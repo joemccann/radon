@@ -2,7 +2,7 @@
 
 import { Activity, AlertTriangle, ChevronDown, Gauge, History, ShieldAlert, TrendingDown } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { buildPerformanceChartModel } from "@/lib/performanceChart";
+import { buildPerformanceChartModel, resolvePerformanceStartingEquity } from "@/lib/performanceChart";
 import { isPerformanceBehindPortfolioSync } from "@/lib/performanceFreshness";
 import type { PerformanceData, PerformanceSeriesPoint } from "@/lib/types";
 import { usePerformance } from "@/lib/usePerformance";
@@ -580,6 +580,7 @@ export default function MobilePerformancePanel({ portfolioLastSync = null, marke
 
   const { summary } = data;
   const N = summary.trading_days;
+  const startingEquity = resolvePerformanceStartingEquity(data);
   const externalFlowWarnings = data.warnings.filter((w) => /deposit|withdrawal|flow|acats|transfer/i.test(w));
   const otherWarnings = data.warnings.filter((w) => !/deposit|withdrawal|flow|acats|transfer/i.test(w));
   const hasWarnings = data.warnings.length > 0 || data.contracts_missing_history.length > 0;
@@ -799,7 +800,7 @@ export default function MobilePerformancePanel({ portfolioLastSync = null, marke
                 <CardRow label="Current DD" value={fmtPct(summary.current_drawdown)} align="compact" tone={summary.current_drawdown < 0 ? "negative" : "default"} />
                 <CardRow label="Drawdown Trough" value={troughDate} align="compact" />
                 <CardRow label="Trading Days" value={String(N)} align="compact" />
-                <CardRow label="Starting Equity" value={fmtUsdExact(summary.starting_equity)} align="compact" />
+                <CardRow label="Starting Equity" value={fmtUsdExact(startingEquity)} align="compact" />
               </div>
             </div>
 

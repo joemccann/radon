@@ -59,6 +59,7 @@ export interface JournalTradePayload {
 export interface JournalRow {
   payload: JournalTradePayload;
   filled_at?: string | null;
+  written_at?: string | null;
 }
 
 export interface BlotterExecutionShape {
@@ -464,11 +465,9 @@ function buildLotMatchedFields(rows: JournalRow[]): Map<number, SynthFields> {
     const totalRoundTripQty = groupPnl.realized_qty;
     const isAnyClosed = totalRoundTripQty > 0;
 
-    // Open-only contracts keep their existing fallback behaviour
-    // (rowToBlotterTrade reads total_cost as cost_basis). Synth's
-    // value-add is exclusively for closed / partial-close groups
-    // where cross-row lot matching is required.
-    if (!isAnyClosed) continue;
+    // Open-only contracts also need an inventory-derived disposition:
+    // a generic stock SELL opens a short and must not be mislabeled closed
+    // merely because its action contains "SELL".
 
     // Per-row buckets: which rows contribute opening vs closing volume?
     // For each row we also need to know how much of the group's basis /
@@ -494,6 +493,17 @@ function buildLotMatchedFields(rows: JournalRow[]): Map<number, SynthFields> {
     if (totalWeight === 0) continue;
 
     const orderedIdx = indices.filter((idx) => weights.has(idx));
+    const closingQtyByRow = new Map<number, number>();
+    let runningQty = 0;
+    for (const exec of [...synthExecs].sort((a, b) => (a.when < b.when ? -1 : a.when > b.when ? 1 : 0))) {
+      const signed = exec.side === "BUY" ? exec.qty : -exec.qty;
+      const closingQty = runningQty !== 0 && Math.sign(runningQty) !== Math.sign(signed)
+        ? Math.min(Math.abs(runningQty), exec.qty)
+        : 0;
+      closingQtyByRow.set(exec.rowIdx, (closingQtyByRow.get(exec.rowIdx) ?? 0) + closingQty);
+      runningQty += signed;
+    }
+    const groupFullyClosed = Math.abs(runningQty) < 1e-9;
     orderedIdx.forEach((idx, i) => {
       const w = weights.get(idx)!;
       const isLast = i === orderedIdx.length - 1;
@@ -517,38 +527,30 @@ function buildLotMatchedFields(rows: JournalRow[]): Map<number, SynthFields> {
         rowCostBasis = rowNotional + commission / 2;
         rowProceeds = rowNotional - commission / 2;
       }
+      if (!isAnyClosed) {
+        // Preserve the existing row-level open-position basis. Journal
+        // total_cost already includes the writer's commission convention;
+        // recalculating it here would double-count commission.
+        rowCostBasis = typeof p.total_cost === "number" ? p.total_cost : rowCostBasis;
+        rowProceeds = 0;
+      }
 
       let rowRealizedPnl: number | null = isAnyClosed ? 0 : null;
-      let rowRealizedQty = 0;
+      let rowRealizedQty = closingQtyByRow.get(idx) ?? 0;
       let rowIsClosedFlag = false;
       if (isAnyClosed) {
-        // Closing legs: SELL/FLAT always; BUY only when labeled BUY_TO_CLOSE
-        // (cover short). Bare BUY_OPTION stays open-side even when the
-        // group has realized volume from other closes.
-        const action = p.action || "";
-        rowIsClosedFlag =
-          side === "FLAT"
-          || side === "SELL"
-          || (side === "BUY" && isClosingAction(action));
-        if (rowIsClosedFlag) {
+        rowIsClosedFlag = rowRealizedQty > 0 || groupFullyClosed;
+        if (rowRealizedQty > 0) {
           // Pro-rata share of group P&L across closing legs (sells,
           // buy-to-close, and net-flat CLOSED rows).
-          const closeWeight = qty;
+          const closeWeight = rowRealizedQty;
           const closeTotalWeight = orderedIdx
-            .map((j) => {
-              const pj = rows[j].payload;
-              const sj = rowSide(pj.action || "");
-              const qj = resolveQuantity(pj);
-              if (sj === "SELL" || sj === "FLAT") return qj;
-              if (sj === "BUY" && isClosingAction(pj.action || "")) return qj;
-              return 0;
-            })
+            .map((j) => closingQtyByRow.get(j) ?? 0)
             .reduce((a, b) => a + b, 0);
           rowRealizedPnl =
             closeTotalWeight > 0
               ? (groupPnl.realized_pnl * closeWeight) / closeTotalWeight
               : 0;
-          rowRealizedQty = closeWeight;
         }
       }
 
@@ -674,12 +676,26 @@ export function dedupeJournalRows(rows: JournalRow[]): JournalRow[] {
   });
 
   const keepIdx = new Set<number>();
+  const authorityScore = (index: number): number => {
+    const payload = rows[index].payload;
+    return [payload.cost_basis, payload.proceeds, payload.realized_pnl, payload.realized_quantity]
+      .filter((value) => typeof value === "number" && Number.isFinite(value))
+      .length;
+  };
   for (const members of groups.values()) {
     let winner = members[0];
     for (const idx of members) {
       const hasMoreParts = parts[idx].length > parts[winner].length;
-      const tiedButLater = parts[idx].length === parts[winner].length && idx > winner;
-      if (hasMoreParts || tiedButLater) winner = idx;
+      const samePartCount = parts[idx].length === parts[winner].length;
+      const richer = samePartCount && authorityScore(idx) > authorityScore(winner);
+      const sameAuthority = authorityScore(idx) === authorityScore(winner);
+      const idxOrder = Number(rows[idx].payload.id ?? -1);
+      const winnerOrder = Number(rows[winner].payload.id ?? -1);
+      const newer = samePartCount && sameAuthority && (
+        (rows[idx].written_at ?? "") > (rows[winner].written_at ?? "")
+        || ((rows[idx].written_at ?? "") === (rows[winner].written_at ?? "") && idxOrder > winnerOrder)
+      );
+      if (hasMoreParts || richer || newer) winner = idx;
     }
     keepIdx.add(winner);
   }
@@ -857,7 +873,13 @@ export function journalRowsToBlotter(
       // Honour the lot-matched is_closed verdict (rowToBlotterTrade's
       // heuristic only flips on action label / non-zero realized_pnl —
       // a SELL that's actually a partial open would slip through).
-      if (synth.is_closed) trade.is_closed = true;
+      trade.is_closed = synth.is_closed;
+      if (!trade.is_closed) {
+        trade.net_quantity = trade.executions[0]?.side === "SLD"
+          ? -trade.executions[0].quantity
+          : trade.executions[0]?.quantity ?? 0;
+        trade.realized_pnl = null;
+      }
       totalCommissions += trade.total_commission || 0;
       if (trade.is_closed) {
         realizedPnl += trade.realized_pnl ?? 0;
@@ -903,6 +925,11 @@ export function journalRowsToBlotter(
   const journalAsOf = maxFilledAt(dedupedRows);
   const legacyAsOf = legacyBlotter?.as_of ?? "";
   const asOf = journalAsOf > legacyAsOf ? journalAsOf : legacyAsOf;
+
+  // Fully closed groups retain their opening executions for auditability.
+  // Keep the realized closing row first so consumers that select the trade
+  // by symbol see the actual close rather than its zero-realized opener.
+  closed.sort((a, b) => (b.realized_quantity ?? 0) - (a.realized_quantity ?? 0));
 
   return {
     as_of: asOf,

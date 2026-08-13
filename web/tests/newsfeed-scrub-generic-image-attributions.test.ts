@@ -106,6 +106,8 @@ describe("runScrub — file-level", () => {
     expect(after[0].images).toEqual([]);
     expect(after[0].rawImages).toEqual([]);
     expect(after[1].images).toEqual(["https://media.radon.run/good-01.png"]);
+    const backup = JSON.parse(await readFile(`${postsFile}.bak`, "utf8"));
+    expect(backup[0].images).toEqual(["https://media.radon.run/x-01.png"]);
   });
 
   it("dry-run leaves files untouched", async () => {

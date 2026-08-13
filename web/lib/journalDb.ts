@@ -11,6 +11,7 @@ export type JournalPayload = {
 };
 
 type ReconciliationPayload = {
+  snapshot_at?: string;
   timestamp?: string;
   new_trades?: unknown[];
   needs_attention?: boolean;
@@ -76,6 +77,17 @@ export async function readJournalFromDb(limit = 5000): Promise<JournalPayload> {
   return { trades };
 }
 
+export async function readReconciliationFromDb(snapshotAt: string): Promise<ReconciliationPayload | null> {
+  const db = getDb();
+  const result = await db.execute({
+    sql: `SELECT payload FROM reconciliation_log WHERE snapshot_at = ? LIMIT 1`,
+    args: [snapshotAt],
+  });
+  if (result.rows.length === 0) return null;
+  const payload = safeParseRecord((result.rows[0] as unknown as { payload?: unknown }).payload);
+  return payload as ReconciliationPayload | null;
+}
+
 export async function readLatestReconciliationFromDb(): Promise<ReconciliationPayload | null> {
   const db = getDb();
   const result = await db.execute({
@@ -87,8 +99,9 @@ export async function readLatestReconciliationFromDb(): Promise<ReconciliationPa
   return payload as ReconciliationPayload | null;
 }
 
-export async function importLatestReconciliationToJournal(): Promise<SyncResult> {
-  const reconciliation = await readLatestReconciliationFromDb();
+async function importReconciliationToJournal(
+  reconciliation: ReconciliationPayload | null,
+): Promise<SyncResult> {
   const newTrades = Array.isArray(reconciliation?.new_trades)
     ? reconciliation.new_trades as ReconciliationTrade[]
     : [];
@@ -101,20 +114,24 @@ export async function importLatestReconciliationToJournal(): Promise<SyncResult>
     normalizeExistingTrades(existing.trades) as Parameters<typeof syncNewTrades>[0],
     newTrades,
   );
+  if (result.needs_rehydration) {
+    throw new Error("Authoritative execution rehydration required");
+  }
   if (result.trades.length === 0) return result;
 
   const db = getDb();
   const writtenAt = new Date().toISOString();
   for (const trade of result.trades) {
     const payload = trade as Record<string, unknown>;
+    const isCorrection = typeof payload.ib_exec_id_corrected === "string";
     await db.execute({
       sql: `
         INSERT INTO journal (trade_id, payload, filled_at, written_at)
         VALUES (?, ?, ?, ?)
-        ON CONFLICT(trade_id) DO UPDATE SET
+        ON CONFLICT(trade_id) DO ${isCorrection ? `UPDATE SET
           payload = excluded.payload,
           filled_at = excluded.filled_at,
-          written_at = excluded.written_at
+          written_at = excluded.written_at` : "NOTHING"}
       `,
       args: [
         tradeIdFor(payload),
@@ -126,4 +143,15 @@ export async function importLatestReconciliationToJournal(): Promise<SyncResult>
   }
 
   return result;
+}
+
+export async function importLatestReconciliationToJournal(): Promise<SyncResult> {
+  return importReconciliationToJournal(await readLatestReconciliationFromDb());
+}
+
+export async function importReconciliationSnapshotToJournal(snapshotAt: string): Promise<SyncResult> {
+  if (!snapshotAt) throw new Error("Exact reconciliation snapshot is required");
+  const reconciliation = await readReconciliationFromDb(snapshotAt);
+  if (!reconciliation) throw new Error("Returned reconciliation snapshot is unavailable");
+  return importReconciliationToJournal(reconciliation);
 }

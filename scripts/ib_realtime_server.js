@@ -38,15 +38,23 @@ import { RateLimiter } from "./lib/rate-limiter.js";
 import {
   decideHealthWrite,
   isFarmStateCode,
+  summarizeSubscriptionFreshness,
   shouldRequestGatewayRestart,
   STALE_DATA_THRESHOLD_MS,
   STALE_CHECK_INTERVAL_MS,
 } from "./lib/staleDataMachine.js";
 import { isMarketOpen } from "./lib/marketCalendar.js";
-import { shouldSkipTicketValidation } from "./lib/wsTrust.js";
+import {
+  resolveRelaySecurityConfig,
+  shouldSkipTicketValidation,
+} from "./lib/wsTrust.js";
 import { applyDepthOp } from "./lib/depthLadder.js";
 import { createReconnectGate } from "./lib/reconnectGate.js";
-import { decideSend, HARD_CAP_BYTES } from "./lib/sendBackpressure.js";
+import {
+  decideSend,
+  HARD_CAP_BYTES,
+  settleIncrementalBatch,
+} from "./lib/sendBackpressure.js";
 import {
   etDateYYYYMMDD,
   isResolvedFutureStale,
@@ -216,11 +224,14 @@ function parseActionMessage(raw) {
 }
 
 const cli = parseArgs(process.argv.slice(2));
-// Bind host. Defaults to 0.0.0.0 for backward compatibility (laptop cloud-thin
-// dev may connect to the relay directly over Tailscale). On the production VPS,
-// where Caddy is the only legitimate entry point, set WS_BIND_HOST=127.0.0.1 so
-// port 8765 is never directly reachable even if the firewall is misconfigured.
-const WS_HOST = process.env.WS_BIND_HOST || "0.0.0.0";
+const relaySecurity = resolveRelaySecurityConfig(process.env);
+if (relaySecurity.requireClerk && !relaySecurity.clerkConfigured) {
+  console.error("WebSocket relay requires CLERK_JWKS_URL and CLERK_ISSUER");
+  process.exit(78);
+}
+// Loopback is the secure default. Direct network access requires an explicit
+// WS_BIND_HOST override and still passes through ticket validation.
+const WS_HOST = relaySecurity.bindHost;
 const wsUrl = `ws://${WS_HOST}:${cli.port}`;
 
 function verbose(...args) {
@@ -310,15 +321,17 @@ const httpServer = http.createServer((_req, res) => {
 const wss = new WebSocketServer({ noServer: true });
 
 httpServer.on("upgrade", async (req, socket, head) => {
-  // Skip ticket validation ONLY for local dev (no Clerk) or genuine loopback
-  // server-to-server calls that did NOT arrive through Caddy. Trusting the peer
+  // Skip ticket validation only for genuine loopback server-to-server calls.
+  // Browser handshakes are never locally trusted, and missing Clerk config
+  // fails closed unless a non-production process explicitly opts in. Trusting the peer
   // address alone was a full auth bypass: Caddy reverse-proxies /ws* to
   // localhost:8765, so every internet client appears as 127.0.0.1. The
   // forwarding-header check (mirrors scripts/api/auth.py:is_trusted_local_request)
   // forces every proxied/public connection through ticket validation.
   const remoteAddr = socket.remoteAddress || "";
   const skipTicket = shouldSkipTicketValidation({
-    clerkConfigured: Boolean(process.env.CLERK_JWKS_URL),
+    clerkConfigured: relaySecurity.clerkConfigured,
+    allowUnauthenticatedDev: relaySecurity.allowUnauthenticatedDev,
     remoteAddr,
     headers: req.headers,
   });
@@ -329,16 +342,17 @@ httpServer.on("upgrade", async (req, socket, head) => {
     return;
   }
 
-  const url = new URL(req.url || "/", `http://${req.headers.host}`);
-  const ticket = url.searchParams.get("ticket");
-
-  if (!ticket) {
-    socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
-    socket.destroy();
-    return;
-  }
-
   try {
+    // The request target is relative by HTTP contract. Never use the untrusted
+    // Host header as URL authority, and keep parsing inside the guarded block.
+    const url = new URL(req.url || "/", "http://relay.invalid");
+    const ticket = url.searchParams.get("ticket");
+    if (!ticket) {
+      socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+
     const res = await fetch(TICKET_VALIDATE_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -758,8 +772,10 @@ function onTicksRecovered() {
 
 // Single chokepoint for every inbound tick: refresh the staleness clock and
 // run the recovery-reset edge. All tick/depth/tape handlers call this.
-function markTick() {
+function markTick(symbol) {
   lastTickTimestamp = Date.now();
+  const state = symbol ? symbolStates.get(symbol) : null;
+  if (state) state.lastTickAt = lastTickTimestamp;
   // First healthy tick of this process: write "ok" once to clear any stale
   // "error" row a prior (escalated, then restarted) process may have latched.
   if (!relayHealthInitialized) {
@@ -803,8 +819,8 @@ function flushBatches() {
   for (const [client, buf] of clientBatchBuffers) {
     if (buf.size === 0) continue;
     const updates = Object.fromEntries(buf);
-    buf.clear();
-    sendMessage(client, { type: "batch", updates });
+    const decision = sendMessage(client, { type: "batch", updates });
+    settleIncrementalBatch(buf, updates, decision);
   }
 }
 
@@ -821,8 +837,8 @@ function flushDepthBatches() {
   for (const [client, buf] of clientDepthBuffers) {
     if (buf.size === 0) continue;
     const updates = Object.fromEntries(buf);
-    buf.clear();
-    sendMessage(client, { type: "depth-batch", updates });
+    const decision = sendMessage(client, { type: "depth-batch", updates });
+    settleIncrementalBatch(buf, updates, decision);
   }
 }
 
@@ -839,8 +855,8 @@ function flushTapeBatches() {
   for (const [client, buf] of clientTapeBuffers) {
     if (buf.size === 0) continue;
     const updates = Object.fromEntries(buf);
-    buf.clear();
-    sendMessage(client, { type: "tape-batch", updates });
+    const decision = sendMessage(client, { type: "tape-batch", updates });
+    settleIncrementalBatch(buf, updates, decision);
   }
 }
 
@@ -882,11 +898,11 @@ function countDroppedFrame(client) {
 
 function sendMessage(client, payload) {
   try {
-    if (client.readyState !== client.OPEN) return;
+    if (client.readyState !== client.OPEN) return "close";
     const decision = decideSend(client.bufferedAmount, payload?.type);
     if (decision === "drop") {
       countDroppedFrame(client);
-      return;
+      return decision;
     }
     if (decision === "close") {
       countDroppedFrame(client);
@@ -897,11 +913,13 @@ function sendMessage(client, payload) {
       // A close handshake would queue behind the same undrained backlog, so the
       // only action that reclaims the heap is destroying the socket.
       try { client.terminate(); } catch { try { client.close(); } catch { /* ignore */ } }
-      return;
+      return decision;
     }
     client.send(JSON.stringify(payload));
+    return decision;
   } catch {
     // Ignore send failures.
+    return "close";
   }
 }
 
@@ -965,6 +983,7 @@ function ensureSymbolState(key, ibContract) {
     tickerId: null,
     contract: ibContract,
     data: createPriceData(key),
+    lastTickAt: Date.now(),
   };
   symbolStates.set(key, state);
   return state;
@@ -991,6 +1010,7 @@ function startLiveSubscription(key, ibContract) {
     state.tickerId = nextTickerId;
     state.contract = ibContract;
     state.data.timestamp = nowIso();
+    state.lastTickAt = Date.now();
     symbolStates.set(key, state);
     requestIdToSymbol.set(nextTickerId, key);
 
@@ -1891,8 +1911,8 @@ function hydrateAndBroadcast(symbol) {
 }
 
 function onTickPrice(tickerId, tickType, price) {
-  markTick();
   const symbol = requestIdToSymbol.get(tickerId);
+  markTick(symbol);
   const liveState = symbol ? symbolStates.get(symbol) : null;
   const snapshotState = snapshotRequests.get(tickerId);
 
@@ -1911,8 +1931,8 @@ function onTickPrice(tickerId, tickType, price) {
 }
 
 function onTickSize(tickerId, sizeType, size) {
-  markTick();
   const symbol = requestIdToSymbol.get(tickerId);
+  markTick(symbol);
   const liveState = symbol ? symbolStates.get(symbol) : null;
   const snapshotState = snapshotRequests.get(tickerId);
 
@@ -2495,6 +2515,7 @@ function wireIBEvents() {
     const symbol = requestIdToSymbol.get(tickerId);
     const liveState = symbol ? symbolStates.get(symbol) : null;
     if (!liveState) return;
+    markTick(symbol);
 
     const validTickTypes = [13, 83, 12, 82];
     if (!validTickTypes.includes(tickType)) return;
@@ -2672,8 +2693,18 @@ staleCheckTimer = setInterval(() => {
 
   const now = Date.now();
   const marketHours = isUSMarketHours();
-  const activeSubscriptions = symbolSubscribers.size;
-  const elapsed = now - lastTickTimestamp;
+  const freshness = summarizeSubscriptionFreshness(
+    [...symbolSubscribers.keys()].map((symbol) => {
+      const state = symbolStates.get(symbol);
+      return {
+        active: Boolean(state?.tickerId != null),
+        lastTickAt: state?.lastTickAt,
+      };
+    }),
+    now,
+  );
+  const { activeSubscriptions } = freshness;
+  const elapsed = now - freshness.lastTickAt;
 
   // DUR-16: RTH tick heartbeat for /api/probe/freshness + the recovery action
   // are decided together (decideHealthWrite) so they can never race. The
@@ -2683,7 +2714,7 @@ staleCheckTimer = setInterval(() => {
   // 2026-06-18 invisibility bug where a dead relay still read state=ok.
   const { action, heartbeat, clearError } = decideHealthWrite({
     now,
-    lastTickAt: lastTickTimestamp,
+    lastTickAt: freshness.lastTickAt,
     ibConnected,
     isMarketHours: marketHours,
     activeSubscriptions,

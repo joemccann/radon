@@ -1,4 +1,7 @@
 """Tests for discover.py — dark pool day analysis and scoring."""
+import json
+import sys
+
 import pytest
 from datetime import datetime
 from unittest.mock import MagicMock, patch
@@ -10,6 +13,7 @@ from discover import (
     is_market_open,
     WEIGHTS,
 )
+from clients.uw_client import UWAPIError
 
 
 # ── is_market_open ──────────────────────────────────────────────────
@@ -201,7 +205,6 @@ class TestDiscoveryTimeTimezoneAware:
             f"discovery_time {discovery_time!r} is naive — JS Date.parse() "
             "will treat it as local time and the freshness banner will lie"
         )
-
     def test_market_wide_empty_alerts_discovery_time_is_timezone_aware(self):
         """Market-wide empty-alert path (line 500) must emit tz-aware ISO."""
         from discover import discover
@@ -219,3 +222,33 @@ class TestDiscoveryTimeTimezoneAware:
             f"discovery_time {discovery_time!r} is naive — JS Date.parse() "
             "will treat it as local time and the freshness banner will lie"
         )
+
+
+def test_required_uw_failure_cannot_publish_or_alert(capsys):
+    """A required provider outage must be explicit and never look publishable."""
+    mock_client = MagicMock()
+    mock_client.__enter__ = MagicMock(return_value=mock_client)
+    mock_client.__exit__ = MagicMock(return_value=False)
+
+    with patch("discover.UWClient", return_value=mock_client), \
+         patch("discover.fetch_options_flow", side_effect=UWAPIError("secret provider detail")), \
+         patch("discover.mirror_scan_snapshot") as mirror, \
+         patch("discover.run_alerts_for_results") as alert, \
+         patch.object(sys, "argv", ["discover.py"]):
+        from discover import main
+
+        main()
+
+    result = json.loads(capsys.readouterr().out)
+    assert result["degraded"] is True
+    assert result["error"] == "required provider data unavailable"
+    assert result["provider_failures"] == [
+        {
+            "provider": "unusual_whales",
+            "operation": "options_flow",
+            "error_type": "UWAPIError",
+        }
+    ]
+    assert "secret provider detail" not in json.dumps(result)
+    mirror.assert_not_called()
+    alert.assert_not_called()

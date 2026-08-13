@@ -1,3 +1,5 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
+
 import { NextResponse } from "next/server";
 import { readFile } from "fs/promises";
 import { statSync } from "fs";
@@ -69,6 +71,8 @@ async function readScannerFromDisk(): Promise<TimestampedRead<Record<string, unk
 }
 
 export async function GET(): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { rate: { key: "scanner:route", limit: 20, windowMs: 60_000 } });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   // Fresher of DB row and disk JSON. The cache_meta still reflects file
   // mtime — useful for "how stale is the disk fallback" diagnostics.
@@ -100,6 +104,8 @@ export async function GET(): Promise<Response> {
 }
 
 export async function POST(): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { rate: { key: "scanner:route", limit: 20, windowMs: 60_000 } });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   try {
     const data = await radonFetch("/scan", { method: "POST", timeout: 130_000 });

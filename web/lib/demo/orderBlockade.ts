@@ -8,7 +8,8 @@
 // Pure decision function (Clerk auth injected) so the route stays a thin switch
 // and the policy is unit-tested.
 
-import { getDemoContext, type DemoContext } from "./demoRole";
+import { resolveDemoContext, type DemoContext, type DemoPublicMetadata } from "./demoRole";
+import { parseAllowedUserIds } from "./provisionTrial";
 
 export type DemoOrderDecision =
   | { action: "allow" } // not a demo user — real IB path
@@ -35,16 +36,29 @@ export function isFailClosedEnvironment(
 /** Shared copy for the fail-closed branch (no em dashes in user-facing text). */
 export const AUTH_UNAVAILABLE_MESSAGE = "Sign-in state could not be verified.";
 
-type AuthLike = Parameters<typeof getDemoContext>[0];
+type AuthLike = () => Promise<{
+  userId?: string | null;
+  sessionClaims?: { metadata?: DemoPublicMetadata } | null;
+  publicMetadata?: DemoPublicMetadata | null;
+}>;
 
 export async function resolveDemoOrderDecision(opts?: {
   authFn?: AuthLike;
   now?: number;
   nodeEnv?: string;
+  allowedRaw?: string;
 }): Promise<DemoOrderDecision> {
   let ctx: DemoContext | null;
+  let userId: string | null;
   try {
-    ctx = await getDemoContext(opts?.authFn, opts?.now);
+    const authFn = opts?.authFn
+      ?? ((await import("@clerk/nextjs/server")).auth as unknown as AuthLike);
+    const result = await authFn();
+    userId = result.userId ?? null;
+    ctx = resolveDemoContext(
+      result.sessionClaims?.metadata ?? result.publicMetadata ?? null,
+      opts?.now,
+    );
   } catch {
     // Clerk could not answer, so the caller's cohort is UNKNOWN. Assuming
     // "not a demo user" here (the pre-T-018 behavior) put a demo user on the
@@ -57,7 +71,12 @@ export async function resolveDemoOrderDecision(opts?: {
       ? { action: "auth-unavailable" }
       : { action: "allow" };
   }
-  if (!ctx) return { action: "allow" };
+  if (!ctx) {
+    const allowed = parseAllowedUserIds(opts?.allowedRaw ?? process.env.ALLOWED_USER_IDS);
+    return userId && allowed.has(userId)
+      ? { action: "allow" }
+      : { action: "auth-unavailable" };
+  }
   if (ctx.expired) {
     return { action: "block-expired", trialExpiresAt: ctx.trialExpiresAt };
   }

@@ -106,6 +106,29 @@ class TestReadWriteCache:
 
         assert result is None
 
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            [],
+            {"fetched_at": "2026-01-01T00:00:00", "ttl_seconds": 60, "data": []},
+            {"fetched_at": "2026-01-01T00:00:00", "ttl_seconds": "forever", "data": {}},
+            {"fetched_at": "2026-01-01T00:00:00", "ttl_seconds": 60, "data": {"d": "bad"}},
+        ],
+    )
+    def test_valid_json_with_invalid_shape_is_quarantined_cache_miss(
+        self, cache_dirs, payload
+    ):
+        stocks_dir, _ = cache_dirs
+        key = cache_key_stock("MALFORMED", "2026-01-01", "2026-03-17")
+        from utils.price_cache import _cache_path
+
+        with patch("utils.price_cache.STOCKS_DIR", stocks_dir):
+            path = _cache_path(stocks_dir, key)
+            path.write_text(json.dumps(payload))
+            assert read_cache(stocks_dir, key) is None
+            assert not path.exists()
+            assert list(stocks_dir.glob(f"{path.name}.invalid-*"))
+
     def test_option_write_read(self, cache_dirs):
         _, options_dir = cache_dirs
         key = cache_key_option("AAPL260321C00230000", "2026-01-01", "2026-03-17")

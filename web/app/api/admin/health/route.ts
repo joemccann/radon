@@ -1,3 +1,5 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
+
 import { NextResponse } from "next/server";
 import { radonFetch, RadonApiError } from "@/lib/radonApi";
 import {
@@ -13,6 +15,8 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function GET(): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { operatorOnly: true });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   try {
     const data = await radonFetch("/health", { method: "GET", timeout: 10_000 });

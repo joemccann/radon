@@ -100,6 +100,8 @@ def normalize_execution(raw: dict[str, Any]) -> dict[str, Any]:
         "symbol": str(raw.get("symbol") or contract.get("symbol") or "").upper(),
         "sec_type": str(raw.get("sec_type") or contract.get("secType") or "").upper(),
         "commission": _number(raw.get("commission") or 0),
+        "revision": max(0, int(raw.get("revision") or 0)),
+        "source_exec_id": str(raw.get("source_exec_id") or exec_id),
     }
 
 
@@ -130,6 +132,41 @@ def _transaction_vector(items: list[dict[str, Any]]) -> dict[str, float]:
         key = str(item["con_id"])
         vector[key] = vector.get(key, 0.0) + float(item["signed_quantity"])
     return _clean_legs(vector)
+
+
+def _split_reversal_items(
+    before: dict[str, float], items: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Allocate each fill quantity once between the closing and opening legs."""
+    remaining = dict(before)
+    closing: list[dict[str, Any]] = []
+    opening: list[dict[str, Any]] = []
+
+    def portion(item: dict[str, Any], signed_quantity: float) -> dict[str, Any]:
+        split = dict(item)
+        original = abs(float(item["signed_quantity"]))
+        split["signed_quantity"] = signed_quantity
+        split["quantity"] = abs(signed_quantity)
+        if original:
+            split["commission"] = float(item.get("commission") or 0) * (
+                abs(signed_quantity) / original
+            )
+        return split
+
+    for item in items:
+        key = str(item["con_id"])
+        delta = float(item["signed_quantity"])
+        current = remaining.get(key, 0.0)
+        close_delta = 0.0
+        if current and current * delta < 0:
+            close_delta = (1 if delta > 0 else -1) * min(abs(current), abs(delta))
+            remaining[key] = current + close_delta
+        open_delta = delta - close_delta
+        if abs(close_delta) > 1e-9:
+            closing.append(portion(item, close_delta))
+        if abs(open_delta) > 1e-9:
+            opening.append(portion(item, open_delta))
+    return closing, opening
 
 
 def _strategy_key(account_id: str, con_ids: Iterable[str]) -> str:
@@ -252,9 +289,10 @@ def replay_transactions(transactions: Iterable[Iterable[dict[str, Any]]]) -> dic
             for key in set(before) | set(after)
         )
         if crossed:
-            append_event(instance, "CLOSE", before, {}, items)
+            closing_items, opening_items = _split_reversal_items(before, items)
+            append_event(instance, "CLOSE", before, {}, closing_items)
             active[account_id].remove(instance)
-            open_instance(account_id, after, items)
+            open_instance(account_id, after, opening_items)
             continue
         if not after:
             append_event(instance, "CLOSE", before, {}, items)

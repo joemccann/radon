@@ -15,6 +15,8 @@ import type { StrengthConfirmationData, ThetaHarvesterData } from "@/lib/types";
 
 const thetaActive = vi.fn<(active: boolean) => void>();
 const strengthActive = vi.fn<(active: boolean) => void>();
+let thetaError: string | null = null;
+let strengthError: string | null = null;
 
 const THETA: ThetaHarvesterData = {
   scan_time: "2026-08-07T14:00:00Z",
@@ -88,14 +90,14 @@ const STRENGTH: StrengthConfirmationData = {
 vi.mock("@/lib/useThetaHarvester", () => ({
   useThetaHarvester: (active: boolean) => {
     thetaActive(active);
-    return { data: active ? THETA : null, loading: false, syncing: false, error: null, lastSync: null, syncNow: vi.fn() };
+    return { data: thetaError ? null : active ? THETA : null, loading: false, syncing: false, error: thetaError, lastSync: null, syncNow: vi.fn() };
   },
 }));
 
 vi.mock("@/lib/useStrengthConfirmation", () => ({
   useStrengthConfirmation: (active: boolean) => {
     strengthActive(active);
-    return { data: active ? STRENGTH : null, loading: false, syncing: false, error: null, lastSync: null, syncNow: vi.fn() };
+    return { data: strengthError ? null : active ? STRENGTH : null, loading: false, syncing: false, error: strengthError, lastSync: null, syncNow: vi.fn() };
   },
 }));
 
@@ -103,6 +105,8 @@ afterEach(() => {
   cleanup();
   thetaActive.mockClear();
   strengthActive.mockClear();
+  thetaError = null;
+  strengthError = null;
 });
 
 describe("ScannerHero", () => {
@@ -146,5 +150,12 @@ describe("ScannerHero", () => {
     render(<ScannerHero />);
     const link = screen.getByRole("link", { name: /open scanner/i }) as HTMLAnchorElement;
     expect(link.getAttribute("href")).toBe("/scanner");
+  });
+
+  it("distinguishes a scanner failure from an empty successful scan", () => {
+    thetaError = "Theta scanner unavailable";
+    render(<ScannerHero />);
+    expect(screen.getByRole("alert").textContent).toContain("Theta scanner unavailable");
+    expect(screen.queryByText(/No theta candidates/)).toBeNull();
   });
 });

@@ -65,7 +65,7 @@ beforeEach(() => {
   mocks.fetchPriorRowsForTickers.mockReset();
   mocks.fetchPortfolioStockBasis.mockReset();
   mocks.fetchJournalRowsInRange.mockResolvedValue([]);
-  mocks.fetchPriorRowsForTickers.mockResolvedValue([]);
+  mocks.fetchPriorRowsForTickers.mockResolvedValue({ rows: [], truncated: false });
   mocks.fetchPortfolioStockBasis.mockResolvedValue({});
 });
 
@@ -88,9 +88,18 @@ describe("registry", () => {
 });
 
 describe("get_realized_pnl", () => {
+  it("realized_pnl_refuses_or_pages_truncated_prior_rows", async () => {
+    mocks.fetchJournalRowsInRange.mockResolvedValue([SNDK_CLOSE]);
+    mocks.fetchPriorRowsForTickers.mockResolvedValue({ rows: [], truncated: true });
+
+    await expect(tool("get_realized_pnl").run!(WINDOW)).rejects.toThrow(
+      /Prior journal history exceeded/,
+    );
+  });
+
   it("fetches prior rows for exactly the tickers with in-window closes, beforeEt = from", async () => {
     mocks.fetchJournalRowsInRange.mockResolvedValue([SNDK_CLOSE, AAPL_OPEN]);
-    mocks.fetchPriorRowsForTickers.mockResolvedValue([SNDK_PRIOR_OPEN]);
+    mocks.fetchPriorRowsForTickers.mockResolvedValue({ rows: [SNDK_PRIOR_OPEN], truncated: false });
 
     const result = (await tool("get_realized_pnl").run!(WINDOW)) as Record<string, unknown>;
 
@@ -110,7 +119,7 @@ describe("get_realized_pnl", () => {
 
   it("lot-matches the cross-window open into an in-window realized round trip", async () => {
     mocks.fetchJournalRowsInRange.mockResolvedValue([SNDK_CLOSE]);
-    mocks.fetchPriorRowsForTickers.mockResolvedValue([SNDK_PRIOR_OPEN]);
+    mocks.fetchPriorRowsForTickers.mockResolvedValue({ rows: [SNDK_PRIOR_OPEN], truncated: false });
 
     const result = (await tool("get_realized_pnl").run!(WINDOW)) as {
       total_realized_pnl: number;

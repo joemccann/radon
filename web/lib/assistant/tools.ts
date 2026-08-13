@@ -41,6 +41,11 @@ export type ToolResult = {
   error?: string;
 };
 
+export type AssistantPrincipal = {
+  userId: string;
+  token?: string;
+};
+
 const READ_TIMEOUT_MS = 130_000;
 const KNOWLEDGE_TIMEOUT_MS = 30_000;
 const KNOWLEDGE_RESULT_LIMIT = 6;
@@ -310,9 +315,15 @@ async function runGetRealizedPnl(input: Record<string, unknown>): Promise<unknow
   }
   const { rows: deduped } = dedupJournalRows(windowRows);
   const closeTickers = closingTickersInWindow(deduped, window);
-  const priorRows = closeTickers.length
+  const prior = closeTickers.length
     ? await fetchPriorRowsForTickers(closeTickers, window.from)
-    : [];
+    : { rows: [], truncated: false };
+  if (prior.truncated) {
+    throw new Error(
+      "Prior journal history exceeded the authoritative row budget. Narrow the date range or ticker and retry.",
+    );
+  }
+  const priorRows = prior.rows;
   // Delivery-basis fallback for called-away shares whose opens predate the
   // journal corpus (MSFT 2026-08-03 assignment). Degrades to no fallback on
   // a snapshot read failure — never fails the P&L call itself.
@@ -518,13 +529,18 @@ export const ASSISTANT_TOOLS: AssistantTool[] = [
     input_schema: {
       type: "object",
       properties: {
+        type: { type: "string", enum: ["stock", "option"], description: "Instrument type" },
         ticker: { type: "string", description: "Underlying symbol" },
         action: { type: "string", enum: ["BUY", "SELL"], description: "Order direction" },
         quantity: { type: "number", description: "Number of contracts or shares" },
         limit_price: { type: "number", description: "Limit price per contract/share" },
-        structure: { type: "string", description: "Optional structure label, e.g. long call, bull call spread" },
+        expiry: { type: "string", description: "Option expiry YYYYMMDD" },
+        strike: { type: "number", description: "Option strike" },
+        right: { type: "string", enum: ["C", "P"], description: "Option right" },
+        conId: { type: "number", description: "IB contract identity from the chain" },
+        exchange: { type: "string", description: "Qualified exchange" },
       },
-      required: ["ticker", "action", "quantity"],
+      required: ["type", "ticker", "action", "quantity", "limit_price"],
     },
     summarize: (input) => {
       const action = typeof input.action === "string" ? input.action.toUpperCase() : "ORDER";
@@ -547,6 +563,10 @@ export function isDestructiveTool(name: string): boolean {
   return Boolean(TOOL_BY_NAME.get(name)?.destructive);
 }
 
+export function isKnowledgeTool(name: string): boolean {
+  return name === "search_knowledge" || name === "find_prior_evals";
+}
+
 /** The tool schema the model sees: name + description + input_schema only. */
 export function toolSchemas(): LlmTool[] {
   return ASSISTANT_TOOLS.map(({ name, description, input_schema }) => ({ name, description, input_schema }));
@@ -559,8 +579,11 @@ export function toolSchemas(): LlmTool[] {
 export async function executeTool(
   name: string,
   input: Record<string, unknown>,
-  token?: string,
+  principal: AssistantPrincipal,
 ): Promise<ToolResult> {
+  if (!principal?.userId) {
+    return { ok: false, error: "Verified principal required." };
+  }
   const tool = TOOL_BY_NAME.get(name);
   if (!tool) {
     return { ok: false, error: `Unknown tool: ${name}` };
@@ -569,7 +592,7 @@ export async function executeTool(
     return { ok: false, error: `Tool ${name} is destructive and requires user confirmation.` };
   }
   try {
-    const data = await tool.run(input, token);
+    const data = await tool.run(input, principal.token);
     return { ok: true, data };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Tool execution failed.";

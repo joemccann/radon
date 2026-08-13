@@ -202,6 +202,18 @@ describe("profile", () => {
     expect(body.username).toBe("Joe Renamed");
     expect(body.avatar_url).toBe("https://media.radon.run/b.png");
   });
+
+  it("concurrent partial profile updates preserve disjoint fields", async () => {
+    const { PUT, GET } = await import("../app/api/profile/route");
+    await Promise.all([
+      PUT(req("http://localhost/api/profile", { method: "PUT", body: JSON.stringify({ username: "Parallel" }) })),
+      PUT(req("http://localhost/api/profile", { method: "PUT", body: JSON.stringify({ avatar_url: "https://media.radon.run/parallel.png" }) })),
+    ]);
+    expect(await jsonOf(await GET())).toMatchObject({
+      username: "Parallel",
+      avatar_url: "https://media.radon.run/parallel.png",
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -246,6 +258,20 @@ describe("bookmarks", () => {
     await POST(req("http://localhost/api/bookmarks", { method: "POST", body }));
     const getRes = await GET();
     expect((await jsonOf(getRes)).bookmarks).toHaveLength(1);
+  });
+
+  it("DELETE preserves literal percent sequences in bookmark ids", async () => {
+    const { POST, GET } = await import("../app/api/bookmarks/route");
+    await POST(req("http://localhost/api/bookmarks", {
+      method: "POST",
+      body: JSON.stringify({ post_id: "post%2Fone" }),
+    }));
+    const { DELETE } = await import("../app/api/bookmarks/[post_id]/route");
+    const res = await DELETE(req("http://localhost/api/bookmarks/post%252Fone", { method: "DELETE" }), {
+      params: Promise.resolve({ post_id: "post%2Fone" }),
+    });
+    expect(res.status).toBe(200);
+    expect((await jsonOf(await GET())).bookmarks).toHaveLength(0);
   });
 
   it("POST rejects missing post_id", async () => {

@@ -85,9 +85,8 @@ export function resolveRealtimePrice(
 export function resolveMarketValue(pos: PortfolioPosition): number | null {
   // For multi-leg positions, always recompute sign-aware from legs
   if (pos.legs.length > 1) {
-    const known = pos.legs.filter((l) => l.market_value != null);
-    if (known.length === 0) return null;
-    return known.reduce((s, l) => {
+    if (pos.legs.some((leg) => leg.market_value == null || !Number.isFinite(leg.market_value))) return null;
+    return pos.legs.reduce((s, l) => {
       const sign = l.direction === "LONG" ? 1 : -1;
       return s + sign * Math.abs(l.market_value!);
     }, 0);

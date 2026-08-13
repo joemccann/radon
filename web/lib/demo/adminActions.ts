@@ -53,14 +53,15 @@ export async function revokeTrial(
   const existing = await getDemoUser(deps.db, userId);
   if (!existing) return { ok: false, reason: "no such demo user" };
 
-  await revokeDemoUser({ db: deps.db, userId, now });
   // Expire in Clerk by stamping the expiry at "now" — middleware treats any
-  // demoRole user whose expiry is in the past as blocked.
+  // demoRole user whose expiry is in the past as blocked. Clerk is authority,
+  // so revoke there before reflecting the state in the reporting database.
   await deps.setClerkMetadata(userId, {
     demoRole: "trial",
     demoTrialStartedAt: existing.started_at ?? undefined,
     demoTrialExpiresAt: now.toISOString(),
   });
+  await revokeDemoUser({ db: deps.db, userId, now });
   return { ok: true };
 }
 

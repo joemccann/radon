@@ -28,7 +28,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
-from clients.uw_client import UWClient, UWAPIError, UWRateLimitError
+from clients.uw_client import UWClient, UWAPIError
 from db.readers import read_portfolio_positions, read_watchlist_tickers
 
 logger = logging.getLogger(__name__)
@@ -92,15 +92,12 @@ def fetch_options_flow(min_premium: int = 500000, limit: int = 200, _client: UWC
     """
     from fetch_flow import fetch_flow_alerts
 
-    try:
-        return fetch_flow_alerts(
-            ticker=None,
-            min_premium=min_premium,
-            _client=_client,
-            limit=limit,
-        )
-    except UWAPIError:
-        return []
+    return fetch_flow_alerts(
+        ticker=None,
+        min_premium=min_premium,
+        _client=_client,
+        limit=limit,
+    )
 
 
 def analyze_darkpool_day(trades: list) -> dict:
@@ -170,10 +167,7 @@ def fetch_darkpool_multi(ticker: str, days: int = 3, _client: UWClient = None) -
 
         trades = get_cached_darkpool(ticker, date)
         if trades is None:
-            try:
-                trades = fetch_darkpool(ticker, date=date, _client=client)
-            except UWAPIError:
-                return None, []
+            trades = fetch_darkpool(ticker, date=date, _client=client)
             if isinstance(trades, list):
                 set_cached_darkpool(ticker, date, trades)
         if isinstance(trades, list):
@@ -423,6 +417,18 @@ def _aggregate_alerts(alerts: list) -> dict:
     return dict(ticker_data)
 
 
+def _provider_failure(operation: str, exc: Exception, ticker: str | None = None) -> dict:
+    """Return safe, typed provider failure metadata without response details."""
+    failure = {
+        "provider": "unusual_whales",
+        "operation": operation,
+        "error_type": type(exc).__name__,
+    }
+    if ticker:
+        failure["ticker"] = ticker
+    return failure
+
+
 def discover_targeted(tickers: list, dp_days: int = 3,
                       min_premium: int = 50000, top: int = 20,
                       max_workers: int = 10) -> dict:
@@ -443,20 +449,18 @@ def discover_targeted(tickers: list, dp_days: int = 3,
     print(f"Scanning {len(tickers)} tickers (targeted mode, {max_workers} workers)...", file=sys.stderr)
 
     candidates = []
+    provider_failures = []
     total = len(tickers)
 
     with UWClient() as client:
         def _process_targeted(ticker):
             from fetch_flow import fetch_flow_alerts
 
-            try:
-                alerts = fetch_flow_alerts(
-                    ticker=ticker,
-                    min_premium=min_premium,
-                    _client=client,
-                )
-            except UWAPIError:
-                alerts = []
+            alerts = fetch_flow_alerts(
+                ticker=ticker,
+                min_premium=min_premium,
+                _client=client,
+            )
 
             flow_data = _aggregate_alerts(alerts).get(ticker, {
                 "alerts": 0, "total_premium": 0, "calls": 0, "puts": 0,
@@ -474,20 +478,22 @@ def discover_targeted(tickers: list, dp_days: int = 3,
                 ticker = futures[future]
                 try:
                     candidate = future.result()
-                except UWRateLimitError:
-                    logger.warning("Rate limited on %s — skipping", ticker)
-                    print(f"  [{done}/{total}] {ticker} - SKIP (rate limited)", file=sys.stderr)
+                except UWAPIError as exc:
+                    logger.warning("Provider unavailable on %s — skipping", ticker)
+                    print(f"  [{done}/{total}] {ticker} - SKIP (provider unavailable)", file=sys.stderr)
+                    provider_failures.append(_provider_failure("ticker_scan", exc, ticker))
                     continue
                 except Exception as exc:
-                    logger.warning("Error processing %s: %s", ticker, exc)
-                    print(f"  [{done}/{total}] {ticker} - ERROR ({exc})", file=sys.stderr)
+                    logger.warning("Error processing %s (%s)", ticker, type(exc).__name__)
+                    print(f"  [{done}/{total}] {ticker} - ERROR", file=sys.stderr)
+                    provider_failures.append(_provider_failure("ticker_scan", exc, ticker))
                     continue
                 print(f"  [{done}/{total}] {ticker}... Score: {candidate['score']}", file=sys.stderr)
                 candidates.append(candidate)
 
     candidates.sort(key=lambda x: x["score"], reverse=True)
 
-    return {
+    result = {
         "discovery_time": datetime.now(timezone.utc).isoformat(),
         "mode": "targeted",
         "tickers_scanned": len(tickers),
@@ -495,6 +501,16 @@ def discover_targeted(tickers: list, dp_days: int = 3,
         "candidates_found": len(candidates),
         "candidates": candidates[:top],
     }
+    if provider_failures:
+        result.update({
+            "degraded": True,
+            "error": "required provider data unavailable",
+            "provider_failures": sorted(
+                provider_failures,
+                key=lambda failure: (failure.get("ticker", ""), failure["operation"]),
+            ),
+        })
+    return result
 
 
 def discover(min_premium: int = 500000, min_alerts: int = 1,
@@ -519,7 +535,20 @@ def discover(min_premium: int = 500000, min_alerts: int = 1,
     print("Fetching market-wide options flow...", file=sys.stderr)
 
     with UWClient() as client:
-        alerts = fetch_options_flow(min_premium=min_premium, limit=200, _client=client)
+        try:
+            alerts = fetch_options_flow(min_premium=min_premium, limit=200, _client=client)
+        except UWAPIError as exc:
+            return {
+                "discovery_time": datetime.now(timezone.utc).isoformat(),
+                "mode": "market-wide",
+                "scoring_weights": WEIGHTS,
+                "alerts_analyzed": 0,
+                "candidates_found": 0,
+                "candidates": [],
+                "degraded": True,
+                "error": "required provider data unavailable",
+                "provider_failures": [_provider_failure("options_flow", exc)],
+            }
 
         if not alerts:
             return {
@@ -550,6 +579,7 @@ def discover(min_premium: int = 500000, min_alerts: int = 1,
         print(f"  Checking {len(tickers_to_check)} candidates with DP data ({dp_days} days)...", file=sys.stderr)
 
         candidates = []
+        provider_failures = []
         total = len(tickers_to_check)
 
         def _process_candidate(ticker):
@@ -562,14 +592,19 @@ def discover(min_premium: int = 500000, min_alerts: int = 1,
             for future in as_completed(futures):
                 done += 1
                 ticker = futures[future]
-                candidate = future.result()
+                try:
+                    candidate = future.result()
+                except UWAPIError as exc:
+                    provider_failures.append(_provider_failure("darkpool", exc, ticker))
+                    print(f"    [{done}/{total}] {ticker}... SKIP (provider unavailable)", file=sys.stderr)
+                    continue
                 print(f"    [{done}/{total}] {ticker}... Score: {candidate['score']}", file=sys.stderr)
                 candidates.append(candidate)
 
     # Sort by score descending
     candidates.sort(key=lambda x: x["score"], reverse=True)
 
-    return {
+    result = {
         "discovery_time": datetime.now(timezone.utc).isoformat(),
         "mode": "market-wide",
         "scoring_weights": WEIGHTS,
@@ -577,6 +612,16 @@ def discover(min_premium: int = 500000, min_alerts: int = 1,
         "candidates_found": len(candidates),
         "candidates": candidates[:top]
     }
+    if provider_failures:
+        result.update({
+            "degraded": True,
+            "error": "required provider data unavailable",
+            "provider_failures": sorted(
+                provider_failures,
+                key=lambda failure: (failure.get("ticker", ""), failure["operation"]),
+            ),
+        })
+    return result
 
 
 def main():
@@ -623,7 +668,7 @@ def main():
         top=args.top,
     )
 
-    if not result.get("error"):
+    if not result.get("error") and not result.get("degraded"):
         mirror_scan_snapshot("discover", result)
         try:
             run_alerts_for_results(result.get("candidates", []))

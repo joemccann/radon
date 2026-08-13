@@ -345,6 +345,30 @@ class TestStatusResponse:
         # pages P1 "edge unhealthy" for it.
         assert body["overall_state"] == "degraded"
 
+    def test_gateway_unit_failure_degrades_complete_production_unit_set(self):
+        body = probes.build_status(
+            {"radon-api": {"state": "up", "payload": {
+                "service_state": "reachable", "auth_state": "authenticated",
+                "upstream_dead": False, "port_listening": True,
+            }}},
+            {
+                "radon-api.service": {"state": "up"},
+                "radon-ib-gateway.service": {"state": "down"},
+            },
+            "t",
+            units_age_secs=0,
+        )
+        assert body["overall_state"] == "degraded"
+
+    def test_stale_cached_unit_down_does_not_override_healthy_live_probes(self):
+        body = probes.build_status(
+            {"radon-relay": {"state": "up"}},
+            {"radon-relay.service": {"state": "down"}},
+            "t",
+            units_age_secs=31,
+        )
+        assert body["overall_state"] == "unknown"
+
     def test_external_probe_is_not_folded_back_into_the_aggregate(self):
         body = probes.build_status(
             {"radon-api": {"state": "up"}},
@@ -568,6 +592,25 @@ class TestUnitStateCacheRefresh:
         assert second == first
 
 
+def test_probe_cache_serves_repeated_status_reads_without_new_probe_fanout():
+    calls = {"count": 0}
+
+    def sweep():
+        calls["count"] += 1
+        return {"radon-api": {"state": "up"}}
+
+    cache = serve.ProbeCache(sweep, interval=60)
+    cache.refresh_once()
+    units = serve.UnitStateCache([])
+
+    first = serve.status_response(cache.snapshot, units)
+    second = serve.status_response(cache.snapshot, units)
+
+    assert first[1]["probes"]["radon-api"]["state"] == "up"
+    assert second[1]["probes"]["radon-api"]["state"] == "up"
+    assert calls["count"] == 1
+
+
 # --- HTTP wiring smoke test (real ephemeral server) ---
 
 class TestServerSmoke:
@@ -734,3 +777,28 @@ def test_nested_api_state_accepts_cloud_mode_reachable() -> None:
         }
     }
     assert _nested_api_state(probes) == "up"
+
+
+def test_lite_probe_fails_closed_for_invalid_empty_and_incomplete_json(monkeypatch) -> None:
+    class Response:
+        status = 200
+
+        def __init__(self, body):
+            self.body = body
+
+        def read(self, _limit):
+            return self.body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    for body in (b"", b"not-json", b"[]"):
+        monkeypatch.setattr(probes.urllib.request, "urlopen", lambda *_a, **_k: Response(body))
+        assert probes.probe_http_json("http://health/lite")["state"] == "unknown"
+
+    assert probes._nested_api_state({
+        "radon-api": {"state": "up", "payload": {"service_state": "reachable"}}
+    }) == "unknown"

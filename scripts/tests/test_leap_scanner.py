@@ -1,5 +1,7 @@
 """Tests for leap_iv_scanner.py and leap_scanner_uw.py — HV calculation, mispricing, delta."""
 import math
+import json
+import sys
 import pytest
 
 from leap_iv_scanner import (
@@ -16,6 +18,7 @@ from leap_scanner_uw import (
     get_leap_options,
     resolve_explicit_tickers,
 )
+import leap_scanner_uw
 
 
 # ── calculate_historical_volatility (IB scanner) ────────────────────
@@ -187,6 +190,22 @@ class TestBuildJsonPayload:
     def test_preset_universe_stamp(self):
         payload = build_json_payload([], 15.0, "preset:mag7", ["AAPL"])
         assert payload["universe"] == "preset:mag7"
+
+
+def test_all_provider_failures_preserve_cache_and_fail_health(tmp_path, monkeypatch):
+    cache = tmp_path / "leap.json"
+    previous = {"scan_time": "old", "results": [{"ticker": "SPY"}]}
+    cache.write_text(json.dumps(previous))
+    monkeypatch.setattr(leap_scanner_uw, "DASHBOARD_CACHE_PATH", cache)
+    monkeypatch.setattr(leap_scanner_uw, "scan_ticker", lambda *_args: None)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["leap_scanner_uw.py", "SPY", "QQQ", "--json", "--output", str(tmp_path / "report.html")],
+    )
+
+    assert leap_scanner_uw.main() == 1
+    assert json.loads(cache.read_text()) == previous
 
 
 # ── find_strikes_by_delta ───────────────────────────────────────────

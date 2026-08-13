@@ -120,7 +120,21 @@ def test_get_ticker_flow_history_respects_lookback(db_conn: sqlite3.Connection) 
 
     rows = get_ticker_flow_history("IWM", lookback_days=3)
     assert len(rows) == 3
-    assert [r["date"] for r in rows] == ["2026-06-01", "2026-06-02", "2026-06-03"]
+    assert [r["date"] for r in rows] == ["2026-06-03", "2026-06-04", "2026-06-05"]
+
+
+def test_history_lookback_keeps_latest_250_rows(db_conn: sqlite3.Connection) -> None:
+    from db.writer import get_ticker_flow_history, upsert_ticker_flow_history
+
+    for day in range(300):
+        upsert_ticker_flow_history(
+            "SPY", f"2025-01-01T00:00:00Z-{day:03d}", flow_strength=float(day)
+        )
+
+    rows = get_ticker_flow_history("SPY", lookback_days=250)
+
+    assert len(rows) == 250
+    assert [row["flow_strength"] for row in rows] == list(map(float, range(50, 300)))
 
 
 def test_upsert_and_read_forecast_snapshot(db_conn: sqlite3.Connection) -> None:

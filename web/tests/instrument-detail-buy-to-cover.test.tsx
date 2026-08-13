@@ -179,9 +179,14 @@ describe("InstrumentDetailModal buy-to-cover", () => {
   });
 
   it("builds a stock-only sell when closing the equity leg of a covered call", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ status: "submitted" }),
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      return {
+        ok: true,
+        json: async () => url.endsWith("/api/orders/whatif")
+          ? ({ initMargin: 25_000 })
+          : ({ status: "submitted" }),
+      } as Response;
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -218,8 +223,9 @@ describe("InstrumentDetailModal buy-to-cover", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /confirm order/i }));
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+    const placementCalls = fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/api/orders/place"));
+    expect(placementCalls).toHaveLength(1);
+    expect(JSON.parse(placementCalls[0][1]!.body as string)).toEqual({
       type: "stock",
       symbol: "EWY",
       action: "SELL",

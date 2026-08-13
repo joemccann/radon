@@ -2,6 +2,13 @@
 
 import { useCallback, useState } from "react";
 import type { ReactNode } from "react";
+import type { PortfolioData } from "@/lib/types";
+import {
+  OrderRiskGate,
+  type OrderRiskInput,
+  type OrderRiskState,
+  useOrderRisk,
+} from "@/lib/order";
 import OrderErrorBanner from "./OrderErrorBanner";
 import OrderTypeToggle from "./OrderTypeToggle";
 import {
@@ -12,6 +19,13 @@ import {
 
 export type SingleLegOrderAction = "BUY" | "SELL";
 export type SingleLegOrderTif = "DAY" | "GTC";
+
+export function singleLegSubmitPermitted(
+  formValid: boolean,
+  riskState: OrderRiskState | null,
+): boolean {
+  return formValid && riskState?.okToSubmit === true;
+}
 
 /**
  * Presentational single-leg order ticket. Owns the BUY/SELL toggle,
@@ -53,11 +67,13 @@ export type SingleLegOrderTicketProps = {
   onOrderTypeChange?: (value: IbOrderType) => void;
   stopPrice?: string;
   onStopPriceChange?: (value: string) => void;
-  /**
-   * The caller's `<OrderRiskGate>` (or null). Only rendered in the confirm
-   * step. Built by the caller from current action/qty/price.
-   */
-  riskGate: ReactNode;
+  /** Canonical risk input and coverage state. The ticket owns the gate so a
+   * caller cannot render a warning while bypassing its submit permit. */
+  riskInput: OrderRiskInput | null;
+  portfolio: PortfolioData | null | undefined;
+  riskSurface: string;
+  riskPaperMode?: boolean;
+  onRiskPaperModeChange?: (next: boolean) => void;
   /** Optional header rendered above the Action field (e.g. "STOCK ORDER"). */
   header?: ReactNode;
   /**
@@ -118,7 +134,11 @@ export default function SingleLegOrderTicket({
   onOrderTypeChange,
   stopPrice: stopPriceProp,
   onStopPriceChange,
-  riskGate,
+  riskInput,
+  portfolio,
+  riskSurface,
+  riskPaperMode,
+  onRiskPaperModeChange,
   header,
   placeUrl = "/api/orders/place",
   buildPayload,
@@ -196,13 +216,17 @@ export default function SingleLegOrderTicket({
     limitPrice: parsedPrice,
     stopPrice: parsedStop,
   });
-  const canSubmit = isValid && typePriceValid && !isNaN(parsedQty) && parsedQty > 0;
+  const formValid = isValid && typePriceValid && !isNaN(parsedQty) && parsedQty > 0;
+  const riskState = useOrderRisk(riskInput, portfolio);
+  const canSubmit = singleLegSubmitPermitted(formValid, riskState);
 
   const handlePlace = useCallback(async () => {
     if (!confirmStep) {
+      if (!formValid) return;
       setConfirmStep(true);
       return;
     }
+    if (!canSubmit) return;
 
     setLoading(true);
     setError(null);
@@ -256,6 +280,8 @@ export default function SingleLegOrderTicket({
     buildSuccessMessage,
     onSuccessToast,
     suppressInlineSuccess,
+    formValid,
+    canSubmit,
   ]);
 
   const quickLabel = (base: string, value: number | null) =>
@@ -390,7 +416,16 @@ export default function SingleLegOrderTicket({
       {success && <div className="order-success">{success}</div>}
 
       {/* Order Summary (shown in confirm step). Owned by `<OrderRiskGate>`. */}
-      {confirmStep && riskGate}
+      {confirmStep && (
+        <OrderRiskGate
+          input={riskInput}
+          portfolio={portfolio}
+          surface={riskSurface}
+          variant="info"
+          paperMode={riskPaperMode}
+          onPaperModeChange={onRiskPaperModeChange}
+        />
+      )}
 
       <div className="order-submit">
         {confirmStep ? (
@@ -410,7 +445,7 @@ export default function SingleLegOrderTicket({
           <button
             className="btn-primary"
             onClick={handlePlace}
-            disabled={!canSubmit || loading}
+            disabled={!formValid || loading}
             style={{ width: "100%" }}
           >
             Place Order

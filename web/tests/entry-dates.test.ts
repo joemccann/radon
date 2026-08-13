@@ -70,6 +70,18 @@ describe("buildContractEntryDates", () => {
     });
   });
 
+  it("deduplicates durable execution identity before detecting a re-open", () => {
+    const rows = [
+      { ticker: "PLTR", expiry: "20260821", right: "C", strike: 145, action: "BUY_OPTION", contracts: 10, date: "2026-06-01", ib_exec_id: "open-1.01" },
+      { ticker: "PLTR  260821C00145000", expiry: "20260821", right: "C", strike: 145, action: "BUY_OPTION", contracts: 10, date: "2026-06-01", ib_exec_id: "open-1.02" },
+      { ticker: "PLTR", expiry: "20260821", right: "C", strike: 145, action: "SELL_OPTION", contracts: 10, date: "2026-06-05", ib_exec_id: "close-1" },
+      { ticker: "PLTR", expiry: "20260821", right: "C", strike: 145, action: "BUY_OPTION", contracts: 5, date: "2026-06-20", ib_exec_id: "open-2" },
+    ];
+    expect(buildContractEntryDates(rows)).toEqual({
+      "PLTR|20260821|C|145": "2026-06-20",
+    });
+  });
+
   it("treats a sign flip through zero as a new episode start", () => {
     const rows = [
       { ticker: "AMD", expiry: "20260918", right: "P", strike: 120, action: "BUY_OPTION", contracts: 10, date: "2026-06-10" },

@@ -8,9 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import MobileAppBar from "../components/mobile/MobileAppBar";
 
 vi.mock("@clerk/nextjs", () => ({
-  useUser: () => {
-    throw new Error("useUser must not be called in authless mobile tests");
-  },
+  useUser: () => ({ user: { primaryEmailAddress: { emailAddress: "operator@example.test" } } }),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -22,9 +20,7 @@ vi.mock("@/lib/IBStatusContext", () => ({
 }));
 
 vi.mock("@/lib/useProfile", () => ({
-  useProfile: () => {
-    throw new Error("useProfile must not be called in authless mobile tests");
-  },
+  useProfile: () => ({ profile: { username: "Operator", avatar_url: null } }),
 }));
 
 afterEach(() => {
@@ -32,10 +28,8 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-describe("MobileAppBar authless rendering", () => {
-  it("does not call Clerk hooks when the authless test flag removes ClerkProvider", () => {
-    vi.stubEnv("NEXT_PUBLIC_RADON_AUTHLESS_TEST", "1");
-
+describe("MobileAppBar authenticated rendering", () => {
+  it("renders identity exclusively from Clerk-backed hooks", () => {
     render(<MobileAppBar title="Dashboard" onOpenSearch={() => undefined} />);
 
     expect(screen.getByTestId("mobile-app-bar")).toBeTruthy();

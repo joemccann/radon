@@ -30,18 +30,43 @@ export function arrivedViaProxy(headers = {}) {
   return FORWARDING_HEADERS.some((name) => Boolean(headers && headers[name]));
 }
 
-/** True only for genuine loopback server-to-server calls (not proxied). */
+/** Browser WebSocket handshakes must never inherit server-to-server trust. */
+export function isBrowserUpgrade(headers = {}) {
+  return Boolean(headers && (headers.origin || headers["sec-fetch-site"]));
+}
+
+/** True only for genuine loopback server-to-server calls (not browsers/proxies). */
 export function isTrustedLocalUpgrade(remoteAddr, headers = {}) {
-  return LOOPBACK_ADDRS.has(remoteAddr) && !arrivedViaProxy(headers);
+  return LOOPBACK_ADDRS.has(remoteAddr)
+    && !arrivedViaProxy(headers)
+    && !isBrowserUpgrade(headers);
 }
 
 /**
  * Decide whether ticket validation may be skipped for an upgrade request.
- * Skip ONLY when Clerk is not configured (local dev with no auth) OR the
- * connection is a trusted loopback server-to-server call. Every proxied
- * (public) connection must present a valid ticket.
+ * Skip only for a trusted loopback server-to-server call. Missing Clerk
+ * configuration fails closed unless development explicitly opts in; browser
+ * and proxied connections always require a valid ticket.
  */
-export function shouldSkipTicketValidation({ clerkConfigured, remoteAddr, headers = {} }) {
-  if (!clerkConfigured) return true;
+export function shouldSkipTicketValidation({
+  clerkConfigured,
+  allowUnauthenticatedDev = false,
+  remoteAddr,
+  headers = {},
+}) {
+  if (!clerkConfigured) {
+    return allowUnauthenticatedDev && isTrustedLocalUpgrade(remoteAddr, headers);
+  }
   return isTrustedLocalUpgrade(remoteAddr, headers);
+}
+
+export function resolveRelaySecurityConfig(env = process.env) {
+  const production = env.NODE_ENV === "production" || env.RADON_WS_REQUIRE_CLERK === "1";
+  return {
+    allowUnauthenticatedDev:
+      !production && env.RADON_WS_ALLOW_UNAUTHENTICATED_DEV === "1",
+    bindHost: env.WS_BIND_HOST || "127.0.0.1",
+    clerkConfigured: Boolean(env.CLERK_JWKS_URL && env.CLERK_ISSUER),
+    requireClerk: production,
+  };
 }

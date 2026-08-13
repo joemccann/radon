@@ -31,12 +31,6 @@ export function formatExpiryEt(iso: string): string {
  * gate owns the expired path).
  */
 export default function DemoWelcomeModal() {
-  if (
-    process.env.NEXT_PUBLIC_RADON_AUTHLESS_TEST === "1" ||
-    process.env.RADON_AUTHLESS_TEST === "1"
-  ) {
-    return null;
-  }
   return <ClerkDemoWelcomeModal />;
 }
 

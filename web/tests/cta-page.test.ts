@@ -12,6 +12,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
+import { normalizeCtaPercentile } from "../lib/ctaPercentiles";
 
 const ROOT = join(__dirname, "..");
 
@@ -73,6 +74,12 @@ describe("components/CtaPage.tsx — structure", () => {
 
   it("uses useRegime for vol-targeting data", () => {
     expect(src).toMatch(/useRegime/);
+  });
+
+  it("uses cache-only regime reads and preserves an exact first percentile", () => {
+    expect(src).toContain("useRegime(false)");
+    expect(normalizeCtaPercentile(1)).toBe(1);
+    expect(normalizeCtaPercentile(0.01)).toBe(1);
   });
 
   it("uses useMenthorqCta for CTA table data", () => {

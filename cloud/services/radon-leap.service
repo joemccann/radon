@@ -16,10 +16,11 @@ Type=oneshot
 User=radon
 WorkingDirectory=/home/radon/radon
 EnvironmentFile=/home/radon/radon-cloud/.env
+Environment=RADON_PYTHON_BIN=/home/radon/radon/.venv/bin/python
 ExecStart=/usr/bin/bash /home/radon/radon/scripts/run_leap_refresh.sh
 StandardOutput=journal
 StandardError=journal
-TimeoutStartSec=360
+TimeoutStartSec=720
 
 [Install]
 WantedBy=multi-user.target

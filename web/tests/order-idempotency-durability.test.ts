@@ -72,7 +72,7 @@ describe("R-043 — idempotency survives a process restart", () => {
     expect(placement).toHaveBeenCalledTimes(1);
   });
 
-  it("still honours the indeterminate retention floor after a restart, then recovers", async () => {
+  it("still honours the durable content-hash TTL after a restart, then recovers", async () => {
     vi.useFakeTimers();
     const placement = vi
       .fn()
@@ -82,14 +82,14 @@ describe("R-043 — idempotency survives a process restart", () => {
     await rejection(runIdempotentOrder("k", CONTENT_HASH_TTL_MS, placement));
     __restartOrderIdempotencyForTests();
 
-    vi.advanceTimersByTime(CONTENT_HASH_TTL_MS + 1_000); // past the 4s TTL, inside the floor
+    vi.advanceTimersByTime(CONTENT_HASH_TTL_MS - 1_000);
     const stillHeld = await rejection(
       runIdempotentOrder("k", CONTENT_HASH_TTL_MS, placement),
     );
     expect(stillHeld).toBeInstanceOf(IndeterminatePlacementError);
     expect(placement).toHaveBeenCalledTimes(1);
 
-    vi.advanceTimersByTime(INDETERMINATE_RETENTION_MS); // past the floor
+    vi.advanceTimersByTime(1_001);
     const afterExpiry = await runIdempotentOrder("k", CONTENT_HASH_TTL_MS, placement);
     expect(afterExpiry).toEqual({ value: "ok", deduplicated: false });
     expect(placement).toHaveBeenCalledTimes(2);

@@ -259,7 +259,7 @@ export function unitVerdict(unit: UnitStatus): UnitVerdict {
 // (socket lingering) or read true while awaiting_2fa (port up, not authed).
 // ---------------------------------------------------------------------------
 
-export type GatewayPowerState = "running" | "stopped" | "transitional";
+export type GatewayPowerState = "running" | "stopped" | "transitional" | "unknown";
 
 /**
  * Derive the power state of the IB Gateway from the gateway systemd unit and

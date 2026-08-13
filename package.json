@@ -12,6 +12,7 @@
     "dotenv": "^17.3.1",
     "fs-extra": "^11.3.4",
     "playwright": "^1.58.2",
+    "sharp": "^0.34.5",
     "ws": "^8.21.0"
   },
   "devDependencies": {

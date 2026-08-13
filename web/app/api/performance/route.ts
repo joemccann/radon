@@ -1,3 +1,4 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
 import { NextResponse } from "next/server";
 import { readFile } from "fs/promises";
 import { join } from "path";
@@ -102,6 +103,8 @@ async function readPerformanceFromDisk(): Promise<TimestampedRead<Record<string,
 }
 
 export async function GET(): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { rate: { key: "performance:route", limit: 20, windowMs: 60_000 } });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   const cacheTtlMs = getCacheTtlMs();
   const [perfRead, portfolioSnapshot] = await Promise.all([
@@ -153,24 +156,28 @@ export async function GET(): Promise<Response> {
   try {
     const data = await radonFetch("/performance", { method: "POST", timeout: 180_000 });
     return setNoStoreResponseHeaders(NextResponse.json(data), requestId);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to generate performance metrics";
+  } catch {
     return setNoStoreResponseHeaders(
-      NextResponse.json({ error: message }, { status: 502 }),
+      NextResponse.json({ error: "Performance metrics temporarily unavailable" }, { status: 502 }),
       requestId,
     );
   }
 }
 
 export async function POST(): Promise<Response> {
+  const access = await requireRouteAccess(undefined, {
+    operatorOnly: true,
+    rate: { key: "performance-build", limit: 2, windowMs: 60_000 },
+    durableRateTier: "C",
+  });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   try {
     const data = await radonFetch("/performance", { method: "POST", timeout: 190_000 });
     return setNoStoreResponseHeaders(NextResponse.json(data), requestId);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to generate performance metrics";
+  } catch {
     return setNoStoreResponseHeaders(
-      NextResponse.json({ error: message }, { status: 502 }),
+      NextResponse.json({ error: "Performance metrics temporarily unavailable" }, { status: 502 }),
       requestId,
     );
   }

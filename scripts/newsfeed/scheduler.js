@@ -17,7 +17,7 @@ function abortableSleep(ms, signal) {
   });
 }
 
-export async function runForever({ intervalMs, scrapeOnce, signal, onCycleError }) {
+export async function runForever({ intervalMs, scrapeOnce, signal, onCycleError, maxConsecutiveErrors = 3 }) {
   if (typeof scrapeOnce !== "function") {
     throw new Error("runForever: scrapeOnce must be a function");
   }
@@ -25,13 +25,19 @@ export async function runForever({ intervalMs, scrapeOnce, signal, onCycleError 
     throw new Error("runForever: intervalMs must be a positive number");
   }
 
+  let consecutiveErrors = 0;
   while (!signal?.aborted) {
     const start = Date.now();
     try {
       await scrapeOnce();
+      consecutiveErrors = 0;
     } catch (err) {
+      consecutiveErrors += 1;
       if (onCycleError) onCycleError(err);
       else console.error(`[newsfeed] cycle failed: ${err.message}`);
+      if (consecutiveErrors >= maxConsecutiveErrors) {
+        throw new Error(`newsfeed failed ${consecutiveErrors} consecutive cycles`, { cause: err });
+      }
     }
     if (signal?.aborted) return;
     const elapsed = Date.now() - start;

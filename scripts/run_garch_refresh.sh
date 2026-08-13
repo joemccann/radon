@@ -114,8 +114,9 @@ echo "$(date): FastAPI unreachable — fallback to direct garch_convergence.py i
 if "$PYTHON_BIN" scripts/garch_convergence.py --preset "$PRESET" --json --no-open >/dev/null 2>>/tmp/garch-scan.err; then
     echo "$(date): GARCH fallback refresh complete (OK)"
     exit 0
+else
+    EXIT_CODE=$?
 fi
 
-EXIT_CODE=$?
 echo "$(date): GARCH fallback refresh FAILED (exit ${EXIT_CODE})" >&2
 exit "${EXIT_CODE}"

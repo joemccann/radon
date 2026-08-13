@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export type AlertRule = {
   id: string;
@@ -34,24 +34,32 @@ export function useAlerts(): UseAlertsReturn {
   const [rules, setRules] = useState<AlertRule[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const requestRef = useRef<{ generation: number; controller: AbortController } | null>(null);
 
   const load = useCallback(async () => {
+    const generation = (requestRef.current?.generation ?? 0) + 1;
+    requestRef.current?.controller.abort();
+    const controller = new AbortController();
+    requestRef.current = { generation, controller };
     setIsLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/alerts", { cache: "no-store" });
+      const res = await fetch("/api/alerts", { cache: "no-store", signal: controller.signal });
       if (!res.ok) throw new Error("Failed to load alert rules");
       const json = (await res.json()) as { rules: AlertRule[] };
+      if (requestRef.current?.generation !== generation) return;
       setRules(Array.isArray(json.rules) ? json.rules : []);
     } catch (err) {
+      if (controller.signal.aborted || requestRef.current?.generation !== generation) return;
       setError(err instanceof Error ? err.message : "Failed to load alert rules");
     } finally {
-      setIsLoading(false);
+      if (requestRef.current?.generation === generation) setIsLoading(false);
     }
   }, []);
 
   useEffect(() => {
     void load();
+    return () => requestRef.current?.controller.abort();
   }, [load]);
 
   const createRule = useCallback(

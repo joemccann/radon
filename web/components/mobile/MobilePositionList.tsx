@@ -65,17 +65,21 @@ function fmtPct(value: number | null | undefined): string {
   return `${sign}${Math.abs(value).toFixed(2)}%`;
 }
 
-function getOptionRtMv(pos: PortfolioPosition, prices?: Record<string, PriceData>): number | null {
+function getOptionRtMv(pos: PortfolioPosition, prices?: Record<string, PriceData>): number | null | undefined {
   if (pos.structure_type === "Stock") return null;
+  if (!prices) return undefined;
   let total = 0;
-  let any = false;
+  let activeLegs = 0;
+  let resolvedLegs = 0;
   for (const leg of pos.legs) {
+    if (!Number.isFinite(leg.contracts) || leg.contracts <= 0) continue;
+    activeLegs += 1;
     if (leg.type === "Stock") {
       const stockKey = pos.ticker.toUpperCase();
       const stockLast = prices?.[stockKey]?.last;
-      if (stockLast != null && stockLast > 0) {
+      if (stockLast != null && Number.isFinite(stockLast) && stockLast > 0) {
         total += (leg.direction === "LONG" ? 1 : -1) * stockLast * leg.contracts;
-        any = true;
+        resolvedLegs += 1;
       }
       continue;
     }
@@ -84,12 +88,13 @@ function getOptionRtMv(pos: PortfolioPosition, prices?: Record<string, PriceData
     const right = leg.type === "Call" ? "C" : "P";
     const k = optionKey({ symbol: pos.ticker.toUpperCase(), expiry, strike: leg.strike, right });
     const last = prices?.[k]?.last;
-    if (last != null && last > 0) {
+    if (last != null && Number.isFinite(last) && last > 0) {
       total += (leg.direction === "LONG" ? 1 : -1) * last * leg.contracts * 100;
-      any = true;
+      resolvedLegs += 1;
     }
   }
-  return any ? total : null;
+  if (activeLegs === 0 || resolvedLegs === 0) return undefined;
+  return resolvedLegs === activeLegs ? total : null;
 }
 
 function PositionCard({ pos, prices, showExpiry, onLegClick }: { pos: PortfolioPosition; prices?: Record<string, PriceData>; showExpiry: boolean; onLegClick: (leg: PortfolioLeg, pos: PortfolioPosition) => void }) {
@@ -105,7 +110,7 @@ function PositionCard({ pos, prices, showExpiry, onLegClick }: { pos: PortfolioP
   // desktop PositionTable fix; the option / resolveMarketValue paths are signed.
   const mv = isStock && rtStockLast != null
     ? positionDirectionSign(pos) * rtStockLast * Math.abs(pos.contracts)
-    : optRtMv ?? resolveMarketValue(pos);
+    : optRtMv === undefined ? resolveMarketValue(pos) : optRtMv;
   // `ec` drives the P&L math (signed, unchanged); `displayEc` is the signed
   // credit/debit the operator reads, via the same helper as the desktop
   // Initial Value column.

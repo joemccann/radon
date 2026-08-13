@@ -7,6 +7,7 @@ import {
   DEFAULT_PERFORMANCE_CHART_MARGINS,
   DEFAULT_PERFORMANCE_CHART_WIDTH,
   buildPerformanceChartModel,
+  resolvePerformanceStartingEquity,
 } from "@/lib/performanceChart";
 import { isPerformanceBehindPortfolioSync } from "@/lib/performanceFreshness";
 import type { PerformanceData, PerformanceSeriesPoint } from "@/lib/types";
@@ -517,6 +518,7 @@ export default function PerformancePanel({ portfolioLastSync = null, marketState
 
   const { summary } = data;
   const N = summary.trading_days;
+  const startingEquity = resolvePerformanceStartingEquity(data);
   const externalFlowWarnings = data.warnings.filter((w) => /deposit|withdrawal|flow|acats|transfer/i.test(w));
   const otherWarnings = data.warnings.filter((w) => !/deposit|withdrawal|flow|acats|transfer/i.test(w));
   const hasWarnings = data.warnings.length > 0 || data.contracts_missing_history.length > 0;
@@ -688,7 +690,7 @@ export default function PerformancePanel({ portfolioLastSync = null, marketState
               </div>
               <div>
                 <span>Starting Equity</span>
-                <strong>{fmtUsdExact(summary.starting_equity)}</strong>
+                <strong>{fmtUsdExact(startingEquity)}</strong>
               </div>
             </div>
           </div>

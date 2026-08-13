@@ -30,7 +30,7 @@ class TestFetchFlowDataDirect:
         mock_module.assert_called_once_with(
             "AAPL",
             lookback_days=5,
-            skip_options_flow=True,
+            skip_options_flow=False,
             fetch_missing_history=False,
             retry_transient=False,
         )

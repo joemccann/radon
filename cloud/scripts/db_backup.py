@@ -104,21 +104,47 @@ def fetch_rows(result) -> list:
 
 
 def iter_table_rows(db, table: str, batch_size: int):
-    """Yield every row of ``table`` in bounded pages (ORDER BY rowid LIMIT/
-    OFFSET). WITHOUT ROWID tables fall back to a single unpaged SELECT —
-    none of Radon's fat snapshot tables are WITHOUT ROWID."""
-    try:
-        offset = 0
-        while True:
+    """Yield a stable rowid keyset, never replaying an already-emitted page.
+
+    A WITHOUT ROWID table may fall back to one unpaged read only when the
+    first rowid query fails. Once any page has been emitted, failure is fatal:
+    replaying the whole table would silently duplicate the prefix.
+    """
+    last_rowid = None
+    emitted = False
+    while True:
+        where = "" if last_rowid is None else f" WHERE rowid > {int(last_rowid)}"
+        try:
             page = fetch_rows(db.execute(
-                f'SELECT * FROM "{table}" ORDER BY rowid LIMIT {batch_size} OFFSET {offset}'
+                f'SELECT rowid, * FROM "{table}"{where} ORDER BY rowid LIMIT {batch_size}'
             ))
-            yield from page
-            if len(page) < batch_size:
-                return
-            offset += batch_size
-    except Exception:
-        yield from fetch_rows(db.execute(f'SELECT * FROM "{table}"'))
+        except Exception:
+            if emitted:
+                raise
+            yield from fetch_rows(db.execute(f'SELECT * FROM "{table}"'))
+            return
+        if not page:
+            return
+        for row in page:
+            last_rowid = row[0]
+            emitted = True
+            yield row[1:]
+        if len(page) < batch_size:
+            return
+
+
+def _is_virtual_table(sql: str) -> bool:
+    return sql.lstrip().upper().startswith("CREATE VIRTUAL TABLE")
+
+
+def _is_virtual_shadow(name: str, virtual_names: set[str]) -> bool:
+    return any(name.startswith(f"{virtual_name}_") for virtual_name in virtual_names)
+
+
+def _is_portable_object(sql: str) -> bool:
+    """Provider-only indexes/functions must be recreated by migrations."""
+    lowered = sql.lower()
+    return "libsql_vector_idx(" not in lowered
 
 
 def dump_database(db, out, batch_size: int = BATCH_SIZE) -> dict:
@@ -128,38 +154,65 @@ def dump_database(db, out, batch_size: int = BATCH_SIZE) -> dict:
     Emits tables (CREATE + paged per-row INSERTs) first, then indexes /
     views / triggers, inside one transaction. Returns {"tables": n, "rows": n}.
     """
-    master = fetch_rows(db.execute(
-        "SELECT name, type, sql FROM sqlite_master WHERE sql IS NOT NULL"
-    ))
-    tables = [(n, s) for n, t, s in master if t == "table" and not is_internal_object(n)]
-    other_objects = [
-        (n, s) for n, t, s in master if t != "table" and not is_internal_object(n)
-    ]
+    db.execute("BEGIN TRANSACTION")
+    try:
+        master = fetch_rows(db.execute(
+            "SELECT name, type, sql FROM sqlite_master WHERE sql IS NOT NULL"
+        ))
+        virtual_names = {
+            n for n, t, s in master if t == "table" and _is_virtual_table(s)
+        }
+        tables = [
+            (n, s)
+            for n, t, s in master
+            if t == "table"
+            and not is_internal_object(n)
+            and not _is_virtual_shadow(n, virtual_names)
+        ]
+        other_objects = [
+            (n, s)
+            for n, t, s in master
+            if t != "table"
+            and not is_internal_object(n)
+            and _is_portable_object(s)
+        ]
 
-    out.write(f"-- radon turso dump {datetime.now(timezone.utc).isoformat()}\n")
-    out.write("PRAGMA foreign_keys=OFF;\n")
-    out.write("BEGIN TRANSACTION;\n")
+        out.write(f"-- radon turso dump {datetime.now(timezone.utc).isoformat()}\n")
+        out.write("PRAGMA foreign_keys=OFF;\n")
+        out.write("BEGIN TRANSACTION;\n")
 
-    total_rows = 0
-    for name, create_sql in tables:
-        started = time.monotonic()
-        out.write(create_sql.rstrip(";") + ";\n")
-        table_rows = 0
-        for row in iter_table_rows(db, name, batch_size):
-            out.write(build_insert(name, row) + "\n")
-            table_rows += 1
-        total_rows += table_rows
-        print(
-            f"  {name}: {table_rows} rows in {time.monotonic() - started:.1f}s",
-            file=sys.stderr,
-            flush=True,
-        )
+        total_rows = 0
+        table_names = {name for name, _sql in tables}
+        for name, create_sql in tables:
+            started = time.monotonic()
+            out.write(create_sql.rstrip(";") + ";\n")
+            table_rows = 0
+            # The production FTS mirror is derivative. Restoring it from the
+            # canonical knowledge rows avoids dumping provider-generated
+            # shadow state and is deterministic across SQLite/libSQL.
+            if name == "knowledge_fts" and "knowledge" in table_names:
+                out.write(
+                    'INSERT INTO "knowledge_fts"(rowid,title,summary,content) '
+                    'SELECT rowid,title,summary,content FROM "knowledge";\n'
+                )
+            else:
+                for row in iter_table_rows(db, name, batch_size):
+                    out.write(build_insert(name, row) + "\n")
+                    table_rows += 1
+            total_rows += table_rows
+            print(
+                f"  {name}: {table_rows} rows in {time.monotonic() - started:.1f}s",
+                file=sys.stderr,
+                flush=True,
+            )
 
-    for _name, create_sql in other_objects:
-        out.write(create_sql.rstrip(";") + ";\n")
+        for _name, create_sql in other_objects:
+            out.write(create_sql.rstrip(";") + ";\n")
 
-    out.write("COMMIT;\n")
-    return {"tables": len(tables), "rows": total_rows}
+        out.write("COMMIT;\n")
+        return {"tables": len(tables), "rows": total_rows}
+    finally:
+        db.execute("ROLLBACK")
 
 
 # ---------------------------------------------------------------------------

@@ -50,8 +50,7 @@ class TestEmitOrder:
 
 
 class TestOrderNodeGate:
-    """The confirmation gate is the analogue of OrderRiskGate: an order node
-    refuses to emit unless the run carries ``confirm_order=True``."""
+    """Legacy order nodes fail closed before any scanner or placement work."""
 
     def _graph(self):
         return {
@@ -62,9 +61,10 @@ class TestOrderNodeGate:
             "edges": [{"from": "n1", "to": "n2"}],
         }
 
-    def test_unconfirmed_run_blocks_and_emits_nothing(self, monkeypatch):
+    @pytest.mark.parametrize("confirmed", [False, True])
+    def test_order_graph_is_disabled_and_emits_nothing(self, monkeypatch, confirmed):
         import workflow.nodes as nodes_mod
-        from workflow.executor import execute_graph
+        from workflow.executor import WorkflowError, execute_graph
 
         monkeypatch.setattr(
             nodes_mod,
@@ -78,31 +78,9 @@ class TestOrderNodeGate:
             lambda row, params: placed.append(row),
         )
 
-        report = execute_graph(self._graph())
-        assert report.ok is False
-        assert report.blocked_by == "n2"
-        assert report.requires_confirmation is True
+        with pytest.raises(WorkflowError, match="order execution is disabled"):
+            execute_graph(self._graph(), confirm_order=confirmed)
         assert placed == []
-
-    def test_confirmed_run_emits_through_bridge(self, monkeypatch):
-        import workflow.nodes as nodes_mod
-        from workflow.executor import execute_graph
-
-        monkeypatch.setattr(
-            nodes_mod,
-            "run_data_source",
-            lambda source, params: [{"ticker": "AAA", "score": 80}],
-        )
-        placed = []
-        monkeypatch.setattr(
-            nodes_mod,
-            "place_order_via_bridge",
-            lambda row, params: placed.append(row),
-        )
-
-        report = execute_graph(self._graph(), confirm_order=True)
-        assert report.ok is True
-        assert placed == [{"ticker": "AAA", "score": 80}]
 
 
 class TestPlacementBridge:

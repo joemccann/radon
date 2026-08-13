@@ -27,7 +27,6 @@ const LATEST_ONE = [
   { table: "discover_sp500_snapshots", orderCol: "scan_time" },
   { table: "theta_harvester_snapshots", orderCol: "scan_time" },
   { table: "strength_confirmation_snapshots", orderCol: "scan_time" },
-  { table: "flow_analysis_snapshots", orderCol: "scan_time" },
   { table: "vcg_snapshots", orderCol: "scan_time" },
   { table: "gamma_rotation_snapshots", orderCol: "scan_time" },
   { table: "oi_changes", orderCol: "scan_time" },
@@ -46,6 +45,11 @@ const HISTORY = [
   { table: "menthorq_cta", orderCol: "date", limit: 10 },
 ];
 
+// This table can contain portfolio-derived flow rows and must never exist in
+// the public demo database. Keep the purge in the recurring job so previously
+// mirrored rows are removed after deployment as well as excluded going forward.
+const PURGED_ACCOUNT_TABLES = ["flow_analysis_snapshots"];
+
 // libsql:// -> https:// so the client uses the stateless HTTP transport.
 function toHttp(url) {
   if (!url) return url;
@@ -62,23 +66,25 @@ function upsertStatements(table, columns, rows) {
   return rows.map((r) => ({ sql, args: cols.map((c) => r[c] ?? null) }));
 }
 
-async function mirrorQuery(src, dst, table, sql) {
+async function mirrorQuery(src, dst, table, sql, pruneSql) {
   let result;
   try {
     result = await src.execute(sql);
   } catch (err) {
     console.warn(`[mirror] SKIP ${table} (source read failed: ${err.message})`);
-    return 0;
+    throw new Error(`${table} source read failed`);
   }
   if (result.rows.length === 0) {
     console.warn(`[mirror] SKIP ${table} (no source rows)`);
     return 0;
   }
   try {
-    await dst.batch(upsertStatements(table, result.columns, result.rows), "write");
+    const statements = upsertStatements(table, result.columns, result.rows);
+    if (pruneSql) statements.push(pruneSql);
+    await dst.batch(statements, "write");
   } catch (err) {
     console.warn(`[mirror] FAIL ${table} (dest write failed: ${err.message})`);
-    return 0;
+    throw new Error(`${table} destination write failed`);
   }
   console.log(`[mirror] ${table}: ${result.rows.length} row(s)`);
   return result.rows.length;
@@ -102,22 +108,49 @@ async function main() {
   const src = createClient({ url: toHttp(srcUrl), authToken: srcToken });
   const dst = createClient({ url: toHttp(dstUrl), authToken: dstToken });
 
+  for (const table of PURGED_ACCOUNT_TABLES) {
+    try {
+      await dst.execute(`DELETE FROM ${table}`);
+      console.log(`[mirror] purged account-derived table: ${table}`);
+    } catch (err) {
+      console.warn(`[mirror] SKIP purge ${table} (dest write failed: ${err.message})`);
+    }
+  }
+
   let total = 0;
+  const failures = [];
   for (const { table, orderCol } of LATEST_ONE) {
-    total += await mirrorQuery(src, dst, table, `SELECT * FROM ${table} ORDER BY ${orderCol} DESC LIMIT 1`);
+    try {
+      total += await mirrorQuery(
+        src, dst, table,
+        `SELECT * FROM ${table} ORDER BY ${orderCol} DESC LIMIT 1`,
+        `DELETE FROM ${table} WHERE ${orderCol} NOT IN (SELECT ${orderCol} FROM ${table} ORDER BY ${orderCol} DESC LIMIT 1)`,
+      );
+    } catch { failures.push(table); }
   }
   for (const { table, key, orderCol } of PER_KEY) {
-    total += await mirrorQuery(
-      src, dst, table,
-      `SELECT * FROM (
-         SELECT *, ROW_NUMBER() OVER (PARTITION BY ${key} ORDER BY ${orderCol} DESC) AS rn
-         FROM ${table}
-       ) WHERE rn = 1`,
-    );
+    try {
+      total += await mirrorQuery(
+        src, dst, table,
+        `SELECT * FROM (
+           SELECT *, ROW_NUMBER() OVER (PARTITION BY ${key} ORDER BY ${orderCol} DESC) AS rn
+           FROM ${table}
+         ) WHERE rn = 1`,
+        `DELETE FROM ${table} WHERE (${key}, ${orderCol}) NOT IN (` +
+          `SELECT ${key}, MAX(${orderCol}) FROM ${table} GROUP BY ${key})`,
+      );
+    } catch { failures.push(table); }
   }
   for (const { table, orderCol, limit } of HISTORY) {
-    total += await mirrorQuery(src, dst, table, `SELECT * FROM ${table} ORDER BY ${orderCol} DESC LIMIT ${limit}`);
+    try {
+      total += await mirrorQuery(
+        src, dst, table,
+        `SELECT * FROM ${table} ORDER BY ${orderCol} DESC LIMIT ${limit}`,
+        `DELETE FROM ${table} WHERE ${orderCol} NOT IN (SELECT ${orderCol} FROM ${table} ORDER BY ${orderCol} DESC LIMIT ${limit})`,
+      );
+    } catch { failures.push(table); }
   }
+  if (failures.length) throw new Error(`required table failures: ${failures.join(", ")}`);
   console.log(`[mirror] done — ${total} row(s) mirrored`);
 }
 

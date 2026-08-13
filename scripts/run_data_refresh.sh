@@ -99,14 +99,22 @@ if [ "$IS_TRADING" = "no" ]; then
 fi
 
 mkdir -p data
+mkdir -p logs
+
+SESSION_OPEN=$("$PYTHON_BIN" -c "
+import sys; sys.path.insert(0, 'scripts')
+from utils.market_calendar import market_state
+print('yes' if market_state().get('is_open') else 'no')
+" 2>/dev/null || echo "no")
 
 SCANNER_STATUS="FAIL"
 FLOW_STATUS="FAIL"
 DISCOVER_STATUS="FAIL"
 
+if [ "$SESSION_OPEN" = "yes" ]; then
 # --- scanner.py ---
 echo "$(date): Running scanner.py --top 25..."
-"$PYTHON_BIN" scripts/scanner.py --top 25 > data/scanner.json.tmp 2>/tmp/scanner.err
+"$PYTHON_BIN" scripts/scanner.py --top 25 > data/scanner.json.tmp 2>>logs/scanner.err.log
 EXIT_CODE=$?
 if [ "$EXIT_CODE" -eq 0 ]; then
     mv data/scanner.json.tmp data/scanner.json
@@ -119,7 +127,7 @@ fi
 
 # --- flow_analysis.py ---
 echo "$(date): Running flow_analysis.py..."
-"$PYTHON_BIN" scripts/flow_analysis.py > data/flow_analysis.json.tmp 2>/tmp/flow_analysis.err
+"$PYTHON_BIN" scripts/flow_analysis.py > data/flow_analysis.json.tmp 2>>logs/flow-analysis.err.log
 EXIT_CODE=$?
 if [ "$EXIT_CODE" -eq 0 ]; then
     mv data/flow_analysis.json.tmp data/flow_analysis.json
@@ -132,7 +140,7 @@ fi
 
 # --- discover.py ---
 echo "$(date): Running discover.py --min-alerts 1..."
-"$PYTHON_BIN" scripts/discover.py --min-alerts 1 > data/discover.json.tmp 2>/tmp/discover.err
+"$PYTHON_BIN" scripts/discover.py --min-alerts 1 > data/discover.json.tmp 2>>logs/discover.err.log
 EXIT_CODE=$?
 if [ "$EXIT_CODE" -eq 0 ]; then
     mv data/discover.json.tmp data/discover.json
@@ -141,6 +149,12 @@ if [ "$EXIT_CODE" -eq 0 ]; then
 else
     rm -f data/discover.json.tmp
     echo "$(date): discover.py failed (exit $EXIT_CODE) - keeping existing data/discover.json"
+fi
+else
+    SCANNER_STATUS="SKIPPED"
+    FLOW_STATUS="SKIPPED"
+    DISCOVER_STATUS="SKIPPED"
+    echo "$(date): Exchange session closed - skipping intraday scanners"
 fi
 
 cri_cache_has_complete_rvol() {
@@ -236,7 +250,7 @@ fi
 
 echo "$(date): Data refresh complete (scanner: $SCANNER_STATUS, flow: $FLOW_STATUS, discover: $DISCOVER_STATUS, cri: $CRI_STATUS)"
 
-if [ "$SCANNER_STATUS" != "OK" ] || [ "$FLOW_STATUS" != "OK" ] || [ "$DISCOVER_STATUS" != "OK" ] || [ "$CRI_STATUS" = "FAIL" ]; then
+if { [ "$SESSION_OPEN" = "yes" ] && { [ "$SCANNER_STATUS" != "OK" ] || [ "$FLOW_STATUS" != "OK" ] || [ "$DISCOVER_STATUS" != "OK" ]; }; } || [ "$CRI_STATUS" = "FAIL" ]; then
     exit 1
 fi
 

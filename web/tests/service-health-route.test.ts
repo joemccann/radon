@@ -129,7 +129,8 @@ describe("/api/service-health", () => {
     expect(body.failing).toHaveLength(1);
     expect(body.degraded_count).toBe(1);
     expect(body.summary).toEqual({ total: 1, failing_count: 1 });
-    expect(body.warning).toContain("connection refused");
+    expect(body.warning).toBe("Service health store unavailable");
+    expect(JSON.stringify(body)).not.toContain("connection refused");
   });
 
   it("sets cache: no-store / force-dynamic headers", async () => {

@@ -35,6 +35,8 @@ const YIELD_MIN_PCT = 0.0;
 const YIELD_MAX_PCT = 20.0;
 
 const CACHE_TTL_MS = 60_000;
+const NEGATIVE_TTL_MS = 5_000;
+const PROVIDER_TIMEOUT_MS = 3_000;
 
 interface LegQuote {
   price: number;
@@ -42,11 +44,14 @@ interface LegQuote {
 }
 
 let cached: { payload: Record<string, unknown>; at: number } | null = null;
+let refreshInFlight: Promise<Record<string, unknown>> | null = null;
+let negativeUntil = 0;
 
 async function fetchLegQuote(symbol: string): Promise<LegQuote | null> {
   const res = await fetch(YAHOO_CHART_URL(symbol), {
     headers: { "User-Agent": "Mozilla/5.0" },
     cache: "no-store",
+    signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
   });
   if (!res.ok) return null;
   const body = (await res.json()) as {
@@ -76,14 +81,30 @@ async function buildLivePayload(): Promise<Record<string, unknown>> {
   };
 }
 
+async function refreshLivePayload(): Promise<Record<string, unknown>> {
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = buildLivePayload().then((payload) => {
+    if (payload.missing) {
+      negativeUntil = Date.now() + NEGATIVE_TTL_MS;
+      return cached?.payload ?? MISSING_LIVE;
+    }
+    cached = { payload, at: Date.now() };
+    negativeUntil = 0;
+    return payload;
+  }).finally(() => {
+    refreshInFlight = null;
+  });
+  return refreshInFlight;
+}
+
 export async function GET() {
   const requestId = getRequestId();
   if (!cached || Date.now() - cached.at >= CACHE_TTL_MS) {
-    const payload = await buildLivePayload();
-    // Never cache the missing shape — a transient upstream failure should
-    // not suppress the estimate for a full TTL.
-    if (payload.missing) {
-      const response = NextResponse.json(MISSING_LIVE);
+    const payload = Date.now() < negativeUntil
+      ? (cached?.payload ?? MISSING_LIVE)
+      : await refreshLivePayload();
+    if (payload.missing || !cached) {
+      const response = NextResponse.json(payload);
       setCacheResponseHeaders(response, {
         maxAgeSeconds: 30,
         staleWhileRevalidateSeconds: 120,
@@ -93,7 +114,6 @@ export async function GET() {
       });
       return response;
     }
-    cached = { payload, at: Date.now() };
   }
   const response = NextResponse.json(cached.payload);
   setCacheResponseHeaders(response, {

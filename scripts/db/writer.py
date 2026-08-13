@@ -1716,10 +1716,13 @@ def get_ticker_flow_history(ticker: str, *, lookback_days: int = 120) -> list[di
     db = get_db()
     cursor = db.execute(
         """
-        SELECT * FROM ticker_flow_history
-        WHERE ticker = ?
+        SELECT * FROM (
+          SELECT * FROM ticker_flow_history
+          WHERE ticker = ?
+          ORDER BY date DESC
+          LIMIT ?
+        ) newest
         ORDER BY date ASC
-        LIMIT ?
         """,
         (ticker.upper(), int(lookback_days)),
     )

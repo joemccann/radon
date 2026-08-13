@@ -422,6 +422,48 @@ class TestDetermineEdge:
 class TestRunEvaluation:
     """The main orchestrator runs milestones in parallel, then sequential."""
 
+    def test_m3_m3b_or_price_fetch_failure_stops_at_edge_gate(self):
+        raw = {
+            "M1": {"verified": True, "options_available": True},
+            "M1B": {},
+            "M1C": {},
+            "M1D": {},
+            "M2": {"trading_days_checked": [], "dark_pool": {}},
+            "M3": {"error": "provider unavailable"},
+            "M3B": [],
+            "PRICE": [],
+        }
+        with patch("evaluate._run_parallel_milestones", return_value=raw):
+            result = run_evaluation("SPY")
+
+        assert result.decision == "NO_TRADE"
+        assert result.failing_gate == "EDGE"
+        assert result.milestones["M3"].passed is False
+        assert "provider unavailable" in (result.milestones["M3"].error or "")
+
+    def test_pending_structure_and_kelly_are_not_passed_or_success_exit(
+        self, ticker_data, flow_data_accumulation, options_data_bullish,
+        oi_data_massive, price_history,
+    ):
+        raw = {
+            "M1": ticker_data,
+            "M1B": {},
+            "M1C": {},
+            "M1D": {},
+            "M2": flow_data_accumulation,
+            "M3": options_data_bullish,
+            "M3B": oi_data_massive,
+            "PRICE": price_history,
+        }
+        with patch("evaluate._run_parallel_milestones", return_value=raw):
+            result = run_evaluation("AAPL")
+
+        assert result.decision == "PENDING"
+        assert result.milestones["M5"].passed is False
+        assert result.milestones["M6"].passed is False
+        from evaluate import _decision_exit_code
+        assert _decision_exit_code([result]) == 2
+
     @patch("evaluate.fetch_ticker_info")
     @patch("evaluate.fetch_flow")
     @patch("evaluate.fetch_options")

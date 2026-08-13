@@ -46,7 +46,7 @@ def test_save_reconciliation_report_falls_back_to_now_when_payload_missing_times
     assert mock_writer[0]["snapshot_at"]  # non-empty
 
 
-def test_save_reconciliation_report_db_failure_does_not_break(monkeypatch: pytest.MonkeyPatch):
+def test_save_reconciliation_report_db_failure_fails_closed(monkeypatch: pytest.MonkeyPatch):
     fake = types.ModuleType("db.writer")
     fake.upsert_reconciliation_log = lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("boom"))  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "db.writer", fake)
@@ -54,7 +54,8 @@ def test_save_reconciliation_report_db_failure_does_not_break(monkeypatch: pytes
         del sys.modules["ib_reconcile"]
     import ib_reconcile
 
-    ib_reconcile.save_reconciliation_report({"diffs": []})  # must not raise
+    with pytest.raises(RuntimeError, match="reconciliation_log write failed"):
+        ib_reconcile.save_reconciliation_report({"diffs": []})
 
 
 def test_loaders_read_canonical_db_helpers(monkeypatch: pytest.MonkeyPatch):

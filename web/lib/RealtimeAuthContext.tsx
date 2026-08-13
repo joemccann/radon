@@ -8,17 +8,6 @@ export type RealtimeTokenGetter = () => Promise<string | null>;
 const RealtimeAuthContext = createContext<RealtimeTokenGetter | undefined>(undefined);
 
 export function RealtimeAuthProvider({ children }: { children: ReactNode }) {
-  if (
-    process.env.NEXT_PUBLIC_RADON_AUTHLESS_TEST === "1" ||
-    process.env.RADON_AUTHLESS_TEST === "1" ||
-    process.env.NODE_ENV === "test"
-  ) {
-    return (
-      <RealtimeAuthContext.Provider value={undefined}>
-        {children}
-      </RealtimeAuthContext.Provider>
-    );
-  }
   return <ClerkRealtimeAuthProvider>{children}</ClerkRealtimeAuthProvider>;
 }
 

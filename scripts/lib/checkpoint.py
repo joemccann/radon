@@ -95,8 +95,22 @@ class CheckpointedJob:
             }
         if state_path.exists():
             self.state["stats"]["resumes"] = self.state["stats"].get("resumes", 0) + 1
+        self._repair_torn_findings_tail()
         self._recover_from_findings_log()
         self.checkpoint()
+
+    def _repair_torn_findings_tail(self) -> None:
+        findings_path = self.dir / FINDINGS_FILE
+        if not findings_path.exists():
+            return
+        with findings_path.open("r+b") as findings:
+            data = findings.read()
+            if not data or data.endswith(b"\n"):
+                return
+            last_complete = data.rfind(b"\n")
+            findings.truncate(last_complete + 1 if last_complete >= 0 else 0)
+            findings.flush()
+            os.fsync(findings.fileno())
 
     def _recover_from_findings_log(self) -> None:
         findings_path = self.dir / FINDINGS_FILE
@@ -111,8 +125,11 @@ class CheckpointedJob:
                     record = json.loads(line)
                 except json.JSONDecodeError:
                     continue  # torn final line from a kill mid-append
-                h = record.get("_hash")
-                if h and h not in self.state["completed"]:
+                key = record.get("_key")
+                if not isinstance(key, str) or not key:
+                    continue
+                h = item_hash(key)
+                if h not in self.state["completed"]:
                     self.state["completed"][h] = record.get("_at", _now())
                     self.state["stats"]["processed"] += 1
 
@@ -135,8 +152,11 @@ class CheckpointedJob:
     # -- commands ----------------------------------------------------------
 
     def record_finding(self, item_key: str, payload: dict) -> None:
+        reserved = {"_hash", "_key", "_at"}.intersection(payload)
+        if reserved:
+            raise ValueError(f"finding payload contains reserved keys: {sorted(reserved)}")
         h = item_hash(item_key)
-        record = {"_hash": h, "_key": item_key, "_at": _now(), **payload}
+        record = {**payload, "_hash": h, "_key": item_key, "_at": _now()}
         self._append_finding(record)
         self.state["completed"][h] = record["_at"]
         self.state["stats"]["processed"] += 1

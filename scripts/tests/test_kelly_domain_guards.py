@@ -135,3 +135,25 @@ class TestKellyCLIBankrollZero:
         assert "dollar_size" not in data
         assert "max_per_position" not in data
         assert "use_size" not in data
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        ["--prob", "-0.01", "--odds", "2"],
+        ["--prob", "1.01", "--odds", "2"],
+        ["--prob", "0.6", "--odds", "0"],
+        ["--prob", "0.6", "--odds", "2", "--fraction", "0"],
+        ["--prob", "0.6", "--odds", "2", "--bankroll", "-1"],
+        ["--prob", "nan", "--odds", "2"],
+    ],
+)
+def test_cli_rejects_invalid_probability_and_sizing_domains(extra):
+    result = subprocess.run(
+        [sys.executable, str(_KELLY_SCRIPT), *extra],
+        capture_output=True,
+        text=True,
+        cwd=str(_REPO_ROOT),
+    )
+    assert result.returncode != 0
+    assert not result.stdout

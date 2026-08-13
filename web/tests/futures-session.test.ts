@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isGlobexOpen } from "@/lib/futuresSession";
+import { isGlobexOpen, isGlobexQuoteFresh } from "@/lib/futuresSession";
 
 /**
  * Build a Date that reads as the given wall-clock time in America/New_York.
@@ -47,5 +47,17 @@ describe("isGlobexOpen — CME equity-index futures session", () => {
   it("CLOSED Friday after 17:00 ET (weekly close, no reopen)", () => {
     expect(isGlobexOpen(etJune("2026-06-12T17:30"))).toBe(false);
     expect(isGlobexOpen(etJune("2026-06-12T19:00"))).toBe(false);
+  });
+
+  it("honors CME full-holiday and early-close sessions", () => {
+    expect(isGlobexOpen(new Date("2026-04-03T14:00:00-04:00"))).toBe(false);
+    expect(isGlobexOpen(new Date("2026-11-26T12:59:00-05:00"))).toBe(true);
+    expect(isGlobexOpen(new Date("2026-11-26T13:01:00-05:00"))).toBe(false);
+  });
+
+  it("rejects quotes older than the active Globex freshness window", () => {
+    const now = new Date("2026-06-09T12:00:00-04:00");
+    expect(isGlobexQuoteFresh("2026-06-09T15:58:00Z", now)).toBe(true);
+    expect(isGlobexQuoteFresh("2026-06-09T15:45:00Z", now)).toBe(false);
   });
 });

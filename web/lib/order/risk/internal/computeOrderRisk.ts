@@ -101,6 +101,8 @@ export interface OrderRiskLeg {
    * model then behaves exactly as before.
    */
   coveringLongContracts?: number;
+  /** False only for virtual stock coverage whose acquisition basis is unknown. */
+  costBasisKnown?: boolean;
 }
 
 export interface OrderRisk {
@@ -364,16 +366,48 @@ function computeGrossOrderRisk(
   );
   const maxGainUnbounded = netCallRatio > 0;
 
-  // From here the call side is bounded for loss. Compute max loss = sum of
-  // per-leg worst cases at the dominant extreme; for puts the worst is at
-  // S = 0, for calls at S → ∞.
-  const maxLossDollars = computeBoundedMaxLoss(legs, netPremium, comboQuantity);
+  // A calendar cannot be reduced to one expiration payoff. An earlier long
+  // never caps a later short; a surviving later long can cap the tail, but
+  // exact dollars still require a time-aware model or the broker what-if.
+  const expiries = new Set(legs.map((leg) => normaliseExpiry(leg.expiry)));
+  if (expiries.size > 1) {
+    return {
+      maxLoss: null,
+      maxGain: null,
+      maxLossUnbounded: false,
+      maxGainUnbounded,
+      hasUndefinedRisk: true,
+      undefinedRiskReason: "Mixed-expiry risk requires broker margin",
+    };
+  }
+
+  if (legs.some((leg) => leg.costBasisKnown === false)) {
+    return {
+      maxLoss: null,
+      maxGain: null,
+      maxLossUnbounded: false,
+      maxGainUnbounded,
+      hasUndefinedRisk: true,
+      undefinedRiskReason: "Stock cost basis unavailable",
+    };
+  }
+
+  // From here the call side is bounded for loss. Evaluate the aggregate
+  // intrinsic payoff at every strike kink, where bounded extrema occur.
+  const extrema = intrinsicPayoffExtrema(legs);
+  const maxLossDollars = Math.max(
+    0,
+    (-extrema.min + netPremium) * comboQuantity * MULTIPLIER,
+  );
 
   // Max gain (when bounded): same model symmetrically. If unbounded on
   // the call side we surface null.
   const maxGainDollars = maxGainUnbounded
     ? null
-    : computeBoundedMaxGain(legs, netPremium, comboQuantity);
+    : Math.max(
+        0,
+        (extrema.max - netPremium) * comboQuantity * MULTIPLIER,
+      );
 
   // Undefined risk flag: naked short put bounds the trade only at
   // stock-to-zero. The number is real but it's a stress bound, not a
@@ -409,25 +443,62 @@ function legsAreBounded(sameRightLegs: OrderRiskLeg[]): {
 } {
   if (sameRightLegs.length === 0) return { bounded: true, reason: null };
   const right = sameRightLegs[0].right;
-  // SELL legs that have covering long holdings of the SAME option are not
-  // contributing naked exposure — discount them by the covering count.
-  const shortRatio = sameRightLegs
-    .filter((l) => l.action === "SELL")
-    .reduce((sum, l) => {
-      const covering = Math.max(0, l.coveringLongContracts ?? 0);
-      return sum + Math.max(0, l.quantity - covering);
-    }, 0);
-  const longRatio = sameRightLegs
-    .filter((l) => l.action === "BUY")
-    .reduce((sum, l) => sum + l.quantity, 0);
+  const longs = sameRightLegs
+    .filter((leg) => leg.action === "BUY")
+    .map((leg) => ({ expiry: normaliseExpiry(leg.expiry), remaining: leg.quantity }))
+    .sort((a, b) => a.expiry.localeCompare(b.expiry));
+  const shorts = sameRightLegs
+    .filter((leg) => leg.action === "SELL")
+    .map((leg) => ({
+      expiry: normaliseExpiry(leg.expiry),
+      remaining: Math.max(0, leg.quantity - Math.max(0, leg.coveringLongContracts ?? 0)),
+    }))
+    .sort((a, b) => b.expiry.localeCompare(a.expiry));
 
-  if (shortRatio === 0) return { bounded: true, reason: null };
-  if (longRatio >= shortRatio) return { bounded: true, reason: null };
+  for (const short of shorts) {
+    for (const long of longs) {
+      if (short.remaining <= 0) break;
+      if (long.remaining <= 0 || long.expiry < short.expiry) continue;
+      const consumed = Math.min(short.remaining, long.remaining);
+      short.remaining -= consumed;
+      long.remaining -= consumed;
+    }
+  }
+
+  if (shorts.every((short) => short.remaining <= 0)) {
+    return { bounded: true, reason: null };
+  }
 
   const rightLabel = right === "C" ? "call" : "put";
   return {
     bounded: false,
     reason: `Uncovered short ${rightLabel}`,
+  };
+}
+
+/** Exact same-expiry intrinsic extrema at every payoff kink. */
+function intrinsicPayoffExtrema(legs: OrderRiskLeg[]): { min: number; max: number } {
+  const points = [0, ...legs.map((leg) => leg.strike)].filter(
+    (value, index, all) => Number.isFinite(value) && value >= 0 && all.indexOf(value) === index,
+  );
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+
+  for (const spot of points) {
+    let payoff = 0;
+    for (const leg of legs) {
+      const intrinsic = leg.right === "C"
+        ? Math.max(0, spot - leg.strike)
+        : Math.max(0, leg.strike - spot);
+      payoff += (leg.action === "BUY" ? 1 : -1) * intrinsic * leg.quantity;
+    }
+    min = Math.min(min, payoff);
+    max = Math.max(max, payoff);
+  }
+
+  return {
+    min: Number.isFinite(min) ? min : 0,
+    max: Number.isFinite(max) ? max : 0,
   };
 }
 
@@ -834,21 +905,37 @@ export function augmentOrderLegsWithPortfolioCoverage(
   // Multiple lots / positions are pooled because stock is fungible.
   let longStockShares = 0;
   let longStockBasisDollars = 0;
+  let longStockBasisKnown = true;
+  const heldShorts: Array<{ contracts: number; right: LegRight; expiry: string }> = [];
   for (const pos of portfolio.positions ?? []) {
-    if (pos.ticker !== ticker) continue;
+    if (pos.ticker.toUpperCase() !== ticker.toUpperCase()) continue;
     for (const leg of pos.legs ?? []) {
-      if (leg.direction !== "LONG") continue;
       if (leg.contracts <= 0) continue;
+      if (leg.direction === "SHORT" && (leg.type === "Call" || leg.type === "Put")) {
+        const effectiveExpiry = leg.expiry ?? pos.expiry;
+        const expiry = effectiveExpiry ? normaliseExpiry(effectiveExpiry) : "";
+        if (expiry) {
+          heldShorts.push({
+            contracts: leg.contracts,
+            right: leg.type === "Call" ? "C" : "P",
+            expiry,
+          });
+        }
+        continue;
+      }
+      if (leg.direction !== "LONG") continue;
       if (leg.type === "Stock") {
         // Stocks don't have expiry / strike. avg_cost is per-share.
         const avgCost = Number.isFinite(leg.avg_cost) ? leg.avg_cost : 0;
+        if (!Number.isFinite(leg.avg_cost)) longStockBasisKnown = false;
         if (avgCost < 0) continue;
         longStockShares += leg.contracts;
         longStockBasisDollars += leg.contracts * avgCost;
         continue;
       }
       if (leg.type !== "Call" && leg.type !== "Put") continue;
-      const expiry = pos.expiry ? normaliseExpiry(pos.expiry) : "";
+      const effectiveExpiry = leg.expiry ?? pos.expiry;
+      const expiry = effectiveExpiry ? normaliseExpiry(effectiveExpiry) : "";
       if (!expiry) continue;
       if (leg.strike == null || !Number.isFinite(leg.strike) || leg.strike <= 0) continue;
       const right: LegRight = leg.type === "Call" ? "C" : "P";
@@ -889,6 +976,26 @@ export function augmentOrderLegsWithPortfolioCoverage(
   // of the chain legs list.
   const remainingByKey = new Map<HeldKey, number>();
   for (const [k, v] of heldLongIndex) remainingByKey.set(k, v.contracts);
+
+  // Existing short obligations consume collateral before a new order can use
+  // it. Options cover the same right through their expiry; remaining short
+  // calls consume 100 shares each. This prevents one holding from backing two
+  // simultaneous shorts.
+  let encumberedStockShares = 0;
+  for (const short of heldShorts) {
+    let remaining = short.contracts;
+    for (const [key, held] of heldLongIndex.entries()) {
+      if (remaining <= 0) break;
+      if (held.right !== short.right || held.expiry < short.expiry) continue;
+      const available = remainingByKey.get(key) ?? 0;
+      const consumed = Math.min(available, remaining);
+      remainingByKey.set(key, available - consumed);
+      remaining -= consumed;
+    }
+    if (short.right === "C" && remaining > 0) {
+      encumberedStockShares += remaining * MULTIPLIER;
+    }
+  }
 
   // Track per-leg remaining naked short contracts after option coverage. Used
   // by pass 2 to apply stock coverage to the residue.
@@ -954,7 +1061,7 @@ export function augmentOrderLegsWithPortfolioCoverage(
   // Weighted avg cost: longStockBasisDollars / longStockShares. We consume
   // a fraction of shares; cost basis scales linearly with shares consumed.
   let netPremiumAdjustment = 0;
-  let remainingShares = longStockShares;
+  let remainingShares = Math.max(0, longStockShares - encumberedStockShares);
   const stockAvgCost = longStockShares > 0 ? longStockBasisDollars / longStockShares : 0;
 
   for (let i = 0; i < chainLegs.length; i++) {
@@ -977,6 +1084,7 @@ export function augmentOrderLegsWithPortfolioCoverage(
       strike: 0,
       expiry: chain.expiry,
       quantity: sharesConsumed / 100 / comboQuantity,
+      costBasisKnown: longStockBasisKnown,
     });
 
     // Cost basis per-share-per-combo: sharesConsumed × avgCost gives total

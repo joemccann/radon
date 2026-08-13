@@ -5,7 +5,6 @@
  */
 
 import type { OpenOrder, PortfolioPosition } from "@/lib/types";
-import { findPortfolioLegDirection } from "@/lib/openOrderCombos";
 
 export type OperatorOrderStatus =
   | "Working"
@@ -154,20 +153,44 @@ function normalizeRight(right: string | null): "C" | "P" | null {
   return null;
 }
 
-function findStockDirection(
+function findStockQuantity(
   positions: readonly PortfolioPosition[] | undefined,
   symbol: string,
-): "LONG" | "SHORT" | null {
-  if (!positions) return null;
+): number {
+  if (!positions) return 0;
   const target = symbol.toUpperCase();
+  let net = 0;
   for (const position of positions) {
     if (position.ticker.toUpperCase() !== target) continue;
-    if (position.legs.length !== 1) continue;
-    const leg = position.legs[0];
-    if (leg?.type !== "Stock") continue;
-    if (leg.direction === "LONG" || leg.direction === "SHORT") return leg.direction;
+    for (const leg of position.legs) {
+      if (leg.type !== "Stock") continue;
+      net += (leg.direction === "LONG" ? 1 : -1) * Math.max(0, leg.contracts);
+    }
   }
-  return null;
+  return net;
+}
+
+function findOptionQuantity(
+  positions: readonly PortfolioPosition[] | undefined,
+  symbol: string,
+  expiry: string,
+  strike: number,
+  right: "C" | "P",
+): number {
+  if (!positions) return 0;
+  const target = symbol.toUpperCase();
+  const targetExpiry = expiry.replace(/-/g, "");
+  let net = 0;
+  for (const position of positions) {
+    if (position.ticker.toUpperCase() !== target) continue;
+    for (const leg of position.legs) {
+      const legRight = leg.type === "Call" ? "C" : leg.type === "Put" ? "P" : null;
+      const legExpiry = (leg.expiry ?? position.expiry).replace(/-/g, "");
+      if (legRight !== right || legExpiry !== targetExpiry || leg.strike !== strike) continue;
+      net += (leg.direction === "LONG" ? 1 : -1) * Math.max(0, leg.contracts);
+    }
+  }
+  return net;
 }
 
 /**
@@ -188,26 +211,24 @@ export function resolveOrderIntent(
   }
 
   if (c.secType === "STK") {
-    const dir = findStockDirection(portfolio, c.symbol);
-    if (!dir) return "OPEN";
-    if (action === "SELL" && dir === "LONG") return "CLOSE";
-    if (action === "BUY" && dir === "SHORT") return "CLOSE";
+    const held = findStockQuantity(portfolio, c.symbol);
+    if (action === "SELL" && held >= order.totalQuantity) return "CLOSE";
+    if (action === "BUY" && -held >= order.totalQuantity) return "CLOSE";
     return "OPEN";
   }
 
   if (c.secType === "OPT") {
     const right = normalizeRight(c.right);
     if (!right || c.strike == null || !c.expiry) return "UNKNOWN";
-    const dir = findPortfolioLegDirection(
+    const held = findOptionQuantity(
       portfolio,
       c.symbol,
       c.expiry,
       c.strike,
       right,
     );
-    if (!dir) return "OPEN";
-    if (action === "SELL" && dir === "LONG") return "CLOSE";
-    if (action === "BUY" && dir === "SHORT") return "CLOSE";
+    if (action === "SELL" && held >= order.totalQuantity) return "CLOSE";
+    if (action === "BUY" && -held >= order.totalQuantity) return "CLOSE";
     return "OPEN";
   }
 

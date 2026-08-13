@@ -6,10 +6,34 @@ from unittest.mock import patch
 
 import pytest
 
-from scanner import analyze_signal, scan
+from scanner import analyze_signal, fetch_flow_data, scan
 
 
 class TestAnalyzeSignal:
+    def test_conflicting_options_bias_applies_penalty_in_production_path(self):
+        flow_data = {
+            "dark_pool": {
+                "aggregate": {
+                    "flow_direction": "ACCUMULATION",
+                    "flow_strength": 70,
+                    "num_prints": 200,
+                },
+                "daily": [],
+            },
+            "options_flow": {"bias": "BEARISH"},
+        }
+
+        result = analyze_signal(flow_data)
+
+        assert result["options_conflict"] is True
+        assert result["score"] == 45
+
+    def test_production_fetch_requests_options_flow_for_conflict_scoring(self):
+        with patch("scanner.fetch_flow_module", return_value={}) as fetch:
+            fetch_flow_data("SPY")
+
+        assert fetch.call_args.kwargs["skip_options_flow"] is False
+
     def test_error_flow_data(self):
         result = analyze_signal({"error": "timeout"})
         assert result["score"] == -1

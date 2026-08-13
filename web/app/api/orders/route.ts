@@ -1,3 +1,4 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
 import { NextResponse } from "next/server";
 import { radonFetch } from "@/lib/radonApi";
 import { readOrdersSnapshotFromDb } from "@/lib/orders/readOrdersFromDb";
@@ -9,22 +10,29 @@ export const dynamic = "force-dynamic";
 let syncInFlight: Promise<void> | null = null;
 
 export async function GET(): Promise<Response> {
+  const access = await requireRouteAccess();
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   try {
     const data = await readOrdersSnapshotFromDb();
     return setNoStoreResponseHeaders(NextResponse.json(data), requestId);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to read orders";
+  } catch {
     // 503, not 500: a Turso outage is transient — useOrders keeps last-good
     // client state on any !res.ok and retries on its poll cadence.
     return setNoStoreResponseHeaders(
-      NextResponse.json({ error: message }, { status: 503 }),
+      NextResponse.json({ error: "Orders temporarily unavailable" }, { status: 503 }),
       requestId,
     );
   }
 }
 
 export async function POST(): Promise<Response> {
+  const access = await requireRouteAccess(undefined, {
+    operatorOnly: true,
+    rate: { key: "orders-refresh", limit: 4, windowMs: 60_000 },
+    durableRateTier: "C",
+  });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   try {
     // Coalesce concurrent POSTs
@@ -38,11 +46,10 @@ export async function POST(): Promise<Response> {
     let cached;
     try {
       cached = await readOrdersSnapshotFromDb();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Sync failed and Turso orders read failed";
+    } catch {
       return setNoStoreResponseHeaders(
         NextResponse.json(
-          { error: message },
+          { error: "Order sync failed" },
           { status: 502 },
         ),
         requestId,
@@ -66,10 +73,9 @@ export async function POST(): Promise<Response> {
   try {
     const data = await readOrdersSnapshotFromDb();
     return setNoStoreResponseHeaders(NextResponse.json(data), requestId);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to read orders";
+  } catch {
     return setNoStoreResponseHeaders(
-      NextResponse.json({ error: message }, { status: 500 }),
+      NextResponse.json({ error: "Orders temporarily unavailable" }, { status: 500 }),
       requestId,
     );
   }

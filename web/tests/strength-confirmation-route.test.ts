@@ -134,6 +134,7 @@ describe("GET /api/scanner/strength", () => {
     expect(res.status).toBe(200);
     expect(body.results[0].ticker).toBe("NVDA");
     expect(body.universe).toBe("explicit");
+    expect(body.cache_meta.last_refresh).toBe("2026-06-25T15:00:00.000Z");
   });
 });
 
@@ -192,7 +193,7 @@ describe("POST /api/scanner/strength/scan", () => {
     expect(mocks.radonFetch).not.toHaveBeenCalled();
   });
 
-  it("serves stale cache with a sync warning when FastAPI is unavailable", async () => {
+  it("failed preset scans are not reported as successful when matching cache exists", async () => {
     mocks.radonFetch.mockRejectedValueOnce(new Error("upstream down"));
     const { POST } = await import("../app/api/scanner/strength/scan/route");
     const req = new Request("http://localhost/api/scanner/strength/scan", {
@@ -203,11 +204,25 @@ describe("POST /api/scanner/strength/scan", () => {
     const res = await POST(req);
     const body = await res.json();
 
-    expect(res.status).toBe(200);
-    expect(res.headers.get("X-Sync-Warning")).toContain("serving cached");
+    expect(res.status).toBe(502);
+    expect(res.headers.get("X-Sync-Warning")).toContain("matching cached");
     expect(noStoreHeader(res)).toContain("no-store");
     expect(body.is_stale).toBe(true);
+    expect(body.scan_succeeded).toBe(false);
     expect(body.results[0].ticker).toBe("AAPL");
+  });
+
+  it("failed targeted scans reject a mismatched cache", async () => {
+    mocks.radonFetch.mockRejectedValueOnce(new Error("upstream down"));
+    const { POST } = await import("../app/api/scanner/strength/scan/route");
+    const res = await POST(new Request("http://localhost/api/scanner/strength/scan", {
+      method: "POST",
+      body: JSON.stringify({ ticker: "MU" }),
+    }));
+    const body = await res.json();
+    expect(res.status).toBe(502);
+    expect(body.results).toEqual([]);
+    expect(body.scan_succeeded).toBe(false);
   });
 
   it("returns a 502 empty envelope when both FastAPI and cache fail", async () => {

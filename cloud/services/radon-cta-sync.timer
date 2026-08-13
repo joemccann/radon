@@ -12,10 +12,10 @@ Description=Radon CTA sync - twice daily during ET trading hours
 # run_cta_sync.sh is idempotent against the latest closed trading day, so
 # repeated fires within a session are safe and the script returns fast
 # when there is nothing new to pull.
-OnCalendar=Mon..Fri *-*-* 18:15:00
-OnCalendar=Mon..Fri *-*-* 19:00:00
-OnCalendar=Mon..Fri *-*-* 20:10:00
-OnCalendar=Mon..Fri *-*-* 21:30:00
+OnCalendar=Mon..Fri *-*-* 18:15:00 UTC
+OnCalendar=Mon..Fri *-*-* 19:00:00 UTC
+OnCalendar=Mon..Fri *-*-* 20:10:00 UTC
+OnCalendar=Mon..Fri *-*-* 21:30:00 UTC
 Persistent=true
 RandomizedDelaySec=300
 

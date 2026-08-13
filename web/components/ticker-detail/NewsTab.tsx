@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ExternalLink, Newspaper } from "lucide-react";
 import SectionEmptyState from "@/components/SectionEmptyState";
 
@@ -24,13 +24,20 @@ export default function NewsTab({ ticker, active }: NewsTabProps) {
   const [error, setError] = useState<string | null>(null);
   const [source, setSource] = useState<string | null>(null);
   const [fetched, setFetched] = useState(false);
+  const [resolvedTicker, setResolvedTicker] = useState<string | null>(null);
+  const requestGenerationRef = useRef(0);
 
-  const fetchNews = useCallback(async () => {
+  const fetchNews = useCallback(async (signal: AbortSignal, generation: number) => {
     setLoading(true);
     setError(null);
+    setNews([]);
+    setSource(null);
+    setFetched(false);
+    setResolvedTicker(null);
     try {
-      const res = await fetch(`/api/ticker/news?ticker=${encodeURIComponent(ticker)}&limit=20`);
+      const res = await fetch(`/api/ticker/news?ticker=${encodeURIComponent(ticker)}&limit=20`, { signal });
       const json = await res.json();
+      if (signal.aborted || generation !== requestGenerationRef.current) return;
       const items = json.data ?? json ?? [];
       setNews(Array.isArray(items) ? items : []);
       setSource(json.source ?? null);
@@ -38,20 +45,27 @@ export default function NewsTab({ ticker, active }: NewsTabProps) {
         setError(json.error);
       }
     } catch (err) {
+      if (signal.aborted || generation !== requestGenerationRef.current) return;
       setError(err instanceof Error ? err.message : "Failed to fetch news");
     } finally {
+      if (signal.aborted || generation !== requestGenerationRef.current) return;
       setLoading(false);
       setFetched(true);
+      setResolvedTicker(ticker);
     }
   }, [ticker]);
 
   useEffect(() => {
-    if (active && !fetched) {
-      fetchNews();
-    }
-  }, [active, fetched, fetchNews]);
+    if (!active) return;
+    const controller = new AbortController();
+    const generation = ++requestGenerationRef.current;
+    void fetchNews(controller.signal, generation);
+    return () => controller.abort();
+  }, [active, fetchNews]);
 
-  if (loading) {
+  const isCurrentTicker = resolvedTicker === ticker;
+
+  if (loading || (active && !isCurrentTicker)) {
     return (
       <div className="tab-loading">
         <div className="tab-loading-text">Loading news...</div>
@@ -59,11 +73,11 @@ export default function NewsTab({ ticker, active }: NewsTabProps) {
     );
   }
 
-  if (error) {
+  if (isCurrentTicker && error) {
     return <div className="tab-error">{error}</div>;
   }
 
-  if (fetched && news.length === 0) {
+  if (isCurrentTicker && fetched && news.length === 0) {
     return (
       <div className="tab-empty">
         <SectionEmptyState
@@ -77,7 +91,7 @@ export default function NewsTab({ ticker, active }: NewsTabProps) {
 
   return (
     <div className="news-tab">
-      {news.map((item, i) => (
+      {(isCurrentTicker ? news : []).map((item, i) => (
         <div key={i} className="news-item">
           <div className="news-meta">
             <span className="news-date">

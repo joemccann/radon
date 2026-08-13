@@ -111,11 +111,13 @@ export function EditorialHeroSection() {
         <RevealOnScroll className="mt-10">
           <ProductPlate
             figNo="Plate 2"
-            figTitle="The instrument · unified dashboard cockpit · live session"
-            shot="dashboard"
-            lightAlt="Radon dashboard: portfolio snapshot, working orders, an opportunity rail, and a market newsfeed in a single cockpit."
-            darkAlt="Radon dashboard, dark theme: portfolio snapshot, working orders, opportunity rail, and newsfeed."
-            caption="The terminal itself. A single cockpit holds the portfolio snapshot, working orders, an opportunity rail scored from flow, and the market newsfeed. The conceptual figure above is the thesis; this is the instrument that runs it."
+            figTitle="The instrument · synthetic portfolio demonstration"
+            shot="portfolio"
+            lightAlt="Synthetic Radon portfolio demonstration with fabricated positions and internally consistent figures."
+            darkAlt="Synthetic Radon portfolio demonstration in dark theme with fabricated positions and figures."
+            caption="A synthetic demonstration of the terminal's portfolio structure. Every ticker and account figure in this plate is fabricated."
+            source="Synthetic demonstration"
+            confidence="Illustrative data"
           />
         </RevealOnScroll>
       </div>

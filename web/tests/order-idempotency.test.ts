@@ -162,18 +162,18 @@ describe("runIdempotentOrder — indeterminate (timeout-class) placement", () =>
     expect(placement).toHaveBeenCalledTimes(1);
   });
 
-  it("holds the key for the retention floor, not the caller's short content-hash TTL", async () => {
+  it("holds an indeterminate key for the full durable content-hash TTL", async () => {
     vi.useFakeTimers();
     const placement = vi.fn().mockRejectedValueOnce(timeoutError()).mockResolvedValueOnce("ok");
 
     await rejection(runIdempotentOrder("k", CONTENT_HASH_TTL_MS, placement));
 
-    vi.advanceTimersByTime(CONTENT_HASH_TTL_MS + 1_000); // past the 4s content-hash TTL
+    vi.advanceTimersByTime(CONTENT_HASH_TTL_MS - 1_000);
     const stillHeld = await rejection(runIdempotentOrder("k", CONTENT_HASH_TTL_MS, placement));
     expect(stillHeld).toBeInstanceOf(IndeterminatePlacementError);
     expect(placement).toHaveBeenCalledTimes(1);
 
-    vi.advanceTimersByTime(INDETERMINATE_RETENTION_MS); // past the retention floor
+    vi.advanceTimersByTime(1_001);
     const afterExpiry = await runIdempotentOrder("k", CONTENT_HASH_TTL_MS, placement);
     expect(afterExpiry).toEqual({ value: "ok", deduplicated: false });
     expect(placement).toHaveBeenCalledTimes(2); // normal behaviour restored

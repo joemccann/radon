@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { join } from "path";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 import { isAllowedShareCardPath, REPORTS_DIR } from "@/lib/shareReportPath";
 
 describe("isAllowedShareCardPath", () => {
@@ -45,4 +48,12 @@ describe("isAllowedShareCardPath", () => {
     expect(isAllowedShareCardPath(join(REPORTS_DIR, "tweet-gex-badd.html"), "gex")).toBe(false);
     expect(isAllowedShareCardPath(join(REPORTS_DIR, "tweet-gex-2026-06-28.html.bak"), "gex")).toBe(false);
   });
+});
+
+it("share actions are parent owned and iframe remains fully isolated", () => {
+  const webRoot = fileURLToPath(new URL("..", import.meta.url));
+  const source = readFileSync(resolve(webRoot, "components/ShareReportModal.tsx"), "utf8");
+  expect(source).toContain('download="radon-share-preview.html"');
+  expect(source).toContain('sandbox=""');
+  expect(source).not.toContain('sandbox="allow-scripts"');
 });

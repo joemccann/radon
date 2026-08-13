@@ -1,3 +1,5 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
+
 import { NextResponse } from "next/server";
 import { readFile } from "fs/promises";
 import { statSync } from "fs";
@@ -43,6 +45,16 @@ function buildCacheMeta(filePath: string): CacheMeta {
   }
 }
 
+function buildResultCacheMeta(timestampMs: number | null, fresh: boolean): CacheMeta {
+  const ageSeconds = timestampMs == null ? null : Math.max(0, Math.round((Date.now() - timestampMs) / 1000));
+  return {
+    last_refresh: timestampMs == null ? null : new Date(timestampMs).toISOString(),
+    age_seconds: ageSeconds,
+    is_stale: !fresh,
+    stale_threshold_seconds: STALE_THRESHOLD_SECONDS,
+  };
+}
+
 export function emptyStrengthConfirmationPayload() {
   return {
     scan_time: "",
@@ -85,8 +97,10 @@ async function readStrengthFromDisk(): Promise<TimestampedRead<Record<string, un
 }
 
 export async function GET(): Promise<Response> {
+  const access = await requireRouteAccess();
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
-  const cache_meta = buildCacheMeta(CACHE_PATH);
+  const diskCacheMeta = buildCacheMeta(CACHE_PATH);
   // Fresher of the shared Turso snapshot and the host-local disk JSON.
   const result = await cachedRead("scanner:strength", READ_CACHE_TTL_MS, () =>
     dbFirstRead({
@@ -97,13 +111,16 @@ export async function GET(): Promise<Response> {
     }),
   );
   if (result.ok) {
+    const cache_meta = result.source === "disk"
+      ? diskCacheMeta
+      : buildResultCacheMeta(result.timestampMs, result.fresh);
     return setNoStoreResponseHeaders(
       NextResponse.json({ ...result.data, cache_meta }),
       requestId,
     );
   }
   return setNoStoreResponseHeaders(
-    NextResponse.json({ ...emptyStrengthConfirmationPayload(), cache_meta }),
+    NextResponse.json({ ...emptyStrengthConfirmationPayload(), cache_meta: diskCacheMeta }),
     requestId,
   );
 }

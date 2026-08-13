@@ -1,3 +1,5 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
+
 import { NextResponse } from "next/server";
 import { RadonApiError, radonFetch } from "@/lib/radonApi";
 import {
@@ -97,6 +99,12 @@ function indeterminatePlacementDetail(error: IndeterminatePlacementError): strin
 }
 
 export async function POST(request: Request): Promise<Response> {
+  const access = await requireRouteAccess(request, {
+    operatorOnly: true,
+    rate: { key: "orders/place:route", limit: 5, windowMs: 60_000 },
+    durableRateTier: "C",
+  });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   try {
     let parsed: unknown;
@@ -356,7 +364,10 @@ export async function POST(request: Request): Promise<Response> {
       typeof body.idempotencyKey === "string" && body.idempotencyKey.trim()
         ? body.idempotencyKey.trim().slice(0, 200)
         : null;
-    const idemKey = clientKey ? `k:${clientKey}` : contentKey(orderPayload);
+    const principalKey = access.principal.userId;
+    const idemKey = clientKey
+      ? `u:${principalKey}:k:${clientKey}`
+      : `u:${principalKey}:${contentKey(orderPayload)}`;
     const idemTtl = clientKey ? CLIENT_KEY_TTL_MS : CONTENT_HASH_TTL_MS;
 
     let placement;

@@ -308,10 +308,12 @@ export default function AdminWorkspace() {
 
   const restartStack = useCallback(async () => {
     const at = new Date().toISOString();
+    let succeeded = false;
     try {
       const res = await fetch("/api/admin/stack/restart", { method: "POST", cache: "no-store" });
       const body = await res.json().catch(() => ({}));
       if (res.ok || res.status === 202) {
+        succeeded = true;
         const detail = body.in_flight
           ? "restart in flight: FastAPI cycled, polling for recovery"
           : typeof body.detail === "string"
@@ -338,6 +340,7 @@ export default function AdminWorkspace() {
     }
     void fetchHealth();
     void fetchServices();
+    return succeeded;
   }, [appendLog, fetchHealth, fetchServices]);
 
   // Targeted per-unit stop of the gateway. Leaves it cleanly stopped + stable
@@ -346,6 +349,7 @@ export default function AdminWorkspace() {
   const stopGateway = useCallback(async () => {
     const at = new Date().toISOString();
     const unit = "radon-ib-gateway.service";
+    let succeeded = false;
     try {
       const res = await fetch(`/api/admin/services/${unit}/stop`, {
         method: "POST",
@@ -356,6 +360,7 @@ export default function AdminWorkspace() {
         const detail = typeof body.error === "string" ? body.error : `HTTP ${res.status}`;
         appendLog({ at, action: "service-action", target: `${unit} stop`, ok: false, detail });
       } else {
+        succeeded = true;
         appendLog({
           at,
           action: "service-action",
@@ -370,6 +375,7 @@ export default function AdminWorkspace() {
     }
     void fetchServices();
     void fetchHealth();
+    return succeeded;
   }, [appendLog, fetchHealth, fetchServices]);
 
   const flashRow = useCallback((unit: string, ok: boolean) => {

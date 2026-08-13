@@ -30,6 +30,9 @@
     <key>KeepAlive</key>
     <false/>
 
+    <key>Umask</key>
+    <integer>63</integer>
+
     <key>StandardOutPath</key>
     <string>/Users/joemccann/dev/apps/finance/radon/logs/margin_debt.out.log</string>
 

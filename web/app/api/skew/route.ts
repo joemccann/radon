@@ -61,6 +61,6 @@ export async function GET(): Promise<Response> {
     // series/current/stats payload — see MISSING_SKEW / dbFirstRead docs.
     isDegraded: isMissingPayload,
   });
-  const response = NextResponse.json(result.ok ? result.data : MISSING_SKEW);
+  const response = NextResponse.json(result.ok && result.fresh ? result.data : MISSING_SKEW);
   return setNoStoreResponseHeaders(response, requestId);
 }

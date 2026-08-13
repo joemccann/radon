@@ -87,15 +87,14 @@ if [ -z "$PYTHON_BIN" ]; then
     exit 1
 fi
 
-# Trading-day gate — match the run_data_refresh.sh probe verbatim so
-# we get the same calendar semantics for free.
+# Exchange-session gate. It is holiday and early-close aware, so broad timer
+# windows cannot launch paid/broker work outside the current session.
 IS_TRADING=$("$PYTHON_BIN" - <<'PY' 2>/dev/null || echo "yes"
 import sys
 try:
     sys.path.insert(0, 'scripts')
-    from utils.market_calendar import _is_trading_day
-    from datetime import datetime
-    print('yes' if _is_trading_day(datetime.now()) else 'no')
+    from utils.market_calendar import market_state
+    print('yes' if market_state().get('is_open') else 'no')
 except Exception:
     # Fail-open: if the calendar import fails for any reason
     # (e.g. missing dependency, syntax error in scripts/utils),
@@ -105,7 +104,7 @@ PY
 )
 
 if [ "$IS_TRADING" = "no" ]; then
-    echo "$(date): Market holiday or weekend — skipping VCG refresh"
+    echo "$(date): Market closed — skipping VCG refresh"
     exit 0
 fi
 
@@ -133,9 +132,10 @@ if "$PYTHON_BIN" scripts/vcg_scan.py --json > "$TMP_PATH" 2>>/tmp/vcg-scan.err; 
     mv "$TMP_PATH" data/vcg.json
     echo "$(date): VCG fallback refresh complete (OK)"
     exit 0
+else
+    EXIT_CODE=$?
 fi
 
-EXIT_CODE=$?
 rm -f "$TMP_PATH"
 echo "$(date): VCG fallback refresh FAILED (exit ${EXIT_CODE})" >&2
 exit "${EXIT_CODE}"

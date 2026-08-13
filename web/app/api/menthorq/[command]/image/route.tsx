@@ -6,6 +6,7 @@ import { loadFonts } from "@/lib/og-fonts";
 import { OG, ogFamilyContract, ogSeriesColor } from "@/lib/og-theme";
 import type { ChartFamily } from "@/lib/chartSystem";
 import { barChartSvg, heatmapSvg, lineChartSvg } from "@/lib/og-charts";
+import { requireRouteAccess } from "@/lib/routeAccess";
 
 export const runtime = "nodejs";
 
@@ -466,6 +467,10 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ command: string }> }
 ) {
+  const access = await requireRouteAccess(request, {
+    rate: { key: "menthorq/image", limit: 20, windowMs: 60_000 },
+  });
+  if (!access.ok) return access.response;
   const { command } = await params;
 
   // Don't match the CTA route (it has its own image handler)

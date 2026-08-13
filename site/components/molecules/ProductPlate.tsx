@@ -3,7 +3,7 @@ import { PlateFrame } from "@/components/molecules/PlateFrame";
 type ProductPlateProps = {
   figNo: string;
   figTitle: string;
-  /** Base name under /plates, e.g. "dashboard" -> dashboard-light.png + dashboard-dark.png */
+  /** Base name under /plates. Account-bearing captures are prohibited. */
   shot: string;
   lightAlt: string;
   darkAlt: string;
@@ -12,11 +12,6 @@ type ProductPlateProps = {
   confidence?: string;
 };
 
-// IMPORTANT: the plate PNGs in /public/plates are downscaled captures of a real
-// Radon session. The operator identity is anonymized, but the FIGURES (net
-// liquidation, day P&L, positions) are still real account data. Swap to demo /
-// synthetic data before any public, non-operator launch of radon.run.
-//
 // The light/dark <img> pair is theme-swapped purely in CSS (.plate-shot rules in
 // globals.css) so both render server-side with correct alt text and the active
 // theme decides which is visible. Width/height set to the native 1512x862 to
@@ -29,8 +24,8 @@ export function ProductPlate({
   lightAlt,
   darkAlt,
   caption,
-  source = "Radon live session",
-  confidence = "Live data",
+  source = "Synthetic demonstration",
+  confidence = "Illustrative data",
 }: ProductPlateProps) {
   return (
     <PlateFrame

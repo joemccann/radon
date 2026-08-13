@@ -110,6 +110,15 @@ describe("Correlation Risk Premium preset range chips", () => {
     expect(countSpreadBars()).toBe(300);
   });
 
+  it("keeps an active preset anchored to newly appended sessions", () => {
+    const { rerender } = render(<RegimeRelationshipView history={buildHistory(40)} />);
+    fireEvent.click(screen.getByTestId("regime-spread-range-1m"));
+    expect(countSpreadBars()).toBe(21);
+    rerender(<RegimeRelationshipView history={buildHistory(45)} />);
+    expect(countSpreadBars()).toBe(21);
+    expect(screen.getByTestId("regime-spread-range-1m").getAttribute("data-active")).toBe("true");
+  });
+
   it("renders mono-font preset chips for each available range", () => {
     const history = buildHistory(120);
     render(

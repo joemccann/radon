@@ -9,6 +9,10 @@ import { render, screen, act, fireEvent, cleanup } from "@testing-library/react"
 import React from "react";
 import TickerSearch from "../components/TickerSearch";
 
+vi.mock("@/lib/useWatchlist", () => ({
+  useWatchlist: () => ({ isWatched: () => false, toggleWatch: vi.fn() }),
+}));
+
 class MockWebSocket {
   static CONNECTING = 0 as const;
   static OPEN = 1 as const;

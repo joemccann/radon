@@ -144,6 +144,27 @@ describe("DashboardNewsFeed pagination", () => {
     expect(screen.queryAllByRole("navigation", { name: /pagination/i })).toHaveLength(0);
   });
 
+  it("uses the filtered collection for totals and lightbox page navigation", async () => {
+    const posts = makePosts(25).map((post, index) => ({
+      ...post,
+      tags: index < 20 ? ["macro"] : ["volatility"],
+      images: index < 5 ? [] : post.images,
+    }));
+    await renderFeed(posts);
+    fireEvent.click(screen.getAllByRole("button", { name: "macro" })[0]);
+
+    let bar = screen.getByRole("navigation", { name: /pagination/i });
+    expect(within(bar).getByText(/showing\s*1\s*[–-]\s*18\s*of\s*20/i)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open lightbox for: Headline 8" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next post" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss lightbox" }));
+
+    bar = screen.getByRole("navigation", { name: /pagination/i });
+    expect(within(bar).getByText(/page 2 of 2/i)).toBeTruthy();
+    expect(screen.getByText("Headline 7")).toBeTruthy();
+  });
+
   it("clamps current page when a refresh shrinks the dataset", async () => {
     // Initial render: 50 posts → 3 pages
     fetchMock.mockResolvedValueOnce({

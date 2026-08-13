@@ -1,3 +1,5 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
+
 import { NextResponse } from "next/server";
 import { readFile, readdir, writeFile, stat, mkdir } from "fs/promises";
 import { join } from "path";
@@ -293,6 +295,8 @@ function triggerBackgroundScan(): void {
 }
 
 export async function GET(): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { rate: { key: "regime:route", limit: 20, windowMs: 60_000 } });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   const result = await readLatestCri();
   const data = normalizeCriPayload((result?.data ?? EMPTY_CRI) as Record<string, unknown>);
@@ -318,6 +322,8 @@ export async function GET(): Promise<Response> {
 }
 
 export async function POST(): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { rate: { key: "regime:route", limit: 20, windowMs: 60_000 } });
+  if (!access.ok) return access.response;
   try {
     const rawData = await radonFetch<Record<string, unknown>>("/regime/scan", {
       method: "POST",
@@ -326,14 +332,13 @@ export async function POST(): Promise<Response> {
     invalidateCache("regime:cri");
     const data = normalizeCriPayload(rawData);
     return NextResponse.json(data);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "CRI scan failed";
+  } catch {
     const cached = await readLatestCri();
     if (cached?.data) {
       const response = NextResponse.json(normalizeCriPayload(cached.data as Record<string, unknown>));
-      response.headers.set("X-Sync-Warning", `CRI sync failed: ${message}`);
+      response.headers.set("X-Sync-Warning", "CRI sync failed - serving cached data");
       return response;
     }
-    return NextResponse.json({ error: message }, { status: 502 });
+    return NextResponse.json({ error: "CRI scan failed" }, { status: 502 });
   }
 }

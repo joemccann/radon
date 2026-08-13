@@ -44,6 +44,22 @@ export type RegimeStripLiveState = {
   spxDistancePct: number | null;
 };
 
+export function resolveCrashTriggerState(args: {
+  liveCorrelation: boolean;
+  correlation: number | null;
+  cachedCorrelationMet: boolean;
+  spxBelowMa: boolean;
+  realizedVolMet: boolean;
+}): { correlationMet: boolean; triggered: boolean } {
+  const correlationMet = args.liveCorrelation && args.correlation != null
+    ? args.correlation > 60
+    : args.cachedCorrelationMet;
+  return {
+    correlationMet,
+    triggered: args.spxBelowMa && args.realizedVolMet && correlationMet,
+  };
+}
+
 export function resolveRegimeStripLiveState({
   prices,
   data,

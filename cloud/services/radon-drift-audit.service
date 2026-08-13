@@ -1,5 +1,7 @@
 [Unit]
 Description=Radon config drift audit (live system vs monorepo cloud source)
+Wants=network-online.target
+After=network-online.target
 # DUR-06 (2026-06-12): diffs live config (Caddyfile, compose, systemd units +
 # drop-ins, polkit, sudoers, /usr/local/bin/radon) against the repo copies and
 # writes the `config-drift` service_health row (ok heartbeat every clean run).

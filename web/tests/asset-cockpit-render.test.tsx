@@ -45,6 +45,10 @@ vi.mock("next/navigation", () => ({
   }),
 }));
 
+vi.mock("@/lib/useWatchlist", () => ({
+  useWatchlist: () => ({ isWatched: () => false, toggleWatch: vi.fn() }),
+}));
+
 /* ── fixtures ── */
 
 // quotePriceData is the single source for header last/netΔ/spread. last=142.18,

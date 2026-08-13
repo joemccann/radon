@@ -1,7 +1,9 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
+
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
-import { getRequestId, jsonApiError, setNoStoreResponseHeaders } from "@/lib/apiContracts";
+import { getRequestId, jsonApiError, scrubSecrets, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 import { radonFetch, RadonApiError } from "@/lib/radonApi";
+import { validateWorkflowGraph } from "@/lib/workflow/validateGraph";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -10,17 +12,14 @@ export const runtime = "nodejs";
 // FastAPI (`POST /workflow/run`) where the Python executor lives. Order-emitting
 // nodes block unless `confirm_order` is passed — the OrderRiskGate confirmation.
 
-function unauthorized(requestId: string): Response {
-  return setNoStoreResponseHeaders(
-    jsonApiError({ status: 401, code: "UNAUTHORIZED", message: "Sign in required", requestId }),
-    requestId,
-  );
-}
-
 export async function POST(req: Request): Promise<Response> {
+  const access = await requireRouteAccess(req, {
+    operatorOnly: true,
+    rate: { key: "workflow/run:route", limit: 10, windowMs: 60_000 },
+    durableRateTier: "B",
+  });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
-  const { userId } = await auth();
-  if (!userId) return unauthorized(requestId);
 
   let body: { graph?: unknown; confirm_order?: unknown };
   try {
@@ -32,10 +31,10 @@ export async function POST(req: Request): Promise<Response> {
     );
   }
 
-  const graph = body.graph as { nodes?: unknown; edges?: unknown } | undefined;
-  if (!graph || !Array.isArray(graph.nodes)) {
+  const validation = validateWorkflowGraph(body.graph);
+  if (!validation.ok) {
     return setNoStoreResponseHeaders(
-      jsonApiError({ status: 400, code: "VALIDATION_ERROR", message: "graph.nodes[] required", requestId }),
+      jsonApiError({ status: 400, code: "VALIDATION_ERROR", message: validation.message, requestId }),
       requestId,
     );
   }
@@ -44,13 +43,14 @@ export async function POST(req: Request): Promise<Response> {
     const report = await radonFetch("/workflow/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ graph: body.graph, confirm_order: Boolean(body.confirm_order) }),
+      body: JSON.stringify({ graph: body.graph, confirm_order: body.confirm_order === true }),
       timeout: 120_000,
+      token: access.principal.token,
     });
     return setNoStoreResponseHeaders(NextResponse.json(report), requestId);
   } catch (err) {
     const status = err instanceof RadonApiError ? err.status : 502;
-    const message = err instanceof Error ? err.message : String(err);
+    const message = scrubSecrets(err instanceof Error ? err.message : String(err));
     return setNoStoreResponseHeaders(
       jsonApiError({ status, code: "UPSTREAM_ERROR", message: "Workflow run failed", detail: message, requestId }),
       requestId,

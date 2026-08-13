@@ -1,3 +1,5 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
+
 import { NextResponse } from "next/server";
 import { readFile } from "fs/promises";
 import { statSync } from "fs";
@@ -71,6 +73,8 @@ async function readLeapFromDisk(): Promise<TimestampedRead<Record<string, unknow
 }
 
 export async function GET(): Promise<Response> {
+  const access = await requireRouteAccess();
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   const result = await cachedRead("leap:snapshot", READ_CACHE_TTL_MS, () =>
     dbFirstRead({

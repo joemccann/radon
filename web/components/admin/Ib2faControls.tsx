@@ -21,20 +21,20 @@ type Ib2faControlsProps = {
   health: AdminHealthPayload | null;
   onForcePush: () => Promise<void>;
   onResetBackoff: () => Promise<void>;
-  onRestartStack: () => Promise<void>;
+  onRestartStack: () => Promise<boolean | void>;
   /** The radon-ib-gateway.service unit row (filtered from the table, still
    *  surfaced here for the power control's active_state). */
   gatewayUnit?: UnitStatus | null;
   /** Whether the host supports systemctl control (false off-VPS). */
   servicesSupported?: boolean;
   /** Targeted per-unit stop of the gateway (control_unit / systemctl stop). */
-  onStopGateway?: () => Promise<void>;
+  onStopGateway?: () => Promise<boolean>;
   /** Full-stack recovery (radon restart): brings the gateway + dependents back
    *  in order. Reuses the Restart All Services path. */
-  onStartGateway?: () => Promise<void>;
+  onStartGateway?: () => Promise<boolean>;
   /** Both admin polls (/admin/services + /health) are failing — radon-api is
    *  unreachable, which is exactly what a gateway stop causes (cascade). The
-   *  cached unit row then reads a stale "active"; treat the gateway as stopped. */
+   *  cached unit row then reads a stale value; treat the gateway as unknown. */
   apiUnreachable?: boolean;
   onAfter?: () => void;
 };
@@ -76,10 +76,10 @@ export default function Ib2faControls({
   const disableReason = forcePushDisabledReason({ pushLock, pending: pendingForce });
 
   // When radon-api is unreachable (both admin polls failing — the cascade a
-  // gateway stop causes), the cached unit row is stale "active". Don't latch
-  // "running" off stale data: report stopped so the control offers Start Gateway.
+  // gateway stop causes), the cached unit row is not affirmative power-state
+  // evidence. Fail closed as unknown and disable destructive power actions.
   const polledPowerState: GatewayPowerState = apiUnreachable
-    ? "stopped"
+    ? "unknown"
     : gatewayPowerState({
         unit: gatewayUnit,
         portListening: health?.ib_gateway?.port_listening,
@@ -109,6 +109,12 @@ export default function Ib2faControls({
   const startBlockedByPush = isForcePushDisabled({ pushLock, pending: false });
   const powerDisabledReason = !servicesSupported
     ? "Read-only: this browser is not on the Hetzner VPS."
+    : powerState === "unknown"
+      ? "Gateway state is unknown while the control plane is unreachable."
+      : powerState === "running" && !onStopGateway
+        ? "Gateway stop control is unavailable."
+        : powerState === "stopped" && !onStartGateway
+          ? "Gateway start control is unavailable."
     : powerState === "transitional"
       ? "Gateway is mid-transition. Wait for it to settle."
       : powerState === "stopped" && startBlockedByPush
@@ -152,9 +158,11 @@ export default function Ib2faControls({
   const runStop = async () => {
     setPendingPower(true);
     try {
-      await onStopGateway?.();
-      // Flip to "Start Gateway" immediately; the poll settles a beat later.
-      setOptimisticPower("stopped");
+      const succeeded = onStopGateway ? await onStopGateway() : false;
+      if (succeeded) {
+        // Flip only after the control plane explicitly acknowledges success.
+        setOptimisticPower("stopped");
+      }
     } finally {
       setPendingPower(false);
       setShowStopConfirm(false);
@@ -165,10 +173,12 @@ export default function Ib2faControls({
   const runStart = async () => {
     setPendingPower(true);
     try {
-      await onStartGateway?.();
-      // Start is a full-stack restart (~60-90s); show it as in-transition
-      // until the poll confirms the gateway is back up.
-      setOptimisticPower("transitional");
+      const succeeded = onStartGateway ? await onStartGateway() : false;
+      if (succeeded) {
+        // Start is a full-stack restart (~60-90s); show it as in-transition
+        // until the poll confirms the gateway is back up.
+        setOptimisticPower("transitional");
+      }
     } finally {
       setPendingPower(false);
       setShowStartConfirm(false);
@@ -181,6 +191,8 @@ export default function Ib2faControls({
       ? "Gateway is running. IB data plane live."
       : powerState === "transitional"
         ? "Gateway is mid-transition."
+        : powerState === "unknown"
+          ? "Gateway state is unknown. Control plane unavailable."
         : "Gateway is stopped. IB, orders relay, and monitor are offline.";
 
   const powerButtonLabel = pendingPower
@@ -191,7 +203,9 @@ export default function Ib2faControls({
         : "Starting..."
       : powerState === "running"
         ? "Stop Gateway"
-        : "Start Gateway";
+        : powerState === "stopped"
+          ? "Start Gateway"
+          : "Unavailable";
 
   return (
     <section className="admin-card" data-testid="ib-controls">
@@ -255,7 +269,9 @@ export default function Ib2faControls({
           onClick={() =>
             powerState === "running"
               ? setShowStopConfirm(true)
-              : setShowStartConfirm(true)
+              : powerState === "stopped"
+                ? setShowStartConfirm(true)
+                : undefined
           }
           disabled={powerDisabled}
           title={powerDisabledReason ?? undefined}
