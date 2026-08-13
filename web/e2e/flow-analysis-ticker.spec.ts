@@ -207,8 +207,8 @@ test.describe("Flow Analysis per-ticker route", () => {
 
     await page.goto("/flow-analysis/NVDA");
 
-    const analyzing = page.locator(".ticker-flow-analyzing-title");
-    await expect(analyzing).toContainText(/Analyzing NVDA/i, { timeout: 5000 });
+    const analyzing = page.locator(".ticker-flow-analyzing .spectral-loader__label");
+    await expect(analyzing).toContainText(/Sampling NVDA flow/i, { timeout: 5000 });
 
     // After scan completes, badge should resolve to BEARISH
     const badge = page.getByTestId("ticker-flow-report").locator(".ticker-flow-badge");
