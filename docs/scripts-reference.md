@@ -8,8 +8,8 @@ The CLI surface area lives behind shell aliases registered in `.pi/`. Run `comma
 |---------|-------------|
 | `scan` | Watchlist dark pool flow scan with CRI regime overlay and HTML report |
 | `discover` | Market-wide or targeted discovery scan for new candidates |
-| `leap-scan [TICKERS]` | Find LEAP IV mispricing opportunities |
-| `garch-convergence [TICKERS]` | Cross-asset implied-versus-realized volatility divergence scan |
+| `leap-scan [TICKERS]` | Find LEAP IV mispricing opportunities (scheduled default: indexes = NDX+SPX+RUT) |
+| `garch-convergence [TICKERS]` | Cross-asset implied-versus-realized volatility divergence scan (scheduled default: indexes = NDX+SPX+RUT curated pairs) |
 | `seasonal [TICKERS]` | Monthly seasonality analysis from EquityClock |
 | `analyst-ratings [TICKERS]` | Ratings, price targets, and recent changes |
 | `vcg` | VCG-R scan with VIX/VVIX/HYG regression and severity tiers |

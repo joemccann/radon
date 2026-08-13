@@ -1618,7 +1618,7 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
       const res = await fetch("/api/leap/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(tickers && tickers.length > 0 ? { tickers } : { preset: "mag7" }),
+        body: JSON.stringify(tickers && tickers.length > 0 ? { tickers } : { preset: "indexes" }),
         cache: "no-store",
       });
       if (!res.ok) {
@@ -1641,7 +1641,7 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
       const res = await fetch("/api/garch-convergence/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(tickers && tickers.length > 0 ? { tickers } : { preset: "mega-tech" }),
+        body: JSON.stringify(tickers && tickers.length > 0 ? { tickers } : { preset: "indexes" }),
         cache: "no-store",
       });
       if (!res.ok) {

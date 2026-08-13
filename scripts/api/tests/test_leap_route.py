@@ -68,7 +68,11 @@ def test_leap_ticker_scan_bypasses_preset_cooldown(monkeypatch):
     assert response.status_code == 200
     assert response.json()["requested_tickers"] == ["NVDA", "AMD"]
     assert calls == [
-        ("leap_scanner_uw.py", ["--tickers", "NVDA,AMD", "--min-gap", "10.0", "--json"], 300)
+        (
+            "leap_scanner_uw.py",
+            ["--tickers", "NVDA,AMD", "--min-gap", "10.0", "--json", "--workers", "16"],
+            300,
+        )
     ]
     # A ticker scan must NOT advance the preset cooldown.
     assert server._leap_last_scan == seeded
@@ -98,7 +102,11 @@ def test_leap_preset_scan_ignores_explicit_ticker_cache(monkeypatch):
     assert response.status_code == 200
     assert response.json()["universe"] == "preset:mag7"
     assert calls == [
-        ("leap_scanner_uw.py", ["--preset", "mag7", "--min-gap", "10.0", "--json"], 300)
+        (
+            "leap_scanner_uw.py",
+            ["--preset", "mag7", "--min-gap", "10.0", "--json", "--workers", "16"],
+            3600,
+        )
     ]
 
 
@@ -144,3 +152,37 @@ def test_leap_rejects_too_many_tickers(monkeypatch):
 
     assert response.status_code == 400
     assert "max 25" in response.text
+
+
+def test_leap_omitted_preset_forwards_indexes(monkeypatch):
+    monkeypatch.setattr(server, "_leap_last_scan", -1e9)
+    monkeypatch.setattr(server, "_leap_scan_lock", None)
+
+    payload = {
+        "scan_time": "2026-08-13T14:00:00",
+        "min_gap": 10.0,
+        "universe": "preset:indexes",
+        "requested_tickers": ["AAPL", "NVDA"],
+        "results": [],
+    }
+    calls: list[tuple[str, list[str], int | None]] = []
+
+    async def fake_run_script(script, args, timeout=None):
+        calls.append((script, args, timeout))
+        return ScriptResult(ok=True, data={})
+
+    monkeypatch.setattr(server, "run_script", fake_run_script)
+    monkeypatch.setattr(server, "_read_cache", lambda _path: payload)
+
+    client = TestClient(server.app)
+    response = client.post("/leap/scan")
+
+    assert response.status_code == 200
+    assert response.json()["universe"] == "preset:indexes"
+    assert calls == [
+        (
+            "leap_scanner_uw.py",
+            ["--preset", "indexes", "--min-gap", "10.0", "--json", "--workers", "16"],
+            3600,
+        )
+    ]

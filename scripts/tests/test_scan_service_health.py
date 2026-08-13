@@ -19,7 +19,7 @@ import io
 import json
 import re
 import sys
-from contextlib import redirect_stdout
+from contextlib import nullcontext, redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -370,6 +370,7 @@ class TestLeapWiring:
             best_gap=15.0,
             is_mispriced=True,
         )
+        monkeypatch.setattr(leap_scanner_uw, "UWClient", lambda: nullcontext(object()))
         monkeypatch.setattr(leap_scanner_uw, "scan_ticker", lambda *a, **kw: result)
         monkeypatch.setattr(leap_scanner_uw, "generate_report", lambda *a, **kw: "<html>")
         monkeypatch.setattr(leap_scanner_uw, "DASHBOARD_CACHE_PATH", tmp_path / "leap.json")

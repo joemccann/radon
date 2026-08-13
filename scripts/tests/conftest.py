@@ -1,4 +1,5 @@
 """Shared pytest configuration and fixtures for scripts tests."""
+import json
 import sys
 from pathlib import Path
 
@@ -56,3 +57,42 @@ def _neutralize_quiet_windows(monkeypatch):
     by default; quiet-window behavior tests set the env explicitly.
     """
     monkeypatch.setenv("RADON_GW_RESTART_QUIET_WINDOWS_UTC", "")
+
+
+@pytest.fixture
+def index_preset_dir(tmp_path, monkeypatch):
+    """Provide deterministic file-backed index presets in clean checkouts.
+
+    Production preset files are runtime-owned and intentionally gitignored.
+    Unit tests therefore build equivalent master-file shapes instead of
+    depending on a developer or VPS data directory.
+    """
+    import utils.presets as presets
+
+    specs = {
+        "ndx100": ("Nasdaq-100", "N", 100, 40),
+        "sp500": ("S&P 500", "S", 500, 250),
+        "r2k": ("Russell 2000", "R", 2000, 1000),
+    }
+    for slug, (description, prefix, ticker_count, pair_count) in specs.items():
+        tickers = [f"{prefix}{i:04d}" for i in range(ticker_count)]
+        if slug == "ndx100":
+            tickers[:2] = ["NVDA", "AAPL"]
+        pairs = [
+            [tickers[0], tickers[i + 1]]
+            for i in range(pair_count)
+        ]
+        (tmp_path / f"{slug}.json").write_text(
+            json.dumps(
+                {
+                    "name": slug,
+                    "description": description,
+                    "tickers": tickers,
+                    "pairs": pairs,
+                    "vol_driver": "GICS/sector-curated index pairs",
+                }
+            )
+        )
+
+    monkeypatch.setattr(presets, "PRESETS_DIR", tmp_path)
+    return tmp_path

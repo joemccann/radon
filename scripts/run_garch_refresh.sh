@@ -14,7 +14,7 @@
 # Configuration via environment:
 #
 #   RADON_PYTHON_BIN                 python interpreter
-#   RADON_GARCH_REFRESH_PRESET       Scanner preset (default: mega-tech)
+#   RADON_GARCH_REFRESH_PRESET       Scanner preset (default: indexes)
 #   RADON_GARCH_REFRESH_FASTAPI_PORT FastAPI port (default 8321)
 #   RADON_GARCH_REFRESH_FASTAPI_HOST FastAPI host (default 127.0.0.1)
 #
@@ -93,15 +93,15 @@ if [ "$IS_TRADING" = "no" ]; then
     exit 0
 fi
 
-PRESET="${RADON_GARCH_REFRESH_PRESET:-mega-tech}"
+PRESET="${RADON_GARCH_REFRESH_PRESET:-indexes}"
 FASTAPI_HOST="${RADON_GARCH_REFRESH_FASTAPI_HOST:-127.0.0.1}"
 FASTAPI_PORT="${RADON_GARCH_REFRESH_FASTAPI_PORT:-8321}"
 FASTAPI_URL="http://${FASTAPI_HOST}:${FASTAPI_PORT}/garch-convergence/scan?preset=${PRESET}"
 
-# Try FastAPI first. 190s matches the FastAPI subprocess timeout (180s) +
-# 10s slack.
+# Try FastAPI first. 3610s matches the FastAPI preset subprocess timeout
+# (3600s) + 10s slack.
 echo "$(date): POST ${FASTAPI_URL}"
-if curl -fsS -X POST -m 190 -o /dev/null -w "%{http_code}" "${FASTAPI_URL}" 2>/tmp/garch-refresh.curl.err | grep -q '^2'; then
+if curl -fsS -X POST -m 3610 -o /dev/null -w "%{http_code}" "${FASTAPI_URL}" 2>/tmp/garch-refresh.curl.err | grep -q '^2'; then
     echo "$(date): GARCH refresh via FastAPI complete (OK)"
     exit 0
 fi

@@ -17,9 +17,9 @@ Security disposition is 95 fixed, 45 duplicate, and 2 deferred-external. The two
 
 ## Verification
 
-- Python application: 6,039 passed, 1 skipped, 90 deselected; 62.50% branch coverage.
-- Cloud: 821 passed, 4 skipped.
-- Vitest: 589 files and 6,071 tests passed; 83.67% statements, 76.56% branches, 86.78% functions, 86.87% lines.
+- Python application: 6,056 passed, 1 skipped, 90 deselected; 62.64% branch coverage.
+- Cloud: 825 passed, 4 skipped.
+- Vitest: 590 files and 6,073 tests passed; 83.67% statements, 76.56% branches, 86.78% functions, 86.87% lines.
 - Browser: 8 desktop and 1 mobile Playwright tests passed; the option-ticket screenshot was inspected.
 - Boundary: 6 browser-tool and 22 startup-protocol tests passed.
 - TypeScript, ESLint (0 errors), production build, 158 output-trace audit manifests, and `git diff --check` passed.
