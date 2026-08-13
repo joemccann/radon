@@ -10,6 +10,24 @@ type MontageLevel = DepthLevel & { firstOfLevel: boolean };
 type PriceClick = (p: Omit<OrderPrefill, "nonce">) => void;
 
 /**
+ * An implied combo level aggregates every leg-venue pair quoting that net
+ * price, so its venue string can carry dozens of entries. Rendering the whole
+ * set wraps the cell into a tall block that breaks the montage row rhythm —
+ * show the leading pair and count the rest, full set on hover.
+ */
+function venueCell(venues: string, side: "bid" | "ask", isCombo: boolean) {
+  const pairs = isCombo ? venues.split(" | ") : [venues];
+  const overflow = pairs.length - 1;
+  return (
+    <span className="book-mkt" key="m" title={overflow > 0 ? venues : undefined}>
+      {side === "ask" && overflow > 0 && <span className="book-venue-more">+{overflow}</span>}
+      <span className="book-venue-lead">{pairs[0]}</span>
+      {side === "bid" && overflow > 0 && <span className="book-venue-more">+{overflow}</span>}
+    </span>
+  );
+}
+
+/**
  * Two-sided montage for stocks (exchange / MPID L2 depth) and options
  * (per-exchange BBO). The two render identically except: stocks draw the
  * price-level edge marker (`firstOfLevel`) and treat index 0 as best; options
@@ -48,14 +66,14 @@ export function DepthMontage({ book, onPriceClick }: { book: DepthBook; onPriceC
     const cells =
       side === "bid"
         ? [
-            <span className="book-mkt" key="m">{mkt}</span>,
+            venueCell(mkt, side, isCombo),
             <span className="book-shares" key="s">{level.size}</span>,
             priceCell,
           ]
         : [
             priceCell,
             <span className="book-shares" key="s">{level.size}</span>,
-            <span className="book-mkt" key="m">{mkt}</span>,
+            venueCell(mkt, side, isCombo),
           ];
     // Click-to-fill: hitting a BID level = you'd hit the bid -> SELL; an ASK
     // level = you'd lift the offer -> BUY. Price flows to the ticket's limit.
@@ -83,7 +101,7 @@ export function DepthMontage({ book, onPriceClick }: { book: DepthBook; onPriceC
   };
 
   return (
-    <div className={`book-montage-body${isOption ? " is-option" : ""}`}>
+    <div className={`book-montage-body${isOption ? " is-option" : ""}${isCombo ? " is-combo" : ""}`}>
       {isOption && (
         <p className="book-montage-note">
           OPRA top of book. Each row is one exchange&apos;s best quote, not stacked
