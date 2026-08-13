@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  *
- * VOL CONE regime tab — cheap 10% OTM wing IV scanner.
+ * VOL CONE scanner tab — cheap 10% OTM wing IV scanner.
  *
  * Pure helpers (lib/volCone.ts): IV/percentile formatting, hit + regime
  * tones, chart-row mapping. VolConePanel: loader / empty / strip / table /

@@ -43,6 +43,19 @@ describe("app/regime/page.tsx — bare /regime redirects to /regime/cri", () => 
   });
 });
 
+describe("app/regime/vol-cone/page.tsx — cheap-wing scanner lives under Scanner", () => {
+  const src = read("app/regime/vol-cone/page.tsx");
+
+  it("imports redirect from next/navigation", () => {
+    expect(src).toMatch(/from\s+["']next\/navigation["']/);
+    expect(src).toMatch(/redirect/);
+  });
+
+  it("redirects to /scanner?mode=vol-cone", () => {
+    expect(src).toMatch(/redirect\(["']\/scanner\?mode=vol-cone["']\)/);
+  });
+});
+
 /* ─── 3. Subroute pages render WorkspaceShell ──────────── */
 
 describe.each([
@@ -58,7 +71,6 @@ describe.each([
   ["skew", "app/regime/skew/page.tsx"],
   ["skew2d", "app/regime/skew2d/page.tsx"],
   ["curve", "app/regime/curve/page.tsx"],
-  ["vol-cone", "app/regime/vol-cone/page.tsx"],
   ["cot", "app/regime/cot/page.tsx"],
   ["ats", "app/regime/ats/page.tsx"],
   ["short", "app/regime/short/page.tsx"],
@@ -119,9 +131,6 @@ vi.mock("../components/Skew2dPanel", () => ({
 }));
 vi.mock("../components/YieldCurvePanel", () => ({
   default: () => <div data-testid="curve-panel-stub" />,
-}));
-vi.mock("../components/VolConePanel", () => ({
-  default: () => <div data-testid="vol-cone-panel-stub" />,
 }));
 vi.mock("../components/equibles-cot/EquiblesCotPanel", () => ({
   default: () => <div data-testid="cot-panel-stub" />,
@@ -320,6 +329,12 @@ describe("RegimePanel — tab is URL-driven", () => {
     const { container } = render(<RegimePanel prices={{}} />);
     within(container).getByRole("button", { name: /^CURVE$/ }).click();
     expect(pushSpy).toHaveBeenCalledWith("/regime/curve");
+  });
+
+  it("does not expose a VOL CONE regime tab", () => {
+    mockedPathname = "/regime/cri";
+    const { container } = render(<RegimePanel prices={{}} />);
+    expect(within(container).queryByRole("button", { name: /^VOL CONE$/ })).toBeNull();
   });
 
   it("renders the COT panel when pathname is /regime/cot", () => {

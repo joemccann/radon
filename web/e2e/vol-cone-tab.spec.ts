@@ -92,12 +92,12 @@ async function setupMocks(
   );
 }
 
-test.describe("/regime/vol-cone — cheap 10% OTM wing IV scanner", () => {
-  test("activates the VOL CONE tab and renders the summary strip", async ({ page }) => {
+test.describe("/scanner?mode=vol-cone — cheap 10% OTM wing IV scanner", () => {
+  test("activates the VOL CONE scanner tab and renders the summary strip", async ({ page }) => {
     await setupMocks(page);
-    await page.goto("/regime/vol-cone");
+    await page.goto("/scanner?mode=vol-cone");
 
-    await expect(page.locator(".ticker-tab", { hasText: "VOL CONE" })).toHaveClass(/active/);
+    await expect(page.getByRole("tab", { name: "VOL CONE" })).toHaveAttribute("aria-selected", "true");
 
     const regime = page.locator('[data-testid="vol-cone-regime-value"]');
     await regime.waitFor({ timeout: 10_000 });
@@ -108,9 +108,16 @@ test.describe("/regime/vol-cone — cheap 10% OTM wing IV scanner", () => {
     await expect(page.locator('[data-testid="vol-cone-strip-source"]')).toContainText("2026-08-12");
   });
 
-  test("renders the table, cone chart, and brush", async ({ page }) => {
+  test("legacy /regime/vol-cone redirects to the scanner tab", async ({ page }) => {
     await setupMocks(page);
     await page.goto("/regime/vol-cone");
+    await expect(page).toHaveURL(/\/scanner\?mode=vol-cone/);
+    await expect(page.getByRole("tab", { name: "VOL CONE" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  test("renders the table, cone chart, and brush", async ({ page }) => {
+    await setupMocks(page);
+    await page.goto("/scanner?mode=vol-cone");
 
     const section = page.locator('[data-testid="vol-cone-chart-section"]');
     await section.waitFor({ timeout: 10_000 });
@@ -139,7 +146,7 @@ test.describe("/regime/vol-cone — cheap 10% OTM wing IV scanner", () => {
       names: [],
       hits: [],
     });
-    await page.goto("/regime/vol-cone");
+    await page.goto("/scanner?mode=vol-cone");
 
     await expect(page.getByText("No vol cone data yet")).toBeVisible({ timeout: 10_000 });
   });

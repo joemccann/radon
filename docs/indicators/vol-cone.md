@@ -8,7 +8,7 @@ Operator reference (2026-08-12): NVDA Sep 18 2026 ATM IV printed at the
 floor of its Apr-Aug 90/10 cone; 10% OTM call and put IVs were in the
 bottom decile of the same window.
 
-- **slug**: `vol-cone` (route `/regime/vol-cone`)
+- **slug**: `vol-cone` (route `/scanner?mode=vol-cone`; `/regime/vol-cone` redirects)
 - **service**: `vol-cone` (kebab-case everywhere: `scan_snapshots.service`,
   `service_health`, systemd units)
 - **Name**: `VolCone` (`VolConePanel`, `useVolCone`)
@@ -265,12 +265,11 @@ Helpers `web/lib/volCone.ts`: types, `formatIvPct`, `formatPercentile`,
 - Brand tokens only. No em dashes. No hardcoded "Refreshes daily".
 - Tooltip: cheap-wing rule in one sentence.
 
-`RegimePanel` four places: union, `REGIME_TAB_VALUES`, `tabFromPathname`
-regex (`vol-cone` before any shorter token is not an issue; add it to
-the alternation), desktop button `VOL CONE`, mobile chip (map
-`vol-cone` → `VOL CONE`), dispatch `activeTab === "vol-cone"`.
+Scanner mode, same shelf as LEAP / GARCH: `ScannerMode` union, query
+`?mode=vol-cone`, `ScannerModeTabs` label `VOL CONE`,
+`ScannerSections` hook + `hit_count` chip + `VolConePanel` branch.
 
-`web/app/regime/vol-cone/page.tsx` — WorkspaceShell section regime.
+`web/app/regime/vol-cone/page.tsx` redirects to `/scanner?mode=vol-cone`.
 
 ## Timer
 
@@ -292,13 +291,13 @@ Create: `scripts/fetch_vol_cone.py`, `scripts/db/migrations/0047_vol_cone.sql`,
 `scripts/tests/test_vol_cone.py`, fixtures listed above,
 `web/app/api/vol-cone/route.ts`, `web/lib/volCone.ts`, `web/lib/useVolCone.ts`,
 `web/components/VolConePanel.tsx`, `web/components/VolConeChart.tsx`,
-`web/app/regime/vol-cone/page.tsx`, `web/tests/vol-cone-api.test.ts`,
+`web/app/regime/vol-cone/page.tsx` (redirect), `web/tests/vol-cone-api.test.ts`,
 `web/tests/vol-cone-panel.test.tsx`, `web/e2e/vol-cone-tab.spec.ts`,
 `cloud/services/radon-vol-cone.{service,timer}`.
 
 Modify: `scripts/db/writer.py` (`upsert_vol_cone_rows`),
-`web/components/RegimePanel.tsx` (four places + mobile chip + dispatch),
-`web/tests/regime-tab-routes.test.tsx`,
+`web/components/ScannerModeTabs.tsx`, `web/components/WorkspaceSections.tsx`,
+`web/tests/scanner-mode-tabs.test.tsx`, `web/tests/regime-tab-routes.test.tsx`,
 `web/lib/serviceHealthWindows.ts` + `web/tests/service-health-windows.test.ts`,
 `scripts/watchdog/services.py` (window + daily bucket),
 `cloud/scripts/setup-vps.sh` `SERVICE_FILES`,
