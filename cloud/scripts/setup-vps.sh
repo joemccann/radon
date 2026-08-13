@@ -110,6 +110,16 @@ readonly SERVICE_FILES=(
   radon-signals-refresh.timer
   radon-vol-cone.service
   radon-vol-cone.timer
+  radon-equibles-ats.service
+  radon-equibles-ats.timer
+  radon-equibles-short-crowding.service
+  radon-equibles-short-crowding.timer
+  radon-equibles-13f.service
+  radon-equibles-13f.timer
+  radon-equibles-cot.service
+  radon-equibles-cot.timer
+  radon-equibles-filings.service
+  radon-equibles-filings.timer
 )
 
 
