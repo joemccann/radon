@@ -123,7 +123,7 @@ export default function LeapScanner({
           <SectionEmptyState
             icon={Telescope}
             headline="No LEAP scan on file"
-            secondary="Run a scan, or wait for the scheduled daily refresh (radon-leap.timer, 14:00 UTC trading days)."
+            secondary="Run a scan, or wait for the scheduled indexes-universe refresh (radon-leap.timer, trading days)."
             action={onScan ? { label: "Run scan", onClick: onScan } : undefined}
           />
         ) : (

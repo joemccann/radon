@@ -18,6 +18,7 @@ Key endpoints used:
 
 Usage:
   python3 scripts/leap_scanner_uw.py XLK XLE XLF
+  python3 scripts/leap_scanner_uw.py --preset indexes     # scheduled default: NDX+SPX+RUT
   python3 scripts/leap_scanner_uw.py --preset sectors
   python3 scripts/leap_scanner_uw.py --preset mag7 --min-gap 20
   python3 scripts/leap_scanner_uw.py --preset row          # All country ETFs
@@ -25,6 +26,7 @@ Usage:
   python3 scripts/leap_scanner_uw.py --preset row-asia     # Asian country ETFs
 
 Presets:
+  indexes      - Scheduled default: Nasdaq-100 + S&P 500 + Russell 2000
   sectors      - S&P 500 sector ETFs (XLK, XLE, XLF, etc.)
   mag7         - Magnificent 7 (AAPL, MSFT, NVDA, etc.)
   semis        - Semiconductors (NVDA, AMD, TSM, etc.)
@@ -43,6 +45,8 @@ import argparse
 import json
 import math
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import nullcontext
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, List, Dict
@@ -50,7 +54,7 @@ from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 from dataclasses import dataclass, field, asdict
 
-from clients.uw_client import UWClient, UWAPIError
+from clients.uw_client import UWClient, UWAPIError, UWRateLimitError
 from utils.ticker_args import parse_ticker_list
 
 try:
@@ -236,6 +240,8 @@ def get_uw_history(ticker: str, uw_client: Optional[UWClient] = None) -> List[fl
         bars = data.get("data", [])
         if bars:
             return [float(b["close"]) for b in bars if b.get("close") is not None]
+    except UWRateLimitError:
+        raise
     except Exception:
         pass
     return []
@@ -292,12 +298,15 @@ def calculate_hv(prices: List[float], period: int) -> Optional[float]:
     return daily_vol * math.sqrt(252) * 100
 
 
-def get_vol_data(ticker: str, uw_client: Optional[UWClient] = None) -> Optional[VolData]:
+def get_vol_data(
+    ticker: str, uw_client: Optional[UWClient] = None, *, quiet: bool = False
+) -> Optional[VolData]:
     """Get historical volatility data for a ticker."""
     prices = get_price_history(ticker, uw_client)
     
     if len(prices) < 60:
-        print(f"  ⚠ Insufficient price data for {ticker}")
+        if not quiet:
+            print(f"  ⚠ Insufficient price data for {ticker}")
         return None
     
     current_price = prices[-1]
@@ -322,6 +331,8 @@ def get_current_iv(ticker: str, _client: UWClient = None) -> tuple:
     def _fetch(client):
         try:
             data = client.get_iv_rank(ticker)
+        except UWRateLimitError:
+            raise
         except UWAPIError:
             return 0, 0
         if 'data' in data and data['data']:
@@ -342,6 +353,8 @@ def get_leap_options(ticker: str, min_year: int = 2027, _client: UWClient = None
     def _fetch(client):
         try:
             return client.get_option_contracts(ticker)
+        except UWRateLimitError:
+            raise
         except UWAPIError:
             return {}
 
@@ -429,71 +442,77 @@ def approximate_delta(strike: float, price: float, iv: float, dte: int) -> float
         return 0.1
 
 
-def scan_ticker(ticker: str, min_gap: float) -> Optional[ScanResult]:
+def scan_ticker(
+    ticker: str,
+    min_gap: float,
+    client: Optional[UWClient] = None,
+    *,
+    quiet: bool = False,
+) -> Optional[ScanResult]:
     """Scan a single ticker for LEAP IV mispricing."""
-    print(f"\n{'='*50}")
-    print(f"Scanning {ticker}")
-    print(f"{'='*50}")
+    def emit(msg: str = "", *, force: bool = False) -> None:
+        if not quiet or force:
+            print(msg)
 
-    # Get current IV and LEAP options using shared client
-    with UWClient() as client:
-        # Get historical volatility (UW primary, Yahoo LAST RESORT)
-        vol_data = get_vol_data(ticker, uw_client=client)
+    emit(f"\n{'='*50}")
+    emit(f"Scanning {ticker}")
+    emit(f"{'='*50}")
+
+    with (UWClient() if client is None else nullcontext(client)) as uw:
+        vol_data = get_vol_data(ticker, uw_client=uw, quiet=quiet)
         if not vol_data:
             return None
 
-        print(f"  Price: ${vol_data.price:.2f}")
-        print(f"  HV20: {vol_data.hv_20:.1f}% | HV60: {vol_data.hv_60:.1f}% | HV252: {vol_data.hv_252:.1f}%")
-        print(f"  Avg HV: {vol_data.avg_hv:.1f}%")
+        emit(f"  Price: ${vol_data.price:.2f}")
+        emit(f"  HV20: {vol_data.hv_20:.1f}% | HV60: {vol_data.hv_60:.1f}% | HV252: {vol_data.hv_252:.1f}%")
+        emit(f"  Avg HV: {vol_data.avg_hv:.1f}%")
 
-        current_iv, iv_rank = get_current_iv(ticker, _client=client)
-        print(f"  Current IV: {current_iv:.1f}% | IV Rank: {iv_rank:.1f}")
+        current_iv, iv_rank = get_current_iv(ticker, _client=uw)
+        emit(f"  Current IV: {current_iv:.1f}% | IV Rank: {iv_rank:.1f}")
 
-        leaps = get_leap_options(ticker, _client=client)
+        leaps = get_leap_options(ticker, _client=uw)
     if not leaps:
-        print(f"  ⚠ No LEAP options found")
+        emit("  ⚠ No LEAP options found")
         return None
-    
-    print(f"  Found {len(leaps)} LEAP calls")
-    
-    # Calculate deltas and find interesting strikes
+
+    emit(f"  Found {len(leaps)} LEAP calls")
+
     for leap in leaps:
         dte = (datetime.strptime(leap.expiry, "%Y-%m-%d") - datetime.now()).days
         leap.delta_approx = approximate_delta(leap.strike, vol_data.price, leap.iv, dte)
-    
-    # Group by approximate delta
+
     delta_groups = {
         "50Δ (ATM)": [l for l in leaps if 0.45 <= l.delta_approx <= 0.55],
         "30Δ": [l for l in leaps if 0.25 <= l.delta_approx < 0.45],
         "20Δ": [l for l in leaps if 0.15 <= l.delta_approx < 0.25],
         "10Δ": [l for l in leaps if 0.05 <= l.delta_approx < 0.15],
     }
-    
-    # Find best mispricing
+
     best_gap = 0
     is_mispriced = False
-    
-    print(f"\n  LEAP IV Analysis:")
+
+    emit("\n  LEAP IV Analysis:")
     for group_name, group_leaps in delta_groups.items():
         if not group_leaps:
             continue
-        
-        # Average IV for this delta group
+
         avg_iv = sum(l.iv for l in group_leaps) / len(group_leaps)
-        
-        # Gap vs HV
+
         gap_20 = vol_data.hv_20 - avg_iv
         gap_60 = vol_data.hv_60 - avg_iv
-        
+
         status = ""
         if gap_20 >= min_gap or gap_60 >= min_gap:
             status = "🔥 MISPRICED"
             is_mispriced = True
             if gap_20 > best_gap:
                 best_gap = gap_20
-        
-        print(f"    {group_name}: IV={avg_iv:.1f}% | Gap vs HV20: {gap_20:+.1f}% | vs HV60: {gap_60:+.1f}% {status}")
-    
+
+        emit(f"    {group_name}: IV={avg_iv:.1f}% | Gap vs HV20: {gap_20:+.1f}% | vs HV60: {gap_60:+.1f}% {status}")
+
+    if quiet and is_mispriced:
+        print(f"  {ticker}: MISPRICED +{best_gap:.1f}%")
+
     return ScanResult(
         ticker=ticker,
         vol_data=vol_data,
@@ -503,6 +522,34 @@ def scan_ticker(ticker: str, min_gap: float) -> Optional[ScanResult]:
         best_gap=best_gap,
         is_mispriced=is_mispriced
     )
+
+
+def scan_universe(
+    tickers: List[str], min_gap: float, workers: int = 16
+) -> List[ScanResult]:
+    """Scan tickers in parallel with one shared UWClient."""
+    workers = max(1, workers)
+    quiet = workers > 1
+    results: List[ScanResult] = []
+    with UWClient() as uw:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {
+                pool.submit(scan_ticker, ticker, min_gap, uw, quiet=quiet): ticker
+                for ticker in tickers
+            }
+            for future in as_completed(futures):
+                ticker = futures[future]
+                try:
+                    result = future.result()
+                except UWRateLimitError:
+                    print(f"  ✗ {ticker}: rate limited, skip")
+                    continue
+                except Exception as exc:
+                    print(f"  ✗ Error scanning {ticker}: {exc}")
+                    continue
+                if result:
+                    results.append(result)
+    return results
 
 
 def generate_report(results: List[ScanResult], min_gap: float) -> str:
@@ -653,6 +700,26 @@ def resolve_explicit_tickers(positional, ticker_list):
     return parse_ticker_list(combined)
 
 
+def resolve_scan_inputs(explicit_tickers=None, preset=None):
+    """Return (tickers, universe). Explicit tickers win over --preset."""
+    explicit = [str(t).upper().strip() for t in (explicit_tickers or []) if str(t).strip()]
+    if explicit:
+        seen = set()
+        out = []
+        for ticker in explicit:
+            if ticker not in seen:
+                seen.add(ticker)
+                out.append(ticker)
+        return out, "explicit"
+    if not preset:
+        return [], ""
+    universe = f"preset:{preset}"
+    if preset in PRESETS:
+        return list(PRESETS[preset]), universe
+    from utils.presets import load_preset
+    return list(load_preset(preset).tickers), universe
+
+
 def build_json_payload(results, min_gap, universe, requested_tickers):
     """Build the data/leap.json envelope, stamped with the scanned universe."""
     return {
@@ -695,6 +762,7 @@ def main():
     parser.add_argument("--output", default="reports/leap-scan-uw.html", help="Output file")
     parser.add_argument("--json", action="store_true", help="Also output JSON")
     parser.add_argument("--list-presets", action="store_true", help="List all available presets")
+    parser.add_argument("--workers", type=int, default=16, help="Parallel worker threads (default 16)")
     
     args = parser.parse_args()
 
@@ -712,47 +780,33 @@ def main():
             print("  (preset loader not available)")
         sys.exit(0)
     
-    # Determine tickers
     explicit_tickers = resolve_explicit_tickers(args.tickers, args.ticker_list)
-    if explicit_tickers:
-        tickers = explicit_tickers
-        universe = "explicit"
-    elif args.preset:
-        universe = f"preset:{args.preset}"
-        # Check built-in presets first, then file presets
-        if args.preset in PRESETS:
-            tickers = PRESETS[args.preset]
-        else:
-            try:
-                from utils.presets import load_preset
-                p = load_preset(args.preset)
-                tickers = p.tickers
-                print(f"📂 Loaded preset: {p.name} ({p.ticker_count} tickers)")
-            except (FileNotFoundError, ImportError) as e:
-                print(f"\n❌ Preset '{args.preset}' not found.")
-                print(f"   Built-in: {', '.join(sorted(PRESETS.keys()))}")
-                print(f"   Use --list-presets to see all available")
-                sys.exit(1)
-    else:
+    if not explicit_tickers and not args.preset:
         parser.print_help()
         print("\n⚠ Specify tickers or use --preset")
         sys.exit(1)
+    try:
+        tickers, universe = resolve_scan_inputs(explicit_tickers, args.preset)
+    except (FileNotFoundError, ImportError, ValueError):
+        print(f"\n❌ Preset '{args.preset}' not found.")
+        print(f"   Built-in: {', '.join(sorted(PRESETS.keys()))}")
+        print(f"   Use --list-presets to see all available")
+        sys.exit(1)
+    if not explicit_tickers and args.preset and args.preset not in PRESETS:
+        print(f"📂 Loaded preset: {args.preset} ({len(tickers)} tickers)")
     
     print(f"\n{'='*60}")
     print("LEAP IV MISPRICING SCANNER")
     print(f"{'='*60}")
-    print(f"Tickers: {', '.join(tickers)}")
+    if len(tickers) > 20:
+        print(f"Tickers: {len(tickers)}  Universe: {universe}")
+    else:
+        print(f"Tickers: {', '.join(tickers)}")
     print(f"Min Gap: {args.min_gap}%")
+    print(f"Workers: {max(1, args.workers)}")
     print(f"Data: Unusual Whales (HV, IV) · Yahoo Finance (LAST RESORT fallback)")
     
-    results = []
-    for ticker in tickers:
-        try:
-            result = scan_ticker(ticker, args.min_gap)
-            if result:
-                results.append(result)
-        except Exception as e:
-            print(f"  ✗ Error scanning {ticker}: {e}")
+    results = scan_universe(tickers, args.min_gap, workers=args.workers)
     
     # Summary
     print(f"\n{'='*60}")
