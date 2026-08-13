@@ -17067,54 +17067,22 @@ body[data-mobile="true"] td.right {
 .ticker-flow-analyzing {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 8px 0;
-}
-
-.ticker-flow-analyzing-header {
-  display: flex;
+  /* Centre the SpectralLoader and the steps block on the same axis;
+     `align-items: center` shrink-wraps the list so its own text stays
+     left-aligned while the block itself sits centred in the panel. */
   align-items: center;
-  gap: 12px;
-}
-
-.ticker-flow-analyzing-spinner {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  border: 2px solid var(--border-dim);
-  border-top-color: var(--signal-core-text);
-  animation: ticker-flow-spin 1s linear infinite;
-  flex-shrink: 0;
-}
-
-@keyframes ticker-flow-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.ticker-flow-analyzing-title {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--text-primary);
-  /* gap on the parent column handles the space between the header row
-     and the steps list; no per-element margin needed. */
+  padding: 8px 0 24px;
 }
 
 .ticker-flow-analyzing-steps {
   list-style: none;
   margin: 0;
-  /* Indent the steps under the title (past the spinner + its gap)
-     so they read as supporting context for the header row, not as
-     a separate list floating in the panel. */
-  padding-left: 30px;
+  padding: 0;
   font-family: var(--font-sans);
   font-size: 12px;
   color: var(--text-secondary);
   line-height: 1.7;
+  text-align: left;
 }
 
 .ticker-flow-analyzing-steps li::before {
