@@ -43,6 +43,7 @@ import { useThetaHarvester } from "@/lib/useThetaHarvester";
 import { useStrengthConfirmation } from "@/lib/useStrengthConfirmation";
 import { useLeap } from "@/lib/useLeap";
 import { useGarchConvergence } from "@/lib/useGarchConvergence";
+import { useVolCone } from "@/lib/useVolCone";
 import { useBlotter } from "@/lib/useBlotter";
 import { formatTradeDate } from "@/lib/blotter/formatTradeDate";
 import { isEarlierLocalDay } from "@/lib/holdTime";
@@ -130,6 +131,7 @@ import ThetaHarvesterScanner, { type ThetaScanParams } from "./ThetaHarvesterSca
 import StrengthConfirmationScanner from "./StrengthConfirmationScanner";
 import LeapScanner from "./LeapScanner";
 import GarchConvergenceScanner from "./GarchConvergenceScanner";
+import VolConePanel from "./VolConePanel";
 import FlowAnalysisTickerInput from "./flow-analysis/FlowAnalysisTickerInput";
 import { InformedFlowPanel } from "./flow-analysis/InformedFlowPanel";
 import { AlertsPanel } from "./alerts/AlertsPanel";
@@ -1422,7 +1424,7 @@ function PortfolioSections({ portfolio, prices }: { portfolio: PortfolioData | n
 /* ─── Scanner table ─────────────────────────────────────── */
 
 type ScannerSortKey = "ticker" | "signal" | "direction" | "score" | "strength" | "buy_ratio" | "sustained_days" | "num_prints";
-type ScannerMode = "flow" | "discover" | "theta" | "strength" | "leap" | "garch";
+type ScannerMode = "flow" | "discover" | "theta" | "strength" | "leap" | "garch" | "vol-cone";
 
 const SCANNER_HEADER_HELP = {
   signal: "Flow intensity bucket from dark-pool activity. STRONG means the flow score is high enough to review immediately.",
@@ -1486,7 +1488,9 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
         ? "leap"
         : queryModeParam === "garch"
           ? "garch"
-          : "flow";
+          : queryModeParam === "vol-cone"
+            ? "vol-cone"
+            : "flow";
   const queryMode = defaultMode ?? parsedQueryMode;
   const [mode, setModeState] = useState<ScannerMode>(queryMode);
   const { data, syncing, error, lastSync, syncNow } = useScanner(mode === "flow");
@@ -1494,6 +1498,7 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
   const strength = useStrengthConfirmation(mode === "strength");
   const leap = useLeap(mode === "leap");
   const garch = useGarchConvergence(mode === "garch");
+  const volCone = useVolCone(mode === "vol-cone");
   const [thetaScanning, setThetaScanning] = useState(false);
   const [thetaScanError, setThetaScanError] = useState<string | null>(null);
   const [strengthScanning, setStrengthScanning] = useState(false);
@@ -1635,6 +1640,7 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
         strength: strength.data ? strength.data.confirmed_strength_count ?? 0 : undefined,
         leap: leap.data ? (leap.data.results ?? []).filter((r) => r.is_mispriced).length : undefined,
         garch: garch.data ? (garch.data.pairs ?? []).filter((p) => p.gates_passed).length : undefined,
+        "vol-cone": volCone.data && !volCone.data.missing ? volCone.data.hit_count : undefined,
       }}
     />
   );
@@ -1722,6 +1728,15 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
           onScan={() => { void runGarchScan(); }}
           onTickerScan={(tickers) => { void runGarchScan(tickers); }}
         />
+      </div>
+    );
+  }
+
+  if (mode === "vol-cone") {
+    return (
+      <div className="scanner-page-shell">
+        {modeTabs}
+        <VolConePanel />
       </div>
     );
   }

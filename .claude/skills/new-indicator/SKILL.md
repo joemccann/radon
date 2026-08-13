@@ -24,7 +24,7 @@ Create:
 | `web/lib/<name>.ts` (pure helpers + types) | `web/lib/marginDebt.ts` |
 | `web/lib/use<Name>.ts` | `web/lib/useMarginDebt.ts` |
 | `web/components/<Name>Panel.tsx` | `web/components/MarginDebtPanel.tsx` |
-| `web/app/regime/<slug>/page.tsx` (5 lines: `<WorkspaceShell section="regime" />`) | `web/app/regime/margin/page.tsx` |
+| `web/app/regime/<slug>/page.tsx` (time-series regime only; name-ranking scanners use `/scanner?mode=<slug>`) | `web/app/regime/margin/page.tsx` / `ScannerModeTabs` |
 | `web/tests/<name>-api.test.ts` | `web/tests/margin-debt-api.test.ts` |
 | `web/tests/<name>-panel.test.tsx` | `web/tests/margin-debt-panel.test.tsx` |
 | `web/e2e/<name>-tab.spec.ts` | `web/e2e/margin-debt-tab.spec.ts` |
@@ -33,8 +33,10 @@ Create:
 Modify (lockstep pins — miss one and a test fails, which is the point):
 
 - `scripts/db/writer.py` — `upsert_<name>_rows(...)` (+ reuse `upsert_scan_snapshot` / `record_service_health`)
-- `web/components/RegimePanel.tsx` — **four places**: the `RegimeTab` union, `REGIME_TAB_VALUES`, the `tabFromPathname` regex, the desktop `<button>` row (the mobile chip bar maps over an inline array — update it too), plus the `if (activeTab === "<slug>")` dispatch branch
-- `web/tests/regime-tab-routes.test.tsx` — add `["<slug>", "app/regime/<slug>/page.tsx"]` to the `describe.each` table + a render/navigation case
+- IA: time-series market-state charts (CRI, GEX, breadth, margin) go on `/regime/<slug>`. Name-ranking scanners (LEAP, GARCH, cheap-wing vol cone) go on `/scanner?mode=<slug>` next to Flow / Discover. Do not park a name scanner on Regime.
+- Regime only: `web/components/RegimePanel.tsx` — **four places**: the `RegimeTab` union, `REGIME_TAB_VALUES`, the `tabFromPathname` regex, the desktop `<button>` row (the mobile chip bar maps over an inline array — update it too), plus the `if (activeTab === "<slug>")` dispatch branch
+- Regime only: `web/tests/regime-tab-routes.test.tsx` — add `["<slug>", "app/regime/<slug>/page.tsx"]` to the `describe.each` table + a render/navigation case
+- Scanner: `ScannerModeTabs` + `WorkspaceSections` `ScannerMode` + `?mode=` parse + panel branch + `scanner-mode-tabs` tests
 - `web/lib/serviceHealthWindows.ts` — staleness window entry (kebab-case service name)
 - `web/tests/service-health-windows.test.ts` — the `expected` set is **exhaustive**; add the new service
 - `scripts/watchdog/services.py` — same window for the Python watchdog + the daily-bucket check list

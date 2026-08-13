@@ -1,5 +1,9 @@
 # Lessons
 
+## 2026-08-13 — Name-ranking vol scanners live under Scanner, not Regime
+
+- `/indicator` defaults to a Regime chart tab. Cheap-wing IV ranking is a name scanner like LEAP and GARCH. Put it on `/scanner?mode=vol-cone`. Redirect `/regime/vol-cone`.
+
 ## 2026-08-13 — Vol cone scans every standard monthly, not one 45-DTE pick
 
 - The NVDA/SMH setup is a named third-Friday monthly (Sep 18), not "whatever expiry is nearest 45 DTE". A single-expiry picker collapses Oct/Nov cones and reads like a rolling tenor.

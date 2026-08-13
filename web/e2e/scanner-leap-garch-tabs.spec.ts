@@ -55,11 +55,12 @@ test.beforeEach(async ({ page }) => {
   );
 });
 
-test("scanner page mode tabs include LEAP and GARCH", async ({ page }) => {
+test("scanner page mode tabs include LEAP, GARCH, and VOL CONE", async ({ page }) => {
   await page.goto("/scanner?mode=leap");
   const tabs = page.getByRole("tablist", { name: "Scanner mode" });
   await expect(tabs.getByRole("tab", { name: "LEAP" })).toBeVisible();
   await expect(tabs.getByRole("tab", { name: "GARCH" })).toBeVisible();
+  await expect(tabs.getByRole("tab", { name: "VOL CONE" })).toBeVisible();
 });
 
 test("mode=leap renders the LEAP panel with candidates", async ({ page }) => {

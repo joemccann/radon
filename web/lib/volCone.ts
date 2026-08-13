@@ -1,5 +1,5 @@
 /**
- * VOL CONE indicator — payload types + pure helpers for the vol-cone regime tab.
+ * VOL CONE indicator — payload types + pure helpers for the vol-cone scanner tab.
  * Mirrors the GET /api/vol-cone contract: expiry-local ATM and 10% OTM wing
  * IVs versus that expiry's 90/10 cone. Spec: docs/indicators/vol-cone.md.
  */
