@@ -730,3 +730,69 @@ class TestIncidentWatchdog:
         timer = unit("radon-incident-watchdog.timer")["Timer"]
         assert timer["oncalendar"].endswith("*:00,05,10,15,20,25,30,35,40,45,50,55")
         assert timer["persistent"] == "false"
+
+
+class TestPerMinuteStartLimits:
+    """A per-minute oneshot must not sit on its own start-limit boundary.
+
+    radon-skew.timer fires every minute through RTH while
+    radon-skew.service carried StartLimitBurst=5 per 300s. Five starts per
+    300 seconds IS one per minute, so the unit ran exactly at the ceiling and
+    any jitter (RandomizedDelaySec, a run crossing a second boundary) tripped
+    start-limit-hit. systemd then PARKS the unit -- it does not auto-recover,
+    it needs a manual `systemctl reset-failed`, and the watchdog pages.
+
+    The script itself was healthy throughout (70 successful runs in 40
+    minutes), which is what makes this shape dangerous: nothing is broken, so
+    nothing points at the unit file.
+    """
+
+    @staticmethod
+    def _fires_every_minute(oncalendar: str) -> bool:
+        # "*-*-* *:*:00" or "Mon..Fri *-*-* 13..21:*:00" - a wildcard MINUTE
+        # field is what makes it per-minute.
+        return any(
+            part.count(":") == 2 and part.split(":")[1] == "*"
+            for part in oncalendar.split()
+        )
+
+    def test_every_per_minute_timer_has_headroom(self, services_dir, all_units):
+        offenders = []
+        for path in sorted(services_dir.iterdir()):
+            name = path.name
+            if not name.endswith(".timer"):
+                continue
+
+            # Read the raw lines: a timer may carry SEVERAL OnCalendar entries
+            # and configparser keeps only the last, which is how the per-minute
+            # schedule on radon-skew.timer hid behind a trailing 21:45 entry.
+            schedules = [
+                line.split("=", 1)[1].strip()
+                for line in path.read_text().splitlines()
+                if line.strip().startswith("OnCalendar=")
+            ]
+            if not any(self._fires_every_minute(s) for s in schedules):
+                continue
+
+            service = all_units.get(name[: -len(".timer")] + ".service")
+            if service is None:
+                continue
+
+            burst = int(service.get("Unit", {}).get("startlimitburst", "5"))
+            interval = int(service.get("Unit", {}).get("startlimitintervalsec", "0"))
+            if interval == 0:
+                continue
+
+            # starts the timer will actually attempt inside one interval
+            attempts = interval // 60
+            if burst <= attempts:
+                offenders.append(
+                    f"{name}: burst={burst} but the timer attempts ~{attempts} "
+                    f"starts per {interval}s window"
+                )
+
+        assert offenders == [], "; ".join(offenders)
+
+    def test_skew_specifically_has_the_raised_burst(self, unit):
+        svc = unit("radon-skew.service")["Unit"]
+        assert int(svc["startlimitburst"]) >= 10
