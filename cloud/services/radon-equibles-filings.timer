@@ -1,0 +1,14 @@
+[Unit]
+Description=Radon Equibles Filing Forensics - daily pre-trade overhang refresh
+
+[Timer]
+# Form 144 notices, 8-K Item 5.02 exec changes and ATM/buyback amendments land
+# continuously, so this is a genuine daily. It is a pre-trade Gate 2/3 input:
+# an unused ATM shelf is a silent convexity killer, so staleness here is worse
+# than for the quarterly datasets.
+OnCalendar=*-*-* 10:00:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
