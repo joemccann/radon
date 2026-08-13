@@ -79,4 +79,65 @@ describe("generalized implied combo book rendering", () => {
     expect(document.querySelector(".book-window")?.textContent).toContain("-1.80");
     expect(screen.queryByRole("button", { name: "Toggle Time and Sales" })).toBeNull();
   });
+
+  it("keeps a multi-venue combo row on one line — leading pair plus an overflow count", () => {
+    const spreadKeys = [keys[0], keys[1]];
+    const multiVenue = (
+      symbol: string,
+      bid: number,
+      ask: number,
+      bidVenues: string[],
+      askVenues: string[],
+    ): DepthBook => ({
+      symbol, kind: "option", entitled: true, isSmartDepth: true, feed: "OPRA BBO", timestamp,
+      bid: bidVenues.map((exchange, index) => ({
+        price: bid, size: 10, marketMaker: null, exchange, nbbo: index === 0,
+      })),
+      ask: askVenues.map((exchange, index) => ({
+        price: ask, size: 10, marketMaker: null, exchange, nbbo: index === 0,
+      })),
+    });
+
+    const spread: PortfolioPosition = {
+      ...position,
+      structure: "Bull Call Spread",
+      structure_type: "Bull Call Spread",
+      legs: [
+        { ...position.legs[0], direction: "LONG", strike: 50 },
+        { ...position.legs[1], direction: "SHORT", strike: 55 },
+      ],
+    };
+
+    render(
+      <TickerDetailProvider>
+        <BookTab
+          ticker="TEST"
+          position={spread}
+          prices={{
+            [spreadKeys[0]]: price(spreadKeys[0], 1, 1.1),
+            [spreadKeys[1]]: price(spreadKeys[1], 0.5, 0.6),
+          }}
+          openOrders={[]}
+          tickerPriceData={price("TEST-COMBO", 0.4, 0.6)}
+          depths={{
+            [spreadKeys[0]]: multiVenue(spreadKeys[0], 1, 1.1, ["AMEX", "BATS", "CBOE"], ["AMEX", "BATS", "CBOE"]),
+            [spreadKeys[1]]: multiVenue(spreadKeys[1], 0.5, 0.6, ["EDGX", "MIAX", "PHLX"], ["EDGX", "MIAX", "PHLX"]),
+          }}
+          tape={{}}
+          bookKey={spreadKeys.join("+")}
+          bookKind="combo"
+          bookOnly
+        />
+      </TickerDetailProvider>,
+    );
+
+    const venueCell = document.querySelector(".book-side.bid .book-row .book-mkt");
+    expect(venueCell).toBeTruthy();
+    // One venue pair on the row, never the whole pipe-joined set (which wraps
+    // into a 30-line block and blows the row height out of the montage).
+    expect(venueCell?.textContent).not.toContain("|");
+    expect(venueCell?.textContent).toContain("AMEX / EDGX");
+    expect(venueCell?.querySelector(".book-venue-more")?.textContent).toBe("+2");
+    expect(venueCell?.getAttribute("title")).toContain("|");
+  });
 });
