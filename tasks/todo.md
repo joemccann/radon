@@ -27,7 +27,7 @@ Source: `/Users/joemccann/dev/apps/finance/radon/.deepsec/data/radon/reports/rep
 - [x] T4 Web/trading correctness remediation and regressions.
 - [x] T5 Integrated finding-by-finding review.
 - [x] T6 Full verification green.
-- [ ] T7 Show Me artifact and PR opened.
+- [x] T7 Show Me artifact and PR opened.
 
 ## Review
 
@@ -35,6 +35,7 @@ Source: `/Users/joemccann/dev/apps/finance/radon/.deepsec/data/radon/reports/rep
 - Security dispositions are 95 fixed, 45 duplicate, and 2 deferred-external; SEC-054/055 require CDN/origin and reachable-history purges after the source removals.
 - Verification: Python 6,039 passed; cloud 821 passed; Vitest 589 files / 6,071 tests passed; Playwright 9 passed; typecheck, lint, production build, boundary suites, visual inspection, and diff hygiene passed.
 - Show Me artifact: `tasks/artifacts/show-me-security-remediation.html`.
+- Draft PR: `https://github.com/joemccann/radon/pull/21`.
 
 ---
 
