@@ -66,6 +66,9 @@ from api.order_audit import record_order_event
 from api.auth import verify_clerk_jwt, verify_api_key, is_trusted_local_request
 from api.ws_ticket import create_ticket, validate_ticket
 from api.routes.historical import router as historical_router
+from api.routes.preferences import router as preferences_router
+
+import app_preferences
 from clients.menthorq_dashboard_client import (
     MenthorQDashboardAuthError,
     MenthorQDashboardClient,
@@ -471,6 +474,19 @@ async def lifespan(app: FastAPI):
     """Start IB pool and UW client on startup, tear down on shutdown."""
     global ib_pool, uw_available
 
+    # Operator preferences BEFORE anything can place an order. bootstrap()
+    # publishes stored values into os.environ so every subprocess we spawn
+    # (ib_place_order.py above all) inherits the caps the operator set; without
+    # it a restart silently reverts the placement funnel to env/defaults.
+    # Only this long-lived process opts into background refreshes — short-lived
+    # subprocesses read the inherited overlay instead of opening their own
+    # Turso socket per invocation.
+    app_preferences.enable_background_refresh(True)
+    if await asyncio.to_thread(app_preferences.bootstrap):
+        logger.info("Operator preferences loaded from Turso")
+    else:
+        logger.warning("Operator preferences unavailable; env and code defaults in force")
+
     if test_mode:
         logger.info("Radon API starting in test mode; IB Gateway and pool startup are disabled")
         uw_available = bool(os.environ.get("UW_TOKEN"))
@@ -539,6 +555,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Radon API", version="1.0.0", lifespan=lifespan)
 app.include_router(historical_router)
+app.include_router(preferences_router)
 
 # Explicit origin allowlist (was a `https://.*\.radon\.run` wildcard regex). The
 # wildcard matched ANY *.radon.run subdomain, so a subdomain takeover of a stale
