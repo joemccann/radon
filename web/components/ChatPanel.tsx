@@ -1,8 +1,17 @@
 "use client";
 
-import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Send, ArrowDown, Copy, Check } from "lucide-react";
-import type { ApiMessage, AssistantOrderProposal, Message, PortfolioData, WorkspaceSection } from "@/lib/types";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowDown, Copy, Check } from "lucide-react";
+import { ApprovalGate, AskComposer, EngineTrace } from "@/components/agent";
+import { buildTurnSteps, describeEngines } from "@/lib/agent/turnSteps";
+import type {
+  ApiMessage,
+  AssistantOrderProposal,
+  AssistantToolEvent,
+  Message,
+  PortfolioData,
+  WorkspaceSection,
+} from "@/lib/types";
 import { quickPromptsBySection } from "@/lib/data";
 import { createTimestamp } from "@/lib/utils";
 import {
@@ -20,6 +29,17 @@ import type { OrderRiskInput, OrderRiskState } from "@/lib/order/risk/useOrderRi
 type ChatPanelProps = {
   activeSection: WorkspaceSection;
   portfolio?: PortfolioData | null;
+  /**
+   * Overlay open flag, forwarded to AskComposer's `focusKey` so the composer
+   * takes focus on every ⌘J open (replaces the old composerRef focus effect).
+   */
+  isOpen?: boolean;
+  /**
+   * A prompt handed over from another surface (e.g. a newsfeed follow-up chip).
+   * Sent once on arrival, then reported back via onSeedConsumed.
+   */
+  seedPrompt?: string | null;
+  onSeedConsumed?: () => void;
 };
 
 /**
@@ -31,16 +51,6 @@ type ChatPanelProps = {
 type ChatStatus = "idle" | "submitted" | "streaming" | "done" | "error";
 
 const STICK_THRESHOLD_PX = 80;
-
-function TypingIndicator() {
-  return (
-    <div className="chat-typing" aria-hidden="true">
-      <span className="chat-typing-dot" />
-      <span className="chat-typing-dot" />
-      <span className="chat-typing-dot" />
-    </div>
-  );
-}
 
 function CopyButton({ content }: { content: string }) {
   const [copied, setCopied] = useState(false);
@@ -86,12 +96,21 @@ function proposalRiskInput(proposal: AssistantOrderProposal | null): OrderRiskIn
   };
 }
 
-export default function ChatPanel({ activeSection, portfolio }: ChatPanelProps) {
-  const [query, setQuery] = useState("");
+export default function ChatPanel({
+  activeSection,
+  portfolio,
+  isOpen = true,
+  seedPrompt = null,
+  onSeedConsumed,
+}: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [status, setStatus] = useState<ChatStatus>("idle");
   const [lastError, setLastError] = useState("");
   const [proposal, setProposal] = useState<AssistantOrderProposal | null>(null);
+  // Tool telemetry for the turn in flight. Reset per send so a finished turn's
+  // trace can't leak into the next one.
+  const [turnTools, setTurnTools] = useState<AssistantToolEvent[]>([]);
+  const [turnModel, setTurnModel] = useState<string | null>(null);
   const [isPlacing, setPlacing] = useState(false);
   const [riskState, setRiskState] = useState<OrderRiskState | null>(null);
   const riskInput = useMemo(() => proposalRiskInput(proposal), [proposal]);
@@ -99,14 +118,7 @@ export default function ChatPanel({ activeSection, portfolio }: ChatPanelProps) 
 
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const atBottomRef = useRef(true);
-  const composingRef = useRef(false);
-  const composerRef = useRef<HTMLTextAreaElement | null>(null);
 
-  // ChatPanel mounts inside the ⌘J overlay; the operator expects to type
-  // immediately, so the composer takes focus on open.
-  useEffect(() => {
-    composerRef.current?.focus();
-  }, []);
   const sectionPrompts = quickPromptsBySection[activeSection];
   const isBusy = status === "submitted" || status === "streaming";
 
@@ -137,13 +149,8 @@ export default function ChatPanel({ activeSection, portfolio }: ChatPanelProps) 
     scrollToBottom();
   }, [scrollToBottom]);
 
-  const sendMessage = async (eventOrPrompt: FormEvent<HTMLFormElement> | string) => {
-    if (typeof eventOrPrompt !== "string") {
-      eventOrPrompt.preventDefault();
-    }
-
-    const nextPrompt = typeof eventOrPrompt === "string" ? eventOrPrompt : query;
-    const cleaned = nextPrompt.trim();
+  const sendMessage = async (prompt: string) => {
+    const cleaned = prompt.trim();
     if (!cleaned || isBusy) {
       return;
     }
@@ -177,9 +184,10 @@ export default function ChatPanel({ activeSection, portfolio }: ChatPanelProps) 
     };
 
     setMessages((current) => [...current, userMessage, assistantMessage]);
-    setQuery("");
     setStatus("submitted");
     setLastError("");
+    setTurnTools([]);
+    setTurnModel(null);
 
     try {
       const piCommand = routeToPiPrompt(cleaned);
@@ -189,6 +197,8 @@ export default function ChatPanel({ activeSection, portfolio }: ChatPanelProps) 
         await streamMessage(assistantId, assistantContent, setMessages);
       } else {
         const turn = await requestAssistantTurn(conversation, cleaned);
+        setTurnTools(turn.toolEvents);
+        setTurnModel(turn.model);
         setStatus("streaming");
         await streamMessage(assistantId, turn.content, setMessages);
         // F7: never auto-execute. A destructive order proposal is surfaced as
@@ -219,6 +229,20 @@ export default function ChatPanel({ activeSection, portfolio }: ChatPanelProps) 
     }
   };
 
+  // A handed-over prompt sends itself once on arrival. Both callbacks are read
+  // through refs so an inline parent arrow (new identity every render) can't
+  // turn this into a send loop; the effect keys on the prompt alone.
+  const sendMessageRef = useRef(sendMessage);
+  sendMessageRef.current = sendMessage;
+  const onSeedConsumedRef = useRef(onSeedConsumed);
+  onSeedConsumedRef.current = onSeedConsumed;
+
+  useEffect(() => {
+    if (!seedPrompt) return;
+    void sendMessageRef.current(seedPrompt);
+    onSeedConsumedRef.current?.();
+  }, [seedPrompt]);
+
   const confirmProposal = async () => {
     if (!proposal || isPlacing || !riskState?.okToSubmit) return;
     setPlacing(true);
@@ -247,18 +271,6 @@ export default function ChatPanel({ activeSection, portfolio }: ChatPanelProps) 
   const cancelProposal = () => {
     if (isPlacing) return;
     setProposal(null);
-  };
-
-  const onComposerKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (
-      event.key === "Enter" &&
-      !event.shiftKey &&
-      !composingRef.current &&
-      !event.nativeEvent.isComposing
-    ) {
-      event.preventDefault();
-      void sendMessage(query);
-    }
   };
 
   const lastAssistantId = [...messages].reverse().find((m) => m.role === "assistant")?.id ?? null;
@@ -316,7 +328,10 @@ export default function ChatPanel({ activeSection, portfolio }: ChatPanelProps) 
                       </div>
                       <div className="chat-message-body">
                         {isPending ? (
-                          <TypingIndicator />
+                          <EngineTrace
+                            steps={buildTurnSteps(turnTools, status === "error" ? "error" : "submitted")}
+                            engines={describeEngines(turnModel)}
+                          />
                         ) : (
                           <>
                             <MarkdownRenderer content={message.content} />
@@ -352,36 +367,29 @@ export default function ChatPanel({ activeSection, portfolio }: ChatPanelProps) 
 
           {lastError ? <div className="chat-error">{lastError}</div> : null}
 
+          {/* F7: never auto-execute. TODO(agent-ui): when the assistant returns
+              sized alternatives (split clips, hold), map them into `options` and
+              pass the confirmed option id through to placeProposedOrder. */}
           {proposal ? (
-            <div className="chat-order-confirm" role="group" aria-label="Order confirmation">
-              <div className="chat-order-confirm-header">CONFIRM ORDER</div>
-              <div className="chat-order-confirm-summary">{proposal.summary}</div>
+            <>
+              {/* The order-risk chokepoint stays mandatory: the gate renders the
+                  risk verdict and confirmProposal refuses unless okToSubmit. */}
               <OrderRiskGate
                 input={riskInput}
                 portfolio={portfolio}
                 surface="assistant-chat"
                 onState={setRiskState}
               />
-              <div className="chat-order-confirm-note">This order is not sent until you confirm.</div>
-              <div className="chat-order-confirm-actions">
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  onClick={cancelProposal}
-                  disabled={isPlacing}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="btn-primary"
-                  onClick={confirmProposal}
-                  disabled={isPlacing}
-                >
-                  {isPlacing ? "Placing..." : "Confirm"}
-                </button>
-              </div>
-            </div>
+              <ApprovalGate
+                title="Confirmation required"
+                body={proposal.summary}
+                options={[{ id: "route", label: "Route as proposed", meta: "AS PROPOSED" }]}
+                busy={isPlacing}
+                confirmDisabled={riskState?.okToSubmit !== true}
+                onConfirm={() => void confirmProposal()}
+                onDismiss={cancelProposal}
+              />
+            </>
           ) : null}
 
           <div className="chat-composer">
@@ -399,36 +407,11 @@ export default function ChatPanel({ activeSection, portfolio }: ChatPanelProps) 
                 ))}
               </div>
             ) : null}
-            <form suppressHydrationWarning className="chat-input-row" onSubmit={sendMessage}>
-              <textarea
-                suppressHydrationWarning
-                ref={composerRef}
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                onKeyDown={onComposerKeyDown}
-                onCompositionStart={() => {
-                  composingRef.current = true;
-                }}
-                onCompositionEnd={() => {
-                  composingRef.current = false;
-                }}
-                placeholder="Ask Grok for flow analysis, risk checks, action items..."
-                className="chat-textarea"
-                aria-label="Message Grok assistant"
-                rows={1}
-                maxLength={1000}
-              />
-              <button
-                suppressHydrationWarning
-                className="chat-send"
-                type="submit"
-                disabled={!query.trim() || isBusy}
-                title="Send (Enter)"
-                aria-label="Send message"
-              >
-                <Send size={14} />
-              </button>
-            </form>
+            <AskComposer
+              busy={isBusy}
+              focusKey={isOpen}
+              onSubmit={(text) => void sendMessage(text)}
+            />
           </div>
         </div>
     </div>

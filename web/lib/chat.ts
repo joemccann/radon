@@ -3,6 +3,7 @@ import type {
   ApiMessage,
   AssistantOrderProposal,
   AssistantResponse,
+  AssistantToolEvent,
   Message,
   PiResponse,
   WorkspaceSection,
@@ -186,6 +187,10 @@ export async function requestAssistantReply(history: ApiMessage[], latestMessage
 export type AssistantTurn = {
   content: string;
   proposal: AssistantOrderProposal | null;
+  /** Per-tool-call telemetry from the agentic loop; drives <EngineTrace>. */
+  toolEvents: AssistantToolEvent[];
+  /** Concrete model id the loop ran on; drives the trace's engine chip. */
+  model: string | null;
 };
 
 /**
@@ -210,7 +215,7 @@ export async function requestAssistantTurn(
 
   if (!response.ok) {
     const message = payload?.error ? `Error: ${payload.error}` : "Assistant service returned an error.";
-    return { content: message, proposal: null };
+    return { content: message, proposal: null, toolEvents: [], model: null };
   }
 
   const content =
@@ -218,7 +223,12 @@ export async function requestAssistantTurn(
       ? formatAssistantPayload(payload.content)
       : fallbackReply(latestMessage);
 
-  return { content, proposal: payload?.proposal ?? null };
+  return {
+    content,
+    proposal: payload?.proposal ?? null,
+    toolEvents: Array.isArray(payload?.toolEvents) ? payload.toolEvents : [],
+    model: typeof payload?.model === "string" ? payload.model : null,
+  };
 }
 
 /**

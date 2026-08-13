@@ -36,7 +36,10 @@ describe("ChatPanel streaming UX", () => {
     expect(buttons.some((b) => /portfolio/i.test(b.textContent ?? ""))).toBe(true);
   });
 
-  it("renders a typing indicator (not 'No output.') while a turn is in flight", async () => {
+  // The pending affordance is now <EngineTrace> (a real step trace fed by the
+  // loop's tool telemetry) rather than the three typing dots; the invariant
+  // under test is unchanged — a pending turn shows progress, never "No output."
+  it("renders an engine trace (not 'No output.') while a turn is in flight", async () => {
     let resolveTurn: (value: unknown) => void = () => {};
     const pending = new Promise((resolve) => {
       resolveTurn = resolve;
@@ -49,12 +52,12 @@ describe("ChatPanel streaming UX", () => {
     global.fetch = fetchMock;
 
     const { container } = render(<ChatPanel activeSection="portfolio" />);
-    const textarea = screen.getByLabelText("Message Grok assistant");
+    const textarea = screen.getByLabelText("Ask Radon");
     fireEvent.change(textarea, { target: { value: "hello there" } });
     fireEvent.submit(textarea.closest("form")!);
 
     await waitFor(() => {
-      expect(container.querySelector(".chat-typing")).not.toBeNull();
+      expect(container.querySelector(".engine-trace")).not.toBeNull();
     });
     expect(screen.queryByText("No output.")).toBeNull();
     expect(screen.queryByText(/Analyzing flow, structure/i)).toBeNull();
@@ -63,7 +66,7 @@ describe("ChatPanel streaming UX", () => {
 
     await waitFor(
       () => {
-        expect(container.querySelector(".chat-typing")).toBeNull();
+        expect(container.querySelector(".engine-trace")).toBeNull();
       },
       { timeout: 4000 },
     );
@@ -84,7 +87,7 @@ describe("ChatPanel streaming UX", () => {
     global.fetch = fetchMock;
 
     render(<ChatPanel activeSection="portfolio" />);
-    const textarea = screen.getByLabelText("Message Grok assistant");
+    const textarea = screen.getByLabelText("Ask Radon");
     fireEvent.change(textarea, { target: { value: "/portfolio" } });
     fireEvent.submit(textarea.closest("form")!);
 

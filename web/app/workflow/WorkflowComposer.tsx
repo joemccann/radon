@@ -26,6 +26,8 @@ import {
   type SavedWorkflow,
   WORKFLOW_PALETTE,
 } from "./workflowClient";
+import { TaskRuns, type AgentTask } from "@/components/agent";
+import { graphToRunningTasks, runReportToTasks } from "@/lib/agent/workflowTasks";
 
 // F14 — minimal working flow-pipeline canvas. Palette adds nodes; edges connect
 // them; Save persists to Turso; Run executes server-side (Python executor). An
@@ -41,6 +43,9 @@ function Canvas() {
   const [saved, setSaved] = useState<SavedWorkflow[]>([]);
   const [status, setStatus] = useState<string>("");
   const [report, setReport] = useState<RunReport | null>(null);
+  // Non-null only while a run is in flight; the executor returns its report in
+  // one shot, so this is the only window where per-node state is "running".
+  const [runningTasks, setRunningTasks] = useState<AgentTask[] | null>(null);
 
   useEffect(() => {
     listWorkflows()
@@ -96,6 +101,9 @@ function Canvas() {
   const onRun = useCallback(async () => {
     const graph = currentGraph();
     try {
+      // Set before the await so the per-node run state is visible while the
+      // executor works; the finally clears it on success, cancel and error.
+      setRunningTasks(graphToRunningTasks(graph));
       const result = await runWorkflowAfterConfirmation(graph, window.confirm, runWorkflow);
       if (!result) {
         setStatus("Run cancelled");
@@ -106,6 +114,8 @@ function Canvas() {
       setStatus(describeRunReport(result));
     } catch (err) {
       setStatus(err instanceof Error ? err.message : "Run failed");
+    } finally {
+      setRunningTasks(null);
     }
   }, [currentGraph]);
 
@@ -187,7 +197,13 @@ function Canvas() {
         </div>
       </div>
 
-      {report ? <RunReportStrip report={report} /> : null}
+      {runningTasks ? (
+        <div style={reportStyle}>
+          <TaskRuns tasks={runningTasks} />
+        </div>
+      ) : report ? (
+        <RunReportStrip report={report} />
+      ) : null}
     </div>
   );
 }
@@ -200,11 +216,7 @@ function RunReportStrip({ report }: { report: RunReport }) {
       </strong>
       <span style={{ marginLeft: 12 }}>{describeRunReport(report)}</span>
       <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {report.steps.map((step) => (
-          <span key={step.node_id} style={stepChipStyle(step.blocked)}>
-            {step.node_type} ({step.rows_in} to {step.rows_out})
-          </span>
-        ))}
+        <TaskRuns tasks={runReportToTasks(report)} />
       </div>
     </div>
   );
@@ -318,16 +330,6 @@ const reportStyle: React.CSSProperties = {
   background: "var(--bg-panel)",
   fontSize: 12,
 };
-
-function stepChipStyle(blocked: boolean): React.CSSProperties {
-  return {
-    border: `1px solid ${blocked ? "var(--negative)" : "var(--border)"}`,
-    borderRadius: 4,
-    padding: "2px 8px",
-    fontFamily: "var(--font-mono)",
-    color: blocked ? "var(--negative)" : "var(--text-secondary)",
-  };
-}
 
 export default function WorkflowComposer() {
   return (
