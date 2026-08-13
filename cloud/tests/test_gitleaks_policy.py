@@ -25,12 +25,20 @@ LITERAL_TWS_BASELINE_COMMITS = {
     # before the report was untracked from this public repo. Immutable on
     # protected main; value tracked for rotation, not a new exposure.
     "9142de46a09e367483ed57e1a323f1141bd106cc",
+    # 2026-08-13: main was rebase-merged and recreated the two commits above
+    # under new SHAs. Blobs are identical to the pre-rebase originals
+    # (32dd55bd == 9142de46's, 1d9a0955 == 65213d97's), so these carry no new
+    # content -- only the commit identity changed.
+    "6ec11003bb4521e7f7b677ffbd78b7fd4d09458a",
+    "da857b8b19a6e5778bb86bf37465346dca8da89b",
 }
 EXAMPLE_BASELINE_COMMITS = {
     "3ee6e6e8a50c24944c1983a75f5bf6dda9048f67",
     "90daa01986c377ac20ba682021d77372fd030393",
     "25ef348f1eb882bdc4a7d735fd8e3206b2711c2e",
     "65213d976eb3b4d835761c0b3f639581a533a27a",
+    # Same 2026-08-13 rebase; recreated fixture commit, identical blob.
+    "da857b8b19a6e5778bb86bf37465346dca8da89b",
 }
 
 
