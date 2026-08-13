@@ -25,9 +25,9 @@ import {
   toolSchemas,
   type AssistantPrincipal,
 } from "@/lib/assistant/tools";
-import type { AssistantOrderInput } from "@/lib/types";
+import type { AssistantOrderComboLeg, AssistantOrderInput } from "@/lib/types";
 
-const MAX_ROUNDS = 6;
+export const MAX_ROUNDS = 8;
 
 const CAP_FALLBACK_MESSAGE = "Reached the maximum tool-calling rounds without a final answer.";
 
@@ -110,6 +110,10 @@ function toToolResultMessage(results: ToolResultBlock[]): LoopMessage {
   return { role: "user", content: results };
 }
 
+function normalizeExpiryDigits(raw: unknown): string {
+  return typeof raw === "string" ? raw.replace(/-/g, "") : "";
+}
+
 export function validateAssistantOrderInput(input: Record<string, unknown>): AssistantOrderInput | null {
   const type = input.type;
   const ticker = typeof input.ticker === "string" ? input.ticker.trim().toUpperCase() : "";
@@ -117,12 +121,32 @@ export function validateAssistantOrderInput(input: Record<string, unknown>): Ass
   const quantity = input.quantity;
   const limitPrice = input.limit_price;
   if (
-    (type !== "stock" && type !== "option") || !/^[A-Z][A-Z0-9.-]{0,9}$/.test(ticker)
+    (type !== "stock" && type !== "option" && type !== "combo") || !/^[A-Z][A-Z0-9.-]{0,9}$/.test(ticker)
     || !action || !Number.isInteger(quantity) || (quantity as number) <= 0
     || typeof limitPrice !== "number" || !Number.isFinite(limitPrice) || limitPrice <= 0
   ) return null;
   if (type === "stock") return { type, ticker, action, quantity: quantity as number, limit_price: limitPrice };
-  const expiry = typeof input.expiry === "string" ? input.expiry : "";
+  if (type === "combo") {
+    if (!Array.isArray(input.legs) || input.legs.length < 2) return null;
+    const legs: AssistantOrderComboLeg[] = [];
+    for (const raw of input.legs) {
+      if (!raw || typeof raw !== "object") return null;
+      const row = raw as Record<string, unknown>;
+      const expiry = normalizeExpiryDigits(row.expiry);
+      const strike = row.strike;
+      const right = row.right === "C" || row.right === "P" ? row.right : null;
+      const legAction = row.action === "BUY" || row.action === "SELL" ? row.action : null;
+      const ratio = typeof row.ratio === "number" ? row.ratio : 1;
+      if (
+        !/^\d{8}$/.test(expiry) || typeof strike !== "number" || !Number.isFinite(strike) || strike <= 0
+        || !right || !legAction || !Number.isInteger(ratio) || ratio <= 0
+      ) return null;
+      legs.push({ expiry, strike, right, action: legAction, ratio });
+    }
+    const structure = typeof input.structure === "string" && input.structure.trim() ? input.structure.trim() : undefined;
+    return { type, ticker, action, quantity: quantity as number, limit_price: limitPrice, ...(structure ? { structure } : {}), legs };
+  }
+  const expiry = normalizeExpiryDigits(input.expiry);
   const strike = input.strike;
   const right = input.right;
   const conId = input.conId;

@@ -2,7 +2,7 @@
 
 Source: `data/radon/reports/report.md` (resolved from `.deepsec/data/radon/reports/report.md`).
 
-Draft PR: `https://github.com/joemccann/radon/pull/21`.
+Merged PR: `https://github.com/joemccann/radon/pull/21`.
 
 ## Reconciliation
 
@@ -13,7 +13,7 @@ Draft PR: `https://github.com/joemccann/radon/pull/21`.
 | Bug | 130 | 0 | backend, risk-core, desktop, mobile, web, and supplemental ledgers |
 | **Total** | **394** | **0** | every report ID is represented in the status ledgers |
 
-Security disposition is 95 fixed, 45 duplicate, and 2 deferred-external. The two deferred rows, SEC-054 and SEC-055, have complete source remediation; only operator-controlled CDN/origin and reachable-history purges remain.
+Security disposition is 95 fixed, 45 duplicate, and 2 deferred-external. SEC-054 and SEC-055 have complete source, owned CDN/origin, immutable-deployment, and owned-history cleanup. Their remaining reachability is external: three third-party forks must be cleaned before GitHub Support can remove immutable pull refs and cached objects.
 
 ## Verification
 

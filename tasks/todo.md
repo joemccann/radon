@@ -1,3 +1,29 @@
+# Task: Assistant full-backend tools (2026-08-13)
+
+CMD+J chat failed the ADBE bull-call-spread ask: no live spot, no priced chain, no spread math, KB miss treated as a dead end. Give the in-app assistant the same operator data surface as a terminal session (READ-only FastAPI + evaluate), then exact strikes from live mids.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests: tool registry, spread math, fetch_backend allowlist, FastAPI quote/uw-chain, system prompt, combo place_order
+- T2 depends_on: [T1] - FastAPI `GET /quote/{ticker}` + `GET /options/uw-chain`
+- T3 depends_on: [T2] - Assistant tools + MAX_ROUNDS=8 + prompt + combo proposal mapping
+- T4 depends_on: [T3] - Focused tests green
+
+## Checklist
+
+- [x] T1 Red tests
+- [x] T2 FastAPI market routes
+- [x] T3 Assistant tools / loop / prompt / placeProposedOrder
+- [x] T4 Verify
+
+## Review
+
+- CMD+J can now quote, pull a priced UW chain, rank verticals, run evaluate.py, and call allowlisted FastAPI READ surfaces. KB miss no longer blocks live data.
+- `GET /quote/{ticker}` and `GET /options/uw-chain` sit on FastAPI. Mutating paths stay off `fetch_backend`. `place_order` combo proposals map to `/api/orders/place` type=combo.
+- Verify: vitest 57 focused + journal/untrusted; pytest `test_assistant_market_routes` + authz matrix 91.
+
+---
+
 # Task: DeepSec security remediation (2026-08-13)
 
 Source: `/Users/joemccann/dev/apps/finance/radon/.deepsec/data/radon/reports/report.md`
@@ -2536,3 +2562,32 @@ Per /indicator swarm (spec: docs/indicators/skew.md). Slug/service `skew`, tab S
 - Root cause: the shared scanner header assigned both the compact Theta heading and its dense controls flexible growth, so the heading occupied roughly half the row and made the controls read as a detached region.
 - Scoped the correction to Theta Harvester: the title now keeps intrinsic width and the control rail owns the remaining flexible space. Other scanner layouts are unchanged, and the existing mobile reflow still applies.
 - Verification: full Vitest 514 files / 5,326 tests passed; Theta Playwright desktop and mobile 2 passed; typecheck, diff check, layout detector, and visual screenshot inspection passed.
+
+# Task: Finalize dashboard-plate purge after history rewrite (2026-08-13)
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify the rewritten owned refs, deleted deployments, CDN 404s, and the post-rewrite CI failure.
+- T2 depends_on: [T1] - Remap commit-exact gitleaks baselines invalidated by the authorized history rewrite.
+- T3 depends_on: [T2] - Run focused gitleaks policy tests and the full Python/cloud/web gates.
+- T4 depends_on: [T3] - Commit and push the follow-up to `main`; verify CI, origin reachability, and branch protection.
+- T5 depends_on: [T4] - Record the remaining immutable GitHub pull refs and third-party fork cleanup.
+
+## Checklist
+
+- [x] T1 Owned purge verified; post-rewrite gitleaks failure isolated.
+- [x] T2 Gitleaks baseline commit IDs remapped.
+- [x] T3 Focused and full verification green.
+- [ ] T4 Follow-up pushed; CI verification pending.
+- [x] T5 External cleanup documented.
+
+## Review
+
+- PR #21 merged. Vercel CDN purged; 221 affected immutable deployments deleted; all four public plate URLs returned 404 twice across five hosts.
+- Thirteen owned branches were rewritten atomically with exact leases; three tags were unchanged. Fresh-mirror verification found zero affected paths or binary objects across owned heads/tags; force-push protection is restored.
+- History rewriting remapped two vetted gitleaks baseline commits. Both original and mapped identities remain commit-exact while immutable pull refs coexist with rewritten origin history; no regex/path allowlist was widened.
+- Verification: gitleaks 2,299 commits / zero findings; Python 6,142 passed, 1 skipped, 62.88% coverage; cloud 825 passed, 4 skipped; Vitest 589 files / 6,093 tests passed, 83.34% statement coverage; Playwright 43 passed; typecheck, lint, production build, output-trace audit, public-asset regressions, and diff hygiene passed.
+- External reachability remains in GitHub pull refs for PRs #10-#19 and forks `Joshglobal/radon`, `pbeninte/radon`, and `mdotk/radon`. Fork owners must clean/delete those refs before GitHub Support can dereference pull refs and run server garbage collection.
+- Show Me artifact: `tasks/artifacts/show-me-security-remediation.html`.
+
+---

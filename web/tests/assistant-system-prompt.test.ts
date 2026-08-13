@@ -48,6 +48,10 @@ describe("assistant system prompt", () => {
     expect(SYSTEM_PROMPT).toContain("go straight to the journal tools");
     // Tool-surface sentence mentions the journal alongside the live surfaces.
     expect(SYSTEM_PROMPT).toContain("the trade journal");
+    expect(SYSTEM_PROMPT).toContain("get_quote");
+    expect(SYSTEM_PROMPT).toContain("rank_spreads");
+    expect(SYSTEM_PROMPT).toContain("run_evaluate");
+    expect(SYSTEM_PROMPT).toContain("Never invent a spot price");
     // No em dashes in user-facing-adjacent copy.
     expect(SYSTEM_PROMPT).not.toContain("—");
     // The static prompt carries no baked-in date; the route injects it per request.

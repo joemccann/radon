@@ -48,6 +48,14 @@ export type AssistantOrderProposal = {
   toolUseId: string;
 };
 
+export type AssistantOrderComboLeg = {
+  expiry: string;
+  strike: number;
+  right: "C" | "P";
+  action: "BUY" | "SELL";
+  ratio: number;
+};
+
 export type AssistantOrderInput =
   | {
       type: "stock";
@@ -67,6 +75,15 @@ export type AssistantOrderInput =
       right: "C" | "P";
       conId: number;
       exchange: string;
+    }
+  | {
+      type: "combo";
+      ticker: string;
+      action: "BUY" | "SELL";
+      quantity: number;
+      limit_price: number;
+      structure?: string;
+      legs: AssistantOrderComboLeg[];
     };
 
 export type AssistantResponse = {

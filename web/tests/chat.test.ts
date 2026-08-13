@@ -1,4 +1,4 @@
-import { test, expect } from "vitest";
+import { test, expect, vi } from "vitest";
 import {
   isPiCommandInput,
   normalizeCommandInput,
@@ -133,4 +133,41 @@ test("validated option proposal submits option or is rejected never stock", asyn
     input: { type: "option", ticker: "SPY", action: "BUY", quantity: 1, limit_price: 2, expiry: "20260918", strike: 600, right: "C", conId: 44, exchange: "SMART" },
   });
   expect(calls[0]).toMatchObject({ type: "option", conId: 44, strike: 600 });
+});
+
+test("placeProposedOrder maps combo legs instead of forcing a stock order", async () => {
+  const fetchMock = vi.fn(async () => ({
+    ok: true,
+    json: async () => ({ message: "submitted" }),
+  }));
+  vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+  const result = await placeProposedOrder({
+    tool: "place_order",
+    destructive: true,
+    summary: "BUY 10 ADBE bull call spread 480/500 2026-09-18 @ 7",
+    toolUseId: "tu-1",
+    input: {
+      ticker: "ADBE",
+      action: "BUY",
+      quantity: 10,
+      limit_price: 7,
+      structure: "bull call spread",
+      type: "combo",
+      legs: [
+        { expiry: "20260918", strike: 480, right: "C", action: "BUY", ratio: 1 },
+        { expiry: "20260918", strike: 500, right: "C", action: "SELL", ratio: 1 },
+      ],
+    },
+  });
+
+  expect(result.ok).toBe(true);
+  const sent = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+  expect(sent.type).toBe("combo");
+  expect(sent.symbol).toBe("ADBE");
+  expect(sent.quantity).toBe(10);
+  expect(sent.limitPrice).toBe(7);
+  expect(sent.legs).toHaveLength(2);
+  expect(sent.legs[0]).toMatchObject({ strike: 480, action: "BUY", right: "C" });
+  vi.unstubAllGlobals();
 });
