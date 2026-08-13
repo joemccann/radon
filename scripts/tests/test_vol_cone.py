@@ -348,6 +348,88 @@ class TestRunHeartbeat:
         assert self.db_writes == [True]
 
 
+class _InterruptingClient(_StubClient):
+    """Stub that dies mid-scan the way a deploy SIGTERM kills the oneshot."""
+
+    def __init__(self, greeks, closes, spot, *, die_after):
+        super().__init__(greeks, closes, spot)
+        self.die_after = die_after
+
+    def fetch_greeks(self, ticker, expiry, as_of=None):
+        if len(self.calls) >= self.die_after:
+            raise KeyboardInterrupt("SIGTERM during stop-clean")
+        return super().fetch_greeks(ticker, expiry, as_of)
+
+
+class TestRunSurvivesInterruption:
+    """Incident 2026-08-12: radon-vol-cone.service was SIGTERM'd mid-ExecStart
+    by the deploy's stop-clean. Everything fetched was held in memory until a
+    single terminal write, so each kill discarded 100% of the work and the
+    cold-start backfill (~15,600 UW calls, ~5h) could never converge.
+    """
+
+    SESSIONS = [row["date"] for row in WEEKLY[-3:]]
+    EXPIRY = date(2026, 9, 18)
+    NOW = datetime(2026, 8, 12, 23, 0, tzinfo=timezone.utc)
+
+    @pytest.fixture(autouse=True)
+    def _isolate(self, tmp_path, monkeypatch):
+        import fetch_vol_cone as mod
+        from db import writer
+
+        monkeypatch.setattr(mod, "VOL_CONE_JSON", tmp_path / "vol_cone.json")
+        monkeypatch.setattr(mod, "_read_history_rows", lambda: [])
+        monkeypatch.setattr(mod, "select_target_expiries", lambda as_of: [self.EXPIRY])
+
+        self.checkpointed: list[dict] = []
+        self.health: list[tuple[str, str]] = []
+        monkeypatch.setattr(writer, "ensure_no_replica_for_writers", lambda: None)
+        monkeypatch.setattr(
+            writer,
+            "upsert_vol_cone_rows",
+            lambda rows, recorded_at=None: self.checkpointed.extend(rows),
+        )
+        monkeypatch.setattr(writer, "upsert_scan_snapshot", lambda *a, **k: None)
+        monkeypatch.setattr(
+            writer,
+            "record_service_health",
+            lambda service, state, **kwargs: self.health.append((service, state)),
+        )
+        self.mod = mod
+
+    def _client(self, cls=_StubClient, **kwargs):
+        closes = {row["date"]: row["spot"] for row in WEEKLY if row["date"] in self.SESSIONS}
+        greeks = {
+            (ticker, self.EXPIRY.isoformat(), session): NVDA_CURRENT
+            for ticker in ("NVDA", "SMH")
+            for session in self.SESSIONS
+        }
+        return cls(greeks, {"NVDA": closes, "SMH": closes},
+                   {"NVDA": NVDA_SPOT, "SMH": SMH_SPOT}, **kwargs)
+
+    def test_completed_ticker_is_persisted_before_the_interrupt(self):
+        client = self._client(_InterruptingClient, die_after=len(self.SESSIONS))
+        with pytest.raises(KeyboardInterrupt):
+            self.mod.run(client=client, now=self.NOW, tickers=["NVDA", "SMH"])
+        nvda = [row for row in self.checkpointed if row["ticker"] == "NVDA"]
+        assert {row["date"] for row in nvda} == set(self.SESSIONS)
+        assert all(row["expiry"] == self.EXPIRY.isoformat() for row in nvda)
+
+    def test_wall_clock_budget_stops_the_scan_and_still_heartbeats(self, monkeypatch):
+        monkeypatch.setenv("VOL_CONE_BUDGET_S", "100")
+        clock = iter([0.0, 60.0, 120.0, 180.0, 240.0])
+        monkeypatch.setattr(self.mod, "_monotonic", lambda: next(clock))
+        client = self._client()
+        payload = self.mod.run(client=client, now=self.NOW, tickers=["NVDA", "SMH"])
+        assert {call[0] for call in client.calls} == {"NVDA"}
+        assert payload["count"] == 1
+        assert ("vol-cone", "ok") in self.health
+
+    def test_budget_defaults_inside_the_unit_start_timeout(self, monkeypatch):
+        monkeypatch.delenv("VOL_CONE_BUDGET_S", raising=False)
+        assert 0 < self.mod._budget_seconds() < 3600
+
+
 # ── Migration + upsert ────────────────────────────────────────────
 
 
