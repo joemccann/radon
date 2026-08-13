@@ -2,8 +2,13 @@
 Description=Radon Skew Indicator (UW SPX 1M 25-delta put/call IV ratio, live RTH)
 After=network.target
 
+# The timer fires every minute through RTH, so a burst of 5 per 300s sits
+# exactly on the boundary and any jitter (RandomizedDelaySec, a run crossing a
+# second) trips start-limit-hit, which PARKS the unit until a manual
+# reset-failed. 10 matches every other per-minute oneshot on this host
+# (host-metrics, ib-watchdog, nextjs-db-watchdog, portfolio-sync).
 StartLimitIntervalSec=300
-StartLimitBurst=5
+StartLimitBurst=10
 
 [Service]
 Type=oneshot
