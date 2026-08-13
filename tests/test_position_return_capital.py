@@ -336,6 +336,72 @@ def test_execution_fact_hash_conflict_raises_instead_of_overwriting():
         raise AssertionError("conflicting immutable execution was overwritten")
 
 
+def test_identity_hash_field_set_is_pinned():
+    """The hashed field set is a contract, not whatever normalize_execution
+    happens to return. Adding a field there must be a deliberate act.
+
+    2026-08-13: commit 4eaaf5e9 added `revision` and `source_exec_id` to
+    normalize_execution for reversal splitting. The hash covered every field
+    except `commission`, so 70 of 76 stored facts instantly hashed differently
+    and orders-sync aborted with `execution fact conflict` on the first
+    pre-existing exec_id it re-synced.
+    """
+    from db.writer import _LIFECYCLE_HASH_FIELDS
+
+    assert _LIFECYCLE_HASH_FIELDS == (
+        "account_id",
+        "con_id",
+        "currency",
+        "exec_id",
+        "filled_at",
+        "multiplier",
+        "order_ref",
+        "perm_id",
+        "price",
+        "quantity",
+        "sec_type",
+        "side",
+        "signed_quantity",
+        "symbol",
+    )
+
+
+def test_new_normalize_execution_field_does_not_manufacture_a_conflict(monkeypatch):
+    """A field added to normalize_execution must not rewrite stored identities."""
+    import db.writer as writer_mod
+    from position_return_capital import normalize_execution as real_normalize
+
+    db = _ledger_db()
+    assert upsert_position_execution_fact(_execution("E1"), db=db) is True
+
+    def normalize_with_new_field(raw):
+        item = real_normalize(raw)
+        item["some_future_field"] = "added by a later feature"
+        return item
+
+    monkeypatch.setattr(writer_mod, "normalize_execution", normalize_with_new_field, raising=False)
+    monkeypatch.setattr(
+        "position_return_capital.normalize_execution", normalize_with_new_field
+    )
+
+    # Same execution, unchanged lifecycle facts — must be a no-op, not a raise.
+    assert upsert_position_execution_fact(_execution("E1"), db=db) is False
+
+
+def test_real_lifecycle_change_still_conflicts(monkeypatch):
+    """Pinning must not blunt the guard: a changed fact still raises."""
+    db = _ledger_db()
+    assert upsert_position_execution_fact(_execution("E1"), db=db) is True
+    for field, value in (("price", 9.99), ("quantity", 11), ("side", "SLD")):
+        changed = {**_execution("E1"), field: value}
+        try:
+            upsert_position_execution_fact(changed, db=db)
+        except ValueError as exc:
+            assert "execution fact conflict" in str(exc)
+        else:  # pragma: no cover - safety assertion
+            raise AssertionError(f"changed {field} was silently accepted")
+
+
 def test_late_commission_enrichment_is_not_treated_as_execution_correction():
     db = _ledger_db()
     initial = {**_execution("E1"), "commission": 0}
