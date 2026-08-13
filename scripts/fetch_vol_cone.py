@@ -58,6 +58,8 @@ _MONTHLY_LOOKAHEAD = 8
 _MAX_LOOKBACK = 80
 _UNIVERSE_CAP = 40
 _THROTTLE_S = 0.3
+_BUDGET_ENV = "VOL_CONE_BUDGET_S"
+_DEFAULT_BUDGET_S = 1200.0
 _HIT_REGIMES = frozenset({"CHEAP_WINGS", "CHEAP_ATM"})
 
 
@@ -415,6 +417,24 @@ def _write_db_cache(
         print(f"[vol-cone] db cache non-fatal: {exc}", file=sys.stderr)
 
 
+def _checkpoint_rows(rows: list[dict[str, Any]], scan_time: str) -> None:
+    """Persist one (ticker, expiry) delta the moment it completes.
+
+    A deploy's stop-clean SIGTERMs this oneshot mid-scan (incident
+    2026-08-12), so rows held in memory until the terminal write were
+    discarded on every interruption and the backfill never converged.
+    """
+    if not rows:
+        return
+    try:
+        from db import writer
+
+        writer.ensure_no_replica_for_writers()
+        writer.upsert_vol_cone_rows(rows, recorded_at=scan_time)
+    except Exception as exc:  # noqa: BLE001 — the terminal write retries
+        print(f"[vol-cone] checkpoint non-fatal: {exc}", file=sys.stderr)
+
+
 def _write_json_cache(payload: dict[str, Any]) -> None:
     VOL_CONE_JSON.parent.mkdir(parents=True, exist_ok=True)
     tmp = VOL_CONE_JSON.with_suffix(".json.tmp")
@@ -540,6 +560,31 @@ def _backfill_ticker(
 
 # ── orchestration ─────────────────────────────────────────────────
 
+def _monotonic() -> float:
+    return time.monotonic()
+
+
+def _budget_seconds() -> float:
+    """Wall-clock ceiling for one invocation, seconds (``VOL_CONE_BUDGET_S``).
+
+    Sized to finish well inside the unit's TimeoutStartSec and a deploy
+    window, so a cold-start backfill converges across successive daily runs
+    instead of attempting every missing session in one multi-hour scan.
+    """
+    try:
+        budget = float(os.environ.get(_BUDGET_ENV) or _DEFAULT_BUDGET_S)
+    except ValueError:
+        return _DEFAULT_BUDGET_S
+    return budget if budget > 0 else _DEFAULT_BUDGET_S
+
+
+def _scan_targets(universe: list[str], expiries: list[date]):
+    """(ticker, expiry) pairs in scan order, flat so one guard bounds both."""
+    for ticker in universe:
+        for expiry in expiries:
+            yield ticker, expiry
+
+
 def run(
     client: Optional[Any] = None,
     *,
@@ -551,6 +596,11 @@ def run(
     If every ticker already has the last completed session for every
     standard monthly in the window, skip UW greeks, rebuild from stored
     history, and refresh scan_time only (rows_changed=False).
+
+    Each completed (ticker, expiry) delta is checkpointed to Turso before
+    the next one starts, and the scan stops once the wall-clock budget is
+    spent — a kill mid-scan then costs at most one pair, and the snapshot
+    plus service_health heartbeat still land on the truncated path.
     """
     now = now or datetime.now(timezone.utc)
     if now.tzinfo is None:
@@ -571,20 +621,30 @@ def run(
         (row["ticker"], row["date"], row["expiry"]): row
         for row in _read_history_rows()
     }
+    deadline = _monotonic() + _budget_seconds()
     rows_changed = False
-    for ticker in universe:
-        for expiry in expiries:
-            expiry_s = expiry.isoformat()
-            stored = {
-                row["date"]
-                for row in by_key.values()
-                if row["ticker"] == ticker and row["expiry"] == expiry_s
-            }
-            if last_completed in stored:
-                continue
-            for row in _backfill_ticker(client, ticker, expiry, last_completed, stored):
-                by_key[(row["ticker"], row["date"], row["expiry"])] = row
-                rows_changed = True
+    for ticker, expiry in _scan_targets(universe, expiries):
+        if _monotonic() >= deadline:
+            print(
+                "[vol-cone] wall-clock budget spent; deferring the rest to the next run",
+                file=sys.stderr,
+            )
+            break
+        expiry_s = expiry.isoformat()
+        stored = {
+            row["date"]
+            for row in by_key.values()
+            if row["ticker"] == ticker and row["expiry"] == expiry_s
+        }
+        if last_completed in stored:
+            continue
+        fetched = _backfill_ticker(client, ticker, expiry, last_completed, stored)
+        if not fetched:
+            continue
+        for row in fetched:
+            by_key[(row["ticker"], row["date"], row["expiry"])] = row
+        rows_changed = True
+        _checkpoint_rows(fetched, scan_time)
 
     if not rows_changed:
         print("[vol-cone] no missing sessions; refreshing snapshot only", file=sys.stderr)
