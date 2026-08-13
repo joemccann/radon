@@ -43,8 +43,7 @@ async function loadLoop(chat: ChatMock, executeTool: ExecuteToolMock) {
     const actual = await vi.importActual<typeof import("@/lib/assistant/tools")>("@/lib/assistant/tools");
     return { ...actual, executeTool };
   });
-  const { runAssistantLoop } = await import("@/lib/assistant/loop");
-  return runAssistantLoop;
+  return import("@/lib/assistant/loop");
 }
 
 const okExecuteTool = () =>
@@ -67,7 +66,9 @@ describe("assistant loop hardening", () => {
 
   it("cap-hit makes one forced tool-less final call and returns its text", async () => {
     const chat = vi.fn();
-    for (let round = 1; round <= 6; round += 1) {
+    const executeTool = okExecuteTool();
+    const { runAssistantLoop, MAX_ROUNDS } = await loadLoop(chat, executeTool);
+    for (let round = 1; round <= MAX_ROUNDS; round += 1) {
       chat.mockResolvedValueOnce(toolUseResponse(round, { query: `q${round}` }));
     }
     chat.mockResolvedValueOnce({
@@ -78,13 +79,12 @@ describe("assistant loop hardening", () => {
       stopReason: "end_turn",
     });
 
-    const executeTool = okExecuteTool();
-    const runAssistantLoop = await loadLoop(chat, executeTool);
     const result = await runAssistantLoop([{ role: "user", content: "Weekly P&L?" }], "system prompt", PRINCIPAL);
 
-    expect(chat).toHaveBeenCalledTimes(7);
+    expect(MAX_ROUNDS).toBe(8);
+    expect(chat).toHaveBeenCalledTimes(MAX_ROUNDS + 1);
 
-    const finalRequest = chat.mock.calls[6][0] as {
+    const finalRequest = chat.mock.calls[MAX_ROUNDS][0] as {
       tools?: unknown;
       messages: Array<{ role: string; content: unknown }>;
     };
@@ -94,25 +94,28 @@ describe("assistant loop hardening", () => {
     expect(String(lastMessage.content)).toContain("tool-call limit");
 
     expect(result.content).toBe("Partial: could not determine X.");
-    expect(result.rounds).toBe(7);
+    expect(result.rounds).toBe(MAX_ROUNDS + 1);
     expect(result.outcome).toBe("cap_forced_final");
-    expect(result.usage).toEqual({ inputTokens: 70, outputTokens: 35 });
+    expect(result.usage).toEqual({
+      inputTokens: 10 * (MAX_ROUNDS + 1),
+      outputTokens: 5 * (MAX_ROUNDS + 1),
+    });
   });
 
   it("cap-hit falls back to the canned string only when the forced final call fails", async () => {
     const chat = vi.fn();
-    for (let round = 1; round <= 6; round += 1) {
+    const { runAssistantLoop, MAX_ROUNDS } = await loadLoop(chat, okExecuteTool());
+    for (let round = 1; round <= MAX_ROUNDS; round += 1) {
       chat.mockResolvedValueOnce(toolUseResponse(round, { query: `q${round}` }));
     }
     chat.mockRejectedValueOnce(new Error("provider down"));
 
-    const runAssistantLoop = await loadLoop(chat, okExecuteTool());
     const result = await runAssistantLoop([{ role: "user", content: "Weekly P&L?" }], "system prompt", PRINCIPAL);
 
-    expect(chat).toHaveBeenCalledTimes(7);
+    expect(chat).toHaveBeenCalledTimes(MAX_ROUNDS + 1);
     expect(result.content).toBe(CANNED_CAP_MESSAGE);
     expect(result.outcome).toBe("cap_fallback");
-    expect(result.rounds).toBe(6);
+    expect(result.rounds).toBe(MAX_ROUNDS);
   });
 
   it("short-circuits an identical repeated call (key order irrelevant) without re-executing the tool", async () => {
@@ -129,7 +132,7 @@ describe("assistant loop hardening", () => {
       });
 
     const executeTool = okExecuteTool();
-    const runAssistantLoop = await loadLoop(chat, executeTool);
+    const { runAssistantLoop } = await loadLoop(chat, executeTool);
     const result = await runAssistantLoop([{ role: "user", content: "Weekly P&L?" }], "system prompt", PRINCIPAL);
 
     expect(executeTool).toHaveBeenCalledTimes(1);
@@ -164,7 +167,7 @@ describe("assistant loop hardening", () => {
       });
 
     const executeTool = okExecuteTool();
-    const runAssistantLoop = await loadLoop(chat, executeTool);
+    const { runAssistantLoop } = await loadLoop(chat, executeTool);
     const result = await runAssistantLoop([{ role: "user", content: "Weekly P&L?" }], "system prompt", PRINCIPAL);
 
     expect(executeTool).toHaveBeenCalledTimes(2);
@@ -188,7 +191,7 @@ describe("assistant loop hardening", () => {
         toolCalls: [{ id: "order-final", name: "place_order", input: validOrder }],
       });
     const executeTool = okExecuteTool();
-    const runAssistantLoop = await loadLoop(chat, executeTool);
+    const { runAssistantLoop } = await loadLoop(chat, executeTool);
 
     const result = await runAssistantLoop(
       [{ role: "user", content: "Buy 1 AAPL and place the order after checking my portfolio" }],
@@ -214,7 +217,7 @@ describe("assistant loop hardening", () => {
         stopReason: "end_turn",
       });
 
-    const runAssistantLoop = await loadLoop(chat, okExecuteTool());
+    const { runAssistantLoop } = await loadLoop(chat, okExecuteTool());
     await runAssistantLoop([{ role: "user", content: "Weekly P&L?" }], "system prompt", PRINCIPAL);
 
     const lines = logSpy.mock.calls.map((call) => String(call[0]));

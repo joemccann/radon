@@ -233,20 +233,29 @@ export async function placeProposedOrder(
   const body: Record<string, unknown> = {
     type: input.type,
     symbol: input.ticker,
-    action: input.action,
+    action: input.type === "combo" ? "BUY" : input.action,
     quantity: input.quantity,
-    limitPrice: input.limit_price,
     tif: "DAY",
+    limitPrice: input.limit_price,
     idempotencyKey: crypto.randomUUID(),
   };
   if (input.type === "option") {
     Object.assign(body, {
-      expiry: input.expiry,
+      expiry: input.expiry.replace(/-/g, ""),
       strike: input.strike,
       right: input.right,
       conId: input.conId,
       exchange: input.exchange,
     });
+  }
+  if (input.type === "combo") {
+    body.legs = input.legs.map((leg) => ({
+      expiry: leg.expiry.replace(/-/g, ""),
+      strike: leg.strike,
+      right: leg.right,
+      action: leg.action,
+      ratio: leg.ratio,
+    }));
   }
 
   const response = await fetch("/api/orders/place", {

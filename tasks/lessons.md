@@ -498,3 +498,7 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 ## 2026-08-11 - Synthetic combo market views
 
 - When a user asks for a spread order book, distinguish an interpolated two-leg market from broker-published BAG depth, but do not substitute a single-leg book. If both leg books exist, offer the synthetic spread ladder with explicit implied/non-executable labeling and keep direct leg books available.
+
+## 2026-08-13 - External sensitive-asset cleanup
+
+- A source deletion does not complete a sensitive-asset remediation. Merge the clean source first, then purge immutable deployments/CDN caches, audit every branch/PR/fork ref, rewrite owned refs with exact leases, and explicitly track provider or fork-owner cleanup that cannot be completed from the origin repository.
