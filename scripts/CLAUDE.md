@@ -113,6 +113,45 @@ FastAPI timeouts now match the script deadlines: `/orders/place` is 25s subproce
 
 ---
 
+## Operator Preferences Contract (`app_preferences.py`)
+
+The `/preferences` page makes the order-limit caps and scanner worker counts
+tunable at runtime. `order_limits.py` keeps its public functions but delegates
+every lookup here. Rules that must not be relaxed:
+
+1. **A stored value can never widen a cap.** Resolution is DB row > env var >
+   code default, with one asymmetry that is the whole point: an env value
+   outside the registry band is CLAMPED into it, a DB value outside the band is
+   **DISCARDED** (falls through to env/default, `db_rejected: true`). The check
+   lives on the READ path, not just the write path, so editing the Turso row
+   directly cannot raise `RADON_MAX_ORDER_NOTIONAL` past its declared ceiling.
+   Verified live 2026-08-11: a hand-written `99000000.0` row resolved to the
+   250,000 default.
+2. **The order path never does inline I/O.** `resolve()` / `get_*()` read a
+   process-local snapshot and never block, never raise. A dead Turso resolves to
+   env/default. The one blocking read is `refresh_snapshot()`.
+3. **Background refresh is opt-in** (`enable_background_refresh(True)`, set only
+   in the radon-api lifespan). `ib_place_order.py` is a fresh interpreter per
+   order: it must resolve from the inherited environment overlay, never open a
+   Turso socket it abandons at exit.
+4. **`bootstrap()` runs in the FastAPI lifespan** and exports stored values into
+   `os.environ`, which is what makes subprocesses inherit the operator's caps.
+   Without it a restart silently reverts the placement funnel to env/defaults.
+5. **Every mutation is audited before it is applied.** `set_value`/`clear_value`
+   write `app_preference_events` FIRST; a failed audit write refuses the change.
+   The actor is derived server-side from the authenticated principal in
+   `routes/preferences.py:_actor`, never from the request body.
+6. **Adding a key means proving something reads it.** The five keys dropped
+   during review were consumed only by standalone systemd units with their own
+   `EnvironmentFile`, which never inherit radon-api's environment — a control
+   surface whose described effect is false is worse than no control.
+   `test_app_preferences.py::TestRegistryIsHonest` pins this.
+
+Migration `0046_app_preferences.sql`. Hard bands live in the registry and are
+deliberately a small multiple of each default; widening one is a code change.
+
+---
+
 ## Position Cache Refresh Contract (`ib_sync.py`)
 
 `ib_insync.positions()` returns an in-memory cache. TWS push updates `pos.position` immediately but `pos.avgCost` lags while TWS recomputes VWAP server-side. `IBClient.get_positions()` calls `reqPositions()` + `sleep(1)` BEFORE reading, draining pending updates so size and avgCost are consistent. Opt out via `get_positions(refresh=False)` for tight read loops. Try/except so gateway hiccups fall back to cache. Tests: `test_ib_client.py::TestPortfolioOperations`. Added 2026-05-20 (commit 5d10def).
