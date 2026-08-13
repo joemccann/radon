@@ -380,6 +380,27 @@ class EquiblesClient:
     # F1 — ATS / OFF-EXCHANGE VENUE SHARE
     # ══════════════════════════════════════════════════════════════════
 
+    def get_prices(
+        self,
+        ticker: str,
+        *,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+    ) -> dict:
+        """GET /stocks/{ticker}/prices - daily OHLCV.
+
+        ``volume`` here is the CONSOLIDATED tape, which makes it the only valid
+        denominator for off-exchange share. Verified live 2026-08-13: AAPL
+        off-exchange/consolidated = 39.9%, NVDA = 48.2%. The short-volume
+        file's totalVolume is off-exchange only and gives >100%.
+        """
+        params = self._build_params(
+            startDate=start_date, endDate=end_date, limit=limit, offset=offset
+        )
+        return self._get(f"stocks/{ticker.upper()}/prices", params=params)
+
     def get_off_exchange_volume(
         self,
         ticker: str,

@@ -21,13 +21,18 @@ prints are bigger. Either alone is noise, so `classify` requires BOTH z-scores
 past the threshold. Thin history returns neutral plus a reason string rather
 than a z-score computed off four observations.
 
-NO CONSOLIDATED DENOMINATOR (verified live 2026-08-11). Equibles publishes no
-all-venue volume, and the daily short-volume file's `totalVolume` is itself
-off-exchange only (AAPL ~14.9M/day against a ~50M/day consolidated tape), so
-using it would have produced an off-exchange share above 100%. The venue-mix
-metric therefore measures ATS against off-exchange volume, which is fully
-determined by the payload. off_exchange_share_pct stays null unless a genuine
-consolidated figure appears in the payload.
+CONSOLIDATED DENOMINATOR (resolved 2026-08-13). The daily `/stocks/{t}/prices`
+bars carry the all-venue tape, so off_exchange_share_pct is computed as
+totalOffExchangeVolume / sum(that week's daily volume). Verified live: AAPL
+39.9% and NVDA 48.2% for the week of 2026-07-06, both inside the plausible
+band for large caps.
+
+The short-volume file's `totalVolume` is NOT a valid denominator - it is
+off-exchange only, and the same two weeks come out at 127% and 116% against it.
+That substitution is guarded by a test. A week covered by fewer than
+MIN_CONSOLIDATED_DAYS sessions is withheld rather than published understated,
+and if the prices walk fails the share degrades to null while the rest of the
+cycle still writes.
 
 UPSTREAM PERCENT FIELD (verified live 2026-08-11). Equibles returns
 `shortVolumePercent` ALREADY IN PERCENT (42.37 for AAPL 2026-08-10, where
@@ -86,8 +91,10 @@ DISTRIBUTION_Z = -1.0
 
 OFF_EXCHANGE_PAGE_LIMIT = 500
 SHORT_VOLUME_PAGE_LIMIT = 500
+PRICES_PAGE_LIMIT = 500
 OFF_EXCHANGE_MAX_PAGES = 2
 SHORT_VOLUME_MAX_PAGES = 3
+PRICES_MAX_PAGES = 3
 
 _UPSERT_CHUNK_ROWS = 200
 
@@ -96,6 +103,11 @@ CLASSIFICATION_DISTRIBUTION = "distribution"
 CLASSIFICATION_NEUTRAL = "neutral"
 
 CONSOLIDATED_FROM_PAYLOAD = "off_exchange_payload"
+CONSOLIDATED_FROM_PRICES = "equibles_daily_prices"
+
+# A week short of this many sessions understates the denominator, which would
+# overstate the share, so its total is withheld rather than published wrong.
+MIN_CONSOLIDATED_DAYS = 4
 
 # Upstream field aliases. The documented name is first; the rest are defensive
 # so a renamed or absent field degrades to null instead of crashing the cycle.
@@ -109,6 +121,7 @@ _TOTAL_OFF_EXCHANGE_KEYS = ("totalOffExchangeVolume", "offExchangeVolume")
 _CONSOLIDATED_KEYS = ("consolidatedVolume", "consolidatedShareVolume", "marketVolume")
 _SHORT_VOLUME_KEYS = ("shortVolume",)
 _DAILY_TOTAL_VOLUME_KEYS = ("totalVolume",)
+_DAILY_CONSOLIDATED_VOLUME_KEYS = ("volume",)
 
 _Z_METRICS = (
     ("ats_share_pct", "ats_share_z"),
@@ -211,8 +224,32 @@ def weekly_short_volume(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]
 
 # ── per-week derived metrics ──────────────────────────────────────
 
-def _resolve_consolidated_volume(row: dict[str, Any]) -> tuple[Optional[float], Optional[str]]:
-    """All-venue denominator, if the payload ever carries one.
+def weekly_consolidated_volume(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Daily /prices bars folded into weekly consolidated-tape totals.
+
+    These bars are the all-venue tape, which is what makes the off-exchange
+    share computable. A week covered by fewer than MIN_CONSOLIDATED_DAYS
+    sessions is withheld, since a partial denominator inflates the share.
+    """
+    buckets: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        week = _row_week(row, _DAY_KEYS)
+        if week is None:
+            continue
+        bucket = buckets.setdefault(week, {"consolidated_volume": 0.0, "days": 0})
+        bucket["consolidated_volume"] += _number(row, _DAILY_CONSOLIDATED_VOLUME_KEYS) or 0.0
+        bucket["days"] += 1
+
+    for bucket in buckets.values():
+        if bucket["days"] < MIN_CONSOLIDATED_DAYS or not bucket["consolidated_volume"]:
+            bucket["consolidated_volume"] = None
+    return buckets
+
+
+def _resolve_consolidated_volume(
+    row: dict[str, Any], consolidated_week: Optional[dict[str, Any]]
+) -> tuple[Optional[float], Optional[str]]:
+    """All-venue denominator: the payload's own figure, else the /prices week.
 
     Only a genuinely consolidated figure qualifies. The short-volume file's
     totalVolume is off-exchange only, so substituting it would report an
@@ -222,13 +259,20 @@ def _resolve_consolidated_volume(row: dict[str, Any]) -> tuple[Optional[float], 
     from_payload = _number(row, _CONSOLIDATED_KEYS)
     if from_payload:
         return from_payload, CONSOLIDATED_FROM_PAYLOAD
+
+    from_prices = (consolidated_week or {}).get("consolidated_volume")
+    if from_prices:
+        return from_prices, CONSOLIDATED_FROM_PRICES
+
     return None, None
 
 
 def derive_week_metrics(
-    row: dict[str, Any], short_week: Optional[dict[str, Any]]
+    row: dict[str, Any],
+    short_week: Optional[dict[str, Any]],
+    consolidated_week: Optional[dict[str, Any]] = None,
 ) -> Optional[dict[str, Any]]:
-    """One weekly off-exchange row plus its short-volume week to stored shape."""
+    """One weekly off-exchange row plus its short-volume and consolidated weeks."""
     week = _row_week(row)
     if week is None:
         return None
@@ -238,7 +282,7 @@ def derive_week_metrics(
     non_ats_volume = _number(row, _NON_ATS_VOLUME_KEYS)
     non_ats_trade_count = _number(row, _NON_ATS_TRADE_COUNT_KEYS)
     total_off_exchange = _number(row, _TOTAL_OFF_EXCHANGE_KEYS)
-    consolidated, consolidated_source = _resolve_consolidated_volume(row)
+    consolidated, consolidated_source = _resolve_consolidated_volume(row, consolidated_week)
     off_exchange_share = _ratio(total_off_exchange, consolidated)
     ats_share = _ratio(ats_volume, total_off_exchange)
 
@@ -325,17 +369,22 @@ def classify(
 # ── series assembly ───────────────────────────────────────────────
 
 def build_ticker_series(
-    off_exchange_rows: list[dict[str, Any]], short_volume_rows: list[dict[str, Any]]
+    off_exchange_rows: list[dict[str, Any]],
+    short_volume_rows: list[dict[str, Any]],
+    price_rows: Optional[list[dict[str, Any]]] = None,
 ) -> list[dict[str, Any]]:
     """Raw endpoint rows to the ascending, fully derived weekly series."""
     short_by_week = weekly_short_volume(short_volume_rows)
+    consolidated_by_week = weekly_consolidated_volume(price_rows or [])
 
     by_week: dict[str, dict[str, Any]] = {}
     for row in off_exchange_rows:
         week = _row_week(row)
         if week is None:
             continue
-        metrics = derive_week_metrics(row, short_by_week.get(week))
+        metrics = derive_week_metrics(
+            row, short_by_week.get(week), consolidated_by_week.get(week)
+        )
         if metrics is not None:
             by_week[week] = metrics
 
@@ -476,7 +525,12 @@ def watchlist_tickers() -> list[str]:
 def _fetch_ticker(
     client: Any, ticker: str, start_date: str, end_date: str
 ) -> list[dict[str, Any]]:
-    """Both bounded pagination walks for one ticker, off-exchange first."""
+    """The bounded pagination walks for one ticker, off-exchange first.
+
+    The daily-prices walk supplies the consolidated denominator; it is the only
+    all-venue volume Equibles publishes, so without it off_exchange_share_pct
+    stays null. A failure there degrades that one field rather than the cycle.
+    """
     off_exchange = client.paginate(
         client.get_off_exchange_volume,
         ticker,
@@ -493,7 +547,25 @@ def _fetch_ticker(
         start_date=start_date,
         end_date=end_date,
     )
-    return build_ticker_series(off_exchange.rows, short_volume.rows)
+
+    try:
+        prices = client.paginate(
+            client.get_prices,
+            ticker,
+            limit=PRICES_PAGE_LIMIT,
+            max_pages=PRICES_MAX_PAGES,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        price_rows = prices.rows
+    except Exception as exc:  # noqa: BLE001 - denominator is optional, cycle is not
+        print(
+            f"[ats-venue-share] {ticker}: consolidated denominator unavailable: {exc}",
+            file=sys.stderr,
+        )
+        price_rows = []
+
+    return build_ticker_series(off_exchange.rows, short_volume.rows, price_rows)
 
 
 def run(
