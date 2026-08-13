@@ -4,8 +4,6 @@ import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { navItems, NAV_GROUP_LABEL, PI_COMMANDS, sectionDescription } from "@/lib/data";
 import { useWatchlist } from "@/lib/useWatchlist";
-import { usePortfolio } from "@/lib/usePortfolio";
-import { useMarketHours, MarketState } from "@/lib/useMarketHours";
 
 type PaletteItem = {
   id: string;
@@ -99,21 +97,18 @@ function buildPaletteItems(portfolioSymbols: string[], watchlistSymbols: string[
 type CommandPaletteProps = {
   open: boolean;
   onClose: () => void;
+  portfolioSymbols: string[];
 };
 
-export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
+export default function CommandPalette({ open, onClose, portfolioSymbols }: CommandPaletteProps) {
   const router = useRouter();
   const { watchlist } = useWatchlist();
-  const marketState = useMarketHours();
-  const isMarketActive = marketState !== MarketState.CLOSED;
-  const { data: portfolio } = usePortfolio(isMarketActive);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const [recent, setRecent] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  const portfolioSymbols = useMemo(() => (portfolio?.positions ?? []).map((p) => p.ticker), [portfolio]);
   const watchlistSymbols = useMemo(() => watchlist.map((w) => w.symbol), [watchlist]);
 
   useEffect(() => {

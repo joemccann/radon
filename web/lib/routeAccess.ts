@@ -118,7 +118,12 @@ export async function requireRouteAccess(
     if (!limited.ok) return reject(429, "Too Many Requests", limited.retryAfterSec);
   }
 
-  if (options.rate && (env.NODE_ENV === "production" || env.NEXT_PUBLIC_RADON_DEMO === "1" || deps.durableRateLimitFn)) {
+  // Upstash is an isolated demo-deployment dependency and must never be
+  // configured in the operator deployment (docs/demo-environment.md). The
+  // operator remains protected by the allowlist, the per-principal worker
+  // budget above, and backend admission/single-flight controls. Demo traffic
+  // additionally consumes its fail-closed cross-instance spend/DOS budget.
+  if (options.rate && kind === "demo") {
     try {
       const tier = options.durableRateTier ?? "B";
       const durable = await (deps.durableRateLimitFn ?? demoRateLimit)(

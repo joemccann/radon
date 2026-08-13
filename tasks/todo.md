@@ -24,6 +24,33 @@ CMD+J chat failed the ADBE bull-call-spread ask: no live spot, no priced chain, 
 
 ---
 
+# Task: Fix authenticated live API 429 storm (2026-08-13)
+
+## Dependency graph
+
+- T1 depends_on: [] - Reproduce the authenticated production failure and capture the affected routes, response headers, retry timing, and request cadence.
+- T2 depends_on: [] - Audit the shared route limiter and portfolio-shell polling/fetch ownership for a security-policy or request-amplification regression.
+- T3 depends_on: [T1, T2] - Add red regression coverage for normal authenticated dashboard traffic and bounded retry behavior after a 429.
+- T4 depends_on: [T3] - Implement the smallest fail-closed correction without weakening protection on expensive or mutating routes.
+- T5 depends_on: [T4] - Run focused and full web/Python gates, then verify the rendered portfolio surface and live request cadence in a browser.
+- T6 depends_on: [T5] - Record root cause, evidence, residual risks, and deployment handoff.
+
+## Checklist
+
+- [x] T1 Capture production 429 behavior.
+- [x] T2 Trace limiter and request ownership.
+- [x] T3 Add failing regression coverage.
+- [x] T4 Implement the correction.
+- [x] T5 Verify focused/full suites and rendered behavior.
+- [x] T6 Add review notes.
+
+## Review
+
+- Root cause: the shared route guard applied the demo-only Upstash limiter to every production route. Operator production intentionally has no demo Redis credentials, so all guarded dashboard reads failed closed as 429; tier B's 10/hour budget was also below the dashboard's legitimate polling cadence.
+- Fix: scope durable Upstash enforcement to active demo principals, retain per-user local route budgets and backend admission controls for the allowlisted operator, remove the command palette's duplicate portfolio hook, suppress redundant market-open reads, and honor bounded `Retry-After` backoff.
+- Red/green: route-access, request-ownership, active-transition, and 429-backoff regressions fail on the security release and pass on this patch. Focused Vitest 29/29 and Playwright cadence 1/1 pass; the screenshot shows the shared AAPL portfolio symbol in the palette without another portfolio request.
+- Full verification: Vitest 592 files / 6,110 tests passed with 83.21% statements, 75.85% branches, 86.64% functions, and 86.35% lines; typecheck passed; lint passed with 0 errors / 12 existing warnings; production build and 160-manifest trace audit passed; `git diff --check` passed.
+
 # Task: DeepSec security remediation (2026-08-13)
 
 Source: `/Users/joemccann/dev/apps/finance/radon/.deepsec/data/radon/reports/report.md`
