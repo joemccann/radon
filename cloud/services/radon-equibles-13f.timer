@@ -1,0 +1,14 @@
+[Unit]
+Description=Radon Equibles 13F Smart Money - weekly institutional positioning refresh
+
+[Timer]
+# 13F is quarterly with a ~45 day filing lag, but filings trickle in across the
+# whole window, so weekly picks up new filers without hammering a quarterly
+# dataset. The data fails Gate 2 on its own - it is context, not a trigger -
+# and the UI renders the reportDate vintage, never this interval.
+OnCalendar=Mon *-*-* 09:45:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
