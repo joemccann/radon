@@ -1,7 +1,7 @@
 /**
  * @vitest-environment node
  *
- * /api/vol-cone — cheap 10% OTM wing IV scanner route (regime tab).
+ * /api/vol-cone — cheap 10% OTM wing IV scanner route (scanner tab).
  *
  * GET-only: radon-vol-cone.timer runs fetch_vol_cone.py. Reads through
  * dbFirstRead (scan_snapshots service='vol-cone', disk data/vol_cone.json)

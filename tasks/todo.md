@@ -41,8 +41,9 @@ Find names like NVDA / SMH where the near monthly (and especially 10% OTM wings)
 
 - Scanner ranks names where ATM IV percentile <= 15 and both 10% OTM wings <= 20 on that monthly's 90/10 cone.
 - Live 2026-08-12 Sep 18: NVDA, SMH, AMD, AVGO, AAPL all `CHEAP_WINGS` (80-session cones).
-- Tab: `/regime/vol-cone`. Timer `radon-vol-cone.timer` Mon-Fri 20:45 UTC; enable on the VPS (deploys do not install units).
+- Tab: `/scanner?mode=vol-cone` (legacy `/regime/vol-cone` redirects). Timer `radon-vol-cone.timer` Mon-Fri 20:45 UTC; enable on the VPS (deploys do not install units).
 - Verification: pytest 5546 + cloud 779 + vitest 5698 + typecheck; Playwright 3/3; live screenshot `docs/indicators/vol-cone-tab.png`.
+- 2026-08-13 IA: moved off Regime onto Scanner next to LEAP/GARCH. Focused vitest 97; Playwright vol-cone 4/4; `/regime/vol-cone` 307.
 
 ---
 

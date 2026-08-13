@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 
-export type ScannerMode = "flow" | "discover" | "theta" | "strength" | "leap" | "garch";
+export type ScannerMode = "flow" | "discover" | "theta" | "strength" | "leap" | "garch" | "vol-cone";
 
 type ScannerTabCounts = Partial<Record<ScannerMode, number>>;
 
@@ -23,10 +23,11 @@ const TABS: { mode: ScannerMode; label: string }[] = [
   { mode: "strength", label: "7-Step Strength" },
   { mode: "leap", label: "LEAP" },
   { mode: "garch", label: "GARCH" },
+  { mode: "vol-cone", label: "VOL CONE" },
 ];
 
 /**
- * The scanner's six-mode tab strip. Each tab carries a small count chip when
+ * The scanner mode tab strip. Each tab carries a small count chip when
  * its scan has a known result count, so signal presence reads across modes
  * without clicking through them.
  */

@@ -15,6 +15,6 @@ const VOL_CONE_SYNC_CONFIG = {
   extractTimestamp: (d: VolConeData) => d.scan_time || null,
 };
 
-export function useVolCone(): UseSyncReturn<VolConeData> {
-  return useSyncHook<VolConeData>(VOL_CONE_SYNC_CONFIG, true);
+export function useVolCone(active = true): UseSyncReturn<VolConeData> {
+  return useSyncHook<VolConeData>({ ...VOL_CONE_SYNC_CONFIG, loadWhenInactive: false }, active);
 }
