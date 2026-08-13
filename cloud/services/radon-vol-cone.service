@@ -14,7 +14,7 @@ Environment=RADON_DB_NO_REPLICA=1
 ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_vol_cone.py
 StandardOutput=journal
 StandardError=journal
-TimeoutStartSec=900
+TimeoutStartSec=3600
 
 [Install]
 WantedBy=multi-user.target

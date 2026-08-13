@@ -15,6 +15,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   buildVolConeChartRows,
   formatIvPct,
+  formatMonthlyExpiry,
   formatPercentile,
   isHit,
   volConeRegimeColor,
@@ -43,6 +44,16 @@ describe("formatPercentile — fraction to one-decimal percent", () => {
 
   it("returns --- for null", () => {
     expect(formatPercentile(null)).toBe("---");
+  });
+});
+
+describe("formatMonthlyExpiry — third-Friday label", () => {
+  it("formats the September monthly", () => {
+    expect(formatMonthlyExpiry("2026-09-18")).toBe("SEP 18");
+  });
+
+  it("returns --- for null", () => {
+    expect(formatMonthlyExpiry(null)).toBe("---");
   });
 });
 
