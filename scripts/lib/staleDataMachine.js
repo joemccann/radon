@@ -179,20 +179,43 @@ export function shouldWriteTickHeartbeat({ now, isMarketHours, inError, lastHear
  * whole idle window and froze the row (the 2026-08-10 stale-freshness
  * incident).
  *
- * Idle is NOT blind, though: IB reports farm state on the info channel
- * independently of any subscription. A relay sitting idle on a farm IB has
- * explicitly called down has nothing healthy to report, and blessing it would
- * trade the old false positive for a false negative — the one regression that
- * would matter, since the frozen row is then the only remaining signal.
+ * Idle is NOT blind on the IB socket: a disconnected relay has nothing
+ * healthy to report. A leftover farm-DOWN code is different — 2103/2105/2108
+ * stick on lastFarmStateCode across drain and overnight, so treating them as
+ * "currently DOWN" while demand is already zero silences the idle heartbeat
+ * and freezes the row (the same 2026-08-10 fingerprint). Farm-down recovery
+ * is the subscribed ladder's job.
  *
  * @param {StaleDataInput} input
  * @returns {boolean}
  */
-function hasHealthyDataPlane({ ibConnected, activeSubscriptions, now, lastTickAt, farmState }) {
+function hasHealthyDataPlane({ ibConnected, activeSubscriptions, now, lastTickAt }) {
   if (!ibConnected) return false;
   if (now - lastTickAt <= STALE_DATA_THRESHOLD_MS) return true;
   if (activeSubscriptions > 0) return false;
-  return !(farmState != null && FARM_DOWN_CODES.has(farmState));
+  return true;
+}
+
+/**
+ * Next lastFarmStateCode after an IB farm info event.
+ * Farm-OK while idle clears leftover DOWN so it cannot ride into the next
+ * idle heartbeat cycle. Farm-OK while subscribed is kept so
+ * {@link decideStaleAction} can prefer resubscribe.
+ *
+ * @param {number|null} current
+ * @param {number} code
+ * @param {number} [activeSubscriptions=0]
+ * @returns {number|null}
+ */
+export function nextFarmStateCode(current, code, activeSubscriptions = 0) {
+  if (!isFarmStateCode(code)) return current;
+  if (FARM_OK_CODES.has(code) && activeSubscriptions <= 0) return null;
+  return code;
+}
+
+/** Last client gone: leftover farm codes are no longer current. */
+export function farmStateAfterIdleDrain() {
+  return null;
 }
 
 /**
@@ -224,9 +247,8 @@ function hasHealthyDataPlane({ ibConnected, activeSubscriptions, now, lastTickAt
  * sits latched at "error" for hours against a relay that is merely idle. So the
  * latch also clears on the writer-state edge: the ladder has nothing to act on
  * and the data plane is healthy, which means the escalation's own precondition
- * (stale ticks with demand outstanding) is gone. Safe by construction — with a
- * farm IB still reports down, {@link hasHealthyDataPlane} is false and the
- * latch holds.
+ * (stale ticks with demand outstanding) is gone. A leftover farm-DOWN code
+ * does not hold the latch once demand is gone.
  *
  * @param {StaleDataInput & {inError: boolean, lastHeartbeatAt: number}} input
  * @returns {{action: "none"|"resubscribe"|"reconnect"|"escalate", heartbeat: boolean, clearError: boolean}}

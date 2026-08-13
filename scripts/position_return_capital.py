@@ -81,6 +81,9 @@ def normalize_execution(raw: dict[str, Any]) -> dict[str, Any]:
     if not order_ref and perm_id is None:
         raise ValueError("execution requires order_ref or perm_id")
 
+    # Replay storage may use avgPrice until the per-fill price arrives.
+    # Identity hashing must ignore that fallback so order-level drift
+    # cannot mint a conflict.
     price_value = raw.get("price")
     if price_value is None:
         price_value = raw.get("avgPrice", 0)
@@ -97,7 +100,7 @@ def normalize_execution(raw: dict[str, Any]) -> dict[str, Any]:
         "order_ref": order_ref,
         "currency": currency,
         "multiplier": multiplier,
-        "symbol": str(raw.get("symbol") or contract.get("symbol") or "").upper(),
+        "symbol": str(contract.get("symbol") or raw.get("symbol") or "").upper(),
         "sec_type": str(raw.get("sec_type") or contract.get("secType") or "").upper(),
         "commission": _number(raw.get("commission") or 0),
         "revision": max(0, int(raw.get("revision") or 0)),

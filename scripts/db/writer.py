@@ -1231,17 +1231,61 @@ def _execution_identity_hash(item: dict[str, Any]) -> str:
     ).hexdigest()
 
 
+def _row_value(row: Any, key: str, index: int) -> Any:
+    if isinstance(row, dict):
+        return row.get(key)
+    try:
+        return row[key]
+    except (KeyError, TypeError, IndexError):
+        return row[index]
+
+
+def _same_number(left: Any, right: Any) -> bool:
+    try:
+        return abs(float(left) - float(right)) <= 1e-10
+    except (TypeError, ValueError):
+        return False
+
+
+def _execution_economically_conflicts(
+    row: Any,
+    item: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    iso_ts,
+) -> bool:
+    """True when stored columns disagree on the fill itself.
+
+    Used only after the pinned hash already differs, so leftover hashes
+    and late metadata (perm_id, avgPrice fallback, timezone form) do
+    not abort orders-sync. A real price/qty/side/time change still raises.
+    """
+    if int(_row_value(row, "con_id", 1)) != int(item["con_id"]):
+        return True
+    if str(_row_value(row, "side", 2)).upper() != str(item["side"]).upper():
+        return True
+    if not _same_number(_row_value(row, "quantity", 3), item["quantity"]):
+        return True
+    if iso_ts(_row_value(row, "filled_at", 5)) != item["filled_at"]:
+        return True
+    explicit_price = payload.get("price")
+    if explicit_price is not None and not _same_number(_row_value(row, "price", 4), explicit_price):
+        return True
+    return False
+
+
 def upsert_position_execution_fact(payload: dict[str, Any], *, db: Any = None) -> bool:
     """Persist a lossless IB execution fact without overwriting its identity.
 
-    Repeated syncs are idempotent.  The same account/exec/revision with a
-    different canonical payload is a hard conflict rather than a silent
-    replacement, because lifecycle history must not be rewritten in place.
+    Repeated syncs are idempotent. New rows hash the pinned lifecycle
+    field set. A hash mismatch only raises when stored economic columns
+    also disagree, so leftover hashes and late IB enrichment do not
+    freeze orders-sync.
     """
     try:
-        from ..position_return_capital import normalize_execution
+        from ..position_return_capital import _iso, normalize_execution
     except ImportError:  # pragma: no cover - flat scripts/ import mode
-        from position_return_capital import normalize_execution  # type: ignore[no-redef]
+        from position_return_capital import _iso, normalize_execution  # type: ignore[no-redef]
 
     item = normalize_execution(payload)
     revision = int(payload.get("revision") or 1)
@@ -1249,13 +1293,20 @@ def upsert_position_execution_fact(payload: dict[str, Any], *, db: Any = None) -
     payload_hash = _execution_identity_hash(item)
     target = db or get_db()
     row = target.execute(
-        """SELECT payload_sha256 FROM position_execution_facts
+        """SELECT payload_sha256, con_id, side, quantity, price, filled_at
+           FROM position_execution_facts
            WHERE account_id = ? AND exec_id = ? AND revision = ?""",
         (item["account_id"], item["exec_id"], revision),
     ).fetchone()
     if row is not None:
-        existing_hash = row[0] if not isinstance(row, dict) else row.get("payload_sha256")
+        existing_hash = _row_value(row, "payload_sha256", 0)
         if existing_hash != payload_hash:
+            if not _execution_economically_conflicts(row, item, payload, iso_ts=_iso):
+                return False
+            logger.warning(
+                "execution fact conflict for %s:%s:%s",
+                item["account_id"], item["exec_id"], revision,
+            )
             raise ValueError(
                 f"execution fact conflict for {item['account_id']}:{item['exec_id']}:{revision}"
             )

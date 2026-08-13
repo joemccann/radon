@@ -421,6 +421,25 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // pages before the second is lost. Local disk + B2 only — no IB.
   "media-backup": { open: 48 * HOUR, extended: 48 * HOUR, closed: 48 * HOUR, category: "scheduled", requires_ib: false },
 
+  // Equibles writers call record_service_health directly (no service_cycle).
+  // Shipped without registration and inherited the 1h default, coercing
+  // successful ok rows to stale during RTH (2026-08-13). Equibles API only
+  // — no IB. RandomizedDelaySec=300 on every timer is absorbed below.
+  // Daily calendar-day timers (weekend runs heartbeat): uniform 26h.
+  "equibles-short-crowding": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+  "equibles-filing-forensics": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+  // Weekly timers: 8-day uniform window = weekly cadence + one day of
+  // drift, same class as preset-rebalance.
+  "equibles-13f": { open: 8 * DAY, extended: 8 * DAY, closed: 8 * DAY, category: "scheduled", requires_ib: false },
+  "equibles-ats-venue-share": { open: 8 * DAY, extended: 8 * DAY, closed: 8 * DAY, category: "scheduled", requires_ib: false },
+  "equibles-cot-positioning": { open: 8 * DAY, extended: 8 * DAY, closed: 8 * DAY, category: "scheduled", requires_ib: false },
+
+  // ``event-odds`` — laptop launchd Mon-Fri 07:00/11:00/15:00 local,
+  // holiday-aware (scripts/run_event_odds.sh). Three weekday fires like
+  // catalysts: 7h spans the active-day gaps; 4d bridges a long weekend.
+  // Polymarket only — no IB.
+  "event-odds": { open: 7 * HOUR, extended: 7 * HOUR, closed: 4 * DAY, category: "scheduled", requires_ib: false },
+
 };
 
 const DEFAULT_WINDOW: Window = {
@@ -502,6 +521,7 @@ const RTH_ONLY_SERVICES = new Set([
   "position-reconcile",
   "cri-scan",
   "vcg-scan",
+  "ib-realtime-relay",
 ]);
 
 /** ET calendar date ("YYYY-MM-DD") is a full-closure US market holiday per

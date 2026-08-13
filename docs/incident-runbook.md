@@ -46,6 +46,12 @@ Peak incident: 2026-07-02 21:32–23:37 UTC, P1, every DB-backed Next.js route d
   minute. Canary succeeds ⇒ Node-local wedge, `radon unit restart radon-nextjs`
   helps. Both fail ⇒ upstream Turso — do NOT restart-flap; stand down and probe
   from a second network (`feedback_turso_http_pipeline_incident_signature`).
+- **2026-08-13, 401 is not a wedge.** `/api/service-health` stays Clerk-protected.
+  The loopback watchdog sends `Authorization: Bearer $RADON_PROBE_FRESHNESS_TOKEN`.
+  HTTP 401/403, a missing token, or any non-200 without a `turso-db` error row
+  is `unknown`: no wedge count, no restart, no `nextjs-db-read` error row.
+  A real wedge is HTTP 200 with a synthetic `turso-db` error row, or a
+  transport failure to :3000.
 - **2026-08-06 recurrence — feature-detection vs the retired replica.**
   `syncDb()` guarded with `"sync" in db`, but @libsql/client's HTTP client
   DEFINES `sync()` and throws `SYNC_NOT_SUPPORTED`. The guard passed, the call
@@ -115,6 +121,12 @@ Incident: 2026-07-08, P1.
   no-op; **the definitive tell:** VPS `git rev-parse HEAD` == target SHA but
   `/home/radon/.radon-last-green-deploy` != that SHA. The `service_health`
   `deploy` row stores the last green SHA in `last_error`.
+- **Classifier (P1 vs P2):** `/sign-in` HTTP 500 is P1 regardless of CI
+  observability. Marker != HEAD is P2 only when CI is a positively observed
+  `completed` run and the transition journal is absent (`in_flight` false).
+  `ci=None` is unknown, never settled. On the VPS `gh` is absent so CI is
+  always None; the journal covers promote-verify only, not the multi-minute
+  staged build. Marker mismatch with unobservable CI is not an incident.
 - **Remediation:** re-run the deploy (empty commit or re-run the job) — the
   marker-mismatch resume path forces a full build/restart/gate. Never bypass a
   control-plane mismatch with `RADON_DEPLOY_NO_GATE=1` except for a wedge class
@@ -149,6 +161,13 @@ Incident: 2026-07-08, P1.
 - **(d) Delayed, not stale:** the relay defaulted to `reqMarketDataType(4)`;
   prior close matches reference exactly but LAST lags; delayed tick fields 66-76.
   Fresh tick timestamps do NOT prove realtime.
+- **(e) Idle / leftover farm-down false stale (2026-08-13):** zero
+  subscriptions is healthy unless the IB socket is down. Leftover
+  2103/2105/2108 must not silence the 60s idle heartbeat; drain and
+  farm-OK-while-idle clear `lastFarmStateCode`. `evaluateRelayTick` uses the
+  same `isStale` open-bell grace as other RTH_ONLY writers
+  (`ib-realtime-relay`). A dead process or a latched error row is still
+  `fresh=false`.
 - **Detection:** `GET /api/probe/freshness` (bearer `RADON_PROBE_FRESHNESS_TOKEN`,
   always 200) — `all_fresh: false` with the failing `checks` named; it is already
   market-state aware, so `all_fresh: null` off-hours is normal.
@@ -260,6 +279,17 @@ Incident: 2026-07-08, P1.
 or stale scheduled). Cross-check `scripts/watchdog` cooldowns before paging —
 this class is usually one writer, not an outage. Remember: a row's state is the
 WRITER's health, never the content of the last event it dispatched.
+
+Discriminate **registration-gap** vs **writer-down** before restarting a unit.
+Python cannot write `state=stale`; `/api/service-health` only coerces an `ok`
+row past its freshness window. So:
+
+- **registration-gap:** coerced `stale` + raw DB `state=ok` + `last_error` null
+  + `updated_at` matching the last timer fire. The writer ran. The name is
+  missing from `SERVICE_FRESHNESS_WINDOWS` (or the window is the 1h default).
+  Register the cadence. Do not restart the unit.
+- **writer-down:** raw DB `state=error`, non-null `last_error`, or `updated_at`
+  never / far past the real cadence. Inspect the unit and logs.
 
 The classifier suppresses EXPECTED states (2026-08-04 false-P2): `stale` rows
 while the market is closed (RTH-only writers quiet off-hours), and `error` rows

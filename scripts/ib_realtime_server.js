@@ -37,7 +37,9 @@ import { LRUCache } from "./lib/lru-cache.js";
 import { RateLimiter } from "./lib/rate-limiter.js";
 import {
   decideHealthWrite,
+  farmStateAfterIdleDrain,
   isFarmStateCode,
+  nextFarmStateCode,
   summarizeSubscriptionFreshness,
   shouldRequestGatewayRestart,
   STALE_DATA_THRESHOLD_MS,
@@ -1753,6 +1755,10 @@ function unsubscribeClientFromSymbol(client, symbol) {
   // keys, so only the refcount registry can retire them.
   releaseForwardsForSubject(client, symbol);
 
+  if (symbolSubscribers.size === 0) {
+    lastFarmStateCode = farmStateAfterIdleDrain();
+  }
+
   return unsubscribed;
 }
 
@@ -1787,6 +1793,9 @@ function disconnectClient(client) {
 
   clientSymbols.delete(client);
   clientOwnerIds.delete(client);
+  if (symbolSubscribers.size === 0) {
+    lastFarmStateCode = farmStateAfterIdleDrain();
+  }
 }
 
 function sendSubscribedConfirmation(client, symbols) {
@@ -2490,7 +2499,7 @@ function wireIBEvents() {
   // bounce. Non-farm info codes are ignored here.
   ib.on(EventName.info, (message, code) => {
     if (typeof code === "number" && isFarmStateCode(code)) {
-      lastFarmStateCode = code;
+      lastFarmStateCode = nextFarmStateCode(lastFarmStateCode, code, symbolSubscribers.size);
       verbose(`IB farm info ${code}: ${message}`);
     }
   });

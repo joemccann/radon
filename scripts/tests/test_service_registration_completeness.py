@@ -6,11 +6,13 @@ fires the degraded banner overnight + on weekends (serviceHealthWindows.ts
 was re-fixed 12+ times in 12 days for exactly this drift class). This test
 closes the loop: a writer cannot ship without a deliberate freshness window.
 
-Collected name sources (the three sanctioned write paths):
+Collected name sources (the four sanctioned write paths):
   1. ``service_cycle("<name>", …)`` call sites — standalone writers;
   2. ``service_name = "<name>"`` declared on BaseHandler subclasses —
      monitor-daemon handlers (structural heartbeat in BaseHandler.run);
-  3. ``db.scan_mirror.SNAPSHOT_UPSERTS`` keys — mirror-fed scans.
+  3. ``db.scan_mirror.SNAPSHOT_UPSERTS`` keys — mirror-fed scans;
+  4. direct ``record_service_health("<name>", …)`` call sites — fetchers
+     that bypass ``service_cycle`` (Equibles, Cboe, event-odds).
 
 If this test finds a genuinely unregistered writer, REGISTER it in the TS
 file with a sensible window — do not weaken the collector.
@@ -170,6 +172,57 @@ def collect_scan_mirror_names() -> set[str]:
     return _SCAN_MIRROR_NAMES
 
 
+# Direct ``record_service_health`` wrappers / chokepoints — first arg is
+# not a service name (state, a parameter, or ``self.service_name``).
+_DIRECT_RECORD_EXCLUDES = frozenset({
+    "db/writer.py",
+    "db/service_cycle.py",
+    "db/scan_mirror.py",
+    "monitor_daemon/handlers/base.py",
+    "ib_watchdog.py",
+})
+
+
+def _build_direct_record_service_health_names() -> dict[str, list[str]]:
+    """``record_service_health(<name>, …)`` first args (string literals or
+    module-level constants), name → files."""
+    found: dict[str, list[str]] = {}
+    for path, tree in _PARSED_TREES:
+        if tree is None:
+            continue
+        if path.relative_to(_SCRIPTS_DIR).as_posix() in _DIRECT_RECORD_EXCLUDES:
+            continue
+        constants = _module_str_constants(tree)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            callee = func.id if isinstance(func, ast.Name) else (
+                func.attr if isinstance(func, ast.Attribute) else None
+            )
+            if callee != "record_service_health":
+                continue
+            if not node.args:
+                continue
+            arg = node.args[0]
+            name: str | None = None
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                name = arg.value
+            elif isinstance(arg, ast.Name):
+                name = constants.get(arg.id)
+            if name:
+                found.setdefault(name, []).append(str(path))
+    return found
+
+
+_DIRECT_RECORD_NAMES: dict[str, list[str]] = _build_direct_record_service_health_names()
+
+
+def collect_direct_record_service_health_names() -> dict[str, list[str]]:
+    """Return cached ``record_service_health(<name>, …)`` first-arg names → files."""
+    return _DIRECT_RECORD_NAMES
+
+
 def ts_registered_services() -> set[str]:
     """All explicit keys of SERVICE_FRESHNESS_WINDOWS (any category)."""
     text = _TS_FILE.read_text(encoding="utf-8")
@@ -220,6 +273,31 @@ class TestCollectorsAreNotBlind:
         names = collect_scan_mirror_names()
         assert {"vcg-scan", "scanner", "discover"} <= names
 
+    def test_direct_health_collector_sees_hand_rolled_writers(self):
+        names = set(collect_direct_record_service_health_names())
+        expected = {
+            "cor",
+            "straddle",
+            "vol-cone",
+            "skew",
+            "skew2d",
+            "margin-debt",
+            "yield-curve",
+            "catalysts",
+            "informed-flow",
+        }
+        missing = expected - names
+        assert not missing, (
+            f"direct record_service_health collector lost writers: "
+            f"{sorted(missing)}. Either a writer moved onto service_cycle "
+            "or the seam was renamed without updating this collector."
+        )
+        leaked = {"ok", "error", "syncing", "paused"} & names
+        assert not leaked, (
+            f"direct collector invented state labels as services: {sorted(leaked)}. "
+            "ib_watchdog.py (state-first) must stay in _DIRECT_RECORD_EXCLUDES."
+        )
+
 
 class TestEveryWriterIsRegistered:
     def test_no_writer_falls_through_to_the_default_window(self):
@@ -236,6 +314,9 @@ class TestEveryWriterIsRegistered:
         for name in collect_scan_mirror_names():
             if name not in registered:
                 unregistered.append(f"{name} (scan_mirror)")
+        for name, files in collect_direct_record_service_health_names().items():
+            if name not in registered:
+                unregistered.append(f"{name} (record_service_health: {files[0]})")
 
         assert not unregistered, (
             "Writers without an explicit SERVICE_FRESHNESS_WINDOWS entry "

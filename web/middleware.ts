@@ -6,7 +6,7 @@ import {
   jsonApiError,
   setNoStoreResponseHeaders,
 } from "@/lib/apiContracts";
-import { isAuthorizedProbeRequest } from "@/lib/probeAuth";
+import { bearerTokenFrom, isAuthorizedProbeRequest } from "@/lib/probeAuth";
 import { IMAGE_HOST_SOURCES } from "@/lib/imageHosts";
 import {
   AUTHENTICATED_SHARE_GENERATOR_ROUTES,
@@ -148,10 +148,11 @@ export const PUBLIC_WEBHOOK_API_ROUTES = ["/api/webhooks/clerk"] as const;
 //                                          (above). The generator POSTs are
 //                                          deliberately absent: they execute a
 //                                          report script on the trading host.
-//   /api/service-health                 — dashboard banner data; intentionally
-//                                          accessible so monitoring pollers
-//                                          and the future public status page
-//                                          don't need a session.
+//   /api/service-health                 — NOT public. Clerk session for the
+//                                          dashboard banner, or bearer
+//                                          RADON_PROBE_FRESHNESS_TOKEN for
+//                                          the loopback watchdog (see
+//                                          PROBE_BEARER_API_ROUTES).
 //   /api/health                         — pre-approved liveness probe for any
 //                                          future Next.js-side health route.
 //
@@ -254,20 +255,37 @@ export function isAuthorizedUser(
 // check entirely. EXPLICIT list, same default-deny discipline as
 // PUBLIC_SHARE_API_ROUTES — a new probe route must be added here AND to the
 // filesystem pin in web/tests/middleware-share-allowlist.test.ts.
-export const PROBE_BEARER_API_ROUTES = ["/api/probe/freshness"] as const;
+//
+// /api/service-health is dual-auth: valid bearer bypasses Clerk for the
+// loopback watchdog; missing bearer falls through to Clerk so the signed-in
+// dashboard banner still works. Wrong bearer is 401.
+export const PROBE_BEARER_API_ROUTES = [
+  "/api/probe/freshness",
+  "/api/service-health",
+] as const;
+
+export const PROBE_BEARER_CLERK_FALLTHROUGH_ROUTES = [
+  "/api/service-health",
+] as const;
 
 export function isProbeBearerRoute(pathname: string): boolean {
   return (PROBE_BEARER_API_ROUTES as readonly string[]).includes(pathname);
 }
 
+function isProbeBearerClerkFallthrough(pathname: string): boolean {
+  return (PROBE_BEARER_CLERK_FALLTHROUGH_ROUTES as readonly string[]).includes(
+    pathname,
+  );
+}
+
 /**
  * Middleware gate for the probe routes. Returns:
- *   - null                  — not a probe route; fall through to Clerk.
+ *   - null                  — not a probe route, or a dual-auth route
+ *                             with no/missing bearer (fall through to Clerk).
  *   - NextResponse.next()   — correct bearer token; let the route run.
- *   - 401 JSON              — missing/wrong token, or the server token is
- *                             unset (fail closed). Body carries no detail
- *                             about WHY, so the response doesn't help an
- *                             attacker distinguish the cases.
+ *   - 401 JSON              — missing/wrong token on a bearer-only route,
+ *                             or the server token is unset (fail closed).
+ *                             Body carries no detail about WHY.
  *
  * Token compare is timing-safe via Web Crypto (lib/probeAuth.ts) — the
  * middleware runs in the Edge runtime, so node:crypto is off the table.
@@ -282,6 +300,14 @@ export async function handleProbeBearerGate(
     expectedToken,
   );
   if (authorized) return NextResponse.next();
+  // Dual-auth: missing bearer falls through to Clerk (dashboard session).
+  // A presented-but-wrong bearer is still 401.
+  if (
+    isProbeBearerClerkFallthrough(request.nextUrl.pathname)
+    && bearerTokenFrom(request.headers.get("authorization")) === null
+  ) {
+    return null;
+  }
   const requestId = getRequestId();
   const response = jsonApiError({
     message: "Unauthorized",
