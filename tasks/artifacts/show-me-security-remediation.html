@@ -57,6 +57,9 @@
     .next article { padding: 18px 20px; border: 1px solid #5c4928; background: #18150f; border-radius: 4px; }
     .next h3 { margin: 7px 0 5px; font-size: 14px; color: var(--warn); }
     .next p { margin: 0; color: #b8ab91; font-size: 12px; line-height: 1.5; }
+    .next .complete { border-color: #164e46; background: #0c1917; }
+    .next .complete h3 { color: var(--signal); }
+    .next .complete p { color: #9abbb6; }
     footer { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--grid); color: var(--muted); font: 11px/1.5 "IBM Plex Mono", ui-monospace, monospace; }
     @media (max-width: 860px) {
       .metrics { grid-template-columns: repeat(2, 1fr); }
@@ -72,14 +75,14 @@
 <body>
   <main>
     <div class="eyebrow">Radon / DeepSec / 2026-08-13</div>
-    <h1>394 findings reduced to zero source-actionable rows.</h1>
-    <p class="lede">The remediation closes the report across trust boundaries, API authority, trading risk, persistence, and stale-state correctness. Every report row maps to source evidence and a regression or an evidence-backed duplicate disposition.</p>
+    <h1>394 findings patched. Owned distribution purged.</h1>
+    <p class="lede">PR #21 is merged, every owned branch was rewritten, and every affected Vercel build was deleted. GitHub pull refs and third-party forks remain externally owned reachability boundaries.</p>
 
     <section class="metrics" aria-label="Report totals">
       <div class="metric"><strong>394</strong><small>Exact report rows reconciled</small></div>
-      <div class="metric"><strong>142</strong><small>Security · 4 critical · 30 high · 108 medium</small></div>
-      <div class="metric"><strong>122</strong><small>High-bug correctness findings</small></div>
-      <div class="metric"><strong>130</strong><small>Bug correctness findings</small></div>
+      <div class="metric"><strong>13</strong><small>Owned branches rewritten atomically</small></div>
+      <div class="metric"><strong>221</strong><small>Affected immutable deployments deleted</small></div>
+      <div class="metric"><strong>404</strong><small>Every public plate URL · two passes</small></div>
     </section>
 
     <section class="flow" aria-label="Remediation flow">
@@ -119,20 +122,20 @@
       </article>
     </section>
 
-    <section class="next" aria-label="Operator follow-through">
-      <article>
-        <div class="label">SEC-054</div>
-        <h3>Purge deployed dashboard plate objects</h3>
-        <p>Remove prior account-bearing binaries from CDN and origin caches after the source deletion ships.</p>
+    <section class="next" aria-label="Purge disposition">
+      <article class="complete">
+        <div class="label">Owned boundary · complete</div>
+        <h3>Source, origin, CDN, and branches are clean</h3>
+        <p>PR #21 merged. Vercel CDN purged. Affected builds removed. Six binary paths and their objects are absent from every owned branch and tag.</p>
       </article>
       <article>
-        <div class="label">SEC-055</div>
-        <h3>Apply repository-history retention policy</h3>
-        <p>Remove the disclosed binaries from reachable history through the approved destructive-history workflow.</p>
+        <div class="label">External boundary · blocked</div>
+        <h3>GitHub pull refs and three forks retain copies</h3>
+        <p>Fork owners must rewrite or delete their refs before GitHub Support can dereference 10 immutable pull refs, purge cached views, and run server garbage collection.</p>
       </article>
     </section>
 
-    <footer>Branch: codex/security-report-20260813 · Evidence: tasks/security-remediation-status-*.md · Deferred items are external cleanup only; source remediation is complete.</footer>
+    <footer>Main: post-rewrite · PR #21 merged · Evidence: tasks/security-remediation-status-*.md · Remaining reachability: refs/pull/10–19 and Joshglobal, pbeninte, mdotk forks.</footer>
   </main>
 </body>
 </html>
