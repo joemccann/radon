@@ -12,6 +12,7 @@ machinery, mirroring executions into executed_orders.
 
 from __future__ import annotations
 
+import json
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -79,14 +80,31 @@ def _fill(*, exec_id: str, symbol: str = "URTY", side: str = "SLD", shares: int 
 
 
 class _FakeJournalDb:
-    """Minimal journal-table stand-in for _load_existing_from_journal."""
+    """Journal + executed_orders stand-in for the sweep's DB reads.
 
-    def __init__(self, rows: list[tuple] | None = None):
+    Dispatches on SQL shape: the sweep walks two different journal
+    projections — the 4-column loader (_load_existing_from_journal) and the
+    single-column coverage scan the carried-over gap recovery uses.
+
+    ``rows`` are (trade_id, payload, filled_at, written_at) tuples.
+    """
+
+    def __init__(
+        self,
+        rows: list[tuple] | None = None,
+        *,
+        executed_rows: list[tuple] | None = None,
+    ):
         self.rows = rows or []
+        self.executed_rows = executed_rows or []
 
     def execute(self, sql, params=None):
         cursor = MagicMock()
-        if "FROM journal" in sql:
+        if "FROM executed_orders" in sql:
+            cursor.fetchall.return_value = self.executed_rows
+        elif "SELECT payload FROM journal" in sql:
+            cursor.fetchall.return_value = [(r[1],) for r in self.rows]
+        elif "FROM journal" in sql:
             cursor.fetchall.return_value = self.rows
         else:
             cursor.fetchall.return_value = []
@@ -223,6 +241,127 @@ class TestSweepImport:
         assert result["executed_mirrored"] == 1
         assert mirrored.call_count == 1
         assert mirrored.call_args[0][0] == "0001.EVE.02"
+
+
+def _executed_order_row(
+    *,
+    exec_id: str,
+    symbol: str = "IWM",
+    side: str = "SLD",
+    quantity: float = 500.0,
+    price: float = 302.92,
+    when: datetime,
+) -> tuple:
+    """An executed_orders row as orders-sync / the sweep mirror writes it."""
+    payload = {
+        "execId": exec_id,
+        "permId": 900200,
+        "orderId": 295,
+        "clientId": 29,
+        "symbol": symbol,
+        "contract": {
+            "conId": 9579970,
+            "symbol": symbol,
+            "secType": "STK",
+            "currency": "USD",
+            "multiplier": 1,
+            "localSymbol": symbol,
+            "tradingClass": symbol,
+            "strike": 0.0,
+            "right": "?",
+            "expiry": None,
+        },
+        "side": side,
+        "quantity": quantity,
+        "price": price,
+        "avgPrice": price,
+        "cumQty": quantity,
+        "commission": 6.57,
+        "time": when.isoformat(),
+    }
+    fill_time = when.isoformat()
+    return (exec_id, json.dumps(payload), fill_time)
+
+
+class TestCarriedOverGapRecovery:
+    """A day whose sweep never succeeded leaves after-hours fills orphaned.
+
+    The live evening session only exposes the CURRENT day's executions, so a
+    later sweep can never re-pull them from IB. executed_orders holds the
+    durable payload, so the sweep must close residual gaps from Turso —
+    otherwise journal-gap-sli pages forever until a human runs
+    scripts/backfill_journal_from_executed_orders.py by hand.
+
+    Incident 20260813T140500Z: IWM perm 1805918121 filled 16:24:50 ET on
+    2026-08-12 (past journal_sync's 15-min post-close grace); that evening's
+    sweep burned its 3-attempt budget on an unreachable gateway.
+    """
+
+    @pytest.fixture
+    def captured_backfill_upserts(self, monkeypatch):
+        """The recovery path writes through db.writer, not journal_sync."""
+        import db.writer as writer_mod
+
+        upserts = MagicMock(name="upsert_journal_entry")
+        monkeypatch.setattr(writer_mod, "upsert_journal_entry", upserts)
+        return upserts
+
+    def test_recovers_prior_day_gap_the_session_no_longer_returns(
+        self, captured_journal_upserts, captured_backfill_upserts
+    ):
+        """Yesterday's orphaned fill is journaled from executed_orders."""
+        yesterday = datetime.now(timezone.utc) - timedelta(days=1)
+        orphan = _executed_order_row(exec_id="00010129.6a7d0497.01.01", when=yesterday)
+
+        h = EveningExecutionSweepHandler()
+        with patch(
+            "monitor_daemon.handlers.evening_execution_sweep.IBClient",
+            # Today's evening session: yesterday's execution is NOT in it.
+            return_value=_connected_client([]),
+        ), patch.object(
+            EveningExecutionSweepHandler,
+            "_open_journal_db",
+            return_value=_FakeJournalDb(executed_rows=[orphan]),
+        ), patch.object(
+            EveningExecutionSweepHandler, "_fetch_executed_rows", return_value=[],
+        ):
+            result = h.execute()
+
+        assert result["gaps_recovered"] == 1
+        assert captured_backfill_upserts.call_count == 1
+        trade_id = captured_backfill_upserts.call_args[0][0]
+        assert trade_id == "00010129.6a7d0497.01.01"
+
+    def test_already_journaled_gap_is_not_rewritten(
+        self, captured_journal_upserts, captured_backfill_upserts
+    ):
+        """Idempotent: an exec_id already covered in journal is left alone."""
+        yesterday = datetime.now(timezone.utc) - timedelta(days=1)
+        covered = _executed_order_row(exec_id="00010129.6a7d0497.01.01", when=yesterday)
+
+        h = EveningExecutionSweepHandler()
+        with patch(
+            "monitor_daemon.handlers.evening_execution_sweep.IBClient",
+            return_value=_connected_client([]),
+        ), patch.object(
+            EveningExecutionSweepHandler,
+            "_open_journal_db",
+            return_value=_FakeJournalDb(
+                [(
+                    "00010129.6a7d0497.01.01",
+                    '{"ib_exec_id": "00010129.6a7d0497.01.01"}',
+                    None,
+                    None,
+                )],
+                executed_rows=[covered],
+            ),
+        ), patch.object(
+            EveningExecutionSweepHandler, "_fetch_executed_rows", return_value=[],
+        ):
+            result = h.execute()
+
+        assert result["gaps_recovered"] == 0
+        assert captured_backfill_upserts.call_count == 0
 
 
 class TestSoftFailure:
