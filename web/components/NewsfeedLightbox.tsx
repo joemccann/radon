@@ -9,6 +9,9 @@ import { formatAbsolute, formatRelative, formatTime } from "@/lib/newsfeedTime";
 import { useDialogChrome } from "@/lib/useDialogChrome";
 import { useBookmarks } from "@/lib/useBookmarks";
 import StarToggle from "@/components/StarToggle";
+import { AnalysisSources } from "@/components/agent";
+import { buildAnalysisSources, buildFollowUps } from "@/lib/agent/analysisSources";
+import { emitAsk } from "@/lib/agent/askBus";
 
 export type NewsfeedLightboxFocus = {
   post: MarketEarPost & { href: string; isoTimestamp: string };
@@ -210,6 +213,12 @@ export default function NewsfeedLightbox({
             {post.content ? (
               <p className="newsfeed-lightbox__body">{post.content}</p>
             ) : null}
+
+            <AnalysisSources
+              sources={buildAnalysisSources(post)}
+              followUps={buildFollowUps(post)}
+              onFollowUp={emitAsk}
+            />
 
             {tags.length > 0 ? (
               <div className="newsfeed-lightbox__tags">
