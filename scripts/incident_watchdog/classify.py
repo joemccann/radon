@@ -92,8 +92,12 @@ def _classify_corrupt_build(findings: dict, now: datetime) -> dict | None:
     liveness = findings.get("nextjs_liveness", {})
     deploy = findings.get("deploy", {})
     ci = deploy.get("ci") or {}
+    # ci=None is unknown, never settled. The VPS has no gh, so CI is
+    # always None; the transition journal only covers promote-verify,
+    # not the multi-minute staged build. P2 needs a positively observed
+    # completed CI plus marker!=head plus not in_flight.
     deploy_settled = (
-        ci.get("status") in (None, "completed") and not deploy.get("in_flight")
+        ci.get("status") == "completed" and not deploy.get("in_flight")
     )
 
     if liveness.get("state") == "down" and liveness.get("http_status") == 500:

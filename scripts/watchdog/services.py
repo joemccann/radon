@@ -224,6 +224,17 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # 10:15 UTC). 48h window mirrors web/lib/serviceHealthWindows.ts and
     # db-backup. Local disk + B2 only — no IB dependency.
     "media-backup": {"open": 48 * _HOUR, "closed": 48 * _HOUR, "requires_ib": False},
+    # Equibles — Equibles API only, no IB. Daily calendar-day timers
+    # (09:30 / 10:00 UTC) use a uniform 26h window; weekly timers (Mon
+    # 13F, Tue ATS, Sat COT) use the 8-day preset-rebalance precedent.
+    "equibles-short-crowding": {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    "equibles-filing-forensics": {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    "equibles-13f": {"open": 8 * _DAY, "closed": 8 * _DAY, "requires_ib": False},
+    "equibles-ats-venue-share": {"open": 8 * _DAY, "closed": 8 * _DAY, "requires_ib": False},
+    "equibles-cot-positioning": {"open": 8 * _DAY, "closed": 8 * _DAY, "requires_ib": False},
+    # event-odds — laptop launchd 3x weekday, holiday-aware. Windows
+    # match catalysts (7h open / 4d closed). Polymarket only — no IB.
+    "event-odds": {"open": 7 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
 }
 
 
@@ -316,6 +327,15 @@ BUCKETS: dict[str, list[str]] = {
         "db-retention",
         # Nightly media.radon.run tree backup to B2 — 48h window.
         "media-backup",
+        # Equibles daily + weekly + event-odds. Hourly check surfaces a
+        # missed fire within 1h of the window expiring (preset-rebalance
+        # weekly precedent).
+        "equibles-short-crowding",
+        "equibles-filing-forensics",
+        "equibles-13f",
+        "equibles-ats-venue-share",
+        "equibles-cot-positioning",
+        "event-odds",
     ],
     # Every scheduled service EXCEPT watchdog-alerts. Including
     # watchdog-alerts here would create a recursive alerting loop:

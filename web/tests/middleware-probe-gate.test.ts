@@ -22,6 +22,7 @@ import {
   handleProbeBearerGate,
   isProbeBearerRoute,
   PROBE_BEARER_API_ROUTES,
+  PROBE_BEARER_CLERK_FALLTHROUGH_ROUTES,
 } from "../middleware";
 import {
   bearerTokenFrom,
@@ -147,5 +148,33 @@ describe("handleProbeBearerGate", () => {
     expect(res).not.toBeNull();
     expect(res!.status).toBe(200);
     expect(res!.headers.get("x-middleware-next")).toBe("1");
+  });
+
+  it("service-health is bearer-gated and not public", () => {
+    expect(PROBE_BEARER_API_ROUTES).toContain("/api/service-health");
+    expect(PROBE_BEARER_CLERK_FALLTHROUGH_ROUTES).toContain("/api/service-health");
+    expect(isProbeBearerRoute("/api/service-health")).toBe(true);
+  });
+
+  it("service-health: valid bearer passes; missing bearer falls through to Clerk", async () => {
+    const allowed = await handleProbeBearerGate(
+      reqFor("/api/service-health", `Bearer ${TOKEN}`),
+      TOKEN,
+    );
+    expect(allowed).not.toBeNull();
+    expect(allowed!.status).toBe(200);
+    expect(allowed!.headers.get("x-middleware-next")).toBe("1");
+
+    const missing = await handleProbeBearerGate(reqFor("/api/service-health"), TOKEN);
+    expect(missing).toBeNull();
+  });
+
+  it("service-health: wrong bearer is 401", async () => {
+    const res = await handleProbeBearerGate(
+      reqFor("/api/service-health", "Bearer not-the-token"),
+      TOKEN,
+    );
+    expect(res).not.toBeNull();
+    expect(res!.status).toBe(401);
   });
 });

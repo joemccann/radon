@@ -294,8 +294,11 @@ def _dual_write_orders_to_db(data: dict) -> None:
                 upsert_executed_order(exec_id, e, fill_time, perm_id=perm_id)
                 try:
                     upsert_position_execution_fact(e)
-                except ValueError:
-                    raise
+                except ValueError as exc:
+                    print(
+                        f"  Warning: execution fact conflict for {exec_id}: {exc}",
+                        file=sys.stderr,
+                    )
                 except Exception as exc:  # noqa: BLE001 - migration may not be live yet
                     print(f"  Warning: execution-ledger write skipped: {exc}", file=sys.stderr)
 

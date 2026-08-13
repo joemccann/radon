@@ -410,6 +410,75 @@ def test_late_commission_enrichment_is_not_treated_as_execution_correction():
     assert upsert_position_execution_fact(enriched, db=db) is False
 
 
+def test_sparse_then_enriched_ib_fill_is_not_a_conflict():
+    db = _ledger_db()
+    exec_id = "0000e1a7.deadbeef.01.01"
+    sparse = {
+        "execId": exec_id,
+        "account_id": "U1",
+        "con_id": 101,
+        "side": "BOT",
+        "quantity": 10,
+        "price": 4.25,
+        "filled_at": "2026-08-07T16:00:30Z",
+        "order_ref": "radon-spcx-1",
+    }
+    enriched = {
+        "execId": exec_id,
+        "account_id": "U1",
+        "side": "BOT",
+        "quantity": 10,
+        "price": 4.25,
+        "avgPrice": 4.80,
+        "time": "2026-08-07T12:00:30-04:00",
+        "permId": 9001,
+        "orderRef": "radon-spcx-1",
+        "symbol": "SPCX P120",
+        "currency": "USD",
+        "multiplier": 100,
+        "sec_type": "OPT",
+        "contract": {
+            "conId": 101,
+            "symbol": "SPCX",
+            "secType": "OPT",
+            "currency": "USD",
+            "multiplier": "100",
+        },
+    }
+    assert upsert_position_execution_fact(sparse, db=db) is True
+    assert upsert_position_execution_fact(enriched, db=db) is False
+
+
+def test_naive_and_offset_equivalent_fill_times_are_not_conflicts():
+    db = _ledger_db()
+    naive = {**_execution("E1"), "filled_at": "2026-08-07T16:00:30"}
+    offset = {**_execution("E1"), "filled_at": "2026-08-07T16:00:30+00:00"}
+    assert upsert_position_execution_fact(naive, db=db) is True
+    assert upsert_position_execution_fact(offset, db=db) is False
+
+
+def test_avg_price_fallback_then_explicit_price_is_not_a_conflict():
+    db = _ledger_db()
+    fallback = {**_execution("E1")}
+    fallback.pop("price")
+    fallback["avgPrice"] = 4.25
+    explicit = {**_execution("E1"), "price": 4.25, "avgPrice": 4.80}
+    assert upsert_position_execution_fact(fallback, db=db) is True
+    assert upsert_position_execution_fact(explicit, db=db) is False
+
+
+def test_avg_price_drift_without_explicit_price_is_not_a_conflict():
+    db = _ledger_db()
+    first = {**_execution("E1")}
+    first.pop("price")
+    first["avgPrice"] = 4.25
+    drifted = {**_execution("E1")}
+    drifted.pop("price")
+    drifted["avgPrice"] = 4.80
+    assert upsert_position_execution_fact(first, db=db) is True
+    assert upsert_position_execution_fact(drifted, db=db) is False
+
+
 def test_ib_exec_correction_invalidates_observed_basis_instead_of_double_counting():
     db = _ledger_db()
     insert_account_margin_sample(

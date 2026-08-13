@@ -154,6 +154,57 @@ def test_dual_write_records_service_health_on_success(mock_writer):
     assert args[1] == "ok"
 
 
+def _executed(exec_id: str, *, price: float = 4.25) -> dict:
+    return {
+        "execId": exec_id,
+        "account_id": "U1",
+        "side": "BOT",
+        "quantity": 10,
+        "price": price,
+        "avgPrice": price,
+        "time": "2026-08-07T16:00:30Z",
+        "permId": 7001,
+        "orderRef": "radon-spcx-1",
+        "contract": {"conId": 101, "symbol": "SPCX"},
+    }
+
+
+def test_dual_write_keeps_remaining_fills_after_one_economic_conflict(mock_writer):
+    import ib_orders
+
+    fake = sys.modules["db.writer"]
+
+    def maybe_conflict(payload):
+        mock_writer["upsert_position_execution_fact"].append(payload)
+        if payload.get("execId") == "exec-conflict":
+            raise ValueError("execution fact conflict for U1:exec-conflict:1")
+
+    fake.upsert_position_execution_fact = maybe_conflict  # type: ignore[attr-defined]
+    ib_orders._dual_write_orders_to_db({
+        "last_sync": "2026-05-07T00:00:00Z",
+        "open_orders": [],
+        "executed_orders": [
+            _executed("exec-ok-1"),
+            _executed("exec-conflict", price=9.99),
+            _executed("exec-ok-2"),
+        ],
+    })
+
+    assert [row["exec_id"] for row in mock_writer["upsert_executed_order"]] == [
+        "exec-ok-1",
+        "exec-conflict",
+        "exec-ok-2",
+    ]
+    assert [row["execId"] for row in mock_writer["upsert_position_execution_fact"]] == [
+        "exec-ok-1",
+        "exec-conflict",
+        "exec-ok-2",
+    ]
+    states = [args[1] for args, _ in mock_writer["record_service_health"]]
+    assert "error" not in states
+    assert "ok" in states
+
+
 def test_dual_write_records_error_on_writer_exception(monkeypatch: pytest.MonkeyPatch, mock_writer):
     import ib_orders
     # Force replace_open_orders_for_session to throw; verify error path
