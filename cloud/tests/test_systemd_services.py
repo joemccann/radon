@@ -696,6 +696,17 @@ class TestBpiScanBudget:
         assert "Tue..Sat" in raw and "11:00:00 UTC" in raw
 
 
+class TestLeapGarchScanBudget:
+    """Index-universe LEAP/GARCH scans need an hour-scale FastAPI budget
+    (3600s) plus systemd headroom so TimeoutStartSec does not kill the
+    oneshot mid-sweep."""
+
+    @pytest.mark.parametrize("unit_name", ["radon-leap.service", "radon-garch.service"])
+    def test_service_start_budget_covers_index_universe_scan(self, unit, unit_name):
+        svc = unit(unit_name)["Service"]
+        assert int(svc["timeoutstartsec"]) >= 3900
+
+
 class TestIncidentWatchdog:
     """Endpoint/body/deploy prober writing data/incidents artifacts.
 

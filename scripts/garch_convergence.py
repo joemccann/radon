@@ -17,6 +17,9 @@ Usage:
     python3 scripts/garch_convergence.py --preset energy
     python3 scripts/garch_convergence.py --preset all     # Run all built-in
 
+    # Scheduled default: NDX+SPX+RUT curated pairs (virtual indexes preset)
+    python3 scripts/garch_convergence.py --preset indexes
+
     # File presets (from data/presets/)
     python3 scripts/garch_convergence.py --preset sp500-semiconductors
     python3 scripts/garch_convergence.py --preset ndx100-biotech
@@ -288,7 +291,7 @@ def fetch_ticker_vol(ticker: str, uw_client: UWClient) -> TickerVol:
     return tv
 
 
-def fetch_all_tickers(tickers: List[str], max_workers: int = 8) -> Dict[str, TickerVol]:
+def fetch_all_tickers(tickers: List[str], max_workers: int = 16) -> Dict[str, TickerVol]:
     """Fetch vol data for ALL tickers in parallel.
 
     Uses one shared UWClient (connection-pooled session) across threads,
@@ -418,7 +421,11 @@ def resolve_inputs(
                     fp = load_preset(name)
                     all_pairs.extend(fp.pairs)
                     descriptions.append(fp.description)
-                    vol_drivers.append(fp.vol_driver)
+                    # Master index files keep vol_driver on groups, not
+                    # the top-level preset. Curated pairs still count.
+                    vol_drivers.append(
+                        fp.vol_driver or ("curated preset pairs" if fp.pairs else "")
+                    )
                 except (FileNotFoundError, ImportError) as exc:
                     print(f"⚠ Preset '{name}' not found: {exc}", file=sys.stderr)
 
@@ -737,9 +744,12 @@ Built-in presets:
   china-etf   (FXI,BABA), (EWY,FXI)
   all         Run all built-in presets
 
-Also supports any data/presets/ file preset (e.g. sp500-semiconductors).
+Virtual / file presets:
+  indexes     NDX+SPX+RUT curated pairs
+  Also any data/presets/ file preset (e.g. sp500-semiconductors).
 
 Examples:
+  python3 scripts/garch_convergence.py --preset indexes
   python3 scripts/garch_convergence.py --preset all
   python3 scripts/garch_convergence.py --preset semis --json
   python3 scripts/garch_convergence.py NVDA AMD GOOGL META
@@ -751,11 +761,15 @@ Examples:
         dest="ticker_list",
         help="Comma-separated tickers (paired consecutively); overrides --preset",
     )
-    parser.add_argument("--preset", "-p", help="Pair preset name (or 'all')")
+    parser.add_argument(
+        "--preset",
+        "-p",
+        help="Pair preset name (or 'all'). indexes = NDX+SPX+RUT curated pairs",
+    )
     parser.add_argument("--json", action="store_true", help="Output JSON instead of HTML")
     parser.add_argument("--no-open", action="store_true", help="Don't open report in browser")
     parser.add_argument("--output", "-o", help="Custom output path")
-    parser.add_argument("--workers", type=int, default=8, help="Parallel worker threads (default 8)")
+    parser.add_argument("--workers", type=int, default=16, help="Parallel worker threads (default 16)")
 
     args = parser.parse_args()
 

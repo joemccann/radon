@@ -1,3 +1,29 @@
+# Task: LEAP/GARCH index-universe default (2026-08-13)
+
+Default scheduled + dashboard scans use Nasdaq-100 + S&P 500 + Russell 2000 via a virtual `indexes` preset (~2494 names, ~1295 curated pairs). No committed `indexes.json`.
+
+## Dependency graph
+
+- T1 depends_on: [] - Failing tests for virtual preset, GARCH curated pairs, LEAP resolve/workers, FastAPI/web/systemd/refresh defaults
+- T2 depends_on: [T1] - Backend: `load_preset('indexes')`, GARCH `resolve_inputs`, LEAP workers/parallel, FastAPI defaults + timeouts + `--workers`
+- T3 depends_on: [T2] - Web SCAN body + radonFetch 3610000, systemd TimeoutStartSec >= 3900, refresh wrappers
+- T4 depends_on: [T3] - Focused tests green
+
+## Checklist
+
+- [x] T1 Red tests
+- [x] T2 Backend
+- [x] T3 Web + systemd
+- [x] T4 Verify
+
+## Review
+
+- T3: dashboard SCAN posts `{preset: indexes}`; Next proxies use `radonFetch` timeout 3610000; systemd oneshots `TimeoutStartSec=3900`. Empty states mention the scheduled indexes-universe refresh. No preset picker.
+- T4: focused suites green. `load_preset('indexes')` = 2494 tickers / 1295 pairs (offline). Defaults are `indexes` in refresh wrappers, FastAPI `leap_scan`/`garch_convergence_scan`, and WorkspaceSections SCAN. Combined pytest scripts+cloud hits ImportPathMismatchError (`tests.conftest`); rerun split. No live 2494-ticker UW scan.
+- Post-verify: empty `vol_driver` on master index files would fail every GARCH gate. Virtual preset now stamps `GICS/sector-curated index pairs`; file presets with pairs fall back to `curated preset pairs`.
+
+---
+
 # Task: Incident notification description + click target (2026-08-12)
 
 ## Dependency graph

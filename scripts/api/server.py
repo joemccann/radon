@@ -2773,6 +2773,8 @@ async def vcg_share():
 _leap_last_scan: float = 0.0
 _leap_scan_lock: Optional[asyncio.Lock] = None
 LEAP_COOLDOWN_S = 600  # 10 min — LEAP scans are slow + low-cadence
+LEAP_PRESET_TIMEOUT_S = 3600
+LEAP_TICKER_TIMEOUT_S = 300
 _SCAN_TICKER_LIST_MAX = 25
 
 
@@ -2824,10 +2826,11 @@ def _scan_cache_matches_preset(cached: Any, preset: str) -> bool:
 
 
 @app.post("/leap/scan")
-async def leap_scan(preset: str = "mag7", min_gap: float = 10.0, tickers: str = ""):
+async def leap_scan(preset: str = "indexes", min_gap: float = 10.0, tickers: str = ""):
     """Run LEAP scan (leap_scanner_uw.py --preset X --json, or --tickers A,B).
 
-    The scanner writes data/leap.json directly; stdout is text + a summary
+    Default preset is the virtual `indexes` universe (NDX+SPX+RUT). The
+    scanner writes data/leap.json directly; stdout is text + a summary
     rather than JSON, so we ignore run_script's parsed payload and re-read
     the cache file after the subprocess completes. 600s cooldown stops
     accidental thrash on the Unusual Whales API; explicit ticker scans
@@ -2853,11 +2856,24 @@ async def leap_scan(preset: str = "mag7", min_gap: float = 10.0, tickers: str = 
             cached = _read_cache(DATA_DIR / "leap.json")
             if _scan_cache_matches_preset(cached, preset):
                 return cached
+        workers = _bounded_env_int("RADON_LEAP_SCANNER_WORKERS", 16)
         if is_ticker_scan:
-            args = ["--tickers", ",".join(requested), "--min-gap", str(min_gap), "--json"]
+            args = [
+                "--tickers", ",".join(requested),
+                "--min-gap", str(min_gap),
+                "--json",
+                "--workers", str(workers),
+            ]
+            timeout = LEAP_TICKER_TIMEOUT_S
         else:
-            args = ["--preset", preset, "--min-gap", str(min_gap), "--json"]
-        result = await run_script("leap_scanner_uw.py", args, timeout=300)
+            args = [
+                "--preset", preset,
+                "--min-gap", str(min_gap),
+                "--json",
+                "--workers", str(workers),
+            ]
+            timeout = LEAP_PRESET_TIMEOUT_S
+        result = await run_script("leap_scanner_uw.py", args, timeout=timeout)
         if not result.ok:
             raise HTTPException(status_code=502, detail=result.error)
         if not is_ticker_scan:
@@ -3391,21 +3407,24 @@ async def index_options_chain(symbol: str, expiry: str = ""):
 _garch_last_scan: float = 0.0
 _garch_scan_lock: Optional[asyncio.Lock] = None
 GARCH_COOLDOWN_S = 600  # 10 min — UW rate-limit + scan latency
+GARCH_PRESET_TIMEOUT_S = 3600
+GARCH_TICKER_TIMEOUT_S = 180
 
 
 @app.post("/garch-convergence/scan")
-async def garch_convergence_scan(preset: str = "mega-tech", tickers: str = ""):
+async def garch_convergence_scan(preset: str = "indexes", tickers: str = ""):
     """Run GARCH convergence scan (garch_convergence.py --preset X --json,
     or --tickers A,B,C,D paired consecutively — even symbol count required).
 
-    Mirrors /leap/scan semantics: 600s cooldown + lock, subprocess writes
-    data/garch_convergence.json directly (and records its own
+    Default preset is the virtual `indexes` universe (NDX+SPX+RUT curated
+    pairs). Mirrors /leap/scan semantics: 600s cooldown + lock, subprocess
+    writes data/garch_convergence.json directly (and records its own
     service_health[garch-scan] row), we re-read the cache file after the
     subprocess completes. Explicit pair scans bypass the cooldown and never
     advance it.
 
-    Built-in presets: semis, mega-tech, energy, china-etf, all. File
-    presets (data/presets/) also accepted.
+    Built-in presets: semis, mega-tech, energy, china-etf, all. Virtual
+    `indexes` plus file presets (data/presets/) also accepted.
     """
     requested = _parse_scan_tickers(tickers, require_pairs=True, dedupe=False)
     if test_mode:
@@ -3427,11 +3446,22 @@ async def garch_convergence_scan(preset: str = "mega-tech", tickers: str = ""):
             cached = _read_cache(DATA_DIR / "garch_convergence.json")
             if _scan_cache_matches_preset(cached, preset):
                 return cached
+        workers = _bounded_env_int("RADON_GARCH_SCANNER_WORKERS", 16)
         if is_ticker_scan:
-            args = ["--tickers", ",".join(requested), "--json", "--no-open"]
+            args = [
+                "--tickers", ",".join(requested),
+                "--json", "--no-open",
+                "--workers", str(workers),
+            ]
+            timeout = GARCH_TICKER_TIMEOUT_S
         else:
-            args = ["--preset", preset, "--json", "--no-open"]
-        result = await run_script("garch_convergence.py", args, timeout=180)
+            args = [
+                "--preset", preset,
+                "--json", "--no-open",
+                "--workers", str(workers),
+            ]
+            timeout = GARCH_PRESET_TIMEOUT_S
+        result = await run_script("garch_convergence.py", args, timeout=timeout)
         if not result.ok:
             raise HTTPException(status_code=502, detail=result.error)
         if not is_ticker_scan:

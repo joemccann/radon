@@ -43,7 +43,7 @@ describe("POST /api/leap/scan", () => {
     expect(noStoreHeader(res)).toContain("no-store");
     expect(mocks.radonFetch).toHaveBeenCalledWith("/leap/scan?preset=mag7", {
       method: "POST",
-      timeout: 310_000,
+      timeout: 3_610_000,
     });
   });
 
@@ -62,7 +62,7 @@ describe("POST /api/leap/scan", () => {
     expect(body.universe).toBe("explicit");
     expect(mocks.radonFetch).toHaveBeenCalledWith("/leap/scan?tickers=NVDA%2CAMD", {
       method: "POST",
-      timeout: 310_000,
+      timeout: 3_610_000,
     });
   });
 
@@ -78,7 +78,7 @@ describe("POST /api/leap/scan", () => {
 
     expect(mocks.radonFetch).toHaveBeenCalledWith("/leap/scan?tickers=NVDA%2CAMD", {
       method: "POST",
-      timeout: 310_000,
+      timeout: 3_610_000,
     });
   });
 
@@ -113,7 +113,7 @@ describe("POST /api/garch-convergence/scan", () => {
     expect(noStoreHeader(res)).toContain("no-store");
     expect(mocks.radonFetch).toHaveBeenCalledWith("/garch-convergence/scan?preset=mega-tech", {
       method: "POST",
-      timeout: 190_000,
+      timeout: 3_610_000,
     });
   });
 
@@ -130,7 +130,7 @@ describe("POST /api/garch-convergence/scan", () => {
     expect(res.status).toBe(200);
     expect(mocks.radonFetch).toHaveBeenCalledWith(
       "/garch-convergence/scan?tickers=NVDA%2CAMD%2CNVDA%2CTSM",
-      { method: "POST", timeout: 190_000 },
+      { method: "POST", timeout: 3_610_000 },
     );
   });
 
