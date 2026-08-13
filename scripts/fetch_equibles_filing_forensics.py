@@ -622,7 +622,21 @@ def _write_json_cache(dossier: dict[str, Any]) -> None:
 
 
 def load_watchlist_tickers() -> list[str]:
-    """Watchlist symbols, best-effort — an absent or odd file yields nothing."""
+    """Watchlist symbols, Turso first with the JSON file as fallback.
+
+    data/*.json is an ephemeral fallback on the VPS, so a disk-only read makes
+    the scheduled run fail every cycle on a host where the file was never
+    written. Turso is the canonical store.
+    """
+    try:
+        from db.readers import read_watchlist_tickers
+
+        symbols = read_watchlist_tickers()
+        if symbols:
+            return [str(s).upper() for s in symbols]
+    except Exception:  # noqa: BLE001 - fall through to the disk copy
+        pass
+
     try:
         raw = json.loads(WATCHLIST_JSON.read_text())
     except (OSError, ValueError):

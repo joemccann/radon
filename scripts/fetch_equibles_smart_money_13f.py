@@ -880,13 +880,26 @@ def _print_summary(payload: dict[str, Any]) -> None:
     print(f"  requests {payload.get('requests_used')}", file=sys.stderr)
 
 
+def watchlist_tickers() -> list[str]:
+    """Watchlist symbols from Turso, the canonical store."""
+    from db.readers import read_watchlist_tickers
+
+    return [str(s).upper() for s in read_watchlist_tickers()]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Equibles 13F smart-money depth layer")
-    parser.add_argument("tickers", nargs="+", help="Ticker symbols")
+    parser.add_argument(
+        "tickers", nargs="*", help="Ticker symbols (default: the Turso watchlist)"
+    )
     parser.add_argument("--json", action="store_true", help="Output JSON to stdout")
     args = parser.parse_args()
 
-    payloads = run_many(args.tickers)
+    tickers = [t.upper() for t in args.tickers] or watchlist_tickers()
+    if not tickers:
+        parser.error("no tickers given and the watchlist is empty")
+
+    payloads = run_many(tickers)
     if args.json:
         print(json.dumps(payloads if len(payloads) > 1 else payloads[0], indent=2))
         return
