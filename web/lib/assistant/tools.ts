@@ -11,6 +11,8 @@
 
 import { radonFetch, RadonApiError } from "@/lib/radonApi";
 import type { LlmTool } from "@/lib/llm/provider";
+import { backendQueryPath, isBackendPathAllowed } from "@/lib/assistant/backend";
+import { rankVerticalSpreads, type ChainContract, type SpreadKind } from "@/lib/assistant/spreads";
 import {
   fetchJournalRowsInRange,
   fetchPriorRowsForTickers,
@@ -333,6 +335,139 @@ async function runGetRealizedPnl(input: Record<string, unknown>): Promise<unknow
   return computeRealizedPnl([...windowRows, ...priorRows], { ...window, stockBasisFallback });
 }
 
+const EVALUATE_TIMEOUT_MS = 185_000;
+const EVALUATE_STDOUT_CHARS = 16_000;
+const SPREAD_KINDS = new Set<SpreadKind>(["bull_call", "bear_call", "bull_put", "bear_put"]);
+
+function asChainContracts(raw: unknown): ChainContract[] {
+  if (!Array.isArray(raw)) return [];
+  const rows: ChainContract[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    const strike = typeof row.strike === "number" ? row.strike : Number(row.strike);
+    const rightRaw = typeof row.right === "string" ? row.right.toUpperCase() : "";
+    if (!Number.isFinite(strike) || (rightRaw !== "C" && rightRaw !== "P")) continue;
+    rows.push({
+      strike,
+      right: rightRaw,
+      bid: typeof row.bid === "number" ? row.bid : null,
+      ask: typeof row.ask === "number" ? row.ask : null,
+      mid: typeof row.mid === "number" ? row.mid : null,
+      iv: typeof row.iv === "number" ? row.iv : null,
+      oi: typeof row.oi === "number" ? row.oi : null,
+      volume: typeof row.volume === "number" ? row.volume : null,
+    });
+  }
+  return rows;
+}
+
+async function runRankSpreads(
+  input: Record<string, unknown>,
+  token?: string,
+): Promise<unknown> {
+  const ticker = tickerOf(input);
+  const expiry = typeof input.expiry === "string" ? input.expiry.trim() : "";
+  if (!ticker || !expiry) throw new Error("ticker and expiry are required.");
+  const kindRaw = typeof input.kind === "string" ? input.kind.trim() : "bull_call";
+  const kind = SPREAD_KINDS.has(kindRaw as SpreadKind) ? (kindRaw as SpreadKind) : "bull_call";
+  const quantity =
+    typeof input.quantity === "number" && Number.isFinite(input.quantity) ? input.quantity : 1;
+
+  const quote = (await radonFetch(`/quote/${encodeURIComponent(ticker)}`, {
+    timeout: 20_000,
+    token,
+  })) as { last?: number; missing?: boolean };
+  const params = new URLSearchParams({
+    symbol: ticker,
+    expiry,
+    right: kind.endsWith("call") ? "C" : "P",
+    wings: "8",
+  });
+  const chain = (await radonFetch(`/options/uw-chain?${params}`, {
+    timeout: 45_000,
+    token,
+  })) as { spot?: number; contracts?: unknown; expiry?: string };
+  const spot =
+    (typeof chain.spot === "number" && chain.spot > 0 && chain.spot) ||
+    (typeof quote.last === "number" && quote.last > 0 && quote.last) ||
+    0;
+  if (!spot) throw new Error("No live spot available; cannot rank spreads.");
+  const spreads = rankVerticalSpreads({
+    spot,
+    contracts: asChainContracts(chain.contracts),
+    kind,
+    quantity,
+  });
+  return {
+    ticker,
+    expiry: chain.expiry ?? expiry,
+    spot,
+    kind,
+    quantity,
+    count: spreads.length,
+    spreads,
+  };
+}
+
+function trimEvaluateOutput(text: string): string {
+  if (text.length <= EVALUATE_STDOUT_CHARS) return text;
+  return `${text.slice(0, EVALUATE_STDOUT_CHARS)}\n\n[... truncated ${text.length - EVALUATE_STDOUT_CHARS} chars ...]`;
+}
+
+async function runEvaluate(input: Record<string, unknown>, token?: string): Promise<unknown> {
+  const ticker = tickerOf(input);
+  if (!ticker) throw new Error("ticker is required.");
+  const days =
+    typeof input.days === "number" && Number.isFinite(input.days) && input.days > 0
+      ? String(Math.floor(input.days))
+      : "5";
+  const data = (await radonFetch("/pi/exec", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      script: "evaluate.py",
+      args: [ticker, "--days", days],
+      timeout: 180,
+    }),
+    timeout: EVALUATE_TIMEOUT_MS,
+    token,
+  })) as { ok?: boolean; stdout?: string; stderr?: string; exit_code?: number; timed_out?: boolean };
+  return {
+    ticker,
+    ok: Boolean(data.ok) && !data.timed_out,
+    exit_code: data.exit_code ?? null,
+    timed_out: Boolean(data.timed_out),
+    stdout: trimEvaluateOutput(data.stdout ?? ""),
+    stderr: trimEvaluateOutput(data.stderr ?? ""),
+  };
+}
+
+async function runFetchBackend(
+  input: Record<string, unknown>,
+  token?: string,
+): Promise<unknown> {
+  const methodRaw = typeof input.method === "string" ? input.method.trim().toUpperCase() : "GET";
+  const method = methodRaw === "POST" ? "POST" : "GET";
+  const path = typeof input.path === "string" ? input.path : "";
+  if (!isBackendPathAllowed(method, path)) {
+    throw new Error(`Backend path is not allowed: ${method} ${path}`);
+  }
+  const query =
+    input.query && typeof input.query === "object" && !Array.isArray(input.query)
+      ? Object.fromEntries(
+          Object.entries(input.query as Record<string, unknown>).filter(
+            (entry): entry is [string, string] => typeof entry[1] === "string",
+          ),
+        )
+      : undefined;
+  return radonFetch(backendQueryPath(path, query), {
+    method,
+    timeout: READ_TIMEOUT_MS,
+    token,
+  });
+}
+
 async function runQueryJournal(input: Record<string, unknown>): Promise<unknown> {
   const window = journalWindowOf(input);
   const requested =
@@ -522,23 +657,158 @@ export const ASSISTANT_TOOLS: AssistantTool[] = [
     run: (input) => runQueryJournal(input),
   },
   {
+    name: "get_quote",
+    description:
+      "Fetch the live last/bid/ask for an underlying. Call this before naming strikes. Never invent a spot price.",
+    destructive: false,
+    input_schema: {
+      type: "object",
+      properties: {
+        ticker: { type: "string", description: "Underlying symbol, e.g. ADBE" },
+      },
+      required: ["ticker"],
+    },
+    run: (input, token) =>
+      radonFetch(`/quote/${encodeURIComponent(tickerOf(input))}`, {
+        timeout: 20_000,
+        token,
+      }),
+  },
+  {
+    name: "get_option_expirations",
+    description:
+      "List listed option expirations with DTE and volume for a ticker. Use this when the operator has not named an expiry.",
+    destructive: false,
+    input_schema: {
+      type: "object",
+      properties: {
+        ticker: { type: "string", description: "Underlying symbol" },
+      },
+      required: ["ticker"],
+    },
+    run: (input, token) =>
+      radonFetch(`/options/uw-chain?symbol=${encodeURIComponent(tickerOf(input))}`, {
+        timeout: 30_000,
+        token,
+      }),
+  },
+  {
+    name: "get_option_chain",
+    description:
+      "Fetch a compact priced option chain (bid/ask/mid/IV/OI) around spot for one expiry. Use before recommending strikes.",
+    destructive: false,
+    input_schema: {
+      type: "object",
+      properties: {
+        ticker: { type: "string", description: "Underlying symbol" },
+        expiry: { type: "string", description: "Expiration YYYY-MM-DD or YYYYMMDD" },
+        right: { type: "string", enum: ["C", "P"], description: "Optional call/put filter" },
+      },
+      required: ["ticker", "expiry"],
+    },
+    run: (input, token) => {
+      const params = new URLSearchParams({
+        symbol: tickerOf(input),
+        expiry: String(input.expiry ?? "").trim(),
+      });
+      const right = typeof input.right === "string" ? input.right.trim().toUpperCase() : "";
+      if (right === "C" || right === "P") params.set("right", right);
+      return radonFetch(`/options/uw-chain?${params}`, { timeout: 45_000, token });
+    },
+  },
+  {
+    name: "rank_spreads",
+    description:
+      "Rank vertical debit/credit spreads from the live priced chain. Returns debit, width, max payout dollars, reward/risk, and a convexity flag (gain >= 2x loss). Use this for 'best call spread' / max-payout questions.",
+    destructive: false,
+    input_schema: {
+      type: "object",
+      properties: {
+        ticker: { type: "string", description: "Underlying symbol" },
+        expiry: { type: "string", description: "Expiration YYYY-MM-DD or YYYYMMDD" },
+        kind: {
+          type: "string",
+          enum: ["bull_call", "bear_call", "bull_put", "bear_put"],
+          description: "Vertical type. Default bull_call.",
+        },
+        quantity: { type: "number", description: "Contract count for dollar payout. Default 1." },
+      },
+      required: ["ticker", "expiry"],
+    },
+    run: (input, token) => runRankSpreads(input, token),
+  },
+  {
+    name: "run_evaluate",
+    description:
+      "Run the full 7-milestone Radon evaluation (flow, OI, edge, structure, Kelly, decision) for a ticker. Use when the operator wants a complete thesis, not just a chain.",
+    destructive: false,
+    input_schema: {
+      type: "object",
+      properties: {
+        ticker: { type: "string", description: "Underlying symbol" },
+        days: { type: "number", description: "Dark-pool lookback days. Default 5." },
+      },
+      required: ["ticker"],
+    },
+    run: (input, token) => runEvaluate(input, token),
+  },
+  {
+    name: "fetch_backend",
+    description:
+      "Call an allowlisted FastAPI READ endpoint (scans, GEX, VCG, regime, earnings, short availability, ratings, portfolio sync, open orders refresh, and other operator surfaces). Mutating paths such as order place/cancel, trading halt, admin, and IB restart are refused.",
+    destructive: false,
+    input_schema: {
+      type: "object",
+      properties: {
+        method: { type: "string", enum: ["GET", "POST"], description: "HTTP method. Default GET." },
+        path: {
+          type: "string",
+          description: "FastAPI path beginning with /, e.g. /earnings/ADBE or /vcg/scan",
+        },
+        query: {
+          type: "object",
+          additionalProperties: { type: "string" },
+          description: "Optional query string fields",
+        },
+      },
+      required: ["path"],
+    },
+    run: (input, token) => runFetchBackend(input, token),
+  },
+  {
     name: "place_order",
     description:
-      "Propose an options or stock order. This is a destructive action: it is NOT executed automatically. The user must confirm the proposal before any order is sent.",
+      "Propose a stock, option, or combo order. This is a destructive action: it is NOT executed automatically. The user must confirm the proposal before any order is sent. For a vertical, set type=combo and include both legs with expiry/strike/right/action/ratio.",
     destructive: true,
     input_schema: {
       type: "object",
       properties: {
-        type: { type: "string", enum: ["stock", "option"], description: "Instrument type" },
+        type: { type: "string", enum: ["stock", "option", "combo"], description: "Instrument type" },
         ticker: { type: "string", description: "Underlying symbol" },
-        action: { type: "string", enum: ["BUY", "SELL"], description: "Order direction" },
+        action: { type: "string", enum: ["BUY", "SELL"], description: "Order direction. Combo entries stay BUY." },
         quantity: { type: "number", description: "Number of contracts or shares" },
-        limit_price: { type: "number", description: "Limit price per contract/share" },
-        expiry: { type: "string", description: "Option expiry YYYYMMDD" },
-        strike: { type: "number", description: "Option strike" },
-        right: { type: "string", enum: ["C", "P"], description: "Option right" },
+        limit_price: { type: "number", description: "Limit price per contract/share or net debit" },
+        structure: { type: "string", description: "Optional structure label, e.g. long call, bull call spread" },
+        expiry: { type: "string", description: "Option expiry YYYYMMDD or YYYY-MM-DD" },
+        strike: { type: "number", description: "Single-leg option strike" },
+        right: { type: "string", enum: ["C", "P"], description: "Single-leg call/put" },
         conId: { type: "number", description: "IB contract identity from the chain" },
         exchange: { type: "string", description: "Qualified exchange" },
+        legs: {
+          type: "array",
+          description: "Combo legs",
+          items: {
+            type: "object",
+            properties: {
+              expiry: { type: "string" },
+              strike: { type: "number" },
+              right: { type: "string", enum: ["C", "P"] },
+              action: { type: "string", enum: ["BUY", "SELL"] },
+              ratio: { type: "number" },
+            },
+            required: ["expiry", "strike", "right", "action", "ratio"],
+          },
+        },
       },
       required: ["type", "ticker", "action", "quantity", "limit_price"],
     },
@@ -548,7 +818,18 @@ export const ASSISTANT_TOOLS: AssistantTool[] = [
       const ticker = tickerOf(input) || "?";
       const structure = typeof input.structure === "string" && input.structure.trim() ? ` ${input.structure.trim()}` : "";
       const limit = typeof input.limit_price === "number" ? ` @ ${input.limit_price}` : "";
-      return `${action} ${quantity} ${ticker}${structure}${limit}`;
+      const legs = Array.isArray(input.legs)
+        ? input.legs
+            .map((leg) => {
+              if (!leg || typeof leg !== "object") return "";
+              const row = leg as Record<string, unknown>;
+              return `${row.action} ${row.strike}${row.right}`;
+            })
+            .filter(Boolean)
+            .join("/")
+        : "";
+      const legBit = legs ? ` ${legs}` : "";
+      return `${action} ${quantity} ${ticker}${structure}${legBit}${limit}`;
     },
   },
 ];
