@@ -1,0 +1,14 @@
+[Unit]
+Description=Radon Equibles ATS Venue Share - weekly FINRA off-exchange pull
+
+[Timer]
+# FINRA publishes the off-exchange (ATS + non-ATS OTC) file weekly and roughly
+# five weeks in arrears, so the series advances at most one row per week no
+# matter how often this runs. Tuesday keeps it clear of the Monday scheduler
+# cluster. Nothing downstream may claim a faster refresh than weekly.
+OnCalendar=Tue *-*-* 09:15:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

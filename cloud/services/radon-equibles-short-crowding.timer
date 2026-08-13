@@ -1,0 +1,14 @@
+[Unit]
+Description=Radon Equibles Short Crowding - daily squeeze/short-interest refresh
+
+[Timer]
+# Short interest settles bi-monthly, but the squeeze scores recompute against
+# daily price, short-volume and fails-to-deliver inputs, so a daily pull is the
+# honest cadence for the composite. The settlementDate carried on every row is
+# what the UI must render for vintage - never this timer's interval.
+OnCalendar=*-*-* 09:30:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
