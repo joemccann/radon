@@ -123,6 +123,27 @@ line here whenever you ship a security fix.**
   deploy, verify the relay + a real authed page render.
 - Don't blind-bump a framework (next/@clerk) just because a scanner flags it —
   verify the exploit applies, then gate the bump on a full build + perimeter-smoke.
+- **Never quote the literal you found.** An audit report describes a credential
+  finding by naming the variable and its location, never by reproducing the
+  value. Writing `TWS_PASSWORD=<the real value>` into a finding turns the report
+  itself into the leak — and reports get committed. This is not hypothetical:
+  the 2026-07-18 report did it, the value went into a PUBLIC repo, the secret
+  scan flagged it, it was allowlisted as "already public, not a new exposure",
+  and a later rebase renumbered that commit, orphaned the allowlist, failed the
+  scan and silently skipped the deploy for hours. One quoted string, five hours
+  of no deploys and a permanent history entry.
+
+  This is enforced, not just requested: `scripts/security/gen_security_report.py`
+  redacts credential literals inside `esc()`, which every rendered field passes
+  through, so a finding cannot carry a value into the HTML no matter how it is
+  worded or which field it lands in. The variable name and prose survive so the
+  finding stays actionable. Verified both directions — the raw findings JSON
+  trips gitleaks, the rendered report does not.
+  Tests: `scripts/tests/test_security_report_redaction.py`.
+
+  Redaction is a backstop for the renderer, not a licence to put secrets in the
+  JSON. If a value is genuinely needed to reproduce a finding, reference where
+  it lives (`docker/ib-gateway/.env:4`) and leave it there.
 
 ## Audit log
 

@@ -15,15 +15,74 @@ documenting the patches you shipped for this audit. Omit it for a findings-only 
 The reusable audit workflow lives at .claude/workflows/security-audit.mjs.
 Methodology + dimension catalog + audit log: docs/security-audit-playbook.md.
 """
-import json, sys, html, argparse
+import json, sys, html, argparse, re
 
 SEV_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4, "false-positive": 5}
 SEV_COLOR = {"critical": "#b3001b", "high": "#d7263d", "medium": "#e08a00",
              "low": "#3a7ca5", "info": "#5a6570", "false-positive": "#5a6570"}
 
+# ── secret redaction ──────────────────────────────────────────────────────
+#
+# An audit report must never embed the literal credential it is reporting.
+# 2026-07-18 did exactly that: a finding quoted the live TWS value, the rendered
+# HTML was committed to this PUBLIC repo, and the literal is now permanently in
+# git history. The secret scan caught it, it was allowlisted as "already public,
+# not a new exposure", and a later rebase renumbered that commit, orphaned the
+# allowlist and silently skipped the deploy for hours.
+#
+# Redaction lives inside esc() on purpose. Every rendered field flows through
+# it, so an audit agent cannot defeat this by inventing a new field or a
+# differently-shaped finding -- the value never reaches the HTML in the first
+# place. The variable NAME and surrounding prose survive so the finding stays
+# actionable; only the value is replaced.
+
+REDACTION_MARKER = "[REDACTED]"
+
+# Names whose assigned value is a secret by construction. TWS_USERID is spelled
+# out because it carries none of the giveaway words.
+_SECRET_NAME = (
+    r"(?:TWS_USERID|TWS_USER|"
+    r"[A-Z0-9_]*(?:PASSWORD|PASSWD|SECRET|TOKEN|APIKEY|API_KEY|CREDENTIAL)[A-Z0-9_]*)"
+)
+
+# A value already redacted, a shell/env reference, or an angle-bracket
+# placeholder is left alone -- re-redacting it would only add noise.
+_PLACEHOLDER = re.compile(r"^(?:<.*>|\*+|\$\{?\w+\}?|x{3,}|redacted|REDACTED)$", re.I)
+
+_ASSIGNMENT = re.compile(rf"\b({_SECRET_NAME})(\s*=\s*)(['\"]?)([^\s'\"]{{4,}})\3")
+
+# "password example: <value>" / "credentials like <value>" -- the shape an audit
+# narrative uses when it illustrates a finding.
+_PROSE = re.compile(
+    r"(?i)\b((?:credential|password)s?\s+(?:example|like)\s*[:=]?\s*)(['\"]?)(\S{4,}?)\2(?=\s|$|[.,;])"
+)
+
+
+def _redact_assignment(m):
+    if _PLACEHOLDER.match(m.group(4)):
+        return m.group(0)
+    return f"{m.group(1)}{m.group(2)}{REDACTION_MARKER}"
+
+
+def _redact_prose(m):
+    if _PLACEHOLDER.match(m.group(3)):
+        return m.group(0)
+    return f"{m.group(1)}{REDACTION_MARKER}"
+
+
+def redact_secrets(text):
+    """Replace credential literals with a marker, keeping the name and context."""
+    text = _ASSIGNMENT.sub(_redact_assignment, text)
+    return _PROSE.sub(_redact_prose, text)
+
 
 def esc(s):
-    return html.escape(str(s if s is not None else ""))
+    """Escape for HTML AND strip any credential literal.
+
+    Redaction runs on the raw string before escaping, so a value cannot slip
+    through by being entity-encoded first.
+    """
+    return html.escape(redact_secrets(str(s if s is not None else "")))
 
 
 def load_result(path):
