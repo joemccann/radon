@@ -8,6 +8,8 @@ import InfoTooltip from "./InfoTooltip";
 import ScannerInstrumentShell from "./ScannerInstrumentShell";
 import SectionEmptyState from "./SectionEmptyState";
 import { useWatchlist } from "@/lib/useWatchlist";
+import { ProposalCard } from "@/components/agent";
+import { buildScannerProposal } from "@/lib/agent/scannerProposal";
 import { formatExpiry } from "@/lib/optionsChainUtils";
 import type { ThetaHarvesterData, ThetaHarvesterEarnings, ThetaHarvesterLeg, ThetaHarvesterResult } from "@/lib/types";
 
@@ -350,7 +352,9 @@ export default function ThetaHarvesterScanner({
   const [minDteInput, setMinDteInput] = useState(String(THETA_DEFAULT_SCAN_PARAMS.minDte));
   const [maxDteInput, setMaxDteInput] = useState(String(THETA_DEFAULT_SCAN_PARAMS.maxDte));
   const [minCreditInput, setMinCreditInput] = useState(String(THETA_DEFAULT_SCAN_PARAMS.minCredit));
-  const rows = data?.results ?? [];
+  // Memoised so the `?? []` fallback doesn't hand a fresh array identity to
+  // every downstream useMemo on each render.
+  const rows = useMemo(() => data?.results ?? [], [data?.results]);
 
   // Overhaul state: local sort (desc-first per column), chip filter, one
   // expanded row, multi-select, and a keyboard cursor (J/K/Enter/Space).
@@ -374,6 +378,17 @@ export default function ThetaHarvesterScanner({
       .slice()
       .sort((a, b) => (value(a) - value(b)) * sortDir);
   }, [rows, activeChip, sortKey, sortDir]);
+
+  // Ranked by score REGARDLESS of the operator's display sort — "top-ranked
+  // candidate" means highest composite, not whatever floated to row 1 after a
+  // sort by DTE. Returns null unless the engine itself rated the leader
+  // actionable, so most scans render the table alone.
+  const proposal = useMemo(
+    () => buildScannerProposal(rows.slice().sort((a, b) => b.score - a.score)),
+    [rows],
+  );
+  const [dismissedProposal, setDismissedProposal] = useState<string | null>(null);
+  const showProposal = proposal && dismissedProposal !== proposal.ticker;
 
   const scoreBounds = useMemo(() => {
     const scores = sorted.map((r) => r.score).filter((s) => Number.isFinite(s));
@@ -551,6 +566,18 @@ export default function ThetaHarvesterScanner({
       className="theta-harvester"
       testId="theta-harvester-section"
     >
+      {/* Accept never routes an order — it opens the instrument, where every
+          order surface is already behind <OrderRiskGate>. */}
+      {showProposal ? (
+        <ProposalCard
+          engines={["THETA"]}
+          statement={proposal.statement}
+          confidence={proposal.confidence}
+          alternatives={proposal.alternatives}
+          onAccept={() => router.push(`/${proposal.ticker}`)}
+          onDismiss={() => setDismissedProposal(proposal.ticker)}
+        />
+      ) : null}
       {loading ? (
         <div className="section-body">
           <div className="snapshot-card__empty">Sampling theta surface...</div>
