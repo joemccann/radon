@@ -6,6 +6,7 @@ import { useTickerFlowReport, type FlowReportData } from "@/lib/useTickerFlowRep
 import { classifyFlowSignal, type FlowDirection } from "@/lib/flowSignal";
 import { resolvePutCallRatio } from "@/lib/flowRatio";
 import SignalCard from "@/components/mobile/SignalCard";
+import SpectralLoader from "@/components/SpectralLoader";
 import { useViewport } from "@/lib/useViewport";
 import DailyDarkPoolHistory from "@/components/flow-analysis/DailyDarkPoolHistory";
 
@@ -213,9 +214,7 @@ function MobileTickerFlowReport({
         {section === "overview" && (
           <>
             {!data && isAnalyzing && (
-              <div className="alert-item" style={{ textAlign: "center", padding: "24px 0" }}>
-                Analyzing {ticker} flow...
-              </div>
+              <SpectralLoader label={`Sampling ${ticker} flow · 5 sessions`} />
             )}
             {verdict && (
               <SignalCard
@@ -459,18 +458,17 @@ function PulseDot() {
 }
 
 function AnalyzingPanel({ ticker, status }: { ticker: string; status: string }) {
-  const message =
+  // The hero badge above already announces "Analyzing {ticker}". This panel
+  // names the sample being taken, so the two read as one thought.
+  const label =
     status === "scanning"
-      ? `Analyzing ${ticker}`
-      : `Loading cached report for ${ticker}`;
+      ? `Sampling ${ticker} flow · 5 sessions`
+      : `Loading cached ${ticker} report`;
   return (
     <section className="section">
       <div className="section-body">
         <div className="ticker-flow-analyzing">
-          <div className="ticker-flow-analyzing-header">
-            <div className="ticker-flow-analyzing-spinner" aria-hidden="true" />
-            <div className="ticker-flow-analyzing-title">{message}</div>
-          </div>
+          <SpectralLoader label={label} />
           <ul className="ticker-flow-analyzing-steps">
             <li>Pulling dark pool prints across the last 5 trading sessions</li>
             <li>Reconstructing buy / sell pressure from NBBO mid-cross</li>
