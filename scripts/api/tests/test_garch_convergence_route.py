@@ -125,9 +125,11 @@ def test_garch_scan_uses_default_preset_when_omitted(client):
         resp = client.post("/garch-convergence/scan")
 
     assert resp.status_code == 200
-    args, _ = run_mock.call_args
-    # Default preset = mega-tech.
-    assert "mega-tech" in args[1]
+    args, kwargs = run_mock.call_args
+    assert args[0] == "garch_convergence.py"
+    assert args[1][args[1].index("--preset") + 1] == "indexes"
+    assert args[1][args[1].index("--workers") + 1] == "16"
+    assert kwargs.get("timeout") == 3600
 
 
 def test_garch_scan_surfaces_subprocess_failure_as_502(client):
@@ -179,7 +181,7 @@ def test_garch_scan_returns_cached_payload_within_cooldown(client, monkeypatch):
 
     cache_payload = {
         "scan_time": "2026-05-22T14:00:00",
-        "universe": "preset:mega-tech",
+        "universe": "preset:indexes",
         "requested_tickers": [],
         "tickers": {},
         "pairs": [],
@@ -227,7 +229,11 @@ def test_garch_ticker_scan_bypasses_preset_cooldown(client, monkeypatch):
     assert resp.status_code == 200
     assert resp.json()["requested_tickers"] == ["NVDA", "AMD"]
     assert calls == [
-        ("garch_convergence.py", ["--tickers", "NVDA,AMD", "--json", "--no-open"], 180)
+        (
+            "garch_convergence.py",
+            ["--tickers", "NVDA,AMD", "--json", "--no-open", "--workers", "16"],
+            180,
+        )
     ]
     assert server._garch_last_scan == seeded
 
@@ -272,7 +278,11 @@ def test_garch_preset_scan_ignores_explicit_ticker_cache(client, monkeypatch):
     assert resp.status_code == 200
     assert resp.json()["universe"] == "preset:mega-tech"
     assert calls == [
-        ("garch_convergence.py", ["--preset", "mega-tech", "--json", "--no-open"], 180)
+        (
+            "garch_convergence.py",
+            ["--preset", "mega-tech", "--json", "--no-open", "--workers", "16"],
+            3600,
+        )
     ]
 
 

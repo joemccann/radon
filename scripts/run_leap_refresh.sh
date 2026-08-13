@@ -14,7 +14,7 @@
 # Configuration via environment:
 #
 #   RADON_PYTHON_BIN                python interpreter
-#   RADON_LEAP_REFRESH_PRESET       UW preset (default: mag7)
+#   RADON_LEAP_REFRESH_PRESET       UW preset (default: indexes)
 #   RADON_LEAP_REFRESH_MIN_GAP      HV-IV gap threshold (default: 10)
 #   RADON_LEAP_REFRESH_FASTAPI_PORT FastAPI port (default 8321)
 #   RADON_LEAP_REFRESH_FASTAPI_HOST FastAPI host (default 127.0.0.1)
@@ -96,17 +96,17 @@ if [ "$IS_TRADING" = "no" ]; then
     exit 0
 fi
 
-PRESET="${RADON_LEAP_REFRESH_PRESET:-mag7}"
+PRESET="${RADON_LEAP_REFRESH_PRESET:-indexes}"
 MIN_GAP="${RADON_LEAP_REFRESH_MIN_GAP:-10}"
 FASTAPI_HOST="${RADON_LEAP_REFRESH_FASTAPI_HOST:-127.0.0.1}"
 FASTAPI_PORT="${RADON_LEAP_REFRESH_FASTAPI_PORT:-8321}"
 FASTAPI_URL="http://${FASTAPI_HOST}:${FASTAPI_PORT}/leap/scan?preset=${PRESET}&min_gap=${MIN_GAP}"
 
 # Try FastAPI first — preserves the dual-write + service_health path the
-# dashboard "Run latest →" button uses. 310s matches the FastAPI timeout
-# for the leap subprocess (300s) with 10s of slack.
+# dashboard "Run latest →" button uses. 3610s matches the FastAPI timeout
+# for the leap preset subprocess (3600s) with 10s of slack.
 echo "$(date): POST ${FASTAPI_URL}"
-if curl -fsS -X POST -m 310 -o /dev/null -w "%{http_code}" "${FASTAPI_URL}" 2>/tmp/leap-refresh.curl.err | grep -q '^2'; then
+if curl -fsS -X POST -m 3610 -o /dev/null -w "%{http_code}" "${FASTAPI_URL}" 2>/tmp/leap-refresh.curl.err | grep -q '^2'; then
     echo "$(date): LEAP refresh via FastAPI complete (OK)"
     exit 0
 fi

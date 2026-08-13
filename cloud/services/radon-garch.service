@@ -19,7 +19,8 @@ EnvironmentFile=/home/radon/radon-cloud/.env
 ExecStart=/usr/bin/bash /home/radon/radon/scripts/run_garch_refresh.sh
 StandardOutput=journal
 StandardError=journal
-TimeoutStartSec=240
+# Indexes universe is ~2500 names / ~1300 pairs; hour-scale FastAPI budget plus headroom.
+TimeoutStartSec=3900
 
 [Install]
 WantedBy=multi-user.target

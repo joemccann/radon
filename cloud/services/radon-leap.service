@@ -20,7 +20,8 @@ Environment=RADON_PYTHON_BIN=/home/radon/radon/.venv/bin/python
 ExecStart=/usr/bin/bash /home/radon/radon/scripts/run_leap_refresh.sh
 StandardOutput=journal
 StandardError=journal
-TimeoutStartSec=720
+# Indexes universe is ~2500 names / ~1300 pairs; hour-scale FastAPI budget plus headroom.
+TimeoutStartSec=3900
 
 [Install]
 WantedBy=multi-user.target
