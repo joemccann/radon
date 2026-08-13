@@ -1,6 +1,6 @@
 "use client";
 
-import { Share2, X } from "lucide-react";
+import { Download, Share2, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useDialogChrome } from "@/lib/useDialogChrome";
 
@@ -191,6 +191,14 @@ export default function ShareReportModal({
           >
             <div className="cta-share-header">
               <span className="cta-share-title">{modalTitle}</span>
+              <a
+                className="cta-share-close"
+                href={shareUrl}
+                download="radon-share-preview.html"
+                aria-label="Download preview"
+              >
+                <Download size={14} />
+              </a>
               <button className="cta-share-close" onClick={closeModal} aria-label="Close">
                 <X size={14} />
               </button>
@@ -219,7 +227,7 @@ export default function ShareReportModal({
               // preview needs neither the parent origin nor its
               // cookies/storage. Granting both back cancels the sandbox's
               // origin isolation, so the framed doc could script window.parent.
-              sandbox="allow-scripts"
+              sandbox=""
             />
           </div>
         </div>

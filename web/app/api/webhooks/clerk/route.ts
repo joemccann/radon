@@ -15,7 +15,11 @@ import {
   parseAllowedUserIds,
   type ClerkUserCreatedData,
 } from "@/lib/demo/provisionTrial";
-import type { DemoDbClient } from "@/lib/demo/demoUsers";
+import {
+  claimDemoWebhookEvent,
+  releaseDemoWebhookEvent,
+  type DemoDbClient,
+} from "@/lib/demo/demoUsers";
 import type { DemoPublicMetadata } from "@/lib/demo/demoRole";
 
 export const runtime = "nodejs";
@@ -67,9 +71,14 @@ export async function POST(request: Request): Promise<Response> {
     return ok({ ignored: event.type ?? "unknown", requestId });
   }
 
+  const eventId = request.headers.get("svix-id")!;
+  const db = getDemoDb() as unknown as DemoDbClient;
   try {
+    if (!(await claimDemoWebhookEvent(db, eventId, event.type))) {
+      return ok({ duplicate: true, requestId });
+    }
     const result = await provisionDemoTrial(event.data, {
-      db: getDemoDb() as unknown as DemoDbClient,
+      db,
       computeExpiry: (startIsoEt) => computeTrialExpiry(startIsoEt),
       setClerkMetadata,
       allowedUserIds: parseAllowedUserIds(process.env.ALLOWED_USER_IDS),
@@ -80,6 +89,7 @@ export async function POST(request: Request): Promise<Response> {
     });
     return ok({ ...result, requestId });
   } catch (error) {
+    await releaseDemoWebhookEvent(db, eventId).catch(() => undefined);
     const detail = error instanceof Error ? error.message : "provisioning failed";
     // 500 so Clerk retries (the provisioning steps are idempotent).
     return ok({ error: "Provisioning failed.", detail, requestId }, 500);

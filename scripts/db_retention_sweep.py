@@ -132,9 +132,10 @@ def main() -> int:
         "elapsed_s": elapsed,
         "failed_tables": failed,
     }
-    # 2026-07-12: every policy timed out yet the unit reported ok with
-    # rows_deleted=0. Fail the oneshot when NO policy succeeded.
-    if failed and len(failed) == len(results):
+    # Retention is one required maintenance transaction. A partial sweep is
+    # degraded too: otherwise the failed table can grow without bound while
+    # systemd and service_health continue to certify the job as healthy.
+    if failed:
         write_service_health("error", summary, started_at)
         print(json.dumps({"ok": False, **summary}, indent=2), file=sys.stderr)
         return 1

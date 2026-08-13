@@ -19,7 +19,19 @@ after-hours ones — are still visible on the evening session:
      write machinery — never a copy);
   3. mirrors the executions into ``executed_orders`` via
      ``db.writer.upsert_executed_order`` (idempotent on execId) so
-     journal_reconcile / journal-gap-sli can diff them.
+     journal_reconcile / journal-gap-sli can diff them;
+  4. recovers CARRIED-OVER gaps from ``executed_orders`` (Turso), not
+     from IB.
+
+Step 4 exists because steps 1-3 only ever see the CURRENT day: a day
+whose sweep never succeeded (dead gateway, daemon outage) leaves its
+after-hours fills orphaned forever, since the next evening's session no
+longer returns them. executed_orders still holds the durable payload, so
+the gap is repairable without IB — otherwise journal-gap-sli pages every
+cycle until a human runs backfill_journal_from_executed_orders.py by
+hand (incident 20260813T140500Z: IWM perm 1805918121 filled 16:24:50 ET
+on 2026-08-12, past journal_sync's 15-min post-close grace, while that
+evening's sweep burned its 3-attempt budget on an unreachable gateway).
 
 Failure handling follows the cash_flow_sync daily conventions: IB/DB
 unavailability RAISES so ``BaseHandler.run()`` never latches
@@ -67,6 +79,10 @@ FIRE_MINUTE_ET = 30
 # failed attempt embargoes 5 min via record_soft_failure; after this
 # many the next attempt waits for tomorrow's window.
 MAX_SOFT_ATTEMPTS_PER_ET_DAY = 3
+
+# Rolling window for carried-over gap recovery. Matches journal-gap-sli /
+# journal-reconcile so the sweep repairs exactly what those sensors alert on.
+GAP_RECOVERY_WINDOW_DAYS = 7
 
 
 def _now_utc() -> datetime:
@@ -195,17 +211,44 @@ class EveningExecutionSweepHandler(BaseHandler):
                 pass
 
         importer = JournalSyncHandler(ib_port=self.ib_port, client_id=self.client_id)
-        summary = importer.import_fills(fills, db=self._open_journal_db(importer))
+        journal_db = self._open_journal_db(importer)
+        summary = importer.import_fills(fills, db=journal_db)
         mirrored = self._mirror_executed_orders(executed_rows)
+        recovered = self._recover_carried_over_gaps(journal_db)
 
         result: Dict[str, Any] = {
             "status": "ok",
             "fills_seen": len(fills),
             "executed_mirrored": mirrored,
+            "gaps_recovered": recovered,
             "timestamp": datetime.now().isoformat(),
         }
         result.update(summary)
         return result
+
+    @staticmethod
+    def _recover_carried_over_gaps(db: Any) -> int:
+        """Close executed_orders-vs-journal gaps the IB session can't return.
+
+        The evening session only exposes the CURRENT day's executions, so a
+        day whose sweep never succeeded (dead gateway, daemon outage) leaves
+        its after-hours fills permanently orphaned: the next sweep pulls a
+        session that no longer contains them. ``executed_orders`` still holds
+        the durable payload, so residual gaps are repaired from Turso using
+        the same reconstruction the manual repair script uses — no second
+        copy of the labelling logic, idempotent on exec_id.
+
+        DB errors propagate: a failed recovery is a soft failure and the
+        journal import that already happened is idempotent on retry.
+        """
+        if db is None:
+            return 0
+        from backfill_journal_from_executed_orders import (  # noqa: PLC0415 — lazy
+            backfill,
+        )
+
+        actions = backfill(db, window_days=GAP_RECOVERY_WINDOW_DAYS, dry_run=False)
+        return sum(1 for a in actions if a.get("status") == "inserted_from_eo")
 
     @staticmethod
     def _open_journal_db(importer: Optional[JournalSyncHandler] = None) -> Any:

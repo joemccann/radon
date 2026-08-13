@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import {
   buildCriHistoryXAxisTickValues,
   shouldRotateCriHistoryXAxisLabels,
@@ -9,6 +10,12 @@ function makeDates(count: number): Date[] {
 }
 
 describe("CriHistoryChart x-axis helpers", () => {
+  it("memoizes live-data merging so tooltip state does not rebuild the SVG", () => {
+    const source = readFileSync(new URL("../components/CriHistoryChart.tsx", import.meta.url), "utf8");
+    expect(source).toMatch(/const chartData = useMemo/);
+    expect(source).toMatch(/\}, \[history, liveValues\]\);/);
+    expect(source).not.toMatch(/\[chartData, width, series, liveValues,/);
+  });
   it("reduces 20-session history to a sparse explicit tick set on desktop widths", () => {
     const dates = makeDates(20);
     const ticks = buildCriHistoryXAxisTickValues(dates, 820);

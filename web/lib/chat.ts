@@ -106,27 +106,27 @@ export function fallbackReply(input: string) {
   }
 
   if (query.includes("analyze brze") || query.includes("brze")) {
-    return "BRZE is against-flow. You are long 300x Mar 20 calls, and flow is negative with 29% distributed bias. If this continues near expiry, reduce risk or hedge immediately.";
+    return "I could not load the live position context. Retry the authenticated assistant before making a portfolio decision.";
   }
 
   if (query.includes("analyze rr") || query.includes(" rr")) {
-    return "RR shows 36% distributed flow and a sustained signal. Keep a hard risk gate: no add, and ensure thesis still controls risk.";
+    return "I could not load current flow context. Retry the authenticated assistant before changing exposure.";
   }
 
   if (query.includes("compare support vs against") || query.includes("support against") || query.includes("support vs against")) {
-    return "Support side currently has 6 positions with confirmation; against side has 2 with a higher urgency profile. Treat against as active monitor tier.";
+    return "Live support and against-flow groups are unavailable. Retry when the authenticated assistant is connected.";
   }
 
   if (query.includes("action") || query.includes("items")) {
-    return "Priority list: BRZE, RR, then MSFT. Confirm any additional prints before adding exposure.";
+    return "Live action items are unavailable. Retry when the authenticated assistant is connected.";
   }
 
   if (query.includes("watch list") || query.includes("watch closely")) {
-    return "Watch list is flagged from mixed intraday flow. MSFT and BKD need one full session before any structural decision.";
+    return "Live watchlist context is unavailable. Retry when the authenticated assistant is connected.";
   }
 
   if (query.includes("portfolio") || query.includes("positions")) {
-    return "Portfolio snapshot: 19 positions total. 7 defined structure, 12 undefined. Net liquidation is $981,353. Flow-aligned positions currently lead.";
+    return "The live portfolio snapshot is unavailable. Retry the authenticated assistant; no cached account figures are embedded in this client.";
   }
 
   return "I can review any ticker, compare support/against groups, or walk through risk and Kelly logic for any position.";
@@ -230,20 +230,23 @@ export async function placeProposedOrder(
   proposal: AssistantOrderProposal,
 ): Promise<{ ok: boolean; message: string }> {
   const input = proposal.input;
-  const symbol = typeof input.ticker === "string" ? input.ticker.toUpperCase() : "";
-  const action = typeof input.action === "string" ? input.action.toUpperCase() : "";
-  const quantity = typeof input.quantity === "number" ? input.quantity : Number(input.quantity);
-  const limitPrice = typeof input.limit_price === "number" ? input.limit_price : Number(input.limit_price);
-
   const body: Record<string, unknown> = {
-    type: "stock",
-    symbol,
-    action,
-    quantity,
+    type: input.type,
+    symbol: input.ticker,
+    action: input.action,
+    quantity: input.quantity,
+    limitPrice: input.limit_price,
     tif: "DAY",
+    idempotencyKey: crypto.randomUUID(),
   };
-  if (Number.isFinite(limitPrice) && limitPrice > 0) {
-    body.limitPrice = limitPrice;
+  if (input.type === "option") {
+    Object.assign(body, {
+      expiry: input.expiry,
+      strike: input.strike,
+      right: input.right,
+      conId: input.conId,
+      exchange: input.exchange,
+    });
   }
 
   const response = await fetch("/api/orders/place", {
@@ -373,6 +376,10 @@ export function resolveSectionFromPath(pathname: string | null, fallback: Worksp
 
   if (pathname.startsWith("/admin")) {
     return "admin";
+  }
+
+  if (pathname.startsWith("/preferences")) {
+    return "preferences";
   }
 
   if (pathname.startsWith("/profile")) {

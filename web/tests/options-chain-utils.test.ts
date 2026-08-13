@@ -307,10 +307,9 @@ describe("computeNetPrice", () => {
     const net = computeNetOptionQuote(legs, prices, "AAPL");
     // To BUY combo: pay call ask (12), receive put bid (100) → net = 12 - 100 = -88 (credit)
     // To SELL combo: receive call bid (10), pay put ask (102) → net = 10 - 102 = -92 (debit)
-    // Natural market: bid=88, ask=92, mid=90
-    expect(net.bid).toBe(88.0);
-    expect(net.ask).toBe(92.0);
-    expect(net.mid).toBe(90.0);
+    expect(net.bid).toBe(-92.0);
+    expect(net.ask).toBe(-88.0);
+    expect(net.mid).toBe(-90.0);
   });
 
   it("returns empty values when any leg quote is missing", () => {
@@ -382,10 +381,9 @@ describe("computeNetPrice", () => {
 
     // To BUY combo: BUY 2x 90C @ 2.7 (5.4), SELL 1x 85P @ 5.2 = 5.4 - 5.2 = 0.2 debit
     // To SELL combo: SELL 2x 90C @ 2.5 (5.0), BUY 1x 85P @ 5.4 = 5.0 - 5.4 = -0.4 debit
-    // Natural market: bid=0.2, ask=0.4, mid=0.3
-    expect(net.bid).toBeCloseTo(0.2, 4);
-    expect(net.ask).toBeCloseTo(0.4, 4);
-    expect(net.mid).toBeCloseTo(0.3, 4);
+    expect(net.bid).toBeCloseTo(-0.4, 4);
+    expect(net.ask).toBeCloseTo(0.2, 4);
+    expect(net.mid).toBeCloseTo(-0.1, 4);
   });
 });
 

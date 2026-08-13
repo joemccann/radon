@@ -445,6 +445,11 @@ type GeminiResponse = {
 };
 
 async function callGemini(request: LlmChatRequest): Promise<LlmChatResponse> {
+  if (request.tools?.length) {
+    // Gemini structured tool-turn parity is not implemented here. Throwing is
+    // intentional so the configured tool-capable provider handles the turn.
+    throw new Error("Gemini tool requests require a tool-capable fallback provider.");
+  }
   const apiKey = envValue("GEMINI_API_KEY");
   if (!apiKey) {
     throw new Error("Missing Gemini API key. Set GEMINI_API_KEY.");

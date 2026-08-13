@@ -148,7 +148,7 @@ def fetch_seasonality(ticker: str) -> Dict:
 # Helpers: Price history
 # ---------------------------------------------------------------------------
 
-def fetch_price_history(ticker: str, days: int = 10) -> List[Dict]:
+def fetch_price_history(ticker: str, days: int = 10) -> Any:
     """Fetch recent price bars from IB.
 
     Returns list of dicts with date, open, close, volume.
@@ -192,8 +192,8 @@ def fetch_price_history(ticker: str, days: int = 10) -> List[Dict]:
             }
             for b in bars
         ]
-    except Exception:
-        return []
+    except Exception as exc:
+        return {"error": f"price history fetch failed: {exc}"}
 
 
 # ---------------------------------------------------------------------------
@@ -489,17 +489,25 @@ def _run_parallel_milestones(
     def _m1d():
         return ("M1D", fetch_news(ticker, days=7, limit=20))
 
-    tasks = [_m1, _m1b, _m1c, _m1d, _m2, _m3, _m3b]
+    tasks = {
+        "M1": _m1,
+        "M1B": _m1b,
+        "M1C": _m1c,
+        "M1D": _m1d,
+        "M2": _m2,
+        "M3": _m3,
+        "M3B": _m3b,
+    }
 
     with ThreadPoolExecutor(max_workers=7) as pool:
-        futures = {pool.submit(fn): fn.__name__ for fn in tasks}
+        futures = {pool.submit(fn): key for key, fn in tasks.items()}
         for future in as_completed(futures):
             try:
                 key, data = future.result()
                 results[key] = data
             except Exception as exc:
-                name = futures[future]
-                results[name] = {"error": str(exc)}
+                key = futures[future]
+                results[key] = {"error": str(exc)}
 
     return results
 
@@ -555,13 +563,13 @@ def _fetch_all_prices(tickers: List[str], days: int = 10) -> Dict[str, List[Dict
                     }
                     for b in bars
                 ]
-            except Exception:
-                results[ticker] = []
+            except Exception as exc:
+                results[ticker] = {"error": f"price history fetch failed: {exc}"}
 
         ib.disconnect()
         return results
-    except Exception:
-        return {t: [] for t in tickers}
+    except Exception as exc:
+        return {t: {"error": f"price history fetch failed: {exc}"} for t in tickers}
 
 
 def run_evaluations(
@@ -688,18 +696,21 @@ def run_evaluation(
 
     eval_result.milestones["M2"] = MilestoneResult(
         name="dark_pool_flow",
-        passed=True,  # M2 itself doesn't gate — Edge (M4) does
+        passed=not bool(m2_data.get("error")),
         data={**m2_data, "includes_today": includes_today},
+        error=m2_data.get("error"),
     )
 
     # ── M3: Options Flow ─────────────────────────────────────────────────
     m3_data = raw.get("M3", {})
     eval_result.milestones["M3"] = MilestoneResult(
-        name="options_flow", passed=True, data=m3_data,
+        name="options_flow", passed=not bool(m3_data.get("error")), data=m3_data,
+        error=m3_data.get("error"),
     )
 
     # ── M3B: OI Changes ──────────────────────────────────────────────────
     m3b_raw = raw.get("M3B", [])
+    m3b_error = m3b_raw.get("error") if isinstance(m3b_raw, dict) else None
     if not isinstance(m3b_raw, list):
         m3b_raw = []
 
@@ -715,12 +726,32 @@ def run_evaluation(
         enriched_oi.append(merged)
 
     eval_result.milestones["M3B"] = MilestoneResult(
-        name="oi_changes", passed=True,
+        name="oi_changes", passed=not bool(m3b_error),
         data={"items": enriched_oi, "summary": categorize_oi_signals(enriched_oi)},
+        error=m3b_error,
     )
 
     # ── M4: Edge Determination ───────────────────────────────────────────
     price_history = raw.get("PRICE", [])
+    price_error = price_history.get("error") if isinstance(price_history, dict) else None
+    required_errors = [
+        ("M2", eval_result.milestones["M2"].error),
+        ("M3", eval_result.milestones["M3"].error),
+        ("M3B", eval_result.milestones["M3B"].error),
+        ("PRICE", price_error),
+    ]
+    failed_required = [(name, error) for name, error in required_errors if error]
+    if failed_required:
+        reason = "; ".join(f"{name}: {error}" for name, error in failed_required)
+        eval_result.milestones["M4"] = MilestoneResult(
+            name="edge_determination",
+            passed=False,
+            data={"passed": False, "reason": f"Required data unavailable: {reason}"},
+            error=reason,
+        )
+        eval_result.decision = "NO_TRADE"
+        eval_result.failing_gate = "EDGE"
+        return eval_result
     edge = determine_edge(
         flow=m2_data,
         options=m3_data,
@@ -745,13 +776,13 @@ def run_evaluation(
     # design the structure interactively.  The structure data is filled in
     # when the operator confirms.
     eval_result.milestones["M5"] = MilestoneResult(
-        name="structure", passed=True,
+        name="structure", passed=False,
         data={"note": "Edge passed — structure design pending operator input"},
     )
 
     # ── M6: Kelly Sizing (placeholder) ───────────────────────────────────
     eval_result.milestones["M6"] = MilestoneResult(
-        name="kelly_sizing", passed=True,
+        name="kelly_sizing", passed=False,
         data={"bankroll": bankroll, "note": "Pending structure design"},
     )
 
@@ -921,6 +952,14 @@ def format_report(result: EvaluationResult) -> str:
 # CLI entry point
 # ---------------------------------------------------------------------------
 
+def _decision_exit_code(results: List[EvaluationResult]) -> int:
+    if any(result.decision == "TRADE" for result in results):
+        return 0
+    if any(result.decision == "PENDING" for result in results):
+        return 2
+    return 1
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Run full evaluation for one or more tickers."
@@ -964,9 +1003,7 @@ def main():
             print(format_report(result))
             print("\n")
 
-    # Exit 0 if any trade, 1 if all NO_TRADE
-    any_trade = any(r.decision != "NO_TRADE" for r in results)
-    sys.exit(0 if any_trade else 1)
+    sys.exit(_decision_exit_code(results))
 
 
 if __name__ == "__main__":

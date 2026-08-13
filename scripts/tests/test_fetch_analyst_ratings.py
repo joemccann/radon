@@ -12,6 +12,7 @@ from fetch_analyst_ratings import (
     update_watchlist_with_ratings,
     format_ratings_table,
     CACHE_TTL_HOURS,
+    merge_ratings_cache,
 )
 
 
@@ -155,6 +156,25 @@ class TestUpdateWatchlistWithRatings:
 # ── get_cached_rating ───────────────────────────────────────────────
 
 class TestCachedRating:
+    def test_concurrent_cache_updates_are_atomic_and_lossless(self, tmp_path):
+        from concurrent.futures import ThreadPoolExecutor
+
+        cache_file = tmp_path / "ratings.json"
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            futures = [
+                pool.submit(
+                    merge_ratings_cache,
+                    cache_file,
+                    {f"T{i}": {"ticker": f"T{i}", "ratings": {"buy": i}}},
+                )
+                for i in range(20)
+            ]
+            for future in futures:
+                future.result()
+
+        payload = json.loads(cache_file.read_text())
+        assert sorted(payload["ratings"]) == sorted(f"T{i}" for i in range(20))
+
     def test_fresh_cache_returned(self, tmp_path):
         cache_file = tmp_path / "cache.json"
         fresh_time = datetime.now().isoformat()

@@ -196,6 +196,7 @@ describe("navItems", () => {
       "alerts",
       "workflow",
       "admin",
+      "preferences",
     ]);
   });
 });
@@ -221,6 +222,7 @@ describe("quickPromptsBySection", () => {
     "alerts",
     "workflow",
     "admin",
+    "preferences",
     "ticker-detail",
     "profile",
   ];
@@ -276,6 +278,7 @@ describe("sectionDescription", () => {
     "alerts",
     "workflow",
     "admin",
+    "preferences",
     "ticker-detail",
     "profile",
   ];

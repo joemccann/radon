@@ -1,5 +1,7 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
 import { NextResponse } from "next/server";
 import { radonFetch } from "@/lib/radonApi";
+import { RadonApiError } from "@/lib/radonApi";
 import {
   demoOrderRefusal,
   resolveDemoOrderDecision,
@@ -90,6 +92,12 @@ function normalizeCancelTargets(
 }
 
 export async function POST(request: Request): Promise<Response> {
+  const access = await requireRouteAccess(request, {
+    operatorOnly: true,
+    rate: { key: "orders/modify:route", limit: 5, windowMs: 60_000 },
+    durableRateTier: "C",
+  });
+  if (!access.ok) return access.response;
   try {
     const body = (await request.json()) as ModifyBody;
     const orderId = body.orderId ?? 0;
@@ -145,20 +153,11 @@ export async function POST(request: Request): Promise<Response> {
         );
       }
 
-      for (const cancelTarget of cancelTargets) {
-        await radonFetch<Record<string, unknown>>("/orders/cancel", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(cancelTarget),
-          timeout: 20_000,
-        });
-      }
-
-      const result = await radonFetch<Record<string, unknown>>("/orders/place", {
+      const result = await radonFetch<Record<string, unknown>>("/orders/replace", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(replaceOrder),
-        timeout: 20_000,
+        body: JSON.stringify({ cancelOrders: cancelTargets, replaceOrder }),
+        timeout: 180_000,
       });
 
       try {
@@ -235,7 +234,9 @@ export async function POST(request: Request): Promise<Response> {
       orders,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Modify failed";
-    return NextResponse.json({ error: message }, { status: 500 });
+    if (error instanceof RadonApiError) {
+      return NextResponse.json({ error: error.detail }, { status: error.status });
+    }
+    return NextResponse.json({ error: "Order modification failed" }, { status: 500 });
   }
 }

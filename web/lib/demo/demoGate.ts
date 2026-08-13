@@ -30,6 +30,7 @@ function noStore(response: NextResponse): NextResponse {
 export type DemoGateDeps = {
   rateLimiter?: (tier: DemoRateTier, userId: string) => Promise<DemoRateLimitResult>;
   now?: number;
+  demoDeployment?: boolean;
 };
 
 /**
@@ -46,7 +47,18 @@ export async function handleDemoGate(
 ): Promise<NextResponse | null> {
   const { userId, metadata, request } = params;
   const ctx = resolveDemoContext(metadata, deps.now);
-  if (!ctx) return null; // not a demo user — no demo gating
+  if (!ctx && deps.demoDeployment) {
+    const requestId = request.headers.get("x-request-id") ?? "demo-provisioning";
+    if (isApiPath(request.nextUrl.pathname)) {
+      return noStore(NextResponse.json({
+        error: "Demo access is not active.",
+        code: "DEMO_ACCESS_PENDING",
+        requestId,
+      }, { status: 403 }));
+    }
+    return noStore(new NextResponse("Demo access is not active.", { status: 403 }));
+  }
+  if (!ctx) return null;
 
   const pathname = request.nextUrl.pathname;
   const api = isApiPath(pathname);
@@ -91,6 +103,18 @@ export async function handleDemoGate(
         res.headers.set("Retry-After", String(retryAfter));
       }
       return noStore(res);
+    }
+    if (tier === "E") {
+      const daily = await limiter("F", userId);
+      if (!daily.success) {
+        return noStore(NextResponse.json({
+          error: "Demo rate limit exceeded. Slow down.",
+          code: "DEMO_RATE_LIMITED",
+          tier: "F",
+          limit: daily.limit,
+          resetAt: daily.reset,
+        }, { status: 429 }));
+      }
     }
   }
 

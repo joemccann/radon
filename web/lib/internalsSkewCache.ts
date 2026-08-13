@@ -31,3 +31,31 @@ export function isSkewCacheFresh(
   const diffDays = (todayMs - latestMs) / (1000 * 60 * 60 * 24);
   return diffDays <= maxStaleDays;
 }
+
+type SkewVariant = {
+  ticker?: unknown;
+  delta?: unknown;
+  timeframe?: unknown;
+  expiries?: unknown;
+};
+
+export function matchesInternalsSkewVariant(
+  payload: { nq?: SkewVariant; spx?: SkewVariant },
+  expected: {
+    nqTicker: string;
+    spxTicker: string;
+    timeframe: string;
+    nqDelta: number;
+    spxDelta: number;
+    nqExpiry?: string | null;
+    spxExpiry?: string | null;
+  },
+): boolean {
+  const matches = (leg: SkewVariant | undefined, ticker: string, delta: number, expiry?: string | null) => {
+    if (!leg || String(leg.ticker ?? "").toUpperCase() !== ticker.toUpperCase()) return false;
+    if (Number(leg.delta) !== delta || String(leg.timeframe ?? "").toUpperCase() !== expected.timeframe.toUpperCase()) return false;
+    return !expiry || (Array.isArray(leg.expiries) && leg.expiries.includes(expiry));
+  };
+  return matches(payload.nq, expected.nqTicker, expected.nqDelta, expected.nqExpiry)
+    && matches(payload.spx, expected.spxTicker, expected.spxDelta, expected.spxExpiry);
+}

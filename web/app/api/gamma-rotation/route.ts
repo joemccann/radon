@@ -1,3 +1,5 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
+
 import { NextResponse } from "next/server";
 import { readFile } from "fs/promises";
 import { join } from "path";
@@ -160,6 +162,8 @@ function triggerBackgroundScan(): void {
 }
 
 export async function GET(): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { rate: { key: "gamma-rotation:route", limit: 20, windowMs: 60_000 } });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   const cached = await readCachedGammaRotation();
   const data = normalizeGammaRotationPayload(cached ?? {});
@@ -182,6 +186,8 @@ export async function GET(): Promise<Response> {
 }
 
 export async function POST(): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { rate: { key: "gamma-rotation:route", limit: 20, windowMs: 60_000 } });
+  if (!access.ok) return access.response;
   try {
     const rawData = await radonFetch<Record<string, unknown>>("/gamma-rotation/scan", { method: "POST", timeout: 130_000 });
     invalidateCache("gamma-rotation:snapshot");

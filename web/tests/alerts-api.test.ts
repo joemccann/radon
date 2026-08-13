@@ -123,6 +123,45 @@ describe("CRUD", () => {
     expect(res.status).toBe(400);
   });
 
+  it("rejects unbounded identifiers before writing", async () => {
+    const ticker = await createRule({
+      ticker: "../../etc/passwd",
+      metric: "score",
+      op: ">",
+      threshold: 50,
+    });
+    expect(ticker.status).toBe(400);
+
+    const metric = await createRule({
+      ticker: "AAPL",
+      metric: "x".repeat(65),
+      op: ">",
+      threshold: 50,
+    });
+    expect(metric.status).toBe(400);
+  });
+
+  it("atomically caps rules per user and suppresses exact duplicates", async () => {
+    await db.batch(
+      Array.from({ length: 49 }, (_, index) => ({
+        sql: `INSERT INTO alert_rules
+          (id, user_id, ticker, metric, op, threshold, channel, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+        args: [`rule-${index}`, currentUserId, `T${index}`, "score", ">", index, "pushover"],
+      })),
+      "write",
+    );
+
+    const fiftieth = await createRule({ ticker: "AAPL", metric: "score", op: ">", threshold: 50 });
+    expect(fiftieth.status).toBe(200);
+
+    const duplicate = await createRule({ ticker: "AAPL", metric: "score", op: ">", threshold: 50 });
+    expect(duplicate.status).toBe(409);
+
+    const overCap = await createRule({ ticker: "MSFT", metric: "score", op: ">", threshold: 50 });
+    expect(overCap.status).toBe(409);
+  });
+
   it("deletes a rule by id and scopes the delete to the owner", async () => {
     await createRule({ ticker: "AAPL", metric: "score", op: ">=", threshold: 80, channel: "pushover" });
     const { GET } = await import("../app/api/alerts/route");

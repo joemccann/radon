@@ -1,3 +1,5 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
+
 import { NextResponse } from "next/server";
 import { RadonApiError, radonFetch } from "@/lib/radonApi";
 import {
@@ -25,6 +27,12 @@ async function readOrdersSnapshotBestEffort() {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  const access = await requireRouteAccess(request, {
+    operatorOnly: true,
+    rate: { key: "orders/cancel:route", limit: 5, windowMs: 60_000 },
+    durableRateTier: "C",
+  });
+  if (!access.ok) return access.response;
   try {
     const body = (await request.json()) as CancelBody;
     const orderId = body.orderId ?? 0;

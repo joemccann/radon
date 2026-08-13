@@ -117,6 +117,7 @@ import type { ModifyOrderRequest } from "@/lib/orderModify";
 import RegimePanel from "./RegimePanel";
 import CtaPage from "./CtaPage";
 import AdminWorkspace from "./admin/AdminWorkspace";
+import PreferencesSection from "./PreferencesSection";
 import ProfileContent from "./profile/ProfileContent";
 import WatchlistContent from "./watchlist/WatchlistContent";
 import PerformancePanel from "./PerformancePanel";
@@ -549,7 +550,7 @@ function deriveGroupDescription(
   return buildExecutedGroupDescription(fills, isClosing, portfolioPositions);
 }
 
-function groupExecutedOrders(
+export function groupExecutedOrders(
   fills: ExecutedOrder[],
   portfolioPositions?: readonly PortfolioPosition[],
 ): PositionFillGroup[] {
@@ -635,30 +636,46 @@ function groupExecutedOrders(
 
   type MinuteBucket = {
     symbol: string;
+    correlation: string | null;
+    latestMs: number | null;
     opens: ExecutedOrder[];
     closes: ExecutedOrder[];
     bags: ExecutedOrder[];
   };
 
-  const byMinute = new Map<string, MinuteBucket>();
-  for (const fill of real) {
+  const buckets: MinuteBucket[] = [];
+  const durableCorrelation = (fill: ExecutedOrder): string | null => {
+    if (typeof fill.orderRef === "string" && fill.orderRef.trim()) return `ref:${fill.orderRef.trim()}`;
+    if (typeof fill.permId === "number" && Number.isFinite(fill.permId) && fill.permId > 0) return `perm:${fill.permId}`;
+    if (typeof fill.orderId === "number" && Number.isFinite(fill.orderId) && fill.orderId > 0) return `order:${fill.orderId}`;
+    return null;
+  };
+  const sortedReal = [...real].sort((a, b) => Date.parse(a.time) - Date.parse(b.time));
+  for (const fill of sortedReal) {
     const sym = fill.contract.symbol;
-    const t = new Date(fill.time);
-    // Round time to nearest minute for grouping
-    const bucket = new Date(t.getFullYear(), t.getMonth(), t.getDate(), t.getHours(), t.getMinutes()).toISOString();
-    const key = `${sym}_${bucket}`;
-    const bucketData = byMinute.get(key);
-    if (bucketData == null) {
-      byMinute.set(key, {
+    const correlation = durableCorrelation(fill);
+    const fillMs = Date.parse(fill.time);
+    let target = correlation
+      ? buckets.find((bucket) => bucket.symbol === sym && bucket.correlation === correlation)
+      : [...buckets].reverse().find((bucket) => (
+          bucket.symbol === sym
+          && bucket.correlation === null
+          && bucket.latestMs != null
+          && Number.isFinite(fillMs)
+          && Math.abs(fillMs - bucket.latestMs) <= 60_000
+        ));
+    if (!target) {
+      target = {
         symbol: sym,
+        correlation,
+        latestMs: Number.isFinite(fillMs) ? fillMs : null,
         opens: [],
         closes: [],
         bags: [],
-      });
+      };
+      buckets.push(target);
     }
-
-    const target = byMinute.get(key);
-    if (!target) continue;
+    if (Number.isFinite(fillMs)) target.latestMs = Math.max(target.latestMs ?? fillMs, fillMs);
 
     if (fill.contract.secType === "BAG") {
       target.bags.push(fill);
@@ -707,8 +724,16 @@ function groupExecutedOrders(
 
     // Net price: BAG fill has the combo price, single-leg uses weighted avg
     let netPrice: number | null = null;
-    if (bagFills.length > 0 && bagFills[0].avgPrice != null) {
-      netPrice = bagFills[0].avgPrice;
+    if (bagFills.length > 0) {
+      const complete = bagFills.every((fill) => (
+        fill.avgPrice != null && Number.isFinite(fill.avgPrice) && Number.isFinite(fill.quantity) && fill.quantity > 0
+      ));
+      if (complete) {
+        const bagQty = bagFills.reduce((sum, fill) => sum + fill.quantity, 0);
+        netPrice = bagQty > 0
+          ? Number((bagFills.reduce((sum, fill) => sum + fill.avgPrice! * fill.quantity, 0) / bagQty).toFixed(4))
+          : null;
+      }
     } else if (optFills.length > 0) {
       const totalQty = optFills.reduce((s, f) => s + f.quantity, 0);
       const weightedSum = optFills.reduce((s, f) => s + (f.avgPrice ?? 0) * f.quantity, 0);
@@ -764,7 +789,7 @@ function groupExecutedOrders(
   })();
 
   const result: PositionFillGroup[] = [];
-  for (const bucket of byMinute.values()) {
+  for (const bucket of buckets) {
     const { opens, closes, bags } = bucket;
     if (opens.length > 0 && closes.length > 0) {
       const closeBuckets: ExecutedOrder[] = [];
@@ -803,6 +828,8 @@ function groupExecutedOrders(
       result.push({ ...makeGroup([...closes, ...bags], true), id: `${nextId()}-close` });
     } else if (opens.length > 0) {
       result.push({ ...makeGroup([...opens, ...bags], false), id: `${nextId()}-open` });
+    } else if (bags.length > 0) {
+      result.push({ ...makeGroup(bags, false), id: `${nextId()}-open` });
     }
   }
 
@@ -4126,6 +4153,8 @@ function WorkspaceSections({ section, portfolio, portfolioLastSync, orders, pric
       return <WorkflowComposer />;
     case "admin":
       return <AdminWorkspace />;
+    case "preferences":
+      return <PreferencesSection />;
     case "profile":
       return <ProfileContent prices={prices} />;
     case "watchlist":

@@ -1,3 +1,5 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
+
 import { NextResponse } from "next/server";
 import { radonFetch } from "@/lib/radonApi";
 import {
@@ -191,6 +193,8 @@ function unavailablePortfolioResponse(
 }
 
 export async function GET(): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { rate: { key: "portfolio:route", limit: 20, windowMs: 60_000 } });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   try {
     const cachedSnapshot = await cachedReadResult(
@@ -236,6 +240,12 @@ export async function GET(): Promise<Response> {
 }
 
 export async function POST(): Promise<Response> {
+  const access = await requireRouteAccess(undefined, {
+    operatorOnly: true,
+    rate: { key: "portfolio-sync", limit: 4, windowMs: 60_000 },
+    durableRateTier: "C",
+  });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   try {
     const data = await radonFetch("/portfolio/sync", { method: "POST", timeout: 35_000 });

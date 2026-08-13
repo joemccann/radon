@@ -174,7 +174,7 @@ describe("<Ib2faControls />", () => {
     expect(screen.getByTestId("gateway-power-status").textContent).toMatch(/running/i);
   });
 
-  it("flips to Start Gateway when the API is unreachable (cascade), ignoring the stale active unit row", () => {
+  it("shows unknown and disables power actions when the API is unreachable", () => {
     // Stopping the gateway cascade-stops radon-api, so both polls fail and the
     // cached unit row stays "active". The control must not latch "running".
     render(
@@ -190,8 +190,9 @@ describe("<Ib2faControls />", () => {
         apiUnreachable
       />,
     );
-    expect(screen.getByTestId("gateway-power-button").textContent).toContain("Start Gateway");
-    expect(screen.getByTestId("gateway-power-status").textContent).toMatch(/stopped/i);
+    expect(screen.getByTestId("gateway-power-button").textContent).toContain("Unavailable");
+    expect(screen.getByTestId("gateway-power-status").textContent).toMatch(/unknown/i);
+    expect((screen.getByTestId("gateway-power-button") as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("clicking Force 2FA opens confirmation (does not fire onForcePush directly)", () => {
@@ -339,7 +340,7 @@ describe("<Ib2faControls /> — gateway power", () => {
   });
 
   it("Stop opens a destructive type-to-confirm dialog enumerating the cascade dependents", () => {
-    const onStopGateway = vi.fn().mockResolvedValue(undefined);
+    const onStopGateway = vi.fn().mockResolvedValue(true);
     render(
       <Ib2faControls
         health={buildHealth({ port_listening: true })}
@@ -433,7 +434,7 @@ describe("<Ib2faControls /> — gateway power", () => {
   });
 
   it("flips the button to Start Gateway immediately after a confirmed Stop (optimistic)", async () => {
-    const onStopGateway = vi.fn().mockResolvedValue(undefined);
+    const onStopGateway = vi.fn().mockResolvedValue(true);
     render(
       <Ib2faControls
         health={buildHealth({ port_listening: true })}
@@ -458,8 +459,44 @@ describe("<Ib2faControls /> — gateway power", () => {
     );
   });
 
+  it("absent or failed power callbacks never change optimistic gateway state", async () => {
+    const failedStop = vi.fn().mockResolvedValue(false);
+    const { rerender } = render(
+      <Ib2faControls
+        health={buildHealth({ port_listening: true })}
+        onForcePush={vi.fn()}
+        onResetBackoff={vi.fn()}
+        onRestartStack={vi.fn()}
+        gatewayUnit={gatewayUnit("active")}
+        servicesSupported
+        onStopGateway={failedStop}
+        onStartGateway={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("gateway-power-button"));
+    fireEvent.change(screen.getByTestId("admin-confirm-typed-input"), {
+      target: { value: "radon-ib-gateway.service" },
+    });
+    fireEvent.click(screen.getByTestId("admin-confirm-action"));
+    await waitFor(() => expect(failedStop).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId("gateway-power-button").textContent).toBe("Stop Gateway");
+
+    rerender(
+      <Ib2faControls
+        health={buildHealth({ port_listening: true })}
+        onForcePush={vi.fn()}
+        onResetBackoff={vi.fn()}
+        onRestartStack={vi.fn()}
+        gatewayUnit={gatewayUnit("active")}
+        servicesSupported
+        onStartGateway={vi.fn()}
+      />,
+    );
+    expect((screen.getByTestId("gateway-power-button") as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("reconciles the optimistic flip with the authoritative poll (never sticks stale)", async () => {
-    const onStopGateway = vi.fn().mockResolvedValue(undefined);
+    const onStopGateway = vi.fn().mockResolvedValue(true);
     const props = (gw: ReturnType<typeof gatewayUnit>) => (
       <Ib2faControls
         health={buildHealth({ port_listening: false })}

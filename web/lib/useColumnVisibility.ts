@@ -29,35 +29,39 @@ export function useColumnVisibility<K extends string>(
   const storageKey = `${STORAGE_PREFIX}${tableId}`;
   const alwaysOnSet = new Set<K>(alwaysOn);
 
-  const [visible, setVisible] = useState<Record<K, boolean>>(() => {
-    if (typeof window === "undefined") return { ...defaults };
+  const [visible, setVisible] = useState<Record<K, boolean>>(() => ({ ...defaults }));
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    let next = { ...defaults };
     try {
       const raw = window.localStorage.getItem(storageKey);
-      if (!raw) return { ...defaults };
-      const saved = JSON.parse(raw) as Partial<Record<K, boolean>>;
-      const merged = { ...defaults };
-      for (const key of Object.keys(saved) as K[]) {
-        if (key in merged && typeof saved[key] === "boolean") {
-          merged[key] = saved[key]!;
+      if (raw) {
+        const saved = JSON.parse(raw) as Partial<Record<K, boolean>>;
+        for (const key of Object.keys(saved) as K[]) {
+          if (key in next && typeof saved[key] === "boolean") next[key] = saved[key]!;
         }
       }
-      // alwaysOn is enforced regardless of stored state.
-      for (const key of alwaysOnSet) merged[key] = true;
-      return merged;
     } catch {
-      return { ...defaults };
+      next = { ...defaults };
     }
-  });
+    for (const key of alwaysOnSet) next[key] = true;
+    setVisible(next);
+    setHydrated(true);
+    // Storage hydration is intentionally post-mount to preserve SSR parity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storageKey]);
 
   // Persist on change.
   useEffect(() => {
     if (typeof window === "undefined") return;
+    if (!hydrated) return;
     try {
       window.localStorage.setItem(storageKey, JSON.stringify(visible));
     } catch {
       // ignore quota / private-mode errors
     }
-  }, [storageKey, visible]);
+  }, [hydrated, storageKey, visible]);
 
   const toggle = useCallback(
     (key: K) => {

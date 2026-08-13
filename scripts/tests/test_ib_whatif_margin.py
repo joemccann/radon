@@ -137,6 +137,32 @@ def test_what_if_calls_whatif_never_places():
     client.disconnect.assert_called_once()  # finally still cleans up
 
 
+def test_credit_combo_accepts_negative_signed_limit_price():
+    state = _make_state(initMarginChange="800.0", maintMarginChange="800.0")
+    client = _make_client(state)
+    client.qualify_contracts.return_value = [MagicMock(conId=1), MagicMock(conId=2)]
+    params = {
+        "type": "combo",
+        "symbol": "SPY",
+        "action": "BUY",
+        "quantity": 1,
+        "limitPrice": -1.25,
+        "tif": "DAY",
+        "legs": [
+            {"expiry": "20260918", "strike": 500, "right": "P", "action": "SELL"},
+            {"expiry": "20260918", "strike": 490, "right": "P", "action": "BUY"},
+        ],
+    }
+
+    with patch("clients.contract_resolver.resolve_option_contract", side_effect=[MagicMock(), MagicMock()]):
+        result = _invoke(params, client, what_if=True)
+
+    assert result["status"] == "ok"
+    assert result["initMargin"] == 800.0
+    client.what_if_order.assert_called_once()
+    client.place_order.assert_not_called()
+
+
 def test_what_if_timeout_returns_error_not_place():
     client = _make_client(_make_state())
     client.what_if_order = MagicMock(side_effect=asyncio.TimeoutError())

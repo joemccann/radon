@@ -116,8 +116,9 @@ if "$PYTHON_BIN" scripts/fetch_oi_changes.py --market \
     --json >/dev/null 2>>"logs/oi_changes.err.log"; then
     echo "$(date): OI-changes refresh complete (OK)"
     exit 0
+else
+    EXIT_CODE=$?
 fi
 
-EXIT_CODE=$?
 echo "$(date): OI-changes refresh FAILED (exit ${EXIT_CODE})" >&2
 exit "${EXIT_CODE}"

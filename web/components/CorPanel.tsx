@@ -240,7 +240,7 @@ export default function CorPanel() {
         />
         {total >= 2 && (
           <BrushMinimap
-            values={series.map((e) => e[tenor] ?? 0)}
+            values={series.map((e) => e[tenor])}
             range={chartRange}
             onRangeChange={(r) => setCustomRange(r)}
             onCustom={() => setPreset("custom")}

@@ -59,12 +59,17 @@ import json
 import logging
 import os
 import sys
+import tempfile
+import threading
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 from urllib import error as urllib_error
 from urllib import request as urllib_request
+
+import fcntl
 
 from .check import CheckOutcome
 from . import cooldown as cooldown_mod
@@ -395,6 +400,19 @@ def heartbeat_ok(*, bucket: str, now) -> None:
 DIGEST_STATE_PATH = _PROJECT_DIR / "data" / "watchdog_digest_state.json"
 DIGEST_MAX_PENDING = 200
 DIGEST_MESSAGE_CHAR_BUDGET = 1000  # Pushover message limit is 1024
+_DIGEST_THREAD_LOCK = threading.Lock()
+
+
+@contextmanager
+def _digest_state_lock():
+    DIGEST_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = DIGEST_STATE_PATH.with_name(f"{DIGEST_STATE_PATH.name}.lock")
+    with _DIGEST_THREAD_LOCK, lock_path.open("a+") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 def _load_digest_state() -> dict:
@@ -406,23 +424,40 @@ def _load_digest_state() -> dict:
 
 def _save_digest_state(state: dict) -> None:
     DIGEST_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    DIGEST_STATE_PATH.write_text(json.dumps(state, indent=1), encoding="utf-8")
+    fd, tmp_name = tempfile.mkstemp(
+        dir=DIGEST_STATE_PATH.parent,
+        prefix=f".{DIGEST_STATE_PATH.name}.",
+        suffix=".tmp",
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as tmp:
+            json.dump(state, tmp, indent=1)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        os.replace(tmp_name, DIGEST_STATE_PATH)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
 
 
 def _enqueue_digest(outcome: CheckOutcome) -> None:
     """Best-effort: append a non-P1 outcome to the pending digest."""
     try:
-        state = _load_digest_state()
-        pending = state.get("pending") or []
-        pending.append({
-            "service": outcome.service,
-            "severity": outcome.severity,
-            "kind": outcome.kind,
-            "message": outcome.message,
-            "at": outcome.now.isoformat() if hasattr(outcome.now, "isoformat") else None,
-        })
-        state["pending"] = pending[-DIGEST_MAX_PENDING:]
-        _save_digest_state(state)
+        with _digest_state_lock():
+            state = _load_digest_state()
+            pending = state.get("pending") or []
+            pending.append({
+                "service": outcome.service,
+                "severity": outcome.severity,
+                "kind": outcome.kind,
+                "message": outcome.message,
+                "at": outcome.now.isoformat() if hasattr(outcome.now, "isoformat") else None,
+            })
+            state["pending"] = pending[-DIGEST_MAX_PENDING:]
+            _save_digest_state(state)
     except Exception as exc:  # noqa: BLE001 — digest bookkeeping must not kill dispatch
         log.warning("digest enqueue failed: %s", exc)
 
@@ -453,40 +488,41 @@ def flush_daily_digest(*, now: datetime) -> Optional[str]:
     Returns a dispatcher error string on send failure (also recorded on
     the ``watchdog-alerts`` row), ``None`` otherwise.
     """
-    state = _load_digest_state()
-    pending = state.get("pending") or []
-    if not pending:
+    with _digest_state_lock():
+        state = _load_digest_state()
+        pending = state.get("pending") or []
+        if not pending:
+            return None
+
+        last_sent = state.get("last_sent_at") or ""
+        today = now.date().isoformat()
+        if last_sent[:10] == today:
+            return None
+
+        creds = _pushover_creds()
+        if not creds:
+            # No external channel: drop this locked batch so the file cannot grow
+            # unbounded. A concurrent enqueue waits and is written afterwards.
+            _save_digest_state({"pending": [], "last_sent_at": state.get("last_sent_at")})
+            log.info("digest skipped (no Pushover creds) — %d entries dropped", len(pending))
+            return None
+
+        user, token = creds
+        payload = build_pushover_payload(
+            user=user,
+            token=token,
+            title=f"radon watchdog: daily digest ({len(pending)} alerts)",
+            message=_format_digest(pending),
+            severity=None,  # normal priority — never emergency
+        )
+        dispatcher_error = _post_pushover(payload)
+        if dispatcher_error:
+            _write_dispatcher_health(now=now, dispatcher_error=f"digest: {dispatcher_error}")
+            return dispatcher_error
+
+        _save_digest_state({"pending": [], "last_sent_at": now.isoformat()})
+        log.info("daily digest dispatched (%d entries)", len(pending))
         return None
-
-    last_sent = state.get("last_sent_at") or ""
-    today = now.date().isoformat()
-    if last_sent[:10] == today:
-        return None
-
-    creds = _pushover_creds()
-    if not creds:
-        # No external channel: drop the batch so the file can't grow
-        # unbounded — the rows already live in service_health(+events).
-        _save_digest_state({"pending": [], "last_sent_at": state.get("last_sent_at")})
-        log.info("digest skipped (no Pushover creds) — %d entries dropped", len(pending))
-        return None
-
-    user, token = creds
-    payload = build_pushover_payload(
-        user=user,
-        token=token,
-        title=f"radon watchdog: daily digest ({len(pending)} alerts)",
-        message=_format_digest(pending),
-        severity=None,  # normal priority — never emergency
-    )
-    dispatcher_error = _post_pushover(payload)
-    if dispatcher_error:
-        _write_dispatcher_health(now=now, dispatcher_error=f"digest: {dispatcher_error}")
-        return dispatcher_error
-
-    _save_digest_state({"pending": [], "last_sent_at": now.isoformat()})
-    log.info("daily digest dispatched (%d entries)", len(pending))
-    return None
 
 
 # ── public entry point ─────────────────────────────────────────────

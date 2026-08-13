@@ -14,6 +14,7 @@ import {
   buildPositionTradeOrder,
   closingActionFor,
   heldComboUnits,
+  overClosesHeldCombo,
   type TradeAction,
   type TradeTarget,
 } from "@/lib/order/positionTrade";
@@ -22,6 +23,7 @@ import {
   ibPlaceFields,
   isStopOrderType,
   pricesValidForOrderType,
+  riskPriceForOrderType,
 } from "@/lib/order/stopOrder";
 import OrderTypeToggle from "@/components/OrderTypeToggle";
 
@@ -120,16 +122,20 @@ export default function PositionTradeTicket({
     target.kind === "combo"
       ? Number.isFinite(parsedPrice) && parsedPrice !== 0
       : pricesValidForOrderType({ orderType, limitPrice: parsedPrice, stopPrice: parsedStop });
-  const isValid = !isNaN(parsedQty) && parsedQty > 0 && priceValid;
+  const overClosesCombo = target.kind === "combo" && overClosesHeldCombo(action, parsedQty, heldQty);
+  const isValid = !isNaN(parsedQty) && parsedQty > 0 && priceValid && !overClosesCombo;
 
   const underlyingSpot = prices[position.ticker]?.last ?? null;
 
+  const riskExecutionPrice = target.kind === "combo"
+    ? parsedPrice
+    : riskPriceForOrderType(orderType, parsedPrice, parsedStop);
   const built = useMemo(
     () =>
       isValid
-        ? buildPositionTradeOrder({ position, target, action, quantity: parsedQty, limitPrice: parsedPrice, tif, quote: { bid, ask }, underlyingSpot })
+        ? buildPositionTradeOrder({ position, target, action, quantity: parsedQty, limitPrice: riskExecutionPrice, tif, quote: { bid, ask }, underlyingSpot })
         : null,
-    [isValid, position, target, action, parsedQty, parsedPrice, tif, bid, ask, underlyingSpot],
+    [isValid, position, target, action, parsedQty, riskExecutionPrice, tif, bid, ask, underlyingSpot],
   );
 
   const nakedShortWarning = useMemo(() => {
@@ -147,6 +153,7 @@ export default function PositionTradeTicket({
   const okToSubmit = riskState?.okToSubmit !== false; // null (pre-confirm) allowed
 
   const handlePlace = useCallback(async () => {
+    if (!isValid) return;
     if (!confirmStep) { setConfirmStep(true); return; }
     if (!built) return;
     setLoading(true);
@@ -172,7 +179,7 @@ export default function PositionTradeTicket({
       } else {
         orderActions?.pushNotification({
           type: "success",
-          message: `${action} ${parsedQty}x ${position.ticker} ${subjectLabel} @ ${fmtSignedPrice(parsedPrice)}`,
+          message: `${action} ${parsedQty}x ${position.ticker} ${subjectLabel} @ ${fmtSignedPrice(riskExecutionPrice)}`,
         });
         setConfirmStep(false);
         onOrderPlaced?.();
@@ -183,7 +190,7 @@ export default function PositionTradeTicket({
     } finally {
       setLoading(false);
     }
-  }, [confirmStep, built, portfolio, orderActions, action, parsedQty, position.ticker, subjectLabel, parsedPrice, onOrderPlaced, onClose]);
+  }, [isValid, confirmStep, built, portfolio, orderActions, action, parsedQty, position.ticker, subjectLabel, riskExecutionPrice, onOrderPlaced, onClose, target.kind, orderType, parsedPrice, parsedStop]);
 
   const closingHint =
     built?.isClosing === false
@@ -307,6 +314,12 @@ export default function PositionTradeTicket({
         <div className="order-error" style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <AlertTriangle size={14} />
           <span>{nakedShortWarning}</span>
+        </div>
+      )}
+
+      {overClosesCombo && (
+        <div className="order-error">
+          Quantity exceeds held combo units ({heldQty}).
         </div>
       )}
 

@@ -89,6 +89,12 @@ describe("formatFillToast", () => {
     expect(msg).not.toContain("@");
   });
 
+  it("omits malformed non-numeric prices without throwing", () => {
+    const malformed = makeFill({ avgPrice: "4.55" as unknown as number });
+    expect(() => formatFillToast(malformed)).not.toThrow();
+    expect(formatFillToast(malformed)).not.toContain("@");
+  });
+
   it("passes an unknown side through raw", () => {
     expect(formatFillToast(makeFill({ side: "XYZ" }))).toContain("FILLED · XYZ 25x");
   });
@@ -167,6 +173,16 @@ describe("loadSeen / saveSeen", () => {
     expect(loaded.size).toBe(MAX_SEEN_KEYS);
     expect(loaded.has(`k.${MAX_SEEN_KEYS + 49}`)).toBe(true);
     expect(loaded.has("k.0")).toBe(false);
+  });
+
+  it("keeps the newest executions when priming a newest-first feed", () => {
+    const storage = new FakeStorage();
+    const newestFirst = Array.from({ length: MAX_SEEN_KEYS + 50 }, (_, index) =>
+      makeFill({ execId: `fill.${MAX_SEEN_KEYS + 50 - index}.01` }));
+    saveSeen(storage, primeSeen(newestFirst));
+    const loaded = loadSeen(storage);
+    expect(loaded.has(`fill.${MAX_SEEN_KEYS + 50}`)).toBe(true);
+    expect(loaded.has("fill.1")).toBe(false);
   });
 
   it("returns an empty set on corrupt JSON", () => {

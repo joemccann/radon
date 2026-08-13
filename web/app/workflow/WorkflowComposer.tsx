@@ -16,13 +16,15 @@ import {
 import "@xyflow/react/dist/style.css";
 import {
   describeRunReport,
-  graphRequiresConfirmation,
+  allocateWorkflowNodeId,
   listWorkflows,
+  runWorkflowAfterConfirmation,
   runWorkflow,
   saveWorkflow,
   toExecutorGraph,
   type RunReport,
   type SavedWorkflow,
+  WORKFLOW_PALETTE,
 } from "./workflowClient";
 
 // F14 — minimal working flow-pipeline canvas. Palette adds nodes; edges connect
@@ -30,21 +32,6 @@ import {
 // order node forces the OrderRiskGate confirmation before a run can place it.
 
 type NodeData = { label: string; nodeType: string; params: Record<string, unknown> };
-
-const PALETTE: Array<{ type: string; label: string; params: Record<string, unknown> }> = [
-  { type: "data-source", label: "Scanner", params: { source: "scanner" } },
-  { type: "filter", label: "Filter: score >= 60", params: { expression: "score >= 60" } },
-  { type: "gate", label: "Gate: Convexity", params: { gate: "convexity", max_gain: "max_gain", max_loss: "max_loss" } },
-  { type: "gate", label: "Gate: Kelly", params: { gate: "kelly", prob_win: "prob_win", odds: "odds" } },
-  { type: "notify", label: "Notify", params: { channel: "service_health" } },
-  { type: "order", label: "Order (needs confirm)", params: { structure: "long_call" } },
-];
-
-let nodeSeq = 0;
-function nextNodeId(): string {
-  nodeSeq += 1;
-  return `n${nodeSeq}`;
-}
 
 function Canvas() {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<NodeData>>([]);
@@ -67,17 +54,16 @@ function Canvas() {
   );
 
   const addNode = useCallback(
-    (entry: (typeof PALETTE)[number]) => {
-      const id = nextNodeId();
-      setNodes((nds) => [
-        ...nds,
-        {
+    (entry: (typeof WORKFLOW_PALETTE)[number]) => {
+      setNodes((nds) => {
+        const id = allocateWorkflowNodeId(nds.map((node) => node.id));
+        return [...nds, {
           id,
           position: { x: 80 + nds.length * 40, y: 60 + nds.length * 70 },
           data: { label: entry.label, nodeType: entry.type, params: entry.params },
           style: nodeStyle(entry.type),
-        } as Node<NodeData>,
-      ]);
+        } as Node<NodeData>];
+      });
     },
     [setNodes],
   );
@@ -109,15 +95,13 @@ function Canvas() {
 
   const onRun = useCallback(async () => {
     const graph = currentGraph();
-    let confirmOrder = false;
-    if (graphRequiresConfirmation(graph)) {
-      confirmOrder = window.confirm(
-        "This pipeline contains an order-emitting node. Confirm OrderRiskGate to allow it to fire?",
-      );
-    }
     try {
+      const result = await runWorkflowAfterConfirmation(graph, window.confirm, runWorkflow);
+      if (!result) {
+        setStatus("Run cancelled");
+        return;
+      }
       setStatus("Running...");
-      const result = await runWorkflow(graph, confirmOrder);
       setReport(result);
       setStatus(describeRunReport(result));
     } catch (err) {
@@ -170,7 +154,7 @@ function Canvas() {
       <div style={bodyStyle}>
         <aside style={paletteStyle}>
           <div style={paletteHeadStyle}>Nodes</div>
-          {PALETTE.map((entry) => (
+          {WORKFLOW_PALETTE.map((entry) => (
             <button key={entry.label} type="button" onClick={() => addNode(entry)} style={paletteBtnStyle}>
               {entry.label}
             </button>
@@ -227,7 +211,7 @@ function RunReportStrip({ report }: { report: RunReport }) {
 }
 
 function paletteLabel(type: string, params: Record<string, unknown>): string {
-  const match = PALETTE.find((p) => p.type === type && JSON.stringify(p.params) === JSON.stringify(params));
+  const match = WORKFLOW_PALETTE.find((p) => p.type === type && JSON.stringify(p.params) === JSON.stringify(params));
   return match?.label ?? type;
 }
 

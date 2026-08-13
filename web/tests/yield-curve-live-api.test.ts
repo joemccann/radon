@@ -130,6 +130,27 @@ describe("GET /api/yield-curve/live", () => {
     expect(fetchMock.mock.calls.length).toBe(callsAfterFirst);
   });
 
+  it("coalesces concurrent cache misses into one two-leg refresh", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      await gate;
+      const symbol = String(input).includes(encodeURIComponent("^TNX")) ? "^TNX" : "^IRX";
+      return new Response(yahooChartBody(symbol, symbol === "^TNX" ? 4.686 : 3.7, NOW_S));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { GET } = await import("../app/api/yield-curve/live/route");
+    const first = GET();
+    const second = GET();
+    await Promise.resolve();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    release();
+    const responses = await Promise.all([first, second]);
+    expect((await responses[0].json()).spread_10y_3m).toBeCloseTo(0.986, 6);
+    expect((await responses[1].json()).spread_10y_3m).toBeCloseTo(0.986, 6);
+  });
+
   it("declares force-dynamic", async () => {
     vi.stubGlobal(
       "fetch",

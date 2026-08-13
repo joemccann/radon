@@ -1,3 +1,5 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
+
 import { NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
@@ -148,6 +150,8 @@ const SEASONALITY_CACHE_SECONDS = 900;
 const STALE_REVALIDATE_SECONDS = 3600;
 
 export async function GET(request: Request): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { rate: { key: "ticker/seasonality:route", limit: 20, windowMs: 60_000 } });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   const { searchParams } = new URL(request.url);
   const ticker = searchParams.get("ticker");

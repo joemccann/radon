@@ -51,6 +51,7 @@ import {
   type MarginEstimate,
 } from "./internal/marginEstimate";
 import { estimateRoundTripCost } from "../costs";
+import type { RiskBudgetReport } from "@/lib/correlationRiskBanner";
 
 export type { ChainOrderLeg, CoveringPortfolioLeg };
 
@@ -95,9 +96,9 @@ export interface OptionOrderRiskInput {
   /** Override "Total:" label (e.g. "Proceeds:", "Close Credit:"). */
   totalLabel?: string;
   /**
-   * Close-out short-circuit. When set, the augmentation pipeline is
-   * bypassed: max-loss/max-gain are zeroed (the SELL is a close, not a new
-   * exposure) and `estimatedPnl` is computed from order proceeds minus
+   * Close-out economics. `chainLegs` must still identify every exact closing
+   * contract so the hook can project retained portfolio risk before treating
+   * the order as a pure close. `estimatedPnl` is computed from cash flow minus
    * sunk basis. Used by close paths in OrderTab and InstrumentDetailModal.
    */
   closeOut?: {
@@ -219,6 +220,54 @@ export interface OrderRiskState {
   okToSubmit: boolean;
   /** Coverage entries injected, exposed for chip rendering. */
   coveringLegs: CoveringPortfolioLeg[];
+  /** Canonical Gate-3 correlation report carried by the portfolio snapshot. */
+  correlationReport: RiskBudgetReport | null;
+  /** Distinguishes a pending snapshot from an unavailable correlation measurement. */
+  correlationStatus: "pending" | "unavailable" | "resolved";
+  /** Stable identity of the portfolio inputs material to broker margin. */
+  portfolioRevision: string;
+}
+
+function buildPortfolioRevision(
+  portfolio: PortfolioData | null | undefined,
+): string {
+  if (portfolio === undefined) return "pending";
+  if (portfolio === null) return "no-portfolio";
+
+  const account = portfolio.account_summary;
+  const positions = portfolio.positions
+    .map((position) => {
+      const legs = position.legs
+        .map((leg) => [
+          leg.con_id ?? "",
+          leg.expiry ?? position.expiry,
+          leg.type,
+          leg.strike ?? "",
+          leg.direction,
+          leg.contracts,
+        ].join(":"))
+        .sort()
+        .join(",");
+      return [
+        position.account_id ?? "",
+        position.position_instance_id ?? position.id,
+        position.ticker,
+        position.direction,
+        position.contracts,
+        legs,
+      ].join("|");
+    })
+    .sort()
+    .join(";");
+
+  return [
+    portfolio.last_sync,
+    account?.initial_margin ?? "",
+    account?.maintenance_margin ?? "",
+    account?.available_funds ?? "",
+    account?.buying_power ?? "",
+    positions,
+  ].join("::");
 }
 
 function makeTraceId(): string {
@@ -369,6 +418,123 @@ function retainedShortCallRiskAfterStockClose(
   return `${uncoveredAfter} retained short call${uncoveredAfter === 1 ? "" : "s"} uncovered after selling stock collateral`;
 }
 
+type ResidualOptionRisk = { reason: string; unbounded: boolean };
+
+/**
+ * Project an option close through the held portfolio before declaring it
+ * risk-free. Closing a long wing can leave a retained short naked even though
+ * the closing order itself is bounded. Exact closing legs are mandatory when
+ * the ticker has option inventory so the projection cannot guess by symbol.
+ */
+function retainedOptionRiskAfterClose(
+  opt: OptionOrderRiskInput,
+  portfolio: PortfolioData | null,
+): ResidualOptionRisk | null {
+  if (portfolio == null) return null;
+
+  type Holding = {
+    key: string;
+    right: "C" | "P";
+    expiry: string;
+    long: number;
+    short: number;
+  };
+  const holdings = new Map<string, Holding>();
+  let longStockShares = 0;
+  for (const position of portfolio.positions) {
+    if (position.ticker.toUpperCase() !== opt.ticker.toUpperCase()) continue;
+    for (const leg of position.legs) {
+      if (leg.type === "Stock") {
+        if (leg.direction === "LONG") longStockShares += Math.max(0, leg.contracts);
+        continue;
+      }
+      if (leg.strike == null || !Number.isFinite(leg.strike)) continue;
+      const right = leg.type === "Call" ? "C" : "P";
+      const expiry = (leg.expiry ?? position.expiry).replace(/-/g, "");
+      const key = `${expiry}|${right}|${leg.strike}`;
+      const holding = holdings.get(key) ?? { key, right, expiry, long: 0, short: 0 };
+      holding[leg.direction === "LONG" ? "long" : "short"] += Math.max(0, leg.contracts);
+      holdings.set(key, holding);
+    }
+  }
+
+  if (holdings.size === 0) return null;
+  if (opt.chainLegs.length === 0) {
+    return { reason: "Closing option identity unavailable", unbounded: false };
+  }
+
+  const uncovered = (inventory: Map<string, Holding>) => {
+    const remainingLongs = [...inventory.values()].map((holding) => ({
+      right: holding.right,
+      expiry: holding.expiry,
+      remaining: holding.long,
+    }));
+    let stockContracts = Math.floor(longStockShares / 100);
+    let calls = 0;
+    let puts = 0;
+    const shorts = [...inventory.values()]
+      .flatMap((holding) =>
+        holding.short > 0
+          ? [{ right: holding.right, expiry: holding.expiry, remaining: holding.short }]
+          : [],
+      )
+      .sort((a, b) => b.expiry.localeCompare(a.expiry));
+    for (const short of shorts) {
+      for (const long of remainingLongs) {
+        if (
+          short.remaining <= 0 ||
+          long.remaining <= 0 ||
+          long.right !== short.right ||
+          long.expiry < short.expiry
+        ) continue;
+        const consumed = Math.min(short.remaining, long.remaining);
+        short.remaining -= consumed;
+        long.remaining -= consumed;
+      }
+      if (short.right === "C" && short.remaining > 0 && stockContracts > 0) {
+        const consumed = Math.min(short.remaining, stockContracts);
+        short.remaining -= consumed;
+        stockContracts -= consumed;
+      }
+      if (short.right === "C") calls += short.remaining;
+      else puts += short.remaining;
+    }
+    return { calls, puts };
+  };
+
+  const before = uncovered(holdings);
+  const projected = new Map(
+    [...holdings].map(([key, holding]) => [key, { ...holding }]),
+  );
+  for (const closingLeg of opt.chainLegs) {
+    const key = `${closingLeg.expiry.replace(/-/g, "")}|${closingLeg.right}|${closingLeg.strike}`;
+    const holding = projected.get(key);
+    const side = closingLeg.action === "SELL" ? "long" : "short";
+    const quantity = Math.max(0, Math.trunc(closingLeg.quantity));
+    if (holding == null || quantity <= 0 || holding[side] < quantity) {
+      return { reason: "Closing option identity does not match held quantity", unbounded: false };
+    }
+    holding[side] -= quantity;
+  }
+
+  const after = uncovered(projected);
+  if (after.calls > before.calls) {
+    const newlyUncovered = after.calls - before.calls;
+    return {
+      reason: `${newlyUncovered} retained short call${newlyUncovered === 1 ? "" : "s"} uncovered by this close`,
+      unbounded: true,
+    };
+  }
+  if (after.puts > before.puts) {
+    const newlyUncovered = after.puts - before.puts;
+    return {
+      reason: `${newlyUncovered} retained short put${newlyUncovered === 1 ? "" : "s"} unprotected by this close`,
+      unbounded: false,
+    };
+  }
+  return null;
+}
+
 /**
  * Margin estimate for a freshly-opened option order (no close-out).
  *
@@ -471,6 +637,17 @@ export function useOrderRisk(
     if (input == null) return null;
 
     const traceId = makeTraceId();
+    const correlationReport = portfolio?.risk_budget ?? null;
+    const correlationStatus =
+      portfolio === undefined
+        ? "pending" as const
+        : correlationReport == null
+          ? "unavailable" as const
+          : "resolved" as const;
+    const portfolioRevision = buildPortfolioRevision(portfolio);
+    const withCorrelation = (
+      state: Omit<OrderRiskState, "correlationReport" | "correlationStatus" | "portfolioRevision">,
+    ): OrderRiskState => ({ ...state, correlationReport, correlationStatus, portfolioRevision });
 
     // ---- Linear branch (futures + stock). Linear instruments have no
     // strike/expiry-as-option and don't flow through the augmentation
@@ -487,12 +664,12 @@ export function useOrderRisk(
       };
 
       if (portfolio === undefined) {
-        return {
+        return withCorrelation({
           summary: brand(baseSummary, "pending", traceId),
           coverageStatus: "pending" as const,
           okToSubmit: false,
           coveringLegs: [],
-        };
+        });
       }
       const coverageStatus: CoverageStatus =
         portfolio === null ? "no-portfolio" : "resolved";
@@ -534,12 +711,12 @@ export function useOrderRisk(
             coverageStatus,
           ),
         };
-        return {
+        return withCorrelation({
           summary: brand(closeSummary, coverageStatus, traceId),
           coverageStatus,
           okToSubmit: true,
           coveringLegs: [],
-        };
+        });
       }
 
       const risk = computeLinearRisk({
@@ -567,12 +744,12 @@ export function useOrderRisk(
       // block — only unresolved coverage disables submit.
       const okToSubmit = coverageStatus === "resolved";
 
-      return {
+      return withCorrelation({
         summary: brand(resolved, coverageStatus, traceId),
         coverageStatus,
         okToSubmit,
         coveringLegs: [],
-      };
+      });
     }
 
     // ---- Option branch (default). Absent `type` is treated as options for
@@ -587,40 +764,47 @@ export function useOrderRisk(
 
     // Pending: portfolio not yet provided. Surface as skeleton; no risk math.
     if (portfolio === undefined) {
-      return {
+      return withCorrelation({
         summary: brand(baseSummary, "pending", traceId),
         coverageStatus: "pending" as const,
         okToSubmit: false,
         coveringLegs: [],
-      };
+      });
     }
 
     const coverageStatus: CoverageStatus =
       portfolio === null ? "no-portfolio" : "resolved";
 
-    // Close-out: short-circuit risk math; surface proceeds + realized P&L.
+    // Close-out: project the exact closing legs through retained portfolio
+    // exposure before surfacing proceeds + realized P&L.
     if (opt.closeOut != null) {
       const proceeds = opt.totalCost ?? 0;
       const pnl = proceeds - opt.closeOut.entryCostDollars;
+      const residualRisk = retainedOptionRiskAfterClose(opt, portfolio);
       const closeSummary: OrderPresentationSummary = {
         ...baseSummary,
         totalCost: Math.abs(proceeds),
         totalLabel: opt.totalLabel ?? (proceeds >= 0 ? "Close Credit:" : "Close Debit:"),
         estimatedPnl: pnl,
         estimatedPnlLabel: opt.closeOut.estimatedPnlLabel ?? "Est. Realized P&L:",
-        // A pure close consumes no margin.
+        maxLossUnbounded: residualRisk?.unbounded || undefined,
+        undefinedRiskReason: residualRisk?.reason ?? null,
+        // A pure close consumes no margin. A close that exposes retained risk
+        // requires broker what-if and is blocked by the canonical gate.
         marginImpact: buildMarginImpact(
-          estimateInitialMargin({ kind: "close-out" }),
+          residualRisk
+            ? { requirement: null, source: "regt-estimate", approximate: true }
+            : estimateInitialMargin({ kind: "close-out" }),
           portfolio,
           coverageStatus,
         ),
       };
-      return {
+      return withCorrelation({
         summary: brand(closeSummary, coverageStatus, traceId),
         coverageStatus,
-        okToSubmit: true,
+        okToSubmit: coverageStatus === "resolved" && residualRisk == null,
         coveringLegs: [],
-      };
+      });
     }
 
     // Augment chain legs with portfolio coverage. When portfolio is null
@@ -680,11 +864,11 @@ export function useOrderRisk(
     // block — only unresolved coverage disables submit.
     const okToSubmit = coverageStatus === "resolved";
 
-    return {
+    return withCorrelation({
       summary: brand(resolved, coverageStatus, traceId),
       coverageStatus,
       okToSubmit,
       coveringLegs: augmented.coveringLegs,
-    };
+    });
   }, [input, portfolio]);
 }

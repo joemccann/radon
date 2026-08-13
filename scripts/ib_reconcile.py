@@ -17,7 +17,7 @@ Actions detected:
 
 import os
 import sys
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Optional
@@ -57,17 +57,18 @@ def load_portfolio_snapshot() -> dict:
     return read_latest_portfolio_snapshot() or {"positions": []}
 
 
-def save_reconciliation_report(data: dict) -> None:
-    """Persist reconciliation output to Turso."""
+def save_reconciliation_report(data: dict) -> str:
+    """Persist reconciliation output and return its exact snapshot identity."""
     try:
         from db.writer import upsert_reconciliation_log
     except ImportError:
-        return
+        raise RuntimeError("reconciliation writer unavailable")
     try:
         snapshot_at = data.get("snapshot_at") or data.get("timestamp") or datetime.now().isoformat()
         upsert_reconciliation_log(snapshot_at, data)
+        return str(snapshot_at)
     except Exception as exc:  # noqa: BLE001 — best-effort
-        log(f"reconciliation_log dual-write failed: {exc}", "warn")
+        raise RuntimeError(f"reconciliation_log write failed: {exc}") from exc
 
 def get_trade_log_trades(trade_log: dict) -> set:
     """Extract set of (ticker, date, structure_type) tuples from trade log."""
@@ -417,7 +418,8 @@ def generate_reconciliation_report(new_trades: list, discrepancies: dict) -> dic
     """Generate a report of what needs to be reconciled."""
     quantity_mismatch = discrepancies.get("quantity_mismatch", [])
     report = {
-        "timestamp": datetime.now().isoformat(),
+        "snapshot_at": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "new_trades": new_trades,
         "positions_missing_locally": discrepancies["missing_locally"],
         "positions_closed": discrepancies["missing_in_ib"],
@@ -496,7 +498,8 @@ def main():
         report = generate_reconciliation_report(new_trades, discrepancies)
         
         # Save reconciliation report
-        save_reconciliation_report(report)
+        snapshot_at = save_reconciliation_report(report)
+        print(f"RADON_RECONCILIATION_SNAPSHOT={snapshot_at}")
 
         # Heartbeat for the watchdog: error when attention is needed so the
         # error bucket pages; ok otherwise.

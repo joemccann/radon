@@ -14,6 +14,7 @@ vi.mock("@/lib/radonApi", async (importOriginal) => {
 
 const LONG_CONTENT = "dark pool accumulation detail ".repeat(200); // ~6000 chars
 const LONG_SUMMARY = "summary sentence ".repeat(60); // ~1000 chars
+const PRINCIPAL = { userId: "user_test", token: "jwt-token" };
 
 const RESULT_ROW = {
   source: "evals",
@@ -84,7 +85,7 @@ describe("assistant knowledge tools", () => {
     const result = await executeTool(
       "search_knowledge",
       { query: "gex flip regime", scopes: ["trading"], sources: ["evals"] },
-      "jwt-token",
+      PRINCIPAL,
     );
 
     expect(result.ok).toBe(true);
@@ -105,7 +106,7 @@ describe("assistant knowledge tools", () => {
     mocks.radonFetch.mockResolvedValue({ results: [], retrieval: "fts-only" });
     const { executeTool } = await import("@/lib/assistant/tools");
 
-    const result = await executeTool("search_knowledge", { query: "watchdog 2fa" });
+    const result = await executeTool("search_knowledge", { query: "watchdog 2fa" }, PRINCIPAL);
 
     expect(result.ok).toBe(true);
     const [, opts] = mocks.radonFetch.mock.calls[0];
@@ -118,7 +119,7 @@ describe("assistant knowledge tools", () => {
     mocks.radonFetch.mockResolvedValue({ results: [RESULT_ROW], retrieval: "hybrid" });
     const { executeTool } = await import("@/lib/assistant/tools");
 
-    const result = await executeTool("search_knowledge", { query: "nvda thesis" });
+    const result = await executeTool("search_knowledge", { query: "nvda thesis" }, PRINCIPAL);
 
     expect(result.ok).toBe(true);
     const data = result.data as { retrieval: string; count: number; results: string[] };
@@ -151,7 +152,7 @@ describe("assistant knowledge tools", () => {
     });
     const { executeTool } = await import("@/lib/assistant/tools");
 
-    const result = await executeTool("search_knowledge", { query: "nvda thesis" });
+    const result = await executeTool("search_knowledge", { query: "nvda thesis" }, PRINCIPAL);
 
     expect(result.ok).toBe(true);
     const data = result.data as { results: string[] };
@@ -163,7 +164,7 @@ describe("assistant knowledge tools", () => {
     mocks.radonFetch.mockResolvedValue({ results: [], retrieval: "fts-only" });
     const { executeTool } = await import("@/lib/assistant/tools");
 
-    const result = await executeTool("search_knowledge", { query: "nothing here" });
+    const result = await executeTool("search_knowledge", { query: "nothing here" }, PRINCIPAL);
 
     expect(result.ok).toBe(true);
     expect(result.data).toMatchObject({ retrieval: "fts-only", count: 0, results: [] });
@@ -177,7 +178,7 @@ describe("assistant knowledge tools", () => {
     });
     const { executeTool } = await import("@/lib/assistant/tools");
 
-    const result = await executeTool("find_prior_evals", { ticker: " nvda " }, "jwt-token");
+    const result = await executeTool("find_prior_evals", { ticker: " nvda " }, PRINCIPAL);
 
     expect(result.ok).toBe(true);
     expect(mocks.radonFetch).toHaveBeenCalledTimes(1);
@@ -199,7 +200,7 @@ describe("assistant knowledge tools", () => {
       .mockResolvedValueOnce({ results: [RESULT_ROW], retrieval: "hybrid" });
     const { executeTool } = await import("@/lib/assistant/tools");
 
-    const result = await executeTool("search_knowledge", { query: "EWY risk reversal" });
+    const result = await executeTool("search_knowledge", { query: "EWY risk reversal" }, PRINCIPAL);
 
     expect(result.ok).toBe(true);
     expect(mocks.radonFetch).toHaveBeenCalledTimes(2);
@@ -214,7 +215,7 @@ describe("assistant knowledge tools", () => {
       .mockResolvedValueOnce({ ticker: "EWY", results: [RESULT_ROW], retrieval: "hybrid" });
     const { executeTool } = await import("@/lib/assistant/tools");
 
-    const result = await executeTool("find_prior_evals", { ticker: "EWY" });
+    const result = await executeTool("find_prior_evals", { ticker: "EWY" }, PRINCIPAL);
 
     expect(result.ok).toBe(true);
     expect(mocks.radonFetch).toHaveBeenCalledTimes(2);
@@ -225,7 +226,7 @@ describe("assistant knowledge tools", () => {
     mocks.radonFetch.mockRejectedValue(new RadonApiError(503, "Knowledge retrieval is unavailable"));
     const { executeTool, KNOWLEDGE_UNAVAILABLE_MESSAGE } = await import("@/lib/assistant/tools");
 
-    const result = await executeTool("search_knowledge", { query: "gex" });
+    const result = await executeTool("search_knowledge", { query: "gex" }, PRINCIPAL);
 
     expect(mocks.radonFetch).toHaveBeenCalledTimes(2);
     expect(result.ok).toBe(false);
@@ -240,7 +241,7 @@ describe("assistant knowledge tools", () => {
     mocks.radonFetch.mockRejectedValue(new RadonApiError(502, "upstream reset"));
     const { executeTool, KNOWLEDGE_UNAVAILABLE_MESSAGE } = await import("@/lib/assistant/tools");
 
-    const result = await executeTool("find_prior_evals", { ticker: "EWY" });
+    const result = await executeTool("find_prior_evals", { ticker: "EWY" }, PRINCIPAL);
 
     expect(mocks.radonFetch).toHaveBeenCalledTimes(2);
     expect(result.ok).toBe(false);
@@ -256,7 +257,7 @@ describe("assistant knowledge tools", () => {
     );
     const { executeTool, KNOWLEDGE_UNAVAILABLE_MESSAGE } = await import("@/lib/assistant/tools");
 
-    const result = await executeTool("search_knowledge", { query: "gex" });
+    const result = await executeTool("search_knowledge", { query: "gex" }, PRINCIPAL);
 
     expect(mocks.radonFetch).toHaveBeenCalledTimes(1);
     expect(result.ok).toBe(false);
@@ -269,7 +270,7 @@ describe("assistant knowledge tools", () => {
     );
     const { executeTool, KNOWLEDGE_UNAVAILABLE_MESSAGE } = await import("@/lib/assistant/tools");
 
-    const result = await executeTool("find_prior_evals", { ticker: "EWY" });
+    const result = await executeTool("find_prior_evals", { ticker: "EWY" }, PRINCIPAL);
 
     expect(mocks.radonFetch).toHaveBeenCalledTimes(1);
     expect(result.ok).toBe(false);
@@ -281,7 +282,7 @@ describe("assistant knowledge tools", () => {
     mocks.radonFetch.mockRejectedValue(new RadonApiError(422, "query too short"));
     const { executeTool, KNOWLEDGE_UNAVAILABLE_MESSAGE } = await import("@/lib/assistant/tools");
 
-    const result = await executeTool("search_knowledge", { query: "x" });
+    const result = await executeTool("search_knowledge", { query: "x" }, PRINCIPAL);
 
     expect(mocks.radonFetch).toHaveBeenCalledTimes(1);
     expect(result.ok).toBe(false);
@@ -316,6 +317,7 @@ describe("assistant knowledge tools", () => {
     const result = await runAssistantLoop(
       [{ role: "user", content: "What was my EWY thesis?" }],
       "system",
+      PRINCIPAL,
     );
 
     expect(result.content).toBe("Knowledge base unavailable; answering without prior context.");

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import ChatPanel from "@/components/ChatPanel";
 import type { WorkspaceSection } from "@/lib/types";
+import type { PortfolioData } from "@/lib/types";
 
 /**
  * ChatLauncher — global ⌘J overlay. Mounted in WorkspaceShell so chat is
@@ -13,9 +14,10 @@ import type { WorkspaceSection } from "@/lib/types";
 
 type ChatLauncherProps = {
   activeSection: WorkspaceSection;
+  portfolio: PortfolioData | null | undefined;
 };
 
-export default function ChatLauncher({ activeSection }: ChatLauncherProps) {
+export default function ChatLauncher({ activeSection, portfolio }: ChatLauncherProps) {
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -53,7 +55,7 @@ export default function ChatLauncher({ activeSection }: ChatLauncherProps) {
           <span className="chat-launcher__kicker">Radon Chat</span>
           <span className="chat-launcher__hint">Esc to dismiss</span>
         </div>
-        <ChatPanel activeSection={activeSection} />
+        <ChatPanel activeSection={activeSection} portfolio={portfolio} />
       </div>
     </div>
   );

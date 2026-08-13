@@ -108,6 +108,15 @@ describe("isStale", () => {
     const states: MarketState[] = ["open", "extended", "closed"];
     expect(states).toHaveLength(3);
   });
+
+  it("does not false-stale RTH-only jobs at premarket or Monday open transitions", () => {
+    const fridayClose = "2026-05-08T20:00:00Z";
+    const mondayPremarket = Date.parse("2026-05-11T12:00:00Z");
+    const mondayOpenPlusOne = Date.parse("2026-05-11T13:31:00Z");
+    expect(isStale("fill-monitor", fridayClose, "extended", mondayPremarket)).toBe(false);
+    expect(isStale("fill-monitor", fridayClose, "open", mondayOpenPlusOne)).toBe(false);
+    expect(isStale("fill-monitor", fridayClose, "open", Date.parse("2026-05-11T13:36:00Z"))).toBe(true);
+  });
 });
 
 /**

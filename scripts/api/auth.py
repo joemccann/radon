@@ -7,10 +7,14 @@ Supports two auth methods:
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import ipaddress
 import os
 import logging
+import re
+import time
+from collections import OrderedDict
 from urllib.parse import urlsplit
 
 from fastapi import Request, HTTPException, Depends
@@ -143,6 +147,13 @@ def is_trusted_service_request(request) -> bool:
 
 _jwks_client = None
 _algorithms = ["RS256"]
+MAX_JWT_BYTES = 8_192
+MAX_JWKS_INFLIGHT = 4
+JWKS_LOOKUP_TIMEOUT_SECONDS = 3.0
+JWKS_NEGATIVE_TTL_SECONDS = 30.0
+_KID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+_jwks_inflight: dict[str, asyncio.Task] = {}
+_jwks_negative: OrderedDict[str, float] = OrderedDict()
 
 
 def _get_jwks_client():
@@ -155,6 +166,57 @@ def _get_jwks_client():
             raise RuntimeError("CLERK_JWKS_URL not set")
         _jwks_client = pyjwt.PyJWKClient(jwks_url, cache_keys=True)
     return _jwks_client
+
+
+def _remember_negative_kid(kid: str) -> None:
+    _jwks_negative[kid] = time.monotonic() + JWKS_NEGATIVE_TTL_SECONDS
+    _jwks_negative.move_to_end(kid)
+    while len(_jwks_negative) > 256:
+        _jwks_negative.popitem(last=False)
+
+
+def _finish_jwks_lookup(kid: str, task: asyncio.Task) -> None:
+    if _jwks_inflight.get(kid) is task:
+        _jwks_inflight.pop(kid, None)
+    try:
+        task.result()
+    except (asyncio.CancelledError, Exception):
+        _remember_negative_kid(kid)
+
+
+async def _bounded_signing_key_lookup(token: str, kid: str):
+    now = time.monotonic()
+    expiry = _jwks_negative.get(kid)
+    if expiry is not None:
+        if expiry > now:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        _jwks_negative.pop(kid, None)
+
+    task = _jwks_inflight.get(kid)
+    if task is None:
+        if len(_jwks_inflight) >= MAX_JWKS_INFLIGHT:
+            raise HTTPException(status_code=503, detail="Authentication unavailable")
+
+        async def lookup():
+            return await asyncio.to_thread(
+                _get_jwks_client().get_signing_key_from_jwt,
+                token,
+            )
+
+        task = asyncio.create_task(lookup())
+        _jwks_inflight[kid] = task
+        task.add_done_callback(lambda completed: _finish_jwks_lookup(kid, completed))
+
+    try:
+        return await asyncio.wait_for(
+            asyncio.shield(task),
+            timeout=JWKS_LOOKUP_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(status_code=503, detail="Authentication unavailable") from exc
+    except Exception as exc:
+        _remember_negative_kid(kid)
+        raise HTTPException(status_code=401, detail="Invalid token") from exc
 
 
 def _get_allowed_users() -> set[str]:
@@ -210,10 +272,21 @@ async def verify_clerk_jwt(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
 
     token = auth_header.removeprefix("Bearer ")
+    if len(token.encode("utf-8")) > MAX_JWT_BYTES:
+        raise HTTPException(status_code=401, detail="Invalid token")
 
     try:
-        jwks_client = _get_jwks_client()
-        signing_key = jwks_client.get_signing_key_from_jwt(token)
+        header = pyjwt.get_unverified_header(token)
+        kid = header.get("kid")
+        if header.get("alg") != "RS256":
+            raise pyjwt.exceptions.InvalidTokenError("invalid JWT header")
+        # Clerk always supplies kid. Legacy/test tokens without one share a
+        # fixed cache key so they cannot create attacker-chosen work keys.
+        if kid is None:
+            kid = "__default__"
+        if not isinstance(kid, str) or not _KID_PATTERN.fullmatch(kid):
+            raise pyjwt.exceptions.InvalidTokenError("invalid JWT header")
+        signing_key = await _bounded_signing_key_lookup(token, kid)
 
         issuer = _get_issuer()
         decode_options = {"verify_aud": False}

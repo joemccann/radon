@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Inbox, Loader2 } from "lucide-react";
 import type { OpenOrder, PortfolioPosition } from "@/lib/types";
 import type { OpenOrderDisplayRow } from "@/lib/openOrderCombos";
@@ -39,6 +39,30 @@ type ActionTarget = {
   isPendingModify: boolean;
   isCombo: boolean;
 };
+
+type ActiveOrderIdentity =
+  | { kind: "single"; permIds: [number] }
+  | { kind: "combo"; permIds: number[] };
+
+function identityForRow(row: OpenOrderDisplayRow): ActiveOrderIdentity {
+  return row.kind === "single"
+    ? { kind: "single", permIds: [row.order.permId] }
+    : { kind: "combo", permIds: row.orders.map((order) => order.permId).sort((a, b) => a - b) };
+}
+
+function rowForIdentity(
+  rows: OpenOrderDisplayRow[],
+  identity: ActiveOrderIdentity | null,
+): OpenOrderDisplayRow | null {
+  if (!identity) return null;
+  return rows.find((row) => {
+    if (row.kind !== identity.kind) return false;
+    const ids = row.kind === "single"
+      ? [row.order.permId]
+      : row.orders.map((order) => order.permId).sort((a, b) => a - b);
+    return ids.length === identity.permIds.length && ids.every((id, index) => id === identity.permIds[index]);
+  }) ?? null;
+}
 
 function limitLabel(limitPrice: number | null, orderType: string, auxPrice?: number | null): string {
   if (orderType === "STP") return auxPrice != null ? fmtPrice(auxPrice) : "STP";
@@ -337,8 +361,12 @@ export default function MobileOrderList({
   onRequestModify,
   portfolioPositions,
 }: MobileOrderListProps) {
-  const [activeRow, setActiveRow] = useState<OpenOrderDisplayRow | null>(null);
+  const [activeIdentity, setActiveIdentity] = useState<ActiveOrderIdentity | null>(null);
   const [sortKey, setSortKey] = useState<OrderSortKey>("default");
+  const activeRow = useMemo(
+    () => rowForIdentity(rows, activeIdentity),
+    [rows, activeIdentity],
+  );
 
   const cancels: HasPermId = pendingCancelPermIds ?? new Set<number>();
   const modifies: HasPermId = pendingModifyPermIds ?? new Set<number>();
@@ -355,7 +383,7 @@ export default function MobileOrderList({
     );
   }
 
-  const closeSheet = () => setActiveRow(null);
+  const closeSheet = () => setActiveIdentity(null);
 
   let target: ActionTarget | null = null;
   if (activeRow) {
@@ -412,7 +440,7 @@ export default function MobileOrderList({
               <Card
                 tone={tone}
                 testId={`mobile-order-${id}`}
-                onClick={() => setActiveRow(row)}
+                onClick={() => setActiveIdentity(identityForRow(row))}
                 ariaLabel={summary.title}
               >
                 <div className="mobile-card__title-row">

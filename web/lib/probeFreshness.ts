@@ -94,8 +94,10 @@ export const JOURNAL_FRESH_WINDOW_MS = 3 * 24 * 3_600_000;
 const NOT_APPLICABLE: ProbeCheck = { applicable: false, age_secs: null, fresh: null };
 
 function ageSecsFrom(timestampMs: number | null, nowMs: number): number | null {
-  if (timestampMs === null || Number.isNaN(timestampMs)) return null;
-  return Math.max(0, Math.round((nowMs - timestampMs) / 1000));
+  if (timestampMs === null || !Number.isFinite(timestampMs)) return null;
+  const ageMs = nowMs - timestampMs;
+  if (ageMs < -60_000) return null;
+  return Math.max(0, Math.round(ageMs / 1000));
 }
 
 function parseRelayDetail(lastError: string | null): Record<string, unknown> {

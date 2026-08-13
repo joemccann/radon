@@ -275,7 +275,7 @@ class TestPortfolioArchive:
     def test_oneshot_with_timeout(self, unit):
         svc = unit("radon-portfolio-archive.service")["Service"]
         assert svc["type"] == "oneshot"
-        assert svc["timeoutstartsec"] == "7200"
+        assert int(svc["timeoutstartsec"]) >= 8000
         assert "archive_portfolio_snapshots.py" in svc["execstart"]
         # Fails closed without RADON_ARCHIVE_S3_* — no allow-delete-without-upload.
         assert "--allow-delete-without-upload" not in svc["execstart"]
@@ -295,7 +295,7 @@ class TestDbRetention:
     def test_oneshot_with_timeout(self, unit):
         svc = unit("radon-db-retention.service")["Service"]
         assert svc["type"] == "oneshot"
-        assert svc["timeoutstartsec"] == "1800"
+        assert int(svc["timeoutstartsec"]) >= 10000
         assert "db_retention_sweep.py" in svc["execstart"]
 
     def test_timer_after_archive_window(self, unit):
@@ -349,10 +349,65 @@ class TestSignalsRefresh:
         timer = unit("radon-signals-refresh.timer")["Timer"]
         raw = (services_dir / "radon-signals-refresh.timer").read_text()
         assert "Mon..Fri" in timer.get("oncalendar", "")
-        # 13..21 UTC spans RTH across both DST shoulders, as the VCG and
-        # data-refresh timers already do.
-        assert "13..21" in raw
+        assert "America/New_York" in raw
         assert timer.get("persistent") == "false"
+
+
+class TestSecurityRemediationSchedules:
+    def test_api_migration_timeout_requires_verified_current_schema(self, services_dir):
+        raw = (services_dir / "radon-api.service").read_text()
+        pre = next(line for line in raw.splitlines() if line.startswith("ExecStartPre="))
+        assert "timeout 30" in pre
+        assert '"$rc" -eq 124' not in pre
+
+    def test_cta_timer_is_explicit_utc(self, services_dir):
+        raw = (services_dir / "radon-cta-sync.timer").read_text()
+        calendars = [line for line in raw.splitlines() if line.startswith("OnCalendar=")]
+        assert calendars and all(line.endswith(" UTC") for line in calendars)
+
+    def test_leap_timer_runs_at_ten_et_across_dst(self, services_dir):
+        raw = (services_dir / "radon-leap.timer").read_text()
+        assert "10:00:00 America/New_York" in raw
+
+    def test_signals_timer_has_explicit_timezone(self, services_dir):
+        raw = (services_dir / "radon-signals-refresh.timer").read_text()
+        assert "America/New_York" in raw
+
+    def test_database_maintenance_units_share_serialization_lock(self, services_dir):
+        names = (
+            "radon-portfolio-archive.service",
+            "radon-db-retention.service",
+            "radon-db-backup.service",
+        )
+        execs = [parse_unit_file(services_dir / name)["Service"]["execstart"] for name in names]
+        assert all("flock" in value for value in execs)
+        lock_paths = [value.split("flock", 1)[1].split()[1] for value in execs]
+        assert len(set(lock_paths)) == 1
+
+    def test_one_minute_skew_timer_does_not_trip_start_limit(self, unit):
+        assert int(unit("radon-skew.service")["Unit"]["startlimitburst"]) >= 10
+
+    def test_private_services_use_restrictive_umask(self, unit):
+        for name in ("radon-db-backup.service", "radon-monitor.service", "radon-newsfeed.service"):
+            assert unit(name)["Service"]["umask"] == "0077"
+
+    def test_health_service_has_resource_ceilings(self, unit):
+        service = unit("radon-health.service")["Service"]
+        assert int(service["tasksmax"]) <= 64
+        assert service["memorymax"]
+
+    def test_nextjs_db_watchdog_has_no_recursive_root_chown(self, services_dir):
+        raw = (services_dir / "radon-nextjs-db-watchdog.service").read_text()
+        assert "chown -R" not in raw
+        assert "StateDirectory=" in raw
+
+    def test_cta_timeout_covers_retry_envelope(self, unit):
+        assert int(unit("radon-cta-sync.service")["Service"]["timeoutstartsec"]) >= 1800
+
+    def test_leap_fallback_uses_venv_and_has_time_budget(self, unit):
+        service = unit("radon-leap.service")["Service"]
+        assert "/home/radon/radon/.venv/bin/python" in service.get("environment", "")
+        assert int(service["timeoutstartsec"]) >= 660
 
 
 class TestSkew:
@@ -675,8 +730,8 @@ def test_api_migration_transport_stall_is_bounded_without_masking_errors(service
     service = (services_dir / "radon-api.service").read_text()
     command = next(line for line in service.splitlines() if line.startswith("ExecStartPre="))
     assert "/usr/bin/timeout 30" in command
-    assert '"$rc" -eq 124' in command
-    assert '"$rc" -eq 0' in command
+    assert '"$rc" -eq 124' not in command
+    assert "migrate.py" in command
 
 
 class TestBpiScanBudget:

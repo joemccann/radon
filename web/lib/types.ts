@@ -1,4 +1,5 @@
 import type { ComponentType } from "react";
+import type { RiskBudgetReport } from "@/lib/correlationRiskBanner";
 
 export type MessageRole = "assistant" | "user";
 
@@ -42,10 +43,31 @@ export type AssistantToolEvent = {
 export type AssistantOrderProposal = {
   tool: string;
   destructive: true;
-  input: Record<string, unknown>;
+  input: AssistantOrderInput;
   summary: string;
   toolUseId: string;
 };
+
+export type AssistantOrderInput =
+  | {
+      type: "stock";
+      ticker: string;
+      action: "BUY" | "SELL";
+      quantity: number;
+      limit_price: number;
+    }
+  | {
+      type: "option";
+      ticker: string;
+      action: "BUY" | "SELL";
+      quantity: number;
+      limit_price: number;
+      expiry: string;
+      strike: number;
+      right: "C" | "P";
+      conId: number;
+      exchange: string;
+    };
 
 export type AssistantResponse = {
   content?: string;
@@ -64,7 +86,7 @@ export type PiResponse = {
   error?: string;
 };
 
-export type WorkspaceSection = "dashboard" | "flow-analysis" | "options" | "portfolio" | "performance" | "orders" | "scanner" | "discover" | "watchlist" | "journal" | "regime" | "cta" | "alerts" | "workflow" | "ticker-detail" | "admin" | "profile";
+export type WorkspaceSection = "dashboard" | "flow-analysis" | "options" | "portfolio" | "performance" | "orders" | "scanner" | "discover" | "watchlist" | "journal" | "regime" | "cta" | "alerts" | "workflow" | "ticker-detail" | "admin" | "preferences" | "profile";
 
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
@@ -220,10 +242,18 @@ export type OpenOrder = {
   remaining: number;
   avgFillPrice: number | null;
   tif: string;
+  orderRef?: string | null;
+  ocaGroup?: string | null;
+  parentId?: number | null;
 };
 
 export type ExecutedOrder = {
   execId: string;
+  account_id?: string | null;
+  permId?: number | null;
+  orderId?: number | null;
+  clientId?: number | null;
+  orderRef?: string | null;
   symbol: string;
   contract: OrderContract;
   side: string;
@@ -283,6 +313,8 @@ export type PortfolioData = {
   defined_risk_count: number;
   undefined_risk_count: number;
   avg_kelly_optimal: number | null;
+  /** Gate-3 correlated-exposure report computed with each canonical snapshot. */
+  risk_budget?: RiskBudgetReport | null;
   account_summary?: AccountSummary;
   /** Ticker -> LATEST journal trade date. Coarse entry-time fallback for share
    *  cards; only usable when it predates the exit. */
@@ -298,12 +330,12 @@ export type PerformanceSeriesPoint = {
   equity: number;
   daily_return: number | null;
   drawdown: number;
-  benchmark_close: number;
-  benchmark_return: number;
+  benchmark_close?: number;
+  benchmark_return?: number;
 };
 
 export type PerformanceSummary = {
-  starting_equity: number;
+  starting_equity?: number;
   ending_equity: number;
   pnl: number;
   trading_days: number;

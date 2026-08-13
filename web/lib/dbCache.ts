@@ -24,7 +24,8 @@
 type Entry<T> = { value: T; freshUntil: number; storedAt: number };
 
 const store = new Map<string, Entry<unknown>>();
-const inflight = new Map<string, Promise<unknown>>();
+const inflight = new Map<string, { generation: number; promise: Promise<unknown> }>();
+const generations = new Map<string, number>();
 
 const DEFAULT_MAX_STALE_MS = 60_000;
 
@@ -94,10 +95,11 @@ export async function cachedReadResult<T>(
     return { value: hit.value, staleWhileError: false };
   }
 
-  const existing = inflight.get(key) as Promise<T> | undefined;
-  if (existing) {
+  const generation = generations.get(key) ?? 0;
+  const existing = inflight.get(key) as { generation: number; promise: Promise<T> } | undefined;
+  if (existing?.generation === generation) {
     try {
-      return { value: await existing, staleWhileError: false };
+      return { value: await existing.promise, staleWhileError: false };
     } catch (error) {
       return staleResult(hit, opts, error);
     }
@@ -105,27 +107,34 @@ export async function cachedReadResult<T>(
 
   const fetchPromise = (async () => {
     const value = await fetcher();
-    store.set(key, { value, freshUntil: Date.now() + ttlMs, storedAt: Date.now() });
+    if ((generations.get(key) ?? 0) === generation) {
+      store.set(key, { value, freshUntil: Date.now() + ttlMs, storedAt: Date.now() });
+    }
     return value;
   })();
-  inflight.set(key, fetchPromise);
+  inflight.set(key, { generation, promise: fetchPromise });
 
   try {
     return { value: await fetchPromise, staleWhileError: false };
   } catch (error) {
     return staleResult(hit, opts, error);
   } finally {
-    inflight.delete(key);
+    const current = inflight.get(key);
+    if (current?.generation === generation && current.promise === fetchPromise) {
+      inflight.delete(key);
+    }
   }
 }
 
 /** Drop one cache key (e.g. after a write that invalidates it). */
 export function invalidateCache(key: string): void {
   store.delete(key);
+  generations.set(key, (generations.get(key) ?? 0) + 1);
 }
 
 /** Test seam — clear all cached entries + in-flight tracking. */
 export function __clearDbCache(): void {
   store.clear();
   inflight.clear();
+  generations.clear();
 }

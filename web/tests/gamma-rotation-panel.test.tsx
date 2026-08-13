@@ -111,4 +111,22 @@ describe("GammaRotationPanel", () => {
     expect(container.textContent).toContain("Top identification");
     expect(container.querySelector("[data-testid='grg-chart']")).toBeTruthy();
   });
+
+  it("breaks paths at missing observations and labels an expanded z-score domain", () => {
+    const data = {
+      ...MOCK_GRG,
+      history: [
+        { ...MOCK_GRG.history[0], grg_z: 4.5 },
+        { ...MOCK_GRG.history[1], grg_z: null },
+        { ...MOCK_GRG.history[2], grg_z: 2.5 },
+      ],
+    };
+    mockUseGammaRotation.mockReturnValue({ data, loading: false, error: null });
+    const { container } = render(<GammaRotationPanel />);
+
+    const path = container.querySelector('path[stroke="var(--warning)"]')?.getAttribute("d") ?? "";
+    expect(path.match(/M/g)).toHaveLength(2);
+    expect(path).not.toContain("NaN");
+    expect(container.textContent).toContain("+4.5σ");
+  });
 });

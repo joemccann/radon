@@ -21,7 +21,7 @@ import {
 } from "@/lib/positionUtils";
 import { fmtSignedPrice, fmtUsd, toneClass } from "@/lib/format";
 import PositionTradeTicket from "./PositionTradeTicket";
-import type { TradeTarget } from "@/lib/order/positionTrade";
+import { heldComboUnits, type TradeTarget } from "@/lib/order/positionTrade";
 
 type PositionTabProps = {
   position: PortfolioPosition;
@@ -203,8 +203,9 @@ function PositionView({
     }
     if (spreadPriceData?.last != null) {
       const mult = getMultiplier(position);
+      const units = heldComboUnits(position);
       return {
-        mv: spreadPriceData.last * position.contracts * mult,
+        mv: spreadPriceData.last * units * mult,
         lastPrice: spreadPriceData.last,
       };
     }
@@ -218,13 +219,15 @@ function PositionView({
       rtMv += sign * lp.last * leg.contracts * 100;
     }
     const mult = getMultiplier(position);
-    return { mv: rtMv, lastPrice: rtMv / (position.contracts * mult) };
+    const units = heldComboUnits(position);
+    return { mv: rtMv, lastPrice: units > 0 ? rtMv / (units * mult) : null };
   }, [isStock, prices, position, spreadPriceData]);
 
   const entryCost = resolveEntryCost(position);
   const avgEntry = getAvgEntry(position);
   const mv = rtData?.mv ?? resolveMarketValue(position);
-  const lastPrice = rtData?.lastPrice ?? (mv != null ? mv / (position.contracts * getMultiplier(position)) : null);
+  const markUnits = isCombo ? heldComboUnits(position) : position.contracts;
+  const lastPrice = rtData?.lastPrice ?? (mv != null && markUnits > 0 ? mv / (markUnits * getMultiplier(position)) : null);
   const pnl = getPnlDollars(position, mv);
   const pnlPct = getPnlPct(position, mv);
   const returnTitle = describeReturnCapital(resolveReturnCapital(position));

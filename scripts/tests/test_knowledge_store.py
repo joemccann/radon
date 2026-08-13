@@ -248,6 +248,30 @@ class TestUpsertDocuments:
         assert counts["pruned"] == 0
         assert len(_knowledge_rows(db)) == 3
 
+    def test_failed_write_rolls_back_before_connection_reuse(self, db):
+        class FailingConnection:
+            def __init__(self, wrapped):
+                self.wrapped = wrapped
+                self.failed = False
+
+            def execute(self, sql, args=()):
+                if not self.failed and "INSERT INTO knowledge_fts" in sql:
+                    self.failed = True
+                    raise RuntimeError("fts unavailable")
+                return self.wrapped.execute(sql, args)
+
+            def commit(self):
+                return self.wrapped.commit()
+
+            def rollback(self):
+                return self.wrapped.rollback()
+
+        with pytest.raises(RuntimeError, match="fts unavailable"):
+            upsert_documents(FailingConnection(db), [_doc()])
+
+        assert _knowledge_rows(db) == []
+        assert upsert_documents(db, [_doc()])["inserted"] == 1
+
 
 class TestDeleteSourceDocs:
     def test_prunes_rows_and_fts_for_missing_keys(self, db):

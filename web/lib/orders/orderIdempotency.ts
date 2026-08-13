@@ -46,12 +46,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-export const CONTENT_HASH_TTL_MS = 4_000;
+// Every production caller is protected even if an older UI omitted a user-intent
+// key. Five minutes spans transport retries, React remounts, and deploy restarts.
+export const CONTENT_HASH_TTL_MS = 300_000;
 export const CLIENT_KEY_TTL_MS = 300_000;
 /**
  * Floor on how long an indeterminate outcome is retained. The abort window is
- * itself ~30s wide, so a content-hash key's 4s TTL expires before the operator
- * has finished reading the error — the very retry it must catch lands after it.
+ * itself ~30s wide. Explicit and content-derived keys now both exceed this floor.
  * Retention is `max(ttlMs, this)`; an explicit client key (300s) already exceeds
  * it. An operator who has checked open orders and genuinely wants to place again
  * passes a fresh `idempotencyKey` rather than waiting this out.
@@ -141,7 +142,9 @@ function ensureHydrated(): void {
 
 function readStore(): PersistedStore {
   try {
-    const parsed: unknown = JSON.parse(fs.readFileSync(storeFilePath(), "utf8"));
+    const parsed: unknown = JSON.parse(
+      fs.readFileSync(/* turbopackIgnore: true */ storeFilePath(), "utf8"),
+    );
     const store = parsed as PersistedStore;
     if (store && store.v === 1 && store.entries && typeof store.entries === "object") {
       return store;

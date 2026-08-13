@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 import fs from "fs-extra";
 
 import { absolutizeMediaUrl, MEDIA_ORIGIN } from "./media.js";
+import { atomicWriteText } from "./atomic.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -77,7 +78,9 @@ async function migrateFile(filePath, { apply }) {
   if (rewrites > 0 && apply) {
     // Preserve indentation of the original file (the scraper writes
     // 2-space pretty-printed JSON; matching that keeps diffs sane).
-    await fs.writeFile(filePath, JSON.stringify(posts, null, 2));
+    await atomicWriteText(filePath, JSON.stringify(posts, null, 2), {
+      backupPath: `${filePath}.bak`,
+    });
   }
 
   return {

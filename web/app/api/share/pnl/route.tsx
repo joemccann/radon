@@ -317,9 +317,6 @@ export async function GET(request: Request) {
     );
   } catch (err) {
     console.error("Share PnL image generation failed:", err);
-    return new Response(
-      `Image generation failed: ${err instanceof Error ? err.message : "Unknown error"}`,
-      { status: 500 },
-    );
+    return new Response("Image generation failed", { status: 500 });
   }
 }

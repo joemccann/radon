@@ -17,7 +17,7 @@ import type { RealizedJournalRow } from "@/lib/journal/realizedPnl";
 const JOURNAL_DB_TIMEOUT_MS = 5_000;
 const JOURNAL_DB_LABEL = "assistant-journal";
 export const WINDOW_ROW_LIMIT = 1_000;
-const PRIOR_ROW_LIMIT = 500;
+export const PRIOR_ROW_LIMIT = 500;
 
 /**
  * How far back the widened fetch looks for opens that predate the queried
@@ -81,8 +81,8 @@ export async function fetchJournalRowsInRange(
 export async function fetchPriorRowsForTickers(
   tickers: string[],
   beforeEt: string,
-): Promise<RealizedJournalRow[]> {
-  if (tickers.length === 0) return [];
+): Promise<{ rows: RealizedJournalRow[]; truncated: boolean }> {
+  if (tickers.length === 0) return { rows: [], truncated: false };
   const upper = tickers.map((t) => t.toUpperCase());
   const placeholders = upper.map(() => "?").join(",");
   const rs = await dbExecute(
@@ -90,10 +90,14 @@ export async function fetchPriorRowsForTickers(
       sql: `SELECT trade_id, payload, filled_at FROM journal
             WHERE COALESCE(filled_at, written_at) >= ? AND COALESCE(filled_at, written_at) < ?
               AND UPPER(COALESCE(json_extract(payload,'$.ticker'), json_extract(payload,'$.symbol'))) IN (${placeholders})
-            ORDER BY COALESCE(filled_at, written_at) ASC LIMIT ${PRIOR_ROW_LIMIT}`,
+            ORDER BY COALESCE(filled_at, written_at) DESC LIMIT ${PRIOR_ROW_LIMIT + 1}`,
       args: [shiftEtDay(beforeEt, -PRIOR_OPEN_LOOKBACK_DAYS), beforeEt, ...upper],
     },
     { timeoutMs: JOURNAL_DB_TIMEOUT_MS, label: JOURNAL_DB_LABEL },
   );
-  return rowsFromResult(rs);
+  const rows = rowsFromResult(rs);
+  return {
+    rows: rows.slice(0, PRIOR_ROW_LIMIT).reverse(),
+    truncated: rows.length > PRIOR_ROW_LIMIT,
+  };
 }

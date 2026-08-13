@@ -26,6 +26,15 @@ describe("handleDemoGate", () => {
     expect(res).toBeNull();
   });
 
+  it("denies missing role metadata on the demo deployment", async () => {
+    const res = await handleDemoGate(
+      { userId: "pending", metadata: null, request: apiReq() },
+      { now: NOW, demoDeployment: true },
+    );
+    expect(res?.status).toBe(403);
+    expect((await res!.json()).code).toBe("DEMO_ACCESS_PENDING");
+  });
+
   it("active demo user under limit passes through", async () => {
     const res = await handleDemoGate(
       { userId: "u", metadata: activeMeta, request: apiReq() },
@@ -69,5 +78,15 @@ describe("handleDemoGate", () => {
     );
     expect(res).toBeNull();
     expect(limiter).not.toHaveBeenCalled();
+  });
+
+  it("websocket ticket reconnects consume minute and daily ceilings", async () => {
+    const limiter = vi.fn(async () => allow);
+    const res = await handleDemoGate(
+      { userId: "u", metadata: activeMeta, request: apiReq("/api/ib/ws-ticket", "POST") },
+      { now: NOW, rateLimiter: limiter },
+    );
+    expect(res).toBeNull();
+    expect(limiter.mock.calls.map(([tier]) => tier)).toEqual(["E", "F"]);
   });
 });

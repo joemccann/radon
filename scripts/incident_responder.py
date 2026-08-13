@@ -39,6 +39,7 @@ from incident_notify import notify as dispatch_notification
 DEFAULT_REMOTE = "radon@ib-gateway"
 DEFAULT_REMOTE_DIR = "/home/radon/radon/data/incidents"
 DEFAULT_LOCAL_DIR = Path("data/incidents_remote")
+MIRROR_SENTINEL = ".radon-incident-mirror"
 # Projections live OUTSIDE the mirror: the analysis agent keeps Read+Glob, so a
 # projection sitting beside the raw incidents is one glob away from the very
 # text it exists to withhold. data/cache/ is already gitignored.
@@ -202,8 +203,12 @@ def build_sync_command(remote: str, remote_dir: str, local_dir: Path) -> list[st
     # files. Excluding them protects them from --delete (rsync never deletes
     # excluded paths without --delete-excluded); without this every cycle
     # wiped the state and re-analyzed the same incident.
+    sentinel = local_dir / MIRROR_SENTINEL
+    if sentinel.is_symlink() or not sentinel.is_file():
+        raise ValueError("refusing destructive mirror sync without its sentinel")
     return [
         "rsync", "-az", "--delete", "--timeout=30",
+        f"--exclude={MIRROR_SENTINEL}",
         "--exclude=.responder-state.json",
         "--exclude=.responder.lock",
         "--exclude=*.diagnosis.md",
@@ -212,6 +217,35 @@ def build_sync_command(remote: str, remote_dir: str, local_dir: Path) -> list[st
         f"{remote}:{remote_dir}/",
         f"{local_dir}/",
     ]
+
+
+def prepare_mirror_dir(repo_root: Path, configured: str) -> Path:
+    """Validate and initialize the sole directory rsync may delete within."""
+    root = repo_root.resolve()
+    configured_path = Path(configured)
+    candidate = configured_path if configured_path.is_absolute() else root / configured_path
+    candidate = Path(os.path.abspath(candidate))
+    expected = Path(os.path.abspath(root / DEFAULT_LOCAL_DIR))
+    if candidate != expected:
+        raise ValueError(f"unapproved incident mirror path: {configured}")
+
+    current = root
+    for part in DEFAULT_LOCAL_DIR.parts:
+        current = current / part
+        if current.is_symlink():
+            raise ValueError(f"incident mirror path contains symlink: {current}")
+
+    candidate.mkdir(parents=True, exist_ok=True)
+    sentinel = candidate / MIRROR_SENTINEL
+    if sentinel.is_symlink():
+        raise ValueError("incident mirror sentinel must not be a symlink")
+    if sentinel.exists():
+        if not sentinel.is_file() or sentinel.read_text() != "radon-incident-mirror-v1\n":
+            raise ValueError("incident mirror sentinel is invalid")
+    else:
+        sentinel.write_text("radon-incident-mirror-v1\n")
+        sentinel.chmod(0o600)
+    return candidate
 
 
 def _matching(value: object, pattern: re.Pattern[str]) -> str | None:
@@ -397,8 +431,14 @@ def analyze(incident_path: Path, repo_root: Path,
 def run_cycle(repo_root: Path) -> int:
     remote = os.environ.get("INCIDENT_RESPONDER_REMOTE", DEFAULT_REMOTE)
     remote_dir = os.environ.get("INCIDENT_RESPONDER_REMOTE_DIR", DEFAULT_REMOTE_DIR)
-    mirror = repo_root / os.environ.get(
-        "INCIDENT_RESPONDER_LOCAL_DIR", str(DEFAULT_LOCAL_DIR))
+    try:
+        mirror = prepare_mirror_dir(
+            repo_root,
+            os.environ.get("INCIDENT_RESPONDER_LOCAL_DIR", str(DEFAULT_LOCAL_DIR)),
+        )
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
     now = datetime.now(timezone.utc)
 
     lock = mirror / ".responder.lock"
@@ -406,7 +446,6 @@ def run_cycle(repo_root: Path) -> int:
         print("previous cycle still running; skipping", file=sys.stderr)
         return 0
     try:
-        mirror.mkdir(parents=True, exist_ok=True)
         sync = subprocess.run(build_sync_command(remote, remote_dir, mirror),
                               capture_output=True, text=True, timeout=60)
         if sync.returncode != 0:

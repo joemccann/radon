@@ -20,10 +20,10 @@ export function registerTradingTools(pi: ExtensionAPI) {
     label: "Kelly Calculator",
     description: "Calculate fractional Kelly bet size given probability and odds",
     parameters: Type.Object({
-      prob_win: Type.Number({ description: "Probability of winning (0-1)" }),
-      odds: Type.Number({ description: "Win/loss ratio" }),
-      fraction: Type.Optional(Type.Number({ description: "Kelly fraction, default 0.25" })),
-      bankroll: Type.Optional(Type.Number({ description: "Current bankroll in dollars" })),
+      prob_win: Type.Number({ minimum: 0, maximum: 1, description: "Probability of winning (0-1)" }),
+      odds: Type.Number({ exclusiveMinimum: 0, maximum: 1_000, description: "Win/loss ratio" }),
+      fraction: Type.Optional(Type.Number({ exclusiveMinimum: 0, maximum: 1, description: "Kelly fraction, default 0.25" })),
+      bankroll: Type.Optional(Type.Number({ minimum: 0, maximum: 1_000_000_000_000, description: "Current bankroll in dollars" })),
     }),
     async execute(_toolCallId: string, params: any) {
       try {
@@ -87,7 +87,7 @@ export function registerTradingTools(pi: ExtensionAPI) {
     label: "Watchlist Scanner",
     description: "Scan watchlist for dark pool flow signals",
     parameters: Type.Object({
-      top: Type.Optional(Type.Number({ description: "Number of top signals (default 20)" })),
+      top: Type.Optional(Type.Integer({ minimum: 1, maximum: 500, description: "Number of top signals (default 20)" })),
       min_score: Type.Optional(Type.Number({ description: "Minimum score threshold (default 0)" })),
     }),
     async execute(_toolCallId: string, params: any) {
@@ -122,13 +122,13 @@ export function registerTradingTools(pi: ExtensionAPI) {
       "Cross-Asset Volatility-Credit Gap scan. Fetches 1Y daily bars for VIX, VVIX, HYG, runs rolling 21-day OLS, computes VCG z-score. Returns JSON with signal state (RISK_OFF/EDR/WATCH/BOUNCE/NORMAL/SUPPRESSED/PANIC), severity tier (1=critical/2=high/3=elevated), EDR flag, bounce flag, VVIX severity amplifier (extreme/elevated/moderate), model betas, attribution, and 10-day history. Key fields: vcg_adj (panic-adjusted z-score), ro (0|1), edr (0|1), tier (1|2|3|null), bounce (0|1), vvix_severity.",
     parameters: Type.Object({
       proxy: Type.Optional(
-        Type.String({ description: "Credit proxy: HYG (default), JNK, or LQD" }),
+        Type.Union([Type.Literal("HYG"), Type.Literal("JNK"), Type.Literal("LQD")], { description: "Credit proxy: HYG (default), JNK, or LQD" }),
       ),
       backtest: Type.Optional(
         Type.Boolean({ description: "Run rolling backtest over historical data" }),
       ),
       days: Type.Optional(
-        Type.Number({ description: "Backtest lookback days (default 252)" }),
+        Type.Integer({ minimum: 1, maximum: 2_520, description: "Backtest lookback days (default 252)" }),
       ),
     }),
     async execute(_toolCallId: string, params: any) {

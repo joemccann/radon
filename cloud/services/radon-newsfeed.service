@@ -14,6 +14,7 @@ StartLimitBurst=5
 [Service]
 Type=simple
 User=radon
+UMask=0077
 WorkingDirectory=/home/radon/radon
 EnvironmentFile=/home/radon/radon-cloud/.env
 # Newsfeed is write-only — it never reads its own rows. Embedded replica

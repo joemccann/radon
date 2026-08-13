@@ -2,6 +2,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs-extra";
 import { chromium } from "playwright";
+import { atomicWriteJson } from "./atomic.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,48 +34,62 @@ export async function createBrowser({
   await fs.ensureDir(path.dirname(storageStatePath));
 
   const browser = await launcher.launch({ headless });
-  const storageState = await readStorageStateIfPresent(storageStatePath);
-  const context = await browser.newContext({
-    viewport,
-    userAgent,
-    storageState,
-  });
-  const page = await context.newPage();
+  let context;
+  let storageState;
+  try {
+    storageState = await readStorageStateIfPresent(storageStatePath);
+    context = await browser.newContext({
+      viewport,
+      userAgent,
+      storageState,
+    });
+    const page = await context.newPage();
 
-  async function exportCookies(urls) {
-    const list = await context.cookies(urls);
-    return list
-      .filter((cookie) => cookie && typeof cookie.name === "string" && typeof cookie.value === "string")
-      .map((cookie) => `${cookie.name}=${cookie.value}`)
-      .join("; ");
-  }
-
-  async function persistStorageState() {
-    await context.storageState({ path: storageStatePath });
-  }
-
-  async function close() {
-    try {
-      await context.close();
-    } catch {
-      /* ignore */
+    async function exportCookies(urls) {
+      const list = await context.cookies(urls);
+      return list
+        .filter((cookie) => cookie && typeof cookie.name === "string" && typeof cookie.value === "string")
+        .map((cookie) => `${cookie.name}=${cookie.value}`)
+        .join("; ");
     }
-    try {
-      await browser.close();
-    } catch {
-      /* ignore */
-    }
-  }
 
-  return {
-    browser,
-    context,
-    page,
-    storageStatePath,
-    exportCookies,
-    persistStorageState,
-    close,
-  };
+    async function persistStorageState() {
+      const state = await context.storageState();
+      await atomicWriteJson(storageStatePath, state, { mode: 0o600 });
+    }
+
+    async function close() {
+      try {
+        await context.close();
+      } catch {
+        /* ignore */
+      }
+      try {
+        await browser.close();
+      } catch {
+        /* ignore */
+      }
+    }
+
+    return {
+      browser,
+      context,
+      page,
+      storageStatePath,
+      exportCookies,
+      persistStorageState,
+      close,
+    };
+  } catch (error) {
+    await context?.close().catch(() => {});
+    await browser.close().catch(() => {});
+    if (storageState) {
+      await fs.move(storageStatePath, `${storageStatePath}.corrupt-${Date.now()}`, {
+        overwrite: false,
+      }).catch(() => {});
+    }
+    throw error;
+  }
 }
 
 export const NEWSFEED_DEFAULT_STORAGE_PATH = DEFAULT_STORAGE_PATH;

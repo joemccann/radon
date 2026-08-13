@@ -6,7 +6,7 @@
  * of market-open status.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { isSkewCacheFresh } from "@/lib/internalsSkewCache";
+import { isSkewCacheFresh, matchesInternalsSkewVariant } from "@/lib/internalsSkewCache";
 
 // Mock radonFetch to simulate FastAPI responses
 const mockRadonFetch = vi.fn();
@@ -94,5 +94,18 @@ describe("internals skew route staleness behavior", () => {
     it("cache with only null dates is treated as stale", () => {
       expect(isSkewCacheFresh("", "2026-03-20")).toBe(false);
     });
+  });
+
+  it("default query rejects a newer nondefault cache variant", () => {
+    expect(matchesInternalsSkewVariant({
+      nq: { ticker: "NQ", delta: 25, timeframe: "1Y", expiries: [] },
+      spx: { ticker: "SPX", delta: 25, timeframe: "1Y", expiries: [] },
+    }, {
+      nqTicker: "NDX",
+      spxTicker: "SPX",
+      timeframe: "5Y",
+      nqDelta: 25,
+      spxDelta: 25,
+    })).toBe(false);
   });
 });

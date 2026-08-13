@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isAllowedShareCardPath, readShareCard } from "@/lib/shareReportPath";
+import { basename } from "path";
+import { isAllowedShareCardPath } from "@/lib/shareReportPath";
+import { radonFetchText, RadonApiError } from "@/lib/radonApi";
 
 export const runtime = "nodejs";
 
@@ -14,9 +16,12 @@ export async function GET(req: NextRequest): Promise<Response> {
     return NextResponse.json({ error: "Access denied" }, { status: 403 });
   }
 
-  const html = await readShareCard(rawPath, "gex");
-  if (html === null) {
-    return NextResponse.json({ error: "File not found" }, { status: 404 });
+  let html: string;
+  try {
+    html = await radonFetchText(`/share/content?type=gex&name=${encodeURIComponent(basename(rawPath))}`);
+  } catch (error) {
+    const status = error instanceof RadonApiError ? error.status : 502;
+    return NextResponse.json({ error: status === 404 ? "File not found" : "Preview unavailable" }, { status });
   }
 
   return new Response(html, {

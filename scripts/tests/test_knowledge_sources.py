@@ -214,6 +214,32 @@ def test_journal_prune_authority_never_covers_trade_log_keys(
     assert journal_source.prunable_doc_keys(keys) == ["manual-alab-1"]
 
 
+def test_journal_source_pages_large_corpus_with_bounded_selects(db):
+    payload = json.dumps({"ticker": "SPY", "decision": "IB_AUTO_IMPORT"})
+    for index in range(451):
+        db.execute(
+            "INSERT INTO journal (trade_id, payload, filled_at, written_at) VALUES (?, ?, ?, ?)",
+            (f"trade-{index:04d}", payload, "2026-08-01", "2026-08-01T00:00:00Z"),
+        )
+    db.commit()
+
+    class RecordingDb:
+        def __init__(self, wrapped):
+            self.wrapped = wrapped
+            self.calls = []
+
+        def execute(self, sql, args):
+            self.calls.append((sql, args))
+            return self.wrapped.execute(sql, args)
+
+    recording = RecordingDb(db)
+    docs = list(journal_source._journal_rows(recording))
+
+    assert len(docs) == 451
+    assert len(recording.calls) == 4
+    assert all(args[1] <= 200 for _, args in recording.calls)
+
+
 # ---------------------------------------------------------------- evals
 
 

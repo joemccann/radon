@@ -188,6 +188,41 @@ def _whatif_result(state) -> dict:
     }
 
 
+def _contract_identity_mismatch(params: dict, contract, expected_sec_type: str) -> str | None:
+    """Bind a caller-supplied conId to every reviewed instrument attribute."""
+    expected_symbol = str(params.get("symbol") or "").upper()
+    actual_symbol = str(getattr(contract, "symbol", "") or "").upper()
+    actual_sec_type = str(getattr(contract, "secType", "") or "").upper()
+    if actual_symbol != expected_symbol:
+        return f"symbol {actual_symbol or '?'} does not match {expected_symbol}"
+    if actual_sec_type != expected_sec_type:
+        return f"secType {actual_sec_type or '?'} does not match {expected_sec_type}"
+
+    expected_expiry = str(params.get("expiry") or "").replace("-", "")
+    actual_expiry = str(getattr(contract, "lastTradeDateOrContractMonth", "") or "").split()[0]
+    if expected_expiry and not actual_expiry.startswith(expected_expiry):
+        return f"expiry {actual_expiry or '?'} does not match {expected_expiry}"
+
+    expected_exchange = str(params.get("exchange") or "").upper()
+    actual_exchange = str(getattr(contract, "exchange", "") or "").upper()
+    if expected_exchange and actual_exchange != expected_exchange:
+        return f"exchange {actual_exchange or '?'} does not match {expected_exchange}"
+
+    if expected_sec_type == "OPT":
+        expected_right = str(params.get("right") or "").upper()[:1]
+        actual_right = str(getattr(contract, "right", "") or "").upper()[:1]
+        if actual_right != expected_right:
+            return f"right {actual_right or '?'} does not match {expected_right}"
+        try:
+            expected_strike = float(params.get("strike"))
+            actual_strike = float(getattr(contract, "strike", "nan"))
+        except (TypeError, ValueError):
+            return "strike is unavailable on qualified contract"
+        if abs(actual_strike - expected_strike) > 1e-8:
+            return f"strike {actual_strike} does not match {expected_strike}"
+    return None
+
+
 def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
     """Place a limit order and return result as dict.
 
@@ -368,6 +403,10 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
             if not qualified:
                 return {"status": "error", "message": f"Could not qualify contract: {symbol}"}
             contract = qualified[0]
+            if con_id:
+                mismatch = _contract_identity_mismatch(params, contract, "OPT")
+                if mismatch:
+                    return {"status": "error", "message": f"conId identity mismatch: {mismatch}"}
 
         elif order_type == "future":
             # VIX futures + other CFE-listed contracts. Caller can pass
@@ -390,6 +429,10 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
             if not qualified:
                 return {"status": "error", "message": f"Could not qualify future: {symbol} {expiry or con_id}"}
             contract = qualified[0]
+            if con_id:
+                mismatch = _contract_identity_mismatch(params, contract, "FUT")
+                if mismatch:
+                    return {"status": "error", "message": f"conId identity mismatch: {mismatch}"}
 
         else:
             contract = Stock(symbol, "SMART", "USD")

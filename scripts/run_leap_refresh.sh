@@ -119,8 +119,9 @@ echo "$(date): FastAPI unreachable — fallback to direct leap_scanner_uw.py inv
 if "$PYTHON_BIN" scripts/leap_scanner_uw.py --preset "$PRESET" --min-gap "$MIN_GAP" --json 2>>/tmp/leap-scan.err; then
     echo "$(date): LEAP fallback refresh complete (OK)"
     exit 0
+else
+    EXIT_CODE=$?
 fi
 
-EXIT_CODE=$?
 echo "$(date): LEAP fallback refresh FAILED (exit ${EXIT_CODE})" >&2
 exit "${EXIT_CODE}"

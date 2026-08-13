@@ -1,3 +1,44 @@
+# Task: DeepSec security remediation (2026-08-13)
+
+Source: `/Users/joemccann/dev/apps/finance/radon/.deepsec/data/radon/reports/report.md`
+
+## Objective and acceptance criteria
+
+- Resolve or explicitly disposition every reported finding: 4 critical, 30 high, 108 medium, 122 high-bug, and 130 bug.
+- Add red/green regressions for security and correctness defects where the affected surface supports automated coverage.
+- Keep implementation isolated on `codex/security-report-20260813` in `.worktrees/security-report-20260813`.
+- Pass focused tests, full Python, root/cloud/web JavaScript suites, typecheck/build gates, and diff hygiene before opening a PR.
+
+## Dependency graph
+
+- T1 depends_on: [] - Normalize all 394 report findings into owned code boundaries, identify duplicates/false positives, and map each actionable item to a test and patch.
+- T2 depends_on: [T1] - Patch critical host, process, network, filesystem, authentication, authorization, redaction, and abuse-control findings.
+- T3 depends_on: [T1] - Patch backend reliability, persistence, scheduler, provider, and data-integrity findings.
+- T4 depends_on: [T1] - Patch web trading-safety, stale-state, risk-gate, caching, and presentation correctness findings.
+- T5 depends_on: [T2, T3, T4] - Integrate agent work, resolve overlaps, and verify every report item has a patch or evidence-backed disposition.
+- T6 depends_on: [T5] - Run focused and full test/build suites; repair every regression until green.
+- T7 depends_on: [T6] - Add the Show Me visual, complete review notes, commit, push, open the PR, and verify PR checks.
+
+## Checklist
+
+- [x] T1 Finding inventory and ownership map.
+- [x] T2 Security boundary remediation and regressions.
+- [x] T3 Backend reliability/data remediation and regressions.
+- [x] T4 Web/trading correctness remediation and regressions.
+- [x] T5 Integrated finding-by-finding review.
+- [x] T6 Full verification green.
+- [x] T7 Show Me artifact and PR opened.
+
+## Review
+
+- All 394 report rows are reconciled with zero source-actionable findings: 142 security, 122 high-bug, and 130 bug.
+- Security dispositions are 95 fixed, 45 duplicate, and 2 deferred-external; SEC-054/055 require CDN/origin and reachable-history purges after the source removals.
+- Verification: Python 6,056 passed; cloud 825 passed; Vitest 590 files / 6,073 tests passed; Playwright 9 passed; typecheck, lint, production build, boundary suites, visual inspection, and diff hygiene passed.
+- Show Me artifact: `tasks/artifacts/show-me-security-remediation.html`.
+- Draft PR: `https://github.com/joemccann/radon/pull/21`.
+
+---
+
 # Task: LEAP/GARCH index-universe default (2026-08-13)
 
 Default scheduled + dashboard scans use Nasdaq-100 + S&P 500 + Russell 2000 via a virtual `indexes` preset (~2494 names, ~1295 curated pairs). No committed `indexes.json`.
@@ -2495,3 +2536,32 @@ Per /indicator swarm (spec: docs/indicators/skew.md). Slug/service `skew`, tab S
 - Root cause: the shared scanner header assigned both the compact Theta heading and its dense controls flexible growth, so the heading occupied roughly half the row and made the controls read as a detached region.
 - Scoped the correction to Theta Harvester: the title now keeps intrinsic width and the control rail owns the remaining flexible space. Other scanner layouts are unchanged, and the existing mobile reflow still applies.
 - Verification: full Vitest 514 files / 5,326 tests passed; Theta Playwright desktop and mobile 2 passed; typecheck, diff check, layout detector, and visual screenshot inspection passed.
+
+# Task: Finalize dashboard-plate purge after history rewrite (2026-08-13)
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify the rewritten owned refs, deleted deployments, CDN 404s, and the post-rewrite CI failure.
+- T2 depends_on: [T1] - Remap commit-exact gitleaks baselines invalidated by the authorized history rewrite.
+- T3 depends_on: [T2] - Run focused gitleaks policy tests and the full Python/cloud/web gates.
+- T4 depends_on: [T3] - Commit and push the follow-up to `main`; verify CI, origin reachability, and branch protection.
+- T5 depends_on: [T4] - Record the remaining immutable GitHub pull refs and third-party fork cleanup.
+
+## Checklist
+
+- [x] T1 Owned purge verified; post-rewrite gitleaks failure isolated.
+- [x] T2 Gitleaks baseline commit IDs remapped.
+- [x] T3 Focused and full verification green.
+- [ ] T4 Follow-up pushed; CI verification pending.
+- [x] T5 External cleanup documented.
+
+## Review
+
+- PR #21 merged. Vercel CDN purged; 221 affected immutable deployments deleted; all four public plate URLs returned 404 twice across five hosts.
+- Thirteen owned branches were rewritten atomically with exact leases; three tags were unchanged. Fresh-mirror verification found zero affected paths or binary objects across owned heads/tags; force-push protection is restored.
+- History rewriting remapped two vetted gitleaks baseline commits. Both original and mapped identities remain commit-exact while immutable pull refs coexist with rewritten origin history; no regex/path allowlist was widened.
+- Verification: gitleaks 2,299 commits / zero findings; Python 6,142 passed, 1 skipped, 62.88% coverage; cloud 825 passed, 4 skipped; Vitest 589 files / 6,093 tests passed, 83.34% statement coverage; Playwright 43 passed; typecheck, lint, production build, output-trace audit, public-asset regressions, and diff hygiene passed.
+- External reachability remains in GitHub pull refs for PRs #10-#19 and forks `Joshglobal/radon`, `pbeninte/radon`, and `mdotk/radon`. Fork owners must clean/delete those refs before GitHub Support can dereference pull refs and run server garbage collection.
+- Show Me artifact: `tasks/artifacts/show-me-security-remediation.html`.
+
+---

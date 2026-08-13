@@ -235,6 +235,36 @@ describe("computeOrderRisk — ratio + asymmetric structures", () => {
     const risk = computeOrderRisk(legs, 1, 1);
     expect(risk.maxLossUnbounded).toBe(false);
   });
+
+  it("reverse calendar with an earlier long cannot bound a later short call", () => {
+    const risk = computeOrderRisk(
+      [
+        leg("BUY", "C", 100, 1, "20260320"),
+        leg("SELL", "C", 100, 1, "20260619"),
+      ],
+      -1,
+      1,
+    );
+
+    expect(risk.maxLossUnbounded).toBe(true);
+    expect(risk.undefinedRiskReason).toMatch(/short call/i);
+  });
+
+  it("short put butterfly measures its loss at the middle strike", () => {
+    const risk = computeOrderRisk(
+      [
+        leg("SELL", "P", 110),
+        leg("BUY", "P", 100, 2),
+        leg("SELL", "P", 90),
+      ],
+      -1,
+      1,
+    );
+
+    expect(risk.maxLossUnbounded).toBe(false);
+    expect(risk.maxLoss).toBe(900);
+    expect(risk.maxGain).toBe(100);
+  });
 });
 
 describe("computeOrderRisk — empty / edge inputs", () => {
@@ -1332,5 +1362,88 @@ describe("augmentOrderLegsWithPortfolioCoverage — order-internal BUY legs cove
     const optionCover = augmented.coveringLegs.filter((l) => l.type === "Option");
     expect(optionCover).toHaveLength(1);
     expect(optionCover[0]).toMatchObject({ type: "Option", strike: 135, contracts: 10 });
+  });
+});
+
+describe("augmentOrderLegsWithPortfolioCoverage — collateral is consumed once", () => {
+  it("does not reuse a long option already covering an existing short", () => {
+    const portfolio = buildPortfolio([
+      makePos({
+        ticker: "ABC",
+        expiry: "2026-12-18",
+        right: "Call",
+        strike: 50,
+        direction: "LONG",
+        contracts: 1,
+      }),
+      makePos({
+        ticker: "ABC",
+        expiry: "2026-09-18",
+        right: "Call",
+        strike: 60,
+        direction: "SHORT",
+        contracts: 1,
+      }),
+    ]);
+
+    const augmented = augmentOrderLegsWithPortfolioCoverage(
+      [chainSell(65, "C", 1, "20260918")],
+      "ABC",
+      portfolio,
+    );
+
+    expect(augmented.coveringLegs).toEqual([]);
+    expect(computeOrderRisk(
+      augmented.riskLegs,
+      -1 + augmented.netPremiumAdjustment,
+      augmented.comboQuantity,
+    ).maxLossUnbounded).toBe(true);
+  });
+
+  it("does not reuse shares already covering an existing short call", () => {
+    const portfolio = buildPortfolio([
+      makeStockPos({ ticker: "ABC", shares: 100, avgCost: 50 }),
+      makePos({
+        ticker: "ABC",
+        expiry: "2026-09-18",
+        right: "Call",
+        strike: 60,
+        direction: "SHORT",
+        contracts: 1,
+      }),
+    ]);
+
+    const augmented = augmentOrderLegsWithPortfolioCoverage(
+      [chainSell(65, "C", 1, "20260918")],
+      "ABC",
+      portfolio,
+    );
+
+    expect(augmented.coveringLegs).toEqual([]);
+    expect(computeOrderRisk(
+      augmented.riskLegs,
+      -1 + augmented.netPremiumAdjustment,
+      augmented.comboQuantity,
+    ).maxLossUnbounded).toBe(true);
+  });
+
+  it("keeps covered-call boundedness but withholds dollar loss when stock basis is missing", () => {
+    const portfolio = buildPortfolio([
+      makeStockPos({ ticker: "ABC", shares: 100, avgCost: Number.NaN }),
+    ]);
+
+    const augmented = augmentOrderLegsWithPortfolioCoverage(
+      [chainSell(60, "C", 1, "20260918")],
+      "ABC",
+      portfolio,
+    );
+    const risk = computeOrderRisk(
+      augmented.riskLegs,
+      -1 + augmented.netPremiumAdjustment,
+      augmented.comboQuantity,
+    );
+
+    expect(risk.maxLossUnbounded).toBe(false);
+    expect(risk.maxLoss).toBeNull();
   });
 });

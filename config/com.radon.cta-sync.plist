@@ -1,115 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.radon.cta-sync</string>
-
-    <key>ProgramArguments</key>
-    <array>
-        <string>/bin/bash</string>
-        <string>/Users/joemccann/dev/apps/finance/radon/scripts/run_cta_sync.sh</string>
-    </array>
-
-    <key>WorkingDirectory</key>
-    <string>/Users/joemccann/dev/apps/finance/radon</string>
-
-    <key>StartCalendarInterval</key>
-    <array>
-        <dict>
-            <key>Hour</key>
-            <integer>13</integer>
-            <key>Minute</key>
-            <integer>15</integer>
-            <key>Weekday</key>
-            <integer>1</integer>
-        </dict>
-        <dict>
-            <key>Hour</key>
-            <integer>14</integer>
-            <key>Minute</key>
-            <integer>0</integer>
-            <key>Weekday</key>
-            <integer>1</integer>
-        </dict>
-        <dict>
-            <key>Hour</key>
-            <integer>13</integer>
-            <key>Minute</key>
-            <integer>15</integer>
-            <key>Weekday</key>
-            <integer>2</integer>
-        </dict>
-        <dict>
-            <key>Hour</key>
-            <integer>14</integer>
-            <key>Minute</key>
-            <integer>0</integer>
-            <key>Weekday</key>
-            <integer>2</integer>
-        </dict>
-        <dict>
-            <key>Hour</key>
-            <integer>13</integer>
-            <key>Minute</key>
-            <integer>15</integer>
-            <key>Weekday</key>
-            <integer>3</integer>
-        </dict>
-        <dict>
-            <key>Hour</key>
-            <integer>14</integer>
-            <key>Minute</key>
-            <integer>0</integer>
-            <key>Weekday</key>
-            <integer>3</integer>
-        </dict>
-        <dict>
-            <key>Hour</key>
-            <integer>13</integer>
-            <key>Minute</key>
-            <integer>15</integer>
-            <key>Weekday</key>
-            <integer>4</integer>
-        </dict>
-        <dict>
-            <key>Hour</key>
-            <integer>14</integer>
-            <key>Minute</key>
-            <integer>0</integer>
-            <key>Weekday</key>
-            <integer>4</integer>
-        </dict>
-        <dict>
-            <key>Hour</key>
-            <integer>13</integer>
-            <key>Minute</key>
-            <integer>15</integer>
-            <key>Weekday</key>
-            <integer>5</integer>
-        </dict>
-        <dict>
-            <key>Hour</key>
-            <integer>14</integer>
-            <key>Minute</key>
-            <integer>0</integer>
-            <key>Weekday</key>
-            <integer>5</integer>
-        </dict>    </array>
-
-    <key>RunAtLoad</key>
-    <true/>
-
-    <key>KeepAlive</key>
-    <false/>
-
-    <key>StandardOutPath</key>
-    <string>/Users/joemccann/dev/apps/finance/radon/logs/cta-sync.out.log</string>
-
-    <key>StandardErrorPath</key>
-    <string>/Users/joemccann/dev/apps/finance/radon/logs/cta-sync.err.log</string>
-
-    <key>ProcessType</key>
-    <string>Background</string>
-</dict>
-</plist>
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.radon.cta-sync</string>
+  <key>ProgramArguments</key><array><string>/bin/bash</string><string>/Users/joemccann/dev/apps/finance/radon/scripts/run_cta_sync.sh</string></array>
+  <key>WorkingDirectory</key><string>/Users/joemccann/dev/apps/finance/radon</string>
+  <key>StartInterval</key><integer>900</integer>
+  <key>RunAtLoad</key><true/><key>KeepAlive</key><false/>
+  <key>Umask</key><integer>63</integer><key>ProcessType</key><string>Background</string>
+  <key>StandardOutPath</key><string>/Users/joemccann/dev/apps/finance/radon/logs/cta-sync.out.log</string>
+  <key>StandardErrorPath</key><string>/Users/joemccann/dev/apps/finance/radon/logs/cta-sync.err.log</string>
+</dict></plist>
