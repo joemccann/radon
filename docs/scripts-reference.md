@@ -45,6 +45,8 @@ The CLI surface area lives behind shell aliases registered in `.pi/`. Run `comma
 | `x-scan-browser [@ACCOUNT]` | Fetch X sentiment through browser scraping |
 | `commands` | Display the full command registry |
 
+Tickets place `STP` and `STP LMT` through `/api/orders/place`. There is no extra CLI alias. Scheduled LEAP and GARCH already default to the virtual `indexes` preset (NDX+SPX+RUT). Knowledge retrieval is the `radon-kb` MCP (`kb_search`, `kb_incidents`, `kb_recent`), not a shell alias.
+
 ## Test Runners
 
 ```bash
@@ -55,8 +57,9 @@ python3.13 scripts/run_pytest_affected.py --files scripts/ib_sync.py -- -q
 # Full Python suite
 python -m pytest scripts/tests/ -v
 
-# Frontend
-cd web && npm test
+# Frontend (repo root, bun / bunx only)
+bunx vitest run --config vitest.config.ts
+cd web && bun test
 
 # E2E
 cd web && npx playwright test

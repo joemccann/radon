@@ -248,10 +248,12 @@ Service health for every dual-writing scheduler lands in the `service_health` ta
 The health daemon's `radon-nextjs` probe is TCP-liveness only, so a process
 that is alive but cannot read Turso (the 2026-07-02 destroy-storm class)
 looked healthy to every monitoring layer. `radon-nextjs-db-watchdog.timer`
-(radon-cloud `services/`, 60s, 24/7) closes the gap: it curls
-`localhost:3000/api/service-health` — a real Turso read through the Next.js
-process — and judges the **body** (the route returns HTTP 200 with a
-synthetic `turso-db` error row when its DB read fails). K=3 consecutive
+(radon-cloud `services/`, 60s, 24/7) closes the gap: it GETs
+`localhost:3000/api/service-health` with
+`Authorization: Bearer $RADON_PROBE_FRESHNESS_TOKEN` (the route is not
+public) and judges the **body**. HTTP 200 with a synthetic `turso-db`
+error row is a wedge. HTTP 401/403 or a missing token is unknown: stand
+down, do not restart. K=3 consecutive
 wedge cycles plus a Python-side canary read (proving Turso itself is fine,
 so a restart will actually help) → solo `systemctl restart radon-nextjs`
 (no PartOf/BindsTo — no cascade), 10 min restart cooldown. Heartbeats the
