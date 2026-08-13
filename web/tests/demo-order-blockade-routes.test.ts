@@ -58,6 +58,7 @@ const DAY_MS = 86_400_000;
 // Window-relative, never hardcoded: a pinned calendar date rots the moment CI
 // runs past it.
 const activeDemoClaims = () => ({
+  userId: "user_demo",
   sessionClaims: {
     metadata: {
       demoRole: "trial",
@@ -67,6 +68,7 @@ const activeDemoClaims = () => ({
 });
 
 const expiredDemoClaims = () => ({
+  userId: "user_demo",
   sessionClaims: {
     metadata: {
       demoRole: "trial",
@@ -75,7 +77,7 @@ const expiredDemoClaims = () => ({
   },
 });
 
-const operatorClaims = () => ({ sessionClaims: { metadata: null } });
+const operatorClaims = () => ({ userId: "user_operator", sessionClaims: { metadata: null } });
 
 /** Clerk down / no request context. */
 const clerkThrows = () => {
@@ -155,7 +157,7 @@ describe("POST /api/orders/modify — demo blockade (T-018 B)", () => {
     const res = await POST(post("/api/orders/modify", MODIFY_BODY));
 
     expect(res.status).toBe(403);
-    expect((await res.json()).code).toBe("DEMO_ORDER_BLOCKED");
+    expect((await res.json()).code).toBe("FORBIDDEN");
     expectNoLiveOrderCall();
   });
 
@@ -179,7 +181,7 @@ describe("POST /api/orders/modify — demo blockade (T-018 B)", () => {
     const res = await POST(post("/api/orders/modify", MODIFY_BODY));
 
     expect(res.status).toBe(403);
-    expect((await res.json()).code).toBe("DEMO_TRIAL_EXPIRED");
+    expect((await res.json()).code).toBe("FORBIDDEN");
     expectNoLiveOrderCall();
   });
 
@@ -189,13 +191,14 @@ describe("POST /api/orders/modify — demo blockade (T-018 B)", () => {
 
     const res = await POST(post("/api/orders/modify", MODIFY_BODY));
 
-    expect(res.status).toBe(503);
-    expect((await res.json()).code).toBe("AUTH_UNAVAILABLE");
+    expect(res.status).toBe(401);
+    expect((await res.json()).code).toBe("UNAUTHORIZED");
     expectNoLiveOrderCall();
   });
 
   it("non-demo operator: unaffected, still forwards to /orders/modify", async () => {
     mockAuth.mockResolvedValue(operatorClaims());
+    vi.stubEnv("ALLOWED_USER_IDS", "user_operator");
     mockReadOrders.mockResolvedValue(CONFIRMED_MODIFY_SNAPSHOT);
     const { POST } = await import("../app/api/orders/modify/route");
 
@@ -214,7 +217,7 @@ describe("POST /api/orders/cancel — demo blockade (T-018 B)", () => {
     const res = await POST(post("/api/orders/cancel", CANCEL_BODY));
 
     expect(res.status).toBe(403);
-    expect((await res.json()).code).toBe("DEMO_ORDER_BLOCKED");
+    expect((await res.json()).code).toBe("FORBIDDEN");
     expectNoLiveOrderCall();
     expect(mockRadonFetch).not.toHaveBeenCalled();
   });
@@ -226,7 +229,7 @@ describe("POST /api/orders/cancel — demo blockade (T-018 B)", () => {
     const res = await POST(post("/api/orders/cancel", CANCEL_BODY));
 
     expect(res.status).toBe(403);
-    expect((await res.json()).code).toBe("DEMO_TRIAL_EXPIRED");
+    expect((await res.json()).code).toBe("FORBIDDEN");
     expectNoLiveOrderCall();
   });
 
@@ -236,13 +239,14 @@ describe("POST /api/orders/cancel — demo blockade (T-018 B)", () => {
 
     const res = await POST(post("/api/orders/cancel", CANCEL_BODY));
 
-    expect(res.status).toBe(503);
-    expect((await res.json()).code).toBe("AUTH_UNAVAILABLE");
+    expect(res.status).toBe(401);
+    expect((await res.json()).code).toBe("UNAUTHORIZED");
     expectNoLiveOrderCall();
   });
 
   it("non-demo operator: unaffected, still forwards to /orders/cancel", async () => {
     mockAuth.mockResolvedValue(operatorClaims());
+    vi.stubEnv("ALLOWED_USER_IDS", "user_operator");
     const { POST } = await import("../app/api/orders/cancel/route");
 
     const res = await POST(post("/api/orders/cancel", CANCEL_BODY));
@@ -253,15 +257,15 @@ describe("POST /api/orders/cancel — demo blockade (T-018 B)", () => {
 });
 
 describe("POST /api/orders/place — fail-closed (T-018 A)", () => {
-  it("active demo still routes to the paper engine, never /orders/place", async () => {
+  it("active demo cannot enter the live placement route", async () => {
     mockAuth.mockResolvedValue(activeDemoClaims());
     const { POST } = await import("../app/api/orders/place/route");
 
     const res = await POST(post("/api/orders/place", PLACE_BODY));
 
-    expect(res.status).toBe(200);
-    expect((await res.json()).paper).toBe(true);
-    expect(upstreamCalls()).toContain("/paper/place");
+    expect(res.status).toBe(403);
+    expect((await res.json()).code).toBe("FORBIDDEN");
+    expect(upstreamCalls()).not.toContain("/paper/place");
     expectNoLiveOrderCall();
   });
 
@@ -271,9 +275,9 @@ describe("POST /api/orders/place — fail-closed (T-018 A)", () => {
 
     const res = await POST(post("/api/orders/place", PLACE_BODY));
 
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(401);
     const body = await res.json();
-    expect(body.error).toContain("Order not placed");
+    expect(body.code).toBe("UNAUTHORIZED");
     expectNoLiveOrderCall();
     expect(upstreamCalls()).not.toContain("/paper/place");
   });

@@ -216,6 +216,15 @@ class IBPool:
         """
         return _PoolContext(self, role)
 
+    async def retire(self, role: str, client: IBClient) -> bool:
+        """Remove a client still owned by a timed-out worker from circulation."""
+        if self._clients.get(role) is not client:
+            return False
+        self._clients.pop(role, None)
+        self._connected[role] = False
+        logger.warning("IB pool: retired quarantined %s client", role)
+        return True
+
     async def _reconnect(self, role: str) -> bool:
         """Attempt to reconnect a disconnected role."""
         client_id = POOL_ROLES[role]

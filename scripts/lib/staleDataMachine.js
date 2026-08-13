@@ -133,6 +133,16 @@ export function isFarmStateCode(code) {
 /** Cadence of the relay's RTH tick heartbeat (DUR-16). */
 export const TICK_HEARTBEAT_INTERVAL_MS = 60_000;
 
+export function summarizeSubscriptionFreshness(subjects, now) {
+  const active = subjects.filter((subject) => subject?.active === true);
+  if (active.length === 0) {
+    return { activeSubscriptions: 0, lastTickAt: now };
+  }
+  const timestamps = active.map((subject) => Number(subject.lastTickAt));
+  const oldest = timestamps.every(Number.isFinite) ? Math.min(...timestamps) : 0;
+  return { activeSubscriptions: active.length, lastTickAt: oldest };
+}
+
 /**
  * DUR-16: should the relay refresh its service_health row with the
  * current last-tick timestamp this cycle?

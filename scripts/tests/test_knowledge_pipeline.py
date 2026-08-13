@@ -131,6 +131,29 @@ class TestDistill:
         # Non-secret substance survives so distillation still works.
         assert "NVDA call" in body
 
+    def test_structured_and_header_credentials_are_scrubbed_before_egress(
+        self, monkeypatch
+    ):
+        sent = {}
+
+        def fake_post(url, **kwargs):
+            sent["content"] = kwargs["json"]["messages"][1]["content"]
+            return _FakeResponse(200, _chat_response(_GOOD_DISTILLATION))
+
+        monkeypatch.setattr(distill_mod.requests, "post", fake_post)
+        distill_mod.distill(
+            "Incident",
+            'Authorization: Bearer opaque-value-123\n'
+            '"client_secret": "super-secret-value"\n'
+            "https://provider.invalid/v1?api_key=query-secret&symbol=SPY",
+        )
+
+        body = sent["content"]
+        assert "opaque-value-123" not in body
+        assert "super-secret-value" not in body
+        assert "query-secret" not in body
+        assert "symbol=SPY" in body
+
     def test_code_fenced_json_is_parsed(self, monkeypatch):
         fenced = f"```json\n{_GOOD_DISTILLATION}\n```"
         monkeypatch.setattr(
@@ -745,3 +768,26 @@ class TestBatchedWrites:
 
         assert result["inserted"] == 5
         assert len(factory_calls) >= 3, "expected a fresh connection per write batch"
+
+    def test_document_split_across_batches_is_not_pruned(self, db, monkeypatch):
+        module = _module([
+            _chunk("doc-a", 0, "zero"),
+            _chunk("doc-a", 1, "one"),
+            _chunk("doc-a", 2, "two"),
+            _chunk("doc-b", 0, "other"),
+        ])
+        monkeypatch.setattr(ingest_mod, "_INGEST_BATCH_DOCS", 2)
+        real_upsert = ingest_mod.upsert_documents
+        batches = []
+
+        def recording_upsert(connection, docs):
+            batches.append([(doc.doc_key, doc.chunk_ix) for doc in docs])
+            return real_upsert(connection, docs)
+
+        monkeypatch.setattr(ingest_mod, "upsert_documents", recording_upsert)
+        ingest_mod.ingest_source(db, module, distill_enabled=False, embed_enabled=False)
+
+        assert batches == [
+            [("doc-a", 0), ("doc-a", 1), ("doc-a", 2)],
+            [("doc-b", 0)],
+        ]

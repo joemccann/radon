@@ -28,17 +28,10 @@ export function optionsErrorResponse(
 ): NextResponse {
   const status =
     error instanceof RadonApiError ? error.status : isTimeoutError(error) ? 504 : 502;
-  const detail =
-    error instanceof RadonApiError
-      ? error.detail
-      : error instanceof Error
-        ? error.message
-        : "Upstream options service failed";
-
   return optionsJson(
     {
       error: label,
-      detail,
+      detail: status === 504 ? "Options request timed out" : "Options service unavailable",
       code: status === 504 ? "UPSTREAM_TIMEOUT" : "UPSTREAM_ERROR",
     },
     status,

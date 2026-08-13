@@ -3,7 +3,7 @@ Description=Radon Skew Indicator (UW SPX 1M 25-delta put/call IV ratio, live RTH
 After=network.target
 
 StartLimitIntervalSec=300
-StartLimitBurst=5
+StartLimitBurst=10
 
 [Service]
 Type=oneshot

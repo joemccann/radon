@@ -276,7 +276,7 @@ describe("POST /api/scanner/theta/scan", () => {
     expect(mocks.radonFetch).not.toHaveBeenCalled();
   });
 
-  it("serves stale cache with a sync warning when FastAPI is unavailable", async () => {
+  it("failed scans preserve failure status even when matching cache exists", async () => {
     mocks.radonFetch.mockRejectedValueOnce(new Error("upstream down"));
     const { POST } = await import("../app/api/scanner/theta/scan/route");
     const req = new Request("http://localhost/api/scanner/theta/scan", {
@@ -287,10 +287,11 @@ describe("POST /api/scanner/theta/scan", () => {
     const res = await POST(req);
     const body = await res.json();
 
-    expect(res.status).toBe(200);
-    expect(res.headers.get("X-Sync-Warning")).toContain("serving cached");
+    expect(res.status).toBe(502);
+    expect(res.headers.get("X-Sync-Warning")).toContain("matching cached");
     expect(noStoreHeader(res)).toContain("no-store");
     expect(body.is_stale).toBe(true);
+    expect(body.scan_succeeded).toBe(false);
     expect(body.results[0].ticker).toBe("AAPL");
   });
 

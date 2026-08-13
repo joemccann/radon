@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, readdir, readFile, rm, writeFile, stat } from "node:fs/
 import { tmpdir } from "node:os";
 import path from "node:path";
 import vm from "node:vm";
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it, afterEach, vi } from "vitest";
 import { JSDOM } from "jsdom";
 
 let tempRoot: string | null = null;
@@ -48,6 +48,69 @@ describe("seedPostsFileIfMissing", () => {
 
     expect(created).toBe(false);
     expect(JSON.parse(await readFile(postsFile, "utf8"))).toEqual([{ id: "abc" }]);
+  });
+
+  it("propagates existing-file read errors instead of seeding empty history", async () => {
+    const root = await createTempRoot();
+    const postsFile = path.join(root, "data", "posts.json");
+    await mkdir(postsFile, { recursive: true });
+    const { seedPostsFileIfMissing } = await import("../../scripts/newsfeed/paths.js");
+    await expect(seedPostsFileIfMissing({ dataDir: path.dirname(postsFile), postsFile })).rejects.toThrow();
+    expect((await stat(postsFile)).isDirectory()).toBe(true);
+  });
+});
+
+describe("browser lifecycle", () => {
+  it("closes a launched browser when context initialization fails", async () => {
+    const root = await createTempRoot();
+    const storageStatePath = path.join(root, "storage.json");
+    await writeFile(storageStatePath, "{}");
+    const close = vi.fn(async () => {});
+    const launcher = {
+      launch: vi.fn(async () => ({
+        newContext: vi.fn(async () => { throw new Error("corrupt storage"); }),
+        close,
+      })),
+    };
+    const { createBrowser } = await import("../../scripts/newsfeed/browser.js");
+    await expect(createBrowser({ storageStatePath, launcher })).rejects.toThrow("corrupt storage");
+    expect(close).toHaveBeenCalledOnce();
+    expect((await readdir(root)).some((name) => name.startsWith("storage.json.corrupt-"))).toBe(true);
+  });
+
+  it("persists browser credentials atomically with mode 0600", async () => {
+    const root = await createTempRoot();
+    const storageStatePath = path.join(root, "storage.json");
+    const context = {
+      newPage: vi.fn(async () => ({})),
+      cookies: vi.fn(async () => []),
+      storageState: vi.fn(async () => ({ cookies: [], origins: [] })),
+      close: vi.fn(async () => {}),
+    };
+    const browser = {
+      newContext: vi.fn(async () => context),
+      close: vi.fn(async () => {}),
+    };
+    const { createBrowser } = await import("../../scripts/newsfeed/browser.js");
+    const handle = await createBrowser({ storageStatePath, launcher: { launch: async () => browser } });
+    await handle.persistStorageState();
+    expect(JSON.parse(await readFile(storageStatePath, "utf8"))).toEqual({ cookies: [], origins: [] });
+    expect((await stat(storageStatePath)).mode & 0o777).toBe(0o600);
+    await handle.close();
+  });
+});
+
+describe("scheduler failure bound", () => {
+  it("exits after bounded consecutive cycle failures", async () => {
+    const scrapeOnce = vi.fn(async () => { throw new Error("browser crashed"); });
+    const { runForever } = await import("../../scripts/newsfeed/scheduler.js");
+    await expect(runForever({
+      intervalMs: 1,
+      scrapeOnce,
+      maxConsecutiveErrors: 2,
+      onCycleError: () => {},
+    })).rejects.toThrow(/failed 2 consecutive cycles/);
+    expect(scrapeOnce).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -208,6 +271,32 @@ describe("mergePosts", () => {
 });
 
 describe("persistPosts rollover", () => {
+  it("fails closed and quarantines malformed existing history", async () => {
+    const root = await createTempRoot();
+    const postsFile = path.join(root, "posts.json");
+    await writeFile(postsFile, "{broken");
+    const { loadExistingPosts } = await import("../../scripts/newsfeed/store.js");
+    await expect(loadExistingPosts(postsFile)).rejects.toThrow(/quarantined/);
+    expect((await readdir(root)).some((name) => name.startsWith("posts.json.corrupt-"))).toBe(true);
+  });
+
+  it("concurrent whole-file writers leave one complete valid snapshot", async () => {
+    const root = await createTempRoot();
+    const dataDir = path.join(root, "data");
+    const archiveDir = path.join(dataDir, "archive");
+    const postsFile = path.join(dataDir, "posts.json");
+    const { persistPosts } = await import("../../scripts/newsfeed/store.js");
+    const first = Array.from({ length: 50 }, (_, id) => ({ id: `a-${id}`, timestampMs: id }));
+    const second = Array.from({ length: 75 }, (_, id) => ({ id: `b-${id}`, timestampMs: id }));
+    await Promise.all([
+      persistPosts(first, { dataDir, archiveDir, postsFile }),
+      persistPosts(second, { dataDir, archiveDir, postsFile }),
+    ]);
+    const persisted = JSON.parse(await readFile(postsFile, "utf8"));
+    expect([50, 75]).toContain(persisted.length);
+    expect(new Set(persisted.map((post: { id: string }) => post.id.split("-")[0])).size).toBe(1);
+  });
+
   it("writes posts.json without archive when under threshold", async () => {
     const root = await createTempRoot();
     const dataDir = path.join(root, "data");
@@ -316,12 +405,12 @@ describe("formatCookieHeader", () => {
   });
 });
 
-// The downloader refuses anything that is not a real raster image before it
-// writes into the publicly served media dir, so fixtures must carry PNG magic
-// bytes. See scripts/newsfeed/media.js:looksLikeImage.
-const PNG_BYTES = Buffer.from([
-  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
-]);
+// The downloader decodes and re-encodes every image, so fixtures must be
+// complete rasters rather than magic-byte stubs.
+const PNG_BYTES = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVR4nGNgYGD4DwABBAEAX+XDSwAAAABJRU5ErkJggg==",
+  "base64",
+);
 
 describe("createImageDownloader (auth-gated upstream)", () => {
   it("sends Cookie header from getCookieHeader so cookie-gated images succeed", async () => {
@@ -360,12 +449,13 @@ describe("createImageDownloader (auth-gated upstream)", () => {
     // Downloader emits absolute URLs (https://media.radon.run/<file>) so
     // the dashboard never hits Next.js's /_next/image with a relative
     // path that 400s on Hetzner. See scripts/newsfeed/media.js.
-    expect(result).toEqual(["https://media.radon.run/cmjrk4n79d-01.png"]);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatch(/^https:\/\/media\.radon\.run\/cmjrk4n79d-01-[a-f0-9]{12}\.png$/);
     expect(requests).toHaveLength(1);
     expect(requests[0].cookie).toBe("P=session-token; U=user-token");
 
-    const onDisk = await readFile(path.join(mediaDir, "cmjrk4n79d-01.png"));
-    expect(onDisk.equals(PNG_BYTES)).toBe(true);
+    const onDisk = await readFile(path.join(mediaDir, new URL(result[0]).pathname.slice(1)));
+    expect(onDisk.subarray(0, 8).equals(PNG_BYTES.subarray(0, 8))).toBe(true);
   });
 
   it("falls back to no-cookie request when getCookieHeader is omitted (legacy behavior)", async () => {
@@ -387,7 +477,8 @@ describe("createImageDownloader (auth-gated upstream)", () => {
 
     const result = await downloader.download("p1", ["https://themarketear.com/images/x.png"]);
 
-    expect(result).toEqual(["https://media.radon.run/p1-01.png"]);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatch(/^https:\/\/media\.radon\.run\/p1-01-[a-f0-9]{12}\.png$/);
     expect(requests[0].cookie).toBeUndefined();
   });
 

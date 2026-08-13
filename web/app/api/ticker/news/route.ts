@@ -1,3 +1,5 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
+
 import { NextResponse } from "next/server";
 import {
   getRequestId,
@@ -5,28 +7,32 @@ import {
   setCacheResponseHeaders,
   setNoStoreResponseHeaders,
 } from "@/lib/apiContracts";
+import { boundedPositiveInt, boundedTicker } from "@/lib/requestBounds";
 
 export const runtime = "nodejs";
 
 const NEWS_CACHE_SECONDS = 45;
+const PROVIDER_TIMEOUT_MS = 3_000;
 
 /** Try UW headlines first, fall back to Yahoo Finance on any error. */
 export async function GET(request: Request): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { rate: { key: "ticker/news:route", limit: 20, windowMs: 60_000 } });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   const { searchParams } = new URL(request.url);
-  const ticker = searchParams.get("ticker");
-  const limit = parseInt(searchParams.get("limit") || "20", 10);
+  const ticker = boundedTicker(searchParams.get("ticker"));
+  const limit = boundedPositiveInt(searchParams.get("limit"), 20, 50);
 
-  if (!ticker) {
+  if (!ticker || limit === null) {
     return jsonApiError({
-      message: "ticker parameter required",
+      message: "valid ticker and limit between 1 and 50 required",
       status: 400,
       code: "BAD_REQUEST",
       requestId,
     });
   }
 
-  const symbol = ticker.toUpperCase();
+  const symbol = ticker;
 
   // Source 1: Unusual Whales
   const uwResult = await fetchUW(symbol, limit, requestId);
@@ -82,6 +88,7 @@ async function fetchUW(
     const res = await fetch(url.toString(), {
       cache: "no-store",
       headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
     });
 
     if (!res.ok) {
@@ -117,6 +124,7 @@ async function fetchYahoo(
         "User-Agent": "Mozilla/5.0",
         Accept: "application/json",
       },
+      signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
     });
 
     // Yahoo chart endpoint doesn't include news — try the search endpoint
@@ -145,6 +153,7 @@ async function fetchYahooSearch(
           "User-Agent": "Mozilla/5.0",
           Accept: "application/json",
         },
+        signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
       },
     );
 

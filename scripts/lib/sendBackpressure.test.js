@@ -6,6 +6,7 @@ import {
   SOFT_HIGH_WATER_BYTES,
   decideSend,
   isCoalescableKind,
+  settleIncrementalBatch,
 } from "./sendBackpressure.js";
 
 const COALESCABLE = ["batch", "depth-batch", "tape-batch"];
@@ -106,6 +107,30 @@ describe("decideSend — hard cap boundary", () => {
   it("does not close one byte under the hard cap", () => {
     expect(decideSend(HARD_CAP_BYTES - 1, "ping")).toBe("send");
     expect(decideSend(HARD_CAP_BYTES - 1, "batch")).toBe("drop");
+  });
+});
+
+describe("incremental batch settlement", () => {
+  it("retains a dropped incremental batch for the next successful send", () => {
+    const dirty = new Map([["SPY", { last: 600 }]]);
+    const snapshot = Object.fromEntries(dirty);
+
+    settleIncrementalBatch(dirty, snapshot, "drop");
+    expect(Object.fromEntries(dirty)).toEqual(snapshot);
+
+    settleIncrementalBatch(dirty, snapshot, "send");
+    expect(dirty.size).toBe(0);
+  });
+
+  it("does not clear a newer update after an older snapshot is sent", () => {
+    const oldQuote = { last: 600 };
+    const dirty = new Map([["SPY", oldQuote]]);
+    const snapshot = Object.fromEntries(dirty);
+    dirty.set("SPY", { last: 601 });
+
+    settleIncrementalBatch(dirty, snapshot, "send");
+
+    expect(dirty.get("SPY")).toEqual({ last: 601 });
   });
 });
 

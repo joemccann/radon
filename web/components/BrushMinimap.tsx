@@ -29,7 +29,7 @@ const CONTEXT_VBW = 1000; // context viewBox width; preserveAspectRatio="none" s
 
 export interface BrushMinimapProps {
   /** One value per session over the FULL history — drives the context sparkline. */
-  values: number[];
+  values: Array<number | null>;
   /** Inclusive [start, end] indices into `values` currently visible in the chart. */
   range: [number, number];
   /** Fired with the new [start, end] as the user drags. */
@@ -142,12 +142,14 @@ export default function BrushMinimap({
   const leftPct = (visibleStart / totalSpan) * 100;
   const widthPct = Math.max(((visibleEnd - visibleStart) / totalSpan) * 100, 0.5);
 
-  const max = Math.max(...values.map((v) => Math.abs(v)), 1);
+  const finiteValues = values.filter((value): value is number => value != null && Number.isFinite(value));
+  const max = Math.max(...finiteValues.map((value) => Math.abs(value)), 1);
   const contextPath =
     d3
-      .line<number>()
+      .line<number | null>()
+      .defined((value) => value != null && Number.isFinite(value))
       .x((_v, index) => (index / Math.max(total - 1, 1)) * CONTEXT_VBW)
-      .y((v) => height / 2 - (v / max) * (height / 2 - 4))
+      .y((value) => height / 2 - ((value ?? 0) / max) * (height / 2 - 4))
       .curve(d3.curveMonotoneX)(values) ?? "";
 
   return (

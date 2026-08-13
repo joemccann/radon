@@ -1,6 +1,13 @@
 import { defineConfig, devices } from "@playwright/test";
+import { randomUUID } from "node:crypto";
 
 const PORT = process.env.PLAYWRIGHT_PORT ? Number(process.env.PLAYWRIGHT_PORT) : 3000;
+// The config is evaluated in both the coordinator and worker processes. Seed
+// the token into the coordinator environment so every child inherits the same
+// high-entropy value; generating independently in each process makes the
+// browser header differ from the web server's expected token.
+const AUTHLESS_TEST_TOKEN = process.env.RADON_AUTHLESS_TEST_TOKEN ?? randomUUID();
+process.env.RADON_AUTHLESS_TEST_TOKEN = AUTHLESS_TEST_TOKEN;
 // The browser origin. Defaults to "localhost" (the app's canonical local host).
 // CI sets PLAYWRIGHT_BASE_HOST=127.0.0.1: chromium's async DNS in the Playwright
 // container resolves the "localhost" NAME flakily, and the literal loopback IP
@@ -27,6 +34,7 @@ export default defineConfig({
   reporter: "list",
   use: {
     baseURL: `http://${HOST}:${PORT}`,
+    extraHTTPHeaders: { "x-radon-authless-test": AUTHLESS_TEST_TOKEN },
     trace: "on-first-retry",
     // A cold `next dev` compiles each route on first navigation; in
     // the CI container that first hit can exceed the 30s default. A larger
@@ -69,7 +77,7 @@ export default defineConfig({
     env: {
       ...process.env,
       RADON_AUTHLESS_TEST: "1",
-      NEXT_PUBLIC_RADON_AUTHLESS_TEST: "1",
+      RADON_AUTHLESS_TEST_TOKEN: AUTHLESS_TEST_TOKEN,
     },
   },
 });

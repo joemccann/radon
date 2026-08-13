@@ -99,6 +99,7 @@ function SectionHeader({ label, collapsed, onToggle }: { label: string; collapse
 function AccountRow({
   acct,
   todayUnrealized,
+  effectiveDayPnl,
   hasPositions,
   hasPrices,
   collapsed,
@@ -117,6 +118,7 @@ function AccountRow({
    *  works because pre-market quotes populate `prices[*].last` — the
    *  Today's P&L breakout further down the page already uses this. */
   todayUnrealized: { pnl: number; positionsWithData: number } | null;
+  effectiveDayPnl: number | null;
   /** True when the portfolio has at least one open position. */
   hasPositions: boolean;
   /** True when the WS prices map has at least one entry. Used to
@@ -135,7 +137,7 @@ function AccountRow({
     ibDaily == null && todayUnrealized != null && todayUnrealized.positionsWithData > 0
       ? todayUnrealized.pnl
       : null;
-  const displayValue = ibDaily ?? fallback;
+  const displayValue = effectiveDayPnl;
   // Label precedence:
   //   1. "TODAY"               — IB streamed dailyPnL (regular trading hours)
   //   2. "ESTIMATED (LIVE | PRE-MARKET | AFTER HOURS)" — IB silent but live
@@ -399,7 +401,7 @@ function ExposureRow({
     ? buildDollarDeltaSubtitle(
         exposure,
         netLiquidation,
-        exposure.rows.some((r) => r.deltaSource === "approx"),
+        exposure.rows.some((r) => r.deltaSource !== "ib"),
       )
     : { subtitle: undefined, change: "NOTIONAL EXPOSURE" };
 
@@ -636,6 +638,8 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
   const total = unrealized + realized;
 
   const acct = portfolio.account_summary;
+  const effectiveDayPnl = acct?.daily_pnl
+    ?? (hasDaily && todayUnrealized ? todayUnrealized.pnl : null);
 
   // Breakdown rows (computed lazily — only used when modals open)
   const unrealizedBreakdownRows = unrealizedModalOpen
@@ -654,6 +658,7 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
         <AccountRow
           acct={acct}
           todayUnrealized={todayUnrealized}
+          effectiveDayPnl={effectiveDayPnl}
           hasPositions={portfolio.positions.length > 0}
           hasPrices={!!hasPrices}
           collapsed={collapsed.account}
@@ -807,10 +812,12 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
         <AccountMetricModal
           open={dayPnlModalOpen}
           title="Day P&L"
-          value={acct.daily_pnl != null ? fmtSignedExact(acct.daily_pnl) : "---"}
+          value={effectiveDayPnl != null ? fmtSignedExact(effectiveDayPnl) : "---"}
           formula={
             "Day P&L = SUM( current_price − yesterday_close ) × position_size\n" +
-            "Source: Interactive Brokers reqPnL() — account-level, updated in real-time\n" +
+            (acct.daily_pnl != null
+              ? "Source: Interactive Brokers reqPnL() — account-level, updated in real-time\n"
+              : "Source: Current prices versus prior-session closes — estimated\n") +
             "Note: Includes all open positions across stocks, options, and other instruments"
           }
           onClose={() => setDayPnlModalOpen(false)}

@@ -87,6 +87,38 @@ describe("CRUD", () => {
     expect(res.status).toBe(400);
   });
 
+  it("rejects oversized graphs before writing", async () => {
+    const nodes = Array.from({ length: 33 }, (_, index) => ({
+      id: `n${index}`,
+      type: "data-source",
+      params: {},
+    }));
+    const res = await save({ name: "too large", graph: { nodes, edges: [] } });
+    expect(res.status).toBe(400);
+
+    const rows = await db.execute("SELECT COUNT(*) AS c FROM workflow_graphs");
+    expect(Number(rows.rows[0].c)).toBe(0);
+  });
+
+  it("does not allow another user to overwrite a workflow by id", async () => {
+    const first = await jsonOf(await save({ name: "owner copy", graph: GRAPH }));
+    currentUserId = "user_test_2";
+
+    const res = await save({
+      id: first.id,
+      name: "attacker copy",
+      graph: { nodes: [], edges: [] },
+    });
+    expect(res.status).toBe(404);
+
+    const row = await db.execute({
+      sql: "SELECT user_id, name FROM workflow_graphs WHERE id = ?",
+      args: [String(first.id)],
+    });
+    expect(row.rows[0].user_id).toBe("user_test_1");
+    expect(row.rows[0].name).toBe("owner copy");
+  });
+
   it("saves then lists the graph for the owner", async () => {
     const saveRes = await save({ name: "Accumulation alerts", graph: GRAPH });
     expect(saveRes.status).toBe(200);

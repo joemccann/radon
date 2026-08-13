@@ -38,6 +38,7 @@ import {
   type JournalRow,
   type JournalTradePayload,
 } from "@/lib/blotter/fromJournal";
+import type { StockBasisPoint } from "@/lib/portfolio/stockBasisDb";
 import { toEtDay } from "@/lib/journal/rangePnl";
 
 export type RowFamily = "flex_agg" | "fill";
@@ -323,7 +324,10 @@ function execCashValue(p: JournalTradePayload, side: "BUY" | "SELL", qty: number
  * consumed so cross-window opens are attributable. Residual inventory is
  * returned for worthless-expiry synthesis.
  */
-function matchInventory(execs: MatchExec[], fallbackPerUnit: number | null = null): InventoryState {
+function matchInventory(
+  execs: MatchExec[],
+  resolveFallback: ((event: MatchExec) => number | null) | null = null,
+): InventoryState {
   const events: CloseEvent[] = [];
   let positionQty = 0;
   let avgBasis = 0;
@@ -335,7 +339,9 @@ function matchInventory(execs: MatchExec[], fallbackPerUnit: number | null = nul
   // phantom opposite position. Uncoded execs never qualify — a plain stock
   // SELL with no opens is a genuine short open.
   const closeAgainstFallback = (e: MatchExec, qty: number): boolean => {
+    const fallbackPerUnit = resolveFallback?.(e) ?? null;
     if (fallbackPerUnit == null || qty <= 0) return false;
+    if (e.side !== "SELL") return false;
     const flags = codeFlags(e.codes);
     if (!flags.assigned && !flags.exercised) return false;
     const closeValue = (e.value / e.qty) * qty;
@@ -424,7 +430,9 @@ export function synthesizeWorthlessExpiry(
   state: Pick<InventoryState, "residualQty" | "residualAvgBasis" | "residualOpenDays">,
   rep: JournalTradePayload,
   asOfDay: string,
+  worthlessProven = false,
 ): CloseEvent | null {
+  if (!worthlessProven) return null;
   if (Math.abs(state.residualQty) < 1e-9) return null;
   // Options only — stocks have no expiry.
   const isOption =
@@ -461,7 +469,7 @@ export function synthesizeWorthlessExpiry(
 function closeEventsForGroup(
   rows: RealizedJournalRow[],
   asOfDay: string,
-  fallbackPerUnit: number | null = null,
+  resolveFallback: ((event: MatchExec) => number | null) | null = null,
 ): CloseEvent[] {
   const events: CloseEvent[] = [];
   const execs: MatchExec[] = [];
@@ -511,14 +519,15 @@ function closeEventsForGroup(
     });
   }
 
-  const inventory = matchInventory(execs, fallbackPerUnit);
+  const inventory = matchInventory(execs, resolveFallback);
   events.push(...inventory.events);
 
   // Always synthesize residual OPT inventory at expiry (as-of opts.to). CLOSED
   // pass-throughs do not clear the fill inventory; skipping expiry when any
   // CLOSED exists would drop true residual lapses (KWEB long after cover flip).
   if (rep) {
-    const expired = synthesizeWorthlessExpiry(inventory, rep, asOfDay);
+    const worthlessProven = inventoryRows.some((row) => codeFlags((row.payload.ib_codes ?? "").toString()).lapsed);
+    const expired = synthesizeWorthlessExpiry(inventory, rep, asOfDay, worthlessProven);
     if (expired) events.push(expired);
   }
 
@@ -603,9 +612,11 @@ export function computeRealizedPnl(
     /** Per-share IB avg_cost by ticker (portfolio snapshot stock legs).
      *  Used ONLY for assignment/exercise-coded stock deliveries whose
      *  opens predate the journal corpus. */
-    stockBasisFallback?: Record<string, number>;
+    stockBasisFallback?: Record<string, number | StockBasisPoint[]>;
   },
 ): RealizedPnlSummary {
+  const todayEt = toEtDay(new Date().toISOString()) ?? opts.to;
+  const asOfDay = opts.to < todayEt ? opts.to : todayEt;
   const { rows } = dedupJournalRows(allRows);
   const tickerFilter = opts.ticker?.trim().toUpperCase() || undefined;
 
@@ -625,11 +636,19 @@ export function computeRealizedPnl(
   for (const [key, group] of groups) {
     // As-of for expiry synthesis is the window end: unexpired residual after
     // `to` stays open (e.g. partial short cover with later expiry).
-    const fallbackPerUnit =
-      key.endsWith("|STK")
-        ? opts.stockBasisFallback?.[resolveTickerUpper(group.rep)] ?? null
-        : null;
-    const events = closeEventsForGroup(group.rows, opts.to, fallbackPerUnit);
+    const resolveFallback = key.endsWith("|STK")
+      ? (event: MatchExec): number | null => {
+          const ticker = resolveTickerUpper(group.rep);
+          const account = typeof group.rep.account_id === "string" ? group.rep.account_id : "";
+          const fallback = opts.stockBasisFallback?.[`${account}|${ticker}`]
+            ?? opts.stockBasisFallback?.[ticker];
+          if (typeof fallback === "number") return fallback;
+          if (!Array.isArray(fallback)) return null;
+          const candidates = fallback.filter((point) => point.takenAt <= event.whenRaw);
+          return candidates.length > 0 ? candidates[candidates.length - 1].avgCost : null;
+        }
+      : null;
+    const events = closeEventsForGroup(group.rows, asOfDay, resolveFallback);
     roundTrips.push(...mergeEventsByCloseDay(events, key, group.rep, opts.from));
   }
 

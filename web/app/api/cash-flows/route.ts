@@ -1,3 +1,5 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
+
 import { NextRequest, NextResponse } from "next/server";
 import { radonFetch } from "@/lib/radonApi";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
@@ -9,6 +11,8 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function GET(req: NextRequest) {
+  const access = await requireRouteAccess();
+  if (!access.ok) return access.response;
   const url = new URL(req.url);
   const days = url.searchParams.get("days") ?? "90";
   const types = url.searchParams.get("types") ?? "";

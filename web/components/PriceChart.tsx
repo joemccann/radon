@@ -54,7 +54,7 @@ export default function PriceChart({
     return { ...prices, [chartKey]: priceDataOverride };
   }, [prices, priceDataOverride, chartKey]);
 
-  const { data, value, loading, isMid, isCalculated } = usePriceHistory(chartKey, effectivePrices);
+  const { data, value, loading, isMid, isCalculated } = usePriceHistory(chartKey, effectivePrices, 200, valueKind);
 
   const priceData = priceDataOverride ?? prices[chartKey];
   const closePrice = priceData?.close ?? null;
@@ -78,7 +78,7 @@ export default function PriceChart({
   }, [isSpreadNet, closePrice]);
 
   const spreadNetBadgeLabel =
-    value != null && value < 0 ? "NET CREDIT" : "NET DEBIT";
+    value == null ? "NET UNAVAILABLE" : value < 0 ? "NET CREDIT" : "NET DEBIT";
 
   return (
     <ChartPanel
@@ -113,7 +113,7 @@ export default function PriceChart({
         )}
         <Liveline
           data={data}
-          value={value}
+          value={value ?? 0}
           theme={theme}
           color={color}
           grid={true}

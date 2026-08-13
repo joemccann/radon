@@ -8,10 +8,10 @@
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
-import WorkspaceSections from "../components/WorkspaceSections";
+import WorkspaceSections, { groupExecutedOrders } from "../components/WorkspaceSections";
 import { bsCall, bsPut } from "../lib/blackScholes";
 import { yearsToExpiry } from "../lib/impliedValue";
-import type { OrdersData, PriceData } from "../lib/types";
+import type { ExecutedOrder, OrdersData, PriceData } from "../lib/types";
 
 // Lighten the render: stub out interactive children that pull contexts we don't care about.
 vi.mock("../components/TickerLink", () => ({
@@ -100,6 +100,29 @@ function enableAllImpliedOrderColumns() {
 }
 
 describe("WorkspaceSections orders — Implied column", () => {
+  it("groups executions by durable order identity instead of calendar minute", () => {
+    const fill = (execId: string, orderRef: string, time: string): ExecutedOrder => ({
+      execId, orderRef, symbol: "SPY", side: "BOT", quantity: 1, avgPrice: 2,
+      commission: 0, realizedPNL: null, time, exchange: "SMART",
+      contract: { conId: 1, symbol: "SPY", secType: "OPT", strike: 600, right: "C", expiry: "20260821" },
+    });
+    const groups = groupExecutedOrders([
+      fill("a", "intent-a", "2026-08-13T14:30:59Z"),
+      fill("b", "intent-b", "2026-08-13T14:31:00Z"),
+    ]);
+    expect(groups).toHaveLength(2);
+  });
+
+  it("uses quantity-weighted BAG execution price and rejects incomplete aggregates", () => {
+    const bag = (execId: string, quantity: number, avgPrice: number | null): ExecutedOrder => ({
+      execId, orderRef: "combo", symbol: "SPY BAG", side: "BOT", quantity, avgPrice,
+      commission: 0, realizedPNL: null, time: "2026-08-13T14:30:00Z", exchange: "SMART",
+      contract: { conId: 0, symbol: "SPY", secType: "BAG", strike: null, right: null, expiry: null },
+    });
+    expect(groupExecutedOrders([bag("a", 1, 2), bag("b", 3, 4)])[0].netPrice).toBe(3.5);
+    expect(groupExecutedOrders([bag("a", 1, 2), bag("b", 3, null)])[0].netPrice).toBeNull();
+  });
+
   it("hides Implied + Implied MV headers when the orders table contains only STK rows", () => {
     const orders: OrdersData = {
       last_sync: NOW.toISOString(),

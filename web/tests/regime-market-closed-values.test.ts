@@ -11,7 +11,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { fileURLToPath } from "url";
-import { resolveRegimeStripLiveState } from "../lib/regimeLiveStrip";
+import { resolveCrashTriggerState, resolveRegimeStripLiveState } from "../lib/regimeLiveStrip";
 import type { PriceData } from "../lib/pricesProtocol";
 
 // Minimal price entry — resolveRegimeStripLiveState only reads .last and .close.
@@ -91,6 +91,18 @@ describe("resolveRegimeStripLiveState — prefers live WS values, gated on marke
     expect(s.vvixValue).toBe(88);
     expect(s.spyValue).toBe(525);
     expect(s.hasLiveVix).toBe(false);
+  });
+});
+
+describe("RegimePanel live COR1M crash trigger", () => {
+  it("updates the crash-trigger decision from the active live COR1M value", () => {
+    expect(resolveCrashTriggerState({
+      liveCorrelation: true,
+      correlation: 72,
+      cachedCorrelationMet: false,
+      spxBelowMa: true,
+      realizedVolMet: true,
+    })).toEqual({ correlationMet: true, triggered: true });
   });
 });
 

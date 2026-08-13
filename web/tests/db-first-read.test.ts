@@ -120,6 +120,24 @@ describe("dbFirstRead — missing timestamps are infinitely stale", () => {
 });
 
 describe("dbFirstRead — per-route max-age", () => {
+  it("rejects a future-dated source beyond the clock-skew allowance", async () => {
+    const result = await dbFirstRead({
+      ...baseOptions,
+      fromDb: source({ v: "future-db" }, NOW + 5 * MINUTE),
+      fromDisk: source({ v: "disk" }, NOW - 2 * MINUTE),
+    });
+    expect(result.ok && result.source).toBe("disk");
+    expect(result.ok && result.fresh).toBe(true);
+  });
+
+  it("returns unavailable when the only source is implausibly future-dated", async () => {
+    await expect(dbFirstRead({
+      ...baseOptions,
+      fromDb: source({ v: "future-db" }, NOW + 5 * MINUTE),
+      fromDisk: absent,
+    })).resolves.toEqual({ ok: false });
+  });
+
   it("reports fresh=true when the served snapshot is within maxAgeMs", async () => {
     const result = await dbFirstRead({
       fromDb: source({ v: "db" }, NOW - 5 * MINUTE),

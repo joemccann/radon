@@ -1,6 +1,6 @@
 export function normalizeCtaPercentile(value: number | null | undefined): number | null {
   if (value == null || !Number.isFinite(value)) return null;
-  const normalized = value >= 0 && value <= 1 ? value * 100 : value;
+  const normalized = value >= 0 && value < 1 ? value * 100 : value;
   return Math.max(0, Math.min(100, normalized));
 }
 

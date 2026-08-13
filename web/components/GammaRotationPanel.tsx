@@ -123,8 +123,7 @@ function AssetCard({ asset }: { asset: GammaRotationAsset }) {
   );
 }
 
-function yFor(value: number | null, min: number, max: number): number {
-  if (value == null || !Number.isFinite(value)) return 120;
+function yFor(value: number, min: number, max: number): number {
   if (max <= min) return 120;
   return 220 - ((value - min) / (max - min)) * 180;
 }
@@ -135,13 +134,22 @@ function xFor(index: number, count: number): number {
 }
 
 function linePath(history: GammaRotationHistoryEntry[], key: "grg_z" | "spy_gamma_z" | "tlt_gamma_z", min: number, max: number): string {
-  return history
-    .map((row, idx) => {
-      const value = row[key];
-      const command = idx === 0 ? "M" : "L";
-      return `${command}${xFor(idx, history.length).toFixed(1)} ${yFor(value, min, max).toFixed(1)}`;
-    })
-    .join(" ");
+  let segmentOpen = false;
+  const commands: string[] = [];
+  history.forEach((row, index) => {
+    const value = row[key];
+    if (value == null || !Number.isFinite(value)) {
+      segmentOpen = false;
+      return;
+    }
+    commands.push(`${segmentOpen ? "L" : "M"}${xFor(index, history.length).toFixed(1)} ${yFor(value, min, max).toFixed(1)}`);
+    segmentOpen = true;
+  });
+  return commands.join(" ");
+}
+
+function domainLabel(value: number): string {
+  return `${value > 0 ? "+" : ""}${Number.isInteger(value) ? value : value.toFixed(1)}σ`;
 }
 
 function GammaRotationChart({ history }: { history: GammaRotationHistoryEntry[] }) {
@@ -169,9 +177,9 @@ function GammaRotationChart({ history }: { history: GammaRotationHistoryEntry[] 
         <path d={linePath(history, "spy_gamma_z", min, max)} fill="none" stroke="var(--signal-core)" strokeWidth="2" opacity="0.8" />
         <path d={linePath(history, "tlt_gamma_z", min, max)} fill="none" stroke="var(--fault)" strokeWidth="2" opacity="0.8" />
         <path d={linePath(history, "grg_z", min, max)} fill="none" stroke="var(--warning)" strokeWidth="3" />
-        <text x="8" y="43" className="grg-svg-label">+3σ</text>
+        <text x="8" y="43" className="grg-svg-label">{domainLabel(max)}</text>
         <text x="20" y={yFor(0, min, max) - 4} className="grg-svg-label">0</text>
-        <text x="8" y="224" className="grg-svg-label">-3σ</text>
+        <text x="8" y="224" className="grg-svg-label">{domainLabel(min)}</text>
         {last && <text x="548" y="248" className="grg-svg-label">{last.date}</text>}
       </svg>
     </div>

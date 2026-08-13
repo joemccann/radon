@@ -89,6 +89,45 @@ def run_probes() -> dict:
     return results
 
 
+class ProbeCache:
+    """Refresh live probes in one background sweep, never per HTTP request."""
+
+    def __init__(self, fetch_fn=run_probes, interval: float = 5.0):
+        self._fetch_fn = fetch_fn
+        self._interval = interval
+        self._lock = threading.Lock()
+        self._value: dict = {}
+        self._stop = threading.Event()
+        self._thread = threading.Thread(
+            target=self._loop, name="health-probe-cache", daemon=True
+        )
+
+    def start(self):
+        self._thread.start()
+
+    def stop(self):
+        self._stop.set()
+
+    def _loop(self):
+        while not self._stop.is_set():
+            self.refresh_once()
+            self._stop.wait(self._interval)
+
+    def refresh_once(self):
+        try:
+            value = self._fetch_fn()
+            if not isinstance(value, dict):
+                return
+            with self._lock:
+                self._value = value
+        except Exception:
+            pass
+
+    def snapshot(self):
+        with self._lock:
+            return dict(self._value)
+
+
 class UnitStateCache:
     """Polls `systemctl show` on a background thread, NEVER on the request hot
     path — forking under an OOM/disk-full incident is exactly when you can't
@@ -220,7 +259,7 @@ class _Handler(BaseHTTPRequestHandler):
         elif path == "/status":
             try:
                 status, body = status_response(
-                    run_probes,
+                    self.server.probe_cache.snapshot,
                     self.server.unit_cache,
                     service_health_cache=getattr(self.server, "service_health_cache", None),
                     external_probe_cache=getattr(self.server, "external_probe_cache", None),
@@ -241,6 +280,7 @@ class _Handler(BaseHTTPRequestHandler):
 
 def build_server(bind: str = BIND, port: int = PORT, units=UNITS):
     cache = UnitStateCache(units)
+    probe_cache = ProbeCache()
     sh_cache = turso_http.ServiceHealthCache(
         ttl=SERVICE_HEALTH_TTL, timeout=SERVICE_HEALTH_TIMEOUT,
     )
@@ -250,6 +290,7 @@ def build_server(bind: str = BIND, port: int = PORT, units=UNITS):
     )
     server = ThreadingHTTPServer((bind, port), _Handler)
     server.unit_cache = cache  # type: ignore[attr-defined]
+    server.probe_cache = probe_cache  # type: ignore[attr-defined]
     server.service_health_cache = sh_cache  # type: ignore[attr-defined]
     server.external_probe_cache = ep_cache  # type: ignore[attr-defined]
     return server, cache
@@ -257,11 +298,15 @@ def build_server(bind: str = BIND, port: int = PORT, units=UNITS):
 
 def main():
     server, cache = build_server()
+    probe_cache = server.probe_cache
     cache.refresh_once()  # warm the unit cache before accepting traffic
+    probe_cache.refresh_once()
     cache.start()
+    probe_cache.start()
     try:
         server.serve_forever()
     finally:
+        probe_cache.stop()
         cache.stop()
         server.server_close()
 

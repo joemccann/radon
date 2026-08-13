@@ -3,7 +3,7 @@
 //   GET  → list every trial with today's AI burn + status.
 //   POST → { action: "revoke" | "extend", userId, tradingDays? }
 //
-// Operator-gated (ALLOWED_USER_IDS) on the Next.js side — never just
+// Operator-gated (DEMO_ADMIN_USER_IDS) on the Next.js side — never just
 // "any signed-in user". Reads/writes the SEPARATE demo Turso DB + Clerk
 // metadata. Transport only; logic lives in lib/demo/*.
 

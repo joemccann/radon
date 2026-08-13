@@ -118,9 +118,9 @@ install() {
     echo "  Log directory: $LOG_DIR"
     echo "  Data directory: data/cri_scheduled/"
 
-    # 4. Generate plist
-    echo "  Generating plist (165 schedule entries)..."
-    generate_plist
+    # 4. The checked-in plist uses a timezone-neutral interval; the wrapper
+    # gates every invocation against the live America/New_York window.
+    echo "  Using timezone-independent interval plist"
 
     # 5. Validate plist
     if ! plutil -lint "$PLIST_SRC" > /dev/null 2>&1; then

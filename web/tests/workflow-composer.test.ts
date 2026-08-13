@@ -2,12 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   describeRunReport,
   graphRequiresConfirmation,
+  allocateWorkflowNodeId,
   listWorkflows,
   runWorkflow,
+  runWorkflowAfterConfirmation,
   saveWorkflow,
   toExecutorGraph,
   type RunReport,
   type WorkflowGraph,
+  WORKFLOW_PALETTE,
 } from "../app/workflow/workflowClient";
 
 /**
@@ -96,6 +99,19 @@ describe("saveWorkflow", () => {
 });
 
 describe("runWorkflow", () => {
+  it("declined_order_confirmation_executes_no_nodes", async () => {
+    const graph: WorkflowGraph = {
+      nodes: [{ id: "order", type: "order", params: {} }],
+      edges: [],
+    };
+    const runner = vi.fn();
+
+    const result = await runWorkflowAfterConfirmation(graph, () => false, runner);
+
+    expect(result).toBeNull();
+    expect(runner).not.toHaveBeenCalled();
+  });
+
   it("POSTs the graph to /api/workflow/run and returns the report", async () => {
     const report: RunReport = {
       ok: true,
@@ -121,6 +137,18 @@ describe("runWorkflow", () => {
     await runWorkflow(SAMPLE, true);
     const sent = JSON.parse(fetchSpy.mock.calls[0][1].body as string);
     expect(sent.confirm_order).toBe(true);
+  });
+});
+
+describe("composer node safety", () => {
+  it("adding_after_load_never_duplicates_existing_node_id", () => {
+    const values = ["loaded", "fresh"];
+    const id = allocateWorkflowNodeId(["n-loaded"], () => values.shift()!);
+    expect(id).toBe("n-fresh");
+  });
+
+  it("palette_order_workflow_builds_valid_executable_contract", () => {
+    expect(WORKFLOW_PALETTE.some((entry) => entry.type === "order")).toBe(false);
   });
 });
 

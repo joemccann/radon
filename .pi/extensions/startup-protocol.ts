@@ -1,7 +1,122 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { execSync, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
+import { execFileSync, spawn } from "node:child_process";
+
+const STARTUP_JOB_TIMEOUT_MS = 120_000;
+const STARTUP_JOB_OUTPUT_BYTES = 1_048_576;
+
+type StartupJobResult = {
+  code: number | null;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+};
+
+/** Run detached startup work with one completion, bounded memory and deadline. */
+export function runBoundedStartupJob(
+  command: string,
+  args: string[],
+  cwd: string,
+  onComplete: (result: StartupJobResult) => void,
+  timeoutMs = STARTUP_JOB_TIMEOUT_MS,
+) {
+  const proc = spawn(command, args, {
+    cwd,
+    detached: true,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  let completed = false;
+  const append = (current: string, chunk: unknown) =>
+    (current + String(chunk)).slice(-STARTUP_JOB_OUTPUT_BYTES);
+  const finish = (code: number | null, timedOut: boolean) => {
+    if (completed) return;
+    completed = true;
+    clearTimeout(timer);
+    onComplete({ code, stdout, stderr, timedOut });
+  };
+  const timer = setTimeout(() => {
+    stderr = append(stderr, "\nstartup job timed out");
+    try {
+      if (proc.pid && process.platform !== "win32") process.kill(-proc.pid, "SIGTERM");
+      else proc.kill("SIGTERM");
+    } catch {
+      try { proc.kill("SIGKILL"); } catch { /* already exited */ }
+    }
+    finish(null, true);
+  }, timeoutMs);
+  timer.unref();
+  proc.stdout?.on("data", (chunk) => { stdout = append(stdout, chunk); });
+  proc.stderr?.on("data", (chunk) => { stderr = append(stderr, chunk); });
+  proc.once("error", (error) => {
+    stderr = append(stderr, `\n${error.message}`);
+    finish(null, false);
+  });
+  proc.once("close", (code) => finish(code, false));
+  proc.unref();
+  return proc;
+}
+
+export interface WorkspaceTrust {
+  root: string;
+  revision: string;
+}
+
+function hashBytes(value: Buffer | string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+export function createWorkspaceTrust(
+  cwd: string,
+  env: NodeJS.ProcessEnv = process.env,
+): WorkspaceTrust | null {
+  const configuredRoot = env.RADON_PI_TRUSTED_WORKSPACE;
+  const configuredRevision = env.RADON_PI_TRUSTED_REVISION;
+  if (!configuredRoot || !configuredRevision || !/^[0-9a-f]{40,64}$/i.test(configuredRevision)) {
+    return null;
+  }
+
+  try {
+    const root = fs.realpathSync(configuredRoot);
+    if (fs.realpathSync(cwd) !== root) return null;
+    const revision = execFileSync("git", ["rev-parse", "--verify", "HEAD^{commit}"], {
+      cwd: root,
+      encoding: "utf8",
+      timeout: 5000,
+    }).trim();
+    if (revision !== configuredRevision) return null;
+    return { root, revision };
+  } catch {
+    return null;
+  }
+}
+
+export function resolveTrustedWorkspaceScript(
+  trust: WorkspaceTrust,
+  relativePath: string,
+): string | null {
+  if (path.isAbsolute(relativePath)) return null;
+  const candidate = path.resolve(trust.root, relativePath);
+  if (!candidate.startsWith(`${trust.root}${path.sep}`)) return null;
+
+  try {
+    const stat = fs.lstatSync(candidate);
+    if (!stat.isFile() || stat.isSymbolicLink()) return null;
+    if (fs.realpathSync(candidate) !== candidate) return null;
+    const revisionBytes = execFileSync(
+      "git",
+      ["show", `${trust.revision}:${relativePath.replaceAll(path.sep, "/")}`],
+      { cwd: trust.root, timeout: 5000, maxBuffer: 10 * 1024 * 1024 },
+    );
+    if (hashBytes(fs.readFileSync(candidate)) !== hashBytes(revisionBytes)) return null;
+    return candidate;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Startup Protocol Extension
@@ -18,8 +133,42 @@ import { execSync, spawn } from "node:child_process";
  * Check if US options markets are currently open.
  * Options trade 9:30 AM - 4:00 PM Eastern Time, Monday-Friday.
  */
-function isMarketOpen(): { isOpen: boolean; status: string } {
-  const now = new Date();
+function nthWeekday(year: number, month: number, weekday: number, nth: number): number {
+  const first = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
+  return 1 + ((weekday - first + 7) % 7) + (nth - 1) * 7;
+}
+
+function lastWeekday(year: number, month: number, weekday: number): number {
+  const last = new Date(Date.UTC(year, month, 0));
+  return last.getUTCDate() - ((last.getUTCDay() - weekday + 7) % 7);
+}
+
+function easterSunday(year: number): Date {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+function observedFixedHoliday(year: number, month: number, day: number): string {
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCDay() === 6) date.setUTCDate(day - 1);
+  if (date.getUTCDay() === 0) date.setUTCDate(day + 1);
+  return date.toISOString().slice(0, 10);
+}
+
+export function marketStateAt(now: Date): { isOpen: boolean; status: string } {
   
   // Convert to Eastern Time
   const etOptions: Intl.DateTimeFormatOptions = { 
@@ -33,17 +182,41 @@ function isMarketOpen(): { isOpen: boolean; status: string } {
   const parts = etFormatter.formatToParts(now);
   
   const weekday = parts.find(p => p.type === 'weekday')?.value || '';
+  const month = Number(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", month: "numeric" }).format(now));
+  const day = Number(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", day: "numeric" }).format(now));
+  const year = Number(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", year: "numeric" }).format(now));
   const hour = parseInt(parts.find(p => p.type === 'hour')?.value || '0', 10);
   const minute = parseInt(parts.find(p => p.type === 'minute')?.value || '0', 10);
   const timeInMinutes = hour * 60 + minute;
   
   // Market hours: 9:30 AM (570 mins) to 4:00 PM (960 mins)
   const marketOpen = 9 * 60 + 30;  // 570
-  const marketClose = 16 * 60;      // 960
+  let marketClose = 16 * 60;      // 960
   
   // Check weekend
   if (weekday === 'Sat' || weekday === 'Sun') {
     return { isOpen: false, status: 'CLOSED (weekend)' };
+  }
+
+  const dateKey = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  const goodFriday = easterSunday(year);
+  goodFriday.setUTCDate(goodFriday.getUTCDate() - 2);
+  const holidays = new Set([
+    observedFixedHoliday(year, 1, 1),
+    `${year}-01-${String(nthWeekday(year, 1, 1, 3)).padStart(2, "0")}`,
+    `${year}-02-${String(nthWeekday(year, 2, 1, 3)).padStart(2, "0")}`,
+    goodFriday.toISOString().slice(0, 10),
+    `${year}-05-${String(lastWeekday(year, 5, 1)).padStart(2, "0")}`,
+    observedFixedHoliday(year, 6, 19),
+    observedFixedHoliday(year, 7, 4),
+    `${year}-09-${String(nthWeekday(year, 9, 1, 1)).padStart(2, "0")}`,
+    `${year}-11-${String(nthWeekday(year, 11, 4, 4)).padStart(2, "0")}`,
+    observedFixedHoliday(year, 12, 25),
+  ]);
+  if (holidays.has(dateKey)) return { isOpen: false, status: "CLOSED (holiday)" };
+  const thanksgiving = nthWeekday(year, 11, 4, 4);
+  if ((month === 11 && day === thanksgiving + 1) || (month === 12 && day === 24)) {
+    marketClose = 13 * 60;
   }
   
   // Check time
@@ -60,6 +233,10 @@ function isMarketOpen(): { isOpen: boolean; status: string } {
     const m = minsToClose % 60;
     return { isOpen: true, status: h > 0 ? `OPEN (${h}h ${m}m to close)` : `OPEN (${m}m to close)` };
   }
+}
+
+function isMarketOpen(): { isOpen: boolean; status: string } {
+  return marketStateAt(new Date());
 }
 
 // UI interface for notifications
@@ -229,16 +406,16 @@ export default function (pi: ExtensionAPI) {
    * reads facts, episodic summaries, and human annotations, assembles
    * a token-budgeted context payload, and returns it for injection.
    */
-  const constructContext = (cwd: string): { loaded: string[]; content: string } => {
-    const scriptPath = path.join(cwd, "scripts/context_constructor.py");
-    
-    if (!fs.existsSync(scriptPath)) {
+  const constructContext = (trust: WorkspaceTrust | null): { loaded: string[]; content: string } => {
+    if (!trust) return { loaded: [], content: "" };
+    const scriptPath = resolveTrustedWorkspaceScript(trust, "scripts/context_constructor.py");
+    if (!scriptPath) {
       return { loaded: [], content: "" };
     }
     
     try {
-      const output = execSync(`python3.13 "${scriptPath}" --json --budget 8000`, {
-        cwd,
+      const output = execFileSync("python3.13", [scriptPath, "--json", "--budget", "8000"], {
+        cwd: trust.root,
         encoding: "utf-8",
         timeout: 10000,
       });
@@ -268,7 +445,7 @@ export default function (pi: ExtensionAPI) {
   pi.on("before_agent_start", async (event, ctx) => {
     const docs = loadProjectDocs(ctx.cwd);
     const skills = loadAlwaysOnSkills(ctx.cwd);
-    const memory = constructContext(ctx.cwd);
+    const memory = constructContext(createWorkspaceTrust(ctx.cwd));
     
     const allLoaded = [...docs.loaded, ...skills.loaded, ...memory.loaded];
     const allContent = [docs.content, skills.content].filter(Boolean).join("\n");
@@ -302,37 +479,23 @@ ${memoryContent}
 
   // Run IB reconciliation asynchronously (non-blocking)
   // onComplete callback is called when IB sync finishes (for chaining free trade)
-  const runIBReconciliation = (cwd: string, tracker: StartupTracker, onComplete?: () => void) => {
-    const scriptPath = path.join(cwd, "scripts/ib_reconcile.py");
-    
-    if (!fs.existsSync(scriptPath)) {
-      tracker.complete("ib", "warning", "IB reconcile script not found");
+  const runIBReconciliation = (trust: WorkspaceTrust, tracker: StartupTracker, onComplete?: () => void) => {
+    const scriptPath = resolveTrustedWorkspaceScript(trust, "scripts/ib_reconcile.py");
+    if (!scriptPath) {
+      tracker.complete("ib", "warning", "IB reconcile script is not trusted");
       onComplete?.();
       return;
     }
     
-    // Spawn Python process in background
-    const proc = spawn("python3.13", [scriptPath], {
-      cwd,
-      detached: true,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    
-    let output = "";
-    let errorOutput = "";
-    
-    proc.stdout?.on("data", (data) => {
-      output += data.toString();
-    });
-    
-    proc.stderr?.on("data", (data) => {
-      errorOutput += data.toString();
-    });
-    
-    proc.on("close", (code) => {
+    runBoundedStartupJob("python3.13", [scriptPath], trust.root, ({ code, stdout: output, stderr: errorOutput, timedOut }) => {
+      if (timedOut) {
+        tracker.complete("ib", "warning", "IB reconciliation timed out");
+        onComplete?.();
+        return;
+      }
       if (code === 0) {
         // Check if reconciliation found issues
-        const reconcilePath = path.join(cwd, "data/reconciliation.json");
+        const reconcilePath = path.join(trust.root, "data/reconciliation.json");
         if (fs.existsSync(reconcilePath)) {
           try {
             const report = JSON.parse(fs.readFileSync(reconcilePath, "utf-8"));
@@ -367,9 +530,6 @@ ${memoryContent}
       // Always call onComplete so dependent tasks can run
       onComplete?.();
     });
-    
-    // Unref so it doesn't keep the process alive
-    proc.unref();
   };
 
   // Check and start Monitor Daemon service
@@ -384,7 +544,7 @@ ${memoryContent}
     
     try {
       // Check if service is running via launchctl
-      const result = execSync(`launchctl list | grep ${serviceName}`, { 
+      const result = execFileSync("launchctl", ["list", serviceName], {
         encoding: "utf-8",
         timeout: 5000 
       }).trim();
@@ -406,19 +566,19 @@ ${memoryContent}
     }
   };
   
-  const startMonitorDaemon = (cwd: string, ui: any): { success: boolean; error: string | null } => {
+  const startMonitorDaemon = (trust: WorkspaceTrust): { success: boolean; error: string | null } => {
     const plistPath = path.join(process.env.HOME || "", "Library/LaunchAgents", "com.radon.monitor-daemon.plist");
-    const configPath = path.join(cwd, "config/com.radon.monitor-daemon.plist");
+    const configPath = resolveTrustedWorkspaceScript(trust, "config/com.radon.monitor-daemon.plist");
     
     // If plist not in LaunchAgents, copy it
     if (!fs.existsSync(plistPath)) {
-      if (!fs.existsSync(configPath)) {
-        return { success: false, error: "Plist config not found. Daemon not set up." };
+      if (!configPath) {
+        return { success: false, error: "Plist config is not trusted. Daemon not set up." };
       }
       
       try {
         // Copy plist to LaunchAgents
-        execSync(`cp "${configPath}" "${plistPath}"`, { timeout: 5000 });
+        fs.copyFileSync(configPath, plistPath);
       } catch (e: any) {
         return { success: false, error: `Failed to copy plist: ${e.message}` };
       }
@@ -426,7 +586,7 @@ ${memoryContent}
     
     try {
       // Load the service
-      execSync(`launchctl load "${plistPath}"`, { 
+      execFileSync("launchctl", ["load", plistPath], {
         encoding: "utf-8",
         timeout: 5000 
       });
@@ -440,8 +600,8 @@ ${memoryContent}
     }
   };
   
-  const ensureMonitorDaemonRunning = (cwd: string, tracker: StartupTracker) => {
-    const status = checkMonitorDaemon(cwd, tracker);
+  const ensureMonitorDaemonRunning = (trust: WorkspaceTrust, tracker: StartupTracker) => {
+    const status = checkMonitorDaemon(trust.root, tracker);
     
     if (status.running) {
       tracker.complete("daemon", "success", "Monitor daemon running");
@@ -454,7 +614,7 @@ ${memoryContent}
     }
     
     // Try to start it
-    const startResult = startMonitorDaemon(cwd, tracker);
+    const startResult = startMonitorDaemon(trust);
     
     if (startResult.success) {
       tracker.complete("daemon", "success", "Monitor daemon started");
@@ -464,33 +624,18 @@ ${memoryContent}
   };
 
   // Run free trade analyzer asynchronously (non-blocking)
-  const runFreeTradeAnalyzer = (cwd: string, tracker: StartupTracker) => {
-    const scriptPath = path.join(cwd, "scripts/free_trade_analyzer.py");
-    
-    if (!fs.existsSync(scriptPath)) {
-      tracker.complete("free_trade", "warning", "Free trade script not found");
+  const runFreeTradeAnalyzer = (trust: WorkspaceTrust, tracker: StartupTracker) => {
+    const scriptPath = resolveTrustedWorkspaceScript(trust, "scripts/free_trade_analyzer.py");
+    if (!scriptPath) {
+      tracker.complete("free_trade", "warning", "Free trade script is not trusted");
       return;
     }
     
-    // Spawn Python process in background with --table for full table output
-    const proc = spawn("python3.13", [scriptPath, "--table"], {
-      cwd,
-      detached: true,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    
-    let output = "";
-    let errorOutput = "";
-    
-    proc.stdout?.on("data", (data) => {
-      output += data.toString();
-    });
-    
-    proc.stderr?.on("data", (data) => {
-      errorOutput += data.toString();
-    });
-    
-    proc.on("close", (code) => {
+    runBoundedStartupJob("python3.13", [scriptPath, "--table"], trust.root, ({ code, stdout: output, stderr: errorOutput, timedOut }) => {
+      if (timedOut) {
+        tracker.complete("free_trade", "warning", "Free trade analysis timed out");
+        return;
+      }
       if (code === 0) {
         const result = output.trim();
         
@@ -547,18 +692,15 @@ ${memoryContent}
         }
       }
     });
-    
-    // Unref so it doesn't keep the process alive
-    proc.unref();
   };
 
   // Run CRI scan asynchronously to pre-warm data/cri.json for /regime page
-  const runCriScan = (cwd: string, tracker: StartupTracker) => {
-    const scriptPath = path.join(cwd, "scripts/cri_scan.py");
-    const cachePath = path.join(cwd, "data/cri.json");
+  const runCriScan = (trust: WorkspaceTrust, tracker: StartupTracker) => {
+    const scriptPath = resolveTrustedWorkspaceScript(trust, "scripts/cri_scan.py");
+    const cachePath = path.join(trust.root, "data/cri.json");
 
-    if (!fs.existsSync(scriptPath)) {
-      tracker.complete("cri", "warning", "CRI scan script not found");
+    if (!scriptPath) {
+      tracker.complete("cri", "warning", "CRI scan script is not trusted");
       return;
     }
 
@@ -576,25 +718,11 @@ ${memoryContent}
       }
     }
 
-    // Spawn cri_scan.py --json in background
-    const proc = spawn("python3.13", [scriptPath, "--json"], {
-      cwd,
-      detached: true,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-
-    let output = "";
-    let errorOutput = "";
-
-    proc.stdout?.on("data", (data) => {
-      output += data.toString();
-    });
-
-    proc.stderr?.on("data", (data) => {
-      errorOutput += data.toString();
-    });
-
-    proc.on("close", (code) => {
+    runBoundedStartupJob("python3.13", [scriptPath, "--json"], trust.root, ({ code, stdout: output, stderr: errorOutput, timedOut }) => {
+      if (timedOut) {
+        tracker.complete("cri", "warning", "CRI scan timed out");
+        return;
+      }
       if (code === 0 && output.trim()) {
         // Write result to cache file for /regime page
         try {
@@ -618,8 +746,6 @@ ${memoryContent}
         tracker.complete("cri", "warning", "CRI scan failed");
       }
     });
-
-    proc.unref();
   };
 
   // Check X account scan status — reads from data/x_accounts.json
@@ -677,34 +803,20 @@ ${memoryContent}
   };
 
   // Run X account scan asynchronously (non-blocking)
-  const runXScan = (cwd: string, account: string, tracker: StartupTracker) => {
-    const scriptPath = path.join(cwd, "scripts/fetch_x_watchlist.py");
+  const runXScan = (trust: WorkspaceTrust, account: string, tracker: StartupTracker) => {
+    const scriptPath = resolveTrustedWorkspaceScript(trust, "scripts/fetch_x_watchlist.py");
     const processName = `x_${account}`;
     
-    if (!fs.existsSync(scriptPath)) {
-      tracker.complete(processName, "error", `@${account} scan script not found`);
+    if (!scriptPath) {
+      tracker.complete(processName, "error", `@${account} scan script is not trusted`);
       return;
     }
     
-    // Spawn Python process in background
-    const proc = spawn("python3.13", [scriptPath, "--account", account], {
-      cwd,
-      detached: true,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    
-    let output = "";
-    let errorOutput = "";
-    
-    proc.stdout?.on("data", (data) => {
-      output += data.toString();
-    });
-    
-    proc.stderr?.on("data", (data) => {
-      errorOutput += data.toString();
-    });
-    
-    proc.on("close", (code) => {
+    runBoundedStartupJob("python3.13", [scriptPath, "--account", account], trust.root, ({ code, stdout: output, timedOut }) => {
+      if (timedOut) {
+        tracker.complete(processName, "warning", `@${account}: scan timed out`);
+        return;
+      }
       if (code === 0) {
         // Parse output to get summary - look for "Tweets with tickers: N"
         const tweetsMatch = output.match(/Tweets with tickers:\s*(\d+)/);
@@ -725,21 +837,18 @@ ${memoryContent}
         }
         
         // Update last_scan timestamp in x_accounts.json
-        updateXAccountLastScan(cwd, account);
+        updateXAccountLastScan(trust.root, account);
         tracker.complete(processName, "success", message);
       } else {
         // Check if it's a parsing issue (still ran, just no tickers)
         if (output.includes("No posts with tickers") || output.includes("No tweets with tickers")) {
-          updateXAccountLastScan(cwd, account);
+          updateXAccountLastScan(trust.root, account);
           tracker.complete(processName, "success", `@${account}: 0 tweets`);
         } else {
           tracker.complete(processName, "warning", `@${account}: scan incomplete`);
         }
       }
     });
-    
-    // Unref so it doesn't keep the process alive
-    proc.unref();
   };
 
   // Format hours ago as human-readable string
@@ -759,7 +868,8 @@ ${memoryContent}
   pi.on("session_start", async (_event, ctx) => {
     const docs = loadProjectDocs(ctx.cwd);
     const skills = loadAlwaysOnSkills(ctx.cwd);
-    const xScans = checkXScanStatus(ctx.cwd);
+    const trust = createWorkspaceTrust(ctx.cwd);
+    const xScans = trust ? checkXScanStatus(trust.root) : [];
     const marketStatus = isMarketOpen();
     
     // Build list of processes to track
@@ -783,7 +893,7 @@ ${memoryContent}
     }
     
     // Load persistent memory from context/ repository (sync)
-    const memory = constructContext(ctx.cwd);
+    const memory = constructContext(trust);
     
     // Complete docs immediately (sync)
     const allLoaded = [...docs.loaded, ...skills.loaded, ...memory.loaded];
@@ -793,24 +903,32 @@ ${memoryContent}
       tracker.complete("docs", "warning", "No project docs found");
     }
     
+    if (!trust) {
+      tracker.complete("ib", "warning", "Startup automation disabled: workspace is not trusted");
+      tracker.complete("free_trade", "warning", "Free trade analysis disabled: workspace is not trusted");
+      tracker.complete("daemon", "warning", "Daemon startup disabled: workspace is not trusted");
+      tracker.complete("cri", "warning", "CRI scan disabled: workspace is not trusted");
+      return;
+    }
+
     // Run IB reconciliation FIRST (async, but free trade waits for it)
     // Pass callback to run free trade after IB completes
-    runIBReconciliation(ctx.cwd, tracker, () => {
+    runIBReconciliation(trust, tracker, () => {
       // Run free trade AFTER IB sync completes (positions may have changed)
-      runFreeTradeAnalyzer(ctx.cwd, tracker);
+      runFreeTradeAnalyzer(trust, tracker);
     });
     
     // Check and ensure Monitor Daemon is running (sync)
     // This handles fill monitoring and exit order placement
-    ensureMonitorDaemonRunning(ctx.cwd, tracker);
+    ensureMonitorDaemonRunning(trust, tracker);
     
     // Run CRI scan in parallel (pre-warm /regime page data)
-    runCriScan(ctx.cwd, tracker);
+    runCriScan(trust, tracker);
 
     // Run X account scans — only scan stale accounts (>12h), report fresh ones immediately
     for (const scan of xScans) {
       if (scan.needsScan) {
-        runXScan(ctx.cwd, scan.account, tracker);
+        runXScan(trust, scan.account, tracker);
       } else {
         const ago = scan.hoursSince != null ? formatHoursAgo(scan.hoursSince) : "recently";
         tracker.complete(`x_${scan.account}`, "success", `@${scan.account}: fresh (${ago})`);

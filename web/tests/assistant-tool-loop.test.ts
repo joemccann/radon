@@ -126,7 +126,18 @@ describe("assistant tool-calling loop", () => {
         {
           id: "tu_order",
           name: "place_order",
-          input: { ticker: "SPY", action: "BUY", quantity: 1, limit_price: 5.0 },
+          input: {
+            type: "option",
+            ticker: "SPY",
+            action: "BUY",
+            quantity: 1,
+            limit_price: 5.0,
+            expiry: "20260918",
+            strike: 500,
+            right: "C",
+            conId: 12345,
+            exchange: "SMART",
+          },
         },
       ],
       stopReason: "tool_use",
@@ -153,7 +164,18 @@ describe("assistant tool-calling loop", () => {
     expect(body.proposal).toMatchObject({
       tool: "place_order",
       destructive: true,
-      input: { ticker: "SPY", action: "BUY", quantity: 1, limit_price: 5.0 },
+      input: {
+        type: "option",
+        ticker: "SPY",
+        action: "BUY",
+        quantity: 1,
+        limit_price: 5.0,
+        expiry: "20260918",
+        strike: 500,
+        right: "C",
+        conId: 12345,
+        exchange: "SMART",
+      },
     });
     expect(typeof body.proposal.summary).toBe("string");
     expect(body.proposal.summary.length).toBeGreaterThan(0);

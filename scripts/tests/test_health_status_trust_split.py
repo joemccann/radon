@@ -57,24 +57,27 @@ class _FakeServiceHealthCache:
         ]}
 
 
+class _FakeProbeCache:
+    def snapshot(self):
+        return dict(_PROBE_RESULTS)
+
+
 @pytest.fixture(scope="class")
 def running():
     """Real ephemeral daemon with deterministic, deliberately sensitive content."""
     server, cache = serve.build_server(bind="127.0.0.1", port=0, units=[])
     cache.stop()
     server.unit_cache = _FakeUnitCache()
+    server.probe_cache = _FakeProbeCache()
     server.service_health_cache = _FakeServiceHealthCache()
     server.external_probe_cache = None
-    original_probes = serve.run_probes
     original_token = getattr(serve, "STATUS_TOKEN", "")
-    serve.run_probes = lambda: dict(_PROBE_RESULTS)
     serve.STATUS_TOKEN = TOKEN
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
         yield server.server_address[1]
     finally:
-        serve.run_probes = original_probes
         serve.STATUS_TOKEN = original_token
         server.shutdown()
         server.server_close()

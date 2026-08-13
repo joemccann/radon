@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  *
  * Phase-2 IB what-if margin layer:
- *   - whatIfKey is a structural identity that EXCLUDES price.
+ *   - whatIfKey includes price and portfolio revision so broker margin cannot go stale.
  *   - mergeWhatIfMargin preserves the brand and computes availableAfter.
  *   - useWhatIfMargin fires only for an undefined-risk combo when ENABLED.
  *   - OrderConfirmSummary renders loading / the "IB margin" tag.
@@ -74,11 +74,14 @@ const DEFINED_SPREAD = {
 };
 
 describe("whatIfKey", () => {
-  it("is identical across different prices (excludes net premium)", () => {
+  it("changes across different prices and portfolio revisions", () => {
     const a = whatIfKey({ ...UNDEFINED_COMBO, netPremium: -1.17 });
     const b = whatIfKey({ ...UNDEFINED_COMBO, netPremium: -2.5 });
     expect(a).not.toBeNull();
-    expect(a).toBe(b);
+    expect(a).not.toBe(b);
+    expect(whatIfKey(UNDEFINED_COMBO, "portfolio-a")).not.toBe(
+      whatIfKey(UNDEFINED_COMBO, "portfolio-b"),
+    );
   });
 
   it("is null for a single-leg input", () => {
@@ -146,6 +149,65 @@ describe("useWhatIfMargin", () => {
     await new Promise((r) => setTimeout(r, 600));
     expect(result.current.status).toBe("idle");
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("refetches when the effective order price changes", async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ initMargin: 5000 }) }));
+    // @ts-expect-error test stub
+    global.fetch = fetchMock;
+
+    const { result, rerender } = renderHook(
+      ({ premium }) => {
+        const input = { ...UNDEFINED_COMBO, netPremium: premium };
+        const state = useOrderRisk(input, resolvedPortfolio);
+        return useWhatIfMargin(input, state, true);
+      },
+      { initialProps: { premium: -1.17 } },
+    );
+
+    await waitFor(() => expect(result.current.status).toBe("success"), { timeout: 2500 });
+    rerender({ premium: -2.5 });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2), { timeout: 2500 });
+  });
+
+  it("refetches when the resolved portfolio state changes", async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ initMargin: 5000 }) }));
+    // @ts-expect-error test stub
+    global.fetch = fetchMock;
+
+    const { result, rerender } = renderHook(
+      ({ portfolio }) => {
+        const state = useOrderRisk(UNDEFINED_COMBO, portfolio);
+        return useWhatIfMargin(UNDEFINED_COMBO, state, true);
+      },
+      { initialProps: { portfolio: resolvedPortfolio } },
+    );
+
+    await waitFor(() => expect(result.current.status).toBe("success"), { timeout: 2500 });
+    rerender({
+      portfolio: {
+        ...resolvedPortfolio,
+        positions: [{
+          position_id: 99,
+          ticker: "SPY",
+          structure: "Long Stock",
+          expiry: "N/A",
+          contracts: 100,
+          cost_basis: 50_000,
+          current_value: 51_000,
+          unrealized_pnl: 1_000,
+          return_pct: 2,
+          legs: [{
+            type: "Stock",
+            strike: null,
+            direction: "LONG",
+            contracts: 100,
+            avg_cost: 500,
+          }],
+        }],
+      },
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2), { timeout: 2500 });
   });
 });
 

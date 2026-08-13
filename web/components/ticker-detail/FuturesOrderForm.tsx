@@ -45,24 +45,51 @@ function formatExpiry(date: string): string {
  * sees the actual exposure (1 VIX future at 19 = $19,000 notional,
  * ~$5,500 initial margin).
  */
-export function FuturesOrderForm({ ticker, portfolio = null }: FuturesOrderFormProps) {
+export function FuturesOrderForm({ ticker, portfolio }: FuturesOrderFormProps) {
   const symbol = ticker.toUpperCase();
   const tickerDetail = useTickerDetailOptional();
   const { data, loading, error } = useFuturesChain(symbol);
 
   const [selectedConId, setSelectedConId] = useState<number | null>(null);
 
+  useEffect(() => setSelectedConId(null), [symbol]);
+
   // Default to front-month when chain loads.
   useEffect(() => {
-    if (data?.contracts.length && selectedConId == null) {
+    if (data?.symbol.toUpperCase() === symbol && data.contracts.length && selectedConId == null) {
       setSelectedConId(data.contracts[0].conId);
     }
-  }, [data, selectedConId]);
+  }, [data, selectedConId, symbol]);
 
   const selectedContract = useMemo<FuturesChainContract | null>(() => {
-    if (!data || selectedConId == null) return null;
-    return data.contracts.find((c) => c.conId === selectedConId) ?? null;
-  }, [data, selectedConId]);
+    if (!data || data.symbol.toUpperCase() !== symbol || selectedConId == null) return null;
+    return data.contracts.find(
+      (c) => c.conId === selectedConId && c.symbol.toUpperCase() === symbol,
+    ) ?? null;
+  }, [data, selectedConId, symbol]);
+
+  const holding = useMemo(() => {
+    let heldLong = 0;
+    let heldShort = 0;
+    let longBasis = 0;
+    let shortBasis = 0;
+    if (!selectedContract || !portfolio) return { heldLong, heldShort, longBasis, shortBasis };
+    for (const position of portfolio.positions) {
+      if (position.ticker.toUpperCase() !== symbol) continue;
+      for (const leg of position.legs) {
+        if (leg.con_id !== selectedContract.conId) continue;
+        const contracts = Math.max(0, Math.abs(leg.contracts));
+        if (leg.direction === "LONG") {
+          heldLong += contracts;
+          longBasis += contracts * Math.abs(leg.avg_cost);
+        } else {
+          heldShort += contracts;
+          shortBasis += contracts * Math.abs(leg.avg_cost);
+        }
+      }
+    }
+    return { heldLong, heldShort, longBasis, shortBasis };
+  }, [portfolio, selectedContract, symbol]);
 
   // Publish the selected contract's expiry to the depth subject so the relay
   // resolves THIS future (not the front month) under the index key, and the
@@ -93,6 +120,13 @@ export function FuturesOrderForm({ ticker, portfolio = null }: FuturesOrderFormP
         const price = parseFloat(limitPrice);
         const qty = parseInt(quantity, 10);
         if (!selectedContract || !Number.isFinite(price) || price <= 0 || !Number.isFinite(qty) || qty <= 0) return null;
+        const closingLong = action === "SELL" && holding.heldLong >= qty;
+        const closingShort = action === "BUY" && holding.heldShort >= qty;
+        const basis = closingLong && holding.heldLong > 0
+          ? holding.longBasis * (qty / holding.heldLong)
+          : closingShort && holding.heldShort > 0
+            ? holding.shortBasis * (qty / holding.heldShort)
+            : null;
         return {
           type: "linear",
           ticker: symbol,
@@ -101,14 +135,17 @@ export function FuturesOrderForm({ ticker, portfolio = null }: FuturesOrderFormP
           quantity: qty,
           limitPrice: price,
           multiplier,
+          heldQuantity: holding.heldLong,
+          heldShortQuantity: holding.heldShort,
+          closeOut: basis == null ? null : { entryCostDollars: basis },
           description: `${action} ${qty} ${selectedContract.localSymbol} @ $${price.toFixed(2)}`,
         };
       },
-    [selectedContract, multiplier, symbol],
+    [selectedContract, multiplier, symbol, holding],
   );
 
   const buildSubmit = ({ action, quantity, limitPrice, tif }: ListedOrderFormValues) => {
-    if (!selectedContract) {
+    if (!selectedContract || selectedContract.symbol.toUpperCase() !== symbol) {
       return { error: "Pick an expiry" };
     }
     const qty = parseInt(quantity, 10);
@@ -177,7 +214,7 @@ export function FuturesOrderForm({ ticker, portfolio = null }: FuturesOrderFormP
       surface="futures-form"
       buildSubmit={buildSubmit}
       submitLabel={(action) => `${action} ${selectedContract?.localSymbol ?? symbol}`}
-      submitDisabled={selectedConId == null}
+      submitDisabled={selectedContract == null}
     />
   );
 }

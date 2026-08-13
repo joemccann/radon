@@ -1,3 +1,5 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
+
 import { NextResponse } from "next/server";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 import { filterApplicableServiceHealthRows } from "@/lib/serviceHealthApplicability";
@@ -65,6 +67,8 @@ async function readStatus(url: string): Promise<Record<string, unknown>> {
 }
 
 export async function GET(): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { operatorOnly: true });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   let lastError = "edge-health fetch failed";
   for (const url of statusSources()) {

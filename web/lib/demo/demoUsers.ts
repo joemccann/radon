@@ -27,14 +27,35 @@ export type DemoDbClient = {
   }) => Promise<{ rows: Array<Record<string, unknown>> }>;
 };
 
+export async function claimDemoWebhookEvent(
+  db: DemoDbClient,
+  eventId: string,
+  eventType: string,
+): Promise<boolean> {
+  const result = await db.execute({
+    sql: `INSERT INTO demo_webhook_events (event_id, event_type, processed_at)
+          VALUES (?, ?, datetime('now'))
+          ON CONFLICT(event_id) DO NOTHING
+          RETURNING event_id`,
+    args: [eventId, eventType],
+  });
+  return result.rows.length === 1;
+}
+
+export async function releaseDemoWebhookEvent(db: DemoDbClient, eventId: string): Promise<void> {
+  await db.execute({
+    sql: `DELETE FROM demo_webhook_events WHERE event_id = ?`,
+    args: [eventId],
+  });
+}
+
 function nowIso(now?: Date): string {
   return (now ?? new Date()).toISOString();
 }
 
 /**
- * Insert or refresh a trial row. Idempotent on `user_id` — a webhook retry (or
- * a re-signup) updates the timestamps in place rather than duplicating. Always
- * lands `status='active'`; expiry is enforced separately (middleware + sweep).
+ * Insert a trial row. A webhook retry may refresh identity fields, but it must
+ * never reset the trial clock or reactivate an expired/revoked user.
  */
 export async function upsertDemoUser(params: {
   db: DemoDbClient;
@@ -54,11 +75,7 @@ export async function upsertDemoUser(params: {
       VALUES (?, ?, ?, ?, ?, 'active', NULL, ?)
       ON CONFLICT(user_id) DO UPDATE SET
         email      = excluded.email,
-        demo_role  = excluded.demo_role,
-        started_at = excluded.started_at,
-        expires_at = excluded.expires_at,
-        status     = 'active',
-        revoked_at = NULL
+        demo_role  = excluded.demo_role
     `,
     args: [userId, email, demoRole, startedAt, expiresAt, created],
   });

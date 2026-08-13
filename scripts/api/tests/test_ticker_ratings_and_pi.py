@@ -220,6 +220,41 @@ def test_pi_exec_rejects_non_string_args(client):
     assert response.status_code == 400
 
 
+@pytest.mark.parametrize(
+    ("script", "args"),
+    [
+        ("scanner.py", ["--top", "999999"]),
+        ("discover.py", ["--output", "/tmp/exfil.json"]),
+        ("evaluate.py", ["AAPL", "--days", "999"]),
+        ("leap_scanner_uw.py", ["--output", "/tmp/exfil.json"]),
+        ("ib_sync.py", ["--host", "attacker.example", "--port", "4444"]),
+    ],
+)
+def test_pi_exec_rejects_unapproved_or_unbounded_argv(client, script, args):
+    response = client.post(
+        "/pi/exec",
+        json={"script": script, "args": args, "allow_mutating": True},
+    )
+    assert response.status_code == 400
+
+
+def test_pi_exec_mutation_flag_is_not_authority_without_trusted_service(client, monkeypatch):
+    from scripts.api import server
+
+    monkeypatch.setenv("CLERK_JWKS_URL", "https://example.test/jwks.json")
+    monkeypatch.setattr(server, "is_trusted_local_request", lambda request: False)
+
+    async def verified(request):
+        return {"sub": "user_test"}
+
+    monkeypatch.setattr(server, "verify_clerk_jwt", verified)
+    response = client.post(
+        "/pi/exec",
+        json={"script": "ib_sync.py", "args": ["--sync"], "allow_mutating": True},
+    )
+    assert response.status_code == 403
+
+
 def test_pi_exec_surfaces_subprocess_failure(client):
     fake = _fake_raw_result(ok=False, stderr="Traceback: KeyError", exit_code=1)
 

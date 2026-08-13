@@ -38,7 +38,7 @@ function leg(expiry: string): OrderLeg {
   };
 }
 
-function renderLadder(legs: OrderLeg[]) {
+function renderLadder(legs: OrderLeg[], prices: Record<string, never> = {}) {
   Object.defineProperty(Element.prototype, "scrollTo", { configurable: true, value: vi.fn() });
   return render(
     React.createElement(MobileChainLadder, {
@@ -48,7 +48,7 @@ function renderLadder(legs: OrderLeg[]) {
       onSelectExpiry: vi.fn(),
       visibleStrikes: [strikeRow(960), strikeRow(970)],
       atmStrike: 970,
-      prices: {},
+      prices,
       currentPrice: 967.78,
       sideFilter: "both" as const,
       onSideFilterChange: vi.fn(),
@@ -78,5 +78,18 @@ describe("Mobile chain ladder leg tint", () => {
     const cell = screen.getByTestId("mobile-chain-call-970");
     expect(cell.getAttribute("aria-pressed")).toBe("false");
     expect(cell.className).not.toContain("selected-buy");
+  });
+
+  it("labels average volume as volume rather than open interest", () => {
+    const callKey = strikeRow(970).callKey;
+    renderLadder([], {
+      [callKey]: {
+        symbol: TICKER,
+        avgVolume: 12_345,
+      } as never,
+    });
+    const cell = screen.getByTestId("mobile-chain-call-970");
+    expect(cell.textContent).toContain("AVG VOL 12k");
+    expect(cell.textContent).not.toContain("OI 12k");
   });
 });

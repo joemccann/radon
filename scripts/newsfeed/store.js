@@ -1,6 +1,7 @@
 import path from "path";
 import fs from "fs-extra";
 import { absolutizeMediaUrl, MEDIA_ORIGIN } from "./media.js";
+import { atomicWriteText, withFileLock } from "./atomic.js";
 
 export const MAX_POSTS_FILE_BYTES = 500 * 1024;
 
@@ -42,7 +43,7 @@ export async function loadExistingPosts(postsFile) {
   try {
     const raw = await fs.readFile(postsFile, "utf8");
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
+    if (!Array.isArray(parsed)) throw new TypeError("newsfeed posts file must contain a JSON array");
     return parsed.map((item) => {
       const { ms } = normaliseTimestamp(item.timestamp);
       return {
@@ -53,8 +54,12 @@ export async function loadExistingPosts(postsFile) {
     });
   } catch (err) {
     if (err.code === "ENOENT") return [];
-    console.warn(`[newsfeed] failed to read existing posts: ${err.message}`);
-    return [];
+    if (err instanceof SyntaxError || err instanceof TypeError) {
+      const quarantine = `${postsFile}.corrupt-${Date.now()}`;
+      await fs.move(postsFile, quarantine, { overwrite: false }).catch(() => {});
+      err.message = `${err.message}; quarantined=${quarantine}`;
+    }
+    throw err;
   }
 }
 
@@ -119,30 +124,33 @@ export async function persistPosts(posts, opts) {
     now = () => new Date(),
   } = opts;
 
-  await fs.ensureDir(dataDir);
-  await fs.ensureDir(archiveDir);
-  if (mediaDir) await fs.ensureDir(mediaDir);
+  return withFileLock(postsFile, async () => {
+    await fs.ensureDir(dataDir);
+    await fs.ensureDir(archiveDir);
+    if (mediaDir) await fs.ensureDir(mediaDir);
 
-  const reduced = posts
-    .map((post) => normalisePostImageUrls(post))
-    .map(({ timestampMs, ...rest }) => rest);
-  const output = JSON.stringify(reduced, null, 2);
-  const size = Buffer.byteLength(output, "utf8");
+    const reduced = posts
+      .map((post) => normalisePostImageUrls(post))
+      .map(({ timestampMs, ...rest }) => rest);
+    const output = JSON.stringify(reduced, null, 2);
+    JSON.parse(output);
+    const size = Buffer.byteLength(output, "utf8");
 
-  if (size <= maxBytes) {
-    await fs.writeFile(postsFile, output);
-    return { archived: false };
-  }
+    if (size <= maxBytes) {
+      await atomicWriteText(postsFile, output);
+      return { archived: false };
+    }
 
-  const archiveName = `posts-${now().toISOString().replace(/[:.]/g, "-")}.json`;
-  const archivePath = path.join(archiveDir, archiveName);
-  await fs.writeFile(archivePath, output);
+    const archiveName = `posts-${now().toISOString().replace(/[:.]/g, "-")}.json`;
+    const archivePath = path.join(archiveDir, archiveName);
+    await atomicWriteText(archivePath, output);
 
-  const keepCount = Math.max(1, Math.ceil(posts.length * 0.2));
-  const truncated = reduced.slice(0, keepCount);
-  await fs.writeFile(postsFile, JSON.stringify(truncated, null, 2));
+    const keepCount = Math.max(1, Math.ceil(posts.length * 0.2));
+    const truncated = reduced.slice(0, keepCount);
+    await atomicWriteText(postsFile, JSON.stringify(truncated, null, 2));
 
-  return { archived: true, archivePath, archiveName, keepCount };
+    return { archived: true, archivePath, archiveName, keepCount };
+  });
 }
 
 // Test seam — exercise the URL normaliser without spinning up the full

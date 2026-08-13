@@ -85,20 +85,19 @@ if [ -z "$PYTHON_BIN" ]; then
     exit 1
 fi
 
-IS_TRADING=$("$PYTHON_BIN" - <<'PY' 2>/dev/null || echo "yes"
+IS_TRADING=$("$PYTHON_BIN" - <<'PY' 2>/dev/null || echo "no"
 import sys
 try:
     sys.path.insert(0, 'scripts')
-    from utils.market_calendar import _is_trading_day
-    from datetime import datetime
-    print('yes' if _is_trading_day(datetime.now()) else 'no')
+    from utils.market_calendar import market_state
+    print('yes' if market_state().get('is_open') else 'no')
 except Exception:
-    print('yes')
+    print('no')
 PY
 )
 
 if [ "$IS_TRADING" = "no" ]; then
-    echo "$(date): Market holiday or weekend — skipping portfolio refresh"
+    echo "$(date): Market closed — skipping portfolio refresh"
     exit 0
 fi
 

@@ -19,17 +19,21 @@ import { generateMockHistory, getBasePrice, nextMockPrice } from "./mockPriceGen
  */
 export function resolveChartPrice(
   pd: PriceData | undefined,
+  valueKind: "price" | "spread-net" = "price",
 ): { price: number | null; isMid: boolean; isCalculated: boolean } {
   if (!pd) return { price: null, isMid: false, isCalculated: false };
 
   // Last-trade price takes full priority
-  if (pd.last != null && pd.last > 0) {
+  if (pd.last != null && Number.isFinite(pd.last) && (valueKind === "spread-net" || pd.last > 0)) {
     return { price: pd.last, isMid: false, isCalculated: pd.lastIsCalculated === true };
   }
 
   // Mid fallback — requires both sides of the quote
-  if (pd.bid != null && pd.ask != null) {
-    return { price: (pd.bid + pd.ask) / 2, isMid: true, isCalculated: false };
+  if (pd.bid != null && pd.ask != null && Number.isFinite(pd.bid) && Number.isFinite(pd.ask)) {
+    const mid = (pd.bid + pd.ask) / 2;
+    if (valueKind === "spread-net" || mid > 0) {
+      return { price: mid, isMid: true, isCalculated: false };
+    }
   }
 
   return { price: null, isMid: false, isCalculated: false };
@@ -37,7 +41,7 @@ export function resolveChartPrice(
 
 interface PriceHistoryResult {
   data: LivelinePoint[];
-  value: number;
+  value: number | null;
   loading: boolean;
   /** True when chart values are derived from mid price (no last-trade available). */
   isMid: boolean;
@@ -64,9 +68,10 @@ export function usePriceHistory(
   ticker: string | null,
   prices: Record<string, PriceData>,
   maxPoints = 200,
+  valueKind: "price" | "spread-net" = "price",
 ): PriceHistoryResult {
   const [data, setData] = useState<LivelinePoint[]>([]);
-  const [value, setValue] = useState(0);
+  const [value, setValue] = useState<number | null>(null);
   const [isMid, setIsMid] = useState(false);
   const [isCalculated, setIsCalculated] = useState(false);
   const lastRealRef = useRef(0);
@@ -79,20 +84,20 @@ export function usePriceHistory(
     tickerRef.current = ticker;
     if (!ticker) {
       setData([]);
-      setValue(0);
+      setValue(null);
       setIsMid(false);
       setIsCalculated(false);
       return;
     }
 
-    const { price: resolvedBase, isMid: baseMid, isCalculated: baseCalc } = resolveChartPrice(prices[ticker]);
+    const { price: resolvedBase, isMid: baseMid, isCalculated: baseCalc } = resolveChartPrice(prices[ticker], valueKind);
 
     if (resolvedBase == null) {
       // No real price — start empty. The mock-walk path is disabled to
       // avoid surfacing fictitious traces (e.g. illiquid option keys
       // landed on the default $100 base and walked from there).
       setData([]);
-      setValue(0);
+      setValue(null);
       setIsMid(false);
       setIsCalculated(false);
       lastPriceRef.current = 0;
@@ -123,7 +128,7 @@ export function usePriceHistory(
   useEffect(() => {
     if (!ticker) return;
     const pd = prices[ticker];
-    const { price: resolved, isMid: mid, isCalculated: calc } = resolveChartPrice(pd);
+    const { price: resolved, isMid: mid, isCalculated: calc } = resolveChartPrice(pd, valueKind);
     if (resolved == null) return;
     if (resolved === lastPriceRef.current) return; // no-op append
 
@@ -138,7 +143,7 @@ export function usePriceHistory(
     setValue(resolved);
     setIsMid(mid);
     setIsCalculated(calc);
-  }, [ticker, prices[ticker ?? ""]?.last, prices[ticker ?? ""]?.bid, prices[ticker ?? ""]?.ask, prices[ticker ?? ""]?.lastIsCalculated, maxPoints]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ticker, prices[ticker ?? ""]?.last, prices[ticker ?? ""]?.bid, prices[ticker ?? ""]?.ask, prices[ticker ?? ""]?.lastIsCalculated, maxPoints, valueKind]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Optional mock-walk fallback. Disabled by default — a recurring class
   // of bugs comes from chart consumers misreading mock data as real

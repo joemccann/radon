@@ -54,19 +54,33 @@ export function useInformedFlow(ticker: string | null, active: boolean = true): 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const requestRef = useRef<{ generation: number; controller: AbortController } | null>(null);
 
   const load = useCallback(async () => {
     if (!ticker) return;
+    requestRef.current?.controller.abort();
+    const generation = (requestRef.current?.generation ?? 0) + 1;
+    const controller = new AbortController();
+    requestRef.current = { generation, controller };
+    setIsLoading(true);
     try {
-      const res = await fetch(`/api/informed-flow/${encodeURIComponent(ticker)}`, { cache: "no-store" });
+      const res = await fetch(`/api/informed-flow/${encodeURIComponent(ticker)}`, {
+        cache: "no-store",
+        signal: controller.signal,
+      });
       if (!res.ok) throw new Error("Failed to fetch informed flow");
       const json = (await res.json()) as InformedFlowData;
+      if (controller.signal.aborted || requestRef.current?.generation !== generation) return;
+      if (json.ticker?.trim().toUpperCase() !== ticker.trim().toUpperCase()) {
+        throw new Error("Informed flow response did not match ticker");
+      }
       setData(json);
       setError(null);
     } catch (err) {
+      if (controller.signal.aborted || requestRef.current?.generation !== generation) return;
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
-      setIsLoading(false);
+      if (requestRef.current?.generation === generation) setIsLoading(false);
     }
   }, [ticker]);
 
@@ -75,11 +89,15 @@ export function useInformedFlow(ticker: string | null, active: boolean = true): 
   }, [load]);
 
   useEffect(() => {
+    setData(null);
+    setError(null);
+    setIsLoading(Boolean(active && ticker));
     if (!active || !ticker) return;
     void load();
     intervalRef.current = setInterval(() => void load(), SYNC_INTERVAL_MS);
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
+      requestRef.current?.controller.abort();
     };
   }, [active, ticker, load]);
 

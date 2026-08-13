@@ -7,6 +7,8 @@ type IndexQuoteResponse = {
   price?: PriceData | null;
 };
 
+export const INDEX_FALLBACK_REFRESH_MS = 60_000;
+
 export function hasUsableIndexPrice(price: PriceData | null | undefined): boolean {
   if (!price) return false;
   return [price.last, price.close, price.bid, price.ask].some(
@@ -39,40 +41,44 @@ export function useIndexQuoteFallback(symbols: string[]): Record<string, PriceDa
   );
 
   useEffect(() => {
-    if (!key) return;
+    if (!key) {
+      setFallbackPrices({});
+      return;
+    }
 
     let cancelled = false;
     const pendingSymbols = key.split(",");
-    void Promise.all(
-      pendingSymbols.map(async (symbol) => {
+    const refresh = async () => {
+      const entries = await Promise.all(pendingSymbols.map(async (symbol) => {
         try {
           const res = await fetch(`/api/index-quote?symbol=${encodeURIComponent(symbol)}`, {
             cache: "no-store",
           });
-          if (!res.ok) return null;
+          if (!res.ok) return [symbol, null] as const;
           const json = await res.json() as IndexQuoteResponse;
-          return json.price && hasUsableIndexPrice(json.price) ? [symbol, json.price] as const : null;
+          return [
+            symbol,
+            json.price && hasUsableIndexPrice(json.price) ? json.price : null,
+          ] as const;
         } catch {
-          return null;
+          return [symbol, null] as const;
         }
-      }),
-    ).then((entries) => {
+      }));
       if (cancelled) return;
-      setFallbackPrices((prev) => {
-        const next = { ...prev };
-        let changed = false;
-        for (const entry of entries) {
-          if (!entry) continue;
-          const [symbol, price] = entry;
-          next[symbol] = price;
-          changed = true;
+      setFallbackPrices(() => {
+        const next: Record<string, PriceData> = {};
+        for (const [symbol, price] of entries) {
+          if (price) next[symbol] = price;
         }
-        return changed ? next : prev;
+        return next;
       });
-    });
+    };
+    void refresh();
+    const timer = setInterval(() => void refresh(), INDEX_FALLBACK_REFRESH_MS);
 
     return () => {
       cancelled = true;
+      clearInterval(timer);
     };
   }, [key]);
 

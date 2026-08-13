@@ -29,7 +29,12 @@ def run_cycle(directory: Path) -> dict:
     now = datetime.now(timezone.utc)
     findings = gather_findings()
     incidents = classify(findings, now)
-    result = record_cycle(incidents, directory, now)
+    # An indeterminate probe is not evidence that the condition recovered.
+    # Keep open incidents until a cycle has definitive observations throughout.
+    allow_resolve = all(
+        finding.get("state") != "unknown" for finding in findings.values()
+    )
+    result = record_cycle(incidents, directory, now, allow_resolve=allow_resolve)
     summary = {
         "at": now.isoformat(),
         "probes": {name: finding.get("state") for name, finding in findings.items()},

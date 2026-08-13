@@ -1,9 +1,13 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 let projectRoot: string | null = null;
+const execFileAsync = promisify(execFile);
 
 async function createProjectRoot() {
   projectRoot = await mkdtemp(path.join(tmpdir(), "radon-taxonomy-test-"));
@@ -100,5 +104,22 @@ describe("appendTagsToTaxonomy", () => {
     const after = await loadTaxonomy(root);
     // Whichever order the writes interleave, the final set must contain every unique tag.
     expect(new Set(after.tags)).toEqual(new Set(["puts", "options", "calls", "positioning"]));
+  });
+
+  it("preserves additions from concurrent processes", async () => {
+    const root = await createProjectRoot();
+    const moduleUrl = pathToFileURL(path.resolve(process.cwd(), "scripts/newsfeed/taxonomy.js")).href;
+    const source = `
+      const { appendTagsToTaxonomy } = await import(process.argv[1]);
+      await appendTagsToTaxonomy(process.argv[2], process.argv[3].split(","));
+    `;
+    await Promise.all([
+      execFileAsync(process.execPath, ["--input-type=module", "-e", source, moduleUrl, root, "puts,options"]),
+      execFileAsync(process.execPath, ["--input-type=module", "-e", source, moduleUrl, root, "calls,macro"]),
+    ]);
+    const { loadTaxonomy } = await import("../../scripts/newsfeed/taxonomy.js");
+    expect(new Set((await loadTaxonomy(root)).tags)).toEqual(
+      new Set(["puts", "options", "calls", "macro"]),
+    );
   });
 });

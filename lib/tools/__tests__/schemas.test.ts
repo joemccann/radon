@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { Value } from "@sinclair/typebox/value";
-import { KellyOutput } from "../schemas/kelly";
+import { KellyInput, KellyOutput } from "../schemas/kelly";
 import { FetchTickerOutput } from "../schemas/fetch-ticker";
-import { ScannerOutput } from "../schemas/scanner";
+import { ScannerInput, ScannerOutput } from "../schemas/scanner";
+import { VCGInputSchema } from "../wrappers/vcg-scan";
 import { OrdersData } from "../schemas/ib-orders";
 import { PortfolioData } from "../schemas/ib-sync";
 import { IBOrderManageOutput } from "../schemas/ib-order-manage";
@@ -36,6 +37,38 @@ describe("KellyOutput schema", () => {
   it("rejects missing required fields", () => {
     const invalid = { full_kelly_pct: 10.0 };
     expect(Value.Check(KellyOutput, invalid)).toBe(false);
+  });
+});
+
+describe("security-sensitive numeric input schemas", () => {
+  it.each([
+    { prob: -0.01, odds: 2 },
+    { prob: 1.01, odds: 2 },
+    { prob: 0.6, odds: 0 },
+    { prob: 0.6, odds: Number.POSITIVE_INFINITY },
+    { prob: 0.6, odds: 2, fraction: 0 },
+    { prob: 0.6, odds: 2, fraction: 1.01 },
+    { prob: 0.6, odds: 2, bankroll: -1 },
+  ])("rejects invalid Kelly domain %#", (input) => {
+    expect(Value.Check(KellyInput, input)).toBe(false);
+  });
+
+  it.each([
+    { top: 0 },
+    { top: 1.5 },
+    { top: 501 },
+  ])("rejects invalid scanner count %#", (input) => {
+    expect(Value.Check(ScannerInput, input)).toBe(false);
+  });
+
+  it.each([
+    { proxy: "SPY" },
+    { proxy: "HYG;touch /tmp/pwn" },
+    { days: 0 },
+    { days: 1.5 },
+    { days: 2521 },
+  ])("rejects invalid VCG controls %#", (input) => {
+    expect(Value.Check(VCGInputSchema, input)).toBe(false);
   });
 });
 

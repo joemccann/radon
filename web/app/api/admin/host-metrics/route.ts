@@ -1,3 +1,4 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
 import { NextResponse } from "next/server";
 import { cachedRead } from "@/lib/dbCache";
 import { dbExecute } from "@/lib/dbExecute";
@@ -50,6 +51,8 @@ async function readHostMetricsPayload(): Promise<HostMetricsPayload> {
 }
 
 export async function GET(): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { operatorOnly: true });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   try {
     const payload = await cachedRead(
@@ -58,8 +61,7 @@ export async function GET(): Promise<Response> {
       readHostMetricsPayload,
     );
     return setNoStoreResponseHeaders(NextResponse.json(payload), requestId);
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
+  } catch {
     // Pre-migration (or laptop without Turso creds): an empty series is a
     // legitimate pending state — 200 + flag, never 4xx console noise.
     const payload: HostMetricsPayload = {
@@ -69,7 +71,7 @@ export async function GET(): Promise<Response> {
       missing: true,
     };
     return setNoStoreResponseHeaders(
-      NextResponse.json({ ...payload, error: detail }),
+      NextResponse.json({ ...payload, error: "Host telemetry unavailable" }),
       requestId,
     );
   }

@@ -9,6 +9,10 @@ import { render, screen, act, fireEvent, cleanup } from "@testing-library/react"
 import React from "react";
 import TickerSearch from "../components/TickerSearch";
 
+vi.mock("@/lib/useWatchlist", () => ({
+  useWatchlist: () => ({ isWatched: () => false, toggleWatch: vi.fn() }),
+}));
+
 /* ---------- MockWebSocket ---------- */
 class MockWebSocket {
   static CONNECTING = 0 as const;
@@ -56,9 +60,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function makeSearchResults(results: Array<{ symbol: string; secType: string }>) {
+function makeSearchResults(pattern: string, results: Array<{ symbol: string; secType: string }>) {
   return {
     type: "searchResults",
+    pattern,
     results: results.map((r, i) => ({
       conId: 1000 + i,
       symbol: r.symbol,
@@ -80,7 +85,7 @@ describe("TickerSearch secType filter", () => {
     const input = screen.getByRole("combobox");
     act(() => { fireEvent.change(input, { target: { value: "AAPL" } }); });
     act(() => vi.advanceTimersByTime(300));
-    act(() => ws.simulateMessage(makeSearchResults([
+    act(() => ws.simulateMessage(makeSearchResults("AAPL", [
       { symbol: "AAPL", secType: "STK" },
     ])));
 
@@ -97,7 +102,7 @@ describe("TickerSearch secType filter", () => {
     const input = screen.getByRole("combobox");
     act(() => { fireEvent.change(input, { target: { value: "SPX" } }); });
     act(() => vi.advanceTimersByTime(300));
-    act(() => ws.simulateMessage(makeSearchResults([
+    act(() => ws.simulateMessage(makeSearchResults("SPX", [
       { symbol: "SPX", secType: "IND" },
     ])));
 
@@ -114,7 +119,7 @@ describe("TickerSearch secType filter", () => {
     const input = screen.getByRole("combobox");
     act(() => { fireEvent.change(input, { target: { value: "ES" } }); });
     act(() => vi.advanceTimersByTime(300));
-    act(() => ws.simulateMessage(makeSearchResults([
+    act(() => ws.simulateMessage(makeSearchResults("ES", [
       { symbol: "ES", secType: "FUT" },
     ])));
 
@@ -131,7 +136,7 @@ describe("TickerSearch secType filter", () => {
     const input = screen.getByRole("combobox");
     act(() => { fireEvent.change(input, { target: { value: "TEST" } }); });
     act(() => vi.advanceTimersByTime(300));
-    act(() => ws.simulateMessage(makeSearchResults([
+    act(() => ws.simulateMessage(makeSearchResults("TEST", [
       { symbol: "AAPL", secType: "STK" },
       { symbol: "WARR", secType: "WAR" },
       { symbol: "BOND1", secType: "BOND" },
@@ -144,5 +149,23 @@ describe("TickerSearch secType filter", () => {
     // WAR and BOND should not be in the DOM
     expect(screen.queryByText("WARR")).toBeNull();
     expect(screen.queryByText("BOND1")).toBeNull();
+  });
+
+  it("ignores an out-of-order result for an older query", async () => {
+    render(React.createElement(TickerSearch, { onSelect: vi.fn() }));
+    await flushSocketOpen();
+    const ws = latestWs();
+    act(() => ws.simulateOpen());
+    const input = screen.getByRole("combobox");
+
+    act(() => { fireEvent.change(input, { target: { value: "A" } }); });
+    act(() => vi.advanceTimersByTime(300));
+    act(() => { fireEvent.change(input, { target: { value: "AA" } }); });
+    act(() => vi.advanceTimersByTime(300));
+    act(() => ws.simulateMessage(makeSearchResults("A", [{ symbol: "AAPL", secType: "STK" }])));
+    expect(screen.queryByText("AAPL")).toBeNull();
+
+    act(() => ws.simulateMessage(makeSearchResults("AA", [{ symbol: "AAL", secType: "STK" }])));
+    expect(screen.getByText("AAL")).toBeDefined();
   });
 });

@@ -213,3 +213,33 @@ def test_main_prints_json_only(monkeypatch, capsys):
 
     parsed = json.loads(captured.out)
     assert parsed["surprise_count"] == 1
+
+
+def test_main_nonzero_when_all_required_stages_fail(monkeypatch, capsys):
+    monkeypatch.setattr(
+        nightly,
+        "run_nightly",
+        lambda **k: {
+            "ran_at": "x",
+            "backfill": {"err": "backfill failed"},
+            "surprise_count": None,
+            "calibration": {"err": "calibration failed"},
+        },
+    )
+
+    assert nightly.main([]) == 1
+
+
+def test_main_nonzero_when_one_required_stage_fails(monkeypatch, capsys):
+    monkeypatch.setattr(
+        nightly,
+        "run_nightly",
+        lambda **k: {
+            "ran_at": "x",
+            "backfill": {"inserted": 1},
+            "surprise_count": 4,
+            "calibration": {"err": "calibration failed"},
+        },
+    )
+
+    assert nightly.main([]) == 1

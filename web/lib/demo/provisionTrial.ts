@@ -71,12 +71,15 @@ export async function provisionDemoTrial(
 
   const now = deps.now ?? new Date();
   const startIsoEt = now.toISOString();
+  // Mark the Clerk identity as pending before any slow calendar/DB work. The
+  // demo gate treats missing expiry as denied, so webhook failure cannot leave
+  // an untagged session outside trial controls.
+  await deps.setClerkMetadata(userId, { demoRole: "pending" });
   const expiry = await deps.computeExpiry(startIsoEt);
   const email = pickPrimaryEmail(data);
 
-  // DB row FIRST so a user can never hold demo access (Clerk metadata) without
-  // a tracking row. A Clerk-write failure then leaves no access + a dangling
-  // row the sweep reconciles; a webhook retry is idempotent either way.
+  // The pending Clerk tag above denies access until both DB tracking and final
+  // active metadata are committed.
   await upsertDemoUser({
     db: deps.db,
     userId,

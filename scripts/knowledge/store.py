@@ -71,27 +71,32 @@ def upsert_documents(db, docs: Iterable[KnowledgeDoc]) -> dict[str, int]:
     {"inserted": n, "updated": n, "skipped": n, "pruned": n}."""
     counts = {"inserted": 0, "updated": 0, "skipped": 0}
     last_chunk_ix: dict[tuple[str, str], int] = {}
-    for doc in docs:
-        doc_id = (doc.source, doc.doc_key)
-        last_chunk_ix[doc_id] = max(last_chunk_ix.get(doc_id, -1), doc.chunk_ix)
-        digest = doc.content_hash()
-        existing = db.execute(
-            _SELECT_EXISTING_SQL, (doc.source, doc.doc_key, doc.chunk_ix)
-        ).fetchone()
-        if existing is not None and existing[1] == digest:
-            if doc.embedding is not None and not existing[2]:
-                _backfill_embedding(db, existing[0], doc)
+    try:
+        db.execute("BEGIN")
+        for doc in docs:
+            doc_id = (doc.source, doc.doc_key)
+            last_chunk_ix[doc_id] = max(last_chunk_ix.get(doc_id, -1), doc.chunk_ix)
+            digest = doc.content_hash()
+            existing = db.execute(
+                _SELECT_EXISTING_SQL, (doc.source, doc.doc_key, doc.chunk_ix)
+            ).fetchone()
+            if existing is not None and existing[1] == digest:
+                if doc.embedding is not None and not existing[2]:
+                    _backfill_embedding(db, existing[0], doc)
+                    counts["updated"] += 1
+                else:
+                    counts["skipped"] += 1
+            elif existing is not None:
+                _update_document(db, existing[0], doc, digest)
                 counts["updated"] += 1
             else:
-                counts["skipped"] += 1
-        elif existing is not None:
-            _update_document(db, existing[0], doc, digest)
-            counts["updated"] += 1
-        else:
-            _insert_document(db, doc, digest)
-            counts["inserted"] += 1
-    counts["pruned"] = _prune_trailing_chunks(db, last_chunk_ix)
-    db.commit()
+                _insert_document(db, doc, digest)
+                counts["inserted"] += 1
+        counts["pruned"] = _prune_trailing_chunks(db, last_chunk_ix)
+        db.commit()
+    except BaseException:
+        db.rollback()
+        raise
     return counts
 
 
@@ -103,16 +108,21 @@ def delete_source_docs(db, source: str, missing_doc_keys: Iterable[str]) -> int:
     if not doc_keys:
         return 0
     key_marks = ", ".join("?" for _ in doc_keys)
-    id_rows = db.execute(
-        f"SELECT id FROM knowledge WHERE source = ? AND doc_key IN ({key_marks})",
-        (source, *doc_keys),
-    ).fetchall()
-    ids = [row[0] for row in id_rows]
-    if ids:
-        id_marks = ", ".join("?" for _ in ids)
-        db.execute(f"DELETE FROM knowledge_fts WHERE rowid IN ({id_marks})", tuple(ids))
-        db.execute(f"DELETE FROM knowledge WHERE id IN ({id_marks})", tuple(ids))
-    db.commit()
+    try:
+        db.execute("BEGIN")
+        id_rows = db.execute(
+            f"SELECT id FROM knowledge WHERE source = ? AND doc_key IN ({key_marks})",
+            (source, *doc_keys),
+        ).fetchall()
+        ids = [row[0] for row in id_rows]
+        if ids:
+            id_marks = ", ".join("?" for _ in ids)
+            db.execute(f"DELETE FROM knowledge_fts WHERE rowid IN ({id_marks})", tuple(ids))
+            db.execute(f"DELETE FROM knowledge WHERE id IN ({id_marks})", tuple(ids))
+        db.commit()
+    except BaseException:
+        db.rollback()
+        raise
     return len(ids)
 
 

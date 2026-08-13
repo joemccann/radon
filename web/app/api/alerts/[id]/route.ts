@@ -1,23 +1,21 @@
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
 import { dbExecute, describeDbError } from "@/lib/dbExecute";
 import { getRequestId, jsonApiError, setNoStoreResponseHeaders } from "@/lib/apiContracts";
+import { requireRouteAccess } from "@/lib/routeAccess";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function DELETE(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const requestId = getRequestId();
-  const { userId } = await auth();
-  if (!userId) {
-    return setNoStoreResponseHeaders(
-      jsonApiError({ status: 401, code: "UNAUTHORIZED", message: "Sign in required", requestId }),
-      requestId,
-    );
-  }
+  const access = await requireRouteAccess(req, {
+    rate: { key: "alerts-delete", limit: 20, windowMs: 60_000 },
+    durableRateTier: "C",
+  });
+  if (!access.ok) return access.response;
 
   const { id } = await params;
   const ruleId = decodeURIComponent(id).trim();
@@ -26,7 +24,7 @@ export async function DELETE(
     await dbExecute(
       {
         sql: `DELETE FROM alert_rules WHERE id = ? AND user_id = ?`,
-        args: [ruleId, userId],
+        args: [ruleId, access.principal.userId],
       },
       { label: "alerts" },
     );

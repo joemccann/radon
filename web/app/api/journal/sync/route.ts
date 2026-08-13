@@ -1,6 +1,7 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
 import { NextResponse } from "next/server";
 import { radonFetch } from "@/lib/radonApi";
-import { importLatestReconciliationToJournal } from "@/lib/journalDb";
+import { importReconciliationSnapshotToJournal } from "@/lib/journalDb";
 
 export const runtime = "nodejs";
 
@@ -11,15 +12,31 @@ export const runtime = "nodejs";
  * Returns { imported, skipped } counts.
  */
 export async function POST(): Promise<Response> {
+  const access = await requireRouteAccess(undefined, {
+    operatorOnly: true,
+    rate: { key: "journal-sync", limit: 2, windowMs: 60_000 },
+    durableRateTier: "C",
+  });
+  if (!access.ok) return access.response;
   try {
-    await radonFetch("/journal/reconcile", { method: "POST", timeout: 130_000 });
-    const result = await importLatestReconciliationToJournal();
+    const requestedAt = Date.now();
+    const reconciliation = await radonFetch<{ snapshot_at?: unknown }>("/journal/reconcile", {
+      method: "POST",
+      timeout: 130_000,
+    });
+    const snapshotAt = typeof reconciliation.snapshot_at === "string"
+      ? reconciliation.snapshot_at
+      : "";
+    const snapshotMs = Date.parse(snapshotAt);
+    if (!snapshotAt || !Number.isFinite(snapshotMs) || snapshotMs < requestedAt - 1_000) {
+      throw new Error("Reconciliation returned a stale snapshot");
+    }
+    const result = await importReconciliationSnapshotToJournal(snapshotAt);
     return NextResponse.json({
       imported: result.imported,
       skipped: result.skipped,
     });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Sync failed";
-    return NextResponse.json({ error: message, imported: 0, skipped: 0 }, { status: 500 });
+  } catch {
+    return NextResponse.json({ error: "Journal sync failed", imported: 0, skipped: 0 }, { status: 500 });
   }
 }

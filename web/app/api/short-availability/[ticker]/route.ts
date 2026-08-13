@@ -1,3 +1,5 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
+
 import { NextResponse } from "next/server";
 import { radonFetch } from "@/lib/radonApi";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
@@ -18,6 +20,8 @@ type Params = { params: Promise<{ ticker: string }> };
  * (see feedback_http_status_for_real_errors.md).
  */
 export async function GET(_req: Request, ctx: Params): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { rate: { key: "short-availability/[ticker]:route", limit: 20, windowMs: 60_000 } });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   const { ticker: raw } = await ctx.params;
   const upper = raw.trim().toUpperCase();

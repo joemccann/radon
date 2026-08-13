@@ -16,7 +16,11 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 TRADE_LOG_PATH = _REPO_ROOT / "data" / "trade_log.json"
 TRADE_LOG_KEY_PREFIX = "trade_log:"
 
-_ROWS_SQL = "SELECT trade_id, payload, filled_at, written_at FROM journal ORDER BY trade_id"
+_BATCH_ROWS = 200
+_ROWS_SQL = (
+    "SELECT trade_id, payload, filled_at, written_at FROM journal "
+    "WHERE trade_id > ? ORDER BY trade_id LIMIT ?"
+)
 
 
 def fetch(db) -> Iterator[KnowledgeDoc]:
@@ -34,20 +38,26 @@ def prunable_doc_keys(doc_keys: Iterator[str] | list[str]) -> list[str]:
 
 
 def _journal_rows(db) -> Iterator[KnowledgeDoc]:
-    for trade_id, payload_json, filled_at, written_at in db.execute(_ROWS_SQL).fetchall():
-        payload = _parse_payload(payload_json)
-        if payload is None:
-            continue
-        yield KnowledgeDoc(
-            source=SOURCE,
-            scope=SCOPE,
-            doc_key=trade_id,
-            content=_render_trade(payload),
-            title=_title(payload),
-            metadata=_metadata(payload),
-            created_at=written_at,
-            last_activity_at=written_at or _date_to_iso(filled_at),
-        )
+    cursor = ""
+    while True:
+        rows = db.execute(_ROWS_SQL, (cursor, _BATCH_ROWS)).fetchall()
+        if not rows:
+            return
+        for trade_id, payload_json, filled_at, written_at in rows:
+            payload = _parse_payload(payload_json)
+            if payload is None:
+                continue
+            yield KnowledgeDoc(
+                source=SOURCE,
+                scope=SCOPE,
+                doc_key=trade_id,
+                content=_render_trade(payload),
+                title=_title(payload),
+                metadata=_metadata(payload),
+                created_at=written_at,
+                last_activity_at=written_at or _date_to_iso(filled_at),
+            )
+        cursor = rows[-1][0]
 
 
 def _trade_log_entries() -> Iterator[KnowledgeDoc]:

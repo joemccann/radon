@@ -29,7 +29,9 @@ export function execKey(fill: ExecutedOrder): string | null {
 /** Baseline key set from the first payload after mount — never toastable. */
 export function primeSeen(executed: ExecutedOrder[]): Set<string> {
   const seen = new Set<string>();
-  for (const fill of executed) {
+  // Feed order is newest-first; insertion order stays oldest-first so the
+  // persistence cap retains the newest executions.
+  for (const fill of [...executed].reverse()) {
     const key = execKey(fill);
     if (key) seen.add(key);
   }
@@ -76,7 +78,9 @@ export function formatFillToast(fill: ExecutedOrder): string {
     typeof fill.quantity === "number" && Number.isFinite(fill.quantity)
       ? `${fill.quantity}x `
       : "";
-  const price = fill.avgPrice != null ? ` @ $${fill.avgPrice.toFixed(2)}` : "";
+  const price = typeof fill.avgPrice === "number" && Number.isFinite(fill.avgPrice)
+    ? ` @ $${fill.avgPrice.toFixed(2)}`
+    : "";
   const sidePart = side ? `${side} ` : "";
   return `FILLED · ${sidePart}${qty}${instrumentLabel(fill)}${price}`;
 }

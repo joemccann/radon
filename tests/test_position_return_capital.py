@@ -110,6 +110,22 @@ def test_replay_zero_cross_closes_old_episode_and_opens_residual():
     assert replay["instances"][1]["legs"] == {"101": -4.0}
 
 
+def test_reversal_allocates_each_execution_quantity_once():
+    replay = replay_transactions([
+        [_execution("E1", quantity=10, perm_id=1)],
+        [_execution("E2", side="SLD", quantity=14, perm_id=2, filled_at="2026-08-07T16:01:30Z")],
+    ])
+
+    close_event, reopen_event = replay["events"][1:]
+    assert close_event["executions"][0]["quantity"] == 10
+    assert reopen_event["executions"][0]["quantity"] == 4
+    assert sum(
+        execution["quantity"]
+        for event in (close_event, reopen_event)
+        for execution in event["executions"]
+    ) == 14
+
+
 def test_isolated_margin_window_accepts_exact_position_diff():
     event = {
         "kind": "OPEN",
@@ -347,3 +363,33 @@ def test_ib_exec_correction_invalidates_observed_basis_instead_of_double_countin
     reconcile_position_return_capital(db, apply=True)
 
     assert read_active_position_return_capital(db) == []
+
+
+def test_execution_correction_supersedes_prior_lifecycle_once():
+    db = _ledger_db()
+    insert_account_margin_sample(
+        "U1", observed_from="2026-08-07T15:59:59Z",
+        observed_through="2026-08-07T16:00:00Z", initial_margin=100_000,
+        maintenance_margin=80_000, currency="USD", positions={}, db=db,
+    )
+    upsert_position_execution_fact(_execution("ROOT.01"), db=db)
+    insert_account_margin_sample(
+        "U1", observed_from="2026-08-07T16:00:59Z",
+        observed_through="2026-08-07T16:01:00Z", initial_margin=127_000,
+        maintenance_margin=100_000, currency="USD", positions={"101": 10}, db=db,
+    )
+    reconcile_position_return_capital(db, apply=True)
+
+    upsert_position_execution_fact({**_execution("ROOT.02"), "price": 4.20}, db=db)
+    reconcile_position_return_capital(db, apply=True)
+
+    assert db.execute("SELECT count(*) FROM position_instances").fetchone()[0] == 1
+    assert db.execute("SELECT count(*) FROM position_instance_events").fetchone()[0] == 1
+    links = db.execute(
+        "SELECT exec_id, revision, price FROM position_event_executions"
+    ).fetchall()
+    assert links == [("ROOT", 2, 4.20)]
+    observations = db.execute(
+        "SELECT status, amount FROM position_capital_observations"
+    ).fetchall()
+    assert observations == [("VOID", None)]
