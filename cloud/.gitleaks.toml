@@ -26,6 +26,15 @@ commits = [
   # Immutable on protected main; the underlying value is tracked for rotation
   # (project_public_repo_leak_sweep_2026_07_05). Not a new exposure.
   "9142de46a09e367483ed57e1a323f1141bd106cc",
+  # 2026-08-13: main was rebase-merged, so the two commits above were recreated
+  # under new SHAs. These entries carry no new content -- the blobs are
+  # identical to their pre-rebase originals:
+  #   6ec11003 docs/security-audit-2026-07-18.html -> blob 32dd55bd (== 9142de46)
+  #   da857b8b cloud/tests/test_gitleaks_policy.py -> blob 1d9a0955 (== 65213d97)
+  # Keyed by SHA, this list is invalidated by any main rewrite; see
+  # test_gitleaks_policy.py for the mirrored baseline.
+  "6ec11003bb4521e7f7b677ffbd78b7fd4d09458a",
+  "da857b8b19a6e5778bb86bf37465346dca8da89b",
 ]
 
 [[rules]]
@@ -42,6 +51,9 @@ commits = [
   "25ef348f1eb882bdc4a7d735fd8e3206b2711c2e",
   # Policy self-test fixtures that were rewritten to runtime construction.
   "65213d976eb3b4d835761c0b3f639581a533a27a",
+  # 2026-08-13 rebase of main recreated the fixture commit above under a new
+  # SHA; blob 1d9a0955 is byte-identical to 65213d97's.
+  "da857b8b19a6e5778bb86bf37465346dca8da89b",
 ]
 
 [allowlist]
