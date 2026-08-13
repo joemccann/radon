@@ -126,6 +126,36 @@ class TestClassify:
         }
         assert classify(findings, NOW) == []
 
+    def test_marker_mismatch_with_unobservable_ci_and_no_journal_does_not_classify(self):
+        """ci=None is unknown, never settled. On the VPS gh is absent, so
+        the journal-only window (promote-verify) is gone while the staged
+        build is still running. Marker != HEAD is not P2 without a
+        positively observed completed CI."""
+        findings = healthy_findings()
+        findings["deploy"] = {
+            "state": "up",
+            "ci": None,
+            "green_marker": "abc",
+            "head": "def",
+            "in_flight": False,
+        }
+        assert classify(findings, NOW) == []
+
+    def test_marker_mismatch_with_observed_completed_ci_still_classifies(self):
+        findings = healthy_findings()
+        findings["deploy"] = {
+            "state": "up",
+            "ci": {"status": "completed", "conclusion": "success", "head_sha": "def"},
+            "green_marker": "abc",
+            "head": "def",
+            "in_flight": False,
+        }
+        incidents = classify(findings, NOW)
+        assert [i["case_id"] for i in incidents] == [
+            "cancelled-deploy-corrupt-next-build"
+        ]
+        assert incidents[0]["severity"] == "P2"
+
     def test_stale_freshness_is_p2(self):
         findings = healthy_findings()
         findings["freshness"] = {

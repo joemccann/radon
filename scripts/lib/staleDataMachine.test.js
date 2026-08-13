@@ -13,6 +13,8 @@ import {
   decideHealthWrite,
   shouldRequestGatewayRestart,
   summarizeSubscriptionFreshness,
+  nextFarmStateCode,
+  farmStateAfterIdleDrain,
 } from "./staleDataMachine.js";
 
 const NOW = 1_700_000_000_000;
@@ -323,17 +325,16 @@ describe("decideHealthWrite (heartbeat must never clobber the escalation row)", 
     ).toEqual({ action: "none", heartbeat: false, clearError: false });
   });
 
-  it("idle relay on a farm IB reports DOWN → no ok heartbeat", () => {
-    // Idle is not blind: farm state arrives on the info channel with or without
-    // subscriptions. Blessing this would swap the 2026-08-10 false positive for
-    // a false negative, which is strictly worse — a genuinely dead farm would
-    // read fresh for as long as nobody happens to be watching.
+  it("sticky leftover farm-DOWN while idle still heartbeats", () => {
+    // lastFarmStateCode sticks across drain / overnight. A leftover 2103/2105/2108
+    // is not a current farm-down, and gating the idle heartbeat on it freezes
+    // the row the same way the 2026-08-10 tick-age gate did.
     for (const farmState of [2103, 2105, 2108]) {
       expect(
         decideHealthWrite(
           hw({ activeSubscriptions: 0, lastTickAt: STALE_TICK_AT, farmState }),
         ),
-      ).toEqual({ action: "none", heartbeat: false, clearError: false });
+      ).toEqual({ action: "none", heartbeat: true, clearError: false });
     }
   });
 
@@ -355,7 +356,7 @@ describe("decideHealthWrite (heartbeat must never clobber the escalation row)", 
     ).toEqual({ action: "none", heartbeat: false, clearError: true });
   });
 
-  it("escalated, went idle, but the farm is still DOWN → latch holds", () => {
+  it("escalated then idle clears the latch even with a leftover farm-DOWN code", () => {
     expect(
       decideHealthWrite(
         hw({
@@ -367,13 +368,39 @@ describe("decideHealthWrite (heartbeat must never clobber the escalation row)", 
           lastEscalationAt: NOW - (ESCALATION_COOLDOWN_MS - 1),
         }),
       ),
-    ).toEqual({ action: "none", heartbeat: false, clearError: false });
+    ).toEqual({ action: "none", heartbeat: false, clearError: true });
   });
 
   it("healthy but inside the heartbeat interval → no write, no action", () => {
     expect(
       decideHealthWrite(hw({ lastHeartbeatAt: NOW - 1_000 })),
     ).toEqual({ action: "none", heartbeat: false, clearError: false });
+  });
+});
+
+describe("farm-state hygiene (leftover DOWN must not stick into idle)", () => {
+  it("clears leftover DOWN on farm-OK when already idle", () => {
+    expect(nextFarmStateCode(2105, 2104, 0)).toBeNull();
+    expect(nextFarmStateCode(2103, 2106, 0)).toBeNull();
+    expect(nextFarmStateCode(2108, 2158, 0)).toBeNull();
+  });
+
+  it("keeps farm-OK while subscribed so the ladder can resubscribe", () => {
+    expect(nextFarmStateCode(2105, 2104, 36)).toBe(2104);
+    expect(nextFarmStateCode(null, 2106, 1)).toBe(2106);
+  });
+
+  it("records a new farm-DOWN whether idle or subscribed", () => {
+    expect(nextFarmStateCode(2104, 2105, 0)).toBe(2105);
+    expect(nextFarmStateCode(null, 2103, 12)).toBe(2103);
+  });
+
+  it("ignores non-farm info codes", () => {
+    expect(nextFarmStateCode(2105, 354, 0)).toBe(2105);
+  });
+
+  it("clears farm state on idle drain", () => {
+    expect(farmStateAfterIdleDrain()).toBeNull();
   });
 });
 

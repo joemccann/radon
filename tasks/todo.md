@@ -1,3 +1,36 @@
+# Task: Remediate live incidents (2026-08-13)
+
+0 open artifacts; 3 live `service_health` errors + 2 diagnosed flap classes.
+
+## Dependency graph
+
+- T1 depends_on: [] - Diagnose host-metrics, orders-sync conflict, journal-gap-sli, relay_tick
+- T2 depends_on: [] - TDD: nextjs-db-watchdog 401 treated as Turso wedge (do not un-protect `/api/service-health`)
+- T3 depends_on: [] - TDD: register Equibles + event-odds freshness windows + watchdog catalog
+- T4 depends_on: [] - TDD: deploy classifier must not fire when CI is unobservable
+- T5 depends_on: [T1] - TDD remaining confirmed code_fix items
+- T6 depends_on: [T2, T3, T4, T5] - Focused tests + runbook notes
+
+## Checklist
+
+- [x] T1 Diagnose remaining live issues
+- [x] T2 nextjs-db-read false wedge
+- [x] T3 Equibles / event-odds registration
+- [x] T4 deploy-marker CI-blind P2
+- [x] T5 Remaining code fixes
+- [x] T6 Verify
+
+## Review
+
+- T6: focused green. pytest 40 (incident 22 + registration 5 + watchdog services 13); nextjs-db-watchdog 6; writer/execution 25 (dual-write 7 + identity 18). vitest 129 (middleware-auth + service-health-windows). Runbook notes: T2 401/unknown wedge; T5 idle/farm-down false stale. T3/T4 already documented.
+- T5: `position_execution_facts` identity is economic only (account/exec/con/side/qty/explicit price/UTC time). Late metadata and avgPrice drift no longer raise; real price conflicts still do. `ib_orders` logs per-row conflicts and finishes the cycle. pytest 587 affected + 20 identity/dual-write.
+- T5: relay_tick idle/open-bell false stale. `hasHealthyDataPlane` treats 0 subs as healthy unless IB is down; leftover 2103/2105/2108 no longer silences the 60s heartbeat. `evaluateRelayTick` uses `isStale` open-bell grace; `ib-realtime-relay` is RTH_ONLY. Drain and farm-OK-while-idle clear `lastFarmStateCode`. Dead process / latched error still `fresh=false`. vitest 200 focused.
+- T2: `/api/service-health` stays off `isPublicRoute`. Watchdog sends `RADON_PROBE_FRESHNESS_TOKEN`; HTTP 401/403 and a missing token are unknown (no wedge count, no restart, no `nextjs-db-read` error row). Dual-auth: valid bearer bypasses Clerk; missing bearer still uses the dashboard session.
+- T3: DUR-14 collector now walks direct `record_service_health` (excludes writer/service_cycle/scan_mirror/base/ib_watchdog). Registered daily 26h short-crowding + filing-forensics; weekly 8d 13f/ats/cot; event-odds 7h/4d like catalysts. All scheduled, requires_ib false. Runbook: ok+null last_error+stale = registration-gap. pytest 18; vitest 114.
+- T4: `ci=None` is unknown, never settled. P2 marker-mismatch requires observed `ci.status==completed` and not in_flight. P1 `/sign-in` 500 unchanged. pytest `test_incident_watchdog.py` 22.
+
+---
+
 # Task: Assistant full-backend tools (2026-08-13)
 
 CMD+J chat failed the ADBE bull-call-spread ask: no live spot, no priced chain, no spread math, KB miss treated as a dead end. Give the in-app assistant the same operator data surface as a terminal session (READ-only FastAPI + evaluate), then exact strikes from live mids.

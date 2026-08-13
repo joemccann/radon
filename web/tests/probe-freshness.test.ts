@@ -144,6 +144,24 @@ describe("evaluateRelayTick", () => {
     expect(freshnessAtSubs(12)).toBe(false);
   });
 
+  it("overnight close write is not stale inside RELAY_HEARTBEAT_STALE_MS of the 09:30 ET bell", () => {
+    // Thu 2026-08-13 09:30:00 ET. Last RTH write was Wed 16:00 ET.
+    const bell = Date.parse("2026-08-13T13:30:00Z");
+    const yesterdayClose = Date.parse("2026-08-12T20:00:00Z");
+    const row = relayRow(
+      { updated_at: iso(yesterdayClose) },
+      {
+        heartbeat: "tick",
+        last_tick_at: iso(yesterdayClose - 10_000),
+        tick_age_secs: 10,
+        active_subscriptions: 0,
+      },
+    );
+    expect(evaluateRelayTick(row, "open", bell).fresh).toBe(true);
+    expect(evaluateRelayTick(row, "open", bell + RELAY_HEARTBEAT_STALE_MS - 60_000).fresh).toBe(true);
+    expect(evaluateRelayTick(row, "open", bell + RELAY_HEARTBEAT_STALE_MS + 60_000).fresh).toBe(false);
+  });
+
   it("idle relay silent past the idle bound is still a dead relay", () => {
     const dead = relayRow(
       { updated_at: iso(OPEN_NOW - RELAY_IDLE_HEARTBEAT_STALE_MS - 60_000) },

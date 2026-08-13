@@ -6,10 +6,14 @@
  * The assistant route returns a structured order proposal for `place_order`:
  *   { tool, destructive, input, summary, toolUseId }
  *
- * ChatPanel must render it as a confirm card (summary + Confirm / Cancel) and:
+ * ChatPanel must render it as a confirm card (summary + Confirm / Dismiss) and:
  *   - NEVER auto-execute (no placement fetch until the operator clicks Confirm),
  *   - Confirm POSTs the proposed order to the placement path,
- *   - Cancel dismisses the card without placing anything.
+ *   - Dismiss clears the card without placing anything.
+ *
+ * The card is now <ApprovalGate> (web/components/agent) rather than the flat
+ * .chat-order-confirm banner, and the composer is <AskComposer> — hence the
+ * "Ask Radon" composer label and the "Dismiss" (was "Cancel") action below.
  *
  * All network is mocked.
  */
@@ -64,7 +68,7 @@ const PROPOSAL = {
 };
 
 async function sendNonCommandMessage(text: string) {
-  const textarea = screen.getByLabelText("Message Grok assistant");
+  const textarea = screen.getByLabelText("Ask Radon");
   fireEvent.change(textarea, { target: { value: text } });
   const form = textarea.closest("form")!;
   fireEvent.submit(form);
@@ -87,7 +91,7 @@ describe("ChatPanel order-confirm card", () => {
       expect(screen.getAllByText(PROPOSAL.summary)).toHaveLength(2);
     });
     expect(screen.getByRole("button", { name: /confirm/i })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /cancel/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /dismiss/i })).toBeTruthy();
   });
 
   it("does NOT auto-execute the order (no placement call before Confirm)", async () => {
@@ -135,7 +139,7 @@ describe("ChatPanel order-confirm card", () => {
     expect(sentBody.idempotencyKey).toMatch(/^[0-9a-f-]{36}$/);
   });
 
-  it("Cancel dismisses the card and places nothing", async () => {
+  it("Dismiss clears the card and places nothing", async () => {
     const { calls } = mockFetchSequence({
       "/api/assistant": () => ({ content: "Proposing an order.", proposal: PROPOSAL }),
     });
@@ -143,8 +147,8 @@ describe("ChatPanel order-confirm card", () => {
     render(<ChatPanel activeSection="dashboard" portfolio={{ positions: [] } as never} />);
     await sendNonCommandMessage("buy me some wulf calls");
 
-    await waitFor(() => screen.getByRole("button", { name: /cancel/i }));
-    fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+    await waitFor(() => screen.getByRole("button", { name: /dismiss/i }));
+    fireEvent.click(screen.getByRole("button", { name: /dismiss/i }));
 
     await waitFor(() => {
       expect(screen.queryByText(PROPOSAL.summary)).toBeNull();

@@ -4,10 +4,13 @@
 liveness green) while every in-process Turso read failed for hours — the
 health daemon, the four watchdog buckets, and systemd all reported healthy
 because none of them exercises a Turso read THROUGH the Next.js process.
-This probe does: GET /api/service-health performs a real DB read and, when
-that read fails, returns HTTP 200 with a synthetic `turso-db` error row
-(web/app/api/service-health/route.ts catch path) — so the judge inspects
-the BODY, not the status code.
+This probe does: GET /api/service-health with
+`Authorization: Bearer $RADON_PROBE_FRESHNESS_TOKEN` (the route is not
+public; Clerk or that bearer). A real DB-read failure returns HTTP 200
+with a synthetic `turso-db` error row (web/app/api/service-health/route.ts
+catch path) — the judge inspects the BODY, not a 401/403 from the auth
+perimeter. HTTP 401/403, a missing token, or a wrong token is unknown:
+stand down, do not count a wedge, do not restart.
 
 Restart policy (mirrors scripts/ib_watchdog.py's ladder):
   - K=3 consecutive wedge cycles (60s timer -> ~3 min to action).
@@ -34,7 +37,10 @@ import os
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
+
+AUTH_DENIED_STATUSES = {401, 403}
 
 PROBE_URL = "http://127.0.0.1:3000/api/service-health"
 PROBE_TIMEOUT_S = 10
@@ -61,20 +67,44 @@ def log(message: str) -> None:
     print(f"[nextjs-db-watchdog] {message}", flush=True)
 
 
-def probe_nextjs_db_read() -> tuple[bool, str]:
-    """True when the Next.js process can read Turso end-to-end."""
+def _probe_token() -> str:
+    return (os.environ.get("RADON_PROBE_FRESHNESS_TOKEN") or "").strip()
+
+
+def probe_nextjs_db_read() -> tuple[str, str]:
+    """Return (verdict, reason): ok | wedge | unknown.
+
+    unknown = missing/wrong token or HTTP 401/403. Never a Node-local wedge.
+    wedge = HTTP 200 with a turso-db error row, or a transport failure.
+    """
+    token = _probe_token()
+    if not token:
+        return "unknown", "missing RADON_PROBE_FRESHNESS_TOKEN"
+    request = urllib.request.Request(
+        PROBE_URL,
+        headers={"Authorization": f"Bearer {token}"},
+    )
     try:
-        with urllib.request.urlopen(PROBE_URL, timeout=PROBE_TIMEOUT_S) as resp:
-            if resp.status != 200:
-                return False, f"HTTP {resp.status}"
-            payload = json.loads(resp.read().decode("utf-8"))
-    except Exception as err:  # timeout, refused, bad JSON — all failing
-        return False, f"probe error: {err}"
+        with urllib.request.urlopen(request, timeout=PROBE_TIMEOUT_S) as resp:
+            status = resp.status
+            raw = resp.read()
+    except urllib.error.HTTPError as err:
+        return "unknown", f"HTTP {err.code}"
+    except Exception as err:  # timeout, refused
+        return "wedge", f"probe error: {err}"
+    if status in AUTH_DENIED_STATUSES:
+        return "unknown", f"HTTP {status}"
+    if status != 200:
+        return "unknown", f"HTTP {status}"
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except Exception as err:
+        return "unknown", f"probe error: {err}"
     rows = payload.get("services") or []
     for row in rows:
         if row.get("service") == "turso-db" and row.get("state") == "error":
-            return False, f"turso-db error row: {row.get('error_summary')}"
-    return True, ""
+            return "wedge", f"turso-db error row: {row.get('error_summary')}"
+    return "ok", ""
 
 
 def python_can_read_turso() -> bool:
@@ -137,9 +167,9 @@ def restart_nextjs() -> None:
 
 def main() -> None:
     state = load_state()
-    ok, reason = probe_nextjs_db_read()
+    verdict, reason = probe_nextjs_db_read()
 
-    if ok:
+    if verdict == "ok":
         if state.get("last_state") == "error":
             log("recovered: Next.js Turso reads healthy again")
         # Heartbeat every clean cycle — transition-only writes leave the row
@@ -149,6 +179,16 @@ def main() -> None:
         save_state({"consecutive_wedges": 0,
                     "last_restart_epoch": state.get("last_restart_epoch", 0),
                     "last_state": "ok"})
+        return
+
+    if verdict == "unknown":
+        # Auth perimeter or missing probe token — not a Turso wedge.
+        log(f"probe unknown ({reason}); standing down, not a Node-local Turso wedge")
+        save_state({
+            "consecutive_wedges": state.get("consecutive_wedges", 0),
+            "last_restart_epoch": state.get("last_restart_epoch", 0),
+            "last_state": state.get("last_state", "ok"),
+        })
         return
 
     if not python_can_read_turso():

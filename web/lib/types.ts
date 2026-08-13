@@ -38,6 +38,8 @@ export type AssistantToolEvent = {
   input: Record<string, unknown>;
   ok: boolean;
   error?: string;
+  /** Loop de-duplicated an identical call and replayed the cached result. */
+  repeated?: boolean;
 };
 
 export type AssistantOrderProposal = {

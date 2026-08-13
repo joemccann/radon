@@ -23,6 +23,7 @@ import {
   getFreshnessWindowMs,
   getMarketStateFromDate,
   getServiceCategory,
+  isStale,
   type MarketState,
 } from "./serviceHealthWindows";
 import { parseScanTime } from "./parseScanTime";
@@ -110,9 +111,13 @@ function parseRelayDetail(lastError: string | null): Record<string, unknown> {
   }
 }
 
-function heartbeatAgeMsFrom(row: RelayHealthRow, nowMs: number): number | null {
-  const heartbeatAt = row.updated_at ? Date.parse(row.updated_at) : NaN;
-  return Number.isNaN(heartbeatAt) ? null : nowMs - heartbeatAt;
+/**
+ * Writer liveness, including the RTH-only open-bell grace in {@link isStale}:
+ * a last write from before today's 09:30 ET is compared to seconds-since-open,
+ * not wall-clock age. Mid-session silence still uses the 5-minute bound.
+ */
+function heartbeatLive(row: RelayHealthRow, market: MarketState, nowMs: number): boolean {
+  return !isStale("ib-realtime-relay", row.updated_at, market, nowMs);
 }
 
 /**
@@ -129,6 +134,10 @@ function heartbeatAgeMsFrom(row: RelayHealthRow, nowMs: number): number | null {
  * guard turned a healthy idle relay into a fake incident (2026-08-10). It is
  * still bounded by RELAY_IDLE_HEARTBEAT_STALE_MS, so a relay process that has
  * genuinely died with no subscribers is still caught.
+ *
+ * Overnight silence is also not a failure: the writer is RTH-only, so a
+ * 16:00 ET close write probed at 09:30 ET must use the same seconds-since-open
+ * rule as isStale (ib-realtime-relay is RTH_ONLY).
  */
 export function evaluateRelayTick(
   row: RelayHealthRow | null,
@@ -144,18 +153,15 @@ export function evaluateRelayTick(
 
   if (row.state === "error") return { applicable: true, age_secs, fresh: false };
 
-  const heartbeatAgeMs = heartbeatAgeMsFrom(row, nowMs);
-
   if (detail.active_subscriptions === 0) {
     return {
       applicable: true,
       age_secs,
-      fresh: heartbeatAgeMs !== null && heartbeatAgeMs <= RELAY_IDLE_HEARTBEAT_STALE_MS,
+      fresh: heartbeatLive(row, market, nowMs),
     };
   }
 
-  const heartbeatLive = heartbeatAgeMs !== null && heartbeatAgeMs <= RELAY_HEARTBEAT_STALE_MS;
-  if (!heartbeatLive) return { applicable: true, age_secs, fresh: false };
+  if (!heartbeatLive(row, market, nowMs)) return { applicable: true, age_secs, fresh: false };
 
   return {
     applicable: true,
