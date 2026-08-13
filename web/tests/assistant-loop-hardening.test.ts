@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  */
 
 const CANNED_CAP_MESSAGE = "Reached the maximum tool-calling rounds without a final answer.";
+const PRINCIPAL = { userId: "user_test", token: "jwt-token" };
 
 type MockChatResponse = {
   provider: string;
@@ -27,7 +28,7 @@ function toolUseResponse(round: number, input: Record<string, unknown>): MockCha
     provider: "anthropic",
     model: "mock-model",
     text: "",
-    toolCalls: [{ id: `tu_${round}`, name: "search_knowledge", input }],
+    toolCalls: [{ id: `tu_${round}`, name: "get_portfolio", input }],
     usage: { inputTokens: 10, outputTokens: 5 },
     stopReason: "tool_use",
   };
@@ -79,7 +80,7 @@ describe("assistant loop hardening", () => {
 
     const executeTool = okExecuteTool();
     const runAssistantLoop = await loadLoop(chat, executeTool);
-    const result = await runAssistantLoop([{ role: "user", content: "Weekly P&L?" }], "system prompt");
+    const result = await runAssistantLoop([{ role: "user", content: "Weekly P&L?" }], "system prompt", PRINCIPAL);
 
     expect(chat).toHaveBeenCalledTimes(7);
 
@@ -106,7 +107,7 @@ describe("assistant loop hardening", () => {
     chat.mockRejectedValueOnce(new Error("provider down"));
 
     const runAssistantLoop = await loadLoop(chat, okExecuteTool());
-    const result = await runAssistantLoop([{ role: "user", content: "Weekly P&L?" }], "system prompt");
+    const result = await runAssistantLoop([{ role: "user", content: "Weekly P&L?" }], "system prompt", PRINCIPAL);
 
     expect(chat).toHaveBeenCalledTimes(7);
     expect(result.content).toBe(CANNED_CAP_MESSAGE);
@@ -129,7 +130,7 @@ describe("assistant loop hardening", () => {
 
     const executeTool = okExecuteTool();
     const runAssistantLoop = await loadLoop(chat, executeTool);
-    const result = await runAssistantLoop([{ role: "user", content: "Weekly P&L?" }], "system prompt");
+    const result = await runAssistantLoop([{ role: "user", content: "Weekly P&L?" }], "system prompt", PRINCIPAL);
 
     expect(executeTool).toHaveBeenCalledTimes(1);
     expect(result.toolEvents).toHaveLength(2);
@@ -164,10 +165,41 @@ describe("assistant loop hardening", () => {
 
     const executeTool = okExecuteTool();
     const runAssistantLoop = await loadLoop(chat, executeTool);
-    const result = await runAssistantLoop([{ role: "user", content: "Weekly P&L?" }], "system prompt");
+    const result = await runAssistantLoop([{ role: "user", content: "Weekly P&L?" }], "system prompt", PRINCIPAL);
 
     expect(executeTool).toHaveBeenCalledTimes(2);
     expect(result.toolEvents.every((event) => event.repeated !== true)).toBe(true);
+  });
+
+  it("destructive_call_waits_for_required_reads_and_runtime_validation", async () => {
+    const validOrder = {
+      type: "stock", ticker: "AAPL", action: "BUY", quantity: 1, limit_price: 200,
+    };
+    const chat = vi.fn()
+      .mockResolvedValueOnce({
+        provider: "anthropic", model: "mock-model", text: "",
+        toolCalls: [
+          { id: "read", name: "get_portfolio", input: {} },
+          { id: "order-early", name: "place_order", input: validOrder },
+        ],
+      })
+      .mockResolvedValueOnce({
+        provider: "anthropic", model: "mock-model", text: "Reviewed.",
+        toolCalls: [{ id: "order-final", name: "place_order", input: validOrder }],
+      });
+    const executeTool = okExecuteTool();
+    const runAssistantLoop = await loadLoop(chat, executeTool);
+
+    const result = await runAssistantLoop(
+      [{ role: "user", content: "Buy 1 AAPL and place the order after checking my portfolio" }],
+      "system prompt",
+      PRINCIPAL,
+    );
+
+    expect(executeTool).toHaveBeenCalledTimes(1);
+    expect(executeTool).toHaveBeenCalledWith("get_portfolio", {}, PRINCIPAL);
+    expect(result.outcome).toBe("proposal");
+    expect(result.proposal?.toolUseId).toBe("order-final");
   });
 
   it("logs one console line per round with the requested tool names", async () => {
@@ -183,10 +215,10 @@ describe("assistant loop hardening", () => {
       });
 
     const runAssistantLoop = await loadLoop(chat, okExecuteTool());
-    await runAssistantLoop([{ role: "user", content: "Weekly P&L?" }], "system prompt");
+    await runAssistantLoop([{ role: "user", content: "Weekly P&L?" }], "system prompt", PRINCIPAL);
 
     const lines = logSpy.mock.calls.map((call) => String(call[0]));
-    expect(lines.some((line) => /^\[assistant\] round=1 .*tools=search_knowledge/.test(line))).toBe(true);
+    expect(lines.some((line) => /^\[assistant\] round=1 .*tools=get_portfolio/.test(line))).toBe(true);
     expect(lines.some((line) => /^\[assistant\] round=2 .*tools=none/.test(line))).toBe(true);
   });
 });

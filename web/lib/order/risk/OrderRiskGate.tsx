@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect } from "react";
+
 /**
  * OrderRiskGate — the renderless contract that pairs `useOrderRisk` with
  * `<OrderConfirmSummary>`.
@@ -24,6 +26,7 @@ import { useRecordOrderRiskTrace } from "./telemetry";
 import { useShortAvailability } from "../hooks/useShortAvailability";
 import { useWhatIfMargin } from "./useWhatIfMargin";
 import { mergeWhatIfMargin } from "./mergeWhatIfMargin";
+import CorrelationRiskBanner from "@/components/CorrelationRiskBanner";
 
 // Phase-2 IB what-if margin. Ships OFF: the backend (endpoint + script branch)
 // is inert until this flag is set, after live verification on an authenticated
@@ -81,11 +84,11 @@ export function OrderRiskGate({
 }: OrderRiskGateProps) {
   const state = useOrderRisk(input, portfolio);
 
-  // Imperative callback so parents can wire submit-button enablement off
-  // the resolved state without re-running the hook themselves.
-  if (onState) {
-    onState(state);
-  }
+  // Parent state updates belong after commit; firing during render produces
+  // React cross-component update warnings and can cause render loops.
+  useEffect(() => {
+    onState?.(state);
+  }, [onState, state]);
 
   // Telemetry: record one trace per resolved-state observation. The hook
   // unconditionally runs (React hooks rule) — when `state` is null it
@@ -117,7 +120,7 @@ export function OrderRiskGate({
 
   // LOCATE/FEE chip: shown when a SELL/SHORT order has no held position in
   // the underlying. Applicable to both option SELL legs and linear SELL orders.
-  const locateEnabled = resolveLocateChipEnabled(input, portfolio);
+  const locateEnabled = resolveLocateChipEnabled(input, portfolio, state);
   const locateTicker = locateEnabled ? (input?.ticker ?? null) : null;
   const { status: locateStatus, data: locateData } = useShortAvailability(
     locateTicker,
@@ -158,6 +161,10 @@ export function OrderRiskGate({
         className={className}
         marginWhatIf={marginWhatIf}
       />
+      <CorrelationRiskBanner
+        report={state.correlationReport}
+        showUnavailable={state.coverageStatus === "resolved"}
+      />
       {showLocateChip && (
         <LocateFeeChip status={locateStatus} data={locateData} />
       )}
@@ -175,22 +182,23 @@ export function OrderRiskGate({
  *     When portfolio is still loading (undefined), we do NOT fetch yet so we
  *     avoid a stale/wrong chip showing before coverage is known.
  */
-function resolveLocateChipEnabled(
+export function resolveLocateChipEnabled(
   input: OrderRiskInput | null,
   portfolio: PortfolioData | null | undefined,
+  state: OrderRiskState | null,
 ): boolean {
   if (input == null) return false;
 
   const hasSellLeg = inputHasSellLeg(input);
   if (!hasSellLeg) return false;
 
-  // Portfolio still loading — do not show chip yet.
-  if (portfolio === undefined) return false;
-
-  // No portfolio context — assume no position; show chip.
-  if (portfolio === null) return true;
-
-  return !portfolioHasPositionForTicker(portfolio, input.ticker);
+  // The canonical risk projection already accounts for order-internal legs,
+  // exact held options, stock coverage, and held quantities. A ticker-only
+  // portfolio lookup is unsafe: an unrelated option position must not hide a
+  // genuinely naked short. Show locate telemetry only after coverage resolves
+  // and the projected order still carries an uncovered/naked obligation.
+  if (portfolio == null || state?.coverageStatus !== "resolved") return false;
+  return state.summary.undefinedRiskReason != null;
 }
 
 function inputHasSellLeg(input: OrderRiskInput): boolean {
@@ -198,13 +206,4 @@ function inputHasSellLeg(input: OrderRiskInput): boolean {
   // Option order: any leg with action SELL
   const opt = input as { chainLegs: { action: string }[] };
   return opt.chainLegs.some((l) => l.action === "SELL");
-}
-
-function portfolioHasPositionForTicker(
-  portfolio: PortfolioData,
-  ticker: string,
-): boolean {
-  return portfolio.positions.some(
-    (p) => p.ticker.toUpperCase() === ticker.toUpperCase(),
-  );
 }

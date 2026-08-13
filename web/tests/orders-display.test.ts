@@ -218,7 +218,7 @@ describe("distanceToFill", () => {
 
 describe("resolveOrderIntent", () => {
   it("SELL against held LONG option is CLOSE", () => {
-    const order = makeOrder({ action: "SELL" });
+    const order = makeOrder({ action: "SELL", totalQuantity: 5 });
     const intent = resolveOrderIntent(order, [
       makeOptPosition("AAPL", "LONG", 200, "Call"),
     ]);
@@ -226,7 +226,7 @@ describe("resolveOrderIntent", () => {
   });
 
   it("BUY against held SHORT option is CLOSE", () => {
-    const order = makeOrder({ action: "BUY" });
+    const order = makeOrder({ action: "BUY", totalQuantity: 5 });
     const intent = resolveOrderIntent(order, [
       makeOptPosition("AAPL", "SHORT", 200, "Call"),
     ]);
@@ -252,6 +252,33 @@ describe("resolveOrderIntent", () => {
     expect(resolveOrderIntent(order, [makeStockPosition("AAPL", "LONG")])).toBe(
       "CLOSE",
     );
+  });
+
+  it("an order larger than the held option quantity is OPEN, not a riskless close", () => {
+    const held = makeOptPosition("AAPL", "LONG", 200, "Call");
+    held.legs[0].contracts = 5;
+    expect(resolveOrderIntent(makeOrder({ action: "SELL", totalQuantity: 10 }), [held])).toBe("OPEN");
+  });
+
+  it("finds stock collateral inside a covered-call position", () => {
+    const coveredCall = makeStockPosition("AAPL", "LONG", 100);
+    coveredCall.structure = "Covered Call";
+    coveredCall.legs.push({
+      type: "Call",
+      strike: 200,
+      direction: "SHORT",
+      contracts: 1,
+      entry_cost: -100,
+      avg_cost: 100,
+      market_price: 1,
+      market_value: -100,
+    });
+    const sell = makeOrder({
+      action: "SELL",
+      totalQuantity: 100,
+      contract: { conId: 9, symbol: "AAPL", secType: "STK", strike: null, right: null, expiry: null },
+    });
+    expect(resolveOrderIntent(sell, [coveredCall])).toBe("CLOSE");
   });
 });
 

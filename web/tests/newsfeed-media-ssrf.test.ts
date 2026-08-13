@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { access, mkdir, mkdtemp, readdir } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -11,9 +11,10 @@ import path from "node:path";
 // (b) read the operator's themarketear.com session cookie out of their own
 // access log. Both are refused before a socket opens.
 
-const PNG_BYTES = Buffer.from([
-  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
-]);
+const PNG_BYTES = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVR4nGNgYGD4DwABBAEAX+XDSwAAAABJRU5ErkJggg==",
+  "base64",
+);
 
 async function tempMediaDir() {
   const root = await mkdtemp(path.join(tmpdir(), "radon-newsfeed-ssrf-"));
@@ -27,6 +28,19 @@ function recordingClient(response = { status: 200, headers: { "content-type": "i
   const client = {
     get: async (url: string, options: { headers?: Record<string, string> } = {}) => {
       requests.push({ url, cookie: options?.headers?.Cookie });
+      return response;
+    },
+  };
+  return { client, requests };
+}
+
+function sequentialClient(responses: Array<{ status: number; headers: Record<string, string>; data: Buffer }>) {
+  const requests: Array<{ url: string; cookie: string | undefined; maxRedirects: number | undefined }> = [];
+  const client = {
+    get: async (url: string, options: { headers?: Record<string, string>; maxRedirects?: number } = {}) => {
+      requests.push({ url, cookie: options.headers?.Cookie, maxRedirects: options.maxRedirects });
+      const response = responses.shift();
+      if (!response) throw new Error("unexpected request");
       return response;
     },
   };
@@ -49,7 +63,8 @@ describe("media.js — image download origin allowlist (SSRF)", () => {
     expect(requests.map((r) => r.url)).toEqual([
       "https://themarketear.com/images/real.png",
     ]);
-    expect(result).toEqual(["https://media.radon.run/p1-03.png"]);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatch(/^https:\/\/media\.radon\.run\/p1-03-[a-f0-9]{12}\.png$/);
   });
 
   it("refuses a plain-http URL even on an allowlisted host", async () => {
@@ -130,6 +145,119 @@ describe("media.js — response must actually be an image", () => {
 
     expect(result).toEqual([]);
     await expect(access(path.join(mediaDir, "p6-01.png"))).rejects.toThrow();
+  });
+
+  it("derives a fixed extension from raster bytes instead of the source path", async () => {
+    const mediaDir = await tempMediaDir();
+    const { createImageDownloader } = await import("../../scripts/newsfeed/media.js");
+    const { client } = recordingClient();
+
+    const downloader = createImageDownloader({ mediaDir, client });
+    const result = await downloader.download("p7", ["https://themarketear.com/images/payload.html"]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatch(/^https:\/\/media\.radon\.run\/p7-01-[a-f0-9]{12}\.png$/);
+    expect(await readdir(mediaDir)).toEqual([new URL(result[0]).pathname.slice(1)]);
+  });
+
+  it("rejects a content type that does not match the decoded raster format", async () => {
+    const mediaDir = await tempMediaDir();
+    const { createImageDownloader } = await import("../../scripts/newsfeed/media.js");
+    const { client } = recordingClient({
+      status: 200,
+      headers: { "content-type": "image/jpeg" },
+      data: PNG_BYTES,
+    });
+
+    const downloader = createImageDownloader({ mediaDir, client });
+    expect(await downloader.download("p8", ["https://themarketear.com/images/x.jpg"])).toEqual([]);
+    expect(await readdir(mediaDir)).toEqual([]);
+  });
+
+  it("decodes and re-encodes raster bytes before public publication", async () => {
+    const mediaDir = await tempMediaDir();
+    const { createImageDownloader } = await import("../../scripts/newsfeed/media.js");
+    const injected = Buffer.concat([PNG_BYTES, Buffer.from("<script>exfiltrate()</script>")]);
+    const { client } = recordingClient({
+      status: 200,
+      headers: { "content-type": "image/png" },
+      data: injected,
+    });
+
+    const downloader = createImageDownloader({ mediaDir, client });
+    const publishedUrls = await downloader.download("p8b", ["https://themarketear.com/images/x.png"]);
+    expect(publishedUrls).toHaveLength(1);
+    expect(publishedUrls[0]).toMatch(/^https:\/\/media\.radon\.run\/p8b-01-[a-f0-9]{12}\.png$/);
+    const published = await readFile(path.join(mediaDir, new URL(publishedUrls[0]).pathname.slice(1)));
+    expect(published.includes(Buffer.from("exfiltrate"))).toBe(false);
+    expect(published.equals(injected)).toBe(false);
+  });
+
+  it("rejects a corrupt payload that only mimics raster magic bytes", async () => {
+    const mediaDir = await tempMediaDir();
+    const { createImageDownloader } = await import("../../scripts/newsfeed/media.js");
+    const { client } = recordingClient({
+      status: 200,
+      headers: { "content-type": "image/png" },
+      data: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]),
+    });
+
+    const downloader = createImageDownloader({ mediaDir, client });
+    expect(await downloader.download("p8c", ["https://themarketear.com/images/x.png"])).toEqual([]);
+    expect(await readdir(mediaDir)).toEqual([]);
+  });
+});
+
+describe("media.js — redirect hop validation", () => {
+  it("follows an allowlisted HTTPS redirect manually and drops the origin cookie", async () => {
+    const mediaDir = await tempMediaDir();
+    const { createImageDownloader } = await import("../../scripts/newsfeed/media.js");
+    const { client, requests } = sequentialClient([
+      {
+        status: 302,
+        headers: { location: "https://tme.cdn.digitaloceanspaces.com/images/final.png" },
+        data: Buffer.alloc(0),
+      },
+      { status: 200, headers: { "content-type": "image/png" }, data: PNG_BYTES },
+    ]);
+    const downloader = createImageDownloader({
+      mediaDir,
+      client,
+      getCookieHeader: async () => "P=session-token",
+    });
+
+    const result = await downloader.download("p9", ["https://themarketear.com/images/start.png"]);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatch(/^https:\/\/media\.radon\.run\/p9-01-[a-f0-9]{12}\.png$/);
+    expect(requests).toEqual([
+      {
+        url: "https://themarketear.com/images/start.png",
+        cookie: "P=session-token",
+        maxRedirects: 0,
+      },
+      {
+        url: "https://tme.cdn.digitaloceanspaces.com/images/final.png",
+        cookie: undefined,
+        maxRedirects: 0,
+      },
+    ]);
+  });
+
+  it("refuses an off-allowlist redirect before opening the next socket", async () => {
+    const mediaDir = await tempMediaDir();
+    const { createImageDownloader } = await import("../../scripts/newsfeed/media.js");
+    const { client, requests } = sequentialClient([
+      {
+        status: 302,
+        headers: { location: "https://attacker.example/payload.png" },
+        data: Buffer.alloc(0),
+      },
+    ]);
+    const downloader = createImageDownloader({ mediaDir, client });
+
+    expect(await downloader.download("p10", ["https://themarketear.com/images/start.png"])).toEqual([]);
+    expect(requests).toHaveLength(1);
+    expect(await readdir(mediaDir)).toEqual([]);
   });
 });
 

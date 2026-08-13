@@ -39,10 +39,10 @@ describe("resolveDemoContext", () => {
     expect(resolveDemoContext(undefined, NOW)).toBeNull();
   });
 
-  it("treats a missing/invalid expiry as not-expired (provisioning gap)", () => {
+  it("treats a missing/invalid expiry as expired (provisioning fails closed)", () => {
     const ctx = resolveDemoContext({ demoRole: "trial" }, NOW);
     expect(ctx).not.toBeNull();
-    expect(ctx!.expired).toBe(false);
+    expect(ctx!.expired).toBe(true);
     expect(ctx!.trialExpiresAt).toBeNull();
   });
 });

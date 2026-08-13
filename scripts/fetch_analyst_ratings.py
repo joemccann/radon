@@ -30,6 +30,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Tuple
 import argparse
+import fcntl
+
+from utils.atomic_io import atomic_save
 
 # Pacing between non-IB (UW) fetches to avoid bursting toward the UW daily limit
 REQUEST_DELAY = 1.5  # seconds between requests
@@ -70,9 +73,24 @@ def load_json(path: Path) -> dict:
 
 
 def save_json(path: Path, data: dict) -> None:
-    """Save JSON file."""
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
+    """Save JSON crash-safely."""
+    atomic_save(str(path), data)
+
+
+def merge_ratings_cache(path: Path, updates: dict[str, dict]) -> dict:
+    """Merge ticker updates under an inter-process lock and atomic rename."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    with open(lock_path, "a+") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            cache = load_json(path)
+            cache.setdefault("ratings", {}).update(updates)
+            cache["last_updated"] = datetime.now().isoformat()
+            save_json(path, cache)
+            return cache
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 def get_watchlist_tickers() -> list:
@@ -779,14 +797,10 @@ def main():
         print("\nWatchlist updated with analyst ratings.", file=sys.stderr)
     
     # Save to cache
-    cache = load_json(RATINGS_CACHE_FILE)
-    if "ratings" not in cache:
-        cache["ratings"] = {}
-    cache["last_updated"] = datetime.now().isoformat()
-    for ticker, data in ratings_dict.items():
-        if not data.get("error"):
-            cache["ratings"][ticker] = data
-    save_json(RATINGS_CACHE_FILE, cache)
+    cache = merge_ratings_cache(
+        RATINGS_CACHE_FILE,
+        {ticker: data for ticker, data in ratings_dict.items() if not data.get("error")},
+    )
 
     # Phase 3 dual-write — best-effort. service_cycle (DUR-14) heartbeats
     # ok on clean exit and error (+ retry embargo) on failure, re-raising

@@ -14,7 +14,8 @@ import ModifyOrderModal from "@/components/ModifyOrderModal";
 import OrderErrorBanner from "@/components/OrderErrorBanner";
 import type { ModifyOrderRequest } from "@/lib/orderModify";
 import { checkNakedShortRisk, type NakedShortPortfolio, type OrderPayload } from "@/lib/nakedShortGuard";
-import { OrderRiskGate, type OrderRiskInput } from "@/lib/order";
+import { OrderRiskGate, type OrderRiskInput, useOrderRisk } from "@/lib/order";
+import { heldComboUnits, isPureComboClose } from "@/lib/order/positionTrade";
 import {
   type IbOrderType,
   ibPlaceFields,
@@ -270,6 +271,24 @@ export function buildSingleLegOrderPayload(params: {
 
 type OrderAction = "BUY" | "SELL";
 
+export function orderTabSubmitPermitted(
+  isValid: boolean,
+  loading: boolean,
+  warning: string | null,
+  riskState: { okToSubmit: boolean } | null,
+): boolean {
+  return isValid && !loading && warning == null && riskState?.okToSubmit === true;
+}
+
+export function defaultSingleOrderAction(position: PortfolioPosition | null): OrderAction {
+  if (position?.legs.length === 1 && position.legs[0].direction === "SHORT") return "BUY";
+  return position == null ? "BUY" : "SELL";
+}
+
+export function comboLegRatio(legContracts: number, comboUnits: number): number {
+  return Math.max(1, Math.trunc(Math.abs(legContracts)) / Math.max(1, comboUnits));
+}
+
 function NewOrderForm({
   ticker,
   position,
@@ -287,7 +306,7 @@ function NewOrderForm({
   const ask = tickerPriceData?.ask ?? null;
   const mid = bid != null && ask != null ? (bid + ask) / 2 : null;
 
-  const defaultAction: OrderAction = position != null ? "SELL" : "BUY";
+  const defaultAction = defaultSingleOrderAction(position);
   const [action, setAction] = useState<OrderAction>(defaultAction);
   const [quantity, setQuantity] = useState(() => {
     if (position && position.structure_type === "Stock") return String(position.contracts);
@@ -360,30 +379,27 @@ function NewOrderForm({
     // stock order fell through as an OPEN ("Total:" with no P&L), so a
     // buy-to-close-short (cover) showed no P&L at all.
     if (!isOption) {
-      if (position != null && position.structure_type === "Stock") {
-        const stockLeg = position.legs[0];
-        const held = Math.abs(position.contracts ?? 0);
-        // avg_cost is per-share for stocks (multiplier 1) — never × multiplier.
-        const basis = parsedQty * Math.abs(Number.isFinite(stockLeg?.avg_cost) ? stockLeg.avg_cost : 0);
-        const isClosingLong = action === "SELL" && position.direction === "LONG" && held >= parsedQty;
-        const isClosingShort = action === "BUY" && position.direction === "SHORT" && held >= parsedQty;
-        if (isClosingLong) {
-          // Sell-to-close: proceeds − basis.
-          return { ticker, chainLegs: [], netPremium: -riskPrice, description, totalCost, totalLabel: "Proceeds:", closeOut: { entryCostDollars: basis } };
-        }
-        if (isClosingShort) {
-          // Buy-to-close-short: pnl = proceeds(−closeDebit) − basis(−credit) =
-          // credit − debit (cover below entry → gain).
-          return { ticker, chainLegs: [], netPremium: riskPrice, description, totalCost: -totalCost, totalLabel: "Close Debit:", closeOut: { entryCostDollars: -basis } };
-        }
-      }
-      // Fresh stock open (or adding on the same side beyond the holding).
+      const stockLeg = position?.structure_type === "Stock" ? position.legs[0] : null;
+      const heldLong = stockLeg?.direction === "LONG" ? Math.abs(stockLeg.contracts) : 0;
+      const heldShort = stockLeg?.direction === "SHORT" ? Math.abs(stockLeg.contracts) : 0;
+      const basis = parsedQty * Math.abs(stockLeg?.avg_cost ?? 0);
       return {
+        type: "linear",
         ticker,
-        chainLegs: [],
-        netPremium: action === "SELL" ? -riskPrice : riskPrice,
+        instrument: "stock",
+        action,
+        quantity: parsedQty,
+        limitPrice: riskPrice,
+        multiplier: 1,
+        heldQuantity: heldLong,
+        heldShortQuantity: heldShort,
         description,
-        totalCost: action === "SELL" ? -totalCost : totalCost,
+        closeOut:
+          action === "SELL" && heldLong >= parsedQty
+            ? { entryCostDollars: basis }
+            : action === "BUY" && heldShort >= parsedQty
+              ? { entryCostDollars: basis }
+              : undefined,
       };
     }
     if (position == null) {
@@ -399,8 +415,7 @@ function NewOrderForm({
 
     const onlyLeg = position.legs[0];
     const right: "C" | "P" = onlyLeg.type === "Call" ? "C" : "P";
-    const legAction: "BUY" | "SELL" =
-      action === "BUY" ? "BUY" : (onlyLeg.direction === "LONG" ? "SELL" : "BUY");
+    const legAction: "BUY" | "SELL" = action;
     const isClosingLong =
       legAction === "SELL" &&
       onlyLeg.direction === "LONG" &&
@@ -418,7 +433,13 @@ function NewOrderForm({
       const entryCostDollars = parsedQty * onlyLeg.avg_cost;
       return {
         ticker,
-        chainLegs: [],
+        chainLegs: [{
+          action: "SELL",
+          right,
+          strike: onlyLeg.strike as number,
+          expiry: onlyLeg.expiry ?? position.expiry,
+          quantity: parsedQty,
+        }],
         netPremium: -riskPrice,
         description,
         totalCost: proceeds,
@@ -439,7 +460,13 @@ function NewOrderForm({
       const basisMagnitude = parsedQty * Math.abs(onlyLeg.avg_cost);
       return {
         ticker,
-        chainLegs: [],
+        chainLegs: [{
+          action: "BUY",
+          right,
+          strike: onlyLeg.strike as number,
+          expiry: onlyLeg.expiry ?? position.expiry,
+          quantity: parsedQty,
+        }],
         netPremium: riskPrice,
         description,
         totalCost: -closeDebit,
@@ -473,6 +500,7 @@ function NewOrderForm({
       underlyingSpot: tickerPriceData?.last ?? null,
     };
   }, [isValid, parsedQty, parsedPrice, parsedStop, orderType, action, ticker, position, bid, ask, tickerPriceData?.last]);
+  const riskState = useOrderRisk(riskInput, portfolio);
 
   // Naked short guard — reactive warning when action is SELL
   const nakedShortWarning = useMemo(() => {
@@ -490,12 +518,15 @@ function NewOrderForm({
     const result = checkNakedShortRisk(payload as OrderPayload, guardPortfolio);
     return result.allowed ? null : result.reason ?? null;
   }, [action, parsedQty, ticker, position, portfolio]);
+  const submitPermitted = orderTabSubmitPermitted(isValid, loading, nakedShortWarning, riskState);
 
   const handlePlace = useCallback(async () => {
     if (!confirmStep) {
+      if (!submitPermitted) return;
       setConfirmStep(true);
       return;
     }
+    if (!submitPermitted) return;
 
     setLoading(true);
     setError(null);
@@ -539,7 +570,7 @@ function NewOrderForm({
     } finally {
       setLoading(false);
     }
-  }, [confirmStep, ticker, action, parsedQty, parsedPrice, parsedStop, orderType, tif, position, portfolio, onOrderPlaced, orderActions]);
+  }, [confirmStep, ticker, action, parsedQty, parsedPrice, parsedStop, orderType, tif, position, portfolio, onOrderPlaced, orderActions, submitPermitted]);
 
   return (
     <div className="order-form">
@@ -664,13 +695,13 @@ function NewOrderForm({
             <button
               className={`btn-primary ${action === "SELL" ? "btn-danger" : ""}`}
               onClick={handlePlace}
-              disabled={!isValid || loading || !!nakedShortWarning}
+              disabled={!submitPermitted}
             >
               {loading ? "Placing..." : "Confirm Order"}
             </button>
           </div>
         ) : (
-          <button className="btn-primary" onClick={handlePlace} disabled={!isValid || loading || !!nakedShortWarning} style={{ width: "100%" }}>
+          <button className="btn-primary" onClick={handlePlace} disabled={!submitPermitted} style={{ width: "100%" }}>
             Place Order
           </button>
         )}
@@ -696,7 +727,8 @@ function ComboOrderForm({
 }) {
   const defaultAction: OrderAction = "SELL";
   const [action, setAction] = useState<OrderAction>(defaultAction);
-  const [quantity, setQuantity] = useState(() => String(position.contracts));
+  const comboUnits = heldComboUnits(position);
+  const [quantity, setQuantity] = useState(() => String(comboUnits));
   const [limitPrice, setLimitPrice] = useState("");
   const [tif, setTif] = useState<"DAY" | "GTC">("GTC");
   const [confirmStep, setConfirmStep] = useState(false);
@@ -725,9 +757,10 @@ function ComboOrderForm({
       const legAction: "BUY" | "SELL" = leg.direction === "LONG" ? "BUY" : "SELL";
       const right = leg.type === "Call" ? "C" : "P";
       const expiryClean = position.expiry.replace(/-/g, "");
-      return { ...leg, legAction, right: right as "C" | "P", expiry: expiryClean };
+      const ratio = comboLegRatio(leg.contracts, comboUnits);
+      return { ...leg, legAction, right: right as "C" | "P", expiry: expiryClean, ratio };
     });
-  }, [position]);
+  }, [position, comboUnits]);
 
   // Compute net BID / ASK / MID for the combo as a structural fair value.
   //
@@ -755,7 +788,7 @@ function ComboOrderForm({
       strike: leg.strike!,
       right: leg.right,
       action: leg.legAction,
-      ratio: 1,
+      ratio: leg.ratio,
     }));
     const payload: OrderPayload = {
       type: "combo",
@@ -770,72 +803,9 @@ function ComboOrderForm({
     return result.allowed ? null : result.reason ?? null;
   }, [action, parsedQty, ticker, legsWithActions, portfolio]);
 
-  const handlePlace = useCallback(async () => {
-    if (!confirmStep) {
-      setConfirmStep(true);
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      const legs = legsWithActions.map((leg) => ({
-        expiry: leg.expiry,
-        strike: leg.strike!,
-        right: leg.right,
-        action: leg.legAction,
-        ratio: 1,
-      }));
-
-      // Final naked short guard check before submission
-      const guardPortfolio = toNakedShortPortfolio(portfolio);
-      const comboPayload: OrderPayload = {
-        type: "combo",
-        symbol: ticker,
-        action,
-        quantity: parsedQty,
-        limitPrice: parsedPrice,
-        legs,
-      };
-      const guardResult = checkNakedShortRisk(comboPayload, guardPortfolio);
-      if (!guardResult.allowed) {
-        setError(guardResult.reason ?? "Order blocked: naked short exposure");
-        setLoading(false);
-        return;
-      }
-
-      const res = await fetch("/api/orders/place", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "combo",
-          symbol: ticker,
-          action,
-          quantity: parsedQty,
-          limitPrice: parsedPrice,
-          tif,
-          legs,
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        setError(json.error || "Order placement failed");
-      } else {
-        orderActions?.pushNotification({ type: "success", message: `Combo order placed: ${action} ${parsedQty}x ${position.structure} @ ${fmtSignedPrice(parsedPrice)}` });
-        setConfirmStep(false);
-        onOrderPlaced?.();
-      }
-    } catch {
-      setError("Network error placing order");
-    } finally {
-      setLoading(false);
-    }
-  }, [confirmStep, ticker, action, parsedQty, parsedPrice, tif, legsWithActions, position.structure, portfolio, onOrderPlaced]);
-
   // Calculate spread width for display
-  const spreadWidth = netPrices.bid != null && netPrices.ask != null 
-    ? (netPrices.ask - netPrices.bid).toFixed(2) 
+  const spreadWidth = netPrices.bid != null && netPrices.ask != null
+    ? (netPrices.ask - netPrices.bid).toFixed(2)
     : null;
   const spreadPct = netPrices.mid != null && spreadWidth != null
     ? ((parseFloat(spreadWidth) / Math.abs(netPrices.mid)) * 100).toFixed(1)
@@ -850,23 +820,6 @@ function ComboOrderForm({
 
     const totalCost = parsedQty * parsedPrice * 100;
     const description = `${action} ${parsedQty}x ${position.structure} @ ${fmtSignedPrice(parsedPrice)}`;
-
-    // SELL is the close/flatten path for a held combo. The gate's `closeOut`
-    // branch surfaces close-credit/close-debit + realized P&L.
-    if (action === "SELL") {
-      const closeCashFlow = totalCost;
-      return {
-        ticker,
-        chainLegs: [],
-        netPremium: parsedPrice,
-        description,
-        totalCost: closeCashFlow,
-        closeOut: { entryCostDollars: resolveEntryCost(position) },
-      };
-    }
-
-    // Buying to open: hand the legs to the gate. The augmentation helper
-    // will look at portfolio coverage automatically.
     const chainLegs = legsWithActions
       .filter((l) => l.strike != null)
       .map((l) => ({
@@ -874,12 +827,43 @@ function ComboOrderForm({
         right: l.right,
         strike: l.strike as number,
         expiry: l.expiry,
-        // Per-combo ratio = 1 here because `legsWithActions` already encodes
-        // the ratio (one entry per combo unit). `parsedQty` becomes the
-        // combo unit count via the augmentation helper's GCD pass.
-        quantity: parsedQty,
+        quantity: parsedQty * l.ratio,
       }));
 
+    // Only a SELL within the held BAG units is a pure close. An oversized
+    // SELL creates new exposure and must pass through the normal risk model.
+    if (isPureComboClose(action, parsedQty, comboUnits)) {
+      const closeCashFlow = totalCost;
+      return {
+        ticker,
+        chainLegs: chainLegs.map((leg) => ({
+          ...leg,
+          action: leg.action === "BUY" ? "SELL" as const : "BUY" as const,
+        })),
+        netPremium: parsedPrice,
+        description,
+        totalCost: closeCashFlow,
+        closeOut: {
+          entryCostDollars: resolveEntryCost(position) * (parsedQty / comboUnits),
+        },
+      };
+    }
+
+    if (action === "SELL") {
+      return {
+        ticker,
+        chainLegs: chainLegs.map((leg) => ({
+          ...leg,
+          action: leg.action === "BUY" ? "SELL" as const : "BUY" as const,
+        })),
+        netPremium: -parsedPrice,
+        description,
+        totalCost,
+      };
+    }
+
+    // Buying to open: hand the legs to the gate. The augmentation helper
+    // will look at portfolio coverage automatically.
     return {
       ticker,
       chainLegs,
@@ -887,7 +871,58 @@ function ComboOrderForm({
       description,
       totalCost,
     };
-  }, [isValid, parsedQty, parsedPrice, action, position, legsWithActions, ticker]);
+  }, [isValid, parsedQty, parsedPrice, action, position, legsWithActions, ticker, comboUnits]);
+  const riskState = useOrderRisk(riskInput, portfolio);
+  const submitPermitted = orderTabSubmitPermitted(isValid, loading, nakedShortWarning, riskState);
+
+  const handlePlace = useCallback(async () => {
+    if (!confirmStep) {
+      if (!submitPermitted) return;
+      setConfirmStep(true);
+      return;
+    }
+    if (!submitPermitted) return;
+
+    setLoading(true);
+    setError(null);
+    try {
+      const legs = legsWithActions.map((leg) => ({
+        expiry: leg.expiry,
+        strike: leg.strike!,
+        right: leg.right,
+        action: leg.legAction,
+        ratio: leg.ratio,
+      }));
+      const guardResult = checkNakedShortRisk({
+        type: "combo",
+        symbol: ticker,
+        action,
+        quantity: parsedQty,
+        limitPrice: parsedPrice,
+        legs,
+      }, toNakedShortPortfolio(portfolio));
+      if (!guardResult.allowed) {
+        setError(guardResult.reason ?? "Order blocked: naked short exposure");
+        return;
+      }
+      const res = await fetch("/api/orders/place", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "combo", symbol: ticker, action, quantity: parsedQty, limitPrice: parsedPrice, tif, legs }),
+      });
+      const json = await res.json();
+      if (!res.ok) setError(json.error || "Order placement failed");
+      else {
+        orderActions?.pushNotification({ type: "success", message: `Combo order placed: ${action} ${parsedQty}x ${position.structure} @ ${fmtSignedPrice(parsedPrice)}` });
+        setConfirmStep(false);
+        onOrderPlaced?.();
+      }
+    } catch {
+      setError("Network error placing order");
+    } finally {
+      setLoading(false);
+    }
+  }, [confirmStep, submitPermitted, legsWithActions, ticker, action, parsedQty, parsedPrice, tif, portfolio, orderActions, position.structure, onOrderPlaced]);
 
   return (
     <div className="order-form">
@@ -1029,13 +1064,13 @@ function ComboOrderForm({
             <button
               className={`btn-primary ${action === "SELL" ? "btn-danger" : ""}`}
               onClick={handlePlace}
-              disabled={!isValid || loading || !!nakedShortWarning}
+              disabled={!submitPermitted}
             >
               {loading ? "Placing..." : "Confirm Order"}
             </button>
           </div>
         ) : (
-          <button className="btn-primary" onClick={handlePlace} disabled={!isValid || loading || !!nakedShortWarning} style={{ width: "100%" }}>
+          <button className="btn-primary" onClick={handlePlace} disabled={!submitPermitted} style={{ width: "100%" }}>
             Place Combo Order
           </button>
         )}
@@ -1129,7 +1164,7 @@ export default function OrderTab({ ticker, position, portfolio, prices, openOrde
             {isCombo && (
               <div className="new-order-section-top">
                 <div className="existing-orders-title">Close Position</div>
-                <ComboOrderForm ticker={ticker} position={position!} portfolio={portfolio} prices={prices} />
+                <ComboOrderForm key={`${ticker}:${position!.id}`} ticker={ticker} position={position!} portfolio={portfolio} prices={prices} />
               </div>
             )}
 
@@ -1137,7 +1172,7 @@ export default function OrderTab({ ticker, position, portfolio, prices, openOrde
             {!isCombo && (
               <div className="new-order-section-top">
                 <div className="existing-orders-title">{position ? "Close Position" : "New Order"}</div>
-                <NewOrderForm ticker={ticker} position={position} portfolio={portfolio} tickerPriceData={tickerPriceData} />
+                <NewOrderForm key={`${ticker}:${position?.id ?? "new"}`} ticker={ticker} position={position} portfolio={portfolio} tickerPriceData={tickerPriceData} />
               </div>
             )}
           </>

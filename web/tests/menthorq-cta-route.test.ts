@@ -116,4 +116,26 @@ describe("GET /api/menthorq/cta", () => {
     expect(body.sync_status.status).toBe("success");
     expect(vi.mocked(spawn)).not.toHaveBeenCalled();
   });
+
+  it("holiday after close uses the previous trading session", async () => {
+    vi.setSystemTime(new Date("2026-07-03T22:15:00Z"));
+    vi.mocked(readdir).mockResolvedValue(["cta_2026-07-02.json"] as never);
+    vi.mocked(readFile).mockImplementation(async (path) => {
+      if (String(path).includes("cta_2026-07-02.json")) {
+        return JSON.stringify({
+          date: "2026-07-02",
+          fetched_at: "2026-07-02T21:30:00Z",
+          tables: { main: [{ underlying: "SPX" }], index: [], commodity: [], currency: [] },
+        });
+      }
+      throw new Error("ENOENT");
+    });
+    vi.mocked(stat).mockResolvedValue({ mtimeMs: Date.now() - 60_000 } as never);
+
+    const { GET } = await importRoute();
+    const body = await (await GET()).json();
+    expect(body.cache_meta.target_date).toBe("2026-07-02");
+    expect(body.cache_meta.is_stale).toBe(false);
+    expect(vi.mocked(spawn)).not.toHaveBeenCalled();
+  });
 });

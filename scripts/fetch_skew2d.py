@@ -224,6 +224,14 @@ def run(*, now: Optional[datetime] = None) -> dict[str, Any]:
     ratio_rows = load_ratio_rows()
     if not ratio_rows:
         raise ValueError("skew2d: zero ratio rows (never cache empty)")
+    from utils.market_calendar import last_completed_session_date
+
+    expected_session = last_completed_session_date(now)
+    latest_session = max(str(row.get("date") or "")[:10] for row in ratio_rows)
+    if latest_session < expected_session:
+        raise ValueError(
+            f"skew2d: stale parent session {latest_session}; expected {expected_session}"
+        )
 
     series = compute_change_2d_series(ratio_rows)
     payload = build_payload(

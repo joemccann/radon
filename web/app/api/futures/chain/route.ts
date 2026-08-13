@@ -1,3 +1,4 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
 import { NextResponse } from "next/server";
 import { readFile } from "fs/promises";
 import { join } from "path";
@@ -41,6 +42,8 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function GET(request: Request): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { rate: { key: "futures/chain:route", limit: 20, windowMs: 60_000 } });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   const { searchParams } = new URL(request.url);
   const symbol = searchParams.get("symbol");
@@ -76,8 +79,6 @@ export async function GET(request: Request): Promise<Response> {
     );
     return setNoStoreResponseHeaders(NextResponse.json(data), requestId);
   } catch (err) {
-    const message = err instanceof Error ? err.message : "futures chain fetch failed";
-
     // FastAPI down/restarting: serve the per-symbol disk cache if present so
     // the order ticket never shows a chain timeout. Only error when no cache.
     const cached = await readCachedFuturesChain(symbolUpper);
@@ -85,14 +86,14 @@ export async function GET(request: Request): Promise<Response> {
       const res = NextResponse.json({ ...cached, stale: true });
       res.headers.set(
         "X-Sync-Warning",
-        `Futures chain fetch failed - serving cached data (${message})`,
+        "Futures chain fetch failed - serving cached data",
       );
       return setNoStoreResponseHeaders(res, requestId);
     }
 
     const status = err instanceof RadonApiError ? err.status : 502;
     return setNoStoreResponseHeaders(
-      NextResponse.json({ error: message }, { status }),
+      NextResponse.json({ error: "Futures chain temporarily unavailable" }, { status }),
       requestId,
     );
   }

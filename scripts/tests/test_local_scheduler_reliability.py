@@ -24,7 +24,7 @@ def _load_plist(name: str) -> dict:
 
 @pytest.mark.parametrize(
     "name",
-    ["com.radon.monitor-daemon.plist", "com.radon.exit-order-service.plist"],
+    ["com.radon.monitor-daemon.plist"],
 )
 def test_python_launch_agents_use_python313_from_explicit_path(name: str) -> None:
     plist = _load_plist(name)
@@ -33,6 +33,10 @@ def test_python_launch_agents_use_python313_from_explicit_path(name: str) -> Non
     path = plist["EnvironmentVariables"]["PATH"].split(":")
     assert path[:2] == ["/opt/homebrew/bin", "/usr/local/bin"]
     assert "/usr/bin" in path
+
+
+def test_retired_exit_order_launch_agent_is_not_shipped() -> None:
+    assert not (CONFIG_DIR / "com.radon.exit-order-service.plist").exists()
 
 
 def test_monitor_launch_agent_does_not_amplify_scheduled_failures() -> None:

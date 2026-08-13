@@ -1,3 +1,5 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
+
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
@@ -591,6 +593,12 @@ export const __resolvePiInput = resolvePiInput;
 export const __normalizeScanArgs = normalizeScanArgs;
 
 export async function POST(request: NextRequest): Promise<Response> {
+  const access = await requireRouteAccess(request, {
+    operatorOnly: true,
+    rate: { key: "pi-command", limit: 4, windowMs: 60_000 },
+    durableRateTier: "C",
+  });
+  if (!access.ok) return access.response;
   let body: PiRoutePayload;
   try {
     body = (await request.json()) as PiRoutePayload;

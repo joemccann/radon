@@ -25,6 +25,8 @@ import os
 from typing import Any, Optional
 
 _OPTION_MULTIPLIER = 100
+_MAX_COMBO_LEGS = 8
+_MAX_COMBO_RATIO = 100
 
 
 def _env_num(name: str, default: float) -> float:
@@ -90,6 +92,35 @@ def check_order_limits(params: dict) -> Optional[dict[str, Any]]:
                 f"{qty_cap} ({cap_env}) — refused"
             ),
         }
+
+    if str(params.get("type", "")).lower() == "combo":
+        legs = params.get("legs")
+        if not isinstance(legs, list) or not 2 <= len(legs) <= _MAX_COMBO_LEGS:
+            return {
+                "code": "ORDER_COMBO_LEG_LIMIT",
+                "message": f"combo must contain 2-{_MAX_COMBO_LEGS} legs — refused",
+            }
+        ratios: list[int] = []
+        for leg in legs:
+            ratio = leg.get("ratio", 1) if isinstance(leg, dict) else None
+            if isinstance(ratio, bool) or not isinstance(ratio, (int, float)) or not float(ratio).is_integer():
+                return {"code": "ORDER_COMBO_RATIO", "message": "combo ratios must be positive integers — refused"}
+            ratio_int = int(ratio)
+            if not 1 <= ratio_int <= _MAX_COMBO_RATIO:
+                return {
+                    "code": "ORDER_COMBO_RATIO",
+                    "message": f"combo ratio {ratio_int} exceeds the 1-{_MAX_COMBO_RATIO} bound — refused",
+                }
+            ratios.append(ratio_int)
+        effective_contracts = int(quantity) * max(ratios)
+        if effective_contracts > max_order_qty():
+            return {
+                "code": "ORDER_EFFECTIVE_QTY_LIMIT",
+                "message": (
+                    f"effective combo contracts {effective_contracts} exceed the server-side "
+                    f"limit of {max_order_qty()} (quantity × max leg ratio) — refused"
+                ),
+            }
 
     notional = order_notional(params)
     notional_cap = max_order_notional()

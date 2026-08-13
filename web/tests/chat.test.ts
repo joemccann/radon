@@ -4,6 +4,7 @@ import {
   normalizeCommandInput,
   routeToPiPrompt,
   fallbackReply,
+  placeProposedOrder,
   resolveSectionFromPath,
 } from "../lib/chat";
 
@@ -100,10 +101,11 @@ test("routeToPiPrompt returns null for unrecognized input", () => {
 
 test("fallbackReply returns contextual replies", () => {
   expect(fallbackReply("").length > 0).toBeTruthy();
-  expect(fallbackReply("brze").includes("BRZE")).toBeTruthy();
-  expect(fallbackReply("analyze rr").includes("RR")).toBeTruthy();
-  expect(fallbackReply("portfolio").includes("19 positions")).toBeTruthy();
-  expect(fallbackReply("compare support vs against").includes("6 positions")).toBeTruthy();
+  expect(fallbackReply("brze")).toContain("live position context");
+  expect(fallbackReply("analyze rr")).toContain("current flow context");
+  expect(fallbackReply("portfolio")).toContain("live portfolio snapshot");
+  expect(fallbackReply("compare support vs against")).toContain("unavailable");
+  expect(fallbackReply("portfolio")).not.toMatch(/\$[\d,]+|\d+ positions/);
 });
 
 test("resolveSectionFromPath maps URL paths to sections", () => {
@@ -118,4 +120,17 @@ test("resolveSectionFromPath maps URL paths to sections", () => {
   expect(resolveSectionFromPath("/journal", "dashboard")).toBe("journal");
   expect(resolveSectionFromPath("/unknown", "dashboard")).toBe("dashboard");
   expect(resolveSectionFromPath(null, "dashboard")).toBe("dashboard");
+});
+
+test("validated option proposal submits option or is rejected never stock", async () => {
+  const calls: unknown[] = [];
+  global.fetch = (async (_url: string, init?: RequestInit) => {
+    calls.push(JSON.parse(String(init?.body)));
+    return { ok: true, json: async () => ({ message: "ok" }) } as Response;
+  }) as typeof fetch;
+  await placeProposedOrder({
+    tool: "place_order", destructive: true, summary: "BUY option", toolUseId: "1",
+    input: { type: "option", ticker: "SPY", action: "BUY", quantity: 1, limit_price: 2, expiry: "20260918", strike: 600, right: "C", conId: 44, exchange: "SMART" },
+  });
+  expect(calls[0]).toMatchObject({ type: "option", conId: 44, strike: 600 });
 });

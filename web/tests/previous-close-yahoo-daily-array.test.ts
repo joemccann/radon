@@ -21,6 +21,12 @@ vi.mock("@clerk/nextjs/server", () => ({
     getToken: async () => null,
   })),
 }));
+vi.mock("@/lib/routeAccess", () => ({
+  requireRouteAccess: vi.fn(async () => ({
+    ok: true,
+    principal: { userId: "test", kind: "test" },
+  })),
+}));
 
 // ws — simulate IB always erroring so we exercise the Yahoo path.
 vi.mock("ws", () => {
@@ -85,6 +91,13 @@ describe("/api/previous-close — Yahoo path reads daily close array, not stale 
 
   afterEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("cache_rollover_at_et_midnight_uses_expected_session", async () => {
+    const { previousCloseSessionDate } = await import("../app/api/previous-close/route");
+    expect(previousCloseSessionDate(new Date("2026-08-11T03:30:00Z"))).toBe("2026-08-07");
+    expect(previousCloseSessionDate(new Date("2026-08-11T04:30:00Z"))).toBe("2026-08-10");
+    expect(previousCloseSessionDate(new Date("2026-07-06T16:00:00Z"))).toBe("2026-07-02");
   });
 
   it("returns the last close strictly before today, ignoring stale chartPreviousClose", async () => {

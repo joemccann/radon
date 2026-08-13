@@ -116,7 +116,7 @@ function BpiReadout({ payload, compact }: { payload: BpiPayload; compact: boolea
 }
 
 export default function BpiPanel() {
-  const { data, loading } = useBpi();
+  const { data, loading, error } = useBpi();
   const { isMobile, hasMounted } = useViewport();
   const compact = hasMounted && isMobile;
 
@@ -153,6 +153,16 @@ export default function BpiPanel() {
 
   if (loading && !data) {
     return <SpectralLoader label="Sampling point and figure buy signals" />;
+  }
+
+  if (error && !data) {
+    return (
+      <SectionEmptyState
+        icon={Gauge}
+        headline="Bullish percent measurement unavailable"
+        secondary={error}
+      />
+    );
   }
 
   const [start, end] = chartRange;

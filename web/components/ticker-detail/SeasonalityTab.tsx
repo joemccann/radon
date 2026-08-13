@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { CalendarRange } from "lucide-react";
 import SectionEmptyState from "@/components/SectionEmptyState";
 
@@ -48,14 +48,21 @@ function ratingClass(rating: Rating): string {
 }
 
 function overallRating(months: MonthData[]): { rating: Rating; favorable: number; unfavorable: number } {
+  const observed = months.filter((month) => month.years > 0);
   let favorable = 0;
   let unfavorable = 0;
-  for (const m of months) {
+  for (const m of observed) {
     const r = rateMonth(m.positive_months_perc, m.avg_change);
     if (r === "FAVORABLE") favorable++;
     if (r === "UNFAVORABLE") unfavorable++;
   }
-  const rating: Rating = favorable >= 6 ? "FAVORABLE" : unfavorable >= 6 ? "UNFAVORABLE" : "NEUTRAL";
+  const rating: Rating = observed.length < 6
+    ? "NEUTRAL"
+    : favorable >= 6
+      ? "FAVORABLE"
+      : unfavorable >= 6
+        ? "UNFAVORABLE"
+        : "NEUTRAL";
   return { rating, favorable, unfavorable };
 }
 
@@ -85,13 +92,20 @@ export default function SeasonalityTab({ ticker, active }: SeasonalityTabProps) 
   const [error, setError] = useState<string | null>(null);
   const [fetched, setFetched] = useState(false);
   const [source, setSource] = useState<DataSource>(null);
+  const [resolvedTicker, setResolvedTicker] = useState<string | null>(null);
+  const requestGenerationRef = useRef(0);
 
-  const fetchSeasonality = useCallback(async () => {
+  const fetchSeasonality = useCallback(async (signal: AbortSignal, generation: number) => {
     setLoading(true);
     setError(null);
+    setMonths([]);
+    setSource(null);
+    setFetched(false);
+    setResolvedTicker(null);
     try {
-      const res = await fetch(`/api/ticker/seasonality?ticker=${encodeURIComponent(ticker)}`);
+      const res = await fetch(`/api/ticker/seasonality?ticker=${encodeURIComponent(ticker)}`, { signal });
       const json = await res.json();
+      if (signal.aborted || generation !== requestGenerationRef.current) return;
       if (!res.ok) throw new Error(json.error || `Failed (${res.status})`);
       setSource(json.source ?? null);
       const items = json.data ?? json ?? [];
@@ -119,18 +133,27 @@ export default function SeasonalityTab({ ticker, active }: SeasonalityTabProps) 
         setMonths(all12);
       }
     } catch (err) {
+      if (signal.aborted || generation !== requestGenerationRef.current) return;
       setError(err instanceof Error ? err.message : "Failed to fetch seasonality");
     } finally {
+      if (signal.aborted || generation !== requestGenerationRef.current) return;
       setLoading(false);
       setFetched(true);
+      setResolvedTicker(ticker);
     }
   }, [ticker]);
 
   useEffect(() => {
-    if (active && !fetched) fetchSeasonality();
-  }, [active, fetched, fetchSeasonality]);
+    if (!active) return;
+    const controller = new AbortController();
+    const generation = ++requestGenerationRef.current;
+    void fetchSeasonality(controller.signal, generation);
+    return () => controller.abort();
+  }, [active, fetchSeasonality]);
 
-  if (loading) {
+  const isCurrentTicker = resolvedTicker === ticker;
+
+  if (loading || (active && !isCurrentTicker)) {
     return (
       <div className="tab-loading">
         <div className="tab-loading-text">Loading seasonality...</div>
@@ -138,11 +161,11 @@ export default function SeasonalityTab({ ticker, active }: SeasonalityTabProps) 
     );
   }
 
-  if (error) {
+  if (isCurrentTicker && error) {
     return <div className="tab-error">{error}</div>;
   }
 
-  if (fetched && months.length === 0) {
+  if (isCurrentTicker && fetched && months.length === 0) {
     return (
       <div className="tab-empty">
         <SectionEmptyState
@@ -154,7 +177,7 @@ export default function SeasonalityTab({ ticker, active }: SeasonalityTabProps) 
     );
   }
 
-  if (months.length === 0) return null;
+  if (!isCurrentTicker || months.length === 0) return null;
 
   const currentMonth = new Date().getMonth() + 1; // 1-indexed
   const { rating, favorable, unfavorable } = overallRating(months);

@@ -134,6 +134,16 @@ describe("Exposure breakdown — short leg delta sign", () => {
     expect(longLeg.legDelta).toBeGreaterThan(0);
   });
 
+  it("labels a position mixed when any leg uses approximation alongside IB delta", () => {
+    const prices: Record<string, PriceData> = {
+      AAPL: makePriceData({ last: 260 }),
+      "AAPL_20260417_270_C": makePriceData({ last: 6.3, delta: 0.36 }),
+    };
+
+    const row = computeExposureDetailed(SPREAD_POSITION, prices).rows[0];
+    expect(row.deltaSource).toBe("mixed");
+  });
+
   it("stock leg rawDelta reflects direction sign", () => {
     const portfolio: PortfolioData = {
       bankroll: 100_000,

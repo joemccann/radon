@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useAuth } from "@clerk/nextjs";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export type WatchlistEntry = {
   id: string;
@@ -16,103 +17,148 @@ type UseWatchlistReturn = {
   toggleWatch: (symbol: string, sector?: string) => Promise<void>;
 };
 
-// Module-level shared store: one fetch hydrates every consumer.
-let cache: WatchlistEntry[] = [];
-let loaded = false;
-let inFlight: Promise<void> | null = null;
+type UserStore = {
+  cache: WatchlistEntry[];
+  loaded: boolean;
+  inFlight: Promise<void> | null;
+  mutation: Promise<void>;
+  generation: number;
+};
+
+const stores = new Map<string, UserStore>();
 const subscribers = new Set<() => void>();
+
+function storeFor(userId: string): UserStore {
+  const existing = stores.get(userId);
+  if (existing) return existing;
+  const created = { cache: [], loaded: false, inFlight: null, mutation: Promise.resolve(), generation: 0 };
+  stores.set(userId, created);
+  return created;
+}
 
 function notify(): void {
   for (const fn of subscribers) fn();
 }
 
-function setCache(next: WatchlistEntry[]): void {
-  cache = next;
+function clearUser(userId: string): void {
+  const store = stores.get(userId);
+  if (store) store.generation += 1;
+  stores.delete(userId);
   notify();
 }
 
-async function loadWatchlist(): Promise<void> {
-  if (inFlight) return inFlight;
-  inFlight = (async () => {
+async function loadWatchlist(userId: string, force = false): Promise<void> {
+  const store = storeFor(userId);
+  if (force) {
+    store.generation += 1;
+    store.inFlight = null;
+  }
+  if (store.inFlight) return store.inFlight;
+  const generation = store.generation;
+  store.inFlight = (async () => {
     try {
       const res = await fetch("/api/watchlist", { cache: "no-store" });
       if (!res.ok) throw new Error("Failed to fetch watchlist");
       const json = (await res.json()) as { watchlist: WatchlistEntry[] };
-      cache = Array.isArray(json.watchlist) ? json.watchlist : [];
+      if (stores.get(userId) !== store || store.generation !== generation) return;
+      store.cache = Array.isArray(json.watchlist) ? json.watchlist : [];
     } catch {
-      // keep whatever we had
+      // Preserve this identity's last known state only.
     } finally {
-      loaded = true;
-      inFlight = null;
-      notify();
+      if (stores.get(userId) === store && store.generation === generation) {
+        store.loaded = true;
+        store.inFlight = null;
+        notify();
+      }
     }
   })();
-  return inFlight;
+  return store.inFlight;
 }
 
 export function useWatchlist(): UseWatchlistReturn {
+  const { isLoaded: authLoaded, isSignedIn, userId } = useAuth();
+  const identity = authLoaded && isSignedIn && userId ? userId : null;
+  const previousIdentity = useRef<string | null>(null);
   const [, forceRender] = useState(0);
-  const [isLoading, setIsLoading] = useState(!loaded);
+  const store = identity ? storeFor(identity) : null;
 
   useEffect(() => {
-    const rerender = () => {
-      forceRender((n) => n + 1);
-      setIsLoading(!loaded);
-    };
+    const rerender = () => forceRender((value) => value + 1);
     subscribers.add(rerender);
-    if (!loaded && !inFlight) void loadWatchlist();
-    else setIsLoading(!loaded);
-    return () => {
-      subscribers.delete(rerender);
-    };
+    return () => { subscribers.delete(rerender); };
   }, []);
 
+  useEffect(() => {
+    const previous = previousIdentity.current;
+    previousIdentity.current = identity;
+    if (previous && previous !== identity) clearUser(previous);
+    if (identity) {
+      const current = storeFor(identity);
+      if (!current.loaded && !current.inFlight) void loadWatchlist(identity);
+    }
+  }, [identity]);
+
+  const watchlist = store?.cache ?? [];
   const isWatched = useCallback((symbol: string) => {
     const normalized = symbol.trim().toUpperCase();
-    return cache.some((w) => w.symbol === normalized);
-  }, []);
+    return identity ? storeFor(identity).cache.some((entry) => entry.symbol === normalized) : false;
+  }, [identity]);
 
   const toggleWatch = useCallback(async (symbol: string, sector?: string) => {
+    if (!identity) throw new Error("Sign in required");
     const normalized = symbol.trim().toUpperCase();
-    const previous = cache;
-    const already = cache.some((w) => w.symbol === normalized);
-
-    if (already) {
-      setCache(cache.filter((w) => w.symbol !== normalized));
+    const current = storeFor(identity);
+    const operation = current.mutation.then(async () => {
+      if (stores.get(identity) !== current) throw new Error("Identity changed");
+      const previousEntry = current.cache.find((entry) => entry.symbol === normalized);
+      const already = Boolean(previousEntry);
+      current.cache = already
+        ? current.cache.filter((entry) => entry.symbol !== normalized)
+        : [{
+            id: `optimistic-${normalized}`,
+            symbol: normalized,
+            sector: sector ?? null,
+            added_at: new Date().toISOString(),
+          }, ...current.cache];
+      notify();
       try {
-        const res = await fetch(`/api/watchlist/${encodeURIComponent(normalized)}`, {
-          method: "DELETE",
-          cache: "no-store",
-        });
-        if (!res.ok) throw new Error("Failed to remove from watchlist");
-      } catch (err) {
-        setCache(previous);
-        throw err;
+        const res = await fetch(
+          already ? `/api/watchlist/${encodeURIComponent(normalized)}` : "/api/watchlist",
+          {
+            method: already ? "DELETE" : "POST",
+            cache: "no-store",
+            ...(already ? {} : {
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ symbol: normalized, sector }),
+            }),
+          },
+        );
+        if (!res.ok) throw new Error("Failed to update watchlist");
+        await loadWatchlist(identity, true);
+      } catch (error) {
+        if (stores.get(identity) === current) {
+          current.cache = current.cache.filter((entry) => entry.symbol !== normalized);
+          if (previousEntry) current.cache = [previousEntry, ...current.cache];
+          notify();
+        }
+        throw error;
       }
-      return;
-    }
-
-    const optimistic: WatchlistEntry = {
-      id: `optimistic-${normalized}`,
-      symbol: normalized,
-      sector: sector ?? null,
-      added_at: new Date().toISOString(),
-    };
-    setCache([optimistic, ...cache]);
+    });
+    current.mutation = operation.catch(() => {});
     try {
-      const res = await fetch("/api/watchlist", {
-        method: "POST",
-        cache: "no-store",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ symbol: normalized, sector }),
-      });
-      if (!res.ok) throw new Error("Failed to add to watchlist");
-      await loadWatchlist();
-    } catch (err) {
-      setCache(previous);
-      throw err;
+      await operation;
+    } catch (error) {
+      if (stores.get(identity) === current) {
+        notify();
+      }
+      throw error;
     }
-  }, []);
+  }, [identity]);
 
-  return { watchlist: cache, isLoading, isWatched, toggleWatch };
+  return {
+    watchlist,
+    isLoading: !authLoaded || Boolean(identity && !store?.loaded),
+    isWatched,
+    toggleWatch,
+  };
 }

@@ -1,11 +1,19 @@
 #!/usr/bin/env python3
 """Kelly criterion calculator."""
-import argparse, json
+import argparse
+import json
+import math
 
 import numpy as np
 
 def kelly(prob_win: float, odds: float, fraction: float = 0.25) -> dict:
     """Calculate fractional Kelly bet size."""
+    if not math.isfinite(prob_win) or not 0 <= prob_win <= 1:
+        raise ValueError("prob_win must be between 0 and 1")
+    if not math.isfinite(odds):
+        raise ValueError("odds must be finite")
+    if not math.isfinite(fraction) or not 0 < fraction <= 1:
+        raise ValueError("fraction must be greater than 0 and at most 1")
     # Guard against invalid inputs that would cause division by zero or nonsensical results
     if odds <= 0:
         return {
@@ -75,12 +83,35 @@ def kelly_size_batch(
     return dollar_size
 
 
+def _bounded_float(
+    name: str,
+    *,
+    minimum: float,
+    maximum: float,
+    exclusive_minimum: bool = False,
+):
+    def parse(raw: str) -> float:
+        try:
+            value = float(raw)
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError(f"{name} must be numeric") from exc
+        lower_invalid = value <= minimum if exclusive_minimum else value < minimum
+        if not math.isfinite(value) or lower_invalid or value > maximum:
+            lower = "greater than" if exclusive_minimum else "at least"
+            raise argparse.ArgumentTypeError(
+                f"{name} must be {lower} {minimum} and at most {maximum}"
+            )
+        return value
+
+    return parse
+
+
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
-    p.add_argument("--prob", type=float, required=True, help="Probability of win (0-1)")
-    p.add_argument("--odds", type=float, required=True, help="Win/loss odds ratio")
-    p.add_argument("--fraction", type=float, default=0.25, help="Kelly fraction (default 0.25)")
-    p.add_argument("--bankroll", type=float, default=None, help="Current bankroll for dollar sizing")
+    p.add_argument("--prob", type=_bounded_float("prob", minimum=0, maximum=1), required=True, help="Probability of win (0-1)")
+    p.add_argument("--odds", type=_bounded_float("odds", minimum=0, maximum=1_000, exclusive_minimum=True), required=True, help="Win/loss odds ratio")
+    p.add_argument("--fraction", type=_bounded_float("fraction", minimum=0, maximum=1, exclusive_minimum=True), default=0.25, help="Kelly fraction (default 0.25)")
+    p.add_argument("--bankroll", type=_bounded_float("bankroll", minimum=0, maximum=1_000_000_000_000), default=None, help="Current bankroll for dollar sizing")
     args = p.parse_args()
 
     result = kelly(args.prob, args.odds, args.fraction)

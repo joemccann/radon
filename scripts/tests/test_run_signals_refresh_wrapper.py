@@ -230,3 +230,10 @@ def test_wrapper_skips_on_market_holiday(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr or result.stdout
     assert stub.calls == [], "holiday run must not hit FastAPI"
+
+
+def test_accepted_request_timeout_does_not_start_direct_scan() -> None:
+    source = (Path(__file__).resolve().parents[1] / "run_signals_refresh.sh").read_text()
+    assert "%{http_code}" in source
+    assert "CURL_EXIT" in source
+    assert "HTTP_CODE" in source

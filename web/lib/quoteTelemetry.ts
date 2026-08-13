@@ -119,16 +119,23 @@ function closedMarketModel(fallback: QuoteFallback): QuoteTelemetryModel {
   };
 }
 
-/** A live quote needs at least one of last/bid/ask. The relay sometimes emits a
+const LIVE_QUOTE_MAX_AGE_MS = 5 * 60 * 1000;
+
+/** A live quote needs a recent timestamp and at least one of last/bid/ask. The relay sometimes emits a
  * hollow tick (object present, every quote field null, volume 0) when the market
  * is closed — that must be treated as "no live quote", not as live data. */
-function hasLiveQuote(priceData: PriceData): boolean {
+function hasLiveQuote(priceData: PriceData, nowMs: number): boolean {
+  const quoteMs = Date.parse(priceData.timestamp);
+  if (!Number.isFinite(quoteMs) || quoteMs > nowMs + 60_000 || nowMs - quoteMs > LIVE_QUOTE_MAX_AGE_MS) {
+    return false;
+  }
   return priceData.last != null || priceData.bid != null || priceData.ask != null;
 }
 
 export function buildQuoteTelemetryModel(
   priceData: PriceData | null,
   fallback: QuoteFallback | null = null,
+  nowMs = Date.now(),
 ): QuoteTelemetryModel | null {
   if (!priceData) {
     return fallback ? closedMarketModel(fallback) : null;
@@ -136,7 +143,7 @@ export function buildQuoteTelemetryModel(
 
   // Hollow tick + a fallback → render the prior session, enriched by any
   // non-null session fields the relay did manage to send.
-  if (!hasLiveQuote(priceData) && fallback) {
+  if (!hasLiveQuote(priceData, nowMs) && fallback) {
     return closedMarketModel({
       open: priceData.open ?? fallback.open,
       high: priceData.high ?? fallback.high,
@@ -144,6 +151,17 @@ export function buildQuoteTelemetryModel(
       close: fallback.close,
       volume: priceData.volume != null && priceData.volume > 0 ? priceData.volume : fallback.volume,
       prevClose: fallback.prevClose,
+    });
+  }
+
+  if (!hasLiveQuote(priceData, nowMs)) {
+    return closedMarketModel({
+      open: priceData.open,
+      high: priceData.high,
+      low: priceData.low,
+      close: priceData.last ?? priceData.close,
+      volume: priceData.volume,
+      prevClose: priceData.close,
     });
   }
 

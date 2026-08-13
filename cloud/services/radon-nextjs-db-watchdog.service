@@ -18,15 +18,12 @@ Type=oneshot
 # config/sudoers.d/radon-ops.
 User=radon
 Group=radon
+StateDirectory=radon-nextjs-db-watchdog
+StateDirectoryMode=0700
 WorkingDirectory=/home/radon/radon
-# The state file (consecutive_wedges, last_restart_epoch) was created root:root
-# while this unit still ran as root, so the first run after the demotion would
-# hit PermissionError in save_state and fail EVERY tick -- including the healthy
-# path, which would also stop the K=3 wedge ladder from ever accumulating. The
-# "+" prefix runs this one step as root regardless of User=, so the handover is
-# self-healing on the live host and needs no manual chown.
-ExecStartPre=+/bin/mkdir -p /home/radon/radon-cloud/state
-ExecStartPre=+/bin/chown -R radon:radon /home/radon/radon-cloud/state
+# systemd creates this private directory with the service's User/Group. Avoid
+# recursive privileged ownership changes across any radon-writable path.
+Environment=RADON_NEXTJS_DB_WATCHDOG_STATE_PATH=/var/lib/radon-nextjs-db-watchdog/state.json
 EnvironmentFile=/home/radon/radon-cloud/.env
 # Direct-to-cloud only; never resurrect the retired embedded replica.
 Environment=RADON_DB_NO_REPLICA=1

@@ -115,6 +115,14 @@ class MonitorDaemon:
         self.respect_market_hours = respect_market_hours
         self.loop_interval = loop_interval
         self._running = False
+        # A handler that outlives its deadline remains registered here until
+        # its worker actually finishes. Python cannot kill a running thread;
+        # refusing a second worker is the safety barrier that prevents a late
+        # live-order mutation from overlapping the next scheduled cycle.
+        self._inflight_handlers: Dict[
+            str,
+            tuple[concurrent.futures.Future, concurrent.futures.ThreadPoolExecutor],
+        ] = {}
     
     def register(self, handler: BaseHandler) -> None:
         """Register a handler with the daemon."""
@@ -256,16 +264,38 @@ class MonitorDaemon:
         catches only KeyboardInterrupt, killing the daemon REL-008 exists to
         keep alive.
         """
+        prior = self._inflight_handlers.get(handler.name)
+        if prior is not None:
+            prior_future, prior_executor = prior
+            if not prior_future.done():
+                error = (
+                    f"handler {handler.name} is still running after its prior timeout; "
+                    "overlapping execution suppressed"
+                )
+                logger.error(error)
+                return {"status": "error", "error": error, "handler": handler.name}
+            # Observe the late result only to release executor resources. Its
+            # timeout was already reported and must not be rewritten as green.
+            try:
+                prior_future.result()
+            except Exception:
+                pass
+            prior_executor.shutdown(wait=False, cancel_futures=True)
+            del self._inflight_handlers[handler.name]
+
         deadline = float(getattr(handler, "max_runtime_seconds",
                                  DEFAULT_HANDLER_DEADLINE_SECONDS))
         executor = concurrent.futures.ThreadPoolExecutor(
             max_workers=1, thread_name_prefix=f"handler-{handler.name}"
         )
+        retained = False
         try:
             future = executor.submit(_run_with_thread_event_loop, handler.run)
             try:
                 return future.result(timeout=deadline)
             except concurrent.futures.TimeoutError:
+                self._inflight_handlers[handler.name] = (future, executor)
+                retained = True
                 error = f"handler {handler.name} timed out after {deadline:.0f}s"
                 logger.error(error)
                 try:
@@ -284,7 +314,8 @@ class MonitorDaemon:
                     logger.warning(f"crash heartbeat failed for {handler.name}: {heartbeat_exc}")
                 return {"status": "error", "error": error, "handler": handler.name}
         finally:
-            executor.shutdown(wait=False, cancel_futures=True)
+            if not retained:
+                executor.shutdown(wait=False, cancel_futures=True)
     
     def run_loop(self) -> None:
         """

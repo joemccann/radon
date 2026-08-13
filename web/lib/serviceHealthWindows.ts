@@ -196,7 +196,7 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // Surfaced 2026-05-16: both flipped stale on a Saturday with clean
   // Friday-evening finishes because the prior 1-day closed window was
   // shorter than the weekend gap.
-  "cri-scan": { open: 35 * MIN, extended: 35 * MIN, closed: 3 * DAY, category: "scheduled", requires_ib: true },
+  "cri-scan": { open: 35 * MIN, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: true },
   // ``gex-scan`` still flows through ``record_service_health`` only when
   // a user POSTs the scan endpoint, so it's on-demand for banner purposes.
   // Source: scripts/gex_scan.py uses UWClient only — no IB dependency.
@@ -211,7 +211,7 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // absorb transient FastAPI or IB Gateway blips, short enough to
   // surface a real outage well inside the trading day. Closed window
   // covers the weekend gap (see cri-scan note above).
-  "vcg-scan": { open: 15 * MIN, extended: 15 * MIN, closed: 3 * DAY, category: "scheduled", requires_ib: true },
+  "vcg-scan": { open: 15 * MIN, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: true },
   // ``cta-sync`` has an autonomous Mon-Fri schedule on the VPS
   // (radon-cta-sync.timer fires 18:15, 19:00, 21:30 UTC) plus the
   // laptop launchd plist as a redundant local trigger. Stale > 25h
@@ -484,8 +484,25 @@ export function isStale(
   const ts = Date.parse(updatedAt);
   if (Number.isNaN(ts)) return true;
   const window = getFreshnessWindowMs(service, market);
+  if (market === "open" && RTH_ONLY_SERVICES.has(service)) {
+    const et = new Date(new Date(nowMs).toLocaleString("en-US", { timeZone: "America/New_York" }));
+    const elapsedOpenMs = Math.max(0, (et.getHours() * 60 + et.getMinutes() - (9 * 60 + 30)) * MIN);
+    const todayOpenEt = nowMs - elapsedOpenMs;
+    if (ts < todayOpenEt) return elapsedOpenMs > window;
+  }
   return nowMs - ts > window;
 }
+
+const RTH_ONLY_SERVICES = new Set([
+  "orders-sync",
+  "portfolio-sync",
+  "journal-sync",
+  "fill-monitor",
+  "exit-orders",
+  "position-reconcile",
+  "cri-scan",
+  "vcg-scan",
+]);
 
 /** ET calendar date ("YYYY-MM-DD") is a full-closure US market holiday per
  * the static table (scripts/config/market_holidays.json — the same SoT the

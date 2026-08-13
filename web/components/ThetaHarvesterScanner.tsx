@@ -90,6 +90,33 @@ function ThetaInfo({ label, helpKey }: { label: string; helpKey: ThetaHelpKey })
   );
 }
 
+function ThetaSortHeader({
+  column,
+  label,
+  helpKey,
+  active,
+  direction,
+  right = false,
+  onSort,
+}: {
+  column: ThetaSortKey;
+  label: string;
+  helpKey: ThetaHelpKey;
+  active: boolean;
+  direction: -1 | 1;
+  right?: boolean;
+  onSort: (column: ThetaSortKey) => void;
+}) {
+  return (
+    <span className={`theta-grid__h theta-grid__h--sort${right ? " right" : ""}`}>
+      <button type="button" className="theta-grid__sort-trigger" onClick={() => onSort(column)}>
+        {label} {active ? (direction === -1 ? "▾" : "▴") : ""}
+      </button>
+      <ThetaInfo label={label} helpKey={helpKey} />
+    </span>
+  );
+}
+
 /* ── Overhaul: filter chips + criteria pips (exported for vitest) ───────── */
 
 export type ThetaFilterChipId = "all" | "dte30" | "noearn" | "rich" | "s97";
@@ -569,27 +596,12 @@ export default function ThetaHarvesterScanner({
             {/* column header */}
             <div className="theta-grid__head" role="row">
               <span className="theta-grid__h">#</span>
-              <button type="button" className="theta-grid__h theta-grid__h--sort" onClick={() => setSort("score")}>
-                SCORE {sortKey === "score" ? (sortDir === -1 ? "▾" : "▴") : ""}
-                <ThetaInfo label="Score" helpKey="score" />
-              </button>
+              <ThetaSortHeader column="score" label="SCORE" helpKey="score" active={sortKey === "score"} direction={sortDir} onSort={setSort} />
               <span className="theta-grid__h">TICKER · STRUCT.</span>
-              <button type="button" className="theta-grid__h theta-grid__h--sort right" onClick={() => setSort("theta")}>
-                THETA/DAY {sortKey === "theta" ? (sortDir === -1 ? "▾" : "▴") : ""}
-                <ThetaInfo label="Theta" helpKey="theta" />
-              </button>
-              <button type="button" className="theta-grid__h theta-grid__h--sort right" onClick={() => setSort("iv")}>
-                IV / RV {sortKey === "iv" ? (sortDir === -1 ? "▾" : "▴") : ""}
-                <ThetaInfo label="IV/RV" helpKey="iv-rv" />
-              </button>
-              <button type="button" className="theta-grid__h theta-grid__h--sort right" onClick={() => setSort("credit")}>
-                CREDIT {sortKey === "credit" ? (sortDir === -1 ? "▾" : "▴") : ""}
-                <ThetaInfo label="Credit" helpKey="credit" />
-              </button>
-              <button type="button" className="theta-grid__h theta-grid__h--sort right" onClick={() => setSort("dte")}>
-                DTE {sortKey === "dte" ? (sortDir === -1 ? "▾" : "▴") : ""}
-                <ThetaInfo label="DTE" helpKey="dte" />
-              </button>
+              <ThetaSortHeader column="theta" label="THETA/DAY" helpKey="theta" active={sortKey === "theta"} direction={sortDir} right onSort={setSort} />
+              <ThetaSortHeader column="iv" label="IV / RV" helpKey="iv-rv" active={sortKey === "iv"} direction={sortDir} right onSort={setSort} />
+              <ThetaSortHeader column="credit" label="CREDIT" helpKey="credit" active={sortKey === "credit"} direction={sortDir} right onSort={setSort} />
+              <ThetaSortHeader column="dte" label="DTE" helpKey="dte" active={sortKey === "dte"} direction={sortDir} right onSort={setSort} />
               <span className="theta-grid__h right">CRITERIA</span>
               <span className="theta-grid__h" aria-hidden />
             </div>

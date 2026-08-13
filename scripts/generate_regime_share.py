@@ -555,7 +555,7 @@ Analyzed by Radon · radon.run"""
 
 # ── Preview HTML ──────────────────────────────────────────────────
 
-def build_preview(cards_b64: list, tweet_text: str, ds: str) -> str:
+def build_preview(cards_b64: list, tweet_text: str, ds: str, card_type: str = "regime") -> str:
     labels = [
         ("CRI Score & Regime", "regime-card-1-cri-score.png"),
         ("Crash Trigger Conditions", "regime-card-2-crash-trigger.png"),
@@ -571,7 +571,6 @@ def build_preview(cards_b64: list, tweet_text: str, ds: str) -> str:
       </div>
       <img style="width:100%;border:1px solid #1e293b;border-radius:3px;display:block" src="{b64}" alt="{title}" id="img{i}">
       <div style="display:flex;gap:8px;margin-top:8px">
-        <button onclick="copyImg('img{i}',this)" style="flex:1;padding:7px;background:#0f1519;border:1px solid #1e293b;border-radius:3px;font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;color:#94a3b8;text-align:center">Copy Image</button>
         <a href="{b64}" download="{fname}" style="flex:1;padding:7px;background:#0f1519;border:1px solid #1e293b;border-radius:3px;font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;color:#94a3b8;text-decoration:none;text-align:center;display:block;line-height:1.4">Download PNG ↓</a>
       </div>
     </div>"""
@@ -602,7 +601,6 @@ body{{background:#07090d;color:#e2e8f0;font-family:'Inter',sans-serif;min-height
   <div class="panel">
     <div class="panel-hdr">Tweet Copy</div>
     <div class="tweet-body" id="tweet-text">{tweet_escaped}</div>
-    <button class="copy-btn" id="copy-btn" onclick="copyTweet()">Copy Tweet Text</button>
     <div class="char">{len(tweet_text)} chars</div>
   </div>
   <div>
@@ -610,28 +608,6 @@ body{{background:#07090d;color:#e2e8f0;font-family:'Inter',sans-serif;min-height
     {imgs_html}
   </div>
 </div>
-<script>
-function copyTweet(){{
-  const t=document.getElementById('tweet-text').innerText;
-  navigator.clipboard.writeText(t).then(()=>{{
-    const b=document.getElementById('copy-btn');
-    b.textContent='Copied!';b.classList.add('copied');
-    setTimeout(()=>{{b.textContent='Copy Tweet Text';b.classList.remove('copied')}},2000);
-  }});
-}}
-function copyImg(id,btn){{
-  const img=document.getElementById(id);
-  const c=document.createElement('canvas');
-  c.width=img.naturalWidth;c.height=img.naturalHeight;
-  c.getContext('2d').drawImage(img,0,0);
-  c.toBlob(b=>{{
-    navigator.clipboard.write([new ClipboardItem({{'image/png':b}})]).then(()=>{{
-      const orig=btn.textContent;btn.textContent='Copied!';
-      setTimeout(()=>{{btn.textContent=orig}},2000);
-    }});
-  }});
-}}
-</script>
 </body></html>"""
 
 
@@ -642,6 +618,7 @@ def main():
     parser.add_argument("--date", help="YYYY-MM-DD date override")
     parser.add_argument("--json", action="store_true", help="Print output as JSON")
     parser.add_argument("--no-open", action="store_true", help="Don't open browser")
+    parser.add_argument("--card-type", choices=("regime", "internals"), default="regime")
     args = parser.parse_args()
 
     data = load_cri(args.date)
@@ -675,8 +652,8 @@ def main():
             cards_b64.append("")
 
     tweet_text = build_tweet(data, ds)
-    preview_html = build_preview(cards_b64, tweet_text, ds)
-    preview_path = str(REPORTS_DIR / f"tweet-regime-{ds}.html")
+    preview_html = build_preview(cards_b64, tweet_text, ds, args.card_type)
+    preview_path = str(REPORTS_DIR / f"tweet-{args.card_type}-{ds}.html")
     with open(preview_path, "w") as f:
         f.write(preview_html)
 

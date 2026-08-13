@@ -274,6 +274,7 @@ describe("computeRealizedPnl — worthless expiry synthesis", () => {
       expiry: "20260717",
       total_cost: 10 * 1.24 * 100 + 5.0, // 1245
       ib_exec_id: "kwebo1",
+      ib_codes: "Ep",
     });
     const summary = computeRealizedPnl([open], { from: "2026-07-01", to: "2026-07-31" });
     expect(summary.count).toBe(1);
@@ -304,6 +305,7 @@ describe("computeRealizedPnl — worthless expiry synthesis", () => {
       // net credit after commission
       total_cost: 5 * 12.22 * 100 - 2.0, // 6108
       ib_exec_id: "muo1",
+      ib_codes: "Ep",
     });
     // Window includes expiry; proceeds field absent so total_cost is the credit.
     const summary = computeRealizedPnl([open], { from: "2026-07-01", to: "2026-07-31" });
@@ -351,6 +353,7 @@ describe("computeRealizedPnl — worthless expiry synthesis", () => {
       expiry: "20260717",
       total_cost: 1000 * 1.2724 * 100,
       ib_exec_id: "k1",
+      ib_codes: "Ep",
     });
     const open2 = row("kweb-o2", "2026-05-14T14:00:00Z", {
       ticker: "KWEB",
@@ -363,6 +366,7 @@ describe("computeRealizedPnl — worthless expiry synthesis", () => {
       expiry: "20260717",
       total_cost: 500 * 1.24 * 100,
       ib_exec_id: "k2",
+      ib_codes: "Ep",
     });
     const debit = 1000 * 1.2724 * 100 + 500 * 1.24 * 100;
     const summary = computeRealizedPnl([open1, open2], { from: "2026-07-01", to: "2026-07-31" });
@@ -400,8 +404,19 @@ describe("computeRealizedPnl — worthless expiry synthesis", () => {
       total_cost: 500 * 1.24 * 100,
       ib_exec_id: "daemon1",
     });
+    const lapseNotice = row("kweb-lapse", "2026-07-17T21:00:00Z", {
+      ticker: "KWEB",
+      action: "LAPSED",
+      structure: "Long Call $31 2026-07-17",
+      contracts: 0,
+      right: "C",
+      strike: 31,
+      expiry: "20260717",
+      ib_exec_id: "kweb-ep",
+      ib_codes: "Ep",
+    });
     const debit = 1000 * 1.2724 * 100 + 500 * 1.24 * 100;
-    const summary = computeRealizedPnl([flexOpen, fillOpen], { from: "2026-07-01", to: "2026-07-31" });
+    const summary = computeRealizedPnl([flexOpen, fillOpen, lapseNotice], { from: "2026-07-01", to: "2026-07-31" });
     expect(summary.count).toBe(1);
     expect(summary.round_trips[0].ticker).toBe("KWEB");
     expect(summary.round_trips[0].qty).toBe(1500);
@@ -686,8 +701,12 @@ describe("computeRealizedPnl — covered-call assignment/exercise", () => {
       ...MSFT_CALL, action: "BUY_TO_CLOSE", contracts: ASSIGNED, fill_price: 0,
       commission: 0, total_cost: 0, ib_exec_id: "A-MSFT-P1", ib_codes: "A",
     });
+    const lapseNotice = row("msft-ep", "2026-08-03T21:00:00Z", {
+      ...MSFT_CALL, action: "LAPSED", contracts: 0, fill_price: 0,
+      commission: 0, total_cost: 0, ib_exec_id: "EP-MSFT-P1", ib_codes: "Ep",
+    });
     const summary = computeRealizedPnl(
-      [callOpenFill, callOpenFlex, partialClose],
+      [callOpenFill, callOpenFlex, partialClose, lapseNotice],
       { from: "2026-08-01", to: "2026-08-15" },
     );
     expect(summary.count).toBe(2);
@@ -717,17 +736,13 @@ describe("computeRealizedPnl — covered-call assignment/exercise", () => {
     expect(trip.structure ?? "").toMatch(/assigned/i);
   });
 
-  it("Flex lag: before assignment rows arrive, the short call falls back to expiry synthesis", () => {
-    // Numerically identical for the option leg (credit kept); corrected to a
-    // labeled assignment + share delivery on the next rehydrate.
+  it("does not assume an unmatched expired option lapsed worthless without proof", () => {
     const summary = computeRealizedPnl(
       [callOpenFill, callOpenFlex],
       { from: "2026-08-01", to: "2026-08-15" },
     );
-    expect(summary.count).toBe(1);
-    expect(summary.round_trips[0].closed).toBe("2026-08-03");
-    expect(summary.round_trips[0].realized_pnl).toBeCloseTo(CALL_CREDIT, 2);
-    expect(summary.round_trips[0].structure ?? "").toMatch(/expired worthless/i);
+    expect(summary.count).toBe(0);
+    expect(summary.total_realized_pnl).toBe(0);
   });
 
   it("share delivery with no journaled stock opens emits no phantom realized P&L", () => {
@@ -786,6 +801,23 @@ describe("computeRealizedPnl — portfolio-basis fallback for deliveries", () =>
     expect(trip.basis_from_portfolio).toBe(true);
   });
 
+  it("uses the account basis snapshot at assignment time, not the latest snapshot", () => {
+    const delivery = row("historical-delivery", "2026-08-03T21:00:00Z", {
+      ticker: "MSFT", account_id: "A", action: "SELL", shares: 100, fill_price: 460,
+      commission: 0, proceeds: 46_000, ib_exec_id: "A-HIST", ib_codes: "A",
+    });
+    const summary = computeRealizedPnl([delivery], {
+      ...AUG,
+      stockBasisFallback: {
+        "A|MSFT": [
+          { takenAt: "2026-08-01T20:00:00Z", avgCost: 450 },
+          { takenAt: "2026-08-10T20:00:00Z", avgCost: 470 },
+        ],
+      },
+    });
+    expect(summary.total_realized_pnl).toBeCloseTo(1_000, 2);
+  });
+
   it("journaled opens cover first; only the uncovered remainder uses the fallback", () => {
     const PARTIAL_SHARES = 400;
     const PARTIAL_PRICE = 458.5;
@@ -822,6 +854,26 @@ describe("computeRealizedPnl — portfolio-basis fallback for deliveries", () =>
 
   it("no fallback for the ticker keeps the pinned no-trip behavior", () => {
     const summary = computeRealizedPnl([shareDelivery], { ...AUG, stockBasisFallback: { EWY: 164.86 } });
+    expect(summary.count).toBe(0);
+  });
+
+  it("a BUY assignment or exercise from flat inventory opens stock instead of fallback-closing", () => {
+    const buyDelivery = row("msft-buy-delivery", "2026-08-03T21:00:00Z", {
+      ticker: "MSFT", action: "BUY", shares: SHARES, fill_price: 460,
+      commission: 0, total_cost: STRIKE_PROCEEDS, ib_exec_id: "A-MSFT-BUY", ib_codes: "A",
+    });
+    const summary = computeRealizedPnl([buyDelivery], { ...AUG, stockBasisFallback: FALLBACK });
+    expect(summary.count).toBe(0);
+    expect(summary.total_realized_pnl).toBe(0);
+  });
+
+  it("does not synthesize an explicit future lapse just because the report window ends later", () => {
+    const futureOpen = row("future-option", "2026-08-01T14:00:00Z", {
+      ticker: "MSFT", action: "BUY_OPTION", contracts: 1, fill_price: 5,
+      total_cost: 500, right: "C", strike: 500, expiry: "20261218",
+      ib_exec_id: "future-option-open", ib_codes: "Ep",
+    });
+    const summary = computeRealizedPnl([futureOpen], { from: "2026-08-01", to: "2027-01-31" });
     expect(summary.count).toBe(0);
   });
 });

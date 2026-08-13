@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { dbExecute, describeDbError } from "@/lib/dbExecute";
 import { getRequestId, jsonApiError, setNoStoreResponseHeaders } from "@/lib/apiContracts";
+import { validateWorkflowGraph } from "@/lib/workflow/validateGraph";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -89,34 +90,44 @@ export async function POST(req: Request): Promise<Response> {
     return validationError(requestId, "Invalid JSON body");
   }
 
-  if (typeof body.name !== "string" || body.name.trim().length === 0) {
+  if (typeof body.name !== "string" || body.name.trim().length === 0 || body.name.trim().length > 100) {
     return validationError(requestId, "name is required");
   }
-  if (typeof body.graph !== "object" || body.graph === null) {
-    return validationError(requestId, "graph is required");
-  }
-  const graph = body.graph as { nodes?: unknown; edges?: unknown };
-  if (!Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) {
-    return validationError(requestId, "graph must have nodes[] and edges[]");
-  }
+  const validation = validateWorkflowGraph(body.graph);
+  if (!validation.ok) return validationError(requestId, validation.message);
 
   const id = typeof body.id === "string" && body.id.length > 0 ? body.id : crypto.randomUUID();
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return validationError(requestId, "id is invalid");
   const name = body.name.trim();
   const graphJson = JSON.stringify(body.graph);
 
   try {
-    await dbExecute(
-      {
-        sql: `INSERT INTO workflow_graphs (id, user_id, name, graph, created_at, updated_at)
-            VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))
-            ON CONFLICT(id) DO UPDATE SET
-              name = excluded.name,
-              graph = excluded.graph,
-              updated_at = excluded.updated_at`,
-        args: [id, userId, name, graphJson],
-      },
-      { label: "workflow" },
-    );
+    if (body.id === undefined) {
+      await dbExecute(
+        {
+          sql: `INSERT INTO workflow_graphs (id, user_id, name, graph, created_at, updated_at)
+              VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`,
+          args: [id, userId, name, graphJson],
+        },
+        { label: "workflow" },
+      );
+    } else {
+      const result = await dbExecute(
+        {
+          sql: `UPDATE workflow_graphs
+              SET name = ?, graph = ?, updated_at = datetime('now')
+              WHERE id = ? AND user_id = ?`,
+          args: [name, graphJson, id, userId],
+        },
+        { label: "workflow" },
+      );
+      if (result.rowsAffected === 0) {
+        return setNoStoreResponseHeaders(
+          jsonApiError({ status: 404, code: "NOT_FOUND", message: "Workflow not found", requestId }),
+          requestId,
+        );
+      }
+    }
     return setNoStoreResponseHeaders(NextResponse.json({ ok: true, id }), requestId);
   } catch (err) {
     return setNoStoreResponseHeaders(

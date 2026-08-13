@@ -61,6 +61,6 @@ export async function GET(): Promise<Response> {
     // series/current/stats payload — see MISSING / dbFirstRead docs.
     isDegraded: isMissingPayload,
   });
-  const response = NextResponse.json(result.ok ? result.data : MISSING);
+  const response = NextResponse.json(result.ok && result.fresh ? result.data : MISSING);
   return setNoStoreResponseHeaders(response, requestId);
 }

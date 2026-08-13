@@ -13131,6 +13131,17 @@ body[data-mobile="true"] .garch-scanner__table tbody td {
   color: var(--text-secondary);
 }
 .theta-grid__h--sort:hover { color: var(--text-primary); }
+.theta-grid__sort-trigger {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+}
 .theta-grid__rowwrap {
   position: relative;
   border-bottom: 1px solid var(--line-grid);

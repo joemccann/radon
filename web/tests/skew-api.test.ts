@@ -158,4 +158,11 @@ describe("GET /api/skew", () => {
     const cacheControl = res.headers.get("cache-control") ?? "";
     expect(cacheControl).toContain("no-store");
   });
+
+  it("expired snapshots are not returned as current", async () => {
+    const old = buildPayload({ scan_time: "2026-01-01T21:45:00.000Z" });
+    await insertSnapshot(old, old.scan_time as string);
+    const { GET } = await import("../app/api/skew/route");
+    expect(await jsonOf(await GET())).toMatchObject({ missing: true, count: 0 });
+  });
 });

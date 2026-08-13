@@ -73,6 +73,34 @@ YAHOO_TICKERS = {
     "LQD": "LQD",
 }
 
+CANONICAL_CREDIT_PROXY = "HYG"
+ALLOWED_CREDIT_PROXIES = frozenset(YAHOO_TICKERS) - {"VIX", "VVIX"}
+
+
+def _credit_proxy(raw: str) -> str:
+    proxy = raw.strip().upper()
+    if proxy not in ALLOWED_CREDIT_PROXIES:
+        raise argparse.ArgumentTypeError("proxy must be HYG, JNK, or LQD")
+    return proxy
+
+
+def _bounded_backtest_days(raw: str) -> int:
+    try:
+        days = int(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("days must be an integer") from exc
+    if not 1 <= days <= 2_520:
+        raise argparse.ArgumentTypeError("days must be between 1 and 2520")
+    return days
+
+
+def _publish_canonical_snapshot(proxy: str, payload: Dict[str, Any]) -> bool:
+    """Publish only the HYG production definition to the shared VCG snapshot."""
+    if proxy != CANONICAL_CREDIT_PROXY:
+        return False
+    mirror_scan_snapshot("vcg-scan", payload)
+    return True
+
 
 # ══════════════════════════════════════════════════════════════════
 # Data Fetching
@@ -1080,10 +1108,10 @@ Examples:
   python3 scripts/vcg_scan.py --backtest --days 252   # 1-year backtest
 """,
     )
-    parser.add_argument("--proxy", default="HYG", help="Credit proxy ticker (default: HYG)")
+    parser.add_argument("--proxy", type=_credit_proxy, default="HYG", help="Credit proxy ticker: HYG, JNK, or LQD (default: HYG)")
     parser.add_argument("--json", action="store_true", help="Output JSON to stdout")
     parser.add_argument("--backtest", action="store_true", help="Run rolling backtest")
-    parser.add_argument("--days", type=int, default=252, help="Backtest lookback days (default: 252)")
+    parser.add_argument("--days", type=_bounded_backtest_days, default=252, help="Backtest lookback days, 1-2520 (default: 252)")
     parser.add_argument("--no-open", action="store_true", help="Don't open HTML report in browser")
     parser.add_argument("--output", "-o", help="Custom output path for HTML")
     parser.add_argument(
@@ -1097,7 +1125,7 @@ Examples:
     parser.add_argument("--force", action="store_true", help="Fetch fresh even when the market is closed (bypass off-hours cache gate)")
 
     args = parser.parse_args()
-    proxy = args.proxy.upper()
+    proxy = args.proxy
     tickers = ["VIX", "VVIX", proxy]
 
     market_open = is_market_open()
@@ -1126,7 +1154,7 @@ Examples:
             if args.json:
                 # Heartbeat the cached serve too — see
                 # feedback_service_health_heartbeat.
-                mirror_scan_snapshot("vcg-scan", cached)
+                _publish_canonical_snapshot(proxy, cached)
                 print(json.dumps(cached, indent=2))
             return
 
@@ -1165,7 +1193,7 @@ Examples:
     # Output
     if args.json:
         result = build_json_output(signal, model, common_dates, proxy, market_open, bt, vix_floor=args.vix_floor, vcg_trigger=args.vcg_trigger)
-        mirror_scan_snapshot("vcg-scan", result)
+        _publish_canonical_snapshot(proxy, result)
         print(json.dumps(result, indent=2))
     else:
         # Print summary

@@ -4,6 +4,7 @@
 
 import path from "path";
 import fs from "fs-extra";
+import { atomicWriteJson, withFileLock } from "./atomic.js";
 
 const TAXONOMY_RELATIVE = path.join("data", "tag_taxonomy.json");
 const DEFAULT_DESCRIPTION =
@@ -40,29 +41,31 @@ let writeChain = Promise.resolve();
 export function appendTagsToTaxonomy(projectRoot, candidates) {
   const next = writeChain.then(async () => {
     const file = resolveTaxonomyFile(projectRoot);
-    const current = await loadTaxonomy(projectRoot);
-    // Case-insensitive dedup: the canonical form is whatever is already in the
-    // taxonomy. If "BTC" exists, the candidate "btc" is treated as a duplicate.
-    const existingByLower = new Map(current.tags.map((t) => [t.toLowerCase(), t]));
-    const additions = [];
-    for (const tag of candidates) {
-      if (typeof tag !== "string" || tag.length === 0) continue;
-      const key = tag.toLowerCase();
-      if (existingByLower.has(key)) continue;
-      existingByLower.set(key, tag);
-      additions.push(tag);
-    }
-    if (additions.length === 0) return [];
+    return withFileLock(file, async () => {
+      const current = await loadTaxonomy(projectRoot);
+      // Case-insensitive dedup: the canonical form is whatever is already in the
+      // taxonomy. If "BTC" exists, the candidate "btc" is treated as a duplicate.
+      const existingByLower = new Map(current.tags.map((t) => [t.toLowerCase(), t]));
+      const additions = [];
+      for (const tag of candidates) {
+        if (typeof tag !== "string" || tag.length === 0) continue;
+        const key = tag.toLowerCase();
+        if (existingByLower.has(key)) continue;
+        existingByLower.set(key, tag);
+        additions.push(tag);
+      }
+      if (additions.length === 0) return [];
 
-    const updated = {
-      version: current.version,
-      description: current.description,
-      tags: [...current.tags, ...additions],
-    };
+      const updated = {
+        version: current.version,
+        description: current.description,
+        tags: [...current.tags, ...additions],
+      };
 
-    await fs.ensureDir(path.dirname(file));
-    await fs.writeFile(file, JSON.stringify(updated, null, 2) + "\n");
-    return additions;
+      await fs.ensureDir(path.dirname(file));
+      await atomicWriteJson(file, updated);
+      return additions;
+    });
   });
 
   writeChain = next.catch(() => {});

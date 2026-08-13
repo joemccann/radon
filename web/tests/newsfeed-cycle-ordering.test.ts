@@ -373,3 +373,75 @@ describe("runScrapeCycle ordering — persistence before tagging", () => {
     expect(healthCalls[0]).toEqual({ service: "newsfeed-scraper", state: "ok" });
   });
 });
+
+describe("runScrapeCycle durable delivery retries", () => {
+  const paths = {
+    dataDir: "/tmp/newsfeed-dirty-test",
+    archiveDir: "/tmp/newsfeed-dirty-test/archive",
+    mediaDir: "/tmp/newsfeed-dirty-test/media",
+    postsFile: "/tmp/newsfeed-dirty-test/posts.json",
+    projectRoot: "/tmp/newsfeed-dirty-test",
+    publicRoot: "/tmp/newsfeed-dirty-test/public",
+  };
+  const item = { id: "p1", title: "same", content: "body", timestamp: "2026-08-13T12:00:00Z", images: [] };
+
+  function deps(state: { dbDirty: boolean; mediaDirty: boolean }) {
+    return {
+      cycleStartIso: "2026-08-13T12:00:00Z",
+      loadExistingPosts: async () => [item],
+      scrapePosts: async () => ({ items: [item] }),
+      mergePosts: (_existing: unknown[], items: unknown[]) => ({ merged: items, changed: false }),
+      hydrateLocalImages: async () => false,
+      persistPosts: async () => ({ archived: false }),
+      pushMedia: async () => ({ ok: true, transferred: 0 }),
+      upsertPosts: async () => {},
+      hydrateTagsDual: async () => false,
+      recordServiceHealth: async () => {},
+      buildTextTagger: () => null,
+      buildVisionTagger: () => null,
+      onNewTags: async () => [],
+      loadDeliveryState: async () => ({ ...state }),
+      saveDeliveryState: async (next: typeof state) => Object.assign(state, next),
+      paths,
+    };
+  }
+
+  it("retries a dirty database write even when posts are unchanged", async () => {
+    const { runScrapeCycle } = await import("../../scripts/newsfeed/cycle.js");
+    const state = { dbDirty: true, mediaDirty: false };
+    let writes = 0;
+    await runScrapeCycle({
+      ...deps(state),
+      upsertPosts: async () => { writes += 1; },
+    });
+    expect(writes).toBe(1);
+    expect(state.dbDirty).toBe(false);
+  });
+
+  it("retries a dirty media upload without a new image change", async () => {
+    const { runScrapeCycle } = await import("../../scripts/newsfeed/cycle.js");
+    const state = { dbDirty: false, mediaDirty: true };
+    let pushes = 0;
+    await runScrapeCycle({
+      ...deps(state),
+      pushMedia: async () => { pushes += 1; return { ok: true, transferred: 1 }; },
+    });
+    expect(pushes).toBe(1);
+    expect(state.mediaDirty).toBe(false);
+  });
+
+  it("does not report healthy while a media delivery retry remains dirty", async () => {
+    const { runScrapeCycle } = await import("../../scripts/newsfeed/cycle.js");
+    const state = { dbDirty: false, mediaDirty: true };
+    const healthStates: string[] = [];
+    await runScrapeCycle({
+      ...deps(state),
+      pushMedia: async () => ({ ok: false, reason: "unavailable" }),
+      recordServiceHealth: async (_service: string, healthState: string) => {
+        healthStates.push(healthState);
+      },
+    });
+    expect(state.mediaDirty).toBe(true);
+    expect(healthStates).not.toContain("ok");
+  });
+});

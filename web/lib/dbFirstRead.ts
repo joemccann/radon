@@ -89,6 +89,7 @@ export type DbFirstReadOptions<T> = {
 };
 
 const DEFAULT_SOURCE_TIMEOUT_MS = 3_000;
+const MAX_FUTURE_SKEW_MS = 60_000;
 
 /** Epoch ms from a snapshot's content timestamp field (scan_time / taken_at / last_sync). */
 export function contentTimestampMs(value: unknown): number | null {
@@ -127,19 +128,30 @@ export async function dbFirstRead<T>(
     readSource(options.fromDb, "DB", label, sourceTimeoutMs),
     readSource(options.fromDisk, "disk", label, sourceTimeoutMs),
   ]);
-  if (!db && !disk) return { ok: false };
+  const nowMs = now();
+  const validDb = rejectFutureTimestamp(db, nowMs);
+  const validDisk = rejectFutureTimestamp(disk, nowMs);
+  if (!validDb && !validDisk) return { ok: false };
 
-  const source = pickFresherSource(db, disk, isDegraded);
-  const chosen = (source === "db" ? db : disk) as TimestampedRead<T>;
-  if (source === "disk") warnDiskServed(label, db !== null);
+  const source = pickFresherSource(validDb, validDisk, isDegraded);
+  const chosen = (source === "db" ? validDb : validDisk) as TimestampedRead<T>;
+  if (source === "disk") warnDiskServed(label, validDb !== null);
 
   return {
     ok: true,
     source,
     data: chosen.data,
     timestampMs: chosen.timestampMs,
-    fresh: isWithinMaxAge(chosen.timestampMs, maxAgeMs, now()),
+    fresh: isWithinMaxAge(chosen.timestampMs, maxAgeMs, nowMs),
   };
+}
+
+function rejectFutureTimestamp<T>(
+  source: TimestampedRead<T> | null,
+  nowMs: number,
+): TimestampedRead<T> | null {
+  if (source?.timestampMs != null && source.timestampMs - nowMs > MAX_FUTURE_SKEW_MS) return null;
+  return source;
 }
 
 function pickFresherSource<T>(
@@ -169,7 +181,9 @@ function isWithinMaxAge(
   maxAgeMs: number,
   nowMs: number,
 ): boolean {
-  return timestampMs !== null && nowMs - timestampMs <= maxAgeMs;
+  return timestampMs !== null
+    && timestampMs - nowMs <= MAX_FUTURE_SKEW_MS
+    && nowMs - timestampMs <= maxAgeMs;
 }
 
 async function readSource<T>(

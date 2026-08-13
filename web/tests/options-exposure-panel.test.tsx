@@ -99,6 +99,15 @@ describe("OptionsExposurePanel", () => {
     expect(useOptionsExposureMock.mock.calls.every((call) => call[1] === "eod")).toBe(true);
   });
 
+  it("resets the expiration selection when the ticker changes", () => {
+    const { rerender } = render(<OptionsExposurePanel symbol="MU" />);
+    fireEvent.click(screen.getByRole("button", { name: /Jul 17/ }));
+    expect(screen.getByRole("button", { name: /Jul 17/ }).getAttribute("aria-pressed")).toBe("true");
+
+    rerender(<OptionsExposurePanel symbol="AAPL" />);
+    expect(screen.getByRole("button", { name: "All Expirations" }).getAttribute("aria-pressed")).toBe("true");
+  });
+
   it("switches metric semantics and frequency while preserving exact options", () => {
     render(<OptionsExposurePanel symbol="MU" />);
     fireEvent.change(screen.getByLabelText("Exposure metric"), { target: { value: "open_interest" } });

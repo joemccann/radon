@@ -864,6 +864,29 @@ describe("journalRowsToBlotter", () => {
   /* ─── T-036: journal-vs-journal exec-id dedupe ─────────────────────── */
 
   describe("journal-vs-journal exec-id dedupe (T-036)", () => {
+    it("prefers the authoritative row deterministically when equal exec ids tie", () => {
+      const sparse = row({ id: 20, ticker: "IWM", action: "SELL_OPTION", contracts: 1, fill_price: 2, ib_exec_id: "same" }, "2026-06-10");
+      const authoritative = row({ id: 10, ticker: "IWM", action: "SELL_OPTION", contracts: 1, fill_price: 2, ib_exec_id: "same", cost_basis: 100, proceeds: 200, realized_pnl: 100 }, "2026-06-10");
+      const out = journalRowsToBlotter([authoritative, sparse]);
+      expect(out.closed_trades).toHaveLength(1);
+      expect(out.closed_trades[0].realized_pnl).toBe(100);
+    });
+
+    it("opens a short stock on SELL and closes it on the later BUY cover", () => {
+      const shortOpen = row({ ticker: "AA", action: "SELL", shares: 100, fill_price: 20, commission: 1, ib_exec_id: "short-open" }, "2026-06-01");
+      const open = journalRowsToBlotter([shortOpen]);
+      expect(open.open_trades.find((trade) => trade.executions[0].exec_id === "short-open")?.net_quantity).toBe(-100);
+
+      const out = journalRowsToBlotter([
+        shortOpen,
+        row({ ticker: "AA", action: "BUY", shares: 100, fill_price: 15, commission: 1, ib_exec_id: "short-cover" }, "2026-06-05"),
+      ]);
+      expect(out.open_trades.filter((trade) => trade.symbol === "AA")).toHaveLength(0);
+      const cover = out.closed_trades.find((trade) => trade.executions[0].exec_id === "short-cover");
+      expect(cover?.is_closed).toBe(true);
+      expect(cover?.realized_pnl).toBeCloseTo(498, 2);
+    });
+
     it("'a' (single, ib_reconcile-style) + 'a+b' (composite, rehydrate-style) → one trade, pnl counted once, composite kept", () => {
       // ib_reconcile.py can log a same-day contract group under its OWN
       // (possibly single-exec) ib_exec_id, carrying IB-native realized_pnl

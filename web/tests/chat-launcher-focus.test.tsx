@@ -12,7 +12,7 @@ afterEach(cleanup);
 
 describe("ChatLauncher", () => {
   it("moves focus to the composer when the Radon Chat modal opens", async () => {
-    render(<ChatLauncher activeSection="dashboard" />);
+    render(<ChatLauncher activeSection="dashboard" portfolio={{ positions: [] } as never} />);
 
     fireEvent.keyDown(document, { key: "j", ctrlKey: true });
 

@@ -3,6 +3,7 @@ import {
   buildPositionTradeOrder,
   closingActionFor,
   heldComboUnits,
+  overClosesHeldCombo,
   type TradeTarget,
 } from "../lib/order/positionTrade";
 import {
@@ -97,7 +98,7 @@ describe("buildPositionTradeOrder — combo", () => {
       position: riskReversal(),
       target: { kind: "combo" },
       action: "SELL",
-      quantity: 5,
+      quantity: 1,
       limitPrice: 2.0,
       tif: "DAY",
     })!;
@@ -116,7 +117,7 @@ describe("buildPositionTradeOrder — combo", () => {
     // -32997 (short, sign -1 * |entry|) + 29500 (long) = -3497... resolveEntryCost
     // uses sign*|entry_cost|: short -1*32997 + long +1*29500 = -3497.
     expect(o.riskInput.closeOut?.entryCostDollars).toBe(-3497);
-    expect(o.riskInput.totalCost).toBe(5 * 2.0 * 100);
+    expect(o.riskInput.totalCost).toBe(1 * 2.0 * 100);
   });
 
   it("BUY = add: hands legs to the augmenter (no closeOut)", () => {
@@ -131,6 +132,71 @@ describe("buildPositionTradeOrder — combo", () => {
     expect(o.isClosing).toBe(false);
     expect(o.riskInput.closeOut).toBeUndefined();
     expect(o.riskInput.chainLegs).toHaveLength(2);
+  });
+
+  it("scales close basis for a partial combo close", () => {
+    const position = riskReversal();
+    position.legs[0].contracts = 10;
+    position.legs[1].contracts = 10;
+    position.entry_cost = -2_000;
+    position.legs[0].entry_cost = -5_000;
+    position.legs[1].entry_cost = 3_000;
+
+    const order = buildPositionTradeOrder({
+      position,
+      target: { kind: "combo" },
+      action: "SELL",
+      quantity: 4,
+      limitPrice: 2,
+      tif: "DAY",
+    })!;
+
+    expect(heldComboUnits(position)).toBe(10);
+    expect(order.isClosing).toBe(true);
+    expect(order.riskInput.closeOut?.entryCostDollars).toBe(-800);
+  });
+
+  it("does not classify an oversized combo SELL as a riskless close", () => {
+    const position = riskReversal();
+    const order = buildPositionTradeOrder({
+      position,
+      target: { kind: "combo" },
+      action: "SELL",
+      quantity: heldComboUnits(position) + 1,
+      limitPrice: 2,
+      tif: "DAY",
+    })!;
+    expect(order.isClosing).toBe(false);
+    expect(order.riskInput.closeOut).toBeUndefined();
+    expect(order.riskInput.chainLegs.length).toBeGreaterThan(0);
+  });
+
+  it("overclose is blocked before risk and placement", () => {
+    expect(overClosesHeldCombo("SELL", 2, 1)).toBe(true);
+    expect(overClosesHeldCombo("SELL", 1, 1)).toBe(false);
+    expect(overClosesHeldCombo("BUY", 2, 1)).toBe(false);
+  });
+
+  it("preserves each calendar leg expiry in payload and risk input", () => {
+    const position = riskReversal();
+    position.legs[0].expiry = "2026-07-17";
+    position.legs[1].expiry = "2026-09-18";
+    const order = buildPositionTradeOrder({
+      position,
+      target: { kind: "combo" },
+      action: "BUY",
+      quantity: 1,
+      limitPrice: 2,
+      tif: "DAY",
+    })!;
+    expect((order.payload.legs as Array<{ expiry: string }>).map((leg) => leg.expiry)).toEqual([
+      "20260717",
+      "20260918",
+    ]);
+    expect(order.riskInput.chainLegs.map((leg) => leg.expiry)).toEqual([
+      "20260717",
+      "20260918",
+    ]);
   });
 });
 

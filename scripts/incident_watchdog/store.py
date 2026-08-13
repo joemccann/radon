@@ -58,7 +58,7 @@ def _new_payload(incident: dict, now: datetime) -> dict:
 
 
 def record_cycle(incidents: list[dict], directory: Path | str,
-                 now: datetime) -> dict:
+                 now: datetime, *, allow_resolve: bool = True) -> dict:
     """Persist one watchdog cycle. Returns {opened, updated, resolved} lists
     of file paths (as strings)."""
     directory = Path(directory)
@@ -91,6 +91,8 @@ def record_cycle(incidents: list[dict], directory: Path | str,
         opened.append(str(path))
 
     resolved: list[str] = []
+    if not allow_resolve:
+        return {"opened": opened, "updated": updated, "resolved": resolved}
     for fingerprint, path in open_by_fingerprint.items():
         if fingerprint in seen:
             continue

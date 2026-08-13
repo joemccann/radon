@@ -1,9 +1,12 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
+
 import { NextResponse } from "next/server";
 import { spawn } from "child_process";
 import { readdir, readFile, stat } from "fs/promises";
 import { join } from "path";
 import { getDb } from "@/lib/db";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
+import { isUsTradingDay } from "@/lib/serviceHealthWindows";
 
 export const runtime = "nodejs";
 // Disable Next.js's default static caching for route handlers. The route reads
@@ -89,8 +92,7 @@ function latestClosedTradingDay(now = new Date()): string {
 }
 
 function isTradingDay(value: Date): boolean {
-  const weekday = value.getDay();
-  return weekday !== 0 && weekday !== 6;
+  return isUsTradingDay(formatYMD(value));
 }
 
 function emptySyncHealth(targetDate: string): CtaSyncHealth {
@@ -360,6 +362,8 @@ function triggerBackgroundSync(expectedDate: string): void {
 }
 
 export async function GET(): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { rate: { key: "menthorq/cta:route", limit: 20, windowMs: 60_000 } });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   const expectedDate = latestClosedTradingDay();
   const latest = await readLatestCta();

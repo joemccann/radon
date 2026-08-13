@@ -7,17 +7,20 @@ import type { DemoDbClient, DemoUserRow } from "@/lib/demo/demoUsers";
 export type FakeDemoDb = DemoDbClient & {
   users: Map<string, DemoUserRow>;
   usage: Map<string, number>; // `${userId} ${endpoint} ${day}` → count
+  webhookEvents: Set<string>;
   setUsage: (userId: string, endpoint: string, day: string, count: number) => void;
 };
 
 export function makeFakeDemoDb(): FakeDemoDb {
   const users = new Map<string, DemoUserRow>();
   const usage = new Map<string, number>();
+  const webhookEvents = new Set<string>();
   const usageKey = (u: string, e: string, d: string) => `${u} ${e} ${d}`;
 
   const db: FakeDemoDb = {
     users,
     usage,
+    webhookEvents,
     setUsage(userId, endpoint, day, count) {
       usage.set(usageKey(userId, endpoint, day), count);
     },
@@ -27,16 +30,30 @@ export function makeFakeDemoDb(): FakeDemoDb {
       if (sql.includes("INSERT INTO demo_users")) {
         const [user_id, email, demo_role, started_at, expires_at, created_at] = a as string[];
         const existing = users.get(user_id);
-        users.set(user_id, {
-          user_id,
-          email: email ?? null,
-          demo_role: demo_role ?? null,
-          started_at: started_at ?? null,
-          expires_at: expires_at ?? null,
-          status: "active",
-          revoked_at: null,
-          created_at: existing?.created_at ?? created_at,
-        });
+        users.set(user_id, existing
+          ? { ...existing, email: email ?? null, demo_role: demo_role ?? null }
+          : {
+              user_id,
+              email: email ?? null,
+              demo_role: demo_role ?? null,
+              started_at: started_at ?? null,
+              expires_at: expires_at ?? null,
+              status: "active",
+              revoked_at: null,
+              created_at,
+            });
+        return { rows: [] };
+      }
+
+      if (sql.includes("INSERT INTO demo_webhook_events")) {
+        const [event_id] = a as string[];
+        if (webhookEvents.has(event_id)) return { rows: [] };
+        webhookEvents.add(event_id);
+        return { rows: [{ event_id }] };
+      }
+
+      if (sql.includes("DELETE FROM demo_webhook_events")) {
+        webhookEvents.delete(String(a[0]));
         return { rows: [] };
       }
 

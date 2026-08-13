@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
@@ -190,6 +191,60 @@ class TestDigestFlush:
                                    message=f"boom {i}"))
         state = json.loads(digest_state_path.read_text())
         assert len(state["pending"]) == notify.DIGEST_MAX_PENDING
+
+    def test_concurrent_buckets_preserve_all_alerts(self, db_conn, digest_state_path):
+        from watchdog import notify
+
+        outcomes = [
+            _outcome(service=f"service-{i}", severity="P2", kind="error", message=str(i))
+            for i in range(12)
+        ]
+        start = threading.Barrier(len(outcomes))
+
+        def enqueue(outcome):
+            start.wait()
+            notify._enqueue_digest(outcome)
+
+        threads = [threading.Thread(target=enqueue, args=(outcome,)) for outcome in outcomes]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        state = json.loads(digest_state_path.read_text())
+        assert {entry["service"] for entry in state["pending"]} == {
+            outcome.service for outcome in outcomes
+        }
+
+    def test_digest_flush_does_not_drop_concurrent_enqueue(
+        self, db_conn, pushover_env, digest_state_path, monkeypatch
+    ):
+        from watchdog import notify
+
+        first = _outcome(service="first", severity="P2", kind="error", message="first")
+        late = _outcome(service="late", severity="P2", kind="error", message="late")
+        notify._enqueue_digest(first)
+        entered = threading.Event()
+        release = threading.Event()
+
+        def blocked_post(_payload):
+            entered.set()
+            release.wait(timeout=2)
+            return None
+
+        monkeypatch.setattr(notify, "_post_pushover", blocked_post)
+        now = datetime(2026, 6, 12, 18, 0, tzinfo=timezone.utc)
+        flush = threading.Thread(target=notify.flush_daily_digest, kwargs={"now": now})
+        flush.start()
+        assert entered.wait(timeout=2)
+        enqueue = threading.Thread(target=notify._enqueue_digest, args=(late,))
+        enqueue.start()
+        release.set()
+        flush.join()
+        enqueue.join()
+
+        state = json.loads(digest_state_path.read_text())
+        assert [entry["service"] for entry in state["pending"]] == ["late"]
 
 
 class TestResendDeleted:

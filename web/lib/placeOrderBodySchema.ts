@@ -15,7 +15,7 @@ export const PlaceOrderComboLegSchema = Type.Object({
   strike: Type.Number(),
   right: OptionRightSchema,
   action: Type.Union([Type.Literal("BUY"), Type.Literal("SELL")]),
-  ratio: Type.Number(),
+  ratio: Type.Integer({ minimum: 1, maximum: 100 }),
   limitPrice: Type.Optional(Type.Number()),
   /** Echoed from chain builder — ignored by IB bridge after normalization */
   symbol: Type.Optional(Type.String()),
@@ -32,7 +32,7 @@ export const PlaceOrderBodySchema = Type.Object({
   ])),
   symbol: Type.String({ minLength: 1 }),
   action: Type.Union([Type.Literal("BUY"), Type.Literal("SELL")]),
-  quantity: Type.Number(),
+  quantity: Type.Integer({ minimum: 1 }),
   limitPrice: Type.Optional(Type.Number()),
   orderType: Type.Optional(Type.Union([
     Type.Literal("LMT"),
@@ -44,7 +44,7 @@ export const PlaceOrderBodySchema = Type.Object({
   expiry: Type.Optional(Type.String()),
   strike: Type.Optional(Type.Number()),
   right: Type.Optional(OptionRightSchema),
-  legs: Type.Optional(Type.Array(PlaceOrderComboLegSchema)),
+  legs: Type.Optional(Type.Array(PlaceOrderComboLegSchema, { minItems: 2, maxItems: 8 })),
   /** Futures: caller can pass IB conId directly (preferred — from /futures/chain) OR expiry. */
   conId: Type.Optional(Type.Number()),
   exchange: Type.Optional(Type.String()),

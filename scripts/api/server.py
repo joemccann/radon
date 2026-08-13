@@ -29,7 +29,7 @@ from typing import Any, Awaitable, Callable, Iterable, List, Optional, Tuple
 
 from fastapi import FastAPI, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from starlette.datastructures import MutableHeaders
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -1929,6 +1929,21 @@ def _execute_workflow_graph(graph: dict, confirm_order: bool) -> dict:
     }
 
 
+_MAX_CONCURRENT_WORKFLOWS = 2
+_active_workflows = 0
+
+
+def _release_workflow_job(task: asyncio.Task) -> None:
+    global _active_workflows
+    _active_workflows = max(0, _active_workflows - 1)
+    # A timed-out request no longer awaits the worker. Consume any eventual
+    # exception so asyncio does not emit an unhandled-task warning.
+    try:
+        task.exception()
+    except (asyncio.CancelledError, Exception):
+        pass
+
+
 @app.post("/workflow/run")
 async def workflow_run(request: Request):
     """F14 — execute an operator-authored flow-pipeline graph server-side.
@@ -1942,7 +1957,28 @@ async def workflow_run(request: Request):
     if not isinstance(graph, dict) or "nodes" not in graph:
         raise HTTPException(status_code=400, detail="body.graph {nodes, edges} required")
     confirm_order = bool(body.get("confirm_order", False))
-    report = await asyncio.to_thread(_execute_workflow_graph, graph, confirm_order)
+    global _active_workflows
+    if _active_workflows >= _MAX_CONCURRENT_WORKFLOWS:
+        raise HTTPException(status_code=429, detail="workflow capacity exhausted")
+    _active_workflows += 1
+    task = asyncio.create_task(
+        asyncio.to_thread(_execute_workflow_graph, graph, confirm_order)
+    )
+    released = False
+    try:
+        report = await asyncio.wait_for(asyncio.shield(task), timeout=31.0)
+    except asyncio.TimeoutError as exc:
+        task.add_done_callback(_release_workflow_job)
+        released = True
+        raise HTTPException(status_code=504, detail="workflow execution timed out") from exc
+    finally:
+        if not released:
+            if task.done():
+                _release_workflow_job(task)
+            else:
+                # Client cancellation must not leak the admission slot while
+                # the shielded worker completes in its thread.
+                task.add_done_callback(_release_workflow_job)
     if report.get("invalid"):
         raise HTTPException(status_code=400, detail=report.get("error", "invalid graph"))
     return report
@@ -1976,7 +2012,7 @@ async def paper_place(request: Request):
 
 
 @app.get("/backtest/{strategy}")
-async def backtest_strategy(strategy: str, refresh: bool = False):
+async def backtest_strategy(request: Request, strategy: str, refresh: bool = False):
     """F12 — latest walk-forward backtest run for a strategy.
 
     Returns the most recent persisted run from ``backtest_runs`` (bounded hrana
@@ -1988,11 +2024,19 @@ async def backtest_strategy(strategy: str, refresh: bool = False):
         if cached is not None:
             return cached
 
-    result = await run_script(
-        "backtest_run.py",
-        ["--strategy", strategy, "--persist"],
-        timeout=180,
-    )
+    task = asyncio.create_task(run_script(
+        "backtest_run.py", ["--strategy", strategy, "--persist"], timeout=180
+    ))
+    while not task.done():
+        await asyncio.wait({task}, timeout=0.25)
+        if await request.is_disconnected():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            raise HTTPException(status_code=499, detail="client disconnected")
+    result = await task
     if not result.ok:
         raise HTTPException(status_code=502, detail=result.error)
     return result.data
@@ -2458,6 +2502,74 @@ async def orders_whatif(request: Request):
     return result.data
 
 
+def _internal_json_request(payload: dict) -> Request:
+    """Build an in-process request so the replace state machine reuses chokepoints."""
+    encoded = json.dumps(payload).encode("utf-8")
+
+    async def receive():
+        return {"type": "http.request", "body": encoded, "more_body": False}
+
+    return Request({"type": "http", "method": "POST", "headers": []}, receive)
+
+
+@app.post("/orders/replace")
+async def orders_replace(request: Request):
+    """Preflight, cancel, and place a replacement with explicit partial state."""
+    _refuse_if_trading_halted()
+    body = await request.json()
+    cancel_orders = body.get("cancelOrders")
+    replacement = body.get("replaceOrder")
+    if (
+        not isinstance(cancel_orders, list)
+        or not 1 <= len(cancel_orders) <= 8
+        or not isinstance(replacement, dict)
+    ):
+        raise HTTPException(status_code=422, detail="Invalid replacement state-machine payload")
+    for target in cancel_orders:
+        if not isinstance(target, dict) or not (
+            isinstance(target.get("orderId"), int) and target.get("orderId", 0) > 0
+            or isinstance(target.get("permId"), int) and target.get("permId", 0) > 0
+        ):
+            raise HTTPException(status_code=422, detail="Invalid replacement cancel target")
+
+    _refuse_if_order_limits_violated(replacement)
+    if not replacement.get("orderRef"):
+        replacement["orderRef"] = f"radon-replace-{uuid.uuid4().hex[:16]}"
+
+    # Complete every non-transmitting validation before the first cancellation.
+    await orders_whatif(_internal_json_request(replacement))
+
+    cancelled = []
+    try:
+        for target in cancel_orders:
+            result = await orders_cancel(_internal_json_request(target))
+            cancelled.append({
+                "orderId": target.get("orderId"),
+                "permId": target.get("permId"),
+                "status": (result or {}).get("finalStatus", "cancelled"),
+            })
+        placed = await orders_place(_internal_json_request(replacement))
+    except HTTPException as exc:
+        status = exc.status_code if exc.status_code == 504 else 502
+        raise HTTPException(
+            status_code=status,
+            detail={
+                "code": "REPLACE_INDETERMINATE" if status == 504 else "REPLACE_PARTIAL",
+                "phase": "placement" if len(cancelled) == len(cancel_orders) else "cancellation",
+                "cancelled": cancelled,
+                "replacementOrderRef": replacement["orderRef"],
+                "upstream": exc.detail,
+            },
+        ) from exc
+
+    return {
+        **(placed or {}),
+        "status": "ok",
+        "cancelled": cancelled,
+        "replacementOrderRef": replacement["orderRef"],
+    }
+
+
 @app.post("/orders/cancel")
 async def orders_cancel(request: Request):
     """Cancel an open order via subprocess.
@@ -2657,7 +2769,18 @@ async def journal_reconcile():
     result = await run_script_raw("ib_reconcile.py", [], timeout=120)
     if not result.ok:
         raise HTTPException(status_code=502, detail=result.error)
-    return {"ok": True}
+    marker = "RADON_RECONCILIATION_SNAPSHOT="
+    snapshot_at = next(
+        (
+            line[len(marker) :].strip()
+            for line in result.stdout.splitlines()
+            if line.startswith(marker)
+        ),
+        "",
+    )
+    if not snapshot_at:
+        raise HTTPException(status_code=502, detail="Reconciliation snapshot was not persisted")
+    return {"ok": True, "snapshot_at": snapshot_at}
 
 
 @app.post("/journal/rehydrate")
@@ -3483,6 +3606,12 @@ _gex_scan_lock: Optional[asyncio.Lock] = None
 GEX_COOLDOWN_S = 60
 
 
+def _gex_cache_for_ticker(payload: Any, ticker: str) -> Optional[dict]:
+    if not isinstance(payload, dict):
+        return None
+    return payload if str(payload.get("ticker") or "").upper() == ticker else None
+
+
 @app.post("/gex/share")
 async def gex_share():
     """Generate GEX X share report (4 cards + preview HTML). Returns output path."""
@@ -3492,6 +3621,24 @@ async def gex_share():
     return result.data
 
 
+_SHARE_CARD_TYPES = frozenset({"gex", "internals"})
+
+
+@app.get("/share/content", response_class=HTMLResponse)
+async def share_content(type: str, name: str):
+    """Serve an allowlisted generated preview from the host that created it."""
+    if type not in _SHARE_CARD_TYPES:
+        raise HTTPException(status_code=400, detail="Invalid share-card type")
+    pattern = re.compile(rf"^tweet-{re.escape(type)}-\d{{4}}-\d{{2}}-\d{{2}}\.html$")
+    if not pattern.fullmatch(name) or Path(name).name != name:
+        raise HTTPException(status_code=403, detail="Access denied")
+    path = PROJECT_ROOT / "reports" / name
+    try:
+        return HTMLResponse(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="File not found") from exc
+
+
 @app.post("/gex/scan")
 async def gex_scan(ticker: str = "SPX"):
     """Run GEX scan (gex_scan.py --json --ticker X). 60s cooldown between scans."""
@@ -3499,23 +3646,28 @@ async def gex_scan(ticker: str = "SPX"):
         return await demo_scan_response("gex-scan", {"scan_time": ""})
     global _gex_last_scan, _gex_scan_lock
     import time as _time
+    ticker = ticker.strip().upper()
+    if not ticker or len(ticker) > 10 or not ticker.replace("-", "").isalnum():
+        raise HTTPException(status_code=400, detail="Invalid ticker")
     if _gex_scan_lock is None:
         _gex_scan_lock = asyncio.Lock()
     now = _time.monotonic()
     if now - _gex_last_scan < GEX_COOLDOWN_S:
-        cached = _read_cache(DATA_DIR / "gex.json")
+        cached = _gex_cache_for_ticker(_read_cache(DATA_DIR / "gex.json"), ticker)
         if cached:
             return cached
     async with _gex_scan_lock:
         if _time.monotonic() - _gex_last_scan < GEX_COOLDOWN_S:
-            cached = _read_cache(DATA_DIR / "gex.json")
+            cached = _gex_cache_for_ticker(_read_cache(DATA_DIR / "gex.json"), ticker)
             if cached:
                 return cached
         result = await run_script(
-            "gex_scan.py", ["--json", "--ticker", ticker.upper()], timeout=120
+            "gex_scan.py", ["--json", "--ticker", ticker], timeout=120
         )
         if not result.ok:
             raise HTTPException(status_code=502, detail=result.error)
+        if _gex_cache_for_ticker(result.data, ticker) is None:
+            raise HTTPException(status_code=502, detail="GEX result ticker mismatch")
         _write_cache(DATA_DIR / "gex.json", result.data)
         _gex_last_scan = _time.monotonic()
         return result.data
@@ -3632,7 +3784,11 @@ async def llm_token_index(days: int = Query(default=180, ge=1, le=3650)):
 @app.post("/internals/share")
 async def internals_share():
     """Generate internals share report using the shared CRI report builder."""
-    result = await run_script("generate_regime_share.py", ["--json", "--no-open"], timeout=120)
+    result = await run_script(
+        "generate_regime_share.py",
+        ["--json", "--no-open", "--card-type", "internals"],
+        timeout=120,
+    )
     if not result.ok:
         raise HTTPException(status_code=502, detail=result.error)
     return result.data
@@ -4125,10 +4281,131 @@ _PI_MUTATE_SCRIPTS = frozenset({
 
 # Outer defence-in-depth allowlist: anything outside both tiers → 400.
 _PI_SCRIPT_ALLOWLIST = _PI_READ_SCRIPTS | _PI_MUTATE_SCRIPTS
+_PI_TICKER = re.compile(r"^[A-Z][A-Z0-9.-]{0,9}$")
+_PI_PRESETS = frozenset({"sectors", "mag7", "semis", "emerging", "china"})
+
+
+def _pi_bounded_int(value: str, name: str, minimum: int, maximum: int) -> str:
+    if not value.isdigit():
+        raise HTTPException(status_code=400, detail=f"{name} must be an integer")
+    parsed = int(value)
+    if parsed < minimum or parsed > maximum:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{name} must be between {minimum} and {maximum}",
+        )
+    return str(parsed)
+
+
+def _pi_parse_flags(
+    args: list[str],
+    *,
+    value_flags: dict[str, tuple[int, int]],
+    boolean_flags: frozenset[str] = frozenset(),
+) -> tuple[list[str], list[str]]:
+    normalized: list[str] = []
+    positional: list[str] = []
+    seen: set[str] = set()
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if not token.startswith("--"):
+            positional.append(token)
+            index += 1
+            continue
+        if token in seen:
+            raise HTTPException(status_code=400, detail=f"duplicate PI flag: {token}")
+        seen.add(token)
+        if token in boolean_flags:
+            normalized.append(token)
+            index += 1
+            continue
+        bounds = value_flags.get(token)
+        if bounds is None or index + 1 >= len(args):
+            raise HTTPException(status_code=400, detail=f"PI flag not allowed: {token}")
+        normalized.extend([
+            token,
+            _pi_bounded_int(args[index + 1], token, bounds[0], bounds[1]),
+        ])
+        index += 2
+    return normalized, positional
+
+
+def _validate_pi_args(script: str, args: list[str]) -> list[str]:
+    if len(args) > 32 or any(len(arg) > 128 or "\x00" in arg for arg in args):
+        raise HTTPException(status_code=400, detail="PI arguments exceed bounds")
+
+    if script == "scanner.py":
+        normalized, positional = _pi_parse_flags(
+            args,
+            value_flags={"--top": (1, 100), "--min-score": (1, 100)},
+        )
+        if positional:
+            raise HTTPException(status_code=400, detail="scanner does not accept positional arguments")
+        return normalized
+
+    if script == "discover.py":
+        normalized, positional = _pi_parse_flags(
+            args,
+            value_flags={
+                "--min-premium": (1, 1_000_000_000),
+                "--min-alerts": (1, 100),
+                "--dp-days": (1, 30),
+            },
+            boolean_flags=frozenset({"--include-indices"}),
+        )
+        if positional:
+            raise HTTPException(status_code=400, detail="discover does not accept positional arguments")
+        return normalized
+
+    if script == "evaluate.py":
+        normalized, positional = _pi_parse_flags(
+            args,
+            value_flags={"--days": (1, 30)},
+        )
+        if len(positional) != 1 or not _PI_TICKER.fullmatch(positional[0].upper()):
+            raise HTTPException(status_code=400, detail="evaluate requires one valid ticker")
+        return [positional[0].upper(), *normalized]
+
+    if script == "leap_scanner_uw.py":
+        # Preset is a bounded enum, not numeric, so handle it separately while
+        # retaining strict rejection of every filesystem/network override.
+        stripped = args
+        preset_args: list[str] = []
+        if "--preset" in args:
+            preset_index = args.index("--preset")
+            if preset_index + 1 >= len(args):
+                raise HTTPException(status_code=400, detail="missing --preset value")
+            preset = args[preset_index + 1].lower()
+            if preset not in _PI_PRESETS:
+                raise HTTPException(status_code=400, detail="invalid LEAP preset")
+            stripped = args[:preset_index] + args[preset_index + 2:]
+            preset_args = ["--preset", preset]
+        normalized, positional = _pi_parse_flags(
+            stripped,
+            value_flags={"--min-gap": (1, 100)},
+            boolean_flags=frozenset({"--json"}),
+        )
+        normalized.extend(preset_args)
+        if len(positional) > 25 or any(not _PI_TICKER.fullmatch(item.upper()) for item in positional):
+            raise HTTPException(status_code=400, detail="LEAP tickers are invalid or exceed 25")
+        return [item.upper() for item in positional] + normalized
+
+    if script == "ib_sync.py":
+        normalized, positional = _pi_parse_flags(
+            args,
+            value_flags={},
+            boolean_flags=frozenset({"--sync", "--no-prices"}),
+        )
+        if positional:
+            raise HTTPException(status_code=400, detail="ib_sync does not accept positional arguments")
+        return normalized
+
+    raise HTTPException(status_code=400, detail="PI script schema missing")
 
 
 @app.post("/pi/exec")
-async def pi_exec(payload: dict):
+async def pi_exec(payload: dict, request: Request):
     """Execute an allowlisted PI script and return raw stdout/stderr text.
 
     Body shape: {"script": "scanner.py", "args": ["--top", "20"], "timeout": 120}
@@ -4148,9 +4425,12 @@ async def pi_exec(payload: dict):
         raise HTTPException(status_code=400, detail="script is required")
     if script not in _PI_SCRIPT_ALLOWLIST:
         raise HTTPException(status_code=400, detail=f"Script not allowed: {script}")
-    if script in _PI_MUTATE_SCRIPTS and payload.get("allow_mutating") is not True:
+    if script in _PI_MUTATE_SCRIPTS and (
+        payload.get("allow_mutating") is not True
+        or not is_trusted_local_request(request)
+    ):
         raise HTTPException(
-            status_code=400,
+            status_code=403 if payload.get("allow_mutating") is True else 400,
             detail=(
                 f"Script is MUTATE-tier and requires explicit "
                 f"allow_mutating: true — {script}"
@@ -4160,6 +4440,7 @@ async def pi_exec(payload: dict):
     args = payload.get("args") or []
     if not isinstance(args, list) or any(not isinstance(a, str) for a in args):
         raise HTTPException(status_code=400, detail="args must be a list of strings")
+    args = _validate_pi_args(script, args)
 
     timeout = payload.get("timeout", 120)
     try:

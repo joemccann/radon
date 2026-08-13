@@ -36,6 +36,7 @@ export function classifyRateTier(
   method: string,
   pathname: string,
 ): DemoRateTier {
+  if (method.toUpperCase() === "POST" && pathname === "/api/ib/ws-ticket") return "E";
   if (AI_PATHS.has(pathname)) return "D";
   if (EXPENSIVE_PATTERNS.some((re) => re.test(pathname))) return "B";
   if (WRITE_METHODS.has(method.toUpperCase())) return "C";

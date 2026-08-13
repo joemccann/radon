@@ -237,7 +237,7 @@ function SideCell({
         <span>IV {fmtIv(data?.impliedVol)}</span>
         {expanded ? <span>Δ {fmtGreek(data?.delta, 2)}</span> : null}
         {expanded ? <span>V {fmtOi(data?.volume)}</span> : null}
-        <span>OI {fmtOi(data?.avgVolume)}</span>
+        <span>AVG VOL {fmtOi(data?.avgVolume)}</span>
       </span>
 
       {quickAddOpen ? (
@@ -354,9 +354,7 @@ export default function MobileChainLadder({
   }, [orderLegs, prices, ticker]);
 
   // F2: structure name + signed debit/credit for the pending strip preview.
-  // Sign comes from computeNetPrice (positive = debit, negative = credit) —
-  // computeNetOptionQuote returns unsigned magnitudes, so it can't tell the
-  // direction on its own.
+  // Sign comes from the natural combo market: positive is debit, negative is credit.
   const pendingStructure = useMemo(
     () => (orderLegs.length > 0 ? detectStructure(orderLegs) : ""),
     [orderLegs],

@@ -3,7 +3,7 @@ import { Type, type Static } from "@sinclair/typebox";
 // ── Input (maps to argparse) ──────────────────────────────────────────
 
 export const ScannerInput = Type.Object({
-  top: Type.Optional(Type.Number({ description: "Number of top signals to show (default 20)" })),
+  top: Type.Optional(Type.Integer({ minimum: 1, maximum: 500, description: "Number of top signals to show (default 20)" })),
   minScore: Type.Optional(Type.Number({ description: "Minimum score threshold (default 0)" })),
 });
 

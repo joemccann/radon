@@ -5,7 +5,7 @@
 import React from "react";
 import { describe, it, expect, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import PositionTable from "../components/PositionTable";
+import PositionTable, { resolveActiveInstrument } from "../components/PositionTable";
 import type { PortfolioPosition } from "../lib/types";
 import type { PriceData } from "../lib/pricesProtocol";
 
@@ -123,5 +123,13 @@ describe("PositionTable expanded leg rows", () => {
     const shortLegRow = screen.getByText("SHORT 1x Call $95").closest("tr");
     expect(shortLegRow).not.toBeNull();
     expect(shortLegRow?.textContent).toContain("$125");
+  });
+
+  it("portfolio refresh invalidates stale trade modal identity", () => {
+    const identity = { positionId: 101, conId: null, legIndex: 0 };
+    expect(resolveActiveInstrument(POSITIONS, identity)?.leg.strike).toBe(80);
+    expect(resolveActiveInstrument([], identity)).toBeNull();
+    const refreshed = [{ ...POSITIONS[0], legs: [POSITIONS[0].legs[1]] }];
+    expect(resolveActiveInstrument(refreshed, identity)?.leg.strike).toBe(95);
   });
 });

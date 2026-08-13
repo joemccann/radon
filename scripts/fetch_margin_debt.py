@@ -301,7 +301,8 @@ def _load_normalization_inputs() -> tuple[dict[str, float], dict[str, float], bo
         gdp_by_quarter = {_quarter_key(month): value for month, value in gdp_monthly.items()}
         return cpi, gdp_by_quarter, bool(cpi and gdp_by_quarter)
     except Exception as exc:  # noqa: BLE001 — normalization is optional
-        print(f"[margin-debt] FRED fetch failed (non-fatal): {exc}", file=sys.stderr)
+        detail = str(exc).replace(api_key, "<redacted>")
+        print(f"[margin-debt] FRED fetch failed (non-fatal): {detail}", file=sys.stderr)
         return {}, {}, False
 
 

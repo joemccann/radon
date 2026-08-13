@@ -136,6 +136,15 @@ describe("BpiPanel", () => {
     ).toBeTruthy();
   });
 
+  it("renders an initial fetch failure as a measurement fault, not missing scan data", () => {
+    useBpiMock.mockReturnValue(hookResult({ error: "BPI upstream unavailable" }));
+    render(<BpiPanel />);
+
+    expect(screen.getByText("Bullish percent measurement unavailable")).toBeTruthy();
+    expect(screen.getByText("BPI upstream unavailable")).toBeTruthy();
+    expect(screen.queryByText(/No bullish percent data yet/)).toBeNull();
+  });
+
   it("renders the per-index empty state for a missing index and keeps the switcher usable", () => {
     useBpiMock.mockReturnValue(hookResult({
       data: {

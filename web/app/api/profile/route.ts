@@ -135,21 +135,31 @@ export async function PUT(req: Request): Promise<Response> {
   }
 
   try {
-    const current = await readProfile(userId);
-    const username = hasUsername ? nextUsername : current.username;
-    const avatarUrl = hasAvatar ? nextAvatar : current.avatar_url;
-    await dbExecute(
-      {
+    if (hasUsername && hasAvatar) {
+      await dbExecute({
         sql: `INSERT INTO user_profiles (user_id, username, avatar_url, updated_at)
-            VALUES (?, ?, ?, datetime('now'))
-            ON CONFLICT(user_id) DO UPDATE SET
-              username = excluded.username,
-              avatar_url = excluded.avatar_url,
-              updated_at = excluded.updated_at`,
-        args: [userId, username, avatarUrl],
-      },
-      { label: "profile" },
-    );
+              VALUES (?, ?, ?, datetime('now'))
+              ON CONFLICT(user_id) DO UPDATE SET username = excluded.username,
+                avatar_url = excluded.avatar_url, updated_at = excluded.updated_at`,
+        args: [userId, nextUsername, nextAvatar],
+      }, { label: "profile" });
+    } else if (hasUsername) {
+      await dbExecute({
+        sql: `INSERT INTO user_profiles (user_id, username, avatar_url, updated_at)
+              VALUES (?, ?, NULL, datetime('now'))
+              ON CONFLICT(user_id) DO UPDATE SET username = excluded.username,
+                updated_at = excluded.updated_at`,
+        args: [userId, nextUsername],
+      }, { label: "profile" });
+    } else if (hasAvatar) {
+      await dbExecute({
+        sql: `INSERT INTO user_profiles (user_id, username, avatar_url, updated_at)
+              VALUES (?, NULL, ?, datetime('now'))
+              ON CONFLICT(user_id) DO UPDATE SET avatar_url = excluded.avatar_url,
+                updated_at = excluded.updated_at`,
+        args: [userId, nextAvatar],
+      }, { label: "profile" });
+    }
     const saved = await readProfile(userId);
     return setNoStoreResponseHeaders(NextResponse.json(saved), requestId);
   } catch (err) {

@@ -79,6 +79,40 @@ def test_torn_final_jsonl_line_is_ignored(job_dir):
     assert not resumed.is_done("item-2")
 
 
+def test_resume_truncates_torn_wal_tail_before_append(job_dir):
+    job = CheckpointedJob(job_dir, "t")
+    job.record_finding("item-1", {"title": "one"})
+    job.finish()
+    with (job_dir / "findings.jsonl").open("ab") as findings:
+        findings.write(b'{"_key":"torn"')
+
+    resumed = CheckpointedJob(job_dir, "t")
+    resumed.record_finding("item-2", {"title": "two"})
+    resumed.finish()
+
+    records = read_findings(job_dir)
+    assert [record["_key"] for record in records] == ["item-1", "item-2"]
+
+
+@pytest.mark.parametrize("reserved", ["_hash", "_key", "_at"])
+def test_payload_cannot_forge_reserved_metadata_or_resume_hash(job_dir, reserved):
+    job = CheckpointedJob(job_dir, "t")
+    with pytest.raises(ValueError, match="reserved"):
+        job.record_finding("item-1", {reserved: "forged"})
+
+
+def test_recovery_recomputes_hash_from_validated_key(job_dir):
+    job = CheckpointedJob(job_dir, "t")
+    job.finish()
+    forged = {"_key": "item-1", "_hash": item_hash("item-2"), "_at": "now"}
+    (job_dir / "findings.jsonl").write_text(json.dumps(forged) + "\n")
+
+    resumed = CheckpointedJob(job_dir, "t")
+
+    assert resumed.is_done("item-1")
+    assert not resumed.is_done("item-2")
+
+
 def test_error_queue_tracks_attempts_and_clears_on_success(job_dir):
     job = CheckpointedJob(job_dir, "t")
     job.record_error("item-1", "boom")

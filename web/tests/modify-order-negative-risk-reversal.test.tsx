@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { OpenOrder, PortfolioData } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
-import ModifyOrderModal from "../components/ModifyOrderModal";
+import ModifyOrderModal, { effectiveComboLegAction } from "../components/ModifyOrderModal";
 
 vi.mock("@/lib/useRiskFreeRate", () => ({
   useRiskFreeRate: () => 0,
@@ -137,6 +137,12 @@ const portfolio = {
 } as unknown as PortfolioData;
 
 describe("ModifyOrderModal signed risk reversal prices", () => {
+  it("sell combo review models submitted direction", () => {
+    expect(effectiveComboLegAction("SELL", "SELL")).toBe("BUY");
+    expect(effectiveComboLegAction("BUY", "SELL")).toBe("SELL");
+    expect(effectiveComboLegAction("SELL", "BUY")).toBe("SELL");
+  });
+
   it("shows signed negative combo references and submits a negative replacement limit", () => {
     const onConfirm = vi.fn();
 

@@ -113,4 +113,18 @@ describe("cachedRead", () => {
     expect(await cachedRead("k", 9999, fetcher)).toBe("v2");
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
+
+  it("invalidation prevents an older in-flight read from repopulating the cache", async () => {
+    let resolveOld!: (value: string) => void;
+    const oldRead = cachedRead("k", 9999, () => new Promise<string>((resolve) => {
+      resolveOld = resolve;
+    }));
+    invalidateCache("k");
+    const newFetcher = vi.fn().mockResolvedValue("new");
+    await expect(cachedRead("k", 9999, newFetcher)).resolves.toBe("new");
+    resolveOld("old");
+    await expect(oldRead).resolves.toBe("old");
+    await expect(cachedRead("k", 9999, newFetcher)).resolves.toBe("new");
+    expect(newFetcher).toHaveBeenCalledTimes(1);
+  });
 });

@@ -1,3 +1,5 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
+
 import { radonFetch } from "@/lib/radonApi";
 import {
   OPTIONS_PROXY_TIMEOUT_MS,
@@ -12,6 +14,8 @@ const SYMBOL_RE = /^[A-Z][A-Z0-9.-]{0,9}$/;
 const FREQUENCIES = new Set(["eod", "intraday"]);
 
 export async function GET(request: Request): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { rate: { key: "options/exposure:route", limit: 20, windowMs: 60_000 } });
+  if (!access.ok) return access.response;
   const { searchParams } = new URL(request.url);
   const rawSymbol = searchParams.get("symbol");
   const symbol = rawSymbol?.toUpperCase();

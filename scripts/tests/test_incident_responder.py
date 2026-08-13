@@ -6,10 +6,13 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from incident_responder import (
     MAX_ANALYSIS_ATTEMPTS,
     build_analyze_command,
     build_sync_command,
+    prepare_mirror_dir,
     load_state,
     mark_analyzed,
     run_cycle,
@@ -211,23 +214,37 @@ class TestCycleRetry:
 
 
 class TestCommands:
-    def test_sync_command_mirrors_remote_dir(self):
-        cmd = build_sync_command("radon@ib-gateway", "/home/radon/radon/data/incidents", Path("/tmp/mirror"))
+    def test_sync_command_mirrors_remote_dir(self, tmp_path):
+        mirror = prepare_mirror_dir(tmp_path, "data/incidents_remote")
+        cmd = build_sync_command("radon@ib-gateway", "/home/radon/radon/data/incidents", mirror)
         assert cmd[0] == "rsync"
         assert "radon@ib-gateway:/home/radon/radon/data/incidents/" in cmd
-        assert cmd[-1] == "/tmp/mirror/"
+        assert cmd[-1] == f"{mirror}/"
 
-    def test_sync_delete_never_wipes_responder_owned_files(self):
+    def test_sync_delete_never_wipes_responder_owned_files(self, tmp_path):
         """--delete removes local files absent on the remote; the dedup state
         and diagnoses live beside the mirror and must be protected or every
         cycle re-analyzes the same incident (5x duplicate-analysis bug,
         2026-08-04)."""
-        cmd = build_sync_command("r@h", "/remote", Path("/tmp/mirror"))
+        mirror = prepare_mirror_dir(tmp_path, "data/incidents_remote")
+        cmd = build_sync_command("r@h", "/remote", mirror)
         assert "--exclude=.responder-state.json" in cmd
         assert "--exclude=.responder.lock" in cmd
         assert "--exclude=*.diagnosis.md" in cmd
         assert "--exclude=*.incident.html" in cmd
         assert "--delete-excluded" not in cmd
+
+    def test_mirror_delete_rejects_root_parent_symlink_and_unapproved_override(
+        self, tmp_path
+    ):
+        for unsafe in ("/", "data", "data/other"):
+            with pytest.raises(ValueError):
+                prepare_mirror_dir(tmp_path, unsafe)
+
+        (tmp_path / "outside").mkdir()
+        (tmp_path / "data").symlink_to(tmp_path / "outside", target_is_directory=True)
+        with pytest.raises(ValueError, match="symlink"):
+            prepare_mirror_dir(tmp_path, "data/incidents_remote")
 
     def test_analyze_command_is_analyze_only(self):
         cmd = build_analyze_command(Path("/tmp/proj/x.projection.json"))

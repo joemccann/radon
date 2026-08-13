@@ -58,7 +58,7 @@ function mockFetchResponses(handlers: Record<string, () => Response>) {
 const PROPOSAL = {
   tool: "place_order",
   destructive: true as const,
-  input: { ticker: "WULF", action: "BUY", quantity: 10, limit_price: 5.6, structure: "long call" },
+  input: { type: "option" as const, ticker: "WULF", action: "BUY" as const, quantity: 10, limit_price: 5.6, expiry: "20260918", strike: 6, right: "C" as const, conId: 12345, exchange: "SMART" },
   summary: "BUY 10 WULF long call @ 5.6",
   toolUseId: "tu-1",
 };
@@ -80,11 +80,11 @@ describe("ChatPanel order-confirm card", () => {
       "/api/assistant": () => ({ content: "Proposing an order.", proposal: PROPOSAL }),
     });
 
-    render(<ChatPanel activeSection="dashboard" />);
+    render(<ChatPanel activeSection="dashboard" portfolio={{ positions: [] } as never} />);
     await sendNonCommandMessage("buy me some wulf calls");
 
     await waitFor(() => {
-      expect(screen.getByText(PROPOSAL.summary)).toBeTruthy();
+      expect(screen.getAllByText(PROPOSAL.summary)).toHaveLength(2);
     });
     expect(screen.getByRole("button", { name: /confirm/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /cancel/i })).toBeTruthy();
@@ -95,11 +95,11 @@ describe("ChatPanel order-confirm card", () => {
       "/api/assistant": () => ({ content: "Proposing an order.", proposal: PROPOSAL }),
     });
 
-    render(<ChatPanel activeSection="dashboard" />);
+    render(<ChatPanel activeSection="dashboard" portfolio={{ positions: [] } as never} />);
     await sendNonCommandMessage("buy me some wulf calls");
 
     await waitFor(() => {
-      expect(screen.getByText(PROPOSAL.summary)).toBeTruthy();
+      expect(screen.getAllByText(PROPOSAL.summary)).toHaveLength(2);
     });
 
     expect(calls.some((c) => c.url.includes("/api/orders/place"))).toBe(false);
@@ -111,11 +111,12 @@ describe("ChatPanel order-confirm card", () => {
       "/api/orders/place": () => ({ status: "ok", message: "Order placed" }),
     });
 
-    render(<ChatPanel activeSection="dashboard" />);
+    render(<ChatPanel activeSection="dashboard" portfolio={{ positions: [] } as never} />);
     await sendNonCommandMessage("buy me some wulf calls");
 
-    await waitFor(() => screen.getByRole("button", { name: /confirm/i }));
-    fireEvent.click(screen.getByRole("button", { name: /confirm/i }));
+    const confirm = await screen.findByRole("button", { name: /confirm/i });
+    await waitFor(() => expect(confirm.hasAttribute("disabled")).toBe(false));
+    fireEvent.click(confirm);
 
     await waitFor(() => {
       const placeCall = calls.find((c) => c.url.includes("/api/orders/place"));
@@ -128,6 +129,10 @@ describe("ChatPanel order-confirm card", () => {
     expect(sentBody.symbol).toBe("WULF");
     expect(sentBody.action).toBe("BUY");
     expect(sentBody.quantity).toBe(10);
+    expect(sentBody.type).toBe("option");
+    expect(sentBody.conId).toBe(12345);
+    expect(sentBody.expiry).toBe("20260918");
+    expect(sentBody.idempotencyKey).toMatch(/^[0-9a-f-]{36}$/);
   });
 
   it("Cancel dismisses the card and places nothing", async () => {
@@ -135,7 +140,7 @@ describe("ChatPanel order-confirm card", () => {
       "/api/assistant": () => ({ content: "Proposing an order.", proposal: PROPOSAL }),
     });
 
-    render(<ChatPanel activeSection="dashboard" />);
+    render(<ChatPanel activeSection="dashboard" portfolio={{ positions: [] } as never} />);
     await sendNonCommandMessage("buy me some wulf calls");
 
     await waitFor(() => screen.getByRole("button", { name: /cancel/i }));
@@ -159,7 +164,7 @@ describe("ChatPanel order-confirm card", () => {
       } as Response),
     });
 
-    render(<ChatPanel activeSection="dashboard" />);
+    render(<ChatPanel activeSection="dashboard" portfolio={{ positions: [] } as never} />);
     await sendNonCommandMessage("/portfolio");
 
     await waitFor(() => {
@@ -178,7 +183,7 @@ describe("ChatPanel order-confirm card", () => {
     // @ts-expect-error test stub
     global.fetch = fetchMock;
 
-    render(<ChatPanel activeSection="dashboard" />);
+    render(<ChatPanel activeSection="dashboard" portfolio={{ positions: [] } as never} />);
     await sendNonCommandMessage("/portfolio");
 
     await waitFor(() => {

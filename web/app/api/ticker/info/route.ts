@@ -1,3 +1,5 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
+
 import { NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
@@ -32,6 +34,7 @@ type CacheEntry = {
 };
 
 const FLOAT_RECHECK_MS = 24 * 60 * 60 * 1000;
+const PROVIDER_TIMEOUT_MS = 4_000;
 
 function floatRecheckDue(entry: CacheEntry): boolean {
   if (isPopulated(entry.short_float ?? {})) return false;
@@ -127,7 +130,7 @@ async function fetchUWStockInfo(ticker: string, token: string): Promise<Record<s
   try {
     const res = await fetch(
       `https://api.unusualwhales.com/api/stock/${encodeURIComponent(ticker)}/info`,
-      { cache: "no-store", headers: { Authorization: `Bearer ${token}` } },
+      { cache: "no-store", headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS) },
     );
     if (!res.ok) return {};
     const json = await res.json();
@@ -146,7 +149,7 @@ async function fetchUWShortFloat(ticker: string, token: string): Promise<Record<
   try {
     const res = await fetch(
       `https://api.unusualwhales.com/api/shorts/${encodeURIComponent(ticker)}/interest-float/v2`,
-      { cache: "no-store", headers: { Authorization: `Bearer ${token}` } },
+      { cache: "no-store", headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS) },
     );
     if (!res.ok) return {};
     const json = await res.json();
@@ -161,7 +164,7 @@ async function fetchUWStockState(ticker: string, token: string): Promise<Record<
   try {
     const res = await fetch(
       `https://api.unusualwhales.com/api/stock/${encodeURIComponent(ticker)}/stock-state`,
-      { cache: "no-store", headers: { Authorization: `Bearer ${token}` } },
+      { cache: "no-store", headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS) },
     );
     if (!res.ok) return {};
     const json = await res.json();
@@ -189,6 +192,7 @@ async function fetchExaData(ticker: string): Promise<{ profile: Record<string, u
         contents: { text: { maxCharacters: 3000 } },
         includeDomains: ["robinhood.com"],
       }),
+      signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
     });
 
     if (!res.ok) return { profile: {}, stats: {} };
@@ -210,7 +214,7 @@ async function fetchYahooStats(ticker: string): Promise<Record<string, unknown>>
     const res = await fetch(url, {
       cache: "no-store",
       headers: { "User-Agent": "Mozilla/5.0" },
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
     });
     if (!res.ok) return {};
     const json = await res.json();
@@ -231,6 +235,8 @@ const CACHE_TTL_SECONDS = 20;
 /* ─── Route handler ─── */
 
 export async function GET(request: Request): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { rate: { key: "ticker/info:route", limit: 20, windowMs: 60_000 } });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   const { searchParams } = new URL(request.url);
   const ticker = searchParams.get("ticker");

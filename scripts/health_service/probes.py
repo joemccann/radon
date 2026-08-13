@@ -55,9 +55,15 @@ def probe_http_json(url: str, timeout: float = 2.0, max_bytes: int = 65536) -> d
         with urllib.request.urlopen(url, timeout=timeout) as resp:
             raw = resp.read(max_bytes)
             try:
-                payload = json.loads(raw.decode("utf-8")) if raw else {}
-            except ValueError:
-                payload = {}
+                payload = json.loads(raw.decode("utf-8")) if raw else None
+            except (UnicodeDecodeError, ValueError):
+                payload = None
+            if not isinstance(payload, dict) or not payload:
+                return {
+                    "state": "unknown",
+                    "http_status": getattr(resp, "status", 200),
+                    "detail": "invalid_json_payload",
+                }
             return {"state": "up", "http_status": getattr(resp, "status", 200), "payload": payload}
     except urllib.error.HTTPError as exc:
         return {"state": "down", "http_status": exc.code, "detail": "http_error"}
@@ -152,6 +158,14 @@ def _nested_api_state(probe_results: dict) -> str | None:
     upstream_dead = payload.get("upstream_dead")
     port_listening = payload.get("port_listening")
 
+    if not (
+        isinstance(service_state, str)
+        and isinstance(auth_state, str)
+        and type(upstream_dead) is bool
+        and type(port_listening) is bool
+    ):
+        return "unknown"
+
     if upstream_dead is True or port_listening is False:
         return "down"
     if isinstance(service_state, str) and service_state.lower() in {
@@ -200,9 +214,13 @@ def aggregate_state(probe_results: dict, units: dict,
         if isinstance(value, dict):
             state = str(value.get("state", "unknown")).lower()
             (dependency_states if name == "ib-gateway" else serving_states).append(state)
-    for value in (units or {}).values():
-        if isinstance(value, dict):
-            serving_states.append(str(value.get("state", "unknown")).lower())
+    units_current = _unit_evidence_current(units_age_secs)
+    if units_current:
+        for name, value in (units or {}).items():
+            if isinstance(value, dict):
+                state = str(value.get("state", "unknown")).lower()
+                target = dependency_states if name == "radon-ib-gateway.service" else serving_states
+                target.append(state)
     nested_api_state = _nested_api_state(probe_results)
     if nested_api_state is not None:
         dependency_states.append(nested_api_state)
@@ -213,7 +231,7 @@ def aggregate_state(probe_results: dict, units: dict,
     if (
         health_service != "ok"
         or not states
-        or not _unit_evidence_current(units_age_secs)
+        or not units_current
     ):
         return "unknown"
     if any(state == "unknown" for state in states):

@@ -23,6 +23,10 @@ describe("classifyRateTier", () => {
     expect(classifyRateTier("DELETE", "/api/journal/123")).toBe("C");
   });
 
+  it("websocket tickets use the reconnect-burst tier", () => {
+    expect(classifyRateTier("POST", "/api/ib/ws-ticket")).toBe("E");
+  });
+
   it("plain reads are tier A", () => {
     expect(classifyRateTier("GET", "/api/portfolio")).toBe("A");
     expect(classifyRateTier("GET", "/api/orders")).toBe("A");

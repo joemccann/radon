@@ -1,3 +1,5 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
+
 import { NextResponse } from "next/server";
 import { readFile } from "fs/promises";
 import { join } from "path";
@@ -64,10 +66,6 @@ function isMarketOpenNow(): boolean {
   if (day === 0 || day === 6) return false;
   const minutes = et.getHours() * 60 + et.getMinutes();
   return minutes >= 9 * 60 + 30 && minutes <= 16 * 60;
-}
-
-function todayET(): string {
-  return new Date().toLocaleDateString("sv", { timeZone: "America/New_York" });
 }
 
 async function readCachedGexFromDb(): Promise<Record<string, unknown> | null> {
@@ -153,6 +151,8 @@ function triggerBackgroundScan(): void {
 const GEX_CACHE_TTL_MS = 5_000;
 
 export async function GET(): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { rate: { key: "gex:route", limit: 20, windowMs: 60_000 } });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   const cached = await cachedRead("gex:SPX", GEX_CACHE_TTL_MS, readCachedGex, {
     staleWhileError: true,
@@ -163,7 +163,7 @@ export async function GET(): Promise<Response> {
   (data as Record<string, unknown>).market_open = currentMarketOpen;
 
   const stale = cached
-    ? isGexDataStale(cached as { scan_time?: string; market_open?: boolean }, todayET(), currentMarketOpen)
+    ? isGexDataStale(cached as { scan_time?: string; market_open?: boolean }, undefined, currentMarketOpen)
     : true;
 
   if (stale) {
@@ -181,22 +181,23 @@ export async function GET(): Promise<Response> {
 }
 
 export async function POST(): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { rate: { key: "gex:route", limit: 20, windowMs: 60_000 } });
+  if (!access.ok) return access.response;
   try {
     const rawData = await radonFetch<Record<string, unknown>>("/gex/scan", { method: "POST", timeout: 130_000 });
     const data = normalizeGexPayload(rawData);
     return NextResponse.json(data);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "GEX scan failed";
+  } catch {
     try {
       const cached = await readCachedGex();
       if (cached) {
         const res = NextResponse.json(normalizeGexPayload(cached));
-        res.headers.set("X-Sync-Warning", `GEX sync failed - serving cached data (${message})`);
+        res.headers.set("X-Sync-Warning", "GEX sync failed - serving cached data");
         return res;
       }
     } catch {
       // fall through to 502
     }
-    return NextResponse.json({ error: message }, { status: 502 });
+    return NextResponse.json({ error: "GEX scan failed" }, { status: 502 });
   }
 }

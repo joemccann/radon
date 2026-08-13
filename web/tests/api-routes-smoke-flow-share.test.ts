@@ -56,13 +56,19 @@ vi.mock("@/lib/db", () => ({ resetDb: () => {},
   syncDb: mockSyncDb,
 }));
 
-// Clerk auth — share routes use auth().getToken().
-const mockAuth = vi.fn().mockResolvedValue({ getToken: async () => "test-token" });
+// Authenticated route principal with a token for FastAPI proxy calls.
+const mockAuth = vi.fn().mockResolvedValue({
+  userId: "user_test",
+  getToken: async () => "test-token",
+});
 vi.mock("@clerk/nextjs/server", () => ({
   auth: mockAuth,
 }));
 
+const originalAllowedUserIds = process.env.ALLOWED_USER_IDS;
+
 beforeEach(() => {
+  process.env.ALLOWED_USER_IDS = "user_test";
   vi.resetModules();
   mockRadonFetch.mockReset();
   mockReadFile.mockReset();
@@ -71,10 +77,15 @@ beforeEach(() => {
   mockMkdir.mockResolvedValue(undefined);
   mockWriteFile.mockResolvedValue(undefined);
   mockGetDb.mockReset();
-  mockAuth.mockResolvedValue({ getToken: async () => "test-token" });
+  mockAuth.mockResolvedValue({
+    userId: "user_test",
+    getToken: async () => "test-token",
+  });
 });
 
 afterEach(() => {
+  if (originalAllowedUserIds === undefined) delete process.env.ALLOWED_USER_IDS;
+  else process.env.ALLOWED_USER_IDS = originalAllowedUserIds;
   vi.clearAllMocks();
 });
 

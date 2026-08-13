@@ -1,3 +1,5 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
+
 import { NextResponse } from "next/server";
 import { readFile } from "fs/promises";
 import { statSync } from "fs";
@@ -69,6 +71,8 @@ async function readFlowAnalysisFromDisk(): Promise<TimestampedRead<Record<string
 }
 
 export async function GET(): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { rate: { key: "flow-analysis:route", limit: 20, windowMs: 60_000 } });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   // Fresher of DB row and disk JSON, so a stalled writer on either side
   // can never freeze the panel.
@@ -102,6 +106,12 @@ export async function GET(): Promise<Response> {
 }
 
 export async function POST(): Promise<Response> {
+  const access = await requireRouteAccess(undefined, {
+    operatorOnly: true,
+    rate: { key: "flow-analysis-run", limit: 2, windowMs: 60_000 },
+    durableRateTier: "C",
+  });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   try {
     const data = await radonFetch("/flow-analysis", { method: "POST", timeout: 130_000 });

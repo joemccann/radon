@@ -12,6 +12,7 @@ import { NextResponse } from "next/server";
 
 const FRED_DFF_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DFF";
 const REVALIDATE_SECONDS = 86_400;
+const MAX_OBSERVATION_AGE_MS = 4 * 24 * 60 * 60 * 1000;
 
 type RiskFreeRateResponse = {
   rate: number;
@@ -26,7 +27,7 @@ async function fetchLatestDff(): Promise<{ rate: number; asOf: string } | null> 
   const cosd = since.toISOString().slice(0, 10);
 
   const res = await fetch(`${FRED_DFF_URL}&cosd=${cosd}`, {
-    next: { revalidate: REVALIDATE_SECONDS },
+    cache: "no-store",
   });
   if (!res.ok) return null;
 
@@ -42,13 +43,18 @@ async function fetchLatestDff(): Promise<{ rate: number; asOf: string } | null> 
   return null;
 }
 
+function observationIsCurrent(asOf: string, now = new Date()): boolean {
+  const observed = Date.parse(`${asOf}T00:00:00Z`);
+  return Number.isFinite(observed) && now.getTime() - observed <= MAX_OBSERVATION_AGE_MS;
+}
+
 export async function GET() {
   try {
     const result = await fetchLatestDff();
-    if (!result) {
+    if (!result || !observationIsCurrent(result.asOf)) {
       return NextResponse.json<RiskFreeRateResponse>(
-        { rate: 0, asOf: null, source: "fallback", stale: true },
-        { headers: { "Cache-Control": "public, max-age=300" } },
+        { rate: 0, asOf: result?.asOf ?? null, source: "fallback", stale: true },
+        { headers: { "Cache-Control": "private, no-store" } },
       );
     }
     return NextResponse.json<RiskFreeRateResponse>(
@@ -58,7 +64,7 @@ export async function GET() {
   } catch {
     return NextResponse.json<RiskFreeRateResponse>(
       { rate: 0, asOf: null, source: "fallback", stale: true },
-      { headers: { "Cache-Control": "public, max-age=300" } },
+      { headers: { "Cache-Control": "private, no-store" } },
     );
   }
 }

@@ -73,3 +73,24 @@ export async function radonFetch<T = Record<string, unknown>>(
   }
   return res.json();
 }
+
+export async function radonFetchText(
+  path: string,
+  opts?: RequestInit & { timeout?: number; token?: string },
+): Promise<string> {
+  const { timeout = 30_000, token, ...fetchOpts } = opts ?? {};
+  const headers = new Headers(fetchOpts.headers);
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const serviceToken = process.env.RADON_SERVICE_TOKEN;
+  if (serviceToken) headers.set("X-Radon-Service-Token", serviceToken);
+  const timeoutSignal = AbortSignal.timeout(timeout);
+  const signal = fetchOpts.signal ? AbortSignal.any([fetchOpts.signal, timeoutSignal]) : timeoutSignal;
+  const res = await fetch(`${RADON_API}${path}`, {
+    ...fetchOpts,
+    headers,
+    cache: fetchOpts.cache ?? "no-store",
+    signal,
+  });
+  if (!res.ok) throw new RadonApiError(res.status, await res.text().catch(() => `HTTP ${res.status}`));
+  return res.text();
+}

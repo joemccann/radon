@@ -1,10 +1,7 @@
 /**
- * Structural identity for an order's IB what-if margin request.
- *
- * The key DELIBERATELY excludes the limit price / net premium so that price
- * keystrokes at the confirm step don't refire a real IB round-trip — the
- * initial-margin requirement is a property of the POSITION (legs + ratios), not
- * the price you pay for it. Returns null when the input is not a what-if-
+ * Complete identity for an order's IB what-if margin request. Price and the
+ * portfolio revision are material to broker margin and must invalidate cached
+ * results. Returns null when the input is not a what-if-
  * eligible combo, which keeps `useWhatIfMargin` idle.
  *
  * Module-private (under internal/) like its risk-module siblings.
@@ -15,7 +12,10 @@ function gcd(a: number, b: number): number {
   return b === 0 ? a : gcd(b, a % b);
 }
 
-export function whatIfKey(input: OrderRiskInput | null): string | null {
+export function whatIfKey(
+  input: OrderRiskInput | null,
+  portfolioRevision = "portfolio-unknown",
+): string | null {
   if (input == null || input.type === "linear") return null;
   const opt = input as OptionOrderRiskInput;
   if (opt.closeOut != null) return null;
@@ -30,7 +30,7 @@ export function whatIfKey(input: OrderRiskInput | null): string | null {
         `${l.expiry}|${l.strike}|${l.right}|${l.action}|${Math.round(quantities[i] / combos)}`,
     )
     .sort();
-  return `${opt.ticker.toUpperCase()}::x${combos}::${parts.join(",")}`;
+  return `${opt.ticker.toUpperCase()}::x${combos}::p${opt.netPremium}::r${portfolioRevision}::${parts.join(",")}`;
 }
 
 /**

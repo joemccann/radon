@@ -110,6 +110,7 @@ export type ReliabilityHistoryPayload = {
   since: string;
   events: ServiceHealthEventRow[];
   baseline: Record<string, string>;
+  truncated?: boolean;
   missing?: boolean;
 };
 

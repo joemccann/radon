@@ -1,3 +1,5 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
+
 import { NextResponse } from "next/server";
 import { RadonApiError, radonFetch } from "@/lib/radonApi";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
@@ -21,6 +23,8 @@ function invalidQueryReason(body: SearchBody): string | null {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { rate: { key: "knowledge/search:route", limit: 20, windowMs: 60_000 } });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
 
   let body: SearchBody;

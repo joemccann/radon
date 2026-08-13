@@ -1,8 +1,8 @@
 "use client";
 
-import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Send, ArrowDown, Copy, Check } from "lucide-react";
-import type { ApiMessage, AssistantOrderProposal, Message, WorkspaceSection } from "@/lib/types";
+import type { ApiMessage, AssistantOrderProposal, Message, PortfolioData, WorkspaceSection } from "@/lib/types";
 import { quickPromptsBySection } from "@/lib/data";
 import { createTimestamp } from "@/lib/utils";
 import {
@@ -14,9 +14,12 @@ import {
   streamMessage,
 } from "@/lib/chat";
 import MarkdownRenderer from "./MarkdownRenderer";
+import { OrderRiskGate } from "@/lib/order/risk/OrderRiskGate";
+import type { OrderRiskInput, OrderRiskState } from "@/lib/order/risk/useOrderRisk";
 
 type ChatPanelProps = {
   activeSection: WorkspaceSection;
+  portfolio?: PortfolioData | null;
 };
 
 /**
@@ -55,13 +58,33 @@ function CopyButton({ content }: { content: string }) {
   );
 }
 
-export default function ChatPanel({ activeSection }: ChatPanelProps) {
+function proposalRiskInput(proposal: AssistantOrderProposal | null): OrderRiskInput | null {
+  if (!proposal) return null;
+  const input = proposal.input;
+  if (input.type === "stock") {
+    return {
+      type: "linear", ticker: input.ticker, action: input.action,
+      quantity: input.quantity, limitPrice: input.limit_price, multiplier: 1,
+      instrument: "stock", description: proposal.summary,
+    };
+  }
+  const signedPremium = input.action === "BUY" ? input.limit_price : -input.limit_price;
+  return {
+    type: "options", ticker: input.ticker, netPremium: signedPremium,
+    description: proposal.summary, totalCost: signedPremium * input.quantity * 100,
+    chainLegs: [{ action: input.action, right: input.right, strike: input.strike, expiry: input.expiry, quantity: input.quantity }],
+  };
+}
+
+export default function ChatPanel({ activeSection, portfolio }: ChatPanelProps) {
   const [query, setQuery] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [status, setStatus] = useState<ChatStatus>("idle");
   const [lastError, setLastError] = useState("");
   const [proposal, setProposal] = useState<AssistantOrderProposal | null>(null);
   const [isPlacing, setPlacing] = useState(false);
+  const [riskState, setRiskState] = useState<OrderRiskState | null>(null);
+  const riskInput = useMemo(() => proposalRiskInput(proposal), [proposal]);
   const [showJump, setShowJump] = useState(false);
 
   const messagesRef = useRef<HTMLDivElement | null>(null);
@@ -114,6 +137,9 @@ export default function ChatPanel({ activeSection }: ChatPanelProps) {
     if (!cleaned || isBusy) {
       return;
     }
+    // A new turn invalidates any prior model-controlled destructive intent.
+    setProposal(null);
+    setRiskState(null);
 
     const userMessage: Message = {
       id: `u-${Date.now()}`,
@@ -184,7 +210,7 @@ export default function ChatPanel({ activeSection }: ChatPanelProps) {
   };
 
   const confirmProposal = async () => {
-    if (!proposal || isPlacing) return;
+    if (!proposal || isPlacing || !riskState?.okToSubmit) return;
     setPlacing(true);
     setLastError("");
     try {
@@ -320,6 +346,12 @@ export default function ChatPanel({ activeSection }: ChatPanelProps) {
             <div className="chat-order-confirm" role="group" aria-label="Order confirmation">
               <div className="chat-order-confirm-header">CONFIRM ORDER</div>
               <div className="chat-order-confirm-summary">{proposal.summary}</div>
+              <OrderRiskGate
+                input={riskInput}
+                portfolio={portfolio}
+                surface="assistant-chat"
+                onState={setRiskState}
+              />
               <div className="chat-order-confirm-note">This order is not sent until you confirm.</div>
               <div className="chat-order-confirm-actions">
                 <button
