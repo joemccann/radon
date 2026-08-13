@@ -5,25 +5,15 @@ import {
   jsonApiError,
   setNoStoreResponseHeaders,
 } from "@/lib/apiContracts";
-import { requireDemoAdmin } from "@/lib/demo/adminAuth";
+import { requireRouteAccess } from "@/lib/routeAccess";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function POST(): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { operatorOnly: true });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
-  // Operator-only, fail CLOSED (see middleware isAuthorizedUser fails open).
-  if (!(await requireDemoAdmin())) {
-    return setNoStoreResponseHeaders(
-      jsonApiError({
-        message: "Operator authorization required",
-        status: 403,
-        code: "FORBIDDEN",
-        requestId,
-      }),
-      requestId,
-    );
-  }
   try {
     const data = await radonFetch("/ib/reset-backoff", { method: "POST", timeout: 15_000 });
     const response = NextResponse.json(data);

@@ -1,9 +1,10 @@
 // Next.js-side operator gate for the demo-users admin API (Phase 6).
 //
-// The /admin/demo-users routes manage trials + write Clerk metadata, so they
-// must be operator-only — not merely "any signed-in user" (which on the demo
-// deployment would include trial users themselves). Mirrors the FastAPI
-// ALLOWED_USER_IDS gate (scripts/api/auth.py) on the Next.js side.
+// The /api/admin/demo-users routes manage trials + write Clerk metadata, so
+// they must be demo-admin-only. The operator control panel at /admin uses
+// ALLOWED_USER_IDS via requireRouteAccess({ operatorOnly: true }). Do not
+// reuse this helper for that page: DEMO_ADMIN_USER_IDS is unset on
+// app.radon.run and would 404 the operator.
 //
 // Default-deny: if DEMO_ADMIN_USER_IDS is unset, NOBODY is a demo admin.
 
