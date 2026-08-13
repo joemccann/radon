@@ -1,3 +1,5 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
+
 
 export const runtime = "nodejs";
 
@@ -8,9 +10,13 @@ import { isCriDataStale } from "@/lib/criStaleness";
 import { selectPreferredCriCandidate, type CriCacheCandidate } from "@/lib/criCache";
 import { backfillRealizedVolHistory, type RegimeHistoryEntry } from "@/lib/regimeHistory";
 import { radonFetch } from "@/lib/radonApi";
-import { isSkewCacheFresh } from "@/lib/internalsSkewCache";
+import { isSkewCacheFresh, matchesInternalsSkewVariant } from "@/lib/internalsSkewCache";
 import { dbExecute } from "@/lib/dbExecute";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
+import {
+  toLongRangeSkewPoints,
+  type LongRangeSkewHistoryPayload,
+} from "@/lib/internalsSkewSeries";
 
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
@@ -180,30 +186,11 @@ function extractNqSkewFromMenthorqPayload(raw: Record<string, unknown> | null): 
 
 type MenthorqSkewHistoryPoint = {
   date: string;
+  metric: "cta_position_spread" | "option_rr_spread";
   nq_skew: number | null;
   spx_position: number | null;
   nq_position: number | null;
   spx_skew?: number | null;
-};
-
-type SkewHistoryApiPoint = {
-  date: string;
-  value: number;
-};
-
-type SkewHistorySeries = {
-  ticker: string;
-  expiry: string | null;
-  delta: number;
-  timeframe: string;
-  data: SkewHistoryApiPoint[];
-};
-
-type LongRangeSkewHistoryPayload = {
-  nq?: SkewHistorySeries;
-  spx?: SkewHistorySeries;
-  nq_skew_history?: SkewHistorySeries;
-  spx_skew_history?: SkewHistorySeries;
 };
 
 async function readMenthorqSkewHistory(): Promise<MenthorqSkewHistoryPoint[]> {
@@ -235,6 +222,7 @@ async function readMenthorqSkewHistory(): Promise<MenthorqSkewHistoryPoint[]> {
 
       points.push({
         date,
+        metric: "cta_position_spread",
         nq_skew: extracted.nq_skew,
         spx_position: extracted.spx_position,
         nq_position: extracted.nq_position,
@@ -246,42 +234,6 @@ async function readMenthorqSkewHistory(): Promise<MenthorqSkewHistoryPoint[]> {
   } catch {
     return [];
   }
-}
-
-function toLongRangeSkewPoints(response: LongRangeSkewHistoryPayload): MenthorqSkewHistoryPoint[] {
-  const nqSeries = response.nq ?? response.nq_skew_history;
-  const spxSeries = response.spx ?? response.spx_skew_history;
-
-  const nqMap = new Map<string, number>();
-  if (nqSeries?.data && Array.isArray(nqSeries.data)) {
-    for (const entry of nqSeries.data) {
-      const value = toSafeNumber((entry as { value?: unknown }).value);
-      if (entry?.date && value != null) nqMap.set(entry.date, value);
-    }
-  }
-
-  const spxMap = new Map<string, number>();
-  if (spxSeries?.data && Array.isArray(spxSeries.data)) {
-    for (const entry of spxSeries.data) {
-      const value = toSafeNumber((entry as { value?: unknown }).value);
-      if (entry?.date && value != null) spxMap.set(entry.date, value);
-    }
-  }
-
-  const dates = new Set<string>([
-    ...nqMap.keys(),
-    ...spxMap.keys(),
-  ]);
-  return [...dates]
-    .sort()
-    .map((date) => ({
-      date,
-      nq_skew: nqMap.get(date) ?? null,
-      nq_position: null,
-      spx_position: spxMap.get(date) ?? null,
-      spx_skew: spxMap.get(date) ?? null,
-    }))
-    .filter((entry) => entry.nq_skew !== null || entry.spx_skew !== null);
 }
 
 async function readCachedLongRangeSkewHistory(): Promise<MenthorqSkewHistoryPoint[]> {
@@ -297,8 +249,21 @@ async function readCachedLongRangeSkewHistory(): Promise<MenthorqSkewHistoryPoin
     }));
     ranked.sort((a, b) => b.mtimeMs - a.mtimeMs);
 
-    const raw = JSON.parse(await readFile(ranked[0].path, "utf-8")) as LongRangeSkewHistoryPayload;
-    return toLongRangeSkewPoints(raw);
+    for (const candidate of ranked) {
+      try {
+        const raw = JSON.parse(await readFile(candidate.path, "utf-8")) as LongRangeSkewHistoryPayload;
+        if (matchesInternalsSkewVariant(raw, {
+          nqTicker: "NDX",
+          spxTicker: "SPX",
+          timeframe: "5Y",
+          nqDelta: 25,
+          spxDelta: 25,
+        })) return toLongRangeSkewPoints(raw);
+      } catch {
+        // Skip corrupt or mismatched variants.
+      }
+    }
+    return [];
   } catch {
     return [];
   }
@@ -375,8 +340,9 @@ function normalizeCriPayload(
   menthorqCache: Record<string, unknown> | null,
   menthorqSkewHistory: MenthorqSkewHistoryPoint[] = [],
 ) {
-  const nqSkewHistory = menthorqSkewHistory;
-  const spxSkewHistory = menthorqSkewHistory
+  const nqSkewHistory = menthorqSkewHistory.filter((entry) => entry.metric === "option_rr_spread");
+  const ctaPositionHistory = menthorqSkewHistory.filter((entry) => entry.metric === "cta_position_spread");
+  const spxSkewHistory = nqSkewHistory
     .map((entry) => ({
       date: entry.date,
       spx_skew: entry.spx_skew,
@@ -406,11 +372,11 @@ function normalizeCriPayload(
     : EMPTY_CRI.cri.level;
   const rawCta = (raw.cta as Record<string, unknown>) ?? {};
   const currentMenthorqSkew = extractCurrentMenthorqSkew(raw, menthorqCache);
-  const latestSkewPoint = menthorqSkewHistory.length > 0
-    ? menthorqSkewHistory[menthorqSkewHistory.length - 1]
+  const latestSkewPoint = nqSkewHistory.length > 0
+    ? nqSkewHistory[nqSkewHistory.length - 1]
     : null;
-  const latestNqSkew = latestSkewPoint?.nq_skew ?? currentMenthorqSkew.nq_skew;
-  const latestSpxSkew = latestSkewPoint?.spx_skew ?? currentMenthorqSkew.spx_position;
+  const latestNqSkew = latestSkewPoint?.metric === "option_rr_spread" ? latestSkewPoint.nq_skew : null;
+  const latestSpxSkew = latestSkewPoint?.metric === "option_rr_spread" ? latestSkewPoint.spx_skew : null;
 
   return {
     ...EMPTY_CRI,
@@ -457,6 +423,8 @@ function normalizeCriPayload(
     spx_skew: latestSpxSkew,
     nq_skew_history: nqSkewHistory,
     spx_skew_history: spxSkewHistory,
+    cta_position_history: ctaPositionHistory,
+    cta_position_spread: currentMenthorqSkew.nq_skew,
     crash_trigger: {
       ...EMPTY_CRI.crash_trigger,
       ...crashTrigger,
@@ -633,6 +601,8 @@ function triggerBackgroundScan(): void {
 }
 
 export async function GET(): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { rate: { key: "internals:route", limit: 20, windowMs: 60_000 } });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   const result = await readLatestCri();
   const [menthorqCache, menthorqSkewHistory] = await Promise.all([
@@ -655,6 +625,8 @@ export async function GET(): Promise<Response> {
 }
 
 export async function POST(): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { rate: { key: "internals:route", limit: 20, windowMs: 60_000 } });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   try {
     const rawData = await radonFetch<Record<string, unknown>>("/regime/scan", {

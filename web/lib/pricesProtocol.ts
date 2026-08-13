@@ -282,18 +282,19 @@ export function contractsKey(contracts: OptionContract[]): string {
 export function portfolioLegToContract(
   ticker: string,
   expiry: string,
-  leg: { type: string; strike: number | null },
+  leg: { type: string; strike: number | null; expiry?: string | null },
 ): OptionContract | null {
   if (leg.type === "Stock") return null;
   if (leg.strike == null || leg.strike === 0) return null;
-  if (!expiry || expiry === "N/A") return null;
+  const effectiveExpiry = leg.expiry ?? expiry;
+  if (!effectiveExpiry || effectiveExpiry === "N/A") return null;
 
   const right = leg.type === "Call" ? "C" : leg.type === "Put" ? "P" : null;
   if (!right) return null;
 
   return normalizeOptionContract({
     symbol: ticker.toUpperCase(),
-    expiry,
+    expiry: effectiveExpiry,
     strike: leg.strike,
     right,
   });

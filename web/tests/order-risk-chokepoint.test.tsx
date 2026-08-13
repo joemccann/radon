@@ -20,7 +20,7 @@
  * the chokepoint contract itself.
  */
 import React from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, renderHook } from "@testing-library/react";
 import type { PortfolioData } from "@/lib/types";
 import { OrderRiskGate, useOrderRisk } from "@/lib/order/risk";
@@ -48,6 +48,29 @@ const sampleInput = {
   netPremium: -5.60,
   description: "Short Call @ $5.60",
   totalCost: -43_120,
+};
+
+const correlationBreach = {
+  clusters: [{
+    tickers: ["AAA", "BBB"],
+    aggregate_exposure: 0.05,
+    budget: 0.025,
+    breached: true,
+    max_pair_corr: 0.98,
+    per_ticker_exposure: { AAA: 0.025, BBB: 0.025 },
+  }],
+  breaches: [{
+    tickers: ["AAA", "BBB"],
+    aggregate_exposure: 0.05,
+    budget: 0.025,
+    breached: true,
+    max_pair_corr: 0.98,
+    per_ticker_exposure: { AAA: 0.025, BBB: 0.025 },
+  }],
+  aggregate_exposure: 0.05,
+  insufficient_data: [],
+  corr_threshold: 0.7,
+  book_budget: 0.025,
 };
 
 describe("useOrderRisk — branded output contract", () => {
@@ -104,6 +127,51 @@ describe("useOrderRisk — branded output contract", () => {
     expect(result.current!.summary.maxLoss).toBeUndefined();
     expect(result.current!.summary.maxGain).toBeUndefined();
     expect(result.current!.okToSubmit).toBe(true);
+  });
+
+  it("closing a protective long blocks when the retained short becomes uncovered", () => {
+    const portfolio = {
+      ...emptyPortfolio,
+      positions: [
+        {
+          id: 1,
+          ticker: "SPY",
+          structure: "Call Vertical",
+          structure_type: "Call Vertical",
+          risk_profile: "DEFINED",
+          expiry: "2026-12-18",
+          contracts: 1,
+          direction: "LONG",
+          entry_cost: 100,
+          max_risk: 400,
+          market_value: 200,
+          legs: [
+            { direction: "LONG", contracts: 1, type: "Call", strike: 100, expiry: "2026-12-18", entry_cost: 0, avg_cost: 100, market_price: 3, market_value: 300 },
+            { direction: "SHORT", contracts: 1, type: "Call", strike: 105, expiry: "2026-12-18", entry_cost: 0, avg_cost: 0, market_price: 1, market_value: -100 },
+          ],
+          kelly_optimal: null,
+          target: null,
+          stop: null,
+          entry_date: "2026-08-01",
+        },
+      ],
+    } as unknown as PortfolioData;
+    const closeProtectiveLong = {
+      ticker: "SPY",
+      chainLegs: [
+        { action: "SELL" as const, right: "C" as const, strike: 100, expiry: "20261218", quantity: 1 },
+      ],
+      netPremium: -3,
+      description: "Close protective call",
+      totalCost: 300,
+      closeOut: { entryCostDollars: 100 },
+    };
+
+    const { result } = renderHook(() => useOrderRisk(closeProtectiveLong, portfolio));
+
+    expect(result.current!.summary.maxLossUnbounded).toBe(true);
+    expect(result.current!.summary.undefinedRiskReason).toMatch(/retained short call/i);
+    expect(result.current!.okToSubmit).toBe(false);
   });
 
   it("emits a fresh traceId per memo input (correlates with telemetry buffer)", () => {
@@ -173,6 +241,31 @@ describe("OrderRiskGate — gate is a thin pairing", () => {
     expect(container.textContent).toMatch(/UNBOUNDED/);
   });
 
+  it("all live order surfaces render correlation gate", () => {
+    const portfolio = {
+      ...emptyPortfolio,
+      risk_budget: correlationBreach,
+    } as PortfolioData;
+    const { container } = render(
+      <OrderRiskGate input={sampleInput} portfolio={portfolio} surface="test" />,
+    );
+    const { result } = renderHook(() => useOrderRisk(sampleInput, portfolio));
+
+    expect(result.current!.correlationStatus).toBe("resolved");
+    expect(result.current!.correlationReport?.breaches).toHaveLength(1);
+    expect(container.querySelector("[data-testid='correlation-risk-banner']")).toBeTruthy();
+    expect(container.textContent).toMatch(/Gate 3: correlated exposure over budget/);
+    expect(container.textContent).toMatch(/AAA \+ BBB/);
+  });
+
+  it("resolved portfolio without correlation data reports measurement unavailable", () => {
+    const { container } = render(
+      <OrderRiskGate input={sampleInput} portfolio={emptyPortfolio} surface="test" />,
+    );
+
+    expect(container.textContent).toMatch(/Gate 3: correlation measurement unavailable/);
+  });
+
   it("renders the pending skeleton when portfolio is undefined", () => {
     const { container } = render(
       <OrderRiskGate input={sampleInput} portfolio={undefined} surface="test" />,
@@ -193,6 +286,25 @@ describe("OrderRiskGate — gate is a thin pairing", () => {
     );
     expect(captured).not.toBeNull();
     expect((captured as { coverageStatus: string }).coverageStatus).toBe("resolved");
+  });
+
+  it("reports state after commit without updating the parent during render", () => {
+    const onState = vi.fn();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    render(
+      <OrderRiskGate
+        input={sampleInput}
+        portfolio={emptyPortfolio}
+        surface="test"
+        onState={onState}
+      />,
+    );
+
+    expect(onState).toHaveBeenCalled();
+    expect(consoleError.mock.calls.flat().join(" ")).not.toMatch(
+      /Cannot update a component while rendering/i,
+    );
+    consoleError.mockRestore();
   });
 });
 

@@ -45,6 +45,12 @@ if [ "$IS_TRADING" = "no" ]; then
     exit 0
 fi
 
+ET_MINUTES=$((10#$(TZ=America/New_York date +%H) * 60 + 10#$(TZ=America/New_York date +%M)))
+if [ "$ET_MINUTES" -lt 245 ] || [ "$ET_MINUTES" -gt 1200 ]; then
+    echo "$(date): Outside 04:05-20:00 ET CRI window - skipping"
+    exit 0
+fi
+
 mkdir -p data/cri_scheduled logs
 TIMESTAMP=$(TZ=America/New_York date +"%Y-%m-%dT%H-%M")
 OUT_PATH="data/cri_scheduled/cri-${TIMESTAMP}.json"

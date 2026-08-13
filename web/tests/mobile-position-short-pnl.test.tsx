@@ -62,4 +62,38 @@ describe("MobilePositionList — short stock P&L sign", () => {
     );
     expect(container.textContent ?? "").toMatch(/-\$95,59\d/);
   });
+
+  it("suppresses complete position P&L when any active option leg lacks a live quote", () => {
+    const spread: PortfolioPosition = {
+      id: 7,
+      ticker: "AAPL",
+      structure: "Bull Call Spread",
+      structure_type: "Vertical",
+      risk_profile: "defined",
+      expiry: "2026-09-18",
+      contracts: 1,
+      direction: "DEBIT",
+      entry_cost: 300,
+      max_risk: 300,
+      market_value: 500,
+      kelly_optimal: null,
+      target: null,
+      stop: null,
+      entry_date: "2026-08-01",
+      legs: [
+        { direction: "LONG", contracts: 1, type: "Call", strike: 200, entry_cost: 500, avg_cost: 5, market_price: 7, market_value: 700 },
+        { direction: "SHORT", contracts: 1, type: "Call", strike: 210, entry_cost: -200, avg_cost: -2, market_price: 2, market_value: -200 },
+      ],
+    };
+    const { container } = render(
+      <MobilePositionList
+        positions={[spread]}
+        prices={{ AAPL_20260918_200_C: pd({ last: 7 }) }}
+      />,
+    );
+
+    const text = container.textContent ?? "";
+    expect(text).not.toContain("+$400.00");
+    expect(text).toContain("N/A");
+  });
 });

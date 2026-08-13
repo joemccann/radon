@@ -15,7 +15,8 @@
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
-import OrderTab from "../components/ticker-detail/OrderTab";
+import OrderTab, { comboLegRatio, defaultSingleOrderAction } from "../components/ticker-detail/OrderTab";
+import { isPureComboClose } from "@/lib/order/positionTrade";
 import { resolveSpreadPriceData } from "@/lib/positionUtils";
 import type { PortfolioData, PortfolioPosition } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
@@ -212,6 +213,27 @@ function readStripPrices(container: HTMLElement): { bid: number; mid: number; as
 
 describe("OrderTab Close Position sign matches header", () => {
   afterEach(cleanup);
+
+  it("short option default is buy to close everywhere", () => {
+    const shortOption = {
+      ...REVERSE_RR_POSITION,
+      legs: [REVERSE_RR_POSITION.legs[0]],
+      contracts: REVERSE_RR_POSITION.legs[0].contracts,
+      direction: "SHORT",
+    } as PortfolioPosition;
+    expect(defaultSingleOrderAction(shortOption)).toBe("BUY");
+  });
+
+  it("ratio combo close preserves held leg ratios", () => {
+    expect(comboLegRatio(6, 2)).toBe(3);
+    expect(comboLegRatio(4, 2)).toBe(2);
+  });
+
+  it("oversized combo sell is not closeout", () => {
+    expect(isPureComboClose("SELL", 10, 10)).toBe(true);
+    expect(isPureComboClose("SELL", 11, 10)).toBe(false);
+    expect(isPureComboClose("BUY", 10, 10)).toBe(false);
+  });
 
   it("Reverse Risk Reversal credit: close-position strip carries the same negative sign as the header", () => {
     // Header source of truth (used by InstrumentDetail / TickerDetailContent).

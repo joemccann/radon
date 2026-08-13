@@ -38,7 +38,10 @@ import urllib.request
 
 PROBE_URL = "http://127.0.0.1:3000/api/service-health"
 PROBE_TIMEOUT_S = 10
-STATE_PATH = "/home/radon/radon-cloud/state/nextjs-db-watchdog.json"
+STATE_PATH = os.environ.get(
+    "RADON_NEXTJS_DB_WATCHDOG_STATE_PATH",
+    "/home/radon/radon-cloud/state/nextjs-db-watchdog.json",
+)
 CONSECUTIVE_WEDGES_TO_RESTART = 3
 RESTART_COOLDOWN_S = 600
 VENV_PYTHON = "/home/radon/radon/.venv/bin/python"

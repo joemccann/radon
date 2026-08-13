@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
   arrivedViaProxy,
+  isBrowserUpgrade,
   isTrustedLocalUpgrade,
+  resolveRelaySecurityConfig,
   shouldSkipTicketValidation,
 } from "./wsTrust.js";
 
@@ -40,13 +42,46 @@ describe("wsTrust", () => {
       expect(isTrustedLocalUpgrade("203.0.113.5", {})).toBe(false);
       expect(isTrustedLocalUpgrade("", {})).toBe(false);
     });
+
+    it("does not trust browser handshakes even when the peer is loopback", () => {
+      expect(isBrowserUpgrade({ origin: "http://localhost:3000" })).toBe(true);
+      expect(isBrowserUpgrade({ "sec-fetch-site": "same-site" })).toBe(true);
+      expect(
+        isTrustedLocalUpgrade("127.0.0.1", {
+          origin: "http://localhost:3000",
+          "sec-fetch-site": "same-site",
+        }),
+      ).toBe(false);
+    });
   });
 
   describe("shouldSkipTicketValidation", () => {
-    it("skips when Clerk is unconfigured (local dev)", () => {
+    it("fails closed when Clerk is unconfigured by default", () => {
       expect(
         shouldSkipTicketValidation({ clerkConfigured: false, remoteAddr: "203.0.113.5", headers: { "x-forwarded-for": "203.0.113.5" } }),
+      ).toBe(false);
+      expect(
+        shouldSkipTicketValidation({ clerkConfigured: false, remoteAddr: "127.0.0.1", headers: {} }),
+      ).toBe(false);
+    });
+
+    it("allows authless development only with explicit opt-in on a non-browser loopback call", () => {
+      expect(
+        shouldSkipTicketValidation({
+          clerkConfigured: false,
+          allowUnauthenticatedDev: true,
+          remoteAddr: "127.0.0.1",
+          headers: {},
+        }),
       ).toBe(true);
+      expect(
+        shouldSkipTicketValidation({
+          clerkConfigured: false,
+          allowUnauthenticatedDev: true,
+          remoteAddr: "127.0.0.1",
+          headers: { origin: "http://localhost:3000" },
+        }),
+      ).toBe(false);
     });
 
     it("ENFORCES tickets for proxied production connections (the bug)", () => {
@@ -69,6 +104,29 @@ describe("wsTrust", () => {
       expect(
         shouldSkipTicketValidation({ clerkConfigured: true, remoteAddr: "203.0.113.5", headers: {} }),
       ).toBe(false);
+    });
+  });
+
+  describe("resolveRelaySecurityConfig", () => {
+    it("defaults the relay to loopback and requires Clerk in production", () => {
+      expect(resolveRelaySecurityConfig({ NODE_ENV: "production" })).toEqual({
+        allowUnauthenticatedDev: false,
+        bindHost: "127.0.0.1",
+        clerkConfigured: false,
+        requireClerk: true,
+      });
+    });
+
+    it("requires an explicit development opt-in for missing Clerk", () => {
+      expect(resolveRelaySecurityConfig({ NODE_ENV: "development" }).allowUnauthenticatedDev).toBe(false);
+      expect(resolveRelaySecurityConfig({
+        NODE_ENV: "development",
+        RADON_WS_ALLOW_UNAUTHENTICATED_DEV: "1",
+      }).allowUnauthenticatedDev).toBe(true);
+      expect(resolveRelaySecurityConfig({
+        NODE_ENV: "production",
+        RADON_WS_ALLOW_UNAUTHENTICATED_DEV: "1",
+      }).allowUnauthenticatedDev).toBe(false);
     });
   });
 });

@@ -87,8 +87,12 @@ vi.mock("@/lib/syncMutex", () => ({
 // WS ticket. Without a Clerk middleware context auth() throws → 500. Return a
 // null token so the route connects without a ticket (the WS mock handles it).
 vi.mock("@clerk/nextjs/server", () => ({
-  auth: vi.fn().mockResolvedValue({ getToken: vi.fn().mockResolvedValue(null) }),
+  auth: vi.fn().mockResolvedValue({
+    userId: "user_test",
+    getToken: vi.fn().mockResolvedValue(null),
+  }),
 }));
+process.env.ALLOWED_USER_IDS = "user_test";
 
 // Mock ws — WebSocket used by /api/previous-close for IB snapshots
 // Default: emit error so IB source fails and tests fall through to UW/Yahoo
@@ -614,12 +618,12 @@ describe("POST /api/previous-close — extended", () => {
       new Request("http://localhost/api/previous-close", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ symbols: ["CACHE_TEST"] }),
+        body: JSON.stringify({ symbols: ["CACHETEST"] }),
       }),
     );
     expect(res1.status).toBe(200);
     const body1 = await res1.json();
-    expect(body1.closes.CACHE_TEST).toBe(99.99);
+    expect(body1.closes.CACHETEST).toBe(99.99);
     const callsAfterFirst = fetchCallCount;
 
     // Second call — should use cache
@@ -627,17 +631,17 @@ describe("POST /api/previous-close — extended", () => {
       new Request("http://localhost/api/previous-close", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ symbols: ["CACHE_TEST"] }),
+        body: JSON.stringify({ symbols: ["CACHETEST"] }),
       }),
     );
     expect(res2.status).toBe(200);
     const body2 = await res2.json();
-    expect(body2.closes.CACHE_TEST).toBe(99.99);
+    expect(body2.closes.CACHETEST).toBe(99.99);
     // No additional fetch calls
     expect(fetchCallCount).toBe(callsAfterFirst);
   });
 
-  it("returns empty closes for empty symbols array", async () => {
+  it("rejects an empty symbols array", async () => {
     const { POST } = await import("../app/api/previous-close/route");
     const res = await POST(
       new Request("http://localhost/api/previous-close", {
@@ -646,9 +650,7 @@ describe("POST /api/previous-close — extended", () => {
         body: JSON.stringify({ symbols: [] }),
       }),
     );
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body).toEqual({ closes: {} });
+    expect(res.status).toBe(400);
     expect(mockFetch).not.toHaveBeenCalled();
   });
 });
@@ -805,7 +807,8 @@ describe("POST /api/orders/modify — extended", () => {
     expect(res.status).toBe(500);
 
     const body = await res.json();
-    expect(body.error).toContain("connection timeout");
+    expect(body.error).toBe("Order modification failed");
+    expect(JSON.stringify(body)).not.toContain("connection timeout");
   });
 
   it("returns 400 when neither orderId nor permId provided", async () => {
@@ -880,10 +883,8 @@ describe("POST /api/orders/modify — extended", () => {
     expect(String(body.error).toLowerCase()).toContain("not confirmed");
   });
 
-  it("replaces combo orders via cancel then place when replacement payload provided", async () => {
+  it("replaces combo orders through the atomic backend state machine", async () => {
     mockRadonFetch
-      .mockResolvedValueOnce({ status: "ok", message: "Order cancelled" })
-      .mockResolvedValueOnce({ status: "ok", message: "Order cancelled" })
       .mockResolvedValueOnce({ status: "ok", message: "Replacement placed", orderId: 202, permId: 999 })
       .mockResolvedValueOnce({});
 
@@ -916,34 +917,30 @@ describe("POST /api/orders/modify — extended", () => {
     );
     expect(res.status).toBe(200);
 
-    expect(mockRadonFetch).toHaveBeenCalledTimes(4);
-    expect(mockRadonFetch.mock.calls[0][0]).toBe("/orders/cancel");
+    expect(mockRadonFetch).toHaveBeenCalledTimes(2);
+    expect(mockRadonFetch.mock.calls[0][0]).toBe("/orders/replace");
     expect(JSON.parse(String(mockRadonFetch.mock.calls[0][1].body))).toMatchObject({
-      orderId: 77,
-      permId: 653611587,
-    });
-    expect(mockRadonFetch.mock.calls[1][0]).toBe("/orders/cancel");
-    expect(JSON.parse(String(mockRadonFetch.mock.calls[1][1].body))).toMatchObject({
-      orderId: 78,
-      permId: 653611588,
-    });
-    expect(mockRadonFetch.mock.calls[2][0]).toBe("/orders/place");
-    expect(JSON.parse(String(mockRadonFetch.mock.calls[2][1].body))).toMatchObject({
-      type: "combo",
-      symbol: "AAOI",
-      action: "SELL",
-      quantity: 75,
-      limitPrice: 0.75,
-      legs: [
-        { expiry: "20260327", strike: 90, right: "P", action: "SELL", ratio: 1 },
-        { expiry: "20260327", strike: 100, right: "C", action: "BUY", ratio: 1 },
+      cancelOrders: [
+        { orderId: 77, permId: 653611587 },
+        { orderId: 78, permId: 653611588 },
       ],
+      replaceOrder: {
+        type: "combo",
+        symbol: "AAOI",
+        action: "SELL",
+        quantity: 75,
+        limitPrice: 0.75,
+        legs: [
+          { expiry: "20260327", strike: 90, right: "P", action: "SELL", ratio: 1 },
+          { expiry: "20260327", strike: 100, right: "C", action: "BUY", ratio: 1 },
+        ],
+      },
     });
+    expect(mockRadonFetch.mock.calls[1][0]).toBe("/orders/refresh");
   });
 
   it("allows negative signed combo replacement limit prices", async () => {
     mockRadonFetch
-      .mockResolvedValueOnce({ status: "ok", message: "Order cancelled" })
       .mockResolvedValueOnce({ status: "ok", message: "Replacement placed", orderId: 202, permId: 999 })
       .mockResolvedValueOnce({});
 
@@ -972,19 +969,23 @@ describe("POST /api/orders/modify — extended", () => {
     );
     expect(res.status).toBe(200);
 
-    expect(mockRadonFetch).toHaveBeenCalledTimes(3);
-    expect(mockRadonFetch.mock.calls[1][0]).toBe("/orders/place");
-    expect(JSON.parse(String(mockRadonFetch.mock.calls[1][1].body))).toMatchObject({
-      type: "combo",
-      symbol: "MSFT",
-      action: "BUY",
-      quantity: 25,
-      limitPrice: -3.4,
-      legs: [
-        { expiry: "20260717", strike: 350, right: "P", action: "SELL", ratio: 1 },
-        { expiry: "20260717", strike: 375, right: "C", action: "BUY", ratio: 1 },
-      ],
+    expect(mockRadonFetch).toHaveBeenCalledTimes(2);
+    expect(mockRadonFetch.mock.calls[0][0]).toBe("/orders/replace");
+    expect(JSON.parse(String(mockRadonFetch.mock.calls[0][1].body))).toMatchObject({
+      cancelOrders: [{ orderId: 77, permId: 653611587 }],
+      replaceOrder: {
+        type: "combo",
+        symbol: "MSFT",
+        action: "BUY",
+        quantity: 25,
+        limitPrice: -3.4,
+        legs: [
+          { expiry: "20260717", strike: 350, right: "P", action: "SELL", ratio: 1 },
+          { expiry: "20260717", strike: 375, right: "C", action: "BUY", ratio: 1 },
+        ],
+      },
     });
+    expect(mockRadonFetch.mock.calls[1][0]).toBe("/orders/refresh");
   });
 
   it("returns 400 when modify fields are missing", async () => {

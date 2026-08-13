@@ -228,6 +228,17 @@ function StrikeRow({
 
 /* ─── Order Builder Panel ─── */
 
+export function chainOrderSubmitPermitted(
+  isValidPrice: boolean,
+  riskState: { okToSubmit: boolean } | null,
+  isCombo: boolean,
+  isDebit: boolean | null,
+): boolean {
+  return isValidPrice
+    && riskState?.okToSubmit === true
+    && (!isCombo || isDebit !== null);
+}
+
 function OrderBuilder({
   ticker,
   legs,
@@ -301,9 +312,8 @@ function OrderBuilder({
     // quote buttons positive, the auto-populated limit positive, and the
     // `isValidPrice` (parsedPrice > 0) check satisfied.
     if (!isCombo) return Math.abs(value);
-    if (isDebit === null) return value;
-    return isDebit ? Math.abs(value) : -Math.abs(value);
-  }, [isCombo, isDebit]);
+    return value;
+  }, [isCombo]);
 
   const signedNetPrices = useMemo(() => {
     return {
@@ -393,13 +403,16 @@ function OrderBuilder({
   // Pull the resolved state for the coverage chip + (later) submit gating.
   // Calling `useOrderRisk` directly here is equivalent to the gate; the gate
   // wraps both the hook and the summary render below.
-  const riskState = useOrderRisk(riskInput, portfolio ?? null);
+  const riskState = useOrderRisk(riskInput, portfolio);
+  const submitPermitted = chainOrderSubmitPermitted(isValidPrice, riskState, isCombo, isDebit);
 
   const handlePlace = useCallback(async () => {
     if (!confirmStep) {
+      if (!submitPermitted) return;
       setConfirmStep(true);
       return;
     }
+    if (!submitPermitted) return;
 
     setLoading(true);
     setError(null);
@@ -465,6 +478,7 @@ function OrderBuilder({
     tif,
     structure,
     signedLimitPrice,
+    submitPermitted,
   ]);
 
   // OrderPriceStrip prices (combo) or single-leg signed mid
@@ -788,7 +802,7 @@ function OrderBuilder({
         {confirmStep && (
           <OrderRiskGate
             input={riskInput}
-            portfolio={portfolio ?? null}
+            portfolio={portfolio}
             surface="chain-builder"
             variant="info"
           />
@@ -815,7 +829,7 @@ function OrderBuilder({
                 type="button"
                 className={`btn-primary ${isDebit === false ? "btn-danger" : ""}`}
                 onClick={handlePlace}
-                disabled={!isValidPrice || loading}
+                disabled={loading || !submitPermitted}
               >
                 {loading ? "Placing..." : "Confirm Order"}
               </button>
@@ -825,7 +839,7 @@ function OrderBuilder({
               type="button"
               className="btn-primary order-builder-place"
               onClick={handlePlace}
-              disabled={!isValidPrice}
+              disabled={!submitPermitted}
             >
               Place {structure || "Order"}
             </button>

@@ -23,6 +23,7 @@ import { afterEach, expect, test, vi } from "vitest";
 
 import PriceChart from "../components/PriceChart";
 import type { PriceData } from "@/lib/pricesProtocol";
+import { resolveChartPrice } from "@/lib/usePriceHistory";
 
 // Capture the props handed to <Liveline> so we can assert color + formatValue
 // without exercising the canvas renderer.
@@ -42,9 +43,13 @@ vi.mock("liveline", () => ({
 
 // Deterministic chart value; bypass the live-walk / WS seeding logic.
 const mockUsePriceHistory = vi.fn();
-vi.mock("@/lib/usePriceHistory", () => ({
-  usePriceHistory: (...args: unknown[]) => mockUsePriceHistory(...args),
-}));
+vi.mock("@/lib/usePriceHistory", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/usePriceHistory")>();
+  return {
+    ...actual,
+    usePriceHistory: (...args: unknown[]) => mockUsePriceHistory(...args),
+  };
+});
 
 // Distinct, resolvable color tokens per role so we can tell them apart.
 // Partial mock: ChartPanel still needs the real chartFamilyLabel/etc.
@@ -106,6 +111,12 @@ test("[spread-net] negative net renders a NET CREDIT badge, not MIDPRICE", () =>
   expect(screen.getByText("NET CREDIT")).toBeTruthy();
   expect(screen.queryByText("MIDPRICE")).toBeNull();
   expect(screen.queryByText("MARK")).toBeNull();
+});
+
+test("[spread-net] accepts an unmocked signed last while price mode rejects it", () => {
+  const data = priceData({ last: -81.6, bid: null, ask: null });
+  expect(resolveChartPrice(data, "spread-net").price).toBe(-81.6);
+  expect(resolveChartPrice(data, "price").price).toBeNull();
 });
 
 test("[spread-net] negative net formats as a signed credit, not a bare $-81.60", () => {

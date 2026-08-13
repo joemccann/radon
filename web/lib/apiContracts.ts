@@ -4,6 +4,8 @@ export type ErrorCode =
   | "BAD_REQUEST"
   | "UNAUTHORIZED"
   | "FORBIDDEN"
+  | "RATE_LIMITED"
+  | "CONFLICT"
   | "NOT_FOUND"
   | "CONFIG_ERROR"
   | "UPSTREAM_ERROR"
@@ -89,9 +91,11 @@ export function setCacheResponseHeaders(
 const SECRET_SCRUB_PATTERNS: Array<[RegExp, string]> = [
   [/libsql:\/\/[^\s'"]+/gi, "[redacted-db-url]"],
   [/https:\/\/[a-z0-9.-]+\.turso\.io[^\s'"]*/gi, "[redacted-db-url]"],
-  [/(auth[_-]?token|authorization|bearer)(\s*[=:]\s*)\S+/gi, "$1$2[redacted]"],
+  [/(\bauthorization\s*[:=]\s*bearer\s+)[^\s,'"}]+/gi, "$1[redacted]"],
+  [/(["']?(?:auth[_-]?token|access[_-]?token|client[_-]?secret|password|api[_-]?key)["']?\s*[:=]\s*["']?)[^\s,'"}]+/gi, "$1[redacted]"],
+  [/(\bbearer\s+)[^\s,'"}]+/gi, "$1[redacted]"],
   [/eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]*/g, "[redacted-jwt]"],
-  [/\bU\d{6,}\b/g, "[redacted-account]"],
+  [/\b(?:U|DU)\d{6,}\b/g, "[redacted-account]"],
   // Named provider-key prefixes: Anthropic (sk-ant-), Clerk/Stripe (sk_live_/sk_test_).
   [/sk-ant-[A-Za-z0-9_-]{6,}/g, "[redacted-key]"],
   [/\bsk_(?:live|test)_[A-Za-z0-9]{6,}\b/g, "[redacted-key]"],

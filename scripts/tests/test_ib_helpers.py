@@ -11,12 +11,34 @@ from ib_orders import (
     IB_SENTINEL,
 )
 from ib_sync import (
+    attach_correlation_risk_report,
     collapse_positions,
     detect_structure_type,
     format_structure_description,
     _normalize_market_price,
     _resolve_market_price,
 )
+
+
+def test_portfolio_snapshot_receives_live_correlation_report(monkeypatch):
+    import portfolio_risk
+
+    portfolio = {
+        "bankroll": 100_000,
+        "positions": [
+            {"ticker": "AAA", "risk_profile": "defined", "max_risk": 2_000},
+            {"ticker": "BBB", "risk_profile": "defined", "max_risk": 2_000},
+        ],
+    }
+    series = {
+        "AAA": {f"2026-01-{day:02d}": 100 + day * day for day in range(1, 8)},
+        "BBB": {f"2026-01-{day:02d}": 200 + day * day * 2 for day in range(1, 8)},
+    }
+    monkeypatch.setattr(portfolio_risk, "load_price_series_for_portfolio", lambda _: series)
+
+    attach_correlation_risk_report(portfolio)
+
+    assert portfolio["risk_budget"]["breaches"][0]["tickers"] == ["AAA", "BBB"]
 
 
 # ── safe_float ──────────────────────────────────────────────────────
@@ -424,8 +446,14 @@ class TestNormalizeMarketPrice:
     def test_valid_price(self):
         assert _normalize_market_price(150.5) == 150.5
 
-    def test_zero_returns_zero(self):
-        assert _normalize_market_price(0.0) == 0.0
+    def test_zero_returns_none(self):
+        assert _normalize_market_price(0.0) is None
+
+    @pytest.mark.parametrize(
+        "raw", [float("inf"), float("-inf"), 1.7976931348623157e308]
+    )
+    def test_infinity_and_ib_sentinel_return_none(self, raw):
+        assert _normalize_market_price(raw) is None
 
 
 # ── _resolve_market_price ───────────────────────────────────────────

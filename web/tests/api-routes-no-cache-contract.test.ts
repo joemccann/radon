@@ -201,7 +201,7 @@ describe("Turso source-of-truth — portfolio route must not read flat JSON", ()
 
 const JOURNAL_DB_ONLY_ROUTES: { path: string; dbHelperPattern: RegExp }[] = [
   { path: "app/api/journal/route.ts", dbHelperPattern: /readJournalFromDb\s*\(/ },
-  { path: "app/api/journal/sync/route.ts", dbHelperPattern: /importLatestReconciliationToJournal\s*\(/ },
+  { path: "app/api/journal/sync/route.ts", dbHelperPattern: /importReconciliationSnapshotToJournal\s*\(/ },
 ];
 
 describe("Turso source-of-truth — journal routes must not read flat JSON", () => {

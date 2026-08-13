@@ -261,6 +261,14 @@ class TestStore:
         assert payload["status"] == "resolved"
         assert payload["resolved_at"] == later.isoformat()
 
+    def test_down_to_unknown_does_not_resolve_open_incident(self, tmp_path: Path):
+        opened = record_cycle([self.incident()], tmp_path, NOW)
+        result = record_cycle([], tmp_path, NOW.replace(minute=10), allow_resolve=False)
+
+        assert result["resolved"] == []
+        payload = json.loads(Path(opened["opened"][0]).read_text())
+        assert payload["status"] == "open"
+
     def test_redetection_after_resolve_opens_a_new_file(self, tmp_path: Path):
         record_cycle([self.incident()], tmp_path, NOW)
         record_cycle([], tmp_path, NOW.replace(minute=10))

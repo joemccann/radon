@@ -42,8 +42,8 @@ export function useWhatIfMargin(
     state?.coverageStatus === "resolved" &&
     marginImpact != null &&
     marginImpact.requirement == null;
-  // Structural key (no price) — refetch only when the position changes.
-  const key = eligible ? whatIfKey(input) : null;
+  const portfolioRevision = state?.portfolioRevision ?? "portfolio-unresolved";
+  const key = eligible ? whatIfKey(input, portfolioRevision) : null;
 
   useEffect(() => {
     if (key == null || input == null) {
@@ -99,8 +99,8 @@ export function useWhatIfMargin(
       window.clearTimeout(timer);
       controller.abort();
     };
-    // `key` encodes the structural identity of `input`; refetch only on a real
-    // structural change, never on price keystrokes or unrelated re-renders.
+    // `key` encodes the complete broker request identity, including price and
+    // the resolved portfolio-state revision.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 

@@ -100,10 +100,11 @@ describe("Next.js /api/gex/share POST route", () => {
     expect(content).toContain("/gex/share");
   });
 
-  it("forwards Clerk auth token", async () => {
+  it("forwards the shared route-access principal token", async () => {
     const p = path.join(PROJECT_ROOT, "web", "app", "api", "gex", "share", "route.ts");
     const content = await readFile(p, "utf-8");
-    expect(content).toContain("getToken");
+    expect(content).toContain("requireRouteAccess");
+    expect(content).toContain("access.principal.token");
   });
 
   it("propagates upstream HTTP status on RadonApiError", async () => {

@@ -6,6 +6,7 @@ import {
   EXPOSURE_METRIC_OPTIONS,
   EXPOSURE_STRIKE_OPTIONS,
   aggregateOptionsExposure,
+  isOptionsExposurePayload,
   selectStrikeWindow,
 } from "@/lib/optionsExposure";
 import { EXPOSURE_FIXTURE } from "./options-exposure-fixture";
@@ -82,6 +83,30 @@ describe("options exposure transforms", () => {
 
     expect(aggregateOptionsExposure(malformed, "net_gex", null).map((row) => row.value))
       .toEqual([1, 1, -1, 0, 0]);
+  });
+
+  it("rejects malformed nested provider data before transformation", () => {
+    expect(isOptionsExposurePayload(EXPOSURE_FIXTURE)).toBe(true);
+
+    const malformedExpiration = structuredClone(EXPOSURE_FIXTURE) as unknown as Record<string, any>;
+    malformedExpiration.expirations[0].dte = "zero";
+    expect(isOptionsExposurePayload(malformedExpiration)).toBe(false);
+
+    const malformedLevel = structuredClone(EXPOSURE_FIXTURE) as unknown as Record<string, any>;
+    malformedLevel.levels[0].value = Number.NaN;
+    expect(isOptionsExposurePayload(malformedLevel)).toBe(false);
+
+    const misalignedCells = structuredClone(EXPOSURE_FIXTURE) as unknown as Record<string, any>;
+    misalignedCells.cells.net_gex.pop();
+    expect(isOptionsExposurePayload(misalignedCells)).toBe(false);
+
+    const invalidIndex = structuredClone(EXPOSURE_FIXTURE) as unknown as Record<string, any>;
+    invalidIndex.cells.strike_idx[0] = 999;
+    expect(isOptionsExposurePayload(invalidIndex)).toBe(false);
+
+    const malformedUnits = structuredClone(EXPOSURE_FIXTURE) as unknown as Record<string, any>;
+    malformedUnits.units.net_gex = 10;
+    expect(isOptionsExposurePayload(malformedUnits)).toBe(false);
   });
 
   it("selects N strikes on each side of the nearest spot strike and sorts descending", () => {

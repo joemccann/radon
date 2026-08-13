@@ -263,6 +263,20 @@ describe("llm provider", () => {
     expect(result.usage).toEqual({ inputTokens: 4, outputTokens: 6 });
   });
 
+  it("gemini tool request explicitly falls back", async () => {
+    process.env.LLM_PROVIDER = "gemini";
+    process.env.LLM_FALLBACK_PROVIDER = "openai";
+    process.env.GEMINI_API_KEY = "g-test";
+    process.env.OPENAI_API_KEY = "sk-test";
+    const { calls } = captureFetch(() =>
+      jsonResponse({ choices: [{ message: { content: "fallback" } }] }),
+    );
+    const result = await chat({ ...SAMPLE_REQUEST, tools: [{ name: "get_flow", input_schema: {} }] });
+    expect(result.provider).toBe("openai");
+    expect(result.usedFallback).toBe(true);
+    expect(calls).toHaveLength(1);
+  });
+
   it("falls back to the configured provider when the primary errors", async () => {
     process.env.LLM_PROVIDER = "openai";
     process.env.LLM_FALLBACK_PROVIDER = "anthropic";

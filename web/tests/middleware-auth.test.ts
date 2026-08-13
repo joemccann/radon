@@ -58,7 +58,6 @@ function collectApiRoutesFromFilesystem(): string[] {
 //   /api/health         — pre-approved liveness probe
 // Adding an entry here is a deliberate, reviewed perimeter decision.
 const REVIEWED_PUBLIC_NON_SHARE_API_ROUTES = [
-  "/api/service-health",
   "/api/health",
   // Clerk webhook (demo.radon.run trial provisioning). NOT Clerk-session-
   // gated — it has no session; it is verified by the svix HMAC signature
@@ -102,8 +101,8 @@ describe("isPublicRoute — explicit allowlist", () => {
     }
   });
 
-  it("exempts /api/service-health (banner data)", () => {
-    expect(isPublicRoute(reqFor("/api/service-health"))).toBe(true);
+  it("protects detailed service-health data", () => {
+    expect(isPublicRoute(reqFor("/api/service-health"))).toBe(false);
   });
 
   it("exempts /api/health (future liveness probe, pre-approved)", () => {

@@ -189,12 +189,14 @@ export default function DashboardNewsFeed() {
       // If the target lives on a different paginated page, follow the
       // cursor so closing the lightbox lands the user where the post
       // they were viewing is visible.
-      const targetPage = Math.floor(next / PAGE_SIZE) + 1;
+      const filteredIndex = filteredPosts.findIndex((post) => post.id === target.id);
+      if (filteredIndex < 0) return;
+      const targetPage = Math.floor(filteredIndex / PAGE_SIZE) + 1;
       if (targetPage !== safePage) {
         setCurrentPage(targetPage);
       }
     },
-    [lightboxIndex, navigablePosts, safePage],
+    [filteredPosts, lightboxIndex, navigablePosts, safePage],
   );
   const rangeStart = filteredPosts.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
   const rangeEnd = Math.min(safePage * PAGE_SIZE, filteredPosts.length);
@@ -221,7 +223,7 @@ export default function DashboardNewsFeed() {
       totalPages={totalPages}
       rangeStart={rangeStart}
       rangeEnd={rangeEnd}
-      totalItems={posts.length}
+      totalItems={filteredPosts.length}
       onPrev={goPrev}
       onNext={goNext}
     />

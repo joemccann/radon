@@ -1,22 +1,39 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
+
 import { NextResponse } from "next/server";
 import { radonFetch } from "@/lib/radonApi";
 import { scrubSecrets } from "@/lib/apiContracts";
+import { boundedTicker } from "@/lib/requestBounds";
 
 export const runtime = "nodejs";
 
+const ratingsInFlight = new Map<string, Promise<Record<string, unknown>>>();
+
+function coalescedRatings(ticker: string): Promise<Record<string, unknown>> {
+  const existing = ratingsInFlight.get(ticker);
+  if (existing) return existing;
+  const pending = radonFetch<Record<string, unknown>>(
+    `/ticker/ratings?ticker=${encodeURIComponent(ticker)}`,
+    { timeout: 60_000 },
+  ).finally(() => {
+    if (ratingsInFlight.get(ticker) === pending) ratingsInFlight.delete(ticker);
+  });
+  ratingsInFlight.set(ticker, pending);
+  return pending;
+}
+
 export async function GET(request: Request): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { rate: { key: "ticker/ratings:route", limit: 20, windowMs: 60_000 } });
+  if (!access.ok) return access.response;
   const { searchParams } = new URL(request.url);
-  const ticker = searchParams.get("ticker");
+  const ticker = boundedTicker(searchParams.get("ticker"));
 
   if (!ticker) {
     return NextResponse.json({ error: "ticker parameter required" }, { status: 400 });
   }
 
   try {
-    const data = await radonFetch<Record<string, unknown>>(
-      `/ticker/ratings?ticker=${encodeURIComponent(ticker.toUpperCase())}`,
-      { timeout: 60_000 },
-    );
+    const data = await coalescedRatings(ticker);
     return NextResponse.json(data);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to fetch ratings";

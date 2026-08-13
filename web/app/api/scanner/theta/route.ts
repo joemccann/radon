@@ -1,3 +1,5 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
+
 import { NextResponse } from "next/server";
 import { readFile } from "fs/promises";
 import { statSync } from "fs";
@@ -98,6 +100,8 @@ async function fetchEarningsBatch(tickers: string[]): Promise<{
 }
 
 export async function GET(): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { rate: { key: "scanner/theta:route", limit: 20, windowMs: 60_000 } });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   const cache_meta = buildCacheMeta(CACHE_PATH);
   // Fresher of the shared Turso snapshot and the host-local disk JSON.

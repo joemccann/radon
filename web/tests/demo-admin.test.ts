@@ -45,12 +45,21 @@ describe("requireDemoAdmin", () => {
     });
     expect(id).toBeNull();
   });
-  it("default-deny when ALLOWED_USER_IDS is empty", async () => {
+  it("default-deny when DEMO_ADMIN_USER_IDS is empty", async () => {
     const id = await requireDemoAdmin({
       authFn: async () => ({ userId: "op_1" }),
       allowedRaw: "",
     });
     expect(id).toBeNull();
+  });
+  it("demo admin authorization is independent of the trial allowlist", async () => {
+    vi.stubEnv("ALLOWED_USER_IDS", "trial_x");
+    vi.stubEnv("DEMO_ADMIN_USER_IDS", "op_1");
+    await expect(requireDemoAdmin({ authFn: async () => ({ userId: "trial_x" }) }))
+      .resolves.toBeNull();
+    await expect(requireDemoAdmin({ authFn: async () => ({ userId: "op_1" }) }))
+      .resolves.toBe("op_1");
+    vi.unstubAllEnvs();
   });
 });
 
@@ -91,6 +100,17 @@ describe("admin actions", () => {
       now: NOW,
     });
     expect(res.ok).toBe(false);
+  });
+
+  it("does not claim database revocation when Clerk enforcement fails", async () => {
+    const db = await seeded();
+    await expect(revokeTrial("user_1", {
+      db,
+      setClerkMetadata: vi.fn().mockRejectedValue(new Error("Clerk unavailable")),
+      computeExpiry: vi.fn(),
+      now: NOW,
+    })).rejects.toThrow("Clerk unavailable");
+    expect((await getDemoUser(db, "user_1"))?.status).toBe("active");
   });
 
   it("extendTrial pushes expiry out in both stores", async () => {

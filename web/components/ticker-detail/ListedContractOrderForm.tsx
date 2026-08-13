@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
-import { OrderRiskGate, type OrderRiskInput } from "@/lib/order";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { OrderRiskGate, type OrderRiskInput, type OrderRiskState } from "@/lib/order";
 import type { PortfolioData } from "@/lib/types";
 
 export type OrderAction = "BUY" | "SELL";
@@ -104,8 +104,15 @@ export function ListedContractOrderForm({
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitOk, setSubmitOk] = useState<string | null>(null);
+  const [riskSnapshot, setRiskSnapshot] = useState<{
+    input: OrderRiskInput;
+    state: OrderRiskState;
+  } | null>(null);
 
-  const values: ListedOrderFormValues = { action, quantity, limitPrice, tif };
+  const values = useMemo<ListedOrderFormValues>(
+    () => ({ action, quantity, limitPrice, tif }),
+    [action, quantity, limitPrice, tif],
+  );
 
   const notional = (() => {
     const price = parseFloat(limitPrice);
@@ -114,12 +121,24 @@ export function ListedContractOrderForm({
     return Math.abs(price * qty * multiplier);
   })();
 
-  const riskInput = buildRiskInput(values);
+  const riskInput = useMemo(() => buildRiskInput(values), [buildRiskInput, values]);
+  const captureRiskState = useCallback((state: OrderRiskState | null) => {
+    if (riskInput && state) setRiskSnapshot({ input: riskInput, state });
+  }, [riskInput]);
+  const riskPermitsSubmit =
+    riskInput != null &&
+    riskSnapshot?.input === riskInput &&
+    riskSnapshot.state.okToSubmit === true;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitError(null);
     setSubmitOk(null);
+
+    if (!riskInput || !riskPermitsSubmit) {
+      setSubmitError("Portfolio risk is still resolving. Review again before submitting.");
+      return;
+    }
 
     const result = buildSubmit(values);
     if ("error" in result) {
@@ -236,9 +255,19 @@ export function ListedContractOrderForm({
 
       {/* Risk math owned by `<OrderRiskGate>`. SHORT futures / naked SELL CALL
           surface UNBOUNDED + Gate-1 warning automatically. */}
-      <OrderRiskGate input={riskInput} portfolio={portfolio} surface={surface} variant="info" />
+      <OrderRiskGate
+        input={riskInput}
+        portfolio={portfolio}
+        surface={surface}
+        variant="info"
+        onState={captureRiskState}
+      />
 
-      <button type="submit" disabled={submitting || submitDisabled} className="futures-form-submit">
+      <button
+        type="submit"
+        disabled={submitting || submitDisabled || !riskPermitsSubmit}
+        className="futures-form-submit"
+      >
         {submitting ? "Submitting…" : typeof submitLabel === "function" ? submitLabel(action) : submitLabel}
       </button>
 

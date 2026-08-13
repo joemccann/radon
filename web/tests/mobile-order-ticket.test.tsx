@@ -392,6 +392,8 @@ describe("MobileOrderTicket — stop types", () => {
     const stopInput = getByTestId("order-stop-price") as HTMLInputElement;
     fireEvent.change(stopInput, { target: { value: "2.50" } });
     fireEvent.click(getByTestId("mobile-order-ticket-review"));
+    expect(getByTestId("mobile-order-ticket-recap").textContent).toContain("2.50");
+    expect(getByTestId("mobile-order-ticket-risk").textContent).toMatch(/250/);
     fireEvent.click(getByTestId("mobile-order-ticket-submit"));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
@@ -399,6 +401,7 @@ describe("MobileOrderTicket — stop types", () => {
     expect(body.orderType).toBe("STP");
     expect(body.stopPrice).toBe(2.5);
     expect(body.type).toBe("option");
+    expect(getByTestId("mobile-order-ticket-success").textContent).toContain("2.50");
   });
 
   it("hides stop types on combo tickets", () => {
@@ -409,6 +412,20 @@ describe("MobileOrderTicket — stop types", () => {
       ],
     });
     expect(queryByTestId("order-type-stp")).toBeNull();
+  });
+
+  it("blocks a combo when missing quotes leave debit versus credit unresolved", () => {
+    const { getByTestId } = renderTicket({
+      legs: [
+        makeLeg({ limitPrice: null }),
+        makeLeg({ id: "AAPL_20260320_210_C", strike: 210, action: "SELL", limitPrice: null }),
+      ],
+      prices: {},
+    });
+    fireEvent.change(getByTestId("mobile-order-ticket-price-input"), {
+      target: { value: "1.00" },
+    });
+    expect((getByTestId("mobile-order-ticket-review") as HTMLButtonElement).disabled).toBe(true);
   });
 });
 

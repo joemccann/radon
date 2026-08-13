@@ -71,7 +71,7 @@ export default function SystemStatusBar({
 }
 
 function fmtAgo(secs: number | null): string {
-  if (secs == null) return "just now";
+  if (secs == null) return "freshness unknown";
   if (secs < 2) return "just now";
   if (secs < 60) return `${secs}s ago`;
   return `${Math.floor(secs / 60)}m ago`;

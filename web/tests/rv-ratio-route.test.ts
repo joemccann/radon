@@ -262,7 +262,7 @@ describe("POST /api/options/rv-ratio", () => {
     expect(await response.json()).toMatchObject({ code: "UPSTREAM_TIMEOUT" });
   });
 
-  it("preserves FastAPI error status and detail", async () => {
+  it("preserves FastAPI error status without exposing detail", async () => {
     const { RadonApiError } = await import("@/lib/radonApi");
     mocks.radonFetch.mockRejectedValue(new RadonApiError(503, "rv_ratio_scan.py failed"));
 
@@ -274,7 +274,7 @@ describe("POST /api/options/rv-ratio", () => {
     expect(response.status).toBe(503);
     expect(await response.json()).toMatchObject({
       error: "RV ratio scan unavailable",
-      detail: "rv_ratio_scan.py failed",
+      detail: "Options service unavailable",
       code: "UPSTREAM_ERROR",
     });
   });

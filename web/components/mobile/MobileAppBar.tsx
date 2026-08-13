@@ -48,21 +48,6 @@ function mobileStatusChip(status: IBDisplayStatus): {
 }
 
 export default function MobileAppBar({ title, onOpenSearch }: MobileAppBarProps) {
-  if (
-    process.env.NEXT_PUBLIC_RADON_AUTHLESS_TEST === "1" ||
-    process.env.RADON_AUTHLESS_TEST === "1"
-  ) {
-    return (
-      <MobileAppBarView
-        title={title}
-        onOpenSearch={onOpenSearch}
-        username="Operator"
-        email="test@radon.local"
-        avatarUrl={null}
-      />
-    );
-  }
-
   return <AuthenticatedMobileAppBar title={title} onOpenSearch={onOpenSearch} />;
 }
 

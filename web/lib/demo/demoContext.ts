@@ -51,7 +51,9 @@ export function resolveDemoContext(
   const trialStartedAt = metadata?.demoTrialStartedAt ?? null;
   const trialExpiresAt = metadata?.demoTrialExpiresAt ?? null;
   const expiresMs = parseMs(trialExpiresAt);
-  const expired = expiresMs !== null && now >= expiresMs;
+  // A tagged demo identity is active only with an affirmative, parseable,
+  // future expiry. Pending/malformed metadata must never become access.
+  const expired = expiresMs === null || now >= expiresMs;
 
   return {
     isDemo: true,

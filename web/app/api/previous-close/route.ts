@@ -1,6 +1,10 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
+import { boundedUniqueTickers } from "@/lib/requestBounds";
+
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { WebSocket } from "ws";
+import { isUsTradingDay } from "@/lib/serviceHealthWindows";
 
 /**
  * Fetch previous-day closing prices for stock symbols.
@@ -13,8 +17,25 @@ import { WebSocket } from "ws";
 // In-memory cache keyed by "SYMBOL:YYYY-MM-DD" — previous close doesn't change within a day
 const cache = new Map<string, number>();
 
-function cacheKey(symbol: string): string {
-  return `${symbol}:${new Date().toISOString().slice(0, 10)}`;
+function etDateString(now: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+}
+
+export function previousCloseSessionDate(now: Date = new Date()): string {
+  const today = etDateString(now);
+  const cursor = new Date(`${today}T12:00:00Z`);
+  do cursor.setUTCDate(cursor.getUTCDate() - 1);
+  while (!isUsTradingDay(cursor.toISOString().slice(0, 10)));
+  return cursor.toISOString().slice(0, 10);
+}
+
+function cacheKey(symbol: string, now: Date = new Date()): string {
+  return `${symbol}:${previousCloseSessionDate(now)}`;
 }
 
 /* ── IB source (via WebSocket snapshot) ─────────────────── */
@@ -28,6 +49,7 @@ async function buildWsUrl(token: string | null): Promise<string> {
     const res = await fetch(`${RADON_API}/ws-ticket`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(750),
     });
     if (!res.ok) return IB_WS_URL;
     const { ticket } = await res.json();
@@ -146,15 +168,6 @@ async function fetchFromUW(symbol: string): Promise<number | null> {
  * is the current session, not yesterday's close. Comparing date strings
  * lexicographically is safe because the format is zero-padded.
  */
-function todayEtDateString(): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/New_York",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date());
-}
-
 function unixSecondsToEtDateString(seconds: number): string {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/New_York",
@@ -175,12 +188,12 @@ function lastClosePriorToTodayEt(
 ): number | null {
   if (!Array.isArray(timestamps) || !Array.isArray(closes)) return null;
   if (timestamps.length !== closes.length) return null;
-  const todayEt = todayEtDateString();
+  const expectedSession = previousCloseSessionDate();
   for (let i = closes.length - 1; i >= 0; i--) {
     const t = timestamps[i];
     const c = closes[i];
     if (typeof t !== "number" || typeof c !== "number" || !(c > 0)) continue;
-    if (unixSecondsToEtDateString(t) < todayEt) return c;
+    if (unixSecondsToEtDateString(t) <= expectedSession) return c;
   }
   return null;
 }
@@ -252,16 +265,15 @@ async function getPreviousClose(symbol: string): Promise<number | null> {
 /* ── Route handler ──────────────────────────────────────── */
 
 export async function POST(req: Request) {
+  const access = await requireRouteAccess(undefined, { rate: { key: "previous-close:route", limit: 20, windowMs: 60_000 } });
+  if (!access.ok) return access.response;
   try {
     const { symbols } = await req.json();
-    if (!Array.isArray(symbols) || symbols.length === 0) {
-      return NextResponse.json({ closes: {} });
-    }
+    const batch = boundedUniqueTickers(symbols, 30);
+    if (!batch) return NextResponse.json({ error: "symbols must contain 1 to 30 valid unique tickers" }, { status: 400 });
 
     const { getToken } = await auth();
     const token = await getToken();
-
-    const batch = symbols.slice(0, 30).map((s: string) => s.toUpperCase());
 
     // Check cache first, collect uncached symbols
     const closes: Record<string, number> = {};

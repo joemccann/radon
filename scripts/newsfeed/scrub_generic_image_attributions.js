@@ -20,6 +20,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "fs-extra";
+import { atomicWriteText } from "./atomic.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -70,7 +71,9 @@ async function scrubFile(filePath, { apply }) {
   const { posts, scrubbed } = scrubPosts(parsed);
 
   if (scrubbed > 0 && apply) {
-    await fs.writeFile(filePath, JSON.stringify(posts, null, 2));
+    await atomicWriteText(filePath, JSON.stringify(posts, null, 2), {
+      backupPath: `${filePath}.bak`,
+    });
   }
 
   return { filePath, exists: true, scrubbed, totalPosts: parsed.length };

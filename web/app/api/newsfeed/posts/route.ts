@@ -1,3 +1,4 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
 import { NextResponse } from "next/server";
 import { cachedRead } from "@/lib/dbCache";
 import { dbExecute } from "@/lib/dbExecute";
@@ -65,6 +66,8 @@ async function fetchPosts() {
 }
 
 export async function GET() {
+  const access = await requireRouteAccess();
+  if (!access.ok) return access.response;
   try {
     const posts = await cachedRead("newsfeed:posts", POSTS_CACHE_TTL_MS, fetchPosts, {
       staleWhileError: true,
@@ -72,10 +75,9 @@ export async function GET() {
     return NextResponse.json(posts, {
       headers: { "cache-control": "no-store" },
     });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+  } catch {
     return NextResponse.json(
-      { error: `newsfeed read failed: ${message}` },
+      { error: "Newsfeed temporarily unavailable" },
       { status: 503, headers: { "cache-control": "no-store" } },
     );
   }

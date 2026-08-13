@@ -57,6 +57,7 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
     const mountedRef = useRef(true);
     const connectingRef = useRef(false);
     const pendingPatternRef = useRef<string | null>(null);
+    const activePatternRef = useRef("");
     const getRealtimeToken = useRealtimeAuth();
     const getRealtimeTokenRef = useRef(getRealtimeToken);
     getRealtimeTokenRef.current = getRealtimeToken;
@@ -140,6 +141,8 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
                   return;
                 }
                 if (data.type === "searchResults") {
+                  const responsePattern = typeof data.pattern === "string" ? data.pattern.trim().toUpperCase() : "";
+                  if (!responsePattern || responsePattern !== activePatternRef.current) return;
                   const filtered: SearchResult[] = (data.results ?? [])
                     .filter((r: SearchResult) => ALLOWED_SEC_TYPES.has(r.secType))
                     .slice(0, MAX_RESULTS);
@@ -221,6 +224,7 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
         if (debounceRef.current) clearTimeout(debounceRef.current);
 
         if (!pattern.trim()) {
+          activePatternRef.current = "";
           setResults([]);
           setLoading(false);
           setIsOpen(false);
@@ -230,6 +234,7 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
 
         setLoading(true);
         setIsOpen(true);
+        activePatternRef.current = pattern.trim().toUpperCase();
 
         debounceRef.current = setTimeout(() => {
           const ws = wsRef.current;

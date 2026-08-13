@@ -301,7 +301,7 @@ describe("MobileOrderList display", () => {
   });
 
   it("shows CLOSE intent badge for sell-to-close", () => {
-    const order = makeOrder({ action: "SELL" });
+    const order = makeOrder({ action: "SELL", totalQuantity: 5, remaining: 5 });
     render(
       <MobileOrderList
         rows={[singleRow(order)]}
@@ -374,6 +374,39 @@ describe("MobileOrderList display", () => {
     expect(onRequestCancel).toHaveBeenCalledTimes(1);
     expect(onRequestCancel.mock.calls[0][0]).toBeNull();
     expect(onRequestCancel.mock.calls[0][1]).toHaveLength(2);
+  });
+
+  it("modify resolves a refreshed combo by stable broker order ids", () => {
+    const onRequestModify = vi.fn();
+    const original = comboRow([
+      makeOrder({ permId: 10, orderId: 1, limitPrice: 1 }),
+      makeOrder({ permId: 11, orderId: 2, action: "SELL", limitPrice: 0.5 }),
+    ]);
+    const { rerender } = render(
+      <MobileOrderList
+        rows={[original]}
+        canModify={() => true}
+        onRequestCancel={noop}
+        onRequestModify={onRequestModify}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("mobile-order-combo-AAPL-1"));
+
+    const refreshedOrders = [
+      makeOrder({ permId: 10, orderId: 101, limitPrice: 1.25 }),
+      makeOrder({ permId: 11, orderId: 102, action: "SELL", limitPrice: 0.75 }),
+    ];
+    rerender(
+      <MobileOrderList
+        rows={[comboRow(refreshedOrders)]}
+        canModify={() => true}
+        onRequestCancel={noop}
+        onRequestModify={onRequestModify}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("mobile-order-action-modify"));
+
+    expect(onRequestModify).toHaveBeenCalledWith(null, refreshedOrders);
   });
 
   it("renders no em dashes in card or sheet markup", () => {

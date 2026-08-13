@@ -475,7 +475,7 @@ describe("GET /api/service-health", () => {
     expect(services).toHaveLength(1);
     expect(services[0]).toMatchObject({ service: "turso-db", state: "error" });
     expect(body.degraded_count).toBe(1);
-    expect(body.warning).toContain("turso");
+    expect(body.warning).toBe("Service health store unavailable");
   });
 });
 
@@ -511,13 +511,17 @@ describe("GET /api/newsfeed/posts", () => {
     const res = await GET();
     expect(res.status).toBe(503);
     const body = (await jsonOf(res)) as Record<string, unknown>;
-    expect(body.error).toContain("newsfeed");
+    expect(body.error).toBe("Newsfeed temporarily unavailable");
   });
 });
 
 describe("GET /api/risk-free-rate", () => {
   it("returns 200 with rate from FRED CSV", async () => {
-    const csv = "DATE,DFF\n2026-05-21,4.33\n2026-05-22,4.35\n";
+    const latest = new Date();
+    latest.setUTCDate(latest.getUTCDate() - 1);
+    const previous = new Date(latest);
+    previous.setUTCDate(previous.getUTCDate() - 1);
+    const csv = `DATE,DFF\n${previous.toISOString().slice(0, 10)},4.33\n${latest.toISOString().slice(0, 10)},4.35\n`;
     mockFetch.mockResolvedValueOnce({
       ok: true,
       text: async () => csv,

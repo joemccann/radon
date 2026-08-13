@@ -266,7 +266,8 @@ describe("GET /api/attribution (via radonFetch)", () => {
     const res = await GET();
     expect(res.status).toBe(500);
     const body = await res.json();
-    expect(body.error).toContain("Script exited");
+    expect(body.error).toBe("Attribution failed");
+    expect(JSON.stringify(body)).not.toContain("Script exited");
   });
 });
 
@@ -687,7 +688,7 @@ describe("POST /api/blotter (via radonFetch)", () => {
     const res = await POST();
     expect(res.status).toBe(502);
     const body = await res.json();
-    expect(body.error).toContain("timed out");
+    expect(body.error).toBe("Blotter sync failed");
   });
 });
 
@@ -741,7 +742,7 @@ describe("GET /api/options/chain (via radonFetch)", () => {
     expect(res.status).toBe(504);
     expect(res.headers.get("Cache-Control")).toContain("no-store");
     expect(body.error).toBe("Option chain unavailable");
-    expect(body.detail).toBe("Script timed out after 45.0s");
+    expect(body.detail).toBe("Options request timed out");
     expect(body.code).toBe("UPSTREAM_TIMEOUT");
   });
 });
@@ -795,7 +796,7 @@ describe("GET /api/options/expirations (via radonFetch)", () => {
     expect(res.status).toBe(504);
     expect(res.headers.get("Cache-Control")).toContain("no-store");
     expect(body.error).toBe("Option expirations unavailable");
-    expect(body.detail).toBe("ib_insync qualifyContracts timed out after 15s");
+    expect(body.detail).toBe("Options request timed out");
     expect(body.code).toBe("UPSTREAM_TIMEOUT");
   });
 });

@@ -886,6 +886,21 @@ class IBClient:
             keepUpToDate=keep_up_to_date,
         )
 
+    def get_head_timestamp(
+        self,
+        contract: Any,
+        what_to_show: str = "TRADES",
+        use_rth: bool = True,
+    ) -> Any:
+        """Return IB's earliest available timestamp for a contract."""
+        self._require_connection()
+        return self._ib.reqHeadTimeStamp(
+            contract,
+            whatToShow=what_to_show,
+            useRTH=use_rth,
+            formatDate=2,
+        )
+
     # -- contract details ---------------------------------------------------
 
     def get_contract_details(self, contract: Any) -> list:

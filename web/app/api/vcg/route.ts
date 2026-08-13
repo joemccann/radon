@@ -1,3 +1,5 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
+
 import { NextResponse } from "next/server";
 import { readFile } from "fs/promises";
 import { join } from "path";
@@ -7,6 +9,7 @@ import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
 import { cachedRead } from "@/lib/dbCache";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
+import { getMarketStateFromDate, isUsTradingDay } from "@/lib/serviceHealthWindows";
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
 // first response and serves stale data until the dev server restarts.
@@ -34,17 +37,22 @@ const EMPTY_VCG = {
   history: [],
 };
 
-function isMarketOpenNow(): boolean {
-  const now = new Date();
+function isMarketOpenNow(now = new Date()): boolean {
+  if (getMarketStateFromDate(now) !== "open") return false;
   const et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
-  const day = et.getDay();
-  if (day === 0 || day === 6) return false;
   const minutes = et.getHours() * 60 + et.getMinutes();
   return minutes >= 9 * 60 + 30 && minutes <= 16 * 60;
 }
 
-function todayET(): string {
-  return new Date().toLocaleDateString("sv", { timeZone: "America/New_York" });
+export function expectedVcgSessionDate(now = new Date()): string {
+  const today = now.toLocaleDateString("sv", { timeZone: "America/New_York" });
+  const et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
+  const afterOpen = et.getHours() * 60 + et.getMinutes() >= 9 * 60 + 30;
+  if (afterOpen && isUsTradingDay(today)) return today;
+  const cursor = new Date(`${today}T12:00:00Z`);
+  do cursor.setUTCDate(cursor.getUTCDate() - 1);
+  while (!isUsTradingDay(cursor.toISOString().slice(0, 10)));
+  return cursor.toISOString().slice(0, 10);
 }
 
 // Mirrors the intraday scan_time TTL in vcgStaleness.ts.
@@ -121,6 +129,8 @@ function triggerBackgroundScan(): void {
 }
 
 export async function GET(): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { rate: { key: "vcg:route", limit: 20, windowMs: 60_000 } });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   const cached = await readCachedVcg();
   const data = normalizeVcgPayload(cached ?? {});
@@ -132,7 +142,7 @@ export async function GET(): Promise<Response> {
   // JSON, so a stale verdict here means BOTH sources are stale — a frozen
   // DB mirror alone can no longer loop the background rescan.
   const stale = cached
-    ? isVcgDataStale(cached as { scan_time?: string; market_open?: boolean }, todayET(), currentMarketOpen)
+    ? isVcgDataStale(cached as { scan_time?: string; market_open?: boolean }, expectedVcgSessionDate(), currentMarketOpen)
     : true;
 
   if (stale) {

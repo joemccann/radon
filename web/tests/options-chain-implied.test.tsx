@@ -26,7 +26,7 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: vi.fn(), push: vi.fn(), prefetch: vi.fn(), back: vi.fn(), forward: vi.fn(), refresh: vi.fn() }),
 }));
 
-import OptionsChainTab from "../components/ticker-detail/OptionsChainTab";
+import OptionsChainTab, { chainOrderSubmitPermitted } from "../components/ticker-detail/OptionsChainTab";
 import { TickerDetailProvider } from "../lib/TickerDetailContext";
 import { bsCall, bsPut } from "../lib/blackScholes";
 import { yearsToExpiry } from "../lib/impliedValue";
@@ -140,6 +140,17 @@ function installFetchMock() {
 }
 
 describe("OptionsChainTab — Implied (Black-Scholes) column", () => {
+  it("chain submit requires resolved portfolio risk", () => {
+    expect(chainOrderSubmitPermitted(true, null, false, null)).toBe(false);
+    expect(chainOrderSubmitPermitted(true, { okToSubmit: false }, false, null)).toBe(false);
+    expect(chainOrderSubmitPermitted(true, { okToSubmit: true }, false, null)).toBe(true);
+  });
+
+  it("unresolved combo sign blocks submission", () => {
+    expect(chainOrderSubmitPermitted(true, { okToSubmit: true }, true, null)).toBe(false);
+    expect(chainOrderSubmitPermitted(true, { okToSubmit: true }, true, false)).toBe(true);
+  });
+
   beforeEach(() => {
     installFetchMock();
     // No-op the chain wrapper auto-scroll so jsdom doesn't error.

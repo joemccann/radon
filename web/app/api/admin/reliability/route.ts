@@ -1,3 +1,4 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
 import { NextResponse } from "next/server";
 import { cachedRead } from "@/lib/dbCache";
 import { dbExecute } from "@/lib/dbExecute";
@@ -34,11 +35,15 @@ async function readReliabilityPayload(): Promise<ReliabilityHistoryPayload> {
   const since = new Date(Date.now() - RELIABILITY_WINDOW_MS).toISOString();
   const eventsResult = await dbExecute({
     sql: `SELECT id, service, state, detail, created_at
-          FROM service_health_events
-          WHERE created_at >= ?
-          ORDER BY created_at ASC
-          LIMIT ?`,
-    args: [since, MAX_EVENT_ROWS],
+          FROM (
+            SELECT id, service, state, detail, created_at
+            FROM service_health_events
+            WHERE created_at >= ?
+            ORDER BY created_at DESC
+            LIMIT ?
+          ) newest
+          ORDER BY created_at ASC`,
+    args: [since, MAX_EVENT_ROWS + 1],
   }, { label: "admin-reliability-events" });
   // SQLite/libSQL bare-column-with-MAX semantics: state comes from the row
   // holding MAX(created_at) per service — the state at window start.
@@ -50,7 +55,8 @@ async function readReliabilityPayload(): Promise<ReliabilityHistoryPayload> {
     args: [since],
   }, { label: "admin-reliability-baseline" });
 
-  const events: ServiceHealthEventRow[] = eventsResult.rows.map((row) => ({
+  const truncated = eventsResult.rows.length > MAX_EVENT_ROWS;
+  const events: ServiceHealthEventRow[] = eventsResult.rows.slice(-MAX_EVENT_ROWS).map((row) => ({
     id: Number(row.id),
     service: String(row.service),
     state: String(row.state),
@@ -62,10 +68,12 @@ async function readReliabilityPayload(): Promise<ReliabilityHistoryPayload> {
     baseline[String(row.service)] = String(row.state);
   }
 
-  return { window_ms: RELIABILITY_WINDOW_MS, since, events, baseline };
+  return { window_ms: RELIABILITY_WINDOW_MS, since, events, baseline, truncated };
 }
 
 export async function GET(): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { operatorOnly: true });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   try {
     const cachedPayload = await cachedRead(
@@ -83,8 +91,7 @@ export async function GET(): Promise<Response> {
       baseline: filterApplicableServiceHealthBaseline(cachedPayload.baseline, replicaPresent),
     };
     return setNoStoreResponseHeaders(NextResponse.json(payload), requestId);
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
+  } catch {
     // Pre-migration (or laptop without Turso creds): an empty history is a
     // legitimate pending state — 200 + flag, never 4xx console noise.
     const payload: ReliabilityHistoryPayload = {
@@ -95,7 +102,7 @@ export async function GET(): Promise<Response> {
       missing: true,
     };
     return setNoStoreResponseHeaders(
-      NextResponse.json({ ...payload, error: detail }),
+      NextResponse.json({ ...payload, error: "Reliability history unavailable" }),
       requestId,
     );
   }

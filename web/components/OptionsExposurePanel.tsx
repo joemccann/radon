@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 
 import {
   DEFAULT_EXPOSURE_CONTROLS,
@@ -125,6 +125,10 @@ export default function OptionsExposurePanel({ symbol }: OptionsExposurePanelPro
     () => new Set(DEFAULT_EXPOSURE_CONTROLS.visibleLevels),
   );
   const { data, loading, error, refresh } = useOptionsExposure(normalizedSymbol, frequency);
+
+  useEffect(() => {
+    setExpirationDates(DEFAULT_EXPOSURE_CONTROLS.expirationDates);
+  }, [normalizedSymbol]);
 
   const rows = useMemo(() => {
     if (!data) return [];

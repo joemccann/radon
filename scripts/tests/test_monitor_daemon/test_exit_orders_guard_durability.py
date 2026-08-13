@@ -27,6 +27,8 @@ Fault injections pinned here:
 
 import json
 import sys
+import threading
+import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -34,6 +36,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
 
 from monitor_daemon.handlers.exit_orders import ExitOrdersHandler
+from monitor_daemon.daemon import MonitorDaemon
 from test_exit_orders import FakeJournalDb, _Cursor
 
 
@@ -211,3 +214,36 @@ class TestJournalWriteReadback:
         assert client.place_order.call_count == 1
         assert "error" in result
         assert ("trade-8", "target") in handler._unrecorded_placements
+
+
+def test_timed_out_exit_worker_cannot_overlap_or_duplicate_sell():
+    started = threading.Event()
+    release = threading.Event()
+    placements = []
+
+    class TimedOutExitHandler:
+        name = "exit_orders"
+        interval_seconds = 1
+        max_runtime_seconds = 0.01
+
+        def run(self):
+            placements.append("SELL")
+            started.set()
+            release.wait(timeout=2)
+            return {"status": "ok"}
+
+        def record_cycle_health(self, *_args, **_kwargs):
+            return None
+
+    daemon = MonitorDaemon(respect_market_hours=False)
+    handler = TimedOutExitHandler()
+
+    first = daemon._run_handler_bounded(handler)
+    assert started.is_set()
+    assert "timed out" in first["error"]
+
+    second = daemon._run_handler_bounded(handler)
+    assert "still running" in second["error"]
+    time.sleep(0.02)
+    assert placements == ["SELL"]
+    release.set()

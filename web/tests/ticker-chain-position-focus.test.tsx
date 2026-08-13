@@ -4,7 +4,7 @@ import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 
-import TickerDetailContent from "../components/TickerDetailContent";
+import TickerDetailContent, { resolveTickerPosition } from "../components/TickerDetailContent";
 import { TickerDetailProvider } from "../lib/TickerDetailContext";
 import { OrderActionsProvider } from "../lib/OrderActionsContext";
 import type { OrdersData, PortfolioData } from "../lib/types";
@@ -17,6 +17,10 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(""),
   usePathname: () => "/PLTR",
   useRouter: () => ({ replace: vi.fn(), push: vi.fn(), prefetch: vi.fn(), back: vi.fn(), forward: vi.fn(), refresh: vi.fn() }),
+}));
+
+vi.mock("@clerk/nextjs", () => ({
+  useAuth: () => ({ isLoaded: true, isSignedIn: false, userId: null }),
 }));
 
 vi.mock("../components/PriceChart", () => ({
@@ -218,5 +222,10 @@ describe("Ticker chain position focus", () => {
         { cache: "no-store" },
       );
     });
+  });
+
+  it("cross ticker posid cannot reach order builder", () => {
+    expect(resolveTickerPosition(PORTFOLIO, "AAPL", 16)).toBeNull();
+    expect(resolveTickerPosition(PORTFOLIO, "PLTR", 16)?.id).toBe(16);
   });
 });

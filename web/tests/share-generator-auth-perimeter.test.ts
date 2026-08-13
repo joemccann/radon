@@ -39,7 +39,10 @@ vi.mock("@/lib/radonApi", () => ({
 // same module, so only auth() is stubbed.
 vi.mock("@clerk/nextjs/server", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@clerk/nextjs/server")>()),
-  auth: vi.fn().mockResolvedValue({ getToken: async () => "test-token" }),
+  auth: vi.fn().mockResolvedValue({
+    userId: "user_test",
+    getToken: async () => "test-token",
+  }),
 }));
 
 const GENERATOR_ROUTES = [
@@ -100,7 +103,7 @@ describe("share perimeter — content GETs public, generator POSTs authenticated
 
   it("leaves the non-share public exemptions alone (any method)", () => {
     expect(perimeter.isPublicRequest(reqFor("/api/webhooks/clerk", "POST"))).toBe(true);
-    expect(perimeter.isPublicRequest(reqFor("/api/service-health"))).toBe(true);
+    expect(perimeter.isPublicRequest(reqFor("/api/service-health"))).toBe(false);
     expect(perimeter.isPublicRequest(reqFor("/sign-in", "POST"))).toBe(true);
     expect(perimeter.isPublicRequest(reqFor("/api/portfolio"))).toBe(false);
   });

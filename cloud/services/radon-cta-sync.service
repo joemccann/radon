@@ -26,7 +26,7 @@ StandardOutput=journal
 StandardError=journal
 # CTA-02: raised from 300s -- Jun 11 18:15Z run was killed mid-fetch by the
 # 5-min limit. Playwright headless fetch can take 8-12 min on a cold session.
-TimeoutStartSec=900
+TimeoutStartSec=1800
 
 [Install]
 WantedBy=multi-user.target

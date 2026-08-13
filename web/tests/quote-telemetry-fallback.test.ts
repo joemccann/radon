@@ -73,6 +73,22 @@ describe("buildQuoteTelemetryModel — after-hours stock-state fallback", () => 
     expect(m.bid.value).toContain("142.40");
   });
 
+  it("labels a prior-session last without a fresh book as CLOSE", () => {
+    const now = Date.parse("2026-08-13T15:00:00Z");
+    const stale = priceData({
+      last: 142.5,
+      bid: null,
+      ask: null,
+      close: 141.5,
+      timestamp: "2026-08-12T20:00:00Z",
+    });
+    const m = buildQuoteTelemetryModel(stale, null, now)!;
+    expect(m.last.label).toBe("CLOSE");
+    expect(m.last.value).toContain("142.50");
+    expect(m.bid.value).toBe("---");
+    expect(m.ask.value).toBe("---");
+  });
+
   it("backfills HIGH/LOW/VOLUME from the fallback when the live stream omits them", () => {
     const m = buildQuoteTelemetryModel(priceData({ last: 142.5 }), FALLBACK)!;
     expect(m.high.value).toContain("143.95");

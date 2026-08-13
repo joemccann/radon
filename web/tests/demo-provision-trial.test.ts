@@ -82,7 +82,7 @@ describe("provisionDemoTrial", () => {
     expect(d.setClerkMetadata).not.toHaveBeenCalled();
   });
 
-  it("writes the DB row BEFORE the Clerk metadata (no access without a row)", async () => {
+  it("writes denied Clerk metadata before slow provisioning, then activates after the DB row", async () => {
     const order: string[] = [];
     const db = makeFakeDemoDb();
     const origExecute = db.execute.bind(db);
@@ -99,7 +99,18 @@ describe("provisionDemoTrial", () => {
       setClerkMetadata,
       now: new Date(),
     });
-    expect(order).toEqual(["db", "clerk"]);
+    expect(order).toEqual(["clerk", "db", "clerk"]);
+    expect(setClerkMetadata.mock.calls[0]).toEqual(["user_demo", { demoRole: "pending" }]);
+  });
+
+  it("leaves a failed provisioning attempt explicitly pending in Clerk", async () => {
+    const setClerkMetadata = vi.fn().mockResolvedValue(undefined);
+    await expect(provisionDemoTrial(demoUser(), deps({
+      setClerkMetadata,
+      computeExpiry: vi.fn().mockRejectedValue(new Error("calendar down")),
+    }))).rejects.toThrow("calendar down");
+    expect(setClerkMetadata).toHaveBeenCalledTimes(1);
+    expect(setClerkMetadata).toHaveBeenCalledWith("user_demo", { demoRole: "pending" });
   });
 });
 

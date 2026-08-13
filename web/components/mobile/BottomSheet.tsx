@@ -114,7 +114,7 @@ export function BottomSheet({
 
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!sheetRef.current || exiting) return;
-    sheetRef.current.setPointerCapture(event.pointerId);
+    event.currentTarget.setPointerCapture(event.pointerId);
     // Disable CSS transition while dragging so follow is 1:1.
     sheetRef.current.style.transition = "none";
     dragStartRef.current = { y: event.clientY, offset: 0, t: performance.now() };
@@ -129,7 +129,10 @@ export function BottomSheet({
     sheetRef.current.style.transform = `translateY(${offset}px)`;
   };
 
-  const handlePointerUp = () => {
+  const handlePointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
     if (!dragStartRef.current || !sheetRef.current) return;
     const offset = dragStartRef.current.offset;
     const elapsed = Math.max(1, performance.now() - dragStartRef.current.t);

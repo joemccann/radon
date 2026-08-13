@@ -85,8 +85,10 @@ vi.mock("child_process", () => ({
 }));
 
 const mockImportLatestReconciliationToJournal = vi.fn();
+const mockImportReconciliationSnapshotToJournal = vi.fn();
 vi.mock("@/lib/journalDb", () => ({
   importLatestReconciliationToJournal: mockImportLatestReconciliationToJournal,
+  importReconciliationSnapshotToJournal: mockImportReconciliationSnapshotToJournal,
 }));
 
 // Global fetch — used by ticker/info, etc.
@@ -315,13 +317,15 @@ describe("GET /api/vcg", () => {
 
 describe("POST /api/journal/sync", () => {
   it("returns 200 with import counts on success", async () => {
-    mockRadonFetch.mockResolvedValueOnce({ ok: true });
-    mockImportLatestReconciliationToJournal.mockResolvedValueOnce({ imported: 3, skipped: 0 });
+    const snapshotAt = new Date().toISOString();
+    mockRadonFetch.mockResolvedValueOnce({ ok: true, snapshot_at: snapshotAt });
+    mockImportReconciliationSnapshotToJournal.mockResolvedValueOnce({ imported: 3, skipped: 0 });
     const { POST } = await import("../app/api/journal/sync/route");
     const res = await POST();
     expect(res.status).toBe(200);
     const body = (await jsonOf(res)) as Record<string, unknown>;
     expect(body.imported).toBe(3);
+    expect(mockImportReconciliationSnapshotToJournal).toHaveBeenCalledWith(snapshotAt);
   });
 
   it("returns 500 envelope on FastAPI reconcile failure", async () => {
