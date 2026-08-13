@@ -25,7 +25,7 @@ from fetch_vol_cone import (
     parse_greek_rows,
     percentile,
     rank_strictly_below,
-    select_target_expiry,
+    select_target_expiries,
     session_ivs,
     third_friday,
 )
@@ -131,16 +131,23 @@ class TestParseAndInterpolate:
 # ── Expiry selection ──────────────────────────────────────────────
 
 
-class TestSelectTargetExpiry:
+class TestSelectTargetExpiries:
     def test_third_friday_september_2026(self):
         assert third_friday(2026, 9) == date(2026, 9, 18)
 
-    def test_as_of_aug_12_picks_sep_monthly(self):
-        assert select_target_expiry(date(2026, 8, 12)) == date(2026, 9, 18)
+    def test_as_of_aug_12_returns_every_standard_monthly_in_window(self):
+        assert select_target_expiries(date(2026, 8, 12)) == [
+            date(2026, 9, 18),
+            date(2026, 10, 16),
+            date(2026, 11, 20),
+            date(2026, 12, 18),
+            date(2027, 1, 15),
+        ]
 
-    def test_rejects_monthlies_inside_21_dte(self):
-        # 2026-08-21 is 9 DTE from 2026-08-12; must not win.
-        assert select_target_expiry(date(2026, 8, 12)) != date(2026, 8, 21)
+    def test_rejects_weeklies_and_front_monthlies_inside_21_dte(self):
+        expiries = select_target_expiries(date(2026, 8, 12))
+        assert date(2026, 8, 21) not in expiries
+        assert date(2026, 8, 14) not in expiries
 
 
 # ── Cone stats + regime ───────────────────────────────────────────
@@ -172,6 +179,7 @@ class TestConeStats:
             for row in WEEKLY
         ]
         name = compute_name("NVDA", "2026-09-18", series)
+        assert name["month"] == "SEP"
         assert name["regime"] == "CHEAP_WINGS"
         assert name["atm_percentile"] == pytest.approx(0.0)
         assert name["call_10_percentile"] == pytest.approx(1 / 18)
@@ -249,39 +257,50 @@ class TestRunHeartbeat:
         monkeypatch.setattr(mod, "_read_history_rows", lambda: [])
         self.mod = mod
 
+    def _history_rows(self, expiries, weekly=WEEKLY):
+        rows = []
+        for expiry in expiries:
+            expiry_s = expiry.isoformat() if isinstance(expiry, date) else expiry
+            for row in weekly:
+                rows.append(
+                    {
+                        "ticker": "NVDA",
+                        "date": row["date"],
+                        "expiry": expiry_s,
+                        "dte": 37,
+                        "spot": row["spot"],
+                        "atm_iv": row["atm"],
+                        "call_10_iv": row["call10"],
+                        "put_10_iv": row["put10"],
+                        "call_10_strike": row.get("call_k"),
+                        "put_10_strike": row.get("put_k"),
+                    }
+                )
+        return rows
+
     def _seed_complete_history(self):
-        series = [
-            {
-                "date": row["date"],
-                "spot": row["spot"],
-                "atm_iv": row["atm"],
-                "call_10_iv": row["call10"],
-                "put_10_iv": row["put10"],
-                "call_10_strike": row.get("call_k"),
-                "put_10_strike": row.get("put_k"),
-            }
-            for row in WEEKLY
-        ]
-        name = compute_name("NVDA", "2026-09-18", series)
+        expiries = select_target_expiries(date(2026, 8, 12))
+        history = self._history_rows(expiries)
+        names = []
+        for expiry in expiries:
+            expiry_s = expiry.isoformat()
+            series = [
+                {
+                    "date": row["date"],
+                    "spot": row["spot"],
+                    "atm_iv": row["atm_iv"],
+                    "call_10_iv": row["call_10_iv"],
+                    "put_10_iv": row["put_10_iv"],
+                }
+                for row in history
+                if row["expiry"] == expiry_s
+            ]
+            names.append(compute_name("NVDA", expiry_s, series))
         payload = self.mod.build_output(
-            [name], scan_time="old", source_as_of="2026-08-12"
+            names, scan_time="old", source_as_of="2026-08-12"
         )
         self.mod.VOL_CONE_JSON.write_text(json.dumps(payload))
-        self.mod._read_history_rows = lambda: [
-            {
-                "ticker": "NVDA",
-                "date": row["date"],
-                "expiry": "2026-09-18",
-                "dte": 37,
-                "spot": row["spot"],
-                "atm_iv": row["atm"],
-                "call_10_iv": row["call10"],
-                "put_10_iv": row["put10"],
-                "call_10_strike": row.get("call_k"),
-                "put_10_strike": row.get("put_k"),
-            }
-            for row in WEEKLY
-        ]
+        self.mod._read_history_rows = lambda: history
         return payload
 
     def test_no_missing_sessions_heartbeats_without_row_writes(self):
@@ -298,22 +317,15 @@ class TestRunHeartbeat:
         assert self.db_writes == [False]
 
     def test_missing_session_fetches_and_upserts(self):
-        prior = [row for row in WEEKLY if row["date"] != "2026-08-12"]
-        self.mod._read_history_rows = lambda: [
-            {
-                "ticker": "NVDA",
-                "date": row["date"],
-                "expiry": "2026-09-18",
-                "dte": 37,
-                "spot": row["spot"],
-                "atm_iv": row["atm"],
-                "call_10_iv": row["call10"],
-                "put_10_iv": row["put10"],
-                "call_10_strike": row.get("call_k"),
-                "put_10_strike": row.get("put_k"),
-            }
-            for row in prior
-        ]
+        expiries = select_target_expiries(date(2026, 8, 12))
+        complete = self._history_rows(
+            [e for e in expiries if e != date(2026, 9, 18)]
+        )
+        sep_prior = self._history_rows(
+            [date(2026, 9, 18)],
+            weekly=[row for row in WEEKLY if row["date"] != "2026-08-12"],
+        )
+        self.mod._read_history_rows = lambda: complete + sep_prior
         closes = {row["date"]: row["spot"] for row in WEEKLY}
         client = _StubClient(
             {("NVDA", "2026-09-18", "2026-08-12"): NVDA_CURRENT},
@@ -326,8 +338,13 @@ class TestRunHeartbeat:
             tickers=["NVDA"],
         )
         assert ("NVDA", "2026-09-18", "2026-08-12") in client.calls
-        assert payload["current"]["ticker"] == "NVDA"
-        assert payload["current"]["atm_iv"] == pytest.approx(NVDA_ATM, abs=1e-9)
+        assert {call[1] for call in client.calls} == {"2026-09-18"}
+        sep = next(name for name in payload["names"] if name["expiry"] == "2026-09-18")
+        assert sep["atm_iv"] == pytest.approx(NVDA_ATM, abs=1e-9)
+        assert sep["month"] == "SEP"
+        assert {name["expiry"] for name in payload["names"]} >= {
+            e.isoformat() for e in expiries
+        }
         assert self.db_writes == [True]
 
 

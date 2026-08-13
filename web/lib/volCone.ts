@@ -19,6 +19,7 @@ export interface VolConeName {
   ticker: string;
   spot: number;
   expiry: string;
+  month?: string | null;
   dte: number;
   atm_iv: number | null;
   call_10_iv: number | null;
@@ -70,6 +71,17 @@ export function formatPercentile(v: number | null | undefined): string {
 
 export function formatVolConeRegime(regime: VolConeRegime): string {
   return regime.replaceAll("_", " ");
+}
+
+/** Standard monthly label: "2026-09-18" -> "SEP 18". */
+export function formatMonthlyExpiry(expiry: string | null | undefined): string {
+  if (!expiry) return "---";
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(expiry);
+  if (!match) return expiry;
+  const months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+  const month = months[Number(match[2]) - 1];
+  if (!month) return expiry;
+  return `${month} ${Number(match[3])}`;
 }
 
 /* ─── Derivations ────────────────────────────────────── */

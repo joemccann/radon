@@ -20,11 +20,16 @@ import { useViewport } from "@/lib/useViewport";
 import {
   buildVolConeChartRows,
   formatIvPct,
+  formatMonthlyExpiry,
   formatPercentile,
   formatVolConeRegime,
   volConeRegimeColor,
   type VolConeName,
 } from "@/lib/volCone";
+
+function nameKey(name: Pick<VolConeName, "ticker" | "expiry">): string {
+  return `${name.ticker}:${name.expiry}`;
+}
 
 const VOL_CONE_TOOLTIP =
   "A hit is cheap ATM (at or below the 15th percentile of this expiry's cone) plus cheap 10% OTM wings (both at or below the 20th percentile).";
@@ -58,7 +63,7 @@ export default function VolConePanel() {
 
   const names = data?.names ?? [];
   const selected =
-    names.find((name) => name.ticker === selectedTicker) ?? data?.current ?? names[0] ?? null;
+    names.find((name) => nameKey(name) === selectedTicker) ?? data?.current ?? names[0] ?? null;
   const series = selected?.series ?? [];
   const total = series.length;
   const activePreset: RangePresetSlug | "custom" = preset ?? defaultPresetForLength(total);
@@ -208,14 +213,15 @@ export default function VolConePanel() {
               </thead>
               <tbody>
                 {visibleNames.map((name) => {
-                  const active = name.ticker === (selected?.ticker ?? current.ticker);
+                  const key = nameKey(name);
+                  const active = key === nameKey(selected ?? current);
                   return (
                     <tr
-                      key={name.ticker}
-                      data-testid={`vol-cone-row-${name.ticker}`}
+                      key={key}
+                      data-testid={`vol-cone-row-${name.ticker}-${name.expiry}`}
                       aria-selected={active}
                       onClick={() => {
-                        setSelectedTicker(name.ticker);
+                        setSelectedTicker(key);
                         setPreset(null);
                         setCustomRange(null);
                       }}
@@ -227,7 +233,7 @@ export default function VolConePanel() {
                       }}
                     >
                       <td>{name.ticker}</td>
-                      <td>{name.expiry}</td>
+                      <td>{formatMonthlyExpiry(name.expiry)}</td>
                       <td className="right">{name.dte}</td>
                       <td className="right">{formatIvPct(name.atm_iv) === "---" ? "---" : `${formatIvPct(name.atm_iv)}%`}</td>
                       <td className="right">{formatIvPct(name.call_10_iv) === "---" ? "---" : `${formatIvPct(name.call_10_iv)}%`}</td>
