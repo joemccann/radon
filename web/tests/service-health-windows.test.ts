@@ -117,6 +117,14 @@ describe("isStale", () => {
     expect(isStale("fill-monitor", fridayClose, "open", mondayOpenPlusOne)).toBe(false);
     expect(isStale("fill-monitor", fridayClose, "open", Date.parse("2026-05-11T13:36:00Z"))).toBe(true);
   });
+
+  it("ib-realtime-relay is RTH-only: yesterday close is not stale at the open bell", () => {
+    const yesterdayClose = "2026-08-12T20:00:00Z";
+    const bell = Date.parse("2026-08-13T13:30:00Z");
+    expect(isStale("ib-realtime-relay", yesterdayClose, "open", bell)).toBe(false);
+    expect(isStale("ib-realtime-relay", yesterdayClose, "open", bell + 4 * 60_000)).toBe(false);
+    expect(isStale("ib-realtime-relay", yesterdayClose, "open", Date.parse("2026-08-13T13:36:00Z"))).toBe(true);
+  });
 });
 
 /**
@@ -486,6 +494,77 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
     expect(getFreshnessWindowMs("vol-cone", "extended")).toBe(3 * DAY);
     expect(getFreshnessWindowMs("vol-cone", "closed")).toBe(3 * DAY);
     expect(requiresIb("vol-cone")).toBe(false);
+  });
+});
+
+/**
+ * Regression (2026-08-13): five Equibles fetchers plus event-odds write
+ * service_health directly and were never registered, so they inherited
+ * the 1h scheduled default and flipped stale during RTH after a
+ * successful daily/weekly run.
+ */
+describe("unregistered-writer regression — equibles + event-odds", () => {
+  const HOUR = 60 * 60_000;
+  const DAY = 24 * HOUR;
+
+  it.each([
+    "equibles-short-crowding",
+    "equibles-filing-forensics",
+  ])("%s is scheduled daily 26h, requires_ib false", (service) => {
+    expect(SERVICE_FRESHNESS_WINDOWS[service]).toBeDefined();
+    expect(getServiceCategory(service)).toBe("scheduled");
+    for (const state of ["open", "extended", "closed"] as MarketState[]) {
+      expect(getFreshnessWindowMs(service, state)).toBe(26 * HOUR);
+      expect(getFreshnessWindowMs(service, state)).toBe(
+        getFreshnessWindowMs("margin-debt", state),
+      );
+    }
+    expect(requiresIb(service)).toBe(false);
+  });
+
+  it.each([
+    "equibles-13f",
+    "equibles-ats-venue-share",
+    "equibles-cot-positioning",
+  ])("%s is scheduled weekly 8d like preset-rebalance, requires_ib false", (service) => {
+    expect(SERVICE_FRESHNESS_WINDOWS[service]).toBeDefined();
+    expect(getServiceCategory(service)).toBe("scheduled");
+    for (const state of ["open", "extended", "closed"] as MarketState[]) {
+      expect(getFreshnessWindowMs(service, state)).toBe(8 * DAY);
+      expect(getFreshnessWindowMs(service, state)).toBe(
+        getFreshnessWindowMs("preset-rebalance", state),
+      );
+    }
+    expect(requiresIb(service)).toBe(false);
+  });
+
+  it("daily equibles: a 20h-old ok row stays fresh", () => {
+    const NOW = Date.parse("2026-08-13T18:00:00Z");
+    const recent = new Date(NOW - 20 * HOUR).toISOString();
+    expect(isStale("equibles-short-crowding", recent, "open", NOW)).toBe(false);
+    expect(isStale("equibles-filing-forensics", recent, "open", NOW)).toBe(false);
+  });
+
+  it("weekly equibles: a 6-day-old ok row stays fresh", () => {
+    const NOW = Date.parse("2026-08-13T18:00:00Z");
+    const recent = new Date(NOW - 6 * DAY).toISOString();
+    expect(isStale("equibles-13f", recent, "open", NOW)).toBe(false);
+    expect(isStale("equibles-ats-venue-share", recent, "open", NOW)).toBe(false);
+    expect(isStale("equibles-cot-positioning", recent, "open", NOW)).toBe(false);
+  });
+
+  it("event-odds matches catalysts (7h open, 4d closed), requires_ib false", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["event-odds"]).toBeDefined();
+    expect(getServiceCategory("event-odds")).toBe("scheduled");
+    expect(getFreshnessWindowMs("event-odds", "open")).toBe(7 * HOUR);
+    expect(getFreshnessWindowMs("event-odds", "extended")).toBe(7 * HOUR);
+    expect(getFreshnessWindowMs("event-odds", "closed")).toBe(4 * DAY);
+    for (const state of ["open", "extended", "closed"] as MarketState[]) {
+      expect(getFreshnessWindowMs("event-odds", state)).toBe(
+        getFreshnessWindowMs("catalysts", state),
+      );
+    }
+    expect(requiresIb("event-odds")).toBe(false);
   });
 });
 

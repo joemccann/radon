@@ -25,7 +25,9 @@
  * `/api/probe/*` routes are bearer-gated (not Clerk-public, not anonymous),
  * and any route file landing under web/app/api/probe without being
  * enumerated in PROBE_BEARER_API_ROUTES fails the filesystem pin below —
- * forcing the same deliberate perimeter decision.
+ * forcing the same deliberate perimeter decision. Extra bearer routes
+ * outside `/api/probe/` (currently `/api/service-health`) must stay in
+ * the list and must stay out of isPublicRoute.
  *
  * Companion: web/tests/middleware-auth.test.ts pins the broader isPublicRoute
  * behavior (sign-in/sign-up, service-health, protected API deny-list).
@@ -127,9 +129,11 @@ describe("PROBE_BEARER_API_ROUTES — explicit bearer-gated probe allowlist (DUR
     }
   });
 
-  it("allowlist matches the probe route files on disk exactly", () => {
+  it("allowlist includes every on-disk /api/probe route plus dual-auth service-health", () => {
     const onDisk = collectProbeRoutesFromFilesystem();
-    expect([...PROBE_BEARER_API_ROUTES].sort()).toEqual(onDisk);
+    expect([...PROBE_BEARER_API_ROUTES].sort()).toEqual(
+      [...onDisk, "/api/service-health"].sort(),
+    );
   });
 });
 

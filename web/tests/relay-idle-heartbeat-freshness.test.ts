@@ -104,7 +104,16 @@ function iso(ms: number): string {
  * the real consequence of a `false` heartbeat: no write at all, so the row
  * genuinely ages instead of being refreshed by the test harness.
  */
-function runRelayStaleCheckLoop({ startMs, phases }: { startMs: number; phases: Phase[] }): RelayRun {
+function runRelayStaleCheckLoop({
+  startMs,
+  phases,
+  farmState = null,
+}: {
+  startMs: number;
+  phases: Phase[];
+  /** Leftover IB farm info code. Sticky across drain unless the writer ignores it. */
+  farmState?: number | null;
+}): RelayRun {
   let lastTickTimestamp = startMs;
   let lastHeartbeatAt = startMs;
   let row: RelayHealthRow | null = null;
@@ -125,7 +134,7 @@ function runRelayStaleCheckLoop({ startMs, phases }: { startMs: number; phases: 
         isMarketHours: isMarketOpen(new Date(now)),
         activeSubscriptions: phase.activeSubscriptions,
         reconnectCycles: 0,
-        farmState: null,
+        farmState,
         lastEscalationAt: null,
         inError: false,
         lastHeartbeatAt,
@@ -404,5 +413,137 @@ describe("dead relay is still detected — the idle exemption is bounded", () =>
       evaluateRelayTick(escalated, "open", DETECTION_MS).fresh,
       "the escalation row is checked before the zero-subscriber exemption; a latched error is never fresh",
     ).toBe(false);
+  });
+});
+
+/**
+ * Open-bell + leftover farm-DOWN still freeze the same row the idle
+ * heartbeat already learned to keep moving. The writer is RTH-only, so
+ * yesterday's 16:00 ET close is a legitimate last write; a leftover
+ * 2103/2105/2108 must not then silence the first idle cycles after drain.
+ */
+const YESTERDAY_CLOSE_MS = Date.parse("2026-08-12T20:00:00Z"); // Wed 16:00 ET
+const OPEN_BELL_MS = Date.parse("2026-08-13T13:30:00Z"); // Thu 09:30:00 ET
+const SUBSCRIBED_DRAIN_COUNT = 36;
+
+function openBellCloseRow(): RelayHealthRow {
+  const run = runRelayStaleCheckLoop({
+    startMs: YESTERDAY_CLOSE_MS - 10 * 60_000,
+    phases: [
+      {
+        durationMs: 10 * 60_000,
+        activeSubscriptions: 0,
+        ticksFlowing: false,
+      },
+    ],
+  });
+  if (!run.row) throw new Error("writer emitted no close-of-day row");
+  return run.row;
+}
+
+describe("open-bell grace — overnight silence is not a dead relay", () => {
+  it("pins yesterday close → next open bell as an RTH → RTH gap", () => {
+    expect(isMarketOpen(new Date(YESTERDAY_CLOSE_MS))).toBe(true);
+    expect(isMarketOpen(new Date(OPEN_BELL_MS))).toBe(true);
+    expect(getMarketStateFromDate(new Date(OPEN_BELL_MS))).toBe("open");
+    expect(OPEN_BELL_MS - YESTERDAY_CLOSE_MS).toBeGreaterThan(RELAY_HEARTBEAT_STALE_MS);
+  });
+
+  it("last write 16:00 ET yesterday is not relay_tick stale inside RELAY_HEARTBEAT_STALE_MS of the bell", () => {
+    const row = openBellCloseRow();
+    const frozen = Date.parse(row.updated_at as string);
+    expect(frozen).toBeLessThanOrEqual(YESTERDAY_CLOSE_MS + STALE_CHECK_INTERVAL_MS);
+    expect(frozen).toBeGreaterThan(YESTERDAY_CLOSE_MS - 2 * TICK_HEARTBEAT_INTERVAL_MS);
+
+    const atBell = evaluateRelayTick(row, "open", OPEN_BELL_MS);
+    const insideGrace = evaluateRelayTick(
+      row,
+      "open",
+      OPEN_BELL_MS + RELAY_HEARTBEAT_STALE_MS - 60_000,
+    );
+
+    expect(atBell.applicable).toBe(true);
+    expect(
+      atBell.fresh,
+      "09:30:00 ET must not compare overnight age against the 5m RTH heartbeat bound",
+    ).toBe(true);
+    expect(insideGrace.fresh).toBe(true);
+
+    const payload = buildFreshnessPayload(freshnessInputsFor(row, OPEN_BELL_MS), new Date(OPEN_BELL_MS));
+    expect(payload.checks.relay_tick.fresh).toBe(true);
+    expect(payload.all_fresh).toBe(true);
+  });
+
+  it("control: the same frozen close row is stale once the session has been open past the bound", () => {
+    const row = openBellCloseRow();
+    const pastGrace = OPEN_BELL_MS + RELAY_HEARTBEAT_STALE_MS + 60_000;
+    expect(getMarketStateFromDate(new Date(pastGrace))).toBe("open");
+    expect(evaluateRelayTick(row, "open", pastGrace).fresh).toBe(false);
+  });
+});
+
+describe("drain and leftover farm-DOWN do not freeze the idle heartbeat", () => {
+  it("last subscribed write (subs=36) then drain to 0 keeps emitting", () => {
+    const warmupMs = 5 * 60_000;
+    const disconnectMs = SESSION_START_MS + warmupMs;
+    const run = runRelayStaleCheckLoop({
+      startMs: SESSION_START_MS,
+      phases: [
+        { durationMs: warmupMs, activeSubscriptions: SUBSCRIBED_DRAIN_COUNT, ticksFlowing: true },
+        { durationMs: DETECTION_MS - disconnectMs, activeSubscriptions: 0, ticksFlowing: false },
+      ],
+    });
+
+    const lastSubscribed = [...run.writes].reverse().find((w) => w.activeSubscriptions === SUBSCRIBED_DRAIN_COUNT);
+    const idleWrites = run.writes.filter((w) => w.atMs > disconnectMs);
+
+    expect(lastSubscribed).toBeDefined();
+    expect(idleWrites.length).toBeGreaterThan(0);
+    expect(idleWrites.every((w) => w.activeSubscriptions === 0)).toBe(true);
+    expect(maxObservedWriteGapMs(run.writes, disconnectMs, DETECTION_MS)).toBeLessThanOrEqual(
+      RELAY_HEARTBEAT_STALE_MS,
+    );
+    expect(evaluateRelayTick(run.row, "open", DETECTION_MS).fresh).toBe(true);
+  });
+
+  it("sticky farm 2105 then idle with ibConnected keeps the heartbeat", () => {
+    const warmupMs = 5 * 60_000;
+    const disconnectMs = SESSION_START_MS + warmupMs;
+    const run = runRelayStaleCheckLoop({
+      startMs: SESSION_START_MS,
+      farmState: 2105,
+      phases: [
+        { durationMs: warmupMs, activeSubscriptions: SUBSCRIBED_DRAIN_COUNT, ticksFlowing: true },
+        { durationMs: DETECTION_MS - disconnectMs, activeSubscriptions: 0, ticksFlowing: false },
+      ],
+    });
+
+    const idleWrites = run.writes.filter((w) => w.atMs > disconnectMs);
+    expect(
+      idleWrites.length,
+      "leftover 2105 must not skip the 60s idle heartbeat once demand is gone",
+    ).toBeGreaterThan(0);
+    expect(maxObservedWriteGapMs(run.writes, disconnectMs, DETECTION_MS)).toBeLessThanOrEqual(
+      RELAY_HEARTBEAT_STALE_MS,
+    );
+    expect(evaluateRelayTick(run.row, "open", DETECTION_MS).fresh).toBe(true);
+  });
+
+  it("dead process and latched error still read fresh=false", () => {
+    const live = idleRunFor(DISCONNECT_PHASES[0].warmupMs, Date.parse("2026-08-10T14:00:00Z"), Date.parse("2026-08-10T14:10:00Z"));
+    if (!live.row) throw new Error("writer emitted no idle row");
+    const deadProbe = Date.parse(live.row.updated_at as string) + 90 * 60_000;
+    expect(evaluateRelayTick(live.row, "open", deadProbe).fresh).toBe(false);
+
+    const latched: RelayHealthRow = {
+      state: "error",
+      last_error: JSON.stringify({
+        error: "No ticks for 196s with 36 active subscriptions after 3 reconnect cycles",
+        last_tick_at: iso(OPEN_BELL_MS - 196_000),
+        active_subscriptions: 0,
+      }),
+      updated_at: iso(OPEN_BELL_MS - 10_000),
+    };
+    expect(evaluateRelayTick(latched, "open", OPEN_BELL_MS).fresh).toBe(false);
   });
 });
