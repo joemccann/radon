@@ -52,6 +52,22 @@ class _OkHandler(http.server.BaseHTTPRequestHandler):
         pass
 
 
+def _flaky_status_handler(fail_code: int):
+    state = {"hits": 0}
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            state["hits"] += 1
+            code = fail_code if state["hits"] == 1 else 200
+            self.send_response(code)
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    return Handler, state
+
+
 def run_script(port: int, fake_python: Path, retries: int = 2,
                delay: int = 1) -> subprocess.CompletedProcess:
     return subprocess.run(
@@ -111,3 +127,65 @@ class TestDeployWindowRetry:
             server.shutdown()
         assert result.returncode == 0, result.stderr
         assert "retry" not in (result.stdout + result.stderr).lower()
+
+    def test_http_502_then_ok_retries(self, fake_python: Path):
+        """2026-08-14 17:00Z: /portfolio/sync returned 502 instantly while
+        /health stayed 200 (top-of-hour scan pile-up / slot cap). curl -f
+        exits 22, the oneshot paged, and the wrapper only retried exit 7.
+        A later POST in the same minute must succeed."""
+        port = free_port()
+        handler, state = _flaky_status_handler(502)
+        server = http.server.HTTPServer(("127.0.0.1", port), handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            result = run_script(port, fake_python, retries=2, delay=1)
+        finally:
+            server.shutdown()
+        assert result.returncode == 0, result.stderr
+        assert state["hits"] == 2
+        assert "retry" in (result.stdout + result.stderr).lower()
+
+    def test_http_503_then_ok_retries(self, fake_python: Path):
+        port = free_port()
+        handler, state = _flaky_status_handler(503)
+        server = http.server.HTTPServer(("127.0.0.1", port), handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            result = run_script(port, fake_python, retries=2, delay=1)
+        finally:
+            server.shutdown()
+        assert result.returncode == 0, result.stderr
+        assert state["hits"] == 2
+
+    def test_http_400_does_not_retry(self, fake_python: Path):
+        port = free_port()
+        handler, state = _flaky_status_handler(400)
+        server = http.server.HTTPServer(("127.0.0.1", port), handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            result = run_script(port, fake_python, retries=2, delay=1)
+        finally:
+            server.shutdown()
+        assert result.returncode == 22
+        assert state["hits"] == 1
+
+    def test_persistent_502_still_fails_with_exit_22(self, fake_python: Path):
+        port = free_port()
+
+        class Always502(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                self.send_response(502)
+                self.end_headers()
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", port), Always502)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            result = run_script(port, fake_python, retries=2, delay=1)
+        finally:
+            server.shutdown()
+        assert result.returncode == 22
+        combined = (result.stdout + result.stderr).lower()
+        assert combined.count("retry") >= 2
