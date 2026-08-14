@@ -394,6 +394,23 @@ class TestResponderLock:
         assert acquire_lock(lock, NOW) is False
         assert acquire_lock(lock, NOW + timedelta(seconds=LOCK_STALE_SECS + 1)) is True
 
+    def test_setup_marker_does_not_read_as_dirty_work(self):
+        """`sync_remote_clone` refuses to ff a dirty tree, so the setup script's
+        own marker must be ignored — otherwise the dedicated clone is pinned
+        forever to whatever grok last committed and never sees a fix (the
+        responder sat on f7fc644f while main was two commits ahead, 2026-08-14).
+        """
+        repo_root = Path(__file__).resolve().parents[3]
+        marker = "cloud/scripts/setup-grok-page-responder.sh"
+        assert "MARKER=\"$CLONE/.radon-page-responder\"" in (
+            repo_root / marker
+        ).read_text(), "marker path moved; update this pin"
+        ignored = subprocess.run(
+            ["git", "check-ignore", "-q", ".radon-page-responder"],
+            cwd=repo_root,
+        )
+        assert ignored.returncode == 0, ".radon-page-responder must be gitignored"
+
     def test_ttl_cannot_outlive_the_grok_timeout(self):
         assert LOCK_STALE_SECS > GROK_TIMEOUT_SECS, "a live cycle must never be stolen"
         assert LOCK_STALE_SECS <= GROK_TIMEOUT_SECS + 600, (

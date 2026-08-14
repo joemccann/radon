@@ -57,6 +57,11 @@ systemctl enable --now radon-grok-page-responder.timer
 Stripped env: `/home/radon/radon-page-responder.env` (Turso + Pushover
 only). Auth: `/home/radon/.grok/auth.json` via device-code.
 
+Setup drops a `.radon-page-responder` marker in the clone. It is gitignored on
+purpose: `sync_remote_clone` fast-forwards only a clean tree, so an untracked
+marker reads as dirty work and pins the clone to whatever grok last committed.
+A responder running code older than `main` is the failure this prevents.
+
 Claude analyze-only remains laptop-only: `com.radon.incident-responder`.
 It never pushes.
 
