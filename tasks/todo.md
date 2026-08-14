@@ -1,3 +1,23 @@
+# Task: Correlation risk budget banner layout (2026-08-14)
+
+## Dependency graph
+
+- T1 depends_on: [] - Failing tests: dedicated `.crb` layout, header row, ticker chips, CSS contract
+- T2 depends_on: [T1] - Rebuild banner markup + CSS (orphaned `.sx`/`.s-hd` after class-name revert)
+- T3 depends_on: [T2] - Focused vitest + Playwright modify-modal header alignment
+
+## Checklist
+
+- [x] T1 Red tests
+- [x] T2 Production fix
+- [x] T3 Verify
+
+## Review
+
+Root cause: CRB still used orphaned `.sx` / `.s-hd` / `.s-tt` / `.s-bd` aliases after the class-name revert, so the header stacked and the module had no padding. Rebuilt as a compact `.crb` module with a single-row header and ticker chips. Vitest 34/34 (`correlation-risk-banner*` + `order-risk-chokepoint`). Playwright chromium 1/1 `e2e/modify-order-correlation-risk.spec.ts` (header y-delta < 6px desktop+393, chips, Cancel/Modify present). Dark-theme modal screenshot inspected.
+
+---
+
 # Task: BPI as-of stale after close (2026-08-13)
 
 ## Dependency graph

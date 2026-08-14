@@ -70,4 +70,34 @@ describe("CorrelationRiskBanner", () => {
     );
     expect(screen.getByTestId("crb-insufficient-data").textContent).toContain("THIN");
   });
+
+  it("uses a dedicated compact module, not orphaned section aliases", () => {
+    render(
+      <CorrelationRiskBanner
+        report={report({ clusters: [BREACH], breaches: [BREACH] })}
+      />,
+    );
+    const banner = screen.getByTestId("correlation-risk-banner");
+    expect(banner.classList.contains("crb")).toBe(true);
+    expect(banner.classList.contains("sx")).toBe(false);
+    expect(banner.querySelector(".s-hd")).toBeNull();
+    expect(banner.querySelector(".s-tt")).toBeNull();
+    expect(banner.querySelector(".crb-header")).toBeTruthy();
+    expect(banner.querySelector(".crb-title")?.textContent).toMatch(/Correlation Risk Budget/);
+    expect(banner.querySelector(".crb-gate")?.textContent).toMatch(/GATE 3/);
+  });
+
+  it("renders measurement-unavailable as a Gate-3 info module", () => {
+    render(
+      <CorrelationRiskBanner
+        report={report({ insufficient_data: ["ADBE", "CBRS", "META"] })}
+        showUnavailable
+      />,
+    );
+    const banner = screen.getByTestId("correlation-risk-banner");
+    expect(banner.getAttribute("data-level")).toBe("info");
+    expect(banner.textContent).toMatch(/Gate 3: correlation measurement unavailable/);
+    const chips = Array.from(banner.querySelectorAll(".crb-ticker")).map((el) => el.textContent);
+    expect(chips).toEqual(["ADBE", "CBRS", "META"]);
+  });
 });
