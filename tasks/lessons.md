@@ -1,5 +1,10 @@
 # Lessons
 
+## 2026-08-14 — Act ticket must shrink or Confirm clips
+
+- `.act-region` is `overflow: hidden`. A `.act-ticket` of `flex: 0 0 auto` grows to the confirm summary + Gate 3 CRB and clips Place / Confirm. There is no scrollport.
+- Ticket must be `flex: 0 1 auto; min-height: 0; overflow-y: auto`. `min-height: 0` is required; flex `min-height: auto` refuses to shrink below content.
+
 ## 2026-08-13 — Name-ranking vol scanners live under Scanner, not Regime
 
 - `/indicator` defaults to a Regime chart tab. Cheap-wing IV ranking is a name scanner like LEAP and GARCH. Put it on `/scanner?mode=vol-cone`. Redirect `/regime/vol-cone`.
