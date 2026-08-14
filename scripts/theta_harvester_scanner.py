@@ -16,13 +16,14 @@ import json
 import math
 import os
 import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import CancelledError, ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from clients.uw_client import UWAPIError, UWClient, UWRateLimitError
+from utils.scan_coverage import coverage_block, should_persist_scan
 
 try:
     from db.scan_mirror import mirror_scan_snapshot  # type: ignore
@@ -48,6 +49,8 @@ TARGET_DELTA = 0.16
 NEAR_ZERO_DELTA = 0.10
 RISK_FREE_RATE = 0.045
 DEFAULT_MAX_WORKERS = 24
+# After this many consecutive UW 429s the rest of the universe will 429 too.
+RATE_LIMIT_ABORT = 8
 
 
 def _env_int(name: str, default: int, *, minimum: int = 1, maximum: int = 64) -> int:
@@ -502,6 +505,8 @@ def scan_ticker(
 
         try:
             current_iv, _iv_rank = _latest_iv(client.get_iv_rank(ticker))
+        except UWRateLimitError:
+            raise
         except Exception as exc:
             errors.append(f"iv_rank:{exc}")
             current_iv = None
@@ -510,6 +515,8 @@ def scan_ticker(
 
         try:
             contracts = client.get_option_contracts(ticker, exclude_zero_vol_chains=True, maybe_otm_only=True)
+        except UWRateLimitError:
+            raise
         except Exception as exc:
             errors.append(f"contracts:{exc}")
             return None
@@ -526,6 +533,8 @@ def scan_ticker(
                 client.get_greek_exposure_by_strike(ticker),
                 spot,
             )
+        except UWRateLimitError:
+            raise
         except Exception as exc:
             errors.append(f"gex:{exc}")
             dealer_support, net_gex, gex_flip = "UNKNOWN", None, None
@@ -658,6 +667,7 @@ def build_output(
     universe_count: int,
     requested_tickers: Optional[Sequence[str]] = None,
     params: Optional[Dict[str, Any]] = None,
+    coverage: Optional[Dict[str, int]] = None,
 ) -> Dict[str, Any]:
     sorted_results = sorted(results, key=lambda row: row.score, reverse=True)
     return {
@@ -670,6 +680,10 @@ def build_output(
         # the FastAPI cooldown so a different DTE/credit search never serves a
         # stale cached snapshot.
         "params": params or {"min_dte": MIN_DTE, "max_dte": MAX_DTE, "min_credit": 0.0},
+        "coverage": coverage or coverage_block(
+            tickers=universe_count, ok=len(sorted_results),
+            no_setup=0, rate_limited=0, errors=0,
+        ),
         "candidates_found": len(sorted_results),
         "theta_harvest_count": sum(1 for row in sorted_results if row.verdict == "THETA_HARVEST"),
         "results": [asdict(row) for row in sorted_results],
@@ -692,6 +706,11 @@ def scan_universe(
     print(f"Scanning {len(resolved)} tickers for theta harvest ({source})...", file=sys.stderr)
 
     results: List[ThetaCandidate] = []
+    ok = 0
+    no_setup = 0
+    rate_limited = 0
+    errors = 0
+    consecutive_rate_limits = 0
     with ThreadPoolExecutor(max_workers=max(1, max_workers)) as pool:
         futures = {
             pool.submit(
@@ -704,12 +723,31 @@ def scan_universe(
             ticker = futures[future]
             try:
                 row = future.result()
-            except UWRateLimitError:
-                print(f"  [{idx}/{len(resolved)}] {ticker} - SKIP (rate limited)", file=sys.stderr)
+            except CancelledError:
                 continue
+            except UWRateLimitError:
+                rate_limited += 1
+                consecutive_rate_limits += 1
+                print(f"  [{idx}/{len(resolved)}] {ticker} - SKIP (rate limited)", file=sys.stderr)
+                if consecutive_rate_limits >= RATE_LIMIT_ABORT:
+                    print(
+                        f"  aborting remaining tickers after {RATE_LIMIT_ABORT} consecutive UW rate limits",
+                        file=sys.stderr,
+                    )
+                    for pending in futures:
+                        pending.cancel()
+                continue
+            except Exception as exc:
+                errors += 1
+                consecutive_rate_limits = 0
+                print(f"  [{idx}/{len(resolved)}] {ticker} - ERROR ({exc})", file=sys.stderr)
+                continue
+            consecutive_rate_limits = 0
             if row is None:
+                no_setup += 1
                 print(f"  [{idx}/{len(resolved)}] {ticker} - NO SETUP", file=sys.stderr)
                 continue
+            ok += 1
             print(f"  [{idx}/{len(resolved)}] {ticker} - {row.verdict} ({row.score:.1f})", file=sys.stderr)
             results.append(row)
 
@@ -729,15 +767,32 @@ def scan_universe(
     return build_output(
         results, source, len(resolved), requested_tickers=resolved,
         params={"min_dte": min_dte, "max_dte": max_dte, "min_credit": min_credit},
+        coverage=coverage_block(
+            tickers=len(resolved), ok=ok, no_setup=no_setup,
+            rate_limited=rate_limited, errors=errors,
+        ),
     )
 
 
-def save_cache(payload: Dict[str, Any], path: Path = _CACHE_PATH) -> None:
+def _read_cache_file(path: Path) -> Optional[Dict[str, Any]]:
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def save_cache(payload: Dict[str, Any], path: Path = _CACHE_PATH) -> bool:
+    prior = _read_cache_file(path)
+    if not should_persist_scan(payload, prior):
+        print("Empty theta scan — preserving last good cache", file=sys.stderr)
+        return False
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(payload, indent=2))
     tmp.replace(path)
     mirror_scan_snapshot("theta-harvester", payload)
+    return True
 
 
 def main() -> None:

@@ -1,6 +1,7 @@
 """Regression tests for theta_harvester_scanner.py."""
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -467,6 +468,45 @@ def test_build_output_includes_serializable_earnings_field() -> None:
     import json
 
     json.dumps(payload)
+
+
+def test_scan_ticker_reraises_rate_limit_from_option_contracts() -> None:
+    class RateLimitedContracts(FakeUWClient):
+        def get_option_contracts(self, ticker: str, **_kwargs):
+            raise theta.UWRateLimitError("daily request limit")
+
+    with pytest.raises(theta.UWRateLimitError):
+        theta.scan_ticker("AAPL", client=RateLimitedContracts(), now=_NOW)
+
+
+def test_scan_universe_records_rate_limit_coverage(monkeypatch) -> None:
+    monkeypatch.setattr(theta, "resolve_tickers", lambda *_a, **_k: (["AAPL", "MSFT"], "explicit"))
+
+    def _rate_limited(_ticker, **_kwargs):
+        raise theta.UWRateLimitError("daily request limit")
+
+    monkeypatch.setattr(theta, "scan_ticker", _rate_limited)
+    payload = theta.scan_universe(["AAPL", "MSFT"], max_workers=2)
+    assert payload["candidates_found"] == 0
+    assert payload["coverage"]["rate_limited"] == 2
+    assert payload["coverage"]["completed"] == 0
+
+
+def test_save_cache_preserves_last_good_on_empty_scan(tmp_path, monkeypatch) -> None:
+    mirrored: list[object] = []
+    monkeypatch.setattr(theta, "mirror_scan_snapshot", lambda *a, **_k: mirrored.append(a))
+    path = tmp_path / "theta_harvester.json"
+    good = theta.build_output([_minimal_candidate()], "preset:ndx100", 102, requested_tickers=["AAPL"])
+    assert theta.save_cache(good, path) is True
+    empty = theta.build_output([], "preset:ndx100", 102, requested_tickers=["AAPL"])
+    empty["coverage"] = {
+        "tickers": 102, "ok": 0, "no_setup": 0, "rate_limited": 102, "errors": 0, "completed": 0,
+    }
+    assert theta.save_cache(empty, path) is False
+    stored = json.loads(path.read_text())
+    assert stored["candidates_found"] == 1
+    assert stored["results"][0]["ticker"] == "AAPL"
+    assert len(mirrored) == 1
 
 
 def test_slim_earnings_field_null_when_missing() -> None:

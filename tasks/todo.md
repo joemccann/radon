@@ -1,3 +1,25 @@
+# Task: Theta scanner serving empty NDX snapshot (2026-08-14)
+
+## Dependency graph
+
+- T1 depends_on: [] - Failing tests: empty scan must not clobber last good; GET serves last populated Turso row
+- T2 depends_on: [T1] - Coverage + refuse-empty persist; re-raise UW 429; GET picker + isDegraded
+- T3 depends_on: [T2] - Same persist/read gate on strength confirmation
+- T4 depends_on: [T3] - Focused pytest + vitest
+
+## Checklist
+
+- [x] T1 Red tests
+- [x] T2 Theta persist + GET
+- [x] T3 Strength persist + GET
+- [x] T4 Verify
+
+## Review
+
+UW daily cap burned at 15:45 UTC. Signals refresh then wrote empty 102/0 snapshots over the 15:30 row (59 theta / 61 strength). GET now skips coverage-failed empties and serves the last populated Turso row. Scanners refuse to persist an empty clobber. pytest 38+29, vitest 46.
+
+---
+
 # Task: P1 radon-portfolio-sync 502 at :00 (2026-08-14)
 
 ## Dependency graph

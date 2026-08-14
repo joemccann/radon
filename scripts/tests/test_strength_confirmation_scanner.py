@@ -49,6 +49,47 @@ def test_build_output_counts_confirmed_strength_only_when_all_groups_pass() -> N
     assert payload["results"][0]["ticker"] == "AAPL"
 
 
+def test_scan_ticker_reraises_rate_limit_from_ohlc() -> None:
+    class RateLimitedOhlc:
+        def get_stock_ohlc(self, ticker: str, candle_size: str = "1d"):
+            raise strength.UWRateLimitError("daily request limit")
+
+    with pytest.raises(strength.UWRateLimitError):
+        strength.scan_ticker("AAPL", client=RateLimitedOhlc())
+
+
+def test_save_cache_preserves_last_good_on_empty_scan(tmp_path, monkeypatch) -> None:
+    mirrored: list[object] = []
+    monkeypatch.setattr(strength, "mirror_scan_snapshot", lambda *a, **_k: mirrored.append(a))
+    path = tmp_path / "strength_confirmation.json"
+    good = strength.build_output(
+        [
+            strength.StrengthCandidate(
+                ticker="AAPL",
+                verdict="REAL_STRENGTH_CONFIRMED",
+                score=100,
+                groups_passed=7,
+                spot=100,
+                factors=[],
+                errors=[],
+            )
+        ],
+        "preset:ndx100",
+        102,
+        requested_tickers=["AAPL"],
+    )
+    assert strength.save_cache(good, path) is True
+    empty = strength.build_output([], "preset:ndx100", 102, requested_tickers=["AAPL"])
+    empty["coverage"] = {
+        "tickers": 102, "ok": 0, "no_setup": 0, "rate_limited": 102, "errors": 0, "completed": 0,
+    }
+    assert strength.save_cache(empty, path) is False
+    stored = json.loads(path.read_text())
+    assert stored["candidates_found"] == 1
+    assert stored["results"][0]["ticker"] == "AAPL"
+    assert len(mirrored) == 1
+
+
 def test_resolve_ndx100_uses_fallback_when_preset_is_structurally_corrupt(monkeypatch) -> None:
     import utils.presets as presets
 
