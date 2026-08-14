@@ -94,6 +94,8 @@ class TestPathConsistency:
         services = read_all_services(services_dir)
         env_paths = set()
         for name, content in services.items():
+            if name.startswith("radon-grok-page-responder"):
+                continue
             match = re.search(r"EnvironmentFile=(.+)", content)
             if match:
                 env_paths.add(match.group(1).strip())
@@ -102,12 +104,16 @@ class TestPathConsistency:
     def test_environment_file_path_matches_env_example_location(self, services_dir):
         services = read_all_services(services_dir)
         env_paths = set()
-        for content in services.values():
+        for name, content in services.items():
             match = re.search(r"EnvironmentFile=(.+)", content)
             if match:
-                env_paths.add(match.group(1).strip())
+                env_paths.add((name, match.group(1).strip()))
         expected = "/home/radon/radon-cloud/.env"
-        assert expected in env_paths, f"Expected {expected}, got {env_paths}"
+        stripped = "/home/radon/radon-page-responder.env"
+        values = {path for _, path in env_paths}
+        assert expected in values, f"Expected {expected}, got {values}"
+        responder = [path for name, path in env_paths if "grok-page-responder" in name]
+        assert responder == [stripped], f"responder env {responder}"
 
     def test_ib_gateway_working_directory_matches_docker_compose_location(self, services_dir):
         gateway = read_text(services_dir / "radon-ib-gateway.service")
@@ -129,7 +135,9 @@ class TestPathConsistency:
         services = read_all_services(services_dir)
         venv_paths = set()
         for name, content in services.items():
-            if "WorkingDirectory=/home/radon/radon" in content and "radon-cloud" not in content:
+            if re.search(r"WorkingDirectory=/home/radon/radon(?:/\S+)?$", content, re.M) \
+                    and "radon-page-responder" not in content \
+                    and "radon-cloud" not in content:
                 for match in re.finditer(r"(/home/radon/radon/\.venv\S*)", content):
                     venv_paths.add(
                         re.sub(r"/bin/\w+$", "", match.group(1))

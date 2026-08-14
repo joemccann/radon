@@ -1,13 +1,14 @@
-"""Laptop poller: delivered iPhone P1 pages -> headless Grok diagnose+fix.
+"""P1 page poller: delivered iPhone alerts -> headless Grok diagnose+fix.
 
-launchd ``com.radon.grok-page-responder`` (30s) reads pending rows from
-``watchdog_pages`` (written by the Hetzner watchdog at Pushover-accept
-time) and runs ``grok --prompt-file`` with ``--always-approve``.
+Primary: VPS ``radon-grok-page-responder.timer`` against the dedicated
+clone ``/home/radon/radon-page-responder``. Laptop launchd is off.
 
 Kill switches (unset = on):
   GROK_PAGE_RESPONDER=0   do not claim or launch
   GROK_PAGE_AUTOSHIP=0    diagnose only; no edits/commits
   GROK_PAGE_AUTOPUSH=0    commit locally; do not push
+  GROK_PAGE_NO_DOTENV=1   do not load repo .env files (VPS required)
+  GROK_PAGE_SYNC_REMOTE=1 fetch+ff origin/main when the tree is clean
 """
 
 from __future__ import annotations
@@ -26,13 +27,31 @@ if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
 _PROJECT_DIR = _SCRIPTS_DIR.parent
-try:
-    from dotenv import load_dotenv  # type: ignore[import-untyped]
-    load_dotenv(_PROJECT_DIR / ".env")
-    load_dotenv(_PROJECT_DIR / ".env.ib-mode")
-    load_dotenv(_PROJECT_DIR / "web" / ".env")
-except Exception:
-    pass
+
+
+def _flag(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def load_repo_dotenv(repo_root: Path | None = None) -> bool:
+    """Load sibling .env files unless the VPS stripped-env flag is set."""
+    if _flag("GROK_PAGE_NO_DOTENV", False):
+        return False
+    root = repo_root or _PROJECT_DIR
+    try:
+        from dotenv import load_dotenv  # type: ignore[import-untyped]
+    except Exception:
+        return False
+    load_dotenv(root / ".env")
+    load_dotenv(root / ".env.ib-mode")
+    load_dotenv(root / "web" / ".env")
+    return True
+
+
+load_repo_dotenv()
 
 from watchdog import notify
 from watchdog import pages as pages_mod
@@ -44,13 +63,6 @@ CACHE_REL = Path("data") / "cache" / "grok_pages"
 LOCK_NAME = ".responder.lock"
 
 GrokRunner = Callable[..., object]
-
-
-def _flag(name: str, default: bool) -> bool:
-    raw = os.environ.get(name)
-    if raw is None or raw.strip() == "":
-        return default
-    return raw.strip().lower() not in {"0", "false", "no", "off"}
 
 
 def responder_enabled() -> bool:
@@ -67,6 +79,33 @@ def autopush_enabled() -> bool:
 
 def grok_bin() -> str:
     return os.environ.get("GROK_BIN") or "grok"
+
+
+def sync_remote_clone(repo_root: Path) -> str:
+    """Fast-forward a clean dedicated clone. Never clobber dirty work."""
+    if not _flag("GROK_PAGE_SYNC_REMOTE", False):
+        return "disabled"
+    porcelain = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=repo_root, capture_output=True, text=True, timeout=30,
+    )
+    if porcelain.returncode != 0:
+        return "status-failed"
+    if (porcelain.stdout or "").strip():
+        return "dirty"
+    fetch = subprocess.run(
+        ["git", "fetch", "origin", "main"],
+        cwd=repo_root, capture_output=True, text=True, timeout=60,
+    )
+    if fetch.returncode != 0:
+        return "fetch-failed"
+    merged = subprocess.run(
+        ["git", "merge", "--ff-only", "origin/main"],
+        cwd=repo_root, capture_output=True, text=True, timeout=30,
+    )
+    if merged.returncode != 0:
+        return "ff-failed"
+    return "synced"
 
 
 def cache_dir(repo_root: Path) -> Path:
@@ -233,6 +272,9 @@ def run_cycle(
 
     runner = grok_runner or _default_grok_runner
     try:
+        sync_state = sync_remote_clone(repo_root)
+        if sync_state not in {"disabled", "synced", "dirty"}:
+            print(json.dumps({"at": now.isoformat(), "sync": sync_state}), file=sys.stderr)
         actionable = pages_mod.list_actionable_pages(now=now)
         if not actionable:
             print(json.dumps({"at": now.isoformat(), "pending": 0}))

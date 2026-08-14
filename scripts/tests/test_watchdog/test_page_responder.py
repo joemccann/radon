@@ -13,8 +13,10 @@ from grok_page_responder import (
     build_followup_payload,
     build_grok_command,
     build_prompt,
+    load_repo_dotenv,
     parse_grok_result,
     run_cycle,
+    sync_remote_clone,
 )
 from watchdog.check import CheckOutcome
 from watchdog.pages import (
@@ -310,6 +312,25 @@ class TestResponder:
         assert db_conn.execute(
             "SELECT status, attempts FROM watchdog_pages WHERE page_id=?", (pid,)
         ).fetchone() == ("skipped", 3)
+
+    def test_no_dotenv_flag_skips_repo_env(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("GROK_PAGE_NO_DOTENV", "1")
+        (tmp_path / ".env").write_text("PUSHOVER_USER=should-not-load\n")
+        assert load_repo_dotenv(tmp_path) is False
+
+    def test_sync_skips_dirty_tree(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("GROK_PAGE_SYNC_REMOTE", "1")
+        with patch("grok_page_responder.subprocess.run") as run:
+            run.return_value = SimpleNamespace(returncode=0, stdout=" M scripts/x.py\n")
+            assert sync_remote_clone(tmp_path) == "dirty"
+            assert run.call_count == 1
+
+    def test_sync_fast_forwards_clean_tree(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("GROK_PAGE_SYNC_REMOTE", "1")
+        with patch("grok_page_responder.subprocess.run") as run:
+            run.return_value = SimpleNamespace(returncode=0, stdout="")
+            assert sync_remote_clone(tmp_path) == "synced"
+            assert run.call_count == 3
 
     def test_lock_skips_overlapping_cycle(self, db_conn, tmp_path, monkeypatch):
         monkeypatch.delenv("GROK_PAGE_RESPONDER", raising=False)

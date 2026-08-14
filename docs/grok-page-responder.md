@@ -3,10 +3,11 @@
 Operator loop for iPhone P1 service pages. Full playbook:
 [`incident-runbook.md`](incident-runbook.md). Brand voice: no hype.
 
-The Mac must be awake. This is not a Hetzner systemd unit. Cloud options
-(dedicated VPS worktree vs Cursor Cloud Agents) are in
-[`show-me-grok-cloud.html`](show-me-grok-cloud.html). Do not run the
-fixer against `/home/radon/radon`.
+Primary host is Hetzner: `radon-grok-page-responder.timer` against
+`/home/radon/radon-page-responder`. Laptop launchd is off. Do not run
+the fixer against `/home/radon/radon`. Cloud options that were rejected
+(Cursor Cloud Agents, weekend clone) are in
+[`show-me-grok-cloud.html`](show-me-grok-cloud.html).
 
 ## What you get on the phone
 
@@ -24,7 +25,8 @@ Never send the last two as P1. That would enqueue another Grok ticket.
 watchdog P1 2xx
   ├─ Pushover emergency          → iPhone
   └─ INSERT watchdog_pages       → Turso (one row per service/kind/UTC hour)
-laptop launchd 30s
+VPS timer (30s after last cycle)
+  ff-only origin/main if the clone is clean
   claim pending
   grok --prompt-file --always-approve
     stand_down | ops_only | code_fix
@@ -40,17 +42,30 @@ Stand down (no ship): `ib-gateway-grouped`, IB 2FA, IB unreachable, Turso
 platform outage, CI deploy already in flight, expected off-hours lag,
 anonymous 401/403, unknown probes, ops-only (secret/host/restart).
 
-## Install (laptop)
+## Install (VPS)
+
+As root:
 
 ```bash
-bash scripts/setup_grok_page_responder.sh
+bash cloud/scripts/setup-grok-page-responder.sh
+sudo -u radon -H /home/radon/.local/bin/grok login --device-auth
+# approve the code on your phone
+bash cloud/scripts/bootstrap-control-plane.sh   # installs the unit
+systemctl enable --now radon-grok-page-responder.timer
 ```
 
-Job: `com.radon.grok-page-responder`. Logs:
-`/tmp/radon-grok-page-responder.log` and `.err`.
+Stripped env: `/home/radon/radon-page-responder.env` (Turso + Pushover
+only). Auth: `/home/radon/.grok/auth.json` via device-code.
 
-Claude analyze-only remains separate: `com.radon.incident-responder`
-(`scripts/incident_responder.py`, 10 min). It never pushes.
+Claude analyze-only remains laptop-only: `com.radon.incident-responder`.
+It never pushes.
+
+## Verify
+
+```bash
+systemctl is-active radon-grok-page-responder.timer
+journalctl -u radon-grok-page-responder -n 20 --no-pager
+```
 
 ## Kill switches
 
@@ -77,17 +92,10 @@ Stale claims older than 2h are reclaimable. Overlapping cycles skip on
 | `scripts/watchdog/pages.py` | Sanitize, enqueue, claim, complete |
 | `scripts/watchdog/notify.py` | After P1 2xx |
 | `scripts/watchdog/grouping.py` | After grouped IB P1 2xx (creds required) |
-| `scripts/grok_page_responder.py` | Laptop poller |
+| `scripts/grok_page_responder.py` | Poller |
+| `cloud/services/radon-grok-page-responder.*` | VPS timer |
+| `cloud/scripts/setup-grok-page-responder.sh` | Clone + stripped env + grok CLI |
 | `scripts/deploy_notify.py` | Live-gate Pushover |
 | `cloud/scripts/deploy.sh` | `notify_release_live` after green marker |
-| `config/com.radon.grok-page-responder.plist` | launchd |
 
-## Verify
-
-```bash
-launchctl print "gui/$(id -u)/com.radon.grok-page-responder" | grep -E 'state|runs|last exit'
-tail -n 5 /tmp/radon-grok-page-responder.log
-```
-
-A quiet healthy cycle prints `{"pending": 0}`. `state = not running`
-between 30s ticks is idle, not down.
+A quiet healthy cycle prints `{"pending": 0}`.
