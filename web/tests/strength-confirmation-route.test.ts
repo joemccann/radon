@@ -108,6 +108,54 @@ describe("GET /api/scanner/strength", () => {
     expect(body.cache_meta.is_stale).toBe(true);
   });
 
+  it("serves the last populated Turso snapshot when a later quota scan wrote zero rows", async () => {
+    mocks.readFile.mockResolvedValue(
+      JSON.stringify({
+        ...strengthPayload,
+        scan_time: "2026-08-14T17:15:21.717198+00:00",
+        candidates_found: 0,
+        confirmed_strength_count: 0,
+        tickers_scanned: 102,
+        results: [],
+      }),
+    );
+    mocks.getDb.mockReturnValue(
+      dbReturning([
+        {
+          scan_time: "2026-08-14T17:15:21.717198+00:00",
+          payload: JSON.stringify({
+            ...strengthPayload,
+            scan_time: "2026-08-14T17:15:21.717198+00:00",
+            candidates_found: 0,
+            confirmed_strength_count: 0,
+            tickers_scanned: 102,
+            results: [],
+          }),
+        },
+        {
+          scan_time: "2026-08-14T15:30:13.599263+00:00",
+          payload: JSON.stringify({
+            ...strengthPayload,
+            scan_time: "2026-08-14T15:30:13.599263+00:00",
+            candidates_found: 61,
+            confirmed_strength_count: 12,
+            tickers_scanned: 102,
+            results: [{ ...strengthPayload.results[0], ticker: "AVGO" }],
+          }),
+        },
+      ]),
+    );
+    const { GET } = await import("../app/api/scanner/strength/route");
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.results[0].ticker).toBe("AVGO");
+    expect(body.candidates_found).toBe(61);
+    expect(body.scan_time).toBe("2026-08-14T15:30:13.599263+00:00");
+  });
+
   it("prefers the fresher Turso snapshot over a staler host-local disk cache", async () => {
     // Disk has the old NDX scan (AAPL @ 2026-06-24); Turso carries a newer
     // single-ticker scan (NVDA @ 2026-06-25). Prod split-brain: the scan ran on

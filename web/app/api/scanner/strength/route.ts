@@ -8,6 +8,7 @@ import { getDb } from "@/lib/db";
 import { cachedRead } from "@/lib/dbCache";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
+import { isCoverageFailedScan, pickUsableScanSnapshot } from "@/lib/scanCoverage";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -79,14 +80,16 @@ export async function readStrengthConfirmationCache(): Promise<Record<string, un
 async function readStrengthFromDb(): Promise<TimestampedRead<Record<string, unknown>> | null> {
   const db = getDb();
   const result = await db.execute({
-    sql: `SELECT scan_time, payload FROM strength_confirmation_snapshots ORDER BY scan_time DESC LIMIT 1`,
+    sql: `SELECT scan_time, payload FROM strength_confirmation_snapshots ORDER BY scan_time DESC LIMIT 30`,
     args: [],
   });
-  if (result.rows.length === 0) return null;
-  const row = result.rows[0] as unknown as { scan_time: string; payload: string };
+  const picked = pickUsableScanSnapshot(
+    result.rows as unknown as Array<{ scan_time: string; payload: string }>,
+  );
+  if (picked == null) return null;
   return {
-    data: JSON.parse(row.payload) as Record<string, unknown>,
-    timestampMs: contentTimestampMs(row.scan_time),
+    data: picked.data,
+    timestampMs: contentTimestampMs(picked.scanTime),
   };
 }
 
@@ -108,6 +111,7 @@ export async function GET(): Promise<Response> {
       fromDisk: readStrengthFromDisk,
       maxAgeMs: STALE_THRESHOLD_SECONDS * 1000,
       label: "strength-confirmation",
+      isDegraded: (data) => isCoverageFailedScan(data),
     }),
   );
   if (result.ok) {

@@ -10,6 +10,7 @@ import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbF
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 import { radonFetch } from "@/lib/radonApi";
 import { backfillThetaEarningsPayload } from "@/lib/thetaEarningsBackfill";
+import { isCoverageFailedScan, pickUsableScanSnapshot } from "@/lib/scanCoverage";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -28,6 +29,16 @@ type CacheMeta = {
   is_stale: boolean;
   stale_threshold_seconds: number;
 };
+
+function buildResultCacheMeta(timestampMs: number | null, fresh: boolean): CacheMeta {
+  const ageSeconds = timestampMs == null ? null : Math.max(0, Math.round((Date.now() - timestampMs) / 1000));
+  return {
+    last_refresh: timestampMs == null ? null : new Date(timestampMs).toISOString(),
+    age_seconds: ageSeconds,
+    is_stale: !fresh,
+    stale_threshold_seconds: STALE_THRESHOLD_SECONDS,
+  };
+}
 
 function buildCacheMeta(filePath: string): CacheMeta {
   try {
@@ -73,14 +84,16 @@ export async function readThetaHarvesterCache(): Promise<Record<string, unknown>
 async function readThetaFromDb(): Promise<TimestampedRead<Record<string, unknown>> | null> {
   const db = getDb();
   const result = await db.execute({
-    sql: `SELECT scan_time, payload FROM theta_harvester_snapshots ORDER BY scan_time DESC LIMIT 1`,
+    sql: `SELECT scan_time, payload FROM theta_harvester_snapshots ORDER BY scan_time DESC LIMIT 30`,
     args: [],
   });
-  if (result.rows.length === 0) return null;
-  const row = result.rows[0] as unknown as { scan_time: string; payload: string };
+  const picked = pickUsableScanSnapshot(
+    result.rows as unknown as Array<{ scan_time: string; payload: string }>,
+  );
+  if (picked == null) return null;
   return {
-    data: JSON.parse(row.payload) as Record<string, unknown>,
-    timestampMs: contentTimestampMs(row.scan_time),
+    data: picked.data,
+    timestampMs: contentTimestampMs(picked.scanTime),
   };
 }
 
@@ -103,7 +116,7 @@ export async function GET(): Promise<Response> {
   const access = await requireRouteAccess(undefined, { rate: { key: "scanner/theta:route", limit: 20, windowMs: 60_000 } });
   if (!access.ok) return access.response;
   const requestId = getRequestId();
-  const cache_meta = buildCacheMeta(CACHE_PATH);
+  const diskCacheMeta = buildCacheMeta(CACHE_PATH);
   // Fresher of the shared Turso snapshot and the host-local disk JSON.
   const result = await cachedRead("scanner:theta", READ_CACHE_TTL_MS, () =>
     dbFirstRead({
@@ -111,9 +124,13 @@ export async function GET(): Promise<Response> {
       fromDisk: readThetaFromDisk,
       maxAgeMs: STALE_THRESHOLD_SECONDS * 1000,
       label: "theta-harvester",
+      isDegraded: (data) => isCoverageFailedScan(data),
     }),
   );
   if (result.ok) {
+    const cache_meta = result.source === "disk"
+      ? diskCacheMeta
+      : buildResultCacheMeta(result.timestampMs, result.fresh);
     // Pre-feature snapshots lack the `earnings` key. Backfill from the
     // standalone earnings service so the column is not blank until the next
     // full NDX rescan. Fail-open: backfill errors leave the payload unchanged.
@@ -127,7 +144,7 @@ export async function GET(): Promise<Response> {
     );
   }
   return setNoStoreResponseHeaders(
-    NextResponse.json({ ...emptyThetaHarvesterPayload(), cache_meta }),
+    NextResponse.json({ ...emptyThetaHarvesterPayload(), cache_meta: diskCacheMeta }),
     requestId,
   );
 }

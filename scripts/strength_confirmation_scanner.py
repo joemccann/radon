@@ -16,13 +16,14 @@ import json
 import math
 import os
 import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import CancelledError, ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from clients.uw_client import UWClient, UWRateLimitError
+from utils.scan_coverage import coverage_block, should_persist_scan
 
 try:
     from db.scan_mirror import mirror_scan_snapshot  # type: ignore
@@ -44,6 +45,7 @@ except Exception:
 
 TRADING_DAYS = 252
 DEFAULT_MAX_WORKERS = 24
+RATE_LIMIT_ABORT = 8
 
 
 def _env_int(name: str, default: int, *, minimum: int = 1, maximum: int = 64) -> int:
@@ -775,6 +777,8 @@ def scan_ticker(
     try:
         try:
             prices = _prices_from_ohlc(client.get_stock_ohlc(ticker, candle_size="1d"))
+        except UWRateLimitError:
+            raise
         except Exception as exc:
             errors.append(f"ohlc:{exc}")
             return None
@@ -786,6 +790,8 @@ def scan_ticker(
         def fetch(label: str, func, default: Any) -> Any:
             try:
                 return func()
+            except UWRateLimitError:
+                raise
             except Exception as exc:  # noqa: BLE001 - scanner degrades by factor
                 errors.append(f"{label}:{exc}")
                 return default
@@ -846,6 +852,7 @@ def build_output(
     source: str,
     universe_count: int,
     requested_tickers: Optional[Sequence[str]] = None,
+    coverage: Optional[Dict[str, int]] = None,
 ) -> Dict[str, Any]:
     sorted_results = sorted(results, key=lambda row: (row.groups_passed, row.score), reverse=True)
     return {
@@ -854,6 +861,10 @@ def build_output(
         "universe": source,
         "requested_tickers": list(requested_tickers or []),
         "tickers_scanned": universe_count,
+        "coverage": coverage or coverage_block(
+            tickers=universe_count, ok=len(sorted_results),
+            no_setup=0, rate_limited=0, errors=0,
+        ),
         "candidates_found": len(sorted_results),
         "confirmed_strength_count": sum(1 for row in sorted_results if row.verdict == "REAL_STRENGTH_CONFIRMED"),
         "results": [asdict(row) for row in sorted_results],
@@ -880,6 +891,11 @@ def scan_universe(
         context_client.close()
 
     results: List[StrengthCandidate] = []
+    ok = 0
+    no_setup = 0
+    rate_limited = 0
+    errors = 0
+    consecutive_rate_limits = 0
     with ThreadPoolExecutor(max_workers=max(1, max_workers)) as pool:
         futures = {
             pool.submit(
@@ -896,23 +912,61 @@ def scan_universe(
             ticker = futures[future]
             try:
                 row = future.result()
-            except UWRateLimitError:
-                print(f"  [{idx}/{len(resolved)}] {ticker} - SKIP (rate limited)", file=sys.stderr)
+            except CancelledError:
                 continue
+            except UWRateLimitError:
+                rate_limited += 1
+                consecutive_rate_limits += 1
+                print(f"  [{idx}/{len(resolved)}] {ticker} - SKIP (rate limited)", file=sys.stderr)
+                if consecutive_rate_limits >= RATE_LIMIT_ABORT:
+                    print(
+                        f"  aborting remaining tickers after {RATE_LIMIT_ABORT} consecutive UW rate limits",
+                        file=sys.stderr,
+                    )
+                    for pending in futures:
+                        pending.cancel()
+                continue
+            except Exception as exc:
+                errors += 1
+                consecutive_rate_limits = 0
+                print(f"  [{idx}/{len(resolved)}] {ticker} - ERROR ({exc})", file=sys.stderr)
+                continue
+            consecutive_rate_limits = 0
             if row is None:
+                no_setup += 1
                 print(f"  [{idx}/{len(resolved)}] {ticker} - NO DATA", file=sys.stderr)
                 continue
+            ok += 1
             print(f"  [{idx}/{len(resolved)}] {ticker} - {row.verdict} ({row.groups_passed}/7)", file=sys.stderr)
             results.append(row)
-    return build_output(results, source, len(resolved), requested_tickers=resolved)
+    return build_output(
+        results, source, len(resolved), requested_tickers=resolved,
+        coverage=coverage_block(
+            tickers=len(resolved), ok=ok, no_setup=no_setup,
+            rate_limited=rate_limited, errors=errors,
+        ),
+    )
 
 
-def save_cache(payload: Dict[str, Any], path: Path = _CACHE_PATH) -> None:
+def _read_cache_file(path: Path) -> Optional[Dict[str, Any]]:
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def save_cache(payload: Dict[str, Any], path: Path = _CACHE_PATH) -> bool:
+    prior = _read_cache_file(path)
+    if not should_persist_scan(payload, prior):
+        print("Empty strength scan — preserving last good cache", file=sys.stderr)
+        return False
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(payload, indent=2))
     tmp.replace(path)
     mirror_scan_snapshot("strength-confirmation", payload)
+    return True
 
 
 def main() -> None:

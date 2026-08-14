@@ -121,6 +121,54 @@ describe("GET /api/scanner/theta", () => {
     expect(body.cache_meta.is_stale).toBe(true);
   });
 
+  it("serves the last populated Turso snapshot when a later quota scan wrote zero rows", async () => {
+    mocks.readFile.mockResolvedValue(
+      JSON.stringify({
+        ...thetaPayload,
+        scan_time: "2026-08-14T17:15:18.159060+00:00",
+        candidates_found: 0,
+        theta_harvest_count: 0,
+        tickers_scanned: 102,
+        results: [],
+      }),
+    );
+    mocks.getDb.mockReturnValue(
+      dbReturning([
+        {
+          scan_time: "2026-08-14T17:15:18.159060+00:00",
+          payload: JSON.stringify({
+            ...thetaPayload,
+            scan_time: "2026-08-14T17:15:18.159060+00:00",
+            candidates_found: 0,
+            theta_harvest_count: 0,
+            tickers_scanned: 102,
+            results: [],
+          }),
+        },
+        {
+          scan_time: "2026-08-14T15:30:09.987292+00:00",
+          payload: JSON.stringify({
+            ...thetaPayload,
+            scan_time: "2026-08-14T15:30:09.987292+00:00",
+            candidates_found: 59,
+            theta_harvest_count: 28,
+            tickers_scanned: 102,
+            results: [{ ...thetaPayload.results[0], ticker: "TXN" }],
+          }),
+        },
+      ]),
+    );
+    const { GET } = await import("../app/api/scanner/theta/route");
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.results[0].ticker).toBe("TXN");
+    expect(body.candidates_found).toBe(59);
+    expect(body.scan_time).toBe("2026-08-14T15:30:09.987292+00:00");
+  });
+
   it("prefers the fresher Turso snapshot over a staler host-local disk cache", async () => {
     // Disk has the old NDX scan (AAPL @ 2026-06-24); Turso carries a newer
     // single-ticker scan (NVDA @ 2026-06-25). This is the prod split-brain:
