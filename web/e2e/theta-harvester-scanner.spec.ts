@@ -76,7 +76,18 @@ const thetaPayload = {
   ],
 };
 
-async function stubApis(page: Page, scanBodies: unknown[] = []) {
+function harvestRow(ticker: string, score: number, setup = "TRUE_THETA") {
+  const base = thetaPayload.results[0];
+  return {
+    ...base,
+    ticker,
+    score,
+    setup,
+    structure: { ...base.structure },
+  };
+}
+
+async function stubApis(page: Page, scanBodies: unknown[] = [], payload: typeof thetaPayload = thetaPayload) {
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -84,12 +95,12 @@ async function stubApis(page: Page, scanBodies: unknown[] = []) {
 
     if (path === "/api/scanner/theta/scan") {
       scanBodies.push(request.postDataJSON());
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(thetaPayload) });
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(payload) });
       return;
     }
 
     if (path === "/api/scanner/theta") {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(thetaPayload) });
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(payload) });
       return;
     }
 
@@ -216,5 +227,34 @@ test.describe("theta harvester scanner", () => {
     expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);
     expect(geometry.tableDisplay).toBe("none");
     expect(geometry.cardCount).toBe(1);
+  });
+
+  test("proposed action alternatives show ticker and formatted structure, not [object Object]", async ({
+    page,
+  }) => {
+    const payload = {
+      ...thetaPayload,
+      requested_tickers: ["AAPL", "AMAT", "MSTR", "TTWO"],
+      tickers_scanned: 4,
+      candidates_found: 4,
+      theta_harvest_count: 4,
+      results: [
+        harvestRow("AAPL", 97),
+        harvestRow("AMAT", 91),
+        harvestRow("MSTR", 88),
+        harvestRow("TTWO", 87),
+      ],
+    };
+    await stubApis(page, [], payload);
+
+    await page.goto("/scanner?mode=theta");
+
+    const card = page.getByRole("region", { name: "Proposed action" });
+    await expect(card).toBeVisible();
+    await expect(card).toContainText("ALTERNATIVES");
+    await expect(card.getByText("AMAT SHORT 95P / 105C")).toBeVisible();
+    await expect(card.getByText("MSTR SHORT 95P / 105C")).toBeVisible();
+    await expect(card.getByText("TTWO SHORT 95P / 105C")).toBeVisible();
+    await expect(card).not.toContainText("[object Object]");
   });
 });

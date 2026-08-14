@@ -13,6 +13,7 @@
  */
 
 import type { ProposalAlternative } from "@/components/agent";
+import { thetaStructLabel } from "@/lib/scannerHero";
 import type { ThetaHarvesterResult } from "@/lib/types";
 
 export type ScannerProposal = {
@@ -41,13 +42,13 @@ function statementFor(result: ThetaHarvesterResult): string {
   const setup = result.setup?.trim();
   if (setup) return setup;
   const edge = Number.isFinite(result.iv_rv_edge) ? result.iv_rv_edge.toFixed(1) : "---";
-  return `${result.ticker} ${result.structure} — IV/RV edge ${edge}, range score ${result.range_score}.`;
+  return `${result.ticker} ${thetaStructLabel(result)} — IV/RV edge ${edge}, range score ${result.range_score}.`;
 }
 
 function alternativesFrom(rest: ThetaHarvesterResult[]): ProposalAlternative[] {
   return rest.slice(0, MAX_ALTERNATIVES).map((row) => ({
     id: row.ticker,
-    label: `${row.ticker} ${row.structure}`,
+    label: `${row.ticker} ${thetaStructLabel(row)}`,
     meta: row.verdict === ACTIONABLE_VERDICT ? `SCORE ${Math.round(row.score)}` : row.verdict,
   }));
 }
