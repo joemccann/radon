@@ -717,6 +717,226 @@ class TestFetchHealthHelper:
         assert health.get("auth_state") == "unknown"
 
 
+def _fired(
+    service: str,
+    *,
+    now: datetime,
+    kind: str = "stale",
+    message: str | None = None,
+    last_error: str | dict | None = None,
+    severity: str = "P1",
+):
+    from watchdog.check import CheckOutcome
+
+    if message is None:
+        message = (
+            f"in error state: {last_error}"
+            if kind == "error"
+            else f"{service} silent for 23m (window 10m) — market open"
+        )
+    blob = last_error
+    if isinstance(last_error, dict):
+        blob = json.dumps(last_error)
+    return CheckOutcome(
+        service=service,
+        kind=kind,
+        status=kind,
+        severity=severity,
+        fired=True,
+        message=message,
+        consecutive_failures=2,
+        now=now,
+        last_error=blob,
+    )
+
+
+class TestUnreachableCopyAndNonIbDiscriminator:
+    """2026-08-13 page: title IB Gateway unreachable + body that told
+    the operator to approve 2FA, naming orders-sync (latched execution
+    fact conflict) and position-reconcile. Unreachable is not a 2FA
+    prompt, and a writer-integrity error is not an IB outage.
+    """
+
+    def test_unreachable_grouped_page_does_not_ask_for_phone_approval(
+        self, db_conn, monkeypatch, fresh_now
+    ):
+        from watchdog import grouping
+
+        monkeypatch.setenv("PUSHOVER_USER", "u")
+        monkeypatch.setenv("PUSHOVER_TOKEN", "t")
+
+        http_calls = []
+
+        def fake_http_post(url, payload, headers=None):
+            http_calls.append((url, payload))
+            return (200, b"")
+
+        outcomes = [
+            _fired("vcg-scan", now=fresh_now),
+            _fired("cri-scan", now=fresh_now),
+        ]
+        with patch("watchdog.notify._http_post", side_effect=fake_http_post), \
+             patch("watchdog.grouping.fetch_health", return_value={"auth_state": "unreachable"}), \
+             patch("watchdog.grouping._api_recently_restarted", return_value=False):
+            grouping.dispatch_with_grouping(outcomes=outcomes, now=fresh_now)
+
+        push_calls = _push_calls(http_calls)
+        assert len(push_calls) == 1
+        title = push_calls[0][1]["title"]
+        body = push_calls[0][1]["message"]
+        assert title == "radon watchdog: IB Gateway unreachable"
+        assert "Approve on phone" not in body
+        assert "reset-backoff" not in body
+        assert "—" not in body
+        assert "radon restart" in body
+        assert "unreachable" in body
+        assert "vcg-scan" in body and "cri-scan" in body
+
+    def test_execution_fact_conflict_does_not_join_unreachable_group(
+        self, db_conn, monkeypatch, fresh_now
+    ):
+        """Production topology: orders-sync latched a writer-integrity
+        error, position-reconcile also fired, /health said unreachable.
+        Grouping those as an IB-outage P1 sold a non-IB error as 2FA.
+        """
+        from watchdog import grouping
+
+        monkeypatch.setenv("PUSHOVER_USER", "u")
+        monkeypatch.setenv("PUSHOVER_TOKEN", "t")
+
+        http_calls = []
+
+        def fake_http_post(url, payload, headers=None):
+            http_calls.append((url, payload))
+            return (200, b"")
+
+        outcomes = [
+            _fired(
+                "orders-sync",
+                now=fresh_now,
+                kind="error",
+                severity="P2",
+                message="in error state: execution fact conflict for U1:exec-1:1",
+                last_error={"message": "execution fact conflict for U1:exec-1:1"},
+            ),
+            _fired("position-reconcile", now=fresh_now),
+        ]
+        with patch("watchdog.notify._http_post", side_effect=fake_http_post), \
+             patch("watchdog.grouping.fetch_health", return_value={"auth_state": "unreachable"}), \
+             patch("watchdog.grouping._api_recently_restarted", return_value=False):
+            grouping.dispatch_with_grouping(outcomes=outcomes, now=fresh_now)
+
+        push_calls = _push_calls(http_calls)
+        grouped = [c for c in push_calls if "IB Gateway" in c[1].get("title", "")]
+        assert grouped == [], (
+            "a latched execution fact conflict must not be absorbed into "
+            f"an IB-outage page; got {[_ungroup_messages(grouped)]}"
+        )
+        per_service = [c[1].get("title", "") for c in push_calls]
+        assert any("position-reconcile" in title for title in per_service), (
+            "the remaining IB-dependent stale must fall through per-service"
+        )
+        assert not any("orders-sync" in title for title in per_service), (
+            "orders-sync is P2 error here; it must not ride a P1 IB page"
+        )
+
+    def test_stale_row_with_latched_non_ib_error_does_not_join_group(
+        self, db_conn, monkeypatch, fresh_now
+    ):
+        """Intraday stale fire + leftover last_error must still be
+        classified from the latched blob, not from requires_ib alone.
+        """
+        from watchdog import check, grouping
+
+        monkeypatch.setenv("PUSHOVER_USER", "u")
+        monkeypatch.setenv("PUSHOVER_TOKEN", "t")
+
+        _seed(
+            db_conn,
+            "orders-sync",
+            "ok",
+            fresh_now - timedelta(minutes=60),
+            error={"message": "execution fact conflict for U1:exec-1:1"},
+        )
+        _seed(
+            db_conn,
+            "position-reconcile",
+            "ok",
+            fresh_now - timedelta(minutes=60),
+        )
+        for other in ("vcg-scan", "cri-scan", "portfolio-sync"):
+            _seed(db_conn, other, "ok", fresh_now - timedelta(minutes=2))
+
+        for tick in (fresh_now, fresh_now + timedelta(minutes=5)):
+            check.check_bucket(bucket="intraday", now=tick)
+        report = check.check_bucket(bucket="intraday", now=fresh_now + timedelta(minutes=10))
+        fired = [o for o in report.outcomes if o.fired]
+        assert {o.service for o in fired} == {"orders-sync", "position-reconcile"}
+
+        http_calls = []
+
+        def fake_http_post(url, payload, headers=None):
+            http_calls.append((url, payload))
+            return (200, b"")
+
+        with patch("watchdog.notify._http_post", side_effect=fake_http_post), \
+             patch("watchdog.grouping.fetch_health", return_value={"auth_state": "unreachable"}), \
+             patch("watchdog.grouping._api_recently_restarted", return_value=False):
+            grouping.dispatch_with_grouping(
+                outcomes=fired, now=fresh_now + timedelta(minutes=10)
+            )
+
+        push_calls = _push_calls(http_calls)
+        grouped = [c for c in push_calls if "IB Gateway" in c[1].get("title", "")]
+        assert grouped == [], (
+            "latched non-IB last_error on a stale IB-dependent row must "
+            f"not join the grouped page; got {_ungroup_messages(push_calls)}"
+        )
+
+    def test_ib_connection_errors_still_group_when_unreachable(
+        self, db_conn, monkeypatch, fresh_now
+    ):
+        from watchdog import grouping
+
+        monkeypatch.setenv("PUSHOVER_USER", "u")
+        monkeypatch.setenv("PUSHOVER_TOKEN", "t")
+
+        http_calls = []
+
+        def fake_http_post(url, payload, headers=None):
+            http_calls.append((url, payload))
+            return (200, b"")
+
+        outcomes = [
+            _fired(
+                "orders-sync",
+                now=fresh_now,
+                kind="error",
+                message="in error state: Failed to connect to IB at 127.0.0.1:4001",
+                last_error={"message": "Failed to connect to IB at 127.0.0.1:4001"},
+            ),
+            _fired(
+                "position-reconcile",
+                now=fresh_now,
+                kind="error",
+                message="in error state: Connection refused",
+                last_error={"message": "Connection refused"},
+            ),
+        ]
+        with patch("watchdog.notify._http_post", side_effect=fake_http_post), \
+             patch("watchdog.grouping.fetch_health", return_value={"auth_state": "unreachable"}), \
+             patch("watchdog.grouping._api_recently_restarted", return_value=False):
+            grouping.dispatch_with_grouping(outcomes=outcomes, now=fresh_now)
+
+        push_calls = _push_calls(http_calls)
+        assert len(push_calls) == 1
+        title = push_calls[0][1]["title"]
+        body = push_calls[0][1]["message"]
+        assert title == "radon watchdog: IB Gateway unreachable"
+        assert "orders-sync" in body and "position-reconcile" in body
+        assert "Approve on phone" not in body
+
+
 class FakeFp:
     """urlopen-style context-managed response stub."""
 

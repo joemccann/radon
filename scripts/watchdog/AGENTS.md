@@ -29,6 +29,6 @@ Watchdog monitors scheduled services from `web/lib/serviceHealthWindows.ts` and 
 ## IB Outage Grouping
 
 - Each service window declares `requires_ib`.
-- When IB is down, group all IB-required failures into a single "IB Gateway awaiting 2FA / unreachable" message.
+- When IB is down, group IB-required failures whose last_error / check reason is IB-shaped (connection, 2FA, gateway, timeout). A latched writer-integrity error (execution fact conflict) falls through per-service. `awaiting_2fa` copy is approve-on-phone / reset-backoff; `unreachable` copy is `radon restart`, not a 2FA prompt.
 - UW-only, Flex-only, and Playwright-only writers are not IB-required just because they share the dashboard.
 - On IB transition from `awaiting_2fa` to `authenticated`, clear stale service-health rows for IB-required services.
