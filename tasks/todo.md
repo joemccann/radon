@@ -1,3 +1,23 @@
+# Task: P1 radon-oi-changes UW daily quota (2026-08-14)
+
+## Dependency graph
+
+- T1 depends_on: [] - Failing tests: market-wide daily cap exits 0, error heartbeat + 20:00 ET embargo, no snapshot upsert; ticker path still exits 1
+- T2 depends_on: [T1] - Catch UW daily quota in fetch_oi_changes.py --market; persist embargo; keep last snapshot
+- T3 depends_on: [T2] - Runbook case (f) + focused pytest + commit/push
+
+## Checklist
+
+- [x] T1 Red tests
+- [x] T2 Embargo + exit 0
+- [x] T3 Verify + runbook
+
+## Review
+
+20:00Z oneshot exited 1 on `daily request limit of 40000`. Market path now embargoes until 20:00 ET, writes error heartbeat, exits 0. Ticker eval still exits 1. pytest 9 focused.
+
+---
+
 # Task: UW 40k daily quote burned by 75% before cash open (2026-08-14)
 
 ## Dependency graph

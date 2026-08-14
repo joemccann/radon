@@ -21,12 +21,14 @@ See docs/options-flow-verification.md for methodology.
 import argparse
 import json
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional, List
+from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from clients.uw_client import UWClient
+from clients.uw_client import UWClient, UWRateLimitError
 
 try:
     from db.scan_mirror import mirror_scan_snapshot  # type: ignore
@@ -40,6 +42,100 @@ _OI_PAGE_LIMIT = 500
 _OI_MAX_PAGES = 40
 # Market-wide /api/market/oi-change: max 200, no page cursor.
 _MARKET_OI_LIMIT = 200
+
+_SCRIPT_DIR = Path(__file__).resolve().parent
+_PROJECT_DIR = _SCRIPT_DIR.parent
+_ET = ZoneInfo("America/New_York")
+_UW_DAILY_LIMIT_MARKER = "daily request limit"
+_UW_DAILY_RESET_HOUR_ET = 20
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _embargo_path() -> Path:
+    return _PROJECT_DIR / "data" / "oi_changes_uw_embargo.json"
+
+
+def _is_uw_daily_quota(exc: BaseException) -> bool:
+    return isinstance(exc, UWRateLimitError) and _UW_DAILY_LIMIT_MARKER in str(exc).lower()
+
+
+def _uw_retry_at(exc: BaseException, now: datetime) -> str:
+    """UW daily cap resets at 20:00 ET; other 429s get a 5-minute embargo."""
+    if _is_uw_daily_quota(exc):
+        local = now.astimezone(_ET)
+        reset = local.replace(hour=_UW_DAILY_RESET_HOUR_ET, minute=0, second=0, microsecond=0)
+        if local >= reset:
+            reset = reset + timedelta(days=1)
+        return reset.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return (now + timedelta(minutes=5)).astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _load_uw_embargo() -> Optional[datetime]:
+    try:
+        raw = json.loads(_embargo_path().read_text()).get("next_attempt_at")
+    except (OSError, ValueError, TypeError, AttributeError):
+        return None
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _save_uw_embargo(next_attempt_at: str) -> None:
+    path = _embargo_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"next_attempt_at": next_attempt_at}))
+
+
+def _clear_uw_embargo() -> None:
+    _embargo_path().unlink(missing_ok=True)
+
+
+def _uw_embargo_active(now: datetime) -> Optional[str]:
+    deadline = _load_uw_embargo()
+    if deadline is None or now >= deadline:
+        if deadline is not None:
+            _clear_uw_embargo()
+        return None
+    return deadline.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _record_cycle_error(exc: BaseException, *, now: datetime, next_attempt_at: str) -> None:
+    message = str(exc).splitlines()[0].strip()[:300]
+    try:
+        from db import writer
+    except ImportError:
+        return
+    try:
+        writer.ensure_no_replica_for_writers()
+        writer.record_service_health(
+            "oi-changes",
+            "error",
+            finished_at=now.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+            error={"message": message, "next_attempt_at": next_attempt_at},
+        )
+    except Exception as write_exc:  # noqa: BLE001 — telemetry must not mask the cycle
+        print(f"[oi-changes] error heartbeat non-fatal: {write_exc}", file=sys.stderr)
+
+
+def _handle_market_uw_limit(exc: UWRateLimitError, now: datetime) -> int:
+    """Heartbeat + embargo. Daily cap exits 0 so the oneshot does not page."""
+    next_attempt = _uw_retry_at(exc, now)
+    if _is_uw_daily_quota(exc):
+        _save_uw_embargo(next_attempt)
+    _record_cycle_error(exc, now=now, next_attempt_at=next_attempt)
+    print(
+        f"[oi-changes] {str(exc).splitlines()[0].strip()}; "
+        f"{'keeping last snapshot until' if _is_uw_daily_quota(exc) else 'retry after'} {next_attempt}",
+        file=sys.stderr,
+    )
+    return 0 if _is_uw_daily_quota(exc) else 1
 
 
 def _passes_filters(item: dict, min_oi_change: int, min_premium: float) -> bool:
@@ -258,6 +354,22 @@ Examples:
     
     try:
         if args.market:
+            now = _now()
+            embargo_until = _uw_embargo_active(now)
+            if embargo_until:
+                _record_cycle_error(
+                    UWRateLimitError(
+                        "You have hit your daily request limit of 40000 requests."
+                    ),
+                    now=now,
+                    next_attempt_at=embargo_until,
+                )
+                print(
+                    f"[oi-changes] UW daily quota embargo until {embargo_until}; "
+                    "keeping last snapshot",
+                    file=sys.stderr,
+                )
+                return
             data = fetch_market_oi_changes(
                 min_oi_change=args.min_oi_change,
                 min_premium=args.min_premium,
@@ -281,6 +393,7 @@ Examples:
         if args.market:
             # Only the market-wide scan heartbeats — per-ticker evaluation
             # lookups would mask a dead scheduled scan.
+            _clear_uw_embargo()
             mirror_scan_snapshot("oi-changes", output)
 
         if args.json:
@@ -288,6 +401,11 @@ Examples:
         else:
             print_results(data, ticker)
             
+    except UWRateLimitError as e:
+        if args.market:
+            sys.exit(_handle_market_uw_limit(e, _now()))
+        print(f'Error: {e}', file=sys.stderr)
+        sys.exit(1)
     except Exception as e:
         print(f'Error: {e}', file=sys.stderr)
         sys.exit(1)

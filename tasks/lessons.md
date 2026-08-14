@@ -1,5 +1,11 @@
 # Lessons
 
+## 2026-08-14 — UW daily quota on a oneshot is a unit P1
+
+- Skew's heartbeat embargo does not cover `Type=oneshot` writers. `fetch_oi_changes.py` printed the 40k daily-cap error and `sys.exit(1)`; `radon-oi-changes.service` went failed and the unit watchdog paged. NRestarts=0 is normal for oneshot.
+- Discriminating check: journal `FAILED (exit 1)` in the same second as the start line; `logs/oi_changes.err.log` has `daily request limit of 40000`.
+- Daily-cap path: write `error` + `next_attempt_at` 20:00 ET, persist a local embargo, keep the last snapshot, exit 0. Do not fail the unit. Ticker eval lookups still exit 1.
+
 ## 2026-08-14 — Act ticket must shrink or Confirm clips
 
 - `.act-region` is `overflow: hidden`. A `.act-ticket` of `flex: 0 0 auto` grows to the confirm summary + Gate 3 CRB and clips Place / Confirm. There is no scrollport.
