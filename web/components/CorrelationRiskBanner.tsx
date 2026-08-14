@@ -15,12 +15,6 @@ import {
  * only — it never proposes resizing.
  */
 
-const LEVEL_TOKEN: Record<string, string> = {
-  critical: "var(--fault)",
-  info: "var(--signal-core)",
-  none: "var(--ok)",
-};
-
 export default function CorrelationRiskBanner({
   report,
   showUnavailable = false,
@@ -34,7 +28,6 @@ export default function CorrelationRiskBanner({
   if ((!banner || banner.level === "none") && !measurementUnavailable) return null;
 
   const level = measurementUnavailable ? "info" : banner!.level;
-  const accent = LEVEL_TOKEN[level] ?? "var(--signal-core)";
   const headline = measurementUnavailable ? "Gate 3: correlation measurement unavailable" : banner!.headline;
   const detail = measurementUnavailable
     ? "Current portfolio price history is insufficient for a correlation risk-budget verdict."
@@ -44,53 +37,42 @@ export default function CorrelationRiskBanner({
 
   return (
     <div
-      className="sx"
+      className="crb"
       data-testid="correlation-risk-banner"
       data-level={level}
-      style={{
-        borderRadius: 4,
-        borderLeft: `3px solid ${accent}`,
-        background: `color-mix(in srgb, ${accent} 8%, transparent)`,
-      }}
     >
-      <div className="s-hd">
-        <div className="s-tt">
-          <ShieldAlert size={14} style={{ color: accent }} />
+      <div className="crb-header">
+        <div className="crb-title">
+          <ShieldAlert size={14} className="crb-icon" aria-hidden="true" />
           Correlation Risk Budget
         </div>
-        <span
-          className="pill"
-          style={{
-            color: accent,
-            background: `color-mix(in srgb, ${accent} 14%, transparent)`,
-          }}
-        >
-          GATE 3
-        </span>
+        <span className="pill crb-gate">GATE 3</span>
       </div>
-      <div className="s-bd">
-        <div className="crb-headline" style={{ color: accent, fontWeight: 600 }}>
-          {headline}
-        </div>
-        <div className="crb-detail pe">{detail}</div>
+      <div className="crb-body">
+        <div className="crb-headline">{headline}</div>
+        <div className="crb-detail">{detail}</div>
 
         {breachedClusters.length > 0 && (
           <div className="crb-clusters" data-testid="crb-clusters">
             {breachedClusters.map((cluster) => (
               <div key={cluster.tickers.join("-")} className="crb-cluster-row">
-                <span className="fm">{cluster.tickers.join(" + ")}</span>
-                <span className="fm" style={{ color: accent }}>
+                <span className="crb-cluster-names">{cluster.tickers.join(" + ")}</span>
+                <span className="crb-cluster-budget">
                   {cluster.exposurePctLabel} vs {cluster.budgetPctLabel} budget
                 </span>
-                <span className="fm pe">corr {cluster.maxPairCorrLabel}</span>
+                <span className="crb-cluster-corr">corr {cluster.maxPairCorrLabel}</span>
               </div>
             ))}
           </div>
         )}
 
         {insufficientData.length > 0 && (
-          <div className="crb-thin pe" data-testid="crb-insufficient-data">
-            Insufficient price history for: {insufficientData.join(", ")}
+          <div className="crb-thin" data-testid="crb-insufficient-data">
+            <div className="crb-tickers">
+              {insufficientData.map((ticker) => (
+                <span key={ticker} className="crb-ticker">{ticker}</span>
+              ))}
+            </div>
           </div>
         )}
       </div>
