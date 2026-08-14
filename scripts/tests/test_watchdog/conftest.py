@@ -22,6 +22,7 @@ if str(_SCRIPTS_DIR) not in sys.path:
 _MIGRATIONS = [
     _SCRIPTS_DIR / "db" / "migrations" / "0001_init.sql",
     _SCRIPTS_DIR / "db" / "migrations" / "0006_watchdog_state.sql",
+    _SCRIPTS_DIR / "db" / "migrations" / "0048_watchdog_pages.sql",
 ]
 
 

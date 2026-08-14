@@ -1,3 +1,25 @@
+# Task: Grok auto-responds to iPhone P1 service pages (2026-08-14)
+
+## Dependency graph
+
+- T1 depends_on: [] - Failing tests: P1 delivery enqueues a page; failed/P2 do not
+- T2 depends_on: [T1] - Turso `watchdog_pages` + enqueue from notify/grouping
+- T3 depends_on: [T2] - Laptop `grok_page_responder` claim/run/complete
+- T4 depends_on: [T3] - launchd + migration + focused pytest
+
+## Checklist
+
+- [x] T1 Red tests
+- [x] T2 Enqueue on delivered P1
+- [x] T3 Headless Grok diagnose+fix
+- [x] T4 Verify + install
+
+## Review
+
+Delivered P1 Pushover inserts `watchdog_pages` (one ticket per service/kind/UTC hour). Laptop `com.radon.grok-page-responder` (30s) claims and runs headless Grok. pytest 169 affected + 66 focused. Migration 0048 applied to Turso. launchd first cycle `pending: 0`. Kill switches: `GROK_PAGE_RESPONDER=0`, `GROK_PAGE_AUTOSHIP=0`, `GROK_PAGE_AUTOPUSH=0`. Mac must be awake. VPS enqueue needs this commit deployed.
+
+---
+
 # Task: Proposal statement leaks TRUE_THETA token (2026-08-14)
 
 ## Dependency graph
