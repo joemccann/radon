@@ -4,6 +4,8 @@ import {
   hasAnyTickerData,
   isPopulated,
   pickUwInfo,
+  STOCK_STATE_TTL_MS,
+  stockStateRefreshDue,
 } from "../lib/tickerInfoCache";
 
 const UW = { marketcap: "83039192045", beta: "3.31" };
@@ -52,6 +54,40 @@ describe("tickerInfoCache — don't cache empty results", () => {
     it("is true when any single source has data (e.g. only the Yahoo 52W backfill)", () => {
       expect(hasAnyTickerData({}, {}, { week_52_high: 151 })).toBe(true);
       expect(hasAnyTickerData(UW, {}, {})).toBe(true);
+    });
+  });
+
+  describe("stockStateRefreshDue", () => {
+    const now = Date.parse("2026-08-14T15:00:00.000Z");
+
+    it("is a 15-minute window", () => {
+      expect(STOCK_STATE_TTL_MS).toBe(15 * 60 * 1000);
+    });
+
+    it("is due when no stamp exists", () => {
+      expect(stockStateRefreshDue({}, now)).toBe(true);
+      expect(stockStateRefreshDue(null, now)).toBe(true);
+    });
+
+    it("is not due when stock_state_checked_at is inside the TTL", () => {
+      expect(stockStateRefreshDue({
+        stock_state_checked_at: "2026-08-14T14:46:00.000Z",
+      }, now)).toBe(false);
+    });
+
+    it("is due when stock_state_checked_at is 15 minutes old", () => {
+      expect(stockStateRefreshDue({
+        stock_state_checked_at: "2026-08-14T14:45:00.000Z",
+      }, now)).toBe(true);
+    });
+
+    it("falls back to fetched_at for legacy entries", () => {
+      expect(stockStateRefreshDue({
+        fetched_at: "2026-08-14T14:50:00.000Z",
+      }, now)).toBe(false);
+      expect(stockStateRefreshDue({
+        fetched_at: "2026-08-14T14:40:00.000Z",
+      }, now)).toBe(true);
     });
   });
 });

@@ -12,6 +12,28 @@ sys.path.insert(0, str(SCRIPTS_DIR / "trade_blotter"))
 
 
 @pytest.fixture(autouse=True)
+def _isolate_uw_budget(tmp_path, monkeypatch):
+    """Point the process-wide UW budget file at a per-test tmp path."""
+    try:
+        import utils.uw_budget as _uwb
+    except Exception:
+        return
+    monkeypatch.setattr(_uwb, "BUDGET_PATH", tmp_path / "uw_budget.json")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_uw_http_cache(tmp_path, monkeypatch):
+    """Point the UW HTTP disk cache at a per-test tmp dir."""
+    try:
+        import utils.uw_cache as _uwc
+    except Exception:
+        return
+    if not hasattr(_uwc, "CACHE_DIR"):
+        return
+    monkeypatch.setattr(_uwc, "CACHE_DIR", tmp_path / "uw_http_cache")
+
+
+@pytest.fixture(autouse=True)
 def _isolate_darkpool_cache(tmp_path, monkeypatch):
     """Point the persistent dark-pool cache at a per-test tmp dir.
 

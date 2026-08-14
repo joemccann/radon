@@ -23,7 +23,9 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from clients.uw_client import UWClient, UWRateLimitError
-from utils.scan_coverage import coverage_block, should_persist_scan
+from utils.scan_coverage import coverage_block, payload_has_candidates, should_persist_scan
+from utils.uw_budget import should_block_universe_scan
+from utils.uw_surface import fetch_surface
 
 try:
     from db.scan_mirror import mirror_scan_snapshot  # type: ignore
@@ -776,7 +778,8 @@ def scan_ticker(
     ticker = ticker.upper()
     try:
         try:
-            prices = _prices_from_ohlc(client.get_stock_ohlc(ticker, candle_size="1d"))
+            surface = fetch_surface(client, ticker)
+            prices = _prices_from_ohlc(surface["ohlc"])
         except UWRateLimitError:
             raise
         except Exception as exc:
@@ -796,24 +799,17 @@ def scan_ticker(
                 errors.append(f"{label}:{exc}")
                 return default
 
-        alerts = fetch("flow_alerts", lambda: client.get_stock_flow_alerts(ticker, limit=50), {"data": []})
-        options_volume = fetch("options_volume", lambda: client.get_options_volume(ticker), {"data": []})
-        iv, iv_rank = _latest_iv(fetch("iv_rank", lambda: client.get_iv_rank(ticker), {"data": []}))
-        strike_gex = fetch("gex_strike", lambda: client.get_greek_exposure_by_strike(ticker), {"data": []})
-        aggregate_gex = fetch("gex_history", lambda: client.get_greek_exposure(ticker), {"data": []})
-        oi_change = fetch("oi_change", lambda: client.get_stock_oi_change(ticker), {"data": []})
-        term_structure = fetch("term_structure", lambda: client.get_volatility_term_structure(ticker), {"data": []})
-        contracts = fetch(
-            "contracts",
-            lambda: client.get_option_contracts(ticker, exclude_zero_vol_chains=True, maybe_otm_only=True),
-            {"data": []},
-        )
-        expiry = next((row["expiry"] for row in _extract_options_by_expiry(contracts)), "")
-        risk_reversal = fetch(
-            "risk_reversal",
-            lambda: client.get_historical_risk_reversal_skew(ticker, expiry=expiry, delta=25) if expiry else {"data": []},
-            {"data": []},
-        )
+        # Per-ticker UW budget: keep surface + OI change; degrade the rest.
+        empty = {"data": []}
+        alerts = empty
+        options_volume = empty
+        iv, iv_rank = _latest_iv(fetch("iv_rank", lambda: surface["iv_rank"], empty))
+        strike_gex = fetch("gex_strike", lambda: surface["gex_strike"], empty)
+        aggregate_gex = empty
+        oi_change = fetch("oi_change", lambda: client.get_stock_oi_change(ticker), empty)
+        term_structure = empty
+        contracts = fetch("contracts", lambda: surface["contracts"], empty)
+        risk_reversal = empty
 
         context = market_context or build_market_context(client)
         flow_summary = _option_flow_summary(alerts, options_volume)
@@ -881,6 +877,20 @@ def scan_universe(
     resolved, source = resolve_tickers(tickers, preset)
     if limit is not None and limit > 0:
         resolved = resolved[:limit]
+    if not tickers and should_block_universe_scan():
+        print(
+            f"UW daily budget block; skipping universe scan ({source})",
+            file=sys.stderr,
+        )
+        prior = _read_cache_file(_CACHE_PATH)
+        if payload_has_candidates(prior):
+            return prior
+        return build_output(
+            [], source, len(resolved), requested_tickers=resolved,
+            coverage=coverage_block(
+                tickers=len(resolved), ok=0, no_setup=0, rate_limited=0, errors=0,
+            ),
+        )
     print(f"Scanning {len(resolved)} tickers for 7-step strength confirmation ({source})...", file=sys.stderr)
 
     client_kwargs = {} if retry_transient else {"max_retries": 0, "backoff_factor": 0}

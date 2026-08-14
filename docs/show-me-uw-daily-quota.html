@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Show me: UW 40k daily quote</title>
+  <style>
+    :root {
+      --canvas: #0a0f14;
+      --panel: #0f1519;
+      --raised: #151c22;
+      --grid: #1e293b;
+      --text: #e2e8f0;
+      --secondary: #94a3b8;
+      --muted: #758192;
+      --signal: #05AD98;
+      --fault: #E85D6C;
+      --warn: #F5A623;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--canvas);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+      padding: 28px 20px 56px;
+    }
+    .wrap { max-width: 1120px; margin: 0 auto; }
+    .kicker {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 10px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin: 0 0 8px;
+    }
+    h1 {
+      font-size: 22px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      margin: 0 0 8px;
+    }
+    .lede {
+      color: var(--secondary);
+      font-size: 14px;
+      line-height: 1.5;
+      max-width: 72ch;
+      margin: 0 0 24px;
+    }
+    .lede b { color: var(--text); font-weight: 600; }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .metric {
+      background: var(--panel);
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      padding: 14px 16px;
+    }
+    .metric .lbl {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin: 0 0 6px;
+    }
+    .metric .val {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 22px;
+      font-weight: 500;
+      letter-spacing: -0.03em;
+    }
+    .metric .sub { color: var(--secondary); font-size: 12px; margin-top: 4px; }
+    .fault { color: var(--fault); }
+    .warn { color: var(--warn); }
+    .ok { color: var(--signal); }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      padding: 16px 18px;
+      margin-bottom: 16px;
+    }
+    .panel h2 {
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin: 0 0 12px;
+      color: var(--secondary);
+    }
+    .bar-track {
+      height: 18px;
+      background: var(--raised);
+      border: 1px solid var(--grid);
+      border-radius: 2px;
+      overflow: hidden;
+      display: flex;
+    }
+    .bar-used { width: 75%; background: var(--fault); }
+    .bar-left { width: 25%; }
+    .bar-cap {
+      margin-top: 8px;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 12px;
+      color: var(--secondary);
+      display: flex;
+      justify-content: space-between;
+    }
+    .eq {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 13px;
+      line-height: 1.7;
+      background: var(--raised);
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      padding: 12px 14px;
+      overflow-x: auto;
+    }
+    .eq .hi { color: var(--fault); }
+    .eq .sig { color: var(--signal); }
+    .timeline {
+      display: grid;
+      grid-template-columns: 88px 1fr;
+      gap: 8px 14px;
+      font-size: 13px;
+    }
+    .timeline time {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th, td {
+      text-align: left;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--grid);
+      vertical-align: top;
+    }
+    th {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 500;
+    }
+    td.num {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      text-align: right;
+      white-space: nowrap;
+    }
+    tr.hot td { color: var(--fault); }
+    .cols {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 12px;
+    }
+    .plan {
+      background: var(--raised);
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      padding: 12px 14px;
+    }
+    .plan h3 {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      margin: 0 0 10px;
+      color: var(--signal);
+    }
+    .plan.later h3 { color: var(--muted); }
+    .plan.next h3 { color: var(--warn); }
+    .plan ol {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    .plan li { margin: 0 0 8px; }
+    .tree {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 12px;
+      line-height: 1.55;
+      white-space: pre;
+      color: var(--secondary);
+    }
+    .tree .hot { color: var(--fault); }
+    .note {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.45;
+      margin: 10px 0 0;
+    }
+    @media (max-width: 860px) {
+      .metrics, .cols { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 560px) {
+      .metrics, .cols { grid-template-columns: 1fr; }
+      .timeline { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <p class="kicker">Show me / Unusual Whales quota</p>
+    <h1>Why 30,000 of 40,000 requests are gone by morning</h1>
+    <p class="lede">
+      UW emailed 75% of the Basic daily cap at 09:04 on 2026-08-14.
+      Same day, <b>signals refresh hit the hard 40k cap at 15:45 UTC</b> (11:45 ET)
+      and wrote empty NDX snapshots. This is not a bursty evaluate. It is a
+      scheduled NDX-wide poll that spends more than one full daily quote every cash session.
+    </p>
+
+    <div class="metrics">
+      <div class="metric">
+        <p class="lbl">Email snapshot</p>
+        <div class="val fault">30,000</div>
+        <div class="sub">of 40,000 at 09:04</div>
+      </div>
+      <div class="metric">
+        <p class="lbl">Signals slot</p>
+        <div class="val warn">~1,450</div>
+        <div class="sub">UW GETs / 15 min</div>
+      </div>
+      <div class="metric">
+        <p class="lbl">RTH scheduled</p>
+        <div class="val fault">~46,000</div>
+        <div class="sub">32 slots x 1,450</div>
+      </div>
+      <div class="metric">
+        <p class="lbl">Cap hit</p>
+        <div class="val fault">11:45 ET</div>
+        <div class="sub">15:45 UTC empty scans</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Budget as of the email</h2>
+      <div class="bar-track" aria-label="30000 of 40000 used">
+        <div class="bar-used"></div>
+        <div class="bar-left"></div>
+      </div>
+      <div class="bar-cap">
+        <span>Used 30,000</span>
+        <span>Headroom 10,000</span>
+        <span>Reset 20:00 ET</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>The equation</h2>
+      <div class="eq">
+        <span class="sig">ndx100</span> 103 names
+        x (<span class="hi">theta 4</span> + <span class="hi">strength 10</span>) calls
+        x <span class="hi">32</span> fires (09:00-16:45 ET / 15m)
+        = <span class="hi">~46,400</span>  &gt;  40,000 daily cap
+      </div>
+      <p class="note">
+        FastAPI cooldown is 600s. The timer is 900s, so cooldown never skips a slot.
+        24 workers each open their own UWClient. In-process cache is 60s and does not survive the next oneshot.
+      </p>
+    </div>
+
+    <div class="panel">
+      <h2>What actually runs</h2>
+      <div class="tree">radon-signals-refresh.timer   every 15m, 09:00-16:45 ET
+  run_signals_refresh.sh  preset=ndx100
+    POST /theta-harvester/scan
+      scan_ticker x 103
+        ohlc  iv_rank  option-contracts  gex/strike  (+earnings)
+    POST /strength-confirmation/scan
+      scan_ticker x 103
+        ohlc  flow-alerts  options-volume  iv_rank
+        gex/strike  gex  oi-change  term-structure
+        option-contracts  risk-reversal-skew
+<span class="hot">  ~1,450 counted UW GETs per fire. No shared payload between the two scans.</span></div>
+    </div>
+
+    <div class="panel">
+      <h2>Clock</h2>
+      <div class="timeline">
+        <time>20:00 ET-1</time>
+        <div>UW daily counter resets. Overnight VPS timers are mostly idle.</div>
+        <time>09:00 ET</time>
+        <div>First signals fire plus data-refresh (CRI/VCG/GEX) plus skew 1-min writer starts.</div>
+        <time>09:04</time>
+        <div>75% email. If this stamp is ET, 30k did not come from one 09:00 slot. If it is PT, that is 12:04 ET (~13 slots, ~19k from signals alone).</div>
+        <time>10:00 ET</time>
+        <div>Leap + GARCH + OI-changes join. Still small next to NDX polling.</div>
+        <time>11:45 ET</time>
+        <div>Daily cap. Signals refresh persists empty 102/0 snapshots over the last good row.</div>
+      </div>
+      <p class="note">
+        Laptop <code>com.radon.data-refresh</code> (scanner + discover + flow_analysis every 15m) is on disk but was not loaded in launchctl at investigation time. If it is loaded on a trading morning it adds another ~500-2,000 requests per slot.
+      </p>
+    </div>
+
+    <div class="panel">
+      <h2>Callers ranked</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Caller</th>
+            <th>Cadence</th>
+            <th>Per run</th>
+            <th>Session</th>
+            <th>Keep?</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="hot">
+            <td>Theta + strength NDX100</td>
+            <td>15 min RTH</td>
+            <td class="num">~1,450</td>
+            <td class="num">~46,400</td>
+            <td>Cut first</td>
+          </tr>
+          <tr>
+            <td>Laptop data-refresh (if loaded)</td>
+            <td>15 min session</td>
+            <td class="num">500-2,000</td>
+            <td class="num">can exceed cap</td>
+            <td>Keep off</td>
+          </tr>
+          <tr>
+            <td>Evaluate fetch_flow</td>
+            <td>on demand</td>
+            <td class="num">5-40+ pages/name</td>
+            <td class="num">variable</td>
+            <td>Keep. Cache prior days.</td>
+          </tr>
+          <tr>
+            <td>Ticker info / quote routes</td>
+            <td>page load, no-store</td>
+            <td class="num">2-3</td>
+            <td class="num">browse tax</td>
+            <td>Cache</td>
+          </tr>
+          <tr>
+            <td>Skew / GEX / VCG / CRI</td>
+            <td>1-15 min</td>
+            <td class="num">1-8</td>
+            <td class="num">&lt;1,000</td>
+            <td>Keep</td>
+          </tr>
+          <tr>
+            <td>Leap / GARCH / OI / catalysts</td>
+            <td>1-3x / day</td>
+            <td class="num">tens-hundreds</td>
+            <td class="num">&lt;1,000</td>
+            <td>Keep</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="panel">
+      <h2>Plan</h2>
+      <div class="cols">
+        <div class="plan">
+          <h3>Do now</h3>
+          <ol>
+            <li>Change <code>radon-signals-refresh.timer</code> to 60 min. 32 fires become 8. ~46k becomes ~12k.</li>
+            <li>Make FastAPI serve the last good theta/strength cache inside a 45-60 min window instead of rescanning NDX.</li>
+            <li>Stop retrying UW 429 when the body says daily request limit. Retries still count.</li>
+            <li>Add a process-wide remaining-budget guard that refuses NDX scans after 50% of the day.</li>
+          </ol>
+        </div>
+        <div class="plan next">
+          <h3>Do next</h3>
+          <ol>
+            <li>One fetch pass shared by theta and strength. Today they duplicate ohlc, iv_rank, contracts, and GEX.</li>
+            <li>Drop strength from 10 endpoints to the 4 that change the verdict.</li>
+            <li>Disk or Turso cache for ohlc / iv / gex / contracts with a 15-60 min TTL.</li>
+            <li>Give ticker info and previous-close a same-session cache. Remove <code>cache: no-store</code>.</li>
+          </ol>
+        </div>
+        <div class="plan later">
+          <h3>Later</h3>
+          <ol>
+            <li>IB-first daily bars. UW only if IB has no history.</li>
+            <li>Dashboard tile: requests used / remaining, reset 20:00 ET.</li>
+            <li>Keep laptop scanner/discover unloaded while VPS owns signals.</li>
+            <li>Buy more UW volume only after the 15-min NDX double-scan is gone.</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

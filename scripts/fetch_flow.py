@@ -280,6 +280,8 @@ def _call_uw_with_retry(call, *, what: str, retry_transient: bool = True):
     except (UWRateLimitError, UWServerError) as exc:
         if not retry_transient:
             raise
+        if "daily request limit" in str(exc).lower():
+            raise
         logger.warning(
             "UW %s: transient %s, retrying once after %ss",
             what, type(exc).__name__, _UW_TRANSIENT_RETRY_SLEEP_S,

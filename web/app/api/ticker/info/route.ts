@@ -8,7 +8,7 @@ import {
   jsonApiError,
   setCacheResponseHeaders,
 } from "@/lib/apiContracts";
-import { canReuseUwInfo, hasAnyTickerData, isPopulated, pickUwInfo } from "@/lib/tickerInfoCache";
+import { canReuseUwInfo, hasAnyTickerData, isPopulated, pickUwInfo, stockStateRefreshDue } from "@/lib/tickerInfoCache";
 import { enforceDemoAiQuota } from "@/lib/demo/enforceAiQuota";
 
 export const runtime = "nodejs";
@@ -30,6 +30,9 @@ type CacheEntry = {
   // re-fire the float fetch on every request forever for them. Empty + fresh
   // stamp = checked recently, don't retry yet.
   short_float_checked_at?: string;
+  // Last stock-state fetch ATTEMPT. HIT path honors a 15-minute TTL so a
+  // populated cache does not hit UW stock-state on every request.
+  stock_state_checked_at?: string;
   fetched_at: string;
 };
 
@@ -270,37 +273,44 @@ export async function GET(request: Request): Promise<Response> {
   const profileCached = cached && hasProfile(cached);
   const statsCached = cached && !isStatsExpired(cached);
 
-  // If profile + stats + uw_info are all cached, just refresh stock-state
-  // (intraday). uw_info MUST be non-empty to take this fast path — a prior
-  // transient UW failure leaves uw_info: {} which would otherwise re-serve an
-  // empty market cap / beta for the full 24h stats window
-  // (see feedback_dont_cache_empty_results).
+  // If profile + stats + uw_info are all cached, refresh stock-state only
+  // when its 15-minute TTL has expired. uw_info MUST be non-empty to take
+  // this fast path — a prior transient UW failure leaves uw_info: {} which
+  // would otherwise re-serve an empty market cap / beta for the full 24h
+  // stats window (see feedback_dont_cache_empty_results).
   if (profileCached && statsCached && isPopulated(cached?.uw_info)) {
     let stockState = cached.stock_state;
     let shortFloat = cached.short_float ?? {};
     if (token) {
       // Legacy entries (and past float failures) lack short_float — self-heal
-      // alongside the intraday stock-state refresh, at most once per recheck
-      // window so structurally-empty tickers don't refetch on every HIT.
-      const [freshState, freshFloat] = await Promise.all([
-        fetchUWStockState(symbol, token),
-        floatRecheckDue(cached) ? fetchUWShortFloat(symbol, token) : Promise.resolve(null),
-      ]);
-      let cacheDirty = false;
-      if (Object.keys(freshState).length > 0) {
-        stockState = freshState;
-        cached.stock_state = freshState;
-        cacheDirty = true;
-      }
-      if (freshFloat != null) {
-        cached.short_float_checked_at = new Date().toISOString();
-        cacheDirty = true;
-        if (isPopulated(freshFloat)) {
-          shortFloat = freshFloat;
-          cached.short_float = freshFloat;
+      // at most once per recheck window. Stock-state is gated by its own
+      // 15-minute TTL so a HIT does not call UW on every request.
+      const refreshState = stockStateRefreshDue(cached);
+      const refreshFloat = floatRecheckDue(cached);
+      if (refreshState || refreshFloat) {
+        const [freshState, freshFloat] = await Promise.all([
+          refreshState ? fetchUWStockState(symbol, token) : Promise.resolve(null),
+          refreshFloat ? fetchUWShortFloat(symbol, token) : Promise.resolve(null),
+        ]);
+        let cacheDirty = false;
+        if (refreshState) {
+          cached.stock_state_checked_at = new Date().toISOString();
+          cacheDirty = true;
+          if (freshState && Object.keys(freshState).length > 0) {
+            stockState = freshState;
+            cached.stock_state = freshState;
+          }
         }
+        if (freshFloat != null) {
+          cached.short_float_checked_at = new Date().toISOString();
+          cacheDirty = true;
+          if (isPopulated(freshFloat)) {
+            shortFloat = freshFloat;
+            cached.short_float = freshFloat;
+          }
+        }
+        if (cacheDirty) await writeCache(cached);
       }
-      if (cacheDirty) await writeCache(cached);
     }
 
     const response = NextResponse.json({
@@ -389,6 +399,7 @@ export async function GET(request: Request): Promise<Response> {
       exa_stats: exaStats,
       short_float: shortFloat,
       short_float_checked_at: new Date().toISOString(),
+      stock_state_checked_at: new Date().toISOString(),
       fetched_at: new Date().toISOString(),
     };
     if (hasAnyData) await writeCache(entry);

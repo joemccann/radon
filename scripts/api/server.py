@@ -1863,6 +1863,14 @@ async def admin_stack_restart():
 # Phase 1: Stateless UW-only endpoints (subprocess-based)
 # ---------------------------------------------------------------------------
 
+@app.get("/uw/usage")
+async def uw_usage():
+    """Operator UW daily request budget from data/uw_budget.json."""
+    from utils.uw_budget import usage_snapshot
+
+    return usage_snapshot()
+
+
 @app.post("/scan")
 async def scan():
     """Run watchlist scanner (scanner.py --top 25)."""
@@ -3040,7 +3048,7 @@ async def leap_scan(preset: str = "indexes", min_gap: float = 10.0, tickers: str
 
 _theta_last_scan: float = 0.0
 _theta_scan_lock: Optional[asyncio.Lock] = None
-THETA_COOLDOWN_S = 600  # 10 min — UW option-chain + GEX scan budget
+THETA_COOLDOWN_S = 3600  # 1h — matches radon-signals-refresh hourly ET cadence
 
 
 # Route defaults mirror theta_harvester_scanner.py's MIN_DTE / MAX_DTE / no-credit-floor.
@@ -3181,7 +3189,7 @@ async def theta_harvester_scan(
 
 _strength_last_scan: float = 0.0
 _strength_scan_lock: Optional[asyncio.Lock] = None
-STRENGTH_COOLDOWN_S = 600  # 10 min — UW option-chain + GEX + breadth budget
+STRENGTH_COOLDOWN_S = 3600  # 1h — matches radon-signals-refresh hourly ET cadence
 
 
 def _strength_cache_matches_preset(cached: Any, preset: str) -> bool:

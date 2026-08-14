@@ -143,15 +143,10 @@ def test_build_output_records_search_params() -> None:
     assert custom["params"] == {"min_dte": 21, "max_dte": 60, "min_credit": 2.0}
 
 
-class FakeUWClient:
-    def get_stock_ohlc(self, ticker: str, candle_size: str = "1d"):
-        assert ticker == "AAPL"
-        assert candle_size == "1d"
-        return {"data": [{"close": 100.0} for _ in range(70)]}
-
-    def get_iv_rank(self, ticker: str):
-        assert ticker == "AAPL"
-        return {
+def _theta_surface() -> dict:
+    return {
+        "ohlc": {"data": [{"close": 100.0} for _ in range(70)]},
+        "iv_rank": {
             "data": [
                 {
                     "date": "2026-06-24",
@@ -159,11 +154,8 @@ class FakeUWClient:
                     "iv_rank_1y": 72,
                 }
             ]
-        }
-
-    def get_option_contracts(self, ticker: str, **_kwargs):
-        assert ticker == "AAPL"
-        return {
+        },
+        "contracts": {
             "data": [
                 {
                     "option_symbol": "AAPL260717P00095000",
@@ -188,23 +180,22 @@ class FakeUWClient:
                     "open_interest": 850,
                 },
             ]
-        }
-
-    def get_greek_exposure_by_strike(self, ticker: str):
-        assert ticker == "AAPL"
-        return {
+        },
+        "gex_strike": {
             "data": [
                 {"strike": 90, "call_gex": 750_000, "put_gex": -50_000},
                 {"strike": 100, "call_gex": 500_000, "put_gex": -25_000},
                 {"strike": 110, "call_gex": 350_000, "put_gex": -10_000},
             ]
-        }
+        },
+    }
 
 
-def test_scan_ticker_scores_true_theta_when_delta_iv_dealer_and_range_gates_pass() -> None:
+def test_scan_ticker_scores_true_theta_when_delta_iv_dealer_and_range_gates_pass(monkeypatch) -> None:
     now = datetime(2026, 6, 24, tzinfo=timezone.utc)
+    monkeypatch.setattr(theta, "fetch_surface", lambda _client, _ticker: _theta_surface())
 
-    candidate = theta.scan_ticker("AAPL", client=FakeUWClient(), now=now)
+    candidate = theta.scan_ticker("AAPL", client=object(), now=now)
 
     assert candidate is not None
     assert candidate.ticker == "AAPL"
@@ -470,13 +461,13 @@ def test_build_output_includes_serializable_earnings_field() -> None:
     json.dumps(payload)
 
 
-def test_scan_ticker_reraises_rate_limit_from_option_contracts() -> None:
-    class RateLimitedContracts(FakeUWClient):
-        def get_option_contracts(self, ticker: str, **_kwargs):
-            raise theta.UWRateLimitError("daily request limit")
+def test_scan_ticker_reraises_rate_limit_from_option_contracts(monkeypatch) -> None:
+    def _rate_limited(_client, _ticker):
+        raise theta.UWRateLimitError("daily request limit")
 
+    monkeypatch.setattr(theta, "fetch_surface", _rate_limited)
     with pytest.raises(theta.UWRateLimitError):
-        theta.scan_ticker("AAPL", client=RateLimitedContracts(), now=_NOW)
+        theta.scan_ticker("AAPL", client=object(), now=_NOW)
 
 
 def test_scan_universe_records_rate_limit_coverage(monkeypatch) -> None:
@@ -490,6 +481,60 @@ def test_scan_universe_records_rate_limit_coverage(monkeypatch) -> None:
     assert payload["candidates_found"] == 0
     assert payload["coverage"]["rate_limited"] == 2
     assert payload["coverage"]["completed"] == 0
+
+
+def test_scan_universe_budget_block_skips_workers_and_keeps_last_good(tmp_path, monkeypatch) -> None:
+    cache = tmp_path / "theta_harvester.json"
+    monkeypatch.setattr(theta, "_CACHE_PATH", cache)
+    monkeypatch.setattr(theta, "should_block_universe_scan", lambda: True)
+    monkeypatch.setattr(theta, "resolve_tickers", lambda *_a, **_k: (["AAPL", "MSFT"], "preset:ndx100"))
+    good = theta.build_output([_minimal_candidate()], "preset:ndx100", 102, requested_tickers=["AAPL"])
+    cache.write_text(json.dumps(good))
+
+    def boom(*_a, **_k):
+        raise AssertionError("universe workers must not run when budget is blocked")
+
+    monkeypatch.setattr(theta, "scan_ticker", boom)
+    payload = theta.scan_universe([])
+    assert payload["candidates_found"] == 1
+    assert payload["results"][0]["ticker"] == "AAPL"
+    assert theta.save_cache(payload, cache) is True
+    stored = json.loads(cache.read_text())
+    assert stored["candidates_found"] == 1
+    assert stored["results"][0]["ticker"] == "AAPL"
+
+
+def test_scan_universe_budget_block_degraded_when_no_last_good(tmp_path, monkeypatch) -> None:
+    cache = tmp_path / "theta_harvester.json"
+    monkeypatch.setattr(theta, "_CACHE_PATH", cache)
+    monkeypatch.setattr(theta, "should_block_universe_scan", lambda: True)
+    monkeypatch.setattr(theta, "resolve_tickers", lambda *_a, **_k: (["AAPL", "MSFT"], "preset:ndx100"))
+    monkeypatch.setattr(
+        theta,
+        "scan_ticker",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("workers")),
+    )
+    payload = theta.scan_universe([])
+    assert payload["candidates_found"] == 0
+    assert payload["coverage"]["tickers"] == 2
+    assert payload["coverage"]["completed"] == 0
+    assert theta.save_cache(payload, cache) is False
+    assert not cache.exists()
+
+
+def test_scan_universe_explicit_tickers_bypass_budget_block(monkeypatch) -> None:
+    monkeypatch.setattr(theta, "should_block_universe_scan", lambda: True)
+    seen: list[str] = []
+
+    def fake_scan(ticker, **_kwargs):
+        seen.append(ticker)
+        return None
+
+    monkeypatch.setattr(theta, "scan_ticker", fake_scan)
+    payload = theta.scan_universe(["MU"])
+    assert seen == ["MU"]
+    assert payload["universe"] == "explicit"
+    assert payload["coverage"]["no_setup"] == 1
 
 
 def test_save_cache_preserves_last_good_on_empty_scan(tmp_path, monkeypatch) -> None:

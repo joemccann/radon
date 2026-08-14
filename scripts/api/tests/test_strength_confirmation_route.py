@@ -18,6 +18,49 @@ def force_live_mode(monkeypatch):
     yield
 
 
+def test_strength_cooldown_is_hourly():
+    assert server.STRENGTH_COOLDOWN_S == 3600
+
+
+def test_strength_confirmation_preset_scan_second_post_inside_hourly_window_returns_cache(monkeypatch):
+    clock = {"now": 10_000.0}
+
+    monkeypatch.setattr(auth, "is_trusted_local_request", lambda request: True)
+    monkeypatch.setattr(server, "is_trusted_local_request", lambda request: True)
+    monkeypatch.setattr(time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(server, "_strength_last_scan", -1e9)
+    monkeypatch.setattr(server, "_strength_scan_lock", None)
+
+    payload = {
+        "scan_time": "2026-06-24T16:00:00Z",
+        "source": "Unusual Whales + Radon regime caches",
+        "universe": "fallback:ndx100",
+        "requested_tickers": ["AAPL", "MSFT"],
+        "tickers_scanned": 2,
+        "candidates_found": 0,
+        "confirmed_strength_count": 0,
+        "results": [],
+    }
+    calls: list[tuple[str, list[str], int | None]] = []
+
+    async def fake_run_script(script: str, args: list[str], timeout: int | None = None):
+        calls.append((script, args, timeout))
+        return ScriptResult(ok=True, data=payload)
+
+    monkeypatch.setattr(server, "run_script", fake_run_script)
+    monkeypatch.setattr(server, "_read_cache", lambda _path: payload)
+
+    client = TestClient(server.app)
+    first = client.post("/strength-confirmation/scan?preset=ndx100")
+    clock["now"] = 10_000.0 + 3599.0
+    second = client.post("/strength-confirmation/scan?preset=ndx100")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json() == payload
+    assert len(calls) == 1
+
+
 def test_strength_confirmation_ticker_scan_bypasses_preset_cooldown(monkeypatch):
     monkeypatch.setattr(auth, "is_trusted_local_request", lambda request: True)
     monkeypatch.setattr(server, "is_trusted_local_request", lambda request: True)
