@@ -18,6 +18,50 @@ def force_live_mode(monkeypatch):
     yield
 
 
+def test_theta_cooldown_is_hourly():
+    assert server.THETA_COOLDOWN_S == 3600
+
+
+def test_theta_harvester_preset_scan_second_post_inside_hourly_window_returns_cache(monkeypatch):
+    clock = {"now": 10_000.0}
+
+    monkeypatch.setattr(auth, "is_trusted_local_request", lambda request: True)
+    monkeypatch.setattr(server, "is_trusted_local_request", lambda request: True)
+    monkeypatch.setattr(time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(server, "_theta_last_scan", -1e9)
+    monkeypatch.setattr(server, "_theta_scan_lock", None)
+
+    payload = {
+        "scan_time": "2026-06-24T16:00:00Z",
+        "source": "Unusual Whales",
+        "universe": "fallback:ndx100",
+        "requested_tickers": ["AAPL", "MSFT"],
+        "tickers_scanned": 2,
+        "params": {"min_dte": 7, "max_dte": 45, "min_credit": 0.0},
+        "candidates_found": 0,
+        "theta_harvest_count": 0,
+        "results": [],
+    }
+    calls: list[tuple[str, list[str], int | None]] = []
+
+    async def fake_run_script(script: str, args: list[str], timeout: int | None = None):
+        calls.append((script, args, timeout))
+        return ScriptResult(ok=True, data=payload)
+
+    monkeypatch.setattr(server, "run_script", fake_run_script)
+    monkeypatch.setattr(server, "_read_cache", lambda _path: payload)
+
+    client = TestClient(server.app)
+    first = client.post("/theta-harvester/scan?preset=ndx100")
+    clock["now"] = 10_000.0 + 3599.0
+    second = client.post("/theta-harvester/scan?preset=ndx100")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json() == payload
+    assert len(calls) == 1
+
+
 def test_theta_harvester_ticker_scan_bypasses_preset_cooldown(monkeypatch):
     monkeypatch.setattr(auth, "is_trusted_local_request", lambda request: True)
     monkeypatch.setattr(server, "is_trusted_local_request", lambda request: True)

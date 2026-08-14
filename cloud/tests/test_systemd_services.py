@@ -354,7 +354,10 @@ class TestSignalsRefresh:
     def test_timer_covers_et_trading_hours_only(self, unit, services_dir):
         timer = unit("radon-signals-refresh.timer")["Timer"]
         raw = (services_dir / "radon-signals-refresh.timer").read_text()
-        assert "Mon..Fri" in timer.get("oncalendar", "")
+        oncalendar = timer.get("oncalendar", "")
+        assert "Mon..Fri" in oncalendar
+        assert "09..16:00:00 America/New_York" in raw
+        assert ":00,15,30,45" not in raw
         assert "America/New_York" in raw
         assert timer.get("persistent") == "false"
 

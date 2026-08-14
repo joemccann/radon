@@ -120,7 +120,7 @@ Deeper troubleshooting and full Docker setup live in [`docs/ib-gateway-docker.md
 
 ## Background Services
 
-Hetzner host systemd is the production surface. Laptop dev uses launchd plists in `config/`.
+Hetzner host systemd is the production surface. Laptop dev uses launchd plists in `config/`. Laptop `com.radon.data-refresh` must stay unloaded while the VPS owns signals or laptop scanner+discover will double UW burn.
 
 | Service | Cadence | Purpose |
 |---------|---------|---------|

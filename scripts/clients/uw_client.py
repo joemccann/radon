@@ -31,10 +31,16 @@ from requests.exceptions import ConnectionError as ReqConnectionError, Timeout a
 
 # Optional in-memory cache for request deduplication
 try:
-    from utils.uw_cache import get_cached, set_cached, make_key
+    from utils.uw_cache import get_cached, set_cached, make_key, get_disk_cached, set_disk_cached
     _USE_CACHE = True
 except ImportError:
     _USE_CACHE = False
+
+try:
+    from utils.uw_budget import record_hit
+except ImportError:  # pragma: no cover - budget helper ships with the client
+    def record_hit(*_args, **_kwargs):  # type: ignore[misc]
+        return 0
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +84,9 @@ class UWServerError(UWAPIError):
 
 # Status codes that are safe to retry
 _RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+
+# Same marker as scripts/fetch_skew.py — daily cap 429s must not be retried.
+_UW_DAILY_LIMIT_MARKER = "daily request limit"
 
 # Default configuration
 _DEFAULT_BASE_URL = "https://api.unusualwhales.com/api"
@@ -161,15 +170,18 @@ class UWClient:
         endpoint = endpoint.lstrip("/")
         url = f"{self._base_url}/{endpoint}"
 
-        # Check cache first (60s TTL). Skip cache when the HTTP session is
-        # replaced with a mock/test double so request and retry semantics remain
-        # observable in tests and deterministic debugging sessions.
+        # Memory (60s) then disk (endpoint-class TTL). Skip both when the HTTP
+        # session is a mock/test double so retry semantics stay observable.
         cache_enabled = _USE_CACHE and isinstance(self._session, requests.Session)
         if cache_enabled:
             cache_key = make_key(endpoint, params)
             cached = get_cached(cache_key)
             if cached is not None:
                 return cached
+            disk = get_disk_cached(cache_key)
+            if disk is not None:
+                set_cached(cache_key, disk)
+                return disk
 
         last_exc: Optional[Exception] = None
 
@@ -183,13 +195,18 @@ class UWClient:
                     continue
                 raise UWAPIError(f"Connection failed after {attempt + 1} attempts: {exc}") from exc
 
+            try:
+                record_hit()
+            except Exception:
+                logger.debug("uw budget record_hit failed", exc_info=True)
+
             status = resp.status_code
 
             if status == 200:
                 data = resp.json()
-                # Cache successful response
                 if cache_enabled:
                     set_cached(cache_key, data)
+                    set_disk_cached(cache_key, endpoint, data)
                 return data
 
             # ── classify error ──
@@ -198,6 +215,8 @@ class UWClient:
 
             if status == 429:
                 exc = UWRateLimitError(msg, status_code=status, response_body=body)
+                if _UW_DAILY_LIMIT_MARKER in msg.lower():
+                    raise exc
             elif status in (401, 403):
                 raise UWAuthError(msg, status_code=status, response_body=body)
             elif status == 404:

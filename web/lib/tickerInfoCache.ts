@@ -46,3 +46,30 @@ export function pickUwInfo(
 export function hasAnyTickerData(uwInfo: RecordMap, exaProfile: RecordMap, exaStats: RecordMap): boolean {
   return isPopulated(uwInfo) || isPopulated(exaProfile) || isPopulated(exaStats);
 }
+
+/** HIT-path stock-state refresh window. uw_info stays on the 24h stats reuse rule. */
+export const STOCK_STATE_TTL_MS = 15 * 60 * 1000;
+
+export type StockStateStamp = {
+  stock_state_checked_at?: string;
+  fetched_at?: string;
+};
+
+/**
+ * Whether a cache HIT should re-fetch UW stock-state.
+ *
+ * Prefer `stock_state_checked_at`; fall back to `fetched_at` so legacy entries
+ * written before the stamp still honor the 15-minute window instead of
+ * refreshing on every request.
+ */
+export function stockStateRefreshDue(
+  entry: StockStateStamp | null | undefined,
+  now: number = Date.now(),
+): boolean {
+  if (!entry) return true;
+  const stamp = entry.stock_state_checked_at ?? entry.fetched_at;
+  if (!stamp) return true;
+  const ts = new Date(stamp).getTime();
+  if (Number.isNaN(ts)) return true;
+  return now - ts >= STOCK_STATE_TTL_MS;
+}

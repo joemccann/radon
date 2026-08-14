@@ -1,3 +1,41 @@
+# Task: UW 40k daily quote burned by 75% before cash open (2026-08-14)
+
+## Dependency graph
+
+- T1 depends_on: [] - Workflow inventory: schedulers, pagination, on-demand, cache/retry
+- T2 depends_on: [T1] - Burn model vs 30000/40000 at 09:04 and 40000 at 15:45 UTC
+- T3 depends_on: [T2] - Show-me + ranked cut plan
+- U1 depends_on: [T3] - Signals timer 60 min + FastAPI 3600s cache window
+- U2 depends_on: [U1] - UWClient does not retry daily-cap 429
+- U3 depends_on: [U2] - Process-wide daily budget refuses NDX scans after 50 percent
+- U4 depends_on: [U3] - Shared ohlc/iv/contracts/gex fetch for theta + strength
+- U5 depends_on: [U4] - Slim strength live UW calls; keep 7-group scoring
+- U6 depends_on: [U5] - Disk UW response cache with endpoint TTLs
+- U7 depends_on: [U6] - Ticker-info stock-state TTL; previous-close already day-cached
+- U8 depends_on: [U7] - IB-first daily bars in shared OHLC path
+- U9 depends_on: [U8] - GET /uw/usage + laptop data-refresh stay-unloaded note
+
+## Checklist
+
+- [x] T1 Inventory
+- [x] T2 Burn model
+- [x] T3 Plan artifact
+- [x] U1 Cadence
+- [x] U2 No daily-cap retry
+- [x] U3 Budget guard
+- [x] U4 Shared fetch
+- [x] U5 Slim strength
+- [x] U6 Disk cache
+- [x] U7 Ticker cache
+- [x] U8 IB-first OHLC
+- [x] U9 Usage API + launchd note
+
+## Review
+
+U1-U9 green. Signals timer hourly ET; FastAPI 3600s cooldown; ticker scans still bypass. Daily-cap 429 not retried in UWClient and fetch_flow. NDX blocked at 50% of 40k; explicit tickers not. Empty NDX persist still refuses last-good clobber. GET /uw/usage + launchd stay-unloaded note. Verify: cloud 3, scripts 221+8, vitest 20.
+
+---
+
 # Task: Theta scanner serving empty NDX snapshot (2026-08-14)
 
 ## Dependency graph

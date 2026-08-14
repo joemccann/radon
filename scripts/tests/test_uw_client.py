@@ -189,6 +189,21 @@ class TestRetryLogic:
         assert result == {"data": "ok"}
         assert mock_session.get.call_count == 2
 
+    def test_daily_request_limit_429_does_not_retry(self, client, mock_session):
+        """Daily quota 429s are exhausted; retries still count against the cap."""
+        rate_limit_resp = _make_response(
+            429,
+            {"message": "daily request limit of 40000"},
+            reason="Too Many Requests",
+        )
+        mock_session.get.return_value = rate_limit_resp
+
+        with patch("time.sleep") as mock_sleep:
+            with pytest.raises(UWRateLimitError):
+                client._get("stock/AAPL/info")
+        assert mock_session.get.call_count == 1
+        mock_sleep.assert_not_called()
+
     def test_retry_on_500(self, client, mock_session):
         """500 responses should be retried."""
         error_resp = _make_response(500, {}, reason="Internal Server Error")
@@ -305,6 +320,96 @@ class TestRetryLogic:
         with patch("time.sleep"):
             result = client._get("stock/AAPL/info")
         assert result == {"data": "ok"}
+
+    def test_http_attempt_records_budget_hit(self, client, mock_session, monkeypatch):
+        hits: list[int] = []
+        monkeypatch.setattr("clients.uw_client.record_hit", lambda: hits.append(1))
+        mock_session.get.return_value = _make_response(200, {"data": "ok"})
+        assert client._get("stock/AAPL/info") == {"data": "ok"}
+        assert hits == [1]
+
+    def test_in_memory_cache_hit_does_not_record_budget_hit(self, client, monkeypatch):
+        from utils.uw_cache import clear_cache, make_key, set_cached
+
+        hits: list[int] = []
+        monkeypatch.setattr("clients.uw_client.record_hit", lambda: hits.append(1))
+        clear_cache()
+        set_cached(make_key("stock/AAPL/info", None), {"data": "from-cache"})
+        client._session.get = lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("HTTP must not run on cache hit")
+        )
+        assert client._get("stock/AAPL/info") == {"data": "from-cache"}
+        assert hits == []
+
+    def test_disk_cache_hit_after_memory_miss_skips_http_and_budget(
+        self, client, monkeypatch, tmp_path
+    ):
+        from utils import uw_cache
+        from utils.uw_cache import clear_cache, get_disk_cached, make_key, set_disk_cached
+
+        hits: list[int] = []
+        monkeypatch.setattr("clients.uw_client.record_hit", lambda: hits.append(1))
+        monkeypatch.setattr(uw_cache, "CACHE_DIR", tmp_path / "uw_http_cache")
+        clear_cache()
+        payload = {"data": "from-disk"}
+        set_disk_cached(make_key("stock/AAPL/info", None), "stock/AAPL/info", payload)
+        assert get_disk_cached(make_key("stock/AAPL/info", None)) == payload
+        client._session.get = lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("HTTP must not run on disk cache hit")
+        )
+        assert client._get("stock/AAPL/info") == payload
+        assert hits == []
+
+    def test_http_200_writes_disk_and_second_get_skips_http(
+        self, client, monkeypatch, tmp_path
+    ):
+        from utils import uw_cache
+        from utils.uw_cache import clear_cache, get_disk_cached, make_key
+
+        hits: list[int] = []
+        monkeypatch.setattr("clients.uw_client.record_hit", lambda: hits.append(1))
+        monkeypatch.setattr(uw_cache, "CACHE_DIR", tmp_path / "uw_http_cache")
+        clear_cache()
+        payload = {"data": {"ticker": "AAPL"}}
+        client._session.get = MagicMock(return_value=_make_response(200, payload))
+        assert client._get("stock/AAPL/info") == payload
+        assert client._session.get.call_count == 1
+        assert hits == [1]
+        assert get_disk_cached(make_key("stock/AAPL/info", None)) == payload
+
+        clear_cache()
+        assert client._get("stock/AAPL/info") == payload
+        assert client._session.get.call_count == 1
+        assert hits == [1]
+
+    def test_http_4xx_is_not_written_to_disk(self, client, monkeypatch, tmp_path):
+        from utils import uw_cache
+        from utils.uw_cache import clear_cache, get_disk_cached, make_key
+
+        monkeypatch.setattr(uw_cache, "CACHE_DIR", tmp_path / "uw_http_cache")
+        clear_cache()
+        client._session.get = MagicMock(
+            return_value=_make_response(404, {"message": "Not found"}, reason="Not Found")
+        )
+        with pytest.raises(UWNotFoundError):
+            client._get("stock/AAPL/info")
+        assert get_disk_cached(make_key("stock/AAPL/info", None)) is None
+        assert list((tmp_path / "uw_http_cache").glob("*.json")) == []
+
+    def test_http_5xx_is_not_written_to_disk(self, client, monkeypatch, tmp_path):
+        from utils import uw_cache
+        from utils.uw_cache import clear_cache, get_disk_cached, make_key
+
+        monkeypatch.setattr(uw_cache, "CACHE_DIR", tmp_path / "uw_http_cache")
+        clear_cache()
+        client._session.get = MagicMock(
+            return_value=_make_response(500, {}, reason="Internal Server Error")
+        )
+        with patch("time.sleep"):
+            with pytest.raises(UWServerError):
+                client._get("stock/AAPL/info")
+        assert get_disk_cached(make_key("stock/AAPL/info", None)) is None
+        assert list((tmp_path / "uw_http_cache").glob("*.json")) == []
 
 
 # ══════════════════════════════════════════════════════════════════════

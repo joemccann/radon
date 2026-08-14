@@ -109,6 +109,7 @@ data/menthorq_cache/
 data/menthorq_dashboard/
 data/seasonality_cache/
 data/darkpool_cache/
+data/uw_http_cache/
 data/price_history_cache/
 data/rv_ratio/
 data/service_health/

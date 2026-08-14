@@ -23,7 +23,9 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from clients.uw_client import UWAPIError, UWClient, UWRateLimitError
-from utils.scan_coverage import coverage_block, should_persist_scan
+from utils.scan_coverage import coverage_block, payload_has_candidates, should_persist_scan
+from utils.uw_budget import should_block_universe_scan
+from utils.uw_surface import fetch_surface
 
 try:
     from db.scan_mirror import mirror_scan_snapshot  # type: ignore
@@ -494,8 +496,8 @@ def scan_ticker(
         client = own_client
     errors: List[str] = []
     try:
-        ohlc = client.get_stock_ohlc(ticker, candle_size="1d")
-        prices = _prices_from_ohlc(ohlc)
+        surface = fetch_surface(client, ticker)
+        prices = _prices_from_ohlc(surface["ohlc"])
         if len(prices) < 21:
             errors.append("insufficient_price_history")
             return None
@@ -504,7 +506,7 @@ def scan_ticker(
         hv60 = calculate_hv(prices, 60) or hv20
 
         try:
-            current_iv, _iv_rank = _latest_iv(client.get_iv_rank(ticker))
+            current_iv, _iv_rank = _latest_iv(surface["iv_rank"])
         except UWRateLimitError:
             raise
         except Exception as exc:
@@ -514,7 +516,7 @@ def scan_ticker(
             current_iv = hv20
 
         try:
-            contracts = client.get_option_contracts(ticker, exclude_zero_vol_chains=True, maybe_otm_only=True)
+            contracts = surface["contracts"]
         except UWRateLimitError:
             raise
         except Exception as exc:
@@ -530,7 +532,7 @@ def scan_ticker(
 
         try:
             dealer_support, net_gex, gex_flip = analyze_dealer_support(
-                client.get_greek_exposure_by_strike(ticker),
+                surface["gex_strike"],
                 spot,
             )
         except UWRateLimitError:
@@ -703,6 +705,21 @@ def scan_universe(
     resolved, source = resolve_tickers(tickers, preset)
     if limit is not None and limit > 0:
         resolved = resolved[:limit]
+    if not tickers and should_block_universe_scan():
+        print(
+            f"UW daily budget block; skipping universe scan ({source})",
+            file=sys.stderr,
+        )
+        prior = _read_cache_file(_CACHE_PATH)
+        if payload_has_candidates(prior):
+            return prior
+        return build_output(
+            [], source, len(resolved), requested_tickers=resolved,
+            params={"min_dte": min_dte, "max_dte": max_dte, "min_credit": min_credit},
+            coverage=coverage_block(
+                tickers=len(resolved), ok=0, no_setup=0, rate_limited=0, errors=0,
+            ),
+        )
     print(f"Scanning {len(resolved)} tickers for theta harvest ({source})...", file=sys.stderr)
 
     results: List[ThetaCandidate] = []
