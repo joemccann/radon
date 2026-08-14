@@ -12,6 +12,10 @@ import {
   readOrdersSnapshotFromDb,
   type OrdersSnapshot,
 } from "@/lib/orders/readOrdersFromDb";
+import {
+  isWorkingOrderMissingDetail,
+  workingOrderMissingMessage,
+} from "@/lib/orders/workingOrders";
 
 export const runtime = "nodejs";
 
@@ -98,10 +102,13 @@ export async function POST(request: Request): Promise<Response> {
     durableRateTier: "C",
   });
   if (!access.ok) return access.response;
+  let orderId = 0;
+  let permId = 0;
+  let existingTif: string | undefined;
   try {
     const body = (await request.json()) as ModifyBody;
-    const orderId = body.orderId ?? 0;
-    const permId = body.permId ?? 0;
+    orderId = body.orderId ?? 0;
+    permId = body.permId ?? 0;
     const newPrice = body.newPrice;
     const newQuantity = body.newQuantity;
     const replaceOrder = body.replaceOrder;
@@ -197,6 +204,9 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
 
+    const prior = await readOrdersSnapshotBestEffort();
+    existingTif = findOpenOrder(prior, orderId, permId)?.tif;
+
     const result = await radonFetch<Record<string, unknown>>("/orders/modify", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -235,6 +245,19 @@ export async function POST(request: Request): Promise<Response> {
     });
   } catch (error) {
     if (error instanceof RadonApiError) {
+      if (isWorkingOrderMissingDetail(error.detail)) {
+        try {
+          await radonFetch("/orders/refresh", { method: "POST", timeout: 10_000 });
+        } catch {
+          // Non-fatal: still return the missing-order copy
+        }
+        const orders = await readOrdersSnapshotBestEffort();
+        const tif = existingTif ?? findOpenOrder(orders, orderId, permId)?.tif;
+        return NextResponse.json(
+          { error: workingOrderMissingMessage(tif), orders },
+          { status: error.status },
+        );
+      }
       return NextResponse.json({ error: error.detail }, { status: error.status });
     }
     return NextResponse.json({ error: "Order modification failed" }, { status: 500 });

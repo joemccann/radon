@@ -11,6 +11,8 @@ import asyncio
 import logging
 from typing import Optional
 
+from utils.working_orders import working_order_missing_message
+
 logger = logging.getLogger("radon.pool_order_manage")
 
 
@@ -45,7 +47,10 @@ async def pool_cancel_order(
     """
     trade = await asyncio.to_thread(_find_trade, client, order_id, perm_id)
     if trade is None:
-        return {"status": "error", "message": f"Trade not found (orderId={order_id}, permId={perm_id})"}
+        return {
+            "status": "error",
+            "message": f"{working_order_missing_message()} (orderId={order_id}, permId={perm_id})",
+        }
 
     status = trade.orderStatus.status
     if status in ("Filled", "Cancelled", "ApiCancelled"):
@@ -101,7 +106,10 @@ async def pool_modify_order(
     """
     trade = await asyncio.to_thread(_find_trade, client, order_id, perm_id)
     if trade is None:
-        return {"status": "error", "message": f"Trade not found (orderId={order_id}, permId={perm_id})"}
+        return {
+            "status": "error",
+            "message": f"{working_order_missing_message()} (orderId={order_id}, permId={perm_id})",
+        }
 
     status = trade.orderStatus.status
     if status in ("Filled", "Cancelled", "ApiCancelled"):

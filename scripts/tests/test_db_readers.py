@@ -92,6 +92,28 @@ def test_reads_open_orders_from_table(readers, conn):
     assert readers.read_open_orders(conn) == [{"permId": 9001, "symbol": "AAPL"}]
 
 
+def test_read_open_orders_drops_prior_session_day(readers, conn):
+    conn.execute(
+        "INSERT INTO open_orders (perm_id, payload, updated_at) VALUES (?, ?, ?)",
+        (
+            1857171561,
+            json.dumps({"permId": 1857171561, "tif": "DAY", "symbol": "CBRS P230"}),
+            "2026-08-13T19:59:51Z",
+        ),
+    )
+    conn.execute(
+        "INSERT INTO open_orders (perm_id, payload, updated_at) VALUES (?, ?, ?)",
+        (
+            2128244184,
+            json.dumps({"permId": 2128244184, "tif": "GTC", "symbol": "META P560"}),
+            "2026-08-13T19:59:51Z",
+        ),
+    )
+    conn.commit()
+
+    assert [row["permId"] for row in readers.read_open_orders(conn)] == [2128244184]
+
+
 def test_reads_executed_orders_from_table(readers, conn):
     conn.execute(
         """

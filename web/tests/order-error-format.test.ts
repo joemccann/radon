@@ -13,6 +13,17 @@ describe("formatOrderError", () => {
     });
   });
 
+  it("rewrites a missing working-order lookup to operator copy", () => {
+    expect(formatOrderError("Radon API 502: Trade not found (orderId=291, permId=1857171561)")).toEqual({
+      summary: "Order is no longer working at IB.",
+      details: ["It may have filled or been cancelled."],
+    });
+    expect(formatOrderError("This DAY order is no longer working at IB. DAY orders end at the regular-session close.")).toEqual({
+      summary: "Order is no longer working at IB.",
+      details: ["DAY orders end at the regular-session close."],
+    });
+  });
+
   it("collapses generic IB cancellation text to a readable sentence", () => {
     expect(formatOrderError("Radon API 502: Order rejected by IB: Cancelled")).toEqual({
       summary: "Order rejected by IB.",
