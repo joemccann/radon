@@ -1,5 +1,11 @@
 # Lessons
 
+## 2026-08-14 — Stacked-deploy stop-clean is still Result=signal collateral
+
+- A 20-min window around the *latest* green marker misses stop-clean of deploy N when deploy N+2 greens 34 min later. Between stacked deploys the transition journal is gone and the previous green sits *before* the kill, so `marker - failed_at` is negative.
+- Discriminating check: `InactiveEnterTimestamp` plus runner dir mtimes / green marker; sibling oneshots failing `Result=signal` the same second; edge and `/health/lite` stay up.
+- Classifier: 60-min age cap; in-flight journal OR kill-after-last-green OR kill-before-latest-green inside that window → P3. Exit-code / timeout / start-limit-hit stay P1.
+
 ## 2026-08-14 — UW daily quota on a oneshot is a unit P1
 
 - Skew's heartbeat embargo does not cover `Type=oneshot` writers. `fetch_oi_changes.py` printed the 40k daily-cap error and `sys.exit(1)`; `radon-oi-changes.service` went failed and the unit watchdog paged. NRestarts=0 is normal for oneshot.
