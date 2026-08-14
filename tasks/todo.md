@@ -1,3 +1,43 @@
+# Task: Proposal statement leaks TRUE_THETA token (2026-08-14)
+
+## Dependency graph
+
+- T1 depends_on: [] - Failing tests: engine setup tokens become ticker + structure
+- T2 depends_on: [T1] - Skip ALL_CAPS setup tokens in statementFor
+- T3 depends_on: [T2] - Focused vitest + Playwright + browser
+
+## Checklist
+
+- [x] T1 Red tests
+- [x] T2 Production fix
+- [x] T3 Verify
+
+## Review
+
+`setup = "TRUE_THETA"` was dumped as the Proposed action headline. `statementFor` now skips ALL_CAPS engine tokens and prints ticker + structure (`AAPL SHORT 95P / 105C`). Prose setups still pass through. Vitest 59/59 (agent-derivations 38, agent-integration 10, scanner-hero 11). Playwright chromium 3/3 `e2e/theta-harvester-scanner.spec.ts` (desktop, mobile, alternatives). Screenshot: statement is `AAPL SHORT 95P / 105C`, not `TRUE_THETA`.
+
+---
+
+# Task: Stale DAY working order blocks modify (2026-08-14)
+
+## Dependency graph
+
+- T1 depends_on: [] - Failing tests: prior-session DAY filter + missing-order copy
+- T2 depends_on: [T1] - Filter snapshot reads; rewrite Trade not found; refresh on miss
+- T3 depends_on: [T2] - Focused vitest + pytest
+
+## Checklist
+
+- [x] T1 Red tests
+- [x] T2 Production fix
+- [x] T3 Verify
+
+## Review
+
+CBRS P230 BUY 35 @ 3.50 was a Thursday DAY order. IB cancelled it at the close. Turso still served it because orders-sync is RTH-only. Modify talks to live IB → Trade not found. Filter prior-ET-session DAY rows on read; rewrite the miss; refresh snapshot on miss. Vitest 38/38. Pytest 72 focused + 155 affected.
+
+---
+
 # Task: Correlation risk budget banner layout (2026-08-14)
 
 ## Dependency graph

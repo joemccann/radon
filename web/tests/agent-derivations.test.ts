@@ -336,6 +336,18 @@ describe("buildScannerProposal", () => {
     expect(proposal?.ticker).toBe("MU");
   });
 
+  it("replaces engine setup tokens with ticker + structure", () => {
+    expect(buildScannerProposal([candidate({ setup: "TRUE_THETA" })])?.statement).toBe(
+      "MU SHORT 95P / 105C",
+    );
+    expect(buildScannerProposal([candidate({ setup: "THETA_HARVEST" })])?.statement).toBe(
+      "MU SHORT 95P / 105C",
+    );
+    expect(buildScannerProposal([candidate({ setup: "DIRECTIONAL_DISGUISE" })])?.statement).toBe(
+      "MU SHORT 95P / 105C",
+    );
+  });
+
   it("lists the next ranked rows as alternatives, capped at three", () => {
     const proposal = buildScannerProposal([
       candidate(),

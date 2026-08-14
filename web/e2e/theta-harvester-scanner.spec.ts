@@ -217,6 +217,9 @@ test.describe("theta harvester scanner", () => {
     await expect(page.getByLabel("Ticker symbol")).toBeVisible();
     await expect(section.locator(".theta-card").first()).toContainText("AAPL");
     await expect(section.locator(".theta-card").first()).toContainText("TRUE THETA");
+    const proposal = page.getByRole("region", { name: "Proposed action" });
+    await expect(proposal).toContainText("AAPL SHORT 95P / 105C");
+    await expect(proposal).not.toContainText("TRUE_THETA");
 
     const geometry = await page.evaluate(() => ({
       scrollWidth: document.documentElement.scrollWidth,
@@ -251,6 +254,8 @@ test.describe("theta harvester scanner", () => {
 
     const card = page.getByRole("region", { name: "Proposed action" });
     await expect(card).toBeVisible();
+    await expect(card.getByText("AAPL SHORT 95P / 105C")).toBeVisible();
+    await expect(card).not.toContainText("TRUE_THETA");
     await expect(card).toContainText("ALTERNATIVES");
     await expect(card.getByText("AMAT SHORT 95P / 105C")).toBeVisible();
     await expect(card.getByText("MSTR SHORT 95P / 105C")).toBeVisible();
