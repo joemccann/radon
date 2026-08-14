@@ -18,7 +18,7 @@ import { buildAnalysisSources, buildFollowUps } from "../lib/agent/analysisSourc
 import { graphToRunningTasks, runReportToTasks } from "../lib/agent/workflowTasks";
 import { buildScannerProposal, isActionable } from "../lib/agent/scannerProposal";
 import type { RunReport } from "../app/workflow/workflowClient";
-import type { AssistantToolEvent, ThetaHarvesterResult } from "../lib/types";
+import type { AssistantToolEvent, ThetaHarvesterResult, ThetaHarvesterStructure } from "../lib/types";
 
 // ── EngineTrace ────────────────────────────────────────────────────────────
 
@@ -223,12 +223,54 @@ describe("graphToRunningTasks", () => {
 
 // ── ProposalCard ───────────────────────────────────────────────────────────
 
+function harvestStructure(): ThetaHarvesterStructure {
+  return {
+    expiry: "20260717",
+    dte: 23,
+    net_delta: -0.01,
+    theta: 0.075,
+    gamma: -0.0042,
+    vega: -0.038,
+    credit: 1.9,
+    short_put: {
+      symbol: "AAPL260717P00095000",
+      expiry: "20260717",
+      strike: 95,
+      right: "P",
+      iv: 35,
+      delta: -0.15,
+      theta: -0.04,
+      gamma: 0.002,
+      vega: 0.018,
+      bid: 0.9,
+      ask: 1.1,
+      volume: 200,
+      open_interest: 900,
+    },
+    short_call: {
+      symbol: "AAPL260717C00105000",
+      expiry: "20260717",
+      strike: 105,
+      right: "C",
+      iv: 35,
+      delta: 0.16,
+      theta: -0.035,
+      gamma: 0.0022,
+      vega: 0.02,
+      bid: 0.8,
+      ask: 1.0,
+      volume: 180,
+      open_interest: 850,
+    },
+  };
+}
+
 function candidate(overrides: Partial<ThetaHarvesterResult> = {}): ThetaHarvesterResult {
   return {
     ticker: "MU",
     score: 97,
     verdict: "THETA_HARVEST",
-    structure: "short strangle" as ThetaHarvesterResult["structure"],
+    structure: harvestStructure(),
     spot: 142,
     iv: 0.51,
     hv20: 0.33,
@@ -303,7 +345,35 @@ describe("buildScannerProposal", () => {
       candidate({ ticker: "QCOM", score: 87 }),
     ]);
     expect(proposal?.alternatives).toHaveLength(3);
-    expect(proposal?.alternatives[0]).toEqual({ id: "NVDA", label: "NVDA short strangle", meta: "SCORE 91" });
+    expect(proposal?.alternatives[0]).toEqual({
+      id: "NVDA",
+      label: "NVDA SHORT 95P / 105C",
+      meta: "SCORE 91",
+    });
     expect(proposal?.alternatives[1].meta).toBe("WATCHLIST");
+  });
+
+  it("never interpolates a structure object as [object Object] in labels or fallback statement", () => {
+    const proposal = buildScannerProposal([
+      candidate(),
+      candidate({ ticker: "AMAT", score: 91 }),
+      candidate({ ticker: "MSTR", score: 88 }),
+      candidate({ ticker: "TTWO", score: 87 }),
+    ]);
+    expect(proposal).not.toBeNull();
+    for (const alt of proposal!.alternatives) {
+      expect(alt.label).toMatch(/^(AMAT|MSTR|TTWO) SHORT 95P \/ 105C$/);
+      expect(alt.label).not.toContain("[object Object]");
+    }
+
+    const fallback = buildScannerProposal([candidate({ setup: "   " })]);
+    expect(fallback?.statement).not.toContain("[object Object]");
+    expect(fallback?.statement).toContain("MU SHORT 95P / 105C");
+  });
+
+  it("uses ticker + formatted structure when setup is empty", () => {
+    const proposal = buildScannerProposal([candidate({ setup: "" })]);
+    expect(proposal?.statement).toBe("MU SHORT 95P / 105C — IV/RV edge 18.0, range score 82.");
+    expect(proposal?.statement).not.toContain("[object Object]");
   });
 });

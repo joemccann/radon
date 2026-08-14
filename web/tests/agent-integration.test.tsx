@@ -16,7 +16,7 @@ import TaskRuns from "../components/agent/TaskRuns";
 import { runReportToTasks } from "../lib/agent/workflowTasks";
 import ProposalCard from "../components/agent/ProposalCard";
 import { buildScannerProposal } from "../lib/agent/scannerProposal";
-import type { ThetaHarvesterResult } from "../lib/types";
+import type { ThetaHarvesterResult, ThetaHarvesterStructure } from "../lib/types";
 
 afterEach(cleanup);
 
@@ -107,12 +107,54 @@ describe("TaskRuns — workflow wiring", () => {
   });
 });
 
+function harvestStructure(): ThetaHarvesterStructure {
+  return {
+    expiry: "20260717",
+    dte: 23,
+    net_delta: -0.01,
+    theta: 0.075,
+    gamma: -0.0042,
+    vega: -0.038,
+    credit: 1.9,
+    short_put: {
+      symbol: "AAPL260717P00095000",
+      expiry: "20260717",
+      strike: 95,
+      right: "P",
+      iv: 35,
+      delta: -0.15,
+      theta: -0.04,
+      gamma: 0.002,
+      vega: 0.018,
+      bid: 0.9,
+      ask: 1.1,
+      volume: 200,
+      open_interest: 900,
+    },
+    short_call: {
+      symbol: "AAPL260717C00105000",
+      expiry: "20260717",
+      strike: 105,
+      right: "C",
+      iv: 35,
+      delta: 0.16,
+      theta: -0.035,
+      gamma: 0.0022,
+      vega: 0.02,
+      bid: 0.8,
+      ask: 1.0,
+      volume: 180,
+      open_interest: 850,
+    },
+  };
+}
+
 describe("ProposalCard — scanner wiring", () => {
   const actionable: ThetaHarvesterResult = {
     ticker: "MU",
     score: 97,
     verdict: "THETA_HARVEST",
-    structure: "short strangle" as ThetaHarvesterResult["structure"],
+    structure: harvestStructure(),
     spot: 142,
     iv: 0.51,
     hv20: 0.33,
@@ -166,6 +208,30 @@ describe("ProposalCard — scanner wiring", () => {
 
     fireEvent.click(screen.getByText("Accept"));
     expect(onAccept).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders alternative labels with ticker and strike legs, not [object Object]", () => {
+    const proposal = buildScannerProposal([
+      { ...actionable, ticker: "MU", score: 97 },
+      { ...actionable, ticker: "AMAT", score: 91, setup: "AMAT TRUE_THETA" },
+      { ...actionable, ticker: "MSTR", score: 88 },
+      { ...actionable, ticker: "TTWO", score: 87 },
+    ])!;
+    render(
+      <ProposalCard
+        engines={["THETA"]}
+        statement={proposal.statement}
+        confidence={proposal.confidence}
+        alternatives={proposal.alternatives}
+        onAccept={() => {}}
+        onDismiss={() => {}}
+      />,
+    );
+
+    expect(screen.getByText("AMAT SHORT 95P / 105C")).toBeTruthy();
+    expect(screen.getByText("MSTR SHORT 95P / 105C")).toBeTruthy();
+    expect(screen.getByText("TTWO SHORT 95P / 105C")).toBeTruthy();
+    expect(screen.queryByText(/\[object Object\]/)).toBeNull();
   });
 });
 
