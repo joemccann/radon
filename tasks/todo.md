@@ -1,3 +1,43 @@
+# Task: Pushover when a release is live (2026-08-14)
+
+## Dependency graph
+
+- T1 depends_on: [] - Failing tests: live payload is priority 0; deploy.sh calls after gate
+- T2 depends_on: [T1] - `scripts/deploy_notify.py` + hook on successful deploy only
+- T3 depends_on: [T2] - Focused pytest
+
+## Checklist
+
+- [x] T1 Red tests
+- [x] T2 Notify after live gate
+- [ ] T3 Verify
+
+## Review
+
+<!-- filled after green -->
+
+---
+
+# Task: CBRS stock book collapsed to empty L1 panel (2026-08-14)
+
+## Dependency graph
+
+- T1 depends_on: [] - Failing tests: L1 BBO montage + depth props wiring
+- T2 depends_on: [T1] - Seed L1 BBO when L2 is missing; pass depths/tape through shell
+- T3 depends_on: [T2] - Grow cockpit book grid; focused vitest
+
+## Checklist
+
+- [x] T1 Red tests
+- [x] T2 BookTab seed + WorkspaceShell props
+- [x] T3 CSS fill + focused tests
+
+## Review
+
+STOCK view with no entitled L2 rendered the 3-cell L1 widget inside a full-height empty panel. Seed a one-level `L1 BBO` montage from bid/ask sizes (same as combo legs). Pass live `depths`/`tape` into memoized `WorkspaceSections` so the book updates when L2 arrives without a price tick.
+
+---
+
 # Task: Grok auto-responds to iPhone P1 service pages (2026-08-14)
 
 ## Dependency graph

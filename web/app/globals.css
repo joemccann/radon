@@ -7915,6 +7915,15 @@ body[data-mobile="true"] .orders-command-strip__jump:active {
   flex-direction: column;
   min-height: 0;
 }
+.book-region .book-window .book-body-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+.book-region .book-window .book-montage {
+  min-height: 0;
+  overflow: auto;
+}
 
 /* ── act column: ticket (top) + position-or-FLAT (bottom), both live ──
    The region owns the single internal divider between ticket and position; the

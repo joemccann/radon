@@ -5,18 +5,26 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { useTickerDetail } from "@/lib/TickerDetailContext";
 import { isDeckKey, legacyTabToDeck, type DeckKey } from "@/lib/legacyTabToDeck";
+import type { DepthBook, Trade } from "@/lib/pricesProtocol";
 import TickerDetailContent from "./TickerDetailContent";
 
 type TickerWorkspaceProps = {
   ticker: string;
   theme: "dark" | "light";
+  depths?: Record<string, DepthBook>;
+  tape?: Record<string, Trade[]>;
 };
 
-export default function TickerWorkspace({ ticker, theme }: TickerWorkspaceProps) {
+export default function TickerWorkspace({
+  ticker,
+  theme,
+  depths: depthsProp,
+  tape: tapeProp,
+}: TickerWorkspaceProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  // portfolio/orders are reactive context state (must re-render when WorkspaceShell
-  // syncs after client navigation). High-frequency feeds stay ref snapshots.
+  // portfolio/orders are reactive context state. Depths/tape arrive as props
+  // from WorkspaceShell so memoized WorkspaceSections still re-renders the book.
   const {
     getPrices,
     getFundamentals,
@@ -29,8 +37,8 @@ export default function TickerWorkspace({ ticker, theme }: TickerWorkspaceProps)
 
   const prices = getPrices();
   const fundamentals = getFundamentals();
-  const depths = getDepths();
-  const tape = getTape();
+  const depths = depthsProp ?? getDepths();
+  const tape = tapeProp ?? getTape();
 
   // Deck model: `?deck=<c|p|n|r|s|i>` opens a reference deck; no deck = book-first
   // landing (book + ticket + position docked, no overlay). Legacy `?tab=` values
