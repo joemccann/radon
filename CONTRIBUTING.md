@@ -10,6 +10,7 @@ The canonical developer runbook is `CLAUDE.md`. Read it before making changes. F
 - Red/green TDD is required: write a failing test first, make it pass, then commit.
   - Web: Vitest.
   - Python: pytest.
+- Docs stay a thin index. `docs/owners.json` maps path globs to one owner file. If you change a mapped path, update an owner in the same commit or write `docs-skip: <reason>` in the message. Do not add a changelog to README.
 
 ## CI and deploy
 
