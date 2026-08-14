@@ -58,7 +58,10 @@ from watchdog import pages as pages_mod
 
 
 GROK_TIMEOUT_SECS = 3600
-LOCK_STALE_SECS = 3 * 3600
+# No cycle may legally outlive the grok timeout, so a lock older than that plus
+# a teardown margin is dead by definition. A killed cycle skips its `finally`,
+# and a TTL wider than this blackholes every queued page until it lapses.
+LOCK_STALE_SECS = GROK_TIMEOUT_SECS + 300
 CACHE_REL = Path("data") / "cache" / "grok_pages"
 LOCK_NAME = ".responder.lock"
 
@@ -114,10 +117,32 @@ def cache_dir(repo_root: Path) -> Path:
     return path
 
 
+def _holder_is_running(lock_path: Path) -> bool:
+    """Is the PID inside the lock still alive? Unreadable content means unknown.
+
+    Unknown holds the lock — only the TTL may break a lock we cannot disprove.
+    """
+    try:
+        pid = int(lock_path.read_text().strip())
+    except (OSError, ValueError):
+        return True
+    if pid <= 0:
+        return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:  # alive, owned by another user
+        return True
+    except OSError:
+        return True
+    return True
+
+
 def acquire_lock(lock_path: Path, now: datetime) -> bool:
     if lock_path.exists():
         age = now.timestamp() - lock_path.stat().st_mtime
-        if age < LOCK_STALE_SECS:
+        if age < LOCK_STALE_SECS and _holder_is_running(lock_path):
             return False
         lock_path.unlink(missing_ok=True)
     lock_path.parent.mkdir(parents=True, exist_ok=True)

@@ -76,6 +76,25 @@ Pure functions:
   ratio + last change); on no material change refresh snapshot + heartbeat
   only (`rows_changed=False`). On change, upsert history rows then snapshot.
 
+### Parent lag — stale vs embargoed
+
+`run()` refuses to publish a fresh `ok` on top of a parent that never caught
+up: `max(skew_history.date) < last_completed_session_date(now)` raises.
+
+One lag is expected, not corruption. When UW's daily cap is spent,
+`fetch_skew.py` keeps its last snapshot and writes a `next_attempt_at`
+deadline to `data/skew_uw_embargo.json`, so `skew_history` sits a session
+behind until the 20:00 ET reset. `fetch_skew2d.py` reads that deadline through
+`fetch_skew.uw_embargo_until(now)` (read-only; the parent owns clearing) and,
+while it is live, holds instead of raising: recompute on the sessions it has,
+refresh the snapshot, write `data/skew2d.json`, and record `service_health`
+`error` carrying the same `next_attempt_at`. No history rows are upserted —
+the missing session has none. The watchdog's error bucket fires once through
+hysteresis and then stays quiet until the deadline lapses.
+
+Raising here instead fails `radon-skew2d.service`, and the unit alarm pages a
+P1 every run for a condition that clears itself (2026-08-14).
+
 Persistence order every cycle:
 
 1. `writer.ensure_no_replica_for_writers()`

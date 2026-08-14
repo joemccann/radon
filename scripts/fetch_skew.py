@@ -409,6 +409,16 @@ def _clear_uw_embargo() -> None:
     _embargo_path().unlink(missing_ok=True)
 
 
+def uw_embargo_until(now: datetime) -> Optional[datetime]:
+    """Active UW-cap deadline, or None. Read-only — the parent owns clearing.
+
+    Derived indicators read this to tell an explained parent lag apart from a
+    genuinely broken parent.
+    """
+    deadline = _load_uw_embargo()
+    return deadline if deadline is not None and now < deadline else None
+
+
 def _uw_embargo_active(now: datetime) -> Optional[str]:
     deadline = _load_uw_embargo()
     if deadline is None or now >= deadline:
