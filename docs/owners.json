@@ -1,0 +1,39 @@
+{
+  "rules": [
+    {
+      "id": "indicators",
+      "globs": ["docs/indicators/*.md"],
+      "owners": ["docs/indicators/README.md"],
+      "note": "Every spec needs an index row. README.md itself is the owner."
+    },
+    {
+      "id": "equibles",
+      "globs": [
+        "cloud/services/radon-equibles-*",
+        "scripts/fetch_equibles_*.py"
+      ],
+      "owners": ["docs/equibles-api.md", "docs/operations.md"]
+    },
+    {
+      "id": "incidents",
+      "globs": [
+        "scripts/incident_watchdog/**",
+        "scripts/incident_responder.py",
+        "cloud/scripts/nextjs_db_watchdog.py",
+        "cloud/services/radon-incident-watchdog.*",
+        "cloud/services/radon-nextjs-db-watchdog.*"
+      ],
+      "owners": ["docs/incident-runbook.md"]
+    },
+    {
+      "id": "ops-timers",
+      "globs": ["cloud/services/*.timer"],
+      "owners": ["docs/operations.md", "docs/cloud-services.md"]
+    },
+    {
+      "id": "cli",
+      "globs": [".pi/commands.json"],
+      "owners": ["docs/scripts-reference.md"]
+    }
+  ]
+}
