@@ -158,6 +158,11 @@ data/cache/
 data/locks/
 data/nav_history.jsonl
 
+# setup-grok-page-responder.sh drops this in the dedicated VPS clone. Untracked
+# it reads as dirty work, and sync_remote_clone then refuses to fast-forward —
+# pinning the responder to whatever grok last committed.
+/.radon-page-responder
+
 # Verification screenshots (generated during UI work)
 /internals-panel.png
 web/internals-panel.png
