@@ -26,7 +26,7 @@ import { SigMeter } from "./SigMeter";
 import SectionEmptyState from "./SectionEmptyState";
 import type { BlotterTrade, DiscoverCandidate, ExecutedOrder, FlowAnalysisPosition, OpenOrder, OrdersData, PortfolioData, PortfolioPosition, ScannerSignal, TradeEntry, WorkspaceSection } from "@/lib/types";
 import { useOrderActions } from "@/lib/OrderActionsContext";
-import type { PriceData } from "@/lib/pricesProtocol";
+import type { DepthBook, PriceData, Trade } from "@/lib/pricesProtocol";
 import { optionKey } from "@/lib/pricesProtocol";
 import { useJournal } from "@/lib/useJournal";
 import {
@@ -4114,12 +4114,14 @@ type WorkspaceSectionsProps = {
   portfolioLastSync?: string | null;
   orders?: OrdersData | null;
   prices?: Record<string, PriceData>;
+  depths?: Record<string, DepthBook>;
+  tape?: Record<string, Trade[]>;
   tickerParam?: string;
   theme?: "dark" | "light";
   marketState?: MarketState;
 };
 
-function WorkspaceSections({ section, portfolio, portfolioLastSync, orders, prices, tickerParam, theme, marketState }: WorkspaceSectionsProps) {
+function WorkspaceSections({ section, portfolio, portfolioLastSync, orders, prices, depths, tape, tickerParam, theme, marketState }: WorkspaceSectionsProps) {
   switch (section) {
     case "dashboard":
       return null;
@@ -4161,7 +4163,7 @@ function WorkspaceSections({ section, portfolio, portfolioLastSync, orders, pric
       return <WatchlistContent prices={prices} portfolio={portfolio ?? null} orders={orders ?? null} />;
     case "ticker-detail":
       return tickerParam ? (
-        <TickerWorkspace ticker={tickerParam} theme={theme ?? "dark"} />
+        <TickerWorkspace ticker={tickerParam} theme={theme ?? "dark"} depths={depths} tape={tape} />
       ) : null;
     default:
       return <FlowSections tickerParam={tickerParam} />;

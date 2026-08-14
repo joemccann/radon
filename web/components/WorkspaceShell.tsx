@@ -562,6 +562,8 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
               portfolioLastSync={portfolioLastSync}
               orders={orders}
               prices={pricesForSections}
+              depths={activeSection === "ticker-detail" ? depths : undefined}
+              tape={activeSection === "ticker-detail" ? tape : undefined}
               tickerParam={tickerParam}
               theme={resolvedTheme}
               marketState={marketState}

@@ -22,6 +22,7 @@ import { IndexOptionOrderForm } from "@/components/ticker-detail/IndexOptionOrde
 import { OrderBook } from "@/components/ticker-detail/OrderBook";
 import { MicrostructureStrip } from "@/components/ticker-detail/MicrostructureStrip";
 import { buildSyntheticComboDepth } from "@/lib/book/syntheticComboDepth";
+import { buildL1BboDepth } from "@/lib/book/l1BboDepth";
 
 /* ─── Types ─── */
 
@@ -515,7 +516,26 @@ export default function BookTab({
   const selectedOptionLeg = optionLegBooks.find((leg) => leg.key === resolvedBookKey) ?? null;
   const isComboBook = bookKind === "combo" && comboLegBooks.length >= 2;
   const depth = useMemo(() => {
-    if (!isComboBook) return depths?.[resolvedBookKey] ?? null;
+    if (!isComboBook) {
+      const live = depths?.[resolvedBookKey] ?? null;
+      if (live?.entitled) return live;
+      const seedKind = live?.kind ?? bookKind ?? "stock";
+      if (seedKind === "future" || seedKind === "combo") return live;
+      const bidSize = priceData?.bidSize ?? null;
+      const askSize = priceData?.askSize ?? null;
+      if (bid != null && ask != null && bidSize != null && askSize != null) {
+        return buildL1BboDepth({
+          symbol: resolvedBookKey,
+          kind: seedKind,
+          bid,
+          ask,
+          bidSize,
+          askSize,
+          timestamp: priceData?.timestamp,
+        }) ?? live;
+      }
+      return live;
+    }
     let depthCount = 0;
     let bboCount = 0;
     const legs = comboLegBooks.map((leg) => {
@@ -527,16 +547,15 @@ export default function BookTab({
       const quote = prices[leg.key];
       const fallback = quote?.bid != null && quote.ask != null
         && quote.bidSize != null && quote.askSize != null
-        ? {
+        ? buildL1BboDepth({
             symbol: leg.key,
-            kind: leg.type === "Stock" ? "stock" as const : "option" as const,
-            bid: [{ price: quote.bid, size: quote.bidSize, marketMaker: null, exchange: null }],
-            ask: [{ price: quote.ask, size: quote.askSize, marketMaker: null, exchange: null }],
-            isSmartDepth: false,
-            feed: "L1 BBO",
-            entitled: true,
+            kind: leg.type === "Stock" ? "stock" : "option",
+            bid: quote.bid,
+            ask: quote.ask,
+            bidSize: quote.bidSize,
+            askSize: quote.askSize,
             timestamp: quote.timestamp,
-          }
+          })
         : null;
       if (fallback) bboCount += 1;
       return { direction: leg.direction, contracts: leg.contracts, book: fallback };
@@ -549,7 +568,7 @@ export default function BookTab({
         ? `HYBRID IMPLIED · ${depthCount} DEPTH + ${bboCount} BBO`
         : "IMPLIED LEG BBO",
     };
-  }, [comboLegBooks, depths, isComboBook, prices, resolvedBookKey]);
+  }, [ask, bid, bookKind, comboLegBooks, depths, isComboBook, priceData, prices, resolvedBookKey]);
   // depth.kind wins; else the kind resolved by the parent; else stock.
   const kind = depth?.kind ?? bookKind ?? "stock";
   // Time & Sales rides the same focused book key as depth. Newest-first from
