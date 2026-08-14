@@ -27,6 +27,7 @@ Sub-directory CLAUDE.md files auto-load when cwd is anywhere under that subtree.
 - `docs/options-structures.{json,md}` — structure taxonomy
 - `docs/brand-identity.md` — brand tokens, signal semantics, voice
 - `docs/cloud-services.md` — Hetzner runbook (services, schedulers, deploy)
+- `docs/grok-page-responder.md` — laptop P1 auto-fix + live-deploy Pushover
 - `docs/unusual_whales_api.md` — UW endpoint surface
 
 ---

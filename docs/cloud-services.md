@@ -334,6 +334,16 @@ does not mean Turso necessarily failed.
 
 journald on the VPS is on-box only (capped at 1G). A laptop launchd job (`~/Library/LaunchAgents/com.radon.journal-pull.plist`, daily + RunAtLoad) runs `scripts/journal_pull.sh`, which ssh-pulls `journalctl --since yesterday -o export | gzip` into `data/journal_archive/` (gitignored) and prunes local snapshots older than 30 days. Laptop-initiated by design — VPS-push to a sleeping laptop fails silently (media-rsync precedent). Inspect a snapshot with `zcat <file> | journalctl --file=- ...` or `gunzip` + `journalctl --root` import tooling.
 
+### Grok P1 responder (laptop-only)
+
+Closing the laptop does **not** break `app.radon.run`, but it **does** pause
+auto-fix. Hetzner writes `watchdog_pages` when a P1 Pushover is accepted;
+`com.radon.grok-page-responder` on the operator Mac claims the row and runs
+headless Grok. Live-deploy Pushover (`radon deploy live`) fires from
+`deploy.sh` on the VPS after the gate, so that page still lands if the Mac
+is asleep. Spec: [`grok-page-responder.md`](grok-page-responder.md).
+Do not install this on `~/radon-weekend/radon` (that clone hard-resets).
+
 ### Error tracking — Sentry (not wired; recommended next step)
 
 No Sentry SDK is installed (no DSN exists; an unconfigured SDK is dead-weight). When ready, the free tier (5k errors/mo) is plenty for a solo operator:

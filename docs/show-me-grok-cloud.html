@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Grok responder in the cloud</title>
+  <style>
+    :root {
+      --canvas: #0a0f14;
+      --panel: #0f1519;
+      --raised: #151c22;
+      --grid: #1e293b;
+      --text: #e2e8f0;
+      --muted: #758192;
+      --secondary: #94a3b8;
+      --signal: #05AD98;
+      --warn: #F5A623;
+      --fault: #E85D6C;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--canvas);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+      padding: 24px 16px 48px;
+    }
+    .wrap { max-width: 960px; margin: 0 auto; }
+    h1 {
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      margin: 0 0 8px;
+    }
+    h2 {
+      font-size: 22px;
+      font-weight: 560;
+      letter-spacing: -0.02em;
+      margin: 0 0 8px;
+    }
+    .lede {
+      color: var(--secondary);
+      font-size: 14px;
+      margin: 0 0 28px;
+      max-width: 42rem;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .label {
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 14px;
+    }
+    .split {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .box {
+      background: var(--raised);
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      padding: 12px;
+    }
+    .box.rec { border-color: var(--signal); }
+    .box.alt { border-color: var(--warn); }
+    .box.no { border-color: var(--fault); }
+    .box h3 { margin: 0 0 8px; font-size: 14px; }
+    .d { font-size: 13px; color: var(--secondary); line-height: 1.5; }
+    ul { margin: 0; padding-left: 1.1rem; color: var(--secondary); font-size: 13px; line-height: 1.5; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td {
+      text-align: left;
+      padding: 7px 6px;
+      border-bottom: 1px solid var(--grid);
+      vertical-align: top;
+    }
+    th {
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 500;
+    }
+    td.k { color: var(--signal); white-space: nowrap; }
+    .yes { color: var(--signal); }
+    .no { color: var(--fault); }
+    .mid { color: var(--warn); }
+    .mono, code {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 12px;
+    }
+    .q {
+      border-left: 2px solid var(--warn);
+      padding: 8px 12px;
+      margin: 0 0 8px;
+      background: var(--raised);
+      font-size: 13px;
+      color: var(--secondary);
+    }
+    .q strong { color: var(--text); font-weight: 600; }
+    @media (max-width: 720px) {
+      .split { grid-template-columns: 1fr; }
+      td.k { white-space: normal; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Radon / ops</h1>
+    <h2>Cloud the P1 fixer</h2>
+    <p class="lede">Ticket enqueue already runs on Hetzner. The fixer is still this Mac. Cursor Ultra buys hosted hours, not a drop-in for the shipped Grok loop.</p>
+
+    <div class="panel">
+      <div class="label">The hole</div>
+      <div class="split">
+        <div class="box">
+          <h3>Already in the cloud</h3>
+          <div class="d">P1 Pushover. <span class="mono">watchdog_pages</span> insert. Live-deploy page after the gate.</div>
+        </div>
+        <div class="box no">
+          <h3>Still on the Mac</h3>
+          <div class="d">Claim, <span class="mono">grok --always-approve</span>, commit, push. Sleep = no auto-fix. <span class="mono">radon deploy live</span> still fires.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="label">Recommendation</div>
+      <div class="split">
+        <div class="box rec">
+          <h3>Primary: VPS Grok in a dedicated clone</h3>
+          <div class="d" style="margin-bottom:8px">Reuse <span class="mono">grok_page_responder.py</span>. 30s systemd oneshot. <span class="mono">TimeoutStartSec=3900</span>.</div>
+          <ul>
+            <li>Clone <span class="mono">/home/radon/radon-page-responder</span>, never <span class="mono">/home/radon/radon</span></li>
+            <li>Stripped env: Turso + Pushover + Grok + gh only</li>
+            <li>Laptop off or standby. Claim is exclusive.</li>
+          </ul>
+        </div>
+        <div class="box alt">
+          <h3>Runner-up: Cursor Cloud Agents API</h3>
+          <div class="d" style="margin-bottom:8px">VPS only claims and <span class="mono">POST /v1/agents</span>. Agent runs on Cursor’s VM.</div>
+          <ul>
+            <li>Better isolation from the trading host</li>
+            <li>Default is a PR, not push main</li>
+            <li><span class="mono">workOnCurrentBranch</span> restores auto-deploy and the same blast radius</li>
+            <li>Need python3.13 + bun on their env. New launcher.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="label">Do not</div>
+      <div class="box no">
+        <ul>
+          <li>Run the agent <span class="mono">--cwd</span> on the live checkout. Deploy treats drift as a failed gate.</li>
+          <li>Load <span class="mono">/home/radon/radon-cloud/.env</span> into the fixer (IB Flex, Clerk, UW, archive).</li>
+          <li>Install it on <span class="mono">~/radon-weekend</span>. That clone hard-resets.</li>
+          <li>Use Bugbot. It reviews PRs. It does not close P1 tickets.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="label">Compare</div>
+      <table>
+        <thead>
+          <tr>
+            <th></th>
+            <th>Laptop Grok</th>
+            <th>VPS Grok worktree</th>
+            <th>Cursor Cloud</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="k">Laptop asleep</td>
+            <td class="no">dead</td>
+            <td class="yes">runs</td>
+            <td class="yes">runs</td>
+          </tr>
+          <tr>
+            <td class="k">Reuse shipped script</td>
+            <td class="yes">yes</td>
+            <td class="yes">yes</td>
+            <td class="no">new launcher</td>
+          </tr>
+          <tr>
+            <td class="k">Push main</td>
+            <td class="yes">yes</td>
+            <td class="mid">if you allow a VPS key</td>
+            <td class="mid">PR default</td>
+          </tr>
+          <tr>
+            <td class="k">Isolation</td>
+            <td class="mid">laptop creds</td>
+            <td class="mid">only if dedicated clone</td>
+            <td class="yes">Cursor VM</td>
+          </tr>
+          <tr>
+            <td class="k">Extra bill</td>
+            <td class="yes">none</td>
+            <td class="mid">0 or xAI API</td>
+            <td class="no">Cursor usage + spend cap</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="panel">
+      <div class="label">Blocks build</div>
+      <div class="q"><strong>1.</strong> Will you put a main-push key on the production VPS?</div>
+      <div class="q"><strong>2.</strong> Grok on Linux: SuperGrok device-code as <span class="mono">radon</span>, or metered <span class="mono">XAI_API_KEY</span>?</div>
+      <div class="q"><strong>3.</strong> Laptop job: off, or 2h reclaim standby?</div>
+    </div>
+  </div>
+</body>
+</html>

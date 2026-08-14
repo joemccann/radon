@@ -19,11 +19,15 @@
       "globs": [
         "scripts/incident_watchdog/**",
         "scripts/incident_responder.py",
+        "scripts/grok_page_responder.py",
+        "scripts/watchdog/pages.py",
+        "scripts/deploy_notify.py",
+        "config/com.radon.grok-page-responder.plist",
         "cloud/scripts/nextjs_db_watchdog.py",
         "cloud/services/radon-incident-watchdog.*",
         "cloud/services/radon-nextjs-db-watchdog.*"
       ],
-      "owners": ["docs/incident-runbook.md"]
+      "owners": ["docs/incident-runbook.md", "docs/grok-page-responder.md"]
     },
     {
       "id": "ops-timers",
