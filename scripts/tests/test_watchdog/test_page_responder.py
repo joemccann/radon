@@ -362,6 +362,88 @@ class TestResponder:
         assert called == []
 
 
+class TestResponderHeartbeat:
+    """A stalled auto-fixer must be visible. Silence from it is not health.
+
+    2026-08-14: the poller skipped every cycle for 2h40m on an orphaned lock
+    and nothing paged, because it writes no row of its own.
+    """
+
+    def test_completed_cycle_heartbeats_ok(self, db_conn, tmp_path, monkeypatch):
+        monkeypatch.delenv("GROK_PAGE_RESPONDER", raising=False)
+        beats = []
+        monkeypatch.setattr(
+            "grok_page_responder.record_cycle_health",
+            lambda state, **kw: beats.append(state),
+        )
+        rc = run_cycle(tmp_path, now=NOW, grok_runner=lambda *_a, **_k: None)
+        assert rc == 0
+        assert beats == ["ok"], "an empty queue is still a healthy poll"
+
+    def test_skipped_cycle_does_not_heartbeat(self, db_conn, tmp_path, monkeypatch):
+        """Otherwise a wedged poller keeps its own row fresh forever."""
+        monkeypatch.delenv("GROK_PAGE_RESPONDER", raising=False)
+        lock = tmp_path / "data" / "cache" / "grok_pages" / ".responder.lock"
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.write_text(str(os.getpid()))
+        beats = []
+        monkeypatch.setattr(
+            "grok_page_responder.record_cycle_health",
+            lambda state, **kw: beats.append(state),
+        )
+        assert run_cycle(tmp_path, now=NOW, grok_runner=lambda *_a, **_k: None) == 0
+        assert beats == []
+
+    def test_disabled_responder_reports_paused_not_silence(
+        self, db_conn, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("GROK_PAGE_RESPONDER", "0")
+        beats = []
+        monkeypatch.setattr(
+            "grok_page_responder.record_cycle_health",
+            lambda state, **kw: beats.append(state),
+        )
+        assert run_cycle(tmp_path, now=NOW, grok_runner=lambda *_a, **_k: None) == 0
+        assert beats == ["paused"], "a deliberate kill switch is not staleness"
+
+    def test_heartbeat_failure_never_breaks_the_cycle(
+        self, db_conn, tmp_path, monkeypatch
+    ):
+        monkeypatch.delenv("GROK_PAGE_RESPONDER", raising=False)
+        monkeypatch.setattr(
+            "grok_page_responder.record_cycle_health",
+            lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("turso down")),
+        )
+        assert run_cycle(tmp_path, now=NOW, grok_runner=lambda *_a, **_k: None) == 0
+
+    def test_broken_cycle_does_not_heartbeat_ok(self, db_conn, tmp_path, monkeypatch):
+        """A dead Turso must let the row go stale, not paint over itself."""
+        monkeypatch.delenv("GROK_PAGE_RESPONDER", raising=False)
+        beats = []
+        monkeypatch.setattr(
+            "grok_page_responder.record_cycle_health",
+            lambda state, **kw: beats.append(state),
+        )
+        monkeypatch.setattr(
+            "watchdog.pages.list_actionable_pages",
+            lambda **_kw: (_ for _ in ()).throw(RuntimeError("stream not found")),
+        )
+        with pytest.raises(RuntimeError, match="stream not found"):
+            run_cycle(tmp_path, now=NOW, grok_runner=lambda *_a, **_k: None)
+        assert beats == []
+
+    def test_window_outlives_the_longest_legal_cycle(self):
+        """Skips do not heartbeat, so the window must absorb a full grok run."""
+        from watchdog.services import SCHEDULED_SERVICES
+
+        window = SCHEDULED_SERVICES["grok-page-responder"]
+        assert window["open"] == window["closed"], "a 24/7 poller has no market gate"
+        assert window["closed"] > GROK_TIMEOUT_SECS, (
+            "a ticket grok works for the full timeout would page as stale"
+        )
+        assert window["requires_ib"] is False
+
+
 class TestResponderLock:
     """A killed cycle must not blackhole the queue until the TTL lapses.
 

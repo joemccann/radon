@@ -399,6 +399,15 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // Turso — no IB. 15-min window = 3 missed cycles before stale.
   "journal-gap-sli": { open: 15 * MIN, extended: 15 * MIN, closed: 15 * MIN, category: "scheduled", requires_ib: false },
 
+  // ``grok-page-responder`` is the VPS P1 auto-fix poller
+  // (scripts/grok_page_responder.py via radon-grok-page-responder.timer,
+  // every 30s, 24/7). Pure Turso + Pushover — no IB. Only a cycle that
+  // COMPLETES heartbeats; cycles that skip on a live lock deliberately stay
+  // silent, so the window has to absorb one full grok run
+  // (GROK_TIMEOUT_SECS = 1h) plus the ticket bookkeeping around it. 90m.
+  // Without this row a wedged poller was invisible for 2h40m (2026-08-14).
+  "grok-page-responder": { open: 90 * MIN, extended: 90 * MIN, closed: 90 * MIN, category: "scheduled", requires_ib: false },
+
   // ``portfolio-archive`` is the portfolio_snapshots cold-archive oneshot
   // (scripts/archive_portfolio_snapshots.py via radon-portfolio-archive.timer
   // on the VPS, 06:52 UTC daily, before db-backup). Heartbeats ok/error on

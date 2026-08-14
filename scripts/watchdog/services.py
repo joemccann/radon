@@ -210,6 +210,11 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # Structured missing_exec_id_count in last_error. Pure Turso, no IB.
     # 15m window = 3 missed cycles before stale.
     "journal-gap-sli": {"open": 15 * _MIN, "closed": 15 * _MIN, "requires_ib": False},
+    # grok-page-responder — VPS P1 auto-fix poller (30s, 24/7). Pure Turso +
+    # Pushover, no IB. Only a COMPLETED cycle heartbeats; a cycle that skips
+    # on a live lock stays silent on purpose, so the window absorbs one full
+    # grok run (GROK_TIMEOUT_SECS = 1h) plus bookkeeping. 90m.
+    "grok-page-responder": {"open": 90 * _MIN, "closed": 90 * _MIN, "requires_ib": False},
     # portfolio-archive — portfolio_snapshots cold-archive oneshot
     # (scripts/archive_portfolio_snapshots.py via radon-portfolio-archive.timer
     # on the VPS, 06:52 UTC daily). 48h window mirrors
@@ -266,6 +271,10 @@ BUCKETS: dict[str, list[str]] = {
         "host-metrics",
         # Continuous journal gap SLI (5m) — error when missing_exec_id_count > 0.
         "journal-gap-sli",
+        # 30s P1 auto-fix poller on the VPS. A stalled auto-fixer is silent
+        # by nature, so the 90m staleness window is the only thing that
+        # surfaces it (2026-08-14: 2h40m wedged, nothing paged).
+        "grok-page-responder",
     ],
     "daily": [
         "cash-flow-sync",
