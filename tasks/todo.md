@@ -1,3 +1,70 @@
+# Task: BPI as-of stale after close (2026-08-13)
+
+## Dependency graph
+
+- T1 depends_on: [] - Failing tests: post-close as_of currency, STALE UI, spark last-bar, 23:30 UTC catch-up
+- T2 depends_on: [T1] - Same-evening timer + spark recovery + isBpiSessionCurrent UI
+- T3 depends_on: [T2] - pytest + vitest + Playwright
+
+## Checklist
+
+- [x] T1 Red tests
+- [x] T2 Production fix
+- [x] T3 Verify
+
+## Review
+
+T3 verification is green: pytest 38/38 when split (31 `test_bpi_scan.py` + 7 `test_systemd_services.py -k 'bpi or Bpi'`; combined invocation hits `ImportPathMismatchError` on scripts vs cloud conftest). Timer has Mon-Fri 21:30/23:30 UTC and Tue-Sat 11:00 UTC. From `web/`, Vitest 26/26 (bpi-panel 15, bpi-route 8, bpi-staleness 3; `-q` unsupported) and Playwright chromium 2/2 on `e2e/bpi-tab.spec.ts`. BpiPanel shows STALE when `as_of < lastCompletedSessionDate` and not when current. Not committed.
+
+---
+
+# Task: Fix proposal alternatives [object Object] (2026-08-13)
+
+## Dependency graph
+
+- T1 depends_on: [] - Failing tests: real ThetaHarvesterStructure in proposal labels
+- T2 depends_on: [T1] - Format alternatives/statement via thetaStructLabel
+- T3 depends_on: [T2] - Focused vitest + Playwright e2e
+
+## Checklist
+
+- [x] T1 Red tests
+- [x] T2 Production fix
+- [x] T3 Verify
+
+## Review
+
+T3 verification is green: from `web/`, Vitest 53/53 (agent-derivations 37, agent-integration 10, scanner-hero 6) and Playwright chromium 3/3 on `e2e/theta-harvester-scanner.spec.ts`, including the alternatives case that asserts `AMAT|MSTR|TTWO SHORT 95P / 105C` and forbids `[object Object]`. The e2e is the browser proof for `/scanner?mode=theta`; no heading tweak was needed (`Proposed action` / `ALTERNATIVES` already match). No local Next process remained on :3000 after the Playwright webServer stopped. `-q` is unsupported on Vitest 4.0.18, so the same files were run without it. Not committed.
+
+---
+
+# Task: Make Codex MCP startup interruption-proof (2026-08-13)
+
+## Dependency graph
+
+- T1 depends_on: [] - Reproduce and identify the exact `codex_apps` and `figma` startup failure paths from current config, status, and logs.
+- T2 depends_on: [T1] - Add a regression check that fails for the discovered configuration/runtime condition.
+- T3 depends_on: [T2] - Apply the smallest durable configuration or launcher repair, including bounded startup timing and auth recovery where supported.
+- T4 depends_on: [T3] - Validate both servers independently and through a fresh Codex startup; confirm the regression check is green.
+- T5 depends_on: [T4] - Record root cause, verification evidence, rollback details, and residual external dependencies.
+
+## Checklist
+
+- [x] T1 Diagnose both interrupted MCP startups.
+- [x] T2 Add failing regression coverage.
+- [x] T3 Apply durable repair.
+- [x] T4 Verify fresh startup and both servers.
+- [x] T5 Add review notes.
+
+## Review
+
+- Root cause: the legacy `/Applications/Codex.app` (build `26.527.60818`, bundled Codex `0.136.0-alpha.2`) had automatic updates disabled and shared bundle ID `com.openai.codex` with the current host. Global Browser/Computer-Use paths still forced that stale bundle. Earlier fixes raised optional MCP timeouts but validated the separate shell CLI, so they did not cover the active desktop runtime.
+- Figma was healthy but optional: prewarm omitted it after 1.072s and it initialized 392ms later. `required = true` now forces startup/resume to wait or fail closed; the 60s allowance remains. `codex_apps` is the internal Apps bridge, so no invalid synthetic MCP entry was added.
+- Installed signed/notarized `/Applications/ChatGPT.app` build `26.810.41047` with bundled Codex `0.148.0-alpha.9`, enabled daily automatic checks/updates, corrected `cua_node` and bundled CLI paths, unregistered the duplicate legacy bundle, and moved it recoverably to `~/.Trash/Codex-legacy-26.527.60818.app`.
+- Regression `/Users/joemccann/.codex/bin/check-mcp-startup` rejects the legacy host/path, disabled updates, or non-required/short-timeout Figma. Verification: doctor auth/config/MCP all OK; required-Figma negative probe failed closed; 8 repeated headless starts clean; combined authenticated Figma + `codex_apps` read-only probe returned `BOTH_MCP_OK`.
+
+---
+
 # Task: Remediate live incidents (2026-08-13)
 
 0 open artifacts; 3 live `service_health` errors + 2 diagnosed flap classes.

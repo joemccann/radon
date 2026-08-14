@@ -17,6 +17,7 @@ import {
   buildBpiEntries,
   classifyBpiState,
   isBpiPayload,
+  isBpiSessionCurrent,
   type BpiIndexSymbol,
   type BpiPayload,
   type BpiTone,
@@ -66,9 +67,33 @@ function IndexSwitcher({
   );
 }
 
+function BpiSessionStaleMark() {
+  return (
+    <span
+      data-testid="bpi-session-stale"
+      style={{
+        marginLeft: "8px",
+        fontFamily: "var(--font-mono)",
+        fontSize: "9px",
+        fontWeight: 700,
+        letterSpacing: "0.08em",
+        color: "var(--warning)",
+        border: "1px solid var(--warning)",
+        padding: "2px 5px",
+        textTransform: "uppercase",
+        lineHeight: 1,
+        borderRadius: "999px",
+      }}
+    >
+      STALE
+    </span>
+  );
+}
+
 function BpiReadout({ payload, compact }: { payload: BpiPayload; compact: boolean }) {
   const badge = classifyBpiState(payload);
   const stateColor = bpiToneColor(badge.tone);
+  const sessionStale = !isBpiSessionCurrent(payload.as_of_session);
 
   if (compact) {
     return (
@@ -76,7 +101,11 @@ function BpiReadout({ payload, compact }: { payload: BpiPayload; compact: boolea
         <MetricCell label="BPI" value={payload.bpi.toFixed(1)} />
         <MetricCell label="STATE" value={badge.label} tone={metricTone(badge.tone)} />
         <MetricCell label="BULLISH" value={`${payload.bullish} / ${payload.members}`} />
-        <MetricCell label="AS OF" value={payload.as_of_session} />
+        <MetricCell
+          label="AS OF"
+          value={sessionStale ? `${payload.as_of_session} STALE` : payload.as_of_session}
+          tone={sessionStale ? "warn" : undefined}
+        />
       </div>
     );
   }
@@ -108,7 +137,12 @@ function BpiReadout({ payload, compact }: { payload: BpiPayload; compact: boolea
       <RegimeStripCell
         testId="bpi-strip-session"
         label="AS OF SESSION"
-        value={payload.as_of_session}
+        value={
+          <>
+            {payload.as_of_session}
+            {sessionStale ? <BpiSessionStaleMark /> : null}
+          </>
+        }
         sub={<>DAILY CLOSE SERIES</>}
       />
     </RegimeStrip>

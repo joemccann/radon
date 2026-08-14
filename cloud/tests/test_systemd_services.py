@@ -747,8 +747,9 @@ class TestBpiScanBudget:
 
     def test_timer_has_evening_and_catchup_passes(self, unit, services_dir):
         raw = (services_dir / "radon-bpi.timer").read_text()
-        assert "Mon..Fri" in raw and "21:30:00 UTC" in raw
-        assert "Tue..Sat" in raw and "11:00:00 UTC" in raw
+        assert "Mon..Fri *-*-* 21:30:00 UTC" in raw
+        assert "Mon..Fri *-*-* 23:30:00 UTC" in raw
+        assert "Tue..Sat *-*-* 11:00:00 UTC" in raw
 
 
 class TestLeapGarchScanBudget:
