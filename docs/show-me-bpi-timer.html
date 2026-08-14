@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BPI after close</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --canvas: #0a0f14;
+      --panel: #0f1519;
+      --raised: #151c22;
+      --grid: #1e293b;
+      --text: #e2e8f0;
+      --muted: #758192;
+      --secondary: #94a3b8;
+      --signal: #05AD98;
+      --warn: #F5A623;
+      --fault: #E85D6C;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--canvas); color: var(--text); }
+    body {
+      font-family: Inter, system-ui, sans-serif;
+      padding: 28px 20px 48px;
+      max-width: 920px;
+      margin: 0 auto;
+    }
+    .kicker {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 10px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    h1 {
+      font-size: 22px;
+      font-weight: 600;
+      letter-spacing: -0.03em;
+      margin: 8px 0 8px;
+    }
+    p.lead {
+      color: var(--secondary);
+      font-size: 14px;
+      line-height: 1.5;
+      margin: 0 0 28px;
+      max-width: 62ch;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .panel h2 {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin: 0 0 14px;
+      font-weight: 500;
+    }
+    .day {
+      display: grid;
+      grid-template-columns: 88px 1fr;
+      gap: 10px 14px;
+      align-items: start;
+    }
+    .clock {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 12px;
+      color: var(--signal);
+      padding-top: 2px;
+    }
+    .clock.old { color: var(--muted); text-decoration: line-through; }
+    .event { font-size: 14px; line-height: 1.4; }
+    .event small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+    .badge {
+      display: inline-block;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      border-radius: 999px;
+      padding: 2px 7px;
+      margin-left: 6px;
+      vertical-align: 1px;
+    }
+    .badge.warn { color: var(--warn); border: 1px solid var(--warn); }
+    .badge.ok { color: var(--signal); border: 1px solid var(--signal); }
+    .badge.fault { color: var(--fault); border: 1px solid var(--fault); }
+    .split {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .cell {
+      background: var(--raised);
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      padding: 12px 14px;
+    }
+    .cell .label {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    .cell .value {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 13px;
+    }
+    .rule {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 13px;
+      line-height: 1.65;
+      background: var(--raised);
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      padding: 14px 16px;
+      overflow-x: auto;
+    }
+    @media (max-width: 640px) {
+      .split, .day { grid-template-columns: 1fr; }
+      .clock { padding-top: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="kicker">Regime / BPI</div>
+  <h1>After the cash close, yesterday is stale</h1>
+  <p class="lead">
+    Screenshot: 14 Aug after hours, AS OF 2026-08-12. Last completed session is 13 Aug.
+    The 21:30 UTC Yahoo pass often misses today’s closes. Until tonight, the only retry was 11:00 UTC the next morning.
+  </p>
+
+  <section class="panel">
+    <h2>Weekday clock (ET)</h2>
+    <div class="day">
+      <div class="clock">16:00</div>
+      <div class="event">Cash close. Last completed session = today.<small>as_of 2026-08-12 is now stale</small></div>
+      <div class="clock">17:30</div>
+      <div class="event">21:30 UTC scan. Full-universe Yahoo refetch.<small>Often one session behind (null last bars)</small></div>
+      <div class="clock">19:30</div>
+      <div class="event">23:30 UTC catch-up <span class="badge ok">live</span><small>Installed on VPS. Recovers last-bar closes from spark/chart meta</small></div>
+      <div class="clock old">07:00 next</div>
+      <div class="event">11:00 UTC morning pass still runs<small>Was the only catch-up. Still the leftover-laggard sweep</small></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>What the panel does now</h2>
+    <div class="rule">as_of &gt;= lastCompletedSessionDate(now)
+  → current
+as_of &lt;  lastCompletedSessionDate(now)
+  → keep the date, show STALE
+RTH before 16:00 ET
+  → yesterday is still current
+Saturday
+  → Friday is current</div>
+  </section>
+
+  <section class="panel">
+    <h2>Host right now</h2>
+    <div class="split">
+      <div class="cell">
+        <div class="label">Timer</div>
+        <div class="value">21:30 / 23:30 / 11:00<span class="badge ok">reinstalled</span></div>
+      </div>
+      <div class="cell">
+        <div class="label">Checkout</div>
+        <div class="value">e7ead64a<span class="badge warn">pre-fix scan</span></div>
+      </div>
+      <div class="cell">
+        <div class="label">Next fire</div>
+        <div class="value">Fri 21:30 UTC</div>
+      </div>
+      <div class="cell">
+        <div class="label">Scan oneshot</div>
+        <div class="value">inactive<span class="badge">not kicked</span></div>
+      </div>
+    </div>
+  </section>
+</body>
+</html>
