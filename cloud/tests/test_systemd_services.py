@@ -66,6 +66,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-ib-watchdog.timer",
     "radon-incident-watchdog.service",
     "radon-incident-watchdog.timer",
+    "radon-grok-page-responder.service",
+    "radon-grok-page-responder.timer",
     "radon-leap.service",
     "radon-leap.timer",
     "radon-llm-index.service",
@@ -113,6 +115,10 @@ IB_GATEWAY_DEPENDENTS = [
 ]
 
 ENV_FILE_PATH = "/home/radon/radon-cloud/.env"
+STRIPPED_ENV_SERVICES = {
+    "radon-grok-page-responder.service",
+}
+STRIPPED_ENV_FILE_PATH = "/home/radon/radon-page-responder.env"
 STATIC_SERVICES = {
     "radon-refresh.service",
     "radon-drift-audit.service",
@@ -712,10 +718,17 @@ class TestCrossCutting:
             if "Service" not in cfg:
                 continue
             env_file = cfg["Service"].get("environmentfile")
-            if env_file is not None:
-                assert env_file == ENV_FILE_PATH, (
-                    f"{name} has EnvironmentFile={env_file}, expected {ENV_FILE_PATH}"
+            if env_file is None:
+                continue
+            if name in STRIPPED_ENV_SERVICES:
+                assert env_file == STRIPPED_ENV_FILE_PATH, (
+                    f"{name} must not load production secrets; "
+                    f"got EnvironmentFile={env_file}"
                 )
+                continue
+            assert env_file == ENV_FILE_PATH, (
+                f"{name} has EnvironmentFile={env_file}, expected {ENV_FILE_PATH}"
+            )
 
     @pytest.mark.parametrize("filename", IB_GATEWAY_DEPENDENTS)
     def test_ib_gateway_dependents_use_ordering_and_intentional_strength(self, unit, filename):
@@ -761,6 +774,31 @@ class TestLeapGarchScanBudget:
     def test_service_start_budget_covers_index_universe_scan(self, unit, unit_name):
         svc = unit(unit_name)["Service"]
         assert int(svc["timeoutstartsec"]) >= 3900
+
+
+class TestGrokPageResponder:
+    """Dedicated clone + stripped env. Never the live checkout."""
+
+    def test_oneshot_budget_covers_grok(self, unit):
+        svc = unit("radon-grok-page-responder.service")["Service"]
+        assert svc["type"] == "oneshot"
+        assert int(svc["timeoutstartsec"]) >= 3900
+        assert svc["workingdirectory"] == "/home/radon/radon-page-responder"
+        assert svc["environmentfile"] == STRIPPED_ENV_FILE_PATH
+        assert "radon-cloud/.env" not in svc["environmentfile"]
+        assert "grok_page_responder.py" in svc["execstart"]
+        assert "/home/radon/radon/.venv" not in svc["execstart"]
+
+    def test_cannot_reach_docker_or_deploy_root(self, unit):
+        svc = unit("radon-grok-page-responder.service")["Service"]
+        hidden = svc.get("inaccessiblepaths", "")
+        assert "docker.sock" in hidden
+        assert "radon-deploy-root" in hidden
+
+    def test_timer_fires_after_idle(self, unit):
+        timer = unit("radon-grok-page-responder.timer")["Timer"]
+        assert timer["onunitinactivesec"] == "30"
+        assert timer["persistent"] == "false"
 
 
 class TestIncidentWatchdog:

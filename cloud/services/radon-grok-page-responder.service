@@ -1,0 +1,26 @@
+[Unit]
+Description=Radon Grok P1 page responder (dedicated clone, stripped env)
+After=network.target
+# Poller: do not park on start-limit. Failures are ticket attempts in Turso.
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+User=radon
+WorkingDirectory=/home/radon/radon-page-responder
+# NEVER /home/radon/radon-cloud/.env — that file has IB Flex, Clerk, UW, archive.
+EnvironmentFile=/home/radon/radon-page-responder.env
+Environment=GROK_PAGE_NO_DOTENV=1
+Environment=GROK_PAGE_SYNC_REMOTE=1
+Environment=HOME=/home/radon
+Environment=PATH=/home/radon/.local/bin:/home/radon/.grok/bin:/usr/local/bin:/usr/bin:/bin
+TimeoutStartSec=3900
+ExecStart=/home/radon/radon-page-responder/.venv/bin/python /home/radon/radon-page-responder/scripts/grok_page_responder.py
+StandardOutput=journal
+StandardError=journal
+NoNewPrivileges=yes
+PrivateTmp=yes
+InaccessiblePaths=/var/run/docker.sock /usr/bin/docker /usr/local/sbin/radon-deploy-root
+
+[Install]
+WantedBy=multi-user.target

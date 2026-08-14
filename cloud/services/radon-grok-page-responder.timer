@@ -1,0 +1,10 @@
+[Unit]
+Description=Radon Grok P1 page responder timer — 30s after last cycle
+
+[Timer]
+OnBootSec=30
+OnUnitInactiveSec=30
+Persistent=false
+
+[Install]
+WantedBy=timers.target
