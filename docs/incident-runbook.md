@@ -139,6 +139,42 @@ Incident: 2026-07-08, P1.
 
 ---
 
+## deploy-stop-clean-oneshot-signal
+
+**`Type=oneshot` scan units page P1 `Result=signal` when deploy
+`stop-clean` SIGTERMs an in-flight run.** Known class:
+`feedback_deploy_stop_clean_fails_inflight_scan_oneshots`.
+
+- **Mechanism:** `deploy.sh` stop-clean stops every `radon-*` unit,
+  including long `Type=oneshot` writers (`radon-bpi` TimeoutStartSec=9000,
+  weekday sweep 35-105 min). systemd records `Result=signal`,
+  `NRestarts=0`. The unit recovers on its next timer fire. The
+  continuous units watchdog used to page that as a P1 outage.
+- **2026-08-05:** kill and `radon-deploy-root stop-clean` in the same
+  second. Fix `deba568a`: downgrade `Result=signal` to P3 when the
+  kill sits inside a deploy window (20 min before green-marker mtime,
+  or while the transition journal exists).
+- **2026-08-14 23:30Z:** three deploys stacked (`a173289` 22:51,
+  `ba6ec0d` 23:03, `bf3e73c` 23:25, green 23:27). BPI killed at
+  22:52:36Z by the first stop-clean. 34 min later the last green
+  exceeded the 20-min single-deploy budget; between deploys the
+  journal was gone and the previous green (20:25Z) sat *before* the
+  kill, so the classifier paged P1 at 23:20/23:25/23:30. Edge and
+  `:8321/health/lite` stayed up. Next timer (23:30) restarted the
+  scan.
+- **Discriminating check:** `InactiveEnterTimestamp` within 60 min of
+  a green-marker mtime or after the last green (cancelled stack);
+  sibling oneshots often fail the same second; `Result=timeout` /
+  `exit-code` is a different class (do not downgrade).
+- **Remediation:** classifier only, do not restart. Exit-code and
+  start-limit-hit stay P1.
+- **Regression:** `test_units.py::TestDeployCollateralSignalKill`
+  (`test_stacked_deploy_signal_kill_34min_before_green_is_p3`,
+  `test_signal_kill_after_last_green_during_cancelled_stack_is_p3`).
+- **Code:** `scripts/watchdog/units.py` (`DEPLOY_COLLATERAL_WINDOW_SECS=3600`).
+
+---
+
 ## stale-market-data-freshness
 
 **Market data stops being fresh while everything looks alive.** Four sub-modes.

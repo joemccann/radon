@@ -58,9 +58,12 @@ DEFAULT_STATE_PATH = _PROJECT_DIR / "data" / "watchdog_units_state.json"
 # SIGTERMs in-flight oneshots (radon-bpi 2026-08-05 21:40:24Z, killed the
 # same second as radon-deploy-root stop-clean). The transition journal
 # exists only mid-deploy; the green marker's mtime stamps deploy end.
+# 2026-08-14 stacked deploys: stop-clean of deploy N at 22:52:36Z,
+# green of deploy N+2 at 23:27:11Z (34 min). A 20-min single-deploy
+# budget paged that as P1. Window covers ~4x DEPLOY_TIMEOUT=900.
 GREEN_MARKER_PATH = Path("/home/radon/.radon-last-green-deploy")
 TRANSITION_JOURNAL_PATH = Path("/home/radon/.radon-deploy-transition.json")
-DEPLOY_COLLATERAL_WINDOW_SECS = 20 * 60  # covers the 15-min deploy budget
+DEPLOY_COLLATERAL_WINDOW_SECS = 60 * 60
 
 
 # ── systemctl seam ───────────────────────────────────────────────────
@@ -140,20 +143,30 @@ def _read_deploy_evidence() -> dict:
 
 def _is_deploy_collateral(unit: dict, deploy: Optional[dict], now: datetime) -> bool:
     """True when a Result=signal failure sits inside a deploy window —
-    stop-clean killing an in-flight oneshot, not an outage."""
+    stop-clean killing an in-flight oneshot, not an outage.
+
+    Covers three stacked-deploy shapes:
+      * journal present (in_flight)
+      * kill after the last green (cancelled / not-yet-green successor)
+      * kill before the latest green (this stack's stop-clean)
+    Age is capped so an unrelated SIGTERM hours later still pages.
+    """
     if not deploy or unit.get("Result") != "signal":
         return False
     failed_at = _parse_systemd_timestamp(unit.get("InactiveEnterTimestamp") or "")
     if failed_at is None:
         return False
+    age = (now - failed_at).total_seconds()
+    if age < 0 or age > DEPLOY_COLLATERAL_WINDOW_SECS:
+        return False
     if deploy.get("in_flight"):
-        if 0 <= (now - failed_at).total_seconds() <= DEPLOY_COLLATERAL_WINDOW_SECS:
-            return True
+        return True
     marker = deploy.get("marker_mtime")
-    if marker is not None:
-        if 0 <= (marker - failed_at).total_seconds() <= DEPLOY_COLLATERAL_WINDOW_SECS:
-            return True
-    return False
+    if marker is None:
+        return False
+    if failed_at >= marker:
+        return True
+    return 0 <= (marker - failed_at).total_seconds() <= DEPLOY_COLLATERAL_WINDOW_SECS
 
 
 # ── state persistence ────────────────────────────────────────────────

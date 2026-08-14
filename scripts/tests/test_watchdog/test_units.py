@@ -400,10 +400,11 @@ class TestContinuousBucketWiring:
 class TestDeployCollateralSignalKill:
     """A deploy's stop-clean SIGTERMs in-flight oneshots (radon-bpi
     2026-08-05 21:40:24Z, killed the same second as radon-deploy-root
-    stop-clean). That is Result=signal collateral, not an outage — it
-    must ride the P3 digest, not page P1. Everything else about failed
-    units is unchanged: exit-code failures, start-limit-hit, and signal
-    kills with no deploy evidence still page."""
+    stop-clean; 2026-08-14 22:52:36Z, first of three stacked deploys,
+    last green 34 min later). That is Result=signal collateral, not an
+    outage — it must ride the P3 digest, not page P1. Everything else
+    about failed units is unchanged: exit-code failures, start-limit-hit,
+    and signal kills with no deploy evidence still page."""
 
     WINDOW_NOW = datetime(2026, 8, 5, 21, 50, tzinfo=timezone.utc)
 
@@ -457,6 +458,37 @@ class TestDeployCollateralSignalKill:
             deploy={"marker_mtime": marker, "in_flight": False},
         )
         assert [o.severity for o in outcomes] == ["P1"]
+
+    def test_stacked_deploy_signal_kill_34min_before_green_is_p3(self):
+        """2026-08-14 23:30Z page: first of three deploys stop-cleaned
+        radon-bpi at 22:52:36Z; the last one greened at 23:27:11Z.
+        34 min exceeds the old 20-min single-deploy budget, but it is
+        still stop-clean collateral — P3, not a P1 page."""
+        killed = datetime(2026, 8, 14, 22, 52, 36, tzinfo=timezone.utc)
+        marker = datetime(2026, 8, 14, 23, 27, 11, tzinfo=timezone.utc)
+        now = datetime(2026, 8, 14, 23, 30, 1, tzinfo=timezone.utc)
+        current = units.parse_show_output(self._signal_block(killed))
+        outcomes = units.evaluate(
+            current=current, previous={}, now=now,
+            deploy={"marker_mtime": marker, "in_flight": False},
+        )
+        assert len(outcomes) == 1
+        assert outcomes[0].severity == "P3"
+        assert "deploy" in outcomes[0].message.lower()
+
+    def test_signal_kill_after_last_green_during_cancelled_stack_is_p3(self):
+        """Between stacked deploys the journal is gone and the last
+        green marker is still the previous release (20:25Z). The 22:52
+        SIGTERM is still the cancelled deploy's stop-clean."""
+        killed = datetime(2026, 8, 14, 22, 52, 36, tzinfo=timezone.utc)
+        marker = datetime(2026, 8, 14, 20, 25, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 8, 14, 23, 20, 0, tzinfo=timezone.utc)
+        current = units.parse_show_output(self._signal_block(killed))
+        outcomes = units.evaluate(
+            current=current, previous={}, now=now,
+            deploy={"marker_mtime": marker, "in_flight": False},
+        )
+        assert [o.severity for o in outcomes] == ["P3"]
 
     def test_exit_code_failure_near_deploy_stays_p1(self):
         killed = datetime(2026, 8, 5, 21, 40, 24, tzinfo=timezone.utc)
