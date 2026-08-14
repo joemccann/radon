@@ -7939,10 +7939,16 @@ body[data-mobile="true"] .orders-command-strip__jump:active {
   overflow: hidden;
 }
 .act-ticket {
-  /* Ticket-focused act column: the ticket sizes to its content (no hard height
-     cap) so it reads clean whether the ticker is flat or holds a combo. The
-     flat/affordance area below fills the remaining space and centers in it. */
-  flex: 0 0 auto;
+  /* Ticket-focused act column: size to content when short so the held /
+     flat affordance below still fills leftover space. flex-shrink +
+     min-height:0 is load-bearing: a `0 0 auto` ticket taller than the
+     column (confirm summary + Gate 3 CRB) overflowed `.act-region`'s
+     overflow:hidden and clipped Place / Confirm with no scrollport. */
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   border-bottom: 1px solid var(--line-grid);
   /* Inner gutter so the ticket form clears the column + split-divider seams. */
   padding: 16px;
