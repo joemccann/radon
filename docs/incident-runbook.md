@@ -179,6 +179,17 @@ Incident: 2026-07-08, P1.
   UW, and refresh the error heartbeat so `_check_stale` cannot re-page
   on `updated_at` age. Other 429s keep a 5-minute embargo.
   Regression: `test_skew.py::TestRunIncremental::test_uw_daily_quota_keeps_last_snapshot_and_embargoes_until_reset`.
+  - **(f2) UW daily quota on a oneshot (`oi-changes`, 2026-08-14 20:00Z):**
+    same 40k cap, but `fetch_oi_changes.py --market` printed the error and
+    `sys.exit(1)`. `Type=oneshot` + NRestarts=0 → unit watchdog P1.
+    Discriminating check: journal `FAILED (exit 1)` in the same second as
+    the start line; `logs/oi_changes.err.log` has the daily-limit text.
+    14:01Z the same day was OK. Not IB, not Turso. Fix: catch the daily
+    cap on the market-wide path, write `error` with `next_attempt_at` =
+    20:00 ET, persist `data/oi_changes_uw_embargo.json`, keep the last
+    snapshot, exit 0 so the unit does not page. Ticker eval lookups still
+    exit 1. Other 429s still fail the oneshot.
+    Regression: `test_fetch_oi_changes.py::test_market_uw_daily_quota_exits_zero_and_embargoes_until_reset`.
 - **Detection:** `GET /api/probe/freshness` (bearer `RADON_PROBE_FRESHNESS_TOKEN`,
   always 200) — `all_fresh: false` with the failing `checks` named; it is already
   market-state aware, so `all_fresh: null` off-hours is normal.
