@@ -168,6 +168,17 @@ Incident: 2026-07-08, P1.
   same `isStale` open-bell grace as other RTH_ONLY writers
   (`ib-realtime-relay`). A dead process or a latched error row is still
   `fresh=false`.
+- **(f) UW daily quota silence (2026-08-14, `skew`):** the 1-minute RTH
+  writer raised `UWRateLimitError` ("daily request limit of 40000")
+  uncaught, wrote no `service_health` row, and paged stale after the 5m
+  open window (14m silent at 15:45Z). Discriminating check: VPS
+  `journalctl -u radon-skew` shows the daily-limit message and the
+  timer is still firing. Not IB, not Turso. Fix: catch the daily cap,
+  write `error` with `next_attempt_at` = 20:00 ET (UW reset), keep the
+  last snapshot, persist a local embargo so later minutes do not call
+  UW, and refresh the error heartbeat so `_check_stale` cannot re-page
+  on `updated_at` age. Other 429s keep a 5-minute embargo.
+  Regression: `test_skew.py::TestRunIncremental::test_uw_daily_quota_keeps_last_snapshot_and_embargoes_until_reset`.
 - **Detection:** `GET /api/probe/freshness` (bearer `RADON_PROBE_FRESHNESS_TOKEN`,
   always 200) — `all_fresh: false` with the failing `checks` named; it is already
   market-state aware, so `all_fresh: null` off-hours is normal.

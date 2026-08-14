@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from clients.uw_client import UWRateLimitError
 from fetch_skew import (
     bracketing_monthly_expiries,
     compute_change_series,
@@ -356,6 +357,61 @@ class TestRunIncremental:
         assert current["expiry_far"] == "2026-09-18"
         assert current["dte_far"] == 44
         assert self.db_writes == [True]
+
+    def test_uw_daily_quota_keeps_last_snapshot_and_embargoes_until_reset(self):
+        # 2026-08-14 P1: radon-skew hit UW's 40k daily cap mid-RTH, raised
+        # uncaught, wrote no heartbeat, and paged stale after the 5m window.
+        series = compute_change_series(
+            [
+                _row("2026-08-01", 1.28),
+                _row("2026-08-03", 1.31),
+                _row("2026-08-04", 1.30),
+            ]
+        )
+        cached = self._cached(series)
+        healths: list[tuple[str, str, dict]] = []
+
+        def fake_health(service, state, **kwargs):
+            healths.append((service, state, kwargs))
+
+        import db.writer as writer
+
+        self.monkeypatch.setattr(writer, "record_service_health", fake_health, raising=False)
+        self.monkeypatch.setattr(writer, "ensure_no_replica_for_writers", lambda: None, raising=False)
+
+        class BoomClient:
+            def __init__(self):
+                self.calls = []
+
+            def fetch_greeks(self, expiry, as_of):
+                self.calls.append((expiry, as_of))
+                raise UWRateLimitError(
+                    "You have hit your daily request limit of 40000 requests."
+                )
+
+        client = BoomClient()
+        now = datetime(2026, 8, 5, 15, 0, tzinfo=timezone.utc)
+        payload = self.mod.run(client=client, now=now)
+
+        assert payload["current"] == cached["current"]
+        assert payload["scan_time"] == "old"
+        assert client.calls == [("2026-08-21", "2026-08-05")]
+        assert self.db_writes == []
+        assert healths
+        service, state, kwargs = healths[0]
+        assert service == "skew"
+        assert state == "error"
+        assert "daily request limit" in kwargs["error"]["message"]
+        assert kwargs["error"]["next_attempt_at"] == "2026-08-06T00:00:00Z"
+
+        client2 = BoomClient()
+        payload2 = self.mod.run(
+            client=client2, now=now.replace(minute=1)
+        )
+        assert client2.calls == []
+        assert payload2["scan_time"] == "old"
+        assert healths[-1][1] == "error"
+        assert healths[-1][2]["error"]["next_attempt_at"] == "2026-08-06T00:00:00Z"
 
     def test_missing_json_cache_rehydrates_base_series_from_turso(self):
         # VPS first run: data/skew.json does not exist but Turso holds the
