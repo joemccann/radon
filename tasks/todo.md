@@ -10,11 +10,11 @@
 
 - [x] T1 Red tests
 - [x] T2 Notify after live gate
-- [ ] T3 Verify
+- [x] T3 Verify
 
 ## Review
 
-<!-- filled after green -->
+After the live deploy gate, `notify_release_live` sends Pushover `radon deploy live` at priority 0 (`<sha7> is live: <subject>`). Rollback and already-green no-ops do not page. pytest 5 + 2.
 
 ---
 

@@ -408,6 +408,24 @@ short_log() {
   git -C "$RADON_DIR" log --oneline -1
 }
 
+notify_release_live() {
+  # Normal-priority Pushover after the live gate. Never P1: that would
+  # enqueue a Grok incident ticket for a successful deploy.
+  local sha="$1"
+  local subject
+  subject="$(git -C "$RADON_DIR" log -1 --format='%s' "$sha" 2>/dev/null || true)"
+  local py="${VENV_DIR}/bin/python"
+  if [[ ! -x "$py" ]]; then
+    py="$SYSTEM_PYTHON"
+  fi
+  if ! "$py" "${RADON_DIR}/scripts/deploy_notify.py" \
+    --sha "$sha" \
+    --subject "$subject" \
+    --env-file "$ENV_FILE_DEFAULT"; then
+    log_warn "live deploy push notify failed (non-fatal)"
+  fi
+}
+
 prepare_python_wheels() {
   local release_dir="$1"
   local target_wheels="${release_dir}/.deploy-wheels/target"
@@ -727,6 +745,7 @@ recover_pending_transition() {
       DEPLOY_RELEASE_UNVERIFIED=0
       finalize_release_artifacts "$JOURNAL_STAGE_DIR" "$JOURNAL_BACKUP_DIR"
       log_success "Finalized previously verified release ${JOURNAL_REQUESTED_SHA:0:7}"
+      notify_release_live "$JOURNAL_REQUESTED_SHA"
       return 0
     fi
     log_error "Verified transition no longer passes its gate; restoring previous release"
@@ -1168,6 +1187,7 @@ main() {
   echo ""
   trap - TERM INT HUP
   log_success "Deploy successful: $(short_log)"
+  notify_release_live "$requested_sha"
 }
 
 run_deploy_internal() {

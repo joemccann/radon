@@ -115,7 +115,7 @@ Radon is glued together from a long list of third-party services. The full env-v
 
 | Service | Purpose | Env vars | Where |
 |---|---|---|---|
-| **Pushover** | Watchdog P1 alerts that cut through iOS Do Not Disturb. P2/P3 land in `service_health` only. Absent vars degrade gracefully. | `PUSHOVER_USER`, `PUSHOVER_TOKEN` | [pushover.net](https://pushover.net/) |
+| **Pushover** | Watchdog P1 alerts that cut through iOS Do Not Disturb. Successful live deploys send a normal-priority `radon deploy live` page (never P1). P2/P3 land in `service_health` only. Absent vars degrade gracefully. | `PUSHOVER_USER`, `PUSHOVER_TOKEN` | [pushover.net](https://pushover.net/) |
 | **FRED (St. Louis Fed)** | Risk-free rate (DFF) for Black-Scholes implied value. No key required; 24h cache + 0.0 fallback. | none | Public API |
 | **Cboe** | COR1M historical fallback when IB / UW are missing the series. | none | Public CSV feed |
 | **Yahoo Finance** | Last-resort price fallback when IB and UW both fail. Never the first or second source. | none | Public API |
