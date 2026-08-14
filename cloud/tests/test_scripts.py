@@ -296,6 +296,20 @@ class TestDeployHealthCheck:
         assert retries > 1
 
 
+class TestDeployLiveNotify:
+    def test_notifies_after_successful_deploy(self, deploy):
+        success = deploy[deploy.index('log_success "Deploy successful:'):]
+        assert "notify_release_live" in success
+        assert "scripts/deploy_notify.py" in deploy
+        assert "Never P1" in deploy
+
+    def test_rollback_does_not_claim_live(self, deploy):
+        rollback = deploy[deploy.index("rollback()"):]
+        next_fn = re.search(r"\n\w+\(\)", rollback[1:])
+        section = rollback[: next_fn.start()] if next_fn else rollback[:800]
+        assert "notify_release_live" not in section
+
+
 class TestDeployRollback:
     def test_has_rollback_function(self, deploy):
         assert re.search(r"rollback\s*\(\)", deploy)
