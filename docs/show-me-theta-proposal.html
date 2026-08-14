@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Theta proposal card</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --canvas: #0a0f14;
+      --panel: #0f1519;
+      --raised: #151c22;
+      --grid: #1e293b;
+      --line: #2e3947;
+      --text: #e2e8f0;
+      --secondary: #94a3b8;
+      --muted: #758192;
+      --signal: #05AD98;
+      --fault: #E85D6C;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--canvas);
+      color: var(--text);
+      font-family: Inter, system-ui, sans-serif;
+      padding: 28px 20px 48px;
+    }
+    .wrap { max-width: 980px; margin: 0 auto; }
+    h1 {
+      font-size: 13px;
+      font-weight: 500;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin: 0 0 8px;
+    }
+    .lede {
+      font-size: 22px;
+      font-weight: 500;
+      letter-spacing: -0.02em;
+      margin: 0 0 28px;
+      max-width: 36rem;
+    }
+    .lede em { font-style: normal; color: var(--signal); }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      padding: 14px 16px 16px;
+    }
+    .mod {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .mod .k {
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+    }
+    .mod .t { font-size: 14px; font-weight: 500; }
+    .chip {
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      border: 1px solid color-mix(in srgb, var(--signal) 55%, transparent);
+      color: var(--signal);
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+    }
+    .stmt {
+      font-size: 18px;
+      font-weight: 500;
+      letter-spacing: -0.02em;
+      margin: 0 0 12px;
+    }
+    .stmt.bad { color: var(--fault); }
+    .stmt.good { color: var(--text); }
+    .conf { font-size: 10px; letter-spacing: 0.1em; color: var(--muted); display: flex; justify-content: space-between; }
+    .conf b { font-weight: 500; color: var(--signal); font-family: "IBM Plex Mono", ui-monospace, monospace; }
+    .meter { height: 2px; background: var(--grid); margin: 6px 0 14px; }
+    .meter > i { display: block; height: 100%; width: 99%; background: var(--signal); }
+    .alts { font-size: 10px; letter-spacing: 0.1em; color: var(--muted); margin-bottom: 6px; }
+    .alt {
+      display: flex;
+      justify-content: space-between;
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      padding: 8px 10px;
+      margin-bottom: 6px;
+      font-size: 12px;
+    }
+    .alt span:last-child { color: var(--muted); font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 11px; }
+    .btns { display: flex; gap: 8px; margin-top: 12px; }
+    .btns b, .btns i {
+      font-style: normal;
+      font-weight: 500;
+      font-size: 12px;
+      padding: 6px 12px;
+      border-radius: 4px;
+    }
+    .btns b { background: #e2e8f0; color: #0a0f14; }
+    .btns i { border: 1px solid var(--line); color: var(--secondary); }
+    .tag {
+      font-size: 10px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 8px;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+    }
+    .flow {
+      margin-top: 20px;
+      background: var(--panel);
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      padding: 16px 18px 18px;
+    }
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+    }
+    @media (max-width: 760px) { .steps { grid-template-columns: 1fr 1fr; } }
+    .step {
+      background: var(--raised);
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      padding: 10px 12px;
+    }
+    .step .n {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 10px;
+      color: var(--signal);
+      letter-spacing: 0.08em;
+    }
+    .step p { margin: 6px 0 0; font-size: 13px; line-height: 1.4; }
+    .step .sub { color: var(--secondary); font-size: 12px; margin-top: 4px; }
+    code {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 12px;
+      color: var(--signal);
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Theta Harvester · Proposed action</h1>
+    <p class="lede">The card is the top harvest, not an order. The headline was a machine token. It now names the <em>structure</em>.</p>
+
+    <div class="grid">
+      <div>
+        <div class="tag">Before · leaked token</div>
+        <div class="card">
+          <div class="mod">
+            <div>
+              <div class="k">Scanner / Proposal</div>
+              <div class="t">Proposed action</div>
+            </div>
+            <span class="chip">THETA</span>
+          </div>
+          <p class="stmt bad">TRUE_THETA</p>
+          <div class="conf"><span>CONFIDENCE</span><b>0.99 · HIGH</b></div>
+          <div class="meter"><i></i></div>
+          <div class="alts">ALTERNATIVES</div>
+          <div class="alt"><span>AMAT SHORT 440P / 690C</span><span>SCORE 98</span></div>
+          <div class="alt"><span>MSTR SHORT 80P / 125C</span><span>SCORE 98</span></div>
+          <div class="alt"><span>TTWO SHORT 210P / 290C</span><span>SCORE 98</span></div>
+          <div class="btns"><b>Accept</b><i>Dismiss</i></div>
+        </div>
+      </div>
+      <div>
+        <div class="tag">After · aa613e49</div>
+        <div class="card">
+          <div class="mod">
+            <div>
+              <div class="k">Scanner / Proposal</div>
+              <div class="t">Proposed action</div>
+            </div>
+            <span class="chip">THETA</span>
+          </div>
+          <p class="stmt good">ARM SHORT 235P / 350C</p>
+          <div class="conf"><span>CONFIDENCE</span><b>0.99 · HIGH</b></div>
+          <div class="meter"><i></i></div>
+          <div class="alts">ALTERNATIVES</div>
+          <div class="alt"><span>AMAT SHORT 440P / 690C</span><span>SCORE 98</span></div>
+          <div class="alt"><span>MSTR SHORT 80P / 125C</span><span>SCORE 98</span></div>
+          <div class="alt"><span>TTWO SHORT 210P / 290C</span><span>SCORE 98</span></div>
+          <div class="btns"><b>Accept</b><i>Dismiss</i></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="flow">
+      <div class="tag">When the card appears</div>
+      <div class="steps">
+        <div class="step">
+          <div class="n">01 ENGINE</div>
+          <p>Python writes <code>setup = TRUE_THETA</code> when verdict is <code>THETA_HARVEST</code>.</p>
+        </div>
+        <div class="step">
+          <div class="n">02 GATE</div>
+          <p>Card only if every gate passed. Else the table stands alone.</p>
+        </div>
+        <div class="step">
+          <div class="n">03 HEADLINE</div>
+          <p>Skip ALL_CAPS tokens. Print ticker + <code>SHORT put / call</code>.</p>
+        </div>
+        <div class="step">
+          <div class="n">04 ACTION</div>
+          <p><b>Accept</b> opens <code>/ARM</code>. <b>Dismiss</b> hides the card. No order is sent.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
