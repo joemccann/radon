@@ -43,6 +43,7 @@ try:
 except Exception:
     pass
 
+from clients.uw_client import UWRateLimitError  # noqa: E402 — needs the sys.path insert
 from utils.market_calendar import (  # noqa: E402 — needs the sys.path insert
     get_last_n_trading_days,
     market_state,
@@ -52,6 +53,10 @@ from utils.market_calendar import (  # noqa: E402 — needs the sys.path insert
 
 # ── constants ─────────────────────────────────────────────────────
 SKEW_JSON = _PROJECT_DIR / "data" / "skew.json"
+# Local sidecar so a daily UW cap does not keep calling the API every minute
+# (4xx does not burn quota, but the uncaught raise left the writer silent).
+_UW_DAILY_LIMIT_MARKER = "daily request limit"
+_UW_DAILY_RESET_HOUR_ET = 20
 
 _TICKER = "SPX"
 _TARGET_DTE = 30
@@ -361,6 +366,76 @@ def _scan_time_iso(now: datetime) -> str:
     return now.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _embargo_path() -> Path:
+    return SKEW_JSON.with_name("skew_uw_embargo.json")
+
+
+def _is_uw_daily_quota(exc: BaseException) -> bool:
+    return isinstance(exc, UWRateLimitError) and _UW_DAILY_LIMIT_MARKER in str(exc).lower()
+
+
+def _uw_retry_at(exc: BaseException, now: datetime) -> str:
+    """UW daily cap resets at 20:00 ET; other 429s get a 5-minute embargo."""
+    if _is_uw_daily_quota(exc):
+        local = now.astimezone(_ET)
+        reset = local.replace(hour=_UW_DAILY_RESET_HOUR_ET, minute=0, second=0, microsecond=0)
+        if local >= reset:
+            reset = reset + timedelta(days=1)
+        return reset.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return (now + timedelta(minutes=5)).astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _load_uw_embargo() -> Optional[datetime]:
+    try:
+        raw = json.loads(_embargo_path().read_text()).get("next_attempt_at")
+    except (OSError, ValueError, TypeError, AttributeError):
+        return None
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _save_uw_embargo(next_attempt_at: str) -> None:
+    path = _embargo_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"next_attempt_at": next_attempt_at}))
+
+
+def _clear_uw_embargo() -> None:
+    _embargo_path().unlink(missing_ok=True)
+
+
+def _uw_embargo_active(now: datetime) -> Optional[str]:
+    deadline = _load_uw_embargo()
+    if deadline is None or now >= deadline:
+        if deadline is not None:
+            _clear_uw_embargo()
+        return None
+    return deadline.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _record_cycle_error(exc: BaseException, *, now: datetime, next_attempt_at: str) -> None:
+    message = str(exc).splitlines()[0].strip()[:300]
+    try:
+        from db import writer
+    except ImportError:
+        return
+    try:
+        writer.ensure_no_replica_for_writers()
+        writer.record_service_health(
+            "skew",
+            "error",
+            finished_at=_scan_time_iso(now),
+            error={"message": message, "next_attempt_at": next_attempt_at},
+        )
+    except Exception as write_exc:  # noqa: BLE001 — telemetry must not mask the cycle
+        print(f"[skew] error heartbeat non-fatal: {write_exc}", file=sys.stderr)
+
+
 def _build_payload(
     scan_time: str,
     series: list[dict[str, Any]],
@@ -390,9 +465,42 @@ def run(client: Optional[Any] = None, *, now: Optional[datetime] = None) -> dict
     is reused with a fresh scan_time and only the snapshot + heartbeat
     refresh (heartbeat-only fast path)."""
     now = now or datetime.now(timezone.utc)
+    embargo_until = _uw_embargo_active(now)
+    if embargo_until:
+        cached = _read_json_cache()
+        if cached:
+            print(
+                f"[skew] UW daily quota embargo until {embargo_until}; keeping last snapshot",
+                file=sys.stderr,
+            )
+            _record_cycle_error(
+                UWRateLimitError("You have hit your daily request limit of 40000 requests."),
+                now=now,
+                next_attempt_at=embargo_until,
+            )
+            return cached
     if client is None:
         client = _DefaultClient()
 
+    try:
+        return _run_cycle(client, now)
+    except UWRateLimitError as exc:
+        next_attempt = _uw_retry_at(exc, now)
+        if _is_uw_daily_quota(exc):
+            _save_uw_embargo(next_attempt)
+        _record_cycle_error(exc, now=now, next_attempt_at=next_attempt)
+        cached = _read_json_cache()
+        if cached:
+            print(
+                f"[skew] {str(exc).splitlines()[0].strip()}; "
+                f"keeping last snapshot until {next_attempt}",
+                file=sys.stderr,
+            )
+            return cached
+        raise
+
+
+def _run_cycle(client: Any, now: datetime) -> dict[str, Any]:
     # Base series is the union of Turso history and the JSON mirror, keyed by
     # date (reads are Turso-first; the JSON file is only a fallback). Trusting
     # the JSON alone restarted the series at the 10-session gap bound on a
@@ -466,6 +574,7 @@ def run(client: Optional[Any] = None, *, now: Optional[datetime] = None) -> dict
     )
     _write_db_cache(payload, scan_time, rows_changed=bool(new_rows))
     _write_json_cache(payload)
+    _clear_uw_embargo()
     return payload
 
 
