@@ -68,6 +68,15 @@ export function formatOrderError(message: string | null | undefined): FormattedO
     return { summary: "Order was not acknowledged by IB.", details: [] };
   }
 
+  if (/trade not found/i.test(cleaned) || /no longer working at ib/i.test(cleaned)) {
+    return {
+      summary: "Order is no longer working at IB.",
+      details: /day order/i.test(cleaned)
+        ? ["DAY orders end at the regular-session close."]
+        : ["It may have filled or been cancelled."],
+    };
+  }
+
   if (
     /YOUR ORDER IS NOT ACCEPTED/i.test(rejectedReason) &&
     /PREVIOUS DAY EQUITY WITH LOAN VALUE/i.test(rejectedReason) &&

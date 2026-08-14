@@ -80,7 +80,7 @@ class TestPoolCancelOrder:
         result = await pool_cancel_order(client, order_id=10, perm_id=0,
                                         poll_interval=0.001)
         assert result["status"] == "error"
-        assert "not found" in result["message"].lower()
+        assert "no longer working" in result["message"].lower()
 
     @pytest.mark.asyncio
     async def test_cancel_returns_error_when_already_filled(self):

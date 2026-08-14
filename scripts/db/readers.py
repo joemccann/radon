@@ -217,13 +217,21 @@ def read_active_position_return_capital(db: Optional[Any] = None) -> list[dict[s
 
 def read_open_orders(db: Optional[Any] = None) -> list[dict[str, Any]]:
     rows = _db(db).execute(
-        "SELECT payload FROM open_orders ORDER BY updated_at DESC"
+        "SELECT payload, updated_at FROM open_orders ORDER BY updated_at DESC"
     ).fetchall()
+    try:
+        from utils.working_orders import is_prior_session_day_order
+    except ImportError:  # pragma: no cover — flat vs package import
+        from scripts.utils.working_orders import is_prior_session_day_order  # type: ignore[no-redef]
     orders: list[dict[str, Any]] = []
     for row in rows:
         payload = _json_payload(_cell(row, 0, "payload"))
-        if payload is not None:
-            orders.append(payload)
+        if payload is None:
+            continue
+        updated_at = str(_cell(row, 1, "updated_at") or "")
+        if is_prior_session_day_order(payload, updated_at):
+            continue
+        orders.append(payload)
     return orders
 
 

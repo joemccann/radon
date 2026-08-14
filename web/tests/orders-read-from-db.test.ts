@@ -43,7 +43,7 @@ const openPayload = (permId: number) => ({
   filled: 0,
   remaining: 1,
   avgFillPrice: null,
-  tif: "DAY",
+  tif: "GTC",
 });
 
 const todayEt = new Date().toLocaleDateString("sv", { timeZone: "America/New_York" });
@@ -96,6 +96,21 @@ describe("readOrdersFromDb", () => {
     expect(result!.executed_count).toBe(1);
     expect(result!.open_orders[0].permId).toBe(1);
     expect(result!.executed_orders[0].execId).toBe("e1");
+  });
+
+  it("excludes prior-session DAY working orders", async () => {
+    const dayGhost = { ...openPayload(1857171561), tif: "DAY", symbol: "CBRS P230" };
+    const gtcKeep = { ...openPayload(2128244184), tif: "GTC", symbol: "META P560" };
+    mockGetDb(
+      [
+        { payload: JSON.stringify(dayGhost), updated_at: "2026-08-13T19:59:51Z" },
+        { payload: JSON.stringify(gtcKeep), updated_at: "2026-08-13T19:59:51Z" },
+      ],
+      [],
+    );
+    const { readOrdersFromDb } = await import("../lib/orders/readOrdersFromDb");
+    const result = await readOrdersFromDb();
+    expect(result!.open_orders.map((o) => o.permId)).toEqual([2128244184]);
   });
 
   it("excludes executed fills from prior ET calendar days", async () => {

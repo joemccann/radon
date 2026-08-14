@@ -10,6 +10,10 @@ import {
   EMPTY_ORDERS,
   readOrdersSnapshotFromDb,
 } from "@/lib/orders/readOrdersFromDb";
+import {
+  isWorkingOrderMissingDetail,
+  workingOrderMissingMessage,
+} from "@/lib/orders/workingOrders";
 
 export const runtime = "nodejs";
 
@@ -33,10 +37,12 @@ export async function POST(request: Request): Promise<Response> {
     durableRateTier: "C",
   });
   if (!access.ok) return access.response;
+  let orderId = 0;
+  let permId = 0;
   try {
     const body = (await request.json()) as CancelBody;
-    const orderId = body.orderId ?? 0;
-    const permId = body.permId ?? 0;
+    orderId = body.orderId ?? 0;
+    permId = body.permId ?? 0;
 
     // Demo blockade (T-018) — above every radonFetch in this file. A demo user
     // has no live order to cancel (paper fills settle immediately, and there is
@@ -79,6 +85,22 @@ export async function POST(request: Request): Promise<Response> {
     });
   } catch (error) {
     if (error instanceof RadonApiError) {
+      if (isWorkingOrderMissingDetail(error.detail)) {
+        try {
+          await radonFetch("/orders/refresh", { method: "POST", timeout: 10_000 });
+        } catch {
+          // Non-fatal
+        }
+        const orders = await readOrdersSnapshotBestEffort();
+        const tif = orders.open_orders.find((order) =>
+          (permId > 0 && order.permId === permId)
+          || (orderId > 0 && order.orderId === orderId),
+        )?.tif;
+        return NextResponse.json(
+          { error: workingOrderMissingMessage(tif), orders },
+          { status: error.status },
+        );
+      }
       return NextResponse.json({ error: error.detail }, { status: error.status });
     }
     const message = error instanceof Error ? error.message : "Cancel failed";

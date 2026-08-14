@@ -20,6 +20,7 @@ from typing import Optional
 sys.path.insert(0, str(Path(__file__).parent))
 
 from clients.ib_client import IBClient, CLIENT_IDS, DEFAULT_HOST, DEFAULT_GATEWAY_PORT
+from utils.working_orders import working_order_missing_message
 
 DEFAULT_PORT = DEFAULT_GATEWAY_PORT
 DEFAULT_CLIENT_ID = CLIENT_IDS["ib_order_manage"]
@@ -93,7 +94,7 @@ def cancel_order(client: IBClient, order_id: int, perm_id: int,
     """
     trade = find_trade(client, order_id, perm_id)
     if trade is None:
-        output("error", f"Trade not found (orderId={order_id}, permId={perm_id})")
+        output("error", f"{working_order_missing_message()} (orderId={order_id}, permId={perm_id})")
 
     status = trade.orderStatus.status
     if status in ("Filled", "Cancelled", "ApiCancelled"):
@@ -114,7 +115,7 @@ def cancel_order(client: IBClient, order_id: int, perm_id: int,
             client.ib.sleep(0.5)
         trade = find_trade(client, order_id, perm_id)
         if trade is None:
-            output("error", "Trade not found after reconnect as original clientId")
+            output("error", f"{working_order_missing_message()} after reconnect as original clientId")
 
     # Capture IB error events during the cancel attempt
     error_msgs = []
@@ -173,7 +174,7 @@ def modify_order(client: IBClient, order_id: int, perm_id: int, new_price: Optio
     """
     trade = find_trade(client, order_id, perm_id)
     if trade is None:
-        output("error", f"Trade not found (orderId={order_id}, permId={perm_id})")
+        output("error", f"{working_order_missing_message()} (orderId={order_id}, permId={perm_id})")
 
     status = trade.orderStatus.status
     if status in ("Filled", "Cancelled", "ApiCancelled"):
@@ -205,7 +206,7 @@ def modify_order(client: IBClient, order_id: int, perm_id: int, new_price: Optio
             client.ib.sleep(0.5)
         trade = find_trade(client, order_id, perm_id)
         if trade is None:
-            output("error", "Trade not found after reconnect as original clientId")
+            output("error", f"{working_order_missing_message()} after reconnect as original clientId")
 
     # Capture IB error events during the modify attempt
     error_msgs = []

@@ -8,6 +8,7 @@ import {
 import { withTimeout } from "@/lib/asyncTimeout";
 import type { OrdersData } from "@tools/schemas/ib-orders";
 import { filterExecutedToEtToday } from "@/lib/orders/executedToday";
+import { isPriorSessionDayOrder } from "@/lib/orders/workingOrders";
 
 export type OrdersSnapshot = Static<typeof OrdersData>;
 
@@ -84,8 +85,9 @@ export async function readOrdersFromDb(): Promise<OrdersSnapshot | null> {
   for (const row of openResult.rows) {
     const payload = safeParse<Open>((row as { payload?: unknown }).payload);
     if (!payload) continue;
-    open.push(payload);
     const updatedAt = String((row as { updated_at?: unknown }).updated_at ?? "");
+    if (isPriorSessionDayOrder(payload, updatedAt)) continue;
+    open.push(payload);
     if (updatedAt > latestOpenSync) latestOpenSync = updatedAt;
   }
 

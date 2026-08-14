@@ -245,12 +245,15 @@ class TestModifyOrder:
             modify_order(client, 10, 12345, 0, "127.0.0.1", 4001)
         assert exc.value.code == 1
 
-    def test_modify_not_found(self):
+    def test_modify_not_found(self, capsys):
         client = make_client([])
 
         with pytest.raises(SystemExit) as exc:
             modify_order(client, 99, 88, 22.50, "127.0.0.1", 4001)
         assert exc.value.code == 1
+        data = json.loads(capsys.readouterr().out)
+        assert data["status"] == "error"
+        assert "no longer working" in data["message"].lower()
 
     def test_modify_stp_lmt_allowed(self):
         t = make_trade(status="Submitted", order_type="STP LMT", lmt_price=18.00)

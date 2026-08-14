@@ -175,6 +175,7 @@ export function OrderActionsProvider({ children }: { children: ReactNode }) {
       const json = await res.json();
       if (!res.ok) {
         pushNotification({ type: "error", message: json.error || "Cancel failed" });
+        if (json.orders) pushOrdersData(json.orders);
       } else {
         setPendingCancels((prev) => new Map(prev).set(order.permId, order));
         startCancelPoll(order);
@@ -282,6 +283,7 @@ export function OrderActionsProvider({ children }: { children: ReactNode }) {
       const json = await res.json();
       if (!res.ok) {
         pushNotification({ type: "error", message: json.error || "Modify failed" });
+        if (json.orders) pushOrdersData(json.orders);
       } else {
         if (request.newPrice != null || request.newQuantity != null) {
           const pm: PendingModify = {

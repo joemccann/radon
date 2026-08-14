@@ -935,14 +935,18 @@ async def _read_orders_snapshot_from_db() -> dict[str, Any]:
     )
     open_rows, executed_rows = await asyncio.gather(open_rows_task, executed_rows_task)
 
+    from utils.working_orders import is_prior_session_day_order
+
     open_orders: list[dict[str, Any]] = []
     latest_open_sync = ""
     for row in open_rows:
         payload = _safe_db_json_object(row[0] if row else None)
         if payload is None:
             continue
-        open_orders.append(payload)
         updated_at = str(row[1] or "") if len(row) > 1 else ""
+        if is_prior_session_day_order(payload, updated_at):
+            continue
+        open_orders.append(payload)
         if updated_at > latest_open_sync:
             latest_open_sync = updated_at
 
