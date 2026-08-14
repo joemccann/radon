@@ -38,11 +38,22 @@ export function isActionable(result: ThetaHarvesterResult): boolean {
   return result.verdict === ACTIONABLE_VERDICT && allGatesPass(result) && !result.errors?.length;
 }
 
+function isEngineSetupToken(setup: string): boolean {
+  return /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*$/.test(setup);
+}
+
+function structureStatement(result: ThetaHarvesterResult): string {
+  return `${result.ticker} ${thetaStructLabel(result)}`;
+}
+
 function statementFor(result: ThetaHarvesterResult): string {
   const setup = result.setup?.trim();
-  if (setup) return setup;
-  const edge = Number.isFinite(result.iv_rv_edge) ? result.iv_rv_edge.toFixed(1) : "---";
-  return `${result.ticker} ${thetaStructLabel(result)} — IV/RV edge ${edge}, range score ${result.range_score}.`;
+  if (setup && !isEngineSetupToken(setup)) return setup;
+  if (!setup) {
+    const edge = Number.isFinite(result.iv_rv_edge) ? result.iv_rv_edge.toFixed(1) : "---";
+    return `${structureStatement(result)} — IV/RV edge ${edge}, range score ${result.range_score}.`;
+  }
+  return structureStatement(result);
 }
 
 function alternativesFrom(rest: ThetaHarvesterResult[]): ProposalAlternative[] {
