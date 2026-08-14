@@ -29,6 +29,11 @@ def _claim_subprocess_slot() -> bool:
     global _active_subprocesses
     # No await between the check and increment: atomic within one event loop.
     if _active_subprocesses >= MAX_CONCURRENT_SUBPROCESSES:
+        logger.warning(
+            "Subprocess capacity exhausted (%d/%d)",
+            _active_subprocesses,
+            MAX_CONCURRENT_SUBPROCESSES,
+        )
         return False
     _active_subprocesses += 1
     return True

@@ -284,6 +284,35 @@ Incident: 2026-07-08, P1.
 
 ---
 
+## portfolio-sync-unit-502
+
+**`radon-portfolio-sync.service` oneshot pages P1 on a single transient 502
+while FastAPI and IB are up.** Peak: 2026-08-14 17:00:00Z, RTH, exit 22.
+
+- **Mechanism:** the every-minute wrapper POSTs `/portfolio/sync`. FastAPI
+  caps concurrent `run_script` at 4. Top-of-hour scanners (theta, vcg,
+  regime, strength, breadth, gex, cri) claim the slots first. The next
+  claim returns `Subprocess capacity exhausted` with no journal line;
+  `/portfolio/sync` maps that to HTTP 502 instantly (`/health` stays 200).
+  `curl -f` exits 22. The wrapper only retried curl exit 7 (connection
+  refused), so the oneshot failed and the unit watchdog paged. NRestarts=0
+  is normal for `Type=oneshot`.
+- **Discriminating check:** journal `POST /portfolio/sync` 502 in the same
+  second as the POST, `/health` 200, no `radon.subprocess WARNING Script
+  ib_sync.py failed`, other :00 scans 200 a few seconds later. Curl err
+  `The requested URL returned error: 502`. A real IB miss logs a
+  subprocess warning and takes ~6–10 s. Deploy `stop-clean` is a different
+  class (API inactive, exit 7 after retries).
+- **Remediation:** retry HTTP 502/503 with the same bounded budget as exit
+  7 (`scripts/run_portfolio_refresh.sh`). Log the slot-cap reject so the
+  next page is diagnosable. Persistent 502 still fails the unit.
+- **Regression:** `test_run_portfolio_refresh_retry.py::TestDeployWindowRetry::test_http_502_then_ok_retries`,
+  `test_http_503_then_ok_retries`, `test_http_400_does_not_retry`,
+  `test_persistent_502_still_fails_with_exit_22`;
+  `test_route_abuse_controls.py::test_subprocess_budget_logs_exhaustion`.
+
+---
+
 ## service-health-degraded / service-down (generic cases)
 
 `service-health-degraded`: `/api/service-health` body lists failing rows (error,

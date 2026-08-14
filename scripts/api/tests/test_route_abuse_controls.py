@@ -30,6 +30,21 @@ async def test_subprocess_budget_rejects_without_spawning(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_subprocess_budget_logs_exhaustion(monkeypatch, caplog):
+    from scripts.api import subprocess as subprocess_mod
+
+    monkeypatch.setattr(
+        subprocess_mod,
+        "_active_subprocesses",
+        subprocess_mod.MAX_CONCURRENT_SUBPROCESSES,
+    )
+    caplog.set_level("WARNING", logger="radon.subprocess")
+    result = await subprocess_mod.run_script("scanner.py", [])
+    assert result.ok is False
+    assert any("capacity exhausted" in rec.message.lower() for rec in caplog.records)
+
+
+@pytest.mark.asyncio
 async def test_run_script_cancellation_kills_and_reaps(monkeypatch):
     from scripts.api import subprocess as subprocess_mod
 

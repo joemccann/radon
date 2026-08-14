@@ -105,15 +105,27 @@ FASTAPI_HOST="${RADON_PORTFOLIO_REFRESH_FASTAPI_HOST:-127.0.0.1}"
 FASTAPI_PORT="${RADON_PORTFOLIO_REFRESH_FASTAPI_PORT:-8321}"
 FASTAPI_URL="http://${FASTAPI_HOST}:${FASTAPI_PORT}/portfolio/sync"
 
-# A deploy restarts radon-api, and this every-minute timer can land its
-# POST inside the seconds-wide restart gap: curl exits 7 (connection
-# refused) instantly, the oneshot fails, and the unit watchdog pages —
-# pure deploy collateral (2026-08-05 16:47:04Z and 20:45:02Z, both
-# matching radon-api restarts to the second). Retry connection-refused a
-# bounded number of times; a genuinely down FastAPI still fails after
-# the retries and alerts through radon-api.service itself.
+# Retry transient FastAPI misses a bounded number of times:
+#   exit 7  — connection refused (deploy restart gap; 2026-08-05)
+#   502/503 — API up but shedding (top-of-hour scan pile-up / slot cap;
+#             2026-08-14 17:00Z: POST /portfolio/sync 502 while /health 200)
+# A genuinely down FastAPI or a 4xx still fails after the budget and
+# pages through this unit; radon-api.service covers a dead listener.
 RETRY_LIMIT="${RADON_PORTFOLIO_REFRESH_RETRIES:-2}"
 RETRY_DELAY="${RADON_PORTFOLIO_REFRESH_RETRY_DELAY_SECS:-8}"
+
+_retryable_portfolio_refresh() {
+    [ "$1" -lt "$RETRY_LIMIT" ] || return 1
+    if [ "$2" -eq 7 ]; then
+        return 0
+    fi
+    if [ "$2" -eq 22 ]; then
+        case "$3" in
+            502|503) return 0 ;;
+        esac
+    fi
+    return 1
+}
 
 echo "$(date): POST ${FASTAPI_URL}"
 attempt=0
@@ -125,11 +137,11 @@ while :; do
         echo "$(date): Portfolio refresh via FastAPI complete (OK)"
         exit 0
     fi
-    if [ "$CURL_EXIT" -ne 7 ] || [ "$attempt" -ge "$RETRY_LIMIT" ]; then
+    if ! _retryable_portfolio_refresh "$attempt" "$CURL_EXIT" "$HTTP_CODE"; then
         break
     fi
     attempt=$((attempt + 1))
-    echo "$(date): FastAPI connection refused — retry ${attempt}/${RETRY_LIMIT} in ${RETRY_DELAY}s (deploy restart window?)"
+    echo "$(date): FastAPI transient (curl=${CURL_EXIT} http=${HTTP_CODE}) — retry ${attempt}/${RETRY_LIMIT} in ${RETRY_DELAY}s"
     sleep "$RETRY_DELAY"
 done
 

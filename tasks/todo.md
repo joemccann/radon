@@ -1,3 +1,23 @@
+# Task: P1 radon-portfolio-sync 502 at :00 (2026-08-14)
+
+## Dependency graph
+
+- T1 depends_on: [] - Failing tests: wrapper retries HTTP 502/503 then succeeds
+- T2 depends_on: [T1] - `run_portfolio_refresh.sh` retries 502/503 like exit 7
+- T3 depends_on: [T2] - Log subprocess capacity exhaustion; runbook; focused pytest
+
+## Checklist
+
+- [x] T1 Red tests
+- [x] T2 Wrapper retry
+- [x] T3 Verify + runbook
+
+## Review
+
+17:00Z P1: `/portfolio/sync` 502 in the same second as the POST while `/health` 200. Wrapper now retries 502/503 with the exit-7 budget. Slot-cap reject logs a warning. Red 3 fail; green 19 focused + 463 affected.
+
+---
+
 # Task: Pushover when a release is live (2026-08-14)
 
 ## Dependency graph
