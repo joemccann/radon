@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>P1 page to Grok</title>
+  <style>
+    :root {
+      --canvas: #0a0f14;
+      --panel: #0f1519;
+      --raised: #151c22;
+      --grid: #1e293b;
+      --text: #e2e8f0;
+      --muted: #758192;
+      --secondary: #94a3b8;
+      --signal: #05AD98;
+      --warn: #F5A623;
+      --fault: #E85D6C;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--canvas);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+      padding: 24px 16px 48px;
+    }
+    .wrap { max-width: 920px; margin: 0 auto; }
+    h1 {
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      margin: 0 0 8px;
+    }
+    h2 {
+      font-size: 22px;
+      font-weight: 560;
+      letter-spacing: -0.02em;
+      margin: 0 0 8px;
+    }
+    .lede {
+      color: var(--secondary);
+      font-size: 14px;
+      margin: 0 0 28px;
+      max-width: 40rem;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .label {
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 14px;
+    }
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .step {
+      background: var(--raised);
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      padding: 12px;
+      min-height: 132px;
+    }
+    .step.phone { border-color: var(--fault); }
+    .step.ticket { border-color: var(--warn); }
+    .step.grok { border-color: var(--signal); }
+    .n {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .t { font-size: 14px; font-weight: 600; margin: 8px 0 6px; }
+    .d { font-size: 12px; color: var(--secondary); line-height: 1.45; }
+    .host {
+      margin-top: 10px;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 10px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .arrow-row {
+      display: none;
+    }
+    .split {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .box {
+      background: var(--raised);
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      padding: 12px;
+    }
+    .box.stand { border-color: var(--warn); }
+    .box.ship { border-color: var(--signal); }
+    .box h3 {
+      margin: 0 0 8px;
+      font-size: 13px;
+    }
+    ul {
+      margin: 0;
+      padding-left: 1.1rem;
+      color: var(--secondary);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    code, .mono {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 12px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th, td {
+      text-align: left;
+      padding: 8px 6px;
+      border-bottom: 1px solid var(--grid);
+      vertical-align: top;
+    }
+    th {
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 500;
+    }
+    td.k { color: var(--signal); white-space: nowrap; }
+    .states {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .chip {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 11px;
+      border: 1px solid var(--grid);
+      border-radius: 999px;
+      padding: 4px 10px;
+      color: var(--secondary);
+    }
+    .chip.pending { color: var(--warn); border-color: var(--warn); }
+    .chip.claimed { color: var(--secondary); }
+    .chip.done { color: var(--signal); border-color: var(--signal); }
+    .chip.skipped { color: var(--fault); border-color: var(--fault); }
+    @media (max-width: 720px) {
+      .flow, .split { grid-template-columns: 1fr; }
+      .step { min-height: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Radon / watchdog</h1>
+    <h2>iPhone P1 to Grok</h2>
+    <p class="lede">The push and the ticket are the same send. Grok only runs if this Mac is awake.</p>
+
+    <div class="panel">
+      <div class="label">Same moment</div>
+      <div class="flow">
+        <div class="step">
+          <div class="n">01</div>
+          <div class="t">P1 fires</div>
+          <div class="d">Watchdog hysteresis + cooldown. Pushover emergency, priority 2.</div>
+          <div class="host">Hetzner</div>
+        </div>
+        <div class="step phone">
+          <div class="n">02</div>
+          <div class="t">iPhone buzzes</div>
+          <div class="d">Cuts through Do Not Disturb. Repeats until you ack or it expires.</div>
+          <div class="host">Pushover</div>
+        </div>
+        <div class="step ticket">
+          <div class="n">03</div>
+          <div class="t">Ticket lands</div>
+          <div class="d">Same 2xx writes <span class="mono">watchdog_pages</span>. One row per service / kind / UTC hour.</div>
+          <div class="host">Turso</div>
+        </div>
+        <div class="step grok">
+          <div class="n">04</div>
+          <div class="t">Grok claims</div>
+          <div class="d">Laptop job every 30s. Headless diagnose, then TDD ship or stand down.</div>
+          <div class="host">This Mac</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="label">After claim</div>
+      <div class="split">
+        <div class="box stand">
+          <h3>Stand down</h3>
+          <ul>
+            <li><span class="mono">ib-gateway-grouped</span>, 2FA, IB unreachable</li>
+            <li>Turso platform outage</li>
+            <li>CI deploy already in flight</li>
+            <li>Off-hours expected lag, 401/403, unknown probes</li>
+          </ul>
+        </div>
+        <div class="box ship">
+          <h3>Ship</h3>
+          <ul>
+            <li>Red test for the failing topology</li>
+            <li>Minimal fix, focused suite green</li>
+            <li>Commit by path, never <span class="mono">git add -A</span></li>
+            <li>One push after CI is idle</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="label">Ticket states</div>
+      <div class="states">
+        <span class="chip pending">pending</span>
+        <span class="chip claimed">claimed</span>
+        <span class="chip done">done</span>
+        <span class="chip skipped">skipped after 3 fails</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="label">Kill switches</div>
+      <table>
+        <thead>
+          <tr><th>Env</th><th>Effect when 0</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="k">GROK_PAGE_RESPONDER</td><td>Do not claim or launch</td></tr>
+          <tr><td class="k">GROK_PAGE_AUTOSHIP</td><td>Diagnose only. No edits or commits.</td></tr>
+          <tr><td class="k">GROK_PAGE_AUTOPUSH</td><td>Commit locally. Do not push.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</body>
+</html>

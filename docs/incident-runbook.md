@@ -380,15 +380,20 @@ bug. Revisit only if Radon grows a real operator desktop shell.
 
 ## Grok auto-response on iPhone P1 pages
 
+Canonical: [`grok-page-responder.md`](grok-page-responder.md).
+
 The same watchdog send that buzzes Pushover on the iPhone writes a
 `watchdog_pages` row (sanitized excerpt, one ticket per service/kind/UTC
 hour). Laptop `com.radon.grok-page-responder` (`scripts/grok_page_responder.py`,
-30s) claims the row and runs headless Grok with the incident-response
-playbook: diagnose, stand down when the runbook says so, otherwise TDD
-and ship. A normal-priority Pushover follow-up reports the disposition.
-The Mac must be awake. Kill switches: `GROK_PAGE_RESPONDER=0`,
-`GROK_PAGE_AUTOSHIP=0` (diagnose only), `GROK_PAGE_AUTOPUSH=0`.
-Install: `bash scripts/setup_grok_page_responder.sh`.
+30s) claims the row and runs headless Grok with this playbook: diagnose,
+stand down when this runbook says so, otherwise TDD and ship. A
+normal-priority `radon grok:` follow-up reports the disposition. After
+`git push origin main` and a green live gate, `deploy_notify.py` sends
+`radon deploy live`. Neither follow-up is P1.
+
+The Mac must be awake. This is not a VPS unit. Kill switches:
+`GROK_PAGE_RESPONDER=0`, `GROK_PAGE_AUTOSHIP=0` (diagnose only),
+`GROK_PAGE_AUTOPUSH=0`. Install: `bash scripts/setup_grok_page_responder.sh`.
 
 macOS banners are easy to miss, so `.claude/hooks/pending_diagnoses.py` closes
 the loop at the next Claude Code session start in this repo (SessionStart hook,
