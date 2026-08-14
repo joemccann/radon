@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
 from grok_page_responder import (
+    GROK_TIMEOUT_SECS,
+    LOCK_STALE_SECS,
+    acquire_lock,
     build_followup_payload,
     build_grok_command,
     build_prompt,
@@ -343,7 +350,7 @@ class TestResponder:
         )
         lock = tmp_path / "data" / "cache" / "grok_pages" / ".responder.lock"
         lock.parent.mkdir(parents=True, exist_ok=True)
-        lock.write_text("99999")
+        lock.write_text(str(os.getpid()))
         lock.touch()
         called = []
         rc = run_cycle(
@@ -353,3 +360,43 @@ class TestResponder:
         )
         assert rc == 0
         assert called == []
+
+
+class TestResponderLock:
+    """A killed cycle must not blackhole the queue until the TTL lapses.
+
+    2026-08-14: a cycle died at 20:14 UTC without reaching its `finally`,
+    and every 30s poll for the next three hours printed "previous grok page
+    cycle still running". A skew2d P1 sat `pending` the whole time.
+    """
+
+    def _held_by(self, tmp_path, pid) -> Path:
+        """A lock written by `pid` and last touched exactly at NOW."""
+        lock = tmp_path / "data" / "cache" / "grok_pages" / ".responder.lock"
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.write_text(str(pid))
+        os.utime(lock, (NOW.timestamp(), NOW.timestamp()))
+        return lock
+
+    def test_dead_holder_lock_is_stolen_immediately(self, tmp_path):
+        dead = subprocess.Popen([sys.executable, "-c", "pass"])
+        dead.wait()
+        lock = self._held_by(tmp_path, dead.pid)
+        assert acquire_lock(lock, NOW) is True
+        assert lock.read_text() == str(os.getpid())
+
+    def test_live_holder_lock_is_respected(self, tmp_path):
+        lock = self._held_by(tmp_path, os.getpid())
+        assert acquire_lock(lock, NOW) is False
+
+    def test_unreadable_holder_falls_back_to_the_ttl(self, tmp_path):
+        lock = self._held_by(tmp_path, "not-a-pid")
+        assert acquire_lock(lock, NOW) is False
+        assert acquire_lock(lock, NOW + timedelta(seconds=LOCK_STALE_SECS + 1)) is True
+
+    def test_ttl_cannot_outlive_the_grok_timeout(self):
+        assert LOCK_STALE_SECS > GROK_TIMEOUT_SECS, "a live cycle must never be stolen"
+        assert LOCK_STALE_SECS <= GROK_TIMEOUT_SECS + 600, (
+            "a lock outliving the longest legal cycle by more than a short margin "
+            "blackholes the queue"
+        )

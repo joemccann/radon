@@ -214,6 +214,69 @@ def _write_db(
         print(f"[skew2d] db cache non-fatal: {exc}", file=sys.stderr)
 
 
+def _parent_uw_embargo(now: datetime) -> Optional[str]:
+    """The parent SKEW writer's own UW-cap deadline, or None."""
+    try:
+        from fetch_skew import uw_embargo_until
+
+        deadline = uw_embargo_until(now)
+    except Exception as exc:  # noqa: BLE001 — no sidecar means no embargo
+        print(f"[skew2d] parent embargo probe non-fatal: {exc}", file=sys.stderr)
+        return None
+    if deadline is None:
+        return None
+    return deadline.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _hold_for_parent_embargo(
+    ratio_rows: list[dict[str, Any]],
+    *,
+    scan_time: str,
+    now: datetime,
+    latest_session: str,
+    embargo_until: str,
+) -> dict[str, Any]:
+    """Refresh the snapshot on the sessions we have and record the known lag.
+
+    The parent keeps its last snapshot while UW's daily cap is spent, so
+    skew_history sits a session behind by design. Raising would fail the unit
+    and page a P1 for a condition that clears itself at the UW reset. Nothing
+    is upserted into history: the missing session has no rows to write.
+    """
+    print(
+        f"[skew2d] parent SKEW embargoed until {embargo_until}; "
+        f"holding at {latest_session}",
+        file=sys.stderr,
+    )
+    series = compute_change_2d_series(ratio_rows)
+    payload = build_payload(
+        series,
+        scan_time=scan_time,
+        source="skew_history",
+        market_status=_market_status(now),
+    )
+    if writer is not None:
+        try:
+            writer.ensure_no_replica_for_writers()
+            writer.upsert_scan_snapshot("skew2d", scan_time, payload)
+            writer.record_service_health(
+                "skew2d",
+                "error",
+                finished_at=scan_time,
+                error={
+                    "message": (
+                        f"parent SKEW embargoed by the UW daily cap; "
+                        f"holding at {latest_session}"
+                    ),
+                    "next_attempt_at": embargo_until,
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 — best-effort mirror
+            print(f"[skew2d] db cache non-fatal: {exc}", file=sys.stderr)
+    persist_json(payload)
+    return payload
+
+
 # ── orchestration ─────────────────────────────────────────────────
 
 def run(*, now: Optional[datetime] = None) -> dict[str, Any]:
@@ -229,8 +292,17 @@ def run(*, now: Optional[datetime] = None) -> dict[str, Any]:
     expected_session = last_completed_session_date(now)
     latest_session = max(str(row.get("date") or "")[:10] for row in ratio_rows)
     if latest_session < expected_session:
-        raise ValueError(
-            f"skew2d: stale parent session {latest_session}; expected {expected_session}"
+        embargo_until = _parent_uw_embargo(now)
+        if embargo_until is None:
+            raise ValueError(
+                f"skew2d: stale parent session {latest_session}; expected {expected_session}"
+            )
+        return _hold_for_parent_embargo(
+            ratio_rows,
+            scan_time=scan_time,
+            now=now,
+            latest_session=latest_session,
+            embargo_until=embargo_until,
         )
 
     series = compute_change_2d_series(ratio_rows)

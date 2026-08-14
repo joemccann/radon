@@ -216,6 +216,77 @@ class TestRunHeartbeat:
         with pytest.raises(ValueError, match="stale parent session"):
             run(now=datetime(2026, 8, 10, 22, 0, tzinfo=timezone.utc))
 
+    def test_parent_uw_embargo_holds_the_lag_instead_of_failing_the_unit(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ):
+        """A UW daily-cap embargo on the parent is an explained lag, not corruption.
+
+        The parent keeps its last snapshot under the cap, so skew_history sits a
+        session behind by design. Raising here fails radon-skew2d.service and
+        pages a P1 for a condition that resolves itself at the UW reset.
+        """
+        _, _, _, run = _import_fetch()
+        import fetch_skew as parent  # type: ignore
+        import fetch_skew2d as mod  # type: ignore
+
+        # Real sidecar, real parse path — relocated so tests never touch data/.
+        monkeypatch.setattr(parent, "SKEW_JSON", tmp_path / "skew.json")
+        embargo_until = "2026-08-11T00:00:00Z"
+        (tmp_path / "skew_uw_embargo.json").write_text(
+            json.dumps({"next_attempt_at": embargo_until})
+        )
+
+        upserts: list[Any] = []
+        snapshots: list[Any] = []
+        healths: list[Any] = []
+
+        class FakeWriter:
+            def ensure_no_replica_for_writers(self):
+                return None
+
+            def upsert_skew2d_rows(self, rows, recorded_at=None):
+                upserts.append((rows, recorded_at))
+
+            def upsert_scan_snapshot(self, service, scan_time, payload):
+                snapshots.append((service, scan_time, payload))
+
+            def record_service_health(self, service, status, finished_at=None, **kw):
+                healths.append((service, status, kw.get("error")))
+
+        monkeypatch.setattr(mod, "load_ratio_rows", lambda: HAND_RATIOS)
+        monkeypatch.setattr(mod, "load_prior_payload", lambda: None)
+        monkeypatch.setattr(mod, "persist_json", lambda _payload: None)
+        monkeypatch.setattr(mod, "writer", FakeWriter())
+
+        payload = run(now=datetime(2026, 8, 10, 21, 50, tzinfo=timezone.utc))
+
+        assert payload["current"]["date"] == "2026-08-07"
+        assert upserts == [], "never upsert history for a session the parent lacks"
+        assert snapshots and snapshots[0][0] == "skew2d"
+        assert healths, "the embargoed cycle must still heartbeat"
+        service, status, error = healths[0]
+        assert (service, status) == ("skew2d", "error")
+        assert error and error.get("next_attempt_at") == embargo_until
+
+    def test_expired_parent_embargo_still_fails_on_a_stale_parent(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ):
+        """An embargo that has already lapsed suppresses nothing."""
+        _, _, _, run = _import_fetch()
+        import fetch_skew as parent  # type: ignore
+        import fetch_skew2d as mod  # type: ignore
+
+        monkeypatch.setattr(parent, "SKEW_JSON", tmp_path / "skew.json")
+        (tmp_path / "skew_uw_embargo.json").write_text(
+            json.dumps({"next_attempt_at": "2026-08-10T00:00:00Z"})
+        )
+        monkeypatch.setattr(mod, "load_ratio_rows", lambda: HAND_RATIOS)
+        monkeypatch.setattr(
+            mod, "persist_json", lambda _p: pytest.fail("stale payload persisted")
+        )
+        with pytest.raises(ValueError, match="stale parent session"):
+            run(now=datetime(2026, 8, 10, 22, 0, tzinfo=timezone.utc))
+
     def test_unchanged_source_refreshes_snapshot_without_row_upserts(
         self, monkeypatch: pytest.MonkeyPatch
     ):

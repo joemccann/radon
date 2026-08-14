@@ -85,6 +85,16 @@ Unset means on.
 Stale claims older than 2h are reclaimable. Overlapping cycles skip on
 `.responder.lock`.
 
+The lock holds only while its PID is alive. A cycle killed before its
+`finally` leaves the file behind, and the next poll steals it once
+`os.kill(pid, 0)` reports the holder gone. Content that will not parse as a
+PID is never assumed dead: those fall back to the TTL, `GROK_TIMEOUT_SECS`
+plus a 5-minute teardown margin, since no cycle may outlive the grok timeout.
+A wider TTL blackholes every queued page for its whole span — on 2026-08-14 a
+cycle died at 20:14 UTC and the old 3h TTL stranded a `radon-skew2d.service`
+P1 in `pending` with the poller printing `previous grok page cycle still
+running` every 30 seconds.
+
 ## Code
 
 | Path | Role |
