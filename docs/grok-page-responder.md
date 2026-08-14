@@ -65,6 +65,25 @@ A responder running code older than `main` is the failure this prevents.
 Claude analyze-only remains laptop-only: `com.radon.incident-responder`.
 It never pushes.
 
+## Own health (`grok-page-responder`)
+
+The poller heartbeats itself, because a stalled auto-fixer is silent by
+nature and its silence used to look exactly like health.
+
+| Cycle | Row |
+|---|---|
+| Completed (including `pending: 0`) | `ok` |
+| Kill switch off | `paused` |
+| Skipped on a live lock | nothing written |
+| Raised on Turso / git | nothing written |
+
+Only a completed cycle heartbeats, so a wedged poller goes stale instead of
+keeping its own row fresh forever. That is why the window is 90m in
+`web/lib/serviceHealthWindows.ts` and `scripts/watchdog/services.py`: it has
+to absorb one full grok run (`GROK_TIMEOUT_SECS`, 1h) of legitimate skipping.
+The row is this writer's health, never the ticket verdict — a stand_down is a
+healthy cycle.
+
 ## Verify
 
 ```bash

@@ -64,6 +64,7 @@ GROK_TIMEOUT_SECS = 3600
 LOCK_STALE_SECS = GROK_TIMEOUT_SECS + 300
 CACHE_REL = Path("data") / "cache" / "grok_pages"
 LOCK_NAME = ".responder.lock"
+HEALTH_SERVICE = "grok-page-responder"
 
 GrokRunner = Callable[..., object]
 
@@ -268,6 +269,28 @@ def _send_followup(*, service: str, disposition: str, summary: str) -> None:
     notify._post_pushover(payload)
 
 
+def record_cycle_health(state: str, *, now: Optional[datetime] = None) -> None:
+    """Heartbeat THIS poller, never the ticket outcome.
+
+    A cycle that reaches the end is healthy even when grok stood down or
+    failed on a page — that verdict belongs to `watchdog_pages`, not here
+    (feedback_service_health_writer_state_not_event_content).
+    """
+    finished = (now or datetime.now(timezone.utc)).isoformat().replace("+00:00", "Z")
+    try:
+        from db.hrana_http import write_service_health_http
+    except ImportError:  # pragma: no cover — stripped clone without db/
+        return
+    write_service_health_http(HEALTH_SERVICE, state, finished_at=finished)
+
+
+def _heartbeat(state: str, now: datetime) -> None:
+    try:
+        record_cycle_health(state, now=now)
+    except Exception as exc:  # noqa: BLE001 — telemetry must not fail a cycle
+        print(f"grok page heartbeat non-fatal: {exc}", file=sys.stderr)
+
+
 def _default_grok_runner(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(
         cmd,
@@ -287,15 +310,20 @@ def run_cycle(
     now = now or datetime.now(timezone.utc)
     if not responder_enabled():
         print(json.dumps({"at": now.isoformat(), "skipped": "disabled"}))
+        _heartbeat("paused", now)
         return 0
 
     cache = cache_dir(repo_root)
     lock = cache / LOCK_NAME
     if not acquire_lock(lock, now):
+        # Deliberately no heartbeat: a poller that only ever skips must be
+        # allowed to go stale, or a wedge keeps its own row fresh forever.
+        # The window absorbs the longest legal run so real work never pages.
         print("previous grok page cycle still running; skipping", file=sys.stderr)
         return 0
 
     runner = grok_runner or _default_grok_runner
+    completed = True
     try:
         sync_state = sync_remote_clone(repo_root)
         if sync_state not in {"disabled", "synced", "dirty"}:
@@ -374,7 +402,14 @@ def run_cycle(
             "summary": summary,
         }))
         return 0
+    except BaseException:
+        # A cycle that died on Turso or git is not a healthy poll. Let the
+        # row go stale rather than paint over the writer's own failure.
+        completed = False
+        raise
     finally:
+        if completed:
+            _heartbeat("ok", now)
         lock.unlink(missing_ok=True)
 
 
