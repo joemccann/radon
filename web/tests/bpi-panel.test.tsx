@@ -162,6 +162,43 @@ describe("BpiPanel", () => {
   });
 });
 
+describe("BpiPanel session staleness", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    cleanup();
+  });
+
+  function renderNdx(asOf: string) {
+    useBpiMock.mockReturnValue(hookResult({
+      data: {
+        ...RESPONSE,
+        indices: { ...RESPONSE.indices, NDX: { ...NDX, as_of_session: asOf } },
+      },
+    }));
+    return render(<BpiPanel />);
+  }
+
+  it("shows the as-of date and a visible STALE mark when the session lags lastCompletedSessionDate", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-13T19:22:00-04:00"));
+    renderNdx("2026-08-12");
+
+    const cell = screen.getByTestId("bpi-strip-session");
+    expect(cell.textContent).toContain("2026-08-12");
+    expect(screen.getByTestId("bpi-session-stale").textContent).toMatch(/STALE/);
+    expect(cell.textContent).not.toMatch(/Refreshes nightly/i);
+  });
+
+  it("does not show STALE when as_of is the last completed session", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-13T19:22:00-04:00"));
+    renderNdx("2026-08-13");
+
+    expect(screen.getByTestId("bpi-strip-session").textContent).toContain("2026-08-13");
+    expect(screen.queryByTestId("bpi-session-stale")).toBeNull();
+  });
+});
+
 describe("BpiChart pins", () => {
   beforeEach(() => {
     useBpiMock.mockReturnValue(hookResult({ data: RESPONSE }));

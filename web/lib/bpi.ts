@@ -9,6 +9,8 @@
  * which is a rendering concern over the payload's history array.
  */
 
+import { lastCompletedSessionDate } from "./marketSession";
+
 export type BpiIndexSymbol = "NDX" | "SPX" | "RUT";
 
 export const BPI_INDEX_SYMBOLS: readonly BpiIndexSymbol[] = ["NDX", "SPX", "RUT"];
@@ -40,6 +42,8 @@ export interface BpiPayload {
   /** Trailing sessions, ascending by date, at most ~504 points. */
   history: BpiHistoryPoint[];
   sources?: Record<string, unknown>;
+  /** Scan-time session lag flag. Absent on old snapshots; not a guard field. */
+  stale?: boolean;
 }
 
 export interface BpiMissingIndex {
@@ -153,4 +157,17 @@ export function bpiToneColor(tone: BpiTone): string {
     case "warning": return "var(--warning)";
     case "neutral": return "var(--text-secondary)";
   }
+}
+
+/**
+ * Session-relative currency: as_of is current iff it covers the last
+ * COMPLETED ET session (16:00 ET boundary). Intraday yesterday is current;
+ * after the close yesterday is stale; Friday stays current all weekend.
+ */
+export function isBpiSessionCurrent(
+  asOf: string | null | undefined,
+  now: Date = new Date(),
+): boolean {
+  if (!asOf) return false;
+  return asOf >= lastCompletedSessionDate(now);
 }

@@ -7,10 +7,13 @@ Description=Radon BPI scan - Mon-Fri 21:30 UTC, after the US close settles
 # (incremental finds nothing new) and heartbeat, so the watchdog window
 # never widens for them.
 OnCalendar=Mon..Fri *-*-* 21:30:00 UTC
-# Catch-up pass the next morning: Yahoo occasionally lags the just-closed
-# session for a subset of members at 21:30 (2026-07-24 NDX repro), leaving
-# the aggregate one session stale. Laggards refetch and the series
-# converges; a no-lag morning run is a cheap incremental no-op.
+# Same-evening catch-up: Yahoo often lags a subset of members at 21:30
+# (2026-07-24 NDX repro), leaving the aggregate one session stale. The
+# 23:30 UTC pass recovers last-bar nulls once spark/chart meta carries
+# the official close.
+OnCalendar=Mon..Fri *-*-* 23:30:00 UTC
+# Morning catch-up: remaining laggards refetch and the series converges;
+# a no-lag morning run is a cheap incremental no-op.
 OnCalendar=Tue..Sat *-*-* 11:00:00 UTC
 Persistent=true
 RandomizedDelaySec=120

@@ -197,21 +197,54 @@ class TestYahooSparkParse:
     """Nightly incremental goes batch-first: the v8 spark endpoint serves up
     to ~100 symbols per request anonymously (the per-symbol chart endpoint
     was tarpitted to ~60s/request on 2026-07-27 — 415 SPX fetches took 52
-    minutes and blew the unit's start budget). Parser is pure; members whose
-    spark payload lacks the last completed session fall back to the
-    per-symbol chart path (which carries the meta-close recovery)."""
+    minutes and blew the unit's start budget). Parser is pure. A null LAST
+    close is recovered from spark meta the same way parse_yahoo_chart
+    recovers regularMarketPrice when regularMarketTime maps to that last
+    bar's session; mid-series nulls stay dropped. Members still missing
+    the last completed session fall back to the per-symbol chart path."""
 
     def _payload(self):
         day_23, day_24, day_27 = 1784813400, 1784899800, 1785159000
+        close_27 = 1785182400  # 2026-07-27 20:00 UTC close
         return {
             "AAPL": {"symbol": "AAPL", "timestamp": [day_23, day_27], "close": [321.66, 333.5]},
-            "MSFT": {"symbol": "MSFT", "timestamp": [day_23, day_24, day_27], "close": [381.58, 380.0, None]},
+            "MSFT": {
+                "symbol": "MSFT",
+                "timestamp": [day_23, day_24, day_27],
+                "close": [381.58, 380.0, None],
+                "meta": {
+                    "regularMarketTime": close_27,
+                    "regularMarketPrice": 428.17,
+                },
+            },
         }
 
-    def test_parses_dates_and_skips_null_closes(self):
+    def test_parses_dates_and_recovers_null_last_from_meta(self):
         bars = bpi.parse_yahoo_spark(self._payload())
         assert bars["AAPL"] == {"2026-07-23": 321.66, "2026-07-27": 333.5}
-        assert bars["MSFT"] == {"2026-07-23": 381.58, "2026-07-24": 380.0}
+        assert bars["MSFT"] == {
+            "2026-07-23": 381.58,
+            "2026-07-24": 380.0,
+            "2026-07-27": 428.17,
+        }
+
+    def test_mid_series_null_stays_dropped(self):
+        day1, day2, day3 = 1784727000, 1784813400, 1784899800
+        payload = {
+            "NVDA": {
+                "symbol": "NVDA",
+                "timestamp": [day1, day2, day3],
+                "close": [325.89, None, 330.0],
+                "meta": {
+                    "regularMarketTime": 1784923200,
+                    "regularMarketPrice": 999.0,
+                },
+            }
+        }
+        bars = bpi.parse_yahoo_spark(payload)
+        assert "2026-07-23" not in bars["NVDA"]
+        assert bars["NVDA"]["2026-07-24"] == 330.0
+        assert 999.0 not in bars["NVDA"].values()
 
     def test_chunks_respect_spark_symbol_cap(self):
         # Empirical endpoint cap: >20 symbols per request → HTTP 400 (the
@@ -223,7 +256,7 @@ class TestYahooSparkParse:
         stragglers = bpi.members_still_stale(
             ["AAPL", "MSFT", "TSLA"], bars, last_complete="2026-07-27"
         )
-        assert stragglers == ["MSFT", "TSLA"]
+        assert stragglers == ["TSLA"]
 
 
 class TestYahooChartParse:

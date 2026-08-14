@@ -284,8 +284,10 @@ SPARK_RANGE = "5d"              # covers the missing tail incl. long weekends
 
 def parse_yahoo_spark(payload: dict[str, Any]) -> dict[str, dict[str, float]]:
     """{symbol: {date: close}} from a v8 spark response (top-level dict keyed
-    by symbol). Null closes are skipped — a member whose latest bar is null
-    simply stays stale and takes the chart fallback path."""
+    by symbol). A null LAST close is recovered from spark meta the same way
+    parse_yahoo_chart recovers regularMarketPrice when regularMarketTime
+    maps to that last bar's session; mid-series nulls stay dropped.
+    In-progress bars are still dropped later via d <= last_complete."""
     bars: dict[str, dict[str, float]] = {}
     for symbol, entry in payload.items():
         if not isinstance(entry, dict):
@@ -297,6 +299,7 @@ def parse_yahoo_spark(payload: dict[str, Any]) -> dict[str, dict[str, float]]:
             for ts, c in zip(timestamps, closes)
             if c is not None
         }
+        _recover_null_last_close(series, timestamps, closes, entry.get("meta") or {})
         if series:
             bars[symbol] = series
     return bars
@@ -375,14 +378,25 @@ def parse_yahoo_chart(result: dict[str, Any]) -> dict[str, float]:
         for ts, c in zip(timestamps, closes)
         if c is not None
     }
-    if timestamps and closes and closes[-1] is None:
-        meta = result.get("meta") or {}
-        market_time, market_price = meta.get("regularMarketTime"), meta.get("regularMarketPrice")
-        if market_time and market_price is not None:
-            last_bar_date = _utc_date(timestamps[-1])
-            if _utc_date(market_time) == last_bar_date:
-                bars[last_bar_date] = float(market_price)
+    _recover_null_last_close(bars, timestamps, closes, result.get("meta") or {})
     return bars
+
+
+def _recover_null_last_close(
+    bars: dict[str, float],
+    timestamps: list[Any],
+    closes: list[Any],
+    meta: dict[str, Any],
+) -> None:
+    """Fill the final bar from meta only when that last close is null and
+    regularMarketTime maps to the same UTC session date as the last stamp."""
+    if not timestamps or not closes or closes[-1] is not None:
+        return
+    market_time, market_price = meta.get("regularMarketTime"), meta.get("regularMarketPrice")
+    if market_time and market_price is not None:
+        last_bar_date = _utc_date(timestamps[-1])
+        if _utc_date(market_time) == last_bar_date:
+            bars[last_bar_date] = float(market_price)
 
 
 def _read_stored_max_dates(members: list[str]) -> dict[str, str]:
