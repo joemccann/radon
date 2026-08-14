@@ -18,6 +18,7 @@ Sub-directory CLAUDE.md files auto-load when cwd is anywhere under that subtree.
 - **`scripts/watchdog/CLAUDE.md`** — Service-health buckets, anti-flood, writer-state semantics, IB-outage grouping.
 - **`scripts/newsfeed/CLAUDE.md`** — Headless Playwright, tagging pipeline (vision + text), cookie-gated images, taxonomy.
 - **`scripts/health_service/CLAUDE.md`** — Isolated stdlib health daemon (`radon-health.service` :8330): stdlib-only isolation contract, `/healthz` + `/status`, never-502 edge floor, three-valued states. Decoupled from the cascade-stop on purpose.
+- **`factory/CLAUDE.md`** — Foreman software factory (eve on Vercel). Draft PRs only. Rails: `docs/factory.md`.
 
 ## Reference docs — read explicitly when needed
 
@@ -28,6 +29,7 @@ Sub-directory CLAUDE.md files auto-load when cwd is anywhere under that subtree.
 - `docs/brand-identity.md` — brand tokens, signal semantics, voice
 - `docs/cloud-services.md` — Hetzner runbook (services, schedulers, deploy)
 - `docs/grok-page-responder.md` — VPS P1 auto-fix + live-deploy Pushover
+- `docs/factory.md` — Foreman software factory: label `factory`, draft PR, human merge
 - `docs/unusual_whales_api.md` — UW endpoint surface
 
 ---

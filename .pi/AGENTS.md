@@ -14,6 +14,7 @@ This root file is intentionally small. Scoped `AGENTS.md` files live beside subs
 | Monitor daemon | `scripts/monitor_daemon/AGENTS.md` | `scripts/monitor_daemon/CLAUDE.md` |
 | Newsfeed | `scripts/newsfeed/AGENTS.md` | `scripts/newsfeed/CLAUDE.md` |
 | Watchdog | `scripts/watchdog/AGENTS.md` | `scripts/watchdog/CLAUDE.md` |
+| Factory | `factory/AGENTS.md` | `factory/CLAUDE.md` |
 
 When a scoped `AGENTS.md` and this root file conflict, prefer the more specific scoped file. When `AGENTS.md` and `CLAUDE.md` conflict, prefer the newer, more specific rule and update the Codex file during the work.
 
