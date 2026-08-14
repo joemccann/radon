@@ -764,15 +764,24 @@ describe("POST /api/orders/modify — extended", () => {
   });
 
   it("returns success when modify succeeds", async () => {
-    mockReadOrdersSnapshotFromDb.mockResolvedValueOnce({
+    const prior = {
       last_sync: "2026-03-14T15:00:00Z",
       open_orders: [
-        { orderId: 101, permId: 0, totalQuantity: 25, limitPrice: 5.5 },
+        { orderId: 101, permId: 0, totalQuantity: 25, limitPrice: 5.25 },
       ],
       executed_orders: [],
       open_count: 1,
       executed_count: 0,
-    });
+    };
+    const confirmed = {
+      ...prior,
+      open_orders: [
+        { orderId: 101, permId: 0, totalQuantity: 25, limitPrice: 5.5 },
+      ],
+    };
+    mockReadOrdersSnapshotFromDb
+      .mockResolvedValueOnce(prior)
+      .mockResolvedValueOnce(confirmed);
     mockRadonFetch
       .mockResolvedValueOnce({ status: "ok", message: "Order 101 modified to 5.50" })
       .mockResolvedValueOnce({});
@@ -827,15 +836,24 @@ describe("POST /api/orders/modify — extended", () => {
   });
 
   it("returns success when quantity-only modify succeeds", async () => {
-    mockReadOrdersSnapshotFromDb.mockResolvedValueOnce({
+    const prior = {
       last_sync: "2026-03-14T15:00:00Z",
       open_orders: [
-        { orderId: 101, permId: 0, totalQuantity: 75, limitPrice: 5.0 },
+        { orderId: 101, permId: 0, totalQuantity: 25, limitPrice: 5.0 },
       ],
       executed_orders: [],
       open_count: 1,
       executed_count: 0,
-    });
+    };
+    const confirmed = {
+      ...prior,
+      open_orders: [
+        { orderId: 101, permId: 0, totalQuantity: 75, limitPrice: 5.0 },
+      ],
+    };
+    mockReadOrdersSnapshotFromDb
+      .mockResolvedValueOnce(prior)
+      .mockResolvedValueOnce(confirmed);
     mockRadonFetch
       .mockResolvedValueOnce({ status: "ok", message: "Order 101 quantity modified to 75" })
       .mockResolvedValueOnce({});
