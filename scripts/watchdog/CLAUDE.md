@@ -29,6 +29,8 @@ Rides the continuous bucket only (`__main__._cmd_bucket`, NOT in `SCHEDULED_SERV
 
 Env: `PUSHOVER_USER`, `PUSHOVER_TOKEN` (absent → degrade gracefully, just write rows).
 
+A delivered P1 also inserts `watchdog_pages` (best-effort). Laptop `com.radon.grok-page-responder` claims the row and runs headless Grok. Enqueue must never block or unmute the page.
+
 ---
 
 ## Service Categorisation

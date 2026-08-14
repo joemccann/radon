@@ -39,7 +39,8 @@ Severity routing for the Pushover channel (DUR-14 escalation)
 ==============================================================
 
  * P1 → Pushover EMERGENCY (priority=2, retry/expire) — repeats until
-   the operator acknowledges the push.
+   the operator acknowledges the push. A successful P1 delivery also
+   inserts a ``watchdog_pages`` row for the laptop Grok responder.
  * P2 / P3 → service_health heartbeat + once-daily digest push (batched
    in ``DIGEST_STATE_PATH``, flushed by the daily watchdog bucket via
    :func:`flush_daily_digest`).
@@ -598,4 +599,21 @@ def dispatch(
             severity=outcome.severity,
             now=outcome.now,
         )
+        if outcome.severity == "P1":
+            _enqueue_grok_page(outcome)
     return pushover.error
+
+
+def _enqueue_grok_page(outcome: CheckOutcome) -> None:
+    """Best-effort ticket for the laptop Grok responder. Never raise."""
+    try:
+        from . import pages
+        pages.enqueue_delivered_page(
+            service=outcome.service,
+            severity=outcome.severity or "P1",
+            kind=outcome.kind,
+            message=outcome.message,
+            now=outcome.now,
+        )
+    except Exception as exc:  # noqa: BLE001 — paging path stays up
+        log.warning("grok page enqueue failed for %s: %s", outcome.service, exc)

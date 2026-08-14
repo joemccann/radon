@@ -444,6 +444,18 @@ def _dispatch_grouped(
 
     if dispatcher_error is None:
         _mark_grouped_page_delivered(ib_outcomes=ib_outcomes, now=now)
+        if notify._pushover_creds():
+            try:
+                from . import pages
+                pages.enqueue_delivered_page(
+                    service=GROUPED_ALERT_KEY,
+                    severity=GROUPED_ALERT_SEVERITY,
+                    kind="grouped",
+                    message=message,
+                    now=now,
+                )
+            except Exception as exc:  # noqa: BLE001 — paging path stays up
+                log.warning("grok page enqueue failed for grouped IB: %s", exc)
     return set(services), dispatcher_error, True
 
 
