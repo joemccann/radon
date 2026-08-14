@@ -37,6 +37,10 @@ class CheckOutcome:
     message: str
     consecutive_failures: int
     now: datetime
+    # Raw service_health.last_error blob (JSON string or plain text).
+    # Grouping uses this to tell IB-outage failures from writer-integrity
+    # errors on requires_ib services.
+    last_error: Optional[str] = None
 
 
 @dataclass
@@ -262,6 +266,9 @@ def _check_error(*, service: str, health: Optional[dict], now: datetime, market_
     decision = cooldown_mod.record_failure_and_decide(service=service, kind="error", now=now)
     severity = _resolve_severity(service=service, kind="error", market_state=market_state)
     msg = f"in error state: {err_msg or 'unknown'}"
+    last_error = health.get("last_error")
+    if last_error is not None and not isinstance(last_error, str):
+        last_error = json.dumps(last_error)
 
     # One alert per condition-transition, not per cycle. A writer that
     # scheduled its own next attempt (Flex throttle -> 24h circuit breaker)
@@ -292,6 +299,7 @@ def _check_error(*, service: str, health: Optional[dict], now: datetime, market_
         message=msg,
         consecutive_failures=decision.consecutive_failures,
         now=now,
+        last_error=last_error,
     )
 
 
@@ -367,6 +375,9 @@ def _check_stale(*, service: str, health: Optional[dict], now: datetime, market_
     window_fmt = _format_age(window_s)
     market_label = market_state
     msg = f"silent for {age_fmt} (window {window_fmt}) — market {market_label}"
+    last_error = health.get("last_error") if health else None
+    if last_error is not None and not isinstance(last_error, str):
+        last_error = json.dumps(last_error)
     return CheckOutcome(
         service=service,
         kind="stale",
@@ -376,6 +387,7 @@ def _check_stale(*, service: str, health: Optional[dict], now: datetime, market_
         message=msg,
         consecutive_failures=decision.consecutive_failures,
         now=now,
+        last_error=last_error,
     )
 
 

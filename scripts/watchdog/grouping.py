@@ -1,16 +1,21 @@
 """Root-cause-aware alert grouping for the watchdog.
 
 When the FastAPI ``/health`` endpoint reports the IB Gateway session
-is ``awaiting_2fa`` or ``unreachable``, the IB-dependent services
+is ``awaiting_2fa`` or ``unreachable``, IB-dependent services
 (vcg-scan, cri-scan, orders-sync, portfolio-sync, fill-monitor,
 exit-orders, journal-sync) tend to go stale in the same cycle. Firing
-N separate Pushover alerts trains the operator to mute the noise — the
-single actionable signal is "approve the 2FA prompt on your phone."
+N separate Pushover alerts trains the operator to mute the noise.
+
+Only failures that look IB-caused join the group: an IB-shaped
+``last_error`` / check reason (connection, 2FA, gateway, timeout), or
+a stale heartbeat with no latched writer error. A latched non-IB
+error (execution fact conflict, reconcile drift) falls through to the
+per-service path even when ``requires_ib`` is true.
 
 This module groups those into ONE message when:
 
   1. ``/health.auth_state`` ∈ {``awaiting_2fa``, ``unreachable``}, AND
-  2. ≥ 2 IB-dependent services fired in the current cycle.
+  2. ≥ 2 IB-caused services fired in the current cycle.
 
 Threshold-of-2 avoids over-reporting on a single transient blip; one
 isolated stale on an IB service is more likely a one-off retry than a
@@ -122,6 +127,77 @@ def _ib_dependent(outcome: CheckOutcome) -> bool:
     return services_mod.requires_ib(outcome.service)
 
 
+# Same production substrings ib_gateway uses to decide a last_error is
+# "caused by IB Gateway being unreachable", plus 2FA wording writers emit.
+# Kept local so watchdog does not import the FastAPI gateway module.
+_IB_SHAPED_PATTERNS = (
+    "failed to connect to ib",
+    "127.0.0.1:4001",
+    "timeouterror",
+    "connection refused",
+    "econnrefused",
+    "connect call failed",
+    "api connection failed",
+    "ibconnectionerror",
+    "make sure api port",
+    "request timed out",
+    "awaiting_2fa",
+    "awaiting 2fa",
+    "2fa",
+)
+
+
+def _parse_error_text(raw: object) -> str:
+    if raw is None:
+        return ""
+    if isinstance(raw, dict):
+        return str(raw.get("message") or raw.get("detail") or "")
+    text = str(raw).strip()
+    if not text:
+        return ""
+    if text[0] in "{[":
+        try:
+            parsed = json.loads(text)
+        except (json.JSONDecodeError, TypeError):
+            return text
+        if isinstance(parsed, dict):
+            return str(parsed.get("message") or parsed.get("detail") or text)
+    return text
+
+
+def _failure_reason(outcome: CheckOutcome) -> str:
+    reason = _parse_error_text(getattr(outcome, "last_error", None))
+    if reason:
+        return reason
+    msg = outcome.message or ""
+    prefix = "in error state:"
+    if msg.lower().startswith(prefix):
+        return msg[len(prefix):].strip()
+    return ""
+
+
+def _looks_like_ib_outage(reason: str) -> bool:
+    hay = reason.lower()
+    return any(pattern in hay for pattern in _IB_SHAPED_PATTERNS)
+
+
+def _ib_caused_failure(outcome: CheckOutcome) -> bool:
+    """True when this fired outcome should join an IB-outage page.
+
+    A latched non-IB last_error (writer integrity, drift) is never
+    sold as a gateway outage. Stale silence with no last_error still
+    joins: that is the classic IB-down symptom.
+    """
+    if not _ib_dependent(outcome):
+        return False
+    reason = _failure_reason(outcome)
+    if _looks_like_ib_outage(reason):
+        return True
+    if reason:
+        return False
+    return outcome.kind == "stale"
+
+
 # A radon-api restart (e.g. a deploy) briefly reports auth_state=awaiting_2fa
 # during pool warmup, before the recovery heartbeat confirms authentication
 # (~seconds). That is NOT a real 2FA prompt — suppress the grouped page when the
@@ -165,10 +241,10 @@ def _api_recently_restarted(now: datetime, threshold_s: int = API_WARMUP_SUPPRES
 def _format_grouped_message(*, auth_state: str, services: list[str]) -> str:
     n = len(services)
     listing = ", ".join(sorted(services))
-    return (
-        f"IB Gateway {auth_state} — {n} services degraded "
-        f"({listing}). Approve on phone or POST /ib/reset-backoff."
-    )
+    head = f"IB Gateway {auth_state}: {n} services degraded ({listing})."
+    if auth_state == "awaiting_2fa":
+        return f"{head} Approve on phone or POST /ib/reset-backoff."
+    return f"{head} Gateway is down. Recover with radon restart."
 
 
 # ── public entry point ────────────────────────────────────────────
@@ -176,7 +252,7 @@ def _format_grouped_message(*, auth_state: str, services: list[str]) -> str:
 def dispatch_with_grouping(*, outcomes: Iterable[CheckOutcome], now: datetime) -> DispatchSummary:
     """Replacement for the per-outcome dispatch loop in __main__.
 
-    Walks ``outcomes``, partitions IB-dependent vs not, fetches
+    Walks ``outcomes``, partitions IB-caused vs not, fetches
     /health to confirm the root cause, fires a single grouped Pushover
     if the threshold is met, and falls through to per-service dispatch
     for the rest. service_health rows write through normally for every
@@ -186,7 +262,7 @@ def dispatch_with_grouping(*, outcomes: Iterable[CheckOutcome], now: datetime) -
     if not fired:
         return DispatchSummary()
 
-    ib_failing = [o for o in fired if _ib_dependent(o)]
+    ib_failing = [o for o in fired if _ib_caused_failure(o)]
     grouped_handled: set[str] = set()
     grouped_dispatcher_error: Optional[str] = None
     grouped_attempted = False

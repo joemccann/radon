@@ -51,7 +51,7 @@ See `feedback_service_health_writer_state_not_event_content.md`.
 
 ## IB-Outage Grouping
 
-Each service window declares `requires_ib`. When IB is down, the watchdog groups all `requires_ib: true` failures into a single "IB Gateway awaiting 2FA / unreachable" message instead of N independent alerts.
+Each service window declares `requires_ib`. When IB is down, the watchdog groups IB-dependent failures whose `last_error` / check reason is IB-shaped (connection, 2FA, gateway, timeout) into a single message. A latched writer-integrity error (e.g. execution fact conflict) falls through to the per-service path. `awaiting_2fa` copy is approve-on-phone / `POST /ib/reset-backoff`. `unreachable` copy is gateway recovery (`radon restart`), not a 2FA prompt.
 
 Verified against each writer's source code in `test_services.py`. UW-only / Flex-only / Playwright-only writers are FALSE even if they live on the same dashboard as IB-backed services.
 
