@@ -196,3 +196,51 @@ class TestPersistence:
         ).fetchall()
         assert len(rows) == 1
         assert rows[0][2] == _iso(now)
+
+
+class TestStateStoreIsNeverCommittable:
+    """Alert suppression is host-local by design; committing it is a real bug.
+
+    ``state_db.py`` keeps cooldowns and acks off Turso on purpose — a
+    data-plane outage must not disable the component reporting it. The cost
+    of that choice is a SQLite file sitting in ``data/``. ``data/*.json``
+    already covers the sibling JSON state, but not ``.db`` or its WAL
+    sidecars, so one host's suppression state was one ``git add`` from
+    muting every other host's alerts.
+    """
+
+    def _ignored(self, relpath: str) -> bool:
+        import subprocess
+        from pathlib import Path
+
+        repo_root = Path(__file__).resolve().parents[3]
+        return (
+            subprocess.run(
+                ["git", "check-ignore", "-q", relpath], cwd=repo_root
+            ).returncode
+            == 0
+        )
+
+    def test_default_state_path_still_lives_in_data(self):
+        from pathlib import Path
+
+        from watchdog.state_db import DEFAULT_PATH
+
+        repo_root = Path(__file__).resolve().parents[3]
+        assert DEFAULT_PATH.parent == repo_root / "data", (
+            "state moved; repoint the ignore rules below"
+        )
+        assert DEFAULT_PATH.name == "watchdog_state.db"
+
+    def test_state_db_and_its_wal_sidecars_are_ignored(self):
+        # WAL mode (state_db.py sets journal_mode=WAL) writes -wal and -shm
+        # alongside the db; ignoring only the .db leaves those committable.
+        for name in (
+            "watchdog_state.db",
+            "watchdog_state.db-wal",
+            "watchdog_state.db-shm",
+        ):
+            assert self._ignored(f"data/{name}"), f"data/{name} must be gitignored"
+
+    def test_runtime_lock_files_are_ignored(self):
+        assert self._ignored("data/watchdog_digest_state.json.lock")
