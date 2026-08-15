@@ -1,3 +1,23 @@
+# Task: Preferences PUT 403 Operator authorization required (2026-08-15)
+
+## Dependency graph
+
+- T1 depends_on: [] - Failing tests: app.radon.run topology (ALLOWED_USER_IDS operator, DEMO_ADMIN_USER_IDS unset) can PUT; source gate forbids requireDemoAdmin
+- T2 depends_on: [T1] - PUT/DELETE use requireRouteAccess({ operatorOnly: true })
+- T3 depends_on: [T2] - Focused vitest green, then full gate, commit, push
+
+## Checklist
+
+- [x] T1 Red tests
+- [x] T2 Operator allowlist on mutations
+- [x] T3 Verify + runbook
+
+## Review
+
+PUT 403 was the demo-trial admin helper (`DEMO_ADMIN_USER_IDS` unset on app.radon.run). Mutations now use `requireRouteAccess({ operatorOnly: true })`. Focused vitest 31/31. pytest 6308 passed.
+
+---
+
 # Task: P1 radon-oi-changes UW daily quota (2026-08-14)
 
 ## Dependency graph

@@ -5,9 +5,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  * helpers in `web/lib/preferences.ts`.
  *
  * The route is a thin authenticated proxy in front of FastAPI `/preferences`.
- * GET requires a signed-in user; PUT and DELETE require the operator allowlist
- * (default-deny). Upstream status codes are preserved so a 422 validation
- * refusal never becomes a 500.
+ * GET requires a signed-in user; PUT and DELETE require the operator
+ * ALLOWED_USER_IDS allowlist (not DEMO_ADMIN_USER_IDS — that env is unset on
+ * app.radon.run and default-denies everyone). Upstream status codes are
+ * preserved so a 422 validation refusal never becomes a 500.
  */
 
 // ---------------------------------------------------------------------------
@@ -31,14 +32,10 @@ vi.mock("@/lib/radonApi", () => ({
   RadonApiError: MockRadonApiError,
 }));
 
-let currentUserId: string | null = "user_signed_in";
+const OPERATOR_ID = "user_operator";
+let currentUserId: string | null = OPERATOR_ID;
 vi.mock("@clerk/nextjs/server", () => ({
   auth: vi.fn(async () => ({ userId: currentUserId })),
-}));
-
-const mockRequireDemoAdmin = vi.fn();
-vi.mock("@/lib/demo/adminAuth", () => ({
-  requireDemoAdmin: mockRequireDemoAdmin,
 }));
 
 // ---------------------------------------------------------------------------
@@ -96,13 +93,18 @@ async function loadRoute() {
 beforeEach(() => {
   vi.resetModules();
   mockRadonFetch.mockReset();
-  mockRequireDemoAdmin.mockReset();
-  mockRequireDemoAdmin.mockResolvedValue("user_x");
-  currentUserId = "user_signed_in";
+  currentUserId = OPERATOR_ID;
+  // Production topology: operator is on ALLOWED_USER_IDS; DEMO_ADMIN_USER_IDS
+  // is unset on app.radon.run and must not gate this route.
+  vi.stubEnv("ALLOWED_USER_IDS", OPERATOR_ID);
+  vi.stubEnv("DEMO_ADMIN_USER_IDS", "");
+  vi.stubEnv("RADON_REQUIRE_OPERATOR_ALLOWLIST", "1");
+  vi.stubEnv("NEXT_PUBLIC_RADON_DEMO", "");
 });
 
 afterEach(() => {
   vi.clearAllMocks();
+  vi.unstubAllEnvs();
 });
 
 // ---------------------------------------------------------------------------
@@ -117,7 +119,7 @@ describe("GET /api/preferences", () => {
     expect(res.status).toBe(401);
     const body = await jsonOf(res);
     expect(body.code).toBe("UNAUTHORIZED");
-    expect(body.error).toBe("Sign in required");
+    expect(body.error).toBe("Unauthorized");
     expect(mockRadonFetch).not.toHaveBeenCalled();
   });
 
@@ -148,13 +150,41 @@ describe("GET /api/preferences", () => {
 
 describe("PUT /api/preferences", () => {
   it("returns 403 FORBIDDEN and never calls FastAPI without an operator", async () => {
-    mockRequireDemoAdmin.mockResolvedValue(null);
+    currentUserId = "user_trial";
     const { PUT } = await loadRoute();
     const res = await PUT(putReq(JSON.stringify({ key: "RADON_MAX_ORDER_QTY", value: 400 })));
     expect(res.status).toBe(403);
     const body = await jsonOf(res);
     expect(body.code).toBe("FORBIDDEN");
-    expect(body.error).toBe("Operator authorization required");
+    expect(body.error).toBe("Forbidden");
+    expect(mockRadonFetch).not.toHaveBeenCalled();
+  });
+
+  it("lets the ALLOWED_USER_IDS operator mutate when DEMO_ADMIN_USER_IDS is unset", async () => {
+    // Exact app.radon.run topology that 403'd Save: operator is signed in and
+    // allowlisted, demo-admin env is blank. The route must not call
+    // requireDemoAdmin (default-deny when that env is empty).
+    mockRadonFetch.mockResolvedValueOnce({ preference: ENTRY, store: STORE });
+    const { PUT } = await loadRoute();
+    const res = await PUT(
+      putReq(JSON.stringify({ key: "RADON_MAX_ORDER_NOTIONAL", value: 1_000_000 })),
+    );
+    expect(res.status).toBe(200);
+    expect(mockRadonFetch).toHaveBeenCalledWith(
+      "/preferences/RADON_MAX_ORDER_NOTIONAL",
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({ value: 1_000_000, updated_by: OPERATOR_ID }),
+      }),
+    );
+  });
+
+  it("does not grant mutation rights via DEMO_ADMIN_USER_IDS", async () => {
+    currentUserId = "user_demo_admin";
+    vi.stubEnv("DEMO_ADMIN_USER_IDS", "user_demo_admin");
+    const { PUT } = await loadRoute();
+    const res = await PUT(putReq(JSON.stringify({ key: "RADON_MAX_ORDER_QTY", value: 400 })));
+    expect(res.status).toBe(403);
     expect(mockRadonFetch).not.toHaveBeenCalled();
   });
 
@@ -168,7 +198,7 @@ describe("PUT /api/preferences", () => {
       "/preferences/RADON_MAX_ORDER_QTY",
       expect.objectContaining({
         method: "PUT",
-        body: JSON.stringify({ value: 400, updated_by: "user_x" }),
+        body: JSON.stringify({ value: 400, updated_by: OPERATOR_ID }),
       }),
     );
   });
@@ -249,7 +279,7 @@ describe("PUT /api/preferences", () => {
 
 describe("DELETE /api/preferences", () => {
   it("returns 403 without an operator", async () => {
-    mockRequireDemoAdmin.mockResolvedValue(null);
+    currentUserId = "user_trial";
     const { DELETE } = await loadRoute();
     const res = await DELETE(
       req("http://localhost/api/preferences?key=RADON_MAX_ORDER_QTY", { method: "DELETE" }),
@@ -269,7 +299,7 @@ describe("DELETE /api/preferences", () => {
     );
     expect(res.status).toBe(200);
     expect(mockRadonFetch).toHaveBeenCalledWith(
-      "/preferences/RADON_MAX_ORDER_QTY?updated_by=user_x",
+      `/preferences/RADON_MAX_ORDER_QTY?updated_by=${OPERATOR_ID}`,
       expect.objectContaining({ method: "DELETE", timeout: 15_000 }),
     );
     const body = (await jsonOf(res)) as { preference: Record<string, unknown> };

@@ -139,90 +139,6 @@ Incident: 2026-07-08, P1.
 
 ---
 
-## deploy-stop-clean-oneshot-signal
-
-**`Type=oneshot` scan units page P1 `Result=signal` when deploy
-`stop-clean` SIGTERMs an in-flight run.** Known class:
-`feedback_deploy_stop_clean_fails_inflight_scan_oneshots`.
-
-- **Mechanism:** `deploy.sh` stop-clean stops every `radon-*` unit,
-  including long `Type=oneshot` writers (`radon-bpi` TimeoutStartSec=9000,
-  weekday sweep 35-105 min). systemd records `Result=signal`,
-  `NRestarts=0`. The unit recovers on its next timer fire. The
-  continuous units watchdog used to page that as a P1 outage.
-- **2026-08-05:** kill and `radon-deploy-root stop-clean` in the same
-  second. Fix `deba568a`: downgrade `Result=signal` to P3 when the
-  kill sits inside a deploy window (20 min before green-marker mtime,
-  or while the transition journal exists).
-- **2026-08-14 23:30Z:** three deploys stacked (`a173289` 22:51,
-  `ba6ec0d` 23:03, `bf3e73c` 23:25, green 23:27). BPI killed at
-  22:52:36Z by the first stop-clean. 34 min later the last green
-  exceeded the 20-min single-deploy budget; between deploys the
-  journal was gone and the previous green (20:25Z) sat *before* the
-  kill, so the classifier paged P1 at 23:20/23:25/23:30. Edge and
-  `:8321/health/lite` stayed up. Next timer (23:30) restarted the
-  scan.
-- **2026-08-15 01:35Z:** Friday 23:30 catch-up still running when
-  deploy `68f7aac` stop-cleaned BPI at 00:34:41Z (green 00:35:59Z,
-  78s later). The oneshot stayed `failed` until Sat 11:00. A
-  now-to-kill 60-min cap flipped P3 to P1 at 01:35 (3619s after the
-  kill) even though kill-to-marker was 78s. Edge and
-  `:8321/health/lite` stayed up. Classifier now measures
-  kill-before-green against the marker, not `now`.
-- **Discriminating check:** `InactiveEnterTimestamp` within 60 min of
-  a green-marker mtime or after the last green (cancelled stack);
-  sibling oneshots often fail the same second; `Result=timeout` /
-  `exit-code` is a different class (do not downgrade). A oneshot
-  still `failed` more than 60 min after that kill is the same class
-  when the kill itself sits inside the marker window.
-- **Remediation:** classifier only, do not restart. Exit-code and
-  start-limit-hit stay P1.
-- **Regression:** `test_units.py::TestDeployCollateralSignalKill`
-  (`test_stacked_deploy_signal_kill_34min_before_green_is_p3`,
-  `test_signal_kill_after_last_green_during_cancelled_stack_is_p3`,
-  `test_oneshot_still_failed_61min_after_stop_clean_is_p3`).
-- **Code:** `scripts/watchdog/units.py` (`DEPLOY_COLLATERAL_WINDOW_SECS=3600`).
-
----
-
-## knowledge-ingest-sqlite-busy
-
-**`radon-knowledge.service` oneshot exits `Result=exit-code` on a single
-transient Turso `SQLITE_BUSY` during the newsfeed (or other) source.**
-Incident: 2026-08-15 00:24Z, P1 page `34ab3e3c…`.
-
-- **Mechanism:** hourly `Type=oneshot` runs `ingest.py --source all`.
-  Newsfeed paginates ~4.7k `posts` rows while concurrent writers
-  (newsfeed-scraper, demo-newsfeed-mirror, other knowledge sources'
-  upserts) hold Turso locks. One `database is locked` / `SQLITE_BUSY`
-  aborted the source; `main()` raised `knowledge ingest failed for:
-  newsfeed` and the unit failed with `NRestarts=0`. Other sources in
-  the same run often succeeded. Python Turso canary stayed healthy
-  (~600 ms) — not a platform outage.
-- **Detection:** journald
-  `[knowledge-ingest] newsfeed failed: Hrana: … SQLITE_BUSY`;
-  `systemctl status radon-knowledge.service` → `Result=exit-code`;
-  `service_health.knowledge-ingest` error row with
-  `knowledge ingest failed for: newsfeed`. Edge and
-  `:8321/health/lite` stay up.
-- **Discriminating check:** Turso canary `SELECT 1` succeeds from the
-  same host; journal shows only one source failed with lock/busy (not
-  every source, not `stream not found` cascade after a dead singleton).
-  If the canary fails too → Turso platform; stand down.
-- **Remediation (code):** one bounded retry per source on transient
-  lock/stream markers, with `reset_connection()` so `get_db()` is a
-  real fresh Hrana stream (the process singleton made the previous
-  per-source `get_db()` a no-op). Do not restart-flap; next timer or
-  one `radon unit restart radon-knowledge` after the fix deploys.
-- **Regression:** `test_knowledge_pipeline.py::TestTransientDbRetry`
-  (`test_source_retries_once_on_sqlite_busy`,
-  `test_sqlite_busy_is_classified_transient`,
-  `test_non_transient_source_error_is_not_retried`).
-- **Code:** `scripts/knowledge/ingest.py` (`_is_transient_db_error`,
-  `_fresh_db`, `_SOURCE_ATTEMPTS=2`).
-
----
-
 ## stale-market-data-freshness
 
 **Market data stops being fresh while everything looks alive.** Four sub-modes.
@@ -501,6 +417,29 @@ notification plugin can post a body, but desktop actions are not supported
 (actions are mobile-only) and a click only focuses a running Tauri window.
 Either would add a signed always-on tray app to solve a sender-identity
 bug. Revisit only if Radon grows a real operator desktop shell.
+
+## preferences-operator-403
+
+**Operator Save on `/preferences` returns 403 `Operator authorization required`.**
+Peak incident: 2026-08-15, operator signed in as joemccann on app.radon.run,
+`PUT /api/preferences` (`RADON_MAX_ORDER_NOTIONAL` → 1_000_000) 403.
+
+- **Mechanism:** PUT/DELETE called the demo-trial admin helper
+  (`DEMO_ADMIN_USER_IDS`). That env is unset on the operator deployment and
+  default-denies everyone, including the `ALLOWED_USER_IDS` operator. GET
+  still worked (signed-in check only), so the page rendered and Save failed.
+- **Detection:** DevTools `preferences` request 403
+  `{error: "Operator authorization required", code: "FORBIDDEN"}`. UI banner
+  "Operator authorization required" under the edited row.
+- **Discriminating check:** source of `web/app/api/preferences/route.ts`
+  must contain `requireRouteAccess` + `operatorOnly: true` and must not
+  import the demo-trial admin helper. Operator is in `ALLOWED_USER_IDS`.
+- **Fix:** gate mutations on `ALLOWED_USER_IDS` via
+  `requireRouteAccess({ operatorOnly: true })`. Demo-user management stays
+  on the demo-trial admin helper.
+- **Regression:** `web/tests/preferences-api.test.ts` production topology
+  (allowlisted operator, blank demo-admin env), `web/tests/admin-page-gate.test.ts`,
+  `web/tests/route-local-authz-matrix.test.ts`.
 
 ## Grok auto-response on iPhone P1 pages
 
