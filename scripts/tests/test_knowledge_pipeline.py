@@ -707,6 +707,108 @@ class TestMainConnectionIsolation:
         assert len(connections) >= len(fake_sources)
 
 
+class TestTransientDbRetry:
+    """radon-knowledge.service P1 2026-08-15: newsfeed failed once on
+    SQLITE_BUSY (concurrent posts/knowledge writers) and the oneshot
+    exited non-zero with no retry, paging Emergency. One bounded retry
+    on transient Turso lock/stream errors absorbs the blip."""
+
+    def test_sqlite_busy_is_classified_transient(self):
+        busy = RuntimeError(
+            'Hrana: `stream error: `Error { message: "SQLite error: '
+            'database is locked", code: "SQLITE_BUSY" }``'
+        )
+        assert ingest_mod._is_transient_db_error(busy)
+        assert not ingest_mod._is_transient_db_error(ValueError("no such table: posts"))
+
+    def test_source_retries_once_on_sqlite_busy(self, monkeypatch, capsys):
+        import contextlib
+        from types import SimpleNamespace
+
+        import db.client as db_client
+        import db.service_cycle as service_cycle_mod
+        import knowledge.sources as sources_mod
+
+        attempts: list[str] = []
+
+        def flaky_ingest(db, module, **kwargs):
+            attempts.append(module.SOURCE)
+            if len(attempts) == 1:
+                raise RuntimeError(
+                    'Hrana: `stream error: `Error { message: "SQLite error: '
+                    'database is locked", code: "SQLITE_BUSY" }``'
+                )
+            return {
+                "source": module.SOURCE,
+                "fetched": 1,
+                "fetched_chunks": 1,
+                "skipped_docs": 0,
+                "distilled": 0,
+                "distill_failed": 0,
+                "embedded": 0,
+                "deleted": 0,
+                "inserted": 1,
+                "updated": 0,
+                "skipped": 0,
+                "pruned": 0,
+            }
+
+        monkeypatch.setattr(ingest_mod, "ingest_source", flaky_ingest)
+        monkeypatch.setattr(ingest_mod, "_SOURCE_RETRY_BACKOFF_SECS", 0.0)
+        monkeypatch.setattr(db_client, "get_db", lambda: object())
+        monkeypatch.setattr(db_client, "reset_connection", lambda: None)
+        monkeypatch.setattr(
+            service_cycle_mod, "service_cycle",
+            lambda *a, **k: contextlib.nullcontext(),
+        )
+        monkeypatch.setattr(
+            sources_mod,
+            "ALL_SOURCES",
+            {
+                "newsfeed": SimpleNamespace(SOURCE="newsfeed", SCOPE="research"),
+            },
+        )
+
+        assert ingest_mod.main(
+            ["--source", "newsfeed", "--no-distill", "--no-embed"]
+        ) == 0
+        assert attempts == ["newsfeed", "newsfeed"]
+        out = capsys.readouterr()
+        assert '"ok": true' in out.out.replace(" ", "") or '"ok": true' in out.out
+
+    def test_non_transient_source_error_is_not_retried(self, monkeypatch, capsys):
+        import contextlib
+        from types import SimpleNamespace
+
+        import db.client as db_client
+        import db.service_cycle as service_cycle_mod
+        import knowledge.sources as sources_mod
+
+        attempts: list[str] = []
+
+        def always_fail(db, module, **kwargs):
+            attempts.append(module.SOURCE)
+            raise ValueError("no such table: posts")
+
+        monkeypatch.setattr(ingest_mod, "ingest_source", always_fail)
+        monkeypatch.setattr(ingest_mod, "_SOURCE_RETRY_BACKOFF_SECS", 0.0)
+        monkeypatch.setattr(db_client, "get_db", lambda: object())
+        monkeypatch.setattr(db_client, "reset_connection", lambda: None)
+        monkeypatch.setattr(
+            service_cycle_mod, "service_cycle",
+            lambda *a, **k: contextlib.nullcontext(),
+        )
+        monkeypatch.setattr(
+            sources_mod,
+            "ALL_SOURCES",
+            {"newsfeed": SimpleNamespace(SOURCE="newsfeed", SCOPE="research")},
+        )
+
+        with pytest.raises(RuntimeError, match="newsfeed"):
+            ingest_mod.main(["--source", "newsfeed", "--no-distill", "--no-embed"])
+        assert attempts == ["newsfeed"]
+
+
 class TestLoadExistingPagination:
     def test_existing_rows_are_read_in_bounded_batches(self, db, monkeypatch):
         # Same Turso HTTP-pipeline limit as the posts read: 1,200 stored
