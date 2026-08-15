@@ -50,13 +50,14 @@ from utils.market_calendar import (  # noqa: E402 — needs the sys.path insert
     last_completed_session_date,
     load_holidays,
 )
+from utils.uw_embargo import (  # noqa: E402 — needs the sys.path insert
+    UwEmbargo,
+    is_daily_quota,
+    retry_at,
+)
 
 # ── constants ─────────────────────────────────────────────────────
 SKEW_JSON = _PROJECT_DIR / "data" / "skew.json"
-# Local sidecar so a daily UW cap does not keep calling the API every minute
-# (4xx does not burn quota, but the uncaught raise left the writer silent).
-_UW_DAILY_LIMIT_MARKER = "daily request limit"
-_UW_DAILY_RESET_HOUR_ET = 20
 
 _TICKER = "SPX"
 _TARGET_DTE = 30
@@ -370,80 +371,41 @@ def _embargo_path() -> Path:
     return SKEW_JSON.with_name("skew_uw_embargo.json")
 
 
+# Resolved per call so relocating SKEW_JSON relocates the sidecar with it.
+_EMBARGO = UwEmbargo("skew", lambda: _embargo_path())
+
+
 def _is_uw_daily_quota(exc: BaseException) -> bool:
-    return isinstance(exc, UWRateLimitError) and _UW_DAILY_LIMIT_MARKER in str(exc).lower()
+    return is_daily_quota(exc)
 
 
 def _uw_retry_at(exc: BaseException, now: datetime) -> str:
-    """UW daily cap resets at 20:00 ET; other 429s get a 5-minute embargo."""
-    if _is_uw_daily_quota(exc):
-        local = now.astimezone(_ET)
-        reset = local.replace(hour=_UW_DAILY_RESET_HOUR_ET, minute=0, second=0, microsecond=0)
-        if local >= reset:
-            reset = reset + timedelta(days=1)
-        return reset.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-    return (now + timedelta(minutes=5)).astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def _load_uw_embargo() -> Optional[datetime]:
-    try:
-        raw = json.loads(_embargo_path().read_text()).get("next_attempt_at")
-    except (OSError, ValueError, TypeError, AttributeError):
-        return None
-    if not raw:
-        return None
-    try:
-        parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
-    except (ValueError, TypeError):
-        return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return retry_at(exc, now)
 
 
 def _save_uw_embargo(next_attempt_at: str) -> None:
-    path = _embargo_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"next_attempt_at": next_attempt_at}))
+    _EMBARGO.arm(next_attempt_at)
 
 
 def _clear_uw_embargo() -> None:
-    _embargo_path().unlink(missing_ok=True)
+    _EMBARGO.clear()
 
 
 def uw_embargo_until(now: datetime) -> Optional[datetime]:
     """Active UW-cap deadline, or None. Read-only — the parent owns clearing.
 
-    Derived indicators read this to tell an explained parent lag apart from a
-    genuinely broken parent.
+    Derived indicators (skew2d) read this to tell an explained parent lag
+    apart from a genuinely broken parent.
     """
-    deadline = _load_uw_embargo()
-    return deadline if deadline is not None and now < deadline else None
+    return _EMBARGO.deadline(now)
 
 
 def _uw_embargo_active(now: datetime) -> Optional[str]:
-    deadline = _load_uw_embargo()
-    if deadline is None or now >= deadline:
-        if deadline is not None:
-            _clear_uw_embargo()
-        return None
-    return deadline.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return _EMBARGO.active_until(now)
 
 
 def _record_cycle_error(exc: BaseException, *, now: datetime, next_attempt_at: str) -> None:
-    message = str(exc).splitlines()[0].strip()[:300]
-    try:
-        from db import writer
-    except ImportError:
-        return
-    try:
-        writer.ensure_no_replica_for_writers()
-        writer.record_service_health(
-            "skew",
-            "error",
-            finished_at=_scan_time_iso(now),
-            error={"message": message, "next_attempt_at": next_attempt_at},
-        )
-    except Exception as write_exc:  # noqa: BLE001 — telemetry must not mask the cycle
-        print(f"[skew] error heartbeat non-fatal: {write_exc}", file=sys.stderr)
+    _EMBARGO.record_error(exc, now=now, next_attempt_at=next_attempt_at)
 
 
 def _build_payload(
