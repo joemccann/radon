@@ -34,6 +34,17 @@
 - `.act-region` is `overflow: hidden`. A `.act-ticket` of `flex: 0 0 auto` grows to the confirm summary + Gate 3 CRB and clips Place / Confirm. There is no scrollport.
 - Ticket must be `flex: 0 1 auto; min-height: 0; overflow-y: auto`. `min-height: 0` is required; flex `min-height: auto` refuses to shrink below content.
 
+## 2026-08-14 — Ticker book depths cannot stay ref-only behind a memoized shell
+
+- `WorkspaceSections` is `memo()`. High-frequency `depths`/`tape` lived in `TickerDetailContext` refs. A depth-batch that did not also change the `prices` identity never re-rendered `TickerWorkspace`, so the Book tab stayed on the empty L1 fallback even when L2 or tape had arrived.
+- Pass `depths` and `tape` as props from `WorkspaceShell` on `ticker-detail`, same as the portfolio reactivity fix. Seed a one-level `L1 BBO` montage from bid/ask sizes when L2 is missing so the panel is not a header over empty space.
+
+## 2026-08-14 — DAY working orders die at the close; RTH-gated sync will not
+
+- `orders-sync` only runs 09:30–16:00 ET. A DAY order still in IB at 15:59 is written to Turso, then IB cancels it at the close. The next snapshot does not land until the following RTH open.
+- Modify/cancel talk to live IB (`find_trade` / `reqAllOpenOrders`). A ghost DAY row still offers Modify and fails with Trade not found.
+- Filter prior-ET-session `tif=DAY` rows on snapshot read. Do not treat a stale Turso working-order row as live.
+
 ## 2026-08-13 — Name-ranking vol scanners live under Scanner, not Regime
 
 - `/indicator` defaults to a Regime chart tab. Cheap-wing IV ranking is a name scanner like LEAP and GARCH. Put it on `/scanner?mode=vol-cone`. Redirect `/regime/vol-cone`.
@@ -540,3 +551,4 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 ## 2026-08-13 - Deployment-scoped rate limits
 
 - A deployment-specific limiter must be gated by the resolved principal/deployment role, not by generic `NODE_ENV=production`. Validate every tier against the real client polling cadence and test the production environment contract where its credentials are intentionally absent.
+- For Codex desktop startup defects, test the desktop host's bundled `Contents/Resources/codex`, not only the shell `codex`; verify app update state and run repeated headless starts through that exact binary. A larger optional-MCP timeout does not prevent first-turn capture races; use documented `required = true` when that server must always be present.

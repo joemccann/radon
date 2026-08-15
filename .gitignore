@@ -147,6 +147,10 @@ web/public/media/
 data/newsfeed-storage*.json
 data/newsfeed-debug-*.png
 
+# DeepSec's own workspace (separate tool, ~850MB with its own node_modules
+# and .env.local). Nothing under it is Radon source.
+.deepsec/
+
 # Temp files
 tmp/
 /nanobanana-output/
