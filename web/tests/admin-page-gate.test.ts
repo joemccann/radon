@@ -20,6 +20,7 @@ const OPERATOR_ADMIN_APIS = [
   "app/api/admin/ib/restart/route.ts",
   "app/api/admin/ib/reset-backoff/route.ts",
   "app/api/admin/stack/restart/route.ts",
+  "app/api/preferences/route.ts",
 ] as const;
 
 describe("operator admin page gate", () => {

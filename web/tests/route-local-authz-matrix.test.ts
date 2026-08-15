@@ -11,7 +11,7 @@ const ROUTES = [
   "leap/scan", "menthorq/[command]/image", "menthorq/cta", "menthorq/cta/image", "newsfeed/posts",
   "options/chain", "options/expirations", "options/exposure", "options/rv-ratio",
   "orders/cancel", "orders/modify", "orders/place", "orders", "orders/whatif",
-  "paper/place", "performance", "pi", "portfolio", "previous-close",
+  "paper/place", "performance", "pi", "portfolio", "preferences", "previous-close",
   "regime", "scanner", "scanner/strength", "scanner/strength/scan",
   "scanner/theta", "scanner/theta/scan", "short-availability/[ticker]",
   "ticker/info", "ticker/news", "ticker/ratings", "ticker/seasonality", "vcg",
@@ -66,7 +66,7 @@ describe("security report route-local authorization matrix", () => {
   });
 
   it("requires operator capability and durable budgets on account mutations", () => {
-    for (const route of ["blotter", "flow-analysis", "journal", "journal/sync", "orders", "performance", "pi", "portfolio"]) {
+    for (const route of ["blotter", "flow-analysis", "journal", "journal/sync", "orders", "performance", "pi", "portfolio", "preferences"]) {
       const text = source(`app/api/${route}/route.ts`);
       expect(text, route).toContain("operatorOnly: true");
       expect(text, route).toContain('durableRateTier: "C"');

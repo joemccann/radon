@@ -1,21 +1,21 @@
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
 import { radonFetch, RadonApiError } from "@/lib/radonApi";
 import {
   getRequestId,
   jsonApiError,
   setNoStoreResponseHeaders,
 } from "@/lib/apiContracts";
-import { requireDemoAdmin } from "@/lib/demo/adminAuth";
+import { requireRouteAccess } from "@/lib/routeAccess";
 
 /**
  * Operator preferences proxy in front of FastAPI `/preferences`.
  *
  * GET is readable by any signed-in user (the page is operator-gated in the
  * perimeter, and the payload carries no secrets). PUT and DELETE mutate live
- * safety caps, so they fail CLOSED behind the operator allowlist — parity with
- * the sibling admin routes, which do not lean on the middleware perimeter
- * alone.
+ * safety caps, so they fail CLOSED behind ALLOWED_USER_IDS via
+ * requireRouteAccess({ operatorOnly: true }). The demo-trial admin helper
+ * is the wrong gate: that allowlist is unset on app.radon.run and
+ * default-denies the operator.
  *
  * Upstream status is preserved verbatim: a 422 validation refusal must reach
  * the operator as 422 with the allowed range, never as a blanket 500.
@@ -56,32 +56,10 @@ function validationFailure(
   );
 }
 
-function operatorRejected(requestId: string): NextResponse {
-  return setNoStoreResponseHeaders(
-    jsonApiError({
-      message: "Operator authorization required",
-      status: 403,
-      code: "FORBIDDEN",
-      requestId,
-    }),
-    requestId,
-  );
-}
-
 export async function GET(): Promise<Response> {
+  const access = await requireRouteAccess();
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
-  const { userId } = await auth();
-  if (!userId) {
-    return setNoStoreResponseHeaders(
-      jsonApiError({
-        message: "Sign in required",
-        status: 401,
-        code: "UNAUTHORIZED",
-        requestId,
-      }),
-      requestId,
-    );
-  }
   try {
     const data = await radonFetch("/preferences", {
       method: "GET",
@@ -94,11 +72,14 @@ export async function GET(): Promise<Response> {
 }
 
 export async function PUT(request: Request): Promise<Response> {
+  const access = await requireRouteAccess(request, {
+    operatorOnly: true,
+    rate: { key: "preferences:mutate", limit: 20, windowMs: 60_000 },
+    durableRateTier: "C",
+  });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
-  const operatorId = await requireDemoAdmin();
-  if (!operatorId) {
-    return operatorRejected(requestId);
-  }
+  const operatorId = access.principal.userId;
 
   let body: unknown;
   try {
@@ -132,11 +113,14 @@ export async function PUT(request: Request): Promise<Response> {
 }
 
 export async function DELETE(request: Request): Promise<Response> {
+  const access = await requireRouteAccess(request, {
+    operatorOnly: true,
+    rate: { key: "preferences:mutate", limit: 20, windowMs: 60_000 },
+    durableRateTier: "C",
+  });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
-  const operatorId = await requireDemoAdmin();
-  if (!operatorId) {
-    return operatorRejected(requestId);
-  }
+  const operatorId = access.principal.userId;
 
   const key = new URL(request.url).searchParams.get("key");
   if (!key || !key.trim()) {

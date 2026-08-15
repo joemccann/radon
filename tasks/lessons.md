@@ -1,5 +1,10 @@
 # Lessons
 
+## 2026-08-15 — Operator mutations use ALLOWED_USER_IDS, not the demo-admin list
+
+- `DEMO_ADMIN_USER_IDS` is unset on app.radon.run and default-denies everyone. Gating `/api/preferences` PUT/DELETE on the demo-trial admin helper 403'd the signed-in operator (`Operator authorization required`) while GET still worked.
+- Operator writes go through `requireRouteAccess({ operatorOnly: true })`. The demo-trial helper stays on `/api/admin/demo-users` only.
+
 ## 2026-08-15 — Oneshot stays failed after stop-clean; do not age-cap against now
 
 - `Type=oneshot` remains `ActiveState=failed` until the next timer. A now-to-kill 60-min cap on kill-before-green flips P3 to P1 after the first hour and pages (BPI 00:34:41Z kill, 00:35:59Z green, 01:35Z page). Measure that branch kill-to-marker.
