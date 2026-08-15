@@ -1,5 +1,10 @@
 # Lessons
 
+## 2026-08-15 — Oneshot stays failed after stop-clean; do not age-cap against now
+
+- `Type=oneshot` remains `ActiveState=failed` until the next timer. A now-to-kill 60-min cap on kill-before-green flips P3 to P1 after the first hour and pages (BPI 00:34:41Z kill, 00:35:59Z green, 01:35Z page). Measure that branch kill-to-marker.
+- Keep the now-to-kill cap on in-flight and kill-after-green so an unrelated SIGTERM hours later still pages.
+
 ## 2026-08-14 — Stacked-deploy stop-clean is still Result=signal collateral
 
 - A 20-min window around the *latest* green marker misses stop-clean of deploy N when deploy N+2 greens 34 min later. Between stacked deploys the transition journal is gone and the previous green sits *before* the kill, so `marker - failed_at` is negative.

@@ -149,7 +149,11 @@ def _is_deploy_collateral(unit: dict, deploy: Optional[dict], now: datetime) -> 
       * journal present (in_flight)
       * kill after the last green (cancelled / not-yet-green successor)
       * kill before the latest green (this stack's stop-clean)
-    Age is capped so an unrelated SIGTERM hours later still pages.
+    The now-to-kill cap applies only to in-flight and kill-after-green
+    so an unrelated SIGTERM hours later still pages. Kill-before-green
+    is measured kill-to-marker: Type=oneshot stays failed until the
+    next timer, and a 60-min now-cap re-pages P1 after the first hour
+    (2026-08-15 01:35Z radon-bpi, kill 78s before green).
     """
     if not deploy or unit.get("Result") != "signal":
         return False
@@ -157,15 +161,15 @@ def _is_deploy_collateral(unit: dict, deploy: Optional[dict], now: datetime) -> 
     if failed_at is None:
         return False
     age = (now - failed_at).total_seconds()
-    if age < 0 or age > DEPLOY_COLLATERAL_WINDOW_SECS:
+    if age < 0:
         return False
     if deploy.get("in_flight"):
-        return True
+        return age <= DEPLOY_COLLATERAL_WINDOW_SECS
     marker = deploy.get("marker_mtime")
     if marker is None:
         return False
     if failed_at >= marker:
-        return True
+        return age <= DEPLOY_COLLATERAL_WINDOW_SECS
     return 0 <= (marker - failed_at).total_seconds() <= DEPLOY_COLLATERAL_WINDOW_SECS
 
 
