@@ -162,15 +162,25 @@ Incident: 2026-07-08, P1.
   kill, so the classifier paged P1 at 23:20/23:25/23:30. Edge and
   `:8321/health/lite` stayed up. Next timer (23:30) restarted the
   scan.
+- **2026-08-15 01:35Z:** Friday 23:30 catch-up still running when
+  deploy `68f7aac` stop-cleaned BPI at 00:34:41Z (green 00:35:59Z,
+  78s later). The oneshot stayed `failed` until Sat 11:00. A
+  now-to-kill 60-min cap flipped P3 to P1 at 01:35 (3619s after the
+  kill) even though kill-to-marker was 78s. Edge and
+  `:8321/health/lite` stayed up. Classifier now measures
+  kill-before-green against the marker, not `now`.
 - **Discriminating check:** `InactiveEnterTimestamp` within 60 min of
   a green-marker mtime or after the last green (cancelled stack);
   sibling oneshots often fail the same second; `Result=timeout` /
-  `exit-code` is a different class (do not downgrade).
+  `exit-code` is a different class (do not downgrade). A oneshot
+  still `failed` more than 60 min after that kill is the same class
+  when the kill itself sits inside the marker window.
 - **Remediation:** classifier only, do not restart. Exit-code and
   start-limit-hit stay P1.
 - **Regression:** `test_units.py::TestDeployCollateralSignalKill`
   (`test_stacked_deploy_signal_kill_34min_before_green_is_p3`,
-  `test_signal_kill_after_last_green_during_cancelled_stack_is_p3`).
+  `test_signal_kill_after_last_green_during_cancelled_stack_is_p3`,
+  `test_oneshot_still_failed_61min_after_stop_clean_is_p3`).
 - **Code:** `scripts/watchdog/units.py` (`DEPLOY_COLLATERAL_WINDOW_SECS=3600`).
 
 ---

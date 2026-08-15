@@ -490,6 +490,40 @@ class TestDeployCollateralSignalKill:
         )
         assert [o.severity for o in outcomes] == ["P3"]
 
+    def test_oneshot_still_failed_61min_after_stop_clean_is_p3(self):
+        """2026-08-15 01:35Z page: stop-clean killed radon-bpi at
+        00:34:41Z; green marker 00:35:59Z (78s later). Type=oneshot
+        stays failed until the next timer (Sat 11:00 UTC). Watchdog
+        cycle at 01:35:00Z is 3619s after the kill, 19s past the
+        now-to-kill age cap, so P3 flipped to P1 and paged. Kill-to-
+        marker is 78s — still stop-clean collateral."""
+        killed = datetime(2026, 8, 15, 0, 34, 41, tzinfo=timezone.utc)
+        marker = datetime(2026, 8, 15, 0, 35, 59, tzinfo=timezone.utc)
+        now = datetime(2026, 8, 15, 1, 35, 0, tzinfo=timezone.utc)
+        current = units.parse_show_output(self._signal_block(killed))
+        outcomes = units.evaluate(
+            current=current, previous={}, now=now,
+            deploy={"marker_mtime": marker, "in_flight": False},
+        )
+        assert len(outcomes) == 1
+        assert outcomes[0].severity == "P3"
+        assert "deploy" in outcomes[0].message.lower()
+
+    def test_signal_kill_after_green_past_now_window_stays_p1(self):
+        """Kill after last green is cancelled-stack collateral only
+        while the kill itself is still inside the now-window. A
+        oneshot failed >60 min after that kill, with no newer green,
+        pages."""
+        killed = datetime(2026, 8, 15, 2, 0, 0, tzinfo=timezone.utc)
+        marker = datetime(2026, 8, 15, 0, 35, 59, tzinfo=timezone.utc)
+        now = datetime(2026, 8, 15, 3, 5, 0, tzinfo=timezone.utc)
+        current = units.parse_show_output(self._signal_block(killed))
+        outcomes = units.evaluate(
+            current=current, previous={}, now=now,
+            deploy={"marker_mtime": marker, "in_flight": False},
+        )
+        assert [o.severity for o in outcomes] == ["P1"]
+
     def test_exit_code_failure_near_deploy_stays_p1(self):
         killed = datetime(2026, 8, 5, 21, 40, 24, tzinfo=timezone.utc)
         marker = datetime(2026, 8, 5, 21, 41, 0, tzinfo=timezone.utc)
