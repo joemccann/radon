@@ -151,6 +151,14 @@ data/newsfeed-debug-*.png
 # and .env.local). Nothing under it is Radon source.
 .deepsec/
 
+# Grok workflow scripts. One-shot prompts named after the task that spawned
+# them (implement-stop-orders, cut-uw-daily-quota, ...), each written once and
+# never re-run. Nothing in the repo reads this directory — no unit, timer, CI
+# job, or script — so committing them only accumulated a graveyard that looked
+# like live automation. Keep them locally; version one only if it becomes
+# something that actually gets re-run.
+.grok/
+
 # Temp files
 tmp/
 /nanobanana-output/
