@@ -175,6 +175,44 @@ Incident: 2026-07-08, P1.
 
 ---
 
+## knowledge-ingest-sqlite-busy
+
+**`radon-knowledge.service` oneshot exits `Result=exit-code` on a single
+transient Turso `SQLITE_BUSY` during the newsfeed (or other) source.**
+Incident: 2026-08-15 00:24Z, P1 page `34ab3e3c…`.
+
+- **Mechanism:** hourly `Type=oneshot` runs `ingest.py --source all`.
+  Newsfeed paginates ~4.7k `posts` rows while concurrent writers
+  (newsfeed-scraper, demo-newsfeed-mirror, other knowledge sources'
+  upserts) hold Turso locks. One `database is locked` / `SQLITE_BUSY`
+  aborted the source; `main()` raised `knowledge ingest failed for:
+  newsfeed` and the unit failed with `NRestarts=0`. Other sources in
+  the same run often succeeded. Python Turso canary stayed healthy
+  (~600 ms) — not a platform outage.
+- **Detection:** journald
+  `[knowledge-ingest] newsfeed failed: Hrana: … SQLITE_BUSY`;
+  `systemctl status radon-knowledge.service` → `Result=exit-code`;
+  `service_health.knowledge-ingest` error row with
+  `knowledge ingest failed for: newsfeed`. Edge and
+  `:8321/health/lite` stay up.
+- **Discriminating check:** Turso canary `SELECT 1` succeeds from the
+  same host; journal shows only one source failed with lock/busy (not
+  every source, not `stream not found` cascade after a dead singleton).
+  If the canary fails too → Turso platform; stand down.
+- **Remediation (code):** one bounded retry per source on transient
+  lock/stream markers, with `reset_connection()` so `get_db()` is a
+  real fresh Hrana stream (the process singleton made the previous
+  per-source `get_db()` a no-op). Do not restart-flap; next timer or
+  one `radon unit restart radon-knowledge` after the fix deploys.
+- **Regression:** `test_knowledge_pipeline.py::TestTransientDbRetry`
+  (`test_source_retries_once_on_sqlite_busy`,
+  `test_sqlite_busy_is_classified_transient`,
+  `test_non_transient_source_error_is_not_retried`).
+- **Code:** `scripts/knowledge/ingest.py` (`_is_transient_db_error`,
+  `_fresh_db`, `_SOURCE_ATTEMPTS=2`).
+
+---
+
 ## stale-market-data-freshness
 
 **Market data stops being fresh while everything looks alive.** Four sub-modes.

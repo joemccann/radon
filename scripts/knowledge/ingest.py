@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Iterable, NamedTuple
@@ -46,6 +47,22 @@ from knowledge.store import delete_source_docs, upsert_documents  # noqa: E402
 
 SERVICE_NAME = "knowledge-ingest"
 DISTILL_WORKERS = 8
+
+# One bounded retry absorbs a transient Turso lock/stream blip so the
+# hourly oneshot does not page P1 on SQLITE_BUSY (2026-08-15: newsfeed
+# failed once under concurrent posts/knowledge writers, NRestarts=0).
+_SOURCE_ATTEMPTS = 2
+_SOURCE_RETRY_BACKOFF_SECS = 1.0
+_TRANSIENT_DB_MARKERS = (
+    "sqlite_busy",
+    "database is locked",
+    "stream not found",
+    "upstream forward failed",
+    "timed out",
+    "timeout",
+    "connection reset",
+    "server closed the connection",
+)
 
 # Bounded id-cursor pagination, same Turso HTTP-pipeline limit as the
 # newsfeed posts read: a source's full stored content in one SELECT
@@ -300,10 +317,28 @@ def _embed_docs(docs: list[KnowledgeDoc], embedder) -> int:
 # ── CLI ──────────────────────────────────────────────────────────────
 
 
+def _is_transient_db_error(exc: BaseException) -> bool:
+    """True for Turso lock/stream blips worth one retry; SQL/schema stay fatal."""
+    message = str(exc).lower()
+    return any(marker in message for marker in _TRANSIENT_DB_MARKERS)
+
+
+def _fresh_db():
+    """Drop the process singleton and open a new direct-to-cloud connection.
+
+    get_db() caches one connection; without reset_connection the per-source
+    and per-batch "fresh" factory is a no-op and a dead/busy Hrana stream
+    poisons every later source (2026-07-19 stream-not-found, 2026-08-15
+    SQLITE_BUSY on newsfeed)."""
+    from db.client import get_db, reset_connection  # noqa: PLC0415
+
+    reset_connection()
+    return get_db()
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     _load_dotenv_if_present()
-    from db.client import get_db  # noqa: PLC0415 — env must be loaded first
     from db.service_cycle import service_cycle  # noqa: PLC0415
     from knowledge.sources import ALL_SOURCES  # noqa: PLC0415
 
@@ -312,22 +347,38 @@ def main(argv: list[str] | None = None) -> int:
     errors: dict[str, str] = {}
     with service_cycle(SERVICE_NAME, market_hours_class="daily"):
         for name, module in modules.items():
-            try:
-                # Fresh connection per source: a long or failing source can
-                # kill the shared Hrana stream and poison every source after
-                # it (incidents "stream not found" after newsfeed's 502 run,
-                # 2026-07-19).
-                results[name] = ingest_source(
-                    get_db(),
-                    module,
-                    distill_enabled=not args.no_distill,
-                    embed_enabled=not args.no_embed,
-                    limit=args.limit,
-                    db_factory=get_db,
-                )
-            except Exception as exc:  # noqa: BLE001 — one bad source must not stop the rest
-                errors[name] = str(exc)
-                print(f"[{SERVICE_NAME}] {name} failed: {exc}", file=sys.stderr)
+            last_exc: BaseException | None = None
+            for attempt in range(1, _SOURCE_ATTEMPTS + 1):
+                try:
+                    # Fresh connection per source (and per retry): a long or
+                    # failing source can kill the shared Hrana stream and
+                    # poison every source after it (incidents "stream not
+                    # found" after newsfeed's 502 run, 2026-07-19).
+                    results[name] = ingest_source(
+                        _fresh_db(),
+                        module,
+                        distill_enabled=not args.no_distill,
+                        embed_enabled=not args.no_embed,
+                        limit=args.limit,
+                        db_factory=_fresh_db,
+                    )
+                    last_exc = None
+                    break
+                except Exception as exc:  # noqa: BLE001 — one bad source must not stop the rest
+                    last_exc = exc
+                    if _is_transient_db_error(exc) and attempt < _SOURCE_ATTEMPTS:
+                        print(
+                            f"[{SERVICE_NAME}] {name}: transient DB error "
+                            f"(attempt {attempt}/{_SOURCE_ATTEMPTS}): {exc}; "
+                            f"retrying in {_SOURCE_RETRY_BACKOFF_SECS}s",
+                            file=sys.stderr,
+                        )
+                        time.sleep(_SOURCE_RETRY_BACKOFF_SECS)
+                        continue
+                    break
+            if last_exc is not None:
+                errors[name] = str(last_exc)
+                print(f"[{SERVICE_NAME}] {name} failed: {last_exc}", file=sys.stderr)
         print(json.dumps({"ok": not errors, "sources": results, "errors": errors}),
               flush=True)
         if errors:
