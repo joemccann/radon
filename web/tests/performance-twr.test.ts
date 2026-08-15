@@ -8,6 +8,7 @@ import {
   isBetaGated,
   isVarGated,
 } from "../lib/performanceTwr";
+import { normalizePerformanceData } from "../lib/performanceData";
 import { isPerformanceBehindPortfolioSync } from "../lib/performanceFreshness";
 
 // ---------------------------------------------------------------------------
@@ -190,5 +191,31 @@ describe("TWR payload contract", () => {
     };
     expect(payload.summary.annualized_return).toBeNull();
     expect(payload.summary.trading_days).toBeLessThan(20);
+  });
+
+  it("normalizes a persisted TWR snapshot that omits reconstruction arrays", () => {
+    const normalized = normalizePerformanceData({
+      status: "ok",
+      methodology: buildTwrMethodology(0.0412),
+      summary: { total_return: 0.1, trading_days: 3 },
+      series: [
+        { date: "2026-01-02", nav: 100_000, return: 0, cum_return: 0, equity: 100 },
+        { date: "2026-01-05", nav: 110_000, return: 0.1, cum_return: 0.1, equity: 110 },
+      ],
+      warnings: [],
+      period_start: "2026-01-02",
+      period_end: "2026-01-05",
+      benchmark: "SPY",
+      nav_source: "disk_cache",
+    });
+    expect(normalized).not.toBeNull();
+    expect(normalized?.contracts_missing_history).toEqual([]);
+    expect(normalized?.warnings).toEqual([]);
+    expect(normalized?.trades_source).toBe("ib_nav");
+    expect(normalized?.summary.starting_equity).toBe(100_000);
+    expect(normalized?.summary.ending_equity).toBe(110_000);
+    expect(normalized?.summary.pnl).toBe(10_000);
+    expect(normalized?.series[0]?.equity).toBe(100_000);
+    expect(normalized?.series[1]?.equity).toBe(110_000);
   });
 });

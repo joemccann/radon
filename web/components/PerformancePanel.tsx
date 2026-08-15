@@ -9,6 +9,7 @@ import {
   buildPerformanceChartModel,
   resolvePerformanceStartingEquity,
 } from "@/lib/performanceChart";
+import { normalizePerformanceData } from "@/lib/performanceData";
 import { isPerformanceBehindPortfolioSync } from "@/lib/performanceFreshness";
 import type { PerformanceData, PerformanceSeriesPoint } from "@/lib/types";
 import { usePerformance } from "@/lib/usePerformance";
@@ -262,7 +263,8 @@ function drawdownLeader(series: PerformanceSeriesPoint[]): string {
 export default function PerformancePanel({ portfolioLastSync = null, marketState }: PerformancePanelProps) {
   const { isMobile, hasMounted } = useViewport();
   const isMarketActive = marketState !== MarketState.CLOSED;
-  const { data, loading, error, syncNow } = usePerformance(isMarketActive);
+  const { data: raw, loading, error, syncNow } = usePerformance(isMarketActive);
+  const data = useMemo(() => normalizePerformanceData(raw), [raw]);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const requestedPortfolioSyncRef = useRef<string | null>(null);
 

@@ -3,6 +3,7 @@
 import { Activity, AlertTriangle, ChevronDown, Gauge, History, ShieldAlert, TrendingDown } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { buildPerformanceChartModel, resolvePerformanceStartingEquity } from "@/lib/performanceChart";
+import { normalizePerformanceData } from "@/lib/performanceData";
 import { isPerformanceBehindPortfolioSync } from "@/lib/performanceFreshness";
 import type { PerformanceData, PerformanceSeriesPoint } from "@/lib/types";
 import { usePerformance } from "@/lib/usePerformance";
@@ -281,7 +282,8 @@ type MobilePerformancePanelProps = {
 
 export default function MobilePerformancePanel({ portfolioLastSync = null, marketState }: MobilePerformancePanelProps) {
   const isMarketActive = marketState !== MarketState.CLOSED;
-  const { data, loading, error, syncNow } = usePerformance(isMarketActive);
+  const { data: raw, loading, error, syncNow } = usePerformance(isMarketActive);
+  const data = useMemo(() => normalizePerformanceData(raw), [raw]);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const requestedPortfolioSyncRef = useRef<string | null>(null);

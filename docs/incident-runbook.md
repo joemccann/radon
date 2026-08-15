@@ -525,6 +525,17 @@ Peak incident: 2026-08-15, operator signed in as joemccann on app.radon.run,
   (allowlisted operator, blank demo-admin env), `web/tests/admin-page-gate.test.ts`,
   `web/tests/route-local-authz-matrix.test.ts`.
 
+## performance-twr-payload-length
+
+**`/performance` route error boundary: `TypeError: Cannot read properties of undefined (reading 'length')`.**
+2026-08-15, app.radon.run/performance. TWR builder snapshots in Turso omit reconstruction-only arrays.
+
+- **Mechanism:** `perf_twr_builder.py` writes `performance_snapshots` without `contracts_missing_history` (and often without `trades_source` / `price_sources`). Next.js GET serves that row. `PerformancePanel` / `MobilePerformancePanel` read `data.contracts_missing_history.length` after `warnings` is empty, then `trades_source.toUpperCase()`. Route error boundary.
+- **Detection:** console `[radon] route error boundary: TypeError ... 'length'`; workspace "RUNTIME ERROR" on `/performance` only.
+- **Discriminating check:** latest Turso `performance_snapshots.payload` has `methodology.curve_type == twr_modified_dietz_daily` and no `contracts_missing_history`. Reconstruction fixtures with that array still render.
+- **Fix:** `normalizePerformanceData` fills missing arrays and derives NAV equity before either panel reads the payload. Builder now emits the same keys on new writes. Existing Turso rows stay valid through the adapter.
+- **Regression:** `web/tests/performance-panel-twr-payload.test.tsx`, `web/tests/performance-twr.test.ts` normalize case, `web/e2e/performance-twr-payload.spec.ts`, `tests/test_portfolio_performance.py`.
+
 ## Grok auto-response on iPhone P1 pages
 
 Canonical: [`grok-page-responder.md`](grok-page-responder.md).

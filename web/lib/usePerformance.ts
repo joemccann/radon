@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { normalizePerformanceData } from "./performanceData";
 import { useSyncHook, type UseSyncReturn } from "./useSyncHook";
 import type { PerformanceData } from "./types";
 
@@ -13,5 +14,7 @@ const config = {
 
 export function usePerformance(active: boolean): UseSyncReturn<PerformanceData> {
   const stableConfig = useMemo(() => config, []);
-  return useSyncHook<PerformanceData>(stableConfig, active);
+  const result = useSyncHook<PerformanceData>(stableConfig, active);
+  const data = useMemo(() => normalizePerformanceData(result.data), [result.data]);
+  return { ...result, data };
 }
