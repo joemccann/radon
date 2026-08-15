@@ -158,6 +158,18 @@ data/cache/
 data/locks/
 data/nav_history.jsonl
 
+# Watchdog alert-suppression state (scripts/watchdog/state_db.py). Host-local
+# ON PURPOSE — keeping cooldowns in Turso would let a data-plane outage
+# disable the component that reports it. `data/*.json` already covers the
+# sibling JSON state; the SQLite store and its WAL sidecars were not covered,
+# leaving one host's suppression one `git add` away from muting every host.
+data/watchdog_state.db
+data/watchdog_state.db-wal
+data/watchdog_state.db-shm
+
+# Per-run lock sidecars next to the JSON state they guard.
+data/*.json.lock
+
 # setup-grok-page-responder.sh drops this in the dedicated VPS clone. Untracked
 # it reads as dirty work, and sync_remote_clone then refuses to fast-forward —
 # pinning the responder to whatever grok last committed.
