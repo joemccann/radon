@@ -84,7 +84,10 @@ up: `max(skew_history.date) < last_completed_session_date(now)` raises.
 One lag is expected, not corruption. When UW's daily cap is spent,
 `fetch_skew.py` keeps its last snapshot and writes a `next_attempt_at`
 deadline to `data/skew_uw_embargo.json`, so `skew_history` sits a session
-behind until the 20:00 ET reset. `fetch_skew2d.py` reads that deadline through
+behind until the 20:00 ET reset. The breaker itself lives in
+`scripts/utils/uw_embargo.py` (`UwEmbargo`, `is_daily_quota`, `retry_at`) and
+is shared with every other UW writer — add a caller there, never a third copy.
+`fetch_skew2d.py` reads that deadline through
 `fetch_skew.uw_embargo_until(now)` (read-only; the parent owns clearing) and,
 while it is live, holds instead of raising: recompute on the sessions it has,
 refresh the snapshot, write `data/skew2d.json`, and record `service_health`

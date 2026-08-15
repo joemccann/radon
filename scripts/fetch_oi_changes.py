@@ -21,14 +21,14 @@ See docs/options-flow-verification.md for methodology.
 import argparse
 import json
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, List
-from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).parent))
 
 from clients.uw_client import UWClient, UWRateLimitError
+from utils.uw_embargo import UwEmbargo, is_daily_quota, retry_at
 
 try:
     from db.scan_mirror import mirror_scan_snapshot  # type: ignore
@@ -45,9 +45,6 @@ _MARKET_OI_LIMIT = 200
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _SCRIPT_DIR.parent
-_ET = ZoneInfo("America/New_York")
-_UW_DAILY_LIMIT_MARKER = "daily request limit"
-_UW_DAILY_RESET_HOUR_ET = 20
 
 
 def _now() -> datetime:
@@ -58,70 +55,32 @@ def _embargo_path() -> Path:
     return _PROJECT_DIR / "data" / "oi_changes_uw_embargo.json"
 
 
+# Resolved per call so tests relocating _embargo_path relocate the sidecar.
+_EMBARGO = UwEmbargo("oi-changes", lambda: _embargo_path())
+
+
 def _is_uw_daily_quota(exc: BaseException) -> bool:
-    return isinstance(exc, UWRateLimitError) and _UW_DAILY_LIMIT_MARKER in str(exc).lower()
+    return is_daily_quota(exc)
 
 
 def _uw_retry_at(exc: BaseException, now: datetime) -> str:
-    """UW daily cap resets at 20:00 ET; other 429s get a 5-minute embargo."""
-    if _is_uw_daily_quota(exc):
-        local = now.astimezone(_ET)
-        reset = local.replace(hour=_UW_DAILY_RESET_HOUR_ET, minute=0, second=0, microsecond=0)
-        if local >= reset:
-            reset = reset + timedelta(days=1)
-        return reset.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-    return (now + timedelta(minutes=5)).astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def _load_uw_embargo() -> Optional[datetime]:
-    try:
-        raw = json.loads(_embargo_path().read_text()).get("next_attempt_at")
-    except (OSError, ValueError, TypeError, AttributeError):
-        return None
-    if not raw:
-        return None
-    try:
-        parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
-    except (ValueError, TypeError):
-        return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return retry_at(exc, now)
 
 
 def _save_uw_embargo(next_attempt_at: str) -> None:
-    path = _embargo_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"next_attempt_at": next_attempt_at}))
+    _EMBARGO.arm(next_attempt_at)
 
 
 def _clear_uw_embargo() -> None:
-    _embargo_path().unlink(missing_ok=True)
+    _EMBARGO.clear()
 
 
 def _uw_embargo_active(now: datetime) -> Optional[str]:
-    deadline = _load_uw_embargo()
-    if deadline is None or now >= deadline:
-        if deadline is not None:
-            _clear_uw_embargo()
-        return None
-    return deadline.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return _EMBARGO.active_until(now)
 
 
 def _record_cycle_error(exc: BaseException, *, now: datetime, next_attempt_at: str) -> None:
-    message = str(exc).splitlines()[0].strip()[:300]
-    try:
-        from db import writer
-    except ImportError:
-        return
-    try:
-        writer.ensure_no_replica_for_writers()
-        writer.record_service_health(
-            "oi-changes",
-            "error",
-            finished_at=now.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
-            error={"message": message, "next_attempt_at": next_attempt_at},
-        )
-    except Exception as write_exc:  # noqa: BLE001 — telemetry must not mask the cycle
-        print(f"[oi-changes] error heartbeat non-fatal: {write_exc}", file=sys.stderr)
+    _EMBARGO.record_error(exc, now=now, next_attempt_at=next_attempt_at)
 
 
 def _handle_market_uw_limit(exc: UWRateLimitError, now: datetime) -> int:

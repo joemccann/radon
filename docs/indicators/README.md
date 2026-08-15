@@ -16,3 +16,7 @@ Owner specs for regime tabs and the cheap-wing scanner. Add a row here when a sp
 A derived indicator must tell an explained parent lag apart from a broken
 parent, or a spent UW daily cap fails its unit and pages a P1 every run. See
 [skew2d.md](skew2d.md) "Parent lag — stale vs embargoed".
+
+Every UW-backed indicator shares one daily-cap breaker,
+`scripts/utils/uw_embargo.py`. Give a new writer its own sidecar file through
+`UwEmbargo(service, path_source)`; do not re-implement the reset arithmetic.
