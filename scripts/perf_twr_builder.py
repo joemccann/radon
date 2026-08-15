@@ -280,6 +280,9 @@ def build_payload(
             "summary": {},
             "series": [],
             "twr_subperiods": [],
+            "contracts_missing_history": [],
+            "trades_source": "ib_nav",
+            "price_sources": {"stocks": "ib_flex_nav", "options": "none"},
         }
     # Detect multi-account
     sample_val = next(iter(nav_snapshots.values()))
@@ -339,6 +342,9 @@ def build_payload(
             "summary": {},
             "series": [],
             "twr_subperiods": [],
+            "contracts_missing_history": [],
+            "trades_source": "ib_nav",
+            "price_sources": {"stocks": "ib_flex_nav", "options": "none"},
             "period_start": min(nav_map.keys()) if nav_map else None,
             "period_end": max(nav_map.keys()) if nav_map else None,
         }
@@ -414,6 +420,13 @@ def build_payload(
         "library_strategy": "fred_dgs3mo",
     }
 
+    starting_equity = series[0]["nav"] if series else None
+    ending_equity = series[-1]["nav"] if series else None
+    pnl = (
+        ending_equity - starting_equity
+        if starting_equity is not None and ending_equity is not None
+        else None
+    )
     summary = {
         "total_return": metrics.get("total_return"),
         "annualized_return": metrics.get("annualized_return"),
@@ -426,6 +439,10 @@ def build_payload(
         "alpha": metrics.get("alpha"),
         "var_95": metrics.get("var_95"),
         "cvar_95": metrics.get("cvar_95"),
+        "tracking_error": metrics.get("tracking_error"),
+        "starting_equity": starting_equity,
+        "ending_equity": ending_equity,
+        "pnl": pnl,
     }
 
     return {
@@ -436,6 +453,10 @@ def build_payload(
         "series": series,
         "twr_subperiods": subperiods,
         "warnings": warnings,
+        "contracts_missing_history": [],
+        "trades_source": "ib_nav",
+        "price_sources": {"stocks": "ib_flex_nav", "options": "none"},
+        "as_of": period_end,
         "period_start": period_start,
         "period_end": period_end,
         "benchmark": "SPY",

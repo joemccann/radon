@@ -55,6 +55,11 @@ def test_zero_flows_twr():
     assert payload["status"] == "ok"
     assert payload["summary"]["total_return"] == pytest.approx(0.21)
     assert payload["methodology"]["curve_type"] == "twr_modified_dietz_daily"
+    assert payload["contracts_missing_history"] == []
+    assert payload["trades_source"] == "ib_nav"
+    assert payload["summary"]["starting_equity"] == pytest.approx(100_000)
+    assert payload["summary"]["ending_equity"] == pytest.approx(121_000)
+    assert payload["summary"]["pnl"] == pytest.approx(21_000)
 
 
 def test_golden_no_flows_total_return_0_123456():
@@ -291,6 +296,8 @@ def test_flex_missing_insufficient_data():
     assert payload["status"] == "insufficient_data"
     payload2 = build_payload(None, None, risk_free_rate_override=0.04)
     assert payload2["status"] == "insufficient_data"
+    assert payload2["contracts_missing_history"] == []
+    assert payload2["series"] == []
     # Single NAV row also insufficient
     payload3 = build_payload({"2026-01-02": 100_000}, {}, risk_free_rate_override=0.04)
     assert payload3["status"] == "insufficient_data"

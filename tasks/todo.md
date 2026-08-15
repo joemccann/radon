@@ -1,3 +1,23 @@
+# Task: /performance runtime crash on TWR snapshot (2026-08-15)
+
+## Dependency graph
+
+- P1 depends_on: [] - Red: render PerformancePanel with persisted TWR payload (no contracts_missing_history)
+- P2 depends_on: [P1] - Normalize TWR/legacy snapshots before any array access
+- P3 depends_on: [P2] - Desktop + mobile green; focused vitest; browser verify
+
+## Checklist
+
+- [x] P1 Failing render test (TypeError length)
+- [x] P2 normalizePerformanceData + both panels
+- [x] P3 Verify
+
+## Review
+
+`/performance` crashed on the live TWR snapshot (`contracts_missing_history` missing, empty `warnings`). Desktop + mobile now normalize before render. Focused vitest 3/3 then 35; e2e TWR spec 1/1; pytest 6340. Full vitest 6236 passed, 49 newsfeed `sharp` missing (unrelated).
+
+---
+
 # Task: Diagnose TWR Performance integration failure (2026-08-15)
 
 ## Dependency graph

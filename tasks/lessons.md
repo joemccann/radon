@@ -1,5 +1,11 @@
 # Lessons
 
+## 2026-08-15 — TWR snapshots are not the reconstruction PerformanceData contract
+
+- `perf_twr_builder.py` rows omit `contracts_missing_history`, `trades_source`, and `price_sources`. Empty `warnings` makes `hasWarnings` evaluate `undefined.length` and trip the `/performance` error boundary.
+- Normalize at the panel before any array or string method. Do not assume Turso snapshots match `web/lib/types.ts` PerformanceData.
+- Chart hardening (HB-117) does not cover panel field access. A finite chart model can still crash the page.
+
 ## 2026-08-15 — Verify third-party setup labels against the live UI
 
 - IBKR Activity Flex Queries do not offer `Custom Date Range` in the current query builder. For rolling NAV history, use the visible `Last 365 Calendar Days` option.
