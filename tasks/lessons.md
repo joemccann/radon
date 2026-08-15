@@ -1,5 +1,12 @@
 # Lessons
 
+## 2026-08-15 — Verify third-party setup labels against the live UI
+
+- IBKR Activity Flex Queries do not offer `Custom Date Range` in the current query builder. For rolling NAV history, use the visible `Last 365 Calendar Days` option.
+- `EquitySummaryByReportDateInBase` is an XML element, not a current IBKR UI label. The Activity Flex section is `Net Asset Value (NAV) in Base`; select `Report Date` and `Total`.
+- IBKR Transfers has no generic `Amount` field. Name the exact fields: `Cash Transfer` for cash, `Position Amount in Base` for transferred-position market value, plus `Report Date`, `Type`, and `Direction`; `Transfer Price` is a unit price, not the total transfer value.
+- Before publishing external-console instructions, verify exact field labels and selectable values against the current screen rather than inferring them from API concepts.
+
 ## 2026-08-15 — Operator mutations use ALLOWED_USER_IDS, not the demo-admin list
 
 - `DEMO_ADMIN_USER_IDS` is unset on app.radon.run and default-denies everyone. Gating `/api/preferences` PUT/DELETE on the demo-trial admin helper 403'd the signed-in operator (`Operator authorization required`) while GET still worked.

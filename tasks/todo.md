@@ -1,3 +1,155 @@
+# Task: Diagnose TWR Performance integration failure (2026-08-15)
+
+## Dependency graph
+
+- T1 depends_on: [] - Inventory the new TWR payload, frontend `PerformanceData` contract, persistence path, and FastAPI/Next routes
+- T2 depends_on: [T1] - Define the minimal payload compatibility fix and migration behavior for persisted snapshots
+- T3 depends_on: [T1] - Define the minimal runtime routing fix so `/performance` invokes the TWR builder
+- T4 depends_on: [T2, T3] - Specify red/green regression coverage and production verification sequence
+- T5 depends_on: [T4] - Produce the staff-level implementation plan and risk assessment
+
+## Checklist
+
+- [x] T1 Inventory contracts and routes
+- [x] T2 Payload compatibility design
+- [x] T3 Runtime routing design
+- [x] T4 Regression and rollout plan
+- [x] T5 Review
+
+## Review
+
+The failure is a partial TWR cutover: FastAPI still invokes `portfolio_performance.py`, while the persisted `perf_twr_builder.py` payload is an incomplete, unversioned shape that the desktop and mobile panels cannot render safely. The implementation should define `performance.twr.v1` as the canonical reduced payload, remove legacy reconstruction-only frontend requirements, switch the single FastAPI rebuild helper to `perf_twr_builder.py`, and reject the current incomplete snapshot until one fresh v1 overwrite exists. Flex 1018 needs builder-level durable backoff, one shared NAV/flows fetch, cached-source degradation metadata, and no same-run retry. Red coverage must prove the payload, chart semantics, route cutover/dedupe, throttle behavior, and desktop/mobile rendering before the API-only restart and one controlled rebuild.
+
+---
+
+# Task: Distribute FRED key and apply Flex performance setup (2026-08-15)
+
+## Dependency graph
+
+- T1 depends_on: [] - Validate root `FRED_API_KEY` and confirmed missing destinations without exposing its value
+- T2 depends_on: [T1] - Subagent A adds the key to `web/.env` and Vercel Production, Preview, and Development, then verifies coverage
+- T3 depends_on: [T2] - Subagent B applies runtime configuration through the minimal required service restart/redeployment
+- T4 depends_on: [T3] - Subagent B runs `perf_twr_builder.py --json` and confirms TWR output is not `insufficient_data`
+- T5 depends_on: [T4] - Subagent B verifies the Performance surface and reports final evidence
+
+## Checklist
+
+- [x] T1 Validate source and target state
+- [x] T2 Update missing FRED destinations
+- [x] T3 Apply runtime configuration
+- [x] T4 Verify builder output
+- [x] T5 Verify Performance surface and review (failed contract check)
+
+## Review
+
+`FRED_API_KEY` now matches across root, web, and Hetzner and exists once in each Vercel environment. `radon-api.service` restarted healthy without touching Gateway. Builder exit 0: `status=ok`, `curve_type=twr_modified_dietz_daily`, 58 rows, 2025-12-31 through 2026-03-20, FRED available, zero warnings. Live Flex fell back to disk cache after temporary generation failure then throttle 1018. Performance UI verification failed: the persisted TWR payload lacks required `PerformanceData` fields and FastAPI `/performance` still invokes the legacy builder.
+
+---
+
+# Task: Distribute IB Flex NAV query ID (2026-08-15)
+
+## Dependency graph
+
+- T1 depends_on: [] - Validate numeric `IB_FLEX_NAV_QUERY_ID` in root `.env` without exposing it
+- T2 depends_on: [T1] - Copy the value to `web/.env` and Hetzner `/home/radon/radon-cloud/.env`
+- T3 depends_on: [T1] - Set the value in Vercel Production, Preview, and Development for project `radon`
+- T4 depends_on: [T2, T3] - Verify local/Hetzner equality and Vercel environment coverage, then remove temporary link metadata
+
+## Checklist
+
+- [x] T1 Validate source value
+- [x] T2 Update local web and Hetzner env files
+- [x] T3 Update Vercel env
+- [x] T4 Verify and review
+
+## Review
+
+`IB_FLEX_NAV_QUERY_ID` has exactly one matching assignment in root `.env`, `web/.env`, and Hetzner `/home/radon/radon-cloud/.env`; Hetzner mode remains `0600`. Vercel lists the variable in Production, Preview, and Development. Temporary `web/.vercel` and generated `web/.gitignore` metadata were removed.
+
+---
+
+# Task: Correct IBKR NAV section label (2026-08-15)
+
+## Dependency graph
+
+- T1 depends_on: [] - Inspect the current Activity Flex section list and NAV modal
+- T2 depends_on: [T1] - Map the UI label and fields to the builder's XML element
+- T3 depends_on: [T2] - Replace the XML-name setup instruction with exact current UI labels and verify source
+
+## Checklist
+
+- [x] T1 Inspect live IBKR UI
+- [x] T2 Confirm `Net Asset Value (NAV) in Base` with `Report Date` and `Total`
+- [x] T3 Correct and verify guide
+
+## Review
+
+The live Activity Flex UI labels the section `Net Asset Value (NAV) in Base`; its required fields are `Report Date` and `Total`. The guide no longer exposes the internal XML name as a navigation label.
+
+---
+
+# Task: Correct IBKR Transfer field instruction (2026-08-15)
+
+## Dependency graph
+
+- T1 depends_on: [] - Confirm the current Transfer fields from the operator screenshot
+- T2 depends_on: [T1] - Verify field meanings against IBKR's reporting reference
+- T3 depends_on: [T2] - Replace nonexistent generic `amount` guidance with exact Transfer field labels and verify source
+
+## Checklist
+
+- [x] T1 Confirm live UI fields
+- [x] T2 Verify IBKR semantics
+- [x] T3 Correct and verify guide
+
+## Review
+
+IBKR Transfers has no generic `Amount` field. The guide now uses exact labels: `Report Date`, `Type`, `Direction`, `Cash Transfer`, and `Position Amount in Base`; source verification passed.
+
+---
+
+# Task: Correct IBKR Flex period instruction (2026-08-15)
+
+## Dependency graph
+
+- T1 depends_on: [] - Confirm the current IBKR period choices from the operator screenshot
+- T2 depends_on: [T1] - Replace unavailable `Custom Date Range` guidance with `Last 365 Calendar Days`
+- T3 depends_on: [T2] - Verify the corrected setup source
+
+## Checklist
+
+- [x] T1 Confirm live UI choices
+- [x] T2 Correct period guidance
+- [x] T3 Verify source
+
+## Review
+
+The current IBKR query builder offers `Last 365 Calendar Days`, not `Custom Date Range`. The setup guide now names the available rolling-history option; source verification passed.
+
+---
+
+# Task: Distribute IB Flex token (2026-08-15)
+
+## Dependency graph
+
+- T1 depends_on: [] - Validate the root token and resolve local, Hetzner, and Vercel targets without exposing its value
+- T2 depends_on: [T1] - Add `IB_FLEX_TOKEN` to `web/.env` and Hetzner `/home/radon/radon-cloud/.env`
+- T3 depends_on: [T1] - Add `IB_FLEX_TOKEN` to Vercel Production, Preview, and Development
+- T4 depends_on: [T2, T3] - Verify all destinations report a non-empty key and document results
+
+## Checklist
+
+- [x] T1 Validate source and targets
+- [x] T2 Update local web and Hetzner env files
+- [x] T3 Update Vercel env
+- [x] T4 Verify and review
+
+## Review
+
+`IB_FLEX_TOKEN` matches across root `.env`, `web/.env`, and Hetzner `/home/radon/radon-cloud/.env`. Vercel lists encrypted values for Production, Preview, and Development.
+
+---
+
 # Task: Preferences PUT 403 Operator authorization required (2026-08-15)
 
 ## Dependency graph

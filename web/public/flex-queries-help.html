@@ -62,7 +62,7 @@
     <h2><span class="num">2</span> NAV Query — <code>IB_FLEX_NAV_QUERY_ID</code> (required)</h2>
     <ol>
       <li>IB Portal → <strong>Performance &amp; Reports → Flex Queries → Activity Flex Queries → Create</strong></li>
-      <li>Period: <code>Custom Date Range</code> · Format: <code>XML</code> · Include: <code>EquitySummaryInBase — By Report Date → Total</code>, <code>CashTransactions</code> (type, amount, reportDate), <code>Transfers</code> (amount, reportDate)</li>
+      <li>Period: <code>Last 365 Calendar Days</code> · Format: <code>XML</code> · Include: <code>Net Asset Value (NAV) in Base</code> (<strong>Report Date</strong>, <strong>Total</strong>), <code>Cash Transactions</code> (<strong>Type</strong>, <strong>Amount</strong>, <strong>Report Date</strong>), <code>Transfers</code> (<strong>Report Date</strong>, <strong>Type</strong>, <strong>Direction</strong>, <strong>Cash Transfer</strong>, <strong>Position Amount in Base</strong>)</li>
       <li><strong>Save</strong> → list shows new row → copy <strong>Query ID</strong> (e.g. <code>1497709</code>)</li>
       <li>Set <code>IB_FLEX_NAV_QUERY_ID=1497709</code> in same envs as above</li>
     </ol>
@@ -76,7 +76,7 @@
     <h2><span class="num">3</span> Flows Query — <code>IB_FLEX_FLOWS_QUERY_ID</code> (optional)</h2>
     <p><code>scripts/perf_twr_builder.py</code> uses <code>flows_qid = IB_FLEX_FLOWS_QUERY_ID or IB_FLEX_NAV_QUERY_ID</code> — if your NAV query already includes <code>CashTransactions</code> + <code>Transfers</code>, skip this step.</p>
     <ol>
-      <li>Same <strong>Create</strong> flow → only <code>CashTransactions</code> + <code>Transfers</code> (add <code>EquitySummaryInBase</code> if you want it standalone)</li>
+      <li>Same <strong>Create</strong> flow → only <code>Cash Transactions</code> + <code>Transfers</code> (add <code>Net Asset Value (NAV) in Base</code> if you want it standalone)</li>
       <li>Save → copy ID → set <code>IB_FLEX_FLOWS_QUERY_ID=…</code> (leave unset to reuse NAV)</li>
     </ol>
     <div class="callout warn"><p><strong>Do not</strong> reuse <code>IB_FLEX_QUERY_ID=1422766</code> (trades) for NAV/flows — that query lacks the sections and will return <code>insufficient_data</code>.</p></div>
