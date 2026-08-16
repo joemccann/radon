@@ -397,6 +397,52 @@ class TestSecurityRemediationSchedules:
         lock_paths = [value.split("flock", 1)[1].split()[1] for value in execs]
         assert len(set(lock_paths)) == 1
 
+    def test_db_maintenance_flock_loser_defers_instead_of_failing(self, unit):
+        """R-067: the /run/lock/radon-db-maintenance.lock loser must defer to
+        its next timer slot, not enter failed.
+
+        Every peer's TimeoutStartSec exceeds the 7500s flock wait, so a
+        long-holding peer used to time the waiter's flock out -> exit 1 ->
+        Result=failed -> P1 page for pure lock contention. flock -E 75
+        (EX_TEMPFAIL) + SuccessExitStatus=75 turns the lock-timeout into a
+        clean deferral; the job's own service_health window (48h) still
+        surfaces persistent deferral.
+        """
+        for name in (
+            "radon-db-backup.service",
+            "radon-db-retention.service",
+            "radon-portfolio-archive.service",
+        ):
+            svc = unit(name)["Service"]
+            assert "-E 75" in svc["execstart"], (
+                f"{name}: flock needs -E 75 so a lock timeout is "
+                "distinguishable from the job's own failure"
+            )
+            assert svc.get("successexitstatus") == "75", (
+                f"{name}: SuccessExitStatus=75 must mark the lock-timeout "
+                "deferral as success (unit ends inactive, not failed)"
+            )
+
+    def test_db_maintenance_lock_wait_leaves_full_work_budget(self, unit):
+        """R-067: acquiring the lock late must not eat the work budget.
+
+        TimeoutStartSec has to cover the full flock wait PLUS the job's own
+        work ceiling, otherwise a waiter that wins the lock near the end of
+        its wait is killed mid-work.
+        """
+        work_budgets = {
+            "radon-db-backup.service": 12000,
+            "radon-db-retention.service": 10000,
+            "radon-portfolio-archive.service": 8000,
+        }
+        for name, work in work_budgets.items():
+            svc = unit(name)["Service"]
+            wait = int(svc["execstart"].split("-w", 1)[1].split()[0])
+            assert int(svc["timeoutstartsec"]) >= wait + work, (
+                f"{name}: TimeoutStartSec must be >= flock wait ({wait}s) "
+                f"+ work budget ({work}s)"
+            )
+
     def test_one_minute_skew_timer_does_not_trip_start_limit(self, unit):
         assert int(unit("radon-skew.service")["Unit"]["startlimitburst"]) >= 10
 
