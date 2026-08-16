@@ -90,7 +90,7 @@ test.describe("/regime/straddle — SPX 1-day straddle ratio tab", () => {
     await setupMocks(page);
     await page.goto("/regime/straddle");
 
-    await expect(page.locator(".ticker-tab", { hasText: "STRADDLE" })).toHaveClass(/active/);
+    await expect(page.locator('.regime-rail__item[data-tab="straddle"]')).toHaveClass(/active/);
 
     const last = page.locator('[data-testid="straddle-last-value"]');
     await last.waitFor({ timeout: 10_000 });

@@ -100,7 +100,7 @@ test.describe("/regime/cor — SPX implied correlation tab", () => {
     await setupMocks(page);
     await page.goto("/regime/cor");
 
-    await expect(page.locator(".ticker-tab", { hasText: "COR" })).toHaveClass(/active/);
+    await expect(page.locator('.regime-rail__item[data-tab="cor"]')).toHaveClass(/active/);
 
     const regime = page.locator('[data-testid="cor-regime-value"]');
     await regime.waitFor({ timeout: 10_000 });

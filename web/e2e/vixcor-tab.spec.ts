@@ -231,7 +231,7 @@ test.describe("/regime/vixcor — VIX vs COR3M correlation tab", () => {
     await setupMocks(page);
     await page.goto("/regime/vixcor");
 
-    await expect(page.locator(".ticker-tab", { hasText: "VIX-COR" })).toHaveClass(/active/);
+    await expect(page.locator('.regime-rail__item[data-tab="vixcor"]')).toHaveClass(/active/);
 
     const regime = page.locator('[data-testid="vixcor-regime-value"]');
     await regime.waitFor({ timeout: 15_000 });

@@ -10023,6 +10023,166 @@ tr {
   padding: 0;
 }
 
+/* ─── Grouped indicator rail (design: "Regime — Grouped Rail") ────────
+   ≥1100px: 244px grouped rail + detail pane. Below that the rail hides and
+   the flat .regime-tab-strip fallback shows. Mobile keeps .m-regime-tabs. */
+
+.regime-detail-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.regime-rail {
+  display: none;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border: 1px solid var(--line-grid);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.regime-rail__filter {
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--line-grid);
+}
+
+.regime-rail__filter input {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  background: var(--bg-canvas);
+  border: 1px solid var(--line-grid);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+}
+
+.regime-rail__filter input::placeholder {
+  color: var(--text-muted);
+}
+
+.regime-rail__filter input:focus {
+  outline: none;
+  border-color: var(--signal-core);
+}
+
+.regime-rail__list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 2px 0 10px;
+}
+
+.regime-rail__group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.regime-rail__count--flagged {
+  color: var(--warning);
+}
+
+.regime-rail__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 32px;
+  padding: 0 14px 0 12px;
+  background: transparent;
+  border: none;
+  border-left: 2px solid transparent;
+  cursor: pointer;
+  text-align: left;
+  transition: var(--transition-controls);
+}
+
+.regime-rail__item:hover {
+  background: var(--bg-panel-raised);
+}
+
+.regime-rail__item:hover .regime-rail__name {
+  color: var(--text-primary);
+}
+
+.regime-rail__item.active {
+  background: var(--bg-panel-raised);
+  border-left-color: var(--signal-core);
+}
+
+.regime-rail__item.active .regime-rail__name {
+  color: var(--text-primary);
+}
+
+.regime-rail__dot {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  background: var(--text-muted);
+}
+
+.regime-rail__dot--core { background: var(--signal-core); }
+.regime-rail__dot--warn { background: var(--warning); }
+.regime-rail__dot--fault { background: var(--negative); }
+
+.regime-rail__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  color: var(--text-secondary);
+}
+
+.regime-rail__val {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.regime-rail__foot {
+  padding: 8px 14px;
+  border-top: 1px solid var(--line-grid);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+@media (min-width: 1100px) {
+  .regime-panel--rail {
+    display: grid;
+    grid-template-columns: 244px minmax(0, 1fr);
+    gap: 16px;
+    align-items: start;
+  }
+
+  .regime-panel--rail > .regime-rail {
+    display: flex;
+    position: sticky;
+    top: 12px;
+    max-height: calc(100vh - var(--header-height) - 40px);
+  }
+
+  .regime-panel--rail > .regime-tab-strip {
+    display: none;
+  }
+}
+
 /* ─── Strategy Backtest panel (F12) ─────────────────────── */
 .backtest-panel {
   display: flex;
@@ -10574,7 +10734,9 @@ tr {
   text-align: right;
 }
 
-@media (max-width: 980px) {
+/* 1240px: below this the detail pane (viewport minus the 260px rail column)
+   is narrower than the old 980px full-width threshold. */
+@media (max-width: 1240px) {
   .regime-detail-grid {
     grid-template-columns: 1fr;
     gap: 1px;

@@ -89,7 +89,7 @@ test.describe("/regime/skew — SPX 1M 25-delta put/call skew tab", () => {
     await setupMocks(page);
     await page.goto("/regime/skew");
 
-    await expect(page.locator(".ticker-tab", { hasText: "SKEW" })).toHaveClass(/active/);
+    await expect(page.locator('.regime-rail__item[data-tab="skew"]')).toHaveClass(/active/);
 
     const change = page.locator('[data-testid="skew-change-value"]');
     await change.waitFor({ timeout: 10_000 });
