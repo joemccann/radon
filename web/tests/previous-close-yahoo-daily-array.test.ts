@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { isUsTradingDay } from "../lib/serviceHealthWindows";
 
 /**
  * Regression: NAK / RR / MSFT showed wildly wrong Day Chg % on the
@@ -74,10 +75,39 @@ function buildYahooPayload(opts: {
 }
 
 /** Build a 5-entry timestamp array ending TODAY (ET-noon), one day apart. */
-function buildRecentTimestamps(): number[] {
-  const dayMs = 24 * 60 * 60 * 1000;
-  const now = Date.now();
-  return [4, 3, 2, 1, 0].map((offset) => Math.floor((now - offset * dayMs) / 1000));
+function etDateString(now: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+}
+
+/**
+ * Five daily bars whose ET dates are spaced by TRADING days, anchored so
+ * index 3 is exactly the session the route resolves to and index 4 is
+ * today's still-open bar.
+ *
+ * The route returns the newest close on or before `previousCloseSessionDate()`.
+ * A calendar-day walk put index 3 on a Saturday for any weekend run, so the
+ * route correctly skipped past it and returned index 2 — the fixture, not the
+ * route, was what failed. Every timestamp is stamped at the 16:00 ET close so
+ * its ET date is unambiguous whatever hour the suite runs at.
+ */
+function buildRecentTimestamps(now: Date = new Date()): number[] {
+  const atEtClose = (isoDate: string) =>
+    Math.floor(Date.parse(`${isoDate}T20:00:00Z`) / 1000);
+
+  const todayEt = etDateString(now);
+  const sessions: string[] = [];
+  const cursor = new Date(`${todayEt}T12:00:00Z`);
+  while (sessions.length < 4) {
+    cursor.setUTCDate(cursor.getUTCDate() - 1);
+    const iso = cursor.toISOString().slice(0, 10);
+    if (isUsTradingDay(iso)) sessions.unshift(iso);
+  }
+  return [...sessions.map(atEtClose), atEtClose(todayEt)];
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────
