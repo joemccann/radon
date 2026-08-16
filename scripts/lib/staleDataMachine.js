@@ -62,6 +62,9 @@ export const FARM_DOWN_CODES = new Set([2103, 2105, 2108]);
  * @property {boolean} ibConnected              IB socket currently up.
  * @property {boolean} isMarketHours            Inside RTH (relay's gate).
  * @property {number} activeSubscriptions       Count of live L1 subjects.
+ * @property {number} [subscribedSymbols]       Count of symbols with subscriber
+ *                                              demand (active ticket or not);
+ *                                              defaults to activeSubscriptions.
  * @property {number} reconnectCycles           Consecutive failed reconnect
  *                                              cycles so far this episode.
  * @property {number|null} farmState            Last IB farm info code, or null.
@@ -135,12 +138,23 @@ export const TICK_HEARTBEAT_INTERVAL_MS = 60_000;
 
 export function summarizeSubscriptionFreshness(subjects, now) {
   const active = subjects.filter((subject) => subject?.active === true);
+  const subscribedSymbols = subjects.length;
   if (active.length === 0) {
-    return { activeSubscriptions: 0, lastTickAt: now };
+    if (subscribedSymbols === 0) {
+      // True idle: nothing subscribed, so no tick can be owed — substituting
+      // now keeps the idle heartbeat honest about the writer, not the stream.
+      return { activeSubscriptions: 0, subscribedSymbols: 0, lastTickAt: now };
+    }
+    // R-061: demand remains but IB nulled every ticket (error 200/354). This
+    // is a degraded data plane, NOT idle — tick age must stay real, or the
+    // idle substitution turns a total blackout into tick_age_secs: 0.
+    const timestamps = subjects.map((subject) => Number(subject?.lastTickAt));
+    const oldest = timestamps.every(Number.isFinite) ? Math.min(...timestamps) : 0;
+    return { activeSubscriptions: 0, subscribedSymbols, lastTickAt: oldest };
   }
   const timestamps = active.map((subject) => Number(subject.lastTickAt));
   const oldest = timestamps.every(Number.isFinite) ? Math.min(...timestamps) : 0;
-  return { activeSubscriptions: active.length, lastTickAt: oldest };
+  return { activeSubscriptions: active.length, subscribedSymbols, lastTickAt: oldest };
 }
 
 /**
@@ -186,14 +200,38 @@ export function shouldWriteTickHeartbeat({ now, isMarketHours, inError, lastHear
  * and freezes the row (the same 2026-08-10 fingerprint). Farm-down recovery
  * is the subscribed ladder's job.
  *
+ * Idle also requires ZERO subscribed symbols, not just zero active tickets
+ * (R-061): when IB nulls every ticket (error 200/354) the symbols stay in
+ * symbolSubscribers, demand is fully outstanding, and silence is a blackout —
+ * reading it as idle-healthy is what hid the 354-everything mode behind a
+ * green row.
+ *
  * @param {StaleDataInput} input
  * @returns {boolean}
  */
-function hasHealthyDataPlane({ ibConnected, activeSubscriptions, now, lastTickAt }) {
+function hasHealthyDataPlane({ ibConnected, activeSubscriptions, subscribedSymbols = activeSubscriptions, now, lastTickAt }) {
   if (!ibConnected) return false;
   if (now - lastTickAt <= STALE_DATA_THRESHOLD_MS) return true;
   if (activeSubscriptions > 0) return false;
+  if (subscribedSymbols > 0) return false;
   return true;
+}
+
+/**
+ * R-061: every subscription nulled by IB while demand remains, with stale
+ * ticks on a live socket. The ladder cannot act (nothing is actionably
+ * subscribed — reconnect/resubscribe cannot fix a revoked entitlement and an
+ * unentitled single symbol must never escalate), but the state is degraded,
+ * not idle: the relay must say so instead of heartbeating ok.
+ *
+ * @param {StaleDataInput} input
+ * @returns {boolean}
+ */
+function isDataPlaneNulled({ ibConnected, activeSubscriptions, subscribedSymbols = activeSubscriptions, now, lastTickAt }) {
+  if (!ibConnected) return false;
+  if (activeSubscriptions > 0) return false;
+  if (subscribedSymbols <= 0) return false;
+  return now - lastTickAt > STALE_DATA_THRESHOLD_MS;
 }
 
 /**
@@ -250,15 +288,22 @@ export function farmStateAfterIdleDrain() {
  * (stale ticks with demand outstanding) is gone. A leftover farm-DOWN code
  * does not hold the latch once demand is gone.
  *
- * @param {StaleDataInput & {inError: boolean, lastHeartbeatAt: number}} input
- * @returns {{action: "none"|"resubscribe"|"reconnect"|"escalate", heartbeat: boolean, clearError: boolean}}
+ * ``degraded`` (R-061) is the third outcome: during RTH, IB has nulled every
+ * subscription while symbols remain subscribed and ticks are stale. The ladder
+ * returns ``none`` (zero active tickets is un-actionable), the heartbeat and
+ * clearError are withheld (the data plane is NOT healthy), and the relay
+ * writes a non-ok row instead so the blackout is visible.
+ *
+ * @param {StaleDataInput & {inError: boolean, lastHeartbeatAt: number, subscribedSymbols?: number}} input
+ * @returns {{action: "none"|"resubscribe"|"reconnect"|"escalate", heartbeat: boolean, clearError: boolean, degraded: boolean}}
  */
 export function decideHealthWrite(input) {
   const action = decideStaleAction(input);
   const isHealthyCycle = action === "none" && hasHealthyDataPlane(input);
   const clearError = isHealthyCycle && input.inError === true;
   const heartbeat = isHealthyCycle && shouldWriteTickHeartbeat(input);
-  return { action, heartbeat, clearError };
+  const degraded = input.isMarketHours === true && isDataPlaneNulled(input);
+  return { action, heartbeat, clearError, degraded };
 }
 
 /**

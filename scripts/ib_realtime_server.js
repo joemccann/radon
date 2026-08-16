@@ -2712,7 +2712,7 @@ staleCheckTimer = setInterval(() => {
     }),
     now,
   );
-  const { activeSubscriptions } = freshness;
+  const { activeSubscriptions, subscribedSymbols } = freshness;
   const elapsed = now - freshness.lastTickAt;
 
   // DUR-16: RTH tick heartbeat for /api/probe/freshness + the recovery action
@@ -2721,12 +2721,13 @@ staleCheckTimer = setInterval(() => {
   // ladder is acting it owns the service_health row, so an "ok" heartbeat can
   // no longer land last and clobber the escalation's "error" row — the
   // 2026-06-18 invisibility bug where a dead relay still read state=ok.
-  const { action, heartbeat, clearError } = decideHealthWrite({
+  const { action, heartbeat, clearError, degraded } = decideHealthWrite({
     now,
     lastTickAt: freshness.lastTickAt,
     ibConnected,
     isMarketHours: marketHours,
     activeSubscriptions,
+    subscribedSymbols,
     reconnectCycles: staleReconnectCycles,
     farmState: lastFarmStateCode,
     lastEscalationAt,
@@ -2745,11 +2746,39 @@ staleCheckTimer = setInterval(() => {
 
   if (heartbeat || clearError) {
     lastTickHeartbeatAt = now;
+    // last_tick_at and tick_age_secs both derive from lastTickTimestamp — the
+    // freshness summary's idle-substituted lastTickAt once made them
+    // contradict each other (R-061).
     void writeRelayHealth("ok", {
       heartbeat: "tick",
       last_tick_at: new Date(lastTickTimestamp).toISOString(),
-      tick_age_secs: Math.round(elapsed / 1000),
+      tick_age_secs: Math.round((now - lastTickTimestamp) / 1000),
       active_subscriptions: activeSubscriptions,
+      subscribed_symbols: subscribedSymbols,
+    });
+  }
+
+  // R-061: IB nulled every subscription (error 200/354) while symbols remain
+  // subscribed — a blackout, not idle. The ladder has nothing actionable
+  // (reconnect/resubscribe cannot restore a revoked entitlement), so honesty
+  // is the job here: latch + write a non-ok row every cycle so the freshness
+  // probe and status surface see frozen prices instead of green health.
+  // Recovery edges: markTick→onTicksRecovered when ticks resume, or the
+  // clearError writer-state edge if demand fully drains.
+  if (degraded) {
+    if (!relayHealthInError) {
+      console.warn(
+        `\x1b[33m[stale-data] IB nulled all ${subscribedSymbols} subscriptions (0 active tickets) with no ticks for ${Math.round(elapsed / 1000)}s during market hours — writing degraded health row\x1b[0m`,
+      );
+    }
+    relayHealthInError = true;
+    void writeRelayHealth("error", {
+      message: `IB nulled all market-data subscriptions (${subscribedSymbols} symbols subscribed, 0 active) with no ticks for ${Math.round(elapsed / 1000)}s during market hours`,
+      reason: "subscriptions_nulled",
+      last_tick_at: new Date(lastTickTimestamp).toISOString(),
+      tick_age_secs: Math.round((now - lastTickTimestamp) / 1000),
+      active_subscriptions: activeSubscriptions,
+      subscribed_symbols: subscribedSymbols,
     });
   }
 
