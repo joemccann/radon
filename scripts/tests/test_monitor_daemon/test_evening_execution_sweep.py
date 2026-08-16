@@ -26,6 +26,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
+from monitor_daemon.handlers.base import et_session_date  # noqa: E402
 from monitor_daemon.handlers.evening_execution_sweep import (  # noqa: E402
     EveningExecutionSweepHandler,
 )
@@ -175,7 +176,8 @@ class TestDailyFireWindow:
 
 class TestSweepImport:
     def test_imports_missing_after_hours_execution(self, captured_journal_upserts):
-        fill = _fill(exec_id="0001.EVE.01", side="BOT")
+        fill_time = _recent_after_hours_fill_time()
+        fill = _fill(exec_id="0001.EVE.01", side="BOT", when=fill_time)
         h = EveningExecutionSweepHandler()
         with patch(
             "monitor_daemon.handlers.evening_execution_sweep.IBClient",
@@ -193,8 +195,12 @@ class TestSweepImport:
         exec_id, entry = captured_journal_upserts.call_args[0][:2]
         assert exec_id == "0001.EVE.01"
         assert entry["ib_exec_id"] == "0001.EVE.01"
-        # Window-relative: the fill landed on today's ET session date.
-        assert entry["date"] == datetime.now(ET).strftime("%Y-%m-%d")
+        # The handler dates a row by the ET SESSION DATE OF THE FILL
+        # (journal_sync -> et_session_date), not by "now". Comparing against
+        # now is deterministically wrong whenever ET local time is 00:00-02:59
+        # — the fill is 3h back, so it sits on the previous ET day — and the
+        # window widens on the spring-forward Sunday.
+        assert entry["date"] == et_session_date(fill_time)
 
     def test_already_imported_exec_ids_are_skipped(self, captured_journal_upserts):
         """Idempotent: a re-run over the same evening's fills writes nothing."""
