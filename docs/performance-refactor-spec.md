@@ -78,6 +78,8 @@ RATIO_LOW_CONFIDENCE_N: int = 252         # below this, every ratio carries low_
 
 SUSPECT_RETURN_THRESHOLD: float = 0.50    # |r_t| above this => quarantine, whatever C_t is
 UNEXPLAINED_OUTLIER_MULTIPLE: float = 5.0 # ...or above this many median sessions (§B.4.1)
+UNEXPLAINED_TAIL_QUANTILE: float = 0.95   # the account's own normal extreme session
+UNEXPLAINED_TAIL_MULTIPLE: float = 3.0    # ...or this many p95 sessions, whichever is wider
 UNEXPLAINED_ABSOLUTE_FLOOR: float = 0.10  # the dispersion bar never falls below this,
                                           #   and never switches itself off
 FLOW_DOMINANT_RATIO: float = 0.25         # |C_t| / denominator above this => flag the subperiod
@@ -276,6 +278,8 @@ export const TWR_GATES = {
   RATIO_LOW_CONFIDENCE_N: 252,
   SUSPECT_RETURN_THRESHOLD: 0.5,
   UNEXPLAINED_OUTLIER_MULTIPLE: 5,
+  UNEXPLAINED_TAIL_QUANTILE: 0.95,
+  UNEXPLAINED_TAIL_MULTIPLE: 3,
   UNEXPLAINED_ABSOLUTE_FLOOR: 0.1,
   FLOW_DOMINANT_RATIO: 0.25,
   IMPLAUSIBLE_ANNUALIZED: 10,
@@ -461,12 +465,44 @@ a bar drawn from the series' own dispersion:
 magnitudes  = |r| over the returns that are not already past SUSPECT_RETURN_THRESHOLD
               (an extreme session must not raise the bar that judges it)
 typical     = median(magnitudes)
+tail        = p95(magnitudes)          # only when len >= MIN_N_DISPERSION (20)
 outlier_bar = max(typical * UNEXPLAINED_OUTLIER_MULTIPLE (5.0),
-                  UNEXPLAINED_ABSOLUTE_FLOOR (0.10))
+                  tail    * UNEXPLAINED_TAIL_MULTIPLE    (3.0),
+                  UNEXPLAINED_ABSOLUTE_FLOOR             (0.10))
 
 magnitudes empty (a young account, a dormant account, a flat series)
             -> outlier_bar = UNEXPLAINED_ABSOLUTE_FLOOR
 ```
+
+**Why the tail term exists, and what it costs.** A multiple of the median
+describes a typical session, not an impossible one, so on any account with real
+dispersion the median-only bar lands inside that account's own upper tail. On
+the operator's real 162-session book: median |r| 0.0274 put the bar at 0.1368,
+below the account's own p99 of 0.2787. Five ordinary sessions were quarantined
+and the published return read +28.76% against a true +121.09% -- a 92-point
+understatement on a book with ~1.1M of genuine trading P&L against 135k of net
+external flows. p95 is what a normal extreme looks like for THIS account.
+
+The tail term may only ever WIDEN the bar; the median term stays and the three
+are combined with `max`. Below `MIN_N_DISPERSION` a quantile is noise, so the
+tail term is not computed and the median term carries the estimate. Collapsing a
+short sample straight to the floor is STRICTER than the median-only rule and
+quarantines short, legitimately volatile series.
+
+**The documented cost.** On the real series with NO flow data, the bar moves
+from 0.1626 to 0.3238, so an unrecorded 42,995.41 deposit on 2026-01-26
+(+22.69%) is no longer caught. That is irreducible: +22.69% is 2.1x this
+account's p95 of 0.10794 and the account genuinely produces sessions that size.
+A bar low enough to catch it quarantines ordinary trading days forever. The two
+are the same magnitude and no threshold separates them.
+
+Completeness of flow data is therefore enforced UPSTREAM rather than inferred
+from return magnitude: a failed fetch is `FlowsStatus.FAILED` and a statement
+missing the Transfers section raises `FLOWS_TRANSFERS_SECTION_ABSENT`, both of
+which refuse to publish outright. The quarantine's remaining job is to catch
+what no market produces, and `SUSPECT_RETURN_THRESHOLD` (0.50) remains an
+absolute ceiling no tail estimate can license. Pinned in
+`tests/test_perf_twr_residuals.py::test_r4_the_real_series_quarantines_what_no_market_produces`.
 
 Three properties are load-bearing:
 

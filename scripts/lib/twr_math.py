@@ -330,21 +330,56 @@ def _dispersion_sample(drafts: Sequence[_DraftSubperiod]) -> List[float]:
     return [d.magnitude for d in drafts if d.ret is not None and not _is_extreme(d)]
 
 
+def _tail_magnitude(magnitudes: Sequence[float], level: float) -> float:
+    """Interpolated quantile of |r|, same convention as `historical_var`."""
+    ordered = sorted(magnitudes)
+    position = (len(ordered) - 1) * level
+    lower = math.floor(position)
+    upper = math.ceil(position)
+    return ordered[lower] + (position - lower) * (ordered[upper] - ordered[lower])
+
+
 def _outlier_threshold(magnitudes: Sequence[float]) -> float:
     """The bar an unexplained session must clear to read as a missing transfer.
 
-    Never absent, never zero, and never conditioned on the sample being large
-    enough. A young account, a dormant account and a flat series each carry too
-    little dispersion to describe themselves, and a bar that switched itself off
-    there is exactly how an unrecorded +22.7% deposit published as `ok`. The
-    absolute floor stands in for the sample that isn't there; an account with
-    real dispersion is measured against its own typical session instead.
+    Anchored to the account's own TAIL, not its median. A multiple of the median
+    describes a typical session, not an impossible one, so on any account with
+    real dispersion it lands inside that account's own upper tail and
+    permanently quarantines its biggest genuine days. Measured on the operator's
+    real 162-session book: median |r| 0.0274 put the old bar at 0.1368, below
+    the account's own p99 of 0.2787, so five ordinary sessions were excluded and
+    the published return read +28.76% against +121.09%.
+
+    p95 is what a normal extreme looks like for THIS account; a genuine missing
+    transfer is out of scale with even that. A quiet book has a small p95 and
+    keeps a tight bar, a leveraged one is measured against its own extremes, and
+    `SUSPECT_RETURN_THRESHOLD` remains an absolute ceiling that no tail can
+    license -- an unrecorded ACATS still shows up as +294% and is caught
+    whatever the distribution looks like.
+
+    The tail term only ever WIDENS the bar; the median term stays. Taking the
+    max of the two is what keeps a small sample honest: below `MIN_N_DISPERSION`
+    a p95 is noise, so the tail term is not computed at all and the median term
+    carries the estimate. Collapsing straight to the floor there would be
+    STRICTER than the old rule and would quarantine short, legitimately volatile
+    series.
+
+    Never absent and never zero. A dormant book's median and tail are both 0, and
+    a bar that switched itself off there is exactly how an unrecorded +22.7%
+    deposit published as `ok`, so the absolute floor stands in for the dispersion
+    that isn't there.
     """
     floor = twr_gates.UNEXPLAINED_ABSOLUTE_FLOOR
     if not magnitudes:
         return floor
-    typical = statistics.median(magnitudes)
-    return max(typical * twr_gates.UNEXPLAINED_OUTLIER_MULTIPLE, floor)
+    typical = statistics.median(magnitudes) * twr_gates.UNEXPLAINED_OUTLIER_MULTIPLE
+    tail = 0.0
+    if len(magnitudes) >= twr_gates.MIN_N_DISPERSION:
+        tail = (
+            _tail_magnitude(magnitudes, twr_gates.UNEXPLAINED_TAIL_QUANTILE)
+            * twr_gates.UNEXPLAINED_TAIL_MULTIPLE
+        )
+    return max(typical, tail, floor)
 
 
 def _suspect_indices(drafts: Sequence[_DraftSubperiod]) -> set[int]:
