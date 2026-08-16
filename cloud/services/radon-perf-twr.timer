@@ -1,0 +1,13 @@
+[Unit]
+Description=Radon TWR performance builder - weekday evening, after Flex settles
+
+[Timer]
+# 20:45 ET on trading days. IBKR Flex settles the session's NAV and cash
+# transactions T+1 through the evening; a mid-session run publishes a NAV that
+# is one session behind and turns the page amber for no reason.
+OnCalendar=Mon..Fri *-*-* 20:45:00 America/New_York
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

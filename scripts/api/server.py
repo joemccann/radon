@@ -3906,13 +3906,56 @@ async def blotter_sync():
 _running_build: Optional[asyncio.Task] = None
 
 
+PERFORMANCE_SCHEMA_VERSION = 2
+
+
+def _refuse_legacy_performance_payload(payload: dict) -> dict:
+    """A payload that is not schema_version 2 never reaches the page as a number.
+
+    The pre-refactor builder published an unversioned shape with no `status`,
+    which the read path defaulted to healthy — that is how a contaminated
+    +951.28% rendered with an empty warnings array. Anything that is not v2 is
+    served with its headline stripped and a loud status instead of silently.
+    """
+    if payload.get("schema_version") == PERFORMANCE_SCHEMA_VERSION:
+        return payload
+    refused = {k: v for k, v in payload.items() if k not in ("summary", "twr", "benchmark")}
+    refused.update(
+        {
+            "schema_version": payload.get("schema_version"),
+            "status": "degraded",
+            "twr": None,
+            "warnings": [
+                {
+                    "code": "LEGACY_PAYLOAD_REFUSED",
+                    "severity": "error",
+                    "message": (
+                        "The performance builder returned a pre-v2 payload; its "
+                        "return figures are suppressed because they carry no "
+                        "integrity status."
+                    ),
+                    "context": {"schema_version": payload.get("schema_version")},
+                }
+            ],
+        }
+    )
+    return refused
+
+
 async def _do_performance_rebuild() -> dict:
-    """Run portfolio_performance.py and cache result."""
-    result = await run_script("portfolio_performance.py", ["--json"], timeout=180)
+    """Run the TWR builder (scripts/perf_twr_builder.py) and cache the result.
+
+    One writer owns performance_snapshots. The builder persists to Turso itself
+    and prints the v2 payload on stdout.
+    """
+    result = await run_script("perf_twr_builder.py", ["--json"], timeout=180)
     if not result.ok:
         raise HTTPException(status_code=502, detail=result.error)
-    _write_cache(DATA_DIR / "performance.json", result.data)
-    return result.data
+    if not isinstance(result.data, dict):
+        raise HTTPException(status_code=502, detail="performance builder returned no payload")
+    payload = _refuse_legacy_performance_payload(result.data)
+    _write_cache(DATA_DIR / "performance.json", payload)
+    return payload
 
 
 @app.post("/performance")

@@ -1,0 +1,21 @@
+[Unit]
+Description=Radon TWR performance builder (Flex EquitySummaryInBase + external flows)
+After=network.target
+
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+User=radon
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/home/radon/radon-cloud/.env
+Environment=RADON_DB_NO_REPLICA=1
+ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/perf_twr_builder.py
+StandardOutput=journal
+StandardError=journal
+# Flex SendRequest/GetStatement polls up to 30 x 3s per query id.
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target
