@@ -275,7 +275,10 @@ describe("/api/performance route", () => {
     );
   });
 
-  it("GET cold start: returns 502 when rebuild fails and no cache", async () => {
+  it("GET cold start: returns 200 with status unavailable when rebuild fails and no cache", async () => {
+    // §C.6: missing data is a status, never a 4xx or 5xx. The UI branches on
+    // `status` rather than guessing at an error envelope. The upstream error
+    // text must still never reach the client.
     mockStat.mockRejectedValue(new Error("ENOENT"));
     mockReadFile.mockRejectedValue(new Error("ENOENT"));
     mockRadonFetch.mockRejectedValue(new Error("FastAPI down"));
@@ -284,8 +287,9 @@ describe("/api/performance route", () => {
     const res = await GET();
     const body = await res.json();
 
-    expect(res.status).toBe(502);
-    expect(body.error).toBe("Performance metrics temporarily unavailable");
+    expect(res.status).toBe(200);
+    expect(body.status).toBe("unavailable");
+    expect(body.warnings.map((w: { code: string }) => w.code)).toContain("NAV_UNAVAILABLE");
     expect(JSON.stringify(body)).not.toContain("FastAPI down");
   });
 

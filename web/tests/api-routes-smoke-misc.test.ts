@@ -203,16 +203,18 @@ describe("GET /api/performance", () => {
     expect(res.status).toBe(200);
   });
 
-  it("returns 502 when cold start (no cache) and FastAPI fails", async () => {
+  it("returns 200 with status unavailable when cold start (no cache) and FastAPI fails", async () => {
+    // §C.6: GET never emits a 4xx/5xx for missing data — it emits a status.
     mockGetDb.mockReturnValue(dbStub([]));
     mockReadFile.mockRejectedValue(new Error("ENOENT"));
     mockStat.mockRejectedValue(new Error("ENOENT"));
     mockRadonFetch.mockRejectedValue(new Error("upstream down"));
     const { GET } = await import("../app/api/performance/route");
     const res = await GET();
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(200);
     const body = (await jsonOf(res)) as Record<string, unknown>;
-    expect(body.error).toBeDefined();
+    expect(body.status).toBe("unavailable");
+    expect(JSON.stringify(body)).not.toContain("upstream down");
   });
 });
 
