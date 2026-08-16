@@ -459,6 +459,22 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
     expect(requiresIb("cor")).toBe(false);
   });
 
+  // ``vixcor`` — radon-vixcor.timer fires daily 02:35 UTC every calendar day,
+  // fifteen minutes behind radon-cor so the COR3M row for the session exists
+  // (weekend runs are 304 heartbeats), so a uniform 26h window matches its
+  // cor parent. Cboe CDN plus Turso cor_history only — no IB.
+  it("vixcor is registered as scheduled with a uniform 26h window", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["vixcor"]).toBeDefined();
+    expect(getServiceCategory("vixcor")).toBe("scheduled");
+    for (const state of ["open", "extended", "closed"] as MarketState[]) {
+      expect(getFreshnessWindowMs("vixcor", state)).toBe(26 * HOUR);
+      expect(getFreshnessWindowMs("vixcor", state)).toBe(
+        getFreshnessWindowMs("cor", state),
+      );
+    }
+    expect(requiresIb("vixcor")).toBe(false);
+  });
+
   // ``skew`` publishes one-minute RTH snapshots and retains a daily
   // finalization heartbeat off-hours. UW-only, no IB.
   it("skew uses a tight open window and a daily off-hours window", () => {
