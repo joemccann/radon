@@ -2,9 +2,14 @@
  * Startup Protocol Tests (TDD)
  * 
  * Tests that all startup processes are visible to the user.
- * Run with: npx tsx .pi/tests/startup-protocol.test.ts
+ *
+ * Collected by the root vitest gate (`vitest.config.ts` include list). It used
+ * to run only when someone typed `npx tsx .pi/tests/startup-protocol.test.ts`
+ * by hand, so the workspace-trust and bounded-startup-job boundaries below were
+ * revertable line by line with CI still green (T-058).
  */
 
+import { test } from "vitest";
 import * as assert from "node:assert";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, realpathSync, writeFileSync, symlinkSync } from "node:fs";
@@ -37,13 +42,6 @@ class MockUI {
   }
 }
 
-// Test runner
-function test(name: string, fn: () => void | Promise<void>) {
-  tests.push({ name, fn });
-}
-
-const tests: Array<{ name: string; fn: () => void | Promise<void> }> = [];
-
 test("market state honors holidays and early closes", () => {
   assert.deepStrictEqual(
     marketStateAt(new Date("2026-12-25T16:00:00Z")),
@@ -60,15 +58,20 @@ test("market state honors holidays and early closes", () => {
 });
 
 test("startup jobs use timeout, bounded output, spawn-error, and process-group termination", () => {
-  const source = execFileSync("git", ["show", "HEAD:.pi/extensions/startup-protocol.ts"], {
-    cwd: join(import.meta.dirname, "../.."),
-    encoding: "utf8",
-  });
   const current = readFileSync(
     join(import.meta.dirname, "../extensions/startup-protocol.ts"),
     "utf8",
   );
-  assert.ok(!source.includes("runBoundedStartupJob"));
+  // T-058 correction: this asserted `git show HEAD:...` did NOT yet contain
+  // `runBoundedStartupJob` — a snapshot of the pre-fix tree that could only
+  // hold while the change was unstaged. Once merged it pins the security fix
+  // as ABSENT, so it was false the moment it landed and only stayed quiet
+  // because no gate collected this file. The invariant it meant to state is
+  // about the CURRENT source: every startup job goes through the bounded
+  // runner, and no unbounded `spawn`/`exec` call bypasses it.
+  assert.ok(current.includes("export function runBoundedStartupJob"));
+  assert.strictEqual((current.match(/\bspawn\(/g) ?? []).length, 1);
+  assert.ok(current.includes("STARTUP_JOB_TIMEOUT_MS"));
   assert.ok(current.includes("STARTUP_JOB_OUTPUT_BYTES"));
   assert.ok(current.includes('proc.once("error"'));
   assert.ok(current.includes('process.kill(-proc.pid, "SIGTERM")'));
@@ -449,32 +452,3 @@ test("trusted startup scripts must match the pinned Git revision and stay beneat
 // ============================================================
 // RUN ALL TESTS
 // ============================================================
-
-async function runTests() {
-  console.log("\n🧪 Running Startup Protocol Tests\n");
-  console.log("=".repeat(50));
-  
-  let passed = 0;
-  let failed = 0;
-  
-  for (const { name, fn } of tests) {
-    try {
-      await fn();
-      console.log(`✅ ${name}`);
-      passed++;
-    } catch (error: any) {
-      console.log(`❌ ${name}`);
-      console.log(`   ${error.message}`);
-      failed++;
-    }
-  }
-  
-  console.log("=".repeat(50));
-  console.log(`\nResults: ${passed} passed, ${failed} failed\n`);
-  
-  if (failed > 0) {
-    process.exit(1);
-  }
-}
-
-runTests();

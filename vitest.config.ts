@@ -18,6 +18,10 @@ export default defineConfig({
       "scripts/lib/**/*.test.js",
       "web/tests/**/*.test.ts",
       "web/tests/**/*.test.tsx",
+      // T-058: the PI extension security tests (browser command boundary,
+      // workspace trust, bounded startup jobs). A dot-directory needs an
+      // explicit leading-dot segment — a `**` glob will not descend into it.
+      ".pi/tests/**/*.test.ts",
     ],
     environment: "node",
     // Pin NODE_ENV=test for every run. Vitest defaults to "test", but an ambient
