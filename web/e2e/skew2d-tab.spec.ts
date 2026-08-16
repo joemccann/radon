@@ -86,7 +86,7 @@ test.describe("/regime/skew2d — 2d change in SPX 1M put/call skew tab", () => 
     await setupMocks(page);
     await page.goto("/regime/skew2d");
 
-    await expect(page.locator(".ticker-tab", { hasText: "SKEW 2D" })).toHaveClass(/active/);
+    await expect(page.locator('.regime-rail__item[data-tab="skew2d"]')).toHaveClass(/active/);
 
     const change = page.locator('[data-testid="skew2d-change-value"]');
     await change.waitFor({ timeout: 10_000 });

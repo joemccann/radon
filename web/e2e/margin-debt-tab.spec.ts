@@ -85,7 +85,7 @@ test.describe("/regime/margin — Margin Debt Acceleration tab", () => {
     await setupMocks(page);
     await page.goto("/regime/margin");
 
-    await expect(page.locator(".ticker-tab", { hasText: "MARGIN" })).toHaveClass(/active/);
+    await expect(page.locator('.regime-rail__item[data-tab="margin"]')).toHaveClass(/active/);
 
     const yoy = page.locator('[data-testid="margin-debt-yoy-value"]');
     await yoy.waitFor({ timeout: 10_000 });
