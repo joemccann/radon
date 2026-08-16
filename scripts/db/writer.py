@@ -561,6 +561,80 @@ def upsert_cash_flow(
     db.commit()
 
 
+# 8 params/row keeps 400 rows at 3,200 bound params, well under SQLite's
+# variable limit.
+_CASH_FLOW_INSERT_CHUNK_ROWS = 400
+
+CASH_FLOW_UPSERT_COLUMNS = (
+    "id", "date", "type", "amount", "currency", "description", "raw_type", "synced_at",
+)
+
+
+def upsert_cash_flow_rows(rows: list[dict[str, Any]]) -> int:
+    """Batched upsert of parsed CashTransaction rows.
+
+    Each row: the dict emitted by ``cash_flow_sync.parse_cash_transactions``
+    (id / date / type / amount / currency / description / raw_type).
+
+    Chunked multi-row INSERTs, never one statement per row: 264 sequential
+    single-row upserts is 264 Hrana round trips on one stream, which is the
+    shape that 502s and then keeps 502ing (scripts/CLAUDE.md, Turso I/O
+    bounding). Precedent: ``upsert_price_history_rows``.
+
+    Returns the number of rows discarded because a LATER row in the same
+    input carried the same ``id``. SQLite refuses to UPSERT one conflict
+    target twice inside a single INSERT, so the dedupe is required; the
+    surviving row is the last one, which is byte-identical to what the
+    old per-row loop produced. IBKR really does issue one transactionID
+    per posting batch with one row per sub-category, so a non-zero return
+    means real data was overwritten — the caller is expected to surface it.
+    """
+    if not rows:
+        return 0
+
+    deduped: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        deduped[str(row["id"])] = row
+    dropped = len(rows) - len(deduped)
+
+    synced_at = _now_iso()
+    ordered = list(deduped.values())
+    db = get_db()
+    placeholder = "(" + ", ".join("?" * len(CASH_FLOW_UPSERT_COLUMNS)) + ")"
+    for start in range(0, len(ordered), _CASH_FLOW_INSERT_CHUNK_ROWS):
+        chunk = ordered[start:start + _CASH_FLOW_INSERT_CHUNK_ROWS]
+        params: list[Any] = []
+        for row in chunk:
+            params.extend((
+                str(row["id"]),
+                row["date"],
+                row["type"],
+                float(row["amount"]),
+                row.get("currency") or "USD",
+                row.get("description"),
+                row.get("raw_type"),
+                synced_at,
+            ))
+        db.execute(
+            "INSERT INTO cash_flows "
+            f"({', '.join(CASH_FLOW_UPSERT_COLUMNS)}) VALUES "
+            + ", ".join(placeholder for _ in chunk)
+            + """
+            ON CONFLICT(id) DO UPDATE SET
+              date        = excluded.date,
+              type        = excluded.type,
+              amount      = excluded.amount,
+              currency    = excluded.currency,
+              description = excluded.description,
+              raw_type    = excluded.raw_type,
+              synced_at   = excluded.synced_at
+            """,
+            tuple(params),
+        )
+    db.commit()
+    return dropped
+
+
 def _journal_payload_with_compact_expiry(payload: dict[str, Any]) -> dict[str, Any]:
     """Journal option rows must persist compact ``YYYYMMDD`` expiry.
 

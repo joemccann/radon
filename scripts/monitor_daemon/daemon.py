@@ -298,12 +298,7 @@ class MonitorDaemon:
                 retained = True
                 error = f"handler {handler.name} timed out after {deadline:.0f}s"
                 logger.error(error)
-                try:
-                    handler.record_cycle_health(
-                        "error", error={"timeout_seconds": deadline}
-                    )
-                except Exception as exc:  # noqa: BLE001 — heartbeat is best-effort here
-                    logger.warning(f"timeout heartbeat failed for {handler.name}: {exc}")
+                self._record_deadline_kill(handler, error, deadline)
                 return {"status": "error", "error": error, "handler": handler.name}
             except Exception as exc:  # noqa: BLE001 — one handler must never kill the daemon
                 error = f"handler {handler.name} raised outside its own error handling: {exc}"
@@ -316,7 +311,32 @@ class MonitorDaemon:
         finally:
             if not retained:
                 executor.shutdown(wait=False, cancel_futures=True)
-    
+
+    @staticmethod
+    def _record_deadline_kill(handler: BaseHandler, error: str, deadline: float) -> None:
+        """Let the handler record its own deadline kill when it can.
+
+        A handler that owns retry bookkeeping (embargoes, per-day request
+        budgets) must see the kill: the generic row below carries no
+        ``next_attempt_at``, which is exactly what made an active embargo
+        invisible to the incident watchdog and produced the 2026-08-04
+        page storm — and it also skips the handler's attempt counter, so
+        the next cycle re-probes a resource this cycle already spent.
+        """
+        recorder = getattr(handler, "record_deadline_failure", None)
+        if callable(recorder):
+            try:
+                recorder(error)
+                return
+            except Exception as exc:  # noqa: BLE001 — fall back, never raise
+                logger.warning(
+                    f"deadline recorder failed for {handler.name}: {exc}"
+                )
+        try:
+            handler.record_cycle_health("error", error={"timeout_seconds": deadline})
+        except Exception as exc:  # noqa: BLE001 — heartbeat is best-effort here
+            logger.warning(f"timeout heartbeat failed for {handler.name}: {exc}")
+
     def run_loop(self) -> None:
         """
         Run continuously until stopped.
@@ -432,6 +452,7 @@ class MonitorDaemon:
 
         except Exception as e:
             logger.warning(f"Failed to load state: {e}")
+            self._seed_handlers_after_corrupt_state()
             try:
                 backup = self.state_file.with_name(
                     self.state_file.name
@@ -441,6 +462,22 @@ class MonitorDaemon:
                 logger.warning(f"Corrupt state preserved at {backup.name}")
             except Exception as backup_exc:  # noqa: BLE001
                 logger.warning(f"Could not back up corrupt state: {backup_exc}")
+
+    def _seed_handlers_after_corrupt_state(self) -> None:
+        """Let handlers rebuild critical state from a durable source.
+
+        Starting blank after a corrupt state file silently forgets
+        embargoes and dedupe baselines. A handler that can reconstruct
+        something more conservative than "blank" gets the chance to.
+        """
+        for handler in self.handlers:
+            seed = getattr(handler, "seed_state_after_corrupt_load", None)
+            if not callable(seed):
+                continue
+            try:
+                seed()
+            except Exception as exc:  # noqa: BLE001 — never block startup
+                logger.warning(f"state seed failed for {handler.name}: {exc}")
 
     def install_signal_handlers(self) -> None:
         """SIGTERM (every deploy) must reach save_state — only

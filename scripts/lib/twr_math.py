@@ -12,7 +12,15 @@ Sign conventions, normative throughout:
 * MWR cashflows use the INVESTOR's sign — money the investor commits is
   negative. That flip happens in exactly one place, ``build_cashflow_vector``.
 
-Flow-timing convention is END OF DAY: ``r_t = (E_t - C_t - B_t) / B_t``.
+Flow-timing convention is BEGINNING OF DAY: ``r_t = (E_t - C_t - B_t) / (B_t + C_t)``.
+The denominator is the capital actually at work, which is what IBKR
+PortfolioAnalyst reports against.
+
+Detection is measured on a DIFFERENT base. ``_DraftSubperiod.magnitude`` is
+``|E - C - B| / B``, over the pre-flow base, because a detector must not divide
+by a number the suspect flow is part of -- an under-recorded inflow would
+otherwise shrink its own apparent anomaly. Report on the capital at work, detect
+on the capital we knew about before the flow arrived.
 """
 
 from __future__ import annotations
@@ -266,12 +274,40 @@ def chain_returns(returns: Sequence[float]) -> float:
 
 
 def subperiod_return(begin_nav: float, end_nav: float, flow: float) -> Optional[float]:
-    """EOD sub-period return, or None when the denominator is unusable."""
+    """BOD sub-period return, or None when the denominator is unusable.
+
+    The flow is assumed present for the whole session, so the denominator is the
+    capital actually at work: ``B + C``, not ``B``.
+
+    This matches IBKR PortfolioAnalyst, which is the reference the operator
+    checks against, and it is the more accurate assumption for an in-kind
+    transfer. End-of-day timing pretends the arriving assets earned nothing that
+    session and credits the entire day's P&L to the pre-existing base. On the
+    real 2026-02-06 ACATS (B 246,713.50, E 972,215.53, C 655,497.16) that is the
+    difference between a reported +28.38% day and the true +7.76% on the
+    902,210.66 that was actually deployed. Chained over 2026 YTD it was +121.09%
+    against IBKR's +90.81%.
+
+    Confirmed against IBKR's own dashboard: it reports 2026-02-05 as -19.17%,
+    which is the BOD figure (-0.1916630); EOD gives -0.2087076.
+
+    ``begin_nav <= 0`` is refused because a period cannot start with no capital.
+
+    A full withdrawal drives ``B + C`` to zero. That is not automatically an
+    error: if the residual is also zero the account simply emptied and earned
+    nothing, which chains harmlessly at 0.0 and must not break the series. Only
+    a zero denominator carrying a NON-zero residual is undefined -- P&L with no
+    capital to have produced it.
+    """
     if not (_is_finite(begin_nav) and _is_finite(end_nav) and _is_finite(flow)):
         return None
     if begin_nav <= 0:
         return None
-    return (float(end_nav) - float(flow) - float(begin_nav)) / float(begin_nav)
+    residual = float(end_nav) - float(flow) - float(begin_nav)
+    denominator = float(begin_nav) + float(flow)
+    if denominator <= 0:
+        return 0.0 if residual == 0.0 else None
+    return residual / denominator
 
 
 @dataclass(frozen=True)
@@ -286,7 +322,30 @@ class _DraftSubperiod:
 
     @property
     def magnitude(self) -> float:
-        return 0.0 if self.ret is None else abs(self.ret)
+        """|unexplained residual| over the PRE-flow base. The detection quantity.
+
+        Deliberately NOT ``abs(self.ret)``. The reported return divides by
+        ``B + C`` (BOD, matching IBKR), but a detector must not divide by a
+        number the suspect flow is part of: the larger ``C`` is, the larger the
+        denominator, and the smaller an under-recorded inflow makes itself look.
+        A recorded flow would be partially excusing itself.
+
+        The real case: B 100,000 -> E 200,000 with only 40,000 of a transfer on
+        file. Against ``B + C`` that is 60,000/140,000 = 43% and slips under the
+        0.50 ceiling; against ``B`` it is 60,000/100,000 = 60% and is caught. The
+        account doubled on 40k of recorded money and the second reading is the
+        honest one.
+
+        So: report on the capital that was at work, detect on the capital we
+        knew about before the flow arrived.
+        """
+        if self.ret is None:
+            return 0.0
+        base = float(self.previous.nav)
+        if base <= 0:
+            return abs(self.ret)
+        residual = float(self.current.nav) - self.flow - base
+        return abs(residual / base)
 
 
 def _draft_subperiod(
@@ -488,7 +547,10 @@ def build_subperiods(
                 begin_nav=draft.previous.nav,
                 end_nav=draft.current.nav,
                 flow=draft.flow,
-                denominator=draft.previous.nav,
+                # The number `r` was actually divided by, so a consumer can
+            # reproduce it. Under BOD that is B + C, not B; publishing B here
+            # shipped a denominator that did not reconcile with the return.
+            denominator=draft.previous.nav + draft.flow,
                 ret=ret,
                 cum_ret=(growth - 1.0) if ret is not None else None,
                 gap_days=draft.gap_days,

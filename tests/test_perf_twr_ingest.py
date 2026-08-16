@@ -259,9 +259,15 @@ def test_flows_d5_a_multi_account_statement_sums_nav_as_well_as_flows(
         pytest.approx(120_000.0, rel=REL),
         pytest.approx(121_100.0, rel=REL),
     ]
-    # (121100 - 57000 - 120000) / 120000 = -55900 / 120000 = -0.4658333333333333
+    # residual    = 121100 - 57000 - 120000 = -55900
+    # denominator = 120000 + 57000          = 177000
+    #   -55900 / 177000 = -0.315819209039548
     assert subperiod_on(payload, "2026-01-06")["r"] == pytest.approx(
-        -0.4658333333333333, rel=REL
+        -0.315819209039548, rel=REL
+    )
+    # Superseded EOD figure: -55900 / 120000 = -0.4658333333333333
+    assert subperiod_on(payload, "2026-01-06")["r"] != pytest.approx(
+        -0.4658333333333333, rel=1e-6
     )
     assert payload["twr"]["cum_return"] >= -1.0
     assert payload["twr"]["cum_return"] != pytest.approx(-2.845, rel=1e-3)
@@ -335,6 +341,16 @@ def test_tests_d1_a_flow_dominant_subperiod_emits_the_flow_dominant_warning():
 def test_tests_d2_an_extreme_session_never_publishes_silently(
     flow, expect_flow_dominant
 ):
+    # KNOWN RED under the BOD convention, deliberately left failing rather than
+    # re-pinned: the DOUBLING_MATERIAL_FLOW case is the whole point of DECISION 1
+    # and BOD lets it escape. residual = 200000 - 40000 - 100000 = 60000 and
+    # denominator = 100000 + 40000 = 140000, so r = 0.42857142857142855, which is
+    # under SUSPECT_RETURN_THRESHOLD (0.50) where the EOD 0.60 was over it. The
+    # sample is one return, so the dispersion bar is 5 * 0.42857 = 2.14 and does
+    # not catch it either. A partially recorded transfer now publishes as `ok`
+    # with an info-severity FLOW_DOMINANT and nothing else. Changing this
+    # expectation to "not suspect" would invert the assertion's purpose; the fix
+    # belongs in the gate, not in the pin.
     payload = build_payload(
         observations(fx.DOUBLING_NAV), ok_flows({"2026-01-06": flow})
     )

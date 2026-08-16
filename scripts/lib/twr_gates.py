@@ -31,5 +31,5 @@ IMPLAUSIBLE_ALPHA: float = 1.0            # |alpha_annualized| > 100%/yr => degr
 MAX_SUBPERIOD_GAP_DAYS: int = 4           # Fri->Mon is 3; >4 is a missing session
 NAV_STALENESS_BUDGET_SESSIONS: int = 2    # Flex settles T+1; 2 sessions of slack
 
-FLOW_CONVENTION = "eod"
+FLOW_CONVENTION = "bod"   # denominator is B + C: the capital actually at work (matches IBKR)
 SORTINO_TARGET = 0.0

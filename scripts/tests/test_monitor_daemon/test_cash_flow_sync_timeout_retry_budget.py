@@ -59,7 +59,12 @@ ET = ZoneInfo("America/New_York")
 MAX_FLEX_ATTEMPTS_PER_ET_DAY = 3
 
 DAEMON_LOOP_SECONDS = 30
-SUBPROCESS_TIMEOUT_SECONDS = 180
+
+
+def _subprocess_timeout_seconds() -> float:
+    from monitor_daemon.handlers.cash_flow_sync import subprocess_timeout_seconds
+
+    return subprocess_timeout_seconds()
 
 
 def _recent_past_trading_day_17et() -> datetime:
@@ -91,7 +96,9 @@ class _TimeoutCountingInner:
 
     def __call__(self):
         self.attempts += 1
-        raise RuntimeError("cash_flow_sync timed out after 180s")
+        raise RuntimeError(
+            f"cash_flow_sync timed out after {_subprocess_timeout_seconds():.0f}s"
+        )
 
 
 def _drive_daemon_evening(handler, inner, start_utc: datetime) -> int:
@@ -114,7 +121,7 @@ def _drive_daemon_evening(handler, inner, start_utc: datetime) -> int:
         ):
             if handler.is_due():
                 handler.run()
-                now += timedelta(seconds=SUBPROCESS_TIMEOUT_SECONDS)
+                now += timedelta(seconds=_subprocess_timeout_seconds())
                 continue
         now += timedelta(seconds=DAEMON_LOOP_SECONDS)
     return inner.attempts
@@ -140,6 +147,65 @@ class TestTimeoutRetryBudget:
             "every ~5 min until midnight ET — each retry burns the "
             "sliding-window budget the module docstring says to protect."
         )
+
+
+class TestPollBudgetOrdering:
+    """C1 — one number, one owner.
+
+    Production numbers before this test: the script polls on a capped
+    exponential ladder with a ~569s wall budget, the handler kills the
+    subprocess at 180s, and the daemon's own deadline (REL-008, landed
+    2026-08-09) preempts BOTH at 120s. Only 14 of the script's 40 polls
+    ever ran; its own "statement not ready after N polls" error has never
+    fired in production. Fourteen of the 16 recorded `cash_flow_sync`
+    failure transitions between 2026-06-16 and 2026-08-07 are
+    `timed out after 180s` — the dominant failure mode is us killing our
+    own process mid-poll, then spending up to two more SendRequests that
+    evening on the soft-retry lane.
+
+    The three deadlines must nest, outermost first. Moving one without
+    the others just relabels which layer does the killing.
+    """
+
+    def test_script_budget_is_inside_the_subprocess_timeout(self):
+        import cash_flow_sync
+
+        assert cash_flow_sync.FLEX_POLL_BUDGET_SECONDS < _subprocess_timeout_seconds()
+
+    def test_subprocess_timeout_is_inside_the_handler_deadline(self):
+        from monitor_daemon.handlers.cash_flow_sync import CashFlowSyncHandler
+
+        assert _subprocess_timeout_seconds() < CashFlowSyncHandler.max_runtime_seconds
+
+    def test_handler_deadline_overrides_the_daemon_default(self):
+        from monitor_daemon.daemon import DEFAULT_HANDLER_DEADLINE_SECONDS
+        from monitor_daemon.handlers.cash_flow_sync import CashFlowSyncHandler
+
+        assert (
+            CashFlowSyncHandler.max_runtime_seconds > DEFAULT_HANDLER_DEADLINE_SECONDS
+        ), (
+            "without an explicit override the 120s daemon deadline kills the "
+            "subprocess first, bypassing _record_failure entirely"
+        )
+
+    def test_the_subprocess_actually_uses_the_reconciled_timeout(self):
+        """The number must reach `subprocess.run`, not just a constant."""
+        from unittest.mock import patch as _patch
+        from types import SimpleNamespace
+
+        from monitor_daemon.handlers import cash_flow_sync as handler_mod
+
+        handler = handler_mod.CashFlowSyncHandler()
+        with _patch.dict(
+            "os.environ",
+            {"IB_FLEX_TOKEN": "t", "IB_FLEX_NAV_QUERY_ID": "1442520"},
+        ), _patch.object(
+            handler_mod.subprocess, "run",
+            return_value=SimpleNamespace(returncode=0, stdout='{"status":"ok"}', stderr=""),
+        ) as run_mock:
+            handler._execute_inner()
+
+        assert run_mock.call_args.kwargs["timeout"] == _subprocess_timeout_seconds()
 
 
 class TestIncidentTimelineIsBestCase:
