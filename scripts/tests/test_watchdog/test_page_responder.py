@@ -267,7 +267,9 @@ class TestResponder:
         assert "widened vcg freshness" in summary
 
     def test_successful_run_marks_done(self, db_conn, tmp_path, monkeypatch):
-        monkeypatch.delenv("GROK_PAGE_RESPONDER", raising=False)
+        # REL-030: the responder now fails CLOSED, so an enabled cycle is an
+        # explicit opt-in rather than the absence of a switch.
+        monkeypatch.setenv("GROK_PAGE_RESPONDER", "1")
         enqueue_delivered_page(
             service="vcg-scan",
             severity="P1",
@@ -296,7 +298,9 @@ class TestResponder:
         followup.assert_called_once()
 
     def test_failed_run_releases_then_skips(self, db_conn, tmp_path, monkeypatch):
-        monkeypatch.delenv("GROK_PAGE_RESPONDER", raising=False)
+        # REL-030: the responder now fails CLOSED, so an enabled cycle is an
+        # explicit opt-in rather than the absence of a switch.
+        monkeypatch.setenv("GROK_PAGE_RESPONDER", "1")
         pid = enqueue_delivered_page(
             service="vcg-scan",
             severity="P1",
@@ -340,7 +344,9 @@ class TestResponder:
             assert run.call_count == 3
 
     def test_lock_skips_overlapping_cycle(self, db_conn, tmp_path, monkeypatch):
-        monkeypatch.delenv("GROK_PAGE_RESPONDER", raising=False)
+        # REL-030: the responder now fails CLOSED, so an enabled cycle is an
+        # explicit opt-in rather than the absence of a switch.
+        monkeypatch.setenv("GROK_PAGE_RESPONDER", "1")
         enqueue_delivered_page(
             service="vcg-scan",
             severity="P1",
@@ -370,7 +376,9 @@ class TestResponderHeartbeat:
     """
 
     def test_completed_cycle_heartbeats_ok(self, db_conn, tmp_path, monkeypatch):
-        monkeypatch.delenv("GROK_PAGE_RESPONDER", raising=False)
+        # REL-030: the responder now fails CLOSED, so an enabled cycle is an
+        # explicit opt-in rather than the absence of a switch.
+        monkeypatch.setenv("GROK_PAGE_RESPONDER", "1")
         beats = []
         monkeypatch.setattr(
             "grok_page_responder.record_cycle_health",
@@ -382,7 +390,9 @@ class TestResponderHeartbeat:
 
     def test_skipped_cycle_does_not_heartbeat(self, db_conn, tmp_path, monkeypatch):
         """Otherwise a wedged poller keeps its own row fresh forever."""
-        monkeypatch.delenv("GROK_PAGE_RESPONDER", raising=False)
+        # REL-030: the responder now fails CLOSED, so an enabled cycle is an
+        # explicit opt-in rather than the absence of a switch.
+        monkeypatch.setenv("GROK_PAGE_RESPONDER", "1")
         lock = tmp_path / "data" / "cache" / "grok_pages" / ".responder.lock"
         lock.parent.mkdir(parents=True, exist_ok=True)
         lock.write_text(str(os.getpid()))
@@ -409,7 +419,9 @@ class TestResponderHeartbeat:
     def test_heartbeat_failure_never_breaks_the_cycle(
         self, db_conn, tmp_path, monkeypatch
     ):
-        monkeypatch.delenv("GROK_PAGE_RESPONDER", raising=False)
+        # REL-030: the responder now fails CLOSED, so an enabled cycle is an
+        # explicit opt-in rather than the absence of a switch.
+        monkeypatch.setenv("GROK_PAGE_RESPONDER", "1")
         monkeypatch.setattr(
             "grok_page_responder.record_cycle_health",
             lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("turso down")),
@@ -418,7 +430,9 @@ class TestResponderHeartbeat:
 
     def test_broken_cycle_does_not_heartbeat_ok(self, db_conn, tmp_path, monkeypatch):
         """A dead Turso must let the row go stale, not paint over itself."""
-        monkeypatch.delenv("GROK_PAGE_RESPONDER", raising=False)
+        # REL-030: the responder now fails CLOSED, so an enabled cycle is an
+        # explicit opt-in rather than the absence of a switch.
+        monkeypatch.setenv("GROK_PAGE_RESPONDER", "1")
         beats = []
         monkeypatch.setattr(
             "grok_page_responder.record_cycle_health",

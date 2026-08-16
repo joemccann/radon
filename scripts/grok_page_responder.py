@@ -69,16 +69,33 @@ HEALTH_SERVICE = "grok-page-responder"
 GrokRunner = Callable[..., object]
 
 
+# Every autonomy switch defaults CLOSED. A missing or renamed
+# EnvironmentFile is indistinguishable here from a deliberate stand-down, and
+# an agent that runs `grok --always-approve` and can `git push origin main`
+# into the production auto-deploy must read that ambiguity as "stop".
 def responder_enabled() -> bool:
-    return _flag("GROK_PAGE_RESPONDER", True)
+    return _flag("GROK_PAGE_RESPONDER", False)
 
 
 def autoship_enabled() -> bool:
-    return _flag("GROK_PAGE_AUTOSHIP", True)
+    return _flag("GROK_PAGE_AUTOSHIP", False)
 
 
 def autopush_enabled() -> bool:
-    return _flag("GROK_PAGE_AUTOPUSH", True)
+    return _flag("GROK_PAGE_AUTOPUSH", False)
+
+
+def max_actions_per_day() -> int:
+    """Global ceiling on grok invocations per UTC day.
+
+    The per-ticket bounds (3 attempts, one ticket per service/severity/kind/
+    hour) do not bound a WEEKEND of hourly P1s — that is ~24 independent
+    autoship-and-push runs, each of which can deploy.
+    """
+    try:
+        return max(0, int(os.environ.get("GROK_PAGE_MAX_ACTIONS_PER_DAY", "6")))
+    except (TypeError, ValueError):
+        return 6
 
 
 def grok_bin() -> str:
@@ -163,9 +180,19 @@ def build_grok_command(prompt_path: Path, repo_root: Path) -> list[str]:
     ]
 
 
+def _utc_day_start(now: datetime) -> datetime:
+    return now.astimezone(timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+
+
 def build_prompt(page: dict, *, autoship: bool, autopush: bool) -> str:
     service = page.get("service") or "unknown-service"
+    # Defence in depth: the watchdog sanitizes at enqueue time, but this
+    # process must not assume the row it read was written by that writer.
     excerpt = page.get("message_excerpt") or ""
+    if not excerpt.startswith(pages_mod.EXCERPT_OPEN):
+        excerpt = pages_mod.sanitize_excerpt(excerpt)
     ship_line = (
         "AUTOSHIP is on: if disposition is code_fix, write the failing "
         "regression test first, make it pass, run the focused suite, then "
@@ -331,6 +358,18 @@ def run_cycle(
         actionable = pages_mod.list_actionable_pages(now=now)
         if not actionable:
             print(json.dumps({"at": now.isoformat(), "pending": 0}))
+            return 0
+
+        actioned_today = pages_mod.actions_since(since=_utc_day_start(now))
+        cap = max_actions_per_day()
+        if actioned_today >= cap:
+            print(json.dumps({
+                "at": now.isoformat(),
+                "skipped": "daily_action_cap",
+                "actioned_today": actioned_today,
+                "cap": cap,
+            }))
+            _heartbeat("paused", now)
             return 0
 
         page = actionable[0]
