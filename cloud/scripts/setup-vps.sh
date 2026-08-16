@@ -104,6 +104,8 @@ readonly SERVICE_FILES=(
   radon-straddle.timer
   radon-cor.service
   radon-cor.timer
+  radon-vixcor.service
+  radon-vixcor.timer
   radon-skew.service
   radon-skew.timer
   radon-skew2d.service
@@ -112,6 +114,8 @@ readonly SERVICE_FILES=(
   radon-signals-refresh.timer
   radon-vol-cone.service
   radon-vol-cone.timer
+  radon-perf-twr.service
+  radon-perf-twr.timer
   radon-equibles-ats.service
   radon-equibles-ats.timer
   radon-equibles-short-crowding.service

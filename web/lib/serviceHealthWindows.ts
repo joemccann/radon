@@ -168,6 +168,12 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // Cboe CDN CSVs only — no IB.
   "cor": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
+  // ``vixcor`` — radon-vixcor.timer fires daily 02:35 UTC every calendar day,
+  // 15 minutes behind radon-cor (weekend and holiday runs are 304 heartbeats),
+  // so a uniform 26h window matches its cor / straddle siblings. Cboe CDN plus
+  // Turso cor_history only — no IB.
+  "vixcor": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+
   // ``skew`` publishes every minute during RTH and finalizes daily at 21:45
   // UTC. Five minutes tolerates transient UW failures while surfacing a dead
   // live writer; the daily heartbeat preserves the off-hours window.

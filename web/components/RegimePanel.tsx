@@ -14,6 +14,7 @@ import BpiPanel from "./BpiPanel";
 import MarginDebtPanel from "./MarginDebtPanel";
 import StraddlePanel from "./StraddlePanel";
 import CorPanel from "./CorPanel";
+import VixCorPanel from "./VixCorPanel";
 import SkewPanel from "./SkewPanel";
 import Skew2dPanel from "./Skew2dPanel";
 import YieldCurvePanel from "./YieldCurvePanel";
@@ -37,19 +38,20 @@ import { SECTION_TOOLTIPS } from "@/lib/sectionTooltips";
 import { computeCri, type CriLevel, type CriResult } from "@/lib/criCalc";
 import { MarketState } from "@/lib/useMarketHours";
 
-type RegimeTab = "cri" | "vcg" | "gex" | "grg" | "breadth" | "bpi" | "margin" | "straddle" | "cor" | "skew" | "skew2d" | "curve" | "cot" | "ats" | "short" | "llm" | "backtest";
+type RegimeTab = "cri" | "vcg" | "gex" | "grg" | "breadth" | "bpi" | "margin" | "straddle" | "cor" | "vixcor" | "skew" | "skew2d" | "curve" | "cot" | "ats" | "short" | "llm" | "backtest";
 
-const REGIME_TAB_VALUES: readonly RegimeTab[] = ["cri", "vcg", "gex", "grg", "breadth", "bpi", "margin", "straddle", "cor", "skew", "skew2d", "curve", "cot", "ats", "short", "llm", "backtest"] as const;
+const REGIME_TAB_VALUES: readonly RegimeTab[] = ["cri", "vcg", "gex", "grg", "breadth", "bpi", "margin", "straddle", "cor", "vixcor", "skew", "skew2d", "curve", "cot", "ats", "short", "llm", "backtest"] as const;
 
 const MOBILE_TAB_LABEL: Partial<Record<RegimeTab, string>> = {
   skew2d: "SKEW 2D",
+  vixcor: "VIX-COR",
 };
 
 /** Extract the tab segment from /regime/<tab>; defaults to "cri". */
 function tabFromPathname(pathname: string | null): RegimeTab {
   if (!pathname) return "cri";
-  // skew2d before skew so /regime/skew2d is not truncated to skew
-  const match = pathname.match(/^\/regime\/(cri|vcg|gex|grg|breadth|bpi|margin|straddle|cor|skew2d|skew|curve|cot|ats|short|llm|backtest)(?:\/|$)/);
+  // Longest prefix first within each family: skew2d before skew, vixcor before cor.
+  const match = pathname.match(/^\/regime\/(cri|vcg|gex|grg|breadth|bpi|margin|straddle|vixcor|cor|skew2d|skew|curve|cot|ats|short|llm|backtest)(?:\/|$)/);
   if (match && (REGIME_TAB_VALUES as readonly string[]).includes(match[1])) {
     return match[1] as RegimeTab;
   }
@@ -309,7 +311,7 @@ export default function RegimePanel({
 
   const tabBar = compact ? (
     <div className="m-regime-tabs" role="tablist" aria-label="Regime tabs">
-      {(["cri", "vcg", "gex", "grg", "breadth", "bpi", "margin", "straddle", "cor", "skew", "skew2d", "curve", "cot", "ats", "short", "llm", "backtest"] as RegimeTab[]).map((t) => (
+      {(["cri", "vcg", "gex", "grg", "breadth", "bpi", "margin", "straddle", "cor", "vixcor", "skew", "skew2d", "curve", "cot", "ats", "short", "llm", "backtest"] as RegimeTab[]).map((t) => (
         <button
           key={t}
           type="button"
@@ -333,6 +335,7 @@ export default function RegimePanel({
       <button className={`ticker-tab ${activeTab === "margin" ? "active" : ""}`} onClick={() => goToTab("margin")}>MARGIN</button>
       <button className={`ticker-tab ${activeTab === "straddle" ? "active" : ""}`} onClick={() => goToTab("straddle")}>STRADDLE</button>
       <button className={`ticker-tab ${activeTab === "cor" ? "active" : ""}`} onClick={() => goToTab("cor")}>COR</button>
+      <button className={`ticker-tab ${activeTab === "vixcor" ? "active" : ""}`} onClick={() => goToTab("vixcor")}>VIX-COR</button>
       <button className={`ticker-tab ${activeTab === "skew" ? "active" : ""}`} onClick={() => goToTab("skew")}>SKEW</button>
       <button className={`ticker-tab ${activeTab === "skew2d" ? "active" : ""}`} onClick={() => goToTab("skew2d")}>SKEW 2D</button>
       <button className={`ticker-tab ${activeTab === "curve" ? "active" : ""}`} onClick={() => goToTab("curve")}>CURVE</button>
@@ -421,6 +424,15 @@ export default function RegimePanel({
       <div className="regime-panel">
         {tabBar}
         <CorPanel />
+      </div>
+    );
+  }
+
+  if (activeTab === "vixcor") {
+    return (
+      <div className="regime-panel">
+        {tabBar}
+        <VixCorPanel />
       </div>
     );
   }
