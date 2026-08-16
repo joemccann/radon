@@ -458,13 +458,24 @@ class TestCrossConventionDedup:
         upserts.assert_not_called()
 
     def test_closed_round_trip_rows_net_zero(self, upserts):
-        """TSLA shape: OCC 'CLOSED' rows are completed round trips — they
-        contribute nothing; the independent plain short still sweeps."""
-        occ = _occ_symbol("TSLA", EXPIRED_COMPACT, "P", 400.0)
+        """OCC 'CLOSED' rows are completed round trips and contribute nothing
+        to their own contract's net; an independent plain short on a DIFFERENT
+        contract still sweeps.
+
+        REL-025: this case used to put the round trip on the SAME contract as
+        the plain short and expect a sweep. A CLOSED row carries no close date,
+        so from the journal alone that shape is indistinguishable from the
+        daemon having re-journaled the round trip's own sale — and guessing
+        wrong writes a $0.00 BUY_TO_CLOSE for a contract never held. The
+        same-contract shape is now pinned as no-sweep by
+        TestRoundTripRowsAbsorbTheDuplicateShort; this keeps the original
+        intent (a round trip does not disarm unrelated sweeps).
+        """
+        occ = _occ_symbol("TSLA", EXPIRED_COMPACT, "P", 380.0)
         db = _make_db(
             [
                 _journal_row(
-                    "CLOSED", 10, ticker=occ, strike=400.0, right="P",
+                    "CLOSED", 10, ticker=occ, strike=380.0, right="P",
                     date_str=(EXPIRED - timedelta(days=50)).strftime("%Y-%m-%d"),
                     ib_exec_id="9217417513+9399322577",
                 ),
@@ -483,6 +494,7 @@ class TestCrossConventionDedup:
         payload = upserts.call_args[0][1]
         assert payload["action"] == "BUY_TO_CLOSE"
         assert payload["contracts"] == 10
+        assert payload["strike"] == 400.0
         assert payload["ticker"] == "TSLA"
 
     def test_occ_only_open_closes_under_normalized_ticker(self, upserts):
@@ -646,3 +658,134 @@ class TestSqlSchemaPins:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# ---------------------------------------------------------------------------
+# REL-025 (R-063, R-074) — the sweep drops CLOSED rows BEFORE the comp/plain
+# pairing, and that pairing is the only defence against the same fills being
+# journaled under both id conventions. A Flex-rehydrated completed round trip
+# is a single CLOSED row, so it contributed nothing and could not pair against
+# the real-time daemon's duplicate SELL_TO_OPEN for the same sale; unpaired_comp
+# was never set so ambiguous stayed False. Net then read as a genuine short and
+# the sweep upserted a BUY_TO_CLOSE at fill_price 0.0 for a contract never
+# held — a fabricated windfall in realized P&L plus a phantom position event.
+#
+# R-074: both expiry guards used strict greater-than, so an assignment,
+# exercise or closing fill booked ON the expiration date did not guard.
+# ---------------------------------------------------------------------------
+
+
+class TestRoundTripRowsAbsorbTheDuplicateShort:
+    def test_closed_round_trip_absorbs_the_daemons_duplicate_sale(self, upserts):
+        """The R-063 drill. A CLOSED row carries no close date, so it cannot be
+        date-paired — it must still absorb the otherwise-unpaired plain row for
+        the same contract rather than let it read as an open short."""
+        occ = _occ_symbol("TSLA", EXPIRED_COMPACT, "P", 400.0)
+        db = _make_db(
+            [
+                _journal_row(
+                    "CLOSED", 10, ticker=occ, strike=400.0, right="P",
+                    date_str=(EXPIRED - timedelta(days=50)).strftime("%Y-%m-%d"),
+                    ib_exec_id="9217417513+9399322577",
+                ),
+                _journal_row(
+                    "SELL_TO_OPEN", 10, ticker="TSLA", strike=400.0, right="P",
+                    date_str=(EXPIRED - timedelta(days=7)).strftime("%Y-%m-%d"),
+                    ib_exec_id="0001eb2e.69fdf46c.01.01",
+                ),
+            ]
+        )
+
+        result = _make_handler(db).execute()
+
+        assert result["closed"] == 0
+        upserts.assert_not_called()
+
+    def test_a_genuine_short_with_no_round_trip_still_sweeps(self, upserts):
+        """Control: the absorption must not disarm the sweep entirely."""
+        db = _make_db(
+            [
+                _journal_row(
+                    "SELL_TO_OPEN", 10, ticker="TSLA", strike=400.0, right="P",
+                    date_str=(EXPIRED - timedelta(days=7)).strftime("%Y-%m-%d"),
+                    ib_exec_id="0001eb2e.69fdf46c.01.01",
+                ),
+            ]
+        )
+
+        result = _make_handler(db).execute()
+
+        assert result["closed"] == 1
+        assert upserts.call_args[0][1]["action"] == "BUY_TO_CLOSE"
+
+    def test_a_round_trip_absorbs_only_its_own_quantity(self, upserts):
+        """A 10-lot round trip cannot account for a 25-lot short: the residual
+        15 is a real open position and must still be closed."""
+        occ = _occ_symbol("TSLA", EXPIRED_COMPACT, "P", 400.0)
+        db = _make_db(
+            [
+                _journal_row(
+                    "CLOSED", 10, ticker=occ, strike=400.0, right="P",
+                    date_str=(EXPIRED - timedelta(days=50)).strftime("%Y-%m-%d"),
+                    ib_exec_id="9217417513+9399322577",
+                ),
+                _journal_row(
+                    "SELL_TO_OPEN", 25, ticker="TSLA", strike=400.0, right="P",
+                    date_str=(EXPIRED - timedelta(days=7)).strftime("%Y-%m-%d"),
+                    ib_exec_id="0001eb2e.69fdf46c.01.01",
+                ),
+            ]
+        )
+
+        result = _make_handler(db).execute()
+
+        assert result["closed"] == 1
+        assert upserts.call_args[0][1]["contracts"] == 15
+
+
+class TestExpiryDateGuardsAreInclusive:
+    def test_a_fill_booked_on_the_expiry_date_guards_the_candidate(self, upserts):
+        """Same-day settlement: a partial close booked exactly on the
+        expiration date leaves a short net, but the contract was demonstrably
+        handled on expiry day — a strict > skipped that guard entirely."""
+        db = _make_db(
+            [
+                _journal_row(
+                    "SELL_TO_OPEN", 25, ticker="TSLA", strike=400.0, right="P",
+                    date_str=(EXPIRED - timedelta(days=7)).strftime("%Y-%m-%d"),
+                    ib_exec_id="0001eb2e.69fdf46c.01.01",
+                ),
+                _journal_row(
+                    "BUY_TO_CLOSE", 10, ticker="TSLA", strike=400.0, right="P",
+                    date_str=EXPIRED.strftime("%Y-%m-%d"),
+                    ib_exec_id="0001eb2e.69fdf46c.01.02",
+                ),
+            ]
+        )
+
+        result = _make_handler(db).execute()
+
+        assert result["closed"] == 0
+        upserts.assert_not_called()
+
+    def test_an_executed_order_on_the_expiry_date_guards_the_candidate(self, upserts):
+        db = _make_db(
+            [
+                _journal_row(
+                    "SELL_TO_OPEN", 10, ticker="TSLA", strike=400.0, right="P",
+                    date_str=(EXPIRED - timedelta(days=7)).strftime("%Y-%m-%d"),
+                    ib_exec_id="0001eb2e.69fdf46c.01.01",
+                ),
+            ],
+            [
+                _executed_row(
+                    ticker="TSLA", strike=400.0, right="P",
+                    fill_time=f"{EXPIRED.strftime('%Y-%m-%d')}T14:00:00Z",
+                ),
+            ],
+        )
+
+        result = _make_handler(db).execute()
+
+        assert result["closed"] == 0
+        upserts.assert_not_called()
