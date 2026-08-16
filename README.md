@@ -164,6 +164,7 @@ Durable facts. History and mechanism live in the owner file, not here.
 - **CMD+J.** Quotes, priced UW chains, and `evaluate.py` run from the in-app assistant. KB miss is not a dead end.
 - **Stop orders.** Desktop and mobile tickets place `STP` and `STP LMT` through `/api/orders/place`.
 - **Incidents.** Watchdog artifacts under `data/incidents/`. Triage with `/incident <path>`. Cases: [`docs/incident-runbook.md`](docs/incident-runbook.md).
+- **Factory.** GitHub issues labeled `factory` become draft PRs via Foreman in [`joemccann/radon-factory`](https://github.com/joemccann/radon-factory). Contract: [`docs/factory.md`](docs/factory.md).
 
 ## What's where
 
@@ -176,6 +177,7 @@ Durable facts. History and mechanism live in the owner file, not here.
 | Incident cases and `/incident` playbook | [`docs/incident-runbook.md`](docs/incident-runbook.md) |
 | Regime and scanner indicator specs | [`docs/indicators/README.md`](docs/indicators/README.md) |
 | Equibles market-structure API | [`docs/equibles-api.md`](docs/equibles-api.md) |
+| Software factory (Foreman, draft PRs from labeled issues) | [`docs/factory.md`](docs/factory.md) |
 | CLI commands and test runners | [`docs/scripts-reference.md`](docs/scripts-reference.md) |
 | Strategy specs (Dark Pool, LEAP, GARCH, VCG-R, CRI, Risk Reversal) | [`docs/strategies.md`](docs/strategies.md) |
 | VCG-R research notes | [`docs/cross_asset_volatility_credit_gap_spec_(VCG).md`](docs/cross_asset_volatility_credit_gap_spec_(VCG).md) |
