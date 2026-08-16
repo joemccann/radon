@@ -19,8 +19,13 @@ MODE="${1:?usage: reliability_weekend.sh audit|remediate}"
 }
 
 REPO="${RADON_WEEKEND_REPO:-$HOME/radon-weekend/radon}"
-# Audit fans out ~6 read agents (cap 2h); remediation is the long half (cap 6h).
+# Audit fans out ~6 read agents (cap 2h); remediation is the long half (cap 6h
+# per round). Remediation must finish the backlog, not defer it to a future
+# weekend: a round that dies on the cap (or crashes) is relaunched as a
+# continuation round against the same weekend branch — per-task commits are the
+# durable state — until a round exits 0 or the backstop trips.
 CAP_SECS=$([[ "$MODE" == "audit" ]] && echo 7200 || echo 21600)
+MAX_ROUNDS=$([[ "$MODE" == "remediate" ]] && echo 8 || echo 1)
 DEADMAN_TITLE="Weekend reliability runner"
 DEADMAN_LABEL="reliability-weekend"
 
@@ -73,12 +78,25 @@ git checkout -f --quiet main
 git reset --hard --quiet origin/main
 git clean -fdq --exclude=.radon-weekend-runner --exclude=logs/ --exclude=.env --exclude=.env.ib-mode --exclude=web/.env
 
-set +e
-timeout "$CAP_SECS" claude -p "/reliability-weekend $MODE" \
-  --dangerously-skip-permissions \
-  --output-format text >> "$RUN_LOG" 2>&1
-RC=$?
-set -e
+ROUND=1
+while :; do
+  echo "[weekend] $MODE round $ROUND/$MAX_ROUNDS" | tee -a "$RUN_LOG"
+  set +e
+  timeout "$CAP_SECS" claude -p "/reliability-weekend $MODE" \
+    --dangerously-skip-permissions \
+    --output-format text >> "$RUN_LOG" 2>&1
+  RC=$?
+  set -e
+  [[ $RC -ne 0 && $ROUND -lt $MAX_ROUNDS ]] || break
+  report "ROUND $ROUND $([[ $RC -eq 124 ]] && echo TIMEOUT || echo "FAILED (exit $RC)") — continuing" \
+    "backlog not finished; relaunching a continuation round (committed tasks are durable on the weekend branch)"
+  ROUND=$((ROUND+1))
+  # Re-ground for the continuation: a killed session may leave a dirty tree.
+  # main is force-reset; the local weekend branch and its commits survive.
+  git checkout -f --quiet main
+  git reset --hard --quiet origin/main
+  git clean -fdq --exclude=.radon-weekend-runner --exclude=logs/ --exclude=.env --exclude=.env.ib-mode --exclude=web/.env
+done
 trap - ERR
 
 TAIL="$(tail -c 1500 "$RUN_LOG" 2>/dev/null || true)"
