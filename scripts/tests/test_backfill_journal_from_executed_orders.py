@@ -544,3 +544,151 @@ class TestPytestGuard:
 
         mod = _import_backfill()
         mod._assert_not_under_pytest()
+
+
+# ---------------------------------------------------------------------------
+# REL-024 (R-049) — the evening sweep runs `backfill(dry_run=False)`
+# unattended, and its only idempotency key is the raw exec-id string. Flex
+# rehydrate journals the SAME fill under the numeric Flex `tradeID`
+# (trade_blotter/flex_query.py:243 prefers tradeID over execId) while
+# executed_orders keys on the IB API execId. After any /journal/rehydrate
+# the sweep therefore reads every rehydrated fill as an uncovered gap and
+# journals it a second time — doubling net quantity, lot-matched basis,
+# realized P&L and isOpen on the canonical store.
+# ---------------------------------------------------------------------------
+
+# What Flex hands back for the EWY fill above: a numeric tradeID, not an execId.
+EWY_FLEX_TRADE_ID = "7412330991"
+
+
+def _flex_rehydrated_ewy_row() -> dict:
+    """The journal payload `journal_rehydrate` writes for EWY_EXEC_PAYLOAD.
+
+    Same contract, same ET session date, same signed quantity — only the
+    `ib_exec_id` namespace and the `structure` expiry format differ.
+    """
+    return {
+        "id": 0,
+        "date": "2026-06-08",
+        "ticker": "EWY",
+        "structure": "Short Call $215 2026-07-17",
+        "decision": "IB_AUTO_IMPORT",
+        "action": "SELL_TO_OPEN",
+        "fill_price": 10.0,
+        "total_cost": 10007.2214,
+        "commission": 7.2214,
+        "ib_exec_id": EWY_FLEX_TRADE_ID,
+        "contracts": 10,
+        "strike": 215.0,
+        "right": "C",
+        "expiry": "20260717",
+        "notes": "Rehydrated from IB Flex Query on 2026-06-09",
+    }
+
+
+class TestDualIdConventionIdempotency:
+    def test_flex_rehydrated_fill_is_not_reinserted_from_executed_orders(
+        self, monkeypatch
+    ):
+        """The R-049 drill: journal row under the Flex tradeID, executed_orders
+        row under the IB execId, unattended sweep → ZERO inserts."""
+        conn = _fresh_db()
+        _patch_db(conn, monkeypatch)
+        monkeypatch.setenv("RADON_DB_TEST_WRITE_OK", "1")
+
+        _insert_journal(
+            conn, EWY_FLEX_TRADE_ID, _flex_rehydrated_ewy_row(), "2026-06-08"
+        )
+        _insert_executed_order(conn, EWY_EXEC_ID, EWY_EXEC_PAYLOAD, EWY_FILL_TIME)
+
+        mod = _import_backfill()
+        actions = mod.backfill(conn, exec_ids=[EWY_EXEC_ID], dry_run=False)
+
+        assert [a["status"] for a in actions] == ["skipped"]
+        assert len(_journal_rows(conn)) == 1, (
+            "the Flex-rehydrated fill was journaled a second time under the "
+            "IB execId — net quantity and realized P&L now double"
+        )
+
+    def test_dry_run_reports_the_flex_covered_fill_as_skipped(self, monkeypatch):
+        """The operator's dry-run must not advertise a phantom gap either."""
+        conn = _fresh_db()
+        _patch_db(conn, monkeypatch)
+
+        _insert_journal(
+            conn, EWY_FLEX_TRADE_ID, _flex_rehydrated_ewy_row(), "2026-06-08"
+        )
+        _insert_executed_order(conn, EWY_EXEC_ID, EWY_EXEC_PAYLOAD, EWY_FILL_TIME)
+
+        mod = _import_backfill()
+        actions = mod.backfill(conn, exec_ids=[EWY_EXEC_ID], dry_run=True)
+
+        assert [a["status"] for a in actions] == ["skipped"]
+
+    def test_genuine_gap_still_inserts_exactly_one_row(self, monkeypatch):
+        """Control: the fingerprint must not swallow a real uncovered fill.
+
+        The journal holds an unrelated contract; the EWY fill is genuinely
+        missing and must still be repaired.
+        """
+        conn = _fresh_db()
+        _patch_db(conn, monkeypatch)
+        monkeypatch.setenv("RADON_DB_TEST_WRITE_OK", "1")
+
+        unrelated = _flex_rehydrated_ewy_row()
+        unrelated["ticker"] = "SPY"
+        unrelated["strike"] = 500.0
+        _insert_journal(conn, "7412330992", unrelated, "2026-06-08")
+        _insert_executed_order(conn, EWY_EXEC_ID, EWY_EXEC_PAYLOAD, EWY_FILL_TIME)
+
+        mod = _import_backfill()
+        actions = mod.backfill(conn, exec_ids=[EWY_EXEC_ID], dry_run=False)
+
+        assert [a["status"] for a in actions] == ["inserted_from_eo"]
+        assert len(_journal_rows(conn)) == 2
+
+    def test_same_contract_opposite_side_is_not_swallowed(self, monkeypatch):
+        """A BUY of the contract the journal holds SHORT is a different fill —
+        the signed quantity is part of the fingerprint, not just the contract."""
+        conn = _fresh_db()
+        _patch_db(conn, monkeypatch)
+        monkeypatch.setenv("RADON_DB_TEST_WRITE_OK", "1")
+
+        _insert_journal(
+            conn, EWY_FLEX_TRADE_ID, _flex_rehydrated_ewy_row(), "2026-06-08"
+        )
+        buy_back = dict(EWY_EXEC_PAYLOAD)
+        buy_back["execId"] = "000205d2.6a26a327.01.02"
+        buy_back["side"] = "BOT"
+        _insert_executed_order(
+            conn, buy_back["execId"], buy_back, "2026-06-08T19:30:00+00:00"
+        )
+
+        mod = _import_backfill()
+        actions = mod.backfill(conn, exec_ids=[buy_back["execId"]], dry_run=False)
+
+        assert [a["status"] for a in actions] == ["inserted_from_eo"]
+        assert len(_journal_rows(conn)) == 2
+
+    def test_correction_of_an_imported_exec_id_is_not_reinserted(self, monkeypatch):
+        """IB re-delivers a corrected execution as `<root>.02`. Exact-string
+        dedupe imports it as an ADDITIONAL fill — `journal_rehydrate` already
+        normalizes roots, `backfill` did not."""
+        conn = _fresh_db()
+        _patch_db(conn, monkeypatch)
+        monkeypatch.setenv("RADON_DB_TEST_WRITE_OK", "1")
+
+        _insert_executed_order(conn, MU_EXEC_ID, MU_EXEC_PAYLOAD, MU_FILL_TIME)
+        mod = _import_backfill()
+        mod.backfill(conn, exec_ids=[MU_EXEC_ID], dry_run=False)
+        assert len(_journal_rows(conn)) == 1
+
+        corrected_id = MU_EXEC_ID[:-1] + "2"
+        corrected = dict(MU_EXEC_PAYLOAD)
+        corrected["execId"] = corrected_id
+        _insert_executed_order(conn, corrected_id, corrected, MU_FILL_TIME)
+
+        actions = mod.backfill(conn, exec_ids=[corrected_id], dry_run=False)
+
+        assert [a["status"] for a in actions] == ["skipped"]
+        assert len(_journal_rows(conn)) == 1
