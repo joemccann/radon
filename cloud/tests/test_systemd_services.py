@@ -435,6 +435,25 @@ class TestSkew:
 
 
 
+class TestSkew2d:
+    """R-066: the derived skew2d job must survive a parked parent.
+
+    Requires=radon-skew.service makes a parent parked by its own
+    StartLimitBurst brake fail every 21:50 UTC skew2d fire with a
+    dependency error. Wants= keeps the start-attempt ordering without
+    hard-failing the child when the parent cannot be started.
+    """
+
+    def test_parent_dependency_is_wants_not_requires(self, unit):
+        u = unit("radon-skew2d.service")["Unit"]
+        assert "radon-skew.service" in u.get("wants", ""), (
+            "radon-skew2d.service must Wants= its parent so a parked "
+            "radon-skew cannot dependency-fail the derived job"
+        )
+        assert "radon-skew.service" not in u.get("requires", "")
+        assert "radon-skew.service" in u["after"]
+
+
 class TestMediaBackup:
     """Nightly media.radon.run tree backup to B2 (prefix media/)."""
 
