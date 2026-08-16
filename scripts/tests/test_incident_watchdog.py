@@ -9,6 +9,8 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+import incident_watchdog.__main__ as watchdog_main
+from incident_watchdog import probes as probes_module
 from incident_watchdog.classify import classify
 from incident_watchdog.probes import (
     parse_freshness_body,
@@ -293,7 +295,8 @@ class TestStore:
 
     def test_down_to_unknown_does_not_resolve_open_incident(self, tmp_path: Path):
         opened = record_cycle([self.incident()], tmp_path, NOW)
-        result = record_cycle([], tmp_path, NOW.replace(minute=10), allow_resolve=False)
+        result = record_cycle([], tmp_path, NOW.replace(minute=10),
+                              indeterminate_probes={"nextjs_db"})
 
         assert result["resolved"] == []
         payload = json.loads(Path(opened["opened"][0]).read_text())
@@ -305,3 +308,143 @@ class TestStore:
         result = record_cycle([self.incident()], tmp_path, NOW.replace(minute=20))
         assert len(result["opened"]) == 1
         assert len(list(tmp_path.glob("incident-*.json"))) == 2
+
+
+def unauthorized_freshness():
+    return {
+        "state": "unknown",
+        "http_status": 401,
+        "token_missing": False,
+        "detail": "/api/probe/freshness returned 401",
+        "all_fresh": None,
+        "stale_checks": [],
+        "database_ok": None,
+    }
+
+
+class TestDeadProbeAlarm:
+    """R-065: a freshness probe that answered definitively wrong (rotated
+    token, 401, removed route) will never self-heal — it is its own alarm,
+    not an indeterminate observation."""
+
+    def test_401_freshness_probe_raises_its_own_alarm(self):
+        findings = healthy_findings()
+        findings["freshness"] = unauthorized_freshness()
+        incidents = classify(findings, NOW)
+        assert [i["case_id"] for i in incidents] == ["watchdog-probe-dead"]
+        assert incidents[0]["severity"] == "P2"
+        assert incidents[0]["fingerprint"] == "watchdog-probe-dead:freshness"
+
+    def test_missing_token_raises_the_alarm_too(self):
+        findings = healthy_findings()
+        findings["freshness"] = {
+            "state": "unknown",
+            "http_status": None,
+            "token_missing": True,
+            "detail": "RADON_PROBE_FRESHNESS_TOKEN is not set",
+            "all_fresh": None,
+            "stale_checks": [],
+            "database_ok": None,
+        }
+        assert [i["case_id"] for i in classify(findings, NOW)] == [
+            "watchdog-probe-dead"
+        ]
+
+    def test_probe_timeout_is_indeterminate_not_an_alarm(self):
+        findings = healthy_findings()
+        findings["freshness"] = {
+            "state": "unknown",
+            "http_status": None,
+            "token_missing": False,
+            "detail": "timeout after 6.0s",
+            "all_fresh": None,
+            "stale_checks": [],
+            "database_ok": None,
+        }
+        assert classify(findings, NOW) == []
+
+    def test_probe_freshness_maps_non_200_to_definitive_unknown(self, monkeypatch):
+        monkeypatch.setattr(
+            probes_module,
+            "_http_get",
+            lambda url, headers=None: {
+                "state": "up", "http_status": 401, "body": None, "detail": "",
+            },
+        )
+        finding = probes_module.probe_freshness("http://x", "tok")
+        assert finding["state"] == "unknown"
+        assert finding["http_status"] == 401
+
+    def test_probe_freshness_missing_token_is_flagged(self):
+        finding = probes_module.probe_freshness("http://x", None)
+        assert finding["state"] == "unknown"
+        assert finding["token_missing"] is True
+
+
+class TestScopedResolution:
+    """R-065: resolution is scoped to the probes that bear on each incident —
+    a dead unrelated probe must not latch every open incident forever."""
+
+    def open_service_down_incident(self, tmp_path: Path):
+        incident = {
+            "case_id": "service-down",
+            "severity": "P1",
+            "title": "FastAPI /health/lite unreachable (connection refused)",
+            "fingerprint": "service-down:fastapi",
+            "evidence": {},
+            "probes": ["api_lite"],
+        }
+        return record_cycle([incident], tmp_path, NOW)
+
+    def test_unrelated_dead_probe_does_not_block_resolution(self, tmp_path: Path):
+        opened = self.open_service_down_incident(tmp_path)
+        result = record_cycle(
+            [], tmp_path, NOW.replace(minute=10),
+            indeterminate_probes={"freshness"},
+        )
+        assert len(result["resolved"]) == 1
+        payload = json.loads(Path(opened["opened"][0]).read_text())
+        assert payload["status"] == "resolved"
+
+    def test_unknown_bearing_probe_still_blocks_resolution(self, tmp_path: Path):
+        opened = self.open_service_down_incident(tmp_path)
+        result = record_cycle(
+            [], tmp_path, NOW.replace(minute=10),
+            indeterminate_probes={"api_lite"},
+        )
+        assert result["resolved"] == []
+        payload = json.loads(Path(opened["opened"][0]).read_text())
+        assert payload["status"] == "open"
+
+    def test_legacy_file_without_probes_scopes_by_case_id(self, tmp_path: Path):
+        opened = self.open_service_down_incident(tmp_path)
+        path = Path(opened["opened"][0])
+        payload = json.loads(path.read_text())
+        payload.pop("probes", None)
+        path.write_text(json.dumps(payload))
+        result = record_cycle(
+            [], tmp_path, NOW.replace(minute=10),
+            indeterminate_probes={"freshness"},
+        )
+        assert len(result["resolved"]) == 1
+
+    def test_run_cycle_with_dead_freshness_resolves_unrelated_and_alarms(
+            self, tmp_path: Path, monkeypatch, capsys):
+        """Acceptance: freshness permanently 401s -> the open FastAPI-down
+        incident still resolves once FastAPI is back, AND the dead probe
+        opens its own incident."""
+        self.open_service_down_incident(tmp_path)
+        findings = healthy_findings()
+        findings["freshness"] = unauthorized_freshness()
+        monkeypatch.setattr(watchdog_main, "gather_findings", lambda: findings)
+        summary = watchdog_main.run_cycle(tmp_path)
+        assert len(summary["resolved"]) == 1
+        assert [i["case_id"] for i in summary["incidents"]] == [
+            "watchdog-probe-dead"
+        ]
+        by_fingerprint = {}
+        for path in tmp_path.glob("incident-*.json"):
+            payload = json.loads(path.read_text())
+            by_fingerprint[payload["fingerprint"]] = payload["status"]
+        assert by_fingerprint["service-down:fastapi"] == "resolved"
+        assert by_fingerprint["watchdog-probe-dead:freshness"] == "open"
