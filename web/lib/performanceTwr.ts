@@ -38,7 +38,7 @@ export const TWR_GATES = {
 
 /** Non-numeric half of the table; kept separate so the parity scan stays numeric. */
 export const TWR_CONVENTIONS = {
-  FLOW_CONVENTION: "eod",
+  FLOW_CONVENTION: "bod",
   SORTINO_TARGET: 0,
 } as const;
 

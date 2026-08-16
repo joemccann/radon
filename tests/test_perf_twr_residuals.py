@@ -715,3 +715,97 @@ def test_r10_the_tail_only_ever_widens_the_bar():
             twr_gates.UNEXPLAINED_ABSOLUTE_FLOOR,
         )
         assert _outlier_threshold(sample) >= old - 1e-12
+
+
+# ===========================================================================
+# R11 — flow timing: BOD, to match the broker
+# ===========================================================================
+#
+# The denominator was B (end-of-day flow timing). IBKR PortfolioAnalyst uses
+# B + C (beginning-of-day), and the operator will always compare against IBKR.
+#
+# EOD is also simply less accurate for an in-kind transfer: it pretends 655k of
+# securities arrived at the closing bell and earned nothing, so the whole day's
+# gain is credited to the pre-existing base.
+#
+#   2026-02-06  B = 246,713.50  E = 972,215.53  C = 655,497.16
+#     EOD   70,004.87 / 246,713.50 = +0.283750   <- a 28% day on paper
+#     BOD   70,004.87 / 902,210.66 = +0.077593   <- the capital actually deployed
+#
+# Proof BOD is IBKR's convention, from IBKR's own dashboard (YTD, TWR, Daily):
+#   worst day 2026-02-05 = -19.17%.  BOD gives -0.1916630, EOD gives -0.2087076.
+#   best  day 2026-06-23 = +27.87%.  No flow that day, so both agree.
+# Chained YTD: BOD +90.81% against IBKR's reported +91.15%; the 0.34pp residual
+# is IBKR running to 08-16 with real-time marks against our 08-14 Flex close.
+
+
+def test_r11_subperiod_return_uses_the_beginning_of_day_denominator():
+    from scripts.lib.twr_math import subperiod_return
+
+    # The real ACATS session. NAVs are the 2026-02-05 and 2026-02-06 closes from
+    # the operator's Flex export; C is the netted 13-row transfer basket.
+    r = subperiod_return(246_713.49538117, 972_215.52538117, 655_497.16)
+    # residual    = 972,215.52538117 - 655,497.16 - 246,713.49538117 =  70,004.87
+    # denominator = 246,713.49538117 + 655,497.16                    = 902,210.65538117
+    # 70,004.87 / 902,210.65538117 = 0.0775925994...
+    assert r == pytest.approx(0.07759259944721442, rel=1e-9)
+    # the EOD value this replaces: 70,004.87 / 246,713.49538117 = 0.2837496...
+    assert r != pytest.approx(0.2837496582497163, rel=1e-6)
+
+
+def test_r11_bod_reproduces_ibkrs_reported_worst_day():
+    """IBKR PortfolioAnalyst YTD reports 2026-02-05 as its worst day, -19.17%.
+
+    Real closes from the Flex export: 2026-02-04 280,286.37292117 ->
+    2026-02-05 246,713.49538117, with a 24,925.00 deposit that day.
+    """
+    from scripts.lib.twr_math import subperiod_return
+
+    r = subperiod_return(280_286.37292117, 246_713.49538117, 24_925.00)
+    # residual    = 246,713.49538117 - 24,925.00 - 280,286.37292117 = -58,497.87754
+    # denominator = 280,286.37292117 + 24,925.00                    = 305,211.37292117
+    # -58,497.87754 / 305,211.37292117 = -0.1916634920...  -> -19.17%
+    assert r == pytest.approx(-0.191663492025603, rel=1e-9)
+    assert round(r * 100, 2) == pytest.approx(-19.17, abs=0.005)
+    # EOD would have given -58,497.87754 / 280,286.37292117 = -0.2087076..., which
+    # is NOT what IBKR reports. This is the assertion that identifies the convention.
+    assert round(-58_497.87754 / 280_286.37292117 * 100, 2) == pytest.approx(-20.87, abs=0.005)
+
+
+def test_r11_a_flowless_session_is_unchanged_by_the_convention():
+    """C = 0 makes B and B + C identical, so no non-flow day moves."""
+    from scripts.lib.twr_math import subperiod_return
+
+    r = subperiod_return(100_000.0, 110_000.0, 0.0)
+    assert r == pytest.approx(0.10, rel=REL)
+
+
+def test_r11_a_withdrawal_shrinks_the_denominator():
+    """A negative flow lowers B + C, so the same P&L is a larger return on the
+    capital that was actually at work."""
+    from scripts.lib.twr_math import subperiod_return
+
+    # B 200,000, withdraw 50,000, end 155,000 -> P&L +5,000 on 150,000 deployed.
+    r = subperiod_return(200_000.0, 155_000.0, -50_000.0)
+    # (155,000 + 50,000 - 200,000) / (200,000 - 50,000) = 5,000 / 150,000
+    assert r == pytest.approx(5_000.0 / 150_000.0, rel=REL)
+
+
+def test_r11_the_convention_constant_says_bod():
+    assert twr_gates.FLOW_CONVENTION == "bod"
+
+
+def test_r11_a_full_withdrawal_does_not_divide_by_zero():
+    """B + C = 0 when everything is withdrawn.
+
+    A zero denominator is only undefined if the residual is non-zero. An account
+    that emptied and earned nothing chains harmlessly at 0.0 and must not break
+    the series (DECISION 4's other half, pinned by
+    test_twr_math.py::test_11b_nav_to_zero_explained_by_a_recorded_withdrawal_chains_at_zero).
+    """
+    from scripts.lib.twr_math import subperiod_return
+
+    # residual = 0 - (-100,000) - 100,000 = 0 -> the account simply emptied.
+    assert subperiod_return(100_000.0, 0.0, -100_000.0) == pytest.approx(0.0, abs=1e-12)
+    # residual = 5,000 with no capital to have produced it -> undefined.
+    assert subperiod_return(100_000.0, 5_000.0, -100_000.0) is None

@@ -851,7 +851,7 @@ export default function MobilePerformancePanel({ portfolioLastSync = null, marke
                     Flow Convention
                   </span>
                   <span className="performance-meta-value" style={{ fontSize: 11 }}>
-                    {view.methodology.flow_convention ?? "eod"}
+                    {view.methodology.flow_convention ?? "bod"}
                   </span>
                 </div>
                 <div className="performance-meta-item" style={{ padding: "8px 10px" }}>

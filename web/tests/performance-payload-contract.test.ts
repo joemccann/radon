@@ -89,12 +89,12 @@ describe("normalizePerformanceData v2 key retention", () => {
     const mwr = out.mwr as Record<string, Record<string, unknown>>;
     const risk = out.risk as Record<string, Record<string, unknown>>;
 
-    expect(twr.cum_return).toBe(0.050112307160331326);
+    expect(twr.cum_return).toBe(0.05092267338835921);
     expect((twr.annualized as Record<string, unknown>).value).toBeNull();
     expect((twr.annualized as Record<string, unknown>).unavailable_reason).toBe("period_lt_1y");
     expect(mwr.period_return.value).toBe(0.05020769210515868);
     expect(mwr.annualized.unavailable_reason).toBe("period_lt_1y");
-    expect(risk.sharpe_ratio.value).toBe(1.9763572406782934);
+    expect(risk.sharpe_ratio.value).toBe(2.0104270378243907);
     expect(risk.sharpe_ratio.low_confidence).toBe(true);
   });
 
@@ -115,8 +115,8 @@ describe("normalizePerformanceData v2 key retention", () => {
 
     expect(series).toHaveLength(3);
     expect(series[0].twr_index).toBe(100);
-    // 100 * (1 + 0.050112307160331326)
-    expect(series[2].twr_index).toBeCloseTo(105.01123071603313, 10);
+    // 100 * (1 + 0.05092267338835921)
+    expect(series[2].twr_index).toBeCloseTo(105.09226733883592, 10);
     expect(series[2].nav).toBe(182217.35574011656);
   });
 });

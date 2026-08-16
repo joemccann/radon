@@ -103,8 +103,10 @@ describe("TWR_GATES table", () => {
 
   it("exports the non-numeric conventions separately", () => {
     expect(mod.TWR_CONVENTIONS).toBeDefined();
-    // EOD: r_t = (E_t - C_t - B_t) / B_t, denominator = B_t (§B.3).
-    expect(mod.TWR_CONVENTIONS.FLOW_CONVENTION).toBe("eod");
+    // BOD: r_t = (E_t - C_t - B_t) / (B_t + C_t), denominator = B_t + C_t (§B.3).
+    // The denominator is the capital actually at work, which is what IBKR
+    // PortfolioAnalyst reports against.
+    expect(mod.TWR_CONVENTIONS.FLOW_CONVENTION).toBe("bod");
     expect(mod.TWR_CONVENTIONS.SORTINO_TARGET).toBe(0);
   });
 

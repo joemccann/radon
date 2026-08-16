@@ -119,20 +119,29 @@ def test_03_feb06_deposit_is_not_a_294_percent_return():
     """The headline defect. B=246713.50 E=972215.53 C=+725000."""
     r = subperiod_return(fx.FEB06_BEGIN_NAV, fx.FEB06_END_NAV, fx.FEB06_FLOW)
 
-    # (972215.53 - 725000.00 - 246713.50) / 246713.50
-    #   = 502.03 / 246713.50
-    #   = 0.0020348704063621486
-    assert r == pytest.approx(0.0020348704063621486, rel=REL)
+    # residual    = 972215.53 - 725000.00 - 246713.50 =    502.03
+    # denominator = 246713.50 + 725000.00             = 971713.50
+    #   502.03 / 971713.50 = 0.0005166440519762543
+    assert r == pytest.approx(0.0005166440519762543, rel=REL)
     assert r < 0.01
     # The live payload published +2.9407 for this session by forcing C to 0:
     #   (972215.53 - 0 - 246713.50) / 246713.50 = 725502.03 / 246713.50 = 2.940666
     assert r != pytest.approx(2.940666, rel=1e-3)
+    # Superseded EOD figure, kept as an anti-pin: dividing the same 502.03 by
+    # B alone credited the day's P&L to the pre-existing base only.
+    #   502.03 / 246713.50 = 0.0020348704063621486
+    assert r != pytest.approx(0.0020348704063621486, rel=1e-6)
 
 
 def test_04_withdrawal_is_removed_from_the_return():
     r = subperiod_return(100_000.0, 90_000.0, -15_000.0)
-    # (90000 - (-15000) - 100000) / 100000 = 5000 / 100000 = 0.05
-    assert r == pytest.approx(0.05, rel=REL)
+    # residual    = 90000 - (-15000) - 100000 =   5000
+    # denominator = 100000 + (-15000)         =  85000   (the capital left at work)
+    #   5000 / 85000 = 1/17 = 0.058823529411764705
+    assert r == pytest.approx(0.058823529411764705, rel=REL)
+    # Superseded EOD figure: 5000 / 100000 = 0.05, which charged the whole
+    # session's P&L against capital that had already been withdrawn.
+    assert r != pytest.approx(0.05, rel=1e-6)
 
 
 def test_05_same_day_deposit_and_withdrawal_net_before_the_return():
@@ -143,8 +152,10 @@ def test_05_same_day_deposit_and_withdrawal_net_before_the_return():
     sp = by_date(chain)[flow_date]
 
     assert sp.flow == pytest.approx(30_000.0, rel=REL)
-    # (131000 - 30000 - 100000) / 100000 = 1000 / 100000 = 0.01
-    assert sp.ret == pytest.approx(0.01, rel=REL)
+    # residual    = 131000 - 30000 - 100000 =   1000
+    # denominator = 100000 + 30000          = 130000
+    #   1000 / 130000 = 1/130 = 0.007692307692307693
+    assert sp.ret == pytest.approx(0.007692307692307693, rel=REL)
 
 
 def test_09_flow_on_the_first_day_is_already_inside_n0():
@@ -170,8 +181,10 @@ def test_10_flow_on_the_last_day_is_netted_out_of_the_terminal_cashflow():
     flows = {d1: 50_000.0}
     chain = build_subperiods(observations(nav), flows)
 
-    # (151000 - 50000 - 100000) / 100000 = 1000 / 100000 = 0.01
-    assert chain.returns == pytest.approx((0.01,), rel=REL)
+    # residual    = 151000 - 50000 - 100000 =   1000
+    # denominator = 100000 + 50000          = 150000
+    #   1000 / 150000 = 1/150 = 0.006666666666666667
+    assert chain.returns == pytest.approx((0.006666666666666667,), rel=REL)
 
     vector = build_cashflow_vector(observations(nav), flows)
     assert vector[0] == DatedCashflow(date=d0, amount=-100_000.0)
@@ -320,7 +333,10 @@ def test_20_flow_dominant_but_explained_is_chained_and_only_flagged():
     assert "flow_dominant" in sp.flags
     assert "suspect" not in sp.flags
     assert sp.skip_reason is None
-    assert sp.ret == pytest.approx(0.0020348704063621486, rel=REL)
+    # residual    = 972215.53 - 725000.00 - 246713.50 =    502.03
+    # denominator = 246713.50 + 725000.00             = 971713.50
+    #   502.03 / 971713.50 = 0.0005166440519762543
+    assert sp.ret == pytest.approx(0.0005166440519762543, rel=REL)
     assert chain.excluded_suspect is False
     assert chain.n_returns == 1
 
@@ -331,8 +347,10 @@ def test_21_flow_without_a_nav_row_carries_to_the_next_observation():
 
     # Saturday 2026-01-10 has no NAV row; the money is first visible on Mon 01-12
     assert sp.flow == pytest.approx(50_000.0, rel=REL)
-    # (151000 - 50000 - 100000) / 100000 = 0.01
-    assert sp.ret == pytest.approx(0.01, rel=REL)
+    # residual    = 151000 - 50000 - 100000 =   1000
+    # denominator = 100000 + 50000          = 150000
+    #   1000 / 150000 = 1/150 = 0.006666666666666667
+    assert sp.ret == pytest.approx(0.006666666666666667, rel=REL)
 
 
 def test_22_consolidation_drops_a_date_an_account_is_missing():
@@ -775,21 +793,50 @@ def test_golden_chain_counts_and_cumulative_return():
     assert chain.period_end == "2026-03-27"
     # 2026-01-02 -> 2026-03-27: 29 (rest of Jan) + 28 (Feb) + 27 = 84
     assert chain.calendar_days == 84
-    # (1.006 * 0.996 * 1.002 * 0.992 * 1.010 * 0.999) ** 10 - 1
-    assert chain.cum_return == pytest.approx(0.050112307160331326, rel=TIGHT)
+    # The fixture NAV is rolled forward as N_t = N_{t-1}(1 + p_t) + C_t, so on
+    # the 58 flow-free sessions the residual still divides by B alone and stays
+    # p_t exactly. Only the two flow days move, each contributing
+    # 1 + r_t = E_t / (B_t + C_t) in place of 1 + p_t (see the two flow-day
+    # derivations in test_golden_flow_days_carry_no_phantom_return).
+    # cycle   = 1.006 * 0.996 * 1.002 * 0.992 * 1.010 * 0.999 = 1.004901685914332
+    # cycle^10                                                = 1.0501123071603298
+    # 02-13 replacement factor = (1 - 0.0005063619214326489) / 0.999
+    # 03-06 replacement factor = (1 + 0.0022779803755503406) / 1.002
+    #   1.0501123071603298 * 0.9994936380785674 / 0.999
+    #                      * 1.0022779803755503 / 1.002  - 1
+    #   = 0.05092267338835921
+    assert chain.cum_return == pytest.approx(0.05092267338835921, rel=TIGHT)
+    # Superseded EOD figure, kept as an anti-pin: dividing both flow days by B
+    # alone gave (1.006*0.996*1.002*0.992*1.010*0.999)**10 - 1 exactly.
+    assert chain.cum_return != pytest.approx(0.050112307160331326, rel=1e-6)
 
 
 def test_golden_flow_days_carry_no_phantom_return():
     chain = build_subperiods(observations(fx.golden_nav()), fx.GOLDEN_FLOWS)
     marks = by_date(chain)
 
-    # index 30 is pattern position 29 % 6 = 5 -> -0.001
-    assert marks["2026-02-13"].ret == pytest.approx(-0.001, rel=TIGHT)
+    # index 30 is pattern position 29 % 6 = 5 -> -0.001, so the fixture rolled
+    # B = 102577.56510647341 forward to E = 202474.98754136695 with C = +100000.
+    # residual    = 202474.98754136695 - 100000 - 102577.56510647341
+    #             = -102.5775651064614            (which is -0.001 * B)
+    # denominator = 102577.56510647341 + 100000 = 202577.5651064734
+    #   -102.5775651064614 / 202577.5651064734 = -0.0005063619214326489
+    assert marks["2026-02-13"].ret == pytest.approx(-0.0005063619214326489, rel=TIGHT)
     assert marks["2026-02-13"].flow == pytest.approx(100_000.00, rel=TIGHT)
-    # |100000| / 102577.56510647341 = 0.9749 > 0.25
+    # The deposit halves the phantom, it never creates one: the arriving 100000
+    # earns the session's own -0.1%, so |r| SHRINKS toward zero, and it is still
+    # nowhere near the +97% the raw NAV delta would have published.
+    assert abs(marks["2026-02-13"].ret) < 0.001
+    # The flag is measured against B, not the BOD denominator:
+    #   |100000| / 102577.56510647341 = 0.9749 > 0.25
     assert "flow_dominant" in marks["2026-02-13"].flags
-    # index 45 is pattern position 44 % 6 = 2 -> +0.002
-    assert marks["2026-03-06"].ret == pytest.approx(0.002, rel=TIGHT)
+    # index 45 is pattern position 44 % 6 = 2 -> +0.002, B = 204868.8123253928,
+    # E = 180278.54995004358, C = -25000.
+    # residual    = 180278.54995004358 - (-25000) - 204868.8123253928
+    #             = 409.737624650792              (which is +0.002 * B)
+    # denominator = 204868.8123253928 + (-25000) = 179868.8123253928
+    #   409.737624650792 / 179868.8123253928 = 0.0022779803755503406
+    assert marks["2026-03-06"].ret == pytest.approx(0.0022779803755503406, rel=TIGHT)
     assert marks["2026-03-06"].flow == pytest.approx(-25_000.00, rel=TIGHT)
 
 
@@ -799,24 +846,40 @@ def test_golden_risk_statistics():
     # (1 + 0.02) ** (1/252) - 1
     rf_daily = 7.85849419846496e-05
 
-    # mean = (0.006 - 0.004 + 0.002 - 0.008 + 0.010 - 0.001) / 6 = 0.005/6
-    #      = 0.0008333333333333334
-    # per-cycle sq devs sum = 2.1683333333e-04 ; * 10 cycles = 2.1683333333e-03
-    # var(ddof=1) = 2.1683333333e-03 / 59 = 3.6751412429e-05
-    # sd = 0.006062294649 ; * 15.874507866387544
-    assert volatility(rets).value == pytest.approx(0.09623593888045874, rel=1e-9)
-    assert sharpe_ratio(rets, rf_daily).value == pytest.approx(1.9763572406782934, rel=1e-9)
-    assert sortino_ratio(rets, rf_daily).value == pytest.approx(3.2608857445808517, rel=1e-9)
-    # negatives per cycle: -0.004, -0.008, -0.001 -> 1.6e-05 + 6.4e-05 + 1e-06
-    #   = 8.1e-05 ; * 10 = 8.1e-04 ; / 60 = 1.35e-05 ; sqrt = 0.003674234614...
+    # The sample is the six-value pattern repeated ten times with exactly two
+    # substitutions, both derived in test_golden_flow_days_carry_no_phantom_return:
+    #   position 29 (2026-02-13): -0.001 -> -0.0005063619214326489
+    #   position 44 (2026-03-06): +0.002 -> +0.0022779803755503406
+    # sum  = 10 * (0.006 - 0.004 + 0.002 - 0.008 + 0.010 - 0.001)
+    #        + (-0.0005063619214326489 - (-0.001))
+    #        + (0.0022779803755503406 - 0.002)
+    #      = 0.05 + 0.0004936380785673511 + 0.0002779803755503406
+    #      = 0.05077161845411769
+    # mean = 0.05077161845411769 / 60 = 0.0008461936409019616
+    # sd(ddof=1) = 0.006061105476604102 ; * 15.874507866387544
+    assert volatility(rets).value == pytest.approx(0.09621706656735644, rel=1e-9)
+    # (0.0008461936409019616 - 7.85849419846496e-05) / 0.006061105476604102
     #   * 15.874507866387544
-    assert downside_deviation(rets).value == pytest.approx(0.05832666628567074, rel=1e-9)
+    assert sharpe_ratio(rets, rf_daily).value == pytest.approx(2.0104270378243907, rel=1e-9)
+    # (0.0008461936409019616 - 7.85849419846496e-05) / 0.003672547713317185
+    #   * 15.874507866387544
+    assert sortino_ratio(rets, rf_daily).value == pytest.approx(3.3179719585628065, rel=1e-9)
+    # negatives per clean cycle: -0.004, -0.008, -0.001 -> 1.6e-05 + 6.4e-05
+    #   + 1e-06 = 8.1e-05 ; * 10 = 8.1e-04, less the one -0.001 replaced by
+    #   -0.0005063619214326489: 8.1e-04 - 1e-06 + 2.5640241e-07
+    #   = 0.000809256402395477 ; / 60 = 1.34876067e-05
+    #   sqrt = 0.003672547713317185 ; * 15.874507866387544
+    assert downside_deviation(rets).value == pytest.approx(0.05829988756473724, rel=1e-9)
 
     dd = drawdowns(chain)
-    # within a cycle: 0.996 * 1.002 * 0.992 = 0.990008064 -> -0.009991936
+    # Unmoved by the convention. The deepest run is positions 1-3 of a cycle,
+    # 0.996 * 1.002 * 0.992 = 0.990008064 -> -0.009991936, and it survives in
+    # the nine cycles the two flow days do not touch (02-13 is position 5,
+    # 03-06 is position 2 of cycle 8, which only makes that one run shallower).
     assert dd.max_drawdown.value == pytest.approx(-0.009991936000000146, rel=1e-9)
 
-    # sorted 60 returns: ten each of -0.008, -0.004, -0.001, 0.002, 0.006, 0.010
+    # sorted 60 returns: still ten -0.008 and ten -0.004 at the bottom (the two
+    # substituted values sit in the -0.001 and +0.002 buckets, far from the tail)
     # p = 59 * 0.05 = 2.95 -> interpolates between two -0.008 values
     assert historical_var(rets).value == pytest.approx(-0.008, rel=1e-9)
     # k = floor(0.05 * 60) = 3 -> mean of three -0.008 values
@@ -1070,7 +1133,9 @@ def test_gate_table_values_are_the_spec_values():
     assert twr_gates.IMPLAUSIBLE_ALPHA == 1.0
     assert twr_gates.MAX_SUBPERIOD_GAP_DAYS == 4
     assert twr_gates.NAV_STALENESS_BUDGET_SESSIONS == 2
-    assert twr_gates.FLOW_CONVENTION == "eod"
+    # BOD: r_t = (E_t - C_t - B_t) / (B_t + C_t). The denominator is the capital
+    # actually at work, which is what IBKR PortfolioAnalyst reports against.
+    assert twr_gates.FLOW_CONVENTION == "bod"
     assert twr_gates.SORTINO_TARGET == 0.0
     # sqrt(252) is the only scaling constant the ratios may use
     assert math.isclose(math.sqrt(twr_gates.TRADING_DAYS), 15.874507866387544, rel_tol=1e-12)
