@@ -129,3 +129,36 @@ how this loop improves as the codebase grows.
   before they land — three of the four highest-severity findings this run were
   confirmed by a single grep, and one severity was raised (P1→P0) only because
   the main context checked the id-namespace claim end to end.
+- 2026-08-16 (remediate): **establish a green baseline before writing any
+  test.** This clone's `python3.13` had no `pytest-asyncio`, so the first
+  full run showed `98 failed` that had nothing to do with the work. CI
+  installs it (`ci.yml`: `pip install pytest pytest-asyncio pytest-cov`);
+  the runner clone does not inherit that. Run the full gate FIRST, and if
+  it is red, diff the failure set against `ci.yml`'s install line before
+  attributing anything to your own changes.
+- 2026-08-16 (remediate): 10 `cloud/tests` cases fail on darwin only —
+  they assert on a `sha256sum` binary macOS does not ship
+  (`shutil.which("sha256sum")` is `None`). They pass in Linux CI. Do not
+  chase them; state them as environmental in the log and PR body, and
+  compare against a stashed baseline to prove your change did not add to
+  the count.
+- 2026-08-16 (remediate): the loop runs on a **weekend**, which is exactly
+  when date-relative test fixtures break. `previous-close-yahoo-daily-array`
+  spaced its bars by calendar days, so "yesterday" was a Saturday and the
+  route correctly skipped it. A weekend-only red blocks the step-4 gate
+  contract, so fixing it is in scope — commit it separately from the REL
+  tasks and label it a gate unblock.
+- 2026-08-16 (remediate): two repo contracts fail the commit if you forget
+  them, and neither is obvious from the finding: editing `cloud/services/*`
+  needs the unit's hash bumped in `cloud/config/installed-units.sha256` in
+  the SAME commit (`cloud/tests/test_unit_install_acknowledgment.py`), and
+  changing a mapped source path needs its owner doc updated in the same
+  commit (`scripts/tests/test_docs_contract.py`). Budget for both.
+- 2026-08-16 (remediate): several findings are pinned in place by an
+  EXISTING test that asserts the buggy behaviour (REL-030's seven
+  "enabled by default" cases, REL-033's `health == []`, REL-025's
+  `test_closed_round_trip_rows_net_zero`). Updating those is not
+  "weakening an assertion" — but say so explicitly in the commit and log
+  row, keep whatever part of the old assertion was still meaningful, and
+  prefer rewriting the case onto a shape that preserves its original
+  intent over deleting it.
