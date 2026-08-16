@@ -115,6 +115,22 @@ const ADMIN_ROUTES = ["edge-health", "health", "host-metrics", "reliability", "s
 const SHARE_ROUTES = ["gex", "internals", "menthorq/cta", "regime", "vcg"] as const;
 
 /**
+ * The destructive operator control plane. Restarting IB Gateway triggers a 2FA
+ * push lock (docs/ib-gateway-recovery.md), so a demo-trial user reaching any of
+ * these is a production outage, not a permissions nit.
+ */
+const CONTROL_PLANE_ROUTES: ReadonlyArray<{ path: string; params?: Record<string, string> }> = [
+  { path: "admin/services" },
+  { path: "admin/services/[unit]/[action]", params: { unit: "radon-api", action: "restart" } },
+  { path: "admin/ib/restart" },
+  { path: "admin/ib/reset-backoff" },
+  { path: "admin/stack/restart" },
+];
+// `preferences` belongs to the same operator allowlist but is not listed here:
+// its GET is authenticated and deliberately NOT operator-scoped, and its
+// mutations are already asserted by OPERATOR_MUTATION_ROUTES above.
+
+/**
  * Routes whose MUTATING methods must pass `operatorOnly: true` and the durable
  * "C" budget at call time. Reads on the same modules are authenticated but not
  * operator-scoped, which is precisely the distinction a whole-file substring
@@ -237,6 +253,36 @@ describe("route authorization runs before privileged work", () => {
   it.each(SHARE_ROUTES)("/api/%s/share denies every exported method", async (route) => {
     await assertDenied(`${route}/share/route.ts`, `${route}/share`, undefined);
   });
+
+  it.each(CONTROL_PLANE_ROUTES.map((r) => [r.path, r] as const))(
+    "/api/%s denies every exported method before touching the control plane",
+    async (_label, route) => {
+      await assertDenied(`${route.path}/route.ts`, route.path, route.params);
+    },
+  );
+});
+
+describe("the destructive control plane is operator-scoped at call time", () => {
+  it.each(CONTROL_PLANE_ROUTES.map((r) => [r.path, r] as const))(
+    "/api/%s passes operatorOnly on every method",
+    async (_label, route) => {
+      const mod = await loadRoute(`${route.path}/route.ts`);
+      const handlers = exportedHandlers(mod);
+      expect(handlers.length, `${route.path} exports no HTTP handler`).toBeGreaterThan(0);
+
+      for (const [method, handler] of handlers) {
+        mockRequireRouteAccess.mockClear();
+        await handler(requestFor(method, route.path), {
+          params: Promise.resolve(route.params ?? {}),
+        });
+        const options = mockRequireRouteAccess.mock.calls[0]?.[1] as
+          | Record<string, unknown>
+          | undefined;
+        expect(options, `${route.path} ${method} passed no options object`).toBeTruthy();
+        expect(options!.operatorOnly, `${route.path} ${method} operatorOnly`).toBe(true);
+      }
+    },
+  );
 });
 
 describe("live authorization options are passed, not merely spelled", () => {
