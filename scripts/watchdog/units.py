@@ -64,6 +64,13 @@ DEFAULT_STATE_PATH = _PROJECT_DIR / "data" / "watchdog_units_state.json"
 GREEN_MARKER_PATH = Path("/home/radon/.radon-last-green-deploy")
 TRANSITION_JOURNAL_PATH = Path("/home/radon/.radon-deploy-transition.json")
 DEPLOY_COLLATERAL_WINDOW_SECS = 60 * 60
+# R-064: kill-before-green compares two FROZEN timestamps (kill vs marker), so
+# without a now-cap a unit that never runs again stays P3-digest forever. The
+# cap must exceed the longest legit recover-on-next-timer horizon: a daily
+# oneshot's next fire is at most ~24h after the kill (2026-08-15 radon-bpi:
+# a 60-min cap here false-paged that exact shape). Past 24h the unit is
+# frozen — the deploy left it dead (e.g. timer disabled) — and it re-pages P1.
+KILL_BEFORE_GREEN_FROZEN_CAP_SECS = 24 * 60 * 60
 
 
 # ── systemctl seam ───────────────────────────────────────────────────
@@ -149,11 +156,13 @@ def _is_deploy_collateral(unit: dict, deploy: Optional[dict], now: datetime) -> 
       * journal present (in_flight)
       * kill after the last green (cancelled / not-yet-green successor)
       * kill before the latest green (this stack's stop-clean)
-    The now-to-kill cap applies only to in-flight and kill-after-green
+    The 60-min now-to-kill cap applies to in-flight and kill-after-green
     so an unrelated SIGTERM hours later still pages. Kill-before-green
-    is measured kill-to-marker: Type=oneshot stays failed until the
-    next timer, and a 60-min now-cap re-pages P1 after the first hour
-    (2026-08-15 01:35Z radon-bpi, kill 78s before green).
+    is measured kill-to-marker because Type=oneshot legitimately stays
+    failed until its next timer fire (2026-08-15 01:35Z radon-bpi, kill
+    78s before green, paged P1 after only an hour) — but that measure is
+    frozen, so the 24h ``KILL_BEFORE_GREEN_FROZEN_CAP_SECS`` bounds it:
+    a unit still failed past every plausible next-timer fire pages P1.
     """
     if not deploy or unit.get("Result") != "signal":
         return False
@@ -170,6 +179,8 @@ def _is_deploy_collateral(unit: dict, deploy: Optional[dict], now: datetime) -> 
         return False
     if failed_at >= marker:
         return age <= DEPLOY_COLLATERAL_WINDOW_SECS
+    if age > KILL_BEFORE_GREEN_FROZEN_CAP_SECS:
+        return False
     return 0 <= (marker - failed_at).total_seconds() <= DEPLOY_COLLATERAL_WINDOW_SECS
 
 

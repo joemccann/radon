@@ -204,6 +204,47 @@ def _ib_caused_failure(outcome: CheckOutcome) -> bool:
 # api restarted within this window so a deploy doesn't wake the operator.
 API_WARMUP_SUPPRESS_S = 180
 
+# R-056: a restart loop keeps ActiveEnterTimestamp perpetually <180s old (the
+# pool-recovery os._exit(1) ladder cycles every ~185-200s), so the timestamp
+# read alone suppresses every IB-outage page indefinitely. Bound it: after this
+# many CONSECUTIVE warmup-suppressed cycles the grouped page fires anyway.
+# A real warmup clears in seconds — one 5-min cycle; three in a row is a loop.
+WARMUP_SUPPRESS_MAX_CONSECUTIVE = 3
+_WARMUP_SUPPRESS_COUNTER_SERVICE = "ib-gateway-warmup-suppress"
+_WARMUP_SUPPRESS_COUNTER_KIND = "warmup-suppression"
+
+
+def _register_warmup_suppression(*, now: datetime) -> bool:
+    """Count one warmup-suppressed cycle; True while under the ceiling.
+
+    Counter storage failure fails toward paging (False) — a broken
+    counter must never extend the suppression.
+    """
+    try:
+        decision = cooldown_mod.record_failure_and_decide(
+            service=_WARMUP_SUPPRESS_COUNTER_SERVICE,
+            kind=_WARMUP_SUPPRESS_COUNTER_KIND,
+            now=now,
+        )
+    except Exception as exc:  # noqa: BLE001 — storage must not extend suppression
+        log.error("warmup suppression counter unavailable; not suppressing: %s", exc)
+        return False
+    return decision.consecutive_failures <= WARMUP_SUPPRESS_MAX_CONSECUTIVE
+
+
+def _reset_warmup_suppression() -> None:
+    """The ceiling counts CONSECUTIVE cycles: any cycle that does not
+    warmup-suppress (healthy, or a real page fired) restarts the count,
+    so ordinary deploys days apart never accumulate to a spurious page.
+    """
+    try:
+        cooldown_mod.record_success(
+            service=_WARMUP_SUPPRESS_COUNTER_SERVICE,
+            kind=_WARMUP_SUPPRESS_COUNTER_KIND,
+        )
+    except Exception as exc:  # noqa: BLE001 — best-effort reset
+        log.warning("warmup suppression counter reset failed: %s", exc)
+
 
 def _api_recently_restarted(now: datetime, threshold_s: int = API_WARMUP_SUPPRESS_S) -> bool:
     """True iff radon-api's last (re)start was within ``threshold_s`` seconds.
@@ -260,6 +301,7 @@ def dispatch_with_grouping(*, outcomes: Iterable[CheckOutcome], now: datetime) -
     """
     fired = [o for o in outcomes if o.fired]
     if not fired:
+        _reset_warmup_suppression()
         return DispatchSummary()
 
     ib_failing = [o for o in fired if _ib_caused_failure(o)]
@@ -269,6 +311,7 @@ def dispatch_with_grouping(*, outcomes: Iterable[CheckOutcome], now: datetime) -
     delivery_attempted = False
     dispatcher_errors: list[str] = []
     suppressed_count = 0
+    warmup_suppressed = False
     if len(ib_failing) >= GROUPING_THRESHOLD:
         # fetch_health is best-effort but a raised exception (test-double
         # or future bug) must not abort the whole dispatch — fall through
@@ -280,17 +323,24 @@ def dispatch_with_grouping(*, outcomes: Iterable[CheckOutcome], now: datetime) -
             health_payload = {"auth_state": "unknown"}
         auth_state = health_payload.get("auth_state") or "unknown"
         if auth_state in GROUPING_AUTH_STATES:
-            if auth_state == "awaiting_2fa" and _api_recently_restarted(now):
+            if (
+                auth_state == "awaiting_2fa"
+                and _api_recently_restarted(now)
+                and _register_warmup_suppression(now=now)
+            ):
                 # Warmup transient from a radon-api restart (a deploy), not a
                 # real 2FA prompt — the recovery heartbeat clears it in seconds.
                 # Absorb the IB failures so they don't spam per-service, but send
-                # NO push: there is nothing for the operator to approve.
+                # NO push: there is nothing for the operator to approve. Past the
+                # consecutive ceiling the api is restart-LOOPING, not warming up,
+                # and the grouped page fires through the else branch.
                 log.info(
                     "IB grouping suppressed — radon-api restarted <%ds ago; "
                     "awaiting_2fa is pool warmup, not a real 2FA prompt",
                     API_WARMUP_SUPPRESS_S,
                 )
                 grouped_handled = {o.service for o in ib_failing}
+                warmup_suppressed = True
             else:
                 grouped_handled, grouped_dispatcher_error, grouped_attempted = _dispatch_grouped(
                     ib_outcomes=ib_failing,
@@ -321,6 +371,9 @@ def dispatch_with_grouping(*, outcomes: Iterable[CheckOutcome], now: datetime) -
         delivery_attempted = True
         if dispatcher_error:
             dispatcher_errors.append(dispatcher_error)
+
+    if not warmup_suppressed:
+        _reset_warmup_suppression()
 
     # Suppressed outcomes need no dispatcher row. Attempted deliveries share
     # one aggregate write so a later success cannot erase an earlier failure.
