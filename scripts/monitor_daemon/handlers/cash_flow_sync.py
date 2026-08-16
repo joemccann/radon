@@ -24,11 +24,12 @@ Wired into monitor_daemon via scripts/monitor_daemon/run.py:create_daemon().
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -70,6 +71,115 @@ FIRE_WINDOW_HOURS = 1
 # budget exactly like a throttled call (module docstring; May 9 2026).
 MAX_SOFT_ATTEMPTS_PER_ET_DAY = 3
 
+# Margin between the script's own poll budget and the subprocess kill. It
+# has to cover interpreter start, dotenv, the Turso write and a slow final
+# poll — nothing more. The three deadlines must nest:
+#
+#   cash_flow_sync.FLEX_POLL_BUDGET_SECONDS
+#     < subprocess_timeout_seconds()
+#       < CashFlowSyncHandler.max_runtime_seconds
+#
+# They did not nest before 2026-08-16 (569s script budget, 180s subprocess
+# kill, 120s daemon deadline), so the script never reached its own timeout
+# and 14 of the 16 recorded failures were us SIGKILLing our own process
+# mid-poll — each one spending a Flex SendRequest and writing zero rows.
+SUBPROCESS_TIMEOUT_MARGIN_SECONDS = 60.0
+HANDLER_DEADLINE_MARGIN_SECONDS = 60.0
+
+# Exit codes emitted by scripts/cash_flow_sync.py, mapped to how this
+# handler must react. Classifying by exit code (rather than by searching
+# the last three stderr lines for "code 1001") is what stops a permanent
+# auth failure from burning 3 SendRequests every trading day forever.
+EXIT_CONFIG_ERROR = 1
+EXIT_THROTTLE = 10
+EXIT_FLEX_APP_ERROR = 11
+
+_SOFT_EXIT_CLASSES = {
+    12: "not_ready",
+    13: "parse_error",
+    14: "write_error",
+}
+
+
+def _flex_poll_budget_seconds() -> float:
+    """The script's own wall budget. Imported lazily so the daemon never
+    pays for the script's dotenv load at import time."""
+    from cash_flow_sync import FLEX_POLL_BUDGET_SECONDS  # noqa: PLC0415
+
+    return float(FLEX_POLL_BUDGET_SECONDS)
+
+
+def subprocess_timeout_seconds() -> float:
+    """Kill the sync subprocess only AFTER it has spent its own budget."""
+    return _flex_poll_budget_seconds() + SUBPROCESS_TIMEOUT_MARGIN_SECONDS
+
+
+class SyncFailure(RuntimeError):
+    """A classified failure of the sync subprocess.
+
+    ``flex_class`` is the contract between the script's exit code and this
+    handler's breaker bookkeeping. It crosses the subprocess boundary as a
+    number, not as a string a log line could truncate.
+    """
+
+    def __init__(self, message: str, *, flex_class: str, code: Optional[str] = None):
+        super().__init__(message)
+        self.flex_class = flex_class
+        self.code = code
+
+
+def _read_service_health_row(service: str) -> Optional[tuple]:
+    """Bounded, read-only single-row lookup. Lazy import keeps stripped
+    environments importable and lets tests stub the transport."""
+    from db import hrana_http  # noqa: PLC0415
+
+    rows = hrana_http.hrana_execute(
+        "SELECT state, last_attempt_finished_at, last_error "
+        "FROM service_health WHERE service = ?",
+        (service,),
+    )
+    return rows[0] if rows else None
+
+
+def _persisted_next_attempt_at(service: str = "cash-flow-sync") -> Optional[str]:
+    """The `next_attempt_at` this handler last persisted to service_health.
+
+    Independent of `daemon_state.json`, which is why it can rebuild an
+    embargo the state file lost.
+    """
+    row = _read_service_health_row(service)
+    if not row:
+        return None
+    raw = row[2]
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    value = parsed.get("next_attempt_at")
+    return str(value) if value else None
+
+
+def _last_line(stdout: Optional[str]) -> str:
+    lines = (stdout or "").strip().splitlines()
+    return lines[-1] if lines else ""
+
+
+def _parse_status_line(stdout: Optional[str]) -> Dict[str, Any]:
+    """The script's machine-readable last stdout line, or ``{}``.
+
+    Detail only — classification comes from the exit code. A malformed or
+    absent line must never change how a failure is handled.
+    """
+    try:
+        parsed = json.loads(_last_line(stdout))
+    except (ValueError, TypeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
 
 def _now_utc() -> datetime:
     """Indirection to make `datetime.now(tz=UTC)` patchable in tests."""
@@ -104,6 +214,11 @@ class CashFlowSyncHandler(BaseHandler):
     requires_market_hours = False
     service_name = "cash-flow-sync"
 
+    # Must sit ABOVE subprocess_timeout_seconds() so the daemon's generic
+    # REL-008 deadline never preempts this handler's own failure
+    # bookkeeping. Pinned by test_cash_flow_sync_timeout_retry_budget.py.
+    max_runtime_seconds = 540.0
+
     def __init__(self) -> None:
         super().__init__()
         self._backoff_state: Dict[str, Any] = _throttle_backoff.initial_state()
@@ -128,6 +243,37 @@ class CashFlowSyncHandler(BaseHandler):
             }
         else:
             self._backoff_state = _throttle_backoff.initial_state()
+
+    def seed_state_after_corrupt_load(self) -> None:
+        """Rebuild the embargo when `daemon_state.json` could not be read.
+
+        The state file is checksummed and shared by every handler, so one
+        bad write starts this handler blank and forgets a live 24-168h
+        Flex embargo. Re-probing a token IBKR still considers hot extends
+        the sliding window instead of clearing it, which is how a one-day
+        problem becomes a week-long one.
+
+        `service_health.last_error.next_attempt_at` is written on every
+        failed cycle and lives in Turso, so it survives whatever ate the
+        file. Read-only, best-effort, and only ever ADDS an embargo.
+        """
+        next_attempt = _persisted_next_attempt_at(self.service_name or "cash-flow-sync")
+        if not next_attempt:
+            return
+        try:
+            parsed = datetime.fromisoformat(next_attempt)
+        except (ValueError, TypeError):
+            return
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        if parsed <= _now_utc():
+            return
+        self._backoff_state = dict(self._backoff_state)
+        self._backoff_state["blocked_until"] = next_attempt
+        logger.warning(
+            "cash_flow_sync state file was unreadable; embargo rebuilt from "
+            "service_health (next attempt %s)", next_attempt
+        )
 
     # ------------------------------------------------------------------
     # Cadence override — daily window + circuit breaker.
@@ -192,7 +338,7 @@ class CashFlowSyncHandler(BaseHandler):
         try:
             result = self._execute_inner()
         except Exception as exc:
-            self._record_failure(started_at, str(exc))
+            self._record_failure(started_at, str(exc), exc=exc)
             raise
 
         # Defence in depth: if a future caller stubs ``_execute_inner``
@@ -214,38 +360,112 @@ class CashFlowSyncHandler(BaseHandler):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+    def record_deadline_failure(self, message: str) -> None:
+        """Called by the daemon when its hard deadline kills this handler.
+
+        Without this hook the daemon writes a generic error row with no
+        ``next_attempt_at`` (invisible to the incident watchdog's embargo
+        suppression — the 2026-08-04 page storm) and skips the soft-attempt
+        counter entirely, so the next cycle re-probes a token that has
+        already spent a request this evening.
+        """
+        self._record_failure(self._utc_now_iso(), message)
+
+    def _classify_failure(self, message: str, exc: Optional[BaseException]) -> str:
+        """throttle | permanent | config | soft.
+
+        Prefers the typed exception carrying the subprocess's exit code.
+        The stderr substring match is retained ONLY as a fallback for a
+        subprocess from an older deploy, and says so in the log.
+        """
+        if isinstance(exc, FlexThrottleError):
+            return "throttle"
+        flex_class = getattr(exc, "flex_class", None)
+        if flex_class in ("throttle", "permanent", "config"):
+            return flex_class
+        if flex_class is not None:
+            return "soft"
+
+        if "FlexThrottleError" in message or any(
+            f"code {code}" in message for code in ("1001", "1018", "1019")
+        ):
+            logger.warning(
+                "cash_flow_sync throttle classified by stderr substring, not exit "
+                "code — the subprocess predates the typed exit-code contract"
+            )
+            return "throttle"
+        return "soft"
+
     def _record_failure(
         self,
         started_at: str,
         message: str,
+        *,
+        exc: Optional[BaseException] = None,
     ) -> None:
         """Persist failure heartbeat with next_attempt_at metadata."""
-        is_throttle = "FlexThrottleError" in message or any(
-            f"code {code}" in message for code in ("1001", "1018", "1019")
-        )
-
+        failure_class = self._classify_failure(message, exc)
         now_utc = _now_utc()
-        if is_throttle:
+
+        if failure_class == "throttle":
             self._backoff_state = _throttle_backoff.record_throttle(
                 self._backoff_state, now_utc=now_utc
             )
+        elif failure_class == "config":
+            self._record_config_error(now_utc)
+        elif failure_class == "permanent":
+            # Auth failure / unknown query id / undocumented error code.
+            # Retrying cannot flip it, so spend no more of today's budget;
+            # the next 17:00 ET window re-probes once a human has looked.
+            self._advance_soft_attempts(now_utc, to=MAX_SOFT_ATTEMPTS_PER_ET_DAY)
         else:
-            today = _et_date(now_utc)
-            prior = self._backoff_state
-            same_day = prior.get("soft_attempt_date") == today
-            attempts = int(prior.get("soft_attempts") or 0) if same_day else 0
-            self._backoff_state = _throttle_backoff.record_soft_failure(
-                prior, now_utc=now_utc
-            )
-            self._backoff_state["soft_attempt_date"] = today
-            self._backoff_state["soft_attempts"] = attempts + 1
+            self._advance_soft_attempts(now_utc)
 
         next_attempt_at = self._next_attempt_iso(now_utc)
         self.record_cycle_health(
             "error",
             started_at=started_at,
-            error={"message": message, "next_attempt_at": next_attempt_at},
+            error={
+                "message": message,
+                "class": failure_class,
+                "next_attempt_at": next_attempt_at,
+            },
         )
+
+    def _advance_soft_attempts(self, now_utc: datetime, *, to: Optional[int] = None) -> None:
+        """Spend one (or all) of today's soft-retry budget and set the
+        short embargo. Never escalates the throttle ladder."""
+        today = _et_date(now_utc)
+        prior = self._backoff_state
+        same_day = prior.get("soft_attempt_date") == today
+        attempts = int(prior.get("soft_attempts") or 0) if same_day else 0
+        self._backoff_state = _throttle_backoff.record_soft_failure(
+            prior, now_utc=now_utc
+        )
+        self._backoff_state["soft_attempt_date"] = today
+        self._backoff_state["soft_attempts"] = to if to is not None else attempts + 1
+
+    def _record_config_error(self, now_utc: datetime) -> None:
+        """A missing token is a CONFIG error, never a success.
+
+        Before 2026-08-16 this path returned ``{"status": "skip"}``, which
+        is not ``error``, so ``execute()`` fell through to ``_mark_success``
+        and RESET the circuit breaker while syncing nothing — a dropped env
+        var reported healthy forever and masked every real failure.
+
+        The breaker is left exactly as it was (no Flex request was spent,
+        so nothing about the token's rate budget changed) and the embargo
+        is only ever EXTENDED, never shortened, so a config error cannot
+        buy a shorter re-probe than the throttle ladder already imposed.
+        """
+        state = dict(self._backoff_state)
+        cooldown_until = now_utc + timedelta(
+            seconds=_throttle_backoff.SOFT_RETRY_COOLDOWN_SECS
+        )
+        current = _throttle_backoff.blocked_until(state)
+        if current is None or current < cooldown_until:
+            state["blocked_until"] = cooldown_until.isoformat()
+        self._backoff_state = state
 
     def _soft_budget_exhausted(self, now_utc: datetime) -> bool:
         """True when today's ET day already spent its soft-retry budget —
@@ -295,33 +515,62 @@ class CashFlowSyncHandler(BaseHandler):
         or the 24h+ embargo from ``record_throttle``).
         """
         if not os.environ.get("IB_FLEX_TOKEN") or not os.environ.get("IB_FLEX_NAV_QUERY_ID"):
-            return {"status": "skip", "reason": "IB_FLEX_TOKEN / IB_FLEX_NAV_QUERY_ID not configured"}
+            raise SyncFailure(
+                "IB_FLEX_TOKEN / IB_FLEX_NAV_QUERY_ID not configured",
+                flex_class="config",
+            )
 
         script = PROJECT_ROOT / "scripts" / "cash_flow_sync.py"
         if not script.exists():
-            raise RuntimeError(f"script not found: {script}")
+            raise SyncFailure(f"script not found: {script}", flex_class="config")
 
+        timeout_s = subprocess_timeout_seconds()
         try:
             result = subprocess.run(
                 [sys.executable, "-m", "scripts.cash_flow_sync"],
                 cwd=str(PROJECT_ROOT),
                 capture_output=True,
                 text=True,
-                timeout=180,
+                timeout=timeout_s,
             )
         except subprocess.TimeoutExpired:
-            raise RuntimeError("cash_flow_sync timed out after 180s") from None
+            raise RuntimeError(f"cash_flow_sync timed out after {timeout_s:.0f}s") from None
         except Exception as exc:
             raise RuntimeError(str(exc)) from exc
 
-        if result.returncode != 0:
-            tail = (result.stderr or result.stdout or "").splitlines()[-3:]
-            error_msg = " | ".join(tail)
-            logger.warning("cash_flow_sync failed: %s", error_msg)
-            raise RuntimeError(error_msg)
+        status = _parse_status_line(result.stdout)
 
-        last_line = (result.stdout or "").strip().splitlines()[-1] if result.stdout else ""
-        return {"status": "ok", "summary": last_line}
+        if result.returncode != 0:
+            raise self._failure_for(result, status)
+
+        return {"status": "ok", "summary": _last_line(result.stdout), "detail": status}
+
+    @staticmethod
+    def _failure_for(result: Any, status: Dict[str, Any]) -> BaseException:
+        """Map the subprocess exit code onto a typed, classified failure."""
+        tail = (result.stderr or result.stdout or "").splitlines()[-3:]
+        message = " | ".join(tail) or f"cash_flow_sync exited {result.returncode}"
+        logger.warning("cash_flow_sync failed (exit %s): %s", result.returncode, message)
+
+        code = result.returncode
+        if code == EXIT_THROTTLE:
+            return FlexThrottleError(str(status.get("code") or "unknown"), message)
+        if code == EXIT_FLEX_APP_ERROR:
+            return SyncFailure(message, flex_class="permanent",
+                               code=str(status.get("code") or ""))
+        if code == EXIT_CONFIG_ERROR:
+            # Exit 1 is also the LEGACY catch-all: a subprocess from a
+            # pre-2026-08-16 deploy exits 1 for a throttle too. Only the
+            # status line proves it is really a config error; without one,
+            # fall through to the stderr substring classifier.
+            if status.get("class") == "config_error":
+                return SyncFailure(message, flex_class="config")
+            return RuntimeError(message)
+        if code in _SOFT_EXIT_CLASSES:
+            return SyncFailure(message, flex_class=_SOFT_EXIT_CLASSES[code])
+        # Unknown exit code from an older deploy: fall back to the stderr
+        # substring classifier in ``_record_failure``.
+        return RuntimeError(message)
 
 
 # Re-export so callers can `from cash_flow_sync import FlexThrottleError`.

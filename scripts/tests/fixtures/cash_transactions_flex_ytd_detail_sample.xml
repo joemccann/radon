@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Slice of the operator's SECOND real IBKR Flex export ("Equity Summary in
+  Base", AF, period YearToDate 20260101..20260814, whenGenerated
+  20260816;130354). 225 CashTransaction rows, ALL levelOfDetail="DETAIL",
+  none missing a transactionID, plus a 13-row <Transfers> section and 163
+  <EquitySummaryByReportDateInBase> rows.
+
+  Rows verbatim except:
+    * accountId scrubbed to U0000000
+    * the masked IBKR username in the market-data fee description scrubbed
+    * the delivering broker's account number scrubbed
+    * trimmed to 3 CashTransaction / 2 Transfer / 1 EquitySummary rows
+
+  Why a SECOND fixture: cash_transactions_flex_sample.xml is the LEGACY
+  query shape (Last365CalendarDays, no levelOfDetail attribute, IBKR
+  aggregate rows with a blank transactionID, no Transfers section). This
+  one is the CURRENT shape. Whether those sections appear at all is a
+  checkbox in the IBKR query builder, and the difference silently changes
+  every downstream total — which is exactly what describe_statement_shape
+  exists to make visible.
+-->
+<FlexQueryResponse queryName="Equity Summary in Base" type="AF">
+<FlexStatements count="1">
+<FlexStatement accountId="U0000000" fromDate="20260101" toDate="20260814" period="YearToDate" whenGenerated="20260816;130354">
+<EquitySummaryInBase>
+<EquitySummaryByReportDateInBase accountId="U0000000" currency="USD" reportDate="20251231" cash="-30650.42352383" stock="130380.51" total="99492.93647617" />
+</EquitySummaryInBase>
+<CashTransactions>
+<CashTransaction accountId="U0000000" currency="USD" fxRateToBase="1" description="CANCEL[J*****00:OPRA NP L1] FOR DEC 2025" multiplier="0" dateTime="20260105;125637" settleDate="20260105" amount="1.5" type="Other Fees" transactionID="37134609475" reportDate="20260105" levelOfDetail="DETAIL" />
+<CashTransaction accountId="U0000000" currency="USD" fxRateToBase="1" description="USD CREDIT INT FOR DEC-2025" multiplier="0" dateTime="20260106" settleDate="20260106" amount="25.89" type="Broker Interest Received" transactionID="37155398573" reportDate="20260106" levelOfDetail="DETAIL" />
+<CashTransaction accountId="U0000000" currency="USD" fxRateToBase="1" description="ADJUSTMENT: DEPOSIT ADVANCE" multiplier="0" dateTime="20260113;165022" settleDate="20260114" amount="80007.13" type="Deposits/Withdrawals" transactionID="37308647311" reportDate="20260113" clientReference="First 80,007.13 of 100,000.00 Deposit" levelOfDetail="DETAIL" />
+</CashTransactions>
+<Transfers>
+<Transfer accountId="U0000000" currency="USD" fxRateToBase="1" assetCategory="STK" symbol="MSFT" description="MICROSOFT CORP" conid="272093" reportDate="20260206" date="20260206" dateTime="20260206" settleDate="20260209" type="ACATS" direction="IN" company="--" account="XXXXXXXX" deliveringBroker="0158" quantity="1000" transferPrice="0" positionAmount="393670" positionAmountInBase="393670" cashTransfer="0" transactionID="37884824872" levelOfDetail="TRANSFER" cost="468505.27" />
+<Transfer accountId="U0000000" currency="USD" fxRateToBase="1" assetCategory="CASH" symbol="--" description="--" multiplier="0" reportDate="20260206" date="20260206" dateTime="20260206" settleDate="20260209" type="ACATS" direction="IN" company="--" account="XXXXXXXX" quantity="0" transferPrice="0" positionAmount="0" positionAmountInBase="0" cashTransfer="-305947.84" transactionID="37884824874" levelOfDetail="TRANSFER" />
+</Transfers>
+</FlexStatement>
+</FlexStatements>
+</FlexQueryResponse>
