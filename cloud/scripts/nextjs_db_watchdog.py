@@ -182,8 +182,18 @@ def main() -> None:
         return
 
     if verdict == "unknown":
-        # Auth perimeter or missing probe token — not a Turso wedge.
+        # Auth perimeter or missing probe token — not a Turso wedge, but not
+        # nothing either: while the probe cannot authenticate, the auto-restart
+        # this unit exists for is disabled. Writing no row at all let a token
+        # rotated on the Next.js side silently and permanently switch the
+        # watchdog off while the unit kept exiting 0 (R-059).
         log(f"probe unknown ({reason}); standing down, not a Node-local Turso wedge")
+        write_health_row(
+            "error",
+            f"freshness probe unusable ({reason}); the auto-restart is disabled "
+            "until the probe authenticates. Not a Node-local DB stall — check "
+            "RADON_PROBE_FRESHNESS_TOKEN on both sides",
+        )
         save_state({
             "consecutive_wedges": state.get("consecutive_wedges", 0),
             "last_restart_epoch": state.get("last_restart_epoch", 0),

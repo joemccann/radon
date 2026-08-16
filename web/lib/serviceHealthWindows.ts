@@ -80,6 +80,10 @@ const DAY = 24 * HOUR;
 export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   "newsfeed-scraper": { open: 5 * MIN, extended: 5 * MIN, closed: 5 * MIN, category: "scheduled", requires_ib: false },
 
+  // radon-nextjs-db-watchdog fires every 60s around the clock. Registered so
+  // a wedged or never-firing watchdog is itself staleness-checked (REL-033).
+  "nextjs-db-read": { open: 5 * MIN, extended: 5 * MIN, closed: 5 * MIN, category: "scheduled", requires_ib: false },
+
   // Market-hours-only IB feeds. The monitor daemon gates these on
   // `requires_market_hours=True`, so they only run 09:30–16:00 ET. The
   // ``extended`` window must match ``closed`` — pre-market (04:00–09:30
