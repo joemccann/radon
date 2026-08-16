@@ -17,6 +17,11 @@ const TIME_OPTS: Intl.DateTimeFormatOptions = {
   hour12: true,
 };
 
+const COMPACT_DATE_OPTS: Intl.DateTimeFormatOptions = {
+  month: "short",
+  day: "numeric",
+};
+
 const LOCALE = "en-US";
 
 export function formatAbsolute(timestamp: string): string {
@@ -29,6 +34,25 @@ export function formatTime(timestamp: string): string {
   const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) return "";
   return new Intl.DateTimeFormat(LOCALE, TIME_OPTS).format(date);
+}
+
+/** Single-token timestamp for narrow surfaces. Relative inside a week, short
+ *  date beyond, so the mobile footer can never wrap and orphan a fragment. */
+export function formatCompact(timestamp: string, now: number = Date.now()): string {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return "";
+  const diff = now - date.getTime();
+  const minute = 60 * 1000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+  if (diff < minute) return "moments ago";
+  if (diff < hour) return `${Math.max(1, Math.round(diff / minute))} min ago`;
+  if (diff < day) return `${Math.max(1, Math.round(diff / hour))} hr ago`;
+  if (diff < 7 * day) {
+    const days = Math.max(1, Math.round(diff / day));
+    return `${days} day${days === 1 ? "" : "s"} ago`;
+  }
+  return new Intl.DateTimeFormat(LOCALE, COMPACT_DATE_OPTS).format(date);
 }
 
 export function formatRelative(timestamp: string, now: number = Date.now()): string {

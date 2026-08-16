@@ -1,0 +1,14 @@
+[Unit]
+Description=Radon VIXCOR Indicator - daily Cboe VIX x COR3M correlation
+
+[Timer]
+# 02:35 UTC, 15 minutes behind radon-cor.timer (02:20 UTC, TimeoutStartSec=300)
+# so the COR3M row for the session is already in Turso when this child reads
+# it. Runs every calendar day: weekend and holiday runs are 304 heartbeats
+# that keep service_health fresh inside the 26h staleness window.
+OnCalendar=*-*-* 02:35:00 UTC
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

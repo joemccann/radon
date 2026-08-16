@@ -277,6 +277,7 @@ class TestCollectorsAreNotBlind:
         names = set(collect_direct_record_service_health_names())
         expected = {
             "cor",
+            "vixcor",
             "straddle",
             "vol-cone",
             "skew",

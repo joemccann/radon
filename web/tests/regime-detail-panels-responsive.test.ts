@@ -18,7 +18,8 @@ describe("Regime detail panels responsive layout", () => {
   it("stacks the detail panels at narrower widths through CSS", () => {
     expect(cssSource).toContain(".regime-detail-grid");
     expect(cssSource).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))");
-    expect(cssSource).toContain("@media (max-width: 980px)");
+    // 1240px, not 980px: the grouped rail takes 260px from the detail pane.
+    expect(cssSource).toContain("@media (max-width: 1240px)");
     expect(cssSource).toContain("grid-template-columns: 1fr");
   });
 });
