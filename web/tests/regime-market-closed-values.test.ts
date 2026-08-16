@@ -11,7 +11,11 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { fileURLToPath } from "url";
-import { resolveCrashTriggerState, resolveRegimeStripLiveState } from "../lib/regimeLiveStrip";
+import {
+  CRASH_TRIGGER_CORRELATION_THRESHOLD,
+  resolveCrashTriggerState,
+  resolveRegimeStripLiveState,
+} from "../lib/regimeLiveStrip";
 import type { PriceData } from "../lib/pricesProtocol";
 
 // Minimal price entry — resolveRegimeStripLiveState only reads .last and .close.
@@ -44,8 +48,12 @@ describe("RegimePanel — COR1M replaces sector ETF correlation inputs", () => {
     expect(panelSource).not.toContain("resetBuffer");
   });
 
-  it("uses COR1M > 60 for the crash-trigger label", () => {
-    expect(panelSource).toContain("COR1M > 60");
+  it("renders the crash-trigger label from the threshold the trigger uses", () => {
+    // Not a grep for the number: the panel must interpolate the same exported
+    // constant `resolveCrashTriggerState` compares against, so the label and
+    // the behaviour cannot drift (the whole point of T-069).
+    expect(panelSource).toContain("COR1M > ${CRASH_TRIGGER_CORRELATION_THRESHOLD}");
+    expect(panelSource).not.toMatch(/label="COR1M > \d/);
   });
 });
 
@@ -95,6 +103,13 @@ describe("resolveRegimeStripLiveState — prefers live WS values, gated on marke
 });
 
 describe("RegimePanel live COR1M crash trigger", () => {
+  it("pins the crash-trigger threshold at 60", () => {
+    // A hard literal on purpose. Every boundary row below is also literal:
+    // deriving them from the constant would move the expectations in lockstep
+    // with the constant and pin nothing at all.
+    expect(CRASH_TRIGGER_CORRELATION_THRESHOLD).toBe(60);
+  });
+
   it("updates the crash-trigger decision from the active live COR1M value", () => {
     expect(resolveCrashTriggerState({
       liveCorrelation: true,
@@ -103,6 +118,53 @@ describe("RegimePanel live COR1M crash trigger", () => {
       spxBelowMa: true,
       realizedVolMet: true,
     })).toEqual({ correlationMet: true, triggered: true });
+  });
+
+  // The threshold is strict (>), so the boundary itself must NOT fire. Without
+  // these three rows the trigger could move to 50 and every other assertion in
+  // the file would stay green while the CRI crash trigger fired ~10
+  // correlation points early.
+  it.each([
+    [59.9, false],
+    [60, false],
+    [60.1, true],
+  ])("correlation %p → correlationMet %p", (correlation, expected) => {
+    expect(resolveCrashTriggerState({
+      liveCorrelation: true,
+      correlation,
+      cachedCorrelationMet: false,
+      spxBelowMa: true,
+      realizedVolMet: true,
+    })).toEqual({ correlationMet: expected, triggered: expected });
+  });
+
+  it("falls through to the cached decision when the live value is absent", () => {
+    for (const cached of [true, false]) {
+      expect(resolveCrashTriggerState({
+        liveCorrelation: false,
+        correlation: 99,
+        cachedCorrelationMet: cached,
+        spxBelowMa: true,
+        realizedVolMet: true,
+      })).toEqual({ correlationMet: cached, triggered: cached });
+      expect(resolveCrashTriggerState({
+        liveCorrelation: true,
+        correlation: null,
+        cachedCorrelationMet: cached,
+        spxBelowMa: true,
+        realizedVolMet: true,
+      })).toEqual({ correlationMet: cached, triggered: cached });
+    }
+  });
+
+  it("suppresses the trigger when SPX is above its MA or realized vol is unmet", () => {
+    const met = { liveCorrelation: true, correlation: 72, cachedCorrelationMet: true };
+    expect(resolveCrashTriggerState({ ...met, spxBelowMa: false, realizedVolMet: true }))
+      .toEqual({ correlationMet: true, triggered: false });
+    expect(resolveCrashTriggerState({ ...met, spxBelowMa: true, realizedVolMet: false }))
+      .toEqual({ correlationMet: true, triggered: false });
+    expect(resolveCrashTriggerState({ ...met, spxBelowMa: false, realizedVolMet: false }))
+      .toEqual({ correlationMet: true, triggered: false });
   });
 });
 

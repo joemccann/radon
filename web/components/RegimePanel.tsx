@@ -32,7 +32,11 @@ import type { ChartSeries, CriHistoryEntry } from "./CriHistoryChart";
 import InfoTooltip from "./InfoTooltip";
 import type { PriceData } from "@/lib/pricesProtocol";
 import { chartSeriesColor } from "@/lib/chartSystem";
-import { resolveCrashTriggerState, resolveRegimeStripLiveState } from "@/lib/regimeLiveStrip";
+import {
+  CRASH_TRIGGER_CORRELATION_THRESHOLD,
+  resolveCrashTriggerState,
+  resolveRegimeStripLiveState,
+} from "@/lib/regimeLiveStrip";
 import { useRegime } from "@/lib/useRegime";
 import { useVcg } from "@/lib/useVcg";
 import { useGex } from "@/lib/useGex";
@@ -730,7 +734,7 @@ export default function RegimePanel({
                 live={false}
               />
               <TriggerRow
-                label="COR1M > 60"
+                label={`COR1M > ${CRASH_TRIGGER_CORRELATION_THRESHOLD}`}
                 met={crashTrigger.correlationMet}
                 value={fmt(activeCorr, 2)}
                 live={effectiveHasLiveCor1m}
