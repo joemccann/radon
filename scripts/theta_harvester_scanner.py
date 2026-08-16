@@ -23,7 +23,18 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from clients.uw_client import UWAPIError, UWClient, UWRateLimitError
-from utils.scan_coverage import coverage_block, payload_has_candidates, should_persist_scan
+from utils.scan_coverage import (
+    coverage_block,
+    is_coverage_failed,
+    payload_has_candidates,
+    should_persist_scan,
+)
+from utils.scan_health import (
+    SCAN_STATUS_BUDGET_BLOCKED,
+    SCAN_STATUS_COVERAGE_FAILED,
+    next_quota_reset_iso,
+    record_scan_degraded,
+)
 from utils.uw_budget import should_block_universe_scan
 from utils.uw_surface import fetch_surface
 
@@ -710,16 +721,24 @@ def scan_universe(
             f"UW daily budget block; skipping universe scan ({source})",
             file=sys.stderr,
         )
+        record_scan_degraded(
+            "theta-harvester",
+            SCAN_STATUS_BUDGET_BLOCKED,
+            f"UW daily budget block; universe scan skipped ({source})",
+            next_attempt_at=next_quota_reset_iso(),
+        )
         prior = _read_cache_file(_CACHE_PATH)
         if payload_has_candidates(prior):
-            return prior
-        return build_output(
+            return {**prior, "scan_status": SCAN_STATUS_BUDGET_BLOCKED}
+        blocked = build_output(
             [], source, len(resolved), requested_tickers=resolved,
             params={"min_dte": min_dte, "max_dte": max_dte, "min_credit": min_credit},
             coverage=coverage_block(
                 tickers=len(resolved), ok=0, no_setup=0, rate_limited=0, errors=0,
             ),
         )
+        blocked["scan_status"] = SCAN_STATUS_BUDGET_BLOCKED
+        return blocked
     print(f"Scanning {len(resolved)} tickers for theta harvest ({source})...", file=sys.stderr)
 
     results: List[ThetaCandidate] = []
@@ -781,7 +800,7 @@ def scan_universe(
                 if row.earnings is None and not any(e.startswith("earnings:") for e in row.errors):
                     row.errors.append(f"earnings:{exc}")
 
-    return build_output(
+    payload = build_output(
         results, source, len(resolved), requested_tickers=resolved,
         params={"min_dte": min_dte, "max_dte": max_dte, "min_credit": min_credit},
         coverage=coverage_block(
@@ -789,6 +808,15 @@ def scan_universe(
             rate_limited=rate_limited, errors=errors,
         ),
     )
+    if not tickers and is_coverage_failed(payload):
+        payload["scan_status"] = SCAN_STATUS_COVERAGE_FAILED
+        cov = payload["coverage"]
+        record_scan_degraded(
+            "theta-harvester",
+            SCAN_STATUS_COVERAGE_FAILED,
+            f"UW coverage failed; completed {cov['completed']}/{cov['tickers']} ({source})",
+        )
+    return payload
 
 
 def _read_cache_file(path: Path) -> Optional[Dict[str, Any]]:
@@ -800,6 +828,9 @@ def _read_cache_file(path: Path) -> Optional[Dict[str, Any]]:
 
 
 def save_cache(payload: Dict[str, Any], path: Path = _CACHE_PATH) -> bool:
+    # scan_status is transient run telemetry — persisting it would let a
+    # blocked run's marker outlive the block inside the last-good snapshot.
+    payload = {key: value for key, value in payload.items() if key != "scan_status"}
     prior = _read_cache_file(path)
     if not should_persist_scan(payload, prior):
         print("Empty theta scan — preserving last good cache", file=sys.stderr)
