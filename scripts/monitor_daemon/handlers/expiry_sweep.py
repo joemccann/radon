@@ -173,10 +173,31 @@ def _net_open_quantity(rows: list[dict[str, Any]]) -> tuple[int, bool]:
     ambiguous — never guess with journal writes.
     """
     groups: dict[tuple, dict[str, int]] = {}
+    # A Flex round trip nets to zero on its own, but it also ACCOUNTS FOR the
+    # sale the real-time daemon may have journaled separately under the other
+    # id convention. It carries no close date, so it cannot join the per-day
+    # pairing below — hold its quantity aside and let it absorb an otherwise
+    # unpaired plain row for the same contract. Dropping these rows outright
+    # made a completed round trip read as a genuine open short, and the sweep
+    # then wrote a $0.00 BUY_TO_CLOSE for a contract never held (R-063).
+    round_trip_comp: dict[int, int] = {1: 0, -1: 0}
     ambiguous = False
     for payload in rows:
         action = str(payload.get("action") or "").upper()
         if action == _ROUND_TRIP_ACTION:
+            if not _is_rehydrate_row(payload):
+                continue
+            try:
+                qty = abs(int(
+                    payload.get("total_round_trip_quantity")
+                    or payload.get("contracts")
+                    or 0
+                ))
+            except (TypeError, ValueError):
+                ambiguous = True
+                continue
+            round_trip_comp[1] += qty
+            round_trip_comp[-1] += qty
             continue
         sign = _ACTION_SIGNS.get(action)
         if sign is None:
@@ -201,6 +222,10 @@ def _net_open_quantity(rows: list[dict[str, Any]]) -> tuple[int, bool]:
                 ambiguous = True
             net += sign * max(comp, plain)
         else:
+            if plain and not comp and round_trip_comp[sign] > 0:
+                absorbed = min(plain, round_trip_comp[sign])
+                round_trip_comp[sign] -= absorbed
+                plain -= absorbed
             unpaired_comp = unpaired_comp or bool(comp)
             unpaired_plain = unpaired_plain or bool(plain)
             net += sign * (comp + plain)
@@ -367,13 +392,16 @@ class ExpirySweepHandler(BaseHandler):
         if close_id in candidate["exec_ids"]:
             return True
 
+        # Inclusive of the expiration date itself: an assignment, exercise or
+        # closing fill booked ON expiry day demonstrably handled this contract,
+        # and a strict > skipped that guard entirely (R-074).
         expiry_iso = expiry_date.strftime("%Y-%m-%d")
-        if candidate["last_date"] > expiry_iso:
+        if candidate["last_date"] >= expiry_iso:
             return True
 
         key = _contract_key(payload)
         for item in executed:
-            if _executed_contract_key(item["payload"]) == key and item["fill_date"] > expiry_iso:
+            if _executed_contract_key(item["payload"]) == key and item["fill_date"] >= expiry_iso:
                 return True
         return False
 
