@@ -53,6 +53,11 @@ class FreshnessWindow(TypedDict):
 # Windows in seconds.
 SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     "newsfeed-scraper": {"open": 5 * _MIN, "closed": 5 * _MIN, "requires_ib": False},
+    # radon-nextjs-db-watchdog fires every 60s around the clock (writer:
+    # cloud/scripts/nextjs_db_watchdog.py). Registered so a wedged or
+    # never-firing watchdog is itself staleness-checked — without this its
+    # row could sit stale forever with nobody watching (REL-033).
+    "nextjs-db-read":   {"open": 5 * _MIN, "closed": 5 * _MIN, "requires_ib": False},
     # Market-hours-only writers (gated by MonitorDaemon's
     # requires_market_hours=True). Mirrors web/lib/serviceHealthWindows.ts;
     # closed window absorbs the longest weekend gap so the banner doesn't

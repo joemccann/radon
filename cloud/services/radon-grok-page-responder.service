@@ -20,7 +20,13 @@ StandardOutput=journal
 StandardError=journal
 NoNewPrivileges=yes
 PrivateTmp=yes
-InaccessiblePaths=/var/run/docker.sock /usr/bin/docker /usr/local/sbin/radon-deploy-root
+# The stripped EnvironmentFile above is pointless if the agent can read the
+# real secrets off disk: /home/radon/radon-cloud/.env is 0600 radon-owned and
+# this unit runs as radon. ProtectHome=tmpfs would also hide the clone and the
+# venv it executes from, so the secrets are denied by path instead.
+InaccessiblePaths=/var/run/docker.sock /usr/bin/docker /usr/local/sbin/radon-deploy-root /home/radon/radon-cloud
+ReadOnlyPaths=/home/radon
+ReadWritePaths=/home/radon/radon-page-responder
 
 [Install]
 WantedBy=multi-user.target

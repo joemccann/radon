@@ -72,6 +72,9 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
+from clients.journal_basis import contract_fill_fingerprint  # noqa: E402
+from utils.exec_ids import exec_id_root  # noqa: E402
+
 # ── env load ──────────────────────────────────────────────────────────────────
 try:
     from dotenv import load_dotenv
@@ -114,37 +117,93 @@ def _assert_not_under_pytest() -> None:
 
 # ── journal exec-id coverage ──────────────────────────────────────────────────
 
-def _journal_covered_exec_ids(db: Any) -> set[str]:
-    """Build the set of individual exec_id parts that are already in journal.
+class JournalCoverage:
+    """What the journal already accounts for, across BOTH id conventions.
 
-    A journal payload carries ib_exec_id; for multi-fill orders the live
-    rehydrate path joins parts with '+'.  We split every stored ib_exec_id
-    on '+' so individual parts are treated as covered.
+    `executed_orders.exec_id` is the IB API execId; Flex rehydrate journals
+    the same fill under the numeric Flex `tradeID` (trade_blotter/
+    flex_query.py prefers `tradeID`). Exact-string matching on one namespace
+    therefore reads every rehydrated fill as an uncovered gap — and since the
+    evening sweep runs `dry_run=False` unattended, it journals it a second
+    time and doubles net quantity, basis and realized P&L (R-049).
+
+    Three layers, most → least precise:
+      1. exact exec id (and the parts of a composite id);
+      2. IB correction root, so a re-delivered `<root>.02` is not a second
+         fill (mirrors `journal_rehydrate._existing_exec_roots`);
+      3. contract + ET session date + signed quantity, the identity both
+         writers agree on regardless of id namespace.
     """
-    covered: set[str] = set()
-    rows = db.execute(
-        "SELECT payload FROM journal WHERE payload LIKE '%ib_exec_id%'"
-    ).fetchall()
+
+    def __init__(self, exec_ids: set[str], roots: set[str], fingerprints: set[tuple]):
+        self.exec_ids = exec_ids
+        self.roots = roots
+        self.fingerprints = fingerprints
+
+    def covers_exec_id(self, exec_id: str) -> bool:
+        if exec_id in self.exec_ids:
+            return True
+        root, correction = exec_id_root(exec_id)
+        return correction > 0 and root in self.roots
+
+    def covers_fill(self, journal_payload: Dict[str, Any]) -> bool:
+        fingerprint = contract_fill_fingerprint(journal_payload)
+        return fingerprint is not None and fingerprint in self.fingerprints
+
+    def record(self, exec_id: str, journal_payload: Dict[str, Any]) -> None:
+        """Account for a row inserted during this run so the next EO row in
+        the same batch cannot re-insert it."""
+        self.exec_ids.add(str(exec_id))
+        root, correction = exec_id_root(exec_id)
+        if root:
+            self.roots.add(root)
+        fingerprint = contract_fill_fingerprint(journal_payload)
+        if fingerprint is not None:
+            self.fingerprints.add(fingerprint)
+
+
+def _journal_coverage(db: Any) -> JournalCoverage:
+    """Read the journal once and build every coverage layer from it."""
+    exec_ids: set[str] = set()
+    roots: set[str] = set()
+    fingerprints: set[tuple] = set()
+
+    rows = db.execute("SELECT payload FROM journal").fetchall()
     for (raw,) in rows:
         try:
             payload = json.loads(raw) if isinstance(raw, str) else raw
         except (json.JSONDecodeError, TypeError):
             continue
+        if not isinstance(payload, dict):
+            continue
+
+        fingerprint = contract_fill_fingerprint(payload)
+        if fingerprint is not None:
+            fingerprints.add(fingerprint)
+
         exec_id = payload.get("ib_exec_id")
         if not exec_id:
             continue
-        covered.add(str(exec_id))
+        exec_ids.add(str(exec_id))
         for part in str(exec_id).split("+"):
             part = part.strip()
-            if part:
-                covered.add(part)
-    return covered
+            if not part:
+                continue
+            exec_ids.add(part)
+            root, _correction = exec_id_root(part)
+            if root:
+                roots.add(root)
+    return JournalCoverage(exec_ids, roots, fingerprints)
+
+
+def _journal_covered_exec_ids(db: Any) -> set[str]:
+    """Back-compat accessor: the exact/composite exec id layer only."""
+    return _journal_coverage(db).exec_ids
 
 
 def _exec_id_in_journal(db: Any, exec_id: str) -> bool:
     """Idempotency check: true if exec_id is already covered in journal."""
-    covered = _journal_covered_exec_ids(db)
-    return exec_id in covered
+    return _journal_coverage(db).covers_exec_id(exec_id)
 
 
 # ── executed_orders scan ──────────────────────────────────────────────────────
@@ -327,7 +386,7 @@ def backfill(
     # fills for the same contract are processed (critical for MU C1050 @110/@108).
     executed = sorted(executed, key=lambda r: r.get("fill_time") or "")
 
-    covered = _journal_covered_exec_ids(db)
+    coverage = _journal_coverage(db)
 
     # Accumulate prior_qty per contract as we insert rows within this run,
     # mirroring _fills_to_entries' in-cycle prior_state mutation.
@@ -338,7 +397,7 @@ def backfill(
     for row in executed:
         exec_id = row["exec_id"]
 
-        if exec_id in covered:
+        if coverage.covers_exec_id(exec_id):
             log.debug("  SKIP  %s — already in journal", exec_id)
             actions.append({"exec_id": exec_id, "status": "skipped"})
             continue
@@ -353,6 +412,17 @@ def backfill(
         except Exception as exc:  # noqa: BLE001
             log.warning("  ERR   %s — failed to reconstruct from executed_orders: %s", exec_id, exc)
             actions.append({"exec_id": exec_id, "status": "reconstruction_failed", "error": str(exc)})
+            continue
+
+        # The reconstructed row is what the id-independent check needs: only
+        # now do we know this fill's contract, session date and signed size.
+        if coverage.covers_fill(journal_payload):
+            log.info(
+                "  SKIP  %s — same fill already journaled under another id "
+                "convention (contract/date/quantity match)",
+                exec_id,
+            )
+            actions.append({"exec_id": exec_id, "status": "skipped"})
             continue
 
         if dry_run:
@@ -375,12 +445,14 @@ def backfill(
             actions.append(action)
         else:
             # Re-check immediately before insert for idempotency under races.
-            if _exec_id_in_journal(db, exec_id):
+            fresh = _journal_coverage(db)
+            if fresh.covers_exec_id(exec_id) or fresh.covers_fill(journal_payload):
                 log.info("  SKIP  %s — appeared in journal between scan and insert", exec_id)
                 actions.append({"exec_id": exec_id, "status": "skipped"})
                 continue
 
             upsert_journal_entry(trade_id, journal_payload, filled_at)
+            coverage.record(exec_id, journal_payload)
             log.info(
                 "  INSERT %s — trade_id=%s filled_at=%s ticker=%s action=%s contracts=%s from_eo=%s",
                 exec_id,

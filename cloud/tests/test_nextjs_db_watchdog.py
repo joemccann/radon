@@ -109,8 +109,11 @@ def test_http_401_does_not_restart_or_count_as_wedge(watchdog, monkeypatch):
     assert restarts == []
     assert state["consecutive_wedges"] == 2
     assert canary_calls == []
-    assert not any(row[0] == "error" for row in health)
-    assert not any("Turso wedge" in row[1] for row in health)
+    # REL-033: the row IS written now (an unauthenticated probe means the
+    # auto-restart is off and somebody has to see that), but it must never
+    # claim the Node-local DB stall this unit restarts for.
+    assert health and health[-1][0] == "error"
+    assert not any("in-process Turso wedge" in row[1] for row in health)
 
 
 def test_http_403_does_not_restart_or_count_as_wedge(watchdog, monkeypatch):
@@ -128,7 +131,8 @@ def test_http_403_does_not_restart_or_count_as_wedge(watchdog, monkeypatch):
     assert restarts == []
     assert state["consecutive_wedges"] == 2
     assert canary_calls == []
-    assert health == []
+    # REL-033: visible, but still not counted as a wedge and still no restart.
+    assert health and health[-1][0] == "error"
 
 
 def test_missing_token_stands_down_without_restart(watchdog, monkeypatch):
@@ -145,7 +149,7 @@ def test_missing_token_stands_down_without_restart(watchdog, monkeypatch):
     assert restarts == []
     assert state["consecutive_wedges"] == 0
     assert canary_calls == []
-    assert health == []
+    assert health and health[-1][0] == "error"
 
 
 def test_bearer_probe_succeeds_on_healthy_200(watchdog, monkeypatch):
@@ -193,3 +197,71 @@ def test_turso_error_row_on_200_still_restarts_after_threshold(watchdog, monkeyp
     assert restarts == ["restart"]
     assert health and health[0][0] == "error"
     assert "in-process Turso wedge" in health[0][1]
+
+
+# ---------------------------------------------------------------------------
+# REL-033 (R-059) — the `unknown` verdict logs, re-saves state and returns
+# WITHOUT ever calling write_health_row, unlike the ok and restart paths. And
+# HEALTH_ROW_SERVICE is in neither watchdog catalog, so the resulting stale row
+# is never staleness-checked either. A token rotated on the Next.js side alone
+# therefore silently and permanently disables the Turso-wedge auto-restart:
+# the unit exits 0 green every 60s with nobody watching the row. A MISSING
+# token is deploy-gated by required-env.txt; a WRONG one is not.
+# ---------------------------------------------------------------------------
+
+SERVICES_PY = REPO_ROOT / "scripts" / "watchdog" / "services.py"
+WINDOWS_TS = REPO_ROOT / "web" / "lib" / "serviceHealthWindows.ts"
+
+
+class TestUnknownVerdictIsVisible:
+    def test_http_401_writes_a_non_ok_health_row(self, watchdog, monkeypatch):
+        module, _state_path, restarts, health, _canary = watchdog
+        monkeypatch.setenv("RADON_PROBE_FRESHNESS_TOKEN", "wrong-token")
+
+        def _urlopen(req, timeout=None):
+            raise _http_error(module.PROBE_URL, 401, "Unauthorized")
+
+        monkeypatch.setattr(module.urllib.request, "urlopen", _urlopen)
+        module.main()
+
+        assert restarts == []
+        assert health, "an unknown verdict wrote no row at all — nobody can see it"
+        assert health[-1][0] != "ok"
+        # It must not claim a Turso wedge: that is a different failure.
+        assert "Turso wedge" not in health[-1][1]
+
+    def test_missing_token_writes_a_non_ok_health_row(self, watchdog, monkeypatch):
+        module, _state_path, restarts, health, _canary = watchdog
+        monkeypatch.delenv("RADON_PROBE_FRESHNESS_TOKEN", raising=False)
+
+        def _boom(*_a, **_k):
+            raise AssertionError("must not probe without a token")
+
+        monkeypatch.setattr(module.urllib.request, "urlopen", _boom)
+        module.main()
+
+        assert restarts == []
+        assert health and health[-1][0] != "ok"
+
+    def test_the_row_names_the_probe_failure(self, watchdog, monkeypatch):
+        """The operator must be able to tell a rotated token from a wedge."""
+        module, _state_path, _restarts, health, _canary = watchdog
+        monkeypatch.setenv("RADON_PROBE_FRESHNESS_TOKEN", "wrong-token")
+        monkeypatch.setattr(
+            module.urllib.request,
+            "urlopen",
+            lambda req, timeout=None: (_ for _ in ()).throw(
+                _http_error(module.PROBE_URL, 403, "Forbidden")
+            ),
+        )
+        module.main()
+
+        assert "probe" in health[-1][1].lower()
+
+
+class TestHealthRowServiceIsInBothCatalogs:
+    def test_registered_in_the_python_catalog(self):
+        assert '"nextjs-db-read"' in SERVICES_PY.read_text(encoding="utf-8")
+
+    def test_registered_in_the_typescript_catalog(self):
+        assert '"nextjs-db-read"' in WINDOWS_TS.read_text(encoding="utf-8")

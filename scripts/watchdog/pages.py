@@ -26,6 +26,9 @@ EXCERPT_CLOSE = "</untrusted-excerpt>"
 MAX_EXCERPT_CHARS = 240
 STALE_CLAIM_SECS = 2 * 3600
 MAX_ATTEMPTS = 3
+# Returned when the claim count cannot be read: larger than any sane daily
+# cap, so an unreadable ledger stands the responder down instead of freeing it.
+_UNKNOWN_ACTION_COUNT = 10_000
 
 INSERT_SQL = """
 INSERT OR IGNORE INTO watchdog_pages (
@@ -137,6 +140,29 @@ def list_actionable_pages(*, now: datetime) -> list[dict]:
             "attempts": int(row[8] or 0),
         })
     return pages
+
+
+def actions_since(*, since: datetime) -> int:
+    """Tickets claimed since `since` — i.e. how many times Grok was launched.
+
+    Backs the responder's global daily cap. Best-effort like the rest of this
+    module, but it fails CLOSED: a Turso miss returns a count that stands the
+    responder down rather than one that lets it keep acting unbounded.
+    """
+    try:
+        from db.hrana_http import hrana_query
+    except ImportError:
+        from scripts.db.hrana_http import hrana_query
+
+    try:
+        rows = hrana_query(
+            "SELECT COUNT(*) FROM watchdog_pages WHERE claimed_at >= ?",
+            (_iso(since),),
+        )
+    except Exception:  # noqa: BLE001
+        log.warning("actions_since unavailable — standing the responder down")
+        return _UNKNOWN_ACTION_COUNT
+    return int(rows[0][0] or 0) if rows else 0
 
 
 def claim_page(page_id: str, *, now: datetime, claim_token: str) -> bool:
