@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.radon.testing-remediate</string>
+
+    <!-- __WEEKEND_REPO__ is substituted by scripts/setup_testing_weekend.sh -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>__WEEKEND_REPO__/scripts/testing_weekend.sh</string>
+        <string>remediate</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__WEEKEND_REPO__</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:__HOME__/.local/bin</string>
+        <key>RADON_WEEKEND_REPO</key>
+        <string>__WEEKEND_REPO__</string>
+        <key>HOME</key>
+        <string>__HOME__</string>
+    </dict>
+
+    <!-- Sunday 17:00 local — the reliability remediation (Sun 10:00,
+         cap 6h) is guaranteed finished by 16:00 in the same runner clone. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>0</integer>
+        <key>Hour</key>
+        <integer>17</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>__WEEKEND_REPO__/logs/testing-weekend/launchd-remediate.log</string>
+    <key>StandardErrorPath</key>
+    <string>__WEEKEND_REPO__/logs/testing-weekend/launchd-remediate.err</string>
+</dict>
+</plist>

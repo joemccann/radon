@@ -1373,3 +1373,11 @@ _Discoveries made during PART B land here; they do not expand the frozen backlog
 - **E2E testid backlog (open):** the wave-2 repair agents catalogued ~17 places where specs must hang on CSS classes/nth-child because components expose no `data-testid`/role (MetricCards cards+toggles, AssetCockpit ticket anchor, OrderTab submit buttons, SharePnl trigger/popover/toggles, exec-group rows, toast kinds). Full list in the wave-2 workflow result (`tasks/wlnotw78h.output`); adopting them removes the dominant residual fragility class in `web/e2e/`.
 - **`next dev` cannot run in the CI Playwright container (open, infra):** neither turbopack nor webpack `next dev` readies inside `mcr.microsoft.com/playwright` — cold-compiling this app's heavy routes on demand hangs in the resource-constrained container (CI runs 31268084987 / 31268824260 timed out after the middleware line). The `e2e-financial-smoke` job therefore builds once and serves a prebuilt `next start` (the perimeter-smoke pattern). A follow-up could give the container more resources or warm the dev routes, but production start is the pragmatic path.
 - **Day Move renders differently under `next start` vs `next dev` (open, possible prod bug):** `day-move-ib-daily-pnl.spec.ts` asserts the IB-daily Day Move value (`acct.daily_pnl` → `-$3,688`), which renders under the dev server but shows "MARKET CLOSED / ---" under a production `next start` with the identical portfolio stub — even though sibling `account_summary` fields (Net Liq etc.) render fine in both. Reproduced 3/3 in isolation. The spec is HELD OUT of the CI subset (still runs locally) pending a decision on whether this is an SSR/hydration ordering bug in the TodayPnlRow Day Move path or a harness artifact; it is the one spec that does not survive the dev→prod server switch.
+
+## 11 · Audit ledger
+
+The weekend loop (`.claude/skills/testing-weekend/`) reads the last line
+here to scope its Saturday delta audit, and appends one line per run.
+Delta findings continue the T-### numbering in dated `## Delta audit` sections.
+
+- Audited through: `d681d247` on 2026-08-08 — initial full audit (T-001…T-054, PART A frozen 2026-08-07 at `2a75496a`) + PART B remediation waves (PRs #13/#14).
