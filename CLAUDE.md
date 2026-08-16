@@ -28,6 +28,7 @@ Sub-directory CLAUDE.md files auto-load when cwd is anywhere under that subtree.
 - `docs/brand-identity.md` — brand tokens, signal semantics, voice
 - `docs/cloud-services.md` — Hetzner runbook (services, schedulers, deploy)
 - `docs/grok-page-responder.md` — VPS P1 auto-fix + live-deploy Pushover
+- `docs/factory.md` — Foreman software factory (sibling Vercel app `joemccann/radon-factory`): label `factory`, draft PR, human merge
 - `docs/unusual_whales_api.md` — UW endpoint surface
 
 ---
