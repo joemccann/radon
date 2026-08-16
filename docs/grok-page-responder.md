@@ -93,15 +93,43 @@ journalctl -u radon-grok-page-responder -n 20 --no-pager
 
 ## Kill switches
 
-Unset means on.
+**Unset means OFF** (REL-030 / R-055). Each switch is an explicit opt-in.
+A missing or renamed `EnvironmentFile` is indistinguishable here from a
+deliberate stand-down, and an agent that runs `grok --always-approve` and can
+`git push origin main` into the production auto-deploy must read that
+ambiguity as "stop". Before this the three flags all defaulted on, so a broken
+env file yielded maximum autonomy.
 
-| Env | When `0` |
-|---|---|
-| `GROK_PAGE_RESPONDER` | Do not claim or launch |
-| `GROK_PAGE_AUTOSHIP` | Diagnose only. No edits or commits |
-| `GROK_PAGE_AUTOPUSH` | Commit locally. Do not push |
+| Env | When `1` | When unset or `0` |
+|---|---|---|
+| `GROK_PAGE_RESPONDER` | Claim and launch | Do not claim or launch |
+| `GROK_PAGE_AUTOSHIP` | Edit, test, commit | Diagnose only. No edits or commits |
+| `GROK_PAGE_AUTOPUSH` | Push after a green suite | Commit locally. Do not push |
 
 `GROK_BIN` overrides the `grok` executable.
+
+## Global daily action cap
+
+The per-ticket bounds (3 attempts; one ticket per service/severity/kind/hour)
+do not bound a weekend of hourly P1s — that is ~24 independent
+autoship-and-push runs, each of which can deploy.
+`GROK_PAGE_MAX_ACTIONS_PER_DAY` (default 6) caps grok invocations per UTC day,
+counted as tickets claimed since 00:00Z (`watchdog.pages.actions_since`). At
+the cap the cycle heartbeats `paused` and exits 0. An unreadable ledger counts
+as over-cap, so a Turso miss stands the responder down rather than freeing it.
+
+## Filesystem sandbox
+
+The unit's stripped `EnvironmentFile` is pointless if the agent can read the
+real secrets off disk, so `/home/radon/radon-cloud` (which holds the 0600
+`.env` with IB Flex, Clerk, UW and archive credentials) is in
+`InaccessiblePaths`, `/home/radon` is `ReadOnlyPaths`, and only the dedicated
+clone is writable. `ProtectHome=tmpfs` is deliberately NOT used: it would also
+hide the clone and the venv the unit executes from.
+
+Page text is untrusted third-party/exception content. It reaches the model
+only inside `<untrusted-excerpt>` delimiters, and `build_prompt` re-sanitizes
+a row that does not already carry them rather than trusting the writer.
 
 ## Ticket states (`watchdog_pages`, migration 0048)
 

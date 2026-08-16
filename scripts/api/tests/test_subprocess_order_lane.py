@@ -1,0 +1,187 @@
+"""REL-023 — the order path must always find a subprocess slot
+(RELIABILITY_AUDIT.md R-048).
+
+`MAX_CONCURRENT_SUBPROCESSES` is shared by every `run_script*` caller and the
+slot is held for the subprocess's whole lifetime. With `LEAP_PRESET_TIMEOUT_S`
+and `GARCH_PRESET_TIMEOUT_S` at 3600s, four routine scans can pin every slot
+for an hour — and `POST /trading/kill` / `POST /orders/cancel-all` both run
+`ib_cancel_all.py` through the same gate. The halt flag would still set (it is
+a file write) so new placements stop, but the working orders the kill switch
+exists to pull would stay live.
+
+Fault injection: saturate the pool with long-running stub scripts, then prove
+the order-lane scripts still admit while a routine scan is refused.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import sys
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[3]
+SCRIPTS_DIR = ROOT / "scripts"
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
+from api import subprocess as subprocess_mod  # noqa: E402
+
+SERVER_PATH = SCRIPTS_DIR / "api" / "server.py"
+
+_SLOW_STUB = "import sys, time\ntime.sleep(30)\n"
+_FAST_STUB = 'import json\nprint(json.dumps({"status": "ok"}))\n'
+
+
+@pytest.fixture
+def stub_scripts(tmp_path, monkeypatch):
+    """Point the runner at throwaway stubs so no real IB script is spawned."""
+    (tmp_path / "slow_scan.py").write_text(_SLOW_STUB)
+    (tmp_path / "leap_scanner_uw.py").write_text(_SLOW_STUB)
+    (tmp_path / "ib_cancel_all.py").write_text(_FAST_STUB)
+    (tmp_path / "ib_place_order.py").write_text(_FAST_STUB)
+    monkeypatch.setattr(subprocess_mod, "SCRIPTS_DIR", tmp_path)
+    monkeypatch.setattr(subprocess_mod, "_active_subprocesses", 0)
+    return tmp_path
+
+
+async def _saturate_general_lane(count: int):
+    """Launch `count` long-running scan subprocesses and wait until they hold
+    their slots. Returns the tasks so the caller can cancel them."""
+    tasks = [
+        asyncio.create_task(subprocess_mod.run_script("slow_scan.py", [], timeout=30))
+        for _ in range(count)
+    ]
+    for _ in range(200):
+        if subprocess_mod._active_subprocesses >= count:
+            break
+        await asyncio.sleep(0.01)
+    return tasks
+
+
+async def _drain(tasks):
+    for task in tasks:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+
+class TestOrderLaneReservation:
+    def test_kill_switch_admits_while_scans_saturate_the_pool(
+        self, stub_scripts, monkeypatch
+    ):
+        """The R-048 scenario: every general slot pinned by hour-long scans,
+        then the operator fires the kill switch."""
+        monkeypatch.setattr(subprocess_mod, "MAX_CONCURRENT_SUBPROCESSES", 2)
+        monkeypatch.setattr(
+            subprocess_mod, "RESERVED_ORDER_SLOTS", 1, raising=False
+        )
+
+        async def run():
+            tasks = await _saturate_general_lane(1)
+            try:
+                refused = await subprocess_mod.run_script("slow_scan.py", [], timeout=5)
+                cancel_all = await subprocess_mod.run_script(
+                    "ib_cancel_all.py", [], timeout=10
+                )
+                return refused, cancel_all
+            finally:
+                await _drain(tasks)
+
+        refused, cancel_all = asyncio.run(run())
+
+        assert refused.ok is False
+        assert "capacity exhausted" in (refused.error or "").lower()
+        assert cancel_all.ok is True, cancel_all.error
+        assert cancel_all.data == {"status": "ok"}
+
+    def test_placement_admits_while_scans_saturate_the_pool(
+        self, stub_scripts, monkeypatch
+    ):
+        monkeypatch.setattr(subprocess_mod, "MAX_CONCURRENT_SUBPROCESSES", 3)
+        monkeypatch.setattr(
+            subprocess_mod, "RESERVED_ORDER_SLOTS", 1, raising=False
+        )
+
+        async def run():
+            tasks = await _saturate_general_lane(2)
+            try:
+                refused = await subprocess_mod.run_script(
+                    "leap_scanner_uw.py", [], timeout=5
+                )
+                placed = await subprocess_mod.run_script(
+                    "ib_place_order.py", ["--json", "{}"], timeout=10
+                )
+                return refused, placed
+            finally:
+                await _drain(tasks)
+
+        refused, placed = asyncio.run(run())
+
+        assert refused.ok is False
+        assert "capacity exhausted" in (refused.error or "").lower()
+        assert placed.ok is True, placed.error
+
+    def test_order_lane_is_still_bounded_by_the_hard_cap(
+        self, stub_scripts, monkeypatch
+    ):
+        """The reservation is a floor for the order path, not an exemption —
+        the global cap still bounds fd/clientId/memory growth."""
+        monkeypatch.setattr(subprocess_mod, "MAX_CONCURRENT_SUBPROCESSES", 2)
+        monkeypatch.setattr(
+            subprocess_mod, "RESERVED_ORDER_SLOTS", 1, raising=False
+        )
+        (stub_scripts / "ib_order_manage.py").write_text(_SLOW_STUB)
+
+        async def run():
+            tasks = [
+                asyncio.create_task(
+                    subprocess_mod.run_script("ib_order_manage.py", [], timeout=30)
+                )
+                for _ in range(2)
+            ]
+            for _ in range(200):
+                if subprocess_mod._active_subprocesses >= 2:
+                    break
+                await asyncio.sleep(0.01)
+            try:
+                return await subprocess_mod.run_script(
+                    "ib_cancel_all.py", [], timeout=5
+                )
+            finally:
+                await _drain(tasks)
+
+        over_cap = asyncio.run(run())
+        assert over_cap.ok is False
+        assert "capacity exhausted" in (over_cap.error or "").lower()
+
+    def test_general_lane_keeps_at_least_one_slot(self, monkeypatch):
+        """A misconfigured reservation must never starve the scan lane to zero."""
+        monkeypatch.setattr(subprocess_mod, "MAX_CONCURRENT_SUBPROCESSES", 1)
+        monkeypatch.setattr(
+            subprocess_mod, "RESERVED_ORDER_SLOTS", 4, raising=False
+        )
+        assert subprocess_mod._general_lane_capacity() >= 1
+
+
+class TestOrderLaneRegistry:
+    def test_every_money_path_script_is_registered(self):
+        """Any order-placing/cancelling script the API spawns must be in the
+        lane, or a scan storm can lock it out again."""
+        assert {
+            "ib_place_order.py",
+            "ib_order_manage.py",
+            "ib_cancel_all.py",
+        } <= subprocess_mod._ORDER_LANE_SCRIPTS
+
+    def test_server_spawns_no_unregistered_order_script(self):
+        """Contract sweep over the real call sites — mirrors the
+        `_NON_IDEMPOTENT_IB_SCRIPTS` discipline."""
+        import re
+
+        source = SERVER_PATH.read_text()
+        spawned = set(
+            re.findall(r'"(ib_(?:place_order|order_manage|cancel_all|execute)\.py)"', source)
+        )
+        assert spawned, "expected the order scripts to be referenced in server.py"
+        assert spawned <= subprocess_mod._ORDER_LANE_SCRIPTS

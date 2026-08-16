@@ -105,6 +105,38 @@ def _bucket_key(payload: dict[str, Any]) -> Optional[str]:
     return f"{ticker}|{expiry}|{right}|{strike}"
 
 
+def contract_fill_fingerprint(payload: dict[str, Any]) -> Optional[tuple]:
+    """Id-namespace-independent identity of a single journaled fill.
+
+    ``ib_exec_id`` is not comparable across writers: Flex rehydrate keys on
+    the numeric Flex ``tradeID`` while the real-time daemon and
+    ``executed_orders`` key on the IB API execId, so the same fill carries two
+    unrelated ids (REL-024 / R-049). This fingerprint — contract, ET session
+    date, signed quantity — is what both writers agree on.
+
+    Returns None for rows the fingerprint cannot describe (missing contract or
+    date, non-directional labels like ``CLOSED``); callers must treat None as
+    "no fallback available" and fall back to exact id matching.
+    """
+    ticker = _normalize_ticker(payload.get("ticker") or payload.get("symbol"))
+    date = str(payload.get("date") or "").strip()
+    if not ticker or not date:
+        return None
+
+    try:
+        qty = abs(float(payload.get("contracts") or payload.get("shares") or 0))
+    except (TypeError, ValueError):
+        return None
+    signed = _signed_qty(payload.get("action"), qty)
+    # `_signed_qty` maps CLOSED to a negative, but a CLOSED row is a round
+    # trip, not one directional fill — it must not fingerprint-match a fill.
+    if signed == 0 or str(payload.get("action") or "").strip().upper() == "CLOSED":
+        return None
+
+    contract = _bucket_key(payload) or f"{ticker}|STK"
+    return (contract, date, signed)
+
+
 def _exec_id_parts(payload: dict[str, Any]) -> list[str]:
     """The execution ids a journal row accounts for.
 

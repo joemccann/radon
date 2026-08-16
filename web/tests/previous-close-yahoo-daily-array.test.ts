@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { isUsTradingDay } from "../lib/serviceHealthWindows";
 
 /**
  * Regression: NAK / RR / MSFT showed wildly wrong Day Chg % on the
@@ -73,30 +74,40 @@ function buildYahooPayload(opts: {
   };
 }
 
+/** Build a 5-entry timestamp array ending TODAY (ET-noon), one day apart. */
+function etDateString(now: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+}
+
 /**
- * Build a 5-entry timestamp array ending TODAY, where the four earlier entries
- * are consecutive TRADING sessions walking back from today.
+ * Five daily bars whose ET dates are spaced by TRADING days, anchored so
+ * index 3 is exactly the session the route resolves to and index 4 is
+ * today's still-open bar.
  *
- * This used to step by calendar days, which silently disagreed with the route:
- * the route resolves the last close strictly before today by SESSION, so on a
- * Sunday it skips Saturday and lands on Friday. The fixture would then label
- * index 3 "yesterday" while the route read index 2, and the suite went red on
- * every weekend run (caught 2026-08-16, a Sunday). Sessions in, sessions out.
+ * The route returns the newest close on or before `previousCloseSessionDate()`.
+ * A calendar-day walk put index 3 on a Saturday for any weekend run, so the
+ * route correctly skipped past it and returned index 2 — the fixture, not the
+ * route, was what failed. Every timestamp is stamped at the 16:00 ET close so
+ * its ET date is unambiguous whatever hour the suite runs at.
  */
-function buildRecentTimestamps(): number[] {
-  const dayMs = 24 * 60 * 60 * 1000;
-  const isWeekend = (d: Date) => d.getUTCDay() === 0 || d.getUTCDay() === 6;
+function buildRecentTimestamps(now: Date = new Date()): number[] {
+  const atEtClose = (isoDate: string) =>
+    Math.floor(Date.parse(`${isoDate}T20:00:00Z`) / 1000);
 
-  const today = new Date();
-  const sessions: Date[] = [];
-  const cursor = new Date(today.getTime());
+  const todayEt = etDateString(now);
+  const sessions: string[] = [];
+  const cursor = new Date(`${todayEt}T12:00:00Z`);
   while (sessions.length < 4) {
-    cursor.setTime(cursor.getTime() - dayMs);
-    if (!isWeekend(cursor)) sessions.push(new Date(cursor.getTime()));
+    cursor.setUTCDate(cursor.getUTCDate() - 1);
+    const iso = cursor.toISOString().slice(0, 10);
+    if (isUsTradingDay(iso)) sessions.unshift(iso);
   }
-
-  // oldest → newest, with today last so the route can exclude it as intraday
-  return [...sessions.reverse(), today].map((d) => Math.floor(d.getTime() / 1000));
+  return [...sessions.map(atEtClose), atEtClose(todayEt)];
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────
