@@ -17,11 +17,17 @@ StandardError=journal
 # Weekday evenings the ENTIRE ~2,600-member universe is one session stale,
 # so the "incremental" is a full-universe refetch (~35-45 min with Yahoo
 # courtesy sleeps; NDX alone measured 13 min). 1200s killed the 2026-07-27
-# run mid-SPX (Result=timeout). Budget a full sweep plus headroom.
-# 2026-07-27 follow-up: Yahoo's tarpit (reactive to the day's hammering)
-# priced even valid 20-symbol spark chunks at ~60s — a fully tarpitted
-# sweep measured 105 min. Normal-pace sweep is ~3 min; budget the worst.
-TimeoutStartSec=9000
+# run mid-SPX (Result=timeout). 2026-07-27 follow-up: Yahoo's tarpit
+# (reactive to the day's hammering) priced even valid 20-symbol spark
+# chunks at ~60s — a fully tarpitted sweep measured 105 min (6300s).
+# Normal-pace sweep is ~3 min.
+# R-071: the budget must ALSO end before the 23:30 UTC catch-up fire — a
+# oneshot still activating when its timer fires swallows that fire, and
+# the catch-up exists precisely to recover a lagging 21:30 run. The
+# inter-fire gap is 7200s, worst-compressed to 7080s by the timer's
+# RandomizedDelaySec=120 on the first fire; 6900 stays under it with
+# margin while still covering the measured tarpit worst case.
+TimeoutStartSec=6900
 
 [Install]
 WantedBy=multi-user.target
