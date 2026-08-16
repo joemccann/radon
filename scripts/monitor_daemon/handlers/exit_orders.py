@@ -338,15 +338,29 @@ class ExitOrdersHandler(BaseHandler):
 
     _ACTIVE_ORDER_STATUSES = {"Submitted", "PreSubmitted", "PendingSubmit", "ApiPending"}
 
-    def _active_sell_index(self, client: Any) -> Dict[Any, Any]:
-        """Index of working SELL orders at IB keyed by conId and localSymbol.
+    @staticmethod
+    def _limit_price_key(value: Any) -> Optional[float]:
+        """Comparable limit price, or None when IB gave us nothing usable."""
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        if value != value or value <= 0:  # NaN / unpriced
+            return None
+        return round(float(value), 4)
 
-        Broker truth: before placing an exit, any working SELL on the same
-        contract means a prior cycle already placed it (crash between
-        place and journal-update, lost write, restarted daemon) — adopt
-        it, never duplicate it.
+    def _active_sell_index(self, client: Any) -> Dict[Any, list]:
+        """Working SELL orders at IB, grouped by conId and localSymbol.
+
+        Broker truth: before placing an exit, a working SELL on the same
+        contract AT THE SAME LIMIT PRICE is a prior cycle's placement
+        (crash between place and journal-update, lost write, restarted
+        daemon) — adopt it, never duplicate it.
+
+        T-055: the price is part of the identity. A target and a stop are
+        two SELL limits on ONE contract, so a contract-only key hands the
+        working target to the stop candidate and the stop never reaches
+        IB.
         """
-        index: Dict[Any, Any] = {}
+        index: Dict[Any, list] = {}
         for trade in client.get_open_orders():
             order = getattr(trade, "order", None)
             if getattr(order, "action", None) != "SELL":
@@ -356,22 +370,47 @@ class ExitOrdersHandler(BaseHandler):
             contract = getattr(trade, "contract", None)
             con_id = getattr(contract, "conId", None)
             local_symbol = getattr(contract, "localSymbol", None)
+            entry = (self._limit_price_key(getattr(order, "lmtPrice", None)), trade)
             if isinstance(con_id, int) and con_id:
-                index[("conid", con_id)] = trade
+                index.setdefault(("conid", con_id), []).append(entry)
             if isinstance(local_symbol, str) and local_symbol:
-                index[("local", local_symbol)] = trade
+                index.setdefault(("local", local_symbol), []).append(entry)
 
         return index
 
-    def _find_active_sell(self, index: Dict[Any, Any], contract: Any) -> Optional[Any]:
+    @staticmethod
+    def _working_sells_for(index: Dict[Any, list], contract: Any) -> list:
         con_id = getattr(contract, "conId", None)
         if isinstance(con_id, int) and ("conid", con_id) in index:
             return index[("conid", con_id)]
         local_symbol = getattr(contract, "localSymbol", None)
         if isinstance(local_symbol, str) and ("local", local_symbol) in index:
             return index[("local", local_symbol)]
-        return None
-    
+        return []
+
+    def _find_active_sell(self, index: Dict[Any, list], contract: Any,
+                          limit_price: Any) -> tuple:
+        """(adoptable trade, identity-unresolved) for one exit candidate.
+
+        Identity-unresolved means a working SELL sits on this contract but
+        IB reported no usable limit price, so it can be neither matched to
+        this leg nor ruled out as a duplicate — the caller defers.
+        """
+        working = self._working_sells_for(index, contract)
+        if not working:
+            return None, False
+
+        wanted = self._limit_price_key(limit_price)
+        if wanted is not None:
+            for price, trade in working:
+                if price == wanted:
+                    return trade, False
+
+        if any(price is None for price, _ in working):
+            return None, True
+        return None, False
+
+
     def execute(self) -> Dict[str, Any]:
         """
         Check pending orders and place those within threshold.
@@ -464,7 +503,24 @@ class ExitOrdersHandler(BaseHandler):
                     # REL-003: a working SELL already at IB for this
                     # contract is a prior cycle's placement whose journal
                     # write never landed — adopt it, never duplicate it.
-                    live = self._find_active_sell(active_sells, contract)
+                    live, unresolved = self._find_active_sell(
+                        active_sells, contract, target_price
+                    )
+                    if live is None and unresolved:
+                        result["orders_skipped"] += 1
+                        result["skipped"].append({
+                            "ticker": ticker,
+                            "contract": contract.localSymbol,
+                            "order_type": order_info["order_type"],
+                            "reason": "working_sell_price_unknown",
+                        })
+                        result["error"] = (
+                            f"working SELL on {contract.localSymbol} has no "
+                            f"readable limit price; {order_info['order_type']} "
+                            f"placement deferred (cannot rule out a duplicate)"
+                        )
+                        logger.warning(result["error"])
+                        continue
                     if live is not None:
                         live_order_id = live.order.orderId
                         adopted = self._update_journal_trade(
