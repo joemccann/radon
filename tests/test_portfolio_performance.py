@@ -178,6 +178,100 @@ def test_acats_in_is_an_external_flow_at_position_value():
     assert chain.returns[0] == pytest.approx(10_000 / 300_000)
 
 
+# ---------------------------------------------------------------------------
+# A real ACATS is a BASKET, and some of its legs are genuinely negative.
+#
+# Transcribed from the operator's Flex export for 2026-02-06 (query 1442520,
+# accountId U4698258). Two legs carry negative amounts under direction="IN":
+# a short ETHA call, which is a liability being taken on, and the cash leg,
+# which left the account as part of the transfer. `abs()`-ing the magnitude
+# before applying the direction sign flipped both, inflating the flow from
+# 655,497.16 to 1,282,260.84 -- a 626,763.68 error, exactly 2x the two
+# negative legs. Only real data exposed this; the prior fixtures were all
+# positive-amount, so IN and OUT both looked correct.
+# ---------------------------------------------------------------------------
+
+REAL_ACATS_BASKET = """<FlexQueryResponse>
+  <FlexStatements>
+    <FlexStatement>
+      <CashTransactions/>
+      <Transfers>
+        <Transfer type="ACATS" direction="IN" assetCategory="STK" symbol="MSFT"
+                  reportDate="2026-02-06" positionAmountInBase="393670" cashTransfer="0"/>
+        <Transfer type="ACATS" direction="IN" assetCategory="STK" symbol="NFLX"
+                  reportDate="2026-02-06" positionAmountInBase="363915" cashTransfer="0"/>
+        <Transfer type="ACATS" direction="IN" assetCategory="STK" symbol="RR"
+                  reportDate="2026-02-06" positionAmountInBase="30400" cashTransfer="0"/>
+        <Transfer type="ACATS" direction="IN" assetCategory="STK" symbol="URTY"
+                  reportDate="2026-02-06" positionAmountInBase="117260" cashTransfer="0"/>
+        <Transfer type="ACATS" direction="IN" assetCategory="OPT" symbol="ETHA 15C"
+                  reportDate="2026-02-06" positionAmountInBase="49600" cashTransfer="0"/>
+        <Transfer type="ACATS" direction="IN" assetCategory="OPT" symbol="ETHA 30C"
+                  reportDate="2026-02-06" positionAmountInBase="-7434" cashTransfer="0"/>
+        <Transfer type="ACATS" direction="IN" assetCategory="OPT" symbol="SOFI 45C"
+                  reportDate="2026-02-06" positionAmountInBase="14034" cashTransfer="0"/>
+        <Transfer type="ACATS" direction="IN" assetCategory="CASH" symbol="--"
+                  reportDate="2026-02-06" positionAmountInBase="0" cashTransfer="-305947.84"/>
+      </Transfers>
+    </FlexStatement>
+  </FlexStatements>
+</FlexQueryResponse>"""
+
+
+def test_acats_basket_preserves_negative_legs():
+    flows = parse_flows(REAL_ACATS_BASKET)
+    # 393670 + 363915 + 30400 + 117260 = 905,245 long stock
+    #   + 49600 - 7434 + 14034        =  56,200 net options (the 30C is short)
+    #   - 305947.84                    = -305,947.84 cash leaving with the transfer
+    #                                  = 655,497.16
+    assert flows.by_date == {"2026-02-06": pytest.approx(655_497.16)}
+    # the abs() bug produced this instead: 655,497.16 + 2 * (7434 + 305947.84)
+    assert flows.by_date["2026-02-06"] != pytest.approx(1_282_260.84)
+
+
+REBOOK_PAIR = """<FlexQueryResponse>
+  <FlexStatements>
+    <FlexStatement>
+      <CashTransactions/>
+      <Transfers>
+        <Transfer type="ACATS" direction="IN" assetCategory="OPT" symbol="ETHA 15C"
+                  reportDate="2026-02-09" positionAmountInBase="-49600" cashTransfer="0" code="Ca"/>
+        <Transfer type="ACATS" direction="IN" assetCategory="OPT" symbol="ETHA 15C"
+                  reportDate="2026-02-09" positionAmountInBase="49600" cashTransfer="0"/>
+        <Transfer type="ACATS" direction="IN" assetCategory="OPT" symbol="SOFI 45C"
+                  reportDate="2026-02-09" positionAmountInBase="-14034" cashTransfer="0" code="Ca"/>
+        <Transfer type="ACATS" direction="IN" assetCategory="OPT" symbol="SOFI 45C"
+                  reportDate="2026-02-09" positionAmountInBase="14034" cashTransfer="0"/>
+      </Transfers>
+    </FlexStatement>
+  </FlexStatements>
+</FlexQueryResponse>"""
+
+
+def test_cancel_and_rebook_pair_nets_to_zero():
+    """IBKR cancels a mis-booked transfer leg and re-books it the same day.
+
+    Real rows from 2026-02-09. The cancel carries the negative amount, so the
+    pair must net to zero. Under abs() it summed to +127,268.00 and invented an
+    external flow on a day nothing moved.
+    """
+    flows = parse_flows(REBOOK_PAIR)
+    # (-49600 + 49600) + (-14034 + 14034) = 0
+    assert flows.by_date["2026-02-09"] == pytest.approx(0.0)
+
+
+def test_transferring_out_a_short_position_is_a_positive_flow():
+    """Shedding a liability increases account value, so OUT of a negative
+    position amount is a POSITIVE external flow. The direction sign multiplies
+    the reported sign; it does not replace it."""
+    xml = ACATS_XML.format(direction="OUT").replace(
+        'positionAmountInBase="50000.00"', 'positionAmountInBase="-50000.00"'
+    )
+    flows = parse_flows(xml)
+    # -1 (OUT) * -50,000 (a short position) = +50,000
+    assert flows.by_date == {"2026-04-02": pytest.approx(50_000.00)}
+
+
 def test_acats_out_is_a_negative_external_flow():
     flows = parse_flows(ACATS_XML.format(direction="OUT"))
     assert flows.by_date == {"2026-04-02": pytest.approx(-50_000.00)}

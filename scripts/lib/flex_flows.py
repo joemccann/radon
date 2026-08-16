@@ -103,6 +103,21 @@ def _transfer_amount(node: ET.Element) -> float:
     """Signed base-currency value of a securities or cash transfer.
 
     `transferPrice` is a PER-SHARE price and is never read as an amount.
+
+    The direction MULTIPLIES the reported sign, it does not replace it. IBKR's
+    amount carries real economic sign inside a single transfer: a short option
+    position transferred IN is a liability taken on (negative), and an ACATS
+    can move cash OUT while the transfer as a whole is direction="IN". Taking
+    abs() before applying the direction flipped both. On the operator's real
+    2026-02-06 ACATS that inflated the flow from 655,497.16 to 1,282,260.84,
+    and it turned a same-day cancel/rebook pair that must net to zero into a
+    phantom +127,268.00 flow.
+
+    All four quadrants are then correct:
+      IN  + long  -> positive (value arrives)
+      IN  + short -> negative (a liability arrives)
+      OUT + long  -> negative (value leaves)
+      OUT + short -> positive (a liability leaves)
     """
     direction = (node.get("direction") or "").strip().upper()
     if direction not in ("IN", "OUT"):
@@ -116,8 +131,7 @@ def _transfer_amount(node: ET.Element) -> float:
     if magnitude is None:
         raise UnknownFlowType(f"transfer:{node.get('type')!r}:no_amount")
 
-    signed = abs(magnitude)
-    return signed if direction == _DIRECTION_IN else -signed
+    return magnitude if direction == _DIRECTION_IN else -magnitude
 
 
 def _missing_flow_sections(root: ET.Element) -> Tuple[str, ...]:
