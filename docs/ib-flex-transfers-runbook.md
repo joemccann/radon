@@ -1,25 +1,48 @@
 # IB Flex Transfers — closing the last TWR data gap
 
+## STATUS: the Portal edit is DONE (2026-08-16)
+
+The operator amended Activity Flex Query `1442520` and the export now carries all three sections:
+163 `EquitySummaryByReportDateInBase` rows, 225 `CashTransaction` rows and 13 `Transfer` rows. Verified
+offline against a manual export, with zero Flex requests. `assetCategory` is the real attribute name,
+so the "Asset Class" Portal label maps through cleanly.
+
+**Two things this runbook did not anticipate, both now fixed:**
+
+1. **The query id in this document was originally wrong.** It said `1497709`, copied from a stale line
+   in CLAUDE.md. Production uses `1442520`. Corrected throughout, and CLAUDE.md corrected too.
+2. **An ACATS is a BASKET, and some legs are negative under `direction="IN"`.** The real 2026-02-06
+   transfer has 13 rows including a short ETHA call (`positionAmountInBase="-7434"`) and a cash leg
+   that LEFT the account (`cashTransfer="-305947.84"`). `_transfer_amount` took `abs()` before applying
+   the direction sign and flipped both, producing 1,282,260.84 instead of 655,497.16. Fixed: the
+   direction multiplies the reported sign rather than replacing it. See §3, which was right about the
+   valuation field and wrong to assume a single row.
+
+**What remains open** is not a data gap. With correct flows, 2026-02-06 still leaves +70,004.87
+unexplained (securities priced at transfer time, not at the close), and that clears the outlier bar, so
+the session is quarantined and the TWR stays degraded. That is a threshold-policy question, not a
+missing-transfer question. See the operator decision in the session notes.
+
 ## Why this matters
 
-The /performance page reported +951.28% TWR because deposits were chained as investment return. That is fixed: flows now reach the TWR builder and an unexplained session is quarantined instead of published. One gap remains — Flex query `1497709` is a **CashTransactions** query, which structurally cannot carry a `<Transfer>` element, so the 2026-02-06 ACATS (NAV `246,713.50 -> 972,215.53`, `+725,502.03`) is invisible. The builder correctly refuses to publish a TWR and shows a degraded page. Skip this runbook and /performance stays degraded forever: the residual is real and no code change can invent the missing amount.
+The /performance page reported +951.28% TWR because deposits were chained as investment return. That is fixed: flows now reach the TWR builder and an unexplained session is quarantined instead of published. One gap remains — Flex query `1442520` is a **CashTransactions** query, which structurally cannot carry a `<Transfer>` element, so the 2026-02-06 ACATS (NAV `246,713.50 -> 972,215.53`, `+725,502.03`) is invisible. The builder correctly refuses to publish a TWR and shows a degraded page. Skip this runbook and /performance stays degraded forever: the residual is real and no code change can invent the missing amount.
 
 ---
 
 ## 1. DECISION: one query, not two
 
-**Recommendation: amend the existing Activity Flex Query `1497709` to add the Transfers section. Do not create a second query, and do not introduce `IB_FLEX_FLOWS_QUERY_ID`.**
+**Recommendation: amend the existing Activity Flex Query `1442520` to add the Transfers section. Do not create a second query, and do not introduce `IB_FLEX_FLOWS_QUERY_ID`.**
 
 Why one query is provably sufficient:
 
-- **An Activity Flex Query already carries multiple sections, and `1497709` already proves it.** Two independent consumers read two different sections out of the *same* document from that one query id: `scripts/perf_twr_builder.py:282` reads `EquitySummaryByReportDateInBase` (the "NAV in Base" section) and `scripts/cash_flow_sync.py:254` reads `CashTransaction` (the "Cash Transactions" section). Sections in an Activity Flex Query are independent checkboxes; Transfers is another one of them. The idea that Flex queries are "typed" one-section-per-query is contradicted by the production query in front of us.
+- **An Activity Flex Query already carries multiple sections, and `1442520` already proves it.** Two independent consumers read two different sections out of the *same* document from that one query id: `scripts/perf_twr_builder.py:282` reads `EquitySummaryByReportDateInBase` (the "NAV in Base" section) and `scripts/cash_flow_sync.py:254` reads `CashTransaction` (the "Cash Transactions" section). Sections in an Activity Flex Query are independent checkboxes; Transfers is another one of them. The idea that Flex queries are "typed" one-section-per-query is contradicted by the production query in front of us.
 - **The builder is already written for the single-document case.** `_flows_query_id()` (`scripts/perf_twr_builder.py:454-455`) falls back to `IB_FLEX_NAV_QUERY_ID` when `IB_FLEX_FLOWS_QUERY_ID` is unset, and `resolve_flows()` (`:500-504`) reuses the already-fetched XML when the two ids match, so one build makes exactly one Flex request. This is pinned by `tests/test_perf_twr_ingest.py:283` (`test_flows_d7_one_flex_fetch_per_distinct_query_id`).
 - **A second query id doubles the Flex request rate per build.** The Flex Web Service rate limit is a sliding window and this repo has already taken a 24h→168h embargo from over-requesting (`project_cash_flow_sync_incident_2026_08_04`, codes 1001/1018/1019). Adding a second id would put `radon-perf-twr` at two SendRequests every weekday evening for zero benefit.
 - **`flex_flows.parse_flows` reads both sections out of one string** (`scripts/lib/flex_flows.py:146` and `:161`) and nets them per date, which is only correct if they come from one statement — which is what one query gives you.
 
 Consequence: **no new environment variable, no code change, no deploy.** This is a Portal-only change (see §4 and §5).
 
-> Distinct Flex query types do exist (Activity vs. Trade Confirmation). `1497709` is an Activity Flex Query — that is the type that owns both Cash Transactions and Transfers. If the Portal shows `1497709` under "Trade Confirmation Flex Queries" rather than "Activity Flex Queries", stop and re-plan; that would be new information.
+> Distinct Flex query types do exist (Activity vs. Trade Confirmation). `1442520` is an Activity Flex Query — that is the type that owns both Cash Transactions and Transfers. If the Portal shows `1442520` under "Trade Confirmation Flex Queries" rather than "Activity Flex Queries", stop and re-plan; that would be new information.
 
 ---
 
@@ -30,7 +53,7 @@ Menu wording drifts between IBKR Portal releases. The path below is the current 
 1. Log in to IBKR **Client Portal** (Account Management) as the account owner.
 2. Top-right user menu → **Performance & Reports** → **Flex Queries**.
    *(Older wording: Reports → Flex Queries. Verify in the Portal.)*
-3. Under **Activity Flex Query**, find the query with id **1497709** and click the **edit** (pencil/gear) icon. Confirm the id on screen before editing — do not edit `1422766` (the blotter/trades query) or `1442520` (journal rehydrate).
+3. Under **Activity Flex Query**, find the query with id **1442520** and click the **edit** (pencil/gear) icon. Confirm the id on screen before editing — do not edit `1422766` (the blotter/trades query) or `1442520` (journal rehydrate).
 4. **Do not change** the existing enabled sections. `EquitySummaryInBase` ("Net Asset Value (NAV) in Base") feeds the NAV series and `Cash Transactions` feeds both `cash_flow_sync.py` and half the flow map. Removing either breaks production.
 5. In the **Sections** list, tick **Transfers**. Click into it to open its field picker.
 6. Tick these fields. The first six are **required by the parser**; the rest are audit-only but cheap:
@@ -56,7 +79,7 @@ Menu wording drifts between IBKR Portal releases. The path below is the current 
 7. **Date / Period:** leave the query's existing period setting **unchanged**. The same document supplies the NAV series, so shrinking the window silently shortens `period_start` on the /performance page. Read the current setting and confirm the window still covers 2026-02-06 (verify in the Portal — likely "Custom Date Range" or "Year to Date"; whatever it is, `2026-01-13` deposits are already coming through, so it reaches at least that far back).
 8. **Format: XML.** Not CSV. `fetch_flex_xml` sends `v=3` and calls `ET.fromstring` on the response (`scripts/perf_twr_builder.py:244-247`), and `cash_flow_sync.py:239-247` does the same. A CSV switch breaks both consumers instantly.
 9. **Models / accounts:** leave the account selection unchanged. If it is a consolidated (multi-account) query, keep it consolidated — `_account_scopes` handles one `<FlexStatement>` per account.
-10. Save. Note the id is still `1497709` — amending a query does not change its id. If the Portal creates a new query instead of editing, **do not proceed**; a new id would require the §5 env work you are trying to avoid.
+10. Save. Note the id is still `1442520` — amending a query does not change its id. If the Portal creates a new query instead of editing, **do not proceed**; a new id would require the §5 env work you are trying to avoid.
 
 ---
 
@@ -100,7 +123,7 @@ If either shows up in the real XML, that is a follow-up code change with its own
 
 ## 5. Env wiring
 
-**No environment variable is needed.** With the single-query recommendation, `IB_FLEX_NAV_QUERY_ID=1497709` already resolves flows via the `_flows_query_id()` fallback, and the amended document arrives through the fetch that already happens. Nothing to edit, nothing to restart, nothing to deploy.
+**No environment variable is needed.** With the single-query recommendation, `IB_FLEX_NAV_QUERY_ID=1442520` already resolves flows via the `_flows_query_id()` fallback, and the amended document arrives through the fetch that already happens. Nothing to edit, nothing to restart, nothing to deploy.
 
 Recorded here only in case §1 is overridden and a second query id is created:
 
@@ -124,7 +147,7 @@ Run **after 17:15 ET** (so `cash_flow_sync`'s daily 17:00 ET call has already co
 
 ```bash
 cd /Users/joemccann/dev/apps/finance/radon/.claude/worktrees/perf-pnl-refactor
-/Users/joemccann/dev/apps/finance/radon/.venv/bin/python - > /tmp/flex_1497709.xml <<'PY'
+/Users/joemccann/dev/apps/finance/radon/.venv/bin/python - > /tmp/flex_1442520.xml <<'PY'
 import os, sys
 from dotenv import load_dotenv
 load_dotenv('.env')
@@ -133,8 +156,8 @@ from scripts.perf_twr_builder import fetch_flex_xml
 sys.stdout.write(fetch_flex_xml(os.environ['IB_FLEX_TOKEN'], os.environ['IB_FLEX_NAV_QUERY_ID']))
 PY
 
-grep -c '<Transfers' /tmp/flex_1497709.xml
-grep -c '<Transfer ' /tmp/flex_1497709.xml
+grep -c '<Transfers' /tmp/flex_1442520.xml
+grep -c '<Transfer ' /tmp/flex_1442520.xml
 ```
 
 Pass: the container count is `>= 1` (one per `<FlexStatement>`). A `0` here means the section did not save in the Portal — go back to §2 step 6, and **wait 24h** before re-pulling.
@@ -145,7 +168,7 @@ If the pull fails with `Flex SendRequest failed code=1018` (or 1001/1019), you a
 ```bash
 /Users/joemccann/dev/apps/finance/radon/.venv/bin/python - <<'PY'
 import xml.etree.ElementTree as ET
-root = ET.parse('/tmp/flex_1497709.xml').getroot()
+root = ET.parse('/tmp/flex_1442520.xml').getroot()
 print('Transfers container present:', root.find('.//Transfers') is not None)
 rows = root.findall('.//Transfer')
 print('Transfer rows:', len(rows))
@@ -185,7 +208,7 @@ sys.path.insert(0, '.')
 from scripts.lib.flex_flows import parse_flows
 from scripts.perf_twr_builder import parse_nav_entries, build_payload, NavObservation
 
-xml = open('/tmp/flex_1497709.xml').read()
+xml = open('/tmp/flex_1442520.xml').read()
 nav = parse_nav_entries(xml)
 flows = parse_flows(xml)
 print('flows status :', flows.status.value, '| reason:', getattr(flows, 'reason', None))
@@ -261,9 +284,9 @@ SELECT report_date, amount, flow_type FROM external_flows ORDER BY report_date;
 
 ## 7. Throttle safety
 
-**The risk.** The Flex Web Service rate-limits per token on a sliding window. Every request made *while* throttled pushes the reset further out. On 2026-08-04 this repo took a 24h→48h→72h→168h embargo ladder from exactly this (`scripts/monitor_daemon/handlers/_throttle_backoff.py:15-37`, codes `1001` / `1018` / `1019`). A week-long embargo on `1497709` takes down **both** the cash-flow sync and the TWR builder.
+**The risk.** The Flex Web Service rate-limits per token on a sliding window. Every request made *while* throttled pushes the reset further out. On 2026-08-04 this repo took a 24h→48h→72h→168h embargo ladder from exactly this (`scripts/monitor_daemon/handlers/_throttle_backoff.py:15-37`, codes `1001` / `1018` / `1019`). A week-long embargo on `1442520` takes down **both** the cash-flow sync and the TWR builder.
 
-**Existing traffic on `1497709`, per weekday:**
+**Existing traffic on `1442520`, per weekday:**
 
 | Consumer | When | Requests |
 |---|---|---|
@@ -274,7 +297,7 @@ SELECT report_date, amount, flow_type FROM external_flows ORDER BY report_date;
 
 1. Amending the query in the Portal costs **zero** Flex requests. Do the Portal edit at any time.
 2. Make **one** manual pull (§6a), and place it outside both windows — best is 18:00–20:00 ET, or any time before 16:00 ET. Never 16:55–17:15 ET and never 20:40–20:55 ET.
-3. §6b, §6c and §6d all read `/tmp/flex_1497709.xml`. Do not re-pull for them.
+3. §6b, §6c and §6d all read `/tmp/flex_1442520.xml`. Do not re-pull for them.
 4. Do **not** run `python scripts/perf_twr_builder.py` manually — it makes a fresh SendRequest. Let the 20:45 timer publish (§6e).
 5. If §6a returns `1001`/`1018`/`1019`: stop immediately. Do not retry. Wait a full 24h, and check the daemon's embargo state before trying again:
 
@@ -302,7 +325,7 @@ for r in get_db().execute(\"SELECT service, state, last_error, updated_at FROM s
 - the TWR builder starts failing with `unknown_flow_type` or `parse_failed`.
 
 **Rollback (Portal-only, zero deploy, zero code):**
-1. IBKR Portal → Performance & Reports → Flex Queries → Activity Flex Query `1497709` → edit → **untick Transfers** → Save.
+1. IBKR Portal → Performance & Reports → Flex Queries → Activity Flex Query `1442520` → edit → **untick Transfers** → Save.
 2. That is the entire rollback. The system returns to exactly today's behaviour: `parse_flows` sees the missing container, returns `FlowSet.failed("flows_section_absent:Transfers")` (`scripts/lib/flex_flows.py:171-173`), the builder publishes `degraded` with `twr: null` plus the `FLOWS_TRANSFERS_SECTION_ABSENT` warning, and `cash_flow_sync` is untouched throughout. Degraded, but never wrong.
 3. No restart is required — the next timer firing re-fetches. If you want it immediate, `radon unit restart radon-api` then re-trigger; **never `radon restart`** (2FA push).
 
@@ -310,4 +333,4 @@ for r in get_db().execute(\"SELECT service, state, last_error, updated_at FROM s
 
 **If the failure is `unknown_flow_type` / `no_direction` / `no_amount`**, that is not a rollback case — it is the parser telling you a field is missing from the Portal config. Re-open the field picker (§2 step 6) and tick the named field. The build stays degraded in the meantime, which is the correct state.
 
-**Do not "fix" a rollback by deleting and recreating the query.** A new query id breaks `IB_FLEX_NAV_QUERY_ID=1497709` in three places (root `.env`, `web/.env`, Hetzner `/home/radon/radon-cloud/.env`) and takes down both consumers.
+**Do not "fix" a rollback by deleting and recreating the query.** A new query id breaks `IB_FLEX_NAV_QUERY_ID=1442520` in three places (root `.env`, `web/.env`, Hetzner `/home/radon/radon-cloud/.env`) and takes down both consumers.
