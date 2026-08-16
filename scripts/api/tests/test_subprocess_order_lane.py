@@ -46,6 +46,29 @@ def stub_scripts(tmp_path, monkeypatch):
     return tmp_path
 
 
+SATURATION_TIMEOUT_S = 20.0
+
+
+async def _await_slots_held(count: int, *, timeout: float = SATURATION_TIMEOUT_S):
+    """Block until `count` slots are actually held, or fail the test.
+
+    Every admission assertion in this file is only meaningful once the general
+    lane is FULL. A bare timed loop that falls through on a cold or contended
+    runner (spawning CPython interpreters can easily outlast a couple of
+    seconds) leaves spare capacity behind, and then "the order lane is admitted
+    while scans saturate the pool" passes for the wrong reason — the
+    reservation could be entirely broken and this suite would stay green.
+    """
+    deadline = asyncio.get_running_loop().time() + timeout
+    while subprocess_mod._active_subprocesses < count:
+        assert asyncio.get_running_loop().time() < deadline, (
+            f"general lane never saturated: {subprocess_mod._active_subprocesses} of "
+            f"{count} slots held after {timeout}s — the admission assertions that "
+            "follow would pass on spare capacity, not on the reservation"
+        )
+        await asyncio.sleep(0.01)
+
+
 async def _saturate_general_lane(count: int):
     """Launch `count` long-running scan subprocesses and wait until they hold
     their slots. Returns the tasks so the caller can cancel them."""
@@ -53,10 +76,7 @@ async def _saturate_general_lane(count: int):
         asyncio.create_task(subprocess_mod.run_script("slow_scan.py", [], timeout=30))
         for _ in range(count)
     ]
-    for _ in range(200):
-        if subprocess_mod._active_subprocesses >= count:
-            break
-        await asyncio.sleep(0.01)
+    await _await_slots_held(count)
     return tasks
 
 
@@ -140,10 +160,7 @@ class TestOrderLaneReservation:
                 )
                 for _ in range(2)
             ]
-            for _ in range(200):
-                if subprocess_mod._active_subprocesses >= 2:
-                    break
-                await asyncio.sleep(0.01)
+            await _await_slots_held(2)
             try:
                 return await subprocess_mod.run_script(
                     "ib_cancel_all.py", [], timeout=5
