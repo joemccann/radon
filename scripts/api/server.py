@@ -358,15 +358,20 @@ async def _recover_stuck_pool_guarded() -> None:
     # escalate when the Gateway probe says authenticated yet the pool is STILL
     # stuck (reconnect ran but didn't take). Re-derive that exact signature.
     from api.ib_gateway import (
-        _pool_has_disconnected_slot,
+        _pool_disconnected_roles,
         _pool_has_connected_accounted_slot,
         _probe_authenticated,
     )
 
-    if not _pool_has_disconnected_slot(ib_pool):
+    stuck_roles = _pool_disconnected_roles(ib_pool)
+    if not stuck_roles:
         _pool_recovery_state["consecutive_failures"] = 0
         return
-    if _pool_has_connected_accounted_slot(ib_pool):
+    # Scope the accounted check to the STUCK roles: an ANY-role check let
+    # healthy orders/sync slots reset the ladder while the data role stayed
+    # wedged forever (R-060). Only a re-read showing the stuck roles recovered
+    # (raced recovery between checks) clears the counter.
+    if _pool_has_connected_accounted_slot(ib_pool, roles=stuck_roles):
         _pool_recovery_state["consecutive_failures"] = 0
         return
     try:
