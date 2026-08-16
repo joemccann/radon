@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 import shutil
 from datetime import datetime, timedelta, timezone
@@ -945,13 +946,7 @@ class JournalSyncHandler(BaseHandler):
             except Exception:
                 commission = 0.0
 
-        multiplier_raw = getattr(contract, "multiplier", None)
-        if not isinstance(multiplier_raw, (str, int, float)):
-            multiplier_raw = None
-        try:
-            multiplier = float(multiplier_raw or (100 if sec_type in ("OPT", "BAG") else 1))
-        except (TypeError, ValueError):
-            multiplier = 100 if sec_type in ("OPT", "BAG") else 1
+        multiplier = self._contract_multiplier(contract, sec_type)
         total_cost = float(shares) * price * multiplier + commission
 
         ib_time = getattr(execution, "time", None)
@@ -1018,6 +1013,28 @@ class JournalSyncHandler(BaseHandler):
             entry["shares"] = abs_qty
 
         return entry
+
+    @staticmethod
+    def _contract_multiplier(contract: Any, sec_type: str) -> float:
+        """IB's contract multiplier, or the sec_type default when unusable.
+
+        ``total_cost`` feeds ``compute_open_basis_for_ticker``, which overrides
+        IB's own avgCost on the portfolio, so an unusable value must fall back
+        rather than propagate. ``"0"`` is the case that bites: it is truthy in
+        Python, so ``float(raw or default)`` returns 0.0 and the entire premium
+        drops out of the basis, leaving a row worth only its commission.
+        """
+        default = 100.0 if sec_type in ("OPT", "BAG") else 1.0
+        raw = getattr(contract, "multiplier", None)
+        if not isinstance(raw, (str, int, float)) or isinstance(raw, bool):
+            return default
+        try:
+            multiplier = float(raw)
+        except (TypeError, ValueError):
+            return default
+        if not math.isfinite(multiplier) or multiplier <= 0:
+            return default
+        return multiplier
 
     @staticmethod
     def _side_to_action(side: str, sec_type: str, prior_qty: float = 0.0) -> Optional[str]:
