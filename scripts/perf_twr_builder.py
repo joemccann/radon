@@ -79,7 +79,7 @@ except Exception:  # pragma: no cover - optional dependency
             return 0.0, "Rf unavailable — fred_client not found"
 
 SCHEMA_VERSION = 2
-CURVE_TYPE = "twr_daily_eod"
+CURVE_TYPE = "twr_daily_bod"
 RETURN_BASIS = "time_weighted"
 DAY_COUNT = "act/365"
 BENCHMARK_BASIS = "price_return"
@@ -1130,12 +1130,24 @@ def build_payload(
             )
         )
     if block is not None and abs(block.alpha_annualized) > twr_gates.IMPLAUSIBLE_ALPHA:
+        # Suppress the BENCHMARK, not the return, at the same severity as any
+        # other benchmark suppression. This was "error", and an error floors the
+        # whole payload to degraded, which took TWR total, max drawdown and
+        # Sharpe down with it -- none of which touch the benchmark. A bad
+        # regression against SPY says nothing about a time-weighted return
+        # computed from NAV and flows alone. Live on 2026-08-16: the real series
+        # chained cleanly to +90.81% with zero quarantined sessions and the page
+        # still rendered "--" because alpha came out at +124.56%.
+        implausible_alpha = block.alpha_annualized
+        block = None
+        benchmark_reason = "implausible"
         warnings.append(
             _warning(
                 "IMPLAUSIBLE_ALPHA",
-                "error",
-                f"Annualized alpha of {block.alpha_annualized:+.2%} is a data defect, not a result.",
-                alpha=block.alpha_annualized,
+                "info",
+                f"Annualized alpha of {implausible_alpha:+.2%} is outside a plausible range; "
+                f"{benchmark_symbol} statistics are suppressed. The return itself is unaffected.",
+                alpha=implausible_alpha,
             )
         )
 

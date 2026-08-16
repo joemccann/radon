@@ -1130,7 +1130,7 @@ def test_gate_table_values_are_the_spec_values():
     assert twr_gates.SUSPECT_RETURN_THRESHOLD == 0.50
     assert twr_gates.FLOW_DOMINANT_RATIO == 0.25
     assert twr_gates.IMPLAUSIBLE_ANNUALIZED == 10.0
-    assert twr_gates.IMPLAUSIBLE_ALPHA == 1.0
+    assert twr_gates.IMPLAUSIBLE_ALPHA == 10.0
     assert twr_gates.MAX_SUBPERIOD_GAP_DAYS == 4
     assert twr_gates.NAV_STALENESS_BUDGET_SESSIONS == 2
     # BOD: r_t = (E_t - C_t - B_t) / (B_t + C_t). The denominator is the capital
