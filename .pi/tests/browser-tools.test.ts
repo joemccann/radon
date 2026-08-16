@@ -1,8 +1,13 @@
 /**
  * Browser tool command-boundary regressions.
- * Run with: bun x tsx .pi/tests/browser-tools.test.ts
+ *
+ * Collected by the root vitest gate (`vitest.config.ts` include list). It used
+ * to run only when someone typed `bun .pi/tests/browser-tools.test.ts` by hand,
+ * which meant the command-injection and executable-bit boundaries below were
+ * revertable line by line with CI still green (T-058).
  */
 
+import { test } from "vitest";
 import * as assert from "node:assert";
 import { chmodSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -12,16 +17,6 @@ import {
   isExecutableFile,
   parseBrowserCommand,
 } from "../extensions/browser-tools.ts";
-
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    console.log(`PASS ${name}`);
-  } catch (error) {
-    console.error(`FAIL ${name}`);
-    throw error;
-  }
-}
 
 test("parses quoted browser arguments without shell evaluation", () => {
   assert.deepStrictEqual(
