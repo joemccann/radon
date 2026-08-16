@@ -206,6 +206,7 @@ web/verify-regime-internals.mjs
 !/.claude/skills/incident-response/
 !/.claude/skills/long-horizon-jobs/
 !/.claude/skills/reliability-weekend/
+!/.claude/skills/testing-weekend/
 /.pi/skills/
 /skills-lock.json
 /radon-dark-full.png
