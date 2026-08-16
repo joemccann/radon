@@ -836,6 +836,27 @@ class TestBpiScanBudget:
         assert "Mon..Fri *-*-* 23:30:00 UTC" in raw
         assert "Tue..Sat *-*-* 11:00:00 UTC" in raw
 
+    def test_start_budget_ends_before_the_2330_catchup_fire(self, unit):
+        """R-071: a still-activating oneshot swallows its own timer fires.
+
+        The 23:30 UTC catch-up exists precisely to recover a lagging 21:30
+        run, but TimeoutStartSec=9000 (150 min) let a slow/tarpitted 21:30
+        run still be activating at 23:30, so systemd dropped the catch-up
+        fire on the floor. The budget must end before the 7200s inter-fire
+        gap, worst-compressed by RandomizedDelaySec=120 on the first fire
+        (7200 - 120 = 7080s), while still covering the worst measured
+        tarpitted sweep (105 min = 6300s from the 2026-07-27 follow-up).
+        """
+        svc = unit("radon-bpi.service")["Service"]
+        budget = int(svc["timeoutstartsec"])
+        assert budget <= 7200 - 120, (
+            "radon-bpi TimeoutStartSec must end before the 23:30 UTC "
+            "catch-up fire (21:30 fire delayed up to RandomizedDelaySec=120)"
+        )
+        assert budget >= 6300, (
+            "budget must still cover the worst measured tarpitted sweep"
+        )
+
 
 class TestLeapGarchScanBudget:
     """Index-universe LEAP/GARCH scans need an hour-scale FastAPI budget
