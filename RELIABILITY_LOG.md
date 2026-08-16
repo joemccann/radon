@@ -51,3 +51,5 @@
 - **NF-1 (from REL-005):** the documented Gate-3 2.5%-of-bankroll cap is still not enforced server-side — static qty/notional caps bound the fat-finger class, but a live net-liq-proportional check needs a cached snapshot read on the placement path (design decision: which snapshot, how stale is acceptable, fail-open vs fail-closed when unavailable). Follow-up, not chased mid-loop.
 
 (none yet)
+
+- **NF triage 2026-08-16 (delta audit):** NF-1 (Gate-3 bankroll-% cap) still open, now compounded by R-052 — the combo notional cap is measured off the signed net credit, so the static caps bound less than assumed; folded into REL-028. NF-2 (unpaginated journal reads on the unbounded transport) confirmed still open and re-filed as R-075 with two NEW instances on a money path (`backfill_journal_from_executed_orders.py:125-127`, `expiry_sweep.py:120-128`), both now running unattended daily; folded into REL-038. NF-3 (relay stale-feed does not gate the order UI) still open and unchanged, and R-061 makes it worse — the relay can now report healthy during a total market-data blackout, so the banner the UI would show never appears.
