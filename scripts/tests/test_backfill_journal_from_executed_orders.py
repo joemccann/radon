@@ -670,6 +670,59 @@ class TestDualIdConventionIdempotency:
         assert [a["status"] for a in actions] == ["inserted_from_eo"]
         assert len(_journal_rows(conn)) == 2
 
+    def test_two_equal_partial_fills_on_one_day_both_land(self, monkeypatch):
+        """T-056: IB slicing one order into two equal partials is routine.
+
+        Both fills share contract, ET session date, side and size, so the
+        fingerprint cannot tell them apart — but their exec-id roots
+        differ, so they ARE two distinct executions. Dropping the second
+        understates net open quantity by half and hands
+        ``compute_open_basis_for_ticker`` a half-position basis, which
+        ``ib_sync.fetch_positions`` then writes over IB's correct avgCost.
+        """
+        conn = _fresh_db()
+        _patch_db(conn, monkeypatch)
+        monkeypatch.setenv("RADON_DB_TEST_WRITE_OK", "1")
+
+        morning = dict(EWY_EXEC_PAYLOAD)
+        morning["time"] = "2026-06-08T14:02:11+00:00"
+        afternoon = dict(EWY_EXEC_PAYLOAD)
+        afternoon["execId"] = "000205d2.6a26a999.01.01"
+        afternoon["time"] = "2026-06-08T18:31:44+00:00"
+
+        _insert_executed_order(conn, morning["execId"], morning, morning["time"])
+        _insert_executed_order(conn, afternoon["execId"], afternoon, afternoon["time"])
+
+        mod = _import_backfill()
+        actions = mod.backfill(
+            conn, exec_ids=[morning["execId"], afternoon["execId"]], dry_run=False
+        )
+
+        assert [a["status"] for a in actions] == [
+            "inserted_from_eo",
+            "inserted_from_eo",
+        ]
+        assert len(_journal_rows(conn)) == 2
+
+    def test_third_equal_fill_is_covered_once_two_rows_exist(self, monkeypatch):
+        """The counted fingerprint must still SKIP: two journal rows cover
+        two fills, so a third same-fingerprint EO row under yet another id
+        namespace is a re-import, not a new execution."""
+        conn = _fresh_db()
+        _patch_db(conn, monkeypatch)
+        monkeypatch.setenv("RADON_DB_TEST_WRITE_OK", "1")
+
+        for index, trade_id in enumerate(("7412330001", "7412330002")):
+            _insert_journal(conn, trade_id, _flex_rehydrated_ewy_row(), "2026-06-08")
+
+        _insert_executed_order(conn, EWY_EXEC_ID, EWY_EXEC_PAYLOAD, EWY_FILL_TIME)
+
+        mod = _import_backfill()
+        actions = mod.backfill(conn, exec_ids=[EWY_EXEC_ID], dry_run=False)
+
+        assert [a["status"] for a in actions] == ["skipped"]
+        assert len(_journal_rows(conn)) == 2
+
     def test_correction_of_an_imported_exec_id_is_not_reinserted(self, monkeypatch):
         """IB re-delivers a corrected execution as `<root>.02`. Exact-string
         dedupe imports it as an ADDITIONAL fill — `journal_rehydrate` already

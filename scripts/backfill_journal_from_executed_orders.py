@@ -62,6 +62,7 @@ import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from collections import Counter
 from typing import Any, Dict, List, Optional
 
 # ── sys.path bootstrap ────────────────────────────────────────────────────────
@@ -133,12 +134,19 @@ class JournalCoverage:
          fill (mirrors `journal_rehydrate._existing_exec_roots`);
       3. contract + ET session date + signed quantity, the identity both
          writers agree on regardless of id namespace.
+
+    Layer 3 is COUNTED, not set membership (T-056). IB routinely slices one
+    order into equal same-day partials; they share a fingerprint but are two
+    distinct executions. One journal row covers exactly one fill, so a
+    fingerprint is only "covered" while unclaimed rows remain.
     """
 
-    def __init__(self, exec_ids: set[str], roots: set[str], fingerprints: set[tuple]):
+    def __init__(self, exec_ids: set[str], roots: set[str],
+                 fingerprints: Counter, claimed: Optional[Counter] = None):
         self.exec_ids = exec_ids
         self.roots = roots
         self.fingerprints = fingerprints
+        self.claimed = claimed if claimed is not None else Counter()
 
     def covers_exec_id(self, exec_id: str) -> bool:
         if exec_id in self.exec_ids:
@@ -148,7 +156,16 @@ class JournalCoverage:
 
     def covers_fill(self, journal_payload: Dict[str, Any]) -> bool:
         fingerprint = contract_fill_fingerprint(journal_payload)
-        return fingerprint is not None and fingerprint in self.fingerprints
+        if fingerprint is None:
+            return False
+        return self.fingerprints[fingerprint] > self.claimed[fingerprint]
+
+    def claim_fill(self, journal_payload: Dict[str, Any]) -> None:
+        """Spend the journal row this fill was matched against, so a second
+        identical fill is measured against what is left."""
+        fingerprint = contract_fill_fingerprint(journal_payload)
+        if fingerprint is not None:
+            self.claimed[fingerprint] += 1
 
     def record(self, exec_id: str, journal_payload: Dict[str, Any]) -> None:
         """Account for a row inserted during this run so the next EO row in
@@ -159,14 +176,20 @@ class JournalCoverage:
             self.roots.add(root)
         fingerprint = contract_fill_fingerprint(journal_payload)
         if fingerprint is not None:
-            self.fingerprints.add(fingerprint)
+            # The row exists AND this fill already owns it.
+            self.fingerprints[fingerprint] += 1
+            self.claimed[fingerprint] += 1
 
 
-def _journal_coverage(db: Any) -> JournalCoverage:
-    """Read the journal once and build every coverage layer from it."""
+def _journal_coverage(db: Any, claimed: Optional[Counter] = None) -> JournalCoverage:
+    """Read the journal once and build every coverage layer from it.
+
+    ``claimed`` carries forward which fingerprint rows this run has already
+    matched, so a mid-run re-read does not re-offer them.
+    """
     exec_ids: set[str] = set()
     roots: set[str] = set()
-    fingerprints: set[tuple] = set()
+    fingerprints: Counter = Counter()
 
     rows = db.execute("SELECT payload FROM journal").fetchall()
     for (raw,) in rows:
@@ -179,7 +202,7 @@ def _journal_coverage(db: Any) -> JournalCoverage:
 
         fingerprint = contract_fill_fingerprint(payload)
         if fingerprint is not None:
-            fingerprints.add(fingerprint)
+            fingerprints[fingerprint] += 1
 
         exec_id = payload.get("ib_exec_id")
         if not exec_id:
@@ -193,7 +216,7 @@ def _journal_coverage(db: Any) -> JournalCoverage:
             root, _correction = exec_id_root(part)
             if root:
                 roots.add(root)
-    return JournalCoverage(exec_ids, roots, fingerprints)
+    return JournalCoverage(exec_ids, roots, fingerprints, claimed)
 
 
 def _journal_covered_exec_ids(db: Any) -> set[str]:
@@ -417,6 +440,7 @@ def backfill(
         # The reconstructed row is what the id-independent check needs: only
         # now do we know this fill's contract, session date and signed size.
         if coverage.covers_fill(journal_payload):
+            coverage.claim_fill(journal_payload)
             log.info(
                 "  SKIP  %s — same fill already journaled under another id "
                 "convention (contract/date/quantity match)",
@@ -445,8 +469,9 @@ def backfill(
             actions.append(action)
         else:
             # Re-check immediately before insert for idempotency under races.
-            fresh = _journal_coverage(db)
+            fresh = _journal_coverage(db, claimed=coverage.claimed)
             if fresh.covers_exec_id(exec_id) or fresh.covers_fill(journal_payload):
+                coverage.claim_fill(journal_payload)
                 log.info("  SKIP  %s — appeared in journal between scan and insert", exec_id)
                 actions.append({"exec_id": exec_id, "status": "skipped"})
                 continue
