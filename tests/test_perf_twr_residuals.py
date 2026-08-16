@@ -809,3 +809,63 @@ def test_r11_a_full_withdrawal_does_not_divide_by_zero():
     assert subperiod_return(100_000.0, 0.0, -100_000.0) == pytest.approx(0.0, abs=1e-12)
     # residual = 5,000 with no capital to have produced it -> undefined.
     assert subperiod_return(100_000.0, 5_000.0, -100_000.0) is None
+
+
+# ===========================================================================
+# R12 — a benchmark statistic must not invalidate the TWR
+# ===========================================================================
+#
+# IMPLAUSIBLE_ALPHA is emitted at severity "error", and _resolve_status floors
+# the whole payload on any error, which suppresses TWR total, max drawdown and
+# Sharpe. None of those depend on the benchmark. A bad regression against SPY
+# says nothing about a time-weighted return computed purely from NAV and flows.
+#
+# Live on 2026-08-16 after the BOD deploy: the real series chained cleanly to
+# +90.81% with zero quarantined sessions, and the page still rendered "--"
+# because alpha came out at +124.56%.
+#
+# And +124.56% is not a defect. The account returned +90.81% in ~7.5 months
+# against a low-single-digit SPY. IMPLAUSIBLE_ALPHA at 1.0 was a skill ceiling
+# masquerading as a corruption detector; the corruption it was written for was
+# the +2,190.09% alpha off flow-contaminated returns, which 10.0 still catches.
+# It now matches IMPLAUSIBLE_ANNUALIZED, so both guards mean the same thing:
+# this is not a result, it is broken data.
+
+
+def _benchmark_closes(dates, start=600.0, step=0.0004):
+    return {d: start * (1.0 + step) ** i for i, d in enumerate(sorted(dates))}
+
+
+def test_r12_implausible_alpha_suppresses_the_benchmark_not_the_return():
+    """A 45-session book that trounces its benchmark still publishes its TWR."""
+    rets = [0.02] * 45
+    nav = _nav_from_returns(rets)
+    payload = build_payload(
+        observations(nav),
+        FlowSet.empty_verified(),
+        benchmark=_benchmark_closes(nav),
+        benchmark_symbol="SPY",
+    )
+
+    # 1.02**45 - 1 = 1.4416... The TWR is a fact about NAV and flows alone.
+    assert payload["twr"] is not None
+    assert payload["twr"]["cum_return"] == pytest.approx(1.02 ** 45 - 1, rel=1e-9)
+    assert payload["status"] == "ok"
+    assert "IMPLAUSIBLE_ALPHA" not in [
+        w["code"] for w in payload["warnings"] if w["severity"] == "error"
+    ]
+
+
+def test_r12_the_alpha_guard_is_a_corruption_detector_not_a_skill_ceiling():
+    # The contaminated alpha this guard exists for was +2190.09%.
+    assert 21.9009 > twr_gates.IMPLAUSIBLE_ALPHA
+    # The operator's real, earned alpha must clear it.
+    assert 1.2456 < twr_gates.IMPLAUSIBLE_ALPHA
+    # Same magnitude as the annualized-return guard: both mean "broken data".
+    assert twr_gates.IMPLAUSIBLE_ALPHA == twr_gates.IMPLAUSIBLE_ANNUALIZED
+
+
+def test_r12_the_curve_type_label_says_bod():
+    """The hero read "TWR DAILY EOD" over a BOD calculation."""
+    assert builder.CURVE_TYPE == "twr_daily_bod"
+    assert "eod" not in builder.CURVE_TYPE

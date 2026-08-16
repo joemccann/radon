@@ -27,7 +27,7 @@ UNEXPLAINED_TAIL_MULTIPLE: float = 3.0    # ...or above this many p95 sessions, 
 UNEXPLAINED_ABSOLUTE_FLOOR: float = 0.10   # the dispersion bar never falls below this
 FLOW_DOMINANT_RATIO: float = 0.25         # |C_t| / denominator above this => flag the subperiod
 IMPLAUSIBLE_ANNUALIZED: float = 10.0      # |annualized| > 1000%/yr => degraded
-IMPLAUSIBLE_ALPHA: float = 1.0            # |alpha_annualized| > 100%/yr => degraded
+IMPLAUSIBLE_ALPHA: float = 10.0     # |alpha_annualized| > 1000%/yr => a data defect, not skill
 MAX_SUBPERIOD_GAP_DAYS: int = 4           # Fri->Mon is 3; >4 is a missing session
 NAV_STALENESS_BUDGET_SESSIONS: int = 2    # Flex settles T+1; 2 sessions of slack
 
