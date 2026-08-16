@@ -5,7 +5,7 @@
  * the value the WRITER froze into the payload, and :86-89 / :729 drive `isStale`
  * off the payload's declared status word. A snapshot written on 2026-03-27 that
  * says `status: "ok"` and `nav_sessions_behind: 0` therefore still publishes a
- * confident +5.01% hero when it is read on 2026-08-15, 100 completed sessions
+ * confident +5.09% hero when it is read on 2026-08-15, 100 completed sessions
  * later. Deleting the declared field derives 100 correctly and it is STILL
  * ignored, because only `status` feeds `isStale`.
  *
@@ -194,8 +194,8 @@ describe("a frozen v2 payload cannot publish confidently months later (R6)", () 
       });
 
       it("publishes no confident TWR: the reader decides, not the payload", () => {
-        // Live hero today: "+5.01%" with no banner, from cum_return
-        // 0.050112307160331326 written five months earlier.
+        // Live hero today: "+5.09%" with no banner, from cum_return
+        // 0.05092267338835921 written five months earlier.
         const view = withFrozenClock(READ_INSTANT, () => viewOf(build()));
         expect(view.twrCumReturn).toBeNull();
       });
@@ -208,7 +208,7 @@ describe("a frozen v2 payload cannot publish confidently months later (R6)", () 
     const view = withFrozenClock("2026-03-27T20:30:00Z", () => viewOf(goldenOkPayload()));
     expect(view.navSessionsBehind).toBe(0);
     expect(view.isStale).toBe(false);
-    expect(view.twrCumReturn).toBe(0.050112307160331326);
+    expect(view.twrCumReturn).toBe(0.05092267338835921);
   });
 });
 

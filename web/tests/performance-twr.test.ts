@@ -49,7 +49,7 @@ describe("TWR_GATES", () => {
   });
 
   it("declares the flow convention it was computed under", () => {
-    expect(TWR_CONVENTIONS.FLOW_CONVENTION).toBe("eod");
+    expect(TWR_CONVENTIONS.FLOW_CONVENTION).toBe("bod");
     expect(TWR_CONVENTIONS.SORTINO_TARGET).toBe(0);
   });
 });

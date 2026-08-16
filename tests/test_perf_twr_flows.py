@@ -503,8 +503,12 @@ def test_20_a_flow_dominant_but_explained_session_stays_ok():
 
     assert payload["status"] == "ok"
     assert "flow_dominant" in sp["flags"]
-    # 502.03 / 246713.50 = 0.0020348704063621486
-    assert sp["r"] == pytest.approx(0.0020348704063621486, rel=REL)
+    # residual    = 972215.53 - 725000.00 - 246713.50 =    502.03
+    # denominator = 246713.50 + 725000.00             = 971713.50
+    #   502.03 / 971713.50 = 0.0005166440519762543
+    assert sp["r"] == pytest.approx(0.0005166440519762543, rel=REL)
+    # Superseded EOD figure: 502.03 / 246713.50 = 0.0020348704063621486
+    assert sp["r"] != pytest.approx(0.0020348704063621486, rel=1e-6)
     assert "SUBPERIOD_SUSPECT" not in codes(payload)
 
 
@@ -770,7 +774,9 @@ def test_methodology_block_declares_the_conventions():
     m = payload["methodology"]
     assert m["curve_type"] == "twr_daily_eod"
     assert m["return_basis"] == "time_weighted"
-    assert m["flow_convention"] == "eod"
+    # `curve_type` describes the NAV marks (one per session, end of day);
+    # `flow_convention` describes the denominator, which is B + C.
+    assert m["flow_convention"] == "bod"
     assert m["day_count"] == "act/365"
     assert m["vol_scaling_days"] == 252
     assert m["sortino_target"] == 0.0
@@ -807,8 +813,9 @@ def test_series_carries_a_twr_index_and_a_drawdown_from_that_index():
     assert series[0]["daily_return"] is None  # the seed observation has no return
     assert series[0]["cum_return"] == 0.0
     assert series[0]["drawdown"] == 0.0
-    # 100 * (1 + 0.050112307160331326)
-    assert series[-1]["twr_index"] == pytest.approx(105.01123071603313, rel=1e-9)
+    # 100 * (1 + 0.05092267338835921), the golden chain derived in
+    # test_twr_math.py::test_golden_chain_counts_and_cumulative_return
+    assert series[-1]["twr_index"] == pytest.approx(105.09226733883592, rel=1e-9)
     assert series[-1]["nav"] == pytest.approx(182_217.35574011656, rel=1e-12)
     assert all(point["drawdown"] <= 0 for point in series)
 
@@ -892,23 +899,28 @@ def test_75_f1_live_series_with_flows_produces_a_plausible_return():
     jan13 = subperiod_on(payload, "2026-01-13")
     feb06 = subperiod_on(payload, fx.FEB06_DATE)
 
-    # (185755.43 - 80007.13 - 106680.59) / 106680.59
-    #   = -932.29 / 106680.59 = -0.008739078027221335
-    assert jan13["r"] == pytest.approx(-0.008739078027221335, rel=REL)
-    # (972215.53 - 725000.00 - 246713.50) / 246713.50
-    #   = 502.03 / 246713.50 = 0.0020348704063621486
-    assert feb06["r"] == pytest.approx(0.0020348704063621486, rel=REL)
-    # (232497.53 - 42000.00 - 189502.12) / 189502.12
-    #   = 995.41 / 189502.12 = 0.005252764454561265
+    # residual    = 185755.43 - 80007.13 - 106680.59 =   -932.29
+    # denominator = 106680.59 + 80007.13             = 186687.72
+    #   -932.29 / 186687.72 = -0.004993847479630734
+    assert jan13["r"] == pytest.approx(-0.004993847479630734, rel=REL)
+    # residual    = 972215.53 - 725000.00 - 246713.50 =    502.03
+    # denominator = 246713.50 + 725000.00             = 971713.50
+    #   502.03 / 971713.50 = 0.0005166440519762543
+    assert feb06["r"] == pytest.approx(0.0005166440519762543, rel=REL)
+    # residual    = 232497.53 - 42000.00 - 189502.12 =    995.41
+    # denominator = 189502.12 + 42000.00             = 231502.12
+    #   995.41 / 231502.12 = 0.004299787837796058
     jan26 = subperiod_on(payload, "2026-01-26")
-    assert jan26["r"] == pytest.approx(0.005252764454561265, rel=REL)
+    assert jan26["r"] == pytest.approx(0.004299787837796058, rel=REL)
 
     # With C dropped, these three sessions read as
     #   185755.43/106680.59 = 1.7412327
     #   232497.53/189502.12 = 1.2268891
     #   972215.53/246713.50 = 3.9406661
     # whose product is 8.4184 (+741.84%) — the bulk of the live +951.28%.
-    # Correctly flow-adjusted they multiply to roughly 0.9985.
+    # Correctly flow-adjusted they multiply to roughly 0.9998
+    #   (1 - 0.004993847479630734) * (1 + 0.004299787837796058)
+    #                             * (1 + 0.0005166440519762543)
     corrected = (1 + jan13["r"]) * (1 + jan26["r"]) * (1 + feb06["r"])
     assert corrected != pytest.approx(8.4184, rel=0.01)
     assert corrected - 1 != pytest.approx(7.4184, rel=0.01)

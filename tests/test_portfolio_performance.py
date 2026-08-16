@@ -123,9 +123,16 @@ def test_deposit_is_excluded_from_return():
     chain = chain_of(nav, {"2026-03-16": 50_000})
     rets = returns_by_date(chain)
 
-    assert rets["2026-03-16"] == pytest.approx(0.05)
+    # residual    = 260000 - 50000 - 200000 =  10000
+    # denominator = 200000 + 50000          = 250000
+    #   10000 / 250000 = 0.04 — the 50000 that arrived is inside the base it
+    #   earned on, so the deposit itself contributes nothing to the return.
+    assert rets["2026-03-16"] == pytest.approx(0.04)
+    # Superseded EOD figure: 10000 / 200000 = 0.05
+    assert rets["2026-03-16"] != pytest.approx(0.05, rel=1e-6)
+    # No flow on 03-17, so nothing changes: (265000 - 0 - 260000) / 260000
     assert rets["2026-03-17"] == pytest.approx(5_000 / 260_000)
-    assert chain.cum_return == pytest.approx(1.05 * (1 + 5_000 / 260_000) - 1)
+    assert chain.cum_return == pytest.approx(1.04 * (1 + 5_000 / 260_000) - 1)
 
 
 def test_withdrawal_is_excluded_from_return():
@@ -133,8 +140,14 @@ def test_withdrawal_is_excluded_from_return():
     chain = chain_of(nav, {"2026-06-02": -100_000})
     rets = returns_by_date(chain)
 
-    assert rets["2026-06-02"] == pytest.approx(-0.04)
-    assert chain.cum_return == pytest.approx(0.96 * (1 + 10_000 / 380_000) - 1)
+    # residual    = 380000 - (-100000) - 500000 = -20000
+    # denominator = 500000 + (-100000)          = 400000
+    #   -20000 / 400000 = -0.05 — the loss is charged against the capital that
+    #   was actually exposed, not against the 100000 that had already left.
+    assert rets["2026-06-02"] == pytest.approx(-0.05)
+    # Superseded EOD figure: -20000 / 500000 = -0.04
+    assert rets["2026-06-02"] != pytest.approx(-0.04, rel=1e-6)
+    assert chain.cum_return == pytest.approx(0.95 * (1 + 10_000 / 380_000) - 1)
 
 
 def test_payload_reports_flows_separately_from_investment_pnl():
@@ -144,7 +157,13 @@ def test_payload_reports_flows_separately_from_investment_pnl():
 
     assert payload["status"] == "ok"
     assert payload["flows_status"] == "ok"
-    assert payload["twr"]["cum_return"] == pytest.approx(0.05)
+    # residual    = 260000 - 50000 - 200000 =  10000
+    # denominator = 200000 + 50000          = 250000  ->  10000 / 250000 = 0.04
+    assert payload["twr"]["cum_return"] == pytest.approx(0.04)
+    # Superseded EOD figure: 10000 / 200000 = 0.05
+    assert payload["twr"]["cum_return"] != pytest.approx(0.05, rel=1e-6)
+    # The 10k earned is a fact about the account, not about the denominator:
+    # investment_pnl is unmoved by the convention change.
     assert payload["equity"]["net_external_flows"] == pytest.approx(50_000)
     assert payload["equity"]["investment_pnl"] == pytest.approx(10_000)
     assert payload["subperiods"][0]["c"] == pytest.approx(50_000)
@@ -175,7 +194,13 @@ def test_acats_in_is_an_external_flow_at_position_value():
     assert flows.by_date["2026-04-02"] != pytest.approx(50.00)
 
     chain = chain_of({"2026-04-01": 300_000, "2026-04-02": 360_000}, dict(flows.by_date))
-    assert chain.returns[0] == pytest.approx(10_000 / 300_000)
+    # residual    = 360000 - 50000 - 300000 =  10000
+    # denominator = 300000 + 50000          = 350000
+    #   10000 / 350000 = 0.02857142857142857 — the transferred-in securities were
+    #   at work for the session, so they belong in the base that earned the 10k.
+    assert chain.returns[0] == pytest.approx(10_000 / 350_000)
+    # Superseded EOD figure: 10000 / 300000
+    assert chain.returns[0] != pytest.approx(10_000 / 300_000, rel=1e-6)
 
 
 # ---------------------------------------------------------------------------
@@ -277,7 +302,12 @@ def test_acats_out_is_a_negative_external_flow():
     assert flows.by_date == {"2026-04-02": pytest.approx(-50_000.00)}
 
     chain = chain_of({"2026-04-01": 300_000, "2026-04-02": 240_000}, dict(flows.by_date))
-    assert chain.returns[0] == pytest.approx(-10_000 / 300_000)
+    # residual    = 240000 - (-50000) - 300000 = -10000
+    # denominator = 300000 + (-50000)          = 250000
+    #   -10000 / 250000 = -0.04
+    assert chain.returns[0] == pytest.approx(-10_000 / 250_000)
+    # Superseded EOD figure: -10000 / 300000
+    assert chain.returns[0] != pytest.approx(-10_000 / 300_000, rel=1e-6)
 
 
 def test_acats_is_not_classified_by_type_string():

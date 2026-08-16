@@ -92,7 +92,7 @@ NAV_STALENESS_BUDGET_SESSIONS: int = 2    # Flex settles T+1; 2 sessions of slac
                                           #   Counted per §C.2's one definition of
                                           #   sessions_behind, and re-derived at READ
                                           #   time, never trusted from the payload.
-FLOW_CONVENTION: str = "eod"              # see §B.3
+FLOW_CONVENTION: str = "bod"              # see §B.3
 SORTINO_TARGET: float = 0.0
 ```
 
@@ -153,7 +153,7 @@ class Subperiod:
     begin_nav: float         # B_t = N_{t-1}
     end_nav: float           # E_t = N_t
     flow: float              # C_t, signed
-    denominator: float       # B_t under the EOD convention
+    denominator: float       # B_t. NOTE: still B_t, not the BOD denominator B_t + C_t
     ret: float | None        # r_t; None when the subperiod is skipped or quarantined
     cum_ret: float | None    # chained cum through this subperiod; None when excluded
     gap_days: int            # calendar days from d_{t-1} to d_t
@@ -392,27 +392,40 @@ amount = +magnitude if direction == "IN" else -magnitude
 
 All `<Transfer>` rows are EXTERNAL by definition — a position moving between custodians is investor capital, not investment return. `<Transfer type="INTERNAL">` between two accounts of the same consolidated group is netted out by `consolidate_accounts` before it reaches `build_subperiods` (it appears as `+X` in one account and `-X` in the other on the same date).
 
-### B.3 Flow-timing convention: **END OF DAY (EOD)**
+### B.3 Flow-timing convention: **BEGINNING OF DAY (BOD)**
 
-Declared in the payload as `methodology.flow_convention: "eod"`.
+Declared in the payload as `methodology.flow_convention: "bod"`.
 
 ```
-r_t = (E_t - C_t - B_t) / B_t          denominator = B_t
+r_t = (E_t - C_t - B_t) / (B_t + C_t)          denominator = B_t + C_t
 ```
+
+The denominator is the capital actually at work over the session: the pre-existing base plus the capital that arrived (or, for `C_t < 0`, less the capital that left).
 
 Justification, specific to IBKR Flex `EquitySummaryByReportDateInBase`:
 
 1. That report emits one NAV per report date, struck at the close. There is no intraday NAV, so no convention can be *derived*; one must be *asserted* and recorded.
 2. A deposit dated `t` is inside `NAV(t)` and outside `NAV(t-1)`. That is all the data says.
-3. Cash landing on day `t` is not deployed on day `t`; it sits in the cash component. EOD models capital actually at risk. BOD would dilute a real +20.3bp day to +5.2bp purely because a wire cleared.
+3. **BOD is what IBKR PortfolioAnalyst reports**, and PortfolioAnalyst is the dashboard the operator reconciles against. A convention that cannot be checked against the broker's own number is not auditable.
+4. An in-kind transfer is not idle cash. EOD pretends arriving securities earned nothing that session and credits the entire day's P&L to the pre-existing base alone. On the real 2026-02-06 ACATS that reads as +28.37% on paper against +7.76% on the capital that was actually deployed.
 
-Convention sensitivity on the live case (`B = 246,713.50`, `E = 972,215.53`, `C = +725,000`; true P&L `E - B - C = 502.03` under all three):
+Confirmation on the operator's real YTD series (Flex `Equity Summary in Base`, 2025-12-31 .. 2026-08-14, 162 subperiods):
+
+| Chain | 2026 YTD | 2026-02-05 | 2026-02-06 |
+|---|---:|---:|---:|
+| EOD | +121.09% | -20.87% | +28.37% |
+| **BOD — chosen** | **+90.81%** | **-19.17%** | **+7.76%** |
+| IBKR PortfolioAnalyst | +91.15% | **-19.17%** | — |
+
+IBKR's single-session figure for 2026-02-05 is the BOD number to the basis point, which is the proof of convention. The 0.34pp YTD residual is IBKR running to 08-16 on real-time marks against our 08-14 Flex close, not a methodology gap.
+
+Convention sensitivity on the live 2026-02-06 case (`B = 246,713.50`, `E = 972,215.53`, `C = +725,000`; true P&L `E - B - C = 502.03` under all three):
 
 | Convention | Denominator | `r_t` | As % |
 |---|---:|---:|---:|
-| BOD (`w=1`) | 971,713.50 | 0.000516644 | +0.0517% |
+| **BOD (`w=1`) — chosen** | 971,713.50 | **0.000516644** | **+0.0517%** |
 | Dietz mid-day (`w=0.5`) | 609,213.50 | 0.000824063 | +0.0824% |
-| **EOD (`w=0`) — chosen** | 246,713.50 | **0.002034870** | **+0.2035%** |
+| EOD (`w=0`) — superseded | 246,713.50 | 0.002034870 | +0.2035% |
 | Current (broken, `C` dropped) | 246,713.50 | 2.940666 | **+294.07%** |
 
 The broken value reproduces the live `r=+2.9407` to 7 significant figures, which proves the defect is `C` forced to zero, not a convention error.
@@ -420,9 +433,10 @@ The broken value reproduces the live `r=+2.9407` to 7 significant figures, which
 Denominator validity, which is also how the seed observation is handled:
 
 - The first NAV observation produces **no** return. `M+1` observations yield **exactly `M`** subperiods. No synthetic leading `r=0` may be emitted. `n_subperiods == n_nav_observations - 1` is an asserted invariant.
-- A subperiod is valid iff `denominator > 0`, i.e. `B_t > 0`.
-- `B_t == 0` -> skip, `skip_reason="zero_base"`. "What return did zero dollars earn" is meaningless; do not silently switch that one day to BOD (mixed conventions in one chain are unauditable), and do not emit `0.0`.
+- A subperiod is valid iff `B_t > 0` **and** `B_t + C_t > 0`.
+- `B_t == 0` -> skip, `skip_reason="zero_base"`. "What return did zero dollars earn" is meaningless; a period cannot start with no capital, whatever arrived during it, and `0.0` is not the answer.
 - `B_t < 0` -> skip, `skip_reason="negative_base"`.
+- `B_t + C_t <= 0` with a **zero** residual is a full withdrawal that emptied the account. It earned nothing, chains harmlessly at `0.0`, and must not break the series. Only a non-positive denominator carrying a **non-zero** residual is undefined — P&L with no capital to have produced it — and that one skips.
 - Any non-finite `B_t`, `E_t`, or `C_t` -> `NonFiniteInput`.
 
 ### B.4 Hard invariant: UNEXPLAINED subperiods are quarantined, never silently chained
@@ -755,7 +769,7 @@ Single schema. Both the `ok` and the degraded branches emit **the same keys**; o
   "methodology": {
     "curve_type": "twr_daily_eod",
     "return_basis": "time_weighted",
-    "flow_convention": "eod",
+    "flow_convention": "bod",
     "day_count": "act/365",
     "vol_scaling_days": 252,
     "sortino_target": 0.0,
@@ -990,14 +1004,14 @@ Fixtures live in `tests/fixtures/perf/` as JSON. Every expected value below is h
 |---|---|---|---|
 | 1 | **Flat NAV** | NAV `[100000, 100000, 100000]`, no flows | `n_subperiods=2`, `n_returns=2`, `returns=[0.0, 0.0]`, `cum_return=0.0` exact, `volatility` gated `insufficient_n`, `max_drawdown` gated |
 | 2 | **Steady growth, no flows** | NAV `[100, 110, 99]` | `r=[0.10, -0.10]` exact, `cum_return = 1.10*0.90 - 1 = -0.01` **exact — assert it is -0.01, not 0.0** |
-| 3 | **The 2026-02-06 case** | `B=246713.50`, `E=972215.53`, `C=+725000` | `r = 0.0020348704063621486`; assert `r < 0.01`; assert explicitly `r != approx(2.940666, rel=1e-3)` |
-| 4 | **Withdrawal** | `B=100000`, `E=90000`, `C=-15000` | `r = 0.05` exact |
-| 5 | **Same-day deposit AND withdrawal** | deposits `+50000`, withdrawals `-20000` same date; `B=100000`, `E=131000` | net `C=+30000`, `r = 0.01` exact |
+| 3 | **The 2026-02-06 case** | `B=246713.50`, `E=972215.53`, `C=+725000` | residual `502.03` / denominator `971713.50` -> `r = 0.0005166440519762543`; assert `r < 0.01`; assert explicitly `r != approx(2.940666, rel=1e-3)` and `r != approx(0.0020348704063621486, rel=1e-6)` (the superseded EOD value) |
+| 4 | **Withdrawal** | `B=100000`, `E=90000`, `C=-15000` | residual `5000` / denominator `85000` -> `r = 1/17 = 0.058823529411764705` |
+| 5 | **Same-day deposit AND withdrawal** | deposits `+50000`, withdrawals `-20000` same date; `B=100000`, `E=131000` | net `C=+30000`, residual `1000` / denominator `130000` -> `r = 1/130 = 0.007692307692307693` |
 | 6 | **ACATS in (Transfer element)** | `<Transfer type="ACATS" direction="IN" assetCategory="STK" quantity="1000" transferPrice="725.00" positionAmountInBase="725000.00" cashTransfer="0"/>` | parsed `C=+725000.00`; assert the parser did **not** return `725.00` |
 | 7 | **ACATS out** | same with `direction="OUT"`, `positionAmountInBase="725000.00"` | `C = -725000.00` |
 | 8 | **Transfer missing direction** | `direction` absent | raises `UnknownFlowType` |
-| 9 | **Flow on the first day** | NAV `[d0:100000, d1:101000]`, `C[d0]=+100000` | chain: `r_1 = 0.01` exact (the d0 flow is inside `N_0` and never enters a subperiod). MWR vector: exactly `[(d0,-100000), (d1,+101000)]` — the `+100000` must NOT appear as a separate `CF` |
-| 10 | **Flow on the last day** | NAV `[d0:100000, d1:151000]`, `C[d1]=+50000` | `r_1 = (151000-50000-100000)/100000 = 0.01` exact; MWR `CF_1 = 151000 - 50000 = +101000` |
+| 9 | **Flow on the first day** | NAV `[d0:100000, d1:101000]`, `C[d0]=+100000` | chain: `r_1 = 0.01` exact — the d0 flow is inside `N_0`, never enters a subperiod, and so leaves `C_1 = 0` and both conventions identical. MWR vector: exactly `[(d0,-100000), (d1,+101000)]` — the `+100000` must NOT appear as a separate `CF` |
+| 10 | **Flow on the last day** | NAV `[d0:100000, d1:151000]`, `C[d1]=+50000` | `r_1 = (151000-50000-100000)/(100000+50000) = 1000/150000 = 1/150 = 0.006666666666666667`; MWR `CF_1 = 151000 - 50000 = +101000` |
 | 11 | **NAV goes to zero, nothing on file** (revised, DECISION 4) | NAV `[100000, 0, 0]`, no flows | subperiod 1 QUARANTINED, `skip_reason="suspect_no_flow"`, `r_1 is None`; subperiod 2 skipped `zero_base`; `status="degraded"`; the published `cum_return` is **not** `-1.0`. `annualize_return(-1.0, 730)` still returns `-1.0` / `total_loss` as a unit (must not raise, must not produce a complex number) — it is simply no longer reachable from an unexplained wipeout |
 | 11b | **NAV goes to zero, withdrawal on file** | NAV `[100000, 0]`, `C[d1] = -100000` | `r_1 = (0 - (-100000) - 100000)/100000 = 0.0` exact; `skip_reason is None`; `n_suspect == 0`. This is the whole of DECISION 4's exemption |
 | 12 | **Negative NAV** | NAV `[-5000, 1000]` | subperiod skipped `negative_base`; `n_returns=0`; `status="insufficient_data"` |
@@ -1089,7 +1103,9 @@ Fixture `tests/fixtures/perf/golden_60.json`. Construction (deterministic, repro
 - Dates: 61 consecutive weekdays starting **2026-01-02**, ending **2026-03-27**. `calendar_days = 84`.
 - Returns: the 6-value pattern `[+0.006, -0.004, +0.002, -0.008, +0.010, -0.001]` repeated exactly 10 times, giving 60 returns.
 - Flows: `+100000.00` on **2026-02-13** (index 30), `-25000.00` on **2026-03-06** (index 45).
-- NAV built forward under the EOD convention: `N_0 = 100000.00`, `N_t = N_{t-1} * (1 + r_t) + C_t`.
+- NAV built forward as `N_0 = 100000.00`, `N_t = N_{t-1} * (1 + r_t) + C_t`. This is the fixture's INPUT construction and is deliberately left as-is across the BOD change, so the NAV checkpoints below are stable. It means the 58 flow-free sessions reproduce the pattern exactly (`C_t = 0` makes both conventions identical) while the two flow days differ: their published `r_t` is `E_t / (B_t + C_t) - 1`, i.e. `p_t * B_t / (B_t + C_t)`.
+  - index 30 (2026-02-13): residual `= -102.5775651064614`, denominator `= 202577.5651064734` -> `r = -0.0005063619214326489` (was `-0.001`).
+  - index 45 (2026-03-06): residual `= 409.737624650792`, denominator `= 179868.8123253928` -> `r = 0.0022779803755503406` (was `+0.002`).
 - Key NAV values: `N_29 = 102577.56510647341`, `N_30 = 202474.98754136695`, `N_44 = 204868.8123253928`, `N_45 = 180278.54995004358`, `N_60 = 182217.35574011656`.
 - `rf_annual = 0.02` -> `rf_daily = 7.85849419846496e-05`.
 
@@ -1101,12 +1117,12 @@ Pinned expectations (`rel=1e-12` unless noted):
 | `counts.n_subperiods` | `60` |
 | `counts.n_returns` | `60` |
 | `counts.n_skipped` / `n_suspect` | `0` / `0` |
-| `twr.cum_return` | `0.050112307160331326` (analytically `(1.006*0.996*1.002*0.992*1.010*0.999)**10 - 1`) |
+| `twr.cum_return` | `0.05092267338835921` (analytically `(1.006*0.996*1.002*0.992*1.010*0.999)**10 * (1-0.0005063619214326489)/0.999 * (1+0.0022779803755503406)/1.002 - 1`) |
 | `twr.annualized` | `None`, `period_lt_1y` (84 calendar days) |
-| `risk.volatility` | `0.09623593888045874` |
-| `risk.sharpe_ratio` | `1.9763572406782934` |
-| `risk.sortino_ratio` | `3.2608857445808517` |
-| `risk.downside_deviation` | `0.05832666628567074` |
+| `risk.volatility` | `0.09621706656735644` |
+| `risk.sharpe_ratio` | `2.0104270378243907` |
+| `risk.sortino_ratio` | `3.3179719585628065` |
+| `risk.downside_deviation` | `0.05829988756473724` |
 | `risk.max_drawdown` | `-0.009991936000000146` |
 | `risk.var_95` | `-0.008` |
 | `risk.cvar_95` | `-0.008` (`k = 3`) |
@@ -1159,7 +1175,7 @@ Required, and pinned in `tests/fixtures/twr_scenarios.py`:
 | # | Fixture | Assertion |
 |---|---|---|
 | 74 | `tests/fixtures/perf/live_20260815_nav.json` — the real 58-point disk series (`2025-12-31 .. 2026-03-20`, `N_0 = 99492.93647617`, `N_last = 1045949.48105117`) with **no flows** | `status == "degraded"`; at least one `SUBPERIOD_SUSPECT`; `twr.cum_return` is `None` or excludes the suspect days; **assert the published `cum_return` is not `approx(9.5128, rel=0.01)`** |
-| 75 | Same NAV series **with** the three flows supplied. `2026-01-13: +80007.13` is the real production `cash_flows` row (`Deposits/Withdrawals`, `ADJUSTMENT: DEPOSIT ADVANCE`) and must be asserted exactly. `2026-01-26: +42000.00` and `2026-02-06: +725502.03` are fixture stand-ins for the un-fetched rows and are declared as such in the fixture file's `_note` field | `abs(twr.cum_return) < 0.60`; **assert the 2026-01-13 / 01-26 / 02-06 subperiod returns do not chain to `approx(8.4184, rel=0.01)`**; `subperiods["2026-01-13"].r == approx(-0.008739078027221335)`; `subperiods["2026-02-06"].r == approx(0.0020348704063621486)`. When the real Flex `Transfers` section becomes available, the 02-06 amount is replaced with the reported `positionAmountInBase` and the pin is re-derived, not relaxed |
+| 75 | Same NAV series **with** the three flows supplied. `2026-01-13: +80007.13` is the real production `cash_flows` row (`Deposits/Withdrawals`, `ADJUSTMENT: DEPOSIT ADVANCE`) and must be asserted exactly. `2026-01-26: +42000.00` and `2026-02-06: +725502.03` are fixture stand-ins for the un-fetched rows and are declared as such in the fixture file's `_note` field | `abs(twr.cum_return) < 0.60`; **assert the 2026-01-13 / 01-26 / 02-06 subperiod returns do not chain to `approx(8.4184, rel=0.01)`**; `subperiods["2026-01-13"].r == approx(-0.004993847479630734)` (residual `-932.29` / denominator `186687.72`); `subperiods["2026-02-06"].r == approx(0.0005166440519762543)` (residual `502.03` / denominator `971713.50`). When the real Flex `Transfers` section becomes available, the 02-06 amount is replaced with the reported `positionAmountInBase` and the pin is re-derived, not relaxed |
 | 76 | Stale-cache regression | disk series with `max(date) = 2026-03-20`, "today" `2026-08-15` -> `load_nav_from_disk` returns `None` (>30d), ladder falls to Turso; if Turso is also empty, `status == "unavailable"`. Under no circumstances `status == "ok"` |
 | 77 | Flex fetch raises | `fetch_flex_xml` raises `TimeoutError` on the flows query -> `FlowSet.failed`, `FLOWS_FETCH_FAILED` error warning, `status == "degraded"`, `twr is None`. **Assert `warnings != []`** — the exact condition the live payload violated |
 

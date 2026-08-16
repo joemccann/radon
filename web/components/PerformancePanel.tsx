@@ -751,7 +751,7 @@ export default function PerformancePanel({ portfolioLastSync = null, marketState
           </div>
           <div className="performance-meta-item">
             <span className="performance-meta-label">Flow Convention</span>
-            <span className="performance-meta-value">{view.methodology.flow_convention ?? "eod"}</span>
+            <span className="performance-meta-value">{view.methodology.flow_convention ?? "bod"}</span>
           </div>
           <div className="performance-meta-item">
             <span className="performance-meta-label">Risk-Free Rate (T-bill)</span>
