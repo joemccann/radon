@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Slice of a real IBKR Flex `Radon Cash Transactions` (AF) statement, taken from
+  the operator's 2025-08-15..2026-08-14 export (329 CashTransaction rows, 264
+  with a transactionID). Rows are verbatim except:
+
+    * accountId scrubbed to U0000000
+    * the operator's name scrubbed out of DISBURSEMENT descriptions
+    * the masked IBKR username scrubbed out of the market-data fee description
+    * TWO rows marked SYNTHETIC below - the real export has no amount="0" row
+      and no row missing reportDate, and both paths are load-bearing
+
+  What this slice pins:
+    * 2026-06-24 - two detail disbursements (-42,000 / -60,000) each with a
+      transactionID, plus IBKR's aggregate -102,000 row with NO transactionID.
+      Parsing the aggregate would double-count the day. Same shape for the
+      -1 / -1 / -2 WITHDRAWAL FEE trio.
+    * transactionID 41191444701 is genuinely reused by three distinct
+      2026-07-06 interest rows. The parser must NOT dedupe on id.
+    * one row per normalized bucket: Deposit, Withdrawal, Dividend, Fee,
+      Interest.
+-->
+<FlexQueryResponse queryName="Radon Cash Transactions" type="AF">
+<FlexStatements count="1">
+<FlexStatement accountId="U0000000" fromDate="20250815" toDate="20260814" period="Last365CalendarDays" whenGenerated="20260816;123413">
+<CashTransactions>
+
+<!-- Deposits / Withdrawals: the combined IBKR label, sign disambiguates. -->
+<CashTransaction currency="USD" description="ADJUSTMENT: DEPOSIT ADVANCE" dateTime="20251021" amount="152.94" type="Deposits/Withdrawals" transactionID="35731598269" reportDate="20251021" />
+<CashTransaction currency="USD" description="CASH RECEIPTS / ELECTRONIC FUND TRANSFERS" dateTime="20251021" amount="100000" type="Deposits/Withdrawals" transactionID="35830439490" reportDate="20251027" />
+<CashTransaction currency="USD" description="CANCELLATION" dateTime="20251021" amount="-152.94" type="Deposits/Withdrawals" transactionID="35830439491" reportDate="20251027" />
+
+<!-- Fee. -->
+<CashTransaction currency="USD" description="MARKET DATA: AMEX (CTA TAPE B) LEVEL 1 FOR OCT 2025" dateTime="20251029;170252" amount="-1.5" type="Other Fees" transactionID="35909440684" reportDate="20251029" />
+
+<!-- Dividend + payment-in-lieu, both classify to Dividend. -->
+<CashTransaction currency="USD" description="SPXL(US25459W8626) CASH DIVIDEND USD 0.17186 PER SHARE (Ordinary Dividend)" dateTime="20251231;202000" amount="69.09" type="Dividends" transactionID="37069558207" reportDate="20251231" />
+<CashTransaction currency="USD" description="SPXL(US25459W8626) PAYMENT IN LIEU OF DIVIDEND (Ordinary Dividend)" dateTime="20251231;202000" amount="32.48" type="Payment In Lieu Of Dividends" transactionID="37069558209" reportDate="20251231" />
+
+<!-- SKIPPED: real dividend row that carries no transactionID. -->
+<CashTransaction currency="USD" description="MSFT(US5949181045) CASH DIVIDEND USD 0.91 PER SHARE (Ordinary Dividend)" dateTime="20260312" amount="910" type="Dividends" transactionID="" reportDate="20260312" />
+
+<!-- Interest, both directions. -->
+<CashTransaction currency="USD" description="USD CREDIT INT FOR OCT-2025" dateTime="20251105" amount="81.48" type="Broker Interest Received" transactionID="36054840804" reportDate="20251105" />
+<CashTransaction currency="USD" description="USD DEBIT INT FOR OCT-2025" dateTime="20251105" amount="-0.95" type="Broker Interest Paid" transactionID="36054840844" reportDate="20251105" />
+
+<!-- 2026-06-24: detail rows + IBKR aggregate rows with no transactionID. -->
+<CashTransaction currency="USD" description="WITHDRAWAL FEE" dateTime="20260624;135011" amount="-1" type="Other Fees" transactionID="40930382794" reportDate="20260624" />
+<CashTransaction currency="USD" description="WITHDRAWAL FEE" dateTime="20260624;073604" amount="-1" type="Other Fees" transactionID="40915218485" reportDate="20260624" />
+<!-- SKIPPED: aggregate of the two -1 fees above. -->
+<CashTransaction currency="USD" description="WITHDRAWAL FEE" dateTime="20260624" amount="-2" type="Other Fees" transactionID="" reportDate="20260624" />
+<CashTransaction currency="USD" description="DISBURSEMENT INITIATED BY ACCOUNT HOLDER" dateTime="20260624;073604" amount="-42000" type="Deposits/Withdrawals" transactionID="40915218486" reportDate="20260624" />
+<CashTransaction currency="USD" description="DISBURSEMENT INITIATED BY ACCOUNT HOLDER" dateTime="20260624;135011" amount="-60000" type="Deposits/Withdrawals" transactionID="40930382802" reportDate="20260624" />
+<!-- SKIPPED: aggregate of the -42000 and -60000 disbursements above. -->
+<CashTransaction currency="USD" description="DISBURSEMENT INITIATED BY ACCOUNT HOLDER" dateTime="20260624" amount="-102000" type="Deposits/Withdrawals" transactionID="" reportDate="20260624" />
+
+<!-- Three distinct rows that share transactionID 41191444701 verbatim. -->
+<CashTransaction currency="USD" description="USD BORROW FEES FOR JUN-2026" dateTime="20260706" amount="-23.71" type="Broker Interest Paid" transactionID="41191444701" reportDate="20260706" />
+<CashTransaction currency="USD" description="USD IBKR MANAGED SECURITIES (SYEP) FOR JUN-2026" dateTime="20260706" amount="61.89" type="Broker Interest Received" transactionID="41191444701" reportDate="20260706" />
+<CashTransaction currency="USD" description="USD SHORT CREDIT INTEREST FOR JUN-2026" dateTime="20260706" amount="182.03" type="Broker Interest Received" transactionID="41191444701" reportDate="20260706" />
+
+<!-- SYNTHETIC, SKIPPED: zero-amount row. The real export has none. -->
+<CashTransaction currency="USD" description="ZERO AMOUNT ADJUSTMENT" dateTime="20260707" amount="0" type="Other Fees" transactionID="99999999999" reportDate="20260707" />
+<!-- SYNTHETIC: no reportDate, so the date falls back to dateTime. -->
+<CashTransaction currency="USD" description="LATE FEE, NO REPORT DATE" dateTime="20260708;120000" amount="-0.75" type="Other Fees" transactionID="99999999998" />
+
+</CashTransactions>
+</FlexStatement>
+</FlexStatements>
+</FlexQueryResponse>
