@@ -2307,19 +2307,27 @@ async def orders_refresh():
 # Phase 3: IB order operations
 # ---------------------------------------------------------------------------
 
-# REL-005: accepted-placement timestamps for the per-minute rate cap.
-# In-process deque is deliberate: one FastAPI process owns all placement
-# routes on a host, and a restart clearing the window is fail-open for
-# at most one minute.
+# REL-005: accepted-placement timestamps for the per-minute rate cap, each
+# tagged with the orderRef it was reserved for. In-process deque is
+# deliberate: one FastAPI process owns all placement routes on a host, and a
+# restart clearing the window is fail-open for at most one minute.
 _order_rate_timestamps: deque = deque()
 
 
-def _refuse_if_order_rate_exceeded() -> None:
+def _refuse_if_order_rate_exceeded(order_ref: Optional[str] = None) -> None:
+    """Claim one slot in the per-minute placement budget.
+
+    REL-026: `/orders/replace` reserves its slot BEFORE the destructive cancel
+    loop, so passing the same `order_ref` again from the inner `orders_place`
+    must not consume a second one — the replace is one placement, not two.
+    """
     from order_limits import max_orders_per_min
 
     now = time.monotonic()
-    while _order_rate_timestamps and now - _order_rate_timestamps[0] > 60.0:
+    while _order_rate_timestamps and now - _order_rate_timestamps[0][0] > 60.0:
         _order_rate_timestamps.popleft()
+    if order_ref and any(ref == order_ref for _stamp, ref in _order_rate_timestamps):
+        return
     cap = max_orders_per_min()
     if len(_order_rate_timestamps) >= cap:
         raise HTTPException(
@@ -2330,7 +2338,7 @@ def _refuse_if_order_rate_exceeded() -> None:
                            f"minute (RADON_MAX_ORDERS_PER_MIN) — refused",
             },
         )
-    _order_rate_timestamps.append(now)
+    _order_rate_timestamps.append((now, order_ref))
 
 
 def _refuse_if_order_limits_violated(params: dict) -> None:
@@ -2379,7 +2387,12 @@ async def orders_place(request: Request):
     _refuse_if_trading_halted()
     body = await request.json()
     _refuse_if_order_limits_violated(body)
-    _refuse_if_order_rate_exceeded()
+    # REL-006: mint the orderRef BEFORE the rate check so it survives a
+    # SIGKILLed subprocess, and so a slot /orders/replace already reserved
+    # for this ref is recognised instead of double-counted (REL-026).
+    if not body.get("orderRef"):
+        body["orderRef"] = f"radon-{uuid.uuid4().hex[:20]}"
+    _refuse_if_order_rate_exceeded(body["orderRef"])
     if test_mode:
         order_id, perm_id = _next_test_order_ids()
         return {
@@ -2391,10 +2404,6 @@ async def orders_place(request: Request):
             "echo": body,
         }
 
-    # REL-006: mint the orderRef HERE so it survives a SIGKILLed subprocess —
-    # it is the durable handle for "did this order arrive at IB or not".
-    if not body.get("orderRef"):
-        body["orderRef"] = f"radon-{uuid.uuid4().hex[:20]}"
     order_ref = body["orderRef"]
 
     order_json = json.dumps(body)
@@ -2567,8 +2576,19 @@ async def orders_replace(request: Request):
     if not replacement.get("orderRef"):
         replacement["orderRef"] = f"radon-replace-{uuid.uuid4().hex[:16]}"
 
+    # REL-026: reserve the per-minute placement budget BEFORE anything
+    # destructive. It used to be claimed inside orders_place, which runs after
+    # the cancel loop — an exhausted budget left the operator's working orders
+    # cancelled and the replacement refused, i.e. the position unhedged.
+    _refuse_if_order_rate_exceeded(replacement["orderRef"])
+
     # Complete every non-transmitting validation before the first cancellation.
     await orders_whatif(_internal_json_request(replacement))
+
+    # The what-if is the slow step and the kill switch exists for exactly the
+    # minutes it spans — re-read the halt at the last instant before the first
+    # cancellation rather than trusting the check at entry.
+    _refuse_if_trading_halted()
 
     cancelled = []
     try:
