@@ -77,7 +77,10 @@ describe("RegimePanel — market closed static fallback", () => {
     expect(source).toMatch(/warning|amber|#f59e0b/i);
   });
 
-  it("crash trigger label uses COR1M > 60", () => {
-    expect(source).toContain("COR1M > 60");
+  it("crash trigger label interpolates the threshold the trigger uses", () => {
+    // The literal moved into CRASH_TRIGGER_CORRELATION_THRESHOLD so the label
+    // and resolveCrashTriggerState cannot disagree (T-069). The number itself
+    // is pinned behaviourally in regime-market-closed-values.test.ts.
+    expect(source).toContain("COR1M > ${CRASH_TRIGGER_CORRELATION_THRESHOLD}");
   });
 });
