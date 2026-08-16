@@ -357,29 +357,50 @@ def test_r4_the_real_series_is_thirteen_times_more_dispersed_than_the_fixture():
     assert statistics.median(real) / statistics.median(interpolated) > 13.0
 
 
-def test_r4_the_real_series_quarantines_the_2026_01_26_deposit():
-    """The claim test_74 makes on the interpolated series, made on production.
+def test_r4_the_real_series_quarantines_what_no_market_produces():
+    """Superseded by R10, and the delta is a DELIBERATE, DOCUMENTED tradeoff.
 
-    232,497.52580117 / 189,502.12175117 - 1 = 0.22688613537771407 — an
-    unrecorded 42,995.41 deposit, chained today because the real series' own
-    median |r| of 0.03252648 lifts the dispersion bar above it.
+    This test used to require all three of REAL_UNEXPLAINED_DATES to quarantine,
+    which held only because the median-anchored bar sat at 0.1626. Once the bar
+    is anchored to the account's own tail it moves to 0.3238 on this series, and
+    2026-01-26 (+0.22688613537771407, a real unrecorded 42,995.41 deposit) is no
+    longer caught.
+
+    That is not a regression that can be tuned away. +22.69% is 2.1x this
+    account's own p95 of 0.10794, and the account genuinely produces sessions
+    that size -- its largest flow-corrected day is +28.4%. A bar low enough to
+    catch the deposit is a bar that quarantines ordinary trading days forever,
+    which published +28.76% against a true +121.09%. The two are the same
+    magnitude and no threshold separates them.
+
+    Completeness of flow data is therefore enforced UPSTREAM, not inferred from
+    return magnitude: a failed fetch is FlowsStatus.FAILED, and a statement
+    missing the Transfers section raises FLOWS_TRANSFERS_SECTION_ABSENT. Both
+    refuse to publish outright. The quarantine's remaining job is to catch what
+    no market produces, and it still does.
     """
     payload = build_payload(observations(fx.real_live_nav()), FlowSet.empty_verified())
 
-    for suspect_date in fx.REAL_UNEXPLAINED_DATES:
+    # 2026-01-13 (+74.12%) and 2026-02-06 (+294.07%) clear SUSPECT_RETURN_THRESHOLD
+    # outright; no tail estimate can license either.
+    for suspect_date in ("2026-01-13", "2026-02-06"):
         sp = subperiod_on(payload, suspect_date)
         assert sp["skip_reason"] == "suspect_no_flow", suspect_date
         assert sp["r"] is None, suspect_date
 
-    assert payload["counts"]["n_suspect"] >= 3
+    # The documented survivor. Pinned so the tradeoff stays visible rather than
+    # quietly reappearing as a surprise.
+    survivor = subperiod_on(payload, "2026-01-26")
+    assert survivor["skip_reason"] is None
+    assert survivor["r"] == pytest.approx(0.22688613537771407, rel=REL)
+
+    assert payload["counts"]["n_suspect"] == 2
     assert payload["status"] == "degraded"
 
     published = None if payload["twr"] is None else payload["twr"]["cum_return"]
     if published is not None:
-        # Anti-pin: the live +951.28%, and the +22.69% the 01-26 session alone
-        # would still inject.
+        # The anti-pin that still matters: the live +951.28% is unreachable.
         assert published != pytest.approx(fx.LIVE_CONTAMINATED_CUM_RETURN, rel=0.01)
-        assert abs(published) < 0.30
 
 
 def test_r4_the_interpolated_fixture_cannot_be_mistaken_for_the_real_one():
@@ -551,3 +572,146 @@ def test_every_emitted_warning_code_is_in_the_spec_allowlist():
         f"{unlisted} are emitted but absent from §C.4's exhaustive allowlist. "
         "Either add them to the spec block and the TS union, or stop emitting them."
     )
+
+
+# ===========================================================================
+# R10 — the dispersion bar is anchored to the MEDIAN, so it can never clear
+# ===========================================================================
+#
+# `_outlier_threshold` was `max(median(|r|) * 5, 0.10)`. A multiple of the
+# median describes a typical session, not an impossible one, so on any account
+# with real dispersion the bar lands inside the account's own upper tail and
+# permanently quarantines its biggest genuine sessions.
+#
+# Measured on the operator's real 162-session series (Flex query 1442520,
+# 2025-12-31..2026-08-14) AFTER the flows were correct:
+#
+#     median |r|  0.027353      bar = max(0.027353 * 5, 0.10) = 0.136765
+#     p90    |r|  0.088133
+#     p95    |r|  0.106300      <- the bar sits BELOW the account's own p99
+#     p99    |r|  0.278656
+#     max    |r|  0.283750
+#     |r| > 0.50  0 sessions
+#
+# Five sessions cleared 0.136765 and were quarantined. Excluding them published
+# +28.76% against +121.09% including them -- a 92-point understatement on an
+# account whose NAV went 99,492.94 -> 1,344,156.96 on only +135,411.85 of net
+# external flows, i.e. ~1.1M of genuine trading P&L.
+#
+# THE FIX: anchor the bar to the account's own TAIL, not its median. A quiet
+# account keeps a tight bar (the floor), a volatile account is measured against
+# its own extremes, and the absolute SUSPECT_RETURN_THRESHOLD ceiling still
+# catches anything a market cannot produce whatever the tail looks like.
+
+TAIL_QUANTILE = 0.95
+TAIL_MULTIPLE = 3.0
+
+
+def _nav_from_returns(rets, start=100_000.0, first="2026-01-05"):
+    """Weekday NAV series whose successive returns are exactly `rets`."""
+    from datetime import timedelta
+
+    day = date.fromisoformat(first)
+    nav, value = {}, float(start)
+    nav[day.isoformat()] = value
+    for r in rets:
+        day += timedelta(days=1)
+        while day.weekday() >= 5:
+            day += timedelta(days=1)
+        value *= 1.0 + r
+        nav[day.isoformat()] = value
+    return nav
+
+
+def test_r10_the_bar_is_a_multiple_of_the_tail_not_the_median():
+    """21 magnitudes: nineteen 0.03, one 0.10, one 0.28.
+
+    p95 at position (21-1)*0.95 = 19.0 lands exactly on index 19 = 0.10, so no
+    interpolation. bar = max(0.10 * 3, 0.10) = 0.30.
+    The old rule gave max(median * 5, 0.10) = max(0.03 * 5, 0.10) = 0.15, which
+    would have quarantined the 0.28 session.
+    """
+    from scripts.lib.twr_math import _outlier_threshold
+
+    magnitudes = [0.03] * 19 + [0.10, 0.28]
+    assert _outlier_threshold(magnitudes) == pytest.approx(0.30, rel=REL)
+    assert statistics.median(magnitudes) * 5 == pytest.approx(0.15, rel=REL)
+
+
+def test_r10_a_volatile_account_keeps_its_biggest_genuine_session():
+    """Same shape as the operator's book: a 28% day is a Tuesday here."""
+    rets = [0.03] * 19 + [0.10, 0.28]
+    nav = _nav_from_returns(rets)
+    payload = build_payload(observations(nav), FlowSet.empty_verified())
+
+    # 22 observations -> 21 returns, at/above MIN_N_DISPERSION.
+    assert payload["counts"]["n_subperiods"] == 21
+    # bar 0.30 (see above); 0.28 is under it and under the 0.50 ceiling.
+    assert 0.28 < 0.30
+    assert 0.28 < twr_gates.SUSPECT_RETURN_THRESHOLD
+    assert payload["counts"]["n_suspect"] == 0
+    assert payload["status"] == "ok"
+    assert "SUBPERIOD_SUSPECT" not in codes(payload)
+
+
+def test_r10_a_volatile_account_still_catches_a_real_missing_transfer():
+    """Widening the bar must not blunt the ceiling. The original defect was a
+    +294% session from an unrecorded 725k ACATS; 2.94 > 0.50 whatever the tail."""
+    rets = [0.03] * 19 + [0.10, 2.9407]
+    nav = _nav_from_returns(rets)
+    payload = build_payload(observations(nav), FlowSet.empty_verified())
+
+    end_date = sorted(nav)[-1]
+    assert subperiod_on(payload, end_date)["skip_reason"] == "suspect_no_flow"
+    assert payload["status"] == "degraded"
+    assert "SUBPERIOD_SUSPECT" in codes(payload)
+
+
+def test_r10_a_quiet_account_still_catches_an_unexplained_deposit():
+    """The tail must not license a deposit on a placid book. Twenty 0.4% days
+    then an unrecorded +22.7%: p95 of the sample is ~0.004, so the bar falls to
+    the 0.10 floor and 0.227 clears it."""
+    rets = [0.004] * 20 + [0.227]
+    nav = _nav_from_returns(rets)
+    payload = build_payload(observations(nav), FlowSet.empty_verified())
+
+    end_date = sorted(nav)[-1]
+    assert 0.227 < twr_gates.SUSPECT_RETURN_THRESHOLD
+    assert subperiod_on(payload, end_date)["skip_reason"] == "suspect_no_flow"
+    assert payload["status"] == "degraded"
+
+
+def test_r10_the_tail_needs_a_real_sample_before_it_is_trusted():
+    """Below the dispersion minimum a p95 is noise, so the tail term is not
+    computed and the median term carries the estimate.
+
+    The tail may only ever WIDEN the bar. Collapsing a short sample straight to
+    the floor would be STRICTER than the rule it replaced and would quarantine
+    short, legitimately volatile series -- it broke four unrelated fixtures when
+    tried.
+    """
+    from scripts.lib.twr_math import _outlier_threshold
+
+    # 5 magnitudes, all 0.30: median 0.30 * 5 = 1.5, no tail term at n < 20.
+    assert _outlier_threshold([0.30] * 5) == pytest.approx(1.5, rel=REL)
+    # Nothing to measure at all falls back to the floor.
+    assert _outlier_threshold([]) == pytest.approx(
+        twr_gates.UNEXPLAINED_ABSOLUTE_FLOOR, rel=REL
+    )
+
+
+def test_r10_the_tail_only_ever_widens_the_bar():
+    """Whatever the sample, the new bar is never below the old median rule."""
+    from scripts.lib.twr_math import _outlier_threshold
+
+    for sample in (
+        [0.03] * 19 + [0.10, 0.28],       # volatile, tail dominates
+        [0.004] * 20 + [0.227],           # quiet, floor dominates
+        [0.30] * 5,                       # short, median dominates
+        [0.0] * 21 + [0.227],             # dormant, floor dominates
+    ):
+        old = max(
+            statistics.median(sample) * twr_gates.UNEXPLAINED_OUTLIER_MULTIPLE,
+            twr_gates.UNEXPLAINED_ABSOLUTE_FLOOR,
+        )
+        assert _outlier_threshold(sample) >= old - 1e-12
