@@ -232,13 +232,12 @@ test.describe("mobile newsfeed item layout (393x852)", () => {
       expect(areas[key].height, `${key} hit height`).toBeGreaterThanOrEqual(44);
       expect(areas[key].width, `${key} hit width`).toBeGreaterThanOrEqual(44);
     }
-    // ⛔ RECORDED EXCEPTION, awaiting an operator ruling. The project floor is
-    // 44px and this chip is 32px. That is a deliberate tradeoff, not a pass:
-    // a 44px pad on a 24px chip overlaps the adjacent wrapped row and the
-    // footer's link pill (see DashboardNewsFeed.module.css). This assertion
-    // therefore pins the CURRENT AGREED value so a silent shrink is caught, and
-    // is explicitly NOT a claim that the 44px rule is satisfied here. If the
-    // ruling is "honour the floor", raise the row pitch and change 32 to 44.
+    // ⛔ RECORDED EXCEPTION to the 44px floor, ACCEPTED by the operator
+    // 2026-08-16. This chip is 32px because a 44px pad on a 24px chip overlaps
+    // the adjacent wrapped row and the footer's link pill (see
+    // DashboardNewsFeed.module.css), and honouring the floor would mean a
+    // taller tag strip, which is the orphan-chip bug this work removed.
+    // Bounded both ways so the accepted value cannot silently drift.
     expect(areas.tagChip.boxHeight).toBeGreaterThanOrEqual(24);
     expect(areas.tagChip.height, "tag chip hit height (32px exception)").toBeGreaterThanOrEqual(32);
     expect(areas.tagChip.height, "exception is 32px, not silently widened").toBeLessThan(44);

@@ -121,7 +121,8 @@
    block's PADDING box. The chip's 24px border box carries a 1px border, so the
    pad grows from 22px, not 24px: -4px landed at 30px. -5px lands at 32px.
 
-   ⛔ RECORDED EXCEPTION to the 44px tap-target rule, needs an operator ruling.
+   ⛔ RECORDED EXCEPTION to the 44px tap-target rule. ACCEPTED by the operator
+   2026-08-16: 32px stands, the tag strip stays one row.
    32px is deliberate, not an oversight. A 44px pad on a 24px chip needs 44px of
    vertical room; the strip has 24px rows with 12px gaps, and the footer's link
    pill already owns a 44px pad 12px below the last row. Growing this to 44 would
