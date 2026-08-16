@@ -236,13 +236,39 @@ def sessions_behind(nav_as_of: Optional[str], through: Optional[_date] = None) -
 # ---------------------------------------------------------------------------
 
 
-def fetch_flex_xml(token: str, query_id: str, *, max_polls: int = 30, poll_secs: float = 3.0) -> str:
-    """Poll Flex until FlexStatements appears; hard-fail if ReferenceCode is missing."""
+FLEX_READ_TIMEOUT_SECONDS = 120.0
+FLEX_POLL_BUDGET_SECONDS = 420.0
+
+
+def fetch_flex_xml(
+    token: str,
+    query_id: str,
+    *,
+    max_polls: int = 60,
+    poll_secs: float = 3.0,
+    read_timeout: float = FLEX_READ_TIMEOUT_SECONDS,
+) -> str:
+    """Poll Flex until FlexStatements appears; hard-fail if ReferenceCode is missing.
+
+    Two budgets, both widened after a live failure on 2026-08-16.
+
+    The socket read timeout was 30s. Query 1442520 now carries three sections
+    (NAV in Base, Cash Transactions, Transfers), and the Transfers section made
+    the statement slow enough that GetStatement blew that timeout outright:
+    ``fetch_failed: The read operation timed out``. The builder degraded
+    correctly rather than publishing, but the payload could never regenerate.
+
+    The poll budget was 30 x 3s = 90 seconds flat. IBKR statement generation at
+    the EOD spike routinely runs into minutes. This is the same wall that made
+    `cash_flow_sync` fail 14 times out of 16 -- a caller-side deadline shorter
+    than the work it is waiting on -- so the budget matches the 420s that script
+    now uses, and the sleep is capped-exponential rather than a fixed 3s.
+    """
     from urllib.parse import urlencode
     from urllib.request import urlopen
 
     params = urlencode({"t": token, "q": query_id, "v": "3"})
-    resp = urlopen(f"{_FLEX_SEND}?{params}", timeout=30)  # noqa: S310
+    resp = urlopen(f"{_FLEX_SEND}?{params}", timeout=read_timeout)  # noqa: S310
     text = resp.read().decode("utf-8")
     root = _ET.fromstring(text)
     ref = root.find(".//ReferenceCode")
@@ -251,14 +277,22 @@ def fetch_flex_xml(token: str, query_id: str, *, max_polls: int = 30, poll_secs:
         err_msg = root.findtext(".//ErrorMessage") or text[:500]
         raise RuntimeError(f"Flex SendRequest failed code={err_code}: {err_msg}")
     ref_code = ref.text.strip()  # type: ignore[union-attr]
+    elapsed = 0.0
+    sleep_s = float(poll_secs)
     for _ in range(max_polls):
-        _time.sleep(poll_secs)
+        if elapsed + sleep_s > FLEX_POLL_BUDGET_SECONDS:
+            break
+        _time.sleep(sleep_s)
+        elapsed += sleep_s
+        sleep_s = min(sleep_s * 2, 15.0)
         params2 = urlencode({"t": token, "q": ref_code, "v": "3"})
-        resp2 = urlopen(f"{_FLEX_GET}?{params2}", timeout=30)  # noqa: S310
+        resp2 = urlopen(f"{_FLEX_GET}?{params2}", timeout=read_timeout)  # noqa: S310
         xml_text = resp2.read().decode("utf-8")
         if "<FlexStatements" in xml_text or "<FlexStatement" in xml_text:
             return xml_text
-    raise RuntimeError(f"Flex GetStatement timeout after {max_polls} polls ref={ref_code}")
+    raise RuntimeError(
+        f"Flex GetStatement not ready within {FLEX_POLL_BUDGET_SECONDS:.0f}s ref={ref_code}"
+    )
 
 
 def _account_scopes(root: _ET.Element) -> List[Tuple[str, _ET.Element]]:
