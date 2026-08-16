@@ -257,15 +257,20 @@ describe.each(UNDEFINED.map((s) => [s.name, s] as const))(
     it("without verified margin, undefined risk never uses opening credit", () => {
       const pos = buildPosition(struct, { max_risk: null, init_margin_at_entry: null });
       expect(pos.max_risk).toBeNull();
-      const capital = getPnlCapital(pos);
-      const ec = resolveEntryCost(pos);
+      // Expectation is built from the FIXTURE's declared net (pos.entry_cost, set
+      // by buildPosition) and the CATALOG's leg actions — never from a call into
+      // positionUtils, which would make the assertion self-satisfying.
+      const declaredNet = pos.entry_cost;
+      const catalogActions = struct.legs.map((leg) => String(leg.action || "BUY").toUpperCase());
+      const catalogTypes = struct.legs.map((leg) => String(leg.type).toLowerCase());
       const isLongStock = pos.legs.length === 1
-        && pos.legs[0]?.type === "Stock"
-        && pos.legs[0].direction === "LONG";
-      const isFullLossDebit = ec > 0 && (isLongStock
-        || pos.legs.every((leg) => leg.type !== "Stock" && leg.direction === "LONG"));
-      expect(capital).toBe(isFullLossDebit ? ec : null);
-      if (ec < 0) expect(getPnlPct(pos)).toBeNull();
+        && catalogTypes[0] === "stock"
+        && catalogActions[0] === "BUY";
+      const isAllLongOptions = catalogTypes.every((t) => t !== "stock")
+        && catalogActions.every((a) => a === "BUY");
+      const fullLossDebit = declaredNet > 0 && (isLongStock || isAllLongOptions);
+      expect(getPnlCapital(pos)).toBe(fullLossDebit ? declaredNet : null);
+      if (declaredNet < 0) expect(getPnlPct(pos)).toBeNull();
     });
 
     it("ignores a bare init_margin_at_entry projection", () => {
@@ -334,8 +339,10 @@ describe.each(DEFINED.map((s) => [s.name, s] as const))(
         init_margin_at_entry: null,
         max_risk: null,
       });
-      const ec = resolveEntryCost(pos);
-      expect(getPnlCapital(pos)).toBe(ec > 0 ? ec : null);
+      // Fixture-declared net, not resolveEntryCost(pos) — the source must agree
+      // with the position payload it was handed, not merely with itself.
+      const declaredNet = pos.entry_cost;
+      expect(getPnlCapital(pos)).toBe(declaredNet > 0 ? declaredNet : null);
     });
   },
 );
@@ -403,5 +410,202 @@ describe("credit vs debit extremes (catalog-derived)", () => {
       const pos = withObservedMargin(buildPosition(struct), 33_000);
       expect(getPnlCapital(pos), name).toBe(33_000);
     }
+  });
+});
+
+/**
+ * Hand-computed denominators — one per risk_profile bucket.
+ *
+ * Every expectation below is a numeric literal worked out from the leg premiums
+ * written into the fixture, never an expression that calls back into
+ * positionUtils. The catalog sweeps above prove all 58 structures BUILD and
+ * resolve; these prove the arithmetic is the arithmetic we intend.
+ */
+function handBuiltPosition(
+  fields: {
+    structure: string;
+    risk_profile: PortfolioPosition["risk_profile"];
+    entry_cost: number;
+    contracts: number;
+    direction: PortfolioPosition["direction"];
+    max_risk?: number | null;
+    market_value?: number | null;
+    expiry?: string;
+  },
+  legs: PortfolioLeg[],
+): PortfolioPosition {
+  return {
+    id: 1,
+    ticker: "TEST",
+    structure: fields.structure,
+    structure_type: fields.structure,
+    risk_profile: fields.risk_profile,
+    expiry: fields.expiry ?? "2026-09-18",
+    contracts: fields.contracts,
+    direction: fields.direction,
+    entry_cost: fields.entry_cost,
+    max_risk: fields.max_risk ?? null,
+    init_margin_at_entry: null,
+    return_capital: null,
+    market_value: fields.market_value ?? null,
+    kelly_optimal: null,
+    target: null,
+    stop: null,
+    entry_date: "2026-08-01",
+    legs,
+  };
+}
+
+function optionLeg(
+  direction: "LONG" | "SHORT",
+  strike: number,
+  contracts: number,
+  entryPerUnit: number,
+  markPerUnit: number,
+): PortfolioLeg {
+  return {
+    direction,
+    contracts,
+    type: "Call",
+    strike,
+    entry_cost: entryPerUnit * contracts * 100,
+    avg_cost: entryPerUnit * 100,
+    market_price: markPerUnit,
+    market_value: markPerUnit * contracts * 100,
+  };
+}
+
+describe("hand-computed capital and return (literal expectations)", () => {
+  it("defined multi-leg debit spread: capital is the net debit, 5 × ($5.00 − $2.00) × 100", () => {
+    // LONG C100 ×5 @ $5.00 = $2,500 debit · SHORT C110 ×5 @ $2.00 = $1,000 credit
+    // Marks: $3.50 → $1,750 · $1.20 → $600
+    const pos = handBuiltPosition(
+      {
+        structure: "Bull Call Spread",
+        risk_profile: "defined",
+        entry_cost: 1_500,
+        contracts: 5,
+        direction: "COMBO",
+      },
+      [optionLeg("LONG", 100, 5, 5, 3.5), optionLeg("SHORT", 110, 5, 2, 1.2)],
+    );
+    expect(resolveEntryCost(pos)).toBe(1_500);
+    expect(resolveMarketValue(pos)).toBe(1_150);
+    expect(getPnlDollars(pos)).toBe(-350);
+    expect(getPnlCapital(pos)).toBe(1_500);
+    expect(getPnlPct(pos)).toBeCloseTo(-23.333333, 6);
+  });
+
+  it("defined single-leg long call: capital is the $900 debit paid", () => {
+    const pos = handBuiltPosition(
+      {
+        structure: "Long Call",
+        risk_profile: "defined",
+        entry_cost: 900,
+        contracts: 2,
+        direction: "LONG",
+      },
+      [optionLeg("LONG", 100, 2, 4.5, 6.2)],
+    );
+    expect(resolveMarketValue(pos)).toBe(1_240);
+    expect(getPnlDollars(pos)).toBe(340);
+    expect(getPnlCapital(pos)).toBe(900);
+    expect(getPnlPct(pos)).toBeCloseTo(37.777778, 6);
+  });
+
+  it("undefined multi-leg CREDIT combo: −$5,000 net credit is never a denominator", () => {
+    // SHORT P95 ×10 @ $8.00 = $8,000 credit · LONG C110 ×10 @ $3.00 = $3,000 debit
+    // Marks: $5.00 → $5,000 · $1.80 → $1,800
+    const legs: PortfolioLeg[] = [
+      { ...optionLeg("SHORT", 95, 10, 8, 5), type: "Put" },
+      optionLeg("LONG", 110, 10, 3, 1.8),
+    ];
+    const pos = handBuiltPosition(
+      {
+        structure: "Long Risk Reversal",
+        risk_profile: "undefined",
+        entry_cost: -5_000,
+        contracts: 10,
+        direction: "COMBO",
+      },
+      legs,
+    );
+    expect(resolveEntryCost(pos)).toBe(-5_000);
+    expect(resolveMarketValue(pos)).toBe(-3_200);
+    expect(getPnlDollars(pos)).toBe(1_800);
+    expect(getPnlCapital(pos)).toBeNull();
+    expect(getPnlPct(pos)).toBeNull();
+    expect(getPnlCapital(withObservedMargin(pos, 40_000))).toBe(40_000);
+    expect(getPnlPct(withObservedMargin(pos, 40_000))).toBeCloseTo(4.5, 9);
+  });
+
+  it("undefined single-leg short put: no verified capital, no return", () => {
+    const pos = handBuiltPosition(
+      {
+        structure: "Short Put",
+        risk_profile: "undefined",
+        entry_cost: -1_200,
+        contracts: 3,
+        direction: "SHORT",
+      },
+      [{ ...optionLeg("SHORT", 95, 3, 4, 2.5), type: "Put" }],
+    );
+    expect(getPnlCapital(pos)).toBeNull();
+    expect(getPnlPct(pos)).toBeNull();
+  });
+
+  it("long stock: the $10,000 paid is the full loss and the denominator", () => {
+    const pos = handBuiltPosition(
+      {
+        structure: "Stock",
+        risk_profile: "undefined",
+        entry_cost: 10_000,
+        contracts: 200,
+        direction: "LONG",
+        expiry: "N/A",
+      },
+      [
+        {
+          direction: "LONG",
+          contracts: 200,
+          type: "Stock",
+          strike: null,
+          entry_cost: 10_000,
+          avg_cost: 50,
+          market_price: 53,
+          market_value: 10_600,
+        },
+      ],
+    );
+    expect(getPnlDollars(pos)).toBe(600);
+    expect(getPnlCapital(pos)).toBe(10_000);
+    expect(getPnlPct(pos)).toBeCloseTo(6, 9);
+  });
+
+  it("leg entry_cost is a MAGNITUDE: direction alone sets the sign of the fold", () => {
+    // Per web/CLAUDE.md the sign comes from leg.direction; entry_cost is stored
+    // as a positive magnitude. A payload whose SHORT leg arrives already signed
+    // must still fold to the same net — dropping the Math.abs in
+    // resolveEntryCost / resolveMarketValue turns this case red.
+    // LONG C100 ×4 @ $7.00 = +$2,800 · SHORT C110 ×4 @ $4.00 = −$1,600
+    const shortLeg = optionLeg("SHORT", 110, 4, 4, 2.25);
+    const pos = handBuiltPosition(
+      {
+        structure: "Bull Call Spread",
+        risk_profile: "defined",
+        entry_cost: 1_200,
+        contracts: 4,
+        direction: "COMBO",
+      },
+      [
+        optionLeg("LONG", 100, 4, 7, 5),
+        { ...shortLeg, entry_cost: -1_600, market_value: -900 },
+      ],
+    );
+    expect(resolveEntryCost(pos)).toBe(1_200);
+    expect(resolveMarketValue(pos)).toBe(1_100);
+    expect(getPnlDollars(pos)).toBe(-100);
+    expect(getPnlCapital(pos)).toBe(1_200);
+    expect(getPnlPct(pos)).toBeCloseTo(-8.333333, 6);
   });
 });
