@@ -59,3 +59,8 @@ commits = [
 [allowlist]
 description = "Generated local artifacts are not source"
 paths = ['''(^|/)__pycache__/|\.pyc$|(^|/)\.venv/''']
+# RADON_DB_NO_REPLICA=1 is the documented replica kill-switch flag (root
+# CLAUDE.md, docs). Prose like ".env with dummy Clerk keys,
+# `RADON_DB_NO_REPLICA=1`" trips generic-api-key (2026-08-16, .pi/AGENTS.md
+# in b2ef3209). The literal is config, never a credential.
+regexes = ['''RADON_DB_NO_REPLICA=1''']
