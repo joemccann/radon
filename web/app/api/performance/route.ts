@@ -42,6 +42,9 @@ function extractTimestampValue(data: Record<string, unknown> | null, key: string
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
+/** Payload v2 states its freshness as `generated_at` / `nav_as_of`; the legacy
+ *  writer stated it as `last_sync` / `as_of`. Hand both shapes over so the
+ *  comparison is never left reading two nulls and answering "behind". */
 function isCacheBehindPortfolio(
   performance: Record<string, unknown> | null,
   portfolio: Record<string, unknown> | null,
@@ -52,6 +55,8 @@ function isCacheBehindPortfolio(
       ? {
           last_sync: extractTimestampValue(performance, "last_sync"),
           as_of: extractTimestampValue(performance, "as_of"),
+          generated_at: extractTimestampValue(performance, "generated_at"),
+          nav_as_of: extractTimestampValue(performance, "nav_as_of"),
         }
       : null,
     portfolioLastSync,
@@ -59,15 +64,49 @@ function isCacheBehindPortfolio(
 }
 
 /**
+ * Hard floor between background rebuilds, deliberately independent of WHY one
+ * was judged necessary. A rebuild runs a full Flex SendRequest plus polls
+ * against a single query id, and IBKR answers a request storm with a 24h to
+ * 168h throttle embargo — this repo has already taken one. FastAPI's own
+ * `_running_build` guard only dedupes CONCURRENT builds, so sequential GETs
+ * need the floor on the caller side, where a freshness bug can no longer
+ * reopen the loop.
+ */
+const MIN_REBUILD_INTERVAL_MS = 5 * 60_000;
+
+let lastBackgroundRebuildAtMs = 0;
+
+/**
  * Fire-and-forget background rebuild trigger.
  * 5s timeout, swallow all errors — caller already returned cached data.
  * §4.4: keep SWR — serve stale immediately, rebuild in background.
  */
 function triggerBackgroundRebuild(): void {
+  const now = Date.now();
+  if (now - lastBackgroundRebuildAtMs < MIN_REBUILD_INTERVAL_MS) return;
+  lastBackgroundRebuildAtMs = now;
   radonFetch("/performance/background", { method: "POST", timeout: 5_000 }).catch(() => {});
 }
 
-/** Phase 2.3 — latest Turso snapshot, timestamped by the taken_at row key. */
+/**
+ * Freshness comes from the payload's own full-ISO `generated_at` (payload v2),
+ * falling back to the legacy `last_sync` and only then to the row key. Two
+ * writers wrote `taken_at` in two shapes; a date-only key reads as ~midnight
+ * and makes every row look permanently stale, which is what kept this route
+ * rebuilding against a five-month-old snapshot.
+ */
+function payloadTimestampMs(
+  payload: Record<string, unknown>,
+  rowTakenAt: string,
+): number | null {
+  return (
+    contentTimestampMs(payload.generated_at)
+    ?? contentTimestampMs(payload.last_sync)
+    ?? contentTimestampMs(rowTakenAt)
+  );
+}
+
+/** Phase 2.3 — latest Turso snapshot, timestamped by the payload's own instant. */
 async function readPerformanceFromDb(): Promise<TimestampedRead<Record<string, unknown>> | null> {
   const result = await dbExecute({
     sql: `SELECT taken_at, payload FROM performance_snapshots ORDER BY taken_at DESC LIMIT 1`,
@@ -75,9 +114,36 @@ async function readPerformanceFromDb(): Promise<TimestampedRead<Record<string, u
   }, { label: "performance" });
   if (result.rows.length === 0) return null;
   const row = result.rows[0] as unknown as { taken_at: string; payload: string };
+  const data = JSON.parse(row.payload) as Record<string, unknown>;
+  return { data, timestampMs: payloadTimestampMs(data, row.taken_at) };
+}
+
+/**
+ * §C.6 — missing data is a status, never an HTTP fault. The UI branches on
+ * `status` and renders the warning; it must never see a 5xx envelope it has to
+ * guess at, and the upstream error text never reaches the client.
+ */
+function navUnavailablePayload(): Record<string, unknown> {
   return {
-    data: JSON.parse(row.payload) as Record<string, unknown>,
-    timestampMs: contentTimestampMs(row.taken_at),
+    schema_version: 2,
+    status: "unavailable",
+    generated_at: new Date().toISOString(),
+    nav_source: "none",
+    nav_as_of: "",
+    nav_sessions_behind: 0,
+    flows_status: "failed",
+    counts: { n_nav_observations: 0, n_subperiods: 0, n_returns: 0, n_skipped: 0, n_suspect: 0 },
+    benchmark: null,
+    series: [],
+    subperiods: [],
+    warnings: [
+      {
+        code: "NAV_UNAVAILABLE",
+        severity: "error",
+        message: "No NAV series available (Flex, disk and Turso all empty).",
+        context: {},
+      },
+    ],
   };
 }
 
@@ -99,7 +165,7 @@ async function readPortfolioFromDb(): Promise<Record<string, unknown> | null> {
 async function readPerformanceFromDisk(): Promise<TimestampedRead<Record<string, unknown>> | null> {
   const data = await readJsonFile(PERFORMANCE_PATH);
   if (!data) return null;
-  return { data, timestampMs: contentTimestampMs(data.last_sync) };
+  return { data, timestampMs: payloadTimestampMs(data, "") };
 }
 
 export async function GET(): Promise<Response> {
@@ -157,10 +223,7 @@ export async function GET(): Promise<Response> {
     const data = await radonFetch("/performance", { method: "POST", timeout: 180_000 });
     return setNoStoreResponseHeaders(NextResponse.json(data), requestId);
   } catch {
-    return setNoStoreResponseHeaders(
-      NextResponse.json({ error: "Performance metrics temporarily unavailable" }, { status: 502 }),
-      requestId,
-    );
+    return setNoStoreResponseHeaders(NextResponse.json(navUnavailablePayload()), requestId);
   }
 }
 

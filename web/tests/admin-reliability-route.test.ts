@@ -33,10 +33,18 @@ afterEach(() => {
 
 describe("GET /api/admin/reliability", () => {
   it("bounds a hung history read and resets the DB client", async () => {
-    vi.useFakeTimers();
     execute.mockImplementation(() => new Promise(() => {}));
 
     const { GET } = await import("../app/api/admin/reliability/route");
+    // `requireRouteAccess` reaches Clerk through `await import(...)`, and
+    // `vi.resetModules()` empties the registry before every test, so on a cold
+    // graph that resolution is a real module load, not a microtask. Warming it
+    // under the real clock is what makes the advance below deterministic:
+    // under fake timers the load never settles, the 3s bound is advanced past
+    // before `withTimeout` has scheduled it, and the request hangs forever.
+    await import("@clerk/nextjs/server");
+
+    vi.useFakeTimers();
     const responsePromise = GET();
     // Handler-local auth resolves before the bounded DB timer is scheduled.
     await vi.advanceTimersByTimeAsync(0);
