@@ -9,6 +9,7 @@ import type {
   WorkspaceSection,
 } from "./types";
 import { PI_COMMAND_ALIASES, PI_COMMAND_SET } from "./data";
+import { placeOrderFeedback } from "./orders/placeOrderFeedback";
 import {
   createTimestamp,
   formatAssistantPayload,
@@ -277,7 +278,11 @@ export async function placeProposedOrder(
   if (!response.ok) {
     return { ok: false, message: (json as { error?: string }).error || "Order placement failed." };
   }
-  return { ok: true, message: (json as { message?: string }).message || `Order placed: ${proposal.summary}` };
+  const feedback = placeOrderFeedback(
+    json,
+    (json as { message?: string }).message || `Order placed: ${proposal.summary}`,
+  );
+  return { ok: true, message: feedback.message };
 }
 
 export async function requestPiReply(command: string): Promise<string> {
