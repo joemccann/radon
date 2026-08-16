@@ -165,7 +165,7 @@ function emptyDistribution(n: number, reason: string): Record<string, GatedValue
 const METHODOLOGY_OK = {
   curve_type: "twr_daily_eod",
   return_basis: "time_weighted",
-  flow_convention: "eod",
+  flow_convention: "bod",
   day_count: "act/365",
   vol_scaling_days: 252,
   sortino_target: 0.0,
@@ -180,7 +180,13 @@ const METHODOLOGY_OK = {
  *
  * Pinned by the spec (all hand-derivable from the 6-value return pattern
  * [+0.006,-0.004,+0.002,-0.008,+0.010,-0.001] repeated 10x):
- *   cum_return   = (1.006*0.996*1.002*0.992*1.010*0.999)^10 - 1 = 0.050112307160331326
+ *   cum_return   = (1.006*0.996*1.002*0.992*1.010*0.999)^10
+ *                  * (1 - 0.0005063619214326489) / 0.999      <- 02-13, C = +100000
+ *                  * (1 + 0.0022779803755503406) / 1.002      <- 03-06, C =  -25000
+ *                  - 1 = 0.05092267338835921
+ *                  (the two flow days divide by B + C, so the pattern factor
+ *                   they would have contributed is replaced; the other 58 have
+ *                   C = 0 and are identical under either convention)
  *   calendar_days= (2026-03-27 - 2026-01-02).days = 84  -> annualized gated period_lt_1y
  *   net flows    = +100000.00 (02-13) + -25000.00 (03-06) = 75000.00
  *   investment_pnl = 182217.35574011656 - 100000.00 - 75000.00 = 7217.35574011656
@@ -212,7 +218,7 @@ export function goldenOkPayload(): PerformancePayloadV2 {
       n_suspect: 0,
     },
     twr: {
-      cum_return: 0.050112307160331326,
+      cum_return: 0.05092267338835921,
       // 84 calendar days < MIN_CALENDAR_DAYS_ANNUALIZED (365)
       annualized: gated(null, 84, 365, "period_lt_1y"),
       excludes_suspect: false,
@@ -223,10 +229,15 @@ export function goldenOkPayload(): PerformancePayloadV2 {
       multiple_sign_changes: false,
     },
     risk: {
-      volatility: gated(0.09623593888045874, 60, 20, null, true),
-      sharpe_ratio: gated(1.9763572406782934, 60, 60, null, true),
-      sortino_ratio: gated(3.2608857445808517, 60, 60, null, true),
-      downside_deviation: gated(0.05832666628567074, 60, 60, null, true),
+      // sum of the 60 returns = 0.05077161845411769 -> mean 0.0008461936409019616
+      // sd(ddof=1) = 0.006061105476604102 ; * sqrt(252) = 15.874507866387544
+      volatility: gated(0.09621706656735644, 60, 20, null, true),
+      // (mean - 7.85849419846496e-05) / 0.006061105476604102 * 15.874507866387544
+      sharpe_ratio: gated(2.0104270378243907, 60, 60, null, true),
+      // (mean - 7.85849419846496e-05) / 0.003672547713317185 * 15.874507866387544
+      sortino_ratio: gated(3.3179719585628065, 60, 60, null, true),
+      // sqrt(0.000809256402395477 / 60) = 0.003672547713317185 ; * 15.874507866387544
+      downside_deviation: gated(0.05829988756473724, 60, 60, null, true),
       max_drawdown: gated(-0.009991936000000146, 60, 20, null, true),
       current_drawdown: gated(-0.000999, 60, 20, null, true),
       var_95: gated(-0.008, 60, 20, null, true),
@@ -243,9 +254,14 @@ export function goldenOkPayload(): PerformancePayloadV2 {
       hit_rate: gated(0.5, 60, 20, null, true),
       best_day: gated(0.01, 60, 20, null, true),
       worst_day: gated(-0.008, 60, 20, null, true),
-      average_up_day: gated(0.006, 60, 20, null, true),
-      average_down_day: gated(-0.004333333333333333, 60, 20, null, true),
-      win_loss_ratio: gated(1.0, 60, 20, null, true),
+      // 30 up days: nine 0.002 plus the 03-06 flow day at 0.0022779803755503406,
+      //   ten 0.006, ten 0.010 -> mean 0.0060092660125183476
+      average_up_day: gated(0.0060092660125183476, 60, 20, null, true),
+      // 30 down days: ten -0.004, ten -0.008, nine -0.001 plus the 02-13 flow
+      //   day at -0.0005063619214326489 -> mean -0.0043168787307144236
+      average_down_day: gated(-0.0043168787307144236, 60, 20, null, true),
+      // 0.0060092660125183476 / 0.0043168787307144236
+      win_loss_ratio: gated(1.392039570109453, 60, 20, null, true),
       positive_days: gated(30, 60, 20, null, true),
       negative_days: gated(30, 60, 20, null, true),
       flat_days: gated(0, 60, 20, null, true),
@@ -299,10 +315,10 @@ export function goldenOkPayload(): PerformancePayloadV2 {
       {
         date: "2026-03-27",
         nav: 182217.35574011656,
-        // twr_index = 100 * (1 + 0.050112307160331326)
-        twr_index: 105.01123071603313,
+        // twr_index = 100 * (1 + 0.05092267338835921)
+        twr_index: 105.09226733883592,
         daily_return: -0.001,
-        cum_return: 0.050112307160331326,
+        cum_return: 0.05092267338835921,
         drawdown: -0.000999,
         flow: 0.0,
         skipped: false,
@@ -316,9 +332,14 @@ export function goldenOkPayload(): PerformancePayloadV2 {
         b: 102577.5651064734,
         e: 202474.98754136695,
         c: 100000.0,
+        // `denominator` is still published as B_t, not the BOD B_t + C_t the
+        // return actually divides by. See scripts/lib/twr_math.py `Subperiod`.
         denominator: 102577.5651064734,
-        // (202474.98754136695 - 100000 - 102577.5651064734) / 102577.5651064734
-        r: -0.001,
+        // residual    = 202474.98754136695 - 100000 - 102577.5651064734
+        //             = -102.5775651064614
+        // denominator = 102577.5651064734 + 100000 = 202577.5651064734
+        //   -102.5775651064614 / 202577.5651064734
+        r: -0.0005063619214326489,
         cum_r: 0.006,
         gap_days: 1,
         flags: ["flow_dominant"],

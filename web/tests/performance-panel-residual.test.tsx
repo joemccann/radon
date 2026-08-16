@@ -3,7 +3,7 @@
  *
  * Residual web-side defects R6, R8, R9 and the two minors, on screen.
  *
- * R6 — a v2 payload frozen on 2026-03-27 renders a confident "+5.01%" hero with
+ * R6 — a v2 payload frozen on 2026-03-27 renders a confident "+5.09%" hero with
  *      no banner when it is read on 2026-08-15, 96 completed sessions later.
  * R8 — flowsFailedDegradedPayload() now carries the REAL builder output, which
  *      pairs a measured ending equity with counts.n_returns 60 on a branch that
@@ -106,9 +106,9 @@ describe("R6 — a v2 payload written 2026-03-27, read 2026-08-15", () => {
       const banner = screen.getByTestId("performance-stale-banner");
       expect(banner.textContent).toContain("2026-03-27");
       expect(banner.textContent).toContain(DERIVED_SESSIONS_BEHIND);
-      // cum_return 0.050112307160331326 -> "+5.01%" is what ships today.
+      // cum_return 0.05092267338835921 -> "+5.09%" is what ships today.
       expect(screen.getByTestId("performance-hero-twr").textContent ?? "").not.toMatch(/\d/);
-      expect(document.body.textContent ?? "").not.toContain("+5.01%");
+      expect(document.body.textContent ?? "").not.toContain("+5.09%");
     });
 
     it(`mobile: ${label} renders a stale banner and a suppressed hero`, () => {
@@ -117,7 +117,7 @@ describe("R6 — a v2 payload written 2026-03-27, read 2026-08-15", () => {
 
       expect(screen.getByTestId("performance-stale-banner")).toBeTruthy();
       expect(screen.getByTestId("performance-hero-twr").textContent ?? "").not.toMatch(/\d/);
-      expect(document.body.textContent ?? "").not.toContain("+5.01%");
+      expect(document.body.textContent ?? "").not.toContain("+5.09%");
     });
   }
 });
