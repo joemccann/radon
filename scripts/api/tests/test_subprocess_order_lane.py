@@ -202,3 +202,84 @@ class TestOrderLaneRegistry:
         )
         assert spawned, "expected the order scripts to be referenced in server.py"
         assert spawned <= subprocess_mod._ORDER_LANE_SCRIPTS
+
+
+class _BlockingProcess:
+    """Stand-in child that holds its slot until it is explicitly killed.
+
+    Mirrors `test_ib_gateway_subprocess_cleanup._BlockingProcess`.
+    """
+
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.killed = False
+        self.waited = False
+        self.returncode = None
+
+    async def communicate(self):
+        self.started.set()
+        await self.release.wait()
+        self.returncode = -9 if self.killed else 0
+        return b"", b""
+
+    def kill(self) -> None:
+        self.killed = True
+        self.release.set()
+
+    async def wait(self) -> int:
+        self.waited = True
+        self.returncode = -9 if self.killed else 0
+        return self.returncode
+
+
+def _process_factory(proc):
+    async def create(*args, **kwargs):
+        return proc
+
+    return create
+
+
+class TestSlotAccountingUnderCancellation:
+    """A cancelled request must not leave the child running with its slot freed.
+
+    `_active_subprocesses` is what bounds fds, IB client ids and the reserved
+    order lane. If a runner releases the slot on cancellation without killing
+    the child, the counter under-counts live processes: the cap stops bounding
+    anything, and an order slot reported as free can already be occupied by an
+    orphan. For `run_module` the orphan is typically
+    `trade_blotter.flex_query`, which keeps spending Flex requests against a
+    token already under a 24h-to-168h throttle embargo.
+    """
+
+    @pytest.mark.parametrize(
+        "runner,args",
+        [
+            ("run_script", ("slow_scan.py", [])),
+            ("run_script_raw", ("slow_scan.py", [])),
+            ("run_module", ("trade_blotter.flex_query", [])),
+        ],
+    )
+    def test_cancellation_kills_the_child_and_frees_the_slot(
+        self, stub_scripts, monkeypatch, runner, args
+    ):
+        proc = _BlockingProcess()
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", _process_factory(proc))
+        monkeypatch.setattr(subprocess_mod, "_active_subprocesses", 0)
+
+        async def run():
+            task = asyncio.create_task(
+                getattr(subprocess_mod, runner)(*args, timeout=30)
+            )
+            await asyncio.wait_for(proc.started.wait(), timeout=5)
+            assert subprocess_mod._active_subprocesses == 1
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+        asyncio.run(run())
+
+        assert proc.killed is True, f"{runner} orphaned the child on cancellation"
+        assert subprocess_mod._active_subprocesses == 0, (
+            f"{runner} leaked a slot on cancellation"
+        )
