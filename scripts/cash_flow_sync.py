@@ -9,15 +9,38 @@ This script bridges that gap.
 Usage:
     python -m scripts.cash_flow_sync
     python -m scripts.cash_flow_sync --types Deposit,Withdrawal
-    python -m scripts.cash_flow_sync --json     # print parsed rows, don't write
+    python -m scripts.cash_flow_sync --json          # print parsed rows, don't write
 
-Required env (already set on Hetzner per /home/radon/radon-cloud/.env):
+    # Operator recovery — no network, no credentials required:
+    python -m scripts.cash_flow_sync --from-file ~/Downloads/statement.xml
+    python -m scripts.cash_flow_sync --from-file statement.xml --dry-run
+    python -m scripts.cash_flow_sync --from-file statement.xml --since 2026-06-01
+
+Required env for a LIVE pull (already set on Hetzner per
+/home/radon/radon-cloud/.env). `--from-file` needs neither:
     IB_FLEX_TOKEN          - Flex Web Service token
     IB_FLEX_NAV_QUERY_ID   - Flex Query ID with CashTransaction section enabled
 
 Outputs:
     Turso `cash_flows` table (one row per transactionID, idempotent).
     `data/cash_flows.json`    - file fallback / debug trace of last pull.
+    A machine-readable status line as the LAST line of stdout, e.g.
+        {"status": "error", "class": "throttle", "code": "1001"}
+    The daemon handler branches on the EXIT CODE (see below); the status
+    line carries the detail.
+
+Exit codes (the handler's classification contract — never classify a
+failure by substring-matching stderr again):
+     0  success
+     1  configuration error (missing token / query id / unreadable file)
+    10  Flex throttle (documented code 1001 / 1018 / 1019) — breaker ladder
+    11  permanent Flex application error (auth, unknown query id, unknown
+        error code). Retrying cannot flip it; do not spend more requests.
+    12  statement never became ready inside the poll budget, or a transport
+        failure. Soft lane.
+    13  the statement came back but would not parse. Soft lane.
+    14  the WRITE failed. The fetch already succeeded — a retry must replay
+        the statement, never spend another SendRequest.
 
 Cadence:
     monitor_daemon `cash_flow_sync` handler runs this once per ET trading
@@ -34,9 +57,10 @@ Cadence:
 Throttle handling:
     Documented Flex throttle codes (1001 / 1018 / 1019) raise
     ``FlexThrottleError`` IMMEDIATELY — no internal retry, since each
-    retry burns more of the sliding-window budget. The daemon handler
-    intercepts the error and advances its circuit breaker (24h -> 48h
-    -> 72h -> 168h capped) before the next attempt.
+    retry burns more of the sliding-window budget. Both legs are checked:
+    a throttle returned on a GetStatement POLL used to be indistinguishable
+    from "not ready", so a throttled token drove 30+ further requests at
+    speed while already throttled.
 
     Other transient failures (network blip, parse error) get exactly
     ONE bounded retry within the call.
@@ -72,13 +96,26 @@ except Exception:
     pass
 
 # DB writer / atomic_io are imported lazily inside main() so pure functions
-# (_classify, _normalize_date, parse_cash_transactions, fetch_cash_transactions)
-# can be unit-tested
-# without libsql_experimental installed in the test environment.
+# (_classify, _normalize_date, parse_cash_transactions, describe_statement_shape,
+# fetch_cash_transactions) can be unit-tested without libsql_experimental
+# installed in the test environment.
 
 # Flex Web Service endpoints
 _SEND_URL = "https://gdcdyn.interactivebrokers.com/Universal/servlet/FlexStatementService.SendRequest"
 _GET_URL = "https://gdcdyn.interactivebrokers.com/Universal/servlet/FlexStatementService.GetStatement"
+
+
+# ── Exit codes ─────────────────────────────────────────────────────────
+# One code per failure CLASS. The daemon handler branches on these; the
+# previous contract was a substring search over the last three lines of
+# stderr, which silently routed permanent errors into the retry lane.
+EXIT_OK = 0
+EXIT_CONFIG_ERROR = 1
+EXIT_THROTTLE = 10
+EXIT_FLEX_APP_ERROR = 11
+EXIT_STATEMENT_NOT_READY = 12
+EXIT_PARSE_ERROR = 13
+EXIT_WRITE_ERROR = 14
 
 
 def _classify(raw_type: str, amount: float) -> str:
@@ -133,6 +170,59 @@ _FLEX_THROTTLE_CODES = {
 # Single bounded retry on a non-throttle transient (network blip, parse error).
 _MAX_SOFT_RETRY_ATTEMPTS = 2  # initial + 1 retry
 
+# ── Poll budget: ONE number, ONE owner ─────────────────────────────────
+# The script's wall budget for waiting on statement generation. Every
+# other deadline in the chain is DERIVED from it, outermost last:
+#
+#   FLEX_POLL_BUDGET_SECONDS (here)
+#     < handler subprocess timeout (budget + margin)
+#       < CashFlowSyncHandler.max_runtime_seconds (the daemon deadline)
+#
+# Before 2026-08-16 those three were 569s / 180s / 120s, in that order:
+# the daemon killed the handler before the handler killed the subprocess
+# before the subprocess finished its FIRST HALF of polling. 14 of the 16
+# recorded failure transitions were that self-inflicted kill, each one
+# spending a SendRequest and writing zero rows.
+#
+# 420s covers the 2.5-3.5 minute statement-generation latency IBKR shows
+# around the 17:00 ET EOD spike with room to spare.
+FLEX_POLL_BUDGET_SECONDS = 420.0
+INITIAL_POLL_SLEEP_SECONDS = 2.0
+MAX_POLL_SLEEP_SECONDS = 15.0
+
+# Belt-and-braces bound so a pathological (initial, cap) pair can never
+# produce an unbounded poll list.
+_ABSOLUTE_MAX_POLLS = 200
+
+
+def poll_delays(
+    budget_seconds: float,
+    *,
+    initial: float = INITIAL_POLL_SLEEP_SECONDS,
+    cap: float = MAX_POLL_SLEEP_SECONDS,
+    max_polls: Optional[int] = None,
+) -> list[float]:
+    """Capped-exponential sleep schedule that fits inside `budget_seconds`.
+
+    2s → 4s → 8s → 15s → 15s … Returns the delays, so the poll count is a
+    consequence of the budget rather than a second number to keep in sync.
+    """
+    hard_cap = _ABSOLUTE_MAX_POLLS if max_polls is None else max(int(max_polls), 0)
+    delays: list[float] = []
+    total = 0.0
+    sleep_s = max(float(initial), 0.0)
+    while len(delays) < hard_cap:
+        if sleep_s > 0 and total + sleep_s > budget_seconds:
+            break
+        delays.append(sleep_s)
+        total += sleep_s
+        if sleep_s <= 0:
+            if max_polls is None:
+                break
+            continue
+        sleep_s = min(sleep_s * 2, cap)
+    return delays
+
 
 # Imported lazily to avoid a circular when the handler module imports this
 # script's pure functions for testing without the full daemon scaffolding.
@@ -146,6 +236,41 @@ class _FlexAppError(RuntimeError):
     throttle (auth, bad query id, etc.). NOT retryable — retrying won't
     flip a 1012 into a success.
     """
+
+
+class _StatementNotReady(RuntimeError):
+    """The poll budget expired before IBKR finished generating the
+    statement. Retryable, but not today's problem — the next daily window
+    will ask again."""
+
+
+class _ConfigError(RuntimeError):
+    """Missing credentials, or a `--from-file` path we cannot read. A
+    human has to act; no amount of retrying helps, and no Flex request
+    was or will be spent."""
+
+
+def _flex_error_from(root: ET.Element, leg: str) -> Optional[BaseException]:
+    """Turn a Flex `<ErrorCode>` body into the right typed exception.
+
+    Applied to BOTH legs. A 1018 returned on a GetStatement poll used to
+    be indistinguishable from "not ready", so a token that was ALREADY
+    throttled kept firing polls at full speed for the rest of the budget.
+    """
+    code_node = root.find(".//ErrorCode")
+    if code_node is None or not (code_node.text or "").strip():
+        return None
+    code = (code_node.text or "").strip()
+    msg_node = root.find(".//ErrorMessage")
+    message = (
+        (msg_node.text or "").strip()
+        if msg_node is not None and msg_node.text
+        else "no ErrorMessage from IBKR"
+    )
+    detail = f"Flex {leg} failed (code {code}): {message}"
+    if code in _FLEX_THROTTLE_CODES:
+        return _flex_throttle_error_cls()(code, detail)
+    return _FlexAppError(detail)
 
 
 def _send_request_once(token: str, query_id: str) -> str:
@@ -164,15 +289,10 @@ def _send_request_once(token: str, query_id: str) -> str:
     if ref_node is not None and ref_node.text:
         return ref_node.text
 
-    code_node = root.find(".//ErrorCode")
-    msg_node = root.find(".//ErrorMessage")
-    code = (code_node.text or "").strip() if code_node is not None and code_node.text else ""
-    message = (msg_node.text or "").strip() if msg_node is not None and msg_node.text else "no ErrorMessage from IBKR"
-    detail = f"Flex SendRequest failed (code {code or 'N/A'}): {message}"
-
-    if code in _FLEX_THROTTLE_CODES:
-        raise _flex_throttle_error_cls()(code, detail)
-    raise _FlexAppError(detail)
+    error = _flex_error_from(root, "SendRequest")
+    if error is not None:
+        raise error
+    raise _FlexAppError("Flex SendRequest failed: no ReferenceCode and no ErrorCode")
 
 
 def _request_reference_code(token: str, query_id: str) -> str:
@@ -223,7 +343,7 @@ def parse_cash_transactions(xml_text: str) -> list[dict[str, Any]]:
     Rows sharing a `transactionID` are all kept; IBKR genuinely reuses ids
     across distinct transactions.
 
-    Returns a list of dicts ready to feed `upsert_cash_flow`.
+    Returns a list of dicts ready to feed `upsert_cash_flow_rows`.
     """
     out: list[dict[str, Any]] = []
     root = ET.fromstring(xml_text)
@@ -248,49 +368,163 @@ def parse_cash_transactions(xml_text: str) -> list[dict[str, Any]]:
     return out
 
 
-def fetch_cash_transactions(
+def describe_statement_shape(xml_text: str) -> dict[str, Any]:
+    """Structural fingerprint of a Flex statement. No I/O, no side effects.
+
+    Whether `<Transfers>` or `levelOfDetail` appear at all is a checkbox in
+    the IBKR query builder, and the difference silently halves or doubles
+    every downstream total: over the legacy 365-day shape the two other
+    parsers in this repo double-count every external flow exactly 2x
+    (because they keep the id-less aggregate rows this one drops), and
+    over a DETAIL-only export that 2x vanishes. Recording the shape turns
+    a silent config change into a visible one.
+
+    It also counts what the parser threw away, so the id-less-row skip
+    stops being an invisible proxy for `levelOfDetail == "SUMMARY"`.
+    """
+    root = ET.fromstring(xml_text)
+    statements = root.findall(".//FlexStatement")
+    cash = root.findall(".//CashTransaction")
+
+    skipped_no_id = 0
+    skipped_zero = 0
+    parsed = 0
+    currencies: set[str] = set()
+    non_usd = 0
+    levels: set[str] = set()
+    for ct in cash:
+        level = (ct.get("levelOfDetail") or "").strip()
+        if level:
+            levels.add(level)
+        if not (ct.get("transactionID") or "").strip():
+            skipped_no_id += 1
+            continue
+        if float(ct.get("amount") or 0.0) == 0.0:
+            skipped_zero += 1
+            continue
+        parsed += 1
+        currency = (ct.get("currency") or "USD").upper()
+        currencies.add(currency)
+        if currency != "USD":
+            non_usd += 1
+
+    first = statements[0] if statements else None
+    return {
+        "flex_statement_count": len(statements),
+        "account_ids": sorted(
+            {(s.get("accountId") or "").strip() for s in statements if s.get("accountId")}
+        ),
+        "period_from": _normalize_date(first.get("fromDate") or "") if first is not None else "",
+        "period_to": _normalize_date(first.get("toDate") or "") if first is not None else "",
+        "when_generated": (first.get("whenGenerated") or "") if first is not None else "",
+        "cash_transaction_count": len(cash),
+        "skipped_no_transaction_id": skipped_no_id,
+        "skipped_zero_amount": skipped_zero,
+        "parsed_rows": parsed,
+        "levels_of_detail": sorted(levels),
+        "has_transfers_section": root.find(".//Transfers") is not None,
+        "transfer_count": len(root.findall(".//Transfer")),
+        "currencies": sorted(currencies),
+        "non_usd_rows": non_usd,
+    }
+
+
+def statement_shape_warnings(shape: dict[str, Any]) -> list[str]:
+    """Human-readable drift notes. Non-fatal by design.
+
+    A single new IBKR quirk taking down the nightly sync is the exact harm
+    this overhaul exists to reduce, so shape drift reports and continues.
+    """
+    warnings: list[str] = []
+    if shape["flex_statement_count"] != 1:
+        warnings.append(
+            f"expected exactly 1 FlexStatement, found {shape['flex_statement_count']}"
+        )
+    if len(shape["account_ids"]) > 1:
+        warnings.append(f"multiple accountIds in one statement: {shape['account_ids']}")
+    if not shape["levels_of_detail"]:
+        warnings.append(
+            "no levelOfDetail attribute on any CashTransaction — the "
+            f"{shape['skipped_no_transaction_id']} row(s) skipped for a blank "
+            "transactionID are being treated as IBKR aggregates by proxy"
+        )
+    if shape["has_transfers_section"]:
+        warnings.append(
+            f"statement carries {shape['transfer_count']} <Transfer> row(s), which "
+            "cash_flows does not ingest — external capital flow is understated"
+        )
+    if shape["non_usd_rows"]:
+        others = [c for c in shape["currencies"] if c != "USD"]
+        warnings.append(
+            f"{shape['non_usd_rows']} non-USD row(s) ({', '.join(others)}) — amounts "
+            "are transaction-currency and must not be summed with USD rows"
+        )
+    return warnings
+
+
+def fetch_statement_xml(
     token: str,
     query_id: str,
     *,
-    max_polls: int = 40,
-    poll_sleep: float = 2.0,
-    max_poll_sleep: float = 15.0,
-) -> list[dict[str, Any]]:
-    """Fetch the NAV Flex Query and parse CashTransaction rows.
-
-    Polls with capped exponential backoff: 2s → 4s → 8s → 15s (capped),
-    repeated up to `max_polls` times. Worst case total wait is roughly
-    2 + 4 + 8 + 15*37 ≈ 9.5 minutes — long enough to ride out the
-    ~17:00 ET EOD spike when Flex is serving thousands of statement
-    requests at once. The previous fixed 20 × 3s = 60s budget was too
-    tight; the 2026-05-14 incident was a perfectly transient Flex
-    backend slowness that the script gave up on at exactly 60s.
-
-    Returns a list of dicts ready to feed `upsert_cash_flow`.
+    max_polls: Optional[int] = None,
+    poll_sleep: float = INITIAL_POLL_SLEEP_SECONDS,
+    max_poll_sleep: float = MAX_POLL_SLEEP_SECONDS,
+    budget_seconds: Optional[float] = None,
+) -> str:
+    """Fetch the raw Flex statement XML. One SendRequest, bounded polling.
 
     Raises:
-        FlexThrottleError    on Flex throttle codes 1001 / 1018 / 1019.
-                             Surfaced typed so the daemon handler can
-                             advance its circuit breaker without retrying.
-        RuntimeError         on auth failure, parse error, or polling
-                             timeout (after one bounded soft retry).
+        FlexThrottleError    on Flex throttle codes 1001 / 1018 / 1019,
+                             from EITHER leg.
+        _FlexAppError        on any other structured Flex error.
+        _StatementNotReady   when the poll budget expires.
     """
     ref_code = _request_reference_code(token, query_id)
 
-    xml_text = ""
-    sleep_s = poll_sleep
-    for _ in range(max_polls):
+    budget = FLEX_POLL_BUDGET_SECONDS if budget_seconds is None else budget_seconds
+    delays = poll_delays(
+        budget, initial=poll_sleep, cap=max_poll_sleep, max_polls=max_polls
+    )
+    for sleep_s in delays:
         time.sleep(sleep_s)
         params2 = urlencode({"t": token, "q": ref_code, "v": "3"})
         resp2 = urlopen(f"{_GET_URL}?{params2}", timeout=30)
         xml_text = resp2.read().decode("utf-8")
         if "<FlexStatements" in xml_text:
-            break
-        sleep_s = min(sleep_s * 2, max_poll_sleep)
-    else:
-        raise RuntimeError(f"Flex statement not ready after {max_polls} polls")
+            return xml_text
+        try:
+            error = _flex_error_from(ET.fromstring(xml_text), "GetStatement")
+        except ET.ParseError:
+            error = None
+        if error is not None:
+            raise error
 
-    return parse_cash_transactions(xml_text)
+    raise _StatementNotReady(
+        f"Flex statement not ready after {len(delays)} polls "
+        f"({budget:.0f}s budget)"
+    )
+
+
+def fetch_cash_transactions(
+    token: str,
+    query_id: str,
+    *,
+    max_polls: Optional[int] = None,
+    poll_sleep: float = INITIAL_POLL_SLEEP_SECONDS,
+    max_poll_sleep: float = MAX_POLL_SLEEP_SECONDS,
+    budget_seconds: Optional[float] = None,
+) -> list[dict[str, Any]]:
+    """Fetch the NAV Flex Query and parse CashTransaction rows."""
+    return parse_cash_transactions(
+        fetch_statement_xml(
+            token,
+            query_id,
+            max_polls=max_polls,
+            poll_sleep=poll_sleep,
+            max_poll_sleep=max_poll_sleep,
+            budget_seconds=budget_seconds,
+        )
+    )
 
 
 def _filter_types(rows: list[dict[str, Any]], allowed: Optional[set[str]]) -> list[dict[str, Any]]:
@@ -299,8 +533,57 @@ def _filter_types(rows: list[dict[str, Any]], allowed: Optional[set[str]]) -> li
     return [r for r in rows if r["type"] in allowed]
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Sync IB cash transactions to radon's cash_flows table")
+def _filter_since(rows: list[dict[str, Any]], since: Optional[str]) -> list[dict[str, Any]]:
+    if not since:
+        return rows
+    return [r for r in rows if r["date"] >= since]
+
+
+def _load_existing_cash_flow_ids() -> set[str]:
+    """transactionIDs already stored, for the `--dry-run` diff.
+
+    Turso-first per the persistence rule. Read-only, bounded, and every
+    caller treats a failure as "no baseline" rather than an error.
+    """
+    from db.hrana_http import hrana_query  # noqa: PLC0415 — lazy; libsql optional
+
+    rows = hrana_query("SELECT id FROM cash_flows LIMIT 20000", ())
+    ids: set[str] = set()
+    for row in rows or []:
+        value = row.get("id") if isinstance(row, dict) else row[0]
+        if value is not None:
+            ids.add(str(value))
+    return ids
+
+
+def _emit_status(status: str, failure_class: str, **extra: Any) -> None:
+    """Machine-readable last line of stdout. The handler reads this for
+    detail; it branches on the exit code."""
+    payload: dict[str, Any] = {"status": status, "class": failure_class}
+    payload.update(extra)
+    print(json.dumps(payload))
+
+
+def _read_statement_file(path_str: str) -> str:
+    path = Path(path_str).expanduser()
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise _ConfigError(f"cannot read statement file {path}: {exc}") from exc
+
+
+def _fetch_live_statement() -> str:
+    token = os.environ.get("IB_FLEX_TOKEN")
+    query_id = os.environ.get("IB_FLEX_NAV_QUERY_ID")
+    if not token or not query_id:
+        raise _ConfigError("IB_FLEX_TOKEN / IB_FLEX_NAV_QUERY_ID not configured")
+    return fetch_statement_xml(token, query_id)
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Sync IB cash transactions to radon's cash_flows table"
+    )
     parser.add_argument(
         "--types",
         default="",
@@ -308,46 +591,127 @@ def main() -> int:
     )
     parser.add_argument("--json", action="store_true", help="Print parsed rows as JSON to stdout, do NOT write to DB.")
     parser.add_argument("--no-file", action="store_true", help="Skip writing data/cash_flows.json")
-    args = parser.parse_args()
+    parser.add_argument(
+        "--from-file",
+        metavar="PATH",
+        help="Parse a saved Flex statement instead of fetching. Makes NO network "
+             "call and needs no credentials — the recovery path during a throttle "
+             "embargo.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Parse, diff against the stored rows, print what would change, write nothing.",
+    )
+    parser.add_argument(
+        "--since",
+        metavar="YYYY-MM-DD",
+        help="Only keep rows dated on or after this date.",
+    )
+    return parser
 
-    token = os.environ.get("IB_FLEX_TOKEN")
-    query_id = os.environ.get("IB_FLEX_NAV_QUERY_ID")
-    if not token or not query_id:
-        print("ERR: IB_FLEX_TOKEN / IB_FLEX_NAV_QUERY_ID not configured", file=sys.stderr)
-        return 1
+
+def main(argv: Optional[list[str]] = None) -> int:
+    args = _build_parser().parse_args(argv)
+
+    # ── Acquire the statement ──────────────────────────────────────────
+    try:
+        if args.from_file:
+            xml_text = _read_statement_file(args.from_file)
+            source = args.from_file
+        else:
+            xml_text = _fetch_live_statement()
+            source = "flex"
+    except _ConfigError as exc:
+        print(f"ERR: {exc}", file=sys.stderr)
+        _emit_status("error", "config_error", message=str(exc))
+        return EXIT_CONFIG_ERROR
+    except _FlexAppError as exc:
+        print(f"ERR: {exc}", file=sys.stderr)
+        _emit_status("error", "flex_app_error", message=str(exc))
+        return EXIT_FLEX_APP_ERROR
+    except _StatementNotReady as exc:
+        print(f"ERR: {exc}", file=sys.stderr)
+        _emit_status("error", "not_ready", message=str(exc))
+        return EXIT_STATEMENT_NOT_READY
+    except Exception as exc:
+        throttle_cls = _flex_throttle_error_cls()
+        if isinstance(exc, throttle_cls):
+            print(f"ERR: {exc}", file=sys.stderr)
+            _emit_status("error", "throttle", code=getattr(exc, "code", None),
+                         message=str(exc))
+            return EXIT_THROTTLE
+        print(f"ERR: cash flow fetch failed: {exc}", file=sys.stderr)
+        _emit_status("error", "transport", message=str(exc))
+        return EXIT_STATEMENT_NOT_READY
+
+    # ── Parse ──────────────────────────────────────────────────────────
+    try:
+        rows = parse_cash_transactions(xml_text)
+        shape = describe_statement_shape(xml_text)
+    except Exception as exc:
+        print(f"ERR: cash flow parse failed: {exc}", file=sys.stderr)
+        _emit_status("error", "parse_error", message=str(exc), source=source)
+        return EXIT_PARSE_ERROR
+
+    warnings = statement_shape_warnings(shape)
+    for warning in warnings:
+        print(f"WARN: statement shape: {warning}", file=sys.stderr)
 
     allowed = {t.strip() for t in args.types.split(",") if t.strip()} or None
-
-    try:
-        rows = fetch_cash_transactions(token, query_id)
-    except Exception as exc:
-        print(f"ERR: cash flow fetch failed: {exc}", file=sys.stderr)
-        return 1
-
-    rows = _filter_types(rows, allowed)
+    rows = _filter_since(_filter_types(rows, allowed), args.since)
     rows.sort(key=lambda r: (r["date"], r["id"]))
 
     if args.json:
         json.dump(rows, sys.stdout, indent=2)
         print()
-        return 0
+        return EXIT_OK
 
-    # Lazy DB imports so pure functions remain unit-testable without libsql.
-    from db.writer import upsert_cash_flow
-    from utils.atomic_io import atomic_save
-
-    written = 0
+    by_type: dict[str, int] = {}
     for r in rows:
-        upsert_cash_flow(
-            txn_id=r["id"],
-            date_str=r["date"],
-            txn_type=r["type"],
-            amount=r["amount"],
-            currency=r["currency"],
-            description=r["description"],
-            raw_type=r["raw_type"],
+        by_type[r["type"]] = by_type.get(r["type"], 0) + 1
+
+    if args.dry_run:
+        try:
+            known = _load_existing_cash_flow_ids()
+            new_rows: Optional[int] = len({r["id"] for r in rows} - known)
+        except Exception as exc:  # noqa: BLE001 — a dry run must never fail on the baseline
+            print(f"WARN: could not read the stored baseline: {exc}", file=sys.stderr)
+            new_rows = None
+        print(
+            f"DRY RUN: {len(rows)} rows parsed from {source}, "
+            f"{'unknown' if new_rows is None else new_rows} new. Breakdown: {by_type}"
         )
-        written += 1
+        _emit_status(
+            "ok", "ok", dry_run=True, rows=len(rows), new_rows=new_rows,
+            source=source, shape=shape, shape_warnings=warnings,
+        )
+        return EXIT_OK
+
+    # ── Write ──────────────────────────────────────────────────────────
+    # A write failure must NEVER be laundered into another Flex request:
+    # the fetch already succeeded, so the retry replays the statement.
+    try:
+        from db.writer import upsert_cash_flow_rows
+        from utils.atomic_io import atomic_save
+
+        dropped_duplicate_ids = upsert_cash_flow_rows(rows)
+    except Exception as exc:
+        print(f"ERR: cash flow write failed: {exc}", file=sys.stderr)
+        _emit_status("error", "write_error", message=str(exc), rows=len(rows),
+                     source=source)
+        return EXIT_WRITE_ERROR
+
+    if dropped_duplicate_ids:
+        # Plan item C12 — IBKR issues one transactionID per posting batch
+        # and one row per sub-category, but `cash_flows.id` is the primary
+        # key, so the batch collapses to its last row. Counting it here is
+        # not a fix; it stops the loss being invisible.
+        print(
+            f"WARN: {dropped_duplicate_ids} row(s) shared a transactionID with a "
+            "later row and were overwritten (cash_flows.id is the primary key)",
+            file=sys.stderr,
+        )
 
     if not args.no_file:
         _DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -358,11 +722,12 @@ def main() -> int:
         }
         atomic_save(_DATA_DIR / "cash_flows.json", snapshot)
 
-    by_type: dict[str, int] = {}
-    for r in rows:
-        by_type[r["type"]] = by_type.get(r["type"], 0) + 1
-    print(f"Synced {written} cash flows. Breakdown: {by_type}")
-    return 0
+    print(f"Synced {len(rows)} cash flows. Breakdown: {by_type}")
+    _emit_status(
+        "ok", "ok", rows=len(rows), source=source, shape=shape,
+        shape_warnings=warnings, overwritten_duplicate_ids=dropped_duplicate_ids,
+    )
+    return EXIT_OK
 
 
 if __name__ == "__main__":
