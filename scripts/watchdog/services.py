@@ -152,6 +152,14 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     "garch-scan":       {"open": 26 * _HOUR, "closed": 3 * _DAY, "requires_ib": False},
     "oi-changes":       {"open": 26 * _HOUR, "closed": 3 * _DAY, "requires_ib": False},
     "catalysts":        {"open": 7 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
+    # theta-harvester / strength-confirmation — fired autonomously by
+    # radon-signals-refresh.timer (hourly, Mon-Fri 09:00-16:00 ET) as well
+    # as by user POSTs (R-068). The wrapper skips outside market hours
+    # without heartbeating, so Monday/post-holiday mornings legitimately
+    # serve a ~66-90h-old row — uniform 4d windows per the bpi-scan
+    # precedent. UW-only, no IB.
+    "theta-harvester":  {"open": 4 * _DAY, "closed": 4 * _DAY, "requires_ib": False},
+    "strength-confirmation": {"open": 4 * _DAY, "closed": 4 * _DAY, "requires_ib": False},
     # bpi-scan — radon-bpi.timer, Mon-Fri 21:30 UTC AFTER the close: during
     # Monday's whole session the newest row is legitimately Friday-evening's
     # (~72h old), so the window is uniform 4d rather than a tight open window.
@@ -330,6 +338,10 @@ BUCKETS: dict[str, list[str]] = {
         # Post-close BPI breadth scan (radon-bpi.timer Mon-Fri 21:30 UTC) —
         # hourly check surfaces a missed run within 1h of the 4d window.
         "bpi-scan",
+        # Top-candidates scans fired by radon-signals-refresh.timer — hourly
+        # check surfaces a dead timer within 1h of the 4d window (R-068).
+        "theta-harvester",
+        "strength-confirmation",
         # Daily drift audit on the VPS — hourly check surfaces a missed
         # run within 1h of the 26h window expiring.
         "config-drift",

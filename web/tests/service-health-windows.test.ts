@@ -160,9 +160,11 @@ describe("market-hours-only services (weekend-aware closed window)", () => {
     expect(isStale(service, friFinish, "closed", SUN_LATE)).toBe(false);
   });
 
+  // theta-harvester left this ≤30min group with R-068: its autonomous
+  // caller is the hourly signals-refresh timer, so its open window is now
+  // the uniform 4d scheduled window pinned in the R-068 describe below.
   it.each([
     "scanner",
-    "theta-harvester",
     "discover",
     "flow-analysis",
     "analyst-ratings",
@@ -298,7 +300,11 @@ describe("SERVICE_FRESHNESS_WINDOWS — category field", () => {
     ["orders-sync", "scheduled"],
     ["portfolio-sync", "scheduled"],
     ["scanner", "on-demand"],
-    ["theta-harvester", "on-demand"],
+    // theta-harvester / strength-confirmation flipped from on-demand when
+    // radon-signals-refresh.timer became their autonomous caller (R-068) —
+    // same transition cta-sync made below.
+    ["theta-harvester", "scheduled"],
+    ["strength-confirmation", "scheduled"],
     ["discover", "on-demand"],
     ["flow-analysis", "on-demand"],
     ["analyst-ratings", "on-demand"],
@@ -322,7 +328,7 @@ describe("SERVICE_FRESHNESS_WINDOWS — category field", () => {
  *  - ``informed-flow`` (scripts/fetch_informed_flow.py) only writes when
  *    a user hits FastAPI ``GET /informed-flow/{ticker}`` — the subprocess
  *    bridge runs the script on demand. UW-only (UWClient), no IB. Same
- *    profile as its UW-scan siblings (scanner / discover / theta-harvester):
+ *    profile as its UW-scan siblings (scanner / discover):
  *    on-demand, 30m open/extended, 3d closed.
  *
  *  - ``portfolio-archive`` (scripts/archive_portfolio_snapshots.py) is the
@@ -696,5 +702,47 @@ describe("requiresIb helper", () => {
 
   it("returns false for unknown services so grouping never silences a misnamed writer", () => {
     expect(requiresIb("brand-new-handler-not-registered")).toBe(false);
+  });
+});
+
+/**
+ * R-068 regression: radon-signals-refresh.timer fires the theta-harvester
+ * and strength-confirmation scans autonomously (hourly, Mon-Fri
+ * 09:00-16:00 ET), but both were still categorized ``on-demand`` — the
+ * dormant-amber class the watchdog buckets exclude — so a dead timer froze
+ * the Top-candidates panel with no page (the unit goes inactive, not
+ * failed, so units.py misses it too).
+ *
+ * Windows follow the bpi-scan precedent for post-gap timer writers: the
+ * wrapper skips outside market hours without heartbeating, so on a Monday
+ * (or post-holiday) morning the newest row is legitimately Friday
+ * afternoon's (~66h, ~90h after a holiday) — a uniform 4d window pages on
+ * a genuinely dead timer without false-paging every Monday.
+ */
+describe("R-068 — signals-refresh scans are scheduled, not dormant-amber", () => {
+  const DAY = 24 * 60 * 60_000;
+
+  it.each(["theta-harvester", "strength-confirmation"])(
+    "%s is categorized as scheduled with uniform 4d windows",
+    (service) => {
+      const entry = SERVICE_FRESHNESS_WINDOWS[service];
+      expect(entry?.category).toBe("scheduled");
+      expect(entry?.open).toBe(4 * DAY);
+      expect(entry?.extended).toBe(4 * DAY);
+      expect(entry?.closed).toBe(4 * DAY);
+      expect(entry?.requires_ib).toBe(false);
+    },
+  );
+
+  it("a Friday-afternoon row is not stale on Monday morning (no false page before the 10:00 ET write)", () => {
+    const MON_0935 = Date.parse("2026-05-11T13:35:00Z"); // Mon 9:35 AM ET
+    const friAfternoon = new Date(Date.parse("2026-05-08T19:00:00Z")).toISOString(); // Fri 3 PM ET
+    expect(isStale("theta-harvester", friAfternoon, "open", MON_0935)).toBe(false);
+  });
+
+  it("a dead timer pages once the row ages past the 4d window", () => {
+    const NOW = Date.parse("2026-05-13T18:00:00Z"); // Wed 2 PM ET
+    const fiveDaysAgo = new Date(NOW - 5 * DAY).toISOString();
+    expect(isStale("strength-confirmation", fiveDaysAgo, "open", NOW)).toBe(true);
   });
 });

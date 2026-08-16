@@ -2,8 +2,9 @@
 #
 # Autonomous refresh for the dashboard's "Top candidates" scans.
 #
-# Runs every 15 minutes during ET trading hours via
-# radon-signals-refresh.timer on Hetzner. Both scans behind the panel
+# Fired by radon-signals-refresh.timer on Hetzner during ET trading hours;
+# the timer's OnCalendar is the cadence SoT (hourly as of 2026-08-16,
+# matching the 3600s FastAPI scan cooldown). Both scans behind the panel
 # (theta harvester, 7-step strength confirmation) shipped with a FastAPI
 # endpoint, a Turso mirror and a service_health row but no scheduler, so the
 # panel served whatever snapshot a human had last triggered by hand.
