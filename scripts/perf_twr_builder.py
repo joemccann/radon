@@ -719,15 +719,31 @@ def _subperiod_warnings(chain: SubperiodChain) -> List[Dict[str, Any]]:
                 )
             )
         if subperiod.skip_reason == "suspect_no_flow":
+            # The residual is what is unexplained, not the raw NAV move. Saying
+            # "no recorded external flow" is false whenever a flow WAS recorded
+            # and merely failed to account for the whole move -- which is the
+            # normal case for an ACATS priced at transfer time rather than at
+            # the close. Report both numbers so the operator can tell a missing
+            # transfer apart from a valuation difference.
+            moved = subperiod.end_nav - subperiod.begin_nav
+            residual = moved - subperiod.flow
+            explained = (
+                "with no recorded external flow"
+                if subperiod.flow == 0.0
+                else f"against a recorded {subperiod.flow:+,.2f} external flow, "
+                f"leaving {residual:+,.2f} unexplained"
+            )
             out.append(
                 _warning(
                     "SUBPERIOD_SUSPECT",
                     "error",
-                    f"{subperiod.date} moved {subperiod.end_nav - subperiod.begin_nav:+,.2f} "
-                    "with no recorded external flow; excluded from the chain.",
+                    f"{subperiod.date} moved {moved:+,.2f} {explained}; "
+                    "excluded from the chain.",
                     date=subperiod.date,
                     begin_nav=subperiod.begin_nav,
                     end_nav=subperiod.end_nav,
+                    flow=subperiod.flow,
+                    residual=residual,
                 )
             )
         elif subperiod.skip_reason:
