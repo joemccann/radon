@@ -58,8 +58,60 @@ def workflow_max_orders() -> int:
     return app_preferences.get_int("RADON_WORKFLOW_MAX_ORDERS")
 
 
+def _combo_risk_per_unit(legs: Any) -> Optional[float]:
+    """Worst-case loss of ONE combo unit, in dollars; None when unpriceable.
+
+    Shorts are paired against longs of the same right — the nearest strike
+    first, so the residual width is the conservative one — and a paired short
+    risks only the width. Pairing ignores expiry on purpose: a calendar's long
+    leg does cover its short, and grouping by expiry would price every index
+    calendar off the strike and refuse it.
+
+    An unpaired short put's max loss IS its strike. An unpaired short call's
+    is unbounded, so the strike stands in as a documented margin proxy — not a
+    true bound, but a number in the right order of magnitude, which is the
+    whole point of the cap.
+    """
+    if not isinstance(legs, list) or not legs:
+        return None
+
+    by_right: dict[str, dict[str, list[float]]] = {}
+    for leg in legs:
+        if not isinstance(leg, dict):
+            return None
+        try:
+            strike = float(leg.get("strike") or 0)
+            ratio = int(leg.get("ratio", 1) or 1)
+        except (TypeError, ValueError):
+            return None
+        if strike <= 0 or ratio <= 0:
+            return None
+        right = str(leg.get("right") or "").upper()[:1]
+        side = "short" if str(leg.get("action") or "").upper().startswith("SELL") else "long"
+        sides = by_right.setdefault(right, {"long": [], "short": []})
+        sides[side].extend([strike] * ratio)
+
+    risk = 0.0
+    for sides in by_right.values():
+        longs = sorted(sides["long"])
+        for short_strike in sorted(sides["short"]):
+            if longs:
+                nearest = min(longs, key=lambda strike: abs(strike - short_strike))
+                longs.remove(nearest)
+                risk += abs(short_strike - nearest) * _OPTION_MULTIPLIER
+            else:
+                risk += short_strike * _OPTION_MULTIPLIER
+    return risk
+
+
 def order_notional(params: dict) -> Optional[float]:
-    """Worst-case premium notional of the order; None when unpriceable."""
+    """Worst-case dollar exposure of the order; None when unpriceable.
+
+    For a combo this is RISK, not premium. Commit 1db9f558 made a combo
+    limitPrice a signed net price, so measuring the cap against |limitPrice|
+    measured a short strangle's net CREDIT: 500 lots at $0.20 priced as
+    $10,000 and cleared the $250k cap with room to spare (R-052).
+    """
     try:
         quantity = abs(float(params.get("quantity") or 0))
         price = abs(float(params.get("limitPrice") or 0))
@@ -67,10 +119,18 @@ def order_notional(params: dict) -> Optional[float]:
             price = abs(float(params.get("stopPrice") or 0))
     except (TypeError, ValueError):
         return None
-    if not quantity or not price:
+    if not quantity:
         return None
+
     multiplier = 1 if str(params.get("type", "")).lower() == "stock" else _OPTION_MULTIPLIER
-    return quantity * price * multiplier
+    premium = quantity * price * multiplier
+
+    if str(params.get("type", "")).lower() == "combo":
+        risk_per_unit = _combo_risk_per_unit(params.get("legs"))
+        if risk_per_unit is not None:
+            return max(premium, quantity * risk_per_unit)
+
+    return premium or None
 
 
 def check_order_limits(params: dict) -> Optional[dict[str, Any]]:
