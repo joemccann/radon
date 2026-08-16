@@ -22,16 +22,51 @@ logger = logging.getLogger("radon.subprocess")
 MAX_CONCURRENT_SUBPROCESSES = max(
     1, min(int(os.environ.get("RADON_MAX_CONCURRENT_SUBPROCESSES", "4")), 16)
 )
+
+# REL-023 (R-048): scans hold a slot for their whole lifetime and the preset
+# scans run with hour-long timeouts, so a routine scan storm could pin every
+# slot and lock out the kill switch — the halt flag would still set while the
+# working orders it exists to pull stayed live. The money path therefore gets a
+# reserved lane that no other caller can claim.
+RESERVED_ORDER_SLOTS = max(
+    1, min(int(os.environ.get("RADON_RESERVED_ORDER_SLOTS", "1")), 8)
+)
+_ORDER_LANE_SCRIPTS = frozenset({
+    "ib_place_order.py",
+    "ib_order_manage.py",
+    "ib_cancel_all.py",
+    "ib_execute.py",
+})
+
 _active_subprocesses = 0
 
 
-def _claim_subprocess_slot() -> bool:
+def _is_order_lane(script: str) -> bool:
+    return Path(script).name in _ORDER_LANE_SCRIPTS
+
+
+def _general_lane_capacity() -> int:
+    """Slots a non-order caller may claim. Never zero: a cap too small to
+    reserve against still has to admit scans."""
+    return max(1, MAX_CONCURRENT_SUBPROCESSES - RESERVED_ORDER_SLOTS)
+
+
+def _lane_capacity(script: str) -> int:
+    if _is_order_lane(script):
+        return MAX_CONCURRENT_SUBPROCESSES
+    return _general_lane_capacity()
+
+
+def _claim_subprocess_slot(script: str) -> bool:
     global _active_subprocesses
     # No await between the check and increment: atomic within one event loop.
-    if _active_subprocesses >= MAX_CONCURRENT_SUBPROCESSES:
+    capacity = _lane_capacity(script)
+    if _active_subprocesses >= capacity:
         logger.warning(
-            "Subprocess capacity exhausted (%d/%d)",
+            "Subprocess capacity exhausted for %s (%d active, lane cap %d, hard cap %d)",
+            script,
             _active_subprocesses,
+            capacity,
             MAX_CONCURRENT_SUBPROCESSES,
         )
         return False
@@ -201,7 +236,7 @@ async def run_script(
     script_path = SCRIPTS_DIR / script
     if not script_path.exists():
         return ScriptResult(ok=False, error=f"Script not found: {script}")
-    if not _claim_subprocess_slot():
+    if not _claim_subprocess_slot(script):
         return ScriptResult(ok=False, error="Subprocess capacity exhausted")
 
     cmd = [sys.executable, str(script_path)] + (args or [])
@@ -286,7 +321,7 @@ async def run_script_raw(
         return RawScriptResult(
             ok=False, stderr=f"Script not found: {script}", exit_code=None
         )
-    if not _claim_subprocess_slot():
+    if not _claim_subprocess_slot(script):
         return RawScriptResult(
             ok=False, stderr="Subprocess capacity exhausted", exit_code=None
         )
@@ -340,7 +375,7 @@ async def run_module(
     For scripts invoked as `python3 -m trade_blotter.flex_query --json`.
     """
     cmd = [sys.executable, "-m", module] + (args or [])
-    if not _claim_subprocess_slot():
+    if not _claim_subprocess_slot(module):
         return ScriptResult(ok=False, error="Subprocess capacity exhausted")
 
     try:
