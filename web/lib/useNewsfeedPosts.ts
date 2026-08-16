@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { normalisePostContent } from "./newsfeedText";
 import { readOfflineMeta } from "./offline/offlineStatus";
 import {
   reportFetchFailure,
@@ -116,7 +117,9 @@ export function useNewsfeedPosts(): NewsfeedPosts {
             isoTimestamp: Number.isFinite(ms) ? ts.toISOString() : stamp,
             timestampMs: Number.isFinite(ms) ? ms : 0,
             href: buildPostHref(post.id),
-            content: (post.content || "").trim(),
+            // The one place raw scrape text becomes display text — every
+            // consumer downstream reads the same normalised body.
+            content: normalisePostContent(post.content || "", post.title || ""),
             images: Array.isArray(post.images) ? post.images : [],
           } satisfies NormalisedPost;
         })

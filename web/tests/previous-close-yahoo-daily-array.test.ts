@@ -73,11 +73,30 @@ function buildYahooPayload(opts: {
   };
 }
 
-/** Build a 5-entry timestamp array ending TODAY (ET-noon), one day apart. */
+/**
+ * Build a 5-entry timestamp array ending TODAY, where the four earlier entries
+ * are consecutive TRADING sessions walking back from today.
+ *
+ * This used to step by calendar days, which silently disagreed with the route:
+ * the route resolves the last close strictly before today by SESSION, so on a
+ * Sunday it skips Saturday and lands on Friday. The fixture would then label
+ * index 3 "yesterday" while the route read index 2, and the suite went red on
+ * every weekend run (caught 2026-08-16, a Sunday). Sessions in, sessions out.
+ */
 function buildRecentTimestamps(): number[] {
   const dayMs = 24 * 60 * 60 * 1000;
-  const now = Date.now();
-  return [4, 3, 2, 1, 0].map((offset) => Math.floor((now - offset * dayMs) / 1000));
+  const isWeekend = (d: Date) => d.getUTCDay() === 0 || d.getUTCDay() === 6;
+
+  const today = new Date();
+  const sessions: Date[] = [];
+  const cursor = new Date(today.getTime());
+  while (sessions.length < 4) {
+    cursor.setTime(cursor.getTime() - dayMs);
+    if (!isWeekend(cursor)) sessions.push(new Date(cursor.getTime()));
+  }
+
+  // oldest → newest, with today last so the route can exclude it as intraday
+  return [...sessions.reverse(), today].map((d) => Math.floor(d.getTime() / 1000));
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────

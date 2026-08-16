@@ -6,7 +6,12 @@
 # root install-copy (install -m 0644 cloud/services/<unit> /etc/systemd/system/
 # && systemctl daemon-reload), or add a drift-allowlist acknowledgment
 # (unit-mismatch:<name> / not-installed:<name>) for the pending-install window.
-# Units acknowledged in config/drift-allowlist.conf are deliberately absent.
+# Units acknowledged in config/drift-allowlist.conf are deliberately absent,
+# EXCEPT where an entry is explicitly marked "pending root install-copy" below:
+# that hash is pre-recorded at the content the operator is expected to install,
+# so the acknowledgment can be dropped in the same commit as the install with
+# no second manifest bump owed. A pre-recorded entry is not proof of install --
+# the drift-allowlist acknowledgment is what says the host does not have it yet.
 #
 # Regenerate an entry: shasum -a 256 cloud/services/<unit-name>
 b28868a2b76da5fa9794cc2d3799ebb51da8a18af895d568eb6b786ef525f698  radon-api.service
@@ -48,6 +53,8 @@ b41f315c5a8b329c262911e75f70e65f12035cd6e14a52866764a8f3f5d916a4  radon-refresh.
 29948e637080564a06a1afde018fef17cb00fc7ac6b9fe57d72857642fce6354  radon-signals-refresh.service
 dd69de2c3694909c48b99e72e39ef620c80e82c37fb93ce22633d53953cdc29b  radon-skew.service
 2c52c797dbdc9d5a7377138b51ada0edc6f8f771d860b192413a7ba052a2d108  radon-straddle.service
+# pending root install-copy (see radon-vixcor.timer for the operator command)
+0d9548823100a02f9d274aad8d9df239e583032a0ee3d3601e97ff6bc04a5ea8  radon-vixcor.service
 c92430ce2cb9be041e5c58f646d98b3e030f86340f8bc4d9aeebe16b9438285f  radon-vol-cone.service
 668180ba66bfcba7a45eee7fa38a22a00fb53f371c8271024947c56f2ab2c84d  radon-watchdog-continuous.service
 27d4750b09c871b9be98de115baeb7ff9cb976fd93fd604a208d2c6cb63f94cb  radon-watchdog-daily.service
@@ -86,6 +93,21 @@ c39daf2868edbe671c8245d861142ce519c09ea251f6c7bca30653c4adb702d5  radon-portfoli
 b00070f782e20320d306b4059ac61d485b96f23ff490118132ed63e572d956fd  radon-signals-refresh.timer
 101f183b91722d831ba7ec01d937f8f060f66b249294f69f878d4262533eff19  radon-skew.timer
 6a994026db08bcbe011649708ef726a9a63d5b48bb24800b7864468a0b8c5a5f  radon-straddle.timer
+# pending root install-copy. Neither CI nor bootstrap installs scheduler
+# timers (bootstrap manages a fixed control-plane list and ignores this pair),
+# and radon@'s polkit covers only start/stop/restart, so the VIXCOR pair
+# reaches the host only through this root transaction, after the deploy for
+# its SHA is green:
+#   ssh root@ib-gateway
+#   install -o root -g root -m 0644 \
+#     /home/radon/radon/cloud/services/radon-vixcor.service \
+#     /home/radon/radon/cloud/services/radon-vixcor.timer /etc/systemd/system/
+#   systemctl daemon-reload
+#   systemctl enable --now radon-vixcor.timer
+#   systemctl list-timers radon-vixcor.timer
+# Then drop the two not-installed:radon-vixcor acknowledgments from
+# config/drift-allowlist.conf; these hashes already match what was installed.
+29ebe0cdfd61d80828d0b7098f04a5752b5b36fee5b8050ba34b31746bdb5455  radon-vixcor.timer
 d125a8d231f7d801b64ec3328fde2994d0ed979ab17541646c99336328bcb1a0  radon-vol-cone.timer
 729bea025997f70a57403c68b7e88b87c480e554fc3666087af4fe88f94c27b3  radon-watchdog-continuous.timer
 f9f0b6716a1c6df7532abba2acf03c55f0d6e54aff76b92e1da13dc21d9dd12f  radon-watchdog-daily.timer
