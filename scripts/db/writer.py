@@ -952,6 +952,39 @@ def upsert_cor_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = Non
     db.commit()
 
 
+def upsert_vixcor_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
+    """VIXCOR indicator — one row per joined session (VIX x COR3M), idempotent
+    on date. corr20 is NULL for the first WINDOW-1 rows and for degenerate
+    windows where one leg is constant.
+
+    Chunked multi-row INSERTs (Hrana I/O bounding): a changed-source run
+    rewrites the full ~5,170-session series, which per-row would be thousands
+    of statements on one stream (the rv-ratio 2026-07-21 502 incident).
+    ~13 chunked round-trips instead.
+    """
+    if not rows:
+        return
+    stamp = recorded_at or _now_iso()
+    db = get_db()
+    for start in range(0, len(rows), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = rows[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        placeholders = ", ".join("(?, ?, ?, ?, ?)" for _ in chunk)
+        params: list[Any] = []
+        for row in chunk:
+            params.extend(
+                (row["date"], row["vix_close"], row["cor3m_close"], row.get("corr20"), stamp)
+            )
+        db.execute(
+            "INSERT INTO vixcor_history (date, vix_close, cor3m_close, corr20, recorded_at) "
+            f"VALUES {placeholders} "
+            "ON CONFLICT(date) DO UPDATE SET "
+            "vix_close = excluded.vix_close, cor3m_close = excluded.cor3m_close, "
+            "corr20 = excluded.corr20, recorded_at = excluded.recorded_at",
+            tuple(params),
+        )
+    db.commit()
+
+
 SKEW_UPSERT_SQL = """
 INSERT INTO skew_history
   (date, expiry, dte, put_iv, call_iv, ratio, change, recorded_at)

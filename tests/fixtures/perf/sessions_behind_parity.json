@@ -1,0 +1,92 @@
+{
+  "_note": [
+    "Audit round 3 / R7 / DECISION 6. ONE definition of sessions_behind, pinned",
+    "on both sides of the stack: count US equity trading sessions STRICTLY AFTER",
+    "nav_as_of and UP TO AND INCLUDING last_completed_session.",
+    "",
+    "last_completed_session is the most recent session whose 16:00 ET close has",
+    "passed. It is supplied here so neither side has to guess 'now': Python calls",
+    "scripts.perf_twr_builder.sessions_behind(nav_as_of, date(last_completed_session));",
+    "TypeScript calls web/lib/performanceData sessionsBehind(nav_as_of, now) with an",
+    "instant that resolves to the same session, e.g. `${last_completed_session}T20:45:00-04:00`",
+    "(the hour the radon-perf-twr timer fires).",
+    "",
+    "Weekends AND NYSE holidays are non-sessions. The 2026 holidays exercised here",
+    "are 2026-01-19 (MLK, Mon), 2026-07-03 (Independence observed, Fri) and",
+    "2026-11-26 (Thanksgiving, Thu)."
+  ],
+  "holidays_2026": [
+    "2026-01-01",
+    "2026-01-19",
+    "2026-02-16",
+    "2026-04-03",
+    "2026-05-25",
+    "2026-06-19",
+    "2026-07-03",
+    "2026-09-07",
+    "2026-11-26",
+    "2026-12-25"
+  ],
+  "cases": [
+    {
+      "nav_as_of": "2026-08-14",
+      "last_completed_session": "2026-08-14",
+      "expected": 0,
+      "why": "Fri to the same Fri. Nothing strictly after it."
+    },
+    {
+      "nav_as_of": "2026-08-13",
+      "last_completed_session": "2026-08-14",
+      "expected": 1,
+      "why": "Fri 08-14 only."
+    },
+    {
+      "nav_as_of": "2026-08-11",
+      "last_completed_session": "2026-08-14",
+      "expected": 3,
+      "why": "Wed 08-12, Thu 08-13, Fri 08-14. This is the R7 repro: the builder returns 2."
+    },
+    {
+      "nav_as_of": "2026-08-07",
+      "last_completed_session": "2026-08-14",
+      "expected": 5,
+      "why": "Mon 08-10 .. Fri 08-14; the 08-08/08-09 weekend is not a session."
+    },
+    {
+      "nav_as_of": "2026-08-14",
+      "last_completed_session": "2026-08-17",
+      "expected": 1,
+      "why": "Mon 08-17 only; the weekend in between is not a session."
+    },
+    {
+      "nav_as_of": "2026-01-16",
+      "last_completed_session": "2026-01-20",
+      "expected": 1,
+      "why": "Mon 01-19 is MLK. Only Tue 01-20 counts."
+    },
+    {
+      "nav_as_of": "2026-07-01",
+      "last_completed_session": "2026-07-07",
+      "expected": 3,
+      "why": "Thu 07-02, Mon 07-06, Tue 07-07. Fri 07-03 is Independence Day observed."
+    },
+    {
+      "nav_as_of": "2026-11-24",
+      "last_completed_session": "2026-11-27",
+      "expected": 2,
+      "why": "Wed 11-25 and Fri 11-27. Thu 11-26 is Thanksgiving."
+    },
+    {
+      "nav_as_of": "2026-09-04",
+      "last_completed_session": "2026-09-08",
+      "expected": 1,
+      "why": "Mon 09-07 is Labor Day. Only Tue 09-08 counts."
+    },
+    {
+      "nav_as_of": "2026-03-20",
+      "last_completed_session": "2026-08-14",
+      "expected": 101,
+      "why": "The live stale-cache gap. 2026-03-23 .. 2026-08-14 is 105 weekdays less the 4 holidays 2026-04-03, 2026-05-25, 2026-06-19, 2026-07-03."
+    }
+  ]
+}

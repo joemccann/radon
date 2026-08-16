@@ -22,11 +22,15 @@ export type PerformanceXAxisTick = PerformanceAxisTick & {
 };
 
 export type PerformanceChartModel = {
+  /** "twr_index" when the payload carries a base-100 TWR index for every point
+   *  (§C.5), "dollar" for a legacy NAV-only series. Both lines share it. */
+  basis: "twr_index" | "dollar";
   equityPath: string;
   benchmarkPath: string;
   areaPath: string;
   latestEquity: number;
-  latestBenchmark: number;
+  /** null when no aligned benchmark series exists. Never falls back to equity. */
+  latestBenchmark: number | null;
   rebasedBenchmarkValues: number[];
   domainMin: number;
   domainMax: number;
@@ -66,6 +70,10 @@ function formatAxisUsd(value: number): string {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   })}`;
+}
+
+function formatAxisIndex(value: number): string {
+  return value.toFixed(2);
 }
 
 function buildLinePath(
@@ -158,7 +166,9 @@ function buildIndexTicks(length: number, desiredTickCount: number): number[] {
 }
 
 export function resolvePerformanceStartingEquity(data: PerformanceData): number {
-  const summaryValue = data.summary.starting_equity;
+  // A v2 payload carries `equity`, not `summary`, and the panels tolerate a
+  // raw snapshot as well as a normalized one — so `summary` can be absent.
+  const summaryValue = data.summary?.starting_equity;
   if (summaryValue != null && Number.isFinite(summaryValue)) return summaryValue;
   const firstPoint = data.series.find((point) => Number.isFinite(point.equity));
   return firstPoint?.equity ?? 0;
@@ -171,8 +181,18 @@ export function buildPerformanceChartModel(
   margins: ChartMargins = DEFAULT_PERFORMANCE_CHART_MARGINS,
 ): PerformanceChartModel {
   const series = data.series.filter((point) => Number.isFinite(point.equity));
+  // normalizeSeries already resolves each point to the plotted basis: the TWR
+  // index when the payload carries one, dollar NAV otherwise.
   const equityValues = series.map((point) => point.equity);
+  const basis: "twr_index" | "dollar" =
+    series.length > 0 && series.every((point) => point.twr_index != null && Number.isFinite(point.twr_index))
+      ? "twr_index"
+      : "dollar";
   const startEquity = resolvePerformanceStartingEquity(data);
+  // The benchmark is rebased onto the FIRST PLOTTED VALUE, so both lines start
+  // together and their slopes are comparable percentages. Rebasing dollars
+  // against a base-100 index draws a deposit as outperformance.
+  const rebaseBase = equityValues[0] != null && equityValues[0] !== 0 ? equityValues[0] : startEquity;
   const benchmarkCloses = series.map((point) => point.benchmark_close);
   const hasCompleteBenchmarkCloses = benchmarkCloses.length > 0
     && benchmarkCloses.every((value) => value != null && Number.isFinite(value))
@@ -180,10 +200,10 @@ export function buildPerformanceChartModel(
   const hasCompleteBenchmarkReturns = series.length > 0
     && series.every((point) => point.benchmark_return != null && Number.isFinite(point.benchmark_return));
   const rebasedBenchmarkValues = hasCompleteBenchmarkCloses
-    ? benchmarkCloses.map((value) => (Number(value) / Number(benchmarkCloses[0])) * startEquity)
+    ? benchmarkCloses.map((value) => (Number(value) / Number(benchmarkCloses[0])) * rebaseBase)
     : hasCompleteBenchmarkReturns
       ? series.reduce<number[]>((values, point, index) => {
-          const previous = index === 0 ? startEquity : values[index - 1];
+          const previous = index === 0 ? rebaseBase : values[index - 1];
           values.push(previous * (1 + Number(point.benchmark_return)));
           return values;
         }, [])
@@ -193,9 +213,10 @@ export function buildPerformanceChartModel(
   const plotLeft = margins.left;
   const plotRight = width - margins.right;
   const span = domainMax - domainMin || 1;
+  const formatAxisValue = basis === "twr_index" ? formatAxisIndex : formatAxisUsd;
   const yAxisTicks = ticks.map((tick) => ({
     value: tick,
-    label: formatAxisUsd(tick),
+    label: formatAxisValue(tick),
     y: plotBottom - ((tick - domainMin) / span) * (plotBottom - margins.top),
   }));
   const xAxisTicks = buildIndexTicks(series.length, 4).map((index) => ({
@@ -205,11 +226,12 @@ export function buildPerformanceChartModel(
   }));
 
   return {
+    basis,
     equityPath: buildLinePath(equityValues, width, height, margins, domainMin, domainMax),
     benchmarkPath: buildLinePath(rebasedBenchmarkValues, width, height, margins, domainMin, domainMax),
     areaPath: buildAreaPath(equityValues, width, height, margins, domainMin, domainMax),
     latestEquity: equityValues[equityValues.length - 1] ?? startEquity,
-    latestBenchmark: rebasedBenchmarkValues[rebasedBenchmarkValues.length - 1] ?? startEquity,
+    latestBenchmark: rebasedBenchmarkValues[rebasedBenchmarkValues.length - 1] ?? null,
     rebasedBenchmarkValues,
     domainMin,
     domainMax,

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { formatAbsolute, formatTime, formatRelative } from "../lib/newsfeedTime";
+import { formatAbsolute, formatCompact, formatTime, formatRelative } from "../lib/newsfeedTime";
 
 describe("newsfeedTime", () => {
   it("formats local-noon as '12:XX PM' (regression: dashboard showed 12:20 AM at noon)", () => {
@@ -51,6 +51,35 @@ describe("newsfeedTime", () => {
     expect(formatRelative(new Date(now - 3 * 60_000).toISOString(), now)).toBe("3 minutes ago");
     expect(formatRelative(new Date(now - 2 * 3_600_000).toISOString(), now)).toBe("2 hours ago");
     expect(formatRelative(new Date(now - 3 * 86_400_000).toISOString(), now)).toBe("3 days ago");
+  });
+
+  it("formatCompact emits exactly one token so the mobile footer can never orphan a fragment", () => {
+    // Window-relative: every case is derived from `now`, never a calendar date.
+    const now = Date.now();
+    const minute = 60_000;
+    const hour = 60 * minute;
+    const day = 24 * hour;
+
+    expect(formatCompact(new Date(now - 30_000).toISOString(), now)).toBe("moments ago");
+    expect(formatCompact(new Date(now - 26 * minute).toISOString(), now)).toBe("26 min ago");
+    expect(formatCompact(new Date(now - 1 * minute).toISOString(), now)).toBe("1 min ago");
+    expect(formatCompact(new Date(now - 3 * hour).toISOString(), now)).toBe("3 hr ago");
+    expect(formatCompact(new Date(now - 1 * day).toISOString(), now)).toBe("1 day ago");
+    expect(formatCompact(new Date(now - 2 * day).toISOString(), now)).toBe("2 days ago");
+  });
+
+  it("formatCompact falls back to a short date beyond a week", () => {
+    const now = Date.now();
+    const nineDaysAgo = new Date(now - 9 * 86_400_000);
+    expect(formatCompact(nineDaysAgo.toISOString(), now)).toBe(
+      new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(nineDaysAgo),
+    );
+  });
+
+  it("formatCompact reads a future timestamp as 'moments ago' and rejects invalid input", () => {
+    const now = Date.now();
+    expect(formatCompact(new Date(now + 5 * 60_000).toISOString(), now)).toBe("moments ago");
+    expect(formatCompact("not-a-date", now)).toBe("");
   });
 
   it("returns '' for invalid timestamps in formatTime/formatRelative", () => {

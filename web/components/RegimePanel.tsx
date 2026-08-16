@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { AlertTriangle, Check, Shield, X, Zap } from "lucide-react";
 import { useViewport } from "@/lib/useViewport";
@@ -14,6 +14,7 @@ import BpiPanel from "./BpiPanel";
 import MarginDebtPanel from "./MarginDebtPanel";
 import StraddlePanel from "./StraddlePanel";
 import CorPanel from "./CorPanel";
+import VixCorPanel from "./VixCorPanel";
 import SkewPanel from "./SkewPanel";
 import Skew2dPanel from "./Skew2dPanel";
 import YieldCurvePanel from "./YieldCurvePanel";
@@ -33,24 +34,25 @@ import type { PriceData } from "@/lib/pricesProtocol";
 import { chartSeriesColor } from "@/lib/chartSystem";
 import { resolveCrashTriggerState, resolveRegimeStripLiveState } from "@/lib/regimeLiveStrip";
 import { useRegime } from "@/lib/useRegime";
+import { useVcg } from "@/lib/useVcg";
+import { useGex } from "@/lib/useGex";
 import { SECTION_TOOLTIPS } from "@/lib/sectionTooltips";
 import { computeCri, type CriLevel, type CriResult } from "@/lib/criCalc";
 import { MarketState } from "@/lib/useMarketHours";
-
-type RegimeTab = "cri" | "vcg" | "gex" | "grg" | "breadth" | "bpi" | "margin" | "straddle" | "cor" | "skew" | "skew2d" | "curve" | "cot" | "ats" | "short" | "llm" | "backtest";
-
-const REGIME_TAB_VALUES: readonly RegimeTab[] = ["cri", "vcg", "gex", "grg", "breadth", "bpi", "margin", "straddle", "cor", "skew", "skew2d", "curve", "cot", "ats", "short", "llm", "backtest"] as const;
+import RegimeRail from "./RegimeRail";
+import { buildRailStatuses, REGIME_TABS, REGIME_TAB_LABEL, type RegimeTab } from "@/lib/regimeRail";
 
 const MOBILE_TAB_LABEL: Partial<Record<RegimeTab, string>> = {
   skew2d: "SKEW 2D",
+  vixcor: "VIX-COR",
 };
 
 /** Extract the tab segment from /regime/<tab>; defaults to "cri". */
 function tabFromPathname(pathname: string | null): RegimeTab {
   if (!pathname) return "cri";
-  // skew2d before skew so /regime/skew2d is not truncated to skew
-  const match = pathname.match(/^\/regime\/(cri|vcg|gex|grg|breadth|bpi|margin|straddle|cor|skew2d|skew|curve|cot|ats|short|llm|backtest)(?:\/|$)/);
-  if (match && (REGIME_TAB_VALUES as readonly string[]).includes(match[1])) {
+  // Longest prefix first within each family: skew2d before skew, vixcor before cor.
+  const match = pathname.match(/^\/regime\/(cri|vcg|gex|grg|breadth|bpi|margin|straddle|vixcor|cor|skew2d|skew|curve|cot|ats|short|llm|backtest)(?:\/|$)/);
+  if (match && (REGIME_TABS as readonly string[]).includes(match[1])) {
     return match[1] as RegimeTab;
   }
   return "cri";
@@ -155,6 +157,10 @@ export default function RegimePanel({
   const activeTab = tabFromPathname(pathname);
   const goToTab = (tab: RegimeTab) => router.push(`/regime/${tab}`);
   const { data, loading, syncing, lastSync } = useRegime(marketState, { endpoint: dataEndpoint });
+  // Rail telemetry only — GET-polled cached scans; passive GEX never triggers
+  // a POST scan on top of GexPanel's own trigger.
+  const { data: railVcgData } = useVcg(marketState);
+  const { data: railGexData } = useGex(marketState, { passive: true });
   const shareModal = shareEndpoint ? (
     <ShareReportModal
       modalTitle={shareModalTitle}
@@ -307,9 +313,20 @@ export default function RegimePanel({
     realizedVolMet: realizedVolTriggerMet,
   });
 
+  const railStatuses = useMemo(
+    () =>
+      buildRailStatuses({
+        cri: data ? { score: cri.score, level: cri.level } : null,
+        cor1m: activeCorr,
+        vcg: railVcgData,
+        gex: railGexData,
+      }),
+    [data, cri.score, cri.level, activeCorr, railVcgData, railGexData],
+  );
+
   const tabBar = compact ? (
     <div className="m-regime-tabs" role="tablist" aria-label="Regime tabs">
-      {(["cri", "vcg", "gex", "grg", "breadth", "bpi", "margin", "straddle", "cor", "skew", "skew2d", "curve", "cot", "ats", "short", "llm", "backtest"] as RegimeTab[]).map((t) => (
+      {(["cri", "vcg", "gex", "grg", "breadth", "bpi", "margin", "straddle", "cor", "vixcor", "skew", "skew2d", "curve", "cot", "ats", "short", "llm", "backtest"] as RegimeTab[]).map((t) => (
         <button
           key={t}
           type="button"
@@ -323,169 +340,93 @@ export default function RegimePanel({
       ))}
     </div>
   ) : (
-    <div className="ticker-tabs" style={{ marginBottom: "16px" }}>
-      <button className={`ticker-tab ${activeTab === "cri" ? "active" : ""}`} onClick={() => goToTab("cri")}>CRI</button>
-      <button className={`ticker-tab ${activeTab === "vcg" ? "active" : ""}`} onClick={() => goToTab("vcg")}>VCG</button>
-      <button className={`ticker-tab ${activeTab === "gex" ? "active" : ""}`} onClick={() => goToTab("gex")}>GEX</button>
-      <button className={`ticker-tab ${activeTab === "grg" ? "active" : ""}`} onClick={() => goToTab("grg")}>GRG</button>
-      <button className={`ticker-tab ${activeTab === "breadth" ? "active" : ""}`} onClick={() => goToTab("breadth")}>BREADTH</button>
-      <button className={`ticker-tab ${activeTab === "bpi" ? "active" : ""}`} onClick={() => goToTab("bpi")}>BULLISH %</button>
-      <button className={`ticker-tab ${activeTab === "margin" ? "active" : ""}`} onClick={() => goToTab("margin")}>MARGIN</button>
-      <button className={`ticker-tab ${activeTab === "straddle" ? "active" : ""}`} onClick={() => goToTab("straddle")}>STRADDLE</button>
-      <button className={`ticker-tab ${activeTab === "cor" ? "active" : ""}`} onClick={() => goToTab("cor")}>COR</button>
-      <button className={`ticker-tab ${activeTab === "skew" ? "active" : ""}`} onClick={() => goToTab("skew")}>SKEW</button>
-      <button className={`ticker-tab ${activeTab === "skew2d" ? "active" : ""}`} onClick={() => goToTab("skew2d")}>SKEW 2D</button>
-      <button className={`ticker-tab ${activeTab === "curve" ? "active" : ""}`} onClick={() => goToTab("curve")}>CURVE</button>
-      <button className={`ticker-tab ${activeTab === "cot" ? "active" : ""}`} onClick={() => goToTab("cot")}>COT</button>
-      <button className={`ticker-tab ${activeTab === "ats" ? "active" : ""}`} onClick={() => goToTab("ats")}>ATS</button>
-      <button className={`ticker-tab ${activeTab === "short" ? "active" : ""}`} onClick={() => goToTab("short")}>SHORT</button>
-      <button className={`ticker-tab ${activeTab === "llm" ? "active" : ""}`} onClick={() => goToTab("llm")}>LLM</button>
-      <button className={`ticker-tab ${activeTab === "backtest" ? "active" : ""}`} onClick={() => goToTab("backtest")}>BACKTEST</button>
+    <>
+      <RegimeRail activeTab={activeTab} onSelect={goToTab} statuses={railStatuses} />
+      {/* Narrow-desktop fallback (<1100px): the flat strip, CSS-toggled against the rail. */}
+      <div className="ticker-tabs regime-tab-strip" style={{ marginBottom: "16px" }}>
+        {REGIME_TABS.map((t) => (
+          <button key={t} className={`ticker-tab ${activeTab === t ? "active" : ""}`} onClick={() => goToTab(t)}>
+            {REGIME_TAB_LABEL[t]}
+          </button>
+        ))}
+      </div>
+    </>
+  );
+
+  const shellClass = compact ? "regime-panel" : "regime-panel regime-panel--rail";
+  const renderShell = (content: ReactNode) => (
+    <div className={shellClass}>
+      {tabBar}
+      <div className="regime-detail-pane">{content}</div>
     </div>
   );
 
   if (activeTab === "backtest") {
-    return (
-      <div className="regime-panel">
-        {tabBar}
-        <BacktestPanel />
-      </div>
-    );
+    return renderShell(<BacktestPanel />);
   }
 
   if (activeTab === "vcg") {
-    return (
-      <div className="regime-panel">
-        {tabBar}
-        <VcgPanel prices={prices} marketState={marketState} />
-      </div>
-    );
+    return renderShell(<VcgPanel prices={prices} marketState={marketState} />);
   }
 
   if (activeTab === "gex") {
-    return (
-      <div className="regime-panel">
-        {tabBar}
-        <GexPanel marketState={marketState} />
-      </div>
-    );
+    return renderShell(<GexPanel marketState={marketState} />);
   }
 
   if (activeTab === "grg") {
-    return (
-      <div className="regime-panel">
-        {tabBar}
-        <GammaRotationPanel marketState={marketState} />
-      </div>
-    );
+    return renderShell(<GammaRotationPanel marketState={marketState} />);
   }
 
   if (activeTab === "breadth") {
-    return (
-      <div className="regime-panel">
-        {tabBar}
-        <BreadthPanel marketState={marketState} />
-      </div>
-    );
+    return renderShell(<BreadthPanel marketState={marketState} />);
   }
 
   if (activeTab === "bpi") {
-    return (
-      <div className="regime-panel">
-        {tabBar}
-        <BpiPanel />
-      </div>
-    );
+    return renderShell(<BpiPanel />);
   }
 
   if (activeTab === "margin") {
-    return (
-      <div className="regime-panel">
-        {tabBar}
-        <MarginDebtPanel />
-      </div>
-    );
+    return renderShell(<MarginDebtPanel />);
   }
 
   if (activeTab === "straddle") {
-    return (
-      <div className="regime-panel">
-        {tabBar}
-        <StraddlePanel prices={prices} />
-      </div>
-    );
+    return renderShell(<StraddlePanel prices={prices} />);
   }
 
   if (activeTab === "cor") {
-    return (
-      <div className="regime-panel">
-        {tabBar}
-        <CorPanel />
-      </div>
-    );
+    return renderShell(<CorPanel />);
+  }
+
+  if (activeTab === "vixcor") {
+    return renderShell(<VixCorPanel />);
   }
 
   if (activeTab === "skew") {
-    return (
-      <div className="regime-panel">
-        {tabBar}
-        <SkewPanel marketState={marketState} />
-      </div>
-    );
+    return renderShell(<SkewPanel marketState={marketState} />);
   }
 
   if (activeTab === "skew2d") {
-    return (
-      <div className="regime-panel">
-        {tabBar}
-        <Skew2dPanel marketState={marketState} />
-      </div>
-    );
+    return renderShell(<Skew2dPanel marketState={marketState} />);
   }
 
   if (activeTab === "curve") {
-    return (
-      <div className="regime-panel">
-        {tabBar}
-        <YieldCurvePanel />
-      </div>
-    );
+    return renderShell(<YieldCurvePanel />);
   }
 
   if (activeTab === "cot") {
-    return (
-      <div className="regime-panel">
-        {tabBar}
-        <EquiblesCotPanel />
-      </div>
-    );
+    return renderShell(<EquiblesCotPanel />);
   }
 
   if (activeTab === "ats") {
-    return (
-      <div className="regime-panel">
-        {tabBar}
-        <AtsVenueSharePanel />
-      </div>
-    );
+    return renderShell(<AtsVenueSharePanel />);
   }
 
   if (activeTab === "short") {
-    return (
-      <div className="regime-panel">
-        {tabBar}
-        <EquiblesShortCrowdingPanel />
-      </div>
-    );
+    return renderShell(<EquiblesShortCrowdingPanel />);
   }
 
   if (activeTab === "llm") {
-    return (
-      <div className="regime-panel">
-        {tabBar}
-        <LlmTokenIndexCard />
-      </div>
-    );
+    return renderShell(<LlmTokenIndexCard />);
   }
 
   // While the first payload is being fetched OR an explicit sync is running,
@@ -493,24 +434,16 @@ export default function RegimePanel({
   // on `loading && !data`). The text empty state below is reserved for the
   // settled no-data case (fetch finished, genuinely nothing to show).
   if ((loading || syncing) && !data) {
-    return (
-      <div className="regime-panel">
-        {tabBar}
-        <SpectralLoader label="Running crash-risk regime scan" />
-      </div>
-    );
+    return renderShell(<SpectralLoader label="Running crash-risk regime scan" />);
   }
 
   if (!data) {
-    return (
-      <div className="regime-panel">
-        {tabBar}
-        <SectionEmptyState
-          icon={Shield}
-          headline="No crash-risk data yet"
-          secondary="Run Sync Now in the header to compute the current crash-risk regime."
-        />
-      </div>
+    return renderShell(
+      <SectionEmptyState
+        icon={Shield}
+        headline="No crash-risk data yet"
+        secondary="Run Sync Now in the header to compute the current crash-risk regime."
+      />,
     );
   }
 
@@ -536,8 +469,9 @@ export default function RegimePanel({
   }
 
   return (
-    <div className="regime-panel">
+    <div className={shellClass}>
       {tabBar}
+      <div className="regime-detail-pane">
 
       {compact ? (
         /* ── MOBILE CRI layout ────────────────────────────── */
@@ -872,6 +806,7 @@ export default function RegimePanel({
         );
       })()}
 
+      </div>
     </div>
   );
 }

@@ -72,7 +72,8 @@ except Exception:
     pass
 
 # DB writer / atomic_io are imported lazily inside main() so pure functions
-# (_classify, _normalize_date, fetch_cash_transactions) can be unit-tested
+# (_classify, _normalize_date, parse_cash_transactions, fetch_cash_transactions)
+# can be unit-tested
 # without libsql_experimental installed in the test environment.
 
 # Flex Web Service endpoints
@@ -206,6 +207,47 @@ def _request_reference_code(token: str, query_id: str) -> str:
     raise RuntimeError("Flex SendRequest failed: unknown error")
 
 
+def parse_cash_transactions(xml_text: str) -> list[dict[str, Any]]:
+    """Parse CashTransaction rows out of a Flex statement. No I/O.
+
+    Pure counterpart of `fetch_cash_transactions` — same rows, no network.
+    Lets a saved statement be replayed after a throttle embargo, and makes
+    the parse rules testable without ever hitting the Flex Web Service.
+
+    Two rows are dropped:
+      * no `transactionID` — IBKR emits per-day aggregate rows alongside the
+        detail rows they summarize (2026-06-24 carries -42,000 and -60,000
+        details plus a -102,000 aggregate). Keeping them double-counts.
+      * `amount` of exactly zero — nothing moved.
+
+    Rows sharing a `transactionID` are all kept; IBKR genuinely reuses ids
+    across distinct transactions.
+
+    Returns a list of dicts ready to feed `upsert_cash_flow`.
+    """
+    out: list[dict[str, Any]] = []
+    root = ET.fromstring(xml_text)
+    for ct in root.findall(".//CashTransaction"):
+        txn_id = (ct.get("transactionID") or "").strip()
+        if not txn_id:
+            continue
+        amt = float(ct.get("amount") or 0.0)
+        if amt == 0.0:
+            continue
+        raw_type = (ct.get("type") or "").strip()
+        date_str = _normalize_date(ct.get("reportDate") or ct.get("dateTime") or "")
+        out.append({
+            "id": txn_id,
+            "date": date_str,
+            "type": _classify(raw_type, amt),
+            "amount": amt,
+            "currency": (ct.get("currency") or "USD").upper(),
+            "description": (ct.get("description") or "").strip() or None,
+            "raw_type": raw_type or None,
+        })
+    return out
+
+
 def fetch_cash_transactions(
     token: str,
     query_id: str,
@@ -248,27 +290,7 @@ def fetch_cash_transactions(
     else:
         raise RuntimeError(f"Flex statement not ready after {max_polls} polls")
 
-    out: list[dict[str, Any]] = []
-    root2 = ET.fromstring(xml_text)
-    for ct in root2.findall(".//CashTransaction"):
-        txn_id = (ct.get("transactionID") or "").strip()
-        if not txn_id:
-            continue
-        amt = float(ct.get("amount") or 0.0)
-        if amt == 0.0:
-            continue
-        raw_type = (ct.get("type") or "").strip()
-        date_str = _normalize_date(ct.get("reportDate") or ct.get("dateTime") or "")
-        out.append({
-            "id": txn_id,
-            "date": date_str,
-            "type": _classify(raw_type, amt),
-            "amount": amt,
-            "currency": (ct.get("currency") or "USD").upper(),
-            "description": (ct.get("description") or "").strip() or None,
-            "raw_type": raw_type or None,
-        })
-    return out
+    return parse_cash_transactions(xml_text)
 
 
 def _filter_types(rows: list[dict[str, Any]], allowed: Optional[set[str]]) -> list[dict[str, Any]]:

@@ -4230,6 +4230,31 @@ td.last-price-cell {
   border-bottom: none;
 }
 
+.performance-degraded-body {
+  padding: 0;
+}
+
+.performance-degraded-headline {
+  padding: 12px 16px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-dim);
+}
+
+.performance-methodology-copy {
+  padding: 12px 16px;
+  border-top: 1px solid var(--line-grid);
+  background: var(--bg-panel);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.6;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
 .performance-empty {
   padding: 18px 16px;
   font-family: var(--font-mono);
@@ -9998,6 +10023,166 @@ tr {
   padding: 0;
 }
 
+/* ─── Grouped indicator rail (design: "Regime — Grouped Rail") ────────
+   ≥1100px: 244px grouped rail + detail pane. Below that the rail hides and
+   the flat .regime-tab-strip fallback shows. Mobile keeps .m-regime-tabs. */
+
+.regime-detail-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.regime-rail {
+  display: none;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border: 1px solid var(--line-grid);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.regime-rail__filter {
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--line-grid);
+}
+
+.regime-rail__filter input {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  background: var(--bg-canvas);
+  border: 1px solid var(--line-grid);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+}
+
+.regime-rail__filter input::placeholder {
+  color: var(--text-muted);
+}
+
+.regime-rail__filter input:focus {
+  outline: none;
+  border-color: var(--signal-core);
+}
+
+.regime-rail__list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 2px 0 10px;
+}
+
+.regime-rail__group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.regime-rail__count--flagged {
+  color: var(--warning);
+}
+
+.regime-rail__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 32px;
+  padding: 0 14px 0 12px;
+  background: transparent;
+  border: none;
+  border-left: 2px solid transparent;
+  cursor: pointer;
+  text-align: left;
+  transition: var(--transition-controls);
+}
+
+.regime-rail__item:hover {
+  background: var(--bg-panel-raised);
+}
+
+.regime-rail__item:hover .regime-rail__name {
+  color: var(--text-primary);
+}
+
+.regime-rail__item.active {
+  background: var(--bg-panel-raised);
+  border-left-color: var(--signal-core);
+}
+
+.regime-rail__item.active .regime-rail__name {
+  color: var(--text-primary);
+}
+
+.regime-rail__dot {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  background: var(--text-muted);
+}
+
+.regime-rail__dot--core { background: var(--signal-core); }
+.regime-rail__dot--warn { background: var(--warning); }
+.regime-rail__dot--fault { background: var(--negative); }
+
+.regime-rail__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  color: var(--text-secondary);
+}
+
+.regime-rail__val {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.regime-rail__foot {
+  padding: 8px 14px;
+  border-top: 1px solid var(--line-grid);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+@media (min-width: 1100px) {
+  .regime-panel--rail {
+    display: grid;
+    grid-template-columns: 244px minmax(0, 1fr);
+    gap: 16px;
+    align-items: start;
+  }
+
+  .regime-panel--rail > .regime-rail {
+    display: flex;
+    position: sticky;
+    top: 12px;
+    max-height: calc(100vh - var(--header-height) - 40px);
+  }
+
+  .regime-panel--rail > .regime-tab-strip {
+    display: none;
+  }
+}
+
 /* ─── Strategy Backtest panel (F12) ─────────────────────── */
 .backtest-panel {
   display: flex;
@@ -10549,7 +10734,9 @@ tr {
   text-align: right;
 }
 
-@media (max-width: 980px) {
+/* 1240px: below this the detail pane (viewport minus the 260px rail column)
+   is narrower than the old 980px full-width threshold. */
+@media (max-width: 1240px) {
   .regime-detail-grid {
     grid-template-columns: 1fr;
     gap: 1px;
@@ -19813,3 +20000,77 @@ body[data-mobile="true"] .alerts-rule__channel {
   .agent-dot--pulse { animation: none; opacity: 0.8; }
   .proposal-card__meter-fill { transition: none; }
 }
+
+/* ══ VIX-COR regime tab (/regime/vixcor) ═══════════════════════════════
+   Two stacked panes sharing one x-scale, plus the base-rate block that
+   carries the validation verdict. Brand tokens only, 4px max radius.
+   Spec: docs/indicators/vixcor.md section G. */
+
+/* Six strip cells, so the shared five-column grid would leave a bare
+   quarter-row of border tone. Re-column to an exact divisor of six. */
+.vixcor-strip .regime-strip { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+
+@media (max-width: 1440px) {
+  .vixcor-strip .regime-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 760px) {
+  .vixcor-strip .regime-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.vixcor-chart-panel { padding: 16px; }
+.vixcor-chart-content { min-width: 0; }
+.vixcor-chart-shell { position: relative; width: 100%; }
+.vixcor-chart-surface { min-height: 440px; }
+.vixcor-chart-empty { height: 440px; }
+.vixcor-chart-svg { display: block; width: 100%; height: 440px; }
+.vixcor-chart-tooltip { z-index: 20; }
+
+.vixcor-base-rate { margin-top: 12px; }
+
+.vixcor-base-rate-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.vixcor-base-rate-table th,
+.vixcor-base-rate-table td {
+  padding: 6px 10px;
+  text-align: right;
+  border-bottom: 1px solid var(--border-dim);
+}
+
+.vixcor-base-rate-table thead th {
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.vixcor-base-rate-table th:first-child,
+.vixcor-base-rate-table td:first-child {
+  text-align: left;
+}
+
+.vixcor-base-rate-table tbody th {
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.vixcor-base-rate-table tbody td { color: var(--text-primary); }
+
+.vixcor-base-rate-table tbody tr:last-child th,
+.vixcor-base-rate-table tbody tr:last-child td { border-bottom: none; }
+
+.vixcor-base-rate-note {
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+/* ══ end VIX-COR regime tab ════════════════════════════════════════════ */

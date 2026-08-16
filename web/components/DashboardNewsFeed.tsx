@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { ChevronLeft, ChevronRight, Link as LinkIcon, RefreshCw } from "lucide-react";
 
-import { formatAbsolute, formatRelative, formatTime } from "../lib/newsfeedTime";
+import { formatAbsolute, formatCompact, formatRelative, formatTime } from "../lib/newsfeedTime";
 import {
   useNewsfeedPosts,
   type MarketEarPost,
@@ -15,6 +15,10 @@ import { useBookmarks } from "../lib/useBookmarks";
 import NewsfeedTagBar from "./NewsfeedTagBar";
 import NewsfeedLightbox, { type NewsfeedLightboxFocus } from "./NewsfeedLightbox";
 import StarToggle from "./StarToggle";
+import styles from "./DashboardNewsFeed.module.css";
+
+/** Chips beyond this count collapse behind a `+N` expander on mobile. */
+const VISIBLE_TAG_LIMIT = 4;
 
 /** Compact snapshot persisted with a bookmark so the profile list can render
  *  the saved post without the live feed being loaded. */
@@ -110,6 +114,28 @@ export default function DashboardNewsFeed() {
 
   const { isBookmarked, toggleBookmark } = useBookmarks();
   const [bookmarkBusy, setBookmarkBusy] = useState<Set<string>>(new Set());
+  const [expandedTags, setExpandedTags] = useState<Set<string>>(new Set());
+  const [postAwaitingTagFocus, setPostAwaitingTagFocus] = useState<string | null>(null);
+  const tagStripsRef = useRef(new Map<string, HTMLDivElement | null>());
+
+  const expandTags = useCallback((postId: string) => {
+    setExpandedTags((prev) => new Set(prev).add(postId));
+    setPostAwaitingTagFocus(postId);
+  }, []);
+
+  // The `+N` control unmounts the moment it is activated, so focus has to be
+  // handed somewhere deliberate: the first chip it just revealed. Without this
+  // the browser resets the active element to the scroll container and a
+  // keyboard user loses their place mid-list.
+  useEffect(() => {
+    if (!postAwaitingTagFocus) return;
+    const strip = tagStripsRef.current.get(postAwaitingTagFocus);
+    setPostAwaitingTagFocus(null);
+    if (!strip) return;
+    const chips = strip.querySelectorAll<HTMLButtonElement>("button.news-feed-tag-chip");
+    const firstRevealed = chips[VISIBLE_TAG_LIMIT] ?? chips[chips.length - 1];
+    firstRevealed?.focus();
+  }, [postAwaitingTagFocus]);
 
   const handleToggleBookmark = useCallback(
     async (post: NormalisedPost) => {
@@ -230,16 +256,16 @@ export default function DashboardNewsFeed() {
   ) : null;
 
   return (
-    <section className="dashboard-news snapshot-card" ref={sectionRef}>
-      <header className="dashboard-news__header">
-        <div className="dashboard-news__heading">
+    <section className={`dashboard-news snapshot-card ${styles.card}`} ref={sectionRef}>
+      <header className={`dashboard-news__header ${styles.header}`}>
+        <div className={`dashboard-news__heading ${styles.heading}`}>
           <p className="panel-eyebrow">Feed / 01</p>
           <h3 className="panel-title">Live market analysis</h3>
         </div>
-        <div className="news-feed-actions">
+        <div className={`news-feed-actions ${styles.actions}`}>
           <button
             type="button"
-            className="news-feed-refresh news-feed-refresh--rail"
+            className={`news-feed-refresh news-feed-refresh--rail ${styles.refresh}`}
             onClick={handleRefresh}
             disabled={refreshing}
             aria-label={refreshing ? "Refreshing feed" : "Refresh feed"}
@@ -270,24 +296,29 @@ export default function DashboardNewsFeed() {
           </div>
         ) : (
           <>
-            <ul className="news-feed-list">
+            <ul className={`news-feed-list ${styles.list}`}>
             {items.map((post) => {
               const firstImage = post.images?.[0] ?? null;
               const relative = formatRelative(post.isoTimestamp);
               const time = formatTime(post.isoTimestamp);
+              const compact = formatCompact(post.isoTimestamp);
               const absolute = formatAbsolute(post.isoTimestamp);
               const postTags = Array.isArray(post.tags) ? post.tags : [];
+              const overflowCount = postTags.length - VISIBLE_TAG_LIMIT;
+              const tagsExpanded = expandedTags.has(post.id);
 
               return (
-                <li key={post.id} className="news-feed-item">
+                <li key={post.id} className={`news-feed-item ${styles.item}`}>
                   <a className="news-feed-link" href={post.href} target="_blank" rel="noopener noreferrer">
-                    <h3 className="news-feed-headline">{post.title}</h3>
+                    <h3 className={`news-feed-headline ${styles.headline}`}>{post.title}</h3>
                   </a>
-                  {post.content ? <p className="news-feed-summary">{post.content}</p> : null}
+                  {post.content ? (
+                    <p className={`news-feed-summary ${styles.summary}`}>{post.content}</p>
+                  ) : null}
                   {firstImage ? (
                     <button
                       type="button"
-                      className="news-feed-image-wrapper news-feed-image-wrapper--button"
+                      className={`news-feed-image-wrapper news-feed-image-wrapper--button ${styles.imageWrapper}`}
                       onClick={() =>
                         setLightboxFocus({ post, imageUrl: firstImage })
                       }
@@ -299,7 +330,7 @@ export default function DashboardNewsFeed() {
                         width={1200}
                         height={675}
                         sizes="(max-width: 1440px) 100vw, 60vw"
-                        className="news-feed-image"
+                        className={`news-feed-image ${styles.image}`}
                         priority={false}
                       />
                       <span className="news-feed-image-zoom" aria-hidden>
@@ -308,14 +339,20 @@ export default function DashboardNewsFeed() {
                     </button>
                   ) : null}
                   {postTags.length > 0 ? (
-                    <div className="news-feed-tags">
-                      {postTags.map((tag) => {
+                    <div
+                      className={`news-feed-tags ${styles.tags}${tagsExpanded ? ` ${styles.tagsExpanded}` : ""}`}
+                      ref={(node) => {
+                        tagStripsRef.current.set(post.id, node);
+                      }}
+                    >
+                      {postTags.map((tag, index) => {
                         const isActive = selectedTags.has(tag);
+                        const overflow = index >= VISIBLE_TAG_LIMIT;
                         return (
                           <button
                             key={tag}
                             type="button"
-                            className={`news-feed-tag-chip${isActive ? " is-active" : ""}`}
+                            className={`news-feed-tag-chip${isActive ? " is-active" : ""} ${styles.tagChip}${overflow ? ` ${styles.tagOverflow}` : ""}`}
                             onClick={() => toggleTag(tag)}
                             aria-pressed={isActive}
                           >
@@ -323,11 +360,25 @@ export default function DashboardNewsFeed() {
                           </button>
                         );
                       })}
+                      {overflowCount > 0 && !tagsExpanded ? (
+                        <button
+                          type="button"
+                          className={`news-feed-tag-chip ${styles.tagChip} ${styles.tagMore}`}
+                          onClick={() => expandTags(post.id)}
+                          // Always collapsed while mounted: expanding unmounts
+                          // the control rather than leaving a hidden one
+                          // claiming aria-expanded="true".
+                          aria-expanded={false}
+                          aria-label={`Show ${overflowCount} more tags`}
+                        >
+                          +{overflowCount}
+                        </button>
+                      ) : null}
                     </div>
                   ) : null}
-                  <div className="news-feed-footer">
+                  <div className={`news-feed-footer ${styles.footer}`}>
                     <a
-                      className="news-feed-link-pill"
+                      className={`news-feed-link-pill ${styles.linkPill}`}
                       href={post.href}
                       target="_blank"
                       rel="noopener noreferrer"
@@ -335,9 +386,12 @@ export default function DashboardNewsFeed() {
                       <LinkIcon size={11} />
                       <span>Link</span>
                     </a>
-                    <span className="news-feed-timestamp" title={absolute}>
-                      {relative}
-                      {time ? ` at ${time}` : ""}
+                    <span className={`news-feed-timestamp ${styles.timestamp}`} title={absolute}>
+                      <span className={styles.tsCompact}>{compact}</span>
+                      <span className={styles.tsFull}>
+                        {relative}
+                        {time ? ` at ${time}` : ""}
+                      </span>
                     </span>
                     <StarToggle
                       active={isBookmarked(post.id)}

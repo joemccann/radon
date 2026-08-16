@@ -85,7 +85,7 @@ test.describe("/regime/bpi — Bullish Percent Index tab", () => {
     await setupMocks(page, bpiResponse("2026-08-12"));
     await page.goto("/regime/bpi");
 
-    await expect(page.locator(".ticker-tab", { hasText: "BULLISH %" })).toHaveClass(/active/);
+    await expect(page.locator('.regime-rail__item[data-tab="bpi"]')).toHaveClass(/active/);
     await page.getByTestId("bpi-index-chip-SPX").click();
 
     const cell = page.getByTestId("bpi-strip-session");

@@ -1,0 +1,263 @@
+/* Mobile-only layout for the Feed / 01 news item. These rules live here, not in
+   globals.css, because globals.css was under concurrent edit when this shipped.
+   Consolidate them back into the `body[data-mobile="true"] .news-feed-*` block in
+   globals.css in a later pass, and drop the doubled-class specificity bumps at the
+   same time. See docs/mobile-newsfeed-layout.md. */
+
+/* Desktop defaults. The compact stamp and the +N chip exist only on the mobile
+   shell; hiding them here keeps desktop byte-identical to today. */
+.tsCompact {
+  display: none;
+}
+
+/* Doubled-class bump like every other rule in this file. A bare `.tagMore` is
+   (0,1,0), which merely TIES `.news-feed-tag-chip { display: inline-flex }` in
+   globals.css and wins on injection order alone. */
+.tagMore.tagMore {
+  display: none;
+}
+
+/* Four-step vertical scale. Every gap below comes from this set. */
+:global(body[data-mobile="true"]) .card.card {
+  --nf-s1: 4px;
+  --nf-s2: 8px;
+  --nf-s3: 12px;
+  --nf-s4: 16px;
+  padding: var(--nf-s3) var(--nf-s3) 0;
+}
+
+:global(body[data-mobile="true"]) .header.header {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: nowrap;
+  gap: var(--nf-s2);
+  margin-bottom: var(--nf-s3);
+}
+
+/* `Feed / 01` duplicates the section toggle two rows above. */
+:global(body[data-mobile="true"]) .heading.heading :global(.panel-eyebrow) {
+  display: none;
+}
+
+:global(body[data-mobile="true"]) .actions.actions {
+  width: auto;
+  flex: 0 0 auto;
+}
+
+:global(body[data-mobile="true"]) .refresh.refresh {
+  position: relative;
+  min-height: 24px;
+  min-width: auto;
+  padding: 0;
+  gap: var(--nf-s1);
+}
+
+:global(body[data-mobile="true"]) .list.list {
+  padding: 0;
+}
+
+/* No bottom inset on the card. The feed is NOT the last block on the mobile
+   dashboard: `.dashboard-surface__right` follows it inside a grid that already
+   supplies the 16px seam, and `body[data-mobile="true"] .main` already reserves
+   `calc(var(--mobile-tab-bar-height) + var(--safe-bottom))` for the fixed tab
+   bar. A safe-area inset here is spent mid-scroll, not at the page end, and
+   blows the Feed -> Top Candidates seam out to 62px on a notched iPhone.
+   `scroll-margin-bottom` below is what keeps a targeted item clear of the bar. */
+:global(body[data-mobile="true"]) .item.item {
+  gap: var(--nf-s2);
+  padding: var(--nf-s4) 0;
+  scroll-margin-bottom: calc(var(--mobile-tab-bar-height) + var(--safe-bottom) + var(--nf-s3));
+}
+
+:global(body[data-mobile="true"]) .headline.headline {
+  font-size: 16px;
+  line-height: 1.25;
+}
+
+:global(body[data-mobile="true"]) .summary.summary {
+  max-inline-size: none;
+  font-size: var(--text-body);
+  line-height: 1.3846;
+  white-space: pre-line;
+}
+
+/* One frame around the image: the image's own inset outline from globals.css. */
+:global(body[data-mobile="true"]) .imageWrapper.imageWrapper {
+  margin-top: var(--nf-s1);
+  border: 0;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--bg-base);
+  aspect-ratio: 16 / 9;
+  min-height: 0;
+  min-width: 0;
+}
+
+:global(body[data-mobile="true"]) .image.image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 4px;
+}
+
+:global(body[data-mobile="true"]) .tags.tags {
+  margin-top: var(--nf-s1);
+  gap: var(--nf-s2);
+}
+
+/* A chip is a secondary filter affordance: 24px box (WCAG 2.5.8 AA), 32px hit
+   area from the pseudo-element, so the global 44px button floor can be cancelled
+   without shrinking the target. */
+:global(body[data-mobile="true"]) .tagChip.tagChip {
+  position: relative;
+  min-height: 24px;
+  min-width: auto;
+  padding: 0 var(--nf-s2);
+  line-height: 1;
+}
+
+/* `inset` on an absolutely positioned box resolves against the containing
+   block's PADDING box. The chip's 24px border box carries a 1px border, so the
+   pad grows from 22px, not 24px: -4px landed at 30px. -5px lands at 32px.
+
+   ⛔ RECORDED EXCEPTION to the 44px tap-target rule. ACCEPTED by the operator
+   2026-08-16: 32px stands, the tag strip stays one row.
+   32px is deliberate, not an oversight. A 44px pad on a 24px chip needs 44px of
+   vertical room; the strip has 24px rows with 12px gaps, and the footer's link
+   pill already owns a 44px pad 12px below the last row. Growing this to 44 would
+   (a) overlap the adjacent wrapped row, so a tap between two chips resolves to
+   the wrong filter, and (b) collide with the footer pill, which wins on
+   `z-index: 1`. Reaching 44 honestly means re-inflating the row pitch, which is
+   the orphan-chip bug this work removed. 32px clears WCAG 2.5.8 AA (24px) but
+   not the project floor. The alternative is to accept a taller tag strip. */
+:global(body[data-mobile="true"]) .tagChip.tagChip::after {
+  content: "";
+  position: absolute;
+  inset: -5px -2px;
+}
+
+:global(body[data-mobile="true"]) .tagOverflow.tagOverflow {
+  display: none;
+}
+
+:global(body[data-mobile="true"]) .tagMore.tagMore {
+  display: inline-flex;
+}
+
+:global(body[data-mobile="true"]) .tagsExpanded.tagsExpanded .tagOverflow.tagOverflow {
+  display: inline-flex;
+}
+
+:global(body[data-mobile="true"]) .tagsExpanded.tagsExpanded .tagMore.tagMore {
+  display: none;
+}
+
+/* One chip size on screen. `NewsfeedTagBar` renders its own chips inside this
+   card and cannot take a module class, so it is reached through the card scope
+   rather than through globals.css. Without this, an active filter puts a 44px
+   `SPX` in the bar two rows above a 24px `SPX` in the item. The bar chip is a
+   dismiss control rather than a secondary filter, so it keeps the full 44px
+   pseudo hit area instead of the chip's 32px. */
+:global(body[data-mobile="true"]) .card.card :global(.news-feed-tag-bar-chip) {
+  position: relative;
+  min-height: 24px;
+  min-width: auto;
+  padding: 0 var(--nf-s2);
+  line-height: 1;
+}
+
+:global(body[data-mobile="true"]) .card.card :global(.news-feed-tag-bar-chip)::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: var(--touch-min);
+  height: var(--touch-min);
+  transform: translate(-50%, -50%);
+}
+
+/* `Clear all` sits on the same row; leaving it at the global 44px floor would
+   just move the mismatch one control to the right. */
+:global(body[data-mobile="true"]) .card.card :global(.news-feed-tag-bar-clear) {
+  position: relative;
+  min-height: 24px;
+  min-width: auto;
+  padding: 0 var(--nf-s3);
+  line-height: 1;
+}
+
+:global(body[data-mobile="true"]) .card.card :global(.news-feed-tag-bar-clear)::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: var(--touch-min);
+  height: var(--touch-min);
+  transform: translate(-50%, -50%);
+}
+
+:global(body[data-mobile="true"]) .footer.footer {
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--nf-s2);
+  margin-top: var(--nf-s1);
+  position: relative;
+  z-index: 1;
+}
+
+:global(body[data-mobile="true"]) .linkPill.linkPill {
+  display: inline-flex;
+  align-items: center;
+  position: relative;
+  flex: 0 0 auto;
+  min-height: 24px;
+  padding: 0 var(--nf-s2);
+  gap: var(--nf-s1);
+}
+
+:global(body[data-mobile="true"]) .timestamp.timestamp {
+  display: inline-flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 24px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+:global(body[data-mobile="true"]) .tsCompact.tsCompact {
+  display: inline;
+}
+
+:global(body[data-mobile="true"]) .tsFull.tsFull {
+  display: none;
+}
+
+:global(body[data-mobile="true"]) .footer.footer :global(.star-toggle) {
+  flex: 0 0 auto;
+  min-height: 24px;
+  min-width: 24px;
+  padding: 0;
+  margin-left: auto;
+  position: relative;
+}
+
+/* 44px tap targets without a 44px layout box. The footer DOES have clipping
+   ancestors — `.main` is `overflow: hidden` and `.content` is `overflow-y:
+   auto` (globals.css:1059 / 1402) — so the pads survive for a narrower reason:
+   they overhang by at most 10px into the item's own 16px block padding and the
+   card's 12px padding, both of which sit well inside those scroll ports. Any
+   future pad that could reach a scroll-port edge has to be re-measured. */
+:global(body[data-mobile="true"]) .refresh.refresh::after,
+:global(body[data-mobile="true"]) .linkPill.linkPill::after,
+:global(body[data-mobile="true"]) .footer.footer :global(.star-toggle)::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: var(--touch-min);
+  height: var(--touch-min);
+  transform: translate(-50%, -50%);
+}

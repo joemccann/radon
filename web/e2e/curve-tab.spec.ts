@@ -89,7 +89,7 @@ test.describe("/regime/curve — 10Y-2Y Treasury spread tab", () => {
     await setupMocks(page);
     await page.goto("/regime/curve");
 
-    await expect(page.locator(".ticker-tab", { hasText: "CURVE" })).toHaveClass(/active/);
+    await expect(page.locator('.regime-rail__item[data-tab="curve"]')).toHaveClass(/active/);
 
     const spread = page.locator('[data-testid="yield-curve-spread-value"]');
     await spread.waitFor({ timeout: 10_000 });

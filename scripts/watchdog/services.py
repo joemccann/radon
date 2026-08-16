@@ -125,6 +125,11 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # are 304 heartbeats). Uniform 26h window mirrors straddle: no
     # weekend/holiday gap to widen for. Cboe CDN only — no IB dependency.
     "cor":              {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # vixcor — radon-vixcor.timer, daily 02:35 UTC every calendar day, fifteen
+    # minutes behind radon-cor so the COR3M row for the session already exists
+    # (weekend/holiday runs are 304 heartbeats). Uniform 26h window mirrors its
+    # cor parent. Cboe CDN plus Turso cor_history only — no IB dependency.
+    "vixcor":           {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # vol-cone — radon-vol-cone.timer, Mon-Fri 20:45 UTC after the 16:45 ET
     # close grace. UW greeks only — no IB. 26h open catches a missed weekday;
     # 3d closed covers Fri 20:45 UTC → Mon 20:45 UTC.
@@ -303,6 +308,10 @@ BUCKETS: dict[str, list[str]] = {
         # Daily 02:20 UTC Cboe COR1M/3M/6M/1Y pull — hourly check surfaces
         # a missed run within 1h of the 26h window expiring.
         "cor",
+        # Daily 02:35 UTC VIX x COR3M 20d correlation derive (fifteen minutes
+        # behind its radon-cor parent) — hourly check surfaces a missed run
+        # within 1h of the 26h window expiring.
+        "vixcor",
         # Daily Mon-Fri 20:45 UTC UW vol-cone pull — hourly check surfaces a
         # missed run within 1h of the 26h window expiring.
         "vol-cone",

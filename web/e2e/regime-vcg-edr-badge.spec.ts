@@ -129,7 +129,13 @@ test.describe("/regime page — VCG EDR badge", () => {
     await setupMocks(page);
     await page.goto("/regime");
 
-    await page.getByRole("button", { name: "VCG" }).click();
+    // Retry the click until the route changes — a click landing mid-hydration
+    // (while the rail re-renders on its first status payload) can be lost.
+    const vcgItem = page.locator('.regime-rail__item[data-tab="vcg"]');
+    await expect(async () => {
+      await vcgItem.click();
+      await expect(page).toHaveURL(/\/regime\/vcg/, { timeout: 2_000 });
+    }).toPass({ timeout: 20_000 });
 
     const edrBadge = page.locator(".section-header .pill", { hasText: "EDR" }).first();
     await expect(edrBadge).toBeVisible({ timeout: 10_000 });

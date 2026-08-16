@@ -351,6 +351,12 @@ export type PerformanceSeriesPoint = {
   drawdown: number;
   benchmark_close?: number;
   benchmark_return?: number;
+  /** v2 only: dollar NAV and the base-100 TWR index for the same session. */
+  nav?: number;
+  twr_index?: number;
+  cum_return?: number;
+  flow?: number;
+  skipped?: boolean;
 };
 
 export type PerformanceSummary = {
@@ -359,39 +365,82 @@ export type PerformanceSummary = {
   pnl: number;
   trading_days: number;
   total_return: number;
-  annualized_return: number;
-  annualized_volatility: number;
-  downside_deviation: number;
-  sharpe_ratio: number;
-  sortino_ratio: number;
-  calmar_ratio: number;
-  max_drawdown: number;
-  current_drawdown: number;
-  max_drawdown_duration_days: number;
+  annualized_return?: number;
+  annualized_volatility?: number;
+  downside_deviation?: number;
+  sharpe_ratio?: number;
+  sortino_ratio?: number;
+  calmar_ratio?: number;
+  max_drawdown?: number;
+  current_drawdown?: number;
+  max_drawdown_duration_days?: number;
+  beta?: number;
+  alpha?: number;
+  correlation?: number;
+  r_squared?: number;
+  tracking_error?: number;
+  information_ratio?: number;
+  treynor_ratio?: number;
+  upside_capture?: number;
+  downside_capture?: number;
+  var_95?: number;
+  cvar_95?: number;
+  tail_ratio?: number;
+  ulcer_index?: number;
+  skew?: number;
+  kurtosis?: number;
+  hit_rate?: number;
+  positive_days?: number;
+  negative_days?: number;
+  flat_days?: number;
+  best_day?: number;
+  worst_day?: number;
+  average_up_day?: number;
+  average_down_day?: number;
+  win_loss_ratio?: number;
+};
+
+/** Structured warning (payload v2). §C.4 — the UI dispatches on `code`. */
+export type PerformanceWarning = {
+  code: string;
+  severity: "info" | "warn" | "error";
+  message: string;
+  context?: Record<string, unknown>;
+};
+
+/**
+ * A complete benchmark block (payload v2 §A.4.1). There is no partially
+ * populated block: either every field is present or the block is null and no
+ * benchmark-derived number appears anywhere.
+ */
+export type PerformanceBenchmarkBlock = {
+  symbol: string;
+  n_common: number;
+  coverage: number;
+  benchmark_return: number;
   beta: number;
-  alpha: number;
+  alpha_annualized: number;
   correlation: number;
   r_squared: number;
   tracking_error: number;
   information_ratio: number;
-  treynor_ratio: number;
-  upside_capture: number;
-  downside_capture: number;
-  var_95: number;
-  cvar_95: number;
-  tail_ratio: number;
-  ulcer_index: number;
-  skew: number;
-  kurtosis: number;
-  hit_rate: number;
-  positive_days: number;
-  negative_days: number;
-  flat_days: number;
-  best_day: number;
-  worst_day: number;
-  average_up_day: number;
-  average_down_day: number;
-  win_loss_ratio: number;
+  basis: string;
+  low_confidence: boolean;
+};
+
+export type PerformanceStatus =
+  | "ok"
+  | "stale"
+  | "degraded"
+  | "insufficient_data"
+  | "unavailable";
+
+export type PerformanceGatedValue = {
+  value: number | null;
+  n: number;
+  min_n: number;
+  unavailable_reason: string | null;
+  low_confidence?: boolean;
 };
 
 export type PerformanceData = {
@@ -400,8 +449,9 @@ export type PerformanceData = {
   period_start: string;
   period_end: string;
   period_label: string;
-  benchmark: string;
-  benchmark_total_return: number;
+  /** v1 carried the symbol string; v2 carries the whole block, or null. */
+  benchmark: string | PerformanceBenchmarkBlock | null;
+  benchmark_total_return?: number;
   trades_source: string;
   price_sources: {
     stocks: string;
@@ -412,11 +462,59 @@ export type PerformanceData = {
     return_basis: string;
     risk_free_rate: number;
     library_strategy: string;
+    risk_free_source?: string;
+    flow_convention?: string;
+    day_count?: string;
   };
   summary: PerformanceSummary;
-  warnings: string[];
+  warnings: Array<string | PerformanceWarning>;
   contracts_missing_history: string[];
   series: PerformanceSeriesPoint[];
+
+  // ---- payload v2 (schema_version 2) ----
+  schema_version?: number;
+  status?: PerformanceStatus;
+  generated_at?: string;
+  account_id?: string;
+  nav_source?: string;
+  nav_as_of?: string;
+  nav_sessions_behind?: number;
+  flows_status?: string;
+  flows_source?: string;
+  calendar_days?: number;
+  counts?: {
+    n_nav_observations: number;
+    n_subperiods: number;
+    n_returns: number;
+    n_skipped: number;
+    n_suspect: number;
+  };
+  twr?: {
+    cum_return: number | null;
+    annualized: PerformanceGatedValue;
+    excludes_suspect: boolean;
+  };
+  mwr?: {
+    period_return: PerformanceGatedValue;
+    annualized: PerformanceGatedValue;
+    multiple_sign_changes: boolean;
+  };
+  risk?: Record<string, PerformanceGatedValue>;
+  distribution?: Record<string, PerformanceGatedValue>;
+  drawdown_detail?: {
+    trough_date?: string | null;
+    peak_date?: string | null;
+    trough_days?: number | null;
+    recovery_days?: number | null;
+    ongoing?: boolean;
+  };
+  equity?: {
+    starting: number;
+    ending: number;
+    net_external_flows: number;
+    investment_pnl: number;
+  };
+  subperiods?: Array<Record<string, unknown>>;
 };
 
 // Trade journal types

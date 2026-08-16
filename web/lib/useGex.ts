@@ -140,7 +140,10 @@ const GEX_SYNC_CONFIG = {
   retryMethod: "GET" as const,
 };
 
-export function useGex(marketState: MarketState | null = null): UseSyncReturn<GexData> {
+export function useGex(
+  marketState: MarketState | null = null,
+  opts?: { passive?: boolean },
+): UseSyncReturn<GexData> {
   const active = true;
 
   const interval = marketState === MarketState.CLOSED
@@ -151,6 +154,9 @@ export function useGex(marketState: MarketState | null = null): UseSyncReturn<Ge
 
   const config = {
     ...GEX_SYNC_CONFIG,
+    // Passive consumers (the regime rail) read the cached scan GET-only so a
+    // second mount never doubles the POST scan-trigger rate.
+    hasPost: opts?.passive ? false : GEX_SYNC_CONFIG.hasPost,
     interval,
   };
 

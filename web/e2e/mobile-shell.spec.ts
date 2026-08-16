@@ -239,7 +239,54 @@ test.describe("MobileShell — phase 1 foundation", () => {
     expect(Math.abs(geometry.panel!.width - geometry.portfolioPanel!.width)).toBeLessThanOrEqual(1);
     expect(geometry.header).not.toBeNull();
     expect(geometry.refresh).not.toBeNull();
-    expect(geometry.refresh!.height).toBeGreaterThanOrEqual(44);
+
+    // The Refresh control's LAYOUT BOX is deliberately 24px tall on the mobile
+    // shell (DashboardNewsFeed.module.css) so the feed card header collapses to
+    // a single row. Its 44px tap target is preserved by a centred ::after
+    // pseudo-element instead of by inflating the box, so
+    // `getBoundingClientRect().height >= 44` is no longer a valid proxy for
+    // "tappable" — it now fails on a control that is perfectly tappable, and it
+    // would equally pass on a 44px box whose target were covered by something
+    // else. The real invariant is the EFFECTIVE HIT AREA, so assert that
+    // directly, two ways:
+    //   1. the ::after box measures --touch-min (44px) square;
+    //   2. hit-testing 21px above and 21px below the control's centre — the
+    //      extremes of a 44px target — resolves back to the control.
+    // Neutralise the pseudo-element and both go red, which is what makes this
+    // a real assertion rather than a weakened one.
+    const refreshHit = await page.evaluate(() => {
+      const el = document.querySelector(
+        '[data-testid="dashboard-section-feed"] .dashboard-news .news-feed-refresh',
+      ) as HTMLElement | null;
+      if (!el) return null;
+      const after = getComputedStyle(el, "::after");
+      const box = el.getBoundingClientRect();
+      const cx = box.left + box.width / 2;
+      const cy = box.top + box.height / 2;
+      // Only the control itself (or its own descendants) counts. An ANCESTOR
+      // under the point means the tap fell through to the panel, which is
+      // exactly the failure this is meant to catch.
+      const resolvesToControl = (x: number, y: number) => {
+        const hit = document.elementFromPoint(x, y);
+        return hit != null && (hit === el || el.contains(hit));
+      };
+      return {
+        pseudoWidth: parseFloat(after.width),
+        pseudoHeight: parseFloat(after.height),
+        pseudoContent: after.content,
+        topEdgeHits: resolvesToControl(cx, cy - 21),
+        bottomEdgeHits: resolvesToControl(cx, cy + 21),
+        centreHits: resolvesToControl(cx, cy),
+      };
+    });
+    expect(refreshHit).not.toBeNull();
+    expect(refreshHit!.pseudoContent).not.toBe("none");
+    expect(refreshHit!.pseudoWidth).toBeGreaterThanOrEqual(44);
+    expect(refreshHit!.pseudoHeight).toBeGreaterThanOrEqual(44);
+    expect(refreshHit!.centreHits).toBe(true);
+    expect(refreshHit!.topEdgeHits).toBe(true);
+    expect(refreshHit!.bottomEdgeHits).toBe(true);
+
     expect(geometry.refresh!.left).toBeGreaterThanOrEqual(geometry.panel!.left - 1);
     expect(geometry.refresh!.right).toBeLessThanOrEqual(geometry.panel!.right + 1);
     expect(geometry.refresh!.left).toBeGreaterThanOrEqual(geometry.header!.left - 1);
