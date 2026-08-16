@@ -553,14 +553,17 @@ def test_c3_implausible_annualized_is_suppressed_and_degrades():
     assert payload["twr"]["annualized"]["unavailable_reason"] == "implausible"
 
 
-def test_58_implausible_alpha_degrades():
+def test_58_implausible_alpha_suppresses_the_benchmark_only():
     # Portfolio alternates +0.08 / +0.09 per session; the benchmark alternates
     # +0.0001 / +0.0002 in the SAME phase, so the pair is perfectly correlated:
     #   dev_r = +/- 0.005 ; dev_b = +/- 0.00005 -> beta = 0.005 / 0.00005 = 100
     #   mean_r = 0.085 ; mean_b = 0.00015
     #   alpha  = (0.085 - 100 * 0.00015) * 252 = 0.070 * 252 = 17.64
-    # 1764%/yr is >> IMPLAUSIBLE_ALPHA (1.0) — the same shape as the live
-    # ALPHA +2190.09% rendered off an unusable SPY series.
+    # 1764%/yr is >> IMPLAUSIBLE_ALPHA (10.0) — the same shape as the live
+    # ALPHA +2190.09% rendered off an unusable SPY series. The threshold moved
+    # 1.0 -> 10.0 because 1.0 was a skill ceiling, not a corruption detector:
+    # the operator's own book earned a real +124.56% annualized alpha and was
+    # being told it was a data defect. 1764% and 2190% still clear 10.0.
     port_returns = [0.08 if i % 2 == 0 else 0.09 for i in range(60)]
     bench_returns = [0.0001 if i % 2 == 0 else 0.0002 for i in range(60)]
 
@@ -574,11 +577,26 @@ def test_58_implausible_alpha_degrades():
 
     payload = build_payload(observations(nav), ok_flows(), benchmark=bench_closes)
 
-    assert payload["benchmark"] is not None
-    assert payload["benchmark"]["alpha_annualized"] == pytest.approx(17.64, rel=1e-3)
+    # The benchmark block is SUPPRESSED, not published with a nonsense alpha.
+    assert payload["benchmark"] is None
     assert "IMPLAUSIBLE_ALPHA" in codes(payload)
-    assert warning_with(payload, "IMPLAUSIBLE_ALPHA")["severity"] == "error"
-    assert payload["status"] == "degraded"
+    # 17.64 is reported in the warning context so the operator can see what was
+    # rejected, without it reaching a card.
+    assert warning_with(payload, "IMPLAUSIBLE_ALPHA")["context"]["alpha"] == pytest.approx(
+        17.64, rel=1e-3
+    )
+
+    # Severity "info", matching BENCHMARK_UNAVAILABLE: the same outcome, so the
+    # same disclosure level. An "error" here floored the payload to degraded and
+    # took the benchmark-INDEPENDENT metrics down with it.
+    assert warning_with(payload, "IMPLAUSIBLE_ALPHA")["severity"] == "info"
+    assert payload["status"] == "ok"
+
+    # The whole point: a bad regression against SPY must not invalidate a return
+    # computed from NAV and flows alone.
+    assert payload["twr"] is not None
+    assert payload["twr"]["cum_return"] is not None
+    assert payload["risk"]["max_drawdown"]["value"] is not None
 
 
 # ===========================================================================
@@ -772,7 +790,7 @@ def test_methodology_block_declares_the_conventions():
         risk_free_source="fred_dgs3mo",
     )
     m = payload["methodology"]
-    assert m["curve_type"] == "twr_daily_eod"
+    assert m["curve_type"] == "twr_daily_bod"
     assert m["return_basis"] == "time_weighted"
     # `curve_type` describes the NAV marks (one per session, end of day);
     # `flow_convention` describes the denominator, which is B + C.
