@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { OrderRiskGate, type OrderRiskInput, type OrderRiskState } from "@/lib/order";
+import { placeOrderFeedback, type PlaceOrderFeedback } from "@/lib/orders/placeOrderFeedback";
 import type { PortfolioData } from "@/lib/types";
 
 export type OrderAction = "BUY" | "SELL";
@@ -103,7 +104,7 @@ export function ListedContractOrderForm({
   const [tif, setTif] = useState<OrderTif>("DAY");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [submitOk, setSubmitOk] = useState<string | null>(null);
+  const [submitOk, setSubmitOk] = useState<PlaceOrderFeedback | null>(null);
   const [riskSnapshot, setRiskSnapshot] = useState<{
     input: OrderRiskInput;
     state: OrderRiskState;
@@ -158,7 +159,7 @@ export function ListedContractOrderForm({
       if (!res.ok) {
         throw new Error((body.error as string) ?? `Order failed (${res.status})`);
       }
-      setSubmitOk(result.successText);
+      setSubmitOk(placeOrderFeedback(body, result.successText));
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "Order failed");
     } finally {
@@ -272,7 +273,13 @@ export function ListedContractOrderForm({
       </button>
 
       {submitError && <div className="futures-form-error">{submitError}</div>}
-      {submitOk && <div className="futures-form-success">{submitOk}</div>}
+      {submitOk && (
+        <div
+          className={`futures-form-success${submitOk.deduplicated ? " futures-form-success--dedup" : ""}`}
+        >
+          {submitOk.message}
+        </div>
+      )}
     </form>
   );
 }

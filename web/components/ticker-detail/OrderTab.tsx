@@ -16,6 +16,7 @@ import type { ModifyOrderRequest } from "@/lib/orderModify";
 import { checkNakedShortRisk, type NakedShortPortfolio, type OrderPayload } from "@/lib/nakedShortGuard";
 import { OrderRiskGate, type OrderRiskInput, useOrderRisk } from "@/lib/order";
 import { heldComboUnits, isPureComboClose } from "@/lib/order/positionTrade";
+import { placeOrderFeedback } from "@/lib/orders/placeOrderFeedback";
 import {
   type IbOrderType,
   ibPlaceFields,
@@ -561,7 +562,8 @@ function NewOrderForm({
       if (!res.ok) {
         setError(json.error || "Order placement failed");
       } else {
-        orderActions?.pushNotification({ type: "success", message: `Order placed: ${action} ${parsedQty} ${ticker} @ ${fmtPrice(parsedPrice)}` });
+        const feedback = placeOrderFeedback(json, `Order placed: ${action} ${parsedQty} ${ticker} @ ${fmtPrice(parsedPrice)}`);
+        orderActions?.pushNotification({ type: feedback.tone, message: feedback.message });
         setConfirmStep(false);
         onOrderPlaced?.();
       }
@@ -913,7 +915,8 @@ function ComboOrderForm({
       const json = await res.json();
       if (!res.ok) setError(json.error || "Order placement failed");
       else {
-        orderActions?.pushNotification({ type: "success", message: `Combo order placed: ${action} ${parsedQty}x ${position.structure} @ ${fmtSignedPrice(parsedPrice)}` });
+        const feedback = placeOrderFeedback(json, `Combo order placed: ${action} ${parsedQty}x ${position.structure} @ ${fmtSignedPrice(parsedPrice)}`);
+        orderActions?.pushNotification({ type: feedback.tone, message: feedback.message });
         setConfirmStep(false);
         onOrderPlaced?.();
       }

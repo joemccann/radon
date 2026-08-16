@@ -46,9 +46,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-// Every production caller is protected even if an older UI omitted a user-intent
-// key. Five minutes spans transport retries, React remounts, and deploy restarts.
-export const CONTENT_HASH_TTL_MS = 300_000;
+// Content-hash fallback (R-051): 15s spans a double-click, a client transport
+// retry and a React remount, while a genuinely intended identical second clip
+// (scaling into a position; re-placing a cancelled stop with the same payload)
+// places again once it elapses. The 300s it was briefly raised to suppressed
+// real intent and left the operator holding half the intended position. An
+// explicit client key states user intent precisely and keeps the long window.
+export const CONTENT_HASH_TTL_MS = 15_000;
 export const CLIENT_KEY_TTL_MS = 300_000;
 /**
  * Floor on how long an indeterminate outcome is retained. The abort window is
