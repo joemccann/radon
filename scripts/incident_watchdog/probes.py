@@ -147,17 +147,27 @@ def probe_health_status(base: str) -> dict:
 
 
 def probe_freshness(base: str, token: str | None) -> dict:
+    """Missing token and non-200 responses are DEFINITIVE unknowns (they never
+    self-heal), distinguished from transient transport unknowns by carrying
+    ``token_missing`` / ``http_status`` so the classifier can alarm on them."""
+    blind = {"all_fresh": None, "stale_checks": [], "database_ok": None}
     if not token:
-        return {"state": "unknown", "all_fresh": None, "stale_checks": [],
-                "database_ok": None}
+        return {"state": "unknown", "http_status": None, "token_missing": True,
+                "detail": "RADON_PROBE_FRESHNESS_TOKEN is not set", **blind}
     result = _http_get(
         f"{base}/api/probe/freshness",
         headers={"Authorization": f"Bearer {token}"},
     )
-    if result["state"] != "up" or result["http_status"] != 200:
-        return {"state": result["state"] if result["state"] != "up" else "unknown",
-                "all_fresh": None, "stale_checks": [], "database_ok": None}
-    return {"state": "up", **parse_freshness_body(result["body"])}
+    if result["state"] != "up":
+        return {"state": result["state"], "http_status": None,
+                "token_missing": False, "detail": result["detail"], **blind}
+    if result["http_status"] != 200:
+        return {"state": "unknown", "http_status": result["http_status"],
+                "token_missing": False,
+                "detail": f"/api/probe/freshness returned {result['http_status']}",
+                **blind}
+    return {"state": "up", "http_status": 200, "token_missing": False,
+            "detail": "", **parse_freshness_body(result["body"])}
 
 
 def _read_ci_run() -> dict | None:

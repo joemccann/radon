@@ -2,8 +2,11 @@
 
 No clock reads — the cycle passes ``now`` so every rule is testable with a
 pinned clock (the only I/O is a once-per-year cached holiday-config read).
-``unknown`` findings never classify (a probe that could not observe is not
-evidence of an outage), and EXPECTED states never classify: stale rows while
+``unknown`` findings never classify as the probed condition (a probe that
+could not observe is not evidence of an outage) — but a probe whose unknown
+is DEFINITIVE (missing/rotated token, non-200 auth response) cannot self-heal
+and is its own ``watchdog-probe-dead`` incident. EXPECTED states never
+classify: stale rows while
 the market is closed (RTH-only writers quiet off-hours are documented-normal)
 and error rows whose own ``next_attempt_at`` circuit-breaker embargo is still
 in the future (2026-08-04T08:00Z false-P2 incident).
@@ -77,6 +80,18 @@ def _is_expected_quiet(row: dict, now: datetime) -> bool:
     return False
 
 
+# Which probes bear on each case: resolution scope for the store. An
+# indeterminate probe only latches the incidents it actually observes.
+CASE_PROBES = {
+    "cancelled-deploy-corrupt-next-build": ("nextjs_liveness", "deploy"),
+    "turso-destroy-storm": ("nextjs_db", "nextjs_liveness"),
+    "stale-market-data-freshness": ("freshness",),
+    "service-health-degraded": ("nextjs_db",),
+    "service-down": ("api_lite",),
+    "watchdog-probe-dead": ("freshness",),
+}
+
+
 def _incident(case_id: str, severity: str, title: str, fingerprint: str,
               evidence: dict) -> dict:
     return {
@@ -85,6 +100,7 @@ def _incident(case_id: str, severity: str, title: str, fingerprint: str,
         "title": title,
         "fingerprint": fingerprint,
         "evidence": evidence,
+        "probes": list(CASE_PROBES[case_id]),
     }
 
 
@@ -195,12 +211,36 @@ def _classify_service_down(findings: dict, now: datetime) -> dict | None:
     return None
 
 
+def _classify_dead_freshness_probe(findings: dict, now: datetime) -> dict | None:
+    """A freshness probe that answered definitively wrong — token missing or
+    rotated, 401/403, route removed — will never self-heal, and while it
+    persists the watchdog is blind to market-data staleness. Unlike a timeout
+    (transient, indeterminate) it is an alarm in its own right."""
+    fresh = findings.get("freshness", {})
+    if fresh.get("state") != "unknown":
+        return None
+    if fresh.get("http_status") is None and not fresh.get("token_missing"):
+        return None
+    detail = fresh.get("detail") or "freshness probe cannot observe"
+    return _incident(
+        "watchdog-probe-dead", "P2",
+        f"Freshness probe is dead, not transiently unknown: {detail}",
+        "watchdog-probe-dead:freshness",
+        {
+            "http_status": fresh.get("http_status"),
+            "token_missing": bool(fresh.get("token_missing")),
+            "detail": fresh.get("detail"),
+        },
+    )
+
+
 _RULES = (
     _classify_corrupt_build,
     _classify_turso_wedge,
     _classify_stale_freshness,
     _classify_degraded_rows,
     _classify_service_down,
+    _classify_dead_freshness_probe,
 )
 
 

@@ -452,6 +452,23 @@ the 2FA lock).
 
 ---
 
+## watchdog-probe-dead
+
+**The watchdog's own freshness probe answered definitively wrong** —
+`RADON_PROBE_FRESHNESS_TOKEN` unset or rotated, a 401/403, or the
+`/api/probe/freshness` route removed. Unlike a probe timeout (transient,
+indeterminate, never an incident) this cannot self-heal, and while it persists
+the watchdog is blind to market-data staleness.
+
+**Fix:** restore the bearer token in the watchdog host's environment (or the
+route), then confirm the next `--once` cycle reports `"freshness": "up"` —
+the incident auto-resolves on that cycle. Incident resolution is scoped
+per-incident to the probes that bear on it (`probes` in the incident JSON),
+so open incidents observed by OTHER probes keep resolving while this one is
+open (R-065: a dead probe must not latch the whole incident directory).
+
+---
+
 ## Incident watchdog operation
 
 ```
