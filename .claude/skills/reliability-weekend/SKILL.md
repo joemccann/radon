@@ -108,3 +108,24 @@ how this loop improves as the codebase grows.
   the readiness manifest) abort the deploy preflight by design — the PR
   body must tell the operator to run the root
   `bootstrap-control-plane.sh` install-copy before merging.
+- 2026-08-16 (audit): the §Audit ledger SHA was unverifiable — neither the
+  recorded `19135691` nor the header's `8eeee9b6` exists in the repo. Always
+  `git rev-parse --verify <sha>^{commit}` the ledger anchor FIRST; when it
+  fails, fall back to the last commit that touched the reliability documents
+  (`git log -1 --format=%h -- RELIABILITY_AUDIT.md RELIABILITY_LOG.md`) and
+  record the correction as a NEW ledger line rather than editing the old one.
+  Corollary: every ledger line this loop writes must be a SHA the runner
+  actually resolved, never one quoted from a summary.
+- 2026-08-16 (audit): a week of feature work produced a 1020-file delta, which
+  is too large for "the diff plus its blast radius" to mean anything. Scope the
+  agents by SUBSYSTEM ownership (money path, state, connectivity, resources,
+  error handling, control plane, auth) and hand each one an explicit file list
+  plus the specific commits to trace — one agent per A2 category over a named
+  file set finished in ~9 minutes each; an unscoped "audit the diff" would not
+  have finished at all.
+- 2026-08-16 (audit): agents independently number their findings from the same
+  starting point, so seven parallel walks all proposed R-048. Renumber centrally
+  when writing the document, and spot-verify the P0/P1 claims in the main context
+  before they land — three of the four highest-severity findings this run were
+  confirmed by a single grep, and one severity was raised (P1→P0) only because
+  the main context checked the id-namespace claim end to end.
