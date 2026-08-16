@@ -78,6 +78,12 @@ const EXPECTED_GATES: Record<string, number> = {
   // DECISION 2: the dispersion bar is max(median|r| * MULTIPLE, FLOOR) and can
   // never switch itself off, so both halves are gates and both are mirrored.
   UNEXPLAINED_OUTLIER_MULTIPLE: 5,
+  // The bar is max(median * 5, p95 * 3, floor). The tail term may only ever
+  // WIDEN it: a median multiple describes a typical session, not an impossible
+  // one, so on a volatile book the median-only bar sat inside the account's own
+  // upper tail and quarantined ordinary trading days forever.
+  UNEXPLAINED_TAIL_QUANTILE: 0.95,
+  UNEXPLAINED_TAIL_MULTIPLE: 3,
   UNEXPLAINED_ABSOLUTE_FLOOR: 0.1,
   FLOW_DOMINANT_RATIO: 0.25,
   IMPLAUSIBLE_ANNUALIZED: 10,

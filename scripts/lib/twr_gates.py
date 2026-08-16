@@ -22,6 +22,8 @@ RATIO_LOW_CONFIDENCE_N: int = 252         # below this, every ratio carries low_
 
 SUSPECT_RETURN_THRESHOLD: float = 0.50    # |r_t| above this => quarantine, whatever C_t is
 UNEXPLAINED_OUTLIER_MULTIPLE: float = 5.0  # |r_t| above this many median sessions => quarantine
+UNEXPLAINED_TAIL_QUANTILE: float = 0.95   # the account's own "normal extreme" session
+UNEXPLAINED_TAIL_MULTIPLE: float = 3.0    # ...or above this many p95 sessions, whichever is wider
 UNEXPLAINED_ABSOLUTE_FLOOR: float = 0.10   # the dispersion bar never falls below this
 FLOW_DOMINANT_RATIO: float = 0.25         # |C_t| / denominator above this => flag the subperiod
 IMPLAUSIBLE_ANNUALIZED: float = 10.0      # |annualized| > 1000%/yr => degraded
