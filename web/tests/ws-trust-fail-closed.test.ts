@@ -8,10 +8,31 @@ import path from "node:path";
 import {
   isTrustedLocalUpgrade,
   resolveRelaySecurityConfig,
+  resolveUpgradeTarget,
   shouldSkipTicketValidation,
 } from "../../scripts/lib/wsTrust.js";
 
 const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
+
+/**
+ * systemd semantics, not substring semantics: `#` starts a comment and the LAST
+ * assignment of a key wins. A `toContain` check passes on a commented-out line
+ * and on a line a later override has already replaced.
+ */
+function readUnitEnvironment(unitPath: string): Record<string, string> {
+  const environment: Record<string, string> = {};
+  for (const rawLine of readFileSync(unitPath, "utf8").split("\n")) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#") || line.startsWith(";")) continue;
+    const match = /^Environment=(?:"([^"]*)"|(.*))$/.exec(line);
+    if (!match) continue;
+    const assignment = match[1] ?? match[2];
+    const separator = assignment.indexOf("=");
+    if (separator <= 0) continue;
+    environment[assignment.slice(0, separator)] = assignment.slice(separator + 1).trim();
+  }
+  return environment;
+}
 
 describe("WebSocket relay fail-closed boundary", () => {
   it("does not grant browser-originated loopback connections local trust", () => {
@@ -31,20 +52,34 @@ describe("WebSocket relay fail-closed boundary", () => {
   });
 
   it("pins the production unit to loopback and required Clerk configuration", () => {
-    const service = readFileSync(
+    const environment = readUnitEnvironment(
       path.resolve(repositoryRoot, "cloud/services/radon-relay.service"),
-      "utf8",
     );
-    expect(service).toContain("Environment=WS_BIND_HOST=127.0.0.1");
-    expect(service).toContain("Environment=RADON_WS_REQUIRE_CLERK=1");
+    expect(environment.WS_BIND_HOST).toBe("127.0.0.1");
+    expect(environment.RADON_WS_REQUIRE_CLERK).toBe("1");
+    expect(resolveRelaySecurityConfig(environment).bindHost).toBe("127.0.0.1");
+    expect(resolveRelaySecurityConfig(environment).requireClerk).toBe(true);
   });
 
-  it("parses upgrade targets against a fixed base inside the guarded block", () => {
+  it("resolves upgrade targets against a fixed base, never the attacker-supplied Host", () => {
+    const target = resolveUpgradeTarget({
+      url: "/ws?ticket=abc123",
+      headers: { host: "evil.example" },
+    });
+    expect(target.origin).toBe("http://relay.invalid");
+    expect(target.host).toBe("relay.invalid");
+    expect(target.searchParams.get("ticket")).toBe("abc123");
+    expect(resolveUpgradeTarget({ headers: { host: "evil.example" } }).origin).toBe(
+      "http://relay.invalid",
+    );
+  });
+
+  it("routes the relay's upgrade handler through the shared parser", () => {
     const source = readFileSync(
       path.resolve(repositoryRoot, "scripts/ib_realtime_server.js"),
       "utf8",
     );
-    expect(source).toContain('new URL(req.url || "/", "http://relay.invalid")');
-    expect(source).not.toContain("`http://${req.headers.host}`");
+    expect(source).toContain("resolveUpgradeTarget(req)");
+    expect(source).not.toMatch(/new URL\([^)]*req\.headers\.host/);
   });
 });
