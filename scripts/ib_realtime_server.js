@@ -51,6 +51,7 @@ import {
   shouldSkipTicketValidation,
 } from "./lib/wsTrust.js";
 import { applyDepthOp } from "./lib/depthLadder.js";
+import { planDepthAdmission } from "./lib/depthBudget.js";
 import { createReconnectGate } from "./lib/reconnectGate.js";
 import {
   decideSend,
@@ -406,8 +407,10 @@ const fundamentalsStore = new LRUCache(500); // symbol → FundamentalsData (LRU
  * behaves byte-for-byte as before. Default OFF.
  *
  * Depth budget: IB allows ~3 concurrent reqMktDepth tickets on a baseline
- * account, so we cap concurrency and LRU-recycle the oldest non-focused
- * ladder before opening a new one.
+ * account, so we cap concurrency. Recycling is per-client (lib/depthBudget.js,
+ * R-082): a subscribe may LRU-recycle only ladders its OWN session exclusively
+ * holds; when other sessions hold the cap it is refused with reason
+ * "depth-budget" instead of silently evicting their legs.
  *
  * NOTE on the @stoqey/ib surface: reqMktDepth(reqId, contract, numRows,
  * isSmartDepth) and cancelMktDepth(reqId, isSmartDepth) BOTH carry the
@@ -1261,14 +1264,6 @@ function depthFeedLabel(kind, isFutures, exchange) {
   return "SMART DEPTH";
 }
 
-function activeDepthCount() {
-  let n = 0;
-  for (const state of symbolDepthStates.values()) {
-    if (state.depthTickerId != null) n += 1;
-  }
-  return n;
-}
-
 function emitDepthUnavailable(symbol, reason, code) {
   const subscribers = depthSubscribers.get(symbol);
   const payload = { type: "depth-unavailable", symbol, reason };
@@ -1293,21 +1288,18 @@ function stopDepthSubscription(key, { keepState = false } = {}) {
   if (!keepState) symbolDepthStates.delete(key);
 }
 
-// Cancel the oldest non-focused depth ticket to stay within the budget.
-function evictOldestDepth(exceptKey) {
-  let oldestKey = null;
-  let oldestAt = Infinity;
+// Live tickets with their subscriber sets, for the per-client budget planner.
+function collectActiveDepthTickets() {
+  const tickets = [];
   for (const [key, state] of symbolDepthStates) {
-    if (key === exceptKey || state.depthTickerId == null) continue;
-    if (state.focusedAt < oldestAt) {
-      oldestAt = state.focusedAt;
-      oldestKey = key;
-    }
+    if (state.depthTickerId == null) continue;
+    tickets.push({
+      key,
+      focusedAt: state.focusedAt,
+      subscribers: depthSubscribers.get(key) ?? new Set(),
+    });
   }
-  if (oldestKey != null) {
-    stopDepthSubscription(oldestKey);
-    emitDepthUnavailable(oldestKey, "recycled");
-  }
+  return tickets;
 }
 
 /* Resolve a futures root (e.g. "ES") to its qualified front-month contract.
@@ -1525,7 +1517,7 @@ function cleanupTapeForReconnect() {
   }
 }
 
-function startDepthSubscription(key, contract, { kind, isFutures }) {
+function startDepthSubscription(key, contract, { kind, isFutures, requestingClient = null }) {
   if (!DEPTH_ENABLED || !ibConnected) return;
 
   let state = symbolDepthStates.get(key);
@@ -1541,11 +1533,22 @@ function startDepthSubscription(key, contract, { kind, isFutures }) {
 
   if (state.depthTickerId != null) return; // already streaming
 
-  // Cap-check: cancel the oldest non-focused ticket before exceeding the budget.
-  while (activeDepthCount() >= MAX_CONCURRENT_DEPTH) {
-    const before = activeDepthCount();
-    evictOldestDepth(key);
-    if (activeDepthCount() >= before) break; // nothing evictable — avoid spin
+  // Cap-check via the per-client planner: only the requesting client's own
+  // exclusive tickets may be recycled — another session's legs are never
+  // evicted; the newcomer is refused with an explicit depth-budget signal.
+  const admission = planDepthAdmission({
+    activeTickets: collectActiveDepthTickets(),
+    requestingClient,
+    exceptKey: key,
+    maxConcurrent: MAX_CONCURRENT_DEPTH,
+  });
+  if (!admission.admit) {
+    emitDepthUnavailable(key, "depth-budget");
+    return;
+  }
+  for (const evictKey of admission.evictKeys) {
+    stopDepthSubscription(evictKey);
+    emitDepthUnavailable(evictKey, "recycled");
   }
 
   const numRows = isFutures ? DEPTH_NUM_ROWS_FUTURES : DEPTH_NUM_ROWS_EQUITY;
@@ -2139,7 +2142,7 @@ async function handleClientMessage(client, data) {
           stopDepthSubscription(subject.key, { keepState: true });
           stopTapeSubscription(subject.key);
         }
-        startDepthSubscription(subject.key, contract, { kind: subject.kind, isFutures: subject.isFutures });
+        startDepthSubscription(subject.key, contract, { kind: subject.kind, isFutures: subject.isFutures, requestingClient: client });
         startTapeSubscription(subject.key, contract);
       } else {
         unsubscribeClientFromDepth(client, subject.key);
