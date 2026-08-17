@@ -324,8 +324,24 @@ test.describe("/regime/vixcor — VIX vs COR3M correlation tab", () => {
 
       const section = page.locator('[data-testid="vixcor-chart-section"]');
       await expect(section.locator("svg path[stroke]").first()).toBeVisible();
-      // The live 2026-08 episode is open and unresolved.
-      await expect(section.locator('[data-testid="vixcor-episode-open"]')).toHaveCount(1);
+
+      // Regime-invariant shape checks only. Pinning "the 2026-08 episode is
+      // still open" fails on CORRECT production data the moment VIX and COR3M
+      // recouple; the pinned-fixture half already asserts the open-episode
+      // render exactly (see the EPISODES case above). What holds in every
+      // regime: at most one episode can be unresolved, an open marker implies
+      // a shade to attach to, and no shade may render with zero width.
+      const shades = section.locator('[data-testid="vixcor-episode-shade"]');
+      const opens = section.locator('[data-testid="vixcor-episode-open"]');
+      const shadeCount = await shades.count();
+      const openCount = await opens.count();
+      expect(openCount).toBeLessThanOrEqual(1);
+      expect(openCount).toBeLessThanOrEqual(shadeCount);
+      const widths = await shades.evaluateAll((nodes) =>
+        nodes.map((node) => Number(node.getAttribute("width"))),
+      );
+      for (const width of widths) expect(width).toBeGreaterThan(0);
+
       await expect(page.locator('[data-testid="vixcor-base-rate"]')).toBeVisible();
 
       // No path may carry a NaN command.
