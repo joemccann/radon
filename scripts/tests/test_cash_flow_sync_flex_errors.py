@@ -32,6 +32,9 @@ SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
+import xml.etree.ElementTree as ET  # noqa: E402
+
+import cash_flow_sync  # noqa: E402
 from cash_flow_sync import fetch_cash_transactions  # noqa: E402
 from monitor_daemon.handlers._throttle_backoff import FlexThrottleError  # noqa: E402
 
@@ -109,7 +112,9 @@ class TestFlexErrorSurface:
         with patch("cash_flow_sync.urlopen") as mock_urlopen, \
              patch("cash_flow_sync.time.sleep"):
             mock_urlopen.return_value = _xml_response(FAIL_1001)
-            with pytest.raises(FlexThrottleError) as excinfo:
+            # Type-agnostic: this class asserts the MESSAGE surface, not the
+            # classification. 1001 is transient, not a throttle.
+            with pytest.raises(RuntimeError) as excinfo:
                 fetch_cash_transactions("tok", "qid")
             msg = str(excinfo.value)
             assert "1001" in msg, f"error code 1001 missing: {msg!r}"
@@ -118,7 +123,9 @@ class TestFlexErrorSurface:
         with patch("cash_flow_sync.urlopen") as mock_urlopen, \
              patch("cash_flow_sync.time.sleep"):
             mock_urlopen.return_value = _xml_response(FAIL_1001)
-            with pytest.raises(FlexThrottleError) as excinfo:
+            # Type-agnostic: this class asserts the MESSAGE surface, not the
+            # classification. 1001 is transient, not a throttle.
+            with pytest.raises(RuntimeError) as excinfo:
                 fetch_cash_transactions("tok", "qid")
             msg = str(excinfo.value)
             assert "Statement could not be generated" in msg, (
@@ -130,7 +137,9 @@ class TestFlexErrorSurface:
         with patch("cash_flow_sync.urlopen") as mock_urlopen, \
              patch("cash_flow_sync.time.sleep"):
             mock_urlopen.return_value = _xml_response(FAIL_1001)
-            with pytest.raises(FlexThrottleError) as excinfo:
+            # Type-agnostic: this class asserts the MESSAGE surface, not the
+            # classification. 1001 is transient, not a throttle.
+            with pytest.raises(RuntimeError) as excinfo:
                 fetch_cash_transactions("tok", "qid")
             msg = str(excinfo.value)
             assert "did not return a ReferenceCode" not in msg, (
@@ -149,21 +158,49 @@ class TestFlexErrorSurface:
 
 
 class TestThrottleNoInternalRetry:
-    """Codes 1001 / 1018 / 1019 must NOT trigger an internal retry —
-    every retry burns the sliding-window throttle budget further. The
-    daemon handler will back off via its circuit breaker instead."""
+    """Only 1018 is a rate limit, and it must NOT trigger an internal retry.
 
-    def test_1001_raises_flex_throttle_error_immediately(self):
+    This class used to assert that 1001 and 1019 were throttles too. They are
+    not, per IBKR's published error table:
+
+        1001  Statement could not be generated at this time. Try again shortly.
+        1018  Too many requests have been made from this token. Try again
+              shortly.  One request per second, 10 per minute (per token).
+        1019  Statement generation in progress. Try again shortly.
+
+    Treating 1019 as a throttle meant the ordinary "still generating" response
+    bought a 24-hour backoff, and treating 1001 as one escalated a ladder toward
+    a week-long embargo over a transient server-side failure. Those two rows are
+    now pinned to the CORRECT classification below rather than deleted, so the
+    old behaviour cannot come back.
+    """
+
+    def test_1001_is_transient_not_a_throttle(self):
+        """IBKR says try again shortly. It must not touch the breaker ladder."""
         with patch("cash_flow_sync.urlopen") as mock_urlopen, \
-             patch("cash_flow_sync.time.sleep") as mock_sleep:
+             patch("cash_flow_sync.time.sleep"):
             mock_urlopen.return_value = _xml_response(FAIL_1001)
-            with pytest.raises(FlexThrottleError) as excinfo:
+            with pytest.raises(cash_flow_sync._FlexTransientError):
                 fetch_cash_transactions("tok", "qid")
-            assert excinfo.value.code == "1001"
-            # Exactly ONE call — no internal retry on a throttle code.
-            assert mock_urlopen.call_count == 1
-            # And we slept zero times — no waiting either.
-            mock_sleep.assert_not_called()
+            # Explicitly NOT the throttle type — that is the whole point.
+            mock_urlopen.return_value = _xml_response(FAIL_1001)
+            with pytest.raises(Exception) as excinfo:
+                fetch_cash_transactions("tok", "qid")
+            assert not isinstance(excinfo.value, FlexThrottleError)
+
+    def test_1019_on_a_poll_is_not_ready_and_keeps_polling(self):
+        """"Generation in progress" is the normal not-ready response. Aborting
+        the poll loop on it is what turned a few seconds into 24 hours."""
+        root = ET.fromstring(FAIL_1019)
+        assert cash_flow_sync._flex_error_from(root, "GetStatement") is None
+
+    def test_1019_on_a_send_is_transient_not_permanent(self):
+        """A generation already in flight is retryable. It must not fall through
+        to the "no ReferenceCode" hard error, which is classified never-retry."""
+        root = ET.fromstring(FAIL_1019)
+        exc = cash_flow_sync._flex_error_from(root, "SendRequest")
+        assert isinstance(exc, cash_flow_sync._FlexTransientError)
+        assert not isinstance(exc, cash_flow_sync._FlexAppError)
 
     def test_1018_raises_flex_throttle_error_immediately(self):
         with patch("cash_flow_sync.urlopen") as mock_urlopen, \
@@ -172,16 +209,6 @@ class TestThrottleNoInternalRetry:
             with pytest.raises(FlexThrottleError) as excinfo:
                 fetch_cash_transactions("tok", "qid")
             assert excinfo.value.code == "1018"
-            assert mock_urlopen.call_count == 1
-            mock_sleep.assert_not_called()
-
-    def test_1019_raises_flex_throttle_error_immediately(self):
-        with patch("cash_flow_sync.urlopen") as mock_urlopen, \
-             patch("cash_flow_sync.time.sleep") as mock_sleep:
-            mock_urlopen.return_value = _xml_response(FAIL_1019)
-            with pytest.raises(FlexThrottleError) as excinfo:
-                fetch_cash_transactions("tok", "qid")
-            assert excinfo.value.code == "1019"
             assert mock_urlopen.call_count == 1
             mock_sleep.assert_not_called()
 
