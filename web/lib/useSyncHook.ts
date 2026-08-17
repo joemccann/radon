@@ -7,6 +7,7 @@ import {
   reportFetchSuccess,
   reportOfflineServed,
 } from "./offline/offlineSignals";
+import { useRouteRefreshKey } from "./RouteRefreshContext";
 
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 type RetryMethod = "GET" | "POST";
@@ -60,6 +61,9 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
   const didInitialSync = useRef(false);
   const didInitialRead = useRef(false);
   const initialLoadKeyRef = useRef<string | null>(null);
+  const previousActiveRef = useRef(active);
+  const routeKey = useRouteRefreshKey();
+  const lastRouteKeyRef = useRef(routeKey);
   const requestRef = useRef<(method: RetryMethod, background?: boolean) => Promise<void>>(async () => {});
 
   const clearRetry = useCallback(() => {
@@ -181,11 +185,26 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
   // If the hook mounted while inactive (with loadWhenInactive), issue the first
   // POST/sync when it later becomes active. When loadWhenInactive is false the
   // initial-load effect above also re-runs on active and performs the GET.
+  // Re-activation after the first sync (scanner mode, section still mounted)
+  // must kick a fresh producer run — didInitialSync used to swallow that.
   useEffect(() => {
-    if (!active || !didInitialRead.current || didInitialSync.current) return;
+    const becameActive = active && !previousActiveRef.current;
+    previousActiveRef.current = active;
+    if (!becameActive || !didInitialRead.current) return;
     didInitialSync.current = true;
     if (hasPost) void triggerSync();
+    else void requestRef.current("GET", true);
   }, [active, hasPost, triggerSync]);
+
+  // Pathname change while this hook stays mounted (regime tabs, ticker
+  // swaps). Re-read the cache immediately; do not wait for the interval.
+  useEffect(() => {
+    if (!routeKey || routeKey === lastRouteKeyRef.current) return;
+    lastRouteKeyRef.current = routeKey;
+    if (!didInitialRead.current) return;
+    if (!active && !loadWhenInactive) return;
+    void requestRef.current("GET", true);
+  }, [routeKey, active, loadWhenInactive]);
 
   // Auto-sync interval (only when active)
   useEffect(() => {

@@ -23,49 +23,31 @@ export enum MarketState {
  *
  * @returns Current MarketState (OPEN, EXTENDED, or CLOSED)
  */
+function marketStateAt(now = new Date()): MarketState {
+  const et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
+  const day = et.getDay(); // 0=Sun, 6=Sat
+
+  if (day === 0 || day === 6) return MarketState.CLOSED;
+
+  const minutes = et.getHours() * 60 + et.getMinutes();
+
+  if (minutes >= 9 * 60 + 30 && minutes <= 16 * 60) return MarketState.OPEN;
+  if (
+    (minutes >= 4 * 60 && minutes < 9 * 60 + 30)
+    || (minutes > 16 * 60 && minutes <= 20 * 60)
+  ) {
+    return MarketState.EXTENDED;
+  }
+  return MarketState.CLOSED;
+}
+
 export function useMarketHours(): MarketState {
-  const [state, setState] = useState<MarketState>(MarketState.CLOSED);
+  const [state, setState] = useState<MarketState>(marketStateAt);
 
   useEffect(() => {
-    /**
-     * Compute current market state based on ET time.
-     */
-    const check = () => {
-      const now = new Date();
-      const et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
-      const day = et.getDay(); // 0=Sun, 6=Sat
-
-      // CLOSED on weekends (Saturdays and Sundays)
-      if (day === 0 || day === 6) {
-        setState(MarketState.CLOSED);
-        return;
-      }
-
-      const minutes = et.getHours() * 60 + et.getMinutes();
-
-      // Regular trading hours: 9:30 AM - 4:00 PM ET
-      if (minutes >= 9 * 60 + 30 && minutes <= 16 * 60) {
-        setState(MarketState.OPEN);
-      }
-      // Extended hours: Premarket (4:00 AM - 9:30 AM) or After Hours (4:00 PM - 8:00 PM)
-      else if (
-        (minutes >= 4 * 60 && minutes < 9 * 60 + 30) ||
-        (minutes > 16 * 60 && minutes <= 20 * 60)
-      ) {
-        setState(MarketState.EXTENDED);
-      }
-      // Overnight: 8:00 PM - 4:00 AM
-      else {
-        setState(MarketState.CLOSED);
-      }
-    };
-
-    // Check immediately on mount
+    const check = () => setState(marketStateAt());
     check();
-
-    // Re-check every minute (sufficient for market hour boundaries)
     const interval = setInterval(check, 60_000);
-
     return () => clearInterval(interval);
   }, []);
 
