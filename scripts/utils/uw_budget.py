@@ -62,6 +62,18 @@ def _with_lock(path: Path):
 
 def record_hit(path: Optional[Path | str] = None, now: Optional[datetime] = None) -> int:
     """Increment today's HTTP hit count and persist ``{date, count}``."""
+    return record_hits(1, path=path, now=now)
+
+
+def record_hits(
+    hits: int, path: Optional[Path | str] = None, now: Optional[datetime] = None
+) -> int:
+    """Increment today's HTTP hit count by ``hits`` under one flock write.
+
+    The counted path for UW requests made outside ``UWClient`` — the Next.js
+    route handlers mirror their hits here via POST /uw/usage/record so the
+    gauge and the universe-scan brake see browsing traffic (REL-036 / R-062).
+    """
     target = _path(path)
     day = quota_date(now)
     with _with_lock(target) as lock:
@@ -69,12 +81,12 @@ def record_hit(path: Optional[Path | str] = None, now: Optional[datetime] = None
         try:
             state = _read_unlocked(target)
             if state.get("date") != day:
-                count = 1
+                count = hits
             else:
                 try:
-                    count = int(state.get("count") or 0) + 1
+                    count = int(state.get("count") or 0) + hits
                 except (TypeError, ValueError):
-                    count = 1
+                    count = hits
             _write_unlocked(target, {"date": day, "count": count})
             return count
         finally:

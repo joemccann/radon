@@ -16,6 +16,11 @@ import {
   isStopOrderType,
   pricesValidForOrderType,
 } from "@/lib/order/stopOrder";
+import {
+  placeOrderFeedback,
+  type PlaceOrderFeedback,
+  type PlaceOrderTone,
+} from "@/lib/orders/placeOrderFeedback";
 
 export type SingleLegOrderAction = "BUY" | "SELL";
 export type SingleLegOrderTif = "DAY" | "GTC";
@@ -104,11 +109,12 @@ export type SingleLegOrderTicketProps = {
   /** Notified of the live TIF (callers rarely need it). */
   onTifChange?: (tif: SingleLegOrderTif) => void;
   /**
-   * Optional toast sink. When provided, a successful placement routes
-   * through it; the inline `.order-success` block is still rendered too
-   * unless `suppressInlineSuccess` is set.
+   * Optional toast sink. When provided, a settled placement routes through
+   * it; the inline `.order-success` block is still rendered too unless
+   * `suppressInlineSuccess` is set. `tone` is "warning" for a suppressed
+   * duplicate submit (the order was NOT sent again), "success" otherwise.
    */
-  onSuccessToast?: (message: string) => void;
+  onSuccessToast?: (message: string, tone: PlaceOrderTone) => void;
   /** When true, success is routed only to the toast sink, not inline. */
   suppressInlineSuccess?: boolean;
   /** Extra class on the outer `.order-form`. */
@@ -167,7 +173,7 @@ export default function SingleLegOrderTicket({
   const [confirmStep, setConfirmStep] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
+  const [success, setSuccess] = useState<PlaceOrderFeedback | null>(null);
 
   const selectAction = useCallback(
     (next: SingleLegOrderAction) => {
@@ -251,15 +257,18 @@ export default function SingleLegOrderTicket({
       if (!res.ok) {
         setError(json.error || "Order placement failed");
       } else {
-        const message = buildSuccessMessage({
-          action,
-          quantity: parsedQty,
-          limitPrice: parsedPrice,
-          orderType,
-          stopPrice: parsedStop,
-        });
-        if (onSuccessToast) onSuccessToast(message);
-        if (!suppressInlineSuccess) setSuccess(message);
+        const feedback = placeOrderFeedback(
+          json,
+          buildSuccessMessage({
+            action,
+            quantity: parsedQty,
+            limitPrice: parsedPrice,
+            orderType,
+            stopPrice: parsedStop,
+          }),
+        );
+        if (onSuccessToast) onSuccessToast(feedback.message, feedback.tone);
+        if (!suppressInlineSuccess) setSuccess(feedback);
         setConfirmStep(false);
       }
     } catch {
@@ -413,7 +422,11 @@ export default function SingleLegOrderTicket({
       </div>
 
       <OrderErrorBanner error={error} />
-      {success && <div className="order-success">{success}</div>}
+      {success && (
+        <div className={`order-success${success.deduplicated ? " order-success--dedup" : ""}`}>
+          {success.message}
+        </div>
+      )}
 
       {/* Order Summary (shown in confirm step). Owned by `<OrderRiskGate>`. */}
       {confirmStep && (

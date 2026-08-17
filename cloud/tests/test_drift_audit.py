@@ -99,17 +99,120 @@ class TestEffectiveCompare:
 
 
 class TestAllowlist:
-    def test_parses_id_and_reason_skipping_comments(self):
+    def test_parses_id_expiry_and_reason_skipping_comments(self):
+        import datetime
+
         text = (
             "# comment line\n"
             "\n"
-            "unit-mismatch:radon-ib-gateway.service repo adds tailscaled ordering\n"
-            "not-installed:radon-llm-index.timer gated on AA signup\n"
+            "unit-mismatch:radon-ib-gateway.service expires=2026-09-30 repo adds tailscaled ordering\n"
+            "not-installed:radon-llm-index.timer expires=2026-12-31 gated on AA signup\n"
         )
         allow = da.parse_allowlist(text)
-        assert allow["unit-mismatch:radon-ib-gateway.service"].startswith("repo adds")
-        assert "not-installed:radon-llm-index.timer" in allow
+        entry = allow["unit-mismatch:radon-ib-gateway.service"]
+        assert entry["expires"] == datetime.date(2026, 9, 30)
+        assert entry["reason"].startswith("repo adds")
+        assert allow["not-installed:radon-llm-index.timer"]["expires"] == datetime.date(2026, 12, 31)
         assert len(allow) == 2
+
+    def test_entry_without_expiry_parses_with_none(self):
+        allow = da.parse_allowlist("unit-mismatch:radon-x.service legacy reason only\n")
+        assert allow["unit-mismatch:radon-x.service"]["expires"] is None
+        assert allow["unit-mismatch:radon-x.service"]["reason"] == "legacy reason only"
+
+    def test_malformed_expiry_parses_with_none(self):
+        allow = da.parse_allowlist("unit-mismatch:radon-x.service expires=2026-13-45 bad date\n")
+        assert allow["unit-mismatch:radon-x.service"]["expires"] is None
+
+
+class TestAllowlistRatchet:
+    """R-058: an allowlist entry is a bounded acknowledgment, not a permanent
+    silencer. Expired or unmatched entries must degrade config-drift."""
+
+    import datetime as _dt
+
+    DRIFT_ID = "unit-mismatch:radon-api.service"
+
+    def _drift(self):
+        return {"id": self.DRIFT_ID, "detail": "live-only: ExecStart=/old"}
+
+    def _entry(self, expires):
+        return {self.DRIFT_ID: {"expires": expires, "reason": "pending privileged unit reinstall"}}
+
+    def test_fresh_entry_still_suppresses(self):
+        drifts, allowed = da.partition_allowlisted(
+            [self._drift()], self._entry(self._dt.date(2026, 9, 15)),
+            today=self._dt.date(2026, 8, 16),
+        )
+        assert drifts == []
+        assert self.DRIFT_ID in allowed
+
+    def test_expired_entry_degrades_and_names_the_unit(self):
+        drifts, allowed = da.partition_allowlisted(
+            [self._drift()], self._entry(self._dt.date(2026, 9, 15)),
+            today=self._dt.date(2026, 9, 16),
+        )
+        assert allowed == {}
+        assert len(drifts) == 1
+        assert drifts[0]["id"] == self.DRIFT_ID
+        assert "expired 2026-09-15" in drifts[0]["detail"]
+
+    def test_expiry_day_itself_still_suppresses(self):
+        drifts, allowed = da.partition_allowlisted(
+            [self._drift()], self._entry(self._dt.date(2026, 9, 15)),
+            today=self._dt.date(2026, 9, 15),
+        )
+        assert drifts == []
+        assert self.DRIFT_ID in allowed
+
+    def test_entry_without_expiry_is_never_honored(self):
+        drifts, allowed = da.partition_allowlisted(
+            [self._drift()], self._entry(None), today=self._dt.date(2026, 8, 16)
+        )
+        assert allowed == {}
+        assert len(drifts) == 1
+        assert drifts[0]["id"] == self.DRIFT_ID
+        assert "no expires=" in drifts[0]["detail"]
+
+    def test_unmatched_entry_is_reported_stale(self):
+        drifts, allowed = da.partition_allowlisted(
+            [], self._entry(self._dt.date(2026, 9, 15)), today=self._dt.date(2026, 8, 16)
+        )
+        assert allowed == {}
+        assert drifts == [
+            {
+                "id": f"stale-allowlist:{self.DRIFT_ID}",
+                "detail": "allowlist entry matches no observed drift; remove it",
+            }
+        ]
+
+
+def test_gather_degrades_on_expired_allowlist_entry(monkeypatch):
+    """Acceptance: expired entry -> the drift surfaces (main flips state=error)."""
+    def inject_unit_drift(drifts, _known):
+        drifts.append({"id": "unit-mismatch:radon-api.service", "detail": "live-only: X"})
+
+    monkeypatch.setattr(da, "_compare_file_pair", lambda *args: None)
+    monkeypatch.setattr(da, "_check_compose", lambda drifts: None)
+    monkeypatch.setattr(da, "_check_units", inject_unit_drift)
+    monkeypatch.setattr(da, "_check_sudoers", lambda drifts: None)
+    monkeypatch.setattr(da, "_check_env_invariants", lambda drifts: None)
+    monkeypatch.setattr(
+        da, "_read_repo",
+        lambda rel: "unit-mismatch:radon-api.service expires=2026-08-01 pending reinstall\n",
+    )
+    drifts, allowed, _known = da.gather()
+    assert allowed == {}
+    assert drifts and drifts[0]["id"] == "unit-mismatch:radon-api.service"
+    assert "expired 2026-08-01" in drifts[0]["detail"]
+
+
+def test_shipped_allowlist_entries_all_carry_expiries():
+    conf = (ROOT / "config" / "drift-allowlist.conf").read_text()
+    allow = da.parse_allowlist(conf)
+    assert allow, "drift allowlist unexpectedly empty"
+    missing = sorted(i for i, entry in allow.items() if entry["expires"] is None)
+    assert missing == [], f"allowlist entries without expires=YYYY-MM-DD: {missing}"
 
 
 class TestUntrackedClassification:
@@ -310,6 +413,16 @@ class TestSummary:
         assert summary["drift_count"] == 0
         assert "radon-beta-api.service" in summary["note"]
         assert summary["allowed_count"] == 1
+
+    def test_allowlisted_pending_is_reported_distinctly_from_clean(self):
+        summary = da.build_last_error(
+            [],
+            allowed={"unit-mismatch:radon-api.service": "until 2026-09-15: pending reinstall"},
+            known_untracked=[],
+        )
+        assert summary["allowlisted_pending"] == ["unit-mismatch:radon-api.service"]
+        assert "allowlisted-pending" in summary["note"]
+        assert "unit-mismatch:radon-api.service" in summary["note"]
 
 
 def test_health_write_retries_transport_failures(monkeypatch):

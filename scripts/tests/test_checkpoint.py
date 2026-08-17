@@ -142,6 +142,90 @@ def test_summary_contains_counts_cursor_and_resume_instruction(job_dir):
     assert "re-read ONLY this file" in summary
 
 
+# ── R-073: durability hardening ──────────────────────────────────────
+
+
+def test_atomic_write_fsyncs_the_parent_directory(job_dir, monkeypatch):
+    """os.replace alone leaves the rename in the un-fsynced directory
+    metadata — a power cut can lose the whole checkpoint file."""
+    import stat as stat_mod
+
+    import checkpoint as cp
+
+    job_dir.mkdir(parents=True)
+    synced_dir_fds = []
+    real_fsync = os.fsync
+
+    def recording_fsync(fd):
+        try:
+            if stat_mod.S_ISDIR(os.fstat(fd).st_mode):
+                synced_dir_fds.append(fd)
+        except OSError:
+            pass
+        return real_fsync(fd)
+
+    monkeypatch.setattr(cp.os, "fsync", recording_fsync)
+    cp._atomic_write(job_dir / "state.json", "{}")
+    assert synced_dir_fds, "os.replace was not followed by a parent-dir fsync"
+
+
+def test_malformed_state_json_rebuilds_from_wal_instead_of_killing_init(job_dir):
+    """REL-021a's daemon_state contract: corrupt state is preserved as
+    .corrupt-<ts> and the job resumes from the findings WAL."""
+    job = CheckpointedJob(job_dir, "t")
+    job.record_finding("item-1", {"title": "one"})
+    job.finish()
+    (job_dir / "state.json").write_text('{"job": "t", "completed": {"trunc')
+
+    resumed = CheckpointedJob(job_dir, "t")
+
+    assert resumed.is_done("item-1")
+    assert not resumed.is_done("item-2")
+    assert resumed.state["stats"]["processed"] == 1
+    backups = list(job_dir.glob("state.json.corrupt-*"))
+    assert len(backups) == 1
+    assert backups[0].read_text().startswith('{"job": "t"')
+
+
+def test_wrong_shape_state_json_is_treated_as_corrupt(job_dir):
+    """Valid JSON without the required keys must not KeyError later."""
+    job = CheckpointedJob(job_dir, "t")
+    job.record_finding("item-1", {"title": "one"})
+    job.finish()
+    (job_dir / "state.json").write_text('["not", "a", "state", "object"]')
+
+    resumed = CheckpointedJob(job_dir, "t")
+    assert resumed.is_done("item-1")
+    assert list(job_dir.glob("state.json.corrupt-*"))
+
+
+def test_torn_tail_repair_streams_in_bounded_chunks(job_dir):
+    """The WAL can be large; the tail repair must scan backwards in bounded
+    chunks, never slurp the whole file into RAM."""
+    import checkpoint as cp
+
+    assert hasattr(cp, "TAIL_REPAIR_CHUNK_BYTES")
+    assert 0 < cp.TAIL_REPAIR_CHUNK_BYTES <= 1024 * 1024
+
+
+def test_torn_tail_longer_than_one_chunk_is_still_repaired(job_dir, monkeypatch):
+    import checkpoint as cp
+
+    monkeypatch.setattr(cp, "TAIL_REPAIR_CHUNK_BYTES", 64, raising=False)
+    job = CheckpointedJob(job_dir, "t")
+    job.record_finding("item-1", {"title": "one"})
+    job.finish()
+    with (job_dir / "findings.jsonl").open("ab") as findings:
+        findings.write(b'{"_key":"torn","junk":"' + b"x" * 500)
+
+    resumed = CheckpointedJob(job_dir, "t")
+    resumed.record_finding("item-2", {"title": "two"})
+    resumed.finish()
+
+    records = read_findings(job_dir)
+    assert [record["_key"] for record in records] == ["item-1", "item-2"]
+
+
 KILL_WORKER = """
 import sys, time, pathlib
 sys.path.insert(0, {libdir!r})

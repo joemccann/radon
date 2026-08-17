@@ -80,7 +80,7 @@ import sys
 import time
 import urllib.request
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 DEFAULT_CLOUD_ROOT = Path("/home/radon/radon/cloud")
@@ -261,17 +261,83 @@ def unit_counter_diff(live: Counter, repo: Counter) -> str:
     return "; ".join(parts)
 
 
-def parse_allowlist(text: str) -> dict[str, str]:
-    """config/drift-allowlist.conf -> {drift-id: reason}. Lines are
-    `<drift-id> <reason...>`; # comments and blanks are skipped."""
-    allow: dict[str, str] = {}
+_ALLOWLIST_EXPIRY = re.compile(r"^expires=(\d{4}-\d{2}-\d{2})$")
+
+
+def parse_allowlist(text: str) -> dict[str, dict]:
+    """config/drift-allowlist.conf -> {drift-id: {"expires": date|None, "reason": str}}.
+
+    Lines are `<drift-id> expires=YYYY-MM-DD <reason...>`; # comments and
+    blanks are skipped. A missing or malformed expiry parses as None -- the
+    ratchet in partition_allowlisted refuses to honor such an entry.
+    """
+    allow: dict[str, dict] = {}
     for line in text.splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        drift_id, _, reason = line.partition(" ")
-        allow[drift_id] = reason.strip()
+        drift_id, _, rest = line.partition(" ")
+        rest = rest.strip()
+        token, _, remainder = rest.partition(" ")
+        expires = None
+        reason = rest
+        match = _ALLOWLIST_EXPIRY.match(token)
+        if match:
+            reason = remainder.strip()
+            try:
+                expires = date.fromisoformat(match.group(1))
+            except ValueError:
+                expires = None
+        allow[drift_id] = {"expires": expires, "reason": reason}
     return allow
+
+
+def partition_allowlisted(
+    raw_drifts: list[dict], allowlist: dict[str, dict], today: date
+) -> tuple[list[dict], dict[str, str]]:
+    """R-058 ratchet: an allowlist entry is a bounded acknowledgment.
+
+    * fresh entry (today <= expires) -> drift suppressed, reported as pending
+    * expired entry -> the drift SURFACES, expiry named in the detail
+    * entry without a valid expires= -> never honored
+    * entry matching no observed drift -> stale-allowlist drift (remove it)
+    """
+    drifts: list[dict] = []
+    allowed: dict[str, str] = {}
+    matched: set[str] = set()
+    for drift in raw_drifts:
+        entry = allowlist.get(drift["id"])
+        if entry is None:
+            drifts.append(drift)
+            continue
+        matched.add(drift["id"])
+        expires = entry["expires"]
+        if expires is None:
+            drifts.append(
+                {
+                    "id": drift["id"],
+                    "detail": "allowlist entry has no expires=YYYY-MM-DD; not honored. "
+                    + drift.get("detail", ""),
+                }
+            )
+        elif today > expires:
+            drifts.append(
+                {
+                    "id": drift["id"],
+                    "detail": f"allowlist entry expired {expires.isoformat()}"
+                    f" ({entry['reason']}); still pending. " + drift.get("detail", ""),
+                }
+            )
+        else:
+            allowed[drift["id"]] = f"until {expires.isoformat()}: {entry['reason']}"
+    for drift_id in sorted(set(allowlist) - matched):
+        drifts.append(
+            {
+                "id": f"stale-allowlist:{drift_id}",
+                "detail": "allowlist entry matches no observed drift; remove it",
+            }
+        )
+    return drifts, allowed
 
 
 def classify_untracked_unit(name: str) -> str:
@@ -292,7 +358,7 @@ def build_last_error(
     if known_untracked:
         note_bits.append("known-untracked: " + ", ".join(sorted(known_untracked)))
     if allowed:
-        note_bits.append(f"allowlisted drift: {len(allowed)}")
+        note_bits.append("allowlisted-pending: " + ", ".join(sorted(allowed)))
     return {
         "summary": summary[:SUMMARY_CAP],
         "drift_count": len(drifts),
@@ -301,8 +367,9 @@ def build_last_error(
             for d in drifts[:MAX_DRIFTS_IN_ROW]
         ],
         "allowed_count": len(allowed),
+        "allowlisted_pending": sorted(allowed),
         "known_untracked": sorted(known_untracked),
-        "note": "; ".join(note_bits),
+        "note": "; ".join(note_bits)[:SUMMARY_CAP],
     }
 
 
@@ -569,13 +636,9 @@ def gather() -> tuple[list[dict], dict[str, str], list[str]]:
     # normalized unit directives, which is both narrower and actionable.
 
     allowlist = parse_allowlist(_read_repo("config/drift-allowlist.conf") or "")
-    drifts, allowed = [], {}
-    for drift in raw_drifts:
-        reason = allowlist.get(drift["id"])
-        if reason is not None:
-            allowed[drift["id"]] = reason
-        else:
-            drifts.append(drift)
+    drifts, allowed = partition_allowlisted(
+        raw_drifts, allowlist, today=datetime.now(timezone.utc).date()
+    )
     return drifts, allowed, known_untracked
 
 

@@ -4,15 +4,19 @@
 #
 #   bash scripts/setup_testing_weekend.sh
 #
-# Reuses the SAME dedicated clone as the reliability loop
-# (~/radon-weekend/radon — never edit it by hand; every run hard-resets
-# it to origin/main), installs the two launchd jobs (Sat 19:00 audit,
-# Sun 17:00 remediate — slotted around the reliability jobs at Sat 22:00
-# / Sun 10:00 so caps can never overlap), and verifies the toolchain.
+# Provisions the testing loop's OWN dedicated clone
+# (~/radon-weekend/radon-testing — never edit it by hand; every run
+# hard-resets it to origin/main), installs the two launchd jobs (Sat
+# 19:00 audit, Sun 17:00 remediate), and verifies the toolchain. The
+# clone is deliberately separate from the reliability loop's
+# (~/radon-weekend/radon): both loops hard-reset their working tree per
+# round and the reliability loop's continuation rounds make its wall
+# clock unbounded, so sharing a clone destroys in-flight work
+# (2026-08-16 incident).
 set -euo pipefail
 
 WEEKEND_ROOT="${RADON_WEEKEND_ROOT:-$HOME/radon-weekend}"
-WEEKEND_REPO="$WEEKEND_ROOT/radon"
+WEEKEND_REPO="$WEEKEND_ROOT/radon-testing"
 LAUNCH_AGENTS="$HOME/Library/LaunchAgents"
 ORIGIN_URL="$(git config --get remote.origin.url 2>/dev/null || echo git@github.com:joemccann/radon.git)"
 
@@ -68,7 +72,7 @@ done
 
 echo
 echo "Done. Schedule: audit Sat 19:00, remediate Sun 17:00 (local time),"
-echo "slotted around the reliability loop (Sat 22:00 / Sun 10:00)."
+echo "in the testing loop's own clone at $WEEKEND_REPO."
 echo "Dead-man: GitHub issue labeled 'testing-weekend' gets a comment"
 echo "per run — no weekend comment means the runner did not fire."
 echo "Smoke test now with:"

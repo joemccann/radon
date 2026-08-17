@@ -72,13 +72,26 @@ def find_stale_rows(db: Any) -> list[dict[str, Any]]:
     from position_return_capital import normalize_execution
 
     stale: list[dict[str, Any]] = []
-    offset = 0
+    # Keyset on the PK triple: ORDER BY ingested_at was non-unique and Hrana
+    # guarantees no stable tie order across queries, so LIMIT/OFFSET could
+    # skip (or double-count) tied rows spanning a page boundary (R-077).
+    cursor_key: tuple[str, str, int] | None = None
     while True:
-        page = db.execute(
-            "SELECT account_id, exec_id, revision, payload_sha256, payload "
-            "FROM position_execution_facts ORDER BY ingested_at LIMIT ? OFFSET ?",
-            (PAGE_SIZE, offset),
-        ).fetchall()
+        if cursor_key is None:
+            page = db.execute(
+                "SELECT account_id, exec_id, revision, payload_sha256, payload "
+                "FROM position_execution_facts "
+                "ORDER BY account_id, exec_id, revision LIMIT ?",
+                (PAGE_SIZE,),
+            ).fetchall()
+        else:
+            page = db.execute(
+                "SELECT account_id, exec_id, revision, payload_sha256, payload "
+                "FROM position_execution_facts "
+                "WHERE (account_id, exec_id, revision) > (?, ?, ?) "
+                "ORDER BY account_id, exec_id, revision LIMIT ?",
+                (*cursor_key, PAGE_SIZE),
+            ).fetchall()
         if not page:
             break
         for account_id, exec_id, revision, stored_hash, payload in page:
@@ -98,7 +111,10 @@ def find_stale_rows(db: Any) -> list[dict[str, Any]]:
                         "expected": expected,
                     }
                 )
-        offset += PAGE_SIZE
+        last = page[-1]
+        cursor_key = (last[0], last[1], last[2])
+        if len(page) < PAGE_SIZE:
+            break
     return stale
 
 

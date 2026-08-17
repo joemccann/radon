@@ -798,6 +798,20 @@ def _pool_has_disconnected_slot(pool) -> bool:
     return any(not role_info.get("connected", False) for role_info in status.values())
 
 
+def _pool_disconnected_roles(pool) -> list:
+    """Return the roles whose current status reports connected=False."""
+    if pool is None:
+        return []
+    try:
+        status = pool.status() or {}
+    except Exception:
+        return []
+    return [
+        role for role, role_info in status.items()
+        if not role_info.get("connected", False)
+    ]
+
+
 def _format_pool_state(pool) -> str:
     """Compact one-line pool state for logs, e.g. "sync=False orders=True data=False"."""
     if pool is None:
@@ -1030,11 +1044,16 @@ async def handle_auth_state_transition(
     return True
 
 
-def _pool_has_connected_accounted_slot(pool) -> bool:
-    """Return True iff some pool role reports connected==True AND non-empty
+def _pool_has_connected_accounted_slot(pool, roles=None) -> bool:
+    """Return True iff a pool role reports connected==True AND non-empty
     managed_accounts — the only state that proves this process can talk to a
     logged-in Gateway. This is the success predicate for ``recover_stuck_pool``:
     a TCP-connected-but-account-less slot is NOT a recovered pool.
+
+    With ``roles`` given, EVERY named role must be connected+accounted. The
+    ANY-role form let healthy orders/sync slots mask a still-wedged data role,
+    so recovery reported success and the escalation ladder never counted
+    (R-060).
     """
     if pool is None:
         return False
@@ -1042,9 +1061,15 @@ def _pool_has_connected_accounted_slot(pool) -> bool:
         status = pool.status() or {}
     except Exception:
         return False
-    return any(
+    if roles is None:
+        return any(
+            role_info.get("connected") and role_info.get("managed_accounts")
+            for role_info in status.values()
+        )
+    scoped = [status.get(role) or {} for role in roles]
+    return bool(scoped) and all(
         role_info.get("connected") and role_info.get("managed_accounts")
-        for role_info in status.values()
+        for role_info in scoped
     )
 
 
@@ -1068,16 +1093,19 @@ async def recover_stuck_pool(
          If NOT authenticated (no managed accounts) → genuine 2FA wait; return
          False and do NOTHING. We never touch the Gateway, never acquire the 2FA
          push lock, never restart — those paths live in ``restart_ib_gateway``.
-      3. Probe authenticated → ``pool.reconnect_all()`` (bounded). RE-READ the
-         pool and return True iff ≥1 role is now connected WITH managed_accounts.
-         The verified re-read is what the transition handler lacks — it swallows
-         the reconnect outcome and reports success on a still-dead pool.
+      3. Probe authenticated → ``pool.reconnect_roles(stuck_roles)`` (bounded),
+         ROLE-SCOPED so live orders/sync sessions are never torn down for a
+         wedged data slot (R-060). RE-READ the pool and return True iff EVERY
+         stuck role is now connected WITH managed_accounts. The verified
+         re-read is what the transition handler lacks — it swallows the
+         reconnect outcome and reports success on a still-dead pool.
 
     Bounded by ``asyncio.wait_for`` so a wedge in the connect path can never
     block the calling heartbeat loop. Errors propagate to the caller, which runs
     this inside the heartbeat try/except.
     """
-    if not _pool_has_disconnected_slot(pool):
+    stuck_roles = _pool_disconnected_roles(pool)
+    if not stuck_roles:
         return False
 
     authenticated, accounts = await _probe_authenticated()
@@ -1090,13 +1118,13 @@ async def recover_stuck_pool(
         return False
 
     logger.info(
-        "pool recovery: Gateway authenticated (accounts=%s) but pool stuck (%s); "
-        "triggering reconnect",
-        accounts, _format_pool_state(pool),
+        "pool recovery: Gateway authenticated (accounts=%s) but pool roles %s "
+        "stuck (%s); triggering role-scoped reconnect",
+        accounts, stuck_roles, _format_pool_state(pool),
     )
-    await asyncio.wait_for(pool.reconnect_all(), timeout=reconnect_timeout)
+    await asyncio.wait_for(pool.reconnect_roles(stuck_roles), timeout=reconnect_timeout)
 
-    recovered = _pool_has_connected_accounted_slot(pool)
+    recovered = _pool_has_connected_accounted_slot(pool, roles=stuck_roles)
     logger.info(
         "pool recovery: reconnect complete; recovered=%s; pool state: %s",
         recovered, _format_pool_state(pool),

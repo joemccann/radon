@@ -67,8 +67,12 @@ def _patch_verified_fail(monkeypatch, *, authenticated=True, disconnected=True, 
     # repo's dual import roots). Patch the module the guard actually binds.
     import api.ib_gateway as ibg
 
-    monkeypatch.setattr(ibg, "_pool_has_disconnected_slot", lambda pool: disconnected)
-    monkeypatch.setattr(ibg, "_pool_has_connected_accounted_slot", lambda pool: accounted)
+    monkeypatch.setattr(
+        ibg, "_pool_disconnected_roles", lambda pool: ["data"] if disconnected else []
+    )
+    monkeypatch.setattr(
+        ibg, "_pool_has_connected_accounted_slot", lambda pool, roles=None: accounted
+    )
 
     async def _probe(timeout=8.0):
         return (authenticated, ["U1"] if authenticated else [])
@@ -167,3 +171,43 @@ def test_test_mode_short_circuits(monkeypatch):
     monkeypatch.setattr(server, "test_mode", True)
     asyncio.run(server._recover_stuck_pool_guarded())
     assert calls["n"] == 0, "guard must never touch IB under RADON_API_TEST_MODE"
+
+
+# ---------------------------------------------------------------------------
+# R-060: healthy money roles must not mask a wedged data role from the ladder.
+# ---------------------------------------------------------------------------
+
+
+def test_wedged_data_with_healthy_money_roles_counts_toward_ladder(monkeypatch):
+    """Exact wedge signature: orders/sync connected+accounted, data stuck,
+    Gateway probe authenticated, recovery not taking. The ANY-role accounted
+    check used to reset the counter every tick so os._exit never fired.
+    """
+    from unittest.mock import MagicMock
+
+    import api.ib_gateway as ibg
+
+    _patch_recover(monkeypatch, [False])
+    restarts = _patch_restart_hook(monkeypatch)
+
+    pool = MagicMock()
+    pool.status.side_effect = lambda: {
+        "sync": {"connected": True, "client_id": 3, "managed_accounts": ["U1"]},
+        "orders": {"connected": True, "client_id": 4, "managed_accounts": ["U1"]},
+        "data": {"connected": False, "client_id": 5, "managed_accounts": []},
+    }
+    monkeypatch.setattr(server, "ib_pool", pool)
+
+    async def _probe(timeout=8.0):
+        return (True, ["U1"])
+
+    monkeypatch.setattr(ibg, "_probe_authenticated", _probe)
+
+    for _ in range(server.POOL_RECOVERY_MAX_BEFORE_RESTART):
+        server._pool_recovery_state["last_attempt_at"] = 0.0
+        asyncio.run(server._recover_stuck_pool_guarded())
+
+    assert restarts["n"] == 1, (
+        "wedged data role never counted toward the escalation ladder — the "
+        "ANY-role accounted check reset it on healthy orders/sync"
+    )

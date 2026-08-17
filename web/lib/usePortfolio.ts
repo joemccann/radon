@@ -8,6 +8,7 @@ import {
   reportFetchSuccess,
   reportOfflineServed,
 } from "./offline/offlineSignals";
+import { useRouteRefreshKey } from "./RouteRefreshContext";
 
 const POLL_INTERVAL_MS = 30_000;
 const MAX_RATE_LIMIT_BACKOFF_MS = 15 * 60_000;
@@ -41,6 +42,8 @@ export function usePortfolio(active: boolean = true): UsePortfolioReturn {
   const previousActiveRef = useRef(active);
   const mountedRef = useRef(true);
   const activeRef = useRef(active);
+  const routeKey = useRouteRefreshKey();
+  const lastRouteKeyRef = useRef(routeKey);
   activeRef.current = active;
 
   const fetchPortfolio = useCallback(async (): Promise<number | null> => {
@@ -170,6 +173,17 @@ export function usePortfolio(active: boolean = true): UsePortfolioReturn {
       if (retryDelayMs !== null && activeRef.current) scheduleNext(retryDelayMs);
     });
   }, [fetchPortfolio, scheduleNext]);
+
+  // Client navigations often keep this hook mounted (same shell instance).
+  // The mount GET never re-runs, so without a pathname trigger the next
+  // snapshot waits for the 30s poll — the latent delay on every route change.
+  useEffect(() => {
+    if (!routeKey || routeKey === lastRouteKeyRef.current) return;
+    lastRouteKeyRef.current = routeKey;
+    void fetchPortfolio().then((retryDelayMs) => {
+      if (retryDelayMs !== null && activeRef.current) scheduleNext(retryDelayMs);
+    });
+  }, [routeKey, fetchPortfolio, scheduleNext]);
 
   useEffect(() => {
     const becameActive = active && !previousActiveRef.current;

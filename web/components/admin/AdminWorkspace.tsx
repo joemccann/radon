@@ -28,6 +28,7 @@ import SloStrip from "./SloStrip";
 import HostMetricsStrip from "./HostMetricsStrip";
 import WriterFreshnessTable from "./WriterFreshnessTable";
 import DemoUsersTable from "./DemoUsersTable";
+import TradingKillSwitch from "./TradingKillSwitch";
 
 type EdgePayload = (EdgeHealthStatus & { reachable?: boolean }) | null;
 
@@ -487,6 +488,7 @@ export default function AdminWorkspace() {
               apiUnreachable={servicesError != null && healthError != null}
             />
           </div>
+          <TradingKillSwitch />
           <ServiceControlPanel
             services={services}
             loading={servicesLoading}

@@ -1,6 +1,9 @@
 [Unit]
 Description=Radon Skew 2D Indicator (two-session SPX 1M put/call skew change)
-Requires=radon-skew.service
+# Wants=, not Requires=: a parent parked by its StartLimitBurst brake must
+# not dependency-fail the 21:50 UTC derived job (R-066). Ordering via After=
+# still runs skew2d behind a startable parent.
+Wants=radon-skew.service
 After=network.target radon-skew.service
 
 StartLimitIntervalSec=300

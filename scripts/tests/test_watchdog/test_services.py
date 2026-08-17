@@ -185,6 +185,37 @@ class TestServiceCatalogContract:
         assert svc_mod.requires_ib("unknown-service-name") is False
 
 
+class TestSignalsRefreshCoverage:
+    """R-068: radon-signals-refresh.timer fires the theta-harvester and
+    strength-confirmation scans autonomously (hourly, Mon-Fri 09:00-16:00
+    ET), so both must be watchdog-tracked scheduled services — on-demand
+    category excluded them from every bucket, and a dead timer froze the
+    Top-candidates panel silently (unit inactive, not failed, so units.py
+    missed it too).
+
+    Uniform 4d windows follow the bpi-scan precedent: the wrapper skips
+    outside market hours without heartbeating, so Monday (and post-holiday)
+    mornings legitimately serve a ~66-90h-old row.
+    """
+
+    def test_signals_refresh_scans_are_scheduled_with_daily_coverage(self):
+        from watchdog import services as svc_mod
+
+        for name in ("theta-harvester", "strength-confirmation"):
+            assert name in svc_mod.SCHEDULED_SERVICES, (
+                f"{name} must be watchdog-tracked: the signals-refresh timer "
+                "is its only autonomous caller and a dead timer is silent"
+            )
+            window = svc_mod.SCHEDULED_SERVICES[name]
+            assert window["open"] == 4 * 24 * 3600, name
+            assert window["closed"] == 4 * 24 * 3600, name
+            assert window["requires_ib"] is False, name
+            assert name in svc_mod.BUCKETS["daily"], (
+                f"{name} needs the hourly daily-bucket check so a dead "
+                "signals-refresh timer surfaces within 1h of the window"
+            )
+
+
 class TestBuckets:
     def test_intraday_bucket_lists_market_hours_services(self):
         from watchdog import services as svc_mod

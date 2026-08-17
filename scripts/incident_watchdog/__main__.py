@@ -29,12 +29,15 @@ def run_cycle(directory: Path) -> dict:
     now = datetime.now(timezone.utc)
     findings = gather_findings()
     incidents = classify(findings, now)
-    # An indeterminate probe is not evidence that the condition recovered.
-    # Keep open incidents until a cycle has definitive observations throughout.
-    allow_resolve = all(
-        finding.get("state") != "unknown" for finding in findings.values()
-    )
-    result = record_cycle(incidents, directory, now, allow_resolve=allow_resolve)
+    # An indeterminate probe is not evidence that its condition recovered,
+    # but it must not latch incidents other probes definitively observed —
+    # the store scopes resolution to each incident's own bearing probes.
+    indeterminate = {
+        name for name, finding in findings.items()
+        if finding.get("state") == "unknown"
+    }
+    result = record_cycle(incidents, directory, now,
+                          indeterminate_probes=indeterminate)
     summary = {
         "at": now.isoformat(),
         "probes": {name: finding.get("state") for name, finding in findings.items()},

@@ -21,14 +21,20 @@ ExecCondition=/usr/bin/test -f /home/radon/radon/scripts/archive_portfolio_snaps
 # Off-box upload required: RADON_ARCHIVE_S3_* (Backblaze B2) in EnvironmentFile.
 # Local partitions still written under RADON_ARCHIVE_DIR; job fails closed if
 # S3 is unset (no --allow-delete-without-upload).
-ExecStart=/usr/bin/flock -w 7500 /run/lock/radon-db-maintenance.lock /home/radon/radon/.venv/bin/python /home/radon/radon/scripts/archive_portfolio_snapshots.py
+ExecStart=/usr/bin/flock -w 7500 -E 75 /run/lock/radon-db-maintenance.lock /home/radon/radon/.venv/bin/python /home/radon/radon/scripts/archive_portfolio_snapshots.py
+# R-067: lock loser exits 75 (EX_TEMPFAIL, reserved for flock) and defers to
+# its next timer slot instead of entering failed; the 48h portfolio-archive
+# service_health window still pages if deferral persists.
+SuccessExitStatus=75
 StandardOutput=journal
 StandardError=journal
 # Healthy steady-state prune is minutes; a first catch-up of a fat backlog
-# needs room for paged archive + single-key delete fallback. 2h is the
-# scheduling contract with db-retention (08:10 UTC) — do not raise without
-# also moving that timer later.
-TimeoutStartSec=8000
+# needs room for paged archive + single-key delete fallback (the 8000s work
+# ceiling). 15500 = full 7500s lock wait + that ceiling, so winning the
+# lock late never eats the work budget. An overrun into db-retention's
+# 08:10 UTC slot no longer fails the peer — it defers cleanly via its own
+# flock -E 75.
+TimeoutStartSec=15500
 
 [Install]
 WantedBy=multi-user.target

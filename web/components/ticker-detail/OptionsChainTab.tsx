@@ -38,6 +38,7 @@ import {
 import { useViewport } from "@/lib/useViewport";
 import MobileChainLadder from "@/components/mobile/MobileChainLadder";
 import ComboSkewPanel from "@/components/ComboSkewPanel";
+import { placeOrderFeedback } from "@/lib/orders/placeOrderFeedback";
 
 /* ─── Types ─── */
 
@@ -460,7 +461,8 @@ function OrderBuilder({
       if (!res.ok) {
         setError(json.error || "Order placement failed");
       } else {
-        orderActions?.pushNotification({ type: "success", message: `Order placed: ${structure || "Option"} on ${ticker}` });
+        const feedback = placeOrderFeedback(json, `Order placed: ${structure || "Option"} on ${ticker}`);
+        orderActions?.pushNotification({ type: feedback.tone, message: feedback.message });
         setConfirmStep(false);
       }
     } catch {

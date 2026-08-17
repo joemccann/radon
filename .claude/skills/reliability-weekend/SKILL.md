@@ -28,9 +28,16 @@ The mode is the first argument: `audit` (Saturday) or `remediate` (Sunday).
 5. **Respect the frozen contracts.** `RELIABILITY_AUDIT.md` finding IDs
    (R-###) and backlog IDs (REL-###) continue their numbering; never
    renumber or rewrite prior entries. `RELIABILITY_LOG.md` is append-only.
-6. **Bounded.** The wrapper enforces a wall-clock cap. Pace so the run
-   finishes cleanly: leave un-started work logged as `DEFERRED`, never
-   half-applied. Commit after every completed task, never mid-task.
+6. **Bounded per session, complete overall.** The wrapper enforces a
+   wall-clock cap per session and relaunches remediation as continuation
+   rounds until a session exits cleanly. Never leave work half-applied;
+   commit after every completed task, never mid-task, and push the branch
+   after every task commit so a killed round loses nothing. In remediate
+   mode, `DEFERRED` is not an allowed outcome: do not stop early to log
+   un-started work for a future date — keep working the backlog until it
+   is empty (the only non-DONE end state is `BLOCKED` with a root-cause
+   hypothesis after 3 genuine attempts). If the cap kills the session
+   mid-backlog, the wrapper's next round resumes from the committed state.
 
 ## Mode: audit (Saturday)
 
@@ -68,17 +75,23 @@ Goal: a DELTA audit — judge what changed, don't re-audit the world.
 
 ## Mode: remediate (Sunday)
 
-Goal: work the newest un-DONE P0/P1 backlog items (this weekend's first,
-then any older non-P2 stragglers), exactly by the PART B contract:
+Goal: work the ENTIRE un-DONE backlog to completion in severity order —
+P0, then P1, then P2 (this weekend's items first, then older stragglers)
+— exactly by the PART B contract. Deferring remaining items to a future
+run is not an outcome; every backlog item ends this weekend as DONE or
+BLOCKED-with-root-cause.
 
 1. Check out the weekend branch (create from `origin/main` if Saturday
    produced nothing; then this run only re-verifies drills — step 4).
+   If the branch already carries `REL-###` commits from an earlier round
+   of this weekend, this is a continuation: diff RELIABILITY_LOG.md
+   against the backlog and resume from the first un-DONE item.
 2. Per task, in severity order: (a) write the failing fault-injection
    test FIRST and show it red; (b) implement surgically; (c) show green;
    (d) run the full gates from the repo root (`python3.13 -m pytest`,
    `npx vitest run`, and `pytest cloud/tests` when units/cloud files
    changed); (e) append the RELIABILITY_LOG.md row with red/green counts;
-   (f) commit with the REL-### id. Forbidden moves: widening a catch
+   (f) commit with the REL-### id and push the branch. Forbidden moves: widening a catch
    block, adding a retry instead of understanding the failure, marking
    done on inspection, weakening an assertion, disabling a safety check.
 3. If blocked after 3 attempts on a task, log `BLOCKED` with a root-cause
@@ -90,8 +103,8 @@ then any older non-P2 stragglers), exactly by the PART B contract:
    `test_daemon_bounded`, `test_snapshot_unavailable`,
    `order-idempotency-durability`) plus three consecutive full-gate runs.
    Record the counts in the log.
-5. Push the branch; update the PR body with: tasks DONE/BLOCKED/DEFERRED
-   by severity, gate counts ×3, and anything needing the operator
+5. Push the branch; update the PR body with: tasks DONE/BLOCKED by
+   severity, gate counts ×3, and anything needing the operator
    (control-plane unit changes need the root bootstrap before merge —
    say so explicitly in the PR body when `cloud/services/*` changed).
 

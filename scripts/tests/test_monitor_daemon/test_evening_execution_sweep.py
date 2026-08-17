@@ -103,8 +103,21 @@ class _FakeJournalDb:
         cursor = MagicMock()
         if "FROM executed_orders" in sql:
             cursor.fetchall.return_value = self.executed_rows
-        elif "SELECT payload FROM journal" in sql:
-            cursor.fetchall.return_value = [(r[1],) for r in self.rows]
+        elif "SELECT trade_id, payload FROM journal" in sql:
+            # Keyset-paginated coverage scan (R-075): honour cursor/limit,
+            # and the written_at delta filter when present.
+            after = params[0]
+            limit = int(params[-1])
+            written_since = params[1] if "written_at >= ?" in sql else None
+            cursor.fetchall.return_value = sorted(
+                (
+                    (r[0], r[1])
+                    for r in self.rows
+                    if r[0] > after
+                    and (written_since is None or (r[3] or "") >= written_since)
+                ),
+                key=lambda r: r[0],
+            )[:limit]
         elif "FROM journal" in sql:
             cursor.fetchall.return_value = self.rows
         else:
