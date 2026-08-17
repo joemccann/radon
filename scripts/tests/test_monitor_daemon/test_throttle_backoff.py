@@ -42,53 +42,59 @@ class TestInitialState:
 
 
 class TestEscalation:
-    def test_first_throttle_embargoes_24h(self):
+    """The ladder models IBKR's ACTUAL 1018 limit: one request per second,
+    10 per minute, per token. A one-minute window.
+
+    It was 24h -> 48h -> 72h -> 168h, three orders of magnitude harsher than the
+    constraint it claimed to model; a full walk cost 312 hours. Re-pinned here
+    rather than deleted so the old durations cannot come back.
+    """
+
+    def test_first_throttle_embargoes_ninety_seconds(self):
         state = record_throttle(initial_state(), now_utc=NOW)
         assert state["throttle_count"] == 1
-        until = blocked_until(state)
-        assert until == NOW + timedelta(hours=24)
+        # Just past IBKR's documented 60s window.
+        assert blocked_until(state) == NOW + timedelta(seconds=90)
 
-    def test_second_throttle_embargoes_48h(self):
+    def test_second_throttle_embargoes_five_minutes(self):
         s1 = record_throttle(initial_state(), now_utc=NOW)
-        s2 = record_throttle(s1, now_utc=NOW + timedelta(hours=25))
+        s2 = record_throttle(s1, now_utc=NOW + timedelta(minutes=2))
         assert s2["throttle_count"] == 2
-        until = blocked_until(s2)
-        assert until == NOW + timedelta(hours=25) + timedelta(hours=48)
+        assert blocked_until(s2) == NOW + timedelta(minutes=2) + timedelta(minutes=5)
 
-    def test_third_throttle_embargoes_72h(self):
+    def test_third_throttle_embargoes_fifteen_minutes(self):
         s = initial_state()
         for _ in range(3):
             s = record_throttle(s, now_utc=NOW)
         assert s["throttle_count"] == 3
-        until = blocked_until(s)
-        assert until == NOW + timedelta(hours=72)
+        assert blocked_until(s) == NOW + timedelta(minutes=15)
 
-    def test_fourth_throttle_caps_at_168h(self):
+    def test_fourth_throttle_caps_at_one_hour(self):
         s = initial_state()
         for _ in range(4):
             s = record_throttle(s, now_utc=NOW)
         assert s["throttle_count"] == 4
-        until = blocked_until(s)
-        assert until == NOW + timedelta(hours=168)
+        assert blocked_until(s) == NOW + timedelta(hours=1)
 
-    def test_seventh_throttle_still_capped_at_168h(self):
+    def test_seventh_throttle_still_capped_at_one_hour(self):
         s = initial_state()
         for _ in range(7):
             s = record_throttle(s, now_utc=NOW)
         assert s["throttle_count"] == 7
-        until = blocked_until(s)
         # Cap is honored regardless of counter value.
-        assert until == NOW + timedelta(hours=168)
+        assert blocked_until(s) == NOW + timedelta(hours=1)
+        # Anti-pin: the superseded week-long cap.
+        assert blocked_until(s) != NOW + timedelta(hours=168)
 
 
 class TestBlockedQuery:
     def test_is_blocked_before_window_expires(self):
         s = record_throttle(initial_state(), now_utc=NOW)
-        assert is_blocked(s, now_utc=NOW + timedelta(hours=23)) is True
+        assert is_blocked(s, now_utc=NOW + timedelta(seconds=60)) is True
 
     def test_is_not_blocked_after_window_expires(self):
         s = record_throttle(initial_state(), now_utc=NOW)
-        assert is_blocked(s, now_utc=NOW + timedelta(hours=25)) is False
+        assert is_blocked(s, now_utc=NOW + timedelta(seconds=120)) is False
 
     def test_is_blocked_handles_naive_iso_string(self):
         # Daemon state.json may end up with naive timestamps.
