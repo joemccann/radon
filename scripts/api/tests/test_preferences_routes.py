@@ -109,12 +109,29 @@ def _entry_for(pref, *, value=None, source="default", updated_at=None, updated_b
     }
 
 
+def _route_module_instances():
+    """Both import identities of the route module (`api.routes.preferences`
+    is what the app registered; `scripts.api.routes.preferences` is what this
+    file imports). They are distinct module objects, so patches must hit both."""
+    from scripts.api.routes import preferences as preferences_module
+
+    modules = [preferences_module]
+    doppelganger = sys.modules.get("api.routes.preferences")
+    if doppelganger is not None and doppelganger is not preferences_module:
+        modules.append(doppelganger)
+    return modules
+
+
 @pytest.fixture(autouse=True)
 def localhost_bypass(monkeypatch):
     from scripts.api import auth, server
 
     monkeypatch.setattr(auth, "is_trusted_local_request", lambda request: True)
     monkeypatch.setattr(server, "is_trusted_local_request", lambda request: True)
+    for module in _route_module_instances():
+        monkeypatch.setattr(
+            module, "is_trusted_local_request", lambda request: True, raising=False
+        )
 
 
 @pytest.fixture
@@ -214,8 +231,35 @@ class TestPutPreference:
         args, _ = store["set_value"].calls[0]
         assert args == (pref.key, 400, "trusted-local")
 
-    def test_the_actor_is_never_taken_from_the_request_body(self, client, store, registry):
-        """A self-asserted actor is worthless on an audit trail for risk caps."""
+    def test_put_records_the_operator_id_forwarded_by_the_trusted_hop(
+        self, client, store, registry
+    ):
+        """The only production caller is Next.js on loopback, which forwards
+        the Clerk operator id as `updated_by` in the body. On the trusted-local
+        path that id is the real principal — record it, not the literal
+        'trusted-local'."""
+        pref = registry[0]
+        store["set_value"].result = _FakeResolved(_entry_for(pref, value=400, source="db"))
+
+        response = client.put(
+            f"/preferences/{pref.key}",
+            json={"value": 400, "updated_by": "user_2abcDEF"},
+        )
+
+        assert response.status_code == 200
+        args, _ = store["set_value"].calls[0]
+        assert args == (pref.key, 400, "user_2abcDEF")
+
+    def test_forwarded_actor_is_ignored_off_the_trusted_local_path(
+        self, client, store, registry, monkeypatch
+    ):
+        """A self-asserted actor is worthless on an audit trail for risk caps:
+        only the trusted Next.js hop may forward one. Any other caller that
+        reaches the handler without an authenticated principal is labelled."""
+        for module in _route_module_instances():
+            monkeypatch.setattr(
+                module, "is_trusted_local_request", lambda request: False
+            )
         pref = registry[0]
         store["set_value"].result = _FakeResolved(_entry_for(pref, value=400, source="db"))
 
@@ -227,6 +271,38 @@ class TestPutPreference:
         assert response.status_code == 200
         args, _ = store["set_value"].calls[0]
         assert "someone-else" not in args
+        assert args == (pref.key, 400, "trusted-local")
+
+    def test_authenticated_principal_wins_over_a_forwarded_actor(self):
+        """A JWT-authenticated caller is recorded by its own subject; a
+        forwarded `updated_by` can never override it."""
+        from types import SimpleNamespace
+
+        from scripts.api.routes import preferences as preferences_module
+
+        request = SimpleNamespace(
+            state=SimpleNamespace(user={"sub": "user_real"}), query_params={}
+        )
+
+        actor = preferences_module._actor(request, {"updated_by": "someone-else"})
+
+        assert actor == "user_real"
+
+    def test_forwarded_actor_is_sanitized(self, client, store, registry):
+        """A blank forwarded id falls back to the label; an oversized one is
+        truncated to the audit column bound."""
+        pref = registry[0]
+        store["set_value"].result = _FakeResolved(_entry_for(pref, value=400, source="db"))
+
+        client.put(f"/preferences/{pref.key}", json={"value": 400, "updated_by": "   "})
+        client.put(
+            f"/preferences/{pref.key}", json={"value": 400, "updated_by": "x" * 200}
+        )
+
+        first, _ = store["set_value"].calls[0]
+        second, _ = store["set_value"].calls[1]
+        assert first == (pref.key, 400, "trusted-local")
+        assert second == (pref.key, 400, "x" * 64)
 
     def test_put_unknown_key_returns_404_with_code(self, client, store, prefs):
         store["set_value"].raises = prefs.PreferenceValidationError(
@@ -334,12 +410,14 @@ class TestDeletePreference:
         entry = _entry_for(pref, source="default")
         store["clear_value"].result = _FakeResolved(entry)
 
-        response = client.delete(f"/preferences/{pref.key}?updated_by=someone-else")
+        response = client.delete(f"/preferences/{pref.key}?updated_by=user_2abcDEF")
 
         assert response.status_code == 200
         assert response.json() == {"preference": entry, "store": STORE_OK}
         args, _ = store["clear_value"].calls[0]
-        assert args == (pref.key, "trusted-local"), "the actor must be server-derived"
+        assert args == (pref.key, "user_2abcDEF"), (
+            "the trusted hop's forwarded operator id is the real principal"
+        )
 
     def test_delete_is_idempotent_when_no_row_exists(self, client, store, registry):
         """Resetting a key with no stored override is a success, not an error."""
