@@ -52,6 +52,7 @@ import {
   shouldSkipTicketValidation,
 } from "./lib/wsTrust.js";
 import { applyDepthOp } from "./lib/depthLadder.js";
+import { planDepthAdmission } from "./lib/depthBudget.js";
 import { createReconnectGate } from "./lib/reconnectGate.js";
 import {
   decideSend,
@@ -405,8 +406,10 @@ const fundamentalsStore = new LRUCache(500); // symbol → FundamentalsData (LRU
  * behaves byte-for-byte as before. Default OFF.
  *
  * Depth budget: IB allows ~3 concurrent reqMktDepth tickets on a baseline
- * account, so we cap concurrency and LRU-recycle the oldest non-focused
- * ladder before opening a new one.
+ * account, so we cap concurrency. Recycling is per-client (lib/depthBudget.js,
+ * R-082): a subscribe may LRU-recycle only ladders its OWN session exclusively
+ * holds; when other sessions hold the cap it is refused with reason
+ * "depth-budget" instead of silently evicting their legs.
  *
  * NOTE on the @stoqey/ib surface: reqMktDepth(reqId, contract, numRows,
  * isSmartDepth) and cancelMktDepth(reqId, isSmartDepth) BOTH carry the
@@ -1260,14 +1263,6 @@ function depthFeedLabel(kind, isFutures, exchange) {
   return "SMART DEPTH";
 }
 
-function activeDepthCount() {
-  let n = 0;
-  for (const state of symbolDepthStates.values()) {
-    if (state.depthTickerId != null) n += 1;
-  }
-  return n;
-}
-
 function emitDepthUnavailable(symbol, reason, code) {
   const subscribers = depthSubscribers.get(symbol);
   const payload = { type: "depth-unavailable", symbol, reason };
@@ -1292,21 +1287,18 @@ function stopDepthSubscription(key, { keepState = false } = {}) {
   if (!keepState) symbolDepthStates.delete(key);
 }
 
-// Cancel the oldest non-focused depth ticket to stay within the budget.
-function evictOldestDepth(exceptKey) {
-  let oldestKey = null;
-  let oldestAt = Infinity;
+// Live tickets with their subscriber sets, for the per-client budget planner.
+function collectActiveDepthTickets() {
+  const tickets = [];
   for (const [key, state] of symbolDepthStates) {
-    if (key === exceptKey || state.depthTickerId == null) continue;
-    if (state.focusedAt < oldestAt) {
-      oldestAt = state.focusedAt;
-      oldestKey = key;
-    }
+    if (state.depthTickerId == null) continue;
+    tickets.push({
+      key,
+      focusedAt: state.focusedAt,
+      subscribers: depthSubscribers.get(key) ?? new Set(),
+    });
   }
-  if (oldestKey != null) {
-    stopDepthSubscription(oldestKey);
-    emitDepthUnavailable(oldestKey, "recycled");
-  }
+  return tickets;
 }
 
 /* Resolve a futures root (e.g. "ES") to its qualified front-month contract.
@@ -1524,7 +1516,7 @@ function cleanupTapeForReconnect() {
   }
 }
 
-function startDepthSubscription(key, contract, { kind, isFutures }) {
+function startDepthSubscription(key, contract, { kind, isFutures, requestingClient = null }) {
   if (!DEPTH_ENABLED || !ibConnected) return;
 
   let state = symbolDepthStates.get(key);
@@ -1540,11 +1532,22 @@ function startDepthSubscription(key, contract, { kind, isFutures }) {
 
   if (state.depthTickerId != null) return; // already streaming
 
-  // Cap-check: cancel the oldest non-focused ticket before exceeding the budget.
-  while (activeDepthCount() >= MAX_CONCURRENT_DEPTH) {
-    const before = activeDepthCount();
-    evictOldestDepth(key);
-    if (activeDepthCount() >= before) break; // nothing evictable — avoid spin
+  // Cap-check via the per-client planner: only the requesting client's own
+  // exclusive tickets may be recycled — another session's legs are never
+  // evicted; the newcomer is refused with an explicit depth-budget signal.
+  const admission = planDepthAdmission({
+    activeTickets: collectActiveDepthTickets(),
+    requestingClient,
+    exceptKey: key,
+    maxConcurrent: MAX_CONCURRENT_DEPTH,
+  });
+  if (!admission.admit) {
+    emitDepthUnavailable(key, "depth-budget");
+    return;
+  }
+  for (const evictKey of admission.evictKeys) {
+    stopDepthSubscription(evictKey);
+    emitDepthUnavailable(evictKey, "recycled");
   }
 
   const numRows = isFutures ? DEPTH_NUM_ROWS_FUTURES : DEPTH_NUM_ROWS_EQUITY;
@@ -2138,7 +2141,7 @@ async function handleClientMessage(client, data) {
           stopDepthSubscription(subject.key, { keepState: true });
           stopTapeSubscription(subject.key);
         }
-        startDepthSubscription(subject.key, contract, { kind: subject.kind, isFutures: subject.isFutures });
+        startDepthSubscription(subject.key, contract, { kind: subject.kind, isFutures: subject.isFutures, requestingClient: client });
         startTapeSubscription(subject.key, contract);
       } else {
         unsubscribeClientFromDepth(client, subject.key);
@@ -2711,7 +2714,7 @@ staleCheckTimer = setInterval(() => {
     }),
     now,
   );
-  const { activeSubscriptions } = freshness;
+  const { activeSubscriptions, subscribedSymbols } = freshness;
   const elapsed = now - freshness.lastTickAt;
 
   // DUR-16: RTH tick heartbeat for /api/probe/freshness + the recovery action
@@ -2720,12 +2723,13 @@ staleCheckTimer = setInterval(() => {
   // ladder is acting it owns the service_health row, so an "ok" heartbeat can
   // no longer land last and clobber the escalation's "error" row — the
   // 2026-06-18 invisibility bug where a dead relay still read state=ok.
-  const { action, heartbeat, clearError } = decideHealthWrite({
+  const { action, heartbeat, clearError, degraded } = decideHealthWrite({
     now,
     lastTickAt: freshness.lastTickAt,
     ibConnected,
     isMarketHours: marketHours,
     activeSubscriptions,
+    subscribedSymbols,
     reconnectCycles: staleReconnectCycles,
     farmState: lastFarmStateCode,
     lastEscalationAt,
@@ -2744,11 +2748,39 @@ staleCheckTimer = setInterval(() => {
 
   if (heartbeat || clearError) {
     lastTickHeartbeatAt = now;
+    // last_tick_at and tick_age_secs both derive from lastTickTimestamp — the
+    // freshness summary's idle-substituted lastTickAt once made them
+    // contradict each other (R-061).
     void writeRelayHealth("ok", {
       heartbeat: "tick",
       last_tick_at: new Date(lastTickTimestamp).toISOString(),
-      tick_age_secs: Math.round(elapsed / 1000),
+      tick_age_secs: Math.round((now - lastTickTimestamp) / 1000),
       active_subscriptions: activeSubscriptions,
+      subscribed_symbols: subscribedSymbols,
+    });
+  }
+
+  // R-061: IB nulled every subscription (error 200/354) while symbols remain
+  // subscribed — a blackout, not idle. The ladder has nothing actionable
+  // (reconnect/resubscribe cannot restore a revoked entitlement), so honesty
+  // is the job here: latch + write a non-ok row every cycle so the freshness
+  // probe and status surface see frozen prices instead of green health.
+  // Recovery edges: markTick→onTicksRecovered when ticks resume, or the
+  // clearError writer-state edge if demand fully drains.
+  if (degraded) {
+    if (!relayHealthInError) {
+      console.warn(
+        `\x1b[33m[stale-data] IB nulled all ${subscribedSymbols} subscriptions (0 active tickets) with no ticks for ${Math.round(elapsed / 1000)}s during market hours — writing degraded health row\x1b[0m`,
+      );
+    }
+    relayHealthInError = true;
+    void writeRelayHealth("error", {
+      message: `IB nulled all market-data subscriptions (${subscribedSymbols} symbols subscribed, 0 active) with no ticks for ${Math.round(elapsed / 1000)}s during market hours`,
+      reason: "subscriptions_nulled",
+      last_tick_at: new Date(lastTickTimestamp).toISOString(),
+      tick_age_secs: Math.round((now - lastTickTimestamp) / 1000),
+      active_subscriptions: activeSubscriptions,
+      subscribed_symbols: subscribedSymbols,
     });
   }
 

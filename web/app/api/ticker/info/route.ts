@@ -10,6 +10,7 @@ import {
 } from "@/lib/apiContracts";
 import { canReuseUwInfo, hasAnyTickerData, isPopulated, pickUwInfo, stockStateRefreshDue } from "@/lib/tickerInfoCache";
 import { enforceDemoAiQuota } from "@/lib/demo/enforceAiQuota";
+import { countedUwFetch } from "@/lib/uwCountedFetch";
 
 export const runtime = "nodejs";
 
@@ -131,7 +132,7 @@ function parseExaText(text: string): { profile: Record<string, unknown>; stats: 
 
 async function fetchUWStockInfo(ticker: string, token: string): Promise<Record<string, unknown>> {
   try {
-    const res = await fetch(
+    const res = await countedUwFetch(
       `https://api.unusualwhales.com/api/stock/${encodeURIComponent(ticker)}/info`,
       { cache: "no-store", headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS) },
     );
@@ -150,7 +151,7 @@ async function fetchUWStockInfo(ticker: string, token: string): Promise<Record<s
  */
 async function fetchUWShortFloat(ticker: string, token: string): Promise<Record<string, unknown>> {
   try {
-    const res = await fetch(
+    const res = await countedUwFetch(
       `https://api.unusualwhales.com/api/shorts/${encodeURIComponent(ticker)}/interest-float/v2`,
       { cache: "no-store", headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS) },
     );
@@ -165,7 +166,7 @@ async function fetchUWShortFloat(ticker: string, token: string): Promise<Record<
 
 async function fetchUWStockState(ticker: string, token: string): Promise<Record<string, unknown>> {
   try {
-    const res = await fetch(
+    const res = await countedUwFetch(
       `https://api.unusualwhales.com/api/stock/${encodeURIComponent(ticker)}/stock-state`,
       { cache: "no-store", headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS) },
     );

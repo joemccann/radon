@@ -33,6 +33,13 @@ DEPLOY_TRANSITION_JOURNAL_FILE = os.environ.get(
 )
 DEPLOY_WINDOW_LOOKBACK_SECONDS = 900
 DEPLOY_MARKER_GRACE_SECONDS = 60
+# R-057: an interrupted deploy leaves the transition journal on disk forever
+# (recover_pending_transition failed), a state that also blocks every later
+# deploy, so it cannot self-clear. A journal older than this is STRANDED: it
+# stops counting as deploy evidence (edge 5xx pages normally) and is raised as
+# its own alarm. Sized like units.DEPLOY_COLLATERAL_WINDOW_SECS — ~4x the
+# 900s deploy budget, covering stacked deploys.
+TRANSITION_JOURNAL_STRANDED_AFTER_SECONDS = 3600
 
 _EDGE_5XX_REASON = re.compile(r"(?:ping|status)_http_5\d\d$")
 
@@ -66,15 +73,34 @@ def _local_aggregate_is_healthy(timeout: float = FETCH_TIMEOUT_SECONDS) -> bool:
     )
 
 
+def _transition_journal_age_seconds(now: datetime) -> float | None:
+    """Age of the deploy transition journal, or None when absent."""
+    try:
+        mtime = os.stat(DEPLOY_TRANSITION_JOURNAL_FILE).st_mtime
+    except OSError:
+        return None
+    return (now - datetime.fromtimestamp(mtime, tz=timezone.utc)).total_seconds()
+
+
+def _transition_journal_is_stranded(now: datetime) -> bool:
+    age = _transition_journal_age_seconds(now)
+    return age is not None and age > TRANSITION_JOURNAL_STRANDED_AFTER_SECONDS
+
+
 def _sampled_during_deploy_window(sample_time: datetime, now: datetime) -> bool:
     """True when the off-box sample overlaps a deploy's service restart.
 
-    An in-flight deploy is evidenced by the transition journal; a just-finished
-    one by the green marker's mtime. Both artifacts are radon-owned on the VPS;
-    on hosts without them (laptop mode) this never suppresses.
+    An in-flight deploy is evidenced by a FRESH transition journal; a
+    just-finished one by the green marker's mtime. A stranded journal (an
+    interrupted deploy) is not deploy evidence — no live deploy exists to
+    blame, so nothing is suppressed. Both artifacts are radon-owned on the
+    VPS; on hosts without them (laptop mode) this never suppresses.
     """
     lookback = timedelta(seconds=DEPLOY_WINDOW_LOOKBACK_SECONDS)
-    if os.path.exists(DEPLOY_TRANSITION_JOURNAL_FILE):
+    journal_age = _transition_journal_age_seconds(now)
+    if journal_age is not None:
+        if journal_age > TRANSITION_JOURNAL_STRANDED_AFTER_SECONDS:
+            return False
         return now - sample_time <= lookback
     try:
         marker_mtime = os.stat(DEPLOY_GREEN_MARKER_FILE).st_mtime
@@ -173,6 +199,25 @@ def check_external_probe(*, now: datetime | None = None) -> CheckOutcome:
             )
 
     if state == reader.VERDICT_HEALTHY:
+        # A stranded journal blocks every subsequent deploy and cannot
+        # self-clear — alarm-worthy on its own, not only when it happens
+        # to coincide with an edge failure (R-057).
+        journal_age = _transition_journal_age_seconds(checked_at)
+        if journal_age is not None and journal_age > TRANSITION_JOURNAL_STRANDED_AFTER_SECONDS:
+            return CheckOutcome(
+                service=SERVICE,
+                kind="deadman",
+                status="error",
+                severity="P2",
+                fired=True,
+                message=(
+                    f"deploy transition journal stranded for {int(journal_age // 60)}m "
+                    f"({DEPLOY_TRANSITION_JOURNAL_FILE}) — an interrupted deploy left it "
+                    "behind; deploys are blocked until it is recovered/removed"
+                ),
+                consecutive_failures=1,
+                now=checked_at,
+            )
         return CheckOutcome(
             service=SERVICE,
             kind="deadman",

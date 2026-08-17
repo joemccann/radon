@@ -36,11 +36,12 @@ The mode is the first argument: `audit` (Saturday) or `remediate` (Sunday).
 6. **Bounded.** The wrapper enforces a wall-clock cap. Pace so the run
    finishes cleanly: leave un-started work logged as `DEFERRED`, never
    half-applied. Commit after every completed task, never mid-task.
-7. **Stay off the reliability loop's lane.** The same runner clone hosts
-   `/reliability-weekend` (audit Sat 22:00, remediate Sun 10:00, caps 2h/6h).
-   Your slots (audit Sat 19:00 cap 2h, remediate Sun 17:00 cap 6h) are
-   sized to never overlap it — do not reschedule yourself, and never edit
-   `RELIABILITY_AUDIT.md` / `RELIABILITY_LOG.md`.
+7. **Stay off the reliability loop's lane.** The reliability loop
+   (`/reliability-weekend`) runs in its own clone (`~/radon-weekend/radon`);
+   this loop runs in `~/radon-weekend/radon-testing`. Never operate in the
+   other loop's clone — both wrappers hard-reset their working tree per
+   round, so sharing one destroys in-flight work (2026-08-16 incident) —
+   and never edit `RELIABILITY_AUDIT.md` / `RELIABILITY_LOG.md`.
 
 ## Mode: audit (Saturday)
 

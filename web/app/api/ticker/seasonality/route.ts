@@ -10,6 +10,7 @@ import {
   setNoStoreResponseHeaders,
 } from "@/lib/apiContracts";
 import { enforceDemoAiQuota } from "@/lib/demo/enforceAiQuota";
+import { countedUwFetch } from "@/lib/uwCountedFetch";
 
 export const runtime = "nodejs";
 
@@ -208,7 +209,7 @@ export async function GET(request: Request): Promise<Response> {
 
   try {
     // 2. Fetch UW API
-    const res = await fetch(
+    const res = await countedUwFetch(
       `https://api.unusualwhales.com/api/seasonality/${encodeURIComponent(symbol)}/monthly`,
       { cache: "no-store", headers: { Authorization: `Bearer ${token}` } },
     );

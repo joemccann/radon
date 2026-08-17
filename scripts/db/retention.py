@@ -30,6 +30,21 @@ BACKTEST_KEEP_PER_STRATEGY = 20
 # series is not truncated under the reader.
 TICKER_FLOW_KEEP_DAYS = 120
 
+# R-076: durable history tables added in migrations 0039-0049. Each horizon
+# sits above its deepest live reader (pinned by test_db_retention.py), so the
+# sweep bounds growth without ever truncating under a consumer.
+# fetch_vixcor derives from the FULL cor3m series (~5,190 sessions today) and
+# fetch_cor can re-backfill from the authoritative Cboe CSV, so cor_history is
+# count-capped well above the whole series instead of date-bounded.
+COR_KEEP_SESSIONS = 7000
+VOL_CONE_KEEP_DAYS = 180              # fetch_vol_cone: 80-session lookback
+SKEW2D_KEEP_DAYS = 730                # durable mirror, no deep reader yet
+EQUIBLES_WEEKLY_KEEP_DAYS = 1096      # ats venue z-scores: 104-week lookback
+EQUIBLES_SETTLEMENT_KEEP_DAYS = 730   # ~26 bi-monthly settlements ≈ 1 year
+EQUIBLES_13F_KEEP_DAYS = 1096         # 8-quarter QoQ ownership series
+COT_KEEP_DAYS = 1461                  # percentiles rank against 3y of weeklies
+WATCHDOG_PAGES_KEEP_DAYS = 90         # forensic dispatch trail
+
 
 @dataclass(frozen=True)
 class KeepLatestPolicy:
@@ -134,6 +149,24 @@ SNAPSHOT_RETENTION_POLICIES: Sequence[Policy] = (
         "backtest_runs", "strategy", "run_at", BACKTEST_KEEP_PER_STRATEGY
     ),
     KeepDaysPolicy("ticker_flow_history", "date", TICKER_FLOW_KEEP_DAYS),
+    # R-076 history tables. equibles_squeeze_scores / equibles_filing_forensics
+    # are ticker-PK upsert-in-place (bounded by the universe) and
+    # app_preference_events is intentionally append-only — none get a policy.
+    KeepLatestPolicy("cor_history", "date", COR_KEEP_SESSIONS),
+    KeepDaysPolicy("vol_cone_history", "date", VOL_CONE_KEEP_DAYS),
+    KeepDaysPolicy("skew2d_history", "date", SKEW2D_KEEP_DAYS),
+    KeepDaysPolicy(
+        "equibles_ats_venue_share", "week_start_date", EQUIBLES_WEEKLY_KEEP_DAYS
+    ),
+    KeepDaysPolicy(
+        "equibles_short_interest", "settlement_date", EQUIBLES_SETTLEMENT_KEEP_DAYS
+    ),
+    KeepDaysPolicy("equibles_13f_holders", "report_date", EQUIBLES_13F_KEEP_DAYS),
+    KeepDaysPolicy("equibles_13f_snapshots", "report_date", EQUIBLES_13F_KEEP_DAYS),
+    KeepDaysPolicy("cot_positioning", "report_date", COT_KEEP_DAYS),
+    # paged_at is a full ISO datetime; against date('now', ...) the boundary
+    # day resolves one day late, which a 90-day forensic horizon absorbs.
+    KeepDaysPolicy("watchdog_pages", "paged_at", WATCHDOG_PAGES_KEEP_DAYS),
 )
 
 

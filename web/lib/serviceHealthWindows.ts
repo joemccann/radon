@@ -244,14 +244,17 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // IB-down alert grouping stays accurate — the writer still records a
   // healthy ok row when IB is unreachable but UW serves the data.
   "scanner": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
-  // ``theta-harvester`` writes when a user POSTs the theta scanner against
-  // a ticker list/preset. UW-only data path; the route serves the latest
-  // file cache until a fresh scan is requested. On-demand category avoids a
-  // stale banner when nobody has inspected theta setups today.
-  "theta-harvester": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
-  // ``strength-confirmation`` writes when a user POSTs the 7-step strength
-  // scanner. UW + local CRI/MenthorQ cache inputs only; no IB dependency.
-  "strength-confirmation": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
+  // ``theta-harvester`` and ``strength-confirmation`` are fired
+  // autonomously by radon-signals-refresh.timer (hourly, Mon-Fri
+  // 09:00-16:00 ET) as well as by user POSTs, so they are SCHEDULED —
+  // on-demand category excluded them from the watchdog buckets and a dead
+  // timer froze the Top-candidates panel silently (R-068). UW-only data
+  // paths; no IB dependency. Windows follow the bpi-scan precedent: the
+  // wrapper skips outside market hours without heartbeating, so Monday
+  // (and post-holiday) mornings legitimately serve a ~66-90h-old row —
+  // uniform 4d pages on a dead timer without false-paging every Monday.
+  "theta-harvester": { open: 4 * DAY, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
+  "strength-confirmation": { open: 4 * DAY, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
   "discover": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
   "flow-analysis": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
   "analyst-ratings": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },

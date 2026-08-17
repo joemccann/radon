@@ -8,6 +8,7 @@ import {
   reportFetchSuccess,
   reportOfflineServed,
 } from "./offline/offlineSignals";
+import { useRouteRefreshKey } from "./RouteRefreshContext";
 
 const POLL_INTERVAL_MS = 30_000;
 const GET_FETCH_TIMEOUT_MS = 12_000;
@@ -39,6 +40,8 @@ export function useOrders(active: boolean = true): UseOrdersReturn {
   const previousActiveRef = useRef(active);
   const mountedRef = useRef(true);
   const activeRef = useRef(active);
+  const routeKey = useRouteRefreshKey();
+  const lastRouteKeyRef = useRef(routeKey);
   activeRef.current = active;
 
   const fetchOrders = useCallback(async () => {
@@ -145,6 +148,12 @@ export function useOrders(active: boolean = true): UseOrdersReturn {
     initialLoadStartedRef.current = true;
     void fetchOrders();
   }, [fetchOrders]);
+
+  useEffect(() => {
+    if (!routeKey || routeKey === lastRouteKeyRef.current) return;
+    lastRouteKeyRef.current = routeKey;
+    void fetchOrders();
+  }, [routeKey, fetchOrders]);
 
   useEffect(() => {
     const becameActive = active && !previousActiveRef.current;

@@ -162,13 +162,16 @@ describe("runIdempotentOrder — indeterminate (timeout-class) placement", () =>
     expect(placement).toHaveBeenCalledTimes(1);
   });
 
-  it("holds an indeterminate key for the full durable content-hash TTL", async () => {
+  it("holds an indeterminate key for the full retention window (TTL or the floor)", async () => {
+    // Retention is max(ttlMs, INDETERMINATE_RETENTION_MS): the short content-hash
+    // TTL (R-051) never shrinks the indeterminate hold below the floor.
+    const retention = Math.max(CONTENT_HASH_TTL_MS, INDETERMINATE_RETENTION_MS);
     vi.useFakeTimers();
     const placement = vi.fn().mockRejectedValueOnce(timeoutError()).mockResolvedValueOnce("ok");
 
     await rejection(runIdempotentOrder("k", CONTENT_HASH_TTL_MS, placement));
 
-    vi.advanceTimersByTime(CONTENT_HASH_TTL_MS - 1_000);
+    vi.advanceTimersByTime(retention - 1_000);
     const stillHeld = await rejection(runIdempotentOrder("k", CONTENT_HASH_TTL_MS, placement));
     expect(stillHeld).toBeInstanceOf(IndeterminatePlacementError);
     expect(placement).toHaveBeenCalledTimes(1);

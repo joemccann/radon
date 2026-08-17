@@ -8,6 +8,7 @@ import {
   setNoStoreResponseHeaders,
 } from "@/lib/apiContracts";
 import { boundedPositiveInt, boundedTicker } from "@/lib/requestBounds";
+import { countedUwFetch } from "@/lib/uwCountedFetch";
 
 export const runtime = "nodejs";
 
@@ -85,7 +86,7 @@ async function fetchUW(
     url.searchParams.set("ticker", ticker);
     url.searchParams.set("limit", String(limit));
 
-    const res = await fetch(url.toString(), {
+    const res = await countedUwFetch(url.toString(), {
       cache: "no-store",
       headers: { Authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),

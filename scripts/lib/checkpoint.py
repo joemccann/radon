@@ -25,6 +25,9 @@ FINDINGS_FILE = "findings.jsonl"
 SUMMARY_FILE = "SUMMARY.md"
 SUMMARY_MAX_FINDINGS = 20
 SUMMARY_MAX_ERRORS = 10
+# R-073: the torn-tail repair scans the WAL backwards this many bytes at a
+# time — the file can be large and must not be slurped into RAM.
+TAIL_REPAIR_CHUNK_BYTES = 64 * 1024
 
 
 def item_hash(key: str) -> str:
@@ -33,6 +36,21 @@ def item_hash(key: str) -> str:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _fsync_dir(path: Path) -> None:
+    """Persist a rename: os.replace is only durable once the parent
+    directory's metadata is fsynced too (R-073)."""
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
 
 
 def _atomic_write(path: Path, content: str) -> None:
@@ -49,6 +67,7 @@ def _atomic_write(path: Path, content: str) -> None:
         except OSError:
             pass
         raise
+    _fsync_dir(path.parent)
 
 
 class CheckpointedJob:
@@ -79,36 +98,88 @@ class CheckpointedJob:
 
     def _load(self) -> None:
         state_path = self.dir / STATE_FILE
-        if state_path.exists():
-            self.state = json.loads(state_path.read_text())
-        else:
-            self.state = {
-                "job": self.name,
-                "version": 1,
-                "started_at": _now(),
-                "updated_at": _now(),
-                "cursor": None,
-                "completed": {},
-                "errors": [],
-                "stats": {"processed": 0, "failed": 0, "resumes": 0},
-                "finished_at": None,
-            }
-        if state_path.exists():
+        resumed = state_path.exists()
+        self.state = self._read_state(state_path) if resumed else None
+        if self.state is None:
+            self.state = self._fresh_state()
+        if resumed:
             self.state["stats"]["resumes"] = self.state["stats"].get("resumes", 0) + 1
         self._repair_torn_findings_tail()
         self._recover_from_findings_log()
         self.checkpoint()
+
+    def _fresh_state(self) -> dict:
+        return {
+            "job": self.name,
+            "version": 1,
+            "started_at": _now(),
+            "updated_at": _now(),
+            "cursor": None,
+            "completed": {},
+            "errors": [],
+            "stats": {"processed": 0, "failed": 0, "resumes": 0},
+            "finished_at": None,
+        }
+
+    def _read_state(self, state_path: Path) -> dict | None:
+        """Parsed state.json, or None after preserving a malformed file.
+
+        A corrupt/wrong-shape state must not kill __init__ (R-073): the
+        findings WAL is the source of truth for completion, so the file is
+        moved aside as ``.corrupt-<ts>`` (the REL-021a daemon_state
+        contract — never silently discard the forensic record) and the
+        completed set is rebuilt from the WAL by ``_recover_from_findings_log``.
+        """
+        try:
+            state = json.loads(state_path.read_text())
+        except (OSError, ValueError):
+            state = None
+        if not self._state_is_wellformed(state):
+            self._preserve_corrupt_state(state_path)
+            return None
+        return state
+
+    @staticmethod
+    def _state_is_wellformed(state) -> bool:
+        return (
+            isinstance(state, dict)
+            and isinstance(state.get("completed"), dict)
+            and isinstance(state.get("errors"), list)
+            and isinstance(state.get("stats"), dict)
+        )
+
+    @staticmethod
+    def _preserve_corrupt_state(state_path: Path) -> None:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+        try:
+            os.replace(state_path, state_path.with_name(state_path.name + f".corrupt-{stamp}"))
+        except OSError:
+            pass
 
     def _repair_torn_findings_tail(self) -> None:
         findings_path = self.dir / FINDINGS_FILE
         if not findings_path.exists():
             return
         with findings_path.open("r+b") as findings:
-            data = findings.read()
-            if not data or data.endswith(b"\n"):
+            size = findings.seek(0, os.SEEK_END)
+            if size == 0:
                 return
-            last_complete = data.rfind(b"\n")
-            findings.truncate(last_complete + 1 if last_complete >= 0 else 0)
+            findings.seek(size - 1)
+            if findings.read(1) == b"\n":
+                return
+            # Backwards chunked scan for the last complete line (R-073).
+            position = size
+            truncate_at = 0
+            while position > 0:
+                chunk_start = max(0, position - TAIL_REPAIR_CHUNK_BYTES)
+                findings.seek(chunk_start)
+                chunk = findings.read(position - chunk_start)
+                newline = chunk.rfind(b"\n")
+                if newline >= 0:
+                    truncate_at = chunk_start + newline + 1
+                    break
+                position = chunk_start
+            findings.truncate(truncate_at)
             findings.flush()
             os.fsync(findings.fileno())
 

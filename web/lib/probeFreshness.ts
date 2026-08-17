@@ -153,7 +153,15 @@ export function evaluateRelayTick(
 
   if (row.state === "error") return { applicable: true, age_secs, fresh: false };
 
-  if (detail.active_subscriptions === 0) {
+  // The idle exemption requires zero DEMAND, not just zero active tickets:
+  // when IB nulls every subscription (error 200/354) the symbols stay
+  // subscribed (detail.subscribed_symbols > 0) and silence is a blackout, so
+  // the row falls through to the tick-flow guard below (R-061). Rows written
+  // before subscribed_symbols existed carry no demand signal and keep the
+  // idle reading.
+  const subscribedSymbols =
+    typeof detail.subscribed_symbols === "number" ? detail.subscribed_symbols : 0;
+  if (detail.active_subscriptions === 0 && subscribedSymbols === 0) {
     return {
       applicable: true,
       age_secs,

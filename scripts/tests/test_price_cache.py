@@ -225,3 +225,67 @@ class TestPruneCache:
             deleted = prune_cache(stocks_dir, max_files=5)
 
         assert deleted == 0
+
+
+class TestQuarantinePrune:
+    """R-072: _quarantine_invalid renames to <sha>.json.invalid-<ns>, but
+    prune_cache only enumerated suffix == ".json" — quarantined files
+    accumulated forever."""
+
+    def test_prune_removes_quarantined_files_past_retention(self, cache_dirs):
+        import os
+
+        from utils.price_cache import QUARANTINE_RETENTION_SECONDS
+
+        stocks_dir, options_dir = cache_dirs
+        stale = stocks_dir / (("a" * 64) + ".json.invalid-1234")
+        stale.write_text("{corrupt")
+        stale_mtime = time.time() - QUARANTINE_RETENTION_SECONDS - 60
+        os.utime(stale, (stale_mtime, stale_mtime))
+        fresh = options_dir / (("b" * 64) + ".json.invalid-5678")
+        fresh.write_text("{corrupt")
+
+        with patch("utils.price_cache.STOCKS_DIR", stocks_dir), \
+             patch("utils.price_cache.OPTIONS_DIR", options_dir):
+            deleted = prune_cache(stocks_dir, max_files=500)
+
+        assert deleted == 1
+        assert not stale.exists()
+        # A freshly-quarantined file survives its forensic window.
+        assert fresh.exists()
+
+    def test_quarantine_sweep_runs_even_under_the_count_cap(self, cache_dirs):
+        """The old early-return on len <= max_files must not skip the sweep."""
+        import os
+
+        from utils.price_cache import QUARANTINE_RETENTION_SECONDS
+
+        stocks_dir, options_dir = cache_dirs
+        (stocks_dir / "live.json").write_text("{}")
+        stale = stocks_dir / (("c" * 64) + ".json.invalid-42")
+        stale.write_text("{corrupt")
+        stale_mtime = time.time() - QUARANTINE_RETENTION_SECONDS - 60
+        os.utime(stale, (stale_mtime, stale_mtime))
+
+        with patch("utils.price_cache.STOCKS_DIR", stocks_dir), \
+             patch("utils.price_cache.OPTIONS_DIR", options_dir):
+            deleted = prune_cache(stocks_dir, max_files=500)
+
+        assert deleted == 1
+        assert not stale.exists()
+        assert (stocks_dir / "live.json").exists()
+
+    def test_quarantined_files_do_not_count_toward_the_json_cap(self, cache_dirs):
+        stocks_dir, options_dir = cache_dirs
+        for i in range(3):
+            (stocks_dir / f"file{i}.json").write_text("{}")
+        (stocks_dir / (("d" * 64) + ".json.invalid-9")).write_text("{corrupt")
+
+        with patch("utils.price_cache.STOCKS_DIR", stocks_dir), \
+             patch("utils.price_cache.OPTIONS_DIR", options_dir):
+            deleted = prune_cache(stocks_dir, max_files=3)
+
+        # The fresh quarantined file is neither deleted nor allowed to push a
+        # live .json entry over the cap.
+        assert deleted == 0
+        assert len(list(stocks_dir.glob("*.json"))) == 3
