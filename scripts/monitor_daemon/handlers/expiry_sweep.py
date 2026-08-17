@@ -64,6 +64,10 @@ MAX_CLOSES_PER_CYCLE = 20
 # while still seeing every opener of a possibly-expired contract.
 JOURNAL_LOOKBACK_DAYS = 1100
 
+# Keyset page size for the journal look-back scan (Turso Hrana I/O bounding —
+# the 1100-day window must never ride one unbounded fetch).
+JOURNAL_SCAN_PAGE_ROWS = 500
+
 # Signed contribution of each option action to the contract's net quantity.
 _ACTION_SIGNS = {
     "BUY_OPTION": 1,
@@ -114,32 +118,43 @@ def _parse_expiry(expiry: Any) -> date | None:
 def _load_option_rows(db: Any, since_date: str) -> list[dict[str, Any]]:
     """Journal option-row payloads over the bounded look-back window.
 
-    Stock rows (payload has ``shares``, no contracts/strike) never expire
-    and are skipped here.
+    Keyset-paginated on trade_id (Turso Hrana I/O bounding), then sorted by
+    filled_at to preserve the scan's historical ordering. Stock rows (payload
+    has ``shares``, no contracts/strike) never expire and are skipped here.
     """
-    cursor = db.execute(
-        """
-        SELECT payload, filled_at, written_at
-        FROM journal
-        WHERE filled_at >= ?
-        ORDER BY filled_at ASC
-        """,
-        (since_date,),
-    )
-    rows = cursor.fetchall()
+    dated_payloads: list[tuple[str, dict[str, Any]]] = []
+    cursor_key = ""
+    while True:
+        rows = db.execute(
+            """
+            SELECT trade_id, payload, filled_at
+            FROM journal
+            WHERE filled_at >= ? AND trade_id > ?
+            ORDER BY trade_id ASC
+            LIMIT ?
+            """,
+            (since_date, cursor_key, JOURNAL_SCAN_PAGE_ROWS),
+        ).fetchall()
+        if not rows:
+            break
 
-    payloads: list[dict[str, Any]] = []
-    for row in rows:
-        try:
-            payload = json.loads(row[0]) if isinstance(row[0], str) else row[0] or {}
-        except Exception:
-            continue
-        if "shares" in payload or "strike" not in payload:
-            continue
-        if not (payload.get("right") and payload.get("expiry")):
-            continue
-        payloads.append(payload)
-    return payloads
+        for row in rows:
+            try:
+                payload = json.loads(row[1]) if isinstance(row[1], str) else row[1] or {}
+            except Exception:
+                continue
+            if "shares" in payload or "strike" not in payload:
+                continue
+            if not (payload.get("right") and payload.get("expiry")):
+                continue
+            dated_payloads.append((str(row[2] or ""), payload))
+
+        cursor_key = rows[-1][0]
+        if len(rows) < JOURNAL_SCAN_PAGE_ROWS:
+            break
+
+    dated_payloads.sort(key=lambda item: item[0])
+    return [payload for _, payload in dated_payloads]
 
 
 def _contract_key(payload: dict[str, Any]) -> tuple[str, str, str, str]:
