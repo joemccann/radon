@@ -4,12 +4,23 @@ import path from "path";
 
 const ROOT = path.resolve(__dirname, "../..");
 
-const countMatches = (source: string, pattern: RegExp): number => (source.match(pattern) ?? []).length;
-
-/** Every upstream `fetch(` in a provider route, excluding the `radonFetch`/`.fetch(` wrappers. */
-const countUpstreamFetchCallSites = (source: string): number => countMatches(source, /(?<![.\w])fetch\(/g);
-
-const countDeadlinedFetches = (source: string): number => countMatches(source, /signal:\s*AbortSignal\.timeout\(/g);
+/**
+ * Every upstream fetch call site in a provider route — bare `fetch(` plus the
+ * counted UW wrapper `countedUwFetch(` (which forwards its init, signal
+ * included, into fetch). Excludes `radonFetch`/`.fetch(` wrappers. Returns
+ * each call site's argument window so the deadline can be asserted PER SITE
+ * rather than by count arithmetic, which breaks when signal options are also
+ * passed to non-fetch helpers.
+ */
+const upstreamFetchCallSites = (source: string): string[] => {
+  const sites: string[] = [];
+  const re = /(?<![.\w])(?:fetch|countedUwFetch)\(/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(source)) !== null) {
+    sites.push(source.slice(m.index, m.index + 600));
+  }
+  return sites;
+};
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -61,12 +72,14 @@ describe("supplemental route remediations", () => {
     const info = await readFile(path.join(ROOT, "web/app/api/ticker/info/route.ts"), "utf8");
     const news = await readFile(path.join(ROOT, "web/app/api/ticker/news/route.ts"), "utf8");
     for (const [name, source] of [["ticker/info", info], ["ticker/news", news]] as const) {
-      const callSites = countUpstreamFetchCallSites(source);
-      expect(callSites, `${name} must still make upstream fetches`).toBeGreaterThan(0);
-      expect(
-        countDeadlinedFetches(source),
-        `${name}: every upstream fetch must carry AbortSignal.timeout — ${callSites} call sites found`,
-      ).toBe(callSites);
+      const sites = upstreamFetchCallSites(source);
+      expect(sites.length, `${name} must still make upstream fetches`).toBeGreaterThan(0);
+      for (const [i, site] of sites.entries()) {
+        expect(
+          /signal:\s*AbortSignal\.timeout\(/.test(site),
+          `${name}: upstream fetch call site ${i + 1} of ${sites.length} must carry AbortSignal.timeout`,
+        ).toBe(true);
+      }
     }
   });
 
