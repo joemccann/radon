@@ -42,6 +42,20 @@ export function isTrustedLocalUpgrade(remoteAddr, headers = {}) {
     && !isBrowserUpgrade(headers);
 }
 
+/** Authority the relay resolves every upgrade target against. Never the Host header. */
+export const UPGRADE_TARGET_BASE = "http://relay.invalid";
+
+/**
+ * Resolve an upgrade request's target URL.
+ *
+ * The request target is relative by HTTP contract, so the authority must come
+ * from a fixed base — an attacker controls `Host` and would otherwise steer
+ * `url.origin` (and anything derived from it) at will.
+ */
+export function resolveUpgradeTarget(req = {}) {
+  return new URL(req.url || "/", UPGRADE_TARGET_BASE);
+}
+
 /**
  * Decide whether ticket validation may be skipped for an upgrade request.
  * Skip only for a trusted loopback server-to-server call. Missing Clerk
