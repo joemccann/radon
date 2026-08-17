@@ -11,7 +11,7 @@ type AuthResult = {
 };
 
 type Env = Partial<Record<
-  "ALLOWED_USER_IDS" | "RADON_REQUIRE_OPERATOR_ALLOWLIST" | "NEXT_PUBLIC_RADON_DEMO" | "NODE_ENV",
+  "ALLOWED_USER_IDS" | "RADON_REQUIRE_OPERATOR_ALLOWLIST" | "NEXT_PUBLIC_RADON_DEMO",
   string | undefined
 >>;
 
@@ -84,14 +84,16 @@ export async function requireRouteAccess(
   options: RouteAccessOptions = {},
   deps: RouteAccessDeps = {},
 ): Promise<RouteAccessResult> {
-  const env: Env = deps.env ?? process.env;
+  const env: Env = deps.env ?? (process.env as Env);
   let authResult: AuthResult;
   try {
     authResult = await (deps.authFn ?? defaultAuth)();
   } catch {
-    // Direct unit tests run route exports without a Clerk request scope. This
-    // seam is compile-time test-only and cannot be enabled by a public env flag.
-    if (env.NODE_ENV === "test") {
+    // Direct unit tests run route exports without a Clerk request scope. The
+    // seam keys on the `process.env.NODE_ENV` LITERAL — inlined at build time
+    // by the bundler and dead-code-eliminated from production output — never
+    // on the runtime `deps.env` object, so no injected env can open it.
+    if (process.env.NODE_ENV === "test") {
       return { ok: true, principal: { userId: "test", kind: "test" } };
     }
     return reject(401, "Unauthorized");
