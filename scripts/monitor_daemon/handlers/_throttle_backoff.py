@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 """Throttle-aware exponential backoff for Flex Web Service polling.
 
-IBKR Flex Web Service uses a sliding-window rate limit. **Every request
-during throttle — including failures — pushes the reset further out.**
-The cure is to back off aggressively on documented throttle codes
-(1001 / 1018 / 1019) and refuse to probe again until the window clears.
+Scoped to ONE error code. IBKR's 1018 row is the only documented rate limit:
+
+    "Too many requests have been made from this token. Please try again
+     shortly.  Limited to one request per second, 10 requests per minute
+     (per token)."
+    https://www.ibkrguides.com/clientportal/performanceandstatements/flex3error.htm
+
+That is a ONE MINUTE window, and IBKR documents no daily, multi-day or weekly
+cooldown anywhere. 1001 and 1019 are NOT rate limits and must never reach this
+module; see `cash_flow_sync._FLEX_THROTTLE_CODES`.
 
 State machine:
 
@@ -12,12 +18,25 @@ State machine:
     throttle hit → counter++; embargo = THROTTLE_EMBARGO[counter-1].
     transient    → no escalation; embargo = SOFT_EMBARGO_SECS (one cycle).
 
-Embargo schedule (capped at 168h / one week):
+Embargo schedule (capped at 1h):
 
-    1st throttle:  24h
-    2nd throttle:  48h
-    3rd throttle:  72h
-    4th+ throttle: 168h
+    1st 1018:   90s   — just past the documented window
+    2nd 1018:    5m
+    3rd 1018:   15m
+    4th+ 1018:   1h   — cap
+
+**Why this changed.** The ladder was 24h → 48h → 72h → 168h, modelling a
+constraint roughly three orders of magnitude harsher than the one IBKR actually
+imposes; a full walk cost 312 hours. Paired with the classifier bug that treated
+1001 and 1019 as throttles, a statement seconds from ready could put the sync to
+sleep for a day and a few transient failures could walk it to a week. That is
+the 10-day outage from 2026-08-06.
+
+It still escalates, deliberately. A second 1018 ninety seconds after the first
+means something is making sustained requests rather than the once-a-day call
+this handler makes, and there is a known uncontrolled consumer in
+`portfolio_performance.py` (up to two on-demand requests per page render, no
+breaker). Escalating in minutes surfaces that without hiding the data for a week.
 
 Stored as a plain dict so the calling handler can persist it via
 ``BaseHandler.get_state`` / ``set_state`` and survive daemon restarts.
@@ -31,10 +50,10 @@ from typing import Any, Dict, Optional
 # Embargo durations in seconds, indexed by (counter - 1). The last entry
 # is the cap that all further attempts use.
 THROTTLE_EMBARGO_SECS = (
-    24 * 60 * 60,    # 24h after 1st throttle
-    48 * 60 * 60,    # 48h after 2nd
-    72 * 60 * 60,    # 72h after 3rd
-    168 * 60 * 60,   # 168h (1 week) cap
+    90,              # 90s after 1st — just past IBKR's documented 1-minute window
+    5 * 60,          # 5m after 2nd
+    15 * 60,         # 15m after 3rd
+    60 * 60,         # 1h cap
 )
 
 # A non-throttle transient (network blip, parse error) does not escalate.

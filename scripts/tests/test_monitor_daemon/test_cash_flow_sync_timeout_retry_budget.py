@@ -50,6 +50,10 @@ SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
+from monitor_daemon.handlers.cash_flow_sync import (  # noqa: E402
+    MAX_SOFT_ATTEMPTS_PER_ET_DAY,
+)
+
 ET = ZoneInfo("America/New_York")
 
 # Budget derived from the module docstring ("one well-timed daily call
@@ -209,13 +213,23 @@ class TestPollBudgetOrdering:
 
 
 class TestIncidentTimelineIsBestCase:
-    """The 2026-08-03 production sequence — timeout -> 5-min soft embargo
-    -> retry -> 1001 -> 24h breaker — stops after exactly 2 SendRequests.
-    This PASSES today and pins the interaction; it exists to document
-    that the bounded outcome currently depends on IBKR volunteering a
-    documented throttle code on the retry, which is luck, not a guard."""
+    """The 2026-08-03 production sequence, re-pinned to the corrected taxonomy.
 
-    def test_timeout_then_1001_engages_24h_breaker_after_two_attempts(self):
+    Originally: timeout -> 5-min soft embargo -> retry -> 1001 -> 24h breaker,
+    and the docstring conceded the bound "depends on IBKR volunteering a
+    documented throttle code on the retry, which is luck, not a guard."
+
+    1001 is not a throttle (IBKR: "Statement could not be generated at this
+    time. Please try again shortly."), so that luck is gone -- and the guard it
+    wished for is what bounds the sequence now: MAX_SOFT_ATTEMPTS_PER_ET_DAY.
+    Three attempts in an ET day, then nothing until tomorrow, whatever IBKR
+    happens to return.
+
+    This is strictly better. The old path bought a 24-HOUR embargo off a
+    transient generation failure; the new one spends a bounded three attempts
+    and stops."""
+
+    def test_timeout_then_1001_is_bounded_by_the_daily_cap_not_a_breaker(self):
         from monitor_daemon.handlers import _throttle_backoff
 
         start = _recent_past_trading_day_17et()
@@ -224,8 +238,11 @@ class TestIncidentTimelineIsBestCase:
         outcomes = iter(
             [
                 RuntimeError("cash_flow_sync timed out after 180s"),
-                _throttle_backoff.FlexThrottleError(
-                    "1001", "Statement could not be generated at this time"
+                # 1001 can no longer produce a FlexThrottleError. Fabricating
+                # one here would test an exception the code cannot raise.
+                RuntimeError(
+                    "Flex SendRequest failed (code 1001): Statement could not "
+                    "be generated at this time. Please try again shortly."
                 ),
             ]
         )
@@ -260,17 +277,38 @@ class TestIncidentTimelineIsBestCase:
             assert handler.is_due() is True
             handler.run()
         assert attempts["n"] == 2
-        assert handler._backoff_state["throttle_count"] == 1
+        # 1001 is transient: it must NOT have touched the breaker ladder.
+        assert handler._backoff_state.get("throttle_count", 0) == 0
 
-        # 24h breaker: not due for the rest of the evening nor before
-        # the embargo expires the next day.
+        # The daily cap is what bounds this now. A third attempt is allowed,
+        # and it is the last one of the ET day.
+        third = refire + timedelta(minutes=8)
+        outcomes_extra = iter([RuntimeError("cash_flow_sync timed out after 180s")])
+
+        def inner_again():
+            attempts["n"] += 1
+            raise next(outcomes_extra)
+
+        handler._execute_inner = inner_again  # type: ignore[method-assign]
+        with patch(
+            "monitor_daemon.handlers.cash_flow_sync._now_utc", return_value=third
+        ):
+            assert handler.is_due() is True
+            handler.run()
+        assert attempts["n"] == MAX_SOFT_ATTEMPTS_PER_ET_DAY == 3
+
+        # Capped for the rest of the ET day, without a multi-day embargo.
         for probe in (
-            refire + timedelta(hours=2),
-            refire + timedelta(hours=23),
+            third + timedelta(minutes=30),
+            third + timedelta(hours=2),
         ):
             with patch(
                 "monitor_daemon.handlers.cash_flow_sync._now_utc",
                 return_value=probe,
             ):
                 assert handler.is_due() is False
-        assert attempts["n"] == 2
+        assert attempts["n"] == MAX_SOFT_ATTEMPTS_PER_ET_DAY
+
+        # And crucially: bounded WITHOUT a multi-day embargo. The breaker was
+        # never engaged, because nothing here was a rate limit.
+        assert handler._backoff_state.get("throttle_count", 0) == 0
