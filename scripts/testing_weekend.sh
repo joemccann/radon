@@ -78,11 +78,33 @@ git checkout --quiet main
 git reset --hard --quiet origin/main
 git clean -fdq --exclude=.radon-weekend-runner --exclude=logs/ --exclude=.env --exclude=.env.ib-mode --exclude=web/.env
 
+# The agent commits per completed task and the skill resumes from the
+# weekend branch, so a fresh attempt after a dropped API connection loses
+# nothing. Retry ONLY on a transient-network signature (2026-08-16: five
+# runs died to ENOTFOUND / connection-lost on the runner's flaky uplink);
+# real failures and timeouts surface immediately.
+MAX_ATTEMPTS=3
+RETRY_PAUSE_SECS=60
+is_transient_network_failure() {
+  tail -c 500 "$RUN_LOG" | grep -qE 'API Error|ENOTFOUND|Connection lost|Execution error'
+}
+
 set +e
-timeout "$CAP_SECS" claude -p "/testing-weekend $MODE" \
-  --dangerously-skip-permissions \
-  --output-format text >> "$RUN_LOG" 2>&1
-RC=$?
+ATTEMPT=1
+START_TS=$SECONDS
+while :; do
+  REMAIN=$((CAP_SECS - (SECONDS - START_TS)))
+  if [[ $REMAIN -le 60 ]]; then RC=124; break; fi
+  timeout "$REMAIN" claude -p "/testing-weekend $MODE" \
+    --dangerously-skip-permissions \
+    --output-format text >> "$RUN_LOG" 2>&1
+  RC=$?
+  [[ $RC -eq 0 || $RC -eq 124 || $ATTEMPT -ge $MAX_ATTEMPTS ]] && break
+  is_transient_network_failure || break
+  echo "[testing-weekend] transient network failure (rc=$RC) — attempt $ATTEMPT/$MAX_ATTEMPTS, retrying in ${RETRY_PAUSE_SECS}s" | tee -a "$RUN_LOG"
+  ATTEMPT=$((ATTEMPT + 1))
+  sleep "$RETRY_PAUSE_SECS"
+done
 set -e
 trap - ERR
 
