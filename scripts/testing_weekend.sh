@@ -3,10 +3,14 @@
 # runner (Mac mini). Saturday: /testing-weekend audit. Sunday:
 # /testing-weekend remediate. See .claude/skills/testing-weekend/.
 #
-# Shares the dedicated runner clone with the reliability loop; the
-# launchd slots (audit Sat 19:00 cap 2h, remediate Sun 17:00 cap 6h) are
-# sized so the two loops never overlap (reliability: Sat 22:00 / Sun
-# 10:00, caps 2h/6h).
+# Runs in its OWN dedicated clone (~/radon-weekend/radon-testing), never
+# the reliability loop's (~/radon-weekend/radon). Both wrappers hard-reset
+# and clean their clone on every round, so two loops in one working tree
+# destroy each other's checkouts and in-flight work — observed 2026-08-16
+# when this loop's audit checked out its branch under a running
+# reliability remediation. Schedule slotting is NOT sufficient isolation:
+# the reliability loop relaunches continuation rounds until its backlog
+# is done, so its wall clock is unbounded.
 #
 # Safety model:
 #   - runs ONLY in the dedicated runner clone (marker file required);
@@ -23,7 +27,7 @@ MODE="${1:?usage: testing_weekend.sh audit|remediate}"
   echo "unknown mode: $MODE" >&2; exit 2;
 }
 
-REPO="${RADON_WEEKEND_REPO:-$HOME/radon-weekend/radon}"
+REPO="${RADON_WEEKEND_REPO:-$HOME/radon-weekend/radon-testing}"
 # Audit fans out read agents (cap 2h); remediation is the long half (cap 6h).
 CAP_SECS=$([[ "$MODE" == "audit" ]] && echo 7200 || echo 21600)
 DEADMAN_TITLE="Weekend testing runner"
