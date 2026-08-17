@@ -14,11 +14,19 @@ burned ~24h of cash flow visibility this way). Cash flows publish once
 per day; one well-timed daily call after market close is sufficient
 and stays inside the rate budget.
 
-Throttle handling: documented Flex codes 1001 / 1018 / 1019 trigger an
-exponential circuit breaker (24h -> 48h -> 72h -> 168h capped) via
-``_throttle_backoff``. The breaker composes with the daily 17:00 ET
-window: when the embargo says "not before tomorrow", the handler still
-waits until tomorrow at 17:00 ET — never a partial-day re-probe.
+Throttle handling: the one documented rate-limit code (1018) triggers an
+exponential circuit breaker (90s -> 5m -> 15m -> 1h capped) via
+``_throttle_backoff``. IBKR's published 1018 limit is one request per
+second and ten per minute, per token, so the ladder is measured in
+minutes; it used to run 24h -> 168h, three orders of magnitude harsher
+than the constraint it modelled. The breaker composes with the daily
+17:00 ET window: an embargo that outlives the window still defers to
+tomorrow at 17:00 ET rather than re-probing mid-day.
+
+1001 and 1019 are NOT rate limits and never reach the breaker. 1019 is
+"statement generation in progress" and 1001 is a transient generation
+failure; both take the soft lane, bounded by
+``MAX_SOFT_ATTEMPTS_PER_ET_DAY``.
 
 Wired into monitor_daemon via scripts/monitor_daemon/run.py:create_daemon().
 """
@@ -386,9 +394,11 @@ class CashFlowSyncHandler(BaseHandler):
         if flex_class is not None:
             return "soft"
 
-        if "FlexThrottleError" in message or any(
-            f"code {code}" in message for code in ("1001", "1018", "1019")
-        ):
+        # Legacy substring fallback, for a subprocess predating the typed
+        # exit-code contract. 1018 ONLY: 1001 is a transient generation failure
+        # and 1019 is "still generating", and routing either into the breaker
+        # lane is what turned "try again shortly" into a multi-day embargo.
+        if "FlexThrottleError" in message or "code 1018" in message:
             logger.warning(
                 "cash_flow_sync throttle classified by stderr substring, not exit "
                 "code — the subprocess predates the typed exit-code contract"

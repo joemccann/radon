@@ -147,12 +147,16 @@ class TestExitCodeClassification:
         self, credentials, health_rows
     ):
         """Deprecated fallback: a subprocess from an older deploy exits 1
-        with the code in stderr. Must still reach the ladder."""
+        with the code in stderr. Must still reach the ladder.
+
+        1018 only. The fallback used to match 1001 and 1019 too, so a legacy
+        subprocess reporting "still generating" reached the breaker lane."""
         handler = CashFlowSyncHandler()
         legacy = SimpleNamespace(
             returncode=1,
             stdout="",
-            stderr="ERR: cash flow fetch failed: Flex throttle (code 1001): busy\n",
+            stderr="ERR: cash flow fetch failed: Flex throttle (code 1018): "
+                   "Too many requests have been made from this token\n",
         )
         with patch.object(handler_mod.subprocess, "run", return_value=legacy):
             handler.run()
