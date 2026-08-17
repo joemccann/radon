@@ -24,6 +24,11 @@ try:
 except ImportError:  # pragma: no cover - depends on which root is on sys.path
     from scripts import app_preferences
 
+try:
+    from api.auth import is_trusted_local_request
+except ImportError:  # pragma: no cover - depends on which root is on sys.path
+    from scripts.api.auth import is_trusted_local_request
+
 logger = logging.getLogger("radon.preferences")
 
 router = APIRouter()
@@ -35,13 +40,16 @@ def _generated_at() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _actor(request: Request) -> str | None:
-    """Who the audit log records, derived server-side from the authenticated
-    principal.
+def _actor(request: Request, body: dict | None = None) -> str | None:
+    """Who the audit log records.
 
-    Never read from the request body: a self-asserted actor is worthless on an
-    audit trail for live risk caps. The trusted-local bypass in server.py
-    returns before setting request.state.user, so an unattributed local caller
+    An authenticated principal (request.state.user) always wins. The
+    trusted-local bypass in server.py returns before setting
+    request.state.user, and the only production caller on that path is the
+    Next.js hop on loopback, which forwards the Clerk operator id as
+    `updated_by` (PUT body / DELETE query) — record that as the real
+    principal. A forwarded id from any non-trusted-local caller is
+    self-asserted and ignored; a trusted-local caller that forwards nothing
     is labelled rather than silently recorded as NULL.
     """
     payload = getattr(request.state, "user", None)
@@ -49,7 +57,22 @@ def _actor(request: Request) -> str | None:
         subject = payload.get("sub")
         if isinstance(subject, str) and subject:
             return subject[:UPDATED_BY_MAX_LEN]
+    forwarded = _forwarded_operator_id(request, body)
+    if forwarded is not None:
+        return forwarded
     return "trusted-local"
+
+
+def _forwarded_operator_id(request: Request, body: dict | None) -> str | None:
+    """Operator id forwarded by the trusted Next.js hop, or None."""
+    if not is_trusted_local_request(request):
+        return None
+    raw = body.get("updated_by") if body is not None else None
+    if raw is None:
+        raw = request.query_params.get("updated_by")
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()[:UPDATED_BY_MAX_LEN]
+    return None
 
 
 def _bad_request() -> HTTPException:
@@ -133,7 +156,9 @@ async def put_preference(key: str, request: Request):
     if "value" not in body:
         raise _bad_request()
 
-    return await _mutate(app_preferences.set_value, key, body["value"], _actor(request))
+    return await _mutate(
+        app_preferences.set_value, key, body["value"], _actor(request, body)
+    )
 
 
 @router.delete("/preferences/{key}")
