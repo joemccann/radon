@@ -23,6 +23,14 @@ export type RoutePrincipal = {
 
 export type RouteAccessOptions = {
   operatorOnly?: boolean;
+  /**
+   * The route carries its own demo order blockade downstream (paper path or an
+   * explicit per-action refusal — lib/demo/orderBlockade.ts). On the demo
+   * deployment (NEXT_PUBLIC_RADON_DEMO=1, ALLOWED_USER_IDS absent by design)
+   * an ACTIVE demo principal passes operatorOnly so the blockade can route it;
+   * everywhere else operatorOnly stays fail-closed.
+   */
+  demoBlockadeRoute?: boolean;
   rate?: { key: string; limit: number; windowMs: number };
   durableRateTier?: DemoRateTier;
 };
@@ -96,19 +104,32 @@ export async function requireRouteAccess(
 
   const allowed = parseAllowed(env.ALLOWED_USER_IDS);
   const allowlisted = allowed.has(userId);
-  if (options.operatorOnly && !allowlisted) return reject(403, "Forbidden");
+
+  // Demo identity resolves BEFORE the operatorOnly gate so a demo-blockade
+  // route can admit an active demo principal; an inactive/expired one is
+  // rejected here regardless of the route's options.
+  let demoActive = false;
+  if (env.NEXT_PUBLIC_RADON_DEMO === "1" && !allowlisted) {
+    const metadata = authResult.sessionClaims?.metadata ?? authResult.publicMetadata ?? null;
+    const demo = resolveDemoContext(metadata, deps.now ?? Date.now());
+    if (!demo || demo.expired) return reject(403, "Demo access is not active");
+    demoActive = true;
+  }
+
+  const admittedByDemoBlockade = demoActive && options.demoBlockadeRoute === true;
+  if (options.operatorOnly && !allowlisted && !admittedByDemoBlockade) {
+    return reject(403, "Forbidden");
+  }
   if (allowed.size > 0 && !allowlisted) return reject(403, "Forbidden");
   if (env.RADON_REQUIRE_OPERATOR_ALLOWLIST === "1" && allowed.size === 0) {
     return reject(403, "Forbidden");
   }
 
-  let kind: RoutePrincipal["kind"] = allowlisted ? "operator" : "authenticated";
-  if (env.NEXT_PUBLIC_RADON_DEMO === "1" && !allowlisted) {
-    const metadata = authResult.sessionClaims?.metadata ?? authResult.publicMetadata ?? null;
-    const demo = resolveDemoContext(metadata, deps.now ?? Date.now());
-    if (!demo || demo.expired) return reject(403, "Demo access is not active");
-    kind = "demo";
-  }
+  const kind: RoutePrincipal["kind"] = allowlisted
+    ? "operator"
+    : demoActive
+      ? "demo"
+      : "authenticated";
 
   if (options.rate) {
     const limited = (deps.rateLimitFn ?? rateLimit)(

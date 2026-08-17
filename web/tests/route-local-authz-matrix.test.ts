@@ -139,6 +139,10 @@ describe("security report route-local authorization matrix", () => {
       const text = source(`app/api/orders/${route}/route.ts`);
       expect(text, route).toContain("operatorOnly: true");
       expect(text, route).toContain('durableRateTier: "C"');
+      // R-080: these routes carry their own demo blockade downstream (paper
+      // path / explicit refusal), so an active demo user on the demo
+      // deployment must reach it instead of dying on operatorOnly.
+      expect(text, route).toContain("demoBlockadeRoute: true");
     }
   });
 
