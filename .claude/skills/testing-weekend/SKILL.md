@@ -168,3 +168,25 @@ how this loop improves as the codebase grows.
     orphaned tip. Tag it first, then
     `git rebase --onto <rebased-base> <old-base> <orphan-tip>` and
     `git branch -f`.
+
+- **2026-08-17 (remediate): never pipe a gate run through `tail` alone.**
+  Round 1 of the closing 3x gate reported `10 failed | 6706 passed` and the
+  names were gone — the command kept only the summary line. Seven further
+  full runs (four sequential, two deliberately concurrent with a full
+  pytest) were all `6716 passed`, so the round could not be named or
+  reproduced and had to be logged as an observation rather than a finding.
+  Write the full reporter output to a file per gate run and read the tail
+  from that file, so a flake round is nameable the first time it happens.
+- **2026-08-17 (remediate): `pytest cloud/tests` is 10-red on macOS on
+  `origin/main` too.** Ten `sha256sum`-dependent control-plane tests cannot
+  pass on a darwin runner. Diff the failure LIST against a clean
+  `origin/main` worktree before treating any cloud red as yours; the count
+  alone is not a signal. Baseline as of this run: `10 failed, 848 passed,
+  4 skipped`.
+- **2026-08-17 (remediate): pre-flight a spec under `next start` before
+  curating it into CI.** The e2e job builds and serves a production
+  server, and this repo has a documented dev-vs-prod divergence. Every
+  spec added to the curated list this run was verified under
+  `PLAYWRIGHT_WEBSERVER_CMD="npx next start"`, which is also how
+  `performance-twr-payload.spec.ts` was caught as permanently red before
+  it could red the job.
