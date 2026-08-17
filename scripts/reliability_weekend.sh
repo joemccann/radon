@@ -69,7 +69,7 @@ echo "[weekend] $MODE start $STAMP repo=$REPO cap=${CAP_SECS}s" | tee -a "$RUN_L
 # Fresh ground truth. Any leftover state from a killed prior run is
 # discarded — the branch/PR on GitHub is the durable state.
 git fetch origin --quiet
-git checkout --quiet main
+git checkout -f --quiet main
 git reset --hard --quiet origin/main
 git clean -fdq --exclude=.radon-weekend-runner --exclude=logs/ --exclude=.env --exclude=.env.ib-mode --exclude=web/.env
 
