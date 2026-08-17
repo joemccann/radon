@@ -391,6 +391,40 @@ describe("preferences client helpers", () => {
     vi.unstubAllGlobals();
   });
 
+  it("every preferences request carries a timeout AbortSignal (R-083)", async () => {
+    // A wedged /api/preferences must not hang the preferences UI forever:
+    // like radonFetchText, every helper request rides an AbortSignal.timeout.
+    const { fetchPreferences, savePreference, resetPreference } = await import(
+      "../lib/preferences"
+    );
+    const fetchSpy = vi.fn().mockImplementation(
+      async () =>
+        new Response(JSON.stringify(PAYLOAD), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+    await fetchPreferences();
+    await savePreference("RADON_MAX_ORDER_QTY", 400);
+    await resetPreference("RADON_MAX_ORDER_QTY");
+    expect(fetchSpy.mock.calls.length).toBe(3);
+    for (const [, init] of fetchSpy.mock.calls) {
+      expect((init as RequestInit | undefined)?.signal).toBeInstanceOf(AbortSignal);
+    }
+    vi.unstubAllGlobals();
+  });
+
+  it("propagates the abort from a timed-out preferences request", async () => {
+    const { fetchPreferences } = await import("../lib/preferences");
+    const fetchSpy = vi
+      .fn()
+      .mockRejectedValue(new DOMException("The operation timed out.", "TimeoutError"));
+    vi.stubGlobal("fetch", fetchSpy);
+    await expect(fetchPreferences()).rejects.toThrow("timed out");
+    vi.unstubAllGlobals();
+  });
+
   it("fetchPreferences and resetPreference hit the proxy endpoints", async () => {
     const { fetchPreferences, resetPreference } = await import("../lib/preferences");
     const fetchSpy = vi.fn().mockImplementation(

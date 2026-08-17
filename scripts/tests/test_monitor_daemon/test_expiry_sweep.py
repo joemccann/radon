@@ -113,6 +113,9 @@ def _executed_row(
 
 
 def _make_db(journal_rows: list, executed_rows: list | None = None) -> MagicMock:
+    """DB double answering the keyset-paginated journal scan: filters by
+    params, honours LIMIT, and synthesizes trade_ids in row order."""
+    keyed = [(f"t{i:06d}", row[0], row[1]) for i, row in enumerate(journal_rows)]
     db = MagicMock()
 
     def _execute(sql: str, params: tuple = ()):
@@ -120,7 +123,11 @@ def _make_db(journal_rows: list, executed_rows: list | None = None) -> MagicMock
         if "executed_orders" in sql:
             cursor.fetchall.return_value = executed_rows or []
         else:
-            cursor.fetchall.return_value = journal_rows
+            since, after, limit = params
+            cursor.fetchall.return_value = sorted(
+                (r for r in keyed if (r[2] or "") >= since and r[0] > after),
+                key=lambda r: r[0],
+            )[: int(limit)]
         return cursor
 
     db.execute.side_effect = _execute
@@ -789,3 +796,72 @@ class TestExpiryDateGuardsAreInclusive:
 
         assert result["closed"] == 0
         upserts.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# R-075: the 1100-day journal payload scan must ride bounded keyset pages
+# (Turso Hrana I/O bounding) — never one unbounded fetchall.
+# ---------------------------------------------------------------------------
+
+FUTURE_EXPIRY_COMPACT = (TODAY_ET + timedelta(days=30)).strftime("%Y%m%d")
+
+
+def _paging_db(journal_rows: list, executed_rows: list | None = None) -> MagicMock:
+    """DB double that answers the keyset-paginated journal scan honestly
+    (filters by params, honours LIMIT) and records rows returned per journal
+    fetch. The legacy unbounded shape gets everything in one fetch — which is
+    exactly what the size assertion catches."""
+    keyed = [(f"t{i:06d}", row[0], row[1]) for i, row in enumerate(journal_rows)]
+    db = MagicMock()
+    db.journal_fetch_sizes = []
+
+    def _execute(sql: str, params: tuple = ()):
+        cursor = MagicMock(spec=["fetchall"])
+        if "executed_orders" in sql:
+            cursor.fetchall.return_value = executed_rows or []
+            return cursor
+        if "trade_id > ?" in sql:
+            since, after, limit = params
+            page = sorted(
+                (r for r in keyed if (r[2] or "") >= since and r[0] > after),
+                key=lambda r: r[0],
+            )[: int(limit)]
+            db.journal_fetch_sizes.append(len(page))
+            cursor.fetchall.return_value = page
+            return cursor
+        db.journal_fetch_sizes.append(len(journal_rows))
+        cursor.fetchall.return_value = journal_rows
+        return cursor
+
+    db.execute.side_effect = _execute
+    return db
+
+
+class TestHranaBoundedJournalScan:
+    def test_journal_scan_reads_in_bounded_keyset_pages(self, upserts, monkeypatch):
+        monkeypatch.setattr(expiry_sweep, "JOURNAL_SCAN_PAGE_ROWS", 10, raising=False)
+        rows = [
+            _journal_row(
+                "BUY_OPTION",
+                1,
+                ticker=f"T{i:03d}",
+                expiry=FUTURE_EXPIRY_COMPACT,
+                ib_exec_id=f"0001abcd.{i:08x}.01.01",
+            )
+            for i in range(25)
+        ]
+        rows.append(_journal_row("BUY_OPTION", 25))  # the one expired SPCX long
+        db = _paging_db(rows)
+        handler = _make_handler(db)
+
+        result = handler.execute()
+
+        assert db.journal_fetch_sizes, "sweep never read the journal"
+        assert max(db.journal_fetch_sizes) <= 10
+        # Pagination must not cost correctness: the expired long still closes.
+        assert result["closed"] == 1
+        assert upserts.call_count == 1
+        payload = upserts.call_args.args[1]
+        assert payload["ticker"] == "SPCX"
+        assert payload["action"] == "SELL_OPTION"
+        assert payload["contracts"] == 25

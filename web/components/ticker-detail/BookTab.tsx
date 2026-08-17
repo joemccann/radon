@@ -446,7 +446,7 @@ function StockOrderForm({
       buildSuccessMessage={({ action, quantity, limitPrice }) =>
         `Order placed: ${action} ${quantity} ${ticker} @ ${fmtPrice(limitPrice)}`
       }
-      onSuccessToast={(message) => orderActions?.pushNotification({ type: "success", message })}
+      onSuccessToast={(message, tone) => orderActions?.pushNotification({ type: tone, message })}
       suppressInlineSuccess
     />
   );

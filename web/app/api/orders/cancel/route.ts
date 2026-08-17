@@ -33,6 +33,7 @@ async function readOrdersSnapshotBestEffort() {
 export async function POST(request: Request): Promise<Response> {
   const access = await requireRouteAccess(request, {
     operatorOnly: true,
+    demoBlockadeRoute: true,
     rate: { key: "orders/cancel:route", limit: 5, windowMs: 60_000 },
     durableRateTier: "C",
   });

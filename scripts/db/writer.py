@@ -1409,7 +1409,22 @@ def upsert_position_execution_fact(payload: dict[str, Any], *, db: Any = None) -
         existing_hash = _row_value(row, "payload_sha256", 0)
         if existing_hash != payload_hash:
             if not _execution_economically_conflicts(row, item, payload, iso_ts=_iso):
-                return False
+                # Tolerated drift: same fill, newer metadata. Converge the
+                # pinned hash AND the stored payload so late IB enrichment
+                # (perm_id, order_ref) reaches the ledger columns instead of
+                # leaving the row permanently mismatched-but-tolerated (R-077).
+                target.execute(
+                    """UPDATE position_execution_facts
+                       SET payload_sha256 = ?, payload = ?, perm_id = ?, order_ref = ?
+                       WHERE account_id = ? AND exec_id = ? AND revision = ?""",
+                    (
+                        payload_hash, canonical, item["perm_id"],
+                        item["order_ref"] or None,
+                        item["account_id"], item["exec_id"], revision,
+                    ),
+                )
+                target.commit()
+                return True
             logger.warning(
                 "execution fact conflict for %s:%s:%s",
                 item["account_id"], item["exec_id"], revision,

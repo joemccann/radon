@@ -692,3 +692,132 @@ class TestDualIdConventionIdempotency:
 
         assert [a["status"] for a in actions] == ["skipped"]
         assert len(_journal_rows(conn)) == 1
+
+
+class _PrefetchedCursor:
+    def __init__(self, rows: list):
+        self._rows = rows
+
+    def fetchall(self) -> list:
+        return self._rows
+
+
+class _JournalScanSpy:
+    """Conn wrapper that records rows returned by every journal SELECT.
+
+    ``on_first_journal_select`` (if set) fires once, after the first journal
+    SELECT executes — the hook a race test uses to insert a concurrent row
+    between the initial coverage scan and the insert loop.
+    """
+
+    def __init__(self, conn):
+        self._conn = conn
+        self.journal_select_sizes: list[int] = []
+        self.on_first_journal_select = None
+
+    def execute(self, sql: str, params: tuple = ()):
+        cursor = self._conn.execute(sql, params)
+        flat = " ".join(sql.split()).upper()
+        if flat.startswith("SELECT") and "FROM JOURNAL" in flat:
+            rows = cursor.fetchall()
+            if self.on_first_journal_select is not None:
+                hook, self.on_first_journal_select = self.on_first_journal_select, None
+                hook()
+            self.journal_select_sizes.append(len(rows))
+            return _PrefetchedCursor(rows)
+        return cursor
+
+    def commit(self) -> None:
+        self._conn.commit()
+
+
+def _seed_filler_journal_rows(conn: sqlite3.Connection, count: int) -> None:
+    for i in range(count):
+        _insert_journal(
+            conn,
+            f"t{i:06d}",
+            {"ticker": f"ZZ{i:03d}", "ib_exec_id": f"0009{i:04x}.6a000000.01.01"},
+            "2026-06-01",
+        )
+
+
+class TestHranaBoundedJournalScans:
+    """R-075: the full-journal coverage scan must ride bounded keyset pages,
+    and the pre-insert race re-check must be a written_at delta scan, not a
+    full-journal rebuild per gap row (Turso Hrana I/O bounding)."""
+
+    def test_journal_coverage_reads_in_bounded_keyset_pages(self, monkeypatch):
+        conn = _fresh_db()
+        _patch_db(conn, monkeypatch)
+        _seed_filler_journal_rows(conn, 25)
+
+        mod = _import_backfill()
+        monkeypatch.setattr(mod, "JOURNAL_SCAN_PAGE_ROWS", 10, raising=False)
+
+        spy = _JournalScanSpy(conn)
+        coverage = mod._journal_coverage(spy)
+
+        assert len(coverage.exec_ids) >= 25
+        assert spy.journal_select_sizes, "coverage never read the journal"
+        assert max(spy.journal_select_sizes) <= 10
+
+    def test_insert_recheck_is_a_delta_scan_not_a_full_rescan_per_row(self, monkeypatch):
+        conn = _fresh_db()
+        _patch_db(conn, monkeypatch)
+        monkeypatch.setenv("RADON_DB_TEST_WRITE_OK", "1")
+        _seed_filler_journal_rows(conn, 30)
+        _insert_executed_order(conn, VIX_P10_EXEC_ID, VIX_P10_EO_PAYLOAD, VIX_P10_FILL_TIME)
+        _insert_executed_order(conn, MU_P800_EXEC_ID, MU_P800_EO_PAYLOAD, MU_P800_FILL_TIME)
+        _insert_executed_order(conn, EWY_EXEC_ID, EWY_EXEC_PAYLOAD, EWY_FILL_TIME)
+
+        mod = _import_backfill()
+        monkeypatch.setattr(mod, "JOURNAL_SCAN_PAGE_ROWS", 10, raising=False)
+
+        spy = _JournalScanSpy(conn)
+        actions = mod.backfill(
+            spy,
+            exec_ids=[VIX_P10_EXEC_ID, MU_P800_EXEC_ID, EWY_EXEC_ID],
+            dry_run=False,
+        )
+
+        assert [a["status"] for a in actions] == ["inserted_from_eo"] * 3
+        # One paginated full scan (~30 rows) + per-row deltas of only the
+        # rows written during this run — never 3 more full 30-row rescans.
+        assert sum(spy.journal_select_sizes) <= 60
+
+    def test_row_written_after_scan_start_is_still_caught_by_recheck(self, monkeypatch):
+        """Race guard must survive the delta re-scan: a journal row that lands
+        AFTER the initial coverage scan (trade_id sorting before every scanned
+        page, so no later page ever sees it) still blocks the insert."""
+        conn = _fresh_db()
+        _patch_db(conn, monkeypatch)
+        monkeypatch.setenv("RADON_DB_TEST_WRITE_OK", "1")
+        _seed_filler_journal_rows(conn, 5)
+        _insert_executed_order(conn, EWY_EXEC_ID, EWY_EXEC_PAYLOAD, EWY_FILL_TIME)
+
+        mod = _import_backfill()
+
+        spy = _JournalScanSpy(conn)
+
+        def _concurrent_writer_lands_the_same_fill():
+            now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            conn.execute(
+                "INSERT OR REPLACE INTO journal (trade_id, payload, filled_at, written_at) "
+                "VALUES (?, ?, ?, ?)",
+                (
+                    "0race",
+                    json.dumps({"ticker": "EWY", "ib_exec_id": EWY_EXEC_ID}),
+                    "2026-06-08",
+                    now,
+                ),
+            )
+            conn.commit()
+
+        spy.on_first_journal_select = _concurrent_writer_lands_the_same_fill
+
+        actions = mod.backfill(spy, exec_ids=[EWY_EXEC_ID], dry_run=False)
+
+        assert [a["status"] for a in actions] == ["skipped"]
+        rows = [r for r in _journal_rows(conn) if r["payload"].get("ib_exec_id") == EWY_EXEC_ID]
+        assert len(rows) == 1
+        assert rows[0]["trade_id"] == "0race"

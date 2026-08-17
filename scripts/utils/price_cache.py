@@ -65,6 +65,12 @@ def _cache_path(subdir: Path, key: str) -> Path:
     return subdir / _filename(key)
 
 
+# R-072: quarantined entries are kept briefly for forensics, then removed by
+# prune_cache — without this they accumulated forever (prune only enumerated
+# suffix == ".json", and ".json.invalid-<ns>" never matches).
+QUARANTINE_RETENTION_SECONDS = 24 * 60 * 60
+
+
 def _quarantine_invalid(path: Path) -> None:
     """Move an invalid cache entry aside so every read remains a cheap miss."""
     try:
@@ -74,6 +80,10 @@ def _quarantine_invalid(path: Path) -> None:
             path.unlink()
         except OSError:
             pass
+
+
+def _is_quarantined(path: Path) -> bool:
+    return ".json.invalid-" in path.name
 
 
 def read_cache(cache_dir: Path, key: str) -> Optional[Dict[str, float]]:
@@ -136,27 +146,36 @@ def write_cache(cache_dir: Path, key: str, data: Dict[str, float], source: str, 
 
 
 def prune_cache(cache_dir: Path, max_files: int = 500) -> int:
-    """Delete oldest files by mtime when count exceeds max_files.
+    """Delete oldest files by mtime when count exceeds max_files, and sweep
+    quarantined entries past their forensic window (R-072).
 
     Thread-safe: call ONCE after all parallel writes complete.
     Returns count of files deleted.
     """
+    deleted = 0
     all_files = []
+    quarantine_cutoff = time.time() - QUARANTINE_RETENTION_SECONDS
     for subdir in (STOCKS_DIR, OPTIONS_DIR):
         for f in subdir.iterdir():
-            if f.suffix == ".json":
+            if _is_quarantined(f):
+                try:
+                    if f.stat().st_mtime < quarantine_cutoff:
+                        f.unlink()
+                        deleted += 1
+                except OSError:
+                    continue
+            elif f.suffix == ".json":
                 try:
                     all_files.append((f, f.stat().st_mtime))
                 except OSError:
                     continue
 
     if len(all_files) <= max_files:
-        return 0
+        return deleted
 
     # Sort oldest first
     all_files.sort(key=lambda x: x[1])
     to_delete = len(all_files) - max_files
-    deleted = 0
     for f, _ in all_files[:to_delete]:
         try:
             f.unlink()

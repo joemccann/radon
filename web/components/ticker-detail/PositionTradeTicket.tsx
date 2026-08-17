@@ -10,6 +10,7 @@ import { useOrderActionsOptional } from "@/lib/OrderActionsContext";
 import { checkNakedShortRisk, type NakedShortPortfolio, type OrderPayload } from "@/lib/nakedShortGuard";
 import { OrderRiskGate, type OrderRiskState } from "@/lib/order";
 import OrderErrorBanner from "@/components/OrderErrorBanner";
+import { placeOrderFeedback } from "@/lib/orders/placeOrderFeedback";
 import {
   buildPositionTradeOrder,
   closingActionFor,
@@ -177,10 +178,11 @@ export default function PositionTradeTicket({
       if (!res.ok) {
         setError(json.error || "Order placement failed");
       } else {
-        orderActions?.pushNotification({
-          type: "success",
-          message: `${action} ${parsedQty}x ${position.ticker} ${subjectLabel} @ ${fmtSignedPrice(riskExecutionPrice)}`,
-        });
+        const feedback = placeOrderFeedback(
+          json,
+          `${action} ${parsedQty}x ${position.ticker} ${subjectLabel} @ ${fmtSignedPrice(riskExecutionPrice)}`,
+        );
+        orderActions?.pushNotification({ type: feedback.tone, message: feedback.message });
         setConfirmStep(false);
         onOrderPlaced?.();
         onClose();

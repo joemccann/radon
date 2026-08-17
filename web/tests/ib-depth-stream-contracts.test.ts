@@ -24,7 +24,17 @@ describe("ib_realtime_server.js exposes the flag-gated L2 depth channel", () => 
     expect(source).toContain("const isSmartDepth = !isFutures;");
     expect(source).toContain("ib.cancelMktDepth(state.depthTickerId, !state.isFutures)");
     expect(source).toContain("const MAX_CONCURRENT_DEPTH = 3");
-    expect(source).toContain("function evictOldestDepth");
+  });
+
+  it("admits depth tickets through the per-client budget planner (R-082)", () => {
+    // One session must never silently lose a leg because another session's
+    // subscribe recycled its ticket: eviction is planned per requesting
+    // client (own exclusive tickets only) and an unadmittable subscribe is
+    // refused with an explicit depth-budget signal instead.
+    expect(source).toContain('import { planDepthAdmission } from "./lib/depthBudget.js"');
+    expect(source).toContain("planDepthAdmission({");
+    expect(source).toContain('emitDepthUnavailable(key, "depth-budget")');
+    expect(source).not.toContain("function evictOldestDepth");
   });
 
   it("handles both the futures and equity/SMART depth events via the EventName enum", () => {

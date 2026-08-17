@@ -20,7 +20,8 @@ ExecStart=/usr/bin/bash /home/radon/radon/scripts/run_signals_refresh.sh
 StandardOutput=journal
 StandardError=journal
 # Two sequential scans, each bounded at 200s by the wrapper's curl deadline.
-# Releases the unit well before the next 15-minute slot.
+# Releases the unit well before the next slot of radon-signals-refresh.timer
+# (the cadence SoT).
 TimeoutStartSec=450
 
 [Install]
