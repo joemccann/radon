@@ -6,6 +6,7 @@ import { TickerDetailProvider } from "@/lib/TickerDetailContext";
 import { ThemeProvider } from "@/lib/ThemeContext";
 import { RealtimeAuthProvider } from "@/lib/RealtimeAuthContext";
 import { OfflineStatusProvider } from "@/lib/offline/OfflineStatusContext";
+import { RouteRefreshProvider } from "@/lib/RouteRefreshContext";
 import ClerkThemeBridge from "@/components/ClerkThemeBridge";
 import SignOutCachePurge from "@/components/SignOutCachePurge";
 
@@ -16,11 +17,13 @@ export default function Providers({ children }: { children: React.ReactNode }) {
         <SignOutCachePurge />
         <RealtimeAuthProvider>
           <OfflineStatusProvider>
-            <IBStatusProvider>
-              <OrderActionsProvider>
-                <TickerDetailProvider>{children}</TickerDetailProvider>
-              </OrderActionsProvider>
-            </IBStatusProvider>
+            <RouteRefreshProvider>
+              <IBStatusProvider>
+                <OrderActionsProvider>
+                  <TickerDetailProvider>{children}</TickerDetailProvider>
+                </OrderActionsProvider>
+              </IBStatusProvider>
+            </RouteRefreshProvider>
           </OfflineStatusProvider>
         </RealtimeAuthProvider>
       </ClerkThemeBridge>

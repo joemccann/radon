@@ -1,3 +1,23 @@
+# Task: Route-change fresh sync (2026-08-17)
+
+## Dependency graph
+
+- T1 depends_on: [] - Red: route-key change and re-activate must fetch immediately
+- T2 depends_on: [T1] - Wire pathname refresh through portfolio, orders, useSyncHook
+- T3 depends_on: [T2] - Green focused tests; market-hours first paint is not blindly CLOSED
+
+## Checklist
+
+- [x] T1 Failing route-change / re-activate tests
+- [x] T2 Immediate GET on pathname; POST only when stale / hasPost re-activate
+- [x] T3 Verify
+
+## Review
+
+Hooks treated client navigations as no-ops (`didInitialSync` / mount-only GET) and waited out the 30s–5m poll. Pathname now re-GETs; scanner re-activation POSTs again. Market-hours first paint is the live session. Focused vitest 30/30.
+
+---
+
 # Task: /performance runtime crash on TWR snapshot (2026-08-15)
 
 ## Dependency graph
