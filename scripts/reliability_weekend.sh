@@ -78,14 +78,44 @@ git checkout -f --quiet main
 git reset --hard --quiet origin/main
 git clean -fdq --exclude=.radon-weekend-runner --exclude=logs/ --exclude=.env --exclude=.env.ib-mode --exclude=web/.env
 
+# The agent commits per completed task and the skill resumes from the
+# weekend branch, so nothing is lost across attempts or rounds. Two nested
+# recovery layers:
+#   - inner (both modes): bounded retry within a round, ONLY on a
+#     transient-network signature (2026-08-16: five runs died to
+#     ENOTFOUND / connection-lost on the runner's flaky uplink); real
+#     failures and timeouts surface immediately.
+#   - outer (remediate only): continuation rounds until a session exits 0
+#     or the backstop trips — the backlog must finish this weekend, never
+#     defer to a future one.
+MAX_ATTEMPTS=3
+RETRY_PAUSE_SECS=60
+is_transient_network_failure() {
+  tail -c 500 "$RUN_LOG" | grep -qE 'API Error|ENOTFOUND|Connection lost|Execution error'
+}
+
+run_round() {
+  local attempt=1 start_ts=$SECONDS remain
+  while :; do
+    remain=$((CAP_SECS - (SECONDS - start_ts)))
+    if [[ $remain -le 60 ]]; then RC=124; break; fi
+    timeout "$remain" claude -p "/reliability-weekend $MODE" \
+      --dangerously-skip-permissions \
+      --output-format text >> "$RUN_LOG" 2>&1
+    RC=$?
+    [[ $RC -eq 0 || $RC -eq 124 || $attempt -ge $MAX_ATTEMPTS ]] && break
+    is_transient_network_failure || break
+    echo "[weekend] transient network failure (rc=$RC) — attempt $attempt/$MAX_ATTEMPTS, retrying in ${RETRY_PAUSE_SECS}s" | tee -a "$RUN_LOG"
+    attempt=$((attempt + 1))
+    sleep "$RETRY_PAUSE_SECS"
+  done
+}
+
 ROUND=1
 while :; do
   echo "[weekend] $MODE round $ROUND/$MAX_ROUNDS" | tee -a "$RUN_LOG"
   set +e
-  timeout "$CAP_SECS" claude -p "/reliability-weekend $MODE" \
-    --dangerously-skip-permissions \
-    --output-format text >> "$RUN_LOG" 2>&1
-  RC=$?
+  run_round
   set -e
   [[ $RC -ne 0 && $ROUND -lt $MAX_ROUNDS ]] || break
   report "ROUND $ROUND $([[ $RC -eq 124 ]] && echo TIMEOUT || echo "FAILED (exit $RC)") — continuing" \
