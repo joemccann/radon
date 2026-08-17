@@ -26,8 +26,8 @@
         <string>__HOME__</string>
     </dict>
 
-    <!-- Saturday 19:00 local — cap 2h ends 21:00, an hour before the
-         reliability audit fires at 22:00 in the same runner clone. -->
+    <!-- Saturday 19:00 local. Runs in the testing loop's own clone;
+         no shared working tree with the reliability loop. -->
     <key>StartCalendarInterval</key>
     <dict>
         <key>Weekday</key>
