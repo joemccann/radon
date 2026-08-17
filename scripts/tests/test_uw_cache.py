@@ -89,3 +89,67 @@ def test_disk_file_stores_endpoint_ttl(cache_dir: Path) -> None:
     assert raw["ttl_seconds"] == 2 * 60
     assert raw["cached_at"] == 2_000.0
     assert raw["data"] == {"data": []}
+
+
+# ── R-069: eviction — expired/over-cap entries must not accumulate forever ──
+
+
+def test_expired_disk_entry_is_unlinked_on_read(cache_dir: Path) -> None:
+    key = uw_cache.make_key("stock/SPY/ohlc", None)
+    uw_cache.set_disk_cached(key, "stock/SPY/ohlc", {"data": []}, now=1_000.0)
+    assert uw_cache.get_disk_cached(key, now=1_000.0 + 16 * 60) is None
+    assert list(cache_dir.glob("*.json")) == []
+
+
+def test_corrupt_disk_entry_is_unlinked_on_read(cache_dir: Path) -> None:
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    key = uw_cache.make_key("stock/AAPL/info", None)
+    path = cache_dir / uw_cache._disk_filename(key)
+    path.write_text("{not-json")
+    assert uw_cache.get_disk_cached(key, now=1_000.0) is None
+    assert not path.exists()
+
+
+def _write_entry_with_mtime(cache_dir: Path, name: str, mtime: float) -> Path:
+    import os
+
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    path = cache_dir / name
+    path.write_text(json.dumps({"cached_at": mtime, "ttl_seconds": 60, "data": {}}))
+    os.utime(path, (mtime, mtime))
+    return path
+
+
+def test_prune_removes_entries_older_than_the_longest_ttl(cache_dir: Path) -> None:
+    now = 1_000_000.0
+    stale = _write_entry_with_mtime(cache_dir, "a" * 64 + ".json", now - 2 * 60 * 60)
+    fresh = _write_entry_with_mtime(cache_dir, "b" * 64 + ".json", now - 30)
+    removed = uw_cache.prune_disk_cache(now=now)
+    assert removed == 1
+    assert not stale.exists()
+    assert fresh.exists()
+
+
+def test_prune_removes_orphaned_tmp_files(cache_dir: Path) -> None:
+    now = 1_000_000.0
+    tmp = _write_entry_with_mtime(cache_dir, "c" * 64 + ".json.tmp", now - 2 * 60 * 60)
+    uw_cache.prune_disk_cache(now=now)
+    assert not tmp.exists()
+
+
+def test_prune_caps_file_count_oldest_first(cache_dir: Path) -> None:
+    now = 1_000_000.0
+    paths = [
+        _write_entry_with_mtime(cache_dir, f"{i:064d}.json", now - 100 + i)
+        for i in range(5)
+    ]
+    uw_cache.prune_disk_cache(now=now, max_files=3)
+    assert [p.exists() for p in paths] == [False, False, True, True, True]
+
+
+def test_set_disk_cached_enforces_the_cap(cache_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(uw_cache, "MAX_DISK_FILES", 2)
+    for i, endpoint in enumerate(("stock/A/info", "stock/B/info", "stock/C/info")):
+        key = uw_cache.make_key(endpoint, None)
+        uw_cache.set_disk_cached(key, endpoint, {"data": [i]})
+    assert len(list(cache_dir.glob("*.json"))) <= 2
