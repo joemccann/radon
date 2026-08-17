@@ -22,7 +22,20 @@ describe("requireRouteAccess", () => {
   it("does not turn a resolved signed-out test auth result into a test principal", async () => {
     const result = await requireRouteAccess(request, {}, {
       authFn: async () => ({ userId: null }),
-      env: { NODE_ENV: "test" },
+      env: {},
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.response.status).toBe(401);
+  });
+
+  it("cannot open the test-auth seam through a runtime env object", async () => {
+    // The seam must key on the build-time `process.env.NODE_ENV` literal, not
+    // on the runtime `deps.env` read — a production process handed
+    // NODE_ENV=test (or any injected env object) must still 401.
+    vi.stubEnv("NODE_ENV", "production");
+    const result = await requireRouteAccess(request, {}, {
+      authFn: async () => { throw new Error("no Clerk request scope"); },
+      env: { NODE_ENV: "test" } as Record<string, string>,
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.response.status).toBe(401);
@@ -94,7 +107,7 @@ describe("requireRouteAccess", () => {
       rate: { key: "portfolio:route", limit: 20, windowMs: 60_000 },
     }, {
       authFn: async () => ({ userId: "operator" }),
-      env: { NODE_ENV: "production", ALLOWED_USER_IDS: "operator" },
+      env: { ALLOWED_USER_IDS: "operator" },
       rateLimitFn: () => ({ ok: true, retryAfterSec: 0 }),
       durableRateLimitFn,
     });
@@ -148,7 +161,7 @@ describe("requireRouteAccess", () => {
       durableRateTier: "B",
     }, {
       authFn: async () => ({ userId: "operator" }),
-      env: { NODE_ENV: "production", ALLOWED_USER_IDS: "operator" },
+      env: { ALLOWED_USER_IDS: "operator" },
       durableRateLimitFn,
     });
     expect(result.ok).toBe(true);
