@@ -81,11 +81,11 @@ test.describe("mobile newsfeed item layout (393x852)", () => {
     await stubFeed(page);
     await page.goto("/dashboard");
     await expect(page.getByTestId("mobile-tab-bar")).toBeVisible();
-    await expect(page.locator("li.news-feed-item").first()).toBeVisible();
+    await expect(page.getByTestId("news-feed-item").first()).toBeVisible();
   });
 
   test("tag strip is a single 24px row with a +N affordance", async ({ page }) => {
-    const tags = page.locator("li.news-feed-item").first().locator("div.news-feed-tags");
+    const tags = page.getByTestId("news-feed-item").first().getByTestId("news-feed-tags");
     const box = await tags.boundingBox();
     expect(box).not.toBeNull();
     // One row of 24px chips. Two rows would be 56px (24 + 8 gap + 24).
@@ -105,11 +105,11 @@ test.describe("mobile newsfeed item layout (393x852)", () => {
   });
 
   test("footer's three children share a baseline within 1px", async ({ page }) => {
-    const centres = await page.locator("li.news-feed-item").first().evaluate((item) => {
-      const footer = item.querySelector(".news-feed-footer")!;
-      const pill = footer.querySelector(".news-feed-link-pill")!;
-      const stamp = footer.querySelector(".news-feed-timestamp")!;
-      const star = footer.querySelector(".star-toggle")!;
+    const centres = await page.getByTestId("news-feed-item").first().evaluate((item) => {
+      const footer = item.querySelector("[data-testid='news-feed-footer']")!;
+      const pill = footer.querySelector("[data-testid='news-feed-link-pill']")!;
+      const stamp = footer.querySelector("[data-testid='news-feed-timestamp']")!;
+      const star = footer.querySelector("[data-testid='star-toggle']")!;
       const centre = (el: Element) => {
         const r = el.getBoundingClientRect();
         return r.top + r.height / 2;
@@ -128,8 +128,8 @@ test.describe("mobile newsfeed item layout (393x852)", () => {
   });
 
   test("timestamp prints one line with no orphaned fragment", async ({ page }) => {
-    const stamp = await page.locator("li.news-feed-item").first().evaluate((item) => {
-      const el = item.querySelector(".news-feed-timestamp") as HTMLElement;
+    const stamp = await page.getByTestId("news-feed-item").first().evaluate((item) => {
+      const el = item.querySelector("[data-testid='news-feed-timestamp']") as HTMLElement;
       const compact = Array.from(el.children).find(
         (child) => getComputedStyle(child).display !== "none",
       ) as HTMLElement;
@@ -173,7 +173,7 @@ test.describe("mobile newsfeed item layout (393x852)", () => {
 
   test("item padding is inline-zero so the rule spans the card interior", async ({ page }) => {
     const padding = await page
-      .locator("li.news-feed-item")
+      .getByTestId("news-feed-item")
       .first()
       .evaluate((el) => {
         const cs = getComputedStyle(el);
@@ -186,7 +186,7 @@ test.describe("mobile newsfeed item layout (393x852)", () => {
 
   test("scrolling the last item into view clears the fixed tab bar", async ({ page }) => {
     const clearance = await page.evaluate(async () => {
-      const items = document.querySelectorAll("li.news-feed-item");
+      const items = document.querySelectorAll("[data-testid='news-feed-item']");
       const last = items[items.length - 1] as HTMLElement;
       last.scrollIntoView({ block: "end", behavior: "auto" });
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
@@ -217,12 +217,12 @@ test.describe("mobile newsfeed item layout (393x852)", () => {
           }
           return { height, width, boxHeight: box.height };
         }
-        const item = document.querySelector("li.news-feed-item")!;
+        const item = document.querySelector("[data-testid='news-feed-item']")!;
         const pick = (sel: string, root: ParentNode = document) => root.querySelector(sel)!;
         return {
           refresh: hit(pick(".dashboard-news .news-feed-refresh")),
-          linkPill: hit(pick(".news-feed-link-pill", item)),
-          star: hit(pick(".star-toggle", item)),
+          linkPill: hit(pick("[data-testid='news-feed-link-pill']", item)),
+          star: hit(pick("[data-testid='star-toggle']", item)),
           tagChip: hit(pick("button.news-feed-tag-chip", item)),
         };
       });
@@ -271,7 +271,7 @@ test.describe("defect B — the safe-area inset must not open a mid-page hole", 
   test("feed seam matches every other section seam with a 0px inset", async ({ page }) => {
     await stubFeed(page);
     await page.goto("/dashboard");
-    await expect(page.locator("li.news-feed-item").first()).toBeVisible();
+    await expect(page.getByTestId("news-feed-item").first()).toBeVisible();
 
     const s = await seams(page);
     expect(Math.abs(s.feedToSignals - s.signalsToCatalysts)).toBeLessThanOrEqual(1);
@@ -281,7 +281,7 @@ test.describe("defect B — the safe-area inset must not open a mid-page hole", 
   test("feed seam matches every other section seam with a 34px notch inset", async ({ page }) => {
     await stubFeed(page);
     await page.goto("/dashboard");
-    await expect(page.locator("li.news-feed-item").first()).toBeVisible();
+    await expect(page.getByTestId("news-feed-item").first()).toBeVisible();
 
     // Simulate an iPhone home-indicator inset. env(safe-area-inset-bottom) is
     // not settable from a test, but every consumer reads the --safe-bottom
@@ -305,7 +305,7 @@ test.describe("defect E — one chip size on screen", () => {
     // Deep-link the filter so the tag bar renders with an active chip.
     await page.goto("/dashboard?tags=SPX");
     await expect(page.locator(".news-feed-tag-bar-chip").first()).toBeVisible();
-    await expect(page.locator("li.news-feed-item").first()).toBeVisible();
+    await expect(page.getByTestId("news-feed-item").first()).toBeVisible();
 
     const sizes = await page.evaluate(() => {
       function hit(el: Element) {
@@ -326,7 +326,7 @@ test.describe("defect E — one chip size on screen", () => {
         return { height, width, boxHeight: box.height };
       }
       const barChip = document.querySelector(".news-feed-tag-bar-chip")!;
-      const itemChip = document.querySelector("li.news-feed-item button.news-feed-tag-chip")!;
+      const itemChip = document.querySelector("[data-testid='news-feed-item'] button.news-feed-tag-chip")!;
       return {
         bar: { ...hit(barChip), text: barChip.textContent?.trim() },
         item: { ...hit(itemChip), text: itemChip.textContent?.trim() },
@@ -347,10 +347,10 @@ test.describe("defect F — the +N expander must not drop focus", () => {
   test("focus stays on a real control after the expander activates", async ({ page }) => {
     await stubFeed(page);
     await page.goto("/dashboard");
-    await expect(page.locator("li.news-feed-item").first()).toBeVisible();
+    await expect(page.getByTestId("news-feed-item").first()).toBeVisible();
 
     const more = page
-      .locator("li.news-feed-item")
+      .getByTestId("news-feed-item")
       .first()
       .getByRole("button", { name: /more tags/i });
     await more.focus();
@@ -360,7 +360,7 @@ test.describe("defect F — the +N expander must not drop focus", () => {
 
     const after = await page.evaluate(() => {
       const active = document.activeElement as HTMLElement | null;
-      const tagList = document.querySelector("li.news-feed-item div.news-feed-tags");
+      const tagList = document.querySelector("[data-testid='news-feed-item'] [data-testid='news-feed-tags']");
       return {
         tag: active?.tagName ?? null,
         text: active?.textContent?.trim().slice(0, 40) ?? null,

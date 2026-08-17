@@ -308,7 +308,7 @@ export default function DashboardNewsFeed() {
               const tagsExpanded = expandedTags.has(post.id);
 
               return (
-                <li key={post.id} className={`news-feed-item ${styles.item}`}>
+                <li key={post.id} data-testid="news-feed-item" className={`news-feed-item ${styles.item}`}>
                   <a className="news-feed-link" href={post.href} target="_blank" rel="noopener noreferrer">
                     <h3 className={`news-feed-headline ${styles.headline}`}>{post.title}</h3>
                   </a>
@@ -340,6 +340,7 @@ export default function DashboardNewsFeed() {
                   ) : null}
                   {postTags.length > 0 ? (
                     <div
+                      data-testid="news-feed-tags"
                       className={`news-feed-tags ${styles.tags}${tagsExpanded ? ` ${styles.tagsExpanded}` : ""}`}
                       ref={(node) => {
                         tagStripsRef.current.set(post.id, node);
@@ -376,8 +377,9 @@ export default function DashboardNewsFeed() {
                       ) : null}
                     </div>
                   ) : null}
-                  <div className={`news-feed-footer ${styles.footer}`}>
+                  <div data-testid="news-feed-footer" className={`news-feed-footer ${styles.footer}`}>
                     <a
+                      data-testid="news-feed-link-pill"
                       className={`news-feed-link-pill ${styles.linkPill}`}
                       href={post.href}
                       target="_blank"
@@ -386,7 +388,11 @@ export default function DashboardNewsFeed() {
                       <LinkIcon size={11} />
                       <span>Link</span>
                     </a>
-                    <span className={`news-feed-timestamp ${styles.timestamp}`} title={absolute}>
+                    <span
+                      data-testid="news-feed-timestamp"
+                      className={`news-feed-timestamp ${styles.timestamp}`}
+                      title={absolute}
+                    >
                       <span className={styles.tsCompact}>{compact}</span>
                       <span className={styles.tsFull}>
                         {relative}
