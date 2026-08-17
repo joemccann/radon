@@ -379,11 +379,12 @@ class TestExitCodes:
         assert code == cash_flow_sync.EXIT_OK
         assert _status_line(stdout)["class"] == "ok"
 
-    @pytest.mark.parametrize("throttle_code", ["1001", "1018", "1019"])
-    def test_throttle_exits_ten(self, credentials, writer, throttle_code):
+    def test_only_1018_takes_the_breaker_lane(self, credentials, writer):
+        """1018 is the ONLY documented rate limit, so it is the only code that
+        may reach the 24h/48h/72h/168h ladder."""
         body = (
             "<FlexStatementResponse><Status>Fail</Status>"
-            f"<ErrorCode>{throttle_code}</ErrorCode>"
+            "<ErrorCode>1018</ErrorCode>"
             "<ErrorMessage>Too many requests</ErrorMessage></FlexStatementResponse>"
         )
         with patch.object(cash_flow_sync, "urlopen") as mock_urlopen, \
@@ -394,7 +395,30 @@ class TestExitCodes:
         assert code == cash_flow_sync.EXIT_THROTTLE
         status = _status_line(stdout)
         assert status["class"] == "throttle"
-        assert status["code"] == throttle_code
+        assert status["code"] == "1018"
+
+    @pytest.mark.parametrize("transient_code", ["1001", "1009", "1019"])
+    def test_transient_codes_take_the_soft_lane_not_the_breaker(
+        self, credentials, writer, transient_code
+    ):
+        """These used to exit 10 and escalate a ladder toward a week-long
+        embargo. IBKR's own text for all three is "try again shortly", and 1019
+        is literally "generation in progress". The soft lane retries in minutes;
+        the breaker lane waits a day. That difference is the 10-day outage."""
+        body = (
+            "<FlexStatementResponse><Status>Fail</Status>"
+            f"<ErrorCode>{transient_code}</ErrorCode>"
+            "<ErrorMessage>Please try again shortly.</ErrorMessage>"
+            "</FlexStatementResponse>"
+        )
+        with patch.object(cash_flow_sync, "urlopen") as mock_urlopen, \
+             patch.object(cash_flow_sync.time, "sleep"):
+            mock_urlopen.side_effect = [_xml_response(body)] * 4
+            code, stdout, _ = _run("--no-file")
+
+        assert code != cash_flow_sync.EXIT_THROTTLE
+        assert code != cash_flow_sync.EXIT_FLEX_APP_ERROR  # not permanent either
+        assert _status_line(stdout)["class"] != "throttle"
 
     def test_permanent_flex_error_exits_eleven(self, credentials, writer):
         body = (

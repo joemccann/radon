@@ -33,7 +33,7 @@ Exit codes (the handler's classification contract — never classify a
 failure by substring-matching stderr again):
      0  success
      1  configuration error (missing token / query id / unreadable file)
-    10  Flex throttle (documented code 1001 / 1018 / 1019) — breaker ladder
+    10  Flex rate limit (code 1018 ONLY) — breaker ladder
     11  permanent Flex application error (auth, unknown query id, unknown
         error code). Retrying cannot flip it; do not spend more requests.
     12  statement never became ready inside the poll budget, or a transport
@@ -55,7 +55,7 @@ Cadence:
     feedback_flex_cash_transaction_lag.md.
 
 Throttle handling:
-    Documented Flex throttle codes (1001 / 1018 / 1019) raise
+    The one documented rate-limit code (1018) raises
     ``FlexThrottleError`` IMMEDIATELY — no internal retry, since each
     retry burns more of the sliding-window budget. Both legs are checked:
     a throttle returned on a GetStatement POLL used to be indistinguishable
@@ -158,12 +158,42 @@ def _normalize_date(raw: str) -> str:
     return raw
 
 
-# Documented throttle codes — every retry on these burns the sliding-window
-# budget further. We do NOT retry internally; the daemon handler's circuit
-# breaker waits 24h+ before the next attempt.
+# IBKR's error taxonomy, as published:
+#   https://www.ibkrguides.com/clientportal/performanceandstatements/flex3error.htm
+#
+#   1001  Statement could not be generated at this time. Please try again shortly.
+#   1009  The server is under heavy load. Statement could not be generated at
+#         this time. Please try again shortly.
+#   1018  Too many requests have been made from this token. Please try again
+#         shortly.  Limited to one request per second, 10 requests per minute
+#         (per token).
+#   1019  Statement generation in progress. Please try again shortly.
+#
+# ONE of these is a rate limit. This set previously held 1001, 1018 AND 1019,
+# and every one of them raised FlexThrottleError and escalated the local
+# 24h/48h/72h/168h ladder. 1019 is the ordinary NOT-READY response during
+# polling, so "still generating" bought a 24-hour backoff; 1001 is a transient
+# generation failure that IBKR tells you to retry shortly, and it escalated
+# toward a one-week embargo. That is the most plausible root cause of the
+# 10-day outage from 2026-08-06.
+#
+# Note also that IBKR publishes NO daily or multi-day cooldown. The documented
+# limit is 10 requests per minute and it clears in a minute; the ladder is
+# Radon-local policy and is far more conservative than the limit it models.
 _FLEX_THROTTLE_CODES = {
+    "1018",  # the only documented rate limit
+}
+
+# "Try again shortly" — transient server-side generation failures. These take
+# the SOFT lane (short bounded retry), never the breaker ladder.
+_FLEX_TRANSIENT_CODES = {
     "1001",  # Statement could not be generated at this time.
-    "1018",  # Too many requests have been made from this token.
+    "1009",  # The server is under heavy load.
+}
+
+# Not an error at all: the statement is still being built. The poll loop must
+# keep waiting rather than treating it as a failure of any kind.
+_FLEX_NOT_READY_CODES = {
     "1019",  # Statement generation in progress.
 }
 
@@ -238,6 +268,16 @@ class _FlexAppError(RuntimeError):
     """
 
 
+class _FlexTransientError(RuntimeError):
+    """IBKR could not generate the statement right now and said to retry.
+
+    Codes 1001 and 1009. Distinct from `_FlexAppError` because retrying DOES
+    flip these, and distinct from `FlexThrottleError` because they are not a
+    rate limit and must never escalate the breaker ladder. Conflating the three
+    is what turned "try again shortly" into a multi-day embargo.
+    """
+
+
 class _StatementNotReady(RuntimeError):
     """The poll budget expired before IBKR finished generating the
     statement. Retryable, but not today's problem — the next daily window
@@ -251,16 +291,26 @@ class _ConfigError(RuntimeError):
 
 
 def _flex_error_from(root: ET.Element, leg: str) -> Optional[BaseException]:
-    """Turn a Flex `<ErrorCode>` body into the right typed exception.
+    """Turn a Flex `<ErrorCode>` body into the right typed exception, or None.
 
-    Applied to BOTH legs. A 1018 returned on a GetStatement poll used to
-    be indistinguishable from "not ready", so a token that was ALREADY
-    throttled kept firing polls at full speed for the rest of the budget.
+    Applied to BOTH legs. A 1018 on a GetStatement poll used to be
+    indistinguishable from "not ready", so an already-throttled token kept
+    firing polls at full speed for the rest of the budget. That is still
+    handled -- 1018 raises on either leg.
+
+    The inverse mistake is the one this function now avoids: 1019 IS "not
+    ready". Returning any exception for it aborts a poll loop that should
+    simply keep waiting, and classifying it as a throttle bought a 24-hour
+    backoff for a statement that was seconds from being ready.
     """
     code_node = root.find(".//ErrorCode")
     if code_node is None or not (code_node.text or "").strip():
         return None
     code = (code_node.text or "").strip()
+    if code in _FLEX_NOT_READY_CODES and leg == "GetStatement":
+        # The statement is still being built. Not an error on the poll leg --
+        # returning one would abort a loop whose whole job is to wait.
+        return None
     msg_node = root.find(".//ErrorMessage")
     message = (
         (msg_node.text or "").strip()
@@ -270,6 +320,12 @@ def _flex_error_from(root: ET.Element, leg: str) -> Optional[BaseException]:
     detail = f"Flex {leg} failed (code {code}): {message}"
     if code in _FLEX_THROTTLE_CODES:
         return _flex_throttle_error_cls()(code, detail)
+    if code in _FLEX_TRANSIENT_CODES or code in _FLEX_NOT_READY_CODES:
+        # 1019 reaching this line means it came back on SendRequest, i.e. a
+        # generation is already in flight. Retryable, not permanent -- and
+        # emphatically not the "no ReferenceCode" hard error it used to fall
+        # through to, which is classified as never-retry.
+        return _FlexTransientError(detail)
     return _FlexAppError(detail)
 
 
@@ -277,7 +333,7 @@ def _send_request_once(token: str, query_id: str) -> str:
     """One SendRequest hit. Returns the ReferenceCode or raises.
 
     Raises:
-        FlexThrottleError    on documented throttle codes (1001/1018/1019)
+        FlexThrottleError    on the rate-limit code (1018)
         _FlexAppError        on any other structured Flex error
         Exception            on transport / parse failure
     """
@@ -298,7 +354,7 @@ def _send_request_once(token: str, query_id: str) -> str:
 def _request_reference_code(token: str, query_id: str) -> str:
     """Call SendRequest with a single bounded retry on transport blips only.
 
-    Throttle codes (1001/1018/1019) raise FlexThrottleError on the first
+    The rate-limit code (1018) raises FlexThrottleError on the first
     hit — no retry, since every retry pushes the sliding-window out
     further. Structured Flex application errors (auth, bad query id)
     fail fast — retrying won't flip them.
@@ -474,7 +530,7 @@ def fetch_statement_xml(
     """Fetch the raw Flex statement XML. One SendRequest, bounded polling.
 
     Raises:
-        FlexThrottleError    on Flex throttle codes 1001 / 1018 / 1019,
+        FlexThrottleError    on the Flex rate-limit code 1018,
                              from EITHER leg.
         _FlexAppError        on any other structured Flex error.
         _StatementNotReady   when the poll budget expires.
