@@ -57,7 +57,6 @@ export default defineConfig({
       exclude: [
         "**/*.test.ts",
         "**/node_modules/**",
-        "web/lib/use*.ts",        // React hooks need jsdom
         "web/lib/OrderActionsContext.tsx",
         "web/lib/TickerDetailContext.tsx",
         "web/lib/types.ts",       // Pure type definitions, no runtime code
