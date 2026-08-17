@@ -446,7 +446,16 @@ def test_sparse_then_enriched_ib_fill_is_not_a_conflict():
         },
     }
     assert upsert_position_execution_fact(sparse, db=db) is True
-    assert upsert_position_execution_fact(enriched, db=db) is False
+    # Tolerated drift converges (R-077): the enriched sync updates the row
+    # in place (perm_id reaches the ledger) instead of being dropped — still
+    # never a conflict, and idempotent on the next identical sync.
+    assert upsert_position_execution_fact(enriched, db=db) is True
+    assert upsert_position_execution_fact(dict(enriched), db=db) is False
+    row = db.execute(
+        "SELECT COUNT(*), MAX(perm_id) FROM position_execution_facts WHERE exec_id = ?",
+        (exec_id,),
+    ).fetchone()
+    assert tuple(row) == (1, 9001)
 
 
 def test_naive_and_offset_equivalent_fill_times_are_not_conflicts():
@@ -476,7 +485,10 @@ def test_avg_price_drift_without_explicit_price_is_not_a_conflict():
     drifted.pop("price")
     drifted["avgPrice"] = 4.80
     assert upsert_position_execution_fact(first, db=db) is True
-    assert upsert_position_execution_fact(drifted, db=db) is False
+    # Tolerated drift converges (R-077): the drifted payload is adopted in
+    # place — still never a conflict, and idempotent once adopted.
+    assert upsert_position_execution_fact(drifted, db=db) is True
+    assert upsert_position_execution_fact(dict(drifted), db=db) is False
 
 
 def test_ib_exec_correction_invalidates_observed_basis_instead_of_double_counting():
