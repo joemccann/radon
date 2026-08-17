@@ -44,3 +44,9 @@ a clean `origin/main` worktree produces the identical `10 failed, 848 passed,
 4 skipped`, and the failure LIST is byte-identical across all three rounds
 (`diff` of the `FAILED` lines: no output). Cause is `shutil.which("sha256sum")`
 returning None on darwin. Filed under NEW_FINDINGS; green in CI on ubuntu.
+
+## T-072 components half — 2026-08-17 (operator delegate decided option (a): honest rebase)
+
+| Task | Status | Commit | Evidence |
+|---|---|---|---|
+| T-072 | DONE (components half; hooks half landed earlier in 73ac14a3) | (this commit) | `web/components/**/*.tsx` added to coverage `include` (`vitest.config.ts:54`), widening the measured surface from 14,722 to **25,807 lines**. MEASURED with components included: lines **78.06%** (20147/25807), functions **73.78%** (4475/6065), branches **65.77%** (18259/27760), statements 75.18% (22432/29835). RED: CI invocation `bunx vitest run --config vitest.config.ts --coverage` under the OLD thresholds → exit 1, `ERROR: Coverage for functions (73.78%) does not meet global threshold (78%)` (6716 tests all passing — the red is the gate, not the suite). THRESHOLD REBASE (T-050 rule — reported, not silent): **functions 78 -> 71** (= floor(73.78 − 2)); this is a ONE-TIME honest re-baseline for the roughly-doubled surface, to be ratcheted back up as component tests land. Lines (78.06 vs 75) and branches (65.77 vs 65) still clear their gates and are UNCHANGED. GREEN: same CI invocation with the rebased thresholds → exit 0, 629 files / 6716 tests passed (measured 78.04/73.73/65.77 on the green run — sub-0.1 run-to-run jitter). |
