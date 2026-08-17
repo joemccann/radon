@@ -167,7 +167,7 @@ export type WSDepthBatchMessage = {
 export type WSDepthUnavailableMessage = {
   type: "depth-unavailable";
   symbol: string;
-  reason: "no-entitlement" | "futures-no-depth" | "recycled";
+  reason: "no-entitlement" | "futures-no-depth" | "recycled" | "depth-budget";
   code?: number;
 };
 

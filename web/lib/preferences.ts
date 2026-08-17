@@ -59,6 +59,11 @@ export class PreferencesRequestError extends Error {
 
 const PREFERENCES_ENDPOINT = "/api/preferences";
 
+// Above the proxy's 15s upstream budget (web/app/api/preferences/route.ts) so
+// the route's own timeout error normally arrives first; this signal is the
+// backstop that keeps a wedged /api/preferences from hanging the UI forever.
+const PREFERENCES_TIMEOUT_MS = 20_000;
+
 function errorFromBody(status: number, body: unknown): PreferencesRequestError {
   const payload = (body ?? {}) as Record<string, unknown>;
   const code = typeof payload.code === "string" ? payload.code : "UPSTREAM_ERROR";
@@ -80,7 +85,13 @@ async function readJson(res: Response): Promise<unknown> {
 }
 
 async function requestJson<T>(input: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(input, { cache: "no-store", ...init });
+  // Same shape as radonFetchText: a timeout signal merged with any caller
+  // signal, so no request can outlive PREFERENCES_TIMEOUT_MS.
+  const timeoutSignal = AbortSignal.timeout(PREFERENCES_TIMEOUT_MS);
+  const signal = init?.signal
+    ? AbortSignal.any([init.signal, timeoutSignal])
+    : timeoutSignal;
+  const res = await fetch(input, { cache: "no-store", ...init, signal });
   const body = await readJson(res);
   if (!res.ok) {
     throw errorFromBody(res.status, body);

@@ -284,7 +284,7 @@ function LegOrderForm({
           ? `Order placed: ${action} ${quantity} ${ticker} Stock @ ${fmtPrice(executionPrice)}`
           : `Order placed: ${action} ${quantity}x ${ticker} ${strikeStr}${right} @ ${fmtPrice(executionPrice)}`;
       }}
-      onSuccessToast={(message) => orderActions?.pushNotification({ type: "success", message })}
+      onSuccessToast={(message, tone) => orderActions?.pushNotification({ type: tone, message })}
       suppressInlineSuccess
     />
   );

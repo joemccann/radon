@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -57,9 +58,12 @@ FALLBACK_PATH = _SCRIPTS_DIR.parent / "data" / "host_metrics_fallback.jsonl"
 # growing without bound.
 FALLBACK_MAX_LINES = 4096
 
+DISK_USAGE_PATH = "/"
+
 HOST_METRICS_INSERT_SQL = (
     "INSERT INTO host_metrics (taken_at, cpu_pct, mem_used_mb, mem_avail_mb, "
-    "load1, swap_used_mb, loop_lag_ms, units_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    "load1, swap_used_mb, loop_lag_ms, disk_pct, units_json) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
 )
 HOST_METRICS_PRUNE_SQL = "DELETE FROM host_metrics WHERE taken_at < ?"
 
@@ -71,6 +75,7 @@ ROW_COLUMNS = (
     "load1",
     "swap_used_mb",
     "loop_lag_ms",
+    "disk_pct",
     "units_json",
 )
 
@@ -166,6 +171,14 @@ def parse_units_blob(text: str) -> list[dict]:
     return units
 
 
+def disk_pct_from_usage(total: int, used: int) -> float | None:
+    """Root-fs used % — R-069: CPU/mem/swap/load alone let the disk fill
+    silently. None when total is nonsense."""
+    if total <= 0:
+        return None
+    return round(100.0 * used / total, 2)
+
+
 def parse_loop_lag(payload) -> float | None:
     if not isinstance(payload, dict):
         return None
@@ -198,6 +211,16 @@ def read_units() -> list[dict]:
         return parse_units_blob(result.stdout)
     except Exception:
         return []
+
+
+def read_disk_pct() -> float | None:
+    """Root-fs usage via shutil.disk_usage. None when unreadable — NULL in
+    the row is itself a signal, matching read_loop_lag."""
+    try:
+        usage = shutil.disk_usage(DISK_USAGE_PATH)
+    except OSError:
+        return None
+    return disk_pct_from_usage(usage.total, usage.used)
 
 
 def read_loop_lag() -> float | None:
@@ -296,6 +319,7 @@ def collect_row(now: datetime) -> dict:
         "load1": parse_loadavg(Path("/proc/loadavg").read_text()),
         "swap_used_mb": swap_used_mb,
         "loop_lag_ms": read_loop_lag(),
+        "disk_pct": read_disk_pct(),
         "units_json": json.dumps(read_units()),
     }
 

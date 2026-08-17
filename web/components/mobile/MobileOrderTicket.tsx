@@ -25,6 +25,7 @@ import BuySellRow from "./BuySellRow";
 import BottomSheet from "./BottomSheet";
 import ComboSkewPanel from "@/components/ComboSkewPanel";
 import OrderErrorBanner from "@/components/OrderErrorBanner";
+import { placeOrderFeedback, type PlaceOrderFeedback } from "@/lib/orders/placeOrderFeedback";
 import {
   type IbOrderType,
   IB_ORDER_TYPES,
@@ -164,7 +165,7 @@ export default function MobileOrderTicket({
   const [confirmStep, setConfirmStep] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
+  const [success, setSuccess] = useState<PlaceOrderFeedback | null>(null);
   const [riskState, setRiskState] = useState<OrderRiskState | null>(null);
 
   const isCombo = legs.length > 1;
@@ -418,15 +419,21 @@ export default function MobileOrderTicket({
       if (!res.ok) {
         setError(json.error || "Order placement failed");
       } else {
-        setSuccess(`Placed ${structure || "Order"} on ${ticker} @ ${fmtPrice(reviewPrice)}`);
+        const feedback = placeOrderFeedback(
+          json,
+          `Placed ${structure || "Order"} on ${ticker} @ ${fmtPrice(reviewPrice)}`,
+        );
+        setSuccess(feedback);
         setConfirmStep(false);
-        // Keep success message visible while the user reads it; clear legs +
+        // Keep the message visible while the user reads it; clear legs +
         // close the sheet together after a brief delay so the parent doesn't
         // unmount us prematurely (the parent open flag depends on legs.length).
+        // A suppressed duplicate needs longer: the operator must register that
+        // the order was NOT sent again before the sheet disappears.
         setTimeout(() => {
           onClearLegs();
           onClose();
-        }, 800);
+        }, feedback.deduplicated ? 4_000 : 800);
       }
     } catch {
       setError("Network error placing order");
@@ -476,8 +483,11 @@ export default function MobileOrderTicket({
     <>
       <OrderErrorBanner error={error} />
       {success ? (
-        <div className="mobile-ticket__success" data-testid="mobile-order-ticket-success">
-          {success}
+        <div
+          className={`mobile-ticket__success${success.deduplicated ? " mobile-ticket__success--dedup" : ""}`}
+          data-testid="mobile-order-ticket-success"
+        >
+          {success.message}
         </div>
       ) : null}
     </>

@@ -57,6 +57,7 @@ const UNAVAILABLE = { initMargin: null, maintMargin: null, source: "unavailable"
 export async function POST(request: Request): Promise<Response> {
   const access = await requireRouteAccess(request, {
     operatorOnly: true,
+    demoBlockadeRoute: true,
     rate: { key: "orders/whatif:route", limit: 10, windowMs: 60_000 },
     durableRateTier: "C",
   });

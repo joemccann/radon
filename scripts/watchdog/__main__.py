@@ -73,7 +73,7 @@ def _handle_snapshot_unavailable(*, bucket: str, now: datetime, reason: str) -> 
     units alarm, external-probe read, and every page were skipped exactly
     when the DB was the outage (R-021).
     """
-    from scripts.watchdog import external_probe, notify, units
+    from scripts.watchdog import disk, external_probe, notify, units
 
     print(f"[watchdog] bucket={bucket} SNAPSHOT UNAVAILABLE: {reason}")
 
@@ -87,6 +87,7 @@ def _handle_snapshot_unavailable(*, bucket: str, now: datetime, reason: str) -> 
         try:
             outcomes = list(units.check_units(now=now))
             outcomes.append(external_probe.check_external_probe(now=now))
+            outcomes.append(disk.check_disk(now=now))
             for outcome in outcomes:
                 print(f"  {outcome.service:24s} {outcome.status:8s} fired={outcome.fired}")
                 if outcome.fired:
@@ -153,7 +154,7 @@ def _cmd_bucket(args: argparse.Namespace) -> int:
     # one probe per 5 min is enough and keeps the other buckets pure
     # service_health checks. ALERT-ONLY; see scripts/watchdog/units.py.
     if args.bucket == "continuous":
-        from scripts.watchdog import external_probe, units
+        from scripts.watchdog import disk, external_probe, units
         unit_outcomes = units.check_units(now=now)
         observed_outcomes.extend(unit_outcomes)
         for outcome in unit_outcomes:
@@ -164,6 +165,13 @@ def _cmd_bucket(args: argparse.Namespace) -> int:
         print(
             f"  {probe_outcome.service:24s} {probe_outcome.status:8s} "
             f"fired={probe_outcome.fired}"
+        )
+
+        disk_outcome = disk.check_disk(now=now)
+        observed_outcomes.append(disk_outcome)
+        print(
+            f"  {disk_outcome.service:24s} {disk_outcome.status:8s} "
+            f"fired={disk_outcome.fired}"
         )
 
     fired = [outcome for outcome in observed_outcomes if outcome.fired]

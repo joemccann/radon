@@ -11,13 +11,19 @@ WorkingDirectory=/home/radon/radon
 EnvironmentFile=/home/radon/radon-cloud/.env
 Environment=RADON_DB_NO_REPLICA=1
 ExecCondition=/usr/bin/test -f /home/radon/radon/scripts/db_retention_sweep.py
-ExecStart=/usr/bin/flock -w 7500 /run/lock/radon-db-maintenance.lock /home/radon/radon/.venv/bin/python /home/radon/radon/scripts/db_retention_sweep.py
+ExecStart=/usr/bin/flock -w 7500 -E 75 /run/lock/radon-db-maintenance.lock /home/radon/radon/.venv/bin/python /home/radon/radon/scripts/db_retention_sweep.py
+# R-067: lock loser exits 75 (EX_TEMPFAIL, reserved for flock) and defers to
+# its next timer slot instead of entering failed; the 48h db-retention
+# service_health window still pages if deferral persists.
+SuccessExitStatus=75
 StandardOutput=journal
 StandardError=journal
 # Unbounded libsql client — process bound is the real one. Normal sweep is
-# seconds to a few minutes once tables are already near retention; 30m
-# absorbs a first-run catch-up on gex/vcg history.
-TimeoutStartSec=10000
+# seconds to a few minutes once tables are already near retention.
+# 17500 = full 7500s lock wait + the 10000s work ceiling (which absorbs a
+# first-run catch-up on gex/vcg history), so winning the lock late never
+# eats the work budget.
+TimeoutStartSec=17500
 
 [Install]
 WantedBy=multi-user.target

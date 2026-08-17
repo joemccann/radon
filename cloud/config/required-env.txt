@@ -29,6 +29,11 @@ CLERK_ISSUER
 CLERK_JWKS_URL
 NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
 ALLOWED_USER_IDS
+# Fail-closed interlock (REL-029/R-054): with this set to 1, a blanked or
+# typo'd ALLOWED_USER_IDS rejects every principal instead of admitting any
+# valid Clerk JWT. Enforced here so the deploy preflight refuses to ship
+# without it.
+RADON_REQUIRE_OPERATOR_ALLOWLIST
 RADON_PROBE_FRESHNESS_TOKEN
 # RADON_HEALTH_STATUS_TOKEN — shared bearer that buys full /status detail from
 # the health daemon THROUGH the public edge. Deliberately NOT a required key:

@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { WebSocket } from "ws";
 import { isUsTradingDay } from "@/lib/serviceHealthWindows";
+import { countedUwFetch } from "@/lib/uwCountedFetch";
 
 /**
  * Fetch previous-day closing prices for stock symbols.
@@ -138,7 +139,7 @@ async function fetchFromUW(symbol: string): Promise<number | null> {
   const token = process.env.UW_TOKEN;
   if (!token) return null;
   try {
-    const res = await fetch(
+    const res = await countedUwFetch(
       `https://api.unusualwhales.com/api/stock/${encodeURIComponent(symbol)}/quote`,
       {
         headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },

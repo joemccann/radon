@@ -177,3 +177,29 @@ class TestGitignore:
         lines = gitignore.read_text().splitlines()
         env_patterns = [line.strip() for line in lines if not line.strip().startswith("#")]
         assert ".env" in env_patterns, ".gitignore must include .env"
+
+
+class TestOperatorAllowlistInterlock:
+    """REL-029 (R-054): the fail-closed allowlist interlock must be enforced.
+
+    RADON_REQUIRE_OPERATOR_ALLOWLIST=1 is asserted in auth code comments but
+    was absent from the deploy contract — a blanked/typo'd ALLOWED_USER_IDS
+    on radon-api would silently let any valid Clerk JWT through. The key
+    belongs in required-env.txt so check-env.py fails the deploy preflight
+    when it is missing or empty.
+    """
+
+    def _contract_keys(self, root):
+        contract = (root / "config" / "required-env.txt").read_text()
+        return [
+            line.strip()
+            for line in contract.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+
+    def test_required_env_contract_contains_interlock_key(self, root):
+        assert "RADON_REQUIRE_OPERATOR_ALLOWLIST" in self._contract_keys(root)
+
+    def test_env_example_pins_interlock_on(self, root):
+        env_vars = parse_env_vars(read_env_example(root))
+        assert env_vars.get("RADON_REQUIRE_OPERATOR_ALLOWLIST") == "1"

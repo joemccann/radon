@@ -78,15 +78,18 @@ def _get_pool(request: Request):
     return pool
 
 
-async def _dispose_after_operation(task: asyncio.Task, client) -> None:
+async def _reap_timed_out_worker(task: asyncio.Task) -> None:
+    """Consume the timed-out worker's eventual result or exception.
+
+    The retired client's disconnect is NOT here: ``pool.retire`` disposes it
+    out-of-band so the role's fixed client_id frees while the worker is still
+    wedged — waiting on the hung awaitable kept the zombie holding the id and
+    every reconnect was rejected by IB as a duplicate (R-060).
+    """
     try:
         await asyncio.shield(task)
     except BaseException:
         pass
-    try:
-        await asyncio.to_thread(client.disconnect)
-    except Exception:
-        logger.warning("failed to disconnect retired IB data client", exc_info=True)
 
 
 async def _bounded_pool_call(
@@ -98,7 +101,7 @@ async def _bounded_pool_call(
         return await asyncio.wait_for(asyncio.shield(pending), timeout=timeout)
     except asyncio.TimeoutError as exc:
         await pool.retire(role, client)
-        asyncio.create_task(_dispose_after_operation(pending, client))
+        asyncio.create_task(_reap_timed_out_worker(pending))
         raise HTTPException(status_code=504, detail="IB operation timed out") from exc
 
 

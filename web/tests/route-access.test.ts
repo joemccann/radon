@@ -22,7 +22,20 @@ describe("requireRouteAccess", () => {
   it("does not turn a resolved signed-out test auth result into a test principal", async () => {
     const result = await requireRouteAccess(request, {}, {
       authFn: async () => ({ userId: null }),
-      env: { NODE_ENV: "test" },
+      env: {},
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.response.status).toBe(401);
+  });
+
+  it("cannot open the test-auth seam through a runtime env object", async () => {
+    // The seam must key on the build-time `process.env.NODE_ENV` literal, not
+    // on the runtime `deps.env` read — a production process handed
+    // NODE_ENV=test (or any injected env object) must still 401.
+    vi.stubEnv("NODE_ENV", "production");
+    const result = await requireRouteAccess(request, {}, {
+      authFn: async () => { throw new Error("no Clerk request scope"); },
+      env: { NODE_ENV: "test" } as Record<string, string>,
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.response.status).toBe(401);
@@ -94,7 +107,7 @@ describe("requireRouteAccess", () => {
       rate: { key: "portfolio:route", limit: 20, windowMs: 60_000 },
     }, {
       authFn: async () => ({ userId: "operator" }),
-      env: { NODE_ENV: "production", ALLOWED_USER_IDS: "operator" },
+      env: { ALLOWED_USER_IDS: "operator" },
       rateLimitFn: () => ({ ok: true, retryAfterSec: 0 }),
       durableRateLimitFn,
     });
@@ -148,11 +161,71 @@ describe("requireRouteAccess", () => {
       durableRateTier: "B",
     }, {
       authFn: async () => ({ userId: "operator" }),
-      env: { NODE_ENV: "production", ALLOWED_USER_IDS: "operator" },
+      env: { ALLOWED_USER_IDS: "operator" },
       durableRateLimitFn,
     });
     expect(result.ok).toBe(true);
     expect(durableRateLimitFn).not.toHaveBeenCalled();
+  });
+
+  it("admits an active demo user through operatorOnly on a demo-blockade route", async () => {
+    // demo.radon.run runs with ALLOWED_USER_IDS absent by design; the order
+    // routes carry their own demo blockade (paper path / explicit refusal),
+    // which is unreachable if operatorOnly 403s every demo user first.
+    const future = new Date(Date.now() + 86_400_000).toISOString();
+    const result = await requireRouteAccess(request, {
+      operatorOnly: true,
+      demoBlockadeRoute: true,
+    }, {
+      authFn: async () => ({
+        userId: "user-demo",
+        sessionClaims: { metadata: { demoRole: "trial", demoTrialExpiresAt: future } },
+      }),
+      env: { NEXT_PUBLIC_RADON_DEMO: "1" },
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.principal.kind).toBe("demo");
+  });
+
+  it("rejects an expired demo user on a demo-blockade route", async () => {
+    const past = new Date(Date.now() - 86_400_000).toISOString();
+    const result = await requireRouteAccess(request, {
+      operatorOnly: true,
+      demoBlockadeRoute: true,
+    }, {
+      authFn: async () => ({
+        userId: "user-demo",
+        sessionClaims: { metadata: { demoRole: "trial", demoTrialExpiresAt: past } },
+      }),
+      env: { NEXT_PUBLIC_RADON_DEMO: "1" },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.response.status).toBe(403);
+  });
+
+  it("keeps demo-blockade routes fail-closed off the demo deployment", async () => {
+    const result = await requireRouteAccess(request, {
+      operatorOnly: true,
+      demoBlockadeRoute: true,
+    }, {
+      authFn: async () => ({ userId: "user-dev" }),
+      env: {},
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.response.status).toBe(403);
+  });
+
+  it("keeps operatorOnly closed to demo users on routes without the blockade", async () => {
+    const future = new Date(Date.now() + 86_400_000).toISOString();
+    const result = await requireRouteAccess(request, { operatorOnly: true }, {
+      authFn: async () => ({
+        userId: "user-demo",
+        sessionClaims: { metadata: { demoRole: "trial", demoTrialExpiresAt: future } },
+      }),
+      env: { NEXT_PUBLIC_RADON_DEMO: "1" },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.response.status).toBe(403);
   });
 
   it("fails closed when the demo durable limiter errors", async () => {

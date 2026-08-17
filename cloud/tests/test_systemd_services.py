@@ -397,6 +397,52 @@ class TestSecurityRemediationSchedules:
         lock_paths = [value.split("flock", 1)[1].split()[1] for value in execs]
         assert len(set(lock_paths)) == 1
 
+    def test_db_maintenance_flock_loser_defers_instead_of_failing(self, unit):
+        """R-067: the /run/lock/radon-db-maintenance.lock loser must defer to
+        its next timer slot, not enter failed.
+
+        Every peer's TimeoutStartSec exceeds the 7500s flock wait, so a
+        long-holding peer used to time the waiter's flock out -> exit 1 ->
+        Result=failed -> P1 page for pure lock contention. flock -E 75
+        (EX_TEMPFAIL) + SuccessExitStatus=75 turns the lock-timeout into a
+        clean deferral; the job's own service_health window (48h) still
+        surfaces persistent deferral.
+        """
+        for name in (
+            "radon-db-backup.service",
+            "radon-db-retention.service",
+            "radon-portfolio-archive.service",
+        ):
+            svc = unit(name)["Service"]
+            assert "-E 75" in svc["execstart"], (
+                f"{name}: flock needs -E 75 so a lock timeout is "
+                "distinguishable from the job's own failure"
+            )
+            assert svc.get("successexitstatus") == "75", (
+                f"{name}: SuccessExitStatus=75 must mark the lock-timeout "
+                "deferral as success (unit ends inactive, not failed)"
+            )
+
+    def test_db_maintenance_lock_wait_leaves_full_work_budget(self, unit):
+        """R-067: acquiring the lock late must not eat the work budget.
+
+        TimeoutStartSec has to cover the full flock wait PLUS the job's own
+        work ceiling, otherwise a waiter that wins the lock near the end of
+        its wait is killed mid-work.
+        """
+        work_budgets = {
+            "radon-db-backup.service": 12000,
+            "radon-db-retention.service": 10000,
+            "radon-portfolio-archive.service": 8000,
+        }
+        for name, work in work_budgets.items():
+            svc = unit(name)["Service"]
+            wait = int(svc["execstart"].split("-w", 1)[1].split()[0])
+            assert int(svc["timeoutstartsec"]) >= wait + work, (
+                f"{name}: TimeoutStartSec must be >= flock wait ({wait}s) "
+                f"+ work budget ({work}s)"
+            )
+
     def test_one_minute_skew_timer_does_not_trip_start_limit(self, unit):
         assert int(unit("radon-skew.service")["Unit"]["startlimitburst"]) >= 10
 
@@ -433,6 +479,25 @@ class TestSkew:
         assert "*-*-* 21:45:00 UTC" in raw
         assert timer.get("persistent") == "false"
 
+
+
+class TestSkew2d:
+    """R-066: the derived skew2d job must survive a parked parent.
+
+    Requires=radon-skew.service makes a parent parked by its own
+    StartLimitBurst brake fail every 21:50 UTC skew2d fire with a
+    dependency error. Wants= keeps the start-attempt ordering without
+    hard-failing the child when the parent cannot be started.
+    """
+
+    def test_parent_dependency_is_wants_not_requires(self, unit):
+        u = unit("radon-skew2d.service")["Unit"]
+        assert "radon-skew.service" in u.get("wants", ""), (
+            "radon-skew2d.service must Wants= its parent so a parked "
+            "radon-skew cannot dependency-fail the derived job"
+        )
+        assert "radon-skew.service" not in u.get("requires", "")
+        assert "radon-skew.service" in u["after"]
 
 
 class TestMediaBackup:
@@ -770,6 +835,27 @@ class TestBpiScanBudget:
         assert "Mon..Fri *-*-* 21:30:00 UTC" in raw
         assert "Mon..Fri *-*-* 23:30:00 UTC" in raw
         assert "Tue..Sat *-*-* 11:00:00 UTC" in raw
+
+    def test_start_budget_ends_before_the_2330_catchup_fire(self, unit):
+        """R-071: a still-activating oneshot swallows its own timer fires.
+
+        The 23:30 UTC catch-up exists precisely to recover a lagging 21:30
+        run, but TimeoutStartSec=9000 (150 min) let a slow/tarpitted 21:30
+        run still be activating at 23:30, so systemd dropped the catch-up
+        fire on the floor. The budget must end before the 7200s inter-fire
+        gap, worst-compressed by RandomizedDelaySec=120 on the first fire
+        (7200 - 120 = 7080s), while still covering the worst measured
+        tarpitted sweep (105 min = 6300s from the 2026-07-27 follow-up).
+        """
+        svc = unit("radon-bpi.service")["Service"]
+        budget = int(svc["timeoutstartsec"])
+        assert budget <= 7200 - 120, (
+            "radon-bpi TimeoutStartSec must end before the 23:30 UTC "
+            "catch-up fire (21:30 fire delayed up to RandomizedDelaySec=120)"
+        )
+        assert budget >= 6300, (
+            "budget must still cover the worst measured tarpitted sweep"
+        )
 
 
 class TestLeapGarchScanBudget:

@@ -15,14 +15,21 @@ UMask=0077
 WorkingDirectory=/home/radon/radon
 EnvironmentFile=/home/radon/radon-cloud/.env
 Environment=RADON_DB_NO_REPLICA=1
-ExecStart=/usr/bin/flock -w 7500 /run/lock/radon-db-maintenance.lock /home/radon/radon/.venv/bin/python /home/radon/radon/cloud/scripts/db_backup.py
+ExecStart=/usr/bin/flock -w 7500 -E 75 /run/lock/radon-db-maintenance.lock /home/radon/radon/.venv/bin/python /home/radon/radon/cloud/scripts/db_backup.py
+# R-067: a lock loser (peer still holding /run/lock/radon-db-maintenance.lock
+# past the 7500s wait) exits 75 (EX_TEMPFAIL) and defers to its next timer
+# slot instead of entering failed; 75 is reserved for flock — db_backup.py
+# never exits with it. The 48h db-backup service_health window still pages
+# if deferral persists.
+SuccessExitStatus=75
 StandardOutput=journal
 StandardError=journal
 # libsql_experimental exposes NO client-side timeouts (DUR-09); this
 # process-level bound is the only real one for a wedged cloud connection.
 # The DB is ~1.4 GB and direct-to-cloud reads run ~1 MB/s, so a healthy
-# full dump takes ~20-25 min; 1h is ~2.5x normal.
-TimeoutStartSec=12000
+# full dump takes ~20-25 min. 19500 = full 7500s lock wait + the 12000s
+# work ceiling, so winning the lock late never eats the work budget.
+TimeoutStartSec=19500
 
 [Install]
 WantedBy=multi-user.target

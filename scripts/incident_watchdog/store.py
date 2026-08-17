@@ -13,6 +13,8 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+from .classify import CASE_PROBES
+
 SCHEMA = "radon.incident/1"
 RUNBOOK = "docs/incident-runbook.md"
 PLAYBOOK = ".claude/skills/incident-response/SKILL.md"
@@ -50,6 +52,7 @@ def _new_payload(incident: dict, now: datetime) -> dict:
         "resolved_at": None,
         "observations": 1,
         "fingerprint": incident["fingerprint"],
+        "probes": list(incident.get("probes", [])),
         "evidence": incident.get("evidence", {}),
         "runbook": f"{RUNBOOK}#{incident['case_id']}",
         "playbook": PLAYBOOK,
@@ -57,10 +60,30 @@ def _new_payload(incident: dict, now: datetime) -> dict:
     }
 
 
+def _bearing_probes(payload: dict) -> tuple[str, ...] | None:
+    probes = payload.get("probes")
+    if probes:
+        return tuple(probes)
+    return CASE_PROBES.get(payload.get("case_id"))
+
+
+def _resolution_blocked(payload: dict, indeterminate_probes: set[str]) -> bool:
+    """An indeterminate probe is not evidence its own condition recovered —
+    but it says nothing about incidents observed by other probes, so it must
+    not latch them (R-065)."""
+    probes = _bearing_probes(payload)
+    if probes is None:
+        return bool(indeterminate_probes)
+    return any(name in indeterminate_probes for name in probes)
+
+
 def record_cycle(incidents: list[dict], directory: Path | str,
-                 now: datetime, *, allow_resolve: bool = True) -> dict:
+                 now: datetime, *,
+                 indeterminate_probes: set[str] = frozenset()) -> dict:
     """Persist one watchdog cycle. Returns {opened, updated, resolved} lists
-    of file paths (as strings)."""
+    of file paths (as strings). ``indeterminate_probes`` names the probes
+    whose state was ``unknown`` this cycle: an open incident resolves only
+    when every probe bearing on it observed definitively."""
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     open_by_fingerprint = _open_incidents(directory)
@@ -91,12 +114,12 @@ def record_cycle(incidents: list[dict], directory: Path | str,
         opened.append(str(path))
 
     resolved: list[str] = []
-    if not allow_resolve:
-        return {"opened": opened, "updated": updated, "resolved": resolved}
     for fingerprint, path in open_by_fingerprint.items():
         if fingerprint in seen:
             continue
         payload = json.loads(path.read_text())
+        if _resolution_blocked(payload, indeterminate_probes):
+            continue
         payload["status"] = "resolved"
         payload["resolved_at"] = now.isoformat()
         _write(path, payload)

@@ -109,6 +109,7 @@ class IBPool:
         self._connected: Dict[str, bool] = {}
         self._lifecycle_lock = asyncio.Lock()
         self._lifecycle_transition = False
+        self._disposals: set = set()
 
         for role in POOL_ROLES:
             self._locks[role] = asyncio.Lock()
@@ -217,13 +218,34 @@ class IBPool:
         return _PoolContext(self, role)
 
     async def retire(self, role: str, client: IBClient) -> bool:
-        """Remove a client still owned by a timed-out worker from circulation."""
-        if self._clients.get(role) is not client:
-            return False
-        self._clients.pop(role, None)
-        self._connected[role] = False
-        logger.warning("IB pool: retired quarantined %s client", role)
-        return True
+        """Remove a client still owned by a timed-out worker from circulation.
+
+        Disposal must NOT wait on the timed-out worker: the zombie holds the
+        role's fixed client_id, so the disconnect runs out-of-band immediately
+        — otherwise the next reconnect is rejected by IB as a duplicate id.
+        """
+        was_current = self._clients.get(role) is client
+        if was_current:
+            self._clients.pop(role, None)
+            self._connected[role] = False
+            logger.warning("IB pool: retired quarantined %s client", role)
+        self._dispose_out_of_band(role, client)
+        return was_current
+
+    def _dispose_out_of_band(self, role: str, client: IBClient) -> None:
+        """Disconnect a retired client without waiting on its wedged worker."""
+        task = asyncio.create_task(asyncio.to_thread(client.disconnect))
+        self._disposals.add(task)
+
+        def _finalize(done: asyncio.Task) -> None:
+            self._disposals.discard(done)
+            if not done.cancelled() and done.exception() is not None:
+                logger.warning(
+                    "IB pool: retired %s client disconnect failed: %s",
+                    role, done.exception(),
+                )
+
+        task.add_done_callback(_finalize)
 
     async def _reconnect(self, role: str) -> bool:
         """Attempt to reconnect a disconnected role."""
@@ -246,6 +268,26 @@ class IBPool:
             self._connected[role] = False
             logger.warning("IB pool: %s reconnect failed: %s", role, e)
             return False
+
+    async def reconnect_roles(self, roles) -> Dict[str, bool]:
+        """Reconnect only the given roles; live roles keep their sessions.
+
+        Role-scoped counterpart to ``reconnect_all`` for the stuck-single-role
+        case (R-060): a wedged ``data`` slot must not tear down live
+        ``orders``/``sync`` sessions — reconnect churn risks Gateway 2FA cycles.
+        """
+        status: Dict[str, bool] = {}
+        for i, role in enumerate(roles):
+            if role not in POOL_ROLES:
+                raise ValueError(
+                    f"Unknown pool role: {role}. Valid: {list(POOL_ROLES.keys())}"
+                )
+            # IB Gateway rate-limits rapid successive connections — stagger by 1s
+            if i > 0:
+                await asyncio.sleep(1)
+            async with self._locks[role]:
+                status[role] = await self._reconnect(role)
+        return status
 
     async def reconnect_all(self) -> Dict[str, bool]:
         """Drop and re-establish every pool role. Idempotent.

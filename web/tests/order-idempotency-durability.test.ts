@@ -72,7 +72,10 @@ describe("R-043 — idempotency survives a process restart", () => {
     expect(placement).toHaveBeenCalledTimes(1);
   });
 
-  it("still honours the durable content-hash TTL after a restart, then recovers", async () => {
+  it("still honours the durable retention window after a restart, then recovers", async () => {
+    // Retention is max(ttlMs, INDETERMINATE_RETENTION_MS): the short content-hash
+    // TTL (R-051) never shrinks the indeterminate hold below the floor.
+    const retention = Math.max(CONTENT_HASH_TTL_MS, INDETERMINATE_RETENTION_MS);
     vi.useFakeTimers();
     const placement = vi
       .fn()
@@ -82,7 +85,7 @@ describe("R-043 — idempotency survives a process restart", () => {
     await rejection(runIdempotentOrder("k", CONTENT_HASH_TTL_MS, placement));
     __restartOrderIdempotencyForTests();
 
-    vi.advanceTimersByTime(CONTENT_HASH_TTL_MS - 1_000);
+    vi.advanceTimersByTime(retention - 1_000);
     const stillHeld = await rejection(
       runIdempotentOrder("k", CONTENT_HASH_TTL_MS, placement),
     );

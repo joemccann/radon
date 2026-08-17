@@ -358,15 +358,20 @@ async def _recover_stuck_pool_guarded() -> None:
     # escalate when the Gateway probe says authenticated yet the pool is STILL
     # stuck (reconnect ran but didn't take). Re-derive that exact signature.
     from api.ib_gateway import (
-        _pool_has_disconnected_slot,
+        _pool_disconnected_roles,
         _pool_has_connected_accounted_slot,
         _probe_authenticated,
     )
 
-    if not _pool_has_disconnected_slot(ib_pool):
+    stuck_roles = _pool_disconnected_roles(ib_pool)
+    if not stuck_roles:
         _pool_recovery_state["consecutive_failures"] = 0
         return
-    if _pool_has_connected_accounted_slot(ib_pool):
+    # Scope the accounted check to the STUCK roles: an ANY-role check let
+    # healthy orders/sync slots reset the ladder while the data role stayed
+    # wedged forever (R-060). Only a re-read showing the stuck roles recovered
+    # (raced recovery between checks) clears the counter.
+    if _pool_has_connected_accounted_slot(ib_pool, roles=stuck_roles):
         _pool_recovery_state["consecutive_failures"] = 0
         return
     try:
@@ -1871,6 +1876,23 @@ async def uw_usage():
     return usage_snapshot()
 
 
+@app.post("/uw/usage/record")
+async def uw_usage_record(count: int = 1):
+    """Mirror UW hits made outside UWClient into the shared daily budget.
+
+    The Next.js route handlers fetch UW directly and used to increment
+    nothing, leaving /uw/usage and the universe-scan brake blind to
+    browsing-driven traffic (REL-036 / R-062). The flock write runs off the
+    event loop.
+    """
+    from utils.uw_budget import record_hits, usage_snapshot
+
+    if not (1 <= count <= 500):
+        raise HTTPException(status_code=400, detail="count must be between 1 and 500")
+    await asyncio.to_thread(record_hits, count)
+    return usage_snapshot()
+
+
 @app.post("/scan")
 async def scan():
     """Run watchlist scanner (scanner.py --top 25)."""
@@ -3189,8 +3211,14 @@ async def theta_harvester_scan(
         result = await run_script("theta_harvester_scanner.py", args, timeout=420)
         if not result.ok:
             raise HTTPException(status_code=502, detail=result.error)
-        if not is_ticker_scan:
+        payload = result.data if isinstance(result.data, dict) else None
+        scan_status = (payload or {}).get("scan_status")
+        # A budget-blocked / coverage-failed scan never ran — stamping the 1h
+        # cooldown would pin the stale snapshot for another hour (R-070).
+        if not is_ticker_scan and not scan_status:
             _theta_last_scan = _time.monotonic()
+        if scan_status and payload is not None:
+            return payload
         cached = _read_cache(DATA_DIR / "theta_harvester.json")
         return cached or {
             "scan_time": "",
@@ -3270,8 +3298,14 @@ async def strength_confirmation_scan(preset: str = "ndx100", limit: int = 0, tic
         result = await run_script("strength_confirmation_scanner.py", args, timeout=480)
         if not result.ok:
             raise HTTPException(status_code=502, detail=result.error)
-        if not is_ticker_scan:
+        payload = result.data if isinstance(result.data, dict) else None
+        scan_status = (payload or {}).get("scan_status")
+        # A budget-blocked / coverage-failed scan never ran — stamping the 1h
+        # cooldown would pin the stale snapshot for another hour (R-070).
+        if not is_ticker_scan and not scan_status:
             _strength_last_scan = _time.monotonic()
+        if scan_status and payload is not None:
+            return payload
         cached = _read_cache(DATA_DIR / "strength_confirmation.json")
         return cached or {
             "scan_time": "",

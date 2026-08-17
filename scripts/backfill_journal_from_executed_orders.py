@@ -161,39 +161,87 @@ class JournalCoverage:
         if fingerprint is not None:
             self.fingerprints.add(fingerprint)
 
+    def absorb(self, other: "JournalCoverage") -> None:
+        """Merge a delta re-scan's layers into this coverage."""
+        self.exec_ids |= other.exec_ids
+        self.roots |= other.roots
+        self.fingerprints |= other.fingerprints
 
-def _journal_coverage(db: Any) -> JournalCoverage:
-    """Read the journal once and build every coverage layer from it."""
-    exec_ids: set[str] = set()
-    roots: set[str] = set()
-    fingerprints: set[tuple] = set()
 
-    rows = db.execute("SELECT payload FROM journal").fetchall()
-    for (raw,) in rows:
-        try:
-            payload = json.loads(raw) if isinstance(raw, str) else raw
-        except (json.JSONDecodeError, TypeError):
+# Keyset page size for journal coverage scans (Turso Hrana I/O bounding —
+# the full-table read must never ride one unbounded fetch).
+JOURNAL_SCAN_PAGE_ROWS = 500
+
+# Slack subtracted from the run-start cutoff for the pre-insert delta
+# re-check, so a concurrent writer that stamped written_at just before this
+# run began (but landed after the initial scan passed its page) is still seen.
+RECHECK_WRITTEN_SINCE_SLACK_S = 60
+
+
+def _journal_payloads(db: Any, *, written_since: Optional[str] = None):
+    """Yield raw journal payloads in bounded keyset pages on trade_id.
+
+    ``written_since`` narrows the scan to rows written at/after the given
+    UTC ISO timestamp — the delta re-check the insert loop uses instead of
+    rebuilding full coverage per gap row.
+    """
+    cursor_key = ""
+    while True:
+        if written_since is None:
+            rows = db.execute(
+                "SELECT trade_id, payload FROM journal "
+                "WHERE trade_id > ? ORDER BY trade_id LIMIT ?",
+                (cursor_key, JOURNAL_SCAN_PAGE_ROWS),
+            ).fetchall()
+        else:
+            rows = db.execute(
+                "SELECT trade_id, payload FROM journal "
+                "WHERE trade_id > ? AND written_at >= ? "
+                "ORDER BY trade_id LIMIT ?",
+                (cursor_key, written_since, JOURNAL_SCAN_PAGE_ROWS),
+            ).fetchall()
+        if not rows:
+            return
+        for _trade_id, raw in rows:
+            yield raw
+        cursor_key = rows[-1][0]
+        if len(rows) < JOURNAL_SCAN_PAGE_ROWS:
+            return
+
+
+def _accumulate_payload_coverage(coverage: JournalCoverage, raw: Any) -> None:
+    """Fold one raw journal payload into every coverage layer."""
+    try:
+        payload = json.loads(raw) if isinstance(raw, str) else raw
+    except (json.JSONDecodeError, TypeError):
+        return
+    if not isinstance(payload, dict):
+        return
+
+    fingerprint = contract_fill_fingerprint(payload)
+    if fingerprint is not None:
+        coverage.fingerprints.add(fingerprint)
+
+    exec_id = payload.get("ib_exec_id")
+    if not exec_id:
+        return
+    coverage.exec_ids.add(str(exec_id))
+    for part in str(exec_id).split("+"):
+        part = part.strip()
+        if not part:
             continue
-        if not isinstance(payload, dict):
-            continue
+        coverage.exec_ids.add(part)
+        root, _correction = exec_id_root(part)
+        if root:
+            coverage.roots.add(root)
 
-        fingerprint = contract_fill_fingerprint(payload)
-        if fingerprint is not None:
-            fingerprints.add(fingerprint)
 
-        exec_id = payload.get("ib_exec_id")
-        if not exec_id:
-            continue
-        exec_ids.add(str(exec_id))
-        for part in str(exec_id).split("+"):
-            part = part.strip()
-            if not part:
-                continue
-            exec_ids.add(part)
-            root, _correction = exec_id_root(part)
-            if root:
-                roots.add(root)
-    return JournalCoverage(exec_ids, roots, fingerprints)
+def _journal_coverage(db: Any, *, written_since: Optional[str] = None) -> JournalCoverage:
+    """Build every coverage layer from a bounded, paginated journal read."""
+    coverage = JournalCoverage(set(), set(), set())
+    for raw in _journal_payloads(db, written_since=written_since):
+        _accumulate_payload_coverage(coverage, raw)
+    return coverage
 
 
 def _journal_covered_exec_ids(db: Any) -> set[str]:
@@ -386,6 +434,11 @@ def backfill(
     # fills for the same contract are processed (critical for MU C1050 @110/@108).
     executed = sorted(executed, key=lambda r: r.get("fill_time") or "")
 
+    recheck_since = (
+        (datetime.now(timezone.utc) - timedelta(seconds=RECHECK_WRITTEN_SINCE_SLACK_S))
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
     coverage = _journal_coverage(db)
 
     # Accumulate prior_qty per contract as we insert rows within this run,
@@ -444,9 +497,12 @@ def backfill(
             }
             actions.append(action)
         else:
-            # Re-check immediately before insert for idempotency under races.
-            fresh = _journal_coverage(db)
-            if fresh.covers_exec_id(exec_id) or fresh.covers_fill(journal_payload):
+            # Re-check immediately before insert for idempotency under races —
+            # a delta scan of rows written since this run started, absorbed
+            # into the cached coverage, not a full-journal rebuild per gap
+            # row (Turso Hrana I/O bounding).
+            coverage.absorb(_journal_coverage(db, written_since=recheck_since))
+            if coverage.covers_exec_id(exec_id) or coverage.covers_fill(journal_payload):
                 log.info("  SKIP  %s — appeared in journal between scan and insert", exec_id)
                 actions.append({"exec_id": exec_id, "status": "skipped"})
                 continue
