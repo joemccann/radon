@@ -328,6 +328,7 @@ async def run_script_raw(
 
     cmd = [sys.executable, str(script_path)] + (args or [])
     work_dir = cwd or str(SCRIPTS_DIR)
+    proc: Optional[asyncio.subprocess.Process] = None
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -359,6 +360,14 @@ async def run_script_raw(
             exit_code=None,
             timed_out=True,
         )
+    except asyncio.CancelledError:
+        # The slot is released in `finally`; without killing the child first
+        # the counter under-counts live processes and the cap stops bounding
+        # fds / IB client ids / the reserved order lane.
+        if proc is not None and proc.returncode is None:
+            proc.kill()
+            await proc.wait()
+        raise
     except Exception as e:
         return RawScriptResult(ok=False, stderr=str(e), exit_code=None)
     finally:
@@ -377,6 +386,8 @@ async def run_module(
     cmd = [sys.executable, "-m", module] + (args or [])
     if not _claim_subprocess_slot(module):
         return ScriptResult(ok=False, error="Subprocess capacity exhausted")
+
+    proc: Optional[asyncio.subprocess.Process] = None
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -413,6 +424,14 @@ async def run_module(
         except Exception:
             pass
         return ScriptResult(ok=False, error=f"Module timed out after {timeout}s")
+
+    except asyncio.CancelledError:
+        # An orphaned `trade_blotter.flex_query` keeps spending Flex requests
+        # against a token already under a 24h-to-168h throttle embargo.
+        if proc is not None and proc.returncode is None:
+            proc.kill()
+            await proc.wait()
+        raise
 
     except json.JSONDecodeError as e:
         return ScriptResult(ok=False, error=f"Invalid JSON output: {e}")

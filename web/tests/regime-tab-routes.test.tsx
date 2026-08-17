@@ -17,6 +17,16 @@ import { render, cleanup, within } from "@testing-library/react";
 const ROOT = join(__dirname, "..");
 const read = (rel: string) => readFileSync(join(ROOT, rel), "utf-8");
 
+// Each subroute page is INVOKED below, not grepped: a page that imports
+// WorkspaceShell but returns null (or notFound()) has to fail here.
+const { shellProps } = vi.hoisted(() => ({ shellProps: [] as Array<{ section?: string }> }));
+vi.mock("@/components/WorkspaceShell", () => ({
+  default: (props: { section?: string }) => {
+    shellProps.push(props);
+    return <div data-testid="workspace-shell-stub" data-section={props.section} />;
+  },
+}));
+
 /* ─── 1. Sidebar / nav ─────────────────────────────────── */
 
 describe("navItems — regime href targets the cri tab", () => {
@@ -30,29 +40,16 @@ describe("navItems — regime href targets the cri tab", () => {
 
 /* ─── 2. /regime root → /regime/cri redirect ───────────── */
 
-describe("app/regime/page.tsx — bare /regime redirects to /regime/cri", () => {
-  const src = read("app/regime/page.tsx");
-
-  it("imports redirect from next/navigation", () => {
-    expect(src).toMatch(/from\s+["']next\/navigation["']/);
-    expect(src).toMatch(/redirect/);
-  });
-
-  it("redirects to /regime/cri", () => {
-    expect(src).toMatch(/redirect\(["']\/regime\/cri["']\)/);
-  });
-});
-
-describe("app/regime/vol-cone/page.tsx — cheap-wing scanner lives under Scanner", () => {
-  const src = read("app/regime/vol-cone/page.tsx");
-
-  it("imports redirect from next/navigation", () => {
-    expect(src).toMatch(/from\s+["']next\/navigation["']/);
-    expect(src).toMatch(/redirect/);
-  });
-
-  it("redirects to /scanner?mode=vol-cone", () => {
-    expect(src).toMatch(/redirect\(["']\/scanner\?mode=vol-cone["']\)/);
+describe.each([
+  ["app/regime/page.tsx", "../app/regime/page", "/regime/cri"],
+  ["app/regime/vol-cone/page.tsx", "../app/regime/vol-cone/page", "/scanner?mode=vol-cone"],
+])("%s — invoking the page redirects", (_rel, mod, target) => {
+  it(`calls redirect("${target}")`, async () => {
+    const { redirect } = await import("next/navigation");
+    vi.mocked(redirect).mockClear();
+    const { default: Page } = await import(mod);
+    Page({});
+    expect(redirect).toHaveBeenCalledWith(target);
   });
 });
 
@@ -74,15 +71,19 @@ describe.each([
   ["cot", "app/regime/cot/page.tsx"],
   ["ats", "app/regime/ats/page.tsx"],
   ["short", "app/regime/short/page.tsx"],
-])("app/regime/%s/page.tsx exists and mounts WorkspaceShell", (_tab, rel) => {
+])("app/regime/%s/page.tsx exists and mounts WorkspaceShell", (tab, rel) => {
   it(`file ${rel} exists`, () => {
     expect(existsSync(join(ROOT, rel))).toBe(true);
   });
 
-  it("renders WorkspaceShell with section='regime'", () => {
-    const src = read(rel);
-    expect(src).toMatch(/import\s+WorkspaceShell/);
-    expect(src).toMatch(/section=["']regime["']/);
+  it("renders a WorkspaceShell with section='regime'", async () => {
+    shellProps.length = 0;
+    const { default: Page } = await import(`../app/regime/${tab}/page`);
+    const { container } = render(<Page />);
+    expect(shellProps).toHaveLength(1);
+    expect(shellProps[0].section).toBe("regime");
+    expect(within(container).getByTestId("workspace-shell-stub")).toBeTruthy();
+    cleanup();
   });
 });
 
@@ -389,16 +390,18 @@ describe("RegimePanel — tab is URL-driven", () => {
 
 /* ─── 5. RegimePanel no longer owns tab state ──────────── */
 
-describe("RegimePanel source — no internal useState for active tab", () => {
-  const src = read("components/RegimePanel.tsx");
+describe("RegimePanel — the URL, not component state, owns the active tab", () => {
+  afterEach(() => cleanup());
 
-  it("does not declare a setActiveTab useState", () => {
-    expect(src).not.toMatch(/setActiveTab\s*\]\s*=\s*useState/);
-  });
+  it("clicking a tab does not switch the view while the pathname is unchanged", () => {
+    // If the panel kept its own activeTab state, clicking VCG would render the
+    // VCG stub immediately. The URL is the single source of truth, so the view
+    // must not move until the router lands on the new pathname.
+    mockedPathname = "/regime/cri";
+    const { container } = render(<RegimePanel prices={{}} />);
+    within(container).getByRole("button", { name: /^VCG$/ }).click();
 
-  it("imports usePathname and useRouter from next/navigation", () => {
-    expect(src).toMatch(/from\s+["']next\/navigation["']/);
-    expect(src).toMatch(/usePathname/);
-    expect(src).toMatch(/useRouter/);
+    expect(pushSpy).toHaveBeenCalledWith("/regime/vcg");
+    expect(within(container).queryByTestId("vcg-panel-stub")).toBeNull();
   });
 });

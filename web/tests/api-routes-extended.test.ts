@@ -1006,6 +1006,79 @@ describe("POST /api/orders/modify — extended", () => {
     expect(mockRadonFetch.mock.calls[1][0]).toBe("/orders/refresh");
   });
 
+  // T-057: /orders/replace cancels every target BEFORE placing. Any failure
+  // after that point leaves the operator's exits cancelled at IB. A flat
+  // "Order modification failed" 500 reads as "nothing happened", which is
+  // exactly the message that gets the position left unhedged or the
+  // replacement double-placed on retry.
+  const COMBO_REPLACEMENT_BODY = {
+    orderId: 77,
+    permId: 653611587,
+    replaceOrder: {
+      type: "combo",
+      symbol: "AAOI",
+      action: "SELL",
+      quantity: 75,
+      limitPrice: 0.75,
+      tif: "DAY",
+      legs: [
+        { expiry: "20260327", strike: 90, right: "P", action: "SELL", ratio: 1 },
+        { expiry: "20260327", strike: 100, right: "C", action: "BUY", ratio: 1 },
+      ],
+    },
+  };
+
+  it("surfaces the indeterminate state when the replace request itself aborts", async () => {
+    mockRadonFetch.mockRejectedValueOnce(
+      new DOMException("The operation was aborted.", "AbortError"),
+    );
+
+    const { POST } = await import("../app/api/orders/modify/route");
+    const res = await POST(
+      new Request("http://localhost/api/orders/modify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(COMBO_REPLACEMENT_BODY),
+      }),
+    );
+
+    expect(res.status).not.toBe(500);
+    const body = await res.json();
+    expect(typeof body.error).toBe("string");
+    expect(body.error).toMatch(/unknown|unconfirmed|indeterminate/i);
+    expect(body.error.toLowerCase()).toContain("cancel");
+  });
+
+  it("renders a REPLACE_PARTIAL detail object as an operator-readable string", async () => {
+    const { RadonApiError } = await import("@/lib/radonApi");
+    mockRadonFetch.mockRejectedValueOnce(
+      new RadonApiError(502, {
+        code: "REPLACE_PARTIAL",
+        phase: "placement",
+        cancelled: [{ orderId: 77, permId: 653611587, status: "cancelled" }],
+        replacementOrderRef: "radon-replace-9f2c1ab4de7c0511",
+        upstream: "Order not acknowledged by IB",
+      } as unknown as string),
+    );
+
+    const { POST } = await import("../app/api/orders/modify/route");
+    const res = await POST(
+      new Request("http://localhost/api/orders/modify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(COMBO_REPLACEMENT_BODY),
+      }),
+    );
+
+    expect(res.status).toBe(502);
+    const body = await res.json();
+    expect(typeof body.error).toBe("string");
+    expect(body.error).toContain("replacementOrderRef");
+    expect(body.error).toContain("radon-replace-9f2c1ab4de7c0511");
+    expect(body.error).toContain("77");
+    expect(body.error).toContain("Order not acknowledged by IB");
+  });
+
   it("returns 400 when modify fields are missing", async () => {
     const { POST } = await import("../app/api/orders/modify/route");
     const res = await POST(

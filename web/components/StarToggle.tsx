@@ -35,6 +35,7 @@ export default function StarToggle({
   return (
     <button
       type="button"
+      data-testid="star-toggle"
       aria-pressed={active}
       title={title}
       onClick={handleClick}

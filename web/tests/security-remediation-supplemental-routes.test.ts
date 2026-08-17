@@ -4,6 +4,24 @@ import path from "path";
 
 const ROOT = path.resolve(__dirname, "../..");
 
+/**
+ * Every upstream fetch call site in a provider route — bare `fetch(` plus the
+ * counted UW wrapper `countedUwFetch(` (which forwards its init, signal
+ * included, into fetch). Excludes `radonFetch`/`.fetch(` wrappers. Returns
+ * each call site's argument window so the deadline can be asserted PER SITE
+ * rather than by count arithmetic, which breaks when signal options are also
+ * passed to non-fetch helpers.
+ */
+const upstreamFetchCallSites = (source: string): string[] => {
+  const sites: string[] = [];
+  const re = /(?<![.\w])(?:fetch|countedUwFetch)\(/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(source)) !== null) {
+    sites.push(source.slice(m.index, m.index + 600));
+  }
+  return sites;
+};
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -38,16 +56,31 @@ describe("supplemental route remediations", () => {
 
   it("served regime previews have no CSP-blocked inline controls", async () => {
     const source = await readFile(path.join(ROOT, "scripts/generate_regime_share.py"), "utf8");
-    const preview = source.slice(source.indexOf("def build_preview"), source.indexOf("# ── Main"));
+    const start = source.indexOf("def build_preview");
+    const end = source.indexOf("# ── Main");
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const preview = source.slice(start, end);
+    // A marker rename must not silently shrink the slice into a vacuous pass.
+    expect(preview.length).toBeGreaterThan(200);
+    expect(preview).toContain("<html");
     expect(preview).not.toContain("<script>");
     expect(preview).not.toContain("onclick=");
   });
 
-  it("provider routes apply deadlines to every upstream fetch", async () => {
+  it("provider routes apply deadlines to EVERY upstream fetch, not to a counted subset", async () => {
     const info = await readFile(path.join(ROOT, "web/app/api/ticker/info/route.ts"), "utf8");
     const news = await readFile(path.join(ROOT, "web/app/api/ticker/news/route.ts"), "utf8");
-    expect(info.match(/signal: AbortSignal\.timeout\(PROVIDER_TIMEOUT_MS\)/g)).toHaveLength(5);
-    expect(news.match(/signal: AbortSignal\.timeout\(PROVIDER_TIMEOUT_MS\)/g)).toHaveLength(3);
+    for (const [name, source] of [["ticker/info", info], ["ticker/news", news]] as const) {
+      const sites = upstreamFetchCallSites(source);
+      expect(sites.length, `${name} must still make upstream fetches`).toBeGreaterThan(0);
+      for (const [i, site] of sites.entries()) {
+        expect(
+          /signal:\s*AbortSignal\.timeout\(/.test(site),
+          `${name}: upstream fetch call site ${i + 1} of ${sites.length} must carry AbortSignal.timeout`,
+        ).toBe(true);
+      }
+    }
   });
 
   it("websocket ticket fetch is inside a bounded deadline", async () => {

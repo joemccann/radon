@@ -48,6 +48,7 @@ import {
 import { isMarketOpen } from "./lib/marketCalendar.js";
 import {
   resolveRelaySecurityConfig,
+  resolveUpgradeTarget,
   shouldSkipTicketValidation,
 } from "./lib/wsTrust.js";
 import { applyDepthOp } from "./lib/depthLadder.js";
@@ -346,9 +347,7 @@ httpServer.on("upgrade", async (req, socket, head) => {
   }
 
   try {
-    // The request target is relative by HTTP contract. Never use the untrusted
-    // Host header as URL authority, and keep parsing inside the guarded block.
-    const url = new URL(req.url || "/", "http://relay.invalid");
+    const url = resolveUpgradeTarget(req);
     const ticket = url.searchParams.get("ticket");
     if (!ticket) {
       socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");

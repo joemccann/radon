@@ -460,7 +460,16 @@ describe("<Ib2faControls /> — gateway power", () => {
   });
 
   it("absent or failed power callbacks never change optimistic gateway state", async () => {
-    const failedStop = vi.fn().mockResolvedValue(false);
+    // T-062: a real power callback is a fetch — it is INVOKED long before it
+    // SETTLES. `mockResolvedValue` collapsed those two moments, so the
+    // post-await assertion below was a load-dependent race (red on a loaded
+    // full-suite run, 8/8 green in isolation). Holding the resolution open
+    // makes the two moments explicit and the assertion deterministic.
+    let settleStop: (ok: boolean) => void = () => {};
+    const stopSettled = new Promise<boolean>((resolve) => {
+      settleStop = resolve;
+    });
+    const failedStop = vi.fn(() => stopSettled);
     const { rerender } = render(
       <Ib2faControls
         health={buildHealth({ port_listening: true })}
@@ -479,7 +488,10 @@ describe("<Ib2faControls /> — gateway power", () => {
     });
     fireEvent.click(screen.getByTestId("admin-confirm-action"));
     await waitFor(() => expect(failedStop).toHaveBeenCalledTimes(1));
-    expect(screen.getByTestId("gateway-power-button").textContent).toBe("Stop Gateway");
+    settleStop(false);
+    await waitFor(() =>
+      expect(screen.getByTestId("gateway-power-button").textContent).toBe("Stop Gateway"),
+    );
 
     rerender(
       <Ib2faControls

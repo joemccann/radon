@@ -311,6 +311,11 @@ jobs:
           e2e/share-pnl.spec.ts
           e2e/wulf-close-order-naked-short.spec.ts
           e2e/portfolio-same-day-combo-pnl.spec.ts
+          e2e/portfolio-same-day-equity-pnl.spec.ts
+          e2e/stop-order-desktop.spec.ts
+          e2e/modify-order-correlation-risk.spec.ts
+          e2e/chain-expiry-preserves-builder.spec.ts
+          e2e/act-ticket-scroll.spec.ts
           e2e/orders-realized-pnl-portfolio-fallback.spec.ts
           e2e/orders-partial-realized-pnl.spec.ts
           e2e/share-pnl-entry-exit.spec.ts

@@ -44,6 +44,13 @@ export type RegimeStripLiveState = {
   spxDistancePct: number | null;
 };
 
+/**
+ * COR1M above this level is the "panic herding" leg of the CRI crash trigger.
+ * The panel label renders from this same constant so the displayed threshold
+ * and the one the trigger actually uses cannot drift apart.
+ */
+export const CRASH_TRIGGER_CORRELATION_THRESHOLD = 60;
+
 export function resolveCrashTriggerState(args: {
   liveCorrelation: boolean;
   correlation: number | null;
@@ -52,7 +59,7 @@ export function resolveCrashTriggerState(args: {
   realizedVolMet: boolean;
 }): { correlationMet: boolean; triggered: boolean } {
   const correlationMet = args.liveCorrelation && args.correlation != null
-    ? args.correlation > 60
+    ? args.correlation > CRASH_TRIGGER_CORRELATION_THRESHOLD
     : args.cachedCorrelationMet;
   return {
     correlationMet,
