@@ -29,6 +29,49 @@ type ModifyBody = {
   replaceOrder?: ReplaceComboOrder;
 };
 
+/** `/orders/replace` cancels every target BEFORE it places the replacement, so
+ *  any failure past that point leaves the operator's exits gone at IB and the
+ *  replacement's fate unknown. A flat 500 reads as "nothing happened" — the
+ *  message that gets a position left unhedged, or the replacement double-placed
+ *  on retry. Mirrors INDETERMINATE_PLACEMENT_MESSAGE on the place route. */
+const REPLACE_INDETERMINATE_MESSAGE =
+  "Replacement status unknown: the working orders were already cancelled at IB and the replacement was not confirmed. Check open orders before retrying.";
+
+function describeCancelledOrders(cancelled: unknown): string {
+  if (!Array.isArray(cancelled) || cancelled.length === 0) return "none reported";
+  return cancelled
+    .map((entry) => {
+      const target = (entry ?? {}) as Record<string, unknown>;
+      const id = target.orderId ?? target.permId ?? "unknown";
+      return `#${id} (${String(target.status ?? "cancelled")})`;
+    })
+    .join(", ");
+}
+
+/** Render a structured REPLACE_PARTIAL / REPLACE_INDETERMINATE detail as the
+ *  `error: string` every other order route returns. */
+function replaceFailureMessage(detail: Record<string, unknown>): string {
+  const indeterminate = detail.code === "REPLACE_INDETERMINATE";
+  const headline = indeterminate
+    ? REPLACE_INDETERMINATE_MESSAGE
+    : `Replacement incomplete during ${String(detail.phase ?? "unknown")}: the cancelled orders are gone and the replacement did not go live.`;
+  return [
+    headline,
+    `Cancelled: ${describeCancelledOrders(detail.cancelled)}.`,
+    `replacementOrderRef=${String(detail.replacementOrderRef ?? "unknown")}.`,
+    `Upstream: ${typeof detail.upstream === "string" ? detail.upstream : JSON.stringify(detail.upstream ?? null)}`,
+  ].join(" ");
+}
+
+function errorDetailAsString(detail: unknown): string {
+  if (typeof detail === "string") return detail;
+  const record = (detail ?? {}) as Record<string, unknown>;
+  if (record.code === "REPLACE_PARTIAL" || record.code === "REPLACE_INDETERMINATE") {
+    return replaceFailureMessage(record);
+  }
+  return JSON.stringify(detail);
+}
+
 async function readOrdersSnapshotBestEffort() {
   try {
     return await readOrdersSnapshotFromDb();
@@ -106,6 +149,7 @@ export async function POST(request: Request): Promise<Response> {
   let orderId = 0;
   let permId = 0;
   let existingTif: string | undefined;
+  let replaceAttempted = false;
   try {
     const body = (await request.json()) as ModifyBody;
     orderId = body.orderId ?? 0;
@@ -161,6 +205,7 @@ export async function POST(request: Request): Promise<Response> {
         );
       }
 
+      replaceAttempted = true;
       const result = await radonFetch<Record<string, unknown>>("/orders/replace", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -259,7 +304,17 @@ export async function POST(request: Request): Promise<Response> {
           { status: error.status },
         );
       }
-      return NextResponse.json({ error: error.detail }, { status: error.status });
+      return NextResponse.json(
+        { error: errorDetailAsString(error.detail) },
+        { status: error.status },
+      );
+    }
+    if (replaceAttempted) {
+      const reason = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+      return NextResponse.json(
+        { error: `${REPLACE_INDETERMINATE_MESSAGE} (${reason})` },
+        { status: 504 },
+      );
     }
     return NextResponse.json({ error: "Order modification failed" }, { status: 500 });
   }

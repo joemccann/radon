@@ -62,11 +62,28 @@ test("portfolio shell owns one initial read and shares its symbols with the comm
 
   await page.goto("/portfolio", { waitUntil: "domcontentloaded" });
   await expect(page.getByText("AAPL", { exact: true }).first()).toBeVisible();
-  await page.waitForTimeout(1_200);
+
+  // A fixed 1.2s window could not tell "one owner" from "slow runner": a shell
+  // regression issuing a third read at t=1.3s passed, and a dev remount storm
+  // inside the window failed. Settle on an explicit signal, then WATCH the
+  // counter - a late owner has to show up in the watch window, and a slow first
+  // paint cannot be mistaken for one.
+  await page.waitForLoadState("networkidle");
+  const settled = portfolioReads;
+  expect(settled, "the portfolio shell must issue its own read").toBeGreaterThan(0);
   // next dev intentionally exercises React's development remount path. It may
   // issue the shell's mount read twice; opening the always-mounted palette must
   // not create a third request owner.
-  expect(portfolioReads).toBeLessThanOrEqual(2);
+  expect(settled, "one read owner, plus at most one dev remount").toBeLessThanOrEqual(2);
+
+  const watchDeadline = Date.now() + 2_500;
+  while (Date.now() < watchDeadline) {
+    expect(
+      portfolioReads,
+      "a new /api/portfolio owner appeared after the page settled",
+    ).toBe(settled);
+    await page.waitForTimeout(100);
+  }
   const readsBeforePalette = portfolioReads;
 
   await page.keyboard.press("Meta+k");

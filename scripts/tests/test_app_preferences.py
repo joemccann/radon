@@ -586,16 +586,24 @@ class TestConcurrentWriteAndRefresh:
         """The refresh SELECT is issued before the save lands, so its result
         is stale by the time it returns and must not clobber the new value."""
         released = threading.Event()
+        # The race this pins is "SELECT issued, THEN the write lands". Waiting a
+        # fixed 50ms for the worker to get there loses that ordering on a slow
+        # runner: the worker captures the POST-write generation, adopts the stale
+        # 500 row, and the assertion fails for a reason that is not the contract.
+        # refresh_snapshot() reads _WRITE_GENERATION on its first line and calls
+        # _hrana_query next, so this event fires strictly after that capture.
+        entered = threading.Event()
         monkeypatch.setattr(app_preferences, "_hrana_execute", lambda *a, **k: None)
 
         def _slow_query(*a, **k):
+            entered.set()
             released.wait(2.0)
             return [("RADON_MAX_ORDER_QTY", "500", "2026-08-11T00:00:00Z", "old")]
 
         monkeypatch.setattr(app_preferences, "_hrana_query", _slow_query)
         worker = threading.Thread(target=app_preferences.refresh_snapshot, daemon=True)
         worker.start()
-        time.sleep(0.05)
+        assert entered.wait(5.0), "the refresh never issued its SELECT"
         app_preferences.set_value("RADON_MAX_ORDER_QTY", 50, updated_by="op")
         released.set()
         worker.join(3.0)

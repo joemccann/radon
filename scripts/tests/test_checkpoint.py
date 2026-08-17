@@ -227,35 +227,76 @@ def test_torn_tail_longer_than_one_chunk_is_still_repaired(job_dir, monkeypatch)
 
 
 KILL_WORKER = """
-import sys, time
+import sys, time, pathlib
 sys.path.insert(0, {libdir!r})
 from checkpoint import CheckpointedJob
+STOP_AFTER = {stop_after}
+SENTINEL = pathlib.Path({sentinel!r})
 job = CheckpointedJob({jobdir!r}, "kill-test")
+written = 0
 for i in range(200):
     key = f"item-{{i:03d}}"
     if job.is_done(key):
         continue
     job.record_finding(key, {{"title": f"finding {{i}}"}})
     job.set_cursor({{"i": i}})
+    written += 1
+    if STOP_AFTER and written >= STOP_AFTER:
+        SENTINEL.write_text(str(i))
+        # Park so the SIGKILL lands mid-run by construction. A fixed sleep in
+        # the parent raced CPython startup: on a cold runner every kill landed
+        # before the first finding and the test silently stopped testing resume.
+        time.sleep(30)
 job.finish()
 print("DONE")
 """
 
 
-def test_sigkill_mid_run_resumes_exactly_once(job_dir, tmp_path):
+def _write_worker(script, tmp_path, job_dir, stop_after, tag):
     libdir = str(Path(__file__).resolve().parents[1] / "lib")
-    script = tmp_path / "worker.py"
-    script.write_text(KILL_WORKER.format(libdir=libdir, jobdir=str(job_dir)))
+    sentinel = tmp_path / f"sentinel-{tag}"
+    script.write_text(
+        KILL_WORKER.format(
+            libdir=libdir,
+            jobdir=str(job_dir),
+            stop_after=stop_after,
+            sentinel=str(sentinel),
+        )
+    )
+    return sentinel
 
+
+def test_sigkill_mid_run_resumes_exactly_once(job_dir, tmp_path):
     import time
 
-    for kill_after in (0.05, 0.1, 0.15):
-        proc = subprocess.Popen([sys.executable, str(script)])
-        time.sleep(kill_after)
-        if proc.poll() is None:
-            os.kill(proc.pid, signal.SIGKILL)
-            proc.wait()
+    script = tmp_path / "worker.py"
 
+    for stop_after in (5, 20, 60):
+        sentinel = _write_worker(script, tmp_path, job_dir, stop_after, stop_after)
+        proc = subprocess.Popen([sys.executable, str(script)])
+        deadline = time.monotonic() + 30.0
+        while not sentinel.exists() and time.monotonic() < deadline:
+            if proc.poll() is not None:
+                break
+            time.sleep(0.01)
+        if not sentinel.exists():
+            if proc.poll() is None:
+                os.kill(proc.pid, signal.SIGKILL)
+            proc.wait()
+            pytest.fail(
+                f"worker never recorded {stop_after} findings; the SIGKILL would "
+                "be a no-op and the resume path would go untested"
+            )
+        os.kill(proc.pid, signal.SIGKILL)
+        proc.wait()
+
+        partial = read_findings(job_dir)
+        assert 0 < len(partial) < 200, (
+            f"kill after {stop_after} findings left {len(partial)} on disk - "
+            "the run must be interrupted mid-flight, not before or after it"
+        )
+
+    _write_worker(script, tmp_path, job_dir, 0, "final")
     final = subprocess.run(
         [sys.executable, str(script)], capture_output=True, text=True, check=True
     )

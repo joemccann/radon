@@ -126,4 +126,68 @@ how this loop improves as the codebase grows.
 
 ## Lessons
 
-_(none yet)_
+- **2026-08-16 (audit):** start by checking the runner clone is CLEAN, before
+  anything else. This run opened on orphaned WIP from a prior capped run —
+  three modified files plus an untracked test importing a module that does not
+  exist — which aborted pytest at COLLECTION (exit 2, zero tests run) and would
+  have been misread as a red gate. Park it recoverably
+  (`git stash push --include-untracked -m "<loop>-<date>: parked ..."`), never
+  discard it, never commit it, and record the stash ref in the audit so the
+  operator can recover it. Gate counts are only meaningful from a clean tree.
+- **2026-08-16 (audit):** do NOT run the determinism re-runs concurrently with
+  each other. Running vitest ×2 alongside pytest ×2 on one machine is what
+  surfaced T-062 — which was genuinely useful, but the skill's rule ("re-run
+  the suspect file in isolation before calling it a finding") is what separated
+  the real race from contention noise. Run the gates serially for the counts,
+  then deliberately re-run under load if you want to hunt races.
+- **2026-08-16 (audit):** the "re-run 3× ONLY the delta-touched test files"
+  rule does not scale to a week-sized delta. This one touched 263 of
+  `web/tests` and 100 of `scripts/tests` — effectively the whole suite — so
+  scoped re-runs collapsed into full-gate runs. Say so in the audit rather than
+  pretending the scoping happened.
+- **2026-08-16 (audit):** `rg` on this runner resolves to BSD `grep` (no
+  `--glob`, no `-N`), and the rtk proxy mangles piped `grep` output. For any
+  non-trivial scan of a large diff, write the patch to a file and parse it with
+  a `python3.13` heredoc — that is what produced the trustworthy zero-new-skips
+  result.
+- **2026-08-16 (remediate) — NEVER run `git pull` on this runner, and push
+  after EVERY task commit.** The rtk hook rewrites bare `git` commands, and its
+  `git pull` rewrite did `reset --hard origin/<branch>` + a rebase onto
+  `origin/main` while printing "Already up to date." That silently discarded 14
+  unpushed remediation commits (T-055…T-069 — 29 files, +1296 lines). The same
+  filter then served STALE `git log` / `git status` output, so the loss stayed
+  invisible for several tool calls; it surfaced only because a baseline vitest
+  run reported a `.pi` suite that T-058 had already fixed. Rails:
+  - Use `rtk proxy git …` for every git command in this loop. Bare `git`
+    output on this runner cannot be trusted for state decisions.
+  - Never `git pull`. Sync with `rtk proxy git fetch origin` plus an explicit
+    `merge --ff-only` you chose deliberately.
+  - `rtk proxy git push` the weekend branch immediately after every task
+    commit, not once at the end. The branch on origin is the only durable copy;
+    "push at the end of the run" is a single point of failure.
+  - Recovery if it happens anyway: `rtk proxy git reflog` still holds the
+    orphaned tip. Tag it first, then
+    `git rebase --onto <rebased-base> <old-base> <orphan-tip>` and
+    `git branch -f`.
+
+- **2026-08-17 (remediate): never pipe a gate run through `tail` alone.**
+  Round 1 of the closing 3x gate reported `10 failed | 6706 passed` and the
+  names were gone — the command kept only the summary line. Seven further
+  full runs (four sequential, two deliberately concurrent with a full
+  pytest) were all `6716 passed`, so the round could not be named or
+  reproduced and had to be logged as an observation rather than a finding.
+  Write the full reporter output to a file per gate run and read the tail
+  from that file, so a flake round is nameable the first time it happens.
+- **2026-08-17 (remediate): `pytest cloud/tests` is 10-red on macOS on
+  `origin/main` too.** Ten `sha256sum`-dependent control-plane tests cannot
+  pass on a darwin runner. Diff the failure LIST against a clean
+  `origin/main` worktree before treating any cloud red as yours; the count
+  alone is not a signal. Baseline as of this run: `10 failed, 848 passed,
+  4 skipped`.
+- **2026-08-17 (remediate): pre-flight a spec under `next start` before
+  curating it into CI.** The e2e job builds and serves a production
+  server, and this repo has a documented dev-vs-prod divergence. Every
+  spec added to the curated list this run was verified under
+  `PLAYWRIGHT_WEBSERVER_CMD="npx next start"`, which is also how
+  `performance-twr-payload.spec.ts` was caught as permanently red before
+  it could red the job.

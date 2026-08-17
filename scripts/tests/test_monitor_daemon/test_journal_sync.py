@@ -23,7 +23,8 @@ from utils.atomic_io import atomic_save, verified_load  # noqa: E402
 def _mock_fill(*, exec_id: str, symbol: str, side: str, shares: int, price: float,
                sec_type: str = "STK", strike: float | None = None, right: str | None = None,
                expiry: str | None = None, commission: float = 1.0,
-               when: datetime | None = None) -> MagicMock:
+               when: datetime | None = None,
+               multiplier: str | int | float | None = None) -> MagicMock:
     fill = MagicMock()
     fill.execution = MagicMock()
     fill.execution.execId = exec_id
@@ -38,6 +39,10 @@ def _mock_fill(*, exec_id: str, symbol: str, side: str, shares: int, price: floa
     fill.contract.strike = strike
     fill.contract.right = right
     fill.contract.lastTradeDateOrContractMonth = expiry
+    # A bare MagicMock would answer getattr(contract, "multiplier") with a Mock,
+    # which fails the handler's isinstance guard and silently routes every fill
+    # down the sec_type default. IB sends a string or nothing.
+    fill.contract.multiplier = multiplier
 
     fill.commissionReport = MagicMock()
     fill.commissionReport.commission = commission
@@ -1492,3 +1497,64 @@ class TestCorrectionSuffixSupersede:
 
         result, _rows, _upserts = self._run(trade_log_path, [composite], [unrelated])
         assert result["imported"] == 1
+
+
+class TestExecutionCostBasis:
+    """
+    `_fill_to_entry` writes `total_cost`, which `compute_open_basis_for_ticker`
+    turns into the per-unit open basis that `ib_sync.fetch_positions` uses to
+    OVERRIDE IB's avgCost. A wrong multiplier here is a wrong cost basis on the
+    portfolio and a wrong realized P&L on the eventual close.
+    """
+
+    @staticmethod
+    def _total_cost(fill: MagicMock) -> float:
+        entry = JournalSyncHandler()._fill_to_entry(fill, next_id=1)
+        assert entry is not None
+        return entry["total_cost"]
+
+    def test_standard_option_multiplier_is_honoured(self):
+        fill = _mock_fill(
+            exec_id="MULT-100", symbol="EWY", side="BOT", shares=5, price=12.0,
+            sec_type="OPT", strike=215.0, right="C", expiry="20261218",
+            commission=1.0, multiplier="100",
+        )
+        assert self._total_cost(fill) == 6001.0
+
+    def test_adjusted_option_multiplier_is_read_from_the_contract(self):
+        """A 10-multiplier adjusted / non-US-listed option must not be priced
+        at 100. Reverting the contract.multiplier read makes this 6001.0."""
+        fill = _mock_fill(
+            exec_id="MULT-10", symbol="EWY", side="BOT", shares=5, price=12.0,
+            sec_type="OPT", strike=215.0, right="C", expiry="20261218",
+            commission=1.0, multiplier="10",
+        )
+        assert self._total_cost(fill) == 601.0
+
+    def test_zero_multiplier_never_collapses_the_basis_to_commission(self):
+        """"0" is truthy in Python, so `float(multiplier_raw or default)` yields
+        0.0 and the whole premium disappears from the basis."""
+        fill = _mock_fill(
+            exec_id="MULT-0", symbol="EWY", side="BOT", shares=5, price=12.0,
+            sec_type="OPT", strike=215.0, right="C", expiry="20261218",
+            commission=1.0, multiplier="0",
+        )
+        total_cost = self._total_cost(fill)
+        assert total_cost != 1.0, "premium vanished — basis collapsed to commission"
+        assert total_cost == 6001.0
+
+    @pytest.mark.parametrize("multiplier", ["", "  ", "abc", None, -100])
+    def test_unusable_multipliers_fall_back_to_the_sec_type_default(self, multiplier):
+        fill = _mock_fill(
+            exec_id=f"MULT-BAD-{multiplier}", symbol="EWY", side="BOT", shares=5,
+            price=12.0, sec_type="OPT", strike=215.0, right="C", expiry="20261218",
+            commission=1.0, multiplier=multiplier,
+        )
+        assert self._total_cost(fill) == 6001.0
+
+    def test_stock_fill_keeps_a_multiplier_of_one(self):
+        fill = _mock_fill(
+            exec_id="MULT-STK", symbol="QQQ", side="BOT", shares=100, price=717.83,
+            sec_type="STK", commission=1.0,
+        )
+        assert self._total_cost(fill) == 71784.0

@@ -46,6 +46,29 @@ def stub_scripts(tmp_path, monkeypatch):
     return tmp_path
 
 
+SATURATION_TIMEOUT_S = 20.0
+
+
+async def _await_slots_held(count: int, *, timeout: float = SATURATION_TIMEOUT_S):
+    """Block until `count` slots are actually held, or fail the test.
+
+    Every admission assertion in this file is only meaningful once the general
+    lane is FULL. A bare timed loop that falls through on a cold or contended
+    runner (spawning CPython interpreters can easily outlast a couple of
+    seconds) leaves spare capacity behind, and then "the order lane is admitted
+    while scans saturate the pool" passes for the wrong reason — the
+    reservation could be entirely broken and this suite would stay green.
+    """
+    deadline = asyncio.get_running_loop().time() + timeout
+    while subprocess_mod._active_subprocesses < count:
+        assert asyncio.get_running_loop().time() < deadline, (
+            f"general lane never saturated: {subprocess_mod._active_subprocesses} of "
+            f"{count} slots held after {timeout}s — the admission assertions that "
+            "follow would pass on spare capacity, not on the reservation"
+        )
+        await asyncio.sleep(0.01)
+
+
 async def _saturate_general_lane(count: int):
     """Launch `count` long-running scan subprocesses and wait until they hold
     their slots. Returns the tasks so the caller can cancel them."""
@@ -53,10 +76,7 @@ async def _saturate_general_lane(count: int):
         asyncio.create_task(subprocess_mod.run_script("slow_scan.py", [], timeout=30))
         for _ in range(count)
     ]
-    for _ in range(200):
-        if subprocess_mod._active_subprocesses >= count:
-            break
-        await asyncio.sleep(0.01)
+    await _await_slots_held(count)
     return tasks
 
 
@@ -140,10 +160,7 @@ class TestOrderLaneReservation:
                 )
                 for _ in range(2)
             ]
-            for _ in range(200):
-                if subprocess_mod._active_subprocesses >= 2:
-                    break
-                await asyncio.sleep(0.01)
+            await _await_slots_held(2)
             try:
                 return await subprocess_mod.run_script(
                     "ib_cancel_all.py", [], timeout=5
@@ -185,3 +202,84 @@ class TestOrderLaneRegistry:
         )
         assert spawned, "expected the order scripts to be referenced in server.py"
         assert spawned <= subprocess_mod._ORDER_LANE_SCRIPTS
+
+
+class _BlockingProcess:
+    """Stand-in child that holds its slot until it is explicitly killed.
+
+    Mirrors `test_ib_gateway_subprocess_cleanup._BlockingProcess`.
+    """
+
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.killed = False
+        self.waited = False
+        self.returncode = None
+
+    async def communicate(self):
+        self.started.set()
+        await self.release.wait()
+        self.returncode = -9 if self.killed else 0
+        return b"", b""
+
+    def kill(self) -> None:
+        self.killed = True
+        self.release.set()
+
+    async def wait(self) -> int:
+        self.waited = True
+        self.returncode = -9 if self.killed else 0
+        return self.returncode
+
+
+def _process_factory(proc):
+    async def create(*args, **kwargs):
+        return proc
+
+    return create
+
+
+class TestSlotAccountingUnderCancellation:
+    """A cancelled request must not leave the child running with its slot freed.
+
+    `_active_subprocesses` is what bounds fds, IB client ids and the reserved
+    order lane. If a runner releases the slot on cancellation without killing
+    the child, the counter under-counts live processes: the cap stops bounding
+    anything, and an order slot reported as free can already be occupied by an
+    orphan. For `run_module` the orphan is typically
+    `trade_blotter.flex_query`, which keeps spending Flex requests against a
+    token already under a 24h-to-168h throttle embargo.
+    """
+
+    @pytest.mark.parametrize(
+        "runner,args",
+        [
+            ("run_script", ("slow_scan.py", [])),
+            ("run_script_raw", ("slow_scan.py", [])),
+            ("run_module", ("trade_blotter.flex_query", [])),
+        ],
+    )
+    def test_cancellation_kills_the_child_and_frees_the_slot(
+        self, stub_scripts, monkeypatch, runner, args
+    ):
+        proc = _BlockingProcess()
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", _process_factory(proc))
+        monkeypatch.setattr(subprocess_mod, "_active_subprocesses", 0)
+
+        async def run():
+            task = asyncio.create_task(
+                getattr(subprocess_mod, runner)(*args, timeout=30)
+            )
+            await asyncio.wait_for(proc.started.wait(), timeout=5)
+            assert subprocess_mod._active_subprocesses == 1
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+        asyncio.run(run())
+
+        assert proc.killed is True, f"{runner} orphaned the child on cancellation"
+        assert subprocess_mod._active_subprocesses == 0, (
+            f"{runner} leaked a slot on cancellation"
+        )

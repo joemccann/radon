@@ -61,6 +61,41 @@ GOOG_TRADE = {
 }
 
 
+def _both_legs_trade():
+    """GOOG with BOTH exit legs PENDING on the SAME contract.
+
+    T-055: the target and the stop are two SELL limits on one conId; only
+    the limit price tells them apart at the broker.
+    """
+    spec = {
+        "symbol": "GOOG",
+        "expiry": "20260417",
+        "strike": 315,
+        "right": "C",
+    }
+    return {
+        "id": 8,
+        "ticker": "GOOG",
+        "structure": "Bull Call Spread",
+        "exit_orders": {
+            "target": {
+                "price": 15.00,
+                "status": "PENDING",
+                "order_id": None,
+                "contracts": 44,
+                "contract_spec": dict(spec),
+            },
+            "stop": {
+                "price": 14.50,
+                "status": "PENDING",
+                "order_id": None,
+                "contracts": 44,
+                "contract_spec": dict(spec),
+            },
+        },
+    }
+
+
 class FailingUpdateDb(FakeJournalDb):
     """Journal reads work; UPDATE raises (Turso blip)."""
 
@@ -100,11 +135,13 @@ def _confirmed_trade(order_id=99, perm_id=777001):
     return trade
 
 
-def _open_sell_trade(con_id=606060, order_id=99, local_symbol="GOOG  260417C00315000"):
+def _open_sell_trade(con_id=606060, order_id=99, local_symbol="GOOG  260417C00315000",
+                     limit_price=15.00):
     trade = MagicMock()
     trade.order.action = "SELL"
     trade.order.orderId = order_id
     trade.order.permId = 777001
+    trade.order.lmtPrice = limit_price
     trade.orderStatus.status = "Submitted"
     trade.contract.conId = con_id
     trade.contract.localSymbol = local_symbol
@@ -132,6 +169,10 @@ def _run(db, handler=None, open_orders=(), open_orders_raises=False,
 
 def _status(db):
     return db.trades["trade-8"]["exit_orders"]["target"]["status"]
+
+
+def _leg(db, order_type):
+    return db.trades["trade-8"]["exit_orders"][order_type]
 
 
 class TestGuardSurvivesRestart:
@@ -192,6 +233,61 @@ class TestBrokerCrossCheck:
         client.place_order.assert_not_called()
         assert "error" in result
         assert _status(db) == "PENDING"
+
+    def test_working_target_is_not_adopted_as_the_stop(self):
+        """T-055: both exit legs sit on the SAME contract, so a
+        contract-only index hands the working TARGET to the stop
+        candidate — the stop is marked PLACED with the target's orderId
+        and never reaches IB, leaving the position unprotected once the
+        target fills."""
+        db = FakeJournalDb([_both_legs_trade()])
+        placed = _confirmed_trade(order_id=4242, perm_id=777002)
+        result, client, _ = _run(
+            db,
+            open_orders=[_open_sell_trade(limit_price=15.00)],
+            place_trade=placed,
+        )
+
+        assert _leg(db, "target")["order_id"] == 99
+        assert result.get("orders_adopted", 0) == 1
+
+        assert client.place_order.call_count == 1
+        assert _leg(db, "stop")["order_id"] != 99
+        assert _leg(db, "stop")["order_id"] == 4242
+        assert _leg(db, "stop")["status"] == "PLACED"
+
+    def test_working_stop_is_not_adopted_as_the_target(self):
+        """Mirror of T-055: the surviving leg at IB is the STOP; the
+        target must still be placed."""
+        db = FakeJournalDb([_both_legs_trade()])
+        placed = _confirmed_trade(order_id=4243, perm_id=777003)
+        result, client, _ = _run(
+            db,
+            open_orders=[_open_sell_trade(order_id=77, limit_price=14.50)],
+            place_trade=placed,
+        )
+
+        assert _leg(db, "stop")["order_id"] == 77
+        assert result.get("orders_adopted", 0) == 1
+        assert client.place_order.call_count == 1
+        assert _leg(db, "target")["order_id"] == 4243
+
+    def test_unpriced_working_sell_defers_instead_of_adopting(self):
+        """Fail-safe: a working SELL whose limit price is unreadable
+        cannot be matched to an exit leg. Neither adopt it (that would
+        write a false PLACED) nor place beside it (possible duplicate) —
+        defer the leg with the row still PENDING."""
+        db = FakeJournalDb([_both_legs_trade()])
+        result, client, _ = _run(
+            db,
+            open_orders=[_open_sell_trade(limit_price=None)],
+        )
+
+        client.place_order.assert_not_called()
+        assert _leg(db, "target")["status"] == "PENDING"
+        assert _leg(db, "stop")["status"] == "PENDING"
+        assert result["orders_skipped"] == 2
+        assert "error" in result
 
     def test_no_matching_open_order_places_normally(self):
         """Control: an unrelated open SELL (different conId + symbol) must
