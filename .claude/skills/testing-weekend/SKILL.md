@@ -149,3 +149,22 @@ how this loop improves as the codebase grows.
   non-trivial scan of a large diff, write the patch to a file and parse it with
   a `python3.13` heredoc — that is what produced the trustworthy zero-new-skips
   result.
+- **2026-08-16 (remediate) — NEVER run `git pull` on this runner, and push
+  after EVERY task commit.** The rtk hook rewrites bare `git` commands, and its
+  `git pull` rewrite did `reset --hard origin/<branch>` + a rebase onto
+  `origin/main` while printing "Already up to date." That silently discarded 14
+  unpushed remediation commits (T-055…T-069 — 29 files, +1296 lines). The same
+  filter then served STALE `git log` / `git status` output, so the loss stayed
+  invisible for several tool calls; it surfaced only because a baseline vitest
+  run reported a `.pi` suite that T-058 had already fixed. Rails:
+  - Use `rtk proxy git …` for every git command in this loop. Bare `git`
+    output on this runner cannot be trusted for state decisions.
+  - Never `git pull`. Sync with `rtk proxy git fetch origin` plus an explicit
+    `merge --ff-only` you chose deliberately.
+  - `rtk proxy git push` the weekend branch immediately after every task
+    commit, not once at the end. The branch on origin is the only durable copy;
+    "push at the end of the run" is a single point of failure.
+  - Recovery if it happens anyway: `rtk proxy git reflog` still holds the
+    orphaned tip. Tag it first, then
+    `git rebase --onto <rebased-base> <old-base> <orphan-tip>` and
+    `git branch -f`.
