@@ -199,10 +199,11 @@ class TestCircuitBreakerCadence:
 
         now = _et_to_utc(2026, 5, 11, 17, 30)
         h = self._fresh_handler()
-        # Pretend a throttle just landed; 24h embargo.
+        # Pretend a 1018 just landed. The first rung is 90s — IBKR's documented
+        # window is one minute, not one day.
         h._backoff_state = record_throttle({"throttle_count": 0, "blocked_until": None}, now_utc=now)
-        # 1h later, still in window → blocked.
-        later = now + timedelta(hours=1)
+        # 60s later, still inside the 90s window → blocked.
+        later = now + timedelta(seconds=60)
         with patch(
             "monitor_daemon.handlers.cash_flow_sync._now_utc", return_value=later
         ):
