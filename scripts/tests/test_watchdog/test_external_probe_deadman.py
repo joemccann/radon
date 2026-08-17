@@ -189,6 +189,23 @@ def test_legacy_aggregate_unhealthy_stays_fail_closed(monkeypatch) -> None:
     assert outcome.fired is True
 
 
+def _healthy_disk_outcome():
+    """Keep continuous-bucket tests hermetic — the real check_disk reads the
+    HOST's root fs and would fire on a genuinely full laptop (R-069)."""
+    from scripts.watchdog.check import CheckOutcome
+
+    return CheckOutcome(
+        service="root-disk-usage",
+        kind="disk",
+        status="healthy",
+        severity=None,
+        fired=False,
+        message="root fs 10% used",
+        consecutive_failures=0,
+        now=NOW,
+    )
+
+
 def test_continuous_bucket_dispatches_external_probe_deadman() -> None:
     from scripts.watchdog.check import CheckOutcome
     from scripts.watchdog.grouping import DispatchSummary
@@ -214,6 +231,7 @@ def test_continuous_bucket_dispatches_external_probe_deadman() -> None:
         patch("scripts.watchdog.check.check_bucket", return_value=report),
         patch("scripts.watchdog.units.check_units", return_value=[]),
         patch("scripts.watchdog.external_probe.check_external_probe", return_value=outcome),
+        patch("scripts.watchdog.disk.check_disk", return_value=_healthy_disk_outcome()),
         patch("scripts.watchdog.grouping.dispatch_with_grouping", side_effect=dispatch),
         patch("scripts.watchdog.notify.log_startup_warning"),
         patch.object(watchdog_main, "_reconcile_recovered_emergencies"),
@@ -243,6 +261,7 @@ def test_continuous_bucket_cancels_external_probe_emergency_on_recovery() -> Non
         patch("scripts.watchdog.check.check_bucket", return_value=report),
         patch("scripts.watchdog.units.check_units", return_value=[]),
         patch("scripts.watchdog.external_probe.check_external_probe", return_value=healthy),
+        patch("scripts.watchdog.disk.check_disk", return_value=_healthy_disk_outcome()),
         patch(
             "scripts.watchdog.grouping.dispatch_with_grouping",
             return_value=DispatchSummary(),

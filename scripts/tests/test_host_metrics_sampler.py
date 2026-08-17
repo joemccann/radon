@@ -102,6 +102,33 @@ class TestLoopLag:
         assert sampler.parse_loop_lag(None) is None
 
 
+class TestDiskUsage:
+    """R-069: the sampler must carry root-fs usage — CPU/mem/swap/load alone
+    let the disk fill silently."""
+
+    def test_disk_pct_from_usage(self):
+        assert sampler.disk_pct_from_usage(100, 42) == pytest.approx(42.0)
+        assert sampler.disk_pct_from_usage(0, 0) is None
+        assert sampler.disk_pct_from_usage(-1, 0) is None
+
+    def test_read_disk_pct_uses_shutil_disk_usage(self, monkeypatch):
+        import collections
+
+        usage = collections.namedtuple("usage", "total used free")(200, 150, 50)
+        monkeypatch.setattr(sampler.shutil, "disk_usage", MagicMock(return_value=usage))
+        assert sampler.read_disk_pct() == pytest.approx(75.0)
+
+    def test_read_disk_pct_unreadable_is_none(self, monkeypatch):
+        monkeypatch.setattr(
+            sampler.shutil, "disk_usage", MagicMock(side_effect=OSError("statvfs"))
+        )
+        assert sampler.read_disk_pct() is None
+
+    def test_row_schema_carries_disk_pct(self):
+        assert "disk_pct" in sampler.ROW_COLUMNS
+        assert "disk_pct" in sampler.HOST_METRICS_INSERT_SQL
+
+
 class TestBoundedWrites:
     def test_write_row_inserts_over_the_bounded_hrana_path(self, monkeypatch):
         execute = MagicMock()
@@ -114,6 +141,7 @@ class TestBoundedWrites:
             "load1": 0.42,
             "swap_used_mb": 0.0,
             "loop_lag_ms": 0.2,
+            "disk_pct": 61.3,
             "units_json": "[]",
         }
         assert sampler.write_row(row) is True
@@ -121,7 +149,7 @@ class TestBoundedWrites:
         sql, args = execute.call_args.args
         assert "INSERT INTO host_metrics" in sql
         assert args == (
-            "2026-06-12T07:00:17Z", 40.0, 3853.5, 3853.5, 0.42, 0.0, 0.2, "[]",
+            "2026-06-12T07:00:17Z", 40.0, 3853.5, 3853.5, 0.42, 0.0, 0.2, 61.3, "[]",
         )
 
     def test_write_row_failure_falls_back_to_jsonl(self, monkeypatch, tmp_path):
