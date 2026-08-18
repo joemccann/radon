@@ -90,10 +90,16 @@ DEFAULT_ACCOUNT_ID = "ALL"
 
 @_dataclass(frozen=True)
 class FlexDocument:
-    """One fetched Flex statement, kept so a query id is requested only once."""
+    """One attempted Flex statement, kept so a query id is requested only once.
+
+    A failed attempt is still an attempt. `xml` is None and `error` carries the
+    upstream message, so a later leg can tell "this id already failed" apart
+    from "this id was never tried" and decline to re-request it.
+    """
 
     query_id: str
-    xml: str
+    xml: Optional[str] = None
+    error: Optional[str] = None
 
 
 @_dataclass(frozen=True)
@@ -449,7 +455,7 @@ def _fetch_nav_document() -> Optional[FlexDocument]:
         return FlexDocument(query_id=query_id, xml=fetch_flex_xml(token, query_id))
     except Exception as exc:  # noqa: BLE001
         print(f"[perf_twr] Flex NAV fetch failed: {exc}", file=_sys.stderr)
-        return None
+        return FlexDocument(query_id=query_id, error=str(exc))
 
 
 def get_nav_snapshots() -> NavResolution:
@@ -462,7 +468,9 @@ def get_nav_snapshots() -> NavResolution:
     """
     document = _fetch_nav_document()
     entries, gap_dates = consolidate_nav(
-        parse_nav_by_account(document.xml) if document is not None else {}
+        parse_nav_by_account(document.xml)
+        if document is not None and document.xml is not None
+        else {}
     )
     if entries:
         _cache_nav_to_disk(entries)
@@ -484,6 +492,75 @@ def _cache_nav_to_disk(entries: Mapping[str, float]) -> None:
         _NAV_CACHE_PATH.write_text(_json.dumps(rows, indent=2))
     except OSError:
         pass
+
+
+def _query_turso(sql: str) -> Optional[List[Any]]:
+    """Rows for one read-only query, or None if Turso is unreachable/unset."""
+    if not _os.environ.get("TURSO_DB_URL") or not _os.environ.get("TURSO_AUTH_TOKEN"):
+        return None
+    try:
+        try:
+            from db.client import get_db  # type: ignore
+        except ImportError:
+            from scripts.db.client import get_db  # type: ignore
+
+        return get_db().execute(sql).fetchall()
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _row_values(row: Any, *keys: str) -> Tuple[Any, ...]:
+    if isinstance(row, dict):
+        return tuple(row.get(k) for k in keys)
+    return tuple(row[i] for i in range(len(keys)))
+
+
+def load_flows_from_turso() -> Optional[Dict[str, float]]:
+    """Last-known-good external flows, netted per report date.
+
+    The symmetric counterpart to `load_nav_from_turso`. Returns None when
+    nothing is mirrored yet; an empty result is NOT a verified zero.
+    """
+    rows = _query_turso("SELECT report_date, amount FROM external_flows ORDER BY report_date ASC")
+    if rows is None:
+        return None
+
+    out: Dict[str, float] = {}
+    for row in rows:
+        report_date, amount = _row_values(row, "report_date", "amount")
+        normalized = _normalize_date(report_date)
+        value = _optional_float(amount)
+        if normalized and value is not None:
+            # One date can carry several flow_type rows; the subperiod maths
+            # only ever needs their net.
+            out[normalized] = out.get(normalized, 0.0) + value
+    return out or None
+
+
+def load_flows_coverage_through() -> Optional[str]:
+    """The last session a good run verified flows for.
+
+    `external_flows` only stores dates that HAD a flow, so its own MAX says
+    nothing about coverage. `twr_subperiods` carries a row per session with an
+    explicit zero, which makes its MAX the honest coverage marker.
+    """
+    rows = _query_turso("SELECT MAX(report_date) AS report_date FROM twr_subperiods")
+    if not rows:
+        return None
+    return _normalize_date(_row_values(rows[0], "report_date")[0])
+
+
+def bound_observations_to_coverage(
+    observations: Sequence[NavObservation], covered_through: Optional[str]
+) -> Sequence[NavObservation]:
+    """Drop NAV past the last session flows were actually verified for.
+
+    Chaining a session the mirror never saw asserts "no external flow that day"
+    on no evidence — the invented zero that inflates TWR.
+    """
+    if not covered_through:
+        return observations
+    return [o for o in observations if o.date <= covered_through]
 
 
 def _flows_query_id() -> Optional[str]:
@@ -521,83 +598,56 @@ def _transfers_section_warnings(xml_text: str, query_id: str) -> List[Dict[str, 
     ]
 
 
-def load_flows_from_turso() -> Optional[Dict[str, float]]:
-    """Last-known-good external flows, netted per report date.
+def _flows_after_fetch_failure(reason: str) -> Tuple[FlowSet, List[Dict[str, Any]]]:
+    """Serve last-known-good flows rather than blanking a page that was correct.
 
-    The symmetric counterpart to `load_nav_from_turso`. Flows for closed
-    sessions are settled facts; they do not change because IBKR's statement
-    generator is unavailable right now. Returning them lets a Flex outage
-    degrade the page's provenance instead of blanking its numbers.
+    Flows for closed sessions are settled facts; they do not change because
+    IBKR's statement generator is unavailable right now. Falling back to the
+    mirror a previous good run wrote degrades the page's provenance instead of
+    its numbers, exactly as NAV already degrades through disk_cache -> turso.
 
-    Returns None when nothing is mirrored yet. An empty result is NOT a
-    verified zero — see the caller.
+    Nothing mirrored stays FAILED: absence of evidence is not a verified zero,
+    and an invented empty flow set is what produced the +951% TWR.
     """
-    if not _os.environ.get("TURSO_DB_URL") or not _os.environ.get("TURSO_AUTH_TOKEN"):
-        return None
-    try:
-        try:
-            from db.client import get_db  # type: ignore
-        except ImportError:
-            from scripts.db.client import get_db  # type: ignore
-
-        db = get_db()
-        rows = db.execute(
-            "SELECT report_date, amount FROM external_flows ORDER BY report_date ASC"
-        ).fetchall()
-    except Exception:  # noqa: BLE001
-        return None
-
-    out: Dict[str, float] = {}
-    for row in rows:
-        if isinstance(row, dict):
-            report_date = _normalize_date(row.get("report_date"))
-            amount = _optional_float(row.get("amount"))
-        else:
-            report_date = _normalize_date(row[0])
-            amount = _optional_float(row[1])
-        if report_date and amount is not None:
-            # One date can carry several flow_type rows; the subperiod maths
-            # only ever needs their net.
-            out[report_date] = out.get(report_date, 0.0) + amount
-    return out or None
+    mirrored = load_flows_from_turso()
+    if not mirrored:
+        return FlowSet.failed(f"fetch_failed: {reason}"), []
+    print(
+        f"[perf_twr] Serving {len(mirrored)} mirrored flows from Turso after Flex failure",
+        file=_sys.stderr,
+    )
+    return FlowSet(status=FlowsStatus.OK, by_date=mirrored, source="turso"), []
 
 
 def resolve_flows(document: Optional[FlexDocument] = None) -> Tuple[FlowSet, List[Dict[str, Any]]]:
     """Resolve external flows plus any coverage warnings about the statement.
 
     The NAV statement is reused when the flows query id matches it, so one
-    query id is never requested twice in a run.
+    query id is never requested twice in a run — and a query id that already
+    FAILED this run is not requested again either. Retrying it cannot succeed
+    seconds later on the same token, and the repeat is what escalates a
+    transient 1001 into a 1025 "too many failed attempts" lockout.
     """
     token = _os.environ.get("IB_FLEX_TOKEN")
     query_id = _flows_query_id()
     if not token or not query_id:
         return FlowSet.failed("flex_not_configured"), []
-    try:
-        statement = (
-            document.xml
-            if document is not None and document.query_id == query_id
-            else fetch_flex_xml(token, query_id)
+
+    already_attempted = document is not None and document.query_id == query_id
+    if already_attempted and document.xml is None:
+        reason = document.error or "nav_fetch_failed"
+        print(
+            f"[perf_twr] Flex flows fetch skipped: query {query_id} already failed "
+            f"this run ({reason})",
+            file=_sys.stderr,
         )
+        return _flows_after_fetch_failure(reason)
+
+    try:
+        statement = document.xml if already_attempted else fetch_flex_xml(token, query_id)
     except Exception as exc:  # noqa: BLE001
         print(f"[perf_twr] Flex flows fetch failed: {exc}", file=_sys.stderr)
-        # Fall back to the flows a previous good run mirrored to Turso rather
-        # than suppressing TWR outright. Without this a single Flex 1001/1025
-        # blanks a page that was correct minutes earlier (incident 2026-08-17).
-        mirrored = load_flows_from_turso()
-        if mirrored:
-            print(
-                f"[perf_twr] Serving {len(mirrored)} mirrored flows from Turso "
-                f"after Flex failure",
-                file=_sys.stderr,
-            )
-            return FlowSet(
-                status=FlowsStatus.OK,
-                by_date=mirrored,
-                source="turso",
-            ), []
-        # Nothing mirrored: absence of evidence is not a verified zero. An
-        # invented empty flow set is what produced the +951% TWR.
-        return FlowSet.failed(f"fetch_failed: {exc}"), []
+        return _flows_after_fetch_failure(str(exc))
 
     coverage = _transfers_section_warnings(statement, query_id)
     try:
@@ -1467,6 +1517,43 @@ def _persist_perf_tables(payload: Mapping[str, Any]) -> None:
         print(f"[perf_twr] TWR table mirror failed: {exc}", file=_sys.stderr)
 
 
+def _apply_mirrored_flow_coverage(
+    observations: Sequence[NavObservation], flows: FlowSet
+) -> Tuple[Sequence[NavObservation], FlowSet, List[Dict[str, Any]]]:
+    """Hold a mirrored-flow build to the sessions the mirror actually verified.
+
+    Live Flex flows need no bound — the statement covers what it covers. A
+    mirror does: publishing a session it never saw asserts "no external flow
+    that day" on no evidence.
+    """
+    if flows.source != "turso" or not observations:
+        return observations, flows, []
+
+    covered_through = load_flows_coverage_through()
+    bounded = bound_observations_to_coverage(observations, covered_through)
+    if not bounded:
+        return observations, FlowSet.failed(
+            f"mirrored_flows_cover_nothing_through_{covered_through or 'unknown'}"
+        ), []
+
+    dropped = len(observations) - len(bounded)
+    return (
+        bounded,
+        flows,
+        [
+            _warning(
+                "FLOWS_SOURCE_MIRROR",
+                "warn",
+                "External flows came from the last mirrored statement, not a live "
+                f"Flex fetch; verified through {covered_through or 'unknown'}.",
+                flows_source="turso",
+                covered_through=covered_through,
+                sessions_dropped=dropped,
+            )
+        ],
+    )
+
+
 def build_and_persist(*, persist: bool = True, allow_inferred_flows: bool = False) -> Dict[str, Any]:
     """Resolve NAV + flows, apply the gates, assemble and optionally persist."""
     resolution = get_nav_snapshots()
@@ -1477,6 +1564,9 @@ def build_and_persist(*, persist: bool = True, allow_inferred_flows: bool = Fals
         flows, coverage = resolve_flows(resolution.document)
     else:
         flows, coverage = FlowSet.failed("no_nav_series"), []
+
+    observations, flows, mirror_warnings = _apply_mirrored_flow_coverage(observations, flows)
+    coverage = list(coverage) + mirror_warnings
 
     benchmark = None
     if len(observations) >= 2:
