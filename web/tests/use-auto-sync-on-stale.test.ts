@@ -62,6 +62,23 @@ describe("useAutoSyncOnStale", () => {
     expect(syncNow).toHaveBeenCalledTimes(2);
   });
 
+  it("retries on the staleness tick while the snapshot stays stale, cooldown-bounded", () => {
+    const syncNow = vi.fn();
+    const { rerender } = renderHook(
+      ({ tick }) => useAutoSyncOnStale(true, syncNow, "orders", true, tick),
+      { initialProps: { tick: 0 } },
+    );
+    expect(syncNow).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(30_000);
+    rerender({ tick: 1 });
+    expect(syncNow).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(31_000);
+    rerender({ tick: 2 });
+    expect(syncNow).toHaveBeenCalledTimes(2);
+  });
+
   it("tracks cooldown per target so a route change still syncs the new page", () => {
     const portfolioSync = vi.fn();
     const ordersSync = vi.fn();
