@@ -14,6 +14,13 @@ export interface CatalystRow {
   source: string;
   days_until: number;
   event_time?: string | null;
+  forecast?: string | number | null;
+  prev?: string | number | null;
+  actual?: string | number | null;
+  reported_period?: string | null;
+  street_mean_est?: string | number | null;
+  actual_eps?: string | number | null;
+  expected_move_perc?: string | number | null;
 }
 
 export interface CatalystData {

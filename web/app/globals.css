@@ -2420,6 +2420,7 @@ a.signals-hero__row:hover { background: var(--bg-panel-raised); }
 .catalyst-group {
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 
 .catalyst-group__head {
@@ -2494,6 +2495,7 @@ a.signals-hero__row:hover { background: var(--bg-panel-raised); }
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
   min-height: 32px;
   border-bottom: 1px solid var(--line-grid);
 }
@@ -2535,12 +2537,44 @@ a.signals-hero__row:hover { background: var(--bg-panel-raised); }
   min-width: 0;
 }
 
+.catalyst-group__print {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  flex: none;
+  white-space: nowrap;
+}
+
+.catalyst-group__print--actual {
+  color: var(--text-primary);
+}
+
 .catalyst-group__when {
   font-family: var(--font-mono);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
   color: var(--text-secondary);
   flex: none;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .catalyst-group__row {
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+
+  .catalyst-group__when {
+    margin-left: auto;
+    order: 2;
+  }
+
+  .catalyst-group__print {
+    flex: 1 0 100%;
+    min-width: 0;
+    order: 3;
+  }
 }
 
 /* ───────────────────────────────────────────────────────────
