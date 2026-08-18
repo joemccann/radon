@@ -382,9 +382,17 @@ def test_76c_the_thirty_day_boundary(tmp_path, monkeypatch):
         ("flex_live", 0, "ok", []),
         ("flex_live", 2, "ok", []),
         ("flex_live", 3, "stale", ["NAV_STALE"]),
-        ("disk_cache", 1, "stale", ["NAV_SOURCE_DISK"]),
+        # Re-pinned 2026-08-17: a fallback SOURCE inside the freshness budget
+        # is provenance, not staleness. These two cases pinned status="stale",
+        # and the render layer gates the TWR on "stale" exactly as on
+        # "degraded" -- so a NAV of 2026-08-14 served from cache on 2026-08-17
+        # blanked the entire page, even though a live Flex fetch would have
+        # returned that same date (IBKR is T+1). The NAV_SOURCE_* code is still
+        # emitted; only the status floor moved. Age still escalates -- see the
+        # `behind=9` rows, which are unchanged.
+        ("disk_cache", 1, "ok", ["NAV_SOURCE_DISK"]),
         ("disk_cache", 9, "degraded", ["NAV_SOURCE_DISK", "NAV_STALE"]),
-        ("turso", 1, "stale", ["NAV_SOURCE_TURSO"]),
+        ("turso", 1, "ok", ["NAV_SOURCE_TURSO"]),
         ("turso", 9, "degraded", ["NAV_SOURCE_TURSO", "NAV_STALE"]),
     ],
 )

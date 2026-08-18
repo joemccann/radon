@@ -612,15 +612,15 @@ Any warning of severity `error` forces at least `degraded`. Any warning of sever
 
 **Gate 1 — external flows.** `status == "ok"` requires `flows.status in {OK, EMPTY_VERIFIED}`. `FAILED` => `degraded`, `twr: null`. `EMPTY_VERIFIED` publishes normally but stamps `flows_status: "empty_verified"` in the payload so an operator can see that "no deposits" was *observed*, not *assumed*.
 
-**Gate 2 — NAV freshness.** `status == "ok"` requires `nav_source == "flex_live"` **and** `sessions_behind(period_end) <= NAV_STALENESS_BUDGET_SESSIONS`. `sessions_behind` uses `scripts/utils/market_calendar` (the same holiday source of truth as `marketCalendar.js`), not naive date subtraction. Any other combination:
+**Gate 2 — NAV freshness.** `status == "ok"` requires `sessions_behind(period_end) <= NAV_STALENESS_BUDGET_SESSIONS`. It does **not** require `nav_source == "flex_live"`: revised 2026-08-17 after a cached NAV of `2026-08-14`, read on `2026-08-17`, floored the payload to `stale` and blanked every gated metric — even though IBKR is T+1 and a live fetch would have returned that exact date. Provenance and freshness are different questions and only the second may hide a number; age is separately policed by `_NAV_DISK_MAX_AGE_DAYS` and by the read layer re-deriving `sessionsBehind` from `nav_as_of`. `sessions_behind` uses `scripts/utils/market_calendar` (the same holiday source of truth as `marketCalendar.js`), not naive date subtraction. Any other combination:
 
 | `nav_source` | sessions behind | status | warning |
 |---|---|---|---|
 | `flex_live` | <= 2 | `ok` | — |
 | `flex_live` | > 2 | `stale` | `NAV_STALE` (warn) |
-| `disk_cache` | <= 2 | `stale` | `NAV_SOURCE_DISK` (warn) |
+| `disk_cache` | <= 2 | `ok` | `NAV_SOURCE_DISK` (info) |
 | `disk_cache` | > 2 | `degraded` | `NAV_SOURCE_DISK` + `NAV_STALE` (error) |
-| `turso` | <= 2 | `stale` | `NAV_SOURCE_TURSO` (warn) |
+| `turso` | <= 2 | `ok` | `NAV_SOURCE_TURSO` (info) |
 | `turso` | > 2 | `degraded` | `NAV_SOURCE_TURSO` + `NAV_STALE` (error) |
 | none | — | `unavailable` | `NAV_UNAVAILABLE` (error) |
 
