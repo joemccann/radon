@@ -43,10 +43,40 @@ describe("DailyDarkPoolHistory", () => {
     expect(screen.getByLabelText(/buy percentage over sessions/i)).toBeTruthy();
   });
 
+  it("keeps the session toggle in the module header, not between table and chart", () => {
+    render(<DailyDarkPoolHistory daily={makeSessions(20)} />);
+
+    const root = screen.getByTestId("daily-dp-history");
+    const header = root.querySelector(".section-header");
+    const toggle = screen.getByTestId("daily-dp-history-toggle");
+    expect(header?.contains(toggle)).toBe(true);
+    expect(screen.queryByTestId("daily-dp-history-disclosure")).toBeNull();
+
+    fireEvent.click(toggle);
+
+    expect(header?.contains(screen.getByTestId("daily-dp-history-toggle"))).toBe(true);
+    const body = root.querySelector(".section-body");
+    const table = body?.querySelector(".ticker-flow-daily");
+    const chart = screen.getByTestId("daily-dp-history-chart");
+    expect(table?.nextElementSibling).toBe(chart);
+  });
+
+  it("renders a chart header with buy-% title and chronological window", () => {
+    render(<DailyDarkPoolHistory daily={makeSessions(20)} />);
+    fireEvent.click(screen.getByTestId("daily-dp-history-toggle"));
+
+    const header = screen.getByTestId("daily-dp-history-chart-header");
+    expect(header.textContent).toMatch(/Buy % by session/i);
+    expect(header.textContent).toContain("07-01");
+    expect(header.textContent).toContain("07-20");
+    expect(header.textContent).toMatch(/oldest to newest/i);
+  });
+
   it("renders chart immediately when history fits the preview", () => {
     render(<DailyDarkPoolHistory daily={makeSessions(3)} />);
     expect(screen.queryByTestId("daily-dp-history-toggle")).toBeNull();
     expect(screen.getByTestId("daily-dp-history-chart")).toBeTruthy();
+    expect(screen.getByTestId("daily-dp-history-chart-header").textContent).toContain("07-18");
   });
 
   it("renders nothing for empty daily", () => {

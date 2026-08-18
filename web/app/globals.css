@@ -17525,14 +17525,14 @@ body[data-mobile="true"] td.right {
   border-bottom: none;
 }
 
-.ticker-flow-history-disclosure {
-  display: flex;
-  justify-content: flex-start;
-  margin-top: 12px;
+.ticker-flow-history > .section-header {
+  flex-wrap: wrap;
+  gap: 8px 12px;
 }
 
 .ticker-flow-history-toggle {
   appearance: none;
+  position: relative;
   background: transparent;
   border: 1px solid var(--border-dim);
   border-radius: 4px;
@@ -17542,13 +17542,31 @@ body[data-mobile="true"] td.right {
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.04em;
-  padding: 6px 10px;
+  padding: 3px 8px;
   text-transform: uppercase;
+  transition-property: color, border-color, scale;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
+}
+
+.ticker-flow-history-toggle::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 100%;
+  min-width: 40px;
+  height: 40px;
+  transform: translate(-50%, -50%);
 }
 
 .ticker-flow-history-toggle:hover {
   border-color: var(--signal-core, #05AD98);
   color: var(--text-primary);
+}
+
+.ticker-flow-history-toggle:active {
+  scale: 0.96;
 }
 
 .ticker-flow-history-toggle:focus-visible {
@@ -17557,9 +17575,17 @@ body[data-mobile="true"] td.right {
 }
 
 .ticker-flow-history-chart {
-  margin-top: 16px;
-  padding-top: 12px;
+  margin-top: 0;
+  padding: 0 8px 12px;
   border-top: 1px solid var(--border-dim);
+}
+
+.ticker-flow-history-chart-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0 8px;
 }
 
 .ticker-flow-history-chart-title {
@@ -17567,8 +17593,18 @@ body[data-mobile="true"] td.right {
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  color: var(--text-secondary, var(--text-muted));
+  margin: 0;
+}
+
+.ticker-flow-history-chart-meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   color: var(--text-muted);
-  margin-bottom: 8px;
+  white-space: nowrap;
 }
 
 .ticker-flow-history-chart-svg {
@@ -17634,6 +17670,15 @@ body[data-mobile="true"] td.right {
 }
 
 @media (max-width: 640px) {
+  .ticker-flow-history-chart-header {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .ticker-flow-history-chart-meta {
+    white-space: normal;
+  }
+
   .ticker-flow-hero {
     padding: 12px;
   }

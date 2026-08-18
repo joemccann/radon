@@ -156,6 +156,43 @@ test.describe("Flow Analysis per-ticker route", () => {
     await expect(page.locator(".ticker-flow-report")).toContainText(/Daily Dark Pool History/i);
   });
 
+  test("daily history toggle lives in the header and chart has a window rail", async ({ page }) => {
+    await setupBaseMocks(page);
+    const fresh = bullishReport("AAPL", new Date().toISOString());
+    fresh.dark_pool!.daily = Array.from({ length: 20 }, (_, i) => {
+      const day = String(20 - i).padStart(2, "0");
+      return {
+        date: `2026-07-${day}`,
+        flow_direction: i % 2 === 0 ? "ACCUMULATION" : "NEUTRAL",
+        flow_strength: 50 + i,
+        dp_buy_ratio: 0.45 + (i % 5) * 0.05,
+        num_prints: 80 + i,
+      };
+    });
+    await page.route("**/api/flow-analysis/AAPL**", (r) =>
+      r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(fresh) }),
+    );
+
+    await page.goto("/flow-analysis/AAPL");
+    const history = page.getByTestId("daily-dp-history");
+    await history.waitFor();
+
+    const toggle = page.getByTestId("daily-dp-history-toggle");
+    await expect(history.locator(".section-header")).toContainText(/20 SESSIONS/i);
+    await expect(history.locator(".section-header").getByTestId("daily-dp-history-toggle")).toBeVisible();
+    await expect(page.getByTestId("daily-dp-history-chart")).toHaveCount(0);
+
+    await toggle.click();
+    const chart = page.getByTestId("daily-dp-history-chart");
+    await expect(chart).toBeVisible();
+    const rail = page.getByTestId("daily-dp-history-chart-header");
+    await expect(rail).toContainText(/Buy % by session/i);
+    await expect(rail).toContainText("07-01");
+    await expect(rail).toContainText("07-20");
+    await expect(rail).toContainText(/oldest to newest/i);
+    await expect(history.locator(".section-header").getByTestId("daily-dp-history-toggle")).toBeVisible();
+  });
+
   test("mobile options tab renders the put/call convention", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await setupBaseMocks(page);
