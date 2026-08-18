@@ -8947,6 +8947,16 @@ body[data-mobile="true"] .orders-command-strip__jump:active {
 /* ── Table wrap for horizontal scroll ── */
 .table-wrap { overflow-x: auto; }
 
+/* Desktop-only tables that swap to cards on mobile still need containment
+   on narrow desktop panels. The mobile display:none rules still win. */
+.theta-harvester__table-wrap { overflow-x: auto; }
+
+/* On the mobile shell a wide table scrolls inside its wrapper instead of
+   two-line-wrapping every cell (same treatment as .pos-legs-table-wrap). */
+body[data-mobile="true"] .table-wrap table { min-width: max-content; }
+body[data-mobile="true"] .table-wrap th,
+body[data-mobile="true"] .table-wrap td { white-space: nowrap; }
+
 /* Horizontal-scroll affordance for wide tables inside a .modal-content
    (which clips overflow-x). Wrap the table in this so it scrolls within
    the modal body instead of overflowing the dialog. */

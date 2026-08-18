@@ -253,7 +253,7 @@ export default function VolConePanel() {
           </nav>
         </div>
         <div className="section-body">
-          <div className="table-scroll">
+          <div className="table-wrap">
             <table className="data-table">
               <thead>
                 <tr>
@@ -394,7 +394,7 @@ export default function VolConePanel() {
             </div>
           )}
           <div className="section-body">
-            <div className="table-scroll">
+            <div className="table-wrap">
               <table className="data-table" data-sortable-exempt="chrome">
                 <tbody>
                   <tr>

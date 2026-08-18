@@ -191,7 +191,7 @@ export default function AtsVenueSharePanel() {
       </div>
 
       <div className="section">
-        <div className="table-scroll">
+        <div className="table-wrap">
           <AtsVenueShareTable rows={rows} />
         </div>
 
