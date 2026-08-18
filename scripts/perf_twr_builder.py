@@ -689,7 +689,13 @@ def _freshness_warnings(nav_source: str, behind: int, nav_as_of: Optional[str]) 
         out.append(
             _warning(
                 source_code,
-                "error" if stale else "warn",
+                # Provenance, not freshness. `warn` floors the payload to
+                # "stale" (_SEVERITY_FLOOR), and the render layer gates the TWR
+                # on "stale" exactly as on "degraded" -- so serving a perfectly
+                # current NAV from a cache blanked the whole page. Age is
+                # already policed by _NAV_DISK_MAX_AGE_DAYS here and by the
+                # read layer re-deriving sessionsBehind from nav_as_of.
+                "error" if stale else "info",
                 f"NAV came from the {nav_source} fallback, not a live Flex fetch.",
                 nav_source=nav_source,
                 nav_as_of=nav_as_of,
