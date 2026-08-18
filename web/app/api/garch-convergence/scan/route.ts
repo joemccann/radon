@@ -10,7 +10,7 @@ import { tickersBodyToRaw, validateTickerList } from "@/lib/scanTickerList";
  * Cooldown + lock live on the FastAPI side. Body accepts {preset?, tickers?}
  * where tickers (comma-separated string or array, paired consecutively so
  * the count must be even) wins over preset; the FastAPI default is
- * preset=indexes.
+ * preset=largecaps.
  */
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";

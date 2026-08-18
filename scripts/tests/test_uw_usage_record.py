@@ -32,7 +32,8 @@ def test_record_hits_increments_by_count_in_one_call(tmp_path: Path) -> None:
     assert record_hits(3, path=path, now=NOW) == 3
     assert record_hits(2, path=path, now=NOW) == 5
     payload = json.loads(path.read_text())
-    assert payload == {"date": quota_date(NOW), "count": 5}
+    assert payload["date"] == quota_date(NOW)
+    assert payload["count"] == 5
     assert used(path=path, now=NOW) == 5
 
 

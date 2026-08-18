@@ -37,9 +37,16 @@ describe("countedUwFetch", () => {
 
     expect(radonFetchMock).toHaveBeenCalledTimes(3);
     expect(radonFetchMock).toHaveBeenCalledWith(
-      "/uw/usage/record",
+      "/uw/usage/record?caller=web&endpoint=stock%2FAAPL%2Finfo",
       expect.objectContaining({ method: "POST" }),
     );
+    // The spent endpoint travels with the hit — a bare total cannot say
+    // which UW path browsing traffic burned.
+    expect(radonFetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "/uw/usage/record?caller=web&endpoint=stock%2FAAPL%2Finfo",
+      "/uw/usage/record?caller=web&endpoint=stock%2FAAPL%2Fstock-state",
+      "/uw/usage/record?caller=web&endpoint=news%2Fheadlines",
+    ]);
   });
 
   it("records nothing when the UW request never produced a response", async () => {

@@ -14,7 +14,7 @@
 # Configuration via environment:
 #
 #   RADON_PYTHON_BIN                 python interpreter
-#   RADON_GARCH_REFRESH_PRESET       Scanner preset (default: indexes)
+#   RADON_GARCH_REFRESH_PRESET       Scanner preset (default: largecaps)
 #   RADON_GARCH_REFRESH_FASTAPI_PORT FastAPI port (default 8321)
 #   RADON_GARCH_REFRESH_FASTAPI_HOST FastAPI host (default 127.0.0.1)
 #
@@ -93,7 +93,7 @@ if [ "$IS_TRADING" = "no" ]; then
     exit 0
 fi
 
-PRESET="${RADON_GARCH_REFRESH_PRESET:-indexes}"
+PRESET="${RADON_GARCH_REFRESH_PRESET:-largecaps}"
 FASTAPI_HOST="${RADON_GARCH_REFRESH_FASTAPI_HOST:-127.0.0.1}"
 FASTAPI_PORT="${RADON_GARCH_REFRESH_FASTAPI_PORT:-8321}"
 FASTAPI_URL="http://${FASTAPI_HOST}:${FASTAPI_PORT}/garch-convergence/scan?preset=${PRESET}"

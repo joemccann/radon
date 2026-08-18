@@ -127,7 +127,7 @@ def test_garch_scan_uses_default_preset_when_omitted(client):
     assert resp.status_code == 200
     args, kwargs = run_mock.call_args
     assert args[0] == "garch_convergence.py"
-    assert args[1][args[1].index("--preset") + 1] == "indexes"
+    assert args[1][args[1].index("--preset") + 1] == "largecaps"
     assert args[1][args[1].index("--workers") + 1] == "16"
     assert kwargs.get("timeout") == 3600
 
@@ -181,7 +181,7 @@ def test_garch_scan_returns_cached_payload_within_cooldown(client, monkeypatch):
 
     cache_payload = {
         "scan_time": "2026-05-22T14:00:00",
-        "universe": "preset:indexes",
+        "universe": "preset:largecaps",
         "requested_tickers": [],
         "tickers": {},
         "pairs": [],

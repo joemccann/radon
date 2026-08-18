@@ -301,6 +301,38 @@ class TestRetryLogic:
             with pytest.raises(UWRateLimitError):
                 client._get("stock/AAPL/info")
 
+    def test_rate_limited_request_retries_once_not_max_retries(
+        self, client, mock_session, monkeypatch
+    ):
+        """A throttled request costs 2 counted hits, never 1 + max_retries.
+
+        Every attempt is a request against the same daily cap, so retrying a
+        429 three times turns one logical fetch into four spent hits — the
+        cap arrives 4x sooner exactly when the account is already throttled.
+        """
+        hits: list[int] = []
+        monkeypatch.setattr("clients.uw_client.record_hit", lambda **kw: hits.append(1))
+        mock_session.get.return_value = _make_response(
+            429, {}, reason="Too Many Requests", headers={"Retry-After": "1"}
+        )
+
+        with patch("time.sleep"):
+            with pytest.raises(UWRateLimitError):
+                client._get("stock/AAPL/info")
+
+        assert mock_session.get.call_count == 2
+        assert hits == [1, 1]
+
+    def test_server_error_still_uses_full_retry_budget(self, client, mock_session):
+        """5xx is not quota pressure — it keeps the full backoff ladder."""
+        mock_session.get.return_value = _make_response(500, {}, reason="Internal Server Error")
+
+        with patch("time.sleep"):
+            with pytest.raises(UWServerError):
+                client._get("stock/AAPL/info")
+
+        assert mock_session.get.call_count == 1 + client._max_retries
+
     def test_connection_error_retried(self, client, mock_session):
         """Connection errors should be retried."""
         from requests.exceptions import ConnectionError
@@ -323,7 +355,7 @@ class TestRetryLogic:
 
     def test_http_attempt_records_budget_hit(self, client, mock_session, monkeypatch):
         hits: list[int] = []
-        monkeypatch.setattr("clients.uw_client.record_hit", lambda: hits.append(1))
+        monkeypatch.setattr("clients.uw_client.record_hit", lambda **kw: hits.append(1))
         mock_session.get.return_value = _make_response(200, {"data": "ok"})
         assert client._get("stock/AAPL/info") == {"data": "ok"}
         assert hits == [1]
@@ -332,7 +364,7 @@ class TestRetryLogic:
         from utils.uw_cache import clear_cache, make_key, set_cached
 
         hits: list[int] = []
-        monkeypatch.setattr("clients.uw_client.record_hit", lambda: hits.append(1))
+        monkeypatch.setattr("clients.uw_client.record_hit", lambda **kw: hits.append(1))
         clear_cache()
         set_cached(make_key("stock/AAPL/info", None), {"data": "from-cache"})
         client._session.get = lambda *a, **k: (_ for _ in ()).throw(
@@ -348,7 +380,7 @@ class TestRetryLogic:
         from utils.uw_cache import clear_cache, get_disk_cached, make_key, set_disk_cached
 
         hits: list[int] = []
-        monkeypatch.setattr("clients.uw_client.record_hit", lambda: hits.append(1))
+        monkeypatch.setattr("clients.uw_client.record_hit", lambda **kw: hits.append(1))
         monkeypatch.setattr(uw_cache, "CACHE_DIR", tmp_path / "uw_http_cache")
         clear_cache()
         payload = {"data": "from-disk"}
@@ -367,7 +399,7 @@ class TestRetryLogic:
         from utils.uw_cache import clear_cache, get_disk_cached, make_key
 
         hits: list[int] = []
-        monkeypatch.setattr("clients.uw_client.record_hit", lambda: hits.append(1))
+        monkeypatch.setattr("clients.uw_client.record_hit", lambda **kw: hits.append(1))
         monkeypatch.setattr(uw_cache, "CACHE_DIR", tmp_path / "uw_http_cache")
         clear_cache()
         payload = {"data": {"ticker": "AAPL"}}

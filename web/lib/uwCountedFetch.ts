@@ -8,6 +8,9 @@
  * through this wrapper: it mirrors one hit into the shared counter via
  * FastAPI, fire-and-forget, after the UW response arrives — matching
  * UWClient, which counts responses, not connection failures.
+ *
+ * The hit carries the UW path it spent, so /uw/usage attributes browsing
+ * traffic per endpoint the same way UWClient attributes scanner traffic.
  */
 import { radonFetch } from "@/lib/radonApi";
 
@@ -18,12 +21,23 @@ export async function countedUwFetch(
   init?: RequestInit,
 ): Promise<Response> {
   const res = await fetch(input, init);
-  recordBudgetHit();
+  recordBudgetHit(uwEndpointOf(input));
   return res;
 }
 
-function recordBudgetHit(): void {
-  void radonFetch("/uw/usage/record", {
+/** "https://api.unusualwhales.com/api/stock/AAPL/info" -> "stock/AAPL/info". */
+function uwEndpointOf(input: string | URL): string {
+  try {
+    const { pathname } = new URL(input.toString());
+    return pathname.replace(/^\/api\//, "").replace(/^\//, "");
+  } catch {
+    return "";
+  }
+}
+
+function recordBudgetHit(endpoint: string): void {
+  const query = new URLSearchParams({ caller: "web", endpoint });
+  void radonFetch(`/uw/usage/record?${query}`, {
     method: "POST",
     timeout: RECORD_TIMEOUT_MS,
   }).catch(() => {
