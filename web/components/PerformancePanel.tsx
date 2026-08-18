@@ -429,6 +429,10 @@ export default function PerformancePanel({ portfolioLastSync = null, marketState
 
   const coreCards = useMemo(() => (view ? buildCoreCards(view) : []), [view]);
   const advancedCards = useMemo(() => (view ? buildAdvancedCards(view) : []), [view]);
+  const advancedGatedCount = useMemo(
+    () => advancedCards.filter((card) => card.value === EMPTY).length,
+    [advancedCards],
+  );
   const allCards = useMemo(() => [...coreCards, ...advancedCards], [coreCards, advancedCards]);
   const activeCard = useMemo(() => allCards.find((c) => c.id === activeCardId) ?? null, [activeCardId, allCards]);
 
@@ -508,7 +512,7 @@ export default function PerformancePanel({ portfolioLastSync = null, marketState
             <div className="performance-methodology-footer" data-testid="performance-methodology">
               <span className="performance-meta-label">Method</span>
               <span className="performance-meta-value">
-                Time-weighted, end-of-day flow convention, chained geometrically
+                Time-weighted, beginning-of-day flow convention, chained geometrically
               </span>
               <span className="performance-meta-label">NAV as of</span>
               <span className="performance-meta-value">{view.navAsOf || EMPTY}</span>
@@ -651,7 +655,13 @@ export default function PerformancePanel({ portfolioLastSync = null, marketState
             <TrendingDown size={14} />
             Advanced
           </div>
-          <span className="pill neutral">GATED</span>
+          {/* Reflect reality. This pill was hardcoded to "GATED" and sat above
+              six populated metrics, which reads as a broken page. */}
+          {advancedGatedCount > 0 ? (
+            <span className="pill neutral">
+              {advancedGatedCount} OF {advancedCards.length} GATED
+            </span>
+          ) : null}
         </div>
         <div className="section-body" style={{ padding: 0 }}>
           <div className="metrics-grid">
@@ -769,7 +779,7 @@ export default function PerformancePanel({ portfolioLastSync = null, marketState
           </div>
         </div>
         <div className="performance-methodology-copy">
-          Time-weighted return, end-of-day flow convention, chained geometrically. External capital (deposits,
+          Time-weighted return, beginning-of-day flow convention, chained geometrically. External capital (deposits,
           withdrawals, ACATS and internal transfers) is removed from return; fees and borrow are returns, not flows.
           Volatility and ratios scale by {TWR_GATES.TRADING_DAYS} sessions; annualization uses an Act/
           {TWR_GATES.DAYS_PER_YEAR} day count. Any metric under its gate reports the reason it is missing rather than a
