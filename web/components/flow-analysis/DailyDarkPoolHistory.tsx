@@ -29,6 +29,46 @@ function directionClass(direction?: string): string {
   return "neutral";
 }
 
+function monthDay(date: string): string {
+  return date.length >= 10 ? date.slice(5) : date;
+}
+
+function sessionWindowLabel(oldest: string, newest: string): string {
+  const from = monthDay(oldest);
+  const to = monthDay(newest);
+  if (from === to) return `${from} · oldest to newest`;
+  return `${from} to ${to} · oldest to newest`;
+}
+
+function HistoryToggle({
+  expanded,
+  hiddenCount,
+  sessionCount,
+  onToggle,
+}: {
+  expanded: boolean;
+  hiddenCount: number;
+  sessionCount: number;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="ticker-flow-history-toggle"
+      data-testid="daily-dp-history-toggle"
+      aria-expanded={expanded}
+      aria-label={
+        expanded
+          ? "Show recent sessions only"
+          : `Show full ${sessionCount}-session history`
+      }
+      onClick={onToggle}
+    >
+      {expanded ? "Recent sessions" : `Full history +${hiddenCount}`}
+    </button>
+  );
+}
+
 function DailyTable({ rows }: { rows: DailyDarkPoolRow[] }) {
   return (
     <table className="ticker-flow-daily">
@@ -113,9 +153,14 @@ function DailyBuyRatioChart({ rows }: { rows: DailyDarkPoolRow[] }) {
 
   const yTicks = [0, 25, 50, 75, 100];
 
+  const windowLabel = sessionWindowLabel(points[0].date, points[n - 1].date);
+
   return (
     <div className="ticker-flow-history-chart" data-testid="daily-dp-history-chart">
-      <div className="ticker-flow-history-chart-title">Buy % by session</div>
+      <div className="ticker-flow-history-chart-header" data-testid="daily-dp-history-chart-header">
+        <div className="ticker-flow-history-chart-title">Buy % by session</div>
+        <div className="ticker-flow-history-chart-meta">{windowLabel}</div>
+      </div>
       <svg
         viewBox={`0 0 ${W} ${H}`}
         role="img"
@@ -240,39 +285,30 @@ export default function DailyDarkPoolHistory({
     : sortedNewestFirst.slice(0, previewCount);
   const hiddenCount = Math.max(0, sortedNewestFirst.length - previewCount);
 
+  const showChart = (expanded && canExpand) || (!canExpand && sortedNewestFirst.length > 1);
+
   return (
-    <section className={`section${compact ? " ticker-flow-history-compact" : ""}`} data-testid="daily-dp-history">
+    <section
+      className={`section ticker-flow-history${compact ? " ticker-flow-history-compact" : ""}`}
+      data-testid="daily-dp-history"
+    >
       <div className="section-header">
         <div className="section-title">Daily Dark Pool History</div>
-        <span className="pill neutral">{sortedNewestFirst.length} SESSIONS</span>
+        <div className="section-header-actions">
+          <span className="pill neutral">{sortedNewestFirst.length} SESSIONS</span>
+          {canExpand && (
+            <HistoryToggle
+              expanded={expanded}
+              hiddenCount={hiddenCount}
+              sessionCount={sortedNewestFirst.length}
+              onToggle={() => setExpanded((v) => !v)}
+            />
+          )}
+        </div>
       </div>
       <div className="section-body">
         <DailyTable rows={visible} />
-
-        {canExpand && (
-          <div className="ticker-flow-history-disclosure">
-            <button
-              type="button"
-              className="ticker-flow-history-toggle"
-              data-testid="daily-dp-history-toggle"
-              aria-expanded={expanded}
-              onClick={() => setExpanded((v) => !v)}
-            >
-              {expanded
-                ? "Show recent sessions only"
-                : `Show full ${sortedNewestFirst.length}-session history (+${hiddenCount})`}
-            </button>
-          </div>
-        )}
-
-        {expanded && canExpand && (
-          <DailyBuyRatioChart rows={sortedNewestFirst} />
-        )}
-
-        {/* When the full set already fits the preview, still chart if >1 session */}
-        {!canExpand && sortedNewestFirst.length > 1 && (
-          <DailyBuyRatioChart rows={sortedNewestFirst} />
-        )}
+        {showChart && <DailyBuyRatioChart rows={sortedNewestFirst} />}
       </div>
     </section>
   );
