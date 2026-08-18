@@ -42,6 +42,7 @@ from scripts.utils.market_calendar import load_holidays  # noqa: E402
 from scripts.lib.twr_math import (  # noqa: E402
     DuplicateNavDate,
     FlowSet,
+    FlowsStatus,
     GatedValue,
     NavObservation,
     NonFiniteInput,
@@ -520,6 +521,47 @@ def _transfers_section_warnings(xml_text: str, query_id: str) -> List[Dict[str, 
     ]
 
 
+def load_flows_from_turso() -> Optional[Dict[str, float]]:
+    """Last-known-good external flows, netted per report date.
+
+    The symmetric counterpart to `load_nav_from_turso`. Flows for closed
+    sessions are settled facts; they do not change because IBKR's statement
+    generator is unavailable right now. Returning them lets a Flex outage
+    degrade the page's provenance instead of blanking its numbers.
+
+    Returns None when nothing is mirrored yet. An empty result is NOT a
+    verified zero — see the caller.
+    """
+    if not _os.environ.get("TURSO_DB_URL") or not _os.environ.get("TURSO_AUTH_TOKEN"):
+        return None
+    try:
+        try:
+            from db.client import get_db  # type: ignore
+        except ImportError:
+            from scripts.db.client import get_db  # type: ignore
+
+        db = get_db()
+        rows = db.execute(
+            "SELECT report_date, amount FROM external_flows ORDER BY report_date ASC"
+        ).fetchall()
+    except Exception:  # noqa: BLE001
+        return None
+
+    out: Dict[str, float] = {}
+    for row in rows:
+        if isinstance(row, dict):
+            report_date = _normalize_date(row.get("report_date"))
+            amount = _optional_float(row.get("amount"))
+        else:
+            report_date = _normalize_date(row[0])
+            amount = _optional_float(row[1])
+        if report_date and amount is not None:
+            # One date can carry several flow_type rows; the subperiod maths
+            # only ever needs their net.
+            out[report_date] = out.get(report_date, 0.0) + amount
+    return out or None
+
+
 def resolve_flows(document: Optional[FlexDocument] = None) -> Tuple[FlowSet, List[Dict[str, Any]]]:
     """Resolve external flows plus any coverage warnings about the statement.
 
@@ -538,6 +580,23 @@ def resolve_flows(document: Optional[FlexDocument] = None) -> Tuple[FlowSet, Lis
         )
     except Exception as exc:  # noqa: BLE001
         print(f"[perf_twr] Flex flows fetch failed: {exc}", file=_sys.stderr)
+        # Fall back to the flows a previous good run mirrored to Turso rather
+        # than suppressing TWR outright. Without this a single Flex 1001/1025
+        # blanks a page that was correct minutes earlier (incident 2026-08-17).
+        mirrored = load_flows_from_turso()
+        if mirrored:
+            print(
+                f"[perf_twr] Serving {len(mirrored)} mirrored flows from Turso "
+                f"after Flex failure",
+                file=_sys.stderr,
+            )
+            return FlowSet(
+                status=FlowsStatus.OK,
+                by_date=mirrored,
+                source="turso",
+            ), []
+        # Nothing mirrored: absence of evidence is not a verified zero. An
+        # invented empty flow set is what produced the +951% TWR.
         return FlowSet.failed(f"fetch_failed: {exc}"), []
 
     coverage = _transfers_section_warnings(statement, query_id)
