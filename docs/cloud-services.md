@@ -503,6 +503,44 @@ Re-check with `turso plan show` after any plan change. Nightly dumps remain mand
 | `radon-db-backup.timer` | **09:00** | Full Turso dump after archive + retention. |
 | `radon-media-backup.timer` | **10:15** | Mirror `media.radon.run` tree (`/home/radon/radon-cloud/media`) → B2 prefix `media/`. Heartbeat: `media-backup`. `TimeoutStartSec=3600`. |
 
+### TWR performance builder (`radon-perf-twr.timer`)
+
+`Tue..Sat 07:30 ET` (`RandomizedDelaySec=300`), oneshot
+`scripts/perf_twr_builder.py`, heartbeat via the `performance_snapshots`
+mirror. Rebuilds the `/performance` payload: NAV + external flows → TWR.
+
+**Run the morning AFTER a session, never the same evening.** IBKR Flex serves
+through its last *finalized* statement date. Measured 2026-08-17: a live Flex
+pull at 20:57 ET Monday still returned NAV through Friday 08-14, and a
+statement generated Sunday 08-16 came back with `toDate="20260814"`. The unit
+originally ran `Mon..Fri 20:45 ET` and could only ever republish the previous
+session. `Tue..Sat` covers all five sessions — Tuesday picks up Monday,
+Saturday picks up Friday and carries the correct NAV across the weekend.
+
+`/performance` is therefore always **T+1**: on Monday it shows Friday. One
+session behind is inside `NAV_STALENESS_BUDGET_SESSIONS: 2`, so the page
+correctly renders no amber warning.
+
+**Both units must be in `cloud/config/installed-units.sha256`** or the install
+step silently skips them. They were absent until 2026-08-17, so the timer was
+never installed on the VPS (`systemctl is-enabled` → `not-found`) and nothing
+rebuilt the payload on a schedule at all; the only refreshes came from the
+page's own SWR trigger.
+
+**A Flex outage must not blank the page.** NAV degrades `flex → disk_cache →
+turso`; flows now degrade `flex → turso external_flows` via
+`load_flows_from_turso()`. Before that fallback existed, one `fetch_flex_xml`
+exception produced `FlowSet.failed`, which suppresses TWR, Max DD, Sharpe and
+the equity curve — so the page flipped between +90.81% and `--` depending on
+whether the last run happened to reach Flex. Flows for closed sessions are
+settled facts and are safe to reserve from the mirror. An **empty** mirror is
+still `FAILED`: absence of evidence is not a verified zero, and inventing a
+zero flow set is what produced the +951% TWR.
+
+Flex codes seen on this path: `1001` (statement not generatable right now),
+`1018` (the only real rate limit), `1019` (generation in progress),
+`1025` (too many failed attempts — a lockout earned by repeated failures).
+
 ### Backblaze B2 dependency (production required)
 
 Off-box store for cold portfolio history. **Not** Cloudflare R2 (account billing/R2 enablement blocked). Uses S3-compatible API via `boto3`.
