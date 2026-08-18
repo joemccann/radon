@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -102,6 +102,58 @@ describe("media.js — createImageDownloader produces absolute URLs", () => {
     expect(getCalls).toBe(1);
     expect(result).toHaveLength(1);
     expect(result[0]).toMatch(new RegExp(`^${MEDIA_ORIGIN}/abc-01-[a-f0-9]{12}\\.png$`));
+  });
+
+  it("writes world-readable files even when process umask is 0077", async () => {
+    // radon-newsfeed.service sets UMask=0077 so Playwright session state stays
+    // 0600. Node's writeFile mode is umask-masked, so a 0644 request becomes
+    // 0600. Caddy runs as a different user and 403s those files on
+    // media.radon.run — which is how /_next/image for
+    // cummyp6evp-01-19963ede07f0.png went blank on 2026-08-17.
+    const dest = path.join(await tempDir(), "cummyp6evp-01-19963ede07f0.png");
+    const { writePublicMediaFile } = await import("../../scripts/newsfeed/mediaPermissions.js");
+    const previous = process.umask(0o077);
+    try {
+      await writePublicMediaFile(dest, PNG_BYTES);
+      expect((await stat(dest)).mode & 0o777).toBe(0o644);
+    } finally {
+      process.umask(previous);
+    }
+  });
+});
+
+describe("media.js — ensurePublicMediaPermissions", () => {
+  it("treats an absolute path as a local dest and user@host:path as remote", async () => {
+    const { localMediaDest } = await import("../../scripts/newsfeed/mediaPermissions.js");
+    expect(localMediaDest("/home/radon/radon-cloud/media/")).toBe(
+      "/home/radon/radon-cloud/media",
+    );
+    expect(localMediaDest("radon@ib-gateway:/home/radon/radon-cloud/media/")).toBeNull();
+  });
+
+  it("repairs 0600 dest files that rsync --ignore-existing will not overwrite", async () => {
+    const dir = path.join(await tempDir(), "media");
+    await mkdir(dir, { recursive: true });
+    const dest = path.join(dir, "cummyp6evp-01-19963ede07f0.png");
+    await writeFile(dest, PNG_BYTES, { mode: 0o600 });
+    const { ensurePublicMediaPermissions } = await import("../../scripts/newsfeed/mediaPermissions.js");
+    const repaired = await ensurePublicMediaPermissions(dir);
+    expect(repaired).toBe(1);
+    expect((await stat(dest)).mode & 0o777).toBe(0o644);
+  });
+
+  it("downloader and rsync dest both go through the public-mode helper", async () => {
+    const mediaSrc = await readFile(
+      path.resolve(__dirname, "../../scripts/newsfeed/media.js"),
+      "utf8",
+    );
+    const pushSrc = await readFile(
+      path.resolve(__dirname, "../../scripts/newsfeed/push_media.js"),
+      "utf8",
+    );
+    expect(mediaSrc).toContain("writePublicMediaFile");
+    expect(pushSrc).toContain("ensurePublicMediaPermissions");
+    expect(pushSrc).toContain("localMediaDest");
   });
 });
 
