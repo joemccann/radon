@@ -1,0 +1,21 @@
+[Unit]
+Description=Radon VOL CONE live intraday sample (UW greeks ranked against the stored cone)
+After=network.target
+
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=oneshot
+User=radon
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/home/radon/radon-cloud/.env
+Environment=RADON_DB_NO_REPLICA=1
+Environment=RADON_UW_CALLER=vol-cone-intraday
+ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_vol_cone.py --intraday
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target

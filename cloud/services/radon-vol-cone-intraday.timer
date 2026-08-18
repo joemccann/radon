@@ -1,0 +1,14 @@
+[Unit]
+Description=Radon VOL CONE live sample - every 15 minutes during ET trading hours
+
+[Timer]
+# The cone's durable series is completed sessions only, so between the open
+# and the 16:45 ET finalization run the tab would otherwise show yesterday.
+# Pre-open and post-close slots hold without spending a UW request: the
+# scanner gates on market_state, so the calendar can stay coarse.
+OnCalendar=Mon..Fri *-*-* 09..16:00,15,30,45 America/New_York
+Persistent=false
+RandomizedDelaySec=30
+
+[Install]
+WantedBy=timers.target

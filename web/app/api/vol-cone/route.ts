@@ -25,8 +25,10 @@ const MISSING_VOL_CONE = {
   hits: [],
 };
 
-// radon-vol-cone.timer fires daily at 20:45 UTC Mon-Fri, so a snapshot
-// older than two days means the writer is down.
+// radon-vol-cone-intraday.timer refreshes the snapshot every 15m during ET
+// trading hours and radon-vol-cone.timer writes the completed session at
+// 20:45 UTC Mon-Fri. Two days is the overnight/weekend floor: older than
+// that and both writers are down.
 const MAX_AGE_MS = 48 * 60 * 60_000;
 
 async function readVolConeFromDb(): Promise<TimestampedRead<Record<string, unknown>> | null> {

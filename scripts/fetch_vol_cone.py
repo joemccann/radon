@@ -25,6 +25,7 @@ import time
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 # ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
@@ -42,25 +43,54 @@ except Exception:
 from utils.market_calendar import (  # noqa: E402 — needs the sys.path insert
     get_last_n_trading_days,
     last_completed_session_date,
+    market_state,
 )
+
+ET = ZoneInfo("America/New_York")
 
 # ── constants ─────────────────────────────────────────────────────
 VOL_CONE_JSON = _PROJECT_DIR / "data" / "vol_cone.json"
 
-DEFAULT_UNIVERSE = [
+# Highest-conviction names, scanned first: the wall-clock budget spends on
+# the head of the universe, so a cold start backfills these before the tail.
+SEED_UNIVERSE = [
     "NVDA", "SMH", "AAPL", "MSFT", "AMZN", "META", "TSLA", "GOOGL", "AMD",
     "AVGO", "QQQ", "SPY", "IWM", "NFLX", "MU", "ARM", "TSM", "ASML", "INTC",
     "QCOM", "AMAT", "LRCX", "KLAC", "TLT", "GLD",
 ]
+_UNIVERSE_PRESET = "ndx100"
+
+
+def _preset_tickers(name: str = _UNIVERSE_PRESET) -> list[str]:
+    try:
+        from utils.presets import load_preset
+
+        return list(load_preset(name).tickers)
+    except Exception as exc:  # noqa: BLE001 - the seed universe still scans
+        print(f"[vol-cone] preset {name} unavailable: {exc}", file=sys.stderr)
+        return []
+
+
+def default_universe() -> list[str]:
+    """Seed names first, then the preset. A cheap-wing screen only means
+    something across a field wide enough to rank against."""
+    return list(dict.fromkeys([*SEED_UNIVERSE, *_preset_tickers()]))
 _MIN_DTE = 21
 _MAX_DTE = 180
 _MONTHLY_LOOKAHEAD = 8
 _MAX_LOOKBACK = 80
-_UNIVERSE_CAP = 40
+_UNIVERSE_CAP = 120
 _THROTTLE_S = 0.3
 _BUDGET_ENV = "VOL_CONE_BUDGET_S"
-_DEFAULT_BUDGET_S = 1200.0
+_DEFAULT_BUDGET_S = 3000.0
 _HIT_REGIMES = frozenset({"CHEAP_WINGS", "CHEAP_ATM"})
+
+# Intraday refresh scope. One greeks call per pair per cycle all session, so
+# the whole universe at this cadence would cost more than the UW daily cap.
+# Only names already near the cheap tail can turn tradeable before the close.
+_INTRADAY_PAIR_CAP = 80
+_INTRADAY_CANDIDATE_MAX = 0.40
+_INTRADAY_UW_FLOOR = 2_000
 
 
 # ── chain parsing + moneyness interpolation ───────────────────────
@@ -249,7 +279,7 @@ def merge_universe(
     """Union seed then watchlist, uppercase, first-seen order, capped."""
     merged: list[str] = []
     seen: set[str] = set()
-    for raw in list(seed if seed is not None else DEFAULT_UNIVERSE) + list(watchlist):
+    for raw in list(seed if seed is not None else default_universe()) + list(watchlist):
         ticker = str(raw or "").strip().upper()
         if not ticker or ticker in seen:
             continue
@@ -359,7 +389,7 @@ class _DefaultClient:
 # ── persistence ───────────────────────────────────────────────────
 
 def _series_point(row: dict[str, Any]) -> dict[str, Any]:
-    return {
+    point = {
         "date": row["date"],
         "spot": row["spot"],
         "atm_iv": row["atm_iv"],
@@ -368,15 +398,22 @@ def _series_point(row: dict[str, Any]) -> dict[str, Any]:
         "call_10_strike": row.get("call_10_strike"),
         "put_10_strike": row.get("put_10_strike"),
     }
+    if row.get("is_intraday"):
+        point["is_intraday"] = True
+    return point
 
 
 def _flatten_history_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Durable rows only. A live sample is display state, not a session:
+    persisting one would make the next run believe today already closed."""
     rows: list[dict[str, Any]] = []
     for name in payload.get("names") or []:
         expiry = name["expiry"]
         expiry_date = date.fromisoformat(expiry)
         ticker = name["ticker"]
         for point in name.get("series") or []:
+            if point.get("is_intraday"):
+                continue
             rows.append(
                 {
                     "ticker": ticker,
@@ -394,27 +431,58 @@ def _flatten_history_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
-def _write_db_cache(
+def _mirror_snapshot(
     payload: dict[str, Any], scan_time: str, *, rows_changed: bool
-) -> None:
-    """Best-effort Turso mirror; data/vol_cone.json is the disk fallback.
+) -> Any:
+    """Mirror the shared cone snapshot to Turso; return the writer module.
 
-    Durable vol_cone_history rows are skipped when no session was added;
-    the snapshot + heartbeat run EVERY cycle so the staleness banner
-    notices a silent writer (cf. feedback_service_health_heartbeat).
+    Both writers publish the same ``vol-cone`` snapshot, but each stamps its
+    OWN service_health row — the row is a statement about that writer, not
+    about the data (cf. feedback_service_health_writer_state_not_event).
+    Durable rows are skipped unless a completed session was added.
     """
     try:
         from db import writer
     except ImportError:
-        return
+        return None
     try:
         writer.ensure_no_replica_for_writers()
         if rows_changed:
             writer.upsert_vol_cone_rows(_flatten_history_rows(payload), recorded_at=scan_time)
         writer.upsert_scan_snapshot("vol-cone", scan_time, payload)
-        writer.record_service_health("vol-cone", "ok", finished_at=scan_time)
+        return writer
     except Exception as exc:  # noqa: BLE001 — best-effort mirror
         print(f"[vol-cone] db cache non-fatal: {exc}", file=sys.stderr)
+        return None
+
+
+def _write_db_cache(
+    payload: dict[str, Any], scan_time: str, *, rows_changed: bool
+) -> None:
+    """EOD writer: data/vol_cone.json is the disk fallback.
+
+    Durable vol_cone_history rows are skipped when no session was added;
+    the snapshot + heartbeat run EVERY cycle so the staleness banner
+    notices a silent writer (cf. feedback_service_health_heartbeat).
+    """
+    writer = _mirror_snapshot(payload, scan_time, rows_changed=rows_changed)
+    if writer is None:
+        return
+    try:
+        writer.record_service_health("vol-cone", "ok", finished_at=scan_time)
+    except Exception as exc:  # noqa: BLE001 — best-effort mirror
+        print(f"[vol-cone] health row non-fatal: {exc}", file=sys.stderr)
+
+
+def _write_intraday_db_cache(payload: dict[str, Any], scan_time: str) -> None:
+    """Live writer: refreshes the shared snapshot, never a durable row."""
+    writer = _mirror_snapshot(payload, scan_time, rows_changed=False)
+    if writer is None:
+        return
+    try:
+        writer.record_service_health("vol-cone-intraday", "ok", finished_at=scan_time)
+    except Exception as exc:  # noqa: BLE001 — best-effort mirror
+        print(f"[vol-cone] intraday health row non-fatal: {exc}", file=sys.stderr)
 
 
 def _checkpoint_rows(rows: list[dict[str, Any]], scan_time: str) -> None:
@@ -671,6 +739,155 @@ def run(
     return payload
 
 
+# ── intraday live sample ──────────────────────────────────────────
+
+def _uw_remaining() -> int:
+    try:
+        from utils.uw_budget import remaining
+
+        return remaining()
+    except Exception:  # noqa: BLE001 - budget telemetry never blocks the scan
+        return _INTRADAY_UW_FLOOR + 1
+
+
+def intraday_targets(
+    names: list[dict[str, Any]],
+    watchlist: list[str],
+    cap: int = _INTRADAY_PAIR_CAP,
+) -> list[tuple[str, str]]:
+    """(ticker, expiry) pairs worth a live refresh, cheapest wing first.
+
+    Everything already at the rich end of its own cone stays on last night's
+    numbers: it cannot reach a tradeable percentile before the close, and
+    refreshing it every cycle is what would blow the daily request cap.
+    """
+    watched = {str(ticker).strip().upper() for ticker in watchlist}
+    ranked = sorted(
+        names, key=lambda name: (name["wing_score"], name["atm_percentile"])
+    )
+    picked = [
+        name
+        for name in ranked
+        if name["ticker"] in watched
+        or name["atm_percentile"] <= _INTRADAY_CANDIDATE_MAX
+        or name["wing_score"] <= _INTRADAY_CANDIDATE_MAX
+    ]
+    return [(name["ticker"], name["expiry"]) for name in picked[:cap]]
+
+
+def _names_from_rows(
+    rows: list[dict[str, Any]], expiries: Optional[set[str]] = None
+) -> list[dict[str, Any]]:
+    """Stored history -> one cone per (ticker, expiry), ticker order kept.
+
+    ``expiries`` keeps the live pass on the same monthlies the EOD run
+    targets; history holds expiries that have since rolled inside 21 DTE.
+    """
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in rows:
+        if expiries is not None and row["expiry"] not in expiries:
+            continue
+        grouped.setdefault((row["ticker"], row["expiry"]), []).append(
+            _series_point(row)
+        )
+    names = []
+    for (ticker, expiry), series in grouped.items():
+        series.sort(key=lambda point: point["date"])
+        names.append(compute_name(ticker, expiry, series))
+    return names
+
+
+def _intraday_hold_reason(now: datetime, names: list[dict[str, Any]]) -> Optional[str]:
+    if not names:
+        return "no stored cone to rank against"
+    if not bool(market_state(now).get("is_open")):
+        return "market closed"
+    remaining = _uw_remaining()
+    if remaining < _INTRADAY_UW_FLOOR:
+        return f"UW daily budget nearly spent ({remaining} left)"
+    return None
+
+
+def _apply_live_points(
+    client: Any, names: list[dict[str, Any]], session: str
+) -> list[dict[str, Any]]:
+    """Re-rank each target pair with today's chain; untouched names pass through."""
+    by_key = {(name["ticker"], name["expiry"]): name for name in names}
+    spots: dict[str, Optional[float]] = {}
+    for ticker, expiry in intraday_targets(names, _load_watchlist()):
+        if ticker not in spots:
+            try:
+                spots[ticker] = _to_float(client.fetch_spot(ticker))
+            except Exception as exc:  # noqa: BLE001 - one name never fails the pass
+                print(f"[vol-cone] {ticker} live spot failed: {exc}", file=sys.stderr)
+                spots[ticker] = None
+        spot = spots[ticker]
+        if spot is None:
+            continue
+        try:
+            payload = client.fetch_greeks(ticker, expiry, session)
+        except Exception as exc:  # noqa: BLE001 - next cycle self-heals
+            print(f"[vol-cone] {ticker} {expiry} live chain failed: {exc}", file=sys.stderr)
+            continue
+        ivs = session_ivs(parse_greek_rows(payload or {}), spot)
+        if ivs is None:
+            continue
+        stored = by_key[(ticker, expiry)]
+        series = [
+            point for point in stored["series"] if point["date"] != session
+        ]
+        series.append({"date": session, "spot": spot, "is_intraday": True, **ivs})
+        by_key[(ticker, expiry)] = {
+            **compute_name(ticker, expiry, series),
+            "is_intraday": True,
+        }
+    return [by_key[(name["ticker"], name["expiry"])] for name in names]
+
+
+def run_intraday(
+    client: Optional[Any] = None, *, now: Optional[datetime] = None
+) -> dict[str, Any]:
+    """Rank today's live IV against the stored cone, without storing it.
+
+    The durable series is completed sessions only, so the tab is a day stale
+    for anyone trading it during the session. This ranks the live chain
+    against that same distribution and marks the point ``is_intraday``: the
+    regime is current, the history the percentile is measured against is not
+    polluted, and the 16:45 ET run still writes the real session.
+    """
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    scan_time = _scan_time_iso(now)
+    session = now.astimezone(ET).date().isoformat()
+
+    targets = {
+        expiry.isoformat()
+        for expiry in select_target_expiries(date.fromisoformat(session))
+    }
+    names = _names_from_rows(_read_history_rows(), targets)
+    hold = _intraday_hold_reason(now, names)
+    if hold:
+        print(f"[vol-cone] intraday hold: {hold}", file=sys.stderr)
+        if not names:
+            raise ValueError("vol-cone intraday has no stored cone to rank against")
+    else:
+        if client is None:
+            client = _DefaultClient()
+        names = _apply_live_points(client, names, session)
+
+    live = any(name.get("is_intraday") for name in names)
+    source_as_of = session if live else max(
+        name["series"][-1]["date"] for name in names
+    )
+    payload = build_output(names, scan_time, source_as_of)
+    payload["market_status"] = "open" if not hold else "closed"
+    payload["is_intraday"] = live
+    _write_intraday_db_cache(payload, scan_time)
+    _write_json_cache(payload)
+    return payload
+
+
 # ── CLI ───────────────────────────────────────────────────────────
 
 def _print_summary(payload: dict[str, Any]) -> None:
@@ -695,9 +912,14 @@ def main() -> None:
         description="Cheap 10% OTM wing IV scanner (Unusual Whales greeks cone)"
     )
     parser.add_argument("--json", action="store_true", help="Output JSON to stdout")
+    parser.add_argument(
+        "--intraday",
+        action="store_true",
+        help="Rank a live sample against the stored cone (no history writes)",
+    )
     args = parser.parse_args()
 
-    payload = run()
+    payload = run_intraday() if args.intraday else run()
     if args.json:
         print(json.dumps(payload, indent=2))
     else:

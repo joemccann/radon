@@ -496,3 +496,167 @@ class TestVolConeStorage:
             "SELECT ticker, date, expiry, atm_iv FROM vol_cone_history"
         ).fetchall()
         assert rows == [("NVDA", "2026-08-12", "2026-09-18", 0.384)]
+
+
+# ── Universe breadth ──────────────────────────────────────────────
+
+
+class TestDefaultUniverse:
+    """The cone is a relative-value screen: 25 names is too few to rank."""
+
+    def test_default_universe_extends_the_seed_with_a_preset(self):
+        import fetch_vol_cone as mod
+
+        universe = mod.default_universe()
+        assert universe[: len(mod.SEED_UNIVERSE)] == mod.SEED_UNIVERSE
+        assert len(universe) > 100
+        assert len(universe) == len(dict.fromkeys(universe))
+
+    def test_universe_cap_admits_more_than_the_seed(self):
+        import fetch_vol_cone as mod
+
+        assert mod._UNIVERSE_CAP > len(mod.SEED_UNIVERSE)
+        assert len(merge_universe([], cap=mod._UNIVERSE_CAP)) > len(mod.SEED_UNIVERSE)
+
+
+# ── Intraday live sample ──────────────────────────────────────────
+
+
+class TestIntradayTargets:
+    """A live pass costs one greeks call per pair, every cycle, all session.
+
+    Refreshing the whole universe at that cadence would cost more than the
+    daily UW cap, and a name deep in the rich tail cannot become tradeable
+    before the close anyway.
+    """
+
+    def _name(self, ticker, wing, atm):
+        return {"ticker": ticker, "expiry": "2026-09-18", "wing_score": wing, "atm_percentile": atm}
+
+    def test_cheapest_names_come_first_and_the_cap_holds(self):
+        from fetch_vol_cone import intraday_targets
+
+        names = [self._name(f"T{i}", i / 100.0, i / 100.0) for i in range(60)]
+        targets = intraday_targets(names, watchlist=[], cap=10)
+        assert len(targets) == 10
+        assert [ticker for ticker, _ in targets] == [f"T{i}" for i in range(10)]
+
+    def test_rich_names_are_not_refreshed(self):
+        from fetch_vol_cone import intraday_targets
+
+        names = [self._name("RICH", 0.95, 0.95), self._name("CHEAP", 0.05, 0.10)]
+        assert intraday_targets(names, watchlist=[], cap=10) == [("CHEAP", "2026-09-18")]
+
+    def test_watchlist_names_are_refreshed_however_rich(self):
+        from fetch_vol_cone import intraday_targets
+
+        names = [self._name("RICH", 0.95, 0.95)]
+        assert intraday_targets(names, watchlist=["rich"], cap=10) == [("RICH", "2026-09-18")]
+
+
+class TestRunIntraday:
+    """Today's cone does not exist until the close, so the session's own IV
+    is ranked against the stored completed-session history and marked live.
+    """
+
+    OPEN = datetime(2026, 8, 13, 17, 0, tzinfo=timezone.utc)      # 13:00 ET Thu
+    CLOSED = datetime(2026, 8, 13, 23, 0, tzinfo=timezone.utc)    # 19:00 ET Thu
+    SESSION = "2026-08-13"
+
+    @pytest.fixture(autouse=True)
+    def _isolate(self, tmp_path, monkeypatch):
+        import fetch_vol_cone as mod
+
+        monkeypatch.setattr(mod, "VOL_CONE_JSON", tmp_path / "vol_cone.json")
+        self.db_writes = []
+        monkeypatch.setattr(
+            mod,
+            "_write_intraday_db_cache",
+            lambda payload, scan_time: self.db_writes.append((False, "vol-cone-intraday")),
+        )
+        monkeypatch.setattr(mod, "_load_watchlist", lambda: [])
+        self.mod = mod
+
+    def _seed_history(self, monkeypatch, expiry="2026-09-18"):
+        rows = [
+            {
+                "ticker": "NVDA",
+                "date": row["date"],
+                "expiry": expiry,
+                "dte": 37,
+                "spot": row["spot"],
+                "atm_iv": row["atm"],
+                "call_10_iv": row["call10"],
+                "put_10_iv": row["put10"],
+                "call_10_strike": row.get("call_k"),
+                "put_10_strike": row.get("put_k"),
+            }
+            for row in WEEKLY
+        ]
+        monkeypatch.setattr(self.mod, "_read_history_rows", lambda: rows)
+        return rows
+
+    def test_live_point_is_ranked_and_flagged(self, monkeypatch):
+        self._seed_history(monkeypatch)
+        client = _StubClient(
+            {("NVDA", "2026-09-18", self.SESSION): NVDA_CURRENT},
+            {},
+            {"NVDA": NVDA_SPOT},
+        )
+        payload = self.mod.run_intraday(client=client, now=self.OPEN)
+
+        assert payload["source_as_of"] == self.SESSION
+        name = payload["names"][0]
+        assert name["is_intraday"] is True
+        assert name["series"][-1]["date"] == self.SESSION
+        assert name["series"][-1]["is_intraday"] is True
+        assert client.calls == [("NVDA", "2026-09-18", self.SESSION)]
+
+    def test_live_point_never_becomes_a_stored_session(self, monkeypatch):
+        self._seed_history(monkeypatch)
+        client = _StubClient(
+            {("NVDA", "2026-09-18", self.SESSION): NVDA_CURRENT},
+            {},
+            {"NVDA": NVDA_SPOT},
+        )
+        payload = self.mod.run_intraday(client=client, now=self.OPEN)
+
+        assert self.db_writes == [(False, "vol-cone-intraday")]
+        stored = self.mod._flatten_history_rows(payload)
+        assert stored, "completed sessions still flatten"
+        assert all(row["date"] != self.SESSION for row in stored)
+
+    def test_closed_market_spends_no_uw_requests(self, monkeypatch):
+        self._seed_history(monkeypatch)
+        client = _StubClient({}, {}, {"NVDA": NVDA_SPOT})
+        payload = self.mod.run_intraday(client=client, now=self.CLOSED)
+
+        assert client.calls == []
+        assert payload["source_as_of"] == WEEKLY[-1]["date"]
+        assert self.db_writes == [(False, "vol-cone-intraday")]
+
+    def test_holds_when_the_uw_daily_budget_is_nearly_spent(self, monkeypatch):
+        self._seed_history(monkeypatch)
+        monkeypatch.setattr(self.mod, "_uw_remaining", lambda: 10)
+        client = _StubClient(
+            {("NVDA", "2026-09-18", self.SESSION): NVDA_CURRENT},
+            {},
+            {"NVDA": NVDA_SPOT},
+        )
+        payload = self.mod.run_intraday(client=client, now=self.OPEN)
+
+        assert client.calls == []
+        assert payload["source_as_of"] == WEEKLY[-1]["date"]
+
+    def test_expiries_outside_the_window_are_dropped(self, monkeypatch):
+        """History keeps monthlies that have since rolled inside 21 DTE. The
+        live pass targets the same window the EOD run does, and raises rather
+        than publishing an empty cone when nothing in the window is stored
+        yet - a failed unit says the backfill is behind, silence would not.
+        """
+        assert self._seed_history(monkeypatch, expiry="2026-08-21")
+        client = _StubClient({}, {}, {"NVDA": NVDA_SPOT})
+
+        with pytest.raises(ValueError, match="no stored cone"):
+            self.mod.run_intraday(client=client, now=self.OPEN)
+        assert client.calls == []

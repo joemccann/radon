@@ -4,13 +4,15 @@ Owner specs for regime tabs and the cheap-wing scanner. Add a row here when a sp
 
 | Slug | Route | Service | Spec |
 |---|---|---|---|
-| vol-cone | `/scanner?mode=vol-cone` | `vol-cone` | [vol-cone.md](vol-cone.md) |
+| vol-cone | `/scanner?mode=vol-cone` | `vol-cone`, `vol-cone-intraday` | [vol-cone.md](vol-cone.md) |
 | skew | `/regime/skew` | `skew` | [skew.md](skew.md) |
 | skew2d | `/regime/skew2d` | `skew2d` | [skew2d.md](skew2d.md) |
 | straddle | `/regime/straddle` | `straddle` | [straddle.md](straddle.md) |
 | cor | `/regime/cor` | `cor` | [cor.md](cor.md) |
 | vixcor | `/regime/vixcor` | `vixcor` | [vixcor.md](vixcor.md) |
 | curve | `/regime/curve` | `yield-curve` | [curve.md](curve.md) |
+
+`vol-cone` is the only indicator with two writers: an EOD run that stores the completed session and a 15m live pass that re-ranks today's chain against it (`is_intraday`), so the tab is tradeable during the session rather than a day stale.
 
 `/regime/vol-cone` redirects to the scanner. Pattern for a new indicator: `.claude/skills/new-indicator/SKILL.md`.
 

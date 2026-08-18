@@ -80,13 +80,26 @@ UI multiplies by 100.
   - `iv-rank` / `volatility/stats`: ATM-ish 1Y rank, not expiry-local and
     not 10% OTM wings. Useful as a cross-check, not the cone.
 - Cadence: UW greeks update through RTH; session-final after the close.
-  This scanner is **EOD**: one run after the 16:45 ET grace. Incremental
-  days cost 1 greeks call per ticker.
+  Two writers:
+  - **EOD** (`radon-vol-cone.timer`, 16:45 ET) writes the completed session
+    into `vol_cone_history`. Incremental days cost 1 greeks call per ticker.
+  - **Live** (`radon-vol-cone-intraday.timer`, every 15m during ET trading
+    hours) re-ranks today's chain against that stored distribution and marks
+    the point `is_intraday`. It never writes a history row: a live sample
+    stored as a session would make the EOD run believe today already closed.
+    Without it the tab is a full session stale for anyone trading it.
 - Licensing: UW is the repo's licensed provider (priority #2; IB fails on
   fit). Derived-indicator display is normal in-app use like SKEW/GEX.
-- Rate limit: UWClient retries 429. 25 names × 1 incremental day ≈ 25
-  requests. First-run 80-session backfill ≈ 2,000 requests at 0.3 s
-  throttle (~10 min). Cap universe at 40.
+- Rate limit: UWClient retries 429. The universe is the seed list plus the
+  `ndx100` preset, capped at 120; one incremental day costs ~1 greeks call
+  per ticker-expiry. A first-run 80-session backfill is ~415 requests per
+  new name, so the wall-clock budget (`VOL_CONE_BUDGET_S`, default 3000s)
+  converges it across successive daily runs rather than in one scan.
+  The live pass refreshes only pairs already near the cheap tail
+  (`_INTRADAY_CANDIDATE_MAX`) plus watchlist names, capped at
+  `_INTRADAY_PAIR_CAP` (80) — bounded cost regardless of universe size —
+  and holds entirely once the shared UW daily budget drops below
+  `_INTRADAY_UW_FLOOR`.
 - Fixtures (captured 2026-08-12):
   - `scripts/tests/fixtures/vol_cone_nvda_greeks_current.json` (77 strikes,
     as-of 2026-08-12, expiry 2026-09-18)
@@ -299,6 +312,16 @@ Scanner mode, same shelf as LEAP / GARCH: `ScannerMode` union, query
   close grace). `Persistent=true`. `RandomizedDelaySec=60`.
 - Windows: 26h open / 3d closed, `category: scheduled`, `requires_ib: false`.
   Daily watchdog bucket.
+
+`cloud/services/radon-vol-cone-intraday.service` + `.timer`.
+
+- Same oneshot shape, `ExecStart ... fetch_vol_cone.py --intraday`,
+  `RADON_UW_CALLER=vol-cone-intraday` so the shared UW budget attributes it.
+- Timer: `OnCalendar=Mon..Fri *-*-* 09..16:00,15,30,45 America/New_York`.
+  `Persistent=false`. The scanner gates on `market_state`, so pre-open and
+  post-close slots hold without spending a request.
+- Health row is `vol-cone-intraday` (the snapshot is shared; the row belongs
+  to the writer that produced it). 45m open / 3d closed, intraday bucket.
 
 ## File checklist
 

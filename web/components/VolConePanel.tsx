@@ -179,7 +179,10 @@ export default function VolConePanel() {
             <MetricCell label="ATM IV" value={formatIvPct(current.atm_iv)} />
             <MetricCell label="WING" value={formatPercentile(current.wing_score)} />
             <MetricCell label="REGIME" value={regimeLabel} tone={regimeTone(current.regime)} />
-            <MetricCell label="SOURCE DATE" value={data.source_as_of ?? "---"} />
+            <MetricCell
+              label={data.is_intraday ? "SOURCE (LIVE)" : "SOURCE DATE"}
+              value={data.source_as_of ?? "---"}
+            />
           </div>
         ) : (
           <RegimeStrip>
@@ -221,7 +224,7 @@ export default function VolConePanel() {
               testId="vol-cone-strip-source"
               label="SOURCE DATE"
               value={data.source_as_of ?? "---"}
-              sub={<>SESSION AS OF</>}
+              sub={<>{data.is_intraday ? "LIVE THIS SESSION" : "SESSION AS OF"}</>}
             />
           </RegimeStrip>
         )}

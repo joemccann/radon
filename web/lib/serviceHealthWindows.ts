@@ -192,6 +192,11 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // ``vol-cone`` — daily 20:45 UTC timer, UW-only, 26h open / 3d closed.
   "vol-cone": { open: 26 * HOUR, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: false },
 
+  // ``vol-cone-intraday`` — 15m live UW sample during ET trading hours; a
+  // market-hours-only writer is silent by design off-session, so extended
+  // and closed carry the same 3d floor as its EOD parent.
+  "vol-cone-intraday": { open: 45 * MIN, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: false },
+
   // ``knowledge-ingest`` — hourly knowledge-base ingest oneshot
   // (scripts/knowledge/ingest.py via radon-knowledge.timer, 24/7; no
   // market-hours gate — connectors read Turso + repo files). Heartbeats
