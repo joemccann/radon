@@ -23,7 +23,7 @@
  *   - no em dashes in user-facing copy (CLAUDE.md mandatory rule)
  */
 import { describe, it, expect, afterEach, vi, beforeEach } from "vitest";
-import { render, cleanup, screen } from "@testing-library/react";
+import { render, cleanup, fireEvent, screen, within } from "@testing-library/react";
 import CashFlowsSection from "../components/CashFlowsSection";
 
 afterEach(() => cleanup());
@@ -332,5 +332,31 @@ describe("CashFlowsSection sync lozenge", () => {
     expect(lozenge.textContent).toMatch(/30m ago/);
     expect(lozenge.textContent).not.toMatch(/throttled|failed|retry/i);
     expect(lozenge.getAttribute("data-state")).toBe("ok");
+  });
+
+  it("reorders cash-flow rows when Date is clicked", () => {
+    useCashFlowsMock.mockReturnValue({
+      data: {
+        rows: [
+          { id: "1", date: "2026-05-08", type: "Withdrawal", amount: -100, currency: "USD", description: "OUT", raw_type: "W", synced_at: "2026-05-08" },
+          { id: "2", date: "2026-05-01", type: "Deposit", amount: 50, currency: "USD", description: "IN", raw_type: "D", synced_at: "2026-05-01" },
+          { id: "3", date: "2026-05-04", type: "Dividend", amount: 5, currency: "USD", description: "DIV", raw_type: "Div", synced_at: "2026-05-04" },
+        ],
+        count: 3,
+        from_date: "2026-02-20",
+        summary: { deposits: 50, withdrawals: -100, dividends: 5, net: -45 },
+        last_synced_at: new Date().toISOString(),
+      },
+      loading: false,
+      error: null,
+      refresh: () => {},
+    });
+    render(<CashFlowsSection />);
+    fireEvent.click(screen.getByTestId("cash-flows-toggle"));
+    const firstDate = () => within(screen.getByRole("table")).getAllByRole("row")[1].textContent ?? "";
+    expect(firstDate()).toContain("05/08");
+    fireEvent.click(screen.getByRole("columnheader", { name: /date/i }));
+    expect(firstDate()).toContain("05/01");
+    expect(screen.getByRole("columnheader", { name: /date/i }).getAttribute("aria-sort")).toBe("ascending");
   });
 });

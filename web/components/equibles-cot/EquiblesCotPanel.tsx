@@ -24,11 +24,58 @@ import {
   formatShareOfOi,
   formatZScore,
   selectContract,
+  type CotBoardRow,
   type CotChartRow,
   type CotContract,
   type CotRangeSlug,
 } from "./cotPositioning";
 import { useEquiblesCot } from "./useEquiblesCot";
+import SortTh from "../SortTh";
+import { useSort } from "@/lib/useSort";
+
+type CotBoardSortKey = "contract" | "category" | "spec" | "comm" | "oi" | "reported";
+
+function cotBoardExtract(row: CotBoardRow, key: CotBoardSortKey): string | number | null {
+  switch (key) {
+    case "contract": return row.name ?? row.market_code;
+    case "category": return row.category;
+    case "spec": return row.net_noncommercial;
+    case "comm": return row.net_commercial;
+    case "oi": return row.net_noncommercial_pct_oi;
+    case "reported": return row.report_date;
+    default: return null;
+  }
+}
+
+function CotBoardTable({ rows }: { rows: CotBoardRow[] }) {
+  const { sorted, sort, toggle } = useSort(rows, cotBoardExtract);
+  return (
+    <table className="data-table">
+      <thead>
+        <tr>
+          <SortTh<CotBoardSortKey> label="CONTRACT" sortKey="contract" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <SortTh<CotBoardSortKey> label="CATEGORY" sortKey="category" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <SortTh<CotBoardSortKey> label="NET SPEC" sortKey="spec" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <SortTh<CotBoardSortKey> label="NET COMM" sortKey="comm" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <SortTh<CotBoardSortKey> label="% OI" sortKey="oi" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <SortTh<CotBoardSortKey> label="REPORTED" sortKey="reported" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+        </tr>
+      </thead>
+      <tbody>
+        {sorted.map((row) => (
+          <tr key={`${row.market_code}-${row.report_date}`}>
+            <td>{row.name ?? row.market_code}</td>
+            <td>{row.category ?? "---"}</td>
+            <td style={{ textAlign: "right" }}>{formatContracts(row.net_noncommercial)}</td>
+            <td style={{ textAlign: "right" }}>{formatContracts(row.net_commercial)}</td>
+            <td style={{ textAlign: "right" }}>{formatShareOfOi(row.net_noncommercial_pct_oi)}</td>
+            <td style={{ textAlign: "right" }}>{formatReportDate(row.report_date)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
 
 const DEFAULT_LOOKBACK_DAYS = 365 * 3;
 const DEFAULT_MIN_STATS_WEEKS = 52;
@@ -257,30 +304,7 @@ export default function EquiblesCotPanel() {
           <div className="section-header">
             <div className="section-title">Cross-Asset Board</div>
           </div>
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>CONTRACT</th>
-                <th>CATEGORY</th>
-                <th style={{ textAlign: "right" }}>NET SPEC</th>
-                <th style={{ textAlign: "right" }}>NET COMM</th>
-                <th style={{ textAlign: "right" }}>% OI</th>
-                <th style={{ textAlign: "right" }}>REPORTED</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.market.map((row) => (
-                <tr key={`${row.market_code}-${row.report_date}`}>
-                  <td>{row.name ?? row.market_code}</td>
-                  <td>{row.category ?? "---"}</td>
-                  <td style={{ textAlign: "right" }}>{formatContracts(row.net_noncommercial)}</td>
-                  <td style={{ textAlign: "right" }}>{formatContracts(row.net_commercial)}</td>
-                  <td style={{ textAlign: "right" }}>{formatShareOfOi(row.net_noncommercial_pct_oi)}</td>
-                  <td style={{ textAlign: "right" }}>{formatReportDate(row.report_date)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <CotBoardTable rows={data.market} />
         </div>
       )}
     </>

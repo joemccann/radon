@@ -21,7 +21,24 @@ import {
 } from "@/lib/positionUtils";
 import { fmtSignedPrice, fmtUsd, toneClass } from "@/lib/format";
 import PositionTradeTicket from "./PositionTradeTicket";
+import SortTh from "../SortTh";
 import { heldComboUnits, type TradeTarget } from "@/lib/order/positionTrade";
+import { useSort } from "@/lib/useSort";
+
+type LegSortKey = "direction" | "type" | "strike" | "qty" | "entry" | "market";
+type IndexedLeg = { leg: PortfolioPosition["legs"][number]; index: number };
+
+function legExtract(row: IndexedLeg, key: LegSortKey): string | number | null {
+  switch (key) {
+    case "direction": return row.leg.direction;
+    case "type": return row.leg.type;
+    case "strike": return row.leg.strike ?? null;
+    case "qty": return row.leg.contracts;
+    case "entry": return row.leg.avg_cost;
+    case "market": return row.leg.market_price;
+    default: return null;
+  }
+}
 
 type PositionTabProps = {
   position: PortfolioPosition;
@@ -49,6 +66,11 @@ function LegsDisclosure({
   const focusedBookKey = ctx?.focusedBookKey ?? null;
   // Default expanded: the legs ARE the actionable surface for a combo.
   const [expanded, setExpanded] = useState(true);
+  const indexedLegs = useMemo(
+    () => position.legs.map((leg, index) => ({ leg, index })),
+    [position.legs],
+  );
+  const { sorted, sort, toggle } = useSort(indexedLegs, legExtract);
 
   return (
     <div className="position-legs">
@@ -65,18 +87,18 @@ function LegsDisclosure({
         <table className="pos-legs-table">
           <thead>
             <tr>
-              <th>Direction</th>
-              <th>Type</th>
-              <th className="right">Strike</th>
-              <th className="right">Qty</th>
-              <th className="right">Entry</th>
-              <th className="right">Market</th>
+              <SortTh<LegSortKey> label="Direction" sortKey="direction" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+              <SortTh<LegSortKey> label="Type" sortKey="type" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+              <SortTh<LegSortKey> label="Strike" sortKey="strike" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+              <SortTh<LegSortKey> label="Qty" sortKey="qty" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+              <SortTh<LegSortKey> label="Entry" sortKey="entry" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+              <SortTh<LegSortKey> label="Market" sortKey="market" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
               <th className="right">Book</th>
               <th className="right">Trade</th>
             </tr>
           </thead>
           <tbody>
-            {position.legs.map((leg, i) => {
+            {sorted.map(({ leg, index: i }) => {
               const key = legPriceKey(position.ticker, position.expiry, leg);
               const legPrice = key ? prices[key] : null;
               const legMktResolved = resolveRealtimePrice(

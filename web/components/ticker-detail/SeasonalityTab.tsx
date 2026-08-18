@@ -3,6 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CalendarRange } from "lucide-react";
 import SectionEmptyState from "@/components/SectionEmptyState";
+import SortTh from "@/components/SortTh";
+import { useSort } from "@/lib/useSort";
+
+type SeasonSortKey = "month" | "avg" | "median" | "best" | "worst" | "win" | "rating";
 
 /* ─── Types matching UW /api/seasonality/{ticker}/monthly ─── */
 
@@ -64,6 +68,66 @@ function overallRating(months: MonthData[]): { rating: Rating; favorable: number
         ? "UNFAVORABLE"
         : "NEUTRAL";
   return { rating, favorable, unfavorable };
+}
+
+function seasonExtract(m: MonthData, key: SeasonSortKey): string | number | null {
+  const hasData = m.years > 0;
+  switch (key) {
+    case "month": return m.month;
+    case "avg": return hasData ? m.avg_change : null;
+    case "median": return hasData ? m.median_change : null;
+    case "best": return hasData ? m.max_change : null;
+    case "worst": return hasData ? m.min_change : null;
+    case "win": return hasData ? m.positive_months_perc : null;
+    case "rating": return hasData ? rateMonth(m.positive_months_perc, m.avg_change) : null;
+    default: return null;
+  }
+}
+
+function SeasonalityDetailTable({ months, currentMonth }: { months: MonthData[]; currentMonth: number }) {
+  const { sorted, sort, toggle } = useSort(months, seasonExtract, "month", "asc");
+  return (
+    <table className="pos-legs-table">
+      <thead>
+        <tr>
+          <SortTh<SeasonSortKey> label="Month" sortKey="month" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <SortTh<SeasonSortKey> label="Avg" sortKey="avg" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <SortTh<SeasonSortKey> label="Median" sortKey="median" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <SortTh<SeasonSortKey> label="Best" sortKey="best" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <SortTh<SeasonSortKey> label="Worst" sortKey="worst" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <SortTh<SeasonSortKey> label="Win Rate" sortKey="win" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <SortTh<SeasonSortKey> label="Rating" sortKey="rating" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+        </tr>
+      </thead>
+      <tbody>
+        {sorted.map((m) => {
+          const hasData = m.years > 0;
+          const monthRating = hasData ? rateMonth(m.positive_months_perc, m.avg_change) : "NEUTRAL" as Rating;
+          const isCurrent = m.month === currentMonth;
+          return (
+            <tr key={m.month} className={`${isCurrent ? "seasonality-row-current" : ""} ${!hasData ? "seasonality-row-nodata" : ""}`}>
+              <td>
+                {MONTH_FULL[m.month - 1]}
+                {isCurrent && <span className="seasonality-now">NOW</span>}
+              </td>
+              {hasData ? (
+                <>
+                  <td className={m.avg_change >= 0 ? "positive" : "negative"}>{fmtPct(m.avg_change)}</td>
+                  <td className={m.median_change >= 0 ? "positive" : "negative"}>{fmtPct(m.median_change)}</td>
+                  <td className="positive">{fmtPct(m.max_change)}</td>
+                  <td className="negative">{fmtPct(m.min_change)}</td>
+                  <td className={m.positive_months_perc > 0.6 ? "positive" : m.positive_months_perc < 0.5 ? "negative" : ""}>{fmtWinRate(m.positive_months_perc)}</td>
+                  <td><span className={`seasonality-table-badge ${ratingClass(monthRating)}`}>{monthRating}</span></td>
+                </>
+              ) : (
+                <td colSpan={6} style={{ color: "var(--text-muted)", fontStyle: "italic" }}>No data</td>
+              )}
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
 }
 
 /** Format decimal as percentage string: 0.0534 -> "+5.3%" */
@@ -254,46 +318,7 @@ export default function SeasonalityTab({ ticker, active }: SeasonalityTabProps) 
       {/* Detail table */}
       <div className="seasonality-detail">
         <div className="seasonality-detail-title">Monthly Detail</div>
-        <table className="pos-legs-table">
-          <thead>
-            <tr>
-              <th>Month</th>
-              <th>Avg</th>
-              <th>Median</th>
-              <th>Best</th>
-              <th>Worst</th>
-              <th>Win Rate</th>
-              <th>Rating</th>
-            </tr>
-          </thead>
-          <tbody>
-            {months.map((m) => {
-              const hasData = m.years > 0;
-              const monthRating = hasData ? rateMonth(m.positive_months_perc, m.avg_change) : "NEUTRAL" as Rating;
-              const isCurrent = m.month === currentMonth;
-              return (
-                <tr key={m.month} className={`${isCurrent ? "seasonality-row-current" : ""} ${!hasData ? "seasonality-row-nodata" : ""}`}>
-                  <td>
-                    {MONTH_FULL[m.month - 1]}
-                    {isCurrent && <span className="seasonality-now">NOW</span>}
-                  </td>
-                  {hasData ? (
-                    <>
-                      <td className={m.avg_change >= 0 ? "positive" : "negative"}>{fmtPct(m.avg_change)}</td>
-                      <td className={m.median_change >= 0 ? "positive" : "negative"}>{fmtPct(m.median_change)}</td>
-                      <td className="positive">{fmtPct(m.max_change)}</td>
-                      <td className="negative">{fmtPct(m.min_change)}</td>
-                      <td className={m.positive_months_perc > 0.6 ? "positive" : m.positive_months_perc < 0.5 ? "negative" : ""}>{fmtWinRate(m.positive_months_perc)}</td>
-                      <td><span className={`seasonality-table-badge ${ratingClass(monthRating)}`}>{monthRating}</span></td>
-                    </>
-                  ) : (
-                    <td colSpan={6} style={{ color: "var(--text-muted)", fontStyle: "italic" }}>No data</td>
-                  )}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <SeasonalityDetailTable months={months} currentMonth={currentMonth} />
       </div>
 
       {/* Legend */}

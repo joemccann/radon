@@ -363,6 +363,25 @@ describe("EquiblesCotPanel — chart and board", () => {
     expect(within(board).getByText("ES FUTURES")).toBeTruthy();
   });
 
+  it("reorders the board when CONTRACT is clicked", () => {
+    const report = latestReportTuesday().toISOString().slice(0, 10);
+    renderPanel(hookState({
+      data: buildData({
+        market: [
+          { market_code: "CZC", name: "ZC FUTURES", category: "Ag", report_date: report, open_interest: 1, net_commercial: 0, net_noncommercial: 1, net_noncommercial_pct_oi: 1 },
+          { market_code: "CES", name: "ES FUTURES", category: "EquityIndices", report_date: report, open_interest: 1, net_commercial: 0, net_noncommercial: 2, net_noncommercial_pct_oi: 2 },
+          { market_code: "CGC", name: "GC FUTURES", category: "Metals", report_date: report, open_interest: 1, net_commercial: 0, net_noncommercial: 3, net_noncommercial_pct_oi: 3 },
+        ],
+      }),
+    }));
+    const board = screen.getByTestId("cot-board");
+    const first = () => within(board).getAllByRole("row")[1].textContent ?? "";
+    expect(first()).toContain("ZC FUTURES");
+    fireEvent.click(within(board).getByRole("columnheader", { name: /contract/i }));
+    expect(first()).toContain("ES FUTURES");
+    expect(within(board).getByRole("columnheader", { name: /contract/i }).getAttribute("aria-sort")).toBe("ascending");
+  });
+
   it("hides the board when the latest-week request came back empty", () => {
     renderPanel(hookState({ data: buildData({ market: [] }) }));
     expect(screen.queryByTestId("cot-board")).toBe(null);

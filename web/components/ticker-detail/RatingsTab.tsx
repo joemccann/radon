@@ -4,6 +4,20 @@ import { useCallback, useEffect, useState } from "react";
 import { Gauge } from "lucide-react";
 import { fmtPrice } from "@/lib/positionUtils";
 import SectionEmptyState from "@/components/SectionEmptyState";
+import SortTh from "@/components/SortTh";
+import { useSort } from "@/lib/useSort";
+
+type RatingSortKey = "date" | "firm" | "action" | "rating";
+
+function ratingExtract(row: UpgradeEntry, key: RatingSortKey): string | number | null {
+  switch (key) {
+    case "date": return row.date ?? null;
+    case "firm": return row.firm;
+    case "action": return row.action;
+    case "rating": return row.to_grade || row.from_grade || null;
+    default: return null;
+  }
+}
 
 /* ─── Types matching the actual API response ─── */
 
@@ -72,6 +86,43 @@ function gradePillClass(grade: string): string {
 
 function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+}
+
+function RatingsChangesTable({ changes }: { changes: UpgradeEntry[] }) {
+  const { sorted, sort, toggle } = useSort(changes, ratingExtract);
+  return (
+    <table className="pos-legs-table">
+      <thead>
+        <tr>
+          <SortTh<RatingSortKey> label="Date" sortKey="date" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <SortTh<RatingSortKey> label="Firm" sortKey="firm" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <SortTh<RatingSortKey> label="Action" sortKey="action" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <SortTh<RatingSortKey> label="Rating" sortKey="rating" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+        </tr>
+      </thead>
+      <tbody>
+        {sorted.map((c, i) => {
+          const grade = c.to_grade || c.from_grade || "";
+          return (
+            <tr key={i}>
+              <td>{c.date || "---"}</td>
+              <td>{c.firm}</td>
+              <td>{capitalize(c.action)}</td>
+              <td>
+                {grade && (
+                  <span className={gradePillClass(grade)}>
+                    {c.from_grade && c.to_grade && c.from_grade !== c.to_grade
+                      ? `${capitalize(c.from_grade)} → ${capitalize(c.to_grade)}`
+                      : capitalize(grade)}
+                  </span>
+                )}
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
 }
 
 export default function RatingsTab({ ticker, active, currentPrice }: RatingsTabProps) {
@@ -240,37 +291,7 @@ export default function RatingsTab({ ticker, active, currentPrice }: RatingsTabP
       {changes.length > 0 && (
         <div className="ratings-changes">
           <div className="ratings-targets-title">Recent Analyst Actions</div>
-          <table className="pos-legs-table">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Firm</th>
-                <th>Action</th>
-                <th>Rating</th>
-              </tr>
-            </thead>
-            <tbody>
-              {changes.map((c, i) => {
-                const grade = c.to_grade || c.from_grade || "";
-                return (
-                  <tr key={i}>
-                    <td>{c.date || "---"}</td>
-                    <td>{c.firm}</td>
-                    <td>{capitalize(c.action)}</td>
-                    <td>
-                      {grade && (
-                        <span className={gradePillClass(grade)}>
-                          {c.from_grade && c.to_grade && c.from_grade !== c.to_grade
-                            ? `${capitalize(c.from_grade)} → ${capitalize(c.to_grade)}`
-                            : capitalize(grade)}
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <RatingsChangesTable changes={changes} />
         </div>
       )}
 

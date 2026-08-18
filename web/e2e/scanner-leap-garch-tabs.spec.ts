@@ -10,6 +10,30 @@ const leapPayload = {
   min_gap: 5,
   results: [
     {
+      ticker: "MSFT",
+      price: 490.2,
+      hv_20: 18.3,
+      hv_60: 19.1,
+      hv_252: 21.4,
+      current_iv: 20.9,
+      iv_rank: 44.0,
+      leap_count: 5,
+      best_gap: 0.5,
+      is_mispriced: false,
+    },
+    {
+      ticker: "AAPL",
+      price: 210.1,
+      hv_20: 22.0,
+      hv_60: 21.0,
+      hv_252: 24.0,
+      current_iv: 18.0,
+      iv_rank: 20.0,
+      leap_count: 6,
+      best_gap: 8.2,
+      is_mispriced: true,
+    },
+    {
       ticker: "NVDA",
       price: 181.4,
       hv_20: 42.1,
@@ -69,14 +93,25 @@ test("mode=leap renders the LEAP panel with candidates", async ({ page }) => {
   await expect(section.getByText("LEAP IV Mispricing")).toBeVisible();
   await expect(section.getByRole("link", { name: "NVDA" })).toBeVisible();
   await expect(section.getByText("+13.7")).toBeVisible();
-  await expect(section.getByText("MISPRICED", { exact: true })).toBeVisible();
+  await expect(section.getByText("MISPRICED", { exact: true }).first()).toBeVisible();
+});
+
+test("mode=leap sorts by Best Gap desc by default and Ticker on click", async ({ page }) => {
+  await page.goto("/scanner?mode=leap");
+  const section = page.getByTestId("leap-scanner-section");
+  const tickers = () => section.locator("tbody tr td:first-child a").allTextContents();
+  await expect.poll(tickers).toEqual(["NVDA", "AAPL", "MSFT"]);
+  await expect(section.getByRole("columnheader", { name: /best gap/i })).toHaveAttribute("aria-sort", "descending");
+  await section.getByRole("columnheader", { name: /ticker/i }).click();
+  await expect.poll(tickers).toEqual(["AAPL", "MSFT", "NVDA"]);
+  await expect(section.getByRole("columnheader", { name: /ticker/i })).toHaveAttribute("aria-sort", "ascending");
 });
 
 test("mode=garch renders the GARCH panel with pairs", async ({ page }) => {
   await page.goto("/scanner?mode=garch");
   const section = page.getByTestId("garch-scanner-section");
   await expect(section.getByText("GARCH Convergence")).toBeVisible();
-  await expect(section.getByText("NVDA ↔ AMD")).toBeVisible();
+  await expect(section.getByTestId("garch-row-NVDA-AMD")).toBeVisible();
   await expect(section.getByText("STRONG", { exact: true })).toBeVisible();
   await expect(section.getByText("1 ACTIONABLE")).toBeVisible();
 });

@@ -1,6 +1,8 @@
 "use client";
 
 import { useId, useMemo, useState } from "react";
+import SortTh from "../SortTh";
+import { useSort } from "@/lib/useSort";
 
 export type DailyDarkPoolRow = {
   date?: string;
@@ -69,20 +71,34 @@ function HistoryToggle({
   );
 }
 
+type DailySortKey = "date" | "direction" | "strength" | "buy" | "prints";
+
+function dailyExtract(row: DailyDarkPoolRow, key: DailySortKey): string | number | null {
+  switch (key) {
+    case "date": return row.date ?? null;
+    case "direction": return row.flow_direction ?? "NEUTRAL";
+    case "strength": return row.flow_strength ?? null;
+    case "buy": return typeof row.dp_buy_ratio === "number" ? row.dp_buy_ratio : null;
+    case "prints": return row.num_prints ?? null;
+    default: return null;
+  }
+}
+
 function DailyTable({ rows }: { rows: DailyDarkPoolRow[] }) {
+  const { sorted, sort, toggle } = useSort(rows, dailyExtract, "date", "desc");
   return (
     <table className="ticker-flow-daily">
       <thead>
         <tr>
-          <th>Date</th>
-          <th>Direction</th>
-          <th>Strength</th>
-          <th>Buy %</th>
-          <th>Prints</th>
+          <SortTh<DailySortKey> label="Date" sortKey="date" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <SortTh<DailySortKey> label="Direction" sortKey="direction" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <SortTh<DailySortKey> label="Strength" sortKey="strength" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <SortTh<DailySortKey> label="Buy %" sortKey="buy" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <SortTh<DailySortKey> label="Prints" sortKey="prints" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
         </tr>
       </thead>
       <tbody>
-        {rows.map((d) => {
+        {sorted.map((d) => {
           const pct = buyPct(d);
           return (
             <tr key={d.date ?? JSON.stringify(d)}>

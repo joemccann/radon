@@ -7,6 +7,8 @@ import SectionEmptyState from "../SectionEmptyState";
 import SpectralLoader from "../SpectralLoader";
 import { RegimeStrip, RegimeStripCell } from "../RegimeStrip";
 import { useEquiblesShortCrowding } from "./useEquiblesShortCrowding";
+import SortTh from "../SortTh";
+import { useSort } from "@/lib/useSort";
 import {
   buildScoreboardSummary,
   formatChangePct,
@@ -20,6 +22,32 @@ import {
   vintageLabel,
   type ShortCrowdingEntry,
 } from "./shortCrowding";
+
+type CrowdingSortKey =
+  | "ticker"
+  | "squeeze"
+  | "dtc"
+  | "short_pos"
+  | "chg"
+  | "si"
+  | "tier"
+  | "readings"
+  | "borrow";
+
+function crowdingExtract(entry: ShortCrowdingEntry, key: CrowdingSortKey): string | number | null {
+  switch (key) {
+    case "ticker": return entry.ticker;
+    case "squeeze": return entry.squeeze_score;
+    case "dtc": return entry.days_to_cover;
+    case "short_pos": return entry.short_position;
+    case "chg": return entry.short_position_change_pct;
+    case "si": return entry.short_interest_pct;
+    case "tier": return entry.crowding_tier;
+    case "readings": return `${entry.readings.upside_convexity} ${entry.readings.short_leg_tail_risk}`;
+    case "borrow": return entry.borrow?.resolved ? entry.borrow.fee_rate ?? null : null;
+    default: return null;
+  }
+}
 
 const FOOTNOTE =
   "Crowding is one number read two ways: convex upside for long call structures (Gate 1), and a fat left tail for short or naked put legs (Gate 3). The squeeze score ranks how crowded and catalyst-primed a short is; it is not a directional buy signal. Short interest is a FINRA settlement figure and publishes with a reporting lag.";
@@ -51,6 +79,32 @@ function IntensityChip({
     >
       {label} {intensity.toUpperCase()}
     </span>
+  );
+}
+
+function ShortCrowdingTable({ entries }: { entries: ShortCrowdingEntry[] }) {
+  const { sorted, sort, toggle } = useSort(entries, crowdingExtract);
+  return (
+    <table className="data-table" data-testid="short-crowding-table">
+      <thead>
+        <tr>
+          <SortTh<CrowdingSortKey> label="Ticker" sortKey="ticker" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <SortTh<CrowdingSortKey> label="Squeeze" sortKey="squeeze" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <SortTh<CrowdingSortKey> label="Days to Cover" sortKey="dtc" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <SortTh<CrowdingSortKey> label="Short Position" sortKey="short_pos" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <SortTh<CrowdingSortKey> label="Chg vs Prior" sortKey="chg" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <SortTh<CrowdingSortKey> label="Short Interest %" sortKey="si" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <SortTh<CrowdingSortKey> label="Tier" sortKey="tier" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <SortTh<CrowdingSortKey> label="Readings" sortKey="readings" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <SortTh<CrowdingSortKey> label="Borrow Fee" sortKey="borrow" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+        </tr>
+      </thead>
+      <tbody>
+        {sorted.map((entry) => (
+          <ScoreboardRow key={entry.ticker} entry={entry} />
+        ))}
+      </tbody>
+    </table>
   );
 }
 
@@ -188,26 +242,7 @@ export default function EquiblesShortCrowdingPanel() {
 
       <div className="section">
         <div className="table-scroll">
-          <table className="data-table" data-testid="short-crowding-table">
-            <thead>
-              <tr>
-                <th>Ticker</th>
-                <th className="right">Squeeze</th>
-                <th className="right">Days to Cover</th>
-                <th className="right">Short Position</th>
-                <th className="right">Chg vs Prior</th>
-                <th className="right">Short Interest %</th>
-                <th>Tier</th>
-                <th>Readings</th>
-                <th className="right">Borrow Fee</th>
-              </tr>
-            </thead>
-            <tbody>
-              {entries.map((entry) => (
-                <ScoreboardRow key={entry.ticker} entry={entry} />
-              ))}
-            </tbody>
-          </table>
+          <ShortCrowdingTable entries={entries} />
         </div>
 
         <div

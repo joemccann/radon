@@ -74,6 +74,7 @@ Applies under `web/`. Mirrors `web/CLAUDE.md`; prefer the Claude file if it is n
 
 ## Key Component Notes
 
+- Every product `<table>` uses `SortTh` + `useSort`. Structural exceptions need `data-sortable-exempt` (`chain-layout` | `matrix` | `markdown` | `chrome` | `kit-demo`). Contract: `web/tests/sortable-table-contract.test.ts`.
 - Options chain sticky header requires separate borders, sticky header backgrounds, and z-index on `thead`.
 - Column visibility persists under `localStorage` key `radon:columns:<tableId>`.
 - Dashboard uses 50/50 grid with sticky internal newsfeed rail.

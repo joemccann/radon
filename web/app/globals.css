@@ -6198,12 +6198,12 @@ tr.leg-row td {
 }
 
 .sort-icon-idle {
-  opacity: 0;
+  opacity: 0.35;
   transition: opacity 150ms ease-in-out;
 }
 
 .sortable-th:hover .sort-icon-idle {
-  opacity: 0.4;
+  opacity: 0.7;
 }
 
 /* ── Connection Banner ── */

@@ -3,7 +3,7 @@
  */
 
 import React from "react";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { cleanup, render, screen, fireEvent, within } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
 import GexPanel, { getDisplayProfile } from "../components/GexPanel";
@@ -112,6 +112,7 @@ describe("GexPanel", () => {
   });
 
   afterEach(() => {
+    cleanup();
     vi.useRealTimers();
   });
 
@@ -258,6 +259,18 @@ describe("GexPanel", () => {
     fireEvent.click(toggle);
     const table = container.querySelector(".gex-history-table");
     expect(table).toBeTruthy();
+  });
+
+  it("sorts history when Date is clicked", () => {
+    const { container } = renderWithData();
+    fireEvent.click(container.querySelector(".gex-history-toggle") as HTMLElement);
+    const table = container.querySelector(".gex-history-table") as HTMLElement;
+    const first = () => within(table).getAllByRole("row")[1].textContent ?? "";
+    const before = first();
+    fireEvent.click(within(table).getByRole("columnheader", { name: /^date$/i }));
+    fireEvent.click(within(table).getByRole("columnheader", { name: /^date$/i }));
+    expect(within(table).getByRole("columnheader", { name: /^date$/i }).getAttribute("aria-sort")).toBe("descending");
+    expect(first()).not.toBe(before);
   });
 
   it("renders flip migration when available", () => {

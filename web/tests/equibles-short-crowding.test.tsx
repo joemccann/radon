@@ -15,7 +15,7 @@
  * Settlement dates are window-relative (today minus N) so nothing rots in CI.
  */
 import React from "react";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -284,5 +284,15 @@ describe("EquiblesShortCrowdingPanel", () => {
     });
     const row = within(screen.getByTestId("short-crowding-row-ZZZ"));
     expect(row.getByTestId("short-crowding-score-ZZZ").textContent).toBe("---");
+  });
+
+  it("reorders scoreboard rows when Ticker is clicked", async () => {
+    await renderPanel({ data: payload() });
+    const tickers = () =>
+      screen.getAllByTestId(/^short-crowding-row-/).map((r) => r.getAttribute("data-ticker"));
+    expect(tickers()).toEqual(["GME", "AAPL"]);
+    fireEvent.click(screen.getByRole("columnheader", { name: /ticker/i }));
+    expect(tickers()).toEqual(["AAPL", "GME"]);
+    expect(screen.getByRole("columnheader", { name: /ticker/i }).getAttribute("aria-sort")).toBe("ascending");
   });
 });

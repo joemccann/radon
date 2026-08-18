@@ -10,7 +10,7 @@ import TickerLink from "./TickerLink";
 import { useSort } from "@/lib/useSort";
 import type { StrengthConfirmationData, StrengthConfirmationResult } from "@/lib/types";
 
-type StrengthSortKey = "ticker" | "score" | "groups" | "spot" | "verdict";
+type StrengthSortKey = "ticker" | "score" | "groups" | "spot" | "failed" | "verdict";
 
 type StrengthConfirmationScannerProps = {
   data: StrengthConfirmationData | null;
@@ -71,6 +71,7 @@ function extract(row: StrengthConfirmationResult, key: StrengthSortKey): string 
     case "score": return row.score;
     case "groups": return row.groups_passed;
     case "spot": return row.spot;
+    case "failed": return failedFactors(row);
     case "verdict": return row.verdict;
     default: return null;
   }
@@ -305,7 +306,7 @@ export default function StrengthConfirmationScanner({
                   <SortTh<StrengthSortKey> label="Groups" sortKey="groups" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <SortTh<StrengthSortKey> label="Spot" sortKey="spot" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   {FACTOR_ORDER.map((group) => <FactorHeader key={group} group={group} />)}
-                  <th>Failed</th>
+                  <SortTh<StrengthSortKey> label="Failed" sortKey="failed" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <SortTh<StrengthSortKey> label="Status" sortKey="verdict" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                 </tr>
               </thead>

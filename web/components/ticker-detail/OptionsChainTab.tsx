@@ -1338,7 +1338,7 @@ export default function OptionsChainTab({
         </div>
       ) : (
         <div className="chain-grid-wrapper" ref={wrapperRef}>
-          <table className="chain-grid">
+          <table className="chain-grid" data-sortable-exempt="chain-layout">
             <thead>
               <tr>
                 {sideFilter !== "puts" && (

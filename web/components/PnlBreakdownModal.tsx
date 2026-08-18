@@ -45,6 +45,7 @@ export default function PnlBreakdownModal({
   const breakdownRows: MetricBreakdownRow[] = rows.map((row) => ({
     id: row.id,
     sortValue: row.pnl,
+    values: [row.ticker, row.structure, row.col1, row.col2, row.pnl, row.pnlPct ?? null],
     cells: [
       { content: row.ticker, className: "eb-ticker" },
       { content: row.structure, className: "eb-structure" },

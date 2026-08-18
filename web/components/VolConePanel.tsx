@@ -9,7 +9,9 @@ import MetricCell from "./mobile/MetricCell";
 import SectionEmptyState from "./SectionEmptyState";
 import SpectralLoader from "./SpectralLoader";
 import VolConeChart from "./VolConeChart";
+import SortTh from "./SortTh";
 import { RegimeStrip, RegimeStripCell } from "./RegimeStrip";
+import { useSort } from "@/lib/useSort";
 import {
   defaultPresetForLength,
   presetRange,
@@ -38,6 +40,22 @@ const SOURCE_FOOTNOTE =
   "Unusual Whales greeks, expiry-local 10% OTM wings. Cone is the 90/10 ATM IV range for this monthly.";
 
 type NameFilter = "all" | "hits";
+type VolConeSortKey = "ticker" | "expiry" | "dte" | "atm" | "call10" | "put10" | "atm_pct" | "wing" | "regime";
+
+function volConeExtract(name: VolConeName, key: VolConeSortKey): string | number | null {
+  switch (key) {
+    case "ticker": return name.ticker;
+    case "expiry": return name.expiry;
+    case "dte": return name.dte;
+    case "atm": return name.atm_iv;
+    case "call10": return name.call_10_iv;
+    case "put10": return name.put_10_iv;
+    case "atm_pct": return name.atm_percentile;
+    case "wing": return name.wing_score;
+    case "regime": return name.regime;
+    default: return null;
+  }
+}
 
 function regimeTone(regime: VolConeName["regime"]): "pos" | "warn" | "neg" | "mut" {
   const color = volConeRegimeColor(regime);
@@ -79,6 +97,9 @@ export default function VolConePanel() {
     return presetRange(activePreset === "custom" ? "all" : activePreset, total);
   }, [activePreset, customRange, total]);
 
+  const visibleNames = filter === "hits" ? (data?.hits ?? []) : names;
+  const { sorted: sortedNames, sort, toggle } = useSort(visibleNames, volConeExtract);
+
   if ((loading || syncing) && !data) {
     return <SpectralLoader label="Loading UW vol cone scan" />;
   }
@@ -94,7 +115,6 @@ export default function VolConePanel() {
   }
 
   const current = data.current;
-  const visibleNames = filter === "hits" ? data.hits : names;
   const rows = buildVolConeChartRows(series);
   const [start, end] = chartRange;
   const slice = rows.slice(start, end + 1);
@@ -200,19 +220,19 @@ export default function VolConePanel() {
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Ticker</th>
-                  <th>Expiry</th>
-                  <th className="right">DTE</th>
-                  <th className="right">ATM</th>
-                  <th className="right">10C</th>
-                  <th className="right">10P</th>
-                  <th className="right">ATM %</th>
-                  <th className="right">WING</th>
-                  <th>Regime</th>
+                  <SortTh<VolConeSortKey> label="Ticker" sortKey="ticker" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<VolConeSortKey> label="Expiry" sortKey="expiry" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<VolConeSortKey> label="DTE" sortKey="dte" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<VolConeSortKey> label="ATM" sortKey="atm" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<VolConeSortKey> label="10C" sortKey="call10" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<VolConeSortKey> label="10P" sortKey="put10" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<VolConeSortKey> label="ATM %" sortKey="atm_pct" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<VolConeSortKey> label="WING" sortKey="wing" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<VolConeSortKey> label="Regime" sortKey="regime" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                 </tr>
               </thead>
               <tbody>
-                {visibleNames.map((name) => {
+                {sortedNames.map((name) => {
                   const key = nameKey(name);
                   const active = key === nameKey(selected ?? current);
                   return (

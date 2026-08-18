@@ -1,5 +1,8 @@
 "use client";
 
+import SortTh from "../SortTh";
+import { useSort } from "@/lib/useSort";
+
 interface TableRow {
   symbol: string;
   signal: string;
@@ -45,7 +48,22 @@ interface DenseNumericTableProps {
   data?: TableRow[];
 }
 
+type KitSortKey = "symbol" | "signal" | "confidence" | "volGap" | "netGamma" | "state";
+
+function kitExtract(row: TableRow, key: KitSortKey): string | number | null {
+  switch (key) {
+    case "symbol": return row.symbol;
+    case "signal": return row.signal;
+    case "confidence": return row.confidence;
+    case "volGap": return Number.parseFloat(row.volGap);
+    case "netGamma": return Number.parseFloat(row.netGamma);
+    case "state": return row.state;
+    default: return null;
+  }
+}
+
 export function DenseNumericTable({ data = SAMPLE_DATA }: DenseNumericTableProps) {
+  const { sorted, sort, toggle } = useSort(data, kitExtract);
   return (
     <div
       style={{
@@ -96,16 +114,16 @@ export function DenseNumericTable({ data = SAMPLE_DATA }: DenseNumericTableProps
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ borderBottom: "1px solid var(--border-dim)" }}>
-              <th style={{ ...thStyle, textAlign: "left" }}>Symbol</th>
-              <th style={{ ...thStyle, textAlign: "left" }}>Signal</th>
-              <th style={{ ...thStyle, textAlign: "right" }}>Confidence</th>
-              <th style={{ ...thStyle, textAlign: "right" }}>Vol Gap</th>
-              <th style={{ ...thStyle, textAlign: "right" }}>Net Gamma</th>
-              <th style={{ ...thStyle, textAlign: "right" }}>State</th>
+              <SortTh<KitSortKey> label="Symbol" sortKey="symbol" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+              <SortTh<KitSortKey> label="Signal" sortKey="signal" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+              <SortTh<KitSortKey> label="Confidence" sortKey="confidence" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+              <SortTh<KitSortKey> label="Vol Gap" sortKey="volGap" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+              <SortTh<KitSortKey> label="Net Gamma" sortKey="netGamma" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+              <SortTh<KitSortKey> label="State" sortKey="state" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
             </tr>
           </thead>
           <tbody>
-            {data.map((row, i) => (
+            {sorted.map((row, i) => (
               <tr
                 key={i}
                 style={{

@@ -2254,7 +2254,7 @@ function DiscoverSections() {
   );
 }
 
-type JournalSortKey = "id" | "date" | "ticker" | "structure" | "decision" | "qty" | "entry_cost" | "max_risk" | "realized_pnl" | "ror";
+type JournalSortKey = "id" | "date" | "ticker" | "structure" | "decision" | "qty" | "entry_cost" | "max_risk" | "realized_pnl" | "ror" | "gates" | "edge";
 
 const journalSortExtract = (t: TradeEntry, key: JournalSortKey): string | number | null => {
   switch (key) {
@@ -2268,6 +2268,8 @@ const journalSortExtract = (t: TradeEntry, key: JournalSortKey): string | number
     case "max_risk": return t.max_risk ?? null;
     case "realized_pnl": return t.realized_pnl ?? null;
     case "ror": return t.return_on_risk ?? null;
+    case "gates": return t.gates_passed?.join(", ") || t.gates_failed?.join(", ") || null;
+    case "edge": return t.edge_analysis?.edge_type ?? null;
     default: return null;
   }
 };
@@ -2553,8 +2555,8 @@ function JournalSections() {
                   <SortTh<JournalSortKey> label="Max Risk" sortKey="max_risk" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <SortTh<JournalSortKey> label="Realized P&L" sortKey="realized_pnl" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <SortTh<JournalSortKey> label="RoR" sortKey="ror" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <th>Gates</th>
-                  <th>Edge</th>
+                  <SortTh<JournalSortKey> label="Gates" sortKey="gates" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<JournalSortKey> label="Edge" sortKey="edge" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                 </tr>
               </thead>
               <tbody>
@@ -2871,6 +2873,7 @@ function OrderImpliedMvCell({ value }: { value: number | null }) {
 }
 
 type ExecOrderKey = "symbol" | "side" | "quantity" | "avgPrice" | "commission" | "realizedPNL" | "time";
+type ExecGroupKey = "position" | "action" | "quantity" | "netPrice" | "commission" | "pnl" | "time";
 
 const execOrderExtract = (item: ExecutedOrder, key: ExecOrderKey): string | number | null => {
   switch (key) {
@@ -3133,6 +3136,19 @@ function OrdersSections({
     [],
   );
   const execFilter = useTableFilter(positionGroups, extractExecSearch);
+  const execGroupExtract = useCallback((g: PositionFillGroup, key: ExecGroupKey): string | number | null => {
+    switch (key) {
+      case "position": return g.symbol;
+      case "action": return g.fills[0]?.side === "CANCELLED" ? "CANCELLED" : g.isClosing ? "CLOSE" : "OPEN";
+      case "quantity": return g.totalQuantity;
+      case "netPrice": return g.netPrice;
+      case "commission": return g.totalCommission;
+      case "pnl": return g.totalPnL;
+      case "time": return g.time;
+      default: return null;
+    }
+  }, []);
+  const execGroupSort = useSort(execFilter.filtered, execGroupExtract, "time", "desc");
 
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const toggleGroup = useCallback((groupId: string) => {
@@ -3659,24 +3675,24 @@ function OrdersSections({
               testId="today-executed-empty"
             />
           ) : showMobileOrders ? (
-            <MobileExecutedList groups={execFilter.filtered} />
+            <MobileExecutedList groups={execGroupSort.sorted} />
           ) : (
             <table>
               <thead>
                 <tr>
                   <th style={{ width: "24px" }}></th>
-                  <th>Position</th>
-                  <th>Action</th>
-                  <th className="right">Quantity</th>
-                  <th className="right">Net Price</th>
-                  <th className="right">Commission</th>
-                  <th className="right">Realized P&L</th>
-                  <th>Time</th>
+                  <SortTh<ExecGroupKey> label="Position" sortKey="position" activeKey={execGroupSort.sort.key} direction={execGroupSort.sort.direction} onToggle={execGroupSort.toggle} />
+                  <SortTh<ExecGroupKey> label="Action" sortKey="action" activeKey={execGroupSort.sort.key} direction={execGroupSort.sort.direction} onToggle={execGroupSort.toggle} />
+                  <SortTh<ExecGroupKey> label="Quantity" sortKey="quantity" className="right" activeKey={execGroupSort.sort.key} direction={execGroupSort.sort.direction} onToggle={execGroupSort.toggle} />
+                  <SortTh<ExecGroupKey> label="Net Price" sortKey="netPrice" className="right" activeKey={execGroupSort.sort.key} direction={execGroupSort.sort.direction} onToggle={execGroupSort.toggle} />
+                  <SortTh<ExecGroupKey> label="Commission" sortKey="commission" className="right" activeKey={execGroupSort.sort.key} direction={execGroupSort.sort.direction} onToggle={execGroupSort.toggle} />
+                  <SortTh<ExecGroupKey> label="Realized P&L" sortKey="pnl" className="right" activeKey={execGroupSort.sort.key} direction={execGroupSort.sort.direction} onToggle={execGroupSort.toggle} />
+                  <SortTh<ExecGroupKey> label="Time" sortKey="time" activeKey={execGroupSort.sort.key} direction={execGroupSort.sort.direction} onToggle={execGroupSort.toggle} />
                   <th style={{ width: "32px" }}></th>
                 </tr>
               </thead>
               <tbody>
-                {execFilter.filtered.map((group) => {
+                {execGroupSort.sorted.map((group) => {
                   const isExpanded = expandedGroups.has(group.id);
                   const isCancelled = group.fills[0]?.side === "CANCELLED";
                   const shareData = group.isClosing && group.totalPnL != null
