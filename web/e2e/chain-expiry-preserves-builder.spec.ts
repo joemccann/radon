@@ -9,8 +9,30 @@
 import { test, expect } from "@playwright/test";
 
 const TICKER = "MU";
-const NEAR = "20260821";
-const FAR = "20260918";
+
+/**
+ * Window-relative expiries. These were hardcoded "20260821" / "20260918" and
+ * rotted on 2026-08-14: `OptionsChainTab` defaults to the first expiry with
+ * >= 7 DTE, so once the near date came inside a week the chain correctly
+ * skipped it and the assertion at `toHaveValue(NEAR)` started reading the FAR
+ * date instead. The component was right; the fixture had aged into its rule.
+ *
+ * Both dates are Fridays comfortably past the 7-DTE cut, so the default
+ * resolves to NEAR on any day this runs.
+ */
+function fridayInDays(days: number): string {
+  const d = new Date();
+  d.setUTCHours(0, 0, 0, 0);
+  d.setUTCDate(d.getUTCDate() + days);
+  while (d.getUTCDay() !== 5) d.setUTCDate(d.getUTCDate() + 1); // 5 = Friday
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}${m}${day}`;
+}
+
+const NEAR = fridayInDays(14);
+const FAR = fridayInDays(42);
 
 const PORTFOLIO_EMPTY = {
   bankroll: 1_000_000,
