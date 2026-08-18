@@ -11,7 +11,7 @@ import SortTh from "./SortTh";
 import { useSort } from "@/lib/useSort";
 import type { LeapData, LeapResult } from "@/lib/types";
 
-type LeapSortKey = "ticker" | "price" | "iv" | "iv_rank" | "hv_20" | "hv_252" | "leaps" | "best_gap";
+type LeapSortKey = "ticker" | "price" | "iv" | "iv_rank" | "hv_20" | "hv_252" | "leaps" | "best_gap" | "status";
 
 type LeapScannerProps = {
   data: LeapData | null;
@@ -36,6 +36,7 @@ function extract(row: LeapResult, key: LeapSortKey): string | number | null {
     case "hv_252": return row.hv_252;
     case "leaps": return row.leap_count;
     case "best_gap": return row.best_gap;
+    case "status": return row.is_mispriced ? "MISPRICED" : "FAIR";
     default: return null;
   }
 }
@@ -59,7 +60,7 @@ export default function LeapScanner({
   onTickerScan,
 }: LeapScannerProps) {
   const rows = data?.results ?? [];
-  const { sorted, sort, toggle } = useSort(rows, extract);
+  const { sorted, sort, toggle } = useSort(rows, extract, "best_gap", "desc");
   const mispricedCount = rows.filter((r) => r.is_mispriced).length;
 
   return (
@@ -139,7 +140,7 @@ export default function LeapScanner({
                   <SortTh<LeapSortKey> label="HV252" sortKey="hv_252" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <SortTh<LeapSortKey> label="LEAPs" sortKey="leaps" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <SortTh<LeapSortKey> label="Best Gap" sortKey="best_gap" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} helpText="Headline signal: realized vol minus LEAP IV in vol points. Positive = options priced below realized movement." helpAriaLabel="Best gap details" />
-                  <th>Status</th>
+                  <SortTh<LeapSortKey> label="Status" sortKey="status" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                 </tr>
               </thead>
               <tbody>

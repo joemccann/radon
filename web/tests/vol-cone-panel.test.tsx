@@ -245,6 +245,25 @@ describe("VolConePanel — strip + table + chart", () => {
     expect(screen.getByText("NVDA")).toBeTruthy();
   });
 
+  it("reorders names when a column header is clicked", () => {
+    const aapl = name({ ticker: "AAPL", expiry: "2026-09-18", dte: 10, wing_score: 0.9, regime: "RICH" });
+    const nvda = name({ ticker: "NVDA", expiry: "2026-09-18", dte: 37, wing_score: 0.08, regime: "CHEAP_WINGS" });
+    const smh = name({ ticker: "SMH", expiry: "2026-10-16", dte: 65, wing_score: 0.44, regime: "NEUTRAL" });
+    renderPanel(hookState({
+      data: buildData({
+        current: nvda,
+        names: [nvda, smh, aapl],
+        hits: [nvda],
+      }),
+    }));
+    const section = screen.getByTestId("vol-cone-table-section");
+    const firstTicker = () => section.querySelector("tbody tr td")?.textContent;
+    expect(firstTicker()).toBe("NVDA");
+    fireEvent.click(screen.getByRole("columnheader", { name: /ticker/i }));
+    expect(firstTicker()).toBe("AAPL");
+    expect(screen.getByRole("columnheader", { name: /ticker/i }).getAttribute("aria-sort")).toBe("ascending");
+  });
+
   it("guards chart paths against NaN", () => {
     const broken = name({
       series: [

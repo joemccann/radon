@@ -4,7 +4,21 @@ import { useMemo, useState } from "react";
 import { ChevronDown, TriangleAlert, Wallet } from "lucide-react";
 import { useCashFlows, type CashFlowRow, type CashFlowType } from "@/lib/useCashFlows";
 import SectionEmptyState from "@/components/SectionEmptyState";
+import SortTh from "@/components/SortTh";
 import { TableSkeleton } from "@/components/ui/Skeleton";
+import { useSort } from "@/lib/useSort";
+
+type CashSortKey = "date" | "type" | "amount" | "description";
+
+function cashExtract(row: CashFlowRow, key: CashSortKey): string | number | null {
+  switch (key) {
+    case "date": return row.date;
+    case "type": return row.type;
+    case "amount": return row.amount;
+    case "description": return row.description ?? row.raw_type ?? null;
+    default: return null;
+  }
+}
 
 const TYPE_TONE: Record<CashFlowType, "accum" | "distrib" | "neutral"> = {
   Deposit: "accum",
@@ -102,6 +116,7 @@ export default function CashFlowsSection() {
     if (filter === "all") return all;
     return all.filter((r) => r.type === filter);
   }, [data?.rows, filter]);
+  const { sorted, sort, toggle } = useSort(rows, cashExtract, "date", "desc");
 
   const summary = data?.summary ?? null;
   const lastSyncedRelative = data?.last_synced_at ? relativeFromNow(data.last_synced_at) : null;
@@ -135,7 +150,7 @@ export default function CashFlowsSection() {
       : SYNC_LOZENGE_EXPLANATION;
   const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const pageStart = page * PAGE_SIZE;
-  const pageRows = rows.slice(pageStart, pageStart + PAGE_SIZE);
+  const pageRows = sorted.slice(pageStart, pageStart + PAGE_SIZE);
   const stopToggle = (e: React.SyntheticEvent) => e.stopPropagation();
 
   return (
@@ -255,10 +270,10 @@ export default function CashFlowsSection() {
                 <table>
                   <thead>
                     <tr>
-                      <th style={{ width: 110 }}>Date</th>
-                      <th style={{ width: 130 }}>Type</th>
-                      <th className="right" style={{ width: 160 }}>Amount</th>
-                      <th>Description</th>
+                      <SortTh<CashSortKey> label="Date" sortKey="date" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                      <SortTh<CashSortKey> label="Type" sortKey="type" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                      <SortTh<CashSortKey> label="Amount" sortKey="amount" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                      <SortTh<CashSortKey> label="Description" sortKey="description" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                     </tr>
                   </thead>
                   <tbody>

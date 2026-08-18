@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import MetricBreakdownModal, { type MetricBreakdownColumn } from "./MetricBreakdownModal";
+import SortTh from "./SortTh";
+import { useSort } from "@/lib/useSort";
 import type { ExposureDataWithBreakdown, ExposureBreakdownRow } from "@/lib/exposureBreakdown";
 import {
   computeLeverageRatio,
@@ -12,6 +14,7 @@ import {
 import { fmtUsd, fmtSignedUsd } from "@/lib/format/money";
 
 export type ExposureMetric = "netLong" | "netShort" | "dollarDelta" | "netExposure";
+type ExposureSortKey = "ticker" | "structure" | "spot" | "delta" | "contribution" | "src";
 
 type Props = {
   metric: ExposureMetric | null;
@@ -86,22 +89,43 @@ function fmtLegDelta(n: number | null): string {
   return n >= 0 ? `+${n.toFixed(4)}` : n.toFixed(4);
 }
 
+function exposureExtract(
+  row: ExposureBreakdownRow,
+  key: ExposureSortKey,
+  getContribution: (row: ExposureBreakdownRow) => number,
+): string | number | null {
+  switch (key) {
+    case "ticker": return row.ticker;
+    case "structure": return row.structure;
+    case "spot": return row.spot;
+    case "delta": return row.delta;
+    case "contribution": return Math.abs(getContribution(row));
+    case "src": return row.deltaSource;
+    default: return null;
+  }
+}
+
 export default function ExposureBreakdownModal({ metric, exposure, bankroll, netLiquidation, onClose }: Props) {
   const [expandedId, setExpandedId] = useState<number | null>(null);
-
-  if (!metric) return null;
-
-  const config = METRIC_CONFIG[metric];
-  const totalValue = config.getValue(exposure);
-
-  // Filter rows that contribute to this metric, sort by contribution magnitude
-  const rows = exposure.rows
-    .filter((r) => {
+  const config = metric ? METRIC_CONFIG[metric] : null;
+  const contributing = useMemo(() => {
+    if (!metric || !config) return [];
+    return exposure.rows.filter((r) => {
       if (metric === "netLong") return r.delta > 0;
       if (metric === "netShort") return r.delta < 0;
-      return true; // dollarDelta and netExposure show all positions
-    })
-    .sort((a, b) => Math.abs(config.getContribution(b)) - Math.abs(config.getContribution(a)));
+      return true;
+    });
+  }, [metric, config, exposure.rows]);
+  const extract = useMemo(
+    () => (row: ExposureBreakdownRow, key: ExposureSortKey) =>
+      exposureExtract(row, key, config ? config.getContribution : () => 0),
+    [config],
+  );
+  const { sorted: rows, sort, toggle } = useSort(contributing, extract, "contribution", "desc");
+
+  if (!metric || !config) return null;
+
+  const totalValue = config.getValue(exposure);
 
   const showLeverage = metric === "dollarDelta";
   const leverage = showLeverage && netLiquidation != null
@@ -143,8 +167,23 @@ export default function ExposureBreakdownModal({ metric, exposure, bankroll, net
       tableHead={(
         <thead>
           <tr>
-            {columns.map((col, i) => (
-              <th key={i} className={col.className}>{col.header}</th>
+            {([
+              ["ticker", columns[0]],
+              ["structure", columns[1]],
+              ["spot", columns[2]],
+              ["delta", columns[3]],
+              ["contribution", columns[4]],
+              ["src", columns[5]],
+            ] as [ExposureSortKey, MetricBreakdownColumn][]).map(([key, col]) => (
+              <SortTh<ExposureSortKey>
+                key={key}
+                label={col.header}
+                sortKey={key}
+                className={col.className}
+                activeKey={sort.key}
+                direction={sort.direction}
+                onToggle={toggle}
+              />
             ))}
           </tr>
         </thead>

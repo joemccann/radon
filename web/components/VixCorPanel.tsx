@@ -281,7 +281,7 @@ export default function VixCorPanel() {
             <div className="section-title">{BASE_RATE_HEADLINE}</div>
           </div>
           <div style={{ overflowX: "auto" }}>
-            <table className="vixcor-base-rate-table">
+            <table className="vixcor-base-rate-table" data-sortable-exempt="matrix">
               <thead>
                 <tr>
                   <th scope="col" rowSpan={2}>

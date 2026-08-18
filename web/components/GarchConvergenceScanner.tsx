@@ -12,7 +12,7 @@ import SortTh from "./SortTh";
 import { useSort } from "@/lib/useSort";
 import type { GarchConvergenceData, GarchPair } from "@/lib/types";
 
-type GarchSortKey = "pair" | "lagger" | "divergence" | "gap" | "iv_rank" | "expected_move" | "signal";
+type GarchSortKey = "pair" | "lagger" | "divergence" | "gap" | "iv_rank" | "expected_move" | "signal" | "gates";
 type GateFilter = "all" | "actionable" | "failed";
 
 type GarchConvergenceScannerProps = {
@@ -37,6 +37,7 @@ function extract(row: GarchPair, key: GarchSortKey): string | number | null {
     case "iv_rank": return row.lagger_iv_rank;
     case "expected_move": return row.expected_move;
     case "signal": return row.signal;
+    case "gates": return row.gates_passed ? "PASS" : (row.failing_gates.join(",") || "gates");
     default: return null;
   }
 }
@@ -246,7 +247,7 @@ export default function GarchConvergenceScanner({
                   <SortTh<GarchSortKey> label="IV Rank" sortKey="iv_rank" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <SortTh<GarchSortKey> label="Exp move" sortKey="expected_move" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} helpText="GARCH-expected move for the lagger if it converges to model-implied vol." helpAriaLabel="Expected move details" />
                   <SortTh<GarchSortKey> label="Signal" sortKey="signal" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <th>Gates</th>
+                  <SortTh<GarchSortKey> label="Gates" sortKey="gates" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                 </tr>
               </thead>
               <tbody>

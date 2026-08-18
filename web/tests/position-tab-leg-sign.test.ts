@@ -4,7 +4,7 @@
 
 import React from "react";
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import PositionTab from "../components/ticker-detail/PositionTab";
 import type { PortfolioPosition } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
@@ -142,5 +142,17 @@ describe("PositionTab leg sign display", () => {
     // last=3.88 > ask=3.86 → resolveRealtimePrice uses mid=(3.80+3.86)/2=3.83
     expect(shortRow?.textContent).toContain("-$3.83");
     expect(shortRow?.querySelector("td.negative")).not.toBeNull();
+  });
+
+  it("reorders legs when Type is clicked", () => {
+    render(React.createElement(PositionTab, { position: POSITION, prices: PRICES }));
+    const types = () =>
+      screen.getAllByRole("row").slice(1).map((row) => row.textContent ?? "");
+    expect(types()[0]).toContain("Call");
+    fireEvent.click(screen.getByRole("columnheader", { name: /^type$/i }));
+    expect(types()[0]).toContain("Call");
+    fireEvent.click(screen.getByRole("columnheader", { name: /^type$/i }));
+    expect(types()[0]).toContain("Put");
+    expect(screen.getByRole("columnheader", { name: /^type$/i }).getAttribute("aria-sort")).toBe("descending");
   });
 });

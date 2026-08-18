@@ -150,4 +150,18 @@ describe("StrengthConfirmationScanner", () => {
     expect(screen.getByText("No confirmed strength setups")).toBeTruthy();
     expect(screen.getByText("The latest scan did not find names with all seven factor groups aligned.")).toBeTruthy();
   });
+
+  it("sorts by Failed when the header is clicked", () => {
+    render(<StrengthConfirmationScanner data={data} />);
+    const section = screen.getByTestId("strength-confirmation-section");
+    const firstTicker = () =>
+      within(section).getAllByRole("row")[1].querySelector(".ticker-link")?.textContent;
+    expect(firstTicker()).toBe("AAPL");
+    fireEvent.click(within(section).getByRole("columnheader", { name: /^failed$/i }));
+    fireEvent.click(within(section).getByRole("columnheader", { name: /^failed$/i }));
+    expect(within(section).getByRole("columnheader", { name: /^failed$/i }).getAttribute("aria-sort")).toBe(
+      "descending",
+    );
+    expect(firstTicker()).toBe("MSFT");
+  });
 });

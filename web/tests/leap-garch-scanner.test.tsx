@@ -143,6 +143,56 @@ describe("LeapScanner", () => {
       "Enter 1-6 letter tickers, comma-separated.",
     );
   });
+
+  it("defaults to Best Gap descending and sorts Ticker and Status on header click", () => {
+    const three: LeapData = {
+      ...leapData,
+      results: [
+        ...leapData.results,
+        {
+          ticker: "AAPL",
+          price: 210.1,
+          hv_20: 22.0,
+          hv_60: 21.0,
+          hv_252: 24.0,
+          current_iv: 18.0,
+          iv_rank: 20.0,
+          leap_count: 6,
+          best_gap: 8.2,
+          is_mispriced: true,
+        },
+      ],
+    };
+    render(<LeapScanner data={three} />);
+    const section = screen.getByTestId("leap-scanner-section");
+    const tickers = () =>
+      within(section)
+        .getAllByRole("link")
+        .map((el) => el.textContent);
+
+    expect(tickers()).toEqual(["NVDA", "AAPL", "MSFT"]);
+    expect(within(section).getByRole("columnheader", { name: /best gap/i }).getAttribute("aria-sort")).toBe(
+      "descending",
+    );
+
+    fireEvent.click(within(section).getByRole("columnheader", { name: /^ticker$/i }));
+    expect(tickers()).toEqual(["AAPL", "MSFT", "NVDA"]);
+    expect(within(section).getByRole("columnheader", { name: /^ticker$/i }).getAttribute("aria-sort")).toBe(
+      "ascending",
+    );
+
+    fireEvent.click(within(section).getByRole("columnheader", { name: /^ticker$/i }));
+    expect(tickers()).toEqual(["NVDA", "MSFT", "AAPL"]);
+    expect(within(section).getByRole("columnheader", { name: /^ticker$/i }).getAttribute("aria-sort")).toBe(
+      "descending",
+    );
+
+    fireEvent.click(within(section).getByRole("columnheader", { name: /^status$/i }));
+    expect(tickers()[0]).toBe("MSFT");
+    expect(within(section).getByRole("columnheader", { name: /^status$/i }).getAttribute("aria-sort")).toBe(
+      "ascending",
+    );
+  });
 });
 
 describe("GarchConvergenceScanner", () => {
@@ -224,5 +274,17 @@ describe("GarchConvergenceScanner", () => {
     expect(screen.getByRole("alert").textContent).toContain(
       "Enter pairs: an even number of tickers.",
     );
+  });
+
+  it("sorts by Gates when the header is clicked", () => {
+    render(<GarchConvergenceScanner data={garchData} />);
+    const section = screen.getByTestId("garch-scanner-section");
+    const first = () => within(section).getAllByTestId(/^garch-row-/)[0].getAttribute("data-testid");
+    const before = first();
+    fireEvent.click(within(section).getByRole("columnheader", { name: /gates/i }));
+    expect(within(section).getByRole("columnheader", { name: /gates/i }).getAttribute("aria-sort")).toMatch(
+      /^(ascending|descending)$/,
+    );
+    expect(first()).not.toBe(before);
   });
 });

@@ -19,6 +19,60 @@ import {
   type AtsVenueShareThresholds,
 } from "./atsVenueShare";
 import { useAtsVenueShare } from "./useAtsVenueShare";
+import SortTh from "../SortTh";
+import { useSort } from "@/lib/useSort";
+
+type AtsSortKey = "ticker" | "share" | "shareZ" | "print" | "printZ" | "shortVol" | "divergence" | "signal";
+
+function atsExtract(row: AtsVenueShareRow, key: AtsSortKey): string | number | null {
+  switch (key) {
+    case "ticker": return row.ticker ?? null;
+    case "share": return row.ats_share_pct;
+    case "shareZ": return row.ats_share_z;
+    case "print": return row.avg_ats_print_size;
+    case "printZ": return row.avg_ats_print_size_z;
+    case "shortVol": return row.short_volume_pct;
+    case "divergence": return venueDivergence(row);
+    case "signal": return row.classification;
+    default: return null;
+  }
+}
+
+function AtsVenueShareTable({ rows }: { rows: AtsVenueShareRow[] }) {
+  const { sorted, sort, toggle } = useSort(rows, atsExtract);
+  return (
+    <table className="data-table" data-testid="ats-venue-share-table">
+      <thead>
+        <tr>
+          <SortTh<AtsSortKey> label="Ticker" sortKey="ticker" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <SortTh<AtsSortKey> label="ATS Share" sortKey="share" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <SortTh<AtsSortKey> label="Share Z" sortKey="shareZ" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <SortTh<AtsSortKey> label="Avg ATS Print" sortKey="print" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <SortTh<AtsSortKey> label="Print Z" sortKey="printZ" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <SortTh<AtsSortKey> label="Short Vol" sortKey="shortVol" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <SortTh<AtsSortKey> label="Divergence" sortKey="divergence" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <SortTh<AtsSortKey> label="Signal" sortKey="signal" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+        </tr>
+      </thead>
+      <tbody>
+        {sorted.map((row) => (
+          <tr key={row.ticker} data-testid={`ats-venue-share-row-${row.ticker}`}>
+            <td>{row.ticker}</td>
+            <td className="right">{formatSharePct(row.ats_share_pct)}</td>
+            <td className="right">{formatZ(row.ats_share_z)}</td>
+            <td className="right">{formatPrintSize(row.avg_ats_print_size)}</td>
+            <td className="right">{formatZ(row.avg_ats_print_size_z)}</td>
+            <td className="right">{formatSharePct(row.short_volume_pct)}</td>
+            <td className="right">{formatGap(venueDivergence(row))}</td>
+            <td>
+              <SignalChip row={row} />
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
 
 const MONO_FOOTNOTE: React.CSSProperties = {
   fontFamily: "var(--font-mono)",
@@ -138,36 +192,7 @@ export default function AtsVenueSharePanel() {
 
       <div className="section">
         <div className="table-scroll">
-          <table className="data-table" data-testid="ats-venue-share-table">
-            <thead>
-              <tr>
-                <th>Ticker</th>
-                <th className="right">ATS Share</th>
-                <th className="right">Share Z</th>
-                <th className="right">Avg ATS Print</th>
-                <th className="right">Print Z</th>
-                <th className="right">Short Vol</th>
-                <th className="right">Divergence</th>
-                <th>Signal</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
-                <tr key={row.ticker} data-testid={`ats-venue-share-row-${row.ticker}`}>
-                  <td>{row.ticker}</td>
-                  <td className="right">{formatSharePct(row.ats_share_pct)}</td>
-                  <td className="right">{formatZ(row.ats_share_z)}</td>
-                  <td className="right">{formatPrintSize(row.avg_ats_print_size)}</td>
-                  <td className="right">{formatZ(row.avg_ats_print_size_z)}</td>
-                  <td className="right">{formatSharePct(row.short_volume_pct)}</td>
-                  <td className="right">{formatGap(venueDivergence(row))}</td>
-                  <td>
-                    <SignalChip row={row} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <AtsVenueShareTable rows={rows} />
         </div>
 
         <div style={MONO_FOOTNOTE}>{methodNote(data.week_start_date, data.thresholds)}</div>

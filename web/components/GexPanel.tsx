@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { Activity, TrendingUp, TrendingDown, ArrowUpRight, ArrowDownRight } from "lucide-react";
 import { useGex, type GexData, type GexBucket, type GexLevel, type GexHistoryEntry, type IvData, type MqLevels, type SourceDelta, type SourceDeltaEntry } from "@/lib/useGex";
 import { isGexDataStale } from "@/lib/gexStaleness";
@@ -10,6 +10,8 @@ import ShareReportModal from "./ShareReportModal";
 import GexLaplaceContour from "./instruments/GexLaplaceContour";
 import SpectralLoader from "./SpectralLoader";
 import RegimeSyncStatusBadge from "./RegimeSyncStatusBadge";
+import SortTh from "./SortTh";
+import { useSort } from "@/lib/useSort";
 
 type GexPanelProps = {
   marketState?: MarketState;
@@ -218,11 +220,19 @@ function ExpectedRangeBar({ data }: { data: GexData }) {
 /* ─── History Table ──────────────────────────────────── */
 
 type GexSortCol = "date" | "net_gex" | "net_dex" | "gex_flip" | "spot" | "atm_iv" | "vol_pc" | "bias";
-type SortDir = "asc" | "desc";
 
-function sortIndicator(col: GexSortCol, activeCol: GexSortCol | null, dir: SortDir): string {
-  if (col !== activeCol) return "";
-  return dir === "asc" ? " \u2191" : " \u2193";
+function gexHistoryExtract(row: GexHistoryEntry, key: GexSortCol): string | number | null {
+  switch (key) {
+    case "date": return row.date;
+    case "spot": return row.spot;
+    case "gex_flip": return row.gex_flip;
+    case "net_gex": return row.net_gex;
+    case "net_dex": return row.net_dex;
+    case "atm_iv": return row.atm_iv;
+    case "vol_pc": return row.vol_pc;
+    case "bias": return row.bias ?? null;
+    default: return null;
+  }
 }
 
 /* ─── MenthorQ Levels Panel ─────────────────────────── */
@@ -349,30 +359,8 @@ function MqLevelsPanel({ mq, sourceDelta }: { mq: MqLevels; sourceDelta: SourceD
 }
 
 function GexHistoryTable({ history }: { history: GexHistoryEntry[] }) {
-  const [sortCol, setSortCol] = useState<GexSortCol | null>(null);
-  const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [expanded, setExpanded] = useState(false);
-
-  function handleSort(col: GexSortCol) {
-    if (sortCol === col) {
-      if (sortDir === "desc") setSortDir("asc");
-      else { setSortCol(null); setSortDir("desc"); }
-    } else {
-      setSortCol(col);
-      setSortDir("desc");
-    }
-  }
-
-  const sorted = useMemo(() => {
-    if (!sortCol) return history;
-    return [...history].sort((a, b) => {
-      const av = sortCol === "date" ? a.date : (a[sortCol] ?? -Infinity);
-      const bv = sortCol === "date" ? b.date : (b[sortCol] ?? -Infinity);
-      if (av < bv) return sortDir === "asc" ? -1 : 1;
-      if (av > bv) return sortDir === "asc" ? 1 : -1;
-      return 0;
-    });
-  }, [history, sortCol, sortDir]);
+  const { sorted, sort, toggle } = useSort(history, gexHistoryExtract);
 
   if (!history.length) return null;
 
@@ -401,14 +389,15 @@ function GexHistoryTable({ history }: { history: GexHistoryEntry[] }) {
             <thead>
               <tr>
                 {cols.map((c) => (
-                  <th
+                  <SortTh<GexSortCol>
                     key={c.key}
+                    label={c.label}
+                    sortKey={c.key}
                     className={`text-${c.align}`}
-                    onClick={() => handleSort(c.key)}
-                    style={{ cursor: "pointer", userSelect: "none" }}
-                  >
-                    {c.label}{sortIndicator(c.key, sortCol, sortDir)}
-                  </th>
+                    activeKey={sort.key}
+                    direction={sort.direction}
+                    onToggle={toggle}
+                  />
                 ))}
               </tr>
             </thead>

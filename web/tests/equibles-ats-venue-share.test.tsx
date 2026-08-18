@@ -11,7 +11,7 @@
  * per covered ticker, the thin-history reason, and the upstream-error notice.
  */
 import React from "react";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -259,6 +259,21 @@ describe("AtsVenueSharePanel — table", () => {
     expect(nvda.getByText("33.3%")).toBeTruthy();
     expect(nvda.getByText("51.5%")).toBeTruthy();
     expect(nvda.getByText("DISTRIBUTION")).toBeTruthy();
+  });
+
+  it("reorders venue-share rows when Ticker is clicked", () => {
+    mockState({
+      data: data({
+        current: [row({ ticker: "NVDA" }), row({ ticker: "AAPL" }), row({ ticker: "MSFT" })],
+      }),
+    });
+    render(<AtsVenueSharePanel />);
+    const tickers = () =>
+      screen.getAllByTestId(/^ats-venue-share-row-/).map((r) => r.getAttribute("data-testid"));
+    expect(tickers()[0]).toBe("ats-venue-share-row-NVDA");
+    fireEvent.click(screen.getByRole("columnheader", { name: /ticker/i }));
+    expect(tickers()[0]).toBe("ats-venue-share-row-AAPL");
+    expect(screen.getByRole("columnheader", { name: /ticker/i }).getAttribute("aria-sort")).toBe("ascending");
   });
 
   it("renders the thin-history reason instead of a fake score", () => {

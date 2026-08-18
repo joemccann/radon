@@ -4,6 +4,8 @@ import type { ReactNode } from "react";
 import { Inbox } from "lucide-react";
 import Modal from "./Modal";
 import SectionEmptyState from "./SectionEmptyState";
+import SortTh from "./SortTh";
+import { useSort } from "@/lib/useSort";
 
 /**
  * MetricBreakdownModal — shared primitive for click-to-explain metric modals.
@@ -42,8 +44,20 @@ export type MetricBreakdownColumn = {
 export type MetricBreakdownRow = {
   id: string | number;
   sortValue: number;
+  values?: Array<string | number | null>;
   cells: MetricBreakdownCell[];
 };
+
+type MetricSortKey = string;
+
+function metricExtract(row: MetricBreakdownRow, key: MetricSortKey): string | number | null {
+  if (key === "magnitude") return Math.abs(row.sortValue);
+  const i = Number(key);
+  if (row.values && i in row.values) return row.values[i] ?? null;
+  const content = row.cells[i]?.content;
+  if (typeof content === "string" || typeof content === "number") return content;
+  return null;
+}
 
 function toneClass(tone?: MetricTone): string {
   return tone ? ` ${tone}` : "";
@@ -112,14 +126,12 @@ export default function MetricBreakdownModal({
   hasRows,
   emptyMessage = "No data available.",
 }: Props) {
+  const { sorted: sortedRows, sort, toggle } = useSort(rows ?? [], metricExtract, "magnitude", "desc");
+
   if (!open) return null;
 
   const isCustomTable = tableHead != null || tableBody != null;
   const isValueOnly = !isCustomTable && columns == null;
-
-  const sortedRows = rows
-    ? [...rows].sort((a, b) => Math.abs(b.sortValue) - Math.abs(a.sortValue))
-    : [];
   const showTable = isCustomTable ? Boolean(hasRows) : sortedRows.length > 0;
 
   return (
@@ -143,9 +155,15 @@ export default function MetricBreakdownModal({
                 <thead>
                   <tr>
                     {columns?.map((col, i) => (
-                      <th key={i} className={col.className}>
-                        {col.header}
-                      </th>
+                      <SortTh
+                        key={i}
+                        label={col.header}
+                        sortKey={String(i)}
+                        className={col.className}
+                        activeKey={sort.key}
+                        direction={sort.direction}
+                        onToggle={toggle}
+                      />
                     ))}
                   </tr>
                 </thead>

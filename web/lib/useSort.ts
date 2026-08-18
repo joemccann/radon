@@ -14,7 +14,7 @@ type ValueExtractor<T, K extends string> = (item: T, key: K) => string | number 
 export function useSort<T, K extends string>(
   data: readonly T[] | T[],
   extractValue: ValueExtractor<T, K>,
-  defaultKey?: K,
+  defaultKey?: NoInfer<K>,
   defaultDirection: SortDirection = "asc",
 ) {
   const [sort, setSort] = useState<SortState<K>>({

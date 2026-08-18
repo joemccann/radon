@@ -3,7 +3,24 @@
 import { Receipt } from "lucide-react";
 import Modal from "./Modal";
 import SectionEmptyState from "./SectionEmptyState";
+import SortTh from "./SortTh";
+import { useSort } from "@/lib/useSort";
 import type { ExecutedOrder } from "@/lib/types";
+
+type FillSortKey = "time" | "symbol" | "side" | "quantity" | "avgPrice" | "commission" | "realizedPNL";
+
+function fillExtract(fill: ExecutedOrder, key: FillSortKey): string | number | null {
+  switch (key) {
+    case "time": return fill.time;
+    case "symbol": return fill.symbol;
+    case "side": return fill.side;
+    case "quantity": return fill.quantity;
+    case "avgPrice": return fill.avgPrice;
+    case "commission": return fill.commission;
+    case "realizedPNL": return fill.realizedPNL;
+    default: return null;
+  }
+}
 
 type Props = {
   open: boolean;
@@ -39,6 +56,7 @@ const fmtPct = (n: number) => `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
 export default function FillsModal({ open, fills, totalRealizedPnl, netLiquidation, onClose }: Props) {
   const fillsWithPnl = fills.filter((f) => f.realizedPNL != null);
   const hasFills = fills.length > 0;
+  const { sorted, sort, toggle } = useSort(fills, fillExtract);
 
   return (
     <Modal open={open} onClose={onClose} title="TODAY'S FILLS" className="fills-modal">
@@ -55,17 +73,17 @@ export default function FillsModal({ open, fills, totalRealizedPnl, netLiquidati
             <table className="fills-table">
               <thead>
                 <tr>
-                  <th>TIME</th>
-                  <th>SYMBOL</th>
-                  <th>SIDE</th>
-                  <th className="text-right">QTY</th>
-                  <th className="text-right">PRICE</th>
-                  <th className="text-right">COMMISSION</th>
-                  <th className="text-right">REALIZED P&L</th>
+                  <SortTh<FillSortKey> label="TIME" sortKey="time" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<FillSortKey> label="SYMBOL" sortKey="symbol" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<FillSortKey> label="SIDE" sortKey="side" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<FillSortKey> label="QTY" sortKey="quantity" className="text-right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<FillSortKey> label="PRICE" sortKey="avgPrice" className="text-right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<FillSortKey> label="COMMISSION" sortKey="commission" className="text-right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<FillSortKey> label="REALIZED P&L" sortKey="realizedPNL" className="text-right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                 </tr>
               </thead>
               <tbody>
-                {fills.map((fill) => (
+                {sorted.map((fill) => (
                   <tr key={fill.execId} className={fill.realizedPNL != null ? (fill.realizedPNL >= 0 ? "fills-row-positive" : "fills-row-negative") : ""}>
                     <td className="mono">{fmtTime(fill.time)}</td>
                     <td className="mono">{fill.symbol}</td>

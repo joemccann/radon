@@ -1,3 +1,27 @@
+# Task: Sortable product tables (2026-08-17)
+
+## Dependency graph
+
+- T1 depends_on: [] - Inventory SortTh/useSort and every product `<table>`
+- T2 depends_on: [T1] - LEAP red/green: default best_gap desc, Status SortTh, visible idle chevron
+- T3 depends_on: [T1] - Contract test + web/CLAUDE.md + web/AGENTS.md rule
+- T4 depends_on: [T1] - Wire remaining product tables; exempt structural layouts
+- T5 depends_on: [T2, T3, T4] - Focused vitest + Playwright LEAP sort
+
+## Checklist
+
+- [x] T1 Inventory
+- [x] T2 LEAP sort + idle chevron
+- [x] T3 Contract + docs
+- [x] T4 Remaining tables
+- [x] T5 Verify
+
+## Review
+
+LEAP defaults to best_gap desc; Status is SortTh. Idle chevron opacity 0.35. Contract test enforces SortTh/useSort or data-sortable-exempt. Remaining product tables wired. Focused vitest 15 files / 169 + LEAP header-click unit; Playwright scanner-leap-garch-tabs 5/5.
+
+---
+
 # Task: Route-change fresh sync (2026-08-17)
 
 ## Dependency graph

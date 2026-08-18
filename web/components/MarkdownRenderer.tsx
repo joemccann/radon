@@ -24,7 +24,7 @@ export default function MarkdownRenderer({ content }: MarkdownRendererProps) {
           ul: ({ children }) => <ul className="chat-markdown-list chat-markdown-list-unordered">{children}</ul>,
           ol: ({ children }) => <ol className="chat-markdown-list chat-markdown-list-ordered">{children}</ol>,
           li: ({ children }) => <li className="chat-markdown-list-item">{children}</li>,
-          table: ({ children }) => <div className="chat-table-wrap"><table className="chat-table">{children}</table></div>,
+          table: ({ children }) => <div className="chat-table-wrap"><table className="chat-table" data-sortable-exempt="markdown">{children}</table></div>,
           thead: ({ children }) => <thead className="chat-markdown-thead">{children}</thead>,
           tbody: ({ children }) => <tbody>{children}</tbody>,
           tr: ({ children }) => <tr>{children}</tr>,
