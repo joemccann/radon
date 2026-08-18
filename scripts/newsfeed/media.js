@@ -1,11 +1,11 @@
 import path from "path";
 import crypto from "node:crypto";
-import fs from "fs-extra";
 import https from "node:https";
 import dns from "node:dns";
 import net from "node:net";
 import axios from "axios";
 import sharp from "sharp";
+import { writePublicMediaFile } from "./mediaPermissions.js";
 
 const BASE_URL = new URL("https://themarketear.com");
 
@@ -267,7 +267,9 @@ export function createImageDownloader({ mediaDir, client = defaultClient, getCoo
 
         // Always replace a legacy file after validation so an older raw or
         // extension-derived publication cannot survive the hardened ingest.
-        await fs.writeFile(destPath, format.data);
+        // chmod 0644 after write — UMask=0077 would otherwise leave 0600 and
+        // Caddy 403s media.radon.run (see mediaPermissions.js).
+        await writePublicMediaFile(destPath, format.data);
         cache.set(absoluteUrl, publicPath);
         return publicPath;
       } catch (err) {

@@ -6,6 +6,7 @@
 // Tailscale is down, the cycle continues and the next cycle retries.
 
 import { spawn } from "node:child_process";
+import { ensurePublicMediaPermissions, localMediaDest } from "./mediaPermissions.js";
 
 // Default target uses Tailscale's MagicDNS name `ib-gateway` — secure private route.
 // Operators without Tailscale on the laptop can switch to the Hetzner public IP via
@@ -21,7 +22,7 @@ export async function pushMedia({
   remote = REMOTE,
   timeoutMs = RSYNC_TIMEOUT_MS,
 } = {}) {
-  return new Promise((resolve) => {
+  const result = await new Promise((resolve) => {
     const args = [
       "-az",
       "--ignore-existing",   // never overwrite — image filenames are content-derived, immutable
@@ -66,6 +67,21 @@ export async function pushMedia({
       resolve({ ok: false, reason: `rsync spawn error: ${err.message}` });
     });
   });
+
+  // --ignore-existing never updates dest modes. Files written under
+  // UMask=0077 stay 0600 on media.radon.run and Caddy 403s them.
+  if (result.ok) {
+    const dest = localMediaDest(remote);
+    if (dest) {
+      try {
+        result.repaired = await ensurePublicMediaPermissions(dest);
+      } catch (err) {
+        result.repaired = 0;
+        result.repairError = err instanceof Error ? err.message : String(err);
+      }
+    }
+  }
+  return result;
 }
 
 // Run directly: `bun run scripts/newsfeed/push_media.js [local] [remote]`
