@@ -1543,7 +1543,13 @@ def _apply_mirrored_flow_coverage(
         [
             _warning(
                 "FLOWS_SOURCE_MIRROR",
-                "warn",
+                # Provenance, not freshness — the same distinction NAV_SOURCE_*
+                # draws. `warn` floors the payload to "stale", and the render
+                # layer gates the TWR on "stale" exactly as on "degraded", so
+                # declaring the mirror at `warn` would blank the very page this
+                # fallback exists to keep alive. The mirror's age is policed by
+                # the coverage bound below, not by the severity.
+                "info",
                 "External flows came from the last mirrored statement, not a live "
                 f"Flex fetch; verified through {covered_through or 'unknown'}.",
                 flows_source="turso",

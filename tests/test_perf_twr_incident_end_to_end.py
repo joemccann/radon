@@ -73,10 +73,17 @@ def test_provenance_is_declared(flex_outage_with_mirror):
     assert "FLOWS_FETCH_FAILED" not in codes
 
 
-def test_status_is_not_ok_while_serving_a_mirror(flex_outage_with_mirror):
+def test_serving_a_mirror_does_not_by_itself_gate_the_page(flex_outage_with_mirror):
+    """Provenance is declared in a warning, not paid for by degrading status.
+
+    `warn` floors the payload to "stale" and the render layer gates the TWR on
+    "stale" exactly as on "degraded" (#52) — so flagging the mirror at `warn`
+    would blank the very page this fallback exists to keep alive.
+    """
     payload = builder.build_and_persist(persist=False)
 
-    assert payload["status"] != "ok"
+    mirror = next(w for w in payload["warnings"] if w["code"] == "FLOWS_SOURCE_MIRROR")
+    assert mirror["severity"] == "info"
 
 
 def test_nav_past_mirror_coverage_is_not_chained(flex_outage_with_mirror, monkeypatch):
