@@ -316,14 +316,17 @@ export default function MobileOrderTicket({
       ? isDebit === false
       : legs[0]?.action === "SELL";
     const netPremium = isCredit ? -Math.abs(reviewPrice) : reviewPrice;
-    const chainLegs = (normalizedOrder?.legs ?? legs).map((l) => ({
+    const chainLegs = legs.map((l) => ({
       action: l.action,
       right: l.right,
       strike: l.strike,
       expiry: l.expiry,
-      // normalizeComboOrder has divided multi-leg by GCD; single-leg passes
-      // through with raw user-entered count (the hook re-normalises).
-      quantity: normalizedOrder ? l.quantity : Math.max(1, Math.trunc(l.quantity)),
+      // RAW user-entered counts, per the ChainOrderLeg contract. The risk
+      // layer derives comboQuantity as the GCD of what it is handed, so
+      // passing normalizeComboOrder's GCD-divided legs (150/150 -> 1/1) made
+      // every multi-lot combo price its max loss/gain as ONE lot while the
+      // You'll-pay notional scaled correctly (2026-08-18).
+      quantity: Math.max(1, Math.trunc(l.quantity)),
     }));
     return {
       ticker,
