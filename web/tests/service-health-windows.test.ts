@@ -746,3 +746,23 @@ describe("R-068 — signals-refresh scans are scheduled, not dormant-amber", () 
     expect(isStale("strength-confirmation", fiveDaysAgo, "open", NOW)).toBe(true);
   });
 });
+
+/**
+ * Live vol-cone sample (2026-08-18): the EOD cone is a day stale for anyone
+ * trading during the session, so radon-vol-cone-intraday.timer re-ranks a
+ * live UW sample every 15m. Silence during RTH means the tab has fallen
+ * back to yesterday's close without saying so.
+ */
+describe("vol-cone-intraday freshness window", () => {
+  const MIN = 60_000;
+  const DAY = 24 * 60 * 60_000;
+
+  it("is scheduled, 45m open, 3d closed/extended, requires_ib false", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["vol-cone-intraday"]).toBeDefined();
+    expect(getServiceCategory("vol-cone-intraday")).toBe("scheduled");
+    expect(getFreshnessWindowMs("vol-cone-intraday", "open")).toBe(45 * MIN);
+    expect(getFreshnessWindowMs("vol-cone-intraday", "extended")).toBe(3 * DAY);
+    expect(getFreshnessWindowMs("vol-cone-intraday", "closed")).toBe(3 * DAY);
+    expect(requiresIb("vol-cone-intraday")).toBe(false);
+  });
+});

@@ -98,6 +98,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-signals-refresh.timer",
     "radon-vol-cone.service",
     "radon-vol-cone.timer",
+    "radon-vol-cone-intraday.service",
+    "radon-vol-cone-intraday.timer",
     "radon-perf-twr.service",
     "radon-perf-twr.timer",
 ]

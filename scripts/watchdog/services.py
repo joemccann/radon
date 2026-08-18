@@ -134,6 +134,12 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # close grace. UW greeks only — no IB. 26h open catches a missed weekday;
     # 3d closed covers Fri 20:45 UTC → Mon 20:45 UTC.
     "vol-cone":         {"open": 26 * _HOUR, "closed": 3 * _DAY, "requires_ib": False},
+    # vol-cone-intraday — radon-vol-cone-intraday.timer, every 15m during ET
+    # trading hours. Ranks a live UW sample against the stored cone so the
+    # tab is tradeable during the session instead of a day stale. 45m open
+    # tolerates one missed cycle; 3d closed covers Fri 16:00 ET -> Mon open,
+    # since a market-hours-only writer is silent by design off-session.
+    "vol-cone-intraday": {"open": 45 * _MIN, "closed": 3 * _DAY, "requires_ib": False},
     # skew — one-minute RTH UW snapshots plus daily 21:45 UTC finalization.
     "skew":             {"open": 5 * _MIN, "closed": 26 * _HOUR, "requires_ib": False},
     # skew2d — radon-skew2d.timer, daily 21:50 UTC every calendar day
@@ -271,6 +277,9 @@ BUCKETS: dict[str, list[str]] = {
         # RTH position-drift sensor (REL-001) — silent during RTH = the
         # reconcile spine is down, page like the other intraday writers.
         "position-reconcile",
+        # 15m live vol-cone sample; silent during RTH means the tab has
+        # silently fallen back to yesterday's close.
+        "vol-cone-intraday",
     ],
     "continuous": [
         "newsfeed-scraper",

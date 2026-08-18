@@ -353,3 +353,23 @@ describe("VolConePanel — selected-name analysis + trade links", () => {
     expect(container.textContent ?? "").not.toMatch(EM_DASH);
   });
 });
+
+describe("VolConePanel — live intraday sample", () => {
+  it("labels the source cell LIVE when the top point is this session", () => {
+    renderPanel(hookState({ data: buildData({ is_intraday: true, source_as_of: "2026-08-18" }) }));
+
+    const cell = screen.getByTestId("vol-cone-strip-source");
+    expect(within(cell).getByText("2026-08-18")).toBeTruthy();
+    // Without this the tab looks identical to a stale post-close snapshot,
+    // and a trader cannot tell which one they are acting on.
+    expect(within(cell).getByText("LIVE THIS SESSION")).toBeTruthy();
+  });
+
+  it("keeps the completed-session label when the cone is a closing snapshot", () => {
+    renderPanel(hookState({ data: buildData() }));
+
+    const cell = screen.getByTestId("vol-cone-strip-source");
+    expect(within(cell).getByText("SESSION AS OF")).toBeTruthy();
+    expect(within(cell).queryByText("LIVE THIS SESSION")).toBeNull();
+  });
+});

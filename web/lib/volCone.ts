@@ -41,6 +41,10 @@ export interface VolConeData {
   /** GET contract: absent data is HTTP 200 with missing:true, never a 4xx. */
   missing?: boolean;
   source_as_of: string | null;
+  /** True when the top point is a live sample of the open session rather
+   *  than a completed close. The percentile is current; the distribution it
+   *  is ranked against is still completed sessions only. */
+  is_intraday?: boolean;
   count: number;
   hit_count: number;
   current: VolConeName | null;
