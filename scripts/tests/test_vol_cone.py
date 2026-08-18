@@ -502,21 +502,39 @@ class TestVolConeStorage:
 
 
 class TestDefaultUniverse:
-    """The cone is a relative-value screen: 25 names is too few to rank."""
+    """The cone is a relative-value screen: 25 names is too few to rank.
 
-    def test_default_universe_extends_the_seed_with_a_preset(self):
+    ``data/presets/`` is runtime-owned and gitignored (the rebalance handler
+    writes it), so these pin the composition rather than the checked-out
+    file — including the degradation when the preset is not on the box.
+    """
+
+    def test_default_universe_extends_the_seed_with_the_preset(self, monkeypatch):
         import fetch_vol_cone as mod
 
+        monkeypatch.setattr(
+            mod, "_preset_tickers", lambda name=mod._UNIVERSE_PRESET: ["NVDA", "PLTR", "ADBE"]
+        )
         universe = mod.default_universe()
+
         assert universe[: len(mod.SEED_UNIVERSE)] == mod.SEED_UNIVERSE
-        assert len(universe) > 100
+        assert universe[len(mod.SEED_UNIVERSE):] == ["PLTR", "ADBE"]
         assert len(universe) == len(dict.fromkeys(universe))
 
-    def test_universe_cap_admits_more_than_the_seed(self):
+    def test_missing_preset_degrades_to_the_seed_list(self, monkeypatch):
+        import fetch_vol_cone as mod
+
+        monkeypatch.setattr(mod, "_preset_tickers", lambda name=mod._UNIVERSE_PRESET: [])
+        assert mod.default_universe() == mod.SEED_UNIVERSE
+
+    def test_universe_cap_admits_far_more_than_the_seed(self, monkeypatch):
         import fetch_vol_cone as mod
 
         assert mod._UNIVERSE_CAP > len(mod.SEED_UNIVERSE)
-        assert len(merge_universe([], cap=mod._UNIVERSE_CAP)) > len(mod.SEED_UNIVERSE)
+        monkeypatch.setattr(
+            mod, "_preset_tickers", lambda name=mod._UNIVERSE_PRESET: [f"T{i}" for i in range(200)]
+        )
+        assert len(merge_universe([], cap=mod._UNIVERSE_CAP)) == mod._UNIVERSE_CAP
 
 
 # ── Intraday live sample ──────────────────────────────────────────
