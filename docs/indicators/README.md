@@ -14,6 +14,13 @@ Owner specs for regime tabs and the cheap-wing scanner. Add a row here when a sp
 
 `/regime/vol-cone` redirects to the scanner. Pattern for a new indicator: `.claude/skills/new-indicator/SKILL.md`.
 
+`vol-cone` is the only indicator that deep-links into the ORDER BUILDER: a
+`CHEAP_WINGS` / `CHEAP_ATM` row links to
+`/{TICKER}?deck=c&expiry=…&src=vol-cone&legs=…`, and the chain labels the
+builder `PREFILLED FROM VOL CONE` off that `src`. Any other `src` falls back to
+`PREFILLED FROM THETA HARVESTER`, so a new indicator that prefills the builder
+must add its own `src` value rather than reuse one.
+
 A derived indicator must tell an explained parent lag apart from a broken
 parent, or a spent UW daily cap fails its unit and pages a P1 every run. See
 [skew2d.md](skew2d.md) "Parent lag — stale vs embargoed".
