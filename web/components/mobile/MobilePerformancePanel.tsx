@@ -464,6 +464,10 @@ export default function MobilePerformancePanel({ portfolioLastSync = null, marke
 
   const coreCards = useMemo(() => (view ? buildCoreCards(view) : []), [view]);
   const advancedCards = useMemo(() => (view ? buildAdvancedCards(view) : []), [view]);
+  const advancedGatedCount = useMemo(
+    () => advancedCards.filter((card) => card.value === EMPTY).length,
+    [advancedCards],
+  );
   const allCards = useMemo(() => [...coreCards, ...advancedCards], [coreCards, advancedCards]);
   const activeCard = useMemo(() => allCards.find((c) => c.id === activeCardId) ?? null, [activeCardId, allCards]);
 
@@ -570,7 +574,7 @@ export default function MobilePerformancePanel({ portfolioLastSync = null, marke
                 color: "var(--text-muted)",
               }}
             >
-              <div>Time-weighted, end-of-day flow convention, chained geometrically</div>
+              <div>Time-weighted, beginning-of-day flow convention, chained geometrically</div>
               <div style={{ marginTop: 4 }}>NAV as of {view.navAsOf || EMPTY}</div>
             </div>
           </div>
@@ -725,9 +729,11 @@ export default function MobilePerformancePanel({ portfolioLastSync = null, marke
             <span className="pill neutral" style={{ fontSize: 9, marginLeft: 4 }} data-testid="mobile-advanced-count">
               {advancedOpen ? "OPEN" : "COLLAPSED"}
             </span>
-            <span className="pill neutral" style={{ fontSize: 9 }}>
-              GATED
-            </span>
+            {advancedGatedCount > 0 ? (
+              <span className="pill neutral" style={{ fontSize: 9 }}>
+                {advancedGatedCount} OF {advancedCards.length} GATED
+              </span>
+            ) : null}
           </span>
           <ChevronDown
             size={14}
@@ -893,7 +899,7 @@ export default function MobilePerformancePanel({ portfolioLastSync = null, marke
                   color: "var(--text-muted)",
                 }}
               >
-                Time-weighted return, end-of-day flow convention, chained geometrically. External capital is removed
+                Time-weighted return, beginning-of-day flow convention, chained geometrically. External capital is removed
                 from return; fees and borrow are returns, not flows. Volatility and ratios scale by{" "}
                 {TWR_GATES.TRADING_DAYS} sessions; annualization uses an Act/{TWR_GATES.DAYS_PER_YEAR} day count.
               </div>
