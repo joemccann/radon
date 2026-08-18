@@ -241,7 +241,7 @@ export default function EquiblesShortCrowdingPanel() {
       </div>
 
       <div className="section">
-        <div className="table-scroll">
+        <div className="table-wrap">
           <ShortCrowdingTable entries={entries} />
         </div>
 

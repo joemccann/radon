@@ -128,7 +128,7 @@ export default function LeapScanner({
             action={onScan ? { label: "Run scan", onClick: onScan } : undefined}
           />
         ) : (
-          <div className="table-scroll">
+          <div className="table-wrap">
             <table className="data-table">
               <thead>
                 <tr>

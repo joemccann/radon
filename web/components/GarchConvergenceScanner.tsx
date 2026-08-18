@@ -236,7 +236,7 @@ export default function GarchConvergenceScanner({
             testId="garch-scanner-filter-empty"
           />
         ) : (
-          <div className="table-scroll garch-scanner__table-wrap">
+          <div className="table-wrap garch-scanner__table-wrap">
             <table className="data-table garch-scanner__table">
               <thead>
                 <tr>
