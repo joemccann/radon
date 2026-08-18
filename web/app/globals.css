@@ -10597,6 +10597,60 @@ tr {
   }
 }
 
+/* VOL CONE selected-name analysis */
+.vol-cone-analysis .vol-cone-analysis-metrics {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  background: var(--border-dim);
+}
+
+.vol-cone-analysis .vol-cone-analysis-metrics .regime-strip {
+  grid-column: 1 / -1;
+}
+
+.vol-cone-analysis .vol-cone-analysis-metrics--stack {
+  grid-template-columns: 1fr;
+  gap: 1px;
+  border-bottom: 1px solid var(--border-dim);
+}
+
+.vol-cone-analysis .vol-cone-analysis-metrics--stack > div {
+  background: var(--bg-panel);
+}
+
+.vol-cone-analysis-trade {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: max(32px, var(--hit-min));
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--signal-core) 34%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--signal-core) 9%, transparent);
+  color: var(--signal-core-text);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-decoration: none;
+}
+
+.vol-cone-analysis-trade:hover {
+  border-color: color-mix(in srgb, var(--signal-core) 55%, transparent);
+  background: color-mix(in srgb, var(--signal-core) 14%, transparent);
+}
+
+body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
+  grid-template-columns: 1fr;
+}
+
+@media (max-width: 640px) {
+  .vol-cone-analysis .vol-cone-analysis-metrics {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Badge */
 .regime-badge {
   font-family: var(--font-mono);

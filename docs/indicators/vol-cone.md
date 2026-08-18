@@ -245,7 +245,9 @@ Hook `web/lib/useVolCone.ts`: `useSyncHook` GET `/api/vol-cone`, hourly,
 `hasPost: false`, timestamp `scan_time`.
 
 Helpers `web/lib/volCone.ts`: types, `formatIvPct`, `formatPercentile`,
-`volConeRegimeColor`, `isHit`, `buildVolConeChartRows`.
+`volConeRegimeColor`, `isHit`, `buildVolConeChartRows`, `listedIncrement`,
+`snapListedStrike`, `expectedMove`, `recommendVolConeTrade`,
+`volConeOrderHref`, `buildVolConeAnalysis`.
 
 ## UI
 
@@ -258,6 +260,19 @@ Helpers `web/lib/volCone.ts`: types, `formatIvPct`, `formatPercentile`,
   (`source_as_of`)
 - Table of `names` (filter chips ALL / HITS): ticker, expiry, DTE, ATM,
   10C, 10P, ATM %, WING, regime. Click selects the cone.
+- Ticker cell is a next/link to `volConeOrderHref` when the row is
+  `CHEAP_WINGS` (long 10% OTM strangle, put then call) or `CHEAP_ATM`
+  (long ATM straddle, call then put). RICH / NEUTRAL stay plain text.
+  Link `stopPropagation` so row click still selects without navigating.
+- Analysis panel (`data-testid="vol-cone-analysis"`) for the selected
+  name (default current/best): structure, 1-sigma expected move, cone
+  gap, snapped wings, thesis. Thesis is cheap insurance versus this
+  expiry cone; long wings or ATM only; not a stock call; not a
+  dark-pool edge. `OPEN TRADE` uses the same href. Mobile stacks the
+  metric grid.
+- Deep link: `/{TICKER}?deck=c&expiry=YYYY-MM-DD&strikes=100&src=vol-cone&legs=BUY:1xKP,BUY:1xKC`.
+  Chain reads `src=vol-cone` and labels the builder `PREFILLED FROM VOL CONE`;
+  any other src keeps `PREFILLED FROM THETA HARVESTER`.
 - Chart: dedicated `VolConeChart` (CriHistoryChart is two-series only).
   ATM + 10% OTM call + 10% OTM put lines and a p10-p90 band. Title
   `{TICKER} {expiry} 90/10 VOL CONE`.
@@ -292,7 +307,8 @@ Create: `scripts/fetch_vol_cone.py`, `scripts/db/migrations/0047_vol_cone.sql`,
 `web/app/api/vol-cone/route.ts`, `web/lib/volCone.ts`, `web/lib/useVolCone.ts`,
 `web/components/VolConePanel.tsx`, `web/components/VolConeChart.tsx`,
 `web/app/regime/vol-cone/page.tsx` (redirect), `web/tests/vol-cone-api.test.ts`,
-`web/tests/vol-cone-panel.test.tsx`, `web/e2e/vol-cone-tab.spec.ts`,
+`web/tests/vol-cone-panel.test.tsx`, `web/tests/vol-cone-analysis.test.ts`,
+`web/e2e/vol-cone-tab.spec.ts`,
 `cloud/services/radon-vol-cone.{service,timer}`.
 
 Modify: `scripts/db/writer.py` (`upsert_vol_cone_rows`),

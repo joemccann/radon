@@ -1,3 +1,27 @@
+# Task: Vol Cone operator analysis + chain prefill (2026-08-17)
+
+## Dependency graph
+
+- T1 depends_on: [] - Red: helper + panel + src-label + e2e tests
+- T2 depends_on: [T1] - Pure helpers in web/lib/volCone.ts
+- T3 depends_on: [T2] - VolConePanel analysis + ticker trade links
+- T4 depends_on: [T3] - OptionsChainTab PREFILLED FROM VOL CONE when src=vol-cone
+- T5 depends_on: [T2, T3, T4] - Green focused vitest + Playwright vol-cone tab
+
+## Checklist
+
+- [x] T1 Failing tests only
+- [x] T2 Helpers
+- [x] T3 Panel
+- [x] T4 Prefill label
+- [x] T5 Verify
+
+## Review
+
+Helpers snap listed strikes and emit `src=vol-cone` long-strangle/straddle hrefs. Panel analysis defaults to current/best; ticker + OPEN TRADE deep-link when recommended. Chain `src=vol-cone` labels PREFILLED FROM VOL CONE. Focused vitest 44 (analysis/panel/deeplink/contract). Playwright 6/6 (vol-cone-tab 5 + theta-harvester-prefill 1). Typecheck clean.
+
+---
+
 # Task: Sortable product tables (2026-08-17)
 
 ## Dependency graph

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type Ref } from "react";
+import { useSearchParams } from "next/navigation";
 import type { PriceData, OptionContract } from "@/lib/pricesProtocol";
 import { optionKey, normalizeOptionExpiry } from "@/lib/pricesProtocol";
 import type { PortfolioData, PortfolioPosition } from "@/lib/types";
@@ -872,6 +873,7 @@ export default function OptionsChainTab({
   // Filter state is deep-linked into the URL (?expiry=&side=&strikes=) — seed
   // from the URL on mount, write back on change. See useChainUrlState.
   const chainUrl = useChainUrlState();
+  const searchParams = useSearchParams();
   const [strikesPerSide, setStrikesPerSide] = useState(() => chainUrl.initialStrikes);
   const [sideFilter, setSideFilter] = useState<SideFilter>(() => chainUrl.initialSide);
   const { isMobile, hasMounted } = useViewport();
@@ -971,9 +973,13 @@ export default function OptionsChainTab({
     }));
 
     setOrderLegs(nextLegs);
-    setPrefillLabel("PREFILLED FROM THETA HARVESTER");
+    setPrefillLabel(
+      searchParams?.get("src") === "vol-cone"
+        ? "PREFILLED FROM VOL CONE"
+        : "PREFILLED FROM THETA HARVESTER",
+    );
     appliedLegsParamRef.current = signature;
-  }, [ticker, selectedExpiry, chainUrl.legsParamRaw, chainUrl.urlExpiry, chainUrl.urlLegs]);
+  }, [ticker, selectedExpiry, chainUrl.legsParamRaw, chainUrl.urlExpiry, chainUrl.urlLegs, searchParams]);
 
   useEffect(() => {
     if (!prefillLabel || orderLegs.length === 0) return;
