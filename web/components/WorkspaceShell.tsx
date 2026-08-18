@@ -10,6 +10,7 @@ import { resolveSectionFromPath } from "@/lib/chat";
 import { usePortfolio } from "@/lib/usePortfolio";
 import { useOrders } from "@/lib/useOrders";
 import { useMarketHours, MarketState } from "@/lib/useMarketHours";
+import { useAutoSyncOnStale } from "@/lib/useAutoSyncOnStale";
 import { useToast } from "@/lib/useToast";
 import { useOrderActions } from "@/lib/OrderActionsContext";
 import { usePrices } from "@/lib/usePrices";
@@ -482,6 +483,10 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
     const ageMs = Date.now() - new Date(lastSync).getTime();
     return Math.max(1, Math.floor(ageMs / 60_000));
   }, [lastSync]);
+
+  // A render that surfaces a stale snapshot triggers the producer sync
+  // itself — the stale pill's Sync button remains the manual fallback.
+  useAutoSyncOnStale(isStale, syncNow, syncTarget, !isDemoMode);
 
   // Sections that render live marks from the prices map. Scanner/discover (and
   // other non-price modules) must not receive a new `prices` identity on every
