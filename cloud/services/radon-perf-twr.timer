@@ -1,11 +1,19 @@
 [Unit]
-Description=Radon TWR performance builder - weekday evening, after Flex settles
+Description=Radon TWR performance builder - morning after, once Flex has finalized the session
 
 [Timer]
-# 20:45 ET on trading days. IBKR Flex settles the session's NAV and cash
-# transactions T+1 through the evening; a mid-session run publishes a NAV that
-# is one session behind and turns the page amber for no reason.
-OnCalendar=Mon..Fri *-*-* 20:45:00 America/New_York
+# 07:30 ET the MORNING AFTER each trading session.
+#
+# This was Mon..Fri 20:45 ET on the theory that Flex settles the session's NAV
+# through the evening. It does not settle that early. Measured 2026-08-17: a
+# live Flex pull at 20:57 ET Monday still returned NAV through Friday 08-14,
+# and a statement generated Sunday 08-16 came back with toDate="20260814".
+# IBKR serves through its last FINALIZED statement date, so an evening run can
+# only ever republish the previous session and the page never advances.
+#
+# Tue..Sat covers all five sessions: Tuesday picks up Monday, Saturday picks up
+# Friday and carries the correct NAV across the weekend.
+OnCalendar=Tue..Sat *-*-* 07:30:00 America/New_York
 Persistent=true
 RandomizedDelaySec=300
 
