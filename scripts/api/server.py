@@ -4025,15 +4025,40 @@ async def performance_sync():
     return await _running_build
 
 
+# Floor between on-demand rebuilds. Every rebuild attempts an IBKR Flex fetch,
+# and the endpoint previously guarded only against a CONCURRENT build -- so each
+# page load that found a stale snapshot fired another one, roughly every 15
+# minutes all day. IBKR answered with code 1025 ("Too many failed attempts"), a
+# lockout earned by repeated failures, which took out /performance AND
+# cash-flow-sync since they share the one token. radon-perf-twr.timer owns the
+# schedule now (Tue..Sat 07:30 ET); this path is a fallback and needs a floor.
+PERFORMANCE_BACKGROUND_COOLDOWN_S = 20 * 60
+
+_last_background_build_at: Optional[float] = None
+
+
 @app.post("/performance/background", status_code=202)
 async def performance_background():
     """Fire-and-forget performance rebuild. Returns 202 immediately.
 
-    If a build is already in-flight, returns already_running (no duplicate).
+    Refuses a duplicate while one is in flight, and refuses a fresh Flex fetch
+    inside the cooldown window.
     """
-    global _running_build
+    global _running_build, _last_background_build_at
     if _running_build is not None and not _running_build.done():
         return {"status": "already_running"}
+
+    now = time.monotonic()
+    if (
+        _last_background_build_at is not None
+        and now - _last_background_build_at < PERFORMANCE_BACKGROUND_COOLDOWN_S
+    ):
+        retry_in = int(
+            PERFORMANCE_BACKGROUND_COOLDOWN_S - (now - _last_background_build_at)
+        )
+        return {"status": "cooldown", "retry_in_seconds": retry_in}
+
+    _last_background_build_at = now
     _running_build = asyncio.create_task(_do_performance_rebuild())
     return {"status": "accepted"}
 
