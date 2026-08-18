@@ -135,6 +135,53 @@ test.describe("/scanner?mode=vol-cone — cheap 10% OTM wing IV scanner", () => 
     await expect(table).toContainText("NVDA");
   });
 
+  test("shows NVDA CHEAP_WINGS analysis and opens the snapped strangle on the chain", async ({ page }) => {
+    await setupMocks(page);
+    await page.route("**/api/options/expirations**", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ symbol: "NVDA", expirations: ["20260918"] }),
+      }),
+    );
+    await page.route("**/api/options/chain**", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ symbol: "NVDA", expiry: "20260918", strikes: [200, 225, 245] }),
+      }),
+    );
+    await page.route("**/api/ticker/info**", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ stock_state: {}, uw_info: {}, profile: {}, stats: {} }),
+      }),
+    );
+
+    await page.goto("/scanner?mode=vol-cone");
+
+    const analysis = page.locator('[data-testid="vol-cone-analysis"]');
+    await expect(analysis).toBeVisible({ timeout: 10_000 });
+    await expect(analysis).toContainText("LONG 10% OTM STRANGLE");
+    await expect(analysis).toContainText("$27");
+    await expect(analysis).toContainText("12%");
+    await expect(analysis.getByRole("link", { name: /open trade/i })).toBeVisible();
+
+    const tickerLink = page.getByTestId("vol-cone-row-NVDA-2026-09-18").getByRole("link");
+    await expect(tickerLink).toHaveAttribute("aria-label", /open/i);
+    await expect(tickerLink).toHaveAttribute("aria-label", /strangle/i);
+    await tickerLink.click();
+
+    await expect(page).toHaveURL(/\/NVDA\?/);
+    const params = new URL(page.url()).searchParams;
+    expect(params.get("deck")).toBe("c");
+    expect(params.get("expiry")).toBe("2026-09-18");
+    expect(params.get("strikes")).toBe("100");
+    expect(params.get("src")).toBe("vol-cone");
+    expect(params.get("legs")).toBe("BUY:1x200P,BUY:1x245C");
+  });
+
   test("shows the empty state on missing:true without a 4xx", async ({ page }) => {
     await setupMocks(page, {
       missing: true,

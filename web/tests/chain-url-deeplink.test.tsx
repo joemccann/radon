@@ -194,4 +194,25 @@ describe("Options chain URL deep-link", () => {
     const sellButtons = within(builder as HTMLElement).getAllByRole("button", { name: "SELL" });
     expect(sellButtons.length).toBe(2);
   });
+
+  it("labels vol-cone prefills as PREFILLED FROM VOL CONE", async () => {
+    searchParamsString = `deck=c&expiry=${NEAR_EXPIRY.dashed}&strikes=100&legs=BUY:1x950P,BUY:1x970C&src=vol-cone`;
+    renderChain();
+
+    await screen.findByText("PREFILLED FROM VOL CONE");
+    expect(screen.queryByText("PREFILLED FROM THETA HARVESTER")).toBeNull();
+    const builder = document.querySelector(".order-builder");
+    expect(builder).not.toBeNull();
+    expect(builder!.textContent).toContain("ORDER BUILDER : Long Strangle");
+    expect(builder!.textContent).toContain("1x $950 Put");
+    expect(builder!.textContent).toContain("1x $970 Call");
+  });
+
+  it("keeps the theta prefill label when src is absent even for long-vol BUY legs", async () => {
+    searchParamsString = `deck=c&expiry=${NEAR_EXPIRY.dashed}&strikes=100&legs=BUY:1x950P,BUY:1x970C`;
+    renderChain();
+
+    await screen.findByText("PREFILLED FROM THETA HARVESTER");
+    expect(screen.queryByText("PREFILLED FROM VOL CONE")).toBeNull();
+  });
 });

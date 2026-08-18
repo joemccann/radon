@@ -9,7 +9,7 @@
  * Spec: docs/indicators/vol-cone.md.
  */
 import React from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
@@ -100,6 +100,12 @@ beforeAll(() => {
 const mockUseVolCone = vi.fn();
 vi.mock("@/lib/useVolCone", () => ({
   useVolCone: (...args: unknown[]) => mockUseVolCone(...args),
+}));
+
+vi.mock("next/link", () => ({
+  default: ({ href, children, ...props }: { href: string; children: React.ReactNode }) => (
+    <a href={href} {...props}>{children}</a>
+  ),
 }));
 
 import VolConePanel from "../components/VolConePanel";
@@ -274,5 +280,76 @@ describe("VolConePanel — strip + table + chart", () => {
     for (const path of document.querySelectorAll("path")) {
       expect(path.getAttribute("d") ?? "").not.toContain("NaN");
     }
+  });
+});
+
+const HEX_LITERAL = /#[0-9a-fA-F]{3,8}\b/;
+const EM_DASH = /\u2014/;
+
+function tradeHref(raw: string | null): URL {
+  expect(raw).toBeTruthy();
+  return new URL(raw!, "http://localhost");
+}
+
+describe("VolConePanel — selected-name analysis + trade links", () => {
+  it("renders operator analysis for the selected CHEAP_WINGS name", () => {
+    renderPanel(hookState({ data: buildData() }));
+
+    const analysis = screen.getByTestId("vol-cone-analysis");
+    expect(analysis.textContent).toContain("LONG 10% OTM STRANGLE");
+    expect(analysis.textContent).toMatch(/\$27/);
+    expect(analysis.textContent).toMatch(/12%/);
+    expect(analysis.textContent).toMatch(/cheap insurance/i);
+    expect(analysis.textContent).toMatch(/cone/i);
+    expect(analysis.textContent ?? "").not.toMatch(EM_DASH);
+
+    const openTrade = within(analysis).getByRole("link", { name: /open trade/i });
+    const href = tradeHref(openTrade.getAttribute("href"));
+    expect(href.pathname).toBe("/NVDA");
+    expect(href.searchParams.get("deck")).toBe("c");
+    expect(href.searchParams.get("expiry")).toBe("2026-09-18");
+    expect(href.searchParams.get("strikes")).toBe("100");
+    expect(href.searchParams.get("src")).toBe("vol-cone");
+    expect(href.searchParams.get("legs")).toBe("BUY:1x200P,BUY:1x245C");
+  });
+
+  it("makes the ticker cell a trade link only when a structure is recommended", () => {
+    renderPanel(hookState({ data: buildData() }));
+
+    const nvdaRow = screen.getByTestId("vol-cone-row-NVDA-2026-09-18");
+    const nvdaLink = within(nvdaRow).getByRole("link");
+    const nvdaLabel = nvdaLink.getAttribute("aria-label") ?? "";
+    expect(nvdaLabel).toMatch(/open/i);
+    expect(nvdaLabel).toMatch(/strangle/i);
+    expect(tradeHref(nvdaLink.getAttribute("href")).searchParams.get("src")).toBe("vol-cone");
+    expect(nvdaRow.querySelector("td")?.querySelector("a")).toBe(nvdaLink);
+
+    const smhRow = screen.getByTestId("vol-cone-row-SMH-2026-09-18");
+    expect(within(smhRow).queryByRole("link")).toBeNull();
+  });
+
+  it("selects a row from a non-link cell so the ticker link is not required", () => {
+    renderPanel(hookState({ data: buildData() }));
+
+    const smhRow = screen.getByTestId("vol-cone-row-SMH-2026-09-18");
+    fireEvent.click(within(smhRow).getByText("37"));
+
+    expect(screen.getByText("SMH 2026-09-18 90/10 VOL CONE")).toBeTruthy();
+    const analysis = screen.getByTestId("vol-cone-analysis");
+    expect(analysis.textContent).toContain("NO TRADE");
+    expect(analysis.textContent).toMatch(/NEUTRAL|cone/i);
+    expect(within(analysis).queryByRole("link", { name: /open trade/i })).toBeNull();
+
+    const nvdaRow = screen.getByTestId("vol-cone-row-NVDA-2026-09-18");
+    fireEvent.click(within(nvdaRow).getByText("37"));
+    expect(screen.getByText("NVDA 2026-09-18 90/10 VOL CONE")).toBeTruthy();
+    expect(within(screen.getByTestId("vol-cone-analysis")).getByRole("link", { name: /open trade/i })).toBeTruthy();
+  });
+
+  it("uses brand tokens and no em dashes in the analysis surface", () => {
+    const { container } = renderPanel(hookState({ data: buildData() }));
+    const analysis = screen.getByTestId("vol-cone-analysis");
+    expect(analysis.innerHTML).not.toMatch(HEX_LITERAL);
+    expect(container.textContent ?? "").not.toMatch(EM_DASH);
   });
 });

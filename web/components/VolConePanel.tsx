@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type MouseEvent } from "react";
+import Link from "next/link";
 import { Cone } from "lucide-react";
 import BrushMinimap from "./BrushMinimap";
 import HistoryRangeChips from "./HistoryRangeChips";
@@ -20,12 +21,15 @@ import {
 import { useVolCone } from "@/lib/useVolCone";
 import { useViewport } from "@/lib/useViewport";
 import {
+  buildVolConeAnalysis,
   buildVolConeChartRows,
   formatIvPct,
   formatMonthlyExpiry,
   formatPercentile,
   formatVolConeRegime,
+  volConeOrderHref,
   volConeRegimeColor,
+  volConeTradeAriaLabel,
   type VolConeName,
 } from "@/lib/volCone";
 
@@ -67,6 +71,35 @@ function regimeTone(regime: VolConeName["regime"]): "pos" | "warn" | "neg" | "mu
 
 function finiteBrushValue(value: number | null | undefined): number {
   return value != null && Number.isFinite(value) ? value : 0;
+}
+
+function formatWingStrikes(put: number | null, call: number | null): string {
+  if (put == null || call == null) return "---";
+  return `${put} / ${call}`;
+}
+
+function formatWingSigma(sigma: number | null): string {
+  if (sigma == null || !Number.isFinite(sigma)) return "---";
+  return `${sigma.toFixed(2)}σ`;
+}
+
+function expressLine(analysis: {
+  href: string | null;
+  wingStrikes: { put: number | null; call: number | null };
+  structureLabel: string;
+}): string {
+  const { put, call } = analysis.wingStrikes;
+  if (analysis.href && put != null && call != null) {
+    if (analysis.structureLabel.includes("STRANGLE")) {
+      return `Buy the listed ${put} put and ${call} call. Debit is max loss.`;
+    }
+    return `Buy the listed ${call} call and ${put} put. Debit is max loss.`;
+  }
+  return "No long-vol structure on this print.";
+}
+
+function stopRowSelect(event: MouseEvent) {
+  event.stopPropagation();
 }
 
 export default function VolConePanel() {
@@ -121,6 +154,7 @@ export default function VolConePanel() {
   const chartTitle = `${selected?.ticker ?? current.ticker} ${selected?.expiry ?? current.expiry} 90/10 VOL CONE`;
   const regimeLabel = formatVolConeRegime(current.regime);
   const regimeColor = volConeRegimeColor(current.regime);
+  const analysis = selected ? buildVolConeAnalysis(selected) : null;
 
   return (
     <>
@@ -235,6 +269,8 @@ export default function VolConePanel() {
                 {sortedNames.map((name) => {
                   const key = nameKey(name);
                   const active = key === nameKey(selected ?? current);
+                  const href = volConeOrderHref(name);
+                  const tradeLabel = volConeTradeAriaLabel(name);
                   return (
                     <tr
                       key={key}
@@ -252,7 +288,20 @@ export default function VolConePanel() {
                           : undefined,
                       }}
                     >
-                      <td>{name.ticker}</td>
+                      <td>
+                        {href && tradeLabel ? (
+                          <Link
+                            href={href}
+                            className="ticker-link"
+                            aria-label={tradeLabel}
+                            onClick={stopRowSelect}
+                          >
+                            {name.ticker}
+                          </Link>
+                        ) : (
+                          name.ticker
+                        )}
+                      </td>
                       <td>{formatMonthlyExpiry(name.expiry)}</td>
                       <td className="right">{name.dte}</td>
                       <td className="right">{formatIvPct(name.atm_iv) === "---" ? "---" : `${formatIvPct(name.atm_iv)}%`}</td>
@@ -271,6 +320,106 @@ export default function VolConePanel() {
           </div>
         </div>
       </div>
+
+      {analysis && selected && (
+        <div className="section vol-cone-analysis" data-testid="vol-cone-analysis">
+          <div className="section-header">
+            <div className="section-title">
+              {selected.ticker} {selected.expiry}
+              <span style={{ color: volConeRegimeColor(analysis.regime) }}>
+                {analysis.structureLabel}
+              </span>
+            </div>
+            {analysis.href && (
+              <Link href={analysis.href} className="vol-cone-analysis-trade">
+                OPEN TRADE
+              </Link>
+            )}
+          </div>
+          {compact ? (
+            <div className="vol-cone-analysis-metrics vol-cone-analysis-metrics--stack">
+              <MetricCell label="1-SIGMA" value={analysis.expectedMoveDollars} />
+              <MetricCell label="MOVE" value={analysis.expectedMovePct} />
+              <MetricCell label="BAND" value={analysis.expectedMoveRange} />
+              <MetricCell label="CONE GAP" value={analysis.coneGapLabel} />
+              <MetricCell
+                label="WINGS"
+                value={formatWingStrikes(analysis.wingStrikes.put, analysis.wingStrikes.call)}
+              />
+              <MetricCell label="WING σ" value={formatWingSigma(analysis.wingsSigma)} />
+            </div>
+          ) : (
+            <div className="vol-cone-analysis-metrics">
+              <RegimeStrip>
+                <RegimeStripCell
+                  testId="vol-cone-analysis-move"
+                  label="1-SIGMA"
+                  value={analysis.expectedMoveDollars}
+                  sub={<>ATM IV x SQRT(DTE/365)</>}
+                />
+                <RegimeStripCell
+                  testId="vol-cone-analysis-move-pct"
+                  label="MOVE"
+                  value={analysis.expectedMovePct}
+                  sub={<>ONE SIGMA</>}
+                />
+                <RegimeStripCell
+                  testId="vol-cone-analysis-band"
+                  label="BAND"
+                  value={analysis.expectedMoveRange}
+                  sub={<>SPOT +/- 1-SIGMA</>}
+                />
+                <RegimeStripCell
+                  testId="vol-cone-analysis-gap"
+                  label="CONE GAP"
+                  value={analysis.coneGapLabel}
+                  sub={<>P10 MINUS ATM</>}
+                />
+                <RegimeStripCell
+                  testId="vol-cone-analysis-wings"
+                  label="WINGS"
+                  value={formatWingStrikes(analysis.wingStrikes.put, analysis.wingStrikes.call)}
+                  sub={<>LISTED 10% OTM</>}
+                />
+                <RegimeStripCell
+                  testId="vol-cone-analysis-sigma"
+                  label="WING σ"
+                  value={formatWingSigma(analysis.wingsSigma)}
+                  sub={<>10% MOVE / 1-SIGMA</>}
+                />
+              </RegimeStrip>
+            </div>
+          )}
+          <div className="section-body">
+            <div className="table-scroll">
+              <table className="data-table" data-sortable-exempt="chrome">
+                <tbody>
+                  <tr>
+                    <td>THESIS</td>
+                    <td>{analysis.thesis}</td>
+                  </tr>
+                  <tr>
+                    <td>EXPRESS</td>
+                    <td>{expressLine(analysis)}</td>
+                  </tr>
+                  <tr>
+                    <td>WINS IF</td>
+                    <td>{analysis.winsIf}</td>
+                  </tr>
+                  <tr>
+                    <td>DIES IF</td>
+                    <td>{analysis.diesIf}</td>
+                  </tr>
+                  <tr>
+                    <td>NOT EDGE</td>
+                    <td>{analysis.notEdge}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="breadth-history-block" data-testid="vol-cone-chart-section">
         <HistoryRangeChips
