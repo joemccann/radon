@@ -13,7 +13,9 @@ Sources (UWClient methods):
 
 Every event becomes a catalyst row:
 
-    {ticker, type, title, date, source, days_until, event_time?}
+    {ticker, type, title, date, source, days_until, event_time?,
+     forecast?, prev?, actual?, reported_period?,
+     street_mean_est?, actual_eps?, expected_move_perc?}
 
 ``date`` is an ISO ``YYYY-MM-DD`` calendar day (ET). ``days_until`` is the
 whole-day distance from "now" (negative = past; past events are dropped by
@@ -32,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
@@ -61,6 +64,19 @@ EARNINGS_LOOKAHEAD_SESSIONS = 5
 EARNINGS_PAGE_LIMIT = 100
 EARNINGS_MAX_PAGES = 3
 FDA_LOOKAHEAD_DAYS = 365
+FRED_OBSERVATIONS_URL = "https://api.stlouisfed.org/fred/series/observations"
+
+# UW economic titles -> FRED series for post-release actual overlay.
+# Only series whose latest observation is the same figure UW forecasts.
+# PAYEMS is the payroll *level*, not the NFP change. USSLIND ended in 2020.
+_FRED_TITLE_SERIES: tuple[tuple[str, str], ...] = (
+    ("weekly jobless claims", "ICSA"),
+    ("initial jobless claims", "ICSA"),
+    ("philadelphia fed business outlook survey", "GACDFSA066MSFRBPHI"),
+    ("us unemployment rate", "UNRATE"),
+    ("unemployment rate", "UNRATE"),
+)
+_FRED_STALE_AFTER_DAYS = 45
 
 _CATALYSTS_TABLE_DDL = """
 CREATE TABLE IF NOT EXISTS catalysts (
@@ -200,6 +216,8 @@ def _normalize_earnings(payload: Any, source: str, today: date) -> list[dict[str
                 "source": source,
                 "days_until": _days_until(event_day, today),
                 "expected_move_perc": raw.get("expected_move_perc"),
+                "street_mean_est": raw.get("street_mean_est"),
+                "actual_eps": raw.get("actual_eps"),
             }
         )
     return rows
@@ -250,8 +268,201 @@ def _normalize_economic(payload: Any, today: date) -> list[dict[str, Any]]:
                 "days_until": _days_until(event_day, today),
                 "forecast": raw.get("forecast"),
                 "prev": raw.get("prev"),
+                "actual": raw.get("actual"),
+                "reported_period": raw.get("reported_period"),
             }
         )
+    return rows
+
+
+def _normalize_event_title(title: str) -> str:
+    text = (title or "").lower().replace(".", "")
+    chars = [ch if ch.isalnum() else " " for ch in text]
+    return " ".join("".join(chars).split())
+
+
+def _fred_series_for_title(title: str) -> Optional[str]:
+    normalized = _normalize_event_title(title)
+    if not normalized:
+        return None
+    for alias, series_id in _FRED_TITLE_SERIES:
+        if alias in normalized:
+            return series_id
+    return None
+
+
+def _is_blank_actual(value: Any) -> bool:
+    return value is None or (isinstance(value, str) and not value.strip())
+
+
+def _canonical_print_number(value: Any) -> Optional[float]:
+    """Normalize a print figure so 209000, 209k, and 4.1% compare equal."""
+    if value is None or value == "" or value == ".":
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        if value != value or value in (float("inf"), float("-inf")):
+            return None
+        return float(value)
+    text = str(value).strip().replace(",", "").replace("%", "")
+    if not text:
+        return None
+    multiplier = 1.0
+    if text[-1] in ("K", "k"):
+        multiplier = 1_000.0
+        text = text[:-1]
+    elif text[-1] in ("M", "m"):
+        multiplier = 1_000_000.0
+        text = text[:-1]
+    try:
+        parsed = float(text)
+    except ValueError:
+        return None
+    if parsed != parsed or parsed in (float("inf"), float("-inf")):
+        return None
+    return parsed * multiplier
+
+
+def _coerce_numeric(value: Any) -> Any:
+    if value is None or value == "" or value == ".":
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        if value != value or value in (float("inf"), float("-inf")):
+            return None
+        return value
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed != parsed or parsed in (float("inf"), float("-inf")):
+        return None
+    return parsed
+
+
+def _observation_pair(payload: Any) -> tuple[Optional[str], Any]:
+    if isinstance(payload, dict):
+        latest_date = ""
+        latest: Any = None
+        for date_key, raw in payload.items():
+            numeric = _coerce_numeric(raw)
+            if numeric is None:
+                continue
+            stamp = str(date_key)
+            if stamp >= latest_date:
+                latest_date = stamp
+                latest = numeric
+        return (latest_date or None, latest)
+    return (None, _coerce_numeric(payload))
+
+
+def _observation_is_stale(obs_date: Optional[str], event_time: Any) -> bool:
+    if not obs_date:
+        return False
+    try:
+        observed = date.fromisoformat(str(obs_date)[:10])
+    except ValueError:
+        return False
+    event_day = _parse_day(event_time)
+    if event_day is None:
+        return False
+    return (event_day - observed).days > _FRED_STALE_AFTER_DAYS
+
+
+def _event_is_released(row: dict[str, Any], now: datetime) -> bool:
+    stamp = row.get("event_time")
+    if not stamp:
+        return False
+    try:
+        parsed = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return False
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    return parsed <= now.astimezone(timezone.utc)
+
+
+def _fetch_fred_latest_observation(series_id: str) -> Any:
+    """Return the latest numeric FRED observation for *series_id*.
+
+    Does not touch the DGS3MO disk cache. Missing key or HTTP errors raise
+    so ``apply_fred_actuals`` can swallow them per row/series.
+    """
+    key = os.environ.get("FRED_API_KEY") or os.environ.get("FRED_KEY")
+    if not key:
+        raise RuntimeError("FRED_API_KEY not set")
+    import requests
+
+    resp = requests.get(
+        FRED_OBSERVATIONS_URL,
+        params={
+            "series_id": series_id,
+            "api_key": key,
+            "file_type": "json",
+            "sort_order": "desc",
+            "limit": 12,
+        },
+        timeout=30,
+    )
+    resp.raise_for_status()
+    latest_date = ""
+    latest: Any = None
+    for obs in resp.json().get("observations") or []:
+        if not isinstance(obs, dict):
+            continue
+        numeric = _coerce_numeric(obs.get("value"))
+        if numeric is None:
+            continue
+        stamp = str(obs.get("date") or "")
+        if stamp >= latest_date:
+            latest_date = stamp
+            latest = numeric
+    if latest is None or not latest_date:
+        return None
+    return {latest_date: latest}
+
+
+def apply_fred_actuals(
+    rows: list[dict[str, Any]],
+    fetch_obs,
+    now: datetime,
+) -> list[dict[str, Any]]:
+    """Fill empty economic ``actual`` from FRED after ``event_time``.
+
+    Best-effort: fetch failures leave ``actual`` empty. Series responses are
+    cached in-memory for this call so a run hits each series at most once.
+    Only released, mapped, empty-actual rows trigger a fetch.
+    """
+    cache: dict[str, Any] = {}
+    for row in rows:
+        if row.get("type") != TYPE_ECONOMIC:
+            continue
+        if not _is_blank_actual(row.get("actual")):
+            continue
+        if not _event_is_released(row, now):
+            continue
+        series_id = _fred_series_for_title(str(row.get("title") or ""))
+        if not series_id:
+            continue
+        if series_id not in cache:
+            try:
+                cache[series_id] = fetch_obs(series_id)
+            except Exception:
+                cache[series_id] = None
+        obs_date, value = _observation_pair(cache[series_id])
+        if value is None:
+            continue
+        if _observation_is_stale(obs_date, row.get("event_time") or row.get("date")):
+            continue
+        if _canonical_print_number(value) == _canonical_print_number(row.get("prev")):
+            continue
+        row["actual"] = value
     return rows
 
 
@@ -270,11 +481,13 @@ def fetch_catalysts(
     *,
     now: Optional[datetime] = None,
     include_past: bool = False,
+    fred_fetch: Optional[Any] = None,
 ) -> list[dict[str, Any]]:
     """Aggregate + normalise all catalyst sources into sorted catalyst rows.
 
     Past events (``days_until < 0``) are excluded unless ``include_past``.
     Sorted by ``days_until`` ascending so the nearest catalyst is first.
+    Released economic rows with an empty actual get a best-effort FRED overlay.
     """
     now = now or datetime.now(timezone.utc)
     today = _et_today(now)
@@ -308,6 +521,8 @@ def fetch_catalysts(
 
     if not include_past:
         rows = [r for r in rows if r["days_until"] >= 0]
+
+    apply_fred_actuals(rows, fred_fetch or _fetch_fred_latest_observation, now)
 
     rows.sort(key=lambda r: (r["days_until"], r["type"], r["ticker"] or ""))
     return rows

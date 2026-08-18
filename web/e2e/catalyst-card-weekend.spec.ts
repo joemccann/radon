@@ -147,9 +147,7 @@ async function installMockWebSocket(page: Page) {
 }
 
 function catalystCard(page: Page) {
-  return page.locator("section.snapshot-card", {
-    has: page.getByRole("heading", { name: /upcoming catalysts/i }),
-  });
+  return page.locator("section.catalyst-quadrant");
 }
 
 test("Sunday: past events absent, future event visible without a TODAY badge", async ({ page }) => {
@@ -171,8 +169,9 @@ test("Sunday: past events absent, future event visible without a TODAY badge", a
   await expect(card.getByText("LINDSAY")).toHaveCount(0);
   await expect(card.getByText("Factory orders")).toHaveCount(0);
 
-  // Tuesday event is 2 ET calendar days out — never TODAY on a closed Sunday.
-  await expect(card.getByText("2d", { exact: true })).toBeVisible();
+  // Tuesday event shows its calendar date, never a relative-only 2d/TODAY badge.
+  await expect(card.getByText("7 Jul", { exact: true })).toBeVisible();
+  await expect(card.getByText("2d", { exact: true })).toHaveCount(0);
   await expect(card.getByText("Today", { exact: true })).toHaveCount(0);
 });
 
@@ -192,12 +191,14 @@ test("Sunday: all-past fossil snapshot renders the empty state", async ({ page }
   await expect(card.getByText("Today", { exact: true })).toHaveCount(0);
 });
 
-test("trading day: elapsed exact-time events disappear while later events remain", async ({ page }, testInfo) => {
+test("trading day: elapsed same-day print stays visible before 20:00 ET", async ({ page }, testInfo) => {
   await page.clock.install({ time: new Date("2026-08-07T21:59:00Z") });
   await installMockWebSocket(page);
   await stubApis(page, [
     catalystRow("2026-08-07", "U.S. employment report", {
       event_time: "2026-08-07T12:30:00Z",
+      forecast: "118000",
+      prev: "172000",
     }),
     catalystRow("2026-08-07", "Evening Fed speaker", {
       event_time: "2026-08-07T22:30:00Z",
@@ -207,8 +208,52 @@ test("trading day: elapsed exact-time events disappear while later events remain
   await page.goto("/");
 
   const card = catalystCard(page);
+  await expect(card.getByText("U.S. employment report")).toBeVisible();
   await expect(card.getByText("Evening Fed speaker")).toBeVisible();
-  await expect(card.getByText("U.S. employment report")).toHaveCount(0);
-  await expect(card.getByText("Today", { exact: true })).toBeVisible();
+  await expect(card.getByText("F 118k  P 172k")).toBeVisible();
+  await expect(card.getByText("7 Aug 08:30 ET", { exact: true })).toBeVisible();
+  await expect(card.getByText("Today", { exact: true })).toHaveCount(0);
   await card.screenshot({ path: testInfo.outputPath("catalyst-exact-time.png") });
+});
+
+test("mixed-day economic rows show calendar dates and F/P or A", async ({ page }, testInfo) => {
+  await page.clock.install({ time: new Date("2026-08-18T15:00:00Z") });
+  await installMockWebSocket(page);
+  await stubApis(page, [
+    catalystRow("2026-08-18", "Pending Home Sales Idx, M/M%", {
+      event_time: "2026-08-18T14:00:00Z",
+      forecast: "0%",
+      prev: "-5.4%",
+      actual: "1.2%",
+    }),
+    catalystRow("2026-08-19", "Federal Open Market Committee meeting minutes published", {
+      event_time: "2026-08-19T18:00:00Z",
+    }),
+    catalystRow("2026-08-20", "Weekly Jobless Claims", {
+      event_time: "2026-08-20T12:30:00Z",
+      forecast: "205000",
+      prev: "209000",
+    }),
+    catalystRow("2026-08-21", "US Flash Services PMI", {
+      event_time: "2026-08-21T13:45:00Z",
+      forecast: "53.8",
+      prev: "53.6",
+    }),
+  ]);
+
+  await page.goto("/");
+
+  const card = catalystCard(page);
+  await expect(card.getByText("18 Aug 10:00 ET")).toBeVisible();
+  await expect(card.getByText("19 Aug 14:00 ET")).toBeVisible();
+  await expect(card.getByText("20 Aug 08:30 ET")).toBeVisible();
+  await expect(card.getByText("21 Aug 09:45 ET")).toBeVisible();
+  await expect(card.getByText("A 1.2%  F 0%")).toBeVisible();
+  await expect(card.getByText("F 205k  P 209k")).toBeVisible();
+  await expect(card.getByText("F 53.8  P 53.6")).toBeVisible();
+  await card.screenshot({ path: testInfo.outputPath("catalyst-mixed-day.png") });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(card.getByText("18 Aug 10:00 ET")).toBeVisible();
+  await card.screenshot({ path: testInfo.outputPath("catalyst-mixed-day-mobile.png") });
 });

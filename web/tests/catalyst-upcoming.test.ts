@@ -8,7 +8,7 @@
  *  - stored days_until is advisory only — always recomputed from `date`
  *  - a row dated a closed "today" (weekend/holiday) is provider noise and is
  *    remapped to its next trading session, never 0 ("Today")
- *  - same-day events age out after the extended session ends (20:00 ET)
+ *  - same-day events stay after event_time until 20:00 ET, then age out
  *  - date-only strings never day-shift west of UTC (formatTradeDate hazard)
  *
  * All `now` instants are explicit UTC — no wall-clock dependence on the host.
@@ -92,17 +92,24 @@ describe("upcomingCatalysts", () => {
     expect(upcomingCatalysts([row("2026-07-10", 0)], FRIDAY_LATE_EVENING)).toEqual([]);
   });
 
-  it("drops elapsed same-day events at their exact time while retaining later events", () => {
+  it("keeps an 08:30 ET print at 17:59 ET the same day so the actual can render", () => {
     const friday1759Et = new Date("2026-08-07T21:59:00Z");
     const kept = upcomingCatalysts(
-      [
-        row("2026-08-07", 0, "Employment report", "2026-08-07T12:30:00Z"),
-        row("2026-08-07", 0, "Evening speaker", "2026-08-07T22:30:00Z"),
-      ],
+      [row("2026-08-07", 0, "Employment report", "2026-08-07T12:30:00Z")],
       friday1759Et,
     );
+    expect(kept).toHaveLength(1);
+    expect(kept[0].title).toBe("Employment report");
+  });
 
-    expect(kept.map((item) => item.title)).toEqual(["Evening speaker"]);
+  it("drops same-day rows after 20:00 ET even if they already printed", () => {
+    const friday2100Et = new Date("2026-08-08T01:00:00Z");
+    expect(
+      upcomingCatalysts(
+        [row("2026-08-07", 0, "Employment report", "2026-08-07T12:30:00Z")],
+        friday2100Et,
+      ),
+    ).toEqual([]);
   });
 
   it("keeps future events late Friday evening with ET-correct distance (west-of-UTC)", () => {

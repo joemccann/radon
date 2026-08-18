@@ -51,7 +51,8 @@ def _make_client() -> MagicMock:
     client.get_economic_calendar.return_value = {
         "data": [
             {"event": "PCE index", "time": "2026-06-26T13:30:00Z",
-             "type": "report", "forecast": "0.2%", "prev": "0.1%"},
+             "type": "report", "forecast": "0.2%", "prev": "0.1%",
+             "reported_period": "May"},
         ]
     }
     return client
@@ -218,3 +219,172 @@ def test_run_writes_cache(monkeypatch, tmp_path):
     assert "rows" in writes, "expected DB cache write to be called"
     assert writes["rows"] == result["catalysts"]
     assert (tmp_path / "catalysts.json").exists()
+
+
+def test_economic_row_carries_forecast_prev_reported_period():
+    client = _make_client()
+    rows = fc.fetch_catalysts(client=client, now=FIXED_NOW)
+    econ = next(r for r in rows if r["type"] == "economic")
+    assert econ["forecast"] == "0.2%"
+    assert econ["prev"] == "0.1%"
+    assert econ["reported_period"] == "May"
+    assert econ["actual"] is None
+
+
+def test_economic_row_persists_uw_actual_when_present():
+    client = _make_client()
+    client.get_economic_calendar.return_value = {
+        "data": [
+            {"event": "PCE index", "time": "2026-06-26T13:30:00Z",
+             "type": "report", "forecast": "0.2%", "prev": "0.1%",
+             "reported_period": "May", "actual": "0.3%"},
+        ]
+    }
+    rows = fc.fetch_catalysts(client=client, now=FIXED_NOW)
+    econ = next(r for r in rows if r["type"] == "economic")
+    assert econ["actual"] == "0.3%"
+    assert econ["forecast"] == "0.2%"
+    assert econ["prev"] == "0.1%"
+    assert econ["reported_period"] == "May"
+
+
+def test_earnings_row_persists_street_mean_est_and_actual_eps():
+    client = _make_client()
+    client.get_earnings_premarket.return_value = {
+        "data": [
+            {"symbol": "AAPL", "full_name": "APPLE INC", "report_date": "2026-06-23",
+             "report_time": "premarket", "expected_move_perc": "0.045",
+             "street_mean_est": 1.52, "actual_eps": 1.61},
+        ]
+    }
+    rows = fc.fetch_catalysts(client=client, now=FIXED_NOW)
+    aapl = next(r for r in rows if r["ticker"] == "AAPL")
+    assert aapl["street_mean_est"] == 1.52
+    assert aapl["actual_eps"] == 1.61
+    assert aapl["expected_move_perc"] == "0.045"
+
+
+def _econ_row(*, title: str, event_time: str, actual=None, **extra) -> dict:
+    day = event_time[:10]
+    row = {
+        "ticker": None,
+        "type": "economic",
+        "title": title,
+        "date": day,
+        "source": "economic",
+        "days_until": 0,
+        "event_time": event_time,
+        "forecast": "220K",
+        "prev": "218K",
+        "actual": actual,
+        "reported_period": "Jun 13",
+    }
+    row.update(extra)
+    return row
+
+
+def test_apply_fred_actuals_fills_icsa_for_released_jobless_claims():
+    released = _econ_row(
+        title="Weekly Jobless Claims",
+        event_time="2026-06-18T12:30:00Z",
+    )
+    future = _econ_row(
+        title="Weekly Jobless Claims",
+        event_time="2026-06-25T12:30:00Z",
+    )
+    calls: list[str] = []
+
+    def fetch_obs(series_id: str):
+        calls.append(series_id)
+        return 235000
+
+    out = fc.apply_fred_actuals([released, future], fetch_obs, FIXED_NOW)
+    assert out[0]["actual"] == 235000
+    assert out[1]["actual"] is None
+    assert calls == ["ICSA"]
+
+
+def test_employment_report_is_not_mapped_to_payems():
+    released = _econ_row(
+        title="U.S. employment report",
+        event_time="2026-06-18T12:30:00Z",
+        forecast="118000",
+        prev="172000",
+    )
+    calls: list[str] = []
+
+    def fetch_obs(series_id: str):
+        calls.append(series_id)
+        return 158858
+
+    out = fc.apply_fred_actuals([released], fetch_obs, FIXED_NOW)
+    assert out[0]["actual"] is None
+    assert calls == []
+
+
+def test_leading_indicators_is_not_mapped_to_usslind():
+    released = _econ_row(
+        title="Leading Indicators",
+        event_time="2026-06-18T14:00:00Z",
+        forecast="0%",
+        prev="-0.2%",
+    )
+    calls: list[str] = []
+
+    def fetch_obs(series_id: str):
+        calls.append(series_id)
+        return {"2020-02-01": 1.72}
+
+    out = fc.apply_fred_actuals([released], fetch_obs, FIXED_NOW)
+    assert out[0]["actual"] is None
+    assert calls == []
+
+
+def test_apply_fred_actuals_skips_when_value_matches_prev():
+    released = _econ_row(
+        title="Weekly Jobless Claims",
+        event_time="2026-06-18T12:30:00Z",
+        prev="209000",
+    )
+
+    def fetch_obs(series_id: str):
+        return {"2026-06-13": 209000}
+
+    out = fc.apply_fred_actuals([released], fetch_obs, FIXED_NOW)
+    assert out[0]["actual"] is None
+
+
+def test_apply_fred_actuals_skips_stale_observation():
+    released = _econ_row(
+        title="Weekly Jobless Claims",
+        event_time="2026-06-18T12:30:00Z",
+        prev="218000",
+    )
+
+    def fetch_obs(series_id: str):
+        return {"2020-02-01": 235000}
+
+    out = fc.apply_fred_actuals([released], fetch_obs, FIXED_NOW)
+    assert out[0]["actual"] is None
+
+
+def test_apply_fred_actuals_swallows_overlay_failure():
+    released = _econ_row(
+        title="Weekly Jobless Claims",
+        event_time="2026-06-18T12:30:00Z",
+    )
+    other = _econ_row(
+        title="PCE index",
+        event_time="2026-06-18T12:30:00Z",
+        forecast="0.2%",
+        prev="0.1%",
+        reported_period="May",
+    )
+    other_snapshot = dict(other)
+
+    def boom(_series_id: str):
+        raise RuntimeError("FRED 500")
+
+    out = fc.apply_fred_actuals([released, other], boom, FIXED_NOW)
+    assert out[0]["actual"] is None
+    assert out[1] == other_snapshot

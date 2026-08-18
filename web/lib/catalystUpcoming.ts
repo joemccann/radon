@@ -9,10 +9,10 @@
  * day at render time.
  *
  * Semantics (operator-specified):
- *  - "Upcoming" means now-or-future only. Past events never survive.
- *  - Rows with an exact `event_time` expire immediately after that instant.
- *  - A same-day event ages out once the extended session has ended (20:00 ET)
- *    — no market event can still occur today after that.
+ *  - "Upcoming" means now-or-future only. Past calendar days never survive.
+ *  - Same-ET-day rows stay until 20:00 ET even after `event_time`, so a
+ *    released print can still render on the dashboard card.
+ *  - A same-day event ages out once the extended session has ended (20:00 ET).
  *  - Events do not occur on closed market days. A row dated a weekend/holiday
  *    "today" is provider noise and is remapped to its next trading session
  *    (per the market-calendar SoT), so it can never badge "Today".
@@ -80,10 +80,6 @@ export function upcomingCatalysts<T extends DatedCatalyst>(rows: T[], now: Date 
   for (const row of rows) {
     const recomputed = daysUntilEt(row.date, now);
     if (!Number.isFinite(recomputed) || recomputed < 0) continue;
-    if (row.event_time) {
-      const eventMs = Date.parse(row.event_time);
-      if (Number.isFinite(eventMs) && eventMs < now.getTime()) continue;
-    }
     if (recomputed === 0) {
       if (todayIsTradingDay && extendedSessionOver) continue;
       if (!todayIsTradingDay) {

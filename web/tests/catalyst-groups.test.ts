@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   groupCatalystsByCategory,
   catalystKindLabel,
+  catalystPrintLabel,
   catalystWhenLabel,
 } from "../lib/catalystGroups";
 import type { CatalystRow } from "../lib/useCatalysts";
@@ -85,14 +86,61 @@ describe("catalystKindLabel", () => {
 });
 
 describe("catalystWhenLabel", () => {
-  it("prefers an exact event time rendered in ET", () => {
+  it("renders calendar date plus ET time when event_time parses", () => {
     expect(
       catalystWhenLabel(row({ event_time: "2026-08-04T14:00:00Z", days_until: 0 })),
-    ).toBe("10:00 ET");
+    ).toBe("4 Aug 10:00 ET");
   });
 
-  it("falls back to the days-until badge label", () => {
-    expect(catalystWhenLabel(row({ days_until: 0 }))).toBe("Today");
-    expect(catalystWhenLabel(row({ days_until: 4 }))).toBe("4d");
+  it("renders calendar date only when event_time is missing", () => {
+    expect(catalystWhenLabel(row({ date: "2026-08-04", days_until: 0 }))).toBe("4 Aug");
+    expect(catalystWhenLabel(row({ date: "2026-08-07", days_until: 3 }))).toBe("7 Aug");
+  });
+});
+
+describe("catalystPrintLabel", () => {
+  it("compacts large economic prints as A/F after actual", () => {
+    expect(
+      catalystPrintLabel(row({ type: "economic", actual: 221000, forecast: "221000" })),
+    ).toBe("A 221k  F 221k");
+  });
+
+  it("uses F/P when economic actual is missing", () => {
+    expect(
+      catalystPrintLabel(row({ type: "economic", forecast: "221000", prev: "215000" })),
+    ).toBe("F 221k  P 215k");
+  });
+
+  it("keeps percents and small decimals", () => {
+    expect(
+      catalystPrintLabel(row({ type: "economic", forecast: "1.1%", prev: "0.3%" })),
+    ).toBe("F 1.1%  P 0.3%");
+    expect(
+      catalystPrintLabel(
+        row({
+          type: "earnings",
+          ticker: "AAPL",
+          title: "AAPL earnings",
+          street_mean_est: 1.52,
+          actual_eps: 1.61,
+        }),
+      ),
+    ).toBe("A 1.61  F 1.52");
+  });
+
+  it("uses F only for unreported earnings", () => {
+    expect(
+      catalystPrintLabel(
+        row({ type: "earnings", ticker: "AAPL", title: "AAPL earnings", street_mean_est: 1.52 }),
+      ),
+    ).toBe("F 1.52");
+  });
+
+  it("omits missing parts and passes already-short strings", () => {
+    expect(catalystPrintLabel(row({ type: "economic", actual: "0.3%" }))).toBe("A 0.3%");
+    expect(
+      catalystPrintLabel(row({ type: "economic", forecast: "220K", prev: "218K" })),
+    ).toBe("F 220K  P 218K");
+    expect(catalystPrintLabel(row({ type: "fda", ticker: "ABOS", title: "PDUFA" }))).toBe("");
   });
 });

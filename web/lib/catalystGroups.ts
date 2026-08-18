@@ -1,5 +1,4 @@
 import type { CatalystRow, CatalystType } from "./useCatalysts";
-import { catalystBadge } from "./catalystBadge";
 import { upcomingCatalysts } from "./catalystUpcoming";
 
 /** A catalyst row tagged with whether its ticker is currently held. */
@@ -84,18 +83,77 @@ export function catalystKindLabel(type: CatalystType): string {
   return KIND_LABEL[type] ?? String(type).toUpperCase();
 }
 
+function isBlankPrint(value: unknown): boolean {
+  return value == null || (typeof value === "string" && value.trim() === "");
+}
+
+function trimCompactNumber(value: number): string {
+  return String(Number(value.toFixed(1)));
+}
+
+/** Compact a print figure: 221000 -> 221k. Percents and short strings pass through. */
+function compactCatalystPrint(value: string | number): string {
+  const raw = String(value).trim();
+  if (!raw) return "";
+  if (raw.includes("%")) return raw;
+  const numeric = Number(raw.replace(/,/g, ""));
+  if (!Number.isFinite(numeric)) return raw;
+  const abs = Math.abs(numeric);
+  if (abs >= 1_000_000) return `${trimCompactNumber(numeric / 1_000_000)}m`;
+  if (abs >= 1_000) return `${trimCompactNumber(numeric / 1_000)}k`;
+  return raw;
+}
+
+function printPart(prefix: string, value: unknown): string {
+  if (isBlankPrint(value)) return "";
+  const compact = compactCatalystPrint(value as string | number);
+  return compact ? `${prefix} ${compact}` : "";
+}
+
+function joinPrintParts(parts: string[]): string {
+  return parts.filter(Boolean).join("  ");
+}
+
+export function catalystPrintLabel(row: CatalystRow): string {
+  if (row.type === "economic") {
+    if (!isBlankPrint(row.actual)) {
+      return joinPrintParts([printPart("A", row.actual), printPart("F", row.forecast)]);
+    }
+    return joinPrintParts([printPart("F", row.forecast), printPart("P", row.prev)]);
+  }
+  if (row.type === "earnings") {
+    if (!isBlankPrint(row.actual_eps)) {
+      return joinPrintParts([printPart("A", row.actual_eps), printPart("F", row.street_mean_est)]);
+    }
+    return joinPrintParts([printPart("F", row.street_mean_est)]);
+  }
+  return "";
+}
+
+function catalystCalendarDateLabel(isoDate: string): string {
+  const [year, month, day] = isoDate.slice(0, 10).split("-").map(Number);
+  if (!year || !month || !day) return "";
+  return new Date(Date.UTC(year, month - 1, day, 12)).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+  });
+}
+
 export function catalystWhenLabel(row: CatalystRow): string {
+  const dateLabel = catalystCalendarDateLabel(row.date);
   if (row.event_time) {
     const ms = Date.parse(row.event_time);
     if (Number.isFinite(ms)) {
-      const time = new Date(ms).toLocaleTimeString("en-US", {
+      const time = new Date(ms).toLocaleTimeString("en-GB", {
         hour: "2-digit",
         minute: "2-digit",
         hour12: false,
+        hourCycle: "h23",
         timeZone: "America/New_York",
       });
-      return `${time} ET`;
+      return dateLabel ? `${dateLabel} ${time} ET` : `${time} ET`;
     }
   }
-  return catalystBadge(row.days_until).label;
+  return dateLabel;
 }
