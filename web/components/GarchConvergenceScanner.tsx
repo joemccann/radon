@@ -220,7 +220,7 @@ export default function GarchConvergenceScanner({
           <SectionEmptyState
             icon={GitCompareArrows}
             headline="No GARCH scan on file"
-            secondary="Run a scan, or wait for the scheduled indexes-universe refresh (radon-garch.timer, trading days)."
+            secondary="Run a scan, or wait for the scheduled large-cap universe refresh (radon-garch.timer, trading days)."
             action={onScan ? { label: "Run scan", onClick: onScan } : undefined}
           />
         ) : sorted.length === 0 ? (

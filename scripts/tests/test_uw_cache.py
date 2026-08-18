@@ -147,6 +147,18 @@ def test_prune_caps_file_count_oldest_first(cache_dir: Path) -> None:
     assert [p.exists() for p in paths] == [False, False, True, True, True]
 
 
+def test_cap_outlives_one_preset_scan_cluster() -> None:
+    """The cap must exceed what the scanners write in a single window.
+
+    garch, leap, theta-harvester and strength-confirmation all fire inside
+    the same two minutes over overlapping ndx100 / indexes universes, at
+    3-5 UW paths per ticker — roughly 2000 distinct keys. A cap below that
+    evicts the first scanner's entries before the next scanner can reuse
+    them, so every scanner re-fetches the same OHLC and contracts from UW.
+    """
+    assert uw_cache.MAX_DISK_FILES >= 2000
+
+
 def test_set_disk_cached_enforces_the_cap(cache_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(uw_cache, "MAX_DISK_FILES", 2)
     for i, endpoint in enumerate(("stock/A/info", "stock/B/info", "stock/C/info")):

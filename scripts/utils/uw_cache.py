@@ -85,7 +85,10 @@ def _disk_path(key: str) -> Path:
 # behind forever and the VPS root fs fills silently. Expired/corrupt entries
 # are unlinked on read; every write sweeps anything older than the longest
 # endpoint-class TTL and caps the file count oldest-first.
-MAX_DISK_FILES = 512
+# Must clear one scan window's distinct keys (see test_uw_cache.py): the
+# 14:00 UTC scanner cluster alone writes ~2000, and a smaller cap made each
+# scanner evict the one before it and re-fetch the same paths from UW.
+MAX_DISK_FILES = 3000
 _MAX_TTL_SECONDS = max(
     TTL_OHLC_IV_GEX_CONTRACTS, TTL_STOCK_INFO, TTL_FLOW_ALERTS, TTL_DEFAULT
 )

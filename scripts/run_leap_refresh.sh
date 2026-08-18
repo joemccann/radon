@@ -14,7 +14,7 @@
 # Configuration via environment:
 #
 #   RADON_PYTHON_BIN                python interpreter
-#   RADON_LEAP_REFRESH_PRESET       UW preset (default: indexes)
+#   RADON_LEAP_REFRESH_PRESET       UW preset (default: largecaps)
 #   RADON_LEAP_REFRESH_MIN_GAP      HV-IV gap threshold (default: 10)
 #   RADON_LEAP_REFRESH_FASTAPI_PORT FastAPI port (default 8321)
 #   RADON_LEAP_REFRESH_FASTAPI_HOST FastAPI host (default 127.0.0.1)
@@ -96,7 +96,7 @@ if [ "$IS_TRADING" = "no" ]; then
     exit 0
 fi
 
-PRESET="${RADON_LEAP_REFRESH_PRESET:-indexes}"
+PRESET="${RADON_LEAP_REFRESH_PRESET:-largecaps}"
 MIN_GAP="${RADON_LEAP_REFRESH_MIN_GAP:-10}"
 FASTAPI_HOST="${RADON_LEAP_REFRESH_FASTAPI_HOST:-127.0.0.1}"
 FASTAPI_PORT="${RADON_LEAP_REFRESH_FASTAPI_PORT:-8321}"

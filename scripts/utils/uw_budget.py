@@ -3,15 +3,22 @@
 Quota day is America/New_York and resets at 20:00 ET (same as fetch_skew).
 NDX / preset universe scans refuse after 50% of the 40000 daily cap.
 Per-ticker and explicit ticker scans are not blocked.
+
+Every hit is tallied by caller and by endpoint class, and the spent day is
+archived on rollover: a bare total answers "how much is left" but never
+"who spent it", which is the only question worth asking at 85% used.
 """
 
 from __future__ import annotations
 
 import fcntl
 import json
+import os
+import re
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 from zoneinfo import ZoneInfo
 
 ET = ZoneInfo("America/New_York")
@@ -20,6 +27,14 @@ UNIVERSE_BLOCK_AT = 20_000
 RESET_HOUR_ET = 20
 
 BUDGET_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "uw_budget.json"
+
+# Overrides the argv-derived caller label for wrappers that shell out.
+CALLER_ENV = "RADON_UW_CALLER"
+# Tally width. A runaway scan must not grow the budget file without bound.
+MAX_TRACKED_KEYS = 200
+TOP_N = 15
+HISTORY_DAYS = 90
+_TICKER_SEGMENT = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
 
 
 def quota_date(now: Optional[datetime] = None) -> str:
@@ -38,6 +53,81 @@ def _path(path: Optional[Path | str] = None) -> Path:
     return Path(path) if path is not None else BUDGET_PATH
 
 
+def _history_path(target: Path) -> Path:
+    return target.with_name(target.stem + "_history.jsonl")
+
+
+def caller_label(caller: Optional[str] = None) -> str:
+    """Who is spending: explicit label, else $RADON_UW_CALLER, else argv[0]."""
+    for candidate in (caller, os.environ.get(CALLER_ENV)):
+        name = (candidate or "").strip()
+        if name:
+            return name[:64]
+    argv0 = sys.argv[0] if sys.argv else ""
+    stem = Path(argv0).stem if argv0 else ""
+    return (stem or "unknown")[:64]
+
+
+def endpoint_class(endpoint: Optional[str]) -> str:
+    """Collapse ticker segments so per-ticker paths tally as one endpoint."""
+    parts = [part for part in str(endpoint or "").strip("/").split("/") if part]
+    if not parts:
+        return "unknown"
+    collapsed = ("<T>" if _TICKER_SEGMENT.match(part) else part for part in parts)
+    return "/".join(collapsed)[:96]
+
+
+def _tally(state: dict, key: str) -> Dict[str, int]:
+    raw = state.get(key)
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        str(name): int(hits)
+        for name, hits in raw.items()
+        if isinstance(hits, int) and not isinstance(hits, bool) and hits > 0
+    }
+
+
+def _bump(tally: Dict[str, int], key: str, hits: int) -> Dict[str, int]:
+    tally[key] = tally.get(key, 0) + hits
+    if len(tally) <= MAX_TRACKED_KEYS:
+        return tally
+    ranked = sorted(tally.items(), key=lambda item: item[1], reverse=True)
+    return dict(ranked[:MAX_TRACKED_KEYS])
+
+
+def _ranked(tally: Dict[str, int]) -> list[dict]:
+    ranked = sorted(tally.items(), key=lambda item: (-item[1], item[0]))
+    return [{"name": name, "hits": hits} for name, hits in ranked[:TOP_N]]
+
+
+def _archive_unlocked(path: Path, state: dict) -> None:
+    """Append the spent quota day so its breakdown outlives the reset."""
+    if not state.get("date") or not state.get("count"):
+        return
+    history = _history_path(path)
+    try:
+        previous = [
+            line for line in history.read_text().splitlines() if line.strip()
+        ]
+    except OSError:
+        previous = []
+    previous.append(json.dumps(_payload(state)))
+    try:
+        history.write_text("\n".join(previous[-HISTORY_DAYS:]) + "\n")
+    except OSError:
+        pass
+
+
+def _payload(state: dict) -> dict:
+    return {
+        "date": state["date"],
+        "count": int(state["count"]),
+        "by_caller": state.get("by_caller") or {},
+        "by_endpoint": state.get("by_endpoint") or {},
+    }
+
+
 def _read_unlocked(path: Path) -> dict:
     try:
         raw = json.loads(path.read_text())
@@ -49,7 +139,7 @@ def _read_unlocked(path: Path) -> dict:
 def _write_unlocked(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps({"date": payload["date"], "count": int(payload["count"])}, indent=2))
+    tmp.write_text(json.dumps(_payload(payload), indent=2))
     tmp.replace(path)
 
 
@@ -60,13 +150,24 @@ def _with_lock(path: Path):
     return open(lock_path, "a+")
 
 
-def record_hit(path: Optional[Path | str] = None, now: Optional[datetime] = None) -> int:
-    """Increment today's HTTP hit count and persist ``{date, count}``."""
-    return record_hits(1, path=path, now=now)
+def record_hit(
+    path: Optional[Path | str] = None,
+    now: Optional[datetime] = None,
+    *,
+    caller: Optional[str] = None,
+    endpoint: Optional[str] = None,
+) -> int:
+    """Increment today's HTTP hit count and persist the attributed totals."""
+    return record_hits(1, path=path, now=now, caller=caller, endpoint=endpoint)
 
 
 def record_hits(
-    hits: int, path: Optional[Path | str] = None, now: Optional[datetime] = None
+    hits: int,
+    path: Optional[Path | str] = None,
+    now: Optional[datetime] = None,
+    *,
+    caller: Optional[str] = None,
+    endpoint: Optional[str] = None,
 ) -> int:
     """Increment today's HTTP hit count by ``hits`` under one flock write.
 
@@ -76,18 +177,31 @@ def record_hits(
     """
     target = _path(path)
     day = quota_date(now)
+    who = caller_label(caller)
+    what = endpoint_class(endpoint)
     with _with_lock(target) as lock:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
         try:
             state = _read_unlocked(target)
             if state.get("date") != day:
-                count = hits
+                _archive_unlocked(target, state)
+                count, by_caller, by_endpoint = hits, {}, {}
             else:
                 try:
                     count = int(state.get("count") or 0) + hits
                 except (TypeError, ValueError):
                     count = hits
-            _write_unlocked(target, {"date": day, "count": count})
+                by_caller = _tally(state, "by_caller")
+                by_endpoint = _tally(state, "by_endpoint")
+            _write_unlocked(
+                target,
+                {
+                    "date": day,
+                    "count": count,
+                    "by_caller": _bump(by_caller, who, hits),
+                    "by_endpoint": _bump(by_endpoint, what, hits),
+                },
+            )
             return count
         finally:
             fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
@@ -117,6 +231,8 @@ def usage_snapshot(
     path: Optional[Path | str] = None, now: Optional[datetime] = None
 ) -> dict:
     """Operator-facing GET /uw/usage payload."""
+    state = _read_unlocked(_path(path))
+    current = state.get("date") == quota_date(now)
     hits = used(path=path, now=now)
     return {
         "used": hits,
@@ -125,4 +241,6 @@ def usage_snapshot(
         "reset_et": f"{RESET_HOUR_ET:02d}:00",
         "quota_day": quota_date(now),
         "universe_scans_blocked": hits >= UNIVERSE_BLOCK_AT,
+        "top_callers": _ranked(_tally(state, "by_caller")) if current else [],
+        "top_endpoints": _ranked(_tally(state, "by_endpoint")) if current else [],
     }

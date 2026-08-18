@@ -25,9 +25,17 @@ from typing import List, Tuple, Dict, Optional
 
 
 PRESETS_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "presets"
-INDEX_UNIVERSE_PARTS = ['ndx100', 'sp500', 'r2k']
+
+# Unions assembled from the file presets at load time — no committed .json.
+# `largecaps` is what the unattended scans run: dropping the Russell 2000 leg
+# takes a scheduled scan from ~2500 tickers to ~600, and at 3 UW requests per
+# ticker that is the difference between fitting the daily cap and spending it.
+VIRTUAL_UNIONS = {
+    "indexes": (["ndx100", "sp500", "r2k"], "Nasdaq-100 + S&P 500 + Russell 2000"),
+    "largecaps": (["ndx100", "sp500"], "Nasdaq-100 + S&P 500"),
+}
 INDEX_UNIVERSE_NAME = "indexes"
-INDEX_UNIVERSE_DESCRIPTION = "Nasdaq-100 + S&P 500 + Russell 2000"
+LARGE_CAP_UNIVERSE_NAME = "largecaps"
 
 
 @dataclass
@@ -116,12 +124,15 @@ def list_presets() -> List[Tuple[str, str, int]]:
         except (json.JSONDecodeError, KeyError):
             continue
 
-    if not any(name == INDEX_UNIVERSE_NAME for name, _, _ in results):
+    file_backed = {name for name, _, _ in results}
+    for union in VIRTUAL_UNIONS:
+        if union in file_backed:
+            continue
         try:
-            idx = load_preset(INDEX_UNIVERSE_NAME)
-            results.append((idx.name, idx.description, idx.ticker_count))
+            preset = load_preset(union)
         except (FileNotFoundError, ValueError):
-            pass
+            continue
+        results.append((preset.name, preset.description, preset.ticker_count))
 
     results.sort(key=lambda row: row[0])
     return results
@@ -151,16 +162,17 @@ def _resolve_preset_path(name: str) -> Path:
     return candidate
 
 
-def _load_index_universe() -> Preset:
-    """Virtual union of Nasdaq-100 + S&P 500 + Russell 2000 file presets."""
-    parts = [load_preset(part) for part in INDEX_UNIVERSE_PARTS]
+def _load_virtual_union(name: str) -> Preset:
+    """Assemble one VIRTUAL_UNIONS entry from its file-backed parts."""
+    slugs, description = VIRTUAL_UNIONS[name]
+    parts = [load_preset(slug) for slug in slugs]
     return Preset(
-        name=INDEX_UNIVERSE_NAME,
-        description=INDEX_UNIVERSE_DESCRIPTION,
+        name=name,
+        description=description,
         tickers=_unique_tickers(*(part.tickers for part in parts)),
         pairs=_unique_pairs(*(part.pairs for part in parts)),
         vol_driver="GICS/sector-curated index pairs",
-        source="virtual union of ndx100, sp500, r2k",
+        source=f"virtual union of {', '.join(slugs)}",
     )
 
 
@@ -170,7 +182,8 @@ def load_preset(name: str) -> Preset:
 
     Args:
         name: Preset name (e.g., "sp500-semis"). ".json" extension optional.
-              `indexes` is a virtual union of ndx100 + sp500 + r2k.
+              `indexes` (ndx100 + sp500 + r2k) and `largecaps` (ndx100 +
+              sp500) are virtual unions of the file presets.
 
     Returns:
         Preset dataclass instance.
@@ -183,8 +196,8 @@ def load_preset(name: str) -> Preset:
     name = name.replace(".json", "")
 
     filepath = _resolve_preset_path(name)
-    if name == INDEX_UNIVERSE_NAME:
-        return _load_index_universe()
+    if name in VIRTUAL_UNIONS:
+        return _load_virtual_union(name)
     if not filepath.exists():
         available = [f.stem for f in PRESETS_DIR.glob("*.json")]
         raise FileNotFoundError(

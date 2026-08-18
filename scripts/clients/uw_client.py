@@ -88,6 +88,11 @@ _RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 # Same marker as scripts/fetch_skew.py — daily cap 429s must not be retried.
 _UW_DAILY_LIMIT_MARKER = "daily request limit"
 
+# Every attempt spends one request from the same daily cap, so a throttled
+# fetch retried the full ladder costs 4 hits instead of 1 — burning the quota
+# fastest exactly when UW is already saying slow down. 5xx keeps the ladder.
+_MAX_RATE_LIMIT_RETRIES = 1
+
 # Default configuration
 _DEFAULT_BASE_URL = "https://api.unusualwhales.com/api"
 _DEFAULT_TIMEOUT = 30
@@ -184,6 +189,7 @@ class UWClient:
                 return disk
 
         last_exc: Optional[Exception] = None
+        rate_limited = 0
 
         for attempt in range(1 + self._max_retries):
             try:
@@ -196,7 +202,7 @@ class UWClient:
                 raise UWAPIError(f"Connection failed after {attempt + 1} attempts: {exc}") from exc
 
             try:
-                record_hit()
+                record_hit(endpoint=endpoint)
             except Exception:
                 logger.debug("uw budget record_hit failed", exc_info=True)
 
@@ -216,6 +222,9 @@ class UWClient:
             if status == 429:
                 exc = UWRateLimitError(msg, status_code=status, response_body=body)
                 if _UW_DAILY_LIMIT_MARKER in msg.lower():
+                    raise exc
+                rate_limited += 1
+                if rate_limited > _MAX_RATE_LIMIT_RETRIES:
                     raise exc
             elif status in (401, 403):
                 raise UWAuthError(msg, status_code=status, response_body=body)

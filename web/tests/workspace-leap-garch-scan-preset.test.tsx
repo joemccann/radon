@@ -74,7 +74,7 @@ vi.mock("@/lib/useLeap", () => ({
       scan_time: "2026-08-13T14:00:00Z",
       min_gap: 10,
       results: [],
-      universe: "preset:indexes",
+      universe: "preset:largecaps",
     },
     loading: false,
     syncing: false,
@@ -90,7 +90,7 @@ vi.mock("@/lib/useGarchConvergence", () => ({
       scan_time: "2026-08-13T14:00:00Z",
       tickers: {},
       pairs: [],
-      universe: "preset:indexes",
+      universe: "preset:largecaps",
     },
     loading: false,
     syncing: false,
@@ -139,7 +139,7 @@ function postedBody(url: string): unknown {
 }
 
 describe("WorkspaceSections SCAN default preset", () => {
-  it("posts {preset: indexes} for LEAP when no custom tickers", async () => {
+  it("posts {preset: largecaps} for LEAP when no custom tickers", async () => {
     searchParamsMock.mockReturnValue(new URLSearchParams("mode=leap"));
     render(<WorkspaceSections section="scanner" />);
 
@@ -147,11 +147,11 @@ describe("WorkspaceSections SCAN default preset", () => {
     fireEvent.click(within(section).getByRole("button", { name: "SCAN" }));
 
     await waitFor(() => {
-      expect(postedBody("/api/leap/scan")).toEqual({ preset: "indexes" });
+      expect(postedBody("/api/leap/scan")).toEqual({ preset: "largecaps" });
     });
   });
 
-  it("posts {preset: indexes} for GARCH when no custom tickers", async () => {
+  it("posts {preset: largecaps} for GARCH when no custom tickers", async () => {
     searchParamsMock.mockReturnValue(new URLSearchParams("mode=garch"));
     render(<WorkspaceSections section="scanner" />);
 
@@ -159,7 +159,7 @@ describe("WorkspaceSections SCAN default preset", () => {
     fireEvent.click(within(section).getByRole("button", { name: "SCAN" }));
 
     await waitFor(() => {
-      expect(postedBody("/api/garch-convergence/scan")).toEqual({ preset: "indexes" });
+      expect(postedBody("/api/garch-convergence/scan")).toEqual({ preset: "largecaps" });
     });
   });
 });

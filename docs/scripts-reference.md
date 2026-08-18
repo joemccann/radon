@@ -8,8 +8,8 @@ The CLI surface area lives behind shell aliases registered in `.pi/`. Run `comma
 |---------|-------------|
 | `scan` | Watchlist dark pool flow scan with CRI regime overlay and HTML report |
 | `discover` | Market-wide or targeted discovery scan for new candidates |
-| `leap-scan [TICKERS]` | Find LEAP IV mispricing opportunities (scheduled default: indexes = NDX+SPX+RUT) |
-| `garch-convergence [TICKERS]` | Cross-asset implied-versus-realized volatility divergence scan (scheduled default: indexes = NDX+SPX+RUT curated pairs) |
+| `leap-scan [TICKERS]` | Find LEAP IV mispricing opportunities (scheduled default: largecaps = NDX+SPX) |
+| `garch-convergence [TICKERS]` | Cross-asset implied-versus-realized volatility divergence scan (scheduled default: largecaps = NDX+SPX curated pairs) |
 | `seasonal [TICKERS]` | Monthly seasonality analysis from EquityClock |
 | `analyst-ratings [TICKERS]` | Ratings, price targets, and recent changes |
 | `vcg` | VCG-R scan with VIX/VVIX/HYG regression and severity tiers |
@@ -45,7 +45,7 @@ The CLI surface area lives behind shell aliases registered in `.pi/`. Run `comma
 | `x-scan-browser [@ACCOUNT]` | Fetch X sentiment through browser scraping |
 | `commands` | Display the full command registry |
 
-Tickets place `STP` and `STP LMT` through `/api/orders/place`. There is no extra CLI alias. Scheduled LEAP and GARCH already default to the virtual `indexes` preset (NDX+SPX+RUT). Knowledge retrieval is the `radon-kb` MCP (`kb_search`, `kb_incidents`, `kb_recent`), not a shell alias.
+Tickets place `STP` and `STP LMT` through `/api/orders/place`. There is no extra CLI alias. Scheduled LEAP and GARCH default to the virtual `largecaps` preset (NDX+SPX). The wider `indexes` union (adds Russell 2000, ~2500 tickers at 3 Unusual Whales requests each) is opt-in per run — three GARCH runs on it spend three quarters of the 40k daily UW cap. Knowledge retrieval is the `radon-kb` MCP (`kb_search`, `kb_incidents`, `kb_recent`), not a shell alias.
 
 ## Test Runners
 

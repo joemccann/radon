@@ -1877,7 +1877,11 @@ async def uw_usage():
 
 
 @app.post("/uw/usage/record")
-async def uw_usage_record(count: int = 1):
+async def uw_usage_record(
+    count: int = 1,
+    caller: str = "web",
+    endpoint: str = "",
+):
     """Mirror UW hits made outside UWClient into the shared daily budget.
 
     The Next.js route handlers fetch UW directly and used to increment
@@ -1889,7 +1893,9 @@ async def uw_usage_record(count: int = 1):
 
     if not (1 <= count <= 500):
         raise HTTPException(status_code=400, detail="count must be between 1 and 500")
-    await asyncio.to_thread(record_hits, count)
+    await asyncio.to_thread(
+        record_hits, count, caller=caller or "web", endpoint=endpoint
+    )
     return usage_snapshot()
 
 
@@ -3022,10 +3028,12 @@ def _scan_cache_matches_preset(cached: Any, preset: str) -> bool:
 
 
 @app.post("/leap/scan")
-async def leap_scan(preset: str = "indexes", min_gap: float = 10.0, tickers: str = ""):
+async def leap_scan(preset: str = "largecaps", min_gap: float = 10.0, tickers: str = ""):
     """Run LEAP scan (leap_scanner_uw.py --preset X --json, or --tickers A,B).
 
-    Default preset is the virtual `indexes` universe (NDX+SPX+RUT). The
+    Default preset is the virtual `largecaps` universe (NDX+SPX). Scanning
+    the full `indexes` union adds the Russell 2000 for ~4x the Unusual
+    Whales requests, and those names rarely price a defined-risk LEAP. The
     scanner writes data/leap.json directly; stdout is text + a summary
     rather than JSON, so we ignore run_script's parsed payload and re-read
     the cache file after the subprocess completes. 600s cooldown stops
@@ -3620,19 +3628,20 @@ GARCH_TICKER_TIMEOUT_S = 180
 
 
 @app.post("/garch-convergence/scan")
-async def garch_convergence_scan(preset: str = "indexes", tickers: str = ""):
+async def garch_convergence_scan(preset: str = "largecaps", tickers: str = ""):
     """Run GARCH convergence scan (garch_convergence.py --preset X --json,
     or --tickers A,B,C,D paired consecutively — even symbol count required).
 
-    Default preset is the virtual `indexes` universe (NDX+SPX+RUT curated
-    pairs). Mirrors /leap/scan semantics: 600s cooldown + lock, subprocess
+    Default preset is the virtual `largecaps` universe (NDX+SPX curated
+    pairs) — `indexes` adds the Russell 2000 at ~4x the Unusual Whales
+    request cost. Mirrors /leap/scan semantics: 600s cooldown + lock, subprocess
     writes data/garch_convergence.json directly (and records its own
     service_health[garch-scan] row), we re-read the cache file after the
     subprocess completes. Explicit pair scans bypass the cooldown and never
     advance it.
 
     Built-in presets: semis, mega-tech, energy, china-etf, all. Virtual
-    `indexes` plus file presets (data/presets/) also accepted.
+    `largecaps` / `indexes` plus file presets (data/presets/) also accepted.
     """
     requested = _parse_scan_tickers(tickers, require_pairs=True, dedupe=False)
     if test_mode:

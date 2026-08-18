@@ -154,14 +154,14 @@ def test_leap_rejects_too_many_tickers(monkeypatch):
     assert "max 25" in response.text
 
 
-def test_leap_omitted_preset_forwards_indexes(monkeypatch):
+def test_leap_omitted_preset_forwards_largecaps(monkeypatch):
     monkeypatch.setattr(server, "_leap_last_scan", -1e9)
     monkeypatch.setattr(server, "_leap_scan_lock", None)
 
     payload = {
         "scan_time": "2026-08-13T14:00:00",
         "min_gap": 10.0,
-        "universe": "preset:indexes",
+        "universe": "preset:largecaps",
         "requested_tickers": ["AAPL", "NVDA"],
         "results": [],
     }
@@ -178,11 +178,11 @@ def test_leap_omitted_preset_forwards_indexes(monkeypatch):
     response = client.post("/leap/scan")
 
     assert response.status_code == 200
-    assert response.json()["universe"] == "preset:indexes"
+    assert response.json()["universe"] == "preset:largecaps"
     assert calls == [
         (
             "leap_scanner_uw.py",
-            ["--preset", "indexes", "--min-gap", "10.0", "--json", "--workers", "16"],
+            ["--preset", "largecaps", "--min-gap", "10.0", "--json", "--workers", "16"],
             3600,
         )
     ]

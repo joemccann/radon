@@ -74,7 +74,7 @@ def _seed(path: Path, count: int) -> None:
     path.write_text(json.dumps({"date": quota_date(), "count": count}))
 
 
-def _expected(used: int, blocked: bool) -> dict:
+def _expected(used: int, blocked: bool, callers=(), endpoints=()) -> dict:
     from utils.uw_budget import DAILY_LIMIT, quota_date
 
     return {
@@ -84,6 +84,9 @@ def _expected(used: int, blocked: bool) -> dict:
         "reset_et": "20:00",
         "quota_day": quota_date(),
         "universe_scans_blocked": blocked,
+        # Attribution: a bare total cannot say who spent the quota.
+        "top_callers": list(callers),
+        "top_endpoints": list(endpoints),
     }
 
 
@@ -137,3 +140,22 @@ def test_uw_usage_clerk_jwt_allowed(clerk_client, budget_path):
     response = clerk_client.get("/uw/usage")
     assert response.status_code == 200
     assert response.json() == _expected(7, False)
+
+
+def test_uw_usage_surfaces_the_top_spenders(trusted_client, budget_path):
+    """The operator question at 85% used is who spent it, not how much is left."""
+    from utils.uw_budget import record_hits
+
+    record_hits(9, path=budget_path, caller="garch_convergence", endpoint="stock/AAPL/ohlc/1d")
+    record_hits(2, path=budget_path, caller="web", endpoint="stock/NVDA/info")
+
+    payload = trusted_client.get("/uw/usage").json()
+    assert payload["used"] == 11
+    assert payload["top_callers"] == [
+        {"name": "garch_convergence", "hits": 9},
+        {"name": "web", "hits": 2},
+    ]
+    assert payload["top_endpoints"] == [
+        {"name": "stock/<T>/ohlc/1d", "hits": 9},
+        {"name": "stock/<T>/info", "hits": 2},
+    ]
