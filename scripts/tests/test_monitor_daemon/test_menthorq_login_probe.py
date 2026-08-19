@@ -99,7 +99,12 @@ class TestLoginProbeVerdicts:
         from monitor_daemon.handlers import menthorq_login_probe as mod
 
         handler = _handler()
-        moment = NOW
+        # Midday anchor: the loop advances ~16.5 minutes and the handler keys
+        # its attempt budget to the UTC DATE — a wall-clock NOW within 16.5
+        # minutes of UTC midnight crossed the boundary, reset the counter, and
+        # turned the final attempt into a fresh day's soft failure (CI ran at
+        # 23:50 UTC and failed exactly this way, 2026-08-19).
+        moment = NOW.replace(hour=12, minute=0, second=0, microsecond=0)
         for attempt in range(mod.MAX_TRANSIENT_ATTEMPTS_PER_DAY):
             moment += timedelta(seconds=mod.RETRY_EMBARGO_SECONDS + 30)
             with _patch_get(exc=requests.ConnectionError("refused")), \
