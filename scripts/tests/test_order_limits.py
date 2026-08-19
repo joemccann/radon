@@ -198,13 +198,14 @@ class TestComboNotionalIsRiskNotPremium:
         assert violation["code"] == "ORDER_NOTIONAL_LIMIT"
 
     def test_short_strangle_notional_prices_the_risk(self):
-        """(700 + 600) × 100 × 500 = $65M of exposure, not $10k of credit."""
+        """(700 + 600) × 100 × 500 = $65M of exposure, less the $10k the
+        order collects — not $10k of credit."""
         notional = order_limits.order_notional({
             "type": "combo", "symbol": "SPY", "action": "SELL",
             "quantity": 500, "limitPrice": -0.20,
             "legs": [_strangle_leg(700, "C"), _strangle_leg(600, "P")],
         })
-        assert notional == pytest.approx(65_000_000.0)
+        assert notional == pytest.approx(64_990_000.0)
 
     def test_defined_risk_debit_spread_within_budget_still_places(self):
         """Control: 10 lots of a 5-wide vertical is $5,000 of risk."""
@@ -258,8 +259,9 @@ class TestComboNotionalIsRiskNotPremium:
                 {"expiry": "20260918", "strike": 6880, "right": "P", "action": "BUY", "ratio": 1},
             ],
         }
-        # 10-wide call wing + 20-wide put wing = $3,000 per unit.
-        assert order_limits.order_notional(params) == pytest.approx(3_000.0)
+        # 10-wide call wing + 20-wide put wing = $3,000 per unit, less the
+        # $400 credit the condor collects.
+        assert order_limits.order_notional(params) == pytest.approx(2_600.0)
 
     def test_ratio_spread_leaves_the_uncovered_short_uncovered(self):
         """Buy 1 / sell 2: one short is paired against the long, the other is
@@ -272,8 +274,66 @@ class TestComboNotionalIsRiskNotPremium:
                 {"expiry": "20260918", "strike": 7050, "right": "C", "action": "SELL", "ratio": 2},
             ],
         }
-        # 50-wide covered pair + one naked 7050 short = (50 + 7050) × 100.
-        assert order_limits.order_notional(params) == pytest.approx(710_000.0)
+        # 50-wide covered pair + one naked 7050 short = (50 + 7050) × 100,
+        # less the $100 credit collected.
+        assert order_limits.order_notional(params) == pytest.approx(709_900.0)
+
+    def test_gld_spread_close_nets_the_credit_against_the_width(self):
+        """Production repro 2026-08-19: SELL 100x GLD 420/450 bull call spread
+        @ $15 credit (a close of a held position). Gross width is $300k, but
+        the order COLLECTS $150k — worst-case exposure is width − credit =
+        $150k, under the $250k cap. Measuring gross width refused a
+        legitimate close."""
+        params = {
+            "type": "combo", "symbol": "GLD", "action": "SELL",
+            "quantity": 100, "limitPrice": 15.0,
+            "legs": [
+                {"expiry": "20260828", "strike": 420, "right": "C", "action": "BUY", "ratio": 1},
+                {"expiry": "20260828", "strike": 450, "right": "C", "action": "SELL", "ratio": 1},
+            ],
+        }
+        assert order_limits.order_notional(params) == pytest.approx(150_000.0)
+        assert order_limits.check_order_limits(params) is None
+
+    def test_chain_builder_credit_spread_nets_the_signed_credit(self):
+        """Chain-builder convention: BUY envelope, negative limitPrice = net
+        credit (commit 1db9f558). Same structure as the SELL-envelope close
+        must measure the same."""
+        params = {
+            "type": "combo", "symbol": "GLD", "action": "BUY",
+            "quantity": 100, "limitPrice": -15.0,
+            "legs": [
+                {"expiry": "20260828", "strike": 420, "right": "C", "action": "SELL", "ratio": 1},
+                {"expiry": "20260828", "strike": 450, "right": "C", "action": "BUY", "ratio": 1},
+            ],
+        }
+        assert order_limits.order_notional(params) == pytest.approx(150_000.0)
+        assert order_limits.check_order_limits(params) is None
+
+    def test_absurd_credit_cannot_zero_out_the_risk_measure(self):
+        """Fat-fingered credit large enough to swallow the strike risk must
+        not slip the cap: the premium term counts the same dollars, so
+        max(premium, risk − credit) never drops below half the strike risk."""
+        violation = order_limits.check_order_limits({
+            "type": "combo", "symbol": "SPY", "action": "SELL",
+            "quantity": 500, "limitPrice": -1500.0,
+            "legs": [_strangle_leg(700, "C"), _strangle_leg(600, "P")],
+        })
+        assert violation is not None
+        assert violation["code"] == "ORDER_NOTIONAL_LIMIT"
+
+    def test_debit_combos_do_not_net(self):
+        """A debit pays premium on top of carrying the structure — netting
+        applies only when the order collects premium."""
+        notional = order_limits.order_notional({
+            "type": "combo", "symbol": "SPX", "action": "BUY",
+            "quantity": 100, "limitPrice": 2.0,
+            "legs": [
+                {"expiry": "20260918", "strike": 7000, "right": "C", "action": "BUY", "ratio": 1},
+                {"expiry": "20260918", "strike": 7050, "right": "C", "action": "SELL", "ratio": 1},
+            ],
+        })
+        assert notional == pytest.approx(500_000.0)
 
     def test_unpriceable_legs_fall_back_to_premium(self):
         """Missing strikes must not silently produce a zero risk number."""
