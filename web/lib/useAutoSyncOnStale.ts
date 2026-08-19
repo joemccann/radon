@@ -13,13 +13,16 @@ const AUTO_SYNC_COOLDOWN_MS = 60_000;
  *
  * Cooldown is per sync target so rapid route flips cannot hammer the
  * rate-limited refresh routes, and a failing producer is retried at most
- * once per window.
+ * once per window. `tick` (from useSnapshotStaleness) re-arms the effect
+ * while the snapshot stays stale, so a failing sync keeps retrying on the
+ * staleness cadence instead of firing once and going quiet.
  */
 export function useAutoSyncOnStale(
   stale: boolean,
   syncNow: () => void,
   target: string,
   enabled: boolean,
+  tick = 0,
 ): void {
   const lastFiredAtByTargetRef = useRef<Map<string, number>>(new Map());
 
@@ -30,5 +33,5 @@ export function useAutoSyncOnStale(
     if (now - lastFiredAt < AUTO_SYNC_COOLDOWN_MS) return;
     lastFiredAtByTargetRef.current.set(target, now);
     syncNow();
-  }, [stale, enabled, target, syncNow]);
+  }, [stale, enabled, target, syncNow, tick]);
 }
