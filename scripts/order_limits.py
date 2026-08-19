@@ -104,6 +104,24 @@ def _combo_risk_per_unit(legs: Any) -> Optional[float]:
     return risk
 
 
+def _combo_credit_per_unit(params: dict, price: float, multiplier: int) -> float:
+    """Premium ONE combo unit collects, in dollars; 0 when the order pays.
+
+    Two credit encodings reach the funnel: the chain builder keeps a BUY
+    envelope and signs the credit negative (commit 1db9f558); the position
+    close ticket ships a SELL envelope with a positive price. Either way the
+    order receives the premium.
+    """
+    try:
+        signed_price = float(params.get("limitPrice") or 0)
+    except (TypeError, ValueError):
+        signed_price = 0.0
+    is_sell_envelope = str(params.get("action") or "").upper().startswith("SELL")
+    if signed_price < 0 or is_sell_envelope:
+        return price * multiplier
+    return 0.0
+
+
 def order_notional(params: dict) -> Optional[float]:
     """Worst-case dollar exposure of the order; None when unpriceable.
 
@@ -111,6 +129,13 @@ def order_notional(params: dict) -> Optional[float]:
     limitPrice a signed net price, so measuring the cap against |limitPrice|
     measured a short strangle's net CREDIT: 500 lots at $0.20 priced as
     $10,000 and cleared the $250k cap with room to spare (R-052).
+
+    A credit combo's worst case is the strike risk MINUS the premium it
+    collects: 100 lots of a 30-wide vertical sold at $15 risks $150k, not
+    $300k — gross width refused a legitimate close (GLD, 2026-08-19). The
+    premium term counts the same dollars the netting subtracts, so
+    max(premium, risk − credit) never falls below half the strike risk and a
+    fat-fingered credit cannot slip an undefined-risk structure past the cap.
     """
     try:
         quantity = abs(float(params.get("quantity") or 0))
@@ -128,7 +153,9 @@ def order_notional(params: dict) -> Optional[float]:
     if str(params.get("type", "")).lower() == "combo":
         risk_per_unit = _combo_risk_per_unit(params.get("legs"))
         if risk_per_unit is not None:
-            return max(premium, quantity * risk_per_unit)
+            credit_per_unit = _combo_credit_per_unit(params, price, multiplier)
+            max_loss_per_unit = max(risk_per_unit - credit_per_unit, 0.0)
+            return max(premium, quantity * max_loss_per_unit)
 
     return premium or None
 
