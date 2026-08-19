@@ -11,6 +11,7 @@ import { usePortfolio } from "@/lib/usePortfolio";
 import { useOrders } from "@/lib/useOrders";
 import { useMarketHours, MarketState } from "@/lib/useMarketHours";
 import { useAutoSyncOnStale } from "@/lib/useAutoSyncOnStale";
+import { useSnapshotStaleness } from "@/lib/useSnapshotStaleness";
 import { useToast } from "@/lib/useToast";
 import { useOrderActions } from "@/lib/OrderActionsContext";
 import { usePrices } from "@/lib/usePrices";
@@ -472,21 +473,13 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
       ? "Sync failed. Reconstruction incomplete."
       : "Awaiting first sample";
 
-  const isStale = useMemo(() => {
-    if (!lastSync) return false;
-    if (marketState !== MarketState.OPEN) return false;
-    const ageMs = Date.now() - new Date(lastSync).getTime();
-    return ageMs > 60_000;
-  }, [lastSync, marketState]);
-  const staleAgeMinutes = useMemo(() => {
-    if (!lastSync) return null;
-    const ageMs = Date.now() - new Date(lastSync).getTime();
-    return Math.max(1, Math.floor(ageMs / 60_000));
-  }, [lastSync]);
+  // Staleness is session-independent (after-hours/overnight fills exist)
+  // and re-evaluated on its own clock, so an idle page cannot rot silently.
+  const { isStale, staleAgeMinutes, tick: stalenessTick } = useSnapshotStaleness(lastSync);
 
   // A render that surfaces a stale snapshot triggers the producer sync
   // itself — the stale pill's Sync button remains the manual fallback.
-  useAutoSyncOnStale(isStale, syncNow, syncTarget, !isDemoMode);
+  useAutoSyncOnStale(isStale, syncNow, syncTarget, !isDemoMode, stalenessTick);
 
   // Sections that render live marks from the prices map. Scanner/discover (and
   // other non-price modules) must not receive a new `prices` identity on every
