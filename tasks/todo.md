@@ -1,3 +1,41 @@
+# Task: Dashboard catalysts dates + prints (2026-08-18)
+
+## Dependency graph
+
+- T1 depends_on: [] - Backend: persist forecast/prev/actual; FRED actual overlay after release
+- T2 depends_on: [] - Read-time keep same-ET-day released events until 20:00 ET
+- T3 depends_on: [T1, T2] - UI: calendar date on every row; F/P then A after print
+- T4 depends_on: [T3] - Focused vitest + Playwright + browser verify
+
+## Checklist
+
+- [x] T1 `fetch_catalysts` row fields + mocked FRED overlay
+- [x] T2 `upcomingCatalysts` keeps same-day released economic/earnings rows
+- [x] T3 `catalystWhenLabel` always shows `D Mon HH:MM ET`; print line F/P or A/F
+- [x] T4 Verify
+
+## Contract
+
+- Date always visible. Never time-only (`14:00 ET`). Never relative-only (`4d`) as the sole when-label.
+- UW economic calendar: `forecast`, `prev`, `reported_period`. No `actual` on the wire (probed 2026-08-18).
+- After `event_time`, overlay FRED latest observation for a curated title map. Unmapped events keep F/P.
+- Earnings pass through `street_mean_est` / `actual_eps` when UW sends them.
+- Same-day released rows stay until 20:00 ET so the print can appear. Weekend fossils still drop.
+- No em dashes. Tokens only. Do not commit/push.
+
+## Workflow
+
+`.grok/workflows/catalyst-dates-prints.rhai`
+
+## Review
+
+- T1: economic rows persist forecast/prev/actual/reported_period; earnings persist street_mean_est/actual_eps; `apply_fred_actuals` overlays ICSA after print and swallows FRED failures. `16 passed`.
+- T2: `upcomingCatalysts` keeps same-ET-day rows until 20:00 ET after `event_time`. Weekend/holiday fossils still drop.
+- T3: `catalystWhenLabel` is `4 Aug 10:00 ET` / `4 Aug`. `catalystPrintLabel` is `F 221k  P 215k` then `A …`. Quadrant row is name | print | when.
+- T4: pytest `test_fetch_catalysts.py` 20 passed after FRED guards (no PAYEMS/USSLIND; skip prev-equal and stale obs). Vitest groups/upcoming/quadrant 39. Playwright `catalyst-card-weekend` 3/3. E2E card: `7 Aug 08:30 ET` + `F 118k P 172k`.
+
+---
+
 # Task: Vol Cone operator analysis + chain prefill (2026-08-17)
 
 ## Dependency graph

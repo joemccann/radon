@@ -140,6 +140,50 @@ describe("CatalystsQuadrant", () => {
     expect(rail?.textContent).toContain("1");
   });
 
+  it("renders calendar date and F/P print", () => {
+    freeze("2026-08-04T14:00:00Z");
+    payload = snapshot([
+      row({
+        title: "Initial jobless claims",
+        event_time: "2026-08-04T12:30:00Z",
+        forecast: "221000",
+        prev: "215000",
+      }),
+    ]);
+    render(<CatalystsQuadrant positionTickers={new Set()} />);
+    const line = document.querySelector(".catalyst-group__row") as HTMLElement;
+    expect(line.querySelector(".catalyst-group__when")?.textContent).toBe("4 Aug 08:30 ET");
+    expect(line.querySelector(".catalyst-group__print")?.textContent).toBe("F 221k  P 215k");
+    expect(line.querySelector(".catalyst-group__print--actual")).toBeNull();
+  });
+
+  it("renders A after the actual is in", () => {
+    freeze("2026-08-04T14:00:00Z");
+    payload = snapshot([
+      row({
+        title: "Initial jobless claims",
+        event_time: "2026-08-04T12:30:00Z",
+        forecast: "221000",
+        prev: "215000",
+        actual: 235000,
+      }),
+    ]);
+    render(<CatalystsQuadrant positionTickers={new Set()} />);
+    const line = document.querySelector(".catalyst-group__row") as HTMLElement;
+    expect(line.querySelector(".catalyst-group__print")?.textContent).toBe("A 235k  F 221k");
+    expect(line.querySelector(".catalyst-group__print--actual")).toBeTruthy();
+  });
+
+  it("hides the print span when the label is empty", () => {
+    freeze("2026-08-04T14:00:00Z");
+    payload = snapshot([
+      row({ type: "fda", ticker: "ABOS", title: "PDUFA date", date: "2026-08-06" }),
+    ]);
+    render(<CatalystsQuadrant positionTickers={new Set()} />);
+    expect(document.querySelector(".catalyst-group__print")).toBeNull();
+    expect(document.querySelector(".catalyst-group__when")?.textContent).toBe("6 Aug");
+  });
+
   it("renders the empty state for a fossil snapshot", () => {
     freeze("2026-08-04T14:00:00Z");
     payload = {

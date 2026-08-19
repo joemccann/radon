@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 
 import { useCatalysts } from "@/lib/useCatalysts";
 import {
+  catalystPrintLabel,
   catalystWhenLabel,
   groupCatalystsByCategory,
   type CatalystCategory,
@@ -35,6 +36,8 @@ function CatalystRowLine({
   row: CategorizedCatalystRow;
   showFlag: boolean;
 }) {
+  const print = catalystPrintLabel(row);
+
   return (
     <div className="catalyst-group__row">
       {showFlag ? (
@@ -46,6 +49,11 @@ function CatalystRowLine({
         {row.ticker ? `${row.ticker} · ` : ""}
         {row.title}
       </span>
+      {print ? (
+        <span className={`catalyst-group__print${print.startsWith("A ") ? " catalyst-group__print--actual" : ""}`}>
+          {print}
+        </span>
+      ) : null}
       <span className="catalyst-group__when">{catalystWhenLabel(row)}</span>
     </div>
   );
