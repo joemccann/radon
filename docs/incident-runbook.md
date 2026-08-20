@@ -358,6 +358,23 @@ Incident: 2026-08-15 00:24Z, P1 page `34ab3e3c…`.
 - **Lesson:** on-demand third-party integrations need a credential-liveness
   monitor exactly like `flex-token-check`. Mocked unit tests prove code
   behavior; only a live monitor proves the credential still works.
+- **2026-08-20 recurrence, different operator-visible failure (HTTP 504):**
+  `menthorq-session` stayed ok (authjs cookies not expired) while
+  `menthorq-login-probe` latched error at 06:03Z after ~65s:
+  `Options exposure authentication is unavailable`. The probe's 90s
+  read timeout can see FastAPI's 503. Next.js `OPTIONS_PROXY_TIMEOUT_MS`
+  is 50s and `DEFAULT_LOGIN_TIMEOUT_SECONDS` was 60s, so `/options/net-gex`
+  504'd (MEASUREMENT FAULT) before the 503 arrived. `_storage_state_expired`
+  does not fire on a live-looking unspendable jar, so every Retry relaunched
+  chromium then the 60s bootstrap. Fix: cap request-path login at 25s
+  (`REQUEST_PATH_AUTH_BUDGET_SECONDS` 40s, still under the 50s proxy) and a
+  process-wide 300s auth-failure embargo so a new FastAPI client per request
+  cannot re-pay the budget. First call still bootstraps (self-heal).
+  Discriminating check: probe 503 in ~60s + session ok + UI 504 in 50s.
+  Reminting the dashboard jar remains ops; this change makes the failure
+  a fast 503 instead of a proxy timeout. Regression:
+  `test_menthorq_dashboard_client.py::test_request_path_auth_budget_fits_inside_next_proxy`
+  and `TestAuthFailureEmbargo`.
 
 ---
 

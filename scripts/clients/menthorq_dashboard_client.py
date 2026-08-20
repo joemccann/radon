@@ -27,6 +27,7 @@ import json
 import math
 import os
 import re
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -59,9 +60,33 @@ _BROWSER_USER_AGENT = (
     "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
 )
 DEFAULT_TIMEOUT_SECONDS = 20.0
-# The full WordPress -> Cognito -> dashboard chain needs more than a
-# single API call's budget; measured ~15s on the VPS.
-DEFAULT_LOGIN_TIMEOUT_SECONDS = 60.0
+# web/app/api/options/_shared.ts OPTIONS_PROXY_TIMEOUT_MS is 50_000.
+# Request-path auth must finish under that so the operator gets FastAPI 503,
+# not a proxy 504 (2026-08-20 /options/net-gex).
+REQUEST_PATH_AUTH_BUDGET_SECONDS = 40.0
+# The WordPress -> Cognito -> dashboard chain measured ~15s on the VPS.
+DEFAULT_LOGIN_TIMEOUT_SECONDS = 25.0
+_AUTH_FAILURE_EMBARGO_SECONDS = 300.0
+_auth_embargo_until = 0.0
+_auth_embargo_lock = threading.Lock()
+
+
+def _auth_embargo_active() -> bool:
+    with _auth_embargo_lock:
+        return time.monotonic() < _auth_embargo_until
+
+
+def _trip_auth_embargo() -> None:
+    global _auth_embargo_until
+    with _auth_embargo_lock:
+        _auth_embargo_until = time.monotonic() + _AUTH_FAILURE_EMBARGO_SECONDS
+
+
+def _reset_auth_embargo_for_tests() -> None:
+    global _auth_embargo_until
+    with _auth_embargo_lock:
+        _auth_embargo_until = 0.0
+
 
 _FREQUENCIES = {"eod", "intraday"}
 _SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9.-]{0,9}$")
@@ -214,8 +239,9 @@ class MenthorQDashboardClient:
         )
         self._http = http_session or requests.Session()
         self._timeout_seconds = max(1.0, float(timeout_seconds))
-        self._login_timeout_seconds = max(
-            self._timeout_seconds, DEFAULT_LOGIN_TIMEOUT_SECONDS
+        self._login_timeout_seconds = min(
+            max(self._timeout_seconds, DEFAULT_LOGIN_TIMEOUT_SECONDS),
+            REQUEST_PATH_AUTH_BUDGET_SECONDS,
         )
         self._username = (username or os.environ.get("MENTHORQ_USER", "")).strip() or None
         self._password = (password or os.environ.get("MENTHORQ_PASS", "")).strip() or None
@@ -238,6 +264,15 @@ class MenthorQDashboardClient:
         return self._normalize(symbol, frequency, exposure, levels)
 
     def _resolve_access_token(self) -> str:
+        if _auth_embargo_active():
+            raise MenthorQDashboardAuthError("dashboard authentication is unavailable")
+        try:
+            return self._resolve_access_token_uncached()
+        except MenthorQDashboardAuthError:
+            _trip_auth_embargo()
+            raise
+
+    def _resolve_access_token_uncached(self) -> str:
         token = self._access_token
         # An operational override is a SHORTCUT, never a dead end: once it
         # lapses, fall through to the self-refreshing jar instead of failing
