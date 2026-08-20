@@ -18,16 +18,22 @@
 - `DEMO_ADMIN_USER_IDS` is unset on app.radon.run and default-denies everyone. Gating `/api/preferences` PUT/DELETE on the demo-trial admin helper 403'd the signed-in operator (`Operator authorization required`) while GET still worked.
 - Operator writes go through `requireRouteAccess({ operatorOnly: true })`. The demo-trial helper stays on `/api/admin/demo-users` only.
 
+## 2026-08-20 — Stacked successor green can move kill-to-marker past 60 min
+
+- a231 stop-cleaned BPI at 00:04:23Z (green 00:05:39Z → P3). 0f7d greened at 02:42:18Z and overwrote the marker; kill-to-latest-marker became 158 min and the 60-min kill-before-green bound paged P1 at 02:45.
+- Any post-kill green within the 24h oneshot recovery horizon is still stop-clean collateral. Do not re-bind kill-before-green (or in_flight) to the 60-min single-deploy window.
+- Keep the 60-min now-to-kill cap only on kill-after-green (no post-kill green yet).
+
 ## 2026-08-15 — Oneshot stays failed after stop-clean; do not age-cap against now
 
 - `Type=oneshot` remains `ActiveState=failed` until the next timer. A now-to-kill 60-min cap on kill-before-green flips P3 to P1 after the first hour and pages (BPI 00:34:41Z kill, 00:35:59Z green, 01:35Z page). Measure that branch kill-to-marker.
-- Keep the now-to-kill cap on in-flight and kill-after-green so an unrelated SIGTERM hours later still pages.
+- Keep the now-to-kill 60-min cap on kill-after-green only. in_flight and kill-before-green use the 24h oneshot horizon (see 2026-08-20).
 
 ## 2026-08-14 — Stacked-deploy stop-clean is still Result=signal collateral
 
 - A 20-min window around the *latest* green marker misses stop-clean of deploy N when deploy N+2 greens 34 min later. Between stacked deploys the transition journal is gone and the previous green sits *before* the kill, so `marker - failed_at` is negative.
 - Discriminating check: `InactiveEnterTimestamp` plus runner dir mtimes / green marker; sibling oneshots failing `Result=signal` the same second; edge and `/health/lite` stay up.
-- Classifier: 60-min age cap; in-flight journal OR kill-after-last-green OR kill-before-latest-green inside that window → P3. Exit-code / timeout / start-limit-hit stay P1.
+- Classifier: kill-after-green uses the 60-min age cap; in_flight and kill-before-latest-green use the 24h oneshot horizon. Exit-code / timeout / start-limit-hit stay P1.
 
 ## 2026-08-14 — UW daily quota on a oneshot is a unit P1
 

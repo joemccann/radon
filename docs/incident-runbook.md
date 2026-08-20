@@ -169,19 +169,28 @@ Incident: 2026-07-08, P1.
   kill) even though kill-to-marker was 78s. Edge and
   `:8321/health/lite` stayed up. Classifier now measures
   kill-before-green against the marker, not `now`.
-- **Discriminating check:** `InactiveEnterTimestamp` within 60 min of
-  a green-marker mtime or after the last green (cancelled stack);
+- **2026-08-20 02:45Z:** page `b76d4a52`. a231 stop-cleaned BPI at
+  00:04:23Z (green 00:05:39Z, kill-to-marker 76s → P3). Four more
+  deploys stacked; 0f7d greened at 02:42:18Z and overwrote the
+  marker. Kill-to-latest-marker became 158 min, so the 60-min
+  kill-before-green bound flipped P3 to P1. Edge and
+  `:8321/health/lite` stayed up; BPI recovered on a later timer
+  (`Result=success`). Kill-before-green and in_flight now use the
+  24h oneshot recovery horizon against any post-kill green.
+- **Discriminating check:** `InactiveEnterTimestamp` before a later
+  green-marker mtime (within the 24h oneshot horizon) or within
+  60 min after the last green (cancelled stack / not-yet-green);
   sibling oneshots often fail the same second; `Result=timeout` /
-  `exit-code` is a different class (do not downgrade). A oneshot
-  still `failed` more than 60 min after that kill is the same class
-  when the kill itself sits inside the marker window.
+  `exit-code` is a different class (do not downgrade).
 - **Remediation:** classifier only, do not restart. Exit-code and
   start-limit-hit stay P1.
 - **Regression:** `test_units.py::TestDeployCollateralSignalKill`
   (`test_stacked_deploy_signal_kill_34min_before_green_is_p3`,
   `test_signal_kill_after_last_green_during_cancelled_stack_is_p3`,
-  `test_oneshot_still_failed_61min_after_stop_clean_is_p3`).
-- **Code:** `scripts/watchdog/units.py` (`DEPLOY_COLLATERAL_WINDOW_SECS=3600`).
+  `test_oneshot_still_failed_61min_after_stop_clean_is_p3`,
+  `test_stacked_successor_green_158min_after_kill_is_p3`).
+- **Code:** `scripts/watchdog/units.py` (`DEPLOY_COLLATERAL_WINDOW_SECS=3600`,
+  `KILL_BEFORE_GREEN_FROZEN_CAP_SECS=86400`).
 
 ---
 
