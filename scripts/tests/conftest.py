@@ -12,6 +12,19 @@ sys.path.insert(0, str(SCRIPTS_DIR / "trade_blotter"))
 
 
 @pytest.fixture(autouse=True)
+def _reset_menthorq_auth_embargo():
+    """Auth-failure embargo is process-wide; do not leak across tests."""
+    try:
+        from clients.menthorq_dashboard_client import _reset_auth_embargo_for_tests
+    except Exception:
+        yield
+        return
+    _reset_auth_embargo_for_tests()
+    yield
+    _reset_auth_embargo_for_tests()
+
+
+@pytest.fixture(autouse=True)
 def _isolate_uw_budget(tmp_path, monkeypatch):
     """Point the process-wide UW budget file at a per-test tmp path."""
     try:

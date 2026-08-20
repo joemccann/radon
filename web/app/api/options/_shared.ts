@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 import { RadonApiError } from "@/lib/radonApi";
 
+// Must stay above Python REQUEST_PATH_AUTH_BUDGET_SECONDS (40s).
 export const OPTIONS_PROXY_TIMEOUT_MS = 50_000;
 
 // Single definition lives in the domain lib so the client hook can share it

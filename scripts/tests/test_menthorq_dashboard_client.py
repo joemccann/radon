@@ -19,6 +19,18 @@ from clients.menthorq_dashboard_client import (
 )
 
 
+@pytest.fixture(autouse=True)
+def reset_menthorq_auth_embargo():
+    from clients import menthorq_dashboard_client as mod
+
+    reset = getattr(mod, "_reset_auth_embargo_for_tests", None)
+    if reset is not None:
+        reset()
+    yield
+    if reset is not None:
+        reset()
+
+
 def _jwt(*, expires_at: int | None = None) -> str:
     payload = {"exp": expires_at or int(time.time()) + 3600, "sub": "test-user"}
     encoded = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
@@ -452,3 +464,89 @@ class TestExpiredOverrideTokenFallsBack:
             lambda: (_ for _ in ()).throw(AssertionError("must not log in with a live token")),
         )
         assert client._resolve_access_token() == live
+
+
+def test_request_path_auth_budget_fits_inside_next_proxy():
+    """2026-08-20: DEFAULT_LOGIN_TIMEOUT_SECONDS was 60s and Next.js
+    OPTIONS_PROXY_TIMEOUT_MS is 50s, so a broken MenthorQ re-login 504'd
+    the browser while the 90s login-probe still saw FastAPI's 503."""
+    from clients import menthorq_dashboard_client as mod
+
+    assert mod.DEFAULT_LOGIN_TIMEOUT_SECONDS <= 25
+    assert mod.REQUEST_PATH_AUTH_BUDGET_SECONDS < 50
+    assert mod.DEFAULT_LOGIN_TIMEOUT_SECONDS <= mod.REQUEST_PATH_AUTH_BUDGET_SECONDS
+
+
+def _live_dashboard_jar(tmp_path: Path) -> Path:
+    path = tmp_path / "jar.json"
+    path.write_text(json.dumps({"cookies": [{
+        "name": "cognito", "value": "x", "domain": ".menthorq.io",
+        "path": "/", "expires": time.time() + 7 * 86_400,
+    }], "origins": []}))
+    path.chmod(0o600)
+    return path
+
+
+class TestAuthFailureEmbargo:
+    """A live-looking jar that cannot mint still paid chromium + 60s
+    bootstrap on every /options/net-gex click. FastAPI constructs a new
+    client per request, so the embargo must be process-wide."""
+
+    def test_second_resolve_skips_bootstrap_during_embargo(self, tmp_path, monkeypatch):
+        from clients import menthorq_dashboard_client as mod
+
+        monkeypatch.setenv("MENTHORQ_USER", "")
+        monkeypatch.setenv("MENTHORQ_PASS", "")
+        monkeypatch.setenv("MENTHORQ_DASHBOARD_ACCESS_TOKEN", "")
+        jar = _live_dashboard_jar(tmp_path)
+        client = mod.MenthorQDashboardClient(
+            storage_state_path=jar, username="u", password="p",
+        )
+        calls = {"bootstrap": 0, "mint": 0}
+
+        def _mint():
+            calls["mint"] += 1
+            raise mod.MenthorQDashboardAuthError("dashboard authentication is unavailable")
+
+        def _bootstrap():
+            calls["bootstrap"] += 1
+            raise mod.MenthorQDashboardAuthError("dashboard authentication is unavailable")
+
+        monkeypatch.setattr(client, "_token_from_storage_state", _mint)
+        monkeypatch.setattr(client, "_bootstrap_dashboard_session", _bootstrap)
+
+        with pytest.raises(mod.MenthorQDashboardAuthError):
+            client._resolve_access_token()
+        assert calls == {"bootstrap": 1, "mint": 1}
+
+        later = mod.MenthorQDashboardClient(
+            storage_state_path=jar, username="u", password="p",
+        )
+        monkeypatch.setattr(later, "_token_from_storage_state", _mint)
+        monkeypatch.setattr(later, "_bootstrap_dashboard_session", _bootstrap)
+        with pytest.raises(mod.MenthorQDashboardAuthError):
+            later._resolve_access_token()
+        assert calls == {"bootstrap": 1, "mint": 1}
+
+    def test_unspendable_live_jar_still_bootstraps_once(self, tmp_path, monkeypatch):
+        from clients import menthorq_dashboard_client as mod
+
+        monkeypatch.setenv("MENTHORQ_DASHBOARD_ACCESS_TOKEN", "")
+        jar = _live_dashboard_jar(tmp_path)
+        token = _jwt()
+        client = mod.MenthorQDashboardClient(
+            storage_state_path=jar, username="u", password="p",
+        )
+        calls = {"bootstrap": 0}
+
+        def _mint():
+            raise mod.MenthorQDashboardAuthError("dashboard authentication is unavailable")
+
+        def _bootstrap():
+            calls["bootstrap"] += 1
+            return token
+
+        monkeypatch.setattr(client, "_token_from_storage_state", _mint)
+        monkeypatch.setattr(client, "_bootstrap_dashboard_session", _bootstrap)
+        assert client._resolve_access_token() == token
+        assert calls["bootstrap"] == 1
