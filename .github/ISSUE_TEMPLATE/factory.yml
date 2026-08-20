@@ -1,0 +1,30 @@
+name: Factory
+description: Operator request that Foreman turns into a draft PR
+title: "[factory] "
+labels: [factory]
+body:
+  - type: textarea
+    id: ask
+    attributes:
+      label: Ask
+      description: What Foreman should implement. One job. No secrets, no account figures.
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: Done when
+      description: Verifiable acceptance. Name the tests that must go green.
+    validations:
+      required: true
+  - type: checkboxes
+    id: rails
+    attributes:
+      label: Rails
+      options:
+        - label: Red/green TDD
+          required: true
+        - label: No runtime path moves unless this issue says so
+          required: true
+        - label: Draft PR only; human merges
+          required: true

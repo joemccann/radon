@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RADON — monorepo legibility plan</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --canvas: #0a0f14;
+      --panel: #0f1519;
+      --raised: #151c22;
+      --grid: #1e293b;
+      --text: #e2e8f0;
+      --muted: #758192;
+      --secondary: #94a3b8;
+      --signal: #05AD98;
+      --warn: #F5A623;
+      --fault: #E85D6C;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--canvas); color: var(--text); }
+    body {
+      font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+      padding: 24px 16px 80px;
+    }
+    .wrap { max-width: 1100px; margin: 0 auto; }
+    .kicker {
+      font-size: 11px;
+      letter-spacing: 0.16em;
+      font-weight: 600;
+      color: var(--muted);
+      margin: 0 0 8px;
+      text-transform: uppercase;
+    }
+    h1 {
+      font-size: 28px;
+      font-weight: 560;
+      letter-spacing: -0.03em;
+      margin: 0 0 8px;
+    }
+    h1 span { color: var(--signal); }
+    .lede {
+      color: var(--secondary);
+      font-size: 15px;
+      line-height: 1.5;
+      margin: 0 0 20px;
+      max-width: 72ch;
+    }
+    .verdict {
+      background: var(--panel);
+      border: 1px solid var(--fault);
+      border-radius: 4px;
+      padding: 16px 18px;
+      margin-bottom: 16px;
+    }
+    .verdict strong { color: var(--fault); font-weight: 600; }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .label {
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      color: var(--muted);
+      margin: 0 0 12px;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .stat {
+      background: var(--raised);
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      padding: 12px;
+    }
+    .stat .n {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 22px;
+      color: var(--signal);
+    }
+    .stat .t {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 4px;
+      letter-spacing: 0.04em;
+    }
+    .stat.warn .n { color: var(--warn); }
+    .stat.fault .n { color: var(--fault); }
+    .cols {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .col {
+      background: var(--raised);
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      padding: 12px;
+      min-height: 220px;
+    }
+    .col h3 {
+      margin: 0 0 10px;
+      font-size: 12px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+    .col.keep h3 { color: var(--signal); }
+    .col.freeze h3 { color: var(--warn); }
+    .col.archive h3 { color: var(--secondary); }
+    .col.kill h3 { color: var(--fault); }
+    .col ul {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .col li {
+      font-size: 13px;
+      color: var(--text);
+      padding: 4px 0;
+      border-top: 1px solid var(--grid);
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    .col li:first-child { border-top: 0; }
+    .tree {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 12px;
+      line-height: 1.55;
+      background: var(--raised);
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      padding: 14px 16px;
+      overflow-x: auto;
+      white-space: pre;
+      color: var(--secondary);
+    }
+    .tree .ok { color: var(--signal); }
+    .tree .bad { color: var(--fault); }
+    .tree .meh { color: var(--warn); }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th, td {
+      text-align: left;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--grid);
+      vertical-align: top;
+    }
+    th {
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    td code, .mono {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 12px;
+    }
+    .tag {
+      display: inline-block;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--grid);
+      color: var(--muted);
+    }
+    .tag.p0 { color: var(--fault); border-color: var(--fault); }
+    .tag.p1 { color: var(--warn); border-color: var(--warn); }
+    .tag.p2 { color: var(--signal); border-color: var(--signal); }
+    .phases {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .phase {
+      background: var(--raised);
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      padding: 12px;
+    }
+    .phase .num {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      color: var(--signal);
+      font-size: 12px;
+      letter-spacing: 0.08em;
+    }
+    .phase h3 {
+      margin: 6px 0 8px;
+      font-size: 15px;
+      font-weight: 560;
+    }
+    .phase p {
+      margin: 0;
+      font-size: 13px;
+      color: var(--secondary);
+      line-height: 1.45;
+    }
+    .arrow-row {
+      display: flex;
+      gap: 8px;
+      align-items: stretch;
+      margin: 8px 0 16px;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 12px;
+    }
+    .arrow-row .box {
+      flex: 1;
+      background: var(--raised);
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      padding: 10px;
+      text-align: center;
+      color: var(--text);
+    }
+    .arrow-row .sep {
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+    }
+    .readme-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .readme-grid ul {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--secondary);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .readme-grid h3 {
+      margin: 0 0 8px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .keep-h { color: var(--signal); }
+    .drop-h { color: var(--fault); }
+    .gh {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+    }
+    .gh .cell {
+      background: var(--raised);
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      padding: 12px;
+    }
+    .gh h3 {
+      margin: 0 0 8px;
+      font-size: 12px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    .foot {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 8px;
+    }
+    a { color: var(--signal); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    @media (max-width: 900px) {
+      .stats, .cols, .phases, .readme-grid, .gh {
+        grid-template-columns: 1fr 1fr;
+      }
+      .arrow-row { flex-direction: column; }
+      .arrow-row .sep { display: none; }
+    }
+    @media (max-width: 560px) {
+      .stats, .cols, .phases, .readme-grid, .gh {
+        grid-template-columns: 1fr;
+      }
+      h1 { font-size: 22px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <p class="kicker">Operator plan · 2026-08-20 · public repo joemccann/radon</p>
+    <h1>Do not reshuffle the <span>runtime tree</span></h1>
+    <p class="lede">
+      The four production roots are already in the right directories. The mess is
+      root archaeology, stale nested READMEs, tracked caches, and GitHub security
+      files that a public proprietary trading repo is missing. Full contract:
+      <a href="monorepo-legibility-plan.md">docs/monorepo-legibility-plan.md</a>.
+    </p>
+
+    <div class="verdict">
+      <strong>Strongest counterargument.</strong>
+      Moving <span class="mono">scripts/*.py</span>, <span class="mono">web/</span>,
+      <span class="mono">cloud/</span>, or <span class="mono">tests/</span> into
+      <span class="mono">apps/</span> / <span class="mono">packages/</span> breaks
+      50 systemd units, 16 launchd plists, pytest pythonpath, Vitest aliases, and
+      push-to-main auto-deploy. Illegibility is documentation and dead artifacts,
+      not the package graph.
+    </div>
+
+    <div class="panel">
+      <div class="label">Tracked inventory (git ls-files)</div>
+      <div class="stats">
+        <div class="stat"><div class="n">1499</div><div class="t">web/</div></div>
+        <div class="stat"><div class="n">907</div><div class="t">scripts/</div></div>
+        <div class="stat"><div class="n">160</div><div class="t">cloud/</div></div>
+        <div class="stat"><div class="n">142</div><div class="t">site/</div></div>
+        <div class="stat warn"><div class="n">114</div><div class="t">scripts/*.py top-level</div></div>
+        <div class="stat fault"><div class="n">57%</div><div class="t">GitHub health score</div></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="label">Classification</div>
+      <div class="cols">
+        <div class="col keep">
+          <h3>Keep in place</h3>
+          <ul>
+            <li>web/ site/ scripts/ cloud/</li>
+            <li>docker/ib-gateway/</li>
+            <li>lib/tools/ + tests/</li>
+            <li>config/*.plist</li>
+            <li>CLAUDE.md + AGENTS.md</li>
+            <li>brand/</li>
+          </ul>
+        </div>
+        <div class="col freeze">
+          <h3>Looks messy, frozen</h3>
+          <ul>
+            <li>RELIABILITY_AUDIT.md</li>
+            <li>RELIABILITY_LOG.md</li>
+            <li>TEST_AUDIT.md</li>
+            <li>TEST_LOG.md</li>
+            <li>REMEDIATION_LOG.md</li>
+            <li>README ## Now true (test-pinned)</li>
+          </ul>
+        </div>
+        <div class="col archive">
+          <h3>Archive (git mv)</h3>
+          <ul>
+            <li>plans/ (all DONE)</li>
+            <li>PROGRESS.md (2026-03-29)</li>
+            <li>cloud/PLAN.md (labeled archived)</li>
+            <li>docs/show-me-*.html</li>
+            <li>completed tasks/ blocks</li>
+            <li>specs/gex-levels.spec.md</li>
+          </ul>
+        </div>
+        <div class="col kill">
+          <h3>Untrack / stop committing</h3>
+          <ul>
+            <li>data/*_cache JSON (already gitignored)</li>
+            <li>data/flex_token_config.json</li>
+            <li>root + web package-lock.json after bun proof</li>
+            <li>Never .github/README.md</li>
+            <li>Never CODE_OF_CONDUCT / FUNDING</li>
+            <li>Wiki (disable)</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="label">GitHub README contract vs current front door</div>
+      <div class="readme-grid">
+        <div>
+          <h3 class="keep-h">Required (docs.github.com)</h3>
+          <ul>
+            <li>What it does (have)</li>
+            <li>Why it is useful (have)</li>
+            <li>How to get started (have, then drowns in env vars)</li>
+            <li>Where to get help (missing)</li>
+            <li>Who maintains it (missing)</li>
+            <li>Relative links (have)</li>
+            <li>LICENSE (proprietary, have)</li>
+            <li>CONTRIBUTING (have, correctly single-operator)</li>
+          </ul>
+        </div>
+        <div>
+          <h3 class="drop-h">Move out of README</h3>
+          <ul>
+            <li>External services encyclopedia (4 tables) to docs/operations.md</li>
+            <li>What's where (20-row index) to docs/README.md</li>
+            <li>Glossary to docs/README.md</li>
+            <li>Do not delete ## Now true: TestThinIndex requires 1-5 bullets plus links to indicators, incident-runbook, equibles-api</li>
+            <li>Do not add ## Recent additions (test forbids it)</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="label">Public-repo security gaps (not a directory problem)</div>
+      <div class="gh">
+        <div class="cell">
+          <h3>Add</h3>
+          <p style="margin:0;font-size:13px;color:var(--secondary);line-height:1.5">
+            <span class="mono">SECURITY.md</span> (private disclosure only).
+            <span class="mono">SUPPORT.md</span> (not a third-party product).
+            <span class="mono">.github/CODEOWNERS</span>.
+            Factory issue template with label <span class="mono">factory</span>.
+          </p>
+        </div>
+        <div class="cell">
+          <h3>Settings</h3>
+          <p style="margin:0;font-size:13px;color:var(--secondary);line-height:1.5">
+            Wiki is on. Secret scanning is off. Dependabot updates are off.
+            Description repeats itself. Fix with
+            <span class="mono">gh repo edit --enable-wiki=false</span>
+            and enable push protection.
+          </p>
+        </div>
+        <div class="cell">
+          <h3>Skip</h3>
+          <p style="margin:0;font-size:13px;color:var(--secondary);line-height:1.5">
+            CODE_OF_CONDUCT and FUNDING would raise the 57% health score and
+            lie about what this repo is. Health percentage is not a goal.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="label">Phase DAG (no phase moves runtime code)</div>
+      <div class="arrow-row">
+        <div class="box">L0 docs + GitHub</div>
+        <div class="sep">-&gt;</div>
+        <div class="box">L1 archive dead trees</div>
+        <div class="sep">-&gt;</div>
+        <div class="box">L2 lockfiles after proof</div>
+        <div class="sep">-&gt;</div>
+        <div class="box">L3 shims only if needed</div>
+      </div>
+      <div class="phases">
+        <div class="phase">
+          <div class="num">L0 · depends_on []</div>
+          <h3>Front door</h3>
+          <p>SECURITY, SUPPORT, CODEOWNERS, docs/README.md, slim root README with the Now-true test updated in the same commit, bun in web/README, untrack ignored caches.</p>
+        </div>
+        <div class="phase">
+          <div class="num">L1 · depends_on [L0]</div>
+          <h3>Archive</h3>
+          <p>git mv plans/, PROGRESS.md, cloud/PLAN.md, show-me HTML into docs/archive/. Add scripts/README.md map. Do not move weekend audit files.</p>
+        </div>
+        <div class="phase">
+          <div class="num">L2 · depends_on [L1]</div>
+          <h3>Locks</h3>
+          <p>site/ keeps npm. Root and web drop package-lock only after deploy/beta is dead or rewritten to bun. web/bun.lock is older than web/package-lock: reconcile first.</p>
+        </div>
+        <div class="phase">
+          <div class="num">L3 · depends_on [L2]</div>
+          <h3>Optional shims</h3>
+          <p>New scripts may land in fetch/ scan/ ib/. Existing files stay. Any later move leaves a shim and bumps installed-units.sha256 in the same commit.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="label">Target root (comments only; paths unchanged for runtime)</div>
+      <div class="tree"><span class="ok">README.md</span>              GitHub front door
+<span class="ok">LICENSE SECURITY.md SUPPORT.md</span>
+CLAUDE.md AGENTS.md DEVELOPMENT.md
+<span class="meh">RELIABILITY_*.md TEST_*.md</span>   weekend contracts, stay
+<span class="ok">web/</span>  Next.js terminal
+<span class="ok">site/</span>  marketing (npm until L2 decides)
+<span class="ok">scripts/</span>  Python + daemons (114 top-level py stay)
+<span class="ok">cloud/</span>  VPS systemd / Caddy / deploy
+<span class="ok">docker/ib-gateway/</span>  laptop Gateway
+<span class="ok">lib/tools  tests  config  brand</span>
+docs/
+  README.md            index
+  archive/             plans, show-me, PROGRESS
+  <span class="ok">monorepo-legibility-plan.md</span>
+<span class="bad"># no apps/  no packages/  no .github/README.md</span></div>
+    </div>
+
+    <div class="panel">
+      <div class="label">Breakage table</div>
+      <table>
+        <thead>
+          <tr>
+            <th>Move</th>
+            <th>Blast</th>
+            <th>Evidence</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="tag p0">P0</span> <code>scripts/*.py</code> into packages</td>
+            <td>Units miss ExecStart, deploy red, no scans</td>
+            <td>50 <code>cloud/services/*.service</code> reference <code>scripts/</code></td>
+          </tr>
+          <tr>
+            <td><span class="tag p0">P0</span> Drop README <code>## Now true</code></td>
+            <td>CI docs contract fails, auto-deploy blocked</td>
+            <td><code>test_docs_contract.py:129</code></td>
+          </tr>
+          <tr>
+            <td><span class="tag p0">P0</span> Move <code>RELIABILITY_AUDIT.md</code></td>
+            <td>Weekend runner ledger and ID namespace break</td>
+            <td><code>.claude/skills/reliability-weekend/SKILL.md</code></td>
+          </tr>
+          <tr>
+            <td><span class="tag p0">P0</span> Add <code>.github/README.md</code></td>
+            <td>GitHub shows that file instead of root README</td>
+            <td>GitHub README location precedence</td>
+          </tr>
+          <tr>
+            <td><span class="tag p1">P1</span> Delete <code>docker/ib-gateway/</code></td>
+            <td>Laptop Gateway gone; <code>local.sh</code> dies</td>
+            <td><code>scripts/docker_ib_gateway.sh</code>, <code>ib_gateway.py</code></td>
+          </tr>
+          <tr>
+            <td><span class="tag p1">P1</span> Delete lockfiles before bun proof</td>
+            <td>Beta npm ci, possible web lock drift</td>
+            <td><code>deploy/beta/setup-beta.sh:76</code>; dates bun 07-02 vs npm 07-11</td>
+          </tr>
+          <tr>
+            <td><span class="tag p2">P2</span> Leave tracked caches</td>
+            <td>Public clone gets stale MenthorQ / seasonality JSON</td>
+            <td><code>.gitignore</code> already lists the dirs; files remain tracked</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="foot">
+      Counts from <code>git ls-files</code> on 2026-08-20. GitHub metadata from
+      <code>gh repo view</code> / community profile. No runtime paths changed by this plan.
+    </p>
+  </div>
+</body>
+</html>

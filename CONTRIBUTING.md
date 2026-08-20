@@ -2,7 +2,7 @@
 
 Radon is a proprietary, single-operator trading system. This guide is for the operator.
 
-The canonical developer runbook is `CLAUDE.md`. Read it before making changes. For a map of the tools that author this project (agents, session tooling, verification gates), see `DEVELOPMENT.md`.
+The canonical developer runbook is `CLAUDE.md`. Read it before making changes. For a map of the tools that author this project (agents, session tooling, verification gates), see `DEVELOPMENT.md`. Documentation index: `docs/README.md`. Security reports: `SECURITY.md`. Clones are unsupported: `SUPPORT.md`.
 
 ## Workflow
 

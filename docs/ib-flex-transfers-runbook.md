@@ -334,3 +334,17 @@ for r in get_db().execute(\"SELECT service, state, last_error, updated_at FROM s
 **If the failure is `unknown_flow_type` / `no_direction` / `no_amount`**, that is not a rollback case — it is the parser telling you a field is missing from the Portal config. Re-open the field picker (§2 step 6) and tick the named field. The build stays degraded in the meantime, which is the correct state.
 
 **Do not "fix" a rollback by deleting and recreating the query.** A new query id breaks `IB_FLEX_NAV_QUERY_ID=1442520` in three places (root `.env`, `web/.env`, Hetzner `/home/radon/radon-cloud/.env`) and takes down both consumers.
+
+---
+
+## Flex Web Service token (runtime)
+
+The Flex Web Service token is `IB_FLEX_TOKEN` in `.env` (not `~/.zshrc`).
+Runtime reminder state is `data/flex_token_config.json`, gitignored.
+Schema: `data/flex_token_config.example.json`.
+
+Current token window (operator-maintained): activated 2026-03-19, expires
+2027-02-18. Reminder offsets: 30 / 14 / 7 / 1 days. Handler:
+`scripts/monitor_daemon/handlers/flex_token_check.py`. Renew in IBKR
+Account Management → Flex Queries → Configure Flex Web Service, then
+update `IB_FLEX_TOKEN` and the local config file.

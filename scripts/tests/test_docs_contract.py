@@ -150,6 +150,39 @@ class TestThinIndex:
         text = (_ROOT / "docs" / "scripts-reference.md").read_text(encoding="utf-8")
         assert "npm test" not in text
 
+    def test_readme_defers_catalog_and_index_to_docs(self):
+        text = (_ROOT / "README.md").read_text(encoding="utf-8")
+        assert "## External services" not in text
+        assert "## What's where" not in text
+        assert "## Glossary" not in text
+        assert "docs/README.md" in text
+        assert "docs/external-services.md" in text
+        assert "SECURITY.md" in text
+        assert "SUPPORT.md" in text
+
+    def test_docs_index_exists_and_lists_owners(self):
+        index = (_ROOT / "docs" / "README.md").read_text(encoding="utf-8")
+        for required in (
+            "CLAUDE.md",
+            "docs/operations.md",
+            "docs/cloud-services.md",
+            "docs/indicators/README.md",
+            "docs/external-services.md",
+            "docs/archive/",
+        ):
+            assert required in index, required
+
+    def test_security_and_support_files_exist(self):
+        assert (_ROOT / "SECURITY.md").is_file()
+        assert (_ROOT / "SUPPORT.md").is_file()
+        assert (_ROOT / ".github" / "CODEOWNERS").is_file()
+
+    def test_web_readme_does_not_teach_npm(self):
+        text = (_ROOT / "web" / "README.md").read_text(encoding="utf-8")
+        assert "npm install" not in text
+        assert "npm test" not in text
+        assert "npm run" not in text
+
 
 class TestOwnership:
     def test_matcher_requires_an_owner_when_a_glob_hits(self):

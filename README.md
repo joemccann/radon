@@ -8,7 +8,7 @@
 ![version](https://img.shields.io/badge/version-0.7.0-05AD98)
 ![license](https://img.shields.io/badge/license-proprietary-1e293b)
 
-**Market-structure reconstruction.** Radon surfaces convex options trades from dark pool and OTC flow, the volatility surface, and cross-asset positioning. The system runs every candidate through a hard three-gate framework before sizing it.
+**Market-structure reconstruction.** Radon surfaces convex options trades from dark pool and OTC flow, the volatility surface, and cross-asset positioning. Every candidate runs a hard three-gate framework before sizing.
 
 Flow signal or nothing. No narrative trades, no chart-pattern trades.
 
@@ -17,15 +17,14 @@ Flow signal or nothing. No narrative trades, no chart-pattern trades.
 - [What it does](#what-it-does)
 - [Three gates, in order](#three-gates-in-order)
 - [Quick start](#quick-start)
-- [External services](#external-services)
 - [Architecture at a glance](#architecture-at-a-glance)
 - [Now true](#now-true)
-- [What's where](#whats-where)
 - [Project layout](#project-layout)
+- [Documentation](#documentation)
 - [Data source priority](#data-source-priority)
 - [Deployment](#deployment)
 - [Tests](#tests)
-- [Glossary](#glossary)
+- [Maintainers and help](#maintainers-and-help)
 
 ## What it does
 
@@ -49,9 +48,9 @@ Any gate fails, no trade. Full rules in [`CLAUDE.md`](CLAUDE.md). Strategy specs
 **Prerequisites**
 
 - Python 3.13 (3.14 has an `ib_insync` / `eventkit` incompatibility)
-- Node.js 18+ and `bun` (npm is not used for the JS stack)
+- Node.js 18+ and `bun` for the terminal (`web/`). `site/` still uses npm. See [`DEVELOPMENT.md`](DEVELOPMENT.md).
 - Interactive Brokers Gateway (cloud via Tailscale, Docker, or local TWS)
-- Accounts at the external services listed below — start with [`.env.example`](.env.example) and [`web/.env.example`](web/.env.example), both fully annotated with sign-up URLs
+- Accounts at the services in [`.env.example`](.env.example), [`web/.env.example`](web/.env.example), and [`docs/external-services.md`](docs/external-services.md)
 
 ```bash
 git clone https://github.com/joemccann/radon.git
@@ -62,7 +61,7 @@ pip install -r requirements.txt
 cd web && bun install && cd ..
 ```
 
-The two `.env.example` files are the canonical variable reference — every required and optional key has an inline comment with purpose, format, and required-vs-optional. Read those before the operations runbook.
+The two `.env.example` files are the canonical variable reference. Read those before the operations runbook.
 
 **Dev launchers**
 
@@ -74,53 +73,6 @@ scripts/local.sh    # fully local: laptop runs everything including the IB Gatew
 `cloud.sh` is the everyday workflow. `local.sh` is for offline dev or when the VPS is down. Mode persists to `.env.ib-mode`; toggle later via `scripts/ib mode local|cloud`.
 
 Open `http://localhost:3000`. Clerk auto-bypasses on localhost in non-production.
-
-## External services
-
-Radon is glued together from a long list of third-party services. The full env-var matrix lives in [`.env.example`](.env.example) and [`web/.env.example`](web/.env.example); the table below summarises why each one is there and where to sign up.
-
-### Required (production)
-
-| Service | Purpose | Env vars | Where |
-|---|---|---|---|
-| **Interactive Brokers** | Real-time quotes, options chains, order routing, positions. IB Gateway + IB Flex Web Service. | `TWS_USERID`, `TWS_PASSWORD`, `IB_FLEX_TOKEN`, `IB_FLEX_QUERY_ID` (blotter), `IB_FLEX_NAV_QUERY_ID` (cash flows), `IB_GATEWAY_*` | [ibkr.com](https://www.interactivebrokers.com/) · IB Pro account · Flex Web Service enabled in Account Management |
-| **Unusual Whales** | Dark pool flow, options flow, OI changes, sweeps, analyst data, LEAP IV. | `UW_TOKEN` | [unusualwhales.com](https://unusualwhales.com/referral#39985a64-656c-4642-a051-db89f6324d64) |
-| **Clerk** | JWT auth for the terminal + FastAPI. Localhost auto-bypassed in dev. | `CLERK_ISSUER`, `CLERK_JWKS_URL`, `CLERK_SECRET_KEY`, `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `ALLOWED_USER_IDS` | [clerk.com](https://clerk.com/) |
-| **Turso (libSQL)** | Cloud-hosted SQLite. Canonical store for journal, service_health, snapshots. | `TURSO_DB_URL`, `TURSO_AUTH_TOKEN` | [turso.tech](https://turso.tech/) |
-| **Anthropic Claude API** | Assistant chat, share-card OG renders, vision tagger (newsfeed), seasonality vision fallback. | `ANTHROPIC_API_KEY` (aliases `CLAUDE_CODE_API_KEY`, `CLAUDE_API_KEY`) | [console.anthropic.com](https://console.anthropic.com/) |
-| **Backblaze B2** | Off-box cold archive for `portfolio_snapshots` older than ~30d (`radon-portfolio-archive` oneshot). S3-compatible API via `boto3`. Required on the production VPS; unit fails closed without keys. | `RADON_ARCHIVE_S3_ENDPOINT`, `RADON_ARCHIVE_S3_BUCKET`, `RADON_ARCHIVE_S3_ACCESS_KEY_ID`, `RADON_ARCHIVE_S3_SECRET_ACCESS_KEY`, `RADON_ARCHIVE_S3_REGION` | [backblaze.com/b2](https://www.backblaze.com/b2/cloud-storage.html) · bucket `radon-archive` |
-
-### Required for specific subsystems
-
-| Service | Subsystem | Env vars | Where |
-|---|---|---|---|
-| **MenthorQ** | `/menthorq/*` CTA / dashboard / screener / forex / summary / quin surfaces. Username/password login via Playwright. | `MENTHORQ_USER`, `MENTHORQ_PASS` | [menthorq.com](https://menthorq.com/) |
-| **MarketDataWorks (MDW)** | Inbound shared-secret used by MDW → FastAPI pushes that feed CTA enrichment. Validates `X-API-Key` header. | `MDW_API_KEY` | Vendor-issued |
-| **The Market Ear** | Real-time intraday news scraped by `scripts/newsfeed/`. Headless Playwright login; session cached at `data/newsfeed-storage.json` (~30d), full re-auth ~6h. | `THEMARKETEAR_EMAIL`, `THEMARKETEAR_PASSWORD` | [themarketear.com](https://themarketear.com/) (paid subscription) |
-| **Cerebras** | Newsfeed text tagger (gpt-oss-120b → qwen-3 fallback). Falls back to Anthropic when unset. | `CEREBRAS_API_KEY` | [cerebras.ai](https://www.cerebras.ai/inference) |
-| **Artificial Analysis** | LLM Token Expenditure Index (`/regime/llm`, daily timer). Free tier 1000 req/day. | `ARTIFICIAL_ANALYSIS_API_KEY` | [artificialanalysis.ai](https://artificialanalysis.ai/login) → Insights dashboard |
-| **Exa** | Company and market research surfaces. | `EXA_API_KEY` | [dashboard.exa.ai](https://dashboard.exa.ai/api-keys) |
-
-### Infrastructure (production)
-
-| Service | Purpose | Notes |
-|---|---|---|
-| **Hetzner Cloud** | VPS that hosts FastAPI, IB Gateway (docker), the WS relay, the monitor daemon, the newsfeed, Caddy, and `media.radon.run`. Host secrets in `/home/radon/radon-cloud/.env` include Turso + **Backblaze B2** archive keys. | Resolved as `ib-gateway` via Tailscale on the laptop |
-| **Backblaze B2** | Cold storage for archived portfolio snapshot months (`portfolio_snapshots/YYYY-MM.jsonl.gz`). See required table above. | Bucket `radon-archive` |
-| **Tailscale** | Mesh VPN between laptop and VPS. Laptop reaches `ib-gateway:4001` over Tailscale; FastAPI on the VPS binds to localhost-only. | [tailscale.com](https://tailscale.com/) |
-| **Caddy** | TLS termination + reverse proxy on the VPS. Serves `app.radon.run` and `media.radon.run`. | Canonical config: [`cloud/caddy/`](cloud/caddy/) |
-| **GitHub Actions** | `git push origin main` triggers `.github/workflows/ci.yml`, which runs the Vitest + pytest gate then deploys the tested monorepo SHA on green. | Confirm: `gh run list --workflow=ci.yml --limit 1` |
-
-### Optional alerting / fallback data
-
-| Service | Purpose | Env vars | Where |
-|---|---|---|---|
-| **Pushover** | Watchdog P1 (emergency) starts laptop Grok auto-fix. Grok follow-up and live deploys are normal-priority (`radon grok:`, `radon deploy live`) and must never be P1. P2/P3 stay in `service_health`. Absent vars degrade gracefully. Spec: [`docs/grok-page-responder.md`](docs/grok-page-responder.md). | `PUSHOVER_USER`, `PUSHOVER_TOKEN` | [pushover.net](https://pushover.net/) |
-| **FRED (St. Louis Fed)** | Risk-free rate (DFF) for Black-Scholes implied value. No key required; 24h cache + 0.0 fallback. | none | Public API |
-| **Cboe** | COR1M historical fallback when IB / UW are missing the series. | none | Public CSV feed |
-| **Yahoo Finance** | Last-resort price fallback when IB and UW both fail. Never the first or second source. | none | Public API |
-
-Production `.env` lives on the VPS at `/home/radon/radon-cloud/.env` (`0600`): this is the sole legacy-directory exception during the monorepo migration, not a source of deploy code or services. Laptop dev uses the root `.env` for FastAPI and scripts, plus `web/.env` for Next.js (some keys are duplicated because Next.js can't read the root file from inside `web/`).
 
 ## Architecture at a glance
 
@@ -144,17 +96,17 @@ Production `.env` lives on the VPS at `/home/radon/radon-cloud/.env` (`0600`): t
 **Process layout**
 
 - `localhost:3000` for the Next.js 16 terminal
-- `:8321` for FastAPI (40+ endpoints, JWT-gated, localhost bypass for server-to-server)
+- `:8321` for FastAPI (JWT-gated, localhost bypass for server-to-server)
 - `:8765` for the IB realtime WebSocket relay
 - 120s loop for the newsfeed scraper (headless Playwright)
 
 **Storage**
 
-- Turso libSQL cloud DB (canonical). Every Radon process talks directly to cloud — no embedded replica anywhere (retired 2026-05-20; see [`docs/cloud-services.md`](docs/cloud-services.md))
+- Turso libSQL cloud DB (canonical). Direct-to-cloud. Embedded replica retired 2026-05-20. See [`docs/cloud-services.md`](docs/cloud-services.md).
 - JSON files in `data/` as fallback / DR archive
 - Hetzner-hosted `media.radon.run` for newsfeed images
 
-Full architecture and the Phase 0-6 migration history live in [`docs/cloud-services.md`](docs/cloud-services.md). The developer runbook is [`CLAUDE.md`](CLAUDE.md).
+Developer runbook: [`CLAUDE.md`](CLAUDE.md).
 
 ## Now true
 
@@ -166,68 +118,49 @@ Durable facts. History and mechanism live in the owner file, not here.
 - **Incidents.** Watchdog artifacts under `data/incidents/`. Triage with `/incident <path>`. Cases: [`docs/incident-runbook.md`](docs/incident-runbook.md).
 - **Factory.** GitHub issues labeled `factory` become draft PRs via Foreman in [`joemccann/radon-factory`](https://github.com/joemccann/radon-factory). Contract: [`docs/factory.md`](docs/factory.md).
 
-## What's where
-
-| Topic | Doc |
-|-------|-----|
-| Developer runbook, gates, calculations, component cheat sheet | [`CLAUDE.md`](CLAUDE.md) |
-| Authoring toolchain map (agents, session tooling, verification, creative stack) | [`DEVELOPMENT.md`](DEVELOPMENT.md) |
-| Cloud architecture, two-mode deploy, Turso DB | [`docs/cloud-services.md`](docs/cloud-services.md) |
-| Background services, watchdogs, deploy flow, env vars | [`docs/operations.md`](docs/operations.md) |
-| Incident cases and `/incident` playbook | [`docs/incident-runbook.md`](docs/incident-runbook.md) |
-| Regime and scanner indicator specs | [`docs/indicators/README.md`](docs/indicators/README.md) |
-| Equibles market-structure API | [`docs/equibles-api.md`](docs/equibles-api.md) |
-| Software factory (Foreman, draft PRs from labeled issues) | [`docs/factory.md`](docs/factory.md) |
-| CLI commands and test runners | [`docs/scripts-reference.md`](docs/scripts-reference.md) |
-| Strategy specs (Dark Pool, LEAP, GARCH, VCG-R, CRI, Risk Reversal) | [`docs/strategies.md`](docs/strategies.md) |
-| VCG-R research notes | [`docs/cross_asset_volatility_credit_gap_spec_(VCG).md`](docs/cross_asset_volatility_credit_gap_spec_(VCG).md) |
-| GARCH convergence strategy | [`docs/strategy-garch-convergence.md`](docs/strategy-garch-convergence.md) |
-| Options structures catalogue | [`docs/options-structures.md`](docs/options-structures.md) |
-| Chart system | [`docs/chart-system.md`](docs/chart-system.md) |
-| Brand identity and design tokens | [`docs/brand-identity.md`](docs/brand-identity.md) |
-| IB Gateway Docker setup | [`docs/ib-gateway-docker.md`](docs/ib-gateway-docker.md) |
-| IB connection troubleshooting | [`docs/ib-connection-troubleshooting.md`](docs/ib-connection-troubleshooting.md) |
-| Unusual Whales API reference | [`docs/unusual_whales_api.md`](docs/unusual_whales_api.md) |
-| Performance reconstruction | [`docs/performance-reconstruction.md`](docs/performance-reconstruction.md) |
-| OAuth subscription auth | [`docs/oauth-subscription-auth.md`](docs/oauth-subscription-auth.md) |
-
 ## Project layout
 
 ```
 radon/
 ├─ scripts/              Python scanners, evaluators, broker integrations
 │  ├─ clients/           Broker and data-provider adapters
+│  ├─ api/               FastAPI (:8321)
 │  ├─ monitor_daemon/    Background fill/exit/rebalance daemon
 │  ├─ db/                Turso writers + migrations
 │  ├─ knowledge/         radon-kb MCP (journal, evals, incidents)
 │  └─ watchdog/          Service-health alerting
-├─ web/                  Next.js 16 terminal + FastAPI server scripts
-├─ site/                 Standalone marketing site (separate Vercel project)
-├─ cloud/                Production infrastructure, services, and deploy tooling
-├─ docs/                 Topic-scoped documentation
-│  └─ indicators/        Regime and scanner specs
-├─ data/                 Runtime artifacts (gitignored except taxonomy + presets)
-├─ config/               launchd plists and service configuration
+├─ web/                  Next.js 16 terminal (bun)
+├─ site/                 Marketing site (npm, separate Vercel project)
+├─ cloud/                VPS systemd, Caddy, deploy, IB Gateway compose
+├─ docker/ib-gateway/    Laptop IB Gateway compose
+├─ lib/tools/            Pi tools (Vitest + CI)
+├─ tests/                TWR money-math (CI collects this directory)
+├─ docs/                 Topic-scoped documentation (index: docs/README.md)
+├─ config/               Laptop launchd plists
 ├─ brand/                Design system and tokens
 └─ CLAUDE.md             Authoritative developer runbook
 ```
 
+## Documentation
+
+Index: [`docs/README.md`](docs/README.md). External services: [`docs/external-services.md`](docs/external-services.md). Equibles: [`docs/equibles-api.md`](docs/equibles-api.md). Toolchain map: [`DEVELOPMENT.md`](DEVELOPMENT.md).
+
 ## Data source priority
 
-Strict order for any price / flow / chain lookup. The full external-service inventory is in [External services](#external-services) above.
+Strict order for any price / flow / chain lookup. Full inventory: [`docs/external-services.md`](docs/external-services.md).
 
 1. **Interactive Brokers** for real-time quotes, options chains, and portfolio state
 2. **Unusual Whales** for dark pool flow, sweeps, options flow, and analyst data
 3. **Cboe official feeds** for COR1M historical fallback
 4. **Yahoo Finance** as a strict last resort
 
-Never skip to Yahoo or web scrape without trying IB then Unusual Whales first. Research surfaces (Exa) and news (themarketear, MenthorQ) are orthogonal — they don't substitute for missing price data.
+Never skip to Yahoo or web scrape without trying IB then Unusual Whales first. Research surfaces (Exa) and news (themarketear, MenthorQ) are orthogonal. They do not substitute for missing price data.
 
 ## Deployment
 
-`git push origin main` is the deploy. After the CI gates pass, GitHub Actions extracts `cloud/` from the exact tested SHA into an immutable VPS runner at `/home/radon/.radon-deploy-runners/<sha>.<run>/cloud` and runs its deploy contract. Before any dependency build, service stop, or transition write, the deploy verifies the installed root control plane against its manifest.
+`git push origin main` is the deploy. After the CI gates pass, GitHub Actions extracts `cloud/` from the exact tested SHA into an immutable VPS runner and runs its deploy contract.
 
-The monorepo [`cloud/`](cloud/) directory is the canonical source for systemd units, Caddy, the IB Gateway Compose project, and deploy tooling. `/home/radon/radon-cloud/.env` remains the only legacy-path exception for stable host secrets. Confirm releases with `gh run list --workflow=ci.yml --limit 1`. For the exact privileged recovery sequence, use [`cloud/CLAUDE.md`](cloud/CLAUDE.md) and [`docs/monorepo-cloud-migration.md`](docs/monorepo-cloud-migration.md); do not reconstruct it from this overview.
+Canonical infra: [`cloud/`](cloud/). Recovery: [`cloud/CLAUDE.md`](cloud/CLAUDE.md) and [`docs/monorepo-cloud-migration.md`](docs/monorepo-cloud-migration.md). Confirm: `gh run list --workflow=ci.yml --limit 1`.
 
 ## Tests
 
@@ -235,20 +168,13 @@ The monorepo [`cloud/`](cloud/) directory is the canonical source for systemd un
 python3.13 scripts/run_pytest_affected.py        # scoped Python tests
 python -m pytest scripts/tests/ -v               # full Python suite
 cd web && bun test                               # Vitest
-cd web && npx playwright test                    # E2E
+cd web && bunx playwright test                   # E2E
 ```
 
-Mocked API calls cover most of the surface, so development rarely needs a live broker session. Order-route integration uses an isolated test-mode FastAPI harness (`web/tests/fastapiHarness.ts`) that never reuses the broker-backed `localhost:8321` server.
+Mocked API calls cover most of the surface. Order-route integration uses an isolated test-mode FastAPI harness (`web/tests/fastapiHarness.ts`) that never reuses the broker-backed `localhost:8321` server.
 
-## Glossary
+## Maintainers and help
 
-| Term | Definition |
-|------|------------|
-| **Convexity** | Asymmetric payoff where expected upside materially exceeds downside |
-| **CRI** | Crash Risk Index, composite crash-risk and CTA deleveraging model |
-| **CTA** | Commodity Trading Advisor, typically systematic trend-following funds |
-| **Dark Pool** | Private off-exchange venue used for institutional trading |
-| **Edge** | A specific reason the market is mispricing an outcome |
-| **GEX** | Gamma exposure surface across the options chain |
-| **Kelly Criterion** | Position-sizing framework that scales exposure to edge and odds |
-| **VCG-R** | Volatility-Credit Gap, VIX>28 + VCG>2.5σ risk-off trigger |
+Maintained by Joe McCann. Single operator. Clones are unsupported. See [`SUPPORT.md`](SUPPORT.md).
+
+Security reports: [`SECURITY.md`](SECURITY.md). Do not open a public issue for a vulnerability.

@@ -8,9 +8,9 @@ history/_transactions.jsonl
 *.sqlite3
 *.sqlite3-journal
 
-# Live account state. The memory constructor derives these from ib-sync runs, so
-# they carry real net liq, open strikes and expiries; the GitHub repo is public.
-# The runtime keeps writing them locally, they just never get tracked again.
+# Live account state and agent-memory facts. The constructor writes these
+# locally. The GitHub repo is public, so only the source-of-truth rule
+# (no account figures) stays tracked.
 # Guarded by tests/test_no_tracked_account_figures.py.
-memory/fact/portfolio-*.json
+memory/fact/*.json
 !memory/fact/portfolio-source-of-truth.json

@@ -7,7 +7,7 @@ Primary host is Hetzner: `radon-grok-page-responder.timer` against
 `/home/radon/radon-page-responder`. Laptop launchd is off. Do not run
 the fixer against `/home/radon/radon`. Cloud options that were rejected
 (Cursor Cloud Agents, weekend clone) are in
-[`show-me-grok-cloud.html`](show-me-grok-cloud.html).
+[`show-me-grok-cloud.html`](archive/show-me/show-me-grok-cloud.html).
 
 ## What you get on the phone
 

@@ -44,6 +44,18 @@
       "id": "cli",
       "globs": [".pi/commands.json"],
       "owners": ["docs/scripts-reference.md"]
+    },
+    {
+      "id": "repo-front-door",
+      "globs": [
+        "SECURITY.md",
+        "SUPPORT.md",
+        "CONTRIBUTING.md",
+        "docs/README.md",
+        "docs/external-services.md"
+      ],
+      "owners": ["docs/README.md"],
+      "note": "GitHub front door. Root README.md is pinned by TestThinIndex, not this glob: a bare README.md glob matches every nested README via basename."
     }
   ]
 }

@@ -11,6 +11,8 @@ Marketing site for Radon, built as a standalone Next.js app in `site/`.
 
 ## Local Development
 
+**Package manager: npm.** `site/package-lock.json` is the lockfile. There is no `site/bun.lock`. The terminal in `web/` uses bun; this app does not.
+
 ```bash
 cd site
 npm install
@@ -38,7 +40,7 @@ python3.13 scripts/seo_audit_report.py
 
 `NEXT_DIST_DIR` is supported so local verification can build without colliding with another live Next.js process using the default `.next/` directory.
 
-Standalone browser coverage for the marketing site lives under `site/e2e/` and runs through the shared Playwright harness in [playwright.site.config.ts](/Users/joemccann/dev/apps/finance/radon/web/playwright.site.config.ts):
+Standalone browser coverage for the marketing site lives under `site/e2e/` and runs through the shared Playwright harness in [`web/playwright.site.config.ts`](../web/playwright.site.config.ts):
 
 ```bash
 cd web
@@ -92,6 +94,6 @@ The script writes `reports/site-seo-audit-YYYY-MM-DD.html`, checks the homepage 
 
 The Vercel project for the site should use `site/` as its **Root Directory**.
 
-This app includes [vercel.json](/Users/joemccann/dev/apps/finance/radon/site/vercel.json) with an `ignoreCommand` that only allows a deploy to continue when files under `site/` changed. Pushes that only touch `web/`, `scripts/`, `data/`, or other repo paths will skip the site build.
+This app includes [`vercel.json`](vercel.json) with an `ignoreCommand` that only allows a deploy to continue when files under `site/` changed. Pushes that only touch `web/`, `scripts/`, `data/`, or other repo paths will skip the site build.
 
-The ignore step is implemented by [vercel-ignore-build.mjs](/Users/joemccann/dev/apps/finance/radon/site/scripts/vercel-ignore-build.mjs). It compares the current commit against the previous deployed commit and defaults to **continuing the build** if Vercel cannot determine the diff.
+The ignore step is implemented by [`scripts/vercel-ignore-build.mjs`](scripts/vercel-ignore-build.mjs). It compares the current commit against the previous deployed commit and defaults to **continuing the build** if Vercel cannot determine the diff.
