@@ -422,4 +422,70 @@ describe("buildExecutedGroupDescription", () => {
     expect(description).toContain("Short $90 Call");
     expect(description).toContain("Long $85 Put");
   });
+
+  it("labels an all-long call + put at different strikes a Long Strangle, not a Risk Reversal", () => {
+    const fills = [
+      makeExecutedFill({
+        symbol: "ARM",
+        side: "BOT",
+        realizedPNL: null,
+        contract: { conId: 111, symbol: "ARM", secType: "OPT", strike: 270, right: "C", expiry: "2026-09-18" },
+      }),
+      makeExecutedFill({
+        execId: "exec-2",
+        symbol: "ARM",
+        side: "BOT",
+        realizedPNL: null,
+        contract: { conId: 222, symbol: "ARM", secType: "OPT", strike: 220, right: "P", expiry: "2026-09-18" },
+      }),
+    ];
+
+    const description = buildExecutedGroupDescription(fills, false);
+    expect(description).toContain("Opened ARM Long Strangle 9/18");
+    expect(description).toContain("Long $270 Call");
+    expect(description).toContain("Long $220 Put");
+    expect(description).not.toContain("Risk Reversal");
+  });
+
+  it("labels an all-long call + put at the same strike a Long Straddle", () => {
+    const fills = [
+      makeExecutedFill({
+        symbol: "ARM",
+        side: "BOT",
+        realizedPNL: null,
+        contract: { conId: 111, symbol: "ARM", secType: "OPT", strike: 250, right: "C", expiry: "2026-09-18" },
+      }),
+      makeExecutedFill({
+        execId: "exec-2",
+        symbol: "ARM",
+        side: "BOT",
+        realizedPNL: null,
+        contract: { conId: 222, symbol: "ARM", secType: "OPT", strike: 250, right: "P", expiry: "2026-09-18" },
+      }),
+    ];
+
+    const description = buildExecutedGroupDescription(fills, false);
+    expect(description).toContain("Opened ARM Long Straddle 9/18");
+    expect(description).not.toContain("Risk Reversal");
+  });
+
+  it("labels a closed short strangle by its original direction", () => {
+    const fills = [
+      makeExecutedFill({
+        symbol: "ARM",
+        side: "BOT",
+        contract: { conId: 111, symbol: "ARM", secType: "OPT", strike: 270, right: "C", expiry: "2026-09-18" },
+      }),
+      makeExecutedFill({
+        execId: "exec-2",
+        symbol: "ARM",
+        side: "BOT",
+        contract: { conId: 222, symbol: "ARM", secType: "OPT", strike: 220, right: "P", expiry: "2026-09-18" },
+      }),
+    ];
+
+    const description = buildExecutedGroupDescription(fills, true);
+    expect(description).toContain("Closed ARM Short Strangle 9/18");
+    expect(description).not.toContain("Risk Reversal");
+  });
 });
