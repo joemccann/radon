@@ -18,6 +18,8 @@ from leap_scanner_uw import (
     get_current_iv,
     get_leap_options,
     resolve_explicit_tickers,
+    ScanResult,
+    VolData,
 )
 import leap_scanner_uw
 
@@ -246,6 +248,59 @@ def test_all_provider_failures_preserve_cache_and_fail_health(tmp_path, monkeypa
 
     assert leap_scanner_uw.main() == 1
     assert json.loads(cache.read_text()) == previous
+
+
+def _one_scan_result(ticker: str) -> ScanResult:
+    return ScanResult(
+        ticker=ticker,
+        vol_data=VolData(
+            ticker=ticker, price=100.0, hv_20=20.0, hv_60=18.0, hv_252=16.0, avg_hv=18.0
+        ),
+        current_iv=15.0,
+        iv_rank=40.0,
+        leaps=[],
+        best_gap=5.0,
+        is_mispriced=False,
+    )
+
+
+def test_partial_ticker_failures_write_cache_and_exit_zero(tmp_path, monkeypatch):
+    """Production 2026-08-20: 347/518 names scanned, 171 with no LEAPs or a
+    provider miss. main() still wrote data/leap.json + an ok heartbeat, then
+    exited 1 because failed_tickers was nonempty. FastAPI mapped that to 502
+    and radon-leap.service paged P1.
+    """
+    cache = tmp_path / "leap.json"
+    monkeypatch.setattr(leap_scanner_uw, "DASHBOARD_CACHE_PATH", cache)
+    monkeypatch.setattr(leap_scanner_uw, "UWClient", lambda: nullcontext(object()))
+    monkeypatch.setattr(leap_scanner_uw, "mirror_scan_snapshot", lambda *a, **k: None)
+
+    def fake_scan(ticker, *args, **kwargs):
+        if ticker == "SPY":
+            return _one_scan_result("SPY")
+        if ticker == "QQQ":
+            return None
+        raise RuntimeError("uw miss")
+
+    monkeypatch.setattr(leap_scanner_uw, "scan_ticker", fake_scan)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "leap_scanner_uw.py",
+            "SPY",
+            "QQQ",
+            "BA",
+            "--json",
+            "--output",
+            str(tmp_path / "report.html"),
+        ],
+    )
+
+    assert leap_scanner_uw.main() == 0
+    payload = json.loads(cache.read_text())
+    assert [row["ticker"] for row in payload["results"]] == ["SPY"]
+    assert set(payload["failed_tickers"]) == {"QQQ", "BA"}
 
 
 # ── find_strikes_by_delta ───────────────────────────────────────────
