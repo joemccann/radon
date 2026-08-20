@@ -4,41 +4,49 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { existsSync } from "fs";
 import { readFile } from "fs/promises";
 import path from "path";
 
 const PROJECT_ROOT = path.resolve(__dirname, "../..");
 
+function flexConfigPath(): string {
+  const live = path.join(PROJECT_ROOT, "data", "flex_token_config.json");
+  const example = path.join(PROJECT_ROOT, "data", "flex_token_config.example.json");
+  return existsSync(live) ? live : example;
+}
+
 // ── 1. Config file ─────────────────────────────────────────────────
 
 describe("flex_token_config.json", () => {
-  it("exists in data/", async () => {
-    const p = path.join(PROJECT_ROOT, "data", "flex_token_config.json");
+  it("example schema is committed", async () => {
+    const p = path.join(PROJECT_ROOT, "data", "flex_token_config.example.json");
     const content = await readFile(p, "utf-8");
     expect(content).toBeTruthy();
   });
 
+  it("exists in data/ or falls back to the committed example", async () => {
+    const content = await readFile(flexConfigPath(), "utf-8");
+    expect(content).toBeTruthy();
+  });
+
   it("contains expires_at ISO date", async () => {
-    const p = path.join(PROJECT_ROOT, "data", "flex_token_config.json");
-    const data = JSON.parse(await readFile(p, "utf-8"));
+    const data = JSON.parse(await readFile(flexConfigPath(), "utf-8"));
     expect(data.expires_at).toMatch(/^\d{4}-\d{2}-\d{2}/);
   });
 
   it("contains renewal_url", async () => {
-    const p = path.join(PROJECT_ROOT, "data", "flex_token_config.json");
-    const data = JSON.parse(await readFile(p, "utf-8"));
+    const data = JSON.parse(await readFile(flexConfigPath(), "utf-8"));
     expect(data.renewal_url).toContain("interactivebrokers.com");
   });
 
   it("contains breadcrumb trail", async () => {
-    const p = path.join(PROJECT_ROOT, "data", "flex_token_config.json");
-    const data = JSON.parse(await readFile(p, "utf-8"));
+    const data = JSON.parse(await readFile(flexConfigPath(), "utf-8"));
     expect(data.breadcrumb).toContain("Flex Queries");
   });
 
   it("contains reminder_days array with 30, 14, 7, 1", async () => {
-    const p = path.join(PROJECT_ROOT, "data", "flex_token_config.json");
-    const data = JSON.parse(await readFile(p, "utf-8"));
+    const data = JSON.parse(await readFile(flexConfigPath(), "utf-8"));
     expect(data.reminder_days).toEqual([30, 14, 7, 1]);
   });
 });

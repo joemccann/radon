@@ -1,0 +1,10 @@
+{
+  "token_masked": "0000...0000",
+  "activated_at": "2026-03-19T19:16:57-04:00",
+  "expires_at": "2027-02-18T19:16:57-05:00",
+  "renewal_url": "https://www.interactivebrokers.com/sso/Login",
+  "breadcrumb": "Performance & Reports -> Flex Queries -> Flex Queries Delivery -> Configure Flex Web Service",
+  "reminder_days": [30, 14, 7, 1],
+  "reminders_sent": {},
+  "notes": "Example only. Runtime copy is gitignored at data/flex_token_config.json. The live token is IB_FLEX_TOKEN in .env, not ~/.zshrc."
+}

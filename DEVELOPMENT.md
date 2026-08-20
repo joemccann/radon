@@ -39,7 +39,7 @@ Every change, agent-authored or not, goes through the same gates. The gates them
 
 ## Runtime and dependencies
 
-- **bun**, not npm — `bun.lock` is canonical for all JS/TS package management.
+- **bun** for the repo root and `web/` (`bun.lock`). `site/` still uses npm (`site/package-lock.json`). Do not regenerate root or `web/` `package-lock.json`.
 - Python requirements are pinned to the VPS's `pip freeze`, not the laptop's, because deploys install on the VPS.
 
 ## Marketing and creative tooling

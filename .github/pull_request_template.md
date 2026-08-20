@@ -1,0 +1,4 @@
+- [ ] Red/green TDD (failing test, then fix)
+- [ ] Staged only the files this change owns (no `git add -A`)
+- [ ] Owner doc updated, or the commit message has `docs-skip: <reason>`
+- [ ] Previous `main` deploy finished before this push

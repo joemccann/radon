@@ -8,9 +8,9 @@ Deployment infrastructure for the [Radon](https://github.com/joemccann/radon) tr
 
 ---
 
-## What This Repo Contains
+## What this directory contains
 
-This directory holds production configuration alongside the Radon application in one monorepo. Application code and infrastructure are tested and deployed at the same Git SHA.
+Production configuration for the Radon monorepo. Application code and infrastructure are tested and deployed at the same Git SHA.
 
 ```
 cloud/
@@ -33,8 +33,6 @@ cloud/
 │   ├── migrate-data.sh         # Snapshot + transfer runtime state
 │   └── wipe-vps.sh             # Reset VPS for clean rebuild
 ├── tests/                      # Configuration validation test suite
-├── .env.example                # All required environment variables
-├── PLAN.md                     # Codex-reviewed implementation plan
 └── README.md
 ```
 
@@ -75,8 +73,8 @@ Tailscale also carries SSH.
 | **Auth** | [Clerk](https://clerk.com) — OAuth (Google, GitHub, X), JWT validation |
 | **Ingress** | [Caddy](https://caddyserver.com) — auto-TLS, reverse proxy, WebSocket |
 | **Deploy** | GitHub Actions + SSH — push-to-deploy in ~30-60s |
-| **Frontend** | Next.js on VPS (Phase 1). Vercel migration in Phase 2. |
-| **VPS** | Hetzner CPX11, Ubuntu 24.04, Ashburn VA |
+| **Frontend** | Next.js on the VPS. Marketing site is the separate `site/` Vercel project. |
+| **VPS** | Hetzner, Ubuntu 24.04, Ashburn VA |
 
 ---
 
@@ -114,7 +112,7 @@ ssh root@ib-gateway 'bash -s' < cloud/scripts/setup-vps.sh
 # Add the printed SSH key to GitHub (Settings → SSH keys)
 
 # Second run — clones repos, builds, configures services
-ssh root@ib-gateway 'bash -s' < scripts/setup-vps.sh
+ssh root@ib-gateway 'bash -s' < cloud/scripts/setup-vps.sh
 ```
 
 ### 2. Complete setup (from your Mac)
@@ -445,28 +443,21 @@ scripts/post-setup.sh
 
 | Service | Monthly |
 |---------|---------|
-| Hetzner CPX11 (2 vCPU, 2GB RAM) | ~$4-6 |
+| Hetzner VPS | host-dependent |
 | Clerk (free tier, 10K MAU) | $0 |
 | Domain | ~$1/mo |
 | **Total** | **~$5-7/mo** |
 
 ---
 
-## Phase 2 (future)
+## Related
 
-- Move Next.js to Vercel after consolidating API routes into FastAPI
-- Multi-tenant: users bring own IB credentials, per-user container orchestration
-- Rate limiting, abuse controls, billing
-
----
-
-## Related Repos
-
-- [radon](https://github.com/joemccann/radon) — Application code (FastAPI, relay, Next.js, scanners)
-- [market-data-warehouse](https://github.com/joemccann/market-data-warehouse) — Historical market data pipeline (shares the same VPS IB Gateway)
+- This directory is part of [joemccann/radon](https://github.com/joemccann/radon), not a standalone repo.
+- Archived Phase 1 plan: [`docs/archive/sessions/cloud-phase1-plan.md`](../docs/archive/sessions/cloud-phase1-plan.md) (do not execute).
+- [market-data-warehouse](https://github.com/joemccann/market-data-warehouse) shares the VPS IB Gateway.
 
 ---
 
 ## License
 
-MIT
+Proprietary. See [`LICENSE`](../LICENSE). No MIT grant.

@@ -13,25 +13,25 @@ Next.js dashboard with real-time IB pricing and Claude-powered conversational in
 
 ```bash
 # 1. Install dependencies
-npm install
+bun install
 
 # 2. Configure environment
 cp .env.example .env
 # Edit .env with your API keys
 
-# 3. Start everything (Next.js + IB price server)
-npm run dev
+# 3. Start everything (from repo root, preferred: ../scripts/cloud.sh)
+bun run dev
 
 # 4. Open http://localhost:3000
 ```
 
-The `npm run dev` command starts four services:
+The `bun run dev` command starts four services:
 - Next.js dev server (port 3000)
 - IB real-time price server (port 8765)
 - FastAPI server (port 8321) — Python script execution, IB Gateway auto-restart
 - Market Ear newsfeed scraper (no port; polls `themarketear.com/newsfeed` every 120s via chrome-cdp)
 
-**Authentication on localhost.** Clerk auth auto-bypasses on `localhost` / `127.0.0.1` / `::1` whenever `NODE_ENV !== "production"`, so `npm run dev` never hits the sign-in wall. `next build && next start` (production builds) still enforce Clerk. See [Authentication](#authentication) for details.
+**Authentication on localhost.** Clerk auth auto-bypasses on `localhost` / `127.0.0.1` / `::1` whenever `NODE_ENV !== "production"`, so `bun run dev` never hits the sign-in wall. `next build && next start` (production builds) still enforce Clerk. See [Authentication](#authentication) for details.
 
 **Note:** Frontend data polling automatically respects market hours. During CLOSED market (weekends, holidays, overnight), all polls stop. During regular hours (9:30 AM - 4:00 PM ET) polling is most frequent. See [Market-Hours Polling](#market-hours-polling) for details.
 
@@ -133,7 +133,7 @@ cp .env.example .env
 
 ## Authentication
 
-The trading terminal uses Clerk for production auth, but **on localhost in development the sign-in wall is automatically bypassed** so `npm run dev` Just Works without ever touching Clerk.
+The trading terminal uses Clerk for production auth, but **on localhost in development the sign-in wall is automatically bypassed** so `bun run dev` Just Works without ever touching Clerk.
 
 | Path | When auth is enforced | When auth is skipped |
 |------|------------------------|----------------------|
@@ -298,13 +298,13 @@ function PriceDisplay() {
 
 ```bash
 # Unit tests (Vitest)
-npm test
+bun test
 
 # E2E tests (Playwright)
 npx playwright test
 ```
 
-`npm test` already runs with `NODE_ENV=test ASSISTANT_MOCK=1`, so no API keys are needed and there is no separate opt-in to run beyond plain `npm test`.
+`bun test` already runs with `NODE_ENV=test ASSISTANT_MOCK=1`, so no API keys are needed and there is no separate opt-in to run beyond plain `bun test`.
 
 **Unit tests** (`web/tests/`): Route logic, price utilities, naked short guard, WebSocket state machine, regime/CRI staleness, CTA freshness, share cards, P&L calculations, day change, exposure breakdown, stale option quote guard (`stale-option-quote-guard.test.ts`).
 
@@ -322,28 +322,28 @@ python3.13 ../scripts/test_ib_realtime.py --ws-only   # WebSocket only
 
 ```bash
 # Start everything (Next.js + IB WS relay + FastAPI)
-npm run dev
+bun run dev
 
 # Start Next.js only (no real-time prices, no FastAPI)
-npm run dev:next
+bun run dev:next
 
 # Start IB price server only
-npm run dev:prices
+bun run dev:prices
 
 # Health check (FastAPI + IB Gateway status)
 curl http://localhost:8321/health
 
 # Build for production
-npm run build
+bun run build
 
 # Start production server
-npm start
+bun start
 
 # Lint
-npm run lint
+bun run lint
 
 # Test IB connectivity
-npm run test:ib
+bun run test:ib
 ```
 
 **Note:** When developing on weekends or outside market hours, data polling will be paused. To test live polling behavior:

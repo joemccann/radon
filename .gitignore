@@ -99,6 +99,7 @@ reports/*.html
 reports/*.json
 reports/*.png
 data/*.json
+!data/flex_token_config.example.json
 data/*.bak
 
 # Ticker/market data caches (regenerated at runtime)
@@ -261,3 +262,6 @@ docs/security-audit-*.html
 
 # Weekend reliability runner marker (dedicated clone only, never committed)
 .radon-weekend-runner
+
+# One-shot security-scan scratch directories (never commit)
+CLAUDE-SECURITY-*/
