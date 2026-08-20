@@ -26,7 +26,12 @@ PrivateTmp=yes
 # venv it executes from, so the secrets are denied by path instead.
 InaccessiblePaths=/var/run/docker.sock /usr/bin/docker /usr/local/sbin/radon-deploy-root /home/radon/radon-cloud
 ReadOnlyPaths=/home/radon
-ReadWritePaths=/home/radon/radon-page-responder
+# The grok CLI writes its session state under ~/.grok; with only the clone
+# writable every fix attempt died at session creation ("Read-only file
+# system"), each page burned its 3 attempts and was skipped — the responder
+# polled healthily while fixing nothing (Aug 15–20 outage). Secrets stance is
+# unchanged: radon-cloud/.env stays inaccessible above.
+ReadWritePaths=/home/radon/radon-page-responder /home/radon/.grok
 
 [Install]
 WantedBy=multi-user.target
