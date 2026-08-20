@@ -400,6 +400,51 @@ describe("deriveBookHeader (BUG 1 — header reads from the depth book)", () => 
     expect(head.ask).toBeNull();
     expect(head.last).toBeNull(); // no mid without both sides
   });
+
+  it("does not treat mixed overnight SMART depth as a negative spread", () => {
+    // GLD after 20:00 ET: leftover ARCA extended-hours bids sit above live
+    // IBEOS overnight asks. Max-bid/min-ask across all MPIDs is crossed;
+    // the tradeable overnight book is IBEOS/OVERNIGHT.
+    const gld: DepthBook = {
+      symbol: "GLD",
+      kind: "stock",
+      isSmartDepth: true,
+      feed: "SMART DEPTH",
+      entitled: true,
+      timestamp: "t",
+      bid: [
+        { price: 413.51, size: 84, marketMaker: "ARCA", exchange: "SMART" },
+        { price: 413.21, size: 64, marketMaker: "ARCA", exchange: "SMART" },
+        { price: 412.07, size: 280, marketMaker: "IBEOS", exchange: "SMART" },
+        { price: 412.07, size: 620, marketMaker: "OVERNIGHT", exchange: "SMART" },
+      ],
+      ask: [
+        { price: 412.24, size: 380, marketMaker: "IBEOS", exchange: "SMART" },
+        { price: 412.24, size: 700, marketMaker: "OVERNIGHT", exchange: "SMART" },
+        { price: 414.18, size: 46, marketMaker: "ARCA", exchange: "SMART" },
+      ],
+    };
+    const l1 = { bid: -1, ask: -1, last: 412.88, lastLabel: "LAST" };
+    const head = deriveBookHeader(gld, l1);
+    expect(head.bid).toBe(412.07);
+    expect(head.ask).toBe(412.24);
+    expect(head.ask).toBeGreaterThanOrEqual(head.bid as number);
+    expect(head.last).toBeCloseTo((412.07 + 412.24) / 2, 10);
+    expect(head.lastLabel).toBe("MID");
+  });
+
+  it("falls back to a valid L1 BBO when SMART depth is crossed and overnight rows are missing", () => {
+    const crossed: DepthBook = {
+      ...STOCK_BOOK,
+      bid: [{ price: 100, size: 1, marketMaker: "ARCA", exchange: "SMART" }],
+      ask: [{ price: 99, size: 1, marketMaker: "BATS", exchange: "SMART" }],
+    };
+    const l1 = { bid: 99.9, ask: 100.1, last: 100, lastLabel: "LAST" };
+    const head = deriveBookHeader(crossed, l1);
+    expect(head.bid).toBe(99.9);
+    expect(head.ask).toBe(100.1);
+    expect(head.last).toBeCloseTo(100, 10);
+  });
 });
 
 describe("parseOptionKey (BUG 3 — round-trips with optionKey)", () => {
