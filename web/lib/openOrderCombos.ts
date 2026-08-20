@@ -205,6 +205,34 @@ function inferExecutedLegDirectionFromFills(
   return latestDirection;
 }
 
+/**
+ * Names the structure of a grouped execution by delegating to the shared
+ * detectStructure classifier — the same one the chain builder and open-order
+ * combos use — so labels never drift between surfaces. Legs carry the
+ * position's ORIGINAL direction (closing fills already flipped upstream).
+ */
+function detectExecutedGroupStructure(
+  legs: { direction: "Long" | "Short"; contract: ExecutedOrder["contract"] }[],
+): string {
+  if (legs.length < 2) return "";
+
+  const structureLegs: OrderLeg[] = [];
+  for (const [index, leg] of legs.entries()) {
+    const right = normalizeRight(leg.contract.right);
+    if (!right || leg.contract.strike == null || leg.contract.expiry == null) return "Combo";
+    structureLegs.push({
+      id: `executed-${index}`,
+      action: leg.direction === "Long" ? "BUY" : "SELL",
+      right,
+      strike: leg.contract.strike,
+      expiry: leg.contract.expiry.replace(/-/g, ""),
+      quantity: 1,
+      limitPrice: null,
+    });
+  }
+  return detectStructure(structureLegs);
+}
+
 export function buildExecutedGroupDescription(
   fills: ExecutedOrder[],
   isClosing: boolean,
@@ -238,6 +266,7 @@ export function buildExecutedGroupDescription(
 
   const parts: string[] = [];
   const legExpiries: string[] = [];
+  const resolvedLegs: { direction: "Long" | "Short"; contract: ExecutedOrder["contract"] }[] = [];
   for (const legGroup of legGroups.values()) {
     const c = legGroup[0].contract;
     const right = c.right === "C" || c.right === "CALL"
@@ -268,6 +297,7 @@ export function buildExecutedGroupDescription(
 
     const expiryShort = c.expiry ? formatExpiryShort(c.expiry) : "";
     parts.push(`${direction} ${strike} ${right}${expiryShort ? ` ${expiryShort}` : ""}`);
+    resolvedLegs.push({ direction, contract: c });
   }
 
   // If all legs share the same expiry, show it once at structure level instead of per-leg
@@ -287,39 +317,7 @@ export function buildExecutedGroupDescription(
   }
 
   const base = isClosing ? "Closed" : "Opened";
-  let structure = "";
-  if (displayParts.length === 2) {
-    const rights = new Set(
-      [...legGroups.values()].map((g) => {
-        const r = g[0].contract.right;
-        return r === "C" || r === "CALL" ? "C" : "P";
-      }),
-    );
-    if (rights.size === 1) {
-      const hasShort = displayParts.some((p) => p.startsWith("Short"));
-      const hasLong = displayParts.some((p) => p.startsWith("Long"));
-      if (hasShort && hasLong) {
-        const right = rights.has("C") ? "Call" : "Put";
-        const strikes = [...legGroups.values()].map((g) => ({
-          strike: g[0].contract.strike ?? 0,
-          dir: displayParts.find((p) => p.includes(`$${g[0].contract.strike}`))?.startsWith("Long") ? "Long" : "Short",
-        }));
-        const longStrike = strikes.find((s) => s.dir === "Long")?.strike ?? 0;
-        const shortStrike = strikes.find((s) => s.dir === "Short")?.strike ?? 0;
-        if (right === "Call") {
-          structure = longStrike < shortStrike ? "Bull Call Spread" : "Bear Call Spread";
-        } else {
-          structure = longStrike > shortStrike ? "Bear Put Spread" : "Bull Put Spread";
-        }
-      } else {
-        structure = "Spread";
-      }
-    } else {
-      structure = "Risk Reversal";
-    }
-  } else if (displayParts.length > 2) {
-    structure = "Combo";
-  }
+  const structure = detectExecutedGroupStructure(resolvedLegs);
 
   const expirySuffix = sharedExpiry ? ` ${sharedExpiry}` : "";
   return `${base} ${fills[0].contract.symbol} ${structure}${expirySuffix} (${displayParts.join(" / ")})`;
