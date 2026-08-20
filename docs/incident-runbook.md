@@ -194,6 +194,39 @@ Incident: 2026-07-08, P1.
 
 ---
 
+## leap-partial-ticker-exit-pages-p1
+
+**`radon-leap.service` oneshot pages P1 `Result=exit-code` after a successful
+largecaps scan.** Peak: 2026-08-20 14:15Z, page `99554c7a…`. Recurred
+2026-08-18 and 2026-08-19 at the same 14:00 UTC timer.
+
+- **Mechanism:** `leap_scanner_uw.py` treats `scan_ticker` returning `None`
+  (no LEAP contracts, missing vol) and per-ticker exceptions as
+  `failed_tickers`. A 518-name `largecaps` run routinely leaves ~170 of
+  those. `main()` still wrote `data/leap.json`, mirrored the snapshot, and
+  heartbeated `leap-scan` `ok`, then `return 1 if failed_tickers else 0`.
+  FastAPI `run_script` mapped exit 1 to HTTP 502. The wrapper logged
+  `FastAPI unreachable`, ran the scanner again, and the oneshot failed
+  (`NRestarts=0`).
+- **Detection:** journal `SCAN COMPLETE` + `Dashboard cache saved` +
+  `LEAP fallback refresh FAILED (exit 1)` in the same second; radon-api
+  `Script leap_scanner_uw.py failed (code 1)` then `POST /leap/scan` 502;
+  `leap.json` has both `results` and `failed_tickers`; `leap-scan` health
+  row is `ok`. Edge and `:8321/health/lite` stay up.
+- **Discriminating check:** cache `len(results) > 0` and unit
+  `Result=exit-code`. Zero results (empty cache preserved) is HB-013, still
+  exit 1. `Result=signal` is deploy stop-clean. UW daily-quota text is the
+  oi-changes class. If `/health/lite` is down too → API/IB, stand down.
+- **Remediation (code):** exit 0 when at least one ticker produced a valid
+  result; keep `failed_tickers` on the payload. Do not restart-flap; next
+  timer or one `radon unit restart radon-leap` after the fix deploys.
+- **Regression:**
+  `test_leap_scanner.py::test_partial_ticker_failures_write_cache_and_exit_zero`,
+  `test_all_provider_failures_preserve_cache_and_fail_health`.
+- **Code:** `scripts/leap_scanner_uw.py` (`main` exit).
+
+---
+
 ## knowledge-ingest-sqlite-busy
 
 **`radon-knowledge.service` oneshot exits `Result=exit-code` on a single

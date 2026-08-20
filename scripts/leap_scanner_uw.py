@@ -872,7 +872,10 @@ def main():
         # service_health row lets the banner spot a stale scheduled scan.
         mirror_scan_snapshot("leap-scan", json_data)
 
-    return 1 if failed_tickers else 0
+    # Names without LEAPs are expected on a largecaps universe. A nonempty
+    # failed_tickers list is recorded in the payload; only zero valid results
+    # fail the oneshot (P1 2026-08-20).
+    return 0
 
 
 if __name__ == "__main__":
