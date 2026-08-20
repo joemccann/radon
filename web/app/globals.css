@@ -12853,10 +12853,58 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
   gap: 12px;
 }
 
+/* Shell owns layout position + the edge-fade overflow affordance; the inner
+   tablist owns scrolling. Fades appear only when the strip actually overflows
+   (data attrs set from scroll state) — a strip ending flush at the viewport
+   edge otherwise reads as complete and hides the off-screen modes. */
+.scanner-mode-tabs-shell {
+  position: relative;
+  align-self: flex-start;
+  max-width: 100%;
+}
+
+.scanner-mode-tabs-shell::before,
+.scanner-mode-tabs-shell::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 1px;
+  width: 28px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  z-index: 1;
+}
+
+.scanner-mode-tabs-shell::before {
+  left: 0;
+  background: linear-gradient(
+    to right,
+    var(--bg-base),
+    color-mix(in srgb, var(--bg-base) 0%, transparent)
+  );
+}
+
+.scanner-mode-tabs-shell::after {
+  right: 0;
+  background: linear-gradient(
+    to left,
+    var(--bg-base),
+    color-mix(in srgb, var(--bg-base) 0%, transparent)
+  );
+}
+
+.scanner-mode-tabs-shell[data-overflow-left="true"]::before {
+  opacity: 1;
+}
+
+.scanner-mode-tabs-shell[data-overflow-right="true"]::after {
+  opacity: 1;
+}
+
 .scanner-mode-tabs {
   display: flex;
   align-items: center;
-  align-self: flex-start;
   gap: 6px;
   padding: 0;
   border-bottom: 1px solid var(--line-grid);
@@ -19030,18 +19078,28 @@ body[data-mobile="true"] .scanner-page-shell {
   gap: 8px;
 }
 
-/* Six tabs never fit a phone's width, so they scroll horizontally rather than
-   squeezing to fit — squeezing wrapped the multi-word labels ("THETA
+/* Seven tabs never fit a phone's width, so they scroll horizontally rather
+   than squeezing to fit — squeezing wrapped the multi-word labels ("THETA
    HARVESTER", "7-STEP STRENGTH") onto two lines and overlapped them. Natural
    width + single line + scroll keeps every label and count chip intact; the
-   partial tab at the trailing edge signals there is more to scroll. */
-body[data-mobile="true"] .scanner-mode-tabs {
+   shell's edge fades (scroll-state driven) signal there is more to scroll —
+   a partial trailing tab alone proved unreliable (the strip can end flush at
+   the viewport edge and read as three-tabs-total). overscroll containment
+   keeps an edge swipe from turning into browser back-navigation. */
+body[data-mobile="true"] .scanner-mode-tabs-shell {
   width: calc(100% - 32px);
   margin: 8px 16px 0;
+  align-self: auto;
+}
+
+body[data-mobile="true"] .scanner-mode-tabs {
+  width: 100%;
   flex-wrap: nowrap;
   overflow-x: auto;
+  overscroll-behavior-x: contain;
   -webkit-overflow-scrolling: touch;
   scroll-snap-type: x proximity;
+  scroll-padding-inline: 12px;
   scrollbar-width: none;
 }
 
