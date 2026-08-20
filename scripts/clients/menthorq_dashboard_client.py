@@ -426,6 +426,18 @@ class MenthorQDashboardClient:
                 password.fill(self._password or "")
                 submit.click()
 
+                # WordPress OpenID consent stays on wp-login.php
+                # (`client_id=aws_cognito_client_id` in the query). A real
+                # browser shows "Authorize"; headless used to wait for the
+                # dashboard URL and time out (2026-08-20 remint).
+                authorize = page.locator('input[name="authorize"]')
+                try:
+                    authorize.wait_for(state="visible", timeout=login_timeout_ms)
+                    if authorize.count() >= 1:
+                        authorize.click()
+                except Exception:
+                    pass
+
                 # WordPress -> Cognito -> dashboard. /api/auth/session returns
                 # null until that chain LANDS, so waiting for the destination
                 # is what makes the poll below meaningful rather than a race.
