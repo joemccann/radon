@@ -282,12 +282,10 @@ class TestCompleteness:
         "radon-ib-gateway.service",
     ]
 
-    def test_every_planned_service_exists_as_systemd_unit(self, root, services_dir):
-        plan = read_text(root / "PLAN.md")
+    def test_every_planned_service_exists_as_systemd_unit(self, services_dir):
         existing_units = {f.name for f in services_dir.iterdir()}
         for svc in self.PLANNED_SERVICES:
-            if svc in plan:
-                assert svc in existing_units, f"PLAN.md mentions {svc} but file is missing"
+            assert svc in existing_units, f"planned unit {svc} is missing"
 
     def test_readme_references_all_services(self, root):
         readme = read_text(root / "README.md")
@@ -302,9 +300,8 @@ class TestCompleteness:
         for name in service_names:
             assert name in readme, f"README.md does not mention {name}"
 
-    def test_env_example_has_plan_variables(self, root):
+    def test_env_example_has_required_variables(self, root):
         env_example = read_text(root / ".env.example")
-        plan = read_text(root / "PLAN.md")
         required_vars = [
             "IB_GATEWAY_HOST",
             "IB_GATEWAY_PORT",
@@ -317,10 +314,7 @@ class TestCompleteness:
             "CLERK_SECRET_KEY",
         ]
         for var in required_vars:
-            if var in plan:
-                assert var in env_example, (
-                    f"PLAN.md references {var} but .env.example is missing it"
-                )
+            assert var in env_example, f".env.example is missing {var}"
 
     def test_claude_md_exists(self, root):
         assert (root / "CLAUDE.md").exists()
@@ -364,4 +358,4 @@ class TestFileTree:
         ]
         for relative_path in planned_files:
             full = root / relative_path
-            assert full.exists(), f"PLAN.md specifies {relative_path} but it is missing"
+            assert full.exists(), f"required cloud file {relative_path} is missing"
