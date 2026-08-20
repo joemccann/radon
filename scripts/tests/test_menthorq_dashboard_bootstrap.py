@@ -214,6 +214,36 @@ class TestBootstrapReachesTheDashboard:
         assert "Headless" not in ua
         assert "Mozilla/5.0" in ua
 
+    def test_clicks_oidc_authorize_consent_before_waiting_for_the_dashboard(
+        self, tmp_path, monkeypatch
+    ):
+        """2026-08-20: after WP login the page stays on wp-login.php with
+        an Authorize submit. Waiting for dashboard.menthorq.io times out
+        unless that button is clicked."""
+        recorder, page = _install_fake_playwright(
+            monkeypatch,
+            post_submit_url=(
+                "https://menthorq.com/wp-login.php?client_id=aws_cognito_client_id"
+                "&action=openid-authenticate"
+            ),
+            payload=LIVE_SESSION,
+        )
+        orig_click = _FakeLocator.click
+
+        def _click(self):
+            if self._selector == 'input[name="authorize"]':
+                self._page.clicked.append(self._selector)
+                self._page.url = (
+                    "https://dashboard.menthorq.io/en/options/exposure?symbol=MU"
+                )
+                return
+            return orig_click(self)
+
+        monkeypatch.setattr(_FakeLocator, "click", _click)
+        token = _client(tmp_path)._bootstrap_dashboard_session()
+        assert token == "header.payload.signature"
+        assert 'input[name="authorize"]' in page.clicked
+
     def test_waits_for_the_oauth_chain_to_land_on_the_dashboard(self, tmp_path, monkeypatch):
         recorder, _page = _install_fake_playwright(
             monkeypatch,
