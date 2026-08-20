@@ -52,6 +52,81 @@ describe("ScannerModeTabs", () => {
   });
 });
 
+describe("ScannerModeTabs mobile navigation", () => {
+  function stripAndShell() {
+    const strip = screen.getByRole("tablist");
+    const shell = strip.parentElement as HTMLElement;
+    return { strip, shell };
+  }
+
+  it("exposes overflow affordance state on the shell as data attributes", () => {
+    render(<ScannerModeTabs mode="flow" onModeChange={() => {}} counts={{}} />);
+    const { strip, shell } = stripAndShell();
+    expect(shell.className).toContain("scanner-mode-tabs-shell");
+
+    Object.defineProperty(strip, "scrollWidth", { configurable: true, value: 900 });
+    Object.defineProperty(strip, "clientWidth", { configurable: true, value: 393 });
+    strip.scrollLeft = 0;
+    fireEvent.scroll(strip);
+    expect(shell.getAttribute("data-overflow-left")).toBe("false");
+    expect(shell.getAttribute("data-overflow-right")).toBe("true");
+
+    strip.scrollLeft = 200;
+    fireEvent.scroll(strip);
+    expect(shell.getAttribute("data-overflow-left")).toBe("true");
+    expect(shell.getAttribute("data-overflow-right")).toBe("true");
+
+    strip.scrollLeft = 507;
+    fireEvent.scroll(strip);
+    expect(shell.getAttribute("data-overflow-left")).toBe("true");
+    expect(shell.getAttribute("data-overflow-right")).toBe("false");
+  });
+
+  it("uses a roving tabindex: only the selected tab is in the tab order", () => {
+    render(<ScannerModeTabs mode="theta" onModeChange={() => {}} counts={{}} />);
+    for (const tab of screen.getAllByRole("tab")) {
+      const selected = tab.getAttribute("aria-selected") === "true";
+      expect(tab.tabIndex).toBe(selected ? 0 : -1);
+    }
+  });
+
+  it("moves focus with arrow keys, wrapping at both ends", () => {
+    render(<ScannerModeTabs mode="flow" onModeChange={() => {}} counts={{}} />);
+    const tabs = screen.getAllByRole("tab");
+    tabs[0].focus();
+
+    fireEvent.keyDown(screen.getByRole("tablist"), { key: "ArrowRight" });
+    expect(document.activeElement).toBe(tabs[1]);
+
+    fireEvent.keyDown(screen.getByRole("tablist"), { key: "ArrowLeft" });
+    fireEvent.keyDown(screen.getByRole("tablist"), { key: "ArrowLeft" });
+    expect(document.activeElement).toBe(tabs[tabs.length - 1]);
+
+    fireEvent.keyDown(screen.getByRole("tablist"), { key: "ArrowRight" });
+    expect(document.activeElement).toBe(tabs[0]);
+  });
+
+  it("Home and End jump to the first and last tab", () => {
+    render(<ScannerModeTabs mode="flow" onModeChange={() => {}} counts={{}} />);
+    const tabs = screen.getAllByRole("tab");
+    tabs[0].focus();
+
+    fireEvent.keyDown(screen.getByRole("tablist"), { key: "End" });
+    expect(document.activeElement).toBe(tabs[tabs.length - 1]);
+
+    fireEvent.keyDown(screen.getByRole("tablist"), { key: "Home" });
+    expect(document.activeElement).toBe(tabs[0]);
+  });
+
+  it("arrow navigation does not fire onModeChange (manual activation)", () => {
+    const onModeChange = vi.fn();
+    render(<ScannerModeTabs mode="flow" onModeChange={onModeChange} counts={{}} />);
+    screen.getAllByRole("tab")[0].focus();
+    fireEvent.keyDown(screen.getByRole("tablist"), { key: "ArrowRight" });
+    expect(onModeChange).not.toHaveBeenCalled();
+  });
+});
+
 describe("SigMeter", () => {
   it("renders a clamped fill width with the tone class", () => {
     render(<SigMeter value={95} tone="pos" />);
