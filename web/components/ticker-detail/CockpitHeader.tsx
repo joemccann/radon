@@ -49,7 +49,7 @@ export default function CockpitHeader({
   const { isMobile, hasMounted } = useViewport();
   const mobile = isMobile && hasMounted;
 
-  const { last, deltaPct, spreadAbs, spreadPct } = useMemo(() => {
+  const { last, deltaPct, spreadAbs, spreadPct, crossed } = useMemo(() => {
     const q = quotePriceData;
     const lastVal = q?.last ?? null;
     const close = q?.close ?? null;
@@ -61,11 +61,12 @@ export default function CockpitHeader({
         ? ((lastVal - close) / Math.abs(close)) * 100
         : null;
 
-    const sAbs = bid != null && ask != null ? ask - bid : null;
-    const mid = bid != null && ask != null ? (ask + bid) / 2 : null;
+    const crossed = bid != null && ask != null && ask < bid;
+    const sAbs = bid != null && ask != null && !crossed ? ask - bid : null;
+    const mid = bid != null && ask != null && !crossed ? (ask + bid) / 2 : null;
     const sPct = sAbs != null && mid != null && mid !== 0 ? (sAbs / mid) * 100 : null;
 
-    return { last: lastVal, deltaPct: dPct, spreadAbs: sAbs, spreadPct: sPct };
+    return { last: lastVal, deltaPct: dPct, spreadAbs: sAbs, spreadPct: sPct, crossed };
   }, [quotePriceData]);
 
   const deltaTone = deltaPct == null ? "" : toneClass(deltaPct);
@@ -192,7 +193,9 @@ export default function CockpitHeader({
       <span className="ckh-sep" />
       <span className="ckh-spr mono">
         {isSpreadNet ? "NET" : "SPREAD"}{" "}
-        {spreadAbs != null ? (
+        {crossed ? (
+          <b>CROSSED</b>
+        ) : spreadAbs != null ? (
           <>
             <b>{fmtPrice(spreadAbs)}</b>
             {spreadPct != null && <> / {spreadPct.toFixed(2)}%</>}

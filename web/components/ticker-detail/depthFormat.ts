@@ -12,5 +12,6 @@ export function fmtDepthPrice(price: number): string {
 /** Bid/ask spread to two decimals. Returns "---" when either side is missing. */
 export function fmtSpread(bid: number | null, ask: number | null): string {
   if (bid == null || ask == null) return "---";
+  if (ask < bid) return "CROSSED";
   return (ask - bid).toFixed(2);
 }

@@ -209,15 +209,63 @@ function bestAskPrice(rows: DepthLevel[]): number | null {
   return Math.min(...rows.map((row) => row.price));
 }
 
+/** True when both sides form a tradeable market (ask at or above bid, positive). */
+export function isValidMarket(bid: number | null, ask: number | null): boolean {
+  return bid != null && ask != null && bid > 0 && ask > 0 && ask >= bid;
+}
+
+/** IBKR overnight session MPIDs (IBEOS, OVERNIGHT, …). */
+const OVERNIGHT_MPID = /^(IBEOS|OVERN)/i;
+
+function isOvernightVenue(row: DepthLevel): boolean {
+  return OVERNIGHT_MPID.test(row.marketMaker ?? "") || OVERNIGHT_MPID.test(row.exchange ?? "");
+}
+
+function bboFromRows(
+  bids: DepthLevel[],
+  asks: DepthLevel[],
+): { bid: number | null; ask: number | null } {
+  return { bid: bestBidPrice(bids), ask: bestAskPrice(asks) };
+}
+
+/**
+ * SMART depth after hours mixes leftover lit (ARCA/NSDQ) quotes with live
+ * overnight (IBEOS) quotes. Max-bid/min-ask across that mix is a crossed
+ * composite, not a tradeable BBO. Prefer an uncrossed overnight book, then
+ * an uncrossed lit book, then a valid L1 quote.
+ */
+function uncrossStockBbo(
+  depth: DepthBook,
+  l1: { bid: number | null; ask: number | null },
+): { bid: number | null; ask: number | null } {
+  const full = bboFromRows(depth.bid, depth.ask);
+  if (isValidMarket(full.bid, full.ask)) return full;
+
+  const overnight = bboFromRows(
+    depth.bid.filter(isOvernightVenue),
+    depth.ask.filter(isOvernightVenue),
+  );
+  if (isValidMarket(overnight.bid, overnight.ask)) return overnight;
+
+  const lit = bboFromRows(
+    depth.bid.filter((row) => !isOvernightVenue(row)),
+    depth.ask.filter((row) => !isOvernightVenue(row)),
+  );
+  if (isValidMarket(lit.bid, lit.ask)) return lit;
+
+  if (isValidMarket(l1.bid, l1.ask)) return { bid: l1.bid, ask: l1.ask };
+  return full;
+}
+
 /**
  * Resolve the window-head bid / ask / mark for the Book tab.
  *
  * When an entitled depth book is present it is the authoritative source (a
  * corrupt or negative L1 scalar is ignored): bid/ask come from the book itself
  * and the MARK is the depth mid, labelled "MID". Futures key the inside on
- * position (index 0); stocks/options take the best price across the side
- * (NBBO for options, inside for stocks). The relay's `nbbo` summary is
- * preferred for options when present.
+ * position (index 0); options use the relay `nbbo` summary. Stocks take the
+ * best uncrossed BBO (overnight MPIDs when SMART mixes leftover lit quotes
+ * with IBEOS after hours). Never report a negative spread as a live market.
  *
  * Falls back entirely to the passed-in L1 scalars when there is no entitled
  * depth book (the L1 fallback path).
@@ -238,19 +286,25 @@ export function deriveBookHeader(
   } else if ((depth.kind === "option" || depth.kind === "combo") && depth.nbbo) {
     bid = depth.nbbo.bestBid ?? bestBidPrice(depth.bid);
     ask = depth.nbbo.bestAsk ?? bestAskPrice(depth.ask);
+  } else if (depth.kind === "stock") {
+    const uncrossed = uncrossStockBbo(depth, l1);
+    bid = uncrossed.bid;
+    ask = uncrossed.ask;
   } else {
     bid = bestBidPrice(depth.bid);
     ask = bestAskPrice(depth.ask);
   }
 
-  const mid =
-    (depth.kind === "option" || depth.kind === "combo") && depth.nbbo?.mid != null
-      ? depth.nbbo.mid
-      : bid != null && ask != null
-        ? (bid + ask) / 2
-        : null;
+  if (isValidMarket(bid, ask)) {
+    const mid =
+      (depth.kind === "option" || depth.kind === "combo") && depth.nbbo?.mid != null
+        ? depth.nbbo.mid
+        : ((bid as number) + (ask as number)) / 2;
+    return { bid, ask, last: mid, lastLabel: "MID" };
+  }
 
-  return { bid, ask, last: mid, lastLabel: "MID" };
+  const last = l1.last != null && l1.last > 0 ? l1.last : null;
+  return { bid, ask, last, lastLabel: last != null ? l1.lastLabel : "MID" };
 }
 
 /**
