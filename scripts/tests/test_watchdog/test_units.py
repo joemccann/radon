@@ -449,8 +449,10 @@ class TestDeployCollateralSignalKill:
         )
         assert [o.severity for o in outcomes] == ["P1"]
 
-    def test_signal_kill_far_from_marker_stays_p1(self):
-        killed = datetime(2026, 8, 5, 18, 0, 0, tzinfo=timezone.utc)
+    def test_signal_kill_far_past_oneshot_horizon_stays_p1(self):
+        """A signal kill whose latest post-kill green (or age) sits past
+        the 24h oneshot recovery horizon is no longer deploy collateral."""
+        killed = datetime(2026, 8, 4, 18, 0, 0, tzinfo=timezone.utc)
         marker = datetime(2026, 8, 5, 21, 41, 0, tzinfo=timezone.utc)
         current = units.parse_show_output(self._signal_block(killed))
         outcomes = units.evaluate(
@@ -500,6 +502,25 @@ class TestDeployCollateralSignalKill:
         killed = datetime(2026, 8, 15, 0, 34, 41, tzinfo=timezone.utc)
         marker = datetime(2026, 8, 15, 0, 35, 59, tzinfo=timezone.utc)
         now = datetime(2026, 8, 15, 1, 35, 0, tzinfo=timezone.utc)
+        current = units.parse_show_output(self._signal_block(killed))
+        outcomes = units.evaluate(
+            current=current, previous={}, now=now,
+            deploy={"marker_mtime": marker, "in_flight": False},
+        )
+        assert len(outcomes) == 1
+        assert outcomes[0].severity == "P3"
+        assert "deploy" in outcomes[0].message.lower()
+
+    def test_stacked_successor_green_158min_after_kill_is_p3(self):
+        """2026-08-20 02:45Z page b76d4a52: a231 stop-cleaned radon-bpi
+        at 00:04:23Z (green 00:05:39Z, kill-to-marker 76s → P3). Four
+        more deploys stacked; 0f7d8e5f greened at 02:42:18Z and
+        overwrote the marker. Kill-to-latest-marker is 9475s (>60 min),
+        so the old kill-before-green bound flipped P3 to P1 even though
+        the unit never recovered and edge /health/lite stayed up."""
+        killed = datetime(2026, 8, 20, 0, 4, 23, tzinfo=timezone.utc)
+        marker = datetime(2026, 8, 20, 2, 42, 18, tzinfo=timezone.utc)
+        now = datetime(2026, 8, 20, 2, 45, 0, tzinfo=timezone.utc)
         current = units.parse_show_output(self._signal_block(killed))
         outcomes = units.evaluate(
             current=current, previous={}, now=now,
