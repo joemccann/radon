@@ -78,6 +78,15 @@ class TestRouting:
             "/api/ib/* must use handle_path (not handle) for prefix stripping"
         )
 
+
+class TestRetiredBetaStack:
+    def test_no_beta_hostname_or_ports(self, caddy_dir):
+        content = read_caddyfile(caddy_dir)
+        assert "beta.radon.run" not in content
+        assert "localhost:3001" not in content
+        assert "127.0.0.1:8322" not in content
+        assert "127.0.0.1:8331" not in content
+
     def test_websocket_route_before_api_route(self, caddy_dir):
         content = read_caddyfile(caddy_dir)
         ws_pos = content.find("handle /ws")

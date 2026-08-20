@@ -163,7 +163,7 @@ class TestCaddyMarksTheEdge:
     def test_edge_health_status_stamps_the_public_marker(self):
         caddyfile = Path(__file__).resolve().parents[2] / "cloud" / "caddy" / "Caddyfile"
         content = caddyfile.read_text(encoding="utf-8")
-        assert content.count("header_up X-Radon-Public-Edge") == 2, (
-            "both app.radon.run and beta.radon.run /edge-health/status proxies must "
-            "mark the request as public so the daemon redacts it"
+        assert content.count("header_up X-Radon-Public-Edge") == 1, (
+            "app.radon.run /edge-health/status must mark the request as public "
+            "so the daemon redacts it"
         )

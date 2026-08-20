@@ -446,7 +446,7 @@ sqlite3 /tmp/radon_restore.db "SELECT ib_exec_id FROM journal" | sort > /tmp/goo
 ```bash
 turso auth login          # browser OAuth once
 turso plan show           # org plan + quotas (not `turso org show`)
-turso db list             # radon / radon-beta / radon-demo
+turso db list             # radon / radon-demo
 turso db show radon
 ```
 
@@ -633,6 +633,22 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now radon-media-backup.timer
 sudo systemctl start radon-media-backup.service   # optional immediate run
 journalctl -u radon-media-backup -n 50 --no-pager
+```
+
+## Retired: beta.radon.run (2026-08-20)
+
+The staging clone was never finished. Repo copies of `deploy/beta/`, the
+Caddy `beta.radon.run` site, and `cloud/config/sudoers.d/radon-beta` are
+gone. Deploy still skips leftover `radon-beta-*` units so a host that still
+has them is not torn down as production.
+
+On the VPS, when convenient (not a deploy blocker):
+
+```bash
+sudo systemctl disable --now radon-beta-nextjs radon-beta-api radon-beta-health
+sudo rm -f /etc/systemd/system/radon-beta-*.service /etc/sudoers.d/radon-beta
+sudo systemctl daemon-reload
+# drop DNS A for beta.radon.run, Clerk satellite, Turso DB radon-beta, /home/radon/radon-beta
 ```
 
 ## Known gaps

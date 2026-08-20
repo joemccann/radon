@@ -1,5 +1,5 @@
 /**
- * Regression: the authenticated app (app/demo/beta.radon.run) must never be
+ * Regression: the authenticated app (app/demo.radon.run) must never be
  * indexed — all marketing/SEO value lives on radon.run (site/). Google indexed
  * https://demo.radon.run/sign-in?redirect_url=... because the app served no
  * robots.txt (the path 404'd through the auth perimeter) and no noindex

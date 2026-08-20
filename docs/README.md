@@ -26,6 +26,7 @@ Archived session artifacts live in [`docs/archive/`](archive/).
 |-------|-----|
 | Background services, watchdogs, env | [`docs/operations.md`](operations.md) |
 | Cloud architecture, Turso, two-mode deploy | [`docs/cloud-services.md`](cloud-services.md) |
+| Retired beta.radon.run (do not recreate) | [`docs/cloud-services.md`](cloud-services.md#retired-betaradonrun-2026-08-20) |
 | Monorepo cutover and rollback | [`docs/monorepo-cloud-migration.md`](monorepo-cloud-migration.md) |
 | Cloud operating contract | [`cloud/CLAUDE.md`](../cloud/CLAUDE.md) |
 | Incident cases and `/incident` | [`docs/incident-runbook.md`](incident-runbook.md) |

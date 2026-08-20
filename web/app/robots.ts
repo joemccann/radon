@@ -1,7 +1,7 @@
 import type { MetadataRoute } from "next";
 import { PUBLIC_SHARE_API_ROUTES } from "@/lib/publicShareRoutes";
 
-// The authenticated terminal (app/demo/beta.radon.run) must never be indexed —
+// The authenticated terminal (app/demo.radon.run) must never be indexed —
 // all marketing/SEO value lives on radon.run (site/). No sitemap on purpose.
 // Paired with the X-Robots-Tag: noindex header in next.config.mjs, which also
 // covers URLs Google already indexed (robots.txt alone doesn't de-index).

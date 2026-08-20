@@ -45,11 +45,10 @@ copy. The fleet prefix drop-in (radon-.service.d/common.conf) is compared
 separately as a plain file pair, not folded into every unit.
 
 Also checked:
-  * live radon-* units absent from services/ -> drift. radon-beta-* unit
-    files are the deliberate exception: beta keep-vs-delete is an open
-    operator decision, so they annotate an ok run as "known-untracked"
-    instead of flipping the banner red (see config/drift-allowlist.conf
-    for the same treatment of other acknowledged drift).
+  * live radon-* units absent from services/ -> drift. Retired
+    radon-beta-* leftovers (the staging stack was never finished) stay
+    "known-untracked" so a host that still has them does not redden
+    config-drift. Do not recreate them. Remove them on the VPS.
   * Environment invariant: every installed radon-*.service must carry
     RADON_DB_NO_REPLICA=1 (supplied fleet-wide by the prefix drop-in),
     asserted via `systemctl show -p Environment`.
@@ -341,8 +340,7 @@ def partition_allowlisted(
 
 
 def classify_untracked_unit(name: str) -> str:
-    """radon-beta-* units are a known open operator decision (keep vs
-    delete) -- note them instead of reddening the banner all weekend."""
+    """Retired radon-beta-* leftovers stay notes, not config-drift errors."""
     return "known-untracked" if name.startswith("radon-beta-") else "drift"
 
 

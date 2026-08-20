@@ -239,5 +239,7 @@ class TestTrustedHostMiddleware:
                 allowed = (getattr(mw, "kwargs", {}) or {}).get("allowed_hosts") or []
                 assert "*" not in allowed, "Host pinning must not be a wildcard"
                 assert "app.radon.run" in allowed
+                assert "demo.radon.run" in allowed
+                assert "beta.radon.run" not in allowed
                 return
         raise AssertionError("TrustedHostMiddleware not installed on app")

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Phase 0 — read-only ground-truth capture for beta.radon.run planning.
+# Phase 0 — read-only VPS ground-truth capture. beta.radon.run is retired.
 # Runs ON the Hetzner VPS. Captures NO secret values (RHS of secret-pattern
 # env keys is redacted). Pure read-only: no systemctl mutations, no writes
 # outside stdout.

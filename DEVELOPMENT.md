@@ -39,7 +39,7 @@ Every change, agent-authored or not, goes through the same gates. The gates them
 
 ## Runtime and dependencies
 
-- **bun** for the repo root and `web/` (`bun.lock`). `site/` still uses npm (`site/package-lock.json`). Do not regenerate root or `web/` `package-lock.json`.
+- **bun** for the repo root and `web/` (`bun.lock`). `site/` still uses npm (`site/package-lock.json`).
 - Python requirements are pinned to the VPS's `pip freeze`, not the laptop's, because deploys install on the VPS.
 
 ## Marketing and creative tooling
@@ -53,7 +53,8 @@ Every change, agent-authored or not, goes through the same gates. The gates them
 
 ## Retired
 
-- **npm** — replaced by bun; do not regenerate `package-lock.json`.
+- **npm** — replaced by bun for root and `web/`. `site/` still uses npm.
+- **beta.radon.run** — staging clone never finished; sunset 2026-08-20. Leftover `radon-beta-*` units on the VPS are ignored by deploy. Do not recreate.
 - **libsql embedded replica** (`data/replica.db`) — decommissioned 2026-05-20 after WAL conflicts; all DB access is direct-to-Turso. Delete the file if it reappears.
 
 ## What this file is not
