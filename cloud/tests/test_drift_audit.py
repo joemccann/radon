@@ -216,7 +216,7 @@ def test_shipped_allowlist_entries_all_carry_expiries():
 
 
 class TestUntrackedClassification:
-    def test_beta_units_are_known_untracked(self):
+    def test_retired_beta_units_stay_known_untracked(self):
         assert da.classify_untracked_unit("radon-beta-api.service") == "known-untracked"
         assert da.classify_untracked_unit("radon-beta-nextjs.service") == "known-untracked"
 

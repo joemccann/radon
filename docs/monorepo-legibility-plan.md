@@ -247,9 +247,9 @@ Do **not** archive `RELIABILITY_*` or `TEST_*` or `REMEDIATION_LOG.md`.
 
 Investigate, then maybe delete. Do not guess.
 
-- [x] L2a **BLOCKED, did not delete lockfiles.** `deploy/beta/setup-beta.sh:76-77` still runs `npm ci` against root and `web/` `package-lock.json`. No `beta` branch on this clone. Rewriting beta to bun is a VPS behavior change, not a docs move.
-- [ ] L2b Root `package-lock.json` stays until L2a is unblocked.
-- [ ] L2c `web/package-lock.json` stays. `web/bun.lock` (2026-07-02) is older than `web/package-lock.json` (2026-07-11); reconciling bun is a separate install, not this commit.
+- [x] L2a Beta sunset. `deploy/beta/` and `cloud/config/sudoers.d/radon-beta` removed. Operator confirmed the stack was never finished.
+- [x] L2b Root `package-lock.json` removed. CI uses `bun.lock`.
+- [x] L2c `web/package-lock.json` removed. CI uses `web/bun.lock`.
 - [x] L2d `site/` keeps npm. Documented in `site/README.md` and `DEVELOPMENT.md`.
 
 Gate: CI `web-tests` job still `bun install --frozen-lockfile` at root and

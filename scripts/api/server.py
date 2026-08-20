@@ -659,7 +659,7 @@ async def auth_middleware(request: Request, call_next):
 # Pinning the Host header to the names we actually serve removes that: a rebound
 # request carries the attacker's hostname and is refused before it reaches a
 # route. Every real caller is covered — Caddy preserves the public hostname
-# (app/beta/demo.radon.run), loopback callers (Next.js, WS relay, watchdog,
+# (app/demo.radon.run), loopback callers (Next.js, WS relay, watchdog,
 # health daemon, deploy health-gate) send localhost/127.0.0.1, and the
 # cloud-thin laptop sends either the tailnet name from scripts/cloud.sh or the
 # tailnet IP literal (see _CanonicalHostForPin below). Extend with
@@ -680,7 +680,6 @@ _ALLOWED_HOSTS = [
     "127.0.0.1",
     "0.0.0.0",
     "app.radon.run",
-    "beta.radon.run",
     "demo.radon.run",
     "ib-gateway",
     "*.ts.net",

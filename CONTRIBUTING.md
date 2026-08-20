@@ -6,7 +6,7 @@ The canonical developer runbook is `CLAUDE.md`. Read it before making changes. F
 
 ## Workflow
 
-- All work commits to `main`. Never commit to the beta branch unless explicitly directed.
+- All work commits to `main`.
 - Red/green TDD is required: write a failing test first, make it pass, then commit.
   - Web: Vitest.
   - Python: pytest.

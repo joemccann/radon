@@ -71,6 +71,10 @@ class TestRebindingIsStillRefused:
             "re-resolved to 127.0.0.1 is same-origin with this API."
         )
 
+    def test_retired_beta_hostname_is_rejected(self):
+        res = _client().get("/health", headers={"Host": "beta.radon.run"})
+        assert res.status_code == 400, "beta.radon.run was never a production caller"
+
 
 class TestWildcardCannotDisableThePin:
     def test_env_wildcard_is_dropped(self):
