@@ -5,7 +5,7 @@ Production bug (2026-05-09): a withdrawal initiated on 2026-05-08 did
 not appear in the Cash Flows panel for ~24h. Initial fix lowered the
 4h polling interval, but on 2026-05-09 the same handler hammered Flex
 through a sliding-window throttle and burned ~24h of visibility. The
-new cadence is **once per ET trading day at 17:00 ET** with throttle-
+new cadence is **once per ET trading day at 08:00 ET** with throttle-
 aware exponential backoff (24h -> 48h -> 72h -> 168h capped) on
 documented Flex throttle codes.
 
@@ -14,7 +14,7 @@ the circuit breaker that delays the next attempt across daemon
 restarts.
 
 Late-fire policy: if `last_run` is on a strictly earlier ET trading
-day AND the daemon is past 17:00 ET on a current trading day, fire
+day AND the daemon is past 08:00 ET on a current trading day, fire
 late even if the 17:00 to 18:00 ET "preferred" window has passed. The
 1-hour preferred window only exists so the daemon's 30s loop has
 multiple chances under normal operation; missing a day defeats the
@@ -52,15 +52,15 @@ def _et_to_utc(year: int, month: int, day: int, hour: int, minute: int = 0) -> d
 # --------------------------------------------------------------------------- is_due
 
 class TestDailyFireWindow:
-    """Handler fires once per ET trading day at 17:00 ET (1h after close)."""
+    """Handler fires once per ET trading day at 08:00 ET (pre-open)."""
 
     def _fresh_handler(self):
         from monitor_daemon.handlers.cash_flow_sync import CashFlowSyncHandler
         return CashFlowSyncHandler()
 
-    def test_fires_at_17_30_et_on_monday_with_no_prior_run(self):
-        # 2026-05-11 is a Monday; 17:30 EDT = 21:30 UTC.
-        now = _et_to_utc(2026, 5, 11, 17, 30)
+    def test_fires_at_8_30_et_on_monday_with_no_prior_run(self):
+        # 2026-05-11 is a Monday; 08:30 EDT = 12:30 UTC.
+        now = _et_to_utc(2026, 5, 11, 8, 30)
         h = self._fresh_handler()
         with patch(
             "monitor_daemon.handlers.cash_flow_sync._now_utc", return_value=now
@@ -68,8 +68,8 @@ class TestDailyFireWindow:
             assert h.is_due() is True
 
     def test_does_not_fire_on_saturday(self):
-        # 2026-05-09 is a Saturday at 17:30 ET.
-        now = _et_to_utc(2026, 5, 9, 17, 30)
+        # 2026-05-09 is a Saturday at 08:30 ET.
+        now = _et_to_utc(2026, 5, 9, 8, 30)
         h = self._fresh_handler()
         with patch(
             "monitor_daemon.handlers.cash_flow_sync._now_utc", return_value=now
@@ -77,7 +77,7 @@ class TestDailyFireWindow:
             assert h.is_due() is False
 
     def test_does_not_fire_on_sunday(self):
-        now = _et_to_utc(2026, 5, 10, 17, 30)
+        now = _et_to_utc(2026, 5, 10, 8, 30)
         h = self._fresh_handler()
         with patch(
             "monitor_daemon.handlers.cash_flow_sync._now_utc", return_value=now
@@ -85,17 +85,17 @@ class TestDailyFireWindow:
             assert h.is_due() is False
 
     def test_does_not_fire_before_window_opens(self):
-        # 16:30 ET on Monday — window not yet open.
-        now = _et_to_utc(2026, 5, 11, 16, 30)
+        # 07:30 ET on Monday — window not yet open.
+        now = _et_to_utc(2026, 5, 11, 7, 30)
         h = self._fresh_handler()
         with patch(
             "monitor_daemon.handlers.cash_flow_sync._now_utc", return_value=now
         ):
             assert h.is_due() is False
 
-    def test_late_fire_after_18_when_not_run_today(self):
-        # 18:30 ET Monday, no prior run — fire late, not next day.
-        now = _et_to_utc(2026, 5, 11, 18, 30)
+    def test_late_fire_after_9_when_not_run_today(self):
+        # 09:30 ET Monday, no prior run — fire late, not next day.
+        now = _et_to_utc(2026, 5, 11, 9, 30)
         h = self._fresh_handler()
         with patch(
             "monitor_daemon.handlers.cash_flow_sync._now_utc", return_value=now
@@ -103,9 +103,9 @@ class TestDailyFireWindow:
             assert h.is_due() is True
 
     def test_does_not_re_fire_same_et_trading_day(self):
-        # last_run at 17:05 ET, now 17:45 ET same day → already done.
-        last_run = _et_to_utc(2026, 5, 11, 17, 5)
-        now = _et_to_utc(2026, 5, 11, 17, 45)
+        # last_run at 08:05 ET, now 08:45 ET same day → already done.
+        last_run = _et_to_utc(2026, 5, 11, 8, 5)
+        now = _et_to_utc(2026, 5, 11, 8, 45)
         h = self._fresh_handler()
         h.last_run = last_run
         with patch(
@@ -114,9 +114,9 @@ class TestDailyFireWindow:
             assert h.is_due() is False
 
     def test_fires_again_next_trading_day(self):
-        # last_run yesterday at 17:05 ET, now 17:30 ET today → fire.
-        last_run = _et_to_utc(2026, 5, 11, 17, 5)
-        now = _et_to_utc(2026, 5, 12, 17, 30)
+        # last_run yesterday at 08:05 ET, now 08:30 ET today → fire.
+        last_run = _et_to_utc(2026, 5, 11, 8, 5)
+        now = _et_to_utc(2026, 5, 12, 8, 30)
         h = self._fresh_handler()
         h.last_run = last_run
         with patch(
@@ -135,7 +135,7 @@ class TestHolidaySkip:
 
     def test_does_not_fire_on_christmas(self):
         # 2026-12-25 is a Friday and a US trading holiday.
-        now = _et_to_utc(2026, 12, 25, 17, 30)
+        now = _et_to_utc(2026, 12, 25, 8, 30)
         h = self._fresh_handler()
         with patch(
             "monitor_daemon.handlers.cash_flow_sync._now_utc", return_value=now
@@ -144,7 +144,7 @@ class TestHolidaySkip:
 
     def test_does_not_fire_on_mlk_day(self):
         # 2026-01-19 (Monday) — MLK day.
-        now = _et_to_utc(2026, 1, 19, 17, 30)
+        now = _et_to_utc(2026, 1, 19, 8, 30)
         h = self._fresh_handler()
         with patch(
             "monitor_daemon.handlers.cash_flow_sync._now_utc", return_value=now
@@ -153,32 +153,32 @@ class TestHolidaySkip:
 
 
 class TestDSTBoundaries:
-    """zoneinfo handles 17:00 ET correctly across the EST/EDT boundary."""
+    """zoneinfo handles 08:00 ET correctly across the EST/EDT boundary."""
 
     def _fresh_handler(self):
         from monitor_daemon.handlers.cash_flow_sync import CashFlowSyncHandler
         return CashFlowSyncHandler()
 
-    def test_17_et_in_march_edt(self):
-        # 2026-03-16 (Monday, after DST start). 17:30 EDT = 21:30 UTC.
-        now = _et_to_utc(2026, 3, 16, 17, 30)
+    def test_8_et_in_march_edt(self):
+        # 2026-03-16 (Monday, after DST start). 08:30 EDT = 12:30 UTC.
+        now = _et_to_utc(2026, 3, 16, 8, 30)
         h = self._fresh_handler()
         with patch(
             "monitor_daemon.handlers.cash_flow_sync._now_utc", return_value=now
         ):
             assert h.is_due() is True
 
-    def test_17_et_in_december_est(self):
-        # 2026-12-14 (Monday, EST). 17:30 EST = 22:30 UTC.
-        now = _et_to_utc(2026, 12, 14, 17, 30)
+    def test_8_et_in_december_est(self):
+        # 2026-12-14 (Monday, EST). 08:30 EST = 13:30 UTC.
+        now = _et_to_utc(2026, 12, 14, 8, 30)
         h = self._fresh_handler()
         with patch(
             "monitor_daemon.handlers.cash_flow_sync._now_utc", return_value=now
         ):
             assert h.is_due() is True
 
-    def test_16_30_est_in_december_does_not_fire(self):
-        now = _et_to_utc(2026, 12, 14, 16, 30)
+    def test_7_30_est_in_december_does_not_fire(self):
+        now = _et_to_utc(2026, 12, 14, 7, 30)
         h = self._fresh_handler()
         with patch(
             "monitor_daemon.handlers.cash_flow_sync._now_utc", return_value=now
@@ -188,7 +188,7 @@ class TestDSTBoundaries:
 
 class TestCircuitBreakerCadence:
     """Throttle-aware backoff composes with the daily window: a 24h
-    embargo says 'no earlier than tomorrow at 17:00 ET'."""
+    embargo says 'no earlier than tomorrow at 08:00 ET'."""
 
     def _fresh_handler(self):
         from monitor_daemon.handlers.cash_flow_sync import CashFlowSyncHandler
@@ -197,7 +197,7 @@ class TestCircuitBreakerCadence:
     def test_blocked_during_embargo(self):
         from monitor_daemon.handlers._throttle_backoff import record_throttle
 
-        now = _et_to_utc(2026, 5, 11, 17, 30)
+        now = _et_to_utc(2026, 5, 11, 8, 30)
         h = self._fresh_handler()
         # Pretend a 1018 just landed. The first rung is 90s — IBKR's documented
         # window is one minute, not one day.
@@ -212,11 +212,11 @@ class TestCircuitBreakerCadence:
     def test_unblocked_after_embargo_expires_and_in_daily_window(self):
         from monitor_daemon.handlers._throttle_backoff import record_throttle
 
-        first = _et_to_utc(2026, 5, 11, 17, 30)
+        first = _et_to_utc(2026, 5, 11, 8, 30)
         h = self._fresh_handler()
         h._backoff_state = record_throttle({"throttle_count": 0, "blocked_until": None}, now_utc=first)
-        # 25h later → embargo cleared, also a daily window on 5/12 17:30 ET.
-        next_day_window = _et_to_utc(2026, 5, 12, 18, 30)
+        # 25h later → embargo cleared, also a daily window on 5/12 08:30 ET.
+        next_day_window = _et_to_utc(2026, 5, 12, 9, 30)
         with patch(
             "monitor_daemon.handlers.cash_flow_sync._now_utc",
             return_value=next_day_window,
@@ -226,7 +226,7 @@ class TestCircuitBreakerCadence:
     def test_breaker_persists_through_get_state_set_state(self):
         from monitor_daemon.handlers._throttle_backoff import record_throttle
 
-        now = _et_to_utc(2026, 5, 11, 17, 30)
+        now = _et_to_utc(2026, 5, 11, 8, 30)
         h1 = self._fresh_handler()
         h1._backoff_state = record_throttle({"throttle_count": 0, "blocked_until": None}, now_utc=now)
         state = h1.get_state()
@@ -237,7 +237,7 @@ class TestCircuitBreakerCadence:
 class TestSoftFailureRetriesWithinDay:
     """A "statement not ready" / network blip must NOT burn the daily
     slot. The handler must retry on a 5-min cadence within the same day
-    so a transient 17:00 ET Flex spike doesn't cost us 24h of data.
+    so a transient 08:00 ET Flex spike doesn't cost us 24h of data.
 
     Production bug (2026-05-14): a single 60s polling timeout latched
     last_run and the handler was silent for ~7 days until Joe noticed
@@ -274,7 +274,7 @@ class TestSoftFailureRetriesWithinDay:
 
     def test_soft_failure_then_retry_after_cooldown(self):
         """After a soft failure, is_due is False for 5 min then True."""
-        first = _et_to_utc(2026, 5, 14, 17, 30)
+        first = _et_to_utc(2026, 5, 14, 8, 30)
         h = self._fresh_handler()
         h._execute_inner = lambda: {  # type: ignore[method-assign]
             "status": "error",
@@ -311,7 +311,7 @@ class TestSoftFailureRetriesWithinDay:
     def test_successful_run_resets_breaker(self):
         from monitor_daemon.handlers._throttle_backoff import record_throttle
 
-        now = _et_to_utc(2026, 5, 11, 17, 30)
+        now = _et_to_utc(2026, 5, 11, 8, 30)
         h = self._fresh_handler()
         h._backoff_state = record_throttle({"throttle_count": 0, "blocked_until": None}, now_utc=now)
         # Simulate the success path the handler triggers internally.

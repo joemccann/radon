@@ -44,7 +44,7 @@ failure by substring-matching stderr again):
 
 Cadence:
     monitor_daemon `cash_flow_sync` handler runs this once per ET trading
-    day at 17:00 ET (1h after market close). IBKR Flex publishes cash
+    day at 08:00 ET (pre-open). IBKR Flex publishes cash
     transactions once per day with a ~1-day settlement lag — a single
     well-timed daily call after the publication window is sufficient.
 
@@ -215,7 +215,7 @@ _MAX_SOFT_RETRY_ATTEMPTS = 2  # initial + 1 retry
 # spending a SendRequest and writing zero rows.
 #
 # 420s covers the 2.5-3.5 minute statement-generation latency IBKR shows
-# around the 17:00 ET EOD spike with room to spare.
+# around Flex generation spikes with room to spare.
 FLEX_POLL_BUDGET_SECONDS = 420.0
 INITIAL_POLL_SLEEP_SECONDS = 2.0
 MAX_POLL_SLEEP_SECONDS = 15.0
