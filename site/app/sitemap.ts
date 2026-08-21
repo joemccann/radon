@@ -1,5 +1,6 @@
 import type { MetadataRoute } from "next";
 import { clusterPages } from "../lib/cluster-pages";
+import { agentPages } from "../lib/developer-pages";
 import { legalPages } from "../lib/legal-pages";
 import { SITE_CONTENT_LAST_MODIFIED, siteUrl } from "../lib/seo";
 
@@ -29,5 +30,11 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: "monthly" as const,
       priority: 0.4,
     },
+    ...agentPages.map((page) => ({
+      url: `${siteUrl}/${page.slug}`,
+      lastModified: new Date(page.lastModified),
+      changeFrequency: "monthly" as const,
+      priority: 0.5,
+    })),
   ];
 }

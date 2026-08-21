@@ -1,4 +1,9 @@
 import type { Metadata, Viewport } from "next";
+import {
+  LEGAL_ADDRESS_COUNTRY,
+  LEGAL_ADDRESS_REGION,
+  LEGAL_CONTACT_EMAIL,
+} from "./legal";
 
 export const DEFAULT_SITE_URL = "https://radon.run";
 export const DEMO_APP_URL = "https://demo.radon.run";
@@ -132,6 +137,17 @@ export const siteStructuredData = [
       name: "Joe McCann",
       url: GITHUB_URL,
       sameAs: [GITHUB_URL, X_PROFILE_URL],
+    },
+    contactPoint: {
+      "@type": "ContactPoint",
+      email: LEGAL_CONTACT_EMAIL,
+      contactType: "customer support",
+      availableLanguage: "English",
+    },
+    address: {
+      "@type": "PostalAddress",
+      addressCountry: LEGAL_ADDRESS_COUNTRY,
+      addressRegion: LEGAL_ADDRESS_REGION,
     },
   },
   {

@@ -14,6 +14,7 @@ interface LegalDocumentProps {
   navLabel: string;
   title: string;
   effectiveDate: string;
+  dateLabel?: string;
   intro: string;
   sections: LegalSection[];
 }
@@ -47,6 +48,7 @@ export function LegalDocument({
   navLabel,
   title,
   effectiveDate,
+  dateLabel = "Effective",
   intro,
   sections,
 }: LegalDocumentProps) {
@@ -73,7 +75,7 @@ export function LegalDocument({
             </h1>
 
             <p className="mb-7 font-mono text-[11.5px] uppercase tracking-[0.14em] text-muted">
-              Effective {effectiveDate}
+              {dateLabel} {effectiveDate}
             </p>
 
             <p className="max-w-[66ch] text-[1.12rem] leading-[1.55] text-secondary">
