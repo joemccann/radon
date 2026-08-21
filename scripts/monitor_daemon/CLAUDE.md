@@ -42,7 +42,7 @@ Full rule in `web/CLAUDE.md` §Combo / BAG Order Guardrails point 7. Python side
 
 ## Where Other Daemons Live
 
-- `cash_flow_sync` runs once per ET trading day at 17:00 ET. Reads `IB_FLEX_NAV_QUERY_ID=1442520` (the Activity query "Equity Summary in Base", three sections: NAV in Base, Cash Transactions, Transfers). Don't repurpose for trade pulls.
+- `cash_flow_sync` runs once per ET trading day at 08:00 ET (moved from 17:00 ET 2026-08-20: every post-close SendRequest failed Flex 1001 while the same query id succeeded every morning via radon-perf-twr). Reads `IB_FLEX_NAV_QUERY_ID=1442520` (the Activity query "Equity Summary in Base", three sections: NAV in Base, Cash Transactions, Transfers). Don't repurpose for trade pulls.
 
   **Only Flex code 1018 is a rate limit** — IBKR publishes one request per second, ten per minute, per token, and no daily or multi-day cooldown anywhere. The breaker ladder is 90s → 5m → 15m → 1h. It was 24h → 48h → 72h → 168h and also fired on **1001** (transient generation failure) and **1019** (*"statement generation in progress"* — the ordinary not-ready response during polling). A statement seconds from ready therefore bought a 24-hour backoff, and a few transient failures walked to a week: that is the 10-day outage from 2026-08-06. 1001/1009 take the soft lane; 1019 on a poll is not an error at all. See `docs/flex-delivery-architecture.md`.
 - `flex_token_check` runs daily, alerts on expiry.

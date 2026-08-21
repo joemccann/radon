@@ -3,7 +3,7 @@
 
 Pulls IB CashTransaction rows (deposits, withdrawals, dividends, interest,
 fees) from the NAV Flex Query and persists to the `cash_flows` Turso
-table once per ET trading day at 17:00 ET (1h after the 4PM ET close).
+table once per ET trading day at 08:00 ET (pre-open; see FIRE_HOUR_ET).
 
 Why daily, not 4-hourly: IBKR Flex Web Service uses a sliding-window
 rate limit. Every request during throttle — including failures —
@@ -11,7 +11,7 @@ pushes the reset further out. The previous 4h cadence with internal
 retries fired up to 12 attempts per 24h. While the token was throttled,
 those attempts perpetuated the throttle indefinitely (May 9 2026 — Joe
 burned ~24h of cash flow visibility this way). Cash flows publish once
-per day; one well-timed daily call after market close is sufficient
+per day; one well-timed daily call is sufficient
 and stays inside the rate budget.
 
 Throttle handling: the one documented rate-limit code (1018) triggers an
@@ -19,9 +19,8 @@ exponential circuit breaker (90s -> 5m -> 15m -> 1h capped) via
 ``_throttle_backoff``. IBKR's published 1018 limit is one request per
 second and ten per minute, per token, so the ladder is measured in
 minutes; it used to run 24h -> 168h, three orders of magnitude harsher
-than the constraint it modelled. The breaker composes with the daily
-17:00 ET window: an embargo that outlives the window still defers to
-tomorrow at 17:00 ET rather than re-probing mid-day.
+than the constraint it modelled. The breaker composes with thedaily window: an embargo that outlives the window still defers to
+tomorrow rather than re-probing later the same day.
 
 1001 and 1019 are NOT rate limits and never reach the breaker. 1019 is
 "statement generation in progress" and 1001 is a transient generation
@@ -64,12 +63,21 @@ CHECK_INTERVAL = 24 * 60 * 60  # 24h floor — exact firing handled by is_due
 
 ET = ZoneInfo("America/New_York")
 
-# Daily fire window: 17:00 ET (inclusive) through 17:59 ET (inclusive).
+# Daily fire window: 08:00 ET (inclusive) through 08:59 ET (inclusive).
 # A 1h window gives the daemon's 30s loop ~120 chances to pick it up
 # under normal operation. Outside the window we still allow a "late
 # fire" if last_run is on a strictly earlier ET trading day, so a
 # daemon outage doesn't skip a day.
-FIRE_HOUR_ET = 17
+#
+# Why morning, not 17:00 ET (the original slot): every 17:00 ET
+# SendRequest from 2026-08-10 through 2026-08-20 failed with Flex 1001
+# ("statement could not be generated at this time") — IBKR's post-close
+# statement-generation window reliably refuses the NAV query — while the
+# SAME query id succeeds every morning at 07:34 ET via radon-perf-twr.
+# Flex only serves its last FINALIZED statement (~T+1 for cash rows), so
+# an evening pull never captured same-day data anyway; the morning pull
+# loses nothing and lands in a window that demonstrably works.
+FIRE_HOUR_ET = 8
 FIRE_WINDOW_HOURS = 1
 
 # Soft-failure retry budget per ET day. A Flex outage that keeps TIMING OUT
@@ -215,7 +223,7 @@ def _is_trading_day_et(now_utc: datetime) -> bool:
 
 
 class CashFlowSyncHandler(BaseHandler):
-    """Run scripts/cash_flow_sync.py once per ET trading day at 17:00 ET."""
+    """Run scripts/cash_flow_sync.py once per ET trading day at 08:00 ET."""
 
     name = "cash_flow_sync"
     interval_seconds = CHECK_INTERVAL
@@ -313,7 +321,7 @@ class CashFlowSyncHandler(BaseHandler):
             if last_run_et_date == today_et_date:
                 return False
 
-        # We're past 17:00 ET on a trading day and haven't fired today.
+        # We are past the fire window on a trading day and have not fired today.
         # Fire — even if past the 1h "preferred" window, since we'd
         # otherwise skip the day entirely.
         return True
@@ -426,7 +434,7 @@ class CashFlowSyncHandler(BaseHandler):
         elif failure_class == "permanent":
             # Auth failure / unknown query id / undocumented error code.
             # Retrying cannot flip it, so spend no more of today's budget;
-            # the next 17:00 ET window re-probes once a human has looked.
+            # the next daily window re-probes once a human has looked.
             self._advance_soft_attempts(now_utc, to=MAX_SOFT_ATTEMPTS_PER_ET_DAY)
         else:
             self._advance_soft_attempts(now_utc)
@@ -479,7 +487,7 @@ class CashFlowSyncHandler(BaseHandler):
 
     def _soft_budget_exhausted(self, now_utc: datetime) -> bool:
         """True when today's ET day already spent its soft-retry budget —
-        the next SendRequest waits for tomorrow's 17:00 ET window."""
+        the next SendRequest waits for tomorrow's daily window."""
         state = self._backoff_state
         if state.get("soft_attempt_date") != _et_date(now_utc):
             return False
@@ -500,7 +508,7 @@ class CashFlowSyncHandler(BaseHandler):
 
     @staticmethod
     def _next_daily_window_after(now_utc: datetime) -> datetime:
-        """Next 17:00 ET on a trading day strictly later than today."""
+        """Next fire-window open on a trading day strictly later than today."""
         et_now = now_utc.astimezone(ET)
         from datetime import timedelta as _td
         candidate = et_now.replace(hour=FIRE_HOUR_ET, minute=0, second=0, microsecond=0)
