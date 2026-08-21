@@ -234,15 +234,12 @@ function isVerifiedReturnCapitalV2(
   return payload.measurement.quality === "exact";
 }
 
-function isFullLossDebit(pos: PortfolioPosition, entryCost: number): boolean {
+function isNetDebitPaid(pos: PortfolioPosition, entryCost: number): boolean {
   if (!Number.isFinite(entryCost) || entryCost <= 0) return false;
-  if (normalizedRiskProfile(pos) === "defined") return true;
-  if (pos.legs.length === 1) {
-    const onlyLeg = pos.legs[0];
-    if (onlyLeg?.type === "Stock" && onlyLeg.direction === "LONG") return true;
-  }
-  return pos.legs.length > 0
-    && pos.legs.every((leg) => leg.type !== "Stock" && leg.direction === "LONG");
+  // Single-leg shorts store entry_cost as a magnitude. That is a credit, not
+  // capital paid. Multi-leg nets are already signed by resolveEntryCost.
+  if (pos.legs.length === 1 && pos.legs[0]?.direction === "SHORT") return false;
+  return true;
 }
 
 /**
@@ -250,8 +247,9 @@ function isFullLossDebit(pos: PortfolioPosition, entryCost: number): boolean {
  *
  * Defined-risk max loss wins. Any position without exact max loss may use a
  * positive, isolated broker-observed opening-margin record with complete v2
- * provenance. A projected what-if number is never accepted. Debit paid is used only
- * where it is demonstrably the full loss.
+ * provenance. A projected what-if number is never accepted. A net debit paid
+ * (entry_cost > 0) is a valid denominator even on undefined-risk mixed
+ * structures such as a debit risk reversal. Opening credits stay unavailable.
  */
 export function resolveReturnCapital(pos: PortfolioPosition): ReturnCapitalBasis | null {
   if (normalizedRiskProfile(pos) === "defined") {
@@ -284,7 +282,7 @@ export function resolveReturnCapital(pos: PortfolioPosition): ReturnCapitalBasis
   }
 
   const entryCost = resolveEntryCost(pos);
-  if (isFullLossDebit(pos, entryCost)) {
+  if (isNetDebitPaid(pos, entryCost)) {
     const entryDate = String(pos.entry_date ?? "").trim();
     return {
       amount: entryCost,

@@ -257,19 +257,11 @@ describe.each(UNDEFINED.map((s) => [s.name, s] as const))(
     it("without verified margin, undefined risk never uses opening credit", () => {
       const pos = buildPosition(struct, { max_risk: null, init_margin_at_entry: null });
       expect(pos.max_risk).toBeNull();
-      // Expectation is built from the FIXTURE's declared net (pos.entry_cost, set
-      // by buildPosition) and the CATALOG's leg actions — never from a call into
-      // positionUtils, which would make the assertion self-satisfying.
+      // Fixture-declared net, not resolveEntryCost(pos). Credits stay
+      // unavailable. A positive net debit is capital even on mixed longs/shorts
+      // (CBRS debit risk reversal, 2026-08-21).
       const declaredNet = pos.entry_cost;
-      const catalogActions = struct.legs.map((leg) => String(leg.action || "BUY").toUpperCase());
-      const catalogTypes = struct.legs.map((leg) => String(leg.type).toLowerCase());
-      const isLongStock = pos.legs.length === 1
-        && catalogTypes[0] === "stock"
-        && catalogActions[0] === "BUY";
-      const isAllLongOptions = catalogTypes.every((t) => t !== "stock")
-        && catalogActions.every((a) => a === "BUY");
-      const fullLossDebit = declaredNet > 0 && (isLongStock || isAllLongOptions);
-      expect(getPnlCapital(pos)).toBe(fullLossDebit ? declaredNet : null);
+      expect(getPnlCapital(pos)).toBe(declaredNet > 0 ? declaredNet : null);
       if (declaredNet < 0) expect(getPnlPct(pos)).toBeNull();
     });
 
@@ -511,6 +503,30 @@ describe("hand-computed capital and return (literal expectations)", () => {
     expect(getPnlDollars(pos)).toBe(340);
     expect(getPnlCapital(pos)).toBe(900);
     expect(getPnlPct(pos)).toBeCloseTo(37.777778, 6);
+  });
+
+  it("undefined debit risk reversal: net debit paid is the return denominator", () => {
+    // CBRS 2026-08-21: LONG 50x C$205 @ $2.33, SHORT 50x P$200 @ $1.58.
+    // Net debit $0.75 × 50 × 100 = $3,750. Marks $2.23 / $1.30.
+    const legs: PortfolioLeg[] = [
+      optionLeg("LONG", 205, 50, 2.33, 2.23),
+      { ...optionLeg("SHORT", 200, 50, 1.58, 1.3), type: "Put" },
+    ];
+    const pos = handBuiltPosition(
+      {
+        structure: "Risk Reversal (P$200.0/C$205.0)",
+        risk_profile: "undefined",
+        entry_cost: 3_750,
+        contracts: 50,
+        direction: "COMBO",
+      },
+      legs,
+    );
+    expect(resolveEntryCost(pos)).toBe(3_750);
+    expect(resolveMarketValue(pos)).toBe(4_650);
+    expect(getPnlDollars(pos)).toBe(900);
+    expect(getPnlCapital(pos)).toBe(3_750);
+    expect(getPnlPct(pos)).toBeCloseTo(24, 6);
   });
 
   it("undefined multi-leg CREDIT combo: −$5,000 net credit is never a denominator", () => {

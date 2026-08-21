@@ -679,7 +679,7 @@ export default function PositionTable({
                 activeKey={sort.key}
                 direction={sort.direction}
                 onToggle={toggle}
-                helpText="Return uses exact max risk, full-loss debit, or isolated broker-observed opening margin. Estimated and unlinked capital remain N/A."
+                helpText="Return uses exact max risk, net debit paid, or isolated broker-observed opening margin. Opening credits and unlinked capital remain N/A."
                 helpAriaLabel="Explain position return basis"
               />
             )}
