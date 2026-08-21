@@ -355,9 +355,13 @@ class TestSignalsRefresh:
         assert svc["environmentfile"] == ENV_FILE_PATH
         assert svc["workingdirectory"] == "/home/radon/radon"
         assert "run_signals_refresh.sh" in svc["execstart"]
-        # Both scans run ~8s each; the budget must still release the unit
-        # well before the next slot.
-        assert int(svc["timeoutstartsec"]) <= 600
+        assert "RADON_SIGNALS_SCAN_TIMEOUT=490" in svc.get("environment", "")
+        # Sequential POSTs must outlive FastAPI's theta 420s + strength 480s
+        # children (curl -m 490 each). A 450s unit cap SIGTERMs a live
+        # first scan and pages; the hourly timer gap is 3600s.
+        budget = int(svc["timeoutstartsec"])
+        assert budget >= 980
+        assert budget <= 1800
 
     def test_timer_covers_et_trading_hours_only(self, unit, services_dir):
         timer = unit("radon-signals-refresh.timer")["Timer"]

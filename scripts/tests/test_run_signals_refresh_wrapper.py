@@ -22,6 +22,7 @@ Responsibilities:
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import socket
 import stat
@@ -368,3 +369,45 @@ def test_persistent_502_still_fails_without_direct_fallback(tmp_path: Path) -> N
     assert "fallback" not in combined
     assert "theta-direct" not in combined
     assert stub.hits.get(THETA_PATH, 0) >= 3, stub.hits
+
+
+def test_wrapper_curl_deadline_covers_fastapi_scan_children() -> None:
+    """BUG-013 left deadlines unaligned: curl -m 200 abort disconnects while
+    FastAPI's theta/strength children still run (420s / 480s). Starlette
+    cancels the request, run_script kills the scanner, the oneshot exits 1,
+    and the unit watchdog pages P1 (Result=exit-code, NRestarts=0) every
+    hourly fire.
+
+    The 490s budget is exported by the 1050s unit so an un-upgraded
+    TimeoutStartSec=450 host keeps the 200s default (2x200 < 450) instead
+    of SIGTERM-ing a live first scan.
+    """
+    scripts = Path(__file__).resolve().parents[1]
+    repo = scripts.parent
+    wrapper = (scripts / "run_signals_refresh.sh").read_text()
+    server = (scripts / "api" / "server.py").read_text()
+    unit = (repo / "cloud" / "services" / "radon-signals-refresh.service").read_text()
+    env_timeout = int(re.search(r"RADON_SIGNALS_SCAN_TIMEOUT=(\d+)", unit).group(1))
+    default_timeout = int(
+        re.search(r"RADON_SIGNALS_SCAN_TIMEOUT:-(\d+)", wrapper).group(1)
+    )
+    theta = int(
+        re.search(
+            r'run_script\("theta_harvester_scanner\.py", args, timeout=(\d+)',
+            server,
+        ).group(1)
+    )
+    strength = int(
+        re.search(
+            r'run_script\("strength_confirmation_scanner\.py", args, timeout=(\d+)',
+            server,
+        ).group(1)
+    )
+    assert env_timeout >= max(theta, strength), (
+        f"unit RADON_SIGNALS_SCAN_TIMEOUT={env_timeout} < FastAPI children "
+        f"{theta}/{strength}: curl abort cancels the accepted scan and pages"
+    )
+    assert default_timeout <= 200, (
+        f"wrapper default {default_timeout} exceeds the live 450s unit cap"
+    )
+    assert int(re.search(r"^TimeoutStartSec=(\d+)", unit, re.M).group(1)) >= 2 * env_timeout

@@ -105,10 +105,13 @@ fi
 PRESET="${RADON_SIGNALS_REFRESH_PRESET:-ndx100}"
 FASTAPI_HOST="${RADON_SIGNALS_REFRESH_FASTAPI_HOST:-127.0.0.1}"
 FASTAPI_PORT="${RADON_SIGNALS_REFRESH_FASTAPI_PORT:-8321}"
-# FastAPI caps the theta child at 420s and the strength child at 480s; a full
-# NDX100 pass measures ~8s. 200s covers a badly degraded UW without holding
-# the unit past its next slot.
-SCAN_TIMEOUT=200
+# FastAPI caps the theta child at 420s and the strength child at 480s.
+# Curl -m must outlive both: a shorter abort disconnects, Starlette
+# cancels the request, run_script kills the scanner, and the oneshot
+# pages P1 (Result=exit-code, NRestarts=0) on every hourly fire.
+# Default 200 stays under TimeoutStartSec=450 on hosts that have not
+# yet installed the 1050s unit (which exports RADON_SIGNALS_SCAN_TIMEOUT=490).
+SCAN_TIMEOUT="${RADON_SIGNALS_SCAN_TIMEOUT:-200}"
 # Retry transient FastAPI shedding a bounded number of times:
 #   502/503 — API up but subprocess slot-cap full (2026-08-21 14:00Z:
 #             both signals POSTs 502 while /health 200; capacity exhausted)
