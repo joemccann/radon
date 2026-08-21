@@ -50,6 +50,10 @@ export function EditorialFooter() {
         <a href="/terms" className={footerLink}>
           Terms
         </a>
+        <span aria-hidden="true">·</span>
+        <a href="/developers" className={footerLink}>
+          Developers
+        </a>
       </div>
     </footer>
   );
