@@ -7,7 +7,10 @@ HeadlessChrome UA) left the jar's durable authjs cookies looking healthy
 while every actual re-login silently failed for 11 days. This probe
 closes that blind spot by exercising the real serving path once a day:
 GET /options/exposure on the local FastAPI, whose provider client owns
-the credential-based re-login (9a49bad6).
+the credential-based re-login (9a49bad6). An auth 503 is not a stand-down
+on MenthorQ's ``client_id=aws_cognito_client_id`` query: bootstrap must
+click OIDC ``input[name=authorize]`` while still on ``wp-login.php``
+(d2d595e7). Session-ok + probe-error means the jar is unspendable.
 
 Loopback requests carry no forwarded headers, so the probe rides the
 trusted-local auth bypass. Cost on success is one exposure fetch — the

@@ -28,3 +28,4 @@ Applies under `scripts/monitor_daemon/`. Root and `scripts/AGENTS.md` also apply
 - `cash_flow_sync` runs once per ET trading day at 17:00 ET and uses `IB_FLEX_NAV_QUERY_ID`.
 - Flex throttle errors require backoff; do not manually retry during throttle because it pushes reset further out.
 - `replica_watchdog` is disabled before subprocess or health writes when `data/replica.db` is absent; while the file exists it is event-driven and uses a 24h staleness window.
+- `menthorq-session` is cookie-expiry only. `menthorq-login-probe` is the live remint. Session ok + probe error means click OIDC Authorize (`input[name=authorize]`), not stand down on `client_id=aws_cognito_client_id`. Dashboard jar is `data/menthorq_dashboard/`; CTA jar is `data/menthorq_cache/`.

@@ -350,10 +350,14 @@ Incident: 2026-08-15 00:24Z, P1 page `34ab3e3c…`.
   construction they cannot see an expired live credential. `cta-sync` kept
   working throughout (separate jar, separate login), proving creds/host/WAF
   were fine and isolating it to the dashboard jar.
-- **Upstream blocker:** the automated re-login cannot complete — MenthorQ's
-  WordPress→Cognito redirect issues `client_id=aws_cognito_client_id`, a
-  literal placeholder. Not fixable from this side; the jar needs re-minting
-  out of band, and a code workaround is a stand-down (upstream defect).
+- **OIDC consent is not a stand-down:** MenthorQ's WordPress→Cognito
+  redirect keeps `client_id=aws_cognito_client_id` in the query and stays
+  on `wp-login.php` with an **Authorize** submit (`input[name=authorize]`).
+  Headless used to wait for `dashboard.menthorq.io` and time out. Click
+  Authorize, then wait for landing. Regression:
+  `test_menthorq_dashboard_bootstrap.py::test_clicks_oidc_authorize_consent_before_waiting_for_the_dashboard`
+  (`d2d595e7`). A headed browser on that consent page is a valid remint,
+  not proof the chain is unfixable.
 - **Standing defense:** `menthorq-session` daily writer
   (`scripts/monitor_daemon/handlers/menthorq_session_check.py`) reads the
   jar's own auth-cookie expiries — no browser, no network — and publishes a
@@ -377,10 +381,20 @@ Incident: 2026-08-15 00:24Z, P1 page `34ab3e3c…`.
   process-wide 300s auth-failure embargo so a new FastAPI client per request
   cannot re-pay the budget. First call still bootstraps (self-heal).
   Discriminating check: probe 503 in ~60s + session ok + UI 504 in 50s.
-  Reminting the dashboard jar remains ops; this change makes the failure
-  a fast 503 instead of a proxy timeout. Regression:
+  Timeout/embargo stop the 504; they do not restore the ladder. Remint is
+  the Authorize click (or a headed export of the jar to
+  `data/menthorq_dashboard/menthorq_dashboard_storage_state.json` on the
+  VPS, then restart `radon-api` to clear the 300s embargo). Regression:
   `test_menthorq_dashboard_client.py::test_request_path_auth_budget_fits_inside_next_proxy`
   and `TestAuthFailureEmbargo`.
+- **2026-08-20 remint (headed Chrome):** VPS headless filled WordPress then
+  timed out on `wp-login.php?client_id=aws_cognito_client_id`. Chrome Debug
+  was already on OIDC consent ("Do you want to log in to Quin By MenthorQ").
+  Click Authorize → `dashboard.menthorq.io/en/options/exposure`. Export
+  cookies to the dashboard jar (mode 0600), install on the VPS, restart
+  `radon-api`. Live check: `GET /options/exposure/GLD?frequency=eod` 200
+  with `complete: true`. CTA jar (`data/menthorq_cache/`) is a different
+  login; do not copy it over the dashboard jar.
 
 ---
 
