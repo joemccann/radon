@@ -77,6 +77,14 @@ class FlexQueryFetcher:
     
     def fetch_executions(self, days_back: int = 30) -> List[Execution]:
         """Fetch executions from Flex Query."""
+        try:
+            from utils.flex_embargo import raise_if_blocked, record_lockout
+        except Exception:
+            raise_if_blocked = None  # type: ignore[assignment]
+            record_lockout = None  # type: ignore[assignment]
+        if raise_if_blocked is not None:
+            raise_if_blocked()
+
         print(f"Requesting Flex Query report...")
         
         # Step 1: Request the report
@@ -105,9 +113,15 @@ class FlexQueryFetcher:
         if status.text != "Success":
             error_msg = root.find(".//ErrorMessage")
             error_code = root.find(".//ErrorCode")
+            code = (error_code.text or "").strip() if error_code is not None else ""
+            if code == "1025" and record_lockout is not None:
+                try:
+                    record_lockout("1025")
+                except Exception:
+                    pass
             raise RuntimeError(
                 f"Flex Query request failed: {error_msg.text if error_msg is not None else 'Unknown error'} "
-                f"(code: {error_code.text if error_code is not None else 'N/A'})"
+                f"(code: {code or 'N/A'})"
             )
         
         reference_code = root.find(".//ReferenceCode")
@@ -136,6 +150,23 @@ class FlexQueryFetcher:
                 print(f"  Attempt {attempt + 1}: Request failed, retrying...")
                 continue
             
+            poll_code = ""
+            try:
+                poll_root = ET.fromstring(response_text)
+                poll_code = (poll_root.findtext(".//ErrorCode") or "").strip()
+            except ET.ParseError:
+                poll_root = None
+            if poll_code in ("1018", "1025"):
+                if poll_code == "1025" and record_lockout is not None:
+                    try:
+                        record_lockout("1025")
+                    except Exception:
+                        pass
+                raise RuntimeError(
+                    f"Flex GetStatement failed (code {poll_code}): "
+                    f"{(poll_root.findtext('.//ErrorMessage') if poll_root is not None else response_text[:200])}"
+                )
+
             # Check if still processing
             # IB returns <FlexStatements count="N"> (with attribute), not bare <FlexStatements>
             if "<Status>Success</Status>" not in response_text and "<FlexStatements" not in response_text:
