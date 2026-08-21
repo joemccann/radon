@@ -16,7 +16,10 @@ import pytest
 from grok_page_responder import (
     GROK_TIMEOUT_SECS,
     LOCK_STALE_SECS,
+    RERUN_TIMER_HORIZON_SECS,
+    RERUNNABLE_ONESHOT_UNITS,
     acquire_lock,
+    attempt_oneshot_rerun,
     build_followup_payload,
     build_grok_command,
     build_prompt,
@@ -456,6 +459,236 @@ class TestResponderHeartbeat:
             "a ticket grok works for the full timeout would page as stale"
         )
         assert window["requires_ib"] is False
+
+
+def _fmt_systemd(ts: datetime) -> str:
+    return ts.astimezone(timezone.utc).strftime("%a %Y-%m-%d %H:%M:%S UTC")
+
+
+def _fake_systemctl(
+    *,
+    next_elapse: str,
+    result: str = "signal",
+    active: str = "failed",
+    log: list | None = None,
+    start_rc: int = 0,
+):
+    """Seam double for the responder's systemctl probe + mutation calls."""
+
+    def runner(args):
+        if log is not None:
+            log.append(list(args))
+        if args[0] == "show":
+            target = args[1]
+            if target.endswith(".timer"):
+                stdout = f"NextElapseUSecRealtime={next_elapse}\n"
+            else:
+                stdout = f"ActiveState={active}\nResult={result}\n"
+            return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
+        rc = start_rc if args[0] == "start" else 0
+        return SimpleNamespace(returncode=rc, stdout="", stderr="")
+
+    return runner
+
+
+def _never_grok(*_a, **_k):
+    raise AssertionError("grok must not run when deterministic rerun applies")
+
+
+def _stand_down_grok(_cmd, **_kwargs):
+    return SimpleNamespace(
+        returncode=0,
+        stdout=json.dumps({"text": "RESULT: stand_down | recovers on next timer"}),
+        stderr="",
+    )
+
+
+class TestSignalKilledOneshotRerun:
+    """A `radon restart` SIGTERM'd radon-vol-cone mid-run (2026-08-20) and the
+    responder stood down with "recovers on next timer" — but the next slot was
+    ~22h away, leaving the day's EOD data missing until a human reset-failed +
+    started the unit. A signal-killed allowlisted oneshot whose next timer is
+    more than 12h out must be re-run, not stood down.
+    """
+
+    FARAWAY = _fmt_systemd(NOW + timedelta(hours=22))
+    SOON = _fmt_systemd(NOW + timedelta(hours=2))
+
+    def _enqueue_unit_page(self, service="radon-vol-cone.service"):
+        return enqueue_delivered_page(
+            service=service,
+            severity="P1",
+            kind="unit",
+            message="systemd unit failed (Result=signal, NRestarts=0)",
+            now=NOW,
+        )
+
+    def _cycle(self, tmp_path, *, grok, systemctl):
+        with patch("grok_page_responder._send_followup") as followup:
+            rc = run_cycle(
+                tmp_path, now=NOW, grok_runner=grok, systemctl_runner=systemctl
+            )
+        return rc, followup
+
+    def test_faraway_timer_reruns_instead_of_standing_down(
+        self, db_conn, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("GROK_PAGE_RESPONDER", "1")
+        monkeypatch.setenv("GROK_PAGE_AUTOSHIP", "1")
+        self._enqueue_unit_page()
+        log: list = []
+        systemctl = _fake_systemctl(next_elapse=self.FARAWAY, log=log)
+
+        rc, followup = self._cycle(tmp_path, grok=_never_grok, systemctl=systemctl)
+
+        assert rc == 0
+        row = db_conn.execute("SELECT status, result FROM watchdog_pages").fetchone()
+        assert row[0] == "done"
+        assert row[1].startswith("restarted_unit:")
+        assert ["reset-failed", "radon-vol-cone.service"] in log
+        assert ["start", "--no-block", "radon-vol-cone.service"] in log
+        followup.assert_called_once()
+        assert followup.call_args.kwargs["disposition"] == "restarted_unit"
+
+    def test_near_timer_still_stands_down_via_grok(
+        self, db_conn, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("GROK_PAGE_RESPONDER", "1")
+        monkeypatch.setenv("GROK_PAGE_AUTOSHIP", "1")
+        self._enqueue_unit_page()
+        log: list = []
+        systemctl = _fake_systemctl(next_elapse=self.SOON, log=log)
+
+        rc, _ = self._cycle(tmp_path, grok=_stand_down_grok, systemctl=systemctl)
+
+        assert rc == 0
+        row = db_conn.execute("SELECT status, result FROM watchdog_pages").fetchone()
+        assert row[0] == "done"
+        assert "stand_down" in row[1]
+        assert ["reset-failed", "radon-vol-cone.service"] not in log
+        assert not any(args[0] == "start" for args in log)
+
+    def test_autoship_off_never_touches_systemd(self, db_conn, tmp_path, monkeypatch):
+        """The restart is an auto-fix action: gated like code_fix shipping."""
+        monkeypatch.setenv("GROK_PAGE_RESPONDER", "1")
+        monkeypatch.delenv("GROK_PAGE_AUTOSHIP", raising=False)
+        self._enqueue_unit_page()
+        log: list = []
+        systemctl = _fake_systemctl(next_elapse=self.FARAWAY, log=log)
+
+        rc, _ = self._cycle(tmp_path, grok=_stand_down_grok, systemctl=systemctl)
+
+        assert rc == 0
+        assert log == []
+
+    def test_unit_outside_allowlist_falls_through_to_grok(
+        self, db_conn, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("GROK_PAGE_RESPONDER", "1")
+        monkeypatch.setenv("GROK_PAGE_AUTOSHIP", "1")
+        self._enqueue_unit_page(service="radon-api.service")
+        log: list = []
+        systemctl = _fake_systemctl(next_elapse=self.FARAWAY, log=log)
+
+        rc, _ = self._cycle(tmp_path, grok=_stand_down_grok, systemctl=systemctl)
+
+        assert rc == 0
+        assert log == []
+
+    def test_deploy_in_flight_blocks_the_rerun(self, db_conn, tmp_path, monkeypatch):
+        monkeypatch.setenv("GROK_PAGE_RESPONDER", "1")
+        monkeypatch.setenv("GROK_PAGE_AUTOSHIP", "1")
+        journal = tmp_path / "transition.json"
+        journal.write_text("{}")
+        monkeypatch.setattr(
+            "grok_page_responder.DEPLOY_TRANSITION_JOURNAL", journal
+        )
+        self._enqueue_unit_page()
+        log: list = []
+        systemctl = _fake_systemctl(next_elapse=self.FARAWAY, log=log)
+
+        rc, _ = self._cycle(tmp_path, grok=_stand_down_grok, systemctl=systemctl)
+
+        assert rc == 0
+        assert log == []
+
+    def test_systemd_state_is_verified_not_trusted_from_excerpt(
+        self, db_conn, tmp_path, monkeypatch
+    ):
+        """The excerpt says Result=signal but the excerpt is untrusted text;
+        only systemd's own answer may trigger the action."""
+        monkeypatch.setenv("GROK_PAGE_RESPONDER", "1")
+        monkeypatch.setenv("GROK_PAGE_AUTOSHIP", "1")
+        self._enqueue_unit_page()
+        log: list = []
+        systemctl = _fake_systemctl(
+            next_elapse=self.FARAWAY, result="exit-code", log=log
+        )
+
+        rc, _ = self._cycle(tmp_path, grok=_stand_down_grok, systemctl=systemctl)
+
+        assert rc == 0
+        assert not any(args[0] in {"reset-failed", "start"} for args in log)
+
+    def test_unparseable_next_elapse_fails_closed(self, db_conn, tmp_path, monkeypatch):
+        monkeypatch.setenv("GROK_PAGE_RESPONDER", "1")
+        monkeypatch.setenv("GROK_PAGE_AUTOSHIP", "1")
+        self._enqueue_unit_page()
+        log: list = []
+        systemctl = _fake_systemctl(next_elapse="n/a", log=log)
+
+        rc, _ = self._cycle(tmp_path, grok=_stand_down_grok, systemctl=systemctl)
+
+        assert rc == 0
+        assert not any(args[0] in {"reset-failed", "start"} for args in log)
+
+    def test_failed_start_falls_through_to_grok(self, db_conn, tmp_path, monkeypatch):
+        monkeypatch.setenv("GROK_PAGE_RESPONDER", "1")
+        monkeypatch.setenv("GROK_PAGE_AUTOSHIP", "1")
+        self._enqueue_unit_page()
+        systemctl = _fake_systemctl(next_elapse=self.FARAWAY, start_rc=1)
+
+        rc, _ = self._cycle(tmp_path, grok=_stand_down_grok, systemctl=systemctl)
+
+        assert rc == 0
+        row = db_conn.execute("SELECT result FROM watchdog_pages").fetchone()
+        assert "stand_down" in row[0]
+
+    def test_horizon_boundary_is_strictly_more_than_12h(self, monkeypatch):
+        monkeypatch.setenv("GROK_PAGE_AUTOSHIP", "1")
+        page = {"page_id": "x", "service": "radon-vol-cone.service", "kind": "unit"}
+        at_horizon = _fmt_systemd(
+            NOW + timedelta(seconds=RERUN_TIMER_HORIZON_SECS)
+        )
+        past_horizon = _fmt_systemd(
+            NOW + timedelta(seconds=RERUN_TIMER_HORIZON_SECS + 60)
+        )
+        assert (
+            attempt_oneshot_rerun(
+                page, now=NOW, systemctl_runner=_fake_systemctl(next_elapse=at_horizon)
+            )
+            is None
+        )
+        rerun = attempt_oneshot_rerun(
+            page, now=NOW, systemctl_runner=_fake_systemctl(next_elapse=past_horizon)
+        )
+        assert rerun is not None
+        assert rerun[0] == "restarted_unit"
+
+    def test_allowlist_matches_the_polkit_grant(self):
+        """The responder has no general right to start radon-* units; every
+        rerunnable oneshot must be explicitly granted in the polkit source."""
+        repo_root = Path(__file__).resolve().parents[3]
+        rules = (
+            repo_root / "cloud" / "config" / "polkit" / "50-radon-services.rules"
+        ).read_text()
+        assert RERUNNABLE_ONESHOT_UNITS, "allowlist must not be empty"
+        for unit in RERUNNABLE_ONESHOT_UNITS:
+            assert f'"{unit}"' in rules, f"{unit} missing from polkit grant"
+            assert unit.startswith("radon-") and unit.endswith(".service")
+            assert not unit.startswith("radon-ib-gateway")
+        assert '"reset-failed"' in rules
+        assert '"start"' in rules
 
 
 class TestResponderLock:

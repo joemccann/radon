@@ -55,6 +55,7 @@ load_repo_dotenv()
 
 from watchdog import notify
 from watchdog import pages as pages_mod
+from watchdog import units as units_mod
 
 
 GROK_TIMEOUT_SECS = 3600
@@ -66,7 +67,26 @@ CACHE_REL = Path("data") / "cache" / "grok_pages"
 LOCK_NAME = ".responder.lock"
 HEALTH_SERVICE = "grok-page-responder"
 
+# "Recovers on next timer" is the wrong call when that slot is most of a day
+# away (radon-vol-cone 2026-08-20: SIGTERM'd at 20:4x UTC, next slot ~22h out).
+# Beyond this horizon a signal-killed oneshot is re-run instead of stood down.
+RERUN_TIMER_HORIZON_SECS = 12 * 3600
+# The responder has no general right to start radon-* units — polkit grants
+# the radon user only the preheld gateway adapter. These benign data-fetch
+# oneshots are the exact set granted verbs reset-failed/start in
+# cloud/config/polkit/50-radon-services.rules; the two lists are pinned to
+# each other by test_allowlist_matches_the_polkit_grant.
+RERUNNABLE_ONESHOT_UNITS = frozenset({
+    "radon-vol-cone.service",
+    "radon-skew.service",
+    "radon-skew2d.service",
+    "radon-bpi.service",
+})
+DEPLOY_TRANSITION_JOURNAL = units_mod.TRANSITION_JOURNAL_PATH
+SYSTEMCTL_TIMEOUT_SECS = 30
+
 GrokRunner = Callable[..., object]
+SystemctlRunner = Callable[[list[str]], object]
 
 
 # Every autonomy switch defaults CLOSED. A missing or renamed
@@ -183,6 +203,85 @@ def build_grok_command(prompt_path: Path, repo_root: Path) -> list[str]:
 def _utc_day_start(now: datetime) -> datetime:
     return now.astimezone(timezone.utc).replace(
         hour=0, minute=0, second=0, microsecond=0
+    )
+
+
+def _default_systemctl_runner(args: list[str]) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["systemctl", *args],
+        capture_output=True,
+        text=True,
+        timeout=SYSTEMCTL_TIMEOUT_SECS,
+    )
+
+
+def _systemctl_show(target: str, properties: str, runner: SystemctlRunner) -> dict:
+    proc = runner(["show", target, "-p", properties, "--no-pager"])
+    if getattr(proc, "returncode", 1) != 0:
+        return {}
+    props = {}
+    for line in (getattr(proc, "stdout", "") or "").splitlines():
+        if "=" in line:
+            key, _, value = line.partition("=")
+            props[key] = value
+    return props
+
+
+def _is_signal_killed(unit: str, runner: SystemctlRunner) -> bool:
+    """Ask systemd itself — the page excerpt is untrusted text and must never
+    trigger the action on its own."""
+    props = _systemctl_show(unit, "ActiveState,Result", runner)
+    return props.get("ActiveState") == "failed" and props.get("Result") == "signal"
+
+
+def _next_timer_elapse(unit: str, runner: SystemctlRunner) -> Optional[datetime]:
+    timer = unit[: -len(".service")] + ".timer"
+    props = _systemctl_show(timer, "NextElapseUSecRealtime", runner)
+    return units_mod._parse_systemd_timestamp(
+        props.get("NextElapseUSecRealtime") or ""
+    )
+
+
+def attempt_oneshot_rerun(
+    page: dict,
+    *,
+    now: datetime,
+    systemctl_runner: Optional[SystemctlRunner] = None,
+) -> Optional[tuple[str, str]]:
+    """Deterministic pre-triage before grok: re-run a signal-killed
+    allowlisted oneshot whose next timer slot is too far away to wait for.
+
+    Returns (disposition, summary) when the unit was re-run; None falls
+    through to the ordinary grok path. Every precondition fails CLOSED:
+    the restart is an auto-fix action, so it takes the same explicit
+    GROK_PAGE_AUTOSHIP opt-in as shipping a code fix, never runs while a
+    deploy transition journal exists, and trusts only systemd's own state.
+    """
+    if page.get("kind") != "unit":
+        return None
+    unit = page.get("service") or ""
+    if unit not in RERUNNABLE_ONESHOT_UNITS:
+        return None
+    if not autoship_enabled():
+        return None
+    if DEPLOY_TRANSITION_JOURNAL.exists():
+        return None
+    runner = systemctl_runner or _default_systemctl_runner
+    if not _is_signal_killed(unit, runner):
+        return None
+    next_run = _next_timer_elapse(unit, runner)
+    if next_run is None:
+        return None
+    wait_secs = (next_run - now).total_seconds()
+    if wait_secs <= RERUN_TIMER_HORIZON_SECS:
+        return None
+    for args in (["reset-failed", unit], ["start", "--no-block", unit]):
+        if getattr(runner(args), "returncode", 1) != 0:
+            return None
+    return (
+        "restarted_unit",
+        f"signal-killed oneshot re-run: next timer slot was "
+        f"{wait_secs / 3600:.0f}h away, reset-failed + start issued",
     )
 
 
@@ -333,6 +432,7 @@ def run_cycle(
     *,
     now: Optional[datetime] = None,
     grok_runner: Optional[GrokRunner] = None,
+    systemctl_runner: Optional[SystemctlRunner] = None,
 ) -> int:
     now = now or datetime.now(timezone.utc)
     if not responder_enabled():
@@ -376,6 +476,32 @@ def run_cycle(
         token = uuid.uuid4().hex
         if not pages_mod.claim_page(page["page_id"], now=now, claim_token=token):
             print(json.dumps({"at": now.isoformat(), "skipped": "lost_claim"}))
+            return 0
+
+        rerun = attempt_oneshot_rerun(
+            page, now=now, systemctl_runner=systemctl_runner
+        )
+        if rerun:
+            disposition, summary = rerun
+            finished = datetime.now(timezone.utc)
+            pages_mod.complete_page(
+                page["page_id"],
+                status="done",
+                result=f"{disposition}: {summary}",
+                now=finished,
+            )
+            _send_followup(
+                service=page["service"],
+                disposition=disposition,
+                summary=summary,
+            )
+            print(json.dumps({
+                "at": finished.isoformat(),
+                "page_id": page["page_id"],
+                "service": page["service"],
+                "disposition": disposition,
+                "summary": summary,
+            }))
             return 0
 
         prompt_path = cache / f"{page['page_id']}.prompt.txt"
