@@ -48,10 +48,12 @@ from knowledge.store import delete_source_docs, upsert_documents  # noqa: E402
 SERVICE_NAME = "knowledge-ingest"
 DISTILL_WORKERS = 8
 
-# One bounded retry absorbs a transient Turso lock/stream blip so the
+# Bounded retries absorb a transient Turso lock/stream blip so the
 # hourly oneshot does not page P1 on SQLITE_BUSY (2026-08-15: newsfeed
-# failed once under concurrent posts/knowledge writers, NRestarts=0).
-_SOURCE_ATTEMPTS = 2
+# failed once with no retry, NRestarts=0; 2026-08-21 17:22Z: newsfeed
+# busy on both attempts of the then-budget of 2, incidents succeeded
+# 6s later).
+_SOURCE_ATTEMPTS = 4
 _SOURCE_RETRY_BACKOFF_SECS = 1.0
 _TRANSIENT_DB_MARKERS = (
     "sqlite_busy",
@@ -318,7 +320,7 @@ def _embed_docs(docs: list[KnowledgeDoc], embedder) -> int:
 
 
 def _is_transient_db_error(exc: BaseException) -> bool:
-    """True for Turso lock/stream blips worth one retry; SQL/schema stay fatal."""
+    """True for Turso lock/stream blips worth retry; SQL/schema stay fatal."""
     message = str(exc).lower()
     return any(marker in message for marker in _TRANSIENT_DB_MARKERS)
 

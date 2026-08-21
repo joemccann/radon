@@ -710,8 +710,10 @@ class TestMainConnectionIsolation:
 class TestTransientDbRetry:
     """radon-knowledge.service P1 2026-08-15: newsfeed failed once on
     SQLITE_BUSY (concurrent posts/knowledge writers) and the oneshot
-    exited non-zero with no retry, paging Emergency. One bounded retry
-    on transient Turso lock/stream errors absorbs the blip."""
+    exited non-zero with no retry, paging Emergency. Recurred 2026-08-21
+    17:22Z: busy on both attempts of the then-budget of 2, while
+    incidents succeeded 6s later. Bounded retries on transient Turso
+    lock/stream errors absorb the blip."""
 
     def test_sqlite_busy_is_classified_transient(self):
         busy = RuntimeError(
@@ -775,6 +777,101 @@ class TestTransientDbRetry:
         assert attempts == ["newsfeed", "newsfeed"]
         out = capsys.readouterr()
         assert '"ok": true' in out.out.replace(" ", "") or '"ok": true' in out.out
+
+    def test_two_consecutive_sqlite_busy_then_success_exits_zero(
+        self, monkeypatch, capsys,
+    ):
+        # 2026-08-21 17:22Z: newsfeed SQLITE_BUSY on attempts 1 and 2 (the
+        # then-budget of 2), then incidents succeeded 6s later. Two
+        # consecutive locks must not fail the oneshot.
+        import contextlib
+
+        import db.client as db_client
+        import db.service_cycle as service_cycle_mod
+        import knowledge.sources as sources_mod
+
+        attempts: list[str] = []
+        busy = RuntimeError(
+            'Hrana: `stream error: `Error { message: "SQLite error: '
+            'database is locked", code: "SQLITE_BUSY" }``'
+        )
+
+        def flaky_ingest(db, module, **kwargs):
+            attempts.append(module.SOURCE)
+            if len(attempts) <= 2:
+                raise busy
+            return {
+                "source": module.SOURCE,
+                "fetched": 1,
+                "fetched_chunks": 1,
+                "skipped_docs": 0,
+                "distilled": 0,
+                "distill_failed": 0,
+                "embedded": 0,
+                "deleted": 0,
+                "inserted": 1,
+                "updated": 0,
+                "skipped": 0,
+                "pruned": 0,
+            }
+
+        monkeypatch.setattr(ingest_mod, "ingest_source", flaky_ingest)
+        monkeypatch.setattr(ingest_mod, "_SOURCE_RETRY_BACKOFF_SECS", 0.0)
+        monkeypatch.setattr(db_client, "get_db", lambda: object())
+        monkeypatch.setattr(db_client, "reset_connection", lambda: None)
+        monkeypatch.setattr(
+            service_cycle_mod, "service_cycle",
+            lambda *a, **k: contextlib.nullcontext(),
+        )
+        monkeypatch.setattr(
+            sources_mod,
+            "ALL_SOURCES",
+            {
+                "newsfeed": SimpleNamespace(SOURCE="newsfeed", SCOPE="research"),
+            },
+        )
+
+        assert ingest_mod.main(
+            ["--source", "newsfeed", "--no-distill", "--no-embed"]
+        ) == 0
+        assert attempts == ["newsfeed", "newsfeed", "newsfeed"]
+        out = capsys.readouterr()
+        assert '"ok": true' in out.out.replace(" ", "") or '"ok": true' in out.out
+
+    def test_exhausted_sqlite_busy_still_fails(self, monkeypatch, capsys):
+        import contextlib
+
+        import db.client as db_client
+        import db.service_cycle as service_cycle_mod
+        import knowledge.sources as sources_mod
+
+        attempts: list[str] = []
+        busy = RuntimeError(
+            'Hrana: `stream error: `Error { message: "SQLite error: '
+            'database is locked", code: "SQLITE_BUSY" }``'
+        )
+
+        def always_busy(db, module, **kwargs):
+            attempts.append(module.SOURCE)
+            raise busy
+
+        monkeypatch.setattr(ingest_mod, "ingest_source", always_busy)
+        monkeypatch.setattr(ingest_mod, "_SOURCE_RETRY_BACKOFF_SECS", 0.0)
+        monkeypatch.setattr(db_client, "get_db", lambda: object())
+        monkeypatch.setattr(db_client, "reset_connection", lambda: None)
+        monkeypatch.setattr(
+            service_cycle_mod, "service_cycle",
+            lambda *a, **k: contextlib.nullcontext(),
+        )
+        monkeypatch.setattr(
+            sources_mod,
+            "ALL_SOURCES",
+            {"newsfeed": SimpleNamespace(SOURCE="newsfeed", SCOPE="research")},
+        )
+
+        with pytest.raises(RuntimeError, match="newsfeed"):
+            ingest_mod.main(["--source", "newsfeed", "--no-distill", "--no-embed"])
+        assert attempts == ["newsfeed"] * ingest_mod._SOURCE_ATTEMPTS
 
     def test_non_transient_source_error_is_not_retried(self, monkeypatch, capsys):
         import contextlib
