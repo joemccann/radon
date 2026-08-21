@@ -8,7 +8,8 @@ import type { ModifyComboLeg, ModifyOrderRequest } from "@/lib/orderModify";
 import Modal from "./Modal";
 import { getQuoteMetrics } from "@/lib/quoteTelemetry";
 import { applyRestingLimitToQuote } from "@/lib/modifyOrderQuote";
-import { fmtPrice, legPriceKey } from "@/lib/positionUtils";
+import { fmtPrice, legPriceKey, resolveEntryCost } from "@/lib/positionUtils";
+import { findHeldComboForClose, heldComboUnits, type ComboStructureLeg } from "@/lib/order/positionTrade";
 import { computeLegImpliedValue } from "@/lib/impliedValue";
 import { useRiskFreeRate } from "@/lib/useRiskFreeRate";
 import { ModifyOrderQuoteTelemetry } from "./QuoteTelemetry";
@@ -352,12 +353,20 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, on
 
     if (isComboLocal) {
       const chainLegs: ChainOrderLeg[] = [];
+      const structureLegs: ComboStructureLeg[] = [];
       for (const leg of editableLegs) {
         const strikeNum = Number.parseFloat(leg.strike);
         const ratio = parsePositiveInteger(leg.ratio);
         if (!Number.isFinite(strikeNum) || strikeNum <= 0) return null;
         if (ratio == null) return null;
         if (!leg.expiry) return null;
+        structureLegs.push({
+          action: leg.action,
+          right: leg.right,
+          strike: strikeNum,
+          expiry: leg.expiry,
+          ratio,
+        });
         chainLegs.push({
           action: effectiveComboLegAction(leg.action, action),
           right: leg.right,
@@ -367,6 +376,26 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, on
         });
       }
       const totalCost = parsedNewLocal * parsedQtyLocal * 100;
+      const closingCombo = findHeldComboForClose({
+        ticker: comboUnderlyingSymbol(order),
+        envelopeAction: action,
+        quantity: parsedQtyLocal,
+        structureLegs,
+        portfolio,
+      });
+      if (closingCombo) {
+        const units = heldComboUnits(closingCombo);
+        return {
+          ticker: comboUnderlyingSymbol(order),
+          chainLegs,
+          netPremium: parsedNewLocal,
+          description: `${action} ${parsedQtyLocal}x ${symbol} combo @ ${fmtPrice(parsedNewLocal)}`,
+          totalCost,
+          closeOut: {
+            entryCostDollars: resolveEntryCost(closingCombo) * (parsedQtyLocal / units),
+          },
+        };
+      }
       return {
         ticker: symbol,
         chainLegs,
