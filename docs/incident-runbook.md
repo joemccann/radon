@@ -194,6 +194,46 @@ Incident: 2026-07-08, P1.
 
 ---
 
+## signals-refresh-curl-timeout-pages-p1
+
+**`radon-signals-refresh.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) on the hourly ET timer.** Recurs every RTH hour while
+the unit stays failed.
+
+- **Mechanism:** `run_signals_refresh.sh` POSTs `/theta-harvester/scan`
+  then `/strength-confirmation/scan`. FastAPI `run_script` budgets are
+  420s / 480s. BUG-013 set curl `-m 200` and treated any non-connect
+  failure (curl 28, HTTP 502) as `return 1` with no fallback. Curl abort
+  disconnects the request; Starlette cancels it; `run_script` SIGKILLs
+  the scanner. The wrapper then starts the second scan. `Type=oneshot`
+  has no `Restart=`, so `NRestarts=0` and `ActiveState=failed` until
+  the next timer. Unit watchdog pages P1. Next hourly fire repeats.
+- **Detection:** journal `FastAPI outcome indeterminate (curl=28, http=000)`
+  then `Signals refresh finished with N failed scan(s)`;
+  `systemctl show radon-signals-refresh.service -p Result,NRestarts`
+  → `exit-code` / `0`. Edge and `:8321/health/lite` stay up.
+- **Discriminating check:** curl 28 with http 000 (this case). Instant
+  HTTP 502 with `Subprocess capacity exhausted` is
+  `signals-refresh-capacity-502` (retry, `6093c087`). HTTP 502 with a
+  scanner traceback is a real scan failure, still P1. `Result=signal`
+  is deploy stop-clean. 09:00 ET skip (`Market closed`) is exit 0.
+- **Remediation (code):** the 1050s unit exports `RADON_SIGNALS_SCAN_TIMEOUT=490`
+  (curl `-m` >= max FastAPI child). Wrapper default stays 200 so an
+  un-upgraded `TimeoutStartSec=450` host does not SIGTERM a live scan.
+  CI deploy does not install the unit — root install-copy:
+  `install -m 0644 cloud/services/radon-signals-refresh.service /etc/systemd/system/ && systemctl daemon-reload`.
+  Then `systemctl reset-failed radon-signals-refresh.service`.
+  Do not restart-flap; next timer after the install-copy.
+- **Regression:**
+  `test_run_signals_refresh_wrapper.py::test_wrapper_curl_deadline_covers_fastapi_scan_children`,
+  `test_systemd_services.py::TestSignalsRefresh::test_oneshot_with_timeout`.
+- **Code:** `scripts/run_signals_refresh.sh`
+  (`RADON_SIGNALS_SCAN_TIMEOUT`, default 200),
+  `cloud/services/radon-signals-refresh.service` (`TimeoutStartSec=1050`,
+  `Environment=RADON_SIGNALS_SCAN_TIMEOUT=490`).
+
+---
+
 ## leap-partial-ticker-exit-pages-p1
 
 **`radon-leap.service` oneshot pages P1 `Result=exit-code` after a successful
