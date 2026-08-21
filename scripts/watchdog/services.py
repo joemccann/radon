@@ -115,6 +115,11 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # 26h window: no weekend/holiday gap to widen for. treasury.gov + Yahoo
     # overlay — no IB dependency.
     "yield-curve":      {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # credit-spread — radon-credit-spread.timer, daily 21:45 UTC every calendar
+    # day (weekend/holiday runs heartbeat with no new Yahoo rows). Uniform
+    # 26h window: no weekend/holiday gap to widen for. Yahoo HYG + SPX only
+    # — no IB dependency.
+    "credit-spread":    {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # straddle — radon-straddle.timer, daily 02:15 UTC every calendar day
     # (Cboe appends the session row ~20:00 ET; weekend/holiday runs are 304
     # heartbeats). Uniform 26h window mirrors margin-debt/yield-curve: no
@@ -319,6 +324,9 @@ BUCKETS: dict[str, list[str]] = {
         # Daily 22:30 UTC Treasury yield-curve pull — hourly check surfaces
         # a missed run within 1h of the 26h window expiring.
         "yield-curve",
+        # Daily 21:45 UTC Yahoo HYG/SPX credit-spread pull — hourly check
+        # surfaces a missed run within 1h of the 26h window expiring.
+        "credit-spread",
         # Daily 02:15 UTC Cboe SPX/VIX1D straddle pull — hourly check
         # surfaces a missed run within 1h of the 26h window expiring.
         "straddle",
