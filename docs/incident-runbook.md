@@ -251,17 +251,23 @@ Incident: 2026-08-15 00:24Z, P1 page `34ab3e3c…`.
   same host; journal shows only one source failed with lock/busy (not
   every source, not `stream not found` cascade after a dead singleton).
   If the canary fails too → Turso platform; stand down.
-- **Remediation (code):** one bounded retry per source on transient
+- **Remediation (code):** bounded retries per source on transient
   lock/stream markers, with `reset_connection()` so `get_db()` is a
   real fresh Hrana stream (the process singleton made the previous
   per-source `get_db()` a no-op). Do not restart-flap; next timer or
   one `radon unit restart radon-knowledge` after the fix deploys.
+- **2026-08-21 17:22Z recurrence (page `e3268a38…`):** `_SOURCE_ATTEMPTS=2`
+  retried newsfeed once; both attempts SQLITE_BUSY; incidents in the
+  same run succeeded 6s later; Turso canary `SELECT 1` ~961 ms. Budget
+  raised to 4. Persistent busy after the budget still fails the unit.
 - **Regression:** `test_knowledge_pipeline.py::TestTransientDbRetry`
   (`test_source_retries_once_on_sqlite_busy`,
+  `test_two_consecutive_sqlite_busy_then_success_exits_zero`,
+  `test_exhausted_sqlite_busy_still_fails`,
   `test_sqlite_busy_is_classified_transient`,
   `test_non_transient_source_error_is_not_retried`).
 - **Code:** `scripts/knowledge/ingest.py` (`_is_transient_db_error`,
-  `_fresh_db`, `_SOURCE_ATTEMPTS=2`).
+  `_fresh_db`, `_SOURCE_ATTEMPTS=4`).
 
 ---
 
