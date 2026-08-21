@@ -125,6 +125,26 @@ class TestOwnersMap:
                 assert (_ROOT / owner).is_file(), f"owner missing: {owner}"
 
 
+_YAHOO_LAST_RESORT_FILES = (
+    "CLAUDE.md",
+    "AGENTS.md",
+    ".pi/AGENTS.md",
+    "scripts/CLAUDE.md",
+    "scripts/AGENTS.md",
+)
+
+
+class TestYahooLastResortRule:
+    """CREDIT shipped Yahoo as the scheduled source. The hard rule must live
+    in the agent instruction files, not only in strategy docs."""
+
+    def test_instruction_files_call_yahoo_absolute_last_resort(self):
+        for rel in _YAHOO_LAST_RESORT_FILES:
+            text = (_ROOT / rel).read_text(encoding="utf-8")
+            assert "ABSOLUTE LAST RESORT" in text, rel
+            assert "Never make Yahoo the scheduled" in text, rel
+
+
 class TestThinIndex:
     def test_readme_has_now_true_not_recent_additions(self):
         text = (_ROOT / "README.md").read_text(encoding="utf-8")

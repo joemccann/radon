@@ -1,3 +1,27 @@
+# Task: CREDIT indicator (HYG vs SPX) 2026-08-21
+
+## Dependency graph
+
+- T1 depends_on: [] - Spec + failing tests (ICE CCC rejected; Yahoo HYG+SPX)
+- T2 depends_on: [T1] - Ingestion / API / UI worktrees
+- T3 depends_on: [T2] - Merge + full suite
+- T4 depends_on: [T3] - Browser verify + PR
+
+## Checklist
+
+- [x] T1 `docs/indicators/credit.md` + red tests
+- [x] T2 Three worktrees green
+- [x] T3 Focused gate + typecheck (authz pin added)
+- [x] T4 Live tab screenshot + PR #63
+
+## Review
+
+- ICE CCC OAS rejected (copyright). Yahoo HYG + SPX. Live fetch 4869 sessions, last 2026-08-20, regime divergent.
+- Focused: pytest 19, vitest 229 + typecheck. Playwright e2e 3/3. Screenshot `docs/indicators/credit-tab.png`.
+- VPS: timer install owed (`not-installed` allowlist). Turso write not run here (no creds).
+
+---
+
 # Task: Dashboard catalysts dates + prints (2026-08-18)
 
 ## Dependency graph

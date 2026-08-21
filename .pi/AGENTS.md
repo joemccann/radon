@@ -81,10 +81,10 @@ Any UI or asset work must comply with Radon brand identity:
 
 1. Interactive Brokers.
 2. Unusual Whales.
-3. Yahoo Finance only as market-data fallback after IB and UW.
-4. Web scrape / browser last resort for market data; use Exa for research/docs and interactive browser only for JS-rendered pages.
+3. Yahoo Finance — **ABSOLUTE LAST RESORT**. Never make Yahoo the scheduled, primary, or only source for a series IB or UW can serve.
+4. Web scrape / browser after Yahoo; use Exa for research/docs and interactive browser only for JS-rendered pages.
 
-Specialized feeds like Cboe may be used where a script explicitly documents that provider as the correct source for a metric.
+Try IB every cycle. Skip the IB socket only when `/health` `auth_state` is set and not `authenticated`; then UW; then Yahoo. 2FA, unattended timers, and "historical needs a gateway" do not skip IB or UW. Specialized official feeds (Cboe, Treasury, FINRA) may sit ahead of Yahoo when a script documents them as the source for that metric.
 
 ## Commands
 
