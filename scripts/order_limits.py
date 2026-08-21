@@ -12,6 +12,7 @@ through ``app_preferences``, which resolves DB row > env var > code default
 and discards any stored value outside the declared hard band:
   RADON_MAX_ORDER_QTY        max contracts/shares per order   (default 500)
   RADON_MAX_ORDER_NOTIONAL   max $ per order (qty×price×mult) (default 250_000)
+  Combo assignment/width is a separate loss cap (_MAX_COMBO_LOSS_DOLLARS).
   RADON_MAX_ORDERS_PER_MIN   max accepted placements per min  (default 10)
   RADON_WORKFLOW_MAX_ORDERS  max orders per workflow run      (default 3)
 
@@ -33,6 +34,11 @@ except ImportError:  # imported as scripts.order_limits from the repo root
 _OPTION_MULTIPLIER = 100
 _MAX_COMBO_LEGS = 8
 _MAX_COMBO_RATIO = 100
+# Assignment/width fat-finger for combos. Distinct from RADON_MAX_ORDER_NOTIONAL,
+# which is qty × limit × multiplier (the number the order ticket labels
+# "notional"). A 100-lot $200 short put is $2M of assignment and $4.7k of
+# debit; mixing those dollars refused a live risk-reversal (2026-08-21).
+_MAX_COMBO_LOSS_DOLLARS = 10_000_000.0
 
 
 def max_order_qty() -> int:
@@ -122,42 +128,50 @@ def _combo_credit_per_unit(params: dict, price: float, multiplier: int) -> float
     return 0.0
 
 
-def order_notional(params: dict) -> Optional[float]:
-    """Worst-case dollar exposure of the order; None when unpriceable.
-
-    For a combo this is RISK, not premium. Commit 1db9f558 made a combo
-    limitPrice a signed net price, so measuring the cap against |limitPrice|
-    measured a short strangle's net CREDIT: 500 lots at $0.20 priced as
-    $10,000 and cleared the $250k cap with room to spare (R-052).
-
-    A credit combo's worst case is the strike risk MINUS the premium it
-    collects: 100 lots of a 30-wide vertical sold at $15 risks $150k, not
-    $300k — gross width refused a legitimate close (GLD, 2026-08-19). The
-    premium term counts the same dollars the netting subtracts, so
-    max(premium, risk − credit) never falls below half the strike risk and a
-    fat-fingered credit cannot slip an undefined-risk structure past the cap.
-    """
+def _quantity_and_price(params: dict) -> tuple[Optional[float], Optional[float]]:
     try:
         quantity = abs(float(params.get("quantity") or 0))
         price = abs(float(params.get("limitPrice") or 0))
         if not price:
             price = abs(float(params.get("stopPrice") or 0))
     except (TypeError, ValueError):
-        return None
+        return None, None
     if not quantity:
-        return None
+        return None, None
+    return quantity, price
 
+
+def order_notional(params: dict) -> Optional[float]:
+    """Dollar notional: quantity × |limit| × multiplier.
+
+    Matches RADON_MAX_ORDER_NOTIONAL's preference text and the order-ticket
+    "notional" line. Combo assignment/width is ``combo_max_loss``, not this.
+    """
+    quantity, price = _quantity_and_price(params)
+    if quantity is None or price is None:
+        return None
     multiplier = 1 if str(params.get("type", "")).lower() == "stock" else _OPTION_MULTIPLIER
     premium = quantity * price * multiplier
-
-    if str(params.get("type", "")).lower() == "combo":
-        risk_per_unit = _combo_risk_per_unit(params.get("legs"))
-        if risk_per_unit is not None:
-            credit_per_unit = _combo_credit_per_unit(params, price, multiplier)
-            max_loss_per_unit = max(risk_per_unit - credit_per_unit, 0.0)
-            return max(premium, quantity * max_loss_per_unit)
-
     return premium or None
+
+
+def combo_max_loss(params: dict) -> Optional[float]:
+    """Worst-case combo loss in dollars; None when not a priceable combo.
+
+    Short strangles still cannot sneak past on a tiny credit (R-052). A
+    risk reversal's assignment-to-zero is this number, not notional.
+    """
+    if str(params.get("type", "")).lower() != "combo":
+        return None
+    quantity, price = _quantity_and_price(params)
+    if quantity is None or price is None:
+        return None
+    risk_per_unit = _combo_risk_per_unit(params.get("legs"))
+    if risk_per_unit is None:
+        return None
+    multiplier = _OPTION_MULTIPLIER
+    credit_per_unit = _combo_credit_per_unit(params, price, multiplier)
+    return quantity * max(risk_per_unit - credit_per_unit, 0.0)
 
 
 def check_order_limits(params: dict) -> Optional[dict[str, Any]]:
@@ -216,6 +230,16 @@ def check_order_limits(params: dict) -> Optional[dict[str, Any]]:
             "message": (
                 f"order notional ${notional:,.0f} exceeds the server-side limit "
                 f"of ${notional_cap:,.0f} (RADON_MAX_ORDER_NOTIONAL) — refused"
+            ),
+        }
+
+    loss = combo_max_loss(params)
+    if loss is not None and loss > _MAX_COMBO_LOSS_DOLLARS:
+        return {
+            "code": "ORDER_MAX_LOSS_LIMIT",
+            "message": (
+                f"combo max loss ${loss:,.0f} exceeds the server-side limit "
+                f"of ${_MAX_COMBO_LOSS_DOLLARS:,.0f} — refused"
             ),
         }
 
