@@ -433,6 +433,21 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
     expect(requiresIb("yield-curve")).toBe(false);
   });
 
+  // ``credit-spread`` — radon-credit-spread.timer fires daily 21:45 UTC
+  // including weekends (heartbeat), so a uniform 26h window matches its
+  // yield-curve sibling. Yahoo only — no IB.
+  it("credit-spread is registered as scheduled with a uniform 26h window", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["credit-spread"]).toBeDefined();
+    expect(getServiceCategory("credit-spread")).toBe("scheduled");
+    for (const state of ["open", "extended", "closed"] as MarketState[]) {
+      expect(getFreshnessWindowMs("credit-spread", state)).toBe(26 * HOUR);
+      expect(getFreshnessWindowMs("credit-spread", state)).toBe(
+        getFreshnessWindowMs("margin-debt", state),
+      );
+    }
+    expect(requiresIb("credit-spread")).toBe(false);
+  });
+
   // ``straddle`` — radon-straddle.timer fires daily 02:15 UTC every calendar
   // day (Cboe appends the session row ~20:00 ET; weekend runs are 304
   // heartbeats), so a uniform 26h window matches its margin-debt /
