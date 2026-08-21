@@ -68,6 +68,7 @@ describe.each([
   ["skew", "app/regime/skew/page.tsx"],
   ["skew2d", "app/regime/skew2d/page.tsx"],
   ["curve", "app/regime/curve/page.tsx"],
+  ["credit", "app/regime/credit/page.tsx"],
   ["cot", "app/regime/cot/page.tsx"],
   ["ats", "app/regime/ats/page.tsx"],
   ["short", "app/regime/short/page.tsx"],
@@ -132,6 +133,9 @@ vi.mock("../components/Skew2dPanel", () => ({
 }));
 vi.mock("../components/YieldCurvePanel", () => ({
   default: () => <div data-testid="curve-panel-stub" />,
+}));
+vi.mock("../components/CreditSpreadPanel", () => ({
+  default: () => <div data-testid="credit-panel-stub" />,
 }));
 vi.mock("../components/equibles-cot/EquiblesCotPanel", () => ({
   default: () => <div data-testid="cot-panel-stub" />,
@@ -330,6 +334,20 @@ describe("RegimePanel — tab is URL-driven", () => {
     const { container } = render(<RegimePanel prices={{}} />);
     within(container).getByRole("button", { name: /^CURVE$/ }).click();
     expect(pushSpy).toHaveBeenCalledWith("/regime/curve");
+  });
+
+  it("renders the Credit Spread panel when pathname is /regime/credit", () => {
+    mockedPathname = "/regime/credit";
+    const { container } = render(<RegimePanel prices={{}} />);
+    expect(within(container).getByTestId("credit-panel-stub")).toBeTruthy();
+    expect(within(container).queryByTestId("curve-panel-stub")).toBeNull();
+  });
+
+  it("clicking CREDIT tab pushes /regime/credit", () => {
+    mockedPathname = "/regime/cri";
+    const { container } = render(<RegimePanel prices={{}} />);
+    within(container).getByRole("button", { name: /^CREDIT$/ }).click();
+    expect(pushSpy).toHaveBeenCalledWith("/regime/credit");
   });
 
   it("does not expose a VOL CONE regime tab", () => {
