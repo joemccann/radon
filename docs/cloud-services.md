@@ -503,6 +503,14 @@ Re-check with `turso plan show` after any plan change. Nightly dumps remain mand
 | `radon-db-backup.timer` | **09:00** | Full Turso dump after archive + retention. |
 | `radon-media-backup.timer` | **10:15** | Mirror `media.radon.run` tree (`/home/radon/radon-cloud/media`) → B2 prefix `media/`. Heartbeat: `media-backup`. `TimeoutStartSec=3600`. |
 
+### CREDIT spread (`radon-credit-spread.timer`)
+
+Daily `21:45 UTC` (`RandomizedDelaySec=300`), oneshot
+`scripts/fetch_credit_spread.py`. IB daily closes for HYG + SPX, then UW, then
+Yahoo. Heartbeat `credit-spread`. Units are listed in `setup-vps.sh`
+`SERVICE_FILES`; root install-copy is still owed (`not-installed` allowlist
+expires 2026-12-31). Spec: [`indicators/credit.md`](indicators/credit.md).
+
 ### TWR performance builder (`radon-perf-twr.timer`)
 
 `Tue..Sat 07:30 ET` (`RandomizedDelaySec=300`), oneshot

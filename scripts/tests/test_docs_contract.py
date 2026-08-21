@@ -180,6 +180,12 @@ class TestThinIndex:
         assert "SECURITY.md" in text
         assert "SUPPORT.md" in text
 
+    def test_owner_docs_list_credit_spread_timer(self):
+        operations = (_ROOT / "docs" / "operations.md").read_text(encoding="utf-8")
+        cloud = (_ROOT / "docs" / "cloud-services.md").read_text(encoding="utf-8")
+        assert "radon-credit-spread.timer" in operations
+        assert "radon-credit-spread.timer" in cloud
+
     def test_docs_index_exists_and_lists_owners(self):
         index = (_ROOT / "docs" / "README.md").read_text(encoding="utf-8")
         for required in (
