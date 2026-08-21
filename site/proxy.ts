@@ -2,7 +2,9 @@ import { NextResponse, type NextRequest } from "next/server";
 import { appendVaryAccept } from "./lib/accept";
 import { negotiate } from "./lib/negotiate";
 
-export function middleware(req: NextRequest) {
+// Next.js 16 renamed middleware.ts -> proxy.ts. Negotiation logic matches
+// the acceptmarkdown.com Next.js recipe (parse Accept, rewrite, Vary, 406).
+export function proxy(req: NextRequest) {
   const pathname = req.nextUrl.pathname;
   const decision = negotiate(pathname, req.headers.get("accept"));
 
