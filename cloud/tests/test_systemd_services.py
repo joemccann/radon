@@ -102,6 +102,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-vol-cone-intraday.timer",
     "radon-perf-twr.service",
     "radon-perf-twr.timer",
+    "radon-credit-spread.service",
+    "radon-credit-spread.timer",
 ]
 
 LONG_RUNNING_SERVICES = [

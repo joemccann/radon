@@ -1,5 +1,11 @@
 # Lessons
 
+## 2026-08-21 — Yahoo is last resort; never the scheduled source
+
+- CREDIT shipped with Yahoo as the only fetcher because IB historical "needs 2FA" and UW "has no HYG history." That skipped the priority chain.
+- 2FA skips the IB socket (`auth_state != authenticated`), not the IB path. UW is next. Yahoo is last.
+- Do not document Yahoo as the scheduled source. Hard rule: `CLAUDE.md` Mandatory Rules #7 and `AGENTS.md` Data Source Priority (`ABSOLUTE LAST RESORT`).
+
 ## 2026-08-15 — TWR snapshots are not the reconstruction PerformanceData contract
 
 - `perf_twr_builder.py` rows omit `contracts_missing_history`, `trades_source`, and `price_sources`. Empty `warnings` makes `hasWarnings` evaluate `undefined.length` and trip the `/performance` error boundary.

@@ -2,6 +2,10 @@
 
 Python conventions shared across the script tree. Loaded automatically when cwd is anywhere under `scripts/`. Subsystem-specific rules live one level deeper (`scripts/api/`, `scripts/monitor_daemon/`, `scripts/watchdog/`, `scripts/newsfeed/`).
 
+## Data Source Priority
+
+Yahoo Finance is **ABSOLUTE LAST RESORT**. Never make Yahoo the scheduled, primary, or only source for a series IB or UW can serve. Try IB every cycle (skip the socket only when `/health` `auth_state` is set and not `authenticated`), then UW, then Yahoo. 2FA / unattended timers / "historical needs a gateway" do not skip IB or UW.
+
 ---
 
 ## Client ID Ranges
@@ -11,7 +15,7 @@ Python conventions shared across the script tree. Loaded automatically when cwd 
 | 0–9 | FastAPI IBPool (sync=3, orders=4, data=5) |
 | 10–19 | WS relay |
 | 20–49 | Subprocess scripts AND monitor_daemon handlers — **always `client_id="auto"`** |
-| 50–69 | Scanners — fixed IDs: CRI 50–61, breadth 62–66, RV-ratio 67–68 (`rv_ratio_scan.py:RV_RATIO_IB_CLIENT_IDS`) |
+| 50–69 | Scanners — fixed IDs: CRI 50–61, breadth 62–66, RV-ratio 67–68 (`rv_ratio_scan.py:RV_RATIO_IB_CLIENT_IDS`), credit-spread 56+69 (`fetch_credit_spread.py:CREDIT_IB_HISTORY_CLIENT_IDS`) |
 | 90–99 | CLI |
 
 **Never hardcode in 20–49.** As of 2026-05-20 daemon handlers (`fill_monitor`, `exit_orders`, `journal_sync`) also use `client_id="auto"` — prior hardcoded 70/71/72 left them one CLOSE_WAIT away from stuck "client id already in use". Auto-allocator: `scripts/clients/ib_client.py:_connect_auto_allocate`.
