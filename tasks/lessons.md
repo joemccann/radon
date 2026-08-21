@@ -1,5 +1,12 @@
 # Lessons
 
+## 2026-08-21 — MenthorQ dashboard remint is the OIDC Authorize click
+
+- `client_id=aws_cognito_client_id` on `wp-login.php` is the OpenID consent page, not proof remint is impossible. The form is `input[name=authorize]`.
+- Headless that waits for `dashboard.menthorq.io` after WordPress submit will 504/503. Click Authorize first (`d2d595e7`).
+- `menthorq-session` ok + `menthorq-login-probe` error = unspendable jar. Session only reads authjs expiry; probe hits the live serving path.
+- Do not stand down as "upstream placeholder client_id". Do not copy the CTA WordPress jar onto the dashboard jar. After installing a reminted jar, restart `radon-api` to clear the 300s auth embargo.
+
 ## 2026-08-21 — Flex 1025 is a token lockout; Monday retry extends it
 
 - Cash Flows lozenge `TOO MANY FAILED ATTEMPTS. PLEASE REVIEW YOUR CONFIGURATION` is Flex code 1025, not a live IB socket miss. Official v3 table ends at 1021; 1025 is undocumented.
@@ -26,7 +33,7 @@
 - `/options/net-gex` 504 is not the same bug as the 2026-08-07 503. `menthorq-session` can be ok while `menthorq-login-probe` is error: cookies look live, re-login is dead.
 - Login-probe read timeout is 90s so it can see FastAPI 503. Next.js `OPTIONS_PROXY_TIMEOUT_MS` is 50s. A 60s Playwright login 504s the browser first.
 - `_storage_state_expired` only skips chromium for a provably dead jar. An unspendable live jar still mint-then-bootstraps on every click unless a process-wide embargo is tripped.
-- Cap request-path login under the proxy (25s / 40s budget) and embargo auth failures. Do not raise the proxy to hide a broken remint. Reminting the dashboard jar is still ops.
+- Cap request-path login under the proxy (25s / 40s budget) and embargo auth failures. Do not raise the proxy to hide a broken remint. Remint by clicking OIDC Authorize, then land on the dashboard.
 
 ## 2026-08-19 — Do not kill a UW producer without a cheaper replacement
 

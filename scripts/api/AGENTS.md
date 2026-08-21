@@ -36,6 +36,12 @@ Applies under `scripts/api/`. Root and `scripts/AGENTS.md` also apply. Mirrors `
 - Watchdog stuck-2FA self-heal fires only after repeated stuck cycles when no push is in flight and backoff has elapsed.
 - If `auth_state=authenticated` but pool clients remain disconnected while a direct probe works, restart `radon-api.service`.
 
+## Options exposure
+
+- `/options/exposure/{symbol}` uses the MenthorQ dashboard jar (`data/menthorq_dashboard/`), not the CTA jar.
+- Next.js proxy 50s; login budget 25s; auth embargo 300s. Restart `radon-api` after reminting the jar.
+- After WordPress login, click `input[name=authorize]` before waiting for the dashboard URL. Do not stand down on `client_id=aws_cognito_client_id`.
+
 ## Service Health / Timers
 
 - Each scan subprocess records its own snapshot + `service_health` row via `scripts/db/scan_mirror.py` (the FastAPI-side mirror is gone).
