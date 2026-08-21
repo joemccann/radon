@@ -1,5 +1,12 @@
 # Lessons
 
+## 2026-08-21 — Wrapper curl -m must outlive the FastAPI scan child
+
+- `radon-signals-refresh` paged P1 `Result=exit-code, NRestarts=0` every RTH hour. Curl `-m 200` aborted while FastAPI's theta/strength children still had 420s/480s. Client disconnect cancelled the request and `run_script` killed the scanner; the oneshot exited 1. NRestarts=0 is normal for `Type=oneshot`.
+- BUG-013 correctly stopped the duplicate fallback on timeout. It did not align deadlines. A shorter curl budget is not a bound — it is a self-kill.
+- Curl `-m` >= FastAPI `run_script` timeout. `TimeoutStartSec` >= the sequential POSTs. Discriminating log: `curl=28, http=000`.
+- 502/503 slot-cap is a different class (`6093c087`): retry, do not treat as a curl-28 timeout.
+
 ## 2026-08-21 — MenthorQ dashboard remint is the OIDC Authorize click
 
 - `client_id=aws_cognito_client_id` on `wp-login.php` is the OpenID consent page, not proof remint is impossible. The form is `input[name=authorize]`.

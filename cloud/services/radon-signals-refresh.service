@@ -16,13 +16,14 @@ Type=oneshot
 User=radon
 WorkingDirectory=/home/radon/radon
 EnvironmentFile=/home/radon/radon-cloud/.env
+Environment=RADON_SIGNALS_SCAN_TIMEOUT=490
 ExecStart=/usr/bin/bash /home/radon/radon/scripts/run_signals_refresh.sh
 StandardOutput=journal
 StandardError=journal
-# Two sequential scans, each bounded at 200s by the wrapper's curl deadline.
-# Releases the unit well before the next slot of radon-signals-refresh.timer
-# (the cadence SoT).
-TimeoutStartSec=450
+# Sequential POSTs: wrapper curl -m is 490s (FastAPI strength child 480s
+# + slack). Two scans plus the calendar probe fit in 1050s; the hourly
+# timer gap is 3600s. A 450s cap SIGTERMed a live first scan.
+TimeoutStartSec=1050
 
 [Install]
 WantedBy=multi-user.target
