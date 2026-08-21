@@ -16,6 +16,7 @@ import {
 import { formatServiceHealthError } from "@/lib/serviceHealthError";
 import { filterApplicableServiceHealthRows } from "@/lib/serviceHealthApplicability";
 import { requireRouteAccess } from "@/lib/routeAccess";
+import { isAuthorizedProbeRequest } from "@/lib/probeAuth";
 
 // Disable Next.js static caching: this handler reads live DB state.
 export const dynamic = "force-dynamic";
@@ -110,8 +111,18 @@ function applyStalenessGate(row: ServiceHealthRow, nowMs: number): ServiceHealth
 }
 
 export async function GET(request?: Request): Promise<Response> {
-  const access = await requireRouteAccess(request);
-  if (!access.ok) return access.response;
+  // Dual-auth (DUR-16): the loopback watchdog authenticates with the probe
+  // bearer and has no Clerk session — a valid bearer must not fall through
+  // to requireRouteAccess. The middleware gate already vetted the token;
+  // this re-check keeps the route safe when invoked without the middleware.
+  const probeAuthorized = request != null && await isAuthorizedProbeRequest(
+    request.headers.get("authorization"),
+    process.env.RADON_PROBE_FRESHNESS_TOKEN,
+  );
+  if (!probeAuthorized) {
+    const access = await requireRouteAccess(request);
+    if (!access.ok) return access.response;
+  }
   const requestId = getRequestId();
   try {
     const cachedRows = await cachedRead(
