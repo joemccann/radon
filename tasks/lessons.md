@@ -5,6 +5,7 @@
 - Cash Flows lozenge `TOO MANY FAILED ATTEMPTS. PLEASE REVIEW YOUR CONFIGURATION` is Flex code 1025, not a live IB socket miss. Official v3 table ends at 1021; 1025 is undocumented.
 - 1014/1012/1015 are the real config/token errors. 1025 is earned by retrying 1001. `_request_reference_code` retried `_FlexTransientError` (2 SendRequests). Classified as permanent, next attempt Monday 08:00 ET. `radon-perf-twr` 07:30 ET and GET `/api/performance` background rebuild poke the same token with no shared embargo.
 - TWR treated `<FlexStatementResponse>` as a ready statement because `<FlexStatement` is a prefix of the error envelope.
+- `/orders` `useBlotter(true)` POSTs `/api/blotter` every 5 min → `journal_rehydrate` → FlexQueryFetcher on query `1422766`, **same token**. Looking at the cash-flows lozenge was itself a SendRequest.
 - Stop internal 1001 retry. 1025 is exit 15, 7-day shared sidecar (`utils.flex_embargo`). Do not SendRequest. Recover with `python -m scripts.cash_flow_sync --from-file`. Portal Run on 1442520 to verify the query; do not set `IB_FLEX_FLOWS_QUERY_ID`.
 
 ## 2026-08-21 — Yahoo is last resort; never the scheduled source
