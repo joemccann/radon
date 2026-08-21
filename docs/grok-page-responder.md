@@ -118,6 +118,37 @@ counted as tickets claimed since 00:00Z (`watchdog.pages.actions_since`). At
 the cap the cycle heartbeats `paused` and exits 0. An unreadable ledger counts
 as over-cap, so a Turso miss stands the responder down rather than freeing it.
 
+## Signal-killed oneshot re-run
+
+A deploy stop-clean or `radon restart` teardown can SIGTERM a timer-driven
+EOD oneshot mid-run. "Recovers on next timer" is the wrong verdict when that
+slot is most of a day away: radon-vol-cone was killed at 20:4x UTC on
+2026-08-20, the next slot was ~22h out, and the day's EOD data stayed missing
+until a human ran reset-failed + start. Before launching grok on a
+`kind=unit` page, the responder pre-triages deterministically
+(`attempt_oneshot_rerun`) and re-runs the unit itself when ALL of these hold:
+
+- the unit is in `RERUNNABLE_ONESHOT_UNITS` (benign data-fetch oneshots:
+  vol-cone, skew, skew2d, bpi). The responder has no general right to start
+  `radon-*` units — polkit grants the radon user exactly this list, verbs
+  `reset-failed` and `start` only
+  (`cloud/config/polkit/50-radon-services.rules`; the two lists are pinned to
+  each other by `test_allowlist_matches_the_polkit_grant`).
+- `GROK_PAGE_AUTOSHIP=1` — the restart is an auto-fix action, so it takes the
+  same explicit opt-in as shipping a code fix. Unset stands down.
+- no deploy transition journal (`/home/radon/.radon-deploy-transition.json`):
+  never restart units mid-deploy.
+- systemd itself reports `ActiveState=failed` + `Result=signal` — the page
+  excerpt is untrusted text and never triggers the action on its own.
+- the unit's timer's next elapse is more than 12h away
+  (`RERUN_TIMER_HORIZON_SECS`). Closer than that, waiting for the timer
+  remains correct and grok triages the page as before.
+
+Action: `systemctl reset-failed <unit>` + `systemctl start --no-block
+<unit>`, ticket completed as `restarted_unit`, normal follow-up push. Any
+failed precondition or failed systemctl call falls through to the ordinary
+grok path. The claim still counts against the daily action cap.
+
 ## Filesystem sandbox
 
 The unit's stripped `EnvironmentFile` is pointless if the agent can read the
