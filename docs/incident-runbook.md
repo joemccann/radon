@@ -467,6 +467,40 @@ while FastAPI and IB are up.** Peak: 2026-08-14 17:00:00Z, RTH, exit 22.
 
 ---
 
+## signals-refresh-capacity-502
+
+**`radon-signals-refresh.service` oneshot pages P1 `Result=exit-code` when
+both Top-candidates scans hit the FastAPI subprocess slot cap.** Peak:
+2026-08-21 14:00:00Z, page `11e2b093…`.
+
+- **Mechanism:** hourly ET timer POSTs `/theta-harvester/scan` then
+  `/strength-confirmation/scan`. At `:00` many scanners claim the shared
+  `run_script` lanes (hard cap 4 / lane cap 3). Both POSTs returned
+  instant HTTP 502 with journal
+  `Subprocess capacity exhausted … (3 active, lane cap 3, hard cap 4)`.
+  `/health/lite` stayed 200 / authenticated. The wrapper treated any
+  non-exit-7 response as indeterminate (BUG-013: no duplicate direct
+  scan) and exited 1 with `NRestarts=0`. A manual POST ~90s later
+  succeeded and refreshed `theta_harvester.json`.
+- **Discriminating check:** unit journal
+  `FastAPI outcome indeterminate (curl=0, http=502)` for both labels in
+  the same second; radon-api
+  `Subprocess capacity exhausted for theta_harvester_scanner.py` /
+  `strength_confirmation_scanner.py`; `/health/lite` 200. Script-failed
+  502 (leap / UW quota) logs `Script … failed (code 1)` and takes
+  seconds. Deploy stop-clean is `Result=signal`.
+- **Remediation (code):** retry HTTP 502/503 with the same bounded budget
+  as portfolio-sync (`RADON_SIGNALS_REFRESH_RETRIES`, default 2,
+  `RADON_SIGNALS_REFRESH_RETRY_DELAY_SECS` default 8). Keep the no-duplicate
+  rule after the budget. Persistent 502 still fails the unit.
+- **Regression:**
+  `test_run_signals_refresh_wrapper.py::test_http_502_then_ok_retries_without_direct_fallback`,
+  `test_http_503_then_ok_retries`, `test_http_500_does_not_retry`,
+  `test_persistent_502_still_fails_without_direct_fallback`.
+- **Code:** `scripts/run_signals_refresh.sh`.
+
+---
+
 ## service-health-degraded / service-down (generic cases)
 
 `service-health-degraded`: `/api/service-health` body lists failing rows (error,

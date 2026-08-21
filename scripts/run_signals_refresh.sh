@@ -109,20 +109,48 @@ FASTAPI_PORT="${RADON_SIGNALS_REFRESH_FASTAPI_PORT:-8321}"
 # NDX100 pass measures ~8s. 200s covers a badly degraded UW without holding
 # the unit past its next slot.
 SCAN_TIMEOUT=200
+# Retry transient FastAPI shedding a bounded number of times:
+#   502/503 — API up but subprocess slot-cap full (2026-08-21 14:00Z:
+#             both signals POSTs 502 while /health 200; capacity exhausted)
+# Connection refused (curl 7) still falls through to direct invocation.
+# A timeout or other HTTP response still refuses the direct fallback so an
+# accepted in-flight scan is never duplicated (BUG-013).
+RETRY_LIMIT="${RADON_SIGNALS_REFRESH_RETRIES:-2}"
+RETRY_DELAY="${RADON_SIGNALS_REFRESH_RETRY_DELAY_SECS:-8}"
 
 mkdir -p logs
+
+_retryable_signals_shed() {
+    # $1 = attempt (0-based), $2 = curl exit, $3 = http code
+    [ "$1" -lt "$RETRY_LIMIT" ] || return 1
+    [ "$2" -eq 0 ] || return 1
+    case "$3" in
+        502|503) return 0 ;;
+    esac
+    return 1
+}
 
 refresh_scan() {
     local label="$1" endpoint="$2" script="$3"
     local url="http://${FASTAPI_HOST}:${FASTAPI_PORT}${endpoint}?preset=${PRESET}"
+    local attempt=0
+    local HTTP_CODE CURL_EXIT
 
     echo "$(date): POST ${url}"
-    HTTP_CODE=$(curl -sS -X POST -m "$SCAN_TIMEOUT" -o /dev/null -w "%{http_code}" "$url")
-    CURL_EXIT=$?
-    if [ "$CURL_EXIT" -eq 0 ] && [[ "$HTTP_CODE" == 2* ]]; then
-        echo "$(date): ${label} refresh via FastAPI complete (OK)"
-        return 0
-    fi
+    while :; do
+        HTTP_CODE=$(curl -sS -X POST -m "$SCAN_TIMEOUT" -o /dev/null -w "%{http_code}" "$url")
+        CURL_EXIT=$?
+        if [ "$CURL_EXIT" -eq 0 ] && [[ "$HTTP_CODE" == 2* ]]; then
+            echo "$(date): ${label} refresh via FastAPI complete (OK)"
+            return 0
+        fi
+        if ! _retryable_signals_shed "$attempt" "$CURL_EXIT" "$HTTP_CODE"; then
+            break
+        fi
+        attempt=$((attempt + 1))
+        echo "$(date): ${label} FastAPI transient (curl=${CURL_EXIT} http=${HTTP_CODE}) — retry ${attempt}/${RETRY_LIMIT} in ${RETRY_DELAY}s"
+        sleep "$RETRY_DELAY"
+    done
 
     # A timeout or HTTP response means FastAPI may have accepted the scan.
     # Starting a direct fallback then can duplicate the provider/IB job.

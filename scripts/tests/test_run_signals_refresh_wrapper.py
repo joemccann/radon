@@ -101,11 +101,25 @@ def _stage_scanner_stub(scripts_dir: Path, name: str, marker: str) -> None:
 
 
 class _FastApiStub:
-    """Records scan POSTs; ``fail_paths`` reply 500 so failure paths are testable."""
+    """Records scan POSTs.
 
-    def __init__(self, port: int, fail_paths: frozenset[str] = frozenset()) -> None:
+    ``fail_paths`` reply with ``fail_status`` forever. ``flaky_paths`` reply
+    with ``fail_status`` on the first hit per path, then 200 — models the
+    top-of-hour subprocess slot-cap 502 that clears once a scan finishes.
+    """
+
+    def __init__(
+        self,
+        port: int,
+        fail_paths: frozenset[str] = frozenset(),
+        flaky_paths: frozenset[str] = frozenset(),
+        fail_status: int = 500,
+    ) -> None:
         self.calls: list[str] = []
+        self.hits: dict[str, int] = {}
         self._fail_paths = fail_paths
+        self._flaky_paths = flaky_paths
+        self._fail_status = fail_status
         self._server = HTTPServer(("127.0.0.1", port), self._handler())
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
 
@@ -116,8 +130,15 @@ class _FastApiStub:
             def do_POST(self) -> None:  # noqa: N802 — std lib signature
                 path = self.path.split("?", 1)[0]
                 recorder.calls.append(path)
-                failed = path in recorder._fail_paths
-                self.send_response(500 if failed else 200)
+                recorder.hits[path] = recorder.hits.get(path, 0) + 1
+                hit = recorder.hits[path]
+                if path in recorder._fail_paths:
+                    code = recorder._fail_status
+                elif path in recorder._flaky_paths and hit == 1:
+                    code = recorder._fail_status
+                else:
+                    code = 200
+                self.send_response(code)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
                 self.wfile.write(b'{"scan_time": "real"}')
@@ -142,12 +163,23 @@ class _FastApiStub:
         self._server.server_close()
 
 
-def _run(repo_dir: Path, python_bin: Path, fastapi_port: int) -> subprocess.CompletedProcess[str]:
+def _run(
+    repo_dir: Path,
+    python_bin: Path,
+    fastapi_port: int,
+    *,
+    retries: int | None = None,
+    delay: int | None = None,
+) -> subprocess.CompletedProcess[str]:
     env = {
         **os.environ,
         "RADON_PYTHON_BIN": str(python_bin),
         "RADON_SIGNALS_REFRESH_FASTAPI_PORT": str(fastapi_port),
     }
+    if retries is not None:
+        env["RADON_SIGNALS_REFRESH_RETRIES"] = str(retries)
+    if delay is not None:
+        env["RADON_SIGNALS_REFRESH_RETRY_DELAY_SECS"] = str(delay)
     return subprocess.run(
         ["bash", str(repo_dir / "scripts" / "run_signals_refresh.sh")],
         cwd=repo_dir,
@@ -237,3 +269,102 @@ def test_accepted_request_timeout_does_not_start_direct_scan() -> None:
     assert "%{http_code}" in source
     assert "CURL_EXIT" in source
     assert "HTTP_CODE" in source
+
+
+def test_http_502_then_ok_retries_without_direct_fallback(tmp_path: Path) -> None:
+    """2026-08-21 14:00Z: both signals POSTs got instant 502 while /health
+    stayed 200 — ``Subprocess capacity exhausted (3 active, lane cap 3,
+    hard cap 4)``. The wrapper treated 502 as indeterminate, skipped the
+    direct fallback (correct), and exited 1 with no retry, so the oneshot
+    paged. A later POST in the same minute must succeed.
+    """
+    repo_dir = _repo(tmp_path)
+    python_bin = _stage_python(tmp_path / "bin")
+    _stage_scanner_stub(repo_dir / "scripts", "theta_harvester_scanner.py", "no-fallback")
+    _stage_scanner_stub(repo_dir / "scripts", "strength_confirmation_scanner.py", "no-fallback")
+
+    port = _free_port()
+    stub = _FastApiStub(
+        port,
+        flaky_paths=frozenset({THETA_PATH, STRENGTH_PATH}),
+        fail_status=502,
+    )
+    stub.start()
+    try:
+        result = _run(repo_dir, python_bin, port, retries=2, delay=1)
+    finally:
+        stub.stop()
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert stub.hits.get(THETA_PATH, 0) == 2, stub.hits
+    assert stub.hits.get(STRENGTH_PATH, 0) == 2, stub.hits
+    combined = (result.stdout + result.stderr).lower()
+    assert "retry" in combined
+    assert "fallback" not in combined
+    assert "no-fallback" not in combined
+
+
+def test_http_503_then_ok_retries(tmp_path: Path) -> None:
+    repo_dir = _repo(tmp_path)
+    python_bin = _stage_python(tmp_path / "bin")
+    _stage_scanner_stub(repo_dir / "scripts", "theta_harvester_scanner.py", "no-fallback")
+    _stage_scanner_stub(repo_dir / "scripts", "strength_confirmation_scanner.py", "no-fallback")
+
+    port = _free_port()
+    stub = _FastApiStub(
+        port,
+        flaky_paths=frozenset({THETA_PATH, STRENGTH_PATH}),
+        fail_status=503,
+    )
+    stub.start()
+    try:
+        result = _run(repo_dir, python_bin, port, retries=2, delay=1)
+    finally:
+        stub.stop()
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert stub.hits.get(THETA_PATH, 0) == 2, stub.hits
+
+
+def test_http_500_does_not_retry(tmp_path: Path) -> None:
+    """Hard 5xx that is not shedding must still fail the unit once."""
+    repo_dir = _repo(tmp_path)
+    python_bin = _stage_python(tmp_path / "bin")
+    # No scanner stubs: fallback fails too, so the failure is genuine.
+    port = _free_port()
+    stub = _FastApiStub(port, fail_paths=frozenset({THETA_PATH}), fail_status=500)
+    stub.start()
+    try:
+        result = _run(repo_dir, python_bin, port, retries=2, delay=1)
+    finally:
+        stub.stop()
+
+    assert result.returncode != 0
+    assert stub.hits.get(THETA_PATH, 0) == 1, stub.hits
+    assert "retry" not in (result.stdout + result.stderr).lower()
+
+
+def test_persistent_502_still_fails_without_direct_fallback(tmp_path: Path) -> None:
+    repo_dir = _repo(tmp_path)
+    python_bin = _stage_python(tmp_path / "bin")
+    _stage_scanner_stub(repo_dir / "scripts", "theta_harvester_scanner.py", "theta-direct")
+    _stage_scanner_stub(repo_dir / "scripts", "strength_confirmation_scanner.py", "strength-direct")
+
+    port = _free_port()
+    stub = _FastApiStub(
+        port,
+        fail_paths=frozenset({THETA_PATH, STRENGTH_PATH}),
+        fail_status=502,
+    )
+    stub.start()
+    try:
+        result = _run(repo_dir, python_bin, port, retries=2, delay=1)
+    finally:
+        stub.stop()
+
+    assert result.returncode != 0
+    combined = (result.stdout + result.stderr).lower()
+    assert combined.count("retry") >= 2
+    assert "fallback" not in combined
+    assert "theta-direct" not in combined
+    assert stub.hits.get(THETA_PATH, 0) >= 3, stub.hits
