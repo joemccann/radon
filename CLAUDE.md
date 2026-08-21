@@ -53,6 +53,7 @@ Sub-directory CLAUDE.md files auto-load when cwd is anywhere under that subtree.
 4. **API keys** in `.env` files. Never `~/.zshrc` unless fallback.
 5. **No raw hex in UI.** Use brand tokens. 4px max border-radius on panels.
 6. **No em dashes in user-facing copy.**
+7. **Yahoo is last resort.** Never make Yahoo the scheduled, primary, or only source for a series IB or UW can serve. 2FA, unattended timers, and "historical needs a gateway" do not skip IB or UW. Try IB, then UW, then Yahoo.
 
 ## ⛔ Four Gates — Sequential, No Exceptions
 
@@ -80,10 +81,10 @@ Any gate fails → stop. Name the gate.
 
 1. Interactive Brokers (TWS / Gateway) — real-time
 2. Unusual Whales (`$UW_TOKEN`) — dark pool, sweeps, alerts
-3. Yahoo — fallback
-4. Web scrape — last resort
+3. Yahoo Finance — **ABSOLUTE LAST RESORT**
+4. Web scrape — after Yahoo
 
-Never skip to Yahoo / web without trying IB → UW first. Clients live in `scripts/clients/`.
+Never make Yahoo the scheduled, primary, or only source for a series IB or UW can serve. Try IB every cycle. Skip the IB socket only when `/health` `auth_state` is set and not `authenticated`; then UW; then Yahoo. Specialized official feeds (Cboe, Treasury, FINRA) may sit ahead of Yahoo when a script documents them as the source for that metric. Clients live in `scripts/clients/`.
 
 ## Credentials
 

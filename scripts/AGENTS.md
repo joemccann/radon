@@ -2,6 +2,10 @@
 
 Applies under `scripts/`. Mirrors `scripts/CLAUDE.md`; prefer the Claude file if newer or more specific.
 
+## Data Source Priority
+
+Yahoo Finance is **ABSOLUTE LAST RESORT**. Never make Yahoo the scheduled, primary, or only source for a series IB or UW can serve. Try IB every cycle (skip the socket only when `/health` `auth_state` is set and not `authenticated`), then UW, then Yahoo. 2FA / unattended timers / "historical needs a gateway" do not skip IB or UW.
+
 ## Python / IB Basics
 
 - Use `python3.13` for project commands unless an existing script explicitly requires another interpreter.

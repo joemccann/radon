@@ -2,6 +2,10 @@
 
 Python conventions shared across the script tree. Loaded automatically when cwd is anywhere under `scripts/`. Subsystem-specific rules live one level deeper (`scripts/api/`, `scripts/monitor_daemon/`, `scripts/watchdog/`, `scripts/newsfeed/`).
 
+## Data Source Priority
+
+Yahoo Finance is **ABSOLUTE LAST RESORT**. Never make Yahoo the scheduled, primary, or only source for a series IB or UW can serve. Try IB every cycle (skip the socket only when `/health` `auth_state` is set and not `authenticated`), then UW, then Yahoo. 2FA / unattended timers / "historical needs a gateway" do not skip IB or UW.
+
 ---
 
 ## Client ID Ranges
