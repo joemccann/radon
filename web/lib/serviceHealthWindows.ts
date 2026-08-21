@@ -66,6 +66,7 @@ const DAY = 24 * HOUR;
  *   fill-monitor         5m open, 3d closed
  *   exit-orders          5m open, 3d closed
  *   flex-token-check     25h (daily)
+ *   flex-web-service     8d on-demand (1025 lockout heartbeat only)
  *   cri-scan             35m open, 1d closed
  *   gex-scan             30m open, 1d closed
  *   vcg-scan             15m open, 1d closed   (5-min cadence; 3 missed cycles)
@@ -135,6 +136,11 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   "position-reconcile": { open: 45 * MIN, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: true },
 
   "flex-token-check": { open: 25 * HOUR, extended: 25 * HOUR, closed: 25 * HOUR, category: "scheduled", requires_ib: false },
+  // Token-wide Flex 1025 lockout sidecar (scripts/utils/flex_embargo.py).
+  // Written only on lockout as error + next_attempt_at (7 days). Not a
+  // timer: silence means the token is not locked. On-demand so a missing
+  // row does not flap the banner; 8d covers the lockout plus slack.
+  "flex-web-service": { open: 8 * DAY, extended: 8 * DAY, closed: 8 * DAY, category: "on-demand", requires_ib: false },
   // MenthorQ dashboard session powering /options/net-gex. Daily check;
   // its jar died silently for 11 days before this row existed (2026-08-07).
   "menthorq-session": { open: 25 * HOUR, extended: 25 * HOUR, closed: 25 * HOUR, category: "scheduled", requires_ib: false },
