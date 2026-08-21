@@ -78,7 +78,7 @@ def test_market_mirror_excludes_and_purges_account_derived_flow_rows():
     source = (Path(__file__).parents[1] / "db" / "mirror_market_snapshots_to_demo.js").read_text()
     latest_block = source.split("const LATEST_ONE = [", 1)[1].split("];", 1)[0]
     assert "flow_analysis_snapshots" not in latest_block
-    assert 'const PURGED_ACCOUNT_TABLES = ["flow_analysis_snapshots"]' in source
+    assert 'PURGED_ACCOUNT_TABLES = ["flow_analysis_snapshots"]' in source
     assert "DELETE FROM ${table}" in source
 
 
@@ -87,3 +87,12 @@ def test_market_mirror_fails_run_and_prunes_destination_windows():
     assert "required table failures" in source
     assert "DELETE FROM ${table} WHERE ${orderCol} NOT IN" in source
     assert "DELETE FROM ${table} WHERE (${key}, ${orderCol}) NOT IN" in source
+
+
+def test_market_mirror_retries_transient_turso_502():
+    """ba86fe0a: oneshot paged P1 on a single scan_snapshots HTTP 502."""
+    source = (Path(__file__).parents[1] / "db" / "mirror_market_snapshots_to_demo.js").read_text()
+    assert "isTransientTursoError" in source
+    assert "http status 5\\d\\d" in source
+    assert "MIRROR_MAX_ATTEMPTS" in source
+    assert "source_read" in source

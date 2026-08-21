@@ -4,6 +4,10 @@ import {
   createBoundedFetch,
   runNewsfeedMirror,
 } from "../db/mirror_newsfeed_to_demo.js";
+import {
+  isTransientTursoError,
+  runMarketMirror,
+} from "../db/mirror_market_snapshots_to_demo.js";
 
 
 function post(id = "p1") {
@@ -19,6 +23,21 @@ function post(id = "p1") {
     tags_vision: "[]",
     created_at: "2026-07-11T12:00:00Z",
     updated_at: "2026-07-11T12:00:00Z",
+  };
+}
+
+function turso502() {
+  const err = new Error("SERVER_ERROR: Server returned HTTP status 502");
+  err.code = "SERVER_ERROR";
+  err.status = 502;
+  return err;
+}
+
+function scanRow(service = "gex") {
+  return {
+    service,
+    scan_time: "2026-08-21T21:00:00Z",
+    payload: "{}",
   };
 }
 
@@ -104,5 +123,130 @@ describe("demo newsfeed mirror reliability", () => {
     expect(init.signal).toBeInstanceOf(AbortSignal);
     caller.abort();
     expect(init.signal.aborted).toBe(true);
+  });
+});
+
+describe("demo market mirror reliability", () => {
+  it("classifies Turso HTTP 502 source reads as transient", () => {
+    expect(isTransientTursoError(turso502())).toBe(true);
+    expect(isTransientTursoError(new Error("no such table: scan_snapshots"))).toBe(false);
+  });
+
+  it("retries a transient scan_snapshots source 502 then mirrors", async () => {
+    // Incident ba86fe0a: oneshot paged P1 after a single Turso 502 on the
+    // scan_snapshots window read while sibling tables mirrored fine.
+    const src = {
+      execute: vi.fn(async (sql) => {
+        const text = String(sql);
+        if (text.includes("FROM scan_snapshots") && text.includes("ROW_NUMBER")) {
+          if (src.execute.mock.calls.filter((c) => String(c[0]).includes("ROW_NUMBER")).length === 1) {
+            throw turso502();
+          }
+          return { columns: ["service", "scan_time", "payload", "rn"], rows: [scanRow("gex")] };
+        }
+        if (text.includes("FROM gex_snapshots")) {
+          return { columns: ["ticker", "scan_time", "payload", "rn"], rows: [{ ticker: "SPX", scan_time: "2026-08-21T21:00:00Z", payload: "{}" }] };
+        }
+        if (text.includes("ORDER BY") && text.includes("LIMIT")) {
+          const table = text.match(/FROM (\w+)/)?.[1];
+          return {
+            columns: ["scan_time", "payload"],
+            rows: [{ scan_time: "2026-08-21T21:00:00Z", payload: JSON.stringify({ table }) }],
+          };
+        }
+        return { columns: [], rows: [] };
+      }),
+    };
+    const dst = {
+      execute: vi.fn().mockResolvedValue({ rows: [] }),
+      batch: vi.fn().mockResolvedValue(undefined),
+    };
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const logs = [];
+
+    const result = await runMarketMirror({
+      src,
+      dst,
+      tables: {
+        latestOne: [{ table: "scanner_snapshots", orderCol: "scan_time" }],
+        perKey: [{ table: "scan_snapshots", key: "service", orderCol: "scan_time" }],
+        history: [],
+        purgedAccountTables: [],
+      },
+      maxAttempts: 3,
+      sleep,
+      log: (entry) => logs.push(entry),
+      now: () => "2026-08-21T21:45:00.000Z",
+      runId: "ba86",
+    });
+
+    expect(result.total).toBeGreaterThanOrEqual(1);
+    expect(result.failures).toEqual([]);
+    expect(sleep).toHaveBeenCalled();
+    expect(logs).toContainEqual(expect.objectContaining({
+      run_id: "ba86",
+      phase: "scan_snapshots:source_read",
+      event: "retry",
+      attempt: 1,
+    }));
+  });
+
+  it("still fails the unit when scan_snapshots 502 persists past the budget", async () => {
+    const src = {
+      execute: vi.fn(async (sql) => {
+        if (String(sql).includes("FROM scan_snapshots")) throw turso502();
+        return { columns: ["scan_time", "payload"], rows: [{ scan_time: "2026-08-21T21:00:00Z", payload: "{}" }] };
+      }),
+    };
+    const dst = {
+      execute: vi.fn().mockResolvedValue({ rows: [] }),
+      batch: vi.fn().mockResolvedValue(undefined),
+    };
+
+    await expect(runMarketMirror({
+      src,
+      dst,
+      tables: {
+        latestOne: [],
+        perKey: [{ table: "scan_snapshots", key: "service", orderCol: "scan_time" }],
+        history: [],
+        purgedAccountTables: [],
+      },
+      maxAttempts: 3,
+      sleep: vi.fn().mockResolvedValue(undefined),
+      log: vi.fn(),
+      now: () => "2026-08-21T21:45:00.000Z",
+      runId: "ba86-fail",
+    })).rejects.toThrow(/required table failures: scan_snapshots/);
+
+    expect(src.execute).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not retry non-transient SQL errors", async () => {
+    const src = {
+      execute: vi.fn().mockRejectedValue(new Error("no such table: scan_snapshots")),
+    };
+    const dst = {
+      execute: vi.fn().mockResolvedValue({ rows: [] }),
+      batch: vi.fn(),
+    };
+
+    await expect(runMarketMirror({
+      src,
+      dst,
+      tables: {
+        latestOne: [],
+        perKey: [{ table: "scan_snapshots", key: "service", orderCol: "scan_time" }],
+        history: [],
+        purgedAccountTables: [],
+      },
+      maxAttempts: 3,
+      sleep: vi.fn().mockResolvedValue(undefined),
+      log: vi.fn(),
+      now: () => "2026-08-21T21:45:00.000Z",
+      runId: "sql-err",
+    })).rejects.toThrow(/required table failures: scan_snapshots/);
+
+    expect(src.execute).toHaveBeenCalledTimes(1);
   });
 });

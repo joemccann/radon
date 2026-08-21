@@ -487,6 +487,43 @@ while FastAPI and IB are up.** Peak: 2026-08-14 17:00:00Z, RTH, exit 22.
 
 ---
 
+## demo-mirror-scan-snapshots-502
+
+**`radon-demo-mirror.service` oneshot pages P1 `Result=exit-code` on a single
+transient Turso HTTP 502 reading `scan_snapshots`.** Peak: 2026-08-21
+21:45:00Z, page `ba86fe0a…`.
+
+- **Mechanism:** weekday 21:45 UTC oneshot mirrors market-analytics tables
+  prod → demo. The `scan_snapshots` per-service window
+  (`ROW_NUMBER() OVER (PARTITION BY service …)`) is the slowest source read
+  (~30 s on a healthy host). A single Turso `SERVER_ERROR: … HTTP status 502`
+  during that read was logged as `SKIP scan_snapshots` and treated as a
+  required-table failure; sibling tables (scanner, gex, cri, breadth, …)
+  mirrored fine in the same run. `NRestarts=0` is normal for `Type=oneshot`.
+  Edge and `:8321/health/lite` stayed up; Turso canary / other table reads
+  succeeded — not a platform outage.
+- **Discriminating check:** journal
+  `SKIP scan_snapshots (source read failed: SERVER_ERROR: Server returned
+  HTTP status 502)` then `FAILED: required table failures: scan_snapshots`;
+  other `[mirror] <table>: N row(s)` lines in the same run; canary
+  `SELECT count(*) FROM scan_snapshots` succeeds from the same host.
+  Deploy stop-clean is `Result=signal`. Full-DB canary failure → Turso
+  platform; stand down.
+- **Remediation (code):** bounded retries on transient Turso source/dest
+  errors (`MIRROR_MAX_ATTEMPTS`, default 3), same class as the newsfeed
+  demo mirror. Persistent 502 still fails the unit. Do not restart-flap;
+  next timer (Mon–Fri 21:45 UTC) or one `radon unit restart
+  radon-demo-mirror` after the fix deploys.
+- **Regression:** `scripts/lib/demoMirrorReliability.test.js` market suite
+  (`retries a transient scan_snapshots source 502 then mirrors`,
+  `still fails the unit when scan_snapshots 502 persists past the budget`,
+  `does not retry non-transient SQL errors`);
+  `test_demo_seed_guard.py::test_market_mirror_retries_transient_turso_502`.
+- **Code:** `scripts/db/mirror_market_snapshots_to_demo.js`
+  (`isTransientTursoError`, `runMarketMirror`).
+
+---
+
 ## signals-refresh-capacity-502
 
 **`radon-signals-refresh.service` oneshot pages P1 `Result=exit-code` when
