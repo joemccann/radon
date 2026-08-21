@@ -20,3 +20,29 @@ polkit.addRule(function(action, subject) {
         return polkit.Result.NO;
     }
 });
+
+// The grok page responder may reset-failed + start exactly these benign
+// data-fetch oneshots when a deploy / `radon restart` SIGTERM'd them mid-run
+// and the next timer slot is more than 12h away. No stop, no restart, no
+// other units. Keep in sync with RERUNNABLE_ONESHOT_UNITS in
+// scripts/grok_page_responder.py (pinned by
+// test_allowlist_matches_the_polkit_grant).
+polkit.addRule(function(action, subject) {
+    if (action.id != "org.freedesktop.systemd1.manage-units" ||
+        subject.user != "radon") {
+        return polkit.Result.NOTHING;
+    }
+    var unit = action.lookup("unit");
+    var verb = action.lookup("verb");
+    var rerunnable = {
+        "radon-vol-cone.service": true,
+        "radon-skew.service": true,
+        "radon-skew2d.service": true,
+        "radon-bpi.service": true
+    };
+    if (unit && rerunnable[unit] === true &&
+        (verb == "start" || verb == "reset-failed")) {
+        return polkit.Result.YES;
+    }
+    return polkit.Result.NOTHING;
+});
