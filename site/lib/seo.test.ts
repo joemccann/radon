@@ -3,6 +3,8 @@ import manifest from "../app/manifest";
 import robots, { AI_ANSWER_ENGINE_BOTS } from "../app/robots";
 import sitemap from "../app/sitemap";
 import { clusterPages } from "./cluster-pages";
+import { agentPages } from "./developer-pages";
+import { LEGAL_ADDRESS_COUNTRY, LEGAL_ADDRESS_REGION, LEGAL_CONTACT_EMAIL } from "./legal";
 import { legalPages } from "./legal-pages";
 import {
   DEFAULT_SITE_URL,
@@ -86,6 +88,16 @@ describe("site SEO contract", () => {
       "@type": "Person",
       name: "Joe McCann",
     });
+    expect(organization.contactPoint).toMatchObject({
+      "@type": "ContactPoint",
+      email: LEGAL_CONTACT_EMAIL,
+      contactType: "customer support",
+    });
+    expect(organization.address).toMatchObject({
+      "@type": "PostalAddress",
+      addressCountry: LEGAL_ADDRESS_COUNTRY,
+      addressRegion: LEGAL_ADDRESS_REGION,
+    });
   });
 
   it("enriches the software application entry for answer engines", () => {
@@ -138,9 +150,9 @@ describe("site SEO contract", () => {
     );
 
     const routes = sitemap();
-    // home + clusters + legal + public /status surface map
+    // home + clusters + legal + public /status + agent/developer surfaces
     expect(routes).toHaveLength(
-      1 + clusterPages.length + legalPages.length + 1,
+      1 + clusterPages.length + legalPages.length + 1 + agentPages.length,
     );
     expect(routes[0]).toMatchObject({
       url: siteUrl,
@@ -178,6 +190,16 @@ describe("site SEO contract", () => {
     expect(statusRoute.lastModified).toEqual(
       new Date(SITE_CONTENT_LAST_MODIFIED),
     );
+    agentPages.forEach((page, index) => {
+      const route =
+        routes[2 + clusterPages.length + legalPages.length + index];
+      expect(route).toMatchObject({
+        url: `${siteUrl}/${page.slug}`,
+        changeFrequency: "monthly",
+        priority: 0.5,
+      });
+      expect(route.lastModified).toEqual(new Date(page.lastModified));
+    });
     for (const route of routes) {
       const lastModified = new Date(route.lastModified!);
       expect(Number.isNaN(lastModified.getTime())).toBe(false);

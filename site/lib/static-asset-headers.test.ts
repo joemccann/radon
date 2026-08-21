@@ -12,4 +12,20 @@ describe("static asset headers", () => {
       value: "noindex",
     });
   });
+
+  it("publishes Vary: Accept so HTML and markdown variants cache separately", async () => {
+    const rules = await nextConfig.headers!();
+    const varyRules = rules.filter((rule) =>
+      rule.headers.some((header) => header.key === "Vary"),
+    );
+    expect(varyRules.map((rule) => rule.source)).toEqual(
+      expect.arrayContaining(["/", "/:path*"]),
+    );
+    for (const rule of varyRules) {
+      expect(rule.headers).toContainEqual({
+        key: "Vary",
+        value: "Accept, Accept-Encoding",
+      });
+    }
+  });
 });

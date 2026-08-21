@@ -12,6 +12,14 @@ const nextConfig: NextConfig = {
         source: "/_next/static/:path*",
         headers: [{ key: "X-Robots-Tag", value: "noindex" }],
       },
+      {
+        source: "/",
+        headers: [{ key: "Vary", value: "Accept, Accept-Encoding" }],
+      },
+      {
+        source: "/:path*",
+        headers: [{ key: "Vary", value: "Accept, Accept-Encoding" }],
+      },
     ];
   },
 };
