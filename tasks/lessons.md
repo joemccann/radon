@@ -1,10 +1,36 @@
 # Lessons
 
+## 2026-08-21 — Flex 1025 is a token lockout; Monday retry extends it
+
+- Cash Flows lozenge `TOO MANY FAILED ATTEMPTS. PLEASE REVIEW YOUR CONFIGURATION` is Flex code 1025, not a live IB socket miss. Official v3 table ends at 1021; 1025 is undocumented.
+- 1014/1012/1015 are the real config/token errors. 1025 is earned by retrying 1001. `_request_reference_code` retried `_FlexTransientError` (2 SendRequests). Classified as permanent, next attempt Monday 08:00 ET. `radon-perf-twr` 07:30 ET and GET `/api/performance` background rebuild poke the same token with no shared embargo.
+- TWR treated `<FlexStatementResponse>` as a ready statement because `<FlexStatement` is a prefix of the error envelope.
+- Stop internal 1001 retry. 1025 is exit 15, 7-day shared sidecar (`utils.flex_embargo`). Do not SendRequest. Recover with `python -m scripts.cash_flow_sync --from-file`. Portal Run on 1442520 to verify the query; do not set `IB_FLEX_FLOWS_QUERY_ID`.
+
 ## 2026-08-21 — Yahoo is last resort; never the scheduled source
 
 - CREDIT shipped with Yahoo as the only fetcher because IB historical "needs 2FA" and UW "has no HYG history." That skipped the priority chain.
 - 2FA skips the IB socket (`auth_state != authenticated`), not the IB path. UW is next. Yahoo is last.
 - Do not document Yahoo as the scheduled source. Hard rule: `CLAUDE.md` Mandatory Rules #7 and `AGENTS.md` Data Source Priority (`ABSOLUTE LAST RESORT`).
+
+## 2026-08-21 — Combo modify P&L is close-out, not opening risk
+
+- `ModifyOrderModal` single-leg SELL-to-close already passed `closeOut`. The combo path did not.
+- A SELL BAG that matches a held risk reversal is a flatten. Covering the short call with the held long call leaves a synthetic long put, so opening-risk math reports Max Gain ≈ put-strike notional and Max Loss = round-trip cost.
+- CBRS 50x @ $8: Max Gain $1,035,835 / Max Loss $4,165 instead of Close Credit $40,000 and realized P&L vs basis.
+- Match structure legs (not inverted economic legs), SELL envelope, qty ≤ held BAG units, then pass `closeOut.entryCostDollars`.
+
+## 2026-08-20 — Request-path login must finish under the Next.js options proxy
+
+- `/options/net-gex` 504 is not the same bug as the 2026-08-07 503. `menthorq-session` can be ok while `menthorq-login-probe` is error: cookies look live, re-login is dead.
+- Login-probe read timeout is 90s so it can see FastAPI 503. Next.js `OPTIONS_PROXY_TIMEOUT_MS` is 50s. A 60s Playwright login 504s the browser first.
+- `_storage_state_expired` only skips chromium for a provably dead jar. An unspendable live jar still mint-then-bootstraps on every click unless a process-wide embargo is tripped.
+- Cap request-path login under the proxy (25s / 40s budget) and embargo auth failures. Do not raise the proxy to hide a broken remint. Reminting the dashboard jar is still ops.
+
+## 2026-08-19 — Do not kill a UW producer without a cheaper replacement
+
+- Unloading laptop `com.radon.data-refresh` stopped the 40k burn but left discover/scanner/flow with no scheduled producer (no VPS timer existed).
+- Replace 15-minute market-wide pagination with hourly VPS + scoring page caps + FastAPI cooldown in the same change, or the tabs go stale and the operator puts the incinerator back.
 
 ## 2026-08-15 — TWR snapshots are not the reconstruction PerformanceData contract
 

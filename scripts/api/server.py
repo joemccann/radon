@@ -4057,6 +4057,13 @@ async def performance_background():
         return {"status": "already_running"}
 
     now = time.monotonic()
+    try:
+        from utils.flex_embargo import is_blocked
+        if is_blocked():
+            return {"status": "lockout"}
+    except Exception:
+        pass
+
     if (
         _last_background_build_at is not None
         and now - _last_background_build_at < PERFORMANCE_BACKGROUND_COOLDOWN_S
@@ -5061,7 +5068,11 @@ def _load_cash_flow_sync_status() -> dict[str, Any]:
                 # like "ERR: cash flow fetch failed: Flex throttle (code
                 # 1001): Statement could not be generated at this time."
                 # — surface only the post-colon Flex sentence.
-                if "Flex throttle" in message:
+                if "code 1025" in lower or "too many failed attempts" in lower:
+                    payload["error_summary"] = (
+                        "Flex lockout. Do not retry. Ingest with --from-file"
+                    )
+                elif "Flex throttle" in message:
                     payload["error_summary"] = "Flex throttled by IBKR"
                 elif ":" in message:
                     payload["error_summary"] = message.split(":")[-1].strip()

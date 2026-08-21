@@ -274,14 +274,30 @@ def fetch_flex_xml(
     from urllib.parse import urlencode
     from urllib.request import urlopen
 
+    try:
+        from utils.flex_embargo import raise_if_blocked, record_lockout
+    except Exception:  # pragma: no cover — embargo is belt-and-suspenders
+        raise_if_blocked = None  # type: ignore[assignment]
+        record_lockout = None  # type: ignore[assignment]
+    if raise_if_blocked is not None:
+        raise_if_blocked()
+
+    def _arm_lockout(code: str) -> None:
+        if code == "1025" and record_lockout is not None:
+            try:
+                record_lockout(code)
+            except Exception:
+                return
+
     params = urlencode({"t": token, "q": query_id, "v": "3"})
     resp = urlopen(f"{_FLEX_SEND}?{params}", timeout=read_timeout)  # noqa: S310
     text = resp.read().decode("utf-8")
     root = _ET.fromstring(text)
     ref = root.find(".//ReferenceCode")
     if ref is None or not (ref.text or "").strip():
-        err_code = root.findtext(".//ErrorCode") or ""
+        err_code = (root.findtext(".//ErrorCode") or "").strip()
         err_msg = root.findtext(".//ErrorMessage") or text[:500]
+        _arm_lockout(err_code)
         raise RuntimeError(f"Flex SendRequest failed code={err_code}: {err_msg}")
     ref_code = ref.text.strip()  # type: ignore[union-attr]
     elapsed = 0.0
@@ -295,8 +311,23 @@ def fetch_flex_xml(
         params2 = urlencode({"t": token, "q": ref_code, "v": "3"})
         resp2 = urlopen(f"{_FLEX_GET}?{params2}", timeout=read_timeout)  # noqa: S310
         xml_text = resp2.read().decode("utf-8")
-        if "<FlexStatements" in xml_text or "<FlexStatement" in xml_text:
+        # Do not match FlexStatementResponse: that wrapper is the ERROR
+        # envelope, and "<FlexStatement" is a prefix of it. Treating 1025
+        # XML as a ready statement is how TWR kept "succeeding" on a lockout.
+        if "<FlexStatements" in xml_text:
             return xml_text
+        try:
+            poll_root = _ET.fromstring(xml_text)
+        except _ET.ParseError:
+            continue
+        err_code = (poll_root.findtext(".//ErrorCode") or "").strip()
+        # 1019 is ordinary not-ready. 1018/1025 are token-level; polling
+        # them for the rest of the budget is how a lockout stays locked.
+        if err_code not in ("1018", "1025"):
+            continue
+        err_msg = (poll_root.findtext(".//ErrorMessage") or xml_text[:500]).strip()
+        _arm_lockout(err_code)
+        raise RuntimeError(f"Flex GetStatement failed code={err_code}: {err_msg}")
     raise RuntimeError(
         f"Flex GetStatement not ready within {FLEX_POLL_BUDGET_SECONDS:.0f}s ref={ref_code}"
     )

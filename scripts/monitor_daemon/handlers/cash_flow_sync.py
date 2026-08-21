@@ -109,6 +109,8 @@ HANDLER_DEADLINE_MARGIN_SECONDS = 60.0
 EXIT_CONFIG_ERROR = 1
 EXIT_THROTTLE = 10
 EXIT_FLEX_APP_ERROR = 11
+EXIT_FLEX_LOCKOUT = 15
+LOCKOUT_EMBARGO_DAYS = 7
 
 _SOFT_EXIT_CLASSES = {
     12: "not_ready",
@@ -397,7 +399,7 @@ class CashFlowSyncHandler(BaseHandler):
         if isinstance(exc, FlexThrottleError):
             return "throttle"
         flex_class = getattr(exc, "flex_class", None)
-        if flex_class in ("throttle", "permanent", "config"):
+        if flex_class in ("throttle", "permanent", "config", "lockout"):
             return flex_class
         if flex_class is not None:
             return "soft"
@@ -429,6 +431,8 @@ class CashFlowSyncHandler(BaseHandler):
             self._backoff_state = _throttle_backoff.record_throttle(
                 self._backoff_state, now_utc=now_utc
             )
+        elif failure_class == "lockout":
+            self._record_lockout(now_utc)
         elif failure_class == "config":
             self._record_config_error(now_utc)
         elif failure_class == "permanent":
@@ -462,6 +466,28 @@ class CashFlowSyncHandler(BaseHandler):
         )
         self._backoff_state["soft_attempt_date"] = today
         self._backoff_state["soft_attempts"] = to if to is not None else attempts + 1
+
+    def _record_lockout(self, now_utc: datetime) -> None:
+        """1025 is a token lockout. The next daily 08:00 window is too soon.
+
+        Production 2026-08-21 classified this as permanent, scheduled Monday
+        08:00 ET, and that SendRequest is what kept the lozenge red. Hold
+        the token for LOCKOUT_EMBARGO_DAYS and arm the shared sidecar so
+        TWR and /performance/background do not poke it either.
+        """
+        today = _et_date(now_utc)
+        state = dict(self._backoff_state)
+        state["soft_attempt_date"] = today
+        state["soft_attempts"] = MAX_SOFT_ATTEMPTS_PER_ET_DAY
+        state["blocked_until"] = (
+            now_utc + timedelta(days=LOCKOUT_EMBARGO_DAYS)
+        ).isoformat()
+        self._backoff_state = state
+        try:
+            from utils.flex_embargo import record_lockout
+            record_lockout("1025", now=now_utc)
+        except Exception:
+            return
 
     def _record_config_error(self, now_utc: datetime) -> None:
         """A missing token is a CONFIG error, never a success.
@@ -573,6 +599,9 @@ class CashFlowSyncHandler(BaseHandler):
         code = result.returncode
         if code == EXIT_THROTTLE:
             return FlexThrottleError(str(status.get("code") or "unknown"), message)
+        if code == EXIT_FLEX_LOCKOUT:
+            return SyncFailure(message, flex_class="lockout",
+                               code=str(status.get("code") or "1025"))
         if code == EXIT_FLEX_APP_ERROR:
             return SyncFailure(message, flex_class="permanent",
                                code=str(status.get("code") or ""))
