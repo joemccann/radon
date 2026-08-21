@@ -128,6 +128,8 @@ readonly SERVICE_FILES=(
   radon-equibles-cot.timer
   radon-equibles-filings.service
   radon-equibles-filings.timer
+  radon-credit-spread.service
+  radon-credit-spread.timer
 )
 
 

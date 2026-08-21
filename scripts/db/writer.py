@@ -922,6 +922,53 @@ def upsert_yield_curve_rows(rows: list[dict[str, Any]], recorded_at: Optional[st
     db.commit()
 
 
+CREDIT_SPREAD_UPSERT_SQL = """
+INSERT INTO credit_spread_history
+  (date, hyg_close, spx_close, recorded_at)
+VALUES (?, ?, ?, ?)
+ON CONFLICT(date) DO UPDATE SET
+  hyg_close   = excluded.hyg_close,
+  spx_close   = excluded.spx_close,
+  recorded_at = excluded.recorded_at
+"""
+
+
+def upsert_credit_spread_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
+    """CREDIT indicator — one row per common HYG/SPX session, idempotent on date.
+
+    Chunked multi-row INSERTs (Hrana I/O bounding): a first-run backfill
+    writes the full ~4,800-session series, which per-row would be thousands
+    of statements on one stream (the rv-ratio 2026-07-21 502 incident).
+    Daily runs pass 0-2 rows.
+    """
+    if not rows:
+        return
+    stamp = recorded_at or _now_iso()
+    db = get_db()
+    for start in range(0, len(rows), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = rows[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        placeholders = ", ".join("(?, ?, ?, ?)" for _ in chunk)
+        params: list[Any] = []
+        for row in chunk:
+            params.extend(
+                (
+                    row["date"],
+                    float(row["hyg_close"]),
+                    float(row["spx_close"]),
+                    stamp,
+                )
+            )
+        db.execute(
+            "INSERT INTO credit_spread_history (date, hyg_close, spx_close, recorded_at) "
+            f"VALUES {placeholders} "
+            "ON CONFLICT(date) DO UPDATE SET "
+            "hyg_close = excluded.hyg_close, spx_close = excluded.spx_close, "
+            "recorded_at = excluded.recorded_at",
+            tuple(params),
+        )
+    db.commit()
+
+
 STRADDLE_UPSERT_SQL = """
 INSERT INTO straddle_history
   (date, spx_close, vix1d_close, ratio, recorded_at)

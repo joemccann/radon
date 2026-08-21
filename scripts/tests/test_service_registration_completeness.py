@@ -284,6 +284,7 @@ class TestCollectorsAreNotBlind:
             "skew2d",
             "margin-debt",
             "yield-curve",
+            "credit-spread",
             "catalysts",
             "informed-flow",
         }
