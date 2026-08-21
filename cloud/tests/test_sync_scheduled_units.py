@@ -200,15 +200,16 @@ def test_deploy_syncs_after_green_gate_and_skips_when_ungranted():
     deploy = DEPLOY.read_text(encoding="utf-8")
     main = function_body(deploy, "main")
     recover = function_body(deploy, "recover_pending_transition")
+    grant = function_body(deploy, "scheduled_units_sync_is_granted")
     sync = function_body(deploy, "sync_scheduled_units")
     assert main.count("sync_scheduled_units") == 2
     assert main.index("green_marker_matches") < main.index("sync_scheduled_units")
     assert main.index("sync_scheduled_units") < main.index("write_green_marker")
     assert main.index("commit-transition") < main.rindex("sync_scheduled_units")
     assert "sync_scheduled_units" in recover
-    assert "sudo -n -l --" in sync
+    assert "sudo -n -l --" in grant
     assert "bootstrap-control-plane.sh" in sync
-    assert 'return 0' in sync
+    assert "return 0" in sync
 
 
 def test_sync_installs_allowlisted_unit_and_reloads_only(tmp_path: pathlib.Path):
