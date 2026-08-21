@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildPositionTradeOrder,
   closingActionFor,
+  findHeldComboForClose,
   heldComboUnits,
   overClosesHeldCombo,
   type TradeTarget,
@@ -154,6 +155,46 @@ describe("buildPositionTradeOrder — combo", () => {
     expect(heldComboUnits(position)).toBe(10);
     expect(order.isClosing).toBe(true);
     expect(order.riskInput.closeOut?.entryCostDollars).toBe(-800);
+  });
+
+  it("finds a held BAG for a matching SELL-combo close", () => {
+    const position = riskReversal();
+    const found = findHeldComboForClose({
+      ticker: "MU",
+      envelopeAction: "SELL",
+      quantity: 1,
+      structureLegs: [
+        { action: "SELL", right: "C", strike: 1050, expiry: "2026-07-17", ratio: 3 },
+        { action: "BUY", right: "P", strike: 800, expiry: "2026-07-17", ratio: 5 },
+      ],
+      portfolio: portfolioWith(position),
+    });
+    expect(found).toBe(position);
+  });
+
+  it("rejects BUY envelope, oversized qty, and mismatched strikes as combo closes", () => {
+    const position = riskReversal();
+    const portfolio = portfolioWith(position);
+    const legs = [
+      { action: "SELL" as const, right: "C" as const, strike: 1050, expiry: "2026-07-17", ratio: 3 },
+      { action: "BUY" as const, right: "P" as const, strike: 800, expiry: "2026-07-17", ratio: 5 },
+    ];
+    expect(findHeldComboForClose({
+      ticker: "MU", envelopeAction: "BUY", quantity: 1, structureLegs: legs, portfolio,
+    })).toBeNull();
+    expect(findHeldComboForClose({
+      ticker: "MU", envelopeAction: "SELL", quantity: 2, structureLegs: legs, portfolio,
+    })).toBeNull();
+    expect(findHeldComboForClose({
+      ticker: "MU",
+      envelopeAction: "SELL",
+      quantity: 1,
+      structureLegs: [
+        { action: "SELL", right: "C", strike: 1049, expiry: "2026-07-17", ratio: 3 },
+        { action: "BUY", right: "P", strike: 800, expiry: "2026-07-17", ratio: 5 },
+      ],
+      portfolio,
+    })).toBeNull();
   });
 
   it("does not classify an oversized combo SELL as a riskless close", () => {

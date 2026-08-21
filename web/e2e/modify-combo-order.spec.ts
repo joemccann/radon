@@ -420,6 +420,44 @@ test.describe("Combo order modify flow", () => {
     });
   });
 
+  test("shows close credit and realized P&L when modifying a SELL combo that flattens a held reversal", async ({ page }) => {
+    const portfolio = {
+      ...PORTFOLIO,
+      positions: [
+        {
+          ...PORTFOLIO.positions[0],
+          entry_cost: 25_000,
+          legs: [
+            { direction: "SHORT", contracts: 50, type: "Put", strike: 90, expiry: "2026-03-27", entry_cost: -30_000, avg_cost: 600, market_price: 0, market_value: 0 },
+            { direction: "LONG", contracts: 50, type: "Call", strike: 98, expiry: "2026-03-27", entry_cost: 55_000, avg_cost: 1_100, market_price: 0, market_value: 0 },
+          ],
+        },
+      ],
+    };
+    await stubApis(page);
+    await page.route("**/api/portfolio", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(portfolio) }),
+    );
+
+    await page.goto("/orders");
+    const row = page.locator("tbody tr").filter({ hasText: "AAOI" }).first();
+    await expect(row).toBeVisible({ timeout: 10_000 });
+    await row.getByRole("button", { name: "MODIFY" }).click();
+
+    const modal = page.locator(".modify-dialog");
+    await expect(modal).toBeVisible();
+    await modal.locator("#modify-price-input").fill("8");
+
+    const summary = modal.locator(".order-confirm-summary");
+    await expect(summary).toContainText("Close Credit:");
+    await expect(summary).toContainText("$40,000");
+    await expect(summary).toContainText("Est. Realized P&L:");
+    await expect(summary).toContainText("$15,000");
+    await expect(summary).not.toContainText("Max Gain:");
+    await expect(summary).not.toContainText("Max Loss:");
+    await modal.screenshot({ path: "test-results/modify-combo-close-pnl.png" });
+  });
+
   test("shows signed negative risk reversal prices and submits a negative replacement limit", async ({ page }) => {
     await installMockWebSocket(page, MSFT_PRICE_FIXTURES);
     await page.unrouteAll({ behavior: "ignoreErrors" });

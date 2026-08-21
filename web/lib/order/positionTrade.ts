@@ -19,7 +19,7 @@
  *    SHORT (proceeds −, basis − = the original credit).
  */
 
-import type { PortfolioPosition, PortfolioLeg } from "@/lib/types";
+import type { PortfolioData, PortfolioPosition, PortfolioLeg } from "@/lib/types";
 import type { OptionOrderRiskInput } from "@/lib/order";
 import { resolveEntryCost } from "@/lib/positionUtils";
 import { fmtSignedPrice } from "@/lib/format";
@@ -92,6 +92,68 @@ export function isPureComboClose(
   heldUnits: number,
 ): boolean {
   return action === "SELL" && quantity > 0 && quantity <= heldUnits;
+}
+
+export type ComboStructureLeg = {
+  action: TradeAction;
+  right: "C" | "P";
+  strike: number;
+  expiry: string;
+  ratio: number;
+};
+
+function structureMatchesHeldCombo(
+  structureLegs: ComboStructureLeg[],
+  position: PortfolioPosition,
+  units: number,
+): boolean {
+  const held = tradeableOptionLegs(position);
+  if (held.length < 2 || held.length !== structureLegs.length) return false;
+
+  const used = new Set<number>();
+  for (const structure of structureLegs) {
+    const expiry = cleanExpiry(structure.expiry);
+    const expectedDirection = structure.action === "BUY" ? "LONG" : "SHORT";
+    const match = held.findIndex((leg, index) => {
+      if (used.has(index)) return false;
+      if (leg.direction !== expectedDirection) return false;
+      if (rightOf(leg) !== structure.right) return false;
+      if (leg.strike !== structure.strike) return false;
+      if (cleanExpiry(leg.expiry ?? position.expiry) !== expiry) return false;
+      return heldContracts(leg) / units === structure.ratio;
+    });
+    if (match < 0) return false;
+    used.add(match);
+  }
+  return used.size === held.length;
+}
+
+/**
+ * Find the held BAG a working SELL combo would flatten. Structure legs are
+ * the BAG definition (LONG→BUY, SHORT→SELL), not the inverted economic
+ * close legs. Qty must stay within held combo units.
+ */
+export function findHeldComboForClose(params: {
+  ticker: string;
+  envelopeAction: TradeAction;
+  quantity: number;
+  structureLegs: ComboStructureLeg[];
+  portfolio?: PortfolioData | null;
+}): PortfolioPosition | null {
+  if (params.envelopeAction !== "SELL") return null;
+  if (params.quantity <= 0) return null;
+  if (!params.portfolio) return null;
+  if (params.structureLegs.length < 2) return null;
+
+  const ticker = params.ticker.toUpperCase();
+  for (const position of params.portfolio.positions ?? []) {
+    if (position.ticker.toUpperCase() !== ticker) continue;
+    const units = heldComboUnits(position);
+    if (!isPureComboClose("SELL", params.quantity, units)) continue;
+    if (!structureMatchesHeldCombo(params.structureLegs, position, units)) continue;
+    return position;
+  }
+  return null;
 }
 
 /** Defense for close-only tickets: a SELL must never exceed held BAG units. */
