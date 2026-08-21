@@ -224,7 +224,7 @@ describe("CreditSpreadPanel — chart + controls", () => {
     renderPanel(hookState({ data: buildData() }));
     expect(
       screen.getByText(
-        "Source: Yahoo Finance daily closes (HYG, S&P 500). HYG is the traded high-yield credit proxy. ICE CCC OAS is not stored.",
+        "Source: Interactive Brokers daily closes (HYG, S&P 500), then Unusual Whales, then Yahoo Finance. HYG is the traded high-yield credit proxy. ICE CCC OAS is not stored.",
       ),
     ).toBeTruthy();
   });

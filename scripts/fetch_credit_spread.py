@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """CREDIT Indicator — HYG vs S&P 500 credit-equity divergence.
 
-Daily aligned closes of HYG (high-yield credit proxy) and ^GSPC. The two
+Daily aligned closes of HYG (high-yield credit proxy) and SPX. The two
 usually rise together (risk-on). Divergence is equities up over 168 sessions
 while HYG is down.
 
-Source is Yahoo chart JSON (no API key). IB historical dailies need a 2FA
-gateway; UW has no HYG history. Yahoo is the scheduled source, not a skip
-to fallback. ICE CCC OAS is not stored.
+Sources, in order (never skip ahead):
+  1. Interactive Brokers — Stock('HYG','SMART','USD'), Index('SPX','CBOE')
+  2. Unusual Whales — OHLC for HYG. Does not serve the SPX index.
+  3. Yahoo Finance — last resort for remaining gaps.
+
+ICE CCC OAS is not stored.
 
 Output is dual-written to Turso credit_spread_history + data/credit_spread.json.
 
@@ -23,7 +26,7 @@ import math
 import os
 import sys
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 from urllib.parse import quote
 
 # ── path setup ────────────────────────────────────────────────────
@@ -37,10 +40,17 @@ if str(_SCRIPT_DIR) not in sys.path:
 try:
     from dotenv import load_dotenv  # type: ignore[import-untyped]
     load_dotenv(_PROJECT_DIR / ".env")
+    load_dotenv(_PROJECT_DIR / ".env.ib-mode")
+    load_dotenv(_PROJECT_DIR / "web" / ".env")
 except Exception:
     pass
 
 from db import writer
+from utils.ib_preflight import (
+    IB_HISTORICAL_TIMEOUT_S,
+    IB_REQUEST_TIMEOUT_S,
+    ib_auth_state as _ib_auth_state,
+)
 
 # ── constants ─────────────────────────────────────────────────────
 CREDIT_SPREAD_JSON = _PROJECT_DIR / "data" / "credit_spread.json"
@@ -48,9 +58,13 @@ CREDIT_SPREAD_JSON = _PROJECT_DIR / "data" / "credit_spread.json"
 LOOKBACK_SESSIONS = 168
 NEAR_HIGH_RATIO = 0.97
 HYG_SYMBOL = "HYG"
-SPX_SYMBOL = "^GSPC"
+SPX_SYMBOL = "SPX"
+YAHOO_SYMBOLS = {HYG_SYMBOL: "HYG", SPX_SYMBOL: "^GSPC"}
+UW_SKIP = frozenset({SPX_SYMBOL})
+CREDIT_IB_HISTORY_CLIENT_IDS = (56, 69)
 
 _PERIOD1 = int(datetime(2007, 4, 11, tzinfo=timezone.utc).timestamp())
+FetchCloses = Callable[[list[str]], dict[str, dict[str, float]]]
 
 
 # ── Yahoo chart ───────────────────────────────────────────────────
@@ -89,6 +103,207 @@ def parse_yahoo_chart(text: str) -> dict[str, float]:
         stamp = datetime.fromtimestamp(ts, tz=timezone.utc)
         by_date[stamp.strftime("%Y-%m-%d")] = float(close)
     return by_date
+
+
+def fetch_yahoo_closes(tickers: list[str], session: Optional[Any] = None) -> dict[str, dict[str, float]]:
+    """Last-resort Yahoo chart closes. ``tickers`` are HYG/SPX, not Yahoo symbols."""
+    import requests
+
+    http = session or requests
+    out: dict[str, dict[str, float]] = {}
+    for ticker in tickers:
+        yahoo_sym = YAHOO_SYMBOLS.get(ticker, ticker)
+        try:
+            parsed = parse_yahoo_chart(fetch_yahoo_chart(yahoo_sym, http))
+        except Exception as exc:
+            print(f"  Yahoo: {ticker} ({yahoo_sym}) failed — {exc}", file=sys.stderr)
+            continue
+        if parsed:
+            out[ticker] = parsed
+            print(f"  Yahoo: {ticker} — {len(parsed)} bars", file=sys.stderr)
+    return out
+
+
+def _bar_date(value: Any) -> str:
+    return str(value)[:10]
+
+
+def _ib_host() -> str:
+    try:
+        from clients.ib_client import DEFAULT_HOST
+
+        return DEFAULT_HOST
+    except Exception:
+        return os.environ.get("IB_GATEWAY_HOST", "127.0.0.1")
+
+
+def _connect_ib_with_retry(
+    ib: Any,
+    client_ids: tuple[int, ...] = CREDIT_IB_HISTORY_CLIENT_IDS,
+    ports: tuple[int, ...] = (4001, 7497),
+    timeout: int = 8,
+) -> bool:
+    host = _ib_host()
+    for client_id in client_ids:
+        for port in ports:
+            try:
+                ib.connect(host, port, clientId=client_id, timeout=timeout)
+                return True
+            except Exception as exc:
+                print(
+                    f"  IB connect failed on port {port} clientId {client_id}: {exc}",
+                    file=sys.stderr,
+                )
+    return False
+
+
+def fetch_ib_closes(tickers: list[str]) -> dict[str, dict[str, float]]:
+    """1Y daily TRADES bars. Skip the socket when the gateway is awaiting 2FA."""
+    auth_state = _ib_auth_state()
+    if auth_state and auth_state != "authenticated":
+        print(
+            f"  IB skipped — gateway auth_state={auth_state} (falling back to UW/Yahoo)",
+            file=sys.stderr,
+        )
+        return {}
+
+    try:
+        from ib_insync import IB, Index, Stock
+    except ImportError:
+        return {}
+
+    ib = IB()
+    if not _connect_ib_with_retry(ib):
+        return {}
+
+    import asyncio
+
+    results: dict[str, dict[str, float]] = {}
+
+    async def _qualify_and_fetch(ticker: str) -> None:
+        if ticker == SPX_SYMBOL:
+            contract = Index(ticker, "CBOE")
+        else:
+            contract = Stock(ticker, "SMART", "USD")
+        try:
+            await asyncio.wait_for(
+                ib.qualifyContractsAsync(contract),
+                timeout=IB_REQUEST_TIMEOUT_S,
+            )
+            bars = await asyncio.wait_for(
+                ib.reqHistoricalDataAsync(
+                    contract,
+                    endDateTime="",
+                    durationStr="1 Y",
+                    barSizeSetting="1 day",
+                    whatToShow="TRADES",
+                    useRTH=True,
+                    formatDate=1,
+                ),
+                timeout=IB_HISTORICAL_TIMEOUT_S,
+            )
+            parsed = {
+                _bar_date(b.date): float(b.close)
+                for b in bars or []
+                if b.close is not None
+            }
+            if parsed:
+                results[ticker] = parsed
+                print(f"  IB: {ticker} — {len(parsed)} bars", file=sys.stderr)
+            else:
+                print(f"  IB: {ticker} — no bars returned", file=sys.stderr)
+        except asyncio.TimeoutError:
+            print(
+                f"  IB: {ticker} timed out — falling back",
+                file=sys.stderr,
+            )
+        except Exception as exc:
+            print(f"  IB: {ticker} failed — {exc}", file=sys.stderr)
+
+    async def _fetch_all() -> None:
+        await asyncio.gather(*[_qualify_and_fetch(t) for t in tickers])
+
+    try:
+        ib.run(_fetch_all())
+    finally:
+        ib.disconnect()
+
+    return results
+
+
+def fetch_uw_closes(tickers: list[str]) -> dict[str, dict[str, float]]:
+    """UW daily OHLC. Indices (SPX) are skipped — UW has no index history."""
+    fetchable = [t for t in tickers if t not in UW_SKIP]
+    if not fetchable:
+        return {}
+
+    try:
+        from clients.uw_client import UWClient
+    except ImportError:
+        return {}
+
+    results: dict[str, dict[str, float]] = {}
+    try:
+        with UWClient() as uw:
+            for ticker in fetchable:
+                try:
+                    data = uw.get_stock_ohlc(ticker, candle_size="1d")
+                    parsed = {
+                        _bar_date(b["date"]): float(b["close"])
+                        for b in data.get("data") or []
+                        if b.get("date") and b.get("close") is not None
+                    }
+                    if parsed:
+                        results[ticker] = parsed
+                        print(f"  UW: {ticker} — {len(parsed)} bars", file=sys.stderr)
+                except Exception as exc:
+                    print(f"  UW: {ticker} failed — {exc}", file=sys.stderr)
+    except Exception as exc:
+        print(f"  UW connection failed — {exc}", file=sys.stderr)
+
+    return results
+
+
+def fetch_closes(
+    tickers: Optional[list[str]] = None,
+    *,
+    fetch_ib: Optional[FetchCloses] = None,
+    fetch_uw: Optional[FetchCloses] = None,
+    fetch_yahoo: Optional[FetchCloses] = None,
+) -> tuple[dict[str, dict[str, float]], dict[str, str]]:
+    """IB first, then UW for gaps, then Yahoo. Yahoo is never called on a hit."""
+    wanted = list(tickers or [HYG_SYMBOL, SPX_SYMBOL])
+    ib_fn = fetch_ib or fetch_ib_closes
+    uw_fn = fetch_uw or fetch_uw_closes
+    yahoo_fn = fetch_yahoo or fetch_yahoo_closes
+
+    closes: dict[str, dict[str, float]] = {}
+    sources: dict[str, str] = {}
+
+    for ticker, series in ib_fn(wanted).items():
+        if series:
+            closes[ticker] = series
+            sources[ticker] = "ib"
+
+    missing = [t for t in wanted if t not in closes]
+    if missing:
+        for ticker, series in uw_fn(missing).items():
+            if series:
+                closes[ticker] = series
+                sources[ticker] = "uw"
+
+    missing = [t for t in wanted if t not in closes]
+    if missing:
+        for ticker, series in yahoo_fn(missing).items():
+            if series:
+                closes[ticker] = series
+                sources[ticker] = "yahoo"
+
+    return closes, sources
+
+
+def combine_source(sources: dict[str, str]) -> str:
+    return "+".join(sorted(set(sources.values())))
 
 
 # ── series assembly ───────────────────────────────────────────────
@@ -183,7 +398,9 @@ def diff_new_rows(
 
 
 def build_output(
-    series: list[dict[str, Any]], scan_time: Optional[str] = None
+    series: list[dict[str, Any]],
+    scan_time: Optional[str] = None,
+    source: str = "ib",
 ) -> dict[str, Any]:
     stamp = scan_time or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     current: Optional[dict[str, Any]] = None
@@ -204,7 +421,7 @@ def build_output(
         }
     return {
         "scan_time": stamp,
-        "source": "yahoo",
+        "source": source,
         "count": len(series),
         "current": current,
         "series": series,
@@ -251,12 +468,10 @@ def _read_cached_series() -> list[dict[str, Any]]:
 
 
 def run() -> dict[str, Any]:
-    import requests
-
-    print("[credit-spread] fetching HYG and ^GSPC", file=sys.stderr)
-    with requests.Session() as session:
-        hyg = parse_yahoo_chart(fetch_yahoo_chart(HYG_SYMBOL, session))
-        spx = parse_yahoo_chart(fetch_yahoo_chart(SPX_SYMBOL, session))
+    print("[credit-spread] fetching HYG and SPX (IB → UW → Yahoo)", file=sys.stderr)
+    closes, sources = fetch_closes()
+    hyg = closes.get(HYG_SYMBOL, {})
+    spx = closes.get(SPX_SYMBOL, {})
 
     fresh = build_series(align_series(hyg, spx))
     cached = _read_cached_series()
@@ -266,7 +481,7 @@ def run() -> dict[str, Any]:
     if not new_rows:
         print("[credit-spread] source unchanged; refreshing snapshot only", file=sys.stderr)
 
-    payload = build_output(series)
+    payload = build_output(series, source=combine_source(sources) or "none")
     persist_result(payload, new_rows)
     return payload
 

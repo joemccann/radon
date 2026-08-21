@@ -23,7 +23,7 @@ import { useCreditSpread } from "@/lib/useCreditSpread";
 import { useViewport } from "@/lib/useViewport";
 
 const SOURCE_FOOTNOTE =
-  "Source: Yahoo Finance daily closes (HYG, S&P 500). HYG is the traded high-yield credit proxy. ICE CCC OAS is not stored.";
+  "Source: Interactive Brokers daily closes (HYG, S&P 500), then Unusual Whales, then Yahoo Finance. HYG is the traded high-yield credit proxy. ICE CCC OAS is not stored.";
 
 const INFO_TOOLTIP =
   "HYG is the traded high-yield credit proxy. ICE CCC option-adjusted spreads are not stored. Equities and high-yield credit usually rise together. Divergence means the S&P 500 is up over 168 sessions while HYG is down.";
@@ -79,7 +79,7 @@ export default function CreditSpreadPanel() {
       <SectionEmptyState
         icon={Activity}
         headline="No credit series yet"
-        secondary="The credit-spread refresh timer populates this tab from Yahoo Finance daily closes for HYG and the S&P 500."
+        secondary="The credit-spread refresh timer populates this tab from Interactive Brokers daily closes for HYG and the S&P 500."
       />
     );
   }

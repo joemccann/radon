@@ -2,8 +2,9 @@
 Description=Radon Credit Spread Indicator - daily 21:45 UTC HYG/SPX pull
 
 [Timer]
-# After the 16:00 ET cash close so Yahoo has the session bar; weekend/holiday
-# runs are no-op heartbeats so the 26h staleness window never widens.
+# After the 16:00 ET cash close so IB / UW / Yahoo have the session bar;
+# weekend/holiday runs are no-op heartbeats so the 26h staleness window
+# never widens.
 OnCalendar=*-*-* 21:45:00 UTC
 Persistent=true
 RandomizedDelaySec=300

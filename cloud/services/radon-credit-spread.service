@@ -1,5 +1,5 @@
 [Unit]
-Description=Radon Credit Spread Indicator (Yahoo HYG vs S&P 500 daily close pull)
+Description=Radon Credit Spread Indicator (IB HYG vs S&P 500 daily close pull)
 After=network.target
 
 StartLimitIntervalSec=300

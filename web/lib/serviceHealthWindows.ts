@@ -162,7 +162,8 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
 
   // ``credit-spread`` — radon-credit-spread.timer fires daily 21:45 UTC every
   // calendar day (weekend runs heartbeat), so a uniform 26h window fits;
-  // Yahoo HYG + SPX only — no IB.
+  // IB HYG + SPX first, then UW, then Yahoo. Yahoo is a complete fallback
+  // so this is not grouped with IB outages (requires_ib: false).
   "credit-spread": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
   // ``straddle`` — radon-straddle.timer fires daily 02:15 UTC every calendar

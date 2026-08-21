@@ -21,7 +21,7 @@ const SERIES = buildSeries();
 
 const CREDIT_MOCK = {
   scan_time: new Date().toISOString(),
-  source: "yahoo",
+  source: "ib",
   count: SERIES.length,
   current: {
     date: "2026-08-20",
@@ -97,7 +97,7 @@ test.describe("/regime/credit — HYG vs S&P 500 tab", () => {
     await expect(section.locator("svg path[stroke]").first()).toBeVisible();
     expect(await section.locator("svg path[stroke]").count()).toBeGreaterThanOrEqual(2);
 
-    await expect(section).toContainText("Yahoo Finance daily closes");
+    await expect(section).toContainText("Interactive Brokers daily closes");
     await expect(section.locator('[data-testid="credit-spread-brush"]')).toBeVisible();
   });
 

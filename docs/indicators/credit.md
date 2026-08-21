@@ -43,25 +43,30 @@ Regime (strict inequalities; a zero return is **not** divergent):
 `NEAR_HIGH_RATIO = 0.97`. `near_high` is true iff `spx_last >= 0.97 * max(SPX in window)`.
 Pin: fixture last/max ≈ 0.97976 → true at 0.97, false at 0.98.
 
-## Source (confirmed 2026-08-21)
+## Source (confirmed 2026-08-21; cascade fixed 2026-08-21)
 
 - Tweet: https://x.com/elliottwaveintl/status/2090449826399862935 (2026-08-20).
   CCC OAS inverted vs SPX weekly; 8-month divergence from Jan 2026. Bloomberg
   series, not FRED. Do not claim the tab is ICE CCC OAS.
-- Yahoo chart JSON, no API key, UA `Mozilla/5.0` (plain `radon/2.0` gets 429, same
-  as the yield-curve SPX overlay):
-  `https://query1.finance.yahoo.com/v8/finance/chart/{HYG|%5EGSPC}?period1={epoch2007-04-11}&period2={now}&interval=1d`
-- Paths: `chart.result[0].timestamp[]`, `chart.result[0].indicators.quote[0].close[]`.
-  Skip null closes. Date = UTC `YYYY-MM-DD` from the unix timestamp.
-  Never use `range=max` (silently degrades to coarse bars).
-- No `Last-Modified` / `ETag` on the chart endpoint (live GET 2026-08-21). Diff on
-  persisted `{date, hyg_close, spx_close}` tuples; unchanged days heartbeat only.
-- History: HYG from 2007-04-11; backfill uses the same URL with `period1` at that
-  epoch. Daily runs fetch the same window and merge over cache (Yahoo is cheap).
-- Why not IB/UW: IB ticks HYG/SPX live but historical daily closes for an unattended
-  timer require an authenticated gateway (2FA lock fails the job). UW has no credit
-  OAS or HYG history endpoints. Yahoo is the scheduled source, not a skipped-to
-  fallback after a live IB attempt.
+- Priority (never skip ahead):
+  1. Interactive Brokers — `Stock('HYG','SMART','USD')`, `Index('SPX','CBOE')`,
+     1Y daily TRADES, merge over cache. Skip the socket when
+     `/health` `auth_state` is set and not `authenticated` (2FA lock). Fall
+     through to UW/Yahoo. Client IDs `(56, 69)`.
+  2. Unusual Whales — `get_stock_ohlc` for HYG. SPX is an index; UW is skipped.
+  3. Yahoo Finance — last resort for remaining gaps. Chart JSON, no API key,
+     UA `Mozilla/5.0` (plain `radon/2.0` gets 429, same as the yield-curve
+     SPX overlay):
+     `https://query1.finance.yahoo.com/v8/finance/chart/{HYG|%5EGSPC}?period1={epoch2007-04-11}&period2={now}&interval=1d`
+- Yahoo paths: `chart.result[0].timestamp[]`,
+  `chart.result[0].indicators.quote[0].close[]`. Skip null closes. Date = UTC
+  `YYYY-MM-DD` from the unix timestamp. Never use `range=max` (silently
+  degrades to coarse bars).
+- Diff on persisted `{date, hyg_close, spx_close}` tuples; unchanged days
+  heartbeat only. Daily IB increment is 1Y; older history lives in cache
+  (or Yahoo when IB+UW both miss a ticker).
+- Payload `source` is `ib` / `uw` / `yahoo`, or `ib+yahoo` when the pair
+  is mixed. Yahoo is never called when IB returns both series.
 - Licensing: HYG and SPX are exchange-traded prices. Display + storage allowed.
 - Fixtures (checked in, captured 2026-08-21):
   - `scripts/tests/fixtures/credit_spread_hyg_sample.json` — Yahoo chart, 2024-01-02
@@ -80,9 +85,11 @@ Pin: fixture last/max ≈ 0.97976 → true at 0.97, false at 0.98.
 Small pure functions (composed-method), stdlib `json` parsing, `requests` fetch:
 
 - `LOOKBACK_SESSIONS = 168`, `NEAR_HIGH_RATIO = 0.97`
-- `HYG_SYMBOL = "HYG"`, `SPX_SYMBOL = "^GSPC"` (URL-encode as `%5EGSPC`)
+- `HYG_SYMBOL = "HYG"`, `SPX_SYMBOL = "SPX"`, Yahoo map `SPX → ^GSPC`
+- `fetch_closes()` — IB then UW then Yahoo; injectable fetchers for tests.
+- `fetch_ib_closes` / `fetch_uw_closes` / `fetch_yahoo_closes`
 - `fetch_yahoo_chart(symbol, session=None) -> str` — UA `Mozilla/5.0`, timeout 30s,
-  raise on non-200/empty.
+  raise on non-200/empty. Last resort only.
 - `parse_yahoo_chart(text) -> dict[str, float]` — date → close; skip nulls.
 - `align_series(hyg: dict, spx: dict) -> list[dict]` — inner join on date, ascending
   `{date, hyg_close, spx_close}`.
@@ -95,11 +102,11 @@ Small pure functions (composed-method), stdlib `json` parsing, `requests` fetch:
 - `merge_series(cached, fresh)` — fresh wins per date.
 - `diff_new_rows(cached, series)` — rows absent from or different in
   `(date, hyg_close, spx_close)`.
-- `build_output(series, scan_time=None) -> payload`:
+- `build_output(series, scan_time=None, source="ib") -> payload`:
   ```
   {
     scan_time,                    # tz-aware UTC ISO, Z suffix
-    source: "yahoo",
+    source: "ib" | "uw" | "yahoo" | "ib+yahoo" | ...,
     count,
     current: {
       date, hyg_close, spx_close,
@@ -177,7 +184,7 @@ Helpers `web/lib/creditSpread.ts` (pure, unit-tested):
 - Gates: `SpectralLoader label="Loading high-yield credit series"` while
   `(loading || syncing) && !data`; `SectionEmptyState` headline
   `"No credit series yet"`, secondary
-  `"The credit-spread refresh timer populates this tab from Yahoo Finance daily closes for HYG and the S&P 500."`
+  `"The credit-spread refresh timer populates this tab from Interactive Brokers daily closes for HYG and the S&P 500."`
 - Section title `Credit`; header clock renders `lastSync`.
 - InfoTooltip: `"HYG is the traded high-yield credit proxy. ICE CCC option-adjusted spreads are not stored. Equities and high-yield credit usually rise together. Divergence means the S&P 500 is up over 168 sessions while HYG is down."`
 - Desktop `RegimeStrip` cells:
@@ -195,7 +202,7 @@ Helpers `web/lib/creditSpread.ts` (pure, unit-tested):
 - Range: `HistoryRangeChips` defaulting to **`all`**, `BrushMinimap`
   `values = series.map(p => p.hyg_close ?? 0)`, `testIdPrefix="credit-spread-brush"`,
   `ariaLabel="Credit series history range brush"`.
-- Footnote: `Source: Yahoo Finance daily closes (HYG, S&P 500). HYG is the traded high-yield credit proxy. ICE CCC OAS is not stored.`
+- Footnote: `Source: Interactive Brokers daily closes (HYG, S&P 500), then Unusual Whales, then Yahoo Finance. HYG is the traded high-yield credit proxy. ICE CCC OAS is not stored.`
   **No cadence claims.** No em dashes. Tokens only, 4px max radius.
 - Registration (UI worktree):
   - `web/lib/regimeRail.ts` — add `credit` to the `RegimeTab` union; append to
@@ -212,8 +219,9 @@ Helpers `web/lib/creditSpread.ts` (pure, unit-tested):
 ## Health / scheduling
 
 - `web/lib/serviceHealthWindows.ts`: `"credit-spread": { open: 26*HOUR, extended: 26*HOUR,
-  closed: 26*HOUR, category: "scheduled", requires_ib: false }` + a 26h pin test in
-  `web/tests/service-health-windows.test.ts` (same shape as yield-curve).
+  closed: 26*HOUR, category: "scheduled", requires_ib: false }` (IB-primary, Yahoo
+  is a complete fallback so CREDIT is not grouped with IB outages) + a 26h pin
+  test in `web/tests/service-health-windows.test.ts` (same shape as yield-curve).
 - `scripts/watchdog/services.py`: same 26h window + append to the daily-bucket list.
 - `cloud/services/radon-credit-spread.service`: Type=oneshot, User=radon,
   WorkingDirectory=/home/radon/radon, EnvironmentFile=/home/radon/radon-cloud/.env,
@@ -221,9 +229,9 @@ Helpers `web/lib/creditSpread.ts` (pure, unit-tested):
   ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_credit_spread.py,
   TimeoutStartSec=300, journal out/err, StartLimitIntervalSec=300, StartLimitBurst=5.
 - `cloud/services/radon-credit-spread.timer`: `OnCalendar=*-*-* 21:45:00 UTC` (comment:
-  after the 16:00 ET cash close so Yahoo has the session bar; weekend/holiday runs
-  are no-op heartbeats so the 26h staleness window never widens), `Persistent=true`,
-  `RandomizedDelaySec=300`.
+  after the 16:00 ET cash close so IB / UW / Yahoo have the session bar;
+  weekend/holiday runs are no-op heartbeats so the 26h staleness window never
+  widens), `Persistent=true`, `RandomizedDelaySec=300`.
 - Append both units to `cloud/scripts/setup-vps.sh` `SERVICE_FILES` and
   `cloud/tests/test_systemd_services.py`.
 - Drift: add `not-installed:radon-credit-spread.{service,timer}` to

@@ -435,7 +435,8 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
 
   // ``credit-spread`` — radon-credit-spread.timer fires daily 21:45 UTC
   // including weekends (heartbeat), so a uniform 26h window matches its
-  // yield-curve sibling. Yahoo only — no IB.
+  // yield-curve sibling. IB-primary with UW/Yahoo fallback; Yahoo is
+  // complete so requires_ib stays false.
   it("credit-spread is registered as scheduled with a uniform 26h window", () => {
     expect(SERVICE_FRESHNESS_WINDOWS["credit-spread"]).toBeDefined();
     expect(getServiceCategory("credit-spread")).toBe("scheduled");

@@ -15,12 +15,18 @@ from pathlib import Path
 import pytest
 
 from fetch_credit_spread import (
+    CREDIT_IB_HISTORY_CLIENT_IDS,
+    HYG_SYMBOL,
     LOOKBACK_SESSIONS,
     NEAR_HIGH_RATIO,
+    SPX_SYMBOL,
     align_series,
     build_output,
     classify_regime,
+    combine_source,
     diff_new_rows,
+    fetch_closes,
+    fetch_ib_closes,
     is_near_high,
     lookback_return,
     lookback_window,
@@ -144,8 +150,8 @@ class TestMergeDiff:
 class TestBuildOutput:
     def test_payload_contract_from_fixture(self):
         aligned = align_series(parse_yahoo_chart(HYG_JSON), parse_yahoo_chart(SPX_JSON))
-        payload = build_output(aligned)
-        assert payload["source"] == "yahoo"
+        payload = build_output(aligned, source="ib")
+        assert payload["source"] == "ib"
         assert payload["count"] == 658
         assert set(payload.keys()) == {"scan_time", "source", "count", "current", "series"}
         current = payload["current"]
@@ -257,3 +263,100 @@ class TestCreditSpreadStorage:
             db.execute("SELECT date, hyg_close, spx_close FROM credit_spread_history")
         )
         assert rows == [("2026-08-20", HYG_LAST, SPX_LAST)]
+
+
+HYG_BARS = {"2026-08-19": 79.4, "2026-08-20": HYG_LAST}
+SPX_BARS = {"2026-08-19": 7600.0, "2026-08-20": SPX_LAST}
+
+
+class TestCombineSource:
+    def test_single_source(self):
+        assert combine_source({"HYG": "ib", "SPX": "ib"}) == "ib"
+
+    def test_mixed_sources_are_sorted_and_joined(self):
+        assert combine_source({"HYG": "ib", "SPX": "yahoo"}) == "ib+yahoo"
+
+
+class TestFetchClosesCascade:
+    def test_ib_both_never_calls_uw_or_yahoo(self):
+        uw_calls: list = []
+        yahoo_calls: list = []
+
+        closes, sources = fetch_closes(
+            fetch_ib=lambda tickers: {HYG_SYMBOL: HYG_BARS, SPX_SYMBOL: SPX_BARS},
+            fetch_uw=lambda tickers: uw_calls.append(tickers) or {},
+            fetch_yahoo=lambda tickers: yahoo_calls.append(tickers) or {},
+        )
+
+        assert closes == {HYG_SYMBOL: HYG_BARS, SPX_SYMBOL: SPX_BARS}
+        assert sources == {HYG_SYMBOL: "ib", SPX_SYMBOL: "ib"}
+        assert combine_source(sources) == "ib"
+        assert uw_calls == []
+        assert yahoo_calls == []
+
+    def test_uw_fills_when_ib_empty_and_skips_yahoo(self):
+        yahoo_calls: list = []
+
+        closes, sources = fetch_closes(
+            fetch_ib=lambda tickers: {},
+            fetch_uw=lambda tickers: {HYG_SYMBOL: HYG_BARS, SPX_SYMBOL: SPX_BARS},
+            fetch_yahoo=lambda tickers: yahoo_calls.append(tickers) or {},
+        )
+
+        assert sources == {HYG_SYMBOL: "uw", SPX_SYMBOL: "uw"}
+        assert combine_source(sources) == "uw"
+        assert yahoo_calls == []
+
+    def test_yahoo_is_last_resort(self):
+        ib_calls: list = []
+        uw_calls: list = []
+
+        closes, sources = fetch_closes(
+            fetch_ib=lambda tickers: ib_calls.append(list(tickers)) or {},
+            fetch_uw=lambda tickers: uw_calls.append(list(tickers)) or {},
+            fetch_yahoo=lambda tickers: {HYG_SYMBOL: HYG_BARS, SPX_SYMBOL: SPX_BARS},
+        )
+
+        assert ib_calls == [[HYG_SYMBOL, SPX_SYMBOL]]
+        assert uw_calls == [[HYG_SYMBOL, SPX_SYMBOL]]
+        assert sources == {HYG_SYMBOL: "yahoo", SPX_SYMBOL: "yahoo"}
+        assert combine_source(sources) == "yahoo"
+
+    def test_partial_ib_asks_uw_then_yahoo_only_for_the_gap(self):
+        uw_calls: list = []
+        yahoo_calls: list = []
+
+        closes, sources = fetch_closes(
+            fetch_ib=lambda tickers: {HYG_SYMBOL: HYG_BARS},
+            fetch_uw=lambda tickers: uw_calls.append(list(tickers)) or {},
+            fetch_yahoo=lambda tickers: yahoo_calls.append(list(tickers))
+            or {SPX_SYMBOL: SPX_BARS},
+        )
+
+        assert uw_calls == [[SPX_SYMBOL]]
+        assert yahoo_calls == [[SPX_SYMBOL]]
+        assert sources == {HYG_SYMBOL: "ib", SPX_SYMBOL: "yahoo"}
+        assert combine_source(sources) == "ib+yahoo"
+
+
+class TestFetchIbAuthGate:
+    def test_skips_connect_when_awaiting_2fa(self, monkeypatch):
+        calls: list[str] = []
+        monkeypatch.setattr("fetch_credit_spread._ib_auth_state", lambda: "awaiting_2fa")
+        monkeypatch.setattr(
+            "fetch_credit_spread._connect_ib_with_retry",
+            lambda *_a, **_k: calls.append("connect") or False,
+        )
+
+        assert fetch_ib_closes([HYG_SYMBOL, SPX_SYMBOL]) == {}
+        assert calls == []
+
+
+class TestCreditIbClientIds:
+    def test_history_ids_are_scanner_range_and_unused_elsewhere(self):
+        assert CREDIT_IB_HISTORY_CLIENT_IDS == (56, 69)
+        assert all(50 <= cid <= 69 for cid in CREDIT_IB_HISTORY_CLIENT_IDS)
+        assert 0 not in CREDIT_IB_HISTORY_CLIENT_IDS
+        # CRI 50-61 (55 is portfolio_report), breadth 62-66, RV-ratio 67-68.
+        taken = set(range(50, 55)) | {55} | set(range(57, 69))
+        assert set(CREDIT_IB_HISTORY_CLIENT_IDS).isdisjoint(taken)
