@@ -1,3 +1,21 @@
+# Task: CREDIT indicator (HYG vs SPX) 2026-08-21
+
+## Dependency graph
+
+- T1 depends_on: [] - Spec + failing tests (ICE CCC rejected; Yahoo HYG+SPX)
+- T2 depends_on: [T1] - Ingestion / API / UI worktrees
+- T3 depends_on: [T2] - Merge + full suite
+- T4 depends_on: [T3] - Browser verify + PR
+
+## Checklist
+
+- [x] T1 `docs/indicators/credit.md` + red tests
+- [ ] T2 Three worktrees green
+- [ ] T3 Full gate
+- [ ] T4 Screenshot + PR
+
+---
+
 # Task: Dashboard catalysts dates + prints (2026-08-18)
 
 ## Dependency graph
