@@ -756,7 +756,7 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
           "Unrealized P&L = SUM( market_value − entry_cost ) per position\n" +
           "Entry cost and market value are signed (credits and short marks negative)\n" +
           "so each row satisfies P&L = MKT VALUE − ENTRY COST.\n" +
-          "Return uses verified max loss, full-loss debit, or isolated broker-observed opening margin; otherwise N/A.\n" +
+          "Return uses verified max loss, net debit paid, or isolated broker-observed opening margin; opening credits stay N/A.\n" +
           "Source: IB market data synced via IB Gateway"
         }
         col1Header="ENTRY COST"
