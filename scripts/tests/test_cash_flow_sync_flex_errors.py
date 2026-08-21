@@ -104,6 +104,15 @@ FAIL_1018 = (
     "</FlexStatementResponse>"
 )
 
+FAIL_1025 = (
+    "<FlexStatementResponse>"
+    "<Status>Fail</Status>"
+    "<ErrorCode>1025</ErrorCode>"
+    "<ErrorMessage>Too many failed attempts. Please review your "
+    "configuration.</ErrorMessage>"
+    "</FlexStatementResponse>"
+)
+
 
 class TestFlexErrorSurface:
     """Surface IBKR's actual error code + message instead of a generic."""
@@ -188,6 +197,20 @@ class TestThrottleNoInternalRetry:
                 fetch_cash_transactions("tok", "qid")
             assert not isinstance(excinfo.value, FlexThrottleError)
 
+    def test_1001_sendrequest_is_not_internally_retried(self):
+        """A second SendRequest 1s later is how 1001 becomes undocumented 1025.
+
+        `_request_reference_code` used to re-raise only throttle + _FlexAppError,
+        so _FlexTransientError fell through to the transport retry loop.
+        """
+        with patch("cash_flow_sync.urlopen") as mock_urlopen, \
+             patch("cash_flow_sync.time.sleep") as mock_sleep:
+            mock_urlopen.return_value = _xml_response(FAIL_1001)
+            with pytest.raises(cash_flow_sync._FlexTransientError):
+                fetch_cash_transactions("tok", "qid")
+            assert mock_urlopen.call_count == 1
+            mock_sleep.assert_not_called()
+
     def test_1019_on_a_poll_is_not_ready_and_keeps_polling(self):
         """"Generation in progress" is the normal not-ready response. Aborting
         the poll loop on it is what turned a few seconds into 24 hours."""
@@ -201,6 +224,17 @@ class TestThrottleNoInternalRetry:
         exc = cash_flow_sync._flex_error_from(root, "SendRequest")
         assert isinstance(exc, cash_flow_sync._FlexTransientError)
         assert not isinstance(exc, cash_flow_sync._FlexAppError)
+
+    def test_1025_is_lockout_and_is_not_internally_retried(self):
+        """Undocumented IBKR lockout. One SendRequest, then stop. A retry
+        is what keeps cash-flow-sync failing for days."""
+        with patch("cash_flow_sync.urlopen") as mock_urlopen, \
+             patch("cash_flow_sync.time.sleep") as mock_sleep:
+            mock_urlopen.return_value = _xml_response(FAIL_1025)
+            with pytest.raises(cash_flow_sync._FlexLockoutError):
+                fetch_cash_transactions("tok", "qid")
+            assert mock_urlopen.call_count == 1
+            mock_sleep.assert_not_called()
 
     def test_1018_raises_flex_throttle_error_immediately(self):
         with patch("cash_flow_sync.urlopen") as mock_urlopen, \

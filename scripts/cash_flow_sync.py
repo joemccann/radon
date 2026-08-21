@@ -36,6 +36,8 @@ failure by substring-matching stderr again):
     10  Flex rate limit (code 1018 ONLY) — breaker ladder
     11  permanent Flex application error (auth, unknown query id, unknown
         error code). Retrying cannot flip it; do not spend more requests.
+    15  Flex lockout (code 1025). Undocumented failed-attempts lockout.
+        Retrying extends it. Shared token embargo, not the next 08:00 window.
     12  statement never became ready inside the poll budget, or a transport
         failure. Soft lane.
     13  the statement came back but would not parse. Soft lane.
@@ -116,6 +118,7 @@ EXIT_FLEX_APP_ERROR = 11
 EXIT_STATEMENT_NOT_READY = 12
 EXIT_PARSE_ERROR = 13
 EXIT_WRITE_ERROR = 14
+EXIT_FLEX_LOCKOUT = 15
 
 
 def _classify(raw_type: str, amount: float) -> str:
@@ -182,6 +185,13 @@ def _normalize_date(raw: str) -> str:
 # Radon-local policy and is far more conservative than the limit it models.
 _FLEX_THROTTLE_CODES = {
     "1018",  # the only documented rate limit
+}
+
+# Undocumented. Not in IBKR's published v3 table (ends 1021). Observed as
+# "Too many failed attempts. Please review your configuration." Earned by
+# retrying 1001 against the same token; every further SendRequest extends it.
+_FLEX_LOCKOUT_CODES = {
+    "1025",
 }
 
 # "Try again shortly" — transient server-side generation failures. These take
@@ -261,6 +271,19 @@ def _flex_throttle_error_cls():
     return FlexThrottleError
 
 
+class _FlexLockoutError(RuntimeError):
+    """Flex 1025: failed-attempts lockout. Not a published config error.
+
+    1014 is "Query is invalid", 1012 is "Token has expired". 1025 is what
+    IBKR returns after too many failed generation attempts on a still-valid
+    token. Retrying it is how the cash-flow lozenge stays red for days.
+    """
+
+    def __init__(self, code: str, message: str):
+        self.code = code
+        super().__init__(message)
+
+
 class _FlexAppError(RuntimeError):
     """Flex returned a structured ErrorCode / ErrorMessage that isn't a
     throttle (auth, bad query id, etc.). NOT retryable — retrying won't
@@ -318,6 +341,8 @@ def _flex_error_from(root: ET.Element, leg: str) -> Optional[BaseException]:
         else "no ErrorMessage from IBKR"
     )
     detail = f"Flex {leg} failed (code {code}): {message}"
+    if code in _FLEX_LOCKOUT_CODES:
+        return _FlexLockoutError(code, detail)
     if code in _FLEX_THROTTLE_CODES:
         return _flex_throttle_error_cls()(code, detail)
     if code in _FLEX_TRANSIENT_CODES or code in _FLEX_NOT_READY_CODES:
@@ -357,7 +382,9 @@ def _request_reference_code(token: str, query_id: str) -> str:
     The rate-limit code (1018) raises FlexThrottleError on the first
     hit — no retry, since every retry pushes the sliding-window out
     further. Structured Flex application errors (auth, bad query id)
-    fail fast — retrying won't flip them.
+    fail fast — retrying won't flip them. Transient generation failures
+    (1001/1009) and lockout (1025) also fail fast: a second SendRequest
+    one second later is how 1001 becomes 1025.
 
     Only transport / parse failures (network blip, bad XML) get a single
     bounded retry; the daemon's daily window catches anything that takes
@@ -369,7 +396,11 @@ def _request_reference_code(token: str, query_id: str) -> str:
             return _send_request_once(token, query_id)
         except _flex_throttle_error_cls():
             raise
+        except _FlexLockoutError:
+            raise
         except _FlexAppError:
+            raise
+        except _FlexTransientError:
             raise
         except Exception as exc:
             last_transport_error = exc
@@ -532,9 +563,12 @@ def fetch_statement_xml(
     Raises:
         FlexThrottleError    on the Flex rate-limit code 1018,
                              from EITHER leg.
+        _FlexLockoutError    on undocumented 1025 (failed-attempts lockout).
         _FlexAppError        on any other structured Flex error.
         _StatementNotReady   when the poll budget expires.
+        FlexTokenLocked      when a prior 1025 embargo is still live.
     """
+    _raise_if_token_locked()
     ref_code = _request_reference_code(token, query_id)
 
     budget = FLEX_POLL_BUDGET_SECONDS if budget_seconds is None else budget_seconds
@@ -628,6 +662,23 @@ def _read_statement_file(path_str: str) -> str:
         raise _ConfigError(f"cannot read statement file {path}: {exc}") from exc
 
 
+def _raise_if_token_locked() -> None:
+    """Skip SendRequest when a prior 1025 embargo is still live."""
+    try:
+        from utils.flex_embargo import raise_if_blocked
+    except Exception:
+        return
+    raise_if_blocked()
+
+
+def _record_token_lockout(code: str) -> None:
+    try:
+        from utils.flex_embargo import record_lockout
+        record_lockout(code)
+    except Exception:
+        return
+
+
 def _fetch_live_statement() -> str:
     token = os.environ.get("IB_FLEX_TOKEN")
     query_id = os.environ.get("IB_FLEX_NAV_QUERY_ID")
@@ -682,6 +733,12 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"ERR: {exc}", file=sys.stderr)
         _emit_status("error", "config_error", message=str(exc))
         return EXIT_CONFIG_ERROR
+    except _FlexLockoutError as exc:
+        print(f"ERR: {exc}", file=sys.stderr)
+        _record_token_lockout(getattr(exc, "code", "1025"))
+        _emit_status("error", "lockout", code=getattr(exc, "code", "1025"),
+                     message=str(exc))
+        return EXIT_FLEX_LOCKOUT
     except _FlexAppError as exc:
         print(f"ERR: {exc}", file=sys.stderr)
         _emit_status("error", "flex_app_error", message=str(exc))
@@ -697,6 +754,10 @@ def main(argv: Optional[list[str]] = None) -> int:
             _emit_status("error", "throttle", code=getattr(exc, "code", None),
                          message=str(exc))
             return EXIT_THROTTLE
+        if type(exc).__name__ == "FlexTokenLocked":
+            print(f"ERR: {exc}", file=sys.stderr)
+            _emit_status("error", "lockout", code="1025", message=str(exc))
+            return EXIT_FLEX_LOCKOUT
         print(f"ERR: cash flow fetch failed: {exc}", file=sys.stderr)
         _emit_status("error", "transport", message=str(exc))
         return EXIT_STATEMENT_NOT_READY

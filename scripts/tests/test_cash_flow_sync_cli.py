@@ -420,6 +420,31 @@ class TestExitCodes:
         assert code != cash_flow_sync.EXIT_FLEX_APP_ERROR  # not permanent either
         assert _status_line(stdout)["class"] != "throttle"
 
+    def test_1025_lockout_exits_distinct_from_permanent_and_does_not_retry(
+        self, credentials, writer
+    ):
+        """Production 2026-08-21: SendRequest 1025 was exit 11 (permanent),
+        so the handler burned the day and scheduled Monday 08:00 ET — which
+        is another SendRequest on a locked token. Lockout must not share
+        that lane."""
+        body = (
+            "<FlexStatementResponse><Status>Fail</Status>"
+            "<ErrorCode>1025</ErrorCode>"
+            "<ErrorMessage>Too many failed attempts. Please review your "
+            "configuration.</ErrorMessage></FlexStatementResponse>"
+        )
+        with patch.object(cash_flow_sync, "urlopen") as mock_urlopen, \
+             patch.object(cash_flow_sync.time, "sleep") as mock_sleep, \
+             patch.object(cash_flow_sync, "_record_token_lockout"):
+            mock_urlopen.side_effect = [_xml_response(body)]
+            code, stdout, _ = _run("--no-file")
+
+        assert code == cash_flow_sync.EXIT_FLEX_LOCKOUT
+        assert _status_line(stdout)["class"] == "lockout"
+        assert _status_line(stdout)["code"] == "1025"
+        assert mock_urlopen.call_count == 1
+        mock_sleep.assert_not_called()
+
     def test_permanent_flex_error_exits_eleven(self, credentials, writer):
         body = (
             "<FlexStatementResponse><Status>Fail</Status>"

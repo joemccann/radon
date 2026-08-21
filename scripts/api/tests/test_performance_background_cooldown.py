@@ -100,6 +100,17 @@ class TestBackgroundRebuildCooldown:
         assert never_actually_builds["n"] == 2
 
     @pytest.mark.asyncio
+    async def test_a_1025_lockout_refuses_the_flex_fetch(
+        self, never_actually_builds, monkeypatch
+    ):
+        """Same token as cash-flow-sync. A page-driven rebuild during 1025
+        is what earned the lockout on 2026-08-17 and keeps it alive."""
+        monkeypatch.setattr("utils.flex_embargo.is_blocked", lambda **k: True)
+        result = await server.performance_background()
+        assert result["status"] == "lockout"
+        assert never_actually_builds["n"] == 0
+
+    @pytest.mark.asyncio
     async def test_cooldown_is_at_least_fifteen_minutes(self):
         """Shorter than the observed ~15-minute SWR cadence would not have
         prevented the lockout."""

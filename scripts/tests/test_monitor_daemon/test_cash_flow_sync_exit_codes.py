@@ -123,6 +123,35 @@ class TestExitCodeClassification:
         with patch.object(handler_mod, "_now_utc", return_value=now):
             assert handler._soft_budget_exhausted(now) is True
 
+    def test_exit_fifteen_1025_embargoes_past_monday_0800(
+        self, credentials, health_rows
+    ):
+        """Live 2026-08-21: class=permanent, next_attempt_at Monday 08:00 ET.
+        That Monday SendRequest is what keeps the undocumented 1025 lockout
+        alive. A lockout must outlast the next daily window."""
+        from monitor_daemon.handlers import _throttle_backoff
+        from monitor_daemon.handlers.cash_flow_sync import EXIT_FLEX_LOCKOUT
+
+        # Friday 2026-08-21 09:58 ET = 13:58 UTC (the production attempt).
+        friday = datetime(2026, 8, 21, 13, 58, 26, tzinfo=timezone.utc)
+        monday_0800_et = datetime(2026, 8, 24, 12, 0, tzinfo=timezone.utc)
+        handler = CashFlowSyncHandler()
+        with patch.object(handler_mod, "_now_utc", return_value=friday), \
+             patch("utils.flex_embargo.record_lockout"):
+            _run_with_exit(
+                handler, EXIT_FLEX_LOCKOUT,
+                {"status": "error", "class": "lockout", "code": "1025"},
+            )
+
+        blocked = _throttle_backoff.blocked_until(handler._backoff_state)
+        assert blocked is not None
+        assert blocked >= monday_0800_et + timedelta(days=1)
+        next_attempt = health_rows[-1]["error"]["next_attempt_at"]
+        assert datetime.fromisoformat(next_attempt) >= monday_0800_et + timedelta(days=1)
+
+        with patch.object(handler_mod, "_now_utc", return_value=monday_0800_et):
+            assert handler.is_due() is False
+
     @pytest.mark.parametrize(
         "returncode,flex_class",
         [(12, "not_ready"), (13, "parse_error"), (14, "write_error")],

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import sys
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -97,3 +98,84 @@ def test_r13_a_ready_statement_still_returns_immediately(monkeypatch):
     assert "<FlexStatement" in builder.fetch_flex_xml("tok", "1442520")
     # One 3s poll, not a walk up the ladder.
     assert slept == [3.0]
+
+
+def test_r13_a_flex_error_on_getstatement_aborts_instead_of_polling(
+    monkeypatch, tmp_path
+):
+    """1018/1025 XML is not 'not ready'. Polling it for 420s is how a
+    locked token stays locked. Abort after the first error body."""
+    slept: list[float] = []
+    monkeypatch.setattr(builder._time, "sleep", lambda s: slept.append(s))
+    monkeypatch.setattr(
+        "utils.flex_embargo.SIDECAR", tmp_path / "flex_token_embargo.json"
+    )
+    monkeypatch.setattr("utils.flex_embargo._heartbeat", lambda *a, **k: None)
+
+    sent = "<FlexStatementResponse><ReferenceCode>REF1</ReferenceCode></FlexStatementResponse>"
+    locked = (
+        "<FlexStatementResponse><Status>Fail</Status>"
+        "<ErrorCode>1025</ErrorCode>"
+        "<ErrorMessage>Too many failed attempts. Please review your "
+        "configuration.</ErrorMessage></FlexStatementResponse>"
+    )
+    calls = {"n": 0}
+
+    def _fake_urlopen(url, timeout=None):  # noqa: ANN001
+        calls["n"] += 1
+        return _Resp(sent if calls["n"] == 1 else locked)
+
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+
+    with pytest.raises(RuntimeError, match="1025"):
+        builder.fetch_flex_xml("tok", "1442520")
+
+    assert calls["n"] == 2  # SendRequest + one GetStatement, not ~29
+    assert slept == [3.0]
+
+
+def test_r13_flex_statement_response_is_not_a_ready_statement(monkeypatch, tmp_path):
+    """`<FlexStatement` is a prefix of `<FlexStatementResponse`. A 1025
+    envelope must not count as a generated statement."""
+    monkeypatch.setattr(builder._time, "sleep", lambda s: None)
+    monkeypatch.setattr(
+        "utils.flex_embargo.SIDECAR", tmp_path / "flex_token_embargo.json"
+    )
+    monkeypatch.setattr("utils.flex_embargo._heartbeat", lambda *a, **k: None)
+
+    sent = "<FlexStatementResponse><ReferenceCode>REF1</ReferenceCode></FlexStatementResponse>"
+    locked = (
+        "<FlexStatementResponse><Status>Fail</Status>"
+        "<ErrorCode>1025</ErrorCode>"
+        "<ErrorMessage>Too many failed attempts.</ErrorMessage>"
+        "</FlexStatementResponse>"
+    )
+    calls = {"n": 0}
+
+    def _fake_urlopen(url, timeout=None):  # noqa: ANN001
+        calls["n"] += 1
+        return _Resp(sent if calls["n"] == 1 else locked)
+
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+
+    with pytest.raises(RuntimeError, match="1025"):
+        builder.fetch_flex_xml("tok", "1442520")
+    assert calls["n"] == 2
+
+
+def test_r13_a_live_lockout_skips_sendrequest(monkeypatch, tmp_path):
+    """Saturday 07:30 TWR must not poke a token cash-flow-sync already locked."""
+    from utils.flex_embargo import FlexTokenLocked, record_lockout
+
+    monkeypatch.setattr(
+        "utils.flex_embargo.SIDECAR", tmp_path / "flex_token_embargo.json"
+    )
+    monkeypatch.setattr("utils.flex_embargo._heartbeat", lambda *a, **k: None)
+    record_lockout("1025", now=datetime(2026, 8, 21, 13, 58, 26, tzinfo=timezone.utc))
+
+    def _boom(url, timeout=None):  # noqa: ANN001
+        raise AssertionError("SendRequest during 1025 lockout")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _boom)
+    with pytest.raises(FlexTokenLocked):
+        builder.fetch_flex_xml("tok", "1442520")

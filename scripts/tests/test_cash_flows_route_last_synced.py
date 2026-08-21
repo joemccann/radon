@@ -231,6 +231,30 @@ class TestSyncStatus:
         assert sync_status["last_attempt_at"] == "2026-05-21T21:00:35Z"
         assert body["last_synced_at"] == row_sync
 
+    def test_1025_lockout_is_surfaced_as_do_not_retry(self, app_with_inmem_db):
+        client, conn = app_with_inmem_db
+        _insert(conn, txn_id="w1", date=_days_ago(26), type_="Withdrawal", amount=-72_000,
+                synced_at=f"{_days_ago(14)}T21:02:34Z")
+        _insert_service_health(
+            conn,
+            state="error",
+            last_attempt_finished_at="2026-08-21T13:58:28.298780Z",
+            last_error=(
+                '{"message": "ERR: Flex SendRequest failed (code 1025): '
+                'Too many failed attempts. Please review your configuration.", '
+                '"class": "lockout", '
+                '"next_attempt_at": "2026-08-28T13:58:26+00:00"}'
+            ),
+        )
+
+        resp = client.get("/cash-flows?days=90")
+        sync_status = resp.json()["sync_status"]
+        assert sync_status["is_throttled"] is False
+        assert sync_status["error_summary"] == (
+            "Flex lockout. Do not retry. Ingest with --from-file"
+        )
+        assert sync_status["next_attempt_at"] == "2026-08-28T13:58:26+00:00"
+
     def test_ok_state_does_not_flag_throttle(self, app_with_inmem_db):
         client, conn = app_with_inmem_db
         _insert(conn, txn_id="w1", date=_days_ago(26), type_="Withdrawal", amount=-72_000,

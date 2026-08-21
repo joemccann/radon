@@ -122,3 +122,27 @@ def test_the_docstring_no_longer_claims_1001_and_1019_are_throttles():
     src = Path(cfs.__file__).read_text()
     assert "throttle codes (1001 / 1018 / 1019)" not in src
     assert "1001 / 1018 / 1019" not in src
+
+
+# ---------------------------------------------------------------------------
+# 1025 — undocumented lockout. Not in IBKR's published v3 table (ends 1021).
+# Observed message: "Too many failed attempts. Please review your configuration."
+# Earned by retrying 1001/failed generation. Retrying it extends the lockout.
+# ---------------------------------------------------------------------------
+
+
+FAIL_1025_MSG = "Too many failed attempts. Please review your configuration."
+
+
+def test_1025_is_a_lockout_not_an_app_error():
+    """1012/1014 are config. 1025 is a failed-attempts lockout on a valid query."""
+    exc = cfs._flex_error_from(_err("1025", FAIL_1025_MSG), "SendRequest")
+    assert isinstance(exc, cfs._FlexLockoutError)
+    assert not isinstance(exc, cfs._FlexAppError)
+    assert not isinstance(exc, _throttle_cls())
+
+
+def test_1025_is_not_retryable_on_either_leg():
+    send = cfs._flex_error_from(_err("1025", FAIL_1025_MSG), "SendRequest")
+    poll = cfs._flex_error_from(_err("1025", FAIL_1025_MSG), "GetStatement")
+    assert type(send) is type(poll) is cfs._FlexLockoutError
