@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  *
  * Grouped indicator rail for /regime (design: "Regime — Grouped Rail").
- * The flat 18-button tab strip becomes a grouped left rail on wide desktop:
+ * The flat 19-button tab strip becomes a grouped left rail on wide desktop:
  * Composite / Volatility / Positioning / Breadth & sentiment / Models, with a
  * filter input, per-group flagged counts, per-indicator status dot + value,
  * and a footer count line. Navigation stays URL-driven via the same routes.
@@ -39,11 +39,11 @@ describe("REGIME_RAIL_GROUPS — grouped registry covers every tab exactly once"
     ]);
   });
 
-  it("flattens to all 18 regime tabs with no duplicates", () => {
-    expect(REGIME_TABS).toHaveLength(18);
-    expect(new Set(REGIME_TABS).size).toBe(18);
+  it("flattens to all 19 regime tabs with no duplicates", () => {
+    expect(REGIME_TABS).toHaveLength(19);
+    expect(new Set(REGIME_TABS).size).toBe(19);
     expect([...REGIME_TABS].sort()).toEqual(
-      ["cri", "vcg", "gex", "grg", "breadth", "bpi", "margin", "straddle", "cor", "vixcor", "skew", "skew2d", "curve", "cot", "ats", "short", "llm", "backtest"].sort(),
+      ["cri", "vcg", "gex", "grg", "breadth", "bpi", "margin", "credit", "straddle", "cor", "vixcor", "skew", "skew2d", "curve", "cot", "ats", "short", "llm", "backtest"].sort(),
     );
   });
 
@@ -61,6 +61,7 @@ describe("REGIME_RAIL_GROUPS — grouped registry covers every tab exactly once"
     expect(groupOf.straddle).toBe("Volatility");
     expect(groupOf.gex).toBe("Positioning");
     expect(groupOf.margin).toBe("Positioning");
+    expect(groupOf.credit).toBe("Positioning");
     expect(groupOf.cot).toBe("Positioning");
     expect(groupOf.short).toBe("Positioning");
     expect(groupOf.ats).toBe("Positioning");
@@ -78,6 +79,7 @@ describe("REGIME_RAIL_GROUPS — grouped registry covers every tab exactly once"
     expect(REGIME_TAB_LABEL.bpi).toBe("BULLISH %");
     expect(REGIME_TAB_LABEL.skew2d).toBe("SKEW 2D");
     expect(REGIME_TAB_LABEL.vixcor).toBe("VIX-COR");
+    expect(REGIME_TAB_LABEL.credit).toBe("CREDIT");
   });
 });
 
@@ -133,12 +135,12 @@ describe("RegimeRail — grouped rail rendering + navigation", () => {
     return { onSelect, ...utils };
   };
 
-  it("renders all five group headers and 18 items", () => {
+  it("renders all five group headers and 19 items", () => {
     const { container } = renderRail();
     for (const g of REGIME_RAIL_GROUPS) {
       expect(within(container).getByText(g.label)).toBeTruthy();
     }
-    expect(container.querySelectorAll("[data-tab]")).toHaveLength(18);
+    expect(container.querySelectorAll("[data-tab]")).toHaveLength(19);
   });
 
   it("marks the active tab with the active class and aria-current", () => {
@@ -167,7 +169,7 @@ describe("RegimeRail — grouped rail rendering + navigation", () => {
     // Composite holds one flagged indicator (VCG warn), Positioning one (GEX fault).
     expect(within(container).getAllByText("1 FLAGGED")).toHaveLength(2);
     // Footer counts every indicator and every warn/fault status.
-    expect(within(container).getByText(/18 INDICATORS · 2 ELEVATED/i)).toBeTruthy();
+    expect(within(container).getByText(/19 INDICATORS · 2 ELEVATED/i)).toBeTruthy();
   });
 
   it("filter narrows items and hides empty groups", () => {
