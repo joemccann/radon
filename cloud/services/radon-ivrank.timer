@@ -1,0 +1,15 @@
+[Unit]
+Description=Radon IV RANK Indicator - daily SPY 1M implied volatility rank
+
+[Timer]
+# 22:10 UTC is after the 16:00 ET close year-round (20:00 UTC summer,
+# 21:00 UTC winter), so the daily SPY OPTION_IMPLIED_VOLATILITY bar is
+# final when the job reads it. Runs every calendar day: weekend and
+# holiday runs are unchanged-data heartbeats that keep service_health
+# fresh inside the 26h staleness window.
+OnCalendar=*-*-* 22:10:00 UTC
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target
