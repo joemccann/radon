@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
-import { ChevronLeft, ChevronRight, Link as LinkIcon, RefreshCw } from "lucide-react";
+import { ArrowUpRight, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 
+import { estimateReadMinutes } from "../lib/newsfeedReadTime";
 import { formatAbsolute, formatCompact, formatRelative, formatTime } from "../lib/newsfeedTime";
 import {
   useNewsfeedPosts,
@@ -32,6 +33,7 @@ function buildPostSnapshot(post: NormalisedPost) {
 }
 
 const PAGE_SIZE = 18;
+const SOURCE_NAME = "Market Ear";
 
 export type { MarketEarPost };
 
@@ -263,6 +265,9 @@ export default function DashboardNewsFeed() {
           <h3 className="panel-title">Live market analysis</h3>
         </div>
         <div className={`news-feed-actions ${styles.actions}`}>
+          {!loading && !error && posts.length > 0 ? (
+            <span className={`news-feed-live-badge ${styles.liveBadge}`}>LIVE</span>
+          ) : null}
           <button
             type="button"
             className={`news-feed-refresh news-feed-refresh--rail ${styles.refresh}`}
@@ -306,38 +311,18 @@ export default function DashboardNewsFeed() {
               const postTags = Array.isArray(post.tags) ? post.tags : [];
               const overflowCount = postTags.length - VISIBLE_TAG_LIMIT;
               const tagsExpanded = expandedTags.has(post.id);
+              const readMinutes = estimateReadMinutes(post.content ?? "");
 
               return (
                 <li key={post.id} data-testid="news-feed-item" className={`news-feed-item ${styles.item}`}>
                   <a className="news-feed-link" href={post.href} target="_blank" rel="noopener noreferrer">
                     <h3 className={`news-feed-headline ${styles.headline}`}>{post.title}</h3>
                   </a>
-                  {post.content ? (
-                    <p className={`news-feed-summary ${styles.summary}`}>{post.content}</p>
-                  ) : null}
-                  {firstImage ? (
-                    <button
-                      type="button"
-                      className={`news-feed-image-wrapper news-feed-image-wrapper--button ${styles.imageWrapper}`}
-                      onClick={() =>
-                        setLightboxFocus({ post, imageUrl: firstImage })
-                      }
-                      aria-label={`Open lightbox for: ${post.title}`}
-                    >
-                      <Image
-                        src={firstImage}
-                        alt={post.title}
-                        width={1200}
-                        height={675}
-                        sizes="(max-width: 1440px) 100vw, 60vw"
-                        className={`news-feed-image ${styles.image}`}
-                        priority={false}
-                      />
-                      <span className="news-feed-image-zoom" aria-hidden>
-                        ⤢
-                      </span>
-                    </button>
-                  ) : null}
+                  <div data-testid="news-feed-meta" className={`news-feed-meta ${styles.meta}`}>
+                    <span title={absolute}>{absolute}</span>
+                    <span className="news-feed-meta__source">{SOURCE_NAME}</span>
+                    <span>{readMinutes} min read</span>
+                  </div>
                   {postTags.length > 0 ? (
                     <div
                       data-testid="news-feed-tags"
@@ -377,6 +362,38 @@ export default function DashboardNewsFeed() {
                       ) : null}
                     </div>
                   ) : null}
+                  {post.content ? (
+                    <p className={`news-feed-summary ${styles.summary}`}>{post.content}</p>
+                  ) : null}
+                  {firstImage ? (
+                    <figure className={`news-feed-figure ${styles.figure}`}>
+                      <button
+                        type="button"
+                        className={`news-feed-image-wrapper news-feed-image-wrapper--button ${styles.imageWrapper}`}
+                        onClick={() =>
+                          setLightboxFocus({ post, imageUrl: firstImage })
+                        }
+                        aria-label={`Open lightbox for: ${post.title}`}
+                      >
+                        <Image
+                          src={firstImage}
+                          alt={post.title}
+                          width={1200}
+                          height={675}
+                          sizes="(max-width: 1440px) 100vw, 60vw"
+                          className={`news-feed-image ${styles.image}`}
+                          priority={false}
+                        />
+                        <span className="news-feed-image-zoom" aria-hidden>
+                          ⤢
+                        </span>
+                      </button>
+                      <figcaption className={`news-feed-figcaption ${styles.figcaption}`}>
+                        <span>Chart · {post.title}</span>
+                        <span>Source · {SOURCE_NAME}</span>
+                      </figcaption>
+                    </figure>
+                  ) : null}
                   <div data-testid="news-feed-footer" className={`news-feed-footer ${styles.footer}`}>
                     <a
                       data-testid="news-feed-link-pill"
@@ -385,8 +402,8 @@ export default function DashboardNewsFeed() {
                       target="_blank"
                       rel="noopener noreferrer"
                     >
-                      <LinkIcon size={11} />
-                      <span>Link</span>
+                      <ArrowUpRight size={11} aria-hidden />
+                      <span>Source link</span>
                     </a>
                     <span
                       data-testid="news-feed-timestamp"

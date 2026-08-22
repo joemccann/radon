@@ -14,8 +14,8 @@ function ruleBlock(selector: string): string {
 describe("typography readability contracts", () => {
   it("gives sustained prose a readable size, rhythm, and measure", () => {
     expect(ruleBlock(".news-feed-summary")).toMatch(/font-size:\s*var\(--text-prose\)/);
-    expect(ruleBlock(".news-feed-summary")).toMatch(/line-height:\s*1\.6/);
-    expect(ruleBlock(".news-feed-summary")).toMatch(/max-inline-size:\s*70ch/);
+    expect(ruleBlock(".news-feed-summary")).toMatch(/line-height:\s*1\.7/);
+    expect(ruleBlock(".news-feed-summary")).toMatch(/max-inline-size:\s*680px/);
     expect(ruleBlock(".news-feed-summary")).toMatch(/text-wrap:\s*pretty/);
 
     expect(ruleBlock(".chat-markdown p")).toMatch(/font-size:\s*var\(--text-prose\)/);
