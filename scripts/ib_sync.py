@@ -49,7 +49,16 @@ except ImportError:
     print("Install with: pip install ib_insync")
     sys.exit(1)
 
-from clients.ib_client import IBClient, CLIENT_IDS, DEFAULT_HOST, DEFAULT_GATEWAY_PORT
+from clients.ib_client import (
+    IBClient,
+    CLIENT_IDS,
+    DEFAULT_HOST,
+    DEFAULT_GATEWAY_PORT,
+    is_valid_ib_number,
+    pnl_is_ready,
+    ticker_has_quote,
+)
+from clients.ib_timing import PhaseTimer
 from clients.journal_basis import (
     compute_open_basis_for_ticker,
     prior_net_qty_for_contract,
@@ -140,11 +149,11 @@ def get_pnl(client: IBClient, account: str = "") -> dict:
             accounts = client.ib.managedAccounts()
             account = accounts[0] if accounts else ""
         pnl = client.get_pnl(account)
-        # Poll until dailyPnL is non-NaN (IB streams this asynchronously)
-        for _ in range(8):  # 8 x 1s = 8s max on top of the 2s in get_pnl
-            if pnl and _valid(getattr(pnl, 'dailyPnL', None)):
-                break
-            client.sleep(1)
+        client.wait_until(
+            lambda: bool(pnl) and _valid(getattr(pnl, "dailyPnL", None)),
+            timeout=8.0,
+            poll=1.0,
+        )
 
         result = {}
         if pnl and hasattr(pnl, 'dailyPnL'):
@@ -832,6 +841,36 @@ def fetch_positions(client: IBClient, journal_basis_lookup: Optional[dict[str, f
     return formatted
 
 
+def wait_for_streaming_data(
+    client: IBClient,
+    *,
+    pnl_obj,
+    tickers: list,
+    pnl_requests: list,
+    timeout: float = 2.5,
+) -> bool:
+    """Wait until account PnL, quotes, and per-position PnL have a first tick.
+
+    Cap at ``timeout`` (the old combined sleep). Returns True if every
+    requested stream is ready, False if the cap expired.
+    """
+
+    def _ready() -> bool:
+        if pnl_obj is not None and not pnl_is_ready(pnl_obj):
+            return False
+        for ticker in tickers:
+            if not ticker_has_quote(ticker):
+                return False
+        for _pos, pnl_single, _con_id in pnl_requests:
+            if pnl_single is None:
+                continue
+            if not is_valid_ib_number(getattr(pnl_single, "dailyPnL", None)):
+                return False
+        return True
+
+    return client.wait_until(_ready, timeout=timeout)
+
+
 def fetch_market_prices(client: IBClient, positions: list) -> list:
     """Fetch current market prices for positions (batched for speed)"""
     # Request Delayed-Frozen data so closed-market queries return last known prices
@@ -848,8 +887,10 @@ def fetch_market_prices(client: IBClient, positions: list) -> list:
         ticker = client.get_quote(pos['contract'])
         tickers.append(ticker)
 
-    # Single sleep for all data to arrive
-    client.sleep(3)
+    client.wait_until(
+        lambda: all(ticker_has_quote(ticker) for ticker in tickers),
+        timeout=3.0,
+    )
 
     # Read results and cancel
     for pos, ticker in zip(positions, tickers):
@@ -915,8 +956,14 @@ def fetch_position_daily_pnl(client: IBClient, positions: list, account: str = "
         else:
             pnl_requests.append((pos, None, None))
 
-    # Single combined sleep — all subscriptions are concurrent
-    client.sleep(3)
+    client.wait_until(
+        lambda: all(
+            pnl_single is None
+            or is_valid_ib_number(getattr(pnl_single, "dailyPnL", None))
+            for _pos, pnl_single, _con_id in pnl_requests
+        ),
+        timeout=3.0,
+    )
 
     # Read results and cancel subscriptions
     for pos, pnl_single, con_id in pnl_requests:
@@ -1491,7 +1538,9 @@ def main():
     args = parser.parse_args()
 
     # Connect
+    timer = PhaseTimer("ib_sync")
     client = connect_ib(args.host, args.port, args.client_id or "auto")
+    timer.mark("connect")
 
     try:
         # ── Phase 1: Account summary (fast, no sleep needed) ──
@@ -1533,6 +1582,7 @@ def main():
                 # Force SMART for all — stocks from get_positions() may have
                 # exchange-specific values (AMEX, BATS) that fail with reqMktData type 4
                 pos['contract'].exchange = 'SMART'
+            timer.mark("qualify")
 
             # Request PnL Single FIRST (takes slightly longer to arrive)
             pnl_requests = []
@@ -1556,11 +1606,15 @@ def main():
                 ticker = client.ib.reqMktData(pos['contract'], "", False, False)
                 tickers.append(ticker)
 
-            # ── Phase 4: ONE combined sleep for all streaming data ──
-            # Market data + PnL Single + account PnL all stream concurrently.
-            # 2.7 seconds — accounts for the faster Phase 1 (accountValues is instant
-            # vs accountSummary's ~200ms round-trip that used to provide implicit delay).
-            client.sleep(2.5)
+            # ── Phase 4: wait for first ticks, cap at the old 2.5s floor ──
+            wait_for_streaming_data(
+                client,
+                pnl_obj=pnl_obj,
+                tickers=tickers,
+                pnl_requests=pnl_requests,
+                timeout=2.5,
+            )
+            timer.mark("sleep")
 
             # ── Phase 5: Read all results ──
             # Market prices
@@ -1604,6 +1658,8 @@ def main():
                 if 'contract' in pos:
                     del pos['contract']
                 pos['ibDailyPnl'] = None
+            timer.mark("qualify")
+            timer.mark("sleep")
 
         # ── Phase 6: Read account PnL (should have arrived during the combined sleep) ──
         pnl_data = {}
@@ -1708,6 +1764,8 @@ def main():
             print(json.dumps(portfolio, separators=(",", ":"), default=str))
 
     finally:
+        timer.mark("done")
+        timer.emit()
         client.disconnect()
         print("✓ Disconnected from IB")
 
