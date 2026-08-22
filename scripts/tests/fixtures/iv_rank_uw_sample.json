@@ -1,0 +1,58 @@
+{
+ "source": "uw",
+ "endpoints": {
+  "iv_rank": "/api/stock/SPY/iv-rank",
+  "volatility_stats": "/api/stock/SPY/volatility/stats"
+ },
+ "iv_rank_response": {
+  "data": [
+   {
+    "close": "772.67",
+    "date": "2026-08-17",
+    "updated_at": "2026-08-17T22:35:20.821261Z",
+    "volatility": "0.127",
+    "iv_rank_1y": "10.58"
+   },
+   {
+    "close": "767.45",
+    "date": "2026-08-18",
+    "updated_at": "2026-08-18T22:35:20.732723Z",
+    "volatility": "0.133",
+    "iv_rank_1y": "14.4041"
+   },
+   {
+    "close": "769.06",
+    "date": "2026-08-19",
+    "updated_at": "2026-08-19T22:35:19.598587Z",
+    "volatility": "0.125",
+    "iv_rank_1y": "9.3053"
+   },
+   {
+    "close": "762.6",
+    "date": "2026-08-20",
+    "updated_at": "2026-08-20T22:35:19.979783Z",
+    "volatility": "0.132",
+    "iv_rank_1y": "13.7667"
+   },
+   {
+    "close": "765.72",
+    "date": "2026-08-21",
+    "updated_at": "2026-08-21T22:35:18.573688Z",
+    "volatility": "0.127",
+    "iv_rank_1y": "10.58"
+   }
+  ]
+ },
+ "volatility_stats_data": {
+  "date": "2026-08-21",
+  "ticker": "SPY",
+  "iv": "0.127000",
+  "iv_low": "0.110000",
+  "iv_high": "0.266000",
+  "iv_rank": "10.58",
+  "rv": "0.128162",
+  "rv_low": "0.055588",
+  "rv_high": "0.201536"
+ },
+ "notes": "iv-rank returns 5 trailing trading days per call; date= param anchors the window; volatility values are strings, decimals annualized; iv_rank_1y is a 0-100 percent string"
+}
