@@ -70,34 +70,56 @@
   scroll-margin-bottom: calc(var(--mobile-tab-bar-height) + var(--safe-bottom) + var(--nf-s3));
 }
 
+/* The design's mobile frame drops the LIVE badge: Refresh alone fits the row. */
+:global(body[data-mobile="true"]) .liveBadge.liveBadge {
+  display: none;
+}
+
 :global(body[data-mobile="true"]) .headline.headline {
-  font-size: 16px;
+  font-size: 23px;
   line-height: 1.25;
 }
 
+:global(body[data-mobile="true"]) .meta.meta {
+  gap: var(--nf-s1) 14px;
+  margin-top: var(--nf-s1);
+  font-size: 10.5px;
+}
+
+:global(body[data-mobile="true"]) .figure.figure {
+  margin: var(--nf-s2) 0 0;
+}
+
+:global(body[data-mobile="true"]) .figcaption.figcaption {
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--nf-s2) 0 0;
+}
+
 :global(body[data-mobile="true"]) .summary.summary {
+  margin: var(--nf-s3) 0 0;
   max-inline-size: none;
   font-size: var(--text-body);
   line-height: 1.3846;
   white-space: pre-line;
 }
 
-/* One frame around the image: the image's own inset outline from globals.css. */
+/* One frame around the image: the image's own inset outline from globals.css.
+   Charts render uncropped (Live Article Redesign): a 16:9 cover crop cut the
+   left axis off wide Market Ear charts. */
 :global(body[data-mobile="true"]) .imageWrapper.imageWrapper {
   margin-top: var(--nf-s1);
   border: 0;
   border-radius: 4px;
   overflow: hidden;
   background: var(--bg-base);
-  aspect-ratio: 16 / 9;
   min-height: 0;
   min-width: 0;
 }
 
 :global(body[data-mobile="true"]) .image.image {
   width: 100%;
-  height: 100%;
-  object-fit: cover;
+  height: auto;
   border-radius: 4px;
 }
 
