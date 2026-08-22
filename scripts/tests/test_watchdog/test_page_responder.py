@@ -28,6 +28,7 @@ from grok_page_responder import (
     run_cycle,
     sync_remote_clone,
 )
+from watchdog import units as units_mod
 from watchdog.check import CheckOutcome
 from watchdog.pages import (
     claim_page,
@@ -472,6 +473,7 @@ def _fake_systemctl(
     active: str = "failed",
     log: list | None = None,
     start_rc: int = 0,
+    failed_at: str = "",
 ):
     """Seam double for the responder's systemctl probe + mutation calls."""
 
@@ -483,7 +485,10 @@ def _fake_systemctl(
             if target.endswith(".timer"):
                 stdout = f"NextElapseUSecRealtime={next_elapse}\n"
             else:
-                stdout = f"ActiveState={active}\nResult={result}\n"
+                stdout = (
+                    f"ActiveState={active}\nResult={result}\n"
+                    f"InactiveEnterTimestamp={failed_at}\n"
+                )
             return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
         rc = start_rc if args[0] == "start" else 0
         return SimpleNamespace(returncode=rc, stdout="", stderr="")
@@ -674,6 +679,117 @@ class TestSignalKilledOneshotRerun:
         )
         assert rerun is not None
         assert rerun[0] == "restarted_unit"
+
+    def _green_marker(self, tmp_path, monkeypatch, *, at):
+        marker = tmp_path / "last-green-deploy"
+        marker.write_text("deadbeef\n")
+        epoch = at.timestamp()
+        os.utime(marker, (epoch, epoch))
+        monkeypatch.setattr(units_mod, "GREEN_MARKER_PATH", marker)
+        return marker
+
+    def test_exit_code_reruns_when_a_fix_deployed_after_the_failure(
+        self, db_conn, tmp_path, monkeypatch
+    ):
+        """radon-leap 2026-08-20: exit 1 at 14:02 UTC, the fix deployed at
+        15:05, next timer 14:00 the NEXT day — the unit sat failed and
+        re-paged hourly until a human reset-failed + started it."""
+        monkeypatch.setenv("GROK_PAGE_RESPONDER", "1")
+        monkeypatch.setenv("GROK_PAGE_AUTOSHIP", "1")
+        self._green_marker(tmp_path, monkeypatch, at=NOW - timedelta(hours=1))
+        self._enqueue_unit_page("radon-leap.service")
+        log: list = []
+        systemctl = _fake_systemctl(
+            next_elapse=self.FARAWAY,
+            result="exit-code",
+            failed_at=_fmt_systemd(NOW - timedelta(hours=2)),
+            log=log,
+        )
+
+        rc, followup = self._cycle(tmp_path, grok=_never_grok, systemctl=systemctl)
+
+        assert rc == 0
+        row = db_conn.execute("SELECT status, result FROM watchdog_pages").fetchone()
+        assert row[0] == "done"
+        assert row[1].startswith("restarted_unit:")
+        assert "deployed" in row[1]
+        assert ["reset-failed", "radon-leap.service"] in log
+        assert ["start", "--no-block", "radon-leap.service"] in log
+        followup.assert_called_once()
+
+    def test_exit_code_with_no_deploy_since_the_failure_stands_down(
+        self, db_conn, tmp_path, monkeypatch
+    ):
+        """Same exit-code failure, but the last green deploy PREDATES it —
+        nothing has changed, so a rerun would just fail again (and a
+        re-failure would page again). Fall through to grok."""
+        monkeypatch.setenv("GROK_PAGE_RESPONDER", "1")
+        monkeypatch.setenv("GROK_PAGE_AUTOSHIP", "1")
+        self._green_marker(tmp_path, monkeypatch, at=NOW - timedelta(hours=3))
+        self._enqueue_unit_page("radon-leap.service")
+        log: list = []
+        systemctl = _fake_systemctl(
+            next_elapse=self.FARAWAY,
+            result="exit-code",
+            failed_at=_fmt_systemd(NOW - timedelta(hours=2)),
+            log=log,
+        )
+
+        rc, _ = self._cycle(tmp_path, grok=_stand_down_grok, systemctl=systemctl)
+
+        assert rc == 0
+        assert not any(args[0] in {"reset-failed", "start"} for args in log)
+
+    def test_exit_code_without_a_green_marker_stands_down(
+        self, db_conn, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("GROK_PAGE_RESPONDER", "1")
+        monkeypatch.setenv("GROK_PAGE_AUTOSHIP", "1")
+        monkeypatch.setattr(units_mod, "GREEN_MARKER_PATH", tmp_path / "absent")
+        self._enqueue_unit_page("radon-leap.service")
+        log: list = []
+        systemctl = _fake_systemctl(
+            next_elapse=self.FARAWAY,
+            result="exit-code",
+            failed_at=_fmt_systemd(NOW - timedelta(hours=2)),
+            log=log,
+        )
+
+        rc, _ = self._cycle(tmp_path, grok=_stand_down_grok, systemctl=systemctl)
+
+        assert rc == 0
+        assert not any(args[0] in {"reset-failed", "start"} for args in log)
+
+    def test_exit_code_rerun_still_honours_the_timer_horizon(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("GROK_PAGE_AUTOSHIP", "1")
+        self._green_marker(tmp_path, monkeypatch, at=NOW - timedelta(hours=1))
+        page = {"page_id": "x", "service": "radon-leap.service", "kind": "unit"}
+        systemctl = _fake_systemctl(
+            next_elapse=self.SOON,
+            result="exit-code",
+            failed_at=_fmt_systemd(NOW - timedelta(hours=2)),
+        )
+        assert attempt_oneshot_rerun(page, now=NOW, systemctl_runner=systemctl) is None
+
+    def test_allowlist_covers_the_daily_scans_and_only_timer_owned_oneshots(self):
+        """Every allowlisted unit must be a timer-owned oneshot in
+        cloud/services (a rerun of anything else is not a data refresh),
+        and the daily scans that re-page for a day when they fail must be
+        on it — radon-leap was the 2026-08-20 case."""
+        repo_root = Path(__file__).resolve().parents[3]
+        services = repo_root / "cloud" / "services"
+        for unit in RERUNNABLE_ONESHOT_UNITS:
+            stem = unit[: -len(".service")]
+            assert (services / unit).is_file(), f"{unit} is not a canonical unit"
+            assert (services / f"{stem}.timer").is_file(), f"{unit} is not timer-owned"
+            assert "Type=oneshot" in (services / unit).read_text(), f"{unit} is not oneshot"
+        for expected in (
+            "radon-leap.service",
+            "radon-garch.service",
+            "radon-credit-spread.service",
+            "radon-cor.service",
+        ):
+            assert expected in RERUNNABLE_ONESHOT_UNITS
 
     def test_allowlist_matches_the_polkit_grant(self):
         """The responder has no general right to start radon-* units; every

@@ -171,13 +171,19 @@ Canonical unit files are copied root-owned to `/etc/systemd/system`; they are
 not symlinked from the checkout. Unit changes require the non-restarting
 control-plane bootstrap or an equivalent reviewed root transaction.
 
-Neither the CI deploy nor bootstrap installs timers or other
-non-control-plane units. Editing a unit in `services/` leaves a root
-install-copy owed (`install -m 0644 cloud/services/<unit>
-/etc/systemd/system/ && systemctl daemon-reload`); record it by bumping the
-unit's hash in `config/installed-units.sha256` in the same commit, or add a
-drift-allowlist acknowledgment for the pending window --
-`tests/test_unit_install_acknowledgment.py` fails CI otherwise.
+Bootstrap installs only the control-plane units. Every other unit
+(the timer-owned scans and their timers) is installed by the CI deploy:
+after the promote and before `restart-managed`, `deploy.sh` runs
+`radon-deploy-root install-units`, which copies each unit whose
+`cloud/services/` content hashes to its entry in
+`config/installed-units.sha256`, daemon-reloads once, and `enable --now`s
+NEW timers only (never a timer-owned `.service`). The manifest digest is the
+review gate: editing a unit in `services/` and bumping its hash in the same
+commit is the whole procedure -- no root SSH. An edit whose hash is NOT
+bumped is left uninstalled (the drift audit then flags it), so the
+drift-allowlist acknowledgment still covers a deliberate pending window;
+`tests/test_unit_install_acknowledgment.py` fails CI otherwise. A unit
+absent from the manifest is never installed.
 
 The drift audit runs from `/home/radon/radon/cloud` and compares live Caddy,
 Compose, systemd, polkit, sudoers, and installed helpers with this source. It

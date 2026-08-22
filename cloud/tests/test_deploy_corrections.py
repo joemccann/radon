@@ -1610,6 +1610,7 @@ exec /bin/rm "$@"
             "verify-restored",
             "verify-control-plane",
             "commit-transition",
+            "install-units",
         ):
             assert f"/usr/local/sbin/radon-deploy-root {action}" in sudoers
 
