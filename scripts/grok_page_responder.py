@@ -72,15 +72,38 @@ HEALTH_SERVICE = "grok-page-responder"
 # Beyond this horizon a signal-killed oneshot is re-run instead of stood down.
 RERUN_TIMER_HORIZON_SECS = 12 * 3600
 # The responder has no general right to start radon-* units — polkit grants
-# the radon user only the preheld gateway adapter. These benign data-fetch
-# oneshots are the exact set granted verbs reset-failed/start in
+# the radon user only the preheld gateway adapter. These benign timer-owned
+# data-fetch oneshots are the exact set granted verbs reset-failed/start in
 # cloud/config/polkit/50-radon-services.rules; the two lists are pinned to
-# each other by test_allowlist_matches_the_polkit_grant.
+# each other by test_allowlist_matches_the_polkit_grant, and every member
+# must be a Type=oneshot with a .timer partner (test_allowlist_covers_...).
+# Intraday timers are deliberately absent: their next slot is minutes away,
+# so the horizon rule would never fire for them anyway.
 RERUNNABLE_ONESHOT_UNITS = frozenset({
     "radon-vol-cone.service",
     "radon-skew.service",
     "radon-skew2d.service",
     "radon-bpi.service",
+    "radon-leap.service",
+    "radon-garch.service",
+    "radon-cor.service",
+    "radon-vixcor.service",
+    "radon-straddle.service",
+    "radon-credit-spread.service",
+    "radon-ivrank.service",
+    "radon-yield-curve.service",
+    "radon-margin-debt.service",
+    "radon-forecast-nightly.service",
+    "radon-catalysts.service",
+    "radon-cta-sync.service",
+    "radon-oi-changes.service",
+    "radon-perf-twr.service",
+    "radon-llm-index.service",
+    "radon-equibles-filings.service",
+    "radon-equibles-short-crowding.service",
+    "radon-equibles-13f.service",
+    "radon-equibles-ats.service",
+    "radon-equibles-cot.service",
 })
 DEPLOY_TRANSITION_JOURNAL = units_mod.TRANSITION_JOURNAL_PATH
 SYSTEMCTL_TIMEOUT_SECS = 30
@@ -227,11 +250,37 @@ def _systemctl_show(target: str, properties: str, runner: SystemctlRunner) -> di
     return props
 
 
-def _is_signal_killed(unit: str, runner: SystemctlRunner) -> bool:
-    """Ask systemd itself — the page excerpt is untrusted text and must never
-    trigger the action on its own."""
-    props = _systemctl_show(unit, "ActiveState,Result", runner)
-    return props.get("ActiveState") == "failed" and props.get("Result") == "signal"
+def _rerun_reason(unit: str, runner: SystemctlRunner) -> Optional[str]:
+    """Why this failed unit is worth re-running, or None.
+
+    Ask systemd itself — the page excerpt is untrusted text and must never
+    trigger the action on its own. Two shapes qualify:
+
+    - ``Result=signal``: killed mid-run (deploy stop-clean, `radon restart`);
+      the code is fine, the slot was lost.
+    - ``Result=exit-code`` with a green deploy NEWER than the failure: the
+      unit failed on its own, a fix has since shipped, and without a rerun
+      it sits `failed` re-paging hourly until its next timer slot
+      (radon-leap 2026-08-20: failed 14:02Z, fixed 15:05Z, next slot the
+      following day). Without a newer deploy nothing has changed, so a
+      rerun would only fail again — fall through to grok.
+    """
+    props = _systemctl_show(unit, "ActiveState,Result,InactiveEnterTimestamp", runner)
+    if props.get("ActiveState") != "failed":
+        return None
+    result = props.get("Result")
+    if result == "signal":
+        return "signal-killed"
+    if result != "exit-code":
+        return None
+    failed_at = units_mod._parse_systemd_timestamp(props.get("InactiveEnterTimestamp") or "")
+    deployed_at = units_mod._read_deploy_evidence()["marker_mtime"]
+    if failed_at is None or deployed_at is None or deployed_at <= failed_at:
+        return None
+    return (
+        f"exit-code with a fix deployed since (green {deployed_at:%H:%M}Z "
+        f"> failure {failed_at:%H:%M}Z)"
+    )
 
 
 def _next_timer_elapse(unit: str, runner: SystemctlRunner) -> Optional[datetime]:
@@ -248,8 +297,9 @@ def attempt_oneshot_rerun(
     now: datetime,
     systemctl_runner: Optional[SystemctlRunner] = None,
 ) -> Optional[tuple[str, str]]:
-    """Deterministic pre-triage before grok: re-run a signal-killed
-    allowlisted oneshot whose next timer slot is too far away to wait for.
+    """Deterministic pre-triage before grok: re-run an allowlisted oneshot
+    that was signal-killed, or that exited non-zero before a fix deployed,
+    when its next timer slot is too far away to wait for.
 
     Returns (disposition, summary) when the unit was re-run; None falls
     through to the ordinary grok path. Every precondition fails CLOSED:
@@ -267,7 +317,8 @@ def attempt_oneshot_rerun(
     if DEPLOY_TRANSITION_JOURNAL.exists():
         return None
     runner = systemctl_runner or _default_systemctl_runner
-    if not _is_signal_killed(unit, runner):
+    reason = _rerun_reason(unit, runner)
+    if reason is None:
         return None
     next_run = _next_timer_elapse(unit, runner)
     if next_run is None:
@@ -280,7 +331,7 @@ def attempt_oneshot_rerun(
             return None
     return (
         "restarted_unit",
-        f"signal-killed oneshot re-run: next timer slot was "
+        f"{reason} oneshot re-run: next timer slot was "
         f"{wait_secs / 3600:.0f}h away, reset-failed + start issued",
     )
 
