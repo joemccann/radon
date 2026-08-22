@@ -12,6 +12,7 @@ set -euo pipefail
 
 WEEKEND_ROOT="${RADON_WEEKEND_ROOT:-$HOME/radon-weekend}"
 WEEKEND_REPO="$WEEKEND_ROOT/radon"
+WEEKEND_VENV="$WEEKEND_ROOT/venv"
 LAUNCH_AGENTS="$HOME/Library/LaunchAgents"
 ORIGIN_URL="$(git config --get remote.origin.url 2>/dev/null || echo git@github.com:joemccann/radon.git)"
 
@@ -30,7 +31,7 @@ echo "[1/4] toolchain"
 check "claude CLI"        command -v claude
 check "gh CLI (authed)"   gh auth status
 check "python3.13"        command -v python3.13
-check "pytest"            python3.13 -c "import pytest"
+check "pytest (venv)"     "$WEEKEND_VENV/bin/python" -c "import pytest" 2>/dev/null
 check "bun"               command -v bun
 check "node"              command -v node
 check "git ssh to origin" git ls-remote --exit-code "$ORIGIN_URL" HEAD
@@ -52,8 +53,11 @@ touch "$WEEKEND_REPO/.radon-weekend-runner"
 mkdir -p "$WEEKEND_REPO/logs/reliability-weekend"
 
 echo "[3/4] python + web dependencies in the runner clone"
+python3.13 -m venv "$WEEKEND_VENV"
+"$WEEKEND_VENV/bin/pip" install -q --upgrade pip
+"$WEEKEND_VENV/bin/pip" install -q pytest
+"$WEEKEND_VENV/bin/pip" install -q -r "$WEEKEND_REPO/requirements.txt"
 ( cd "$WEEKEND_REPO" \
-  && python3.13 -m pip install -q -r requirements.txt \
   && bun install --frozen-lockfile >/dev/null \
   && cd web && bun install --frozen-lockfile >/dev/null )
 
