@@ -22,7 +22,8 @@ polkit.addRule(function(action, subject) {
 });
 
 // The grok page responder may reset-failed + start exactly these benign
-// data-fetch oneshots when a deploy / `radon restart` SIGTERM'd them mid-run
+// timer-owned data-fetch oneshots when a deploy / `radon restart` SIGTERM'd
+// them mid-run, or when they exited non-zero and a fix has deployed since,
 // and the next timer slot is more than 12h away. No stop, no restart, no
 // other units. Keep in sync with RERUNNABLE_ONESHOT_UNITS in
 // scripts/grok_page_responder.py (pinned by
@@ -38,7 +39,27 @@ polkit.addRule(function(action, subject) {
         "radon-vol-cone.service": true,
         "radon-skew.service": true,
         "radon-skew2d.service": true,
-        "radon-bpi.service": true
+        "radon-bpi.service": true,
+        "radon-leap.service": true,
+        "radon-garch.service": true,
+        "radon-cor.service": true,
+        "radon-vixcor.service": true,
+        "radon-straddle.service": true,
+        "radon-credit-spread.service": true,
+        "radon-ivrank.service": true,
+        "radon-yield-curve.service": true,
+        "radon-margin-debt.service": true,
+        "radon-forecast-nightly.service": true,
+        "radon-catalysts.service": true,
+        "radon-cta-sync.service": true,
+        "radon-oi-changes.service": true,
+        "radon-perf-twr.service": true,
+        "radon-llm-index.service": true,
+        "radon-equibles-filings.service": true,
+        "radon-equibles-short-crowding.service": true,
+        "radon-equibles-13f.service": true,
+        "radon-equibles-ats.service": true,
+        "radon-equibles-cot.service": true
     };
     if (unit && rerunnable[unit] === true &&
         (verb == "start" || verb == "reset-failed")) {

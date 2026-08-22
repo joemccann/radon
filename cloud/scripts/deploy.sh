@@ -852,8 +852,22 @@ restart_services() {
       recover_pending_transition || true
       return "$status"
     fi
+    install_release_units
   fi
   start_services_after_transition
+}
+
+# Timer-owned units ship with the release. Once the promote above has put the
+# target SHA's cloud/services in place and while the app tier is still down,
+# the root helper installs the manifest-pinned set (config/installed-units
+# .sha256 is the review gate) and enables any NEW timers -- the
+# `ssh root && install -m 0644 && daemon-reload && enable --now` an operator
+# used to owe after every unit edit. Non-fatal: units are inert config, and
+# the daily drift audit flags anything the helper declined to install.
+install_release_units() {
+  if ! sudo "$DEPLOY_ROOT_HELPER" install-units; then
+    log_warn "Unit install reported a failure; the drift audit will flag any gap"
+  fi
 }
 
 # -- Post-deploy gate ---------------------------------------------------------
