@@ -190,6 +190,12 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // Turso cor_history only — no IB.
   "vixcor": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
+  // ``ivrank`` — radon-ivrank.timer fires daily 22:10 UTC every calendar day
+  // (weekend runs are unchanged-data heartbeats), so a uniform 26h window
+  // matches its daily siblings. IB primary with a UW fallback, so the job
+  // heartbeats through an IB outage: requires_ib stays false.
+  "ivrank": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+
   // ``skew`` publishes every minute during RTH and finalizes daily at 21:45
   // UTC. Five minutes tolerates transient UW failures while surfacing a dead
   // live writer; the daily heartbeat preserves the off-hours window.
