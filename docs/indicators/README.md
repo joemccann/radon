@@ -10,6 +10,7 @@ Owner specs for regime tabs and the cheap-wing scanner. Add a row here when a sp
 | straddle | `/regime/straddle` | `straddle` | [straddle.md](straddle.md) |
 | cor | `/regime/cor` | `cor` | [cor.md](cor.md) |
 | vixcor | `/regime/vixcor` | `vixcor` | [vixcor.md](vixcor.md) |
+| ivrank | `/regime/ivrank` | `ivrank` | [ivrank.md](ivrank.md) |
 | curve | `/regime/curve` | `yield-curve` | [curve.md](curve.md) |
 | credit | `/regime/credit` | `credit-spread` | [credit.md](credit.md) |
 
