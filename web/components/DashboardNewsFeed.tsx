@@ -315,9 +315,7 @@ export default function DashboardNewsFeed() {
 
               return (
                 <li key={post.id} data-testid="news-feed-item" className={`news-feed-item ${styles.item}`}>
-                  <a className="news-feed-link" href={post.href} target="_blank" rel="noopener noreferrer">
-                    <h3 className={`news-feed-headline ${styles.headline}`}>{post.title}</h3>
-                  </a>
+                  <h3 className={`news-feed-headline ${styles.headline}`}>{post.title}</h3>
                   <div data-testid="news-feed-meta" className={`news-feed-meta ${styles.meta}`}>
                     <span title={absolute}>{absolute}</span>
                     <span className="news-feed-meta__source">{SOURCE_NAME}</span>
