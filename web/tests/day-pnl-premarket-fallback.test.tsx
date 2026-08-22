@@ -115,6 +115,8 @@ function dayPnlCardText(container: HTMLElement): string {
 
 describe("Day P&L card — pre-market fallback to client-computed aggregate", () => {
   it("renders IB daily_pnl when available (regular hours)", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-05T18:30:00Z")); // Fri 14:30 ET
     const portfolio = buildPortfolio({ daily_pnl: -47_215 });
     const { container } = render(
       React.createElement(MetricCards, {

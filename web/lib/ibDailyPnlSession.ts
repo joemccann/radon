@@ -1,0 +1,24 @@
+import { isUsTradingDay } from "./serviceHealthWindows";
+
+/**
+ * IB's account-level `reqPnL().dailyPnL` only describes a real session on a
+ * US trading day. On weekends and full-closure holidays IB keeps streaming
+ * the field and re-baselines it at its daily account rollover, so a Saturday
+ * sync can report a five-figure "day" P&L with a flat NLV and no trades
+ * (2026-08-22: +$13,951.76 after Friday closed at -$5,339.04). Gate every
+ * consumer of `account_summary.daily_pnl` on this.
+ */
+export function isIbDailyPnlCurrent(now: Date = new Date()): boolean {
+  const et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return isUsTradingDay(`${et.getFullYear()}-${pad(et.getMonth() + 1)}-${pad(et.getDate())}`);
+}
+
+/** `account_summary.daily_pnl` when it describes today's session, else null. */
+export function currentIbDailyPnl(
+  dailyPnl: number | null | undefined,
+  now: Date = new Date(),
+): number | null {
+  if (dailyPnl == null) return null;
+  return isIbDailyPnlCurrent(now) ? dailyPnl : null;
+}

@@ -51,7 +51,7 @@ describe("deriveKpis", () => {
   });
 
   it("prefers IB daily_pnl for today P&L and tones positive as core", () => {
-    const [, todayPnl] = deriveKpis(portfolioWith({ daily_pnl: 18_432 }), 999);
+    const [, todayPnl] = deriveKpis(portfolioWith({ daily_pnl: 18_432 }), 999, new Date("2026-08-07T18:30:00Z")); // Fri 14:30 ET
     expect(todayPnl.value).toBe(18_432);
     expect(todayPnl.tone).toBe("core");
   });
@@ -117,5 +117,22 @@ describe("fmtMoneyExact", () => {
   });
   it("uses typographic minus for negatives", () => {
     expect(fmtMoneyExact(-1_250)).toBe("−$1,250");
+  });
+});
+
+describe("deriveKpis Today P&L on a non-trading day", () => {
+  it("blanks IB daily_pnl on Saturday instead of calling it today", () => {
+    const saturday = new Date("2026-08-22T21:23:00Z");
+    const cell = deriveKpis(portfolioWith({ daily_pnl: 13_951.76 }), 0, saturday)
+      .find((c) => c.key === "todayPnl");
+    expect(cell?.value).toBeNull();
+    expect(cell?.display).toBe("—");
+  });
+
+  it("keeps IB daily_pnl on a trading day", () => {
+    const friday = new Date("2026-08-21T18:30:00Z");
+    const cell = deriveKpis(portfolioWith({ daily_pnl: -5_339.04 }), 0, friday)
+      .find((c) => c.key === "todayPnl");
+    expect(cell?.value).toBeCloseTo(-5_339.04);
   });
 });

@@ -14,7 +14,10 @@ vi.mock("@/lib/useViewport", () => ({
   useViewport: () => ({ isMobile: false, hasMounted: true }),
 }));
 
-afterEach(() => cleanup());
+afterEach(() => {
+  vi.useRealTimers();
+  cleanup();
+});
 
 const portfolio = {
   bankroll: 0,
@@ -45,6 +48,8 @@ const portfolio = {
 
 describe("KpiStrip", () => {
   it("renders the four account cells with exact figures", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-07T18:30:00Z")); // Fri 14:30 ET — IB daily_pnl is a live session figure
     render(<KpiStrip portfolio={portfolio} realizedPnl={0} />);
     expect(screen.getByText("Net Liquidation")).toBeTruthy();
     expect(screen.getByText("$2,847,120")).toBeTruthy();
