@@ -247,6 +247,27 @@ the run; never log the response body on error (token echo).
   Weekend/holiday runs fetch the same bars → `rows_changed=False` → snapshot +
   heartbeat only ("source unchanged; refreshing snapshot only").
 
+### D.2a Bad-print gate (added 2026-08-22)
+
+IB's `OPTION_IMPLIED_VOLATILITY` series carries occasional single-session bad
+prints: 2026-08-17 came back as `0.2443` between `0.1153` and `0.1251` while
+UW had `0.127` that day (VIX was ~15). After the merge and before ranking:
+
+- `detect_outliers(rows)`: an `ib`-sourced bar whose iv is **strictly** more
+  than `OUTLIER_NEIGHBOR_RATIO = 1.5` times BOTH neighbours (or below both by
+  the same ratio) is flagged. Edges with one neighbour never qualify; `uw`
+  rows are not retested.
+- `repair_outliers(rows, uw_iv_lookup)`: for each flagged date, fetch UW's
+  `volatility` for that session (`/api/stock/SPY/iv-rank?date=<date>`) and
+  substitute it, re-tagging the row `source: "uw"`. A lookup that returns
+  `None` or raises leaves the bar untouched: the gate only overrides a print a
+  second feed can contradict. Repairs are listed in the payload as
+  `outliers_repaired: [{date, ib_iv, uw_iv}]`.
+- Stored rows are covered too (detection runs over the merged series), so a
+  pre-gate bad print self-heals on the next run; once persisted as `uw` the
+  IB restatement is an outlier again, repaired to the same value, and
+  `rows_changed` stays false.
+
 ### D.3 Write order (every cycle)
 
 ```python
