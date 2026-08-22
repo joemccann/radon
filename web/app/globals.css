@@ -4772,9 +4772,10 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh--rail {
 }
 
 .news-feed-figure {
-  margin: 36px -40px 0;
-  border-top: 1px solid var(--line-grid);
-  border-bottom: 1px solid var(--line-grid);
+  margin: 36px 0 0;
+  border: 1px solid var(--line-grid);
+  border-radius: 4px;
+  overflow: hidden;
 }
 
 .news-feed-figure .news-feed-image-wrapper {
@@ -4787,7 +4788,7 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh--rail {
   display: flex;
   justify-content: space-between;
   gap: 16px;
-  padding: 8px 40px;
+  padding: 8px 16px;
   border-top: 1px solid var(--line-grid);
   font-family: var(--font-mono);
   font-size: 10.5px;

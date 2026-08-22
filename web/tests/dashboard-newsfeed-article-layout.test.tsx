@@ -2,6 +2,8 @@
  * @vitest-environment jsdom
  */
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import React from "react";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -95,5 +97,16 @@ describe("DashboardNewsFeed article layout", () => {
     const pill = screen.getByTestId("news-feed-link-pill");
     expect(pill.textContent).toBe("Source link");
     expect(pill.getAttribute("href")).toBe("https://themarketear.com/posts/p1");
+  });
+});
+
+describe("figure column alignment", () => {
+  const css = readFileSync(join(__dirname, "..", "app", "globals.css"), "utf8");
+  const rule = (selector: string) =>
+    css.match(new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{([^}]*)\\}`))![1];
+
+  it("keeps the chart inside the same column as the headline and copy", () => {
+    expect(rule(".news-feed-figure")).toMatch(/margin:\s*36px\s+0\s+0/);
+    expect(rule(".news-feed-figure")).not.toMatch(/-40px/);
   });
 });
