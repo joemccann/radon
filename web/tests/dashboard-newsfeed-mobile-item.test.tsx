@@ -258,7 +258,8 @@ describe("DashboardNewsFeed.module.css mobile rules", () => {
 
   it("tightens the type scale", () => {
     const headline = ruleBlock(moduleCss, `:global(${mobile}) .headline.headline`);
-    expect(headline).toMatch(/font-size:\s*16px/);
+    // Live Article Redesign (2026-08-22): 23px headline on the 390 frame.
+    expect(headline).toMatch(/font-size:\s*23px/);
     expect(headline).toMatch(/line-height:\s*1\.25/);
 
     const summary = ruleBlock(moduleCss, `:global(${mobile}) .summary.summary`);
@@ -305,12 +306,13 @@ describe("DashboardNewsFeed.module.css mobile rules", () => {
     expect(refresh).toMatch(/position:\s*relative/);
   });
 
-  it("leaves one frame around the image", () => {
+  it("leaves one frame around the image and never crops the chart", () => {
     const wrapper = ruleBlock(moduleCss, `:global(${mobile}) .imageWrapper.imageWrapper`);
     expect(wrapper).toMatch(/border:\s*0/);
-    expect(wrapper).toMatch(/aspect-ratio:\s*16\s*\/\s*9/);
+    expect(wrapper).not.toMatch(/aspect-ratio/);
     const image = ruleBlock(moduleCss, `:global(${mobile}) .image.image`);
-    expect(image).toMatch(/object-fit:\s*cover/);
+    expect(image).toMatch(/height:\s*auto/);
+    expect(image).not.toMatch(/object-fit:\s*cover/);
   });
 
   it("clears the fixed tab bar without double-counting its reservation", () => {
