@@ -1,3 +1,4 @@
+import { currentIbDailyPnl } from "./ibDailyPnlSession";
 import type { PortfolioData } from "./types";
 import { assessMargin } from "./marginWarning";
 import { fmtMoneySigned } from "./format/money";
@@ -36,12 +37,13 @@ function clampPct(value: number): number {
 
 const EMPTY_CELL = { value: null, display: "—", meta: null, tone: "neutral", barPct: null, barTone: null } as const;
 
-export function deriveKpis(portfolio: PortfolioData | null, realizedPnl = 0): KpiCell[] {
+export function deriveKpis(portfolio: PortfolioData | null, realizedPnl = 0, now: Date = new Date()): KpiCell[] {
   const acct = portfolio?.account_summary;
 
   const netLiq = acct?.net_liquidation ?? null;
-  const ibDaily = acct?.daily_pnl ?? null;
-  // Prefer IB's streamed dailyPnL when available; fall back to realized fills.
+  // IB's streamed dailyPnL only describes a session on a trading day; fall
+  // back to realized fills otherwise (zero on a weekend, so the cell blanks).
+  const ibDaily = currentIbDailyPnl(acct?.daily_pnl, now);
   const todayPnl = ibDaily ?? (realizedPnl !== 0 ? realizedPnl : null);
   const buyingPower = acct?.buying_power ?? null;
 
