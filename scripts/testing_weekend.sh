@@ -28,6 +28,10 @@ MODE="${1:?usage: testing_weekend.sh audit|remediate}"
 }
 
 REPO="${RADON_WEEKEND_REPO:-$HOME/radon-weekend/radon-testing}"
+WEEKEND_ROOT="$(dirname "$REPO")"
+VENV="$WEEKEND_ROOT/venv"
+# Activate the venv so any python3.13 calls inside the agent use it.
+[[ -f "$VENV/bin/activate" ]] && export PATH="$VENV/bin:$PATH"
 # Audit fans out read agents (cap 2h); remediation is the long half (cap 6h).
 CAP_SECS=$([[ "$MODE" == "audit" ]] && echo 7200 || echo 21600)
 DEADMAN_TITLE="Weekend testing runner"
