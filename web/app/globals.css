@@ -4549,15 +4549,6 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh--rail {
   border-bottom: none;
 }
 
-.news-feed-link {
-  text-decoration: none;
-  color: var(--text-primary);
-}
-
-.news-feed-link:hover .news-feed-headline {
-  color: var(--signal-core-text);
-}
-
 .news-feed-headline {
   margin: 0;
   max-inline-size: 680px;
