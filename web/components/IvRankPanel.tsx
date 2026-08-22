@@ -210,7 +210,10 @@ export default function IvRankPanel() {
               testId="ivrank-strip-regime"
               label="REGIME"
               value={
-                <span data-testid="ivrank-regime-value" style={{ color: regimeTone }}>
+                <span
+                  data-testid="ivrank-regime-value"
+                  style={{ color: regimeTone, whiteSpace: "nowrap" }}
+                >
                   {regime ?? "---"}
                 </span>
               }
