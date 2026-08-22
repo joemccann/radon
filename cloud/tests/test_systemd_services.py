@@ -104,6 +104,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-perf-twr.timer",
     "radon-credit-spread.service",
     "radon-credit-spread.timer",
+    "radon-ivrank.service",
+    "radon-ivrank.timer",
 ]
 
 LONG_RUNNING_SERVICES = [
