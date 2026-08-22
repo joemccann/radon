@@ -212,6 +212,111 @@ class TestMergeHistory:
         assert merged[-1]["source"] == "uw"
 
 
+class TestOutlierGate:
+    """A single-session bar that deviates >50% from BOTH neighbors is a bad
+    print, not a vol event (IB served 2026-08-17 iv=0.2443 between 0.1153
+    and 0.1251 while UW had 0.127 that day). Repair with UW's value for
+    that date; leave it alone when UW cannot vouch."""
+
+    PIN_OUTLIER_DATE = "2026-08-17"
+    PIN_OUTLIER_IB_IV = 0.2442928
+    PIN_OUTLIER_UW_IV = 0.127
+
+    def test_ratio_constant_matches_the_spec(self):
+        assert _mod().OUTLIER_NEIGHBOR_RATIO == 1.5
+
+    def test_detects_the_fixture_bad_print_and_nothing_else(self):
+        mod = _mod()
+        rows = [{**row, "source": "ib"} for row in _ib_rows()]
+        assert mod.detect_outliers(rows) == [self.PIN_OUTLIER_DATE]
+
+    def test_high_side_needs_both_neighbors(self):
+        mod = _mod()
+        both = [
+            {"date": "d1", "iv": 0.115, "source": "ib"},
+            {"date": "d2", "iv": 0.244, "source": "ib"},   # > 1.5x both sides
+            {"date": "d3", "iv": 0.125, "source": "ib"},
+        ]
+        assert mod.detect_outliers(both) == ["d2"]
+        one_side = [
+            {"date": "d1", "iv": 0.115, "source": "ib"},
+            {"date": "d2", "iv": 0.244, "source": "ib"},
+            {"date": "d3", "iv": 0.240, "source": "ib"},   # a real regime shift
+        ]
+        assert mod.detect_outliers(one_side) == []
+
+    def test_low_side_outlier(self):
+        mod = _mod()
+        rows = [
+            {"date": "d1", "iv": 0.20, "source": "ib"},
+            {"date": "d2", "iv": 0.05, "source": "ib"},    # < both / 1.5
+            {"date": "d3", "iv": 0.21, "source": "ib"},
+        ]
+        assert mod.detect_outliers(rows) == ["d2"]
+
+    def test_boundary_is_exactly_the_ratio_and_strict(self):
+        mod = _mod()
+        rows = [
+            {"date": "d1", "iv": 0.10, "source": "ib"},
+            {"date": "d2", "iv": 0.15, "source": "ib"},    # == 1.5x, NOT an outlier
+            {"date": "d3", "iv": 0.10, "source": "ib"},
+        ]
+        assert mod.detect_outliers(rows) == []
+
+    def test_edges_without_two_neighbors_are_never_flagged(self):
+        mod = _mod()
+        rows = [
+            {"date": "d1", "iv": 0.50, "source": "ib"},
+            {"date": "d2", "iv": 0.10, "source": "ib"},
+        ]
+        assert mod.detect_outliers(rows) == []
+
+    def test_uw_sourced_rows_are_not_retested(self):
+        mod = _mod()
+        rows = [
+            {"date": "d1", "iv": 0.115, "source": "ib"},
+            {"date": "d2", "iv": 0.244, "source": "uw"},
+            {"date": "d3", "iv": 0.125, "source": "ib"},
+        ]
+        assert mod.detect_outliers(rows) == []
+
+    def test_repair_substitutes_uw_value_and_tags_source(self):
+        mod = _mod()
+        rows = [{**row, "source": "ib"} for row in _ib_rows()]
+        calls: list[str] = []
+
+        def lookup(date: str) -> Optional[float]:
+            calls.append(date)
+            return self.PIN_OUTLIER_UW_IV
+
+        repaired_rows, repairs = mod.repair_outliers(rows, lookup)
+        assert calls == [self.PIN_OUTLIER_DATE]
+        by_date = {row["date"]: row for row in repaired_rows}
+        assert by_date[self.PIN_OUTLIER_DATE] == {
+            "date": self.PIN_OUTLIER_DATE, "iv": self.PIN_OUTLIER_UW_IV, "source": "uw",
+        }
+        assert repairs == [
+            {"date": self.PIN_OUTLIER_DATE, "ib_iv": self.PIN_OUTLIER_IB_IV, "uw_iv": self.PIN_OUTLIER_UW_IV}
+        ]
+        assert len(repaired_rows) == len(rows)
+        # the input is not mutated
+        assert rows[[r["date"] for r in rows].index(self.PIN_OUTLIER_DATE)]["iv"] == self.PIN_OUTLIER_IB_IV
+
+    def test_repair_leaves_the_bar_when_uw_cannot_vouch(self):
+        mod = _mod()
+        rows = [{**row, "source": "ib"} for row in _ib_rows()]
+        repaired_rows, repairs = mod.repair_outliers(rows, lambda _date: None)
+        assert repairs == []
+        assert repaired_rows == rows
+
+        def boom(_date: str) -> Optional[float]:
+            raise RuntimeError("uw down")
+
+        repaired_rows, repairs = mod.repair_outliers(rows, boom)
+        assert repairs == []
+        assert repaired_rows == rows
+
+
 class TestMapUwRows:
     def test_maps_the_fixture_strings_to_floats(self):
         mod = _mod()
@@ -426,6 +531,9 @@ def job(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(mod, "writer", fake)
     monkeypatch.setattr(mod, "gateway_auth_state", lambda: "authenticated")
     monkeypatch.setattr(mod, "load_history", lambda: [])
+    # Default lookup in tests: UW cannot vouch (no network). Individual tests
+    # pass an explicit uw_iv_lookup to exercise the repair.
+    monkeypatch.setattr(mod, "_real_uw_iv_for_date", lambda _date: None)
     return mod, fake, tmp_path
 
 
@@ -495,6 +603,66 @@ class TestRunHappyPath:
         )
         assert payload["uw_check"] is None
         assert fake.health == [("ivrank", "ok", None)]
+
+
+class TestOutlierRepairInRun:
+    def test_bad_print_is_repaired_persisted_and_reported(self, job):
+        mod, fake, _tmp = job
+        payload = mod.run(
+            ib_fetch=_StubIb(_ib_rows()), uw_fetch=_StubUw(), uw_check=lambda: None,
+            uw_iv_lookup=lambda date: 0.127 if date == "2026-08-17" else None,
+            now=NOW_RUN,
+        )
+        assert payload["outliers_repaired"] == [
+            {"date": "2026-08-17", "ib_iv": 0.2442928, "uw_iv": 0.127}
+        ]
+        by_date = {row["date"]: row for row in payload["series"]}
+        assert by_date["2026-08-17"]["iv"] == pytest.approx(0.127, abs=1e-12)
+        written = {row["date"]: row for row in fake.ivrank_rows[0][0]}
+        assert written["2026-08-17"]["iv"] == pytest.approx(0.127, abs=1e-12)
+        assert written["2026-08-17"]["source"] == "uw"
+        assert payload["source"] == "ib"          # the run's primary feed is unchanged
+        assert fake.health == [("ivrank", "ok", None)]
+
+    def test_unrepairable_print_stays_and_run_is_still_ok(self, job):
+        mod, fake, _tmp = job
+        payload = mod.run(
+            ib_fetch=_StubIb(_ib_rows()), uw_fetch=_StubUw(), uw_check=lambda: None,
+            uw_iv_lookup=lambda _date: None, now=NOW_RUN,
+        )
+        assert payload["outliers_repaired"] == []
+        by_date = {row["date"]: row for row in payload["series"]}
+        assert by_date["2026-08-17"]["iv"] == pytest.approx(0.2442928, abs=1e-12)
+        assert fake.health == [("ivrank", "ok", None)]
+
+    def test_stored_bad_print_self_heals_on_the_next_run(self, job, monkeypatch):
+        """The row already persisted from a pre-gate run is repaired too."""
+        mod, fake, _tmp = job
+        stored = [{**row, "source": "ib"} for row in _ib_rows()]
+        monkeypatch.setattr(mod, "load_history", lambda: stored)
+        tail = [{"date": r["date"], "iv": r["iv"]} for r in _ib_rows()[-5:]]
+        mod.run(
+            ib_fetch=_StubIb(tail), uw_fetch=_StubUw(), uw_check=lambda: None,
+            uw_iv_lookup=lambda date: 0.127 if date == "2026-08-17" else None,
+            now=NOW_RUN,
+        )
+        assert len(fake.ivrank_rows) == 1                # rows_changed: the repair landed
+        written = {row["date"]: row for row in fake.ivrank_rows[0][0]}
+        assert written["2026-08-17"]["source"] == "uw"
+
+    def test_repaired_history_is_stable_on_the_following_run(self, job, monkeypatch):
+        mod, fake, _tmp = job
+        stored = [{**row, "source": "ib"} for row in _ib_rows()]
+        i = [r["date"] for r in stored].index("2026-08-17")
+        stored[i] = {"date": "2026-08-17", "iv": 0.127, "source": "uw"}
+        monkeypatch.setattr(mod, "load_history", lambda: stored)
+        tail = [{"date": r["date"], "iv": r["iv"]} for r in _ib_rows()[-5:]]  # IB restates 0.2443
+        mod.run(
+            ib_fetch=_StubIb(tail), uw_fetch=_StubUw(), uw_check=lambda: None,
+            uw_iv_lookup=lambda date: 0.127 if date == "2026-08-17" else None,
+            now=NOW_RUN,
+        )
+        assert fake.ivrank_rows == []                    # nothing changed; no churn
 
 
 class TestUnchangedSource:

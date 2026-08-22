@@ -52,6 +52,10 @@ INCREMENTAL_DURATION = "1 M"  # daily run: ~22 bars, survives missed runs
 RANK_SUPPRESSED_MAX = 20.0    # regime band edges, strict per B.4
 RANK_NORMAL_MAX = 50.0
 RANK_ELEVATED_MAX = 80.0
+# A bar that deviates by more than this ratio from BOTH neighbours is a bad
+# print, not a vol event (IB served 2026-08-17 iv=0.2443 between 0.1153 and
+# 0.1251 while UW had 0.127). Strict: exactly 1.5x is not an outlier.
+OUTLIER_NEIGHBOR_RATIO = 1.5
 
 IVRANK_JSON = _PROJECT_DIR / "data" / "ivrank.json"
 SERVICE = "ivrank"
@@ -131,6 +135,47 @@ def merge_history(
     return [by_date[date] for date in sorted(by_date)]
 
 
+def detect_outliers(rows: list[dict[str, Any]]) -> list[str]:
+    """Dates of ib-sourced bars that sit more than OUTLIER_NEIGHBOR_RATIO
+    above or below BOTH adjacent sessions. Edges (one neighbour) never
+    qualify; uw-sourced rows are already vouched for and are not retested."""
+    flagged: list[str] = []
+    for i in range(1, len(rows) - 1):
+        row = rows[i]
+        if row.get("source") != "ib":
+            continue
+        iv, prev_iv, next_iv = row["iv"], rows[i - 1]["iv"], rows[i + 1]["iv"]
+        spike = iv > prev_iv * OUTLIER_NEIGHBOR_RATIO and iv > next_iv * OUTLIER_NEIGHBOR_RATIO
+        crater = iv * OUTLIER_NEIGHBOR_RATIO < prev_iv and iv * OUTLIER_NEIGHBOR_RATIO < next_iv
+        if spike or crater:
+            flagged.append(row["date"])
+    return flagged
+
+
+def repair_outliers(
+    rows: list[dict[str, Any]],
+    uw_iv_lookup: Callable[[str], Optional[float]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Substitute UW's iv for each detected outlier date (row re-tagged
+    source 'uw'). A lookup that returns None or raises leaves the bar as is:
+    the gate only overrides a print a second feed can contradict."""
+    repaired = [dict(row) for row in rows]
+    repairs: list[dict[str, Any]] = []
+    index = {row["date"]: i for i, row in enumerate(repaired)}
+    for date in detect_outliers(repaired):
+        try:
+            uw_iv = uw_iv_lookup(date)
+        except Exception:  # noqa: BLE001 — advisory feed; body never logged
+            print(f"[ivrank] uw lookup for outlier {date} failed (non-fatal)", file=sys.stderr)
+            continue
+        if uw_iv is None:
+            continue
+        i = index[date]
+        repairs.append({"date": date, "ib_iv": repaired[i]["iv"], "uw_iv": float(uw_iv)})
+        repaired[i] = {"date": date, "iv": float(uw_iv), "source": "uw"}
+    return repaired, repairs
+
+
 def map_uw_rows(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """UW iv-rank rows (string-typed) → [{date, iv, source: 'uw'}], skipping
     malformed rows."""
@@ -208,6 +253,15 @@ def _uw_get(path: str) -> dict[str, Any]:
 def _real_uw_fetch() -> list[dict[str, Any]]:
     payload = _uw_get("/api/stock/SPY/iv-rank")
     return map_uw_rows(payload.get("data") or [])
+
+
+def _real_uw_iv_for_date(date: str) -> Optional[float]:
+    """UW 30d IV for one session (the iv-rank window anchored on ``date``)."""
+    payload = _uw_get(f"/api/stock/SPY/iv-rank?date={date}")
+    for row in map_uw_rows(payload.get("data") or []):
+        if row["date"] == date:
+            return row["iv"]
+    return None
 
 
 def _real_uw_check() -> Optional[dict[str, Any]]:
@@ -518,6 +572,7 @@ def run(
     ib_fetch: Optional[Callable[[str], list[dict[str, Any]]]] = None,
     uw_fetch: Optional[Callable[[], list[dict[str, Any]]]] = None,
     uw_check: Optional[Callable[[], Optional[dict[str, Any]]]] = None,
+    uw_iv_lookup: Optional[Callable[[str], Optional[float]]] = None,
     *,
     now: Optional[datetime] = None,
     backfill: bool = False,
@@ -536,6 +591,13 @@ def run(
 
     stored = load_history()
     merged = merge_history(stored, fetched)
+    merged, repairs = repair_outliers(merged, uw_iv_lookup or _real_uw_iv_for_date)
+    for repair in repairs:
+        print(
+            f"[ivrank] repaired bad print {repair['date']}: ib {repair['ib_iv']:.4f} "
+            f"-> uw {repair['uw_iv']:.4f}",
+            file=sys.stderr,
+        )
     series = compute_series(merged)
     rows_changed = _rows_changed(stored, merged)
     if not rows_changed:
@@ -550,6 +612,7 @@ def run(
         uw_check=check,
         now=now,
     )
+    payload["outliers_repaired"] = repairs
     print(
         f"[ivrank] {payload['count']} sessions through {payload['as_of']} "
         f"({payload['rank_count']} with a rank) via {source}",
