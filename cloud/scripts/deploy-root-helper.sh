@@ -84,6 +84,9 @@ if [[ "${RADON_DEPLOY_HELPER_TEST_MODE:-0}" == "1" ]]; then
   readonly CADDY_SOURCE="${RADON_TEST_CADDY_SOURCE:-}"
   readonly CADDY_CONFIG="${RADON_TEST_CADDY_CONFIG:-}"
   readonly CADDY_BIN="${RADON_TEST_CADDY_BIN:-}"
+  readonly UNIT_SOURCE_DIR="${RADON_TEST_UNIT_SOURCE_DIR:-}"
+  readonly UNIT_MANIFEST="${RADON_TEST_UNIT_MANIFEST:-}"
+  readonly SYSTEMD_UNIT_DIR="${RADON_TEST_SYSTEMD_UNIT_DIR:-}"
   readonly TEST_SYSTEMCTL_TIMEOUT="${RADON_TEST_SYSTEMCTL_TIMEOUT:-1}"
   readonly STATE_WAIT_SECONDS="${RADON_TEST_STATE_WAIT_SECONDS:-0}"
   readonly PREHELD_WAIT_SECONDS="${RADON_TEST_PREHELD_WAIT_SECONDS:-0}"
@@ -126,6 +129,9 @@ else
   readonly CADDY_SOURCE=/home/radon/radon/cloud/caddy/Caddyfile
   readonly CADDY_CONFIG=/etc/caddy/Caddyfile
   readonly CADDY_BIN=/usr/bin/caddy
+  readonly UNIT_SOURCE_DIR=/home/radon/radon/cloud/services
+  readonly UNIT_MANIFEST=/home/radon/radon/cloud/config/installed-units.sha256
+  readonly SYSTEMD_UNIT_DIR=/etc/systemd/system
   readonly REPLICA_FILES=(
     /home/radon/radon/data/replica.db
     /home/radon/radon/data/replica.db-wal
@@ -152,7 +158,7 @@ prepare_state_dir() {
 }
 
 if (( $# != 1 )); then
-  echo "usage: radon-deploy-root {stop-clean|restart-managed|recover|verify-restored|verify-control-plane|commit-transition|publish-caddy}" >&2
+  echo "usage: radon-deploy-root {stop-clean|restart-managed|recover|verify-restored|verify-control-plane|commit-transition|publish-caddy|install-units}" >&2
   exit 64
 fi
 
@@ -587,6 +593,133 @@ publish_caddy() {
   return 75
 }
 
+# The timer-owned units the deploy is allowed to (re)install. The manifest
+# digest is the review gate: a unit whose checkout content does not hash to
+# its committed entry is unreviewed and is NOT installed -- that is exactly
+# the pending-install window config/drift-allowlist.conf acknowledges.
+# Control-plane units stay bootstrap-owned (listed in CONTROL_PLANE_SOURCES);
+# gateway and beta units stay excluded. `enable --now` is issued for NEWLY
+# installed timers only, never for a timer-owned .service: enabling both made
+# every scheduled job fire at once (setup-vps.sh, enable_services).
+#
+# Same hardening as publish_caddy: root-side constant paths, a symlinked source
+# is refused, the candidate is staged 0600 and its hash is checked against the
+# manifest digest before promotion, so a radon-side swap of the source between
+# the regular-file test and the copy can never land in /etc/systemd/system.
+file_sha256() {
+  local digest
+  digest="$("$SHA256SUM" -- "$1")" || return 1
+  printf '%s\n' "${digest%% *}"
+}
+
+stage_unit_candidate() {
+  local source="$1" candidate="$2"
+  if (( HELPER_TEST_MODE == 1 )); then
+    "$INSTALL" -m 0600 "$source" "$candidate"
+  else
+    "$INSTALL" -m 0600 -o root -g root "$source" "$candidate"
+  fi
+}
+
+install_manifest_units() {
+  local line digest unit source target candidate actual was_present
+  local control_plane_units=" "
+  local -a new_timers=() skipped=()
+  local installed=0 updated=0 unchanged=0 changed=0 entry
+  local manifest_line_re='^([0-9a-f]{64})[[:space:]][[:space:]](radon-[a-zA-Z0-9_.@-]+\.(service|timer))$'
+
+  [[ -n "$UNIT_SOURCE_DIR" && -n "$UNIT_MANIFEST" && -n "$SYSTEMD_UNIT_DIR" ]] || {
+    echo "unit install paths are not configured" >&2
+    return 78
+  }
+  [[ -f "$UNIT_MANIFEST" && ! -L "$UNIT_MANIFEST" ]] || {
+    echo "unit manifest is missing or is not a regular file: ${UNIT_MANIFEST}" >&2
+    return 66
+  }
+  [[ -d "$SYSTEMD_UNIT_DIR" && ! -L "$SYSTEMD_UNIT_DIR" ]] || {
+    echo "systemd unit directory is missing: ${SYSTEMD_UNIT_DIR}" >&2
+    return 66
+  }
+  for entry in "${CONTROL_PLANE_SOURCES[@]}"; do
+    [[ "$entry" == services/* ]] && control_plane_units+="${entry#services/} "
+  done
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%%#*}"
+    line="${line%"${line##*[![:space:]]}"}"
+    [[ -z "$line" ]] && continue
+    if [[ ! "$line" =~ $manifest_line_re ]]; then
+      echo "install-units: ignoring malformed manifest line" >&2
+      continue
+    fi
+    digest="${BASH_REMATCH[1]}"
+    unit="${BASH_REMATCH[2]}"
+    [[ "$control_plane_units" == *" ${unit} "* ]] && continue
+    unit_is_excluded "$unit" && continue
+
+    source="${UNIT_SOURCE_DIR}/${unit}"
+    target="${SYSTEMD_UNIT_DIR}/${unit}"
+    if [[ ! -f "$source" || -L "$source" ]]; then
+      skipped+=("${unit} (source-missing-or-symlink)")
+      continue
+    fi
+    if [[ "$(file_sha256 "$source")" != "$digest" ]]; then
+      skipped+=("${unit} (manifest-mismatch)")
+      continue
+    fi
+    if [[ -L "$target" ]]; then
+      skipped+=("${unit} (symlinked-target)")
+      continue
+    fi
+    was_present=0
+    if [[ -f "$target" ]]; then
+      was_present=1
+      if [[ "$(file_sha256 "$target")" == "$digest" ]]; then
+        unchanged=$((unchanged + 1))
+        continue
+      fi
+    fi
+
+    candidate="$(mktemp "${SYSTEMD_UNIT_DIR}/.${unit}.candidate.XXXXXX")"
+    if ! stage_unit_candidate "$source" "$candidate"; then
+      "$RM" -f "$candidate"
+      skipped+=("${unit} (stage-failed)")
+      continue
+    fi
+    actual="$(file_sha256 "$candidate")"
+    if [[ "$actual" != "$digest" ]]; then
+      "$RM" -f "$candidate"
+      skipped+=("${unit} (staged-content-drift)")
+      continue
+    fi
+    chmod 0644 "$candidate"
+    mv -f -- "$candidate" "$target"
+    "$SYNC" -f "$target"
+    changed=1
+    if (( was_present )); then
+      updated=$((updated + 1))
+    else
+      installed=$((installed + 1))
+      [[ "$unit" == *.timer ]] && new_timers+=("$unit")
+    fi
+  done < "$UNIT_MANIFEST"
+
+  if (( changed )); then
+    systemctl_bounded daemon-reload || return $?
+  fi
+  # ${arr[@]+"${arr[@]}"}: an empty array is an unbound variable under set -u
+  # on bash 3.2 (the test host).
+  for unit in ${new_timers[@]+"${new_timers[@]}"}; do
+    systemctl_bounded enable --now "$unit" || return $?
+  done
+  printf 'install-units: installed=%d updated=%d unchanged=%d skipped=%d\n' \
+    "$installed" "$updated" "$unchanged" "${#skipped[@]}"
+  for entry in ${skipped[@]+"${skipped[@]}"}; do
+    printf 'install-units: skipped %s\n' "$entry"
+  done
+  return 0
+}
+
 cancel_radon_jobs() {
   local jobs id unit
   local job_ids=()
@@ -646,13 +779,14 @@ terminate_root_action_group() {
 }
 
 # Only the release-lifecycle actions queue systemd jobs for radon-* units, so
-# only their failures leave torn jobs worth cancelling. publish-caddy touches
+# only their failures leave torn jobs worth cancelling (install-units joins
+# them: `enable --now` on a new timer queues a start job). publish-caddy touches
 # one non-radon unit (caddy) and is reachable by the unprivileged account, so
 # cancelling on its non-zero exit -- a rejected Caddyfile exits 65 -- would let
 # radon tear down an unrelated deploy's in-flight restarts.
 action_queues_radon_jobs() {
   case "${1:-}" in
-    stop-clean|restart-managed|recover) return 0 ;;
+    stop-clean|restart-managed|recover|install-units) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -681,6 +815,9 @@ root_action_timeout() {
     publish-caddy)
       # Bounded like a mutation (it stages, validates, installs, reloads) but
       # deliberately outside the release-lifecycle job-cancel class above.
+      printf '%s\n' "$ROOT_MUTATION_ACTION_TIMEOUT"
+      ;;
+    install-units)
       printf '%s\n' "$ROOT_MUTATION_ACTION_TIMEOUT"
       ;;
     verify-restored|verify-control-plane)
@@ -778,6 +915,9 @@ case "$1" in
     ;;
   publish-caddy)
     publish_caddy
+    ;;
+  install-units)
+    install_manifest_units
     ;;
   *)
     echo "unknown deploy-root action" >&2

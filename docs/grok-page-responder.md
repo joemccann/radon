@@ -118,7 +118,7 @@ counted as tickets claimed since 00:00Z (`watchdog.pages.actions_since`). At
 the cap the cycle heartbeats `paused` and exits 0. An unreadable ledger counts
 as over-cap, so a Turso miss stands the responder down rather than freeing it.
 
-## Signal-killed oneshot re-run
+## Oneshot re-run (signal-killed, or exit-code with a fix deployed since)
 
 A deploy stop-clean or `radon restart` teardown can SIGTERM a timer-driven
 EOD oneshot mid-run. "Recovers on next timer" is the wrong verdict when that
@@ -128,18 +128,29 @@ until a human ran reset-failed + start. Before launching grok on a
 `kind=unit` page, the responder pre-triages deterministically
 (`attempt_oneshot_rerun`) and re-runs the unit itself when ALL of these hold:
 
-- the unit is in `RERUNNABLE_ONESHOT_UNITS` (benign data-fetch oneshots:
-  vol-cone, skew, skew2d, bpi). The responder has no general right to start
-  `radon-*` units — polkit grants the radon user exactly this list, verbs
-  `reset-failed` and `start` only
-  (`cloud/config/polkit/50-radon-services.rules`; the two lists are pinned to
-  each other by `test_allowlist_matches_the_polkit_grant`).
+- the unit is in `RERUNNABLE_ONESHOT_UNITS` (the timer-owned data-fetch
+  oneshots: the daily and multi-daily scans such as vol-cone, skew, bpi,
+  leap, garch, cor, credit-spread, the equibles fetches; intraday timers are
+  deliberately absent because their next slot is minutes away). The
+  responder has no general right to start `radon-*` units — polkit grants
+  the radon user exactly this list, verbs `reset-failed` and `start` only
+  (`cloud/config/polkit/50-radon-services.rules`; the two lists are pinned
+  to each other by `test_allowlist_matches_the_polkit_grant`, and every
+  member must be a `Type=oneshot` with a `.timer` partner per
+  `test_allowlist_covers_the_daily_scans_and_only_timer_owned_oneshots`).
 - `GROK_PAGE_AUTOSHIP=1` — the restart is an auto-fix action, so it takes the
   same explicit opt-in as shipping a code fix. Unset stands down.
 - no deploy transition journal (`/home/radon/.radon-deploy-transition.json`):
   never restart units mid-deploy.
-- systemd itself reports `ActiveState=failed` + `Result=signal` — the page
-  excerpt is untrusted text and never triggers the action on its own.
+- systemd itself reports `ActiveState=failed` (the page excerpt is
+  untrusted text and never triggers the action on its own) with either
+  `Result=signal`, or `Result=exit-code` AND the green deploy marker
+  (`/home/radon/.radon-last-green-deploy`) is newer than the unit's
+  `InactiveEnterTimestamp` — a fix has shipped since the failure.
+  radon-leap 2026-08-20: exit 1 at 14:02Z, fix deployed 15:05Z, next slot
+  the following day; it sat `failed` re-paging hourly until a human ran
+  reset-failed + start. Without a newer deploy nothing has changed, a rerun
+  would only fail again, so it falls through to grok.
 - the unit's timer's next elapse is more than 12h away
   (`RERUN_TIMER_HORIZON_SECS`). Closer than that, waiting for the timer
   remains correct and grok triages the page as before.
