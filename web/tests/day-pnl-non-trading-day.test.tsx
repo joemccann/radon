@@ -35,7 +35,25 @@ vi.mock("@/lib/useMarketHours", () => ({
 
 type Portfolio = Parameters<typeof MetricCards>[0]["portfolio"];
 
-function buildPortfolio(dailyPnl: number | null): Portfolio {
+const CRYPTO_POSITION = {
+  id: "BTC-crypto",
+  ticker: "BTC",
+  structure: "Crypto",
+  structure_type: "Crypto",
+  direction: "LONG",
+  qty: 2,
+  contracts: 2,
+  avg_entry: 60_000,
+  cost: 120_000,
+  legs: [],
+  market_value: 130_000,
+  pnl: 10_000,
+  pnl_pct: 8.3,
+  entry_date: "2026-04-01",
+  ib_daily_pnl: null,
+};
+
+function buildPortfolio(dailyPnl: number | null, extraPositions: unknown[] = []): Portfolio {
   return {
     bankroll: 1_332_959.5,
     net_leverage: 0.5,
@@ -59,6 +77,7 @@ function buildPortfolio(dailyPnl: number | null): Portfolio {
         entry_date: "2026-04-01",
         ib_daily_pnl: null,
       },
+      ...extraPositions,
     ],
     account_summary: {
       net_liquidation: 1_332_959.5,
@@ -83,16 +102,22 @@ function buildPortfolio(dailyPnl: number | null): Portfolio {
 }
 
 // Weekend quotes: last == Friday close, so a client-side day move is zero.
-const WEEKEND_PRICES = { AAPL: { last: 190, close: 190 } };
+const WEEKEND_PRICES = {
+  AAPL: { last: 190, close: 190 },
+  BTC: { last: 65_500, close: 65_000 }, // crypto trades through the weekend: +$500 × 2
+};
 
-function dayPnlCardText(container: HTMLElement): string {
+function cardText(container: HTMLElement, name: string): string {
   for (const label of Array.from(container.querySelectorAll(".metric-label"))) {
-    if ((label.textContent ?? "").trim() === "Day P&L") {
+    if ((label.textContent ?? "").trim() === name) {
       return label.parentElement?.textContent ?? "";
     }
   }
   return "";
 }
+
+const dayPnlCardText = (c: HTMLElement) => cardText(c, "Day P&L");
+const dayMoveCardText = (c: HTMLElement) => cardText(c, "Day Move");
 
 function renderCards(portfolio: Portfolio) {
   return render(
@@ -134,5 +159,24 @@ describe("Day P&L card on a non-trading day", () => {
     const text = dayPnlCardText(container);
     expect(text).toContain("-$5,339");
     expect(text).toContain("TODAY");
+  });
+
+  it("blanks TODAY'S P&L Day Move on Saturday when only equities are held", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-22T21:23:00Z"));
+    const { container } = renderCards(buildPortfolio(13_951.76));
+    const text = dayMoveCardText(container);
+    expect(text).toContain("---");
+    expect(text).toContain("MARKET CLOSED");
+    expect(text).not.toContain("POSITIONS");
+  });
+
+  it("counts only spot crypto toward Day Move on Saturday", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-22T21:23:00Z"));
+    const { container } = renderCards(buildPortfolio(null, [CRYPTO_POSITION]));
+    const text = dayMoveCardText(container);
+    expect(text).toContain("+$1,000");
+    expect(text).toContain("1 OF 1 POSITIONS");
   });
 });

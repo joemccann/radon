@@ -1,6 +1,6 @@
 "use client";
 
-import { isIbDailyPnlCurrent } from "@/lib/ibDailyPnlSession";
+import { isIbDailyPnlCurrent, sessionPositions } from "@/lib/ibDailyPnlSession";
 import { useState, useCallback, useMemo, type ReactNode } from "react";
 import type { PortfolioData, AccountSummary, ExecutedOrder } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
@@ -633,8 +633,15 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
   const hasPrices = prices && Object.keys(prices).length > 0;
   const exposure = hasPrices ? computeExposureDetailed(portfolio, prices) : null;
 
+  // Outside a US trading day only spot crypto has a session: the day-move
+  // math runs over that subset so stale Friday equity marks never read as a
+  // weekend "day move" (2026-08-22: +$25,857 across 9 equity positions).
+  const sessionToday = isIbDailyPnlCurrent();
+  const sessionPortfolio = sessionToday
+    ? portfolio
+    : { ...portfolio, positions: sessionPositions(portfolio) };
   const todayUnrealized = hasPrices
-    ? computeTodayUnrealizedPnl(portfolio, prices)
+    ? computeTodayUnrealizedPnl(sessionPortfolio, prices)
     : null;
   const hasDaily = todayUnrealized != null && todayUnrealized.positionsWithData > 0;
   const unrealized = todayUnrealized?.pnl ?? 0;
@@ -642,20 +649,18 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
   const total = unrealized + realized;
 
   const acct = portfolio.account_summary;
-  // Outside a US trading day there is no session to report: IB still streams
-  // (and re-baselines) dailyPnL and weekend quotes still produce a client-side
-  // day move, so both sources are ignored and the card reads MARKET CLOSED.
-  const sessionToday = isIbDailyPnlCurrent();
+  // IB still streams (and re-baselines) dailyPnL on weekends; only the
+  // session-filtered client-side day move (spot crypto) may stand in.
   const ibDailyPnl = sessionToday ? acct?.daily_pnl ?? null : null;
   const effectiveDayPnl = ibDailyPnl
-    ?? (sessionToday && hasDaily && todayUnrealized ? todayUnrealized.pnl : null);
+    ?? (hasDaily && todayUnrealized ? todayUnrealized.pnl : null);
 
   // Breakdown rows (computed lazily — only used when modals open)
   const unrealizedBreakdownRows = unrealizedModalOpen
     ? computeUnrealizedBreakdown(portfolio)
     : [];
   const dayMoveBreakdown = dayMoveModalOpen && hasPrices
-    ? computeDayMoveBreakdown(portfolio, prices!)
+    ? computeDayMoveBreakdown(sessionPortfolio, prices!)
     : { rows: [], total: 0 };
 
   if (!isPortfolio) return null;
@@ -667,7 +672,7 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
         <AccountRow
           acct={acct}
           ibDailyPnl={ibDailyPnl}
-          todayUnrealized={sessionToday ? todayUnrealized : null}
+          todayUnrealized={todayUnrealized}
           effectiveDayPnl={effectiveDayPnl}
           hasPositions={portfolio.positions.length > 0}
           hasPrices={!!hasPrices}

@@ -1,4 +1,5 @@
 import { isUsTradingDay } from "./serviceHealthWindows";
+import type { PortfolioData, PortfolioPosition } from "./types";
 
 /**
  * IB's account-level `reqPnL().dailyPnL` only describes a real session on a
@@ -21,4 +22,23 @@ export function currentIbDailyPnl(
 ): number | null {
   if (dailyPnl == null) return null;
   return isIbDailyPnlCurrent(now) ? dailyPnl : null;
+}
+
+/** Spot crypto (IB secType CRYPTO, mapped by ib_sync) trades 24/7. */
+export function isCryptoPosition(pos: Pick<PortfolioPosition, "structure_type">): boolean {
+  return pos.structure_type === "Crypto";
+}
+
+/**
+ * Positions that have a live session right now: every position on a US
+ * trading day, only spot crypto on weekends and full-closure holidays. The
+ * day-move math must run over this subset so a weekend never reports an
+ * equity "day move" off stale Friday marks.
+ */
+export function sessionPositions(
+  portfolio: PortfolioData,
+  now: Date = new Date(),
+): PortfolioPosition[] {
+  if (isIbDailyPnlCurrent(now)) return portfolio.positions;
+  return portfolio.positions.filter(isCryptoPosition);
 }
