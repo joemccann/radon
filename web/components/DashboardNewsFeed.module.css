@@ -93,7 +93,7 @@
 :global(body[data-mobile="true"]) .figcaption.figcaption {
   flex-direction: column;
   gap: 2px;
-  padding: var(--nf-s2) 0 0;
+  padding: var(--nf-s2) var(--nf-s3);
 }
 
 :global(body[data-mobile="true"]) .summary.summary {
