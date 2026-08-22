@@ -497,6 +497,22 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
     expect(requiresIb("vixcor")).toBe(false);
   });
 
+  // ``ivrank`` — radon-ivrank.timer fires daily 22:10 UTC every calendar day
+  // (weekend runs are unchanged-data heartbeats), so a uniform 26h window
+  // matches its daily siblings. IB primary with a UW fallback, so the job
+  // heartbeats through an IB outage: requires_ib stays false.
+  it("ivrank is registered as scheduled with a uniform 26h window", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["ivrank"]).toBeDefined();
+    expect(getServiceCategory("ivrank")).toBe("scheduled");
+    for (const state of ["open", "extended", "closed"] as MarketState[]) {
+      expect(getFreshnessWindowMs("ivrank", state)).toBe(26 * HOUR);
+      expect(getFreshnessWindowMs("ivrank", state)).toBe(
+        getFreshnessWindowMs("vixcor", state),
+      );
+    }
+    expect(requiresIb("ivrank")).toBe(false);
+  });
+
   // ``skew`` publishes one-minute RTH snapshots and retains a daily
   // finalization heartbeat off-hours. UW-only, no IB.
   it("skew uses a tight open window and a daily off-hours window", () => {
