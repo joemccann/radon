@@ -72,6 +72,7 @@ describe.each([
   ["cot", "app/regime/cot/page.tsx"],
   ["ats", "app/regime/ats/page.tsx"],
   ["short", "app/regime/short/page.tsx"],
+  ["ivrank", "app/regime/ivrank/page.tsx"],
 ])("app/regime/%s/page.tsx exists and mounts WorkspaceShell", (tab, rel) => {
   it(`file ${rel} exists`, () => {
     expect(existsSync(join(ROOT, rel))).toBe(true);
@@ -145,6 +146,9 @@ vi.mock("../components/equibles-ats-venue-share/AtsVenueSharePanel", () => ({
 }));
 vi.mock("../components/equibles/EquiblesShortCrowdingPanel", () => ({
   default: () => <div data-testid="short-panel-stub" />
+}));
+vi.mock("../components/IvRankPanel", () => ({
+  default: () => <div data-testid="ivrank-panel-stub" />,
 }));
 vi.mock("../components/CriHistoryChart", () => ({ default: () => null }));
 vi.mock("../components/RegimeRelationshipView", () => ({ default: () => null }));
@@ -396,6 +400,20 @@ describe("RegimePanel — tab is URL-driven", () => {
     const { container } = render(<RegimePanel prices={{}} />);
     within(container).getByRole("button", { name: /^SHORT$/ }).click();
     expect(pushSpy).toHaveBeenCalledWith("/regime/short");
+  });
+
+  it("renders the IV Rank panel when pathname is /regime/ivrank", () => {
+    mockedPathname = "/regime/ivrank";
+    const { container } = render(<RegimePanel prices={{}} />);
+    expect(within(container).getByTestId("ivrank-panel-stub")).toBeTruthy();
+    expect(within(container).queryByTestId("short-panel-stub")).toBeNull();
+  });
+
+  it("clicking IV RANK tab pushes /regime/ivrank", () => {
+    mockedPathname = "/regime/cri";
+    const { container } = render(<RegimePanel prices={{}} />);
+    within(container).getByRole("button", { name: /^IV RANK$/ }).click();
+    expect(pushSpy).toHaveBeenCalledWith("/regime/ivrank");
   });
 
   it("clicking CRI from VCG pushes /regime/cri", () => {

@@ -12,14 +12,14 @@ import type { GexData } from "./useGex";
 export type RegimeTab =
   | "cri" | "vcg" | "gex" | "grg"
   | "breadth" | "bpi" | "margin" | "straddle"
-  | "cor" | "vixcor" | "skew" | "skew2d" | "curve"
+  | "cor" | "vixcor" | "ivrank" | "skew" | "skew2d" | "curve"
   | "cot" | "ats" | "short" | "llm" | "backtest" | "credit";
 
 export type RegimeRailGroup = { label: string; tabs: readonly RegimeTab[] };
 
 export const REGIME_RAIL_GROUPS: readonly RegimeRailGroup[] = [
   { label: "Composite", tabs: ["cri", "grg", "vcg"] },
-  { label: "Volatility", tabs: ["vixcor", "skew", "skew2d", "curve", "straddle"] },
+  { label: "Volatility", tabs: ["vixcor", "ivrank", "skew", "skew2d", "curve", "straddle"] },
   { label: "Positioning", tabs: ["gex", "margin", "credit", "cot", "short", "ats"] },
   { label: "Breadth & sentiment", tabs: ["breadth", "bpi", "cor"] },
   { label: "Models", tabs: ["llm", "backtest"] },
@@ -32,6 +32,7 @@ export const REGIME_TAB_LABEL: Record<RegimeTab, string> = {
   grg: "GRG",
   vcg: "VCG",
   vixcor: "VIX-COR",
+  ivrank: "IV RANK",
   skew: "SKEW",
   skew2d: "SKEW 2D",
   curve: "CURVE",
