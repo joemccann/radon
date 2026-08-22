@@ -43,7 +43,7 @@ const MIDDLEWARE_PERIMETER_ONLY_ROUTES = [
   "equibles-smart-money-13f",
   "flex-token", "flow-surprise", "futures-quote", "garch-convergence",
   "garch-convergence/scan", "ib/ws-ticket", "index-quote",
-  "informed-flow/[ticker]", "llm-token-index", "margin-debt", "prices",
+  "informed-flow/[ticker]", "ivrank", "llm-token-index", "margin-debt", "prices",
   "profile", "risk-free-rate", "skew", "skew2d", "straddle", "vixcor",
   "vol-cone", "watchlist", "watchlist/[symbol]", "workflow", "yield-curve",
   "yield-curve/live",
