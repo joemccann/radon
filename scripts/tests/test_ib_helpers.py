@@ -168,6 +168,14 @@ class TestDetectStructureType:
         assert name == "Stock"
         assert risk == "equity"
 
+    def test_single_spot_crypto(self):
+        # IB spot crypto (PAXOS) trades 24/7; the client keys its weekend
+        # Day Move carve-out on this structure_type.
+        legs = [{"secType": "CRYPTO", "position": 0.5}]
+        name, risk = detect_structure_type(legs)
+        assert name == "Crypto"
+        assert risk == "equity"
+
     def test_single_long_call(self):
         legs = [{"secType": "OPT", "position": 1, "right": "C", "strike": 200}]
         name, risk = detect_structure_type(legs)
