@@ -387,3 +387,12 @@ describe("EquiblesCotPanel — chart and board", () => {
     expect(screen.queryByTestId("cot-board")).toBe(null);
   });
 });
+
+describe("EquiblesCotPanel — freshness copy derived from data + timer", () => {
+  it("states the report age and the next scheduled refresh", () => {
+    renderPanel(hookState({ data: buildData() }));
+    const note = screen.getByTestId("cot-methodnote").textContent ?? "";
+    expect(note).toMatch(/\(\d+d old\)/);
+    expect(note).toMatch(/Next refresh (Sun|Mon|Tue|Wed|Thu|Fri|Sat) \d{4}-\d{2}-\d{2} 01:00 UTC/);
+  });
+});
