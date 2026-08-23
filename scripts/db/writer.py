@@ -969,6 +969,61 @@ def upsert_credit_spread_rows(rows: list[dict[str, Any]], recorded_at: Optional[
     db.commit()
 
 
+DIVYIELD_UPSERT_SQL = """
+INSERT INTO divyield_history
+  (date, pct_above, count_above, total, y10, approximate, recorded_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(date) DO UPDATE SET
+  pct_above   = excluded.pct_above,
+  count_above = excluded.count_above,
+  total       = excluded.total,
+  y10         = excluded.y10,
+  approximate = excluded.approximate,
+  recorded_at = excluded.recorded_at
+"""
+
+
+def upsert_divyield_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
+    """DIVYIELD indicator — one row per date, idempotent on date.
+
+    Chunked multi-row INSERTs (Hrana I/O bounding): the one-time --backfill
+    passes ~440 approximate monthly rows, which per-row would be hundreds of
+    statements on one stream (the rv-ratio 2026-07-21 502 incident). Daily
+    runs pass 0-1 rows.
+    """
+    if not rows:
+        return
+    stamp = recorded_at or _now_iso()
+    db = get_db()
+    for start in range(0, len(rows), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = rows[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        placeholders = ", ".join("(?, ?, ?, ?, ?, ?, ?)" for _ in chunk)
+        params: list[Any] = []
+        for row in chunk:
+            params.extend(
+                (
+                    row["date"],
+                    float(row["pct_above"]),
+                    int(row["count_above"]),
+                    int(row["total"]),
+                    float(row["y10"]),
+                    int(row.get("approximate", 0)),
+                    stamp,
+                )
+            )
+        db.execute(
+            "INSERT INTO divyield_history "
+            "(date, pct_above, count_above, total, y10, approximate, recorded_at) "
+            f"VALUES {placeholders} "
+            "ON CONFLICT(date) DO UPDATE SET "
+            "pct_above = excluded.pct_above, count_above = excluded.count_above, "
+            "total = excluded.total, y10 = excluded.y10, "
+            "approximate = excluded.approximate, recorded_at = excluded.recorded_at",
+            tuple(params),
+        )
+    db.commit()
+
+
 IEI_HYG_UPSERT_SQL = """
 INSERT INTO iei_hyg_history
   (date, iei_close, hyg_close, dxy_close, recorded_at)

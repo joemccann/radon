@@ -1,0 +1,16 @@
+[Unit]
+Description=Radon DIV YIELD Indicator - daily 22:40 UTC SPX dividend yield breadth
+
+[Timer]
+# 22:40 UTC is after the 16:00 ET close year-round and after radon-yield-curve's
+# 20:45/22:30 passes have landed the session's y10 row that this job reads
+# from Turso; the ten-minute offset from the 22:30 pass keeps the two jobs
+# off the same minute. Runs every calendar day: weekend and holiday runs are
+# unchanged-day heartbeats that keep service_health fresh inside the 26h
+# staleness window.
+OnCalendar=*-*-* 22:40:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
