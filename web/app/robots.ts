@@ -14,12 +14,29 @@ import { PUBLIC_SHARE_API_ROUTES } from "@/lib/publicShareRoutes";
 // Allow rules win over Disallow: / for those paths. The global noindex header
 // still keeps them out of search results — noindex governs indexing, not
 // preview fetching.
+//
+// Googlebot is a separate Allow: / group on purpose. GSC 2026-08-20 listed
+// demo.radon.run as "Indexed, though blocked by robots.txt": Disallow: /
+// stopped recrawl, so Google never saw the noindex header and could not
+// drop the URL. Googlebot must be able to fetch the page to honor noindex.
+export const GOOGLE_INDEXING_BOTS = [
+  "Googlebot",
+  "Googlebot-Image",
+  "Google-InspectionTool",
+] as const;
+
 export default function robots(): MetadataRoute.Robots {
   return {
-    rules: {
-      userAgent: "*",
-      allow: [...PUBLIC_SHARE_API_ROUTES],
-      disallow: "/",
-    },
+    rules: [
+      {
+        userAgent: "*",
+        allow: [...PUBLIC_SHARE_API_ROUTES],
+        disallow: "/",
+      },
+      {
+        userAgent: [...GOOGLE_INDEXING_BOTS],
+        allow: "/",
+      },
+    ],
   };
 }
