@@ -10852,9 +10852,8 @@ tr {
 
   .regime-strip-value {
     font-size: 16px;
-    line-height: 1.05;
-    white-space: nowrap;
-    overflow-wrap: normal;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
   }
 
   .regime-strip-day-chg {
