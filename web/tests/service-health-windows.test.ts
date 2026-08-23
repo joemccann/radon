@@ -427,6 +427,22 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
     expect(requiresIb("yield-curve")).toBe(false);
   });
 
+  // ``div-yield`` — radon-divyield.timer fires daily 22:40 UTC every
+  // calendar day (weekend/holiday runs heartbeat on unchanged data), so a
+  // uniform 26h window matches its yield-curve sibling. GitHub constituents
+  // CSV + Yahoo dividends + Turso y10 only, no IB.
+  it("div-yield is registered as scheduled with a uniform 26h window", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["div-yield"]).toBeDefined();
+    expect(getServiceCategory("div-yield")).toBe("scheduled");
+    for (const state of ["open", "extended", "closed"] as MarketState[]) {
+      expect(getFreshnessWindowMs("div-yield", state)).toBe(26 * HOUR);
+      expect(getFreshnessWindowMs("div-yield", state)).toBe(
+        getFreshnessWindowMs("yield-curve", state),
+      );
+    }
+    expect(requiresIb("div-yield")).toBe(false);
+  });
+
   // ``credit-spread`` — radon-credit-spread.timer fires daily 21:45 UTC
   // including weekends (heartbeat), so a uniform 26h window matches its
   // yield-curve sibling. IB-primary with UW/Yahoo fallback; Yahoo is
