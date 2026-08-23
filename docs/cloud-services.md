@@ -544,6 +544,18 @@ approximation, `approximate=1`). Weekend runs are unchanged-day heartbeats.
 Heartbeat `div-yield`. Installed by the deploy's `install-units` verb from
 `installed-units.sha256`. Spec: [`indicators/divyield.md`](indicators/divyield.md).
 
+### HY AD (`radon-hyad.timer`)
+
+`Tue..Sat 11:00 UTC` (`RandomizedDelaySec=300`), oneshot `scripts/fetch_hyad.py`,
+`TimeoutStartSec=300`. High yield corporate bond cumulative advance-decline line
+from FINRA TRACE end-of-day market breadth (public dynarep reporting endpoint,
+UA `radon/2.0`, self-minted double-submit XSRF pair): HY column summed over
+CORP + CORP_144A, rolling 10-day window each run (self-healing over bond-market
+holidays), cumulative line and 21/50-day MAs derived at payload build, SPX
+overlay joined from `credit_spread_history`. Rows in `hyad_history` (2018+).
+Heartbeat `hy-ad`. Installed by the deploy's `install-units` verb from
+`installed-units.sha256`. Spec: [`indicators/hyad.md`](indicators/hyad.md).
+
 ### IV RANK (`radon-ivrank.timer`)
 
 Daily `22:10 UTC` (`RandomizedDelaySec=120`), oneshot
