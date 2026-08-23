@@ -69,6 +69,7 @@ describe.each([
   ["skew2d", "app/regime/skew2d/page.tsx"],
   ["curve", "app/regime/curve/page.tsx"],
   ["credit", "app/regime/credit/page.tsx"],
+  ["iei-hyg", "app/regime/iei-hyg/page.tsx"],
   ["cot", "app/regime/cot/page.tsx"],
   ["ats", "app/regime/ats/page.tsx"],
   ["short", "app/regime/short/page.tsx"],
@@ -137,6 +138,9 @@ vi.mock("../components/YieldCurvePanel", () => ({
 }));
 vi.mock("../components/CreditSpreadPanel", () => ({
   default: () => <div data-testid="credit-panel-stub" />,
+}));
+vi.mock("../components/IeiHygPanel", () => ({
+  default: () => <div data-testid="iei-hyg-panel-stub" />,
 }));
 vi.mock("../components/equibles-cot/EquiblesCotPanel", () => ({
   default: () => <div data-testid="cot-panel-stub" />,
@@ -352,6 +356,20 @@ describe("RegimePanel — tab is URL-driven", () => {
     const { container } = render(<RegimePanel prices={{}} />);
     within(container).getByRole("button", { name: /^CREDIT$/ }).click();
     expect(pushSpy).toHaveBeenCalledWith("/regime/credit");
+  });
+
+  it("renders the IEI/HYG panel when pathname is /regime/iei-hyg", () => {
+    mockedPathname = "/regime/iei-hyg";
+    const { container } = render(<RegimePanel prices={{}} />);
+    expect(within(container).getByTestId("iei-hyg-panel-stub")).toBeTruthy();
+    expect(within(container).queryByTestId("credit-panel-stub")).toBeNull();
+  });
+
+  it("clicking IEI/HYG tab pushes /regime/iei-hyg", () => {
+    mockedPathname = "/regime/cri";
+    const { container } = render(<RegimePanel prices={{}} />);
+    within(container).getByRole("button", { name: /^IEI\/HYG$/ }).click();
+    expect(pushSpy).toHaveBeenCalledWith("/regime/iei-hyg");
   });
 
   it("does not expose a VOL CONE regime tab", () => {
