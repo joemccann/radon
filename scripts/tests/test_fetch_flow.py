@@ -403,6 +403,34 @@ class TestDarkpoolPagination:
             _darkpool_page_cursor(pages[2])
         )
 
+    def test_max_pages_caps_the_walk(self):
+        from fetch_flow import DARKPOOL_PAGE_LIMIT, fetch_darkpool
+
+        page1 = [
+            self._trade(i, f"2026-08-06T16:{59 - (i // 60):02d}:{59 - (i % 60):02d}Z")
+            for i in range(DARKPOOL_PAGE_LIMIT)
+        ]
+        page2 = [
+            self._trade(
+                DARKPOOL_PAGE_LIMIT + i,
+                f"2026-08-06T12:{59 - (i // 60):02d}:{59 - (i % 60):02d}Z",
+            )
+            for i in range(DARKPOOL_PAGE_LIMIT)
+        ]
+        mock_client = MagicMock()
+        mock_client.get_darkpool_flow.side_effect = [
+            {"data": page1},
+            {"data": page2},
+            {"data": page2},
+        ]
+
+        result = fetch_darkpool(
+            "GLD", date="2026-08-06", _client=mock_client, max_pages=2
+        )
+
+        assert len(result) == 2 * DARKPOOL_PAGE_LIMIT
+        assert mock_client.get_darkpool_flow.call_count == 2
+
     def test_stops_when_cursor_cannot_advance(self):
         """If UW returns a full page without a usable older cursor, stop."""
         from fetch_flow import DARKPOOL_PAGE_LIMIT, fetch_darkpool

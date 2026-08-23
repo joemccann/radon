@@ -34,7 +34,11 @@ if command -v launchctl >/dev/null 2>&1; then
   #   radon-informed-flow.timer   OnCalendar=Mon..Fri 07:00  -> run_informed_flow.sh (watchlist sweep)
   #   radon-event-odds.timer      OnCalendar=Mon..Fri 07,11,15:00 -> run_event_odds.sh
   # Each wrapper is holiday-aware (skips non-trading days via market_calendar).
-  for plist in com.radon.cri-scan com.radon.cta-sync com.radon.data-refresh \
+  # com.radon.data-refresh is intentionally omitted: the VPS
+  # radon-flow-refresh.timer owns the hourly (Mon-Fri 09:00-16:00 ET)
+  # scanner / discover / flow-analysis refresh. Loading the laptop agent
+  # too would double-spend the UW daily quota. Keep it off.
+  for plist in com.radon.cri-scan com.radon.cta-sync \
                com.radon.exit-order-service com.radon.monitor-daemon \
                com.radon.vcg-refresh com.radon.catalysts \
                com.radon.informed-flow com.radon.event-odds; do

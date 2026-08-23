@@ -184,7 +184,7 @@ class TestDiscoverMarketWideParallel:
 
         mock_client.get_flow_alerts.return_value = {"data": alerts}
 
-        def track_dp(ticker, days=3, _client=None):
+        def track_dp(ticker, days=3, _client=None, **_kwargs):
             thread_ids.add(threading.current_thread().ident)
             time.sleep(0.02)
             return _mock_dp_result()

@@ -165,9 +165,22 @@ install() {
 
     # 6. Unload old service if present
     launchctl unload "$PLIST_DST" 2>/dev/null || true
+    launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
 
-    # 7. Install and load
+    # 7. Install and load. Default refuse: the VPS radon-flow-refresh.timer
+    # owns the hourly (Mon-Fri 09:00-16:00 ET) scanner / discover / flow
+    # refresh. Running this 15-minute laptop loop as well double-spends the
+    # UW daily quota. Override only with RADON_FORCE_DATA_REFRESH=1.
+    if [[ "${RADON_FORCE_DATA_REFRESH:-}" != "1" ]]; then
+        rm -f "$PLIST_DST"
+        launchctl disable "gui/$(id -u)/$LABEL" 2>/dev/null || true
+        echo "REFUSED: laptop data-refresh stays unloaded (UW quota)."
+        echo "VPS radon-flow-refresh.timer owns the hourly scanner / discover / flow refresh."
+        echo "Override: RADON_FORCE_DATA_REFRESH=1 $0 install"
+        exit 1
+    fi
     cp "$PLIST_SRC" "$PLIST_DST"
+    launchctl enable "gui/$(id -u)/$LABEL" 2>/dev/null || true
     launchctl load "$PLIST_DST"
 
     echo ""

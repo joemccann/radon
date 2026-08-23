@@ -252,3 +252,24 @@ def test_required_uw_failure_cannot_publish_or_alert(capsys):
     assert "secret provider detail" not in json.dumps(result)
     mirror.assert_not_called()
     alert.assert_not_called()
+
+
+def test_fetch_darkpool_multi_caps_scoring_pages():
+    from discover import DISCOVER_DARKPOOL_MAX_PAGES, fetch_darkpool_multi
+
+    mock_client = MagicMock()
+    captured = {}
+
+    def _fake_fetch(ticker, date=None, _client=None, max_pages=None):
+        captured["max_pages"] = max_pages
+        return [{"size": 1, "price": 101, "nbbo_bid": 99, "nbbo_ask": 101}]
+
+    with patch("discover.get_cached_darkpool", return_value=None), \
+         patch("discover.set_cached_darkpool"), \
+         patch("discover.get_last_n_trading_days", return_value=["2026-08-18"]), \
+         patch("discover._is_trading_day", return_value=True), \
+         patch("fetch_flow.fetch_darkpool", side_effect=_fake_fetch):
+        fetch_darkpool_multi("AAPL", days=1, _client=mock_client)
+
+    assert captured["max_pages"] == DISCOVER_DARKPOOL_MAX_PAGES
+    assert DISCOVER_DARKPOOL_MAX_PAGES == 2

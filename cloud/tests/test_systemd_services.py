@@ -96,6 +96,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-skew2d.timer",
     "radon-signals-refresh.service",
     "radon-signals-refresh.timer",
+    "radon-flow-refresh.service",
+    "radon-flow-refresh.timer",
     "radon-vol-cone.service",
     "radon-vol-cone.timer",
     "radon-vol-cone-intraday.service",
@@ -380,6 +382,27 @@ class TestSignalsRefresh:
         assert timer.get("persistent") == "false"
 
 
+class TestFlowRefresh:
+    """Laptop data-refresh is unloaded. These tabs need a VPS hourly producer."""
+
+    def test_oneshot_with_timeout(self, unit, services_dir):
+        svc = unit("radon-flow-refresh.service")["Service"]
+        raw = (services_dir / "radon-flow-refresh.service").read_text()
+        assert svc["type"] == "oneshot"
+        assert svc["environmentfile"] == ENV_FILE_PATH
+        assert "run_flow_refresh.sh" in svc["execstart"]
+        assert int(svc["timeoutstartsec"]) <= 600
+        assert "RADON_UW_CALLER=flow-refresh" in raw
+
+    def test_timer_is_hourly_et(self, unit, services_dir):
+        raw = (services_dir / "radon-flow-refresh.timer").read_text()
+        assert "Mon..Fri" in raw
+        assert "09..16:00:00 America/New_York" in raw
+        assert ":00,15,30,45" not in raw
+        timer = unit("radon-flow-refresh.timer")["Timer"]
+        assert timer.get("persistent") == "false"
+
+
 class TestSecurityRemediationSchedules:
     def test_api_migration_timeout_requires_verified_current_schema(self, services_dir):
         raw = (services_dir / "radon-api.service").read_text()
@@ -486,10 +509,21 @@ class TestSecurityRemediationSchedules:
 class TestSkew:
     """SKEW publishes provisional intraday snapshots during RTH."""
 
-    def test_timer_runs_every_minute_across_both_et_dst_windows(self, unit, services_dir):
+    def test_timer_runs_every_five_minutes_across_both_et_dst_windows(self, unit, services_dir):
         timer = unit("radon-skew.timer")["Timer"]
         raw = (services_dir / "radon-skew.timer").read_text()
-        assert "Mon..Fri *-*-* 13..21:*:00" in raw
+        rth = next(
+            line.split("=", 1)[1].strip()
+            for line in raw.splitlines()
+            if line.strip().startswith("OnCalendar=") and "13..21" in line
+        )
+        assert "Mon..Fri *-*-* 13..21:00,05,10,15,20,25,30,35,40,45,50,55" in rth
+        assert "UTC" in rth
+        assert ":*:00" not in rth
+        assert not any(
+            part.count(":") == 2 and part.split(":")[1] == "*"
+            for part in rth.split()
+        )
         assert "*-*-* 21:45:00 UTC" in raw
         assert timer.get("persistent") == "false"
 
@@ -936,7 +970,7 @@ class TestIncidentWatchdog:
 class TestPerMinuteStartLimits:
     """A per-minute oneshot must not sit on its own start-limit boundary.
 
-    radon-skew.timer fires every minute through RTH while
+    radon-skew.timer historically fired every minute through RTH while
     radon-skew.service carried StartLimitBurst=5 per 300s. Five starts per
     300 seconds IS one per minute, so the unit ran exactly at the ceiling and
     any jitter (RandomizedDelaySec, a run crossing a second boundary) tripped

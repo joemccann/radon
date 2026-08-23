@@ -17,7 +17,7 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const CACHE_PATH = join(process.cwd(), "..", "data", "scanner.json");
-const STALE_THRESHOLD_SECONDS = 600;
+const STALE_THRESHOLD_SECONDS = 3600;
 // Coalesces polling tabs into one source read per window
 // (contract: tests/db-read-cache-contract.test.ts).
 const READ_CACHE_TTL_MS = 10_000;

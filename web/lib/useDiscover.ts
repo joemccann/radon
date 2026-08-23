@@ -8,6 +8,7 @@ const config = {
   endpoint: "/api/discover",
   extractTimestamp: (d: DiscoverData) => d.discovery_time || null,
   loadWhenInactive: false,
+  interval: 0,
 };
 
 export function useDiscover(active: boolean): UseSyncReturn<DiscoverData> {

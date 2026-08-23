@@ -315,11 +315,15 @@ def fetch_darkpool(
     _client: Optional[UWClient] = None,
     *,
     retry_transient: bool = True,
+    max_pages: Optional[int] = None,
 ) -> List[Dict]:
     """Fetch dark pool trade prints for a ticker (full day, multi-page).
 
     UW hard-caps each response at ``DARKPOOL_PAGE_LIMIT`` (500). Walks
     older pages with ``older_than`` until a short page or empty page.
+
+    ``max_pages`` caps the walk (discover scoring). Evaluate and
+    ticker flow reports omit it and use ``DARKPOOL_MAX_PAGES``.
 
     Returns list of individual dark pool transactions with price, size,
     NBBO context, and premium.
@@ -347,7 +351,11 @@ def fetch_darkpool(
         all_trades: List[Dict] = []
         older_than: Optional[str] = None
         seen_ids: set = set()
-        for page_idx in range(DARKPOOL_MAX_PAGES):
+        if max_pages is None:
+            page_cap = DARKPOOL_MAX_PAGES
+        else:
+            page_cap = max(1, min(int(max_pages), DARKPOOL_MAX_PAGES))
+        for page_idx in range(page_cap):
             resp = _fetch_page(client, older_than=older_than)
             if resp is None:
                 break
@@ -377,8 +385,8 @@ def fetch_darkpool(
             older_than = next_cursor
         else:
             logger.warning(
-                "darkpool(%s, date=%s): hit DARKPOOL_MAX_PAGES=%d (%d prints)",
-                ticker, date, DARKPOOL_MAX_PAGES, len(all_trades),
+                "darkpool(%s, date=%s): hit page cap=%d (%d prints)",
+                ticker, date, page_cap, len(all_trades),
             )
         return all_trades
 

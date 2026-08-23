@@ -63,6 +63,10 @@ def is_market_open(date: datetime) -> bool:
     return _is_trading_day(date)
 
 
+# Scoring only needs direction, not the full 20k-print tape.
+# evaluate.py still walks DARKPOOL_MAX_PAGES (40).
+DISCOVER_DARKPOOL_MAX_PAGES = 2
+
 # Scoring weights (must sum to 100)
 WEIGHTS = {
     "dp_strength": 30,      # Dark pool flow strength (0-100)
@@ -144,7 +148,13 @@ def analyze_darkpool_day(trades: list) -> dict:
     }
 
 
-def fetch_darkpool_multi(ticker: str, days: int = 3, _client: UWClient = None) -> dict:
+def fetch_darkpool_multi(
+    ticker: str,
+    days: int = 3,
+    _client: UWClient = None,
+    *,
+    max_pages: int = DISCOVER_DARKPOOL_MAX_PAGES,
+) -> dict:
     """Fetch multiple days of dark pool data for sustained direction analysis.
 
     Always includes today (if trading day) even during market hours.
@@ -167,7 +177,9 @@ def fetch_darkpool_multi(ticker: str, days: int = 3, _client: UWClient = None) -
 
         trades = get_cached_darkpool(ticker, date)
         if trades is None:
-            trades = fetch_darkpool(ticker, date=date, _client=client)
+            trades = fetch_darkpool(
+                ticker, date=date, _client=client, max_pages=max_pages
+            )
             if isinstance(trades, list):
                 set_cached_darkpool(ticker, date, trades)
         if isinstance(trades, list):
@@ -431,7 +443,8 @@ def _provider_failure(operation: str, exc: Exception, ticker: str | None = None)
 
 def discover_targeted(tickers: list, dp_days: int = 3,
                       min_premium: int = 50000, top: int = 20,
-                      max_workers: int = 10) -> dict:
+                      max_workers: int = 10,
+                      dp_pages: int = DISCOVER_DARKPOOL_MAX_PAGES) -> dict:
     """
     Discover edge signals for an explicit list of tickers.
 
@@ -467,7 +480,9 @@ def discover_targeted(tickers: list, dp_days: int = 3,
                 "sweeps": 0, "vol_oi_ratios": [], "sector": "", "issue_type": ""
             })
 
-            dp = fetch_darkpool_multi(ticker, days=dp_days, _client=client)
+            dp = fetch_darkpool_multi(
+                ticker, days=dp_days, _client=client, max_pages=dp_pages
+            )
             return _build_candidate(ticker, flow_data, dp)
 
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
@@ -515,7 +530,8 @@ def discover_targeted(tickers: list, dp_days: int = 3,
 
 def discover(min_premium: int = 500000, min_alerts: int = 1,
              dp_days: int = 3, exclude_indices: bool = True,
-             tickers: list = None, top: int = 20) -> dict:
+             tickers: list = None, top: int = 20,
+             dp_pages: int = DISCOVER_DARKPOOL_MAX_PAGES) -> dict:
     """
     Discover new trading candidates.
 
@@ -529,6 +545,7 @@ def discover(min_premium: int = 500000, min_alerts: int = 1,
     if tickers:
         return discover_targeted(
             tickers, dp_days=dp_days, min_premium=min_premium, top=top,
+            dp_pages=dp_pages,
         )
 
     # --- Market-wide mode (original behavior) ---
@@ -583,7 +600,9 @@ def discover(min_premium: int = 500000, min_alerts: int = 1,
         total = len(tickers_to_check)
 
         def _process_candidate(ticker):
-            dp = fetch_darkpool_multi(ticker, days=dp_days, _client=client)
+            dp = fetch_darkpool_multi(
+                ticker, days=dp_days, _client=client, max_pages=dp_pages
+            )
             return _build_candidate(ticker, all_flow[ticker], dp)
 
         with ThreadPoolExecutor(max_workers=10) as pool:
@@ -642,6 +661,8 @@ def main():
                    help="Minimum premium filter (default $500k market-wide, $50k targeted)")
     p.add_argument("--min-alerts", type=int, default=1,
                    help="Minimum alerts per ticker in market-wide mode (default 1)")
+    p.add_argument("--dp-pages", type=int, default=DISCOVER_DARKPOOL_MAX_PAGES,
+                   help="Dark pool pages per ticker-day for scoring (default 2; evaluate uses 40)")
     p.add_argument("--dp-days", type=int, default=3,
                    help="Days of dark pool data to check (default 3)")
     p.add_argument("--top", type=int, default=20,
@@ -666,6 +687,7 @@ def main():
         exclude_indices=not args.include_indices,
         tickers=resolved,
         top=args.top,
+        dp_pages=args.dp_pages,
     )
 
     if not result.get("error") and not result.get("degraded"):

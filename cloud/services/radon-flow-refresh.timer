@@ -1,0 +1,12 @@
+[Unit]
+Description=Radon flow tabs refresh - hourly during ET trading hours
+
+[Timer]
+# Fires hourly at minute 00 Mon-Fri 09:00-16:00 ET.
+# Matches FLOW_TAB_COOLDOWN_S = 3600 so a scheduled POST is never
+# cooldown-suppressed. Wrapper exits 0 when the session is closed.
+OnCalendar=Mon..Fri *-*-* 09..16:00:00 America/New_York
+Persistent=false
+
+[Install]
+WantedBy=timers.target

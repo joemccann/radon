@@ -7,7 +7,7 @@
  *   making the freshness banner lie. The fix: parse via parseScanTime() so
  *   naive strings are coerced to UTC.
  *
- * STALE_THRESHOLD_SECONDS = 600 (10 min) inside the route.
+ * STALE_THRESHOLD_SECONDS = 3600 (hourly flow-refresh) inside the route.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createClient, type Client } from "@libsql/client";
@@ -93,9 +93,8 @@ describe("GET /api/discover — naive ISO scan_time is treated as UTC", () => {
     expect(body.cache_meta.age_seconds).toBeLessThan(60);
   });
 
-  it("naive scan_time produced 11 minutes ago IS stale", async () => {
-    // 11 minutes before the anchored now (>10min threshold).
-    const naive = "2026-05-09T01:52:00.000000";
+  it("naive scan_time produced 61 minutes ago IS stale", async () => {
+    const naive = "2026-05-09T01:02:00.000000";
     await insertSnapshot(naive);
 
     const { GET } = await import("../app/api/discover/route");
@@ -103,7 +102,7 @@ describe("GET /api/discover — naive ISO scan_time is treated as UTC", () => {
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.cache_meta.is_stale).toBe(true);
-    expect(body.cache_meta.age_seconds).toBeGreaterThan(600);
+    expect(body.cache_meta.age_seconds).toBeGreaterThan(3600);
   });
 
   it("timezone-aware scan_time still parses correctly (regression: don't double-shift)", async () => {
