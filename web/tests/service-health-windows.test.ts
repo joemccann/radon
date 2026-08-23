@@ -443,6 +443,19 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
     expect(requiresIb("div-yield")).toBe(false);
   });
 
+  // ``hy-ad`` — radon-hyad.timer fires Tue..Sat 11:00 UTC, the morning after
+  // FINRA TRACE end-of-day finalization (T+1). Uniform 120h window covers the
+  // T+1 lag plus 3-day weekends and bond-market-only holidays; older means
+  // the writer is down. FINRA HTTP only — no IB.
+  it("hy-ad is registered as scheduled with a uniform 120h window", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["hy-ad"]).toBeDefined();
+    expect(getServiceCategory("hy-ad")).toBe("scheduled");
+    for (const state of ["open", "extended", "closed"] as MarketState[]) {
+      expect(getFreshnessWindowMs("hy-ad", state)).toBe(120 * HOUR);
+    }
+    expect(requiresIb("hy-ad")).toBe(false);
+  });
+
   // ``credit-spread`` — radon-credit-spread.timer fires daily 21:45 UTC
   // including weekends (heartbeat), so a uniform 26h window matches its
   // yield-curve sibling. IB-primary with UW/Yahoo fallback; Yahoo is
