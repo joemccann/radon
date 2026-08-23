@@ -874,3 +874,99 @@ class TestHranaBoundedJournalScans:
         rows = [r for r in _journal_rows(conn) if r["payload"].get("ib_exec_id") == EWY_EXEC_ID]
         assert len(rows) == 1
         assert rows[0]["trade_id"] == "0race"
+
+
+class TestExactIdSkipSpendsTheFingerprintClaim:
+    """REL-042 / R-088: the counted fingerprint coverage was never SPENT on
+    the exact-exec_id skip path (`continue` before `claim_fill`).
+
+    IB slices one order into fills A and B with identical fingerprints. The
+    journal already holds A from a previous partial run. Processing A hits
+    `covers_exec_id` and skips WITHOUT claiming, so `claimed[F]` stays 0;
+    processing B then sees `fingerprints[F] = 1 > claimed[F] = 0` and is
+    dropped as "already journaled under another id convention" and never
+    inserted. The missing row flows into `compute_open_basis_for_ticker`,
+    which overrides IB's own avgCost — permanently wrong basis and P&L for
+    that ticker. This is the most common real path: a re-run after a
+    partial previous run.
+    """
+
+    def test_second_partial_lands_when_the_first_is_already_journaled(self, monkeypatch):
+        conn = _fresh_db()
+        _patch_db(conn, monkeypatch)
+        monkeypatch.setenv("RADON_DB_TEST_WRITE_OK", "1")
+
+        morning = dict(EWY_EXEC_PAYLOAD)
+        morning["time"] = "2026-06-08T14:02:11+00:00"
+        afternoon = dict(EWY_EXEC_PAYLOAD)
+        afternoon["execId"] = "000205d2.6a26a999.01.01"
+        afternoon["time"] = "2026-06-08T18:31:44+00:00"
+
+        _insert_executed_order(conn, morning["execId"], morning, morning["time"])
+        _insert_executed_order(conn, afternoon["execId"], afternoon, afternoon["time"])
+
+        mod = _import_backfill()
+        # Partial previous run: only the morning fill made it in.
+        first = mod.backfill(conn, exec_ids=[morning["execId"]], dry_run=False)
+        assert [a["status"] for a in first] == ["inserted_from_eo"]
+
+        # Re-run over BOTH: the morning fill is skipped by exact id and must
+        # spend its fingerprint claim, so the afternoon fill still inserts.
+        second = mod.backfill(
+            conn, exec_ids=[morning["execId"], afternoon["execId"]], dry_run=False
+        )
+
+        assert [a["status"] for a in second] == ["skipped", "inserted_from_eo"], second
+        assert len(_journal_rows(conn)) == 2
+
+    def test_corrected_exec_id_skip_also_spends_the_claim(self, monkeypatch):
+        """The root layer skips a re-delivered `<root>.02`; that must spend
+        the claim too, or its same-fingerprint sibling is swallowed."""
+        conn = _fresh_db()
+        _patch_db(conn, monkeypatch)
+        monkeypatch.setenv("RADON_DB_TEST_WRITE_OK", "1")
+
+        morning = dict(EWY_EXEC_PAYLOAD)
+        morning["time"] = "2026-06-08T14:02:11+00:00"
+        correction = dict(morning)
+        correction["execId"] = morning["execId"].rsplit(".", 1)[0] + ".02"
+        sibling = dict(EWY_EXEC_PAYLOAD)
+        sibling["execId"] = "000205d2.6a26a999.01.01"
+        sibling["time"] = "2026-06-08T18:31:44+00:00"
+
+        _insert_executed_order(conn, morning["execId"], morning, morning["time"])
+        _insert_executed_order(conn, correction["execId"], correction, morning["time"])
+        _insert_executed_order(conn, sibling["execId"], sibling, sibling["time"])
+
+        mod = _import_backfill()
+        actions = mod.backfill(
+            conn,
+            exec_ids=[morning["execId"], correction["execId"], sibling["execId"]],
+            dry_run=False,
+        )
+
+        assert [a["status"] for a in actions] == [
+            "inserted_from_eo",
+            "skipped",
+            "inserted_from_eo",
+        ], actions
+        assert len(_journal_rows(conn)) == 2
+
+    def test_a_genuine_reimport_is_still_skipped(self, monkeypatch):
+        """Control: one journal row, one EO row under a different id
+        namespace — spending the claim must not turn a re-import into a
+        duplicate insert."""
+        conn = _fresh_db()
+        _patch_db(conn, monkeypatch)
+        monkeypatch.setenv("RADON_DB_TEST_WRITE_OK", "1")
+
+        _insert_journal(
+            conn, EWY_FLEX_TRADE_ID, _flex_rehydrated_ewy_row(), "2026-06-08"
+        )
+        _insert_executed_order(conn, EWY_EXEC_ID, EWY_EXEC_PAYLOAD, EWY_FILL_TIME)
+
+        mod = _import_backfill()
+        actions = mod.backfill(conn, exec_ids=[EWY_EXEC_ID], dry_run=False)
+
+        assert [a["status"] for a in actions] == ["skipped"]
+        assert len(_journal_rows(conn)) == 1
