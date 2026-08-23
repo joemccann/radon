@@ -52,7 +52,7 @@ Yahoo Finance is **ABSOLUTE LAST RESORT**. Never make Yahoo the scheduled, prima
 ## Portfolio / Basis
 
 - IB is the only current portfolio source. Verify with `python3.13 scripts/ib_sync.py`.
-- `ib_insync.positions()` is cached; `IBClient.get_positions()` calls `reqPositions()` and sleeps before reading by default.
+- `ib_insync.positions()` is cached; `IBClient.get_positions()` calls `reqPositions()` then waits for `positionEndEvent` and finite `avgCost` (1s cap) before reading.
 - `scripts/clients/journal_basis.py` computes lot-matched open basis from raw journal rows and overrides IB's drifting VWAP in `ib_sync.py`.
 - `PortfolioLeg.avg_cost` convention is per-contract for options and per-share for stocks; web display divides option cost by 100 when needed.
 - Entry-date fallback in `ib_sync.py` must match web docs: blotter per-contract -> trade_log ticker/structure -> IB fills -> previous portfolio ticker/structure/expiry -> today.

@@ -29,6 +29,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(Path(__file__).parent))
 
 from clients.ib_client import IBClient, CLIENT_IDS, DEFAULT_HOST, DEFAULT_GATEWAY_PORT
+from clients.ib_timing import PhaseTimer
 
 CLIENT_ID = CLIENT_IDS.get("ib_place_order", 26)
 PORT = DEFAULT_GATEWAY_PORT
@@ -315,10 +316,14 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
     outside_rth = bool(params.get("outsideRth", False))
 
     client = IBClient()
+    timer = PhaseTimer("ib_place_order")
 
     try:
         client.connect(host=DEFAULT_HOST, port=PORT, client_id="auto", timeout=10)
+        timer.mark("connect")
     except Exception as e:
+        timer.mark("done")
+        timer.emit()
         return {"status": "error", "message": f"Connection failed: {e}"}
 
     # REL-006: once placeOrder has transmitted, ANY exception must return an
@@ -440,6 +445,8 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
             if not qualified:
                 return {"status": "error", "message": f"Could not qualify contract: {symbol}"}
             contract = qualified[0]
+
+        timer.mark("qualify")
 
         # Capture IB error events so we can detect silent rejections
         ib_errors: list = []
@@ -569,6 +576,8 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
             if ib_errors:
                 break
 
+        timer.mark("permId")
+
         order_id = trade.order.orderId
         perm_id = trade.order.permId
         status = trade.orderStatus.status if trade.orderStatus else "Unknown"
@@ -673,6 +682,8 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
         return {"status": "error", "message": str(e)}
 
     finally:
+        timer.mark("done")
+        timer.emit()
         client.disconnect()
 
 

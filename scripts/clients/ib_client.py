@@ -3,6 +3,10 @@
 Wraps ``ib_insync.IB`` with connection management, order operations,
 market data, portfolio queries, fill monitoring, and Flex Query support.
 
+This is not a Rust port. IBClient is wait-and-forward on the TWS socket;
+speed work is event-driven completion with hard caps (``wait_until``),
+not a language swap.
+
 Usage::
 
     from clients.ib_client import IBClient
@@ -23,10 +27,11 @@ Usage::
 from __future__ import annotations
 
 import logging
+import math
 import os
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Set, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Union
 
 from dotenv import load_dotenv
 from ib_insync import IB, FlexReport, Option
@@ -149,6 +154,83 @@ _INVALID_CONTRACT_CODES = frozenset({
 })
 
 logger = logging.getLogger("ib_client")
+
+# IB unset / DBL_MAX — same sentinel ib_insync and TWS use for "no value yet"
+UNSET_DOUBLE = 1.7976931348623157e+308
+_WAIT_POLL_S = 0.05
+
+
+def is_valid_ib_number(val: Any) -> bool:
+    """True when ``val`` is a finite number and not IB's unset sentinel."""
+    if val is None:
+        return False
+    try:
+        num = float(val)
+    except (TypeError, ValueError):
+        return False
+    if not math.isfinite(num):
+        return False
+    if num == UNSET_DOUBLE or num >= 1e307:
+        return False
+    return True
+
+
+def ticker_has_quote(ticker: Any) -> bool:
+    """True when a ticker has a usable last, bid/ask pair, or close."""
+    if ticker is None:
+        return False
+    market_price = None
+    market_price_fn = getattr(ticker, "marketPrice", None)
+    if callable(market_price_fn):
+        try:
+            market_price = market_price_fn()
+        except Exception:
+            market_price = None
+    if is_valid_ib_number(market_price) and float(market_price) > 0:
+        return True
+    bid = getattr(ticker, "bid", None)
+    ask = getattr(ticker, "ask", None)
+    if (
+        is_valid_ib_number(bid)
+        and is_valid_ib_number(ask)
+        and float(bid) > 0
+        and float(ask) > 0
+    ):
+        return True
+    for attr in ("last", "close"):
+        price = getattr(ticker, attr, None)
+        if is_valid_ib_number(price) and float(price) > 0:
+            return True
+    return False
+
+
+def pnl_is_ready(pnl: Any) -> bool:
+    """True when account or single PnL has a first valid daily or unrealized tick."""
+    if pnl is None:
+        return False
+    return is_valid_ib_number(getattr(pnl, "dailyPnL", None)) or is_valid_ib_number(
+        getattr(pnl, "unrealizedPnL", None)
+    )
+
+
+def bind_event(event: Any, handler: Callable) -> Callable[[], None]:
+    """Subscribe ``handler`` to an ib_insync Event. Returns an unbind callable.
+
+    MagicMock and other non-Event objects raise TypeError on ``+=``; treat
+    that as no event so the caller times out instead of flooring a sleep.
+    """
+    try:
+        event += handler
+    except TypeError:
+        return lambda: None
+
+    def unbind() -> None:
+        try:
+            event.__isub__(handler)
+        except TypeError:
+            pass
+
+    return unbind
 
 
 # ---------------------------------------------------------------------------
@@ -364,6 +446,31 @@ class IBClient:
         if not self.is_connected():
             raise IBConnectionError("Not connected to IB. Call connect() first.")
 
+    def wait_until(
+        self,
+        predicate: Callable[[], bool],
+        timeout: float,
+        poll: float = _WAIT_POLL_S,
+    ) -> bool:
+        """Poll ``predicate`` while draining IB events. Cap at ``timeout``.
+
+        Elapsed time is the sum of ``ib.sleep`` steps (not wall clock) so
+        mocked sleeps in tests stay instant and do not busy-loop.
+        Returns True as soon as ``predicate`` is true; False on timeout.
+        """
+        if timeout <= 0:
+            return bool(predicate())
+        if predicate():
+            return True
+        elapsed = 0.0
+        while elapsed < timeout:
+            step = min(poll, timeout - elapsed)
+            self._ib.sleep(step)
+            elapsed += step
+            if predicate():
+                return True
+        return bool(predicate())
+
     # -- error handling -----------------------------------------------------
 
     def _on_error(self, reqId: Any, errorCode: Any, errorString: str, contract: Any = None) -> None:
@@ -446,17 +553,38 @@ class IBClient:
         feedback_ib_position_cache_stale_avgcost.md (forthcoming).
 
         Set ``refresh=False`` for tight read loops where you've already
-        forced a refresh on a parent call and want to avoid the ~1 s
-        sleep. The default is the safe one.
+        forced a refresh on a parent call and want to avoid the wait.
+        The default is the safe one.
+
+        Wait is event-driven: ``positionEndEvent`` AND finite ``avgCost``
+        on every row, hard-capped at 1s. Size can arrive before VWAP;
+        returning on the first ``positionEvent`` reintroduces the stale
+        avgCost snapshot. No event (unit mocks) falls through to the cap.
         """
         self._require_connection()
         if refresh:
             try:
-                self._ib.reqPositions()
-                # ib_insync's positionEvent fires per-position as TWS pushes;
-                # 1 s is enough for the full set in steady state and bounded
-                # so a slow gateway doesn't stall the caller.
-                self._ib.sleep(1)
+                ended = False
+
+                def _on_end() -> None:
+                    nonlocal ended
+                    ended = True
+
+                unbind = bind_event(getattr(self._ib, "positionEndEvent", None), _on_end)
+                try:
+                    self._ib.reqPositions()
+
+                    def _ready() -> bool:
+                        if not ended:
+                            return False
+                        return all(
+                            is_valid_ib_number(getattr(pos, "avgCost", None))
+                            for pos in self._ib.positions()
+                        )
+
+                    self.wait_until(_ready, timeout=1.0)
+                finally:
+                    unbind()
             except Exception as exc:
                 # Don't fail the whole sync if reqPositions itself errors —
                 # fall back to the (possibly slightly stale) cache.
@@ -480,7 +608,7 @@ class IBClient:
         """Request P&L for account. Returns PnL with dailyPnL, unrealizedPnL, realizedPnL."""
         self._require_connection()
         pnl = self._ib.reqPnL(account)
-        self._ib.sleep(2)
+        self.wait_until(lambda: pnl_is_ready(pnl), timeout=2.0)
         return pnl
 
     def cancel_pnl(self, pnl_obj: Any) -> None:
@@ -498,7 +626,7 @@ class IBClient:
         """
         self._require_connection()
         pnl = self._ib.reqPnLSingle(account, "", con_id)
-        self._ib.sleep(0.5)  # brief sleep; batch callers will poll separately
+        self.wait_until(lambda: pnl_is_ready(pnl), timeout=0.5)
         return pnl
 
     def cancel_pnl_single(self, account: str, con_id: int) -> None:
@@ -654,16 +782,28 @@ class IBClient:
         """
         self._require_connection()
         self._ib.reqGlobalCancel()
-        self._ib.sleep(0.5)
+        self.wait_until(lambda: not self._ib.openTrades(), timeout=0.5)
 
     def get_open_orders(self) -> list:
         """Return all open orders across all clients.
 
         Uses ``reqAllOpenOrders`` (master client sees everything).
+        Waits for ``openOrderEndEvent``, hard-capped at 0.5s. Empty book
+        is valid — do not return just because ``openTrades()`` is empty.
         """
         self._require_connection()
-        self._ib.reqAllOpenOrders()
-        self._ib.sleep(0.5)
+        ended = False
+
+        def _on_end() -> None:
+            nonlocal ended
+            ended = True
+
+        unbind = bind_event(getattr(self._ib, "openOrderEndEvent", None), _on_end)
+        try:
+            self._ib.reqAllOpenOrders()
+            self.wait_until(lambda: ended, timeout=0.5)
+        finally:
+            unbind()
         return self._ib.openTrades()
 
     def get_open_trades(self) -> list:
@@ -714,7 +854,7 @@ class IBClient:
         self._require_connection()
         ticker = self._ib.reqMktData(contract, generic_ticks, snapshot, False)
         if snapshot:
-            self._ib.sleep(2)
+            self.wait_until(lambda: ticker_has_quote(ticker), timeout=2.0)
         else:
             # Track active streaming subscription
             self._subscriptions.append({
@@ -768,7 +908,7 @@ class IBClient:
                 f"Could not qualify option: {symbol} {expiry} ${strike} {right}"
             )
         ticker = self._ib.reqMktData(qualified[0], "", False, False)
-        self._ib.sleep(2)
+        self.wait_until(lambda: ticker_has_quote(ticker), timeout=2.0)
         return ticker
 
     def qualify_contract(self, contract: Any) -> Any:
@@ -862,6 +1002,7 @@ class IBClient:
         use_rth: bool = True,
         end_date: str = "",
         keep_up_to_date: bool = False,
+        timeout: float = 15.0,
     ) -> list:
         """Request historical bar data.
 
@@ -873,18 +1014,33 @@ class IBClient:
             use_rth: Regular trading hours only.
             end_date: End date/time (empty = now).
             keep_up_to_date: Keep the bars updated.
+            timeout: Seconds to wait for the initial bar set. ib_insync has
+                no per-request timeout; 2FA otherwise blocks forever.
         """
         self._require_connection()
-        return self._ib.reqHistoricalData(
-            contract,
-            endDateTime=end_date,
-            durationStr=duration,
-            barSizeSetting=bar_size,
-            whatToShow=what_to_show,
-            useRTH=use_rth,
-            formatDate=1,
-            keepUpToDate=keep_up_to_date,
-        )
+        import asyncio
+
+        async def _run() -> Any:
+            return await asyncio.wait_for(
+                self._ib.reqHistoricalDataAsync(
+                    contract,
+                    endDateTime=end_date,
+                    durationStr=duration,
+                    barSizeSetting=bar_size,
+                    whatToShow=what_to_show,
+                    useRTH=use_rth,
+                    formatDate=1,
+                    keepUpToDate=keep_up_to_date,
+                ),
+                timeout=timeout,
+            )
+
+        try:
+            return self._ib.run(_run())
+        except asyncio.TimeoutError as exc:
+            raise IBTimeoutError(
+                f"Historical data timed out after {timeout}s"
+            ) from exc
 
     def get_head_timestamp(
         self,
