@@ -3,7 +3,7 @@ import Link from "next/link";
 import { EditorialEyebrow } from "@/components/atoms/EditorialEyebrow";
 import { EditorialFooter } from "@/components/sections/EditorialFooter";
 import { EditorialHeader } from "@/components/sections/EditorialHeader";
-import { DEMO_APP_URL, siteUrl } from "@/lib/seo";
+import { DEMO_APP_URL, STATUS_PAGE_ROBOTS, siteUrl } from "@/lib/seo";
 
 /**
  * Public system-surface map (P3).
@@ -17,7 +17,7 @@ export const metadata: Metadata = {
   description:
     "Where Radon public and operator surfaces live: marketing site, free demo, and authenticated terminal.",
   alternates: { canonical: `${siteUrl}/status` },
-  robots: { index: true, follow: true },
+  robots: STATUS_PAGE_ROBOTS,
 };
 
 // Static page — Edge-safe, no Node-only APIs, no account data.

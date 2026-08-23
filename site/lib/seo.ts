@@ -15,7 +15,7 @@ export const SITE_DESCRIPTION =
 
 // Frozen content date for sitemap lastmod. Update when the page copy or
 // structure meaningfully changes; a request-time stamp gets ignored by Google.
-export const SITE_CONTENT_LAST_MODIFIED = "2026-07-03";
+export const SITE_CONTENT_LAST_MODIFIED = "2026-08-23";
 export const SITE_KEYWORDS = [
   "Radon Terminal",
   "market structure",
@@ -27,7 +27,15 @@ export const SITE_KEYWORDS = [
   "institutional trading",
   "crash risk index",
   "gamma exposure",
+  "fractional kelly",
+  "unusual whales",
+  "interactive brokers",
+  "defined-risk options",
 ];
+export const STATUS_PAGE_ROBOTS = {
+  index: false,
+  follow: true,
+} as const;
 export const SOCIAL_IMAGE_PATH = "/og-image.png";
 export const SOCIAL_IMAGE_ALT =
   "Radon Terminal marketing card: serif headline reading Institutions finish buying before the chart moves, over the editorial research-journal canvas with the radon.run source rail.";
@@ -129,6 +137,7 @@ export const siteStructuredData = [
     "@context": "https://schema.org",
     "@type": "Organization",
     name: "Radon",
+    alternateName: ["Radon Terminal"],
     url: siteUrl,
     logo: `${siteUrl}/brand/radon-app-icon.svg`,
     sameAs: [GITHUB_URL, X_PROFILE_URL],

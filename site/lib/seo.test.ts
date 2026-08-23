@@ -10,8 +10,10 @@ import {
   DEFAULT_SITE_URL,
   SITE_CONTENT_LAST_MODIFIED,
   SITE_DESCRIPTION,
+  SITE_KEYWORDS,
   SITE_NAME,
   SITE_TITLE,
+  STATUS_PAGE_ROBOTS,
   X_PROFILE_URL,
   siteMetadata,
   siteStructuredData,
@@ -84,6 +86,7 @@ describe("site SEO contract", () => {
         X_PROFILE_URL,
       ]),
     );
+    expect(organization.alternateName).toEqual(["Radon Terminal"]);
     expect(organization.founder).toMatchObject({
       "@type": "Person",
       name: "Joe McCann",
@@ -122,16 +125,35 @@ describe("site SEO contract", () => {
     expect(audience.audienceType).toContain("options traders");
   });
 
+  it("targets the queries Search Console already shows impressions for", () => {
+    const keywords = SITE_KEYWORDS.join(" ").toLowerCase();
+    for (const term of [
+      "fractional kelly",
+      "crash risk index",
+      "dark pool",
+      "unusual whales",
+      "interactive brokers",
+    ]) {
+      expect(keywords).toContain(term);
+    }
+  });
+
+  it("marks /status noindex so the thin surface map stays out of the sitemap quality set", () => {
+    expect(STATUS_PAGE_ROBOTS).toEqual({ index: false, follow: true });
+  });
+
   it("publishes crawl routes and manifest metadata", () => {
     expect(robots()).toEqual({
       rules: [
         {
           userAgent: "*",
           allow: "/",
+          disallow: "/_next/",
         },
         {
           userAgent: AI_ANSWER_ENGINE_BOTS,
           allow: "/",
+          disallow: "/_next/",
         },
       ],
       sitemap: `${siteUrl}/sitemap.xml`,
@@ -150,10 +172,12 @@ describe("site SEO contract", () => {
     );
 
     const routes = sitemap();
-    // home + clusters + legal + public /status + agent/developer surfaces
+    // home + clusters + legal + agent/developer surfaces. /status is noindex
+    // and must not occupy a sitemap slot (GSC: discovered, not indexed).
     expect(routes).toHaveLength(
-      1 + clusterPages.length + legalPages.length + 1 + agentPages.length,
+      1 + clusterPages.length + legalPages.length + agentPages.length,
     );
+    expect(routes.map((route) => route.url)).not.toContain(`${siteUrl}/status`);
     expect(routes[0]).toMatchObject({
       url: siteUrl,
       changeFrequency: "weekly",
@@ -181,18 +205,9 @@ describe("site SEO contract", () => {
       });
       expect(route.lastModified).toEqual(new Date(page.lastModified));
     });
-    const statusRoute = routes[1 + clusterPages.length + legalPages.length];
-    expect(statusRoute).toMatchObject({
-      url: `${siteUrl}/status`,
-      changeFrequency: "monthly",
-      priority: 0.4,
-    });
-    expect(statusRoute.lastModified).toEqual(
-      new Date(SITE_CONTENT_LAST_MODIFIED),
-    );
     agentPages.forEach((page, index) => {
       const route =
-        routes[2 + clusterPages.length + legalPages.length + index];
+        routes[1 + clusterPages.length + legalPages.length + index];
       expect(route).toMatchObject({
         url: `${siteUrl}/${page.slug}`,
         changeFrequency: "monthly",

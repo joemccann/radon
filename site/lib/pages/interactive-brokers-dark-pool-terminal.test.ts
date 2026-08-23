@@ -27,6 +27,9 @@ describe("interactive-brokers-dark-pool-terminal content contract", () => {
     expect(PAGE_TITLE.length).toBeLessThanOrEqual(60);
     expect(PAGE_TITLE.endsWith(" | Radon Terminal")).toBe(true);
     expect(PAGE_DESCRIPTION.length).toBeLessThanOrEqual(160);
+    expect(PAGE_DESCRIPTION.startsWith("Interactive Brokers dark pool terminal:")).toBe(
+      true,
+    );
   });
 
   it("bans em and en dashes and AI cliches from the copy", () => {

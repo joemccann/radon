@@ -22,7 +22,7 @@ export const CRASH_RISK_INDEX_SLUG = "crash-risk-index";
 export const CRASH_RISK_INDEX_NAV_LABEL = "Crash Risk Index";
 
 export const CRASH_RISK_INDEX_TITLE =
-  "CRI Crash Risk Index Options Regime | Radon Terminal";
+  "CRI Crash Risk Index: VIX, VVIX, COR1M | Radon Terminal";
 export const CRASH_RISK_INDEX_DESCRIPTION =
   "CRI is Radon's Crash Risk Index: VIX, VVIX, COR1M implied correlation, and SPX trend, each scored 0 to 25 and summed into a published 0 to 100 crash regime read.";
 
@@ -34,7 +34,7 @@ export const CRASH_RISK_INDEX_H1 =
 // SITE_CONTENT_LAST_MODIFIED in lib/seo.ts). Bump dateModified when the copy
 // meaningfully changes.
 export const CRASH_RISK_INDEX_DATE_PUBLISHED = "2026-07-03";
-export const CRASH_RISK_INDEX_DATE_MODIFIED = "2026-07-03";
+export const CRASH_RISK_INDEX_DATE_MODIFIED = "2026-08-23";
 
 export const crashRiskIndexUrl = `${siteUrl}/${CRASH_RISK_INDEX_SLUG}`;
 
