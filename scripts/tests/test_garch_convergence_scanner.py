@@ -1,7 +1,20 @@
 """Regression tests for garch_convergence.py explicit ticker-scan support."""
 from __future__ import annotations
 
+from contextlib import contextmanager
+
+import pytest
+
 import garch_convergence as garch
+
+
+@pytest.fixture(autouse=True)
+def _no_live_scan_ib(monkeypatch):
+    @contextmanager
+    def _none():
+        yield None
+
+    monkeypatch.setattr(garch, "scan_ib_session", _none)
 
 
 def test_resolve_inputs_pairs_explicit_tickers_consecutively():
@@ -71,3 +84,61 @@ def test_resolve_inputs_indexes_passes_vol_driver_gate(index_preset_dir):
         vol_driver=driver,
     )
     assert result.gate_vol_driver is True
+
+
+def test_fetch_prices_ib_hit_skips_uw_ohlc(monkeypatch):
+    from types import SimpleNamespace
+
+    class RecordingUW:
+        def __init__(self):
+            self.calls = []
+
+        def get_stock_ohlc(self, ticker, candle_size="1d"):
+            self.calls.append((ticker, candle_size))
+            return {"data": [{"close": 1.0}] * 60}
+
+    class RecordingIB:
+        def get_historical_data(self, contract, **kwargs):
+            return [SimpleNamespace(date="2026-01-01", close=100.0 + i) for i in range(60)]
+
+    uw = RecordingUW()
+    monkeypatch.setattr(
+        garch,
+        "_fetch_yahoo_prices",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("yahoo")),
+    )
+
+    prices = garch._fetch_prices("AAPL", uw, ib=RecordingIB())
+
+    assert uw.calls == []
+    assert len(prices) == 60
+    assert prices[0] == 100.0
+    assert prices[-1] == 159.0
+
+
+def test_fetch_prices_ib_miss_calls_uw_ohlc(monkeypatch):
+    from types import SimpleNamespace
+
+    class RecordingUW:
+        def __init__(self):
+            self.calls = []
+
+        def get_stock_ohlc(self, ticker, candle_size="1d"):
+            self.calls.append((ticker, candle_size))
+            return {"data": [{"close": float(i)} for i in range(1, 61)]}
+
+    class RecordingIB:
+        def get_historical_data(self, contract, **kwargs):
+            return []
+
+    uw = RecordingUW()
+    monkeypatch.setattr(
+        garch,
+        "_fetch_yahoo_prices",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("yahoo")),
+    )
+
+    prices = garch._fetch_prices("NVDA", uw, ib=RecordingIB())
+
+    assert uw.calls == [("NVDA", "1d")]
+    assert prices == [float(i) for i in range(1, 61)]

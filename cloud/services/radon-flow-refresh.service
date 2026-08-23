@@ -1,0 +1,22 @@
+[Unit]
+Description=Radon dashboard flow refresh (scanner + flow_analysis + discover via FastAPI)
+After=network.target radon-api.service
+Wants=radon-api.service
+
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+User=radon
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/home/radon/radon-cloud/.env
+Environment=RADON_UW_CALLER=flow-refresh
+ExecStart=/usr/bin/bash /home/radon/radon/scripts/run_flow_refresh.sh
+StandardOutput=journal
+StandardError=journal
+# Three sequential POSTs, each bounded at 180s by the wrapper curl deadline.
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target

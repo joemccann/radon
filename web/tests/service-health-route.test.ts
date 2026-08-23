@@ -225,7 +225,7 @@ describe("/api/service-health — category-aware response shape", () => {
       body.services.map((row: { service: string; category: string }) => [row.service, row.category]),
     );
     expect(byName["newsfeed-scraper"]).toBe("scheduled");
-    expect(byName["scanner"]).toBe("on-demand");
+    expect(byName["scanner"]).toBe("scheduled");
   });
 
   it("coerces past-window scheduled rows to state=stale and counts them in degraded_count", async () => {
@@ -249,13 +249,11 @@ describe("/api/service-health — category-aware response shape", () => {
   });
 
   it("coerces past-window on-demand rows to state=dormant and counts them in dormant_count", async () => {
-    // scanner is on-demand; closed-window is 3d. Use a Friday-evening
-    // timestamp + a frozen Saturday-noon now: 3d window not exceeded,
-    // so simulate well past it instead.
+    // analyst-ratings is on-demand; closed-window is 3d.
     const dormant = new Date(Date.now() - 7 * 24 * 60 * 60_000).toISOString();
     mockGetDb([
       {
-        service: "scanner",
+        service: "analyst-ratings",
         state: "ok",
         last_attempt_started_at: dormant,
         last_attempt_finished_at: dormant,
@@ -275,7 +273,7 @@ describe("/api/service-health — category-aware response shape", () => {
     const now = new Date().toISOString();
     mockGetDb([
       {
-        service: "scanner", // on-demand
+        service: "analyst-ratings",
         state: "error",
         last_attempt_started_at: now,
         last_attempt_finished_at: now,
@@ -333,7 +331,7 @@ describe("/api/service-health — category-aware response shape", () => {
         updated_at: stale,
       },
       {
-        service: "scanner",
+        service: "analyst-ratings",
         state: "ok",
         last_attempt_started_at: dormantTs,
         last_attempt_finished_at: dormantTs,
@@ -341,7 +339,7 @@ describe("/api/service-health — category-aware response shape", () => {
         updated_at: dormantTs,
       },
       {
-        service: "discover",
+        service: "gex-scan",
         state: "ok",
         last_attempt_started_at: dormantTs,
         last_attempt_finished_at: dormantTs,

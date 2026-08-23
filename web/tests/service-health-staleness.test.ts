@@ -159,12 +159,12 @@ describe("/api/service-health — stale coercion", () => {
   });
 
   it("on-demand service past its closed window is coerced to dormant, not stale", async () => {
-    // ``scanner`` is on-demand with a 3d closed window, so 7d-old data
+    // ``analyst-ratings`` is on-demand with a 3d closed window, so 7d-old data
     // is well past it.
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60_000).toISOString();
     mockGetDb([
       {
-        service: "scanner",
+        service: "analyst-ratings",
         state: "ok",
         last_attempt_started_at: sevenDaysAgo,
         last_attempt_finished_at: sevenDaysAgo,

@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Radon — X List Feed Plan</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --canvas: #f4f6f8;
+      --panel: #ffffff;
+      --raised: #eef1f4;
+      --grid: #d8dee6;
+      --text: #0a0f14;
+      --text-muted: #5a6570;
+      --text-dim: #88929c;
+      --accent: #05AD98;
+      --accent-dim: color-mix(in srgb, #05AD98 18%, transparent);
+      --warn: #c45c26;
+      --danger: #b42318;
+      --ok: #0d7a4f;
+      --code-bg: #e8ecf0;
+      --shadow: 0 1px 0 color-mix(in srgb, #0a0f14 6%, transparent);
+      --radius: 4px;
+      --font: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      --display: "Inter", ui-sans-serif, system-ui, sans-serif;
+      --max: 920px;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --canvas: #0a0f14;
+        --panel: #0f1519;
+        --raised: #151c22;
+        --grid: #1e293b;
+        --text: #e8eef4;
+        --text-muted: #94a3b8;
+        --text-dim: #64748b;
+        --accent: #05AD98;
+        --accent-dim: color-mix(in srgb, #05AD98 22%, transparent);
+        --warn: #e08a4a;
+        --danger: #f07178;
+        --ok: #3dcf9a;
+        --code-bg: #121a21;
+        --shadow: 0 0 0 1px color-mix(in srgb, #ffffff 4%, transparent);
+      }
+    }
+
+    :root[data-theme="dark"] {
+      --canvas: #0a0f14;
+      --panel: #0f1519;
+      --raised: #151c22;
+      --grid: #1e293b;
+      --text: #e8eef4;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      --accent: #05AD98;
+      --accent-dim: color-mix(in srgb, #05AD98 22%, transparent);
+      --warn: #e08a4a;
+      --danger: #f07178;
+      --ok: #3dcf9a;
+      --code-bg: #121a21;
+      --shadow: 0 0 0 1px color-mix(in srgb, #ffffff 4%, transparent);
+    }
+
+    :root[data-theme="light"] {
+      --canvas: #f4f6f8;
+      --panel: #ffffff;
+      --raised: #eef1f4;
+      --grid: #d8dee6;
+      --text: #0a0f14;
+      --text-muted: #5a6570;
+      --text-dim: #88929c;
+      --accent: #05AD98;
+      --accent-dim: color-mix(in srgb, #05AD98 18%, transparent);
+      --warn: #c45c26;
+      --danger: #b42318;
+      --ok: #0d7a4f;
+      --code-bg: #e8ecf0;
+      --shadow: 0 1px 0 color-mix(in srgb, #0a0f14 6%, transparent);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: var(--font);
+      font-size: 15px;
+      line-height: 1.55;
+      color: var(--text);
+      background: var(--canvas);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 12px 20px;
+      background: color-mix(in srgb, var(--panel) 92%, transparent);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--grid);
+    }
+    .brand {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      min-width: 0;
+    }
+    .brand-mark {
+      font-family: var(--display);
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      font-size: 12px;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+    .brand-title {
+      font-size: 13px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .theme-btn {
+      appearance: none;
+      border: 1px solid var(--grid);
+      background: var(--raised);
+      color: var(--text);
+      border-radius: var(--radius);
+      padding: 6px 10px;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      cursor: pointer;
+    }
+    .theme-btn[aria-pressed="true"] {
+      border-color: var(--accent);
+      background: var(--accent-dim);
+      color: var(--accent);
+    }
+    .theme-btn:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    main {
+      max-width: var(--max);
+      margin: 0 auto;
+      padding: 28px 20px 80px;
+    }
+
+    .hero {
+      border: 1px solid var(--grid);
+      background: var(--panel);
+      border-radius: var(--radius);
+      padding: 24px;
+      box-shadow: var(--shadow);
+      margin-bottom: 20px;
+    }
+    .eyebrow {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin: 0 0 8px;
+    }
+    h1 {
+      font-size: clamp(1.5rem, 2.5vw, 1.85rem);
+      font-weight: 650;
+      letter-spacing: -0.02em;
+      line-height: 1.2;
+      margin: 0 0 12px;
+    }
+    .lede {
+      margin: 0;
+      color: var(--text-muted);
+      max-width: 62ch;
+    }
+    .meta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 18px;
+    }
+    .chip {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      padding: 4px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--grid);
+      background: var(--raised);
+      color: var(--text-muted);
+    }
+    .chip.accent {
+      border-color: color-mix(in srgb, var(--accent) 45%, var(--grid));
+      background: var(--accent-dim);
+      color: var(--accent);
+    }
+    .chip.warn {
+      border-color: color-mix(in srgb, var(--warn) 40%, var(--grid));
+      color: var(--warn);
+    }
+
+    .toc {
+      border: 1px solid var(--grid);
+      background: var(--panel);
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      margin-bottom: 28px;
+    }
+    .toc h2 {
+      margin: 0 0 10px;
+      font-size: 12px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      font-weight: 600;
+    }
+    .toc ol {
+      margin: 0;
+      padding-left: 1.2rem;
+      columns: 2;
+      gap: 24px;
+    }
+    .toc li { margin: 4px 0; break-inside: avoid; }
+    .toc a { color: var(--text-muted); }
+    .toc a:hover { color: var(--accent); }
+    @media (max-width: 640px) {
+      .toc ol { columns: 1; }
+    }
+
+    section.block {
+      border: 1px solid var(--grid);
+      background: var(--panel);
+      border-radius: var(--radius);
+      padding: 22px 24px;
+      margin-bottom: 16px;
+      box-shadow: var(--shadow);
+    }
+    section.block > h2 {
+      margin: 0 0 14px;
+      font-size: 1.05rem;
+      font-weight: 650;
+      letter-spacing: -0.01em;
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    section.block > h2 .num {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--accent);
+      letter-spacing: 0.08em;
+    }
+    h3 {
+      margin: 20px 0 8px;
+      font-size: 0.92rem;
+      font-weight: 650;
+      color: var(--text);
+    }
+    h3:first-of-type { margin-top: 4px; }
+    p { margin: 0 0 12px; color: var(--text); }
+    p.muted { color: var(--text-muted); }
+    ul, ol { margin: 0 0 12px; padding-left: 1.25rem; }
+    li { margin: 4px 0; }
+    li::marker { color: var(--text-dim); }
+    strong { font-weight: 650; }
+
+    .callout {
+      border-left: 3px solid var(--warn);
+      background: color-mix(in srgb, var(--warn) 8%, var(--panel));
+      padding: 12px 14px;
+      margin: 0 0 14px;
+      border-radius: 0 var(--radius) var(--radius) 0;
+    }
+    .callout.danger {
+      border-left-color: var(--danger);
+      background: color-mix(in srgb, var(--danger) 8%, var(--panel));
+    }
+    .callout.ok {
+      border-left-color: var(--ok);
+      background: color-mix(in srgb, var(--ok) 8%, var(--panel));
+    }
+    .callout.accent {
+      border-left-color: var(--accent);
+      background: var(--accent-dim);
+    }
+    .callout p { margin: 0; color: var(--text); }
+    .callout .label {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin-bottom: 4px;
+      display: block;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13.5px;
+      margin: 0 0 14px;
+    }
+    th, td {
+      text-align: left;
+      vertical-align: top;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--grid);
+    }
+    th {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      font-weight: 600;
+      background: var(--raised);
+    }
+    tr:last-child td { border-bottom: none; }
+    td code, p code, li code {
+      font-family: var(--mono);
+      font-size: 0.88em;
+      background: var(--code-bg);
+      padding: 1px 5px;
+      border-radius: 3px;
+    }
+
+    pre {
+      margin: 0 0 14px;
+      padding: 14px 16px;
+      background: var(--code-bg);
+      border: 1px solid var(--grid);
+      border-radius: var(--radius);
+      overflow-x: auto;
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.45;
+      color: var(--text);
+    }
+
+    .graph {
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.5;
+      white-space: pre;
+      overflow-x: auto;
+      padding: 14px 16px;
+      background: var(--code-bg);
+      border: 1px solid var(--grid);
+      border-radius: var(--radius);
+      margin: 0 0 14px;
+    }
+
+    .conf {
+      display: inline-block;
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding: 2px 6px;
+      border-radius: 999px;
+      border: 1px solid var(--grid);
+      color: var(--text-dim);
+      vertical-align: middle;
+    }
+    .conf.high { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, var(--grid)); }
+    .conf.mod { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, var(--grid)); }
+
+    footer {
+      margin-top: 28px;
+      padding-top: 16px;
+      border-top: 1px solid var(--grid);
+      font-size: 12px;
+      color: var(--text-dim);
+      font-family: var(--mono);
+    }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    @media (max-width: 720px) {
+      .two-col { grid-template-columns: 1fr; }
+    }
+    .mini {
+      border: 1px solid var(--grid);
+      background: var(--raised);
+      border-radius: var(--radius);
+      padding: 12px 14px;
+    }
+    .mini h4 {
+      margin: 0 0 6px;
+      font-size: 12px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      font-weight: 600;
+    }
+    .mini p { margin: 0; font-size: 13.5px; color: var(--text-muted); }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">Radon</span>
+      <span class="brand-title">X List Feed Integration Plan</span>
+    </div>
+    <div class="controls" role="group" aria-label="Color theme">
+      <button type="button" class="theme-btn" data-theme-set="light" aria-pressed="false">Light</button>
+      <button type="button" class="theme-btn" data-theme-set="dark" aria-pressed="false">Dark</button>
+      <button type="button" class="theme-btn" data-theme-set="system" aria-pressed="true">System</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="hero">
+      <p class="eyebrow">Implementation plan · no code shipped</p>
+      <h1>Live X list feed on the dashboard</h1>
+      <p class="lede">
+        Surface posts from a fixed X list beside Market Ear on the Live Market Feed rail.
+        Official X API v2 poll into Turso; Next.js reads only. Not a scrapers job. Not xAI search.
+      </p>
+      <div class="meta-row">
+        <span class="chip accent">List 1240684211385675777</span>
+        <span class="chip">Bearer · pay-per-use</span>
+        <span class="chip">Poll 60–120s</span>
+        <span class="chip warn">No list-native stream</span>
+        <span class="chip">~3–5 eng days after API access</span>
+      </div>
+    </div>
+
+    <nav class="toc" aria-label="Contents">
+      <h2>Contents</h2>
+      <ol>
+        <li><a href="#counter">Counterpoint</a></li>
+        <li><a href="#goal">Goal</a></li>
+        <li><a href="#current">Current system</a></li>
+        <li><a href="#requirements">Hard requirements</a></li>
+        <li><a href="#architecture">Architecture decision</a></li>
+        <li><a href="#deps">Dependency graph</a></li>
+        <li><a href="#phases">Phases P0–P8</a></li>
+        <li><a href="#files">File checklist</a></li>
+        <li><a href="#nongoals">Non-goals</a></li>
+        <li><a href="#risks">Risks</a></li>
+        <li><a href="#decisions">Decisions before coding</a></li>
+        <li><a href="#bottom">Bottom line</a></li>
+      </ol>
+    </nav>
+
+    <section class="block" id="counter">
+      <h2><span class="num">00</span> Counterpoint first</h2>
+      <div class="callout danger">
+        <span class="label">Do not romanticize realtime</span>
+        <p>
+          “Realtime X list next to Market Ear” is not small UI glue. There is <strong>no native list firehose</strong>.
+          True push means filtered-stream rules rebuilt from membership (or Enterprise). For one operator list,
+          <strong>poll + Turso + 1–2 min UI refresh</strong> is the correct product, not WebSockets.
+          Scraping X is a non-starter for production. xAI <code>x_search</code> in-repo is watchlist research, not a list timeline.
+          <span class="conf high">Confidence high</span>
+        </p>
+      </div>
+      <p class="muted">
+        List ID from URL: <code>1240684211385675777</code>. Confirm public with
+        <code>GET /2/lists/{id}?list.fields=private</code> before locking auth.
+        <span class="conf high">ID parse high</span>
+        <span class="conf mod">Public status moderate until verified</span>
+      </p>
+    </section>
+
+    <section class="block" id="goal">
+      <h2><span class="num">01</span> Goal</h2>
+      <p>
+        Surface posts from
+        <a href="https://x.com/i/lists/1240684211385675777" target="_blank" rel="noopener">X list 1240684211385675777</a>
+        on the dashboard <strong>within or next to</strong> the Live Market Feed rail, freshness comparable to newsfeed
+        (~1–2 min), Clerk-gated, Turso-backed, brand-compliant.
+      </p>
+    </section>
+
+    <section class="block" id="current">
+      <h2><span class="num">02</span> Current system (insertion surface)</h2>
+      <table>
+        <thead>
+          <tr><th>Layer</th><th>Reality</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Dashboard</td>
+            <td><code>DashboardSurface</code> left column = section <code>feed</code> / “Live Market Feed” → <code>DashboardNewsFeed</code> only</td>
+          </tr>
+          <tr>
+            <td>News producer</td>
+            <td>Playwright Market Ear scraper, 120s, <code>radon-newsfeed.service</code></td>
+          </tr>
+          <tr>
+            <td>News store</td>
+            <td>Turso <code>posts</code> + disk fallback; media on <code>media.radon.run</code></td>
+          </tr>
+          <tr>
+            <td>News consumer</td>
+            <td><code>useNewsfeedPosts</code> → <code>GET /api/newsfeed/posts</code>, poll <strong>2 min</strong></td>
+          </tr>
+          <tr>
+            <td>Realtime elsewhere</td>
+            <td>IB WebSocket only; feeds are pollers</td>
+          </tr>
+          <tr>
+            <td>Existing X code</td>
+            <td>Outbound “Copy &amp; Tweet”; <code>fetch_x_xai.py</code>. <strong>No list ingest, no <code>/api/x/*</code></strong></td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="callout">
+        <span class="label">Constraint</span>
+        <p>Do <strong>not</strong> reuse Market Ear <code>posts</code> / href / tag contracts for tweets.</p>
+      </div>
+    </section>
+
+    <section class="block" id="requirements">
+      <h2><span class="num">03</span> Hard requirements</h2>
+
+      <h3>Product</h3>
+      <ol>
+        <li>Follow <strong>one fixed list</strong> (constant + env): <code>X_LIST_ID=1240684211385675777</code>.</li>
+        <li>Show <strong>new posts</strong>: author, text, time, link to <code>https://x.com/{user}/status/{id}</code>, optional media.</li>
+        <li>Placement: <strong>inside left feed rail</strong> (tab or stacked panel) on first ship.</li>
+        <li>Operator app only (Clerk); not demo-mirrored unless product asks later.</li>
+        <li>Empty / degraded states describe measurement conditions (token missing, list private, poll stalled).</li>
+      </ol>
+
+      <h3>Technical (Radon rules)</h3>
+      <ol>
+        <li><strong>No <code>spawn</code> from Next.js.</strong> Producer is daemon/timer; Next only reads Turso.</li>
+        <li><strong>Turso-first</strong>; migration required; optional JSON fallback.</li>
+        <li>Secrets in <code>.env</code> / Hetzner <code>~/radon-cloud/.env</code> only.</li>
+        <li>Brand tokens only; instrument-module chrome; no em dashes; no Twitter product chrome.</li>
+        <li><code>service_health</code> for the poller; register staleness windows.</li>
+        <li>TDD: parse + API + panel; Playwright for tab presence.</li>
+      </ol>
+
+      <h3>Legal / platform</h3>
+      <ol>
+        <li>Official <strong>X API v2</strong> only for production.</li>
+        <li>Display + offline cache with <strong>content compliance</strong> (delete when post is deleted/protected).</li>
+        <li>Prefer <strong>hotlink</strong> media URLs; do not rehost unless justified.</li>
+        <li>Developer app use case: private operator dashboard, not redistribution.</li>
+      </ol>
+      <p class="muted">
+        Docs:
+        <a href="https://docs.x.com/x-api/lists/list-tweets/introduction">List posts</a> ·
+        <a href="https://docs.x.com/x-api/fundamentals/rate-limits">Rate limits</a> ·
+        <a href="https://docs.x.com/x-api/getting-started/pricing">Pricing</a> ·
+        <a href="https://docs.x.com/fundamentals/authentication/oauth-2-0/application-only">App-only auth</a> ·
+        <a href="https://docs.x.com/developer-terms/policy">Developer Policy</a>
+      </p>
+    </section>
+
+    <section class="block" id="architecture">
+      <h2><span class="num">04</span> Architecture decision</h2>
+      <table>
+        <thead>
+          <tr><th>Choice</th><th>Decision</th><th>Why</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Transport</td>
+            <td><strong>Poll</strong> <code>GET /2/lists/:id/tweets</code></td>
+            <td>Native list timeline; 900 req/15 min; simple</td>
+          </tr>
+          <tr>
+            <td>Cadence</td>
+            <td><strong>60–120 s</strong> producer + UI poll</td>
+            <td>Matches Market Ear “live”</td>
+          </tr>
+          <tr>
+            <td>Auth</td>
+            <td><strong>OAuth 2.0 App-Only Bearer</strong></td>
+            <td>Public list read</td>
+          </tr>
+          <tr>
+            <td>Billing</td>
+            <td><strong>Pay-per-use</strong> credits (~$0.005 / post read, 24h dedupe)</td>
+            <td>New access is PPU; legacy Pro closed/migrating</td>
+          </tr>
+          <tr>
+            <td>Stream</td>
+            <td><strong>Out of v1</strong></td>
+            <td>No list-native stream; member <code>from:</code> rules = churn + cost</td>
+          </tr>
+          <tr>
+            <td>Scrape / Nitter / unofficial</td>
+            <td><strong>Forbidden</strong></td>
+            <td>ToS + reliability</td>
+          </tr>
+          <tr>
+            <td>xAI <code>x_search</code></td>
+            <td><strong>Not the producer</strong></td>
+            <td>Wrong product surface</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="two-col">
+        <div class="mini">
+          <h4>Cost sketch</h4>
+          <p>Poll every 2 min → 720 calls/day. Billing is mostly unique posts, not raw HTTP. Quiet list: cents to low dollars/day. Set a hard credit cap.</p>
+        </div>
+        <div class="mini">
+          <h4>Confidence</h4>
+          <p><span class="conf high">Poll high</span> · <span class="conf mod">PPU unit prices moderate</span> — confirm in console before budgeting.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="block" id="deps">
+      <h2><span class="num">05</span> Dependency graph</h2>
+      <div class="graph">P0 Account &amp; list verification
+ └─► P1 Secrets &amp; env contract
+      └─► P2 Spec (payload, SLA, layout)
+           ├─► P3 Schema + writer + migration
+           ├─► P4 Ingestion poller + systemd
+           ├─► P5 API route + client hook
+           └─► P6 UI (DashboardSurface + panel)
+                └─► P7 Health, deploy, compliance job
+                     └─► P8 E2E + production verify</div>
+    </section>
+
+    <section class="block" id="phases">
+      <h2><span class="num">06</span> Phases P0–P8</h2>
+
+      <h3>P0 — Account and list (blocking)</h3>
+      <table>
+        <thead><tr><th>ID</th><th>Work</th><th>Done when</th></tr></thead>
+        <tbody>
+          <tr><td>P0.1</td><td>X developer project + app; list read</td><td>App exists in console</td></tr>
+          <tr><td>P0.2</td><td>Fund PPU credits + spending limit</td><td>Balance + cap set</td></tr>
+          <tr><td>P0.3</td><td><code>GET /2/lists/1240684211385675777?list.fields=private,member_count,name</code></td><td><code>private=false</code> or user OAuth path</td></tr>
+          <tr><td>P0.4</td><td>Successful list tweets with expansions</td><td>Fixture JSON saved</td></tr>
+        </tbody>
+      </table>
+      <p class="muted">Blocker: private list → user-context OAuth enters P1.</p>
+
+      <h3>P1 — Secrets</h3>
+      <table>
+        <thead><tr><th>Env</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td><code>X_BEARER_TOKEN</code></td><td>App-only API</td></tr>
+          <tr><td><code>X_LIST_ID</code></td><td>Default <code>1240684211385675777</code></td></tr>
+          <tr><td><code>X_API_KEY</code> / <code>X_API_SECRET</code></td><td>Optional; regenerating Bearer or user OAuth later</td></tr>
+        </tbody>
+      </table>
+      <p class="muted">Document in <code>.env.example</code> and Hetzner runbook. Load only in producer; never expose to browser.</p>
+
+      <h3>P2 — Spec (<code>docs/x-list-feed.md</code>)</h3>
+      <ol>
+        <li><strong>Freshness SLA:</strong> posts appear ≤ 3 min after X publish under normal limits.</li>
+        <li><strong>History:</strong> last N days or last M posts (e.g. 7d / 500 rows).</li>
+        <li><strong>Layout A (recommended):</strong> tabs inside feed: <code>MARKET EAR | X LIST</code>. Alt B: stacked panel under Market Ear.</li>
+        <li><strong>Payload</strong> (canonical):</li>
+      </ol>
+      <pre>{
+  id: string;              // tweet id
+  text: string;
+  created_at: string;      // ISO
+  author_id: string;
+  author_username: string;
+  author_name: string;
+  author_avatar_url?: string;
+  media?: { type: string; url: string }[];
+  urls?: { display: string; expanded: string }[];
+  metrics?: { like_count?: number; retweet_count?: number };
+  list_id: string;
+  ingested_at: string;
+  deleted?: boolean;
+}</pre>
+      <p class="muted">
+        Request fields:
+        <code>tweet.fields=created_at,author_id,public_metrics,entities,attachments,note_tweet</code>
+        · <code>expansions=author_id,attachments.media_keys</code>
+        · <code>user.fields=username,name,profile_image_url</code>
+        · <code>media.fields=url,preview_image_url,type</code>
+        · <code>max_results=100</code> + <code>since_id</code> for catch-up.
+      </p>
+
+      <h3>P3 — Storage</h3>
+      <p>New table <code>x_list_posts</code> (next free migration):</p>
+      <ul>
+        <li>PK <code>id</code> (tweet id)</li>
+        <li><code>list_id</code>, <code>created_at</code>, <code>author_*</code>, <code>text</code>, <code>payload</code> JSON, <code>ingested_at</code>, <code>deleted</code></li>
+        <li>Indexes: <code>(list_id, created_at DESC)</code>, <code>deleted</code></li>
+        <li>Optional <code>scan_snapshots</code> service <code>x-list</code></li>
+        <li>Writer: chunked upsert; never empty-wipe on failed poll</li>
+      </ul>
+
+      <h3>P4 — Ingestion</h3>
+      <table>
+        <thead><tr><th>Piece</th><th>Spec</th></tr></thead>
+        <tbody>
+          <tr><td>Script</td><td><code>scripts/fetch_x_list.py</code> (Python preferred)</td></tr>
+          <tr><td>Loop</td><td>Oneshot + timer every 60–120s</td></tr>
+          <tr><td>Logic</td><td>Store <code>newest_id</code>; request with <code>since_id</code>; upsert; heartbeat</td></tr>
+          <tr><td>Unit</td><td><code>cloud/services/radon-x-list.{service,timer}</code></td></tr>
+          <tr><td>Register</td><td><code>setup-vps.sh</code>, systemd pin tests, watchdog windows</td></tr>
+          <tr><td>Health</td><td><code>record_service_health("x-list", …)</code></td></tr>
+          <tr><td>Errors</td><td>401/403 → error health, no cache wipe; 429 → header backoff</td></tr>
+        </tbody>
+      </table>
+      <p class="muted">Out of scope v1: likes UI, posting, DMs, multi-list.</p>
+
+      <h3>P5 — API + hook</h3>
+      <ul>
+        <li>Route: <code>GET /api/x-list/posts</code> — Clerk, <code>force-dynamic</code>, Turso, missing = 200 + empty</li>
+        <li>Cache: short max-age or no-store (like newsfeed)</li>
+        <li>Hook: <code>useXListPosts</code> — poll 60–120s, last-good hold</li>
+        <li>Tests: empty, rows, no cross-table leak</li>
+      </ul>
+
+      <h3>P6 — UI</h3>
+      <ul>
+        <li>Component: <code>DashboardXListFeed</code> (+ tab shell if chosen)</li>
+        <li>Wire into <code>DashboardSurface</code> feed section</li>
+        <li>Row: handle, relative time, text (no em dash), media thumb, open-on-X</li>
+        <li>Meta rail: source <code>X LIST</code>, list id/name, last poll time</li>
+        <li>Empty: “No list posts yet. Waiting for the x-list poller.” / “X API token missing.”</li>
+        <li>Mobile: same stack; tabs over dual sticky rails</li>
+      </ul>
+      <p class="muted">Never hardcode “Refreshes 60s” unless it matches timer + hook.</p>
+
+      <h3>P7 — Compliance and ops</h3>
+      <ol>
+        <li>Periodic <code>GET /2/tweets?ids=…</code>; mark <code>deleted</code> if gone.</li>
+        <li>Retention prune (weekly).</li>
+        <li>Hetzner install timer once (deploys do not enable new units).</li>
+        <li>Cloud runbook blurb.</li>
+        <li>Demo: exclude unless product asks.</li>
+      </ol>
+
+      <h3>P8 — Verification</h3>
+      <ol>
+        <li>Fixture parse tests green.</li>
+        <li>Live poll inserts Turso rows.</li>
+        <li>Authenticated API returns them.</li>
+        <li>Dashboard shows rows; screenshot.</li>
+        <li>Kill token → empty/error, not 500 cascade.</li>
+        <li>CI green after merge.</li>
+      </ol>
+    </section>
+
+    <section class="block" id="files">
+      <h2><span class="num">07</span> File checklist</h2>
+      <div class="two-col">
+        <div class="mini">
+          <h4>Create</h4>
+          <p>
+            <code>docs/x-list-feed.md</code><br />
+            <code>scripts/db/migrations/00NN_x_list_posts.sql</code><br />
+            <code>scripts/fetch_x_list.py</code><br />
+            <code>scripts/tests/test_x_list.py</code> + fixture<br />
+            <code>web/app/api/x-list/posts/route.ts</code><br />
+            <code>web/lib/xList.ts</code>, <code>useXListPosts.ts</code><br />
+            <code>web/components/DashboardXListFeed.tsx</code><br />
+            tests + e2e<br />
+            <code>cloud/services/radon-x-list.{service,timer}</code>
+          </p>
+        </div>
+        <div class="mini">
+          <h4>Modify</h4>
+          <p>
+            <code>scripts/db/writer.py</code> (and/or JS writer)<br />
+            <code>DashboardSurface.tsx</code> (+ CSS if tabbed)<br />
+            service health windows + watchdog + systemd pins<br />
+            <code>.env.example</code>, <code>docs/cloud-services.md</code>
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="block" id="nongoals">
+      <h2><span class="num">08</span> Explicit non-goals (v1)</h2>
+      <ul>
+        <li>Filtered stream / webhooks</li>
+        <li>Multi-list UI</li>
+        <li>Merging Market Ear + X into one chronological stream</li>
+        <li>Tweet-level AI tagging pipeline</li>
+        <li>Public marketing site feed</li>
+        <li>Replacing Market Ear</li>
+      </ul>
+    </section>
+
+    <section class="block" id="risks">
+      <h2><span class="num">09</span> Risks and mitigations</h2>
+      <table>
+        <thead><tr><th>Risk</th><th>Severity</th><th>Mitigation</th></tr></thead>
+        <tbody>
+          <tr><td>List is private</td><td>High</td><td>P0 check; user OAuth path</td></tr>
+          <tr><td>PPU bill surprise</td><td>Medium</td><td>Credit cap; poll 120s; minimal fields</td></tr>
+          <tr><td>Rate limit / outage</td><td>Medium</td><td>Backoff, last-good UI, health banner</td></tr>
+          <tr><td>Deleted tweets linger</td><td>Medium</td><td>Compliance poller</td></tr>
+          <tr><td>Layout density</td><td>Medium</td><td>Tabs, not dual full rails</td></tr>
+          <tr><td>Confusing with Market Ear</td><td>Low</td><td>Separate source label + hrefs to x.com</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="block" id="decisions">
+      <h2><span class="num">10</span> Decisions before coding</h2>
+      <ol>
+        <li><strong>Layout:</strong> tabs in feed (recommended) vs stacked second panel.</li>
+        <li><strong>Poll interval:</strong> 60s vs 120s (match newsfeed).</li>
+        <li><strong>Budget:</strong> confirm PPU pricing in X console; set monthly cap.</li>
+        <li><strong>Private list?</strong> if yes, OAuth user tokens enter P1.</li>
+      </ol>
+      <h3>Suggested calendar</h3>
+      <table>
+        <thead><tr><th>Phase</th><th>Effort (rough)</th></tr></thead>
+        <tbody>
+          <tr><td>P0–P2 account + spec</td><td>0.5–1 day</td></tr>
+          <tr><td>P3–P4 poller + Turso</td><td>1–2 days</td></tr>
+          <tr><td>P5–P6 API + UI</td><td>1–2 days</td></tr>
+          <tr><td>P7–P8 ship + VPS timer</td><td>0.5–1 day</td></tr>
+          <tr><td><strong>Total v1</strong></td><td><strong>~3–5 eng days</strong> after API access works</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="block" id="bottom">
+      <h2><span class="num">11</span> Bottom line</h2>
+      <div class="callout ok">
+        <span class="label">Ship shape</span>
+        <p>
+          Bearer-authenticated, pay-per-use poller of
+          <code>GET /2/lists/1240684211385675777/tweets</code>
+          into a <strong>new Turso table</strong>, expose via <code>/api/x-list/posts</code>,
+          render as a <strong>tab beside Market Ear</strong> on <code>DashboardSurface</code>,
+          cadence <strong>~1–2 minutes</strong>, with systemd + service_health + delete compliance.
+          Anything sold as “realtime stream for a list” is membership-based filtered stream (v2) or fantasy on Free/scrape.
+          <span class="conf high">Confidence high</span>
+        </p>
+      </div>
+    </section>
+
+    <footer>
+      radon · docs/x-list-feed-plan.html · generated for operator review · light / dark / system
+    </footer>
+  </main>
+
+  <script>
+    (function () {
+      const root = document.documentElement;
+      const storageKey = "radon-x-list-plan-theme";
+      const buttons = Array.from(document.querySelectorAll("[data-theme-set]"));
+
+      function apply(mode) {
+        if (mode === "light" || mode === "dark") {
+          root.setAttribute("data-theme", mode);
+        } else {
+          root.removeAttribute("data-theme");
+          mode = "system";
+        }
+        buttons.forEach((btn) => {
+          btn.setAttribute("aria-pressed", String(btn.getAttribute("data-theme-set") === mode));
+        });
+        try { localStorage.setItem(storageKey, mode); } catch (_) {}
+      }
+
+      let initial = "system";
+      try {
+        const stored = localStorage.getItem(storageKey);
+        if (stored === "light" || stored === "dark" || stored === "system") initial = stored;
+      } catch (_) {}
+      apply(initial);
+
+      buttons.forEach((btn) => {
+        btn.addEventListener("click", () => apply(btn.getAttribute("data-theme-set")));
+      });
+    })();
+  </script>
+</body>
+</html>

@@ -219,6 +219,33 @@ class TestSignalsRefreshCoverage:
             )
 
 
+class TestFlowRefreshCoverage:
+    def test_flow_tabs_are_scheduled_with_daily_coverage(self):
+        from watchdog import services as svc_mod
+
+        for name in ("scanner", "discover", "flow-analysis"):
+            assert name in svc_mod.SCHEDULED_SERVICES, name
+            window = svc_mod.SCHEDULED_SERVICES[name]
+            assert window["open"] == 4 * 24 * 3600, name
+            assert window["closed"] == 4 * 24 * 3600, name
+            assert window["requires_ib"] is False, name
+            assert name in svc_mod.BUCKETS["daily"], name
+
+
+class TestSkewCoverage:
+    """radon-skew.timer fires every 5 minutes during RTH. The RTH window
+    must span two cycles so one slow run never flips skew to stale."""
+
+    def test_skew_open_window_spans_two_timer_cycles(self):
+        from watchdog import services as svc_mod
+
+        window = svc_mod.SCHEDULED_SERVICES["skew"]
+        assert window["open"] == 10 * 60
+        assert window["closed"] == 26 * 3600
+        assert window["requires_ib"] is False
+        assert "skew" in svc_mod.BUCKETS["intraday"]
+
+
 class TestBuckets:
     def test_intraday_bucket_lists_market_hours_services(self):
         from watchdog import services as svc_mod

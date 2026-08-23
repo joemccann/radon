@@ -2,12 +2,22 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
 
 import theta_harvester_scanner as theta
+
+
+@pytest.fixture(autouse=True)
+def _no_live_scan_ib(monkeypatch) -> None:
+    @contextmanager
+    def _none():
+        yield None
+
+    monkeypatch.setattr(theta, "scan_ib_session", _none)
 
 
 def test_dedupe_tickers_rejects_corrupt_numeric_preset_entries() -> None:
@@ -191,9 +201,66 @@ def _theta_surface() -> dict:
     }
 
 
+class _RecordingUW:
+    def __init__(self) -> None:
+        self.calls: list[tuple] = []
+
+    def get_stock_ohlc(self, ticker: str, candle_size: str = "1d"):
+        self.calls.append(("ohlc", ticker, candle_size))
+        return {"data": [{"close": 100.0}]}
+
+    def get_iv_rank(self, ticker: str):
+        self.calls.append(("iv_rank", ticker))
+        return {"data": []}
+
+    def get_option_contracts(self, ticker: str, **kwargs):
+        self.calls.append(("contracts", ticker, kwargs))
+        return {"data": []}
+
+    def get_greek_exposure_by_strike(self, ticker: str):
+        self.calls.append(("gex_strike", ticker))
+        return {"data": []}
+
+
+class _RecordingIB:
+    def __init__(self, bars) -> None:
+        self.calls: list[tuple] = []
+        self.bars = bars
+
+    def get_historical_data(self, contract, **kwargs):
+        self.calls.append((contract, kwargs))
+        return self.bars
+
+
+def _ib_closes(count: int):
+    return [SimpleNamespace(date=f"2026-01-{(i % 28) + 1:02d}", close=100.0 + i) for i in range(count)]
+
+
+def test_scan_ticker_ib_hit_skips_uw_ohlc() -> None:
+    from utils.uw_surface import MIN_DAILY_CLOSES
+
+    uw = _RecordingUW()
+    ib = _RecordingIB(bars=_ib_closes(MIN_DAILY_CLOSES))
+
+    theta.scan_ticker("AAPL", client=uw, ib=ib)
+
+    assert [name for name, *_rest in uw.calls] != []
+    assert all(name != "ohlc" for name, *_rest in uw.calls)
+    assert len(ib.calls) == 1
+
+
+def test_scan_ticker_ib_miss_calls_uw_ohlc() -> None:
+    uw = _RecordingUW()
+    ib = _RecordingIB(bars=_ib_closes(3))
+
+    theta.scan_ticker("AAPL", client=uw, ib=ib)
+
+    assert uw.calls[0] == ("ohlc", "AAPL", "1d")
+
+
 def test_scan_ticker_scores_true_theta_when_delta_iv_dealer_and_range_gates_pass(monkeypatch) -> None:
     now = datetime(2026, 6, 24, tzinfo=timezone.utc)
-    monkeypatch.setattr(theta, "fetch_surface", lambda _client, _ticker: _theta_surface())
+    monkeypatch.setattr(theta, "fetch_surface", lambda _client, _ticker, **_kw: _theta_surface())
 
     candidate = theta.scan_ticker("AAPL", client=object(), now=now)
 
@@ -462,7 +529,7 @@ def test_build_output_includes_serializable_earnings_field() -> None:
 
 
 def test_scan_ticker_reraises_rate_limit_from_option_contracts(monkeypatch) -> None:
-    def _rate_limited(_client, _ticker):
+    def _rate_limited(_client, _ticker, **_kw):
         raise theta.UWRateLimitError("daily request limit")
 
     monkeypatch.setattr(theta, "fetch_surface", _rate_limited)

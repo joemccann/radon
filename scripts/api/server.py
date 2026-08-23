@@ -1898,31 +1898,83 @@ async def uw_usage_record(
     return usage_snapshot()
 
 
-@app.post("/scan")
-async def scan():
-    """Run watchlist scanner (scanner.py --top 25)."""
+FLOW_TAB_COOLDOWN_S = 3600  # hourly VPS timer + SCAN cache
+_flow_tab_last: dict[str, float] = {}
+_flow_tab_locks: dict[str, asyncio.Lock] = {}
+
+
+async def _run_flow_tab(
+    name: str,
+    cache_name: str,
+    script: str,
+    args: list[str],
+    *,
+    timeout: int,
+    force: bool,
+    demo_key: str,
+    demo_payload: dict,
+):
+    """Single-flight + 3600s cooldown for scanner / discover / flow-analysis.
+
+    ``force=True`` spends UW again. The hourly wrapper always passes force:
+    the cooldown equals the timer period, so a jittered early fire would
+    otherwise be cache-served.
+    """
+    import time as _time
+
     if test_mode:
-        return await demo_scan_response("scanner", {"scan_time": "", "results": []})
+        return await demo_scan_response(demo_key, demo_payload)
+    cache_path = DATA_DIR / cache_name
+    lock = _flow_tab_locks.setdefault(name, asyncio.Lock())
+    now = _time.monotonic()
+    if not force and now - _flow_tab_last.get(name, 0.0) < FLOW_TAB_COOLDOWN_S:
+        cached = _read_cache(cache_path)
+        if cached:
+            return cached
+    async with lock:
+        if not force and _time.monotonic() - _flow_tab_last.get(name, 0.0) < FLOW_TAB_COOLDOWN_S:
+            cached = _read_cache(cache_path)
+            if cached:
+                return cached
+        result = await run_script(script, args, timeout=timeout)
+        if not result.ok:
+            raise HTTPException(status_code=502, detail=result.error)
+        if result.data and result.data.get("error"):
+            raise HTTPException(status_code=400, detail=result.data["error"])
+        _write_cache(cache_path, result.data)
+        _flow_tab_last[name] = _time.monotonic()
+        return result.data
+
+
+@app.post("/scan")
+async def scan(force: bool = False):
+    """Run watchlist scanner (scanner.py --top 25)."""
     workers = _bounded_env_int("RADON_SCANNER_WORKERS", 24)
-    result = await run_script("scanner.py", ["--top", "25", "--workers", str(workers)], timeout=120)
-    if not result.ok:
-        raise HTTPException(status_code=502, detail=result.error)
-    _write_cache(DATA_DIR / "scanner.json", result.data)
-    return result.data
+    return await _run_flow_tab(
+        "scanner",
+        "scanner.json",
+        "scanner.py",
+        ["--top", "25", "--workers", str(workers)],
+        timeout=120,
+        force=force,
+        demo_key="scanner",
+        demo_payload={"scan_time": "", "results": []},
+    )
 
 
 @app.post("/discover")
-async def discover():
-    """Run market-wide discovery (discover.py --min-alerts 1)."""
-    if test_mode:
-        return await demo_scan_response("discover", {"scan_time": "", "results": []})
-    result = await run_script("discover.py", ["--min-alerts", "1"], timeout=120)
-    if not result.ok:
-        raise HTTPException(status_code=502, detail=result.error)
-    if result.data and result.data.get("error"):
-        raise HTTPException(status_code=400, detail=result.data["error"])
-    _write_cache(DATA_DIR / "discover.json", result.data)
-    return result.data
+async def discover(force: bool = False):
+    """Run market-wide discovery. Scoring walk is 2 darkpool pages, min 3 alerts."""
+    return await _run_flow_tab(
+        "discover",
+        "discover.json",
+        "discover.py",
+        ["--min-alerts", "3", "--dp-pages", "2"],
+        timeout=180,
+        force=force,
+        demo_key="discover",
+        demo_payload={"scan_time": "", "results": []},
+    )
 
 
 @app.post("/forecast/chronos")
@@ -2142,15 +2194,18 @@ async def flow_surprise(request: Request):
 
 
 @app.post("/flow-analysis")
-async def flow_analysis():
+async def flow_analysis(force: bool = False):
     """Run portfolio flow analysis (flow_analysis.py)."""
-    if test_mode:
-        return await demo_scan_response("flow-analysis", {"scan_time": "", "results": []})
-    result = await run_script("flow_analysis.py", timeout=120)
-    if not result.ok:
-        raise HTTPException(status_code=502, detail=result.error)
-    _write_cache(DATA_DIR / "flow_analysis.json", result.data)
-    return result.data
+    return await _run_flow_tab(
+        "flow-analysis",
+        "flow_analysis.json",
+        "flow_analysis.py",
+        [],
+        timeout=120,
+        force=force,
+        demo_key="flow-analysis",
+        demo_payload={"scan_time": "", "results": []},
+    )
 
 
 _TICKER_RE = re.compile(r"^[A-Z]{1,5}$")
@@ -4518,6 +4573,7 @@ def _validate_pi_args(script: str, args: list[str]) -> list[str]:
             value_flags={
                 "--min-premium": (1, 1_000_000_000),
                 "--min-alerts": (1, 100),
+                "--dp-pages": (1, 40),
                 "--dp-days": (1, 30),
             },
             boolean_flags=frozenset({"--include-indices"}),

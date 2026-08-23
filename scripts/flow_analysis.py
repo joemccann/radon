@@ -148,7 +148,7 @@ def run_analysis():
         print(f"  [{i}/{len(positions)}] {ticker}...", file=sys.stderr, end=" ")
 
         try:
-            flow_data = fetch_flow_module(ticker)
+            flow_data = fetch_flow_module(ticker, fetch_missing_history=False)
             analysis = analyze_signal(flow_data)
         except Exception as e:
             print(f"ERROR: {e}", file=sys.stderr)

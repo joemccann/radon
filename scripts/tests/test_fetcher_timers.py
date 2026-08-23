@@ -90,3 +90,15 @@ def test_local_sh_references_label(label: str) -> None:
 def test_run_wrappers_exist() -> None:
     for _, (_, wrapper) in _NEW_TIMERS.items():
         assert (_SCRIPTS_DIR / wrapper).is_file(), f"missing wrapper scripts/{wrapper}"
+
+
+def test_local_sh_does_not_load_data_refresh() -> None:
+    text = _LOCAL_SH.read_text()
+    load_block = text.split("for plist in", 1)[1].split("; do", 1)[0]
+    assert "com.radon.data-refresh" not in load_block
+
+
+def test_setup_data_refresh_refuses_install_without_force() -> None:
+    script = (_SCRIPTS_DIR / "setup_data_refresh_service.sh").read_text()
+    assert "RADON_FORCE_DATA_REFRESH" in script
+    assert "laptop data-refresh stays unloaded" in script

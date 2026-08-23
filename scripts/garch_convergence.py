@@ -51,6 +51,7 @@ if str(_SCRIPT_DIR) not in sys.path:
 
 from clients.uw_client import UWClient, UWAPIError
 from utils.ticker_args import parse_ticker_list
+from utils.uw_surface import fetch_daily_closes, scan_ib_session
 
 try:
     from db.scan_mirror import mirror_scan_snapshot  # type: ignore
@@ -142,12 +143,12 @@ class PairAnalysis:
         ])
 
 
-# ── Price data fetch (UW primary, Yahoo LAST RESORT) ─────────────
+# ── Price data fetch (IB first, UW fallback, Yahoo last resort) ──
 
-def _fetch_uw_prices(ticker: str, uw_client: UWClient) -> List[float]:
-    """Fetch daily closes from Unusual Whales OHLC. Returns list of floats."""
+def _fetch_uw_prices(ticker: str, uw_client: UWClient, ib: Any = None) -> List[float]:
+    """Fetch daily closes: IB first, UW on miss. Returns list of floats."""
     try:
-        data = uw_client.get_stock_ohlc(ticker, candle_size="1d")
+        data = fetch_daily_closes(ticker, ib=ib, uw=uw_client, min_bars=60)
         bars = data.get("data", [])
         if bars:
             return [float(b["close"]) for b in bars if b.get("close") is not None]
@@ -174,12 +175,11 @@ def _fetch_yahoo_prices(ticker: str, days: int = 400) -> List[float]:
         return []
 
 
-def _fetch_prices(ticker: str, uw_client: UWClient) -> List[float]:
-    """Fetch daily closes: UW primary, Yahoo LAST RESORT."""
-    prices = _fetch_uw_prices(ticker, uw_client)
+def _fetch_prices(ticker: str, uw_client: UWClient, ib: Any = None) -> List[float]:
+    """Fetch daily closes: IB first, UW fallback, Yahoo last resort."""
+    prices = _fetch_uw_prices(ticker, uw_client, ib=ib)
     if len(prices) >= 60:
         return prices
-    # LAST RESORT
     return _fetch_yahoo_prices(ticker)
 
 
@@ -249,12 +249,12 @@ def _fetch_uw_leaps(ticker: str, client: UWClient, min_year: int = 2027) -> List
 
 # ── Parallel ticker data fetcher ─────────────────────────────────
 
-def fetch_ticker_vol(ticker: str, uw_client: UWClient) -> TickerVol:
+def fetch_ticker_vol(ticker: str, uw_client: UWClient, ib: Any = None) -> TickerVol:
     """Fetch all vol data for one ticker. Thread-safe (uses shared UWClient session)."""
     tv = TickerVol(ticker=ticker)
 
-    # Prices: UW primary, Yahoo LAST RESORT (blocking I/O — runs in thread pool)
-    prices = _fetch_prices(ticker, uw_client)
+    # Prices: IB first, UW fallback, Yahoo last resort (blocking I/O in thread pool)
+    prices = _fetch_prices(ticker, uw_client, ib=ib)
     if len(prices) < 60:
         tv.error = "Insufficient price data"
         return tv
@@ -300,15 +300,16 @@ def fetch_all_tickers(tickers: List[str], max_workers: int = 16) -> Dict[str, Ti
     results: Dict[str, TickerVol] = {}
     t0 = time.time()
 
-    with UWClient() as uw:
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = {pool.submit(fetch_ticker_vol, t, uw): t for t in tickers}
-            for future in as_completed(futures):
-                ticker = futures[future]
-                try:
-                    results[ticker] = future.result()
-                except Exception as exc:
-                    results[ticker] = TickerVol(ticker=ticker, error=str(exc))
+    with scan_ib_session() as ib:
+        with UWClient() as uw:
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                futures = {pool.submit(fetch_ticker_vol, t, uw, ib): t for t in tickers}
+                for future in as_completed(futures):
+                    ticker = futures[future]
+                    try:
+                        results[ticker] = future.result()
+                    except Exception as exc:
+                        results[ticker] = TickerVol(ticker=ticker, error=str(exc))
 
     elapsed = time.time() - t0
     print(f"  ✓ Fetched {len(results)} tickers in {elapsed:.1f}s", file=sys.stderr)

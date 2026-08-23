@@ -202,10 +202,11 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // ``trin`` — radon-trin.timer samples NYSE A/D + volume from IB every 5 minutes during RTH (3 missed cycles flag); off-hours the close heartbeat holds a day.
   "trin": { open: 15 * MIN, extended: 24 * HOUR, closed: 24 * HOUR, category: "scheduled", requires_ib: true },
 
-  // ``skew`` publishes every minute during RTH and finalizes daily at 21:45
-  // UTC. Five minutes tolerates transient UW failures while surfacing a dead
-  // live writer; the daily heartbeat preserves the off-hours window.
-  "skew": { open: 5 * MIN, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+  // ``skew`` publishes every 5 minutes during RTH (radon-skew.timer) and
+  // finalizes daily at 21:45 UTC. Ten minutes = two timer cycles, so one slow
+  // run never reads as a dead live writer; the daily heartbeat preserves the
+  // off-hours window.
+  "skew": { open: 10 * MIN, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
   // ``skew2d`` — radon-skew2d.timer fires daily 21:50 UTC every calendar day
   // (derived from skew_history; weekend runs heartbeat when parent is quiet),
@@ -266,13 +267,14 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // (Friday 16:00 ET → Monday 09:30 ET ≈ 65h) without flipping to
   // stale. Per-service intraday cadence varies but ≤30 min during
   // market hours catches genuine outages quickly.
-  // scanner / discover / flow-analysis: UW-only, no IB dependency
-  // (verified against scripts/scanner.py, scripts/discover.py,
-  // scripts/fetch_flow.py — all import from clients.uw_client only).
+  // scanner / discover / flow-analysis: radon-flow-refresh.timer hourly
+  // ET RTH (plus SCAN). Wrapper skips closed session without a
+  // heartbeat, so Monday mornings are a ~66-90h-old row — 4d windows
+  // match theta-harvester. UW-only, no IB.
   // analyst-ratings: IB-primary with UW fallback; classified false so
   // IB-down alert grouping stays accurate — the writer still records a
   // healthy ok row when IB is unreachable but UW serves the data.
-  "scanner": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
+  "scanner": { open: 4 * DAY, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
   // ``theta-harvester`` and ``strength-confirmation`` are fired
   // autonomously by radon-signals-refresh.timer (hourly, Mon-Fri
   // 09:00-16:00 ET) as well as by user POSTs, so they are SCHEDULED —
@@ -284,8 +286,8 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // uniform 4d pages on a dead timer without false-paging every Monday.
   "theta-harvester": { open: 4 * DAY, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
   "strength-confirmation": { open: 4 * DAY, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
-  "discover": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
-  "flow-analysis": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
+  "discover": { open: 4 * DAY, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
+  "flow-analysis": { open: 4 * DAY, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
   "analyst-ratings": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
   // ``chronos-forecast`` only writes when a user POSTs /forecast/chronos
   // (Chronos-2 time-series engine, scripts/chronos_forecast.py). Reads

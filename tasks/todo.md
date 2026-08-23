@@ -1,24 +1,151 @@
-# Task: CREDIT indicator (HYG vs SPX) 2026-08-21
+# Task: Cash-flow Flex 1025 lockout (2026-08-21)
 
 ## Dependency graph
 
-- T1 depends_on: [] - Spec + failing tests (ICE CCC rejected; Yahoo HYG+SPX)
-- T2 depends_on: [T1] - Ingestion / API / UI worktrees
-- T3 depends_on: [T2] - Merge + full suite
-- T4 depends_on: [T3] - Browser verify + PR
+- F1 depends_on: [] - Pin 1001 internal retry + unclassified 1025 (red)
+- F2 depends_on: [F1] - Lockout class, exit 15, 7-day handler embargo, no 1001 SendRequest retry
+- F3 depends_on: [F2] - Shared `flex_embargo` sidecar; TWR poll aborts 1018/1025; performance/background refuses lockout
+- F4 depends_on: [F3] - Focused pytest green; lozenge copy "Do not retry. Ingest with --from-file"
 
 ## Checklist
 
-- [x] T1 `docs/indicators/credit.md` + red tests
-- [x] T2 Three worktrees green
-- [x] T3 Focused gate + typecheck (authz pin added)
-- [x] T4 Live tab screenshot + PR #63
+- [x] F1 Red: 1001 urlopen.call_count was 2; 1025 had no class
+- [x] F2 `_FlexLockoutError`, EXIT_FLEX_LOCKOUT=15, Monday 08:00 is_due False
+- [x] F3 `scripts/utils/flex_embargo.py`; TWR `<FlexStatements>` only; `/performance/background` status=lockout
+- [x] F4 Focused pytest green
 
 ## Review
 
-- ICE CCC OAS rejected (copyright). Yahoo HYG + SPX. Live fetch 4869 sessions, last 2026-08-20, regime divergent.
-- Focused: pytest 19, vitest 229 + typecheck. Playwright e2e 3/3. Screenshot `docs/indicators/credit-tab.png`.
-- VPS: timer install owed (`not-installed` allowlist). Turso write not run here (no creds).
+- Production 2026-08-21T13:58:26Z: SendRequest 1025, class=permanent, next_attempt Monday 08:00 ET. Last success 4d earlier.
+- Mechanism: 1001×2 SendRequest + TWR 07:30 + page-driven Flex every 20 min on one token.
+- Ops: zero Flex SendRequests until the sidecar lapses. Portal Run 1442520, then `--from-file`. Do not retry Monday.
+
+## Constraints
+
+- Preserve unrelated dirty files.
+- `IB_FLEX_FLOWS_QUERY_ID` stays unset.
+- No SendRequest from this change.
+
+---
+
+# Task: Modify-order combo close P&L (2026-08-21)
+
+## Dependency graph
+
+- T1 depends_on: [] - Reproduce CBRS SELL-combo modify P&L (Max Gain $1,035,835 / Max Loss $4,165) as a failing test
+- T2 depends_on: [T1] - Match working SELL BAG to held combo and pass `closeOut.entryCostDollars`
+- T3 depends_on: [T2] - Focused Vitest + Playwright; visual confirm; no live modify
+
+## Checklist
+
+- [x] T1 Red: modify modal close of 50x CBRS RR @ $8 shows realized P&L, not opening max gain/loss
+- [x] T2 Wire `findHeldComboForClose` into `ModifyOrderModal` combo `riskInput`
+- [x] T3 Green tests + screenshot of Close Credit / Est. Realized P&L
+
+## Review
+
+- Root cause: combo modify sent the post-modify BAG through opening-risk math. Held long 205 calls covered the inverted short call, leaving a synthetic long 200 put. Max Gain = (200 + 8) x 50 x 100 minus round-trip cost = $1,035,835. Max Loss = that cost = $4,165.
+- Fix: `findHeldComboForClose` matches SELL envelope + structure legs + qty <= held units, then `closeOut.entryCostDollars` from `resolveEntryCost`.
+- Red reproduced screenshot dollars. Green: Close Credit $40,000 / Est. Realized P&L $15,000. Playwright screenshot `web/test-results/modify-combo-close-pnl.png`.
+- Focused Vitest: 35 passed. Playwright: close-credit spec passed. No live broker modify.
+
+## Constraints
+
+- Preserve unrelated dirty files.
+- Combo close is SELL envelope, structure legs unchanged, qty <= held BAG units.
+- `avg_cost` is per-contract; do not multiply basis by 100 again.
+- Do not submit a live broker modify.
+
+---
+
+# Task: Monorepo legibility (2026-08-20)
+
+## Dependency graph
+
+- L0 depends_on: [] - GitHub front door, SECURITY/SUPPORT/CODEOWNERS, slim README with TestThinIndex, untrack ignored caches
+- L1 depends_on: [L0] - Archive plans/, PROGRESS.md, show-me HTML; add scripts/README.md map; no runtime moves
+- L2 depends_on: [L1] - Lockfiles only after deploy/beta and bun drift are proven
+- L3 depends_on: [L2] - Optional future shims; never move ExecStart paths without unit hash bump
+
+## Checklist
+
+- [x] L-plan Inventory + no-break plan (`docs/monorepo-legibility-plan.md`, `docs/archive/show-me/show-me-monorepo-legibility.html`)
+- [x] L0 Docs + GitHub files; keep `## Now true`; untrack gitignored caches
+- [x] L1 Archive dead trees; weekend audit files stay at root
+- [x] L2 Lockfiles BLOCKED (beta setup still npm ci). site/ npm documented. No lockfile deletes.
+- [x] L3 skipped (no runtime path moves)
+
+## Contract
+
+- Do not create `apps/` or `packages/`.
+- Do not move `web/`, `scripts/`, `cloud/`, `site/`, `docker/ib-gateway/`, `tests/`, `lib/tools/`.
+- Do not move `RELIABILITY_*.md` or `TEST_*.md`.
+- Do not add `.github/README.md`.
+- No em dashes. No `git add -A`.
+
+Owner: `docs/monorepo-legibility-plan.md`
+
+---
+
+# Task: Options net-gex HTTP 504 (2026-08-20)
+
+## Dependency graph
+
+- T1 depends_on: [] - Diagnose: 2026-08-07 recurrence vs timeout-budget split
+- T2 depends_on: [T1] - Red tests: auth budget < 50s proxy; process-wide auth embargo
+- T3 depends_on: [T2] - Cap login timeout; module-level 300s embargo; runbook note
+- T4 depends_on: [T3] - Focused pytest + vitest; commit; push; live verify
+
+## Checklist
+
+- [x] T1 History vs live 504
+- [x] T2 Failing tests
+- [x] T3 Minimal fix
+- [x] T4 Verify, commit, push
+
+## Review
+
+- Hybrid: same MenthorQ auth class as 2026-08-07, new operator-visible 504. Probe 06:03Z 503 in ~65s; Next.js proxy 50s; login timeout was 60s.
+- RED: budget 60>25; second resolve bootstrap 2. GREEN: login 25s, 40s request-path budget, 300s process-wide embargo.
+- Source: `DEFAULT_LOGIN_TIMEOUT_SECONDS = 25.0`; module-level `_auth_embargo_until` + `_AUTH_FAILURE_EMBARGO_SECONDS = 300.0`.
+- Re-run (repo root): pytest 46 passed, 1 warning; vitest `options-exposure-route` 6 passed (1 file). No commit/push.
+
+## Contract
+
+- Same MenthorQ auth class as 2026-08-07. Operator-visible failure is new: 60s login > 50s Next.js proxy => HTTP 504 MEASUREMENT FAULT.
+- Login-probe (90s) can still see FastAPI 503. Browser must also get 503, not a proxy 504.
+- Do not raise OPTIONS_PROXY_TIMEOUT_MS. Do not remint cookies in this change.
+- First request may still bootstrap. Subsequent requests during the embargo fail immediately.
+- No em dashes. Surgical. Ignore unrelated dirty files.
+
+## Workflow
+
+`.grok/workflows/fix-options-exposure-504.rhai`
+
+---
+
+# Task: UW freshness vs 40k budget (2026-08-19)
+
+## Dependency graph
+
+- F1 depends_on: [] - Discover scoring walks 2 darkpool pages; FastAPI min-alerts 3
+- F2 depends_on: [] - FastAPI 3600s cooldown + single-flight on /scan /discover /flow-analysis
+- F3 depends_on: [F1, F2] - VPS hourly radon-flow-refresh via FastAPI
+- F4 depends_on: [F3] - Stale banners + watchdog match hourly (not 10 min)
+
+## Checklist
+
+- [x] F1 `fetch_darkpool(max_pages=)` + discover scoring cap
+- [x] F2 cooldown; `force=1` bypass
+- [x] F3 timer + wrapper; drift-allowlist until root install
+- [x] F4 windows + tests
+
+## Contract
+
+- Evaluate keeps the full 40-page tape.
+- Laptop data-refresh stays unloaded.
+- Hourly RTH is the freshness SoT. SCAN inside the hour serves cache.
+- No em dashes.
 
 ---
 
@@ -57,6 +184,32 @@
 - T2: `upcomingCatalysts` keeps same-ET-day rows until 20:00 ET after `event_time`. Weekend/holiday fossils still drop.
 - T3: `catalystWhenLabel` is `4 Aug 10:00 ET` / `4 Aug`. `catalystPrintLabel` is `F 221k  P 215k` then `A …`. Quadrant row is name | print | when.
 - T4: pytest `test_fetch_catalysts.py` 20 passed after FRED guards (no PAYEMS/USSLIND; skip prev-equal and stale obs). Vitest groups/upcoming/quadrant 39. Playwright `catalyst-card-weekend` 3/3. E2E card: `7 Aug 08:30 ET` + `F 118k P 172k`.
+
+---
+
+# Task: Product analytics recommendation report (2026-08-19)
+
+## Dependency graph
+
+- T1 depends_on: [] - Audit Radon's current web stack, deployment, analytics hooks, authentication, and data architecture.
+- T2 depends_on: [] - Verify current product-analytics capabilities, free tiers, privacy, self-hosting burden, and AI-agent access from primary sources.
+- T3 depends_on: [T1, T2] - Score viable options against Radon's operator needs and select an implementation strategy, event model, and rollout sequence.
+- T4 depends_on: [T3] - Build a concise, actionable, Radon-branded standalone HTML report with source-linked evidence.
+- T5 depends_on: [T4] - Validate citations, links, content consistency, accessibility, responsive rendering, and browser presentation.
+
+## Checklist
+
+- [x] T1 Audit repository context.
+- [x] T2 Research current alternatives.
+- [x] T3 Produce recommendation and measurement plan.
+- [x] T4 Generate HTML report.
+- [x] T5 Verify and document results.
+
+## Review
+
+- Selected PostHog Cloud Free behind a same-origin, authenticated, typed event gateway; session replay and autocapture remain disabled for the operator app.
+- Report: `docs/product-analytics-recommendation.html` with vendor matrix, privacy architecture, eight-event contract, decision dashboards, rollout gates, agent policy, and official sources.
+- Verification: 30/30 external citations returned HTTP 200; four repository references exist; Playwright returned HTTP 200 at 1440x1100 and 390x844 with zero horizontal overflow and zero broken in-page anchors; primary text/color pairs meet WCAG AA contrast; `git diff --check` passed.
 
 ---
 

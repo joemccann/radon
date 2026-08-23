@@ -165,8 +165,10 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # tolerates one missed cycle; 3d closed covers Fri 16:00 ET -> Mon open,
     # since a market-hours-only writer is silent by design off-session.
     "vol-cone-intraday": {"open": 45 * _MIN, "closed": 3 * _DAY, "requires_ib": False},
-    # skew — one-minute RTH UW snapshots plus daily 21:45 UTC finalization.
-    "skew":             {"open": 5 * _MIN, "closed": 26 * _HOUR, "requires_ib": False},
+    # skew — radon-skew.timer fires every 5 minutes during RTH plus a daily
+    # 21:45 UTC finalization. 10m open = two timer cycles, so one slow or
+    # skipped run never flips skew to stale.
+    "skew":             {"open": 10 * _MIN, "closed": 26 * _HOUR, "requires_ib": False},
     # skew2d — radon-skew2d.timer, daily 21:50 UTC every calendar day
     # (five minutes after parent SKEW finalize; weekend/holiday runs heartbeat
     # with no new parent rows). Uniform 26h window mirrors margin-debt /
@@ -191,6 +193,9 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # precedent. UW-only, no IB.
     "theta-harvester":  {"open": 4 * _DAY, "closed": 4 * _DAY, "requires_ib": False},
     "strength-confirmation": {"open": 4 * _DAY, "closed": 4 * _DAY, "requires_ib": False},
+    "scanner":          {"open": 4 * _DAY, "closed": 4 * _DAY, "requires_ib": False},
+    "discover":         {"open": 4 * _DAY, "closed": 4 * _DAY, "requires_ib": False},
+    "flow-analysis":    {"open": 4 * _DAY, "closed": 4 * _DAY, "requires_ib": False},
     # bpi-scan — radon-bpi.timer, Mon-Fri 21:30 UTC AFTER the close: during
     # Monday's whole session the newest row is legitimately Friday-evening's
     # (~72h old), so the window is uniform 4d rather than a tight open window.
@@ -389,6 +394,9 @@ BUCKETS: dict[str, list[str]] = {
         # check surfaces a dead timer within 1h of the 4d window (R-068).
         "theta-harvester",
         "strength-confirmation",
+        "scanner",
+        "discover",
+        "flow-analysis",
         # Daily drift audit on the VPS — hourly check surfaces a missed
         # run within 1h of the 26h window expiring.
         "config-drift",
