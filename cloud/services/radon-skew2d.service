@@ -13,7 +13,7 @@ StartLimitBurst=5
 Type=oneshot
 User=radon
 WorkingDirectory=/home/radon/radon
-EnvironmentFile=/home/radon/radon-cloud/.env
+EnvironmentFile=/etc/radon/env
 Environment=RADON_DB_NO_REPLICA=1
 ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_skew2d.py
 StandardOutput=journal

@@ -13,7 +13,7 @@ StartLimitBurst=10
 Type=oneshot
 User=radon
 WorkingDirectory=/home/radon/radon
-EnvironmentFile=/home/radon/radon-cloud/.env
+EnvironmentFile=/etc/radon/env
 Environment=RADON_DB_NO_REPLICA=1
 # The sampler ships with the MAIN repo (scripts/host_metrics_sampler.py)
 # and lands on the next deploy. Until then this condition skips the run

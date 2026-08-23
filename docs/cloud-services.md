@@ -62,7 +62,7 @@ THEMARKETEAR_PASSWORD=<…>
    For a missing or changed unit, use the reviewed root control-plane procedure
    from [`cloud/CLAUDE.md`](../cloud/CLAUDE.md); do not copy a unit from an
    obsolete containerized-services path.
-5. **`RADON_MEDIA_REMOTE` is a local fs path on Hetzner** — `/home/radon/radon-cloud/media/` (no `host:` prefix, no SSH). rsync does a local copy directly to the volume Caddy serves. The Tailscale and public-IP variants are laptop-only fallbacks (see below).
+5. **`RADON_MEDIA_REMOTE` is a local fs path on Hetzner** — `/var/lib/radon/media/` (no `host:` prefix, no SSH). `/home/radon/radon-cloud/media` is a compatibility symlink. The Tailscale and public-IP variants are laptop-only fallbacks (see below).
 6. **Closing the laptop after the cutover does not break `app.radon.run`** — the newsfeed now runs entirely on Hetzner. No chrome-cdp, no Chrome Debug.app, no Tailscale dependency for new posts.
 
 ### Tailscale-free media push
@@ -106,7 +106,7 @@ The same SSH public key is authorized on both routes — `~/.ssh/authorized_keys
 
 `data/replica.db` is intentionally absent — the embedded-replica architecture was retired 2026-05-20. If the file appears on disk (stray from a pre-migration host), it is safe to `rm` — nothing reads from it.
 
-Every `radon-*.service` uses `EnvironmentFile=/home/radon/radon-cloud/.env` so a single edit propagates to all schedulers. That compatibility path remains until one green host cutover; the canonical future file is `/etc/radon/env` (`deploy.sh` prefers it when that path is a regular file). Do not change unit `EnvironmentFile=` until that cutover. The legacy directory is not a deploy source; use the canonical `cloud/` runbook for service lifecycle changes.
+Every `radon-*.service` (except `radon-grok-page-responder`) uses `EnvironmentFile=/etc/radon/env`. `/home/radon/radon-cloud/.env` is a compatibility symlink to that file. Media is `/var/lib/radon/media` (Caddy `media.radon.run`); `/home/radon/radon-cloud/media` is a compatibility symlink. The legacy directory is not a deploy source.
 
 **Whole-stack kill switch:** `/usr/local/bin/radon` wraps all units (IB Gateway included). Run on the VPS or remotely:
 
@@ -591,7 +591,7 @@ Off-box store for cold portfolio history. **Not** Cloudflare R2 (account billing
 | Script | `scripts/archive_portfolio_snapshots.py` |
 | Unit | `radon-portfolio-archive.service` — **fails closed** if B2 env is unset |
 | Env contract | root `.env.example`, `cloud/.env.example`, `cloud/config/required-env.txt` |
-| VPS secrets | `/home/radon/radon-cloud/.env` (`EnvironmentFile=` on the unit; canonical future path `/etc/radon/env` after one green host cutover) |
+| VPS secrets | `/etc/radon/env` (`EnvironmentFile=` on the unit; `~/radon-cloud/.env` is a compatibility symlink) |
 
 Required vars (all five keys + region; endpoint must include `https://`):
 
@@ -638,7 +638,7 @@ Nightly off-box mirror of the Caddy static tree for `media.radon.run`.
 
 | | |
 |---|---|
-| Local root | `/home/radon/radon-cloud/media` (Caddy `file_server` root; also `RADON_MEDIA_REMOTE` on Hetzner) |
+| Local root | `/var/lib/radon/media` (Caddy `file_server` root; `~/radon-cloud/media` is a compatibility symlink) |
 | Object store | Same Backblaze B2 bucket as portfolio archive (`radon-archive`) |
 | Object prefix | `media/` (override with `RADON_MEDIA_BACKUP_PREFIX`) |
 | Script | `cloud/scripts/media_backup.py` |

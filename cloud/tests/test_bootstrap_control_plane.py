@@ -55,6 +55,11 @@ ARTIFACTS = (
         0o644,
     ),
     Artifact(
+        "services/radon-ib-watchdog.timer",
+        "/etc/systemd/system/radon-ib-watchdog.timer",
+        0o644,
+    ),
+    Artifact(
         "services/radon-ib-gateway.service",
         "/etc/systemd/system/radon-ib-gateway.service",
         0o644,
@@ -70,11 +75,26 @@ ARTIFACTS = (
         0o644,
     ),
     Artifact(
+        "services/radon-portfolio-sync.timer",
+        "/etc/systemd/system/radon-portfolio-sync.timer",
+        0o644,
+    ),
+    Artifact(
         "services/radon-refresh.service", "/etc/systemd/system/radon-refresh.service", 0o644
+    ),
+    Artifact(
+        "services/radon-refresh.timer",
+        "/etc/systemd/system/radon-refresh.timer",
+        0o644,
     ),
     Artifact(
         "services/radon-db-backup.service",
         "/etc/systemd/system/radon-db-backup.service",
+        0o644,
+    ),
+    Artifact(
+        "services/radon-db-backup.timer",
+        "/etc/systemd/system/radon-db-backup.timer",
         0o644,
     ),
     Artifact(
@@ -83,8 +103,18 @@ ARTIFACTS = (
         0o644,
     ),
     Artifact(
+        "services/radon-drift-audit.timer",
+        "/etc/systemd/system/radon-drift-audit.timer",
+        0o644,
+    ),
+    Artifact(
         "services/radon-nextjs-db-watchdog.service",
         "/etc/systemd/system/radon-nextjs-db-watchdog.service",
+        0o644,
+    ),
+    Artifact(
+        "services/radon-nextjs-db-watchdog.timer",
+        "/etc/systemd/system/radon-nextjs-db-watchdog.timer",
         0o644,
     ),
 )

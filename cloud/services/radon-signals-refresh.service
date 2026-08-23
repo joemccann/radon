@@ -15,7 +15,7 @@ StartLimitBurst=5
 Type=oneshot
 User=radon
 WorkingDirectory=/home/radon/radon
-EnvironmentFile=/home/radon/radon-cloud/.env
+EnvironmentFile=/etc/radon/env
 Environment=RADON_SIGNALS_SCAN_TIMEOUT=490
 ExecStart=/usr/bin/bash /home/radon/radon/scripts/run_signals_refresh.sh
 StandardOutput=journal

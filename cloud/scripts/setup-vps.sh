@@ -18,7 +18,7 @@ fi
 # overridable via RADON_CLOUD_DIR=/home/radon/radon-cloud during migration.
 readonly RADON_DIR="${RADON_APP_DIR:-/home/radon/radon}"
 readonly CLOUD_DIR="${RADON_CLOUD_DIR:-${RADON_DIR}/cloud}"
-readonly ENV_FILE="${RADON_DEPLOY_ENV_FILE:-/home/radon/radon-cloud/.env}"
+readonly ENV_FILE="${RADON_DEPLOY_ENV_FILE:-/etc/radon/env}"
 readonly RADON_REPO="git@github.com:joemccann/radon.git"
 readonly CLOUD_REPO="git@github.com:joemccann/radon-cloud.git"  # legacy only
 readonly PYTHON_BIN="python3.13"
@@ -378,18 +378,17 @@ preflight_checks() {
 }
 
 create_etc_radon_dir() {
-  # Canonical future secrets dir. Create it on first setup so a later operator
-  # cutover does not need a fresh mkdir as root.
-  # Do NOT move /home/radon/radon-cloud/.env automatically; live units still
-  # read EnvironmentFile=/home/radon/radon-cloud/.env.
-  # Operator cutover after one green deploy:
-  #   install -m 0600 /etc/radon/env
-  #   ln -sfn /etc/radon/env /home/radon/radon-cloud/.env
+  # Canonical secrets and media dirs. Live units load /etc/radon/env.
+  # Compatibility: ~/radon-cloud/.env and ~/radon-cloud/media are host
+  # symlinks after P2, not a checkout.
   local dir="/etc/radon"
+  local media="/var/lib/radon/media"
   if [[ "${RADON_HELPER_SKIP_CHOWN:-0}" == "1" ]]; then
     install -d -m 0750 "$dir"
+    install -d -m 0750 "$media"
   else
     install -d -m 0750 -o radon -g radon "$dir"
+    install -d -m 0750 -o radon -g radon "$media"
   fi
 }
 

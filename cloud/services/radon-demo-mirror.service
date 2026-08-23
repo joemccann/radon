@@ -7,7 +7,7 @@ After=network-online.target
 Type=oneshot
 User=radon
 WorkingDirectory=/home/radon/radon
-EnvironmentFile=/home/radon/radon-cloud/.env
+EnvironmentFile=/etc/radon/env
 Environment=RADON_DB_NO_REPLICA=1
 ExecStart=/usr/bin/node scripts/db/mirror_market_snapshots_to_demo.js
 TimeoutStartSec=300

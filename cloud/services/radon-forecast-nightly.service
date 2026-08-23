@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=oneshot
 User=radon
 WorkingDirectory=/home/radon/radon
-EnvironmentFile=/home/radon/radon-cloud/.env
+EnvironmentFile=/etc/radon/env
 Environment=RADON_DB_NO_REPLICA=1
 ExecStart=/home/radon/forecasting-venv/bin/python scripts/nightly_forecast.py --metric flow_strength --top 25 --lookback 250 --backfill-days 20
 StandardOutput=journal

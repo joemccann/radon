@@ -2,7 +2,7 @@
 """Nightly backup of the media.radon.run static tree to Backblaze B2.
 
 Caddy serves ``https://media.radon.run`` from
-``/home/radon/radon-cloud/media`` (see cloud/caddy/Caddyfile). The
+``/var/lib/radon/media`` (see cloud/caddy/Caddyfile). The
 newsfeed scraper rsyncs immutable content-derived filenames into that
 directory. This oneshot mirrors the tree off-box so a VPS disk loss
 does not wipe newsfeed images.
@@ -43,7 +43,7 @@ SERVICE_NAME = "media-backup"
 TURSO_TIMEOUT = 10
 SUMMARY_CAP = 300
 DEFAULT_MEDIA_DIR = Path(
-    os.environ.get("RADON_MEDIA_DIR", "/home/radon/radon-cloud/media")
+    os.environ.get("RADON_MEDIA_DIR", "/var/lib/radon/media")
 )
 DEFAULT_PREFIX = "media/"
 

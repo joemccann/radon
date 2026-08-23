@@ -1,3 +1,27 @@
+# Task: P2 host paths (2026-08-23)
+
+## Dependency graph
+
+- P2a depends_on: [] - Red tests for /etc/radon/env and /var/lib/radon/media
+- P2b depends_on: [P2a] - Units, Caddy, media_backup, hashes, CI env
+- P2c depends_on: [P2b] - VPS copy env + rsync media before push
+- P2d depends_on: [P2c] - Push, deploy, publish-caddy, compatibility symlinks
+
+## Checklist
+
+- [x] P2a Red tests
+- [x] P2b Repo cutover
+- [x] P2c Host files (env hash match, 5475 media files)
+- [ ] P2d CI deploy + publish-caddy + symlinks
+
+## Constraints
+
+- Do not change privileged control-plane scripts (drift_audit, helpers, sudoers).
+- Do not restart Gateway.
+- /etc/radon/env must exist as a regular file before units switch EnvironmentFile.
+
+---
+
 # Task: VPS bulletproof sequence (2026-08-23)
 
 ## Dependency graph

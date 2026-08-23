@@ -27,6 +27,7 @@ RUNNER_PRUNER = CLOUD_ROOT / "scripts" / "prune-deploy-runners.py"
 
 CANONICAL_APP_DIR = "/home/radon/radon"
 CANONICAL_CLOUD_DIR = f"{CANONICAL_APP_DIR}/cloud"
+CANONICAL_ENV_FILE = "/etc/radon/env"
 LEGACY_ENV_FILE = "/home/radon/radon-cloud/.env"
 ROLLBACK_ARTIFACTS = ("node_modules", "web/node_modules", "web/.next", "web/.env", ".venv")
 
@@ -526,7 +527,7 @@ def test_runtime_code_paths_are_canonical_while_secret_path_remains_stable() -> 
                         "EnvironmentFile=/home/radon/radon-page-responder.env"
                     ), name
                 else:
-                    assert line == f"EnvironmentFile={LEGACY_ENV_FILE}", name
+                    assert line == f"EnvironmentFile={CANONICAL_ENV_FILE}", name
             if line.startswith(("WorkingDirectory=", "ExecStart=", "ExecStop=")):
                 assert "/home/radon/radon-cloud" not in line, f"{name}: {line}"
                 if name == stripped:
@@ -536,8 +537,8 @@ def test_runtime_code_paths_are_canonical_while_secret_path_remains_stable() -> 
     setup = SETUP.read_text(encoding="utf-8")
     post_setup = POST_SETUP.read_text(encoding="utf-8")
     assert f'RADON_CLOUD_DIR:-{CANONICAL_CLOUD_DIR}' in gateway
-    assert LEGACY_ENV_FILE in setup
-    assert f'ENV_FILE="${{RADON_DEPLOY_ENV_FILE:-{LEGACY_ENV_FILE}}}"' in setup
+    assert CANONICAL_ENV_FILE in setup
+    assert f'ENV_FILE="${{RADON_DEPLOY_ENV_FILE:-{CANONICAL_ENV_FILE}}}"' in setup
     assert f"{CANONICAL_CLOUD_DIR}/scripts" in post_setup
 
 

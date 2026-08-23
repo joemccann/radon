@@ -13,7 +13,7 @@ StartLimitBurst=5
 Type=oneshot
 User=radon
 WorkingDirectory=/home/radon/radon
-EnvironmentFile=/home/radon/radon-cloud/.env
+EnvironmentFile=/etc/radon/env
 Environment=RADON_DB_NO_REPLICA=1
 # Script ships with the MAIN repo and lands on the next deploy. Until then
 # this condition skips the run CLEANLY (unit ends inactive, not failed).

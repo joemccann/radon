@@ -18,7 +18,7 @@ StartLimitBurst=10
 Type=oneshot
 User=radon
 WorkingDirectory=/home/radon/radon
-EnvironmentFile=/home/radon/radon-cloud/.env
+EnvironmentFile=/etc/radon/env
 Environment=RADON_PYTHON_BIN=/home/radon/radon/.venv/bin/python
 ExecStart=/usr/bin/bash /home/radon/radon/scripts/run_portfolio_refresh.sh
 StandardOutput=journal

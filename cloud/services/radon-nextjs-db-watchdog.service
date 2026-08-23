@@ -24,7 +24,7 @@ WorkingDirectory=/home/radon/radon
 # systemd creates this private directory with the service's User/Group. Avoid
 # recursive privileged ownership changes across any radon-writable path.
 Environment=RADON_NEXTJS_DB_WATCHDOG_STATE_PATH=/var/lib/radon-nextjs-db-watchdog/state.json
-EnvironmentFile=/home/radon/radon-cloud/.env
+EnvironmentFile=/etc/radon/env
 # Direct-to-cloud only; never resurrect the retired embedded replica.
 Environment=RADON_DB_NO_REPLICA=1
 # -I (isolated): drops the script's own directory from sys.path, so a module

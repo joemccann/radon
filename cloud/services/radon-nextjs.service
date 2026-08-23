@@ -14,7 +14,7 @@ StartLimitBurst=5
 Type=simple
 User=radon
 WorkingDirectory=/home/radon/radon/web
-EnvironmentFile=/home/radon/radon-cloud/.env
+EnvironmentFile=/etc/radon/env
 # 2026-05-20: take Next.js off the embedded replica too. Even with
 # api/relay/newsfeed/monitor on RADON_DB_NO_REPLICA=1, their direct-to-
 # cloud writes still raced Next.js's locally-buffered replica frames

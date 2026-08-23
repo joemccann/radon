@@ -130,7 +130,7 @@ IB_GATEWAY_DEPENDENTS = [
     "radon-portfolio-sync.service",
 ]
 
-ENV_FILE_PATH = "/home/radon/radon-cloud/.env"
+ENV_FILE_PATH = "/etc/radon/env"
 STRIPPED_ENV_SERVICES = {
     "radon-grok-page-responder.service",
 }
@@ -557,7 +557,7 @@ class TestMediaBackup:
         assert svc["timeoutstartsec"] == "3600"
         assert "media_backup.py" in svc["execstart"]
         assert svc["user"] == "radon"
-        assert "/home/radon/radon-cloud/.env" in svc["environmentfile"]
+        assert "/etc/radon/env" in svc["environmentfile"]
         env = svc.get("environment", "")
         assert "RADON_MEDIA_DIR" in env or "RADON_DB_NO_REPLICA" in env
 

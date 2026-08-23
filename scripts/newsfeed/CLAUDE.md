@@ -69,6 +69,6 @@ Per-post chips with AND-semantics when ≥2 are active. Active filters render as
 
 ## Hetzner Resident
 
-Newsfeed runs on the VPS, not laptop. Session at `data/newsfeed-storage.json` (gitignored). On Hetzner `RADON_MEDIA_REMOTE=/home/radon/radon-cloud/media/`. Service: `radon-newsfeed.service` (`Restart=on-failure`).
+Newsfeed runs on the VPS, not laptop. Session at `data/newsfeed-storage.json` (gitignored). On Hetzner `RADON_MEDIA_REMOTE=/var/lib/radon/media/` (compat symlink `~/radon-cloud/media`). Service: `radon-newsfeed.service` (`Restart=on-failure`).
 
 For local one-shot debug: `node scripts/newsfeed/index.js --once`.
