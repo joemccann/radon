@@ -36,7 +36,7 @@ from utils.scan_health import (
     record_scan_degraded,
 )
 from utils.uw_budget import should_block_universe_scan
-from utils.uw_surface import fetch_surface
+from utils.uw_surface import fetch_surface, scan_ib_session
 
 try:
     from db.scan_mirror import mirror_scan_snapshot  # type: ignore
@@ -779,6 +779,7 @@ def scan_ticker(
     market_context: Optional[MarketContext] = None,
     *,
     retry_transient: bool = False,
+    ib: Any = None,
 ) -> Optional[StrengthCandidate]:
     own_client = None
     if client is None:
@@ -789,7 +790,7 @@ def scan_ticker(
     ticker = ticker.upper()
     try:
         try:
-            surface = fetch_surface(client, ticker)
+            surface = fetch_surface(client, ticker, ib=ib)
             prices = _prices_from_ohlc(surface["ohlc"])
         except UWRateLimitError:
             raise
@@ -925,49 +926,51 @@ def scan_universe(
     rate_limited = 0
     errors = 0
     consecutive_rate_limits = 0
-    with ThreadPoolExecutor(max_workers=max(1, max_workers)) as pool:
-        futures = {
-            pool.submit(
-                scan_ticker,
-                ticker,
-                None,
-                None,
-                market_context,
-                retry_transient=retry_transient,
-            ): ticker
-            for ticker in resolved
-        }
-        for idx, future in enumerate(as_completed(futures), start=1):
-            ticker = futures[future]
-            try:
-                row = future.result()
-            except CancelledError:
-                continue
-            except UWRateLimitError:
-                rate_limited += 1
-                consecutive_rate_limits += 1
-                print(f"  [{idx}/{len(resolved)}] {ticker} - SKIP (rate limited)", file=sys.stderr)
-                if consecutive_rate_limits >= RATE_LIMIT_ABORT:
-                    print(
-                        f"  aborting remaining tickers after {RATE_LIMIT_ABORT} consecutive UW rate limits",
-                        file=sys.stderr,
-                    )
-                    for pending in futures:
-                        pending.cancel()
-                continue
-            except Exception as exc:
-                errors += 1
+    with scan_ib_session() as ib:
+        with ThreadPoolExecutor(max_workers=max(1, max_workers)) as pool:
+            futures = {
+                pool.submit(
+                    scan_ticker,
+                    ticker,
+                    None,
+                    None,
+                    market_context,
+                    retry_transient=retry_transient,
+                    ib=ib,
+                ): ticker
+                for ticker in resolved
+            }
+            for idx, future in enumerate(as_completed(futures), start=1):
+                ticker = futures[future]
+                try:
+                    row = future.result()
+                except CancelledError:
+                    continue
+                except UWRateLimitError:
+                    rate_limited += 1
+                    consecutive_rate_limits += 1
+                    print(f"  [{idx}/{len(resolved)}] {ticker} - SKIP (rate limited)", file=sys.stderr)
+                    if consecutive_rate_limits >= RATE_LIMIT_ABORT:
+                        print(
+                            f"  aborting remaining tickers after {RATE_LIMIT_ABORT} consecutive UW rate limits",
+                            file=sys.stderr,
+                        )
+                        for pending in futures:
+                            pending.cancel()
+                    continue
+                except Exception as exc:
+                    errors += 1
+                    consecutive_rate_limits = 0
+                    print(f"  [{idx}/{len(resolved)}] {ticker} - ERROR ({exc})", file=sys.stderr)
+                    continue
                 consecutive_rate_limits = 0
-                print(f"  [{idx}/{len(resolved)}] {ticker} - ERROR ({exc})", file=sys.stderr)
-                continue
-            consecutive_rate_limits = 0
-            if row is None:
-                no_setup += 1
-                print(f"  [{idx}/{len(resolved)}] {ticker} - NO DATA", file=sys.stderr)
-                continue
-            ok += 1
-            print(f"  [{idx}/{len(resolved)}] {ticker} - {row.verdict} ({row.groups_passed}/7)", file=sys.stderr)
-            results.append(row)
+                if row is None:
+                    no_setup += 1
+                    print(f"  [{idx}/{len(resolved)}] {ticker} - NO DATA", file=sys.stderr)
+                    continue
+                ok += 1
+                print(f"  [{idx}/{len(resolved)}] {ticker} - {row.verdict} ({row.groups_passed}/7)", file=sys.stderr)
+                results.append(row)
     payload = build_output(
         results, source, len(resolved), requested_tickers=resolved,
         coverage=coverage_block(

@@ -2,11 +2,9 @@
 """
 LEAP IV Mispricing Scanner (Unusual Whales primary)
 
-Uses Unusual Whales for OHLC price data (HV calculation) and
-LEAP option IV data. Yahoo Finance as ABSOLUTE LAST RESORT
-for price data when UW fails.
-
-No IB connection required.
+Uses IB historical bars for daily closes when the gateway is up,
+Unusual Whales OHLC as fallback, and Yahoo as last resort.
+UW remains the source for LEAP option IV.
 
 API Reference: docs/unusual_whales_api.md
 Full Spec: docs/unusual_whales_api_spec.yaml
@@ -49,13 +47,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import nullcontext
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional, List, Dict
+from typing import Any, Optional, List, Dict
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 from dataclasses import dataclass, field, asdict
 
 from clients.uw_client import UWClient, UWAPIError, UWRateLimitError
 from utils.ticker_args import parse_ticker_list
+from utils.uw_surface import fetch_daily_closes, scan_ib_session
 
 try:
     from db.scan_mirror import mirror_scan_snapshot  # type: ignore
@@ -229,14 +228,18 @@ class ScanResult:
     is_mispriced: bool
 
 
-def get_uw_history(ticker: str, uw_client: Optional[UWClient] = None) -> List[float]:
-    """Fetch historical daily closes from Unusual Whales OHLC endpoint."""
+def get_uw_history(
+    ticker: str,
+    uw_client: Optional[UWClient] = None,
+    ib: Any = None,
+) -> List[float]:
+    """Fetch historical daily closes: IB first, UW on miss."""
     try:
-        if uw_client:
-            data = uw_client.get_stock_ohlc(ticker, candle_size="1d")
-        else:
+        if uw_client is None and ib is None:
             with UWClient() as client:
-                data = client.get_stock_ohlc(ticker, candle_size="1d")
+                data = fetch_daily_closes(ticker, ib=None, uw=client, min_bars=60)
+        else:
+            data = fetch_daily_closes(ticker, ib=ib, uw=uw_client, min_bars=60)
         bars = data.get("data", [])
         if bars:
             return [float(b["close"]) for b in bars if b.get("close") is not None]
@@ -268,12 +271,15 @@ def get_yahoo_history(ticker: str, days: int = 400) -> List[float]:
         return []
 
 
-def get_price_history(ticker: str, uw_client: Optional[UWClient] = None) -> List[float]:
-    """Fetch daily closes: UW primary, Yahoo ABSOLUTE LAST RESORT."""
-    prices = get_uw_history(ticker, uw_client)
+def get_price_history(
+    ticker: str,
+    uw_client: Optional[UWClient] = None,
+    ib: Any = None,
+) -> List[float]:
+    """Fetch daily closes: IB first, UW fallback, Yahoo last resort."""
+    prices = get_uw_history(ticker, uw_client, ib=ib)
     if len(prices) >= 60:
         return prices
-    # LAST RESORT
     return get_yahoo_history(ticker)
 
 
@@ -299,10 +305,14 @@ def calculate_hv(prices: List[float], period: int) -> Optional[float]:
 
 
 def get_vol_data(
-    ticker: str, uw_client: Optional[UWClient] = None, *, quiet: bool = False
+    ticker: str,
+    uw_client: Optional[UWClient] = None,
+    *,
+    quiet: bool = False,
+    ib: Any = None,
 ) -> Optional[VolData]:
     """Get historical volatility data for a ticker."""
-    prices = get_price_history(ticker, uw_client)
+    prices = get_price_history(ticker, uw_client, ib=ib)
     
     if len(prices) < 60:
         if not quiet:
@@ -448,6 +458,7 @@ def scan_ticker(
     client: Optional[UWClient] = None,
     *,
     quiet: bool = False,
+    ib: Any = None,
 ) -> Optional[ScanResult]:
     """Scan a single ticker for LEAP IV mispricing."""
     def emit(msg: str = "", *, force: bool = False) -> None:
@@ -459,7 +470,7 @@ def scan_ticker(
     emit(f"{'='*50}")
 
     with (UWClient() if client is None else nullcontext(client)) as uw:
-        vol_data = get_vol_data(ticker, uw_client=uw, quiet=quiet)
+        vol_data = get_vol_data(ticker, uw_client=uw, quiet=quiet, ib=ib)
         if not vol_data:
             return None
 
@@ -534,30 +545,31 @@ def scan_universe(
     workers = max(1, workers)
     quiet = workers > 1
     results: List[ScanResult] = []
-    with UWClient() as uw:
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = {
-                pool.submit(scan_ticker, ticker, min_gap, uw, quiet=quiet): ticker
-                for ticker in tickers
-            }
-            for future in as_completed(futures):
-                ticker = futures[future]
-                try:
-                    result = future.result()
-                except UWRateLimitError:
-                    print(f"  ✗ {ticker}: rate limited, skip")
-                    if failed_tickers is not None:
+    with scan_ib_session() as ib:
+        with UWClient() as uw:
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = {
+                    pool.submit(scan_ticker, ticker, min_gap, uw, quiet=quiet, ib=ib): ticker
+                    for ticker in tickers
+                }
+                for future in as_completed(futures):
+                    ticker = futures[future]
+                    try:
+                        result = future.result()
+                    except UWRateLimitError:
+                        print(f"  ✗ {ticker}: rate limited, skip")
+                        if failed_tickers is not None:
+                            failed_tickers.append(ticker)
+                        continue
+                    except Exception as exc:
+                        print(f"  ✗ Error scanning {ticker}: {exc}")
+                        if failed_tickers is not None:
+                            failed_tickers.append(ticker)
+                        continue
+                    if result:
+                        results.append(result)
+                    elif failed_tickers is not None:
                         failed_tickers.append(ticker)
-                    continue
-                except Exception as exc:
-                    print(f"  ✗ Error scanning {ticker}: {exc}")
-                    if failed_tickers is not None:
-                        failed_tickers.append(ticker)
-                    continue
-                if result:
-                    results.append(result)
-                elif failed_tickers is not None:
-                    failed_tickers.append(ticker)
     return results
 
 

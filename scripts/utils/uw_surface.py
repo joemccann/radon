@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any
+import threading
+from contextlib import contextmanager
+from typing import Any, Iterator
 
 # HV20 needs 21 daily closes; scanners reject fewer than this.
 MIN_DAILY_CLOSES = 21
@@ -89,3 +91,49 @@ def fetch_surface(client: Any, ticker: str, ib: Any = None) -> dict[str, Any]:
         ),
         "gex_strike": client.get_greek_exposure_by_strike(symbol),
     }
+
+
+class _LockedIB:
+    """Serialize get_historical_data; ib_insync is not thread-safe."""
+
+    def __init__(self, ib: Any) -> None:
+        self._ib = ib
+        self._lock = threading.Lock()
+
+    def get_historical_data(self, *args: Any, **kwargs: Any) -> Any:
+        with self._lock:
+            return self._ib.get_historical_data(*args, **kwargs)
+
+    def disconnect(self) -> None:
+        disconnect = getattr(self._ib, "disconnect", None)
+        if disconnect is not None:
+            disconnect()
+
+
+@contextmanager
+def scan_ib_session() -> Iterator[Any]:
+    """One IB connection for a scan run. Yields None if connect fails."""
+    client = None
+    adapter: Any = None
+    try:
+        from clients.ib_client import IBClient
+
+        client = IBClient()
+        client.connect(client_id="auto", timeout=8, max_retries=1)
+        adapter = _LockedIB(client)
+    except Exception:
+        if client is not None:
+            try:
+                client.disconnect()
+            except Exception:
+                pass
+        adapter = None
+        client = None
+    try:
+        yield adapter
+    finally:
+        if adapter is not None:
+            try:
+                adapter.disconnect()
+            except Exception:
+                pass

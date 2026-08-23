@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -25,6 +26,16 @@ if str(_SCRIPTS_DIR) not in sys.path:
 import strength_confirmation_scanner as strength  # noqa: E402
 import theta_harvester_scanner as theta  # noqa: E402
 from clients.uw_client import UWRateLimitError  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _no_live_scan_ib(monkeypatch) -> None:
+    @contextmanager
+    def _none():
+        yield None
+
+    monkeypatch.setattr(theta, "scan_ib_session", _none)
+    monkeypatch.setattr(strength, "scan_ib_session", _none)
 
 
 PRIOR_GOOD = {

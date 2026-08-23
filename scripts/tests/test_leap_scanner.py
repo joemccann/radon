@@ -2,7 +2,7 @@
 import math
 import json
 import sys
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 import pytest
 
 from leap_iv_scanner import (
@@ -22,6 +22,15 @@ from leap_scanner_uw import (
     VolData,
 )
 import leap_scanner_uw
+
+
+@pytest.fixture(autouse=True)
+def _no_live_scan_ib(monkeypatch):
+    @contextmanager
+    def _none():
+        yield None
+
+    monkeypatch.setattr(leap_scanner_uw, "scan_ib_session", _none)
 
 
 # ── calculate_historical_volatility (IB scanner) ────────────────────
@@ -233,13 +242,71 @@ class TestResolveScanInputs:
         )
 
 
+def test_get_price_history_ib_hit_skips_uw_ohlc(monkeypatch):
+    from types import SimpleNamespace
+
+    class RecordingUW:
+        def __init__(self):
+            self.calls = []
+
+        def get_stock_ohlc(self, ticker, candle_size="1d"):
+            self.calls.append((ticker, candle_size))
+            return {"data": [{"close": 1.0}] * 60}
+
+    class RecordingIB:
+        def get_historical_data(self, contract, **kwargs):
+            return [SimpleNamespace(date="2026-01-01", close=100.0 + i) for i in range(60)]
+
+    uw = RecordingUW()
+    monkeypatch.setattr(
+        leap_scanner_uw,
+        "get_yahoo_history",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("yahoo")),
+    )
+
+    prices = leap_scanner_uw.get_price_history("AAPL", uw_client=uw, ib=RecordingIB())
+
+    assert uw.calls == []
+    assert len(prices) == 60
+    assert prices[0] == 100.0
+    assert prices[-1] == 159.0
+
+
+def test_get_uw_history_ib_miss_calls_uw_ohlc(monkeypatch):
+    from types import SimpleNamespace
+
+    class RecordingUW:
+        def __init__(self):
+            self.calls = []
+
+        def get_stock_ohlc(self, ticker, candle_size="1d"):
+            self.calls.append((ticker, candle_size))
+            return {"data": [{"close": float(i)} for i in range(1, 61)]}
+
+    class RecordingIB:
+        def get_historical_data(self, contract, **kwargs):
+            return [SimpleNamespace(date="2026-01-01", close=100.0)]
+
+    uw = RecordingUW()
+    monkeypatch.setattr(
+        leap_scanner_uw,
+        "get_yahoo_history",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("yahoo")),
+    )
+
+    prices = leap_scanner_uw.get_price_history("MSFT", uw_client=uw, ib=RecordingIB())
+
+    assert uw.calls == [("MSFT", "1d")]
+    assert prices == [float(i) for i in range(1, 61)]
+
+
 def test_all_provider_failures_preserve_cache_and_fail_health(tmp_path, monkeypatch):
     cache = tmp_path / "leap.json"
     previous = {"scan_time": "old", "results": [{"ticker": "SPY"}]}
     cache.write_text(json.dumps(previous))
     monkeypatch.setattr(leap_scanner_uw, "DASHBOARD_CACHE_PATH", cache)
     monkeypatch.setattr(leap_scanner_uw, "UWClient", lambda: nullcontext(object()))
-    monkeypatch.setattr(leap_scanner_uw, "scan_ticker", lambda *_args: None)
+    monkeypatch.setattr(leap_scanner_uw, "scan_ticker", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         sys,
         "argv",
