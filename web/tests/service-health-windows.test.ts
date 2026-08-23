@@ -529,6 +529,18 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
     expect(requiresIb("iei-hyg")).toBe(false);
   });
 
+  // ``trin`` — radon-trin.timer samples IB every 5 minutes during RTH, so a
+  // 15-minute open window tolerates 3 missed cycles (like vcg-scan); the
+  // closing snapshot holds 24h off-hours. IB-only internals: requires_ib true.
+  it("trin uses a 15m open window, 24h off-hours, requires_ib true", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["trin"]).toBeDefined();
+    expect(getServiceCategory("trin")).toBe("scheduled");
+    expect(getFreshnessWindowMs("trin", "open")).toBe(15 * MIN);
+    expect(getFreshnessWindowMs("trin", "extended")).toBe(24 * HOUR);
+    expect(getFreshnessWindowMs("trin", "closed")).toBe(24 * HOUR);
+    expect(requiresIb("trin")).toBe(true);
+  });
+
   // ``skew`` publishes one-minute RTH snapshots and retains a daily
   // finalization heartbeat off-hours. UW-only, no IB.
   it("skew uses a tight open window and a daily off-hours window", () => {
@@ -732,6 +744,8 @@ describe("SERVICE_FRESHNESS_WINDOWS — requires_ib field", () => {
       "orders-read-compare",
       // REL-001: PositionReconcileHandler fetches IB positions every cycle.
       "position-reconcile",
+      // radon-trin.timer samples NYSE A/D + up/down volume from IB every 5 min RTH.
+      "trin",
     ]);
     expect(ibTrue).toEqual(expected);
   });
