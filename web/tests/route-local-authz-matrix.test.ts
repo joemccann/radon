@@ -38,7 +38,7 @@ const MIDDLEWARE_PERIMETER_ONLY_ROUTES = [
   "admin/demo-users", "bookmarks", "bookmarks/[post_id]", "bpi", "catalysts",
   // cor/skew2d/vol-cone/equibles-*: read-only market-data indicators (R-079
   // classification) — same posture as bpi/margin-debt/straddle.
-  "cor", "credit-spread", "iei-hyg", "trin", "equibles-ats-venue-share", "equibles-cot-positioning",
+  "cor", "credit-spread", "divyield", "iei-hyg", "trin", "equibles-ats-venue-share", "equibles-cot-positioning",
   "equibles-filing-forensics", "equibles-short-crowding",
   "equibles-smart-money-13f",
   "flex-token", "flow-surprise", "futures-quote", "garch-convergence",

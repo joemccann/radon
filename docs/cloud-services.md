@@ -530,6 +530,20 @@ read time. Every run refreshes StockCharts `$TRIN` daily closes
 Heartbeat `trin`. Installed by the deploy's `install-units` verb from
 `installed-units.sha256`. Spec: [`indicators/trin.md`](indicators/trin.md).
 
+### DIV YIELD (`radon-divyield.timer`)
+
+Daily `22:40 UTC` (`RandomizedDelaySec=300`, offset from `radon-yield-curve`'s
+22:30 pass so the day's `y10` row lands first), oneshot
+`scripts/fetch_divyield.py`, `TimeoutStartSec=900`. Percent of S&P 500
+constituents whose trailing-12M dividend yield exceeds the 10Y Treasury yield:
+constituents from the github-datasets CSV (Wikipedia parse API, then the
+`index_constituents` cache/seed chain as fallbacks), per-ticker trailing yields
+from Yahoo v8 charts (6 workers), `y10` read from Turso `yield_curve_history`.
+Rows in `divyield_history` (monthly pre-cutover rows are a survivorship-biased
+approximation, `approximate=1`). Weekend runs are unchanged-day heartbeats.
+Heartbeat `div-yield`. Installed by the deploy's `install-units` verb from
+`installed-units.sha256`. Spec: [`indicators/divyield.md`](indicators/divyield.md).
+
 ### IV RANK (`radon-ivrank.timer`)
 
 Daily `22:10 UTC` (`RandomizedDelaySec=120`), oneshot
