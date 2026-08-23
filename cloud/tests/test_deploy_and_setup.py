@@ -250,8 +250,10 @@ class TestSetupSudoers:
             "recover",
             "install-units",
             "sync-scheduled-units",
+            "refresh-control-plane",
         ):
             assert f"radon-deploy-root {action}" in sudoers
+        assert "radon-deploy-root refresh-control-plane-privileged" not in sudoers
         assert "radon-deploy-root start-nextjs" not in sudoers
 
     def test_watchdog_sudoers_file_provisioned(self, setup_sh: str) -> None:
@@ -321,6 +323,34 @@ class TestOperatorCli:
         assert "install_operator_cli" in main_block.group(1), (
             "install_operator_cli defined but never called from main()"
         )
+
+
+class TestDefaultEnvFile:
+    def test_prefers_etc_radon_env_when_present(self, deploy_sh: str) -> None:
+        body = _function_body(deploy_sh, "_default_env_file")
+        assert re.search(
+            r'if \[\[ -n "\$\{RADON_DEPLOY_ENV_FILE:-\}" \]\]; then.*'
+            r'elif \[\[ -f /etc/radon/env \]\]; then.*'
+            r'elif \[\[ -f /home/radon/radon-cloud/\.env \]\]; then.*'
+            r'\$\{CLOUD_DIR\}/\.env',
+            body,
+            re.DOTALL,
+        ), "_default_env_file must prefer /etc/radon/env over ~/radon-cloud/.env"
+
+
+class TestSetupEtcRadon:
+    def test_creates_etc_radon_dir_mode_0750(self, setup_sh: str) -> None:
+        body = _function_body(setup_sh, "create_etc_radon_dir")
+        assert "-m 0750" in body
+        assert "-o radon" in body
+        assert "-g radon" in body
+        assert "/etc/radon" in body
+        assert "install -m 0600" in body
+        assert "ln -sfn" in body
+        assert not re.search(r"^\s*(mv|cp)\s+", body, re.MULTILINE)
+        main = _function_body(setup_sh, "main")
+        assert main.index("preflight_checks") < main.index("create_etc_radon_dir")
+        assert main.index("create_etc_radon_dir") < main.index("validate_env")
 
 
 class TestShellSyntax:

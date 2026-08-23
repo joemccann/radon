@@ -1,0 +1,834 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RADON — VPS dockerization, adversarial plan</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --canvas: #0a0f14;
+      --panel: #0f1519;
+      --raised: #151c22;
+      --grid: #1e293b;
+      --text: #e2e8f0;
+      --muted: #758192;
+      --secondary: #94a3b8;
+      --signal: #05AD98;
+      --strong: #0FCFB5;
+      --warn: #F5A623;
+      --fault: #E85D6C;
+      --violet: #9e80f6;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--canvas); color: var(--text); }
+    body {
+      font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+      padding: 24px 16px 96px;
+    }
+    .wrap { max-width: 1180px; margin: 0 auto; }
+    .kicker {
+      font-size: 11px;
+      letter-spacing: 0.16em;
+      font-weight: 600;
+      color: var(--muted);
+      margin: 0 0 8px;
+      text-transform: uppercase;
+    }
+    h1 {
+      font-size: 30px;
+      font-weight: 560;
+      letter-spacing: -0.03em;
+      margin: 0 0 8px;
+    }
+    h1 span { color: var(--fault); }
+    .lede {
+      color: var(--secondary);
+      font-size: 15px;
+      line-height: 1.55;
+      margin: 0 0 20px;
+      max-width: 78ch;
+    }
+    .toc {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 0 0 20px;
+    }
+    .toc a {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 11px;
+      color: var(--secondary);
+      text-decoration: none;
+      border: 1px solid var(--grid);
+      border-radius: 999px;
+      padding: 4px 10px;
+    }
+    .toc a:hover { color: var(--signal); border-color: var(--signal); }
+    .verdict {
+      background: var(--panel);
+      border: 1px solid var(--fault);
+      border-radius: 4px;
+      padding: 16px 18px;
+      margin-bottom: 16px;
+    }
+    .verdict strong { color: var(--fault); font-weight: 600; }
+    .verdict p { margin: 8px 0 0; color: var(--secondary); font-size: 14px; line-height: 1.5; }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .label {
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      color: var(--muted);
+      margin: 0 0 12px;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+    h2 {
+      font-size: 18px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      margin: 0 0 10px;
+    }
+    p, li { font-size: 14px; line-height: 1.55; color: var(--text); }
+    .muted { color: var(--secondary); }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .stat {
+      background: var(--raised);
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      padding: 12px;
+    }
+    .stat .n {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 22px;
+      color: var(--signal);
+    }
+    .stat .t {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 4px;
+      letter-spacing: 0.04em;
+    }
+    .stat.warn .n { color: var(--warn); }
+    .stat.fault .n { color: var(--fault); }
+    .stat.violet .n { color: var(--violet); }
+    .planes {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .plane {
+      background: var(--raised);
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      padding: 14px;
+      min-height: 280px;
+    }
+    .plane h3 {
+      margin: 0 0 8px;
+      font-size: 12px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+    .plane.host h3 { color: var(--warn); }
+    .plane.broker h3 { color: var(--fault); }
+    .plane.app h3 { color: var(--signal); }
+    .plane ul { margin: 0; padding: 0; list-style: none; }
+    .plane li {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 12px;
+      padding: 5px 0;
+      border-top: 1px solid var(--grid);
+      color: var(--text);
+    }
+    .plane li:first-child { border-top: 0; }
+    .tree {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 12px;
+      line-height: 1.55;
+      background: var(--raised);
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      padding: 14px 16px;
+      overflow-x: auto;
+      white-space: pre;
+      color: var(--secondary);
+    }
+    .tree .ok { color: var(--signal); }
+    .tree .bad { color: var(--fault); }
+    .tree .meh { color: var(--warn); }
+    .tree .vio { color: var(--violet); }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td {
+      text-align: left;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--grid);
+      vertical-align: top;
+    }
+    th {
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    td code, .mono {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 12px;
+    }
+    .tag {
+      display: inline-block;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--grid);
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .tag.p0 { color: var(--fault); border-color: var(--fault); }
+    .tag.p1 { color: var(--warn); border-color: var(--warn); }
+    .tag.p2 { color: var(--signal); border-color: var(--signal); }
+    .tag.p3 { color: var(--violet); border-color: var(--violet); }
+    .kill {
+      display: grid;
+      grid-template-columns: 72px 1fr;
+      gap: 10px;
+      padding: 10px 0;
+      border-top: 1px solid var(--grid);
+    }
+    .kill:first-of-type { border-top: 0; }
+    .kill .shot {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 11px;
+      color: var(--fault);
+      letter-spacing: 0.08em;
+      padding-top: 2px;
+    }
+    .phases {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .phase {
+      background: var(--raised);
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      padding: 12px;
+    }
+    .phase .num {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 11px;
+      color: var(--signal);
+      letter-spacing: 0.1em;
+    }
+    .phase h3 {
+      margin: 6px 0 8px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .phase p { margin: 0; font-size: 12px; color: var(--secondary); line-height: 1.45; }
+    .phase.never { border-color: var(--fault); }
+    .phase.never .num { color: var(--fault); }
+    .cols-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .keep { border-color: var(--signal); }
+    .killbox { border-color: var(--fault); }
+    ul.tight { margin: 0; padding-left: 18px; }
+    ul.tight li { margin: 4px 0; color: var(--secondary); }
+    .conf {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+    @media (max-width: 980px) {
+      .stats, .planes, .phases, .cols-2 { grid-template-columns: 1fr 1fr; }
+      h1 { font-size: 24px; }
+    }
+    @media (max-width: 640px) {
+      .stats, .planes, .phases, .cols-2 { grid-template-columns: 1fr; }
+      .kill { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <p class="kicker">Host architecture / adversarial plan / 2026-08-23</p>
+    <h1>Do not dockerize the <span>entire</span> VPS</h1>
+    <p class="lede">
+      The operator pain is real. The diagnosis is wrong. You already run Docker
+      where it is required (IB Gateway). The remaining SSH/bootstrap tax is a
+      control-plane chicken-and-egg, not a missing Compose file. A full-stack
+      compose project would reintroduce the cascade-stop and stacked-2FA bugs
+      this host was built to prevent.
+    </p>
+
+    <nav class="toc">
+      <a href="#verdict">Verdict</a>
+      <a href="#wrong">Wrong variable</a>
+      <a href="#now">Three planes</a>
+      <a href="#tax">Operator tax</a>
+      <a href="#naive">Naive plan</a>
+      <a href="#attack">Kill shots</a>
+      <a href="#self">Attack the hybrid</a>
+      <a href="#plan">Bulletproof plan</a>
+      <a href="#matrix">Keep / image / never</a>
+      <a href="#done">Done when</a>
+    </nav>
+
+    <section class="verdict" id="verdict">
+      <strong>Verdict (confidence: high).</strong>
+      <p>
+        Keep systemd as the host supervisor. Keep the Gateway as a single
+        Docker container with <code class="mono">restart: "no"</code>. Stop
+        building Next.js and the Python venv on the box. Teach CI to refresh
+        the control-plane bundle through the existing root helper so a normal
+        push never requires a root SSH session. That is the plan. Kubernetes,
+        Coolify, Compose-as-OS, and systemd-in-Docker are rejected.
+      </p>
+    </section>
+
+    <section class="panel" id="wrong">
+      <p class="label">01 / You are measuring the wrong variable</p>
+      <div class="stats">
+        <div class="stat"><div class="n">106</div><div class="t">Unit files in cloud/services (57 service + 49 timer)</div></div>
+        <div class="stat warn"><div class="n">21</div><div class="t">Bootstrap artifacts. Any hash change fails CI until root SSH</div></div>
+        <div class="stat"><div class="n">5</div><div class="t">Always-on app units CI restarts (next, api, relay, monitor, newsfeed)</div></div>
+        <div class="stat fault"><div class="n">1</div><div class="t">Line in auto-sync-units.txt. The no-SSH unit path is almost unused</div></div>
+        <div class="stat violet"><div class="n">0</div><div class="t">docker/services left. Deleted as decoy units (40cfff2a)</div></div>
+        <div class="stat warn"><div class="n">SSH</div><div class="t">CI already SSHs as radon and runs deploy.sh. You are not the deployer</div></div>
+      </div>
+      <p class="muted" style="margin: 14px 0 0;">
+        Push to <code class="mono">main</code> already deploys. The job extracts
+        <code class="mono">cloud/</code> from the tested SHA into
+        <code class="mono">~/.radon-deploy-runners/&lt;sha&gt;.&lt;run&gt;/cloud</code>,
+        then runs that runner's <code class="mono">deploy.sh</code>. You SSH after
+        a push because the incoming SHA changed a bootstrap artifact and
+        preflight refused the release, or because a timer is sitting on the
+        drift allowlist as pending root install-copy. Docker does not delete
+        that contract. It copies it into image tags and a socket.
+      </p>
+    </section>
+
+    <section class="panel" id="now">
+      <p class="label">02 / Current topology is already three planes</p>
+      <div class="planes">
+        <div class="plane host">
+          <h3>Host plane (never a container)</h3>
+          <ul>
+            <li>systemd PID 1, journald, polkit</li>
+            <li>Caddy + Let's Encrypt + media.radon.run</li>
+            <li>Tailscale (100.112.32.16 bind)</li>
+            <li>Docker engine, no app docker.sock</li>
+            <li>radon-health :8330 stdlib isolation</li>
+            <li>/usr/local/sbin/radon-deploy-root</li>
+            <li>/usr/local/bin/radon-ib-gateway-control</li>
+            <li>/usr/local/bin/radon</li>
+            <li>/etc/sudoers.d/radon-*</li>
+            <li>/var/lib/radon locks + 2FA lease</li>
+            <li>~/radon-cloud/.env 0600 leftover path</li>
+          </ul>
+        </div>
+        <div class="plane broker">
+          <h3>Broker plane (already Docker)</h3>
+          <ul>
+            <li>ghcr.io/gnzsnz/ib-gateway digest-pinned</li>
+            <li>restart: "no" (non-negotiable)</li>
+            <li>IBC TWOFA_TIMEOUT_ACTION=exit</li>
+            <li>RELOGIN_AFTER_TWOFA_TIMEOUT=no</li>
+            <li>AUTO_RESTART_TIME blank</li>
+            <li>127.0.0.1:4001 + tailnet 4001</li>
+            <li>VNC 127.0.0.1:5900</li>
+            <li>volume ib-config</li>
+            <li>oneshot systemd unit RemainAfterExit</li>
+            <li>watchdog + preheld restart adapter</li>
+            <li>autoheal was removed 2026-07-02</li>
+          </ul>
+        </div>
+        <div class="plane app">
+          <h3>App plane (host processes today)</h3>
+          <ul>
+            <li>Next.js compile-mode, built on VPS</li>
+            <li>FastAPI uvicorn in .venv python3.13</li>
+            <li>relay Type=notify WatchdogSec=45</li>
+            <li>monitor Type=notify WatchdogSec=900</li>
+            <li>newsfeed Playwright loop</li>
+            <li>~40 oneshot scanners + timers</li>
+            <li>WorkingDirectory=/home/radon/radon</li>
+            <li>direct Turso, no replica.db</li>
+            <li>PartOf= gateway on relay/monitor</li>
+            <li>grok-page-responder separate clone</li>
+            <li>Bun 1.3.14 + host Node PATH pins</li>
+          </ul>
+        </div>
+      </div>
+      <div class="tree" style="margin-top: 12px;">Browser
+  Caddy host :443
+    /              → 127.0.0.1:3000  radon-nextjs
+    /api/ib/*      → 127.0.0.1:8321  radon-api
+    /ws*           → 127.0.0.1:8765  radon-relay
+    /edge-health/* → Caddy static + 127.0.0.1:8330 radon-health
+  media.radon.run  → host files under ~/radon-cloud/media
+
+App units ──TCP 127.0.0.1:4001──► ib-gateway container (socat 4003)
+Laptop     ──Tailscale 100.112.32.16:4001──► same container
+
+<span class="ok">CI push main</span> → appleboy/ssh-action as radon
+  → immutable runner cloud/scripts/deploy.sh $SHA
+    → sudo -n radon-deploy-root {verify,install-units,restart-managed}
+    → <span class="bad">REFUSE if /var/lib/radon/control-plane-manifest.sha256
+      does not match the incoming 21 bootstrap artifacts</span></div>
+    </section>
+
+    <section class="panel" id="tax">
+      <p class="label">03 / The bootstrap tax is a lock ordering bug</p>
+      <h2>Chicken and egg, not "we forgot Docker"</h2>
+      <p class="muted">
+        <code class="mono">bootstrap-control-plane.sh</code> installs 21
+        root-owned files (helpers, sudoers, polkit, and core units including
+        api, relay, monitor, health, gateway, refresh, portfolio-sync,
+        db-backup, drift-audit, nextjs-db-watchdog).
+        <code class="mono">deploy.sh</code> preflight requires those installed
+        hashes to equal the incoming SHA <em>before</em> it will promote the
+        release. Change <code class="mono">radon-api.service</code>, push,
+        and CI correctly refuses. You then SSH as root, fast-forward
+        <code class="mono">/home/radon/radon</code>, run bootstrap, and rerun
+        CI. That loop is load-bearing. It is also unfinished automation:
+        <code class="mono">radon-deploy-root</code> has
+        <code class="mono">install-units</code> and
+        <code class="mono">sync-scheduled-units</code>, and it does
+        <strong>not</strong> have <code class="mono">refresh-control-plane</code>.
+      </p>
+      <table>
+        <thead>
+          <tr><th>Action you still do over SSH</th><th>Why it exists</th><th>Does Docker delete it?</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Root bootstrap after a helper/sudoers/core-unit edit</td>
+            <td>Preflight is inverted: verify-then-install on privileged files</td>
+            <td><span class="tag p0">NO</span> You would still need a privileged install of the compose file, units, or quadlets</td>
+          </tr>
+          <tr>
+            <td>Approve IBKR Mobile 2FA / VNC</td>
+            <td>IBKR push tokens. Docker restart policy is banned</td>
+            <td><span class="tag p0">NO</span> Compose up would make it worse</td>
+          </tr>
+          <tr>
+            <td>Edit ~/radon-cloud/.env</td>
+            <td>Secrets live outside the checkout on purpose</td>
+            <td><span class="tag p1">NO</span> Becomes docker secrets or the same file</td>
+          </tr>
+          <tr>
+            <td>Pending timer install-copy (skew2d, credit, ivrank, …)</td>
+            <td>Drift allowlist is a queue of privileged copies you deferred</td>
+            <td><span class="tag p0">NO</span> Same queue, different file type</td>
+          </tr>
+          <tr>
+            <td>Incident: radon restart, journalctl, ib-gateway-control</td>
+            <td>Live broker session cannot be cattle</td>
+            <td><span class="tag p0">NO</span></td>
+          </tr>
+          <tr>
+            <td>Playwright host libs, Bun pin, .venv rebuild</td>
+            <td>Runtime is the live checkout plus host packages</td>
+            <td><span class="tag p2">YES</span> This is the only class Docker actually kills</td>
+          </tr>
+          <tr>
+            <td>First-time setup-vps.sh</td>
+            <td>Packages, firewall, Caddy, user, Docker CE</td>
+            <td><span class="tag p0">NO</span> Every container host still needs this</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="panel" id="naive">
+      <p class="label">04 / Naive plan (the one I will destroy)</p>
+      <h2>One Compose project. One up -d. Whole box is cattle.</h2>
+      <div class="tree"><span class="bad">Rejected shape</span>
+cloud/compose.prod.yml
+  caddy          ports 80/443, mount /data/caddy + media
+  ib-gateway     restart unless-stopped     ← already illegal
+  api            build python image
+  nextjs         build web image
+  relay          node image
+  monitor        python image
+  newsfeed       playwright image
+  health         python image               ← shared fate with trading stack
+  jobs           one container, internal cron
+  autoheal       mount /var/run/docker.sock ← already illegal (2026-07-02)
+
+CI: docker buildx bake && docker compose -H ssh://radon@vps up -d
+Operator: never SSH. Never bootstrap. Never systemctl.</div>
+      <div class="cols-2" style="margin-top: 12px;">
+        <div class="panel keep" style="margin: 0;">
+          <p class="label">Pros people actually want</p>
+          <ul class="tight">
+            <li>Immutable runtime. No host Bun / deadsnakes / Playwright libs.</li>
+            <li>CI builds the artifact that production runs. VPS stops compiling Next.</li>
+            <li>Rollback is retag + recreate, not a worktree + .venv dance.</li>
+            <li>A wiped box is closer to setup-vps.sh + compose pull.</li>
+            <li>Newsfeed Chromium deps stop being a one-time apt landmine.</li>
+          </ul>
+        </div>
+        <div class="panel killbox" style="margin: 0;">
+          <p class="label">Cons that are fatal on this host</p>
+          <ul class="tight">
+            <li>Shared project restart = stacked 2FA + cascade-stop in a new costume.</li>
+            <li>docker.sock to any app container is host takeover plus live orders.</li>
+            <li>Cron in a jobs container cannot express TimeoutStartSec, flock, SuccessExitStatus=75, RandomizedDelaySec, Type=notify.</li>
+            <li>Health daemon in the trading compose file dies with the stack it exists to observe.</li>
+            <li>Caddy in Compose couples the never-502 floor to app recreates.</li>
+            <li>You still SSH for 2FA, env, first bootstrap, and disk full.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" id="attack">
+      <p class="label">05 / Adversarial analysis of the naive plan</p>
+      <h2>Kill shots. Confidence: high unless noted.</h2>
+
+      <div class="kill">
+        <div class="shot">K1 2FA</div>
+        <div>
+          <strong>Compose restart policy cannot hold a push lock.</strong>
+          <p class="muted">
+            Gateway <code class="mono">restart: "no"</code> is not a style
+            choice. IBC relogin, Docker on-failure, and willfarrell/autoheal
+            all mint a second IBKR push while the first is in flight. IBKR
+            then rejects every approval. The watchdog + 10-minute lease +
+            preheld adapter exist because Docker is the wrong supervisor for
+            that container. Putting Gateway in the same project as api/next
+            means <code class="mono">compose up</code> after a code deploy
+            recreates it. Confidence: high. Lived through this.
+          </p>
+        </div>
+      </div>
+      <div class="kill">
+        <div class="shot">K2 FATE</div>
+        <div>
+          <strong>One compose file is the cascade-stop bug.</strong>
+          <p class="muted">
+            Today, stopping <code class="mono">radon-ib-gateway</code>
+            cascade-stops relay and monitor via <code class="mono">PartOf=</code>,
+            and <code class="mono">Restart=always</code> does not re-fire on
+            a clean stop. radon-health is isolated on purpose: no Requires,
+            no After gateway. A single compose project plus
+            <code class="mono">depends_on</code> rebuilds that coupling.
+            Health in the same file is a 502 during every deploy. Confidence: high.
+          </p>
+        </div>
+      </div>
+      <div class="kill">
+        <div class="shot">K3 SOCK</div>
+        <div>
+          <strong>Any container with docker.sock is root on a live-order host.</strong>
+          <p class="muted">
+            Autoheal was removed 2026-07-02 for exactly this: unpinned image,
+            root-equivalent socket, bypass of the 2FA lease. A "platform"
+            container that starts other containers recreates it. Factory
+            already refuses IB Gateway, docker, and host control of the broker.
+            Confidence: high.
+          </p>
+        </div>
+      </div>
+      <div class="kill">
+        <div class="shot">K4 TIMER</div>
+        <div>
+          <strong>systemd timers are the product. Cron-in-Docker is a downgrade.</strong>
+          <p class="muted">
+            49 timers encode market hours, catch-up fires, RandomizedDelaySec,
+            TimeoutStartSec budgets (bpi 6900s vs 23:30 catch-up), flock
+            SuccessExitStatus=75, Wants vs Requires (skew2d parked parent).
+            ofelia / supercronic / systemd-in-Docker lose that or nest PID 1.
+            Nested systemd is an anti-pattern this repo already deleted
+            (<code class="mono">docker/services</code> removed as decoy,
+            40cfff2a). Confidence: high.
+          </p>
+        </div>
+      </div>
+      <div class="kill">
+        <div class="shot">K5 NOTIFY</div>
+        <div>
+          <strong>Relay and monitor are Type=notify watchdogs, not healthchecks.</strong>
+          <p class="muted">
+            Relay WatchdogSec=45 via systemd-notify child. Monitor WatchdogSec=900
+            keyed to loop progress, not process liveness. Docker HEALTHCHECK
+            is TCP/HTTP and will call a wedged event loop healthy. You can
+            pass NOTIFY_SOCKET into a container. That is systemd wrapping
+            Docker, which is the hybrid plan, not Compose-as-OS. Confidence: high.
+          </p>
+        </div>
+      </div>
+      <div class="kill">
+        <div class="shot">K6 NET</div>
+        <div>
+          <strong>Bridge networking breaks the loopback contract.</strong>
+          <p class="muted">
+            Caddy, IB_GATEWAY_HOST=127.0.0.1, health :8330, WS bind 127.0.0.1,
+            Tailscale 4001 publish are host-namespace facts. User-defined
+            bridges require extra_hosts, published ports, and a rewrite of
+            Caddy plus IB client code. Host network mode is the only sane
+            Docker networking for this box. Host network plus Compose is
+            just systemd with extra YAML. Confidence: high.
+          </p>
+        </div>
+      </div>
+      <div class="kill">
+        <div class="shot">K7 EDGE</div>
+        <div>
+          <strong>Caddy is the never-502 floor. Do not put it in the app project.</strong>
+          <p class="muted">
+            <code class="mono">/edge-health/ping</code> is a static 200 from
+            Caddy. The public chip and the off-box GitHub probe depend on it.
+            Recreating Caddy to ship a Next image is an edge outage class
+            you currently do not have. TLS material and media.radon.run
+            belong on the host. Confidence: high.
+          </p>
+        </div>
+      </div>
+      <div class="kill">
+        <div class="shot">K8 PRIV</div>
+        <div>
+          <strong>Docker does not remove the privileged plane. It hides it.</strong>
+          <p class="muted">
+            Someone still owns the engine, the firewall, sudoers, and the
+            first image pull credential. If CI can <code class="mono">compose up</code>
+            as a user in group docker, CI is root. You removed required
+            reviewers on the Production environment. Giving that same job
+            docker.sock on the trading host is a privilege escalation you
+            spent a year writing sudoers to prevent. Confidence: high.
+          </p>
+        </div>
+      </div>
+      <div class="kill">
+        <div class="shot">K9 IDLE</div>
+        <div>
+          <strong>Oneshot timers are free when idle. 40 always-on containers are not.</strong>
+          <p class="muted">
+            Host instance type is not pinned in the live runbook (archive
+            mentioned CPX11; treat as unknown). Playwright + Gateway Java +
+            Next + 40 fat images will OOM a small box. systemd oneshots
+            start, write Turso, exit. Keep that. Confidence: moderate on
+            RAM numbers, high on the shape.
+          </p>
+        </div>
+      </div>
+      <div class="kill">
+        <div class="shot">K10 LIE</div>
+        <div>
+          <strong>The repo already tried the containerized scheduler and deleted it.</strong>
+          <p class="muted">
+            docs/cloud-services.md still advertises <code class="mono">docker/services/</code>
+            as a Phase 4 alternative. The directory is gone. Commit 40cfff2a
+            called those units decoys. Rebuilding that design is not a
+            strategy. It is amnesia. Confidence: high.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" id="self">
+      <p class="label">06 / Attack the hybrid plan too</p>
+      <h2>If systemd keeps supervising and only the app plane becomes images, what still dies?</h2>
+      <table>
+        <thead>
+          <tr><th>Attack</th><th>Severity</th><th>Counter</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>docker group on user radon == root, same as K8</td>
+            <td><span class="tag p0">P0</span></td>
+            <td>Do not add radon to docker. Root helper pulls images and runs <code class="mono">docker run</code> with a fixed argv. Same sudoers shape as today.</td>
+          </tr>
+          <tr>
+            <td>CI-driven control-plane refresh lets a compromised Actions job rewrite sudoers</td>
+            <td><span class="tag p0">P0</span></td>
+            <td>Split GitHub Environment "control-plane" with required reviewers on <code class="mono">cloud/scripts/{bootstrap-control-plane,deploy-root-helper,ib-gateway-control,operator-radon}.sh</code>, sudoers, polkit. App deploys stay auto. Helper refuses to install sudoers/polkit without that path.</td>
+          </tr>
+          <tr>
+            <td>Image pull from GHCR during a Turso or GitHub outage bricks restart-managed</td>
+            <td><span class="tag p1">P1</span></td>
+            <td>Mirror last N SHA tags on the box, same retention as deploy runners (current + 4). Restart uses local images. Pull is a pre-teardown step; failure does not stop the running SHA.</td>
+          </tr>
+          <tr>
+            <td>Host network mode shares the namespace; a bind-0.0.0.0 bug is public</td>
+            <td><span class="tag p1">P1</span></td>
+            <td>Keep existing tests that parse units/env for 127.0.0.1 binds (relay). Image entrypoints inherit those env vars. Caddy remains the only :443 listener.</td>
+          </tr>
+          <tr>
+            <td>NOTIFY_SOCKET into containers is fiddly; WatchdogSec goes deaf</td>
+            <td><span class="tag p1">P1</span></td>
+            <td>Pass NOTIFY_SOCKET and MAINPID. Prove with a failing test that a wedged relay misses WatchdogSec and systemd restarts only that unit. If that proof fails, keep relay/monitor as host Node/Python and only image Next + oneshots.</td>
+          </tr>
+          <tr>
+            <td>Newsfeed storage state + media path assume host paths</td>
+            <td><span class="tag p1">P1</span></td>
+            <td>Bind-mount <code class="mono">/var/lib/radon/newsfeed</code> and <code class="mono">/var/lib/radon/media</code>. Stop writing media under the leftover radon-cloud tree.</td>
+          </tr>
+          <tr>
+            <td>Grok page responder is a second clone with its own env and device-auth</td>
+            <td><span class="tag p1">P1</span></td>
+            <td>Out of scope for app images. Leave it as a host timer against /home/radon/radon-page-responder. Do not put grok credentials in the trading image.</td>
+          </tr>
+          <tr>
+            <td>Laptop local mode still uses launchd + local compose Gateway</td>
+            <td><span class="tag p2">P2</span></td>
+            <td>Do not force the laptop onto prod images. Dual-mode stays. Images are a Hetzner runtime, not a dev workflow.</td>
+          </tr>
+          <tr>
+            <td>Build matrix: four images, four Dockerfiles, CI time</td>
+            <td><span class="tag p2">P2</span></td>
+            <td>Two images, not four. <code class="mono">radon-python</code> (api + every python oneshot + monitor). <code class="mono">radon-node</code> (next start + relay + newsfeed). Playwright makes newsfeed fat; split only if the node image exceeds a measured budget.</td>
+          </tr>
+          <tr>
+            <td>IB client-id collisions when oneshot containers overlap</td>
+            <td><span class="tag p2">P2</span></td>
+            <td>Already a host problem. Keep client_id=auto. Do not run two copies of the same oneshot. systemd already serializes a given unit.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="panel" id="plan">
+      <p class="label">07 / Bulletproof plan</p>
+      <h2>Invert bootstrap. Image the app plane. Leave the broker and the edge alone.</h2>
+      <div class="phases">
+        <div class="phase">
+          <div class="num">P0 · WEEK 1</div>
+          <h3>Stop the lying docs</h3>
+          <p>Delete the docker/services promise from cloud-services.md. Document the three planes. Expand auto-sync-units.txt from 1 line to every timer-owned oneshot. Drain the drift allowlist by actually installing, not by renewing expiry dates.</p>
+        </div>
+        <div class="phase">
+          <div class="num">P1 · WEEKS 1–3</div>
+          <h3>CI control-plane refresh</h3>
+          <p>Add radon-deploy-root refresh-control-plane. Same transaction as bootstrap (lock, refuse pending gateway/app transition, stage, hash, daemon-reload, no process start/stop, no Gateway touch). App deploys call it from the immutable runner. Sudoers/polkit changes require the reviewed control-plane environment. After this, a normal unit edit is git add + hash bump + push. No root SSH.</p>
+        </div>
+        <div class="phase">
+          <div class="num">P2 · WEEKS 3–5</div>
+          <h3>Move secrets and media</h3>
+          <p>/etc/radon/env 0600 root:radon. /var/lib/radon/media. Stop treating ~/radon-cloud as a place. Keep the file as a compatibility symlink until one green deploy reads the new path. This is independent of Docker and should ship first.</p>
+        </div>
+        <div class="phase">
+          <div class="num">P3 · WEEKS 5–10</div>
+          <h3>Image the app plane</h3>
+          <p>CI builds radon-python and radon-node tagged by git SHA, pushed to GHCR. systemd ExecStart becomes a root-helper docker run --network host --env-file /etc/radon/env. Timers stay systemd timers firing --rm oneshots. deploy.sh pulls, writes /var/lib/radon/release-images.env, restart-managed. Host .venv and bun install on the VPS die.</p>
+        </div>
+        <div class="phase never">
+          <div class="num">NEVER</div>
+          <h3>Do not</h3>
+          <p>Gateway in the app project. restart unless-stopped on Gateway. docker.sock in any radon image. Caddy in Compose. Health in the trading project. k3s/Nomad/Coolify. systemd inside a container. Laptop forced onto prod images. Factory touching this path.</p>
+        </div>
+      </div>
+
+      <div class="tree" style="margin-top: 14px;"><span class="ok">Target shape</span>
+Host systemd
+  caddy.service                         <span class="meh">HOST</span>
+  radon-health.service                  <span class="meh">HOST stdlib python</span>
+  radon-ib-gateway.service              <span class="bad">EXISTING container, restart no</span>
+    ExecStart=/usr/local/bin/radon-ib-gateway-control start
+  radon-nextjs.service                  <span class="ok">docker run --network host radon-node:$SHA</span>
+  radon-api.service                     <span class="ok">docker run --network host radon-python:$SHA uvicorn …</span>
+  radon-relay.service                   <span class="ok">same node image, NOTIFY_SOCKET passed</span>
+  radon-monitor.service                 <span class="ok">same python image, NOTIFY_SOCKET passed</span>
+  radon-newsfeed.service                <span class="ok">same node image, Playwright inside</span>
+  radon-*.timer → oneshot docker run --rm python scripts/…
+
+CI
+  test gate (unchanged)
+  docker buildx --tag ghcr.io/…/radon-{python,node}:$SHA
+  ssh radon → runner deploy.sh $SHA
+    sudo radon-deploy-root refresh-control-plane   <span class="ok">NEW</span>
+    pull images (fail closed, keep running SHA)
+    install-units / sync-scheduled-units
+    restart-managed   <span class="bad">still excludes Gateway</span>
+    gates: systemctl + /health/lite + next + relay + advisory :8330</div>
+    </section>
+
+    <section class="panel" id="matrix">
+      <p class="label">08 / Keep / image / never</p>
+      <table>
+        <thead>
+          <tr><th>Component</th><th>Decision</th><th>Reason</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>IB Gateway</td><td><span class="tag p1">KEEP AS-IS</span></td><td>Already Docker. Lifecycle owned by the lease helper. Isolated compose project forever.</td></tr>
+          <tr><td>Caddy + media + TLS</td><td><span class="tag p1">HOST</span></td><td>Never-502 floor. Recreates must not track app SHAs.</td></tr>
+          <tr><td>radon-health</td><td><span class="tag p1">HOST</span></td><td>stdlib-only isolation. Must survive radon stop and app image rollback.</td></tr>
+          <tr><td>deploy-root, gateway-control, operator CLI, sudoers, polkit</td><td><span class="tag p1">HOST</span></td><td>Privilege boundary. CI may refresh via helper, never via docker.sock.</td></tr>
+          <tr><td>Tailscale, journald, firewall</td><td><span class="tag p1">HOST</span></td><td>Kernel plane.</td></tr>
+          <tr><td>Next.js, FastAPI, relay, monitor, newsfeed</td><td><span class="tag p2">IMAGE</span></td><td>This is the host-Python/Bun/Playwright tax. Two images, host network, systemd supervisor.</td></tr>
+          <tr><td>Timer-owned scanners</td><td><span class="tag p2">IMAGE + HOST TIMER</span></td><td>Keep the calendar. Replace ExecStart path with docker run --rm of the python image.</td></tr>
+          <tr><td>grok-page-responder</td><td><span class="tag p1">HOST, OUT OF SCOPE</span></td><td>Separate clone, device-auth, must not share the trading image.</td></tr>
+          <tr><td>Watchdog / drift-audit</td><td><span class="tag p3">HOST FIRST</span></td><td>They inspect systemd and installed files. Imaging them requires rewriting the probes. Do it last or never.</td></tr>
+          <tr><td>k3s / Nomad / Coolify / Compose-as-OS</td><td><span class="tag p0">NEVER</span></td><td>Orchestrator for one operator, one box, one broker session. Adds a control plane you will SSH into.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="panel">
+      <p class="label">09 / What a week of SSH should look like after P1</p>
+      <div class="cols-2">
+        <div class="panel killbox" style="margin:0;">
+          <p class="label">Today</p>
+          <ul class="tight">
+            <li>Push unit edit → CI refuse preflight</li>
+            <li>SSH root, git ff-only, bootstrap-control-plane.sh</li>
+            <li>Rerun CI deploy, wait, check /status</li>
+            <li>SSH again if a timer was not in install-units</li>
+            <li>SSH for 2FA, env, journalctl, radon status</li>
+          </ul>
+        </div>
+        <div class="panel keep" style="margin:0;">
+          <p class="label">After P1, before any image work</p>
+          <ul class="tight">
+            <li>Push unit edit + manifest hash → CI deploy installs it</li>
+            <li>Push helper/sudoers → blocked on control-plane environment review, then helper refresh, still no interactive SSH</li>
+            <li>SSH remains for 2FA, VNC, disk, and genuine incidents</li>
+            <li>If you still bootstrap after ordinary unit edits, P1 failed</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" id="done">
+      <p class="label">10 / Done when / rollback</p>
+      <table>
+        <thead>
+          <tr><th>Gate</th><th>Evidence</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>P0</td><td>cloud-services.md no longer mentions docker/services. auto-sync-units.txt lists every timer-owned oneshot. Drift allowlist has no "pending root install-copy" older than 14 days.</td></tr>
+          <tr><td>P1</td><td>A commit that only changes radon-breadth.service + its sha256 deploys green with zero root SSH. A commit that changes sudoers sits in a reviewed environment and does not auto-merge.</td></tr>
+          <tr><td>P2</td><td>EnvironmentFile and RADON_COMPOSE_ENV_FILE point at /etc/radon/env. media.radon.run serves /var/lib/radon/media. ~/radon-cloud is a symlink farm, not a checkout.</td></tr>
+          <tr><td>P3</td><td>deploy.sh no longer runs bun install or venv sync on the VPS. ps shows docker-run next/api/relay/monitor/newsfeed. Gateway container id is unchanged across an app deploy. /health/lite and /edge-health/ping stay 200 through the cutover. Focused cloud pytest + a forced rollback to the previous image SHA restore the prior app plane without touching Gateway.</td></tr>
+          <tr><td>Hard rollback</td><td>Keep host ExecStart paths in git behind a unit drop-in. First image release ships with RADON_RUNTIME=host|container. Flip the drop-in, restart-managed, Gateway stays up. Do not delete .venv until that rollback has been drilled.</td></tr>
+        </tbody>
+      </table>
+      <p class="conf" style="margin-top: 14px;">
+        CONFIDENCE: diagnosis high · naive-plan rejection high · P1 as the actual operator win high · P3 images as a follow-on moderate until WatchdogSec-in-container is proven · instance sizing unknown · do not start P3 before P1 is green in production.
+      </p>
+    </section>
+  </div>
+</body>
+</html>

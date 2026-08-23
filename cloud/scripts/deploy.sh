@@ -35,10 +35,13 @@ _default_cloud_dir() {
 }
 
 _default_env_file() {
-  # Keep production secrets at the historical path when present so the
-  # monorepo cutover never requires moving host credentials.
+  # Canonical future path is /etc/radon/env. Compatibility fallback is
+  # ~/radon-cloud/.env so live units keep working until one green host
+  # cutover. RADON_DEPLOY_ENV_FILE always wins.
   if [[ -n "${RADON_DEPLOY_ENV_FILE:-}" ]]; then
     printf '%s\n' "${RADON_DEPLOY_ENV_FILE}"
+  elif [[ -f /etc/radon/env ]]; then
+    printf '%s\n' "/etc/radon/env"
   elif [[ -f /home/radon/radon-cloud/.env ]]; then
     printf '%s\n' "/home/radon/radon-cloud/.env"
   else
@@ -93,7 +96,7 @@ readonly BUN_VERSION="1.3.14"
 readonly SERVICES=(radon-nextjs radon-api radon-relay radon-monitor radon-newsfeed)
 
 # Required env vars that MUST be present before a deploy touches services.
-# Prefer ~/radon-cloud/.env when it exists (stable host secrets path).
+# Prefer /etc/radon/env when that regular file exists; else ~/radon-cloud/.env.
 # Discord vars are intentionally absent — the notification stack uses Pushover.
 readonly ENV_FILE_DEFAULT="$(_default_env_file)"
 readonly DEPLOY_LOCK_FILE="${RADON_DEPLOY_LOCK_FILE:-/home/radon/.radon-deploy.lock}"
@@ -220,6 +223,13 @@ preflight_control_plane() {
     }
     source_hash="$("$SHA256SUM" "$source_path" | awk '{print $1}')" || return 1
     if [[ "$source_hash" != "$expected_hash" ]]; then
+      if [[ "$source_rel" == services/* ]]; then
+        log_warn "[preflight] control-plane unit ${source_rel} differs from the installed manifest; refresh-control-plane will apply it after promote"
+        [[ "$installed_target" == "$DEPLOY_ROOT_HELPER" ]] && deploy_helper_found=1
+        [[ "$installed_target" == "$GATEWAY_CONTROL_HELPER" ]] && gateway_helper_found=1
+        entries=$((entries + 1))
+        continue
+      fi
       log_error "[preflight] installed control plane is incompatible with ${source_rel}"
       return 1
     fi
@@ -289,6 +299,18 @@ sync_scheduled_units() {
     return 1
   fi
   log_success "Scheduled units match the GitHub main tip allowlist"
+}
+
+refresh_control_plane() {
+  if ! sudo -n -l -- "$DEPLOY_ROOT_HELPER" refresh-control-plane >/dev/null 2>&1; then
+    log_warn "Control-plane refresh is not granted yet; run cloud/scripts/bootstrap-control-plane.sh once as root"
+    return 0
+  fi
+  if ! sudo "$DEPLOY_ROOT_HELPER" refresh-control-plane; then
+    log_error "Control-plane refresh failed"
+    return 1
+  fi
+  log_success "Control-plane units match the target release"
 }
 
 quarantine_green_marker() {
@@ -870,6 +892,7 @@ restart_services() {
       return "$status"
     fi
     install_release_units
+    refresh_control_plane || return 1
   fi
   start_services_after_transition
 }

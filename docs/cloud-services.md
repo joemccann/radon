@@ -22,7 +22,7 @@ This document covers Radon's two-mode architecture introduced in Phase 0–6 of 
 
 - **Database**: Turso (libSQL) — every Radon process talks **directly** to the cloud DB for both reads and writes. Direct-to-cloud is the code default (DUR-07; replica is opt-in only via `RADON_DB_USE_REPLICA=1`), and the prefix drop-in `/etc/systemd/system/radon-.service.d/common.conf` sets the `RADON_DB_NO_REPLICA=1` kill switch on every `radon-*` unit as belt-and-suspenders. The embedded-replica architecture (`data/replica.db`) was retired 2026-05-20 after two same-day incidents: multi-writer WAL checkpoint contention (radon-cloud `741cfc6`) followed by single-writer frame conflicts between the replica owner and direct-cloud writers (radon-cloud `2c46232`). The libsql embedded-replica model only works when ONE host has exactly ONE writer; Radon's split between Node and Python writers can't satisfy that constraint. Reads cost +30–60 ms cloud round-trip, absorbed by SWR caching. See `feedback_libsql_replica_one_writer.md` for the full failure-mode catalog.
 - **Media**: Hetzner-hosted Caddy serves `https://media.radon.run`; the laptop's newsfeed scraper rsyncs new images over Tailscale.
-- **Schedulers**: laptop launchd plists (local mode) OR Hetzner host systemd services (cloud mode). The `docker/services/` directory in this repo is a containerized alternative we designed but did not deploy — production unit sources live in `/home/radon/radon/cloud/services/` and are installed through the reviewed control-plane path.
+- **Schedulers**: laptop launchd plists (local mode) OR Hetzner host systemd (cloud mode). Production is host systemd; IB Gateway is the only production container. App-plane images are future work and default `RADON_RUNTIME=host`. Unit sources live in `/home/radon/radon/cloud/services/` and are installed through the reviewed control-plane path. The former `docker/services/` tree was deleted as decoy units in `40cfff2a` and is not a scheduler alternative.
 - **Self-contained**: themarketear.com newsfeed scraper is now a headless Playwright flow that runs on either the laptop or Hetzner. No magic-link or Chrome Debug.app dependency.
 
 ## Newsfeed (`themarketear.com`) — Self-contained headless flow
@@ -106,7 +106,7 @@ The same SSH public key is authorized on both routes — `~/.ssh/authorized_keys
 
 `data/replica.db` is intentionally absent — the embedded-replica architecture was retired 2026-05-20. If the file appears on disk (stray from a pre-migration host), it is safe to `rm` — nothing reads from it.
 
-Every `radon-*.service` uses `EnvironmentFile=/home/radon/radon-cloud/.env` so a single edit propagates to all schedulers. The legacy directory is not a deploy source; use the canonical `cloud/` runbook for service lifecycle changes.
+Every `radon-*.service` uses `EnvironmentFile=/home/radon/radon-cloud/.env` so a single edit propagates to all schedulers. That compatibility path remains until one green host cutover; the canonical future file is `/etc/radon/env` (`deploy.sh` prefers it when that path is a regular file). Do not change unit `EnvironmentFile=` until that cutover. The legacy directory is not a deploy source; use the canonical `cloud/` runbook for service lifecycle changes.
 
 **Whole-stack kill switch:** `/usr/local/bin/radon` wraps all units (IB Gateway included). Run on the VPS or remotely:
 
@@ -170,11 +170,9 @@ Related: `scripts/db/migrate.py` (radon-api `ExecStartPre`) retries transport-cl
 
 `web/package.json` runs `next build --experimental-build-mode=compile` because Next.js 16's standard build crashes during prerender of `/_global-error` and `/_not-found` (the root ClerkProvider context isn't materialised in isolated workers — `useContext` returns null). Compile mode skips prerender entirely; every page is `force-dynamic` already so the runtime behavior is unchanged. If a future Next.js patch fixes the underlying issue, drop the flag and the build returns to the standard pipeline.
 
-### Containerized scheduler alternative (not currently deployed)
+### Runtime planes
 
-The repo also includes `docker/services/Dockerfile` + `docker/services/docker-compose.yml` describing a single Python+Node+Playwright container with systemd timers. This is the design from Phase 4 of the migration plan — kept as committed config in case the host-systemd setup is ever replaced with a containerized one. Production today uses host systemd.
-
-**Do not deploy from this branch.** The plan document explicitly forbids automatic prod deploys until rollback paths are exercised.
+Production is three planes: host (never container), broker (already Docker), app (host today, images later). IB Gateway in `cloud/docker-compose.yml` is the only production container. App-plane images (`docker/app`) are scaffolding only, not production runtime; the default is `RADON_RUNTIME=host`. The former `docker/services/` tree was deleted as decoy units in `40cfff2a` and is not a containerized scheduler alternative.
 
 ## Trades — single source of truth
 
@@ -593,7 +591,7 @@ Off-box store for cold portfolio history. **Not** Cloudflare R2 (account billing
 | Script | `scripts/archive_portfolio_snapshots.py` |
 | Unit | `radon-portfolio-archive.service` — **fails closed** if B2 env is unset |
 | Env contract | root `.env.example`, `cloud/.env.example`, `cloud/config/required-env.txt` |
-| VPS secrets | `/home/radon/radon-cloud/.env` (`EnvironmentFile=` on the unit) |
+| VPS secrets | `/home/radon/radon-cloud/.env` (`EnvironmentFile=` on the unit; canonical future path `/etc/radon/env` after one green host cutover) |
 
 Required vars (all five keys + region; endpoint must include `https://`):
 

@@ -1,0 +1,22 @@
+# Scaffolding only. Not production runtime. Default remains host binaries.
+# Build from repo root:
+#   docker build -f docker/app/Dockerfile.python --ignorefile docker/app/.dockerignore .
+FROM python:3.13-slim
+
+RUN useradd --system --create-home --home-dir /home/radon --shell /usr/sbin/nologin radon \
+    && mkdir -p /home/radon/radon/scripts \
+    && chown -R radon:radon /home/radon
+
+WORKDIR /home/radon/radon
+
+COPY requirements.txt ./requirements.txt
+COPY scripts/requirements-api.txt ./scripts/requirements-api.txt
+RUN python -m pip install --no-cache-dir \
+    -r requirements.txt \
+    -r scripts/requirements-api.txt
+
+COPY --chown=radon:radon scripts ./scripts
+
+USER radon
+
+CMD ["uvicorn", "scripts.api.server:app", "--host", "127.0.0.1", "--port", "8321"]

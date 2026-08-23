@@ -377,6 +377,22 @@ preflight_checks() {
   log_success "Preflight checks passed"
 }
 
+create_etc_radon_dir() {
+  # Canonical future secrets dir. Create it on first setup so a later operator
+  # cutover does not need a fresh mkdir as root.
+  # Do NOT move /home/radon/radon-cloud/.env automatically; live units still
+  # read EnvironmentFile=/home/radon/radon-cloud/.env.
+  # Operator cutover after one green deploy:
+  #   install -m 0600 /etc/radon/env
+  #   ln -sfn /etc/radon/env /home/radon/radon-cloud/.env
+  local dir="/etc/radon"
+  if [[ "${RADON_HELPER_SKIP_CHOWN:-0}" == "1" ]]; then
+    install -d -m 0750 "$dir"
+  else
+    install -d -m 0750 -o radon -g radon "$dir"
+  fi
+}
+
 # -- Repo cloning -----------------------------------------------------------
 
 clone_repo() {
@@ -821,6 +837,7 @@ main() {
   install_prerequisites
   validate_versions
   preflight_checks
+  create_etc_radon_dir
   clone_repos
   validate_env
   setup_python

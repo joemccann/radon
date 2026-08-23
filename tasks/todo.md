@@ -1,3 +1,43 @@
+# Task: VPS bulletproof sequence (2026-08-23)
+
+## Dependency graph
+
+- V0 depends_on: [] - P0: kill docker/services docs; auto-sync every timer-owned oneshot except llm-index; stale allowlist comments
+- V1 depends_on: [V0] - P1 red: refresh-control-plane tests (unit-only refresh, privileged refuse, no start/stop, no Gateway)
+- V2 depends_on: [V1] - P1 green: helper verb + sudoers + deploy.sh preflight skip for services/* + post-promote refresh
+- V3 depends_on: [V2] - P2: prefer /etc/radon/env with ~/radon-cloud/.env fallback; do not change unit EnvironmentFile
+- V4 depends_on: [V3] - P3: radon-python + radon-node Dockerfiles, host default, no docker.sock, no Gateway, no Caddy
+- V5 depends_on: [V4] - cloud pytest + bash -n; show-me board
+
+## Checklist
+
+- [x] V0 Docs + auto-sync-units.txt
+- [x] V1 Red tests for refresh-control-plane
+- [x] V2 Helper/sudoers/deploy.sh
+- [x] V3 Env path preference
+- [x] V4 App image scaffolding (RADON_RUNTIME=host)
+- [x] V5 Verify + show-me
+
+## Constraints
+
+- First SHA that adds the sudoers verb still needs one root bootstrap. After that, unit-only pushes must deploy without SSH.
+- Do not exec bootstrap during an in-flight deploy (app transition journal + deploy lock).
+- Do not start/stop/restart Gateway. daemon-reload only.
+- Do not put radon in group docker. Do not mount docker.sock.
+- Do not change live ExecStart to docker run.
+- llm-index stays not-installed.
+- Preserve unrelated dirty files. No `git add -A`.
+
+## Review
+
+- V1 red: `cloud/tests/test_refresh_control_plane.py` pins the sudoers verb, helper usage/timeout (mutation, not job-cancel), sandbox unit-only refresh, privileged 78, gateway 75, app transition allowed, preflight skip `services/*` + fail-closed `scripts/*` `config/*`, post-install refresh warn-if-ungranted. `test_monorepo_cutover.py` unchanged.
+- V2 green: helper `refresh-control-plane` copies unit-class diffs only, rewrites manifest/ready, daemon-reload once, no start/stop/restart/enable/docker/bootstrap. Privileged diffs exit 78; gateway transition 75; app journal ignored. Sudoers exact verb; `refresh-control-plane-privileged` helper-only. `deploy.sh` preflight warns+continues on `services/*` hash mismatch, fails `scripts/*` `config/*`; after `install_release_units` invokes refresh (warn if ungranted).
+- V3: `deploy.sh` prefers `/etc/radon/env` when that regular file exists; `~/radon-cloud/.env` fallback; unit `EnvironmentFile=` unchanged. setup-vps creates `/etc/radon` 0750 and does not move the live env.
+- V4: `docker/app` python/node scaffolding + commented `runtime-container.conf.example`. Not installed. Not CI deploy `needs`. `RADON_RUNTIME=host`.
+- V5: orchestrator re-run 177 passed / 38.71s then visudo gate 21/21. Privileged sudoers refresh now `visudo -cf`s the candidate (red then green). `bash -n` helper/deploy/bootstrap. auto-sync 90, no llm-index, no control-plane services. Live `EnvironmentFile=` unchanged. Images are not production runtime. First SHA still needs one root bootstrap.
+
+---
+
 # Task: Cash-flow Flex 1025 lockout (2026-08-21)
 
 ## Dependency graph

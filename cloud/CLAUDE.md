@@ -22,13 +22,35 @@ cloud/
   docker-compose.yml         # production IB Gateway container
 ```
 
+## Runtime Planes
+
+Production is three planes. Do not collapse them.
+
+- **Host plane** (never container): systemd, journald, polkit, sudoers,
+  Caddy, Tailscale, Docker engine, `radon-health` on `127.0.0.1:8330`,
+  `/usr/local/sbin/radon-deploy-root`, `/usr/local/bin/radon-ib-gateway-control`.
+- **Broker plane** (already Docker): digest-pinned IB Gateway in
+  `cloud/docker-compose.yml`. This is the only production container.
+- **App plane** (host today, images later): Next.js, FastAPI, relay,
+  monitor, newsfeed, and timer-owned oneshots. Default `RADON_RUNTIME=host`.
+  `docker/app` Dockerfiles are scaffolding only; they are not production
+  runtime and CI deploy does not build them. App-plane images must not own
+  Gateway, Caddy, health, or `docker.sock`.
+
+After `radon-deploy-root refresh-control-plane` is installed (helper +
+sudoers), a unit-only push does not need root SSH. The SHA that *adds*
+that sudoers verb still needs one root `bootstrap-control-plane.sh`.
+Refresh copies changed control-plane units and `daemon-reload`s; it does
+not start, stop, or restart Gateway.
+
 ## Canonical Host Paths
 
 - Monorepo checkout: `/home/radon/radon`
 - Cloud source: `/home/radon/radon/cloud`
 - Immutable deploy support: `/home/radon/.radon-deploy-runners/<sha>.<run>/cloud`
-- Temporary stable secret file: `/home/radon/radon-cloud/.env`, mode `0600`,
-  owner `radon:radon`
+- Canonical future secret file: `/etc/radon/env` (regular file, mode `0600`)
+- Compatibility secret file (until one green host cutover):
+  `/home/radon/radon-cloud/.env`, mode `0600`, owner `radon:radon`
 - Durable privileged deploy state: `/var/lib/radon/deploy`
 - Control-plane manifest/readiness:
   `/var/lib/radon/control-plane-manifest.sha256` and
@@ -37,8 +59,8 @@ cloud/
 The legacy directory is not a code source. Do not symlink the whole
 `/home/radon/radon-cloud` directory while the secret file lives inside it.
 Code paths, working directories, Compose, drift audit, helpers, and units use
-the monorepo cloud path. `EnvironmentFile=/home/radon/radon-cloud/.env` is the
-single deliberate migration exception.
+the monorepo cloud path. `EnvironmentFile=/home/radon/radon-cloud/.env` remains
+the unit path until one green host cutover onto `/etc/radon/env`.
 
 ## Deployment Contract
 
@@ -157,9 +179,16 @@ Immutable runners under `~/.radon-deploy-runners/` are extracted `a-w`.
 - Production invariants on Hetzner monorepo hosts:
   `IB_GATEWAY_MODE=cloud`, `RADON_MODE=hetzner`, `IB_GATEWAY_HOST=127.0.0.1`,
   `NODE_ENV=production`.
+- Canonical future secrets path: `/etc/radon/env`. Compatibility path
+  `/home/radon/radon-cloud/.env` remains until one green host cutover.
+  `deploy.sh` prefers `/etc/radon/env` when that path is a regular file.
+  Unit `EnvironmentFile=` is unchanged.
 - Compose interpolation and service `env_file` both receive the explicit
-  external env path through `RADON_COMPOSE_ENV_FILE` (stable file:
+  external env path through `RADON_COMPOSE_ENV_FILE` (compatibility file:
   `/home/radon/radon-cloud/.env`).
+- `docker/app` images are not production runtime yet. Default remains
+  host binaries (`RADON_RUNTIME=host`). Do not add an image-build job to
+  CI deploy `needs`.
 - `web/.env` contains only `NEXT_PUBLIC_*` build values and is mode `0600`.
   Never copy the complete production env into the web tree.
 - Setup validates the stable env before dependency installation or builds.
@@ -189,9 +218,16 @@ publish after a green deploy: `radon-deploy-root sync-scheduled-units`
 reads git objects at the GitHub `joemccann/radon` main tip (not the
 radon-writable checkout), requires the blob SHA-256 to match the
 manifest, installs `0644 root:root`, and `daemon-reload`s. It never
-starts, stops, or enables units. First enablement still needs one
-`bootstrap-control-plane.sh` so the live helper and sudoers gain both
-verbs.
+starts, stops, or enables units.
+
+After promote, `deploy.sh` runs `radon-deploy-root refresh-control-plane`
+(unit-class diffs only: `services/*` at `0644 root:root`, one
+`daemon-reload`). It does not start, stop, or restart Gateway. Privileged
+diffs (`scripts/*`, `config/*`) fail closed unless root runs
+`refresh-control-plane-privileged`, which is not in sudoers. The SHA
+that adds the `refresh-control-plane` sudoers verb still needs one
+`bootstrap-control-plane.sh`. After that verb is installed, a unit-only
+push does not need root SSH.
 
 The drift audit runs from `/home/radon/radon/cloud` and compares live Caddy,
 Compose, systemd, polkit, sudoers, and installed helpers with this source. It

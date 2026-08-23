@@ -97,7 +97,9 @@ if [[ "${RADON_DEPLOY_HELPER_TEST_MODE:-0}" == "1" ]]; then
   readonly PREHELD_WAIT_SECONDS="${RADON_TEST_PREHELD_WAIT_SECONDS:-0}"
   readonly SLEEP="${RADON_TEST_SLEEP:-/bin/sleep}"
   readonly CONTROL_PLANE_ROOT="${RADON_TEST_CONTROL_PLANE_ROOT:-}"
+  readonly CLOUD_SOURCE="${RADON_TEST_CLOUD_SOURCE:-${RADON_TEST_CLOUD_ROOT:-}}"
   readonly SHA256SUM="${RADON_TEST_SHA256SUM:-$(command -v sha256sum)}"
+  readonly VISUDO="${RADON_TEST_VISUDO:-$(command -v visudo)}"
   test_replica_prefix="${RADON_TEST_REPLICA_PREFIX:?test replica prefix is required}"
   readonly REPLICA_FILES=(
     "$test_replica_prefix"
@@ -124,7 +126,9 @@ else
   readonly PREHELD_WAIT_SECONDS=120
   readonly SLEEP=/usr/bin/sleep
   readonly CONTROL_PLANE_ROOT=""
+  readonly CLOUD_SOURCE=/home/radon/radon/cloud
   readonly SHA256SUM=/usr/bin/sha256sum
+  readonly VISUDO=/usr/sbin/visudo
   readonly ROOT_MUTATION_ACTION_TIMEOUT=180
   readonly ROOT_VERIFY_ACTION_TIMEOUT=30
   readonly ROOT_COMMIT_ACTION_TIMEOUT=30
@@ -152,6 +156,9 @@ fi
 readonly RESTORED_STATE_FILE="${ACTIVE_STATE_FILE}.restored"
 readonly INVENTORY_FILE="${ACTIVE_STATE_FILE}.inventory"
 readonly CONTROL_PLANE_MANIFEST="${CONTROL_PLANE_ROOT}/var/lib/radon/control-plane-manifest.sha256"
+readonly CONTROL_PLANE_READY="${CONTROL_PLANE_ROOT}/var/lib/radon/control-plane-ready"
+readonly GATEWAY_TRANSITION_FILE="${CONTROL_PLANE_ROOT}/var/lib/radon/ib-gateway-transition.json"
+readonly LOGICAL_CONTROL_PLANE_MANIFEST="/var/lib/radon/control-plane-manifest.sha256"
 
 [[ "${#CONTROL_PLANE_SOURCES[@]}" -eq "${#CONTROL_PLANE_TARGETS[@]}" && \
    "${#CONTROL_PLANE_SOURCES[@]}" -eq "${#CONTROL_PLANE_MODES[@]}" ]] || {
@@ -168,7 +175,7 @@ prepare_state_dir() {
 }
 
 if (( $# != 1 )); then
-  echo "usage: radon-deploy-root {stop-clean|restart-managed|recover|verify-restored|verify-control-plane|commit-transition|publish-caddy|install-units|sync-scheduled-units}" >&2
+  echo "usage: radon-deploy-root {stop-clean|restart-managed|recover|verify-restored|verify-control-plane|commit-transition|publish-caddy|install-units|sync-scheduled-units|refresh-control-plane|refresh-control-plane-privileged}" >&2
   exit 64
 fi
 
@@ -888,6 +895,170 @@ sync_scheduled_units() {
   return 0
 }
 
+refresh_install_file() {
+  local source="$1"
+  local dest="$2"
+  local mode="$3"
+  local dest_dir candidate
+  dest_dir="$(dirname -- "$dest")"
+  mkdir -p "$dest_dir" || return 73
+  if [[ -e "$dest" || -L "$dest" ]] && [[ ! -f "$dest" || -L "$dest" ]]; then
+    echo "live control-plane path is not a regular file: ${dest}" >&2
+    return 74
+  fi
+  candidate="$(mktemp "${dest_dir}/.radon-refresh.XXXXXX")"
+  if (( HELPER_TEST_MODE == 1 )); then
+    if ! "$INSTALL" -m "$mode" "$source" "$candidate"; then
+      "$RM" -f "$candidate"
+      return 73
+    fi
+  else
+    if ! "$INSTALL" -m "$mode" -o root -g root "$source" "$candidate"; then
+      "$RM" -f "$candidate"
+      return 73
+    fi
+  fi
+  case "$dest" in
+    */sudoers.d/*)
+      if [[ -z "$VISUDO" ]] || ! "$VISUDO" -cf "$candidate" >/dev/null; then
+        echo "sudoers validation failed: ${dest}" >&2
+        "$RM" -f "$candidate"
+        return 73
+      fi
+      ;;
+    */radon-deploy-root|*/radon-ib-gateway-control|*/usr/local/bin/radon)
+      if ! bash -n "$candidate"; then
+        echo "shell syntax validation failed: ${dest}" >&2
+        "$RM" -f "$candidate"
+        return 73
+      fi
+      ;;
+  esac
+  if ! mv -f -- "$candidate" "$dest"; then
+    "$RM" -f "$candidate"
+    return 73
+  fi
+  "$SYNC" -f "$dest"
+}
+
+write_control_plane_manifest_and_ready() {
+  local index source_rel dest digest tmp_manifest tmp_ready state_dir
+  state_dir="$(dirname -- "$CONTROL_PLANE_MANIFEST")"
+  mkdir -p "$state_dir" || return 73
+  tmp_manifest="$(mktemp "${CONTROL_PLANE_MANIFEST}.XXXXXX")"
+  for index in "${!CONTROL_PLANE_SOURCES[@]}"; do
+    source_rel="${CONTROL_PLANE_SOURCES[$index]}"
+    dest="${CONTROL_PLANE_ROOT}${CONTROL_PLANE_TARGETS[$index]}"
+    if [[ ! -f "$dest" || -L "$dest" ]]; then
+      "$RM" -f "$tmp_manifest"
+      echo "installed control-plane target is unavailable after refresh: ${CONTROL_PLANE_TARGETS[$index]}" >&2
+      return 73
+    fi
+    digest="$(file_sha256 "$dest")" || {
+      "$RM" -f "$tmp_manifest"
+      return 73
+    }
+    printf '%s  %s -> %s\n' "$digest" "$source_rel" "${CONTROL_PLANE_TARGETS[$index]}" \
+      >> "$tmp_manifest"
+  done
+  chmod 0644 "$tmp_manifest"
+  mv -f -- "$tmp_manifest" "$CONTROL_PLANE_MANIFEST"
+  "$SYNC" -f "$CONTROL_PLANE_MANIFEST"
+  tmp_ready="$(mktemp "${CONTROL_PLANE_READY}.XXXXXX")"
+  printf '%s  %s\n' "$(file_sha256 "$CONTROL_PLANE_MANIFEST")" \
+    "$LOGICAL_CONTROL_PLANE_MANIFEST" > "$tmp_ready"
+  chmod 0644 "$tmp_ready"
+  mv -f -- "$tmp_ready" "$CONTROL_PLANE_READY"
+  "$SYNC" -f "$CONTROL_PLANE_READY"
+}
+
+# Unit-only refresh during deploy. Must not exec bootstrap-control-plane.sh:
+# bootstrap refuses the in-flight app transition journal and the deploy lock.
+# Pending Gateway transition is the only transition that blocks this path.
+refresh_control_plane() {
+  local privileged=0
+  local index source_rel source dest installed_hash source_hash mode
+  local -a unit_indexes=()
+  local -a privileged_indexes=()
+
+  [[ "${1:-}" == "privileged" ]] && privileged=1
+
+  [[ -n "$CLOUD_SOURCE" && -d "$CLOUD_SOURCE" ]] || {
+    echo "control-plane source tree is not configured" >&2
+    return 78
+  }
+
+  if [[ -e "$GATEWAY_TRANSITION_FILE" || -L "$GATEWAY_TRANSITION_FILE" ]]; then
+    echo "refusing control-plane refresh while a gateway transition is pending" >&2
+    return 75
+  fi
+
+  for index in "${!CONTROL_PLANE_SOURCES[@]}"; do
+    source_rel="${CONTROL_PLANE_SOURCES[$index]}"
+    source="${CLOUD_SOURCE}/${source_rel}"
+    dest="${CONTROL_PLANE_ROOT}${CONTROL_PLANE_TARGETS[$index]}"
+    if [[ ! -f "$source" || -L "$source" ]]; then
+      echo "control-plane source is missing or is not a regular file: ${source_rel}" >&2
+      return 66
+    fi
+    source_hash="$(file_sha256 "$source")" || {
+      echo "control-plane source is unreadable: ${source_rel}" >&2
+      return 66
+    }
+    installed_hash=""
+    if [[ -f "$dest" && ! -L "$dest" ]]; then
+      installed_hash="$(file_sha256 "$dest")" || installed_hash=""
+    fi
+    [[ "$source_hash" == "$installed_hash" ]] && continue
+    case "$source_rel" in
+      services/*) unit_indexes+=("$index") ;;
+      *) privileged_indexes+=("$index") ;;
+    esac
+  done
+
+  if (( ${#privileged_indexes[@]} > 0 )) && (( privileged == 0 )); then
+    echo "refresh-control-plane: privileged control-plane diffs require refresh-control-plane-privileged" >&2
+    return 78
+  fi
+
+  if (( ${#unit_indexes[@]} == 0 && ${#privileged_indexes[@]} == 0 )); then
+    printf 'refresh-control-plane: control-plane is current/unchanged\n'
+    return 0
+  fi
+
+  for index in ${unit_indexes[@]+"${unit_indexes[@]}"}; do
+    source_rel="${CONTROL_PLANE_SOURCES[$index]}"
+    source="${CLOUD_SOURCE}/${source_rel}"
+    dest="${CONTROL_PLANE_ROOT}${CONTROL_PLANE_TARGETS[$index]}"
+    refresh_install_file "$source" "$dest" 0644 || return $?
+    if [[ "$(file_sha256 "$dest")" != "$(file_sha256 "$source")" ]]; then
+      echo "control-plane install verification failed: ${source_rel}" >&2
+      return 73
+    fi
+  done
+
+  if (( privileged == 1 )); then
+    for index in ${privileged_indexes[@]+"${privileged_indexes[@]}"}; do
+      source_rel="${CONTROL_PLANE_SOURCES[$index]}"
+      source="${CLOUD_SOURCE}/${source_rel}"
+      dest="${CONTROL_PLANE_ROOT}${CONTROL_PLANE_TARGETS[$index]}"
+      mode="${CONTROL_PLANE_MODES[$index]}"
+      refresh_install_file "$source" "$dest" "$mode" || return $?
+      if [[ "$(file_sha256 "$dest")" != "$(file_sha256 "$source")" ]]; then
+        echo "control-plane install verification failed: ${source_rel}" >&2
+        return 73
+      fi
+    done
+  fi
+
+  write_control_plane_manifest_and_ready || return $?
+  systemctl_bounded daemon-reload || {
+    echo "daemon-reload failed after control-plane refresh" >&2
+    return 75
+  }
+  return 0
+}
+
 cancel_radon_jobs() {
   local jobs id unit
   local job_ids=()
@@ -987,6 +1158,9 @@ root_action_timeout() {
       printf '%s\n' "$ROOT_MUTATION_ACTION_TIMEOUT"
       ;;
     install-units)
+      printf '%s\n' "$ROOT_MUTATION_ACTION_TIMEOUT"
+      ;;
+    refresh-control-plane|refresh-control-plane-privileged)
       printf '%s\n' "$ROOT_MUTATION_ACTION_TIMEOUT"
       ;;
     verify-restored|verify-control-plane)
@@ -1090,6 +1264,12 @@ case "$1" in
     ;;
   sync-scheduled-units)
     sync_scheduled_units
+    ;;
+  refresh-control-plane)
+    refresh_control_plane
+    ;;
+  refresh-control-plane-privileged)
+    refresh_control_plane privileged
     ;;
   *)
     echo "unknown deploy-root action" >&2
