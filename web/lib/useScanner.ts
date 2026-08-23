@@ -9,6 +9,7 @@ const config = {
   extractTimestamp: (d: ScannerData) => d.scan_time || null,
   // Cold /scanner only GETs the active mode; inactive badges stay empty until selected (T7).
   loadWhenInactive: false,
+  interval: 0,
 };
 
 export function useScanner(active: boolean): UseSyncReturn<ScannerData> {

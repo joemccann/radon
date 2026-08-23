@@ -17,7 +17,7 @@ import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 // Shared helpers
 // ---------------------------------------------------------------------------
 
-const STALE_THRESHOLD = 600; // seconds
+const STALE_THRESHOLD = 3600; // seconds; matches hourly flow-refresh cadence
 
 function makeMtime(ageSeconds: number): Date {
   return new Date(Date.now() - ageSeconds * 1000);
@@ -122,16 +122,16 @@ describe("GET /api/flow-analysis — cache_meta", () => {
     expect(body.cache_meta.stale_threshold_seconds).toBe(STALE_THRESHOLD);
   });
 
-  it("returns is_stale: true when file is 700s old", async () => {
+  it("returns is_stale: true when file is 3700s old", async () => {
     vi.mocked(fs.statSync).mockReturnValue({
-      mtime: makeMtime(700),
+      mtime: makeMtime(3700),
     } as unknown as fs.Stats);
 
     const { GET } = await import("../app/api/flow-analysis/route");
     const body = await callGET({ GET });
 
     expect(body.cache_meta.is_stale).toBe(true);
-    expect(body.cache_meta.age_seconds).toBeGreaterThanOrEqual(695);
+    expect(body.cache_meta.age_seconds).toBeGreaterThanOrEqual(3695);
   });
 
   it("returns last_refresh: null and is_stale: true when file not found (statSync throws)", async () => {
@@ -187,16 +187,16 @@ describe("GET /api/scanner — cache_meta", () => {
     expect(body.cache_meta.stale_threshold_seconds).toBe(STALE_THRESHOLD);
   });
 
-  it("returns is_stale: true when file is 700s old", async () => {
+  it("returns is_stale: true when file is 3700s old", async () => {
     vi.mocked(fs.statSync).mockReturnValue({
-      mtime: makeMtime(700),
+      mtime: makeMtime(3700),
     } as unknown as fs.Stats);
 
     const { GET } = await import("../app/api/scanner/route");
     const body = await callGET({ GET });
 
     expect(body.cache_meta.is_stale).toBe(true);
-    expect(body.cache_meta.age_seconds).toBeGreaterThanOrEqual(695);
+    expect(body.cache_meta.age_seconds).toBeGreaterThanOrEqual(3695);
   });
 
   it("returns last_refresh: null and is_stale: true when file not found (statSync throws)", async () => {
@@ -252,16 +252,16 @@ describe("GET /api/discover — cache_meta", () => {
     expect(body.cache_meta.stale_threshold_seconds).toBe(STALE_THRESHOLD);
   });
 
-  it("returns is_stale: true when file is 700s old", async () => {
+  it("returns is_stale: true when file is 3700s old", async () => {
     vi.mocked(fs.statSync).mockReturnValue({
-      mtime: makeMtime(700),
+      mtime: makeMtime(3700),
     } as unknown as fs.Stats);
 
     const { GET } = await import("../app/api/discover/route");
     const body = await callGET({ GET });
 
     expect(body.cache_meta.is_stale).toBe(true);
-    expect(body.cache_meta.age_seconds).toBeGreaterThanOrEqual(695);
+    expect(body.cache_meta.age_seconds).toBeGreaterThanOrEqual(3695);
   });
 
   it("returns last_refresh: null and is_stale: true when file not found (statSync throws)", async () => {

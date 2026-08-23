@@ -160,13 +160,10 @@ describe("market-hours-only services (weekend-aware closed window)", () => {
     expect(isStale(service, friFinish, "closed", SUN_LATE)).toBe(false);
   });
 
-  // theta-harvester left this ≤30min group with R-068: its autonomous
-  // caller is the hourly signals-refresh timer, so its open window is now
-  // the uniform 4d scheduled window pinned in the R-068 describe below.
+  // scanner / discover / flow-analysis left this ≤30min group when
+  // radon-flow-refresh.timer became their hourly caller (same 4d
+  // window as theta-harvester). analyst-ratings stays on-demand.
   it.each([
-    "scanner",
-    "discover",
-    "flow-analysis",
     "analyst-ratings",
   ])("%s: still fires fast during market hours (≤30 min)", (service) => {
     const NOW = Date.parse("2026-05-08T18:00:00Z"); // Fri 2 PM ET
@@ -299,14 +296,14 @@ describe("SERVICE_FRESHNESS_WINDOWS — category field", () => {
     ["replica-watchdog", "scheduled"],
     ["orders-sync", "scheduled"],
     ["portfolio-sync", "scheduled"],
-    ["scanner", "on-demand"],
+    ["scanner", "scheduled"],
     // theta-harvester / strength-confirmation flipped from on-demand when
     // radon-signals-refresh.timer became their autonomous caller (R-068) —
     // same transition cta-sync made below.
     ["theta-harvester", "scheduled"],
     ["strength-confirmation", "scheduled"],
-    ["discover", "on-demand"],
-    ["flow-analysis", "on-demand"],
+    ["discover", "scheduled"],
+    ["flow-analysis", "scheduled"],
     ["analyst-ratings", "on-demand"],
     ["gex-scan", "on-demand"],
     // cta-sync is scheduled by radon-cta-sync.timer on Hetzner — flipped
@@ -352,10 +349,9 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
     expect(getFreshnessWindowMs("informed-flow", "open")).toBe(30 * MIN);
     expect(getFreshnessWindowMs("informed-flow", "extended")).toBe(30 * MIN);
     expect(getFreshnessWindowMs("informed-flow", "closed")).toBe(3 * DAY);
-    // Byte-for-byte the same window as scanner — the sibling family.
     for (const state of ["open", "extended", "closed"] as MarketState[]) {
       expect(getFreshnessWindowMs("informed-flow", state)).toBe(
-        getFreshnessWindowMs("scanner", state),
+        getFreshnessWindowMs("analyst-ratings", state),
       );
     }
   });
@@ -541,12 +537,12 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
     expect(requiresIb("trin")).toBe(true);
   });
 
-  // ``skew`` publishes one-minute RTH snapshots and retains a daily
+  // ``skew`` publishes 5-minute RTH snapshots and retains a daily
   // finalization heartbeat off-hours. UW-only, no IB.
-  it("skew uses a tight open window and a daily off-hours window", () => {
+  it("skew open window spans two 5-minute timer cycles and a daily off-hours window", () => {
     expect(SERVICE_FRESHNESS_WINDOWS["skew"]).toBeDefined();
     expect(getServiceCategory("skew")).toBe("scheduled");
-    expect(getFreshnessWindowMs("skew", "open")).toBe(5 * MIN);
+    expect(getFreshnessWindowMs("skew", "open")).toBe(10 * MIN);
     expect(getFreshnessWindowMs("skew", "extended")).toBe(26 * HOUR);
     expect(getFreshnessWindowMs("skew", "closed")).toBe(26 * HOUR);
     expect(requiresIb("skew")).toBe(false);
@@ -656,7 +652,7 @@ describe("getServiceCategory", () => {
   });
 
   it("returns the configured category for a known on-demand service", () => {
-    expect(getServiceCategory("scanner")).toBe("on-demand");
+    expect(getServiceCategory("analyst-ratings")).toBe("on-demand");
   });
 
   it("treats unknown services as scheduled (fail loud, not quiet)", () => {

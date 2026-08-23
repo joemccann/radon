@@ -7,6 +7,7 @@ import type { FlowAnalysisData } from "./types";
 const config = {
   endpoint: "/api/flow-analysis",
   extractTimestamp: (d: FlowAnalysisData) => d.analysis_time || null,
+  interval: 0,
 };
 
 export function useFlowAnalysis(active: boolean): UseSyncReturn<FlowAnalysisData> {
