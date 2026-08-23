@@ -2306,6 +2306,7 @@ class TestDeploymentBudgets:
         assert "verify-restored" in selector
         assert "verify-control-plane" in selector
         assert "commit-transition" in selector
+        assert "install-units" in selector
         assert "sync-scheduled-units" in selector
         supervisor = function_body(helper, "supervise_root_action")
         assert "root_action_timeout" in supervisor
