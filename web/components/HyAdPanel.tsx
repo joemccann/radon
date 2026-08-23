@@ -171,16 +171,16 @@ export default function HyAdPanel() {
               sub={<>{advDecSub}</>}
             />
             <RegimeStripCell
-              testId="hyad-strip-ma21"
-              label="21D MA"
-              value={<span data-testid="hyad-ma21">{formatSignedThousands(current.ma21)}</span>}
-              sub={<>21 SESSION SMA OF CUM</>}
-            />
-            <RegimeStripCell
-              testId="hyad-strip-ma50"
-              label="50D MA"
-              value={<span data-testid="hyad-ma50">{formatSignedThousands(current.ma50)}</span>}
-              sub={<>50 SESSION SMA OF CUM</>}
+              testId="hyad-strip-ma"
+              label="21D / 50D MA"
+              value={
+                <>
+                  <span data-testid="hyad-ma21">{formatSignedThousands(current.ma21)}</span>
+                  {" / "}
+                  <span data-testid="hyad-ma50">{formatSignedThousands(current.ma50)}</span>
+                </>
+              }
+              sub={<>21 AND 50 SESSION SMA OF CUM</>}
             />
             <RegimeStripCell
               testId="hyad-strip-regime"
