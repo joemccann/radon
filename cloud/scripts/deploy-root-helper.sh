@@ -80,6 +80,7 @@ if [[ "${RADON_DEPLOY_HELPER_TEST_MODE:-0}" == "1" ]]; then
   readonly HELPER_TEST_MODE=1
   readonly STATE_DIR="$(dirname "${RADON_TEST_ACTIVE_STATE_FILE:?test active-state file is required}")"
   readonly SYSTEMCTL="${RADON_TEST_SYSTEMCTL:?test systemctl is required}"
+  readonly SYSTEMD_ANALYZE="${RADON_TEST_SYSTEMD_ANALYZE:-}"
   readonly RM="${RADON_TEST_RM:?test rm is required}"
   readonly SYNC="${RADON_TEST_SYNC:?test sync is required}"
   readonly ACTIVE_STATE_FILE="${RADON_TEST_ACTIVE_STATE_FILE}"
@@ -122,6 +123,7 @@ else
     exit 77
   fi
   readonly SYSTEMCTL=/usr/bin/systemctl
+  readonly SYSTEMD_ANALYZE=/usr/bin/systemd-analyze
   readonly RM=/usr/bin/rm
   readonly SYNC=/usr/bin/sync
   readonly INSTALL=/usr/bin/install
@@ -280,6 +282,19 @@ unit_is_excluded() {
   local unit="$1"
   [[ "$unit" == radon-beta-* ]] && return 0
   [[ "$unit" == radon-ib-gateway.service || "$unit" == "$PREHELD_UNIT" ]]
+}
+
+# R-140: the core long-running services are STOPPED when install-units runs.
+# Replacing their unit files at that moment, with a rollback path that never
+# reinstalls unit files, takes app.radon.run down until a human SSHes as root.
+# They stay bootstrap/operator-owned. Distinct from unit_is_excluded, which
+# also drives the stop/restart transition inventory and must keep listing them.
+unit_is_release_managed() {
+  local unit="$1" core
+  for core in "${CORE_SERVICES[@]}"; do
+    [[ "$unit" == "$core" ]] && return 0
+  done
+  return 1
 }
 
 list_transition_units() {
@@ -644,8 +659,29 @@ stage_unit_candidate() {
 # never from /home/radon/radon, which anything running as `radon` can write
 # (R-084). A unit that is not reachable from that tip is refused even when its
 # digest matches; the checkout manifest is not evidence of review.
+# `systemd-analyze verify` on the staged body, mirroring publish_caddy's
+# `caddy validate` gate. The unit has to carry its real name for the
+# verifier to parse it as that unit type.
+unit_candidate_verifies() {
+  local candidate="$1" unit="$2" scratch rc=0
+  [[ -n "$SYSTEMD_ANALYZE" && -x "$SYSTEMD_ANALYZE" ]] || return 0
+  scratch="$(mktemp -d "${SYSTEMD_UNIT_DIR}/.verify.XXXXXX")" || return 0
+  if cat -- "$candidate" > "${scratch}/${unit}"; then
+    if [[ -n "${TIMEOUT:-}" ]]; then
+      "$TIMEOUT" --signal=TERM --kill-after=2s 10s \
+        "$SYSTEMD_ANALYZE" verify "${scratch}/${unit}" || rc=$?
+    else
+      "$SYSTEMD_ANALYZE" verify "${scratch}/${unit}" || rc=$?
+    fi
+  else
+    rc=1
+  fi
+  "$RM" -rf "$scratch"
+  return "$rc"
+}
+
 install_manifest_units() {
-  local tip manifest line digest unit target candidate actual was_present
+  local tip manifest line digest unit target candidate actual was_present backup
   local -a new_timers=() skipped=()
   local installed=0 updated=0 unchanged=0 changed=0 entry
   local manifest_line_re='^([0-9a-f]{64})[[:space:]][[:space:]](radon-[a-zA-Z0-9_.@-]+\.(service|timer))$'
@@ -681,6 +717,10 @@ install_manifest_units() {
       continue
     fi
     unit_is_excluded "$unit" && continue
+    if unit_is_release_managed "$unit"; then
+      skipped+=("${unit} (release-managed)")
+      continue
+    fi
 
     target="${SYSTEMD_UNIT_DIR}/${unit}"
     if [[ -L "$target" ]]; then
@@ -714,7 +754,31 @@ install_manifest_units() {
     fi
 
     chmod 0644 "$candidate"
-    mv -f -- "$candidate" "$target"
+    if ! unit_candidate_verifies "$candidate" "$unit"; then
+      "$RM" -f "$candidate"
+      skipped+=("${unit} (verify-failed)")
+      continue
+    fi
+    # daemon-reload never fails on a malformed unit body, and
+    # restore_release_backup does not reinstall unit files, so the only
+    # recovery from a bad promotion is a root SSH. Keep the live body and
+    # put it back if anything below fails.
+    backup=""
+    if (( was_present )); then
+      backup="$(mktemp "${SYSTEMD_UNIT_DIR}/.${unit}.backup.XXXXXX")"
+      if ! cat -- "$target" > "$backup"; then
+        "$RM" -f "$backup" "$candidate"
+        skipped+=("${unit} (snapshot-failed)")
+        continue
+      fi
+    fi
+    if ! mv -f -- "$candidate" "$target"; then
+      [[ -n "$backup" ]] && mv -f -- "$backup" "$target"
+      "$RM" -f "$candidate"
+      skipped+=("${unit} (promote-failed)")
+      continue
+    fi
+    [[ -n "$backup" ]] && "$RM" -f "$backup"
     "$SYNC" -f "$target"
     changed=1
     if (( was_present )); then

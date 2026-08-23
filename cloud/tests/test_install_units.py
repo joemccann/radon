@@ -415,3 +415,88 @@ def test_verify_control_plane_covers_the_scheduling_timers():
         target = "/etc/systemd/system/" + timer.split("/", 1)[1]
         assert target in helper, target
         assert target in bootstrap, target
+
+
+# --- REL-054 (R-140): a hash-matching but BROKEN unit installs cleanly today.
+# `daemon-reload` never fails on a malformed unit body, rollback never
+# reinstalls unit files, and two core non-control-plane services are in scope.
+
+
+def _analyze_stub(tmp_path: pathlib.Path, *, reject: str = "") -> pathlib.Path:
+    """Fake `systemd-analyze verify <path>`: non-zero when the staged body
+    contains the rejection marker."""
+    stub = tmp_path / "systemd-analyze"
+    _write_executable(
+        stub,
+        f"""#!/bin/bash
+[[ "${{1:-}}" == "verify" ]] || exit 0
+marker={shlex.quote(reject)}
+[[ -n "$marker" ]] || exit 0
+grep -q -- "$marker" "$2" && {{ echo "$2: bad unit" >&2; exit 1; }}
+exit 0
+""",
+    )
+    return stub
+
+
+def test_core_services_are_never_installed_by_the_deploy(tmp_path):
+    """R-140: radon-nextjs.service and radon-newsfeed.service are in the
+    manifest but in neither exclusion list, so an unattended deploy `mv`s
+    them into /etc/systemd/system while services are stopped."""
+    box = Sandbox(tmp_path)
+    for name in ("radon-nextjs.service", "radon-newsfeed.service"):
+        box.source(name, SERVICE_BODY)
+
+    result = box.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert list(box.unit_dir.iterdir()) == []
+    assert box.systemctl_calls() == []
+
+
+def test_unit_that_fails_systemd_analyze_is_not_promoted(tmp_path):
+    """A hash-matching unit body that systemd cannot parse installs cleanly
+    today — `daemon-reload` does not fail on it, and rollback never
+    reinstalls unit files, so the service stays down until a human SSHes."""
+    box = Sandbox(tmp_path)
+    broken = SERVICE_BODY.replace("ExecStart=/bin/true", "ExecStart=/nonexistent")
+    box.source("radon-credit-spread.service", broken)
+    box.env["RADON_TEST_SYSTEMD_ANALYZE"] = str(
+        _analyze_stub(tmp_path, reject="/nonexistent")
+    )
+
+    result = box.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not (box.unit_dir / "radon-credit-spread.service").exists()
+    assert "verify-failed" in result.stdout
+    assert box.systemctl_calls() == []
+
+
+def test_a_live_unit_is_restored_when_its_replacement_fails_verify(tmp_path):
+    box = Sandbox(tmp_path)
+    broken = SERVICE_BODY.replace("ExecStart=/bin/true", "ExecStart=/nonexistent")
+    box.source("radon-credit-spread.service", broken)
+    box.installed("radon-credit-spread.service", SERVICE_BODY)
+    box.env["RADON_TEST_SYSTEMD_ANALYZE"] = str(
+        _analyze_stub(tmp_path, reject="/nonexistent")
+    )
+
+    result = box.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (box.unit_dir / "radon-credit-spread.service").read_text() == SERVICE_BODY
+    assert "verify-failed" in result.stdout
+    assert box.systemctl_calls() == []
+
+
+def test_a_good_unit_still_installs_when_verify_is_available(tmp_path):
+    box = Sandbox(tmp_path)
+    box.source("radon-credit-spread.timer", TIMER_BODY)
+    box.env["RADON_TEST_SYSTEMD_ANALYZE"] = str(_analyze_stub(tmp_path))
+
+    result = box.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (box.unit_dir / "radon-credit-spread.timer").read_text() == TIMER_BODY
+    assert "installed=1" in result.stdout
