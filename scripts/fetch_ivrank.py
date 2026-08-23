@@ -162,7 +162,17 @@ def repair_outliers(
     repaired = [dict(row) for row in rows]
     repairs: list[dict[str, Any]] = []
     index = {row["date"]: i for i, row in enumerate(repaired)}
-    for date in detect_outliers(repaired):
+    outliers = detect_outliers(repaired)
+    if len(outliers) > UW_REPAIR_MAX_LOOKUPS:
+        # Newest first: a fresh bad print is worth more than a 2023 one that
+        # UW may never be able to serve (R-152).
+        outliers = sorted(outliers, reverse=True)[:UW_REPAIR_MAX_LOOKUPS]
+        print(
+            f"[ivrank] repair pass bounded to {UW_REPAIR_MAX_LOOKUPS} UW lookups "
+            f"(newest first); the remainder retries tomorrow",
+            file=sys.stderr,
+        )
+    for date in outliers:
         try:
             uw_iv = uw_iv_lookup(date)
         except Exception:  # noqa: BLE001 — advisory feed; body never logged
@@ -235,8 +245,22 @@ def _uw_token() -> str:
     return (os.environ.get("UW_TOKEN") or "").strip().strip('"').strip("'")
 
 
+# R-152: `repair_outliers` walks the ENTIRE stored history and re-flags every
+# row still tagged `source == "ib"`. A date UW cannot serve (its 2023-09-22
+# floor) stays `ib` and is re-fetched every night forever — unbounded and
+# monotone. Bound the per-run lookups; the backlog drains a slice a night and
+# a permanently unservable date stops costing quota every single run.
+UW_REPAIR_MAX_LOOKUPS = 25
+
+
 def _uw_get(path: str) -> dict[str, Any]:
-    """Bounded UW GET. Never log the response body — 401 bodies echo the token."""
+    """Bounded UW GET. Never log the response body — 401 bodies echo the token.
+
+    R-152: this was a raw `urlopen` with no `record_hit`, so every ivrank UW
+    hit was invisible to `/uw/usage`, to `top_callers` and to
+    `should_block_universe_scan` — the R-062 hole REL-036 closed for the six
+    Next.js routes, reopened by a job merged in this delta.
+    """
     from urllib.request import Request, urlopen
 
     token = _uw_token()
@@ -246,8 +270,23 @@ def _uw_get(path: str) -> dict[str, Any]:
         f"{UW_BASE_URL}{path}",
         headers={"Authorization": f"Bearer {token}", "User-Agent": USER_AGENT},
     )
-    with urlopen(req, timeout=UW_TIMEOUT_S) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    try:
+        with urlopen(req, timeout=UW_TIMEOUT_S) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    finally:
+        _count_uw_hit(path)
+
+
+def _count_uw_hit(path: str) -> None:
+    """Attribute one UW request to the shared daily budget. Never raises."""
+    try:
+        from utils import uw_budget
+
+        uw_budget.record_hit(
+            caller="ivrank", endpoint=path.split("?", 1)[0]
+        )
+    except Exception:  # noqa: BLE001 — the gauge must never fail the job
+        pass
 
 
 def _real_uw_fetch() -> list[dict[str, Any]]:

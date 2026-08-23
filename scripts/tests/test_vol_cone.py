@@ -590,7 +590,12 @@ class TestRunIntraday:
         monkeypatch.setattr(
             mod,
             "_write_intraday_db_cache",
-            lambda payload, scan_time: self.db_writes.append((False, "vol-cone-intraday")),
+            # REL-062 / R-150: the writer takes the hold reason now, so a
+            # quota hold can heartbeat error instead of a fresh `ok` that
+            # keeps the 45-minute staleness window from ever firing.
+            lambda payload, scan_time, hold_reason=None: self.db_writes.append(
+                (False, "vol-cone-intraday", hold_reason)
+            ),
         )
         monkeypatch.setattr(mod, "_load_watchlist", lambda: [])
         self.mod = mod
@@ -639,7 +644,7 @@ class TestRunIntraday:
         )
         payload = self.mod.run_intraday(client=client, now=self.OPEN)
 
-        assert self.db_writes == [(False, "vol-cone-intraday")]
+        assert self.db_writes == [(False, "vol-cone-intraday", None)]
         stored = self.mod._flatten_history_rows(payload)
         assert stored, "completed sessions still flatten"
         assert all(row["date"] != self.SESSION for row in stored)
@@ -651,7 +656,7 @@ class TestRunIntraday:
 
         assert client.calls == []
         assert payload["source_as_of"] == WEEKLY[-1]["date"]
-        assert self.db_writes == [(False, "vol-cone-intraday")]
+        assert self.db_writes == [(False, "vol-cone-intraday", None)]
 
     def test_holds_when_the_uw_daily_budget_is_nearly_spent(self, monkeypatch):
         self._seed_history(monkeypatch)

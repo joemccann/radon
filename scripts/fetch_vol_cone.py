@@ -45,6 +45,7 @@ from utils.market_calendar import (  # noqa: E402 — needs the sys.path insert
     last_completed_session_date,
     market_state,
 )
+from utils import uw_budget  # noqa: E402
 
 ET = ZoneInfo("America/New_York")
 
@@ -90,7 +91,18 @@ _HIT_REGIMES = frozenset({"CHEAP_WINGS", "CHEAP_ATM"})
 # Only names already near the cheap tail can turn tradeable before the close.
 _INTRADAY_PAIR_CAP = 80
 _INTRADAY_CANDIDATE_MAX = 0.40
-_INTRADAY_UW_FLOOR = 2_000
+# R-151: this was 2_000, which let vol-cone-intraday spend down to 2,000
+# remaining — the whole 20,000-38,000 band `should_block_universe_scan`
+# reserves for theta-harvester / strength-confirmation / discover. At
+# 81-160 requests per 15-minute cycle, ~26 cycles a weekday, this job could
+# starve the universe scans and then keep running while they wrote
+# `uw-budget-blocked` rows until the 20:00 ET reset. The floor is now the
+# reserve itself: intraday stops where the universe brake starts.
+_INTRADAY_UW_FLOOR = uw_budget.DAILY_LIMIT - uw_budget.UNIVERSE_BLOCK_AT
+
+# R-150: a budget hold is not a closed market. Stamping "closed" while the
+# market is open made the VOL CONE tab's own label deny the outage.
+_HOLD_MARKET_STATUS = "held"
 
 
 # ── chain parsing + moneyness interpolation ───────────────────────
@@ -474,13 +486,35 @@ def _write_db_cache(
         print(f"[vol-cone] health row non-fatal: {exc}", file=sys.stderr)
 
 
-def _write_intraday_db_cache(payload: dict[str, Any], scan_time: str) -> None:
-    """Live writer: refreshes the shared snapshot, never a durable row."""
+def _write_intraday_db_cache(
+    payload: dict[str, Any],
+    scan_time: str,
+    hold_reason: Optional[str] = None,
+) -> None:
+    """Live writer: refreshes the shared snapshot, never a durable row.
+
+    R-150: the heartbeat was an unconditional `ok`, including on the
+    quota-hold path. The watchdog's 45-minute open window is keyed on row
+    FRESHNESS, so a fresh `ok` every 15 minutes meant the staleness detector
+    could never fire for a quota outage — the tab silently reverted to last
+    night's cone for the rest of the session behind a green chip.
+    """
     writer = _mirror_snapshot(payload, scan_time, rows_changed=False)
     if writer is None:
         return
     try:
-        writer.record_service_health("vol-cone-intraday", "ok", finished_at=scan_time)
+        if hold_reason is None:
+            writer.record_service_health(
+                "vol-cone-intraday", "ok", finished_at=scan_time
+            )
+        else:
+            writer.record_service_health(
+                "vol-cone-intraday",
+                "error",
+                finished_at=scan_time,
+                error={"message": f"vol-cone intraday held: {hold_reason}",
+                       "class": "hold"},
+            )
     except Exception as exc:  # noqa: BLE001 — best-effort mirror
         print(f"[vol-cone] intraday health row non-fatal: {exc}", file=sys.stderr)
 
@@ -803,7 +837,9 @@ def _intraday_hold_reason(now: datetime, names: list[dict[str, Any]]) -> Optiona
     if not bool(market_state(now).get("is_open")):
         return "market closed"
     remaining = _uw_remaining()
-    if remaining < _INTRADAY_UW_FLOOR:
+    # `<=`: at exactly the reserve, the next cycle's 81-160 requests would
+    # cross into the band the universe brake protects.
+    if remaining <= _INTRADAY_UW_FLOOR:
         return f"UW daily budget nearly spent ({remaining} left)"
     return None
 
@@ -881,9 +917,13 @@ def run_intraday(
         name["series"][-1]["date"] for name in names
     )
     payload = build_output(names, scan_time, source_as_of)
-    payload["market_status"] = "open" if not hold else "closed"
+    payload["market_status"] = _HOLD_MARKET_STATUS if hold else "open"
     payload["is_intraday"] = live
-    _write_intraday_db_cache(payload, scan_time)
+    payload["hold_reason"] = hold
+    # A "market closed" hold is the honest one; anything else is degradation.
+    _write_intraday_db_cache(
+        payload, scan_time, hold_reason=None if hold == "market closed" else hold
+    )
     _write_json_cache(payload)
     return payload
 

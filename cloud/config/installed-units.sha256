@@ -21,7 +21,7 @@
 # timer-owned oneshot). Verified: timer enabled/active, next fire
 # Units acknowledged in config/drift-allowlist.conf are deliberately absent,
 03f89d26f03fce70cd6d4323d3e7cce1f624b64a5b2b65308c8ff232f59e85c0  radon-watchdog-intraday.timer
-0811279d3826a33ab7220caaf0fe9610120bb18e76a10aeb51b4e0c7ee4555d6  radon-ivrank.service
+f009e2526b96fb3a47babb2b57be8f0a66d77e2598739534774dfb3be74514ef  radon-ivrank.service
 054e75a01a18e4aa8bd5d5f65e0e64c461335f951491a60211fa126a99b977b4  radon-host-metrics.timer
 c7f71b6a949351d062fc7939630fbfcdb18e8941ddf3c58112e89bb082544fa9  radon-flow-refresh.service
 09943ac2d9e55b45905db71577d9223b8e13959f05816748fe3288bf3e669279  radon-skew.timer
