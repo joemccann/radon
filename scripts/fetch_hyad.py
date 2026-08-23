@@ -67,7 +67,6 @@ FETCH_TIMEOUT_S = 30
 
 PAGE_LIMIT = 5000
 BACKFILL_START = "2018-01-22"
-BACKFILL_OFFSETS = (0, 5000, 10000, 15000)
 DAILY_WINDOW_DAYS = 10
 HISTORY_READ_PAGE_ROWS = 500
 
@@ -415,15 +414,23 @@ def run() -> dict[str, Any]:
 # -- backfill (run once with --backfill) ---------------------------
 
 def run_backfill() -> int:
-    """One-time build from 2018-01-22 through today: two paged pulls (one
-    per bondType compareFilter), offsets 0/5000/10000/15000, 8 requests."""
-    end_date = date.today().isoformat()
+    """One-time build from 2018-01-22 through today, one request per
+    bondType per calendar year. Offset paging is unusable here: the
+    endpoint sorts only by date, intra-date row order is unstable across
+    requests, and a page boundary that cuts inside a date duplicates or
+    drops rows (observed corrupting 2020-11-24). A year window holds at
+    most ~1,800 rows, far under the 5,000-row page cap, and every date
+    belongs wholly to exactly one window."""
+    today = date.today()
+    start = date.fromisoformat(BACKFILL_START)
     raw: list[dict[str, Any]] = []
     for bond_type in HY_BOND_TYPES:
-        for offset in BACKFILL_OFFSETS:
-            envelope = fetch_breadth_page(bond_type, BACKFILL_START, end_date, offset=offset)
+        for year in range(start.year, today.year + 1):
+            window_start = max(start, date(year, 1, 1)).isoformat()
+            window_end = min(today, date(year, 12, 31)).isoformat()
+            envelope = fetch_breadth_page(bond_type, window_start, window_end)
             page = parse_breadth_rows(envelope)
-            _log(f"backfill: {bond_type} offset {offset}: {len(page)} rows")
+            _log(f"backfill: {bond_type} {year}: {len(page)} rows")
             raw.extend(page)
 
     rows = merge_bond_types(raw)
