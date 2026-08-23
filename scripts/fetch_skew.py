@@ -348,8 +348,8 @@ def _missing_sessions(last_stored: str, now: datetime) -> list[str]:
     """Trading days after ``last_stored`` up to the last FINALIZABLE ET
     session (16:45 boundary), ascending, bounded to the most recent 10."""
     # UW's 16:00 print can still settle immediately after the bell. Preserve
-    # the established 16:45 ET finalization window even though the high-
-    # frequency timer also fires through the UTC DST shoulder.
+    # the established 16:45 ET finalization window even though the
+    # 5-minute RTH timer also fires through the UTC DST shoulder.
     last_completed = last_completed_session_date(now - _FINALIZATION_GRACE)
     if last_stored >= last_completed:
         return []
