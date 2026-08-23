@@ -1,0 +1,11 @@
+# Example only. MUST NOT be installed by setup-vps.sh or
+# bootstrap-control-plane.sh. Default runtime remains host binaries.
+#
+# After app images are production runtime, copy this file to
+# /etc/systemd/system/radon-.service.d/runtime-container.conf and replace
+# IMAGE with the unit command. Empty ExecStart= clears the host binary.
+#
+# [Service]
+# Environment=RADON_RUNTIME=container
+# ExecStart=
+# ExecStart=docker run --network host --env-file /etc/radon/env --rm --name %N IMAGE

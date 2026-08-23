@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RADON — bulletproof sequence executed</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --canvas: #0a0f14; --panel: #0f1519; --raised: #151c22; --grid: #1e293b;
+      --text: #e2e8f0; --muted: #758192; --secondary: #94a3b8;
+      --signal: #05AD98; --warn: #F5A623; --fault: #E85D6C;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--canvas); color: var(--text); }
+    body { font-family: Inter, ui-sans-serif, system-ui, sans-serif; padding: 24px 16px 80px; }
+    .wrap { max-width: 1100px; margin: 0 auto; }
+    .kicker { font-size: 11px; letter-spacing: 0.16em; font-weight: 600; color: var(--muted); text-transform: uppercase; margin: 0 0 8px; }
+    h1 { font-size: 28px; font-weight: 560; letter-spacing: -0.03em; margin: 0 0 8px; }
+    h1 span { color: var(--signal); }
+    .lede { color: var(--secondary); font-size: 15px; line-height: 1.5; margin: 0 0 20px; max-width: 72ch; }
+    .verdict { background: var(--panel); border: 1px solid var(--warn); border-radius: 4px; padding: 16px 18px; margin-bottom: 16px; }
+    .verdict strong { color: var(--warn); }
+    .verdict p { margin: 8px 0 0; color: var(--secondary); font-size: 14px; line-height: 1.5; }
+    .panel { background: var(--panel); border: 1px solid var(--grid); border-radius: 4px; padding: 16px; margin-bottom: 16px; }
+    .label { font-size: 11px; letter-spacing: 0.12em; color: var(--muted); margin: 0 0 12px; text-transform: uppercase; font-weight: 600; }
+    .stats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+    .stat { background: var(--raised); border: 1px solid var(--grid); border-radius: 4px; padding: 12px; }
+    .stat .n { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 22px; color: var(--signal); }
+    .stat.warn .n { color: var(--warn); }
+    .stat .t { font-size: 11px; color: var(--muted); margin-top: 4px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+    th { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+    td code, .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px; }
+    .tag { display: inline-block; font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 10px; letter-spacing: 0.08em; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--grid); }
+    .tag.ok { color: var(--signal); border-color: var(--signal); }
+    .tag.hold { color: var(--warn); border-color: var(--warn); }
+    .tag.no { color: var(--fault); border-color: var(--fault); }
+    .tree { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px; line-height: 1.55; background: var(--raised); border: 1px solid var(--grid); border-radius: 4px; padding: 14px 16px; overflow-x: auto; white-space: pre; color: var(--secondary); }
+    .ok { color: var(--signal); } .meh { color: var(--warn); } .bad { color: var(--fault); }
+    @media (max-width: 800px) { .stats { grid-template-columns: 1fr 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <p class="kicker">Workflow vps-bulletproof-sequence / executed 2026-08-23</p>
+    <h1>Repo sequence is in. <span>Host cutover is not.</span></h1>
+    <p class="lede">
+      Full Docker is still rejected. What landed is the control-plane invert,
+      timer auto-sync, an env-path preference that does not break today, and
+      unused app image scaffolding. Production ExecStart is still host binaries.
+    </p>
+
+    <section class="verdict">
+      <strong>Operator action still owed before this SHA is useful on the VPS.</strong>
+      <p>
+        This commit adds the sudoers verb <code class="mono">refresh-control-plane</code>.
+        CI preflight will refuse until one root bootstrap publishes helper + sudoers.
+        After that, a unit-only push deploys without SSH. Do not push until you can
+        run bootstrap on the box. Preflight fails before teardown, so a premature
+        push will not stop Gateway.
+      </p>
+    </section>
+
+    <section class="panel">
+      <p class="label">Evidence</p>
+      <div class="stats">
+        <div class="stat"><div class="n">177</div><div class="t">cloud tests passed (38.71s) then visudo 21/21</div></div>
+        <div class="stat"><div class="n">90</div><div class="t">auto-sync units, hashes match manifest</div></div>
+        <div class="stat"><div class="n">0</div><div class="t">docker.sock mounts; docker/services/ still gone</div></div>
+        <div class="stat warn"><div class="n">1</div><div class="t">root bootstrap still owed for this SHA</div></div>
+        <div class="stat warn"><div class="n">host</div><div class="t">RADON_RUNTIME default. Images are not live</div></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <p class="label">What changed vs what did not</p>
+      <table>
+        <thead><tr><th>Item</th><th>State</th><th>Proof</th></tr></thead>
+        <tbody>
+          <tr><td>P0 docs / docker/services lie</td><td><span class="tag ok">DONE</span></td><td>cloud-services.md names 40cfff2a deletion</td></tr>
+          <tr><td>auto-sync timer-owned oneshots</td><td><span class="tag ok">DONE</span></td><td>90 names; llm-index and control-plane services excluded</td></tr>
+          <tr><td>refresh-control-plane</td><td><span class="tag ok">DONE IN REPO</span></td><td>helper copies services/* only; visudo on sudoers; no bootstrap exec; no Gateway start/stop</td></tr>
+          <tr><td>First production install of the verb</td><td><span class="tag hold">OWED</span></td><td>sudoers hash is privileged; preflight fail-closed until bootstrap</td></tr>
+          <tr><td>/etc/radon/env preference</td><td><span class="tag ok">CODE ONLY</span></td><td>fallback ~/radon-cloud/.env; unit EnvironmentFile unchanged</td></tr>
+          <tr><td>App Dockerfiles</td><td><span class="tag hold">SCAFFOLD</span></td><td>docker/app python+node; drop-in example commented; not in CI deploy needs</td></tr>
+          <tr><td>Compose-as-OS / Gateway in app project</td><td><span class="tag no">REJECTED</span></td><td>unchanged cloud/docker-compose.yml restart:no</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="panel">
+      <p class="label">Deploy path after this SHA is bootstrapped</p>
+      <div class="tree">push main
+  CI tests
+  ssh radon → runner deploy.sh $SHA
+    preflight_control_plane
+      <span class="ok">services/* hash mismatch → warn, continue</span>
+      <span class="bad">scripts/* or config/* mismatch → refuse (bootstrap)</span>
+    build worktree
+    stop-clean (app units; Gateway excluded)
+    git reset --hard $SHA
+    install-units          <span class="meh">still skips control-plane services</span>
+    refresh-control-plane  <span class="ok">copies unit diffs, visudo if sudoers, daemon-reload</span>
+    restart-managed
+    gates: systemctl + /health/lite + next + relay</div>
+    </section>
+
+    <section class="panel">
+      <p class="label">Host cutover commands (once, as root)</p>
+      <div class="tree">TARGET_SHA=&lt;this-commit&gt;
+sudo -u radon -H git -C /home/radon/radon fetch --prune origin
+sudo -u radon -H git -C /home/radon/radon merge --ff-only "$TARGET_SHA"
+cd /home/radon/radon
+bash cloud/scripts/bootstrap-control-plane.sh   # no Gateway restart
+# then re-run CI deploy for the same SHA
+
+# later, independent of Docker:
+# install -m 0600 /etc/radon/env
+# ln -sfn /etc/radon/env /home/radon/radon-cloud/.env</div>
+    </section>
+  </div>
+</body>
+</html>

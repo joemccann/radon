@@ -26,12 +26,20 @@ own monitoring tools can't distinguish "Java app responsive" from
 
 ## Why the current healthcheck misses it
 
-`docker/services/.../docker-compose.yml` (and the radon-cloud copy on the
-VPS) ships:
+`cloud/docker-compose.yml` (production IB Gateway compose; the only
+production container) ships a TCP-only healthcheck:
 
 ```yaml
 healthcheck:
-  test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/4001"]
+  test:
+    - CMD-SHELL
+    - >-
+      case "$${TRADING_MODE:-paper}" in
+        live) port=4001 ;;
+        paper) port=4002 ;;
+        *) exit 1 ;;
+      esac;
+      exec bash -c "exec 3<>/dev/tcp/127.0.0.1/$${port}"
   interval: 30s
   timeout: 10s
   retries: 5

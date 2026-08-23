@@ -265,12 +265,20 @@ def test_deploy_installs_units_after_promote_and_before_restart(tmp_path):
     calls = tmp_path / "calls"
     result = _run_shell(_restart_services_shell(calls), tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert calls.read_text(encoding="utf-8").splitlines() == [
-        "/fixed/root-helper stop-clean",
-        "activate",
-        "/fixed/root-helper install-units",
-        "/fixed/root-helper restart-managed",
-    ]
+    lines = calls.read_text(encoding="utf-8").splitlines()
+    assert "/fixed/root-helper stop-clean" in lines
+    assert "activate" in lines
+    assert "/fixed/root-helper install-units" in lines
+    assert "/fixed/root-helper restart-managed" in lines
+    refresh_idx = next(
+        (i for i, line in enumerate(lines) if line.endswith("refresh-control-plane")),
+        None,
+    )
+    assert refresh_idx is not None, lines
+    assert lines.index("/fixed/root-helper stop-clean") < lines.index("activate")
+    assert lines.index("activate") < lines.index("/fixed/root-helper install-units")
+    assert lines.index("/fixed/root-helper install-units") < refresh_idx
+    assert refresh_idx < lines.index("/fixed/root-helper restart-managed")
 
 
 def test_deploy_unit_install_failure_is_non_fatal(tmp_path):

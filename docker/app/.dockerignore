@@ -1,0 +1,8 @@
+.git
+data/replica.db
+**/.env
+cloud/
+docker/ib-gateway
+**/.venv
+**/node_modules
+**/.next
