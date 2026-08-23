@@ -1,0 +1,1284 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Radon Product Analytics Decision Memo</title>
+  <style>
+    :root {
+      --canvas: #0a0f14;
+      --panel: #0f1519;
+      --raised: #151c22;
+      --grid: #2e3947;
+      --grid-soft: #1e293b;
+      --text: #e2e8f0;
+      --secondary: #94a3b8;
+      --muted: #758192;
+      --signal: #05ad98;
+      --signal-strong: #0fcfb5;
+      --signal-deep: #33a090;
+      --warn: #f5a623;
+      --fault: #e85d6c;
+      --extreme: #9e80f6;
+      --font-ui: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --font-mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; }
+
+    html {
+      scroll-behavior: smooth;
+      background: var(--canvas);
+    }
+
+    body {
+      margin: 0;
+      background: var(--canvas);
+      color: var(--text);
+      font-family: var(--font-ui);
+      font-size: 15px;
+      line-height: 1.58;
+      text-rendering: optimizeLegibility;
+    }
+
+    a {
+      color: var(--signal-strong);
+      text-decoration-thickness: 1px;
+      text-underline-offset: 3px;
+    }
+
+    a:hover { color: var(--text); }
+
+    a:focus-visible,
+    summary:focus-visible {
+      outline: 2px solid var(--signal);
+      outline-offset: 3px;
+      border-radius: 2px;
+    }
+
+    .skip-link {
+      position: fixed;
+      top: 8px;
+      left: 8px;
+      z-index: 20;
+      padding: 8px 12px;
+      background: var(--signal);
+      color: var(--canvas);
+      transform: translateY(-160%);
+    }
+
+    .skip-link:focus { transform: translateY(0); }
+
+    .shell {
+      width: min(1440px, 100%);
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 232px minmax(0, 1fr);
+      border-left: 1px solid var(--grid-soft);
+      border-right: 1px solid var(--grid-soft);
+      min-height: 100vh;
+    }
+
+    .rail {
+      position: sticky;
+      top: 0;
+      align-self: start;
+      height: 100vh;
+      padding: 24px 20px;
+      border-right: 1px solid var(--grid);
+      background: var(--panel);
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+    }
+
+    .brand {
+      display: grid;
+      grid-template-columns: 28px 1fr;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .mark {
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--signal);
+      border-radius: 3px;
+      color: var(--signal-strong);
+      font: 600 12px/1 var(--font-mono);
+    }
+
+    .brand-name {
+      display: block;
+      font-weight: 650;
+      letter-spacing: .01em;
+    }
+
+    .brand-sub,
+    .eyebrow,
+    .module-id,
+    .meta,
+    .label,
+    .status,
+    .foot-label {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+
+    .brand-sub { color: var(--muted); }
+
+    .rail nav { display: grid; gap: 4px; }
+
+    .rail nav a {
+      padding: 7px 8px;
+      color: var(--secondary);
+      text-decoration: none;
+      border-left: 1px solid var(--grid-soft);
+      font-size: 12px;
+    }
+
+    .rail nav a:hover {
+      color: var(--text);
+      border-left-color: var(--signal);
+      background: var(--raised);
+    }
+
+    .rail-stamp {
+      margin-top: auto;
+      padding-top: 16px;
+      border-top: 1px solid var(--grid);
+      color: var(--muted);
+      font: 500 10px/1.7 var(--font-mono);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    main { min-width: 0; }
+
+    .hero {
+      padding: clamp(40px, 7vw, 88px) clamp(24px, 6vw, 76px) 48px;
+      border-bottom: 1px solid var(--grid);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      width: 170px;
+      height: 170px;
+      right: 40px;
+      top: 34px;
+      border: 1px solid color-mix(in srgb, var(--signal) 38%, transparent);
+      border-radius: 50%;
+      box-shadow: none;
+      opacity: .55;
+      pointer-events: none;
+    }
+
+    .hero::before {
+      content: "";
+      position: absolute;
+      right: 123px;
+      top: 17px;
+      height: 205px;
+      width: 1px;
+      background: color-mix(in srgb, var(--signal) 30%, transparent);
+      transform: rotate(31deg);
+      transform-origin: center;
+      pointer-events: none;
+    }
+
+    .eyebrow { color: var(--signal-strong); }
+
+    h1 {
+      max-width: 820px;
+      margin: 18px 0 16px;
+      font-size: clamp(38px, 6vw, 70px);
+      line-height: .98;
+      letter-spacing: -.045em;
+      font-weight: 650;
+    }
+
+    .lede {
+      max-width: 760px;
+      margin: 0;
+      color: var(--secondary);
+      font-size: clamp(16px, 2vw, 20px);
+      line-height: 1.5;
+    }
+
+    .decision-line {
+      margin-top: 32px;
+      max-width: 920px;
+      display: grid;
+      grid-template-columns: 152px 1fr;
+      border: 1px solid var(--signal-deep);
+      background: var(--panel);
+      border-radius: 4px;
+    }
+
+    .decision-line .label {
+      padding: 18px;
+      color: var(--signal-strong);
+      border-right: 1px solid var(--signal-deep);
+      display: flex;
+      align-items: center;
+    }
+
+    .decision-copy {
+      padding: 18px 20px;
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    .telemetry {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      border-bottom: 1px solid var(--grid);
+    }
+
+    .readout {
+      padding: 20px clamp(16px, 3vw, 30px);
+      border-right: 1px solid var(--grid);
+    }
+
+    .readout:last-child { border-right: 0; }
+
+    .readout .label {
+      display: block;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    .readout strong {
+      font: 600 clamp(20px, 3vw, 28px)/1.15 var(--font-mono);
+      color: var(--text);
+    }
+
+    .readout small {
+      display: block;
+      margin-top: 6px;
+      color: var(--secondary);
+      font-size: 11px;
+    }
+
+    section {
+      padding: 56px clamp(24px, 6vw, 76px);
+      border-bottom: 1px solid var(--grid);
+      scroll-margin-top: 16px;
+    }
+
+    .section-head {
+      display: grid;
+      grid-template-columns: 92px minmax(0, 680px);
+      gap: 20px;
+      align-items: start;
+      margin-bottom: 30px;
+    }
+
+    .module-id {
+      padding-top: 7px;
+      color: var(--signal);
+    }
+
+    h2 {
+      margin: 0;
+      font-size: clamp(26px, 4vw, 40px);
+      line-height: 1.08;
+      letter-spacing: -.025em;
+      font-weight: 650;
+    }
+
+    h3 {
+      margin: 0 0 12px;
+      font-size: 17px;
+      line-height: 1.25;
+      font-weight: 650;
+    }
+
+    p { margin: 0 0 16px; }
+
+    .muted { color: var(--secondary); }
+
+    .grid-2,
+    .grid-3 {
+      display: grid;
+      gap: 16px;
+    }
+
+    .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+    .panel {
+      min-width: 0;
+      padding: 18px;
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      background: var(--panel);
+    }
+
+    .panel.signal { border-color: var(--signal-deep); }
+    .panel.warn { border-color: color-mix(in srgb, var(--warn) 70%, var(--grid)); }
+    .panel.fault { border-color: color-mix(in srgb, var(--fault) 65%, var(--grid)); }
+
+    .panel .meta {
+      display: block;
+      margin-bottom: 12px;
+      color: var(--muted);
+    }
+
+    .panel.signal .meta { color: var(--signal-strong); }
+    .panel.warn .meta { color: var(--warn); }
+    .panel.fault .meta { color: var(--fault); }
+
+    ul,
+    ol {
+      margin: 0;
+      padding-left: 20px;
+    }
+
+    li + li { margin-top: 8px; }
+
+    .plain-list {
+      list-style: none;
+      padding: 0;
+    }
+
+    .plain-list li {
+      padding: 9px 0;
+      border-top: 1px solid var(--grid-soft);
+    }
+
+    .plain-list li:first-child { border-top: 0; padding-top: 0; }
+
+    .verdict-strip {
+      margin-top: 16px;
+      padding: 16px 18px;
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      background: var(--raised);
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 14px;
+      align-items: start;
+    }
+
+    .status {
+      display: inline-flex;
+      width: fit-content;
+      align-items: center;
+      min-height: 22px;
+      padding: 2px 9px;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--signal) 14%, transparent);
+      color: var(--signal-strong);
+      border: 1px solid color-mix(in srgb, var(--signal) 45%, transparent);
+      white-space: nowrap;
+    }
+
+    .status.alt {
+      color: var(--secondary);
+      border-color: var(--grid);
+      background: transparent;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      background: var(--panel);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 800px;
+      font-size: 12px;
+    }
+
+    th,
+    td {
+      padding: 12px 14px;
+      text-align: left;
+      vertical-align: top;
+      border-bottom: 1px solid var(--grid-soft);
+    }
+
+    th {
+      color: var(--secondary);
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      background: var(--raised);
+      white-space: nowrap;
+    }
+
+    tbody tr:last-child td { border-bottom: 0; }
+    tbody tr:hover td { background: var(--raised); }
+    tr.recommended td:first-child { box-shadow: inset 2px 0 0 var(--signal); }
+
+    .vendor {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      font-weight: 650;
+      font-size: 13px;
+    }
+
+    .score {
+      display: grid;
+      grid-template-columns: 34px 72px;
+      gap: 8px;
+      align-items: center;
+      font: 600 12px/1 var(--font-mono);
+    }
+
+    .bar {
+      height: 5px;
+      background: var(--grid-soft);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .bar::after {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: var(--score);
+      background: var(--signal);
+    }
+
+    .criteria {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 1px;
+      background: var(--grid);
+      border: 1px solid var(--grid);
+      margin-bottom: 16px;
+    }
+
+    .criterion {
+      padding: 13px;
+      background: var(--panel);
+    }
+
+    .criterion strong {
+      display: block;
+      color: var(--signal-strong);
+      font: 600 16px/1 var(--font-mono);
+      margin-bottom: 5px;
+    }
+
+    .criterion span { color: var(--secondary); font-size: 11px; }
+
+    .architecture {
+      display: grid;
+      grid-template-columns: minmax(150px, 1fr) 32px minmax(190px, 1.2fr) 32px minmax(170px, 1fr);
+      gap: 10px;
+      align-items: stretch;
+      margin-bottom: 16px;
+    }
+
+    .flow-node {
+      min-height: 116px;
+      padding: 16px;
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      background: var(--panel);
+    }
+
+    .flow-node.primary { border-color: var(--signal-deep); }
+
+    .flow-node strong {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+
+    .flow-node span {
+      display: block;
+      color: var(--secondary);
+      font-size: 12px;
+    }
+
+    .arrow {
+      display: grid;
+      place-items: center;
+      color: var(--signal);
+      font: 500 20px/1 var(--font-mono);
+    }
+
+    .isolation {
+      margin-top: 12px;
+      padding: 14px 16px;
+      border: 1px dashed var(--grid);
+      color: var(--secondary);
+      font-size: 12px;
+    }
+
+    code,
+    .mono {
+      font-family: var(--font-mono);
+      color: var(--signal-strong);
+      font-size: .92em;
+    }
+
+    pre {
+      margin: 14px 0 0;
+      padding: 16px;
+      overflow-x: auto;
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      background: var(--canvas);
+      color: var(--text);
+      white-space: pre-wrap;
+      font: 400 12px/1.65 var(--font-mono);
+    }
+
+    .banned {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 1px;
+      background: var(--grid);
+      border: 1px solid var(--grid);
+    }
+
+    .ban-group {
+      background: var(--panel);
+      padding: 16px;
+    }
+
+    .ban-group strong {
+      display: block;
+      color: var(--fault);
+      font: 500 10px/1.2 var(--font-mono);
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .ban-group span { color: var(--secondary); font-size: 12px; }
+
+    .timeline {
+      border-left: 1px solid var(--grid);
+      margin-left: 7px;
+    }
+
+    .phase {
+      position: relative;
+      padding: 0 0 28px 28px;
+    }
+
+    .phase:last-child { padding-bottom: 0; }
+
+    .phase::before {
+      content: "";
+      position: absolute;
+      left: -5px;
+      top: 5px;
+      width: 9px;
+      height: 9px;
+      border: 1px solid var(--signal);
+      background: var(--canvas);
+      border-radius: 50%;
+    }
+
+    .phase .meta { color: var(--signal-strong); margin-bottom: 7px; }
+
+    .phase p { color: var(--secondary); margin: 0; }
+
+    .acceptance {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px 24px;
+      margin-top: 24px;
+      padding: 18px;
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      background: var(--panel);
+    }
+
+    .check {
+      display: grid;
+      grid-template-columns: 18px 1fr;
+      gap: 9px;
+      color: var(--secondary);
+      font-size: 12px;
+    }
+
+    .check::before {
+      content: "";
+      width: 11px;
+      height: 11px;
+      margin-top: 4px;
+      border: 1px solid var(--signal-deep);
+      border-radius: 2px;
+    }
+
+    details {
+      border-top: 1px solid var(--grid-soft);
+      padding: 14px 0;
+    }
+
+    details:last-child { border-bottom: 1px solid var(--grid-soft); }
+
+    summary {
+      cursor: pointer;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    details p { color: var(--secondary); margin: 10px 0 0; }
+
+    .source-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .source {
+      padding: 14px 16px;
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      background: var(--panel);
+      font-size: 12px;
+    }
+
+    .source .foot-label {
+      display: block;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    .source a { display: inline-block; margin: 2px 8px 2px 0; }
+
+    .final-call {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 20px;
+      align-items: center;
+      padding: 24px;
+      border: 1px solid var(--signal-deep);
+      border-radius: 4px;
+      background: var(--panel);
+    }
+
+    .final-call strong {
+      display: block;
+      font-size: 20px;
+      margin-bottom: 4px;
+    }
+
+    .final-call span { color: var(--secondary); }
+
+    .final-call .status { color: var(--canvas); background: var(--signal); border-color: var(--signal); }
+
+    @media (max-width: 980px) {
+      .shell { grid-template-columns: 1fr; border: 0; }
+      .rail {
+        position: static;
+        height: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--grid);
+        padding: 16px 20px;
+        flex-direction: row;
+        align-items: center;
+      }
+      .rail nav, .rail-stamp { display: none; }
+      .telemetry { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .readout:nth-child(2) { border-right: 0; }
+      .readout:nth-child(-n+2) { border-bottom: 1px solid var(--grid); }
+      .criteria { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .architecture { grid-template-columns: 1fr; }
+      .arrow { min-height: 22px; transform: rotate(90deg); }
+      .hero::after, .hero::before { opacity: .2; }
+    }
+
+    @media (max-width: 680px) {
+      .hero { padding-top: 40px; }
+      h1 { font-size: clamp(36px, 13vw, 54px); }
+      .decision-line { grid-template-columns: 1fr; }
+      .decision-line .label { border-right: 0; border-bottom: 1px solid var(--signal-deep); }
+      .section-head { grid-template-columns: 1fr; gap: 8px; }
+      .module-id { padding-top: 0; }
+      .grid-2, .grid-3, .source-grid, .acceptance { grid-template-columns: 1fr; }
+      .criteria { grid-template-columns: 1fr 1fr; }
+      .banned { grid-template-columns: 1fr; }
+      .final-call { grid-template-columns: 1fr; }
+    }
+
+    @media print {
+      :root {
+        --canvas: #ffffff;
+        --panel: #ffffff;
+        --raised: #f1f5f9;
+        --grid: #94a3b8;
+        --grid-soft: #dbe3ea;
+        --text: #0a0f14;
+        --secondary: #344250;
+        --muted: #526170;
+        --signal: #037066;
+        --signal-strong: #037066;
+        --signal-deep: #048a7a;
+      }
+      .shell { display: block; border: 0; }
+      .rail { display: none; }
+      .hero, section { padding-left: 0; padding-right: 0; }
+      .hero::after, .hero::before { display: none; }
+      a { color: var(--signal); }
+      section, .panel, .table-wrap, .source { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#report">Skip to report</a>
+  <div class="shell">
+    <aside class="rail" aria-label="Report navigation">
+      <div class="brand">
+        <span class="mark" aria-hidden="true">R</span>
+        <span>
+          <span class="brand-name">Radon</span>
+          <span class="brand-sub">Decision memo</span>
+        </span>
+      </div>
+      <nav>
+        <a href="#decision">01 / Decision</a>
+        <a href="#selection">02 / Selection</a>
+        <a href="#architecture">03 / Architecture</a>
+        <a href="#events">04 / Events</a>
+        <a href="#dashboards">05 / Dashboards</a>
+        <a href="#rollout">06 / Rollout</a>
+        <a href="#agents">07 / Agent use</a>
+        <a href="#sources">08 / Sources</a>
+      </nav>
+      <div class="rail-stamp">
+        Research date<br>
+        2026-08-19<br><br>
+        Confidence<br>
+        High
+      </div>
+    </aside>
+
+    <main id="report">
+      <header class="hero">
+        <div class="eyebrow">Radon / Product intelligence / Decision memo</div>
+        <h1>Instrument the product, not the trader.</h1>
+        <p class="lede">Measure feature adoption, workflow completion, friction, and retention without exporting positions, orders, prompts, or screen contents.</p>
+        <div class="decision-line" aria-label="Recommendation">
+          <span class="label">Recommendation</span>
+          <div class="decision-copy">PostHog Cloud Free through a strict, same-origin event gateway.</div>
+        </div>
+      </header>
+
+      <div class="telemetry" aria-label="Decision readouts">
+        <div class="readout">
+          <span class="label">Expected launch cost</span>
+          <strong>$0 / mo</strong>
+          <small>Hard billing limit at zero</small>
+        </div>
+        <div class="readout">
+          <span class="label">Free analytics volume</span>
+          <strong>1M</strong>
+          <small>Events per month</small>
+        </div>
+        <div class="readout">
+          <span class="label">Free retention</span>
+          <strong>1 year</strong>
+          <small>One project, unlimited members</small>
+        </div>
+        <div class="readout">
+          <span class="label">Agent interface</span>
+          <strong>MCP + SQL</strong>
+          <small>Hosted MCP, HogQL, full API</small>
+        </div>
+      </div>
+
+      <section id="decision">
+        <div class="section-head">
+          <div class="module-id">Module 01</div>
+          <h2>Use PostHog Cloud. Do not deploy a generic tracking script.</h2>
+        </div>
+
+        <div class="grid-2">
+          <article class="panel signal">
+            <span class="meta">Use</span>
+            <h3>Curated product events</h3>
+            <ul>
+              <li>PostHog Cloud Free in the US region.</li>
+              <li>One project with <code>user_mode=operator|demo</code>; development and tests disabled.</li>
+              <li>Trends, funnels, retention, paths, and cohorts from a small typed event vocabulary.</li>
+              <li>PostHog MCP for read-heavy analysis from Codex and other trusted agents.</li>
+            </ul>
+          </article>
+
+          <article class="panel fault">
+            <span class="meta">Do not use</span>
+            <h3>Ambient surveillance</h3>
+            <ul>
+              <li>No autocapture, automatic full-URL capture, heatmaps, or replay in the operator app.</li>
+              <li>No client-supplied user identity or arbitrary event properties.</li>
+              <li>No Google Analytics as a second tracker. It adds noise, consent surface, and another taxonomy.</li>
+              <li>No self-hosted analytics workload on the production trading VPS.</li>
+            </ul>
+          </article>
+        </div>
+
+        <div class="verdict-strip">
+          <span class="status">High confidence</span>
+          <div><strong>Why this wins:</strong> PostHog is the best combination of real product analysis, zero-dollar launch capacity, published spend controls, a first-party Codex-compatible MCP, HogQL, broad APIs, and a credible export/self-host escape route.<sup><a href="#src-posthog" aria-label="Source: PostHog">1</a></sup></div>
+        </div>
+      </section>
+
+      <section id="selection">
+        <div class="section-head">
+          <div class="module-id">Module 02</div>
+          <h2>Seven products screened against Radon's actual operating constraints.</h2>
+        </div>
+
+        <div class="criteria" aria-label="Scoring weights">
+          <div class="criterion"><strong>30%</strong><span>Product analysis depth</span></div>
+          <div class="criterion"><strong>25%</strong><span>Agent-native access</span></div>
+          <div class="criterion"><strong>20%</strong><span>Sensitive-data control</span></div>
+          <div class="criterion"><strong>15%</strong><span>Free capacity and spend control</span></div>
+          <div class="criterion"><strong>10%</strong><span>Radon integration and operations</span></div>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Rank</th>
+                <th scope="col">Product</th>
+                <th scope="col">Score</th>
+                <th scope="col">Free / entry economics</th>
+                <th scope="col">Agent surface</th>
+                <th scope="col">Decision</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="recommended">
+                <td class="mono">01</td>
+                <td><span class="vendor">PostHog <span class="status">Select</span></span></td>
+                <td><span class="score">95 <span class="bar" style="--score:95%"></span></span></td>
+                <td>1M events, 5K replays, one-year retention, and almost all product features. No card. Per-product billing limits.<sup><a href="#src-posthog">1</a></sup></td>
+                <td>Free hosted MCP explicitly supports Codex; HogQL and broad API access.<sup><a href="#src-posthog-mcp">2</a></sup></td>
+                <td>Best total fit. Keep replay off and use personless pseudonymous events at launch.</td>
+              </tr>
+              <tr>
+                <td class="mono">02</td>
+                <td><span class="vendor">Amplitude <span class="status alt">Runner-up</span></span></td>
+                <td><span class="score">90 <span class="bar" style="--score:90%"></span></span></td>
+                <td>2M events and 10K replays free. Plus starts at $0, but marginal pricing beyond the free volume is not published plainly.<sup><a href="#src-amplitude">6</a></sup></td>
+                <td>MCP is available on every plan and can query analytics, replay, flags, and experiments.<sup><a href="#src-amplitude-mcp">7</a></sup></td>
+                <td>Choose if 2M free events or Amplitude's analyst experience matters more than transparent scale pricing and open-source optionality.</td>
+              </tr>
+              <tr>
+                <td class="mono">03</td>
+                <td><span class="vendor">Mixpanel</span></td>
+                <td><span class="score">84 <span class="bar" style="--score:84%"></span></span></td>
+                <td>1M events and 10K replays free, but only five saved reports per user. Growth charges $0.28 per additional 1K events at entry volume.<sup><a href="#src-mixpanel">8</a></sup></td>
+                <td>Strong MCP plus a programmatic Headless Python surface.</td>
+                <td>Capable, but the free analysis surface is needlessly restrictive and the first paid event tier is expensive.</td>
+              </tr>
+              <tr>
+                <td class="mono">04</td>
+                <td><span class="vendor">OpenPanel <span class="status alt">Privacy fallback</span></span></td>
+                <td><span class="score">83 <span class="bar" style="--score:83%"></span></span></td>
+                <td>No permanent cloud free tier. $2.50 for 5K events, $20 for 100K; free self-hosting.<sup><a href="#src-openpanel">10</a></sup></td>
+                <td>Excellent read-scoped MCP with funnels, retention, flows, sessions, and raw event queries.</td>
+                <td>Best fallback if a genuinely read-only agent credential matters more than free volume or native feature flags.</td>
+              </tr>
+              <tr>
+                <td class="mono">05</td>
+                <td><span class="vendor">Umami</span></td>
+                <td><span class="score">69 <span class="bar" style="--score:69%"></span></span></td>
+                <td>100K cloud events and six-month retention free; each stored property consumes usage. API requires Pro.<sup><a href="#src-umami">11</a></sup></td>
+                <td>REST/database access when paid or self-hosted; no official MCP found.</td>
+                <td>Best lightweight self-host fallback, but agent access and experimentation are weaker.</td>
+              </tr>
+              <tr>
+                <td class="mono">06</td>
+                <td><span class="vendor">Google Analytics 4</span></td>
+                <td><span class="score">58 <span class="bar" style="--score:58%"></span></span></td>
+                <td>Free service with Data API and BigQuery export; BigQuery has separate usage economics.<sup><a href="#src-ga4">13</a></sup></td>
+                <td>No first-party analytics MCP identified. Agents require API or BigQuery plumbing.</td>
+                <td>Optimized for traffic and the Google ecosystem, not a precise operator product loop.</td>
+              </tr>
+              <tr>
+                <td class="mono">07</td>
+                <td><span class="vendor">Vercel Web Analytics</span></td>
+                <td><span class="score">45 <span class="bar" style="--score:45%"></span></span></td>
+                <td>Hobby has 50K events, one-month history, and no custom events. Custom events require Pro.<sup><a href="#src-vercel">12</a></sup></td>
+                <td>Vercel MCP manages projects and deployments; it is not a full product-analysis surface.</td>
+                <td>Keep it on the marketing site. It cannot answer feature retention or workflow-dropoff questions.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="muted" style="margin-top:12px">Scores are a Radon-specific weighted assessment, not vendor claims. Prices and plan limits were checked against official sources on 2026-08-19.</p>
+      </section>
+
+      <section id="architecture">
+        <div class="section-head">
+          <div class="module-id">Module 03</div>
+          <h2>Put a privacy choke point between the application and the vendor.</h2>
+        </div>
+
+        <div class="architecture" role="img" aria-label="Radon emits typed events to a same-origin gateway, which pseudonymizes and forwards approved fields to PostHog. Agents read PostHog through MCP.">
+          <div class="flow-node">
+            <strong>Radon surfaces</strong>
+            <span>Normalized feature views from the client. Authoritative completion and failure events from server chokepoints.</span>
+          </div>
+          <div class="arrow" aria-hidden="true">→</div>
+          <div class="flow-node primary">
+            <strong><code>POST /api/product-events</code></strong>
+            <span>Clerk-authenticated. Fixed event schema. HMAC pseudonym. Low-cardinality enums. Non-blocking delivery.</span>
+          </div>
+          <div class="arrow" aria-hidden="true">→</div>
+          <div class="flow-node">
+            <strong>PostHog Cloud</strong>
+            <span>Trends, funnels, retention, paths, saved dashboards, MCP, HogQL, API, and exports.</span>
+          </div>
+        </div>
+
+        <div class="isolation"><strong class="mono">Isolation boundary:</strong> Turso journal, portfolio snapshots, order events, raw assistant telemetry, broker errors, and operational logs remain first-party. They are not joined to or forwarded into PostHog.</div>
+
+        <div class="grid-3" style="margin-top:16px">
+          <article class="panel">
+            <span class="meta">Identity</span>
+            <h3>Pseudonymous and personless</h3>
+            <p class="muted">Derive a stable HMAC from Clerk <code>userId</code> on the server. Never send the raw ID, email, username, or avatar. Do not create PostHog person profiles at launch.</p>
+          </article>
+          <article class="panel">
+            <span class="meta">Reliability</span>
+            <h3>Analytics fails open</h3>
+            <p class="muted">A tracking timeout or vendor outage must never slow navigation, alter an API status, block an order, or mark a workflow failed.</p>
+          </article>
+          <article class="panel">
+            <span class="meta">Topology</span>
+            <h3>Deployment-neutral</h3>
+            <p class="muted">The same Next.js route works on the Hetzner operator app and Vercel demo. It avoids a remote CDN script and fits the current CSP.<sup><a href="#src-repo">14</a></sup></p>
+          </article>
+        </div>
+      </section>
+
+      <section id="events">
+        <div class="section-head">
+          <div class="module-id">Module 04</div>
+          <h2>Start with eight events. More data would make the system worse.</h2>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Event</th>
+                <th scope="col">Authoritative trigger</th>
+                <th scope="col">Allowed properties</th>
+                <th scope="col">Question answered</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>feature_viewed</code></td>
+                <td>Client route change after route normalization</td>
+                <td><code>feature_id</code>, <code>entry_surface</code></td>
+                <td>Which modules are reached, by whom, and how often?</td>
+              </tr>
+              <tr>
+                <td><code>workflow_started</code></td>
+                <td>Explicit action, not component mount</td>
+                <td><code>workflow_id</code>, <code>feature_id</code></td>
+                <td>What are users trying to accomplish?</td>
+              </tr>
+              <tr>
+                <td><code>workflow_completed</code></td>
+                <td>Server success response or verified client completion</td>
+                <td><code>workflow_id</code>, <code>duration_bucket</code>, <code>result_count_bucket</code></td>
+                <td>Which features deliver useful outcomes?</td>
+              </tr>
+              <tr>
+                <td><code>workflow_failed</code></td>
+                <td>Sanitized server failure classification</td>
+                <td><code>workflow_id</code>, <code>failure_class</code>, <code>duration_bucket</code></td>
+                <td>Where does the experience break?</td>
+              </tr>
+              <tr>
+                <td><code>empty_state_seen</code></td>
+                <td>Actionable empty or degraded state rendered</td>
+                <td><code>feature_id</code>, <code>state_class</code>, <code>freshness_class</code></td>
+                <td>Which modules look unused because data is unavailable?</td>
+              </tr>
+              <tr>
+                <td><code>recovery_action_selected</code></td>
+                <td>User chooses retry, refresh, setup, or alternate path</td>
+                <td><code>feature_id</code>, <code>action_id</code></td>
+                <td>Do recovery controls work and get discovered?</td>
+              </tr>
+              <tr>
+                <td><code>assistant_turn_completed</code></td>
+                <td>Assistant route after completion</td>
+                <td><code>surface</code>, <code>outcome</code>, <code>latency_bucket</code>, <code>tool_count_bucket</code></td>
+                <td>Is the assistant useful, fast, and reliable without exporting prompts?</td>
+              </tr>
+              <tr>
+                <td><code>execution_flow_advanced</code></td>
+                <td>Server-side order workflow state transition</td>
+                <td><code>stage</code>, <code>outcome</code>, <code>failure_class</code></td>
+                <td>Where does the risk-review and execution flow lose users?</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p class="muted" style="margin-top:12px">Global fields are server-owned: <code>event_version</code>, <code>user_mode</code>, <code>deployment</code>, <code>release_sha</code>, and pseudonymous <code>distinct_id</code>. Workflow IDs are controlled enums such as <code>scan</code>, <code>watchlist_add</code>, <code>alert_create</code>, <code>workflow_run</code>, <code>order_preview</code>, and <code>assistant_turn</code>.</p>
+
+        <div class="banned" style="margin-top:24px">
+          <div class="ban-group">
+            <strong>Trading data: prohibited</strong>
+            <span>Ticker, strike, expiry, side, quantity, price, premium, P&amp;L, NAV, margin, positions, order or account IDs, alert thresholds.</span>
+          </div>
+          <div class="ban-group">
+            <strong>Identity and content: prohibited</strong>
+            <span>Raw Clerk ID, email, username, watchlist contents, bookmarks, assistant prompts or answers, workflow graphs, broker messages.</span>
+          </div>
+          <div class="ban-group">
+            <strong>Ambient capture: prohibited</strong>
+            <span>Full URLs, query strings, DOM text, screenshots, console logs, network bodies, replay, free-form errors, arbitrary client properties.</span>
+          </div>
+        </div>
+      </section>
+
+      <section id="dashboards">
+        <div class="section-head">
+          <div class="module-id">Module 05</div>
+          <h2>Build dashboards around decisions, not vanity counts.</h2>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Saved view</th>
+                <th scope="col">Definition</th>
+                <th scope="col">Initial action rule</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Feature adoption</strong></td>
+                <td>Unique users per <code>feature_id</code> divided by weekly active users, with operator and demo split.</td>
+                <td>Investigate features below 5% of WAU for six weeks before investing further.</td>
+              </tr>
+              <tr>
+                <td><strong>Useful workflows</strong></td>
+                <td><code>workflow_completed / workflow_started</code>, by workflow and release.</td>
+                <td>Fix any material workflow below 70% completion or down 10 percentage points from its four-week baseline.</td>
+              </tr>
+              <tr>
+                <td><strong>Friction register</strong></td>
+                <td>Failures, empty states, recovery attempts, and P50/P90 duration by feature.</td>
+                <td>Work the highest-volume recoverable failure first. Do not rank by anecdote.</td>
+              </tr>
+              <tr>
+                <td><strong>Time to first value</strong></td>
+                <td>First authenticated session to first completed high-value workflow.</td>
+                <td>If P90 exceeds two sessions, repair onboarding, empty-state guidance, or navigation.</td>
+              </tr>
+              <tr>
+                <td><strong>Retention by first value</strong></td>
+                <td>Week-1 and week-4 return rate grouped by the user's first completed workflow.</td>
+                <td>Promote entry paths associated with persistent retention lift; treat correlation as directional until tested.</td>
+              </tr>
+              <tr>
+                <td><strong>Release impact</strong></td>
+                <td>Completion, failure, and duration before and after <code>release_sha</code>.</td>
+                <td>Reopen a shipped change when completion falls and the effect survives normal traffic variation.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="panel warn" style="margin-top:16px">
+          <span class="meta">Sample discipline</span>
+          <p style="margin:0">If a cohort has fewer than 20 users, label the result directional and inspect event sequences or conduct interviews. Do not manufacture statistical certainty from a small demo population. Recalibrate every threshold after 30 days of real baseline data.</p>
+        </div>
+      </section>
+
+      <section id="rollout">
+        <div class="section-head">
+          <div class="module-id">Module 06</div>
+          <h2>A four-stage rollout that produces useful evidence in the first week.</h2>
+        </div>
+
+        <div class="timeline">
+          <article class="phase">
+            <div class="meta">Stage 0 / Before code</div>
+            <h3>Set the data contract</h3>
+            <p>Create one PostHog US Cloud Free project, set the billing limit to $0, disable session replay and autocapture, leave AI data processing off initially, and publish accurate app/demo privacy notices before collection begins.</p>
+          </article>
+          <article class="phase">
+            <div class="meta">Stage 1 / Foundation</div>
+            <h3>Build the typed gateway</h3>
+            <p>Add a same-origin authenticated endpoint, server-owned HMAC identity, event/property allowlists, route normalization, timeout isolation, production-only gating, and regression tests for every prohibited field class.</p>
+          </article>
+          <article class="phase">
+            <div class="meta">Stage 2 / First signal</div>
+            <h3>Instrument reach and outcomes</h3>
+            <p>Ship <code>feature_viewed</code>, workflow start/completion/failure, empty states, recovery actions, assistant outcomes, and execution stages. Record server-side success only at authoritative chokepoints.</p>
+          </article>
+          <article class="phase">
+            <div class="meta">Stage 3 / Day 30</div>
+            <h3>Close the product loop</h3>
+            <p>Connect the MCP to a trusted local agent, create the six saved views above, run the weekly decision prompt, delete noisy events, revise thresholds, and decide whether a demo-only fully masked replay pilot is justified.</p>
+          </article>
+        </div>
+
+        <div class="acceptance" aria-label="Implementation acceptance criteria">
+          <div class="check">A captured-event sample contains zero prohibited values or keys.</div>
+          <div class="check">Development, test, and unauthenticated traffic emit zero events.</div>
+          <div class="check">Vendor failure changes no product response, latency budget, or order state.</div>
+          <div class="check">Dynamic ticker routes resolve only to controlled feature IDs.</div>
+          <div class="check">Operator and demo views are separated in every saved report.</div>
+          <div class="check">An agent can answer the six product questions without person-profile access.</div>
+        </div>
+      </section>
+
+      <section id="agents">
+        <div class="section-head">
+          <div class="module-id">Module 07</div>
+          <h2>Make the agent an analyst, not an unsupervised product manager.</h2>
+        </div>
+
+        <div class="grid-2">
+          <article class="panel signal">
+            <span class="meta">Weekly analysis prompt</span>
+            <h3>Copy this into Codex through PostHog MCP</h3>
+            <pre>Analyze Radon product usage for the last 28 days.
+
+Return: feature -> reach -> workflow completion -> friction -> recommended action.
+
+Compare operator and demo separately. Use only saved views and allowlisted fields. Label cohorts under 20 users as directional. Identify features below 5% WAU for six weeks, workflows below 70% completion, and material release regressions.
+
+Do not request person profiles or raw events. Do not create or modify dashboards, flags, experiments, surveys, or cohorts. Cite every claim with the query and sample size.</pre>
+          </article>
+
+          <article class="panel">
+            <span class="meta">Agent policy</span>
+            <h3>Read-heavy by default</h3>
+            <ul class="plain-list">
+              <li><strong>Allowed:</strong> query saved insights, execute bounded HogQL, compare cohorts, summarize release impact.</li>
+              <li><strong>Approval required:</strong> create or edit dashboards, cohorts, flags, experiments, or surveys.</li>
+              <li><strong>Forbidden:</strong> person-profile lookup, session replay, raw event export, joining analytics with trading records.</li>
+              <li><strong>Evidence floor:</strong> query, date range, cohort size, and uncertainty accompany every recommendation.</li>
+            </ul>
+          </article>
+        </div>
+
+        <div class="verdict-strip">
+          <span class="status alt">Fallback rule</span>
+          <div>Move to Amplitude only if the 2M free-event ceiling or its analyst interface becomes decisive. Move to OpenPanel if a vendor-enforced read-only MCP credential becomes mandatory. Self-host only under a real data-residency requirement, and place it on separate infrastructure.</div>
+        </div>
+      </section>
+
+      <section id="sources">
+        <div class="section-head">
+          <div class="module-id">Module 08</div>
+          <h2>Primary sources and repository evidence.</h2>
+        </div>
+
+        <div class="source-grid">
+          <div class="source" id="src-posthog">
+            <span class="foot-label">01 / PostHog economics and capabilities</span>
+            <a href="https://posthog.com/pricing">Pricing</a>
+            <a href="https://posthog.com/docs/product-analytics">Product analytics</a>
+            <a href="https://posthog.com/docs/api">API</a>
+            <a href="https://posthog.com/docs/self-host">Self-hosting</a>
+          </div>
+          <div class="source" id="src-posthog-mcp">
+            <span class="foot-label">02-05 / PostHog integration and control</span>
+            <a href="https://posthog.com/docs/model-context-protocol">MCP</a>
+            <a href="https://posthog.com/docs/libraries/next-js">Next.js</a>
+            <a href="https://posthog.com/docs/session-replay/privacy">Replay privacy</a>
+            <a href="https://posthog.com/docs/privacy">Privacy</a>
+          </div>
+          <div class="source" id="src-amplitude">
+            <span class="foot-label">06 / Amplitude</span>
+            <a href="https://amplitude.com/pricing">Pricing</a>
+            <a href="https://amplitude.com/docs/apis/analytics/export">Raw export API</a>
+            <a href="https://amplitude.com/security-and-privacy">Security and privacy</a>
+          </div>
+          <div class="source" id="src-amplitude-mcp">
+            <span class="foot-label">07 / Amplitude agent access</span>
+            <a href="https://amplitude.com/mcp-server">MCP overview</a>
+            <a href="https://amplitude.com/releases/even-more-external-mcp-tools-agent-skills-and-the-mcp-app">MCP tools and skills</a>
+          </div>
+          <div class="source" id="src-mixpanel">
+            <span class="foot-label">08-09 / Mixpanel</span>
+            <a href="https://mixpanel.com/pricing">Pricing</a>
+            <a href="https://docs.mixpanel.com/docs/mcp">MCP</a>
+            <a href="https://mixpanel.com/blog/mixpanel-headless/">Headless SDK</a>
+            <a href="https://docs.mixpanel.com/docs/export-methods">Exports</a>
+          </div>
+          <div class="source" id="src-openpanel">
+            <span class="foot-label">10 / OpenPanel</span>
+            <a href="https://openpanel.dev/pricing">Pricing</a>
+            <a href="https://openpanel.dev/docs/mcp">Read-scoped MCP</a>
+            <a href="https://openpanel.dev/docs/api/export">Raw export</a>
+            <a href="https://openpanel.dev/docs/sdks/nextjs">Next.js SDK</a>
+          </div>
+          <div class="source" id="src-umami">
+            <span class="foot-label">11 / Umami</span>
+            <a href="https://umami.is/pricing">Pricing</a>
+            <a href="https://docs.umami.is/docs/about">Features</a>
+            <a href="https://docs.umami.is/docs/cloud/api-key">Cloud API</a>
+            <a href="https://docs.umami.is/docs/install">Self-hosting</a>
+          </div>
+          <div class="source" id="src-vercel">
+            <span class="foot-label">12 / Vercel Web Analytics</span>
+            <a href="https://vercel.com/docs/analytics/limits-and-pricing">Limits and pricing</a>
+            <a href="https://vercel.com/docs/analytics/custom-events">Custom events</a>
+            <a href="https://vercel.com/docs/analytics/privacy-policy">Privacy model</a>
+          </div>
+          <div class="source" id="src-ga4">
+            <span class="foot-label">13 / Google Analytics 4</span>
+            <a href="https://developers.google.com/analytics/devguides/reporting/data/v1">Data API</a>
+            <a href="https://support.google.com/analytics/answer/9358801">BigQuery export</a>
+          </div>
+          <div class="source" id="src-repo">
+            <span class="foot-label">14 / Radon repository</span>
+            <a href="../web/package.json">Web dependencies</a>
+            <a href="../web/app/layout.tsx">App layout</a>
+            <a href="../site/app/layout.tsx">Marketing analytics mount</a>
+            <a href="../web/middleware.ts">CSP and authentication perimeter</a>
+          </div>
+        </div>
+
+        <div class="panel" style="margin-top:16px">
+          <span class="meta">Research scope</span>
+          <p style="margin:0">Official vendor documentation and pricing pages were checked on 2026-08-19. The comparison favors Radon's authenticated, financially sensitive Next.js application, not a public content site. Vendor pricing and capabilities can change; recheck the linked pages before purchase or rollout.</p>
+        </div>
+      </section>
+
+      <section>
+        <div class="final-call">
+          <div>
+            <strong>Ship the gateway and eight events. Leave replay off.</strong>
+            <span>That is enough to identify adoption, abandonment, reliability friction, and underused product surface without creating a second sensitive-data system.</span>
+          </div>
+          <span class="status">Proceed</span>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
