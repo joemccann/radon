@@ -391,23 +391,33 @@ class _PoolContext:
     async def __aenter__(self) -> IBClient:
         await self._pool._locks[self._role].acquire()
 
-        if self._pool._lifecycle_transition:
-            self._pool._locks[self._role].release()
-            raise ConnectionError("IB pool lifecycle transition in progress")
+        # R-148: `release()` used to appear only on the three explicit error
+        # branches. A CancelledError at either await below — request-task
+        # cancellation, an enclosing wait_for, shutdown — propagated with the
+        # lock STILL HELD, and asyncio.Lock has no owner and no timeout, so
+        # every later acquire(role) blocked forever. On `orders` and `sync`
+        # that is the money path, and no watchdog covers it because
+        # `is_connected` stays true. Only a radon-api restart cleared it.
+        acquired = True
+        try:
+            if self._pool._lifecycle_transition:
+                raise ConnectionError("IB pool lifecycle transition in progress")
 
-        # Auto-reconnect if connection dropped or liveness probe failed
-        if not await self._pool._is_live(self._role):
-            reconnected = await self._pool._reconnect(self._role)
-            if not reconnected:
+            # Auto-reconnect if connection dropped or liveness probe failed
+            if not await self._pool._is_live(self._role):
+                reconnected = await self._pool._reconnect(self._role)
+                if not reconnected:
+                    raise ConnectionError(f"IB pool: {self._role} is not connected")
+
+            client = self._pool.get(self._role)
+            if client is None:
+                raise ConnectionError(f"IB pool: {self._role} has no client")
+
+            acquired = False  # handed to the caller; __aexit__ owns it now
+            return client
+        finally:
+            if acquired:
                 self._pool._locks[self._role].release()
-                raise ConnectionError(f"IB pool: {self._role} is not connected")
-
-        client = self._pool.get(self._role)
-        if client is None:
-            self._pool._locks[self._role].release()
-            raise ConnectionError(f"IB pool: {self._role} has no client")
-
-        return client
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         self._pool._locks[self._role].release()

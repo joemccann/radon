@@ -284,6 +284,56 @@ def check_order_limits(params: dict) -> Optional[dict[str, Any]]:
     return None
 
 
+def check_modify_limits(
+    working_order: Optional[dict],
+    *,
+    new_quantity: Any = None,
+    new_price: Any = None,
+    action: Optional[str] = None,
+) -> Optional[dict[str, Any]]:
+    """Full limit set for a modify, measured on the WORKING order's shape.
+
+    R-145: `/orders/modify` only ever called `check_quantity_limit`, which
+    hardcodes `{"type": "option", "limitPrice": 0}` — so `order_notional()`
+    returned None (premium is 0) and `combo_max_loss()` returned None (type is
+    not "combo"), and both branches were skipped. `newPrice` was bounded only
+    by `> 0`. Modifying a working 1-lot BAG with a short 195 put leg to 500
+    lots was accepted with its assignment exposure never computed. REL-005's
+    contract named modify as a chokepoint for max qty AND max notional.
+
+    An unreadable working order is NOT a bypass: the contract-quantity cap
+    still applies, exactly as before.
+    """
+    if not isinstance(working_order, dict):
+        return check_quantity_limit(new_quantity) if new_quantity is not None else None
+
+    sec_type = str(working_order.get("secType") or "").upper()
+    legs = working_order.get("legs")
+    if sec_type == "BAG" or isinstance(legs, list) and len(legs) >= 2:
+        order_type = "combo"
+    elif sec_type == "STK":
+        order_type = "stock"
+    else:
+        order_type = "option"
+
+    quantity = new_quantity
+    if quantity is None:
+        quantity = working_order.get("quantity") or working_order.get("totalQuantity")
+    price = new_price
+    if price is None:
+        price = working_order.get("limitPrice") or working_order.get("lmtPrice") or 0
+
+    params: dict[str, Any] = {
+        "type": order_type,
+        "quantity": quantity,
+        "limitPrice": price,
+        "action": action or working_order.get("action"),
+    }
+    if order_type == "combo" and isinstance(legs, list):
+        params["legs"] = legs
+    return check_order_limits(params)
+
+
 def check_quantity_limit(quantity: Any) -> Optional[dict[str, Any]]:
     """Quantity-only bound (modify path: no type/price context).
 

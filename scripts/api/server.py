@@ -2744,6 +2744,25 @@ async def orders_cancel(request: Request):
     return result.data
 
 
+async def _find_working_order(order_id: Any, perm_id: Any) -> Optional[dict]:
+    """The working order's payload from the Turso snapshot, or None.
+
+    Best-effort by construction (R-145): a just-placed order or a Turso blip
+    must degrade to the old contract-quantity cap, never block a modify.
+    """
+    try:
+        snapshot = await _read_orders_snapshot_from_db()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("orders/modify: could not read the working order: %s", exc)
+        return None
+    for payload in snapshot.get("open_orders", []):
+        if perm_id and payload.get("permId") == perm_id:
+            return payload
+        if order_id and payload.get("orderId") == order_id:
+            return payload
+    return None
+
+
 @app.post("/orders/modify")
 async def orders_modify(request: Request):
     """Modify an open order via subprocess.
@@ -2768,11 +2787,20 @@ async def orders_modify(request: Request):
     new_quantity = body.get("newQuantity")
     outside_rth = body.get("outsideRth")
 
-    # REL-005: a working 1-lot must not be modifiable into a 10,000-lot.
-    if new_quantity is not None:
-        from order_limits import check_quantity_limit
+    # REL-005 / R-145: a working 1-lot must not be modifiable into a
+    # 10,000-lot, AND the resized order must be measured on the working
+    # order's real shape. `check_quantity_limit` hardcoded
+    # `{"type": "option", "limitPrice": 0}`, so the notional and combo
+    # max-loss branches were both skipped and `newPrice` was bounded only by
+    # `> 0`. The snapshot read is best-effort: an unreadable working order
+    # falls back to the contract-quantity cap, never to no cap.
+    if new_quantity is not None or new_price is not None:
+        from order_limits import check_modify_limits
 
-        violation = check_quantity_limit(new_quantity)
+        working_order = await _find_working_order(order_id, perm_id)
+        violation = check_modify_limits(
+            working_order, new_quantity=new_quantity, new_price=new_price
+        )
         if violation:
             raise HTTPException(status_code=422, detail=violation)
 
