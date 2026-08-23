@@ -26,10 +26,14 @@ export type SnapshotStaleness = {
 export function useSnapshotStaleness(lastSync: string | null): SnapshotStaleness {
   const [tick, setTick] = useState(0);
 
+  // R-139: this fired unconditionally, and `tick` is in the returned memo,
+  // so WorkspaceShell and every non-memoised child re-rendered every 30s in
+  // every open tab even with nothing to age.
   useEffect(() => {
+    if (!lastSync) return;
     const id = setInterval(() => setTick((t) => t + 1), STALENESS_TICK_MS);
     return () => clearInterval(id);
-  }, []);
+  }, [lastSync]);
 
   return useMemo(() => {
     if (!lastSync) return { isStale: false, staleAgeMinutes: null, tick };

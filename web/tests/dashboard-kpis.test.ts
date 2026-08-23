@@ -129,10 +129,23 @@ describe("deriveKpis Today P&L on a non-trading day", () => {
     expect(cell?.display).toBe("—");
   });
 
-  it("keeps IB daily_pnl on a trading day", () => {
+  it("keeps IB daily_pnl on a trading day the snapshot was taken in", () => {
+    // REL-048 / R-107: "a trading day" is no longer enough — the snapshot
+    // has to have been CAPTURED during it. The fixture's own last_sync is
+    // 2026-08-07, so the date is now part of this assertion.
+    const friday = new Date("2026-08-21T18:30:00Z");
+    const portfolio = {
+      ...portfolioWith({ daily_pnl: -5_339.04 }),
+      last_sync: "2026-08-21T18:29:00Z",
+    };
+    const cell = deriveKpis(portfolio, 0, friday).find((c) => c.key === "todayPnl");
+    expect(cell?.value).toBeCloseTo(-5_339.04);
+  });
+
+  it("blanks a daily_pnl captured on an EARLIER trading day", () => {
     const friday = new Date("2026-08-21T18:30:00Z");
     const cell = deriveKpis(portfolioWith({ daily_pnl: -5_339.04 }), 0, friday)
       .find((c) => c.key === "todayPnl");
-    expect(cell?.value).toBeCloseTo(-5_339.04);
+    expect(cell?.value).toBeNull();
   });
 });

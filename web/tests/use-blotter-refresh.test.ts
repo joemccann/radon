@@ -63,8 +63,18 @@ describe("useBlotter", () => {
       expect(result.current.data?.summary.closed_trades).toBe(2);
     });
 
-    expect(fetchMock).toHaveBeenCalledWith("/api/blotter", { method: "GET", cache: "no-store" });
-    expect(fetchMock).toHaveBeenCalledWith("/api/blotter", { method: "POST", cache: "no-store" });
+    // REL-048 / R-106: every request carries an AbortSignal.timeout now — a
+    // wedged endpoint used to accumulate one hung request per interval tick
+    // until the browser's 6-connection limit blocked the whole tab.
+    for (const method of ["GET", "POST"]) {
+      const call = fetchMock.mock.calls.find(
+        ([url, init]) => url === "/api/blotter" && (init as RequestInit)?.method === method,
+      );
+      expect(call, `${method} /api/blotter was never issued`).toBeTruthy();
+      const init = call![1] as RequestInit;
+      expect(init.cache).toBe("no-store");
+      expect(init.signal).toBeInstanceOf(AbortSignal);
+    }
   });
 
   it("keeps cached history visible but surfaces the sync error when live refresh fails", async () => {

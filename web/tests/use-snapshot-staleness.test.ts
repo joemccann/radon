@@ -52,11 +52,24 @@ describe("useSnapshotStaleness", () => {
   });
 
   it("exposes a tick that advances with each re-evaluation", () => {
-    const { result } = renderHook(() => useSnapshotStaleness(null));
+    const { result } = renderHook(() =>
+      useSnapshotStaleness(new Date(Date.now() - 5 * 60_000).toISOString()),
+    );
     const initialTick = result.current.tick;
     act(() => {
       vi.advanceTimersByTime(61_000);
     });
     expect(result.current.tick).toBeGreaterThan(initialTick);
+  });
+
+  it("does not tick when there is no snapshot to age", () => {
+    // REL-048 / R-139: `tick` is in the returned memo, so an unconditional
+    // interval re-rendered WorkspaceShell and every non-memoised child every
+    // 30s in every open tab, with nothing to recompute.
+    const { result } = renderHook(() => useSnapshotStaleness(null));
+    act(() => {
+      vi.advanceTimersByTime(5 * 60_000);
+    });
+    expect(result.current.tick).toBe(0);
   });
 });
