@@ -12,7 +12,7 @@ through ``app_preferences``, which resolves DB row > env var > code default
 and discards any stored value outside the declared hard band:
   RADON_MAX_ORDER_QTY        max contracts/shares per order   (default 500)
   RADON_MAX_ORDER_NOTIONAL   max $ per order (qty×price×mult) (default 250_000)
-  Combo assignment/width is a separate loss cap (_MAX_COMBO_LOSS_DOLLARS).
+  RADON_MAX_COMBO_LOSS_DOLLARS combo worst-case loss cap     (default 10_000_000)
   RADON_MAX_ORDERS_PER_MIN   max accepted placements per min  (default 10)
   RADON_WORKFLOW_MAX_ORDERS  max orders per workflow run      (default 3)
 
@@ -34,11 +34,6 @@ except ImportError:  # imported as scripts.order_limits from the repo root
 _OPTION_MULTIPLIER = 100
 _MAX_COMBO_LEGS = 8
 _MAX_COMBO_RATIO = 100
-# Assignment/width fat-finger for combos. Distinct from RADON_MAX_ORDER_NOTIONAL,
-# which is qty × limit × multiplier (the number the order ticket labels
-# "notional"). A 100-lot $200 short put is $2M of assignment and $4.7k of
-# debit; mixing those dollars refused a live risk-reversal (2026-08-21).
-_MAX_COMBO_LOSS_DOLLARS = 10_000_000.0
 
 
 def max_order_qty() -> int:
@@ -54,6 +49,15 @@ def max_stock_order_qty() -> int:
 
 def max_order_notional() -> float:
     return app_preferences.get_float("RADON_MAX_ORDER_NOTIONAL")
+
+
+def max_combo_loss_dollars() -> float:
+    """Assignment/width fat-finger for combos. Distinct from
+    RADON_MAX_ORDER_NOTIONAL, which is qty × limit × multiplier (the number
+    the order ticket labels "notional"). A 100-lot $200 short put is $2M of
+    assignment and $4.7k of debit; mixing those dollars refused a live
+    risk-reversal (2026-08-21)."""
+    return app_preferences.get_float("RADON_MAX_COMBO_LOSS_DOLLARS")
 
 
 def max_orders_per_min() -> int:
@@ -234,12 +238,13 @@ def check_order_limits(params: dict) -> Optional[dict[str, Any]]:
         }
 
     loss = combo_max_loss(params)
-    if loss is not None and loss > _MAX_COMBO_LOSS_DOLLARS:
+    loss_cap = max_combo_loss_dollars()
+    if loss is not None and loss > loss_cap:
         return {
             "code": "ORDER_MAX_LOSS_LIMIT",
             "message": (
                 f"combo max loss ${loss:,.0f} exceeds the server-side limit "
-                f"of ${_MAX_COMBO_LOSS_DOLLARS:,.0f} — refused"
+                f"of ${loss_cap:,.0f} (RADON_MAX_COMBO_LOSS_DOLLARS) — refused"
             ),
         }
 

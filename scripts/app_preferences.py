@@ -172,6 +172,22 @@ REGISTRY: Tuple[Preference, ...] = (
         applies_immediately=True,
     ),
     Preference(
+        key="RADON_MAX_COMBO_LOSS_DOLLARS",
+        label="Max combo worst-case loss",
+        group="Order Limits",
+        value_type="float",
+        default=10_000_000.0,
+        hard_min=10_000.0,
+        hard_max=50_000_000.0,
+        unit="USD",
+        description=(
+            "Hard ceiling on a combo order's worst-case loss: assignment for "
+            "unpaired shorts, width for paired ones, net of premium. Separate "
+            "from notional, which is what the order ticket pays or collects."
+        ),
+        applies_immediately=True,
+    ),
+    Preference(
         key="RADON_MAX_ORDERS_PER_MIN",
         label="Max orders per minute",
         group="Order Limits",

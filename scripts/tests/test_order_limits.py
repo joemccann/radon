@@ -377,3 +377,45 @@ class TestComboNotionalIsRiskNotPremium:
             ],
         }
         assert order_limits.order_notional(params) == pytest.approx(600.0)
+
+
+class TestComboLossCapIsOperatorTunable:
+    """T-080 — the combo worst-case-loss cap was a hardcoded $10M with
+    nothing between it and the $250k notional cap. It keeps $10M as the
+    default but resolves through ``app_preferences`` like the other limits."""
+
+    def _seventy_lot_strangle(self):
+        return {
+            "type": "combo", "symbol": "SPY", "action": "SELL",
+            "quantity": 70, "limitPrice": -0.20,
+            "legs": [_strangle_leg(700, "C"), _strangle_leg(600, "P")],
+        }
+
+    def test_default_is_ten_million(self):
+        assert order_limits.max_combo_loss_dollars() == pytest.approx(10_000_000.0)
+
+    def test_seventy_lot_strangle_clears_the_default(self):
+        loss = order_limits.combo_max_loss(self._seventy_lot_strangle())
+        assert loss == pytest.approx(9_098_600.0)
+        assert order_limits.check_order_limits(self._seventy_lot_strangle()) is None
+
+    def test_lowered_cap_refuses_the_same_order(self, monkeypatch):
+        monkeypatch.setenv("RADON_MAX_COMBO_LOSS_DOLLARS", "1000000")
+        violation = order_limits.check_order_limits(self._seventy_lot_strangle())
+        assert violation is not None
+        assert violation["code"] == "ORDER_MAX_LOSS_LIMIT"
+        assert "RADON_MAX_COMBO_LOSS_DOLLARS" in violation["message"]
+
+    def test_boundary_at_the_cap(self, monkeypatch):
+        """Loss exactly at the cap places; one dollar over is refused."""
+        loss = order_limits.combo_max_loss(self._seventy_lot_strangle())
+        monkeypatch.setenv("RADON_MAX_COMBO_LOSS_DOLLARS", str(loss))
+        assert order_limits.check_order_limits(self._seventy_lot_strangle()) is None
+        monkeypatch.setenv("RADON_MAX_COMBO_LOSS_DOLLARS", str(loss - 1))
+        violation = order_limits.check_order_limits(self._seventy_lot_strangle())
+        assert violation is not None and violation["code"] == "ORDER_MAX_LOSS_LIMIT"
+
+    def test_env_above_hard_ceiling_is_clamped(self, monkeypatch):
+        """The band tops out at $50M; an env value cannot lift the cap past it."""
+        monkeypatch.setenv("RADON_MAX_COMBO_LOSS_DOLLARS", "999999999999")
+        assert order_limits.max_combo_loss_dollars() == pytest.approx(50_000_000.0)
