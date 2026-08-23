@@ -2,12 +2,16 @@
  * @vitest-environment jsdom
  */
 
-import { createElement } from "react";
-import { describe, expect, it, vi } from "vitest";
-import { render } from "@testing-library/react";
+import { act, createElement } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import Sidebar from "../components/Sidebar";
+
+// Flush concurrent work inside act() so Sidebar's post-mount rAF
+// (setSettled) cannot run after this file's jsdom is torn down.
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 vi.mock("@/lib/IBStatusContext", () => ({
   useIBStatusContext: () => ({ displayStatus: "unreachable" }),
@@ -35,6 +39,10 @@ function declaredHeight(selector: string): string | null {
   return min ? min[1].trim() : null;
 }
 
+afterEach(() => {
+  cleanup();
+});
+
 describe("workspace chrome alignment", () => {
   it("sidebar-header and header use the same height token so bottom borders align", () => {
     const sidebarHeaderHeight = declaredHeight(".sidebar-header");
@@ -50,7 +58,7 @@ describe("workspace chrome alignment", () => {
     expect(body).not.toMatch(/min-height\s*:/);
   });
 
-  it("renders the monogram at the compact 22px brand size", () => {
+  it("renders the monogram at the compact 22px brand size", async () => {
     const { container } = render(
       createElement(Sidebar, {
         activeSection: "portfolio",
@@ -59,6 +67,12 @@ describe("workspace chrome alignment", () => {
         lastSync: null,
       }),
     );
+
+    await act(async () => {
+      await new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => resolve());
+      });
+    });
 
     const monogram = container.querySelector(".sidebar-header img.logo-mark");
     expect(monogram).not.toBeNull();

@@ -1185,15 +1185,20 @@ class TestHistoricalData:
         bar.low = 149.0
         bar.close = 151.0
         bar.volume = 1000000
-        mock_ib.reqHistoricalData.return_value = [bar]
+
+        async def _hist(*_a, **_k):
+            return [bar]
+
+        mock_ib.reqHistoricalDataAsync = _hist
+        mock_ib.run.side_effect = lambda coro: asyncio.new_event_loop().run_until_complete(coro)
 
         client = IBClient()
         client.connect(client_id=1)
         contract = MagicMock()
         bars = client.get_historical_data(contract, duration="1 D", bar_size="1 hour")
 
-        mock_ib.reqHistoricalData.assert_called_once()
         assert len(bars) == 1
+        mock_ib.reqHistoricalData.assert_not_called()
 
 
 # ===========================================================================
