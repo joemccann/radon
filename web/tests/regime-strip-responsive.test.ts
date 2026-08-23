@@ -62,3 +62,13 @@ describe("Regime strip responsive layout", () => {
     expect(stripSource).toContain("regime-strip-meta-row");
   });
 });
+
+describe("Regime strip small-screen value overflow", () => {
+  it("lets a long value wrap inside the rail instead of painting over the meta column", () => {
+    const mobileSource = cssSource.slice(cssSource.indexOf(".regime-strip-cell:nth-child(n)"));
+    const valueBlock =
+      mobileSource.match(/\.regime-strip-value\s*\{[\s\S]*?\}/m)?.[0] ?? "";
+    expect(valueBlock).not.toContain("white-space: nowrap");
+    expect(valueBlock).toContain("overflow-wrap: anywhere");
+  });
+});

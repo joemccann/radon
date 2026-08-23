@@ -45,13 +45,13 @@ function AtsVenueShareTable({ rows }: { rows: AtsVenueShareRow[] }) {
       <thead>
         <tr>
           <SortTh<AtsSortKey> label="Ticker" sortKey="ticker" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-          <SortTh<AtsSortKey> label="ATS Share" sortKey="share" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-          <SortTh<AtsSortKey> label="Share Z" sortKey="shareZ" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-          <SortTh<AtsSortKey> label="Avg ATS Print" sortKey="print" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-          <SortTh<AtsSortKey> label="Print Z" sortKey="printZ" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-          <SortTh<AtsSortKey> label="Short Vol" sortKey="shortVol" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-          <SortTh<AtsSortKey> label="Divergence" sortKey="divergence" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-          <SortTh<AtsSortKey> label="Signal" sortKey="signal" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <SortTh<AtsSortKey> label="ATS Share" sortKey="share" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} helpText="Dark-pool (ATS) slice of the week's FINRA off-exchange volume. Off-exchange volume is the only denominator the source publishes." helpAriaLabel="ATS share details" />
+          <SortTh<AtsSortKey> label="Share Z" sortKey="shareZ" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} helpText="This week's ATS share against its trailing weekly window. Blank until enough history exists to score." helpAriaLabel="Share z-score details" />
+          <SortTh<AtsSortKey> label="Avg ATS Print" sortKey="print" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} helpText="Average shares per ATS trade. Larger prints mean size is being worked in the dark rather than internalized in odd lots." helpAriaLabel="Average ATS print details" />
+          <SortTh<AtsSortKey> label="Print Z" sortKey="printZ" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} helpText="This week's average ATS print size against its trailing weekly window." helpAriaLabel="Print z-score details" />
+          <SortTh<AtsSortKey> label="Short Vol" sortKey="shortVol" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} helpText="Short volume share of the off-exchange tape. The hedging baseline the divergence column is measured against." helpAriaLabel="Short volume details" />
+          <SortTh<AtsSortKey> label="Divergence" sortKey="divergence" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} helpText="ATS share minus short-volume share, in percentage points. Positive means dark-pool share is running ahead of shorting: buying rather than hedging." helpAriaLabel="Divergence details" />
+          <SortTh<AtsSortKey> label="Signal" sortKey="signal" activeKey={sort.key} direction={sort.direction} onToggle={toggle} helpText="Accumulation needs elevated ATS share AND a larger average ATS print in the same week; distribution needs both depressed. Either alone is noise." helpAriaLabel="Signal details" />
         </tr>
       </thead>
       <tbody>
@@ -74,11 +74,21 @@ function AtsVenueShareTable({ rows }: { rows: AtsVenueShareRow[] }) {
   );
 }
 
+const FOOTNOTE_BLOCK: React.CSSProperties = {
+  marginTop: "14px",
+  paddingTop: "12px",
+  borderTop: "1px solid var(--border-dim)",
+  display: "grid",
+  gap: "8px",
+};
+
 const MONO_FOOTNOTE: React.CSSProperties = {
   fontFamily: "var(--font-mono)",
   fontSize: "9px",
   color: "var(--text-muted)",
-  marginTop: "8px",
+  lineHeight: "1.7",
+  letterSpacing: "0.02em",
+  maxWidth: "82ch",
 };
 
 function methodNote(
@@ -195,13 +205,17 @@ export default function AtsVenueSharePanel() {
           <AtsVenueShareTable rows={rows} />
         </div>
 
-        <div style={MONO_FOOTNOTE}>{methodNote(data.week_start_date, data.thresholds)}</div>
-
-        {errors.length > 0 && (
-          <div style={MONO_FOOTNOTE} data-testid="ats-venue-share-errors">
-            NOT COVERED THIS CYCLE: {errors.map((e) => `${e.ticker} (${e.error})`).join(", ")}
+        <div style={FOOTNOTE_BLOCK} data-testid="ats-venue-share-footnotes">
+          <div style={MONO_FOOTNOTE} data-testid="ats-venue-share-methodnote">
+            {methodNote(data.week_start_date, data.thresholds)}
           </div>
-        )}
+
+          {errors.length > 0 && (
+            <div style={MONO_FOOTNOTE} data-testid="ats-venue-share-errors">
+              NOT COVERED THIS CYCLE: {errors.map((e) => `${e.ticker} (${e.error})`).join(", ")}
+            </div>
+          )}
+        </div>
       </div>
     </>
   );

@@ -325,3 +325,41 @@ describe("AtsVenueSharePanel — table", () => {
     expect(screen.getByTestId("ats-venue-share-errors").textContent).toContain("ZZZZ");
   });
 });
+
+describe("AtsVenueSharePanel — column info bubbles", () => {
+  it("gives every metric column an info bubble", () => {
+    mockState({ data: data() });
+    render(<AtsVenueSharePanel />);
+    const labels = [
+      "ATS share details",
+      "Share z-score details",
+      "Average ATS print details",
+      "Print z-score details",
+      "Short volume details",
+      "Divergence details",
+      "Signal details",
+    ];
+    for (const label of labels) {
+      expect(screen.getByLabelText(label)).toBeTruthy();
+    }
+  });
+});
+
+describe("AtsVenueSharePanel — method footnote spacing", () => {
+  it("sets the bottom copy apart from the table with a divider and readable line spacing", () => {
+    mockState({
+      data: data({ errors: [{ ticker: "BITF", error: "Stock 'BITF' not found." }] }),
+    });
+    render(<AtsVenueSharePanel />);
+
+    const block = screen.getByTestId("ats-venue-share-footnotes");
+    expect(block.style.borderTop).toContain("1px solid");
+    expect(Number.parseFloat(block.style.paddingTop)).toBeGreaterThanOrEqual(10);
+    expect(Number.parseFloat(block.style.marginTop)).toBeGreaterThanOrEqual(12);
+
+    const note = screen.getByTestId("ats-venue-share-methodnote");
+    expect(Number.parseFloat(note.style.lineHeight)).toBeGreaterThanOrEqual(1.5);
+    const errors = screen.getByTestId("ats-venue-share-errors");
+    expect(Number.parseFloat(errors.style.lineHeight)).toBeGreaterThanOrEqual(1.5);
+  });
+});
