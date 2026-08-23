@@ -924,7 +924,14 @@ def run_intraday(
     _write_intraday_db_cache(
         payload, scan_time, hold_reason=None if hold == "market closed" else hold
     )
-    _write_json_cache(payload)
+    # R-128: a held pass carries no live point — republishing the shared
+    # `vol-cone` snapshot (and data/vol_cone.json) would only overwrite the
+    # EOD writer's output with a rebuild of the same history, and in EDT the
+    # two timers can land in the same minute. The heartbeat above still runs,
+    # so a silent intraday writer is still visible.
+    if hold is None:
+        _mirror_snapshot(payload, scan_time, rows_changed=False)
+        _write_json_cache(payload)
     return payload
 
 

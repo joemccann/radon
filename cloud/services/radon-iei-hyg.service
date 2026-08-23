@@ -11,10 +11,14 @@ User=radon
 WorkingDirectory=/home/radon/radon
 EnvironmentFile=/etc/radon/env
 Environment=RADON_DB_NO_REPLICA=1
-ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_iei_hyg.py
+# R-127: shares IB client IDs 56/69 with radon-credit-spread; see that
+# unit for the full rationale. -w outlasts the peer's 300s work budget.
+ExecStart=/usr/bin/flock -w 360 -E 75 /run/lock/radon-ib-history-5669.lock /home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_iei_hyg.py
+SuccessExitStatus=75
 StandardOutput=journal
 StandardError=journal
-TimeoutStartSec=600
+# 360s lock wait + the 600s work ceiling.
+TimeoutStartSec=960
 
 [Install]
 WantedBy=multi-user.target

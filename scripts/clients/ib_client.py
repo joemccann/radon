@@ -26,6 +26,7 @@ Usage::
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 import os
@@ -62,6 +63,14 @@ class IBOrderError(IBError):
 
 class IBTimeoutError(IBError):
     """Raised when an operation times out."""
+
+
+# ib_insync's own `timeout` is the ONLY path that sends
+# cancelHistoricalData(reqId) — an outer wait_for that fires first just
+# cancels the local coroutine and leaks one of IB's ~50 simultaneous
+# historical slots. So the request carries ib_insync's deadline and the
+# outer guard sits this much later, firing only if that cancel itself wedges.
+HISTORICAL_CANCEL_GRACE_SECS = 5.0
 
 
 class IBContractError(IBError):
@@ -1066,7 +1075,6 @@ class IBClient:
                 no per-request timeout; 2FA otherwise blocks forever.
         """
         self._require_connection()
-        import asyncio
 
         async def _run() -> Any:
             return await asyncio.wait_for(
@@ -1079,16 +1087,37 @@ class IBClient:
                     useRTH=use_rth,
                     formatDate=1,
                     keepUpToDate=keep_up_to_date,
+                    timeout=timeout,
                 ),
-                timeout=timeout,
+                timeout=timeout + HISTORICAL_CANCEL_GRACE_SECS,
             )
 
+        started = time.monotonic()
         try:
-            return self._ib.run(_run())
+            bars = self._ib.run(_run())
         except asyncio.TimeoutError as exc:
             raise IBTimeoutError(
-                f"Historical data timed out after {timeout}s"
+                f"Historical data timed out after {timeout}s "
+                "(ib_insync's own cancel did not return)"
             ) from exc
+
+        # ib_insync does not raise on its own timeout: it cancels the reqId,
+        # clears the container and returns it. Empty-and-slow is that path;
+        # empty-and-fast is a contract with genuinely no bars.
+        returned_rows = len(bars) if bars is not None else 0
+        if returned_rows == 0 and (time.monotonic() - started) >= timeout:
+            if keep_up_to_date:
+                # cancelHistoricalData(reqId) does not end the SUBSCRIPTION
+                # ib_insync registered, so a keepUpToDate timeout leaks a
+                # subscriber for the life of the pooled client.
+                try:
+                    self._ib.cancelHistoricalData(bars)
+                except Exception as exc:  # noqa: BLE001 — best-effort cleanup
+                    self.logger.warning(
+                        "historical subscription cleanup failed: %s", exc
+                    )
+            raise IBTimeoutError(f"Historical data timed out after {timeout}s")
+        return bars
 
     def get_head_timestamp(
         self,

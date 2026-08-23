@@ -49,7 +49,7 @@ except Exception:
 from breadth_scan import _fetch_stockcharts_daily
 from db import writer
 from utils.ib_preflight import IB_REQUEST_TIMEOUT_S, ib_auth_state as _ib_auth_state
-from utils.market_calendar import is_market_open_et
+from utils.market_calendar import is_market_open_et, last_completed_session_date
 
 # ── constants ─────────────────────────────────────────────────────
 SERVICE = "trin"
@@ -367,6 +367,24 @@ def fetch_daily() -> list[DailyRow]:
     return sorted(_fetch_stockcharts_daily(STOCKCHARTS_SYMBOL))
 
 
+def daily_needs_refresh(cached: list[DailyRow]) -> bool:
+    """True when the cached daily series is missing the last closed session.
+
+    The sampler runs every five minutes, but StockCharts publishes ONE new
+    $TRIN close per session — scraping on every cycle was 108 hits/day for
+    at most one new row, against a third-party endpoint the breadth scan
+    shares.
+    """
+    if not cached:
+        return True
+    return max(date for date, _close in cached) < last_completed_session_date()
+
+
+def fetch_daily_if_stale(cached: list[DailyRow]) -> list[DailyRow]:
+    """`fetch_daily()` only when a session is actually missing."""
+    return fetch_daily() if daily_needs_refresh(cached) else []
+
+
 # ── cache (Turso first, JSON fallback) ────────────────────────────
 
 def _json_cache() -> dict[str, Any]:
@@ -553,7 +571,7 @@ def run() -> dict[str, Any]:
     cached_samples = load_cached_samples()
     cached_daily = load_cached_daily()
     sample, live_source = sample_live()
-    fresh_daily = fetch_daily()
+    fresh_daily = fetch_daily_if_stale(cached_daily)
     daily = merge_daily(cached_daily, fresh_daily)
     new_daily = diff_new_daily(cached_daily, daily)
     samples = merge_samples(cached_samples, sample)
