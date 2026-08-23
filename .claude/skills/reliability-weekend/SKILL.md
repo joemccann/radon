@@ -175,3 +175,16 @@ how this loop improves as the codebase grows.
   row, keep whatever part of the old assertion was still meaningful, and
   prefer rewriting the case onto a shape that preserves its original
   intent over deleting it.
+- 2026-08-22 (audit): the ledger anchor range (`c529c92a..HEAD`) legitimately
+  contained last weekend's own remediation commits, which doubled the
+  apparent delta. Split the range at the last commit that touched
+  `RELIABILITY_LOG.md` (`git log -1 --format=%h -- RELIABILITY_LOG.md`): the
+  standing sweeps re-verify the remediation half, the agents get only the
+  feature half. Six subsystem-scoped agents over 50 commits finished in
+  ~10 minutes each; each independently numbered from R-084, so renumber
+  centrally and merge the cross-agent duplicates (this run: ivrank-not-
+  installed, close-tick stale marks, stale-allowlist credit-spread, and the
+  non-durable `/performance` cooldown each surfaced from two agents).
+- 2026-08-22 (audit): scope `git diff --name-only` with
+  `grep -vE 'tests?/|\.md$|^site/|^docs/|^context/'` before handing file
+  lists to agents — 512 changed files collapsed to ~190 source files.
