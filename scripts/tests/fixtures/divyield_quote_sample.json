@@ -1,0 +1,182 @@
+{
+ "chart": {
+  "result": [
+   {
+    "meta": {
+     "currency": "USD",
+     "symbol": "XOM",
+     "exchangeName": "NYQ",
+     "fullExchangeName": "NYSE",
+     "instrumentType": "EQUITY",
+     "firstTradeDate": -252322200,
+     "regularMarketTime": 1787342624,
+     "hasPrePostMarketData": true,
+     "gmtoffset": -14400,
+     "timezone": "EDT",
+     "exchangeTimezoneName": "America/New_York",
+     "regularMarketPrice": 165.11,
+     "fiftyTwoWeekHigh": 176.41,
+     "fiftyTwoWeekLow": 108.35,
+     "regularMarketDayHigh": 168.0,
+     "regularMarketDayLow": 164.62,
+     "regularMarketVolume": 14225679,
+     "longName": "ExxonMobil Holdings Corporation",
+     "shortName": "ExxonMobil Holdings Corporation",
+     "chartPreviousClose": 109.23,
+     "priceHint": 2,
+     "currentTradingPeriod": {
+      "pre": {
+       "timezone": "EDT",
+       "start": 1787299200,
+       "end": 1787319000,
+       "gmtoffset": -14400
+      },
+      "regular": {
+       "timezone": "EDT",
+       "start": 1787319000,
+       "end": 1787342400,
+       "gmtoffset": -14400
+      },
+      "post": {
+       "timezone": "EDT",
+       "start": 1787342400,
+       "end": 1787356800,
+       "gmtoffset": -14400
+      }
+     },
+     "dataGranularity": "1d",
+     "range": "1y",
+     "validRanges": [
+      "1d",
+      "5d",
+      "1mo",
+      "3mo",
+      "6mo",
+      "1y",
+      "2y",
+      "5y",
+      "10y",
+      "ytd",
+      "max"
+     ]
+    },
+    "timestamp": [
+     1755869400,
+     1756128600,
+     1756215000,
+     1756301400,
+     1756387800,
+     1756474200,
+     1756819800,
+     1756906200,
+     1756992600,
+     1757079000
+    ],
+    "events": {
+     "dividends": {
+      "1763130600": {
+       "amount": 1.03,
+       "date": 1763130600
+      },
+      "1770906600": {
+       "amount": 1.03,
+       "date": 1770906600
+      },
+      "1778851800": {
+       "amount": 1.03,
+       "date": 1778851800
+      },
+      "1786973400": {
+       "amount": 1.03,
+       "date": 1786973400
+      }
+     }
+    },
+    "indicators": {
+     "quote": [
+      {
+       "open": [
+        109.5999984741211,
+        110.9000015258789,
+        111.37000274658203,
+        111.41999816894531,
+        112.87000274658203,
+        113.72000122070312,
+        114.18000030517578,
+        113.97000122070312,
+        112.11000061035156,
+        111.5999984741211
+       ],
+       "low": [
+        109.5999984741211,
+        110.54000091552734,
+        110.36000061035156,
+        111.41999816894531,
+        112.06999969482422,
+        113.58000183105469,
+        113.33000183105469,
+        111.45999908447266,
+        111.37999725341797,
+        109.0199966430664
+       ],
+       "close": [
+        111.27999877929688,
+        111.73999786376953,
+        111.48999786376953,
+        112.75,
+        113.3499984741211,
+        114.29000091552734,
+        114.69000244140625,
+        111.91000366210938,
+        112.4000015258789,
+        109.2300033569336
+       ],
+       "volume": [
+        13586700,
+        9744900,
+        18143900,
+        15262600,
+        14189800,
+        14597900,
+        15206700,
+        14920100,
+        12864400,
+        16826700
+       ],
+       "high": [
+        111.41000366210938,
+        111.91999816894531,
+        111.80999755859375,
+        112.9800033569336,
+        113.6500015258789,
+        114.79000091552734,
+        115.23999786376953,
+        114.43000030517578,
+        113.12999725341797,
+        111.77999877929688
+       ]
+      }
+     ],
+     "adjclose": [
+      {
+       "adjclose": [
+        108.1456527709961,
+        108.59268951416016,
+        108.3497314453125,
+        109.57424926757812,
+        110.15734100341797,
+        111.07087707519531,
+        111.45960235595703,
+        108.75790405273438,
+        109.2341079711914,
+        106.15339660644531
+       ]
+      }
+     ]
+    },
+    "_fixture_note": "Captured 2026-08-23 via curl -A 'Mozilla/5.0' https://query1.finance.yahoo.com/v8/finance/chart/XOM?range=1y&interval=1d&events=div ; timestamp/quote/adjclose arrays truncated from 251 entries to 10; meta and events.dividends kept COMPLETE (4 dividend events, TTM=4.12, regularMarketPrice=165.11, trailing yield 2.495%)."
+   }
+  ],
+  "error": null
+ }
+}
