@@ -17,6 +17,8 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from .. import ib_executor
+
 logger = logging.getLogger("radon.historical")
 
 router = APIRouter()
@@ -79,7 +81,8 @@ def _get_pool(request: Request):
 
 
 async def _reap_timed_out_worker(task: asyncio.Task) -> None:
-    """Consume the timed-out worker's eventual result or exception.
+    """Consume the timed-out worker's eventual result or exception, and give
+    its IB thread back when (if) it finally returns.
 
     The retired client's disconnect is NOT here: ``pool.retire`` disposes it
     out-of-band so the role's fixed client_id frees while the worker is still
@@ -90,16 +93,33 @@ async def _reap_timed_out_worker(task: asyncio.Task) -> None:
         await asyncio.shield(task)
     except BaseException:
         pass
+    finally:
+        ib_executor.clear_wedged()
 
 
 async def _bounded_pool_call(
     pool, role: str, client, operation, *args, timeout: float = IB_OPERATION_TIMEOUT_SECS, **kwargs
 ):
-    """Bound a sync IB call and quarantine its client if its worker outlives us."""
-    pending = asyncio.create_task(asyncio.to_thread(operation, *args, **kwargs))
+    """Bound a sync IB call and quarantine its client if its worker outlives us.
+
+    R-143: the worker runs on the dedicated IB executor, never the default
+    one — a wedged data call must not queue Clerk verification, Turso writes
+    or order cancel/place behind it — and the acquire fails loudly once too
+    many IB threads are already unusable.
+    """
+    try:
+        pending = asyncio.ensure_future(
+            ib_executor.submit(operation, *args, **kwargs)
+        )
+    except ib_executor.IBExecutorSaturated as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"IB thread pool unavailable: {exc}",
+        ) from exc
     try:
         return await asyncio.wait_for(asyncio.shield(pending), timeout=timeout)
     except asyncio.TimeoutError as exc:
+        ib_executor.mark_wedged()
         await pool.retire(role, client)
         asyncio.create_task(_reap_timed_out_worker(pending))
         raise HTTPException(status_code=504, detail="IB operation timed out") from exc
