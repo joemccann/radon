@@ -52,11 +52,24 @@ def check_demo_isolation(env: Mapping[str, str]) -> list[str]:
             f"({demo_url!r}) — demo must use a SEPARATE Turso database."
         )
 
+    # R-156: this used to be the ONLY check on TURSO_DB_URL, and it fired
+    # only when the two vars were equal — so a demo env carrying the REAL
+    # production URL alongside a distinct TURSO_DEMO_DB_URL returned zero
+    # violations. `getDemoDb()` serves only /api/admin/demo-users; every
+    # account route goes through `dbExecute` -> `getDb()` -> TURSO_DB_URL, so
+    # that variable IS the isolation boundary. Equality with the demo URL is
+    # the DESIRED state on the demo VM, not a violation.
     prod_url = env.get("TURSO_DB_URL", "")
-    if prod_url and demo_url and prod_url == demo_url:
+    if not prod_url:
         violations.append(
-            "TURSO_DB_URL == TURSO_DEMO_DB_URL — demo and prod point at the "
-            "same database."
+            "TURSO_DB_URL is not set — getDb() would resolve to whatever the "
+            "host inherits; the demo VM must name its demo database explicitly."
+        )
+    elif PROD_DB_MARKER in prod_url:
+        violations.append(
+            f"TURSO_DB_URL contains the prod marker {PROD_DB_MARKER!r} "
+            f"({prod_url!r}) — every account route reads through this variable, "
+            "so the demo tier would serve the operator's real positions."
         )
 
     if env.get("RADON_API_TEST_MODE") != "1":
