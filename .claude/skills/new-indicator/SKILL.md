@@ -40,7 +40,7 @@ Modify (lockstep pins — miss one and a test fails, which is the point):
 - `web/lib/serviceHealthWindows.ts` — staleness window entry (kebab-case service name)
 - `web/tests/service-health-windows.test.ts` — the `expected` set is **exhaustive**; add the new service
 - `scripts/watchdog/services.py` — same window for the Python watchdog + the daily-bucket check list
-- `cloud/scripts/setup-vps.sh` — append both units to the `SERVICE_FILES` array (line ~34-97). **Deploys do NOT install units; this array is the only scripted install path.**
+- `cloud/scripts/setup-vps.sh` — append both units to the `SERVICE_FILES` array (line ~34-97), AND add both unit hashes to `cloud/config/installed-units.sha256` in the same commit: since PR #73 the deploy's `radon-deploy-root install-units` verb installs every manifest-pinned unit and `enable --now`s new timers, so no root SSH is owed. A unit missing from the manifest is never installed.
 - `cloud/tests/test_systemd_services.py` — add both units to the canonical set
 
 ## 1. Ingestion job (`scripts/`)
@@ -98,7 +98,7 @@ Modify (lockstep pins — miss one and a test fails, which is the point):
 ## 6. Scheduling and deploy
 
 - Units in `cloud/services/`: `radon-<name>.service` (`Type=oneshot`, `User=radon`, `WorkingDirectory=/home/radon/radon`, `EnvironmentFile=/home/radon/radon-cloud/.env`, `Environment=RADON_DB_NO_REPLICA=1`, `ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_<name>.py`, `TimeoutStartSec` sized to the job, journald out/err) + `radon-<name>.timer` (`OnCalendar=... UTC`, `Persistent=true`, `RandomizedDelaySec`, `WantedBy=timers.target`). Comment the OnCalendar choice.
-- Register in `setup-vps.sh` `SERVICE_FILES` and `cloud/tests/test_systemd_services.py`. **`deploy.sh` does not install or enable units** — on an existing VPS, install once by hand (`install -m 0644` to `/etc/systemd/system`, `daemon-reload`, `enable --now` the timer; root SSH works, see reference_vps_root_ssh_unit_installs), and keep repo/VPS reconciled or drift_audit flags it.
+- Register in `setup-vps.sh` `SERVICE_FILES`, `cloud/tests/test_systemd_services.py`, and `cloud/config/installed-units.sha256` (sha256 of each unit file). The deploy's `install-units` verb then installs the pair root-owned and enables the timer on the next green deploy; verify on the host with `systemctl list-timers 'radon-<name>*'`.
 - Prod env note: units call the venv python **directly** — the `run_*.sh` wrapper fallback ladder resolves the wrong python on the VPS (feedback_scan_wrapper_fallback_picks_system_python).
 
 ## 7. CI gates and shipping

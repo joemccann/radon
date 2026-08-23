@@ -165,7 +165,7 @@ export default function IeiHygPanel() {
               testId="iei-hyg-strip-ratio"
               label="RATIO"
               value={<span data-testid="iei-hyg-ratio">{formatRatio(current.ratio)}</span>}
-              sub={<>IEI OVER HYG</>}
+              sub={<>IEI OVER HYG · RANK <span data-testid="iei-hyg-rank">{formatRank(current.ratio_pct_rank)}</span></>}
             />
             <RegimeStripCell
               testId="iei-hyg-strip-state"
@@ -190,19 +190,10 @@ export default function IeiHygPanel() {
               sub={<>{formatSessionDate(current.high_date)}</>}
             />
             <RegimeStripCell
-              testId="iei-hyg-strip-rank"
-              label="RANK"
-              value={<span data-testid="iei-hyg-rank">{formatRank(current.ratio_pct_rank)}</span>}
-            />
-            <RegimeStripCell
               testId="iei-hyg-strip-dxy"
               label="DXY"
               value={<span data-testid="iei-hyg-dxy">{formatDxy(current.dxy_close)}</span>}
-            />
-            <RegimeStripCell
-              testId="iei-hyg-strip-source"
-              label="SOURCE"
-              value={<span data-testid="iei-hyg-source">{sourceText}</span>}
+              sub={<span data-testid="iei-hyg-source">{sourceText}</span>}
             />
           </RegimeStrip>
         )}
