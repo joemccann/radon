@@ -129,7 +129,35 @@ def collect_service_cycle_names() -> dict[str, list[str]]:
     return _SERVICE_CYCLE_NAMES
 
 
-def _build_handler_service_names() -> dict[str, list[str]]:
+def _build_scheduled_handler_classes() -> set[str]:
+    """Handler classes `create_daemon()` actually registers.
+
+    A handler class that nothing registers writes no heartbeat, so demanding
+    a freshness window for it would force both catalogs to advertise a
+    control that never runs (R-141, `ExitOrdersHandler`).
+    """
+    tree = _parse(_SCRIPTS_DIR / "monitor_daemon" / "run.py")
+    assert tree is not None, "monitor_daemon/run.py must parse"
+    registered: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if not (isinstance(func, ast.Attribute) and func.attr == "register"):
+            continue
+        for arg in node.args:
+            if isinstance(arg, ast.Call) and isinstance(arg.func, ast.Name):
+                registered.add(arg.func.id)
+    assert registered, "failed to parse create_daemon() registrations"
+    return registered
+
+
+_SCHEDULED_HANDLER_CLASSES: set[str] = _build_scheduled_handler_classes()
+
+
+def _build_handler_service_names(
+    *, scheduled_only: bool = True
+) -> dict[str, list[str]]:
     """Class-level ``service_name = "<literal>"`` on handler classes."""
     found: dict[str, list[str]] = {}
     handlers_dir = _SCRIPTS_DIR / "monitor_daemon" / "handlers"
@@ -139,6 +167,8 @@ def _build_handler_service_names() -> dict[str, list[str]]:
             continue
         for node in ast.walk(tree):
             if not isinstance(node, ast.ClassDef):
+                continue
+            if scheduled_only and node.name not in _SCHEDULED_HANDLER_CLASSES:
                 continue
             for stmt in node.body:
                 if not isinstance(stmt, ast.Assign):
@@ -260,7 +290,6 @@ class TestCollectorsAreNotBlind:
         names = set(collect_handler_service_names())
         expected = {
             "fill-monitor",
-            "exit-orders",
             "journal-sync",
             "flex-token-check",
             "cash-flow-sync",
@@ -268,6 +297,12 @@ class TestCollectorsAreNotBlind:
         }
         missing = expected - names
         assert not missing, f"handler collector lost: {sorted(missing)}"
+        # `exit-orders` was in this set until R-141: the class exists and
+        # still carries its service_name, but `create_daemon()` does not
+        # register it, so it writes no heartbeat and must not be demanded of
+        # either catalog. The class-level literal is still discoverable.
+        assert "exit-orders" not in names
+        assert "exit-orders" in _build_handler_service_names(scheduled_only=False)
 
     def test_scan_mirror_collector_sees_mirror_fed_scans(self):
         names = collect_scan_mirror_names()

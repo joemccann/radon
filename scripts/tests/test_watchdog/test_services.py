@@ -96,8 +96,7 @@ class TestServiceCatalogContract:
         """The IB-dependent set is locked to what the writer source code
         actually does (verified by reading scripts/vcg_scan.py,
         scripts/cri_scan.py, scripts/ib_orders.py, scripts/ib_sync.py,
-        scripts/monitor_daemon/handlers/{fill_monitor,exit_orders,
-        journal_sync}.py).
+        scripts/monitor_daemon/handlers/{fill_monitor,journal_sync}.py).
 
         Drift here should fail loudly so we don't quietly group alerts
         on services that aren't actually IB-dependent.
@@ -114,7 +113,9 @@ class TestServiceCatalogContract:
             "orders-sync",
             "portfolio-sync",
             "fill-monitor",
-            "exit-orders",
+            # `exit-orders` was here until R-141 — ExitOrdersHandler is no
+            # longer registered by create_daemon(), so it never writes a
+            # heartbeat and must not be in either catalog.
             "journal-sync",
             # REL-001: PositionReconcileHandler connects to IB every cycle
             # (fetch_ib_positions via IBClient) — verified in
@@ -263,7 +264,7 @@ class TestBuckets:
         assert "newsfeed-scraper" in cont
         assert "replica-watchdog" in cont
         assert "fill-monitor" in cont
-        assert "exit-orders" in cont
+        assert "exit-orders" not in cont  # R-141: unscheduled, no heartbeat
         assert "journal-sync" in cont
         assert "journal-gap-sli" in cont
 
