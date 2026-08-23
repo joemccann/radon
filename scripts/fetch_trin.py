@@ -114,23 +114,13 @@ def _bucket_label(moment_et: datetime, minutes: int) -> str:
     return f"{moment_et:%Y-%m-%d}T{start_min // 60:02d}:{start_min % 60:02d}"
 
 
-def _session_bucket(ts_iso: str) -> Optional[str]:
-    """Bucket a sample belongs to for bar building: RTH samples by hour, a
-    post-close sample folds into the session's final bar, pre-open is dropped."""
-    moment_et = _parse_utc(ts_iso).astimezone(_ET)
-    minutes = _et_minutes(moment_et)
-    if minutes < _RTH_OPEN_MIN:
-        return None
-    return _bucket_label(moment_et, min(minutes, _RTH_CLOSE_MIN - 1))
-
-
 # ── pure computation ──────────────────────────────────────────────
 
 def bucket_hourly(samples: list[Sample]) -> list[dict[str, Any]]:
-    """Last sample per RTH hour bucket, sorted by bucket; pre-open samples dropped."""
+    """Last sample per RTH hour bucket, sorted by bucket; off-session samples dropped."""
     last_by_bucket: dict[str, Sample] = {}
     for sample in sorted(samples, key=lambda s: s["ts"]):
-        bucket = _session_bucket(sample["ts"])
+        bucket = hourly_bucket(sample["ts"])
         if bucket is not None:
             last_by_bucket[bucket] = sample
     return [

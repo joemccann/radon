@@ -98,7 +98,11 @@ class TestSessionBuckets:
         assert bars[0]["ts"] == _stamp(55)
 
     def test_bucket_hourly_drops_off_session_samples(self):
-        samples = [{"ts": _stamp(-30), "session_date": "2026-08-21", "trin": 9.0}] + _samples([0.7])
+        samples = (
+            [{"ts": _stamp(-30), "session_date": "2026-08-21", "trin": 9.0}]
+            + _samples([0.7])
+            + [{"ts": _stamp(6 * 60 + 35), "session_date": "2026-08-21", "trin": 8.0}]  # 16:05 ET
+        )
         assert [b["trin"] for b in bucket_hourly(samples)] == [0.7]
 
 
@@ -135,7 +139,7 @@ class TestBuildOutput:
         samples = []
         for hour, trin in enumerate([0.9] * 10 + [0.7, 0.62, 0.58, 0.55]):
             base = SESSION_OPEN_UTC - timedelta(days=1) if hour < 7 else SESSION_OPEN_UTC
-            minute = (hour % 7) * 60 + 55
+            minute = (hour % 7) * 60 + 25  # slot 6 = 15:55 ET, inside the last bar
             ts = (base + timedelta(minutes=minute)).isoformat().replace("+00:00", "Z")
             samples.append({"ts": ts, "session_date": session_date(ts), "trin": trin, "adv": 1500, "dec": 1300, "up_vol": 2.0e9, "down_vol": 1.5e9})
         payload = build_output(samples, daily, scan_time="2026-08-21T19:55:00Z", source="ib+stockcharts")

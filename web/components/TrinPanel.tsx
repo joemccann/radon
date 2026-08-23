@@ -134,7 +134,7 @@ export default function TrinPanel() {
       key: "trin",
       label: "TRIN",
       color: chartSeriesColor("fault"),
-      axis: "right",
+      axis: "left",
       scaleType: "linear",
       format: formatTrin,
     },
@@ -238,21 +238,12 @@ export default function TrinPanel() {
           series={chartSeries}
           title="TRIN 60 MIN"
           xTickFormat={formatHourlyTick}
+          sharedAxis
+          referenceLevels={[
+            { value: ZONE_LOW, label: `LOW ZONE ${formatTrin(ZONE_LOW)}`, color: "var(--negative)" },
+            { value: ZONE_HIGH, label: `HIGH ZONE ${formatTrin(ZONE_HIGH)}`, color: "var(--positive)" },
+          ]}
         />
-        <div
-          data-testid="trin-zone-legend"
-          style={{
-            display: "flex",
-            gap: "12px",
-            padding: "4px 8px",
-            fontFamily: "var(--font-mono)",
-            fontSize: "9px",
-            color: "var(--text-muted)",
-          }}
-        >
-          <span style={{ color: "var(--negative)" }}>LOW ZONE {formatTrin(ZONE_LOW)}</span>
-          <span style={{ color: "var(--positive)" }}>HIGH ZONE {formatTrin(ZONE_HIGH)}</span>
-        </div>
         {total >= 2 && (
           <BrushMinimap
             values={hourly.map((b) => finiteOrNull(b.trin) ?? 0)}
