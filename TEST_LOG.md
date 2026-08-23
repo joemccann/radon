@@ -56,3 +56,13 @@ returning None on darwin. Filed under NEW_FINDINGS; green in CI on ubuntu.
 | Task | Status | Commit | Evidence |
 |---|---|---|---|
 | T-079 | DONE | (this commit) | `web/e2e/performance-twr-payload.spec.ts` (filed in TEST_AUDIT.md NEW_FINDINGS 2026-08-17 as "permanently RED, pins a superseded payload contract") rewritten to assert the CURRENT v2 contract, both directions: (1) a valid v2 payload — `schema_version: 2`, declared `status: "ok"`, `flows_status: "ok"`, `nav_as_of` = today — renders `+10.00%` in the hero plus `Ending equity $110,000.00`; (2) the SAME payload with `schema_version` removed degrades through `resolveStatus` and renders the honest `--`. All dates are window-relative (`isoDaysAgo`), because staleness is decided at read time from `nav_as_of` vs the clock (`NAV_STALENESS_BUDGET_SESSIONS = 2`) — the old fixture's hardcoded `period_end: "2026-03-20"` would have re-rotted a v2 rewrite by June. Cum return 0.1 over `calendar_days: 90` annualizes to ~47%, inside `IMPLAUSIBLE_ANNUALIZED = 10`. RED (pre-fix, under the T-073 pre-flight method — `npm run build` then `PLAYWRIGHT_WEBSERVER_CMD="npx next start -p 3030"`): `Expected: "+10.00%" / Received: "--"`, 1 failed — the audit's exact signature. GREEN (same invocation, post-rewrite): 2 passed (3.9s); re-run 2 passed (4.0s); `tsc --noEmit` clean. NOT added to the CI curated subset (observe-green-first rule; this run rewrote the spec). CANDIDATE for a future curation pass: it is page.route-mocked, deterministic, and now green under the production server CI uses. |
+
+## Delta audit 2026-08-22 (Saturday, audit mode)
+
+| Gate | Run 1 | Run 2 |
+|---|---|---|
+| `python3.13 -m pytest` | 1 failed (T-089 sleep race; 3/3 isolated green), 7215 passed, 1 skipped, 90 deselected | 7216 passed, 1 skipped, 90 deselected |
+| `npx vitest run` | 672 files / 7036 passed | 672 files / 7036 passed |
+| `pytest cloud/tests` | 12 failed, 910 passed, 4 skipped (darwin) | identical list |
+
+Darwin cloud baseline is now 12 (10 known `sha256sum` + 2 new from #67, T-088). 17 findings filed (T-080…T-096); see `TEST_AUDIT.md` `## Delta audit 2026-08-22`.

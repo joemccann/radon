@@ -191,3 +191,15 @@ how this loop improves as the codebase grows.
   `PLAYWRIGHT_WEBSERVER_CMD="npx next start"`, which is also how
   `performance-twr-payload.spec.ts` was caught as permanently red before
   it could red the job.
+- **2026-08-22 (audit): last weekend's remediation lands inside this week's
+  delta.** The ledger SHA is the audit HEAD, not the merge of the weekend PR,
+  so the range `71de8a33..HEAD` re-contained T-055…T-079 and the reliability
+  loop's REL-0xx source commits. Re-triage them as ordinary delta rather than
+  exempting them (two findings this run — T-086, T-087 — were on REL-038
+  tests), and say in the audit that the range overlaps.
+- **2026-08-22 (audit): the darwin cloud baseline is a LIST, not a count, and
+  it moves.** Round 1 read `12 failed` against a recorded baseline of 10; the
+  diff of `FAILED` lines against the 2026-08-17 list is what separated two
+  new `sha256sum`-shim reds (T-088) from the known ten. Always `sort` the
+  `FAILED` lines to a file and `diff` them; update the recorded baseline in
+  the audit whenever it changes.
