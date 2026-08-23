@@ -176,18 +176,23 @@ def is_valid_ib_number(val: Any) -> bool:
 
 
 def ticker_has_quote(ticker: Any) -> bool:
-    """True when a ticker has a usable last, bid/ask pair, or close."""
+    """True when a ticker has a two-sided book or a `last`.
+
+    R-089: `close` used to satisfy this, and so did `marketPrice()`, which
+    falls back to `close` itself. IB delivers the CLOSE tick (type 9) in the
+    first burst after `reqMktData` — hundreds of ms before a two-sided book
+    on anything illiquid, and the only prompt tick under
+    `reqMarketDataType(4)`. Since `wait_until` returns on the first
+    satisfied poll, the sync proceeded with bid/ask still NaN and
+    `_resolve_market_price` stamped the PRIOR SESSION CLOSE as the live
+    mark. Nothing in the web app reads `marketPriceIsCalculated`, so that
+    stale mark rendered identically to a live one.
+
+    A close-only ticker now burns the full cap and reports False; the
+    caller falls back to close deliberately instead of by accident.
+    """
     if ticker is None:
         return False
-    market_price = None
-    market_price_fn = getattr(ticker, "marketPrice", None)
-    if callable(market_price_fn):
-        try:
-            market_price = market_price_fn()
-        except Exception:
-            market_price = None
-    if is_valid_ib_number(market_price) and float(market_price) > 0:
-        return True
     bid = getattr(ticker, "bid", None)
     ask = getattr(ticker, "ask", None)
     if (
@@ -197,11 +202,8 @@ def ticker_has_quote(ticker: Any) -> bool:
         and float(ask) > 0
     ):
         return True
-    for attr in ("last", "close"):
-        price = getattr(ticker, attr, None)
-        if is_valid_ib_number(price) and float(price) > 0:
-            return True
-    return False
+    last = getattr(ticker, "last", None)
+    return bool(is_valid_ib_number(last) and float(last) > 0)
 
 
 def pnl_is_ready(pnl: Any) -> bool:
@@ -211,6 +213,34 @@ def pnl_is_ready(pnl: Any) -> bool:
     return is_valid_ib_number(getattr(pnl, "dailyPnL", None)) or is_valid_ib_number(
         getattr(pnl, "unrealizedPnL", None)
     )
+
+
+def pnl_daily_is_ready(pnl: Any) -> bool:
+    """True only once `dailyPnL` itself is valid.
+
+    R-111: IB commonly delivers a valid `unrealizedPnL` with `dailyPnL`
+    still at DBL_MAX right after connect and outside RTH. Phase 6 consumes
+    dailyPnL ONLY and writes None when unset, so waiting on the looser
+    predicate intermittently blanks TODAY'S P&L.
+    """
+    if pnl is None:
+        return False
+    return is_valid_ib_number(getattr(pnl, "dailyPnL", None))
+
+
+def positions_snapshot_is_ready(ended: bool, positions: Any) -> bool:
+    """True when positionEnd fired AND every row carries a finite avgCost.
+
+    R-118: the old inline predicate was `ended and all(valid avgCost ...)`.
+    `connectionClosed()` empties the positions cache and `all([])` is
+    vacuously True, so a socket drop mid-wait reported SUCCESS.
+    """
+    if not ended:
+        return False
+    rows = list(positions or [])
+    if not rows:
+        return False
+    return all(is_valid_ib_number(getattr(pos, "avgCost", None)) for pos in rows)
 
 
 def bind_event(event: Any, handler: Callable) -> Callable[[], None]:
@@ -469,6 +499,14 @@ class IBClient:
             elapsed += step
             if predicate():
                 return True
+            # R-118: a socket that drops mid-wait will never satisfy the
+            # predicate. Burning the full cap in silence made a degraded
+            # gateway byte-identical to a healthy one.
+            if not self.is_connected():
+                logger.warning(
+                    "wait_until abandoned after %.2fs: IB socket closed", elapsed
+                )
+                return False
         return bool(predicate())
 
     # -- error handling -----------------------------------------------------
@@ -576,13 +614,16 @@ class IBClient:
 
                     def _ready() -> bool:
                         if not ended:
-                            return False
-                        return all(
-                            is_valid_ib_number(getattr(pos, "avgCost", None))
-                            for pos in self._ib.positions()
+                            return False  # don't read the cache before end
+                        return positions_snapshot_is_ready(
+                            ended, self._ib.positions()
                         )
 
-                    self.wait_until(_ready, timeout=1.0)
+                    if not self.wait_until(_ready, timeout=1.0):
+                        logger.warning(
+                            "get_positions: positionEnd/avgCost wait lapsed — "
+                            "returning a possibly stale cache"
+                        )
                 finally:
                     unbind()
             except Exception as exc:
@@ -608,7 +649,8 @@ class IBClient:
         """Request P&L for account. Returns PnL with dailyPnL, unrealizedPnL, realizedPnL."""
         self._require_connection()
         pnl = self._ib.reqPnL(account)
-        self.wait_until(lambda: pnl_is_ready(pnl), timeout=2.0)
+        if not self.wait_until(lambda: pnl_daily_is_ready(pnl), timeout=2.0):
+            logger.warning("get_pnl: no dailyPnL tick within 2.0s")
         return pnl
 
     def cancel_pnl(self, pnl_obj: Any) -> None:
@@ -626,7 +668,7 @@ class IBClient:
         """
         self._require_connection()
         pnl = self._ib.reqPnLSingle(account, "", con_id)
-        self.wait_until(lambda: pnl_is_ready(pnl), timeout=0.5)
+        self.wait_until(lambda: pnl_daily_is_ready(pnl), timeout=0.5)
         return pnl
 
     def cancel_pnl_single(self, account: str, con_id: int) -> None:
@@ -782,7 +824,13 @@ class IBClient:
         """
         self._require_connection()
         self._ib.reqGlobalCancel()
-        self.wait_until(lambda: not self._ib.openTrades(), timeout=0.5)
+        # R-110: on a freshly-connected master with no openOrder pushes yet,
+        # openTrades() is empty and the predicate is true before the first
+        # sleep — the kill switch returned with reqGlobalCancel still in the
+        # transport buffer. Always drain at least one step.
+        self._ib.sleep(_WAIT_POLL_S)
+        if not self.wait_until(lambda: not self._ib.openTrades(), timeout=0.5):
+            logger.warning("global_cancel: orders still working after the drain wait")
 
     def get_open_orders(self) -> list:
         """Return all open orders across all clients.
