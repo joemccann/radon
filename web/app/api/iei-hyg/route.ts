@@ -3,7 +3,7 @@ import { readFile } from "fs/promises";
 import { join } from "path";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
-import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
+import { contentTimestampMs, dbFirstRead, type TimestampedRead, staleCollapse } from "@/lib/dbFirstRead";
 import { MISSING_IEI_HYG } from "@/lib/ieiHyg";
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
@@ -48,7 +48,9 @@ export async function GET(): Promise<Response> {
     maxAgeMs: IEI_HYG_MAX_AGE_MS,
     label: "iei-hyg",
   });
-  const response = NextResponse.json(result.ok ? result.data : MISSING_IEI_HYG);
+  const response = NextResponse.json(
+    result.ok && result.fresh ? result.data : staleCollapse(MISSING_IEI_HYG, result),
+  );
   return setCacheResponseHeaders(response, {
     maxAgeSeconds: 300,
     staleWhileRevalidateSeconds: 3600,

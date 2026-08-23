@@ -3,7 +3,7 @@ import { readFile } from "fs/promises";
 import { join } from "path";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
-import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
+import { contentTimestampMs, dbFirstRead, type TimestampedRead, staleCollapse } from "@/lib/dbFirstRead";
 import { MISSING_TRIN } from "@/lib/trin";
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
@@ -48,7 +48,9 @@ export async function GET(): Promise<Response> {
     maxAgeMs: TRIN_MAX_AGE_MS,
     label: "trin",
   });
-  const response = NextResponse.json(result.ok ? result.data : MISSING_TRIN);
+  const response = NextResponse.json(
+    result.ok && result.fresh ? result.data : staleCollapse(MISSING_TRIN, result),
+  );
   return setCacheResponseHeaders(response, {
     maxAgeSeconds: 60,
     staleWhileRevalidateSeconds: 300,
