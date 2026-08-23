@@ -1,3 +1,27 @@
+# Task: GSC indexing / ranking (2026-08-23)
+
+## Report (sc-domain:radon.run, last update 8/20/26)
+
+- Indexed 11 / not indexed 22
+- Submitted sitemap: 9 indexed, 1 discovered-not-indexed (`/status`)
+- 15 crawled-not-indexed: `/_next/static/chunks/*?dpl=*`
+- 3 months: 14 clicks, 350 impressions, 4% CTR, avg position 10
+- Top queries: signalodds (15), fractional kelly sizing (10), cri crash (2)
+
+## Checklist
+
+- [x] S1 robots.txt Disallow `/_next/` (both * and AI groups)
+- [x] S2 noindex `/status`, drop from sitemap
+- [x] S3 retarget Kelly / CRI / IB titles to GSC queries
+- [x] S4 bump lastmod, keywords, Organization alternateName
+
+## Review
+
+- site/lib 85/85; full Vitest 7086/7086
+- Did not change `web/` robots (demo.radon.run still "indexed though blocked by robots.txt")
+
+---
+
 # Task: P2 host paths (2026-08-23)
 
 ## Dependency graph

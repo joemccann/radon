@@ -23,7 +23,10 @@ describe("fractional Kelly page content contract", () => {
   it("keeps the title and description within SEO limits", () => {
     expect(PAGE_TITLE.length).toBeLessThanOrEqual(60);
     expect(PAGE_TITLE.endsWith(" | Radon Terminal")).toBe(true);
+    expect(PAGE_TITLE).toContain("Fractional Kelly Sizing");
     expect(PAGE_DESCRIPTION.length).toBeLessThanOrEqual(160);
+    expect(PAGE_DESCRIPTION.toLowerCase()).toContain("fractional kelly sizing");
+    expect(PAGE_DESCRIPTION.toLowerCase()).toContain("signal odds");
   });
 
   it("bans em dashes and AI cliches from the copy", () => {
@@ -42,11 +45,20 @@ describe("fractional Kelly page content contract", () => {
   });
 
   it("keeps every FAQ entry a real question with a substantive answer", () => {
-    expect(kellySizingFaqEntries).toHaveLength(4);
+    expect(kellySizingFaqEntries).toHaveLength(5);
     for (const entry of kellySizingFaqEntries) {
       expect(entry.question.trim().endsWith("?")).toBe(true);
       expect(entry.answer.trim().length).toBeGreaterThan(80);
     }
+  });
+
+  it("defines signal odds in a FAQ Google already shows impressions for", () => {
+    const entry = kellySizingFaqEntries.find((item) =>
+      item.question.toLowerCase().includes("signal odds"),
+    );
+    expect(entry).toBeDefined();
+    expect(entry!.answer.toLowerCase()).toContain("max gain");
+    expect(entry!.answer.toLowerCase()).toContain("max loss");
   });
 
   it("states the cap as a ceiling that cannot be overridden", () => {

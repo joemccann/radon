@@ -46,7 +46,9 @@ describe("crash-risk-index content contract", () => {
   it("keeps the SEO surface within limits", () => {
     expect(CRASH_RISK_INDEX_TITLE.length).toBeLessThanOrEqual(60);
     expect(CRASH_RISK_INDEX_TITLE.endsWith(" | Radon Terminal")).toBe(true);
+    expect(CRASH_RISK_INDEX_TITLE).toContain("CRI Crash");
     expect(CRASH_RISK_INDEX_DESCRIPTION.length).toBeLessThanOrEqual(200);
+    expect(CRASH_RISK_INDEX_DESCRIPTION).toContain("Crash Risk Index");
   });
 
   it("describes the real composite: four components scored 0 to 25", () => {

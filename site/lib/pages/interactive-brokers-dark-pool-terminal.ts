@@ -20,7 +20,7 @@ export const NAV_LABEL = "Interactive Brokers dark pool terminal";
 export const PAGE_TITLE =
   "Interactive Brokers Dark Pool Terminal | Radon Terminal";
 export const PAGE_DESCRIPTION =
-  "A dark pool terminal on Interactive Brokers rails: off-exchange prints scored for accumulation, then routed as defined-risk IB combo orders. Free demo.";
+  "Interactive Brokers dark pool terminal: Unusual Whales prints scored for accumulation, then routed as defined-risk IB combo orders. Free demo.";
 export const PAGE_HEADLINE =
   "A dark pool terminal is only finished when it routes the order.";
 
@@ -28,7 +28,7 @@ export const PAGE_HEADLINE =
 // copy meaningfully changes; a request-time stamp gets ignored by Google
 // (same rationale as SITE_CONTENT_LAST_MODIFIED in lib/seo.ts).
 export const PAGE_DATE_PUBLISHED = "2026-07-03";
-export const PAGE_DATE_MODIFIED = "2026-07-03";
+export const PAGE_DATE_MODIFIED = "2026-08-23";
 
 export type IbRole = {
   role: string;

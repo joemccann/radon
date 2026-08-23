@@ -15,16 +15,16 @@ import {
 export const PAGE_SLUG = "fractional-kelly-position-sizing";
 export const PAGE_NAV_LABEL = "Fractional Kelly position sizing";
 export const PAGE_TITLE =
-  "Fractional Kelly Options Position Sizing | Radon Terminal";
+  "Fractional Kelly Sizing for Options | Radon Terminal";
 export const PAGE_DESCRIPTION =
-  "How Radon sizes options positions: fractional Kelly from structure max loss and signal odds, hard-capped at 2.5% of bankroll per position. Free demo.";
+  "Fractional Kelly sizing for options: signal odds from max gain over max loss, quarter-Kelly, then a hard 2.5% bankroll cap. Free demo.";
 export const PAGE_HEADLINE = "Position size is a policy, not a feeling.";
 
 // Frozen per-page dates for TechArticle JSON-LD. Update dateModified when the
 // copy meaningfully changes; a request-time stamp gets ignored by Google
 // (same rationale as SITE_CONTENT_LAST_MODIFIED in lib/seo.ts).
 export const PAGE_DATE_PUBLISHED = "2026-07-03";
-export const PAGE_DATE_MODIFIED = "2026-07-03";
+export const PAGE_DATE_MODIFIED = "2026-08-23";
 
 export const pageUrl = `${siteUrl}/${PAGE_SLUG}`;
 
@@ -70,6 +70,11 @@ export const kellySizingFaqEntries: FaqEntry[] = [
     question: "Can I override the 2.5% cap?",
     answer:
       "No. A hard cap that can be overridden is advisory, and the evaluation pipeline is explicit that this one is not: milestone 6 enforces the cap before milestone 7 will route an order. The value of the ceiling is that it holds on exactly the trade where overriding it feels most justified.",
+  },
+  {
+    question: "What are signal odds in fractional Kelly sizing?",
+    answer:
+      "Signal odds are the payoff ratio b in the Kelly formula: max gain divided by max loss on the chosen defined-risk structure. Radon reads that ratio at the sizing milestone, combines it with the probability assigned to the flow signal, takes a quarter of full Kelly, and then applies the 2.5% bankroll ceiling.",
   },
 ];
 
