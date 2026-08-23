@@ -818,14 +818,26 @@ export function buildPerformanceView(raw: unknown): PerformanceView | null {
       ? suppressFor(rawAnnualized, "implausible")
       : rawAnnualized;
 
-  const mwrPeriod = isV2
+  // R-147: `twr.cum_return` and `twr.annualized` are plausibility-gated but
+  // the MWR pair passed through `gatedValueFrom` with no bar at all, so the
+  // MWR/IRR card could render an absurd or sign-inverted figure right beside
+  // a TWR that had been correctly suppressed.
+  const rawMwrPeriod = isV2
     ? gatedValueFrom(mwrBlock.period_return, TWR_GATES.MIN_N_MWR)
     : isMwrGated(nReturns)
       ? suppressed("insufficient_n", nReturns, TWR_GATES.MIN_N_MWR)
       : suppressed("not_computed", nReturns, TWR_GATES.MIN_N_MWR);
-  const mwrAnnualized = isV2
+  const mwrPeriod =
+    rawMwrPeriod.value != null && isImplausibleCumReturn(rawMwrPeriod.value, calendarDays)
+      ? suppressFor(rawMwrPeriod, "implausible")
+      : rawMwrPeriod;
+  const rawMwrAnnualized = isV2
     ? gatedValueFrom(mwrBlock.annualized, TWR_GATES.MIN_N_MWR)
     : suppressed("not_computed", nReturns, TWR_GATES.MIN_N_MWR);
+  const mwrAnnualized =
+    rawMwrAnnualized.value != null && isImplausibleAnnualized(rawMwrAnnualized.value)
+      ? suppressFor(rawMwrAnnualized, "implausible")
+      : rawMwrAnnualized;
 
   const risk = isV2 ? riskFromV2(gatedRecord(data.risk), nReturns) : riskFromV1(summary, nReturns);
   const payloadWarnings = performanceWarnings(data);

@@ -234,12 +234,37 @@ function isVerifiedReturnCapitalV2(
   return payload.measurement.quality === "exact";
 }
 
+/**
+ * True when every SHORT option leg is covered by a same-right LONG leg.
+ *
+ * R-146: `isNetDebitPaid` replaced `isFullLossDebit` without carrying over
+ * any risk check, so a 1x2 call ratio (buy 1 @ $10, sell 2 @ $4.50) — net
+ * debit +$100, UNBOUNDED upside risk — got a $100 denominator and published
+ * a four-digit "Return on debit paid · exact". The debit bounds the loss
+ * only while the shorts are covered; strike-agnostic on purpose, matching
+ * the order-risk netting rule (web/CLAUDE.md §6).
+ */
+function shortsAreCovered(pos: PortfolioPosition): boolean {
+  const longsByRight = new Map<string, number>();
+  const shortsByRight = new Map<string, number>();
+  for (const leg of pos.legs ?? []) {
+    if (leg.type !== "Call" && leg.type !== "Put") continue; // stock covers separately
+    const contracts = Math.abs(Number(leg.contracts) || 0);
+    const bucket = leg.direction === "SHORT" ? shortsByRight : longsByRight;
+    bucket.set(leg.type, (bucket.get(leg.type) ?? 0) + contracts);
+  }
+  for (const [right, short] of shortsByRight) {
+    if (short > (longsByRight.get(right) ?? 0)) return false;
+  }
+  return true;
+}
+
 function isNetDebitPaid(pos: PortfolioPosition, entryCost: number): boolean {
   if (!Number.isFinite(entryCost) || entryCost <= 0) return false;
   // Single-leg shorts store entry_cost as a magnitude. That is a credit, not
   // capital paid. Multi-leg nets are already signed by resolveEntryCost.
   if (pos.legs.length === 1 && pos.legs[0]?.direction === "SHORT") return false;
-  return true;
+  return shortsAreCovered(pos);
 }
 
 /**
@@ -248,8 +273,9 @@ function isNetDebitPaid(pos: PortfolioPosition, entryCost: number): boolean {
  * Defined-risk max loss wins. Any position without exact max loss may use a
  * positive, isolated broker-observed opening-margin record with complete v2
  * provenance. A projected what-if number is never accepted. A net debit paid
- * (entry_cost > 0) is a valid denominator even on undefined-risk mixed
- * structures such as a debit risk reversal. Opening credits stay unavailable.
+ * (entry_cost > 0) is a valid denominator only while every short option leg
+ * is covered by a same-right long — the debit bounds the loss exactly then,
+ * and not at all otherwise (R-146). Opening credits stay unavailable.
  */
 export function resolveReturnCapital(pos: PortfolioPosition): ReturnCapitalBasis | null {
   if (normalizedRiskProfile(pos) === "defined") {
