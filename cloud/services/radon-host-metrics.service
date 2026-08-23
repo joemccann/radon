@@ -24,11 +24,8 @@ ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/host_metr
 StandardOutput=journal
 StandardError=journal
 # A oneshot with no runtime ceiling can hang forever and freeze its timer
-# (the ib-watchdog self-hang, 2026-06-10 / 2fbc72f class) -- bound the whole
-# run. For Type=oneshot the operative bound is TimeoutStartSec; RuntimeMaxSec
-# is set for belt-and-suspenders symmetry. Normal run is ~1.2s (1s CPU
-# sample + bounded hrana writes, 4s timeout each).
-RuntimeMaxSec=30
+# (the ib-watchdog self-hang, 2026-06-10 / 2fbc72f class). Type=oneshot
+# ignores RuntimeMaxSec; TimeoutStartSec is the bound. Normal run is ~1.2s.
 TimeoutStartSec=30
 
 [Install]
