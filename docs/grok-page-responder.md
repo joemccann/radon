@@ -155,6 +155,16 @@ until a human ran reset-failed + start. Before launching grok on a
 - the unit's timer's next elapse is more than 12h away
   (`RERUN_TIMER_HORIZON_SECS`). Closer than that, waiting for the timer
   remains correct and grok triages the page as before.
+- the unit has not already spent its re-run for the UTC day
+  (`MAX_RERUNS_PER_UNIT_PER_DAY`, counted by `watchdog.pages.reruns_since`
+  over completed `restarted_unit:` tickets for that service). R-115: the
+  green-deploy marker is written by EVERY green deploy with no relation to
+  the failed unit, so a unit failing for an environmental reason (UW quota
+  exhausted, provider 5xx, gateway down) otherwise satisfies "a fix has
+  deployed since" once per unrelated merge to main, indefinitely — four of
+  the allowlisted units are UW consumers, so each attempt spends quota it
+  does not have. Fails CLOSED: a count that cannot be read stands the
+  re-run down.
 
 Action: `systemctl reset-failed <unit>` + `systemctl start --no-block
 <unit>`, ticket completed as `restarted_unit`, normal follow-up push. Any

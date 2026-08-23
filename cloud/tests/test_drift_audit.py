@@ -195,7 +195,7 @@ def test_gather_degrades_on_expired_allowlist_entry(monkeypatch):
     monkeypatch.setattr(da, "_compare_file_pair", lambda *args: None)
     monkeypatch.setattr(da, "_check_compose", lambda drifts: None)
     monkeypatch.setattr(da, "_check_units", inject_unit_drift)
-    monkeypatch.setattr(da, "_check_sudoers", lambda drifts: None)
+    monkeypatch.setattr(da, "_check_sudoers", lambda drifts, known: None)
     monkeypatch.setattr(da, "_check_env_invariants", lambda drifts: None)
     monkeypatch.setattr(
         da, "_read_repo",
@@ -338,7 +338,7 @@ def test_gather_does_not_mix_general_git_dirtiness_into_config(monkeypatch):
     monkeypatch.setattr(da, "_compare_file_pair", lambda *args: None)
     monkeypatch.setattr(da, "_check_compose", lambda drifts: None)
     monkeypatch.setattr(da, "_check_units", lambda drifts, known: None)
-    monkeypatch.setattr(da, "_check_sudoers", lambda drifts: None)
+    monkeypatch.setattr(da, "_check_sudoers", lambda drifts, known: None)
     monkeypatch.setattr(da, "_check_env_invariants", lambda drifts: None)
     monkeypatch.setattr(da, "_read", lambda path: "")
     assert da.gather() == ([], {}, [])
