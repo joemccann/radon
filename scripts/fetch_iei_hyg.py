@@ -382,7 +382,11 @@ def _write_json_cache(payload: dict[str, Any]) -> None:
     os.replace(tmp, IEI_HYG_JSON)
 
 
-def persist_result(payload: dict[str, Any], changed_rows: list[dict[str, Any]]) -> None:
+def persist_result(
+    payload: dict[str, Any],
+    changed_rows: list[dict[str, Any]],
+    health_error: Optional[dict[str, Any]] = None,
+) -> None:
     """Dual-write: Turso rows + snapshot + heartbeat, then the JSON fallback.
 
     Refuses an empty series entirely. Snapshot + heartbeat run EVERY cycle
@@ -396,7 +400,12 @@ def persist_result(payload: dict[str, Any], changed_rows: list[dict[str, Any]]) 
     if changed_rows:
         writer.upsert_iei_hyg_rows(changed_rows, recorded_at=scan_time)
     writer.upsert_scan_snapshot(SERVICE, scan_time, payload)
-    writer.record_service_health(SERVICE, "ok", finished_at=scan_time)
+    if health_error is None:
+        writer.record_service_health(SERVICE, "ok", finished_at=scan_time)
+    else:
+        writer.record_service_health(
+            SERVICE, "error", finished_at=scan_time, error=health_error,
+        )
     _write_json_cache(payload)
 
 
@@ -421,7 +430,20 @@ def run() -> dict[str, Any]:
     if not new_rows:
         _log("source unchanged; refreshing snapshot only")
     payload = build_output(series, source=source)
-    persist_result(payload, new_rows)
+    # R-098: see fetch_credit_spread — a dead source lived only in
+    # payload["source"], which nothing reads.
+    health_error = (
+        {
+            "message": (
+                "iei-hyg: every source failed (IB, UW, Yahoo); serving the "
+                f"cached series through {payload.get('as_of') or 'the last row'}"
+            ),
+            "class": "source_down",
+        }
+        if not source or source == "none"
+        else None
+    )
+    persist_result(payload, new_rows, health_error)
     return payload
 
 

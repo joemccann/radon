@@ -257,7 +257,7 @@ class TestCli:
         monkeypatch.setattr(ft, "load_cached_daily", lambda: [])
         monkeypatch.setattr(ft, "sample_live", lambda: (None, "ib-skipped"))
         monkeypatch.setattr(ft, "fetch_daily", lambda: daily)
-        monkeypatch.setattr(ft, "persist_result", lambda payload, s, d: None)
+        monkeypatch.setattr(ft, "persist_result", lambda payload, s, d, health_error=None: None)
         assert main(["--json"]) == 0
         payload = json.loads(capsys.readouterr().out)
         assert payload["current"]["daily_close"] == 0.68

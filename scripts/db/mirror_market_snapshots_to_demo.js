@@ -182,12 +182,31 @@ export async function runMarketMirror({
   const purgedAccountTables = tables.purgedAccountTables ?? PURGED_ACCOUNT_TABLES;
   const opts = { maxAttempts, sleep, log, now, runId };
 
+  // R-097: this ran OUTSIDE the retry ladder and outside `failures[]`, so a
+  // documented transient 502 on the purge was console.warn'd and the mirror
+  // proceeded, reported done and exited 0 — leaving account-derived rows from
+  // the production book in the PUBLIC demo database indefinitely, with no
+  // signal in the exit status, the health rows or the retry log. It is
+  // retried like every other statement, and a purge that ultimately fails is
+  // fatal BEFORE any snapshot row is written.
   for (const table of purgedAccountTables) {
     try {
-      await dst.execute(`DELETE FROM ${table}`);
+      await retryOperation({
+        phase: `${table}:account_purge`,
+        operation: () => dst.execute(`DELETE FROM ${table}`),
+        maxAttempts,
+        sleep,
+        log,
+        now,
+        runId,
+      });
       console.log(`[mirror] purged account-derived table: ${table}`);
     } catch (err) {
-      console.warn(`[mirror] SKIP purge ${table} (dest write failed: ${err.message})`);
+      console.error(`[mirror] FATAL purge ${table} failed: ${err.message}`);
+      throw new Error(
+        `account-data purge failed for ${table}: ${err.message} — refusing to ` +
+        `mirror while production account rows may remain in the demo database`,
+      );
     }
   }
 

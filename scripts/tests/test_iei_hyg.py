@@ -259,7 +259,7 @@ class TestCli:
             "fetch_closes",
             lambda *a, **k: ({"IEI": closes["iei"], "HYG": closes["hyg"], "DXY": closes["dxy"]}, "yahoo"),
         )
-        monkeypatch.setattr(fih, "persist_result", lambda payload, rows: None)
+        monkeypatch.setattr(fih, "persist_result", lambda payload, rows, health_error=None: None)
         assert main(["--json"]) == 0
         out = capsys.readouterr().out
         payload = json.loads(out)

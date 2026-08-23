@@ -438,7 +438,9 @@ def _write_json_cache(payload: dict[str, Any]) -> None:
 
 
 def persist_result(
-    payload: dict[str, Any], rows_changed_rows: list[dict[str, Any]]
+    payload: dict[str, Any],
+    rows_changed_rows: list[dict[str, Any]],
+    health_error: Optional[dict[str, Any]] = None,
 ) -> None:
     """Dual-write: Turso rows + snapshot + heartbeat, then the JSON fallback.
 
@@ -454,7 +456,12 @@ def persist_result(
     if rows_changed_rows:
         writer.upsert_credit_spread_rows(rows_changed_rows, recorded_at=scan_time)
     writer.upsert_scan_snapshot("credit-spread", scan_time, payload)
-    writer.record_service_health("credit-spread", "ok", finished_at=scan_time)
+    if health_error is None:
+        writer.record_service_health("credit-spread", "ok", finished_at=scan_time)
+    else:
+        writer.record_service_health(
+            "credit-spread", "error", finished_at=scan_time, error=health_error,
+        )
     _write_json_cache(payload)
 
 
@@ -481,8 +488,23 @@ def run() -> dict[str, Any]:
     if not new_rows:
         print("[credit-spread] source unchanged; refreshing snapshot only", file=sys.stderr)
 
-    payload = build_output(series, source=combine_source(sources) or "none")
-    persist_result(payload, new_rows)
+    combined = combine_source(sources) or "none"
+    payload = build_output(series, source=combined)
+    # R-098: `source="none"` means every rung of IB -> UW -> Yahoo failed, and
+    # nothing consumed that field — the row heartbeated ok off the cached
+    # series and the panel rendered it as current.
+    health_error = (
+        {
+            "message": (
+                "credit-spread: every source failed (IB, UW, Yahoo); serving "
+                f"the cached series through {payload.get('as_of') or 'the last row'}"
+            ),
+            "class": "source_down",
+        }
+        if combined == "none"
+        else None
+    )
+    persist_result(payload, new_rows, health_error)
     return payload
 
 

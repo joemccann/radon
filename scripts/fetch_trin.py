@@ -136,9 +136,14 @@ def moving_average(values: list[float], n: int = MA_PERIOD) -> Optional[float]:
     return sum(window) / n
 
 
-def classify_state(ma10: Optional[float]) -> str:
+def classify_state(ma10: Optional[float], source: Optional[str] = None) -> str:
+    """R-099: a delayed or frozen print may not promote the badge to
+    `in_zone`. The zone is a live-market call; a 15-minute-old TRIN reading
+    is not evidence for it."""
     if ma10 is None:
         return "neutral"
+    if source is not None and source not in LIVE_SOURCES:
+        return "neutral" if ma10 <= ZONE_NEAR else _elevated_or_neutral(ma10)
     if ma10 <= ZONE_LOW:
         return "in_zone"
     if ma10 <= ZONE_NEAR:
@@ -146,6 +151,10 @@ def classify_state(ma10: Optional[float]) -> str:
     if ma10 >= ZONE_HIGH:
         return "elevated"
     return "neutral"
+
+
+def _elevated_or_neutral(ma10: float) -> str:
+    return "elevated" if ma10 >= ZONE_HIGH else "neutral"
 
 
 def _field(source: Any, name: str) -> Any:
@@ -245,12 +254,24 @@ def _ib_gateway_unavailable() -> bool:
     return False
 
 
-def _snapshot_ticker(ib: Any, contract: Any) -> Optional[Any]:
-    """Snapshot an IB index, trying live -> frozen -> delayed feeds.
-    snapshot=True MUST pass "" genericTickList (feedback_ib_snapshot_no_generic_ticks)."""
+# R-099: the ladder happily settles on type 3 (delayed) or 4
+# (delayed-frozen). A 15-minute-old print stamped with `datetime.now()` lands
+# in the CURRENT hour bucket, feeds MA(10) and reaches the UI as a live
+# IN ZONE badge. The `NOT NULL source` column exists to carry exactly this.
+IB_DATA_TYPE_SOURCE = {1: "ib", 2: "ib-frozen", 3: "ib-delayed", 4: "ib-delayed-frozen"}
+LIVE_SOURCES = frozenset({"ib"})
+
+
+def _snapshot_ticker(ib: Any, contract: Any) -> tuple[Optional[Any], Optional[int]]:
+    """Snapshot an IB index, trying live -> delayed -> delayed-frozen feeds.
+
+    Returns ``(ticker, market_data_type)`` so the caller can record WHICH
+    feed answered. snapshot=True MUST pass "" genericTickList
+    (feedback_ib_snapshot_no_generic_ticks).
+    """
     qualified = ib.qualifyContracts(contract)
     if not qualified:
-        return None
+        return None, None
     contract = qualified[0]
     for data_type in IB_MARKET_DATA_TYPES:
         try:
@@ -262,8 +283,8 @@ def _snapshot_ticker(ib: Any, contract: Any) -> Optional[Any]:
             _log(f"IB: {contract.symbol} snapshot (type {data_type}) failed: {exc}")
             continue
         if extract_index_value(ticker) is not None:
-            return ticker
-    return None
+            return ticker, data_type
+    return None, None
 
 
 def _bid_ask(ticker: Any) -> tuple[Optional[float], Optional[float]]:
@@ -272,7 +293,13 @@ def _bid_ask(ticker: Any) -> tuple[Optional[float], Optional[float]]:
     return _positive_finite(_field(ticker, "bid")), _positive_finite(_field(ticker, "ask"))
 
 
-def _build_sample(trin: float, ad_ticker: Any, vol_ticker: Any, now: datetime) -> Sample:
+def _build_sample(
+    trin: float,
+    ad_ticker: Any,
+    vol_ticker: Any,
+    now: datetime,
+    market_data_type: Optional[int] = None,
+) -> Sample:
     adv, dec = _bid_ask(ad_ticker)
     up_vol, down_vol = _bid_ask(vol_ticker)
     stamp = _iso_utc(now)
@@ -284,21 +311,24 @@ def _build_sample(trin: float, ad_ticker: Any, vol_ticker: Any, now: datetime) -
         "dec": None if dec is None else int(dec),
         "up_vol": up_vol,
         "down_vol": down_vol,
-        "source": "ib",
+        "source": IB_DATA_TYPE_SOURCE.get(market_data_type or 1, "ib"),
     }
 
 
 def _snapshot_indices(ib: Any) -> Optional[Sample]:
     from ib_insync import Index
 
-    trin_ticker = _snapshot_ticker(ib, Index("TRIN-NYSE", "NYSE"))
+    trin_ticker, data_type = _snapshot_ticker(ib, Index("TRIN-NYSE", "NYSE"))
     trin = extract_index_value(trin_ticker) if trin_ticker is not None else None
     if trin is None:
         _log("IB: TRIN-NYSE unpriceable")
         return None
-    ad_ticker = _snapshot_ticker(ib, Index("AD-NYSE", "NYSE"))
-    vol_ticker = _snapshot_ticker(ib, Index("VOL-NYSE", "NYSE"))
-    return _build_sample(trin, ad_ticker, vol_ticker, datetime.now(timezone.utc))
+    ad_ticker, _ad_type = _snapshot_ticker(ib, Index("AD-NYSE", "NYSE"))
+    vol_ticker, _vol_type = _snapshot_ticker(ib, Index("VOL-NYSE", "NYSE"))
+    return _build_sample(
+        trin, ad_ticker, vol_ticker, datetime.now(timezone.utc),
+        market_data_type=data_type,
+    )
 
 
 def sample_live() -> tuple[Optional[Sample], str]:
@@ -452,10 +482,21 @@ def _nothing_to_persist(payload: dict[str, Any], new_samples: list[Sample], new_
     return not new_samples and not new_daily and not payload["hourly"] and not payload["daily"]
 
 
-def persist_result(payload: dict[str, Any], new_samples: list[Sample], new_daily_rows: list[DailyRow]) -> None:
+def persist_result(
+    payload: dict[str, Any],
+    new_samples: list[Sample],
+    new_daily_rows: list[DailyRow],
+    health_error: Optional[dict[str, Any]] = None,
+) -> None:
     """Dual-write: Turso rows + snapshot + heartbeat, then the JSON fallback.
     Snapshot + heartbeat run EVERY cycle so the staleness banner notices a
-    silent writer; an entirely empty run is refused."""
+    silent writer; an entirely empty run is refused.
+
+    R-098: the heartbeat used to be an unconditional `ok`, so a total IB
+    outage re-served the cached print behind a green banner every 5 minutes
+    all day. The degradation lived only in `payload["source"]`, which nothing
+    consumes. `fetch_ivrank.py` is the reference shape.
+    """
     if _nothing_to_persist(payload, new_samples, new_daily_rows):
         _log("refusing to persist: no samples and no daily rows")
         return
@@ -466,7 +507,12 @@ def persist_result(payload: dict[str, Any], new_samples: list[Sample], new_daily
     if new_daily_rows:
         writer.upsert_trin_daily_rows(new_daily_rows, recorded_at=scan_time)
     writer.upsert_scan_snapshot(SERVICE, scan_time, payload)
-    writer.record_service_health(SERVICE, "ok", finished_at=scan_time)
+    if health_error is None:
+        writer.record_service_health(SERVICE, "ok", finished_at=scan_time)
+    else:
+        writer.record_service_health(
+            SERVICE, "error", finished_at=scan_time, error=health_error,
+        )
     _write_json_cache(payload)
 
 
@@ -482,7 +528,20 @@ def run() -> dict[str, Any]:
     samples = merge_samples(cached_samples, sample)
     daily_source = "stockcharts" if fresh_daily else "cache"
     payload = build_output(samples, daily, source=f"{live_source}+{daily_source}")
-    persist_result(payload, [sample] if sample else [], new_daily)
+    # `ib-skipped` is off-hours and expected; `ib-failed` is the live source
+    # being down while the panel keeps rendering a cached print (R-098).
+    health_error = (
+        {
+            "message": (
+                f"trin: live IB sample unavailable ({live_source}); serving the "
+                f"cached print through {payload.get('as_of') or 'the last sample'}"
+            ),
+            "class": "source_down",
+        }
+        if live_source == "ib-failed"
+        else None
+    )
+    persist_result(payload, [sample] if sample else [], new_daily, health_error)
     return payload
 
 
