@@ -147,6 +147,49 @@ def test_fetch_surface_ib_hit_skips_uw_ohlc() -> None:
     assert surface["iv_rank"] == payloads["iv_rank"]
 
 
+def test_scan_ib_session_connect_failure_yields_none(monkeypatch) -> None:
+    from utils.uw_surface import scan_ib_session
+
+    class BoomClient:
+        def connect(self, **kwargs):
+            raise RuntimeError("gateway down")
+
+        def disconnect(self):
+            raise AssertionError("disconnect unconnected client")
+
+    monkeypatch.setattr("clients.ib_client.IBClient", BoomClient)
+    with scan_ib_session() as ib:
+        assert ib is None
+
+
+def test_scan_ib_session_uses_auto_id_and_disconnects(monkeypatch) -> None:
+    from utils.uw_surface import scan_ib_session
+
+    calls: list = []
+
+    class FakeClient:
+        def connect(self, **kwargs):
+            calls.append(("connect", kwargs))
+
+        def disconnect(self):
+            calls.append("disconnect")
+
+        def get_historical_data(self, contract, **kwargs):
+            calls.append("hist")
+            return []
+
+    monkeypatch.setattr("clients.ib_client.IBClient", FakeClient)
+    with scan_ib_session() as ib:
+        assert ib is not None
+        ib.get_historical_data("AAPL")
+    assert calls[0][0] == "connect"
+    assert calls[0][1]["client_id"] == "auto"
+    assert calls[0][1]["timeout"] == 8
+    assert calls[0][1]["max_retries"] == 1
+    assert "hist" in calls
+    assert calls[-1] == "disconnect"
+
+
 def test_fetch_surface_ib_miss_calls_uw_ohlc() -> None:
     payloads = _payloads()
     uw = RecordingClient(**payloads)

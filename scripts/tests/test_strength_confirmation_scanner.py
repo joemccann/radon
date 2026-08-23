@@ -2,12 +2,22 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
 
 import strength_confirmation_scanner as strength
+
+
+@pytest.fixture(autouse=True)
+def _no_live_scan_ib(monkeypatch) -> None:
+    @contextmanager
+    def _none():
+        yield None
+
+    monkeypatch.setattr(strength, "scan_ib_session", _none)
 
 
 def test_dedupe_tickers_rejects_numeric_noise() -> None:
@@ -49,8 +59,69 @@ def test_build_output_counts_confirmed_strength_only_when_all_groups_pass() -> N
     assert payload["results"][0]["ticker"] == "AAPL"
 
 
+class _RecordingUW:
+    def __init__(self) -> None:
+        self.calls: list[tuple] = []
+
+    def get_stock_ohlc(self, ticker: str, candle_size: str = "1d"):
+        self.calls.append(("ohlc", ticker, candle_size))
+        return {"data": [{"close": 100.0}]}
+
+    def get_iv_rank(self, ticker: str):
+        self.calls.append(("iv_rank", ticker))
+        return {"data": []}
+
+    def get_option_contracts(self, ticker: str, **kwargs):
+        self.calls.append(("contracts", ticker, kwargs))
+        return {"data": []}
+
+    def get_greek_exposure_by_strike(self, ticker: str):
+        self.calls.append(("gex_strike", ticker))
+        return {"data": []}
+
+    def get_stock_oi_change(self, ticker: str, **_kwargs):
+        self.calls.append(("oi_change", ticker))
+        return {"data": []}
+
+
+class _RecordingIB:
+    def __init__(self, bars) -> None:
+        self.calls: list[tuple] = []
+        self.bars = bars
+
+    def get_historical_data(self, contract, **kwargs):
+        self.calls.append((contract, kwargs))
+        return self.bars
+
+
+def _ib_closes(count: int):
+    return [SimpleNamespace(date=f"2026-01-{(i % 28) + 1:02d}", close=100.0 + i) for i in range(count)]
+
+
+def test_scan_ticker_ib_hit_skips_uw_ohlc() -> None:
+    from utils.uw_surface import MIN_DAILY_CLOSES
+
+    uw = _RecordingUW()
+    ib = _RecordingIB(bars=_ib_closes(MIN_DAILY_CLOSES))
+
+    strength.scan_ticker("AAPL", client=uw, ib=ib, market_context=_market_context())
+
+    assert [name for name, *_rest in uw.calls] != []
+    assert all(name != "ohlc" for name, *_rest in uw.calls)
+    assert len(ib.calls) == 1
+
+
+def test_scan_ticker_ib_miss_calls_uw_ohlc() -> None:
+    uw = _RecordingUW()
+    ib = _RecordingIB(bars=_ib_closes(3))
+
+    strength.scan_ticker("AAPL", client=uw, ib=ib, market_context=_market_context())
+
+    assert uw.calls[0] == ("ohlc", "AAPL", "1d")
+
+
 def test_scan_ticker_reraises_rate_limit_from_ohlc(monkeypatch) -> None:
-    def _rate_limited(_client, _ticker):
+    def _rate_limited(_client, _ticker, **_kw):
         raise strength.UWRateLimitError("daily request limit")
 
     monkeypatch.setattr(strength, "fetch_surface", _rate_limited)
@@ -300,7 +371,7 @@ def test_verdict_for_thresholds() -> None:
 
 def test_scan_ticker_does_not_call_dropped_uw_methods(monkeypatch) -> None:
     client = RecordingSlimClient()
-    monkeypatch.setattr(strength, "fetch_surface", lambda _client, _ticker: _strength_surface())
+    monkeypatch.setattr(strength, "fetch_surface", lambda _client, _ticker, **_kw: _strength_surface())
     candidate = strength.scan_ticker(
         "AAPL",
         client=client,
@@ -357,7 +428,7 @@ def test_seven_group_scoring_confirms_when_payloads_supplied() -> None:
 
 
 def test_scan_ticker_returns_watchlist_when_dropped_sources_degrade(monkeypatch) -> None:
-    monkeypatch.setattr(strength, "fetch_surface", lambda _client, _ticker: _strength_surface())
+    monkeypatch.setattr(strength, "fetch_surface", lambda _client, _ticker, **_kw: _strength_surface())
     candidate = strength.scan_ticker(
         "AAPL",
         client=OIChangeClient(),
