@@ -164,6 +164,9 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // ``yield-curve`` — radon-yield-curve.timer fires daily 22:30 UTC every calendar day (weekend runs heartbeat), so a uniform 26h window fits; Treasury CSV + Yahoo only — no IB.
   "yield-curve": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
+  // ``div-yield`` — radon-divyield.timer fires daily 22:40 UTC every calendar day (weekend runs are unchanged-day heartbeats), so a uniform 26h window matches its yield-curve sibling; GitHub constituents + Yahoo dividends + Turso y10, no IB.
+  "div-yield": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+
   // ``credit-spread`` — radon-credit-spread.timer fires daily 21:45 UTC every
   // calendar day (weekend runs heartbeat), so a uniform 26h window fits;
   // IB HYG + SPX first, then UW, then Yahoo. Yahoo is a complete fallback
