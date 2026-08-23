@@ -5,14 +5,17 @@
 #   bash scripts/setup_reliability_weekend.sh
 #
 # Creates a DEDICATED clone at ~/radon-weekend/radon (never edit it by
-# hand — every run hard-resets it to origin/main), installs the two
-# launchd jobs (Sat 22:00 audit, Sun 10:00 remediate), and verifies the
+# hand — every run hard-resets it to origin/main), installs the single
+# daily launchd job (one cycle: audit then remediate), and verifies the
 # toolchain the runs need.
 set -euo pipefail
 
 WEEKEND_ROOT="${RADON_WEEKEND_ROOT:-$HOME/radon-weekend}"
 WEEKEND_REPO="$WEEKEND_ROOT/radon"
 WEEKEND_VENV="$WEEKEND_ROOT/venv"
+# Pushover creds for the per-phase page. Lives OUTSIDE the runner clone:
+# every round hard-resets and cleans that clone.
+WEEKEND_ENV="$WEEKEND_ROOT/.env"
 LAUNCH_AGENTS="$HOME/Library/LaunchAgents"
 ORIGIN_URL="$(git config --get remote.origin.url 2>/dev/null || echo git@github.com:joemccann/radon.git)"
 
@@ -35,11 +38,12 @@ check "pytest (venv)"     "$WEEKEND_VENV/bin/python" -c "import pytest" 2>/dev/n
 check "bun"               command -v bun
 check "node"              command -v node
 check "git ssh to origin" git ls-remote --exit-code "$ORIGIN_URL" HEAD
+check "pushover creds"    grep -qE '^PUSHOVER_(USER|TOKEN)=.+' "$WEEKEND_ENV"
 check "root ssh to VPS (optional, for operator use only)" \
   ssh -o BatchMode=yes -o ConnectTimeout=5 root@ib-gateway true
 if [[ $fail -ne 0 ]]; then
   echo "Fix the MISSING items above, then re-run. (VPS ssh is optional —"
-  echo "the unattended loop never uses it; it is for your Monday follow-ups.)"
+  echo "the unattended loop never uses it; it is for your follow-ups.)"
   # VPS ssh alone should not block install:
   # continue only if everything except that check passed.
 fi
@@ -49,8 +53,25 @@ mkdir -p "$WEEKEND_ROOT"
 if [[ ! -d "$WEEKEND_REPO/.git" ]]; then
   git clone "$ORIGIN_URL" "$WEEKEND_REPO"
 fi
+# An already-provisioned clone must carry the current config/ and scripts/
+# before the job is installed from it. main is force-reset; any weekend
+# branch and its commits survive.
+git -C "$WEEKEND_REPO" fetch origin --quiet
+git -C "$WEEKEND_REPO" checkout -f --quiet main
+git -C "$WEEKEND_REPO" reset --hard --quiet origin/main
 touch "$WEEKEND_REPO/.radon-weekend-runner"
 mkdir -p "$WEEKEND_REPO/logs/reliability-weekend"
+
+if [[ ! -f "$WEEKEND_ENV" ]]; then
+  cat > "$WEEKEND_ENV" <<'EOF'
+# Pushover creds for the daily cycle's per-phase page.
+# Single-quote any value containing $ (see CLAUDE.md).
+# PUSHOVER_USER=
+# PUSHOVER_TOKEN=
+EOF
+  chmod 600 "$WEEKEND_ENV"
+  echo "  created $WEEKEND_ENV (fill in PUSHOVER_USER / PUSHOVER_TOKEN to enable paging)"
+fi
 
 echo "[3/4] python + web dependencies in the runner clone"
 python3.13 -m venv "$WEEKEND_VENV"
@@ -63,21 +84,37 @@ python3.13 -m venv "$WEEKEND_VENV"
 
 echo "[4/4] launchd jobs"
 mkdir -p "$LAUNCH_AGENTS"
-for name in reliability-audit reliability-remediate; do
-  src="$WEEKEND_REPO/config/com.radon.${name}.plist"
-  dst="$LAUNCH_AGENTS/com.radon.${name}.plist"
-  sed -e "s|__WEEKEND_REPO__|$WEEKEND_REPO|g" -e "s|__HOME__|$HOME|g" \
-    "$src" > "$dst"
-  plutil -lint "$dst" >/dev/null
-  launchctl unload "$dst" 2>/dev/null || true
-  launchctl load "$dst"
-  echo "  loaded $dst"
+# Retire the split audit/remediate jobs. An operator copy left loaded keeps
+# firing into the same clone as the daily cycle, which is the same-clone
+# collision the single job exists to avoid. Idempotent: absent is fine.
+for old in reliability-audit reliability-remediate; do
+  legacy="$LAUNCH_AGENTS/com.radon.${old}.plist"
+  if [[ -f "$legacy" ]]; then
+    launchctl unload "$legacy" 2>/dev/null || true
+    rm -f "$legacy"
+    echo "  removed $legacy"
+  fi
 done
+JOB_PLIST="$LAUNCH_AGENTS/com.radon.reliability-daily.plist"
+sed -e "s|__WEEKEND_REPO__|$WEEKEND_REPO|g" -e "s|__HOME__|$HOME|g" \
+  "$WEEKEND_REPO/config/com.radon.reliability-daily.plist" > "$JOB_PLIST"
+plutil -lint "$JOB_PLIST" >/dev/null
+launchctl unload "$JOB_PLIST" 2>/dev/null || true
+launchctl load "$JOB_PLIST"
+echo "  loaded $JOB_PLIST"
+
+# Read the cadence back off the installed job so this copy cannot drift.
+SCHED_HOUR="$(plutil -extract StartCalendarInterval.Hour raw -o - "$JOB_PLIST")"
+SCHED_MIN="$(plutil -extract StartCalendarInterval.Minute raw -o - "$JOB_PLIST")"
 
 echo
-echo "Done. Schedule: audit Sat 22:00, remediate Sun 10:00 (local time)."
-echo "Dead-man: GitHub issue labeled 'reliability-weekend' gets a comment"
-echo "per run — no weekend comment means the runner did not fire."
+printf 'Done. Schedule: one cycle daily at %02d:%02d local (audit, then remediate).\n' \
+  "$SCHED_HOUR" "$SCHED_MIN"
+echo "Dead-man: GitHub issue labeled 'reliability-weekend' gets a comment per"
+echo "phase, plus a Pushover when $WEEKEND_ENV carries creds."
+echo "A quiet day means the runner did not fire OR the previous cycle is"
+echo "still running: launchd will not start a second instance of the label."
+echo "Check with: launchctl list | grep radon"
 echo "Smoke test now with:"
 echo "  RADON_WEEKEND_REPO=$WEEKEND_REPO bash $WEEKEND_REPO/scripts/reliability_weekend.sh audit"
 echo

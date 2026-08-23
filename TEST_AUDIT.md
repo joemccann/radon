@@ -2450,7 +2450,7 @@ renumbered from T-097. The first pass's audit text, ledger line and
 ## 11 · Audit ledger
 
 The weekend loop (`.claude/skills/testing-weekend/`) reads the last line
-here to scope its Saturday delta audit, and appends one line per run.
+here to scope its daily delta audit, and appends one line per run.
 Delta findings continue the T-### numbering in dated `## Delta audit` sections.
 
 - Audited through: `d681d247` on 2026-08-08 — initial full audit (T-001…T-054, PART A frozen 2026-08-07 at `2a75496a`) + PART B remediation waves (PRs #13/#14).
