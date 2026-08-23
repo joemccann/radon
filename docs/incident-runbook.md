@@ -220,10 +220,11 @@ the unit stays failed.
 - **Remediation (code):** the 1050s unit exports `RADON_SIGNALS_SCAN_TIMEOUT=490`
   (curl `-m` >= max FastAPI child). Wrapper default stays 200 so an
   un-upgraded `TimeoutStartSec=450` host does not SIGTERM a live scan.
-  CI deploy does not install the unit — root install-copy:
-  `install -m 0644 cloud/services/radon-signals-refresh.service /etc/systemd/system/ && systemctl daemon-reload`.
-  Then `systemctl reset-failed radon-signals-refresh.service`.
-  Do not restart-flap; next timer after the install-copy.
+  After one `bootstrap-control-plane.sh` publishes the
+  `sync-scheduled-units` verb, the next green CI deploy (or a same-SHA
+  re-run) installs the unit. Then
+  `systemctl reset-failed radon-signals-refresh.service`.
+  Do not restart-flap; next timer after the sync.
 - **Regression:**
   `test_run_signals_refresh_wrapper.py::test_wrapper_curl_deadline_covers_fastapi_scan_children`,
   `test_systemd_services.py::TestSignalsRefresh::test_oneshot_with_timeout`.

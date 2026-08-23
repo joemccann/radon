@@ -168,8 +168,7 @@ Immutable runners under `~/.radon-deploy-runners/` are extracted `a-w`.
 ## Systemd And Drift
 
 Canonical unit files are copied root-owned to `/etc/systemd/system`; they are
-not symlinked from the checkout. Unit changes require the non-restarting
-control-plane bootstrap or an equivalent reviewed root transaction.
+not symlinked from the checkout.
 
 Bootstrap installs only the control-plane units. Every other unit
 (the timer-owned scans and their timers) is installed by the CI deploy:
@@ -184,6 +183,15 @@ bumped is left uninstalled (the drift audit then flags it), so the
 drift-allowlist acknowledgment still covers a deliberate pending window;
 `tests/test_unit_install_acknowledgment.py` fails CI otherwise. A unit
 absent from the manifest is never installed.
+
+Allowlisted units (`config/auto-sync-units.txt`) get a second, tighter
+publish after a green deploy: `radon-deploy-root sync-scheduled-units`
+reads git objects at the GitHub `joemccann/radon` main tip (not the
+radon-writable checkout), requires the blob SHA-256 to match the
+manifest, installs `0644 root:root`, and `daemon-reload`s. It never
+starts, stops, or enables units. First enablement still needs one
+`bootstrap-control-plane.sh` so the live helper and sudoers gain both
+verbs.
 
 The drift audit runs from `/home/radon/radon/cloud` and compares live Caddy,
 Compose, systemd, polkit, sudoers, and installed helpers with this source. It
