@@ -119,7 +119,10 @@ class TestMovingAverageAndState:
         assert classify_state(0.6500001) == "neutral"
         assert classify_state(1.50) == "elevated"
         assert classify_state(1.4999999) == "neutral"
-        assert classify_state(None) == "neutral"
+        # REL-067 / R-160: no MA(10) is not a mid-range reading. `state` is
+        # the field the tab colours on, so "no reading yet" and "reading is
+        # mid-range, no signal" used to render identically as an all-clear.
+        assert classify_state(None) is None
 
 
 class TestExtractIndexValue:
@@ -171,7 +174,7 @@ class TestBuildOutput:
         assert payload["hourly"] == []
         assert payload["current"]["trin"] is None
         assert payload["current"]["ma10"] is None
-        assert payload["current"]["state"] == "neutral"
+        assert payload["current"]["state"] is None  # R-160
         assert payload["current"]["daily_close"] == 0.68
 
     def test_hourly_payload_is_capped(self, daily):

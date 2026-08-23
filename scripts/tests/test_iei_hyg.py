@@ -115,8 +115,13 @@ class TestPctRank:
         assert pct_rank(2.0, 1.0, 2.0) == 1.0
         assert pct_rank(1.25, 1.0, 2.0) == pytest.approx(0.25)
 
-    def test_degenerate_window_is_zero(self):
-        assert pct_rank(1.5, 1.5, 1.5) == 0.0
+    def test_degenerate_window_has_no_percentile(self):
+        """REL-067 / R-162: 0.0 is the STRONGEST risk-on reading this
+        indicator emits — "IEI/HYG at the bottom of its 52-week range" —
+        fabricated from a single distinct ratio, while `classify_state` on
+        the same input says "neutral"."""
+        assert pct_rank(1.5, 1.5, 1.5) is None
+        assert classify_state(1.5, 1.5, 1.5) == "neutral"
 
 
 class TestBuildOutput:

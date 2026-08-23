@@ -308,9 +308,17 @@ def classify_state(ratio: float, low: float, high: float) -> str:
     return "neutral"
 
 
-def pct_rank(ratio: float, low: float, high: float) -> float:
+def pct_rank(ratio: float, low: float, high: float) -> Optional[float]:
+    """R-162: a single-distinct-ratio window has NO percentile.
+
+    Returning 0.0 fabricated the strongest risk-on reading this indicator
+    emits — "IEI/HYG at the bottom of its 52-week range", i.e. maximum
+    high-yield outperformance — from no data, while `classify_state` on the
+    same input correctly said `"neutral"`. The two published fields
+    contradicted each other and the rank is the headline number.
+    """
     if high == low:
-        return 0.0
+        return None
     return (ratio - low) / (high - low)
 
 

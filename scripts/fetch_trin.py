@@ -136,12 +136,19 @@ def moving_average(values: list[float], n: int = MA_PERIOD) -> Optional[float]:
     return sum(window) / n
 
 
-def classify_state(ma10: Optional[float], source: Optional[str] = None) -> str:
+def classify_state(ma10: Optional[float], source: Optional[str] = None) -> Optional[str]:
     """R-099: a delayed or frozen print may not promote the badge to
     `in_zone`. The zone is a live-market call; a 15-minute-old TRIN reading
-    is not evidence for it."""
+    is not evidence for it.
+
+    R-160: no MA(10) yet is `None`, not `"neutral"`. `moving_average` returns
+    None below 10 hourly bars — a first install, a post-retention truncation
+    or a cache rebuild from a short data/trin.json all land there — and
+    `current.state` is the field the tab colours on, so "no reading yet" and
+    "mid-range, no signal" used to render identically as an all-clear.
+    """
     if ma10 is None:
-        return "neutral"
+        return None
     if source is not None and source not in LIVE_SOURCES:
         return "neutral" if ma10 <= ZONE_NEAR else _elevated_or_neutral(ma10)
     if ma10 <= ZONE_LOW:

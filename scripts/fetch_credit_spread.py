@@ -336,12 +336,21 @@ def lookback_return(window: list[dict[str, Any]], key: str) -> Optional[float]:
     return last_f / first_f - 1
 
 
-def classify_regime(spx_ret: Optional[float], hyg_ret: Optional[float]) -> str:
-    """Strict inequalities. Zero or missing return is coupled."""
+def classify_regime(spx_ret: Optional[float], hyg_ret: Optional[float]) -> Optional[str]:
+    """Strict inequalities. Zero return is coupled; MISSING is no regime.
+
+    R-161: a missing or non-finite return used to map onto `"coupled"`, which
+    is also the benign risk-on label. `lookback_return` returns None for a
+    window shorter than 2 rows, a non-numeric close or a zero denominator, so
+    a one-session series — a first run after a cache wipe, or a provider
+    cascade returning a single overlapping date — reported "credit and
+    equities in agreement". This indicator exists to surface `"divergent"`;
+    its failure mode must not be the reassuring label.
+    """
     if spx_ret is None or hyg_ret is None:
-        return "coupled"
+        return None
     if not (math.isfinite(spx_ret) and math.isfinite(hyg_ret)):
-        return "coupled"
+        return None
     if spx_ret > 0 and hyg_ret < 0:
         return "divergent"
     if spx_ret > 0 and hyg_ret > 0:
