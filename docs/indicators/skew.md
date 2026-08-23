@@ -56,7 +56,7 @@ change_t       = ratio_t - ratio_{t-1}        (None on the first stored session)
   returns daily putIV-callIV **difference** per expiry.
 - **Rejected**: Cboe SKEW index (tail-risk measure from the whole strip — NOT
   the 25d ratio; never substitute). IB (no historical IV-by-delta; forward-only).
-- Cadence: provisional current-session data every minute during RTH; session
+- Cadence: provisional current-session data every 5 minutes during RTH; session
   data final after a 16:45 ET grace. The timer also runs at **21:45 UTC**
   daily for finalization and weekend/holiday health heartbeats.
 - Licensing: UW is the repo's licensed provider (priority #2; IB fails on fit);
@@ -203,7 +203,7 @@ Panel:
 `cloud/services/radon-skew.{service,timer}`: oneshot venv-python direct,
 `EnvironmentFile=/home/radon/radon-cloud/.env` (UW_TOKEN must resolve there —
 confirm it exists on the VPS env; it does for GEX/leap timers),
-`RADON_DB_NO_REPLICA=1`, `TimeoutStartSec=300`; timer runs each minute in the
+`RADON_DB_NO_REPLICA=1`, `TimeoutStartSec=300`; timer runs every 5 minutes in the
 broad 13:00-21:59 UTC weekday DST window (the fetcher gates on the shared ET
 market calendar) plus `OnCalendar=*-*-* 21:45:00 UTC` for finalization and
 off-hours health. `RandomizedDelaySec=5`, `AccuracySec=1s`,

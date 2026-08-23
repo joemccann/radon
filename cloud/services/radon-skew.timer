@@ -2,9 +2,10 @@
 Description=Radon Skew Indicator - live RTH and finalized UW SPX 25d greeks
 
 [Timer]
-# Minute cadence covers 09:30-16:00 ET across both DST regimes. The fetcher
-# gates on the shared market calendar, so shoulder minutes never call UW.
-OnCalendar=Mon..Fri *-*-* 13..21:*:00 UTC
+# Five-minute cadence covers 09:30-16:00 ET across both DST regimes. The
+# fetcher gates on the shared market calendar, so shoulder minutes never
+# call UW. A 1-minute timer vs the 60s UW disk cache is a paid no-op.
+OnCalendar=Mon..Fri *-*-* 13..21:00,05,10,15,20,25,30,35,40,45,50,55 UTC
 # Daily 21:45 UTC run finalizes the session after the 16:45 ET grace and keeps
 # weekend/holiday service health fresh.
 OnCalendar=*-*-* 21:45:00 UTC
