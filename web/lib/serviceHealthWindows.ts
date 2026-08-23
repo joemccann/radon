@@ -199,6 +199,9 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // ``iei-hyg`` — radon-iei-hyg.timer fires daily 21:55 UTC; IB → UW → Yahoo cascade, so requires_ib stays false.
   "iei-hyg": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
+  // ``trin`` — radon-trin.timer samples NYSE A/D + volume from IB every 5 minutes during RTH (3 missed cycles flag); off-hours the close heartbeat holds a day.
+  "trin": { open: 15 * MIN, extended: 24 * HOUR, closed: 24 * HOUR, category: "scheduled", requires_ib: true },
+
   // ``skew`` publishes every minute during RTH and finalizes daily at 21:45
   // UTC. Five minutes tolerates transient UW failures while surfacing a dead
   // live writer; the daily heartbeat preserves the off-hours window.
