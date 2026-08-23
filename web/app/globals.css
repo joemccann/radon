@@ -623,6 +623,186 @@ body {
   text-overflow: ellipsis;
 }
 
+/* ─── Sidebar collapse → icon rail ───────────────────────────────────────
+   The rail keeps every destination reachable: icons stay, group headers
+   become hairline dividers (the grouping survives without its labels), the
+   active item keeps its 2px bar, and a mono tooltip names each target on
+   hover / keyboard focus. Width animates only after the saved preference
+   has been applied (.sidebar--settled) so a collapsed restore snaps. */
+.sidebar {
+  position: relative;
+  --sidebar-rail-width: 56px;
+}
+
+.sidebar--settled {
+  transition: width 200ms var(--ease-out);
+}
+
+.sidebar--collapsed {
+  width: var(--sidebar-rail-width);
+}
+
+.sidebar--collapsed .sidebar-header {
+  padding: 0;
+  justify-content: center;
+}
+
+.sidebar--collapsed .logo-text,
+.sidebar--collapsed .nav-item-label,
+.sidebar--collapsed .nav-group-label-text,
+.sidebar--collapsed .nav-group-chevron,
+.sidebar--collapsed .sidebar-user-card__text {
+  display: none;
+}
+
+.sidebar--collapsed .sidebar-nav {
+  overflow: visible;
+  padding: 4px 0;
+}
+
+.sidebar--collapsed .nav-group + .nav-group {
+  margin-top: 0;
+}
+
+/* Group header → divider. Keeps the boundary, drops the label. */
+.sidebar--collapsed .nav-group-label {
+  min-height: 0;
+  height: 1px;
+  padding: 0;
+  margin: 6px 14px;
+  background: var(--border-dim);
+  pointer-events: none;
+}
+
+.sidebar--collapsed .nav-group:first-child .nav-group-label {
+  display: none;
+}
+
+.sidebar--collapsed .nav-item,
+.sidebar--collapsed .sidebar-collapse-toggle,
+.sidebar--collapsed .sidebar-user-card {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+  gap: 0;
+}
+
+.sidebar--collapsed .nav-item {
+  height: 36px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+/* Optical: the 2px active bar sits on the left edge, so nudge the icon back
+   by half of it to keep the rail's icon column visually centred. */
+.sidebar--collapsed .nav-item .nav-icon,
+.sidebar--collapsed .sidebar-user-card__avatar {
+  margin-left: -2px;
+}
+
+/* Collapse / expand control — a nav row, not a floating chrome button. */
+.sidebar-collapse-toggle {
+  position: relative;
+  width: 100%;
+  min-height: var(--hit-min);
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: none;
+  border-top: 1px solid var(--border-dim);
+  border-left: 2px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: var(--transition-controls);
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.sidebar-collapse-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.sidebar-collapse-toggle:focus-visible,
+.sidebar--collapsed .nav-item:focus-visible,
+.sidebar--collapsed .sidebar-user-card:focus-visible {
+  outline: 1px solid var(--signal-core-text);
+  outline-offset: -1px;
+}
+
+.sidebar-collapse-glyph__arrow {
+  transform-origin: 9.75px 7px;
+  transition: transform 150ms var(--ease-out);
+}
+
+.sidebar-collapse-glyph--collapsed .sidebar-collapse-glyph__arrow {
+  transform: scaleX(-1);
+}
+
+/* Rail tooltips — CSS only, named from data-label. Enter slides 4px from
+   the rail; exit is a plain fade (softer than the enter). */
+.sidebar--collapsed [data-label] {
+  position: relative;
+}
+
+.sidebar--collapsed [data-label]::after {
+  content: attr(data-label);
+  position: absolute;
+  left: calc(100% + 8px);
+  top: 50%;
+  translate: -4px -50%;
+  padding: 5px 8px;
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--border-dim);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  line-height: 1;
+  box-shadow: 0 1px 2px oklch(0 0 0 / 0.12), 0 4px 12px oklch(0 0 0 / 0.16);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 60;
+  transition: opacity 120ms var(--ease-out), translate 120ms var(--ease-out);
+}
+
+.sidebar--collapsed [data-label]:hover::after,
+.sidebar--collapsed [data-label]:focus-visible::after {
+  opacity: 1;
+  translate: 0 -50%;
+  transition-delay: 60ms, 60ms;
+}
+
+/* Short viewports: let the rail scroll instead of pushing the profile card
+   off-screen; tooltips would be clipped there, so drop them. */
+@media (max-height: 720px) {
+  .sidebar--collapsed .sidebar-nav {
+    overflow-y: auto;
+  }
+
+  .sidebar--collapsed .sidebar-nav [data-label]::after {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar--settled,
+  .sidebar-collapse-glyph__arrow,
+  .sidebar--collapsed [data-label]::after {
+    transition: none;
+  }
+}
+
 /* ─── StarToggle ─── */
 .star-toggle {
   display: inline-flex;
@@ -4592,9 +4772,10 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh--rail {
 }
 
 .news-feed-figure {
-  margin: 36px -40px 0;
-  border-top: 1px solid var(--line-grid);
-  border-bottom: 1px solid var(--line-grid);
+  margin: 36px 0 0;
+  border: 1px solid var(--line-grid);
+  border-radius: 4px;
+  overflow: hidden;
 }
 
 .news-feed-figure .news-feed-image-wrapper {
@@ -4607,7 +4788,7 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh--rail {
   display: flex;
   justify-content: space-between;
   gap: 16px;
-  padding: 8px 40px;
+  padding: 8px 16px;
   border-top: 1px solid var(--line-grid);
   font-family: var(--font-mono);
   font-size: 10.5px;

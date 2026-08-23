@@ -420,7 +420,7 @@ scripts/post-setup.sh
 - SSH via Tailscale only (ufw blocks public SSH)
 - `.env` and `.env.production` are gitignored and must never be committed. A credential-shaped example previously entered repository history; credential rotation and a coordinated destructive history rewrite remain required separately.
 - GitHub Actions pinned by commit SHA
-- Deploy sudoers grants only five exact invocations of the root-owned `/usr/local/sbin/radon-deploy-root` helper; the helper discovers non-beta Radon units with a required core-service floor and owns the fixed stale-replica cleanup paths
+- Deploy sudoers grants only seven exact invocations of the root-owned `/usr/local/sbin/radon-deploy-root` helper (plus `publish-caddy` in its own fragment); the helper discovers non-beta Radon units with a required core-service floor, owns the fixed stale-replica cleanup paths, and installs the manifest-pinned timer-owned units (`install-units`) during each deploy
 - The IB Gateway image is digest-pinned, and IBC scheduled/cold restarts are blank so only the lease-aware watchdog can initiate a 2FA-producing cycle
 - Cloud CI fetches full Git history and scans it with default Gitleaks rules plus literal TWS-assignment and credential-example rules
 - Unit files are copied to root-owned `/etc/systemd/system/` (not symlinked from user-writable paths)

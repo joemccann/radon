@@ -149,7 +149,7 @@ export function computeDayMoveBreakdown(
       continue;
     }
 
-    if (pos.structure_type === "Stock") {
+    if (pos.structure_type === "Stock" || pos.structure_type === "Crypto") {
       const p = prices[pos.ticker];
       const current = p ? resolveLastOrMid(p) : null;
       if (current == null || p?.close == null || p.close <= 0) continue;

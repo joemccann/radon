@@ -511,6 +511,16 @@ Yahoo. Heartbeat `credit-spread`. Units are listed in `setup-vps.sh`
 `SERVICE_FILES`; root install-copy is still owed (`not-installed` allowlist
 expires 2026-12-31). Spec: [`indicators/credit.md`](indicators/credit.md).
 
+### IV RANK (`radon-ivrank.timer`)
+
+Daily `22:10 UTC` (`RandomizedDelaySec=120`), oneshot
+`scripts/fetch_ivrank.py`. SPY 30-day implied vol from IB
+(`OPTION_IMPLIED_VOLATILITY` daily bars, health-gated), UW iv-rank fallback,
+ranked over the trailing 252 sessions. Heartbeat `ivrank`. Units are listed in
+`setup-vps.sh` `SERVICE_FILES`; root install-copy is still owed
+(`not-installed` allowlist expires 2026-12-31). Spec:
+[`indicators/ivrank.md`](indicators/ivrank.md).
+
 ### TWR performance builder (`radon-perf-twr.timer`)
 
 `Tue..Sat 07:30 ET` (`RandomizedDelaySec=300`), oneshot

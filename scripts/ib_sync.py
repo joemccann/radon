@@ -193,6 +193,10 @@ def detect_structure_type(legs: list) -> Tuple[str, str]:
         leg = legs[0]
         if leg['secType'] == 'STK':
             return "Stock", "equity"
+        if leg['secType'] == 'CRYPTO':
+            # Spot crypto trades 24/7: the client keys its weekend Day Move
+            # carve-out on this structure_type.
+            return "Crypto", "equity"
         direction = "Long" if leg['position'] > 0 else "Short"
         right = "Call" if leg.get('right') == 'C' else "Put"
         return f"{direction} {right}", "defined" if direction == "Long" else "undefined"

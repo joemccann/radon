@@ -8,7 +8,13 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
  * escapes parent overflow:hidden/auto containers. Flips below the
  * trigger when there isn't enough viewport space above. On coarse
  * (touch) pointers, tap toggles the popup and tap-outside dismisses it.
+ *
+ * The popup is hoverable and its copy selectable: leaving the trigger (or
+ * the popup) only schedules a close after TOOLTIP_HIDE_DELAY_MS, so the
+ * pointer can cross the gap into the text; re-entering either cancels it.
  */
+export const TOOLTIP_HIDE_DELAY_MS = 300;
+
 type InfoTooltipProps = {
   text: string;
   ariaLabel?: string;
@@ -36,18 +42,40 @@ export default function InfoTooltip({ text, ariaLabel, triggerTestId, contentTes
   const [popupHeight, setPopupHeight] = useState<number | null>(null);
   const ref = useRef<HTMLSpanElement>(null);
   const popupRef = useRef<HTMLSpanElement>(null);
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isCoarse = useCoarsePointer();
   const isOpen = rect !== null;
 
+  const cancelScheduledHide = useCallback(() => {
+    if (hideTimer.current !== null) {
+      clearTimeout(hideTimer.current);
+      hideTimer.current = null;
+    }
+  }, []);
+
   const show = useCallback(() => {
+    cancelScheduledHide();
     const el = ref.current;
     if (!el) return;
     setRect(el.getBoundingClientRect());
-  }, []);
+  }, [cancelScheduledHide]);
 
-  function hide() {
+  const hide = useCallback(() => {
+    cancelScheduledHide();
     setRect(null);
-  }
+  }, [cancelScheduledHide]);
+
+  // Leaving the trigger or the popup closes after a grace period so the
+  // pointer can travel into the copy and select it.
+  const scheduleHide = useCallback(() => {
+    cancelScheduledHide();
+    hideTimer.current = setTimeout(() => {
+      hideTimer.current = null;
+      setRect(null);
+    }, TOOLTIP_HIDE_DELAY_MS);
+  }, [cancelScheduledHide]);
+
+  useEffect(() => cancelScheduledHide, [cancelScheduledHide]);
 
   function toggle() {
     if (isOpen) {
@@ -95,9 +123,9 @@ export default function InfoTooltip({ text, ariaLabel, triggerTestId, contentTes
       data-testid={triggerTestId}
       style={{ display: "inline-flex", alignItems: "center" }}
       onMouseEnter={show}
-      onMouseLeave={hide}
+      onMouseLeave={scheduleHide}
       onFocus={show}
-      onBlur={hide}
+      onBlur={scheduleHide}
       aria-label={ariaLabel}
       tabIndex={0}
     >
@@ -148,6 +176,8 @@ export default function InfoTooltip({ text, ariaLabel, triggerTestId, contentTes
         <span
           ref={popupRef}
           data-testid={contentTestId}
+          onMouseEnter={cancelScheduledHide}
+          onMouseLeave={scheduleHide}
           style={{
             position: "fixed",
             visibility: popupHeight === null ? "hidden" : undefined,
@@ -164,7 +194,9 @@ export default function InfoTooltip({ text, ariaLabel, triggerTestId, contentTes
             color: "var(--text-primary)",
             lineHeight: 1.5,
             zIndex: 9999,
-            pointerEvents: "none",
+            pointerEvents: "auto",
+            userSelect: "text",
+            cursor: "text",
             whiteSpace: "normal",
             fontWeight: 400,
             textTransform: "none",
