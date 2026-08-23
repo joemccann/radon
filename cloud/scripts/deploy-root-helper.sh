@@ -87,6 +87,11 @@ if [[ "${RADON_DEPLOY_HELPER_TEST_MODE:-0}" == "1" ]]; then
   readonly UNIT_SOURCE_DIR="${RADON_TEST_UNIT_SOURCE_DIR:-}"
   readonly UNIT_MANIFEST="${RADON_TEST_UNIT_MANIFEST:-}"
   readonly SYSTEMD_UNIT_DIR="${RADON_TEST_SYSTEMD_UNIT_DIR:-}"
+  readonly GIT="${RADON_TEST_GIT:-$(command -v git)}"
+  readonly RADON_GIT_DIR="${RADON_TEST_GIT_DIR:-}"
+  readonly UNIT_REMOTE="${RADON_TEST_UNIT_REMOTE:-}"
+  readonly SYSTEMD_DIR="${RADON_TEST_SYSTEMD_DIR:-}"
+  readonly FORCE_GITHUB_REMOTE_CHECK="${RADON_TEST_FORCE_GITHUB_REMOTE_CHECK:-0}"
   readonly TEST_SYSTEMCTL_TIMEOUT="${RADON_TEST_SYSTEMCTL_TIMEOUT:-1}"
   readonly STATE_WAIT_SECONDS="${RADON_TEST_STATE_WAIT_SECONDS:-0}"
   readonly PREHELD_WAIT_SECONDS="${RADON_TEST_PREHELD_WAIT_SECONDS:-0}"
@@ -132,6 +137,11 @@ else
   readonly UNIT_SOURCE_DIR=/home/radon/radon/cloud/services
   readonly UNIT_MANIFEST=/home/radon/radon/cloud/config/installed-units.sha256
   readonly SYSTEMD_UNIT_DIR=/etc/systemd/system
+  readonly GIT=/usr/bin/git
+  readonly RADON_GIT_DIR=/home/radon/radon/.git
+  readonly UNIT_REMOTE=https://github.com/joemccann/radon.git
+  readonly SYSTEMD_DIR=/etc/systemd/system
+  readonly FORCE_GITHUB_REMOTE_CHECK=1
   readonly REPLICA_FILES=(
     /home/radon/radon/data/replica.db
     /home/radon/radon/data/replica.db-wal
@@ -158,7 +168,7 @@ prepare_state_dir() {
 }
 
 if (( $# != 1 )); then
-  echo "usage: radon-deploy-root {stop-clean|restart-managed|recover|verify-restored|verify-control-plane|commit-transition|publish-caddy|install-units}" >&2
+  echo "usage: radon-deploy-root {stop-clean|restart-managed|recover|verify-restored|verify-control-plane|commit-transition|publish-caddy|install-units|sync-scheduled-units}" >&2
   exit 64
 fi
 
@@ -720,6 +730,164 @@ install_manifest_units() {
   return 0
 }
 
+github_origin_is_allowed() {
+  case "$1" in
+    git@github.com:joemccann/radon|git@github.com:joemccann/radon.git) return 0 ;;
+    ssh://git@github.com/joemccann/radon|ssh://git@github.com/joemccann/radon.git) return 0 ;;
+    https://github.com/joemccann/radon|https://github.com/joemccann/radon.git) return 0 ;;
+    https://*@github.com/joemccann/radon|https://*@github.com/joemccann/radon.git) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+control_plane_unit_name() {
+  local name="$1" target
+  for target in "${CONTROL_PLANE_TARGETS[@]}"; do
+    [[ "$(basename -- "$target")" == "$name" ]] && return 0
+  done
+  return 1
+}
+
+git_bounded() {
+  if [[ -n "${TIMEOUT:-}" ]]; then
+    "$TIMEOUT" --signal=TERM --kill-after=2s 20s "$GIT" "$@"
+  else
+    "$GIT" "$@"
+  fi
+}
+
+# Allowlisted non-control-plane units only. Content comes from git objects at
+# the GitHub main tip -- never from the radon-writable checkout -- and must
+# match installed-units.sha256. Install is 0644 root:root plus one
+# daemon-reload. No start/stop/enable.
+sync_scheduled_units() {
+  local remote_url remote_sha local_sha allowlist manifest unit expected actual live
+  local tmp dest installed=0
+
+  unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+        GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_EXEC_PATH GIT_SSH GIT_SSH_COMMAND \
+        GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM \
+        GIT_SSL_NO_VERIFY GIT_HTTP_USER_AGENT GIT_PROXY_COMMAND || true
+
+  [[ -n "$GIT" && -n "$RADON_GIT_DIR" && -n "$UNIT_REMOTE" && -n "$SYSTEMD_DIR" ]] || {
+    echo "scheduled unit sync paths are not configured" >&2
+    return 78
+  }
+  remote_url="$UNIT_REMOTE"
+  if [[ "$FORCE_GITHUB_REMOTE_CHECK" == "1" ]]; then
+    github_origin_is_allowed "$remote_url" || {
+      echo "scheduled unit sync remote is not the GitHub radon repo" >&2
+      return 76
+    }
+  fi
+
+  remote_sha="$(git_bounded ls-remote --refs "$remote_url" refs/heads/main | awk '{print $1}')" || {
+    echo "could not read main tip for scheduled unit sync" >&2
+    return 69
+  }
+  [[ "$remote_sha" =~ ^[0-9a-f]{40}$ ]] || {
+    echo "invalid main tip for scheduled unit sync" >&2
+    return 69
+  }
+  local_sha="$(git_bounded --git-dir="$RADON_GIT_DIR" rev-parse HEAD)" || {
+    echo "could not read local HEAD for scheduled unit sync" >&2
+    return 66
+  }
+  [[ "$local_sha" == "$remote_sha" ]] || {
+    echo "HEAD is not the GitHub main tip; refusing scheduled unit sync" >&2
+    return 76
+  }
+  git_bounded --git-dir="$RADON_GIT_DIR" cat-file -e "${remote_sha}^{commit}" || {
+    echo "local git store is missing the main tip" >&2
+    return 66
+  }
+
+  allowlist="$(git_bounded --git-dir="$RADON_GIT_DIR" cat-file blob \
+    "${remote_sha}:cloud/config/auto-sync-units.txt")" || {
+    echo "auto-sync unit allowlist is missing at main tip" >&2
+    return 66
+  }
+  manifest="$(git_bounded --git-dir="$RADON_GIT_DIR" cat-file blob \
+    "${remote_sha}:cloud/config/installed-units.sha256")" || {
+    echo "installed-units manifest is missing at main tip" >&2
+    return 66
+  }
+
+  mkdir -p "$SYSTEMD_DIR"
+  while IFS= read -r unit || [[ -n "$unit" ]]; do
+    unit="${unit%%#*}"
+    unit="${unit#"${unit%%[![:space:]]*}"}"
+    unit="${unit%"${unit##*[![:space:]]}"}"
+    [[ -n "$unit" ]] || continue
+
+    [[ "$unit" =~ ^radon-[a-z0-9][a-z0-9.-]*\.(service|timer)$ ]] || {
+      echo "refusing unsafe scheduled unit name: ${unit}" >&2
+      return 64
+    }
+    if control_plane_unit_name "$unit"; then
+      echo "refusing to sync a control-plane unit: ${unit}" >&2
+      return 64
+    fi
+
+    expected="$(printf '%s\n' "$manifest" | awk -v n="$unit" '
+      $2 == n { print $1; found = 1 }
+      END { exit(found ? 0 : 1) }
+    ')" || {
+      echo "allowlisted unit is missing from the install manifest: ${unit}" >&2
+      return 66
+    }
+    [[ "$expected" =~ ^[0-9a-f]{64}$ ]] || {
+      echo "invalid manifest digest for ${unit}" >&2
+      return 66
+    }
+
+    dest="${SYSTEMD_DIR}/${unit}"
+    if [[ -e "$dest" || -L "$dest" ]] && [[ ! -f "$dest" || -L "$dest" ]]; then
+      echo "live unit path is not a regular file: ${dest}" >&2
+      return 74
+    fi
+
+    tmp="$(mktemp "${STATE_DIR}/scheduled-unit.XXXXXX")"
+    if ! git_bounded --git-dir="$RADON_GIT_DIR" cat-file blob \
+         "${remote_sha}:cloud/services/${unit}" > "$tmp"; then
+      "$RM" -f "$tmp"
+      echo "allowlisted unit blob is missing at main tip: ${unit}" >&2
+      return 66
+    fi
+    chmod 0600 "$tmp"
+    actual="$("$SHA256SUM" "$tmp" | awk '{print $1}')"
+    if [[ "$actual" != "$expected" ]]; then
+      "$RM" -f "$tmp"
+      echo "allowlisted unit does not match the install manifest: ${unit}" >&2
+      return 65
+    fi
+
+    if [[ -f "$dest" ]]; then
+      live="$("$SHA256SUM" "$dest" | awk '{print $1}')"
+      if [[ "$live" == "$actual" ]]; then
+        "$RM" -f "$tmp"
+        continue
+      fi
+    fi
+
+    if (( HELPER_TEST_MODE == 1 )); then
+      "$INSTALL" -m 0644 "$tmp" "$dest" || { "$RM" -f "$tmp"; return 73; }
+    else
+      "$INSTALL" -m 0644 -o root -g root "$tmp" "$dest" || { "$RM" -f "$tmp"; return 73; }
+    fi
+    "$RM" -f "$tmp"
+    installed=1
+  done <<< "$allowlist"
+
+  if (( installed == 1 )); then
+    systemctl_bounded daemon-reload || {
+      echo "daemon-reload failed after scheduled unit sync" >&2
+      return 75
+    }
+  fi
+  return 0
+}
+
 cancel_radon_jobs() {
   local jobs id unit
   local job_ids=()
@@ -780,10 +948,10 @@ terminate_root_action_group() {
 
 # Only the release-lifecycle actions queue systemd jobs for radon-* units, so
 # only their failures leave torn jobs worth cancelling (install-units joins
-# them: `enable --now` on a new timer queues a start job). publish-caddy touches
-# one non-radon unit (caddy) and is reachable by the unprivileged account, so
-# cancelling on its non-zero exit -- a rejected Caddyfile exits 65 -- would let
-# radon tear down an unrelated deploy's in-flight restarts.
+# them: `enable --now` on a new timer queues a start job). publish-caddy and
+# sync-scheduled-units are reachable by the unprivileged account, so cancelling
+# on a rejected Caddyfile or allowlist (exit 65) would let radon tear down an
+# unrelated deploy's in-flight restarts.
 action_queues_radon_jobs() {
   case "${1:-}" in
     stop-clean|restart-managed|recover|install-units) return 0 ;;
@@ -812,9 +980,10 @@ root_action_timeout() {
     stop-clean|restart-managed|recover)
       printf '%s\n' "$ROOT_MUTATION_ACTION_TIMEOUT"
       ;;
-    publish-caddy)
-      # Bounded like a mutation (it stages, validates, installs, reloads) but
-      # deliberately outside the release-lifecycle job-cancel class above.
+    publish-caddy|sync-scheduled-units)
+      # Bounded like a mutation (stage/install/reload) but deliberately
+      # outside the release-lifecycle job-cancel class above. A rejected
+      # allowlist or hash mismatch must not cancel an in-flight deploy.
       printf '%s\n' "$ROOT_MUTATION_ACTION_TIMEOUT"
       ;;
     install-units)
@@ -918,6 +1087,9 @@ case "$1" in
     ;;
   install-units)
     install_manifest_units
+    ;;
+  sync-scheduled-units)
+    sync_scheduled_units
     ;;
   *)
     echo "unknown deploy-root action" >&2

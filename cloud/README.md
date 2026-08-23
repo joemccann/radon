@@ -177,6 +177,12 @@ manifest preflight before it may transition services. Do not use
 See [the cloud operating contract](CLAUDE.md) and [the monorepo lifecycle
 runbook](../docs/monorepo-cloud-migration.md) for the canonical procedure.
 
+Allowlisted scheduled units (`config/auto-sync-units.txt`) are not part of
+that bootstrap set. After the helper and sudoers from this checkout are
+installed once, each green CI deploy runs `radon-deploy-root
+sync-scheduled-units`: git objects at the GitHub main tip, manifest hash
+match, `0644 root:root` install, `daemon-reload` only.
+
 ### 4. Verify
 
 ```bash
@@ -420,7 +426,7 @@ scripts/post-setup.sh
 - SSH via Tailscale only (ufw blocks public SSH)
 - `.env` and `.env.production` are gitignored and must never be committed. A credential-shaped example previously entered repository history; credential rotation and a coordinated destructive history rewrite remain required separately.
 - GitHub Actions pinned by commit SHA
-- Deploy sudoers grants only seven exact invocations of the root-owned `/usr/local/sbin/radon-deploy-root` helper (plus `publish-caddy` in its own fragment); the helper discovers non-beta Radon units with a required core-service floor, owns the fixed stale-replica cleanup paths, and installs the manifest-pinned timer-owned units (`install-units`) during each deploy
+- Deploy sudoers grants only exact invocations of the root-owned `/usr/local/sbin/radon-deploy-root` helper (`stop-clean`, `restart-managed`, `recover`, `verify-restored`, `verify-control-plane`, `commit-transition`, `install-units`, `sync-scheduled-units`, plus `publish-caddy` in its own fragment); the helper discovers non-beta Radon units with a required core-service floor, owns the fixed stale-replica cleanup paths, and installs the manifest-pinned timer-owned units (`install-units`) during each deploy. `sync-scheduled-units` re-reads allowlisted units from git objects at the GitHub main tip and never starts, stops, or enables units.
 - The IB Gateway image is digest-pinned, and IBC scheduled/cold restarts are blank so only the lease-aware watchdog can initiate a 2FA-producing cycle
 - Cloud CI fetches full Git history and scans it with default Gitleaks rules plus literal TWS-assignment and credential-example rules
 - Unit files are copied to root-owned `/etc/systemd/system/` (not symlinked from user-writable paths)

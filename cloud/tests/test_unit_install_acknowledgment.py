@@ -12,7 +12,8 @@ Contract (mirrors config/drift-allowlist.conf's acknowledged-drift pattern):
 
   * config/installed-units.sha256 records `<sha256>  <unit-name>` for every
     unit in services/ as last installed on the host. It is bumped in the same
-    commit as (or immediately after) the root install-copy.
+    commit as (or immediately after) the root install-copy or the
+    `sync-scheduled-units` allowlist add that will perform that copy.
   * A commit that changes a unit WITHOUT bumping its manifest entry must add a
     drift-allowlist acknowledgment for that unit (`unit-mismatch:<name>` or
     `not-installed:<name>`) so the pending-install window is explicit and the

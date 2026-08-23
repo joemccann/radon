@@ -1,5 +1,11 @@
 # Lessons
 
+## 2026-08-21 — Scheduled units sync through a fixed helper, not a radon install
+
+- CI cannot write `/etc/systemd/system`. A general sudo `install`/`systemctl` grant is a root shell. `radon-deploy-root sync-scheduled-units` is the only write: exact sudoers verb, git objects at the GitHub main tip, manifest hash match, regular file, daemon-reload, no start/stop/enable.
+- First enablement is one `bootstrap-control-plane.sh` so live helper and sudoers gain the verb. After that, add the unit to `cloud/config/auto-sync-units.txt` and bump `installed-units.sha256`. Do not add scanner oneshots to the control-plane SOURCES list.
+- Do not copy from the live checkout. Radon owns that tree.
+
 ## 2026-08-21 — Wrapper curl -m must outlive the FastAPI scan child
 
 - `radon-signals-refresh` paged P1 `Result=exit-code, NRestarts=0` every RTH hour. Curl `-m 200` aborted while FastAPI's theta/strength children still had 420s/480s. Client disconnect cancelled the request and `run_script` killed the scanner; the oneshot exited 1. NRestarts=0 is normal for `Type=oneshot`.
