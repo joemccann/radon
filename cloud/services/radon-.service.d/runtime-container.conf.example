@@ -4,8 +4,12 @@
 # After app images are production runtime, copy this file to
 # /etc/systemd/system/radon-.service.d/runtime-container.conf and replace
 # IMAGE with the unit command. Empty ExecStart= clears the host binary.
+# Host network does not share the host mount namespace: bind-mount
+# NOTIFY_SOCKET so Type=notify WatchdogSec still sees WATCHDOG=1.
+# Do not mount the Docker engine socket. Do not pull at start if the image is absent;
+# GHCR down must not block RADON_RUNTIME=host (the live units).
 #
 # [Service]
 # Environment=RADON_RUNTIME=container
 # ExecStart=
-# ExecStart=docker run --network host --env-file /etc/radon/env --rm --name %N IMAGE
+# ExecStart=docker run --network host --env-file /etc/radon/env --env NOTIFY_SOCKET --env WATCHDOG_USEC --mount type=bind,src=${NOTIFY_SOCKET},dst=${NOTIFY_SOCKET} --rm --name %N IMAGE

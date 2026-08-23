@@ -291,16 +291,12 @@ unit_is_excluded() {
   [[ "$unit" == radon-ib-gateway.service || "$unit" == "$PREHELD_UNIT" ]]
 }
 
-# R-140: the core long-running services are STOPPED when install-units runs.
-# Replacing their unit files at that moment, with a rollback path that never
-# reinstalls unit files, takes app.radon.run down until a human SSHes as root.
-# They stay bootstrap/operator-owned. Distinct from unit_is_excluded, which
-# also drives the stop/restart transition inventory and must keep listing them.
+# nextjs and newsfeed are CORE_SERVICES (stopped during install-units) but
+# they are not control-plane and not the Gateway. Skipping them left
+# EnvironmentFile/ExecStart edits as a root hand-copy. install-units now
+# copies them while they are stopped; restart-managed starts the new file.
+# api/relay/monitor remain bootstrap/refresh-owned via control_plane_unit_name.
 unit_is_release_managed() {
-  local unit="$1" core
-  for core in "${CORE_SERVICES[@]}"; do
-    [[ "$unit" == "$core" ]] && return 0
-  done
   return 1
 }
 

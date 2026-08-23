@@ -447,10 +447,10 @@ exit 0
     return stub
 
 
-def test_core_services_are_never_installed_by_the_deploy(tmp_path):
-    """R-140: radon-nextjs.service and radon-newsfeed.service are in the
-    manifest but in neither exclusion list, so an unattended deploy `mv`s
-    them into /etc/systemd/system while services are stopped."""
+def test_nextjs_and_newsfeed_are_installed_by_the_deploy(tmp_path):
+    """nextjs and newsfeed are not control-plane and not the Gateway.
+    install-units must copy them so EnvironmentFile/ExecStart edits do
+    not require a hand `install` as root (P2 gap)."""
     box = Sandbox(tmp_path)
     for name in ("radon-nextjs.service", "radon-newsfeed.service"):
         box.source(name, SERVICE_BODY)
@@ -458,8 +458,10 @@ def test_core_services_are_never_installed_by_the_deploy(tmp_path):
     result = box.run()
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert list(box.unit_dir.iterdir()) == []
-    assert box.systemctl_calls() == []
+    assert (box.unit_dir / "radon-nextjs.service").read_text() == SERVICE_BODY
+    assert (box.unit_dir / "radon-newsfeed.service").read_text() == SERVICE_BODY
+    assert box.systemctl_calls().count("daemon-reload") == 1
+    assert "release-managed" not in result.stdout
 
 
 def test_unit_that_fails_systemd_analyze_is_not_promoted(tmp_path):
