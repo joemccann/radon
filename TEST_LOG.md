@@ -66,3 +66,19 @@ returning None on darwin. Filed under NEW_FINDINGS; green in CI on ubuntu.
 | `pytest cloud/tests` | 12 failed, 910 passed, 4 skipped (darwin) | identical list |
 
 Darwin cloud baseline is now 12 (10 known `sha256sum` + 2 new from #67, T-088). 17 findings filed (T-080…T-096); see `TEST_AUDIT.md` `## Delta audit 2026-08-22`.
+
+## Delta audit 2026-08-22 (second pass, audit mode, different host)
+
+| Gate | Run 1 | Run 2 | Run 3 |
+|---|---|---|---|
+| `python3.13 -m pytest` | 7216 passed, 1 skipped, 90 deselected (199.6s) | **1 failed** (T-089 sleep race), 7215 passed | 7216 passed, 1 skipped, 90 deselected |
+| `npx vitest run` | 672 files / 7036 passed | 672 files / 7036 passed | 672 files / 7036 passed |
+| `pytest cloud/tests` | 34 failed, 888 passed, 4 skipped | identical list | identical list |
+
+Round 1 of pytest initially read `107 failed` — the shared runner venv had no
+`pytest-asyncio` (T-119). The table records the counts after installing it.
+Darwin cloud baseline on THIS host is 34, not the first pass's 12: no bash >= 4
+(T-118). Verified against a `git worktree` at `71de8a33` — same 34, sorted
+`FAILED` lists byte-identical. 24 additional findings filed (T-097…T-120);
+8 converged with the first pass and were dropped. See `TEST_AUDIT.md`
+`## Delta audit 2026-08-22 (second pass)`.

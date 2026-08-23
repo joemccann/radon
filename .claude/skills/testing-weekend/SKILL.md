@@ -203,3 +203,48 @@ how this loop improves as the codebase grows.
   new `sha256sum`-shim reds (T-088) from the known ten. Always `sort` the
   `FAILED` lines to a file and `diff` them; update the recorded baseline in
   the audit whenever it changes.
+- **2026-08-22 (audit, second pass): CHECK `origin` FOR AN EXISTING WEEKEND
+  BRANCH BEFORE YOU START, not at push time.** Two runs of this loop audited
+  the same range on the same day on different hosts. The second only
+  discovered the first when `git push` was rejected — after it had already
+  numbered 32 findings from T-080, colliding with all 17 the first had
+  pushed. Do this in step 1, right after the clean-tree check:
+  `git fetch origin && git rev-parse --verify origin/testing/weekend-<date>`.
+  If it exists, read its audit section FIRST and continue numbering after it.
+  Recovery if you find out late: never force-push over the other run. Reset
+  onto its tip, drop your duplicates, renumber the rest from its highest
+  T-number, and append a `## Delta audit <date> (second pass)` section — the
+  frozen-contract rail permits a new dated section, never a rewrite. Record
+  the convergences in a table; two independent readers landing on the same
+  file:line is real evidence, and throwing it away is a loss.
+- **2026-08-22 (audit): cross-references written into the sweeps / re-triage
+  prose go STALE while you are still drafting.** Three references in the
+  first draft ("Filed as T-096", "Promoted to T-095", "see T-094") were
+  written against early draft numbers and silently pointed at three unrelated
+  findings by the time the section was numbered. Number the findings FIRST,
+  then write the prose that cites them — or grep every `T-\d{3}` in the
+  finished section and confirm each one resolves to the subject you meant.
+- **2026-08-22 (audit): verify the RUNNER TOOLCHAIN before trusting a red
+  gate, the same way you verify the tree is clean.** One round reported
+  `107 failed` and every failure was "async def functions are not natively
+  supported" — the shared venv (`~/radon-weekend/venv`) had pytest but no
+  `pytest-asyncio`, which only CI installs. The same tree was `7216 passed`
+  once the plugin was in. `node` was also absent from the agent's PATH until
+  `~/.nvm/versions/node/<v>/bin` was prepended (the wrapper exports it, but a
+  Bash-tool shell re-reads the profile). Do this before the gates:
+  `python3.13 -c "import pytest_asyncio"`, `node --version`,
+  `ls node_modules/.bin/vitest`. Fix the environment, never the repo, and
+  record the install in the audit.
+- **2026-08-22 (audit): attribute a red cloud gate by RUNNING the base SHA.**
+  Building on the first pass's "baseline is a LIST, not a count": a
+  `git worktree add /tmp/... <last-audited-sha>` plus a `diff` of the sorted
+  `FAILED` lists settles it in two minutes and byte-identically, and it also
+  catches the case where the list is longer for a reason unrelated to the
+  delta — this host reads 34, not 12, because it has no bash >= 4.
+- **2026-08-22 (audit): a source change can make an UNTOUCHED test
+  date-dependent — sweep the diff's blast radius, not the diff.**
+  `f2fbe0a7`/`d45849d7` added an `isIbDailyPnlCurrent()` wall-clock gate to
+  `MetricCards`; two e2e specs the delta never opened now false-red every
+  weekend (T-117). Nothing in the changed-test list would have surfaced it.
+  After cataloguing changed tests, ask the inverse question: which EXISTING
+  tests does this source change now describe differently?
