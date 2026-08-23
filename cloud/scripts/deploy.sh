@@ -275,6 +275,22 @@ write_green_marker() {
   mv -f "$marker_tmp" "$GREEN_MARKER_FILE"
 }
 
+scheduled_units_sync_is_granted() {
+  sudo -n -l -- "$DEPLOY_ROOT_HELPER" sync-scheduled-units >/dev/null 2>&1
+}
+
+sync_scheduled_units() {
+  if ! scheduled_units_sync_is_granted; then
+    log_warn "Scheduled unit sync is not granted yet; run cloud/scripts/bootstrap-control-plane.sh once as root"
+    return 0
+  fi
+  if ! sudo "$DEPLOY_ROOT_HELPER" sync-scheduled-units; then
+    log_error "Scheduled unit sync failed"
+    return 1
+  fi
+  log_success "Scheduled units match the GitHub main tip allowlist"
+}
+
 quarantine_green_marker() {
   local requested_sha="$1"
   local quarantine
@@ -742,6 +758,7 @@ recover_pending_transition() {
       record_deploy_marker "$JOURNAL_REQUESTED_SHA" || return 1
       write_green_marker "$JOURNAL_REQUESTED_SHA" || return 1
       sudo "$DEPLOY_ROOT_HELPER" commit-transition || return 1
+      sync_scheduled_units || return 1
       DEPLOY_RELEASE_UNVERIFIED=0
       finalize_release_artifacts "$JOURNAL_STAGE_DIR" "$JOURNAL_BACKUP_DIR"
       log_success "Finalized previously verified release ${JOURNAL_REQUESTED_SHA:0:7}"
@@ -1162,6 +1179,7 @@ main() {
   if [[ "$prev_commit" == "$requested_sha" ]] && green_marker_matches "$requested_sha"; then
     log_info "Commit ${requested_sha:0:7} already has a durable green marker; rechecking live gate"
     if deploy_gate; then
+      sync_scheduled_units || return 1
       trap - TERM INT HUP
       log_success "Deploy already green: $(short_log)"
       return 0
@@ -1194,6 +1212,7 @@ main() {
     record_deploy_marker "$requested_sha"
     write_green_marker "$requested_sha"
     sudo "$DEPLOY_ROOT_HELPER" commit-transition
+    sync_scheduled_units || return 1
     DEPLOY_RELEASE_UNVERIFIED=0
     finalize_release_artifacts
   fi

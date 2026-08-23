@@ -244,7 +244,13 @@ class TestSetupSudoers:
     def test_deploy_sudoers_includes_stop_and_rm(self, setup_sh: str) -> None:
         sudoers = (REPO_ROOT / "config" / "sudoers.d" / "radon-deploy").read_text()
         assert "radon-*" not in sudoers
-        for action in ("stop-clean", "restart-managed", "recover"):
+        for action in (
+            "stop-clean",
+            "restart-managed",
+            "recover",
+            "install-units",
+            "sync-scheduled-units",
+        ):
             assert f"radon-deploy-root {action}" in sudoers
         assert "radon-deploy-root start-nextjs" not in sudoers
 

@@ -850,7 +850,9 @@ recover_pending_transition
         assert marker.read_text(encoding="utf-8") == f"{self.REQUESTED}\n"
         assert not journal.exists()
         assert calls.read_text(encoding="utf-8").splitlines() == [
-            "/usr/local/sbin/radon-deploy-root commit-transition"
+            "/usr/local/sbin/radon-deploy-root commit-transition",
+            "-n -l -- /usr/local/sbin/radon-deploy-root sync-scheduled-units",
+            "/usr/local/sbin/radon-deploy-root sync-scheduled-units",
         ]
 
     def test_verified_journal_with_missing_venv_rolls_back_instead_of_finalizing(
@@ -925,13 +927,26 @@ write_green_marker() {{
   printf '%s\\n' green >> {events!s}
 }}
 sudo() {{
-  [[ "$*" == "/usr/local/sbin/radon-deploy-root commit-transition" ]] || return 92
-  [[ "$(cat {events!s})" == green ]] || return 93
-  [[ -f {journal!s} ]] || return 94
-  printf '%s\\n' commit >> {events!s}
+  case "$*" in
+    "/usr/local/sbin/radon-deploy-root commit-transition")
+      [[ "$(cat {events!s})" == green ]] || return 93
+      [[ -f {journal!s} ]] || return 94
+      printf '%s\\n' commit >> {events!s}
+      ;;
+    "-n -l -- /usr/local/sbin/radon-deploy-root sync-scheduled-units")
+      return 0
+      ;;
+    "/usr/local/sbin/radon-deploy-root sync-scheduled-units")
+      [[ "$(tail -n 1 {events!s})" == commit ]] || return 96
+      printf '%s\\n' sync >> {events!s}
+      ;;
+    *)
+      return 92
+      ;;
+  esac
 }}
 clear_transition_journal() {{
-  [[ "$(tail -n 1 {events!s})" == commit ]] || return 95
+  [[ "$(tail -n 1 {events!s})" == sync ]] || return 95
   printf '%s\\n' cleanup >> {events!s}
   rm -f -- {journal!s}
 }}
@@ -947,6 +962,7 @@ recover_pending_transition
         assert events.read_text(encoding="utf-8").splitlines() == [
             "green",
             "commit",
+            "sync",
             "cleanup",
         ]
         assert not journal.exists()
@@ -1611,6 +1627,7 @@ exec /bin/rm "$@"
             "verify-control-plane",
             "commit-transition",
             "install-units",
+            "sync-scheduled-units",
         ):
             assert f"/usr/local/sbin/radon-deploy-root {action}" in sudoers
 
@@ -2289,6 +2306,8 @@ class TestDeploymentBudgets:
         assert "verify-restored" in selector
         assert "verify-control-plane" in selector
         assert "commit-transition" in selector
+        assert "install-units" in selector
+        assert "sync-scheduled-units" in selector
         supervisor = function_body(helper, "supervise_root_action")
         assert "root_action_timeout" in supervisor
 
