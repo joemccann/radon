@@ -215,11 +215,18 @@ class TestPersistResult:
         persist_result(build_output([sample], daily), [sample], [("2026-08-21", 0.68)])
         assert persist_calls == [("guard",), ("samples", 1), ("daily", 1), ("snapshot", "trin"), ("health", "trin", "ok")]
 
-    def test_off_hours_heartbeats_daily_only(self, persist_calls, daily):
+    def test_off_hours_heartbeats_but_does_not_bump_the_snapshot(self, persist_calls, daily):
+        """REL-053 / R-125 (writer half): this asserted a snapshot upsert on
+        a cycle that added nothing, and that snapshot carries a bumped
+        `scan_time` every downstream freshness gate reads — which is what
+        made a re-serialised cache indistinguishable from a live sample. The
+        HEARTBEAT still fires every cycle (feedback_service_health_heartbeat:
+        a writer that skips it goes silently dead); only the snapshot is
+        withheld."""
         persist_result(build_output([], daily), [], [])
         kinds = [c[0] for c in persist_calls]
         assert "samples" not in kinds
-        assert ("snapshot", "trin") in persist_calls
+        assert ("snapshot", "trin") not in persist_calls
         assert ("health", "trin", "ok") in persist_calls
 
 

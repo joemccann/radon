@@ -507,6 +507,30 @@ def persist_result(
     if _nothing_to_persist(payload, new_samples, new_daily_rows):
         _log("refusing to persist: no samples and no daily rows")
         return
+    # R-125 (writer half): a cycle that added NOTHING — IB unreachable,
+    # off-hours, the source unchanged — used to upsert a snapshot carrying a
+    # bumped `scan_time` and heartbeat `ok`. Every freshness judgement
+    # downstream reads that timestamp, so the writer itself is what made a
+    # re-serialised cache indistinguishable from a live sample. A degraded
+    # run still records its error (REL-049 / R-098); it just does not claim
+    # a fresh scan.
+    if not new_samples and not new_daily_rows:
+        # The heartbeat still fires EVERY cycle — that is the only way the
+        # banner notices a silent writer (feedback_service_health_heartbeat)
+        # — but the SNAPSHOT is not rewritten, so `scan_time` keeps naming
+        # the last cycle that actually produced data.
+        writer.ensure_no_replica_for_writers()
+        if health_error is None:
+            writer.record_service_health(
+                SERVICE, "ok", finished_at=payload["scan_time"]
+            )
+        else:
+            writer.record_service_health(
+                SERVICE, "error", finished_at=payload["scan_time"], error=health_error,
+            )
+        _log("no new samples or daily rows; leaving the stored scan_time untouched")
+        _write_json_cache(payload)
+        return
     scan_time = payload["scan_time"]
     writer.ensure_no_replica_for_writers()
     if new_samples:
