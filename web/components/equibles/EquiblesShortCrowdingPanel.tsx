@@ -9,6 +9,7 @@ import { RegimeStrip, RegimeStripCell } from "../RegimeStrip";
 import { useEquiblesShortCrowding } from "./useEquiblesShortCrowding";
 import SortTh from "../SortTh";
 import { useSort } from "@/lib/useSort";
+import { SHORT_CROWDING_REFRESH, dataAgeDays, nextRefreshLabel } from "@/lib/refreshSchedule";
 import {
   buildScoreboardSummary,
   formatChangePct,
@@ -54,6 +55,14 @@ const FOOTNOTE =
 
 const BORROW_NOTE =
   "Borrow cost and shortable supply come from the IB probe on each ticker page; they are not joined into this board yet.";
+
+function freshnessNote(settlementDate: string | null): string {
+  const age = settlementDate == null ? null : dataAgeDays(settlementDate);
+  const latest = settlementDate
+    ? `Latest FINRA settlement ${settlementDate}${age != null ? ` (${age}d old)` : ""}; the next bi-monthly settlement disseminates about two weeks after it settles.`
+    : "";
+  return `${latest} Checked daily. Next refresh ${nextRefreshLabel(SHORT_CROWDING_REFRESH)}.`.trim();
+}
 
 function IntensityChip({
   testId,
@@ -254,7 +263,7 @@ export default function EquiblesShortCrowdingPanel() {
             marginTop: "8px",
           }}
         >
-          {FOOTNOTE} {BORROW_NOTE}
+          {FOOTNOTE} {BORROW_NOTE} {freshnessNote(data.latest_settlement_date ?? entries[0]?.settlement_date ?? null)}
         </div>
       </div>
     </>

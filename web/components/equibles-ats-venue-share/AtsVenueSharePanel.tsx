@@ -19,6 +19,7 @@ import {
   type AtsVenueShareThresholds,
 } from "./atsVenueShare";
 import { useAtsVenueShare } from "./useAtsVenueShare";
+import { ATS_VENUE_SHARE_REFRESH, dataAgeDays, nextRefreshLabel } from "@/lib/refreshSchedule";
 import SortTh from "../SortTh";
 import { useSort } from "@/lib/useSort";
 
@@ -100,10 +101,14 @@ function methodNote(
   const scope = window && minimum
     ? `Z-scores measure each week against its trailing ${window} weeks, and stay blank until ${minimum} observations exist.`
     : "";
+  const age = dataAgeDays(week);
   const source = week
-    ? `FINRA off-exchange file, latest week ${week}.`
+    ? `FINRA off-exchange file, latest week ${week}${age != null ? ` (${age}d old)` : ""}.`
     : "FINRA off-exchange file.";
-  return `${source} ATS share is measured against off-exchange volume, the only denominator the source publishes. Accumulation requires elevated ATS share AND a larger average ATS print in the same week. ${scope}`.trim();
+  const lag =
+    "FINRA publishes these weeks about a month in arrears and the provider trails FINRA, so the newest week always sits behind the calendar.";
+  const refresh = `Next refresh ${nextRefreshLabel(ATS_VENUE_SHARE_REFRESH)}.`;
+  return `${source} ${lag} ATS share is measured against off-exchange volume, the only denominator the source publishes. Accumulation requires elevated ATS share AND a larger average ATS print in the same week. ${scope} ${refresh}`.trim();
 }
 
 function SignalChip({ row }: { row: AtsVenueShareRow }) {

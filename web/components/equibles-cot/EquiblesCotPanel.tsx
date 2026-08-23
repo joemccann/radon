@@ -10,6 +10,7 @@ import SectionEmptyState from "../SectionEmptyState";
 import SpectralLoader from "../SpectralLoader";
 import { RegimeStrip, RegimeStripCell } from "../RegimeStrip";
 import { chartSeriesColor } from "@/lib/chartSystem";
+import { COT_POSITIONING_REFRESH, dataAgeDays, nextRefreshLabel } from "@/lib/refreshSchedule";
 import { useViewport } from "@/lib/useViewport";
 import {
   CONTRARIAN_TONE,
@@ -91,11 +92,15 @@ function methodologyFootnote(
   extremes: { high: number; low: number },
 ): string {
   const years = Math.round(lookbackDays / 365);
+  const age = dataAgeDays(reportDate);
   return (
-    `CFTC Commitments of Traders, week ending ${formatReportDate(reportDate)}. ` +
+    `CFTC Commitments of Traders, week ending ${formatReportDate(reportDate)}` +
+    `${age != null ? ` (${age}d old)` : ""}. ` +
+    `CFTC publishes each Tuesday's positions on Friday afternoon ET. ` +
     `Percentile ranks the speculative net against its own trailing ${years}y of weekly reports ` +
     `(withheld under ${minWeeks} reports). Above ${extremes.high} or below ${extremes.low} is a ` +
-    `crowded book, and crowded books are read contrarian.`
+    `crowded book, and crowded books are read contrarian. ` +
+    `Next refresh ${nextRefreshLabel(COT_POSITIONING_REFRESH)}.`
   );
 }
 
@@ -282,10 +287,12 @@ export default function EquiblesCotPanel() {
           />
         )}
         <div
+          data-testid="cot-methodnote"
           style={{
             fontFamily: "var(--font-mono)",
             fontSize: "9px",
             color: "var(--text-muted)",
+            lineHeight: "1.7",
             marginTop: "8px",
           }}
         >

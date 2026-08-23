@@ -296,3 +296,12 @@ describe("EquiblesShortCrowdingPanel", () => {
     expect(screen.getByRole("columnheader", { name: /ticker/i }).getAttribute("aria-sort")).toBe("ascending");
   });
 });
+
+describe("freshness copy derived from data + timer", () => {
+  it("states the settlement age and the next scheduled refresh", async () => {
+    await renderPanel({ data: payload() });
+    const note = screen.getByTestId("short-crowding-footnote").textContent ?? "";
+    expect(note).toMatch(/\(\d+d old\)/);
+    expect(note).toMatch(/Next refresh (Sun|Mon|Tue|Wed|Thu|Fri|Sat) \d{4}-\d{2}-\d{2} 09:30 UTC/);
+  });
+});

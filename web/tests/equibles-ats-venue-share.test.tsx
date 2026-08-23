@@ -363,3 +363,13 @@ describe("AtsVenueSharePanel — method footnote spacing", () => {
     expect(Number.parseFloat(errors.style.lineHeight)).toBeGreaterThanOrEqual(1.5);
   });
 });
+
+describe("AtsVenueSharePanel — freshness copy derived from data + timer", () => {
+  it("states the data age and the next scheduled refresh", () => {
+    mockState({ data: data() });
+    render(<AtsVenueSharePanel />);
+    const note = screen.getByTestId("ats-venue-share-methodnote").textContent ?? "";
+    expect(note).toMatch(/\(\d+d old\)/);
+    expect(note).toMatch(/Next refresh (Sun|Mon|Tue|Wed|Thu|Fri|Sat) \d{4}-\d{2}-\d{2} 09:15 UTC/);
+  });
+});
