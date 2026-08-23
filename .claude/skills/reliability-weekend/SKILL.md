@@ -1,6 +1,6 @@
 ---
 name: reliability-weekend
-description: Weekend reliability loop - Saturday delta-audit of everything merged since the last audited SHA (new findings appended to RELIABILITY_AUDIT.md), Sunday red/green remediation of new P0/P1 findings on a PR branch. Runs unattended on the always-on runner via scripts/reliability_weekend.sh; invoke as /reliability-weekend audit or /reliability-weekend remediate.
+description: Weekend reliability loop - daily delta-audit of everything merged since the last audited SHA (new findings appended to RELIABILITY_AUDIT.md), then red/green remediation of new P0/P1 findings on a PR branch. Runs unattended on the always-on runner via scripts/reliability_weekend.sh, one daily cycle at 00:00 local that runs audit then remediate; invoke as /reliability-weekend audit or /reliability-weekend remediate.
 ---
 
 # Reliability Weekend Loop
@@ -11,7 +11,9 @@ standard is the one set by the 2026-08-09 audit (`RELIABILITY_AUDIT.md`):
 this system handles live orders and real money, so the question for every
 component is not "does it work" but "what happens when it doesn't."
 
-The mode is the first argument: `audit` (Saturday) or `remediate` (Sunday).
+The mode is the first argument: `audit` or `remediate`. The unattended job
+fires once a day at 00:00 local and runs `audit` then `remediate`
+sequentially in this loop's own clone.
 
 ## Hard rails (both modes — violating any of these is a failed run)
 
@@ -20,8 +22,8 @@ The mode is the first argument: `audit` (Saturday) or `remediate` (Sunday).
 2. **Never place, modify, or cancel a live order.** Fault injection is
    fakes/mocks only. Never set or clear the production trading halt.
 3. **Never push to `main`.** All changes land on a branch
-   `reliability/weekend-<YYYY-MM-DD>` and a PR. The Monday human merge is
-   the deploy trigger.
+   `reliability/weekend-<YYYY-MM-DD>` and a PR. The human merge is the
+   deploy trigger.
 4. **Never run against the operator's working clone.** Refuse (exit
    nonzero, say why) unless the file `.radon-weekend-runner` exists in the
    repo root — that marker means this is the dedicated runner clone.
@@ -39,7 +41,7 @@ The mode is the first argument: `audit` (Saturday) or `remediate` (Sunday).
    hypothesis after 3 genuine attempts). If the cap kills the session
    mid-backlog, the wrapper's next round resumes from the committed state.
 
-## Mode: audit (Saturday)
+## Mode: audit (first phase of the daily cycle)
 
 Goal: a DELTA audit — judge what changed, don't re-audit the world.
 
@@ -73,18 +75,18 @@ Goal: a DELTA audit — judge what changed, don't re-audit the world.
    summary in the body. Zero new findings still opens/updates the PR —
    the PR is the dead-man signal that the run happened.
 
-## Mode: remediate (Sunday)
+## Mode: remediate (second phase of the daily cycle)
 
 Goal: work the ENTIRE un-DONE backlog to completion in severity order —
-P0, then P1, then P2 (this weekend's items first, then older stragglers)
+P0, then P1, then P2 (this run's items first, then older stragglers)
 — exactly by the PART B contract. Deferring remaining items to a future
-run is not an outcome; every backlog item ends this weekend as DONE or
+run is not an outcome; every backlog item ends this run as DONE or
 BLOCKED-with-root-cause.
 
-1. Check out the weekend branch (create from `origin/main` if Saturday
-   produced nothing; then this run only re-verifies drills — step 4).
+1. Check out the weekend branch (create from `origin/main` if the audit
+   phase produced nothing; then this run only re-verifies drills, step 4).
    If the branch already carries `REL-###` commits from an earlier round
-   of this weekend, this is a continuation: diff RELIABILITY_LOG.md
+   of this run, this is a continuation: diff RELIABILITY_LOG.md
    against the backlog and resume from the first un-DONE item.
 2. Per task, in severity order: (a) write the failing fault-injection
    test FIRST and show it red; (b) implement surgically; (c) show green;
@@ -107,6 +109,19 @@ BLOCKED-with-root-cause.
    severity, gate counts ×3, and anything needing the operator
    (control-plane unit changes need the root bootstrap before merge —
    say so explicitly in the PR body when `cloud/services/*` changed).
+
+## Dead-man reporting
+
+Every phase outcome is reported three ways, so a silent-dead runner shows up
+the next morning at the latest: a comment on the rolling GitHub issue
+labeled `reliability-weekend`, a Pushover notification per phase carrying
+the status and the weekend PR link when one exists, and the PR itself.
+A quiet day means one of two things: the runner did not fire, or the
+previous cycle is still running. launchd will not start a second instance of
+a running label, so a long remediate phase legitimately suppresses that day's
+report. Check `launchctl list | grep radon` before treating quiet as dead.
+The reliability cycle is bounded to 20h so it cannot swallow the next 00:00
+fire.
 
 ## Self-improvement
 

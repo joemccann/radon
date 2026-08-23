@@ -199,7 +199,7 @@ Findings discovered during PART B go to `NEW_FINDINGS` appendix — this backlog
 ## 6. Audit ledger
 
 The weekend loop (`.claude/skills/reliability-weekend/`) reads the last line
-here to scope its Saturday delta audit, and appends one line per run.
+here to scope its daily delta audit, and appends one line per run.
 Delta findings continue the R-### numbering in dated `## Delta audit` sections.
 
 - Audited through: `19135691` on 2026-08-09 — initial full audit (R-001…R-047) + PART B remediation.

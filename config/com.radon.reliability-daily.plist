@@ -3,14 +3,14 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.radon.testing-remediate</string>
+    <string>com.radon.reliability-daily</string>
 
-    <!-- __WEEKEND_REPO__ is substituted by scripts/setup_testing_weekend.sh -->
+    <!-- __WEEKEND_REPO__ is substituted by scripts/setup_reliability_weekend.sh -->
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>__WEEKEND_REPO__/scripts/testing_weekend.sh</string>
-        <string>remediate</string>
+        <string>__WEEKEND_REPO__/scripts/reliability_weekend.sh</string>
+        <string>cycle</string>
     </array>
 
     <key>WorkingDirectory</key>
@@ -26,14 +26,12 @@
         <string>__HOME__</string>
     </dict>
 
-    <!-- Sunday 17:00 local. Runs in the testing loop's own clone;
-         no shared working tree with the reliability loop. -->
+    <!-- Daily 00:00 local (no Weekday key). One job runs the audit phase then
+         the remediate phase, sequentially, in this loop's own clone. -->
     <key>StartCalendarInterval</key>
     <dict>
-        <key>Weekday</key>
-        <integer>0</integer>
         <key>Hour</key>
-        <integer>17</integer>
+        <integer>0</integer>
         <key>Minute</key>
         <integer>0</integer>
     </dict>
@@ -42,8 +40,8 @@
     <false/>
 
     <key>StandardOutPath</key>
-    <string>__WEEKEND_REPO__/logs/testing-weekend/launchd-remediate.log</string>
+    <string>__WEEKEND_REPO__/logs/reliability-weekend/launchd-cycle.log</string>
     <key>StandardErrorPath</key>
-    <string>__WEEKEND_REPO__/logs/testing-weekend/launchd-remediate.err</string>
+    <string>__WEEKEND_REPO__/logs/reliability-weekend/launchd-cycle.err</string>
 </dict>
 </plist>

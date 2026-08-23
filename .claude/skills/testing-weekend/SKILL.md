@@ -1,6 +1,6 @@
 ---
 name: testing-weekend
-description: Weekend testing loop - Saturday delta-audit of test-suite health for everything merged since the last audited SHA (new findings appended to TEST_AUDIT.md), Sunday red/green remediation of new P0/P1 findings on a PR branch. Runs unattended on the always-on runner via scripts/testing_weekend.sh; invoke as /testing-weekend audit or /testing-weekend remediate.
+description: Weekend testing loop - daily delta-audit of test-suite health for everything merged since the last audited SHA (new findings appended to TEST_AUDIT.md), then red/green remediation of new P0/P1 findings on a PR branch. Runs unattended on the always-on runner via scripts/testing_weekend.sh, one daily cycle at 00:00 local that runs audit then remediate; invoke as /testing-weekend audit or /testing-weekend remediate.
 ---
 
 # Testing Weekend Loop
@@ -11,7 +11,9 @@ standard is the one set by the 2026-08-07 audit (`TEST_AUDIT.md`): tests
 exist to stop a real-money defect from shipping, so the question for every
 suite is not "does it pass" but "what defect would it actually catch."
 
-The mode is the first argument: `audit` (Saturday) or `remediate` (Sunday).
+The mode is the first argument: `audit` or `remediate`. The unattended job
+fires once a day at 00:00 local and runs `audit` then `remediate`
+sequentially in this loop's own clone.
 
 ## Hard rails (both modes — violating any of these is a failed run)
 
@@ -19,8 +21,8 @@ The mode is the first argument: `audit` (Saturday) or `remediate` (Sunday).
    no `radon restart`, no docker commands against it. Tests use fakes/mocks
    only — never a live IB connection, never a live order.
 2. **Never push to `main`.** All changes land on a branch
-   `testing/weekend-<YYYY-MM-DD>` and a PR. The Monday human merge is the
-   deploy trigger.
+   `testing/weekend-<YYYY-MM-DD>` and a PR. The human merge is the deploy
+   trigger.
 3. **Never run against the operator's working clone.** Refuse (exit
    nonzero, say why) unless the file `.radon-weekend-runner` exists in the
    repo root — that marker means this is the dedicated runner clone.
@@ -41,9 +43,11 @@ The mode is the first argument: `audit` (Saturday) or `remediate` (Sunday).
    this loop runs in `~/radon-weekend/radon-testing`. Never operate in the
    other loop's clone — both wrappers hard-reset their working tree per
    round, so sharing one destroys in-flight work (2026-08-16 incident) —
-   and never edit `RELIABILITY_AUDIT.md` / `RELIABILITY_LOG.md`.
+   and never edit `RELIABILITY_AUDIT.md` / `RELIABILITY_LOG.md`. Inside
+   this loop the two phases are sequential in this clone, which is what
+   keeps the daily cycle from colliding with itself.
 
-## Mode: audit (Saturday)
+## Mode: audit (first phase of the daily cycle)
 
 Goal: a DELTA audit of TEST-SUITE HEALTH — judge what changed, don't
 re-audit the world. Reliability of the production system is the other
@@ -90,13 +94,13 @@ loop's job; yours is whether the tests guarding it are real.
    in the body. Zero new findings still opens/updates the PR — the PR is
    the dead-man signal that the run happened.
 
-## Mode: remediate (Sunday)
+## Mode: remediate (second phase of the daily cycle)
 
-Goal: work the newest un-DONE P0/P1 backlog items (this weekend's first,
+Goal: work the newest un-DONE P0/P1 backlog items (this run's first,
 then any older non-P2 stragglers), exactly by the PART B contract:
 
-1. Check out the weekend branch (create from `origin/main` if Saturday
-   produced nothing; then this run only re-verifies gates — step 4).
+1. Check out the weekend branch (create from `origin/main` if the audit
+   phase produced nothing; then this run only re-verifies gates, step 4).
 2. Per task, in severity order: (a) demonstrate the gap red FIRST — for a
    missing test, write it and show it fail against the defect (or show it
    catch a deliberate mutation of the source when the code is currently
@@ -116,6 +120,19 @@ then any older non-P2 stragglers), exactly by the PART B contract:
    by severity, gate counts ×3, and anything needing the operator (e.g. a
    ratchet-threshold decision per the T-050 rule, or CI workflow changes
    that need a human eye before merge).
+
+## Dead-man reporting
+
+Every phase outcome is reported three ways, so a silent-dead runner shows up
+the next morning at the latest: a comment on the rolling GitHub issue
+labeled `testing-weekend`, a Pushover notification per phase carrying the
+status and the weekend PR link when one exists, and the PR itself.
+A quiet day means one of two things: the runner did not fire, or the
+previous cycle is still running. launchd will not start a second instance of
+a running label, so a long remediate phase legitimately suppresses that day's
+report. Check `launchctl list | grep radon` before treating quiet as dead.
+This loop's worst case is one 2h audit plus one 6h remediate, so it always
+clears the next 00:00 fire.
 
 ## Self-improvement
 
