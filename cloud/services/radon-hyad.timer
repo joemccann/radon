@@ -1,0 +1,15 @@
+[Unit]
+Description=Radon HYAD Indicator - Tue..Sat 11:00 UTC FINRA HY bond breadth
+
+[Timer]
+# Tue..Sat 11:00 UTC is the T+1 morning after FINRA TRACE end-of-day
+# finalization: FINRA publishes aggregates for days the bond market is
+# open, so the Tuesday run picks up Monday's session and the Saturday run
+# picks up Friday's. The job's rolling last-10-calendar-day request window
+# self-heals across bond-market holidays and late revisions.
+OnCalendar=Tue..Sat 11:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
