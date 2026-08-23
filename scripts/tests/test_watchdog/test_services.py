@@ -123,6 +123,9 @@ class TestServiceCatalogContract:
             # Evening after-hours fill sweep (REL-012) — pulls get_fills()
             # from IB Gateway once per trading evening.
             "execution-sweep",
+            # TRIN 5m RTH sampler: the hourly series has no non-IB source
+            # (scripts/fetch_trin.py sample_live connects via IBClient).
+            "trin",
         }
         assert ib_dependent == expected, (
             f"requires_ib=true mismatch.\n"

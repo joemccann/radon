@@ -127,6 +127,13 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # then UW, then Yahoo. Yahoo is a complete fallback so this is not
     # grouped with IB outages.
     "iei-hyg":          {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # trin — radon-trin.timer, every 5m Mon-Fri 13:02-21:57 UTC (offset 2 min
+    # from breadth). Samples TRIN-NYSE from an IB snapshot during RTH only;
+    # off-hours runs refresh the StockCharts daily series and heartbeat. 15m
+    # open tolerates two missed slots; 24h closed covers the silent overnight
+    # and the weekend is bridged by the daily-only heartbeats. IB is the ONLY
+    # source of the hourly sample, so it groups with IB outages.
+    "trin":             {"open": 15 * _MIN, "closed": 24 * _HOUR, "requires_ib": True},
     # straddle — radon-straddle.timer, daily 02:15 UTC every calendar day
     # (Cboe appends the session row ~20:00 ET; weekend/holiday runs are 304
     # heartbeats). Uniform 26h window mirrors margin-debt/yield-curve: no
@@ -298,6 +305,9 @@ BUCKETS: dict[str, list[str]] = {
         # 15m live vol-cone sample; silent during RTH means the tab has
         # silently fallen back to yesterday's close.
         "vol-cone-intraday",
+        # 5m RTH TRIN sample (IB snapshot); silent during RTH means the
+        # hourly bars and MA(10) stop forming.
+        "trin",
     ],
     "continuous": [
         "newsfeed-scraper",
