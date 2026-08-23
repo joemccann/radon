@@ -11314,6 +11314,19 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
 
 /* ── Breadth panel (regime tab) ─────────────────────── */
 
+/* Pre-sampling note inside a history block (a fresh intraday sampler has no
+   bars until its first session). */
+.chart-section-note {
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  border: 1px dashed var(--line-grid);
+  border-radius: 4px;
+  margin-bottom: 8px;
+}
+
 .breadth-history-block {
   display: flex;
   flex-direction: column;

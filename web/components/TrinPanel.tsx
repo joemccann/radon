@@ -110,7 +110,7 @@ export default function TrinPanel() {
     return <SpectralLoader label="Loading TRIN series" />;
   }
 
-  if (!data || data.missing || !data.current || hourly.length === 0) {
+  if (!data || data.missing || !data.current) {
     return (
       <SectionEmptyState
         icon={Activity}
@@ -223,6 +223,11 @@ export default function TrinPanel() {
       </div>
 
       <div className="breadth-history-block" data-testid="trin-chart-section">
+        {total === 0 && (
+          <div className="chart-section-note" data-testid="trin-no-bars">
+            No 60-minute bars yet. The sampler records TRIN during NYSE regular hours; the first bar lands after the next open.
+          </div>
+        )}
         <HistoryRangeChips
           active={activeRange}
           onChange={(next) => {

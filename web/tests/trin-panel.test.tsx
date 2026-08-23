@@ -132,6 +132,17 @@ describe("TrinPanel", () => {
     expect(screen.getByTestId("trin-brush")).toBeTruthy();
   });
 
+  it("renders the strip and a pre-sampling note when there are no hourly bars yet", () => {
+    const data = buildData({ hourly: [] });
+    data.current = { ...data.current!, trin: null, ma10: null, state: "neutral", adv: null, dec: null, up_vol: null, down_vol: null };
+    mockUseTrin.mockReturnValue(hookState({ data }));
+    render(<TrinPanel />);
+    expect(screen.queryByTestId("section-empty-state")).toBeNull();
+    expect(screen.getByTestId("trin-daily").textContent).toContain("0.68");
+    expect(screen.getByTestId("trin-value").textContent).toBe("---");
+    expect(screen.getByTestId("trin-no-bars")).toBeTruthy();
+  });
+
   it("renders '---' for MA10 until ten bars exist", () => {
     const data = buildData();
     data.current = { ...data.current!, ma10: null, state: "neutral" };
