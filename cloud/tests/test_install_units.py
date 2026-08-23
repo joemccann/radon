@@ -34,14 +34,31 @@ def _sha(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _git(repo: pathlib.Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(repo), *args], check=True, capture_output=True
+    )
+
+
 class Sandbox:
+    """The checkout is a real git repo that doubles as its own `main` remote.
+
+    `install-units` sources both the manifest and every unit body from git
+    objects at the GitHub main tip, so the fixture has to commit before the
+    helper can see anything -- exactly the property under test.
+    """
+
     def __init__(self, tmp_path: pathlib.Path):
         self.tmp = tmp_path
-        self.services = tmp_path / "checkout" / "services"
+        self.repo = tmp_path / "checkout"
+        self.services = self.repo / "cloud" / "services"
         self.services.mkdir(parents=True)
-        self.manifest = tmp_path / "checkout" / "config" / "installed-units.sha256"
+        self.manifest = self.repo / "cloud" / "config" / "installed-units.sha256"
         self.manifest.parent.mkdir(parents=True)
         self.manifest.write_text("#\n", encoding="utf-8")
+        _git(self.repo, "init", "-b", "main", ".")
+        _git(self.repo, "config", "user.email", "install-units@test")
+        _git(self.repo, "config", "user.name", "install-units")
         self.unit_dir = tmp_path / "etc" / "systemd" / "system"
         self.unit_dir.mkdir(parents=True)
         self.systemctl_log = tmp_path / "systemctl.log"
@@ -69,8 +86,8 @@ class Sandbox:
             "RADON_TEST_SYNC": str(fake_sync),
             "RADON_TEST_ACTIVE_STATE_FILE": str(tmp_path / "active-units"),
             "RADON_TEST_REPLICA_PREFIX": str(tmp_path / "replica.db"),
-            "RADON_TEST_UNIT_SOURCE_DIR": str(self.services),
-            "RADON_TEST_UNIT_MANIFEST": str(self.manifest),
+            "RADON_TEST_GIT_DIR": str(self.repo / ".git"),
+            "RADON_TEST_UNIT_REMOTE": str(self.repo),
             "RADON_TEST_SYSTEMD_UNIT_DIR": str(self.unit_dir),
             "RADON_TEST_SHA256SUM": str(sha256sum),
         }
@@ -91,7 +108,16 @@ class Sandbox:
         path.write_text(body, encoding="utf-8")
         return path
 
-    def run(self) -> subprocess.CompletedProcess[str]:
+    def commit(self) -> str:
+        _git(self.repo, "add", "-A")
+        _git(self.repo, "commit", "--allow-empty", "-m", "release")
+        return subprocess.check_output(
+            ["git", "-C", str(self.repo), "rev-parse", "HEAD"], text=True
+        ).strip()
+
+    def run(self, *, commit: bool = True) -> subprocess.CompletedProcess[str]:
+        if commit:
+            self.commit()
         return subprocess.run(
             ["bash", str(ROOT_HELPER), "install-units"],
             env=self.env,
@@ -280,3 +306,112 @@ def test_deploy_unit_install_failure_is_non_fatal(tmp_path):
     assert calls.read_text(encoding="utf-8").splitlines()[-1] == "/fixed/root-helper restart-managed"
     assert "drift audit" in result.stdout + result.stderr
 
+
+
+# --- REL-039 (R-084, R-091): the checkout is radon-writable, so it may not be
+# the trust source. Unit content and the manifest that gates it both come from
+# git objects at the GitHub main tip, and the control-plane exclusion covers
+# the TIMERS that schedule the control-plane services.
+
+
+def test_unit_absent_from_the_main_tip_is_refused(tmp_path):
+    """R-084: anything running as `radon` can drop a unit into the checkout
+    and append its digest to the checkout manifest. Neither is reachable from
+    the pinned main tip, so neither may be installed."""
+    box = Sandbox(tmp_path)
+    box.source("radon-credit-spread.timer", TIMER_BODY)
+    # The manifest line IS reviewed content at the tip; the unit body is not.
+    # This is the strongest form of R-084: the digest gate passes and the blob
+    # still has to be reachable from the tip.
+    evil = "[Unit]\nDescription=x\n[Service]\nExecStart=/bin/sh -c 'id > /tmp/pwn'\n"
+    box.record("radon-evil.service", evil)
+    box.commit()
+    (box.services / "radon-evil.service").write_text(evil, encoding="utf-8")
+
+    result = box.run(commit=False)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not (box.unit_dir / "radon-evil.service").exists()
+    assert not any("radon-evil" in c for c in box.systemctl_calls())
+    assert "radon-evil.service (not-at-main-tip)" in result.stdout
+    assert "installed=1" in result.stdout  # the reviewed timer still lands
+
+
+def test_checkout_edit_after_the_tip_never_reaches_systemd(tmp_path):
+    """The blob at the tip is the content installed, not the working tree."""
+    box = Sandbox(tmp_path)
+    box.source("radon-credit-spread.timer", TIMER_BODY)
+    box.commit()
+    (box.services / "radon-credit-spread.timer").write_text(
+        TIMER_BODY.replace("OnCalendar=daily", "OnCalendar=*:0/1"), encoding="utf-8"
+    )
+
+    result = box.run(commit=False)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (box.unit_dir / "radon-credit-spread.timer").read_text() == TIMER_BODY
+
+
+def test_head_behind_the_main_tip_refuses_the_whole_install(tmp_path):
+    box = Sandbox(tmp_path)
+    box.source("radon-credit-spread.timer", TIMER_BODY)
+    box.commit()
+    remote = tmp_path / "remote"
+    subprocess.run(
+        ["git", "clone", "--bare", str(box.repo), str(remote)],
+        check=True,
+        capture_output=True,
+    )
+    box.source("radon-credit-spread.service", SERVICE_BODY)
+    box.commit()  # local HEAD now ahead of the "GitHub" tip
+    box.env["RADON_TEST_UNIT_REMOTE"] = str(remote)
+
+    result = box.run(commit=False)
+
+    assert result.returncode == 76, result.stdout + result.stderr
+    assert list(box.unit_dir.iterdir()) == []
+    # The supervisor's job-cancel sweep may list jobs on a failed action;
+    # nothing may be reloaded or enabled.
+    assert not any(c.startswith(("daemon-reload", "enable")) for c in box.systemctl_calls())
+
+
+def test_control_plane_timers_are_never_installed(tmp_path):
+    """R-091: rewriting radon-drift-audit.timer to monthly hides an installed
+    unit for 31 days; the same trick on radon-ib-watchdog.timer disarms
+    gateway supervision. Both are control-plane, like their .service."""
+    box = Sandbox(tmp_path)
+    for name in (
+        "radon-ib-watchdog.timer",
+        "radon-portfolio-sync.timer",
+        "radon-refresh.timer",
+        "radon-db-backup.timer",
+        "radon-drift-audit.timer",
+        "radon-nextjs-db-watchdog.timer",
+    ):
+        box.source(name, TIMER_BODY)
+
+    result = box.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert list(box.unit_dir.iterdir()) == []
+    assert box.systemctl_calls() == []
+    assert "(control-plane)" in result.stdout
+
+
+def test_verify_control_plane_covers_the_scheduling_timers():
+    """A control-plane .service whose .timer is unverified is unsupervised."""
+    helper = ROOT_HELPER.read_text(encoding="utf-8")
+    bootstrap = (ROOT / "scripts" / "bootstrap-control-plane.sh").read_text(encoding="utf-8")
+    for timer in (
+        "services/radon-ib-watchdog.timer",
+        "services/radon-portfolio-sync.timer",
+        "services/radon-refresh.timer",
+        "services/radon-db-backup.timer",
+        "services/radon-drift-audit.timer",
+        "services/radon-nextjs-db-watchdog.timer",
+    ):
+        assert timer in helper, timer
+        assert timer in bootstrap, timer
+        target = "/etc/systemd/system/" + timer.split("/", 1)[1]
+        assert target in helper, target
+        assert target in bootstrap, target

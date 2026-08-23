@@ -24,15 +24,21 @@ readonly -a CONTROL_PLANE_SOURCES=(
   services/radon-health.service
   services/radon-ib-gateway-preheld-restart.service
   services/radon-ib-watchdog.service
+  services/radon-ib-watchdog.timer
   services/radon-ib-gateway.service
   services/radon-api.service
   services/radon-monitor.service
   services/radon-relay.service
   services/radon-portfolio-sync.service
+  services/radon-portfolio-sync.timer
   services/radon-refresh.service
+  services/radon-refresh.timer
   services/radon-db-backup.service
+  services/radon-db-backup.timer
   services/radon-drift-audit.service
+  services/radon-drift-audit.timer
   services/radon-nextjs-db-watchdog.service
+  services/radon-nextjs-db-watchdog.timer
 )
 readonly -a CONTROL_PLANE_TARGETS=(
   /usr/local/sbin/radon-deploy-root
@@ -47,21 +53,27 @@ readonly -a CONTROL_PLANE_TARGETS=(
   /etc/systemd/system/radon-health.service
   /etc/systemd/system/radon-ib-gateway-preheld-restart.service
   /etc/systemd/system/radon-ib-watchdog.service
+  /etc/systemd/system/radon-ib-watchdog.timer
   /etc/systemd/system/radon-ib-gateway.service
   /etc/systemd/system/radon-api.service
   /etc/systemd/system/radon-monitor.service
   /etc/systemd/system/radon-relay.service
   /etc/systemd/system/radon-portfolio-sync.service
+  /etc/systemd/system/radon-portfolio-sync.timer
   /etc/systemd/system/radon-refresh.service
+  /etc/systemd/system/radon-refresh.timer
   /etc/systemd/system/radon-db-backup.service
+  /etc/systemd/system/radon-db-backup.timer
   /etc/systemd/system/radon-drift-audit.service
+  /etc/systemd/system/radon-drift-audit.timer
   /etc/systemd/system/radon-nextjs-db-watchdog.service
+  /etc/systemd/system/radon-nextjs-db-watchdog.timer
 )
 readonly -a CONTROL_PLANE_MODES=(
   755 755 755 644
   440 440 440 440
   644
-  644 644 644 644 644 644 644 644 644 644 644 644
+  644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644
 )
 
 if [[ "${RADON_DEPLOY_HELPER_TEST_MODE:-0}" == "1" ]]; then
@@ -84,8 +96,6 @@ if [[ "${RADON_DEPLOY_HELPER_TEST_MODE:-0}" == "1" ]]; then
   readonly CADDY_SOURCE="${RADON_TEST_CADDY_SOURCE:-}"
   readonly CADDY_CONFIG="${RADON_TEST_CADDY_CONFIG:-}"
   readonly CADDY_BIN="${RADON_TEST_CADDY_BIN:-}"
-  readonly UNIT_SOURCE_DIR="${RADON_TEST_UNIT_SOURCE_DIR:-}"
-  readonly UNIT_MANIFEST="${RADON_TEST_UNIT_MANIFEST:-}"
   readonly SYSTEMD_UNIT_DIR="${RADON_TEST_SYSTEMD_UNIT_DIR:-}"
   readonly GIT="${RADON_TEST_GIT:-$(command -v git)}"
   readonly RADON_GIT_DIR="${RADON_TEST_GIT_DIR:-}"
@@ -134,8 +144,6 @@ else
   readonly CADDY_SOURCE=/home/radon/radon/cloud/caddy/Caddyfile
   readonly CADDY_CONFIG=/etc/caddy/Caddyfile
   readonly CADDY_BIN=/usr/bin/caddy
-  readonly UNIT_SOURCE_DIR=/home/radon/radon/cloud/services
-  readonly UNIT_MANIFEST=/home/radon/radon/cloud/config/installed-units.sha256
   readonly SYSTEMD_UNIT_DIR=/etc/systemd/system
   readonly GIT=/usr/bin/git
   readonly RADON_GIT_DIR=/home/radon/radon/.git
@@ -631,28 +639,32 @@ stage_unit_candidate() {
   fi
 }
 
+# Installs the timer-owned units recorded in installed-units.sha256. Both the
+# manifest and every unit body come from git objects at the GitHub main tip --
+# never from /home/radon/radon, which anything running as `radon` can write
+# (R-084). A unit that is not reachable from that tip is refused even when its
+# digest matches; the checkout manifest is not evidence of review.
 install_manifest_units() {
-  local line digest unit source target candidate actual was_present
-  local control_plane_units=" "
+  local tip manifest line digest unit target candidate actual was_present
   local -a new_timers=() skipped=()
   local installed=0 updated=0 unchanged=0 changed=0 entry
   local manifest_line_re='^([0-9a-f]{64})[[:space:]][[:space:]](radon-[a-zA-Z0-9_.@-]+\.(service|timer))$'
 
-  [[ -n "$UNIT_SOURCE_DIR" && -n "$UNIT_MANIFEST" && -n "$SYSTEMD_UNIT_DIR" ]] || {
+  [[ -n "$SYSTEMD_UNIT_DIR" ]] || {
     echo "unit install paths are not configured" >&2
     return 78
-  }
-  [[ -f "$UNIT_MANIFEST" && ! -L "$UNIT_MANIFEST" ]] || {
-    echo "unit manifest is missing or is not a regular file: ${UNIT_MANIFEST}" >&2
-    return 66
   }
   [[ -d "$SYSTEMD_UNIT_DIR" && ! -L "$SYSTEMD_UNIT_DIR" ]] || {
     echo "systemd unit directory is missing: ${SYSTEMD_UNIT_DIR}" >&2
     return 66
   }
-  for entry in "${CONTROL_PLANE_SOURCES[@]}"; do
-    [[ "$entry" == services/* ]] && control_plane_units+="${entry#services/} "
-  done
+
+  tip="$(resolve_trusted_main_tip)" || return $?
+  manifest="$(git_bounded --git-dir="$RADON_GIT_DIR" cat-file blob \
+    "${tip}:cloud/config/installed-units.sha256")" || {
+    echo "installed-units manifest is missing at main tip" >&2
+    return 66
+  }
 
   while IFS= read -r line || [[ -n "$line" ]]; do
     line="${line%%#*}"
@@ -664,44 +676,43 @@ install_manifest_units() {
     fi
     digest="${BASH_REMATCH[1]}"
     unit="${BASH_REMATCH[2]}"
-    [[ "$control_plane_units" == *" ${unit} "* ]] && continue
+    if control_plane_unit_name "$unit"; then
+      skipped+=("${unit} (control-plane)")
+      continue
+    fi
     unit_is_excluded "$unit" && continue
 
-    source="${UNIT_SOURCE_DIR}/${unit}"
     target="${SYSTEMD_UNIT_DIR}/${unit}"
-    if [[ ! -f "$source" || -L "$source" ]]; then
-      skipped+=("${unit} (source-missing-or-symlink)")
-      continue
-    fi
-    if [[ "$(file_sha256 "$source")" != "$digest" ]]; then
-      skipped+=("${unit} (manifest-mismatch)")
-      continue
-    fi
     if [[ -L "$target" ]]; then
       skipped+=("${unit} (symlinked-target)")
       continue
     fi
-    was_present=0
-    if [[ -f "$target" ]]; then
-      was_present=1
-      if [[ "$(file_sha256 "$target")" == "$digest" ]]; then
-        unchanged=$((unchanged + 1))
-        continue
-      fi
-    fi
 
     candidate="$(mktemp "${SYSTEMD_UNIT_DIR}/.${unit}.candidate.XXXXXX")"
-    if ! stage_unit_candidate "$source" "$candidate"; then
+    chmod 0600 "$candidate"
+    if ! git_bounded --git-dir="$RADON_GIT_DIR" cat-file blob \
+         "${tip}:cloud/services/${unit}" > "$candidate"; then
       "$RM" -f "$candidate"
-      skipped+=("${unit} (stage-failed)")
+      skipped+=("${unit} (not-at-main-tip)")
       continue
     fi
     actual="$(file_sha256 "$candidate")"
     if [[ "$actual" != "$digest" ]]; then
       "$RM" -f "$candidate"
-      skipped+=("${unit} (staged-content-drift)")
+      skipped+=("${unit} (manifest-mismatch)")
       continue
     fi
+
+    was_present=0
+    if [[ -f "$target" ]]; then
+      was_present=1
+      if [[ "$(file_sha256 "$target")" == "$digest" ]]; then
+        "$RM" -f "$candidate"
+        unchanged=$((unchanged + 1))
+        continue
+      fi
+    fi
+
     chmod 0644 "$candidate"
     mv -f -- "$candidate" "$target"
     "$SYNC" -f "$target"
@@ -712,7 +723,7 @@ install_manifest_units() {
       installed=$((installed + 1))
       [[ "$unit" == *.timer ]] && new_timers+=("$unit")
     fi
-  done < "$UNIT_MANIFEST"
+  done <<< "$manifest"
 
   if (( changed )); then
     systemctl_bounded daemon-reload || return $?
@@ -741,9 +752,14 @@ github_origin_is_allowed() {
 }
 
 control_plane_unit_name() {
-  local name="$1" target
+  local name="$1" target base
   for target in "${CONTROL_PLANE_TARGETS[@]}"; do
-    [[ "$(basename -- "$target")" == "$name" ]] && return 0
+    base="$(basename -- "$target")"
+    [[ "$base" == "$name" ]] && return 0
+    # The timer that schedules a control-plane service is control-plane too:
+    # rewriting radon-drift-audit.timer hides an installed unit, and the same
+    # trick on radon-ib-watchdog.timer disarms gateway supervision.
+    [[ "$name" == *.timer && "${name%.timer}.service" == "$base" ]] && return 0
   done
   return 1
 }
@@ -760,47 +776,59 @@ git_bounded() {
 # the GitHub main tip -- never from the radon-writable checkout -- and must
 # match installed-units.sha256. Install is 0644 root:root plus one
 # daemon-reload. No start/stop/enable.
-sync_scheduled_units() {
-  local remote_url remote_sha local_sha allowlist manifest unit expected actual live
-  local tmp dest installed=0
+# The one trust anchor for anything that installs a unit file: HEAD must be
+# the GitHub main tip, and the tip commit must be in the local object store so
+# every subsequent `cat-file blob` reads reviewed content.
+resolve_trusted_main_tip() {
+  local remote_sha local_sha
 
   unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
         GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_EXEC_PATH GIT_SSH GIT_SSH_COMMAND \
         GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM \
         GIT_SSL_NO_VERIFY GIT_HTTP_USER_AGENT GIT_PROXY_COMMAND || true
 
-  [[ -n "$GIT" && -n "$RADON_GIT_DIR" && -n "$UNIT_REMOTE" && -n "$SYSTEMD_DIR" ]] || {
-    echo "scheduled unit sync paths are not configured" >&2
+  [[ -n "$GIT" && -n "$RADON_GIT_DIR" && -n "$UNIT_REMOTE" ]] || {
+    echo "unit trust-source paths are not configured" >&2
     return 78
   }
-  remote_url="$UNIT_REMOTE"
   if [[ "$FORCE_GITHUB_REMOTE_CHECK" == "1" ]]; then
-    github_origin_is_allowed "$remote_url" || {
-      echo "scheduled unit sync remote is not the GitHub radon repo" >&2
+    github_origin_is_allowed "$UNIT_REMOTE" || {
+      echo "unit remote is not the GitHub radon repo" >&2
       return 76
     }
   fi
-
-  remote_sha="$(git_bounded ls-remote --refs "$remote_url" refs/heads/main | awk '{print $1}')" || {
-    echo "could not read main tip for scheduled unit sync" >&2
+  remote_sha="$(git_bounded ls-remote --refs "$UNIT_REMOTE" refs/heads/main | awk '{print $1}')" || {
+    echo "could not read the GitHub main tip" >&2
     return 69
   }
   [[ "$remote_sha" =~ ^[0-9a-f]{40}$ ]] || {
-    echo "invalid main tip for scheduled unit sync" >&2
+    echo "invalid GitHub main tip" >&2
     return 69
   }
   local_sha="$(git_bounded --git-dir="$RADON_GIT_DIR" rev-parse HEAD)" || {
-    echo "could not read local HEAD for scheduled unit sync" >&2
+    echo "could not read local HEAD" >&2
     return 66
   }
   [[ "$local_sha" == "$remote_sha" ]] || {
-    echo "HEAD is not the GitHub main tip; refusing scheduled unit sync" >&2
+    echo "HEAD is not the GitHub main tip; refusing unit install" >&2
     return 76
   }
   git_bounded --git-dir="$RADON_GIT_DIR" cat-file -e "${remote_sha}^{commit}" || {
     echo "local git store is missing the main tip" >&2
     return 66
   }
+  printf '%s\n' "$remote_sha"
+}
+
+sync_scheduled_units() {
+  local remote_sha allowlist manifest unit expected actual live
+  local tmp dest installed=0
+
+  [[ -n "$SYSTEMD_DIR" ]] || {
+    echo "scheduled unit sync paths are not configured" >&2
+    return 78
+  }
+  remote_sha="$(resolve_trusted_main_tip)" || return $?
 
   allowlist="$(git_bounded --git-dir="$RADON_GIT_DIR" cat-file blob \
     "${remote_sha}:cloud/config/auto-sync-units.txt")" || {
