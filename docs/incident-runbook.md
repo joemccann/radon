@@ -73,7 +73,8 @@ Peak incident: 2026-07-02 21:32–23:37 UTC, P1, every DB-backed Next.js route d
   `db-pool-bounded.test.ts`, `db-timeout-self-heal.test.ts`,
   `db-stall-diagnostics.test.ts`, `routes-db-unavailable-503.test.ts`.
 - **Code:** `web/lib/db.ts`, `web/lib/dbExecute.ts`, `web/lib/dbKeepAlive.ts`,
-  `web/instrumentation.ts`, `radon-cloud/scripts/nextjs_db_watchdog.py`.
+  `web/instrumentation.ts`, `cloud/scripts/nextjs_db_watchdog.py`.
+  Watchdog units load `EnvironmentFile=/etc/radon/env`.
 
 ---
 

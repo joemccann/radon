@@ -15,7 +15,7 @@ Companion to `docs/unusual_whales_api.md`.
 |---|---|
 | Base | `https://api.equibles.com/v1` |
 | Auth | `Authorization: Bearer $EQUIBLES_API_KEY` |
-| Key | repo-root `.env` (laptop) and `/home/radon/radon-cloud/.env` mode `0600` (Hetzner) |
+| Key | repo-root `.env` (laptop) and `/etc/radon/env` mode `0600` (Hetzner; `~/radon-cloud/.env` is a compatibility symlink) |
 | Plan | Pro. `X-RateLimit-Limit: 100000` / day, shared REST + MCP, resets 00:00 UTC |
 | Methods | GET only |
 
