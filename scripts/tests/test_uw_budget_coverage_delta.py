@@ -167,3 +167,80 @@ class TestIvrankUwHitsAreCounted:
     def test_the_unit_attributes_its_uw_hits(self):
         unit = (REPO / "cloud" / "services" / "radon-ivrank.service").read_text()
         assert "RADON_UW_CALLER=ivrank" in unit
+
+
+class TestIvrankRepairSurvivesTheNextIbFetch:
+    """REL-064 / R-154 (P1): the repair is clobbered by the next IB fetch.
+
+    `merge_history` refuses only `uw`-over-`ib`. The reverse — the daily IB
+    "1M" fetch restating the same bad bar as `source='ib'` — overwrites the
+    stored repaired `uw` row. `repair_outliers` then re-detects it and
+    re-calls UW; if UW raises or returns None the loop `continue`s,
+    `_rows_changed` is still True, and `_write_db` upserts the bad IB print
+    back over the good value. Once the date ages out of the 1-month IB
+    window it FREEZES at whatever the last run wrote. A 0.2443 print against
+    a ~0.12 series sets the max of the 252-session window, distorting
+    `iv_rank` and the SUPPRESSED/NORMAL/ELEVATED/EXTREME label for every one
+    of the next 252 sessions.
+    """
+
+    def test_an_ib_restatement_never_overwrites_a_repaired_uw_row(self):
+        import fetch_ivrank as iv
+
+        stored = [{"date": "2026-08-14", "iv": 0.121, "source": "uw", "repaired": True}]
+        fetched = [{"date": "2026-08-14", "iv": 0.2443, "source": "ib"}]
+
+        merged = iv.merge_history(stored, fetched)
+
+        assert merged[0]["iv"] == 0.121
+        assert merged[0]["source"] == "uw"
+
+    def test_an_ib_restatement_still_wins_over_an_unrepaired_ib_row(self):
+        import fetch_ivrank as iv
+
+        stored = [{"date": "2026-08-14", "iv": 0.118, "source": "ib"}]
+        fetched = [{"date": "2026-08-14", "iv": 0.120, "source": "ib"}]
+
+        assert iv.merge_history(stored, fetched)[0]["iv"] == 0.120
+
+    def test_a_uw_row_still_never_overwrites_a_plain_ib_row(self):
+        import fetch_ivrank as iv
+
+        stored = [{"date": "2026-08-14", "iv": 0.118, "source": "ib"}]
+        fetched = [{"date": "2026-08-14", "iv": 0.130, "source": "uw"}]
+
+        assert iv.merge_history(stored, fetched)[0]["iv"] == 0.118
+
+    def test_a_failed_uw_lookup_leaves_the_stored_value_alone(self):
+        """The second half: a repair pass whose lookup fails must not report
+        a change, or the bad IB print is upserted back over the good one."""
+        import fetch_ivrank as iv
+
+        rows = [
+            {"date": "2026-08-12", "iv": 0.120, "source": "ib"},
+            {"date": "2026-08-13", "iv": 0.2443, "source": "ib"},
+            {"date": "2026-08-14", "iv": 0.121, "source": "ib"},
+        ]
+
+        def _dead(_date):
+            raise RuntimeError("UW 429")
+
+        repaired, repairs = iv.repair_outliers(rows, _dead)
+
+        assert repairs == []
+        assert repaired == rows, "a failed repair rewrote the series"
+
+    def test_a_successful_repair_is_marked_so_it_survives(self):
+        import fetch_ivrank as iv
+
+        rows = [
+            {"date": "2026-08-12", "iv": 0.120, "source": "ib"},
+            {"date": "2026-08-13", "iv": 0.2443, "source": "ib"},
+            {"date": "2026-08-14", "iv": 0.121, "source": "ib"},
+        ]
+        repaired, repairs = iv.repair_outliers(rows, lambda _d: 0.1205)
+
+        assert len(repairs) == 1
+        fixed = next(r for r in repaired if r["date"] == "2026-08-13")
+        assert fixed["source"] == "uw"
+        assert fixed.get("repaired") is True

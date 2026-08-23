@@ -123,13 +123,23 @@ def merge_history(
 ) -> list[dict[str, Any]]:
     """Upsert-merge fetched rows over stored history by date.
 
-    Fetched wins (IB restates the current session's bar), except a uw row
-    never overwrites a stored ib row for the same date.
+    Fetched wins (IB restates the current session's bar), with two refusals:
+    a `uw` row never overwrites a stored `ib` row, and — R-154 — an `ib` row
+    never overwrites a stored REPAIRED row. The daily IB "1M" fetch restates
+    the same bad bar, which used to clobber the repair; `repair_outliers`
+    then re-detected it and re-called UW, and a lookup that raised or
+    returned None left `_rows_changed` True, so `_write_db` upserted the bad
+    print back over the good value. Once the date aged out of the 1-month IB
+    window it froze at whatever the last run wrote — and a 0.2443 print
+    against a ~0.12 series sets the max of the 252-session window, distorting
+    `iv_rank` and its label for every one of the next 252 sessions.
     """
     by_date = {row["date"]: dict(row) for row in stored}
     for row in fetched:
         existing = by_date.get(row["date"])
         if existing and existing.get("source") == "ib" and row.get("source") == "uw":
+            continue
+        if existing and existing.get("repaired") and row.get("source") == "ib":
             continue
         by_date[row["date"]] = dict(row)
     return [by_date[date] for date in sorted(by_date)]
@@ -182,7 +192,11 @@ def repair_outliers(
             continue
         i = index[date]
         repairs.append({"date": date, "ib_iv": repaired[i]["iv"], "uw_iv": float(uw_iv)})
-        repaired[i] = {"date": date, "iv": float(uw_iv), "source": "uw"}
+        # `repaired` is what makes the substitution durable against the next
+        # IB restatement of the same bad bar (R-154).
+        repaired[i] = {
+            "date": date, "iv": float(uw_iv), "source": "uw", "repaired": True,
+        }
     return repaired, repairs
 
 

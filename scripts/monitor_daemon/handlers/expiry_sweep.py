@@ -252,6 +252,40 @@ def _net_open_quantity(rows: list[dict[str, Any]]) -> tuple[int, bool]:
     return net, ambiguous
 
 
+def _last_reducing_date(contract_rows: list[dict[str, Any]], net: int) -> str:
+    """Latest date of a fill whose side OPPOSES the open position (R-155).
+
+    A flat book (net == 0) is handled by definition, so every date counts.
+    """
+    if net == 0:
+        return max((str(p.get("date") or "")[:10] for p in contract_rows), default="")
+    closing_sign = -1 if net > 0 else 1
+    return max(
+        (
+            str(p.get("date") or "")[:10]
+            for p in contract_rows
+            if _ACTION_SIGNS.get(str(p.get("action") or "").upper()) == closing_sign
+        ),
+        default="",
+    )
+
+
+def _executed_reduces_position(payload: dict[str, Any], net: int) -> bool:
+    """True when an executed_orders fill's side opposes the open position."""
+    if net == 0:
+        return True
+    action = str(payload.get("action") or payload.get("side") or "").upper()
+    if action.startswith("B") or action == "BOT":
+        return net < 0
+    if action.startswith("S") or action == "SLD":
+        return net > 0
+    # An unreadable side keeps the pre-R-155 conservative behaviour: post-expiry
+    # activity we cannot classify still guards, because writing a $0.00
+    # expiration next to a real close double-books. Only a POSITIVELY
+    # identified opening side lifts the guard.
+    return True
+
+
 def _aggregate_contracts(rows: list[dict[str, Any]]) -> dict[tuple, dict[str, Any]]:
     """Per contract key: duplication-aware net qty, exec ids, latest date."""
     grouped: dict[tuple, list[dict[str, Any]]] = {}
@@ -272,6 +306,13 @@ def _aggregate_contracts(rows: list[dict[str, Any]]) -> dict[tuple, dict[str, An
             "last_date": max(
                 (str(p.get("date") or "")[:10] for p in contract_rows), default=""
             ),
+            # R-155: `last_date` covers OPENERS too, and the R-074 guard was
+            # widened to `>=` so a close booked on expiry day counts. An
+            # OPENING fill on expiry day then satisfied the same condition,
+            # the sweep skipped, and every 0DTE that expired worthless stayed
+            # permanently open in the journal. Only a fill that REDUCES the
+            # position is evidence the contract was handled.
+            "last_reducing_date": _last_reducing_date(contract_rows, net),
         }
     return contracts
 
@@ -409,14 +450,20 @@ class ExpirySweepHandler(BaseHandler):
 
         # Inclusive of the expiration date itself: an assignment, exercise or
         # closing fill booked ON expiry day demonstrably handled this contract,
-        # and a strict > skipped that guard entirely (R-074).
+        # and a strict > skipped that guard entirely (R-074). R-155: only a
+        # REDUCING fill counts — the opener of a 0DTE also lands on expiry day.
         expiry_iso = expiry_date.strftime("%Y-%m-%d")
-        if candidate["last_date"] >= expiry_iso:
+        if candidate.get("last_reducing_date", "") >= expiry_iso:
             return True
 
         key = _contract_key(payload)
+        net = candidate.get("net", 0)
         for item in executed:
-            if _executed_contract_key(item["payload"]) == key and item["fill_date"] >= expiry_iso:
+            if _executed_contract_key(item["payload"]) != key:
+                continue
+            if item["fill_date"] < expiry_iso:
+                continue
+            if _executed_reduces_position(item["payload"], net):
                 return True
         return False
 

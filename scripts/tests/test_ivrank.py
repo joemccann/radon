@@ -292,8 +292,13 @@ class TestOutlierGate:
         repaired_rows, repairs = mod.repair_outliers(rows, lookup)
         assert calls == [self.PIN_OUTLIER_DATE]
         by_date = {row["date"]: row for row in repaired_rows}
+        # REL-064 / R-154: `repaired` is what stops the next daily IB "1M"
+        # fetch restating the same bad bar right back over the substitution.
         assert by_date[self.PIN_OUTLIER_DATE] == {
-            "date": self.PIN_OUTLIER_DATE, "iv": self.PIN_OUTLIER_UW_IV, "source": "uw",
+            "date": self.PIN_OUTLIER_DATE,
+            "iv": self.PIN_OUTLIER_UW_IV,
+            "source": "uw",
+            "repaired": True,
         }
         assert repairs == [
             {"date": self.PIN_OUTLIER_DATE, "ib_iv": self.PIN_OUTLIER_IB_IV, "uw_iv": self.PIN_OUTLIER_UW_IV}
