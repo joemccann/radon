@@ -99,10 +99,25 @@ describe("useAutoSyncOnStale backs off a failing producer", () => {
 });
 
 describe("useSnapshotStaleness does not tick when there is nothing to age", () => {
-  it("holds the tick at 0 while lastSync is null", () => {
+  it("keeps ticking while lastSync is null", () => {
+    // REL-061 / R-149 superseded the original assertion here: a null
+    // lastSync is a BLACKOUT, not a quiet startup, so it must keep the
+    // retry cadence alive. R-139's real target — a re-render every 30s
+    // with nothing to recompute — is now the FRESH case, asserted below.
     const { result } = renderHook(() => useSnapshotStaleness(null));
     act(() => {
       vi.advanceTimersByTime(5 * 60_000);
+    });
+    expect(result.current.tick).toBeGreaterThan(0);
+    expect(result.current.state).toBe("unknown");
+  });
+
+  it("holds the tick at 0 while the snapshot is fresh", () => {
+    const { result } = renderHook(() =>
+      useSnapshotStaleness(new Date(Date.now() - 1_000).toISOString()),
+    );
+    act(() => {
+      vi.advanceTimersByTime(30_000);
     });
     expect(result.current.tick).toBe(0);
   });
