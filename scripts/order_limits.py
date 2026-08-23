@@ -117,19 +117,28 @@ def _combo_risk_per_unit(legs: Any) -> Optional[float]:
 def _combo_credit_per_unit(params: dict, price: float, multiplier: int) -> float:
     """Premium ONE combo unit collects, in dollars; 0 when the order pays.
 
-    Two credit encodings reach the funnel: the chain builder keeps a BUY
-    envelope and signs the credit negative (commit 1db9f558); the position
-    close ticket ships a SELL envelope with a positive price. Either way the
-    order receives the premium.
+    IB's BAG sign convention has FOUR quadrants, and the envelope alone does
+    not decide direction — the sign of the net price flips it:
+
+        BUY  envelope, price > 0  → debit paid      → no credit
+        BUY  envelope, price < 0  → credit received → credit (chain builder,
+                                                      commit 1db9f558)
+        SELL envelope, price > 0  → credit received → credit (close ticket)
+        SELL envelope, price < 0  → debit paid      → no credit
+
+    R-086: the fourth quadrant — closing or rolling a SHORT structure for a
+    debit — used to be booked as *collecting* |price| × 100 per unit, and
+    that phantom credit was subtracted from risk_per_unit. A 500-lot SELL
+    combo on a $5-wide short vertical at limitPrice=-5.00 priced at $0 loss
+    on an order paying $250,000.
     """
     try:
         signed_price = float(params.get("limitPrice") or 0)
     except (TypeError, ValueError):
         signed_price = 0.0
     is_sell_envelope = str(params.get("action") or "").upper().startswith("SELL")
-    if signed_price < 0 or is_sell_envelope:
-        return price * multiplier
-    return 0.0
+    receives_premium = (signed_price < 0) != is_sell_envelope
+    return price * multiplier if receives_premium else 0.0
 
 
 def _quantity_and_price(params: dict) -> tuple[Optional[float], Optional[float]]:
@@ -225,6 +234,30 @@ def check_order_limits(params: dict) -> Optional[dict[str, Any]]:
                     f"limit of {max_order_qty()} (quantity × max leg ratio) — refused"
                 ),
             }
+
+        # R-087: combo_max_loss returns None — i.e. NO loss check at all —
+        # when any option leg lacks a positive strike, and that hole was the
+        # sole combo risk gate. Refuse instead of transmitting unbounded.
+        for leg in legs:
+            if not isinstance(leg, dict):
+                return {
+                    "code": "ORDER_COMBO_STRIKE",
+                    "message": "combo leg is not an object — refused",
+                }
+            if str(leg.get("sec_type") or leg.get("secType") or "").upper() == "STK":
+                continue
+            try:
+                strike = float(leg.get("strike") or 0)
+            except (TypeError, ValueError):
+                strike = 0.0
+            if strike <= 0:
+                return {
+                    "code": "ORDER_COMBO_STRIKE",
+                    "message": (
+                        "combo option leg is missing a positive strike, so its "
+                        "max loss cannot be priced — refused"
+                    ),
+                }
 
     notional = order_notional(params)
     notional_cap = max_order_notional()
