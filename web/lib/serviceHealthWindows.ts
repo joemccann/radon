@@ -133,6 +133,11 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // missed cycle + slack; closed folds the weekend like its siblings.
   "position-reconcile": { open: 45 * MIN, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: true },
 
+  // R-159: radon-perf-twr wrote no health row and was in neither catalog.
+  // The `performance` key below is a DIFFERENT, on-demand writer
+  // (portfolio_performance.py). Tue..Sat 07:30 ET; 26h open catches a missed
+  // weekday run, 4d closed covers the Sat->Tue gap.
+  "perf-twr": { open: 26 * HOUR, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
   "flex-token-check": { open: 25 * HOUR, extended: 25 * HOUR, closed: 25 * HOUR, category: "scheduled", requires_ib: false },
   // Token-wide Flex 1025 lockout sidecar (scripts/utils/flex_embargo.py).
   // Written only on lockout as error + next_attempt_at (7 days). Not a

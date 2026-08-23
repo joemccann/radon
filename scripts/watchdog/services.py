@@ -79,6 +79,14 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # position-reconcile — 30-min RTH IB-vs-snapshot drift check (REL-001).
     # 45min open = one missed cycle + slack; mirrors serviceHealthWindows.ts.
     "position-reconcile": {"open": 45 * _MIN, "closed": 3 * _DAY, "requires_ib": True},
+    # R-159: radon-perf-twr wrote no service_health row and always exited 0,
+    # and was in NEITHER catalog (the web catalog's `performance` key is a
+    # different, on-demand writer). On a Flex 1025 lockout the builder
+    # returns status=degraded, systemd records success, and check.py treats
+    # "no row" as dormant — /performance serves stale returns with no alert.
+    # radon-perf-twr.timer fires Tue..Sat 07:30 ET; 26h open catches a missed
+    # weekday run, 4d closed covers the Sat->Tue gap like cash-flow-sync.
+    "perf-twr":         {"open": 26 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
     "flex-token-check": {"open": 25 * _HOUR, "closed": 25 * _HOUR, "requires_ib": False},
     "menthorq-session": {"open": 25 * _HOUR, "closed": 25 * _HOUR, "requires_ib": False},
     # Daily LIVE probe of the MenthorQ credential re-login chain (the
@@ -334,6 +342,14 @@ BUCKETS: dict[str, list[str]] = {
     "continuous": [
         "newsfeed-scraper",
         "replica-watchdog",
+        # R-158: this carried a 5-minute freshness window and appeared in NO
+        # bucket, so only the auto-derived `error` bucket saw it and
+        # `_check_error` fires solely on state == "error". A stopped or
+        # disabled radon-nextjs-db-watchdog.timer left the last `ok` row
+        # un-age-checked indefinitely, and a stopped timer is `inactive`
+        # rather than `failed`, so units.py missed it too — the Turso-wedge
+        # auto-restart off with an ok row on the board.
+        "nextjs-db-read",
         "fill-monitor",
         "journal-sync",
         # Always-on heartbeat (writes service_health every 60s cycle).
@@ -354,6 +370,10 @@ BUCKETS: dict[str, list[str]] = {
     ],
     "daily": [
         "cash-flow-sync",
+        # R-159: the TWR builder (Tue..Sat 07:30 ET). Silent means a Flex
+        # lockout, a throttle embargo or a dead timer, and /performance keeps
+        # serving the last snapshot until someone eyeballs the page.
+        "perf-twr",
         # Daily 20:30 ET evening execution sweep (monitor daemon) — hourly
         # check surfaces a missed run within 1h of the 26h window expiring.
         "execution-sweep",

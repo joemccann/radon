@@ -1640,6 +1640,37 @@ def build_and_persist(*, persist: bool = True, allow_inferred_flows: bool = Fals
     return payload
 
 
+# R-159: this job wrote NO service_health row and always exited 0 — `--check`
+# is the only non-zero path and the unit's ExecStart does not pass it. `perf-twr`
+# was in neither watchdog catalog, so on a Flex 1025 lockout the builder
+# returned status=degraded, systemd recorded success, and check.py treated "no
+# row" as dormant while /performance served stale returns.
+_PERF_TWR_SERVICE = "perf-twr"
+_PERF_TWR_OK_STATUSES = frozenset({"ok"})
+
+
+def _perf_twr_state(status: object) -> str:
+    """Map the payload's own status onto a service_health state.
+
+    `stale` is deliberately an ERROR here: `--check` tolerates it because a
+    stale-but-valid payload can still be served, but a builder that cannot
+    advance the curve is exactly what this row exists to surface.
+    """
+    return "ok" if str(status or "") in _PERF_TWR_OK_STATUSES else "error"
+
+
+def _record_perf_twr_health(status: object, error: object = None) -> None:
+    """Best-effort heartbeat. A failed write must never fail the build."""
+    try:
+        from db.writer import record_service_health
+
+        record_service_health(
+            _PERF_TWR_SERVICE, _perf_twr_state(status), error=error,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"[perf_twr] health row non-fatal: {exc}", file=_sys.stderr)
+
+
 def main() -> None:
     import argparse
 
@@ -1665,6 +1696,20 @@ def main() -> None:
     payload = build_and_persist(
         persist=not args.no_persist, allow_inferred_flows=args.allow_inferred_flows
     )
+    if not args.no_persist:
+        _record_perf_twr_health(
+            payload.get("status"),
+            error=None
+            if _perf_twr_state(payload.get("status")) == "ok"
+            else {
+                "message": (
+                    f"perf-twr status={payload.get('status')} "
+                    f"flows={payload.get('flows_status')} "
+                    f"nav_source={payload.get('nav_source')}"
+                ),
+                "class": "degraded_build",
+            },
+        )
     summary = (
         f"[perf_twr] status={payload['status']} "
         f"period={payload['period_start']}..{payload['period_end']} "
