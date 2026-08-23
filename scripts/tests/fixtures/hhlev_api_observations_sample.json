@@ -1,0 +1,142 @@
+{
+  "TLBSHNO": {
+    "realtime_start": "2026-08-23",
+    "realtime_end": "2026-08-23",
+    "observation_start": "2024-01-01",
+    "observation_end": "9999-12-31",
+    "units": "lin",
+    "output_type": 1,
+    "file_type": "json",
+    "order_by": "observation_date",
+    "sort_order": "asc",
+    "count": 9,
+    "offset": 0,
+    "limit": 100000,
+    "observations": [
+      {
+        "realtime_start": "2026-08-23",
+        "realtime_end": "2026-08-23",
+        "date": "2024-01-01",
+        "value": "20583428.0"
+      },
+      {
+        "realtime_start": "2026-08-23",
+        "realtime_end": "2026-08-23",
+        "date": "2024-04-01",
+        "value": "20741514.0"
+      },
+      {
+        "realtime_start": "2026-08-23",
+        "realtime_end": "2026-08-23",
+        "date": "2024-07-01",
+        "value": "20912042.0"
+      },
+      {
+        "realtime_start": "2026-08-23",
+        "realtime_end": "2026-08-23",
+        "date": "2024-10-01",
+        "value": "20860228.0"
+      },
+      {
+        "realtime_start": "2026-08-23",
+        "realtime_end": "2026-08-23",
+        "date": "2025-01-01",
+        "value": "20874073.0"
+      },
+      {
+        "realtime_start": "2026-08-23",
+        "realtime_end": "2026-08-23",
+        "date": "2025-04-01",
+        "value": "21044205.0"
+      },
+      {
+        "realtime_start": "2026-08-23",
+        "realtime_end": "2026-08-23",
+        "date": "2025-07-01",
+        "value": "21276794.0"
+      },
+      {
+        "realtime_start": "2026-08-23",
+        "realtime_end": "2026-08-23",
+        "date": "2025-10-01",
+        "value": "21506681.0"
+      },
+      {
+        "realtime_start": "2026-08-23",
+        "realtime_end": "2026-08-23",
+        "date": "2026-01-01",
+        "value": "21560050.0"
+      }
+    ]
+  },
+  "TNWBSHNO": {
+    "realtime_start": "2026-08-23",
+    "realtime_end": "2026-08-23",
+    "observation_start": "2024-01-01",
+    "observation_end": "9999-12-31",
+    "units": "lin",
+    "output_type": 1,
+    "file_type": "json",
+    "order_by": "observation_date",
+    "sort_order": "asc",
+    "count": 9,
+    "offset": 0,
+    "limit": 100000,
+    "observations": [
+      {
+        "realtime_start": "2026-08-23",
+        "realtime_end": "2026-08-23",
+        "date": "2024-01-01",
+        "value": "161885618.0"
+      },
+      {
+        "realtime_start": "2026-08-23",
+        "realtime_end": "2026-08-23",
+        "date": "2024-04-01",
+        "value": "164874727.0"
+      },
+      {
+        "realtime_start": "2026-08-23",
+        "realtime_end": "2026-08-23",
+        "date": "2024-07-01",
+        "value": "168988769.0"
+      },
+      {
+        "realtime_start": "2026-08-23",
+        "realtime_end": "2026-08-23",
+        "date": "2024-10-01",
+        "value": "169760700.0"
+      },
+      {
+        "realtime_start": "2026-08-23",
+        "realtime_end": "2026-08-23",
+        "date": "2025-01-01",
+        "value": "169608637.0"
+      },
+      {
+        "realtime_start": "2026-08-23",
+        "realtime_end": "2026-08-23",
+        "date": "2025-04-01",
+        "value": "175931076.0"
+      },
+      {
+        "realtime_start": "2026-08-23",
+        "realtime_end": "2026-08-23",
+        "date": "2025-07-01",
+        "value": "181137271.0"
+      },
+      {
+        "realtime_start": "2026-08-23",
+        "realtime_end": "2026-08-23",
+        "date": "2025-10-01",
+        "value": "182866812.0"
+      },
+      {
+        "realtime_start": "2026-08-23",
+        "realtime_end": "2026-08-23",
+        "date": "2026-01-01",
+        "value": "182979889.0"
+      }
+    ]
+  }
+}
