@@ -4080,10 +4080,19 @@ async def performance_sync():
     """Run portfolio performance metrics. 180s timeout.
 
     If a build is already in-flight, piggybacks on it (returns same result).
+
+    R-101: this had NEITHER the embargo guard nor the cooldown its sibling
+    `/performance/background` got in 23b1b9c5, and its callers include the
+    cold-start GET path. With `performance_snapshots` empty or Turso reads
+    failing, EVERY GET /api/performance blocked on a full builder run — the
+    request storm that earned the 1025 in the first place.
     """
     global _running_build
     if _running_build is not None and not _running_build.done():
         return await _running_build
+
+    _refuse_rebuild_or_none()  # raises 503 on lockout / 429 on cooldown
+    _record_rebuild_attempt()
     _running_build = asyncio.create_task(_do_performance_rebuild())
     return await _running_build
 
@@ -4097,7 +4106,70 @@ async def performance_sync():
 # schedule now (Tue..Sat 07:30 ET); this path is a fallback and needs a floor.
 PERFORMANCE_BACKGROUND_COOLDOWN_S = 20 * 60
 
-_last_background_build_at: Optional[float] = None
+# R-102: the cooldown used to be a process-local `time.monotonic()` float.
+# Any radon-api restart (deploy, watchdog, OOM) reset it to None and re-opened
+# an immediate Flex fetch; under a crash loop the 20-minute floor was zero.
+# It lives on disk now, in UTC epoch seconds, so a restart cannot buy a fetch.
+PERFORMANCE_REBUILD_SIDECAR = DATA_DIR / "performance_rebuild_cooldown.json"
+
+
+def _last_rebuild_epoch() -> Optional[float]:
+    try:
+        raw = json.loads(PERFORMANCE_REBUILD_SIDECAR.read_text())
+        value = float(raw.get("last_rebuild_at"))
+    except (OSError, ValueError, TypeError, AttributeError):
+        return None
+    return value
+
+
+def _record_rebuild_attempt() -> None:
+    try:
+        PERFORMANCE_REBUILD_SIDECAR.parent.mkdir(parents=True, exist_ok=True)
+        from utils.atomic_io import atomic_save
+
+        atomic_save(
+            str(PERFORMANCE_REBUILD_SIDECAR),
+            {"last_rebuild_at": datetime.now(timezone.utc).timestamp()},
+        )
+    except Exception:  # noqa: BLE001 — a cooldown write must never fail a build
+        logger.warning("could not persist the performance rebuild cooldown")
+
+
+def _rebuild_refusal() -> Optional[dict]:
+    """`None` when a rebuild may proceed, else a refusal payload."""
+    try:
+        from utils.flex_embargo import active_until
+
+        until = active_until()
+    except Exception:
+        until = None
+    if until:
+        return {"status": "lockout", "next_attempt_at": until}
+
+    last = _last_rebuild_epoch()
+    if last is None:
+        return None
+    age = datetime.now(timezone.utc).timestamp() - last
+    if 0 <= age < PERFORMANCE_BACKGROUND_COOLDOWN_S:
+        return {
+            "status": "cooldown",
+            "retry_in_seconds": int(PERFORMANCE_BACKGROUND_COOLDOWN_S - age),
+        }
+    return None
+
+
+def _refuse_rebuild_or_none() -> None:
+    """R-102: a refusal used to be a 202 to a caller that swallows the body,
+    so `/performance` served a stale snapshot with no explanation anywhere.
+    The synchronous endpoint answers with a real status code and logs."""
+    refusal = _rebuild_refusal()
+    if refusal is None:
+        return
+    logger.warning("performance rebuild refused: %s", refusal)
+    raise HTTPException(
+        status_code=503 if refusal["status"] == "lockout" else 429,
+        detail=refusal,
+    )
 
 
 @app.post("/performance/background", status_code=202)
@@ -4105,30 +4177,21 @@ async def performance_background():
     """Fire-and-forget performance rebuild. Returns 202 immediately.
 
     Refuses a duplicate while one is in flight, and refuses a fresh Flex fetch
-    inside the cooldown window.
+    inside the cooldown window or during a token lockout.
     """
-    global _running_build, _last_background_build_at
+    global _running_build
     if _running_build is not None and not _running_build.done():
         return {"status": "already_running"}
 
-    now = time.monotonic()
-    try:
-        from utils.flex_embargo import is_blocked
-        if is_blocked():
-            return {"status": "lockout"}
-    except Exception:
-        pass
-
-    if (
-        _last_background_build_at is not None
-        and now - _last_background_build_at < PERFORMANCE_BACKGROUND_COOLDOWN_S
-    ):
-        retry_in = int(
-            PERFORMANCE_BACKGROUND_COOLDOWN_S - (now - _last_background_build_at)
+    refusal = _rebuild_refusal()
+    if refusal is not None:
+        logger.warning("background performance rebuild refused: %s", refusal)
+        return JSONResponse(
+            status_code=503 if refusal["status"] == "lockout" else 429,
+            content=refusal,
         )
-        return {"status": "cooldown", "retry_in_seconds": retry_in}
 
-    _last_background_build_at = now
+    _record_rebuild_attempt()
     _running_build = asyncio.create_task(_do_performance_rebuild())
     return {"status": "accepted"}
 

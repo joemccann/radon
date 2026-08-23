@@ -119,6 +119,11 @@ EXIT_STATEMENT_NOT_READY = 12
 EXIT_PARSE_ERROR = 13
 EXIT_WRITE_ERROR = 14
 EXIT_FLEX_LOCKOUT = 15
+# R-100: a pre-flight embargo short-circuit performs NO HTTP, so it is not
+# evidence of a fresh IBKR 1025 and must never re-arm the token-wide
+# deadline. It exited 15 like a real lockout, and the daemon handler mapped
+# 15 straight back to record_lockout — every arming path extended the outage.
+EXIT_FLEX_PREFLIGHT_EMBARGO = 16
 
 
 def _classify(raw_type: str, amount: float) -> str:
@@ -772,8 +777,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             return EXIT_THROTTLE
         if type(exc).__name__ == "FlexTokenLocked":
             print(f"ERR: {exc}", file=sys.stderr)
-            _emit_status("error", "lockout", code="1025", message=str(exc))
-            return EXIT_FLEX_LOCKOUT
+            _emit_status("error", "preflight_embargo", code="1025", message=str(exc))
+            return EXIT_FLEX_PREFLIGHT_EMBARGO
         print(f"ERR: cash flow fetch failed: {exc}", file=sys.stderr)
         _emit_status("error", "transport", message=str(exc))
         return EXIT_STATEMENT_NOT_READY
