@@ -21,6 +21,7 @@
 # timer-owned oneshot). Verified: timer enabled/active, next fire
 # Units acknowledged in config/drift-allowlist.conf are deliberately absent,
 03f89d26f03fce70cd6d4323d3e7cce1f624b64a5b2b65308c8ff232f59e85c0  radon-watchdog-intraday.timer
+041c74c2c1f8b44b58104d9eccef8e090fa5799dade33213fcc6dd5b2b364036  radon-ivrank.service
 054e75a01a18e4aa8bd5d5f65e0e64c461335f951491a60211fa126a99b977b4  radon-host-metrics.timer
 079cee944885bc9fb31e1dfaed63acd2b2c944f7195a17708359604c4423defe  radon-flow-refresh.service
 09943ac2d9e55b45905db71577d9223b8e13959f05816748fe3288bf3e669279  radon-skew.timer
@@ -89,6 +90,7 @@ b409e9590c02a659a416200b9a88baa846115f8d78189d2c13fbd00270553d70  radon-db-backu
 b41f315c5a8b329c262911e75f70e65f12035cd6e14a52866764a8f3f5d916a4  radon-refresh.service
 b6943791ac70dacb075beeab32ef1a1214c1a845f6c7b40b2580977007ddcd3b  radon-watchdog-error.service
 b756b2eb4faf692f8292149843c61cc46c5bf31f9d515f9f31400e6d3a431916  radon-credit-spread.timer
+b91673c4a0d35ea5e09f400dbb46984d0db0a4aece6994f951050e17bbb32b8e  radon-ivrank.timer
 ba922a7566120af411315bb75a78b019da57f99fe924c3f9cbb2e25d23a88cb9  radon-forecast-nightly.timer
 bb92d7edc52e836a70c9def18771e40db0eb8032ef792a1973e01ad8f7b2c86b  radon-knowledge.service
 bbcae5cebee5ca45af4da5a2db86fe69f86713917cea1f1980275d70b116b307  radon-db-backup.timer
