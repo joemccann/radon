@@ -39,11 +39,11 @@ describe("REGIME_RAIL_GROUPS — grouped registry covers every tab exactly once"
     ]);
   });
 
-  it("flattens to all 23 regime tabs with no duplicates", () => {
-    expect(REGIME_TABS).toHaveLength(23);
-    expect(new Set(REGIME_TABS).size).toBe(23);
+  it("flattens to all 24 regime tabs with no duplicates", () => {
+    expect(REGIME_TABS).toHaveLength(24);
+    expect(new Set(REGIME_TABS).size).toBe(24);
     expect([...REGIME_TABS].sort()).toEqual(
-      ["cri", "vcg", "gex", "grg", "breadth", "trin", "divyield", "bpi", "margin", "credit", "iei-hyg", "straddle", "cor", "vixcor", "ivrank", "skew", "skew2d", "curve", "cot", "ats", "short", "llm", "backtest"].sort(),
+      ["cri", "vcg", "gex", "grg", "breadth", "trin", "divyield", "hyad", "bpi", "margin", "credit", "iei-hyg", "straddle", "cor", "vixcor", "ivrank", "skew", "skew2d", "curve", "cot", "ats", "short", "llm", "backtest"].sort(),
     );
   });
 
@@ -67,6 +67,7 @@ describe("REGIME_RAIL_GROUPS — grouped registry covers every tab exactly once"
     expect(groupOf.short).toBe("Positioning");
     expect(groupOf.ats).toBe("Positioning");
     expect(groupOf.breadth).toBe("Breadth & sentiment");
+    expect(groupOf.hyad).toBe("Breadth & sentiment");
     expect(groupOf.bpi).toBe("Breadth & sentiment");
     expect(groupOf.cor).toBe("Breadth & sentiment");
     expect(groupOf.llm).toBe("Models");
@@ -82,6 +83,7 @@ describe("REGIME_RAIL_GROUPS — grouped registry covers every tab exactly once"
     expect(REGIME_TAB_LABEL.vixcor).toBe("VIX-COR");
     expect(REGIME_TAB_LABEL.ivrank).toBe("IV RANK");
     expect(REGIME_TAB_LABEL.credit).toBe("CREDIT");
+    expect(REGIME_TAB_LABEL.hyad).toBe("HY AD");
   });
 });
 
@@ -137,12 +139,12 @@ describe("RegimeRail — grouped rail rendering + navigation", () => {
     return { onSelect, ...utils };
   };
 
-  it("renders all five group headers and 23 items", () => {
+  it("renders all five group headers and 24 items", () => {
     const { container } = renderRail();
     for (const g of REGIME_RAIL_GROUPS) {
       expect(within(container).getByText(g.label)).toBeTruthy();
     }
-    expect(container.querySelectorAll("[data-tab]")).toHaveLength(23);
+    expect(container.querySelectorAll("[data-tab]")).toHaveLength(24);
   });
 
   it("marks the active tab with the active class and aria-current", () => {
@@ -171,7 +173,7 @@ describe("RegimeRail — grouped rail rendering + navigation", () => {
     // Composite holds one flagged indicator (VCG warn), Positioning one (GEX fault).
     expect(within(container).getAllByText("1 FLAGGED")).toHaveLength(2);
     // Footer counts every indicator and every warn/fault status.
-    expect(within(container).getByText(/23 INDICATORS · 2 ELEVATED/i)).toBeTruthy();
+    expect(within(container).getByText(/24 INDICATORS · 2 ELEVATED/i)).toBeTruthy();
   });
 
   it("filter narrows items and hides empty groups", () => {
