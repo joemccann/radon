@@ -175,3 +175,69 @@ how this loop improves as the codebase grows.
   row, keep whatever part of the old assertion was still meaningful, and
   prefer rewriting the case onto a shape that preserves its original
   intent over deleting it.
+- 2026-08-22 (audit): the ledger anchor range (`c529c92a..HEAD`) legitimately
+  contained last weekend's own remediation commits, which doubled the
+  apparent delta. Split the range at the last commit that touched
+  `RELIABILITY_LOG.md` (`git log -1 --format=%h -- RELIABILITY_LOG.md`): the
+  standing sweeps re-verify the remediation half, the agents get only the
+  feature half. Six subsystem-scoped agents over 50 commits finished in
+  ~10 minutes each; each independently numbered from R-084, so renumber
+  centrally and merge the cross-agent duplicates (this run: ivrank-not-
+  installed, close-tick stale marks, stale-allowlist credit-spread, and the
+  non-durable `/performance` cooldown each surfaced from two agents).
+- 2026-08-22 (audit): scope `git diff --name-only` with
+  `grep -vE 'tests?/|\.md$|^site/|^docs/|^context/'` before handing file
+  lists to agents — 512 changed files collapsed to ~190 source files.
+- 2026-08-22 (audit): **cap each category walk at roughly 20 files.** The
+  error-handling agent was handed ~37 files (five fetchers plus their routes,
+  libs and hooks) and died to the stream watchdog at 600s with no progress,
+  losing the whole walk. Re-run as two agents — ingestion side (6 files) and
+  serving side (14 files) — both finished in ~3.5 minutes. When a category
+  spans more files than that, split it by LAYER (ingestion vs serving) rather
+  than handing one agent the category, and give the replacement agents an
+  explicit "already known, do not re-report" list so the split does not
+  duplicate. Also tell them to work fast and name a budget; the two that were
+  told to did.
+- 2026-08-22 (audit): **expect cross-category duplicates and merge centrally.**
+  Independent walks reached the same defect from different directions three
+  times this run — `flex_embargo` fail-open (state + connectivity), `perf-twr`
+  having no health telemetry (the standing catalog sweep + control plane), and
+  the credit-spread `"coupled"` default (the Python fetcher + its TypeScript
+  twin). Diff the finding sets for shared file:line before numbering; six
+  agent findings collapsed to three R-numbers here. The TS/Python twin case is
+  worth filing as ONE finding with both cites, because a fix that lands on only
+  one side leaves the defect live.
+- 2026-08-22 (audit): the standing sweeps earn their place — the `perf-twr`
+  gap (a timer installed this delta whose job writes no `service_health` row
+  and sits in neither catalog) was invisible to every scoped agent, because no
+  agent's file list contained both the unit and the two catalogs. Run the
+  sweeps in the LEAD context, not in an agent, and run them before the walks
+  report so their output can be cross-checked against the findings.
+- 2026-08-22 (audit): **check for a remote weekend branch BEFORE numbering
+  anything.** Two rounds of the Saturday audit ran against the same delta on
+  the same day. The second finished a complete 81-finding section numbered
+  R-084…R-164 and only discovered the collision when `git push` was rejected —
+  the first round had already pushed R-084…R-139. Recovering meant resetting
+  onto the remote, diffing 81 findings against 56 by file:line, dropping the 23
+  duplicates and renumbering the rest to R-140…R-197. Do this FIRST, every run,
+  before the walks are even launched:
+  `git ls-remote --heads origin reliability/weekend-<date>` and, if it exists,
+  `git fetch` it and read its `## Delta audit` section — then scope the walks to
+  what it did not cover, and start numbering after its highest R-###.
+  Corollary: never `git push --force` to resolve this. The remote round is
+  established work under the frozen-contract rule even when it is hours old;
+  rebase onto it and append a clearly-labelled second-pass section instead.
+- 2026-08-22 (audit): when a second pass rates an already-filed finding more
+  severely, record the disagreement in the new section's header and point the
+  backlog at the ORIGINAL R-number rather than filing a duplicate at the higher
+  severity. Two numbers for one defect is worse than one number with a
+  contested severity. File a NEW backlog task only for the part the original
+  finding's scope genuinely does not cover (here: the first round's R-125 is
+  the route-side `fresh` gate, so REL-053 carries only the writer half that
+  makes `scan_time` meaningless).
+- 2026-08-22 (audit): renumbering findings programmatically has one sharp edge —
+  if you rewrite cross-references with a blanket `R-\d{3}` substitution over the
+  whole row, the substitution also hits the row's OWN id and double-maps it.
+  Split the row at the id field, rewrite the body only, then set the id. Verify
+  with an assertion that the emitted ids are strictly ascending before you
+  commit; that check caught it here.

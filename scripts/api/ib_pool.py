@@ -23,6 +23,8 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 from clients.ib_client import IBClient, POOL_ROLES, DEFAULT_HOST, DEFAULT_GATEWAY_PORT
 
+from . import ib_executor
+
 # REL-015: roles whose acquire runs an application-level liveness probe.
 # `data` stays on the cheap TCP check to avoid latency on market-data calls.
 LIVENESS_PROBE_ROLES = frozenset({"orders", "sync"})
@@ -233,8 +235,17 @@ class IBPool:
         return was_current
 
     def _dispose_out_of_band(self, role: str, client: IBClient) -> None:
-        """Disconnect a retired client without waiting on its wedged worker."""
-        task = asyncio.create_task(asyncio.to_thread(client.disconnect))
+        """Disconnect a retired client without waiting on its wedged worker.
+
+        R-143: on the dedicated IB executor, never the default one. This
+        disconnect cannot be cancelled and is fired at exactly the moment a
+        worker has already wedged, so on the shared pool it was the second
+        thread lost per timeout — Clerk verification and Turso writes queued
+        behind it.
+        """
+        task = asyncio.ensure_future(
+            ib_executor.submit(client.disconnect, force=True)
+        )
         self._disposals.add(task)
 
         def _finalize(done: asyncio.Task) -> None:

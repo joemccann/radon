@@ -44,8 +44,8 @@ describe("SERVICE_FRESHNESS_WINDOWS", () => {
 
   it("collapses `extended` to `closed` for market-hours-only writers", () => {
     // pre-market (04:00-09:30 ET) + after-hours (16:00-20:00 ET) map to
-    // MarketState=`extended`. fill-monitor, exit-orders, journal-sync,
-    // orders-sync, portfolio-sync don't run in extended hours — the
+    // MarketState=`extended`. fill-monitor, journal-sync, orders-sync,
+    // portfolio-sync don't run in extended hours — the
     // monitor daemon gates them on `requires_market_hours=True`. So
     // the `extended` window must match `closed`, or the banner falsely
     // flags them every weekday morning between 04:00 and 09:30 ET.
@@ -55,7 +55,6 @@ describe("SERVICE_FRESHNESS_WINDOWS", () => {
       "portfolio-sync",
       "journal-sync",
       "fill-monitor",
-      "exit-orders",
       "orders-read-compare",
     ];
     for (const service of services) {
@@ -289,7 +288,6 @@ describe("SERVICE_FRESHNESS_WINDOWS — category field", () => {
     ["journal-sync", "scheduled"],
     ["cash-flow-sync", "scheduled"],
     ["fill-monitor", "scheduled"],
-    ["exit-orders", "scheduled"],
     ["flex-token-check", "scheduled"],
     ["cri-scan", "scheduled"],
     ["vcg-scan", "scheduled"],
@@ -696,7 +694,6 @@ describe("SERVICE_FRESHNESS_WINDOWS — requires_ib field", () => {
     ["orders-sync", true],
     ["portfolio-sync", true],
     ["fill-monitor", true],
-    ["exit-orders", true],
     ["journal-sync", true],
     ["execution-sweep", true],
     ["orders-read-compare", true],
@@ -733,7 +730,9 @@ describe("SERVICE_FRESHNESS_WINDOWS — requires_ib field", () => {
       "orders-sync",
       "portfolio-sync",
       "fill-monitor",
-      "exit-orders",
+      // `exit-orders` was here until R-141 — ExitOrdersHandler is no longer
+      // registered by create_daemon(), so it writes no heartbeat and is in
+      // neither catalog.
       "journal-sync",
       // Evening after-hours fill sweep (REL-012) — get_fills() from IB.
       "execution-sweep",

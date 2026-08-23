@@ -29,7 +29,7 @@ from datetime import datetime
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from monitor_daemon.daemon import MonitorDaemon
-from monitor_daemon.handlers import FillMonitorHandler, ExitOrdersHandler, PresetRebalanceHandler, JournalSyncHandler
+from monitor_daemon.handlers import FillMonitorHandler, PresetRebalanceHandler, JournalSyncHandler
 from monitor_daemon.handlers.flex_token_check import FlexTokenCheck
 from monitor_daemon.handlers.menthorq_session_check import MenthorQSessionCheck
 from monitor_daemon.handlers.menthorq_login_probe import MenthorQLoginProbe
@@ -88,11 +88,13 @@ def create_daemon() -> MonitorDaemon:
         send_notifications=True
     ))
     
-    daemon.register(ExitOrdersHandler(
-        ib_port=4001,
-        max_gap_pct=0.40
-    ))
-    
+    # ExitOrdersHandler is deliberately NOT registered (R-141): no producer
+    # anywhere writes the `exit_orders` section it reads, so every cycle
+    # connected to IB, placed nothing, and reported an ok heartbeat for a
+    # control that does not exist. The handler and its drills stay in the
+    # tree; scripts/tests/test_exit_orders_unregistered.py fails the moment a
+    # producer lands, which is when this registration comes back.
+
     daemon.register(PresetRebalanceHandler())
 
     daemon.register(FlexTokenCheck())
@@ -148,10 +150,6 @@ def run_once(daemon: MonitorDaemon) -> dict:
                 print(f"   New: {data.get('new_orders', 0)}")
                 print(f"   Partial fills: {data.get('partial_fills', 0)}")
                 print(f"   Complete fills: {data.get('complete_fills', 0)}")
-            elif name == "exit_orders":
-                print(f"   Checked: {data.get('orders_checked', 0)}")
-                print(f"   Placed: {data.get('orders_placed', 0)}")
-                print(f"   Skipped: {data.get('orders_skipped', 0)}")
     
     return results
 
@@ -186,7 +184,6 @@ def list_handlers():
     print("\nAvailable Handlers:")
     print("-" * 40)
     print("  fill_monitor       - Monitor orders for fills (60s)")
-    print("  exit_orders        - Place pending exit orders (300s)")
     print("  preset_rebalance   - Index constituent updates (weekly)")
     print("  flex_token_check   - IB Flex token expiry reminders (daily)")
     print("  journal_sync       - Append fresh IB fills to trade_log (300s)")

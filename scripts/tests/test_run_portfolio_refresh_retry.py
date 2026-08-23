@@ -88,25 +88,50 @@ def run_script(port: int, fake_python: Path, retries: int = 2,
 class TestDeployWindowRetry:
     def test_server_up_after_first_refusal_succeeds(self, fake_python: Path):
         """The deploy restart window: first POST refused, API back before
-        the retry — the run must succeed instead of failing the unit."""
+        the retry — the run must succeed instead of failing the unit.
+
+        The bind is driven by the script's OWN "retry" line, not a sleep: a
+        fixed 0.5s raced bash startup both ways (bind first => no retry line;
+        bind after the ladder => non-zero exit), and failed ~3 runs in 5.
+        """
         port = free_port()
         holder: dict = {}
-
-        def start_late():
-            # Bind AFTER the script's first attempt — HTTPServer listens
-            # at construction, so building it early defeats the test.
-            time.sleep(0.5)
-            holder["server"] = http.server.HTTPServer(("127.0.0.1", port), _OkHandler)
-            holder["server"].serve_forever()
-
-        threading.Thread(target=start_late, daemon=True).start()
+        proc = subprocess.Popen(
+            ["bash", str(SCRIPT)],
+            cwd=REPO_ROOT,
+            env={
+                "PATH": "/usr/bin:/bin:/usr/sbin",
+                "HOME": str(fake_python.parent),
+                "RADON_PYTHON_BIN": str(fake_python),
+                "RADON_PORTFOLIO_REFRESH_FASTAPI_PORT": str(port),
+                "RADON_PORTFOLIO_REFRESH_RETRIES": "3",
+                "RADON_PORTFOLIO_REFRESH_RETRY_DELAY_SECS": "3",
+            },
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        )
         try:
-            result = run_script(port, fake_python, retries=3, delay=1)
+            captured = []
+            for line in proc.stdout:
+                captured.append(line)
+                if "retry" in line.lower():
+                    # Inside the 3s retry delay: bind now.
+                    holder["server"] = http.server.HTTPServer(
+                        ("127.0.0.1", port), _OkHandler
+                    )
+                    threading.Thread(
+                        target=holder["server"].serve_forever, daemon=True
+                    ).start()
+                    break
+            assert holder.get("server") is not None, "".join(captured)
+            rest = proc.stdout.read()
+            returncode = proc.wait(timeout=60)
         finally:
             if "server" in holder:
                 holder["server"].shutdown()
-        assert result.returncode == 0, result.stderr
-        assert "retry" in (result.stdout + result.stderr).lower()
+            if proc.poll() is None:
+                proc.kill()
+            proc.stdout.close()
+        assert returncode == 0, "".join(captured) + rest
 
     def test_persistent_refusal_still_fails_with_exit_7(self, fake_python: Path):
         """A genuinely down FastAPI must still fail (bounded retries),

@@ -140,6 +140,10 @@ class ExitOrdersHandler(BaseHandler):
                         "order_type": order_type,
                         "target_price": section.get("price"),
                         "contracts": section.get("contracts"),
+                        # R-085: the oversell guard needs the POSITION
+                        # size, not the exit leg's size. Fall back to the
+                        # leg when the row predates the field.
+                        "held_contracts": trade.get("contracts"),
                         "contract_spec": section.get("contract_spec"),
                         "action": "SELL",  # Exit orders are sells
                         "journal_trade_id": journal_trade_id,
@@ -388,6 +392,44 @@ class ExitOrdersHandler(BaseHandler):
             return index[("local", local_symbol)]
         return []
 
+    @classmethod
+    def _working_sell_quantity(cls, index: Dict[Any, list], contract: Any,
+                               oca_group: Optional[str] = None) -> Optional[float]:
+        """Unfilled SELL quantity working at IB on this contract that is
+        NOT already OCA-linked to the row being placed.
+
+        A sibling exit leg in the same OCA group cannot fill alongside
+        this one — counting it would refuse the stop whenever the target
+        is live (T-055). Anything else (a manual TWS order, a legacy
+        pre-OCA placement, another row) does count.
+
+        ``None`` means at least one such order's remaining size is
+        unreadable — the caller must fail safe, never treat it as zero.
+        """
+        total = 0.0
+        for _price, trade in cls._working_sells_for(index, contract):
+            order = getattr(trade, "order", None)
+            if oca_group is not None and \
+                    str(getattr(order, "ocaGroup", "")) == oca_group:
+                continue
+            quantity = getattr(order, "totalQuantity", None)
+            filled = getattr(getattr(trade, "orderStatus", None), "filled", 0)
+            if isinstance(quantity, bool) or not isinstance(quantity, (int, float)):
+                return None
+            if quantity != quantity:  # NaN
+                return None
+            if isinstance(filled, bool) or not isinstance(filled, (int, float)) \
+                    or filled != filled:
+                filled = 0
+            total += max(0.0, float(quantity) - float(filled))
+        return total
+
+    @staticmethod
+    def _oca_group(journal_trade_id: Any, trade_id: Any) -> str:
+        """One group per journal row: filling the target cancels that
+        row's stop, and never another position's exit."""
+        return f"radon-exit-{journal_trade_id if journal_trade_id is not None else trade_id}"
+
     def _find_active_sell(self, index: Dict[Any, list], contract: Any,
                           limit_price: Any) -> tuple:
         """(adoptable trade, identity-unresolved) for one exit candidate.
@@ -582,12 +624,53 @@ class ExitOrdersHandler(BaseHandler):
 
                     # Check if within threshold
                     if self._can_place_order(mid, target_price):
-                        # Place the order
+                        # R-085: price-keyed adoption cannot recognise a
+                        # working SELL at a different limit (the sibling
+                        # exit leg, a manual TWS edit, an IB tick
+                        # normalisation), so it would place a SECOND
+                        # full-size SELL. Broker truth bounds the total.
+                        held = order_info.get("held_contracts")
+                        if not isinstance(held, (int, float)) or isinstance(held, bool):
+                            held = contracts
+                        oca_group = self._oca_group(
+                            order_info.get("journal_trade_id"),
+                            order_info.get("trade_id"),
+                        )
+                        working_qty = self._working_sell_quantity(
+                            active_sells, contract, oca_group
+                        )
+                        if working_qty is None or working_qty + contracts > held:
+                            detail = (
+                                "unreadable" if working_qty is None
+                                else f"{working_qty:g}"
+                            )
+                            result["orders_skipped"] += 1
+                            result["skipped"].append({
+                                "ticker": ticker,
+                                "contract": contract.localSymbol,
+                                "order_type": order_info["order_type"],
+                                "reason": "oversell_guard",
+                                "working_quantity": working_qty,
+                                "held_contracts": held,
+                            })
+                            result["error"] = (
+                                f"refusing {order_info['order_type']} on "
+                                f"{contract.localSymbol}: {detail} working SELL "
+                                f"+ {contracts} new would exceed {held} held"
+                            )
+                            logger.error(result["error"])
+                            continue
+
+                        # Place the order. Both exit legs of one journal
+                        # row share an OCA group so the first fill cancels
+                        # the sibling at IB, not one cycle later here.
                         limit_order = LimitOrder(
                             action="SELL",
                             totalQuantity=contracts,
                             lmtPrice=target_price,
-                            tif="GTC"
+                            tif="GTC",
+                            ocaGroup=oca_group,
+                            ocaType=1,
                         )
 
                         trade = client.place_order(contract, limit_order)
