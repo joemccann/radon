@@ -476,11 +476,42 @@ def persist_result(
 
 # ── orchestration ─────────────────────────────────────────────────
 
-def _read_cached_series() -> list[dict[str, Any]]:
+def _turso_series() -> list[dict[str, Any]]:
+    """The durable series from `credit_spread_history` (Turso-first read).
+
+    R-123: this table was WRITE-ONLY — no SELECT anywhere in the repo — and
+    the fetcher rehydrated from host-local JSON alone. Losing
+    `data/credit_spread.json` (a host rebuild, or a failed `persist_result`
+    before `_write_json_cache`) made the next run treat IB's 1-year window as
+    the WHOLE series and republish a 1-year snapshot where an 18-year one
+    stood, while the 2007+ rows sat unreadable in Turso.
+    """
+    from db.client import get_db
+
+    rows = get_db().execute(
+        "SELECT date, hyg_close, spx_close FROM credit_spread_history ORDER BY date"
+    ).fetchall()
+    return [
+        {"date": row[0], "hyg_close": float(row[1]), "spx_close": float(row[2])}
+        for row in rows
+    ]
+
+
+def _json_series() -> list[dict[str, Any]]:
     try:
         return json.loads(CREDIT_SPREAD_JSON.read_text())["series"]
     except (OSError, ValueError, KeyError):
         return []
+
+
+def _read_cached_series() -> list[dict[str, Any]]:
+    try:
+        stored = _turso_series()
+        if stored:
+            return stored
+    except Exception as exc:  # noqa: BLE001 — the JSON fallback still works
+        print(f"[credit-spread] turso rehydrate non-fatal: {exc}", file=sys.stderr)
+    return _json_series()
 
 
 def run() -> dict[str, Any]:

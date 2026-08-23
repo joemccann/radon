@@ -219,7 +219,9 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   "hhlev": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
   // ``trin`` — radon-trin.timer samples NYSE A/D + volume from IB every 5 minutes during RTH (3 missed cycles flag); off-hours the close heartbeat holds a day.
-  "trin": { open: 15 * MIN, extended: 24 * HOUR, closed: 24 * HOUR, category: "scheduled", requires_ib: true },
+  // R-122: 24h closed against a Mon-Fri-only timer went stale every Saturday
+  // evening. 3 days covers the Fri -> Mon gap, like the other RTH writers.
+  "trin": { open: 15 * MIN, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: true },
 
   // ``skew`` publishes every 5 minutes during RTH (radon-skew.timer) and
   // finalizes daily at 21:45 UTC. Ten minutes = two timer cycles, so one slow

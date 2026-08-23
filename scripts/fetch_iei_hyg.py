@@ -419,11 +419,43 @@ def persist_result(
 
 # ── orchestration ─────────────────────────────────────────────────
 
-def load_cached_series() -> list[dict[str, Any]]:
+def _turso_series() -> list[dict[str, Any]]:
+    """The durable series from `iei_hyg_history` (Turso-first read, R-123)."""
+    from db.client import get_db
+
+    rows = get_db().execute(
+        "SELECT date, iei_close, hyg_close, dxy_close "
+        "FROM iei_hyg_history ORDER BY date"
+    ).fetchall()
+    # `ratio` is derived, not stored — go through _row so the stored and the
+    # freshly-computed series are byte-identical in shape.
+    return [
+        _row(
+            row[0],
+            float(row[1]),
+            float(row[2]),
+            None if row[3] is None else float(row[3]),
+        )
+        for row in rows
+        if row[2]
+    ]
+
+
+def _json_series() -> list[dict[str, Any]]:
     try:
         return json.loads(IEI_HYG_JSON.read_text())["series"]
     except (OSError, ValueError, KeyError):
         return []
+
+
+def load_cached_series() -> list[dict[str, Any]]:
+    try:
+        stored = _turso_series()
+        if stored:
+            return stored
+    except Exception as exc:  # noqa: BLE001 — the JSON fallback still works
+        _log(f"turso rehydrate non-fatal: {exc}")
+    return _json_series()
 
 
 def run() -> dict[str, Any]:

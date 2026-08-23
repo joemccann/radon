@@ -158,7 +158,11 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # open tolerates two missed slots; 24h closed covers the silent overnight
     # and the weekend is bridged by the daily-only heartbeats. IB is the ONLY
     # source of the hourly sample, so it groups with IB outages.
-    "trin":             {"open": 15 * _MIN, "closed": 24 * _HOUR, "requires_ib": True},
+    # R-122: closed was 24h against a Mon-Fri-only timer with
+    # Persistent=false, so the last heartbeat is Friday ~21:57 UTC and the row
+    # went stale from Saturday evening until Monday's first fire — a
+    # guaranteed weekend page. 3 days covers Fri -> Mon like the siblings.
+    "trin":             {"open": 15 * _MIN, "closed": 3 * _DAY, "requires_ib": True},
     # straddle — radon-straddle.timer, daily 02:15 UTC every calendar day
     # (Cboe appends the session row ~20:00 ET; weekend/holiday runs are 304
     # heartbeats). Uniform 26h window mirrors margin-debt/yield-curve: no
