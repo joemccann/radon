@@ -1166,6 +1166,10 @@ main() {
 
   trap 'handle_deploy_signal TERM' TERM INT HUP
   log_info "Starting deployment (timeout: ${DEPLOY_TIMEOUT}s)..."
+  if [[ "${RADON_RUNTIME:-host}" != "host" ]]; then
+    log_error "RADON_RUNTIME=${RADON_RUNTIME:-} is not production. Host binaries only (GHCR down must not block a deploy)."
+    return 1
+  fi
 
   if ! preflight_control_plane; then
     log_error "Aborting deploy: installed control plane is not ready for this release."

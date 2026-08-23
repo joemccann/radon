@@ -132,10 +132,10 @@ class TestRuntimeContainerDropin:
         text = EXAMPLE_DROPIN.read_text(encoding="utf-8")
         assert "docker.sock" not in text
         assert "RADON_RUNTIME=container" in text
-        assert (
-            "ExecStart=docker run --network host --env-file /etc/radon/env "
-            "--rm --name %N"
-        ) in text
+        assert "--network host" in text
+        assert "--env-file /etc/radon/env" in text
+        assert "NOTIFY_SOCKET" in text
+        assert "WATCHDOG_USEC" in text
         for line in text.splitlines():
             if line.strip():
                 assert line.lstrip().startswith("#")
