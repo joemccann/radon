@@ -70,6 +70,7 @@ describe.each([
   ["curve", "app/regime/curve/page.tsx"],
   ["credit", "app/regime/credit/page.tsx"],
   ["iei-hyg", "app/regime/iei-hyg/page.tsx"],
+  ["trin", "app/regime/trin/page.tsx"],
   ["cot", "app/regime/cot/page.tsx"],
   ["ats", "app/regime/ats/page.tsx"],
   ["short", "app/regime/short/page.tsx"],
@@ -141,6 +142,9 @@ vi.mock("../components/CreditSpreadPanel", () => ({
 }));
 vi.mock("../components/IeiHygPanel", () => ({
   default: () => <div data-testid="iei-hyg-panel-stub" />,
+}));
+vi.mock("../components/TrinPanel", () => ({
+  default: () => <div data-testid="trin-panel-stub" />,
 }));
 vi.mock("../components/equibles-cot/EquiblesCotPanel", () => ({
   default: () => <div data-testid="cot-panel-stub" />,
@@ -370,6 +374,20 @@ describe("RegimePanel — tab is URL-driven", () => {
     const { container } = render(<RegimePanel prices={{}} />);
     within(container).getByRole("button", { name: /^IEI\/HYG$/ }).click();
     expect(pushSpy).toHaveBeenCalledWith("/regime/iei-hyg");
+  });
+
+  it("renders the TRIN panel when pathname is /regime/trin", () => {
+    mockedPathname = "/regime/trin";
+    const { container } = render(<RegimePanel prices={{}} />);
+    expect(within(container).getByTestId("trin-panel-stub")).toBeTruthy();
+    expect(within(container).queryByTestId("iei-hyg-panel-stub")).toBeNull();
+  });
+
+  it("clicking TRIN tab pushes /regime/trin", () => {
+    mockedPathname = "/regime/cri";
+    const { container } = render(<RegimePanel prices={{}} />);
+    within(container).getByRole("button", { name: /^TRIN$/ }).click();
+    expect(pushSpy).toHaveBeenCalledWith("/regime/trin");
   });
 
   it("does not expose a VOL CONE regime tab", () => {

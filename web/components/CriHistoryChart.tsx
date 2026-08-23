@@ -37,10 +37,22 @@ interface TooltipState<T> {
   d: T | null;
 }
 
+export interface ReferenceLevel {
+  value: number;
+  label: string;
+  color?: string;
+}
+
 interface CriHistoryChartProps<T extends { date: string }> {
   history: T[];
   series: [ChartSeries<T>, ChartSeries<T>];
   title: string;
+  /** Plot both series on ONE y-scale (built from the union of their values
+   *  and any reference levels) — for an indicator and its moving average. */
+  sharedAxis?: boolean;
+  /** Dashed horizontal guide lines on the left scale (e.g. signal zones);
+   *  their values are folded into the scale domain so they are always visible. */
+  referenceLevels?: ReferenceLevel[];
   /** Override for today's live values — keys match the entry type fields */
   liveValues?: Partial<Record<keyof T, number>>;
   /** X-axis tick label override; defaults to "%b %-d" (e.g. "Mar 5"). */
@@ -87,6 +99,8 @@ export default function CriHistoryChart<T extends { date: string }>({
   title,
   liveValues,
   xTickFormat,
+  sharedAxis = false,
+  referenceLevels,
 }: CriHistoryChartProps<T>) {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -158,11 +172,16 @@ export default function CriHistoryChart<T extends { date: string }>({
       return s.scaleType !== "log" || v > 0;
     }
 
-    // Helper: build Y scale for a series
+    // Helper: build Y scale for a series (or, on a shared axis, for both
+    // series plus the reference levels).
     function buildYScale(s: ChartSeries<T>): d3.ScaleContinuousNumeric<number, number> {
-      const vals = chartData
-        .map((d) => d[s.key] as number | null | undefined)
+      const sources = sharedAxis ? [leftSeries, rightSeries] : [s];
+      const vals = sources
+        .flatMap((src) => chartData.map((d) => d[src.key] as number | null | undefined))
         .filter((v): v is number => isPlottable(s, v));
+      for (const level of referenceLevels ?? []) {
+        if (isPlottable(s, level.value)) vals.push(level.value);
+      }
       if (vals.length === 0) return d3.scaleLinear().domain([0, 100]).range([innerH, 0]);
       const ext = d3.extent(vals) as [number, number];
       if (s.scaleType === "log") {
@@ -186,7 +205,7 @@ export default function CriHistoryChart<T extends { date: string }>({
     }
 
     const yLeft = buildYScale(leftSeries);
-    const yRight = buildYScale(rightSeries);
+    const yRight = sharedAxis ? yLeft : buildYScale(rightSeries);
     const leftTickValues = buildYTickValues(leftSeries, yLeft);
     const rightTickValues = buildYTickValues(rightSeries, yRight);
 
@@ -252,6 +271,31 @@ export default function CriHistoryChart<T extends { date: string }>({
           .attr("stroke-width", 1)
           .attr("opacity", 0.5);
       }
+    }
+
+    // Reference levels: dashed guides under the data lines, labelled at the
+    // right edge so they read as zones rather than as a third series.
+    for (const level of referenceLevels ?? []) {
+      if (!isPlottable(leftSeries, level.value)) continue;
+      const y = yLeft(level.value);
+      const color = level.color ?? CHART_AXIS_MUTED;
+      g.append("line")
+        .attr("class", "reference-level")
+        .attr("x1", 0)
+        .attr("x2", innerW)
+        .attr("y1", y)
+        .attr("y2", y)
+        .attr("stroke", color)
+        .attr("stroke-width", 1)
+        .attr("stroke-dasharray", "4 4");
+      g.append("text")
+        .attr("x", innerW - 4)
+        .attr("y", y - 4)
+        .attr("text-anchor", "end")
+        .attr("fill", color)
+        .attr("font-size", 9)
+        .attr("font-family", "var(--font-mono)")
+        .text(level.label);
     }
 
     drawLine(leftSeries, yLeft);

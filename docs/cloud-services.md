@@ -520,6 +520,18 @@ Yahoo (`DX-Y.NYB` for DXY). Heartbeat `iei-hyg`. Installed by the deploy's
 `install-units` verb from `installed-units.sha256`. Spec:
 [`indicators/iei-hyg.md`](indicators/iei-hyg.md).
 
+### TRIN (`radon-trin.timer`)
+
+Every 5 minutes `Mon..Fri 13:02-21:57 UTC` (2 min offset from
+`radon-breadth` so the two IB snapshot jobs never collide), oneshot
+`scripts/fetch_trin.py`, `TimeoutStartSec=240`. During RTH (ET, calendar-gated
+at runtime, `/health` auth-gated) it snapshots IB `TRIN-NYSE` plus `AD-NYSE` /
+`VOL-NYSE` into Turso `trin_samples`; hourly bars and MA(10) are derived at
+read time. Every run refreshes StockCharts `$TRIN` daily closes
+(`trin_daily`) and heartbeats, so off-hours runs are daily-only heartbeats.
+Heartbeat `trin`. Installed by the deploy's `install-units` verb from
+`installed-units.sha256`. Spec: [`indicators/trin.md`](indicators/trin.md).
+
 ### IV RANK (`radon-ivrank.timer`)
 
 Daily `22:10 UTC` (`RandomizedDelaySec=120`), oneshot
