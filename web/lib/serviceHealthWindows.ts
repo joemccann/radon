@@ -200,6 +200,12 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // ``iei-hyg`` — radon-iei-hyg.timer fires daily 21:55 UTC; IB → UW → Yahoo cascade, so requires_ib stays false.
   "iei-hyg": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
+  // ``hy-ad``: radon-hyad.timer fires Tue..Sat 11:00 UTC, the morning after
+  // FINRA TRACE end-of-day finalization (T+1). A uniform 120h window covers
+  // the T+1 lag plus 3-day weekends and bond-market-only holidays; older
+  // means the writer is down. FINRA HTTP only, no IB.
+  "hy-ad": { open: 120 * HOUR, extended: 120 * HOUR, closed: 120 * HOUR, category: "scheduled", requires_ib: false },
+
   // ``trin`` — radon-trin.timer samples NYSE A/D + volume from IB every 5 minutes during RTH (3 missed cycles flag); off-hours the close heartbeat holds a day.
   "trin": { open: 15 * MIN, extended: 24 * HOUR, closed: 24 * HOUR, category: "scheduled", requires_ib: true },
 
