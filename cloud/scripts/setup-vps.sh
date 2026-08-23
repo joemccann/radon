@@ -134,6 +134,8 @@ readonly SERVICE_FILES=(
   radon-ivrank.timer
   radon-iei-hyg.service
   radon-iei-hyg.timer
+  radon-trin.service
+  radon-trin.timer
 )
 
 

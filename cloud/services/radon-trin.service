@@ -1,0 +1,22 @@
+[Unit]
+Description=Radon TRIN Indicator (IB TRIN-NYSE 5-minute RTH sample + StockCharts $TRIN daily)
+After=network.target radon-api.service
+Wants=radon-api.service
+
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+User=radon
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/home/radon/radon-cloud/.env
+Environment=RADON_DB_NO_REPLICA=1
+ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_trin.py
+StandardOutput=journal
+StandardError=journal
+# Release the five-minute timer slot before the next one fires.
+TimeoutStartSec=240
+
+[Install]
+WantedBy=multi-user.target

@@ -1019,6 +1019,90 @@ def upsert_iei_hyg_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] =
         )
     db.commit()
 
+
+_TRIN_SAMPLE_COLUMNS = "(ts, session_date, trin, adv, dec, up_vol, down_vol, source, recorded_at)"
+_TRIN_SAMPLE_ON_CONFLICT = (
+    "ON CONFLICT(ts) DO UPDATE SET "
+    "session_date = excluded.session_date, trin = excluded.trin, "
+    "adv = excluded.adv, dec = excluded.dec, "
+    "up_vol = excluded.up_vol, down_vol = excluded.down_vol, "
+    "source = excluded.source, recorded_at = excluded.recorded_at"
+)
+TRIN_SAMPLE_UPSERT_SQL = (
+    f"INSERT INTO trin_samples {_TRIN_SAMPLE_COLUMNS} "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+    f"{_TRIN_SAMPLE_ON_CONFLICT}"
+)
+
+_TRIN_DAILY_ON_CONFLICT = (
+    "ON CONFLICT(date) DO UPDATE SET close = excluded.close, recorded_at = excluded.recorded_at"
+)
+TRIN_DAILY_UPSERT_SQL = (
+    f"INSERT INTO trin_daily (date, close, recorded_at) VALUES (?, ?, ?) {_TRIN_DAILY_ON_CONFLICT}"
+)
+
+
+def _trin_sample_params(row: dict[str, Any], stamp: str) -> tuple:
+    def _optional_float(value: Any) -> Optional[float]:
+        return None if value is None else float(value)
+
+    def _optional_int(value: Any) -> Optional[int]:
+        return None if value is None else int(value)
+
+    return (
+        row["ts"],
+        row["session_date"],
+        float(row["trin"]),
+        _optional_int(row.get("adv")),
+        _optional_int(row.get("dec")),
+        _optional_float(row.get("up_vol")),
+        _optional_float(row.get("down_vol")),
+        row.get("source") or "ib",
+        stamp,
+    )
+
+
+def upsert_trin_samples(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
+    """TRIN indicator — one row per five-minute RTH sample, idempotent on ts.
+    Chunked multi-row INSERTs (Hrana I/O bounding); a live run passes one row."""
+    if not rows:
+        return
+    stamp = recorded_at or _now_iso()
+    db = get_db()
+    for start in range(0, len(rows), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = rows[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        placeholders = ", ".join("(?, ?, ?, ?, ?, ?, ?, ?, ?)" for _ in chunk)
+        params: list[Any] = []
+        for row in chunk:
+            params.extend(_trin_sample_params(row, stamp))
+        db.execute(
+            f"INSERT INTO trin_samples {_TRIN_SAMPLE_COLUMNS} VALUES {placeholders} "
+            f"{_TRIN_SAMPLE_ON_CONFLICT}",
+            tuple(params),
+        )
+    db.commit()
+
+
+def upsert_trin_daily_rows(rows: list[tuple[str, float]], recorded_at: Optional[str] = None) -> None:
+    """TRIN daily closes (StockCharts $TRIN) — (date, close) tuples, idempotent on date."""
+    if not rows:
+        return
+    stamp = recorded_at or _now_iso()
+    db = get_db()
+    for start in range(0, len(rows), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = rows[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        placeholders = ", ".join("(?, ?, ?)" for _ in chunk)
+        params: list[Any] = []
+        for date, close in chunk:
+            params.extend((date, float(close), stamp))
+        db.execute(
+            f"INSERT INTO trin_daily (date, close, recorded_at) VALUES {placeholders} "
+            f"{_TRIN_DAILY_ON_CONFLICT}",
+            tuple(params),
+        )
+    db.commit()
+
+
 STRADDLE_UPSERT_SQL = """
 INSERT INTO straddle_history
   (date, spx_close, vix1d_close, ratio, recorded_at)
