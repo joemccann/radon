@@ -120,15 +120,21 @@ readonly -a SOURCES=(
   services/radon-health.service
   services/radon-ib-gateway-preheld-restart.service
   services/radon-ib-watchdog.service
+  services/radon-ib-watchdog.timer
   services/radon-ib-gateway.service
   services/radon-api.service
   services/radon-monitor.service
   services/radon-relay.service
   services/radon-portfolio-sync.service
+  services/radon-portfolio-sync.timer
   services/radon-refresh.service
+  services/radon-refresh.timer
   services/radon-db-backup.service
+  services/radon-db-backup.timer
   services/radon-drift-audit.service
+  services/radon-drift-audit.timer
   services/radon-nextjs-db-watchdog.service
+  services/radon-nextjs-db-watchdog.timer
 )
 readonly -a LOGICAL_TARGETS=(
   /usr/local/sbin/radon-deploy-root
@@ -143,28 +149,35 @@ readonly -a LOGICAL_TARGETS=(
   /etc/systemd/system/radon-health.service
   /etc/systemd/system/radon-ib-gateway-preheld-restart.service
   /etc/systemd/system/radon-ib-watchdog.service
+  /etc/systemd/system/radon-ib-watchdog.timer
   /etc/systemd/system/radon-ib-gateway.service
   /etc/systemd/system/radon-api.service
   /etc/systemd/system/radon-monitor.service
   /etc/systemd/system/radon-relay.service
   /etc/systemd/system/radon-portfolio-sync.service
+  /etc/systemd/system/radon-portfolio-sync.timer
   /etc/systemd/system/radon-refresh.service
+  /etc/systemd/system/radon-refresh.timer
   /etc/systemd/system/radon-db-backup.service
+  /etc/systemd/system/radon-db-backup.timer
   /etc/systemd/system/radon-drift-audit.service
+  /etc/systemd/system/radon-drift-audit.timer
   /etc/systemd/system/radon-nextjs-db-watchdog.service
+  /etc/systemd/system/radon-nextjs-db-watchdog.timer
 )
 readonly -a MODES=(
   0755 0755 0755 0644
   0440 0440 0440 0440
   0644
-  0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644
+  0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644
+  0644 0644 0644
 )
 readonly -a KINDS=(
   shell shell shell python
   sudoers sudoers sudoers sudoers
   polkit
   systemd systemd systemd systemd systemd systemd systemd systemd systemd
-  systemd systemd systemd
+  systemd systemd systemd systemd systemd systemd systemd systemd systemd
 )
 
 [[ "${#SOURCES[@]}" -eq "${#LOGICAL_TARGETS[@]}" && \

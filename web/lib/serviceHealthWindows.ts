@@ -64,7 +64,6 @@ const DAY = 24 * HOUR;
  *   journal-sync         10m always
  *   cash-flow-sync       25h open, 4d closed  (trading-day only; skips weekends)
  *   fill-monitor         5m open, 3d closed
- *   exit-orders          5m open, 3d closed
  *   flex-token-check     25h (daily)
  *   flex-web-service     8d on-demand (1025 lockout heartbeat only)
  *   cri-scan             35m open, 1d closed
@@ -123,13 +122,12 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // catch a missed weekday run. Pulls get_fills() from IB Gateway.
   "execution-sweep": { open: 26 * HOUR, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: true },
 
-  // Both ``fill-monitor`` and ``exit-orders`` only run during market
-  // hours via the monitor daemon. Their 1h closed window assumed the
-  // daemon fired during extended hours too, which it does not (DST fix
-  // 2026-05-14 confirmed the market-hours gate). Widen ``extended`` +
-  // ``closed`` to cover the worst-case weekend gap.
+  // ``fill-monitor`` only runs during market hours via the monitor
+  // daemon. Its 1h closed window assumed the daemon fired during
+  // extended hours too, which it does not (DST fix 2026-05-14 confirmed
+  // the market-hours gate). Widen ``extended`` + ``closed`` to cover the
+  // worst-case weekend gap.
   "fill-monitor": { open: 5 * MIN, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: true },
-  "exit-orders": { open: 5 * MIN, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: true },
   // position-reconcile — 30-min RTH IB-vs-snapshot position drift check
   // (monitor_daemon PositionReconcileHandler, REL-001). 45min open = one
   // missed cycle + slack; closed folds the weekend like its siblings.
@@ -570,7 +568,6 @@ const RTH_ONLY_SERVICES = new Set([
   "portfolio-sync",
   "journal-sync",
   "fill-monitor",
-  "exit-orders",
   "position-reconcile",
   "cri-scan",
   "vcg-scan",

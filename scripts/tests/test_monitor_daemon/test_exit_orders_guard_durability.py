@@ -136,12 +136,23 @@ def _confirmed_trade(order_id=99, perm_id=777001):
 
 
 def _open_sell_trade(con_id=606060, order_id=99, local_symbol="GOOG  260417C00315000",
-                     limit_price=15.00):
+                     limit_price=15.00, oca_group="radon-exit-trade-8",
+                     quantity=44):
+    """A working SELL this handler placed on trade-8 in an earlier cycle.
+
+    REL-040: real placements now carry the row's OCA group and a readable
+    size, so the oversell guard can tell an OCA sibling (cannot co-fill)
+    from a foreign working order (can). Pass ``oca_group=None`` for the
+    latter.
+    """
     trade = MagicMock()
     trade.order.action = "SELL"
     trade.order.orderId = order_id
     trade.order.permId = 777001
     trade.order.lmtPrice = limit_price
+    trade.order.ocaGroup = oca_group
+    trade.order.totalQuantity = quantity
+    trade.orderStatus.filled = 0
     trade.orderStatus.status = "Submitted"
     trade.contract.conId = con_id
     trade.contract.localSymbol = local_symbol

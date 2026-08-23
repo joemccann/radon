@@ -76,7 +76,6 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # 4 days like cash-flow-sync; open 26h catches a missed weekday run.
     "execution-sweep":  {"open": 26 * _HOUR, "closed": 4 * _DAY, "requires_ib": True},
     "fill-monitor":     {"open": 5 * _MIN, "closed": 3 * _DAY, "requires_ib": True},
-    "exit-orders":      {"open": 5 * _MIN, "closed": 3 * _DAY, "requires_ib": True},
     # position-reconcile — 30-min RTH IB-vs-snapshot drift check (REL-001).
     # 45min open = one missed cycle + slack; mirrors serviceHealthWindows.ts.
     "position-reconcile": {"open": 45 * _MIN, "closed": 3 * _DAY, "requires_ib": True},
@@ -318,7 +317,6 @@ BUCKETS: dict[str, list[str]] = {
         "newsfeed-scraper",
         "replica-watchdog",
         "fill-monitor",
-        "exit-orders",
         "journal-sync",
         # Always-on heartbeat (writes service_health every 60s cycle).
         "ib-watchdog",

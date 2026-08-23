@@ -306,8 +306,9 @@ def test_create_daemon_uses_auto_client_ids(tmp_path, monkeypatch):
     handlers = {handler.name: handler for handler in daemon.handlers}
 
     assert handlers["fill_monitor"].client_id == "auto"
-    assert handlers["exit_orders"].client_id == "auto"
     assert handlers["journal_sync"].client_id == "auto"
+    # exit_orders was asserted here until R-141 deregistered it.
+    assert "exit_orders" not in handlers
 
 
 if __name__ == "__main__":
