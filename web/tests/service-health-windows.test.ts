@@ -513,6 +513,22 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
     expect(requiresIb("ivrank")).toBe(false);
   });
 
+  // ``iei-hyg`` — radon-iei-hyg.timer fires daily 21:55 UTC every calendar day
+  // (weekend runs are unchanged-data heartbeats), so a uniform 26h window
+  // matches its daily siblings. IB → UW → Yahoo cascade, so the job
+  // heartbeats through an IB outage: requires_ib stays false.
+  it("iei-hyg is registered as scheduled with a uniform 26h window", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["iei-hyg"]).toBeDefined();
+    expect(getServiceCategory("iei-hyg")).toBe("scheduled");
+    for (const state of ["open", "extended", "closed"] as MarketState[]) {
+      expect(getFreshnessWindowMs("iei-hyg", state)).toBe(26 * HOUR);
+      expect(getFreshnessWindowMs("iei-hyg", state)).toBe(
+        getFreshnessWindowMs("ivrank", state),
+      );
+    }
+    expect(requiresIb("iei-hyg")).toBe(false);
+  });
+
   // ``skew`` publishes one-minute RTH snapshots and retains a daily
   // finalization heartbeat off-hours. UW-only, no IB.
   it("skew uses a tight open window and a daily off-hours window", () => {

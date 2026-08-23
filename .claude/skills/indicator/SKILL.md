@@ -133,9 +133,10 @@ lockstep pins, coverage ratchet). Do not loosen a pin test to get green.
    Turso has the snapshot + history rows, prod API returns the payload (expect the
    auth perimeter as anon), and load `https://app.radon.run/regime/<slug>` in a real
    browser session for a final screenshot.
-4. Install + enable the systemd timer on the VPS (deploys do not do this), confirm
-   `systemctl list-timers radon-<name>.timer`, then trigger one run
-   (`systemctl start radon-<name>.service`) and check the `service_health` row.
+4. Confirm the deploy installed and enabled the timer (`systemctl list-timers radon-<name>.timer`;
+   the deploy log prints `install-units: installed=2` when the manifest carried both
+   hashes), then trigger one run (`systemctl start radon-<name>.service` as root) and
+   check the `service_health` row.
 5. Clean up: `git worktree remove` the four worktrees, delete the `ind/*` branches,
    update `tasks/todo.md` review section.
 

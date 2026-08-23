@@ -13,14 +13,14 @@ export type RegimeTab =
   | "cri" | "vcg" | "gex" | "grg"
   | "breadth" | "bpi" | "margin" | "straddle"
   | "cor" | "vixcor" | "ivrank" | "skew" | "skew2d" | "curve"
-  | "cot" | "ats" | "short" | "llm" | "backtest" | "credit";
+  | "cot" | "ats" | "short" | "llm" | "backtest" | "credit" | "iei-hyg";
 
 export type RegimeRailGroup = { label: string; tabs: readonly RegimeTab[] };
 
 export const REGIME_RAIL_GROUPS: readonly RegimeRailGroup[] = [
   { label: "Composite", tabs: ["cri", "grg", "vcg"] },
   { label: "Volatility", tabs: ["vixcor", "ivrank", "skew", "skew2d", "curve", "straddle"] },
-  { label: "Positioning", tabs: ["gex", "margin", "credit", "cot", "short", "ats"] },
+  { label: "Positioning", tabs: ["gex", "margin", "credit", "iei-hyg", "cot", "short", "ats"] },
   { label: "Breadth & sentiment", tabs: ["breadth", "bpi", "cor"] },
   { label: "Models", tabs: ["llm", "backtest"] },
 ];
@@ -40,6 +40,7 @@ export const REGIME_TAB_LABEL: Record<RegimeTab, string> = {
   gex: "GEX",
   margin: "MARGIN",
   credit: "CREDIT",
+  "iei-hyg": "IEI/HYG",
   cot: "COT",
   short: "SHORT",
   ats: "ATS",

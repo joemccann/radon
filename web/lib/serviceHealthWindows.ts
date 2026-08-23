@@ -196,6 +196,9 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // heartbeats through an IB outage: requires_ib stays false.
   "ivrank": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
+  // ``iei-hyg`` — radon-iei-hyg.timer fires daily 21:55 UTC; IB → UW → Yahoo cascade, so requires_ib stays false.
+  "iei-hyg": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+
   // ``skew`` publishes every minute during RTH and finalizes daily at 21:45
   // UTC. Five minutes tolerates transient UW failures while surfacing a dead
   // live writer; the daily heartbeat preserves the off-hours window.

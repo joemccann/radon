@@ -132,6 +132,8 @@ readonly SERVICE_FILES=(
   radon-credit-spread.timer
   radon-ivrank.service
   radon-ivrank.timer
+  radon-iei-hyg.service
+  radon-iei-hyg.timer
 )
 
 

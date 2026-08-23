@@ -13,6 +13,8 @@ Owner specs for regime tabs and the cheap-wing scanner. Add a row here when a sp
 | ivrank | `/regime/ivrank` | `ivrank` | [ivrank.md](ivrank.md) |
 | curve | `/regime/curve` | `yield-curve` | [curve.md](curve.md) |
 | credit | `/regime/credit` | `credit-spread` | [credit.md](credit.md) |
+| iei-hyg | `/regime/iei-hyg` | `iei-hyg` | [iei-hyg.md](iei-hyg.md) |
+| trin | `/regime/trin` | `trin` | [trin.md](trin.md) (spec; build in flight) |
 
 `vol-cone` is the only indicator with two writers: an EOD run that stores the completed session and a 15m live pass that re-ranks today's chain against it (`is_intraday`), so the tab is tradeable during the session rather than a day stale.
 

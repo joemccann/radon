@@ -20,6 +20,7 @@ import SkewPanel from "./SkewPanel";
 import Skew2dPanel from "./Skew2dPanel";
 import YieldCurvePanel from "./YieldCurvePanel";
 import CreditSpreadPanel from "./CreditSpreadPanel";
+import IeiHygPanel from "./IeiHygPanel";
 import EquiblesCotPanel from "./equibles-cot/EquiblesCotPanel";
 import AtsVenueSharePanel from "./equibles-ats-venue-share/AtsVenueSharePanel";
 import EquiblesShortCrowdingPanel from "./equibles/EquiblesShortCrowdingPanel";
@@ -52,13 +53,14 @@ const MOBILE_TAB_LABEL: Partial<Record<RegimeTab, string>> = {
   skew2d: "SKEW 2D",
   vixcor: "VIX-COR",
   ivrank: "IV RANK",
+  "iei-hyg": "IEI/HYG",
 };
 
 /** Extract the tab segment from /regime/<tab>; defaults to "cri". */
 function tabFromPathname(pathname: string | null): RegimeTab {
   if (!pathname) return "cri";
   // Longest prefix first within each family: skew2d before skew, vixcor before cor.
-  const match = pathname.match(/^\/regime\/(cri|vcg|gex|grg|breadth|bpi|margin|straddle|vixcor|ivrank|cor|skew2d|skew|curve|credit|cot|ats|short|llm|backtest)(?:\/|$)/);
+  const match = pathname.match(/^\/regime\/(cri|vcg|gex|grg|breadth|bpi|margin|straddle|vixcor|ivrank|cor|skew2d|skew|curve|credit|iei-hyg|cot|ats|short|llm|backtest)(?:\/|$)/);
   if (match && (REGIME_TABS as readonly string[]).includes(match[1])) {
     return match[1] as RegimeTab;
   }
@@ -333,7 +335,7 @@ export default function RegimePanel({
 
   const tabBar = compact ? (
     <div className="m-regime-tabs" role="tablist" aria-label="Regime tabs">
-      {(["cri", "vcg", "gex", "grg", "breadth", "bpi", "margin", "credit", "straddle", "cor", "vixcor", "ivrank", "skew", "skew2d", "curve", "cot", "ats", "short", "llm", "backtest"] as RegimeTab[]).map((t) => (
+      {(["cri", "vcg", "gex", "grg", "breadth", "bpi", "margin", "credit", "iei-hyg", "straddle", "cor", "vixcor", "ivrank", "skew", "skew2d", "curve", "cot", "ats", "short", "llm", "backtest"] as RegimeTab[]).map((t) => (
         <button
           key={t}
           type="button"
@@ -426,6 +428,10 @@ export default function RegimePanel({
 
   if (activeTab === "credit") {
     return renderShell(<CreditSpreadPanel />);
+  }
+
+  if (activeTab === "iei-hyg") {
+    return renderShell(<IeiHygPanel />);
   }
 
   if (activeTab === "cot") {

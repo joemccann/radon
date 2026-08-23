@@ -969,6 +969,56 @@ def upsert_credit_spread_rows(rows: list[dict[str, Any]], recorded_at: Optional[
     db.commit()
 
 
+IEI_HYG_UPSERT_SQL = """
+INSERT INTO iei_hyg_history
+  (date, iei_close, hyg_close, dxy_close, recorded_at)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(date) DO UPDATE SET
+  iei_close   = excluded.iei_close,
+  hyg_close   = excluded.hyg_close,
+  dxy_close   = excluded.dxy_close,
+  recorded_at = excluded.recorded_at
+"""
+
+
+def _iei_hyg_params(row: dict[str, Any], stamp: str) -> tuple:
+    dxy = row.get("dxy_close")
+    return (
+        row["date"],
+        float(row["iei_close"]),
+        float(row["hyg_close"]),
+        None if dxy is None else float(dxy),
+        stamp,
+    )
+
+
+def upsert_iei_hyg_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
+    """IEI/HYG indicator — one row per common IEI/HYG session, idempotent on date.
+
+    Chunked multi-row INSERTs (Hrana I/O bounding), same shape as the
+    credit-spread writer: a first-run backfill is ~4,800 sessions, daily
+    runs pass 0-2 rows. dxy_close is nullable (ICE gaps on US holidays).
+    """
+    if not rows:
+        return
+    stamp = recorded_at or _now_iso()
+    db = get_db()
+    for start in range(0, len(rows), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = rows[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        placeholders = ", ".join("(?, ?, ?, ?, ?)" for _ in chunk)
+        params: list[Any] = []
+        for row in chunk:
+            params.extend(_iei_hyg_params(row, stamp))
+        db.execute(
+            "INSERT INTO iei_hyg_history (date, iei_close, hyg_close, dxy_close, recorded_at) "
+            f"VALUES {placeholders} "
+            "ON CONFLICT(date) DO UPDATE SET "
+            "iei_close = excluded.iei_close, hyg_close = excluded.hyg_close, "
+            "dxy_close = excluded.dxy_close, recorded_at = excluded.recorded_at",
+            tuple(params),
+        )
+    db.commit()
+
 STRADDLE_UPSERT_SQL = """
 INSERT INTO straddle_history
   (date, spx_close, vix1d_close, ratio, recorded_at)

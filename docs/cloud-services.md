@@ -511,6 +511,15 @@ Yahoo. Heartbeat `credit-spread`. Units are listed in `setup-vps.sh`
 `SERVICE_FILES`; root install-copy is still owed (`not-installed` allowlist
 expires 2026-12-31). Spec: [`indicators/credit.md`](indicators/credit.md).
 
+### IEI/HYG ratio (`radon-iei-hyg.timer`)
+
+Daily `21:55 UTC` (`RandomizedDelaySec=300`), oneshot
+`scripts/fetch_iei_hyg.py`. IB daily closes for IEI + HYG (SMART) and the ICE
+dollar index (`DX`, NYBOT), then UW (IEI/HYG, regular-session rows only), then
+Yahoo (`DX-Y.NYB` for DXY). Heartbeat `iei-hyg`. Installed by the deploy's
+`install-units` verb from `installed-units.sha256`. Spec:
+[`indicators/iei-hyg.md`](indicators/iei-hyg.md).
+
 ### IV RANK (`radon-ivrank.timer`)
 
 Daily `22:10 UTC` (`RandomizedDelaySec=120`), oneshot
