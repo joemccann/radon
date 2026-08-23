@@ -138,6 +138,8 @@ readonly SERVICE_FILES=(
   radon-iei-hyg.timer
   radon-trin.service
   radon-trin.timer
+  radon-divyield.service
+  radon-divyield.timer
 )
 
 
