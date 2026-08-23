@@ -5,43 +5,74 @@
  * robots.txt (the path 404'd through the auth perimeter) and no noindex
  * signal anywhere.
  *
- * Four pins:
- *   1. app/robots.ts disallows every path for every crawler, with no sitemap.
- *   2. The share-card routes stay crawlable via Allow carve-outs — preview
+ * Five pins:
+ *   1. Wildcard crawlers still see Disallow: / (plus share-card Allows),
+ *      with no sitemap.
+ *   2. Googlebot is allowed to crawl so it can recrawl trapped URLs and
+ *      honor X-Robots-Tag: noindex. A blanket Disallow: / is exactly the
+ *      GSC "Indexed, though blocked by robots.txt" trap.
+ *   3. The share-card routes stay crawlable via Allow carve-outs — preview
  *      bots (Twitterbot, Slackbot) honor robots.txt, so a blanket Disallow: /
  *      would stop shared tweet cards from unfurling.
- *   3. /robots.txt is anonymously reachable — crawlers have no Clerk session,
+ *   4. /robots.txt is anonymously reachable — crawlers have no Clerk session,
  *      so the middleware must treat it as public instead of redirecting it to
  *      /sign-in (which is exactly the URL Google indexed).
- *   4. next.config.mjs emits X-Robots-Tag: noindex, nofollow on all routes,
+ *   5. next.config.mjs emits X-Robots-Tag: noindex, nofollow on all routes,
  *      covering responses robots.txt rules alone don't (already-indexed URLs).
  */
 import { describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
 
-import robots from "../app/robots";
+import robots, { GOOGLE_INDEXING_BOTS } from "../app/robots";
 import {
   AUTHENTICATED_SHARE_GENERATOR_ROUTES,
   isPublicRoute,
   PUBLIC_SHARE_API_ROUTES,
 } from "../middleware";
 
+type RobotsRule = {
+  userAgent: string | string[];
+  allow?: string | string[];
+  disallow?: string | string[];
+};
+
+function robotsRules(): RobotsRule[] {
+  const rules = robots().rules;
+  return (Array.isArray(rules) ? rules : [rules]) as RobotsRule[];
+}
+
+function wildcardRule(): RobotsRule {
+  const rule = robotsRules().find((entry) => entry.userAgent === "*");
+  if (!rule) throw new Error("missing * robots rule");
+  return rule;
+}
+
 describe("app/robots.ts — disallow all crawlers except share cards", () => {
-  it("disallows every path for every user agent, with no sitemap", () => {
-    const output = robots();
-    expect(output.rules).toEqual({
+  it("disallows every path for wildcard crawlers, with no sitemap", () => {
+    expect(wildcardRule()).toEqual({
       userAgent: "*",
       allow: [...PUBLIC_SHARE_API_ROUTES],
       disallow: "/",
     });
-    expect(output).not.toHaveProperty("sitemap");
+    expect(robots()).not.toHaveProperty("sitemap");
+  });
+
+  it("lets Googlebot crawl so the noindex header can drop trapped URLs", () => {
+    const google = robotsRules().find((rule) => {
+      const ua = rule.userAgent;
+      return Array.isArray(ua) && ua.includes("Googlebot");
+    });
+    expect(google).toBeDefined();
+    expect(google!.userAgent).toEqual([...GOOGLE_INDEXING_BOTS]);
+    expect(google!.allow).toBe("/");
+    expect(google!.disallow).toBeUndefined();
   });
 
   it("carves out every public share-card route so link previews keep unfurling", () => {
-    const output = robots();
-    const rules = output.rules as { allow: string[] };
+    const allow = wildcardRule().allow;
+    const allowed = Array.isArray(allow) ? allow : [allow];
     for (const route of PUBLIC_SHARE_API_ROUTES) {
-      expect(rules.allow).toContain(route);
+      expect(allowed).toContain(route);
     }
   });
 
@@ -49,9 +80,10 @@ describe("app/robots.ts — disallow all crawlers except share cards", () => {
   // report script on the trading host and now require a Clerk session, so
   // advertising them to crawlers would only publish a path that 401s.
   it("does not advertise the authenticated generator POST routes", () => {
-    const rules = robots().rules as { allow: string[] };
+    const allow = wildcardRule().allow;
+    const allowed = Array.isArray(allow) ? allow : [allow];
     for (const route of AUTHENTICATED_SHARE_GENERATOR_ROUTES) {
-      expect(rules.allow, route).not.toContain(route);
+      expect(allowed, route).not.toContain(route);
     }
   });
 });

@@ -109,12 +109,16 @@ describe("share perimeter — content GETs public, generator POSTs authenticated
   });
 
   it("advertises only the preview GET paths to crawlers", () => {
-    const rules = robots().rules as { allow: string[] };
+    const rules = robots().rules;
+    const list = Array.isArray(rules) ? rules : [rules];
+    const wildcard = list.find((rule) => rule.userAgent === "*") as {
+      allow: string[];
+    };
     for (const route of PREVIEW_ROUTES) {
-      expect(rules.allow, route).toContain(route);
+      expect(wildcard.allow, route).toContain(route);
     }
     for (const route of GENERATOR_ROUTES) {
-      expect(rules.allow, route).not.toContain(route);
+      expect(wildcard.allow, route).not.toContain(route);
     }
   });
 });

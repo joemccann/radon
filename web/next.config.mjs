@@ -15,7 +15,8 @@ function securityHeaders() {
   const headers = [
     { key: "X-Frame-Options", value: "DENY" },
     // Authenticated terminal — never indexed. SEO lives on radon.run (site/).
-    // Belt to app/robots.ts's suspenders: de-indexes URLs crawlers already hold.
+    // Googlebot is allowed to crawl (see app/robots.ts) so this header can
+    // drop URLs already in the index; robots.txt Disallow would hide it.
     { key: "X-Robots-Tag", value: "noindex, nofollow" },
     { key: "X-Content-Type-Options", value: "nosniff" },
     { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
