@@ -13,7 +13,7 @@ Type=oneshot
 User=radon
 UMask=0077
 WorkingDirectory=/home/radon/radon
-EnvironmentFile=/home/radon/radon-cloud/.env
+EnvironmentFile=/etc/radon/env
 Environment=RADON_DB_NO_REPLICA=1
 ExecStart=/usr/bin/flock -w 7500 -E 75 /run/lock/radon-db-maintenance.lock /home/radon/radon/.venv/bin/python /home/radon/radon/cloud/scripts/db_backup.py
 # R-067: a lock loser (peer still holding /run/lock/radon-db-maintenance.lock

@@ -14,7 +14,7 @@ Applies under `scripts/newsfeed/`. Mirrors `scripts/newsfeed/CLAUDE.md`.
 ## Media / Storage
 
 - Cookie-gated images require Playwright cookies through redirects.
-- On Hetzner, `RADON_MEDIA_REMOTE=/home/radon/radon-cloud/media/`.
+- On Hetzner, `RADON_MEDIA_REMOTE=/var/lib/radon/media/` (compatibility symlink `~/radon-cloud/media`).
 - Rollover at 500 KB: archive old posts and keep about 20%.
 - `mergePosts` preserves tags.
 - Do not honor JSON-LD `schema.image` when article DOM has no `<img>`; it can produce generic placeholder misattribution.

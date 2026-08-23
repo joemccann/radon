@@ -13,7 +13,7 @@ StartLimitBurst=5
 Type=oneshot
 User=radon
 WorkingDirectory=/home/radon/radon
-EnvironmentFile=/home/radon/radon-cloud/.env
+EnvironmentFile=/etc/radon/env
 # Probes are individually bounded (6s HTTP, 12s subprocess); a clean cycle is
 # a few seconds. Type=oneshot has NO default start timeout and cannot overlap,
 # so an unbounded hang would permanently stall the timer.

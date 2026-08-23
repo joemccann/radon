@@ -13,10 +13,10 @@ StartLimitBurst=5
 Type=oneshot
 User=radon
 WorkingDirectory=/home/radon/radon
-EnvironmentFile=/home/radon/radon-cloud/.env
+EnvironmentFile=/etc/radon/env
 Environment=RADON_DB_NO_REPLICA=1
 # Default media root matches Caddy media.radon.run file_server root.
-Environment=RADON_MEDIA_DIR=/home/radon/radon-cloud/media
+Environment=RADON_MEDIA_DIR=/var/lib/radon/media
 # Script ships with the monorepo cloud/ tree and lands on the next deploy.
 # Until present, skip cleanly (unit ends inactive, not failed).
 ExecCondition=/usr/bin/test -f /home/radon/radon/cloud/scripts/media_backup.py

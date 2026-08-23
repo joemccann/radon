@@ -108,7 +108,7 @@ class TestPathConsistency:
             match = re.search(r"EnvironmentFile=(.+)", content)
             if match:
                 env_paths.add((name, match.group(1).strip()))
-        expected = "/home/radon/radon-cloud/.env"
+        expected = "/etc/radon/env"
         stripped = "/home/radon/radon-page-responder.env"
         values = {path for _, path in env_paths}
         assert expected in values, f"Expected {expected}, got {values}"
@@ -140,7 +140,7 @@ class TestPathConsistency:
                     and "radon-cloud" not in content:
                 for match in re.finditer(r"(/home/radon/radon/\.venv\S*)", content):
                     venv_paths.add(
-                        re.sub(r"/bin/\w+$", "", match.group(1))
+                        re.sub(r"/bin/[^/\s]+$", "", match.group(1))
                     )
         assert len(venv_paths) <= 1, f"Multiple venv paths found: {venv_paths}"
         if venv_paths:

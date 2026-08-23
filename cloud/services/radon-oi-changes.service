@@ -14,7 +14,7 @@ StartLimitBurst=5
 Type=oneshot
 User=radon
 WorkingDirectory=/home/radon/radon
-EnvironmentFile=/home/radon/radon-cloud/.env
+EnvironmentFile=/etc/radon/env
 # Put RADON_DB_NO_REPLICA last: configparser (unit tests) keeps only the
 # final Environment= line when keys duplicate; fleet drop-in also sets it.
 Environment=RADON_PYTHON_BIN=/home/radon/radon/.venv/bin/python3

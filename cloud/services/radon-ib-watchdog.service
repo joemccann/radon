@@ -22,7 +22,7 @@ User=radon
 StateDirectory=radon
 StateDirectoryMode=0750
 WorkingDirectory=/home/radon/radon
-EnvironmentFile=/home/radon/radon-cloud/.env
+EnvironmentFile=/etc/radon/env
 # Direct-to-cloud only; never resurrect the retired embedded replica
 # (every other radon-* unit sets this). See feedback_libsql_replica_one_writer.
 Environment=RADON_DB_NO_REPLICA=1

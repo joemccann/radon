@@ -13,12 +13,10 @@ radon-credit-spread.service
 radon-credit-spread.timer
 radon-cta-sync.service
 radon-cta-sync.timer
-radon-db-backup.timer
 radon-db-retention.service
 radon-db-retention.timer
 radon-demo-mirror.service
 radon-demo-mirror.timer
-radon-drift-audit.timer
 radon-equibles-13f.service
 radon-equibles-13f.timer
 radon-equibles-ats.service
@@ -39,7 +37,6 @@ radon-grok-page-responder.service
 radon-grok-page-responder.timer
 radon-host-metrics.service
 radon-host-metrics.timer
-radon-ib-watchdog.timer
 radon-iei-hyg.service
 radon-iei-hyg.timer
 radon-incident-watchdog.service
@@ -54,15 +51,12 @@ radon-margin-debt.service
 radon-margin-debt.timer
 radon-media-backup.service
 radon-media-backup.timer
-radon-nextjs-db-watchdog.timer
 radon-oi-changes.service
 radon-oi-changes.timer
 radon-perf-twr.service
 radon-perf-twr.timer
 radon-portfolio-archive.service
 radon-portfolio-archive.timer
-radon-portfolio-sync.timer
-radon-refresh.timer
 radon-signals-refresh.service
 radon-signals-refresh.timer
 radon-skew.service

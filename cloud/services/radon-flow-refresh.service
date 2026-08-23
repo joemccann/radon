@@ -10,7 +10,7 @@ StartLimitBurst=5
 Type=oneshot
 User=radon
 WorkingDirectory=/home/radon/radon
-EnvironmentFile=/home/radon/radon-cloud/.env
+EnvironmentFile=/etc/radon/env
 Environment=RADON_UW_CALLER=flow-refresh
 ExecStart=/usr/bin/bash /home/radon/radon/scripts/run_flow_refresh.sh
 StandardOutput=journal

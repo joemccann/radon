@@ -14,7 +14,7 @@ StartLimitBurst=5
 Type=oneshot
 User=radon
 WorkingDirectory=/home/radon/radon
-EnvironmentFile=/home/radon/radon-cloud/.env
+EnvironmentFile=/etc/radon/env
 # 2026-07-02: sync libsql (libsql_experimental 0.0.55) exposes no request
 # timeout, so a wedged Turso connection hangs the cycle forever. Type=oneshot
 # has NO start timeout by default and cannot overlap, so one hung cycle

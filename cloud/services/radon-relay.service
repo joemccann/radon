@@ -20,7 +20,7 @@ NotifyAccess=all
 WatchdogSec=45
 User=radon
 WorkingDirectory=/home/radon/radon
-EnvironmentFile=/home/radon/radon-cloud/.env
+EnvironmentFile=/etc/radon/env
 Environment=WS_BIND_HOST=127.0.0.1
 Environment=RADON_WS_REQUIRE_CLERK=1
 # Relay is push-only - IB ticks fan out via WebSocket, no Turso reads.

@@ -30,15 +30,21 @@ CONTROL_PLANE_UNITS = {
     "radon-health.service",
     "radon-ib-gateway-preheld-restart.service",
     "radon-ib-watchdog.service",
+    "radon-ib-watchdog.timer",
     "radon-ib-gateway.service",
     "radon-api.service",
     "radon-monitor.service",
     "radon-relay.service",
     "radon-portfolio-sync.service",
+    "radon-portfolio-sync.timer",
     "radon-refresh.service",
+    "radon-refresh.timer",
     "radon-db-backup.service",
+    "radon-db-backup.timer",
     "radon-drift-audit.service",
+    "radon-drift-audit.timer",
     "radon-nextjs-db-watchdog.service",
+    "radon-nextjs-db-watchdog.timer",
 }
 
 

@@ -17,7 +17,7 @@ StartLimitBurst=5
 Type=simple
 User=radon
 WorkingDirectory=/home/radon/radon
-EnvironmentFile=/home/radon/radon-cloud/.env
+EnvironmentFile=/etc/radon/env
 # Apply pending Turso migrations before serving traffic. Idempotent — a
 # no-op when at latest. See scripts/db/migrate.py.
 # libsql_experimental has no socket/operation timeout and can hold the GIL

@@ -15,7 +15,7 @@ StartLimitBurst=5
 Type=oneshot
 User=radon
 WorkingDirectory=/home/radon/radon
-EnvironmentFile=/home/radon/radon-cloud/.env
+EnvironmentFile=/etc/radon/env
 # Pin the resolver to the venv interpreter (the only one with playwright
 # installed). Without this, run_cta_sync.sh tries python3.13 / python3.9
 # / /usr/bin/python3 and exits 1 with "No Python interpreter with

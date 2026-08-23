@@ -48,19 +48,19 @@ not start, stop, or restart Gateway.
 - Monorepo checkout: `/home/radon/radon`
 - Cloud source: `/home/radon/radon/cloud`
 - Immutable deploy support: `/home/radon/.radon-deploy-runners/<sha>.<run>/cloud`
-- Canonical future secret file: `/etc/radon/env` (regular file, mode `0600`)
-- Compatibility secret file (until one green host cutover):
-  `/home/radon/radon-cloud/.env`, mode `0600`, owner `radon:radon`
+- Canonical secrets: `/etc/radon/env` (regular file, mode `0600`, owner `radon:radon`)
+- Compatibility secret symlink: `/home/radon/radon-cloud/.env` -> `/etc/radon/env`
+- Canonical media: `/var/lib/radon/media`
+- Compatibility media symlink: `/home/radon/radon-cloud/media` -> `/var/lib/radon/media`
 - Durable privileged deploy state: `/var/lib/radon/deploy`
 - Control-plane manifest/readiness:
   `/var/lib/radon/control-plane-manifest.sha256` and
   `/var/lib/radon/control-plane-ready`
 
 The legacy directory is not a code source. Do not symlink the whole
-`/home/radon/radon-cloud` directory while the secret file lives inside it.
-Code paths, working directories, Compose, drift audit, helpers, and units use
-the monorepo cloud path. `EnvironmentFile=/home/radon/radon-cloud/.env` remains
-the unit path until one green host cutover onto `/etc/radon/env`.
+`/home/radon/radon-cloud` directory. Code paths, working directories, Compose,
+drift audit, helpers, and units use the monorepo cloud path. Units load
+`EnvironmentFile=/etc/radon/env`.
 
 ## Deployment Contract
 

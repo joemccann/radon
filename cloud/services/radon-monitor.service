@@ -24,7 +24,7 @@ WatchdogSec=900
 User=radon
 UMask=0077
 WorkingDirectory=/home/radon/radon
-EnvironmentFile=/home/radon/radon-cloud/.env
+EnvironmentFile=/etc/radon/env
 Environment=PYTHONPATH=/home/radon/radon/scripts
 # Bypass the libsql embedded replica and write direct to Turso cloud.
 # Reason: replica.db can only have ONE long-running writer per host before

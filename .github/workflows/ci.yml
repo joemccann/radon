@@ -368,7 +368,11 @@ jobs:
             RUN_ID='${{ github.run_id }}.${{ github.run_attempt }}'
             RADON="${HOME}/radon"
             LEGACY_CLOUD="${HOME}/radon-cloud"
-            ENV_FILE="${LEGACY_CLOUD}/.env"
+            if [[ -f /etc/radon/env && ! -L /etc/radon/env ]]; then
+              ENV_FILE=/etc/radon/env
+            else
+              ENV_FILE="${LEGACY_CLOUD}/.env"
+            fi
             RUNNER_ROOT="${HOME}/.radon-deploy-runners"
             RUNNER="${RUNNER_ROOT}/${SHA}.${RUN_ID}"
             RUNNER_KEEP_NEWEST=4

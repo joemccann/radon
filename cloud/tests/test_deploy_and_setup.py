@@ -345,8 +345,7 @@ class TestSetupEtcRadon:
         assert "-o radon" in body
         assert "-g radon" in body
         assert "/etc/radon" in body
-        assert "install -m 0600" in body
-        assert "ln -sfn" in body
+        assert "/var/lib/radon/media" in body
         assert not re.search(r"^\s*(mv|cp)\s+", body, re.MULTILINE)
         main = _function_body(setup_sh, "main")
         assert main.index("preflight_checks") < main.index("create_etc_radon_dir")

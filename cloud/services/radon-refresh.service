@@ -16,7 +16,7 @@ StartLimitBurst=5
 Type=oneshot
 User=radon
 WorkingDirectory=/home/radon/radon
-EnvironmentFile=/home/radon/radon-cloud/.env
+EnvironmentFile=/etc/radon/env
 ExecStart=/home/radon/radon/.venv/bin/python -m scripts.data_refresh
 # data_refresh runs three sequential children with 120s budgets. Preserve
 # that normal path while bounding hung children before the next 15-minute run.

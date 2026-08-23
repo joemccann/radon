@@ -16,7 +16,7 @@ Type=simple
 User=radon
 UMask=0077
 WorkingDirectory=/home/radon/radon
-EnvironmentFile=/home/radon/radon-cloud/.env
+EnvironmentFile=/etc/radon/env
 # Newsfeed is write-only — it never reads its own rows. Embedded replica
 # would force it to compete with radon-nextjs for the WAL checkpoint
 # lock; see CLAUDE.md "Trades canonical store" and the libsql one-writer

@@ -14,7 +14,7 @@ StartLimitBurst=5
 Type=oneshot
 User=radon
 WorkingDirectory=/home/radon/radon
-EnvironmentFile=/home/radon/radon-cloud/.env
+EnvironmentFile=/etc/radon/env
 # Pin the resolver to the venv interpreter so libsql_experimental + dotenv
 # are guaranteed available (matches the pattern other oneshots use).
 Environment=RADON_DB_NO_REPLICA=1

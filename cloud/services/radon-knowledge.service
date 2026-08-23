@@ -14,7 +14,7 @@ StartLimitBurst=5
 Type=oneshot
 User=radon
 WorkingDirectory=/home/radon/radon
-EnvironmentFile=/home/radon/radon-cloud/.env
+EnvironmentFile=/etc/radon/env
 # fastembed defaults its model cache to /tmp/fastembed_cache, which is
 # ephemeral — pin it so the ~67 MB bge-small-en-v1.5 ONNX model downloads
 # once and survives /tmp cleanup.
