@@ -5169,6 +5169,7 @@ def _load_cash_flow_sync_status() -> dict[str, Any]:
         "next_attempt_at": None,
         "error_summary": None,
         "is_throttled": False,
+        "is_lockout": False,
     }
     try:
         # Bounded hrana read; runs off-loop via asyncio.to_thread at the
@@ -5201,24 +5202,11 @@ def _load_cash_flow_sync_status() -> dict[str, Any]:
                 next_attempt = None
 
             if message:
-                # Flex throttle is the dominant cash-flow-sync failure mode.
-                # Surface a concise tag so the UI doesn't have to substring-
-                # match the raw IBKR error text.
-                lower = message.lower()
-                payload["is_throttled"] = (
-                    "throttle" in lower
-                    or "code 1001" in lower
-                    or "code 1018" in lower
-                    or "code 1019" in lower
-                )
-                # Pull out the user-facing slice. The full message looks
-                # like "ERR: cash flow fetch failed: Flex throttle (code
-                # 1001): Statement could not be generated at this time."
-                # — surface only the post-colon Flex sentence.
-                if "code 1025" in lower or "too many failed attempts" in lower:
-                    payload["error_summary"] = (
-                        "Flex lockout. Do not retry. Ingest with --from-file"
-                    )
+                verdict = _classify_cash_flow_error(message)
+                payload.update(verdict)
+                if verdict.get("is_lockout"):
+                    # Sidecar-or-Turso reconstruction of the live deadline
+                    # beats whatever next_attempt_at the row happened to carry.
                     try:
                         from utils.flex_embargo import active_until
                         reconstructed = active_until()
@@ -5226,18 +5214,42 @@ def _load_cash_flow_sync_status() -> dict[str, Any]:
                         reconstructed = None
                     if reconstructed:
                         next_attempt = reconstructed
-                elif "Flex throttle" in message:
-                    payload["error_summary"] = "Flex throttled by IBKR"
-                elif ":" in message:
-                    payload["error_summary"] = message.split(":")[-1].strip()
-                else:
-                    payload["error_summary"] = message
 
             payload["next_attempt_at"] = next_attempt
     except Exception:
         # Never let a service_health read fail the cash-flows response.
         pass
     return payload
+
+
+def _classify_cash_flow_error(message: str) -> dict[str, Any]:
+    """Tag a cash-flow-sync failure so the UI need not substring-match IBKR.
+
+    R-134: `is_throttled` used to fire on 1001|1018|1019. Per 436dcdc1 only
+    1018 is a rate limit — 1001 is "could not be generated" and 1019 is
+    "generation in progress", both of which take the bounded soft lane — so
+    the amber "Flex throttled, don't manually retry" lozenge was rendered for
+    a 5-minute soft wait. And 1025, the 7-DAY token lockout, was omitted
+    entirely and fell through to generic red. `is_lockout` is its own flag.
+    """
+    lower = message.lower()
+    is_lockout = "code 1025" in lower or "too many failed attempts" in lower
+    verdict: dict[str, Any] = {
+        "is_lockout": is_lockout,
+        # Only 1018 is a rate limit. "throttle" stays as a fallback for the
+        # producer's own wording, but a lockout is never a throttle.
+        "is_throttled": (not is_lockout)
+        and ("code 1018" in lower or "throttle" in lower),
+    }
+    if is_lockout:
+        verdict["error_summary"] = "Flex lockout. Do not retry. Ingest with --from-file"
+    elif "Flex throttle" in message:
+        verdict["error_summary"] = "Flex throttled by IBKR"
+    elif ":" in message:
+        verdict["error_summary"] = message.split(":")[-1].strip()
+    else:
+        verdict["error_summary"] = message
+    return verdict
 
 
 # ---------------------------------------------------------------------------

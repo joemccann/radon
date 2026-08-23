@@ -157,6 +157,26 @@ class IBFetcher(ExecutionFetcher):
             self._disconnect()
 
 
+def _raise_if_flex_locked() -> None:
+    """Refuse to SendRequest during a token-wide 1025 lockout (R-133)."""
+    try:
+        from utils.flex_embargo import raise_if_blocked
+    except Exception:  # noqa: BLE001 — embargo is advisory here
+        return
+    raise_if_blocked()
+
+
+def _arm_flex_lockout_if_needed(root) -> None:
+    """Arm the shared sidecar when IBKR answers with the 1025 envelope."""
+    try:
+        from utils.flex_embargo import is_lockout_code, record_lockout
+    except Exception:  # noqa: BLE001
+        return
+    code = (root.findtext(".//ErrorCode") or "").strip()
+    if is_lockout_code(code):
+        record_lockout(code)
+
+
 class FlexQueryFetcher(ExecutionFetcher):
     """
     Fetches historical executions via IB Flex Query.
@@ -179,7 +199,15 @@ class FlexQueryFetcher(ExecutionFetcher):
         self.query_id = query_id
     
     def fetch_executions(self) -> List[Execution]:
-        """Fetch executions via Flex Query."""
+        """Fetch executions via Flex Query.
+
+        R-133: f236e662 added the embargo to `flex_query.py` only. This
+        second, independent fetcher had no check and no 1025 handling, and
+        treated the presence of `FlexStatementResponse` — which is the ERROR
+        envelope — as READY, so a 1025 body parsed to zero `.//Trade` nodes
+        and was returned as a successful empty execution list.
+        """
+        _raise_if_flex_locked()
         # Step 1: Request the report
         request_url = f"{self.FLEX_SERVICE_URL}.SendRequest"
         params = {
@@ -196,6 +224,7 @@ class FlexQueryFetcher(ExecutionFetcher):
         
         if status is None or status.text != "Success":
             error_msg = root.find(".//ErrorMessage")
+            _arm_flex_lockout_if_needed(root)
             raise RuntimeError(f"Flex Query request failed: {error_msg.text if error_msg else 'Unknown error'}")
         
         reference_code = root.find(".//ReferenceCode").text
@@ -214,13 +243,19 @@ class FlexQueryFetcher(ExecutionFetcher):
             }
 
             response_text = _http_get_text(statement_url, params)
-            
-            # Check if still processing
-            if "FlexStatementResponse" not in response_text:
+
+            # A ready statement is `<FlexStatements`. `FlexStatementResponse`
+            # is the ERROR envelope and `<FlexStatement` is a prefix of it,
+            # so matching on the wrapper returned a 1025 as an empty success.
+            if "<FlexStatements" in response_text:
+                return self._parse_xml(response_text)
+
+            try:
+                poll_root = ET.fromstring(response_text)
+            except ET.ParseError:
                 continue
-            
-            return self._parse_xml(response_text)
-        
+            _arm_flex_lockout_if_needed(poll_root)
+
         raise RuntimeError("Flex Query timed out")
     
     def _parse_xml(self, xml_content: str) -> List[Execution]:

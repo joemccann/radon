@@ -114,7 +114,9 @@ EXIT_FLEX_LOCKOUT = 15
 # refused to SendRequest because the shared sidecar was already armed. That
 # is the embargo WORKING; it must not extend the deadline.
 EXIT_FLEX_PREFLIGHT_EMBARGO = 16
-LOCKOUT_EMBARGO_DAYS = 7
+# R-134: single-sourced from utils.flex_embargo — the two copies had already
+# started to disagree with each other across four call sites.
+from utils.flex_embargo import LOCKOUT_DAYS as LOCKOUT_EMBARGO_DAYS  # noqa: E402
 
 _SOFT_EXIT_CLASSES = {
     12: "not_ready",
