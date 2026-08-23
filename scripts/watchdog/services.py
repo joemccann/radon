@@ -131,6 +131,13 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # then UW, then Yahoo. Yahoo is a complete fallback so this is not
     # grouped with IB outages.
     "iei-hyg":          {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # hy-ad — radon-hyad.timer, Tue..Sat 11:00 UTC (T+1 morning after FINRA
+    # TRACE end-of-day finalization; FINRA publishes only for days the bond
+    # market is open, so weekend/holiday runs are unchanged-day heartbeats).
+    # 120h windows cover 3-day weekends plus bond-market-only holidays before
+    # the next Tue..Sat run lands. FINRA HTTP + Turso SPX join — no IB
+    # dependency.
+    "hy-ad":            {"open": 120 * _HOUR, "closed": 120 * _HOUR, "requires_ib": False},
     # trin — radon-trin.timer, every 5m Mon-Fri 13:02-21:57 UTC (offset 2 min
     # from breadth). Samples TRIN-NYSE from an IB snapshot during RTH only;
     # off-hours runs refresh the StockCharts daily series and heartbeat. 15m
@@ -358,6 +365,9 @@ BUCKETS: dict[str, list[str]] = {
         # Daily 22:40 UTC SPX dividend-yield breadth sweep — hourly check
         # surfaces a missed run within 1h of the 26h window expiring.
         "div-yield",
+        # Tue..Sat 11:00 UTC FINRA HY bond breadth pull — hourly check
+        # surfaces a missed run within 1h of the 120h window expiring.
+        "hy-ad",
         # Daily 21:45 UTC IB HYG/SPX credit-spread pull — hourly check
         # surfaces a missed run within 1h of the 26h window expiring.
         "credit-spread",
