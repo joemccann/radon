@@ -1,0 +1,15 @@
+[Unit]
+Description=Radon IEI/HYG Indicator - daily 21:55 UTC IEI/HYG/DXY pull
+
+[Timer]
+# After the 16:00 ET cash close so IB / UW / Yahoo have the session bar.
+# 21:55 is the free slot after credit-spread (21:45) and skew2d (21:50);
+# it shares IB client IDs 56/69 with credit-spread, so the two must never
+# overlap. Weekend/holiday runs are no-op heartbeats so the 26h staleness
+# window never widens.
+OnCalendar=*-*-* 21:55:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
