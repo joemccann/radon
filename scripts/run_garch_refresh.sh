@@ -96,21 +96,36 @@ fi
 PRESET="${RADON_GARCH_REFRESH_PRESET:-largecaps}"
 FASTAPI_HOST="${RADON_GARCH_REFRESH_FASTAPI_HOST:-127.0.0.1}"
 FASTAPI_PORT="${RADON_GARCH_REFRESH_FASTAPI_PORT:-8321}"
+FASTAPI_TIMEOUT_SECS="${RADON_SCAN_FASTAPI_TIMEOUT_SECS:-3610}"
 FASTAPI_URL="http://${FASTAPI_HOST}:${FASTAPI_PORT}/garch-convergence/scan?preset=${PRESET}"
 
 # Try FastAPI first. 3610s matches the FastAPI preset subprocess timeout
 # (3600s) + 10s slack.
 echo "$(date): POST ${FASTAPI_URL}"
-if curl -fsS -X POST -m 3610 -o /dev/null -w "%{http_code}" "${FASTAPI_URL}" 2>/tmp/garch-refresh.curl.err | grep -q '^2'; then
+# R-144: only curl exit 7 (connection refused) proves the request was never
+# accepted. A 502 "Subprocess capacity exhausted" means the box is ALREADY
+# running too many scans, and a -m timeout means FastAPI's child may still be
+# mid-flight — falling back on either launches a duplicate outside
+# MAX_CONCURRENT_SUBPROCESSES and outside the cooldown. Same guard as
+# run_signals_refresh.sh.
+HTTP_CODE=$(curl -sS -X POST -m "$FASTAPI_TIMEOUT_SECS" -o /dev/null \
+    -w "%{http_code}" "${FASTAPI_URL}" 2>/tmp/garch-refresh.curl.err)
+CURL_EXIT=$?
+if [ "$CURL_EXIT" -eq 0 ] && [[ "$HTTP_CODE" == 2* ]]; then
     echo "$(date): GARCH refresh via FastAPI complete (OK)"
     exit 0
 fi
 
-# FastAPI unreachable or non-2xx — fall through to direct invocation so
-# the file cache at least stays warm. service_health + Turso won't update
-# on this path; radon-ib-watchdog and the systemd journal surface
-# radon-api.service health separately.
-echo "$(date): FastAPI unreachable — fallback to direct garch_convergence.py invocation"
+if [ "$CURL_EXIT" -ne 7 ]; then
+    echo "$(date): GARCH FastAPI outcome indeterminate (curl=${CURL_EXIT}, http=${HTTP_CODE}); not launching duplicate" >&2
+    exit 1
+fi
+
+# Connection refused: nothing was accepted, so a direct run is safe and
+# keeps the file cache warm. service_health + Turso won't update on this
+# path; radon-ib-watchdog and the systemd journal surface radon-api.service
+# health separately.
+echo "$(date): FastAPI unavailable — fallback to direct garch_convergence.py invocation"
 if "$PYTHON_BIN" scripts/garch_convergence.py --preset "$PRESET" --json --no-open >/dev/null 2>>/tmp/garch-scan.err; then
     echo "$(date): GARCH fallback refresh complete (OK)"
     exit 0
