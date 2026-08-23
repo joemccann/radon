@@ -22,6 +22,7 @@ import YieldCurvePanel from "./YieldCurvePanel";
 import CreditSpreadPanel from "./CreditSpreadPanel";
 import IeiHygPanel from "./IeiHygPanel";
 import TrinPanel from "./TrinPanel";
+import DivYieldPanel from "./DivYieldPanel";
 import EquiblesCotPanel from "./equibles-cot/EquiblesCotPanel";
 import AtsVenueSharePanel from "./equibles-ats-venue-share/AtsVenueSharePanel";
 import EquiblesShortCrowdingPanel from "./equibles/EquiblesShortCrowdingPanel";
@@ -56,13 +57,14 @@ const MOBILE_TAB_LABEL: Partial<Record<RegimeTab, string>> = {
   ivrank: "IV RANK",
   "iei-hyg": "IEI/HYG",
   trin: "TRIN",
+  divyield: "DIV YIELD",
 };
 
 /** Extract the tab segment from /regime/<tab>; defaults to "cri". */
 function tabFromPathname(pathname: string | null): RegimeTab {
   if (!pathname) return "cri";
   // Longest prefix first within each family: skew2d before skew, vixcor before cor.
-  const match = pathname.match(/^\/regime\/(cri|vcg|gex|grg|breadth|bpi|margin|straddle|vixcor|ivrank|cor|skew2d|skew|curve|credit|iei-hyg|trin|cot|ats|short|llm|backtest)(?:\/|$)/);
+  const match = pathname.match(/^\/regime\/(cri|vcg|gex|grg|breadth|bpi|margin|straddle|vixcor|ivrank|cor|skew2d|skew|curve|credit|iei-hyg|trin|divyield|cot|ats|short|llm|backtest)(?:\/|$)/);
   if (match && (REGIME_TABS as readonly string[]).includes(match[1])) {
     return match[1] as RegimeTab;
   }
@@ -337,7 +339,7 @@ export default function RegimePanel({
 
   const tabBar = compact ? (
     <div className="m-regime-tabs" role="tablist" aria-label="Regime tabs">
-      {(["cri", "vcg", "gex", "grg", "breadth", "trin", "bpi", "margin", "credit", "iei-hyg", "straddle", "cor", "vixcor", "ivrank", "skew", "skew2d", "curve", "cot", "ats", "short", "llm", "backtest"] as RegimeTab[]).map((t) => (
+      {(["cri", "vcg", "gex", "grg", "breadth", "trin", "divyield", "bpi", "margin", "credit", "iei-hyg", "straddle", "cor", "vixcor", "ivrank", "skew", "skew2d", "curve", "cot", "ats", "short", "llm", "backtest"] as RegimeTab[]).map((t) => (
         <button
           key={t}
           type="button"
@@ -438,6 +440,10 @@ export default function RegimePanel({
 
   if (activeTab === "trin") {
     return renderShell(<TrinPanel />);
+  }
+
+  if (activeTab === "divyield") {
+    return renderShell(<DivYieldPanel />);
   }
 
   if (activeTab === "cot") {
