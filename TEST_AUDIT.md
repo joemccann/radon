@@ -2435,6 +2435,18 @@ appended on top, with the eight converged findings dropped and the rest
 renumbered from T-097. The first pass's audit text, ledger line and
 `TEST_LOG.md` row are byte-unchanged.
 
+## Remediation 2026-08-23
+
+- **T-080 DONE.** Operator decision: $10M is not policy; it stays the default
+  but is modifiable. `_MAX_COMBO_LOSS_DOLLARS` replaced by
+  `order_limits.max_combo_loss_dollars()` reading `RADON_MAX_COMBO_LOSS_DOLLARS`
+  from `app_preferences` (default 10_000_000, band $10k..$50M, group "Order
+  Limits", applies immediately — editable via `PUT /api/preferences`). Tests:
+  `TestComboLossCapIsOperatorTunable` pins the default, the 70-lot / $9,098,600
+  strangle clearing it, a lowered cap refusing the same order, the cap±1
+  boundary, and env clamping at the $50M ceiling. Red 3/4 before the change;
+  `test_order_limits.py` 33 green, `scripts/tests` 6229 green after.
+
 ## 11 · Audit ledger
 
 The weekend loop (`.claude/skills/testing-weekend/`) reads the last line
