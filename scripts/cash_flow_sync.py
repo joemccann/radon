@@ -575,11 +575,27 @@ def fetch_statement_xml(
     delays = poll_delays(
         budget, initial=poll_sleep, cap=max_poll_sleep, max_polls=max_polls
     )
+    # R-103: the schedule sizes SLEEP to the budget, but the urlopen in the
+    # same loop body was charged nowhere — worst case 30 x 30 + 420 = 1320s
+    # against a 480s SIGKILL, and even a benign 3s GetStatement latency put
+    # the run past it. HTTP time is now MEASURED and charged against the same
+    # budget, and each read is bounded by what is left of it.
+    elapsed = 0.0
+    polls = 0
     for sleep_s in delays:
+        if elapsed + sleep_s > budget:
+            break
         time.sleep(sleep_s)
+        elapsed += sleep_s
+        remaining = budget - elapsed
+        if remaining <= 0:
+            break
+        polls += 1
         params2 = urlencode({"t": token, "q": ref_code, "v": "3"})
-        resp2 = urlopen(f"{_GET_URL}?{params2}", timeout=30)
+        started = time.monotonic()
+        resp2 = urlopen(f"{_GET_URL}?{params2}", timeout=min(30.0, remaining))
         xml_text = resp2.read().decode("utf-8")
+        elapsed += max(0.0, time.monotonic() - started)
         if "<FlexStatements" in xml_text:
             return xml_text
         try:
@@ -590,7 +606,7 @@ def fetch_statement_xml(
             raise error
 
     raise _StatementNotReady(
-        f"Flex statement not ready after {len(delays)} polls "
+        f"Flex statement not ready after {polls} polls "
         f"({budget:.0f}s budget)"
     )
 

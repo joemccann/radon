@@ -300,6 +300,11 @@ def fetch_flex_xml(
         _arm_lockout(err_code)
         raise RuntimeError(f"Flex SendRequest failed code={err_code}: {err_msg}")
     ref_code = ref.text.strip()  # type: ignore[union-attr]
+    # R-103: `elapsed` counted SLEEP only, so ~29 x 120s of urlopen on top of
+    # the 420s budget made the real worst case ~65 minutes against
+    # TimeoutStartSec=600 and run_script(timeout=180). HTTP time is now
+    # MEASURED and charged against the same budget, and each read is bounded
+    # by what is left of it.
     elapsed = 0.0
     sleep_s = float(poll_secs)
     for _ in range(max_polls):
@@ -308,8 +313,15 @@ def fetch_flex_xml(
         _time.sleep(sleep_s)
         elapsed += sleep_s
         sleep_s = min(sleep_s * 2, 15.0)
+        remaining = FLEX_POLL_BUDGET_SECONDS - elapsed
+        if remaining <= 0:
+            break
         params2 = urlencode({"t": token, "q": ref_code, "v": "3"})
-        resp2 = urlopen(f"{_FLEX_GET}?{params2}", timeout=read_timeout)  # noqa: S310
+        started = _time.monotonic()
+        resp2 = urlopen(  # noqa: S310
+            f"{_FLEX_GET}?{params2}", timeout=min(float(read_timeout), remaining)
+        )
+        elapsed += max(0.0, _time.monotonic() - started)
         xml_text = resp2.read().decode("utf-8")
         # Do not match FlexStatementResponse: that wrapper is the ERROR
         # envelope, and "<FlexStatement" is a prefix of it. Treating 1025
