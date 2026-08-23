@@ -38,6 +38,44 @@ function fmtSigned(v: number | null | undefined, decimals = 0): string {
   return `${v >= 0 ? "+" : ""}${v.toFixed(decimals)}`;
 }
 
+const MIN_CORRELATION_PAIRS = 3;
+
+/**
+ * Pearson correlation of two aligned series. Pairs with a null/non-finite
+ * value on either side are skipped; null when fewer than
+ * MIN_CORRELATION_PAIRS valid pairs remain or a series has zero variance.
+ */
+export function pearsonCorrelation(
+  xs: ReadonlyArray<number | null | undefined>,
+  ys: ReadonlyArray<number | null | undefined>,
+): number | null {
+  const px: number[] = [];
+  const py: number[] = [];
+  for (let i = 0; i < Math.min(xs.length, ys.length); i += 1) {
+    const x = xs[i];
+    const y = ys[i];
+    if (x == null || y == null || !Number.isFinite(x) || !Number.isFinite(y)) continue;
+    px.push(x);
+    py.push(y);
+  }
+  if (px.length < MIN_CORRELATION_PAIRS) return null;
+  const meanX = px.reduce((s, v) => s + v, 0) / px.length;
+  const meanY = py.reduce((s, v) => s + v, 0) / py.length;
+  let sumXY = 0;
+  let sumXX = 0;
+  let sumYY = 0;
+  for (let i = 0; i < px.length; i += 1) {
+    const dx = px[i] - meanX;
+    const dy = py[i] - meanY;
+    sumXY += dx * dy;
+    sumXX += dx * dx;
+    sumYY += dy * dy;
+  }
+  const denominator = Math.sqrt(sumXX * sumYY);
+  if (denominator === 0) return null;
+  return sumXY / denominator;
+}
+
 /**
  * Divergence rule (user-facing semantics — must match the backend collector):
  * over the last 20 sessions, spy_change_20d_pct > 1 AND cum_ad_change_20d < 0
@@ -386,19 +424,43 @@ export default function BreadthPanel({ marketState }: BreadthPanelProps) {
       {data.history.length >= 2 && (() => {
         const [start, end] = chartRange;
         const slice = data.history.slice(start, end + 1);
+        const rangeCorrelation = pearsonCorrelation(
+          slice.map((h) => h.cum_ad),
+          slice.map((h) => h.spy_close),
+        );
         return (
           <div className="breadth-history-block" data-testid="breadth-history-chart-section">
-            <HistoryRangeChips
-              active={activeRange}
-              onChange={(preset) => {
-                setRangeTouched(true);
-                setCustomRange(null);
-                setActiveRange(preset);
-              }}
-              maxSessions={data.history.length}
-              ariaLabel="Breadth chart range"
-              dataTestId="breadth-history-range-chips"
-            />
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <HistoryRangeChips
+                active={activeRange}
+                onChange={(preset) => {
+                  setRangeTouched(true);
+                  setCustomRange(null);
+                  setActiveRange(preset);
+                }}
+                maxSessions={data.history.length}
+                ariaLabel="Breadth chart range"
+                dataTestId="breadth-history-range-chips"
+              />
+              <span
+                data-testid="breadth-corr-stat"
+                title="Pearson correlation of cumulative A/D vs SPY over the visible range"
+                style={{
+                  marginLeft: "auto",
+                  marginBottom: "8px",
+                  fontFamily: "var(--font-mono)",
+                  fontSize: "10px",
+                  letterSpacing: "0.08em",
+                  whiteSpace: "nowrap",
+                  color: "var(--text-muted)",
+                }}
+              >
+                {"ρ "}
+                <span style={{ color: signColor(rangeCorrelation) }}>
+                  {fmtSigned(rangeCorrelation, 2)}
+                </span>
+              </span>
+            </div>
             <CriHistoryChart
               history={slice}
               series={breadthSeries}

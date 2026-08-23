@@ -8,7 +8,7 @@
  * and the divergence chip text/tone for each of none/bearish/bullish.
  */
 import React from "react";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { BreadthData, BreadthHistoryEntry, BreadthIntradayPoint } from "@/lib/useBreadth";
@@ -31,7 +31,7 @@ vi.mock("@/lib/useBreadth", () => ({
   useBreadth: (...args: unknown[]) => mockUseBreadth(...args),
 }));
 
-import BreadthPanel from "../components/BreadthPanel";
+import BreadthPanel, { pearsonCorrelation } from "../components/BreadthPanel";
 
 afterEach(() => {
   cleanup();
@@ -151,6 +151,72 @@ describe("BreadthPanel — content", () => {
   it("shows the muted no-session state when intraday is empty", () => {
     renderPanel(hookState({ data: buildBreadthData({ intraday: [] }) }));
     expect(screen.getByText("NO SESSION DATA")).toBeTruthy();
+  });
+});
+
+describe("pearsonCorrelation", () => {
+  it("returns +1 for perfectly positively correlated series", () => {
+    expect(pearsonCorrelation([1, 2, 3, 4], [10, 20, 30, 40])).toBeCloseTo(1, 8);
+  });
+
+  it("returns -1 for perfectly negatively correlated series", () => {
+    expect(pearsonCorrelation([1, 2, 3, 4], [40, 30, 20, 10])).toBeCloseTo(-1, 8);
+  });
+
+  it("skips pairs where either value is null", () => {
+    expect(pearsonCorrelation([1, 2, null, 3, 4], [10, 20, 999, null, 40])).toBeCloseTo(1, 8);
+  });
+
+  it("returns null with fewer than 3 valid pairs", () => {
+    expect(pearsonCorrelation([1, 2], [10, 20])).toBeNull();
+    expect(pearsonCorrelation([1, 2, null, 4], [10, null, 30, 40])).toBeNull();
+  });
+
+  it("returns null when a series has zero variance", () => {
+    expect(pearsonCorrelation([5, 5, 5, 5], [10, 20, 30, 40])).toBeNull();
+  });
+});
+
+describe("BreadthPanel — A/D vs SPY correlation stat", () => {
+  /** First 9 sessions anti-correlate, last 21 correlate perfectly — so the
+   *  default 1M window reads +1.00 and the All window reads something else. */
+  function buildSplitHistory(): BreadthHistoryEntry[] {
+    return Array.from({ length: 30 }, (_, i) => ({
+      date: `2026-06-${String(i + 1).padStart(2, "0")}`,
+      net_ad: 100,
+      cum_ad: i < 9 ? 50000 - i * 200 : 40000 + i * 90,
+      spy_close: 600 + i * 0.5,
+    }));
+  }
+
+  it("renders the Pearson correlation of the visible window", () => {
+    renderPanel(hookState({ data: buildBreadthData({ history: buildSplitHistory() }) }));
+    expect(screen.getByTestId("breadth-corr-stat").textContent).toBe("ρ +1.00");
+  });
+
+  it("recomputes when the range preset changes", () => {
+    const history = buildSplitHistory();
+    renderPanel(hookState({ data: buildBreadthData({ history }) }));
+    fireEvent.click(screen.getByTestId("breadth-history-range-chips-all"));
+    const expected = pearsonCorrelation(
+      history.map((h) => h.cum_ad),
+      history.map((h) => h.spy_close),
+    );
+    expect(expected).not.toBeNull();
+    expect(screen.getByTestId("breadth-corr-stat").textContent).toBe(
+      `ρ ${expected! >= 0 ? "+" : ""}${expected!.toFixed(2)}`,
+    );
+  });
+
+  it("renders --- with fewer than 3 valid pairs", () => {
+    const history: BreadthHistoryEntry[] = [
+      { date: "2026-06-01", net_ad: 100, cum_ad: 100, spy_close: 600 },
+      { date: "2026-06-02", net_ad: 100, cum_ad: 200, spy_close: null },
+      { date: "2026-06-03", net_ad: 100, cum_ad: 300, spy_close: null },
+      { date: "2026-06-04", net_ad: 100, cum_ad: 400, spy_close: 602 },
+    ];
+    renderPanel(hookState({ data: buildBreadthData({ history }) }));
+    expect(screen.getByTestId("breadth-corr-stat").textContent).toBe("ρ ---");
   });
 });
 
