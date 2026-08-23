@@ -768,6 +768,17 @@ async def _probe_authenticated(timeout: float = 8.0) -> tuple[bool, List[str]]:
         return (False, [])
 
     def _do_probe() -> tuple[bool, List[str]]:
+        # R-142: ib_insync's connect() reaches util.getLoop(), which raises
+        # RuntimeError in a thread with no loop installed — and asyncio.to_thread
+        # gives it exactly that. The bare except below would report the
+        # plumbing error as "not authenticated", so a live gateway looks like a
+        # 2FA wait to three consumers. ib_pool._connect_in_thread already does
+        # this; the probe has to as well.
+        try:
+            asyncio.get_event_loop()
+        except RuntimeError:
+            asyncio.set_event_loop(asyncio.new_event_loop())
+
         ib = IB()
         try:
             # CLI range (90-99) per CLAUDE.md client-id allocation — clientId 98
@@ -776,7 +787,8 @@ async def _probe_authenticated(timeout: float = 8.0) -> tuple[bool, List[str]]:
             ib.connect(IB_HOST, IB_PORT, clientId=98, timeout=timeout)
             accounts = list(ib.managedAccounts() or [])
             return (bool(accounts), accounts)
-        except Exception:
+        except Exception as exc:
+            logger.warning("IB auth probe failed: %s: %s", type(exc).__name__, exc)
             return (False, [])
         finally:
             try:
