@@ -77,3 +77,18 @@ def test_drift_audit_file_pairs_omit_secret_paths() -> None:
         assert live != CANONICAL_ENV
         assert "radon-cloud/.env" not in live
         assert not repo_rel.endswith(".env")
+
+
+def test_setup_vps_grants_caddy_traverse_into_media_parent() -> None:
+    """/var/lib/radon is 0750 radon:radon and Caddy serves media/ beneath it.
+
+    Without radon group membership the caddy user cannot traverse the parent
+    and every media.radon.run request 403s (2026-08-23 regression after the
+    media cutover). Supplementary groups apply at process start, so a fresh
+    grant must restart caddy, not reload it.
+    """
+    text = (CLOUD / "scripts" / "setup-vps.sh").read_text(encoding="utf-8")
+    assert "usermod -aG radon caddy" in text
+    grant = text.index("usermod -aG radon caddy")
+    restart_snippet = text[grant : grant + 400]
+    assert "restart caddy" in restart_snippet

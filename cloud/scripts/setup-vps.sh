@@ -507,6 +507,22 @@ install_caddy() {
     apt-get install -y caddy
     log_success "Caddy installed"
   fi
+
+  # /var/lib/radon stays 0750 radon:radon (2FA leases live beside media/), so
+  # the caddy user needs radon group membership to traverse into media/ —
+  # without it every media.radon.run request 403s (2026-08-23 regression).
+  # Supplementary groups apply at process start: a fresh grant needs a
+  # restart, not a reload. Runs here (setup-only) because deploys reuse
+  # configure_caddy, which must never restart the proxy.
+  if [[ "${RADON_HELPER_SKIP_CHOWN:-0}" != "1" ]] \
+    && ! id -nG caddy 2>/dev/null | grep -qw radon; then
+    usermod -aG radon caddy
+    if ! "$CADDY_TIMEOUT" --signal=TERM --kill-after=2s 15s \
+      "$CADDY_SYSTEMCTL" restart caddy; then
+      log_error "Caddy restart after radon group grant failed"
+      return 1
+    fi
+  fi
 }
 
 configure_caddy() {
