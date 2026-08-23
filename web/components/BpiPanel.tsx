@@ -44,11 +44,37 @@ function metricTone(tone: BpiTone): "pos" | "warn" | "mut" {
 
 function IndexSwitcher({
   active,
+  compact,
   onChange,
 }: {
   active: BpiIndexSymbol;
+  compact: boolean;
   onChange: (symbol: BpiIndexSymbol) => void;
 }) {
+  if (compact) {
+    return (
+      <nav
+        className="m-segment"
+        aria-label="Bullish percent index"
+        data-testid="bpi-index-chips"
+        style={{ width: "auto", margin: "12px 16px" }}
+      >
+        {BPI_INDEX_SYMBOLS.map((symbol) => (
+          <button
+            key={symbol}
+            type="button"
+            className={`m-segment__item${active === symbol ? " m-segment__item--active" : ""}`}
+            aria-pressed={active === symbol}
+            onClick={() => onChange(symbol)}
+            data-testid={`bpi-index-chip-${symbol}`}
+          >
+            {symbol}
+          </button>
+        ))}
+      </nav>
+    );
+  }
+
   return (
     <nav className="history-range-chips" aria-label="Bullish percent index" data-testid="bpi-index-chips">
       {BPI_INDEX_SYMBOLS.map((symbol) => (
@@ -97,7 +123,19 @@ function BpiReadout({ payload, compact }: { payload: BpiPayload; compact: boolea
 
   if (compact) {
     return (
-      <div className="m-regime-grid2x2" data-testid="bpi-mobile-grid">
+      <div
+        className="m-regime-grid2x2"
+        data-testid="bpi-mobile-grid"
+        style={{
+          // Fuse into the section frame: the section border supplies the
+          // left/right/bottom hairlines, a single top hairline separates
+          // the grid from the switcher, and zero margin removes the sliver
+          // row before the section's bottom border.
+          borderWidth: "1px 0 0",
+          borderTopColor: "var(--line-grid)",
+          margin: 0,
+        }}
+      >
         <MetricCell label="BPI" value={payload.bpi.toFixed(1)} />
         <MetricCell label="STATE" value={badge.label} tone={metricTone(badge.tone)} />
         <MetricCell label="BULLISH" value={`${payload.bullish} / ${payload.members}`} />
@@ -213,7 +251,7 @@ export default function BpiPanel() {
           </div>
         </div>
 
-        <IndexSwitcher active={index} onChange={switchIndex} />
+        <IndexSwitcher active={index} compact={compact} onChange={switchIndex} />
 
         {payload ? (
           <BpiReadout payload={payload} compact={compact} />

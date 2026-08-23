@@ -14,6 +14,8 @@
  */
 
 import React from "react";
+import { readFileSync } from "fs";
+import { join } from "path";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -43,6 +45,13 @@ beforeAll(() => {
 const useBpiMock = vi.fn();
 vi.mock("@/lib/useBpi", () => ({
   useBpi: (...args: unknown[]) => useBpiMock(...args),
+}));
+
+const DESKTOP_VIEWPORT = { isMobile: false, hasMounted: true };
+const MOBILE_VIEWPORT = { isMobile: true, hasMounted: true };
+const viewportMock = vi.fn(() => DESKTOP_VIEWPORT);
+vi.mock("@/lib/useViewport", () => ({
+  useViewport: () => viewportMock(),
 }));
 
 function hookResult(overrides: Record<string, unknown> = {}) {
@@ -159,6 +168,66 @@ describe("BpiPanel", () => {
 
     fireEvent.click(screen.getByTestId("bpi-index-chip-SPX"));
     expect(screen.getByTestId("bpi-members").textContent).toContain("/ 500");
+  });
+});
+
+describe("BpiPanel mobile compact layout", () => {
+  beforeEach(() => {
+    useBpiMock.mockReturnValue(hookResult({ data: RESPONSE }));
+    viewportMock.mockReturnValue(MOBILE_VIEWPORT);
+  });
+
+  afterEach(() => {
+    viewportMock.mockReturnValue(DESKTOP_VIEWPORT);
+    cleanup();
+  });
+
+  it("renders the index switcher as the shared m-segment segmented control, not loose chips", () => {
+    render(<BpiPanel />);
+
+    const nav = screen.getByTestId("bpi-index-chips");
+    expect(nav.className).toContain("m-segment");
+    expect(nav.className).not.toContain("history-range-chips");
+
+    const ndx = screen.getByTestId("bpi-index-chip-NDX");
+    expect(ndx.className).toContain("m-segment__item");
+    expect(ndx.className).toContain("m-segment__item--active");
+    expect(ndx.className).not.toContain("history-range-chip");
+    expect(screen.getByTestId("bpi-index-chip-SPX").className).not.toContain(
+      "m-segment__item--active",
+    );
+  });
+
+  it("keeps aria-pressed switching behavior on the segmented control", () => {
+    render(<BpiPanel />);
+
+    fireEvent.click(screen.getByTestId("bpi-index-chip-SPX"));
+
+    const spx = screen.getByTestId("bpi-index-chip-SPX");
+    expect(spx.getAttribute("aria-pressed")).toBe("true");
+    expect(spx.className).toContain("m-segment__item--active");
+    expect(screen.getByTestId("bpi-mobile-grid").textContent).toContain("/ 500");
+  });
+
+  it("fuses the stat grid into the panel frame: single top hairline, no outer border doubling, no trailing sliver", () => {
+    render(<BpiPanel />);
+
+    const grid = screen.getByTestId("bpi-mobile-grid");
+    // Grid keeps only a 1px top hairline; the section border frames the
+    // other three edges so seams stay a single hairline.
+    expect(grid.style.borderTopWidth).toBe("1px");
+    expect(grid.style.borderLeftWidth).toBe("0px");
+    expect(grid.style.borderRightWidth).toBe("0px");
+    expect(grid.style.borderBottomWidth).toBe("0px");
+    // No margin under the grid: kills the empty sliver row before the
+    // section's bottom border.
+    expect(["0", "0px"]).toContain(grid.style.marginBottom);
+  });
+
+  it("uses theme tokens, never raw hex, in the compact treatment", () => {
+    const source = readFileSync(join(__dirname, "../components/BpiPanel.tsx"), "utf-8");
+    expect(source).toContain("var(--line-grid)");
+    expect(source).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
   });
 });
 
