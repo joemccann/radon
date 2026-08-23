@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>UW quota reconstruction</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+:root{
+  --bg-canvas:#0a0f14;
+  --bg-panel:#0f1519;
+  --bg-raised:#151c22;
+  --line-grid:#1e293b;
+  --text-primary:#e2e8f0;
+  --text-secondary:#94a3b8;
+  --text-muted:#758192;
+  --signal:#05AD98;
+  --signal-strong:#0FCFB5;
+  --warn:#F5A623;
+  --fault:#E85D6C;
+  --extreme:#9e80f6;
+  --neutral:#94a3b8;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg-canvas);color:var(--text-primary);font-family:Inter,system-ui,sans-serif}
+body{padding:24px 16px 48px}
+.page{max-width:1100px;margin:0 auto}
+.kicker{
+  font:500 11px/1.3 "IBM Plex Mono",monospace;
+  letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted)
+}
+h1{font-size:22px;font-weight:600;letter-spacing:.03em;margin:8px 0 4px;line-height:1.2}
+.lede{color:var(--text-secondary);font-size:14px;line-height:1.45;margin:0 0 24px;max-width:62ch}
+.grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:12px}
+.panel{
+  background:var(--bg-panel);
+  border:1px solid var(--line-grid);
+  border-radius:4px;
+  padding:14px 16px
+}
+.span-12{grid-column:span 12}
+.span-8{grid-column:span 8}
+.span-6{grid-column:span 6}
+.span-4{grid-column:span 4}
+.span-3{grid-column:span 3}
+.panel-label{
+  font:500 10px/1.3 "IBM Plex Mono",monospace;
+  letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted);
+  margin-bottom:10px
+}
+.stat{
+  font:600 28px/1 "IBM Plex Mono",monospace;color:var(--text-primary)
+}
+.stat.fault{color:var(--fault)}
+.stat.warn{color:var(--warn)}
+.stat.ok{color:var(--signal)}
+.stat-sub{font-size:12px;color:var(--text-secondary);margin-top:6px}
+.bar{
+  display:flex;height:28px;border:1px solid var(--line-grid);border-radius:4px;overflow:hidden;margin:12px 0 8px
+}
+.bar > span{display:block;height:100%}
+.legend{display:flex;flex-wrap:wrap;gap:12px 16px;font:500 11px/1.3 "IBM Plex Mono",monospace;color:var(--text-secondary)}
+.swatch{display:inline-block;width:8px;height:8px;border-radius:1px;margin-right:6px;vertical-align:middle}
+.loop{
+  display:grid;grid-template-columns:1fr auto 1fr auto 1fr;gap:8px;align-items:center
+}
+.node{
+  background:var(--bg-raised);border:1px solid var(--line-grid);border-radius:4px;padding:10px
+}
+.node.fault{border-color:var(--fault)}
+.node.ok{border-color:var(--signal)}
+.node h3{margin:0 0 4px;font-size:13px;font-weight:600}
+.node p{margin:0;font-size:12px;color:var(--text-secondary);line-height:1.4}
+.arrow{color:var(--text-muted);font:500 16px/1 "IBM Plex Mono",monospace;text-align:center}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line-grid);vertical-align:top}
+th{font:500 10px/1.3 "IBM Plex Mono",monospace;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);font-weight:500}
+td.mono{font-family:"IBM Plex Mono",monospace;font-size:12px}
+.keep{color:var(--signal)}
+.cut{color:var(--fault)}
+.hybrid{color:var(--warn)}
+.badge{
+  display:inline-block;padding:2px 8px;border:1px solid var(--line-grid);
+  border-radius:999px;font:500 10px/1.4 "IBM Plex Mono",monospace;letter-spacing:.04em;text-transform:uppercase
+}
+.badge.fault{border-color:var(--fault);color:var(--fault)}
+.badge.warn{border-color:var(--warn);color:var(--warn)}
+.badge.ok{border-color:var(--signal);color:var(--signal)}
+.steps{margin:0;padding-left:18px;color:var(--text-secondary);font-size:13px;line-height:1.55}
+.steps b{color:var(--text-primary);font-weight:600}
+@media (max-width:900px){
+  .span-8,.span-6,.span-4,.span-3{grid-column:span 12}
+  .loop{grid-template-columns:1fr}
+  .arrow{transform:rotate(90deg);padding:4px 0}
+  .stat{font-size:24px}
+  body{padding:16px 12px 40px}
+}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="kicker">Radon / Unusual Whales / quota day 2026-08-18 20:00 ET</div>
+  <h1>The 40k cap is a laptop loop, not a missing vendor</h1>
+  <p class="lede">Laptop <span class="mono">com.radon.data-refresh</span> is loaded every 15 minutes and spent 30,736 of 40,000 requests on discover, flow_analysis, and scanner. IBKR cannot replace print-level dark pool. Unload the agent before buying anything.</p>
+
+  <div class="grid">
+    <div class="panel span-3">
+      <div class="panel-label">Used / limit</div>
+      <div class="stat fault">30736</div>
+      <div class="stat-sub">of 40,000 · 77% · laptop only</div>
+    </div>
+    <div class="panel span-3">
+      <div class="panel-label">Discover</div>
+      <div class="stat fault">20913</div>
+      <div class="stat-sub">52% of the daily cap</div>
+    </div>
+    <div class="panel span-3">
+      <div class="panel-label">Flow analysis</div>
+      <div class="stat warn">6516</div>
+      <div class="stat-sub">16% · open positions tape</div>
+    </div>
+    <div class="panel span-3">
+      <div class="panel-label">Scanner</div>
+      <div class="stat warn">3307</div>
+      <div class="stat-sub">8% · watchlist 5d flow</div>
+    </div>
+
+    <div class="panel span-12">
+      <div class="panel-label">Account-wide cap vs laptop counter</div>
+      <div class="bar" aria-label="quota composition">
+        <span style="width:52.3%;background:#E85D6C" title="discover 20913"></span>
+        <span style="width:16.3%;background:#F5A623" title="flow_analysis 6516"></span>
+        <span style="width:8.3%;background:#9e80f6" title="scanner 3307"></span>
+        <span style="width:23.1%;background:#1e293b" title="headroom 9264"></span>
+      </div>
+      <div class="legend">
+        <span><i class="swatch" style="background:#E85D6C"></i>discover 20,913</span>
+        <span><i class="swatch" style="background:#F5A623"></i>flow_analysis 6,516</span>
+        <span><i class="swatch" style="background:#9e80f6"></i>scanner 3,307</span>
+        <span><i class="swatch" style="background:#1e293b"></i>headroom 9,264 (VPS skew/leap/garch still eat this)</span>
+      </div>
+    </div>
+
+    <div class="panel span-12">
+      <div class="panel-label">The 15 minute incinerator · launchd loaded · 17 runs today</div>
+      <div class="loop">
+        <div class="node fault">
+          <h3>launchd 900s</h3>
+          <p>com.radon.data-refresh<br>comment said stay unloaded</p>
+        </div>
+        <div class="arrow">→</div>
+        <div class="node fault">
+          <h3>discover --min-alerts 1</h3>
+          <p>walk flow-alerts to 25 pages, then darkpool today for every 1-alert ticker, max 40 pages</p>
+        </div>
+        <div class="arrow">→</div>
+        <div class="node">
+          <h3>scanner + flow_analysis</h3>
+          <p>same /darkpool/{ticker} tape, closed days cached, today refetched every fire</p>
+        </div>
+      </div>
+      <p class="stat-sub" style="margin-top:12px">Last fire: discover 12:36–13:39 PDT (63 min). Interval 15 min. Next run queues while the last walk is still paginating. 17 × ~1,230 discover hits ≈ 20.9k.</p>
+    </div>
+
+    <div class="panel span-6">
+      <div class="panel-label">Keep UW (Gate 2 edge)</div>
+      <table>
+        <thead><tr><th>Surface</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">darkpool/{ticker}</td><td>Print tape with NBBO. IB historical TRADES filters blocks away from NBBO.</td></tr>
+          <tr><td class="mono">option-trades/flow-alerts</td><td>Sweeps / floor / opening. No IB equivalent.</td></tr>
+          <tr><td class="mono">evaluate M2 M3 M3B</td><td>On-demand full pagination. This is the product.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="panel span-6">
+      <div class="panel-label">Stop calling UW</div>
+      <table>
+        <thead><tr><th>Need</th><th>Use instead</th></tr></thead>
+        <tbody>
+          <tr><td>OHLC / quotes / prev close</td><td>IBKR (already first on fetch_surface)</td></tr>
+          <tr><td>News / earnings / analyst</td><td>Newsfeed, Finnhub 60/min, Nasdaq</td></tr>
+          <tr><td>Short float / ATS share</td><td>Equibles Pro (100k/day, already paid)</td></tr>
+          <tr><td>Greeks / IV / skew history</td><td>ThetaData $80 or ORATS $99–199</td></tr>
+          <tr><td>TRF prints if you build a scorer</td><td>Massive stocks Advanced $199, not Cheddar</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="panel span-12">
+      <div class="panel-label">Cadence after the cut</div>
+      <table>
+        <thead><tr><th>Surface</th><th>Now</th><th>Target</th><th>Mode</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="mono">discover / scanner / flow</td>
+            <td class="cut">laptop 15 min, min-alerts 1, no cooldown</td>
+            <td class="keep">VPS hourly or click; min-alerts 3; DP pages 2 for scoring</td>
+            <td><span class="badge ok">hybrid SWR</span></td>
+          </tr>
+          <tr>
+            <td class="mono">evaluate.py</td>
+            <td class="keep">on demand, full tape</td>
+            <td class="keep">unchanged</td>
+            <td><span class="badge ok">live</span></td>
+          </tr>
+          <tr>
+            <td class="mono">theta / strength</td>
+            <td class="keep">hourly + 3600s</td>
+            <td class="keep">keep</td>
+            <td><span class="badge ok">scheduled</span></td>
+          </tr>
+          <tr>
+            <td class="mono">skew</td>
+            <td class="warn">1 min RTH ~780 GETs</td>
+            <td>5 min</td>
+            <td><span class="badge warn">trim</span></td>
+          </tr>
+          <tr>
+            <td class="mono">POST /discover /scan</td>
+            <td class="cut">no cooldown</td>
+            <td>1800–3600s single-flight</td>
+            <td><span class="badge fault">gate</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="panel span-12">
+      <div class="panel-label">Do now</div>
+      <ol class="steps">
+        <li><b>bootout</b> <span class="mono">com.radon.data-refresh</span> and delete the LaunchAgent. Confirmed loaded, 17 runs, comment forbade it.</li>
+        <li><b>Cooldown + single-flight</b> on FastAPI POST /discover and /scan. Serve last JSON.</li>
+        <li>If scheduled discover stays: one VPS hourly timer, min-alerts 3, scoring darkpool cap 2 pages. Full 40-page walk only inside evaluate.</li>
+        <li>Move <span class="mono">uw_budget</span> to one shared counter. Laptop 20k brake cannot see VPS spend; UW sees the sum.</li>
+      </ol>
+    </div>
+  </div>
+</div>
+</body>
+</html>
