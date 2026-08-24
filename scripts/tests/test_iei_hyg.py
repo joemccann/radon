@@ -14,12 +14,20 @@ import pytest
 
 from fetch_credit_spread import parse_yahoo_chart
 from fetch_iei_hyg import (
+    DXY_SYMBOL,
+    HYG_SYMBOL,
+    IEI_SYMBOL,
+    NO_SOURCE,
+    TICKERS,
+    UW_SKIP,
     WINDOW_SESSIONS,
     align_series,
     build_output,
     classify_state,
     diff_new_rows,
     extremes_window,
+    fetch_closes,
+    fetch_uw_closes,
     main,
     merge_series,
     pct_rank,
@@ -375,3 +383,125 @@ class TestCli:
         payload = json.loads(out)
         assert payload["count"] == 62
         assert payload["current"]["state"] == "new_low"
+
+
+# ── source ladder (Mandatory Rule 7) ──────────────────────────────
+#
+# T-112. `TestCli` monkeypatched `fetch_closes` wholesale and nothing else in
+# this file called it, so the IEI/HYG ladder had ZERO coverage: swapping
+# `fetch_iei_hyg.py:271-273` to `yahoo -> uw -> ib` left every test green while
+# the scheduled job made Yahoo the primary source for a series IB and UW both
+# serve. The near-identical credit-spread ladder has had these four cases since
+# it shipped (`test_credit_spread.py:401-460`); this is the missing twin.
+
+
+class TestFetchClosesCascade:
+    def test_ib_covering_every_ticker_never_calls_uw_or_yahoo(self):
+        uw_calls: list = []
+        yahoo_calls: list = []
+
+        closes, source = fetch_closes(
+            fetch_ib=lambda tickers: {t: {"2026-08-21": 1.0} for t in tickers},
+            fetch_uw=lambda tickers: uw_calls.append(list(tickers)) or {},
+            fetch_yahoo=lambda tickers: yahoo_calls.append(list(tickers)) or {},
+        )
+
+        assert sorted(closes) == sorted(TICKERS)
+        assert source == "ib"
+        assert uw_calls == []
+        assert yahoo_calls == []
+
+    def test_uw_fills_the_ib_gap_and_yahoo_is_not_reached(self):
+        yahoo_calls: list = []
+
+        closes, source = fetch_closes(
+            fetch_ib=lambda tickers: {},
+            fetch_uw=lambda tickers: {t: {"2026-08-21": 1.0} for t in tickers},
+            fetch_yahoo=lambda tickers: yahoo_calls.append(list(tickers)) or {},
+        )
+
+        assert sorted(closes) == sorted(TICKERS)
+        assert source == "uw"
+        assert yahoo_calls == []
+
+    def test_yahoo_is_the_last_resort_and_both_others_were_tried_first(self):
+        ib_calls: list = []
+        uw_calls: list = []
+
+        closes, source = fetch_closes(
+            fetch_ib=lambda tickers: ib_calls.append(list(tickers)) or {},
+            fetch_uw=lambda tickers: uw_calls.append(list(tickers)) or {},
+            fetch_yahoo=lambda tickers: {t: {"2026-08-21": 1.0} for t in tickers},
+        )
+
+        assert ib_calls == [TICKERS]
+        assert uw_calls == [TICKERS]
+        assert source == "yahoo"
+
+    def test_each_rung_is_only_asked_for_the_tickers_still_missing(self):
+        uw_calls: list = []
+        yahoo_calls: list = []
+
+        closes, source = fetch_closes(
+            fetch_ib=lambda tickers: {IEI_SYMBOL: {"2026-08-21": 1.0}},
+            fetch_uw=lambda tickers: uw_calls.append(list(tickers))
+            or {HYG_SYMBOL: {"2026-08-21": 2.0}},
+            fetch_yahoo=lambda tickers: yahoo_calls.append(list(tickers))
+            or {DXY_SYMBOL: {"2026-08-21": 3.0}},
+        )
+
+        assert uw_calls == [[HYG_SYMBOL, DXY_SYMBOL]]
+        assert yahoo_calls == [[DXY_SYMBOL]]
+        assert sorted(closes) == sorted(TICKERS)
+        assert source == "ib+uw+yahoo"
+
+    def test_an_empty_series_from_a_rung_does_not_claim_the_ticker(self):
+        yahoo_calls: list = []
+
+        closes, source = fetch_closes(
+            fetch_ib=lambda tickers: {t: {} for t in tickers},
+            fetch_uw=lambda tickers: {},
+            fetch_yahoo=lambda tickers: yahoo_calls.append(list(tickers))
+            or {t: {"2026-08-21": 1.0} for t in tickers},
+        )
+
+        assert yahoo_calls == [TICKERS]
+        assert source == "yahoo"
+
+    def test_no_rung_answers_at_all(self):
+        closes, source = fetch_closes(
+            fetch_ib=lambda tickers: {},
+            fetch_uw=lambda tickers: {},
+            fetch_yahoo=lambda tickers: {},
+        )
+
+        assert closes == {}
+        assert source == NO_SOURCE
+
+    def test_an_explicit_ticker_list_overrides_the_default_universe(self):
+        ib_calls: list = []
+
+        fetch_closes(
+            [HYG_SYMBOL],
+            fetch_ib=lambda tickers: ib_calls.append(list(tickers)) or {},
+            fetch_uw=lambda tickers: {},
+            fetch_yahoo=lambda tickers: {},
+        )
+
+        assert ib_calls == [[HYG_SYMBOL]]
+
+
+class TestDxyNeverGoesToUnusualWhales:
+    """DXY is not a UW-quotable symbol; `UW_SKIP` keeps it off the quota."""
+
+    def test_uw_fetcher_returns_early_for_dxy_only(self, monkeypatch):
+        def _explode(*_a, **_k):
+            raise AssertionError("UWClient was constructed for a UW_SKIP ticker")
+
+        monkeypatch.setattr("clients.uw_client.UWClient", _explode)
+
+        assert fetch_uw_closes([DXY_SYMBOL]) == {}
+
+    def test_dxy_is_declared_skippable(self):
+        assert DXY_SYMBOL in UW_SKIP
+        assert IEI_SYMBOL not in UW_SKIP and HYG_SYMBOL not in UW_SKIP
