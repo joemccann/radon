@@ -128,12 +128,26 @@ def _payload(state: dict) -> dict:
     }
 
 
+# R-172: an unreadable tally is NOT a zero tally. `_read_unlocked` collapsed
+# "the file does not exist yet" and "the file is truncated / the disk is
+# full" into the same `{}`, so a torn write re-opened the entire 40,000-call
+# daily budget to a scanner that had already spent it. A present-but-broken
+# file reads as SPENT.
+_UNREADABLE = {"_unreadable": True}
+
+
 def _read_unlocked(path: Path) -> dict:
     try:
-        raw = json.loads(path.read_text())
-    except (OSError, ValueError, TypeError):
+        text = path.read_text()
+    except FileNotFoundError:
         return {}
-    return raw if isinstance(raw, dict) else {}
+    except OSError:
+        return dict(_UNREADABLE)
+    try:
+        raw = json.loads(text)
+    except (ValueError, TypeError):
+        return dict(_UNREADABLE)
+    return raw if isinstance(raw, dict) else dict(_UNREADABLE)
 
 
 def _write_unlocked(path: Path, payload: dict) -> None:
@@ -209,6 +223,10 @@ def record_hits(
 
 def used(path: Optional[Path | str] = None, now: Optional[datetime] = None) -> int:
     state = _read_unlocked(_path(path))
+    if state.get("_unreadable"):
+        # Fail CLOSED: report the whole budget spent until the state file is
+        # readable again, rather than handing out calls we cannot account for.
+        return DAILY_LIMIT
     if state.get("date") != quota_date(now):
         return 0
     try:
@@ -232,9 +250,11 @@ def usage_snapshot(
 ) -> dict:
     """Operator-facing GET /uw/usage payload."""
     state = _read_unlocked(_path(path))
-    current = state.get("date") == quota_date(now)
+    unreadable = bool(state.get("_unreadable"))
+    current = (not unreadable) and state.get("date") == quota_date(now)
     hits = used(path=path, now=now)
     return {
+        "state_unreadable": unreadable,
         "used": hits,
         "limit": DAILY_LIMIT,
         "remaining": max(0, DAILY_LIMIT - hits),
