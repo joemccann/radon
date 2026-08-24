@@ -145,7 +145,8 @@ until a human ran reset-failed + start. Before launching grok on a
 - systemd itself reports `ActiveState=failed` (the page excerpt is
   untrusted text and never triggers the action on its own) with either
   `Result=signal`, or `Result=exit-code` AND the green deploy marker
-  (`/home/radon/.radon-last-green-deploy`) is newer than the unit's
+  (`/home/radon/.radon-last-green-deploy`, read as an mtime via
+  `watchdog.units._file_mtime`) is newer than the unit's
   `InactiveEnterTimestamp` — a fix has shipped since the failure.
   radon-leap 2026-08-20: exit 1 at 14:02Z, fix deployed 15:05Z, next slot
   the following day; it sat `failed` re-paging hourly until a human ran

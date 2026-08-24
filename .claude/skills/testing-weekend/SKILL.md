@@ -265,3 +265,54 @@ how this loop improves as the codebase grows.
   weekend (T-117). Nothing in the changed-test list would have surfaced it.
   After cataloguing changed tests, ask the inverse question: which EXISTING
   tests does this source change now describe differently?
+- **2026-08-23 (remediate): an absent audit phase does NOT mean "only
+  re-verify gates".** This cycle's audit never ran (PR #75 had merged the
+  2026-08-22 findings at 11:17 and no 2026-08-23 branch existed), but the
+  backlog still held 20 un-DONE P1s from T-081…T-109. Step 1's "create from
+  `origin/main`, then only re-verify" applies when the backlog is EMPTY;
+  otherwise create the branch and work the newest non-P2 stragglers exactly as
+  if this run's audit had filed them. The remediation bullets go under a
+  `## Remediation <date>` section in `TEST_AUDIT.md` and a dated table in
+  `TEST_LOG.md`.
+- **2026-08-23 (remediate): fan the backlog out to one worktree per task
+  group; cherry-pick back serially.** `git worktree add --detach /tmp/...`
+  plus symlinked `node_modules` (root AND `web/`) gives each subagent a clean
+  tree; the shared venv needs nothing. Group findings that touch the SAME
+  test file into one agent (T-082+T-097, T-084+T-099, T-086+T-098 here) or
+  the cherry-picks conflict. The main clone stays untouched, so a baseline
+  gate can run there while the agents work, and each `cherry-pick -n` +
+  docs row + push is one durable commit. Sixteen P1s landed in ~15 minutes
+  of wall clock this way versus one-at-a-time.
+- **2026-08-23 (remediate): a subagent's "green" is scoped; re-read the
+  source diff before landing.** Two things the per-task reports could not
+  show: (a) the relay is ESM with socket side effects on import, so T-087's
+  builder was never executed by the relay in any test — verify by hand that
+  the variables the extracted call uses (`freshness`) are in scope at the
+  call site; (b) `_read_deploy_evidence` gained a `now` kwarg (T-103) and its
+  second caller lived in `grok_page_responder.py`, outside the agent's
+  scoped run. Grep every caller of a changed signature in the LANDED tree,
+  not the worktree.
+- **2026-08-23 (remediate): the darwin cloud baseline grew by three
+  `sha256sum`-class reds without any test being wrong.** At `4985a7f8`
+  this host reads 12; at `2e904678` it reads 15 because
+  `test_refresh_control_plane.py` (new in the delta) also asserts
+  `shutil.which("sha256sum")`. Same rule as the audit lesson: sort the
+  `FAILED` lines, run the base SHA in a worktree, `diff` — and record the
+  new list in the log so the next run does not misattribute it.
+- **2026-08-23 (remediate): two hosts remediated the same branch at once —
+  the 2026-08-22 "check origin first" lesson is necessary but not
+  sufficient for REMEDIATE.** Both runs fetched at pre-flight, found no
+  branch, and created it; the second host's first push was rejected, it
+  reset onto this host's tip (correctly) and started from the BOTTOM of the
+  P1 list — which this host had already fanned out in parallel, so T-100,
+  T-106, T-108, T-109 were still at risk of being done twice. Rails:
+  push the EMPTY branch immediately after creating it (this host did, and
+  that is what made the second host detect the collision); before EVERY
+  landing, `rtk proxy git fetch origin` and rebase onto the remote tip with
+  `rtk proxy git rebase` (never force-push, never `git pull`); keep the
+  per-task landing script inserting rows ABOVE any other host's section
+  in `TEST_LOG.md` so the two tables do not interleave; and list every
+  landed T-### in the PR body as soon as it lands, because the PR body is
+  the only channel the other host reads. A `TEST_LOG.md` conflict on
+  rebase is expected; resolve it by keeping both sections, never by
+  dropping a row.
