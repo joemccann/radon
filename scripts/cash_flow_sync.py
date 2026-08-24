@@ -671,12 +671,15 @@ def _raise_if_token_locked() -> None:
     raise_if_blocked()
 
 
-def _record_token_lockout(code: str) -> None:
+def _record_token_lockout(code: str) -> bool:
+    """Arm the token-wide embargo. True iff at least one sink recorded it."""
     try:
         from utils.flex_embargo import record_lockout
         record_lockout(code)
-    except Exception:
-        return
+    except Exception as exc:
+        print(f"WARN: Flex lockout NOT recorded ({exc})", file=sys.stderr)
+        return False
+    return True
 
 
 def _fetch_live_statement() -> str:
@@ -735,9 +738,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         return EXIT_CONFIG_ERROR
     except _FlexLockoutError as exc:
         print(f"ERR: {exc}", file=sys.stderr)
-        _record_token_lockout(getattr(exc, "code", "1025"))
+        recorded = bool(_record_token_lockout(getattr(exc, "code", "1025")))
         _emit_status("error", "lockout", code=getattr(exc, "code", "1025"),
-                     message=str(exc))
+                     message=str(exc), embargo_recorded=recorded)
         return EXIT_FLEX_LOCKOUT
     except _FlexAppError as exc:
         print(f"ERR: {exc}", file=sys.stderr)

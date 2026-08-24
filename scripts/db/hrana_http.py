@@ -219,3 +219,31 @@ def write_service_health_http(
         ),
         timeout=timeout,
     )
+
+
+SERVICE_HEALTH_SELECT_SQL = (
+    "SELECT service, state, last_attempt_started_at, last_attempt_finished_at, "
+    "last_error, updated_at FROM service_health WHERE service = ?"
+)
+_SERVICE_HEALTH_COLUMNS = (
+    "service",
+    "state",
+    "last_attempt_started_at",
+    "last_attempt_finished_at",
+    "last_error",
+    "updated_at",
+)
+
+
+def read_service_health_http(
+    service: str, timeout: float = HRANA_TIMEOUT_S
+) -> Optional[dict[str, Any]]:
+    """Single ``service_health`` row over the bounded transport, keyed by
+    column; ``None`` when the service has no row. Raises
+    :class:`HranaHttpError` on any transport failure — the caller owns the
+    fallback, same contract as :func:`write_service_health_http`.
+    """
+    rows = hrana_query(SERVICE_HEALTH_SELECT_SQL, (service,), timeout=timeout)
+    if not rows:
+        return None
+    return dict(zip(_SERVICE_HEALTH_COLUMNS, rows[0]))
