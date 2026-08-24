@@ -19,6 +19,8 @@ Owner specs for regime tabs and the cheap-wing scanner. Add a row here when a sp
 | hyad | `/regime/hyad` | `hy-ad` | [hyad.md](hyad.md) |
 | hhlev | `/regime/hhlev` | `hhlev` | [hhlev.md](hhlev.md) |
 
+`divyield` oneshot `TimeoutStartSec=2100` covers a tarpitted Yahoo constituent sweep (`SWEEP_BUDGET_S=1800` plus one in-flight fetch). 900s SIGTERM'd the 2026-08-24 run.
+
 `vol-cone` is the only indicator with two writers: an EOD run that stores the completed session and a 15m live pass that re-ranks today's chain against it (`is_intraday`), so the tab is tradeable during the session rather than a day stale.
 
 `/regime/vol-cone` redirects to the scanner. Pattern for a new indicator: `.claude/skills/new-indicator/SKILL.md`.
