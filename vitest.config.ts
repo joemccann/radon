@@ -26,6 +26,10 @@ export default defineConfig({
     environment: "node",
     fileParallelism: true,
     maxWorkers: "100%",
+    // Shard VMs plus coverage have timed out 5s jsdom tests (newsfeed
+    // pagination on shard 5, theta-harvester on shard 7). One CI retry
+    // is cheaper than a red deploy gate; local stays fail-fast.
+    retry: process.env.CI ? 1 : 0,
     // Pin NODE_ENV=test for every run. Vitest defaults to "test", but an ambient
     // shell `NODE_ENV=development` (common in a dev session) leaks through and
     // overrides it — silently flipping code paths that branch on NODE_ENV (e.g.
