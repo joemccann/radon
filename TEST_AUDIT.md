@@ -2461,6 +2461,7 @@ renumbered from T-097. The first pass's audit text, ledger line and
 - **T-099 DONE.** Both indicator jobs now heartbeat `error` + `stale_source` when IB, UW and Yahoo all fail (mirrors `fetch_ivrank`); no cache raises. Red `('health', <svc>, 'ok')` written over unconfirmed data, green after; the legitimate unchanged-day `ok` path is pinned separately.
 - **T-087 DONE.** Relay health detail now produced by an extracted builder the test imports; R-061 mutation reds 2, green 11/11 and 373 related.
 - **T-108 DONE.** Demo-mirror account-table purge retries via `retryOperation` and fails the run on persistent error instead of warning. Red: transient 502 not retried, persistent 502 resolved `{failures: []}`; green after. Source-grep guard now reds when the loop is deleted.
+- **T-085 DONE.** Suppressed-submit contract asserted behaviorally on all eight order surfaces; ChatPanel found genuinely defective (dedup message discarded) and fixed. Red 8/8 under the mutation (ChatPanel red unmutated), green 189 across 27 files.
 
 ## 11 · Audit ledger
 
