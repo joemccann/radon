@@ -2464,6 +2464,7 @@ renumbered from T-097. The first pass's audit text, ledger line and
 - **T-085 DONE.** Suppressed-submit contract asserted behaviorally on all eight order surfaces; ChatPanel found genuinely defective (dedup message discarded) and fixed. Red 8/8 under the mutation (ChatPanel red unmutated), green 189 across 27 files.
 - **T-100 DONE.** Flex 1025 embargo is now token-wide and durable: `service_health` row read back when the sidecar is missing, unwritable sidecar still arms via the row, `record_lockout` raises when neither sink lands. Three AC reds reproduced; green across 17 files. Pre-existing `hrana_execute`-for-SELECT bug in the monitor handler noted for the next audit.
 - **T-106 DONE.** Vol-cone payload carries `intraday_count`; the panel labels a partial live pass honestly and marks un-refreshed rows AS OF their own last session. Red `KeyError: 'intraday_count'` / `LIVE 1/2 NAMES` not found; green after.
+- **T-109 DONE.** GARCH and LEAP preset scans now honour the UW universe-scan brake with the theta harvester's degraded-telemetry row; the shell-default grep is a resolved-ticker-count guard (1666 ceiling; `indexes` at 2600 reds it). Five reds reproduced, green across nine files.
 
 ## 11 · Audit ledger
 
