@@ -113,6 +113,40 @@ class TestToleratedHashConverges:
         # The stored row is untouched by a refused write.
         assert json.loads(_row(conn)[3])["price"] == 4.15
 
+    def test_avg_price_restatement_reaches_the_price_column(self):
+        """T-098: replay storage supplies avgPrice, which the conflict gate
+        deliberately ignores, so the tolerated branch must carry the derived
+        price into the denormalized column or the row never converges."""
+        from db.writer import upsert_position_execution_fact
+
+        conn = _fresh_db()
+        replay = {k: v for k, v in BASE_EXECUTION.items() if k != "price"}
+        assert upsert_position_execution_fact(dict(replay, avgPrice=4.15), db=conn) is True
+
+        assert upsert_position_execution_fact(dict(replay, avgPrice=9.99), db=conn) is True
+
+        price, payload = conn.execute(
+            "SELECT price, payload FROM position_execution_facts WHERE exec_id = ?",
+            (BASE_EXECUTION["execId"],),
+        ).fetchone()
+        assert json.loads(payload)["avgPrice"] == 9.99
+        assert price == 9.99
+
+    def test_multiplier_restatement_reaches_the_multiplier_column(self):
+        from db.writer import upsert_position_execution_fact
+
+        conn = _fresh_db()
+        assert upsert_position_execution_fact(dict(BASE_EXECUTION), db=conn) is True
+
+        assert upsert_position_execution_fact(dict(BASE_EXECUTION, multiplier=1), db=conn) is True
+
+        multiplier, payload = conn.execute(
+            "SELECT multiplier, payload FROM position_execution_facts WHERE exec_id = ?",
+            (BASE_EXECUTION["execId"],),
+        ).fetchone()
+        assert json.loads(payload)["multiplier"] == 1
+        assert multiplier == 1
+
 
 class _TieShufflingDb:
     """Simulates Hrana's non-deterministic tie order: every query re-sorts

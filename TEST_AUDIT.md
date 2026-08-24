@@ -2450,6 +2450,7 @@ renumbered from T-097. The first pass's audit text, ledger line and
 - **T-097 DONE.** `scripts/clients/ib_client.py` `wait_until` is now a wall-clock deadline (`time.monotonic()`) plus a `ceil(timeout/poll)` step cap. Red 1.24s wall for a 0.2s timeout under a 0.2s-overrunning sleep; green after. Step assertion relaxed to `<= ceil(timeout/poll)` (the `== 4` pinned the defect).
 - **T-082 DONE.** `scripts/ib_sync.py` `wait_for_streaming_data` releases only on a valid account `dailyPnL` (`account_daily_pnl_is_ready` in `ib_client.py`). Red: nan `dailyPnL` + valid `unrealizedPnL` reported ready; green after. Guard tests for a quoteless ticker and a nan PnLSingle pin the two loops against deletion.
 - **T-086 DONE.** Real-sqlite keyset test (`TestRehashKeysetPagingRealSqlite`, 25 rows / 2 accounts / tied `ingested_at` / `PAGE_SIZE=10`) in `scripts/tests/test_position_execution_fact_tolerated_hash.py`. Red under the AND-form WHERE mutation (10 of 25 rows skipped), green with the row-value comparison; source unchanged.
+- **T-098 DONE.** `scripts/db/writer.py` tolerated-drift UPDATE carries the full denormalized column set through `_execution_fact_columns(item)`, shared with INSERT, so a converged row equals a fresh insert. Red: `price` column stuck at 4.15 after a 9.99 restatement, `multiplier` stuck at 100.0 after 1; green after. Option (a) chosen over widening the gate because `normalize_execution` documents that avgPrice drift must not raise.
 
 ## 11 · Audit ledger
 

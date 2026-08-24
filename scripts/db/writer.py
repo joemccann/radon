@@ -1704,6 +1704,20 @@ def _execution_economically_conflicts(
     return False
 
 
+def _execution_fact_columns(item: dict[str, Any]) -> tuple[Any, ...]:
+    """Denormalized ledger columns derived from a normalized execution.
+
+    Single source for INSERT and the tolerated-drift UPDATE so a converged
+    row is column-for-column what a fresh insert of the same payload would
+    produce (T-098).
+    """
+    return (
+        item["perm_id"], item["order_ref"] or None, item["con_id"],
+        item["side"], item["quantity"], item["price"], item["multiplier"],
+        item["currency"], item["filled_at"],
+    )
+
+
 def upsert_position_execution_fact(payload: dict[str, Any], *, db: Any = None) -> bool:
     """Persist a lossless IB execution fact without overwriting its identity.
 
@@ -1733,16 +1747,20 @@ def upsert_position_execution_fact(payload: dict[str, Any], *, db: Any = None) -
         if existing_hash != payload_hash:
             if not _execution_economically_conflicts(row, item, payload, iso_ts=_iso):
                 # Tolerated drift: same fill, newer metadata. Converge the
-                # pinned hash AND the stored payload so late IB enrichment
-                # (perm_id, order_ref) reaches the ledger columns instead of
-                # leaving the row permanently mismatched-but-tolerated (R-077).
+                # pinned hash, the stored payload AND every denormalized
+                # column so late IB enrichment (perm_id, order_ref) and gate-
+                # tolerated restatements (avgPrice-derived price, multiplier,
+                # currency) reach the ledger instead of leaving the row
+                # permanently self-contradictory (R-077, T-098).
                 target.execute(
                     """UPDATE position_execution_facts
-                       SET payload_sha256 = ?, payload = ?, perm_id = ?, order_ref = ?
+                       SET payload_sha256 = ?, payload = ?,
+                           perm_id = ?, order_ref = ?, con_id = ?, side = ?,
+                           quantity = ?, price = ?, multiplier = ?, currency = ?,
+                           filled_at = ?
                        WHERE account_id = ? AND exec_id = ? AND revision = ?""",
                     (
-                        payload_hash, canonical, item["perm_id"],
-                        item["order_ref"] or None,
+                        payload_hash, canonical, *_execution_fact_columns(item),
                         item["account_id"], item["exec_id"], revision,
                     ),
                 )
@@ -1767,9 +1785,7 @@ def upsert_position_execution_fact(payload: dict[str, Any], *, db: Any = None) -
         """,
         (
             item["account_id"], item["exec_id"], revision, payload_hash,
-            item["perm_id"], item["order_ref"] or None, item["con_id"],
-            item["side"], item["quantity"], item["price"], item["multiplier"],
-            item["currency"], item["filled_at"], canonical, _now_iso(),
+            *_execution_fact_columns(item), canonical, _now_iso(),
         ),
     )
     target.commit()
