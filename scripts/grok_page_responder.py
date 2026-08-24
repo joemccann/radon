@@ -274,7 +274,7 @@ def _rerun_reason(unit: str, runner: SystemctlRunner) -> Optional[str]:
     if result != "exit-code":
         return None
     failed_at = units_mod._parse_systemd_timestamp(props.get("InactiveEnterTimestamp") or "")
-    deployed_at = units_mod._read_deploy_evidence()["marker_mtime"]
+    deployed_at = units_mod._file_mtime(units_mod.GREEN_MARKER_PATH)
     if failed_at is None or deployed_at is None or deployed_at <= failed_at:
         return None
     return (

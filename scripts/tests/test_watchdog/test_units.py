@@ -9,7 +9,7 @@ dispatch path.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -439,6 +439,18 @@ class TestDeployCollateralSignalKill:
             deploy={"marker_mtime": None, "in_flight": True},
         )
         assert [o.severity for o in outcomes] == ["P3"]
+
+    def test_signal_kill_hours_before_inflight_journal_stays_p1(self):
+        """T-103: a live deploy (fresh journal) can only own kills inside
+        the single-deploy window. A SIGTERM 20h old is not this deploy's
+        stop-clean collateral — it must page P1, not ride the digest."""
+        killed = self.WINDOW_NOW - timedelta(hours=20)
+        current = units.parse_show_output(self._signal_block(killed))
+        outcomes = units.evaluate(
+            current=current, previous={}, now=self.WINDOW_NOW,
+            deploy={"marker_mtime": None, "in_flight": True},
+        )
+        assert [o.severity for o in outcomes] == ["P1"]
 
     def test_signal_kill_without_deploy_evidence_stays_p1(self):
         killed = datetime(2026, 8, 5, 21, 40, 24, tzinfo=timezone.utc)

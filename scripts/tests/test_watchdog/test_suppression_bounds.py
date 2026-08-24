@@ -241,6 +241,69 @@ def _signal_block(unit_id: str, killed_at: datetime) -> str:
     )
 
 
+class TestInFlightJournalStaleness:
+    """T-103 — units' ``in_flight`` deploy evidence shares the R-057
+    stranded-journal rule: a journal older than
+    ``TRANSITION_JOURNAL_STRANDED_AFTER_SECONDS`` is an interrupted deploy,
+    not a live one, so it must not downgrade signal kills."""
+
+    def _units_journal(self, tmp_path, monkeypatch, *, age_seconds: int):
+        journal = tmp_path / "deploy-transition.json"
+        monkeypatch.setattr(units, "GREEN_MARKER_PATH", tmp_path / "last-green-deploy")
+        monkeypatch.setattr(units, "TRANSITION_JOURNAL_PATH", journal)
+        journal.write_text("{}\n")
+        stamp = (NOW - timedelta(seconds=age_seconds)).timestamp()
+        os.utime(journal, (stamp, stamp))
+
+    def test_stranded_journal_is_not_in_flight(self, tmp_path, monkeypatch):
+        self._units_journal(
+            tmp_path,
+            monkeypatch,
+            age_seconds=external_probe.TRANSITION_JOURNAL_STRANDED_AFTER_SECONDS + 600,
+        )
+
+        assert units._read_deploy_evidence(now=NOW)["in_flight"] is False, (
+            "a journal aged past the staleness cap is an interrupted deploy — "
+            "it must not count as in-flight deploy evidence"
+        )
+
+    def test_fresh_journal_is_in_flight(self, tmp_path, monkeypatch):
+        self._units_journal(tmp_path, monkeypatch, age_seconds=120)
+
+        assert units._read_deploy_evidence(now=NOW)["in_flight"] is True
+
+    def test_absent_journal_is_not_in_flight(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(units, "GREEN_MARKER_PATH", tmp_path / "last-green-deploy")
+        monkeypatch.setattr(units, "TRANSITION_JOURNAL_PATH", tmp_path / "deploy-transition.json")
+
+        assert units._read_deploy_evidence(now=NOW)["in_flight"] is False
+
+    def test_inflight_kill_older_than_deploy_window_returns_to_p1(self):
+        """Even with a fresh journal, a kill 20h old cannot be this
+        deploy's stop-clean — the in_flight branch is bounded by the
+        single-deploy window, not the 24h frozen cap."""
+        killed = NOW - timedelta(hours=20)
+        current = units.parse_show_output(_signal_block("radon-bpi.service", killed))
+
+        outcomes = units.evaluate(
+            current=current, previous={}, now=NOW,
+            deploy={"marker_mtime": None, "in_flight": True},
+        )
+
+        assert [o.severity for o in outcomes] == ["P1"]
+
+    def test_inflight_kill_inside_deploy_window_stays_p3(self):
+        killed = NOW - timedelta(seconds=units.DEPLOY_COLLATERAL_WINDOW_SECS - 60)
+        current = units.parse_show_output(_signal_block("radon-bpi.service", killed))
+
+        outcomes = units.evaluate(
+            current=current, previous={}, now=NOW,
+            deploy={"marker_mtime": None, "in_flight": True},
+        )
+
+        assert [o.severity for o in outcomes] == ["P3"]
+
+
 class TestKillBeforeGreenFrozenCap:
     """R-064 — kill-before-green collateral has a now-cap."""
 

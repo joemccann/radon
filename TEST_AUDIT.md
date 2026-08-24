@@ -2456,6 +2456,7 @@ renumbered from T-097. The first pass's audit text, ledger line and
 - **T-083 DONE.** Per-position Day P&L now gated on the IB session via `withSessionIbDailyPnl()` in `PositionTable`; crypto carve-out kept. Red `+$13,952` rendered on a Saturday for an equity option; green blank, with weekday and crypto controls. 454 related tests green, tsc clean.
 - **T-101 DONE.** Cancel All / Halt confirm gates now behaviorally pinned (zero POSTs before confirm, exactly one after, zero on dismiss). Red 4 failed under the direct-`runAction` mutation, green 7/7 with source unchanged.
 - **T-107 DONE.** `usePathname` → context → `Providers` wiring pinned end to end. Red under both deletion mutations (empty pathname; provider removed), green 2/2 with source unchanged.
+- **T-103 DONE.** `in_flight` deploy-collateral suppression bounded to the 60-min window and gated on a live (not stranded) transition journal, sharing `external_probe`'s rule. Red `['P3'] == ['P1']` for a 20h-old in-flight kill; green 297 in `test_watchdog/`; mutant caught.
 
 ## 11 · Audit ledger
 

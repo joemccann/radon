@@ -43,6 +43,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from .check import CheckOutcome
+from .external_probe import TRANSITION_JOURNAL_STRANDED_AFTER_SECONDS
 
 log = logging.getLogger("watchdog.units")
 
@@ -131,20 +132,32 @@ def _parse_systemd_timestamp(value: str) -> Optional[datetime]:
     return parsed.replace(tzinfo=_tz.utc)
 
 
-def _read_deploy_evidence() -> dict:
-    marker_mtime = None
-    try:
-        if GREEN_MARKER_PATH.is_file():
-            from datetime import timezone as _tz
+def _file_mtime(path: Path) -> Optional[datetime]:
+    from datetime import timezone as _tz
 
-            marker_mtime = datetime.fromtimestamp(
-                GREEN_MARKER_PATH.stat().st_mtime, tz=_tz.utc
-            )
+    try:
+        if not path.is_file():
+            return None
+        return datetime.fromtimestamp(path.stat().st_mtime, tz=_tz.utc)
     except OSError:
-        pass
+        return None
+
+
+def _journal_is_live(now: datetime) -> bool:
+    """T-103: shares external_probe's R-057 rule. An interrupted deploy
+    strands the journal on disk forever; past the staleness cap it is
+    not evidence of a live deploy and must not downgrade signal kills."""
+    journal_mtime = _file_mtime(TRANSITION_JOURNAL_PATH)
+    if journal_mtime is None:
+        return False
+    age = (now - journal_mtime).total_seconds()
+    return age <= TRANSITION_JOURNAL_STRANDED_AFTER_SECONDS
+
+
+def _read_deploy_evidence(now: datetime) -> dict:
     return {
-        "marker_mtime": marker_mtime,
-        "in_flight": TRANSITION_JOURNAL_PATH.exists(),
+        "marker_mtime": _file_mtime(GREEN_MARKER_PATH),
+        "in_flight": _journal_is_live(now),
     }
 
 
@@ -156,9 +169,12 @@ def _is_deploy_collateral(unit: dict, deploy: Optional[dict], now: datetime) -> 
       * journal present (in_flight)
       * kill after the last green (cancelled / not-yet-green successor)
       * kill before the latest green (this stack's stop-clean)
-    The 60-min now-to-kill cap applies to kill-after-green so an
-    unrelated SIGTERM hours later still pages. in_flight and
-    kill-before-green use the 24h oneshot recovery horizon
+    The 60-min now-to-kill cap applies to in_flight and kill-after-green
+    so an unrelated SIGTERM hours later still pages: a live journal is at
+    most ``TRANSITION_JOURNAL_STRANDED_AFTER_SECONDS`` old, so a kill
+    older than the single-deploy window predates the deploy that would
+    have to own it (T-103). Kill-before-green uses the 24h oneshot
+    recovery horizon
     (``KILL_BEFORE_GREEN_FROZEN_CAP_SECS``): Type=oneshot stays failed
     until its next timer (2026-08-15 01:35Z radon-bpi), and a stacked
     successor can overwrite the green marker hours after the first
@@ -176,8 +192,8 @@ def _is_deploy_collateral(unit: dict, deploy: Optional[dict], now: datetime) -> 
     age = (now - failed_at).total_seconds()
     if age < 0:
         return False
-    if deploy.get("in_flight"):
-        return age <= KILL_BEFORE_GREEN_FROZEN_CAP_SECS
+    if deploy.get("in_flight") and age <= DEPLOY_COLLATERAL_WINDOW_SECS:
+        return True
     marker = deploy.get("marker_mtime")
     if marker is None:
         return False
@@ -357,7 +373,7 @@ def check_units(
 
     previous = _load_state(state_path)
     outcomes = evaluate(
-        current=current, previous=previous, now=now, deploy=_read_deploy_evidence()
+        current=current, previous=previous, now=now, deploy=_read_deploy_evidence(now)
     )
     try:
         _save_state(state_path, current, now)
