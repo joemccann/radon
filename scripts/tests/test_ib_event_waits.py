@@ -273,6 +273,83 @@ def test_wait_for_streaming_data_returns_when_all_ready():
     client.wait_until.assert_called_once()
 
 
+def _ready_ticker():
+    ticker = MagicMock()
+    ticker.bid = 10.0
+    ticker.ask = 10.1
+    ticker.last = 10.05
+    ticker.close = 10.0
+    return ticker
+
+
+def _quoteless_ticker():
+    ticker = MagicMock()
+    ticker.bid = float("nan")
+    ticker.ask = float("nan")
+    ticker.last = float("nan")
+    ticker.close = float("nan")
+    ticker.marketPrice.return_value = float("nan")
+    return ticker
+
+
+def _account_pnl(daily, unrealized):
+    pnl = MagicMock()
+    pnl.dailyPnL = daily
+    pnl.unrealizedPnL = unrealized
+    return pnl
+
+
+def _single_pnl(daily):
+    single = MagicMock()
+    single.dailyPnL = daily
+    return single
+
+
+def _streaming_ready(pnl_obj, tickers, pnl_requests):
+    from ib_sync import wait_for_streaming_data
+
+    client = MagicMock()
+    client.wait_until.side_effect = lambda pred, timeout: pred()
+    return wait_for_streaming_data(
+        client,
+        pnl_obj=pnl_obj,
+        tickers=tickers,
+        pnl_requests=pnl_requests,
+        timeout=2.5,
+    )
+
+
+def test_wait_for_streaming_data_not_ready_when_ticker_has_no_quote():
+    assert _streaming_ready(
+        _account_pnl(1.0, 0.5),
+        [_ready_ticker(), _quoteless_ticker()],
+        [({}, _single_pnl(0.25), 1)],
+    ) is False
+
+
+def test_wait_for_streaming_data_not_ready_when_account_daily_pnl_missing():
+    """Phase 6 reads dailyPnL with no fallback wait; an unrealizedPnL tick
+    arriving first must not release the wait."""
+    assert _streaming_ready(
+        _account_pnl(float("nan"), 1.0),
+        [_ready_ticker()],
+        [({}, _single_pnl(0.25), 1)],
+    ) is False
+    assert _streaming_ready(
+        _account_pnl(None, 1.0),
+        [_ready_ticker()],
+        [({}, _single_pnl(0.25), 1)],
+    ) is False
+
+
+def test_wait_for_streaming_data_not_ready_when_single_pnl_daily_missing():
+    assert _streaming_ready(
+        _account_pnl(1.0, 0.5),
+        [_ready_ticker()],
+        [({}, _single_pnl(0.25), 1), ({}, _single_pnl(float("nan")), 2)],
+    ) is False
+
+
 @patch("clients.ib_client.IB")
 def test_get_historical_data_times_out(MockIB):
     mock_ib = MockIB.return_value

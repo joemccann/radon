@@ -54,8 +54,8 @@ from clients.ib_client import (
     CLIENT_IDS,
     DEFAULT_HOST,
     DEFAULT_GATEWAY_PORT,
+    account_daily_pnl_is_ready,
     is_valid_ib_number,
-    pnl_is_ready,
     ticker_has_quote,
 )
 from clients.ib_timing import PhaseTimer
@@ -860,7 +860,7 @@ def wait_for_streaming_data(
     """
 
     def _ready() -> bool:
-        if pnl_obj is not None and not pnl_is_ready(pnl_obj):
+        if pnl_obj is not None and not account_daily_pnl_is_ready(pnl_obj):
             return False
         for ticker in tickers:
             if not ticker_has_quote(ticker):

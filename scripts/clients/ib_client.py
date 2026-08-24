@@ -213,6 +213,18 @@ def pnl_is_ready(pnl: Any) -> bool:
     )
 
 
+def account_daily_pnl_is_ready(pnl: Any) -> bool:
+    """True only when the account PnL has a valid ``dailyPnL`` tick.
+
+    IB can stream ``unrealizedPnL`` a tick before ``dailyPnL``; callers that
+    read ``dailyPnL`` with no fallback wait must not release on the OR
+    predicate in :func:`pnl_is_ready`.
+    """
+    if pnl is None:
+        return False
+    return is_valid_ib_number(getattr(pnl, "dailyPnL", None))
+
+
 def bind_event(event: Any, handler: Callable) -> Callable[[], None]:
     """Subscribe ``handler`` to an ib_insync Event. Returns an unbind callable.
 
