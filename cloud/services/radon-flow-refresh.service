@@ -13,6 +13,11 @@ WorkingDirectory=/home/radon/radon
 EnvironmentFile=/etc/radon/env
 Environment=RADON_UW_CALLER=flow-refresh
 ExecStart=/usr/bin/bash /home/radon/radon/scripts/run_flow_refresh.sh
+# R-067 / R-170: wrapper SHED_EXIT=75 is EX_TEMPFAIL (subprocess lane full).
+# SuccessExitStatus keeps a leaked 75 inactive, not failed. The wrapper
+# remaps an all-shed run to exit 0 so a host that has not yet installed
+# this unit file still does not page.
+SuccessExitStatus=75
 StandardOutput=journal
 StandardError=journal
 # Three sequential POSTs, each bounded at 180s by the wrapper curl deadline.

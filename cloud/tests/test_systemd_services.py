@@ -403,6 +403,8 @@ class TestFlowRefresh:
         assert "run_flow_refresh.sh" in svc["execstart"]
         assert int(svc["timeoutstartsec"]) <= 600
         assert "RADON_UW_CALLER=flow-refresh" in raw
+        # R-067 / R-170: wrapper SHED_EXIT=75 must not enter failed.
+        assert svc.get("successexitstatus") == "75"
 
     def test_timer_is_hourly_et(self, unit, services_dir):
         raw = (services_dir / "radon-flow-refresh.timer").read_text()

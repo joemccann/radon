@@ -672,11 +672,21 @@ all three flow-tab POSTs hit the FastAPI subprocess slot cap.** Peak:
   per-scan wall budget. Persistent shed exits 0 (`SHED_EXIT=75`) so the
   unit watchdog does not page P1 hourly for a full lane; the next slot
   retries. Keep the no-duplicate rule. Real failures still exit 1.
+  `SuccessExitStatus=75` on the oneshot makes a leaked 75 inactive, not
+  failed (R-067). The unit watchdog pages P1 once per
+  `InactiveEnterTimestamp` for Type=oneshot `Result=exit-code`; the same
+  timestamp is P3 digest (next timer retries). Type=simple failed stays P1.
 - **Regression:**
   `test_run_flow_refresh_wrapper.py::test_http_502_then_ok_retries_without_direct_fallback`,
   `test_http_503_then_ok_retries`, `test_http_500_does_not_retry`,
-  `test_persistent_502_sheds_without_direct_fallback`.
-- **Code:** `scripts/run_flow_refresh.sh`.
+  `test_persistent_502_sheds_without_direct_fallback`,
+  `test_flow_refresh_oneshot_contract.py`,
+  `test_watchdog/test_units.py::TestOneshotExitCodeLatch`.
+- **Code:** `scripts/run_flow_refresh.sh`,
+  `cloud/services/radon-flow-refresh.service`, `scripts/watchdog/units.py`.
+- **Host:** CI deploy `install-units` (hash bumped). No control-plane
+  bootstrap. `reset-failed` is not required after this SHA: a shed no
+  longer enters failed, and a leftover latch is digest-only.
 
 ---
 
