@@ -1021,6 +1021,8 @@ async def _read_orders_snapshot_from_db() -> dict[str, Any]:
         if fill_time > latest_exec_sync:
             latest_exec_sync = fill_time
 
+    await _overlay_journal_realized_pnl(executed_orders)
+
     return {
         "last_sync": latest_open_sync or latest_exec_sync,
         "open_orders": open_orders,
@@ -1028,6 +1030,27 @@ async def _read_orders_snapshot_from_db() -> dict[str, Any]:
         "open_count": len(open_orders),
         "executed_count": len(executed_orders),
     }
+
+
+async def _overlay_journal_realized_pnl(executed_orders: list[dict[str, Any]]) -> None:
+    """IB's commission-report realizedPNL drifts with IB's avgCost after a
+    partial close; the journal's average-cost figure wins when the journal
+    covers the contract. Best-effort: a journal read failure keeps IB's."""
+    if not executed_orders:
+        return
+    from clients.journal_realized import (
+        apply_journal_realized_pnl,
+        journal_realized_pnl_for_fills,
+    )
+
+    try:
+        realized = await asyncio.to_thread(
+            journal_realized_pnl_for_fills, db_http.hrana_execute, executed_orders
+        )
+    except Exception as exc:
+        logger.warning("orders: journal realized P&L overlay skipped: %s", exc)
+        return
+    apply_journal_realized_pnl(executed_orders, realized)
 
 
 def _today_et_str() -> str:
