@@ -252,18 +252,29 @@ describe("Minor — risk-free copy must not contradict the rate next to it", () 
   });
 
   it("agrees with the Sharpe card's own risk-free label on the same payload", () => {
-    const payload = rfPayload({ risk_free_rate: 0.0374, risk_free_source: undefined });
-    delete (payload.methodology as Record<string, unknown>).risk_free_source;
-    stubV2(payload);
-    render(<PerformancePanel />);
+    // The subject is copy COHERENCE between the footer and the Sharpe card,
+    // which only exists while Sharpe renders a number. R-163 made read-time
+    // staleness suppress every derived statistic (not just the hero), and the
+    // golden fixture's nav_as_of is fixed, so this reads on the fixture's own
+    // last session — the same device the sibling twr-payload suite uses.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-27T20:45:00-04:00"));
+    try {
+      const payload = rfPayload({ risk_free_rate: 0.0374, risk_free_source: undefined });
+      delete (payload.methodology as Record<string, unknown>).risk_free_source;
+      stubV2(payload);
+      render(<PerformancePanel />);
 
-    const footer = screen.getByTestId("methodology-rf").textContent ?? "";
-    const sharpeSub = screen.getByTestId("performance-sub-sharpe-vs-tbill").textContent ?? "";
-    expect(sharpeSub).toContain("3.74%");
-    // Today: footer "3.74% (fallback 0)" vs sharpe "RF 3.74% DGS3MO".
-    const footerClaimsFallback = footer.toLowerCase().includes("fallback");
-    const sharpeClaimsFred = sharpeSub.toUpperCase().includes("DGS3MO");
-    expect(footerClaimsFallback && sharpeClaimsFred).toBe(false);
+      const footer = screen.getByTestId("methodology-rf").textContent ?? "";
+      const sharpeSub = screen.getByTestId("performance-sub-sharpe-vs-tbill").textContent ?? "";
+      expect(sharpeSub).toContain("3.74%");
+      // Today: footer "3.74% (fallback 0)" vs sharpe "RF 3.74% DGS3MO".
+      const footerClaimsFallback = footer.toLowerCase().includes("fallback");
+      const sharpeClaimsFred = sharpeSub.toUpperCase().includes("DGS3MO");
+      expect(footerClaimsFallback && sharpeClaimsFred).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("still says fallback when the rate really is the zero fallback", () => {

@@ -608,6 +608,23 @@ function isUsMarketHoliday(et: Date): boolean {
   return isHolidayIso(isoDate);
 }
 
+/**
+ * R-164: the static table is finite, and `isHolidayIso` returns false for any
+ * year it does not cover — so once it runs out, `isUsTradingDay` silently
+ * degrades to weekday-only and every full-closure holiday reads as a trading
+ * day. Blanking a whole uncovered year would be far worse than being wrong on
+ * ~9 days, so the runtime behaviour is unchanged and the coverage is instead
+ * made explicit here and pinned by a contract test that fails CI a year
+ * before the data runs out.
+ */
+export const HOLIDAY_TABLE_YEARS: readonly string[] = Object.freeze(
+  Object.keys(staticHolidays as Record<string, string[]>).sort(),
+);
+
+export function isHolidayTableCovering(isoDate: string): boolean {
+  return HOLIDAY_TABLE_YEARS.includes(isoDate.slice(0, 4));
+}
+
 function isHolidayIso(isoDate: string): boolean {
   const dates = (staticHolidays as Record<string, string[]>)[isoDate.slice(0, 4)];
   return Array.isArray(dates) && dates.includes(isoDate);
