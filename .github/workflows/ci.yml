@@ -190,6 +190,9 @@ jobs:
         with:
           python-version: "3.13"
           enable-cache: true
+          # ubuntu-latest has no system 3.13. --system fails with
+          # "No system Python installation found for Python 3.13".
+          activate-environment: true
           cache-dependency-glob: |
             requirements.txt
             scripts/requirements-api.txt
@@ -197,7 +200,7 @@ jobs:
             cloud/requirements-test.txt
       - name: Install dependencies
         run: |
-          uv pip install --system -r requirements.txt -r scripts/requirements-api.txt -r requirements-dev.txt
+          uv pip install -r requirements.txt -r scripts/requirements-api.txt -r requirements-dev.txt
       # Run from the repo ROOT — pyproject.toml pins pythonpath so `import
       # ib_sync` / `from api.*` / trade_blotter all resolve. addopts already
       # applies `-m 'not integration'`, so the live MenthorQ suite is skipped.
@@ -284,14 +287,15 @@ jobs:
         with:
           python-version: "3.13"
           enable-cache: true
+          activate-environment: true
           cache-dependency-glob: |
             requirements-dev.txt
             cloud/requirements-test.txt
       - name: Install dependencies
         run: |
-          uv pip install --system -r requirements-dev.txt
+          uv pip install -r requirements-dev.txt
           if [ -f cloud/requirements-test.txt ]; then
-            uv pip install --system -r cloud/requirements-test.txt
+            uv pip install -r cloud/requirements-test.txt
           fi
       # Separate job: pyproject.toml norecursedirs includes cloud/ because
       # cloud/tests/conftest.py collides with scripts/tests/conftest.py on the

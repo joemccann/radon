@@ -122,10 +122,12 @@ def test_python_ci_jobs_cache_pip_and_pin_the_test_toolchain() -> None:
         assert uv_pin in setup_uv["uses"]
         assert setup_uv["with"]["python-version"] == "3.13"
         assert str(setup_uv["with"].get("enable-cache", "")).lower() in ("true", "True")
+        assert str(setup_uv["with"].get("activate-environment", "")).lower() in ("true", "True")
         cache_paths = str(setup_uv["with"].get("cache-dependency-glob", ""))
         assert "requirements-dev.txt" in cache_paths
         commands = _job_commands(jobs[name])
-        assert "uv pip install --system" in commands
+        assert "uv pip install" in commands
+        assert "uv pip install --system" not in commands
         assert "requirements-dev.txt" in commands
         assert "pip install --upgrade pip" not in commands
         assert "pip install pytest pytest-asyncio pytest-cov" not in commands
