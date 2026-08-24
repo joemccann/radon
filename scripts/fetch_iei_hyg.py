@@ -267,15 +267,20 @@ def fetch_closes(
     fetch_ib: Optional[FetchCloses] = None,
     fetch_uw: Optional[FetchCloses] = None,
     fetch_yahoo: Optional[FetchCloses] = None,
-) -> tuple[dict[str, Closes], str]:
-    """IB first, then UW for gaps, then Yahoo. Returns (closes, combined source)."""
+) -> tuple[dict[str, Closes], str, dict[str, str]]:
+    """IB first, then UW for gaps, then Yahoo.
+
+    Returns ``(closes, combined source, per-ticker sources)``. R-190: the
+    combined string alone cannot say WHICH leg fell back, so a mixed IB+Yahoo
+    ratio was stored indistinguishably from the opposite pairing.
+    """
     wanted = list(tickers or TICKERS)
     closes: dict[str, Closes] = {}
     sources: dict[str, str] = {}
     _take(fetch_ib or fetch_ib_closes, wanted, "ib", closes, sources)
     _take(fetch_uw or fetch_uw_closes, wanted, "uw", closes, sources)
     _take(fetch_yahoo or fetch_yahoo_closes, wanted, "yahoo", closes, sources)
-    return closes, combine_source(sources) or "none"
+    return closes, combine_source(sources) or "none", dict(sources)
 
 
 # ── series assembly ───────────────────────────────────────────────
@@ -355,11 +360,16 @@ def build_output(
     series: list[dict[str, Any]],
     scan_time: Optional[str] = None,
     source: str = "ib",
+    source_by_ticker: Optional[dict[str, str]] = None,
 ) -> dict[str, Any]:
     stamp = scan_time or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     return {
         "scan_time": stamp,
         "source": source,
+        # R-190: the collapsed `source` string cannot say WHICH leg fell back,
+        # so a mixed IB+Yahoo ratio was stored indistinguishably from the
+        # other mixed pairing. The per-ticker map rides alongside it.
+        "source_by_ticker": dict(source_by_ticker or {}),
         "count": len(series),
         "current": _current(series) if series else None,
         "series": series,
@@ -467,7 +477,7 @@ def load_cached_series() -> list[dict[str, Any]]:
 
 def run() -> dict[str, Any]:
     _log("fetching IEI, HYG and DXY (IB -> UW -> Yahoo)")
-    closes, source = fetch_closes()
+    closes, source, source_by_ticker = fetch_closes()
     fresh = align_series(
         closes.get(IEI_SYMBOL, {}), closes.get(HYG_SYMBOL, {}), closes.get(DXY_SYMBOL, {})
     )
@@ -476,7 +486,7 @@ def run() -> dict[str, Any]:
     new_rows = diff_new_rows(cached, series)
     if not new_rows:
         _log("source unchanged; refreshing snapshot only")
-    payload = build_output(series, source=source)
+    payload = build_output(series, source=source, source_by_ticker=source_by_ticker)
     # R-098: see fetch_credit_spread — a dead source lived only in
     # payload["source"], which nothing reads.
     health_error = (

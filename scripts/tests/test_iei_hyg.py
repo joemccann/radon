@@ -292,7 +292,12 @@ class TestCli:
         monkeypatch.setattr(
             fih,
             "fetch_closes",
-            lambda *a, **k: ({"IEI": closes["iei"], "HYG": closes["hyg"], "DXY": closes["dxy"]}, "yahoo"),
+            # R-190: the cascade returns the per-ticker map too.
+            lambda *a, **k: (
+                {"IEI": closes["iei"], "HYG": closes["hyg"], "DXY": closes["dxy"]},
+                "yahoo",
+                {"IEI": "yahoo", "HYG": "yahoo", "DXY": "yahoo"},
+            ),
         )
         monkeypatch.setattr(fih, "persist_result", lambda payload, rows, health_error=None: None)
         assert main(["--json"]) == 0

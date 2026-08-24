@@ -159,7 +159,11 @@ class TestBuildOutput:
         payload = build_output(aligned, source="ib")
         assert payload["source"] == "ib"
         assert payload["count"] == 658
-        assert set(payload.keys()) == {"scan_time", "source", "count", "current", "series"}
+        # R-190 adds source_by_ticker: the collapsed `source` string cannot
+        # say WHICH leg fell back to Yahoo.
+        assert set(payload.keys()) == {
+            "scan_time", "source", "source_by_ticker", "count", "current", "series",
+        }
         current = payload["current"]
         assert current["date"] == "2026-08-20"
         assert current["hyg_close"] == pytest.approx(HYG_LAST)

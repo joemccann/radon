@@ -303,6 +303,14 @@ def fetch_closes(
 
 
 def combine_source(sources: dict[str, str]) -> str:
+    """Collapse the per-ticker map to the legacy display string.
+
+    R-190: this is LOSSY on purpose (it is what the `source` column has always
+    held), but it was the only thing that reached the payload — so an IB HYG
+    with a Yahoo SPX and a Yahoo HYG with an IB SPX were both "ib+yahoo", and
+    which leg was the fallback was unrecoverable. `build_output` now carries
+    the map alongside it.
+    """
     return "+".join(sorted(set(sources.values())))
 
 
@@ -410,6 +418,7 @@ def build_output(
     series: list[dict[str, Any]],
     scan_time: Optional[str] = None,
     source: str = "ib",
+    source_by_ticker: Optional[dict[str, str]] = None,
 ) -> dict[str, Any]:
     stamp = scan_time or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     current: Optional[dict[str, Any]] = None
@@ -431,6 +440,10 @@ def build_output(
     return {
         "scan_time": stamp,
         "source": source,
+        # R-190: the collapsed `source` string cannot say WHICH leg fell back,
+        # so a mixed IB+Yahoo ratio was stored indistinguishably from the
+        # other mixed pairing. The per-ticker map rides alongside it.
+        "source_by_ticker": dict(source_by_ticker or {}),
         "count": len(series),
         "current": current,
         "series": series,
@@ -529,7 +542,7 @@ def run() -> dict[str, Any]:
         print("[credit-spread] source unchanged; refreshing snapshot only", file=sys.stderr)
 
     combined = combine_source(sources) or "none"
-    payload = build_output(series, source=combined)
+    payload = build_output(series, source=combined, source_by_ticker=sources)
     # R-098: `source="none"` means every rung of IB -> UW -> Yahoo failed, and
     # nothing consumed that field — the row heartbeated ok off the cached
     # series and the panel rendered it as current.

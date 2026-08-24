@@ -183,17 +183,42 @@ def _positive_finite(value: Any) -> Optional[float]:
 
 
 def extract_index_value(ticker: Any) -> Optional[float]:
-    """First finite positive of last -> close -> (bid+ask)/2; generated indices
-    may carry the value in bid/ask rather than last (AD-NYSE precedent)."""
+    """First finite positive of last -> close -> bid when bid == ask.
+
+    R-189: the bid/ask fallback used to average the two fields, but on a NYSE
+    generated index they are not a quote around a price — `_bid_ask` below
+    encodes the actual convention (`adv, dec = bid, ask` for AD-NYSE,
+    `up_vol, down_vol = bid, ask` for VOL-NYSE): two unrelated quantities.
+    Their midpoint is a value of nothing. The AD-NYSE precedent the old
+    docstring cited is the DEGENERATE case — one value published in both
+    fields — so that, and only that, is what the fallback accepts now.
+    """
     for name in ("last", "close"):
         value = _positive_finite(_field(ticker, name))
         if value is not None:
             return value
     bid = _positive_finite(_field(ticker, "bid"))
     ask = _positive_finite(_field(ticker, "ask"))
-    if bid is not None and ask is not None:
-        return (bid + ask) / 2.0
+    if bid is not None and ask is not None and bid == ask:
+        return bid
     return None
+
+
+def index_has_data(ticker: Any) -> bool:
+    """Readiness for the snapshot ladder, which is NOT the same question.
+
+    AD-NYSE and VOL-NYSE legitimately answer with two DIFFERENT counts, and
+    `_snapshot_ticker` used `extract_index_value(...) is not None` as its
+    readiness test — which only worked because the midpoint of two counts was
+    finite. Tightening the value fallback would otherwise have made every
+    counts-only ticker look unpriceable.
+    """
+    if ticker is None:
+        return False
+    if extract_index_value(ticker) is not None:
+        return True
+    bid, ask = _bid_ask(ticker)
+    return bid is not None or ask is not None
 
 
 def _hourly_with_ma(bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -289,7 +314,7 @@ def _snapshot_ticker(ib: Any, contract: Any) -> tuple[Optional[Any], Optional[in
         except Exception as exc:
             _log(f"IB: {contract.symbol} snapshot (type {data_type}) failed: {exc}")
             continue
-        if extract_index_value(ticker) is not None:
+        if index_has_data(ticker):
             return ticker, data_type
     return None, None
 

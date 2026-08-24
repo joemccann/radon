@@ -126,10 +126,19 @@ class TestMovingAverageAndState:
 
 
 class TestExtractIndexValue:
-    def test_prefers_last_then_close_then_bid_ask_mid(self):
+    def test_prefers_last_then_close_then_a_degenerate_bid_ask(self):
+        """R-189: the third case used to assert a MIDPOINT of 0.6/0.8.
+
+        On a NYSE generated index bid/ask is not a quote — `_bid_ask` reads
+        them as two unrelated counts (advancers/decliners, up/down volume) —
+        so their average is a value of nothing. The precedent the fallback
+        actually serves is one value published in BOTH fields, which is what
+        the case asserts now. The last/close precedence is unchanged.
+        """
         assert extract_index_value({"last": 0.68, "close": 0.7, "bid": 0.6, "ask": 0.8}) == 0.68
         assert extract_index_value({"last": float("nan"), "close": 0.7, "bid": 0.6, "ask": 0.8}) == 0.7
-        assert extract_index_value({"last": None, "close": None, "bid": 0.6, "ask": 0.8}) == pytest.approx(0.7)
+        assert extract_index_value({"last": None, "close": None, "bid": 0.7, "ask": 0.7}) == pytest.approx(0.7)
+        assert extract_index_value({"last": None, "close": None, "bid": 0.6, "ask": 0.8}) is None
 
     def test_non_positive_or_non_finite_is_none(self):
         assert extract_index_value({"last": 0.0, "close": -1.0, "bid": None, "ask": None}) is None
