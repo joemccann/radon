@@ -2455,6 +2455,7 @@ renumbered from T-097. The first pass's audit text, ledger line and
 - **T-105 DONE.** Role-scoped counter reset pinned with a status()-driven fake and per-tick assertions; reconnect mirror added. Red 2 failed under the ANY-role mutation, green 8 passed with source unchanged.
 - **T-083 DONE.** Per-position Day P&L now gated on the IB session via `withSessionIbDailyPnl()` in `PositionTable`; crypto carve-out kept. Red `+$13,952` rendered on a Saturday for an equity option; green blank, with weekday and crypto controls. 454 related tests green, tsc clean.
 - **T-101 DONE.** Cancel All / Halt confirm gates now behaviorally pinned (zero POSTs before confirm, exactly one after, zero on dismiss). Red 4 failed under the direct-`runAction` mutation, green 7/7 with source unchanged.
+- **T-107 DONE.** `usePathname` → context → `Providers` wiring pinned end to end. Red under both deletion mutations (empty pathname; provider removed), green 2/2 with source unchanged.
 
 ## 11 · Audit ledger
 
