@@ -796,6 +796,7 @@ recover_pending_transition() {
   DEPLOY_SERVICES_RECOVERED=0
   sudo "$DEPLOY_ROOT_HELPER" stop-clean || return 1
   restore_release_backup "$JOURNAL_PREVIOUS_SHA" "$JOURNAL_BACKUP_DIR" || return 1
+  revert_release_units
   sudo "$DEPLOY_ROOT_HELPER" recover || return 1
   DEPLOY_SERVICES_RECOVERED=1
   DEPLOY_TEARDOWN_STARTED=0
@@ -907,6 +908,19 @@ restart_services() {
 install_release_units() {
   if ! sudo "$DEPLOY_ROOT_HELPER" install-units; then
     log_warn "Unit install reported a failure; the drift audit will flag any gap"
+  fi
+}
+
+# Rollback counterpart (T-104). The helper journals what install-units
+# promoted; revert-units disables and removes the units the failed release
+# added and restores the bodies it replaced. Runs after the checkout restore
+# and before `recover` starts the core services, so nextjs/newsfeed come up
+# on the restored bodies. Non-fatal like the install -- a failed revert must
+# not keep the restored release down -- but logged as an error because an
+# armed timer pointing at a missing script pages on every fire.
+revert_release_units() {
+  if ! sudo "$DEPLOY_ROOT_HELPER" revert-units; then
+    log_error "Unit revert reported a failure; units the failed release installed may still be armed"
   fi
 }
 

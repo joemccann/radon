@@ -165,6 +165,8 @@ else
 fi
 readonly RESTORED_STATE_FILE="${ACTIVE_STATE_FILE}.restored"
 readonly INVENTORY_FILE="${ACTIVE_STATE_FILE}.inventory"
+readonly UNITS_TRANSACTION_FILE="${STATE_DIR}/installed-units.transaction"
+readonly UNIT_BACKUP_PREFIX="${STATE_DIR}/unit-backup."
 readonly CONTROL_PLANE_MANIFEST="${CONTROL_PLANE_ROOT}/var/lib/radon/control-plane-manifest.sha256"
 readonly CONTROL_PLANE_READY="${CONTROL_PLANE_ROOT}/var/lib/radon/control-plane-ready"
 readonly GATEWAY_TRANSITION_FILE="${CONTROL_PLANE_ROOT}/var/lib/radon/ib-gateway-transition.json"
@@ -185,7 +187,7 @@ prepare_state_dir() {
 }
 
 if (( $# != 1 )); then
-  echo "usage: radon-deploy-root {stop-clean|restart-managed|recover|verify-restored|verify-control-plane|commit-transition|publish-caddy|install-units|sync-scheduled-units|refresh-control-plane|refresh-control-plane-privileged}" >&2
+  echo "usage: radon-deploy-root {stop-clean|restart-managed|recover|verify-restored|verify-control-plane|commit-transition|publish-caddy|install-units|revert-units|sync-scheduled-units|refresh-control-plane|refresh-control-plane-privileged}" >&2
   exit 64
 fi
 
@@ -532,6 +534,7 @@ resume_active_snapshot() {
 
 commit_transition() {
   verify_restored_state
+  close_unit_transaction
   "$RM" -f "$RESTORED_STATE_FILE" "$ACTIVE_STATE_FILE" "$INVENTORY_FILE"
   "$SYNC" -f "$(dirname "$ACTIVE_STATE_FILE")"
 }
@@ -683,6 +686,84 @@ unit_candidate_verifies() {
   return "$rc"
 }
 
+# T-104: install-units journals every unit it promotes so a rollback can put
+# /etc/systemd/system back exactly. install-units cannot re-run against the
+# restored SHA (it reads the GitHub main tip and refuses a HEAD behind it),
+# and a unit absent from the restored manifest would never be revisited, so a
+# Persistent=true timer enabled by a gate-failing deploy fired 203/EXEC
+# forever. commit-transition closes the journal; revert-units consumes it.
+begin_unit_transaction() {
+  "$RM" -f -- "${UNIT_BACKUP_PREFIX}"*
+  : > "$UNITS_TRANSACTION_FILE"
+  chmod 0600 "$UNITS_TRANSACTION_FILE"
+}
+
+record_unit_change() {
+  printf '%s\t%s\n' "$1" "$2" >> "$UNITS_TRANSACTION_FILE"
+  "$SYNC" -f "$UNITS_TRANSACTION_FILE"
+}
+
+close_unit_transaction() {
+  "$RM" -f -- "$UNITS_TRANSACTION_FILE" "${UNIT_BACKUP_PREFIX}"*
+}
+
+revert_installed_units() {
+  local verb unit target backup
+  local -a timers=() services=()
+  local restored=0 changed=0
+  local unit_re='^radon-[a-zA-Z0-9_.@-]+\.(service|timer)$'
+
+  [[ -f "$UNITS_TRANSACTION_FILE" ]] || {
+    printf 'revert-units: nothing to revert\n'
+    return 0
+  }
+  while IFS=$'\t' read -r verb unit; do
+    [[ "$unit" =~ $unit_re ]] || continue
+    case "$verb" in
+      installed)
+        if [[ "$unit" == *.timer ]]; then timers+=("$unit"); else services+=("$unit"); fi
+        ;;
+      updated)
+        backup="${UNIT_BACKUP_PREFIX}${unit}"
+        [[ -f "$backup" ]] || {
+          echo "revert-units: no saved body for ${unit}" >&2
+          continue
+        }
+        target="${SYSTEMD_UNIT_DIR}/${unit}"
+        mv -f -- "$backup" "$target" || return 73
+        chmod 0644 "$target"
+        "$SYNC" -f "$target"
+        restored=$((restored + 1))
+        changed=1
+        ;;
+    esac
+  done < "$UNITS_TRANSACTION_FILE"
+
+  # Timers first so a newly armed timer cannot re-queue the service it owns
+  # while that service is being stopped.
+  for unit in ${timers[@]+"${timers[@]}"}; do
+    systemctl_bounded disable --now "$unit" || true
+  done
+  for unit in ${services[@]+"${services[@]}"}; do
+    systemctl_bounded stop "$unit" || true
+  done
+  for unit in ${timers[@]+"${timers[@]}"} ${services[@]+"${services[@]}"}; do
+    "$RM" -f -- "${SYSTEMD_UNIT_DIR}/${unit}"
+    changed=1
+  done
+  if (( changed )); then
+    systemctl_bounded daemon-reload || return $?
+  fi
+  if (( ${#timers[@]} + ${#services[@]} > 0 )); then
+    # A removed unit that already failed 203/EXEC stays listed as failed
+    # after the reload; clearing it is what stops the pages.
+    systemctl_bounded reset-failed ${timers[@]+"${timers[@]}"} ${services[@]+"${services[@]}"} || true
+  fi
+  close_unit_transaction
+  printf 'revert-units: removed=%d restored=%d\n' \
+    $(( ${#timers[@]} + ${#services[@]} )) "$restored"
+}
+
 install_manifest_units() {
   local tip manifest line digest unit target candidate actual was_present backup
   local -a new_timers=() skipped=()
@@ -704,6 +785,7 @@ install_manifest_units() {
     echo "installed-units manifest is missing at main tip" >&2
     return 66
   }
+  begin_unit_transaction
 
   while IFS= read -r line || [[ -n "$line" ]]; do
     line="${line%%#*}"
@@ -781,12 +863,14 @@ install_manifest_units() {
       skipped+=("${unit} (promote-failed)")
       continue
     fi
-    [[ -n "$backup" ]] && "$RM" -f "$backup"
     "$SYNC" -f "$target"
     changed=1
     if (( was_present )); then
+      mv -f -- "$backup" "${UNIT_BACKUP_PREFIX}${unit}"
+      record_unit_change updated "$unit"
       updated=$((updated + 1))
     else
+      record_unit_change installed "$unit"
       installed=$((installed + 1))
       [[ "$unit" == *.timer ]] && new_timers+=("$unit")
     fi
@@ -1213,7 +1297,7 @@ terminate_root_action_group() {
 # unrelated deploy's in-flight restarts.
 action_queues_radon_jobs() {
   case "${1:-}" in
-    stop-clean|restart-managed|recover|install-units) return 0 ;;
+    stop-clean|restart-managed|recover|install-units|revert-units) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -1245,7 +1329,7 @@ root_action_timeout() {
       # allowlist or hash mismatch must not cancel an in-flight deploy.
       printf '%s\n' "$ROOT_MUTATION_ACTION_TIMEOUT"
       ;;
-    install-units)
+    install-units|revert-units)
       printf '%s\n' "$ROOT_MUTATION_ACTION_TIMEOUT"
       ;;
     refresh-control-plane|refresh-control-plane-privileged)
@@ -1349,6 +1433,9 @@ case "$1" in
     ;;
   install-units)
     install_manifest_units
+    ;;
+  revert-units)
+    revert_installed_units
     ;;
   sync-scheduled-units)
     sync_scheduled_units

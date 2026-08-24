@@ -115,11 +115,13 @@ class Sandbox:
             ["git", "-C", str(self.repo), "rev-parse", "HEAD"], text=True
         ).strip()
 
-    def run(self, *, commit: bool = True) -> subprocess.CompletedProcess[str]:
+    def run(
+        self, *, commit: bool = True, action: str = "install-units"
+    ) -> subprocess.CompletedProcess[str]:
         if commit:
             self.commit()
         return subprocess.run(
-            ["bash", str(ROOT_HELPER), "install-units"],
+            ["bash", str(ROOT_HELPER), action],
             env=self.env,
             capture_output=True,
             text=True,
@@ -510,3 +512,164 @@ def test_a_good_unit_still_installs_when_verify_is_available(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
     assert (box.unit_dir / "radon-credit-spread.timer").read_text() == TIMER_BODY
     assert "installed=1" in result.stdout
+
+
+# --- T-104: a gate-failing deploy has already installed and `enable --now`ed
+# the target release's timers. Rollback restores the previous checkout but
+# nothing reverted /etc/systemd/system, so a Persistent=true timer kept firing
+# a script that no longer existed (203/EXEC forever). install-units cannot be
+# re-run against the restored SHA (it reads the GitHub main tip and refuses a
+# HEAD behind it), so the helper journals what it changed and `revert-units`
+# undoes exactly that.
+
+import sys
+
+JOURNAL_HELPER = ROOT / "scripts" / "deploy-journal.py"
+ROLLBACK_ARTIFACTS = ("node_modules", "web/node_modules", "web/.next", "web/.env", ".venv")
+
+
+def _write_release_artifacts(root: pathlib.Path, label: str) -> None:
+    for relative in ROLLBACK_ARTIFACTS:
+        path = root / relative
+        if relative == "web/.env":
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(label, encoding="utf-8")
+        elif relative == ".venv":
+            executable = path / "bin" / "python"
+            executable.parent.mkdir(parents=True, exist_ok=True)
+            executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            executable.chmod(0o755)
+        else:
+            path.mkdir(parents=True, exist_ok=True)
+
+
+def test_failed_gate_rollback_reverts_units_after_restoring_the_previous_release(tmp_path):
+    """The revert has to follow the checkout restore (the restored release is
+    what the units must match) and precede `recover` (nextjs/newsfeed bodies
+    are read when the core services start)."""
+    live = tmp_path / "live"
+    releases = tmp_path / "releases"
+    stage = releases / "stage.target"
+    backup = releases / "backup.previous"
+    stage.mkdir(parents=True)
+    backup.mkdir()
+    _write_release_artifacts(live, "target")
+    _write_release_artifacts(stage, "staged")
+    _write_release_artifacts(backup, "previous")
+    journal = tmp_path / "transition.json"
+    requested = "2" * 40
+    previous = "1" * 40
+    subprocess.run(
+        [sys.executable, str(JOURNAL_HELPER), "write", str(journal), requested,
+         previous, str(stage), str(backup), "target_unverified"],
+        check=True,
+    )
+    calls = tmp_path / "calls"
+    shell = f"""
+set -euo pipefail
+source {DEPLOY!s}
+sudo() {{ printf '%s\\n' "$*" >> {calls!s}; }}
+git() {{
+  [[ "$*" == *"reset --hard"* ]] && printf 'git reset --hard\\n' >> {calls!s}
+  return 0
+}}
+check_units_active() {{ return 0; }}
+sleep() {{ return 0; }}
+gate_calls=0
+deploy_gate() {{ gate_calls=$((gate_calls + 1)); (( gate_calls > 1 )); }}
+if ! deploy_gate; then rollback {previous}; fi
+"""
+    result = subprocess.run(
+        ["bash", "-c", shell],
+        env={
+            **os.environ,
+            "RADON_DEPLOY_ROOT_HELPER": "/fixed/root-helper",
+            "RADON_DIR": str(live),
+            "RADON_CLOUD_DIR": str(ROOT),
+            "RADON_RELEASES_DIR": str(releases),
+            "RADON_DEPLOY_TRANSITION_JOURNAL": str(journal),
+            "RADON_DEPLOY_JOURNAL_PYTHON": sys.executable,
+            "RADON_SYSTEM_PYTHON": sys.executable,
+        },
+        capture_output=True,
+        text=True,
+    )
+    combined = result.stdout + result.stderr
+    assert result.returncode == 1, combined
+    assert "Rollback complete" in combined
+    lines = calls.read_text(encoding="utf-8").splitlines()
+    assert "/fixed/root-helper revert-units" in lines, lines
+    restore_idx = lines.index("git reset --hard")
+    revert_idx = lines.index("/fixed/root-helper revert-units")
+    recover_idx = lines.index("/fixed/root-helper recover")
+    assert lines.index("/fixed/root-helper stop-clean") < restore_idx < revert_idx < recover_idx, lines
+
+
+def test_revert_units_disables_and_removes_new_units_and_restores_updated_bodies(tmp_path):
+    box = Sandbox(tmp_path)
+    box.source("radon-credit-spread.service", SERVICE_BODY)
+    box.source("radon-credit-spread.timer", TIMER_BODY)
+    updated_timer = TIMER_BODY.replace("daily", "*-*-* 21:45:00 UTC")
+    box.source("radon-iei-hyg.timer", updated_timer)
+    box.installed("radon-iei-hyg.timer", TIMER_BODY)
+    installed = box.run()
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    assert (box.unit_dir / "radon-iei-hyg.timer").read_text() == updated_timer
+    install_calls = len(box.systemctl_calls())
+
+    result = box.run(commit=False, action="revert-units")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not (box.unit_dir / "radon-credit-spread.timer").exists()
+    assert not (box.unit_dir / "radon-credit-spread.service").exists()
+    assert (box.unit_dir / "radon-iei-hyg.timer").read_text() == TIMER_BODY
+    assert (box.unit_dir / "radon-iei-hyg.timer").stat().st_mode & 0o777 == 0o644
+    assert [p.name for p in box.unit_dir.iterdir()] == ["radon-iei-hyg.timer"]
+    calls = box.systemctl_calls()[install_calls:]
+    assert calls == [
+        "disable --now radon-credit-spread.timer",
+        "stop radon-credit-spread.service",
+        "daemon-reload",
+        "reset-failed radon-credit-spread.timer radon-credit-spread.service",
+    ], calls
+    assert "removed=2 restored=1" in result.stdout
+
+
+def test_revert_units_is_a_no_op_without_a_pending_install(tmp_path):
+    box = Sandbox(tmp_path)
+    box.installed("radon-iei-hyg.timer", TIMER_BODY)
+
+    result = box.run(commit=False, action="revert-units")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (box.unit_dir / "radon-iei-hyg.timer").read_text() == TIMER_BODY
+    assert box.systemctl_calls() == []
+    assert "nothing to revert" in result.stdout
+
+
+def test_committed_install_is_not_reverted_by_a_later_rollback(tmp_path):
+    """commit-transition closes the install transaction: a later deploy that
+    fails before its own install-units must not strip the green release's
+    timers."""
+    box = Sandbox(tmp_path)
+    box.source("radon-credit-spread.timer", TIMER_BODY)
+    installed = box.run()
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    committed = box.run(commit=False, action="commit-transition")
+    assert committed.returncode == 0, committed.stdout + committed.stderr
+    install_calls = len(box.systemctl_calls())
+
+    result = box.run(commit=False, action="revert-units")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (box.unit_dir / "radon-credit-spread.timer").read_text() == TIMER_BODY
+    assert box.systemctl_calls()[install_calls:] == []
+
+
+def test_revert_units_is_an_exact_sudo_grant_with_a_mutation_deadline():
+    sudoers = (ROOT / "config" / "sudoers.d" / "radon-deploy").read_text(encoding="utf-8")
+    assert "/usr/local/sbin/radon-deploy-root revert-units" in sudoers
+    helper = ROOT_HELPER.read_text(encoding="utf-8")
+    assert "revert-units)" in helper
+    recover = DEPLOY.read_text(encoding="utf-8")
+    assert "revert-units" in recover

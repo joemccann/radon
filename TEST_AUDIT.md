@@ -2465,6 +2465,7 @@ renumbered from T-097. The first pass's audit text, ledger line and
 - **T-100 DONE.** Flex 1025 embargo is now token-wide and durable: `service_health` row read back when the sidecar is missing, unwritable sidecar still arms via the row, `record_lockout` raises when neither sink lands. Three AC reds reproduced; green across 17 files. Pre-existing `hrana_execute`-for-SELECT bug in the monitor handler noted for the next audit.
 - **T-106 DONE.** Vol-cone payload carries `intraday_count`; the panel labels a partial live pass honestly and marks un-refreshed rows AS OF their own last session. Red `KeyError: 'intraday_count'` / `LIVE 1/2 NAMES` not found; green after.
 - **T-109 DONE.** GARCH and LEAP preset scans now honour the UW universe-scan brake with the theta harvester's degraded-telemetry row; the shell-default grep is a resolved-ticker-count guard (1666 ceiling; `indexes` at 2600 reds it). Five reds reproduced, green across nine files.
+- **T-104 DONE (deploy control-plane change - needs operator eye).** Rollback now reverts exactly the units the failed release promoted via a helper-side transaction journal (`revert-units`); the restore branch call sequence is pinned. Red `'revert-units' in [...]` on a gate-failing deploy; green 24 in `test_install_units.py`, cloud FAILED list unchanged. Control-plane sources changed: root bootstrap run required before the first deploy.
 
 ## 11 · Audit ledger
 
