@@ -46,6 +46,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 from api.ib_pool import IBPool
 from api import db_http
+from db.service_health_sql import SERVICE_HEALTH_UPSERT_SQL, service_health_upsert_args
 from api.demo_scan import demo_disabled_payload, demo_scan_response
 from api.subprocess import run_script, run_module, run_script_raw, ScriptResult
 from api.ib_gateway import (
@@ -425,6 +426,39 @@ async def _ib_recovery_heartbeat_loop(interval: float = IB_HEARTBEAT_INTERVAL_SE
 
 
 ORDERS_SYNC_INTERVAL_SECS = 5 * 60  # 5 min — comfortably under the 10-min watchdog window
+# Same class as flow-refresh-capacity-502 / R-170: general-lane cap is 3,
+# scan storms pin it, ib_orders.py is not on the reserved order lane.
+ORDERS_SYNC_SHED_RETRIES = 2
+ORDERS_SYNC_SHED_RETRY_DELAY_SECS = 8.0
+_CAPACITY_SHED_MARKER = "subprocess capacity exhausted"
+
+
+def _is_capacity_shed(error: Optional[str]) -> bool:
+    return bool(error) and _CAPACITY_SHED_MARKER in error.lower()
+
+
+async def _heartbeat_orders_sync_skip(reason: str) -> None:
+    """Keep the orders-sync row fresh when this tick cannot spawn ib_orders.py.
+
+    Capacity shed is R-170: the general lane is full, not a writer fault.
+    Without this, two consecutive 5-min sheds trip the 10-min stale window
+    (2026-08-24 19:30Z page 60096761, 19m silent while IB stayed up).
+    """
+    try:
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        await asyncio.to_thread(
+            db_http.hrana_execute,
+            SERVICE_HEALTH_UPSERT_SQL,
+            service_health_upsert_args(
+                "orders-sync",
+                "ok",
+                started_at=now,
+                finished_at=now,
+                error=None,
+            ),
+        )
+    except Exception:
+        logger.exception("orders-sync loop: skip heartbeat failed (%s)", reason)
 
 
 async def _orders_sync_tick() -> None:
@@ -454,10 +488,31 @@ async def _orders_sync_tick() -> None:
         return
     logger.info("orders-sync loop: running ib_orders.py --sync")
     outcome = await _coordinated_orders_sync()
+    attempts = 0
+    while (
+        not outcome.ok
+        and _is_capacity_shed(outcome.error)
+        and attempts < ORDERS_SYNC_SHED_RETRIES
+    ):
+        attempts += 1
+        logger.info(
+            "orders-sync loop: capacity shed — retry %d/%d in %.0fs",
+            attempts,
+            ORDERS_SYNC_SHED_RETRIES,
+            ORDERS_SYNC_SHED_RETRY_DELAY_SECS,
+        )
+        await asyncio.sleep(ORDERS_SYNC_SHED_RETRY_DELAY_SECS)
+        outcome = await _coordinated_orders_sync()
     if outcome.ok:
         logger.info("orders-sync loop: sync complete")
-    else:
-        logger.warning("orders-sync loop: sync failed: %s", outcome.error)
+        return
+    if _is_capacity_shed(outcome.error):
+        logger.warning(
+            "orders-sync loop: sync shed for subprocess capacity; next tick retries"
+        )
+        await _heartbeat_orders_sync_skip("subprocess capacity exhausted")
+        return
+    logger.warning("orders-sync loop: sync failed: %s", outcome.error)
 
 
 async def _orders_sync_loop(interval: float = ORDERS_SYNC_INTERVAL_SECS) -> None:

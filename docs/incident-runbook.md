@@ -680,6 +680,44 @@ all three flow-tab POSTs hit the FastAPI subprocess slot cap.** Peak:
 
 ---
 
+## orders-sync-capacity-shed-stale
+
+**Autonomous `orders-sync` loop pages P1 `kind=stale` during RTH when
+`ib_orders.py` is refused by the general subprocess lane and never
+heartbeats.** Peak: 2026-08-24 19:30Z, page `60096761…`, 19m silent
+(window 10m) while market open.
+
+- **Mechanism:** FastAPI's 5-min `_orders_sync_loop` spawns
+  `ib_orders.py --sync` (general lane, cap 3). Scan storms (gex, vcg,
+  cri, breadth, portfolio-sync) pin all 3 slots. The tick logs
+  `Subprocess capacity exhausted` and returns; `service_cycle` lives
+  inside the unspawned script, so `updated_at` freezes. Two consecutive
+  sheds trip the 10-min stale window. `/health/lite` stays 200 /
+  authenticated. `ib_orders.py` is not on the reserved order lane
+  (R-048 is kill-switch / place / manage / cancel only).
+- **Discriminating check:** radon-api journal
+  `orders-sync loop: running ib_orders.py --sync` then
+  `Subprocess capacity exhausted for ib_orders.py (3 active, lane cap 3,
+  hard cap 4)` at 5-min cadence; `service_health.orders-sync` `state=ok`
+  with `updated_at` older than 10m; `/health/lite` authenticated;
+  fill-monitor / portfolio-sync / relay still fresh. Grouped IB 2FA /
+  unreachable is a different class. Deploy stop-clean is
+  `Result=signal` on units, not this loop.
+- **Remediation (code):** retry capacity shed
+  (`ORDERS_SYNC_SHED_RETRIES=2`, `ORDERS_SYNC_SHED_RETRY_DELAY_SECS=8`).
+  Persistent shed heartbeats `ok` over `api.db_http` (R-170: lane full
+  is not a writer fault) so `_check_stale` cannot page; the next 5-min
+  tick retries the sync. Real IB/script misses still do not stamp ok.
+  Do not put `ib_orders.py` on the reserved order lane.
+- **Regression:**
+  `test_orders_sync_loop.py::test_orders_sync_tick_retries_capacity_shed_then_succeeds`,
+  `test_orders_sync_tick_persistent_capacity_shed_heartbeats_ok`,
+  `test_orders_sync_tick_real_failure_does_not_skip_heartbeat`.
+- **Code:** `scripts/api/server.py` (`_orders_sync_tick`,
+  `_heartbeat_orders_sync_skip`).
+
+---
+
 ## service-health-degraded / service-down (generic cases)
 
 `service-health-degraded`: `/api/service-health` body lists failing rows (error,
