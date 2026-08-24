@@ -42,7 +42,7 @@ const MIDDLEWARE_PERIMETER_ONLY_ROUTES = [
   "equibles-filing-forensics", "equibles-short-crowding",
   "equibles-smart-money-13f",
   "flex-token", "flow-surprise", "futures-quote", "garch-convergence",
-  "garch-convergence/scan", "hyad", "ib/ws-ticket", "index-quote",
+  "garch-convergence/scan", "hhlev", "hyad", "ib/ws-ticket", "index-quote",
   "informed-flow/[ticker]", "ivrank", "llm-token-index", "margin-debt", "prices",
   "profile", "risk-free-rate", "skew", "skew2d", "straddle", "vixcor",
   "vol-cone", "watchlist", "watchlist/[symbol]", "workflow", "yield-curve",
