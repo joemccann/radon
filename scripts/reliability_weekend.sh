@@ -42,8 +42,23 @@ acquire_runner_lock() {
 
 release_runner_lock() { rm -rf -- "$1"; }
 
-# `source reliability_weekend.sh --lock-lib-only` exposes the two helpers
-# above to the contract test without running a weekend.
+# The 00:00 fetch is the cycle's single point of failure: 2026-08-23 one run
+# died here on a port-22 blackhole (NordVPN) before the agent started.
+# Bounded so a genuinely dead uplink still surfaces within minutes.
+FETCH_ATTEMPTS="${RADON_WEEKEND_FETCH_ATTEMPTS:-3}"
+FETCH_PAUSE_SECS="${RADON_WEEKEND_FETCH_PAUSE_SECS:-60}"
+fetch_origin_with_retry() {
+  local attempt
+  for (( attempt = 1; attempt <= FETCH_ATTEMPTS; attempt++ )); do
+    git fetch origin --quiet && return 0
+    echo "[weekend] git fetch origin failed — attempt $attempt/$FETCH_ATTEMPTS" >&2
+    if (( attempt < FETCH_ATTEMPTS )); then sleep "$FETCH_PAUSE_SECS"; fi
+  done
+  return 1
+}
+
+# `source reliability_weekend.sh --lock-lib-only` exposes the helpers
+# above to the contract tests without running a weekend.
 [[ "${1:-}" == "--lock-lib-only" ]] && return 0 2>/dev/null
 
 MODE="${1:?usage: reliability_weekend.sh audit|remediate|cycle}"
@@ -169,7 +184,7 @@ on_crash() {
 # Fresh ground truth. Any leftover state from a killed prior run is
 # discarded — the branch/PR on GitHub is the durable state.
 ground_truth() {
-  git fetch origin --quiet
+  fetch_origin_with_retry
   git checkout -f --quiet main
   git reset --hard --quiet origin/main
   git clean -fdq --exclude=.radon-weekend-runner --exclude=.weekend-runner.lock --exclude=logs/ --exclude=.env --exclude=.env.ib-mode --exclude=web/.env

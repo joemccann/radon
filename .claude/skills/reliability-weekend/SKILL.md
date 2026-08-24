@@ -298,3 +298,11 @@ how this loop improves as the codebase grows.
   watchdog POLLS, not whether the writer is RTH-only, so it needed a separate
   `OPEN_BELL_GRACE_SERVICES` rather than a bucket move that would have
   silently changed the check cadence too.
+- 2026-08-24 (runner): the 2026-08-23 remediate fire died in `ground_truth`
+  on `ssh: connect to host github.com port 22` (NordVPN blackholes 22) with
+  no dead-man comment, and the new daily plist was never installed, so the
+  00:00 cycle silently did not fire. `fetch_origin_with_retry` bounds the
+  fetch (3 x 60 s); the runner's `~/.ssh/config` routes `github.com` via
+  `ssh.github.com:443`; the plist PATH carries `~/.bun/bin`. After any
+  loop change, run `setup_reliability_weekend.sh` and confirm
+  `launchctl list | grep reliability-daily`.
