@@ -10,6 +10,16 @@ REPO = CLOUD.parent
 SERVICES = CLOUD / "services"
 DEPLOY = CLOUD / "scripts" / "deploy.sh"
 DROPIN = CLOUD / "services" / "radon-.service.d" / "runtime-container.conf.example"
+UNIT_DROPINS = tuple(
+    CLOUD / "services" / f"{name}.d" / "runtime-container.conf.example"
+    for name in (
+        "radon-api.service",
+        "radon-nextjs.service",
+        "radon-relay.service",
+        "radon-monitor.service",
+        "radon-newsfeed.service",
+    )
+)
 BOOTSTRAP = CLOUD / "scripts" / "bootstrap-control-plane.sh"
 SETUP = CLOUD / "scripts" / "setup-vps.sh"
 
@@ -47,10 +57,11 @@ def test_deploy_sh_never_docker_pulls() -> None:
 
 
 def test_container_dropin_is_not_a_live_unit() -> None:
-    text = DROPIN.read_text(encoding="utf-8")
-    for line in text.splitlines():
-        if line.strip():
-            assert line.lstrip().startswith("#")
+    for path in (DROPIN, *UNIT_DROPINS):
+        text = path.read_text(encoding="utf-8")
+        for line in text.splitlines():
+            if line.strip():
+                assert line.lstrip().startswith("#"), path.name
     bootstrap = BOOTSTRAP.read_text(encoding="utf-8")
     assert "runtime-container.conf.example" not in bootstrap
     setup = SETUP.read_text(encoding="utf-8")

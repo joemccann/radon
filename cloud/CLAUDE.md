@@ -31,11 +31,15 @@ Production is three planes. Do not collapse them.
   `/usr/local/sbin/radon-deploy-root`, `/usr/local/bin/radon-ib-gateway-control`.
 - **Broker plane** (already Docker): digest-pinned IB Gateway in
   `cloud/docker-compose.yml`. This is the only production container.
-- **App plane** (host today, images later): Next.js, FastAPI, relay,
+- **App plane** (host default, images optional): Next.js, FastAPI, relay,
   monitor, newsfeed, and timer-owned oneshots. Default `RADON_RUNTIME=host`.
-  `docker/app` Dockerfiles are scaffolding only; they are not production
-  runtime and CI deploy does not build them. App-plane images must not own
-  Gateway, Caddy, health, or `docker.sock`.
+  Images live in `docker/app`. Production ExecStart stays host binaries
+  until per-unit `runtime-container.conf` drop-ins are installed. The
+  root wrapper is `/usr/local/sbin/radon-app-runtime` (`pull` via sudoers;
+  `run` is systemd-only and does not take the deploy lock). Do not put
+  `User=radon` on `docker run`. App-plane images must not own Gateway,
+  Caddy, health, or the Docker engine socket. Image builds are a separate
+  workflow, not a `ci.yml` deploy `needs`.
 
 After `radon-deploy-root refresh-control-plane` is installed (helper +
 sudoers), a unit-only push does not need root SSH. The SHA that *adds*
@@ -186,9 +190,10 @@ Immutable runners under `~/.radon-deploy-runners/` are extracted `a-w`.
 - Compose interpolation and service `env_file` both receive the explicit
   external env path through `RADON_COMPOSE_ENV_FILE` (compatibility file:
   `/home/radon/radon-cloud/.env`).
-- `docker/app` images are not production runtime yet. Default remains
-  host binaries (`RADON_RUNTIME=host`). Do not add an image-build job to
-  CI deploy `needs`.
+- `docker/app` images are not production runtime until the per-unit
+  drop-ins are installed. Default remains host binaries
+  (`RADON_RUNTIME=host`). `.github/workflows/app-images.yml` builds
+  images and is not a `ci.yml` deploy `needs`.
 - `web/.env` contains only `NEXT_PUBLIC_*` build values and is mode `0600`.
   Never copy the complete production env into the web tree.
 - Setup validates the stable env before dependency installation or builds.

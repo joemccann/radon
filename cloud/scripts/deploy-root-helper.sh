@@ -16,6 +16,7 @@ readonly -a CONTROL_PLANE_SOURCES=(
   scripts/ib-gateway-control.sh
   scripts/operator-radon.sh
   scripts/drift_audit.py
+  scripts/radon-app-runtime.sh
   config/sudoers.d/radon-deploy
   config/sudoers.d/radon-monitor
   config/sudoers.d/radon-ops
@@ -45,6 +46,7 @@ readonly -a CONTROL_PLANE_TARGETS=(
   /usr/local/bin/radon-ib-gateway-control
   /usr/local/bin/radon
   /usr/local/lib/radon/drift_audit.py
+  /usr/local/sbin/radon-app-runtime
   /etc/sudoers.d/radon-deploy
   /etc/sudoers.d/radon-monitor
   /etc/sudoers.d/radon-ops
@@ -70,7 +72,7 @@ readonly -a CONTROL_PLANE_TARGETS=(
   /etc/systemd/system/radon-nextjs-db-watchdog.timer
 )
 readonly -a CONTROL_PLANE_MODES=(
-  755 755 755 644
+  755 755 755 644 755
   440 440 440 440
   644
   644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644

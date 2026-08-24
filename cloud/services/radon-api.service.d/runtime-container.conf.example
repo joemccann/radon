@@ -1,0 +1,11 @@
+# Example only. MUST NOT be installed by setup-vps.sh or
+# bootstrap-control-plane.sh. Default runtime remains host binaries.
+#
+# After hours, copy to /etc/systemd/system/radon-api.service.d/runtime-container.conf
+#
+# [Service]
+# User=root
+# NotifyAccess=all
+# Environment=RADON_RUNTIME=container
+# ExecStart=
+# ExecStart=/usr/local/sbin/radon-app-runtime run %n
