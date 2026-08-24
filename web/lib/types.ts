@@ -280,6 +280,10 @@ export type ExecutedOrder = {
   avgPrice: number | null;
   commission: number | null;
   realizedPNL: number | null;
+  /** IB's commission-report figure when `realizedPNL` was replaced by the
+   *  journal average-cost value (`realizedPNLSource === "journal"`). */
+  ibRealizedPNL?: number | null;
+  realizedPNLSource?: "journal" | "ib";
   time: string;
   exchange: string;
 };
