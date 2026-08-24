@@ -112,6 +112,7 @@ readonly -a SOURCES=(
   scripts/ib-gateway-control.sh
   scripts/operator-radon.sh
   scripts/drift_audit.py
+  scripts/radon-app-runtime.sh
   config/sudoers.d/radon-deploy
   config/sudoers.d/radon-monitor
   config/sudoers.d/radon-ops
@@ -141,6 +142,7 @@ readonly -a LOGICAL_TARGETS=(
   /usr/local/bin/radon-ib-gateway-control
   /usr/local/bin/radon
   /usr/local/lib/radon/drift_audit.py
+  /usr/local/sbin/radon-app-runtime
   /etc/sudoers.d/radon-deploy
   /etc/sudoers.d/radon-monitor
   /etc/sudoers.d/radon-ops
@@ -166,14 +168,14 @@ readonly -a LOGICAL_TARGETS=(
   /etc/systemd/system/radon-nextjs-db-watchdog.timer
 )
 readonly -a MODES=(
-  0755 0755 0755 0644
+  0755 0755 0755 0644 0755
   0440 0440 0440 0440
   0644
   0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644
   0644 0644 0644
 )
 readonly -a KINDS=(
-  shell shell shell python
+  shell shell shell python shell
   sudoers sudoers sudoers sudoers
   polkit
   systemd systemd systemd systemd systemd systemd systemd systemd systemd

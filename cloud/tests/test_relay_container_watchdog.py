@@ -17,7 +17,10 @@ from pathlib import Path
 CLOUD = Path(__file__).resolve().parents[1]
 REPO = CLOUD.parent
 RELAY_UNIT = CLOUD / "services" / "radon-relay.service"
-DROPIN = CLOUD / "services" / "radon-.service.d" / "runtime-container.conf.example"
+DROPIN = (
+    CLOUD / "services" / "radon-relay.service.d" / "runtime-container.conf.example"
+)
+RUNTIME = CLOUD / "scripts" / "radon-app-runtime.sh"
 RELAY_JS = REPO / "scripts" / "ib_realtime_server.js"
 
 WATCHDOG_SEC = 0.25
@@ -115,9 +118,13 @@ def test_relay_source_pings_watchdog_when_socket_present() -> None:
 
 
 def test_container_dropin_forwards_notify_socket() -> None:
-    text = DROPIN.read_text(encoding="utf-8")
-    assert "NOTIFY_SOCKET" in text
-    assert "WATCHDOG_USEC" in text
-    assert "docker.sock" not in text
-    assert "--network host" in text
-    assert "ghcr.io" not in text or "IMAGE" in text
+    dropin = DROPIN.read_text(encoding="utf-8")
+    runtime = RUNTIME.read_text(encoding="utf-8")
+    assert "NotifyAccess=all" in dropin
+    assert "radon-app-runtime run %n" in dropin
+    assert "docker.sock" not in dropin
+    assert "docker.sock" not in runtime
+    assert "NOTIFY_SOCKET" in runtime
+    assert "WATCHDOG_USEC" in runtime
+    assert "--network host" in runtime
+    assert "--cgroupns" in runtime

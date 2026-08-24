@@ -90,6 +90,39 @@
 
 ---
 
+# Task: P3 app-plane images (2026-08-24)
+
+## Dependency graph
+
+- P3A depends_on: [] - Red tests: runtime wrapper, per-unit drop-ins, Dockerfiles, sudoers pull, non-gating CI
+- P3B depends_on: [P3A] - Green: buildable python/node images, radon-app-runtime, bootstrap artifact, host default
+- P3C depends_on: [P3B] - Docs. Do not merge to main until after 16:00 ET. Do not install drop-ins until after hours.
+
+## Checklist
+
+- [x] P3A Red tests
+- [x] P3B Wrapper + images + sudoers pull + bootstrap artifact + app-images.yml
+- [x] P3C Docs. Branch only; no main push; no live ExecStart docker; no Gateway restart
+
+## Constraints
+
+- Live units stay host ExecStart until after-hours per-unit drop-in.
+- radon is not in group docker. run is root wrapper, not User=radon docker.
+- Wrapper must not take the deploy lock.
+- Do not mount docker.sock. Do not own Gateway, Caddy, health.
+- Image job is not a deploy `needs`.
+- First SHA that adds the wrapper/sudoers still needs one root bootstrap.
+
+## Review
+
+- Red then green: `cloud/tests` 1059 passed / 4 skipped / 166.35s.
+- Wrapper `radon-app-runtime`: `pull` sudoers-exact; `run` allowlisted 5 units; host net; `--user` radon; notify bind; cgroup parent; no engine socket; no deploy lock; refuses Gateway/health/Caddy.
+- Live `ExecStart` still host binaries. Per-unit examples commented, not installed. Fleet example documents the Gateway/health trap.
+- `app-images.yml` is not in `ci.yml` deploy `needs`. `deploy.sh` still refuses non-host `RADON_RUNTIME`.
+- Not merged to main (market open). After 16:00 ET: merge, bootstrap, `radon-app-runtime pull`, then install drop-ins + `restart-managed`. Gateway CID unchanged.
+
+---
+
 # Task: VPS bulletproof sequence (2026-08-23)
 
 ## Dependency graph
