@@ -113,6 +113,8 @@ class TestNodeImage:
         assert "bun install --frozen-lockfile" in text
         assert "bun run build" in text
         assert "playwright" in text.lower()
+        assert "bunx" not in text
+        assert "bun x playwright" in text
         assert "next start" in text or '"next", "start"' in text or "npm run start" in text
 
     def test_user_radon_is_final(self) -> None:

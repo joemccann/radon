@@ -60,7 +60,7 @@ ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY \
 
 RUN bun run build \
     && mkdir -p /ms-playwright \
-    && bunx playwright install chromium chromium-headless-shell \
+    && bun x playwright install chromium chromium-headless-shell \
     && chown -R radon:radon /home/radon/radon /ms-playwright
 
 USER radon
