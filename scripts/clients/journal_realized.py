@@ -82,6 +82,25 @@ def journal_realized_pnl_for_fills(
     return realized_pnl_by_exec_id(rows)
 
 
+def overlay_journal_realized_pnl(db, fills: Sequence[dict[str, Any]]) -> None:
+    """Write-time overlay for the ``executed_orders`` writers.
+
+    ``db`` is a libsql connection (``execute(...).fetchall()``). Best-effort:
+    a journal read failure leaves IB's figures untouched so the sync itself
+    never fails on the overlay.
+    """
+    if not fills:
+        return
+    try:
+        realized = journal_realized_pnl_for_fills(
+            lambda sql, args: db.execute(sql, args).fetchall(), fills
+        )
+    except Exception as exc:  # noqa: BLE001 — overlay is advisory
+        logger.warning("journal_realized: overlay skipped: %s", exc)
+        return
+    apply_journal_realized_pnl(fills, realized)
+
+
 def apply_journal_realized_pnl(
     fills: Sequence[dict[str, Any]], realized: dict[str, float]
 ) -> None:
