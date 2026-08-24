@@ -2446,6 +2446,7 @@ renumbered from T-097. The first pass's audit text, ledger line and
   strangle clearing it, a lowered cap refusing the same order, the cap±1
   boundary, and env clamping at the $50M ceiling. Red 3/4 before the change;
   `test_order_limits.py` 33 green, `scripts/tests` 6229 green after.
+- **T-081 DONE.** `load_flows_from_turso` (`scripts/perf_twr_builder.py`) buckets rows by `flow_type`: classified rows win per date over the builder's `external` mirror (`_MIRRORED_FLOW_TYPE`, reused by `_external_flow_rows`). New `TestLoadFlowsFromTursoCountsAMirroredRowOnce` (3 tests, real sqlite with 0035 applied, only `get_db` stubbed) in `tests/test_perf_twr_flows_turso_fallback.py`. Red 160014.26 for an 80007.13 deposit; green after. 210 perf-TWR tests green.
 
 ## 11 · Audit ledger
 

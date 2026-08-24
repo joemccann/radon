@@ -82,3 +82,9 @@ Darwin cloud baseline on THIS host is 34, not the first pass's 12: no bash >= 4
 `FAILED` lists byte-identical. 24 additional findings filed (T-097…T-120);
 8 converged with the first pass and were dropped. See `TEST_AUDIT.md`
 `## Delta audit 2026-08-22 (second pass)`.
+
+## Remediation 2026-08-23 (remediate mode)
+
+| Task | Status | Commit | Evidence |
+|---|---|---|---|
+| T-081 | DONE | (this commit) | `load_flows_from_turso` now selects `flow_type` and lets classified `deposit|withdrawal|acats` rows take precedence over the builder-mirrored `external` row for the same date. Red: real sqlite + migration 0035, deposit + external row on 2026-01-13 at 80007.13 → `{'2026-01-13': 160014.26}`. Green: 80007.13; `tests/test_perf_twr*.py` + `test_portfolio_performance.py` 210 passed. |
