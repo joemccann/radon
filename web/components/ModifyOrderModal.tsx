@@ -397,6 +397,7 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, op
         workingSellUnits: workingSellComboUnits(
           comboUnderlyingSymbol(order),
           openOrders,
+          { permId: order.permId, orderId: order.orderId },
         ),
       });
       if (closingCombo) {

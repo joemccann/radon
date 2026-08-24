@@ -135,6 +135,18 @@ describe("the working-SELL tally reads the open-orders snapshot", () => {
     expect(workingSellComboUnits("AAPL", orders)).toBe(0);
   });
 
+  it("excludes the order being modified so a full-size modify still reads as a close", async () => {
+    const { workingSellComboUnits } = await import("../lib/order/positionTrade");
+    const modifying = { ...workingSell(250), orderId: 42, permId: 9001 };
+    const other = { ...workingSell(3), orderId: 43, permId: 9002 };
+    expect(
+      workingSellComboUnits("AAPL", { open_orders: [modifying, other] } as never, { permId: 9001 }),
+    ).toBe(3);
+    expect(
+      workingSellComboUnits("AAPL", { open_orders: [modifying, other] } as never, { orderId: 42 }),
+    ).toBe(3);
+  });
+
   it("is zero for a missing snapshot", async () => {
     const { workingSellComboUnits } = await import("../lib/order/positionTrade");
     expect(workingSellComboUnits("AAPL", null)).toBe(0);
