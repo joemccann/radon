@@ -10,7 +10,7 @@ stays append-only.
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .classify import CASE_PROBES
@@ -18,6 +18,48 @@ from .classify import CASE_PROBES
 SCHEMA = "radon.incident/1"
 RUNBOOK = "docs/incident-runbook.md"
 PLAYBOOK = ".claude/skills/incident-response/SKILL.md"
+
+
+# R-178: data/incidents/ had no retention, and `_open_incidents` re-globs and
+# JSON-parses EVERY incident ever written on all 288 cycles a day (status is
+# only known after the parse). The horizon is generous — an incident is a
+# forensic record — but it is finite.
+RESOLVED_RETENTION_DAYS = 90
+
+
+def prune_resolved(directory: Path, *, now: datetime) -> int:
+    """Delete resolved incidents older than the retention horizon.
+
+    Fails safe in every ambiguous case: an unparseable file, an incident that
+    is not resolved, and a resolved incident with no usable `resolved_at` are
+    all left exactly where they are.
+    """
+    cutoff = now - timedelta(days=RESOLVED_RETENTION_DAYS)
+    removed = 0
+    for path in sorted(directory.glob("incident-*.json")):
+        try:
+            payload = json.loads(path.read_text())
+        except (ValueError, OSError):
+            continue
+        if payload.get("status") != "resolved":
+            continue
+        raw = payload.get("resolved_at")
+        if not isinstance(raw, str) or not raw:
+            continue
+        try:
+            resolved_at = datetime.fromisoformat(raw)
+        except ValueError:
+            continue
+        if resolved_at.tzinfo is None:
+            resolved_at = resolved_at.replace(tzinfo=timezone.utc)
+        if resolved_at >= cutoff:
+            continue
+        try:
+            path.unlink()
+        except OSError:
+            continue
+        removed += 1
+    return removed
 
 
 def _open_incidents(directory: Path) -> dict[str, Path]:
@@ -86,6 +128,8 @@ def record_cycle(incidents: list[dict], directory: Path | str,
     when every probe bearing on it observed definitively."""
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
+    # Prune BEFORE the glob so the cycle's own scan shrinks with it (R-178).
+    prune_resolved(directory, now=now)
     open_by_fingerprint = _open_incidents(directory)
     seen = {incident["fingerprint"] for incident in incidents}
 

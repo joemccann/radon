@@ -319,16 +319,29 @@ def _aggregate_contracts(rows: list[dict[str, Any]]) -> dict[tuple, dict[str, An
 
 def _executed_orders_since(db: Any, since_date: str) -> list[dict[str, Any]]:
     """executed_orders payloads + fill dates with fill_time >= since_date."""
-    cursor = db.execute(
-        """
-        SELECT exec_id, perm_id, payload, fill_time, recorded_at
-        FROM executed_orders
-        WHERE fill_time >= ?
-        ORDER BY fill_time ASC
-        """,
-        (since_date,),
-    )
-    rows = cursor.fetchall()
+    # R-176: keyset-paginated on exec_id, matching the sibling journal read
+    # in this same file. executed_orders grows with every fill forever and
+    # this ran on the unbounded direct-to-cloud transport.
+    rows: list[Any] = []
+    cursor_key = ""
+    while True:
+        page = db.execute(
+            """
+            SELECT exec_id, perm_id, payload, fill_time, recorded_at
+            FROM executed_orders
+            WHERE fill_time >= ? AND exec_id > ?
+            ORDER BY exec_id ASC
+            LIMIT ?
+            """,
+            (since_date, cursor_key, JOURNAL_SCAN_PAGE_ROWS),
+        ).fetchall()
+        if not page:
+            break
+        rows.extend(page)
+        cursor_key = page[-1][0]
+        if len(page) < JOURNAL_SCAN_PAGE_ROWS:
+            break
+    rows.sort(key=lambda row: str(row[3] or ""))
 
     items: list[dict[str, Any]] = []
     for row in rows:

@@ -64,6 +64,7 @@ HOURLY_PAYLOAD_CAP = 400
 STOCKCHARTS_SYMBOL = "$TRIN"
 SAMPLE_LOOKBACK_DAYS = 200
 SAMPLE_READ_PAGE_ROWS = 500
+DAILY_READ_PAGE_ROWS = 500  # R-176: trin_daily is append-only and unbounded
 SNAPSHOT_SETTLE_S = 2
 IB_MARKET_DATA_TYPES = (1, 3, 4)
 
@@ -474,11 +475,31 @@ def load_cached_samples() -> list[Sample]:
     return _json_samples()
 
 
-def _turso_daily() -> list[DailyRow]:
-    from db.client import get_db
+def _turso_daily(db: Any = None) -> list[DailyRow]:
+    """Keyset-paginated on date (Hrana I/O bounding), like `_turso_samples`.
 
-    page = get_db().execute("SELECT date, close FROM trin_daily ORDER BY date").fetchall()
-    return [(row[0], float(row[1])) for row in page]
+    R-176: this was a full-table SELECT on an append-only table that grows one
+    row per session forever, on the direct-to-cloud HTTP pipeline the sibling
+    read is already paginated against.
+    """
+    if db is None:
+        from db.client import get_db
+
+        db = get_db()
+    cursor = ""
+    rows: list[DailyRow] = []
+    while True:
+        page = db.execute(
+            "SELECT date, close FROM trin_daily WHERE date > ? ORDER BY date LIMIT ?",
+            (cursor, DAILY_READ_PAGE_ROWS),
+        ).fetchall()
+        if not page:
+            break
+        rows.extend((row[0], float(row[1])) for row in page)
+        cursor = page[-1][0]
+        if len(page) < DAILY_READ_PAGE_ROWS:
+            break
+    return rows
 
 
 def _json_daily() -> list[DailyRow]:

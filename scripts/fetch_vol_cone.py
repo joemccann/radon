@@ -51,6 +51,8 @@ ET = ZoneInfo("America/New_York")
 
 # ── constants ─────────────────────────────────────────────────────
 VOL_CONE_JSON = _PROJECT_DIR / "data" / "vol_cone.json"
+# R-176: vol_cone_history is append-only and unbounded; read it in pages.
+HISTORY_READ_PAGE_ROWS = 1000
 
 # Highest-conviction names, scanned first: the wall-clock budget spends on
 # the head of the universe, so a cold start backfills these before the tail.
@@ -568,10 +570,25 @@ def _read_history_rows() -> list[dict[str, Any]]:
     try:
         from db.client import get_db
 
-        rows = get_db().execute(
-            "SELECT ticker, date, expiry, dte, spot, atm_iv, call_10_iv, put_10_iv, "
-            "call_10_strike, put_10_strike FROM vol_cone_history ORDER BY ticker, date"
-        ).fetchall()
+        # R-176: keyset-paginated on (ticker, date) — this was a full-table
+        # SELECT on an append-only table that grows one row per name per
+        # expiry per session, on the direct-to-cloud Hrana pipeline.
+        db = get_db()
+        rows = []
+        cursor_ticker, cursor_date = "", ""
+        while True:
+            page = db.execute(
+                "SELECT ticker, date, expiry, dte, spot, atm_iv, call_10_iv, put_10_iv, "
+                "call_10_strike, put_10_strike FROM vol_cone_history "
+                "WHERE (ticker, date) > (?, ?) ORDER BY ticker, date LIMIT ?",
+                (cursor_ticker, cursor_date, HISTORY_READ_PAGE_ROWS),
+            ).fetchall()
+            if not page:
+                break
+            rows.extend(page)
+            cursor_ticker, cursor_date = page[-1][0], page[-1][1]
+            if len(page) < HISTORY_READ_PAGE_ROWS:
+                break
         return [dict(zip(keys, row)) for row in rows]
     except Exception as exc:  # noqa: BLE001 — the JSON fallback still works
         print(f"[vol-cone] turso rehydrate non-fatal: {exc}", file=sys.stderr)
