@@ -3,12 +3,7 @@ import { readFile } from "fs/promises";
 import { join } from "path";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
-import {
-  contentTimestampMs,
-  dbFirstRead,
-  isMissingPayload,
-  type TimestampedRead,
-} from "@/lib/dbFirstRead";
+import { contentTimestampMs, dbFirstRead, isMissingPayload, type TimestampedRead, staleCollapse } from "@/lib/dbFirstRead";
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
 // first response and serves stale data until the dev server restarts.
@@ -74,7 +69,9 @@ export async function GET(): Promise<Response> {
     // full series and reach the client verbatim.
     isDegraded: isMissingPayload,
   });
-  const response = NextResponse.json(result.ok && result.fresh ? result.data : MISSING_VIXCOR);
+  const response = NextResponse.json(
+    result.ok && result.fresh ? result.data : staleCollapse(MISSING_VIXCOR, result),
+  );
   return setCacheResponseHeaders(response, {
     maxAgeSeconds: 300,
     staleWhileRevalidateSeconds: 3600,

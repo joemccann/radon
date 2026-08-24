@@ -3,7 +3,7 @@ import { readFile } from "fs/promises";
 import { join } from "path";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
-import { contentTimestampMs, dbFirstRead, type TimestampedRead, staleCollapse } from "@/lib/dbFirstRead";
+import { contentTimestampMs, dbFirstRead, type TimestampedRead, staleCollapse, isMissingPayload } from "@/lib/dbFirstRead";
 import { MISSING_TRIN } from "@/lib/trin";
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
@@ -47,6 +47,10 @@ export async function GET(): Promise<Response> {
     fromDisk: readTrinFromDisk,
     maxAgeMs: TRIN_MAX_AGE_MS,
     label: "trin",
+    // R-193: a writer that ran, produced nothing and still stamped a
+    // timestamped row would otherwise outrank an older row with a real
+    // series on freshness alone. Same guard vixcor and ivrank carry.
+    isDegraded: isMissingPayload,
   });
   const response = NextResponse.json(
     result.ok && result.fresh ? result.data : staleCollapse(MISSING_TRIN, result),

@@ -507,8 +507,17 @@ describe("VixCorPanel — episode cell", () => {
 
 describe("VixCorPanel — parent-lag degradation copy is derived, never hardcoded", () => {
   it("reads the default sub-label when the parent is current", () => {
+    // R-195: the old default was the literal "DAILY SERIES SINCE 2006-01" —
+    // a hardcoded cadence claim standing in for a lag reading, on a branch
+    // that ALSO absorbed null (lag could not be determined). This suite's own
+    // title says the copy is derived and never hardcoded; now it is.
     renderPanel(hookState({ data: buildData() }));
-    expect(screen.getByTestId("vixcor-lag-copy").textContent).toBe("DAILY SERIES SINCE 2006-01");
+    expect(screen.getByTestId("vixcor-lag-copy").textContent).toBe("PARENT CURRENT");
+  });
+
+  it("says the lag is unknown rather than claiming the parent is current", () => {
+    renderPanel(hookState({ data: buildData({ lag_sessions: null }) }));
+    expect(screen.getByTestId("vixcor-lag-copy").textContent).toBe("PARENT LAG UNKNOWN");
   });
 
   it("singularizes a one-session parent lag on the holding status", () => {
