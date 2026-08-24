@@ -2452,6 +2452,7 @@ renumbered from T-097. The first pass's audit text, ledger line and
 - **T-086 DONE.** Real-sqlite keyset test (`TestRehashKeysetPagingRealSqlite`, 25 rows / 2 accounts / tied `ingested_at` / `PAGE_SIZE=10`) in `scripts/tests/test_position_execution_fact_tolerated_hash.py`. Red under the AND-form WHERE mutation (10 of 25 rows skipped), green with the row-value comparison; source unchanged.
 - **T-098 DONE.** `scripts/db/writer.py` tolerated-drift UPDATE carries the full denormalized column set through `_execution_fact_columns(item)`, shared with INSERT, so a converged row equals a fresh insert. Red: `price` column stuck at 4.15 after a 9.99 restatement, `multiplier` stuck at 100.0 after 1; green after. Option (a) chosen over widening the gate because `normalize_execution` documents that avgPrice drift must not raise.
 - **T-102 DONE.** Holiday table extended 2028…2030 (29 dates, NYSE observance rules, independently re-derived and byte-matched). Both the TS and Python readers now carry a `currentYear+2` horizon assertion plus a derived MLK-Monday non-trading-day check, so the next expiry fails a year early instead of silently.
+- **T-105 DONE.** Role-scoped counter reset pinned with a status()-driven fake and per-tick assertions; reconnect mirror added. Red 2 failed under the ANY-role mutation, green 8 passed with source unchanged.
 
 ## 11 · Audit ledger
 
