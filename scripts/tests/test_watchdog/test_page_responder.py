@@ -760,6 +760,55 @@ class TestSignalKilledOneshotRerun:
         assert rc == 0
         assert not any(args[0] in {"reset-failed", "start"} for args in log)
 
+    def test_timeout_reruns_when_a_fix_deployed_after_the_failure(
+        self, db_conn, tmp_path, monkeypatch
+    ):
+        """radon-divyield 2026-08-24: Result=timeout at 23:57 UTC, next
+        timer 22:40 the next day. After the sweep-budget fix deploys the
+        unit must be re-run, not left failed re-paging hourly."""
+        monkeypatch.setenv("GROK_PAGE_RESPONDER", "1")
+        monkeypatch.setenv("GROK_PAGE_AUTOSHIP", "1")
+        self._green_marker(tmp_path, monkeypatch, at=NOW - timedelta(hours=1))
+        self._enqueue_unit_page("radon-divyield.service")
+        log: list = []
+        systemctl = _fake_systemctl(
+            next_elapse=self.FARAWAY,
+            result="timeout",
+            failed_at=_fmt_systemd(NOW - timedelta(hours=2)),
+            log=log,
+        )
+
+        rc, followup = self._cycle(tmp_path, grok=_never_grok, systemctl=systemctl)
+
+        assert rc == 0
+        row = db_conn.execute("SELECT status, result FROM watchdog_pages").fetchone()
+        assert row[0] == "done"
+        assert row[1].startswith("restarted_unit:")
+        assert "timeout" in row[1]
+        assert ["reset-failed", "radon-divyield.service"] in log
+        assert ["start", "--no-block", "radon-divyield.service"] in log
+        followup.assert_called_once()
+
+    def test_timeout_with_no_deploy_since_the_failure_stands_down(
+        self, db_conn, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("GROK_PAGE_RESPONDER", "1")
+        monkeypatch.setenv("GROK_PAGE_AUTOSHIP", "1")
+        self._green_marker(tmp_path, monkeypatch, at=NOW - timedelta(hours=3))
+        self._enqueue_unit_page("radon-divyield.service")
+        log: list = []
+        systemctl = _fake_systemctl(
+            next_elapse=self.FARAWAY,
+            result="timeout",
+            failed_at=_fmt_systemd(NOW - timedelta(hours=2)),
+            log=log,
+        )
+
+        rc, _ = self._cycle(tmp_path, grok=_stand_down_grok, systemctl=systemctl)
+
+        assert rc == 0
+        assert not any(args[0] in {"reset-failed", "start"} for args in log)
+
     def test_exit_code_rerun_still_honours_the_timer_horizon(self, tmp_path, monkeypatch):
         monkeypatch.setenv("GROK_PAGE_AUTOSHIP", "1")
         self._green_marker(tmp_path, monkeypatch, at=NOW - timedelta(hours=1))
@@ -788,6 +837,7 @@ class TestSignalKilledOneshotRerun:
             "radon-garch.service",
             "radon-credit-spread.service",
             "radon-cor.service",
+            "radon-divyield.service",
         ):
             assert expected in RERUNNABLE_ONESHOT_UNITS
 

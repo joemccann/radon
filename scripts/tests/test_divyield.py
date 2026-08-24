@@ -23,6 +23,7 @@ from pathlib import Path
 import pytest
 
 from fetch_divyield import (
+    FETCH_TIMEOUT_S,
     MIN_CONSTITUENTS,
     build_output,
     compute_pct_above,
@@ -31,6 +32,7 @@ from fetch_divyield import (
     is_unchanged_day,
     parse_constituents_csv,
     persist_result,
+    sweep_yields,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -337,3 +339,53 @@ class TestStorage:
 
         parameters = list(inspect.signature(writer.upsert_divyield_rows).parameters)
         assert parameters == ["rows", "recorded_at"]
+
+
+class TestSweepBudget:
+    """2026-08-24: radon-divyield Result=timeout after 900s. Yahoo v8 was
+    ~20s/chart; 503 tickers / 6 workers is ~28 min. ThreadPoolExecutor.map
+    waited out the whole tarpit and systemd SIGTERM'd the oneshot
+    (NRestarts=0) with nothing persisted."""
+
+    def test_tarpitted_yahoo_stops_inside_the_wall_clock_budget(self, monkeypatch):
+        import time
+        import fetch_divyield as fd
+
+        monkeypatch.setattr(fd, "SWEEP_BUDGET_S", 0.15, raising=False)
+        monkeypatch.setattr(fd, "FETCH_WORKERS", 2)
+
+        def hang(_ticker: str) -> dict:
+            time.sleep(0.4)
+            return QUOTE
+
+        monkeypatch.setattr(fd, "fetch_ticker_chart", hang)
+        tickers = [f"T{i:02d}" for i in range(8)]
+        started = time.monotonic()
+        yields, errors, _data_date = sweep_yields(tickers)
+        elapsed = time.monotonic() - started
+        # In-flight workers may finish one 0.4s fetch after the deadline;
+        # map() over 8/2 workers would take ~1.6s.
+        assert elapsed < 1.0
+        assert len(yields) + errors == len(tickers)
+
+    def test_quotes_finished_before_the_deadline_are_kept(self, monkeypatch):
+        import fetch_divyield as fd
+
+        monkeypatch.setattr(fd, "SWEEP_BUDGET_S", 30.0, raising=False)
+        monkeypatch.setattr(fd, "FETCH_WORKERS", 2)
+        monkeypatch.setattr(fd, "fetch_ticker_chart", lambda _ticker: QUOTE)
+        yields, errors, data_date = sweep_yields(["XOM", "T", "VZ"])
+        assert errors == 0
+        assert set(yields) == {"XOM", "T", "VZ"}
+        assert data_date is not None
+
+    def test_sweep_budget_fits_inside_unit_start_timeout(self):
+        service = Path(__file__).resolve().parents[2] / "cloud" / "services" / "radon-divyield.service"
+        timeout_line = next(
+            line for line in service.read_text().splitlines()
+            if line.startswith("TimeoutStartSec=")
+        )
+        unit_timeout = int(timeout_line.split("=", 1)[1])
+        from fetch_divyield import SWEEP_BUDGET_S
+
+        assert SWEEP_BUDGET_S + FETCH_TIMEOUT_S <= unit_timeout

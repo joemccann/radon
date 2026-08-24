@@ -14,7 +14,7 @@ Environment=RADON_DB_NO_REPLICA=1
 ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_divyield.py
 StandardOutput=journal
 StandardError=journal
-TimeoutStartSec=900
+TimeoutStartSec=2100
 
 [Install]
 WantedBy=multi-user.target

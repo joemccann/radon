@@ -912,6 +912,23 @@ class TestBpiScanBudget:
         )
 
 
+class TestDivyieldScanBudget:
+    """Daily 22:40 UTC Yahoo constituent sweep. TimeoutStartSec=900 killed
+    the 2026-08-24 run (Result=timeout, NRestarts=0) while Yahoo v8 was
+    ~20s/chart: 503 tickers / 6 workers needs ~28 min. The start budget
+    must cover that tarpit plus one in-flight FETCH_TIMEOUT_S, and still
+    end long before the next calendar fire (24h)."""
+
+    def test_service_start_budget_covers_tarpitted_yahoo_sweep(self, unit):
+        svc = unit("radon-divyield.service")["Service"]
+        assert svc["type"] == "oneshot"
+        assert int(svc["timeoutstartsec"]) >= 2100
+
+    def test_start_budget_ends_before_the_next_calendar_fire(self, unit):
+        svc = unit("radon-divyield.service")["Service"]
+        assert int(svc["timeoutstartsec"]) <= 3600
+
+
 class TestLeapGarchScanBudget:
     """Index-universe LEAP/GARCH scans need an hour-scale FastAPI budget
     (3600s) plus systemd headroom so TimeoutStartSec does not kill the
