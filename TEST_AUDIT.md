@@ -2435,6 +2435,44 @@ appended on top, with the eight converged findings dropped and the rest
 renumbered from T-097. The first pass's audit text, ledger line and
 `TEST_LOG.md` row are byte-unchanged.
 
+## Delta audit 2026-08-23 (second host, surfaced by remediation)
+
+### P1 — correctness gaps
+
+- **T-121 [P1] Six rendered tables sit in no horizontal-overflow container at
+  all — the 2026-08-18 vol-cone mobile bug, unfixed, in six other places.**
+  Surfaced by inverting `web/tests/table-scroll-wrapper-contract.test.ts`
+  under T-113: the old contract only inspected classNames that ALREADY
+  contained `table-scroll`/`table-wrap`, so a table with no wrapper class was
+  never looked at. Enumerating every `<table>` in `web/components` +
+  `web/app` and requiring an ancestor with an `overflow-x` rule (global CSS or
+  the component's CSS module) or an inline `overflowX` leaves six unwrapped:
+  `WorkspaceSections.tsx:OrdersSections` and `:HistoricalTradesSection` (both
+  inside `div.section > div.section-body`),
+  `equibles-cot/EquiblesCotPanel.tsx:CotBoardTable` (`.data-table`, which has
+  NO stylesheet rule of any kind),
+  `flow-analysis/DailyDarkPoolHistory.tsx:DailyTable` (`.ticker-flow-daily`),
+  `ticker-detail/RatingsTab.tsx:RatingsChangesTable` (`.pos-legs-table` inside
+  `div.ratings-changes` — note `.pos-legs-table-wrap { overflow-x: auto }`
+  exists at `globals.css:8577` and is simply not used here), and
+  `ticker-detail/SeasonalityTab.tsx:SeasonalityDetailTable`
+  (`div.seasonality-detail`). Verified per class: none of `.section-body`,
+  `.data-table`, `.ticker-flow-daily`, `.ratings-changes`,
+  `.seasonality-detail` names an `overflow-x` rule anywhere in `globals.css`
+  or a module. Not a measurement artefact and not a design choice — the one
+  table that IS deliberately unwrapped
+  (`OptionsExposurePanel`, `table-layout: fixed` with per-column widths and
+  ellipsis truncation) now says so with `data-overflow-exempt`. Pinned as
+  `KNOWN_UNWRAPPED_T121` in the inverted contract under an EQUALITY assertion,
+  so a seventh reds immediately and fixing one reds until its entry is
+  removed. **AC:** RED — the entries above are the red list today; green —
+  wrap each in a container carrying an `overflow-x` rule (or reuse
+  `.pos-legs-table-wrap`), remove its `KNOWN_UNWRAPPED_T121` entry, and verify
+  at 390px in a browser per Mandatory Rule 3. NOT fixed by the run that filed
+  it: six UI changes need browser verification, which is outside a
+  test-quality remediation task.
+
+
 ## Remediation 2026-08-23
 
 - **T-080 DONE.** Operator decision: $10M is not policy; it stays the default
