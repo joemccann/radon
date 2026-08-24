@@ -557,7 +557,8 @@ def load_flows_from_turso() -> Optional[Dict[str, float]]:
     nothing is mirrored yet; an empty result is NOT a verified zero.
     """
     rows = _query_turso(
-        "SELECT report_date, amount, flow_type FROM external_flows ORDER BY report_date ASC"
+        "SELECT account_id, report_date, amount, flow_type FROM external_flows"
+        " ORDER BY report_date ASC"
     )
     if rows is None:
         return None
@@ -567,19 +568,31 @@ def load_flows_from_turso() -> Optional[Dict[str, float]]:
     # own net subperiod flow as `external`. Both describe the same cash
     # movement, so a date that carries classified rows must not also count
     # its `external` mirror (T-081: one $80k deposit read as $160k).
-    classified: Dict[str, float] = {}
-    mirrored: Dict[str, float] = {}
+    #
+    # The PK is (account_id, report_date, flow_type) and `_statements` fans a
+    # multi-statement Flex document out per accountId, so the mirror/classified
+    # pair only ever describes the same movement WITHIN one account. Deciding
+    # precedence on the date alone drops a second account's flow instead.
+    classified: Dict[Tuple[str, str], float] = {}
+    mirrored: Dict[Tuple[str, str], float] = {}
     for row in rows:
-        report_date, amount, flow_type = _row_values(row, "report_date", "amount", "flow_type")
+        account_id, report_date, amount, flow_type = _row_values(
+            row, "account_id", "report_date", "amount", "flow_type"
+        )
         normalized = _normalize_date(report_date)
         value = _optional_float(amount)
         if not normalized or value is None:
             continue
+        key = (str(account_id or DEFAULT_ACCOUNT_ID), normalized)
         bucket = mirrored if flow_type == _MIRRORED_FLOW_TYPE else classified
-        bucket[normalized] = bucket.get(normalized, 0.0) + value
+        bucket[key] = bucket.get(key, 0.0) + value
 
-    out = dict(mirrored)
-    out.update(classified)
+    per_account = dict(mirrored)
+    per_account.update(classified)
+
+    out: Dict[str, float] = {}
+    for (_account_id, normalized), value in per_account.items():
+        out[normalized] = out.get(normalized, 0.0) + value
     return out or None
 
 

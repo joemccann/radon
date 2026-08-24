@@ -142,11 +142,17 @@ def _sqlite_with_0035() -> sqlite3.Connection:
     return db
 
 
-def _insert_flow(db: sqlite3.Connection, report_date: str, amount: float, flow_type: str) -> None:
+def _insert_flow(
+    db: sqlite3.Connection,
+    report_date: str,
+    amount: float,
+    flow_type: str,
+    account_id: str = "U1",
+) -> None:
     db.execute(
         "INSERT INTO external_flows (account_id, report_date, amount, flow_type, note) "
         "VALUES (?, ?, ?, ?, ?)",
-        ("U1", report_date, amount, flow_type, flow_type),
+        (account_id, report_date, amount, flow_type, flow_type),
     )
 
 
@@ -196,3 +202,29 @@ class TestLoadFlowsFromTursoCountsAMirroredRowOnce:
         _insert_flow(turso_is_sqlite, "2026-02-06", 655_497.16, "external")
 
         assert builder.load_flows_from_turso() == {"2026-02-06": pytest.approx(655_497.16)}
+
+
+class TestPrecedenceIsPerAccountNotPerDate:
+    """`external_flows` is keyed per account, and so is the mirror/classified pair.
+
+    `_statements` (`perf_twr_builder.py:341`) already fans a multi-statement Flex
+    document out per `accountId`, and the backfill falls back to the literal
+    `"ALL"` where the element carries none, so one date genuinely can hold rows
+    under two account ids. Collapsing precedence to the date alone drops a
+    second account's flow entirely instead of counting it once.
+    """
+
+    def test_second_account_mirror_is_not_swallowed_by_the_first_classified(
+        self, turso_is_sqlite
+    ):
+        _insert_flow(turso_is_sqlite, "2026-05-01", 10_000.0, "deposit", account_id="ALL")
+        _insert_flow(turso_is_sqlite, "2026-05-01", 7_500.0, "external", account_id="U123")
+
+        assert builder.load_flows_from_turso() == {"2026-05-01": pytest.approx(17_500.0)}
+
+    def test_each_account_still_dedupes_its_own_mirror(self, turso_is_sqlite):
+        _insert_flow(turso_is_sqlite, "2026-04-01", 10_000.0, "deposit", account_id="U123")
+        _insert_flow(turso_is_sqlite, "2026-04-01", 10_000.0, "external", account_id="U123")
+        _insert_flow(turso_is_sqlite, "2026-04-01", 2_500.0, "deposit", account_id="U999")
+
+        assert builder.load_flows_from_turso() == {"2026-04-01": pytest.approx(12_500.0)}
