@@ -196,7 +196,7 @@ def persist_calls(monkeypatch, tmp_path):
     monkeypatch.setattr(
         fih.writer,
         "record_service_health",
-        lambda service, state, finished_at=None: calls.append(("health", service, state)),
+        lambda service, state, finished_at=None, error=None: calls.append(("health", service, state)),
     )
     return calls
 
@@ -221,6 +221,68 @@ class TestPersistResult:
         kinds = [c[0] for c in persist_calls]
         assert "rows" not in kinds
         assert ("snapshot", "iei-hyg") in persist_calls
+        assert ("health", "iei-hyg", "ok") in persist_calls
+
+
+CACHED_SCAN_TIME = "2026-08-21T21:55:00Z"
+
+
+def _stub_all_sources_down(monkeypatch) -> None:
+    import fetch_iei_hyg as fih
+
+    for name in ("fetch_ib_closes", "fetch_uw_closes", "fetch_yahoo_closes"):
+        monkeypatch.setattr(fih, name, lambda tickers: {})
+
+
+class TestAllSourcesDown:
+    """IB, UW and Yahoo all empty: the cache is re-served as stale_source and the
+    heartbeat is an error so the watchdog pages instead of reading a fresh ok."""
+
+    def test_cached_series_is_reserved_as_stale_source_with_error_heartbeat(self, persist_calls, monkeypatch):
+        import fetch_iei_hyg as fih
+
+        fih.IEI_HYG_JSON.write_text(json.dumps(build_output([ROW], scan_time=CACHED_SCAN_TIME, source="yahoo")))
+        _stub_all_sources_down(monkeypatch)
+
+        payload = fih.run()
+
+        assert ("health", "iei-hyg", "error") in persist_calls
+        assert ("health", "iei-hyg", "ok") not in persist_calls
+        assert payload["status"] == "stale_source"
+        assert payload["count"] == 1
+        assert payload["current"]["date"] == ROW["date"]
+        assert payload["scan_time"] != CACHED_SCAN_TIME
+        assert "rows" not in [c[0] for c in persist_calls]
+        assert ("snapshot", "iei-hyg") in persist_calls
+        assert json.loads(fih.IEI_HYG_JSON.read_text())["status"] == "stale_source"
+
+    def test_no_cache_raises_and_never_heartbeats(self, persist_calls, monkeypatch):
+        import fetch_iei_hyg as fih
+
+        _stub_all_sources_down(monkeypatch)
+
+        with pytest.raises(RuntimeError):
+            fih.run()
+        assert persist_calls == []
+
+    def test_unchanged_day_with_a_live_source_is_still_ok(self, persist_calls, monkeypatch):
+        import fetch_iei_hyg as fih
+
+        fih.IEI_HYG_JSON.write_text(json.dumps(build_output([ROW], scan_time=CACHED_SCAN_TIME, source="ib")))
+        monkeypatch.setattr(
+            fih,
+            "fetch_ib_closes",
+            lambda tickers: {
+                "IEI": {ROW["date"]: IEI_LAST},
+                "HYG": {ROW["date"]: HYG_LAST},
+                "DXY": {ROW["date"]: DXY_LAST},
+            },
+        )
+
+        payload = fih.run()
+
+        assert "status" not in payload
+        assert "rows" not in [c[0] for c in persist_calls]
         assert ("health", "iei-hyg", "ok") in persist_calls
 
 

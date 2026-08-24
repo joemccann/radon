@@ -54,6 +54,9 @@ from utils.ib_preflight import (
 
 # ── constants ─────────────────────────────────────────────────────
 CREDIT_SPREAD_JSON = _PROJECT_DIR / "data" / "credit_spread.json"
+SERVICE = "credit-spread"
+NO_SOURCE = "none"
+STATUS_STALE_SOURCE = "stale_source"
 
 LOOKBACK_SESSIONS = 168
 NEAR_HIGH_RATIO = 0.97
@@ -438,23 +441,32 @@ def _write_json_cache(payload: dict[str, Any]) -> None:
 
 
 def persist_result(
-    payload: dict[str, Any], rows_changed_rows: list[dict[str, Any]]
+    payload: dict[str, Any],
+    rows_changed_rows: list[dict[str, Any]],
+    *,
+    health_error: Optional[dict[str, Any]] = None,
 ) -> None:
     """Dual-write: Turso rows + snapshot + heartbeat, then the JSON fallback.
 
     Refuses an empty series entirely. Snapshot + heartbeat run EVERY cycle
-    so the staleness banner notices a silent writer.
+    so the staleness banner notices a silent writer; the heartbeat is an
+    error when no source confirmed the series (stale_source).
     """
     if not payload["series"]:
-        print("[credit-spread] refusing to persist empty series", file=sys.stderr)
+        print(f"[{SERVICE}] refusing to persist empty series", file=sys.stderr)
         return
 
     scan_time = payload["scan_time"]
     writer.ensure_no_replica_for_writers()
     if rows_changed_rows:
         writer.upsert_credit_spread_rows(rows_changed_rows, recorded_at=scan_time)
-    writer.upsert_scan_snapshot("credit-spread", scan_time, payload)
-    writer.record_service_health("credit-spread", "ok", finished_at=scan_time)
+    writer.upsert_scan_snapshot(SERVICE, scan_time, payload)
+    writer.record_service_health(
+        SERVICE,
+        "ok" if health_error is None else "error",
+        finished_at=scan_time,
+        error=health_error,
+    )
     _write_json_cache(payload)
 
 
@@ -467,21 +479,41 @@ def _read_cached_series() -> list[dict[str, Any]]:
         return []
 
 
+def _serve_cached(cached: list[dict[str, Any]]) -> dict[str, Any]:
+    """IB, UW and Yahoo all down: re-serve the cache as stale_source, page."""
+    if not cached:
+        raise RuntimeError(f"{SERVICE}: IB, UW and Yahoo all failed with no cached series")
+    payload = {**build_output(cached, source=NO_SOURCE), "status": STATUS_STALE_SOURCE}
+    through = payload["current"]["date"]
+    print(
+        f"[{SERVICE}] all sources down; re-serving cached series through {through}",
+        file=sys.stderr,
+    )
+    health_error = {
+        "message": f"{SERVICE}: IB, UW and Yahoo all failed; serving cached series through {through}"
+    }
+    persist_result(payload, [], health_error=health_error)
+    return payload
+
+
 def run() -> dict[str, Any]:
-    print("[credit-spread] fetching HYG and SPX (IB → UW → Yahoo)", file=sys.stderr)
+    print(f"[{SERVICE}] fetching HYG and SPX (IB → UW → Yahoo)", file=sys.stderr)
     closes, sources = fetch_closes()
+    cached = _read_cached_series()
+    source = combine_source(sources)
+    if not source:
+        return _serve_cached(cached)
     hyg = closes.get(HYG_SYMBOL, {})
     spx = closes.get(SPX_SYMBOL, {})
 
     fresh = build_series(align_series(hyg, spx))
-    cached = _read_cached_series()
     series = merge_series(cached, fresh)
     new_rows = diff_new_rows(cached, series)
 
     if not new_rows:
-        print("[credit-spread] source unchanged; refreshing snapshot only", file=sys.stderr)
+        print(f"[{SERVICE}] source unchanged; refreshing snapshot only", file=sys.stderr)
 
-    payload = build_output(series, source=combine_source(sources) or "none")
+    payload = build_output(series, source=source)
     persist_result(payload, new_rows)
     return payload
 

@@ -117,13 +117,18 @@ Small pure functions (composed-method), stdlib `json` parsing, `requests` fetch:
     series: [{date, hyg_close, spx_close}, ...]
   }
   ```
-- `persist_result(payload, rows_changed_rows)` — refuses empty `series`; else
-  `writer.ensure_no_replica_for_writers()`;
+- `persist_result(payload, rows_changed_rows, *, health_error=None)` — refuses empty
+  `series`; else `writer.ensure_no_replica_for_writers()`;
   `writer.upsert_credit_spread_rows(new_rows, recorded_at=scan_time)` only when
   changed; `writer.upsert_scan_snapshot("credit-spread", ...)` EVERY cycle;
-  `writer.record_service_health("credit-spread", "ok", finished_at=scan_time)` EVERY
-  cycle; atomic JSON to `data/credit_spread.json`.
-- Unchanged day prints `[credit-spread] source unchanged; refreshing snapshot only`.
+  `writer.record_service_health("credit-spread", "ok" | "error", finished_at=scan_time,
+  error=...)` EVERY cycle; atomic JSON to `data/credit_spread.json`.
+- Unchanged day prints `[credit-spread] source unchanged; refreshing snapshot only`
+  and is still an `ok` heartbeat (a source answered).
+- All three sources down (`combine_source(sources)` empty): `run` re-serves the JSON
+  cache through `_serve_cached` as `status: "stale_source"` with an `error` heartbeat
+  (mirrors `fetch_ivrank`), so the watchdog pages instead of reading a fresh `ok`
+  over data no source confirmed. No cache → `RuntimeError`, nothing persisted.
 - CLI: `--json` → payload to stdout (stderr for progress).
 
 ## Storage — migration `scripts/db/migrations/0051_credit_spread.sql`

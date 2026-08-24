@@ -199,7 +199,7 @@ def persist_calls(monkeypatch, tmp_path):
     monkeypatch.setattr(
         fcs.writer,
         "record_service_health",
-        lambda service, state, finished_at=None: calls.append(
+        lambda service, state, finished_at=None, error=None: calls.append(
             ("health", service, state)
         ),
     )
@@ -230,6 +230,74 @@ class TestPersistResult:
         kinds = [c[0] for c in persist_calls]
         assert "rows" not in kinds
         assert ("snapshot", "credit-spread") in persist_calls
+        assert ("health", "credit-spread", "ok") in persist_calls
+
+
+CACHED_ROW = {"date": "2026-08-20", "hyg_close": HYG_LAST, "spx_close": SPX_LAST}
+CACHED_SCAN_TIME = "2026-08-20T21:45:00Z"
+
+
+def _stub_all_sources_down(monkeypatch) -> None:
+    import fetch_credit_spread as fcs
+
+    for name in ("fetch_ib_closes", "fetch_uw_closes", "fetch_yahoo_closes"):
+        monkeypatch.setattr(fcs, name, lambda tickers: {})
+
+
+class TestAllSourcesDown:
+    """IB, UW and Yahoo all empty: the cache is re-served as stale_source and the
+    heartbeat is an error so the watchdog pages instead of reading a fresh ok."""
+
+    def test_cached_series_is_reserved_as_stale_source_with_error_heartbeat(
+        self, persist_calls, monkeypatch
+    ):
+        import fetch_credit_spread as fcs
+
+        fcs.CREDIT_SPREAD_JSON.write_text(
+            json.dumps(build_output([CACHED_ROW], scan_time=CACHED_SCAN_TIME, source="yahoo"))
+        )
+        _stub_all_sources_down(monkeypatch)
+
+        payload = fcs.run()
+
+        assert ("health", "credit-spread", "error") in persist_calls
+        assert ("health", "credit-spread", "ok") not in persist_calls
+        assert payload["status"] == "stale_source"
+        assert payload["count"] == 1
+        assert payload["current"]["date"] == CACHED_ROW["date"]
+        assert payload["scan_time"] != CACHED_SCAN_TIME
+        assert "rows" not in [c[0] for c in persist_calls]
+        assert ("snapshot", "credit-spread") in persist_calls
+        assert json.loads(fcs.CREDIT_SPREAD_JSON.read_text())["status"] == "stale_source"
+
+    def test_no_cache_raises_and_never_heartbeats(self, persist_calls, monkeypatch):
+        import fetch_credit_spread as fcs
+
+        _stub_all_sources_down(monkeypatch)
+
+        with pytest.raises(RuntimeError):
+            fcs.run()
+        assert persist_calls == []
+
+    def test_unchanged_day_with_a_live_source_is_still_ok(self, persist_calls, monkeypatch):
+        import fetch_credit_spread as fcs
+
+        fcs.CREDIT_SPREAD_JSON.write_text(
+            json.dumps(build_output([CACHED_ROW], scan_time=CACHED_SCAN_TIME, source="ib"))
+        )
+        monkeypatch.setattr(
+            fcs,
+            "fetch_ib_closes",
+            lambda tickers: {
+                HYG_SYMBOL: {CACHED_ROW["date"]: HYG_LAST},
+                SPX_SYMBOL: {CACHED_ROW["date"]: SPX_LAST},
+            },
+        )
+
+        payload = fcs.run()
+
+        assert "status" not in payload
+        assert "rows" not in [c[0] for c in persist_calls]
         assert ("health", "credit-spread", "ok") in persist_calls
 
 
