@@ -1,0 +1,49 @@
+name: App-plane images
+
+# Builds radon-python / radon-node. This workflow is NOT a deploy need and
+# must never live in ci.yml `deploy.needs`. Host binaries remain the
+# production runtime until per-unit drop-ins are installed after hours.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  app-images:
+    name: Build app-plane images
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    concurrency:
+      group: app-images-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build python image
+        run: >
+          docker build
+          -f docker/app/Dockerfile.python
+          --ignorefile docker/app/.dockerignore
+          -t radon-python:ci
+          .
+      - name: Build node image
+        run: >
+          docker build
+          -f docker/app/Dockerfile.node
+          --ignorefile docker/app/.dockerignore
+          -t radon-node:ci
+          .
+      - name: Push SHA tags to GHCR
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          set -euo pipefail
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          sha="${GITHUB_SHA}"
+          docker tag radon-python:ci "ghcr.io/joemccann/radon-python:${sha}"
+          docker tag radon-node:ci "ghcr.io/joemccann/radon-node:${sha}"
+          docker push "ghcr.io/joemccann/radon-python:${sha}"
+          docker push "ghcr.io/joemccann/radon-node:${sha}"

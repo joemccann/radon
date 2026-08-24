@@ -34,6 +34,7 @@ ARTIFACTS = (
     # Root runs the audit, so its payload cannot live in the radon-writable
     # checkout. It is data for a root-owned interpreter, hence 0644 not 0755.
     Artifact("scripts/drift_audit.py", "/usr/local/lib/radon/drift_audit.py", 0o644),
+    Artifact("scripts/radon-app-runtime.sh", "/usr/local/sbin/radon-app-runtime", 0o755),
     Artifact("config/sudoers.d/radon-deploy", "/etc/sudoers.d/radon-deploy", 0o440),
     Artifact("config/sudoers.d/radon-monitor", "/etc/sudoers.d/radon-monitor", 0o440),
     Artifact("config/sudoers.d/radon-ops", "/etc/sudoers.d/radon-ops", 0o440),
@@ -453,7 +454,7 @@ def test_root_verifier_rejects_installed_target_drift(
     valid = _run_root_control_plane_verifier(sandbox)
     assert valid.returncode == 0, valid.stdout + valid.stderr
 
-    artifact = ARTIFACTS[8]
+    artifact = next(item for item in ARTIFACTS if item.source.endswith("50-radon-services.rules"))
     target = _installed_path(sandbox.rootfs, artifact)
     if mutation == "missing":
         target.unlink()

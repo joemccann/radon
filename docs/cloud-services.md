@@ -22,7 +22,7 @@ This document covers Radon's two-mode architecture introduced in Phase 0–6 of 
 
 - **Database**: Turso (libSQL) — every Radon process talks **directly** to the cloud DB for both reads and writes. Direct-to-cloud is the code default (DUR-07; replica is opt-in only via `RADON_DB_USE_REPLICA=1`), and the prefix drop-in `/etc/systemd/system/radon-.service.d/common.conf` sets the `RADON_DB_NO_REPLICA=1` kill switch on every `radon-*` unit as belt-and-suspenders. The embedded-replica architecture (`data/replica.db`) was retired 2026-05-20 after two same-day incidents: multi-writer WAL checkpoint contention (radon-cloud `741cfc6`) followed by single-writer frame conflicts between the replica owner and direct-cloud writers (radon-cloud `2c46232`). The libsql embedded-replica model only works when ONE host has exactly ONE writer; Radon's split between Node and Python writers can't satisfy that constraint. Reads cost +30–60 ms cloud round-trip, absorbed by SWR caching. See `feedback_libsql_replica_one_writer.md` for the full failure-mode catalog.
 - **Media**: Hetzner-hosted Caddy serves `https://media.radon.run`; the laptop's newsfeed scraper rsyncs new images over Tailscale.
-- **Schedulers**: laptop launchd plists (local mode) OR Hetzner host systemd (cloud mode). Production is host systemd; IB Gateway is the only production container. App-plane images are future work and default `RADON_RUNTIME=host`. Unit sources live in `/home/radon/radon/cloud/services/` and are installed through the reviewed control-plane path. The former `docker/services/` tree was deleted as decoy units in `40cfff2a` and is not a scheduler alternative.
+- **Schedulers**: laptop launchd plists (local mode) OR Hetzner host systemd (cloud mode). Production is host systemd; IB Gateway is the only production container until per-unit app drop-ins are installed. App-plane images default `RADON_RUNTIME=host`. Unit sources live in `/home/radon/radon/cloud/services/` and are installed through the reviewed control-plane path. The former `docker/services/` tree was deleted as decoy units in `40cfff2a` and is not a scheduler alternative.
 - **Self-contained**: themarketear.com newsfeed scraper is now a headless Playwright flow that runs on either the laptop or Hetzner. No magic-link or Chrome Debug.app dependency.
 
 ## Newsfeed (`themarketear.com`) — Self-contained headless flow
@@ -172,7 +172,7 @@ Related: `scripts/db/migrate.py` (radon-api `ExecStartPre`) retries transport-cl
 
 ### Runtime planes
 
-Production is three planes: host (never container), broker (already Docker), app (host today, images later). IB Gateway in `cloud/docker-compose.yml` is the only production container. App-plane images (`docker/app`) are scaffolding only, not production runtime; the default is `RADON_RUNTIME=host`. The former `docker/services/` tree was deleted as decoy units in `40cfff2a` and is not a containerized scheduler alternative.
+Production is three planes: host (never container), broker (already Docker), app (host default). IB Gateway in `cloud/docker-compose.yml` is the only production container until per-unit `runtime-container.conf` drop-ins are installed after hours. App-plane images (`docker/app`) plus `/usr/local/sbin/radon-app-runtime` are the optional container path; the default is `RADON_RUNTIME=host`. Do not install the fleet `radon-.service.d` example (it would override Gateway and health). The former `docker/services/` tree was deleted as decoy units in `40cfff2a` and is not a containerized scheduler alternative.
 
 ## Trades — single source of truth
 

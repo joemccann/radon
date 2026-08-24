@@ -1,4 +1,4 @@
-"""Static pins for app-plane image scaffolding (not production runtime)."""
+"""P3 app-plane images: buildable, host-default, never Gateway/Caddy/docker.sock."""
 
 from __future__ import annotations
 
@@ -11,11 +11,19 @@ DOCKER_APP = REPO_ROOT / "docker" / "app"
 PYTHON_DF = DOCKER_APP / "Dockerfile.python"
 NODE_DF = DOCKER_APP / "Dockerfile.node"
 DOCKERIGNORE = DOCKER_APP / ".dockerignore"
-EXAMPLE_DROPIN = (
+FLEET_DROPIN = (
     CLOUD_ROOT / "services" / "radon-.service.d" / "runtime-container.conf.example"
+)
+APP_UNITS = (
+    "radon-api.service",
+    "radon-nextjs.service",
+    "radon-relay.service",
+    "radon-monitor.service",
+    "radon-newsfeed.service",
 )
 BOOTSTRAP = CLOUD_ROOT / "scripts" / "bootstrap-control-plane.sh"
 SETUP = CLOUD_ROOT / "scripts" / "setup-vps.sh"
+HELPER = CLOUD_ROOT / "scripts" / "deploy-root-helper.sh"
 
 
 def _function_body(script: str, name: str) -> str:
@@ -59,6 +67,10 @@ def _start_lines(text: str) -> list[str]:
     ]
 
 
+def _dropin_for(unit: str) -> Path:
+    return CLOUD_ROOT / "services" / f"{unit}.d" / "runtime-container.conf.example"
+
+
 class TestAppDockerfilesExist:
     def test_python_dockerfile_exists(self) -> None:
         assert PYTHON_DF.is_file()
@@ -79,8 +91,10 @@ class TestPythonImage:
         assert "WORKDIR /home/radon/radon" in text
         assert "uvicorn" in text
         assert "scripts.api.server:app" in text
-        assert "127.0.0.1" in text
+        assert "0.0.0.0" in text
         assert "8321" in text
+        assert "--proxy-headers" in text
+        assert "127.0.0.1" in text
 
     def test_user_radon_is_final(self) -> None:
         text = PYTHON_DF.read_text(encoding="utf-8")
@@ -90,12 +104,16 @@ class TestPythonImage:
 class TestNodeImage:
     def test_base_copies_and_cmd(self) -> None:
         text = NODE_DF.read_text(encoding="utf-8")
-        assert _from_images(text) == ["node:22-bookworm-slim"]
-        assert "COPY web/" in text
-        assert "scripts/ib_realtime_server.js" in text
-        assert "scripts/newsfeed/" in text
-        assert "npm ci --omit=dev" in text
-        assert '"npm", "run", "start"' in text or "npm run start" in text
+        images = _from_images(text)
+        assert images[-1] == "node:22-bookworm-slim"
+        assert any("bun" in image for image in images)
+        assert "1.3.14" in text
+        assert "COPY web/" in text or "COPY web" in text
+        assert "scripts/" in text
+        assert "bun install --frozen-lockfile" in text
+        assert "bun run build" in text
+        assert "playwright" in text.lower()
+        assert "next start" in text or '"next", "start"' in text or "npm run start" in text
 
     def test_user_radon_is_final(self) -> None:
         text = NODE_DF.read_text(encoding="utf-8")
@@ -127,18 +145,30 @@ class TestImageSafety:
 
 
 class TestRuntimeContainerDropin:
-    def test_example_exists_and_is_commented(self) -> None:
-        assert EXAMPLE_DROPIN.is_file()
-        text = EXAMPLE_DROPIN.read_text(encoding="utf-8")
+    def test_fleet_example_is_commented_and_forbids_install(self) -> None:
+        assert FLEET_DROPIN.is_file()
+        text = FLEET_DROPIN.read_text(encoding="utf-8")
         assert "docker.sock" not in text
-        assert "RADON_RUNTIME=container" in text
-        assert "--network host" in text
-        assert "--env-file /etc/radon/env" in text
-        assert "NOTIFY_SOCKET" in text
-        assert "WATCHDOG_USEC" in text
+        assert "DO NOT" in text or "MUST NOT" in text
+        assert "radon-ib-gateway" in text
+        assert "radon-health" in text
         for line in text.splitlines():
             if line.strip():
                 assert line.lstrip().startswith("#")
+
+    def test_per_unit_examples_call_wrapper_and_stay_commented(self) -> None:
+        for unit in APP_UNITS:
+            path = _dropin_for(unit)
+            assert path.is_file(), unit
+            text = path.read_text(encoding="utf-8")
+            assert "docker.sock" not in text, unit
+            assert "RADON_RUNTIME=container" in text, unit
+            assert "radon-app-runtime run %n" in text, unit
+            assert "NotifyAccess=all" in text, unit
+            assert "User=root" in text, unit
+            for line in text.splitlines():
+                if line.strip():
+                    assert line.lstrip().startswith("#"), f"{unit}: {line}"
 
     def test_example_not_in_bootstrap_sources(self) -> None:
         sources = _readonly_array(BOOTSTRAP.read_text(encoding="utf-8"), "SOURCES")
@@ -152,3 +182,10 @@ class TestRuntimeContainerDropin:
         body = _function_body(SETUP.read_text(encoding="utf-8"), "install_fleet_dropin")
         assert "common.conf" in body
         assert "runtime-container" not in body
+
+    def test_helper_control_plane_includes_runtime_wrapper(self) -> None:
+        sources = _readonly_array(HELPER.read_text(encoding="utf-8"), "CONTROL_PLANE_SOURCES")
+        targets = _readonly_array(HELPER.read_text(encoding="utf-8"), "CONTROL_PLANE_TARGETS")
+        assert "scripts/radon-app-runtime.sh" in sources
+        assert "/usr/local/sbin/radon-app-runtime" in targets
+        assert "runtime-container.conf.example" not in sources

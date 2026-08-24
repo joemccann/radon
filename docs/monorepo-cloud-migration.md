@@ -236,9 +236,9 @@ Production is three planes. Do not collapse them into one Compose project.
 |---|---|---|
 | Host | never container | systemd, journald, polkit, sudoers, Caddy, Tailscale, Docker engine, `radon-health` `:8330`, `radon-deploy-root`, `radon-ib-gateway-control` |
 | Broker | already Docker | digest-pinned IB Gateway in `cloud/docker-compose.yml` — the only production container |
-| App | host today, images later | Next.js, FastAPI, relay, monitor, newsfeed, timer-owned oneshots. Default `RADON_RUNTIME=host` |
+| App | host default, images optional | Next.js, FastAPI, relay, monitor, newsfeed, timer-owned oneshots. Default `RADON_RUNTIME=host`. Per-unit drop-ins switch ExecStart to `radon-app-runtime run %n` after hours |
 
-App-plane images are future work. They must not own Gateway, Caddy, health, or `docker.sock`.
+App-plane images exist under `docker/app` and are not production runtime until per-unit drop-ins are installed. They must not own Gateway, Caddy, health, or the Docker engine socket. `radon-app-runtime` pulls/runs those images as root and does not take the deploy lock.
 
 After `radon-deploy-root refresh-control-plane` is installed (helper + sudoers), a unit-only push does not need root SSH. The SHA that *adds* that sudoers verb still needs one root `bootstrap-control-plane.sh`. Control-plane `.service` files stay bootstrap/refresh-owned; allowlisted timer-owned oneshots publish via `sync-scheduled-units` (`daemon-reload` only, no start/stop).
 

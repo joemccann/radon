@@ -1,9 +1,10 @@
-# Scaffolding only. Not production runtime. Default remains host binaries.
+# App-plane Python image (api, monitor). Not production until the per-unit
+# drop-in is installed. Default remains host binaries.
 # Build from repo root:
 #   docker build -f docker/app/Dockerfile.python --ignorefile docker/app/.dockerignore .
 FROM python:3.13-slim
 
-RUN useradd --system --create-home --home-dir /home/radon --shell /usr/sbin/nologin radon \
+RUN useradd --system --uid 1000 --create-home --home-dir /home/radon --shell /usr/sbin/nologin radon \
     && mkdir -p /home/radon/radon/scripts \
     && chown -R radon:radon /home/radon
 
@@ -19,4 +20,4 @@ COPY --chown=radon:radon scripts ./scripts
 
 USER radon
 
-CMD ["uvicorn", "scripts.api.server:app", "--host", "127.0.0.1", "--port", "8321"]
+CMD ["uvicorn", "scripts.api.server:app", "--host", "0.0.0.0", "--port", "8321", "--proxy-headers", "--forwarded-allow-ips", "127.0.0.1"]
