@@ -3503,3 +3503,11 @@ Per /indicator swarm (spec: docs/indicators/skew.md). Slug/service `skew`, tab S
 - Show Me artifact: `tasks/artifacts/show-me-security-remediation.html`.
 
 ---
+
+# Review — DIVYIELD + HYAD + HHLEV indicator swarm (2026-08-23)
+
+- [x] DIVYIELD (`/regime/divyield`, service `div-yield`, migration 0055): pct of S&P 500 stocks with TTM dividend yield above the 10Y CMT. GitHub constituents CSV (Wikipedia + seed fallbacks), Yahoo v8 per-ticker sweep (6 workers, 15.7s laptop), y10 from `yield_curve_history`. 439 approximate monthly rows 1990+ (survivorship-labeled) + daily accumulation. Current 3.78% (19/503 vs 4.74%) matches the NDR chart's 3.85%. Shipped in CI run 32673940611 (deployed).
+- [x] HYAD (`/regime/hyad`, service `hy-ad`, migration 0056): HY corporate bond cumulative A-D line from FINRA dynarep TRACE breadth (CORP+CORP_144A fieldC), 2,156 rows 2018+, 21/50d MAs, SPX overlay from `credit_spread_history`. Regime DETERIORATING mirrors the McClellan divergence. Backfill bug found+fixed: offset paging is unstable intra-date; page by year windows.
+- [x] HHLEV (`/regime/hhlev`, service `hhlev`, migration 0057): Z.1 household liabilities as pct of net worth (TLBSHNO/TNWBSHNO via keyless fredgraph CSV; keyed API fallback). 304 quarters 1945Q4+; current 11.78% DELEVERAGED; 2009Q1 peak 24.26 — matches the JPM chart. Full-history re-upsert per run (Z.1 revisions).
+- Cross-cutting fixes: `scripts/utils/ipv4_first.py` (VPS IPv6 blackholes Yahoo/GitHub → 60s/request in urllib; wired into all three fetchers), midnight-safe `_TODAY` anchors in test_divyield/test_hyad (CI 00:0x UTC flake), HYAD strip merged to 5 cells (fixed 5-col grid).
+- Evidence: red suites (25+27+33 pytest, 5/5/16/17 vitest) → per-lane green → full gates 7,097 pytest + 1,012 cloud + 7,162 vitest + typecheck → live screenshots docs/indicators/{divyield,hyad,hhlev}-tab.png → Turso rows verified → CI + deploy per run links in git log.
