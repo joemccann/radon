@@ -2449,6 +2449,7 @@ renumbered from T-097. The first pass's audit text, ledger line and
 - **T-081 DONE.** `load_flows_from_turso` (`scripts/perf_twr_builder.py`) buckets rows by `flow_type`: classified rows win per date over the builder's `external` mirror (`_MIRRORED_FLOW_TYPE`, reused by `_external_flow_rows`). New `TestLoadFlowsFromTursoCountsAMirroredRowOnce` (3 tests, real sqlite with 0035 applied, only `get_db` stubbed) in `tests/test_perf_twr_flows_turso_fallback.py`. Red 160014.26 for an 80007.13 deposit; green after. 210 perf-TWR tests green.
 - **T-097 DONE.** `scripts/clients/ib_client.py` `wait_until` is now a wall-clock deadline (`time.monotonic()`) plus a `ceil(timeout/poll)` step cap. Red 1.24s wall for a 0.2s timeout under a 0.2s-overrunning sleep; green after. Step assertion relaxed to `<= ceil(timeout/poll)` (the `== 4` pinned the defect).
 - **T-082 DONE.** `scripts/ib_sync.py` `wait_for_streaming_data` releases only on a valid account `dailyPnL` (`account_daily_pnl_is_ready` in `ib_client.py`). Red: nan `dailyPnL` + valid `unrealizedPnL` reported ready; green after. Guard tests for a quoteless ticker and a nan PnLSingle pin the two loops against deletion.
+- **T-086 DONE.** Real-sqlite keyset test (`TestRehashKeysetPagingRealSqlite`, 25 rows / 2 accounts / tied `ingested_at` / `PAGE_SIZE=10`) in `scripts/tests/test_position_execution_fact_tolerated_hash.py`. Red under the AND-form WHERE mutation (10 of 25 rows skipped), green with the row-value comparison; source unchanged.
 
 ## 11 · Audit ledger
 
