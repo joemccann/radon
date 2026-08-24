@@ -1,3 +1,25 @@
+# Task: Reconstruct 1025 lockout from Turso (2026-08-23)
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests: missing sidecar reconstructs live 1025/permanent row
+- T2 depends_on: [T1] - Reconstruct lockout in flex_embargo, is_due, /cash-flows, lozenge
+- T3 depends_on: [T2] - Verify focused pytest + vitest
+
+## Checklist
+
+- [x] T1 Red tests
+- [x] T2 Reconstruct lockout
+- [x] T3 Verify
+
+## Review
+
+- Focused pytest 43 passed; lozenge vitest 10/10
+- Live topology: no sidecar + class=permanent 1025 from 2026-08-21T13:58Z
+  blocks Monday 08:00 ET; next_attempt is last_attempt+7d not 12:00Z Monday
+
+---
+
 # Task: GSC indexing / ranking (2026-08-23)
 
 ## Report (sc-domain:radon.run, last update 8/20/26)

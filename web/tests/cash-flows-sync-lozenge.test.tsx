@@ -26,7 +26,10 @@ import { describe, it, expect, afterEach, vi, beforeEach } from "vitest";
 import { render, cleanup, fireEvent, screen, within } from "@testing-library/react";
 import CashFlowsSection from "../components/CashFlowsSection";
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 // Stub the hook so we can drive the component from props-equivalent data.
 vi.mock("../lib/useCashFlows", async () => {
@@ -358,5 +361,49 @@ describe("CashFlowsSection sync lozenge", () => {
     fireEvent.click(screen.getByRole("columnheader", { name: /date/i }));
     expect(firstDate()).toContain("05/01");
     expect(screen.getByRole("columnheader", { name: /date/i }).getAttribute("aria-sort")).toBe("ascending");
+  });
+
+  it("does not append retry tomorrow on a Flex lockout with Monday next_attempt", () => {
+    vi.useFakeTimers();
+    // Sunday 2026-08-23 22:45 ET
+    vi.setSystemTime(new Date("2026-08-24T02:45:00.000Z"));
+    const lastSynced = new Date("2026-08-17T02:45:00.000Z").toISOString();
+    useCashFlowsMock.mockReturnValue({
+      data: {
+        rows: [
+          {
+            id: "x",
+            date: "2026-08-16",
+            type: "Withdrawal",
+            amount: -1,
+            currency: "USD",
+            description: null,
+            raw_type: null,
+            synced_at: lastSynced,
+          },
+        ],
+        count: 1,
+        from_date: "2026-05-25",
+        summary: { deposits: 0, withdrawals: -1, dividends: 0, net: -1 },
+        last_synced_at: lastSynced,
+        sync_status: {
+          state: "error",
+          last_attempt_at: "2026-08-21T13:58:28.298780Z",
+          next_attempt_at: "2026-08-24T12:00:00+00:00",
+          error_summary: "Flex lockout. Do not retry. Ingest with --from-file",
+          is_throttled: false,
+        },
+      },
+      loading: false,
+      error: null,
+      refresh: () => {},
+    });
+
+    render(<CashFlowsSection />);
+    const lozenge = screen.getByTestId("cash-flows-sync-lozenge");
+    expect(lozenge.textContent).toMatch(/Flex lockout/i);
+    expect(lozenge.textContent).toMatch(/Do not retry/i);
+    expect(lozenge.textContent).not.toMatch(/retry.*tomorrow/i);
+    expect(lozenge.textContent?.includes("—")).toBe(false);
   });
 });

@@ -126,7 +126,10 @@ export default function CashFlowsSection() {
   // error states fall through to a generic warn treatment.
   const isThrottled = syncStatus?.state === "error" && Boolean(syncStatus?.is_throttled);
   const isErrored = syncStatus?.state === "error" && !isThrottled;
-  const retryHint = syncStatus?.next_attempt_at ? formatNextAttempt(syncStatus.next_attempt_at) : null;
+  const isLockout = Boolean(syncStatus?.error_summary?.includes("Do not retry"));
+  const retryHint = !isLockout && syncStatus?.next_attempt_at
+    ? formatNextAttempt(syncStatus.next_attempt_at)
+    : null;
   const lozengeTone: "ok" | "warn" | "fault" = isThrottled ? "warn" : isErrored ? "fault" : "ok";
   const lozengeLabel = (() => {
     if (!lastSyncedRelative) return null;

@@ -179,3 +179,63 @@ def test_r13_a_live_lockout_skips_sendrequest(monkeypatch, tmp_path):
     monkeypatch.setattr(urllib.request, "urlopen", _boom)
     with pytest.raises(FlexTokenLocked):
         builder.fetch_flex_xml("tok", "1442520")
+
+
+def test_r13_missing_sidecar_reconstructs_live_1025_and_skips_sendrequest(
+    monkeypatch, tmp_path
+):
+    """Monday 07:30 ET TWR must not poke the token when only Turso holds 1025."""
+    import json
+
+    from utils.flex_embargo import FlexTokenLocked
+
+    monkeypatch.setattr(
+        "utils.flex_embargo.SIDECAR", tmp_path / "flex_token_embargo.json"
+    )
+    monkeypatch.setattr("utils.flex_embargo._heartbeat", lambda *a, **k: None)
+
+    live_row = (
+        "error",
+        "2026-08-21T13:58:28.298780Z",
+        json.dumps({
+            "message": (
+                "ERR: Flex SendRequest failed (code 1025): "
+                "Too many failed attempts. Please review your configuration."
+            ),
+            "class": "permanent",
+            "next_attempt_at": "2026-08-24T12:00:00+00:00",
+        }),
+    )
+
+    def fake(sql, args=(), timeout=None):  # noqa: ANN001
+        key = args[0] if args else None
+        if key == "cash-flow-sync":
+            return [live_row]
+        return []
+
+    import db.hrana_http as hrana_mod
+
+    monkeypatch.setattr(hrana_mod, "hrana_execute", fake)
+    monkeypatch.setattr(hrana_mod, "hrana_query", fake)
+
+    twr = datetime(2026, 8, 24, 11, 30, tzinfo=timezone.utc)
+
+    class _Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):  # noqa: ANN001
+            if tz is None:
+                return twr.replace(tzinfo=None)
+            return twr.astimezone(tz)
+
+    monkeypatch.setattr("utils.flex_embargo.datetime", _Frozen)
+
+    calls = {"n": 0}
+
+    def _boom(url, timeout=None):  # noqa: ANN001
+        calls["n"] += 1
+        raise AssertionError("SendRequest during 1025 lockout")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _boom)
+    with pytest.raises(FlexTokenLocked):
+        builder.fetch_flex_xml("tok", "1442520")
+    assert calls["n"] == 0
