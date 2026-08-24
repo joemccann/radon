@@ -13,7 +13,7 @@ Owner specs for regime tabs and the cheap-wing scanner. Add a row here when a sp
 | ivrank | `/regime/ivrank` | `ivrank` | [ivrank.md](ivrank.md) |
 | curve | `/regime/curve` | `yield-curve` | [curve.md](curve.md) |
 | credit | `/regime/credit` | `credit-spread` | [credit.md](credit.md) |
-| iei-hyg | `/regime/iei-hyg` | `iei-hyg` | [iei-hyg.md](iei-hyg.md) |
+| iei-hyg | `/regime/iei-hyg` | `iei-hyg` | [iei-hyg.md](iei-hyg.md) (tab renamed TSY/HY 2026-08-23) |
 | trin | `/regime/trin` | `trin` | [trin.md](trin.md) (spec; build in flight) |
 | divyield | `/regime/divyield` | `div-yield` | [divyield.md](divyield.md) |
 | hyad | `/regime/hyad` | `hy-ad` | [hyad.md](hyad.md) |
