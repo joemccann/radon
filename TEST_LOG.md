@@ -108,6 +108,36 @@ Darwin cloud baseline on THIS host is 34, not the first pass's 12: no bash >= 4
 | T-109 | DONE | (this commit) | `garch_convergence.main` and `leap_scanner_uw.main` refuse preset (non-explicit-ticker) scans when `should_block_universe_scan()`, writing the `SCAN_STATUS_BUDGET_BLOCKED` degraded row via `record_scan_degraded` exactly as the theta harvester does; GARCH re-emits the prior cache stamped `scan_status=uw-budget-blocked` without writing it, LEAP leaves `data/leap.json` untouched. The shell-default string grep is replaced by `test_scheduled_scan_defaults_resolve_under_the_universe_brake` (parses `${VAR:-default}` from both wrappers and `preset:` from `WorkspaceSections.tsx`, resolves via `load_preset`, asserts `< MAX_SCHEDULED_PRESET_TICKERS = 20000 // (4 scans/day x 3 req) = 1666`; `largecaps` 600 passes, `indexes` 2600 fails) plus `test_full_index_union_would_trip_the_universe_brake`. Red: `AttributeError: … has no attribute '_CACHE_PATH'` (x3), `… has no attribute 'should_block_universe_scan'` (x2); size guard red with the wrapper default flipped to `indexes` (`assert 2600 < 1666`). Green: `test_uw_budget` 12, `test_scan_degraded_telemetry` 17, `test_garch_convergence_scanner` 7, `test_leap_scanner` 36, `test_theta_harvester_scanner` 25, `test_leap_garch_refresh_defaults` 2, `test_refresh_wrapper_exit_status` 3, `test_scan_service_health` 25, `test_uw_client` 130. |
 | T-104 | DONE (deploy control-plane change - needs operator eye) | (this commit) | `deploy-root-helper.sh install-units` now journals a transaction under `STATE_DIR` (installed/updated units + pre-promotion bodies); new exact-grant `revert-units` disables --now newly installed timers, stops newly installed services, removes their files, restores replaced bodies, daemon-reloads once and reset-faileds the removed units; `commit-transition` closes the journal so a later rollback cannot strip a committed release. `deploy.sh recover_pending_transition` calls `revert_release_units` after `restore_release_backup` and before `recover` (non-fatal, logged as error). `sudoers.d/radon-deploy` gains the exact `revert-units` grant. Re-running `install-units` was not viable (it sources the GitHub main tip and refuses a HEAD behind it, exit 76) and moving the install after the gate would regress the nextjs/newsfeed body refresh. Red: gate-failing deploy call log `['stop-clean', 'git reset --hard', 'recover', 'verify-restored', 'commit-transition']` → `assert 'revert-units' in [...]`, plus four helper-level reds (exit 64 unknown action / missing grant). Green: `test_install_units.py` 24; `test_deploy_corrections.py` restore-branch exact call lists now include `revert-units` (still exact); full `pytest cloud/tests` on darwin 15 failed / 997 passed, FAILED list byte-identical to the baseline. **Operator:** helper + sudoers are control-plane sources; `preflight_control_plane` fails closed on their hash mismatch, so one root run of `cloud/scripts/bootstrap-control-plane.sh` is required on the host before the first deploy of this SHA. |
 
+### Closing gates — 2026-08-23 remediation, this host (3 consecutive rounds at `e7f2fdd3`)
+
+| Round | `python3.13 -m pytest` | `npx vitest run` | `pytest cloud/tests` |
+|---|---|---|---|
+| 1 | 7413 passed, 1 skipped, 90 deselected (151.4s) | 683 files / 7163 passed (49.8s) | 15 failed, 997 passed, 4 skipped (174.1s) |
+| 2 | 7413 passed, 1 skipped, 90 deselected (151.5s) | 683 files / 7163 passed (73.2s) | 15 failed, 997 passed, 4 skipped (177.6s) |
+| 3 | 7413 passed, 1 skipped, 90 deselected (224.4s) | 683 files / 7163 passed (84.7s) | 15 failed, 997 passed, 4 skipped (180.6s) |
+
+Serial, one gate at a time, full reporter output written to a file per run.
+The 15 cloud reds are the darwin `sha256sum` baseline for THIS host: 12 at
+the last audited SHA `4985a7f8` (run in a worktree, matches the 2026-08-22
+first-pass host) plus 3 in `test_refresh_control_plane.py`, which is new in
+`4985a7f8..2e904678` and also asserts `shutil.which("sha256sum")`. The sorted
+`FAILED` list is byte-identical across the baseline run on `origin/main`
+(`2e904678`), the mid-run check, and all three closing rounds. Delta from the
+`2e904678` baseline: pytest +48 (7365 → 7413), vitest +28 tests / +3 files
+(7135 → 7163), cloud +5 passed (992 → 997), 0 new reds.
+
+Tasks this host: 20 DONE (T-081, T-082, T-083, T-084, T-085, T-086, T-087,
+T-097, T-098, T-099, T-100, T-101, T-102, T-103, T-104, T-105, T-106, T-107,
+T-108, T-109), 0 BLOCKED, 0 DEFERRED. Two source defects surfaced by red
+tests and fixed in scope: `ChatPanel.confirmProposal` discarded the dedup
+message (T-085); the rest are as the audit ACs describe. Needs an operator
+eye before merge: T-104 changes `deploy-root-helper.sh` and
+`sudoers.d/radon-deploy` (control-plane sources — one root run of
+`cloud/scripts/bootstrap-control-plane.sh` before the first deploy of the
+merged SHA). Noticed, not touched (next audit):
+`scripts/monitor_daemon/handlers/cash_flow_sync.py:156` uses `hrana_execute`
+for a SELECT so `_persisted_next_attempt_at` can never return a value.
+
 ## Remediation 2026-08-23 (second host, remediate mode)
 
 This host started `remediate` while another host was already remediating the
