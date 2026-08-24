@@ -17,6 +17,7 @@ Owner specs for regime tabs and the cheap-wing scanner. Add a row here when a sp
 | trin | `/regime/trin` | `trin` | [trin.md](trin.md) (spec; build in flight) |
 | divyield | `/regime/divyield` | `div-yield` | [divyield.md](divyield.md) |
 | hyad | `/regime/hyad` | `hy-ad` | [hyad.md](hyad.md) |
+| hhlev | `/regime/hhlev` | `hhlev` | [hhlev.md](hhlev.md) |
 
 `vol-cone` is the only indicator with two writers: an EOD run that stores the completed session and a 15m live pass that re-ranks today's chain against it (`is_intraday`), so the tab is tradeable during the session rather than a day stale.
 

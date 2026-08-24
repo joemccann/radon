@@ -50,6 +50,9 @@ except Exception:
     pass
 
 from db import writer
+from utils.ipv4_first import prefer_ipv4
+
+prefer_ipv4()
 
 # -- constants -----------------------------------------------------
 SERVICE = "hy-ad"

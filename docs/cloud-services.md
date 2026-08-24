@@ -556,6 +556,19 @@ overlay joined from `credit_spread_history`. Rows in `hyad_history` (2018+).
 Heartbeat `hy-ad`. Installed by the deploy's `install-units` verb from
 `installed-units.sha256`. Spec: [`indicators/hyad.md`](indicators/hyad.md).
 
+### HH LEV (`radon-hhlev.timer`)
+
+Daily `13:20 UTC` (`RandomizedDelaySec=300`, offset from `radon-margin-debt`'s
+13:10 pass), oneshot `scripts/fetch_hhlev.py`, `TimeoutStartSec=300`. US
+household leverage: Z.1 household liabilities as a percent of net worth
+(`TLBSHNO`/`TNWBSHNO`) from the keyless FRED fredgraph CSV (UA must be
+`radon/2.0 (+https://radon.run)`; the bare token is reset by FRED's edge),
+keyed FRED API fallback via `FRED_API_KEY`. Quarterly source (~10 week lag,
+releases Mar/Jun/Sep/Dec); the daily run re-upserts the full revised series
+into `hhlev_history` and heartbeats `hhlev` regardless. Installed by the
+deploy's `install-units` verb from `installed-units.sha256`. Spec:
+[`indicators/hhlev.md`](indicators/hhlev.md).
+
 ### IV RANK (`radon-ivrank.timer`)
 
 Daily `22:10 UTC` (`RandomizedDelaySec=120`), oneshot
