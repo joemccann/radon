@@ -17,6 +17,8 @@ radon-db-retention.service
 radon-db-retention.timer
 radon-demo-mirror.service
 radon-demo-mirror.timer
+radon-divyield.service
+radon-divyield.timer
 radon-equibles-13f.service
 radon-equibles-13f.timer
 radon-equibles-ats.service

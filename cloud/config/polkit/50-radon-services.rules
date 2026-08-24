@@ -59,7 +59,8 @@ polkit.addRule(function(action, subject) {
         "radon-equibles-short-crowding.service": true,
         "radon-equibles-13f.service": true,
         "radon-equibles-ats.service": true,
-        "radon-equibles-cot.service": true
+        "radon-equibles-cot.service": true,
+        "radon-divyield.service": true
     };
     if (unit && rerunnable[unit] === true &&
         (verb == "start" || verb == "reset-failed")) {

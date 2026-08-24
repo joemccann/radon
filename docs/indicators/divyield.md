@@ -176,7 +176,9 @@ ordered ascending by date, monthly `approximate:1` rows then daily rows.
 - Service: `Type=oneshot`, `User=radon`, `WorkingDirectory=/home/radon/radon`,
   `EnvironmentFile=/home/radon/radon-cloud/.env`, `Environment=RADON_DB_NO_REPLICA=1`,
   `ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_divyield.py`
-  (venv python directly, never the wrapper), `TimeoutStartSec=900` (503 fetches + slack).
+  (venv python directly, never the wrapper), `TimeoutStartSec=2100`
+  (`SWEEP_BUDGET_S=1800` plus one in-flight Yahoo timeout; 900s SIGTERM'd a
+  20s/chart night on 2026-08-24).
 - Timer: `OnCalendar=*-*-* 22:40:00 UTC` — after US close and after radon-yield-curve's
   20:45/22:30 passes have landed the day's `y10`; offset from 22:30 to avoid sharing
   the minute. `Persistent=true`, `RandomizedDelaySec=300`, `WantedBy=timers.target`.

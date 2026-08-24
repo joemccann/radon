@@ -144,11 +144,12 @@ until a human ran reset-failed + start. Before launching grok on a
   never restart units mid-deploy.
 - systemd itself reports `ActiveState=failed` (the page excerpt is
   untrusted text and never triggers the action on its own) with either
-  `Result=signal`, or `Result=exit-code` AND the green deploy marker
-  (`/home/radon/.radon-last-green-deploy`) is newer than the unit's
-  `InactiveEnterTimestamp` — a fix has shipped since the failure.
+  `Result=signal`, or `Result=exit-code`/`Result=timeout` AND the green
+  deploy marker (`/home/radon/.radon-last-green-deploy`) is newer than the
+  unit's `InactiveEnterTimestamp` — a fix has shipped since the failure.
   radon-leap 2026-08-20: exit 1 at 14:02Z, fix deployed 15:05Z, next slot
-  the following day; it sat `failed` re-paging hourly until a human ran
+  the following day; radon-divyield 2026-08-24: `Result=timeout` at 23:57Z,
+  next slot ~22h. Both sat `failed` re-paging hourly until a human ran
   reset-failed + start. Without a newer deploy nothing has changed, a rerun
   would only fail again, so it falls through to grok.
 - the unit's timer's next elapse is more than 12h away

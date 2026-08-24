@@ -104,6 +104,7 @@ RERUNNABLE_ONESHOT_UNITS = frozenset({
     "radon-equibles-13f.service",
     "radon-equibles-ats.service",
     "radon-equibles-cot.service",
+    "radon-divyield.service",
 })
 DEPLOY_TRANSITION_JOURNAL = units_mod.TRANSITION_JOURNAL_PATH
 SYSTEMCTL_TIMEOUT_SECS = 30
@@ -258,11 +259,13 @@ def _rerun_reason(unit: str, runner: SystemctlRunner) -> Optional[str]:
 
     - ``Result=signal``: killed mid-run (deploy stop-clean, `radon restart`);
       the code is fine, the slot was lost.
-    - ``Result=exit-code`` with a green deploy NEWER than the failure: the
-      unit failed on its own, a fix has since shipped, and without a rerun
-      it sits `failed` re-paging hourly until its next timer slot
+    - ``Result=exit-code`` or ``Result=timeout`` with a green deploy NEWER
+      than the failure: the unit failed on its own (or systemd SIGTERM'd it
+      at TimeoutStartSec), a fix has since shipped, and without a rerun it
+      sits `failed` re-paging hourly until its next timer slot
       (radon-leap 2026-08-20: failed 14:02Z, fixed 15:05Z, next slot the
-      following day). Without a newer deploy nothing has changed, so a
+      following day; radon-divyield 2026-08-24: Result=timeout at 23:57Z,
+      next slot 22h out). Without a newer deploy nothing has changed, so a
       rerun would only fail again — fall through to grok.
     """
     props = _systemctl_show(unit, "ActiveState,Result,InactiveEnterTimestamp", runner)
@@ -271,14 +274,14 @@ def _rerun_reason(unit: str, runner: SystemctlRunner) -> Optional[str]:
     result = props.get("Result")
     if result == "signal":
         return "signal-killed"
-    if result != "exit-code":
+    if result not in ("exit-code", "timeout"):
         return None
     failed_at = units_mod._parse_systemd_timestamp(props.get("InactiveEnterTimestamp") or "")
     deployed_at = units_mod._read_deploy_evidence()["marker_mtime"]
     if failed_at is None or deployed_at is None or deployed_at <= failed_at:
         return None
     return (
-        f"exit-code with a fix deployed since (green {deployed_at:%H:%M}Z "
+        f"{result} with a fix deployed since (green {deployed_at:%H:%M}Z "
         f"> failure {failed_at:%H:%M}Z)"
     )
 

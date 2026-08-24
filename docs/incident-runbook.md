@@ -236,6 +236,49 @@ the unit stays failed.
 
 ---
 
+## divyield-yahoo-sweep-timeout
+
+**`radon-divyield.service` oneshot pages P1 `Result=timeout` (`NRestarts=0`)
+on the daily 22:40 UTC timer.** Peak: 2026-08-23 23:57Z, page `c52496dd…`.
+
+- **Mechanism:** `fetch_divyield.py` sweeps ~503 S&P 500 Yahoo v8 charts
+  with `ThreadPoolExecutor.map` (6 workers, 30s/request). The spec's
+  healthy-path measurement was 15.7s, so `TimeoutStartSec=900` looked
+  like slack. A slow Yahoo night (~20s/chart) needs ~28 min
+  (`503/6*20`). `map()` waited out the tarpit; systemd SIGTERM'd at
+  900s (`ExecMainStatus=15`). Nothing persisted. `Type=oneshot` has no
+  `Restart=`, so `NRestarts=0` and `ActiveState=failed` until the next
+  calendar fire (~22h). Unit watchdog pages P1. IB unused; weekend
+  gateway-down is coincidental.
+- **Detection:** journal `[div-yield] constituents: 503 tickers via
+  github-datasets` then silence until systemd timeout;
+  `systemctl show radon-divyield.service -p Result,NRestarts` →
+  `timeout` / `0`; ExecMainStart to InactiveEnter is exactly
+  `TimeoutStartSec`. Edge and `:8321/health/lite` stay up.
+  `service_health.div-yield` may still be `ok` from an earlier
+  same-day catch-up.
+- **Discriminating check:** `Result=timeout` with a constituents log
+  and no `quote sweep 100/503` (or a late one) in the same run. Yahoo
+  chart latency on the host in the tens of seconds. `Result=signal` is
+  deploy stop-clean (do not raise the budget). Zero constituents is a
+  different class. If `/health/lite` is down too → API, stand down.
+- **Remediation (code):** wall-clock `SWEEP_BUDGET_S=1800` with
+  `wait(..., FIRST_COMPLETED)` so the process exits before systemd
+  kills it; unfinished tickers count as `quote_errors` (the 80%
+  degenerate guard still refuses a thin sweep). `TimeoutStartSec=2100`
+  covers the budget plus one in-flight `FETCH_TIMEOUT_S`. Do not
+  restart-flap on the hung code; after the fix deploys, one
+  `radon unit restart radon-divyield` or the grok oneshot rerun
+  (`Result=timeout` + newer green marker, next timer >12h).
+- **Regression:**
+  `test_divyield.py::TestSweepBudget::test_tarpitted_yahoo_stops_inside_the_wall_clock_budget`,
+  `test_systemd_services.py::TestDivyieldScanBudget`,
+  `test_page_responder.py::test_timeout_reruns_when_a_fix_deployed_after_the_failure`.
+- **Code:** `scripts/fetch_divyield.py` (`SWEEP_BUDGET_S`, `sweep_yields`),
+  `cloud/services/radon-divyield.service` (`TimeoutStartSec=2100`).
+
+---
+
 ## leap-partial-ticker-exit-pages-p1
 
 **`radon-leap.service` oneshot pages P1 `Result=exit-code` after a successful
