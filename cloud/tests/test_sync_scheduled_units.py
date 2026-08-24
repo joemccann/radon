@@ -218,6 +218,7 @@ def test_deploy_syncs_after_green_gate_and_skips_when_ungranted():
     assert main.index("sync_scheduled_units") < main.index("write_green_marker")
     assert main.index("commit-transition") < main.rindex("sync_scheduled_units")
     assert "sync_scheduled_units" in recover
+    assert "sync_scheduled_units || return 1" not in recover
     assert "sudo -n -l --" in grant
     assert "bootstrap-control-plane.sh" in sync
     assert "return 0" in sync

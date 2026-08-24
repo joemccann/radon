@@ -855,6 +855,53 @@ recover_pending_transition
             "/usr/local/sbin/radon-deploy-root sync-scheduled-units",
         ]
 
+    def test_verified_journal_finalizes_when_unit_sync_refuses_stale_head(
+        self, tmp_path: Path
+    ) -> None:
+        releases = tmp_path / "releases"
+        live = tmp_path / "live"
+        stage = releases / "stage.target"
+        backup = releases / "backup.previous"
+        journal = tmp_path / "transition.json"
+        marker = tmp_path / "green-marker"
+        calls = tmp_path / "sudo.log"
+        releases.mkdir()
+        stage.mkdir()
+        backup.mkdir()
+        target = _create_release_artifacts(live, "target")
+        _create_release_artifacts(backup, "old")
+        _write_transition_journal(
+            journal, self.REQUESTED, self.PREVIOUS, stage, backup, "verified"
+        )
+        shell = f"""
+set -euo pipefail
+source {DEPLOY!s}
+current_commit() {{ printf '%s\\n' {self.REQUESTED}; }}
+deploy_gate() {{ return 0; }}
+record_deploy_marker() {{ return 0; }}
+log_warn() {{ :; }}
+sudo() {{
+  printf '%s\\n' "$*" >> {calls!s}
+  [[ "$*" == "/usr/local/sbin/radon-deploy-root sync-scheduled-units" ]] && return 76
+  return 0
+}}
+recover_pending_transition
+"""
+        result = subprocess.run(
+            ["bash", "-c", shell],
+            env={
+                **_transition_env(live, releases, journal),
+                "RADON_DEPLOY_GREEN_MARKER": str(marker),
+            },
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        for relative, expected in target.items():
+            assert (live / relative).read_bytes() == expected
+        assert marker.read_text(encoding="utf-8") == f"{self.REQUESTED}\n"
+        assert not journal.exists()
+
     def test_verified_journal_with_missing_venv_rolls_back_instead_of_finalizing(
         self, tmp_path: Path
     ) -> None:

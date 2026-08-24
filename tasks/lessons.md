@@ -14,6 +14,10 @@
 - Do not SendRequest to "check". Recover with `--from-file`. Do not heartbeat
   `cash-flow-sync` on reconstruct (that would stamp `last_attempt` as now and
   slide the 7-day clock).
+## 2026-08-23 — Verified-journal recover must not die on unit sync
+
+- `sync-scheduled-units` requires HEAD == GitHub main tip. A verified journal is often one SHA behind a tip that moved during the 40s gate. Fatal sync left the journal in place and the next deploy exited 76 (`Unfinished transition recovery failed`).
+- Recover: `sync_scheduled_units || log_warn`. Do not `return 1`. The gate already passed; finish the journal.
 
 ## 2026-08-21 — Scheduled units sync through a fixed helper, not a radon install
 
