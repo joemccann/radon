@@ -266,3 +266,13 @@ Depth montage / ladder + Time & Sales in the ticker Book tab. Plan + full design
 - **Per-instrument context fields are subject-owned.** `depthSymbols`, `depthFutureExpiry`, and `focusedBookKey` are written by the SUBJECT (`TickerDetailContent`, `FuturesOrderForm`): the effect that publishes a value publishes the empty value in its cleanup, keyed on ticker. `setActiveTicker` must never reset them on a ticker change: React runs child passive effects before the parent's, so a reset inside the shell's ticker-sync lands AFTER the new subject's publish and wins — `usePrices` never sent `subscribe-depth` and client-side navigation degraded to a single-row "L1 BBO" book with an empty tape while a hard load looked fine (2026-08-24). The `!ticker` branch (leaving detail) may still clear everything. Tests: `ticker-detail-context-depth-symbols-race.test.tsx`, `ticker-detail-content-focused-book-key-clears.test.tsx`.
 - **WS protocol.** `subscribe-depth` / `unsubscribe-depth` take a **single** symbol — scarce resource, only the focused subject subscribes (distinct from the array `subscribe`). Types + message shapes live in `pricesProtocol.ts`; pure derivations in `web/lib/book/depthDerivations.ts`.
 - **Verification.** Depth rows + the tape only populate during **market hours (RTH)** — empty off-hours is correct, not a bug. A populated ladder needs an RTH chrome-cdp check. Phase 1 ships an empty `Trade[]` tape; the dedicated tape feed is Phase 3.
+
+## Bounded shutdown (`instrumentation.ts` → `lib/boundedShutdown.ts`)
+
+Next's own SIGTERM handler runs `server.close()`, which waits for every open
+connection; in RTH those include `radonFetch` calls with 130 s timeouts against
+a FastAPI the deploy has already stopped, so `radon-nextjs` sat in
+`final-sigterm` until systemd's 90 s SIGKILL while the deploy waits 60 s
+(three rollbacks on 2026-08-24). `installBoundedShutdown()` lets Next's
+cleanup run and force-exits after `SHUTDOWN_GRACE_MS` (10 s). Never raise the
+grace above the deploy's `STATE_WAIT_SECONDS`. Test: `tests/bounded-shutdown.test.ts`.
