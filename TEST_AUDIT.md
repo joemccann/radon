@@ -2459,6 +2459,7 @@ renumbered from T-097. The first pass's audit text, ledger line and
 - **T-103 DONE.** `in_flight` deploy-collateral suppression bounded to the 60-min window and gated on a live (not stranded) transition journal, sharing `external_probe`'s rule. Red `['P3'] == ['P1']` for a 20h-old in-flight kill; green 297 in `test_watchdog/`; mutant caught.
 - **T-084 DONE.** Idempotent-upsert tests for `iei_hyg_history` / `credit_spread_history` execute the production writers on a recording sqlite; dead SQL constants removed. Red 4 failed under a column-swap mutation, green after with the mutation reverted.
 - **T-099 DONE.** Both indicator jobs now heartbeat `error` + `stale_source` when IB, UW and Yahoo all fail (mirrors `fetch_ivrank`); no cache raises. Red `('health', <svc>, 'ok')` written over unconfirmed data, green after; the legitimate unchanged-day `ok` path is pinned separately.
+- **T-087 DONE.** Relay health detail now produced by an extracted builder the test imports; R-061 mutation reds 2, green 11/11 and 373 related.
 
 ## 11 · Audit ledger
 

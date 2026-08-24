@@ -321,3 +321,27 @@ export function decideHealthWrite(input) {
 export function shouldRequestGatewayRestart(gatewayMode) {
   return gatewayMode === "docker" || gatewayMode === "cloud";
 }
+
+/**
+ * The tick-freshness fields the relay puts in every service_health detail
+ * (ok heartbeat and R-061 degraded row alike).
+ *
+ * ``last_tick_at`` and ``tick_age_secs`` both derive from the relay's
+ * ``lastTickTimestamp`` — never from ``freshness.lastTickAt``, whose idle
+ * substitution (``now`` when nothing is subscribed) once made the two fields
+ * contradict each other inside one row (R-061). ``freshness`` contributes only
+ * its subscription counts.
+ *
+ * @param {number} now                                   Current epoch ms.
+ * @param {number} lastTickTimestamp                     Epoch ms of the relay's last real tick.
+ * @param {{activeSubscriptions: number, subscribedSymbols: number}} freshness
+ * @returns {{last_tick_at: string, tick_age_secs: number, active_subscriptions: number, subscribed_symbols: number}}
+ */
+export function buildRelayHealthDetail(now, lastTickTimestamp, freshness) {
+  return {
+    last_tick_at: new Date(lastTickTimestamp).toISOString(),
+    tick_age_secs: Math.round((now - lastTickTimestamp) / 1000),
+    active_subscriptions: freshness.activeSubscriptions,
+    subscribed_symbols: freshness.subscribedSymbols,
+  };
+}
