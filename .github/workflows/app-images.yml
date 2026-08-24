@@ -24,19 +24,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build python image
-        run: >
-          docker build
-          -f docker/app/Dockerfile.python
-          --ignorefile docker/app/.dockerignore
-          -t radon-python:ci
-          .
+        run: |
+          cp docker/app/.dockerignore .dockerignore
+          docker build -f docker/app/Dockerfile.python -t radon-python:ci .
       - name: Build node image
-        run: >
-          docker build
-          -f docker/app/Dockerfile.node
-          --ignorefile docker/app/.dockerignore
-          -t radon-node:ci
-          .
+        run: |
+          cp docker/app/.dockerignore .dockerignore
+          docker build -f docker/app/Dockerfile.node -t radon-node:ci .
       - name: Push SHA tags to GHCR
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |

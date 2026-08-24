@@ -251,5 +251,7 @@ def test_image_workflow_exists_and_is_not_a_deploy_need() -> None:
     assert "app-images" not in ci
     assert "docker/app/Dockerfile.python" in wf
     assert "docker/app/Dockerfile.node" in wf
+    assert "docker/app/.dockerignore" in wf
+    assert "--ignorefile" not in wf
     assert "packages: write" in wf
     assert "environment:" not in wf
