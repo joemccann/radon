@@ -31,7 +31,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libxrandr2 \
     && rm -rf /var/lib/apt/lists/*
 
-RUN useradd --system --uid 1000 --create-home --home-dir /home/radon --shell /usr/sbin/nologin radon \
+RUN useradd --system --create-home --home-dir /home/radon --shell /usr/sbin/nologin radon \
     && mkdir -p /home/radon/radon \
     && chown -R radon:radon /home/radon
 

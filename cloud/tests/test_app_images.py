@@ -118,6 +118,7 @@ class TestNodeImage:
     def test_user_radon_is_final(self) -> None:
         text = NODE_DF.read_text(encoding="utf-8")
         assert _final_user(text) == "radon"
+        assert "--uid 1000" not in text
 
 
 class TestImageSafety:
