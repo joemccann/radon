@@ -229,3 +229,63 @@ def test_dual_write_no_op_on_import_error(monkeypatch: pytest.MonkeyPatch):
     import ib_orders
     # Should not raise.
     ib_orders._dual_write_orders_to_db({"open_orders": [], "executed_orders": []})
+
+
+_JOURNAL_OPEN = {
+    "ticker": "SLV", "strike": 60.0, "right": "C", "expiry": "20261016",
+    "action": "BUY_OPTION", "contracts": 10, "fill_price": 1.0, "commission": 0.0,
+    "total_cost": 1000.0, "ib_exec_id": "open-1", "date": "2026-08-07",
+}
+_JOURNAL_CLOSE = {**_JOURNAL_OPEN, "action": "SELL_OPTION", "fill_price": 3.0,
+                  "total_cost": 3000.0, "ib_exec_id": "close-1", "date": "2026-08-24"}
+
+
+def _closing_fill():
+    return {
+        "execId": "close-1", "permId": 7, "time": "2026-08-24T19:55:56+00:00",
+        "symbol": "SLV C60",
+        "contract": {"symbol": "SLV", "secType": "OPT", "strike": 60.0, "right": "C",
+                     "expiry": "2026-10-16"},
+        "side": "SLD", "quantity": 10.0, "realizedPNL": 1234.5,
+    }
+
+
+def _stub_db_client(monkeypatch, *, rows=None, error=None):
+    import json
+
+    class _Cursor:
+        def fetchall(self):
+            return [(json.dumps(r), r["date"], f"w{i}") for i, r in enumerate(rows or [])]
+
+    class _Db:
+        def execute(self, sql, args=()):
+            if error:
+                raise error
+            return _Cursor()
+
+    fake = types.ModuleType("db.client")
+    fake.get_db = lambda: _Db()  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "db.client", fake)
+
+
+def test_dual_write_persists_journal_realized_pnl_over_ib(mock_writer, monkeypatch):
+    _stub_db_client(monkeypatch, rows=[_JOURNAL_OPEN, _JOURNAL_CLOSE])
+    import ib_orders
+
+    ib_orders._dual_write_orders_to_db({"open_orders": [], "executed_orders": [_closing_fill()]})
+
+    [written] = mock_writer["upsert_executed_order"]
+    assert written["payload"]["realizedPNL"] == 2000.0
+    assert written["payload"]["ibRealizedPNL"] == 1234.5
+    assert written["payload"]["realizedPNLSource"] == "journal"
+
+
+def test_dual_write_keeps_ib_realized_pnl_when_journal_unreadable(mock_writer, monkeypatch):
+    _stub_db_client(monkeypatch, error=RuntimeError("stream not found"))
+    import ib_orders
+
+    ib_orders._dual_write_orders_to_db({"open_orders": [], "executed_orders": [_closing_fill()]})
+
+    [written] = mock_writer["upsert_executed_order"]
+    assert written["payload"]["realizedPNL"] == 1234.5
+    assert "ibRealizedPNL" not in written["payload"]

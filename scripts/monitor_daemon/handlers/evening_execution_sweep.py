@@ -107,6 +107,17 @@ def _is_trading_day_et(now_utc: datetime) -> bool:
     return et_dt.strftime("%Y-%m-%d") not in holidays
 
 
+def _overlay_journal_realized_pnl(rows: List[Dict[str, Any]]) -> None:
+    """Journal average-cost realized P&L over IB's drifted figure (advisory)."""
+    try:
+        from clients.journal_realized import overlay_journal_realized_pnl  # noqa: PLC0415
+        from db.client import get_db  # noqa: PLC0415
+
+        overlay_journal_realized_pnl(get_db(), rows)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("evening_execution_sweep: realized P&L overlay skipped: %s", exc)
+
+
 class EveningExecutionSweepHandler(BaseHandler):
     """Import the day's after-hours executions once per ET trading day."""
 
@@ -272,6 +283,7 @@ class EveningExecutionSweepHandler(BaseHandler):
         """
         if not rows or upsert_executed_order is None:
             return 0
+        _overlay_journal_realized_pnl(rows)
         mirrored = 0
         for e in rows:
             exec_id = e.get("execId")

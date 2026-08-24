@@ -20,6 +20,7 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 from clients.journal_realized import (  # noqa: E402
     apply_journal_realized_pnl,
     journal_realized_pnl_for_fills,
+    overlay_journal_realized_pnl,
     realized_pnl_by_exec_id,
 )
 
@@ -185,3 +186,44 @@ class TestLoadForFills:
             raise AssertionError("must not query")
 
         assert journal_realized_pnl_for_fills(execute, []) == {}
+
+
+class _FakeCursor:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def fetchall(self):
+        return self._rows
+
+
+class _FakeDb:
+    """Mirrors the libsql connection surface the writers hand over."""
+
+    def __init__(self, rows=None, error=None):
+        self._rows = rows or []
+        self._error = error
+
+    def execute(self, sql, args=()):
+        if self._error:
+            raise self._error
+        return _FakeCursor(self._rows)
+
+
+class TestOverlayWithDb:
+    def test_persists_journal_figure_on_the_fill_payload(self):
+        db = _FakeDb(rows=[
+            _row("o1", "BUY_OPTION", 10, 1.00, 0.0, _C60, "2026-08-07", "w1"),
+            _row("c1", "SELL_OPTION", 10, 3.00, 0.0, _C60, "2026-08-24", "w2"),
+        ])
+        fills = [_fill("c1", "SLV", 60.0, "C", "SLD", 10, 1234.5)]
+        overlay_journal_realized_pnl(db, fills)
+        assert fills[0]["realizedPNL"] == 2000.0
+        assert fills[0]["ibRealizedPNL"] == 1234.5
+        assert fills[0]["realizedPNLSource"] == "journal"
+
+    def test_journal_read_failure_keeps_ib_figure(self):
+        db = _FakeDb(error=RuntimeError("stream not found"))
+        fills = [_fill("c1", "SLV", 60.0, "C", "SLD", 10, 1234.5)]
+        overlay_journal_realized_pnl(db, fills)
+        assert fills[0]["realizedPNL"] == 1234.5
+        assert "ibRealizedPNL" not in fills[0]
