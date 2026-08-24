@@ -45,3 +45,26 @@ export async function runForever({ intervalMs, scrapeOnce, signal, onCycleError,
     await abortableSleep(wait, signal);
   }
 }
+
+export const SHUTDOWN_GRACE_MS = 10_000;
+
+/**
+ * Bounded shutdown for the long-running loop. A Playwright scrape mid-flight
+ * does not observe the abort, so a SIGTERM that only aborted the controller
+ * left the process alive until systemd's SIGKILL (90 s) — longer than the
+ * deploy waits for the unit to go inactive. Abort, then exit after the grace.
+ */
+export function createShutdown({ controller, exit = process.exit, graceMs = SHUTDOWN_GRACE_MS }) {
+  let started = false;
+  return function shutdown(signalName) {
+    if (started) return;
+    started = true;
+    console.info(`[newsfeed] received ${signalName} — shutting down`);
+    controller.abort();
+    const timer = setTimeout(() => {
+      console.warn(`[newsfeed] shutdown grace of ${graceMs}ms elapsed — exiting`);
+      exit(0);
+    }, graceMs);
+    timer.unref?.();
+  };
+}

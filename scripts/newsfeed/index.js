@@ -15,7 +15,7 @@ import { buildExtractionExpression, parsePayload } from "./extract.js";
 import { createImageDownloader, hydrateLocalImages } from "./media.js";
 import { loadExistingPosts, mergePosts, persistPosts } from "./store.js";
 import { pushMedia } from "./push_media.js";
-import { runForever } from "./scheduler.js";
+import { createShutdown, runForever } from "./scheduler.js";
 import { appendTaxonomy, recordServiceHealth, upsertPosts } from "../db/writer.js";
 import { createTagger } from "./tagger.js";
 import { createVisionTagger, hydrateTagsDual } from "./vision_tagger.js";
@@ -286,16 +286,15 @@ if (isDirectExecution()) {
       });
   } else {
     const controller = new AbortController();
-    const shutdown = (signal) => {
-      console.info(`[newsfeed] received ${signal} — shutting down`);
-      controller.abort();
-    };
+    const shutdown = createShutdown({ controller });
     process.on("SIGINT", () => shutdown("SIGINT"));
     process.on("SIGTERM", () => shutdown("SIGTERM"));
 
-    run({ signal: controller.signal }).catch((err) => {
-      console.error(`[newsfeed] fatal: ${err.message}`);
-      process.exit(1);
-    });
+    run({ signal: controller.signal })
+      .then(() => process.exit(0))
+      .catch((err) => {
+        console.error(`[newsfeed] fatal: ${err.message}`);
+        process.exit(1);
+      });
   }
 }
