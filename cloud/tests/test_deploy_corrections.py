@@ -2377,21 +2377,18 @@ class TestCloudSecretScan:
 
     def test_root_ci_runs_full_python313_cloud_suite(self) -> None:
         workflow = yaml.safe_load(ROOT_CI.read_text(encoding="utf-8"))
-        jobs = workflow["jobs"]
-        pytest_jobs = [
-            job
-            for job in jobs.values()
-            if "pytest" in "\n".join(str(step.get("run", "")) for step in job["steps"])
-        ]
-        assert len(pytest_jobs) == 1
-        job = pytest_jobs[0]
-        setup_python = next(
-            step for step in job["steps"] if "actions/setup-python" in step.get("uses", "")
+        job = workflow["jobs"]["cloud-tests"]
+        setup_uv = next(
+            step for step in job["steps"] if "astral-sh/setup-uv" in step.get("uses", "")
         )
-        assert setup_python["with"]["python-version"] == "3.13"
+        assert setup_uv["with"]["python-version"] == "3.13"
         commands = "\n".join(str(step.get("run", "")) for step in job["steps"])
         assert "requirements-test.txt" in commands
-        assert re.search(r"python\s+-m\s+pytest(?:\s|$)", commands)
+        assert "pytest cloud/tests" in commands
+        unit_commands = "\n".join(
+            str(step.get("run", "")) for step in workflow["jobs"]["py-tests"]["steps"]
+        )
+        assert "pytest cloud/tests" not in unit_commands
 
     def test_custom_rules_reject_literal_tws_assignments_and_examples(self) -> None:
         config = tomllib.loads(GITLEAKS_CONFIG.read_text(encoding="utf-8"))

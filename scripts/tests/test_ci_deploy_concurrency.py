@@ -8,13 +8,23 @@ finish and every deploy must name the exact commit it intends to release.
 
 from __future__ import annotations
 
+import fnmatch
+import re
 from pathlib import Path
 
 import yaml
 
 
 WORKFLOW = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "ci.yml"
-TEST_JOBS = ("secret-scan", "web-tests", "py-tests", "perimeter-smoke")
+TEST_JOBS = (
+    "secret-scan",
+    "web-tests",
+    "web-coverage",
+    "py-tests",
+    "py-coverage",
+    "cloud-tests",
+    "perimeter-smoke",
+)
 
 
 def _workflow() -> dict:
@@ -83,10 +93,198 @@ def test_deploy_passes_the_explicit_workflow_sha() -> None:
     assert "RADON_DEPLOY_ENV_FILE" in script
 
 
+def _job_commands(job: dict) -> str:
+    return "\n".join(str(step.get("run", "")) for step in job.get("steps", []))
+
+
 def test_ci_runs_cloud_infra_pytest() -> None:
+    jobs = _workflow()["jobs"]
+    cloud = jobs["cloud-tests"]
+    assert "pytest cloud/tests" in _job_commands(cloud)
+    assert "pytest cloud/tests" not in _job_commands(jobs["py-tests"]), (
+        "cloud infra tests must run as their own job so they leave the unit "
+        "pytest critical path"
+    )
+    deploy_needs = jobs["deploy"]["needs"]
+    assert "cloud-tests" in deploy_needs
+    assert "py-tests" in deploy_needs
+
+
+def test_python_ci_jobs_cache_pip_and_pin_the_test_toolchain() -> None:
+    jobs = _workflow()["jobs"]
+    uv_pin = "803947b9bd8e9f986429fa0c5a41c367cd732b41"
+    for name in ("py-tests", "cloud-tests"):
+        setup_uv = next(
+            step
+            for step in jobs[name]["steps"]
+            if "astral-sh/setup-uv@" in step.get("uses", "")
+        )
+        assert uv_pin in setup_uv["uses"]
+        assert setup_uv["with"]["python-version"] == "3.13"
+        assert str(setup_uv["with"].get("enable-cache", "")).lower() in ("true", "True")
+        cache_paths = str(setup_uv["with"].get("cache-dependency-glob", ""))
+        assert "requirements-dev.txt" in cache_paths
+        commands = _job_commands(jobs[name])
+        assert "uv pip install --system" in commands
+        assert "requirements-dev.txt" in commands
+        assert "pip install --upgrade pip" not in commands
+        assert "pip install pytest pytest-asyncio pytest-cov" not in commands
+
+
+def test_vitest_uses_all_ci_workers() -> None:
+    config = (WORKFLOW.parents[2] / "vitest.config.ts").read_text(encoding="utf-8")
+    assert re.search(r'maxWorkers:\s*["\']100%["\']', config)
+    assert re.search(r"fileParallelism:\s*true", config)
+
+
+def test_vitest_shards_then_merges_coverage_ratchet() -> None:
+    jobs = _workflow()["jobs"]
+    web = jobs["web-tests"]
+    shards = web["strategy"]["matrix"]["shard"]
+    assert [str(item) for item in shards] == ["1", "2", "3", "4", "5", "6", "7", "8"]
+    assert "matrix.shard" in web["concurrency"]["group"]
+    commands = _job_commands(web)
+    assert "--shard=${{ matrix.shard }}/8" in commands
+    assert "coverage.thresholds.lines=0" in commands
+    assert "coverage.thresholds.functions=0" in commands
+    assert "coverage.thresholds.branches=0" in commands
+    coverage = jobs["web-coverage"]
+    assert "web-tests" in coverage["needs"]
+    assert "merge_vitest_coverage" in _job_commands(coverage)
+    web_checkout = next(
+        step for step in coverage["steps"] if "actions/checkout" in step.get("uses", "")
+    )
+    sparse = str(web_checkout.get("with", {}).get("sparse-checkout", ""))
+    assert "merge_vitest_coverage.py" in sparse
+    assert "vitest.config.ts" in sparse
+
+
+def test_vitest_coverage_uses_text_reporter_only() -> None:
+    config = (WORKFLOW.parents[2] / "vitest.config.ts").read_text(encoding="utf-8")
+    assert re.search(r'reporter:\s*\[\s*["\']text["\']\s*\]', config), (
+        "html/clover/json coverage reports inflate the 307s vitest gate; "
+        "the ratchet is thresholds, not artifacts"
+    )
+    assert "--coverage" in _job_commands(_workflow()["jobs"]["web-tests"])
+
+
+def test_unit_pytest_uses_xdist_loadfile() -> None:
+    commands = _job_commands(_workflow()["jobs"]["py-tests"])
+    assert "-n auto" in commands
+    assert "--dist loadfile" in commands
+    assert "--cov-fail-under=0" in commands
+    assert "--cov-branch" not in commands
+    assert "term-missing" not in commands
+
+
+def test_pytest_shards_then_combines_coverage_ratchet() -> None:
+    jobs = _workflow()["jobs"]
+    py_tests = jobs["py-tests"]
+    shards = [str(item) for item in py_tests["strategy"]["matrix"]["shard"]]
+    assert shards == [
+        "scripts-ac",
+        "scripts-df",
+        "scripts-i",
+        "scripts-ghjm",
+        "scripts-npsz",
+        "scripts-rs",
+        "rest-api",
+        "rest",
+    ]
+    assert "matrix.shard" in py_tests["concurrency"]["group"]
+    commands = _job_commands(py_tests)
+    assert "matrix.paths" in commands
+    include = str(py_tests["strategy"]["matrix"]["include"])
+    assert "test_[a-c]" in include
+    assert "test_[d-f]" in include
+    assert "test_i*" in include
+    assert "--cov-fail-under=0" in commands
+    checkout = next(
+        step
+        for step in py_tests["steps"]
+        if "actions/checkout" in step.get("uses", "")
+    )
+    fetch_depth = str(checkout.get("with", {}).get("fetch-depth", ""))
+    assert "scripts-df" in fetch_depth
+    coverage = jobs["py-coverage"]
+    assert "py-tests" in coverage["needs"]
+    cov_commands = _job_commands(coverage)
+    assert "coverage combine coverage-artifacts/" in cov_commands
+    assert "fail-under=56" in cov_commands
+    cov_checkout = next(
+        step for step in coverage["steps"] if "actions/checkout" in step.get("uses", "")
+    )
+    sparse = str(cov_checkout.get("with", {}).get("sparse-checkout", ""))
+    assert "pyproject.toml" in sparse
+    assert "scripts" in sparse
+
+
+def test_pytest_filename_shards_partition_scripts_tests() -> None:
     py_tests = _workflow()["jobs"]["py-tests"]
-    commands = "\n".join(str(step.get("run", "")) for step in py_tests["steps"])
-    assert "pytest cloud/tests" in commands
+    include = py_tests["strategy"]["matrix"]["include"]
+    filename_globs: list[str] = []
+    other_paths: list[str] = []
+    for row in include:
+        for token in str(row["paths"]).split():
+            token = token.strip('"')
+            if token.startswith("scripts/tests/"):
+                filename_globs.append(Path(token).name)
+            else:
+                other_paths.append(token)
+    files = [
+        path.name
+        for path in (WORKFLOW.parents[2] / "scripts" / "tests").glob("test_*.py")
+    ]
+    assigned = {name: [] for name in files}
+    for pattern in filename_globs:
+        for name in files:
+            if fnmatch.fnmatch(name, pattern):
+                assigned[name].append(pattern)
+    overlap = {name: hits for name, hits in assigned.items() if len(hits) > 1}
+    missing = [name for name, hits in assigned.items() if not hits]
+    assert overlap == {}
+    assert missing == []
+    assert "scripts/api/tests" in other_paths
+    assert "scripts/trade_blotter" in other_paths
+    assert "tests" in other_paths
+
+
+def test_coverage_ratchets_gate_deploy() -> None:
+    jobs = _workflow()["jobs"]
+    needs = jobs["deploy"]["needs"]
+    assert "web-coverage" in needs
+    assert "py-coverage" in needs
+    assert "web-tests" in needs
+    assert "py-tests" in needs
+    assert "cloud-tests" in needs
+    assert "stage-release" not in jobs
+    assert "merge_vitest_coverage" in _job_commands(jobs["web-coverage"])
+    assert "fail-under=56" in _job_commands(jobs["py-coverage"])
+
+
+def test_py_coverage_installs_coverage_only() -> None:
+    job = _workflow()["jobs"]["py-coverage"]
+    commands = _job_commands(job)
+    assert "pytest-cov==7.1.0" in commands
+    assert "pip install -r requirements-dev.txt" not in commands
+    assert not any("astral-sh/setup-uv@" in step.get("uses", "") for step in job["steps"])
+    assert "python3 -m pip" in commands or "python3 -m coverage" in commands
+
+
+def test_bun_jobs_cache_the_install_store() -> None:
+    jobs = _workflow()["jobs"]
+    pin = "5a3ec84eff668545956fd18022155c47e93e2684"
+    for name in ("web-tests", "perimeter-smoke"):
+        cache = next(
+            step
+            for step in jobs[name]["steps"]
+            if "actions/cache@" in step.get("uses", "")
+        )
+        assert pin in cache["uses"]
+        assert "~/.bun/install/cache" in str(cache["with"]["path"])
+        key = str(cache["with"]["key"])
+        assert "bun.lock" in key
+        assert "web/bun.lock" in key
 
 
 def test_ci_uses_frozen_bun_lockfile_contract_for_both_workspaces() -> None:
@@ -100,8 +298,5 @@ def test_ci_uses_frozen_bun_lockfile_contract_for_both_workspaces() -> None:
         steps = workflow["jobs"][job_name]["steps"]
         commands = "\n".join(str(step.get("run", "")) for step in steps)
         assert commands.count("bun install --frozen-lockfile") == 2
-        install_lines = [line.strip() for line in commands.splitlines() if "bun install" in line]
-        assert install_lines == [
-            "bun install --frozen-lockfile",
-            "bun install --frozen-lockfile",
-        ]
+        assert "&" in commands
+        assert "wait" in commands

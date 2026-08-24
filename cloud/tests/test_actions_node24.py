@@ -3,6 +3,7 @@
 The runner warning names checkout / setup-python / upload-artifact pinned
 to Node-20 action.yml. Official majors that switched to ``using: node24``
 are the fix. setup-bun v2.2.0 is already node24 at the existing pin.
+CI Python now uses astral-sh/setup-uv (node24) instead of setup-python.
 """
 
 from __future__ import annotations
@@ -24,6 +25,9 @@ NODE24_PINS = {
     ),
     "actions/upload-artifact": (
         "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",  # v7.0.1
+    ),
+    "astral-sh/setup-uv": (
+        "803947b9bd8e9f986429fa0c5a41c367cd732b41",  # v7.2.1
     ),
 }
 

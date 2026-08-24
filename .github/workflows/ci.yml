@@ -61,16 +61,26 @@ jobs:
         run: gitleaks detect --source . --config cloud/.gitleaks.toml --redact --no-banner --verbose
 
   web-tests:
-    name: Vitest (full config)
+    name: Vitest (shard ${{ matrix.shard }}/8)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     concurrency:
-      group: ci-web-tests-${{ github.ref }}
+      group: ci-web-tests-${{ github.ref }}-${{ matrix.shard }}
       cancel-in-progress: true
     env:
       NODE_ENV: test
       ASSISTANT_MOCK: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', 'web/bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: "1.3.14"
@@ -78,9 +88,10 @@ jobs:
       # cross-cutting vitest.config.ts (which imports `vitest/config`), and
       # web/ provides the app modules the tests import (@/lib, react, ...).
       # Install BOTH or the root config fails to load with ERR_MODULE_NOT_FOUND.
-      - run: bun install --frozen-lockfile
-      - run: bun install --frozen-lockfile
-        working-directory: web
+      - run: |
+          bun install --frozen-lockfile &
+          bun install --frozen-lockfile --cwd web &
+          wait
       # Run the FULL vitest config from the repo root (lib/tools + site/lib +
       # web/tests), NOT `bun run test` — that script restricts to web/tests and
       # silently skips ~9 files / ~68 tests (incl. site/lib/theme). vitest + the
@@ -97,38 +108,96 @@ jobs:
       # reads from resolveProjectRoot()); the test now writes under the project
       # root, so it is cwd-independent and runs in CI.
       #
-      # --coverage enforces the vitest.config.ts thresholds (lines/funcs/
-      # branches) as a non-regressing ratchet — symmetric with the pytest
-      # --cov-fail-under gate. @vitest/coverage-v8 is a declared devDep.
+      # Shards zero the per-job coverage thresholds: each shard only executes
+      # an eighth of the tests, so the ratchet would false-fail. web-coverage merges
+      # istanbul JSON and applies vitest.config.ts lines/functions/branches.
       - run: >-
           bunx vitest run --config vitest.config.ts --coverage
+          --shard=${{ matrix.shard }}/8
+          --coverage.reporter=json
+          --coverage.reportsDirectory=coverage/shard-${{ matrix.shard }}
+          --coverage.thresholds.lines=0
+          --coverage.thresholds.functions=0
+          --coverage.thresholds.branches=0
           --exclude '**/web/tests/integration.test.ts'
           --exclude '**/lib/tools/__tests__/kelly.test.ts'
           --exclude '**/lib/tools/__tests__/runner.test.ts'
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: vitest-coverage-${{ matrix.shard }}
+          path: coverage/shard-${{ matrix.shard }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
 
-  py-tests:
-    name: pytest (unit, no integration)
+  web-coverage:
+    name: Vitest coverage ratchet
+    needs: [web-tests]
     runs-on: ubuntu-latest
     concurrency:
-      group: ci-py-tests-${{ github.ref }}
+      group: ci-web-coverage-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: |
+            scripts/ci/merge_vitest_coverage.py
+            vitest.config.ts
+          sparse-checkout-cone-mode: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: vitest-coverage-*
+          path: coverage-artifacts
+      - run: python3 scripts/ci/merge_vitest_coverage.py --root coverage-artifacts
+
+  py-tests:
+    name: pytest (${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Isolate test_i* and scripts/api/tests; those two buckets dominated
+        # wall-clock under the previous a-c / d-g / h-i / rest split.
+        shard: [scripts-ac, scripts-df, scripts-i, scripts-ghjm, scripts-npsz, scripts-rs, rest-api, rest]
+        include:
+          - shard: scripts-ac
+            paths: "scripts/tests/test_[a-c]*.py"
+          - shard: scripts-df
+            paths: "scripts/tests/test_[d-f]*.py"
+          - shard: scripts-i
+            paths: "scripts/tests/test_i*.py"
+          - shard: scripts-ghjm
+            paths: "scripts/tests/test_[g-h]*.py scripts/tests/test_[j-m]*.py"
+          - shard: scripts-npsz
+            paths: "scripts/tests/test_[n-p]*.py scripts/tests/test_[t-z]*.py"
+          - shard: scripts-rs
+            paths: "scripts/tests/test_[r-s]*.py"
+          - shard: rest-api
+            paths: scripts/api/tests
+          - shard: rest
+            paths: scripts/trade_blotter tests
+    concurrency:
+      group: ci-py-tests-${{ github.ref }}-${{ matrix.shard }}
       cancel-in-progress: true
     env:
       DOCS_CONTRACT_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+          # docs contract (test_docs_contract.py) diffs against DOCS_CONTRACT_BASE.
+          fetch-depth: ${{ matrix.shard == 'scripts-df' && 0 || 1 }}
+      - uses: astral-sh/setup-uv@803947b9bd8e9f986429fa0c5a41c367cd732b41 # v7.2.1
         with:
           python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: |
+            requirements.txt
+            scripts/requirements-api.txt
+            requirements-dev.txt
+            cloud/requirements-test.txt
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt -r scripts/requirements-api.txt
-          pip install pytest pytest-asyncio pytest-cov
-          if [ -f cloud/requirements-test.txt ]; then
-            pip install -r cloud/requirements-test.txt
-          fi
+          uv pip install --system -r requirements.txt -r scripts/requirements-api.txt -r requirements-dev.txt
       # Run from the repo ROOT — pyproject.toml pins pythonpath so `import
       # ib_sync` / `from api.*` / trade_blotter all resolve. addopts already
       # applies `-m 'not integration'`, so the live MenthorQ suite is skipped.
@@ -136,29 +205,53 @@ jobs:
       # tests (29 collected) are orphaned — pythonpath includes the dir, but it
       # is not a collection target unless named.
       #
-      # --cov-fail-under is a non-regressing RATCHET, not a vanity target.
-      # 2026-08-08 (TEST_AUDIT T-050): rebased onto an HONEST metric. The
-      # prior 64 gate counted test files as covered surface area — test
-      # modules self-cover ~99% just by being collected/executed, which
-      # inflated the combined statement+branch figure to 73.01% (climbing to
-      # 74.88% by the end of the T-001..T-052 remediation pass). pyproject.toml
-      # now carries `[tool.coverage.run] omit` for scripts/tests,
-      # scripts/api/tests, scripts/trade_blotter/test_*.py, and tests/, so
-      # this number measures PRODUCT code only. Measured honest coverage on
-      # this branch: 58.85%. The gate dropping from 64 to 56 is the metric
-      # excluding test files from the numerator, not a coverage regression —
-      # product coverage was unchanged (in fact still rising) at rebase time.
-      # 56 sits ~2.5pts below the measured honest figure, preserving the
-      # original ratchet design. Raise it over time as coverage climbs; never
-      # lower it to make a red build pass.
-      # `tests` (repo root) carries the TWR money-math suite (20 cases) —
-      # it passed locally for months while gating nothing (TEST_AUDIT T-051).
+      # Shards zero --cov-fail-under: each machine only executes part of the
+      # suite. py-coverage combines the data files and applies the 56 ratchet.
+      # `tests` (repo root) carries the TWR money-math suite (TEST_AUDIT T-051).
+      #
+      # -n auto --dist loadfile: GitHub-hosted runners have multiple cores;
+      # loadfile keeps each test module on one worker so autouse fixtures and
+      # module-level stubs do not race. pytest-cov combines worker coverage.
       - run: >-
-          python -m pytest scripts/tests scripts/api/tests scripts/trade_blotter tests
-          --cov=scripts --cov=api --cov-branch --cov-report=term-missing
-          --cov-fail-under=56
-      - name: Cloud infra pytest
-        run: python -m pytest cloud/tests -q
+          python -m pytest ${{ matrix.paths }}
+          -n auto --dist loadfile
+          --cov=scripts --cov=api
+          --cov-fail-under=0
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pytest-coverage-${{ matrix.shard }}
+          path: .coverage
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+
+  py-coverage:
+    name: pytest coverage ratchet
+    needs: [py-tests]
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ci-py-coverage-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: |
+            pyproject.toml
+            scripts
+            tests
+      - name: Install dependencies
+        run: python3 -m pip install --user --break-system-packages pytest-cov==7.1.0
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: pytest-coverage-*
+          path: coverage-artifacts
+      # --cov-fail-under is a non-regressing RATCHET, not a vanity target.
+      # 2026-08-08 (TEST_AUDIT T-050): honest product-only coverage; 56 sits
+      # ~2.5pts below the measured figure. Never lower it to make a red build
+      # pass.
+      - run: |
+          python3 -m coverage combine coverage-artifacts/*
+          python3 -m coverage report --fail-under=56 --show-missing
       # REL-065 / R-156: docs/demo-environment.md has claimed since phase 0
       # that a "CI isolation guard rejects any demo deploy whose env carries a
       # prod TURSO_DB_URL". Nothing invoked it. On demo.radon.run
@@ -177,7 +270,34 @@ jobs:
             echo "no demo env configured on this runner — nothing to check"
             exit 0
           fi
-          python scripts/ci/check_demo_isolation.py
+          python3 scripts/ci/check_demo_isolation.py
+
+  cloud-tests:
+    name: pytest (cloud infra)
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ci-cloud-tests-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@803947b9bd8e9f986429fa0c5a41c367cd732b41 # v7.2.1
+        with:
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: |
+            requirements-dev.txt
+            cloud/requirements-test.txt
+      - name: Install dependencies
+        run: |
+          uv pip install --system -r requirements-dev.txt
+          if [ -f cloud/requirements-test.txt ]; then
+            uv pip install --system -r cloud/requirements-test.txt
+          fi
+      # Separate job: pyproject.toml norecursedirs includes cloud/ because
+      # cloud/tests/conftest.py collides with scripts/tests/conftest.py on the
+      # import path `tests.conftest`. Running it after unit pytest serialized
+      # ~60s onto the deploy critical path.
+      - run: python -m pytest cloud/tests -q
 
   perimeter-smoke:
     name: Perimeter smoke (next start + curl)
@@ -201,14 +321,21 @@ jobs:
       RADON_PROBE_FRESHNESS_TOKEN: rpf_ci_perimeter_smoke_dummy
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', 'web/bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: "1.3.14"
       # Both bun projects, same as web-tests: next.config aliases @tools to
       # the root lib/tools, so the build resolves modules from BOTH trees.
-      - run: bun install --frozen-lockfile
-      - run: bun install --frozen-lockfile
-        working-directory: web
+      - run: |
+          bun install --frozen-lockfile &
+          bun install --frozen-lockfile --cwd web &
+          wait
       # Static half of the Edge-runtime guard: the no-restricted-syntax
       # node:* ban on the middleware import graph (web/eslint.config.mjs).
       # Scoped to the perimeter files so unrelated lint warnings can't block
@@ -348,7 +475,7 @@ jobs:
 
   deploy:
     name: Deploy to VPS
-    needs: [secret-scan, web-tests, py-tests, perimeter-smoke]
+    needs: [secret-scan, web-tests, web-coverage, py-tests, py-coverage, cloud-tests, perimeter-smoke]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     # Outer budget: deploy.sh gets 15m, then 30s to kill descendants. A root
