@@ -233,6 +233,25 @@ class TestPersistResult:
         assert ("health", "credit-spread", "ok") in persist_calls
 
 
+class _RecordingConnection:
+    """sqlite3 stand-in for the Hrana client that refuses executemany."""
+
+    def __init__(self, conn: sqlite3.Connection):
+        self._conn = conn
+        self.statements: list[tuple[str, tuple]] = []
+        self.commits = 0
+
+    def execute(self, sql: str, params: tuple = ()):  # noqa: D102
+        self.statements.append((sql, tuple(params)))
+        return self._conn.execute(sql, params)
+
+    def executemany(self, *_args, **_kwargs):  # noqa: D102
+        raise AssertionError("executemany is one Hrana round-trip per row")
+
+    def commit(self):  # noqa: D102
+        self.commits += 1
+
+
 class TestCreditSpreadStorage:
     @pytest.fixture()
     def db(self):
@@ -244,6 +263,15 @@ class TestCreditSpreadStorage:
         yield conn
         conn.close()
 
+    @pytest.fixture()
+    def recording_writer(self, db, monkeypatch):
+        """The REAL db.writer with get_db() wired to the in-memory 0051 schema."""
+        from db import writer
+
+        recording = _RecordingConnection(db)
+        monkeypatch.setattr(writer, "get_db", lambda: recording)
+        return writer, recording
+
     def test_migration_registers_version_51(self, db):
         versions = [r[0] for r in db.execute("SELECT version FROM schema_migrations")]
         assert versions == [51]
@@ -252,17 +280,42 @@ class TestCreditSpreadStorage:
         cols = [r[1] for r in db.execute("PRAGMA table_info(credit_spread_history)")]
         assert cols == ["date", "hyg_close", "spx_close", "recorded_at"]
 
-    def test_upsert_is_idempotent_per_date(self, db):
-        from db import writer
+    def test_upsert_is_idempotent_per_date(self, db, recording_writer):
+        writer, recording = recording_writer
+        stale = {"date": "2026-08-20", "hyg_close": 79.0, "spx_close": 7600.0}
+        fresh = {"date": "2026-08-20", "hyg_close": HYG_LAST, "spx_close": SPX_LAST}
 
-        args_old = ("2026-08-20", 79.0, 7600.0, "2026-08-20T21:45:00Z")
-        args_new = ("2026-08-20", HYG_LAST, SPX_LAST, "2026-08-21T21:45:00Z")
-        db.execute(writer.CREDIT_SPREAD_UPSERT_SQL, args_old)
-        db.execute(writer.CREDIT_SPREAD_UPSERT_SQL, args_new)
+        writer.upsert_credit_spread_rows([stale], recorded_at="2026-08-20T21:45:00Z")
+        writer.upsert_credit_spread_rows([fresh], recorded_at="2026-08-21T21:45:00Z")
+
         rows = list(
-            db.execute("SELECT date, hyg_close, spx_close FROM credit_spread_history")
+            db.execute(
+                "SELECT date, hyg_close, spx_close, recorded_at FROM credit_spread_history"
+            )
         )
-        assert rows == [("2026-08-20", HYG_LAST, SPX_LAST)]
+        assert rows == [("2026-08-20", HYG_LAST, SPX_LAST, "2026-08-21T21:45:00Z")]
+        assert recording.commits == 2
+        assert all(
+            "ON CONFLICT(date) DO UPDATE" in sql for sql, _ in recording.statements
+        )
+
+    def test_upsert_chunks_many_rows_into_multi_row_inserts(self, db, recording_writer):
+        writer, recording = recording_writer
+        rows = [
+            {"date": f"2025-{m:02d}-{d:02d}", "hyg_close": 70.0 + m, "spx_close": 6000.0 + d}
+            for m in range(1, 13)
+            for d in range(1, 29)
+        ]
+
+        writer.upsert_credit_spread_rows(rows, recorded_at="2026-08-21T21:45:00Z")
+
+        assert db.execute("SELECT COUNT(*) FROM credit_spread_history").fetchone() == (
+            len(rows),
+        )
+        assert len(recording.statements) < len(rows)
+        assert db.execute(
+            "SELECT hyg_close, spx_close FROM credit_spread_history WHERE date = '2025-12-28'"
+        ).fetchone() == (82.0, 6028.0)
 
 
 HYG_BARS = {"2026-08-19": 79.4, "2026-08-20": HYG_LAST}

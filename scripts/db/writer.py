@@ -922,17 +922,6 @@ def upsert_yield_curve_rows(rows: list[dict[str, Any]], recorded_at: Optional[st
     db.commit()
 
 
-CREDIT_SPREAD_UPSERT_SQL = """
-INSERT INTO credit_spread_history
-  (date, hyg_close, spx_close, recorded_at)
-VALUES (?, ?, ?, ?)
-ON CONFLICT(date) DO UPDATE SET
-  hyg_close   = excluded.hyg_close,
-  spx_close   = excluded.spx_close,
-  recorded_at = excluded.recorded_at
-"""
-
-
 def upsert_credit_spread_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
     """CREDIT indicator — one row per common HYG/SPX session, idempotent on date.
 
@@ -1075,18 +1064,6 @@ def upsert_hyad_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = No
             tuple(params),
         )
     db.commit()
-
-
-IEI_HYG_UPSERT_SQL = """
-INSERT INTO iei_hyg_history
-  (date, iei_close, hyg_close, dxy_close, recorded_at)
-VALUES (?, ?, ?, ?, ?)
-ON CONFLICT(date) DO UPDATE SET
-  iei_close   = excluded.iei_close,
-  hyg_close   = excluded.hyg_close,
-  dxy_close   = excluded.dxy_close,
-  recorded_at = excluded.recorded_at
-"""
 
 
 def _iei_hyg_params(row: dict[str, Any], stamp: str) -> tuple:

@@ -142,9 +142,10 @@ CREATE INDEX IF NOT EXISTS idx_credit_spread_history_date
 INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (51, datetime('now'));
 ```
 
-Writer (`scripts/db/writer.py`): `CREDIT_SPREAD_UPSERT_SQL` = single-row form for the
-schema pin test; `upsert_credit_spread_rows(rows, recorded_at)` chunks like
-`upsert_yield_curve_rows` (`date, hyg_close, spx_close, recorded_at`).
+Writer (`scripts/db/writer.py`): `upsert_credit_spread_rows(rows, recorded_at)` chunks
+like `upsert_yield_curve_rows` (`date, hyg_close, spx_close, recorded_at`). The
+idempotency test drives this real writer through a recording sqlite `get_db()`
+stand-in (no separate single-row SQL constant).
 
 Also add `"credit-spread"` to
 `scripts/tests/test_service_registration_completeness.py`

@@ -224,6 +224,25 @@ class TestPersistResult:
         assert ("health", "iei-hyg", "ok") in persist_calls
 
 
+class _RecordingConnection:
+    """sqlite3 stand-in for the Hrana client that refuses executemany."""
+
+    def __init__(self, conn: sqlite3.Connection):
+        self._conn = conn
+        self.statements: list[tuple[str, tuple]] = []
+        self.commits = 0
+
+    def execute(self, sql: str, params: tuple = ()):  # noqa: D102
+        self.statements.append((sql, tuple(params)))
+        return self._conn.execute(sql, params)
+
+    def executemany(self, *_args, **_kwargs):  # noqa: D102
+        raise AssertionError("executemany is one Hrana round-trip per row")
+
+    def commit(self):  # noqa: D102
+        self.commits += 1
+
+
 class TestStorage:
     @pytest.fixture()
     def db(self):
@@ -233,6 +252,15 @@ class TestStorage:
         yield conn
         conn.close()
 
+    @pytest.fixture()
+    def recording_writer(self, db, monkeypatch):
+        """The REAL db.writer with get_db() wired to the in-memory 0053 schema."""
+        from db import writer
+
+        recording = _RecordingConnection(db)
+        monkeypatch.setattr(writer, "get_db", lambda: recording)
+        return writer, recording
+
     def test_migration_registers_version_53(self, db):
         assert [r[0] for r in db.execute("SELECT version FROM schema_migrations")] == [53]
 
@@ -240,13 +268,33 @@ class TestStorage:
         cols = [r[1] for r in db.execute("PRAGMA table_info(iei_hyg_history)")]
         assert cols == ["date", "iei_close", "hyg_close", "dxy_close", "recorded_at"]
 
-    def test_upsert_is_idempotent_per_date(self, db):
-        from db import writer
+    def test_upsert_is_idempotent_per_date(self, db, recording_writer):
+        writer, recording = recording_writer
+        stale = {"date": "2026-08-21", "iei_close": 116.0, "hyg_close": 79.0, "dxy_close": None, "ratio": 116.0 / 79.0}
 
-        db.execute(writer.IEI_HYG_UPSERT_SQL, ("2026-08-21", 116.0, 79.0, None, "2026-08-21T21:55:00Z"))
-        db.execute(writer.IEI_HYG_UPSERT_SQL, ("2026-08-21", IEI_LAST, HYG_LAST, DXY_LAST, "2026-08-22T21:55:00Z"))
-        rows = list(db.execute("SELECT date, iei_close, hyg_close, dxy_close FROM iei_hyg_history"))
-        assert rows == [("2026-08-21", IEI_LAST, HYG_LAST, DXY_LAST)]
+        writer.upsert_iei_hyg_rows([stale], recorded_at="2026-08-21T21:55:00Z")
+        writer.upsert_iei_hyg_rows([ROW], recorded_at="2026-08-22T21:55:00Z")
+
+        rows = list(db.execute("SELECT date, iei_close, hyg_close, dxy_close, recorded_at FROM iei_hyg_history"))
+        assert rows == [("2026-08-21", IEI_LAST, HYG_LAST, DXY_LAST, "2026-08-22T21:55:00Z")]
+        assert recording.commits == 2
+        assert all("ON CONFLICT(date) DO UPDATE" in sql for sql, _ in recording.statements)
+
+    def test_upsert_chunks_many_rows_into_multi_row_inserts(self, db, recording_writer):
+        writer, recording = recording_writer
+        rows = [
+            {"date": f"2025-{m:02d}-{d:02d}", "iei_close": 100.0 + d, "hyg_close": 70.0 + m, "dxy_close": None}
+            for m in range(1, 13)
+            for d in range(1, 29)
+        ]
+
+        writer.upsert_iei_hyg_rows(rows, recorded_at="2026-08-22T21:55:00Z")
+
+        assert db.execute("SELECT COUNT(*) FROM iei_hyg_history").fetchone() == (len(rows),)
+        assert len(recording.statements) < len(rows)
+        assert db.execute(
+            "SELECT iei_close, hyg_close FROM iei_hyg_history WHERE date = '2025-12-28'"
+        ).fetchone() == (128.0, 82.0)
 
 
 class TestCli:
