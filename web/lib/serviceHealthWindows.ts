@@ -206,6 +206,13 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // means the writer is down. FINRA HTTP only, no IB.
   "hy-ad": { open: 120 * HOUR, extended: 120 * HOUR, closed: 120 * HOUR, category: "scheduled", requires_ib: false },
 
+  // ``hhlev``: radon-hhlev.timer fires daily 13:20 UTC every calendar day,
+  // a cheap conditional check of the quarterly Fed Z.1 household leverage
+  // source (weekend and unchanged-day runs still heartbeat), so a uniform
+  // 26h window matches its margin-debt sibling. Data age of 100+ days is a
+  // legitimate quarterly lag, never writer health. FRED HTTP only, no IB.
+  "hhlev": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+
   // ``trin`` — radon-trin.timer samples NYSE A/D + volume from IB every 5 minutes during RTH (3 missed cycles flag); off-hours the close heartbeat holds a day.
   "trin": { open: 15 * MIN, extended: 24 * HOUR, closed: 24 * HOUR, category: "scheduled", requires_ib: true },
 
