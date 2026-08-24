@@ -118,15 +118,17 @@ class TestModifyEnforcesTheFullLimitSet:
         max-loss branches can run exactly as the place path runs them."""
         from order_limits import check_modify_limits
 
-        # A risk reversal: the short 195 put is NOT covered by the long call,
-        # so 500 lots is 500 x 195 x 100 = $9.75M of assignment-to-zero — the
-        # exposure the place path measures and modify never did.
+        # A risk reversal: the short 400 put is NOT covered by the long call,
+        # so 500 lots is 500 x 400 x 100 = $20M of assignment-to-zero — past
+        # the $10M RADON_MAX_COMBO_LOSS_DOLLARS default while staying inside
+        # the 500-contract qty cap — the exposure the place path measures and
+        # modify never did.
         working_bag = {
             "orderType": "LMT",
             "secType": "BAG",
             "legs": [
-                {"action": "SELL", "right": "P", "strike": 195.0, "ratio": 1},
-                {"action": "BUY", "right": "C", "strike": 205.0, "ratio": 1},
+                {"action": "SELL", "right": "P", "strike": 400.0, "ratio": 1},
+                {"action": "BUY", "right": "C", "strike": 410.0, "ratio": 1},
             ],
         }
         violation = check_modify_limits(
