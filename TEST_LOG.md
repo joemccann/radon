@@ -160,3 +160,26 @@ Baseline on `origin/main` @ `2e904678`, clean tree: pytest **7365 passed, 1 skip
 | T-111 | DONE | (this commit) | `TestSuppressionCeilingsAreSmallEnoughToMatter` (4 cases) added. The file's existing 13 cases each derive their expectation from the constant under test (`ceiling = grouping.WARMUP_SUPPRESS_MAX_CONSECUTIVE`, `... + 600`, `... + 3600`), so they hold for ANY value it could take — they test the mechanism and nothing pins the magnitude. The new cases pin the POLICY with two-sided literals: `WARMUP_SUPPRESS_MAX_CONSECUTIVE` in `[1, 6]` (at the 5-minute cycle, 6 is 30 minutes of muted IB pages, and R-056 was a ~120-200s restart loop), `TRANSITION_JOURNAL_STRANDED_AFTER_SECONDS` in `[300, 2*3600]` (a deploy takes minutes; one that has not finished in 2h is stuck and blocks later deploys, so it cannot self-clear), `KILL_BEFORE_GREEN_FROZEN_CAP_SECS` in `[24h, 36h]` (a daily oneshot must be allowed to stay failed until its next fire, and nothing legitimate waits past ~36h). Lower bounds included so the ceilings cannot be satisfied by setting a constant to zero. Same convention as `tests/test_twr_math.py:1135` and `scripts/tests/test_cash_flow_sync_cli.py:347`. **Import split closed:** the file imported `external_probe`/`units` via `scripts.watchdog` and `grouping` via `watchdog` — VERIFIED distinct module objects (`scripts.watchdog.grouping is watchdog.grouping` → `False`) — while the fixture at `:77-78` patches `watchdog.grouping.*` BY STRING, so the two halves were patching two objects. Settled on `watchdog.*` (what the string patches and the rest of `test_watchdog/` use); a fourth case asserts the constants agree across both paths so a future split reds here instead of silently no-op'ing a monkeypatch. **RED — the finding's exact widening,** injected via an out-of-tree pytest plugin setting the three to 500 / 10**9 / 10**9 (41h of muted IB pages and two ~31-year mutes): PRE-EXISTING file **13 passed**, fully green — R-056/R-057/R-064 restored in practice by the suite that forbids them. NEW file **3 failed** by name, each message carrying the converted magnitude. Restored: 17 passed in file, 301 in `test_watchdog/`. Gate: pytest **7426 passed**, 1 skipped, 90 deselected (202.2s). |
 
 **Inherited red on the shared branch (not from this host):** `scripts/tests/test_docs_contract.py::TestOwnership::test_changed_mapped_paths_update_an_owner_doc` — `efc1a3a5` (the other run's T-103) edits `scripts/grok_page_responder.py` without touching `docs/grok-page-responder.md` or `docs/incident-runbook.md` and without a `docs-skip:` trailer. Verified pre-existing by stashing this host's working tree and re-running the test at the branch tip.
+
+### Closing gates — three consecutive full rounds (second host)
+
+| Gate | Round 1 | Round 2 | Round 3 |
+|---|---|---|---|
+| `python3.13 -m pytest` | 7426 passed, 1 skipped, 90 deselected (161.8s) | 7426 passed, 1 skipped, 90 deselected (158.4s) | 7426 passed, 1 skipped, 90 deselected (171.9s) |
+| `npx vitest run` | 683 files / 7182 passed | 683 files / 7182 passed | 683 files / 7182 passed |
+| `pytest cloud/tests` | 34 failed, 978 passed, 4 skipped (182.6s) | identical list (192.1s) | identical list (170.4s) |
+
+The 34 cloud reds are the darwin baseline (T-118: no `bash >= 4`, plus the
+`sha256sum` class of T-088). The sorted `FAILED` list is **byte-identical**
+across all three rounds AND against the run-start baseline taken on
+`origin/main` @ `2e904678` before any change on this host — `diff` produces no
+output in every comparison. Delta from that baseline: pytest +61
+(7365 → 7426), vitest +47 tests / +3 files (7135 → 7182), cloud +5 passed
+(973 → 978), **0 new reds**.
+
+Tasks this host: 6 DONE (T-081 delta, T-111, T-112, T-113, T-114, T-120),
+0 BLOCKED, 0 DEFERRED. One new finding filed: **T-121** (six tables with no
+horizontal-overflow container — surfaced by inverting the T-113 contract; not
+fixed here because six UI changes need 390px browser verification per
+Mandatory Rule 3). Nothing needs an operator decision: no threshold moved, no
+CI workflow touched, no skip or `.only` added.

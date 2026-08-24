@@ -316,3 +316,48 @@ how this loop improves as the codebase grows.
   the only channel the other host reads. A `TEST_LOG.md` conflict on
   rebase is expected; resolve it by keeping both sections, never by
   dropping a row.
+- **2026-08-23 (remediate, second host): a CLAIM COMMENT on the PR is what
+  actually de-conflicts two live runs.** The "check origin first" rail did not
+  fire here — `origin/testing/weekend-2026-08-23` did not exist at pre-flight
+  and appeared before the first push — so the first two tasks (T-081, T-109)
+  were done twice and thrown away. What stopped it was posting a comment on
+  the weekend PR naming the exact T-### items this host would take, BEFORE
+  starting them; zero collisions across the five that followed. Do it as soon
+  as the branch exists: list the items, say which end of the list you are
+  working from, and re-`fetch` before every landing.
+- **2026-08-23 (remediate, second host): a duplicate task is not wasted if you
+  DIFF the two answers.** Both hosts fixed T-081; comparing the two
+  implementations is what found that the landed one keys precedence on
+  `report_date` alone, which drops a second account's mirror-only row.
+  Reset onto the other host's tip, drop your commit, then probe their fix with
+  YOUR test cases before moving on. That was the only surviving product change
+  from this host's first hour.
+- **2026-08-23 (remediate): `rtk` is not installed on every runner.** The
+  2026-08-16 lesson mandates `rtk proxy git …`; on this host `rtk` is not on
+  PATH at all and bare `git` is correct and trustworthy. Check
+  `command -v rtk` at pre-flight and follow that rail only where the proxy
+  actually exists — otherwise every git call fails with exit 127 and the run
+  looks blocked.
+- **2026-08-23 (remediate): check `uptime` before calling a vitest round red.**
+  One full gate read `13 failed / 7169 passed`, 11 of them bare
+  `Test timed out in 5000ms` across nine unrelated files, with the run taking
+  336 s instead of ~110 s. Load average was 66 (`corespotlightd` at 367% CPU).
+  The nine files were 44-passed in isolation and the next full run was
+  7182 passed in 107 s. Capture the reporter output to a file, name the files,
+  re-run them in isolation, and record the load average alongside the counts.
+- **2026-08-23 (remediate): a new tree-walking contract test must be timed, not
+  just made green.** The first draft of the inverted table-overflow contract
+  built a fresh RegExp against the whole ~1 MB `globals.css` for every class
+  token of every ancestor of every tag: 4.5-6 s against vitest's 5 s default,
+  so it flaked 8/8 on a TIMEOUT rather than an assertion. Precompute the
+  stylesheet side once and re-run the new file 3x checking the reported
+  duration, not only the pass count.
+- **2026-08-23 (remediate): inverting a net-negative contract surfaces PRODUCT
+  defects — budget for filing them, not for fixing them.** Turning the
+  table-wrapper test from "named wrappers must be styled" into "every table
+  must have an overflow ancestor" produced six real horizontal-overflow bugs
+  (T-121). Fixing them is six UI changes needing 390px browser verification,
+  which is outside a test-quality task. Pin them in a named list under an
+  EQUALITY assertion — so a seventh reds immediately and fixing one reds until
+  its entry is removed — and file the finding. Do NOT skip them, and do NOT
+  quietly widen the rule until they pass.
