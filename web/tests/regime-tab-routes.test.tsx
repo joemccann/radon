@@ -73,6 +73,7 @@ describe.each([
   ["trin", "app/regime/trin/page.tsx"],
   ["divyield", "app/regime/divyield/page.tsx"],
   ["hyad", "app/regime/hyad/page.tsx"],
+  ["hhlev", "app/regime/hhlev/page.tsx"],
   ["cot", "app/regime/cot/page.tsx"],
   ["ats", "app/regime/ats/page.tsx"],
   ["short", "app/regime/short/page.tsx"],
@@ -153,6 +154,9 @@ vi.mock("../components/DivYieldPanel", () => ({
 }));
 vi.mock("../components/HyAdPanel", () => ({
   default: () => <div data-testid="hyad-panel-stub" />,
+}));
+vi.mock("../components/HhLevPanel", () => ({
+  default: () => <div data-testid="hhlev-panel-stub" />,
 }));
 vi.mock("../components/equibles-cot/EquiblesCotPanel", () => ({
   default: () => <div data-testid="cot-panel-stub" />,
@@ -424,6 +428,20 @@ describe("RegimePanel — tab is URL-driven", () => {
     const { container } = render(<RegimePanel prices={{}} />);
     within(container).getByRole("button", { name: /^HY AD$/ }).click();
     expect(pushSpy).toHaveBeenCalledWith("/regime/hyad");
+  });
+
+  it("renders the HH LEV panel when pathname is /regime/hhlev", () => {
+    mockedPathname = "/regime/hhlev";
+    const { container } = render(<RegimePanel prices={{}} />);
+    expect(within(container).getByTestId("hhlev-panel-stub")).toBeTruthy();
+    expect(within(container).queryByTestId("hyad-panel-stub")).toBeNull();
+  });
+
+  it("clicking HH LEV tab pushes /regime/hhlev", () => {
+    mockedPathname = "/regime/cri";
+    const { container } = render(<RegimePanel prices={{}} />);
+    within(container).getByRole("button", { name: /^HH LEV$/ }).click();
+    expect(pushSpy).toHaveBeenCalledWith("/regime/hhlev");
   });
 
   it("does not expose a VOL CONE regime tab", () => {
