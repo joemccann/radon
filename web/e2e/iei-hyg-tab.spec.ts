@@ -111,7 +111,7 @@ test.describe("/regime/iei-hyg - IEI/HYG ratio tab", () => {
     await expect(section.locator("svg path[stroke]").first()).toBeVisible();
     expect(await section.locator("svg path[stroke]").count()).toBeGreaterThanOrEqual(2);
 
-    await expect(section).toContainText("IEI / HYG RATIO");
+    await expect(section).toContainText("3-7Y TREASURIES VS HIGH YIELD (IEI / HYG RATIO)");
     await expect(section.locator('[data-testid="iei-hyg-brush"]')).toBeVisible();
   });
 

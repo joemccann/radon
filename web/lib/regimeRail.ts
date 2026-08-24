@@ -41,7 +41,7 @@ export const REGIME_TAB_LABEL: Record<RegimeTab, string> = {
   margin: "MARGIN",
   hhlev: "HH LEV",
   credit: "CREDIT",
-  "iei-hyg": "IEI/HYG",
+  "iei-hyg": "TSY/HY",
   cot: "COT",
   short: "SHORT",
   ats: "ATS",

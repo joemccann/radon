@@ -381,10 +381,10 @@ describe("RegimePanel — tab is URL-driven", () => {
     expect(within(container).queryByTestId("credit-panel-stub")).toBeNull();
   });
 
-  it("clicking IEI/HYG tab pushes /regime/iei-hyg", () => {
+  it("clicking TSY/HY tab pushes /regime/iei-hyg", () => {
     mockedPathname = "/regime/cri";
     const { container } = render(<RegimePanel prices={{}} />);
-    within(container).getByRole("button", { name: /^IEI\/HYG$/ }).click();
+    within(container).getByRole("button", { name: /^TSY\/HY$/ }).click();
     expect(pushSpy).toHaveBeenCalledWith("/regime/iei-hyg");
   });
 

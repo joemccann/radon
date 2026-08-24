@@ -57,7 +57,7 @@ const MOBILE_TAB_LABEL: Partial<Record<RegimeTab, string>> = {
   skew2d: "SKEW 2D",
   vixcor: "VIX-COR",
   ivrank: "IV RANK",
-  "iei-hyg": "IEI/HYG",
+  "iei-hyg": "TSY/HY",
   trin: "TRIN",
   divyield: "DIV YIELD",
   hyad: "HY AD",

@@ -146,14 +146,14 @@ describe("IeiHygPanel", () => {
   it("shows the SpectralLoader while the first payload is loading", () => {
     mockUseIeiHyg.mockReturnValue(hookState({ loading: true }));
     renderPanel();
-    expect(screen.getByText("Loading IEI/HYG series")).toBeTruthy();
+    expect(screen.getByText("Loading Treasury vs high yield ratio series")).toBeTruthy();
   });
 
   it("shows the empty state on the missing contract", () => {
     mockUseIeiHyg.mockReturnValue(hookState({ data: { ...MISSING_IEI_HYG } as unknown as IeiHygData }));
     renderPanel();
     expect(screen.getByTestId("section-empty-state")).toBeTruthy();
-    expect(screen.getByText("No IEI/HYG snapshot")).toBeTruthy();
+    expect(screen.getByText("No Treasury vs high yield snapshot")).toBeTruthy();
   });
 
   it("renders the strip from current and the chart title", () => {
@@ -165,7 +165,7 @@ describe("IeiHygPanel", () => {
     expect(screen.getByTestId("iei-hyg-high").textContent).toContain("1.4758");
     expect(screen.getByTestId("iei-hyg-rank").textContent).toBe("0%");
     expect(screen.getByTestId("iei-hyg-dxy").textContent).toBe("98.80");
-    expect(screen.getByText("IEI / HYG RATIO")).toBeTruthy();
+    expect(screen.getByText("3-7Y TREASURIES VS HIGH YIELD (IEI / HYG RATIO)")).toBeTruthy();
     expect(screen.getByTestId("iei-hyg-brush")).toBeTruthy();
   });
 
