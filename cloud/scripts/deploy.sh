@@ -780,7 +780,8 @@ recover_pending_transition() {
       record_deploy_marker "$JOURNAL_REQUESTED_SHA" || return 1
       write_green_marker "$JOURNAL_REQUESTED_SHA" || return 1
       sudo "$DEPLOY_ROOT_HELPER" commit-transition || return 1
-      sync_scheduled_units || return 1
+      sync_scheduled_units || log_warn \
+        "Scheduled unit sync failed after a verified release; the next deploy will republish them"
       DEPLOY_RELEASE_UNVERIFIED=0
       finalize_release_artifacts "$JOURNAL_STAGE_DIR" "$JOURNAL_BACKUP_DIR"
       log_success "Finalized previously verified release ${JOURNAL_REQUESTED_SHA:0:7}"
@@ -1214,7 +1215,8 @@ main() {
   if [[ "$prev_commit" == "$requested_sha" ]] && green_marker_matches "$requested_sha"; then
     log_info "Commit ${requested_sha:0:7} already has a durable green marker; rechecking live gate"
     if deploy_gate; then
-      sync_scheduled_units || return 1
+      sync_scheduled_units || log_warn \
+        "Scheduled unit sync failed on an already-green release; the next deploy will republish them"
       trap - TERM INT HUP
       log_success "Deploy already green: $(short_log)"
       return 0
@@ -1247,7 +1249,15 @@ main() {
     record_deploy_marker "$requested_sha"
     write_green_marker "$requested_sha"
     sudo "$DEPLOY_ROOT_HELPER" commit-transition
-    sync_scheduled_units || return 1
+    # R-183: the release is verified, the green marker is written and the
+    # transition is committed by this point — a failed scheduled-unit publish
+    # cannot un-deploy any of that. The helper refuses when local HEAD no
+    # longer matches `git ls-remote origin main` (exit 76), which is exactly
+    # what a mid-deploy push to main produces: a benign race that used to
+    # red-flag a green release and strand the transition journal. Warn and
+    # carry on; the next deploy publishes the units.
+    sync_scheduled_units || log_warn \
+      "Scheduled unit sync failed after a verified release; the next deploy will republish them"
     DEPLOY_RELEASE_UNVERIFIED=0
     finalize_release_artifacts
   fi

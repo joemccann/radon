@@ -214,6 +214,11 @@ run_phase() {
   echo "[weekend] $PHASE start $STAMP repo=$REPO cap=${CAP_SECS}s" | tee -a "$RUN_LOG"
   ground_truth
 
+  # R-185: `timeout claude` returning 124 (cap) or any non-zero agent exit is
+  # an EXPECTED outcome these rounds handle — but the ERR trap was still armed
+  # over them, so every failed or timed-out round posted a false
+  # "CRASHED — wrapper died" dead-man comment AND then its real status.
+  trap - ERR
   local round=1
   while :; do
     echo "[weekend] $PHASE round $round/$MAX_ROUNDS" | tee -a "$RUN_LOG"
@@ -237,7 +242,8 @@ run_phase() {
     git reset --hard --quiet origin/main
     git clean -fdq --exclude=.radon-weekend-runner --exclude=.weekend-runner.lock --exclude=logs/ --exclude=.env --exclude=.env.ib-mode --exclude=web/.env
   done
-  trap - ERR
+  # A genuine wrapper death AFTER the rounds finished must still page.
+  trap on_crash ERR
 
   local tail_text
   tail_text="$(tail -c 1500 "$RUN_LOG" 2>/dev/null || true)"
