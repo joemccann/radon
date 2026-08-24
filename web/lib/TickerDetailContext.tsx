@@ -97,10 +97,13 @@ export function TickerDetailProvider({ children }: { children: ReactNode }) {
       // A pinned leg book belongs to one subject — drop it whenever the focused
       // ticker changes so it never leaks across instruments. The selected depth
       // future expiry is likewise per-instrument and must not survive a switch.
+      // depthSymbols is NOT reset here: the subject's own effect cleanup
+      // publishes [] on unmount, and because child passive effects run before
+      // the parent's, a reset here would land after the new subject's publish
+      // and leave the book with no depth subscription.
       if (next !== prev) {
         setFocusedBookKeyState(null);
         setDepthFutureExpiryState(null);
-        setDepthSymbolsState([]);
       }
       return next;
     });
