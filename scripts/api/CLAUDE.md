@@ -118,3 +118,19 @@ The auto-heal handler clears stale `service_health` rows for `requires_ib=true` 
 `/api/ticker/ratings` and `/api/pi` route from Next.js to FastAPI via `radonFetch`. FastAPI runs the actual Python via `run_script` / `run_script_raw`. CLAUDE.md rule enforced since commit 67fe5e8.
 
 The PI endpoint validates `script` against a two-tier allowlist (`scripts/api/server.py`). **READ-tier** (`_PI_READ_SCRIPTS`: `scanner.py`, `discover.py`, `evaluate.py`, `leap_scanner_uw.py`) — pure analysis/scans, run on the default path. **MUTATE-tier** (`_PI_MUTATE_SCRIPTS`: `ib_sync.py`) — connects to the live IB account and writes Turso portfolio snapshots; refused 400 unless the request carries `allow_mutating: true`. Only the `sync` chat command opts in (Next.js `runPythonScript(..., allowMutating=true)` in `web/app/api/pi/route.ts:executeSync`). Anything outside both tiers → 400. Never expand either tier, and never move a script READ→MUTATE-capable without a security review — `/pi/exec` is reachable from the Next.js chat surface.
+
+---
+
+## Intraday Scan Admission (`scan_gate.py`)
+
+`/regime/scan`, `/breadth/scan`, `/vcg/scan` and `/gex/scan` share one policy
+(`SCAN_GATES` + `_gated_scan` in `server.py`): a completed scan is served from
+cache for `SCAN_COOLDOWN_S` (120 s) without a subprocess, and a failed scan
+(lane exhaustion, script error, ticker mismatch) arms `SCAN_FAILURE_BACKOFF_S`
+(60 s) during which the route answers **429 + `Retry-After`** instead of
+re-spawning. Never re-run a scan on the retry path: on 2026-08-24 three
+periodic callers plus a 5 s client poll re-fired every 502'd scan on the
+2-vCPU host and starved the IB Gateway JVM (84 relay tick stalls vs 0 the
+prior Friday). The Next.js side mirrors it with `web/lib/backgroundScan.ts`
+(in-flight dedupe + 60 s backoff on any failure). Tests:
+`scripts/api/tests/test_scan_gate.py`, `web/tests/background-scan-trigger.test.ts`.

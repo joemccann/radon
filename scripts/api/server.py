@@ -49,6 +49,7 @@ from api import db_http
 from db.service_health_sql import SERVICE_HEALTH_UPSERT_SQL, service_health_upsert_args
 from api.demo_scan import demo_disabled_payload, demo_scan_response
 from api.subprocess import run_script, run_module, run_script_raw, ScriptResult
+from api.scan_gate import ScanGate
 from api.ib_gateway import (
     check_ib_gateway,
     ensure_ib_gateway,
@@ -3015,26 +3016,75 @@ async def journal_rehydrate(days: int = 365):
     return result.data or {"ok": True, "imported": 0, "skipped": 0}
 
 
+# ── Intraday scan admission (regime / breadth / vcg / gex) ──────────
+# One policy for the four routes the GET pages poll: a completed scan is
+# served from cache for the cooldown, a failed scan is refused with 429 for
+# the backoff. Re-spawning on every 5 s client poll after a 502 is what
+# saturated the 2-vCPU host and starved the IB gateway on 2026-08-24.
+
+SCAN_GATES: dict[str, ScanGate] = {
+    name: ScanGate(name) for name in ("regime", "breadth", "vcg", "gex")
+}
+
+
+async def _gated_scan(
+    gate: ScanGate,
+    read_cached: Callable[[], Optional[dict]],
+    run: Callable[[], Awaitable[ScriptResult]],
+    on_fresh: Callable[[ScriptResult], dict] = lambda result: result.data,
+) -> dict:
+    def _admit() -> Optional[dict]:
+        if gate.in_backoff():
+            raise HTTPException(
+                status_code=429,
+                detail=f"{gate.name} scan backing off after a failure",
+                headers=gate.retry_after_header(),
+            )
+        if gate.in_cooldown():
+            return read_cached()
+        return None
+
+    hit = _admit()
+    if hit:
+        return hit
+    async with gate.lock:
+        hit = _admit()
+        if hit:
+            return hit
+        result = await run()
+        if not result.ok:
+            gate.mark_failure()
+            raise HTTPException(status_code=502, detail=result.error)
+        try:
+            payload = on_fresh(result)
+        except HTTPException:
+            gate.mark_failure()
+            raise
+        gate.mark_success()
+        return payload
+
+
 @app.post("/regime/scan")
 async def regime_scan():
-    """Run CRI scan (cri_scan.py --json). 120s timeout."""
+    """Run CRI scan (cri_scan.py --json). Cooldown + failure backoff via SCAN_GATES."""
     if test_mode:
         return await demo_scan_response("regime", {"scan_time": ""})
-    result = await run_script("cri_scan.py", ["--json"], timeout=120)
-    if not result.ok:
-        raise HTTPException(status_code=502, detail=result.error)
-    _write_cache(DATA_DIR / "cri.json", result.data)
-    return result.data
 
+    def _persist(result: ScriptResult) -> dict:
+        _write_cache(DATA_DIR / "cri.json", result.data)
+        return result.data
 
-_breadth_last_scan: float = 0.0
-_breadth_scan_lock: Optional[asyncio.Lock] = None
-BREADTH_COOLDOWN_S = 60
+    return await _gated_scan(
+        SCAN_GATES["regime"],
+        lambda: _read_cache(DATA_DIR / "cri.json"),
+        lambda: run_script("cri_scan.py", ["--json"], timeout=120),
+        _persist,
+    )
 
 
 @app.post("/breadth/scan")
 async def breadth_scan():
-    """Run NYSE breadth scan (breadth_scan.py --json). 60s cooldown between scans.
+    """Run NYSE breadth scan (breadth_scan.py --json). Cooldown + failure backoff via SCAN_GATES.
 
     No --force: the script's off-hours cache gate serves the fresh cache
     without touching IB, so mount-time auto-syncs outside market hours cost
@@ -3044,58 +3094,31 @@ async def breadth_scan():
     """
     if test_mode:
         return await demo_scan_response("breadth-scan", {"scan_time": ""})
-    global _breadth_last_scan, _breadth_scan_lock
-    import time as _time
-    if _breadth_scan_lock is None:
-        _breadth_scan_lock = asyncio.Lock()
-    if _time.monotonic() - _breadth_last_scan < BREADTH_COOLDOWN_S:
-        cached = _read_cache(DATA_DIR / "breadth.json")
-        if cached:
-            return cached
-    async with _breadth_scan_lock:
-        if _time.monotonic() - _breadth_last_scan < BREADTH_COOLDOWN_S:
-            cached = _read_cache(DATA_DIR / "breadth.json")
-            if cached:
-                return cached
-        result = await run_script("breadth_scan.py", ["--json"], timeout=120)
-        if not result.ok:
-            raise HTTPException(status_code=502, detail=result.error)
-        _breadth_last_scan = _time.monotonic()
-        return result.data
+    return await _gated_scan(
+        SCAN_GATES["breadth"],
+        lambda: _read_cache(DATA_DIR / "breadth.json"),
+        lambda: run_script("breadth_scan.py", ["--json"], timeout=120),
+    )
 
 
 # ── VCG (Volatility-Credit Gap) ─────────────────────────────────────
 
-_vcg_last_scan: float = 0.0
-_vcg_scan_lock: Optional[asyncio.Lock] = None
-VCG_COOLDOWN_S = 60
-
-
 @app.post("/vcg/scan")
 async def vcg_scan():
-    """Run VCG scan (vcg_scan.py --json). 60s cooldown between scans."""
+    """Run VCG scan (vcg_scan.py --json). Cooldown + failure backoff via SCAN_GATES."""
     if test_mode:
         return await demo_scan_response("vcg-scan", {"scan_time": ""})
-    global _vcg_last_scan, _vcg_scan_lock
-    import time as _time
-    if _vcg_scan_lock is None:
-        _vcg_scan_lock = asyncio.Lock()
-    now = _time.monotonic()
-    if now - _vcg_last_scan < VCG_COOLDOWN_S:
-        cached = _read_cache(DATA_DIR / "vcg.json")
-        if cached:
-            return cached
-    async with _vcg_scan_lock:
-        if _time.monotonic() - _vcg_last_scan < VCG_COOLDOWN_S:
-            cached = _read_cache(DATA_DIR / "vcg.json")
-            if cached:
-                return cached
-        result = await run_script("vcg_scan.py", ["--json"], timeout=120)
-        if not result.ok:
-            raise HTTPException(status_code=502, detail=result.error)
+
+    def _persist(result: ScriptResult) -> dict:
         _write_cache(DATA_DIR / "vcg.json", result.data)
-        _vcg_last_scan = _time.monotonic()
         return result.data
+
+    return await _gated_scan(
+        SCAN_GATES["vcg"],
+        lambda: _read_cache(DATA_DIR / "vcg.json"),
+        lambda: run_script("vcg_scan.py", ["--json"], timeout=120),
+        _persist,
+    )
 
 
 @app.post("/vcg/share")
@@ -3832,11 +3855,6 @@ async def garch_convergence_scan(preset: str = "largecaps", tickers: str = ""):
 
 # ── GEX (Gamma Exposure Levels) ─────────────────────────────────────
 
-_gex_last_scan: float = 0.0
-_gex_scan_lock: Optional[asyncio.Lock] = None
-GEX_COOLDOWN_S = 60
-
-
 def _gex_cache_for_ticker(payload: Any, ticker: str) -> Optional[dict]:
     if not isinstance(payload, dict):
         return None
@@ -3872,36 +3890,25 @@ async def share_content(type: str, name: str):
 
 @app.post("/gex/scan")
 async def gex_scan(ticker: str = "SPX"):
-    """Run GEX scan (gex_scan.py --json --ticker X). 60s cooldown between scans."""
+    """Run GEX scan (gex_scan.py --json --ticker X). Cooldown + failure backoff via SCAN_GATES."""
     if test_mode:
         return await demo_scan_response("gex-scan", {"scan_time": ""})
-    global _gex_last_scan, _gex_scan_lock
-    import time as _time
     ticker = ticker.strip().upper()
     if not ticker or len(ticker) > 10 or not ticker.replace("-", "").isalnum():
         raise HTTPException(status_code=400, detail="Invalid ticker")
-    if _gex_scan_lock is None:
-        _gex_scan_lock = asyncio.Lock()
-    now = _time.monotonic()
-    if now - _gex_last_scan < GEX_COOLDOWN_S:
-        cached = _gex_cache_for_ticker(_read_cache(DATA_DIR / "gex.json"), ticker)
-        if cached:
-            return cached
-    async with _gex_scan_lock:
-        if _time.monotonic() - _gex_last_scan < GEX_COOLDOWN_S:
-            cached = _gex_cache_for_ticker(_read_cache(DATA_DIR / "gex.json"), ticker)
-            if cached:
-                return cached
-        result = await run_script(
-            "gex_scan.py", ["--json", "--ticker", ticker], timeout=120
-        )
-        if not result.ok:
-            raise HTTPException(status_code=502, detail=result.error)
+
+    def _persist(result: ScriptResult) -> dict:
         if _gex_cache_for_ticker(result.data, ticker) is None:
             raise HTTPException(status_code=502, detail="GEX result ticker mismatch")
         _write_cache(DATA_DIR / "gex.json", result.data)
-        _gex_last_scan = _time.monotonic()
         return result.data
+
+    return await _gated_scan(
+        SCAN_GATES["gex"],
+        lambda: _gex_cache_for_ticker(_read_cache(DATA_DIR / "gex.json"), ticker),
+        lambda: run_script("gex_scan.py", ["--json", "--ticker", ticker], timeout=120),
+        _persist,
+    )
 
 
 # ── Gamma Rotation Gap (SPY/TLT cross-asset gamma) ───────────────────

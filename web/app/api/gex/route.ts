@@ -5,6 +5,7 @@ import { readFile } from "fs/promises";
 import { join } from "path";
 import { isGexDataStale } from "@/lib/gexStaleness";
 import { radonFetch } from "@/lib/radonApi";
+import { createBackgroundScanTrigger } from "@/lib/backgroundScan";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { dbExecute } from "@/lib/dbExecute";
 import { cachedRead } from "@/lib/dbCache";
@@ -132,18 +133,10 @@ function normalizeGexPayload(raw: Record<string, unknown>): Record<string, unkno
   };
 }
 
-let bgScanInFlight = false;
-
-function triggerBackgroundScan(): void {
-  if (bgScanInFlight) return;
-  bgScanInFlight = true;
-
-  console.log("[GEX] Background scan triggered via FastAPI");
-  radonFetch<Record<string, unknown>>("/gex/scan", { method: "POST", timeout: 130_000 })
-    .then(() => { console.log("[GEX] Background scan complete"); })
-    .catch((err) => { console.error("[GEX] Background scan failed:", err.message); })
-    .finally(() => { bgScanInFlight = false; });
-}
+const triggerBackgroundScan = createBackgroundScanTrigger({
+  label: "GEX",
+  run: () => radonFetch<Record<string, unknown>>("/gex/scan", { method: "POST", timeout: 130_000 }),
+});
 
 // Coalesce the polled GET reads (DB round trip + disk) into one per window.
 // staleWhileError keeps GEX rendering through a brief Turso stall. The POST

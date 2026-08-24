@@ -5,6 +5,7 @@ import { readFile } from "fs/promises";
 import { join } from "path";
 import { isVcgDataStale } from "@/lib/vcgStaleness";
 import { radonFetch } from "@/lib/radonApi";
+import { createBackgroundScanTrigger } from "@/lib/backgroundScan";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
 import { cachedRead } from "@/lib/dbCache";
@@ -115,18 +116,10 @@ function normalizeVcgPayload(raw: Record<string, unknown>): Record<string, unkno
   };
 }
 
-let bgScanInFlight = false;
-
-function triggerBackgroundScan(): void {
-  if (bgScanInFlight) return;
-  bgScanInFlight = true;
-
-  console.log("[VCG] Background scan triggered via FastAPI");
-  radonFetch<Record<string, unknown>>("/vcg/scan", { method: "POST", timeout: 130_000 })
-    .then(() => { console.log("[VCG] Background scan complete"); })
-    .catch((err) => { console.error("[VCG] Background scan failed:", err.message); })
-    .finally(() => { bgScanInFlight = false; });
-}
+const triggerBackgroundScan = createBackgroundScanTrigger({
+  label: "VCG",
+  run: () => radonFetch<Record<string, unknown>>("/vcg/scan", { method: "POST", timeout: 130_000 }),
+});
 
 export async function GET(): Promise<Response> {
   const access = await requireRouteAccess(undefined, { rate: { key: "vcg:route", limit: 20, windowMs: 60_000 } });

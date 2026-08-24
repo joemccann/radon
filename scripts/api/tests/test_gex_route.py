@@ -1,16 +1,17 @@
 """Ticker identity guards for the shared GEX scan cache."""
 
 import asyncio
-import time
 
 from scripts.api import server
+from scripts.api.scan_gate import ScanGate
 from scripts.api.subprocess import ScriptResult
 
 
 def test_cooldown_never_returns_another_tickers_cache(monkeypatch):
     monkeypatch.setattr(server, "test_mode", False)
-    monkeypatch.setattr(server, "_gex_last_scan", time.monotonic())
-    monkeypatch.setattr(server, "_gex_scan_lock", None)
+    gate = ScanGate("gex")
+    gate.mark_success()
+    monkeypatch.setitem(server.SCAN_GATES, "gex", gate)
     monkeypatch.setattr(server, "_read_cache", lambda _path: {"ticker": "SPY"})
     calls = []
 

@@ -7,6 +7,7 @@ import { isCriDataStale } from "@/lib/criStaleness";
 import { selectPreferredCriCandidate, type CriCacheCandidate } from "@/lib/criCache";
 import { backfillRealizedVolHistory, type RegimeHistoryEntry } from "@/lib/regimeHistory";
 import { radonFetch } from "@/lib/radonApi";
+import { createBackgroundScanTrigger } from "@/lib/backgroundScan";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { dbExecute } from "@/lib/dbExecute";
 import { cachedRead, invalidateCache } from "@/lib/dbCache";
@@ -179,8 +180,6 @@ function normalizeCriPayload(raw: Record<string, unknown>): Record<string, unkno
   };
 }
 
-let bgScanInFlight = false;
-
 // Coalesces every client tab's ~60s poll into one source read per window
 // (contract: tests/db-read-cache-contract.test.ts).
 const READ_CACHE_TTL_MS = 5_000;
@@ -275,24 +274,17 @@ async function isCacheStale(filePath: string, data: Record<string, unknown>): Pr
 }
 
 /** Fire-and-forget: run CRI scan via FastAPI and save results */
-function triggerBackgroundScan(): void {
-  if (bgScanInFlight) return;
-  bgScanInFlight = true;
-
-  console.log("[CRI] Background scan triggered via FastAPI");
-  radonFetch<Record<string, unknown>>("/regime/scan", { method: "POST", timeout: 130_000 })
-    .then(async (data) => {
-      await mkdir(SCHEDULED_DIR, { recursive: true });
-      const ts = new Date().toLocaleString("sv", { timeZone: "America/New_York" })
-        .replace(" ", "T").slice(0, 16).replace(":", "-");
-      const outPath = join(SCHEDULED_DIR, `cri-${ts}.json`);
-      const payload = JSON.stringify(data, null, 2);
-      await writeFile(outPath, payload);
-      console.log(`[CRI] Background scan complete → ${outPath}`);
-    })
-    .catch((err) => { console.error("[CRI] Background scan failed:", err.message); })
-    .finally(() => { bgScanInFlight = false; });
+async function runCriScanAndArchive(): Promise<void> {
+  const data = await radonFetch<Record<string, unknown>>("/regime/scan", { method: "POST", timeout: 130_000 });
+  await mkdir(SCHEDULED_DIR, { recursive: true });
+  const ts = new Date().toLocaleString("sv", { timeZone: "America/New_York" })
+    .replace(" ", "T").slice(0, 16).replace(":", "-");
+  const outPath = join(SCHEDULED_DIR, `cri-${ts}.json`);
+  await writeFile(outPath, JSON.stringify(data, null, 2));
+  console.log(`[CRI] Background scan archived → ${outPath}`);
 }
+
+const triggerBackgroundScan = createBackgroundScanTrigger({ label: "CRI", run: runCriScanAndArchive });
 
 export async function GET(): Promise<Response> {
   const access = await requireRouteAccess(undefined, { rate: { key: "regime:route", limit: 20, windowMs: 60_000 } });
