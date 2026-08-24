@@ -1077,6 +1077,62 @@ def upsert_hyad_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = No
     db.commit()
 
 
+HHLEV_UPSERT_SQL = """
+INSERT INTO hhlev_history
+  (date, leverage_pct, liabilities_musd, net_worth_musd, recorded_at)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(date) DO UPDATE SET
+  leverage_pct     = excluded.leverage_pct,
+  liabilities_musd = excluded.liabilities_musd,
+  net_worth_musd   = excluded.net_worth_musd,
+  recorded_at      = excluded.recorded_at
+"""
+
+
+def upsert_hhlev_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
+    """HHLEV indicator — one row per quarter, idempotent on date.
+
+    Chunked multi-row INSERTs (Hrana I/O bounding): Z.1 revises full
+    history each release, so EVERY daily run passes all ~304 quarterly
+    rows, which per-row would be hundreds of statements on one stream
+    (the rv-ratio 2026-07-21 502 incident).
+    """
+    if not rows:
+        return
+    stamp = recorded_at or _now_iso()
+    db = get_db()
+    for start in range(0, len(rows), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = rows[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        placeholders = ", ".join("(?, ?, ?, ?, ?)" for _ in chunk)
+        params: list[Any] = []
+        for row in chunk:
+            liabilities = float(row["liabilities_musd"])
+            net_worth = float(row["net_worth_musd"])
+            params.extend(
+                (
+                    row["date"],
+                    float(
+                        row.get("leverage_pct", 100.0 * liabilities / net_worth)
+                    ),
+                    liabilities,
+                    net_worth,
+                    stamp,
+                )
+            )
+        db.execute(
+            "INSERT INTO hhlev_history "
+            "(date, leverage_pct, liabilities_musd, net_worth_musd, recorded_at) "
+            f"VALUES {placeholders} "
+            "ON CONFLICT(date) DO UPDATE SET "
+            "leverage_pct = excluded.leverage_pct, "
+            "liabilities_musd = excluded.liabilities_musd, "
+            "net_worth_musd = excluded.net_worth_musd, "
+            "recorded_at = excluded.recorded_at",
+            tuple(params),
+        )
+    db.commit()
+
+
 IEI_HYG_UPSERT_SQL = """
 INSERT INTO iei_hyg_history
   (date, iei_close, hyg_close, dxy_close, recorded_at)

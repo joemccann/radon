@@ -116,6 +116,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-divyield.timer",
     "radon-hyad.service",
     "radon-hyad.timer",
+    "radon-hhlev.service",
+    "radon-hhlev.timer",
 ]
 
 LONG_RUNNING_SERVICES = [
