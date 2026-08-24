@@ -104,7 +104,6 @@ RERUNNABLE_ONESHOT_UNITS = frozenset({
     "radon-equibles-13f.service",
     "radon-equibles-ats.service",
     "radon-equibles-cot.service",
-    "radon-divyield.service",
 })
 DEPLOY_TRANSITION_JOURNAL = units_mod.TRANSITION_JOURNAL_PATH
 SYSTEMCTL_TIMEOUT_SECS = 30

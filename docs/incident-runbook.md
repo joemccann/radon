@@ -268,8 +268,8 @@ on the daily 22:40 UTC timer.** Peak: 2026-08-23 23:57Z, page `c52496dd…`.
   degenerate guard still refuses a thin sweep). `TimeoutStartSec=2100`
   covers the budget plus one in-flight `FETCH_TIMEOUT_S`. Do not
   restart-flap on the hung code; after the fix deploys, one
-  `radon unit restart radon-divyield` or the grok oneshot rerun
-  (`Result=timeout` + newer green marker, next timer >12h).
+  `radon unit restart radon-divyield`. Polkit cannot gain a new
+  rerun grant in the same release (control-plane preflight).
 - **Regression:**
   `test_divyield.py::TestSweepBudget::test_tarpitted_yahoo_stops_inside_the_wall_clock_budget`,
   `test_systemd_services.py::TestDivyieldScanBudget`,

@@ -764,12 +764,14 @@ class TestSignalKilledOneshotRerun:
         self, db_conn, tmp_path, monkeypatch
     ):
         """radon-divyield 2026-08-24: Result=timeout at 23:57 UTC, next
-        timer 22:40 the next day. After the sweep-budget fix deploys the
-        unit must be re-run, not left failed re-paging hourly."""
+        timer 22:40 the next day. Result=timeout must rerun like exit-code
+        once a newer green deploy exists. Uses an already-granted allowlisted
+        oneshot: adding a unit to polkit is a control-plane refresh and
+        cannot ship in the same release as the sweep-budget fix."""
         monkeypatch.setenv("GROK_PAGE_RESPONDER", "1")
         monkeypatch.setenv("GROK_PAGE_AUTOSHIP", "1")
         self._green_marker(tmp_path, monkeypatch, at=NOW - timedelta(hours=1))
-        self._enqueue_unit_page("radon-divyield.service")
+        self._enqueue_unit_page("radon-leap.service")
         log: list = []
         systemctl = _fake_systemctl(
             next_elapse=self.FARAWAY,
@@ -785,8 +787,8 @@ class TestSignalKilledOneshotRerun:
         assert row[0] == "done"
         assert row[1].startswith("restarted_unit:")
         assert "timeout" in row[1]
-        assert ["reset-failed", "radon-divyield.service"] in log
-        assert ["start", "--no-block", "radon-divyield.service"] in log
+        assert ["reset-failed", "radon-leap.service"] in log
+        assert ["start", "--no-block", "radon-leap.service"] in log
         followup.assert_called_once()
 
     def test_timeout_with_no_deploy_since_the_failure_stands_down(
@@ -795,7 +797,7 @@ class TestSignalKilledOneshotRerun:
         monkeypatch.setenv("GROK_PAGE_RESPONDER", "1")
         monkeypatch.setenv("GROK_PAGE_AUTOSHIP", "1")
         self._green_marker(tmp_path, monkeypatch, at=NOW - timedelta(hours=3))
-        self._enqueue_unit_page("radon-divyield.service")
+        self._enqueue_unit_page("radon-leap.service")
         log: list = []
         systemctl = _fake_systemctl(
             next_elapse=self.FARAWAY,
@@ -837,7 +839,6 @@ class TestSignalKilledOneshotRerun:
             "radon-garch.service",
             "radon-credit-spread.service",
             "radon-cor.service",
-            "radon-divyield.service",
         ):
             assert expected in RERUNNABLE_ONESHOT_UNITS
 
