@@ -467,15 +467,22 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
     }
   }, []);
 
+  // Staleness is session-independent (after-hours/overnight fills exist)
+  // and re-evaluated on its own clock, so an idle page cannot rot silently.
+  const {
+    isStale,
+    state: snapshotState,
+    staleAgeMinutes,
+    tick: stalenessTick,
+  } = useSnapshotStaleness(lastSync);
+
+  // R-149: no snapshot at all is a BLACKOUT, and "Awaiting first sample" read
+  // as a benign startup state for the rest of the session.
   const syncLabel = lastSync
     ? `Last sample ${new Date(lastSync).toLocaleTimeString([], { hour12: false })}`
     : error
       ? "Sync failed. Reconstruction incomplete."
-      : "Awaiting first sample";
-
-  // Staleness is session-independent (after-hours/overnight fills exist)
-  // and re-evaluated on its own clock, so an idle page cannot rot silently.
-  const { isStale, staleAgeMinutes, tick: stalenessTick } = useSnapshotStaleness(lastSync);
+      : "No sample yet. Reconstruction unavailable.";
 
   // A render that surfaces a stale snapshot triggers the producer sync
   // itself — the stale pill's Sync button remains the manual fallback.
@@ -518,7 +525,7 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
           onSyncNow={syncNow}
         >
           {!isOptionsWorkspace ? <div className="sync-controls">
-            <span className={`sync-status ${error ? "sync-error" : syncing ? "sync-active" : ""}`}>
+            <span className={`sync-status ${error || snapshotState === "unknown" ? "sync-error" : syncing ? "sync-active" : ""}`}>
               {syncLabel}
             </span>
             <button

@@ -9,7 +9,12 @@ import Modal from "./Modal";
 import { getQuoteMetrics } from "@/lib/quoteTelemetry";
 import { applyRestingLimitToQuote } from "@/lib/modifyOrderQuote";
 import { fmtPrice, legPriceKey, resolveEntryCost } from "@/lib/positionUtils";
-import { findHeldComboForClose, heldComboUnits, type ComboStructureLeg } from "@/lib/order/positionTrade";
+import {
+  findHeldComboForClose,
+  heldComboUnits,
+  workingSellComboUnits,
+  type ComboStructureLeg,
+} from "@/lib/order/positionTrade";
 import { computeLegImpliedValue } from "@/lib/impliedValue";
 import { useRiskFreeRate } from "@/lib/useRiskFreeRate";
 import { ModifyOrderQuoteTelemetry } from "./QuoteTelemetry";
@@ -36,6 +41,9 @@ type ModifyOrderModalProps = {
   loading: boolean;
   prices?: Record<string, PriceData>;
   portfolio?: PortfolioData | null;
+  /** R-112: the open-orders snapshot, so a close-out can see what is
+   *  already working on the same BAG. */
+  openOrders?: { open_orders?: unknown[] } | null;
   onConfirm: (request: ModifyOrderRequest) => void;
   onClose: () => void;
 };
@@ -293,7 +301,7 @@ export function resolveOrderPriceData(
   return null;
 }
 
-export default function ModifyOrderModal({ order, loading, prices, portfolio, onConfirm, onClose }: ModifyOrderModalProps) {
+export default function ModifyOrderModal({ order, loading, prices, portfolio, openOrders = null, onConfirm, onClose }: ModifyOrderModalProps) {
   const [newPrice, setNewPrice] = useState("");
   const [newQuantity, setNewQuantity] = useState("");
   const [outsideRth, setOutsideRth] = useState(false);
@@ -382,15 +390,32 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, on
         quantity: parsedQtyLocal,
         structureLegs,
         portfolio,
+        // R-112: other working SELL combos on this BAG consume held units
+        // too. Without this, three full-size SELLs each classified as a pure
+        // zero-margin close — and `whatIfKey` returns null whenever
+        // `closeOut != null`, so the broker what-if never ran to catch it.
+        workingSellUnits: workingSellComboUnits(
+          comboUnderlyingSymbol(order),
+          openOrders,
+        ),
       });
       if (closingCombo) {
         const units = heldComboUnits(closingCombo);
         return {
           ticker: comboUnderlyingSymbol(order),
           chainLegs,
-          netPremium: parsedNewLocal,
+          // R-112: SELL receives the premium, exactly as the opening branch
+          // below signs it, and the branch dropped `quote` so net-of-cost
+          // risk disappeared on a matched close.
+          netPremium: action === "SELL" ? -parsedNewLocal : parsedNewLocal,
           description: `${action} ${parsedQtyLocal}x ${symbol} combo @ ${fmtPrice(parsedNewLocal)}`,
+          // `totalCost` stays POSITIVE here: the close-out branch of
+          // useOrderRisk reads it as PROCEEDS (`proceeds >= 0` picks the
+          // "Close Credit:" label and `pnl = proceeds - entryCost`). That is
+          // the opposite convention from the opening branch below, and
+          // flipping it turned a credit close into a debit.
           totalCost,
+          quote: priceData ? { bid: priceData.bid, ask: priceData.ask } : null,
           closeOut: {
             entryCostDollars: resolveEntryCost(closingCombo) * (parsedQtyLocal / units),
           },

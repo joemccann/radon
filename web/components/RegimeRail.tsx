@@ -5,6 +5,7 @@ import {
   REGIME_RAIL_GROUPS,
   REGIME_TABS,
   REGIME_TAB_LABEL,
+  FLAGGABLE_REGIME_TABS,
   elevatedCount,
   isFlagged,
   type RailStatuses,
@@ -80,7 +81,7 @@ export default function RegimeRail({ activeTab, onSelect, statuses }: RegimeRail
         ))}
       </div>
       <div className="regime-rail__foot">
-        {REGIME_TABS.length} INDICATORS · {elevatedCount(statuses)} ELEVATED
+        {FLAGGABLE_REGIME_TABS.length} MONITORED · {elevatedCount(statuses)} ELEVATED
       </div>
     </nav>
   );

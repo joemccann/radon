@@ -212,7 +212,7 @@ function inferExecutedLegDirectionFromFills(
  * position's ORIGINAL direction (closing fills already flipped upstream).
  */
 function detectExecutedGroupStructure(
-  legs: { direction: "Long" | "Short"; contract: ExecutedOrder["contract"] }[],
+  legs: { direction: "Long" | "Short"; contract: ExecutedOrder["contract"]; quantity: number }[],
 ): string {
   if (legs.length < 2) return "";
 
@@ -226,7 +226,10 @@ function detectExecutedGroupStructure(
       right,
       strike: leg.contract.strike,
       expiry: leg.contract.expiry.replace(/-/g, ""),
-      quantity: 1,
+      // R-166: `quantity: 1` for every leg meant a filled 1x2 ratio spread
+      // was classified — and journalled — as a plain vertical, which is a
+      // materially different risk profile.
+      quantity: leg.quantity,
       limitPrice: null,
     });
   }
@@ -266,7 +269,11 @@ export function buildExecutedGroupDescription(
 
   const parts: string[] = [];
   const legExpiries: string[] = [];
-  const resolvedLegs: { direction: "Long" | "Short"; contract: ExecutedOrder["contract"] }[] = [];
+  const resolvedLegs: {
+    direction: "Long" | "Short";
+    contract: ExecutedOrder["contract"];
+    quantity: number;
+  }[] = [];
   for (const legGroup of legGroups.values()) {
     const c = legGroup[0].contract;
     const right = c.right === "C" || c.right === "CALL"
@@ -297,7 +304,12 @@ export function buildExecutedGroupDescription(
 
     const expiryShort = c.expiry ? formatExpiryShort(c.expiry) : "";
     parts.push(`${direction} ${strike} ${right}${expiryShort ? ` ${expiryShort}` : ""}`);
-    resolvedLegs.push({ direction, contract: c });
+    resolvedLegs.push({
+      direction,
+      contract: c,
+      // A leg's size is the sum of its fills, not the count of them.
+      quantity: legGroup.reduce((sum, f) => sum + Math.abs(f.quantity || 0), 0) || 1,
+    });
   }
 
   // If all legs share the same expiry, show it once at structure level instead of per-leg

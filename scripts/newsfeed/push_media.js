@@ -6,7 +6,11 @@
 // Tailscale is down, the cycle continues and the next cycle retries.
 
 import { spawn } from "node:child_process";
-import { ensurePublicMediaPermissions, localMediaDest } from "./mediaPermissions.js";
+import {
+  ensurePublicMediaPermissions,
+  localMediaDest,
+  pruneMediaTree,
+} from "./mediaPermissions.js";
 
 // Default target uses Tailscale's MagicDNS name `ib-gateway` — secure private route.
 // Operators without Tailscale on the laptop can switch to the Hetzner public IP via
@@ -16,6 +20,9 @@ import { ensurePublicMediaPermissions, localMediaDest } from "./mediaPermissions
 const REMOTE = process.env.RADON_MEDIA_REMOTE ?? "radon@ib-gateway:/home/radon/radon-cloud/media/";
 const LOCAL = process.env.RADON_MEDIA_LOCAL ?? "web/public/media/";
 const RSYNC_TIMEOUT_MS = 30_000;
+// R-171: the full-tree sweep runs at most once an hour, not every cycle.
+export const SWEEP_MIN_INTERVAL_MS = 60 * 60_000;
+let lastSweepAt = 0;
 
 export async function pushMedia({
   local = LOCAL,
@@ -23,9 +30,16 @@ export async function pushMedia({
   timeoutMs = RSYNC_TIMEOUT_MS,
 } = {}) {
   const result = await new Promise((resolve) => {
+    // R-137: `--ignore-existing` skipped every pre-fix 0600 image forever, so
+    // they stayed 403 on media.radon.run permanently, and the post-transfer
+    // chmod below never runs on the DEFAULT remote route (localMediaDest is
+    // null for `radon@ib-gateway:/…`). rsync's own `--chmod` is the only
+    // thing that reaches the remote destination. Dropping --ignore-existing
+    // costs nothing: filenames are content-derived and immutable, so the
+    // size+mtime check skips the data and `-a` still repairs the mode.
     const args = [
       "-az",
-      "--ignore-existing",   // never overwrite — image filenames are content-derived, immutable
+      "--chmod=F644",        // destination file mode, applied over SSH too
       "--itemize-changes",   // emit a line per transferred file
       "--timeout=20",         // per-file network timeout
       local,
@@ -68,17 +82,32 @@ export async function pushMedia({
     });
   });
 
-  // --ignore-existing never updates dest modes. Files written under
-  // UMask=0077 stay 0600 on media.radon.run and Caddy 403s them.
+  // Files written under UMask=0077 land 0600; Caddy 403s them. Which
+  // mechanism repaired the mode is recorded either way, so a remote push is
+  // never silently unrepaired.
   if (result.ok) {
     const dest = localMediaDest(remote);
     if (dest) {
-      try {
-        result.repaired = await ensurePublicMediaPermissions(dest);
-      } catch (err) {
-        result.repaired = 0;
-        result.repairError = err instanceof Error ? err.message : String(err);
+      result.repairMode = "local-chmod";
+      // R-171: readdir + stat over the WHOLE tree on every 2-minute cycle, at
+      // a cost growing linearly in a directory that only grows. rsync's own
+      // --chmod already sets the mode on transferred files; this sweep is the
+      // backstop for files written before that landed, so it does not need to
+      // run 720 times a day.
+      if (Date.now() - lastSweepAt >= SWEEP_MIN_INTERVAL_MS) {
+        lastSweepAt = Date.now();
+        try {
+          result.repaired = await ensurePublicMediaPermissions(dest);
+          result.pruned = await pruneMediaTree(dest);
+        } catch (err) {
+          result.repaired = 0;
+          result.repairError = err instanceof Error ? err.message : String(err);
+        }
+      } else {
+        result.repairMode = "local-chmod-skipped";
       }
+    } else {
+      result.repairMode = "rsync-chmod";
     }
   }
   return result;

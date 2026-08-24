@@ -78,6 +78,9 @@ def _expected(used: int, blocked: bool, callers=(), endpoints=()) -> dict:
     from utils.uw_budget import DAILY_LIMIT, quota_date
 
     return {
+        # R-172: a present-but-unreadable state file reads as SPENT, so the
+        # payload has to say which of the two it is.
+        "state_unreadable": False,
         "used": used,
         "limit": 40000,
         "remaining": DAILY_LIMIT - used,

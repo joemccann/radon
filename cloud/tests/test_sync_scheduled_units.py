@@ -165,6 +165,11 @@ def _run_sync(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
     )
 
 
+# R-188: the shape checks below validate each ENTRY; nothing bounded the
+# LIST. Adding a unit here grants CI the right to publish it into
+# /etc/systemd/system with no root bootstrap, which is a decision, not a
+# detail — so membership is pinned in cloud/tests/test_control_plane_bounds.py
+# (EXPECTED_AUTO_SYNC_UNITS) and growing the list means editing that ratchet.
 def test_allowlist_names_are_hashed_non_control_plane_units():
     assert ALLOWLIST.is_file()
     names = []

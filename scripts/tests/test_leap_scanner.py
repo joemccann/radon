@@ -342,9 +342,17 @@ def test_partial_ticker_failures_write_cache_and_exit_zero(tmp_path, monkeypatch
     monkeypatch.setattr(leap_scanner_uw, "UWClient", lambda: nullcontext(object()))
     monkeypatch.setattr(leap_scanner_uw, "mirror_scan_snapshot", lambda *a, **k: None)
 
+    # REL-049 / R-095: the universe proportions matter now. A name with no
+    # LEAPs is ordinary; a provider exception is not, and once provider
+    # failures dominate the run the scan is an outage. The original 3-ticker
+    # fixture was 1 result / 1 empty / 1 provider error, i.e. a 50% provider
+    # failure rate, which is the exhausted case — not the 347/518 production
+    # shape this test is named for.
+    scanned = [f"T{i}" for i in range(8)]
+
     def fake_scan(ticker, *args, **kwargs):
-        if ticker == "SPY":
-            return _one_scan_result("SPY")
+        if ticker in scanned:
+            return _one_scan_result(ticker)
         if ticker == "QQQ":
             return None
         raise RuntimeError("uw miss")
@@ -355,7 +363,7 @@ def test_partial_ticker_failures_write_cache_and_exit_zero(tmp_path, monkeypatch
         "argv",
         [
             "leap_scanner_uw.py",
-            "SPY",
+            *scanned,
             "QQQ",
             "BA",
             "--json",
@@ -366,8 +374,49 @@ def test_partial_ticker_failures_write_cache_and_exit_zero(tmp_path, monkeypatch
 
     assert leap_scanner_uw.main() == 0
     payload = json.loads(cache.read_text())
-    assert [row["ticker"] for row in payload["results"]] == ["SPY"]
+    assert sorted(row["ticker"] for row in payload["results"]) == sorted(scanned)
     assert set(payload["failed_tickers"]) == {"QQQ", "BA"}
+    assert payload["provider_failures"] == ["BA"]
+    assert payload["status"] == "ok"
+
+
+def test_a_provider_wipeout_exits_nonzero_and_marks_the_row_error(tmp_path, monkeypatch):
+    """R-095: UW's daily cap tripping after the third ticker yielded
+    results=2 / failed=516, an overwritten data/leap.json, an unconditional
+    `leap-scan = ok` heartbeat and exit 0 — a 2-name LEAP tab behind a green
+    banner."""
+    cache = tmp_path / "leap.json"
+    monkeypatch.setattr(leap_scanner_uw, "DASHBOARD_CACHE_PATH", cache)
+    monkeypatch.setattr(leap_scanner_uw, "UWClient", lambda: nullcontext(object()))
+    health: list = []
+    monkeypatch.setattr(
+        leap_scanner_uw,
+        "mirror_scan_snapshot",
+        lambda *a, **k: health.append(k.get("health_error")),
+    )
+
+    def fake_scan(ticker, *args, **kwargs):
+        if ticker in {"SPY", "QQQ"}:
+            return _one_scan_result(ticker)
+        raise leap_scanner_uw.UWRateLimitError("daily cap")
+
+    monkeypatch.setattr(leap_scanner_uw, "scan_ticker", fake_scan)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "leap_scanner_uw.py",
+            "SPY", "QQQ", *[f"X{i}" for i in range(20)],
+            "--json", "--output", str(tmp_path / "report.html"),
+        ],
+    )
+
+    assert leap_scanner_uw.main() == 1
+    payload = json.loads(cache.read_text())
+    assert payload["status"] == "degraded"
+    assert len(payload["provider_failures"]) == 20
+    assert health and health[-1] is not None
+    assert health[-1]["class"] == "provider_exhausted"
 
 
 # ── find_strikes_by_delta ───────────────────────────────────────────

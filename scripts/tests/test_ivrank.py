@@ -110,10 +110,15 @@ class TestRankWindow:
         assert mod.pct_window(window) == pytest.approx(200.0 / 3.0, abs=1e-9)
 
     def test_worked_example_three_degenerate_is_none_not_zero(self):
+        """REL-067 / R-191: `pct_window` also returns None here now. It used
+        to return 0.0, and `build_current`'s
+        `has_rank = iv_rank is not None or iv_pct is not None` made that
+        sufficient to publish the 1-year low/high block off a window
+        `rank_window` had just declared unmeasurable."""
         mod = _mod()
         window = [0.15, 0.15, 0.15]
         assert mod.rank_window(window) is None
-        assert mod.pct_window(window) == pytest.approx(0.0, abs=1e-12)
+        assert mod.pct_window(window) is None
 
     def test_current_is_the_min(self):
         mod = _mod()
@@ -168,8 +173,8 @@ class TestComputeSeries:
         assert series[-1]["iv"] == pytest.approx(PIN_CURRENT_IV, abs=1e-9)
 
     def test_rank_appears_exactly_at_the_window_edge(self):
-        """252 flat bars then one at 0.20: row 251 is degenerate (None rank,
-        0.0 pct), row 252 ranks 100 with pct 251/252*100."""
+        """252 flat bars then one at 0.20: row 251 is degenerate (None rank
+        AND None pct since R-191), row 252 ranks 100 with pct 251/252*100."""
         mod = _mod()
         rows = _synthetic_rows(252, iv=0.10) + [
             {"date": "2020-09-09", "iv": 0.20, "source": "ib"}
@@ -177,7 +182,7 @@ class TestComputeSeries:
         series = mod.compute_series(rows)
         assert series[250]["iv_rank"] is None          # only 251 trailing values
         assert series[251]["iv_rank"] is None          # full window but degenerate
-        assert series[251]["iv_pct"] == pytest.approx(0.0, abs=1e-12)
+        assert series[251]["iv_pct"] is None
         assert series[252]["iv_rank"] == pytest.approx(100.0, abs=1e-12)
         assert series[252]["iv_pct"] == pytest.approx(251.0 / 252.0 * 100.0, abs=1e-9)
 
@@ -292,8 +297,13 @@ class TestOutlierGate:
         repaired_rows, repairs = mod.repair_outliers(rows, lookup)
         assert calls == [self.PIN_OUTLIER_DATE]
         by_date = {row["date"]: row for row in repaired_rows}
+        # REL-064 / R-154: `repaired` is what stops the next daily IB "1M"
+        # fetch restating the same bad bar right back over the substitution.
         assert by_date[self.PIN_OUTLIER_DATE] == {
-            "date": self.PIN_OUTLIER_DATE, "iv": self.PIN_OUTLIER_UW_IV, "source": "uw",
+            "date": self.PIN_OUTLIER_DATE,
+            "iv": self.PIN_OUTLIER_UW_IV,
+            "source": "uw",
+            "repaired": True,
         }
         assert repairs == [
             {"date": self.PIN_OUTLIER_DATE, "ib_iv": self.PIN_OUTLIER_IB_IV, "uw_iv": self.PIN_OUTLIER_UW_IV}

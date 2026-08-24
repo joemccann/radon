@@ -340,7 +340,15 @@ def test_leading_indicators_is_not_mapped_to_usslind():
     assert calls == []
 
 
-def test_apply_fred_actuals_skips_when_value_matches_prev():
+def test_apply_fred_actuals_fills_a_print_equal_to_the_prior_one():
+    """R-138: equal-to-prev is a REAL print, not "no print".
+
+    This case previously asserted the skip. UNRATE repeats month-over-month
+    and ICSA ties week to week, so discarding a released figure because it
+    matched `prev` blanked the `actual` column for exactly the series the
+    overlay exists to fill. The staleness check on the observation date is
+    what distinguishes released from not-yet-released; equality never was.
+    """
     released = _econ_row(
         title="Weekly Jobless Claims",
         event_time="2026-06-18T12:30:00Z",
@@ -351,7 +359,7 @@ def test_apply_fred_actuals_skips_when_value_matches_prev():
         return {"2026-06-13": 209000}
 
     out = fc.apply_fred_actuals([released], fetch_obs, FIXED_NOW)
-    assert out[0]["actual"] is None
+    assert out[0]["actual"] == 209000
 
 
 def test_apply_fred_actuals_skips_stale_observation():

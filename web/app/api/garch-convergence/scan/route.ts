@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 import { radonFetch, RadonApiError } from "@/lib/radonApi";
 import { tickersBodyToRaw, validateTickerList } from "@/lib/scanTickerList";
+import { requireRouteAccess } from "@/lib/routeAccess";
 
 /**
  * POST /api/garch-convergence/scan
@@ -16,6 +17,14 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function POST(request: Request): Promise<Response> {
+  // R-180: this SPAWNS garch_convergence.py. It was classified as "read-only
+  // market data" in the filesystem-pinned matrix, whose own contract says a
+  // deliberate subprocess trigger belongs in a guarded bucket — its
+  // leap/scan sibling has carried the same guard since R-079.
+  const access = await requireRouteAccess(request, {
+    rate: { key: "garch-convergence/scan:route", limit: 20, windowMs: 60_000 },
+  });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   let body: Record<string, unknown> = {};
   try {

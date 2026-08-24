@@ -134,9 +134,14 @@ export default function VixCorPanel() {
   const regimeTone = vixcorRegimeColor(regime);
   const live = openEpisode(data.episodes) ?? (current.episode?.open ? current.episode : null);
   const lastClosed = lastResolvedEpisode(data.episodes);
-  const lagSessions = data.lag_sessions ?? 0;
+  // R-195: `?? 0` here collapsed "the job could not determine parent lag"
+  // into "the parent is current" BEFORE parentLagCopy ever saw it, so
+  // fixing the helper alone would not have reached this call site.
+  const lagSessions = data.lag_sessions ?? null;
   const lagCopy = parentLagCopy(lagSessions);
-  const lagTone = lagSessions > 1 ? "var(--warning)" : "var(--text-muted)";
+  const lagTone = lagSessions == null || lagSessions > 1
+    ? "var(--warning)"
+    : "var(--text-muted)";
 
   const rows = buildVixcorChartRows(series, chartRange);
   const bands = visibleEpisodes(

@@ -6,7 +6,11 @@ Description=Radon VOL CONE live sample - every 15 minutes during ET trading hour
 # and the 16:45 ET finalization run the tab would otherwise show yesterday.
 # Pre-open and post-close slots hold without spending a UW request: the
 # scanner gates on market_state, so the calendar can stay coarse.
-OnCalendar=Mon..Fri *-*-* 09..16:00,15,30,45 America/New_York
+# R-128: the 16:45 ET slot is deliberately absent — in EDT it is 20:45 UTC,
+# the EOD writer's own minute, and both writers publish the same `vol-cone`
+# snapshot key and data/vol_cone.json.
+OnCalendar=Mon..Fri *-*-* 09..15:00,15,30,45 America/New_York
+OnCalendar=Mon..Fri *-*-* 16:00,15,30 America/New_York
 Persistent=false
 RandomizedDelaySec=30
 

@@ -5,6 +5,8 @@ const mockReadDataFile = vi.fn();
 
 vi.mock("@/lib/radonApi", () => ({
   radonFetch: mockRadonFetch,
+  radonErrorDetailText: (detail: unknown) =>
+    typeof detail === "string" ? detail : JSON.stringify(detail),
   RadonApiError: class extends Error {
     status: number;
     detail: string;

@@ -978,7 +978,13 @@ def modified_dietz(
         weighted_flow += (span - elapsed) / span * amount
 
     denominator = begin_nav + weighted_flow
-    if denominator == 0:
+    # R-147: this guarded only `== 0`, while `subperiod_return` bounds the
+    # SAME B + C quantity with `<= 0` and the docstring "a period cannot
+    # start with no capital". A weighted outflow exceeding begin_nav — what a
+    # Flex NAV document double-counting a transfer across its three sections
+    # produces, the hazard CLAUDE.md flags for IB_FLEX_NAV_QUERY_ID — made
+    # the denominator negative and the return sign-inverted.
+    if denominator <= 0:
         return GatedValue(None, n, limit, "degenerate")
     return GatedValue((end_nav - begin_nav - total_flow) / denominator, n, limit, None)
 

@@ -295,17 +295,40 @@ class CheckpointedJob:
         return "\n".join(lines) + "\n"
 
     def _tail_findings(self, n: int) -> list[dict]:
+        """Last `n` findings, read from the END of the WAL.
+
+        R-177: this slurped and JSON-parsed the ENTIRE file on every
+        checkpoint — the exact pattern R-073 removed from its sibling
+        `_repair_torn_findings_tail`, whose rationale (the file can be large
+        and the tail is all we need) applies verbatim here. Same backwards
+        chunked scan, same chunk size.
+        """
         findings_path = self.dir / FINDINGS_FILE
         if not findings_path.exists():
             return []
-        records = []
-        with findings_path.open() as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    records.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
+        if n <= 0:
+            return []
+        with findings_path.open("rb") as findings:
+            size = findings.seek(0, os.SEEK_END)
+            if size == 0:
+                return []
+            position = size
+            tail = b""
+            # Read backwards until the chunk holds more than n line breaks
+            # (n+1 so the first, possibly partial, line can be discarded).
+            while position > 0 and tail.count(b"\n") <= n:
+                chunk_start = max(0, position - TAIL_REPAIR_CHUNK_BYTES)
+                findings.seek(chunk_start)
+                tail = findings.read(position - chunk_start) + tail
+                position = chunk_start
+            complete = tail if position == 0 else tail.split(b"\n", 1)[-1]
+        records: list[dict] = []
+        for line in complete.split(b"\n"):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                records.append(json.loads(line))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                continue  # torn final line from a kill mid-append
         return records[-n:]

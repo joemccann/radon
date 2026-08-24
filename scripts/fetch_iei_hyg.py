@@ -60,6 +60,11 @@ SERVICE = "iei-hyg"
 IEI_HYG_JSON = _PROJECT_DIR / "data" / "iei_hyg.json"
 
 WINDOW_SESSIONS = 252
+# R-126: `extremes_window` is a trailing slice, so on a 30-session series the
+# latest row IS the window extreme nearly every day and `classify_state`
+# published NEW 52W LOW/HIGH off a month of data. No partial-window extreme,
+# ever — the same rule `fetch_ivrank.MIN_OBSERVATIONS` already enforces.
+MIN_OBSERVATIONS = WINDOW_SESSIONS
 IEI_SYMBOL = "IEI"
 HYG_SYMBOL = "HYG"
 DXY_SYMBOL = "DXY"
@@ -262,15 +267,20 @@ def fetch_closes(
     fetch_ib: Optional[FetchCloses] = None,
     fetch_uw: Optional[FetchCloses] = None,
     fetch_yahoo: Optional[FetchCloses] = None,
-) -> tuple[dict[str, Closes], str]:
-    """IB first, then UW for gaps, then Yahoo. Returns (closes, combined source)."""
+) -> tuple[dict[str, Closes], str, dict[str, str]]:
+    """IB first, then UW for gaps, then Yahoo.
+
+    Returns ``(closes, combined source, per-ticker sources)``. R-190: the
+    combined string alone cannot say WHICH leg fell back, so a mixed IB+Yahoo
+    ratio was stored indistinguishably from the opposite pairing.
+    """
     wanted = list(tickers or TICKERS)
     closes: dict[str, Closes] = {}
     sources: dict[str, str] = {}
     _take(fetch_ib or fetch_ib_closes, wanted, "ib", closes, sources)
     _take(fetch_uw or fetch_uw_closes, wanted, "uw", closes, sources)
     _take(fetch_yahoo or fetch_yahoo_closes, wanted, "yahoo", closes, sources)
-    return closes, combine_source(sources) or "none"
+    return closes, combine_source(sources) or "none", dict(sources)
 
 
 # ── series assembly ───────────────────────────────────────────────
@@ -308,9 +318,17 @@ def classify_state(ratio: float, low: float, high: float) -> str:
     return "neutral"
 
 
-def pct_rank(ratio: float, low: float, high: float) -> float:
+def pct_rank(ratio: float, low: float, high: float) -> Optional[float]:
+    """R-162: a single-distinct-ratio window has NO percentile.
+
+    Returning 0.0 fabricated the strongest risk-on reading this indicator
+    emits — "IEI/HYG at the bottom of its 52-week range", i.e. maximum
+    high-yield outperformance — from no data, while `classify_state` on the
+    same input correctly said `"neutral"`. The two published fields
+    contradicted each other and the rank is the headline number.
+    """
     if high == low:
-        return 0.0
+        return None
     return (ratio - low) / (high - low)
 
 
@@ -320,6 +338,7 @@ def _current(series: list[dict[str, Any]]) -> dict[str, Any]:
     lowest = min(window, key=lambda r: r["ratio"])
     highest = max(window, key=lambda r: r["ratio"])
     low, high = lowest["ratio"], highest["ratio"]
+    complete = len(window) >= MIN_OBSERVATIONS
     return {
         "date": latest["date"],
         "iei_close": latest["iei_close"],
@@ -330,9 +349,10 @@ def _current(series: list[dict[str, Any]]) -> dict[str, Any]:
         "low_date": lowest["date"],
         "ratio_52w_high": high,
         "high_date": highest["date"],
-        "ratio_pct_rank": pct_rank(latest["ratio"], low, high),
+        "ratio_pct_rank": pct_rank(latest["ratio"], low, high) if complete else None,
         "window_sessions": len(window),
-        "state": classify_state(latest["ratio"], low, high),
+        "window_complete": complete,
+        "state": classify_state(latest["ratio"], low, high) if complete else "unknown",
     }
 
 
@@ -340,11 +360,16 @@ def build_output(
     series: list[dict[str, Any]],
     scan_time: Optional[str] = None,
     source: str = "ib",
+    source_by_ticker: Optional[dict[str, str]] = None,
 ) -> dict[str, Any]:
     stamp = scan_time or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     return {
         "scan_time": stamp,
         "source": source,
+        # R-190: the collapsed `source` string cannot say WHICH leg fell back,
+        # so a mixed IB+Yahoo ratio was stored indistinguishably from the
+        # other mixed pairing. The per-ticker map rides alongside it.
+        "source_by_ticker": dict(source_by_ticker or {}),
         "count": len(series),
         "current": _current(series) if series else None,
         "series": series,
@@ -382,7 +407,11 @@ def _write_json_cache(payload: dict[str, Any]) -> None:
     os.replace(tmp, IEI_HYG_JSON)
 
 
-def persist_result(payload: dict[str, Any], changed_rows: list[dict[str, Any]]) -> None:
+def persist_result(
+    payload: dict[str, Any],
+    changed_rows: list[dict[str, Any]],
+    health_error: Optional[dict[str, Any]] = None,
+) -> None:
     """Dual-write: Turso rows + snapshot + heartbeat, then the JSON fallback.
 
     Refuses an empty series entirely. Snapshot + heartbeat run EVERY cycle
@@ -396,22 +425,59 @@ def persist_result(payload: dict[str, Any], changed_rows: list[dict[str, Any]]) 
     if changed_rows:
         writer.upsert_iei_hyg_rows(changed_rows, recorded_at=scan_time)
     writer.upsert_scan_snapshot(SERVICE, scan_time, payload)
-    writer.record_service_health(SERVICE, "ok", finished_at=scan_time)
+    if health_error is None:
+        writer.record_service_health(SERVICE, "ok", finished_at=scan_time)
+    else:
+        writer.record_service_health(
+            SERVICE, "error", finished_at=scan_time, error=health_error,
+        )
     _write_json_cache(payload)
 
 
 # ── orchestration ─────────────────────────────────────────────────
 
-def load_cached_series() -> list[dict[str, Any]]:
+def _turso_series() -> list[dict[str, Any]]:
+    """The durable series from `iei_hyg_history` (Turso-first read, R-123)."""
+    from db.client import get_db
+
+    rows = get_db().execute(
+        "SELECT date, iei_close, hyg_close, dxy_close "
+        "FROM iei_hyg_history ORDER BY date"
+    ).fetchall()
+    # `ratio` is derived, not stored — go through _row so the stored and the
+    # freshly-computed series are byte-identical in shape.
+    return [
+        _row(
+            row[0],
+            float(row[1]),
+            float(row[2]),
+            None if row[3] is None else float(row[3]),
+        )
+        for row in rows
+        if row[2]
+    ]
+
+
+def _json_series() -> list[dict[str, Any]]:
     try:
         return json.loads(IEI_HYG_JSON.read_text())["series"]
     except (OSError, ValueError, KeyError):
         return []
 
 
+def load_cached_series() -> list[dict[str, Any]]:
+    try:
+        stored = _turso_series()
+        if stored:
+            return stored
+    except Exception as exc:  # noqa: BLE001 — the JSON fallback still works
+        _log(f"turso rehydrate non-fatal: {exc}")
+    return _json_series()
+
+
 def run() -> dict[str, Any]:
     _log("fetching IEI, HYG and DXY (IB -> UW -> Yahoo)")
-    closes, source = fetch_closes()
+    closes, source, source_by_ticker = fetch_closes()
     fresh = align_series(
         closes.get(IEI_SYMBOL, {}), closes.get(HYG_SYMBOL, {}), closes.get(DXY_SYMBOL, {})
     )
@@ -420,8 +486,21 @@ def run() -> dict[str, Any]:
     new_rows = diff_new_rows(cached, series)
     if not new_rows:
         _log("source unchanged; refreshing snapshot only")
-    payload = build_output(series, source=source)
-    persist_result(payload, new_rows)
+    payload = build_output(series, source=source, source_by_ticker=source_by_ticker)
+    # R-098: see fetch_credit_spread — a dead source lived only in
+    # payload["source"], which nothing reads.
+    health_error = (
+        {
+            "message": (
+                "iei-hyg: every source failed (IB, UW, Yahoo); serving the "
+                f"cached series through {payload.get('as_of') or 'the last row'}"
+            ),
+            "class": "source_down",
+        }
+        if not source or source == "none"
+        else None
+    )
+    persist_result(payload, new_rows, health_error)
     return payload
 
 

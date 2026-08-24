@@ -172,6 +172,22 @@ def modify_order(client: IBClient, order_id: int, perm_id: int, new_price: Optio
     with Error 103 (Duplicate order id).  We detect the original clientId
     from trade.order.clientId and reconnect as that client before modifying.
     """
+    # R-165: a modify RE-TRANSMITS the order, so it is a placement and the
+    # kill switch applies. The only halt check on this path lived at the
+    # FastAPI route, which the subprocess and the CLI both go around;
+    # trading_halt.py states the contract as "every order-placing process on
+    # the host". Cancel is deliberately NOT gated: cancelling reduces risk
+    # and cancel-all is the kill switch's own recovery path.
+    from trading_halt import get_halt_state, is_trading_halted
+
+    if is_trading_halted():
+        reason = get_halt_state().get("reason", "manual halt")
+        output(
+            "error",
+            f"TRADING HALTED — order not modified ({reason}). "
+            f"Resume via POST /trading/resume.",
+        )
+
     trade = find_trade(client, order_id, perm_id)
     if trade is None:
         output("error", f"{working_order_missing_message()} (orderId={order_id}, permId={perm_id})")

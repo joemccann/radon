@@ -159,6 +159,25 @@ jobs:
           --cov-fail-under=56
       - name: Cloud infra pytest
         run: python -m pytest cloud/tests -q
+      # REL-065 / R-156: docs/demo-environment.md has claimed since phase 0
+      # that a "CI isolation guard rejects any demo deploy whose env carries a
+      # prod TURSO_DB_URL". Nothing invoked it. On demo.radon.run
+      # ALLOWED_USER_IDS is absent by design and the account routes carry no
+      # operatorOnly, so DB isolation is the ONLY layer between a trial user
+      # and the operator's real positions, TWR curve, NAV and blotter.
+      # Skipped when no demo env is configured on the runner, so this cannot
+      # fail a prod-only CI run.
+      - name: Demo isolation guard
+        env:
+          TURSO_DEMO_DB_URL: ${{ secrets.TURSO_DEMO_DB_URL }}
+          TURSO_DB_URL: ${{ secrets.TURSO_DEMO_APP_DB_URL }}
+          RADON_API_TEST_MODE: "1"
+        run: |
+          if [ -z "${TURSO_DEMO_DB_URL}" ] && [ -z "${TURSO_DB_URL}" ]; then
+            echo "no demo env configured on this runner — nothing to check"
+            exit 0
+          fi
+          python scripts/ci/check_demo_isolation.py
 
   perimeter-smoke:
     name: Perimeter smoke (next start + curl)

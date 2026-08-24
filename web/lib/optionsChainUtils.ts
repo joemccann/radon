@@ -55,6 +55,15 @@ export function detectStructure(legs: OrderLeg[]): string {
         const type = a.right === "C" ? "Call" : "Put";
         const buyLeg = a.action === "BUY" ? a : b;
         const sellLeg = a.action === "SELL" ? a : b;
+        // R-166: unequal leg sizes are NOT a vertical. A 1x2 with the short
+        // side larger carries the extra short's risk profile; with the long
+        // side larger it is a backspread. Both were labelled "Bull/Bear
+        // <type> Spread", which is a materially different position.
+        const buyQty = Math.abs(buyLeg.quantity || 0);
+        const sellQty = Math.abs(sellLeg.quantity || 0);
+        if (buyQty > 0 && sellQty > 0 && buyQty !== sellQty) {
+          return sellQty > buyQty ? `${type} Ratio Spread` : `${type} Backspread`;
+        }
         if (a.right === "C") {
           return buyLeg.strike < sellLeg.strike ? `Bull ${type} Spread` : `Bear ${type} Spread`;
         }

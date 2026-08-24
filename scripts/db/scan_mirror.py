@@ -80,13 +80,23 @@ def ensure_perf_twr_tables_best_effort() -> None:
         print(f"[perf-twr] ensure tables non-fatal: {exc}", file=sys.stderr)
 
 
-def mirror_scan_snapshot(service: str, payload: dict, taken_at: Optional[str] = None) -> None:
+def mirror_scan_snapshot(
+    service: str,
+    payload: dict,
+    taken_at: Optional[str] = None,
+    *,
+    health_error: Optional[dict] = None,
+) -> None:
     """Best-effort: upsert the scan's Turso snapshot + heartbeat service_health.
 
     Never raises past the unknown-service guard — the row state reflects THIS
     writer's own outcome (``ok`` on a clean mirror, ``error`` with the detail
     when the snapshot write fails), and a failed Turso write must never crash
     the scan that produced the data.
+
+    ``health_error`` lets the CALLER declare its own run degraded even when
+    the mirror itself succeeds (R-095): a scan whose provider died mid-run
+    still has rows worth persisting, but it must not heartbeat ok.
     """
     if service not in SNAPSHOT_UPSERTS:
         raise ValueError(f"unknown scan service: {service}")
@@ -115,7 +125,12 @@ def mirror_scan_snapshot(service: str, payload: dict, taken_at: Optional[str] = 
             getattr(writer, upsert_name)(service, scan_iso or _today_et_str(), payload)
         elif upsert_name:
             getattr(writer, upsert_name)(scan_iso or _today_et_str(), payload)
-        writer.record_service_health(service, "ok", finished_at=scan_iso)
+        if health_error is None:
+            writer.record_service_health(service, "ok", finished_at=scan_iso)
+        else:
+            writer.record_service_health(
+                service, "error", finished_at=scan_iso, error=health_error,
+            )
     except Exception as exc:  # noqa: BLE001 — best-effort mirror
         print(f"[{service}] db dual-write non-fatal: {exc}", file=sys.stderr)
         try:

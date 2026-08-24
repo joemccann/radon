@@ -257,14 +257,39 @@ def test_wait_for_streaming_data_returns_when_all_ready():
 
 @patch("clients.ib_client.IB")
 def test_get_historical_data_times_out(MockIB):
+    """R-117: ib_insync owns the deadline now, so it is the one that expires.
+
+    Its contract is to send cancelHistoricalData(reqId) and return an EMPTY
+    container without raising — the previous stub hung past its own `timeout`
+    and returned None, which no real gateway does. The assertion is unchanged:
+    a historical request that does not deliver raises IBTimeoutError.
+    """
     mock_ib = MockIB.return_value
 
-    async def _hang(*_a, **_k):
-        await asyncio.sleep(5)
+    async def _expire_like_ib_insync(*_a, **kwargs):
+        await asyncio.sleep(kwargs["timeout"])
+        return []
 
-    mock_ib.reqHistoricalDataAsync = _hang
+    mock_ib.reqHistoricalDataAsync = _expire_like_ib_insync
     mock_ib.run.side_effect = lambda coro: asyncio.new_event_loop().run_until_complete(coro)
     client = _connected_client(mock_ib)
 
     with pytest.raises(IBTimeoutError, match="timed out"):
         client.get_historical_data(MagicMock(), timeout=0.05)
+
+
+@patch("clients.ib_client.IB")
+def test_get_historical_data_bounds_a_wedged_cancel(MockIB):
+    """The outer guard is the backstop for ib_insync's own cancel wedging."""
+    mock_ib = MockIB.return_value
+
+    async def _hang(*_a, **_k):
+        await asyncio.sleep(30)
+
+    mock_ib.reqHistoricalDataAsync = _hang
+    mock_ib.run.side_effect = lambda coro: asyncio.new_event_loop().run_until_complete(coro)
+    client = _connected_client(mock_ib)
+
+    with patch("clients.ib_client.HISTORICAL_CANCEL_GRACE_SECS", 0.05):
+        with pytest.raises(IBTimeoutError, match="cancel did not return"):
+            client.get_historical_data(MagicMock(), timeout=0.05)

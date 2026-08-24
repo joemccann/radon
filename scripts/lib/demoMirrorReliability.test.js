@@ -250,3 +250,77 @@ describe("demo market mirror reliability", () => {
     expect(src.execute).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("account-data purge (REL-049 / R-097)", () => {
+  /**
+   * `flow_analysis_snapshots` can carry portfolio-derived flow rows and must
+   * never exist in the PUBLIC demo database. The purge ran outside the retry
+   * ladder and outside `failures[]`, so the documented transient 502 was
+   * console.warn'd, the mirror proceeded, reported done and exited 0 —
+   * production account rows left in place, indistinguishable from a clean run.
+   */
+  it("retries a transient 502 on the purge instead of skipping it", async () => {
+    const src = {
+      execute: vi.fn().mockResolvedValue({ columns: [], rows: [] }),
+    };
+    let purgeAttempts = 0;
+    const dst = {
+      execute: vi.fn(async (sql) => {
+        if (String(sql).includes("DELETE FROM flow_analysis_snapshots")) {
+          purgeAttempts += 1;
+          if (purgeAttempts === 1) throw turso502();
+        }
+        return { rows: [] };
+      }),
+      batch: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const result = await runMarketMirror({
+      src,
+      dst,
+      tables: { latestOne: [], perKey: [], history: [], purgedAccountTables: ["flow_analysis_snapshots"] },
+      maxAttempts: 3,
+      sleep: vi.fn().mockResolvedValue(undefined),
+      log: () => {},
+      now: () => "2026-08-23T12:00:00.000Z",
+      runId: "purge-retry",
+    });
+
+    expect(purgeAttempts).toBe(2);
+    expect(result.failures).toEqual([]);
+  });
+
+  it("refuses to mirror at all when the purge never succeeds", async () => {
+    const src = {
+      execute: vi.fn().mockResolvedValue({
+        columns: ["scan_time", "payload"],
+        rows: [{ scan_time: "2026-08-23T12:00:00Z", payload: "{}" }],
+      }),
+    };
+    const dst = {
+      execute: vi.fn(async (sql) => {
+        if (String(sql).includes("DELETE FROM flow_analysis_snapshots")) throw turso502();
+        return { rows: [] };
+      }),
+      batch: vi.fn().mockResolvedValue(undefined),
+    };
+
+    await expect(runMarketMirror({
+      src,
+      dst,
+      tables: {
+        latestOne: [{ table: "scanner_snapshots", orderCol: "scan_time" }],
+        perKey: [],
+        history: [],
+        purgedAccountTables: ["flow_analysis_snapshots"],
+      },
+      maxAttempts: 2,
+      sleep: vi.fn().mockResolvedValue(undefined),
+      log: () => {},
+      now: () => "2026-08-23T12:00:00.000Z",
+      runId: "purge-fatal",
+    })).rejects.toThrow(/account-data purge failed/);
+
+    expect(dst.batch).not.toHaveBeenCalled();
+  });
+});

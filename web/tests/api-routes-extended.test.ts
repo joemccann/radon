@@ -1058,7 +1058,7 @@ describe("POST /api/orders/modify — extended", () => {
         cancelled: [{ orderId: 77, permId: 653611587, status: "cancelled" }],
         replacementOrderRef: "radon-replace-9f2c1ab4de7c0511",
         upstream: "Order not acknowledged by IB",
-      } as unknown as string),
+      }),
     );
 
     const { POST } = await import("../app/api/orders/modify/route");

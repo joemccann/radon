@@ -67,6 +67,9 @@ export type GateReason =
   | "no_sign_change"
   | "degenerate"
   | "insufficient_dates"
+  // R-163: read-time staleness. The payload can say "ok" and still be months
+  // old — every derived statistic is as stale as the NAV it was computed from.
+  | "stale_nav"
   | "total_loss"
   | "implausible"
   | "invalid_total_return"
@@ -187,6 +190,8 @@ export function gateCopy(gate: GatedValue, label: string): string {
       return "no cash flows";
     case "insufficient_dates":
       return "needs 2 dated cash flows";
+    case "stale_nav":
+      return "NAV is stale";
     case "total_loss":
       return "-100%";
     case "implausible":

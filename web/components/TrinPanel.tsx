@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Activity } from "lucide-react";
 import BrushMinimap from "./BrushMinimap";
+import PanelRefreshError from "./PanelRefreshError";
 import CriHistoryChart, { type ChartSeries } from "./CriHistoryChart";
 import HistoryRangeChips from "./HistoryRangeChips";
 import InfoTooltip from "./InfoTooltip";
@@ -79,7 +80,7 @@ function formatHourlyTick(d: Date): string {
 }
 
 export default function TrinPanel() {
-  const { data, loading, syncing, lastSync } = useTrin();
+  const { data, loading, syncing, lastSync, error } = useTrin();
   const { isMobile, hasMounted } = useViewport();
   const compact = hasMounted && isMobile;
 
@@ -161,6 +162,7 @@ export default function TrinPanel() {
             TRIN
             <InfoTooltip text={INFO_TOOLTIP} />
           </div>
+          <PanelRefreshError error={error} testId="trin-refresh-error" />
           {lastSync && (
             <span style={{ fontFamily: "var(--font-mono)", fontSize: "9px", color: "var(--text-muted)" }}>
               {new Date(lastSync).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}

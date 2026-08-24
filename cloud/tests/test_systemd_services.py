@@ -382,7 +382,11 @@ class TestSignalsRefresh:
         raw = (services_dir / "radon-signals-refresh.timer").read_text()
         oncalendar = timer.get("oncalendar", "")
         assert "Mon..Fri" in oncalendar
-        assert "09..16:00:00 America/New_York" in raw
+        # R-170: minute :05, not :00 — radon-garch (14:00 UTC) and radon-leap
+        # (10:00 ET) both land in the 14:00 UTC minute and each hold one of
+        # the three general-lane subprocess slots for up to an hour, so two
+        # signals scans deterministically contended for the last one.
+        assert "09..16:05:00 America/New_York" in raw
         assert ":00,15,30,45" not in raw
         assert "America/New_York" in raw
         assert timer.get("persistent") == "false"

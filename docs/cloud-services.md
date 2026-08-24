@@ -505,7 +505,8 @@ Re-check with `turso plan show` after any plan change. Nightly dumps remain mand
 
 Daily `21:45 UTC` (`RandomizedDelaySec=300`), oneshot
 `scripts/fetch_credit_spread.py`. IB daily closes for HYG + SPX, then UW, then
-Yahoo. Heartbeat `credit-spread`. Units are listed in `setup-vps.sh`
+Yahoo. Both units share IB client IDs 56/69 and therefore serialize on `flock -w <peer budget> -E 75 /run/lock/radon-ib-history-5669.lock`: the 21:45/21:55 gap is not a mutex once `RandomizedDelaySec=300` applies to both. The lock loser exits 75 (`SuccessExitStatus=75`) and defers to its next slot instead of entering `failed` (R-127).
+Heartbeat `credit-spread`. Units are listed in `setup-vps.sh`
 `SERVICE_FILES`; root install-copy is still owed (`not-installed` allowlist
 expires 2026-12-31). Spec: [`indicators/credit.md`](indicators/credit.md).
 
@@ -514,7 +515,8 @@ expires 2026-12-31). Spec: [`indicators/credit.md`](indicators/credit.md).
 Daily `21:55 UTC` (`RandomizedDelaySec=300`), oneshot
 `scripts/fetch_iei_hyg.py`. IB daily closes for IEI + HYG (SMART) and the ICE
 dollar index (`DX`, NYBOT), then UW (IEI/HYG, regular-session rows only), then
-Yahoo (`DX-Y.NYB` for DXY). Heartbeat `iei-hyg`. Installed by the deploy's
+Yahoo (`DX-Y.NYB` for DXY). Serialized against `radon-credit-spread` on the
+shared IB client IDs (see above). Heartbeat `iei-hyg`. Installed by the deploy's
 `install-units` verb from `installed-units.sha256`. Spec:
 [`indicators/iei-hyg.md`](indicators/iei-hyg.md).
 
@@ -525,8 +527,10 @@ Every 5 minutes `Mon..Fri 13:02-21:57 UTC` (2 min offset from
 `scripts/fetch_trin.py`, `TimeoutStartSec=240`. During RTH (ET, calendar-gated
 at runtime, `/health` auth-gated) it snapshots IB `TRIN-NYSE` plus `AD-NYSE` /
 `VOL-NYSE` into Turso `trin_samples`; hourly bars and MA(10) are derived at
-read time. Every run refreshes StockCharts `$TRIN` daily closes
-(`trin_daily`) and heartbeats, so off-hours runs are daily-only heartbeats.
+read time. The StockCharts `$TRIN` daily series (`trin_daily`) is scraped
+only when the last closed session is missing from the cache (R-121: it used to
+scrape on all 108 cycles a day for at most one new row); every run heartbeats,
+so off-hours runs are heartbeat-only.
 Heartbeat `trin`. Installed by the deploy's `install-units` verb from
 `installed-units.sha256`. Spec: [`indicators/trin.md`](indicators/trin.md).
 

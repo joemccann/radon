@@ -142,11 +142,17 @@ class JournalCoverage:
     """
 
     def __init__(self, exec_ids: set[str], roots: set[str],
-                 fingerprints: Counter, claimed: Optional[Counter] = None):
+                 fingerprints: Counter, claimed: Optional[Counter] = None,
+                 exec_fingerprints: Optional[Dict[str, str]] = None):
         self.exec_ids = exec_ids
         self.roots = roots
         self.fingerprints = fingerprints
         self.claimed = claimed if claimed is not None else Counter()
+        # exec id (and each composite part / correction root) → the
+        # fingerprint of the journal row carrying it. R-088: the exact-id
+        # skip happens BEFORE the payload is reconstructed, so this map is
+        # how that path spends its claim without a rebuild per row.
+        self.exec_fingerprints = exec_fingerprints if exec_fingerprints is not None else {}
 
     def covers_exec_id(self, exec_id: str) -> bool:
         if exec_id in self.exec_ids:
@@ -159,6 +165,22 @@ class JournalCoverage:
         if fingerprint is None:
             return False
         return self.fingerprints[fingerprint] > self.claimed[fingerprint]
+
+    def claim_exec_id(self, exec_id: str) -> None:
+        """Spend the journal row an EXACT-id (or root) match consumed.
+
+        Without this, a fill skipped by exec id leaves `claimed` at 0 while
+        `fingerprints` counts its journal row, so its same-fingerprint
+        sibling reads as "already journaled under another id convention"
+        and is silently dropped (R-088).
+        """
+        fingerprint = self.exec_fingerprints.get(str(exec_id))
+        if fingerprint is None:
+            root, correction = exec_id_root(str(exec_id))
+            if correction > 0 and root:
+                fingerprint = self.exec_fingerprints.get(root)
+        if fingerprint is not None:
+            self.claimed[fingerprint] += 1
 
     def claim_fill(self, journal_payload: Dict[str, Any]) -> None:
         """Spend the journal row this fill was matched against, so a second
@@ -179,6 +201,9 @@ class JournalCoverage:
             # The row exists AND this fill already owns it.
             self.fingerprints[fingerprint] += 1
             self.claimed[fingerprint] += 1
+            self.exec_fingerprints.setdefault(str(exec_id), fingerprint)
+            if root:
+                self.exec_fingerprints.setdefault(root, fingerprint)
 
     def absorb(self, other: "JournalCoverage") -> None:
         """Merge a delta re-scan's layers into this coverage.
@@ -191,6 +216,7 @@ class JournalCoverage:
         self.exec_ids |= other.exec_ids
         self.roots |= other.roots
         self.fingerprints |= other.fingerprints
+        self.exec_fingerprints.update(other.exec_fingerprints)
 
 
 # Keyset page size for journal coverage scans (Turso Hrana I/O bounding —
@@ -251,14 +277,20 @@ def _accumulate_payload_coverage(coverage: JournalCoverage, raw: Any) -> None:
     if not exec_id:
         return
     coverage.exec_ids.add(str(exec_id))
+    if fingerprint is not None:
+        coverage.exec_fingerprints.setdefault(str(exec_id), fingerprint)
     for part in str(exec_id).split("+"):
         part = part.strip()
         if not part:
             continue
         coverage.exec_ids.add(part)
+        if fingerprint is not None:
+            coverage.exec_fingerprints.setdefault(part, fingerprint)
         root, _correction = exec_id_root(part)
         if root:
             coverage.roots.add(root)
+            if fingerprint is not None:
+                coverage.exec_fingerprints.setdefault(root, fingerprint)
 
 
 def _journal_coverage(
@@ -488,6 +520,10 @@ def backfill(
         exec_id = row["exec_id"]
 
         if coverage.covers_exec_id(exec_id):
+            # R-088: spend the journal row this exact-id match consumed, or
+            # this fill's same-fingerprint sibling is read as a re-import
+            # and never inserted.
+            coverage.claim_exec_id(exec_id)
             log.debug("  SKIP  %s — already in journal", exec_id)
             actions.append({"exec_id": exec_id, "status": "skipped"})
             continue

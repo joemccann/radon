@@ -1,7 +1,7 @@
 import { requireRouteAccess } from "@/lib/routeAccess";
 
 import { NextResponse } from "next/server";
-import { RadonApiError, radonFetch } from "@/lib/radonApi";
+import { RadonApiError, radonFetch, radonErrorDetailText } from "@/lib/radonApi";
 import {
   getRequestId,
   jsonApiError,
@@ -195,7 +195,7 @@ export async function POST(request: Request): Promise<Response> {
     if (error instanceof RadonApiError) {
       return setNoStoreResponseHeaders(
         jsonApiError({
-          message: error.detail,
+          message: radonErrorDetailText(error.detail),
           status: error.status,
           code: error.status >= 500 ? "UPSTREAM_ERROR" : undefined,
           requestId,

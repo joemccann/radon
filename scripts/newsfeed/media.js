@@ -225,9 +225,27 @@ function slugify(value) {
   );
 }
 
+// R-175: `download` fanned out one concurrent request per <img> with no
+// pool, and `post.rawImages` comes verbatim from third-party article markup
+// (see the module comment above) — so the fan-out width was
+// attacker-influenced, and each in-flight task holds a decoded buffer. The
+// URL map was also never evicted in a process that cycles every 120 s.
+export const IMAGE_DOWNLOAD_CONCURRENCY = 4;
+export const MAX_IMAGES_PER_POST = 12;
+export const MAX_URL_CACHE_ENTRIES = 2000;
+
 export function createImageDownloader({ mediaDir, client = defaultClient, getCookieHeader } = {}) {
   if (!mediaDir) throw new Error("createImageDownloader requires mediaDir");
   const cache = new Map();
+
+  function remember(key, value) {
+    // Insertion-ordered Map: the oldest key is the first one iterated.
+    if (cache.size >= MAX_URL_CACHE_ENTRIES) {
+      const oldest = cache.keys().next().value;
+      if (oldest !== undefined) cache.delete(oldest);
+    }
+    cache.set(key, value);
+  }
 
   async function resolveCookieHeader() {
     if (typeof getCookieHeader !== "function") return null;
@@ -244,8 +262,14 @@ export function createImageDownloader({ mediaDir, client = defaultClient, getCoo
     if (!Array.isArray(urls) || urls.length === 0) return [];
 
     const cookieHeader = await resolveCookieHeader();
+    const wanted = urls.slice(0, MAX_IMAGES_PER_POST);
+    if (urls.length > wanted.length) {
+      console.warn(
+        `[newsfeed] ${postId}: ${urls.length} images offered, downloading the first ${wanted.length}`,
+      );
+    }
 
-    const tasks = urls.map(async (remoteUrl, index) => {
+    const fetchOne = async (remoteUrl, index) => {
       const urlObj = new URL(remoteUrl, BASE_URL);
       const absoluteUrl = urlObj.toString();
       if (cache.has(absoluteUrl)) return cache.get(absoluteUrl);
@@ -270,15 +294,30 @@ export function createImageDownloader({ mediaDir, client = defaultClient, getCoo
         // chmod 0644 after write — UMask=0077 would otherwise leave 0600 and
         // Caddy 403s media.radon.run (see mediaPermissions.js).
         await writePublicMediaFile(destPath, format.data);
-        cache.set(absoluteUrl, publicPath);
+        remember(absoluteUrl, publicPath);
         return publicPath;
       } catch (err) {
         console.warn(`[newsfeed] image download failed ${absoluteUrl}: ${err.message}`);
         return null;
       }
-    });
+    };
 
-    const results = await Promise.all(tasks);
+    // Fixed-size worker pool over a shared index: order-preserving results,
+    // never more than IMAGE_DOWNLOAD_CONCURRENCY requests (or decoded
+    // buffers) in flight regardless of how many <img> tags the article had.
+    const results = new Array(wanted.length).fill(null);
+    let next = 0;
+    const workers = Array.from(
+      { length: Math.min(IMAGE_DOWNLOAD_CONCURRENCY, wanted.length) },
+      async () => {
+        while (true) {
+          const index = next++;
+          if (index >= wanted.length) return;
+          results[index] = await fetchOne(wanted[index], index);
+        }
+      },
+    );
+    await Promise.all(workers);
     return results.filter(Boolean);
   }
 

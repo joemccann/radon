@@ -519,6 +519,17 @@ class TestSignalKilledOneshotRerun:
     FARAWAY = _fmt_systemd(NOW + timedelta(hours=22))
     SOON = _fmt_systemd(NOW + timedelta(hours=2))
 
+    @pytest.fixture(autouse=True)
+    def _unspent_rerun_budget(self, monkeypatch):
+        """R-115 added a per-unit daily re-run bound that fails CLOSED. These
+        cases are about the horizon rule, so give each one a fresh budget;
+        the bound itself is exercised in test_ops_plane_bounds.py."""
+        import grok_page_responder as _responder
+
+        monkeypatch.setattr(
+            _responder.pages_mod, "reruns_since", lambda service, since: 0
+        )
+
     def _enqueue_unit_page(self, service="radon-vol-cone.service"):
         return enqueue_delivered_page(
             service=service,

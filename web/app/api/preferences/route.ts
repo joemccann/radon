@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { radonFetch, RadonApiError } from "@/lib/radonApi";
+import { radonFetch, RadonApiError, radonErrorDetailText } from "@/lib/radonApi";
 import {
   getRequestId,
   jsonApiError,
@@ -30,7 +30,7 @@ function upstreamFailure(error: unknown, requestId: string): NextResponse {
   const status = error instanceof RadonApiError ? error.status : 502;
   const detail =
     error instanceof RadonApiError
-      ? error.detail
+      ? radonErrorDetailText(error.detail)
       : error instanceof Error
         ? error.message
         : "preferences request failed";

@@ -436,9 +436,27 @@ class TestDeployCollateralSignalKill:
         current = units.parse_show_output(self._signal_block(killed))
         outcomes = units.evaluate(
             current=current, previous={}, now=self.WINDOW_NOW,
-            deploy={"marker_mtime": None, "in_flight": True},
+            # REL-066 / R-157: `in_flight` alone is no longer enough. An
+            # interrupted deploy leaves the transition journal on disk
+            # indefinitely and it cannot self-clear, so an unbounded
+            # `in_flight` downgraded every signal kill in the previous 24h to
+            # P3 digest. A FRESH journal is still deploy evidence.
+            deploy={"marker_mtime": None, "in_flight": True, "journal_age_seconds": 120},
         )
         assert [o.severity for o in outcomes] == ["P3"]
+
+    def test_signal_kill_during_a_STRANDED_journal_stays_p1(self):
+        killed = self.WINDOW_NOW.replace(minute=48)
+        current = units.parse_show_output(self._signal_block(killed))
+        outcomes = units.evaluate(
+            current=current, previous={}, now=self.WINDOW_NOW,
+            deploy={
+                "marker_mtime": None,
+                "in_flight": True,
+                "journal_age_seconds": units.TRANSITION_JOURNAL_STRANDED_AFTER_SECONDS + 1,
+            },
+        )
+        assert [o.severity for o in outcomes] == ["P1"]
 
     def test_signal_kill_without_deploy_evidence_stays_p1(self):
         killed = datetime(2026, 8, 5, 21, 40, 24, tzinfo=timezone.utc)

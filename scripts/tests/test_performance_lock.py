@@ -31,6 +31,24 @@ def anyio_backend():
     return "asyncio"
 
 
+@pytest.fixture(autouse=True)
+def isolated_rebuild_cooldown(tmp_path, monkeypatch):
+    """REL-047 / R-102: the rebuild cooldown is a durable sidecar now, so it
+    must not be shared with the repo's real data/ directory (or between
+    tests) — that is exactly the process-restart durability being tested."""
+    # `api.server` and `scripts.api.server` are two module objects for the
+    # same file in this tree; the routes under test may be bound to either.
+    for name in ("api.server", "scripts.api.server"):
+        try:
+            module = __import__(name, fromlist=["server"])
+        except ImportError:
+            continue
+        monkeypatch.setattr(
+            module, "PERFORMANCE_REBUILD_SIDECAR", tmp_path / "cooldown.json"
+        )
+    yield
+
+
 @pytest.fixture()
 async def client():
     """Create an httpx.AsyncClient against the FastAPI app with mocked startup."""

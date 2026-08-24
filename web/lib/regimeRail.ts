@@ -116,6 +116,15 @@ export function isFlagged(status: RailStatus | undefined): boolean {
   return status != null && (status.tone === "warn" || status.tone === "fault");
 }
 
+/**
+ * R-196: the rail's "N ELEVATED" summary was denominated over all 22
+ * REGIME_TABS, but `buildRailStatuses` only ever emits these four — the five
+ * indicators this delta added are registered as tabs with no rail reading, so
+ * "0 of 22 elevated" read as broad calm when 18 of them were never asked.
+ * Adding a tab to the rail means adding it here AND to buildRailStatuses.
+ */
+export const FLAGGABLE_REGIME_TABS: readonly RegimeTab[] = ["cri", "cor", "vcg", "gex"];
+
 export function elevatedCount(statuses: RailStatuses): number {
-  return REGIME_TABS.filter((tab) => isFlagged(statuses[tab])).length;
+  return FLAGGABLE_REGIME_TABS.filter((tab) => isFlagged(statuses[tab])).length;
 }

@@ -375,6 +375,7 @@ def fetch_ib_nav_series() -> Optional[List[Dict[str, Any]]]:
     from urllib.parse import urlencode
 
     try:
+        _raise_if_flex_locked()
         # Request report
         url = "https://gdcdyn.interactivebrokers.com/Universal/servlet/FlexStatementService.SendRequest"
         params = urlencode({"t": token, "q": nav_query_id, "v": "3"})
@@ -383,6 +384,7 @@ def fetch_ib_nav_series() -> Optional[List[Dict[str, Any]]]:
         root = ET.fromstring(text)
         ref_node = root.find(".//ReferenceCode")
         if ref_node is None or not ref_node.text:
+            _arm_flex_lockout_if_needed(root)
             return None
         ref_code = ref_node.text
 
@@ -394,6 +396,10 @@ def fetch_ib_nav_series() -> Optional[List[Dict[str, Any]]]:
             resp2 = urlopen(f"{stmt_url}?{params2}", timeout=30)
             xml_text = resp2.read().decode("utf-8")
             if "<FlexStatements" not in xml_text:
+                try:
+                    _arm_flex_lockout_if_needed(ET.fromstring(xml_text))
+                except ET.ParseError:
+                    pass
                 continue
 
             root2 = ET.fromstring(xml_text)
@@ -492,12 +498,14 @@ def _extract_cash_flows(cash_flows: Dict[str, float]) -> None:
     if not token or not query_id:
         return
 
+    _raise_if_flex_locked()
     url = "https://gdcdyn.interactivebrokers.com/Universal/servlet/FlexStatementService.SendRequest"
     params = urlencode({"t": token, "q": query_id, "v": "3"})
     resp = urlopen(f"{url}?{params}", timeout=30)
     root = ET.fromstring(resp.read().decode("utf-8"))
     ref_node = root.find(".//ReferenceCode")
     if ref_node is None or not ref_node.text:
+        _arm_flex_lockout_if_needed(root)
         return
     ref_code = ref_node.text
 
@@ -508,6 +516,10 @@ def _extract_cash_flows(cash_flows: Dict[str, float]) -> None:
         resp2 = urlopen(f"{stmt_url}?{params2}", timeout=30)
         xml_text = resp2.read().decode("utf-8")
         if "<FlexStatements" not in xml_text:
+            try:
+                _arm_flex_lockout_if_needed(ET.fromstring(xml_text))
+            except ET.ParseError:
+                pass
             continue
 
         root2 = ET.fromstring(xml_text)
@@ -644,11 +656,36 @@ def build_nav_equity_curve(nav_history: Dict[str, float]) -> Optional[pd.DataFra
     return df
 
 
+# R-132: three raw Flex paths in this file had no embargo check and no 1025
+# detection, and the poll loops `continue` whenever `<FlexStatements` is
+# absent — exactly what a 1025 error envelope looks like. One CLI invocation
+# was 1 SendRequest plus up to 30 GetStatements against a locked token, each
+# extending the outage. `_throttle_backoff.py` names this file as the known
+# uncontrolled consumer.
+def _raise_if_flex_locked() -> None:
+    try:
+        from utils.flex_embargo import raise_if_blocked
+    except Exception:  # noqa: BLE001 — embargo is advisory here
+        return
+    raise_if_blocked()
+
+
+def _arm_flex_lockout_if_needed(root) -> None:
+    try:
+        from utils.flex_embargo import is_lockout_code, record_lockout
+    except Exception:  # noqa: BLE001
+        return
+    code = (root.findtext(".//ErrorCode") or "").strip()
+    if is_lockout_code(code):
+        record_lockout(code)
+
+
 def fetch_flex_trade_fills() -> tuple[List[TradeFill], str]:
     token = os.environ.get("IB_FLEX_TOKEN")
     query_id = os.environ.get("IB_FLEX_QUERY_ID")
     if not token or not query_id:
         raise RuntimeError("IB_FLEX_TOKEN and IB_FLEX_QUERY_ID are required for live performance reconstruction")
+    _raise_if_flex_locked()
     client = IBClient()
     report = client.run_flex_query(query_id=int(query_id), token=token)
     trades_df = report.df("Trade")

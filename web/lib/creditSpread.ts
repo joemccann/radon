@@ -60,12 +60,19 @@ export function formatDateTick(d: Date): string {
   return `${MONTH_LABELS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
 }
 
+/**
+ * R-197 (the web twin of R-161): a missing or non-finite return has NO
+ * regime. Returning `"coupled"` — a benign, tradeable label that
+ * `regimeColor` then paints `var(--positive)` — made the failure mode read as
+ * "credit and equities in agreement". Currently reached only from tests, but
+ * it is a lying default one import away from the panel.
+ */
 export function classifyRegime(
   spxRet: number | null | undefined,
   hygRet: number | null | undefined,
-): CreditRegime {
+): CreditRegime | null {
   if (spxRet == null || hygRet == null || !Number.isFinite(spxRet) || !Number.isFinite(hygRet)) {
-    return "coupled";
+    return null;
   }
   if (spxRet > 0 && hygRet < 0) return "divergent";
   if (spxRet < 0 && hygRet < 0) return "risk-off";

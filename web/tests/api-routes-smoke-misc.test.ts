@@ -412,7 +412,12 @@ describe("POST /api/ib/ws-ticket", () => {
     });
   });
 
-  it("forwards the Clerk bearer token to FastAPI", async () => {
+  it("mints from the vetted principal, not from the raw header (R-179)", async () => {
+    // The route used to read the Authorization header directly and make it
+    // OPTIONAL — with no header it called FastAPI's /ws-ticket with no token
+    // at all, and the Next.js server IS loopback, which that endpoint trusts.
+    // The token now comes from requireRouteAccess's principal, so an
+    // unauthenticated caller gets no ticket rather than a loopback-minted one.
     mockRadonFetch.mockResolvedValueOnce({ ticket: "abc123" });
     const { POST } = await import("../app/api/ib/ws-ticket/route");
     const res = await POST(req("http://localhost/api/ib/ws-ticket", {
@@ -420,10 +425,12 @@ describe("POST /api/ib/ws-ticket", () => {
       headers: { Authorization: "Bearer clerk-token-123" },
     }));
     expect(res.status).toBe(200);
-    expect(mockRadonFetch).toHaveBeenCalledWith("/ws-ticket", {
-      method: "POST",
-      token: "clerk-token-123",
-    });
+    const [path, init] = mockRadonFetch.mock.calls.at(-1) as [string, Record<string, unknown>];
+    expect(path).toBe("/ws-ticket");
+    expect(init.method).toBe("POST");
+    expect(Object.keys(init)).toEqual(["method", "token"]);
+    // The source-level pin (route-local guard present, raw header no longer
+    // read) lives in auth-perimeter-delta.test.ts, which has no node:fs mock.
   });
 
   it("returns 500 envelope on FastAPI failure", async () => {

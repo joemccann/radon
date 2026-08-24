@@ -105,6 +105,13 @@ RERUNNABLE_ONESHOT_UNITS = frozenset({
     "radon-equibles-ats.service",
     "radon-equibles-cot.service",
 })
+# Per-unit ceiling on automatic re-runs in one UTC day. The global action cap
+# bounds how often the responder acts at all, but not how often it spends that
+# budget on ONE unit: a unit failing environmentally (UW quota exhausted,
+# provider 5xx, gateway down) satisfies the "a fix deployed since" rule once
+# per unrelated merge to main, indefinitely, each attempt spending quota it
+# does not have.
+MAX_RERUNS_PER_UNIT_PER_DAY = 1
 DEPLOY_TRANSITION_JOURNAL = units_mod.TRANSITION_JOURNAL_PATH
 SYSTEMCTL_TIMEOUT_SECS = 30
 
@@ -317,6 +324,12 @@ def attempt_oneshot_rerun(
     if not autoship_enabled():
         return None
     if DEPLOY_TRANSITION_JOURNAL.exists():
+        return None
+    try:
+        spent = pages_mod.reruns_since(unit, since=_utc_day_start(now))
+    except Exception:  # noqa: BLE001 — unknown spend is a blocked spend
+        return None
+    if spent >= MAX_RERUNS_PER_UNIT_PER_DAY:
         return None
     runner = systemctl_runner or _default_systemctl_runner
     reason = _rerun_reason(unit, runner)

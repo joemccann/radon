@@ -27,11 +27,17 @@ from monitor_daemon.handlers.flex_token_check import FlexTokenCheck  # noqa: E40
 @pytest.fixture
 def handler(tmp_path, monkeypatch: pytest.MonkeyPatch):
     h = FlexTokenCheck()
-    # Point the handler at a missing config so _execute_inner takes the
-    # cheap skip path — these tests exercise the prune wiring, not Flex.
+    # A valid, far-from-expiry config so _execute_inner takes its ordinary
+    # path — these tests exercise the prune wiring, not Flex. R-131 made a
+    # MISSING config a soft failure (it means the token TTL is unmonitored),
+    # which is covered by test_silent_degradation_bounds.py.
+    from datetime import datetime, timedelta, timezone
+
+    cfg = tmp_path / "flex_token_config.json"
+    expires = (datetime.now(timezone.utc) + timedelta(days=300)).isoformat()
+    cfg.write_text('{"expires_at": "' + expires + '", "reminder_days": [30]}\n')
     monkeypatch.setattr(
-        "monitor_daemon.handlers.flex_token_check.CONFIG_PATH",
-        tmp_path / "flex_token_config.json",
+        "monitor_daemon.handlers.flex_token_check.CONFIG_PATH", cfg,
     )
     return h
 

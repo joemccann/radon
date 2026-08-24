@@ -45,6 +45,17 @@ EQUIBLES_13F_KEEP_DAYS = 1096         # 8-quarter QoQ ownership series
 COT_KEEP_DAYS = 1461                  # percentiles rank against 3y of weeklies
 WATCHDOG_PAGES_KEEP_DAYS = 90         # forensic dispatch trail
 
+# R-120: the five tables migrations 0051-0054 added had NO policy, so the
+# sweep that bounds every other history table skipped them. Each horizon sits
+# above its deepest live reader, same rule as the R-076 block above.
+CREDIT_SPREAD_KEEP_SESSIONS = 6000    # 18y+ daily series backs the full chart
+IVRANK_KEEP_SESSIONS = 3000           # 252-session rank window + chart history
+IEI_HYG_KEEP_SESSIONS = 3000          # 252-session extremes window + chart
+TRIN_DAILY_KEEP_SESSIONS = 1500       # daily $TRIN chart (~6y)
+# ~78 intraday samples a weekday; only the CURRENT session's MA(10) and the
+# hourly chart read them, so this is deliberately the tightest of the five.
+TRIN_SAMPLES_KEEP_ROWS = 4000
+
 
 @dataclass(frozen=True)
 class KeepLatestPolicy:
@@ -167,6 +178,12 @@ SNAPSHOT_RETENTION_POLICIES: Sequence[Policy] = (
     # paged_at is a full ISO datetime; against date('now', ...) the boundary
     # day resolves one day late, which a 90-day forensic horizon absorbs.
     KeepDaysPolicy("watchdog_pages", "paged_at", WATCHDOG_PAGES_KEEP_DAYS),
+    # R-120: migrations 0051-0054.
+    KeepLatestPolicy("credit_spread_history", "date", CREDIT_SPREAD_KEEP_SESSIONS),
+    KeepLatestPolicy("ivrank_history", "date", IVRANK_KEEP_SESSIONS),
+    KeepLatestPolicy("iei_hyg_history", "date", IEI_HYG_KEEP_SESSIONS),
+    KeepLatestPolicy("trin_daily", "date", TRIN_DAILY_KEEP_SESSIONS),
+    KeepLatestPolicy("trin_samples", "ts", TRIN_SAMPLES_KEEP_ROWS),
 )
 
 

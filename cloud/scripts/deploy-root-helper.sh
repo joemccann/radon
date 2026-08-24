@@ -797,14 +797,26 @@ install_manifest_units() {
   fi
   # ${arr[@]+"${arr[@]}"}: an empty array is an unbound variable under set -u
   # on bash 3.2 (the test host).
+  # R-184: `|| return $?` on the first failure silently skipped every LATER
+  # new timer, and neither the deploy nor the drift audit noticed the ones
+  # that were never attempted. Try them all, name the failures, then fail.
+  local enable_failures=0
   for unit in ${new_timers[@]+"${new_timers[@]}"}; do
-    systemctl_bounded enable --now "$unit" || return $?
+    if ! systemctl_bounded enable --now "$unit"; then
+      printf 'install-units: enable failed %s\n' "$unit" >&2
+      enable_failures=$((enable_failures + 1))
+      continue
+    fi
   done
   printf 'install-units: installed=%d updated=%d unchanged=%d skipped=%d\n' \
     "$installed" "$updated" "$unchanged" "${#skipped[@]}"
   for entry in ${skipped[@]+"${skipped[@]}"}; do
     printf 'install-units: skipped %s\n' "$entry"
   done
+  if (( enable_failures )); then
+    printf 'install-units: %d timer(s) failed to enable\n' "$enable_failures" >&2
+    return 1
+  fi
   return 0
 }
 

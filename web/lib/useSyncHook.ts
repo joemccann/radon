@@ -38,6 +38,13 @@ export type UseSyncReturn<T> = {
   syncNow: () => void;
 };
 
+/**
+ * Above the proxy's own upstream budget so the route's structured timeout
+ * error normally arrives first and this signal is the backstop (the
+ * `radonFetchText` / preferences shape, REL-038 R-083).
+ */
+const SYNC_REQUEST_TIMEOUT_MS = 20_000;
+
 export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSyncReturn<T> {
   const {
     endpoint,
@@ -58,6 +65,8 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
   const [lastSync, setLastSync] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** R-106: one request per verb at a time. */
+  const inFlightRef = useRef<Set<RetryMethod>>(new Set());
   const didInitialSync = useRef(false);
   const didInitialRead = useRef(false);
   const initialLoadKeyRef = useRef<string | null>(null);
@@ -74,12 +83,23 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
   }, []);
 
   const executeRequest = useCallback(async (method: RetryMethod, background = false) => {
+    // R-106: a wedged endpoint (FastAPI blocked on UW / MenthorQ) used to
+    // accumulate one hung request per interval tick, per mounted hook,
+    // indefinitely — and the browser's 6-connection/host limit then
+    // head-of-line-blocked every other API call in the tab. `usePortfolio`
+    // and `useOrders` already do both of these; this hook did neither.
+    if (inFlightRef.current.has(method)) return;
+    inFlightRef.current.add(method);
     if (!background && method === "POST") {
       setSyncing(true);
     }
     let networkResolved = false;
     try {
-      const res = await fetch(endpoint, { method, cache: "no-store" });
+      const res = await fetch(endpoint, {
+        method,
+        cache: "no-store",
+        signal: AbortSignal.timeout(SYNC_REQUEST_TIMEOUT_MS),
+      });
       networkResolved = true;
       const meta = readOfflineMeta(res.headers);
       if (meta.servedOffline) reportOfflineServed(meta.cachedAt);
@@ -110,6 +130,7 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
         return prev;
       });
     } finally {
+      inFlightRef.current.delete(method);
       if (!background && method === "POST") {
         setSyncing(false);
       }
@@ -141,7 +162,11 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
       let networkResolved = false;
       try {
         if (!didInitialRead.current) setLoading(true);
-        const res = await fetch(endpoint, { method: "GET", cache: "no-store" });
+        const res = await fetch(endpoint, {
+          method: "GET",
+          cache: "no-store",
+          signal: AbortSignal.timeout(SYNC_REQUEST_TIMEOUT_MS),
+        });
         networkResolved = true;
         const meta = readOfflineMeta(res.headers);
         if (meta.servedOffline) reportOfflineServed(meta.cachedAt);

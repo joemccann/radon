@@ -72,6 +72,16 @@ DEPLOY_COLLATERAL_WINDOW_SECS = 60 * 60
 # frozen — the deploy left it dead (e.g. timer disabled) — and it re-pages P1.
 KILL_BEFORE_GREEN_FROZEN_CAP_SECS = 24 * 60 * 60
 
+# R-157: the `in_flight` branch keyed on nothing but the journal EXISTING.
+# R-057 established that an interrupted deploy leaves it on disk indefinitely
+# and cannot self-clear, and shipped this same bound in external_probe.py —
+# units.py never got it. While a stranded journal sits there (a state the
+# fleet already alarms at P2), every OOM-kill, `systemctl kill` or
+# stop-timeout SIGKILL of any radon-* unit in the previous 24h was
+# reclassified P3 digest instead of P1 page. Kept numerically identical to
+# external_probe's, and pinned by a test.
+TRANSITION_JOURNAL_STRANDED_AFTER_SECONDS = 3600
+
 
 # ── systemctl seam ───────────────────────────────────────────────────
 
@@ -132,20 +142,41 @@ def _parse_systemd_timestamp(value: str) -> Optional[datetime]:
 
 
 def _read_deploy_evidence() -> dict:
+    from datetime import timezone as _tz
+
     marker_mtime = None
     try:
         if GREEN_MARKER_PATH.is_file():
-            from datetime import timezone as _tz
-
             marker_mtime = datetime.fromtimestamp(
                 GREEN_MARKER_PATH.stat().st_mtime, tz=_tz.utc
             )
     except OSError:
         pass
+    journal_age_seconds: Optional[float] = None
+    try:
+        journal_age_seconds = (
+            datetime.now(_tz.utc)
+            - datetime.fromtimestamp(TRANSITION_JOURNAL_PATH.stat().st_mtime, tz=_tz.utc)
+        ).total_seconds()
+    except OSError:
+        journal_age_seconds = None
     return {
         "marker_mtime": marker_mtime,
         "in_flight": TRANSITION_JOURNAL_PATH.exists(),
+        "journal_age_seconds": journal_age_seconds,
     }
+
+
+def _journal_is_stranded(deploy: dict) -> bool:
+    """True when the transition journal is too old to be evidence of a deploy.
+
+    An unknown age is treated as stranded: the journal cannot self-clear, so
+    "we could not read its mtime" is not a reason to keep excusing kills.
+    """
+    age = deploy.get("journal_age_seconds")
+    if age is None:
+        return True
+    return age > TRANSITION_JOURNAL_STRANDED_AFTER_SECONDS
 
 
 def _is_deploy_collateral(unit: dict, deploy: Optional[dict], now: datetime) -> bool:
@@ -176,7 +207,7 @@ def _is_deploy_collateral(unit: dict, deploy: Optional[dict], now: datetime) -> 
     age = (now - failed_at).total_seconds()
     if age < 0:
         return False
-    if deploy.get("in_flight"):
+    if deploy.get("in_flight") and not _journal_is_stranded(deploy):
         return age <= KILL_BEFORE_GREEN_FROZEN_CAP_SECS
     marker = deploy.get("marker_mtime")
     if marker is None:

@@ -46,8 +46,9 @@ logger = logging.getLogger(__name__)
 PROBE_URL = "http://127.0.0.1:8321/options/exposure/SPX"
 PROBE_PARAMS = {"frequency": "eod"}
 # Connect fast-fails; read covers the full credential login chain
-# (~15s measured on the VPS, 60s client-side login timeout) plus the
-# failing path's two chromium launches. The daemon loop is sequential,
+# (~15s measured on the VPS, bounded client-side by
+# REQUEST_PATH_AUTH_BUDGET_SECONDS = 40s since R-096) plus the failing
+# path's two chromium launches. The daemon loop is sequential,
 # so this is also the worst-case stall the probe can inflict on it.
 PROBE_TIMEOUT = (5, 90)
 
@@ -62,7 +63,17 @@ def _now_utc() -> datetime:
 
 
 def _is_auth_failure(status_code: int, detail: str) -> bool:
-    return status_code == 503 and "authentication" in detail.lower()
+    """True only for a login chain that actually FAILED.
+
+    R-119: the 300s client-side embargo answered with the same 503 and the
+    same word "authentication", so a one-off chromium OOM at 06:00Z made the
+    06:02Z probe take the PERSISTENT branch and latch a full-day "re-login
+    chain is broken" alarm on a chain that was never exercised.
+    """
+    lowered = detail.lower()
+    if "embargo" in lowered:
+        return False
+    return status_code == 503 and "authentication" in lowered
 
 
 class MenthorQLoginProbe(BaseHandler):

@@ -345,7 +345,18 @@ def test_http_500_does_not_retry(tmp_path: Path) -> None:
     assert "retry" not in (result.stdout + result.stderr).lower()
 
 
-def test_persistent_502_still_fails_without_direct_fallback(tmp_path: Path) -> None:
+def test_persistent_502_sheds_without_direct_fallback(tmp_path: Path) -> None:
+    """R-170: a persistent 502 is the general subprocess lane being FULL.
+
+    This case used to assert a non-zero exit. Capacity is
+    MAX_CONCURRENT_SUBPROCESSES(4) - RESERVED_ORDER_SLOTS(1) = 3, and the
+    hour-long leap and garch scans each hold one, so the retry budget
+    (2 x 8 s) cannot clear a hold of up to 3600 s — the unit failed
+    deterministically at the timer overlap and paged P1 hourly for a
+    condition no retry can fix. The half of this test that still matters is
+    unchanged and asserted below: a shed must NEVER launch the direct
+    fallback, because FastAPI may have accepted an in-flight scan.
+    """
     repo_dir = _repo(tmp_path)
     python_bin = _stage_python(tmp_path / "bin")
     _stage_scanner_stub(repo_dir / "scripts", "theta_harvester_scanner.py", "theta-direct")
@@ -363,8 +374,9 @@ def test_persistent_502_still_fails_without_direct_fallback(tmp_path: Path) -> N
     finally:
         stub.stop()
 
-    assert result.returncode != 0
+    assert result.returncode == 0
     combined = (result.stdout + result.stderr).lower()
+    assert "shed" in combined and "capacity" in combined
     assert combined.count("retry") >= 2
     assert "fallback" not in combined
     assert "theta-direct" not in combined

@@ -284,34 +284,39 @@ def _run_shell(shell: str, tmp_path: pathlib.Path) -> subprocess.CompletedProces
     )
 
 
-def test_deploy_installs_units_after_promote_and_before_restart(tmp_path):
+def test_deploy_installs_units_after_promote_and_after_restart(tmp_path):
     """The live checkout only becomes the target SHA at activation, so the
-    install must follow it -- and precede restart-managed so new timers are
-    live for the release that shipped them."""
+    install must follow it.
+
+    It must also follow restart-managed (R-094): `enable --now` on a newly
+    installed Persistent=true timer whose last slot has passed queues an
+    immediate catch-up run of its .service, and firing that into a dead
+    FastAPI paged P1 on every green deploy that shipped a new timer. New
+    timers are live within the same deploy either way -- one step later.
+    """
     calls = tmp_path / "calls"
     result = _run_shell(_restart_services_shell(calls), tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
     lines = calls.read_text(encoding="utf-8").splitlines()
-    assert "/fixed/root-helper stop-clean" in lines
-    assert "activate" in lines
-    assert "/fixed/root-helper install-units" in lines
-    assert "/fixed/root-helper restart-managed" in lines
     refresh_idx = next(
         (i for i, line in enumerate(lines) if line.endswith("refresh-control-plane")),
         None,
     )
     assert refresh_idx is not None, lines
     assert lines.index("/fixed/root-helper stop-clean") < lines.index("activate")
-    assert lines.index("activate") < lines.index("/fixed/root-helper install-units")
-    assert lines.index("/fixed/root-helper install-units") < refresh_idx
+    assert lines.index("activate") < refresh_idx
     assert refresh_idx < lines.index("/fixed/root-helper restart-managed")
+    assert lines.index("/fixed/root-helper restart-managed") < lines.index(
+        "/fixed/root-helper install-units"
+    )
+    assert lines[-1] == "/fixed/root-helper install-units"
 
 
 def test_deploy_unit_install_failure_is_non_fatal(tmp_path):
     calls = tmp_path / "calls"
     result = _run_shell(_restart_services_shell(calls, install_rc=66), tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert calls.read_text(encoding="utf-8").splitlines()[-1] == "/fixed/root-helper restart-managed"
+    assert calls.read_text(encoding="utf-8").splitlines()[-1] == "/fixed/root-helper install-units"
     assert "drift audit" in result.stdout + result.stderr
 
 
@@ -510,3 +515,23 @@ def test_a_good_unit_still_installs_when_verify_is_available(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
     assert (box.unit_dir / "radon-credit-spread.timer").read_text() == TIMER_BODY
     assert "installed=1" in result.stdout
+
+
+# --- REL-045 (R-094): a newly enabled Persistent=true timer whose last
+# calendar slot has passed queues an immediate catch-up run of its .service.
+# install_release_units ran while radon-api and Next.js were DOWN, so that
+# oneshot failed on 127.0.0.1:8321 with Result=exit-code, which
+# `_is_deploy_collateral` does not absorb, and paged P1 on a green deploy.
+
+
+def test_new_timers_are_enabled_after_services_are_back(tmp_path):
+    calls = tmp_path / "calls"
+    result = _run_shell(_restart_services_shell(calls), tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    order = calls.read_text(encoding="utf-8").splitlines()
+    install = order.index("/fixed/root-helper install-units")
+    restart = order.index("/fixed/root-helper restart-managed")
+    assert install > restart, (
+        "install-units still runs while the app tier is down: `enable --now` on "
+        f"a Persistent=true timer fires its oneshot into a dead FastAPI. {order}"
+    )

@@ -7,8 +7,11 @@ Every further SendRequest extends it. cash-flow-sync, radon-perf-twr, and
 POST /performance/background share IB_FLEX_TOKEN, so a per-handler breaker
 cannot clear it.
 
-One sidecar, one token. Dual-write service_health so the watchdog can see
-the deadline after a deploy wipes `data/`.
+One sidecar, one token. The deadline belongs to the IBKR event, not to the
+caller: `record_lockout` is EXTEND-ONLY, so an independent arming path cannot
+slide a live 7-day outage into a 14-day one (R-100). The sidecar is written
+atomically (R-129) and, when it is gone, rehydrated from the `service_health`
+dual-write (R-130) — a deploy that wipes `data/` must not drop a live lockout.
 """
 from __future__ import annotations
 
@@ -16,6 +19,8 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
+
+from .atomic_io import atomic_save
 
 LOCKOUT_CODES = frozenset({"1025"})
 LOCKOUT_DAYS = 7
@@ -56,12 +61,10 @@ def _read_sidecar() -> Optional[datetime]:
 
 
 def _arm_sidecar(until: str, code: str = "1025") -> None:
+    """R-129: atomic write so a concurrent reader never sees a truncated file."""
     try:
         SIDECAR.parent.mkdir(parents=True, exist_ok=True)
-        SIDECAR.write_text(json.dumps({
-            "next_attempt_at": until,
-            "code": str(code),
-        }))
+        atomic_save(SIDECAR, {"next_attempt_at": until, "code": str(code)})
     except OSError:
         pass
 
@@ -118,8 +121,13 @@ def _health_rows(service: str) -> list[Any]:
     return list(rows) if rows else []
 
 
-def _reconstruct_from_turso() -> Optional[datetime]:
-    """Sidecar gone. Fail closed on 1025 evidence, else fail open."""
+def _rehydrate_from_health() -> Optional[datetime]:
+    """Sidecar gone: the lockout deadline recorded in `service_health`, or None.
+
+    R-130: the dual-write used to be write-only, so removing the gitignored
+    sidecar silently dropped a live 7-day lockout. Fail closed on 1025
+    evidence in either writer's row, else fail open.
+    """
     try:
         for service in (SERVICE, CASH_FLOW_SERVICE):
             rows = _health_rows(service)
@@ -133,12 +141,19 @@ def _reconstruct_from_turso() -> Optional[datetime]:
     return None
 
 
+def _stored_deadline() -> Optional[datetime]:
+    stored = _read_sidecar()
+    if stored is not None:
+        return stored
+    return _rehydrate_from_health()
+
+
 def active_until(*, now: Optional[datetime] = None) -> Optional[str]:
     """Live lockout deadline, or None. Consumes a lapsed sidecar."""
     moment = now or datetime.now(timezone.utc)
     stored = _read_sidecar()
     if stored is None:
-        stored = _reconstruct_from_turso()
+        stored = _rehydrate_from_health()
         if stored is None:
             return None
         if moment >= stored:
@@ -147,6 +162,7 @@ def active_until(*, now: Optional[datetime] = None) -> Optional[str]:
         return _utc_iso(stored)
     if moment >= stored:
         clear()
+        _heartbeat_ok()
         return None
     return _utc_iso(stored)
 
@@ -162,8 +178,20 @@ def raise_if_blocked(*, now: Optional[datetime] = None) -> None:
 
 
 def record_lockout(code: str = "1025", *, now: Optional[datetime] = None) -> str:
-    """Arm the sidecar and heartbeat. Returns the ISO deadline."""
-    until = deadline_for(now=now)
+    """Arm the sidecar and heartbeat. Returns the ISO deadline in force.
+
+    EXTEND-ONLY (R-100): a live deadline is never moved. It used to be
+    rewritten to `now + 7d` on every call, and since a pre-flight
+    `FlexTokenLocked` (no HTTP performed) exited with the same code as a
+    fresh IBKR 1025, the daemon handler re-armed on it — every independent
+    caller doubled a token-wide outage without making one Flex request.
+    """
+    moment = now or datetime.now(timezone.utc)
+    existing = _stored_deadline()
+    if existing is not None and existing > moment:
+        return _utc_iso(existing)
+
+    until = deadline_for(now=moment)
     _arm_sidecar(until, code)
     _heartbeat(until, code)
     return until
@@ -178,6 +206,22 @@ def clear() -> None:
 
 def is_lockout_code(code: Optional[str]) -> bool:
     return str(code or "").strip() in LOCKOUT_CODES
+
+
+def _heartbeat_ok() -> None:
+    """Clear the flex-web-service row once a lockout lapses (R-130).
+
+    `clear()` only unlinked the sidecar, so the banner stayed red for ~24h
+    inside the row's 8-day window, quoting a `next_attempt_at` in the past.
+    """
+    try:
+        from db.writer import record_service_health
+    except Exception:
+        return
+    try:
+        record_service_health(SERVICE, "ok")
+    except Exception:
+        return
 
 
 def _heartbeat(until: str, code: str) -> None:

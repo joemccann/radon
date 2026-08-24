@@ -17,6 +17,7 @@ import { formatServiceHealthError } from "@/lib/serviceHealthError";
 import { filterApplicableServiceHealthRows } from "@/lib/serviceHealthApplicability";
 import { requireRouteAccess } from "@/lib/routeAccess";
 import { isAuthorizedProbeRequest } from "@/lib/probeAuth";
+import { clientIp, rateLimit } from "@/lib/rateLimit";
 
 // Disable Next.js static caching: this handler reads live DB state.
 export const dynamic = "force-dynamic";
@@ -110,6 +111,14 @@ function applyStalenessGate(row: ServiceHealthRow, nowMs: number): ServiceHealth
   return { ...row, state: coerced };
 }
 
+const PROBE_RATE_LIMIT = 60;
+const PROBE_RATE_WINDOW_MS = 60_000;
+
+/** The probe's view: states and freshness, never writer diagnostics (R-186). */
+function forProbe(row: ServiceHealthRow): ServiceHealthRow {
+  return { ...row, last_error: null, error_summary: null };
+}
+
 export async function GET(request?: Request): Promise<Response> {
   // Dual-auth (DUR-16): the loopback watchdog authenticates with the probe
   // bearer and has no Clerk session — a valid bearer must not fall through
@@ -122,6 +131,26 @@ export async function GET(request?: Request): Promise<Response> {
   if (!probeAuthorized) {
     const access = await requireRouteAccess(request);
     if (!access.ok) return access.response;
+  } else {
+    // R-186: before 83de48e3 a bearer passed middleware and then 401'd
+    // in-route; now it short-circuits requireRouteAccess entirely, so one
+    // shared STATIC token yielded the full operator diagnostic payload —
+    // every service's writer-supplied `last_error` — at any rate. The probe
+    // needs states and freshness, so that is all it gets, and the token gets
+    // a ceiling of its own.
+    const limited = rateLimit(`service-health:probe:${clientIp(request)}`, {
+      limit: PROBE_RATE_LIMIT,
+      windowMs: PROBE_RATE_WINDOW_MS,
+    });
+    if (!limited.ok) {
+      return setNoStoreResponseHeaders(
+        NextResponse.json(
+          { error: "Too Many Requests" },
+          { status: 429, headers: { "Retry-After": String(limited.retryAfterSec) } },
+        ),
+        getRequestId(),
+      );
+    }
   }
   const requestId = getRequestId();
   try {
@@ -170,8 +199,8 @@ export async function GET(request?: Request): Promise<Response> {
     const dormant = rows.filter(isDormantRow);
 
     const response = NextResponse.json({
-      services: rows,
-      failing,
+      services: probeAuthorized ? rows.map(forProbe) : rows,
+      failing: probeAuthorized ? failing.map(forProbe) : failing,
       degraded_count: degraded.length,
       dormant_count: dormant.length,
       summary: {

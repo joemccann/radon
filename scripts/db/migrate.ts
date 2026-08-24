@@ -90,6 +90,12 @@ function splitStatements(sql: string): string[] {
     .filter((s) => s.length > 0);
 }
 
+/** Mirrors migrate.py's _ALREADY_APPLIED_MARKERS (R-153). */
+function isAlreadyApplied(err: unknown): boolean {
+  const message = String(err).toLowerCase();
+  return message.includes("duplicate column name") || message.includes("already exists");
+}
+
 async function main(): Promise<void> {
   const { url, authToken } = readEnv();
   const db = createClient({ url, authToken });
@@ -113,6 +119,16 @@ async function main(): Promise<void> {
       try {
         await db.execute(stmt);
       } catch (err) {
+        // R-153: on a REPLAY (the version row was lost between the DDL
+        // commit and its INSERT), an object that already exists IS the
+        // applied state. Aborting here took every later migration with it,
+        // and migrate is radon-api's ExecStartPre.
+        if (isAlreadyApplied(err)) {
+          console.warn(
+            `[migrate] ${m.name}: statement already applied, continuing (${String(err)})`,
+          );
+          continue;
+        }
         console.error(`[migrate] FAILED on statement:\n${stmt.slice(0, 200)}\n`);
         throw err;
       }

@@ -197,9 +197,13 @@ class TestSignalsRefreshCoverage:
     Top-candidates panel silently (unit inactive, not failed, so units.py
     missed it too).
 
-    Uniform 4d windows follow the bpi-scan precedent: the wrapper skips
-    outside market hours without heartbeating, so Monday (and post-holiday)
-    mornings legitimately serve a ~66-90h-old row.
+    R-187: the uniform 4d windows this originally pinned were 96x an HOURLY
+    cadence, so a timer dead on Monday morning went unreported until Thursday.
+    The reason 4d was chosen — the wrapper skips outside market hours without
+    heartbeating, so Monday and post-holiday mornings legitimately serve a
+    ~66-90h-old row — is now handled where it belongs, by check.py's
+    open-bell grace, which caps the effective age at how long the session has
+    been open. `closed` still absorbs the whole weekend.
     """
 
     def test_signals_refresh_scans_are_scheduled_with_daily_coverage(self):
@@ -211,12 +215,16 @@ class TestSignalsRefreshCoverage:
                 "is its only autonomous caller and a dead timer is silent"
             )
             window = svc_mod.SCHEDULED_SERVICES[name]
-            assert window["open"] == 4 * 24 * 3600, name
+            assert window["open"] == 3 * 3600, name
             assert window["closed"] == 4 * 24 * 3600, name
             assert window["requires_ib"] is False, name
             assert name in svc_mod.BUCKETS["daily"], (
                 f"{name} needs the hourly daily-bucket check so a dead "
                 "signals-refresh timer surfaces within 1h of the window"
+            )
+            assert name in svc_mod.OPEN_BELL_GRACE_SERVICES, (
+                f"{name} writes only during RTH, so its tight open window "
+                "must be measured from today's opening bell"
             )
 
 

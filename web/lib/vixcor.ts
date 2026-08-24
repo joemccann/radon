@@ -252,8 +252,12 @@ export function visibleEpisodes(
  * any hardcoded cadence copy.
  */
 export function parentLagCopy(lagSessions: number | null | undefined): string {
-  const lag = lagSessions ?? 0;
-  if (!Number.isFinite(lag) || lag <= 0) return "DAILY SERIES SINCE 2006-01";
-  if (lag === 1) return "PARENT 1 SESSION BEHIND";
-  return `PARENT ${lag} SESSIONS BEHIND`;
+  // R-195: `?? 0` collapsed null (the job could NOT determine parent lag)
+  // into 0 (the parent is current), and both branches then returned the
+  // literal "DAILY SERIES SINCE 2006-01" — a hardcoded cadence claim, which
+  // the repo's UI copy rule forbids, standing in for an unknown.
+  if (lagSessions == null || !Number.isFinite(lagSessions)) return "PARENT LAG UNKNOWN";
+  if (lagSessions <= 0) return "PARENT CURRENT";
+  if (lagSessions === 1) return "PARENT 1 SESSION BEHIND";
+  return `PARENT ${lagSessions} SESSIONS BEHIND`;
 }

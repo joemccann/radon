@@ -174,8 +174,10 @@ describe("RegimeRail — grouped rail rendering + navigation", () => {
     expect(within(container.querySelector('[data-tab="cri"]') as HTMLElement).getByText("3")).toBeTruthy();
     // Composite holds one flagged indicator (VCG warn), Positioning one (GEX fault).
     expect(within(container).getAllByText("1 FLAGGED")).toHaveLength(2);
-    // Footer counts every indicator and every warn/fault status.
-    expect(within(container).getByText(/25 INDICATORS · 2 ELEVATED/i)).toBeTruthy();
+    // R-196: the footer counts the tabs buildRailStatuses can actually flag,
+    // not all 22 REGIME_TABS. "0 of 22 elevated" read as broad calm when 18
+    // of them were never asked.
+    expect(within(container).getByText(/4 MONITORED · 2 ELEVATED/i)).toBeTruthy();
   });
 
   it("filter narrows items and hides empty groups", () => {

@@ -2744,6 +2744,25 @@ async def orders_cancel(request: Request):
     return result.data
 
 
+async def _find_working_order(order_id: Any, perm_id: Any) -> Optional[dict]:
+    """The working order's payload from the Turso snapshot, or None.
+
+    Best-effort by construction (R-145): a just-placed order or a Turso blip
+    must degrade to the old contract-quantity cap, never block a modify.
+    """
+    try:
+        snapshot = await _read_orders_snapshot_from_db()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("orders/modify: could not read the working order: %s", exc)
+        return None
+    for payload in snapshot.get("open_orders", []):
+        if perm_id and payload.get("permId") == perm_id:
+            return payload
+        if order_id and payload.get("orderId") == order_id:
+            return payload
+    return None
+
+
 @app.post("/orders/modify")
 async def orders_modify(request: Request):
     """Modify an open order via subprocess.
@@ -2768,11 +2787,20 @@ async def orders_modify(request: Request):
     new_quantity = body.get("newQuantity")
     outside_rth = body.get("outsideRth")
 
-    # REL-005: a working 1-lot must not be modifiable into a 10,000-lot.
-    if new_quantity is not None:
-        from order_limits import check_quantity_limit
+    # REL-005 / R-145: a working 1-lot must not be modifiable into a
+    # 10,000-lot, AND the resized order must be measured on the working
+    # order's real shape. `check_quantity_limit` hardcoded
+    # `{"type": "option", "limitPrice": 0}`, so the notional and combo
+    # max-loss branches were both skipped and `newPrice` was bounded only by
+    # `> 0`. The snapshot read is best-effort: an unreadable working order
+    # falls back to the contract-quantity cap, never to no cap.
+    if new_quantity is not None or new_price is not None:
+        from order_limits import check_modify_limits
 
-        violation = check_quantity_limit(new_quantity)
+        working_order = await _find_working_order(order_id, perm_id)
+        violation = check_modify_limits(
+            working_order, new_quantity=new_quantity, new_price=new_price
+        )
         if violation:
             raise HTTPException(status_code=422, detail=violation)
 
@@ -4080,10 +4108,19 @@ async def performance_sync():
     """Run portfolio performance metrics. 180s timeout.
 
     If a build is already in-flight, piggybacks on it (returns same result).
+
+    R-101: this had NEITHER the embargo guard nor the cooldown its sibling
+    `/performance/background` got in 23b1b9c5, and its callers include the
+    cold-start GET path. With `performance_snapshots` empty or Turso reads
+    failing, EVERY GET /api/performance blocked on a full builder run — the
+    request storm that earned the 1025 in the first place.
     """
     global _running_build
     if _running_build is not None and not _running_build.done():
         return await _running_build
+
+    _refuse_rebuild_or_none()  # raises 503 on lockout / 429 on cooldown
+    _record_rebuild_attempt()
     _running_build = asyncio.create_task(_do_performance_rebuild())
     return await _running_build
 
@@ -4097,7 +4134,70 @@ async def performance_sync():
 # schedule now (Tue..Sat 07:30 ET); this path is a fallback and needs a floor.
 PERFORMANCE_BACKGROUND_COOLDOWN_S = 20 * 60
 
-_last_background_build_at: Optional[float] = None
+# R-102: the cooldown used to be a process-local `time.monotonic()` float.
+# Any radon-api restart (deploy, watchdog, OOM) reset it to None and re-opened
+# an immediate Flex fetch; under a crash loop the 20-minute floor was zero.
+# It lives on disk now, in UTC epoch seconds, so a restart cannot buy a fetch.
+PERFORMANCE_REBUILD_SIDECAR = DATA_DIR / "performance_rebuild_cooldown.json"
+
+
+def _last_rebuild_epoch() -> Optional[float]:
+    try:
+        raw = json.loads(PERFORMANCE_REBUILD_SIDECAR.read_text())
+        value = float(raw.get("last_rebuild_at"))
+    except (OSError, ValueError, TypeError, AttributeError):
+        return None
+    return value
+
+
+def _record_rebuild_attempt() -> None:
+    try:
+        PERFORMANCE_REBUILD_SIDECAR.parent.mkdir(parents=True, exist_ok=True)
+        from utils.atomic_io import atomic_save
+
+        atomic_save(
+            str(PERFORMANCE_REBUILD_SIDECAR),
+            {"last_rebuild_at": datetime.now(timezone.utc).timestamp()},
+        )
+    except Exception:  # noqa: BLE001 — a cooldown write must never fail a build
+        logger.warning("could not persist the performance rebuild cooldown")
+
+
+def _rebuild_refusal() -> Optional[dict]:
+    """`None` when a rebuild may proceed, else a refusal payload."""
+    try:
+        from utils.flex_embargo import active_until
+
+        until = active_until()
+    except Exception:
+        until = None
+    if until:
+        return {"status": "lockout", "next_attempt_at": until}
+
+    last = _last_rebuild_epoch()
+    if last is None:
+        return None
+    age = datetime.now(timezone.utc).timestamp() - last
+    if 0 <= age < PERFORMANCE_BACKGROUND_COOLDOWN_S:
+        return {
+            "status": "cooldown",
+            "retry_in_seconds": int(PERFORMANCE_BACKGROUND_COOLDOWN_S - age),
+        }
+    return None
+
+
+def _refuse_rebuild_or_none() -> None:
+    """R-102: a refusal used to be a 202 to a caller that swallows the body,
+    so `/performance` served a stale snapshot with no explanation anywhere.
+    The synchronous endpoint answers with a real status code and logs."""
+    refusal = _rebuild_refusal()
+    if refusal is None:
+        return
+    logger.warning("performance rebuild refused: %s", refusal)
+    raise HTTPException(
+        status_code=503 if refusal["status"] == "lockout" else 429,
+        detail=refusal,
+    )
 
 
 @app.post("/performance/background", status_code=202)
@@ -4105,30 +4205,21 @@ async def performance_background():
     """Fire-and-forget performance rebuild. Returns 202 immediately.
 
     Refuses a duplicate while one is in flight, and refuses a fresh Flex fetch
-    inside the cooldown window.
+    inside the cooldown window or during a token lockout.
     """
-    global _running_build, _last_background_build_at
+    global _running_build
     if _running_build is not None and not _running_build.done():
         return {"status": "already_running"}
 
-    now = time.monotonic()
-    try:
-        from utils.flex_embargo import is_blocked
-        if is_blocked():
-            return {"status": "lockout"}
-    except Exception:
-        pass
-
-    if (
-        _last_background_build_at is not None
-        and now - _last_background_build_at < PERFORMANCE_BACKGROUND_COOLDOWN_S
-    ):
-        retry_in = int(
-            PERFORMANCE_BACKGROUND_COOLDOWN_S - (now - _last_background_build_at)
+    refusal = _rebuild_refusal()
+    if refusal is not None:
+        logger.warning("background performance rebuild refused: %s", refusal)
+        return JSONResponse(
+            status_code=503 if refusal["status"] == "lockout" else 429,
+            content=refusal,
         )
-        return {"status": "cooldown", "retry_in_seconds": retry_in}
 
-    _last_background_build_at = now
+    _record_rebuild_attempt()
     _running_build = asyncio.create_task(_do_performance_rebuild())
     return {"status": "accepted"}
 
@@ -5078,6 +5169,7 @@ def _load_cash_flow_sync_status() -> dict[str, Any]:
         "next_attempt_at": None,
         "error_summary": None,
         "is_throttled": False,
+        "is_lockout": False,
     }
     try:
         # Bounded hrana read; runs off-loop via asyncio.to_thread at the
@@ -5110,24 +5202,11 @@ def _load_cash_flow_sync_status() -> dict[str, Any]:
                 next_attempt = None
 
             if message:
-                # Flex throttle is the dominant cash-flow-sync failure mode.
-                # Surface a concise tag so the UI doesn't have to substring-
-                # match the raw IBKR error text.
-                lower = message.lower()
-                payload["is_throttled"] = (
-                    "throttle" in lower
-                    or "code 1001" in lower
-                    or "code 1018" in lower
-                    or "code 1019" in lower
-                )
-                # Pull out the user-facing slice. The full message looks
-                # like "ERR: cash flow fetch failed: Flex throttle (code
-                # 1001): Statement could not be generated at this time."
-                # — surface only the post-colon Flex sentence.
-                if "code 1025" in lower or "too many failed attempts" in lower:
-                    payload["error_summary"] = (
-                        "Flex lockout. Do not retry. Ingest with --from-file"
-                    )
+                verdict = _classify_cash_flow_error(message)
+                payload.update(verdict)
+                if verdict.get("is_lockout"):
+                    # Sidecar-or-Turso reconstruction of the live deadline
+                    # beats whatever next_attempt_at the row happened to carry.
                     try:
                         from utils.flex_embargo import active_until
                         reconstructed = active_until()
@@ -5135,18 +5214,42 @@ def _load_cash_flow_sync_status() -> dict[str, Any]:
                         reconstructed = None
                     if reconstructed:
                         next_attempt = reconstructed
-                elif "Flex throttle" in message:
-                    payload["error_summary"] = "Flex throttled by IBKR"
-                elif ":" in message:
-                    payload["error_summary"] = message.split(":")[-1].strip()
-                else:
-                    payload["error_summary"] = message
 
             payload["next_attempt_at"] = next_attempt
     except Exception:
         # Never let a service_health read fail the cash-flows response.
         pass
     return payload
+
+
+def _classify_cash_flow_error(message: str) -> dict[str, Any]:
+    """Tag a cash-flow-sync failure so the UI need not substring-match IBKR.
+
+    R-134: `is_throttled` used to fire on 1001|1018|1019. Per 436dcdc1 only
+    1018 is a rate limit — 1001 is "could not be generated" and 1019 is
+    "generation in progress", both of which take the bounded soft lane — so
+    the amber "Flex throttled, don't manually retry" lozenge was rendered for
+    a 5-minute soft wait. And 1025, the 7-DAY token lockout, was omitted
+    entirely and fell through to generic red. `is_lockout` is its own flag.
+    """
+    lower = message.lower()
+    is_lockout = "code 1025" in lower or "too many failed attempts" in lower
+    verdict: dict[str, Any] = {
+        "is_lockout": is_lockout,
+        # Only 1018 is a rate limit. "throttle" stays as a fallback for the
+        # producer's own wording, but a lockout is never a throttle.
+        "is_throttled": (not is_lockout)
+        and ("code 1018" in lower or "throttle" in lower),
+    }
+    if is_lockout:
+        verdict["error_summary"] = "Flex lockout. Do not retry. Ingest with --from-file"
+    elif "Flex throttle" in message:
+        verdict["error_summary"] = "Flex throttled by IBKR"
+    elif ":" in message:
+        verdict["error_summary"] = message.split(":")[-1].strip()
+    else:
+        verdict["error_summary"] = message
+    return verdict
 
 
 # ---------------------------------------------------------------------------

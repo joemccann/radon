@@ -165,6 +165,34 @@ def actions_since(*, since: datetime) -> int:
     return int(rows[0][0] or 0) if rows else 0
 
 
+RERUN_RESULT_PREFIX = "restarted_unit:"
+
+
+def reruns_since(service: str, *, since: datetime) -> int:
+    """Oneshot re-runs already spent on THIS unit since `since`.
+
+    The global daily cap bounds how often the responder acts at all; it does
+    not stop one unit failing for an environmental reason (UW quota gone,
+    provider 5xx) from consuming the whole day's budget, one re-run per
+    unrelated merge to main. Fails CLOSED like `actions_since`.
+    """
+    try:
+        from db.hrana_http import hrana_query
+    except ImportError:
+        from scripts.db.hrana_http import hrana_query
+
+    try:
+        rows = hrana_query(
+            "SELECT COUNT(*) FROM watchdog_pages "
+            "WHERE service = ? AND finished_at >= ? AND result LIKE ?",
+            (service, _iso(since), RERUN_RESULT_PREFIX + "%"),
+        )
+    except Exception:  # noqa: BLE001
+        log.warning("reruns_since unavailable — standing the rerun down")
+        return _UNKNOWN_ACTION_COUNT
+    return int(rows[0][0] or 0) if rows else 0
+
+
 def claim_page(page_id: str, *, now: datetime, claim_token: str) -> bool:
     try:
         from db.hrana_http import hrana_execute, hrana_query

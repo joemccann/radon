@@ -11,6 +11,9 @@ User=radon
 WorkingDirectory=/home/radon/radon
 EnvironmentFile=/etc/radon/env
 Environment=RADON_DB_NO_REPLICA=1
+# R-152: without this every ivrank UW hit is counted but unattributed in
+# /uw/usage top_callers, so a runaway repair pass is invisible.
+Environment=RADON_UW_CALLER=ivrank
 ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_ivrank.py
 StandardOutput=journal
 StandardError=journal

@@ -2,13 +2,20 @@
 Description=Radon dashboard signals refresh - hourly during ET trading hours
 
 [Timer]
-# Fires hourly at minute 00 Mon-Fri 09:00-16:00 ET.
+# Fires hourly at minute 05 Mon-Fri 09:00-16:00 ET.
 # Covers ET trading hours 09:30-16:00 (09:00 is pre-open, 16:00 is the
 # close sample). Cadence matches the 3600s FastAPI scan cooldown so a
 # scheduled POST is never cooldown-suppressed.
 # run_signals_refresh.sh re-checks the trading calendar at runtime and exits 0
 # on US holidays before doing any work.
-OnCalendar=Mon..Fri *-*-* 09..16:00:00 America/New_York
+# R-170: fire at :05, not :00. radon-garch (14:00 UTC) and radon-leap
+# (10:00 ET = 14:00 UTC in EDT) both land in the 14:00 UTC minute and each
+# hold one of the three general-lane subprocess slots for up to 3600 s, so
+# two signals scans contended for the last slot and the unit failed
+# deterministically at that overlap. The offset does not fix a long hold on
+# its own — the wrapper now treats a capacity shed as a non-failure — but it
+# removes the guaranteed collision.
+OnCalendar=Mon..Fri *-*-* 09..16:05:00 America/New_York
 Persistent=false
 
 [Install]

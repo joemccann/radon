@@ -1,6 +1,9 @@
 "use client";
 
-import { isIbDailyPnlCurrent, sessionPositions } from "@/lib/ibDailyPnlSession";
+import {
+  isIbDailyPnlFromCurrentSession,
+  sessionPositions,
+} from "@/lib/ibDailyPnlSession";
 import { useState, useCallback, useMemo, type ReactNode } from "react";
 import type { PortfolioData, AccountSummary, ExecutedOrder } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
@@ -636,7 +639,7 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
   // Outside a US trading day only spot crypto has a session: the day-move
   // math runs over that subset so stale Friday equity marks never read as a
   // weekend "day move" (2026-08-22: +$25,857 across 9 equity positions).
-  const sessionToday = isIbDailyPnlCurrent();
+  const sessionToday = isIbDailyPnlFromCurrentSession(portfolio.last_sync);
   const sessionPortfolio = sessionToday
     ? portfolio
     : { ...portfolio, positions: sessionPositions(portfolio) };

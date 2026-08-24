@@ -298,6 +298,19 @@ class MonitorDaemon:
                 retained = True
                 error = f"handler {handler.name} timed out after {deadline:.0f}s"
                 logger.error(error)
+                # R-109: the worker thread keeps running. When it finally
+                # finishes it calls _mark_success -> record_success, which
+                # CLEARS blocked_until and writes an ok row over the embargo
+                # the deadline path is about to record. Retire the run first
+                # so the late thread's bookkeeping is refused.
+                retire = getattr(handler, "retire_current_run", None)
+                if callable(retire):
+                    try:
+                        retire()
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning(
+                            f"could not retire {handler.name}'s timed-out run: {exc}"
+                        )
                 self._record_deadline_kill(handler, error, deadline)
                 return {"status": "error", "error": error, "handler": handler.name}
             except Exception as exc:  # noqa: BLE001 — one handler must never kill the daemon
@@ -438,17 +451,41 @@ class MonitorDaemon:
         fill-dedupe baselines) and silently discarding it destroyed the
         only forensic record.
         """
-        if not self.state_file or not self.state_file.exists():
+        # R-108: this used to return before the seeding hook, which only
+        # fired on a CHECKSUM failure. A deleted or never-written state file
+        # (fresh host, restored VM, failed atomic write, `rm` during triage)
+        # made cash_flow_sync start blank, forget a live 24h-168h Flex
+        # embargo, re-probe a hot token and extend the sliding lockout.
+        if not self.state_file:
+            return
+        if not self.state_file.exists():
+            logger.warning(
+                "daemon state file %s is missing — seeding handlers from their "
+                "durable sources", self.state_file
+            )
+            self._seed_handlers_after_corrupt_state()
             return
 
         try:
             state = verified_load(str(self.state_file))
             handler_states = state.get("handlers", {})
 
+            # R-108: set_state used to run INSIDE this try, so one handler
+            # raising on a malformed value aborted the restore loop, seeded
+            # ALL handlers including ones already correctly restored, and
+            # wrote a spurious .corrupt-<ts> backup of a valid file.
             for handler in self.handlers:
-                if handler.name in handler_states:
+                if handler.name not in handler_states:
+                    continue
+                try:
                     handler.set_state(handler_states[handler.name])
                     logger.debug(f"Restored state for {handler.name}")
+                except Exception as restore_exc:  # noqa: BLE001
+                    logger.warning(
+                        "state restore failed for %s: %s — seeding just this "
+                        "handler", handler.name, restore_exc
+                    )
+                    self._seed_handler_after_corrupt_state(handler)
 
         except Exception as e:
             logger.warning(f"Failed to load state: {e}")
@@ -471,13 +508,17 @@ class MonitorDaemon:
         something more conservative than "blank" gets the chance to.
         """
         for handler in self.handlers:
-            seed = getattr(handler, "seed_state_after_corrupt_load", None)
-            if not callable(seed):
-                continue
-            try:
-                seed()
-            except Exception as exc:  # noqa: BLE001 — never block startup
-                logger.warning(f"state seed failed for {handler.name}: {exc}")
+            self._seed_handler_after_corrupt_state(handler)
+
+    @staticmethod
+    def _seed_handler_after_corrupt_state(handler: BaseHandler) -> None:
+        seed = getattr(handler, "seed_state_after_corrupt_load", None)
+        if not callable(seed):
+            return
+        try:
+            seed()
+        except Exception as exc:  # noqa: BLE001 — never block startup
+            logger.warning(f"state seed failed for {handler.name}: {exc}")
 
     def install_signal_handlers(self) -> None:
         """SIGTERM (every deploy) must reach save_state — only

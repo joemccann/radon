@@ -178,6 +178,8 @@ def test_risk_reversal_notional_is_the_debit_not_the_put_strike(monkeypatch):
     multiplier. Assignment risk is a separate loss cap.
     """
     monkeypatch.setenv("RADON_MAX_ORDER_NOTIONAL", "1000000")
+    # $2M of assignment sits under the operator-tunable combo loss cap
+    # (RADON_MAX_COMBO_LOSS_DOLLARS, default $10M — T-080).
     params = {
         "type": "combo", "symbol": "XYZ", "action": "BUY",
         "quantity": 100, "limitPrice": 0.47,
@@ -211,7 +213,7 @@ class TestComboNotionalIsRiskNotPremium:
     def test_short_strangle_at_a_small_credit_is_refused(self):
         """The R-052 case: 500 lots, $0.20 net credit, undefined risk."""
         violation = order_limits.check_order_limits({
-            "type": "combo", "symbol": "SPY", "action": "SELL",
+            "type": "combo", "symbol": "SPY", "action": "BUY",
             "quantity": 500, "limitPrice": -0.20,
             "legs": [_strangle_leg(700, "C"), _strangle_leg(600, "P")],
         })
@@ -222,7 +224,7 @@ class TestComboNotionalIsRiskNotPremium:
         """Notional is qty × |credit| × 100 = $10k. Assignment is
         (700 + 600) × 100 × 500 minus the $10k collected."""
         params = {
-            "type": "combo", "symbol": "SPY", "action": "SELL",
+            "type": "combo", "symbol": "SPY", "action": "BUY",
             "quantity": 500, "limitPrice": -0.20,
             "legs": [_strangle_leg(700, "C"), _strangle_leg(600, "P")],
         }
@@ -273,7 +275,7 @@ class TestComboNotionalIsRiskNotPremium:
 
     def test_iron_condor_sums_both_wings(self):
         params = {
-            "type": "combo", "symbol": "SPX", "action": "SELL",
+            "type": "combo", "symbol": "SPX", "action": "BUY",
             "quantity": 1, "limitPrice": -4.0,
             "legs": [
                 {"expiry": "20260918", "strike": 7100, "right": "C", "action": "SELL", "ratio": 1},
@@ -290,7 +292,7 @@ class TestComboNotionalIsRiskNotPremium:
         """Buy 1 / sell 2: one short is paired against the long, the other is
         naked and prices at its strike."""
         params = {
-            "type": "combo", "symbol": "SPX", "action": "SELL",
+            "type": "combo", "symbol": "SPX", "action": "BUY",
             "quantity": 1, "limitPrice": -1.0,
             "legs": [
                 {"expiry": "20260918", "strike": 7000, "right": "C", "action": "BUY", "ratio": 1},
@@ -338,7 +340,7 @@ class TestComboNotionalIsRiskNotPremium:
         not slip the cap: the premium term counts the same dollars, so
         max(premium, risk − credit) never drops below half the strike risk."""
         violation = order_limits.check_order_limits({
-            "type": "combo", "symbol": "SPY", "action": "SELL",
+            "type": "combo", "symbol": "SPY", "action": "BUY",
             "quantity": 500, "limitPrice": -1500.0,
             "legs": [_strangle_leg(700, "C"), _strangle_leg(600, "P")],
         })
@@ -385,8 +387,10 @@ class TestComboLossCapIsOperatorTunable:
     default but resolves through ``app_preferences`` like the other limits."""
 
     def _seventy_lot_strangle(self):
+        # BUY envelope + negative price = credit received (chain-builder
+        # encoding, R-086 four-quadrant rule), so the $0.20 nets off risk.
         return {
-            "type": "combo", "symbol": "SPY", "action": "SELL",
+            "type": "combo", "symbol": "SPY", "action": "BUY",
             "quantity": 70, "limitPrice": -0.20,
             "legs": [_strangle_leg(700, "C"), _strangle_leg(600, "P")],
         }

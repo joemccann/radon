@@ -241,7 +241,7 @@ describe("decideHealthWrite (heartbeat must never clobber the escalation row)", 
   }
 
   it("healthy cycle → heartbeat ok, no recovery action", () => {
-    expect(decideHealthWrite(hw())).toEqual({ action: "none", heartbeat: true, clearError: false, degraded: false });
+    expect(decideHealthWrite(hw())).toEqual({ action: "none", heartbeat: true, clearError: false, degraded: false, disconnected: false });
   });
 
   it("disconnected relay with an old tick → no misleading ok heartbeat", () => {
@@ -255,7 +255,7 @@ describe("decideHealthWrite (heartbeat must never clobber the escalation row)", 
           lastHeartbeatAt: NOW - TICK_HEARTBEAT_INTERVAL_MS - 10_000,
         }),
       ),
-    ).toEqual({ action: "none", heartbeat: false, clearError: false, degraded: false });
+    ).toEqual({ action: "none", heartbeat: false, clearError: false, degraded: false, disconnected: false });
   });
 
   it("ESCALATION cycle → NO heartbeat (the 2026-06-18 clobber bug)", () => {
@@ -271,19 +271,19 @@ describe("decideHealthWrite (heartbeat must never clobber the escalation row)", 
           lastHeartbeatAt: NOW - TICK_HEARTBEAT_INTERVAL_MS - 10_000,
         }),
       ),
-    ).toEqual({ action: "escalate", heartbeat: false, clearError: false, degraded: false });
+    ).toEqual({ action: "escalate", heartbeat: false, clearError: false, degraded: false, disconnected: false });
   });
 
   it("reconnect cycle → no heartbeat (ladder owns the row)", () => {
     expect(
       decideHealthWrite(hw({ lastTickAt: STALE_TICK_AT, reconnectCycles: 0 })),
-    ).toEqual({ action: "reconnect", heartbeat: false, clearError: false, degraded: false });
+    ).toEqual({ action: "reconnect", heartbeat: false, clearError: false, degraded: false, disconnected: false });
   });
 
   it("resubscribe cycle → no heartbeat", () => {
     expect(
       decideHealthWrite(hw({ lastTickAt: STALE_TICK_AT, farmState: 2104 })),
-    ).toEqual({ action: "resubscribe", heartbeat: false, clearError: false, degraded: false });
+    ).toEqual({ action: "resubscribe", heartbeat: false, clearError: false, degraded: false, disconnected: false });
   });
 
   it("post-escalation cooldown (still stale, error latched) → action none but NO heartbeat", () => {
@@ -299,7 +299,7 @@ describe("decideHealthWrite (heartbeat must never clobber the escalation row)", 
           inError: true,
         }),
       ),
-    ).toEqual({ action: "none", heartbeat: false, clearError: false, degraded: false });
+    ).toEqual({ action: "none", heartbeat: false, clearError: false, degraded: false, disconnected: false });
   });
 
   it("idle relay (zero subscribers, no tick possible) → still heartbeats", () => {
@@ -311,7 +311,7 @@ describe("decideHealthWrite (heartbeat must never clobber the escalation row)", 
       decideHealthWrite(
         hw({ activeSubscriptions: 0, lastTickAt: STALE_TICK_AT }),
       ),
-    ).toEqual({ action: "none", heartbeat: true, clearError: false, degraded: false });
+    ).toEqual({ action: "none", heartbeat: true, clearError: false, degraded: false, disconnected: false });
   });
 
   it("idle relay with the IB socket DOWN → never looks idle-healthy", () => {
@@ -322,7 +322,7 @@ describe("decideHealthWrite (heartbeat must never clobber the escalation row)", 
       decideHealthWrite(
         hw({ ibConnected: false, activeSubscriptions: 0, lastTickAt: STALE_TICK_AT }),
       ),
-    ).toEqual({ action: "none", heartbeat: false, clearError: false, degraded: false });
+    ).toEqual({ action: "none", heartbeat: false, clearError: false, degraded: false, disconnected: false });
   });
 
   it("sticky leftover farm-DOWN while idle still heartbeats", () => {
@@ -334,7 +334,7 @@ describe("decideHealthWrite (heartbeat must never clobber the escalation row)", 
         decideHealthWrite(
           hw({ activeSubscriptions: 0, lastTickAt: STALE_TICK_AT, farmState }),
         ),
-      ).toEqual({ action: "none", heartbeat: true, clearError: false, degraded: false });
+      ).toEqual({ action: "none", heartbeat: true, clearError: false, degraded: false, disconnected: false });
     }
   });
 
@@ -353,7 +353,7 @@ describe("decideHealthWrite (heartbeat must never clobber the escalation row)", 
           lastEscalationAt: NOW - (ESCALATION_COOLDOWN_MS - 1),
         }),
       ),
-    ).toEqual({ action: "none", heartbeat: false, clearError: true, degraded: false });
+    ).toEqual({ action: "none", heartbeat: false, clearError: true, degraded: false, disconnected: false });
   });
 
   it("escalated then idle clears the latch even with a leftover farm-DOWN code", () => {
@@ -368,13 +368,13 @@ describe("decideHealthWrite (heartbeat must never clobber the escalation row)", 
           lastEscalationAt: NOW - (ESCALATION_COOLDOWN_MS - 1),
         }),
       ),
-    ).toEqual({ action: "none", heartbeat: false, clearError: true, degraded: false });
+    ).toEqual({ action: "none", heartbeat: false, clearError: true, degraded: false, disconnected: false });
   });
 
   it("healthy but inside the heartbeat interval → no write, no action", () => {
     expect(
       decideHealthWrite(hw({ lastHeartbeatAt: NOW - 1_000 })),
-    ).toEqual({ action: "none", heartbeat: false, clearError: false, degraded: false });
+    ).toEqual({ action: "none", heartbeat: false, clearError: false, degraded: false, disconnected: false });
   });
 });
 
@@ -428,6 +428,7 @@ describe("R-061 blackout honesty (every subscription nulled by IB is degraded, n
       heartbeat: false,
       clearError: false,
       degraded: true,
+      disconnected: false,
     });
   });
 
@@ -437,6 +438,7 @@ describe("R-061 blackout honesty (every subscription nulled by IB is degraded, n
       heartbeat: false,
       clearError: false,
       degraded: true,
+      disconnected: false,
     });
   });
 
@@ -446,6 +448,7 @@ describe("R-061 blackout honesty (every subscription nulled by IB is degraded, n
       heartbeat: true,
       clearError: false,
       degraded: false,
+      disconnected: false,
     });
   });
 
@@ -455,6 +458,7 @@ describe("R-061 blackout honesty (every subscription nulled by IB is degraded, n
       heartbeat: true,
       clearError: false,
       degraded: false,
+      disconnected: false,
     });
   });
 

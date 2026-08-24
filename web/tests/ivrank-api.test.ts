@@ -196,7 +196,11 @@ describe("GET /api/ivrank — absent and stale data are 200, never 4xx", () => {
     const { GET } = await import("../app/api/ivrank/route");
     const res = await GET();
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual(MISSING_IVRANK);
+    // R-194: the collapse keeps the stale row's own scan_time and marks
+    // it stale, so "the feed died on the 20th" is distinguishable from
+    // "this job has never run". Everything else is still the missing shape.
+    const body = await res.json();
+    expect(body).toEqual({ ...MISSING_IVRANK, stale: true, scan_time: old });
   });
 
   it("still serves a snapshot inside the 48h budget", async () => {

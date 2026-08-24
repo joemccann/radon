@@ -124,9 +124,15 @@ class TestClassifyRegime:
         assert classify_regime(-0.01, -0.01) == "risk-off"
         assert classify_regime(-0.01, 0.01) == "credit-lead"
 
-    def test_missing_returns_are_coupled(self):
-        assert classify_regime(None, -0.01) == "coupled"
-        assert classify_regime(0.01, None) == "coupled"
+    def test_missing_returns_have_no_regime(self):
+        """REL-067 / R-161: this asserted `"coupled"`, which is ALSO the
+        benign risk-on label. `lookback_return` returns None for a window
+        shorter than 2 rows, so a first run after a cache wipe reported
+        "credit and equities in agreement" — the reassuring label as the
+        failure mode of an indicator that exists to surface `divergent`."""
+        assert classify_regime(None, -0.01) is None
+        assert classify_regime(0.01, None) is None
+        assert classify_regime(0.0, 0.0) == "coupled"  # a REAL flat pair
 
 
 class TestMergeDiff:
@@ -153,7 +159,11 @@ class TestBuildOutput:
         payload = build_output(aligned, source="ib")
         assert payload["source"] == "ib"
         assert payload["count"] == 658
-        assert set(payload.keys()) == {"scan_time", "source", "count", "current", "series"}
+        # R-190 adds source_by_ticker: the collapsed `source` string cannot
+        # say WHICH leg fell back to Yahoo.
+        assert set(payload.keys()) == {
+            "scan_time", "source", "source_by_ticker", "count", "current", "series",
+        }
         current = payload["current"]
         assert current["date"] == "2026-08-20"
         assert current["hyg_close"] == pytest.approx(HYG_LAST)
