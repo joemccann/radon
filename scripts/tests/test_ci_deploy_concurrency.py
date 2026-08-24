@@ -208,6 +208,15 @@ def test_pytest_shards_then_combines_coverage_ratchet() -> None:
     )
     fetch_depth = str(checkout.get("with", {}).get("fetch-depth", ""))
     assert "scripts-df" in fetch_depth
+    upload = next(
+        step
+        for step in py_tests["steps"]
+        if "upload-artifact" in step.get("uses", "")
+    )
+    assert upload["with"]["path"] == ".coverage"
+    # upload-artifact v4+ skips dotfiles unless this is set (PR 88 first green
+    # pytest run: 1586 passed, then "No files were found ... path: .coverage").
+    assert str(upload["with"].get("include-hidden-files", "")).lower() in ("true", "True")
     coverage = jobs["py-coverage"]
     assert "py-tests" in coverage["needs"]
     cov_commands = _job_commands(coverage)
