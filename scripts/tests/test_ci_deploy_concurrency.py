@@ -220,7 +220,9 @@ def test_pytest_shards_then_combines_coverage_ratchet() -> None:
     coverage = jobs["py-coverage"]
     assert "py-tests" in coverage["needs"]
     cov_commands = _job_commands(coverage)
-    assert "coverage combine coverage-artifacts/" in cov_commands
+    assert "find coverage-artifacts" in cov_commands
+    assert "name '.coverage'" in cov_commands
+    assert "coverage combine" in cov_commands
     assert "fail-under=56" in cov_commands
     cov_checkout = next(
         step for step in coverage["steps"] if "actions/checkout" in step.get("uses", "")
@@ -278,8 +280,12 @@ def test_py_coverage_installs_coverage_only() -> None:
     commands = _job_commands(job)
     assert "pytest-cov==7.1.0" in commands
     assert "pip install -r requirements-dev.txt" not in commands
-    assert not any("astral-sh/setup-uv@" in step.get("uses", "") for step in job["steps"])
-    assert "python3 -m pip" in commands or "python3 -m coverage" in commands
+    setup_uv = next(
+        step for step in job["steps"] if "astral-sh/setup-uv@" in step.get("uses", "")
+    )
+    assert setup_uv["with"]["python-version"] == "3.13"
+    assert str(setup_uv["with"].get("activate-environment", "")).lower() in ("true", "True")
+    assert "python -m coverage combine" in commands
 
 
 def test_bun_jobs_cache_the_install_store() -> None:

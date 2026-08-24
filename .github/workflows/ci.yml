@@ -243,8 +243,13 @@ jobs:
             pyproject.toml
             scripts
             tests
+      - uses: astral-sh/setup-uv@803947b9bd8e9f986429fa0c5a41c367cd732b41 # v7.2.1
+        with:
+          python-version: "3.13"
+          enable-cache: true
+          activate-environment: true
       - name: Install dependencies
-        run: python3 -m pip install --user --break-system-packages pytest-cov==7.1.0
+        run: uv pip install pytest-cov==7.1.0
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           pattern: pytest-coverage-*
@@ -254,8 +259,14 @@ jobs:
       # ~2.5pts below the measured figure. Never lower it to make a red build
       # pass.
       - run: |
-          python3 -m coverage combine coverage-artifacts/*
-          python3 -m coverage report --fail-under=56 --show-missing
+          mapfile -d '' files < <(find coverage-artifacts -name '.coverage' -print0)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "no .coverage files under coverage-artifacts" >&2
+            find coverage-artifacts -print >&2
+            exit 1
+          fi
+          python -m coverage combine "${files[@]}"
+          python -m coverage report --fail-under=56 --show-missing
       # REL-065 / R-156: docs/demo-environment.md has claimed since phase 0
       # that a "CI isolation guard rejects any demo deploy whose env carries a
       # prod TURSO_DB_URL". Nothing invoked it. On demo.radon.run
