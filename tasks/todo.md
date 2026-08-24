@@ -1,3 +1,25 @@
+# Task: flow-refresh oneshot shed page (2026-08-24)
+
+## Dependency graph
+
+- F1 depends_on: [] - Red tests: SuccessExitStatus=75 + oneshot exit-code latch
+- F2 depends_on: [F1] - Unit SuccessExitStatus, watchdog latch, hash bump
+- F3 depends_on: [F2] - Focused pytest green
+
+## Checklist
+
+- [x] F1 Red tests
+- [x] F2 Unit + watchdog + hash
+- [x] F3 Verify
+
+## Review
+
+- Focused pytest 19+56 contract/watchdog + 7 cloud
+- Wrapper on main already remaps all-shed to exit 0 (872a3ed6, deployed 19:15Z)
+- Repeating page is the oneshot ActiveState=failed latch from 19:00Z
+
+---
+
 # Task: Reconstruct 1025 lockout from Turso (2026-08-23)
 
 ## Dependency graph

@@ -11,7 +11,9 @@ times over 10 days before anything noticed.
 
 Three signals, one alert max per unit per cycle (highest severity wins):
 
-  * ``failed``   — ActiveState=failed. P1. ``Result=start-limit-hit`` is
+  * ``failed``   — ActiveState=failed. P1, except Type=oneshot
+    ``Result=exit-code`` re-observed at the same InactiveEnterTimestamp
+    (P3: the next timer is the retry). ``Result=start-limit-hit`` is
     called out explicitly because it requires a manual operator action.
   * ``flap``     — SubState=auto-restart observed in two consecutive
     watchdog cycles. P1 (sustained crash loop).
@@ -48,7 +50,7 @@ log = logging.getLogger("watchdog.units")
 
 
 UNIT_GLOB = "radon-*"
-SHOW_PROPERTIES = "Id,ActiveState,SubState,Result,NRestarts,InactiveEnterTimestamp"
+SHOW_PROPERTIES = "Id,ActiveState,SubState,Result,NRestarts,InactiveEnterTimestamp,Type"
 SYSTEMCTL_TIMEOUT_S = 10
 
 _PROJECT_DIR = Path(__file__).resolve().parent.parent.parent
@@ -239,6 +241,8 @@ def _save_state(path: Path, current: list[dict], now: datetime) -> None:
             "nrestarts": unit.get("NRestarts"),
             "auto_restart": unit.get("SubState") == "auto-restart",
             "active_state": unit.get("ActiveState"),
+            "inactive_enter": unit.get("InactiveEnterTimestamp"),
+            "unit_type": unit.get("Type"),
         }
         for unit in current
     }
@@ -262,8 +266,32 @@ def _outcome_for(*, unit_id: str, severity: str, message: str, now: datetime) ->
     )
 
 
+def _is_oneshot_exit_code_latch(unit: dict, previous: dict) -> bool:
+    """True when this is the same completed oneshot ExecStart still sitting
+    in ActiveState=failed.
+
+    Type=oneshot has no Restart=, so NRestarts stays 0 and systemd leaves
+    the unit failed until the next timer fire. The first sight of a given
+    InactiveEnterTimestamp is a real ExecStart failure and still pages P1.
+    Re-observing the same timestamp is the latch, not a new outage
+    (2026-08-24 radon-flow-refresh capacity shed).
+    """
+    if unit.get("Type") != "oneshot":
+        return False
+    if (unit.get("Result") or "") != "exit-code":
+        return False
+    ts = unit.get("InactiveEnterTimestamp") or ""
+    if not ts or ts == "n/a":
+        return False
+    prior = previous.get(unit.get("Id") or "") or {}
+    return (prior.get("inactive_enter") or "") == ts
+
+
 def _failed_alert(
-    unit: dict, now: datetime, deploy: Optional[dict] = None
+    unit: dict,
+    now: datetime,
+    deploy: Optional[dict] = None,
+    previous: Optional[dict] = None,
 ) -> Optional[CheckOutcome]:
     if unit.get("ActiveState") != "failed":
         return None
@@ -275,6 +303,12 @@ def _failed_alert(
         message = (
             f"signal-killed inside a deploy window (Result={result}) — "
             "deploy stop-clean collateral, recovers on the next timer fire"
+        )
+        return _outcome_for(unit_id=unit["Id"], severity="P3", message=message, now=now)
+    if _is_oneshot_exit_code_latch(unit, previous or {}):
+        message = (
+            f"oneshot Result=exit-code latched "
+            f"(NRestarts={unit.get('NRestarts')}) — next timer retries"
         )
         return _outcome_for(unit_id=unit["Id"], severity="P3", message=message, now=now)
     message = f"systemd unit failed (Result={result}, NRestarts={unit.get('NRestarts')})"
@@ -348,7 +382,9 @@ def evaluate(
     """One alert max per unit, plus a prior-P1 recovery observation."""
     outcomes = []
     for unit in current:
-        p1_alert = _failed_alert(unit, now, deploy) or _flap_alert(unit, previous, now)
+        p1_alert = _failed_alert(unit, now, deploy, previous) or _flap_alert(
+            unit, previous, now
+        )
         recovery = None if p1_alert else _recovery_observation(unit, previous, now)
         if recovery:
             outcomes.append(recovery)
