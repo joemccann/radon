@@ -687,6 +687,50 @@ the 2FA lock).
 
 ---
 
+## flex-1025-lockout
+
+**IBKR Flex code 1025 is a token lockout. A persisted `class=permanent` row
+plus a missing sidecar will SendRequest at the next 08:00 ET window and
+extend it.** Operator lozenge: `SYNCED 7D AGO · FLEX LOCKOUT. DO NOT RETRY.
+INGEST WITH --FROM-FILE, RETRY 08:00 ET TOMORROW`.
+
+- **Mechanism:** 1025 is undocumented ("Too many failed attempts"), earned by
+  retrying 1001. `75ded753` classified new 1025s as lockout (exit 15, 7-day
+  sidecar). The live 2026-08-21 13:58Z row predates that commit
+  (`class=permanent`, `next_attempt_at=2026-08-24T12:00:00Z`).
+  `flex_embargo.active_until` used to read only `data/flex_token_embargo.json`,
+  which a deploy wipes and which `record_lockout` never wrote for that row.
+  `CashFlowSyncHandler.is_due` honored `daemon_state` `blocked_until` (the
+  Monday 08:00 window). `/orders` POST `/api/blotter` → `journal_rehydrate`
+  shares the token. Looking at the lozenge was itself a SendRequest.
+- **Detection:** `service_health.cash-flow-sync` error with `code 1025` or
+  "too many failed attempts"; lozenge `Do not retry`; `last_synced_at` days
+  old; sidecar file absent on the host.
+- **Discriminating check:** do NOT SendRequest. Read the row and the sidecar.
+
+```
+python3.13 -c "from utils.flex_embargo import active_until, is_blocked; print(is_blocked(), active_until())"
+```
+
+  Blocked through `last_attempt_finished_at + 7d` (2026-08-28T13:58:28Z for
+  the 2026-08-21 row) even if `next_attempt_at` is the next 08:00 ET window.
+  A 1012/config permanent row must not reconstruct as a 7-day lockout.
+- **Remediation:** reconstruct the sidecar from Turso; do not probe Flex.
+  Recover the table with `python3.13 -m scripts.cash_flow_sync --from-file`.
+  Portal Run on query `1442520` only. Do not set `IB_FLEX_FLOWS_QUERY_ID`.
+- **Fix commits:** `75ded753` (new 1025s), plus the reconstruction commit
+  that made a missing sidecar + `class=permanent` 1025 fail closed through
+  `last_attempt+7d`.
+- **Regression:** `scripts/tests/test_flex_token_embargo.py`
+  (`test_missing_sidecar_reconstructs_live_1025_permanent_from_turso`),
+  `scripts/tests/test_monitor_daemon/test_cash_flow_sync_exit_codes.py`
+  (`TestLockoutReconstructedFromTurso`),
+  `scripts/tests/test_cash_flows_route_last_synced.py`
+  (`test_live_permanent_1025_next_attempt_is_lockout_deadline_not_monday`),
+  `web/tests/cash-flows-sync-lozenge.test.tsx` (no `retry tomorrow` on lockout).
+
+---
+
 ## watchdog-probe-dead
 
 **The watchdog's own freshness probe answered definitively wrong** —

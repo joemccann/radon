@@ -302,6 +302,13 @@ class CashFlowSyncHandler(BaseHandler):
 
         now_utc = _now_utc()
 
+        try:
+            from utils.flex_embargo import is_blocked as token_locked
+            if token_locked(now=now_utc):
+                return False
+        except Exception:
+            pass
+
         if _throttle_backoff.is_blocked(self._backoff_state, now_utc=now_utc):
             return False
 

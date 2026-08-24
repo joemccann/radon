@@ -5128,6 +5128,13 @@ def _load_cash_flow_sync_status() -> dict[str, Any]:
                     payload["error_summary"] = (
                         "Flex lockout. Do not retry. Ingest with --from-file"
                     )
+                    try:
+                        from utils.flex_embargo import active_until
+                        reconstructed = active_until()
+                    except Exception:
+                        reconstructed = None
+                    if reconstructed:
+                        next_attempt = reconstructed
                 elif "Flex throttle" in message:
                     payload["error_summary"] = "Flex throttled by IBKR"
                 elif ":" in message:

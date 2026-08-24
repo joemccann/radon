@@ -1,5 +1,20 @@
 # Lessons
 
+## 2026-08-23 — A persisted 1025/permanent row is still a live lockout
+
+- `75ded753` stopped classifying NEW 1025s as permanent. It did not rewrite
+  the 2026-08-21 13:58Z row (`class=permanent`, `next_attempt_at` Monday
+  08:00 ET) and the sidecar is only armed by `record_lockout`.
+- `flex_embargo.active_until` must reconstruct from Turso when
+  `data/flex_token_embargo.json` is missing. Deadline is
+  `last_attempt_finished_at + 7d`, not the stored 08:00 window. 1012 stays
+  not-lockout.
+- `is_due` must consult `flex_embargo.is_blocked` or Monday 08:00 ET
+  SendRequests and extends 1025. `/orders` blotter rehydrate shares the token.
+- Do not SendRequest to "check". Recover with `--from-file`. Do not heartbeat
+  `cash-flow-sync` on reconstruct (that would stamp `last_attempt` as now and
+  slide the 7-day clock).
+
 ## 2026-08-21 — Scheduled units sync through a fixed helper, not a radon install
 
 - CI cannot write `/etc/systemd/system`. A general sudo `install`/`systemctl` grant is a root shell. `radon-deploy-root sync-scheduled-units` is the only write: exact sudoers verb, git objects at the GitHub main tip, manifest hash match, regular file, daemon-reload, no start/stop/enable.
