@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import time
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
@@ -110,7 +111,24 @@ def test_wait_until_caps_at_timeout_using_sleep_steps(MockIB):
     mock_ib = MockIB.return_value
     client = _connected_client(mock_ib)
     assert client.wait_until(lambda: False, timeout=0.2, poll=0.05) is False
-    assert mock_ib.sleep.call_count == 4
+    assert 1 <= mock_ib.sleep.call_count <= math.ceil(0.2 / 0.05)
+
+
+@patch("clients.ib_client.IB")
+def test_wait_until_is_bounded_by_wall_clock_when_sleep_overruns(MockIB):
+    """ib.sleep runs the event loop for AT LEAST ``secs``; a blocked handler
+    can stretch each 0.05s step to 0.2s. The cap must be wall-clock, not
+    ``ceil(timeout/poll)`` nominal steps (which would be 4 x 0.2s = 0.8s)."""
+    mock_ib = MockIB.return_value
+    client = _connected_client(mock_ib)
+    mock_ib.sleep.side_effect = lambda seconds: time.sleep(0.2)
+
+    started = time.monotonic()
+    assert client.wait_until(lambda: False, timeout=0.2, poll=0.05) is False
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 0.5, f"wait_until overran wall-clock timeout: {elapsed:.2f}s"
+    assert mock_ib.sleep.call_count <= 2
 
 
 @patch("clients.ib_client.IB")
