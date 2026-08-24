@@ -109,6 +109,12 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # conditional-GET no-op on unchanged days, heartbeats each run). Uniform
     # 26h window: no weekend/holiday gap to widen for.
     "margin-debt":      {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # hhlev — radon-hhlev.timer, daily 13:20 UTC every calendar day (quarterly
+    # Z.1 source with a daily cheap check, heartbeats each run). Uniform 26h
+    # window cloned from margin-debt: no weekend/holiday gap to widen for.
+    # Data age (a quarter can be ~100+ days old) is legitimate and never
+    # conflated with writer health. FRED HTTP only — no IB dependency.
+    "hhlev":            {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # yield-curve — radon-yield-curve.timer, daily 22:30 UTC every calendar
     # day (weekend/holiday runs heartbeat with no new Treasury rows). Uniform
     # 26h window: no weekend/holiday gap to widen for. treasury.gov + Yahoo
@@ -359,6 +365,9 @@ BUCKETS: dict[str, list[str]] = {
         # of the window expiring.
         "llm-token-index",
         "margin-debt",
+        # Daily 13:20 UTC FRED Z.1 household-leverage pull — hourly check
+        # surfaces a missed run within 1h of the 26h window expiring.
+        "hhlev",
         # Daily 22:30 UTC Treasury yield-curve pull — hourly check surfaces
         # a missed run within 1h of the 26h window expiring.
         "yield-curve",

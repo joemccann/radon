@@ -1,0 +1,12 @@
+[Unit]
+Description=Radon HHLEV Indicator - daily 13:20 UTC FRED Z.1 household leverage pull
+
+[Timer]
+# Daily cheap conditional check of a quarterly Z.1 source, offset ten
+# minutes from radon-margin-debt's 13:10 pass.
+OnCalendar=*-*-* 13:20:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
