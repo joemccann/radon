@@ -93,6 +93,25 @@ def test_deploy_passes_the_explicit_workflow_sha() -> None:
     assert "RADON_DEPLOY_ENV_FILE" in script
 
 
+def test_stage_release_overlaps_gating_jobs_and_is_cancelable() -> None:
+    jobs = _workflow()["jobs"]
+    stage = jobs["stage-release"]
+    assert "needs" not in stage or stage.get("needs") in (None, [], "")
+    assert stage["if"] == jobs["deploy"]["if"]
+    concurrency = stage.get("concurrency", {})
+    assert concurrency.get("cancel-in-progress") == "true"
+    assert "github.ref" in concurrency.get("group", "")
+    assert concurrency.get("group") != "deploy-production"
+    assert stage.get("continue-on-error") in ("true", True)
+    ssh_step = next(step for step in stage["steps"] if "ssh-action" in step.get("uses", ""))
+    script = ssh_step["with"]["script"]
+    assert "RADON_DEPLOY_STAGE=1" in script
+    assert "${{ github.sha }}" in script
+    assert "cloud/scripts/deploy.sh" in script
+    assert "stage-release" in jobs["deploy"]["needs"]
+    assert jobs["deploy"]["concurrency"]["cancel-in-progress"] == "false"
+
+
 def _job_commands(job: dict) -> str:
     return "\n".join(str(step.get("run", "")) for step in job.get("steps", []))
 
@@ -270,7 +289,7 @@ def test_coverage_ratchets_gate_deploy() -> None:
     assert "web-tests" in needs
     assert "py-tests" in needs
     assert "cloud-tests" in needs
-    assert "stage-release" not in jobs
+    assert "stage-release" in needs
     assert "merge_vitest_coverage" in _job_commands(jobs["web-coverage"])
     assert "fail-under=56" in _job_commands(jobs["py-coverage"])
 
