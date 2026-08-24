@@ -372,4 +372,54 @@ describe("VolConePanel — live intraday sample", () => {
     expect(within(cell).getByText("SESSION AS OF")).toBeTruthy();
     expect(within(cell).queryByText("LIVE THIS SESSION")).toBeNull();
   });
+
+  // T-106: the live pass refreshes only the cheap tail plus the watchlist,
+  // so most rows still show last night's IV while the payload flag is true.
+  it("counts live names in the strip and marks un-refreshed rows as-of", () => {
+    const nvda = name({ is_intraday: true });
+    const smh = name({ ticker: "SMH", regime: "NEUTRAL", wing_score: 0.44, atm_percentile: 0.4, atm_iv: 0.387 });
+    renderPanel(
+      hookState({
+        data: buildData({
+          is_intraday: true,
+          source_as_of: "2026-08-18",
+          current: nvda,
+          names: [nvda, smh],
+          hits: [nvda],
+        }),
+      }),
+    );
+
+    const cell = screen.getByTestId("vol-cone-strip-source");
+    expect(within(cell).getByText("LIVE 1/2 NAMES")).toBeTruthy();
+    expect(within(cell).queryByText("LIVE THIS SESSION")).toBeNull();
+
+    const smhRow = screen.getByTestId("vol-cone-row-SMH-2026-09-18");
+    const stale = within(smhRow).getByTestId("vol-cone-row-stale");
+    expect(stale.textContent).toBe("AS OF 2026-04-27");
+    expect(stale.getAttribute("aria-label")).toBe("SMH not refreshed this session, as of 2026-04-27");
+
+    const nvdaRow = screen.getByTestId("vol-cone-row-NVDA-2026-09-18");
+    expect(within(nvdaRow).queryByTestId("vol-cone-row-stale")).toBeNull();
+  });
+
+  it("keeps LIVE THIS SESSION and no row markers when every name was refreshed", () => {
+    const nvda = name({ is_intraday: true });
+    const smh = name({ ticker: "SMH", regime: "NEUTRAL", is_intraday: true });
+    renderPanel(
+      hookState({
+        data: buildData({
+          is_intraday: true,
+          source_as_of: "2026-08-18",
+          current: nvda,
+          names: [nvda, smh],
+          hits: [nvda],
+        }),
+      }),
+    );
+
+    const cell = screen.getByTestId("vol-cone-strip-source");
+    expect(within(cell).getByText("LIVE THIS SESSION")).toBeTruthy();
+    expect(screen.queryAllByTestId("vol-cone-row-stale")).toHaveLength(0);
+  });
 });
