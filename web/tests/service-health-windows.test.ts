@@ -830,15 +830,33 @@ describe("requiresIb helper", () => {
 describe("R-068 — signals-refresh scans are scheduled, not dormant-amber", () => {
   const DAY = 24 * 60 * 60_000;
 
+  const HOUR = 60 * 60_000;
+
   it.each(["theta-harvester", "strength-confirmation"])(
-    "%s is categorized as scheduled with uniform 4d windows",
+    "%s is scheduled, with an open window that matches its hourly cadence",
     (service) => {
+      // R-187: `open` was 4d — 96x the cadence — so a timer dead on Monday
+      // morning went unreported until Thursday. The reason 4d was chosen (a
+      // Friday-afternoon row must not page on Monday) is handled by the
+      // RTH_ONLY open-bell grace, asserted in the very next case, so the
+      // open window can now match what the writer actually does.
       const entry = SERVICE_FRESHNESS_WINDOWS[service];
       expect(entry?.category).toBe("scheduled");
-      expect(entry?.open).toBe(4 * DAY);
+      expect(entry?.open).toBe(3 * HOUR);
       expect(entry?.extended).toBe(4 * DAY);
       expect(entry?.closed).toBe(4 * DAY);
       expect(entry?.requires_ib).toBe(false);
+    },
+  );
+
+  it.each(["theta-harvester", "strength-confirmation"])(
+    "%s surfaces a timer dead since the open, within the session",
+    (service) => {
+      const MON_1400 = Date.parse("2026-05-11T18:00:00Z"); // Mon 2 PM ET
+      const atTheOpen = new Date(Date.parse("2026-05-11T13:30:00Z")).toISOString();
+      // 4.5h of session silence on an hourly writer: under the old 4d window
+      // this read as fresh until Thursday.
+      expect(isStale(service, atTheOpen, "open", MON_1400)).toBe(true);
     },
   );
 

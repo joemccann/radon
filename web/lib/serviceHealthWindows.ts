@@ -305,8 +305,12 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // wrapper skips outside market hours without heartbeating, so Monday
   // (and post-holiday) mornings legitimately serve a ~66-90h-old row —
   // uniform 4d pages on a dead timer without false-paging every Monday.
-  "theta-harvester": { open: 4 * DAY, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
-  "strength-confirmation": { open: 4 * DAY, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
+  // R-187: 4d was 96x an HOURLY cadence — a timer dead on Monday morning
+  // went unreported until Thursday. Both are in RTH_ONLY_SERVICES below, so
+  // `isStale` caps the effective age at how long the session has been open
+  // and the tight open window cannot false-page at 09:31 off Friday's close.
+  "theta-harvester": { open: 3 * HOUR, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
+  "strength-confirmation": { open: 3 * HOUR, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
   "discover": { open: 4 * DAY, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
   "flow-analysis": { open: 4 * DAY, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
   "analyst-ratings": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
@@ -587,6 +591,10 @@ export function isStale(
 }
 
 const RTH_ONLY_SERVICES = new Set([
+  // R-187: written hourly by radon-signals-refresh.timer during the session
+  // only, so their open-window age must be measured from today's open.
+  "theta-harvester",
+  "strength-confirmation",
   "orders-sync",
   "portfolio-sync",
   "journal-sync",

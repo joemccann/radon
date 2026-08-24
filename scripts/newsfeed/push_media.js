@@ -6,7 +6,11 @@
 // Tailscale is down, the cycle continues and the next cycle retries.
 
 import { spawn } from "node:child_process";
-import { ensurePublicMediaPermissions, localMediaDest } from "./mediaPermissions.js";
+import {
+  ensurePublicMediaPermissions,
+  localMediaDest,
+  pruneMediaTree,
+} from "./mediaPermissions.js";
 
 // Default target uses Tailscale's MagicDNS name `ib-gateway` — secure private route.
 // Operators without Tailscale on the laptop can switch to the Hetzner public IP via
@@ -16,6 +20,9 @@ import { ensurePublicMediaPermissions, localMediaDest } from "./mediaPermissions
 const REMOTE = process.env.RADON_MEDIA_REMOTE ?? "radon@ib-gateway:/home/radon/radon-cloud/media/";
 const LOCAL = process.env.RADON_MEDIA_LOCAL ?? "web/public/media/";
 const RSYNC_TIMEOUT_MS = 30_000;
+// R-171: the full-tree sweep runs at most once an hour, not every cycle.
+export const SWEEP_MIN_INTERVAL_MS = 60 * 60_000;
+let lastSweepAt = 0;
 
 export async function pushMedia({
   local = LOCAL,
@@ -82,11 +89,22 @@ export async function pushMedia({
     const dest = localMediaDest(remote);
     if (dest) {
       result.repairMode = "local-chmod";
-      try {
-        result.repaired = await ensurePublicMediaPermissions(dest);
-      } catch (err) {
-        result.repaired = 0;
-        result.repairError = err instanceof Error ? err.message : String(err);
+      // R-171: readdir + stat over the WHOLE tree on every 2-minute cycle, at
+      // a cost growing linearly in a directory that only grows. rsync's own
+      // --chmod already sets the mode on transferred files; this sweep is the
+      // backstop for files written before that landed, so it does not need to
+      // run 720 times a day.
+      if (Date.now() - lastSweepAt >= SWEEP_MIN_INTERVAL_MS) {
+        lastSweepAt = Date.now();
+        try {
+          result.repaired = await ensurePublicMediaPermissions(dest);
+          result.pruned = await pruneMediaTree(dest);
+        } catch (err) {
+          result.repaired = 0;
+          result.repairError = err instanceof Error ? err.message : String(err);
+        }
+      } else {
+        result.repairMode = "local-chmod-skipped";
       }
     } else {
       result.repairMode = "rsync-chmod";

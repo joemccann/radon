@@ -216,12 +216,17 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     "catalysts":        {"open": 7 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
     # theta-harvester / strength-confirmation — fired autonomously by
     # radon-signals-refresh.timer (hourly, Mon-Fri 09:00-16:00 ET) as well
-    # as by user POSTs (R-068). The wrapper skips outside market hours
-    # without heartbeating, so Monday/post-holiday mornings legitimately
-    # serve a ~66-90h-old row — uniform 4d windows per the bpi-scan
-    # precedent. UW-only, no IB.
-    "theta-harvester":  {"open": 4 * _DAY, "closed": 4 * _DAY, "requires_ib": False},
-    "strength-confirmation": {"open": 4 * _DAY, "closed": 4 * _DAY, "requires_ib": False},
+    # as by user POSTs (R-068). R-187: the uniform 4d window was 96x the
+    # cadence, so a timer dead on Monday morning went unreported until
+    # Thursday while the Top-candidates panel served a stale row. R-068 chose
+    # 4d because the wrapper skips outside market hours without heartbeating
+    # and Monday mornings legitimately serve a ~66-90h-old row — but these
+    # two are in BUCKETS["intraday"], so `check.py`'s open-bell grace already
+    # caps the effective age at how long the session has been open. The tight
+    # OPEN window is therefore safe, and `closed` still absorbs the weekend.
+    # UW-only, no IB.
+    "theta-harvester":  {"open": 3 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
+    "strength-confirmation": {"open": 3 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
     "scanner":          {"open": 4 * _DAY, "closed": 4 * _DAY, "requires_ib": False},
     "discover":         {"open": 4 * _DAY, "closed": 4 * _DAY, "requires_ib": False},
     "flow-analysis":    {"open": 4 * _DAY, "closed": 4 * _DAY, "requires_ib": False},
@@ -324,6 +329,23 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # match catalysts (7h open / 4d closed). Polymarket only — no IB.
     "event-odds": {"open": 7 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
 }
+
+
+# Services whose OPEN window is measured from today's opening bell rather
+# than wall-clock age (check.py's open-bell grace). These write only while
+# the session is running, so at 09:31 their true age spans the overnight or
+# weekend gap when they legitimately did not run — the grace is what lets
+# them carry a TIGHT open window without false-paging every Monday.
+#
+# R-187: this used to be `BUCKETS["intraday"]`, which conflates two
+# different questions — how often the WATCHDOG checks a service, and whether
+# the service writes only during RTH. theta-harvester and strength-
+# confirmation are hourly RTH writers on the daily CHECK cadence, so they
+# need the grace without changing how often they are polled.
+OPEN_BELL_GRACE_SERVICES: frozenset[str] = frozenset({
+    "theta-harvester",
+    "strength-confirmation",
+})
 
 
 BUCKETS: dict[str, list[str]] = {
