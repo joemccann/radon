@@ -19,4 +19,10 @@ export async function register() {
   } catch (err) {
     console.warn("[instrumentation] loop-lag monitor failed to start:", err);
   }
+  try {
+    const { installBoundedShutdown } = await import("@/lib/boundedShutdown");
+    installBoundedShutdown();
+  } catch (err) {
+    console.warn("[instrumentation] bounded shutdown failed to install:", err);
+  }
 }
