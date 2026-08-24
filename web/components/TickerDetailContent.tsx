@@ -190,7 +190,16 @@ export default function TickerDetailContent({
   // option, set from the position deck) wins; else the single-leg option price
   // key; else the ticker. Published upstream so `usePrices` opens the one scarce
   // depth ticket for exactly this subject.
-  const focusedBookKey = useTickerDetailOptional()?.focusedBookKey ?? null;
+  const tickerDetail = useTickerDetailOptional();
+  const focusedBookKey = tickerDetail?.focusedBookKey ?? null;
+  // The subject owns the pin's lifetime: a leg book pinned on one ticker must
+  // not leak to the next. Clearing here (child cleanup, keyed on ticker) is
+  // ordering-safe; a reset inside the shell's setActiveTicker is not.
+  const setFocusedBookKey = tickerDetail?.setFocusedBookKey;
+  useEffect(() => {
+    if (!setFocusedBookKey) return;
+    return () => setFocusedBookKey(null);
+  }, [ticker, setFocusedBookKey]);
   const comboBookKeys = useMemo(
     () => [...new Set(position?.legs
       .map((leg) => leg.type === "Stock" ? ticker : legPriceKey(ticker, position.expiry, leg))

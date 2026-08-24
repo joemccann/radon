@@ -96,3 +96,63 @@ describe("TickerDetailContext depth subject vs. setActiveTicker ordering", () =>
     expect(observed).toEqual({ activeTicker: null, depthSymbols: [] });
   });
 });
+
+/**
+ * Same parent/child ordering hazard for the other per-instrument fields.
+ * `depthFutureExpiry` is published by FuturesOrderForm's mount effect (with a
+ * cleanup that publishes null) — a reset inside setActiveTicker lands after it
+ * and the relay resolves the front month instead of the selected future.
+ * `focusedBookKey` is pinned by the user and cleared by the SUBJECT on ticker
+ * change; a shell-side reset must not be what keeps it from leaking.
+ */
+describe("TickerDetailContext per-instrument fields vs. setActiveTicker ordering", () => {
+  let seen: { depthFutureExpiry: string | null; focusedBookKey: string | null } = {
+    depthFutureExpiry: null,
+    focusedBookKey: null,
+  };
+
+  function FuturesSubject({ ticker, expiry }: { ticker: string; expiry: string }) {
+    const { setDepthFutureExpiry, setFocusedBookKey, depthFutureExpiry, focusedBookKey } = useTickerDetail();
+    useEffect(() => {
+      setDepthFutureExpiry(expiry);
+      return () => setDepthFutureExpiry(null);
+    }, [expiry, setDepthFutureExpiry]);
+    useEffect(() => {
+      setFocusedBookKey(`${ticker}-LEG`);
+      return () => setFocusedBookKey(null);
+    }, [ticker, setFocusedBookKey]);
+    seen = { depthFutureExpiry, focusedBookKey };
+    return null;
+  }
+
+  function FuturesShell({ ticker, expiry }: { ticker: string; expiry: string }) {
+    const { setActiveTicker } = useTickerDetail();
+    useEffect(() => {
+      setActiveTicker(ticker);
+    }, [ticker, setActiveTicker]);
+    return <FuturesSubject ticker={ticker} expiry={expiry} />;
+  }
+
+  it("keeps a subject-published future expiry and focused key when shell and subject commit together", () => {
+    render(
+      <TickerDetailProvider>
+        <FuturesShell ticker="VIX" expiry="20260916" />
+      </TickerDetailProvider>,
+    );
+    expect(seen).toEqual({ depthFutureExpiry: "20260916", focusedBookKey: "VIX-LEG" });
+  });
+
+  it("keeps the new subject's values across client-side ticker navigation", () => {
+    const view = render(
+      <TickerDetailProvider>
+        <FuturesShell ticker="VIX" expiry="20260916" />
+      </TickerDetailProvider>,
+    );
+    view.rerender(
+      <TickerDetailProvider>
+        <FuturesShell ticker="SPX" expiry="20261218" />
+      </TickerDetailProvider>,
+    );
+    expect(seen).toEqual({ depthFutureExpiry: "20261218", focusedBookKey: "SPX-LEG" });
+  });
+});
