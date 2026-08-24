@@ -6,7 +6,10 @@
 
 export const WINDOW_SESSIONS = 252;
 
-export type IeiHygState = "new_low" | "new_high" | "neutral";
+// R-126: `unknown` is a window shorter than WINDOW_SESSIONS — a trailing
+// slice makes the latest row the extreme almost every day while the series
+// is still building, so there is no 52-week verdict to render yet.
+export type IeiHygState = "new_low" | "new_high" | "neutral" | "unknown";
 
 export interface IeiHygPoint {
   date: string;
@@ -26,8 +29,9 @@ export interface IeiHygCurrent {
   low_date: string;
   ratio_52w_high: number;
   high_date: string;
-  ratio_pct_rank: number;
+  ratio_pct_rank: number | null;
   window_sessions: number;
+  window_complete: boolean;
   state: IeiHygState;
 }
 
@@ -62,6 +66,7 @@ export function stateLabel(state: IeiHygState | null | undefined): string {
   if (state === "new_low") return "NEW 52W LOW";
   if (state === "new_high") return "NEW 52W HIGH";
   if (state === "neutral") return "NEUTRAL";
+  if (state === "unknown") return "BUILDING WINDOW";
   return "---";
 }
 

@@ -23,9 +23,16 @@ export async function pushMedia({
   timeoutMs = RSYNC_TIMEOUT_MS,
 } = {}) {
   const result = await new Promise((resolve) => {
+    // R-137: `--ignore-existing` skipped every pre-fix 0600 image forever, so
+    // they stayed 403 on media.radon.run permanently, and the post-transfer
+    // chmod below never runs on the DEFAULT remote route (localMediaDest is
+    // null for `radon@ib-gateway:/…`). rsync's own `--chmod` is the only
+    // thing that reaches the remote destination. Dropping --ignore-existing
+    // costs nothing: filenames are content-derived and immutable, so the
+    // size+mtime check skips the data and `-a` still repairs the mode.
     const args = [
       "-az",
-      "--ignore-existing",   // never overwrite — image filenames are content-derived, immutable
+      "--chmod=F644",        // destination file mode, applied over SSH too
       "--itemize-changes",   // emit a line per transferred file
       "--timeout=20",         // per-file network timeout
       local,
@@ -68,17 +75,21 @@ export async function pushMedia({
     });
   });
 
-  // --ignore-existing never updates dest modes. Files written under
-  // UMask=0077 stay 0600 on media.radon.run and Caddy 403s them.
+  // Files written under UMask=0077 land 0600; Caddy 403s them. Which
+  // mechanism repaired the mode is recorded either way, so a remote push is
+  // never silently unrepaired.
   if (result.ok) {
     const dest = localMediaDest(remote);
     if (dest) {
+      result.repairMode = "local-chmod";
       try {
         result.repaired = await ensurePublicMediaPermissions(dest);
       } catch (err) {
         result.repaired = 0;
         result.repairError = err instanceof Error ? err.message : String(err);
       }
+    } else {
+      result.repairMode = "rsync-chmod";
     }
   }
   return result;

@@ -453,15 +453,21 @@ def apply_fred_actuals(
         if series_id not in cache:
             try:
                 cache[series_id] = fetch_obs(series_id)
-            except Exception:
+            except Exception as exc:  # noqa: BLE001 — one dead series is not the feed
+                # R-138: swallowed silently, a revoked FRED_API_KEY, a 429 or
+                # an outage was indistinguishable from "not released yet" and
+                # the `actual` column stayed blank forever. The sibling
+                # `_safe_call` logs for exactly this reason.
+                print(f"[catalysts] FRED {series_id} failed: {exc}", file=sys.stderr)
                 cache[series_id] = None
         obs_date, value = _observation_pair(cache[series_id])
         if value is None:
             continue
         if _observation_is_stale(obs_date, row.get("event_time") or row.get("date")):
             continue
-        if _canonical_print_number(value) == _canonical_print_number(row.get("prev")):
-            continue
+        # R-138: an equal-to-prev print is a REAL print. UNRATE repeats
+        # month-over-month and ICSA ties weekly; the staleness check above is
+        # what distinguishes "released" from "not released yet".
         row["actual"] = value
     return rows
 

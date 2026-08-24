@@ -20,6 +20,19 @@ export function localMediaDest(remote) {
   return remote.endsWith("/") ? remote.slice(0, -1) : remote;
 }
 
+// R-137: the sweep chmods files in an OPERATOR-SUPPLIED directory. Without
+// an allowlist a stray storageState / cookie jar under a Caddy web root
+// becomes world-readable. Only the shapes the newsfeed actually publishes.
+export const PUBLIC_MEDIA_EXTENSIONS = new Set([
+  ".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif", ".svg",
+]);
+
+export function isPublicMediaFile(name) {
+  const dot = name.lastIndexOf(".");
+  if (dot <= 0) return false;
+  return PUBLIC_MEDIA_EXTENSIONS.has(name.slice(dot).toLowerCase());
+}
+
 export async function ensurePublicMediaPermissions(dir) {
   if (!dir) return 0;
   let entries;
@@ -32,6 +45,7 @@ export async function ensurePublicMediaPermissions(dir) {
   let repaired = 0;
   for (const entry of entries) {
     if (!entry.isFile()) continue;
+    if (!isPublicMediaFile(entry.name)) continue;
     const destPath = path.join(dir, entry.name);
     const st = await fs.stat(destPath);
     if ((st.mode & 0o777) === PUBLIC_MEDIA_FILE_MODE) continue;

@@ -60,6 +60,11 @@ SERVICE = "iei-hyg"
 IEI_HYG_JSON = _PROJECT_DIR / "data" / "iei_hyg.json"
 
 WINDOW_SESSIONS = 252
+# R-126: `extremes_window` is a trailing slice, so on a 30-session series the
+# latest row IS the window extreme nearly every day and `classify_state`
+# published NEW 52W LOW/HIGH off a month of data. No partial-window extreme,
+# ever — the same rule `fetch_ivrank.MIN_OBSERVATIONS` already enforces.
+MIN_OBSERVATIONS = WINDOW_SESSIONS
 IEI_SYMBOL = "IEI"
 HYG_SYMBOL = "HYG"
 DXY_SYMBOL = "DXY"
@@ -328,6 +333,7 @@ def _current(series: list[dict[str, Any]]) -> dict[str, Any]:
     lowest = min(window, key=lambda r: r["ratio"])
     highest = max(window, key=lambda r: r["ratio"])
     low, high = lowest["ratio"], highest["ratio"]
+    complete = len(window) >= MIN_OBSERVATIONS
     return {
         "date": latest["date"],
         "iei_close": latest["iei_close"],
@@ -338,9 +344,10 @@ def _current(series: list[dict[str, Any]]) -> dict[str, Any]:
         "low_date": lowest["date"],
         "ratio_52w_high": high,
         "high_date": highest["date"],
-        "ratio_pct_rank": pct_rank(latest["ratio"], low, high),
+        "ratio_pct_rank": pct_rank(latest["ratio"], low, high) if complete else None,
         "window_sessions": len(window),
-        "state": classify_state(latest["ratio"], low, high),
+        "window_complete": complete,
+        "state": classify_state(latest["ratio"], low, high) if complete else "unknown",
     }
 
 
