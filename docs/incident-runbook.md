@@ -643,6 +643,43 @@ both Top-candidates scans hit the FastAPI subprocess slot cap.** Peak:
 
 ---
 
+## flow-refresh-capacity-502
+
+**`radon-flow-refresh.service` oneshot pages P1 `Result=exit-code` when
+all three flow-tab POSTs hit the FastAPI subprocess slot cap.** Peak:
+2026-08-24 19:00:00Z, page `304b0d7f…`.
+
+- **Mechanism:** hourly ET `:00` timer POSTs `/scan?force=true`,
+  `/flow-analysis?force=true`, `/discover?force=true`. At the top of the
+  hour peer scanners (breadth, portfolio-sync, vcg, regime) claim the
+  shared `run_script` lanes (hard cap 4 / lane cap 3). All three POSTs
+  returned instant HTTP 502 with journal
+  `Subprocess capacity exhausted … (3 active, lane cap 3, hard cap 4)`.
+  `/health/lite` stayed 200 / authenticated. The wrapper treated any
+  non-exit-7 response as indeterminate (BUG-013: no duplicate direct
+  scan) and exited 1 with `NRestarts=0`. Capacity cleared ~26s later.
+- **Discriminating check:** unit journal
+  `FastAPI outcome indeterminate (curl=0, http=502)` for scanner /
+  flow-analysis / discover in the same second; radon-api
+  `Subprocess capacity exhausted for scanner.py` /
+  `flow_analysis.py` / `discover.py`; `/health/lite` 200. Script-failed
+  502 logs `Script … failed (code 1)` and takes seconds. Deploy
+  stop-clean is `Result=signal`. Market-closed skip is exit 0.
+- **Remediation (code):** same class as `signals-refresh-capacity-502`
+  / R-170. Retry HTTP 502/503
+  (`RADON_FLOW_REFRESH_RETRIES` default 2,
+  `RADON_FLOW_REFRESH_RETRY_DELAY_SECS` default 8) charged against the
+  per-scan wall budget. Persistent shed exits 0 (`SHED_EXIT=75`) so the
+  unit watchdog does not page P1 hourly for a full lane; the next slot
+  retries. Keep the no-duplicate rule. Real failures still exit 1.
+- **Regression:**
+  `test_run_flow_refresh_wrapper.py::test_http_502_then_ok_retries_without_direct_fallback`,
+  `test_http_503_then_ok_retries`, `test_http_500_does_not_retry`,
+  `test_persistent_502_sheds_without_direct_fallback`.
+- **Code:** `scripts/run_flow_refresh.sh`.
+
+---
+
 ## service-health-degraded / service-down (generic cases)
 
 `service-health-degraded`: `/api/service-health` body lists failing rows (error,
