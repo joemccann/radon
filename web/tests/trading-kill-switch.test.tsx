@@ -114,4 +114,75 @@ describe("<TradingKillSwitch />", () => {
       expect(resume?.method).toBe("POST");
     });
   });
+
+  // T-101: Cancel All is a master global cancel (exit orders included) and
+  // runAction() always posts {confirm:true}, so the ConfirmDialog is the ONLY
+  // human gate. Pin that one click on the button fires nothing.
+  describe("Cancel All confirm gate", () => {
+    function postsTo(path: string) {
+      return calls.filter((c) => c.method === "POST" && c.path === path);
+    }
+
+    it("clicking Cancel All Orders posts nothing until the dialog is confirmed", async () => {
+      render(<TradingKillSwitch />);
+      await waitFor(() => screen.getByTestId("trading-cancel-all-button"));
+
+      fireEvent.click(screen.getByTestId("trading-cancel-all-button"));
+      expect(calls.filter((c) => c.method === "POST")).toHaveLength(0);
+
+      fireEvent.click(screen.getByTestId("admin-confirm-action"));
+
+      await waitFor(() =>
+        expect(postsTo("/api/admin/trading/cancel-all")).toHaveLength(1),
+      );
+      const cancelAll = postsTo("/api/admin/trading/cancel-all")[0];
+      expect((cancelAll.body as Record<string, unknown>).confirm).toBe(true);
+      expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
+    });
+
+    it("dismissing the Cancel All dialog posts nothing", async () => {
+      render(<TradingKillSwitch />);
+      await waitFor(() => screen.getByTestId("trading-cancel-all-button"));
+
+      fireEvent.click(screen.getByTestId("trading-cancel-all-button"));
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+      await waitFor(() =>
+        expect(screen.getByTestId("admin-confirm-action")).toHaveProperty("disabled", true),
+      );
+      expect(calls.filter((c) => c.method === "POST")).toHaveLength(0);
+    });
+  });
+
+  describe("Halt confirm gate", () => {
+    it("clicking Halt Trading posts nothing until the dialog is confirmed", async () => {
+      render(<TradingKillSwitch />);
+      await waitFor(() => screen.getByTestId("trading-halt-button"));
+
+      fireEvent.click(screen.getByTestId("trading-halt-button"));
+      expect(calls.filter((c) => c.method === "POST")).toHaveLength(0);
+
+      fireEvent.click(screen.getByTestId("admin-confirm-action"));
+
+      await waitFor(() =>
+        expect(
+          calls.filter((c) => c.method === "POST" && c.path === "/api/admin/trading/halt"),
+        ).toHaveLength(1),
+      );
+      expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
+    });
+
+    it("dismissing the Halt dialog posts nothing", async () => {
+      render(<TradingKillSwitch />);
+      await waitFor(() => screen.getByTestId("trading-halt-button"));
+
+      fireEvent.click(screen.getByTestId("trading-halt-button"));
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+      await waitFor(() =>
+        expect(screen.getByTestId("admin-confirm-action")).toHaveProperty("disabled", true),
+      );
+      expect(calls.filter((c) => c.method === "POST")).toHaveLength(0);
+    });
+  });
 });
