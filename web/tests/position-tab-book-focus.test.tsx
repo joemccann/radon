@@ -76,14 +76,27 @@ describe("PositionTab — per-leg book focus", () => {
 });
 
 describe("TickerDetailContext — focusedBookKey lifecycle", () => {
-  it("clears the pinned book key when the focused ticker changes", () => {
-    const wrapper = ({ children }: { children: React.ReactNode }) =>
-      React.createElement(TickerDetailProvider, null, children);
+  const wrapper = ({ children }: { children: React.ReactNode }) =>
+    React.createElement(TickerDetailProvider, null, children);
+
+  it("does not reset the pinned book key on a ticker change — the subject owns it", () => {
+    // TickerDetailContent clears the pin in its ticker-keyed effect cleanup
+    // (ticker-detail-content-focused-book-key-clears.test.tsx). A shell-side
+    // reset here would race child publishes (child effects run first), which
+    // is how client-side navigation lost its depth subscription.
     const { result } = renderHook(() => useTickerDetail(), { wrapper });
     act(() => result.current.setActiveTicker("VIX"));
     act(() => result.current.setFocusedBookKey("VIX_20260616_18_C"));
     expect(result.current.focusedBookKey).toBe("VIX_20260616_18_C");
     act(() => result.current.setActiveTicker("SPX")); // different subject
+    expect(result.current.focusedBookKey).toBe("VIX_20260616_18_C");
+  });
+
+  it("clears the pinned book key when leaving ticker detail", () => {
+    const { result } = renderHook(() => useTickerDetail(), { wrapper });
+    act(() => result.current.setActiveTicker("VIX"));
+    act(() => result.current.setFocusedBookKey("VIX_20260616_18_C"));
+    act(() => result.current.setActiveTicker(null));
     expect(result.current.focusedBookKey).toBeNull();
   });
 });
