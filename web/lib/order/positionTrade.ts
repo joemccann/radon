@@ -187,12 +187,20 @@ export function overClosesHeldCombo(
 export function workingSellComboUnits(
   ticker: string,
   orders: { open_orders?: unknown[] } | null | undefined,
+  /**
+   * The order being MODIFIED. It is still working at the broker and sits in
+   * the snapshot, but the post-modify shape replaces it, so counting it would
+   * consume its own held units and misclassify a full-size close as a fresh
+   * opening credit spread.
+   */
+  exclude?: { permId?: number | null; orderId?: number | null } | null,
 ): number {
   const rows = Array.isArray(orders?.open_orders) ? orders!.open_orders! : [];
   const upper = ticker.toUpperCase();
   let total = 0;
   for (const raw of rows) {
     const row = raw as Record<string, unknown>;
+    if (isExcludedOrder(row, exclude)) continue;
     if (String(row.action ?? "").toUpperCase() !== "SELL") continue;
     const contract = (row.contract ?? {}) as Record<string, unknown>;
     if (String(contract.secType ?? "").toUpperCase() !== "BAG") continue;
@@ -201,6 +209,16 @@ export function workingSellComboUnits(
     if (Number.isFinite(quantity) && quantity > 0) total += quantity;
   }
   return total;
+}
+
+function isExcludedOrder(
+  row: Record<string, unknown>,
+  exclude: { permId?: number | null; orderId?: number | null } | null | undefined,
+): boolean {
+  if (!exclude) return false;
+  if (exclude.permId != null && Number(row.permId) === exclude.permId) return true;
+  if (exclude.orderId != null && Number(row.orderId) === exclude.orderId) return true;
+  return false;
 }
 
 /** The action that CLOSES the target (so the UI can default to it). */
