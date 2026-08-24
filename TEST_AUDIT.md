@@ -2460,6 +2460,7 @@ renumbered from T-097. The first pass's audit text, ledger line and
 - **T-084 DONE.** Idempotent-upsert tests for `iei_hyg_history` / `credit_spread_history` execute the production writers on a recording sqlite; dead SQL constants removed. Red 4 failed under a column-swap mutation, green after with the mutation reverted.
 - **T-099 DONE.** Both indicator jobs now heartbeat `error` + `stale_source` when IB, UW and Yahoo all fail (mirrors `fetch_ivrank`); no cache raises. Red `('health', <svc>, 'ok')` written over unconfirmed data, green after; the legitimate unchanged-day `ok` path is pinned separately.
 - **T-087 DONE.** Relay health detail now produced by an extracted builder the test imports; R-061 mutation reds 2, green 11/11 and 373 related.
+- **T-108 DONE.** Demo-mirror account-table purge retries via `retryOperation` and fails the run on persistent error instead of warning. Red: transient 502 not retried, persistent 502 resolved `{failures: []}`; green after. Source-grep guard now reds when the loop is deleted.
 
 ## 11 · Audit ledger
 

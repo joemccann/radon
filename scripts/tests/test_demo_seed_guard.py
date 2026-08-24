@@ -75,11 +75,25 @@ def test_main_aborts_on_prod_env(monkeypatch):
 
 
 def test_market_mirror_excludes_and_purges_account_derived_flow_rows():
+    # T-108: behavioral coverage lives in scripts/lib/demoMirrorReliability.test.js
+    # (purge issued by default, retried on 502, run fails when it persists).
+    # This grep only pins the wiring shape so the loop cannot vanish silently.
     source = (Path(__file__).parents[1] / "db" / "mirror_market_snapshots_to_demo.js").read_text()
     latest_block = source.split("const LATEST_ONE = [", 1)[1].split("];", 1)[0]
     assert "flow_analysis_snapshots" not in latest_block
     assert 'PURGED_ACCOUNT_TABLES = ["flow_analysis_snapshots"]' in source
-    assert "DELETE FROM ${table}" in source
+
+    purge_fn = source.split("async function purgeAccountTable(dst, table, opts) {", 1)[1].split("\n}\n", 1)[0]
+    assert "retryOperation({" in purge_fn
+    assert "phase: `${table}:purge`" in purge_fn
+    assert "dst.execute(`DELETE FROM ${table}`)" in purge_fn
+    assert "throw new Error(`${table} purge failed`)" in purge_fn
+
+    run_fn = source.split("export async function runMarketMirror({", 1)[1]
+    purge_loop = run_fn.split("for (const table of purgedAccountTables) {", 1)[1].split("\n  }\n", 1)[0]
+    assert "await purgeAccountTable(dst, table, opts);" in purge_loop
+    assert "failures.push(table);" in purge_loop
+    assert "SKIP purge" not in source
 
 
 def test_market_mirror_fails_run_and_prunes_destination_windows():
