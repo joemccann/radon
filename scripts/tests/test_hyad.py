@@ -46,6 +46,9 @@ COUNT_KEYS = {
 }
 
 SCAN_TIME = datetime.now(timezone.utc).isoformat()
+# One import-time anchor for every relative date in this module: mixing
+# import-time and call-time clocks flakes when a CI run crosses UTC midnight.
+_TODAY = date.today()
 
 
 def _raw_rows() -> list[dict]:
@@ -173,7 +176,7 @@ def _synthetic_rows(count: int) -> list[dict]:
     """`count` merged rows ending yesterday, each with net = +1 (adv=dec+1)."""
     rows = []
     for i in range(count):
-        day = (date.today() - timedelta(days=count - i)).isoformat()
+        day = (_TODAY - timedelta(days=count - i)).isoformat()
         rows.append({"date": day, "advances": 901, "declines": 900, "unchanged": 50, "total": 2000})
     return rows
 
@@ -218,7 +221,7 @@ class TestBuildSeries:
             build_series([], {})
 
 
-DATA_DATE = (date.today() - timedelta(days=1)).isoformat()
+DATA_DATE = (_TODAY - timedelta(days=1)).isoformat()
 
 
 def _build_payload(count: int = 60) -> dict:

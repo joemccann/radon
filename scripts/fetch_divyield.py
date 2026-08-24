@@ -60,6 +60,9 @@ from clients.index_constituents import (
     resolve_constituents,
 )
 from db import writer
+from utils.ipv4_first import prefer_ipv4
+
+prefer_ipv4()
 
 # ── constants ─────────────────────────────────────────────────────
 SERVICE = "div-yield"

@@ -40,7 +40,10 @@ CONSTITUENTS_CSV = (FIXTURES / "divyield_constituents_sample.csv").read_text()
 QUOTE = json.loads((FIXTURES / "divyield_quote_sample.json").read_text())
 
 # Window-relative dates only — hardcoded dates rot in fixtures and tests.
-DATA_DATE = (date.today() - timedelta(days=1)).isoformat()
+# One import-time anchor for every relative date in this module: mixing
+# import-time and call-time clocks flakes when a CI run crosses UTC midnight.
+_TODAY = date.today()
+DATA_DATE = (_TODAY - timedelta(days=1)).isoformat()
 Y10_DATE = DATA_DATE
 Y10 = 4.74
 SCAN_TIME = datetime.now(timezone.utc).isoformat()
@@ -168,7 +171,7 @@ class TestUnchangedDay:
 
     def test_changed_count_or_date_or_missing_latest_is_changed(self):
         assert is_unchanged_day(_current_row(), {**_current_row(), "count_above": 20}) is False
-        prior_date = (date.today() - timedelta(days=2)).isoformat()
+        prior_date = (_TODAY - timedelta(days=2)).isoformat()
         assert is_unchanged_day(_current_row(), {**_current_row(), "date": prior_date}) is False
         assert is_unchanged_day(_current_row(), None) is False
 
