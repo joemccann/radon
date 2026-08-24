@@ -119,14 +119,26 @@ class TestMovingAverageAndState:
         assert classify_state(0.6500001) == "neutral"
         assert classify_state(1.50) == "elevated"
         assert classify_state(1.4999999) == "neutral"
-        assert classify_state(None) == "neutral"
+        # REL-067 / R-160: no MA(10) is not a mid-range reading. `state` is
+        # the field the tab colours on, so "no reading yet" and "reading is
+        # mid-range, no signal" used to render identically as an all-clear.
+        assert classify_state(None) is None
 
 
 class TestExtractIndexValue:
-    def test_prefers_last_then_close_then_bid_ask_mid(self):
+    def test_prefers_last_then_close_then_a_degenerate_bid_ask(self):
+        """R-189: the third case used to assert a MIDPOINT of 0.6/0.8.
+
+        On a NYSE generated index bid/ask is not a quote — `_bid_ask` reads
+        them as two unrelated counts (advancers/decliners, up/down volume) —
+        so their average is a value of nothing. The precedent the fallback
+        actually serves is one value published in BOTH fields, which is what
+        the case asserts now. The last/close precedence is unchanged.
+        """
         assert extract_index_value({"last": 0.68, "close": 0.7, "bid": 0.6, "ask": 0.8}) == 0.68
         assert extract_index_value({"last": float("nan"), "close": 0.7, "bid": 0.6, "ask": 0.8}) == 0.7
-        assert extract_index_value({"last": None, "close": None, "bid": 0.6, "ask": 0.8}) == pytest.approx(0.7)
+        assert extract_index_value({"last": None, "close": None, "bid": 0.7, "ask": 0.7}) == pytest.approx(0.7)
+        assert extract_index_value({"last": None, "close": None, "bid": 0.6, "ask": 0.8}) is None
 
     def test_non_positive_or_non_finite_is_none(self):
         assert extract_index_value({"last": 0.0, "close": -1.0, "bid": None, "ask": None}) is None
@@ -171,7 +183,7 @@ class TestBuildOutput:
         assert payload["hourly"] == []
         assert payload["current"]["trin"] is None
         assert payload["current"]["ma10"] is None
-        assert payload["current"]["state"] == "neutral"
+        assert payload["current"]["state"] is None  # R-160
         assert payload["current"]["daily_close"] == 0.68
 
     def test_hourly_payload_is_capped(self, daily):
@@ -212,11 +224,18 @@ class TestPersistResult:
         persist_result(build_output([sample], daily), [sample], [("2026-08-21", 0.68)])
         assert persist_calls == [("guard",), ("samples", 1), ("daily", 1), ("snapshot", "trin"), ("health", "trin", "ok")]
 
-    def test_off_hours_heartbeats_daily_only(self, persist_calls, daily):
+    def test_off_hours_heartbeats_but_does_not_bump_the_snapshot(self, persist_calls, daily):
+        """REL-053 / R-125 (writer half): this asserted a snapshot upsert on
+        a cycle that added nothing, and that snapshot carries a bumped
+        `scan_time` every downstream freshness gate reads — which is what
+        made a re-serialised cache indistinguishable from a live sample. The
+        HEARTBEAT still fires every cycle (feedback_service_health_heartbeat:
+        a writer that skips it goes silently dead); only the snapshot is
+        withheld."""
         persist_result(build_output([], daily), [], [])
         kinds = [c[0] for c in persist_calls]
         assert "samples" not in kinds
-        assert ("snapshot", "trin") in persist_calls
+        assert ("snapshot", "trin") not in persist_calls
         assert ("health", "trin", "ok") in persist_calls
 
 
@@ -257,7 +276,7 @@ class TestCli:
         monkeypatch.setattr(ft, "load_cached_daily", lambda: [])
         monkeypatch.setattr(ft, "sample_live", lambda: (None, "ib-skipped"))
         monkeypatch.setattr(ft, "fetch_daily", lambda: daily)
-        monkeypatch.setattr(ft, "persist_result", lambda payload, s, d: None)
+        monkeypatch.setattr(ft, "persist_result", lambda payload, s, d, health_error=None: None)
         assert main(["--json"]) == 0
         payload = json.loads(capsys.readouterr().out)
         assert payload["current"]["daily_close"] == 0.68

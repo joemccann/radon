@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
-from monitor_daemon.handlers.base import BaseHandler
+from monitor_daemon.handlers.base import BaseHandler, HandlerSoftFailure
 
 logger = logging.getLogger(__name__)
 
@@ -57,10 +57,15 @@ class FlexTokenCheck(BaseHandler):
     service_name = "flex-token-check"  # structural heartbeat via BaseHandler.run()
 
     def execute(self) -> Dict[str, Any]:
-        result = self._execute_inner()
+        # The prune runs FIRST and independently of the token check: R-131
+        # turned a missing config into a soft failure, and the daily
+        # retention sweep only lives here because this is the existing daily
+        # 24/7 slot — it has nothing to do with the Flex token.
         # DB errors here propagate so the BaseHandler contract retries next
         # cycle (and writes the structural error row) instead of latching.
-        result["events_pruned"] = self._prune_service_health_events()
+        pruned = self._prune_service_health_events()
+        result = self._execute_inner()
+        result["events_pruned"] = pruned
         # portfolio_snapshots are NOT pruned here: deletion is owned by the
         # archive pipeline (scripts/archive_portfolio_snapshots.py), which
         # exports + uploads rows off-box BEFORE removing them. An unconditional
@@ -84,15 +89,26 @@ class FlexTokenCheck(BaseHandler):
         return prune_service_health_events()
 
     def _execute_inner(self) -> Dict[str, Any]:
+        # R-131: `skip` is a SUCCESS to BaseHandler, so a missing config
+        # heartbeated a healthy flex-token-check every day while the Flex
+        # token marched to expiry unwatched. A monitor that cannot monitor
+        # is degraded. Raising (not returning status=error) is the handler
+        # contract pinned by test_base_handler_contract.py.
         if not CONFIG_PATH.exists():
-            return {"status": "skip", "reason": "flex_token_config.json not found"}
+            raise HandlerSoftFailure(
+                f"flex_token_config.json not found at {CONFIG_PATH}; the Flex "
+                "token TTL is unmonitored"
+            )
 
         with open(CONFIG_PATH) as f:
             config = json.load(f)
 
         expires_str = config.get("expires_at")
         if not expires_str:
-            return {"status": "skip", "reason": "no expires_at in config"}
+            raise HandlerSoftFailure(
+                "no expires_at in flex_token_config.json; the Flex token TTL "
+                "is unmonitored"
+            )
 
         # Parse expiry — handle both offset-aware and naive
         expires_at = datetime.fromisoformat(expires_str)

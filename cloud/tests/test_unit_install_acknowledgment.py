@@ -95,3 +95,82 @@ def test_changed_units_are_acknowledged_pending_install():
         "units changed in services/ without a manifest bump or drift-allowlist "
         f"acknowledgment (root install-copy still owed): {unacknowledged}"
     )
+
+
+# --- REL-045 (R-092, R-113): the `not-installed:` ack is a trapdoor.
+#
+# R-092: radon-ivrank.{service,timer} took the ack path instead of a manifest
+# bump. After eb5cc11f the automated installer iterates the MANIFEST, and
+# `sync-scheduled-units` requires a manifest entry too, so an ack-only unit is
+# excluded from every automated install path while the ack keeps config-drift
+# green for four months. `_check_stale` treats a service with no
+# `service_health` row as dormant-healthy, so the watchdog stays silent and
+# `/api/ivrank` serves `missing: true` forever. The IV RANK tab shipped
+# "live-verified" on a job that never ran in production.
+#
+# R-113: radon-credit-spread.{service,timer} were manifest-pinned AND still
+# carried acks. The first successful install-units makes `partition_allowlisted`
+# emit `stale-allowlist:` for both, turning config-drift error until two comment
+# lines are deleted. The REL-032 ratchet firing on a self-inflicted condition.
+
+
+def _not_installed_acks() -> dict[str, str]:
+    """`not-installed:<unit>` -> its reason text."""
+    acks: dict[str, str] = {}
+    for line in ALLOWLIST.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        drift_id, _, reason = line.partition(" ")
+        if drift_id.startswith("not-installed:"):
+            acks[drift_id[len("not-installed:"):]] = reason.strip()
+    return acks
+
+
+def test_a_not_installed_ack_never_coexists_with_a_manifest_entry():
+    """R-113: the two say opposite things, and once install-units succeeds
+    the ack becomes a `stale-allowlist:` drift that pages daily."""
+    installed = set(_manifest_hashes())
+    both = sorted(set(_not_installed_acks()) & installed)
+    assert not both, (
+        "these units are manifest-pinned AND carry a not-installed ack, so the "
+        "first successful install-units turns config-drift error via "
+        f"stale-allowlist: {both}"
+    )
+
+
+def test_a_not_installed_ack_names_a_gate_the_installer_cannot_clear():
+    """R-092: "root install-copy owed after merge" is no longer a real gate —
+    the automated installer performs exactly that copy, from the manifest. An
+    ack whose reason is a pending install is a unit that will NEVER install,
+    silently. A legitimate ack names something outside the deploy's control.
+    """
+    install_owed_phrases = (
+        "install-copy",
+        "install copy",
+        "owed",
+        "pending install",
+        "next vps",
+        "reinstall",
+    )
+    offenders = []
+    for unit, reason in sorted(_not_installed_acks().items()):
+        lowered = reason.lower()
+        if any(phrase in lowered for phrase in install_owed_phrases):
+            offenders.append(f"{unit}: {reason}")
+    assert not offenders, (
+        "a not-installed ack may not be used for work the automated installer "
+        "now does — add the unit to config/installed-units.sha256 instead. "
+        f"Offenders: {offenders}"
+    )
+
+
+def test_every_unit_is_either_manifest_pinned_or_acked_for_a_real_reason():
+    """No unit may fall through both paths into silent non-installation."""
+    installed = set(_manifest_hashes())
+    acked = set(_not_installed_acks()) | _acknowledged_units()
+    orphans = sorted(set(_unit_files()) - installed - acked)
+    assert not orphans, (
+        "units in services/ with neither a manifest entry nor an ack — they "
+        f"install nowhere and nothing reports it: {orphans}"
+    )

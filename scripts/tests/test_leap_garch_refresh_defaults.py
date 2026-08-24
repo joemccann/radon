@@ -14,10 +14,15 @@ SCRIPTS = Path(__file__).resolve().parent.parent
 def test_leap_refresh_defaults_to_largecaps_and_3610s_curl():
     text = (SCRIPTS / "run_leap_refresh.sh").read_text()
     assert "RADON_LEAP_REFRESH_PRESET:-largecaps}" in text
-    assert "curl -fsS -X POST -m 3610" in text
+    # R-144 replaced `curl -fsS` with an exit-code + status read so a 502 or
+    # a timeout can be told apart from connection-refused. The 3610s default
+    # is unchanged; it now lives in a named variable.
+    assert "RADON_SCAN_FASTAPI_TIMEOUT_SECS:-3610}" in text
+    assert '-m "$FASTAPI_TIMEOUT_SECS"' in text
 
 
 def test_garch_refresh_defaults_to_largecaps_and_3610s_curl():
     text = (SCRIPTS / "run_garch_refresh.sh").read_text()
     assert "RADON_GARCH_REFRESH_PRESET:-largecaps}" in text
-    assert "curl -fsS -X POST -m 3610" in text
+    assert "RADON_SCAN_FASTAPI_TIMEOUT_SECS:-3610}" in text
+    assert '-m "$FASTAPI_TIMEOUT_SECS"' in text

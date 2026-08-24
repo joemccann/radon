@@ -26,6 +26,7 @@ Usage::
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 import os
@@ -62,6 +63,14 @@ class IBOrderError(IBError):
 
 class IBTimeoutError(IBError):
     """Raised when an operation times out."""
+
+
+# ib_insync's own `timeout` is the ONLY path that sends
+# cancelHistoricalData(reqId) — an outer wait_for that fires first just
+# cancels the local coroutine and leaks one of IB's ~50 simultaneous
+# historical slots. So the request carries ib_insync's deadline and the
+# outer guard sits this much later, firing only if that cancel itself wedges.
+HISTORICAL_CANCEL_GRACE_SECS = 5.0
 
 
 class IBContractError(IBError):
@@ -176,18 +185,23 @@ def is_valid_ib_number(val: Any) -> bool:
 
 
 def ticker_has_quote(ticker: Any) -> bool:
-    """True when a ticker has a usable last, bid/ask pair, or close."""
+    """True when a ticker has a two-sided book or a `last`.
+
+    R-089: `close` used to satisfy this, and so did `marketPrice()`, which
+    falls back to `close` itself. IB delivers the CLOSE tick (type 9) in the
+    first burst after `reqMktData` — hundreds of ms before a two-sided book
+    on anything illiquid, and the only prompt tick under
+    `reqMarketDataType(4)`. Since `wait_until` returns on the first
+    satisfied poll, the sync proceeded with bid/ask still NaN and
+    `_resolve_market_price` stamped the PRIOR SESSION CLOSE as the live
+    mark. Nothing in the web app reads `marketPriceIsCalculated`, so that
+    stale mark rendered identically to a live one.
+
+    A close-only ticker now burns the full cap and reports False; the
+    caller falls back to close deliberately instead of by accident.
+    """
     if ticker is None:
         return False
-    market_price = None
-    market_price_fn = getattr(ticker, "marketPrice", None)
-    if callable(market_price_fn):
-        try:
-            market_price = market_price_fn()
-        except Exception:
-            market_price = None
-    if is_valid_ib_number(market_price) and float(market_price) > 0:
-        return True
     bid = getattr(ticker, "bid", None)
     ask = getattr(ticker, "ask", None)
     if (
@@ -197,11 +211,8 @@ def ticker_has_quote(ticker: Any) -> bool:
         and float(ask) > 0
     ):
         return True
-    for attr in ("last", "close"):
-        price = getattr(ticker, attr, None)
-        if is_valid_ib_number(price) and float(price) > 0:
-            return True
-    return False
+    last = getattr(ticker, "last", None)
+    return bool(is_valid_ib_number(last) and float(last) > 0)
 
 
 def pnl_is_ready(pnl: Any) -> bool:
@@ -211,6 +222,34 @@ def pnl_is_ready(pnl: Any) -> bool:
     return is_valid_ib_number(getattr(pnl, "dailyPnL", None)) or is_valid_ib_number(
         getattr(pnl, "unrealizedPnL", None)
     )
+
+
+def pnl_daily_is_ready(pnl: Any) -> bool:
+    """True only once `dailyPnL` itself is valid.
+
+    R-111: IB commonly delivers a valid `unrealizedPnL` with `dailyPnL`
+    still at DBL_MAX right after connect and outside RTH. Phase 6 consumes
+    dailyPnL ONLY and writes None when unset, so waiting on the looser
+    predicate intermittently blanks TODAY'S P&L.
+    """
+    if pnl is None:
+        return False
+    return is_valid_ib_number(getattr(pnl, "dailyPnL", None))
+
+
+def positions_snapshot_is_ready(ended: bool, positions: Any) -> bool:
+    """True when positionEnd fired AND every row carries a finite avgCost.
+
+    R-118: the old inline predicate was `ended and all(valid avgCost ...)`.
+    `connectionClosed()` empties the positions cache and `all([])` is
+    vacuously True, so a socket drop mid-wait reported SUCCESS.
+    """
+    if not ended:
+        return False
+    rows = list(positions or [])
+    if not rows:
+        return False
+    return all(is_valid_ib_number(getattr(pos, "avgCost", None)) for pos in rows)
 
 
 def bind_event(event: Any, handler: Callable) -> Callable[[], None]:
@@ -469,6 +508,14 @@ class IBClient:
             elapsed += step
             if predicate():
                 return True
+            # R-118: a socket that drops mid-wait will never satisfy the
+            # predicate. Burning the full cap in silence made a degraded
+            # gateway byte-identical to a healthy one.
+            if not self.is_connected():
+                logger.warning(
+                    "wait_until abandoned after %.2fs: IB socket closed", elapsed
+                )
+                return False
         return bool(predicate())
 
     # -- error handling -----------------------------------------------------
@@ -576,13 +623,16 @@ class IBClient:
 
                     def _ready() -> bool:
                         if not ended:
-                            return False
-                        return all(
-                            is_valid_ib_number(getattr(pos, "avgCost", None))
-                            for pos in self._ib.positions()
+                            return False  # don't read the cache before end
+                        return positions_snapshot_is_ready(
+                            ended, self._ib.positions()
                         )
 
-                    self.wait_until(_ready, timeout=1.0)
+                    if not self.wait_until(_ready, timeout=1.0):
+                        logger.warning(
+                            "get_positions: positionEnd/avgCost wait lapsed — "
+                            "returning a possibly stale cache"
+                        )
                 finally:
                     unbind()
             except Exception as exc:
@@ -608,7 +658,8 @@ class IBClient:
         """Request P&L for account. Returns PnL with dailyPnL, unrealizedPnL, realizedPnL."""
         self._require_connection()
         pnl = self._ib.reqPnL(account)
-        self.wait_until(lambda: pnl_is_ready(pnl), timeout=2.0)
+        if not self.wait_until(lambda: pnl_daily_is_ready(pnl), timeout=2.0):
+            logger.warning("get_pnl: no dailyPnL tick within 2.0s")
         return pnl
 
     def cancel_pnl(self, pnl_obj: Any) -> None:
@@ -626,7 +677,7 @@ class IBClient:
         """
         self._require_connection()
         pnl = self._ib.reqPnLSingle(account, "", con_id)
-        self.wait_until(lambda: pnl_is_ready(pnl), timeout=0.5)
+        self.wait_until(lambda: pnl_daily_is_ready(pnl), timeout=0.5)
         return pnl
 
     def cancel_pnl_single(self, account: str, con_id: int) -> None:
@@ -782,7 +833,13 @@ class IBClient:
         """
         self._require_connection()
         self._ib.reqGlobalCancel()
-        self.wait_until(lambda: not self._ib.openTrades(), timeout=0.5)
+        # R-110: on a freshly-connected master with no openOrder pushes yet,
+        # openTrades() is empty and the predicate is true before the first
+        # sleep — the kill switch returned with reqGlobalCancel still in the
+        # transport buffer. Always drain at least one step.
+        self._ib.sleep(_WAIT_POLL_S)
+        if not self.wait_until(lambda: not self._ib.openTrades(), timeout=0.5):
+            logger.warning("global_cancel: orders still working after the drain wait")
 
     def get_open_orders(self) -> list:
         """Return all open orders across all clients.
@@ -1018,7 +1075,6 @@ class IBClient:
                 no per-request timeout; 2FA otherwise blocks forever.
         """
         self._require_connection()
-        import asyncio
 
         async def _run() -> Any:
             return await asyncio.wait_for(
@@ -1031,16 +1087,37 @@ class IBClient:
                     useRTH=use_rth,
                     formatDate=1,
                     keepUpToDate=keep_up_to_date,
+                    timeout=timeout,
                 ),
-                timeout=timeout,
+                timeout=timeout + HISTORICAL_CANCEL_GRACE_SECS,
             )
 
+        started = time.monotonic()
         try:
-            return self._ib.run(_run())
+            bars = self._ib.run(_run())
         except asyncio.TimeoutError as exc:
             raise IBTimeoutError(
-                f"Historical data timed out after {timeout}s"
+                f"Historical data timed out after {timeout}s "
+                "(ib_insync's own cancel did not return)"
             ) from exc
+
+        # ib_insync does not raise on its own timeout: it cancels the reqId,
+        # clears the container and returns it. Empty-and-slow is that path;
+        # empty-and-fast is a contract with genuinely no bars.
+        returned_rows = len(bars) if bars is not None else 0
+        if returned_rows == 0 and (time.monotonic() - started) >= timeout:
+            if keep_up_to_date:
+                # cancelHistoricalData(reqId) does not end the SUBSCRIPTION
+                # ib_insync registered, so a keepUpToDate timeout leaks a
+                # subscriber for the life of the pooled client.
+                try:
+                    self._ib.cancelHistoricalData(bars)
+                except Exception as exc:  # noqa: BLE001 — best-effort cleanup
+                    self.logger.warning(
+                        "historical subscription cleanup failed: %s", exc
+                    )
+            raise IBTimeoutError(f"Historical data timed out after {timeout}s")
+        return bars
 
     def get_head_timestamp(
         self,

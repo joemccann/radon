@@ -42,21 +42,52 @@ describe("useSnapshotStaleness", () => {
     expect(result.current.isStale).toBe(true);
   });
 
-  it("null or unparseable lastSync is not stale", () => {
+  it("null or unparseable lastSync is UNKNOWN, which is not fresh", () => {
+    // REL-061 / R-149: this asserted `isStale: false`, i.e. a total blackout
+    // reported healthy. lastSync is null exactly when the producer has never
+    // written a snapshot this session, when the GET returned an error body,
+    // or when extractTimestamp yielded null — so the stale pill stayed
+    // hidden and useAutoSyncOnStale never fired. There is no age to report,
+    // so staleAgeMinutes is still null.
     const { result: nullResult } = renderHook(() => useSnapshotStaleness(null));
-    expect(nullResult.current.isStale).toBe(false);
+    expect(nullResult.current.state).toBe("unknown");
+    expect(nullResult.current.isStale).toBe(true);
     expect(nullResult.current.staleAgeMinutes).toBeNull();
 
     const { result: badResult } = renderHook(() => useSnapshotStaleness("not-a-date"));
-    expect(badResult.current.isStale).toBe(false);
+    expect(badResult.current.state).toBe("unknown");
+    expect(badResult.current.isStale).toBe(true);
   });
 
   it("exposes a tick that advances with each re-evaluation", () => {
-    const { result } = renderHook(() => useSnapshotStaleness(null));
+    const { result } = renderHook(() =>
+      useSnapshotStaleness(new Date(Date.now() - 5 * 60_000).toISOString()),
+    );
     const initialTick = result.current.tick;
     act(() => {
       vi.advanceTimersByTime(61_000);
     });
     expect(result.current.tick).toBeGreaterThan(initialTick);
+  });
+
+  it("does not tick while the snapshot is fresh", () => {
+    // REL-048 / R-139: `tick` is in the returned memo, so an unconditional
+    // interval re-rendered WorkspaceShell and every non-memoised child every
+    // 30s in every open tab, with nothing to recompute. REL-061 / R-149 then
+    // narrowed the exemption to FRESH: a blackout has to keep the retry
+    // cadence alive, so it ticks.
+    const { result } = renderHook(() =>
+      useSnapshotStaleness(new Date(Date.now() - 1_000).toISOString()),
+    );
+    act(() => {
+      vi.advanceTimersByTime(30_000);
+    });
+    expect(result.current.tick).toBe(0);
+
+    const { result: blackout } = renderHook(() => useSnapshotStaleness(null));
+    act(() => {
+      vi.advanceTimersByTime(90_000);
+    });
+    expect(blackout.current.tick).toBeGreaterThan(0);
   });
 });

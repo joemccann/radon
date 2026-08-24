@@ -89,6 +89,12 @@ def _disk_path(key: str) -> Path:
 # 14:00 UTC scanner cluster alone writes ~2000, and a smaller cap made each
 # scanner evict the one before it and re-fetch the same paths from UW.
 MAX_DISK_FILES = 3000
+# R-173: the cap bounded file COUNT only — `path.stat()` was read for
+# `st_mtime` and never for `st_size`. The payloads here are whole UW greeks
+# and option-contracts chains (hundreds of KB for a liquid name, up to ~4,800
+# candles for a daily OHLC pull), so 3,000 files is a multi-GB ceiling on a
+# VPS root fs. Both ceilings apply; whichever binds first wins.
+MAX_DISK_BYTES = 1_500_000_000
 _MAX_TTL_SECONDS = max(
     TTL_OHLC_IV_GEX_CONTRACTS, TTL_STOCK_INFO, TTL_FLOW_ALERTS, TTL_DEFAULT
 )
@@ -155,23 +161,34 @@ def prune_disk_cache(
         return 0
 
     removed = 0
-    survivors: list[tuple[Path, float]] = []
+    survivors: list[tuple[Path, float, int]] = []
     for path in entries:
         try:
-            mtime = path.stat().st_mtime
+            stat = path.stat()
         except OSError:
             continue
+        mtime = stat.st_mtime
         if clock - mtime > _MAX_TTL_SECONDS:
             _unlink_quiet(path)
             removed += 1
         elif path.suffix == ".json":
-            survivors.append((path, mtime))
+            survivors.append((path, mtime, stat.st_size))
 
+    survivors.sort(key=lambda entry: entry[1])  # oldest first, both sweeps
     if len(survivors) > cap:
-        survivors.sort(key=lambda entry: entry[1])
-        for path, _ in survivors[: len(survivors) - cap]:
+        for path, _, _ in survivors[: len(survivors) - cap]:
             _unlink_quiet(path)
             removed += 1
+        survivors = survivors[len(survivors) - cap :]
+
+    total = sum(entry[2] for entry in survivors)
+    index = 0
+    while total > MAX_DISK_BYTES and index < len(survivors):
+        path, _, size = survivors[index]
+        _unlink_quiet(path)
+        removed += 1
+        total -= size
+        index += 1
     return removed
 
 

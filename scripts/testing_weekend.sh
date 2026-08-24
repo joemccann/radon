@@ -151,6 +151,11 @@ run_phase() {
 
   # Attempt clock is per phase: under cycle the remediate phase must not
   # inherit the audit phase's elapsed seconds and insta-timeout.
+  # R-185: `timeout claude` returning 124 (cap) or any non-zero agent exit is
+  # an EXPECTED outcome this loop handles — but the ERR trap was still armed
+  # over it, so every failed or timed-out run posted a false
+  # "CRASHED — wrapper died" dead-man comment AND then its real status.
+  trap - ERR
   local attempt=1 start_ts=$SECONDS remain
   set +e
   while :; do
@@ -167,7 +172,8 @@ run_phase() {
     sleep "$RETRY_PAUSE_SECS"
   done
   set -e
-  trap - ERR
+  # A genuine wrapper death AFTER the agent finished must still page.
+  trap on_crash ERR
 
   local tail_text
   tail_text="$(tail -c 1500 "$RUN_LOG" 2>/dev/null || true)"

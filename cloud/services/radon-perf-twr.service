@@ -14,7 +14,11 @@ Environment=RADON_DB_NO_REPLICA=1
 ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/perf_twr_builder.py
 StandardOutput=journal
 StandardError=journal
-# Flex SendRequest/GetStatement polls up to 30 x 3s per query id.
+# Derived from perf_twr_builder.FLEX_POLL_BUDGET_SECONDS (420s), which is now
+# a WALL-CLOCK deadline covering both the poll sleeps and the GetStatement
+# reads (R-103). resolve_flows reuses the one NAV document, so a run makes one
+# Flex request chain. 600s = the 420s budget plus SendRequest, parse and write.
+# Pinned by scripts/tests/test_nested_deadlines.py.
 TimeoutStartSec=600
 
 [Install]

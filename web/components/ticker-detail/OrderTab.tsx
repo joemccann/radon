@@ -1107,6 +1107,8 @@ export default function OrderTab({ ticker, position, portfolio, prices, openOrde
         loading={modifyLoading}
         prices={prices}
         portfolio={portfolio}
+        // R-112: a close-out must count the SELL combos already working.
+        openOrders={{ open_orders: openOrders }}
         onConfirm={handleModifyConfirm}
         onClose={() => setModifyTarget(null)}
       />

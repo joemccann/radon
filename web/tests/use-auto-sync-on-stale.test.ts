@@ -1,12 +1,16 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { renderHook } from "@testing-library/react";
-import { useAutoSyncOnStale } from "../lib/useAutoSyncOnStale";
+import { useAutoSyncOnStale, resetAutoSyncCooldowns } from "../lib/useAutoSyncOnStale";
 
 describe("useAutoSyncOnStale", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-18T15:52:00Z"));
+    // REL-048 / R-105: the cooldown moved to module scope so remounts and
+    // sibling tabs share one window against the per-operator rate limiter,
+    // which means each case must clear it explicitly.
+    resetAutoSyncCooldowns();
   });
 
   afterEach(() => {
@@ -62,7 +66,10 @@ describe("useAutoSyncOnStale", () => {
     expect(syncNow).toHaveBeenCalledTimes(2);
   });
 
-  it("retries on the staleness tick while the snapshot stays stale, cooldown-bounded", () => {
+  it("retries on the staleness tick while the snapshot stays stale, backoff-bounded", () => {
+    // REL-048 / R-105: the window used to be a flat 60s, so a producer that
+    // returns HTTP 200 without refreshing last_sync was re-fired once a
+    // minute forever. Each fire that fails to clear staleness doubles it.
     const syncNow = vi.fn();
     const { rerender } = renderHook(
       ({ tick }) => useAutoSyncOnStale(true, syncNow, "orders", true, tick),
@@ -76,6 +83,10 @@ describe("useAutoSyncOnStale", () => {
 
     vi.advanceTimersByTime(31_000);
     rerender({ tick: 2 });
+    expect(syncNow).toHaveBeenCalledTimes(1); // 2x window after one failure
+
+    vi.advanceTimersByTime(60_000);
+    rerender({ tick: 3 });
     expect(syncNow).toHaveBeenCalledTimes(2);
   });
 

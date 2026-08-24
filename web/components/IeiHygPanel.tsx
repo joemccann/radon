@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Scale } from "lucide-react";
 import BrushMinimap from "./BrushMinimap";
+import PanelRefreshError from "./PanelRefreshError";
 import CriHistoryChart, { type ChartSeries } from "./CriHistoryChart";
 import HistoryRangeChips from "./HistoryRangeChips";
 import InfoTooltip from "./InfoTooltip";
@@ -58,7 +59,7 @@ function finiteOrNull(v: number | null | undefined): number | null {
 }
 
 export default function IeiHygPanel() {
-  const { data, loading, syncing, lastSync } = useIeiHyg();
+  const { data, loading, syncing, lastSync, error } = useIeiHyg();
   const { isMobile, hasMounted } = useViewport();
   const compact = hasMounted && isMobile;
 
@@ -138,6 +139,7 @@ export default function IeiHygPanel() {
             TREASURIES VS HIGH YIELD
             <InfoTooltip text={INFO_TOOLTIP} />
           </div>
+          <PanelRefreshError error={error} testId="iei-hyg-refresh-error" />
           {lastSync && (
             <span style={{ fontFamily: "var(--font-mono)", fontSize: "9px", color: "var(--text-muted)" }}>
               {new Date(lastSync).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}

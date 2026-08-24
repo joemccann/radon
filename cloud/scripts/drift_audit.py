@@ -344,6 +344,18 @@ def classify_untracked_unit(name: str) -> str:
     return "known-untracked" if name.startswith("radon-beta-") else "drift"
 
 
+def classify_untracked_sudoers(name: str) -> str:
+    """Same sunset rule for sudoers fragments as for units.
+
+    2b1e7162 deleted `config/sudoers.d/radon-beta` but the live fragment
+    survives on the host, so without this the beta sunset red-flags
+    `config-drift` on every audit forever and the signal stops meaning
+    anything. The fragment name has no `-` suffix, so the unit prefix
+    (`radon-beta-`) does not match it.
+    """
+    return "known-untracked" if name.startswith("radon-beta") else "drift"
+
+
 def build_last_error(
     drifts: list[dict], allowed: dict[str, str], known_untracked: list[str]
 ) -> dict:
@@ -555,7 +567,7 @@ def _check_units(drifts: list[dict], known_untracked: list[str]) -> None:
             )
 
 
-def _check_sudoers(drifts: list[dict]) -> None:
+def _check_sudoers(drifts: list[dict], known_untracked: list[str]) -> None:
     repo_dir = REPO / "config" / "sudoers.d"
     repo_frags = {p.name: p for p in repo_dir.glob("*") if p.is_file()}
     for name, repo_path in sorted(repo_frags.items()):
@@ -565,7 +577,11 @@ def _check_sudoers(drifts: list[dict]) -> None:
         if drift:
             drifts.append(drift)
     for live in sorted(SUDOERS_DIR.glob("radon*")):
-        if live.name not in repo_frags:
+        if live.name in repo_frags:
+            continue
+        if classify_untracked_sudoers(live.name) == "known-untracked":
+            known_untracked.append(live.name)
+        else:
             drifts.append({"id": f"untracked-sudoers:{live.name}", "detail": str(live)})
 
 
@@ -627,7 +643,7 @@ def gather() -> tuple[list[dict], dict[str, str], list[str]]:
             raw_drifts.append(drift)
     _check_compose(raw_drifts)
     _check_units(raw_drifts, known_untracked)
-    _check_sudoers(raw_drifts)
+    _check_sudoers(raw_drifts, known_untracked)
     _check_env_invariants(raw_drifts)
     # Do not conflate application checkout hygiene with deployed configuration
     # drift. Managed runtime artifacts above are compared byte-for-byte or by

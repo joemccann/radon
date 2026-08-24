@@ -122,7 +122,13 @@ export async function requireRouteAccess(
   if (options.operatorOnly && !allowlisted && !admittedByDemoBlockade) {
     return reject(403, "Forbidden");
   }
-  if (allowed.size > 0 && !allowlisted) return reject(403, "Forbidden");
+  // R-182: this line ignored `admittedByDemoBlockade` entirely, so the
+  // admission two lines above was undone whenever ALLOWED_USER_IDS was
+  // non-empty — the escape hatch existed only on a deployment with no
+  // allowlist at all, which is not what the option documents.
+  if (allowed.size > 0 && !allowlisted && !admittedByDemoBlockade) {
+    return reject(403, "Forbidden");
+  }
   if (env.RADON_REQUIRE_OPERATOR_ALLOWLIST === "1" && allowed.size === 0) {
     return reject(403, "Forbidden");
   }

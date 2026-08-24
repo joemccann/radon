@@ -11,6 +11,7 @@ import hashlib
 import json
 import math
 import os
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -139,10 +140,31 @@ def write_cache(cache_dir: Path, key: str, data: Dict[str, float], source: str, 
         "data": data,
     }
     atomic_save(str(path), payload)
-    # R-033: the 500-file cap used to be enforced only by the shelved
-    # performance rebuild — every other writer grew the cache unboundedly.
-    # Cheap: prune_cache is a no-op count check below the cap.
-    prune_cache(subdir)
+    # R-033 put the cap enforcement here so every writer maintains it.
+    # R-174: but `write_cache` runs inside the PARALLEL fetch path
+    # (portfolio_performance's pool), and `prune_cache`'s own docstring says
+    # "call ONCE after all parallel writes complete" — N threads each ran a
+    # full two-directory stat sweep and each computed its own oldest-first
+    # list from a tree the others were mutating. Single-flight + rate-limited:
+    # the cap is still maintained by ordinary writes, just not N times a
+    # second from N threads.
+    _maybe_prune(subdir)
+
+
+PRUNE_MIN_INTERVAL_SECONDS = 30.0
+_prune_lock = threading.Lock()
+_last_prune_at = 0.0
+
+
+def _maybe_prune(cache_dir: Path) -> None:
+    """Run at most one prune at a time, at most once per interval."""
+    global _last_prune_at
+    now = time.time()
+    with _prune_lock:
+        if now - _last_prune_at < PRUNE_MIN_INTERVAL_SECONDS:
+            return
+        _last_prune_at = now
+        prune_cache(cache_dir)
 
 
 def prune_cache(cache_dir: Path, max_files: int = 500) -> int:
