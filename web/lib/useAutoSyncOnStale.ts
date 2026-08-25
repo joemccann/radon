@@ -2,11 +2,13 @@
 
 import { useEffect } from "react";
 
-const AUTO_SYNC_COOLDOWN_MS = 60_000;
-/** Cap the backoff so a producer that recovers is retried within ~16 min. */
-const MAX_BACKOFF_MULTIPLIER = 16;
+import {
+  claimAutoSyncFire,
+  type AutoSyncState,
+  type ClaimStore,
+} from "./autoSyncClaim";
 
-type TargetState = { lastFiredAt: number; consecutive: number };
+type TargetState = AutoSyncState;
 
 /**
  * MODULE scope, deliberately (R-105). The map used to be a `useRef` per
@@ -15,13 +17,14 @@ type TargetState = { lastFiredAt: number; consecutive: number };
  * limiter. Two hooks pointed at the same target now share one window.
  *
  * Same-origin tabs additionally share it through `localStorage`; a private
- * window or a storage exception just falls back to the in-memory map.
+ * window or a storage exception just falls back to the in-memory map. The
+ * read-then-write itself is serialized across tabs by `claimAutoSyncFire`.
  */
 const stateByTarget = new Map<string, TargetState>();
 
 const STORAGE_PREFIX = "radon:autosync:";
 
-function readState(target: string): TargetState {
+function readState(target: string): TargetState | null {
   const memory = stateByTarget.get(target);
   let stored: TargetState | null = null;
   try {
@@ -38,7 +41,7 @@ function readState(target: string): TargetState {
   } catch {
     stored = null;
   }
-  if (!memory) return stored ?? { lastFiredAt: 0, consecutive: 0 };
+  if (!memory) return stored;
   if (!stored) return memory;
   return stored.lastFiredAt > memory.lastFiredAt ? stored : memory;
 }
@@ -50,6 +53,12 @@ function writeState(target: string, state: TargetState): void {
   } catch {
     /* private window / quota — the in-memory map still bounds this tab */
   }
+}
+
+const store: ClaimStore = { read: readState, write: writeState };
+
+function webLocks(): LockManager | undefined {
+  return typeof navigator !== "undefined" ? navigator.locks : undefined;
 }
 
 /** Test seam: drop every target's cooldown. */
@@ -90,21 +99,26 @@ export function useAutoSyncOnStale(
   useEffect(() => {
     if (!enabled) return;
     if (!stale) {
-      // The producer succeeded: the next stale window starts fresh.
-      const current = stateByTarget.get(target);
+      // The producer succeeded: the next stale window starts fresh. Reset
+      // from the merged view so a tab that never won a claim still clears
+      // the shared ladder, and a stale in-memory timestamp never rewinds it.
+      const current = readState(target);
       if (current && current.consecutive !== 0) {
         writeState(target, { lastFiredAt: current.lastFiredAt, consecutive: 0 });
       }
       return;
     }
-    const now = Date.now();
-    const state = readState(target);
-    const multiplier = Math.min(
-      MAX_BACKOFF_MULTIPLIER,
-      2 ** Math.max(0, state.consecutive),
-    );
-    if (now - state.lastFiredAt < AUTO_SYNC_COOLDOWN_MS * multiplier) return;
-    writeState(target, { lastFiredAt: now, consecutive: state.consecutive + 1 });
-    syncNow();
+    const claimed = claimAutoSyncFire({ target, now: Date.now(), store, locks: webLocks() });
+    if (claimed === true) {
+      syncNow();
+      return;
+    }
+    if (claimed === false) return;
+    // A claim already wrote the cooldown, so the fire must happen even if the
+    // effect re-ran meanwhile (StrictMode double-invoke, a 30 s tick); the
+    // sync hooks guard their own state updates against unmount.
+    void claimed.then((ok) => {
+      if (ok) syncNow();
+    });
   }, [stale, enabled, target, syncNow, tick]);
 }

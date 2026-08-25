@@ -276,3 +276,20 @@ a FastAPI the deploy has already stopped, so `radon-nextjs` sat in
 (three rollbacks on 2026-08-24). `installBoundedShutdown()` lets Next's
 cleanup run and force-exits after `SHUTDOWN_GRACE_MS` (10 s). Never raise the
 grace above the deploy's `STATE_WAIT_SECONDS`. Test: `tests/bounded-shutdown.test.ts`.
+
+## Auto-sync is per-user rate-limited; tabs must not race it
+
+`POST /api/portfolio` (`portfolio-sync`) and `POST /api/orders` (`orders-refresh`)
+are limited to 4/min **per user** (`lib/routeAccess.ts`), shared by every tab
+and device. `useAutoSyncOnStale` therefore takes its cooldown through
+`lib/autoSyncClaim.ts` under a Web Lock (`navigator.locks`, one holder per
+origin) so the read-then-write is atomic across tabs; without locks it degrades
+to the synchronous claim. A 429 on the sync POST is **coalescence** (a sibling
+already synced this window): `usePortfolio.doSync` / `useOrders.triggerSync`
+keep the snapshot and never put the body text into `error`; the GET poll is
+not backed off by a POST 429 (separate `portfolio:route` bucket). A 429 on the
+cached GET honours `Retry-After` and keeps the snapshot on screen; only a cold
+tab with nothing to show reports it (2026-08-24: 963 "Too Many Requests"
+banners from five aligned tabs).
+Tests: `tests/auto-sync-claim.test.ts`, `tests/use-portfolio-sync-429.test.ts`,
+`tests/use-orders-sync-429.test.ts`.

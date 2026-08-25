@@ -38,6 +38,7 @@ export function usePortfolio(active: boolean = true): UsePortfolioReturn {
   const readingRef = useRef(false);
   const lastReadAtRef = useRef(0);
   const rateLimitedUntilRef = useRef(0);
+  const hasDataRef = useRef(false);
   const initialLoadStartedRef = useRef(false);
   const previousActiveRef = useRef(active);
   const mountedRef = useRef(true);
@@ -69,6 +70,9 @@ export function usePortfolio(active: boolean = true): UsePortfolioReturn {
           );
           rateLimitedUntilRef.current = Date.now() + retryDelayMs;
         }
+        // A limited cached read is not degradation while a snapshot is on
+        // screen; only a cold tab with nothing to show reports it.
+        if (hasDataRef.current) return retryDelayMs;
       }
       const meta = readOfflineMeta(res.headers);
       if (meta.servedOffline) reportOfflineServed(meta.cachedAt);
@@ -76,6 +80,7 @@ export function usePortfolio(active: boolean = true): UsePortfolioReturn {
       if (!res.ok) throw new Error(`Failed to fetch portfolio (${res.status})`);
       const json = (await res.json()) as PortfolioData;
       if (!mountedRef.current || generation !== dataGenerationRef.current) return retryDelayMs;
+      hasDataRef.current = true;
       setData(json);
       setLastSync(json.last_sync);
       const warning = res.headers.get("X-Sync-Warning");
@@ -128,6 +133,10 @@ export function usePortfolio(active: boolean = true): UsePortfolioReturn {
         cache: "no-store",
         signal: AbortSignal.timeout(POST_FETCH_TIMEOUT_MS),
       });
+      // A sibling tab or device already spent this window's producer budget;
+      // its snapshot arrives on the next poll (a separate, unlimited-so-far
+      // read bucket, so the poll is deliberately NOT backed off here).
+      if (res.status === 429) return;
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error((body as { error?: string }).error ?? "Sync failed");
@@ -135,6 +144,7 @@ export function usePortfolio(active: boolean = true): UsePortfolioReturn {
       const json = (await res.json()) as PortfolioData;
       if (!mountedRef.current || syncGeneration !== dataGenerationRef.current) return;
       dataGenerationRef.current += 1;
+      hasDataRef.current = true;
       setData(json);
       setLastSync(json.last_sync);
       const warning = res.headers.get("X-Sync-Warning");
