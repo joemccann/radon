@@ -262,6 +262,99 @@ class TestSweepImport:
         assert mirrored.call_args[0][0] == "0001.EVE.02"
 
 
+# TEST_AUDIT T-126: the write-time journal realized P&L overlay
+# (7cfcdfd9) on the sweep mirror was unwired-green — no test referenced it
+# and its try/except swallowed a broken import. After-hours fills are
+# mirrored ONLY by this sweep, so an outsideRth close kept IB's drifted
+# figure in executed_orders permanently.
+_SLV_C60 = {"ticker": "SLV", "strike": 60.0, "right": "C", "expiry": "20261016"}
+
+
+def _journal_row(exec_id, action, qty, price, date, written):
+    payload = {
+        **_SLV_C60,
+        "action": action,
+        "contracts": qty,
+        "fill_price": price,
+        "commission": 0.0,
+        "ib_exec_id": exec_id,
+        "date": date,
+        "multiplier": 100.0,
+    }
+    return (json.dumps(payload), date, written)
+
+
+class _FakeOverlayDb:
+    """The libsql surface `overlay_journal_realized_pnl` reads through."""
+
+    def __init__(self, rows):
+        self._rows = rows
+
+    def execute(self, sql, args=()):
+        cursor = MagicMock()
+        cursor.fetchall.return_value = self._rows
+        return cursor
+
+
+def _option_close_row(exec_id: str, ib_pnl: float) -> dict:
+    return {
+        "execId": exec_id,
+        "permId": 900100,
+        "symbol": "SLV C60",
+        "contract": {"symbol": "SLV", "secType": "OPT", "strike": 60.0, "right": "C",
+                     "expiry": "2026-10-16"},
+        "side": "SLD",
+        "quantity": 10,
+        "realizedPNL": ib_pnl,
+        "time": _recent_after_hours_fill_time().isoformat(),
+    }
+
+
+class TestMirrorCarriesJournalRealizedPnl:
+    def _run(self, monkeypatch, get_db):
+        import db.client as db_client
+        import monitor_daemon.handlers.evening_execution_sweep as sweep_mod
+
+        mirrored = MagicMock(name="upsert_executed_order")
+        monkeypatch.setattr(sweep_mod, "upsert_executed_order", mirrored)
+        monkeypatch.setattr(db_client, "get_db", get_db)
+        h = EveningExecutionSweepHandler()
+        with patch(
+            "monitor_daemon.handlers.evening_execution_sweep.IBClient",
+            return_value=_connected_client([]),
+        ), patch.object(
+            EveningExecutionSweepHandler, "_open_journal_db",
+            return_value=_FakeJournalDb(),
+        ), patch.object(
+            EveningExecutionSweepHandler, "_fetch_executed_rows",
+            return_value=[_option_close_row("0001.EVE.03", ib_pnl=1234.56)],
+        ):
+            result = h.execute()
+        assert result["executed_mirrored"] == 1
+        assert mirrored.call_count == 1
+        return mirrored.call_args[0][1]
+
+    def test_mirrored_payload_carries_the_journal_figure(self, captured_journal_upserts, monkeypatch):
+        rows = [
+            _journal_row("o1", "BUY_OPTION", 10, 1.00, "2026-08-07", "w1"),
+            _journal_row("0001.EVE.03", "SELL_OPTION", 10, 3.00, "2026-08-24", "w2"),
+        ]
+        payload = self._run(monkeypatch, lambda: _FakeOverlayDb(rows))
+        assert payload["realizedPNL"] == 2000.0
+        assert payload["realizedPNLSource"] == "journal"
+        assert payload["ibRealizedPNL"] == 1234.56
+
+    def test_journal_unreachable_keeps_ib_figure_and_warns(self, captured_journal_upserts, monkeypatch, caplog):
+        def boom():
+            raise RuntimeError("turso down")
+
+        with caplog.at_level("WARNING", logger="monitor_daemon.handlers.evening_execution_sweep"):
+            payload = self._run(monkeypatch, boom)
+        assert payload["realizedPNL"] == 1234.56
+        assert payload.get("realizedPNLSource") != "journal"
+        assert any("overlay skipped" in r.getMessage() for r in caplog.records)
+
+
 def _executed_order_row(
     *,
     exec_id: str,
