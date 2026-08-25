@@ -53,6 +53,12 @@ mkdir -p "$WEEKEND_ROOT"
 if [[ ! -d "$WEEKEND_REPO/.git" ]]; then
   git clone "$ORIGIN_URL" "$WEEKEND_REPO"
 fi
+# A live cycle owns this clone. Unloading the job and hard-resetting the tree
+# under it orphans the agent onto a reset checkout.
+if kill -0 "$(cat "$WEEKEND_REPO/.weekend-runner.lock/pid" 2>/dev/null)" 2>/dev/null; then
+  echo "  a weekend run is in flight in $WEEKEND_REPO; re-run when it finishes"
+  exit 1
+fi
 # An already-provisioned clone must carry the current config/ and scripts/
 # before the job is installed from it. main is force-reset; any weekend
 # branch and its commits survive.
@@ -118,3 +124,8 @@ echo "still running: launchd will not start a second instance of the label."
 echo "Check with: launchctl list | grep radon"
 echo "Smoke test now with:"
 echo "  RADON_WEEKEND_REPO=$WEEKEND_REPO bash $WEEKEND_REPO/scripts/testing_weekend.sh audit"
+echo "Upgrading the wrapper in this clone, with no run in flight"
+echo "(check: ls -d $WEEKEND_REPO/.weekend-runner.lock):"
+echo "  git -C $WEEKEND_REPO fetch origin && git -C $WEEKEND_REPO checkout -f main && git -C $WEEKEND_REPO reset --hard origin/main"
+echo "Use git only. cp / cat / tee rewrite the file IN PLACE, which strands a"
+echo "running wrapper at a stale byte offset; git writes a new inode instead."

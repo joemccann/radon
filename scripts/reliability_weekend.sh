@@ -12,6 +12,10 @@
 #     be a working checkout anyone edits by hand.
 #   - the agent never pushes main (skill rail); this wrapper's only git
 #     writes are fetch/reset on the runner clone.
+#   - deploy this file with git only (fetch + checkout -f + reset --hard):
+#     git writes a NEW inode, so a running copy keeps reading the old one.
+#     cp / cat / tee rewrite it IN PLACE and strand a live run at a stale
+#     byte offset. Never write it in a clone while a run is in flight.
 #   - wall-clock capped; every outcome (incl. crash) is reported to the
 #     rolling GitHub issue, and each phase also pages Pushover, so a
 #     silent-dead runner is visible without waiting for the next run.
@@ -61,6 +65,15 @@ fetch_origin_with_retry() {
 # above to the contract tests without running a weekend.
 [[ "${1:-}" == "--lock-lib-only" ]] && return 0 2>/dev/null
 
+# Bash reads a script LAZILY by byte offset and re-reads it from disk after
+# every fork. The agent this wrapper spawns edits files in this clone, this
+# one included, so the whole run body is ONE function: bash parses a function
+# body in full before its first statement runs, and never reads it from disk
+# again. Two invariants keep that true — nothing above this line may fork, and
+# the call at the bottom must exit on its own line. Residual window: the
+# initial parse itself, before main is defined.
+main() {
+
 MODE="${1:?usage: reliability_weekend.sh audit|remediate|cycle}"
 [[ "$MODE" == "audit" || "$MODE" == "remediate" || "$MODE" == "cycle" ]] || {
   echo "unknown mode: $MODE" >&2; exit 2;
@@ -81,13 +94,6 @@ cd "$REPO"
   echo "REFUSING: $REPO is not the dedicated weekend runner clone" >&2
   exit 2
 }
-
-RUNNER_LOCK="$REPO/.weekend-runner.lock"
-acquire_runner_lock "$RUNNER_LOCK" || {
-  echo "REFUSING: another weekend run owns $REPO" >&2
-  exit 3
-}
-trap 'release_runner_lock "$RUNNER_LOCK"' EXIT
 
 RUNNER_LOCK="$REPO/.weekend-runner.lock"
 acquire_runner_lock "$RUNNER_LOCK" || {
@@ -293,3 +299,7 @@ fi
 
 run_phase "$MODE"
 exit "$RC"
+}
+# Call and exit on ONE line: parsed together, so even a returning main can
+# never make bash read this file again.
+main "$@"; exit

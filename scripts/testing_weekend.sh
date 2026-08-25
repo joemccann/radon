@@ -21,12 +21,49 @@
 #     be a working checkout anyone edits by hand.
 #   - the agent never pushes main (skill rail); this wrapper's only git
 #     writes are fetch/reset on the runner clone.
+#   - deploy this file with git only (fetch + checkout -f + reset --hard):
+#     git writes a NEW inode, so a running copy keeps reading the old one.
+#     cp / cat / tee rewrite it IN PLACE and strand a live run at a stale
+#     byte offset. Never write it in a clone while a run is in flight.
 #   - wall-clock capped; every outcome (incl. crash) is reported to the
 #     rolling GitHub issue, and each phase also pages Pushover, so a
 #     silent-dead runner is visible without waiting for the next run.
 # -E: the ERR trap must be inherited by ground_truth/run_phase, otherwise a
 # git failure at midnight exits silently with no dead-man comment and no page.
 set -Eeuo pipefail
+
+# One writer per runner clone. The daily fire, a hand-run smoke test and the
+# setup script all drive the SAME tree, and every entry point runs
+# `git clean -fdq`, so a second run would delete the live agent's uncommitted
+# work mid-write with both runs reporting success. The plist pre-reset and
+# setup_testing_weekend.sh both stand down on this lock, so it has to exist.
+# mkdir is the atomic primitive here: flock(1) does not exist on macOS.
+acquire_runner_lock() {
+  local dir="$1" held
+  if ! mkdir "$dir" 2>/dev/null; then
+    held="$(cat "$dir/pid" 2>/dev/null || true)"
+    if [[ -n "$held" ]] && kill -0 "$held" 2>/dev/null; then
+      echo "weekend runner lock held by pid $held ($dir)" >&2
+      return 1
+    fi
+    echo "[weekend] reclaiming stale runner lock (pid ${held:-unknown})" >&2
+    rm -rf -- "$dir"
+    mkdir "$dir" 2>/dev/null || { echo "cannot take runner lock $dir" >&2; return 1; }
+  fi
+  echo "$$" > "$dir/pid"
+  return 0
+}
+
+release_runner_lock() { rm -rf -- "$1"; }
+
+# Bash reads a script LAZILY by byte offset and re-reads it from disk after
+# every fork. The agent this wrapper spawns edits files in this clone, this
+# one included, so the whole run body is ONE function: bash parses a function
+# body in full before its first statement runs, and never reads it from disk
+# again. Two invariants keep that true — nothing above this line may fork, and
+# the call at the bottom must exit on its own line. Residual window: the
+# initial parse itself, before main is defined.
+main() {
 
 MODE="${1:?usage: testing_weekend.sh audit|remediate|cycle}"
 [[ "$MODE" == "audit" || "$MODE" == "remediate" || "$MODE" == "cycle" ]] || {
@@ -48,6 +85,13 @@ cd "$REPO"
   echo "REFUSING: $REPO is not the dedicated weekend runner clone" >&2
   exit 2
 }
+
+RUNNER_LOCK="$REPO/.weekend-runner.lock"
+acquire_runner_lock "$RUNNER_LOCK" || {
+  echo "REFUSING: another weekend run owns $REPO" >&2
+  exit 3
+}
+trap 'release_runner_lock "$RUNNER_LOCK"' EXIT
 
 LOG_DIR="$REPO/logs/testing-weekend"
 mkdir -p "$LOG_DIR"
@@ -129,7 +173,7 @@ ground_truth() {
   git fetch origin --quiet
   git checkout -f --quiet main
   git reset --hard --quiet origin/main
-  git clean -fdq --exclude=.radon-weekend-runner --exclude=logs/ --exclude=.env --exclude=.env.ib-mode --exclude=web/.env
+  git clean -fdq --exclude=.radon-weekend-runner --exclude=.weekend-runner.lock --exclude=logs/ --exclude=.env --exclude=.env.ib-mode --exclude=web/.env
 }
 
 # The agent commits per completed task and the skill resumes from the
@@ -208,3 +252,7 @@ fi
 
 run_phase "$MODE"
 exit "$RC"
+}
+# Call and exit on ONE line: parsed together, so even a returning main can
+# never make bash read this file again.
+main "$@"; exit
