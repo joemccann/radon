@@ -186,23 +186,22 @@ def _is_deploy_collateral(unit: dict, deploy: Optional[dict], now: datetime) -> 
     stop-clean killing an in-flight oneshot, not an outage.
 
     Covers three stacked-deploy shapes:
+      * kill before the latest green (completed stop-clean; checked first)
       * journal present (in_flight)
       * kill after the last green (cancelled / not-yet-green successor)
-      * kill before the latest green (this stack's stop-clean)
-    The 60-min now-to-kill cap applies to in_flight and kill-after-green
-    so an unrelated SIGTERM hours later still pages: a live journal is at
-    most ``TRANSITION_JOURNAL_STRANDED_AFTER_SECONDS`` old, so a kill
-    older than the single-deploy window predates the deploy that would
-    have to own it (T-103). Kill-before-green uses the 24h oneshot
-    recovery horizon
+    Kill-before-green is evaluated before ``in_flight``: a successor
+    deploy's fresh transition journal must not re-page a latched oneshot
+    already explained by an earlier greened stop-clean (2026-08-25
+    16:20Z a70a393e: BPI kill 12:41, green 15:14, successor journal
+    16:19 → in_flight 60-min age cap false-paged P1). The 60-min
+    now-to-kill cap still applies to in_flight and kill-after-green so
+    an unrelated SIGTERM hours later pages (T-103). Kill-before-green
+    uses the 24h oneshot recovery horizon
     (``KILL_BEFORE_GREEN_FROZEN_CAP_SECS``): Type=oneshot stays failed
     until its next timer (2026-08-15 01:35Z radon-bpi), and a stacked
     successor can overwrite the green marker hours after the first
     stop-clean (2026-08-20 02:45Z radon-bpi: kill 00:04, a231 green
-    00:05, 0f7d green 02:42 → kill-to-latest-marker 158 min). Bounding
-    kill-before-green by the 60-min single-deploy window false-paged
-    that shape; any post-kill green within the recovery horizon is
-    still stop-clean collateral.
+    00:05, 0f7d green 02:42 → kill-to-latest-marker 158 min).
     """
     if not deploy or unit.get("Result") != "signal":
         return False
@@ -212,16 +211,16 @@ def _is_deploy_collateral(unit: dict, deploy: Optional[dict], now: datetime) -> 
     age = (now - failed_at).total_seconds()
     if age < 0:
         return False
+    marker = deploy.get("marker_mtime")
+    if marker is not None and failed_at < marker:
+        if age > KILL_BEFORE_GREEN_FROZEN_CAP_SECS:
+            return False
+        return 0 <= (marker - failed_at).total_seconds() <= KILL_BEFORE_GREEN_FROZEN_CAP_SECS
     if deploy.get("in_flight") and not _journal_is_stranded(deploy):
         return age <= DEPLOY_COLLATERAL_WINDOW_SECS
-    marker = deploy.get("marker_mtime")
     if marker is None:
         return False
-    if failed_at >= marker:
-        return age <= DEPLOY_COLLATERAL_WINDOW_SECS
-    if age > KILL_BEFORE_GREEN_FROZEN_CAP_SECS:
-        return False
-    return 0 <= (marker - failed_at).total_seconds() <= KILL_BEFORE_GREEN_FROZEN_CAP_SECS
+    return age <= DEPLOY_COLLATERAL_WINDOW_SECS
 
 
 # ── state persistence ────────────────────────────────────────────────
