@@ -25,6 +25,7 @@ import type { SideFilter } from "@/lib/useChainUrlState";
 import BottomSheet from "./BottomSheet";
 import MobileOrderTicket from "./MobileOrderTicket";
 import SpectralLoader from "@/components/SpectralLoader";
+import { OrderQuoteTelemetry } from "@/components/QuoteTelemetry";
 
 type Strike = {
   strike: number;
@@ -630,17 +631,11 @@ export default function MobileChainLadder({
           }
         >
           <div className="mobile-chain__detail">
-            <div className="mobile-chain__detail-row">
-              <span className="mobile-chain__detail-label">Last</span>
-              <span className="mobile-chain__detail-value">{fmtLast(selected.data?.last)}</span>
-            </div>
-            <div className="mobile-chain__detail-row">
-              <span className="mobile-chain__detail-label">Bid / Ask</span>
-              <span className="mobile-chain__detail-value">
-                {selected.data?.bid != null ? fmtPrice(selected.data.bid) : "—"} /{" "}
-                {selected.data?.ask != null ? fmtPrice(selected.data.ask) : "—"}
-              </span>
-            </div>
+            <OrderQuoteTelemetry
+              priceData={selected.data}
+              label={`${ticker.toUpperCase()} ${selected.strike} ${selected.right === "C" ? "Call" : "Put"}`}
+              density="tight"
+            />
             <div className="mobile-chain__detail-row">
               <span className="mobile-chain__detail-label">Bid Size / Ask Size</span>
               <span className="mobile-chain__detail-value">
@@ -666,10 +661,6 @@ export default function MobileChainLadder({
             <div className="mobile-chain__detail-row">
               <span className="mobile-chain__detail-label">Vega</span>
               <span className="mobile-chain__detail-value">{fmtGreek(selected.data?.vega)}</span>
-            </div>
-            <div className="mobile-chain__detail-row">
-              <span className="mobile-chain__detail-label">Volume</span>
-              <span className="mobile-chain__detail-value">{fmtOi(selected.data?.volume)}</span>
             </div>
             <div className="mobile-chain__detail-row">
               <span className="mobile-chain__detail-label">Avg Volume</span>

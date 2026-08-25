@@ -11,6 +11,12 @@ import {
 
 type QuoteTelemetryVariant = "bar" | "compact";
 
+/**
+ * Spacing/type-scale only. `tight` exists so the same nine fields fit a narrow
+ * inline ticket or a mobile bottom sheet; it never changes WHICH fields render.
+ */
+export type QuoteTelemetryDensity = "default" | "tight";
+
 const BAR_FIELDS: QuoteTelemetryFieldKey[] = ["bid", "mid", "ask", "spread", "last", "volume", "high", "low", "day"];
 const COMPACT_FIELDS: QuoteTelemetryFieldKey[] = ["bid", "mid", "ask", "spread"];
 
@@ -38,19 +44,25 @@ function QuoteTelemetryPanel({
   label,
   fields,
   variant,
+  density = "default",
 }: {
   model: QuoteTelemetryModel | null;
   label?: string;
   fields: QuoteTelemetryFieldKey[];
   variant: QuoteTelemetryVariant;
+  density?: QuoteTelemetryDensity;
 }) {
   const classes = VARIANT_CLASSES[variant];
   if (!model) {
     return <div className={classes.empty}>{classes.emptyText}</div>;
   }
 
+  const containerClass = density === "tight"
+    ? `${classes.container} ${classes.container}--tight`
+    : classes.container;
+
   return (
-    <div className={classes.container}>
+    <div className={containerClass}>
       {variant === "bar" && label && (
         <div className={classes.row} style={{ gridColumn: "1 / -1" }}>
           <span className={classes.label}>{label}</span>
@@ -74,41 +86,52 @@ function QuoteTelemetryPanel({
   );
 }
 
-export function TickerQuoteTelemetry({
-  priceData,
+export type OrderQuoteTelemetryProps = {
+  /** The traded instrument's live quote. Omit (or pass null) on a combo and hand `model` instead. */
+  priceData?: PriceData | null;
+  /**
+   * Escape hatch for surfaces that have no single PriceData (BAG / combo
+   * tickets). Build it with `comboQuotePriceData()` + `buildQuoteTelemetryModel()`
+   * so the spread math and the closed-market fallback stay in one place.
+   * Takes precedence over `priceData`.
+   */
+  model?: QuoteTelemetryModel | null;
+  /** e.g. "META 2026-08-28 $550 P". Rendered as a full-width row above the fields. */
+  label?: string;
+  /** Prior-session OHLV (UW stock-state) so a closed market shows CLOSE instead of an empty panel. */
+  fallback?: QuoteFallback | null;
+  /** Spacing and type scale only. `tight` for inline tickets and mobile sheets. */
+  density?: QuoteTelemetryDensity;
+};
+
+/**
+ * The one nine-field quote panel every order surface renders: BID MID ASK /
+ * SPREAD LAST VOLUME / HIGH LOW DAY. Same model, same formatter, and the same
+ * closed-market fallback the portfolio position drawer gets.
+ */
+export function OrderQuoteTelemetry({
+  priceData = null,
+  model,
   label,
   fallback,
-}: {
-  priceData: PriceData | null;
-  label?: string;
-  fallback?: QuoteFallback | null;
-}) {
+  density = "default",
+}: OrderQuoteTelemetryProps) {
   return (
     <QuoteTelemetryPanel
-      model={buildQuoteTelemetryModel(priceData, fallback ?? null)}
+      model={model ?? buildQuoteTelemetryModel(priceData ?? null, fallback ?? null)}
       label={label}
       fields={BAR_FIELDS}
       variant="bar"
+      density={density}
     />
   );
 }
 
-export function InstrumentOrderQuoteTelemetry({
-  priceData,
-  label,
-}: {
-  priceData: PriceData | null;
-  label?: string;
-}) {
-  return (
-    <QuoteTelemetryPanel
-      model={buildQuoteTelemetryModel(priceData)}
-      label={label}
-      fields={BAR_FIELDS}
-      variant="bar"
-    />
-  );
-}
+/** Thin alias. The ticker hero bar is the same nine-field panel. */
+export const TickerQuoteTelemetry = OrderQuoteTelemetry;
+
+/** Thin alias kept for existing order call sites. Prefer `OrderQuoteTelemetry`. */
+export const InstrumentOrderQuoteTelemetry = OrderQuoteTelemetry;
 
 export function ModifyOrderQuoteTelemetry({ priceData }: { priceData: PriceData | null }) {
   return (

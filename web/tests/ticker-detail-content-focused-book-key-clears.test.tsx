@@ -26,6 +26,7 @@ vi.mock("../components/PriceChart", () => ({
 }));
 vi.mock("../components/QuoteTelemetry", () => ({
   TickerQuoteTelemetry: () => React.createElement("div", { "data-testid": "quote-telemetry" }),
+  OrderQuoteTelemetry: () => React.createElement("div", { "data-testid": "order-quote-telemetry" }),
 }));
 
 const PORTFOLIO: PortfolioData = {

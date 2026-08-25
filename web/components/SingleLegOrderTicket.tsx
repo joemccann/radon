@@ -11,6 +11,8 @@ import {
 } from "@/lib/order";
 import OrderErrorBanner from "./OrderErrorBanner";
 import OrderTypeToggle from "./OrderTypeToggle";
+import { OrderQuoteTelemetry } from "./QuoteTelemetry";
+import type { PriceData } from "@/lib/pricesProtocol";
 import {
   type IbOrderType,
   isStopOrderType,
@@ -60,6 +62,14 @@ export type SingleLegOrderTicketProps = {
   bid: number | null;
   mid: number | null;
   ask: number | null;
+  /**
+   * Full live quote for the instrument being traded. When present the ticket
+   * renders the shared nine-field `<OrderQuoteTelemetry>` block above the
+   * Action field; omitted, no quote block is rendered at all.
+   */
+  priceData?: PriceData | null;
+  /** Instrument caption for the telemetry block (e.g. "AAPL $170 Call 2026-08-28"). */
+  quoteLabel?: string;
   /** When true the quick buttons append the price (e.g. "BID 1.23"). */
   showQuickButtonPrices?: boolean;
   /** Whether the current form state is submittable. */
@@ -132,6 +142,8 @@ export default function SingleLegOrderTicket({
   bid,
   mid,
   ask,
+  priceData,
+  quoteLabel,
   showQuickButtonPrices = false,
   isValid,
   limitPrice,
@@ -299,6 +311,10 @@ export default function SingleLegOrderTicket({
   return (
     <div className={className ? `order-form ${className}` : "order-form"} style={style}>
       {header}
+
+      {priceData != null && (
+        <OrderQuoteTelemetry priceData={priceData} label={quoteLabel} density="tight" />
+      )}
 
       <div className="order-field">
         <label className="order-label">Action</label>

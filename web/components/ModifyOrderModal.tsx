@@ -17,9 +17,8 @@ import {
 } from "@/lib/order/positionTrade";
 import { computeLegImpliedValue } from "@/lib/impliedValue";
 import { useRiskFreeRate } from "@/lib/useRiskFreeRate";
-import { ModifyOrderQuoteTelemetry } from "./QuoteTelemetry";
+import { OrderQuoteTelemetry } from "./QuoteTelemetry";
 import {
-  OrderPriceStrip,
   OrderLegPills,
   OrderRiskGate,
   type OrderLeg as UnifiedOrderLeg,
@@ -626,22 +625,7 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, op
 
         <div className={`modify-layout${isComboOrder ? " modify-layout-combo" : ""}`}>
           <div className="modify-primary-panel">
-            <ModifyOrderQuoteTelemetry priceData={priceData} />
-
-            {/* Price strip for combo orders */}
-            {isComboOrder && hasPriceData && bid != null && ask != null && mid != null && (
-              <OrderPriceStrip
-                prices={{
-                  bid,
-                  mid,
-                  ask,
-                  spread: ask - bid,
-                  spreadPct: Math.abs(mid) > 0 ? ((ask - bid) / Math.abs(mid)) * 100 : null,
-                  available: true,
-                }}
-                compact
-              />
-            )}
+            <OrderQuoteTelemetry priceData={priceData} label={order.symbol} density="tight" />
 
             {order.orderType === "STP LMT" && order.auxPrice != null && (
               <div className="modify-stop-row">

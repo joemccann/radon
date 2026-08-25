@@ -11,6 +11,7 @@ import { fmtPrice, legPriceKey, resolveEntryCost, resolveNaturalSpreadQuote } fr
 import { computeLegImpliedValue } from "@/lib/impliedValue";
 import { useRiskFreeRate } from "@/lib/useRiskFreeRate";
 import ModifyOrderModal from "@/components/ModifyOrderModal";
+import { OrderQuoteTelemetry } from "@/components/QuoteTelemetry";
 import OrderErrorBanner from "@/components/OrderErrorBanner";
 import type { ModifyOrderRequest } from "@/lib/orderModify";
 import { checkNakedShortRisk, type NakedShortPortfolio, type OrderPayload } from "@/lib/nakedShortGuard";
@@ -576,6 +577,8 @@ function NewOrderForm({
 
   return (
     <div className="order-form">
+      <OrderQuoteTelemetry priceData={tickerPriceData ?? null} label={ticker} />
+
       <div className="order-field">
         <label className="order-label">Action</label>
         <div className="order-action-buttons">
@@ -1121,7 +1124,13 @@ export default function OrderTab({ ticker, position, portfolio, prices, openOrde
         {isIndex ? (
           <div className="new-order-section-top">
             <div className="existing-orders-title">New Order</div>
-            {hasFuturesSupport(ticker) && <FuturesOrderForm ticker={ticker} portfolio={portfolio} />}
+            {hasFuturesSupport(ticker) && (
+              <FuturesOrderForm
+                ticker={ticker}
+                portfolio={portfolio}
+                priceData={tickerPriceData ?? prices[ticker] ?? null}
+              />
+            )}
             {hasIndexOptionsSupport(ticker) && (
               <div style={{ marginTop: hasFuturesSupport(ticker) ? "24px" : "0" }}>
                 <IndexOptionOrderForm ticker={ticker} portfolio={portfolio} />

@@ -36,6 +36,8 @@ import {
   type OrderQuoteSide,
   type OrderRiskInput,
 } from "@/lib/order";
+import { OrderQuoteTelemetry } from "@/components/QuoteTelemetry";
+import { comboQuotePriceData } from "@/lib/quoteTelemetry";
 import { useViewport } from "@/lib/useViewport";
 import MobileChainLadder from "@/components/mobile/MobileChainLadder";
 import ComboSkewPanel from "@/components/ComboSkewPanel";
@@ -325,6 +327,32 @@ function OrderBuilder({
     };
   }, [netPrices.bid, netPrices.mid, netPrices.ask, signedNetPrice]);
 
+  // One quote for whatever is being ticketed: the contract's own book for a
+  // single leg, the net combo book wrapped as a PriceData for a spread. Both
+  // feed the same shared quote-telemetry model.
+  const quotePriceData = useMemo((): PriceData | null => {
+    if (legs.length === 0) return null;
+    if (isCombo) {
+      const { bid, ask, mid } = signedNetPrices;
+      if (bid == null || ask == null) return null;
+      return comboQuotePriceData({ symbol: ticker, bid, ask, last: mid });
+    }
+    const leg = legs[0];
+    return prices[optionKey({
+      symbol: ticker,
+      expiry: leg.expiry,
+      strike: leg.strike,
+      right: leg.right,
+    })] ?? null;
+  }, [legs, isCombo, signedNetPrices, prices, ticker]);
+
+  const quoteLabel = useMemo(() => {
+    if (legs.length === 0) return "";
+    if (isCombo) return `${ticker}${structure ? ` ${structure}` : ""} NET`;
+    const leg = legs[0];
+    return `${ticker} ${formatExpiry(leg.expiry)} $${leg.strike} ${leg.right === "C" ? "Call" : "Put"}`;
+  }, [legs, isCombo, ticker, structure]);
+
   useEffect(() => {
     if (structureKey === lastStructureKeyRef.current) return;
     lastStructureKeyRef.current = structureKey;
@@ -600,14 +628,21 @@ function OrderBuilder({
         )}
       </div>
 
-      {/* Market: single tappable quote surface */}
-      {isCombo && stripPrices.available && (
+      {/* Market: full quote telemetry above the tappable quote surface */}
+      {(quotePriceData != null || (isCombo && stripPrices.available)) && (
         <div className="order-builder-section order-builder-section--market">
-          <OrderPriceStrip
-            prices={stripPrices}
-            selected={selectedQuoteSide}
-            onSelect={applyQuoteSide}
+          <OrderQuoteTelemetry
+            priceData={quotePriceData}
+            label={quoteLabel}
+            density="tight"
           />
+          {isCombo && stripPrices.available && (
+            <OrderPriceStrip
+              prices={stripPrices}
+              selected={selectedQuoteSide}
+              onSelect={applyQuoteSide}
+            />
+          )}
         </div>
       )}
 

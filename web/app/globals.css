@@ -7868,6 +7868,11 @@ body[data-mobile="true"] .orders-command-strip__jump:active {
 .price-bar-value { font-family: var(--font-mono); font-size: 12px; font-weight: 500; }
 .price-bar-value.positive { color: var(--positive); }
 .price-bar-value.negative { color: var(--negative); }
+/* Tight density: same nine fields, smaller spacing + type so the panel fits a
+   narrow inline order ticket or a mobile bottom sheet. Never drops a field. */
+.price-bar--tight { gap: 4px 8px; padding: 6px 0; }
+.price-bar--tight .price-bar-label { font-size: 8px; }
+.price-bar--tight .price-bar-value { font-size: 11px; }
 
 /* Price chart */
 .price-chart-panel { border-top: none; }
