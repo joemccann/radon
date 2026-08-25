@@ -2022,6 +2022,24 @@ raise SystemExit(2)
         )
         assert result.returncode == 0, result.stdout + result.stderr
 
+    def test_payload_paths_changed_fail_open_when_git_fails(self, tmp_path: Path) -> None:
+        fake_bin = tmp_path / "bin"
+        fake_bin.mkdir()
+        _write_executable(
+            fake_bin / "git",
+            f"""#!{sys.executable}
+import sys
+raise SystemExit(128)
+""",
+        )
+        result = subprocess.run(
+            ["bash", "-c", f"source {DEPLOY!s}; payload_paths_changed a b"],
+            env={**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"},
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
     def test_restart_services_skips_helper_when_payloads_match(
         self, deploy_text: str
     ) -> None:

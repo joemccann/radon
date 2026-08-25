@@ -1102,7 +1102,12 @@ payload_paths_changed() {
   local prev="$1"
   local new="$2"
   local path
+  local paths
   if [[ -z "$prev" || -z "$new" || "$prev" == "$new" || "$prev" =~ ^0+$ ]]; then
+    return 0
+  fi
+  # Fail open: unknown git state must restart, not skip the fleet.
+  if ! paths="$(git -C "$RADON_DIR" diff --name-only "$prev" "$new" 2>/dev/null)"; then
     return 0
   fi
   while IFS= read -r path; do
@@ -1120,7 +1125,7 @@ payload_paths_changed() {
         ;;
     esac
     return 0
-  done < <(git -C "$RADON_DIR" diff --name-only "$prev" "$new")
+  done <<< "$paths"
   return 1
 }
 
