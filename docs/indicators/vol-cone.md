@@ -99,7 +99,9 @@ UI multiplies by 100.
   (`_INTRADAY_CANDIDATE_MAX`) plus watchlist names, capped at
   `_INTRADAY_PAIR_CAP` (80) — bounded cost regardless of universe size —
   and holds entirely once the shared UW daily budget drops below
-  `_INTRADAY_UW_FLOOR`.
+  `_INTRADAY_UW_FLOOR`. Because the pass is partial, refreshed names carry
+  `is_intraday: true` and the payload reports `intraday_count` next to
+  `count`; payload `is_intraday` stays "any name refreshed".
 - Fixtures (captured 2026-08-12):
   - `scripts/tests/fixtures/vol_cone_nvda_greeks_current.json` (77 strikes,
     as-of 2026-08-12, expiry 2026-09-18)

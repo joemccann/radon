@@ -255,7 +255,7 @@ export default function ChatPanel({
           id: `a-${Date.now()}-order`,
           role: "assistant",
           timestamp: createTimestamp(),
-          content: result.ok ? `Order placed: ${proposal.summary}` : `Order failed: ${result.message}`,
+          content: result.ok ? result.message : `Order failed: ${result.message}`,
         },
       ]);
       if (!result.ok) setLastError(result.message);

@@ -50,7 +50,13 @@ if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
 from clients.uw_client import UWClient, UWAPIError
+from utils.scan_health import (
+    SCAN_STATUS_BUDGET_BLOCKED,
+    next_quota_reset_iso,
+    record_scan_degraded,
+)
 from utils.ticker_args import parse_ticker_list
+from utils.uw_budget import should_block_universe_scan
 from utils.uw_surface import fetch_daily_closes, scan_ib_session
 
 try:
@@ -58,6 +64,8 @@ try:
 except Exception:  # pragma: no cover — DB layer optional
     def mirror_scan_snapshot(*args, **kwargs):  # type: ignore
         return None
+
+_CACHE_PATH = _PROJECT_DIR / "data" / "garch_convergence.json"
 
 # ── built-in pair presets ─────────────────────────────────────────
 PAIR_PRESETS: Dict[str, Dict[str, Any]] = {
@@ -731,6 +739,34 @@ def to_json(
     }
 
 
+def _read_cache_file(path: Path) -> Optional[Dict]:
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def budget_blocked_payload(universe: str, requested_tickers: List[str]) -> Dict:
+    """Refuse a universe scan under the UW daily budget brake (theta precedent).
+
+    Writes the distinguishable service_health row and hands back the last
+    good cache stamped with a transient ``scan_status`` marker; nothing is
+    persisted or mirrored, so the marker never outlives the block.
+    """
+    print(f"UW daily budget block; skipping universe scan ({universe})", file=sys.stderr)
+    record_scan_degraded(
+        "garch-scan",
+        SCAN_STATUS_BUDGET_BLOCKED,
+        f"UW daily budget block; universe scan skipped ({universe})",
+        next_attempt_at=next_quota_reset_iso(),
+    )
+    prior = _read_cache_file(_CACHE_PATH)
+    if prior is None:
+        prior = to_json({}, [], universe=universe, requested_tickers=requested_tickers)
+    return {**prior, "scan_status": SCAN_STATUS_BUDGET_BLOCKED}
+
+
 # ── CLI entry point ───────────────────────────────────────────────
 
 def main():
@@ -792,6 +828,12 @@ Examples:
         print("❌ No pairs to analyze.", file=sys.stderr)
         sys.exit(1)
 
+    if not tickers_in and should_block_universe_scan():
+        blocked = budget_blocked_payload(universe, all_tickers)
+        if args.json:
+            print(json.dumps(blocked, indent=2))
+        return
+
     print(f"\n{'='*60}", file=sys.stderr)
     print(f"GARCH CONVERGENCE SCAN — {description}", file=sys.stderr)
     print(f"{'='*60}", file=sys.stderr)
@@ -842,7 +884,7 @@ Examples:
         # Opportunities → GARCH tab can read the latest scan via
         # /api/garch-convergence. Mirrors the LEAP scanner convention
         # (data/leap.json) added in commit f2bd329 / 35da343.
-        cache_path = _PROJECT_DIR / "data" / "garch_convergence.json"
+        cache_path = _CACHE_PATH
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         cache_path.write_text(json.dumps(json_data, indent=2))
         print(f"✓ Dashboard cache saved to {cache_path}", file=sys.stderr)

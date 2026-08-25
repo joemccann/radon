@@ -23,7 +23,7 @@ export enum MarketState {
  *
  * @returns Current MarketState (OPEN, EXTENDED, or CLOSED)
  */
-function marketStateAt(now = new Date()): MarketState {
+export function marketStateAt(now = new Date()): MarketState {
   const et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
   const day = et.getDay(); // 0=Sun, 6=Sat
 

@@ -342,7 +342,7 @@ export default function OptionsExposurePanel({ symbol }: OptionsExposurePanelPro
         </div>
       ) : (
         <div className={styles.tableWrap} data-testid="options-exposure-table-wrap">
-          <table className={styles.table} aria-label={`${data.symbol} options exposure by strike`} data-sortable-exempt="chain-layout">
+          <table className={styles.table} aria-label={`${data.symbol} options exposure by strike`} data-sortable-exempt="chain-layout" data-overflow-exempt="table-layout:fixed with per-column widths and ellipsis truncation; .tableWrap is overflow:visible by design">
             <colgroup>
               <col className={styles.strikeColumn} />
               <col className={styles.levelColumn} />

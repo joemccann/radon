@@ -14,6 +14,7 @@ import {
   getMarketPhaseFromDate,
   getFreshnessWindowMs,
   getServiceCategory,
+  isUsTradingDay,
 } from "../lib/serviceHealthWindows";
 import holidays from "../../scripts/config/market_holidays.json";
 
@@ -58,5 +59,33 @@ describe("holiday awareness", () => {
         `year ${year} missing Christmas`).toBe(true);
       expect(getMarketStateFromDate(new Date(`${year}-12-25T15:00:00Z`))).toBe("closed");
     }
+  });
+});
+
+/**
+ * T-102: years missing from the static table fall back to weekday-only, so
+ * once the table expires every holiday silently reads as a trading day and
+ * the Day P&L card resumes printing IB's re-baselined daily_pnl as "TODAY".
+ * Pin a two-year horizon so the next expiry fails here a year early. The
+ * MLK check is derived (third Monday of January), never a literal.
+ */
+function thirdMondayOfJanuaryIso(year: number): string {
+  const first = new Date(Date.UTC(year, 0, 1, 12));
+  const offsetToMonday = (8 - first.getUTCDay()) % 7;
+  const day = 1 + offsetToMonday + 14;
+  return `${year}-01-${String(day).padStart(2, "0")}`;
+}
+
+describe("static holiday table horizon (T-102)", () => {
+  const horizonYear = new Date().getFullYear() + 2;
+
+  it("covers two years ahead so expiry fails a year early, not silently", () => {
+    expect(Object.keys(holidays)).toContain(String(horizonYear));
+  });
+
+  it("MLK Monday two years ahead is not a trading day", () => {
+    const mlk = thirdMondayOfJanuaryIso(horizonYear);
+    expect(new Date(`${mlk}T12:00:00Z`).getUTCDay(), `${mlk} is a Monday`).toBe(1);
+    expect(isUsTradingDay(mlk), `${mlk} (MLK) must be a holiday`).toBe(false);
   });
 });

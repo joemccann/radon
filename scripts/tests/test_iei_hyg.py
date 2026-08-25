@@ -14,12 +14,20 @@ import pytest
 
 from fetch_credit_spread import parse_yahoo_chart
 from fetch_iei_hyg import (
+    DXY_SYMBOL,
+    HYG_SYMBOL,
+    IEI_SYMBOL,
+    NO_SOURCE,
+    TICKERS,
+    UW_SKIP,
     WINDOW_SESSIONS,
     align_series,
     build_output,
     classify_state,
     diff_new_rows,
     extremes_window,
+    fetch_closes,
+    fetch_uw_closes,
     main,
     merge_series,
     pct_rank,
@@ -231,7 +239,7 @@ def persist_calls(monkeypatch, tmp_path):
     monkeypatch.setattr(
         fih.writer,
         "record_service_health",
-        lambda service, state, finished_at=None: calls.append(("health", service, state)),
+        lambda service, state, finished_at=None, error=None: calls.append(("health", service, state)),
     )
     return calls
 
@@ -259,6 +267,87 @@ class TestPersistResult:
         assert ("health", "iei-hyg", "ok") in persist_calls
 
 
+CACHED_SCAN_TIME = "2026-08-21T21:55:00Z"
+
+
+def _stub_all_sources_down(monkeypatch) -> None:
+    import fetch_iei_hyg as fih
+
+    for name in ("fetch_ib_closes", "fetch_uw_closes", "fetch_yahoo_closes"):
+        monkeypatch.setattr(fih, name, lambda tickers: {})
+
+
+class TestAllSourcesDown:
+    """IB, UW and Yahoo all empty: the cache is re-served as stale_source and the
+    heartbeat is an error so the watchdog pages instead of reading a fresh ok."""
+
+    def test_cached_series_is_reserved_as_stale_source_with_error_heartbeat(self, persist_calls, monkeypatch):
+        import fetch_iei_hyg as fih
+
+        fih.IEI_HYG_JSON.write_text(json.dumps(build_output([ROW], scan_time=CACHED_SCAN_TIME, source="yahoo")))
+        _stub_all_sources_down(monkeypatch)
+
+        payload = fih.run()
+
+        assert ("health", "iei-hyg", "error") in persist_calls
+        assert ("health", "iei-hyg", "ok") not in persist_calls
+        assert payload["status"] == "stale_source"
+        assert payload["count"] == 1
+        assert payload["current"]["date"] == ROW["date"]
+        assert payload["scan_time"] != CACHED_SCAN_TIME
+        assert "rows" not in [c[0] for c in persist_calls]
+        assert ("snapshot", "iei-hyg") in persist_calls
+        assert json.loads(fih.IEI_HYG_JSON.read_text())["status"] == "stale_source"
+
+    def test_no_cache_raises_and_never_heartbeats(self, persist_calls, monkeypatch):
+        import fetch_iei_hyg as fih
+
+        _stub_all_sources_down(monkeypatch)
+
+        with pytest.raises(RuntimeError):
+            fih.run()
+        assert persist_calls == []
+
+    def test_unchanged_day_with_a_live_source_is_still_ok(self, persist_calls, monkeypatch):
+        import fetch_iei_hyg as fih
+
+        fih.IEI_HYG_JSON.write_text(json.dumps(build_output([ROW], scan_time=CACHED_SCAN_TIME, source="ib")))
+        monkeypatch.setattr(
+            fih,
+            "fetch_ib_closes",
+            lambda tickers: {
+                "IEI": {ROW["date"]: IEI_LAST},
+                "HYG": {ROW["date"]: HYG_LAST},
+                "DXY": {ROW["date"]: DXY_LAST},
+            },
+        )
+
+        payload = fih.run()
+
+        assert "status" not in payload
+        assert "rows" not in [c[0] for c in persist_calls]
+        assert ("health", "iei-hyg", "ok") in persist_calls
+
+
+class _RecordingConnection:
+    """sqlite3 stand-in for the Hrana client that refuses executemany."""
+
+    def __init__(self, conn: sqlite3.Connection):
+        self._conn = conn
+        self.statements: list[tuple[str, tuple]] = []
+        self.commits = 0
+
+    def execute(self, sql: str, params: tuple = ()):  # noqa: D102
+        self.statements.append((sql, tuple(params)))
+        return self._conn.execute(sql, params)
+
+    def executemany(self, *_args, **_kwargs):  # noqa: D102
+        raise AssertionError("executemany is one Hrana round-trip per row")
+
+    def commit(self):  # noqa: D102
+        self.commits += 1
+
+
 class TestStorage:
     @pytest.fixture()
     def db(self):
@@ -268,6 +357,15 @@ class TestStorage:
         yield conn
         conn.close()
 
+    @pytest.fixture()
+    def recording_writer(self, db, monkeypatch):
+        """The REAL db.writer with get_db() wired to the in-memory 0053 schema."""
+        from db import writer
+
+        recording = _RecordingConnection(db)
+        monkeypatch.setattr(writer, "get_db", lambda: recording)
+        return writer, recording
+
     def test_migration_registers_version_53(self, db):
         assert [r[0] for r in db.execute("SELECT version FROM schema_migrations")] == [53]
 
@@ -275,13 +373,33 @@ class TestStorage:
         cols = [r[1] for r in db.execute("PRAGMA table_info(iei_hyg_history)")]
         assert cols == ["date", "iei_close", "hyg_close", "dxy_close", "recorded_at"]
 
-    def test_upsert_is_idempotent_per_date(self, db):
-        from db import writer
+    def test_upsert_is_idempotent_per_date(self, db, recording_writer):
+        writer, recording = recording_writer
+        stale = {"date": "2026-08-21", "iei_close": 116.0, "hyg_close": 79.0, "dxy_close": None, "ratio": 116.0 / 79.0}
 
-        db.execute(writer.IEI_HYG_UPSERT_SQL, ("2026-08-21", 116.0, 79.0, None, "2026-08-21T21:55:00Z"))
-        db.execute(writer.IEI_HYG_UPSERT_SQL, ("2026-08-21", IEI_LAST, HYG_LAST, DXY_LAST, "2026-08-22T21:55:00Z"))
-        rows = list(db.execute("SELECT date, iei_close, hyg_close, dxy_close FROM iei_hyg_history"))
-        assert rows == [("2026-08-21", IEI_LAST, HYG_LAST, DXY_LAST)]
+        writer.upsert_iei_hyg_rows([stale], recorded_at="2026-08-21T21:55:00Z")
+        writer.upsert_iei_hyg_rows([ROW], recorded_at="2026-08-22T21:55:00Z")
+
+        rows = list(db.execute("SELECT date, iei_close, hyg_close, dxy_close, recorded_at FROM iei_hyg_history"))
+        assert rows == [("2026-08-21", IEI_LAST, HYG_LAST, DXY_LAST, "2026-08-22T21:55:00Z")]
+        assert recording.commits == 2
+        assert all("ON CONFLICT(date) DO UPDATE" in sql for sql, _ in recording.statements)
+
+    def test_upsert_chunks_many_rows_into_multi_row_inserts(self, db, recording_writer):
+        writer, recording = recording_writer
+        rows = [
+            {"date": f"2025-{m:02d}-{d:02d}", "iei_close": 100.0 + d, "hyg_close": 70.0 + m, "dxy_close": None}
+            for m in range(1, 13)
+            for d in range(1, 29)
+        ]
+
+        writer.upsert_iei_hyg_rows(rows, recorded_at="2026-08-22T21:55:00Z")
+
+        assert db.execute("SELECT COUNT(*) FROM iei_hyg_history").fetchone() == (len(rows),)
+        assert len(recording.statements) < len(rows)
+        assert db.execute(
+            "SELECT iei_close, hyg_close FROM iei_hyg_history WHERE date = '2025-12-28'"
+        ).fetchone() == (128.0, 82.0)
 
 
 class TestCli:
@@ -305,3 +423,125 @@ class TestCli:
         payload = json.loads(out)
         assert payload["count"] == 62
         assert payload["current"]["state"] == "unknown"  # R-126: 62 < 252
+
+
+# ── source ladder (Mandatory Rule 7) ──────────────────────────────
+#
+# T-112. `TestCli` monkeypatched `fetch_closes` wholesale and nothing else in
+# this file called it, so the IEI/HYG ladder had ZERO coverage: swapping
+# `fetch_iei_hyg.py:271-273` to `yahoo -> uw -> ib` left every test green while
+# the scheduled job made Yahoo the primary source for a series IB and UW both
+# serve. The near-identical credit-spread ladder has had these four cases since
+# it shipped (`test_credit_spread.py:401-460`); this is the missing twin.
+
+
+class TestFetchClosesCascade:
+    def test_ib_covering_every_ticker_never_calls_uw_or_yahoo(self):
+        uw_calls: list = []
+        yahoo_calls: list = []
+
+        closes, source, _ = fetch_closes(
+            fetch_ib=lambda tickers: {t: {"2026-08-21": 1.0} for t in tickers},
+            fetch_uw=lambda tickers: uw_calls.append(list(tickers)) or {},
+            fetch_yahoo=lambda tickers: yahoo_calls.append(list(tickers)) or {},
+        )
+
+        assert sorted(closes) == sorted(TICKERS)
+        assert source == "ib"
+        assert uw_calls == []
+        assert yahoo_calls == []
+
+    def test_uw_fills_the_ib_gap_and_yahoo_is_not_reached(self):
+        yahoo_calls: list = []
+
+        closes, source, _ = fetch_closes(
+            fetch_ib=lambda tickers: {},
+            fetch_uw=lambda tickers: {t: {"2026-08-21": 1.0} for t in tickers},
+            fetch_yahoo=lambda tickers: yahoo_calls.append(list(tickers)) or {},
+        )
+
+        assert sorted(closes) == sorted(TICKERS)
+        assert source == "uw"
+        assert yahoo_calls == []
+
+    def test_yahoo_is_the_last_resort_and_both_others_were_tried_first(self):
+        ib_calls: list = []
+        uw_calls: list = []
+
+        closes, source, _ = fetch_closes(
+            fetch_ib=lambda tickers: ib_calls.append(list(tickers)) or {},
+            fetch_uw=lambda tickers: uw_calls.append(list(tickers)) or {},
+            fetch_yahoo=lambda tickers: {t: {"2026-08-21": 1.0} for t in tickers},
+        )
+
+        assert ib_calls == [TICKERS]
+        assert uw_calls == [TICKERS]
+        assert source == "yahoo"
+
+    def test_each_rung_is_only_asked_for_the_tickers_still_missing(self):
+        uw_calls: list = []
+        yahoo_calls: list = []
+
+        closes, source, _ = fetch_closes(
+            fetch_ib=lambda tickers: {IEI_SYMBOL: {"2026-08-21": 1.0}},
+            fetch_uw=lambda tickers: uw_calls.append(list(tickers))
+            or {HYG_SYMBOL: {"2026-08-21": 2.0}},
+            fetch_yahoo=lambda tickers: yahoo_calls.append(list(tickers))
+            or {DXY_SYMBOL: {"2026-08-21": 3.0}},
+        )
+
+        assert uw_calls == [[HYG_SYMBOL, DXY_SYMBOL]]
+        assert yahoo_calls == [[DXY_SYMBOL]]
+        assert sorted(closes) == sorted(TICKERS)
+        assert source == "ib+uw+yahoo"
+
+    def test_an_empty_series_from_a_rung_does_not_claim_the_ticker(self):
+        yahoo_calls: list = []
+
+        closes, source, _ = fetch_closes(
+            fetch_ib=lambda tickers: {t: {} for t in tickers},
+            fetch_uw=lambda tickers: {},
+            fetch_yahoo=lambda tickers: yahoo_calls.append(list(tickers))
+            or {t: {"2026-08-21": 1.0} for t in tickers},
+        )
+
+        assert yahoo_calls == [TICKERS]
+        assert source == "yahoo"
+
+    def test_no_rung_answers_at_all(self):
+        closes, source, _ = fetch_closes(
+            fetch_ib=lambda tickers: {},
+            fetch_uw=lambda tickers: {},
+            fetch_yahoo=lambda tickers: {},
+        )
+
+        assert closes == {}
+        assert source == NO_SOURCE
+
+    def test_an_explicit_ticker_list_overrides_the_default_universe(self):
+        ib_calls: list = []
+
+        fetch_closes(
+            [HYG_SYMBOL],
+            fetch_ib=lambda tickers: ib_calls.append(list(tickers)) or {},
+            fetch_uw=lambda tickers: {},
+            fetch_yahoo=lambda tickers: {},
+        )
+
+        assert ib_calls == [[HYG_SYMBOL]]
+
+
+class TestDxyNeverGoesToUnusualWhales:
+    """DXY is not a UW-quotable symbol; `UW_SKIP` keeps it off the quota."""
+
+    def test_uw_fetcher_returns_early_for_dxy_only(self, monkeypatch):
+        def _explode(*_a, **_k):
+            raise AssertionError("UWClient was constructed for a UW_SKIP ticker")
+
+        monkeypatch.setattr("clients.uw_client.UWClient", _explode)
+
+        assert fetch_uw_closes([DXY_SYMBOL]) == {}
+
+    def test_dxy_is_declared_skippable(self):
+        assert DXY_SYMBOL in UW_SKIP
+        assert IEI_SYMBOL not in UW_SKIP and HYG_SYMBOL not in UW_SKIP

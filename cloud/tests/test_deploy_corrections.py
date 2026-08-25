@@ -540,6 +540,7 @@ class TestDurableReleaseTransition:
         assert not journal.exists()
         assert calls.read_text(encoding="utf-8").splitlines() == [
             "/usr/local/sbin/radon-deploy-root stop-clean",
+            "/usr/local/sbin/radon-deploy-root revert-units",
             "/usr/local/sbin/radon-deploy-root recover",
             "/usr/local/sbin/radon-deploy-root verify-restored",
             "/usr/local/sbin/radon-deploy-root commit-transition",
@@ -941,6 +942,7 @@ recover_pending_transition
         _assert_release_snapshot(live, old)
         assert calls.read_text(encoding="utf-8").splitlines() == [
             "/usr/local/sbin/radon-deploy-root stop-clean",
+            "/usr/local/sbin/radon-deploy-root revert-units",
             "/usr/local/sbin/radon-deploy-root recover",
             "/usr/local/sbin/radon-deploy-root verify-restored",
             "/usr/local/sbin/radon-deploy-root commit-transition",
