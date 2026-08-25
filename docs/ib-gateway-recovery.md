@@ -30,6 +30,22 @@ Required participants:
 
 This is what defends against stacked-push rejection.
 
+**Two release rules keep the lease from outliving the push it guards** (2026-08-25: an
+admin stop landed 14s after a restart, the stop path left the lease held, and every
+recovery control - Start Gateway, Restart All Services, `radon restart`, the watchdog -
+stayed refused for the remaining 590s with no container on the host):
+
+- `radon-ib-gateway-control stop` releases the lease unconditionally after a converged
+  stop. A stopped container has no login session, so no push can still be pending
+  against it. An unconverged stop keeps the lease - the container is still up.
+- A lease is not honoured once the Gateway is provably down: older than
+  `GATEWAY_DOWN_GRACE_SECS` (90s) with nothing accepting on `IB_GATEWAY_HOST:PORT`.
+  A real pending push always keeps 4001 listening (`auth_state=awaiting_2fa` +
+  `port_listening=true`), so this only ever eats an orphan - a killed control plane, a
+  container crash, an out-of-band `docker stop`. The grace covers container boot, where
+  the lease exists a beat before the port binds. The probe runs only for a lease past its
+  grace, so `/health` polling never opens a socket.
+
 ### 2. In-memory backoff ladder
 
 Per-process. `restart_ib_gateway()` runs a `managedAccounts()` probe post-restart:

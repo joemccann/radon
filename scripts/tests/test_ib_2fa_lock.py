@@ -59,7 +59,7 @@ def test_check_returns_none_when_lock_has_expired():
 # --- rejection while held ---------------------------------------------------
 
 
-def test_second_holder_is_rejected_while_lock_is_active():
+def test_second_holder_is_rejected_while_lock_is_active(gateway_port_up):
     ib_2fa_lock.acquire_2fa_push_lock("restart-cli", ttl_secs=600, now=1000.0)
     ok, current = ib_2fa_lock.acquire_2fa_push_lock("ib-watchdog", ttl_secs=600, now=1100.0)
     assert ok is False
@@ -194,7 +194,7 @@ def test_remaining_lock_secs_returns_zero_when_free():
     assert ib_2fa_lock.remaining_lock_secs(now=1000.0) == 0
 
 
-def test_remaining_lock_secs_counts_down_toward_expiry():
+def test_remaining_lock_secs_counts_down_toward_expiry(gateway_port_up):
     ib_2fa_lock.acquire_2fa_push_lock("restart-cli", ttl_secs=600, now=1000.0)
     assert ib_2fa_lock.remaining_lock_secs(now=1000.0) == 600
     assert ib_2fa_lock.remaining_lock_secs(now=1100.0) == 500
@@ -297,3 +297,91 @@ def test_cli_resolves_via_python_dash_m(tmp_path: Path):
     )
     assert refused.returncode == 1
     assert "radon-cli" in refused.stderr
+
+
+# --- orphaned lease: Gateway provably down ----------------------------------
+#
+# 2026-08-25 incident. An operator restart took the lease at 12:40:46, an admin
+# stop of radon-ib-gateway.service tore the container down 14s later, and the
+# stop path left the lease held. With no container there was no push in flight,
+# yet every recovery path (Start Gateway, Restart All Services, watchdog) stayed
+# blocked for the rest of the 600s TTL.
+
+
+@pytest.fixture
+def gateway_port_down(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ib_2fa_lock, "_gateway_port_listening", lambda: False)
+
+
+@pytest.fixture
+def gateway_port_up(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ib_2fa_lock, "_gateway_port_listening", lambda: True)
+
+
+def _past_grace(base: float = 1000.0) -> float:
+    return base + ib_2fa_lock.GATEWAY_DOWN_GRACE_SECS + 1
+
+
+def test_check_drops_lease_once_gateway_port_is_down_past_grace(gateway_port_down):
+    ib_2fa_lock.acquire_2fa_push_lock("radon-cloud.ib-gateway-control", now=1000.0)
+    assert ib_2fa_lock.check_2fa_push_lock(now=_past_grace()) is None
+
+
+def test_acquire_succeeds_over_a_lease_orphaned_by_a_downed_gateway(gateway_port_down):
+    ib_2fa_lock.acquire_2fa_push_lock("radon-cloud.ib-gateway-control", now=1000.0)
+    ok, lock = ib_2fa_lock.acquire_2fa_push_lock("ib-watchdog", now=_past_grace())
+    assert ok is True
+    assert lock is not None and lock.holder == "ib-watchdog"
+
+
+def test_lease_survives_the_grace_window_while_the_container_boots(gateway_port_down):
+    """The lease exists a beat before the container binds 4001 — do not eat it."""
+    ib_2fa_lock.acquire_2fa_push_lock("radon-cloud.ib-gateway-control", now=1000.0)
+    held = ib_2fa_lock.check_2fa_push_lock(
+        now=1000.0 + ib_2fa_lock.GATEWAY_DOWN_GRACE_SECS - 1
+    )
+    assert held is not None and held.holder == "radon-cloud.ib-gateway-control"
+
+
+def test_lease_is_honoured_while_the_gateway_awaits_the_2fa_tap(gateway_port_up):
+    """auth_state=awaiting_2fa keeps port 4001 listening — a real push in flight."""
+    ib_2fa_lock.acquire_2fa_push_lock("radon-cloud.ib-gateway-control", now=1000.0)
+    held = ib_2fa_lock.check_2fa_push_lock(now=_past_grace())
+    assert held is not None and held.holder == "radon-cloud.ib-gateway-control"
+
+
+def test_remaining_secs_reports_zero_for_an_orphaned_lease(gateway_port_down):
+    ib_2fa_lock.acquire_2fa_push_lock("radon-cloud.ib-gateway-control", now=1000.0)
+    assert ib_2fa_lock.remaining_lock_secs(now=_past_grace()) == 0
+
+
+def test_port_probe_is_skipped_while_the_lease_is_young(monkeypatch):
+    """Cheap by construction: /health must not open a socket on every poll."""
+    probes: list[int] = []
+    monkeypatch.setattr(
+        ib_2fa_lock, "_gateway_port_listening", lambda: probes.append(1) or True
+    )
+    ib_2fa_lock.acquire_2fa_push_lock("radon-cloud.ib-gateway-control", now=1000.0)
+    ib_2fa_lock.check_2fa_push_lock(now=1010.0)
+    assert probes == []
+
+
+def test_cli_release_any_clears_a_lease_held_by_another_component(capsys):
+    ib_2fa_lock.acquire_2fa_push_lock("ib-watchdog", now=1000.0)
+    assert ib_2fa_lock.main(["release-any"]) == 0
+    assert "ib-watchdog" in capsys.readouterr().out
+    assert ib_2fa_lock.check_2fa_push_lock(now=1010.0) is None
+
+
+def test_cli_release_any_when_free_is_noop():
+    assert ib_2fa_lock.main(["release-any"]) == 0
+
+
+def test_orphan_warning_is_logged_once_per_lease(gateway_port_down, caplog, monkeypatch):
+    """/health re-reads the lease every poll; the journal must not fill with it."""
+    monkeypatch.setattr(ib_2fa_lock, "_orphan_reported", None)
+    ib_2fa_lock.acquire_2fa_push_lock("radon-cloud.ib-gateway-control", now=1000.0)
+    with caplog.at_level("WARNING", logger="radon.ib_2fa_lock"):
+        for _ in range(5):
+            ib_2fa_lock.check_2fa_push_lock(now=_past_grace())
+    assert sum("ignored: Gateway port down" in r.message for r in caplog.records) == 1

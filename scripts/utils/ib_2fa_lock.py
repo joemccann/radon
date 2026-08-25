@@ -45,6 +45,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import socket
 import sys
 import tempfile
 import time
@@ -74,6 +75,26 @@ DEFAULT_LOCK_TTL_SECS = 600
 # the per-user Application Support directory so every local control plane can
 # share the lease without root privileges. Override via env for dev/test.
 DEFAULT_LOCK_PATH = "/var/lib/radon/ib-2fa-push-lock.json"
+
+# A pending IBKR push always has a live Gateway behind it: the container binds
+# the API port before IBC starts waiting for the tap (auth_state=awaiting_2fa is
+# observed with port_listening=true for the whole window). So a lease whose
+# Gateway port has been shut for longer than this grace is guarding nothing —
+# an operator stop, a container crash, or a killed control plane orphaned it —
+# and honouring it locks every recovery path out for the rest of the TTL.
+# The grace covers container boot, where the lease exists a beat before the
+# port binds. 2026-08-25: an admin stop 14s after a restart orphaned a lease
+# and blocked Start Gateway for 10 minutes with no container on the host.
+GATEWAY_DOWN_GRACE_SECS = 90
+
+# Loopback refuses instantly; the budget only bites on an unreachable
+# IB_GATEWAY_HOST, and only for a lease already past its grace.
+_PORT_PROBE_TIMEOUT_SECS = 0.35
+
+# Identity of the last lease reported as orphaned. /health re-reads the lease on
+# every poll, so the warning is logged once per lease instead of every 2s until
+# the next acquire overwrites the file.
+_orphan_reported: Optional[tuple[str, float]] = None
 
 
 def _lock_path() -> Path:
@@ -225,6 +246,42 @@ def _read_lock_file() -> Optional[PushLock]:
         )
 
 
+def _gateway_port_listening() -> bool:
+    """True when something accepts on the IB API port the lease is guarding."""
+    host = os.environ.get("IB_GATEWAY_HOST", "127.0.0.1")
+    try:
+        port = int(os.environ.get("IB_GATEWAY_PORT", "4001"))
+    except ValueError:
+        port = 4001
+    try:
+        with socket.create_connection((host, port), timeout=_PORT_PROBE_TIMEOUT_SECS):
+            return True
+    except OSError:
+        return False
+
+
+def _is_orphaned(lock: PushLock, now: float) -> bool:
+    """True when no push can still be in flight behind ``lock``.
+
+    Age is checked first so the socket probe stays off the hot path: /health
+    reads the lease on every poll and a young lease is always honoured.
+    """
+    if now - lock.acquired_at < GATEWAY_DOWN_GRACE_SECS:
+        return False
+    if _gateway_port_listening():
+        return False
+    global _orphan_reported
+    identity = (lock.holder, lock.acquired_at)
+    if _orphan_reported != identity:
+        _orphan_reported = identity
+        logger.warning(
+            "2FA lease held by %r ignored: Gateway port down for %.0fs",
+            lock.holder,
+            now - lock.acquired_at,
+        )
+    return True
+
+
 def check_2fa_push_lock(
     now: Optional[float] = None,
     *,
@@ -233,13 +290,17 @@ def check_2fa_push_lock(
     """Return the active lock if one is held, else None.
 
     An expired lock counts as free — the caller may proceed and will
-    typically acquire a fresh lock as part of their restart sequence.
+    typically acquire a fresh lock as part of their restart sequence. So does
+    one orphaned by a Gateway that is provably down (see ``_is_orphaned``).
     """
+    now = now if now is not None else time.time()
     with _guard(exclusive=False, timeout_secs=guard_timeout_secs):
         lock = _read_lock_file()
     if lock is None:
         return None
     if lock.is_expired(now):
+        return None
+    if _is_orphaned(lock, now):
         return None
     return lock
 
@@ -266,7 +327,11 @@ def acquire_2fa_push_lock(
     now = now if now is not None else time.time()
     with _guard(exclusive=True, timeout_secs=guard_timeout_secs):
         existing = _read_lock_file()
-        if existing is not None and not existing.is_expired(now):
+        if (
+            existing is not None
+            and not existing.is_expired(now)
+            and not _is_orphaned(existing, now)
+        ):
             return (False, existing)
 
         lock = PushLock(
@@ -380,7 +445,8 @@ def remaining_lock_secs(now: Optional[float] = None) -> int:
 
 _CLI_USAGE = (
     "usage: python3 -m scripts.utils.ib_2fa_lock "
-    "{check|acquire <holder>|release <holder>|consume <holder> <marker-path>}"
+    "{check|acquire <holder>|release <holder>|release-any"
+    "|consume <holder> <marker-path>}"
 )
 
 
@@ -423,6 +489,21 @@ def _cli_release(holder: str) -> int:
     return 0
 
 
+def _cli_release_any() -> int:
+    """Clear whichever lease is held. For paths that make every lease moot.
+
+    ``release <holder>`` is holder-scoped by design, so it cannot clean up after
+    a different component. Stopping the Gateway retires the push of whoever took
+    the lease, so that path needs an unconditional clear.
+    """
+    released = release_2fa_push_lock()
+    if released is None:
+        print("free")
+    else:
+        print(f"released holder={released.holder}")
+    return 0
+
+
 def _cli_consume(holder: str, marker_path: str) -> int:
     consumed, current = consume_2fa_push_lock(holder, Path(marker_path))
     if consumed:
@@ -444,6 +525,8 @@ def main(argv: list[str]) -> int:
         return _cli_acquire(argv[1])
     if len(argv) == 2 and argv[0] == "release":
         return _cli_release(argv[1])
+    if argv == ["release-any"]:
+        return _cli_release_any()
     if len(argv) == 3 and argv[0] == "consume":
         return _cli_consume(argv[1], argv[2])
     print(_CLI_USAGE, file=sys.stderr)
