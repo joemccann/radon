@@ -29,8 +29,19 @@
         reverse_proxy localhost:8765
     }
 
+    # Ride out an upstream restart instead of forwarding it to the browser.
+    # reverse_proxy defaults to zero retries, so every request that landed in
+    # the ~7s radon-nextjs/radon-api gap of a deploy promote got a raw 502
+    # (2026-08-25: /admin, /api/ib/ws-ticket, /api/portfolio). The window
+    # outlasts the bounded 10s Next.js SIGTERM drain plus the restart, and is
+    # short enough that a genuinely dead upstream still fails the request.
+    # Do NOT add fail_duration: marking the single upstream down would take
+    # the retry loop out of the picture and 502 immediately again.
     handle_path /api/ib/* {
-        reverse_proxy localhost:8321
+        reverse_proxy localhost:8321 {
+            lb_try_duration 15s
+            lb_try_interval 250ms
+        }
     }
 
     # Tier-2 edge health surface. Reached Caddy->daemon DIRECTLY (never via
@@ -62,7 +73,10 @@
     }
 
     handle {
-        reverse_proxy localhost:3000
+        reverse_proxy localhost:3000 {
+            lb_try_duration 15s
+            lb_try_interval 250ms
+        }
     }
 }
 

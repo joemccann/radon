@@ -195,6 +195,49 @@ Incident: 2026-07-08, P1.
 
 ---
 
+## deploy-restart-window-edge-502
+
+**Every page 502s for a few seconds during a deploy promote.**
+Reported 2026-08-25 as "502 on https://app.radon.run/admin".
+
+- **Mechanism:** `restart-managed` stops `radon-nextjs` and `radon-api` before
+  the new ones listen. `reverse_proxy` defaults to zero retries, so Caddy
+  turned each `dial tcp [::1]:3000: connect: connection refused` into a raw
+  502 the instant the dial failed. Deploy #89 promoted at 12:31 UTC and the
+  edge served 502s from 12:31:29 to 12:31:36 — `/admin` and its RSC prefetches,
+  plus 64 `/api/ib/ws-ticket`, `/api/portfolio`, `/api/orders`. Nothing was
+  broken: the release was green and `/admin` answered 307 → `/sign-in` again
+  the moment `next start` bound the port.
+- **Detection:** transient — a 502 that clears on reload. `journalctl -u caddy`
+  shows `connection refused` to `:3000`/`:8321`, `/var/log/caddy/radon.log` has
+  a `"status":502` burst confined to one minute, and that minute matches the
+  deploy's `[gate] Next.js HTTP responding` line. `curl -sI` after the fact
+  returns the normal 307.
+- **Discriminating check:** compare the 502 timestamps with
+  `systemctl show radon-nextjs -p ActiveEnterTimestamp` and
+  `/home/radon/.radon-last-green-deploy`. Inside the restart window it is this
+  case. Persisting 502s after the unit is active are a different failure
+  (check `.next/BUILD_ID` and `cancelled-deploy-corrupt-next-build`).
+- **Fix (`cloud/caddy/Caddyfile`):** `lb_try_duration 15s` /
+  `lb_try_interval 250ms` on the `:3000` and `:8321` upstreams. The window
+  outlasts the bounded 10 s Next.js SIGTERM drain
+  (`web/lib/boundedShutdown.ts`) plus the restart, so requests wait out the gap
+  instead of failing. Never add `fail_duration`: marking the single upstream
+  down removes the retry loop and restores the instant 502. The edge health
+  floor (`:8330`) deliberately keeps zero retries so probes stay fast.
+- **Publishing:** the Caddyfile is NOT shipped by the CI deploy. After merge,
+  on the VPS as `radon`:
+  `sudo -n /usr/local/sbin/radon-deploy-root publish-caddy` (stages, validates,
+  installs atomically, bounded reload, rolls back on failure). Until then the
+  drift audit flags `/etc/caddy/Caddyfile`.
+- **Regression:** `cloud/tests/test_caddyfile.py::TestUpstreamRestartWindow`
+  (retry window ≥ drain + start on both app upstreams, none on the health
+  floor) and `::TestRestartWindowMechanism`, which runs a real caddy against a
+  dead port and asserts the request is served once the upstream returns
+  (`RADON_CADDY_BIN=<path>` to run it; skipped when no binary is present).
+
+---
+
 ## signals-refresh-curl-timeout-pages-p1
 
 **`radon-signals-refresh.service` oneshot pages P1 `Result=exit-code`
