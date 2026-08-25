@@ -350,6 +350,22 @@ class TestPersistResult:
 DATA_DATE = (date.today() - timedelta(days=1)).isoformat()
 
 
+# TEST_AUDIT T-133: `run()` was executed by no test (see test_divyield.py).
+class TestRun:
+    def test_every_run_writes_the_full_revised_series(self, persist_calls, monkeypatch):
+        import fetch_hhlev as fh
+
+        rows = parse_fredgraph_csv(CSV_TEXT)
+        monkeypatch.setattr(fh, "fetch_rows", lambda: (rows, "2026-06-12T12:00:00Z"))
+
+        payload = fh.run()
+
+        assert ("rows", len(rows)) in persist_calls
+        assert ("health", "hhlev", "ok") in persist_calls
+        assert payload["data_date"] == LATEST_DATE
+        assert "2026-06-12T12:00:00Z" in json.dumps(payload)
+
+
 class TestStorage:
     @pytest.fixture()
     def db(self):

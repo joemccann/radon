@@ -283,6 +283,49 @@ class TestPersistResult:
         assert ("health", "div-yield", "ok") in persist_calls
 
 
+# TEST_AUDIT T-133: `run()` was executed by no test. A regression that stops
+# writing history rows while still heartbeating `ok` (e.g. `changed`
+# computed against a stale history) is invisible: the snapshot and the
+# heartbeat keep the 26h/120h watchdog windows green while `*_history`
+# never grows. Drive the orchestration with the fetchers stubbed.
+class TestRun:
+    def test_a_new_date_writes_exactly_one_history_row(self, persist_calls, monkeypatch):
+        import fetch_divyield as fd
+
+        tickers = [f"T{i:03d}" for i in range(fd.MIN_CONSTITUENTS)]
+        monkeypatch.setattr(fd, "fetch_constituents", lambda: (tickers, "github"))
+        monkeypatch.setattr(
+            fd, "sweep_yields", lambda _tickers: ({t: 4.0 + (i % 7) / 10 for i, t in enumerate(tickers)}, 0, DATA_DATE)
+        )
+        monkeypatch.setattr(fd, "_latest_y10", lambda: (DATA_DATE, 4.70))
+        older = {**_current_row(), "date": (_TODAY - timedelta(days=2)).isoformat()}
+        monkeypatch.setattr(fd, "load_history", lambda: [older])
+
+        payload = fd.run()
+
+        assert ("rows", 1) in persist_calls
+        assert persist_calls.index(("rows", 1)) < persist_calls.index(("snapshot", "div-yield"))
+        assert ("health", "div-yield", "ok") in persist_calls
+        assert payload["data_date"] == DATA_DATE
+        assert [row["date"] for row in payload["series"]][-2:] == [older["date"], DATA_DATE]
+
+    def test_an_unchanged_day_writes_no_row_but_still_heartbeats(self, persist_calls, monkeypatch):
+        import fetch_divyield as fd
+
+        tickers = [f"T{i:03d}" for i in range(fd.MIN_CONSTITUENTS)]
+        yields = {t: 4.0 + (i % 7) / 10 for i, t in enumerate(tickers)}
+        monkeypatch.setattr(fd, "fetch_constituents", lambda: (tickers, "github"))
+        monkeypatch.setattr(fd, "sweep_yields", lambda _tickers: (yields, 0, DATA_DATE))
+        monkeypatch.setattr(fd, "_latest_y10", lambda: (DATA_DATE, 4.70))
+        stored = {"date": DATA_DATE, **fd.compute_pct_above(list(yields.values()), 4.70), "y10": 4.70, "approximate": 0}
+        monkeypatch.setattr(fd, "load_history", lambda: [stored])
+
+        fd.run()
+
+        assert "rows" not in [c[0] for c in persist_calls]
+        assert ("health", "div-yield", "ok") in persist_calls
+
+
 class TestStorage:
     @pytest.fixture()
     def db(self):

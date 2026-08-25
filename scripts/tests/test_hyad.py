@@ -313,6 +313,45 @@ class TestPersistResult:
         assert ("health", "hy-ad", "ok") in persist_calls
 
 
+# TEST_AUDIT T-133: `run()` was executed by no test (see test_divyield.py).
+class TestRun:
+    def test_only_new_or_revised_days_are_written(self, persist_calls, monkeypatch):
+        import fetch_hyad as fh
+
+        window = _synthetic_rows(3)
+        stored = [dict(window[0]), dict(window[1])]
+        monkeypatch.setattr(fh, "fetch_window", lambda start, end: window)
+        monkeypatch.setattr(fh, "_turso_history", lambda: stored)
+        monkeypatch.setattr(fh, "_spx_by_date", lambda: {})
+
+        payload = fh.run()
+
+        assert ("rows", 1) in persist_calls
+        assert ("health", "hy-ad", "ok") in persist_calls
+        assert payload["data_date"] == window[-1]["date"]
+
+    def test_a_revised_stored_day_is_rewritten(self, persist_calls, monkeypatch):
+        import fetch_hyad as fh
+
+        window = _synthetic_rows(2)
+        stored = [dict(window[0]), {**window[1], "advances": window[1]["advances"] - 5}]
+        monkeypatch.setattr(fh, "fetch_window", lambda start, end: window)
+        monkeypatch.setattr(fh, "_turso_history", lambda: stored)
+        monkeypatch.setattr(fh, "_spx_by_date", lambda: {})
+
+        fh.run()
+
+        assert ("rows", 1) in persist_calls
+
+    def test_an_empty_window_is_a_retryable_failure_not_a_heartbeat(self, persist_calls, monkeypatch):
+        import fetch_hyad as fh
+
+        monkeypatch.setattr(fh, "fetch_window", lambda start, end: [])
+        with pytest.raises(RuntimeError):
+            fh.run()
+        assert persist_calls == []
+
+
 class TestStorage:
     @pytest.fixture()
     def db(self):
