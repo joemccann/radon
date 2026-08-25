@@ -1,5 +1,7 @@
 /**
- * Lightweight per-IP fixed-window rate limiter.
+ * Lightweight per-KEY fixed-window rate limiter. Route callers key it per
+ * user (routeAccess.ts `route:<key>:<userId>`), so every tab and device of one
+ * operator shares a bucket; share generators key it per IP via clientIp().
  *
  * Best-effort, per-instance (in-memory) throttling — a CDN/Caddy limiter
  * is the durable layer. This defends against runaway callers on a single
