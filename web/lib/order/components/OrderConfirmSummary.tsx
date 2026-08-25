@@ -17,6 +17,7 @@
 import { useEffect } from "react";
 import type { AugmentedOrderSummary } from "../types";
 import { isAugmentedOrderSummary } from "../types";
+import { computePayoffRatio, formatPayoffRatio, CONVEXITY_MIN_RATIO } from "../payoffRatio";
 
 interface OrderConfirmSummaryProps {
   /**
@@ -110,6 +111,11 @@ export function OrderConfirmSummary({
   const hasUndefinedRisk =
     summary.maxLossUnbounded === true ||
     (summary.undefinedRiskReason != null && summary.undefinedRiskReason.length > 0);
+  // Embedded leverage: gain per dollar risked. Suppressed for unbounded loss —
+  // the Gate 1 warning below already owns that case and a multiple against an
+  // undefined denominator would read as reassurance.
+  const payoff = computePayoffRatio(summary);
+  const showPayoff = payoff != null && payoff.kind !== "undefined-risk";
 
   return (
     <div
@@ -217,6 +223,36 @@ export function OrderConfirmSummary({
               data-unbounded={summary.maxLossUnbounded === true ? "true" : undefined}
             >
               {summary.maxLossUnbounded === true ? "UNBOUNDED" : formatCurrency(summary.maxLoss)}
+            </span>
+          </span>
+        )}
+        {showPayoff && payoff != null && (
+          <span className="order-confirm-metric">
+            <span className="order-confirm-metric-label">Payoff:</span>
+            <span
+              className={`order-confirm-metric-value ${
+                payoff.kind === "uncapped" || payoff.meetsConvexity
+                  ? "order-confirm-positive"
+                  : ""
+              }`.trim()}
+              data-testid="order-payoff-ratio"
+              data-meets-convexity={
+                payoff.kind === "uncapped" ? "true" : payoff.meetsConvexity ? "true" : "false"
+              }
+              style={
+                payoff.kind === "ratio" && !payoff.meetsConvexity
+                  ? { color: "var(--warning)" }
+                  : undefined
+              }
+            >
+              {payoff.kind === "uncapped" ? "UNCAPPED" : formatPayoffRatio(payoff.ratio)}
+              {payoff.kind === "ratio" && !payoff.meetsConvexity && (
+                <span
+                  style={{ marginLeft: "6px", fontSize: "0.85em", color: "var(--text-muted)" }}
+                >
+                  GATE 1: below {CONVEXITY_MIN_RATIO}:1
+                </span>
+              )}
             </span>
           </span>
         )}
