@@ -374,15 +374,18 @@ require_new_lease() {
     echo "REFUSING Gateway cycle: atomic lease CLI unavailable" >&2
     return 1
   fi
+  # Match the marker anywhere: the lease CLI also logs diagnostics to stderr
+  # (an ignored orphan lease), and stdout/stderr interleave unpredictably once
+  # both are captured through one pipe.
   if ! output=$("$LOCK_PYTHON" "$LOCK_CLI" acquire "$LOCK_HOLDER" 2>&1); then
     echo "REFUSING Gateway cycle: ${output:-atomic lease acquisition failed}" >&2
     case "$output" in
-      held*) return "$LEASE_HELD_RC" ;;
+      *"held holder="*) return "$LEASE_HELD_RC" ;;
       *) return 1 ;;
     esac
   fi
   case "$output" in
-    acquired*) printf '2FA push lease: %s\n' "$output" ;;
+    *"acquired holder="*) printf '2FA push lease: %s\n' "$output" ;;
     *)
       echo "REFUSING Gateway cycle: unrecognized lease response: $output" >&2
       return 1
@@ -444,9 +447,30 @@ restart_gateway_preheld() {
   fi
 }
 
+release_any_lease() {
+  local output
+  if [[ ! -x "$LOCK_PYTHON" || ! -f "$LOCK_CLI" ]]; then
+    echo "WARNING: 2FA lease CLI unavailable; lease not cleared" >&2
+    return 0
+  fi
+  if output=$("$LOCK_PYTHON" "$LOCK_CLI" release-any 2>&1); then
+    printf '2FA push lease: %s\n' "$output"
+  else
+    echo "WARNING: could not clear 2FA push lease: ${output:-unknown error}" >&2
+  fi
+}
+
 stop_gateway() {
   reconcile_pending_transition
   compose_to_state stopped stop down
+  # A stopped container has no login session, so no IBKR push can still be
+  # pending against it. Leaving the lease held locks operator start, the
+  # watchdog, and deploy out for the rest of its 10m TTL — 2026-08-25, an admin
+  # stop 14s after a restart wedged every Gateway control until the TTL ran out.
+  # Only reached on a converged stop: compose_to_state returns non-zero under
+  # set -e when the container is still up, and a live container still needs the
+  # lease. Unconditional by design — whoever took it, their push is now moot.
+  release_any_lease
 }
 
 case "${1:-}" in

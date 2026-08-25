@@ -1102,3 +1102,123 @@ def test_no_shipped_direct_gateway_cycle_bypasses_helper():
             offenders.append(str(path.relative_to(CLOUD_ROOT)))
 
     assert offenders == []
+
+
+# --- stop must not orphan the 2FA lease -------------------------------------
+#
+# 2026-08-25 incident. `radon-ib-gateway-control start` took the lease, then an
+# admin stop of radon-ib-gateway.service (ExecStop -> this helper) tore the
+# container down and left the lease held. The UI reported "Another restart is in
+# flight" with no container anywhere and blocked every recovery button for the
+# rest of the 600s TTL.
+
+
+def test_stop_releases_the_2fa_push_lease(control_env):
+    env, state, _log, lock = control_env
+    state.write_text("running\n")
+    _acquire(env, "radon-cloud.ib-gateway-control")
+    assert lock.exists()
+
+    result = _run_control(env, "stop")
+
+    assert result.returncode == 0, result.stderr
+    assert state.read_text().strip() == "stopped"
+    assert not lock.exists(), "a stopped container cannot have a push in flight"
+    assert "released" in result.stdout
+
+
+def test_stop_releases_a_lease_held_by_another_component(control_env):
+    """Whoever took it, the operation it protected is moot once the Gateway is down."""
+    env, state, _log, lock = control_env
+    state.write_text("running\n")
+    _acquire(env, WATCHDOG_HOLDER)
+
+    result = _run_control(env, "stop")
+
+    assert result.returncode == 0, result.stderr
+    assert not lock.exists()
+
+
+def test_stop_keeps_the_lease_when_the_container_refuses_to_go_down(control_env):
+    """An unconverged stop leaves a live container — the lease still guards it."""
+    env, state, _log, lock = control_env
+    state.write_text("running\n")
+    _acquire(env, "radon-cloud.ib-gateway-control")
+    env["FAKE_DOCKER_STATE"] = str(state)
+    env["RADON_DOCKER_BIN"] = str(Path(env["RADON_IB_CONTROL_GUARD_PATH"]).parent / "stuck-docker")
+    _write_executable(
+        Path(env["RADON_DOCKER_BIN"]),
+        """#!/bin/sh
+if [ "${1:-}" = inspect ]; then printf 'true\\n'; exit 0; fi
+exit 0
+""",
+    )
+
+    result = _run_control(env, "stop")
+
+    assert result.returncode != 0
+    assert lock.exists()
+
+
+def test_stop_then_start_is_not_blocked_by_the_prior_lease(control_env):
+    """The exact 2026-08-25 sequence: restart, admin stop, operator tries again."""
+    env, state, log, lock = control_env
+    state.write_text("stopped\n")
+
+    assert _run_control(env, "restart").returncode == 0
+    assert lock.exists()
+    assert _run_control(env, "stop").returncode == 0
+
+    result = _run_control(env, "start")
+
+    assert result.returncode == 0, result.stderr
+    assert state.read_text().strip() == "running"
+    assert re.search(r"compose .* up -d", log.read_text())
+
+
+def test_start_ignores_a_lease_orphaned_while_the_gateway_stayed_down(control_env):
+    """Defense in depth: any path that dies holding the lease must not wedge start.
+
+    Fabricates an aged lease (a killed control plane, an out-of-band `docker
+    stop`) with no container behind it. Real socket probe against a port nothing
+    is serving, so the lease is provably guarding no push.
+    """
+    env, state, _log, lock = control_env
+    state.write_text("stopped\n")
+    stale_at = time.time() - 3600
+    lock.write_text(
+        '{"holder": "radon-cloud.ib-gateway-control", '
+        f'"acquired_at": {stale_at}, "expires_at": {stale_at + 7200}, '
+        '"reason": "killed mid-restart"}'
+    )
+    env["IB_GATEWAY_PORT"] = "1"  # nothing listens; connection refused
+
+    result = _run_control(env, "start")
+
+    assert result.returncode == 0, result.stderr
+    assert state.read_text().strip() == "running"
+
+
+def test_start_still_defers_to_a_lease_with_a_live_gateway_port(control_env):
+    """The lease must keep working while a push is genuinely in flight."""
+    import socket
+
+    env, state, _log, lock = control_env
+    state.write_text("stopped\n")
+    stale_at = time.time() - 3600
+    lock.write_text(
+        '{"holder": "scripts.ib_watchdog.trigger_restart", '
+        f'"acquired_at": {stale_at}, "expires_at": {stale_at + 7200}, '
+        '"reason": "awaiting 2FA tap"}'
+    )
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(128)  # every probe leaves an unaccepted connection queued
+    env["IB_GATEWAY_PORT"] = str(listener.getsockname()[1])
+    try:
+        result = _run_control(env, "start")
+    finally:
+        listener.close()
+
+    assert result.returncode == 75, result.stdout + result.stderr
+    assert state.read_text().strip() == "stopped"
