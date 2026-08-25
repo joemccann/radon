@@ -1,27 +1,7 @@
-import type { StrengthConfirmationResult, ThetaHarvesterResult } from "./types";
+import type { ThetaHarvesterResult } from "./types";
+import { formatMonthlyExpiry, type VolConeName, type VolConeRegime } from "./volCone";
 
-export type GateCell = {
-  code: string;
-  /** null = factor absent from the payload (unknown, not failed). */
-  passed: boolean | null;
-  title: string;
-};
-
-export type BadgeTone = "strong" | "warn" | "fault" | "neutral";
-
-/** Display order + codes for the 7-gate ladder, keyed to the scanner's
- *  `factors[].group` strings (strength_confirmation_scanner.py). */
-const GATE_ORDER: ReadonlyArray<{ code: string; group: string }> = [
-  { code: "Q", group: "Q-SCORES" },
-  { code: "GX", group: "NET GEX" },
-  { code: "CL", group: "CALL POSITIONING" },
-  { code: "TM", group: "TERM STRUCTURE" },
-  { code: "SM", group: "VOLATILITY SMILE" },
-  { code: "SY", group: "SYSTEMATIC POSITIONING" },
-  { code: "BR", group: "MARKET BREADTH" },
-];
-
-export const GATE_CODES = GATE_ORDER.map((g) => g.code);
+export type VolConeTone = "strong" | "warn" | "fault";
 
 export function thetaStructLabel(result: ThetaHarvesterResult): string {
   const put = result.structure?.short_put?.strike;
@@ -30,35 +10,36 @@ export function thetaStructLabel(result: ThetaHarvesterResult): string {
   return `SHORT ${put}P / ${call}C`;
 }
 
-export function gateCells(result: StrengthConfirmationResult): GateCell[] {
-  const byGroup = new Map(result.factors.map((f) => [f.group, f]));
-  return GATE_ORDER.map(({ code, group }) => {
-    const factor = byGroup.get(group);
-    return {
-      code,
-      passed: factor ? factor.passed : null,
-      title: `${group} · ${factor ? (factor.passed ? "PASS" : "FAIL") : "NO DATA"}`,
-    };
-  });
+/** Where the latest ATM IV sits inside this expiry's 90/10 cone: 0 = at or
+ *  below the p10 floor (cheapest print), 1 = at or above the p90 ceiling.
+ *  Null when the cone is degenerate or the ATM IV is missing. */
+export function conePosition(
+  name: Pick<VolConeName, "atm_iv" | "p10" | "p90">,
+): number | null {
+  const { atm_iv: atm, p10, p90 } = name;
+  if (atm == null || p10 == null || p90 == null) return null;
+  if (!Number.isFinite(atm) || !Number.isFinite(p10) || !Number.isFinite(p90)) return null;
+  if (p90 <= p10) return null;
+  return Math.max(0, Math.min(1, (atm - p10) / (p90 - p10)));
 }
 
-export function strengthBadge(verdict: string): { label: string; tone: BadgeTone } {
-  switch (verdict) {
-    case "REAL_STRENGTH_CONFIRMED":
-      return { label: "CONFIRMED", tone: "strong" };
-    case "WATCHLIST":
-      return { label: "PARTIAL", tone: "warn" };
-    case "WEAK":
-      return { label: "WEAK", tone: "fault" };
-    default:
-      return { label: verdict, tone: "neutral" };
-  }
+/** Score-bar fill percent. The bar reads like every other one on this panel —
+ *  longer is better — so a full bar means ATM IV is sitting on the cone floor. */
+export function coneFillPct(name: Pick<VolConeName, "atm_iv" | "p10" | "p90">): number {
+  const position = conePosition(name);
+  return position == null ? 0 : (1 - position) * 100;
 }
 
-export function scoreTone(score: number): "strong" | "warn" | "fault" {
-  if (score >= 70) return "strong";
-  if (score >= 50) return "warn";
+/** Cheap wings are the tradeable print; cheap ATM alone is the softer one. */
+export function volConeTone(regime: VolConeRegime): VolConeTone {
+  if (regime === "CHEAP_WINGS") return "strong";
+  if (regime === "CHEAP_ATM") return "warn";
   return "fault";
+}
+
+/** Expiry cell for a hero row: "SEP 18 · 24D". */
+export function volConeExpiryLabel(name: Pick<VolConeName, "expiry" | "dte">): string {
+  return `${formatMonthlyExpiry(name.expiry)} · ${name.dte}D`;
 }
 
 function isSameLocalDay(a: Date, b: Date): boolean {
