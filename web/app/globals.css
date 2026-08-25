@@ -14915,6 +14915,22 @@ body[data-mobile="true"] .garch-scanner__table tbody td {
 .grg-chart-wrap {
   min-height: 306px;
   padding: 12px;
+  /* The chart sits beside the SPY/TLT stack, so its grid cell is as tall as
+     that stack. Stretch the plot into the whole cell instead of letting a
+     fixed-ratio SVG letterbox and leave a dead band underneath. */
+  display: flex;
+  flex-direction: column;
+}
+
+.grg-chart-plot {
+  flex: 1;
+  /* Without this a flex child refuses to shrink below its content height and
+     the ResizeObserver never settles. */
+  min-height: 0;
+}
+
+.grg-chart-plot svg {
+  display: block;
 }
 
 .grg-chart-head {

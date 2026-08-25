@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, AlertTriangle, TrendingDown, TrendingUp } from "lucide-react";
 import { MarketState } from "@/lib/useMarketHours";
 import {
@@ -123,17 +124,38 @@ function AssetCard({ asset }: { asset: GammaRotationAsset }) {
   );
 }
 
-function yFor(value: number, min: number, max: number): number {
-  if (max <= min) return 120;
-  return 220 - ((value - min) / (max - min)) * 180;
+/**
+ * The plot rectangle inside the measured SVG box. Left gutter holds the sigma
+ * labels, the bottom gutter holds the date axis.
+ */
+type ChartBox = { width: number; height: number };
+type PlotRect = { left: number; right: number; top: number; bottom: number };
+
+const CHART_PAD = { left: 44, right: 24, top: 20, bottom: 34 };
+const FALLBACK_BOX: ChartBox = { width: 708, height: 306 };
+/** Below this the axis drops ticks rather than overlapping them. */
+const MIN_PX_PER_DATE_TICK = 120;
+
+function plotRect(box: ChartBox): PlotRect {
+  return {
+    left: CHART_PAD.left,
+    right: Math.max(CHART_PAD.left + 1, box.width - CHART_PAD.right),
+    top: CHART_PAD.top,
+    bottom: Math.max(CHART_PAD.top + 1, box.height - CHART_PAD.bottom),
+  };
 }
 
-function xFor(index: number, count: number): number {
-  if (count <= 1) return 44;
-  return 44 + (index / (count - 1)) * 620;
+function yFor(value: number, min: number, max: number, rect: PlotRect): number {
+  if (max <= min) return (rect.top + rect.bottom) / 2;
+  return rect.bottom - ((value - min) / (max - min)) * (rect.bottom - rect.top);
 }
 
-function linePath(history: GammaRotationHistoryEntry[], key: "grg_z" | "spy_gamma_z" | "tlt_gamma_z", min: number, max: number): string {
+function xFor(index: number, count: number, rect: PlotRect): number {
+  if (count <= 1) return rect.left;
+  return rect.left + (index / (count - 1)) * (rect.right - rect.left);
+}
+
+function linePath(history: GammaRotationHistoryEntry[], key: "grg_z" | "spy_gamma_z" | "tlt_gamma_z", min: number, max: number, rect: PlotRect): string {
   let segmentOpen = false;
   const commands: string[] = [];
   history.forEach((row, index) => {
@@ -142,10 +164,48 @@ function linePath(history: GammaRotationHistoryEntry[], key: "grg_z" | "spy_gamm
       segmentOpen = false;
       return;
     }
-    commands.push(`${segmentOpen ? "L" : "M"}${xFor(index, history.length).toFixed(1)} ${yFor(value, min, max).toFixed(1)}`);
+    commands.push(`${segmentOpen ? "L" : "M"}${xFor(index, history.length, rect).toFixed(1)} ${yFor(value, min, max, rect).toFixed(1)}`);
     segmentOpen = true;
   });
   return commands.join(" ");
+}
+
+/**
+ * Evenly spaced session indices for the date axis, always including the first
+ * and last so the axis states the range it covers. Count is driven by the
+ * measured width so labels never collide.
+ */
+function dateTickIndices(count: number, plotWidth: number): number[] {
+  if (count <= 0) return [];
+  if (count === 1) return [0];
+  const fit = Math.floor(plotWidth / MIN_PX_PER_DATE_TICK);
+  const ticks = Math.max(2, Math.min(7, fit, count));
+  const step = (count - 1) / (ticks - 1);
+  const indices = Array.from({ length: ticks }, (_, i) => Math.round(i * step));
+  return [...new Set(indices)];
+}
+
+/** Measures the chart host so the SVG can draw in pixel space and fill it. */
+function useChartBox(ref: React.RefObject<HTMLDivElement | null>): ChartBox {
+  const [box, setBox] = useState<ChartBox>(FALLBACK_BOX);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect;
+      if (!rect || rect.width <= 0 || rect.height <= 0) return;
+      setBox({ width: rect.width, height: rect.height });
+    });
+    observer.observe(el);
+    const initial = el.getBoundingClientRect();
+    if (initial.width > 0 && initial.height > 0) {
+      setBox({ width: initial.width, height: initial.height });
+    }
+    return () => observer.disconnect();
+  }, [ref]);
+
+  return box;
 }
 
 function domainLabel(value: number): string {
@@ -153,10 +213,20 @@ function domainLabel(value: number): string {
 }
 
 function GammaRotationChart({ history }: { history: GammaRotationHistoryEntry[] }) {
+  const plotRef = useRef<HTMLDivElement>(null);
+  const box = useChartBox(plotRef);
+  const rect = plotRect(box);
+
   const values = history.flatMap((row) => [row.grg_z, row.spy_gamma_z, row.tlt_gamma_z]).filter((value): value is number => value != null && Number.isFinite(value));
   const min = Math.min(-3, ...values);
   const max = Math.max(3, ...values);
-  const last = history.at(-1);
+  const zeroY = yFor(0, min, max, rect);
+
+  const gridRows = [0, 0.25, 0.5, 0.75, 1].map((t) => rect.top + t * (rect.bottom - rect.top));
+  const ticks = useMemo(
+    () => dateTickIndices(history.length, rect.right - rect.left),
+    [history.length, rect.left, rect.right],
+  );
 
   return (
     <div className="grg-chart-wrap" data-testid="grg-chart">
@@ -168,20 +238,47 @@ function GammaRotationChart({ history }: { history: GammaRotationHistoryEntry[] 
           <i style={{ background: "var(--fault)" }} /> TLT
         </span>
       </div>
-      <svg viewBox="0 0 708 260" role="img" aria-label="Gamma Rotation Gap history">
-        <g stroke="var(--chart-grid)" strokeWidth="1">
-          {[40, 85, 130, 175, 220].map((y) => <line key={y} x1="44" y1={y} x2="664" y2={y} />)}
-          {[44, 168, 292, 416, 540, 664].map((x) => <line key={x} x1={x} y1="28" x2={x} y2="226" />)}
-        </g>
-        <line x1="44" y1={yFor(0, min, max)} x2="664" y2={yFor(0, min, max)} stroke="var(--text-muted)" strokeDasharray="4 6" opacity="0.65" />
-        <path d={linePath(history, "spy_gamma_z", min, max)} fill="none" stroke="var(--signal-core)" strokeWidth="2" opacity="0.8" />
-        <path d={linePath(history, "tlt_gamma_z", min, max)} fill="none" stroke="var(--fault)" strokeWidth="2" opacity="0.8" />
-        <path d={linePath(history, "grg_z", min, max)} fill="none" stroke="var(--warning)" strokeWidth="3" />
-        <text x="8" y="43" className="grg-svg-label">{domainLabel(max)}</text>
-        <text x="20" y={yFor(0, min, max) - 4} className="grg-svg-label">0</text>
-        <text x="8" y="224" className="grg-svg-label">{domainLabel(min)}</text>
-        {last && <text x="548" y="248" className="grg-svg-label">{last.date}</text>}
-      </svg>
+      <div className="grg-chart-plot" ref={plotRef}>
+        <svg
+          width="100%"
+          height="100%"
+          viewBox={`0 0 ${Math.round(box.width)} ${Math.round(box.height)}`}
+          role="img"
+          aria-label="Gamma Rotation Gap history"
+        >
+          <g stroke="var(--chart-grid)" strokeWidth="1">
+            {gridRows.map((y) => <line key={y} x1={rect.left} y1={y} x2={rect.right} y2={y} />)}
+            {ticks.map((index) => {
+              const x = xFor(index, history.length, rect);
+              return <line key={`v${index}`} x1={x} y1={rect.top} x2={x} y2={rect.bottom} />;
+            })}
+          </g>
+          <line x1={rect.left} y1={zeroY} x2={rect.right} y2={zeroY} stroke="var(--text-muted)" strokeDasharray="4 6" opacity="0.65" />
+          <path d={linePath(history, "spy_gamma_z", min, max, rect)} fill="none" stroke="var(--signal-core)" strokeWidth="2" opacity="0.8" />
+          <path d={linePath(history, "tlt_gamma_z", min, max, rect)} fill="none" stroke="var(--fault)" strokeWidth="2" opacity="0.8" />
+          <path d={linePath(history, "grg_z", min, max, rect)} fill="none" stroke="var(--warning)" strokeWidth="3" />
+          <text x="8" y={rect.top + 8} className="grg-svg-label">{domainLabel(max)}</text>
+          <text x="20" y={zeroY - 4} className="grg-svg-label">0</text>
+          <text x="8" y={rect.bottom} className="grg-svg-label">{domainLabel(min)}</text>
+          {ticks.map((index, position) => {
+            const row = history[index];
+            if (!row) return null;
+            const anchor = position === 0 ? "start" : position === ticks.length - 1 ? "end" : "middle";
+            return (
+              <text
+                key={`t${index}`}
+                data-testid="grg-x-tick"
+                x={xFor(index, history.length, rect)}
+                y={rect.bottom + 20}
+                textAnchor={anchor}
+                className="grg-svg-label"
+              >
+                {row.date}
+              </text>
+            );
+          })}
+        </svg>
+      </div>
     </div>
   );
 }
