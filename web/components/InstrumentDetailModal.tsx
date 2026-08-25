@@ -234,6 +234,9 @@ function LegOrderForm({
     };
   }, [isValid, parsedQty, parsedPrice, parsedStop, orderType, action, ticker, strikeStr, right, isStock, leg.strike, leg.direction, leg.contracts, leg.avg_cost, expiry, bid, ask]);
 
+  // Deliberately no `priceData` below: the modal already renders the telemetry
+  // block above this form, and handing it to the ticket as well prints the
+  // same nine fields twice.
   return (
     <SingleLegOrderTicket
       defaultAction={defaultAction}
@@ -244,7 +247,6 @@ function LegOrderForm({
       bid={bid}
       mid={mid}
       ask={ask}
-      priceData={priceData}
       showQuickButtonPrices={true}
       isValid={isValid}
       limitPrice={limitPrice}
