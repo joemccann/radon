@@ -162,6 +162,24 @@ class TestDeployGate:
         rollback_pos = after_gate.find("rollback")
         assert rollback_pos >= 0
 
+    def test_main_does_not_blind_sleep_before_the_post_restart_gate(self, deploy_sh: str) -> None:
+        main_body = _function_body(deploy_sh, "main")
+        restart = main_body.index("restart_services")
+        gate = main_body.index("if ! deploy_gate")
+        between = main_body[restart:gate]
+        assert "HEALTH_WAIT_SECONDS" not in between
+        assert "sleep" not in between
+        surface_retries = int(
+            re.search(r"^readonly SURFACE_RETRIES=(\d+)", deploy_sh, re.M).group(1)
+        )
+        surface_wait = int(
+            re.search(r"^readonly SURFACE_RETRY_WAIT=(\d+)", deploy_sh, re.M).group(1)
+        )
+        surface_timeout = int(
+            re.search(r"^readonly SURFACE_TIMEOUT=(\d+)", deploy_sh, re.M).group(1)
+        )
+        assert surface_retries * (surface_timeout + surface_wait) >= 40
+
     def test_gate_worst_case_stays_under_two_minutes(self, deploy_sh: str) -> None:
         # The 06-11 failure was a GitHub step SIGTERM at ~3min. Worst case:
         # lite probe = HEALTH_RETRIES * (HEALTH_CURL_TIMEOUT + HEALTH_RETRY_WAIT),

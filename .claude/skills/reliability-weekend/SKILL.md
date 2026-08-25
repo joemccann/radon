@@ -256,3 +256,53 @@ how this loop improves as the codebase grows.
   Split the row at the id field, rewrite the body only, then set the id. Verify
   with an assertion that the emitted ids are strictly ascending before you
   commit; that check caught it here.
+- 2026-08-23 (remediate, continuation): **the weekend PR can already be
+  MERGED when a continuation round finishes.** Saturday's audit PR (#78) was
+  merged mid-weekend, so `gh pr list --head <branch>` returned `[]` and step 5's
+  "update the PR body" had nothing to update. Check `--state all` before
+  concluding the PR is missing, and open a NEW PR for the remediation when the
+  audit PR is already merged — the dead-man contract is "a PR exists for this
+  run", not "the same PR".
+- 2026-08-23 (remediate): **run the full gate BEFORE the drills, not after.**
+  Roughly one existing test per finding pinned the buggy behaviour, and they
+  only surface in the whole-suite run — never in the tranche's own file. Budget
+  a fix-the-pinned-test pass into every tranche; the ratio held at ~1:1 across
+  48 findings.
+- 2026-08-23 (remediate): a source-level assertion written as
+  `expect(src).not.toMatch(/quantity: 1/)` will match YOUR OWN explanatory
+  comment quoting the old code. Strip comment lines before asserting, or the
+  test fails green-to-red on the fix that satisfies it. Cost three round trips.
+- 2026-08-23 (remediate): `vitest` needs node on PATH and this clone's
+  `web/node_modules` was missing `@rollup/rollup-darwin-arm64`. Neither is a
+  code failure; `export PATH="$HOME/.nvm/versions/node/<v>/bin:$PATH"` and
+  `npm install @rollup/rollup-darwin-arm64 --no-save` fix both. Establish the
+  vitest baseline at the same time as the pytest one.
+- 2026-08-23 (remediate): a full `vitest` run CONCURRENT with a full `pytest`
+  run produced one failure that did not reproduce in two isolated re-runs
+  (duration 387 s against a normal 90 s — CPU starvation, not a bug). Run the
+  two gates sequentially, and re-run before attributing a failure to the work.
+- 2026-08-23 (remediate): findings often name ONE call site when the repo has
+  several of identical shape — R-183 cited one `sync_scheduled_units || return 1`
+  and there were three; R-185 named `testing_weekend.sh` and
+  `reliability_weekend.sh` had the same trap bug. Grep for the pattern, not the
+  cited line, and fix the whole class in the same commit.
+- 2026-08-23 (remediate): before claiming a fix, check whether an OPEN PR
+  already addresses it from a live incident (`gh pr list`). R-183 was being
+  fixed in parallel by PR #80. Say so in the PR body rather than letting the
+  human discover the overlap at merge time.
+- 2026-08-23 (remediate): when a fix needs a guard the repo already has, find
+  the EXISTING mechanism before inventing one — R-187's Monday-morning
+  false-page was already solved by `check.py`'s open-bell grace and the web's
+  `RTH_ONLY_SERVICES`. But check what the existing set is actually keyed on:
+  the grace hung off `BUCKETS["intraday"]`, which answers how often the
+  watchdog POLLS, not whether the writer is RTH-only, so it needed a separate
+  `OPEN_BELL_GRACE_SERVICES` rather than a bucket move that would have
+  silently changed the check cadence too.
+- 2026-08-24 (runner): the 2026-08-23 remediate fire died in `ground_truth`
+  on `ssh: connect to host github.com port 22` (NordVPN blackholes 22) with
+  no dead-man comment, and the new daily plist was never installed, so the
+  00:00 cycle silently did not fire. `fetch_origin_with_retry` bounds the
+  fetch (3 x 60 s); the runner's `~/.ssh/config` routes `github.com` via
+  `ssh.github.com:443`; the plist PATH carries `~/.bun/bin`. After any
+  loop change, run `setup_reliability_weekend.sh` and confirm
+  `launchctl list | grep reliability-daily`.

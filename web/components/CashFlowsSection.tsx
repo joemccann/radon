@@ -126,21 +126,28 @@ export default function CashFlowsSection() {
   // error states fall through to a generic warn treatment.
   const isThrottled = syncStatus?.state === "error" && Boolean(syncStatus?.is_throttled);
   const isErrored = syncStatus?.state === "error" && !isThrottled;
-  const retryHint = syncStatus?.next_attempt_at ? formatNextAttempt(syncStatus.next_attempt_at) : null;
+  const isLockout = Boolean(syncStatus?.error_summary?.includes("Do not retry"));
+  const retryHint = !isLockout && syncStatus?.next_attempt_at
+    ? formatNextAttempt(syncStatus.next_attempt_at)
+    : null;
   const lozengeTone: "ok" | "warn" | "fault" = isThrottled ? "warn" : isErrored ? "fault" : "ok";
   const lozengeLabel = (() => {
-    if (!lastSyncedRelative) return null;
+    // R-135: the failure branches run BEFORE the no-prior-sync bail-out. A
+    // fresh environment (or a truncated cash_flows table) that hits a 1025
+    // on its first pull has no `last_synced_at`, so keying the whole lozenge
+    // off one showed an empty table with no error, no retry hint and no tone
+    // for the full 7-day embargo.
+    const syncedPrefix = lastSyncedRelative ? `Synced ${lastSyncedRelative}` : "Never synced";
     if (isThrottled) {
       return retryHint
-        ? `Synced ${lastSyncedRelative} · Flex throttled, retry ${retryHint}`
-        : `Synced ${lastSyncedRelative} · Flex throttled`;
+        ? `${syncedPrefix} · Flex throttled, retry ${retryHint}`
+        : `${syncedPrefix} · Flex throttled`;
     }
     if (isErrored) {
       const tag = syncStatus?.error_summary ?? "sync failed";
-      return retryHint
-        ? `Synced ${lastSyncedRelative} · ${tag}, retry ${retryHint}`
-        : `Synced ${lastSyncedRelative} · ${tag}`;
+      return retryHint ? `${syncedPrefix} · ${tag}, retry ${retryHint}` : `${syncedPrefix} · ${tag}`;
     }
+    if (!lastSyncedRelative) return null;
     return `Synced ${lastSyncedRelative}`;
   })();
   const lozengeTooltip = isThrottled

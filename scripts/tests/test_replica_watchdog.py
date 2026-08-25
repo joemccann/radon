@@ -25,11 +25,10 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 
-def _install_fake_db_writer() -> tuple[MagicMock, MagicMock]:
-    """Stub `db.writer` so the handler's lazy import works in tests.
-
-    Returns the (record_service_health, _now_iso) MagicMocks so callers
-    can assert against them.
+@pytest.fixture(autouse=True)
+def fake_db_writer(monkeypatch: pytest.MonkeyPatch):
+    """Stub db.writer for this module; restore so later files on the same
+    xdist worker still import the real writer (test_skew2d in the r-s shard).
     """
     record_mock = MagicMock(name="record_service_health")
     now_iso_mock = MagicMock(name="_now_iso", return_value="2026-05-09T09:00:00Z")
@@ -38,18 +37,12 @@ def _install_fake_db_writer() -> tuple[MagicMock, MagicMock]:
     fake_writer.record_service_health = record_mock  # type: ignore[attr-defined]
     fake_writer._now_iso = now_iso_mock  # type: ignore[attr-defined]
 
-    fake_db_pkg = sys.modules.get("db") or types.ModuleType("db")
-    fake_db_pkg.writer = fake_writer  # type: ignore[attr-defined]
-
-    sys.modules["db"] = fake_db_pkg
-    sys.modules["db.writer"] = fake_writer
-    return record_mock, now_iso_mock
-
-
-@pytest.fixture(autouse=True)
-def fake_db_writer():
-    """Reset db.writer mocks for every test."""
-    record_mock, now_iso_mock = _install_fake_db_writer()
+    monkeypatch.setitem(sys.modules, "db.writer", fake_writer)
+    db_pkg = sys.modules.get("db")
+    if db_pkg is None:
+        db_pkg = types.ModuleType("db")
+        monkeypatch.setitem(sys.modules, "db", db_pkg)
+    monkeypatch.setattr(db_pkg, "writer", fake_writer, raising=False)
     yield record_mock, now_iso_mock
 
 

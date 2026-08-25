@@ -54,8 +54,8 @@ from clients.ib_client import (
     CLIENT_IDS,
     DEFAULT_HOST,
     DEFAULT_GATEWAY_PORT,
-    account_daily_pnl_is_ready,
     is_valid_ib_number,
+    pnl_daily_is_ready,
     ticker_has_quote,
 )
 from clients.ib_timing import PhaseTimer
@@ -149,11 +149,12 @@ def get_pnl(client: IBClient, account: str = "") -> dict:
             accounts = client.ib.managedAccounts()
             account = accounts[0] if accounts else ""
         pnl = client.get_pnl(account)
-        client.wait_until(
-            lambda: bool(pnl) and _valid(getattr(pnl, "dailyPnL", None)),
+        if not client.wait_until(
+            lambda: pnl_daily_is_ready(pnl),
             timeout=8.0,
             poll=1.0,
-        )
+        ):
+            print("  Warning: account dailyPnL never arrived within 8.0s")
 
         result = {}
         if pnl and hasattr(pnl, 'dailyPnL'):
@@ -860,7 +861,7 @@ def wait_for_streaming_data(
     """
 
     def _ready() -> bool:
-        if pnl_obj is not None and not account_daily_pnl_is_ready(pnl_obj):
+        if pnl_obj is not None and not pnl_daily_is_ready(pnl_obj):
             return False
         for ticker in tickers:
             if not ticker_has_quote(ticker):
@@ -891,10 +892,23 @@ def fetch_market_prices(client: IBClient, positions: list) -> list:
         ticker = client.get_quote(pos['contract'])
         tickers.append(ticker)
 
-    client.wait_until(
+    # R-089: `close` no longer satisfies the predicate, so an illiquid name
+    # holds the wait until its book arrives. The 3.0s that replaced the old
+    # sleep is the CAP; a lapse means at least one position will be marked
+    # off a stale close, which must be visible in the log.
+    if not client.wait_until(
         lambda: all(ticker_has_quote(ticker) for ticker in tickers),
         timeout=3.0,
-    )
+    ):
+        missing = [
+            getattr(pos["contract"], "localSymbol", pos.get("symbol"))
+            for pos, ticker in zip(positions, tickers)
+            if not ticker_has_quote(ticker)
+        ]
+        print(
+            f"  Warning: no two-sided quote within 3.0s for {len(missing)} "
+            f"position(s): {missing[:8]} — marked off close"
+        )
 
     # Read results and cancel
     for pos, ticker in zip(positions, tickers):
@@ -960,14 +974,15 @@ def fetch_position_daily_pnl(client: IBClient, positions: list, account: str = "
         else:
             pnl_requests.append((pos, None, None))
 
-    client.wait_until(
+    if not client.wait_until(
         lambda: all(
             pnl_single is None
             or is_valid_ib_number(getattr(pnl_single, "dailyPnL", None))
             for _pos, pnl_single, _con_id in pnl_requests
         ),
         timeout=3.0,
-    )
+    ):
+        print("  Warning: per-position dailyPnL incomplete after 3.0s")
 
     # Read results and cancel subscriptions
     for pos, pnl_single, con_id in pnl_requests:

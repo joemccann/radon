@@ -79,6 +79,14 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # position-reconcile — 30-min RTH IB-vs-snapshot drift check (REL-001).
     # 45min open = one missed cycle + slack; mirrors serviceHealthWindows.ts.
     "position-reconcile": {"open": 45 * _MIN, "closed": 3 * _DAY, "requires_ib": True},
+    # R-159: radon-perf-twr wrote no service_health row and always exited 0,
+    # and was in NEITHER catalog (the web catalog's `performance` key is a
+    # different, on-demand writer). On a Flex 1025 lockout the builder
+    # returns status=degraded, systemd records success, and check.py treats
+    # "no row" as dormant — /performance serves stale returns with no alert.
+    # radon-perf-twr.timer fires Tue..Sat 07:30 ET; 26h open catches a missed
+    # weekday run, 4d closed covers the Sat->Tue gap like cash-flow-sync.
+    "perf-twr":         {"open": 26 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
     "flex-token-check": {"open": 25 * _HOUR, "closed": 25 * _HOUR, "requires_ib": False},
     "menthorq-session": {"open": 25 * _HOUR, "closed": 25 * _HOUR, "requires_ib": False},
     # Daily LIVE probe of the MenthorQ credential re-login chain (the
@@ -109,6 +117,12 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # conditional-GET no-op on unchanged days, heartbeats each run). Uniform
     # 26h window: no weekend/holiday gap to widen for.
     "margin-debt":      {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # hhlev — radon-hhlev.timer, daily 13:20 UTC every calendar day (quarterly
+    # Z.1 source with a daily cheap check, heartbeats each run). Uniform 26h
+    # window cloned from margin-debt: no weekend/holiday gap to widen for.
+    # Data age (a quarter can be ~100+ days old) is legitimate and never
+    # conflated with writer health. FRED HTTP only — no IB dependency.
+    "hhlev":            {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # yield-curve — radon-yield-curve.timer, daily 22:30 UTC every calendar
     # day (weekend/holiday runs heartbeat with no new Treasury rows). Uniform
     # 26h window: no weekend/holiday gap to widen for. treasury.gov + Yahoo
@@ -144,7 +158,11 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # open tolerates two missed slots; 24h closed covers the silent overnight
     # and the weekend is bridged by the daily-only heartbeats. IB is the ONLY
     # source of the hourly sample, so it groups with IB outages.
-    "trin":             {"open": 15 * _MIN, "closed": 24 * _HOUR, "requires_ib": True},
+    # R-122: closed was 24h against a Mon-Fri-only timer with
+    # Persistent=false, so the last heartbeat is Friday ~21:57 UTC and the row
+    # went stale from Saturday evening until Monday's first fire — a
+    # guaranteed weekend page. 3 days covers Fri -> Mon like the siblings.
+    "trin":             {"open": 15 * _MIN, "closed": 3 * _DAY, "requires_ib": True},
     # straddle — radon-straddle.timer, daily 02:15 UTC every calendar day
     # (Cboe appends the session row ~20:00 ET; weekend/holiday runs are 304
     # heartbeats). Uniform 26h window mirrors margin-debt/yield-curve: no
@@ -198,12 +216,17 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     "catalysts":        {"open": 7 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
     # theta-harvester / strength-confirmation — fired autonomously by
     # radon-signals-refresh.timer (hourly, Mon-Fri 09:00-16:00 ET) as well
-    # as by user POSTs (R-068). The wrapper skips outside market hours
-    # without heartbeating, so Monday/post-holiday mornings legitimately
-    # serve a ~66-90h-old row — uniform 4d windows per the bpi-scan
-    # precedent. UW-only, no IB.
-    "theta-harvester":  {"open": 4 * _DAY, "closed": 4 * _DAY, "requires_ib": False},
-    "strength-confirmation": {"open": 4 * _DAY, "closed": 4 * _DAY, "requires_ib": False},
+    # as by user POSTs (R-068). R-187: the uniform 4d window was 96x the
+    # cadence, so a timer dead on Monday morning went unreported until
+    # Thursday while the Top-candidates panel served a stale row. R-068 chose
+    # 4d because the wrapper skips outside market hours without heartbeating
+    # and Monday mornings legitimately serve a ~66-90h-old row — but these
+    # two are in BUCKETS["intraday"], so `check.py`'s open-bell grace already
+    # caps the effective age at how long the session has been open. The tight
+    # OPEN window is therefore safe, and `closed` still absorbs the weekend.
+    # UW-only, no IB.
+    "theta-harvester":  {"open": 3 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
+    "strength-confirmation": {"open": 3 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
     "scanner":          {"open": 4 * _DAY, "closed": 4 * _DAY, "requires_ib": False},
     "discover":         {"open": 4 * _DAY, "closed": 4 * _DAY, "requires_ib": False},
     "flow-analysis":    {"open": 4 * _DAY, "closed": 4 * _DAY, "requires_ib": False},
@@ -308,6 +331,23 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
 }
 
 
+# Services whose OPEN window is measured from today's opening bell rather
+# than wall-clock age (check.py's open-bell grace). These write only while
+# the session is running, so at 09:31 their true age spans the overnight or
+# weekend gap when they legitimately did not run — the grace is what lets
+# them carry a TIGHT open window without false-paging every Monday.
+#
+# R-187: this used to be `BUCKETS["intraday"]`, which conflates two
+# different questions — how often the WATCHDOG checks a service, and whether
+# the service writes only during RTH. theta-harvester and strength-
+# confirmation are hourly RTH writers on the daily CHECK cadence, so they
+# need the grace without changing how often they are polled.
+OPEN_BELL_GRACE_SERVICES: frozenset[str] = frozenset({
+    "theta-harvester",
+    "strength-confirmation",
+})
+
+
 BUCKETS: dict[str, list[str]] = {
     "intraday": [
         "vcg-scan",
@@ -328,6 +368,14 @@ BUCKETS: dict[str, list[str]] = {
     "continuous": [
         "newsfeed-scraper",
         "replica-watchdog",
+        # R-158: this carried a 5-minute freshness window and appeared in NO
+        # bucket, so only the auto-derived `error` bucket saw it and
+        # `_check_error` fires solely on state == "error". A stopped or
+        # disabled radon-nextjs-db-watchdog.timer left the last `ok` row
+        # un-age-checked indefinitely, and a stopped timer is `inactive`
+        # rather than `failed`, so units.py missed it too — the Turso-wedge
+        # auto-restart off with an ok row on the board.
+        "nextjs-db-read",
         "fill-monitor",
         "journal-sync",
         # Always-on heartbeat (writes service_health every 60s cycle).
@@ -348,6 +396,10 @@ BUCKETS: dict[str, list[str]] = {
     ],
     "daily": [
         "cash-flow-sync",
+        # R-159: the TWR builder (Tue..Sat 07:30 ET). Silent means a Flex
+        # lockout, a throttle embargo or a dead timer, and /performance keeps
+        # serving the last snapshot until someone eyeballs the page.
+        "perf-twr",
         # Daily 20:30 ET evening execution sweep (monitor daemon) — hourly
         # check surfaces a missed run within 1h of the 26h window expiring.
         "execution-sweep",
@@ -359,6 +411,9 @@ BUCKETS: dict[str, list[str]] = {
         # of the window expiring.
         "llm-token-index",
         "margin-debt",
+        # Daily 13:20 UTC FRED Z.1 household-leverage pull — hourly check
+        # surfaces a missed run within 1h of the 26h window expiring.
+        "hhlev",
         # Daily 22:30 UTC Treasury yield-curve pull — hourly check surfaces
         # a missed run within 1h of the 26h window expiring.
         "yield-curve",

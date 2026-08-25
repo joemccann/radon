@@ -292,13 +292,17 @@ describe("v2 payload — normalization ownership", () => {
 describe("v2 payload — MWR", () => {
   it("renders the MWR value when the sample clears MIN_N_MWR", () => {
     // golden: n_returns 60 >= MIN_N_MWR 20; period_return 0.05020769210515868
-    // -> +5.02%
-    stubV2(goldenOkPayload());
-    render(<PerformancePanel />);
+    // -> +5.02%. R-163 extended read-time staleness from the hero to every
+    // derived statistic, so this assertion needs the same fixture-day read
+    // instant the file already defines for exactly this reason.
+    readingOn(FIXTURE_READ_INSTANT, () => {
+      stubV2(goldenOkPayload());
+      render(<PerformancePanel />);
 
-    expect(TWR_GATES.MIN_N_MWR).toBe(20);
-    expect(screen.getByTestId("performance-value-mwr-irr").textContent).toBe("+5.02%");
-    expect(screen.queryByTestId("performance-gate-mwr-irr")).toBeNull();
+      expect(TWR_GATES.MIN_N_MWR).toBe(20);
+      expect(screen.getByTestId("performance-value-mwr-irr").textContent).toBe("+5.02%");
+      expect(screen.queryByTestId("performance-gate-mwr-irr")).toBeNull();
+    });
   });
 
   it("blames the real cause, not the sample size, when flows are unavailable", () => {
@@ -316,12 +320,14 @@ describe("v2 payload — MWR", () => {
 
 describe("v2 payload — benchmark coherence", () => {
   it("renders beta AND the benchmark return together when the block is complete", () => {
-    stubV2(goldenOkPayload());
-    render(<PerformancePanel />);
+    readingOn(FIXTURE_READ_INSTANT, () => {
+      stubV2(goldenOkPayload());
+      render(<PerformancePanel />);
 
-    expect(screen.getByTestId("performance-value-beta").textContent).toBe("0.84");
-    // benchmark_return 0.0312 -> +3.12%
-    expect(document.body.textContent ?? "").toContain("+3.12%");
+      expect(screen.getByTestId("performance-value-beta").textContent).toBe("0.84");
+      // benchmark_return 0.0312 -> +3.12%
+      expect(document.body.textContent ?? "").toContain("+3.12%");
+    });
   });
 
   it("renders NO benchmark STATISTIC when benchmark is null, but still states why (R9)", () => {

@@ -255,6 +255,78 @@ class TestSyncStatus:
         )
         assert sync_status["next_attempt_at"] == "2026-08-28T13:58:26+00:00"
 
+    def test_live_permanent_1025_next_attempt_is_lockout_deadline_not_monday(
+        self, app_with_inmem_db, monkeypatch, tmp_path
+    ):
+        """Production 2026-08-21 row: class=permanent, next_attempt Monday
+        12:00Z. Surface lockout copy and last_attempt+7d, not that window."""
+        client, conn = app_with_inmem_db
+        _insert(conn, txn_id="w1", date=_days_ago(26), type_="Withdrawal", amount=-72_000,
+                synced_at=f"{_days_ago(14)}T21:02:34Z")
+        last_attempt = "2026-08-21T13:58:28.298780Z"
+        _insert_service_health(
+            conn,
+            state="error",
+            last_attempt_finished_at=last_attempt,
+            last_error=(
+                '{"message": "ERR: Flex SendRequest failed (code 1025): '
+                'Too many failed attempts. Please review your configuration.", '
+                '"class": "permanent", '
+                '"next_attempt_at": "2026-08-24T12:00:00+00:00"}'
+            ),
+        )
+
+        monkeypatch.setattr(
+            "utils.flex_embargo.SIDECAR", tmp_path / "flex_token_embargo.json"
+        )
+        monkeypatch.setattr("utils.flex_embargo._heartbeat", lambda *a, **k: None)
+        monday = datetime(2026, 8, 24, 12, 0, tzinfo=timezone.utc)
+
+        class _Frozen(datetime):
+            @classmethod
+            def now(cls, tz=None):  # noqa: ANN001
+                if tz is None:
+                    return monday.replace(tzinfo=None)
+                return monday.astimezone(tz)
+
+        monkeypatch.setattr("utils.flex_embargo.datetime", _Frozen)
+
+        live_row = (
+            "error",
+            last_attempt,
+            (
+                '{"message": "ERR: Flex SendRequest failed (code 1025): '
+                'Too many failed attempts. Please review your configuration.", '
+                '"class": "permanent", '
+                '"next_attempt_at": "2026-08-24T12:00:00+00:00"}'
+            ),
+        )
+
+        def fake_turso(sql, args=(), timeout=None):  # noqa: ANN001
+            key = args[0] if args else None
+            if key == "cash-flow-sync":
+                return [live_row]
+            return []
+
+        import db.hrana_http as hrana_mod
+
+        monkeypatch.setattr(hrana_mod, "hrana_execute", fake_turso)
+        monkeypatch.setattr(hrana_mod, "hrana_query", fake_turso)
+
+        resp = client.get("/cash-flows?days=90")
+        sync_status = resp.json()["sync_status"]
+        assert sync_status["error_summary"] == (
+            "Flex lockout. Do not retry. Ingest with --from-file"
+        )
+        raw = sync_status["next_attempt_at"]
+        assert raw is not None
+        parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        last_dt = datetime.fromisoformat(last_attempt.replace("Z", "+00:00"))
+        assert parsed >= last_dt + timedelta(days=7)
+        assert parsed >= datetime(2026, 8, 28, tzinfo=timezone.utc)
+        assert parsed != datetime(2026, 8, 24, 12, 0, tzinfo=timezone.utc)
+        assert "2026-08-24T12:00:00" not in str(raw)
+
     def test_ok_state_does_not_flag_throttle(self, app_with_inmem_db):
         client, conn = app_with_inmem_db
         _insert(conn, txn_id="w1", date=_days_ago(26), type_="Withdrawal", amount=-72_000,

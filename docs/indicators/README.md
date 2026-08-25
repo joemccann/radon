@@ -13,10 +13,13 @@ Owner specs for regime tabs and the cheap-wing scanner. Add a row here when a sp
 | ivrank | `/regime/ivrank` | `ivrank` | [ivrank.md](ivrank.md) |
 | curve | `/regime/curve` | `yield-curve` | [curve.md](curve.md) |
 | credit | `/regime/credit` | `credit-spread` | [credit.md](credit.md) |
-| iei-hyg | `/regime/iei-hyg` | `iei-hyg` | [iei-hyg.md](iei-hyg.md) |
+| iei-hyg | `/regime/iei-hyg` | `iei-hyg` | [iei-hyg.md](iei-hyg.md) (tab renamed TSY/HY 2026-08-23) |
 | trin | `/regime/trin` | `trin` | [trin.md](trin.md) (spec; build in flight) |
 | divyield | `/regime/divyield` | `div-yield` | [divyield.md](divyield.md) |
 | hyad | `/regime/hyad` | `hy-ad` | [hyad.md](hyad.md) |
+| hhlev | `/regime/hhlev` | `hhlev` | [hhlev.md](hhlev.md) |
+
+`divyield` oneshot `TimeoutStartSec=2100` covers a tarpitted Yahoo constituent sweep (`SWEEP_BUDGET_S=1800` plus one in-flight fetch). 900s SIGTERM'd the 2026-08-24 run.
 
 `vol-cone` is the only indicator with two writers: an EOD run that stores the completed session and a 15m live pass that re-ranks today's chain against it (`is_intraday`), so the tab is tradeable during the session rather than a day stale.
 

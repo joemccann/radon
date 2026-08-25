@@ -30,6 +30,10 @@ const mockRadonFetch = vi.fn();
 vi.mock("@/lib/radonApi", () => ({
   radonFetch: mockRadonFetch,
   RadonApiError: MockRadonApiError,
+  // REL-044: RadonApiError.detail may now be a structured object, so the
+  // route flattens it through this helper before rendering.
+  radonErrorDetailText: (detail: unknown) =>
+    typeof detail === "string" ? detail : JSON.stringify(detail),
 }));
 
 const OPERATOR_ID = "user_operator";

@@ -239,3 +239,32 @@ describe("CreditSpreadPanel — chart + controls", () => {
     }
   });
 });
+
+/**
+ * REL-067 / R-197: the web twin of R-161. `classifyRegime` returned
+ * `"coupled"` — a benign, tradeable label that `regimeColor` paints
+ * `var(--positive)` — for a missing or non-finite return.
+ */
+describe("classifyRegime has no regime without returns", () => {
+  it.each([
+    [null, 0.01],
+    [0.01, null],
+    [undefined, 0.01],
+    [Number.NaN, 0.01],
+    [0.01, Number.POSITIVE_INFINITY],
+  ])("returns null for (%s, %s)", (spx, hyg) => {
+    expect(classifyRegime(spx as number | null, hyg as number | null)).toBeNull();
+  });
+
+  it("still classifies real returns", () => {
+    expect(classifyRegime(0.02, -0.01)).toBe("divergent");
+    expect(classifyRegime(0.02, 0.01)).toBe("coupled");
+    expect(classifyRegime(-0.02, -0.01)).toBe("risk-off");
+    expect(classifyRegime(-0.02, 0.01)).toBe("credit-lead");
+  });
+
+  it("paints an absent regime as muted, not positive", () => {
+    expect(regimeColor(null)).toBe("var(--text-muted)");
+    expect(regimeColor("coupled")).toBe("var(--positive)");
+  });
+});

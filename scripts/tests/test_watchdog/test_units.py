@@ -20,7 +20,15 @@ from watchdog import units
 NOW = datetime(2026, 6, 12, 12, 0, tzinfo=timezone.utc)
 
 
-def _block(unit_id, active="active", sub="running", result="success", nrestarts=0):
+def _block(
+    unit_id,
+    active="active",
+    sub="running",
+    result="success",
+    nrestarts=0,
+    unit_type=None,
+    inactive_enter=None,
+):
     lines = [
         f"Result={result}",
         f"NRestarts={nrestarts}",
@@ -30,6 +38,10 @@ def _block(unit_id, active="active", sub="running", result="success", nrestarts=
     ]
     if nrestarts is None:
         lines = [l for l in lines if not l.startswith("NRestarts")]
+    if unit_type:
+        lines.append(f"Type={unit_type}")
+    if inactive_enter:
+        lines.append(f"InactiveEnterTimestamp={inactive_enter}")
     return "\n".join(lines)
 
 
@@ -105,6 +117,124 @@ class TestFailedState:
         )
         outcomes = units.evaluate(current=current, previous={}, now=NOW)
         assert [o.fired for o in outcomes] == [True]
+
+
+# ── evaluation: timer-owned oneshot exit-code latch ───────────────────
+
+FLOW_FAIL_TS = "Mon 2026-08-24 19:00:00 UTC"
+FLOW_FAIL_TS_NEXT = "Mon 2026-08-24 20:00:00 UTC"
+
+
+def _oneshot_exit_code(unit_id="radon-flow-refresh.service", ts=FLOW_FAIL_TS):
+    return _block(
+        unit_id,
+        active="failed",
+        sub="failed",
+        result="exit-code",
+        nrestarts=0,
+        unit_type="oneshot",
+        inactive_enter=ts,
+    )
+
+
+class TestOneshotExitCodeLatch:
+    """Type=oneshot + Result=exit-code + NRestarts=0 stays ActiveState=failed
+    until the next timer fire. The 2026-08-24 19:00Z flow-refresh capacity
+    shed left that latch in place; the continuous bucket re-paged P1 every
+    cooldown for the same ExecStart. First sight of a timestamp is a real
+    ExecStart failure (P1). Re-observing the same timestamp is not.
+    """
+
+    def test_oneshot_exit_code_pages_p1_on_first_sight(self):
+        current = units.parse_show_output(_show_output(_oneshot_exit_code()))
+        outcomes = units.evaluate(current=current, previous={}, now=NOW)
+        assert len(outcomes) == 1
+        assert outcomes[0].severity == "P1"
+        assert outcomes[0].fired is True
+        assert "exit-code" in outcomes[0].message
+
+    def test_oneshot_exit_code_same_timestamp_is_p3(self):
+        current = units.parse_show_output(_show_output(_oneshot_exit_code()))
+        previous = {
+            "radon-flow-refresh.service": {
+                "nrestarts": 0,
+                "auto_restart": False,
+                "active_state": "failed",
+                "inactive_enter": FLOW_FAIL_TS,
+            }
+        }
+        outcomes = units.evaluate(current=current, previous=previous, now=NOW)
+        assert len(outcomes) == 1
+        assert outcomes[0].severity == "P3"
+        assert outcomes[0].fired is True
+        assert "next timer" in outcomes[0].message.lower()
+
+    def test_oneshot_exit_code_new_timestamp_pages_p1_again(self):
+        current = units.parse_show_output(
+            _show_output(_oneshot_exit_code(ts=FLOW_FAIL_TS_NEXT))
+        )
+        previous = {
+            "radon-flow-refresh.service": {
+                "nrestarts": 0,
+                "auto_restart": False,
+                "active_state": "failed",
+                "inactive_enter": FLOW_FAIL_TS,
+            }
+        }
+        outcomes = units.evaluate(current=current, previous=previous, now=NOW)
+        assert [o.severity for o in outcomes] == ["P1"]
+
+    def test_simple_service_exit_code_stays_p1_every_cycle(self):
+        """Do not weaken Restart= services: failed+exit-code stays P1."""
+        current = units.parse_show_output(
+            _show_output(
+                _block(
+                    "radon-api.service",
+                    active="failed",
+                    sub="failed",
+                    result="exit-code",
+                    nrestarts=0,
+                    unit_type="simple",
+                    inactive_enter=FLOW_FAIL_TS,
+                )
+            )
+        )
+        previous = {
+            "radon-api.service": {
+                "nrestarts": 0,
+                "auto_restart": False,
+                "active_state": "failed",
+                "inactive_enter": FLOW_FAIL_TS,
+            }
+        }
+        outcomes = units.evaluate(current=current, previous=previous, now=NOW)
+        assert [o.severity for o in outcomes] == ["P1"]
+
+    def test_oneshot_start_limit_hit_stays_p1(self):
+        current = units.parse_show_output(
+            _show_output(
+                _block(
+                    "radon-flow-refresh.service",
+                    active="failed",
+                    sub="failed",
+                    result="start-limit-hit",
+                    nrestarts=0,
+                    unit_type="oneshot",
+                    inactive_enter=FLOW_FAIL_TS,
+                )
+            )
+        )
+        previous = {
+            "radon-flow-refresh.service": {
+                "nrestarts": 0,
+                "auto_restart": False,
+                "active_state": "failed",
+                "inactive_enter": FLOW_FAIL_TS,
+            }
+        }
+        outcomes = units.evaluate(current=current, previous=previous, now=NOW)
+        assert [o.severity for o in outcomes] == ["P1"]
+        assert "start-limit-hit" in outcomes[0].message
 
 
 # ── evaluation: flap detection ───────────────────────────────────────
@@ -436,7 +566,12 @@ class TestDeployCollateralSignalKill:
         current = units.parse_show_output(self._signal_block(killed))
         outcomes = units.evaluate(
             current=current, previous={}, now=self.WINDOW_NOW,
-            deploy={"marker_mtime": None, "in_flight": True},
+            # REL-066 / R-157: `in_flight` alone is no longer enough. An
+            # interrupted deploy leaves the transition journal on disk
+            # indefinitely and it cannot self-clear, so an unbounded
+            # `in_flight` downgraded every signal kill in the previous 24h to
+            # P3 digest. A FRESH journal is still deploy evidence.
+            deploy={"marker_mtime": None, "in_flight": True, "journal_age_seconds": 120},
         )
         assert [o.severity for o in outcomes] == ["P3"]
 
@@ -448,7 +583,20 @@ class TestDeployCollateralSignalKill:
         current = units.parse_show_output(self._signal_block(killed))
         outcomes = units.evaluate(
             current=current, previous={}, now=self.WINDOW_NOW,
-            deploy={"marker_mtime": None, "in_flight": True},
+            deploy={"marker_mtime": None, "in_flight": True, "journal_age_seconds": 120},
+        )
+        assert [o.severity for o in outcomes] == ["P1"]
+
+    def test_signal_kill_during_a_STRANDED_journal_stays_p1(self):
+        killed = self.WINDOW_NOW.replace(minute=48)
+        current = units.parse_show_output(self._signal_block(killed))
+        outcomes = units.evaluate(
+            current=current, previous={}, now=self.WINDOW_NOW,
+            deploy={
+                "marker_mtime": None,
+                "in_flight": True,
+                "journal_age_seconds": units.TRANSITION_JOURNAL_STRANDED_AFTER_SECONDS + 1,
+            },
         )
         assert [o.severity for o in outcomes] == ["P1"]
 

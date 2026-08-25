@@ -33,11 +33,29 @@ import scripts.api.server as server  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
-def reset_build_state(monkeypatch):
-    """Every test starts with no in-flight build and no cooldown history."""
+def reset_build_state(monkeypatch, tmp_path):
+    """Every test starts with no in-flight build and no cooldown history.
+
+    REL-047 / R-102: the cooldown was a process-local `time.monotonic()`
+    float, so any radon-api restart reset it and re-opened an immediate Flex
+    fetch — under a crash loop the 20-minute floor was zero. It is a sidecar
+    now, which is what this fixture points at a tmp path.
+    """
     monkeypatch.setattr(server, "_running_build", None, raising=False)
-    monkeypatch.setattr(server, "_last_background_build_at", None, raising=False)
+    monkeypatch.setattr(
+        server, "PERFORMANCE_REBUILD_SIDECAR", tmp_path / "cooldown.json"
+    )
     yield
+
+
+def _refusal_body(result):
+    """Refusals are real status codes now (429 cooldown / 503 lockout), not a
+    202 to a caller that swallows the body (R-102)."""
+    import json as _json
+
+    if isinstance(result, dict):
+        return 200, result
+    return result.status_code, _json.loads(bytes(result.body))
 
 
 @pytest.fixture
@@ -73,8 +91,9 @@ class TestBackgroundRebuildCooldown:
         if server._running_build is not None:
             await server._running_build
 
-        second = await server.performance_background()
+        status, second = _refusal_body(await server.performance_background())
 
+        assert status == 429
         assert second["status"] == "cooldown"
         assert never_actually_builds["n"] == 1, "second call must not reach Flex"
 
@@ -84,12 +103,13 @@ class TestBackgroundRebuildCooldown:
         if server._running_build is not None:
             await server._running_build
 
-        # Rewind the clock past the cooldown.
-        monkeypatch.setattr(
-            server,
-            "_last_background_build_at",
-            server._last_background_build_at - server.PERFORMANCE_BACKGROUND_COOLDOWN_S - 1,
-        )
+        # Rewind the persisted stamp past the cooldown.
+        import json as _json
+
+        stamped = _json.loads(server.PERFORMANCE_REBUILD_SIDECAR.read_text())
+        stamped["last_rebuild_at"] -= server.PERFORMANCE_BACKGROUND_COOLDOWN_S + 1
+        server.PERFORMANCE_REBUILD_SIDECAR.write_text(_json.dumps(stamped))
+
         again = await server.performance_background()
         assert again["status"] == "accepted"
 
@@ -105,9 +125,13 @@ class TestBackgroundRebuildCooldown:
     ):
         """Same token as cash-flow-sync. A page-driven rebuild during 1025
         is what earned the lockout on 2026-08-17 and keeps it alive."""
-        monkeypatch.setattr("utils.flex_embargo.is_blocked", lambda **k: True)
-        result = await server.performance_background()
+        monkeypatch.setattr(
+            "utils.flex_embargo.active_until", lambda **k: "2026-08-30T12:00:00Z"
+        )
+        status, result = _refusal_body(await server.performance_background())
+        assert status == 503
         assert result["status"] == "lockout"
+        assert result["next_attempt_at"] == "2026-08-30T12:00:00Z"
         assert never_actually_builds["n"] == 0
 
     @pytest.mark.asyncio
@@ -142,3 +166,59 @@ class TestBackgroundRebuildCooldown:
 
         release.set()
         await server._running_build
+
+
+class TestSynchronousRebuildIsGuardedToo:
+    """R-101: POST /performance had NEITHER guard, and its callers include
+    the cold-start GET path. With performance_snapshots empty or Turso reads
+    failing, every GET /api/performance blocked on a full builder run — the
+    request storm that earned the 1025."""
+
+    @pytest.mark.asyncio
+    async def test_a_lockout_refuses_the_synchronous_rebuild(
+        self, never_actually_builds, monkeypatch
+    ):
+        from fastapi import HTTPException
+
+        monkeypatch.setattr(
+            "utils.flex_embargo.active_until", lambda **k: "2026-08-30T12:00:00Z"
+        )
+        with pytest.raises(HTTPException) as exc:
+            await server.performance_sync()
+        assert exc.value.status_code == 503
+        assert exc.value.detail["status"] == "lockout"
+        assert never_actually_builds["n"] == 0
+
+    @pytest.mark.asyncio
+    async def test_the_cooldown_is_shared_with_the_background_path(
+        self, never_actually_builds
+    ):
+        """One token, one floor: a background rebuild must silence the
+        synchronous one, and vice versa."""
+        from fastapi import HTTPException
+
+        assert (await server.performance_background())["status"] == "accepted"
+        if server._running_build is not None:
+            await server._running_build
+
+        with pytest.raises(HTTPException) as exc:
+            await server.performance_sync()
+        assert exc.value.status_code == 429
+        assert never_actually_builds["n"] == 1
+
+    @pytest.mark.asyncio
+    async def test_the_cooldown_survives_a_process_restart(
+        self, never_actually_builds
+    ):
+        """R-102: the old monotonic float was reset by every deploy, watchdog
+        restart and OOM kill, so the 20-minute floor was zero in a crash
+        loop. Re-importing module state must not re-open the fetch."""
+        assert (await server.performance_background())["status"] == "accepted"
+        if server._running_build is not None:
+            await server._running_build
+
+        server._running_build = None  # simulated fresh process
+        status, refusal = _refusal_body(await server.performance_background())
+        assert status == 429
+        assert refusal["status"] == "cooldown"
+        assert never_actually_builds["n"] == 1

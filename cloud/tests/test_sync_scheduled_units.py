@@ -165,6 +165,11 @@ def _run_sync(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
     )
 
 
+# R-188: the shape checks below validate each ENTRY; nothing bounded the
+# LIST. Adding a unit here grants CI the right to publish it into
+# /etc/systemd/system with no root bootstrap, which is a decision, not a
+# detail — so membership is pinned in cloud/tests/test_control_plane_bounds.py
+# (EXPECTED_AUTO_SYNC_UNITS) and growing the list means editing that ratchet.
 def test_allowlist_names_are_hashed_non_control_plane_units():
     assert ALLOWLIST.is_file()
     names = []
@@ -213,6 +218,7 @@ def test_deploy_syncs_after_green_gate_and_skips_when_ungranted():
     assert main.index("sync_scheduled_units") < main.index("write_green_marker")
     assert main.index("commit-transition") < main.rindex("sync_scheduled_units")
     assert "sync_scheduled_units" in recover
+    assert "sync_scheduled_units || return 1" not in recover
     assert "sudo -n -l --" in grant
     assert "bootstrap-control-plane.sh" in sync
     assert "return 0" in sync

@@ -92,24 +92,21 @@ export function TickerDetailProvider({ children }: { children: ReactNode }) {
   const tapeRef = useRef<Record<string, Trade[]>>({});
 
   const setActiveTicker = useCallback((ticker: string | null) => {
-    setActiveTickerState((prev) => {
-      const next = ticker ? ticker.toUpperCase() : null;
-      // A pinned leg book belongs to one subject — drop it whenever the focused
-      // ticker changes so it never leaks across instruments. The selected depth
-      // future expiry is likewise per-instrument and must not survive a switch.
-      if (next !== prev) {
-        setFocusedBookKeyState(null);
-        setDepthFutureExpiryState(null);
-        setDepthSymbolsState([]);
-      }
-      return next;
-    });
+    // Per-instrument fields (depthSymbols, depthFutureExpiry, focusedBookKey)
+    // are NEVER reset on a ticker change here. Their SUBJECT owns them: the
+    // child effect that publishes a value also publishes the empty value in
+    // its cleanup (TickerDetailContent, FuturesOrderForm). React runs child
+    // passive effects before the parent's, so a reset inside this shell-side
+    // sync would land AFTER the new subject's publish and win — which is
+    // exactly how client-side navigation lost its depth subscription.
+    setActiveTickerState(ticker ? ticker.toUpperCase() : null);
     if (!ticker) {
       setActivePositionIdState(null);
       setChainContractsState([]);
       setDepthSymbolState(null);
       setDepthSymbolsState([]);
       setDepthFutureExpiryState(null);
+      setFocusedBookKeyState(null);
     }
   }, []);
 

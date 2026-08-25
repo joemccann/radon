@@ -3198,6 +3198,8 @@ function OrdersSections({
         loading={actionLoading}
         prices={prices}
         portfolio={portfolio}
+        // R-112: the close-out branch must know what is already working.
+        openOrders={orders}
         onConfirm={handleModify}
         onClose={() => setModifyTarget(null)}
       />

@@ -123,8 +123,13 @@ class TestPctRank:
         assert pct_rank(2.0, 1.0, 2.0) == 1.0
         assert pct_rank(1.25, 1.0, 2.0) == pytest.approx(0.25)
 
-    def test_degenerate_window_is_zero(self):
-        assert pct_rank(1.5, 1.5, 1.5) == 0.0
+    def test_degenerate_window_has_no_percentile(self):
+        """REL-067 / R-162: 0.0 is the STRONGEST risk-on reading this
+        indicator emits — "IEI/HYG at the bottom of its 52-week range" —
+        fabricated from a single distinct ratio, while `classify_state` on
+        the same input says "neutral"."""
+        assert pct_rank(1.5, 1.5, 1.5) is None
+        assert classify_state(1.5, 1.5, 1.5) == "neutral"
 
 
 class TestBuildOutput:
@@ -143,9 +148,15 @@ class TestBuildOutput:
         assert current["low_date"] == "2026-08-21"
         assert current["ratio_52w_high"] == pytest.approx(RATIO_MAX)
         assert current["high_date"] == "2026-06-26"
-        assert current["ratio_pct_rank"] == 0.0
+        # R-126: the fixture's latest row IS the window minimum — but 62
+        # sessions is not a 52-week window, and a trailing slice makes the
+        # newest row the extreme almost every day while the series builds.
+        # The extremes themselves are still reported (asserted above); only
+        # the 52-week VERDICT is withheld.
+        assert current["ratio_pct_rank"] is None
         assert current["window_sessions"] == 62
-        assert current["state"] == "new_low"
+        assert current["window_complete"] is False
+        assert current["state"] == "unknown"
         assert payload["series"][-1]["ratio"] == pytest.approx(RATIO_LAST)
         assert payload["series"][-2]["ratio"] == pytest.approx(RATIO_PREV)
 
@@ -157,14 +168,38 @@ class TestBuildOutput:
         assert payload["scan_time"].endswith("Z")
 
     def test_neutral_when_latest_is_inside_the_range(self):
+        # Padded to a complete window (R-126): the subject is the classifier's
+        # inside-the-range branch, which only has a verdict to give once the
+        # 252-session window is full.
+        import fetch_iei_hyg as fih
+
+        pad = [
+            {
+                "date": f"2025-{1 + i // 28:02d}-{1 + i % 28:02d}",
+                "iei_close": 100.0, "hyg_close": 45.0, "dxy_close": None,
+                "ratio": 100.0 / 45.0,
+            }
+            for i in range(fih.MIN_OBSERVATIONS - 3)
+        ]
+        rows = pad + [
+            {"date": "2026-08-19", "iei_close": 100.0, "hyg_close": 50.0, "dxy_close": None, "ratio": 2.0},
+            {"date": "2026-08-20", "iei_close": 100.0, "hyg_close": 40.0, "dxy_close": None, "ratio": 2.5},
+            {"date": "2026-08-21", "iei_close": 100.0, "hyg_close": 45.0, "dxy_close": 98.0, "ratio": 100.0 / 45.0},
+        ]
+        current = build_output(rows)["current"]
+        assert current["window_complete"] is True
+        assert current["state"] == "neutral"
+        assert 0.0 < current["ratio_pct_rank"] < 1.0
+
+    def test_a_partial_window_withholds_the_verdict(self):
         rows = [
             {"date": "2026-08-19", "iei_close": 100.0, "hyg_close": 50.0, "dxy_close": None, "ratio": 2.0},
             {"date": "2026-08-20", "iei_close": 100.0, "hyg_close": 40.0, "dxy_close": None, "ratio": 2.5},
             {"date": "2026-08-21", "iei_close": 100.0, "hyg_close": 45.0, "dxy_close": 98.0, "ratio": 100.0 / 45.0},
         ]
         current = build_output(rows)["current"]
-        assert current["state"] == "neutral"
-        assert 0.0 < current["ratio_pct_rank"] < 1.0
+        assert current["state"] == "unknown"
+        assert current["ratio_pct_rank"] is None
 
 
 class TestUwRegularSession:
@@ -375,14 +410,19 @@ class TestCli:
         monkeypatch.setattr(
             fih,
             "fetch_closes",
-            lambda *a, **k: ({"IEI": closes["iei"], "HYG": closes["hyg"], "DXY": closes["dxy"]}, "yahoo"),
+            # R-190: the cascade returns the per-ticker map too.
+            lambda *a, **k: (
+                {"IEI": closes["iei"], "HYG": closes["hyg"], "DXY": closes["dxy"]},
+                "yahoo",
+                {"IEI": "yahoo", "HYG": "yahoo", "DXY": "yahoo"},
+            ),
         )
-        monkeypatch.setattr(fih, "persist_result", lambda payload, rows: None)
+        monkeypatch.setattr(fih, "persist_result", lambda payload, rows, health_error=None: None)
         assert main(["--json"]) == 0
         out = capsys.readouterr().out
         payload = json.loads(out)
         assert payload["count"] == 62
-        assert payload["current"]["state"] == "new_low"
+        assert payload["current"]["state"] == "unknown"  # R-126: 62 < 252
 
 
 # ── source ladder (Mandatory Rule 7) ──────────────────────────────
@@ -400,7 +440,7 @@ class TestFetchClosesCascade:
         uw_calls: list = []
         yahoo_calls: list = []
 
-        closes, source = fetch_closes(
+        closes, source, _ = fetch_closes(
             fetch_ib=lambda tickers: {t: {"2026-08-21": 1.0} for t in tickers},
             fetch_uw=lambda tickers: uw_calls.append(list(tickers)) or {},
             fetch_yahoo=lambda tickers: yahoo_calls.append(list(tickers)) or {},
@@ -414,7 +454,7 @@ class TestFetchClosesCascade:
     def test_uw_fills_the_ib_gap_and_yahoo_is_not_reached(self):
         yahoo_calls: list = []
 
-        closes, source = fetch_closes(
+        closes, source, _ = fetch_closes(
             fetch_ib=lambda tickers: {},
             fetch_uw=lambda tickers: {t: {"2026-08-21": 1.0} for t in tickers},
             fetch_yahoo=lambda tickers: yahoo_calls.append(list(tickers)) or {},
@@ -428,7 +468,7 @@ class TestFetchClosesCascade:
         ib_calls: list = []
         uw_calls: list = []
 
-        closes, source = fetch_closes(
+        closes, source, _ = fetch_closes(
             fetch_ib=lambda tickers: ib_calls.append(list(tickers)) or {},
             fetch_uw=lambda tickers: uw_calls.append(list(tickers)) or {},
             fetch_yahoo=lambda tickers: {t: {"2026-08-21": 1.0} for t in tickers},
@@ -442,7 +482,7 @@ class TestFetchClosesCascade:
         uw_calls: list = []
         yahoo_calls: list = []
 
-        closes, source = fetch_closes(
+        closes, source, _ = fetch_closes(
             fetch_ib=lambda tickers: {IEI_SYMBOL: {"2026-08-21": 1.0}},
             fetch_uw=lambda tickers: uw_calls.append(list(tickers))
             or {HYG_SYMBOL: {"2026-08-21": 2.0}},
@@ -458,7 +498,7 @@ class TestFetchClosesCascade:
     def test_an_empty_series_from_a_rung_does_not_claim_the_ticker(self):
         yahoo_calls: list = []
 
-        closes, source = fetch_closes(
+        closes, source, _ = fetch_closes(
             fetch_ib=lambda tickers: {t: {} for t in tickers},
             fetch_uw=lambda tickers: {},
             fetch_yahoo=lambda tickers: yahoo_calls.append(list(tickers))
@@ -469,7 +509,7 @@ class TestFetchClosesCascade:
         assert source == "yahoo"
 
     def test_no_rung_answers_at_all(self):
-        closes, source = fetch_closes(
+        closes, source, _ = fetch_closes(
             fetch_ib=lambda tickers: {},
             fetch_uw=lambda tickers: {},
             fetch_yahoo=lambda tickers: {},

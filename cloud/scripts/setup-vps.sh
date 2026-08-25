@@ -142,6 +142,8 @@ readonly SERVICE_FILES=(
   radon-divyield.timer
   radon-hyad.service
   radon-hyad.timer
+  radon-hhlev.service
+  radon-hhlev.timer
 )
 
 
@@ -799,6 +801,31 @@ install_operator_cli() {
   log_success "Operator CLI installed (radon {stop|start|restart|status})"
 }
 
+install_app_runtime() {
+  local source="${CLOUD_DIR}/scripts/radon-app-runtime.sh"
+  local target="/usr/local/sbin/radon-app-runtime"
+  local -a owner_args=(-o root -g root)
+  [[ "${RADON_HELPER_SKIP_CHOWN:-0}" == "1" ]] && owner_args=()
+  local staged
+
+  if [[ ! -f "$source" ]]; then
+    log_error "radon-app-runtime.sh missing from ${CLOUD_DIR}/scripts/"
+    return 1
+  fi
+
+  log_info "Installing /usr/local/sbin/radon-app-runtime..."
+  staged="$(mktemp "${target}.tmp.XXXXXX")"
+  install -m 0755 "${owner_args[@]}" "$source" "$staged"
+  if ! bash -n "$staged" || [[ ! -x "$staged" ]]; then
+    rm -f "$staged"
+    log_error "App runtime candidate failed syntax/permission validation"
+    return 1
+  fi
+  mv -f "$staged" "$target"
+
+  log_success "App runtime wrapper installed"
+}
+
 # The only direct systemd privilege left to the radon user is the watchdog's
 # fixed preheld adapter. All other mutations route through /usr/local/bin/radon.
 install_admin_polkit_rule() {
@@ -871,6 +898,7 @@ main() {
   open_firewall
   install_deploy_root_helper
   install_operator_cli
+  install_app_runtime
   configure_sudoers
   install_admin_polkit_rule
   start_services

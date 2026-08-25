@@ -100,22 +100,36 @@ PRESET="${RADON_LEAP_REFRESH_PRESET:-largecaps}"
 MIN_GAP="${RADON_LEAP_REFRESH_MIN_GAP:-10}"
 FASTAPI_HOST="${RADON_LEAP_REFRESH_FASTAPI_HOST:-127.0.0.1}"
 FASTAPI_PORT="${RADON_LEAP_REFRESH_FASTAPI_PORT:-8321}"
+FASTAPI_TIMEOUT_SECS="${RADON_SCAN_FASTAPI_TIMEOUT_SECS:-3610}"
 FASTAPI_URL="http://${FASTAPI_HOST}:${FASTAPI_PORT}/leap/scan?preset=${PRESET}&min_gap=${MIN_GAP}"
 
 # Try FastAPI first — preserves the dual-write + service_health path the
 # dashboard "Run latest →" button uses. 3610s matches the FastAPI timeout
 # for the leap preset subprocess (3600s) with 10s of slack.
 echo "$(date): POST ${FASTAPI_URL}"
-if curl -fsS -X POST -m 3610 -o /dev/null -w "%{http_code}" "${FASTAPI_URL}" 2>/tmp/leap-refresh.curl.err | grep -q '^2'; then
+# R-144: only curl exit 7 (connection refused) proves the request was never
+# accepted. A 502 "Subprocess capacity exhausted" means the box is ALREADY
+# running too many scans, and a -m timeout means FastAPI's child may still be
+# mid-flight — falling back on either launches a duplicate outside
+# MAX_CONCURRENT_SUBPROCESSES and outside the cooldown. Same guard as
+# run_signals_refresh.sh.
+HTTP_CODE=$(curl -sS -X POST -m "$FASTAPI_TIMEOUT_SECS" -o /dev/null \
+    -w "%{http_code}" "${FASTAPI_URL}" 2>/tmp/leap-refresh.curl.err)
+CURL_EXIT=$?
+if [ "$CURL_EXIT" -eq 0 ] && [[ "$HTTP_CODE" == 2* ]]; then
     echo "$(date): LEAP refresh via FastAPI complete (OK)"
     exit 0
 fi
 
-# FastAPI unreachable or non-2xx — fall through to direct invocation
-# so the file cache at least stays warm. service_health and Turso
-# won't update on this path; the systemd watchdog will surface
-# radon-api.service health separately.
-echo "$(date): FastAPI unreachable — fallback to direct leap_scanner_uw.py invocation"
+if [ "$CURL_EXIT" -ne 7 ]; then
+    echo "$(date): LEAP FastAPI outcome indeterminate (curl=${CURL_EXIT}, http=${HTTP_CODE}); not launching duplicate" >&2
+    exit 1
+fi
+
+# Connection refused: nothing was accepted, so a direct run is safe and
+# keeps the file cache warm. service_health and Turso won't update on this
+# path; the systemd watchdog surfaces radon-api.service health separately.
+echo "$(date): FastAPI unavailable — fallback to direct leap_scanner_uw.py invocation"
 if "$PYTHON_BIN" scripts/leap_scanner_uw.py --preset "$PRESET" --min-gap "$MIN_GAP" --json 2>>/tmp/leap-scan.err; then
     echo "$(date): LEAP fallback refresh complete (OK)"
     exit 0

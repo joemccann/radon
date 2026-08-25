@@ -15,7 +15,7 @@ Reference implementation to copy throughout: the sibling CREDIT indicator
 | slug (route) | `iei-hyg` → `/regime/iei-hyg` |
 | service (kebab) | `iei-hyg` (`scan_snapshots.service`, `service_health`, unit names, API dir `web/app/api/iei-hyg/`) |
 | PascalCase | `IeiHyg` (`IeiHygPanel`, `useIeiHyg`, `web/lib/ieiHyg.ts`) |
-| Tab label | `IEI/HYG` |
+| Tab label | `TSY/HY` (renamed from `IEI/HYG` 2026-08-23; panel title "TREASURIES VS HIGH YIELD", tooltip spells out both ETFs: IEI = iShares 3-7 Year Treasury Bond ETF, coupon-paying mid-curve notes, no STRIPS; HYG = iShares iBoxx USD High Yield Corporate Bond ETF, the most liquid junk bond corner, shorter maturity and less rate sensitive than the broad junk universe) |
 | Migration | `0053_iei_hyg.sql` (version 53; Turso `MAX(version)` = 52 on 2026-08-22) |
 | Timer | `radon-iei-hyg.{service,timer}`, `OnCalendar=*-*-* 21:55:00 UTC` daily, `Persistent=true`, `RandomizedDelaySec=300` (free slot after credit 21:45 / skew2d 21:50) |
 | JSON fallback | `data/iei_hyg.json` |

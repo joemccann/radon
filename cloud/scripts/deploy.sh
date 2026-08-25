@@ -77,7 +77,7 @@ readonly HEALTH_WAIT_SECONDS=15
 readonly HEALTH_RETRIES=6
 readonly HEALTH_RETRY_WAIT=5
 readonly HEALTH_CURL_TIMEOUT=5
-readonly SURFACE_RETRIES=3
+readonly SURFACE_RETRIES=8
 readonly SURFACE_RETRY_WAIT=2
 readonly SURFACE_TIMEOUT=3
 # The slowest managed restart policy is newsfeed's RestartSec=30. A 40-second
@@ -113,6 +113,8 @@ readonly SYSTEM_PYTHON="${RADON_SYSTEM_PYTHON:-/usr/bin/python3.13}"
 readonly RELEASES_DIR="${RADON_RELEASES_DIR:-/home/radon/.radon-releases}"
 readonly RELEASE_ARTIFACTS=(node_modules web/node_modules web/.next web/.env)
 readonly ROLLBACK_ARTIFACTS=(node_modules web/node_modules web/.next web/.env .venv)
+readonly REUSE_LIVE_MARKER=".deploy-reuse-live"
+readonly PRESTAGE_FILE="${RADON_DEPLOY_PRESTAGE:-/home/radon/.radon-prestage}"
 readonly TRANSITION_JOURNAL_FILE="${RADON_DEPLOY_TRANSITION_JOURNAL:-/home/radon/.radon-deploy-transition.json}"
 readonly DEPLOY_SUPPORT_DIR="${RADON_DEPLOY_SUPPORT_DIR:-${_CLOUD_FROM_SCRIPT}/scripts}"
 readonly JOURNAL_HELPER="${RADON_DEPLOY_JOURNAL_HELPER:-${DEPLOY_SUPPORT_DIR}/deploy-journal.py}"
@@ -121,6 +123,10 @@ readonly JOURNAL_PYTHON="${RADON_DEPLOY_JOURNAL_PYTHON:-${SYSTEM_PYTHON}}"
 # An interrupted deploy deliberately leaves Git at the requested SHA with no
 # green marker; the next run sees the marker mismatch and resumes the full
 # build/restart/gate path instead of returning a false no-op success.
+STABILITY_COUNTS=()
+STABILITY_STARTED_AT=0
+SEEDED_ROOT_NODE_MODULES=0
+SEEDED_WEB_NODE_MODULES=0
 DEPLOY_TEARDOWN_STARTED=0
 DEPLOY_SERVICES_RECOVERED=1
 DEPLOY_RELEASE_UNVERIFIED=0
@@ -464,20 +470,65 @@ notify_release_live() {
   fi
 }
 
+requirements_hash() {
+  local release_dir="$1"
+  cat "${release_dir}/requirements.txt" \
+    "${release_dir}/scripts/requirements-api.txt" \
+    | "$SHA256SUM" | awk '{print $1}'
+}
+
+live_python_env_matches() {
+  local release_dir="$1"
+  local req_hash
+  [[ -x "${VENV_DIR}/bin/python" && -f "${VENV_DIR}/.radon-req-hash" ]] || return 1
+  req_hash="$(requirements_hash "$release_dir")"
+  [[ "$(cat "${VENV_DIR}/.radon-req-hash")" == "$req_hash" ]]
+}
+
+release_artifact_reused_from_live() {
+  local release_dir="$1"
+  local artifact="$2"
+  local marker="${release_dir}/.deploy-reuse-live"
+  [[ -f "$marker" ]] && grep -Fxq "$artifact" "$marker"
+}
+
 prepare_python_wheels() {
   local release_dir="$1"
-  local target_wheels="${release_dir}/.deploy-wheels/target"
+  local wheels_parent="${release_dir}/.deploy-wheels"
+  local target_wheels="${wheels_parent}/target"
+  local cache_root="${RADON_WHEEL_CACHE:-/home/radon/.cache/radon-wheels}"
+  local req_hash cached
 
-  rm -rf -- "${release_dir}/.deploy-wheels"
+  req_hash="$(requirements_hash "$release_dir")"
+  cached="${cache_root}/${req_hash}"
+
+  rm -rf -- "$wheels_parent"
+  mkdir -p "$wheels_parent"
+  if [[ -d "$cached" && -n "$(ls -A "$cached" 2>/dev/null || true)" ]]; then
+    ln -s "$cached" "$target_wheels"
+    log_info "Reusing cached Python wheels (${req_hash:0:12})"
+    return 0
+  fi
   mkdir -p "$target_wheels"
   "${VENV_DIR}/bin/python" -m pip wheel --wheel-dir "$target_wheels" \
     --requirement "${release_dir}/requirements.txt" \
     --requirement "${release_dir}/scripts/requirements-api.txt"
+  mkdir -p "$cache_root"
+  rm -rf -- "$cached"
+  mv "$target_wheels" "$cached"
+  ln -s "$cached" "$target_wheels"
 }
 
 install_target_python_env() {
   local release_dir="$1"
   local wheelhouse="${release_dir}/.deploy-wheels/target"
+  local req_hash
+
+  if live_python_env_matches "$release_dir"; then
+    log_info "Reusing live Python env (requirements unchanged)"
+    validate_target_python_env "$RADON_DIR"
+    return $?
+  fi
 
   if [[ ! -e "${RELEASE_BACKUP_DIR}/.venv" && ! -L "${RELEASE_BACKUP_DIR}/.venv" ]]; then
     log_error "Refusing to replace Python env without an exact previous-env backup"
@@ -487,6 +538,8 @@ install_target_python_env() {
   "${VENV_DIR}/bin/python" -m pip install --no-index --find-links "$wheelhouse" \
     --requirement "${release_dir}/requirements.txt" \
     --requirement "${release_dir}/scripts/requirements-api.txt"
+  req_hash="$(requirements_hash "$release_dir")"
+  printf '%s\n' "$req_hash" > "${VENV_DIR}/.radon-req-hash"
   validate_target_python_env "$RADON_DIR"
 }
 
@@ -494,6 +547,82 @@ validate_target_python_env() {
   local release_dir="${1:-$RADON_DIR}"
   "${release_dir}/.venv/bin/python" -c \
     'import fastapi, httptools, uvicorn, uvloop, watchfiles, websockets'
+}
+
+should_rebuild_next() {
+  local release_dir="$1"
+  local live="${RADON_DIR}"
+  local live_sha staged_sha changed
+
+  if [[ ! -d "${release_dir}/web/.next" && ! -d "${live}/web/.next" ]]; then
+    return 0
+  fi
+  live_sha="$(git -C "$live" rev-parse HEAD)" || return 0
+  staged_sha="$(git -C "$release_dir" rev-parse HEAD)" || return 0
+  # web/ is the Next app. Root package.json/bun.lock and lib/tools are
+  # compile inputs via outputFileTracingRoot and the @tools webpack alias.
+  # brand/ is imported by web tokens. Anything else (scripts/, cloud/, docs)
+  # must not force a Next rebuild.
+  changed="$(
+    git -C "$live" diff --name-only "$live_sha" "$staged_sha" -- \
+      web package.json bun.lock lib/tools brand
+  )" || return 0
+  [[ -n "$changed" ]]
+}
+
+seed_staged_node_modules() {
+  local release_dir="$1"
+  local live="${RADON_DIR}"
+  local rebuild=0
+  local marker="${release_dir}/.deploy-reuse-live"
+  SEEDED_ROOT_NODE_MODULES=0
+  SEEDED_WEB_NODE_MODULES=0
+
+  [[ -n "$release_dir" && "$release_dir" != "$live" ]] || return 0
+
+  rm -f -- "$marker"
+  if should_rebuild_next "$release_dir"; then
+    rebuild=1
+  fi
+
+  # Copy, never hardlink: bun/next mutate trees, and a hardlink would write
+  # through into the still-serving live release. When bun install and next
+  # compile are both skipped, leave live artifacts in place and record them
+  # in .deploy-reuse-live so activate does not mv a second copy.
+  if cmp -s "${live}/bun.lock" "${release_dir}/bun.lock" \
+    && [[ -d "${live}/node_modules" ]]; then
+    SEEDED_ROOT_NODE_MODULES=1
+    if (( rebuild == 1 )); then
+      rm -rf "${release_dir}/node_modules"
+      cp -a "${live}/node_modules" "${release_dir}/node_modules"
+      log_info "Seeded root node_modules from live (bun.lock unchanged)"
+    else
+      printf '%s\n' "node_modules" >> "$marker"
+      log_info "Reusing live node_modules in place (no copy)"
+    fi
+  fi
+  if cmp -s "${live}/web/bun.lock" "${release_dir}/web/bun.lock" \
+    && [[ -d "${live}/web/node_modules" ]]; then
+    SEEDED_WEB_NODE_MODULES=1
+    if (( rebuild == 1 )); then
+      rm -rf "${release_dir}/web/node_modules"
+      cp -a "${live}/web/node_modules" "${release_dir}/web/node_modules"
+      log_info "Seeded web/node_modules from live (web/bun.lock unchanged)"
+    else
+      printf '%s\n' "web/node_modules" >> "$marker"
+      log_info "Reusing live web/node_modules in place (no copy)"
+    fi
+  fi
+  if [[ -d "${live}/web/.next" ]]; then
+    if (( rebuild == 1 )); then
+      rm -rf "${release_dir}/web/.next"
+      cp -a "${live}/web/.next" "${release_dir}/web/.next"
+      log_info "Seeded web/.next for incremental compile"
+    else
+      printf '%s\n' "web/.next" >> "$marker"
+      log_info "Reusing live web/.next in place (no copy)"
+    fi
+  fi
 }
 
 build_nextjs_at() {
@@ -518,19 +647,45 @@ build_nextjs_at() {
     return 1
   fi
 
+  seed_staged_node_modules "$release_dir"
+
   # CI and production both use Bun's frozen lockfile contract. Browser
   # installation is part of the artifact build and must finish before teardown.
+  # Skip bun install when the staged lockfile matches live and node_modules
+  # was copied; still run playwright install (no-op when browsers are cached).
   (
     cd "$release_dir"
-    bun install --frozen-lockfile
-    ./node_modules/.bin/playwright install chromium chromium-headless-shell >/dev/null
+    if [[ "${SEEDED_ROOT_NODE_MODULES:-0}" != 1 ]]; then
+      bun install --frozen-lockfile
+    fi
+    playwright_root="${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}"
+    if [[ ! -d "$playwright_root" || -z "$(ls -A "$playwright_root" 2>/dev/null || true)" ]]; then
+      if [[ -x ./node_modules/.bin/playwright ]]; then
+        ./node_modules/.bin/playwright install chromium chromium-headless-shell >/dev/null
+      else
+        "${RADON_DIR}/node_modules/.bin/playwright" install chromium chromium-headless-shell >/dev/null
+      fi
+    fi
   )
 
   (
     cd "${release_dir}/web"
-    bun install --frozen-lockfile
-    ./node_modules/.bin/playwright install chromium chromium-headless-shell >/dev/null
-    run_with_cloud_env "$cloud_env" bun run build
+    if [[ "${SEEDED_WEB_NODE_MODULES:-0}" != 1 ]]; then
+      bun install --frozen-lockfile
+    fi
+    playwright_root="${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}"
+    if [[ ! -d "$playwright_root" || -z "$(ls -A "$playwright_root" 2>/dev/null || true)" ]]; then
+      if [[ -x ./node_modules/.bin/playwright ]]; then
+        ./node_modules/.bin/playwright install chromium chromium-headless-shell >/dev/null
+      else
+        "${RADON_DIR}/web/node_modules/.bin/playwright" install chromium chromium-headless-shell >/dev/null
+      fi
+    fi
+    if should_rebuild_next "$release_dir"; then
+      run_with_cloud_env "$cloud_env" bun run build
+    else
+      log_info "Skipping next build; web inputs unchanged and web/.next is seeded"
+    fi
   )
 }
 
@@ -542,11 +697,46 @@ validate_release_artifacts() {
   local release_dir="$1"
   local artifact
   for artifact in "${RELEASE_ARTIFACTS[@]}"; do
+    if release_artifact_reused_from_live "$release_dir" "$artifact"; then
+      if [[ -e "${RADON_DIR}/${artifact}" || -L "${RADON_DIR}/${artifact}" ]]; then
+        continue
+      fi
+      log_error "Release artifact marked for live reuse is missing: ${artifact}"
+      return 1
+    fi
     if [[ ! -e "${release_dir}/${artifact}" && ! -L "${release_dir}/${artifact}" ]]; then
       log_error "Release artifact missing: ${artifact}"
       return 1
     fi
   done
+}
+
+write_prestage() {
+  local sha="$1"
+  local dir="${2:-$STAGED_RELEASE_DIR}"
+  local tmp
+  [[ -n "$dir" && -d "$dir" ]] || return 1
+  tmp="$(mktemp "${PRESTAGE_FILE}.XXXXXX")"
+  printf '%s\n%s\n' "$sha" "$dir" > "$tmp"
+  chmod 0600 "$tmp"
+  mv "$tmp" "$PRESTAGE_FILE"
+}
+
+load_prestage() {
+  local sha="$1"
+  local recorded_sha recorded_dir
+  [[ -f "$PRESTAGE_FILE" ]] || return 1
+  recorded_sha="$(sed -n '1p' "$PRESTAGE_FILE")"
+  recorded_dir="$(sed -n '2p' "$PRESTAGE_FILE")"
+  [[ "$recorded_sha" == "$sha" ]] || return 1
+  [[ -n "$recorded_dir" && -d "$recorded_dir" ]] || return 1
+  STAGED_RELEASE_DIR="$recorded_dir"
+  if ! validate_release_artifacts "$STAGED_RELEASE_DIR"; then
+    STAGED_RELEASE_DIR=""
+    return 1
+  fi
+  rm -f -- "$PRESTAGE_FILE"
+  log_info "Reusing prestaged release ${sha:0:7} at ${recorded_dir}"
 }
 
 validate_rollback_artifacts() {
@@ -600,14 +790,24 @@ cleanup_staged_release() {
 build_staged_release() {
   local requested_sha="$1"
   local status=0
+  local wheel_status=0
+  local next_pid wheel_pid
 
   create_staged_worktree "$requested_sha" || return $?
-  build_nextjs_at "$STAGED_RELEASE_DIR" || status=$?
+  # Next compile and pip wheel touch disjoint trees (.next/node_modules vs
+  # .deploy-wheels). Overlap them so a wheel-cache miss does not sit behind
+  # bun/next, and a Next rebuild does not sit behind scipy wheels.
+  build_nextjs_at "$STAGED_RELEASE_DIR" &
+  next_pid=$!
+  prepare_python_wheels "$STAGED_RELEASE_DIR" &
+  wheel_pid=$!
+  wait "$next_pid" || status=$?
+  wait "$wheel_pid" || wheel_status=$?
   if (( status == 0 )); then
-    validate_release_artifacts "$STAGED_RELEASE_DIR" || status=$?
+    status=$wheel_status
   fi
   if (( status == 0 )); then
-    prepare_python_wheels "$STAGED_RELEASE_DIR" || status=$?
+    validate_release_artifacts "$STAGED_RELEASE_DIR" || status=$?
   fi
   if (( status != 0 )); then
     log_error "Staged release build failed; live artifacts were not touched"
@@ -690,6 +890,7 @@ activate_staged_release() {
   local previous_sha="$2"
   local artifact
   local status=0
+  local reuse_venv=0
 
   if [[ ! -f "$TRANSITION_JOURNAL_FILE" || -z "$RELEASE_BACKUP_DIR" ]]; then
     log_error "Release activation requires a durable prepared transition"
@@ -698,7 +899,18 @@ activate_staged_release() {
   DEPLOY_RELEASE_UNVERIFIED=1
   write_transition_phase backup_started || return $?
 
+  # Artifacts listed in .deploy-reuse-live stay on the live tree (no second copy).
+  if live_python_env_matches "$STAGED_RELEASE_DIR"; then
+    reuse_venv=1
+  fi
+
   for artifact in "${ROLLBACK_ARTIFACTS[@]}"; do
+    if [[ "$artifact" == ".venv" && "$reuse_venv" == 1 ]]; then
+      continue
+    fi
+    if release_artifact_reused_from_live "$STAGED_RELEASE_DIR" "$artifact"; then
+      continue
+    fi
     mkdir -p "$(dirname "${RELEASE_BACKUP_DIR}/${artifact}")"
     mv "${RADON_DIR}/${artifact}" "${RELEASE_BACKUP_DIR}/${artifact}" || status=$?
     (( status == 0 )) || break
@@ -714,13 +926,21 @@ activate_staged_release() {
   fi
   if (( status == 0 )); then
     for artifact in "${RELEASE_ARTIFACTS[@]}"; do
+      if release_artifact_reused_from_live "$STAGED_RELEASE_DIR" "$artifact"; then
+        continue
+      fi
       mkdir -p "$(dirname "${RADON_DIR}/${artifact}")"
       mv "${STAGED_RELEASE_DIR}/${artifact}" "${RADON_DIR}/${artifact}" || status=$?
       (( status == 0 )) || break
     done
   fi
   if (( status == 0 )); then
-    install_target_python_env "$STAGED_RELEASE_DIR" || status=$?
+    if [[ "$reuse_venv" == 1 ]]; then
+      log_info "Keeping live Python env; requirements hash matches"
+      validate_target_python_env "$RADON_DIR" || status=$?
+    else
+      install_target_python_env "$STAGED_RELEASE_DIR" || status=$?
+    fi
   fi
   if (( status != 0 )); then
     log_error "Release activation failed; durable recovery is required"
@@ -780,7 +1000,8 @@ recover_pending_transition() {
       record_deploy_marker "$JOURNAL_REQUESTED_SHA" || return 1
       write_green_marker "$JOURNAL_REQUESTED_SHA" || return 1
       sudo "$DEPLOY_ROOT_HELPER" commit-transition || return 1
-      sync_scheduled_units || return 1
+      sync_scheduled_units || log_warn \
+        "Scheduled unit sync failed after a verified release; the next deploy will republish them"
       DEPLOY_RELEASE_UNVERIFIED=0
       finalize_release_artifacts "$JOURNAL_STAGE_DIR" "$JOURNAL_BACKUP_DIR"
       log_success "Finalized previously verified release ${JOURNAL_REQUESTED_SHA:0:7}"
@@ -892,15 +1113,23 @@ restart_services() {
       recover_pending_transition || true
       return "$status"
     fi
-    install_release_units
     refresh_control_plane || return 1
   fi
   start_services_after_transition
+  # R-094: this used to run while the app tier was down. 32 timers in
+  # cloud/services carry Persistent=true, and `enable --now` on a freshly
+  # installed one whose last calendar slot has passed queues an IMMEDIATE
+  # catch-up run of its .service — into a dead 127.0.0.1:8321. The oneshot
+  # exits non-zero with Result=exit-code, which `_is_deploy_collateral` does
+  # not absorb, so a green deploy paged P1 for every new persistent timer.
+  if [[ -n "$requested_sha" ]]; then
+    install_release_units
+  fi
 }
 
 # Timer-owned units ship with the release. Once the promote above has put the
-# target SHA's cloud/services in place and while the app tier is still down,
-# the root helper installs the manifest-pinned set (config/installed-units
+# target SHA's cloud/services in place AND the app tier is back up (R-094), the
+# root helper installs the manifest-pinned set (config/installed-units
 # .sha256 is the review gate) and enables any NEW timers -- the
 # `ssh root && install -m 0644 && daemon-reload && enable --now` an operator
 # used to owe after every unit edit. Non-fatal: units are inert config, and
@@ -956,11 +1185,9 @@ check_units_active() {
   return 0
 }
 
-check_units_stable() {
-  local restart_counts=()
-  local unstable=()
-  local unit count previous index=0
-
+snapshot_unit_restarts() {
+  local unit count
+  STABILITY_COUNTS=()
   for unit in "${SERVICES[@]}"; do
     count="$(systemctl show "${unit}.service" --property=NRestarts --value 2>/dev/null)" || {
       log_error "[gate] could not read restart counter for ${unit}"
@@ -970,12 +1197,26 @@ check_units_stable() {
       log_error "[gate] invalid restart counter for ${unit}"
       return 1
     }
-    restart_counts+=("$count")
+    STABILITY_COUNTS+=("$count")
   done
+  STABILITY_STARTED_AT="$SECONDS"
+}
 
-  sleep "$UNIT_STABILITY_SECONDS"
+check_units_stable() {
+  local unstable=()
+  local unit count previous index=0
+  local elapsed=0 remaining=0
+
+  if [[ ${#STABILITY_COUNTS[@]} -eq 0 ]]; then
+    snapshot_unit_restarts || return 1
+  fi
+  elapsed=$((SECONDS - STABILITY_STARTED_AT))
+  remaining=$((UNIT_STABILITY_SECONDS - elapsed))
+  if (( remaining > 0 )); then
+    sleep "$remaining"
+  fi
   for unit in "${SERVICES[@]}"; do
-    previous="${restart_counts[$index]}"
+    previous="${STABILITY_COUNTS[$index]}"
     index=$((index + 1))
     if ! systemctl is-active --quiet "${unit}.service"; then
       unstable+=("${unit}:inactive")
@@ -989,6 +1230,8 @@ check_units_stable() {
       unstable+=("${unit}:restart counter changed")
     fi
   done
+  STABILITY_COUNTS=()
+  STABILITY_STARTED_AT=0
   if (( ${#unstable[@]} > 0 )); then
     log_error "[gate] units failed stability window: ${unstable[*]}"
     return 1
@@ -1094,9 +1337,12 @@ report_isolated_health() {
 
 deploy_gate() {
   # Run every layer even after a failure so the deploy logs the complete picture.
+  # Snapshot NRestarts before surface probes so the 40s newsfeed RestartSec
+  # window overlaps lite/Next/relay checks instead of stacking after them.
   local gate_rc=0
   check_units_active || gate_rc=1
   check_release_topology_restored || gate_rc=1
+  snapshot_unit_restarts || gate_rc=1
   check_health_lite || gate_rc=1
   check_nextjs_http || gate_rc=1
   check_relay_listener || gate_rc=1
@@ -1218,9 +1464,15 @@ main() {
   fi
 
   if [[ "$prev_commit" == "$requested_sha" ]] && green_marker_matches "$requested_sha"; then
+    if [[ "${RADON_DEPLOY_STAGE:-0}" == "1" ]]; then
+      log_info "Commit ${requested_sha:0:7} already green; skipping prestage"
+      trap - TERM INT HUP
+      return 0
+    fi
     log_info "Commit ${requested_sha:0:7} already has a durable green marker; rechecking live gate"
     if deploy_gate; then
-      sync_scheduled_units || return 1
+      sync_scheduled_units || log_warn \
+        "Scheduled unit sync failed on an already-green release; the next deploy will republish them"
       trap - TERM INT HUP
       log_success "Deploy already green: $(short_log)"
       return 0
@@ -1236,14 +1488,27 @@ main() {
 
   log_info "Deploying ${prev_commit:0:7} -> ${requested_sha:0:7}"
 
+  if [[ "${RADON_DEPLOY_STAGE:-0}" == "1" ]]; then
+    if [[ -f "$TRANSITION_JOURNAL_FILE" ]]; then
+      log_warn "Unfinished transition present; skipping prestage"
+      trap - TERM INT HUP
+      return 0
+    fi
+    log_info "Prestaging target release in an isolated worktree..."
+    build_staged_release "$requested_sha"
+    write_prestage "$requested_sha"
+    trap - TERM INT HUP
+    log_success "Prestaged ${requested_sha:0:7}"
+    return 0
+  fi
+
   log_info "Building target release in an isolated worktree..."
-  build_staged_release "$requested_sha"
+  if ! load_prestage "$requested_sha"; then
+    build_staged_release "$requested_sha"
+  fi
 
   log_info "Promoting staged artifacts and restarting services..."
   restart_services "$requested_sha" "$prev_commit"
-
-  log_info "Waiting ${HEALTH_WAIT_SECONDS}s for services to start..."
-  sleep "$HEALTH_WAIT_SECONDS"
 
   log_info "Running post-deploy gate..."
   if ! deploy_gate; then
@@ -1253,7 +1518,15 @@ main() {
     record_deploy_marker "$requested_sha"
     write_green_marker "$requested_sha"
     sudo "$DEPLOY_ROOT_HELPER" commit-transition
-    sync_scheduled_units || return 1
+    # R-183: the release is verified, the green marker is written and the
+    # transition is committed by this point — a failed scheduled-unit publish
+    # cannot un-deploy any of that. The helper refuses when local HEAD no
+    # longer matches `git ls-remote origin main` (exit 76), which is exactly
+    # what a mid-deploy push to main produces: a benign race that used to
+    # red-flag a green release and strand the transition journal. Warn and
+    # carry on; the next deploy publishes the units.
+    sync_scheduled_units || log_warn \
+      "Scheduled unit sync failed after a verified release; the next deploy will republish them"
     DEPLOY_RELEASE_UNVERIFIED=0
     finalize_release_artifacts
   fi
@@ -1377,6 +1650,11 @@ supervise_deploy_command() {
     return 1
   fi
   if ! flock -n 9; then
+    if [[ "${RADON_DEPLOY_STAGE:-0}" == "1" ]]; then
+      log_warn "Another deployment owns ${DEPLOY_LOCK_FILE}; skipping prestage"
+      exec 9>&-
+      return 0
+    fi
     log_error "Another deployment owns ${DEPLOY_LOCK_FILE}; refusing to overlap"
     exec 9>&-
     return 75
@@ -1391,6 +1669,12 @@ supervise_deploy_command() {
   trap 'handle_supervisor_signal HUP' HUP
 
   if [[ -f "$TRANSITION_JOURNAL_FILE" ]]; then
+    if [[ "${RADON_DEPLOY_STAGE:-0}" == "1" ]]; then
+      log_warn "Unfinished transition present; skipping prestage"
+      trap - TERM INT HUP
+      exec 9>&-
+      return 0
+    fi
     log_warn "Found an unfinished deploy transition; recovering it before starting new work"
     if ! recover_pending_transition; then
       log_error "Unfinished transition recovery failed; refusing a new deploy"

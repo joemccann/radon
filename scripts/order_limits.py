@@ -117,19 +117,28 @@ def _combo_risk_per_unit(legs: Any) -> Optional[float]:
 def _combo_credit_per_unit(params: dict, price: float, multiplier: int) -> float:
     """Premium ONE combo unit collects, in dollars; 0 when the order pays.
 
-    Two credit encodings reach the funnel: the chain builder keeps a BUY
-    envelope and signs the credit negative (commit 1db9f558); the position
-    close ticket ships a SELL envelope with a positive price. Either way the
-    order receives the premium.
+    IB's BAG sign convention has FOUR quadrants, and the envelope alone does
+    not decide direction — the sign of the net price flips it:
+
+        BUY  envelope, price > 0  → debit paid      → no credit
+        BUY  envelope, price < 0  → credit received → credit (chain builder,
+                                                      commit 1db9f558)
+        SELL envelope, price > 0  → credit received → credit (close ticket)
+        SELL envelope, price < 0  → debit paid      → no credit
+
+    R-086: the fourth quadrant — closing or rolling a SHORT structure for a
+    debit — used to be booked as *collecting* |price| × 100 per unit, and
+    that phantom credit was subtracted from risk_per_unit. A 500-lot SELL
+    combo on a $5-wide short vertical at limitPrice=-5.00 priced at $0 loss
+    on an order paying $250,000.
     """
     try:
         signed_price = float(params.get("limitPrice") or 0)
     except (TypeError, ValueError):
         signed_price = 0.0
     is_sell_envelope = str(params.get("action") or "").upper().startswith("SELL")
-    if signed_price < 0 or is_sell_envelope:
-        return price * multiplier
-    return 0.0
+    receives_premium = (signed_price < 0) != is_sell_envelope
+    return price * multiplier if receives_premium else 0.0
 
 
 def _quantity_and_price(params: dict) -> tuple[Optional[float], Optional[float]]:
@@ -226,6 +235,30 @@ def check_order_limits(params: dict) -> Optional[dict[str, Any]]:
                 ),
             }
 
+        # R-087: combo_max_loss returns None — i.e. NO loss check at all —
+        # when any option leg lacks a positive strike, and that hole was the
+        # sole combo risk gate. Refuse instead of transmitting unbounded.
+        for leg in legs:
+            if not isinstance(leg, dict):
+                return {
+                    "code": "ORDER_COMBO_STRIKE",
+                    "message": "combo leg is not an object — refused",
+                }
+            if str(leg.get("sec_type") or leg.get("secType") or "").upper() == "STK":
+                continue
+            try:
+                strike = float(leg.get("strike") or 0)
+            except (TypeError, ValueError):
+                strike = 0.0
+            if strike <= 0:
+                return {
+                    "code": "ORDER_COMBO_STRIKE",
+                    "message": (
+                        "combo option leg is missing a positive strike, so its "
+                        "max loss cannot be priced — refused"
+                    ),
+                }
+
     notional = order_notional(params)
     notional_cap = max_order_notional()
     if notional is not None and notional > notional_cap:
@@ -249,6 +282,56 @@ def check_order_limits(params: dict) -> Optional[dict[str, Any]]:
         }
 
     return None
+
+
+def check_modify_limits(
+    working_order: Optional[dict],
+    *,
+    new_quantity: Any = None,
+    new_price: Any = None,
+    action: Optional[str] = None,
+) -> Optional[dict[str, Any]]:
+    """Full limit set for a modify, measured on the WORKING order's shape.
+
+    R-145: `/orders/modify` only ever called `check_quantity_limit`, which
+    hardcodes `{"type": "option", "limitPrice": 0}` — so `order_notional()`
+    returned None (premium is 0) and `combo_max_loss()` returned None (type is
+    not "combo"), and both branches were skipped. `newPrice` was bounded only
+    by `> 0`. Modifying a working 1-lot BAG with a short 195 put leg to 500
+    lots was accepted with its assignment exposure never computed. REL-005's
+    contract named modify as a chokepoint for max qty AND max notional.
+
+    An unreadable working order is NOT a bypass: the contract-quantity cap
+    still applies, exactly as before.
+    """
+    if not isinstance(working_order, dict):
+        return check_quantity_limit(new_quantity) if new_quantity is not None else None
+
+    sec_type = str(working_order.get("secType") or "").upper()
+    legs = working_order.get("legs")
+    if sec_type == "BAG" or isinstance(legs, list) and len(legs) >= 2:
+        order_type = "combo"
+    elif sec_type == "STK":
+        order_type = "stock"
+    else:
+        order_type = "option"
+
+    quantity = new_quantity
+    if quantity is None:
+        quantity = working_order.get("quantity") or working_order.get("totalQuantity")
+    price = new_price
+    if price is None:
+        price = working_order.get("limitPrice") or working_order.get("lmtPrice") or 0
+
+    params: dict[str, Any] = {
+        "type": order_type,
+        "quantity": quantity,
+        "limitPrice": price,
+        "action": action or working_order.get("action"),
+    }
+    if order_type == "combo" and isinstance(legs, list):
+        params["legs"] = legs
+    return check_order_limits(params)
 
 
 def check_quantity_limit(quantity: Any) -> Optional[dict[str, Any]]:

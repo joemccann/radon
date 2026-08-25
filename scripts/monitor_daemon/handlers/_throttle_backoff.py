@@ -43,6 +43,8 @@ Stored as a plain dict so the calling handler can persist it via
 """
 from __future__ import annotations
 
+import logging
+
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
@@ -126,29 +128,47 @@ def record_soft_failure(
     }
 
 
+# R-169: a deadline that will not parse is a breaker in an UNKNOWN state.
+# `blocked_until` returns this instead of None so a caller can tell "no
+# lockout was ever recorded" from "a lockout was recorded and the record is
+# corrupt" — the two used to be the same answer.
+log = logging.getLogger(__name__)
+
+CORRUPT_DEADLINE_SENTINEL = object()
+
+
 def is_blocked(state: Dict[str, Any], *, now_utc: datetime) -> bool:
-    """True iff `now_utc` is before the recorded `blocked_until`."""
+    """True iff `now_utc` is before the recorded `blocked_until`.
+
+    Fails CLOSED on an unparseable deadline. Returning False there silently
+    disarmed the 1018 rate-limit breaker: unlike the 1025 lockout, which has
+    the token-wide embargo standing the caller down behind it, nothing else
+    bounds this path, so a corrupt persisted string put the handler straight
+    back onto the endpoint that throttled it.
+    """
     raw = state.get("blocked_until")
     if not raw:
         return False
     try:
         until = datetime.fromisoformat(raw)
     except (ValueError, TypeError):
-        return False
+        log.warning("throttle blocked_until is unparseable (%r) — staying blocked", raw)
+        return True
     if until.tzinfo is None:
         until = until.replace(tzinfo=timezone.utc)
     return now_utc < until
 
 
 def blocked_until(state: Dict[str, Any]) -> Optional[datetime]:
-    """Return the parsed `blocked_until` datetime, or None."""
+    """Return the parsed `blocked_until` datetime, None, or the corrupt
+    sentinel (R-169) when a deadline was recorded but will not parse."""
     raw = state.get("blocked_until")
     if not raw:
         return None
     try:
         parsed = datetime.fromisoformat(raw)
     except (ValueError, TypeError):
-        return None
+        return CORRUPT_DEADLINE_SENTINEL  # type: ignore[return-value]
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed

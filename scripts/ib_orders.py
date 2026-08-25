@@ -249,6 +249,16 @@ def save_orders(data: dict):
     print("Saved orders to Turso open_orders/executed_orders")
 
 
+def _overlay_journal_realized_pnl(executed: list) -> None:
+    try:
+        from clients.journal_realized import overlay_journal_realized_pnl
+        from db.client import get_db
+
+        overlay_journal_realized_pnl(get_db(), executed)
+    except Exception as exc:  # noqa: BLE001 — advisory; IB figures stay
+        print(f"  Warning: journal realized P&L overlay skipped: {exc}", file=sys.stderr)
+
+
 def _dual_write_orders_to_db(data: dict) -> None:
     """Persist an IB order snapshot into open_orders + executed_orders."""
     try:
@@ -280,6 +290,12 @@ def _dual_write_orders_to_db(data: dict) -> None:
                     continue
                 open_rows.append((perm_id, o))
             replace_open_orders_for_session(open_rows)
+
+            # IB's commission-report realizedPNL drifts with IB's avgCost after a
+            # partial close; persist the journal average-cost figure instead so
+            # every reader of executed_orders (Next.js reads Turso directly)
+            # sees it.
+            _overlay_journal_realized_pnl(data.get("executed_orders", []))
 
             # Executed orders: per-row upsert keyed by execId. IB's exec_id is
             # globally unique within an account, so INSERT OR REPLACE is safe.

@@ -54,7 +54,7 @@ import {
 } from "./lib/wsTrust.js";
 import { applyDepthOp } from "./lib/depthLadder.js";
 import { planDepthAdmission } from "./lib/depthBudget.js";
-import { createReconnectGate } from "./lib/reconnectGate.js";
+import { createReconnectGate, reconnectDelayMs } from "./lib/reconnectGate.js";
 import {
   decideSend,
   HARD_CAP_BYTES,
@@ -613,6 +613,11 @@ let pingIntervalTimer = null;
 const snapshotLimiter = new RateLimiter(50);
 
 let ibConnected = false;
+// R-167 / R-168: consecutive failed reconnects drive the backoff, and the
+// moment the socket went down bounds the disconnected health row so an
+// ordinary reconnect never writes one.
+let ibReconnectAttempts = 0;
+let ibDisconnectedSinceAt = null;
 let shuttingDown = false;
 const reconnectGate = createReconnectGate({ delayMs: RECONNECT_MS });
 let ibClientGeneration = 0;
@@ -2356,6 +2361,7 @@ function rotateIBClient(newClientId) {
       nextClient.connect();
     } catch {
       ibConnected = false;
+      if (ibDisconnectedSinceAt === null) ibDisconnectedSinceAt = Date.now();
       broadcastStatus();
       scheduleReconnect();
     }
@@ -2366,6 +2372,8 @@ function scheduleReconnect() {
   if (shuttingDown) return;
   const scheduledClient = ib;
   const scheduledGeneration = ibClientGeneration;
+  const delay = reconnectDelayMs(ibReconnectAttempts);
+  ibReconnectAttempts += 1;
   reconnectGate.schedule(() => {
     if (scheduledClient !== ib || scheduledGeneration !== ibClientGeneration) return;
     console.log(`Attempting IB reconnect to ${cli.ibHost}:${cli.ibPort}...`);
@@ -2379,10 +2387,11 @@ function scheduleReconnect() {
     } catch {
       // Ignore.
       ibConnected = false;
+      if (ibDisconnectedSinceAt === null) ibDisconnectedSinceAt = Date.now();
       broadcastStatus();
       scheduleReconnect();
     }
-  });
+  }, delay);
 }
 
 function wireIBEvents() {
@@ -2393,6 +2402,8 @@ function wireIBEvents() {
   ib.on(EventName.connected, () => {
     if (!isCurrentClient()) return;
     ibConnected = true;
+    ibReconnectAttempts = 0;
+    ibDisconnectedSinceAt = null;
     ibConnectionIssue = null;
     console.log(`IB connected (clientId ${IB_CLIENT_ID_POOL[activeClientIdIndex]})`);
     reconnectGate.invalidate();
@@ -2418,6 +2429,7 @@ function wireIBEvents() {
       console.log("IB disconnected");
     }
     ibConnected = false;
+    if (ibDisconnectedSinceAt === null) ibDisconnectedSinceAt = Date.now();
     broadcastStatus();
     scheduleReconnect();
   });
@@ -2489,6 +2501,7 @@ function wireIBEvents() {
 
     if (connectionIssue) {
       ibConnected = false;
+      if (ibDisconnectedSinceAt === null) ibDisconnectedSinceAt = Date.now();
       ibConnectionIssue = connectionIssue;
       broadcastStatus();
       scheduleReconnect();
@@ -2724,7 +2737,7 @@ staleCheckTimer = setInterval(() => {
   // ladder is acting it owns the service_health row, so an "ok" heartbeat can
   // no longer land last and clobber the escalation's "error" row — the
   // 2026-06-18 invisibility bug where a dead relay still read state=ok.
-  const { action, heartbeat, clearError, degraded } = decideHealthWrite({
+  const { action, heartbeat, clearError, degraded, disconnected } = decideHealthWrite({
     now,
     lastTickAt: freshness.lastTickAt,
     ibConnected,
@@ -2736,7 +2749,30 @@ staleCheckTimer = setInterval(() => {
     lastEscalationAt,
     inError: relayHealthInError,
     lastHeartbeatAt: lastTickHeartbeatAt,
+    disconnectedSinceAt: ibDisconnectedSinceAt,
   });
+
+  // R-168: the socket is gone during RTH with demand outstanding. The ladder
+  // has nothing to say (it guards on ibConnected), so without this the relay
+  // wrote NO row at all and a dead socket read as healthy on every surface.
+  // Bounded by the same 45 s staleness threshold, so an ordinary reconnect
+  // never lands here. Recovery: the connected edge clears
+  // ibDisconnectedSinceAt and the tick heartbeat resumes.
+  if (disconnected) {
+    const downSecs = Math.round((now - ibDisconnectedSinceAt) / 1000);
+    if (!relayHealthInError) {
+      console.warn(
+        `\x1b[33m[stale-data] IB socket down ${downSecs}s during market hours with ${subscribedSymbols} symbols subscribed — writing disconnected health row\x1b[0m`,
+      );
+    }
+    relayHealthInError = true;
+    void writeRelayHealth("error", {
+      message: `IB socket disconnected for ${downSecs}s during market hours with ${subscribedSymbols} symbols subscribed`,
+      reason: "ib_disconnected",
+      ...buildRelayHealthDetail(now, lastTickTimestamp, freshness),
+    });
+    return;
+  }
 
   // The tick edge (onTicksRecovered) can never fire with zero subscriptions,
   // so a relay that escalated and then went idle would stay latched at "error"

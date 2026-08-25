@@ -144,17 +144,27 @@ until a human ran reset-failed + start. Before launching grok on a
   never restart units mid-deploy.
 - systemd itself reports `ActiveState=failed` (the page excerpt is
   untrusted text and never triggers the action on its own) with either
-  `Result=signal`, or `Result=exit-code` AND the green deploy marker
-  (`/home/radon/.radon-last-green-deploy`, read as an mtime via
-  `watchdog.units._file_mtime`) is newer than the unit's
-  `InactiveEnterTimestamp` — a fix has shipped since the failure.
+  `Result=signal`, or `Result=exit-code`/`Result=timeout` AND the green
+  deploy marker (`/home/radon/.radon-last-green-deploy`) is newer than the
+  unit's `InactiveEnterTimestamp` — a fix has shipped since the failure.
   radon-leap 2026-08-20: exit 1 at 14:02Z, fix deployed 15:05Z, next slot
-  the following day; it sat `failed` re-paging hourly until a human ran
+  the following day; radon-divyield 2026-08-24: `Result=timeout` at 23:57Z,
+  next slot ~22h. Both sat `failed` re-paging hourly until a human ran
   reset-failed + start. Without a newer deploy nothing has changed, a rerun
   would only fail again, so it falls through to grok.
 - the unit's timer's next elapse is more than 12h away
   (`RERUN_TIMER_HORIZON_SECS`). Closer than that, waiting for the timer
   remains correct and grok triages the page as before.
+- the unit has not already spent its re-run for the UTC day
+  (`MAX_RERUNS_PER_UNIT_PER_DAY`, counted by `watchdog.pages.reruns_since`
+  over completed `restarted_unit:` tickets for that service). R-115: the
+  green-deploy marker is written by EVERY green deploy with no relation to
+  the failed unit, so a unit failing for an environmental reason (UW quota
+  exhausted, provider 5xx, gateway down) otherwise satisfies "a fix has
+  deployed since" once per unrelated merge to main, indefinitely — four of
+  the allowlisted units are UW consumers, so each attempt spends quota it
+  does not have. Fails CLOSED: a count that cannot be read stands the
+  re-run down.
 
 Action: `systemctl reset-failed <unit>` + `systemctl start --no-block
 <unit>`, ticket completed as `restarted_unit`, normal follow-up push. Any

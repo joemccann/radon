@@ -116,6 +116,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-divyield.timer",
     "radon-hyad.service",
     "radon-hyad.timer",
+    "radon-hhlev.service",
+    "radon-hhlev.timer",
 ]
 
 LONG_RUNNING_SERVICES = [
@@ -380,7 +382,11 @@ class TestSignalsRefresh:
         raw = (services_dir / "radon-signals-refresh.timer").read_text()
         oncalendar = timer.get("oncalendar", "")
         assert "Mon..Fri" in oncalendar
-        assert "09..16:00:00 America/New_York" in raw
+        # R-170: minute :05, not :00 — radon-garch (14:00 UTC) and radon-leap
+        # (10:00 ET) both land in the 14:00 UTC minute and each hold one of
+        # the three general-lane subprocess slots for up to an hour, so two
+        # signals scans deterministically contended for the last one.
+        assert "09..16:05:00 America/New_York" in raw
         assert ":00,15,30,45" not in raw
         assert "America/New_York" in raw
         assert timer.get("persistent") == "false"
@@ -397,6 +403,8 @@ class TestFlowRefresh:
         assert "run_flow_refresh.sh" in svc["execstart"]
         assert int(svc["timeoutstartsec"]) <= 600
         assert "RADON_UW_CALLER=flow-refresh" in raw
+        # R-067 / R-170: wrapper SHED_EXIT=75 must not enter failed.
+        assert svc.get("successexitstatus") == "75"
 
     def test_timer_is_hourly_et(self, unit, services_dir):
         raw = (services_dir / "radon-flow-refresh.timer").read_text()
@@ -876,7 +884,9 @@ class TestBpiScanBudget:
     stale, so radon-bpi's "incremental" run is a full-universe refetch
     (~35-45 min with Yahoo courtesy sleeps). TimeoutStartSec=1200 killed
     the 2026-07-27 run mid-SPX (Result=timeout, watchdog paged); the
-    budget must cover a full sweep with headroom."""
+    budget must cover a full sweep with headroom. 2026-08-24: 6900s still
+    SIGTERM'd a tarpitted RUT spark — the process now self-limits at
+    SWEEP_BUDGET_S=6600; this TimeoutStartSec must not rise (R-071)."""
 
     def test_service_start_budget_covers_full_universe_sweep(self, unit):
         svc = unit("radon-bpi.service")["Service"]
@@ -908,6 +918,23 @@ class TestBpiScanBudget:
         assert budget >= 6300, (
             "budget must still cover the worst measured tarpitted sweep"
         )
+
+
+class TestDivyieldScanBudget:
+    """Daily 22:40 UTC Yahoo constituent sweep. TimeoutStartSec=900 killed
+    the 2026-08-24 run (Result=timeout, NRestarts=0) while Yahoo v8 was
+    ~20s/chart: 503 tickers / 6 workers needs ~28 min. The start budget
+    must cover that tarpit plus one in-flight FETCH_TIMEOUT_S, and still
+    end long before the next calendar fire (24h)."""
+
+    def test_service_start_budget_covers_tarpitted_yahoo_sweep(self, unit):
+        svc = unit("radon-divyield.service")["Service"]
+        assert svc["type"] == "oneshot"
+        assert int(svc["timeoutstartsec"]) >= 2100
+
+    def test_start_budget_ends_before_the_next_calendar_fire(self, unit):
+        svc = unit("radon-divyield.service")["Service"]
+        assert int(svc["timeoutstartsec"]) <= 3600
 
 
 class TestLeapGarchScanBudget:

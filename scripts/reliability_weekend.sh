@@ -19,6 +19,48 @@
 # git failure at midnight exits silently with no dead-man comment and no page.
 set -Eeuo pipefail
 
+# One writer per runner clone. Both weekend plists drive the SAME tree and
+# every entry point (and continuation round) runs `git clean -fdq`, so a
+# missed Saturday audit firing on wake near the Sunday slot would delete
+# remediate's uncommitted work mid-write with both runs reporting success.
+# mkdir is the atomic primitive here: flock(1) does not exist on macOS.
+acquire_runner_lock() {
+  local dir="$1" held
+  if ! mkdir "$dir" 2>/dev/null; then
+    held="$(cat "$dir/pid" 2>/dev/null || true)"
+    if [[ -n "$held" ]] && kill -0 "$held" 2>/dev/null; then
+      echo "weekend runner lock held by pid $held ($dir)" >&2
+      return 1
+    fi
+    echo "[weekend] reclaiming stale runner lock (pid ${held:-unknown})" >&2
+    rm -rf -- "$dir"
+    mkdir "$dir" 2>/dev/null || { echo "cannot take runner lock $dir" >&2; return 1; }
+  fi
+  echo "$$" > "$dir/pid"
+  return 0
+}
+
+release_runner_lock() { rm -rf -- "$1"; }
+
+# The 00:00 fetch is the cycle's single point of failure: 2026-08-23 one run
+# died here on a port-22 blackhole (NordVPN) before the agent started.
+# Bounded so a genuinely dead uplink still surfaces within minutes.
+FETCH_ATTEMPTS="${RADON_WEEKEND_FETCH_ATTEMPTS:-3}"
+FETCH_PAUSE_SECS="${RADON_WEEKEND_FETCH_PAUSE_SECS:-60}"
+fetch_origin_with_retry() {
+  local attempt
+  for (( attempt = 1; attempt <= FETCH_ATTEMPTS; attempt++ )); do
+    git fetch origin --quiet && return 0
+    echo "[weekend] git fetch origin failed — attempt $attempt/$FETCH_ATTEMPTS" >&2
+    if (( attempt < FETCH_ATTEMPTS )); then sleep "$FETCH_PAUSE_SECS"; fi
+  done
+  return 1
+}
+
+# `source reliability_weekend.sh --lock-lib-only` exposes the helpers
+# above to the contract tests without running a weekend.
+[[ "${1:-}" == "--lock-lib-only" ]] && return 0 2>/dev/null
+
 MODE="${1:?usage: reliability_weekend.sh audit|remediate|cycle}"
 [[ "$MODE" == "audit" || "$MODE" == "remediate" || "$MODE" == "cycle" ]] || {
   echo "unknown mode: $MODE" >&2; exit 2;
@@ -39,6 +81,20 @@ cd "$REPO"
   echo "REFUSING: $REPO is not the dedicated weekend runner clone" >&2
   exit 2
 }
+
+RUNNER_LOCK="$REPO/.weekend-runner.lock"
+acquire_runner_lock "$RUNNER_LOCK" || {
+  echo "REFUSING: another weekend run owns $REPO" >&2
+  exit 3
+}
+trap 'release_runner_lock "$RUNNER_LOCK"' EXIT
+
+RUNNER_LOCK="$REPO/.weekend-runner.lock"
+acquire_runner_lock "$RUNNER_LOCK" || {
+  echo "REFUSING: another weekend run owns $REPO" >&2
+  exit 3
+}
+trap 'release_runner_lock "$RUNNER_LOCK"' EXIT
 
 LOG_DIR="$REPO/logs/reliability-weekend"
 mkdir -p "$LOG_DIR"
@@ -128,10 +184,10 @@ on_crash() {
 # Fresh ground truth. Any leftover state from a killed prior run is
 # discarded — the branch/PR on GitHub is the durable state.
 ground_truth() {
-  git fetch origin --quiet
+  fetch_origin_with_retry
   git checkout -f --quiet main
   git reset --hard --quiet origin/main
-  git clean -fdq --exclude=.radon-weekend-runner --exclude=logs/ --exclude=.env --exclude=.env.ib-mode --exclude=web/.env
+  git clean -fdq --exclude=.radon-weekend-runner --exclude=.weekend-runner.lock --exclude=logs/ --exclude=.env --exclude=.env.ib-mode --exclude=web/.env
 }
 
 # The agent commits per completed task and the skill resumes from the
@@ -173,6 +229,11 @@ run_phase() {
   echo "[weekend] $PHASE start $STAMP repo=$REPO cap=${CAP_SECS}s" | tee -a "$RUN_LOG"
   ground_truth
 
+  # R-185: `timeout claude` returning 124 (cap) or any non-zero agent exit is
+  # an EXPECTED outcome these rounds handle — but the ERR trap was still armed
+  # over them, so every failed or timed-out round posted a false
+  # "CRASHED — wrapper died" dead-man comment AND then its real status.
+  trap - ERR
   local round=1
   while :; do
     echo "[weekend] $PHASE round $round/$MAX_ROUNDS" | tee -a "$RUN_LOG"
@@ -194,9 +255,10 @@ run_phase() {
     # main is force-reset; the local weekend branch and its commits survive.
     git checkout -f --quiet main
     git reset --hard --quiet origin/main
-    git clean -fdq --exclude=.radon-weekend-runner --exclude=logs/ --exclude=.env --exclude=.env.ib-mode --exclude=web/.env
+    git clean -fdq --exclude=.radon-weekend-runner --exclude=.weekend-runner.lock --exclude=logs/ --exclude=.env --exclude=.env.ib-mode --exclude=web/.env
   done
-  trap - ERR
+  # A genuine wrapper death AFTER the rounds finished must still page.
+  trap on_crash ERR
 
   local tail_text
   tail_text="$(tail -c 1500 "$RUN_LOG" 2>/dev/null || true)"

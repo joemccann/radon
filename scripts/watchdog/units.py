@@ -11,7 +11,9 @@ times over 10 days before anything noticed.
 
 Three signals, one alert max per unit per cycle (highest severity wins):
 
-  * ``failed``   — ActiveState=failed. P1. ``Result=start-limit-hit`` is
+  * ``failed``   — ActiveState=failed. P1, except Type=oneshot
+    ``Result=exit-code`` re-observed at the same InactiveEnterTimestamp
+    (P3: the next timer is the retry). ``Result=start-limit-hit`` is
     called out explicitly because it requires a manual operator action.
   * ``flap``     — SubState=auto-restart observed in two consecutive
     watchdog cycles. P1 (sustained crash loop).
@@ -43,13 +45,12 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from .check import CheckOutcome
-from .external_probe import TRANSITION_JOURNAL_STRANDED_AFTER_SECONDS
 
 log = logging.getLogger("watchdog.units")
 
 
 UNIT_GLOB = "radon-*"
-SHOW_PROPERTIES = "Id,ActiveState,SubState,Result,NRestarts,InactiveEnterTimestamp"
+SHOW_PROPERTIES = "Id,ActiveState,SubState,Result,NRestarts,InactiveEnterTimestamp,Type"
 SYSTEMCTL_TIMEOUT_S = 10
 
 _PROJECT_DIR = Path(__file__).resolve().parent.parent.parent
@@ -72,6 +73,16 @@ DEPLOY_COLLATERAL_WINDOW_SECS = 60 * 60
 # a 60-min cap here false-paged that exact shape). Past 24h the unit is
 # frozen — the deploy left it dead (e.g. timer disabled) — and it re-pages P1.
 KILL_BEFORE_GREEN_FROZEN_CAP_SECS = 24 * 60 * 60
+
+# R-157: the `in_flight` branch keyed on nothing but the journal EXISTING.
+# R-057 established that an interrupted deploy leaves it on disk indefinitely
+# and cannot self-clear, and shipped this same bound in external_probe.py —
+# units.py never got it. While a stranded journal sits there (a state the
+# fleet already alarms at P2), every OOM-kill, `systemctl kill` or
+# stop-timeout SIGKILL of any radon-* unit in the previous 24h was
+# reclassified P3 digest instead of P1 page. Kept numerically identical to
+# external_probe's, and pinned by a test.
+TRANSITION_JOURNAL_STRANDED_AFTER_SECONDS = 3600
 
 
 # ── systemctl seam ───────────────────────────────────────────────────
@@ -132,33 +143,42 @@ def _parse_systemd_timestamp(value: str) -> Optional[datetime]:
     return parsed.replace(tzinfo=_tz.utc)
 
 
-def _file_mtime(path: Path) -> Optional[datetime]:
+def _read_deploy_evidence() -> dict:
     from datetime import timezone as _tz
 
+    marker_mtime = None
     try:
-        if not path.is_file():
-            return None
-        return datetime.fromtimestamp(path.stat().st_mtime, tz=_tz.utc)
+        if GREEN_MARKER_PATH.is_file():
+            marker_mtime = datetime.fromtimestamp(
+                GREEN_MARKER_PATH.stat().st_mtime, tz=_tz.utc
+            )
     except OSError:
-        return None
-
-
-def _journal_is_live(now: datetime) -> bool:
-    """T-103: shares external_probe's R-057 rule. An interrupted deploy
-    strands the journal on disk forever; past the staleness cap it is
-    not evidence of a live deploy and must not downgrade signal kills."""
-    journal_mtime = _file_mtime(TRANSITION_JOURNAL_PATH)
-    if journal_mtime is None:
-        return False
-    age = (now - journal_mtime).total_seconds()
-    return age <= TRANSITION_JOURNAL_STRANDED_AFTER_SECONDS
-
-
-def _read_deploy_evidence(now: datetime) -> dict:
+        pass
+    journal_age_seconds: Optional[float] = None
+    try:
+        journal_age_seconds = (
+            datetime.now(_tz.utc)
+            - datetime.fromtimestamp(TRANSITION_JOURNAL_PATH.stat().st_mtime, tz=_tz.utc)
+        ).total_seconds()
+    except OSError:
+        journal_age_seconds = None
     return {
-        "marker_mtime": _file_mtime(GREEN_MARKER_PATH),
-        "in_flight": _journal_is_live(now),
+        "marker_mtime": marker_mtime,
+        "in_flight": TRANSITION_JOURNAL_PATH.exists(),
+        "journal_age_seconds": journal_age_seconds,
     }
+
+
+def _journal_is_stranded(deploy: dict) -> bool:
+    """True when the transition journal is too old to be evidence of a deploy.
+
+    An unknown age is treated as stranded: the journal cannot self-clear, so
+    "we could not read its mtime" is not a reason to keep excusing kills.
+    """
+    age = deploy.get("journal_age_seconds")
+    if age is None:
+        return True
+    return age > TRANSITION_JOURNAL_STRANDED_AFTER_SECONDS
 
 
 def _is_deploy_collateral(unit: dict, deploy: Optional[dict], now: datetime) -> bool:
@@ -192,8 +212,8 @@ def _is_deploy_collateral(unit: dict, deploy: Optional[dict], now: datetime) -> 
     age = (now - failed_at).total_seconds()
     if age < 0:
         return False
-    if deploy.get("in_flight") and age <= DEPLOY_COLLATERAL_WINDOW_SECS:
-        return True
+    if deploy.get("in_flight") and not _journal_is_stranded(deploy):
+        return age <= DEPLOY_COLLATERAL_WINDOW_SECS
     marker = deploy.get("marker_mtime")
     if marker is None:
         return False
@@ -224,6 +244,8 @@ def _save_state(path: Path, current: list[dict], now: datetime) -> None:
             "nrestarts": unit.get("NRestarts"),
             "auto_restart": unit.get("SubState") == "auto-restart",
             "active_state": unit.get("ActiveState"),
+            "inactive_enter": unit.get("InactiveEnterTimestamp"),
+            "unit_type": unit.get("Type"),
         }
         for unit in current
     }
@@ -247,8 +269,32 @@ def _outcome_for(*, unit_id: str, severity: str, message: str, now: datetime) ->
     )
 
 
+def _is_oneshot_exit_code_latch(unit: dict, previous: dict) -> bool:
+    """True when this is the same completed oneshot ExecStart still sitting
+    in ActiveState=failed.
+
+    Type=oneshot has no Restart=, so NRestarts stays 0 and systemd leaves
+    the unit failed until the next timer fire. The first sight of a given
+    InactiveEnterTimestamp is a real ExecStart failure and still pages P1.
+    Re-observing the same timestamp is the latch, not a new outage
+    (2026-08-24 radon-flow-refresh capacity shed).
+    """
+    if unit.get("Type") != "oneshot":
+        return False
+    if (unit.get("Result") or "") != "exit-code":
+        return False
+    ts = unit.get("InactiveEnterTimestamp") or ""
+    if not ts or ts == "n/a":
+        return False
+    prior = previous.get(unit.get("Id") or "") or {}
+    return (prior.get("inactive_enter") or "") == ts
+
+
 def _failed_alert(
-    unit: dict, now: datetime, deploy: Optional[dict] = None
+    unit: dict,
+    now: datetime,
+    deploy: Optional[dict] = None,
+    previous: Optional[dict] = None,
 ) -> Optional[CheckOutcome]:
     if unit.get("ActiveState") != "failed":
         return None
@@ -260,6 +306,12 @@ def _failed_alert(
         message = (
             f"signal-killed inside a deploy window (Result={result}) — "
             "deploy stop-clean collateral, recovers on the next timer fire"
+        )
+        return _outcome_for(unit_id=unit["Id"], severity="P3", message=message, now=now)
+    if _is_oneshot_exit_code_latch(unit, previous or {}):
+        message = (
+            f"oneshot Result=exit-code latched "
+            f"(NRestarts={unit.get('NRestarts')}) — next timer retries"
         )
         return _outcome_for(unit_id=unit["Id"], severity="P3", message=message, now=now)
     message = f"systemd unit failed (Result={result}, NRestarts={unit.get('NRestarts')})"
@@ -333,7 +385,9 @@ def evaluate(
     """One alert max per unit, plus a prior-P1 recovery observation."""
     outcomes = []
     for unit in current:
-        p1_alert = _failed_alert(unit, now, deploy) or _flap_alert(unit, previous, now)
+        p1_alert = _failed_alert(unit, now, deploy, previous) or _flap_alert(
+            unit, previous, now
+        )
         recovery = None if p1_alert else _recovery_observation(unit, previous, now)
         if recovery:
             outcomes.append(recovery)
@@ -373,7 +427,7 @@ def check_units(
 
     previous = _load_state(state_path)
     outcomes = evaluate(
-        current=current, previous=previous, now=now, deploy=_read_deploy_evidence(now)
+        current=current, previous=previous, now=now, deploy=_read_deploy_evidence()
     )
     try:
         _save_state(state_path, current, now)

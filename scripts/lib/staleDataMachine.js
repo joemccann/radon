@@ -297,13 +297,43 @@ export function farmStateAfterIdleDrain() {
  * @param {StaleDataInput & {inError: boolean, lastHeartbeatAt: number, subscribedSymbols?: number}} input
  * @returns {{action: "none"|"resubscribe"|"reconnect"|"escalate", heartbeat: boolean, clearError: boolean, degraded: boolean}}
  */
+/**
+ * R-168: while the IB socket is DOWN during RTH the relay wrote no
+ * service_health row at all — decideStaleAction returns "none" on
+ * !ibConnected, hasHealthyDataPlane is false so the heartbeat and clearError
+ * are withheld, and isDataPlaneNulled is false so `degraded` is withheld too.
+ * A relay whose socket is simply gone mid-session was byte-identical, on the
+ * health surface, to one that is fine.
+ *
+ * Bounded by the same staleness threshold the tick ladder uses, so an
+ * ordinary reconnect (seconds) never writes an error row.
+ *
+ * @param {StaleDataInput & {disconnectedSinceAt?: number|null}} input
+ * @returns {boolean}
+ */
+export function isDisconnectedDuringDemand({
+  ibConnected,
+  isMarketHours,
+  activeSubscriptions = 0,
+  subscribedSymbols = activeSubscriptions,
+  now,
+  disconnectedSinceAt,
+}) {
+  if (isMarketHours !== true) return false;
+  if (ibConnected) return false;
+  if (subscribedSymbols <= 0 && activeSubscriptions <= 0) return false;
+  if (disconnectedSinceAt == null) return false;
+  return now - disconnectedSinceAt > STALE_DATA_THRESHOLD_MS;
+}
+
 export function decideHealthWrite(input) {
   const action = decideStaleAction(input);
   const isHealthyCycle = action === "none" && hasHealthyDataPlane(input);
   const clearError = isHealthyCycle && input.inError === true;
   const heartbeat = isHealthyCycle && shouldWriteTickHeartbeat(input);
   const degraded = input.isMarketHours === true && isDataPlaneNulled(input);
-  return { action, heartbeat, clearError, degraded };
+  const disconnected = isDisconnectedDuringDemand(input);
+  return { action, heartbeat, clearError, degraded, disconnected };
 }
 
 /**

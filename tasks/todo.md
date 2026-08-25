@@ -1,3 +1,68 @@
+# Task: P1 radon-bpi Result=timeout (page bbaa065b, 2026-08-24 23:30Z)
+
+## Dependency graph
+
+- B1 depends_on: [] - Red: tarpitted Yahoo spark/chart stop inside SWEEP_BUDGET_S
+- B2 depends_on: [B1] - Shared run deadline; exit before TimeoutStartSec=6900
+- B3 depends_on: [B2] - Runbook case + focused pytest
+
+## Checklist
+
+- [x] B1 Red tests
+- [x] B2 Wall-clock budget (do not raise TimeoutStartSec; R-071 stands)
+- [x] B3 Runbook `bpi-yahoo-sweep-timeout`
+
+## Review
+
+- Focused pytest: `test_bpi_scan.py` 35 passed; `TestBpiScanBudget` 3 passed
+- Live: 21:30Z Result=timeout at 6900s mid-RUT spark; 23:30 catch-up already running; no unit restart
+
+---
+
+# Task: flow-refresh oneshot shed page (2026-08-24)
+
+## Dependency graph
+
+- F1 depends_on: [] - Red tests: SuccessExitStatus=75 + oneshot exit-code latch
+- F2 depends_on: [F1] - Unit SuccessExitStatus, watchdog latch, hash bump
+- F3 depends_on: [F2] - Focused pytest green
+
+## Checklist
+
+- [x] F1 Red tests
+- [x] F2 Unit + watchdog + hash
+- [x] F3 Verify
+
+## Review
+
+- Focused pytest 19+56 contract/watchdog + 7 cloud
+- Wrapper on main already remaps all-shed to exit 0 (872a3ed6, deployed 19:15Z)
+- Repeating page is the oneshot ActiveState=failed latch from 19:00Z
+
+---
+
+# Task: Reconstruct 1025 lockout from Turso (2026-08-23)
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests: missing sidecar reconstructs live 1025/permanent row
+- T2 depends_on: [T1] - Reconstruct lockout in flex_embargo, is_due, /cash-flows, lozenge
+- T3 depends_on: [T2] - Verify focused pytest + vitest
+
+## Checklist
+
+- [x] T1 Red tests
+- [x] T2 Reconstruct lockout
+- [x] T3 Verify
+
+## Review
+
+- Focused pytest 43 passed; lozenge vitest 10/10
+- Live topology: no sidecar + class=permanent 1025 from 2026-08-21T13:58Z
+  blocks Monday 08:00 ET; next_attempt is last_attempt+7d not 12:00Z Monday
+
+---
+
 # Task: GSC indexing / ranking (2026-08-23)
 
 ## Report (sc-domain:radon.run, last update 8/20/26)
@@ -43,6 +108,39 @@
 - Do not change privileged control-plane scripts (drift_audit, helpers, sudoers).
 - Do not restart Gateway.
 - /etc/radon/env must exist as a regular file before units switch EnvironmentFile.
+
+---
+
+# Task: P3 app-plane images (2026-08-24)
+
+## Dependency graph
+
+- P3A depends_on: [] - Red tests: runtime wrapper, per-unit drop-ins, Dockerfiles, sudoers pull, non-gating CI
+- P3B depends_on: [P3A] - Green: buildable python/node images, radon-app-runtime, bootstrap artifact, host default
+- P3C depends_on: [P3B] - Docs. Do not merge to main until after 16:00 ET. Do not install drop-ins until after hours.
+
+## Checklist
+
+- [x] P3A Red tests
+- [x] P3B Wrapper + images + sudoers pull + bootstrap artifact + app-images.yml
+- [x] P3C Docs. Branch only; no main push; no live ExecStart docker; no Gateway restart
+
+## Constraints
+
+- Live units stay host ExecStart until after-hours per-unit drop-in.
+- radon is not in group docker. run is root wrapper, not User=radon docker.
+- Wrapper must not take the deploy lock.
+- Do not mount docker.sock. Do not own Gateway, Caddy, health.
+- Image job is not a deploy `needs`.
+- First SHA that adds the wrapper/sudoers still needs one root bootstrap.
+
+## Review
+
+- Red then green: `cloud/tests` 1059 passed / 4 skipped / 166.35s.
+- Wrapper `radon-app-runtime`: `pull` sudoers-exact; `run` allowlisted 5 units; host net; `--user` radon; notify bind; cgroup parent; no engine socket; no deploy lock; refuses Gateway/health/Caddy.
+- Live `ExecStart` still host binaries. Per-unit examples commented, not installed. Fleet example documents the Gateway/health trap.
+- `app-images.yml` is not in `ci.yml` deploy `needs`. `deploy.sh` still refuses non-host `RADON_RUNTIME`.
+- Not merged to main (market open). After 16:00 ET: merge, bootstrap, `radon-app-runtime pull`, then install drop-ins + `restart-managed`. Gateway CID unchanged.
 
 ---
 
@@ -3503,3 +3601,11 @@ Per /indicator swarm (spec: docs/indicators/skew.md). Slug/service `skew`, tab S
 - Show Me artifact: `tasks/artifacts/show-me-security-remediation.html`.
 
 ---
+
+# Review — DIVYIELD + HYAD + HHLEV indicator swarm (2026-08-23)
+
+- [x] DIVYIELD (`/regime/divyield`, service `div-yield`, migration 0055): pct of S&P 500 stocks with TTM dividend yield above the 10Y CMT. GitHub constituents CSV (Wikipedia + seed fallbacks), Yahoo v8 per-ticker sweep (6 workers, 15.7s laptop), y10 from `yield_curve_history`. 439 approximate monthly rows 1990+ (survivorship-labeled) + daily accumulation. Current 3.78% (19/503 vs 4.74%) matches the NDR chart's 3.85%. Shipped in CI run 32673940611 (deployed).
+- [x] HYAD (`/regime/hyad`, service `hy-ad`, migration 0056): HY corporate bond cumulative A-D line from FINRA dynarep TRACE breadth (CORP+CORP_144A fieldC), 2,156 rows 2018+, 21/50d MAs, SPX overlay from `credit_spread_history`. Regime DETERIORATING mirrors the McClellan divergence. Backfill bug found+fixed: offset paging is unstable intra-date; page by year windows.
+- [x] HHLEV (`/regime/hhlev`, service `hhlev`, migration 0057): Z.1 household liabilities as pct of net worth (TLBSHNO/TNWBSHNO via keyless fredgraph CSV; keyed API fallback). 304 quarters 1945Q4+; current 11.78% DELEVERAGED; 2009Q1 peak 24.26 — matches the JPM chart. Full-history re-upsert per run (Z.1 revisions).
+- Cross-cutting fixes: `scripts/utils/ipv4_first.py` (VPS IPv6 blackholes Yahoo/GitHub → 60s/request in urllib; wired into all three fetchers), midnight-safe `_TODAY` anchors in test_divyield/test_hyad (CI 00:0x UTC flake), HYAD strip merged to 5 cells (fixed 5-col grid).
+- Evidence: red suites (25+27+33 pytest, 5/5/16/17 vitest) → per-lane green → full gates 7,097 pytest + 1,012 cloud + 7,162 vitest + typecheck → live screenshots docs/indicators/{divyield,hyad,hhlev}-tab.png → Turso rows verified → CI + deploy per run links in git log.

@@ -22,7 +22,7 @@ This document covers Radon's two-mode architecture introduced in Phase 0–6 of 
 
 - **Database**: Turso (libSQL) — every Radon process talks **directly** to the cloud DB for both reads and writes. Direct-to-cloud is the code default (DUR-07; replica is opt-in only via `RADON_DB_USE_REPLICA=1`), and the prefix drop-in `/etc/systemd/system/radon-.service.d/common.conf` sets the `RADON_DB_NO_REPLICA=1` kill switch on every `radon-*` unit as belt-and-suspenders. The embedded-replica architecture (`data/replica.db`) was retired 2026-05-20 after two same-day incidents: multi-writer WAL checkpoint contention (radon-cloud `741cfc6`) followed by single-writer frame conflicts between the replica owner and direct-cloud writers (radon-cloud `2c46232`). The libsql embedded-replica model only works when ONE host has exactly ONE writer; Radon's split between Node and Python writers can't satisfy that constraint. Reads cost +30–60 ms cloud round-trip, absorbed by SWR caching. See `feedback_libsql_replica_one_writer.md` for the full failure-mode catalog.
 - **Media**: Hetzner-hosted Caddy serves `https://media.radon.run`; the laptop's newsfeed scraper rsyncs new images over Tailscale.
-- **Schedulers**: laptop launchd plists (local mode) OR Hetzner host systemd (cloud mode). Production is host systemd; IB Gateway is the only production container. App-plane images are future work and default `RADON_RUNTIME=host`. Unit sources live in `/home/radon/radon/cloud/services/` and are installed through the reviewed control-plane path. The former `docker/services/` tree was deleted as decoy units in `40cfff2a` and is not a scheduler alternative.
+- **Schedulers**: laptop launchd plists (local mode) OR Hetzner host systemd (cloud mode). Production is host systemd; IB Gateway is the only production container until per-unit app drop-ins are installed. App-plane images default `RADON_RUNTIME=host`. Unit sources live in `/home/radon/radon/cloud/services/` and are installed through the reviewed control-plane path. The former `docker/services/` tree was deleted as decoy units in `40cfff2a` and is not a scheduler alternative.
 - **Self-contained**: themarketear.com newsfeed scraper is now a headless Playwright flow that runs on either the laptop or Hetzner. No magic-link or Chrome Debug.app dependency.
 
 ## Newsfeed (`themarketear.com`) — Self-contained headless flow
@@ -172,7 +172,7 @@ Related: `scripts/db/migrate.py` (radon-api `ExecStartPre`) retries transport-cl
 
 ### Runtime planes
 
-Production is three planes: host (never container), broker (already Docker), app (host today, images later). IB Gateway in `cloud/docker-compose.yml` is the only production container. App-plane images (`docker/app`) are scaffolding only, not production runtime; the default is `RADON_RUNTIME=host`. The former `docker/services/` tree was deleted as decoy units in `40cfff2a` and is not a containerized scheduler alternative.
+Production is three planes: host (never container), broker (already Docker), app (host default). IB Gateway in `cloud/docker-compose.yml` is the only production container until per-unit `runtime-container.conf` drop-ins are installed after hours. App-plane images (`docker/app`) plus `/usr/local/sbin/radon-app-runtime` are the optional container path; the default is `RADON_RUNTIME=host`. Do not install the fleet `radon-.service.d` example (it would override Gateway and health). The former `docker/services/` tree was deleted as decoy units in `40cfff2a` and is not a containerized scheduler alternative.
 
 ## Trades — single source of truth
 
@@ -505,7 +505,8 @@ Re-check with `turso plan show` after any plan change. Nightly dumps remain mand
 
 Daily `21:45 UTC` (`RandomizedDelaySec=300`), oneshot
 `scripts/fetch_credit_spread.py`. IB daily closes for HYG + SPX, then UW, then
-Yahoo. Heartbeat `credit-spread`. Units are listed in `setup-vps.sh`
+Yahoo. Both units share IB client IDs 56/69 and therefore serialize on `flock -w <peer budget> -E 75 /run/lock/radon-ib-history-5669.lock`: the 21:45/21:55 gap is not a mutex once `RandomizedDelaySec=300` applies to both. The lock loser exits 75 (`SuccessExitStatus=75`) and defers to its next slot instead of entering `failed` (R-127).
+Heartbeat `credit-spread`. Units are listed in `setup-vps.sh`
 `SERVICE_FILES`; root install-copy is still owed (`not-installed` allowlist
 expires 2026-12-31). Spec: [`indicators/credit.md`](indicators/credit.md).
 
@@ -514,7 +515,8 @@ expires 2026-12-31). Spec: [`indicators/credit.md`](indicators/credit.md).
 Daily `21:55 UTC` (`RandomizedDelaySec=300`), oneshot
 `scripts/fetch_iei_hyg.py`. IB daily closes for IEI + HYG (SMART) and the ICE
 dollar index (`DX`, NYBOT), then UW (IEI/HYG, regular-session rows only), then
-Yahoo (`DX-Y.NYB` for DXY). Heartbeat `iei-hyg`. Installed by the deploy's
+Yahoo (`DX-Y.NYB` for DXY). Serialized against `radon-credit-spread` on the
+shared IB client IDs (see above). Heartbeat `iei-hyg`. Installed by the deploy's
 `install-units` verb from `installed-units.sha256`. Spec:
 [`indicators/iei-hyg.md`](indicators/iei-hyg.md).
 
@@ -525,8 +527,10 @@ Every 5 minutes `Mon..Fri 13:02-21:57 UTC` (2 min offset from
 `scripts/fetch_trin.py`, `TimeoutStartSec=240`. During RTH (ET, calendar-gated
 at runtime, `/health` auth-gated) it snapshots IB `TRIN-NYSE` plus `AD-NYSE` /
 `VOL-NYSE` into Turso `trin_samples`; hourly bars and MA(10) are derived at
-read time. Every run refreshes StockCharts `$TRIN` daily closes
-(`trin_daily`) and heartbeats, so off-hours runs are daily-only heartbeats.
+read time. The StockCharts `$TRIN` daily series (`trin_daily`) is scraped
+only when the last closed session is missing from the cache (R-121: it used to
+scrape on all 108 cycles a day for at most one new row); every run heartbeats,
+so off-hours runs are heartbeat-only.
 Heartbeat `trin`. Installed by the deploy's `install-units` verb from
 `installed-units.sha256`. Spec: [`indicators/trin.md`](indicators/trin.md).
 
@@ -534,7 +538,7 @@ Heartbeat `trin`. Installed by the deploy's `install-units` verb from
 
 Daily `22:40 UTC` (`RandomizedDelaySec=300`, offset from `radon-yield-curve`'s
 22:30 pass so the day's `y10` row lands first), oneshot
-`scripts/fetch_divyield.py`, `TimeoutStartSec=900`. Percent of S&P 500
+`scripts/fetch_divyield.py`, `TimeoutStartSec=2100`. Percent of S&P 500
 constituents whose trailing-12M dividend yield exceeds the 10Y Treasury yield:
 constituents from the github-datasets CSV (Wikipedia parse API, then the
 `index_constituents` cache/seed chain as fallbacks), per-ticker trailing yields
@@ -555,6 +559,19 @@ holidays), cumulative line and 21/50-day MAs derived at payload build, SPX
 overlay joined from `credit_spread_history`. Rows in `hyad_history` (2018+).
 Heartbeat `hy-ad`. Installed by the deploy's `install-units` verb from
 `installed-units.sha256`. Spec: [`indicators/hyad.md`](indicators/hyad.md).
+
+### HH LEV (`radon-hhlev.timer`)
+
+Daily `13:20 UTC` (`RandomizedDelaySec=300`, offset from `radon-margin-debt`'s
+13:10 pass), oneshot `scripts/fetch_hhlev.py`, `TimeoutStartSec=300`. US
+household leverage: Z.1 household liabilities as a percent of net worth
+(`TLBSHNO`/`TNWBSHNO`) from the keyless FRED fredgraph CSV (UA must be
+`radon/2.0 (+https://radon.run)`; the bare token is reset by FRED's edge),
+keyed FRED API fallback via `FRED_API_KEY`. Quarterly source (~10 week lag,
+releases Mar/Jun/Sep/Dec); the daily run re-upserts the full revised series
+into `hhlev_history` and heartbeats `hhlev` regardless. Installed by the
+deploy's `install-units` verb from `installed-units.sha256`. Spec:
+[`indicators/hhlev.md`](indicators/hhlev.md).
 
 ### IV RANK (`radon-ivrank.timer`)
 

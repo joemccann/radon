@@ -85,7 +85,7 @@ IBKR rejection text embeds literal `<br>` tokens. `web/lib/orderError.ts:formatO
 ### Sign Convention
 Credits negative, debits positive. **Never `Math.abs()` on option prices without approval.** Preserve sign through entire display pipeline.
 
-**Avg Entry / Initial Value sign is scoped by leg count AND instrument (`getAvgEntry` / `getInitialValue`), identically for both columns.** Multi-leg COMBO → net credit/debit sign (a credit combo reads NEGATIVE). Single-leg **stock** → `Math.abs` (Avg Entry is a per-instrument PRICE; a short stock shows +$1,134.97). Single-leg **short option** → NEGATIVE (premium CREDIT, matching the signed LAST PRICE mark). Single-leg **long option** → positive (debit paid). Sign comes from `leg.direction`, not `entry_cost` (stored as a positive magnitude); per-leg `LegRow` stays `|leg.entry_cost|`. Don't re-add `Math.abs` on the `pos.legs.length > 1` path citing a "non-negative" rule — that's the EWY credit-combo bug (2026-06-23). Tests: `position-table-short-stock-avg-entry.test.tsx`, `position-table-credit-combo-sign.test.tsx`.
+**Avg Entry / Initial Value sign is scoped by leg count AND instrument (`getAvgEntry` / `getInitialValue`), identically for both columns.** Multi-leg COMBO → net credit/debit sign (a credit combo reads NEGATIVE). Single-leg **stock** → `Math.abs` (Avg Entry is a per-instrument PRICE; a short stock shows +$1,134.97). Single-leg **short option** → NEGATIVE (premium CREDIT, matching the signed LAST PRICE mark). Single-leg **long option** → positive (debit paid). Sign comes from `leg.direction`, not `entry_cost` (stored as a positive magnitude). Expanded `LegRow`s follow the same scoping (2026-08-23): a SHORT option leg's Avg Entry, Last Price, and Implied render NEGATIVE (premium credits); stock legs and the Entry Cost / Initial Value / MV leg cells stay positive magnitudes. Don't re-add `Math.abs` on the `pos.legs.length > 1` path citing a "non-negative" rule — that's the EWY credit-combo bug (2026-06-23). Tests: `position-table-short-stock-avg-entry.test.tsx`, `position-table-credit-combo-sign.test.tsx`.
 
 ### Daily Change %
 ```
@@ -201,7 +201,7 @@ cushion = excess_liquidity / net_liquidation
 
 | Tab | Key Files | Notes |
 |---|---|---|
-| **VCG** | `useVcg.ts`, `vcg_scan.py`, `data/vcg.json` | RO: VIX>28 + VCG>2.5. EDR: VIX>25 + VCG 2.0–2.5. BOUNCE: VCG<-3.5. VVIX = amplifier, not gate. `POST /vcg/{scan,share}`, 60s cooldown. Autonomous 5-min via `radon-vcg-refresh.timer`. 15min banner window. |
+| **VCG** | `useVcg.ts`, `vcg_scan.py`, `data/vcg.json` | RO: VIX>28 + VCG>2.5. EDR: VIX>25 + VCG 2.0–2.5. BOUNCE: VCG<-3.5. VVIX = amplifier, not gate. `POST /vcg/{scan,share}`; scan admission via `SCAN_GATES` (120s cooldown serves cache, 60s failure backoff returns 429). Autonomous 5-min via `radon-vcg-refresh.timer`. 15min banner window. |
 | **GEX** | `useGex.ts`, `gex_scan.py`, `data/gex.json` | UW: `call_gex` positive, `put_gex` negative, `net = call_gex + put_gex` (no negation). Levels: GEX Flip, Max Magnet, Max Accelerator, Put/Call Wall. Bias: BULL/CAUTIOUS_BULL/NEUTRAL/CAUTIOUS_BEAR/BEAR. |
 | **RV Ratio** (`/options/rv-ratio`) | `useRvRatio.ts`, `rv_ratio_scan.py`, Turso `rv_ratio_snapshots` | Per-asset 252-session realized vol ÷ SPY with ±1σ band + divergence regime (`in_band/elevated/decoupled/compressed`). GET is Turso-first (`dbFirstRead`); a missing/stale snapshot fires exactly ONE synchronous scan POST (600s FastAPI cooldown, no polling). Freshness is session-relative to the **last COMPLETED ET session** (`lastCompletedSessionDate`, 16:00 ET boundary) — intraday, yesterday's close is current; never mark a snapshot stale for lacking today's in-progress candle. Plan: `tasks/rv-ratio-indicator-plan.md`. |
 | **CRI / Regime** | `criStaleness.ts`, `regime` route triggers `cri_scan.py` | Stale if `data.date != today` OR (market_open AND mtime>60s). CRI `history` carries ~251 days; chart slices for display; statistical windows are explicit constants. |
@@ -263,5 +263,33 @@ Depth montage / ladder + Time & Sales in the ticker Book tab. Plan + full design
 - **Feature flag.** Gated end-to-end on `RADON_DEPTH_ENABLED` (relay reads `process.env`). OFF (default) → relay opens NO `reqMktDepth` tickets, registers no depth handlers, stays on delayed-frozen (`reqMarketDataType(4)`); the UI shows the existing `<L1OrderBook>`. ON → relay flips the connection to realtime (`reqMarketDataType(1)`) — depth + tick-by-tick require realtime. A dedicated realtime depth client is the production follow-up; today the shared relay connection flips while depth is active.
 - **IB lib.** The relay uses **`@stoqey/ib`** (migrated from the dead `ib@0.2.9`) — events via the `EventName` enum, contracts as plain object literals, `error` is positional `(error, code, reqId)` with a `reqId>=0` guard. `reqMktDepth(id, contract, numRows, isSmartDepth)`: `isSmartDepth=true` equity/option (SMART-aggregated montage, `marketMaker`=exchange), `false` futures (`updateMktDepth`, no MM → price-level ladder). **Depth ticket budget ~3 concurrent** → relay enforces a cap + LRU recycle keyed to the focused symbol.
 - **Entitlements (confirmed live).** Account is realtime-entitled with L2 depth on NASDAQ/BATS/ARCA/BEX/NYSE/IEX. Error `10089` (no depth entitlement) → relay cancels the ticket + emits `depth-unavailable`, UI degrades to L1; never latches a fault.
+- **Per-instrument context fields are subject-owned.** `depthSymbols`, `depthFutureExpiry`, and `focusedBookKey` are written by the SUBJECT (`TickerDetailContent`, `FuturesOrderForm`): the effect that publishes a value publishes the empty value in its cleanup, keyed on ticker. `setActiveTicker` must never reset them on a ticker change: React runs child passive effects before the parent's, so a reset inside the shell's ticker-sync lands AFTER the new subject's publish and wins — `usePrices` never sent `subscribe-depth` and client-side navigation degraded to a single-row "L1 BBO" book with an empty tape while a hard load looked fine (2026-08-24). The `!ticker` branch (leaving detail) may still clear everything. Tests: `ticker-detail-context-depth-symbols-race.test.tsx`, `ticker-detail-content-focused-book-key-clears.test.tsx`.
 - **WS protocol.** `subscribe-depth` / `unsubscribe-depth` take a **single** symbol — scarce resource, only the focused subject subscribes (distinct from the array `subscribe`). Types + message shapes live in `pricesProtocol.ts`; pure derivations in `web/lib/book/depthDerivations.ts`.
 - **Verification.** Depth rows + the tape only populate during **market hours (RTH)** — empty off-hours is correct, not a bug. A populated ladder needs an RTH chrome-cdp check. Phase 1 ships an empty `Trade[]` tape; the dedicated tape feed is Phase 3.
+
+## Bounded shutdown (`instrumentation.ts` → `lib/boundedShutdown.ts`)
+
+Next's own SIGTERM handler runs `server.close()`, which waits for every open
+connection; in RTH those include `radonFetch` calls with 130 s timeouts against
+a FastAPI the deploy has already stopped, so `radon-nextjs` sat in
+`final-sigterm` until systemd's 90 s SIGKILL while the deploy waits 60 s
+(three rollbacks on 2026-08-24). `installBoundedShutdown()` lets Next's
+cleanup run and force-exits after `SHUTDOWN_GRACE_MS` (10 s). Never raise the
+grace above the deploy's `STATE_WAIT_SECONDS`. Test: `tests/bounded-shutdown.test.ts`.
+
+## Auto-sync is per-user rate-limited; tabs must not race it
+
+`POST /api/portfolio` (`portfolio-sync`) and `POST /api/orders` (`orders-refresh`)
+are limited to 4/min **per user** (`lib/routeAccess.ts`), shared by every tab
+and device. `useAutoSyncOnStale` therefore takes its cooldown through
+`lib/autoSyncClaim.ts` under a Web Lock (`navigator.locks`, one holder per
+origin) so the read-then-write is atomic across tabs; without locks it degrades
+to the synchronous claim. A 429 on the sync POST is **coalescence** (a sibling
+already synced this window): `usePortfolio.doSync` / `useOrders.triggerSync`
+keep the snapshot and never put the body text into `error`; the GET poll is
+not backed off by a POST 429 (separate `portfolio:route` bucket). A 429 on the
+cached GET honours `Retry-After` and keeps the snapshot on screen; only a cold
+tab with nothing to show reports it (2026-08-24: 963 "Too Many Requests"
+banners from five aligned tabs).
+Tests: `tests/auto-sync-claim.test.ts`, `tests/use-portfolio-sync-429.test.ts`,
+`tests/use-orders-sync-429.test.ts`.

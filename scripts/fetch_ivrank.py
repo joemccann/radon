@@ -81,9 +81,19 @@ def rank_window(values: list[float]) -> Optional[float]:
     return (current - low) / (high - low) * 100.0
 
 
-def pct_window(values: list[float]) -> float:
-    """Share of the window strictly below the last value, as a percent."""
+def pct_window(values: list[float]) -> Optional[float]:
+    """Share of the window strictly below the last value, as a percent.
+
+    R-191: None on the same degenerate window `rank_window` refuses. It used
+    to return 0.0 there (nothing is strictly below), and `build_current`'s
+    `has_rank = iv_rank is not None or iv_pct is not None` made that 0.0
+    sufficient to unlock the 1-year low/high block — publishing "1M IV is
+    below every one of the trailing 252 sessions", the cheapest-premium
+    signal the indicator can print, beside `iv_rank: null`.
+    """
     current = values[-1]
+    if max(values) == min(values):
+        return None
     below = sum(1 for value in values if value < current)
     return below / len(values) * 100.0
 
@@ -123,13 +133,23 @@ def merge_history(
 ) -> list[dict[str, Any]]:
     """Upsert-merge fetched rows over stored history by date.
 
-    Fetched wins (IB restates the current session's bar), except a uw row
-    never overwrites a stored ib row for the same date.
+    Fetched wins (IB restates the current session's bar), with two refusals:
+    a `uw` row never overwrites a stored `ib` row, and — R-154 — an `ib` row
+    never overwrites a stored REPAIRED row. The daily IB "1M" fetch restates
+    the same bad bar, which used to clobber the repair; `repair_outliers`
+    then re-detected it and re-called UW, and a lookup that raised or
+    returned None left `_rows_changed` True, so `_write_db` upserted the bad
+    print back over the good value. Once the date aged out of the 1-month IB
+    window it froze at whatever the last run wrote — and a 0.2443 print
+    against a ~0.12 series sets the max of the 252-session window, distorting
+    `iv_rank` and its label for every one of the next 252 sessions.
     """
     by_date = {row["date"]: dict(row) for row in stored}
     for row in fetched:
         existing = by_date.get(row["date"])
         if existing and existing.get("source") == "ib" and row.get("source") == "uw":
+            continue
+        if existing and existing.get("repaired") and row.get("source") == "ib":
             continue
         by_date[row["date"]] = dict(row)
     return [by_date[date] for date in sorted(by_date)]
@@ -162,7 +182,17 @@ def repair_outliers(
     repaired = [dict(row) for row in rows]
     repairs: list[dict[str, Any]] = []
     index = {row["date"]: i for i, row in enumerate(repaired)}
-    for date in detect_outliers(repaired):
+    outliers = detect_outliers(repaired)
+    if len(outliers) > UW_REPAIR_MAX_LOOKUPS:
+        # Newest first: a fresh bad print is worth more than a 2023 one that
+        # UW may never be able to serve (R-152).
+        outliers = sorted(outliers, reverse=True)[:UW_REPAIR_MAX_LOOKUPS]
+        print(
+            f"[ivrank] repair pass bounded to {UW_REPAIR_MAX_LOOKUPS} UW lookups "
+            f"(newest first); the remainder retries tomorrow",
+            file=sys.stderr,
+        )
+    for date in outliers:
         try:
             uw_iv = uw_iv_lookup(date)
         except Exception:  # noqa: BLE001 — advisory feed; body never logged
@@ -172,7 +202,11 @@ def repair_outliers(
             continue
         i = index[date]
         repairs.append({"date": date, "ib_iv": repaired[i]["iv"], "uw_iv": float(uw_iv)})
-        repaired[i] = {"date": date, "iv": float(uw_iv), "source": "uw"}
+        # `repaired` is what makes the substitution durable against the next
+        # IB restatement of the same bad bar (R-154).
+        repaired[i] = {
+            "date": date, "iv": float(uw_iv), "source": "uw", "repaired": True,
+        }
     return repaired, repairs
 
 
@@ -235,8 +269,22 @@ def _uw_token() -> str:
     return (os.environ.get("UW_TOKEN") or "").strip().strip('"').strip("'")
 
 
+# R-152: `repair_outliers` walks the ENTIRE stored history and re-flags every
+# row still tagged `source == "ib"`. A date UW cannot serve (its 2023-09-22
+# floor) stays `ib` and is re-fetched every night forever — unbounded and
+# monotone. Bound the per-run lookups; the backlog drains a slice a night and
+# a permanently unservable date stops costing quota every single run.
+UW_REPAIR_MAX_LOOKUPS = 25
+
+
 def _uw_get(path: str) -> dict[str, Any]:
-    """Bounded UW GET. Never log the response body — 401 bodies echo the token."""
+    """Bounded UW GET. Never log the response body — 401 bodies echo the token.
+
+    R-152: this was a raw `urlopen` with no `record_hit`, so every ivrank UW
+    hit was invisible to `/uw/usage`, to `top_callers` and to
+    `should_block_universe_scan` — the R-062 hole REL-036 closed for the six
+    Next.js routes, reopened by a job merged in this delta.
+    """
     from urllib.request import Request, urlopen
 
     token = _uw_token()
@@ -246,8 +294,23 @@ def _uw_get(path: str) -> dict[str, Any]:
         f"{UW_BASE_URL}{path}",
         headers={"Authorization": f"Bearer {token}", "User-Agent": USER_AGENT},
     )
-    with urlopen(req, timeout=UW_TIMEOUT_S) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    try:
+        with urlopen(req, timeout=UW_TIMEOUT_S) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    finally:
+        _count_uw_hit(path)
+
+
+def _count_uw_hit(path: str) -> None:
+    """Attribute one UW request to the shared daily budget. Never raises."""
+    try:
+        from utils import uw_budget
+
+        uw_budget.record_hit(
+            caller="ivrank", endpoint=path.split("?", 1)[0]
+        )
+    except Exception:  # noqa: BLE001 — the gauge must never fail the job
+        pass
 
 
 def _real_uw_fetch() -> list[dict[str, Any]]:
@@ -355,16 +418,30 @@ def _write_db(
     """
     if writer is None:
         return
+    # R-192: the row upsert, the snapshot AND the heartbeat used to share one
+    # `except`, so a Hrana 502 on the first skipped the other two — and
+    # `run()` then wrote data/*.json unconditionally and exited 0. Turso held
+    # day N-1, the JSON held day N, routes prefer the DB, and no heartbeat
+    # explained it. The row write is bounded on its own and its failure is
+    # FOLDED INTO the heartbeat instead of silencing it.
+    row_error: Optional[dict[str, Any]] = None
     try:
         writer.ensure_no_replica_for_writers()
         if rows_changed and rows:
             writer.upsert_ivrank_rows(rows, recorded_at=scan_time)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[ivrank] row upsert failed: {exc}", file=sys.stderr)
+        row_error = {
+            "message": f"ivrank row upsert failed: {exc}",
+            "class": "db_write_failed",
+        }
+    try:
         writer.upsert_scan_snapshot(SERVICE, scan_time, payload)
         writer.record_service_health(
             SERVICE,
-            "ok" if health_error is None else "error",
+            "ok" if (health_error is None and row_error is None) else "error",
             finished_at=scan_time,
-            error=health_error,
+            error=health_error or row_error,
         )
     except Exception as exc:  # noqa: BLE001 — best-effort mirror
         print(f"[ivrank] db cache non-fatal: {exc}", file=sys.stderr)

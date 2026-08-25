@@ -58,6 +58,30 @@ export type DbFirstResult<T> =
     }
   | { ok: false };
 
+/**
+ * Collapse a stale read onto the route's "missing" constant WITHOUT losing
+ * the provenance that makes it diagnosable.
+ *
+ * R-125: four routes computed `fresh` and then served on `ok` alone, so a
+ * writer that died on Friday kept serving Friday's print as current. Gating
+ * on `fresh` fixes that, but replacing the payload with a bare constant
+ * (R-194's complaint about the two routes that already gated) makes "the
+ * feed died three days ago" read identically to "this job has never run".
+ * The stale row's own `scan_time` rides along, plus `stale: true`.
+ */
+export function staleCollapse<M extends { scan_time?: string | null }, T>(
+  missing: M,
+  result: DbFirstResult<T>,
+): M & { stale?: true } {
+  if (!result.ok) return missing;
+  const scanTime = (result.data as { scan_time?: unknown })?.scan_time;
+  return {
+    ...missing,
+    stale: true as const,
+    scan_time: typeof scanTime === "string" ? scanTime : missing.scan_time ?? null,
+  };
+}
+
 export type DbFirstReadOptions<T> = {
   /** Latest Turso snapshot, or null when no row exists. Throwing is treated as absent. */
   fromDb: () => Promise<TimestampedRead<T> | null>;

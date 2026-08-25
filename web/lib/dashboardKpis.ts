@@ -43,7 +43,8 @@ export function deriveKpis(portfolio: PortfolioData | null, realizedPnl = 0, now
   const netLiq = acct?.net_liquidation ?? null;
   // IB's streamed dailyPnL only describes a session on a trading day; fall
   // back to realized fills otherwise (zero on a weekend, so the cell blanks).
-  const ibDaily = currentIbDailyPnl(acct?.daily_pnl, now);
+  // R-107: the snapshot's own date decides, not the wall clock.
+  const ibDaily = currentIbDailyPnl(acct?.daily_pnl, now, portfolio?.last_sync);
   const todayPnl = ibDaily ?? (realizedPnl !== 0 ? realizedPnl : null);
   const buyingPower = acct?.buying_power ?? null;
 

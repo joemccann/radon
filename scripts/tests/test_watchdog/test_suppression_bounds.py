@@ -238,7 +238,7 @@ def _signal_block(unit_id: str, killed_at: datetime) -> str:
 
 
 class TestInFlightJournalStaleness:
-    """T-103 — units' ``in_flight`` deploy evidence shares the R-057
+    """T-103 / R-157 — units' ``in_flight`` deploy evidence shares the R-057
     stranded-journal rule: a journal older than
     ``TRANSITION_JOURNAL_STRANDED_AFTER_SECONDS`` is an interrupted deploy,
     not a live one, so it must not downgrade signal kills."""
@@ -248,7 +248,7 @@ class TestInFlightJournalStaleness:
         monkeypatch.setattr(units, "GREEN_MARKER_PATH", tmp_path / "last-green-deploy")
         monkeypatch.setattr(units, "TRANSITION_JOURNAL_PATH", journal)
         journal.write_text("{}\n")
-        stamp = (NOW - timedelta(seconds=age_seconds)).timestamp()
+        stamp = (datetime.now(timezone.utc) - timedelta(seconds=age_seconds)).timestamp()
         os.utime(journal, (stamp, stamp))
 
     def test_stranded_journal_is_not_in_flight(self, tmp_path, monkeypatch):
@@ -258,7 +258,7 @@ class TestInFlightJournalStaleness:
             age_seconds=external_probe.TRANSITION_JOURNAL_STRANDED_AFTER_SECONDS + 600,
         )
 
-        assert units._read_deploy_evidence(now=NOW)["in_flight"] is False, (
+        assert units._journal_is_stranded(units._read_deploy_evidence()) is True, (
             "a journal aged past the staleness cap is an interrupted deploy — "
             "it must not count as in-flight deploy evidence"
         )
@@ -266,13 +266,21 @@ class TestInFlightJournalStaleness:
     def test_fresh_journal_is_in_flight(self, tmp_path, monkeypatch):
         self._units_journal(tmp_path, monkeypatch, age_seconds=120)
 
-        assert units._read_deploy_evidence(now=NOW)["in_flight"] is True
+        evidence = units._read_deploy_evidence()
+        assert evidence["in_flight"] is True
+        assert units._journal_is_stranded(evidence) is False
 
     def test_absent_journal_is_not_in_flight(self, tmp_path, monkeypatch):
         monkeypatch.setattr(units, "GREEN_MARKER_PATH", tmp_path / "last-green-deploy")
         monkeypatch.setattr(units, "TRANSITION_JOURNAL_PATH", tmp_path / "deploy-transition.json")
 
-        assert units._read_deploy_evidence(now=NOW)["in_flight"] is False
+        assert units._read_deploy_evidence()["in_flight"] is False
+
+    def test_units_and_external_probe_share_the_staleness_cap(self):
+        assert (
+            units.TRANSITION_JOURNAL_STRANDED_AFTER_SECONDS
+            == external_probe.TRANSITION_JOURNAL_STRANDED_AFTER_SECONDS
+        )
 
     def test_inflight_kill_older_than_deploy_window_returns_to_p1(self):
         """Even with a fresh journal, a kill 20h old cannot be this
@@ -283,7 +291,7 @@ class TestInFlightJournalStaleness:
 
         outcomes = units.evaluate(
             current=current, previous={}, now=NOW,
-            deploy={"marker_mtime": None, "in_flight": True},
+            deploy={"marker_mtime": None, "in_flight": True, "journal_age_seconds": 120},
         )
 
         assert [o.severity for o in outcomes] == ["P1"]
@@ -294,7 +302,7 @@ class TestInFlightJournalStaleness:
 
         outcomes = units.evaluate(
             current=current, previous={}, now=NOW,
-            deploy={"marker_mtime": None, "in_flight": True},
+            deploy={"marker_mtime": None, "in_flight": True, "journal_age_seconds": 120},
         )
 
         assert [o.severity for o in outcomes] == ["P3"]

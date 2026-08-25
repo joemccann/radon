@@ -255,7 +255,6 @@ function LegRow({
   );
   const marketPrice = resolvedPrice.price;
   const isCalculated = resolvedPrice.isCalculated;
-  const { direction: priceDirection, flashDirection } = usePriceDirection(marketPrice);
 
   // Per-leg P&L: sign-aware (MV - EC)
   const mult = leg.type === "Stock" ? 1 : 100;
@@ -263,6 +262,14 @@ function LegRow({
   const legEc = Math.abs(leg.entry_cost);
   const sign = leg.direction === "LONG" ? 1 : -1;
   const legPnl = legMv != null ? sign * (legMv - legEc) : null;
+
+  // A SHORT option leg's Avg Entry and Last Price are premium CREDITS and
+  // display negative, matching the signed combo header row. Stock legs stay
+  // positive — their Avg Entry is a per-instrument PRICE, same scoping as the
+  // single-leg stock rule.
+  const displaySign = leg.type === "Stock" ? 1 : sign;
+  const signedMarketPrice = marketPrice != null ? displaySign * marketPrice : null;
+  const { direction: priceDirection, flashDirection } = usePriceDirection(signedMarketPrice);
 
   // The leg-description cell spans across the columns to the right of Ticker
   // up through Direction: Structure, optional Qty, Direction (each gated).
@@ -283,11 +290,11 @@ function LegRow({
       )}
       {showUnderlying && <td></td>}
       {columns.avg_entry && (
-        <td className="right cell-muted">{fmtPrice(Math.abs(leg.avg_cost) / (leg.type === "Stock" ? 1 : 100))}</td>
+        <td className="right cell-muted">{fmtPrice(displaySign * (Math.abs(leg.avg_cost) / mult))}</td>
       )}
       {columns.last_price && (
         <td className="right last-price-cell">
-          {marketPrice != null ? fmtPriceOrCalculated(marketPrice, isCalculated) : "—"}
+          {signedMarketPrice != null ? fmtPriceOrCalculated(signedMarketPrice, isCalculated) : "—"}
           {priceDirection === "up" && <ArrowUp size={11} className="price-trend-icon price-trend-up" aria-label="price up" />}
           {priceDirection === "down" && <ArrowDown size={11} className="price-trend-icon price-trend-down" aria-label="price down" />}
         </td>
@@ -536,8 +543,8 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
                 prices,
                 { riskFreeRate },
               );
-        const legImplied = legResult?.perContract ?? null;
         const legSign = leg.direction === "LONG" ? 1 : -1;
+        const legImplied = legResult?.perContract != null ? legSign * legResult.perContract : null;
         const legImpliedMv = legResult?.notional != null ? legSign * legResult.notional : null;
         return (
           <LegRow

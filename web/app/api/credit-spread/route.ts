@@ -3,7 +3,7 @@ import { readFile } from "fs/promises";
 import { join } from "path";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
-import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
+import { contentTimestampMs, dbFirstRead, type TimestampedRead, staleCollapse, isMissingPayload } from "@/lib/dbFirstRead";
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
 // first response and serves stale data until the dev server restarts.
@@ -55,8 +55,14 @@ export async function GET(): Promise<Response> {
     fromDisk: readCreditSpreadFromDisk,
     maxAgeMs: CREDIT_SPREAD_MAX_AGE_MS,
     label: "credit-spread",
+    // R-193: a writer that ran, produced nothing and still stamped a
+    // timestamped row would otherwise outrank an older row with a real
+    // series on freshness alone. Same guard vixcor and ivrank carry.
+    isDegraded: isMissingPayload,
   });
-  const response = NextResponse.json(result.ok ? result.data : MISSING_CREDIT_SPREAD);
+  const response = NextResponse.json(
+    result.ok && result.fresh ? result.data : staleCollapse(MISSING_CREDIT_SPREAD, result),
+  );
   return setCacheResponseHeaders(response, {
     maxAgeSeconds: 300,
     staleWhileRevalidateSeconds: 3600,

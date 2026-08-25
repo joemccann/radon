@@ -221,18 +221,28 @@ def _write_db(
     """
     if writer is None:
         return
+    row_error: Optional[dict[str, Any]] = None
     try:
         writer.ensure_no_replica_for_writers()
         if rows_changed:
             if vix_tail:
                 writer.upsert_price_history_rows(VIX_SYMBOL, vix_tail)
             writer.upsert_vixcor_rows(payload["series"], recorded_at=scan_time)
+    except Exception as exc:  # noqa: BLE001
+        # R-192: see fetch_ivrank._write_db — a failed row upsert must not
+        # take the snapshot and the heartbeat down with it and still exit 0.
+        print(f"[vixcor] row upsert failed: {exc}", file=sys.stderr)
+        row_error = {
+            "message": f"vixcor row upsert failed: {exc}",
+            "class": "db_write_failed",
+        }
+    try:
         writer.upsert_scan_snapshot(SERVICE, scan_time, payload)
         writer.record_service_health(
             SERVICE,
-            "ok" if health_error is None else "error",
+            "ok" if (health_error is None and row_error is None) else "error",
             finished_at=scan_time,
-            error=health_error,
+            error=health_error or row_error,
         )
     except Exception as exc:  # noqa: BLE001 — best-effort mirror
         print(f"[vixcor] db cache non-fatal: {exc}", file=sys.stderr)

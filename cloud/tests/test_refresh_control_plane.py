@@ -423,11 +423,17 @@ def test_preflight_skips_services_hash_mismatch_and_fails_closed_on_scripts_conf
     assert "services/" in preflight
 
 
-def test_restart_services_invokes_refresh_after_install_units() -> None:
+def test_restart_services_refreshes_before_restart_and_installs_units_after() -> None:
+    """Control-plane refresh runs while the app tier is down (after activate,
+    before restart-managed); timer-owned units install AFTER the app tier is
+    back (R-094 / REL-045) so a new Persistent=true timer cannot fire its
+    catch-up run into a dead FastAPI."""
     deploy = DEPLOY.read_text(encoding="utf-8")
     restart = function_body(deploy, "restart_services")
     assert "refresh_control_plane" in restart
-    assert restart.index("install_release_units") < restart.index("refresh_control_plane")
+    assert restart.index("activate_staged_release") < restart.index("refresh_control_plane")
+    assert restart.index("refresh_control_plane") < restart.index("start_services_after_transition")
+    assert restart.index("start_services_after_transition") < restart.index("install_release_units")
     refresh = function_body(deploy, "refresh_control_plane")
     assert "refresh-control-plane" in refresh
     assert "refresh-control-plane-privileged" not in refresh

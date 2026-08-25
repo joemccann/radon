@@ -100,6 +100,19 @@ def _split_statements(sql: str) -> list[str]:
     return [s.strip() for s in parts if s.strip()]
 
 
+# Substrings SQLite/libsql use for "this object is already there", which on a
+# REPLAY is the applied state rather than a failure (R-153).
+_ALREADY_APPLIED_MARKERS = (
+    "duplicate column name",
+    "already exists",
+)
+
+
+def _is_already_applied(exc: BaseException) -> bool:
+    message = str(exc).lower()
+    return any(marker in message for marker in _ALREADY_APPLIED_MARKERS)
+
+
 def main() -> None:
     url = os.environ.get("TURSO_DB_URL")
     token = os.environ.get("TURSO_AUTH_TOKEN")
@@ -137,12 +150,27 @@ def main() -> None:
             try:
                 db.execute(stmt)
             except Exception as exc:
+                # R-153: 0050 is the only real ALTER TABLE in the set. A kill
+                # between its committed ADD COLUMN and the version row left
+                # version 50 unrecorded, so the next run replayed it, hit
+                # `duplicate column name` and ABORTED — taking 0051-0054 with
+                # it. migrate.py is radon-api's ExecStartPre, so that is a
+                # control-plane outage on every boot until a hand repair.
+                # A statement whose object already exists IS the applied
+                # state; anything else still fails loudly.
+                if _is_already_applied(exc):
+                    sys.stderr.write(
+                        f"[migrate] {name}: statement already applied, continuing "
+                        f"({exc})\n"
+                    )
+                    continue
                 sys.stderr.write(f"[migrate] FAILED on statement:\n{stmt[:200]}\n\n")
                 raise
-        db.commit()
         # The migration file's own INSERT INTO schema_migrations may already
         # record the version; if not, record it ourselves. INSERT OR IGNORE
-        # keeps both code paths idempotent.
+        # keeps both code paths idempotent. Issued BEFORE the commit so the
+        # version lands with the statements, not in a second round trip that
+        # a dropped connection can lose.
         db.execute(
             "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, datetime('now'))",
             (version,),

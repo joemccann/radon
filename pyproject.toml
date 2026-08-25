@@ -15,6 +15,9 @@ known-first-party = ["utils", "trade_blotter"]
 # was inflating the CI coverage gate ~15pts (73.01% inflated vs 58.00%
 # honest product-only) — TEST_AUDIT T-050.
 omit = ["scripts/tests/*", "scripts/api/tests/*", "scripts/trade_blotter/test_*.py", "tests/*"]
+# CI shards pytest; combine needs repo-relative paths so
+# /home/runner/work/... does not fork the same file into two rows.
+relative_files = true
 
 [tool.pytest.ini_options]
 # Pin import roots so collection is cwd-independent. Without this, running

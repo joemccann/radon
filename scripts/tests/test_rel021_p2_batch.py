@@ -102,6 +102,11 @@ class TestPriceCachePruneOnWrite:
         monkeypatch.setattr(price_cache, "STOCKS_DIR", stocks)
         prune = MagicMock()
         monkeypatch.setattr(price_cache, "prune_cache", prune)
+        # R-174 made the write-path prune single-flight and rate-limited (it
+        # runs inside the PARALLEL fetch path, which its own docstring
+        # forbids). R-033's contract — an ordinary write maintains the cap —
+        # is unchanged; the interval just has to be clear for this call.
+        monkeypatch.setattr(price_cache, "_last_prune_at", 0.0)
 
         price_cache.write_cache(stocks, "AAPL_2026-01-01_2026-02-01",
                                 {"2026-01-02": 100.0}, source="ib", ttl=900)

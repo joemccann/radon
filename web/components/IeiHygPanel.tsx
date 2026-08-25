@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Scale } from "lucide-react";
 import BrushMinimap from "./BrushMinimap";
+import PanelRefreshError from "./PanelRefreshError";
 import CriHistoryChart, { type ChartSeries } from "./CriHistoryChart";
 import HistoryRangeChips from "./HistoryRangeChips";
 import InfoTooltip from "./InfoTooltip";
@@ -23,7 +24,7 @@ import { useIeiHyg } from "@/lib/useIeiHyg";
 import { useViewport } from "@/lib/useViewport";
 
 const INFO_TOOLTIP =
-  "IEI over HYG. A new 52-week low means high yield is outperforming Treasuries: spreads tightening, risk-on. A new 52-week high is the opposite. DXY is an overlay only.";
+  "The price ratio of IEI over HYG. IEI is the iShares 3-7 Year Treasury Bond ETF: coupon-paying US Treasury notes in the middle of the curve (3 to 7 year maturities, no STRIPS), a pure intermediate rates instrument. HYG is the iShares iBoxx USD High Yield Corporate Bond ETF: the most liquid corner of the junk bond market, typically shorter maturity and less rate sensitive than the broad junk universe. A new 52-week low in the ratio means high yield credit is outperforming Treasuries: spreads tightening, risk-on. A new 52-week high means money is leaving junk credit for Treasuries: risk-off. DXY is an overlay only.";
 
 interface IeiHygChartRow {
   date: string;
@@ -58,7 +59,7 @@ function finiteOrNull(v: number | null | undefined): number | null {
 }
 
 export default function IeiHygPanel() {
-  const { data, loading, syncing, lastSync } = useIeiHyg();
+  const { data, loading, syncing, lastSync, error } = useIeiHyg();
   const { isMobile, hasMounted } = useViewport();
   const compact = hasMounted && isMobile;
 
@@ -86,14 +87,14 @@ export default function IeiHygPanel() {
   }, [activeRange, customRange, total]);
 
   if ((loading || syncing) && !data) {
-    return <SpectralLoader label="Loading IEI/HYG series" />;
+    return <SpectralLoader label="Loading Treasury vs high yield ratio series" />;
   }
 
   if (!data || data.missing || !data.current || series.length === 0) {
     return (
       <SectionEmptyState
         icon={Scale}
-        headline="No IEI/HYG snapshot"
+        headline="No Treasury vs high yield snapshot"
         secondary="Waiting for the iei-hyg refresh timer"
       />
     );
@@ -135,9 +136,10 @@ export default function IeiHygPanel() {
         <div className="section-header">
           <div className="section-title">
             <Scale size={14} />
-            IEI/HYG
+            TREASURIES VS HIGH YIELD
             <InfoTooltip text={INFO_TOOLTIP} />
           </div>
+          <PanelRefreshError error={error} testId="iei-hyg-refresh-error" />
           {lastSync && (
             <span style={{ fontFamily: "var(--font-mono)", fontSize: "9px", color: "var(--text-muted)" }}>
               {new Date(lastSync).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
@@ -165,7 +167,7 @@ export default function IeiHygPanel() {
               testId="iei-hyg-strip-ratio"
               label="RATIO"
               value={<span data-testid="iei-hyg-ratio">{formatRatio(current.ratio)}</span>}
-              sub={<>IEI OVER HYG · RANK <span data-testid="iei-hyg-rank">{formatRank(current.ratio_pct_rank)}</span></>}
+              sub={<>IEI 3-7Y TSY / HYG HY CORP · RANK <span data-testid="iei-hyg-rank">{formatRank(current.ratio_pct_rank)}</span></>}
             />
             <RegimeStripCell
               testId="iei-hyg-strip-state"
@@ -213,7 +215,7 @@ export default function IeiHygPanel() {
         <CriHistoryChart
           history={slice}
           series={chartSeries}
-          title="IEI / HYG RATIO"
+          title="3-7Y TREASURIES VS HIGH YIELD (IEI / HYG RATIO)"
           xTickFormat={formatDateTick}
         />
         {total >= 2 && (

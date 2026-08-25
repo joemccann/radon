@@ -147,7 +147,7 @@ Incident: 2026-07-08, P1.
 `feedback_deploy_stop_clean_fails_inflight_scan_oneshots`.
 
 - **Mechanism:** `deploy.sh` stop-clean stops every `radon-*` unit,
-  including long `Type=oneshot` writers (`radon-bpi` TimeoutStartSec=9000,
+  including long `Type=oneshot` writers (`radon-bpi` TimeoutStartSec=6900,
   weekday sweep 35-105 min). systemd records `Result=signal`,
   `NRestarts=0`. The unit recovers on its next timer fire. The
   continuous units watchdog used to page that as a P1 outage.
@@ -233,6 +233,94 @@ the unit stays failed.
   (`RADON_SIGNALS_SCAN_TIMEOUT`, default 200),
   `cloud/services/radon-signals-refresh.service` (`TimeoutStartSec=1050`,
   `Environment=RADON_SIGNALS_SCAN_TIMEOUT=490`).
+
+---
+
+## divyield-yahoo-sweep-timeout
+
+**`radon-divyield.service` oneshot pages P1 `Result=timeout` (`NRestarts=0`)
+on the daily 22:40 UTC timer.** Peak: 2026-08-23 23:57Z, page `c52496dd…`.
+
+- **Mechanism:** `fetch_divyield.py` sweeps ~503 S&P 500 Yahoo v8 charts
+  with `ThreadPoolExecutor.map` (6 workers, 30s/request). The spec's
+  healthy-path measurement was 15.7s, so `TimeoutStartSec=900` looked
+  like slack. A slow Yahoo night (~20s/chart) needs ~28 min
+  (`503/6*20`). `map()` waited out the tarpit; systemd SIGTERM'd at
+  900s (`ExecMainStatus=15`). Nothing persisted. `Type=oneshot` has no
+  `Restart=`, so `NRestarts=0` and `ActiveState=failed` until the next
+  calendar fire (~22h). Unit watchdog pages P1. IB unused; weekend
+  gateway-down is coincidental.
+- **Detection:** journal `[div-yield] constituents: 503 tickers via
+  github-datasets` then silence until systemd timeout;
+  `systemctl show radon-divyield.service -p Result,NRestarts` →
+  `timeout` / `0`; ExecMainStart to InactiveEnter is exactly
+  `TimeoutStartSec`. Edge and `:8321/health/lite` stay up.
+  `service_health.div-yield` may still be `ok` from an earlier
+  same-day catch-up.
+- **Discriminating check:** `Result=timeout` with a constituents log
+  and no `quote sweep 100/503` (or a late one) in the same run. Yahoo
+  chart latency on the host in the tens of seconds. `Result=signal` is
+  deploy stop-clean (do not raise the budget). Zero constituents is a
+  different class. If `/health/lite` is down too → API, stand down.
+- **Remediation (code):** wall-clock `SWEEP_BUDGET_S=1800` with
+  `wait(..., FIRST_COMPLETED)` so the process exits before systemd
+  kills it; unfinished tickers count as `quote_errors` (the 80%
+  degenerate guard still refuses a thin sweep). `TimeoutStartSec=2100`
+  covers the budget plus one in-flight `FETCH_TIMEOUT_S`. Do not
+  restart-flap on the hung code; after the fix deploys, one
+  `radon unit restart radon-divyield`. Polkit cannot gain a new
+  rerun grant in the same release (control-plane preflight).
+- **Regression:**
+  `test_divyield.py::TestSweepBudget::test_tarpitted_yahoo_stops_inside_the_wall_clock_budget`,
+  `test_systemd_services.py::TestDivyieldScanBudget`,
+  `test_page_responder.py::test_timeout_reruns_when_a_fix_deployed_after_the_failure`.
+- **Code:** `scripts/fetch_divyield.py` (`SWEEP_BUDGET_S`, `sweep_yields`),
+  `cloud/services/radon-divyield.service` (`TimeoutStartSec=2100`).
+
+---
+
+## bpi-yahoo-sweep-timeout
+
+**`radon-bpi.service` oneshot pages P1 `Result=timeout` (`NRestarts=0`)
+on the weekday 21:30 UTC fire.** Peak: 2026-08-24 23:30Z, page `bbaa065b…`.
+
+- **Mechanism:** `bpi_scan.py --index all` spark-batches NDX/SPX/RUT
+  member closes (20 symbols/chunk, sequential). Weekday 21:30 is a
+  full-universe refetch. 2026-08-24: NDX 8 min, SPX 22 min, then RUT
+  1996 members (~100 chunks at ~60s) still running when systemd
+  SIGTERM'd at `TimeoutStartSec=6900` (21:31:31Z start → InactiveEnter
+  23:26:31Z). `Type=oneshot` has no `Restart=`, so `NRestarts=0`.
+  Unit watchdog pages P1. NDX+SPX had already upserted; RUT did not.
+  Heartbeat sits outside the kill, so `bpi-scan` stays on the prior
+  cycle. R-071 sized 6900 to unstick the 23:30 catch-up; that fire
+  did start. Raising `TimeoutStartSec` would swallow it again.
+- **Detection:** journal `history: 1996 members, fetching 1996` then
+  silence until systemd timeout; `systemctl show radon-bpi.service
+  -p Result,NRestarts` → `timeout` / `0`; ExecMainStart to
+  InactiveEnter is exactly `TimeoutStartSec`. Edge and
+  `:8321/health/lite` stay up. `service_health.bpi-scan` may still
+  be `ok` from an earlier catch-up.
+- **Discriminating check:** `Result=timeout` after an NDX/SPX persist
+  and a RUT `fetching NNNN` line with no `spark wall-clock budget
+  spent` / `RUT: Turso history`. `Result=signal` is deploy stop-clean
+  (do not raise the budget). If `/health/lite` is down too → API,
+  stand down.
+- **Remediation (code):** process-wide `SWEEP_BUDGET_S=6600` shared
+  across NDX+SPX+RUT. Spark chunks and chart-fallback
+  `wait(..., FIRST_COMPLETED)` stop submitting at the deadline so the
+  process exits, heartbeats, and leaves unfinished members to the
+  23:30 / 11:00 catch-up. `TimeoutStartSec` stays 6900 (R-071).
+  Do not restart-flap the hung run; after the fix deploys, one
+  `radon unit restart radon-bpi` if the next timer is >12h out.
+- **Regression:**
+  `test_bpi_scan.py::TestSweepBudget`
+  (`test_tarpitted_spark_stops_inside_the_wall_clock_budget`,
+  `test_tarpitted_chart_fallback_stops_inside_the_wall_clock_budget`,
+  `test_run_scan_passes_one_shared_deadline_to_every_index`,
+  `test_sweep_budget_fits_inside_unit_start_timeout`).
+- **Code:** `scripts/bpi_scan.py` (`SWEEP_BUDGET_S`,
+  `_fetch_members_spark`, `_fetch_members`),
+  `cloud/services/radon-bpi.service` (`TimeoutStartSec=6900`).
 
 ---
 
@@ -600,6 +688,91 @@ both Top-candidates scans hit the FastAPI subprocess slot cap.** Peak:
 
 ---
 
+## flow-refresh-capacity-502
+
+**`radon-flow-refresh.service` oneshot pages P1 `Result=exit-code` when
+all three flow-tab POSTs hit the FastAPI subprocess slot cap.** Peak:
+2026-08-24 19:00:00Z, page `304b0d7f…`.
+
+- **Mechanism:** hourly ET `:00` timer POSTs `/scan?force=true`,
+  `/flow-analysis?force=true`, `/discover?force=true`. At the top of the
+  hour peer scanners (breadth, portfolio-sync, vcg, regime) claim the
+  shared `run_script` lanes (hard cap 4 / lane cap 3). All three POSTs
+  returned instant HTTP 502 with journal
+  `Subprocess capacity exhausted … (3 active, lane cap 3, hard cap 4)`.
+  `/health/lite` stayed 200 / authenticated. The wrapper treated any
+  non-exit-7 response as indeterminate (BUG-013: no duplicate direct
+  scan) and exited 1 with `NRestarts=0`. Capacity cleared ~26s later.
+- **Discriminating check:** unit journal
+  `FastAPI outcome indeterminate (curl=0, http=502)` for scanner /
+  flow-analysis / discover in the same second; radon-api
+  `Subprocess capacity exhausted for scanner.py` /
+  `flow_analysis.py` / `discover.py`; `/health/lite` 200. Script-failed
+  502 logs `Script … failed (code 1)` and takes seconds. Deploy
+  stop-clean is `Result=signal`. Market-closed skip is exit 0.
+- **Remediation (code):** same class as `signals-refresh-capacity-502`
+  / R-170. Retry HTTP 502/503
+  (`RADON_FLOW_REFRESH_RETRIES` default 2,
+  `RADON_FLOW_REFRESH_RETRY_DELAY_SECS` default 8) charged against the
+  per-scan wall budget. Persistent shed exits 0 (`SHED_EXIT=75`) so the
+  unit watchdog does not page P1 hourly for a full lane; the next slot
+  retries. Keep the no-duplicate rule. Real failures still exit 1.
+  `SuccessExitStatus=75` on the oneshot makes a leaked 75 inactive, not
+  failed (R-067). The unit watchdog pages P1 once per
+  `InactiveEnterTimestamp` for Type=oneshot `Result=exit-code`; the same
+  timestamp is P3 digest (next timer retries). Type=simple failed stays P1.
+- **Regression:**
+  `test_run_flow_refresh_wrapper.py::test_http_502_then_ok_retries_without_direct_fallback`,
+  `test_http_503_then_ok_retries`, `test_http_500_does_not_retry`,
+  `test_persistent_502_sheds_without_direct_fallback`,
+  `test_flow_refresh_oneshot_contract.py`,
+  `test_watchdog/test_units.py::TestOneshotExitCodeLatch`.
+- **Code:** `scripts/run_flow_refresh.sh`,
+  `cloud/services/radon-flow-refresh.service`, `scripts/watchdog/units.py`.
+- **Host:** CI deploy `install-units` (hash bumped). No control-plane
+  bootstrap. `reset-failed` is not required after this SHA: a shed no
+  longer enters failed, and a leftover latch is digest-only.
+
+---
+
+## orders-sync-capacity-shed-stale
+
+**Autonomous `orders-sync` loop pages P1 `kind=stale` during RTH when
+`ib_orders.py` is refused by the general subprocess lane and never
+heartbeats.** Peak: 2026-08-24 19:30Z, page `60096761…`, 19m silent
+(window 10m) while market open.
+
+- **Mechanism:** FastAPI's 5-min `_orders_sync_loop` spawns
+  `ib_orders.py --sync` (general lane, cap 3). Scan storms (gex, vcg,
+  cri, breadth, portfolio-sync) pin all 3 slots. The tick logs
+  `Subprocess capacity exhausted` and returns; `service_cycle` lives
+  inside the unspawned script, so `updated_at` freezes. Two consecutive
+  sheds trip the 10-min stale window. `/health/lite` stays 200 /
+  authenticated. `ib_orders.py` is not on the reserved order lane
+  (R-048 is kill-switch / place / manage / cancel only).
+- **Discriminating check:** radon-api journal
+  `orders-sync loop: running ib_orders.py --sync` then
+  `Subprocess capacity exhausted for ib_orders.py (3 active, lane cap 3,
+  hard cap 4)` at 5-min cadence; `service_health.orders-sync` `state=ok`
+  with `updated_at` older than 10m; `/health/lite` authenticated;
+  fill-monitor / portfolio-sync / relay still fresh. Grouped IB 2FA /
+  unreachable is a different class. Deploy stop-clean is
+  `Result=signal` on units, not this loop.
+- **Remediation (code):** retry capacity shed
+  (`ORDERS_SYNC_SHED_RETRIES=2`, `ORDERS_SYNC_SHED_RETRY_DELAY_SECS=8`).
+  Persistent shed heartbeats `ok` over `api.db_http` (R-170: lane full
+  is not a writer fault) so `_check_stale` cannot page; the next 5-min
+  tick retries the sync. Real IB/script misses still do not stamp ok.
+  Do not put `ib_orders.py` on the reserved order lane.
+- **Regression:**
+  `test_orders_sync_loop.py::test_orders_sync_tick_retries_capacity_shed_then_succeeds`,
+  `test_orders_sync_tick_persistent_capacity_shed_heartbeats_ok`,
+  `test_orders_sync_tick_real_failure_does_not_skip_heartbeat`.
+- **Code:** `scripts/api/server.py` (`_orders_sync_tick`,
+  `_heartbeat_orders_sync_skip`).
+
+---
+
 ## service-health-degraded / service-down (generic cases)
 
 `service-health-degraded`: `/api/service-health` body lists failing rows (error,
@@ -641,6 +814,50 @@ count on a latched daily handler is cycles-since-latch, never N incidents.
 `systemctl status radon-api` and journald; remember the cascade-stop rule — a
 cleanly stopped unit will NOT `Restart=always` back (`radon restart` respects
 the 2FA lock).
+
+---
+
+## flex-1025-lockout
+
+**IBKR Flex code 1025 is a token lockout. A persisted `class=permanent` row
+plus a missing sidecar will SendRequest at the next 08:00 ET window and
+extend it.** Operator lozenge: `SYNCED 7D AGO · FLEX LOCKOUT. DO NOT RETRY.
+INGEST WITH --FROM-FILE, RETRY 08:00 ET TOMORROW`.
+
+- **Mechanism:** 1025 is undocumented ("Too many failed attempts"), earned by
+  retrying 1001. `75ded753` classified new 1025s as lockout (exit 15, 7-day
+  sidecar). The live 2026-08-21 13:58Z row predates that commit
+  (`class=permanent`, `next_attempt_at=2026-08-24T12:00:00Z`).
+  `flex_embargo.active_until` used to read only `data/flex_token_embargo.json`,
+  which a deploy wipes and which `record_lockout` never wrote for that row.
+  `CashFlowSyncHandler.is_due` honored `daemon_state` `blocked_until` (the
+  Monday 08:00 window). `/orders` POST `/api/blotter` → `journal_rehydrate`
+  shares the token. Looking at the lozenge was itself a SendRequest.
+- **Detection:** `service_health.cash-flow-sync` error with `code 1025` or
+  "too many failed attempts"; lozenge `Do not retry`; `last_synced_at` days
+  old; sidecar file absent on the host.
+- **Discriminating check:** do NOT SendRequest. Read the row and the sidecar.
+
+```
+python3.13 -c "from utils.flex_embargo import active_until, is_blocked; print(is_blocked(), active_until())"
+```
+
+  Blocked through `last_attempt_finished_at + 7d` (2026-08-28T13:58:28Z for
+  the 2026-08-21 row) even if `next_attempt_at` is the next 08:00 ET window.
+  A 1012/config permanent row must not reconstruct as a 7-day lockout.
+- **Remediation:** reconstruct the sidecar from Turso; do not probe Flex.
+  Recover the table with `python3.13 -m scripts.cash_flow_sync --from-file`.
+  Portal Run on query `1442520` only. Do not set `IB_FLEX_FLOWS_QUERY_ID`.
+- **Fix commits:** `75ded753` (new 1025s), plus the reconstruction commit
+  that made a missing sidecar + `class=permanent` 1025 fail closed through
+  `last_attempt+7d`.
+- **Regression:** `scripts/tests/test_flex_token_embargo.py`
+  (`test_missing_sidecar_reconstructs_live_1025_permanent_from_turso`),
+  `scripts/tests/test_monitor_daemon/test_cash_flow_sync_exit_codes.py`
+  (`TestLockoutReconstructedFromTurso`),
+  `scripts/tests/test_cash_flows_route_last_synced.py`
+  (`test_live_permanent_1025_next_attempt_is_lockout_deadline_not_monday`),
+  `web/tests/cash-flows-sync-lozenge.test.tsx` (no `retry tomorrow` on lockout).
 
 ---
 

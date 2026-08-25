@@ -249,3 +249,56 @@ class TestMissingConfigIsNeverGreen:
             handler.run()
 
         run_mock.assert_not_called()
+
+
+class TestLockoutReconstructedFromTurso:
+    """Live 2026-08-21: sidecar gone, daemon_state blocked_until is Monday
+    08:00 ET, service_health still holds class=permanent 1025. is_due at
+    that window must stay False so the subprocess never starts."""
+
+    def test_is_due_false_at_monday_0800_when_sidecar_missing(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ):
+        monday = datetime(2026, 8, 24, 12, 0, tzinfo=timezone.utc)
+        monkeypatch.setattr(
+            "utils.flex_embargo.SIDECAR", tmp_path / "flex_token_embargo.json"
+        )
+        monkeypatch.setattr("utils.flex_embargo._heartbeat", lambda *a, **k: None)
+
+        last_error = json.dumps({
+            "message": (
+                "ERR: Flex SendRequest failed (code 1025): "
+                "Too many failed attempts. Please review your configuration."
+            ),
+            "class": "permanent",
+            "next_attempt_at": "2026-08-24T12:00:00+00:00",
+        })
+        row = ("error", "2026-08-21T13:58:28.298780Z", last_error)
+
+        def fake(sql, args=(), timeout=None):  # noqa: ANN001
+            key = args[0] if args else None
+            if key == "cash-flow-sync" or (not args and "cash-flow-sync" in (sql or "")):
+                return [row]
+            return []
+
+        import db.hrana_http as hrana_mod
+
+        monkeypatch.setattr(hrana_mod, "hrana_execute", fake)
+        monkeypatch.setattr(hrana_mod, "hrana_query", fake)
+
+        class _Frozen(datetime):
+            @classmethod
+            def now(cls, tz=None):  # noqa: ANN001
+                if tz is None:
+                    return monday.replace(tzinfo=None)
+                return monday.astimezone(tz)
+
+        monkeypatch.setattr("utils.flex_embargo.datetime", _Frozen)
+
+        handler = CashFlowSyncHandler()
+        handler._backoff_state["blocked_until"] = "2026-08-24T12:00:00+00:00"
+
+        with patch.object(handler_mod, "_now_utc", return_value=monday), \
+             patch.object(handler_mod.subprocess, "run") as run_mock:
+            assert handler.is_due() is False
+            run_mock.assert_not_called()

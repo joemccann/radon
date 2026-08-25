@@ -9,19 +9,45 @@ import type { PortfolioData, PortfolioPosition } from "./types";
  * (2026-08-22: +$13,951.76 after Friday closed at -$5,339.04). Gate every
  * consumer of `account_summary.daily_pnl` on this.
  */
-export function isIbDailyPnlCurrent(now: Date = new Date()): boolean {
-  const et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
+function etDate(moment: Date): string {
+  const et = new Date(moment.toLocaleString("en-US", { timeZone: "America/New_York" }));
   const pad = (n: number) => String(n).padStart(2, "0");
-  return isUsTradingDay(`${et.getFullYear()}-${pad(et.getMonth() + 1)}-${pad(et.getDate())}`);
+  return `${et.getFullYear()}-${pad(et.getMonth() + 1)}-${pad(et.getDate())}`;
+}
+
+export function isIbDailyPnlCurrent(now: Date = new Date()): boolean {
+  return isUsTradingDay(etDate(now));
+}
+
+/**
+ * R-107: the gate above reads the WALL CLOCK. The number it guards was
+ * captured by the producer at `portfolio.last_sync`, and those two dates
+ * diverge whenever the producer is down — exactly the state R-105's
+ * unbounded retry loop leaves behind. Producer's last success Saturday,
+ * operator opens the dashboard Monday 08:00 ET, `isUsTradingDay` is true,
+ * and the Saturday-captured phantom daily P&L renders labelled TODAY and
+ * drives dayPnlPct. A daily P&L only describes today's session when the
+ * SNAPSHOT was taken during it.
+ */
+export function isIbDailyPnlFromCurrentSession(
+  lastSync: string | null | undefined,
+  now: Date = new Date(),
+): boolean {
+  if (!isIbDailyPnlCurrent(now)) return false;
+  if (!lastSync) return true; // no provenance: fall back to the wall clock
+  const captured = new Date(lastSync);
+  if (Number.isNaN(captured.getTime())) return true;
+  return etDate(captured) === etDate(now);
 }
 
 /** `account_summary.daily_pnl` when it describes today's session, else null. */
 export function currentIbDailyPnl(
   dailyPnl: number | null | undefined,
   now: Date = new Date(),
+  lastSync: string | null | undefined = undefined,
 ): number | null {
   if (dailyPnl == null) return null;
-  return isIbDailyPnlCurrent(now) ? dailyPnl : null;
+  return isIbDailyPnlFromCurrentSession(lastSync, now) ? dailyPnl : null;
 }
 
 /** Spot crypto (IB secType CRYPTO, mapped by ib_sync) trades 24/7. */

@@ -161,25 +161,6 @@ async function mirrorQuery(src, dst, table, sql, pruneSql, opts) {
   return result.rows.length;
 }
 
-async function purgeAccountTable(dst, table, opts) {
-  const { maxAttempts, sleep, log, now, runId } = opts;
-  try {
-    await retryOperation({
-      phase: `${table}:purge`,
-      operation: () => dst.execute(`DELETE FROM ${table}`),
-      maxAttempts,
-      sleep,
-      log,
-      now,
-      runId,
-    });
-  } catch (err) {
-    console.warn(`[mirror] FAIL purge ${table} (dest write failed: ${err.message})`);
-    throw new Error(`${table} purge failed`);
-  }
-  console.log(`[mirror] purged account-derived table: ${table}`);
-}
-
 export async function runMarketMirror({
   src,
   dst,
@@ -201,13 +182,36 @@ export async function runMarketMirror({
   const purgedAccountTables = tables.purgedAccountTables ?? PURGED_ACCOUNT_TABLES;
   const opts = { maxAttempts, sleep, log, now, runId };
 
-  let total = 0;
-  const failures = [];
+  // R-097: this ran OUTSIDE the retry ladder and outside `failures[]`, so a
+  // documented transient 502 on the purge was console.warn'd and the mirror
+  // proceeded, reported done and exited 0 — leaving account-derived rows from
+  // the production book in the PUBLIC demo database indefinitely, with no
+  // signal in the exit status, the health rows or the retry log. It is
+  // retried like every other statement, and a purge that ultimately fails is
+  // fatal BEFORE any snapshot row is written.
   for (const table of purgedAccountTables) {
     try {
-      await purgeAccountTable(dst, table, opts);
-    } catch { failures.push(table); }
+      await retryOperation({
+        phase: `${table}:account_purge`,
+        operation: () => dst.execute(`DELETE FROM ${table}`),
+        maxAttempts,
+        sleep,
+        log,
+        now,
+        runId,
+      });
+      console.log(`[mirror] purged account-derived table: ${table}`);
+    } catch (err) {
+      console.error(`[mirror] FATAL purge ${table} failed: ${err.message}`);
+      throw new Error(
+        `account-data purge failed for ${table}: ${err.message} — refusing to ` +
+        `mirror while production account rows may remain in the demo database`,
+      );
+    }
   }
+
+  let total = 0;
+  const failures = [];
   for (const { table, orderCol } of latestOne) {
     try {
       total += await mirrorQuery(

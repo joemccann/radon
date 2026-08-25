@@ -133,6 +133,11 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // missed cycle + slack; closed folds the weekend like its siblings.
   "position-reconcile": { open: 45 * MIN, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: true },
 
+  // R-159: radon-perf-twr wrote no health row and was in neither catalog.
+  // The `performance` key below is a DIFFERENT, on-demand writer
+  // (portfolio_performance.py). Tue..Sat 07:30 ET; 26h open catches a missed
+  // weekday run, 4d closed covers the Sat->Tue gap.
+  "perf-twr": { open: 26 * HOUR, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
   "flex-token-check": { open: 25 * HOUR, extended: 25 * HOUR, closed: 25 * HOUR, category: "scheduled", requires_ib: false },
   // Token-wide Flex 1025 lockout sidecar (scripts/utils/flex_embargo.py).
   // Written only on lockout as error + next_attempt_at (7 days). Not a
@@ -206,8 +211,17 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // means the writer is down. FINRA HTTP only, no IB.
   "hy-ad": { open: 120 * HOUR, extended: 120 * HOUR, closed: 120 * HOUR, category: "scheduled", requires_ib: false },
 
+  // ``hhlev``: radon-hhlev.timer fires daily 13:20 UTC every calendar day,
+  // a cheap conditional check of the quarterly Fed Z.1 household leverage
+  // source (weekend and unchanged-day runs still heartbeat), so a uniform
+  // 26h window matches its margin-debt sibling. Data age of 100+ days is a
+  // legitimate quarterly lag, never writer health. FRED HTTP only, no IB.
+  "hhlev": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+
   // ``trin`` — radon-trin.timer samples NYSE A/D + volume from IB every 5 minutes during RTH (3 missed cycles flag); off-hours the close heartbeat holds a day.
-  "trin": { open: 15 * MIN, extended: 24 * HOUR, closed: 24 * HOUR, category: "scheduled", requires_ib: true },
+  // R-122: 24h closed against a Mon-Fri-only timer went stale every Saturday
+  // evening. 3 days covers the Fri -> Mon gap, like the other RTH writers.
+  "trin": { open: 15 * MIN, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: true },
 
   // ``skew`` publishes every 5 minutes during RTH (radon-skew.timer) and
   // finalizes daily at 21:45 UTC. Ten minutes = two timer cycles, so one slow
@@ -291,8 +305,12 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // wrapper skips outside market hours without heartbeating, so Monday
   // (and post-holiday) mornings legitimately serve a ~66-90h-old row —
   // uniform 4d pages on a dead timer without false-paging every Monday.
-  "theta-harvester": { open: 4 * DAY, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
-  "strength-confirmation": { open: 4 * DAY, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
+  // R-187: 4d was 96x an HOURLY cadence — a timer dead on Monday morning
+  // went unreported until Thursday. Both are in RTH_ONLY_SERVICES below, so
+  // `isStale` caps the effective age at how long the session has been open
+  // and the tight open window cannot false-page at 09:31 off Friday's close.
+  "theta-harvester": { open: 3 * HOUR, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
+  "strength-confirmation": { open: 3 * HOUR, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
   "discover": { open: 4 * DAY, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
   "flow-analysis": { open: 4 * DAY, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
   "analyst-ratings": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
@@ -573,6 +591,10 @@ export function isStale(
 }
 
 const RTH_ONLY_SERVICES = new Set([
+  // R-187: written hourly by radon-signals-refresh.timer during the session
+  // only, so their open-window age must be measured from today's open.
+  "theta-harvester",
+  "strength-confirmation",
   "orders-sync",
   "portfolio-sync",
   "journal-sync",
@@ -592,6 +614,23 @@ const RTH_ONLY_SERVICES = new Set([
 function isUsMarketHoliday(et: Date): boolean {
   const isoDate = `${et.getFullYear()}-${String(et.getMonth() + 1).padStart(2, "0")}-${String(et.getDate()).padStart(2, "0")}`;
   return isHolidayIso(isoDate);
+}
+
+/**
+ * R-164: the static table is finite, and `isHolidayIso` returns false for any
+ * year it does not cover — so once it runs out, `isUsTradingDay` silently
+ * degrades to weekday-only and every full-closure holiday reads as a trading
+ * day. Blanking a whole uncovered year would be far worse than being wrong on
+ * ~9 days, so the runtime behaviour is unchanged and the coverage is instead
+ * made explicit here and pinned by a contract test that fails CI a year
+ * before the data runs out.
+ */
+export const HOLIDAY_TABLE_YEARS: readonly string[] = Object.freeze(
+  Object.keys(staticHolidays as Record<string, string[]>).sort(),
+);
+
+export function isHolidayTableCovering(isoDate: string): boolean {
+  return HOLIDAY_TABLE_YEARS.includes(isoDate.slice(0, 4));
 }
 
 function isHolidayIso(isoDate: string): boolean {

@@ -350,7 +350,10 @@ def _check_stale(*, service: str, health: Optional[dict], now: datetime, market_
             # produce the first session write. A genuinely silent scanner still
             # trips once the session has been open longer than its window.
             effective_age = age_s
-            if market_state == "open" and service in services_mod.BUCKETS["intraday"]:
+            if market_state == "open" and (
+                service in services_mod.BUCKETS["intraday"]
+                or service in services_mod.OPEN_BELL_GRACE_SERVICES
+            ):
                 effective_age = min(age_s, _seconds_since_open(now))
             is_stale = effective_age > window_s
         except Exception:

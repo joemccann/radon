@@ -66,6 +66,12 @@ DEFAULT_TIMEOUT_SECONDS = 20.0
 REQUEST_PATH_AUTH_BUDGET_SECONDS = 40.0
 # The WordPress -> Cognito -> dashboard chain measured ~15s on the VPS.
 DEFAULT_LOGIN_TIMEOUT_SECONDS = 25.0
+# R-096: the OIDC consent form is OPTIONAL — absent whenever WordPress
+# remembers the grant, which is the steady state after the first one. Waiting
+# the full login timeout for it burned 20s of a 40s budget on every healthy
+# request, and 20 + ~15 (wait_for_url) + up to 20 (session poll) blew past the
+# 50s Next.js proxy as a 504 MEASUREMENT FAULT.
+CONSENT_PROBE_SECONDS = 1.5
 _AUTH_FAILURE_EMBARGO_SECONDS = 300.0
 _auth_embargo_until = 0.0
 _auth_embargo_lock = threading.Lock()
@@ -117,6 +123,24 @@ class MenthorQDashboardError(Exception):
 
 class MenthorQDashboardAuthError(MenthorQDashboardError):
     """A dashboard access token could not be obtained or is expired."""
+
+
+class MenthorQDashboardAuthEmbargoed(MenthorQDashboardAuthError):
+    """A RECENT auth failure is still embargoed; this chain was not exercised.
+
+    R-119: the embargo used to raise the same message as a genuine login
+    failure, so the daily login probe matched `503 + "authentication"`, took
+    its PERSISTENT branch and latched a full-day "re-login chain is broken"
+    alarm on a chain that never ran.
+    """
+
+
+class MenthorQDashboardStorageError(MenthorQDashboardError):
+    """The session jar could not be written locally (disk full, permissions).
+
+    R-119: this used to be a MenthorQDashboardAuthError, so a local disk
+    problem tripped the 300s token embargo.
+    """
 
 
 class MenthorQDashboardTimeoutError(MenthorQDashboardError):
@@ -246,6 +270,20 @@ class MenthorQDashboardClient:
         self._username = (username or os.environ.get("MENTHORQ_USER", "")).strip() or None
         self._password = (password or os.environ.get("MENTHORQ_PASS", "")).strip() or None
 
+    def _remaining_ms(self, deadline: float, cap_seconds: float) -> int:
+        """Milliseconds left before ``deadline``, clamped to ``cap_seconds``.
+
+        R-096: every step used to get its own full cap, and the per-step caps
+        summed to ~150s against a 50s proxy. Threading one monotonic deadline
+        through them is what makes REQUEST_PATH_AUTH_BUDGET_SECONDS real.
+        """
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise MenthorQDashboardAuthError(
+                "dashboard authentication budget exhausted"
+            )
+        return int(min(remaining, max(0.0, cap_seconds)) * 1000)
+
     def fetch_exposure(self, symbol: str, frequency: str = "eod") -> dict[str, Any]:
         """Fetch one uncached symbol/frequency cube plus its EOD level overlay."""
 
@@ -265,7 +303,9 @@ class MenthorQDashboardClient:
 
     def _resolve_access_token(self) -> str:
         if _auth_embargo_active():
-            raise MenthorQDashboardAuthError("dashboard authentication is unavailable")
+            raise MenthorQDashboardAuthEmbargoed(
+                "dashboard authentication embargoed after a recent failure"
+            )
         try:
             return self._resolve_access_token_uncached()
         except MenthorQDashboardAuthError:
@@ -310,8 +350,8 @@ class MenthorQDashboardClient:
         try:
             self._storage_state_path.chmod(0o600)
         except OSError as exc:
-            raise MenthorQDashboardAuthError(
-                "dashboard authentication is unavailable"
+            raise MenthorQDashboardStorageError(
+                "dashboard session jar could not be written"
             ) from exc
 
     def _token_from_storage_state(self) -> str:
@@ -385,8 +425,15 @@ class MenthorQDashboardClient:
         login form and returns through Cognito. Credentials are only entered in
         the server-side browser context; the resulting storage state is kept in
         the dedicated dashboard path, never sent to the web client.
+
+        R-096: ONE monotonic deadline covers the whole chain. Every step used
+        to get its own full cap, and those caps summed to ~150s against the
+        50s Next.js proxy — so `/options/net-gex` returned the 504
+        MEASUREMENT FAULT that REQUEST_PATH_AUTH_BUDGET_SECONDS exists to
+        prevent.
         """
 
+        deadline = time.monotonic() + REQUEST_PATH_AUTH_BUDGET_SECONDS
         browser = None
         context = None
         try:
@@ -409,15 +456,23 @@ class MenthorQDashboardClient:
                 page.goto(
                     BOOTSTRAP_URL,
                     wait_until="domcontentloaded",
-                    timeout=int(self._login_timeout_seconds * 1000),
+                    timeout=self._remaining_ms(deadline, self._login_timeout_seconds),
                 )
                 username = page.locator('input[name="log"]')
                 password = page.locator('input[name="pwd"]')
                 submit = page.locator('input[name="wp-submit"]')
-                login_timeout_ms = int(self._timeout_seconds * 1000)
-                username.wait_for(state="visible", timeout=login_timeout_ms)
-                password.wait_for(state="visible", timeout=login_timeout_ms)
-                submit.wait_for(state="visible", timeout=login_timeout_ms)
+                username.wait_for(
+                    state="visible",
+                    timeout=self._remaining_ms(deadline, self._timeout_seconds),
+                )
+                password.wait_for(
+                    state="visible",
+                    timeout=self._remaining_ms(deadline, self._timeout_seconds),
+                )
+                submit.wait_for(
+                    state="visible",
+                    timeout=self._remaining_ms(deadline, self._timeout_seconds),
+                )
                 if username.count() != 1 or password.count() != 1 or submit.count() != 1:
                     raise MenthorQDashboardAuthError(
                         "dashboard authentication is unavailable"
@@ -432,9 +487,18 @@ class MenthorQDashboardClient:
                 # dashboard URL and time out (2026-08-20 remint).
                 authorize = page.locator('input[name="authorize"]')
                 try:
-                    authorize.wait_for(state="visible", timeout=login_timeout_ms)
+                    # R-096: a PROBE, not a wait. The form is absent whenever
+                    # WordPress remembers the grant, and burning the full
+                    # login timeout on its absence is what pushed the healthy
+                    # path past the 50s proxy.
+                    authorize.wait_for(
+                        state="visible",
+                        timeout=self._remaining_ms(deadline, CONSENT_PROBE_SECONDS),
+                    )
                     if authorize.count() >= 1:
                         authorize.click()
+                except MenthorQDashboardAuthError:
+                    raise
                 except Exception:
                     pass
 
@@ -444,18 +508,21 @@ class MenthorQDashboardClient:
                 try:
                     page.wait_for_url(
                         "**dashboard.menthorq.io**",
-                        timeout=int(self._login_timeout_seconds * 1000),
+                        timeout=self._remaining_ms(
+                            deadline, self._login_timeout_seconds
+                        ),
                     )
+                except MenthorQDashboardAuthError:
+                    raise
                 except Exception as exc:
                     raise MenthorQDashboardAuthError(
                         "dashboard authentication is unavailable"
                     ) from exc
 
-                deadline = time.monotonic() + self._timeout_seconds
                 while time.monotonic() < deadline:
                     response = context.request.get(
                         SESSION_URL,
-                        timeout=int(self._timeout_seconds * 1000),
+                        timeout=self._remaining_ms(deadline, self._timeout_seconds),
                     )
                     if response.ok:
                         try:
@@ -498,8 +565,8 @@ class MenthorQDashboardClient:
             context.storage_state(path=str(self._storage_state_path))
             self._ensure_private_storage_state()
         except OSError as exc:
-            raise MenthorQDashboardAuthError(
-                "dashboard authentication is unavailable"
+            raise MenthorQDashboardStorageError(
+                "dashboard session jar could not be written"
             ) from exc
 
     def _request_json(self, url: str, token: str) -> dict[str, Any]:

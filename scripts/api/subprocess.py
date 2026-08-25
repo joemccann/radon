@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import os
+import signal
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -213,6 +214,42 @@ def _extract_json_payload(stdout: str) -> Optional[object]:
     return json.loads(stdout[start:])
 
 
+# R-136: three cancel branches each did `proc.kill(); await proc.wait()` bare.
+# A child that exits between the `returncode is None` check and the signal
+# raises ProcessLookupError OUT of `except CancelledError`, replacing the
+# cancellation and breaking wait_for/TaskGroup semantics; and `wait()` is
+# unbounded, so a SIGKILLed child wedged in uninterruptible I/O holds the
+# cancelled task and its subprocess slot forever. Scripts are spawned with
+# `start_new_session=True` so the whole process group is signalled — only the
+# direct child was, which left a script's own children holding IB client ids.
+CHILD_REAP_TIMEOUT_SECS = 5.0
+
+
+async def _terminate_child(proc, *, reap_timeout: float = CHILD_REAP_TIMEOUT_SECS) -> None:
+    """Kill a child and its group, bounded, never raising."""
+    if proc is None or getattr(proc, "returncode", None) is not None:
+        return
+    pid = getattr(proc, "pid", None)
+    if pid:
+        try:
+            os.killpg(os.getpgid(pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+    try:
+        proc.kill()
+    except (ProcessLookupError, OSError):
+        pass
+    try:
+        await asyncio.wait_for(_shielded_wait(proc), timeout=reap_timeout)
+    except (asyncio.TimeoutError, ProcessLookupError, OSError):
+        logger.warning("child %s did not reap within %.0fs", pid, reap_timeout)
+
+
+async def _shielded_wait(proc) -> None:
+    """`proc.wait()` that the surrounding cancellation cannot re-cancel."""
+    await asyncio.shield(asyncio.ensure_future(proc.wait()))
+
+
 async def run_script(
     script: str,
     args: Optional[List[str]] = None,
@@ -249,6 +286,7 @@ async def run_script(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=work_dir,
+            start_new_session=True,
         )
 
         stdout_bytes, stderr_bytes = await asyncio.wait_for(
@@ -280,17 +318,11 @@ async def run_script(
 
     except asyncio.TimeoutError:
         logger.error("Script %s timed out after %.0fs", script, timeout)
-        try:
-            proc.kill()
-            await proc.wait()
-        except Exception:
-            pass
+        await _terminate_child(proc)
         return ScriptResult(ok=False, error=f"Script timed out after {timeout}s")
 
     except asyncio.CancelledError:
-        if proc is not None and proc.returncode is None:
-            proc.kill()
-            await proc.wait()
+        await _terminate_child(proc)
         raise
 
     except json.JSONDecodeError as e:
@@ -336,6 +368,7 @@ async def run_script_raw(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=work_dir,
+            start_new_session=True,
         )
         stdout_bytes, stderr_bytes = await asyncio.wait_for(
             proc.communicate(), timeout=timeout
@@ -349,11 +382,7 @@ async def run_script_raw(
             exit_code=proc.returncode,
         )
     except asyncio.TimeoutError:
-        try:
-            proc.kill()
-            await proc.wait()
-        except Exception:
-            pass
+        await _terminate_child(proc)
         return RawScriptResult(
             ok=False,
             stderr=f"Script timed out after {timeout}s",
@@ -364,9 +393,7 @@ async def run_script_raw(
         # The slot is released in `finally`; without killing the child first
         # the counter under-counts live processes and the cap stops bounding
         # fds / IB client ids / the reserved order lane.
-        if proc is not None and proc.returncode is None:
-            proc.kill()
-            await proc.wait()
+        await _terminate_child(proc)
         raise
     except Exception as e:
         return RawScriptResult(ok=False, stderr=str(e), exit_code=None)
@@ -418,19 +445,13 @@ async def run_module(
         return ScriptResult(ok=True, data=payload)
 
     except asyncio.TimeoutError:
-        try:
-            proc.kill()
-            await proc.wait()
-        except Exception:
-            pass
+        await _terminate_child(proc)
         return ScriptResult(ok=False, error=f"Module timed out after {timeout}s")
 
     except asyncio.CancelledError:
         # An orphaned `trade_blotter.flex_query` keeps spending Flex requests
         # against a token already under a 24h-to-168h throttle embargo.
-        if proc is not None and proc.returncode is None:
-            proc.kill()
-            await proc.wait()
+        await _terminate_child(proc)
         raise
 
     except json.JSONDecodeError as e:

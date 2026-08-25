@@ -27,7 +27,21 @@ const GUARDED_ADMIN_ACTION_ROUTES = [
   "admin/ib/reset-backoff", "admin/ib/restart", "admin/services",
   "admin/services/[unit]/[action]", "admin/stack/restart",
   "admin/trading/[action]", "alerts", "alerts/[id]",
+  // R-179: minting a relay ticket is not read-only — with an OPTIONAL bearer
+  // this route was a loopback-trusted deputy (the Next.js server IS loopback
+  // to FastAPI's /ws-ticket).
+  "ib/ws-ticket",
+  // R-180: this POST SPAWNS garch_convergence.py. Its leap/scan sibling has
+  // carried the same guard since R-079; the read-only GET stays below.
+  "garch-convergence/scan",
 ] as const;
+
+// R-181: routes whose guard is a DIFFERENT allowlist. `admin/demo-users`
+// calls `requireDemoAdmin()` against DEMO_ADMIN_USER_IDS, not
+// requireRouteAccess against ALLOWED_USER_IDS — filing it under "no
+// route-local guard" described the wrong posture and left the guard it does
+// have unexercised by either matrix.
+const DEMO_ADMIN_GUARDED_ROUTES = ["admin/demo-users"] as const;
 
 // Routes with NO route-local guard: the middleware default-deny perimeter is
 // their only auth layer — a deliberate classification for read-only market
@@ -35,14 +49,14 @@ const GUARDED_ADMIN_ACTION_ROUTES = [
 // lands either here or in a guarded list above; the filesystem pin below
 // fails until that decision is made (the publicShareRoutes.ts discipline).
 const MIDDLEWARE_PERIMETER_ONLY_ROUTES = [
-  "admin/demo-users", "bookmarks", "bookmarks/[post_id]", "bpi", "catalysts",
+  "bookmarks", "bookmarks/[post_id]", "bpi", "catalysts",
   // cor/skew2d/vol-cone/equibles-*: read-only market-data indicators (R-079
   // classification) — same posture as bpi/margin-debt/straddle.
   "cor", "credit-spread", "divyield", "iei-hyg", "trin", "equibles-ats-venue-share", "equibles-cot-positioning",
   "equibles-filing-forensics", "equibles-short-crowding",
   "equibles-smart-money-13f",
   "flex-token", "flow-surprise", "futures-quote", "garch-convergence",
-  "garch-convergence/scan", "hyad", "ib/ws-ticket", "index-quote",
+  "hhlev", "hyad", "index-quote",
   "informed-flow/[ticker]", "ivrank", "llm-token-index", "margin-debt", "prices",
   "profile", "risk-free-rate", "skew", "skew2d", "straddle", "vixcor",
   "vol-cone", "watchlist", "watchlist/[symbol]", "workflow", "yield-curve",
@@ -90,6 +104,7 @@ describe("security report route-local authorization matrix", () => {
       ...SHARE_ROUTES.map((route) => `${route}/share`),
       ...ADMIN_ROUTES.map((route) => `admin/${route}`),
       ...GUARDED_ADMIN_ACTION_ROUTES,
+      ...DEMO_ADMIN_GUARDED_ROUTES,
       ...MIDDLEWARE_PERIMETER_ONLY_ROUTES,
       ...PINNED_ELSEWHERE_ROUTES,
     ]);
@@ -111,6 +126,15 @@ describe("security report route-local authorization matrix", () => {
       expect(text, route).toMatch(/const access = await requireRouteAccess/);
       expect(text, route).toMatch(/if \(!access\.ok\) return access\.response/);
     }
+  });
+
+  it("guards the demo-admin routes with their own allowlist (R-181)", () => {
+    for (const route of DEMO_ADMIN_GUARDED_ROUTES) {
+      const text = source(`app/api/${route}/route.ts`);
+      expect(text, route).toContain("requireDemoAdmin");
+      expect(text, route).not.toContain("requireRouteAccess");
+    }
+    expect(source("lib/demo/adminAuth.ts")).toContain("DEMO_ADMIN_USER_IDS");
   });
 
   it("guards the admin page with the fail-closed operator allowlist", () => {

@@ -306,6 +306,14 @@ def fetch_closes(
 
 
 def combine_source(sources: dict[str, str]) -> str:
+    """Collapse the per-ticker map to the legacy display string.
+
+    R-190: this is LOSSY on purpose (it is what the `source` column has always
+    held), but it was the only thing that reached the payload — so an IB HYG
+    with a Yahoo SPX and a Yahoo HYG with an IB SPX were both "ib+yahoo", and
+    which leg was the fallback was unrecoverable. `build_output` now carries
+    the map alongside it.
+    """
     return "+".join(sorted(set(sources.values())))
 
 
@@ -339,12 +347,21 @@ def lookback_return(window: list[dict[str, Any]], key: str) -> Optional[float]:
     return last_f / first_f - 1
 
 
-def classify_regime(spx_ret: Optional[float], hyg_ret: Optional[float]) -> str:
-    """Strict inequalities. Zero or missing return is coupled."""
+def classify_regime(spx_ret: Optional[float], hyg_ret: Optional[float]) -> Optional[str]:
+    """Strict inequalities. Zero return is coupled; MISSING is no regime.
+
+    R-161: a missing or non-finite return used to map onto `"coupled"`, which
+    is also the benign risk-on label. `lookback_return` returns None for a
+    window shorter than 2 rows, a non-numeric close or a zero denominator, so
+    a one-session series — a first run after a cache wipe, or a provider
+    cascade returning a single overlapping date — reported "credit and
+    equities in agreement". This indicator exists to surface `"divergent"`;
+    its failure mode must not be the reassuring label.
+    """
     if spx_ret is None or hyg_ret is None:
-        return "coupled"
+        return None
     if not (math.isfinite(spx_ret) and math.isfinite(hyg_ret)):
-        return "coupled"
+        return None
     if spx_ret > 0 and hyg_ret < 0:
         return "divergent"
     if spx_ret > 0 and hyg_ret > 0:
@@ -404,6 +421,7 @@ def build_output(
     series: list[dict[str, Any]],
     scan_time: Optional[str] = None,
     source: str = "ib",
+    source_by_ticker: Optional[dict[str, str]] = None,
 ) -> dict[str, Any]:
     stamp = scan_time or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     current: Optional[dict[str, Any]] = None
@@ -425,6 +443,10 @@ def build_output(
     return {
         "scan_time": stamp,
         "source": source,
+        # R-190: the collapsed `source` string cannot say WHICH leg fell back,
+        # so a mixed IB+Yahoo ratio was stored indistinguishably from the
+        # other mixed pairing. The per-ticker map rides alongside it.
+        "source_by_ticker": dict(source_by_ticker or {}),
         "count": len(series),
         "current": current,
         "series": series,
@@ -443,7 +465,6 @@ def _write_json_cache(payload: dict[str, Any]) -> None:
 def persist_result(
     payload: dict[str, Any],
     rows_changed_rows: list[dict[str, Any]],
-    *,
     health_error: Optional[dict[str, Any]] = None,
 ) -> None:
     """Dual-write: Turso rows + snapshot + heartbeat, then the JSON fallback.
@@ -472,15 +493,51 @@ def persist_result(
 
 # ── orchestration ─────────────────────────────────────────────────
 
-def _read_cached_series() -> list[dict[str, Any]]:
+def _turso_series() -> list[dict[str, Any]]:
+    """The durable series from `credit_spread_history` (Turso-first read).
+
+    R-123: this table was WRITE-ONLY — no SELECT anywhere in the repo — and
+    the fetcher rehydrated from host-local JSON alone. Losing
+    `data/credit_spread.json` (a host rebuild, or a failed `persist_result`
+    before `_write_json_cache`) made the next run treat IB's 1-year window as
+    the WHOLE series and republish a 1-year snapshot where an 18-year one
+    stood, while the 2007+ rows sat unreadable in Turso.
+    """
+    from db.client import get_db
+
+    rows = get_db().execute(
+        "SELECT date, hyg_close, spx_close FROM credit_spread_history ORDER BY date"
+    ).fetchall()
+    return [
+        {"date": row[0], "hyg_close": float(row[1]), "spx_close": float(row[2])}
+        for row in rows
+    ]
+
+
+def _json_series() -> list[dict[str, Any]]:
     try:
         return json.loads(CREDIT_SPREAD_JSON.read_text())["series"]
     except (OSError, ValueError, KeyError):
         return []
 
 
+def _read_cached_series() -> list[dict[str, Any]]:
+    try:
+        stored = _turso_series()
+        if stored:
+            return stored
+    except Exception as exc:  # noqa: BLE001 — the JSON fallback still works
+        print(f"[{SERVICE}] turso rehydrate non-fatal: {exc}", file=sys.stderr)
+    return _json_series()
+
+
 def _serve_cached(cached: list[dict[str, Any]]) -> dict[str, Any]:
-    """IB, UW and Yahoo all down: re-serve the cache as stale_source, page."""
+    """IB, UW and Yahoo all down: re-serve the cache as stale_source, page.
+
+    R-098: `source="none"` used to live only in payload["source"], which
+    nothing consumed; the row heartbeated ok off the cached series and the
+    panel rendered it as current.
+    """
     if not cached:
         raise RuntimeError(f"{SERVICE}: IB, UW and Yahoo all failed with no cached series")
     payload = {**build_output(cached, source=NO_SOURCE), "status": STATUS_STALE_SOURCE}
@@ -490,9 +547,13 @@ def _serve_cached(cached: list[dict[str, Any]]) -> dict[str, Any]:
         file=sys.stderr,
     )
     health_error = {
-        "message": f"{SERVICE}: IB, UW and Yahoo all failed; serving cached series through {through}"
+        "message": (
+            f"{SERVICE}: every source failed (IB, UW, Yahoo); serving the "
+            f"cached series through {through}"
+        ),
+        "class": "source_down",
     }
-    persist_result(payload, [], health_error=health_error)
+    persist_result(payload, [], health_error)
     return payload
 
 
@@ -500,8 +561,8 @@ def run() -> dict[str, Any]:
     print(f"[{SERVICE}] fetching HYG and SPX (IB → UW → Yahoo)", file=sys.stderr)
     closes, sources = fetch_closes()
     cached = _read_cached_series()
-    source = combine_source(sources)
-    if not source:
+    source = combine_source(sources) or NO_SOURCE
+    if source == NO_SOURCE:
         return _serve_cached(cached)
     hyg = closes.get(HYG_SYMBOL, {})
     spx = closes.get(SPX_SYMBOL, {})
@@ -513,7 +574,7 @@ def run() -> dict[str, Any]:
     if not new_rows:
         print(f"[{SERVICE}] source unchanged; refreshing snapshot only", file=sys.stderr)
 
-    payload = build_output(series, source=source)
+    payload = build_output(series, source=source, source_by_ticker=sources)
     persist_result(payload, new_rows)
     return payload
 

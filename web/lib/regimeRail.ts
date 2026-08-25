@@ -13,14 +13,14 @@ export type RegimeTab =
   | "cri" | "vcg" | "gex" | "grg"
   | "breadth" | "bpi" | "margin" | "straddle"
   | "cor" | "vixcor" | "ivrank" | "skew" | "skew2d" | "curve"
-  | "cot" | "ats" | "short" | "llm" | "backtest" | "credit" | "iei-hyg" | "trin" | "divyield" | "hyad";
+  | "cot" | "ats" | "short" | "llm" | "backtest" | "credit" | "iei-hyg" | "trin" | "divyield" | "hyad" | "hhlev";
 
 export type RegimeRailGroup = { label: string; tabs: readonly RegimeTab[] };
 
 export const REGIME_RAIL_GROUPS: readonly RegimeRailGroup[] = [
   { label: "Composite", tabs: ["cri", "grg", "vcg"] },
   { label: "Volatility", tabs: ["vixcor", "ivrank", "skew", "skew2d", "curve", "straddle"] },
-  { label: "Positioning", tabs: ["gex", "margin", "credit", "iei-hyg", "cot", "short", "ats"] },
+  { label: "Positioning", tabs: ["gex", "margin", "hhlev", "credit", "iei-hyg", "cot", "short", "ats"] },
   { label: "Breadth & sentiment", tabs: ["breadth", "trin", "divyield", "hyad", "bpi", "cor"] },
   { label: "Models", tabs: ["llm", "backtest"] },
 ];
@@ -39,8 +39,9 @@ export const REGIME_TAB_LABEL: Record<RegimeTab, string> = {
   straddle: "STRADDLE",
   gex: "GEX",
   margin: "MARGIN",
+  hhlev: "HH LEV",
   credit: "CREDIT",
-  "iei-hyg": "IEI/HYG",
+  "iei-hyg": "TSY/HY",
   cot: "COT",
   short: "SHORT",
   ats: "ATS",
@@ -115,6 +116,15 @@ export function isFlagged(status: RailStatus | undefined): boolean {
   return status != null && (status.tone === "warn" || status.tone === "fault");
 }
 
+/**
+ * R-196: the rail's "N ELEVATED" summary was denominated over all 22
+ * REGIME_TABS, but `buildRailStatuses` only ever emits these four — the five
+ * indicators this delta added are registered as tabs with no rail reading, so
+ * "0 of 22 elevated" read as broad calm when 18 of them were never asked.
+ * Adding a tab to the rail means adding it here AND to buildRailStatuses.
+ */
+export const FLAGGABLE_REGIME_TABS: readonly RegimeTab[] = ["cri", "cor", "vcg", "gex"];
+
 export function elevatedCount(statuses: RailStatuses): number {
-  return REGIME_TABS.filter((tab) => isFlagged(statuses[tab])).length;
+  return FLAGGABLE_REGIME_TABS.filter((tab) => isFlagged(statuses[tab])).length;
 }

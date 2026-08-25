@@ -20,6 +20,23 @@ function jsonResponse(body: Payload) {
   };
 }
 
+/**
+ * REL-048 / R-106: every useSyncHook request carries an AbortSignal.timeout
+ * now, so the init object is no longer a two-key literal.
+ */
+function expectFetch(
+  fetchMock: { mock: { calls: unknown[][] } },
+  index: number,
+  url: string,
+  method: string,
+): void {
+  const [calledUrl, init] = fetchMock.mock.calls[index] as [string, RequestInit];
+  expect(calledUrl).toBe(url);
+  expect(init.method).toBe(method);
+  expect(init.cache).toBe("no-store");
+  expect(init.signal).toBeInstanceOf(AbortSignal);
+}
+
 describe("useSyncHook inactive initial load", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -46,7 +63,7 @@ describe("useSyncHook inactive initial load", () => {
 
     expect(result.current.data?.value).toBe(7);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/internals", { method: "GET", cache: "no-store" });
+    expectFetch(fetchMock, 0, "/api/internals", "GET");
   });
 
   it("triggers the first sync when a previously inactive hook becomes active", async () => {
@@ -73,7 +90,7 @@ describe("useSyncHook inactive initial load", () => {
     rerender({ active: true });
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/internals", { method: "POST", cache: "no-store" });
+    expectFetch(fetchMock, 1, "/api/internals", "POST");
   });
 
   it("skips mount GET when loadWhenInactive is false and inactive", async () => {
@@ -104,9 +121,6 @@ describe("useSyncHook inactive initial load", () => {
 
     await waitFor(() => expect(result.current.data?.value).toBe(7));
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/scanner/theta", {
-      method: "GET",
-      cache: "no-store",
-    });
+    expectFetch(fetchMock, 0, "/api/scanner/theta", "GET");
   });
 });

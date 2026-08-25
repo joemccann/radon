@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Gauge } from "lucide-react";
 import BrushMinimap from "./BrushMinimap";
+import PanelRefreshError from "./PanelRefreshError";
 import CriHistoryChart, { type ChartSeries } from "./CriHistoryChart";
 import HistoryRangeChips from "./HistoryRangeChips";
 import InfoTooltip from "./InfoTooltip";
@@ -69,7 +70,7 @@ function formatDayTick(d: Date): string {
 }
 
 export default function IvRankPanel() {
-  const { data, loading, syncing } = useIvRank();
+  const { data, loading, syncing, error } = useIvRank();
   const { isMobile, hasMounted } = useViewport();
   const compact = hasMounted && isMobile;
 
@@ -152,6 +153,7 @@ export default function IvRankPanel() {
             SPY 1M IV Rank
             <InfoTooltip text={IVRANK_TOOLTIP} />
           </div>
+          <PanelRefreshError error={error} testId="ivrank-refresh-error" />
           {clock && (
             <span style={{ fontFamily: "var(--font-mono)", fontSize: "9px", color: "var(--text-muted)" }}>
               {clock}

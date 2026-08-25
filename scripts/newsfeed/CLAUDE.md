@@ -72,3 +72,12 @@ Per-post chips with AND-semantics when ≥2 are active. Active filters render as
 Newsfeed runs on the VPS, not laptop. Session at `data/newsfeed-storage.json` (gitignored). On Hetzner `RADON_MEDIA_REMOTE=/var/lib/radon/media/` (compat symlink `~/radon-cloud/media`). Service: `radon-newsfeed.service` (`Restart=on-failure`).
 
 For local one-shot debug: `node scripts/newsfeed/index.js --once`.
+
+## Bounded shutdown
+
+SIGTERM/SIGINT go through `scheduler.js:createShutdown`: abort the loop, then
+`process.exit(0)` after `SHUTDOWN_GRACE_MS` (10 s) if the run has not settled.
+A Playwright scrape mid-flight does not observe the abort; before this the unit
+lived until systemd's 90 s SIGKILL, longer than the deploy waits for it to go
+inactive, and three releases rolled back on 2026-08-24. Test:
+`web/tests/newsfeed-shutdown.test.ts`.

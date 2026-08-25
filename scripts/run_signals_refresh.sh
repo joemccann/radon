@@ -120,6 +120,17 @@ SCAN_TIMEOUT="${RADON_SIGNALS_SCAN_TIMEOUT:-200}"
 # accepted in-flight scan is never duplicated (BUG-013).
 RETRY_LIMIT="${RADON_SIGNALS_REFRESH_RETRIES:-2}"
 RETRY_DELAY="${RADON_SIGNALS_REFRESH_RETRY_DELAY_SECS:-8}"
+# R-093: the retry ladder used to give every attempt a FRESH -m and charged
+# the sleeps nowhere, so one scan's worst case was 3x490+2x8 = 1486s and two
+# scans 2972s against TimeoutStartSec=1050. systemd then SIGTERMed the group
+# mid-write: Result=signal, partial snapshot, P1 page outside a deploy window.
+# SCAN_TIMEOUT is now the whole scan's wall budget — attempts and retry
+# sleeps are charged against it — so two scans plus the calendar probe fit
+# inside the unit cap by construction.
+PROBE_BUDGET_SECS="${RADON_SIGNALS_PROBE_BUDGET_SECS:-60}"
+# Distinct return code for "the general subprocess lane was full" (R-170), so
+# the caller can tell a capacity shed from a real scan failure.
+SHED_EXIT=75
 
 mkdir -p logs
 
@@ -137,11 +148,18 @@ refresh_scan() {
     local label="$1" endpoint="$2" script="$3"
     local url="http://${FASTAPI_HOST}:${FASTAPI_PORT}${endpoint}?preset=${PRESET}"
     local attempt=0
-    local HTTP_CODE CURL_EXIT
+    local HTTP_CODE=000 CURL_EXIT=28
+    local SCAN_DEADLINE=$((SECONDS + SCAN_TIMEOUT))
+    local remaining delay
 
     echo "$(date): POST ${url}"
     while :; do
-        HTTP_CODE=$(curl -sS -X POST -m "$SCAN_TIMEOUT" -o /dev/null -w "%{http_code}" "$url")
+        remaining=$((SCAN_DEADLINE - SECONDS))
+        if [ "$remaining" -le 0 ]; then
+            echo "$(date): ${label} scan deadline (${SCAN_TIMEOUT}s) reached" >&2
+            break
+        fi
+        HTTP_CODE=$(curl -sS -X POST -m "$remaining" -o /dev/null -w "%{http_code}" "$url")
         CURL_EXIT=$?
         if [ "$CURL_EXIT" -eq 0 ] && [[ "$HTTP_CODE" == 2* ]]; then
             echo "$(date): ${label} refresh via FastAPI complete (OK)"
@@ -151,9 +169,31 @@ refresh_scan() {
             break
         fi
         attempt=$((attempt + 1))
-        echo "$(date): ${label} FastAPI transient (curl=${CURL_EXIT} http=${HTTP_CODE}) — retry ${attempt}/${RETRY_LIMIT} in ${RETRY_DELAY}s"
-        sleep "$RETRY_DELAY"
+        # The retry sleep is charged against the same deadline.
+        delay=$((SCAN_DEADLINE - SECONDS))
+        [ "$delay" -gt "$RETRY_DELAY" ] && delay="$RETRY_DELAY"
+        if [ "$delay" -le 0 ]; then
+            echo "$(date): ${label} scan deadline reached before retry ${attempt}" >&2
+            break
+        fi
+        echo "$(date): ${label} FastAPI transient (curl=${CURL_EXIT} http=${HTTP_CODE}) — retry ${attempt}/${RETRY_LIMIT} in ${delay}s"
+        sleep "$delay"
     done
+
+    # R-170: a 502/503 that survived the retries is the general subprocess
+    # lane being FULL, not a fault. Capacity is
+    # MAX_CONCURRENT_SUBPROCESSES(4) - RESERVED_ORDER_SLOTS(1) = 3, and the
+    # hour-long leap and garch scans each hold one, so at the 14:00 UTC timer
+    # overlap two signals scans contend for the last slot. RETRY_LIMIT(2) x
+    # RETRY_DELAY(8) = 16 s of waiting cannot clear a hold of up to 3600 s, so
+    # the unit failed deterministically and paged P1 every hour for a
+    # condition no amount of retrying can fix. This wrapper runs hourly: the
+    # next slot picks the scan up, and the 4-day-to-3-hour staleness windows
+    # (R-187) still page if it never does.
+    if [ "$CURL_EXIT" -eq 0 ] && { [ "$HTTP_CODE" = "502" ] || [ "$HTTP_CODE" = "503" ]; }; then
+        echo "$(date): ${label} shed for subprocess capacity (http=${HTTP_CODE}); the next slot retries" >&2
+        return "$SHED_EXIT"
+    fi
 
     # A timeout or HTTP response means FastAPI may have accepted the scan.
     # Starting a direct fallback then can duplicate the provider/IB job.
@@ -175,14 +215,28 @@ refresh_scan() {
 }
 
 FAILURES=0
-refresh_scan "Theta harvester" "/theta-harvester/scan" "theta_harvester_scanner.py" \
-    || FAILURES=$((FAILURES + 1))
-refresh_scan "Strength confirmation" "/strength-confirmation/scan" "strength_confirmation_scanner.py" \
-    || FAILURES=$((FAILURES + 1))
+SHED=0
+
+run_one() {
+    refresh_scan "$@"
+    case $? in
+        0) ;;
+        "$SHED_EXIT") SHED=$((SHED + 1)) ;;
+        *) FAILURES=$((FAILURES + 1)) ;;
+    esac
+}
+
+run_one "Theta harvester" "/theta-harvester/scan" "theta_harvester_scanner.py"
+run_one "Strength confirmation" "/strength-confirmation/scan" "strength_confirmation_scanner.py"
 
 if [ "$FAILURES" -gt 0 ]; then
     echo "$(date): Signals refresh finished with ${FAILURES} failed scan(s)" >&2
     exit 1
+fi
+
+if [ "$SHED" -gt 0 ]; then
+    echo "$(date): Signals refresh shed ${SHED} scan(s) for subprocess capacity; the next slot retries" >&2
+    exit 0
 fi
 
 echo "$(date): Signals refresh complete (OK)"

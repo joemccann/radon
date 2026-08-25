@@ -107,6 +107,9 @@ export function useOrders(active: boolean = true): UseOrdersReturn {
         cache: "no-store",
         signal: AbortSignal.timeout(POST_FETCH_TIMEOUT_MS),
       });
+      // A sibling tab or device already spent this window's producer budget;
+      // its snapshot arrives on the next poll. Coalescence, not degradation.
+      if (res.status === 429) return;
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error((body as { error?: string }).error ?? "Sync failed");

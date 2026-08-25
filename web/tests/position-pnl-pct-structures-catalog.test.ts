@@ -505,9 +505,18 @@ describe("hand-computed capital and return (literal expectations)", () => {
     expect(getPnlPct(pos)).toBeCloseTo(37.777778, 6);
   });
 
-  it("undefined debit risk reversal: net debit paid is the return denominator", () => {
+  it("undefined debit risk reversal: the naked short put has no capital basis", () => {
     // CBRS 2026-08-21: LONG 50x C$205 @ $2.33, SHORT 50x P$200 @ $1.58.
     // Net debit $0.75 × 50 × 100 = $3,750. Marks $2.23 / $1.30.
+    //
+    // REL-060 / R-146: this asserted a $3,750 denominator. The debit is real,
+    // but it bounds nothing — the short 200 put is uncovered, i.e. $1,000,000
+    // of assignment-to-zero on 50 contracts — so "Return on debit paid ·
+    // exact" was true of the debit and false of the risk it was presented as
+    // a return on. 3b5d05ff introduced that by replacing `isFullLossDebit`
+    // (defined risk / single long stock / all-long only) with a check that
+    // carried no risk test at all. P&L in DOLLARS is unchanged and still
+    // asserted below; only the percentage is withheld.
     const legs: PortfolioLeg[] = [
       optionLeg("LONG", 205, 50, 2.33, 2.23),
       { ...optionLeg("SHORT", 200, 50, 1.58, 1.3), type: "Put" },
@@ -525,8 +534,8 @@ describe("hand-computed capital and return (literal expectations)", () => {
     expect(resolveEntryCost(pos)).toBe(3_750);
     expect(resolveMarketValue(pos)).toBe(4_650);
     expect(getPnlDollars(pos)).toBe(900);
-    expect(getPnlCapital(pos)).toBe(3_750);
-    expect(getPnlPct(pos)).toBeCloseTo(24, 6);
+    expect(getPnlCapital(pos)).toBeNull();
+    expect(getPnlPct(pos)).toBeNull();
   });
 
   it("undefined multi-leg CREDIT combo: −$5,000 net credit is never a denominator", () => {

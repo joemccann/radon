@@ -86,12 +86,22 @@ export function heldComboUnits(position: PortfolioPosition): number {
 }
 
 /** True only when a combo SELL stays within the held BAG units. */
+/**
+ * R-112: `workingSellUnits` is the BAG quantity already working at the broker
+ * on this ticker. It used to be ignored entirely, so three working full-size
+ * SELL combos each classified as a pure zero-margin close — and because
+ * `whatIfKey` returns null whenever `closeOut != null`, the broker what-if
+ * that would have caught it is skipped and `okToSubmit: true` is asserted on
+ * structure match alone.
+ */
 export function isPureComboClose(
   action: TradeAction,
   quantity: number,
   heldUnits: number,
+  workingSellUnits = 0,
 ): boolean {
-  return action === "SELL" && quantity > 0 && quantity <= heldUnits;
+  const available = heldUnits - Math.max(0, workingSellUnits);
+  return action === "SELL" && quantity > 0 && quantity <= available;
 }
 
 export type ComboStructureLeg = {
@@ -139,6 +149,8 @@ export function findHeldComboForClose(params: {
   quantity: number;
   structureLegs: ComboStructureLeg[];
   portfolio?: PortfolioData | null;
+  /** R-112: BAG units already working at the broker on this ticker. */
+  workingSellUnits?: number;
 }): PortfolioPosition | null {
   if (params.envelopeAction !== "SELL") return null;
   if (params.quantity <= 0) return null;
@@ -149,7 +161,7 @@ export function findHeldComboForClose(params: {
   for (const position of params.portfolio.positions ?? []) {
     if (position.ticker.toUpperCase() !== ticker) continue;
     const units = heldComboUnits(position);
-    if (!isPureComboClose("SELL", params.quantity, units)) continue;
+    if (!isPureComboClose("SELL", params.quantity, units, params.workingSellUnits ?? 0)) continue;
     if (!structureMatchesHeldCombo(params.structureLegs, position, units)) continue;
     return position;
   }
@@ -161,8 +173,52 @@ export function overClosesHeldCombo(
   action: TradeAction,
   quantity: number,
   heldUnits: number,
+  workingSellUnits = 0,
 ): boolean {
-  return action === "SELL" && quantity > heldUnits;
+  return action === "SELL" && quantity > heldUnits - Math.max(0, workingSellUnits);
+}
+
+
+/**
+ * Total working SELL quantity on BAG orders for one ticker (R-112).
+ * Best-effort: an unreadable snapshot is 0, which keeps the pre-existing
+ * held-units-only behaviour rather than blocking a legitimate close.
+ */
+export function workingSellComboUnits(
+  ticker: string,
+  orders: { open_orders?: unknown[] } | null | undefined,
+  /**
+   * The order being MODIFIED. It is still working at the broker and sits in
+   * the snapshot, but the post-modify shape replaces it, so counting it would
+   * consume its own held units and misclassify a full-size close as a fresh
+   * opening credit spread.
+   */
+  exclude?: { permId?: number | null; orderId?: number | null } | null,
+): number {
+  const rows = Array.isArray(orders?.open_orders) ? orders!.open_orders! : [];
+  const upper = ticker.toUpperCase();
+  let total = 0;
+  for (const raw of rows) {
+    const row = raw as Record<string, unknown>;
+    if (isExcludedOrder(row, exclude)) continue;
+    if (String(row.action ?? "").toUpperCase() !== "SELL") continue;
+    const contract = (row.contract ?? {}) as Record<string, unknown>;
+    if (String(contract.secType ?? "").toUpperCase() !== "BAG") continue;
+    if (String(contract.symbol ?? "").toUpperCase() !== upper) continue;
+    const quantity = Number(row.totalQuantity ?? row.quantity ?? 0);
+    if (Number.isFinite(quantity) && quantity > 0) total += quantity;
+  }
+  return total;
+}
+
+function isExcludedOrder(
+  row: Record<string, unknown>,
+  exclude: { permId?: number | null; orderId?: number | null } | null | undefined,
+): boolean {
+  if (!exclude) return false;
+  if (exclude.permId != null && Number(row.permId) === exclude.permId) return true;
+  if (exclude.orderId != null && Number(row.orderId) === exclude.orderId) return true;
+  return false;
 }
 
 /** The action that CLOSES the target (so the UI can default to it). */

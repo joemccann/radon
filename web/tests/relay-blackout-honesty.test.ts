@@ -215,7 +215,7 @@ describe("T-087: buildRelayHealthDetail is the relay's row payload", () => {
     // sockets on import, so pin the call site textually instead.
     const relaySource = readFileSync(new URL("../../scripts/ib_realtime_server.js", import.meta.url), "utf8");
     const builderCalls = relaySource.match(/\.\.\.buildRelayHealthDetail\(now, lastTickTimestamp, freshness\)/g) ?? [];
-    expect(builderCalls, "ok heartbeat + degraded error rows").toHaveLength(2);
+    expect(builderCalls, "ok heartbeat + degraded and disconnected error rows").toHaveLength(3);
     expect(relaySource).not.toMatch(/tick_age_secs:/);
     expect(relaySource).not.toMatch(/last_tick_at:/);
   });

@@ -5,8 +5,9 @@ Description=Radon TRIN Indicator - every 5 minutes during ET trading hours
 # Fires every 5 minutes Mon-Fri 13:02-21:57 UTC, offset 2 min from
 # radon-breadth's :00/:05/... slots so the two IB snapshot jobs never collide.
 # Covers ET trading hours 09:30-16:00 across both DST shoulders; fetch_trin.py
-# gates the IB sample on the trading calendar at runtime and refreshes the
-# daily series only when the market is closed.
+# gates the IB sample on the trading calendar at runtime and scrapes the
+# StockCharts daily series only when the last closed session is missing from
+# the cache (R-121: it used to scrape on every one of the 108 daily cycles).
 OnCalendar=Mon..Fri *-*-* 13..21:02,07,12,17,22,27,32,37,42,47,52,57 UTC
 Persistent=false
 

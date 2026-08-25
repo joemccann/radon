@@ -519,6 +519,17 @@ class TestSignalKilledOneshotRerun:
     FARAWAY = _fmt_systemd(NOW + timedelta(hours=22))
     SOON = _fmt_systemd(NOW + timedelta(hours=2))
 
+    @pytest.fixture(autouse=True)
+    def _unspent_rerun_budget(self, monkeypatch):
+        """R-115 added a per-unit daily re-run bound that fails CLOSED. These
+        cases are about the horizon rule, so give each one a fresh budget;
+        the bound itself is exercised in test_ops_plane_bounds.py."""
+        import grok_page_responder as _responder
+
+        monkeypatch.setattr(
+            _responder.pages_mod, "reruns_since", lambda service, since: 0
+        )
+
     def _enqueue_unit_page(self, service="radon-vol-cone.service"):
         return enqueue_delivered_page(
             service=service,
@@ -751,6 +762,57 @@ class TestSignalKilledOneshotRerun:
         systemctl = _fake_systemctl(
             next_elapse=self.FARAWAY,
             result="exit-code",
+            failed_at=_fmt_systemd(NOW - timedelta(hours=2)),
+            log=log,
+        )
+
+        rc, _ = self._cycle(tmp_path, grok=_stand_down_grok, systemctl=systemctl)
+
+        assert rc == 0
+        assert not any(args[0] in {"reset-failed", "start"} for args in log)
+
+    def test_timeout_reruns_when_a_fix_deployed_after_the_failure(
+        self, db_conn, tmp_path, monkeypatch
+    ):
+        """radon-divyield 2026-08-24: Result=timeout at 23:57 UTC, next
+        timer 22:40 the next day. Result=timeout must rerun like exit-code
+        once a newer green deploy exists. Uses an already-granted allowlisted
+        oneshot: adding a unit to polkit is a control-plane refresh and
+        cannot ship in the same release as the sweep-budget fix."""
+        monkeypatch.setenv("GROK_PAGE_RESPONDER", "1")
+        monkeypatch.setenv("GROK_PAGE_AUTOSHIP", "1")
+        self._green_marker(tmp_path, monkeypatch, at=NOW - timedelta(hours=1))
+        self._enqueue_unit_page("radon-leap.service")
+        log: list = []
+        systemctl = _fake_systemctl(
+            next_elapse=self.FARAWAY,
+            result="timeout",
+            failed_at=_fmt_systemd(NOW - timedelta(hours=2)),
+            log=log,
+        )
+
+        rc, followup = self._cycle(tmp_path, grok=_never_grok, systemctl=systemctl)
+
+        assert rc == 0
+        row = db_conn.execute("SELECT status, result FROM watchdog_pages").fetchone()
+        assert row[0] == "done"
+        assert row[1].startswith("restarted_unit:")
+        assert "timeout" in row[1]
+        assert ["reset-failed", "radon-leap.service"] in log
+        assert ["start", "--no-block", "radon-leap.service"] in log
+        followup.assert_called_once()
+
+    def test_timeout_with_no_deploy_since_the_failure_stands_down(
+        self, db_conn, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("GROK_PAGE_RESPONDER", "1")
+        monkeypatch.setenv("GROK_PAGE_AUTOSHIP", "1")
+        self._green_marker(tmp_path, monkeypatch, at=NOW - timedelta(hours=3))
+        self._enqueue_unit_page("radon-leap.service")
+        log: list = []
+        systemctl = _fake_systemctl(
+            next_elapse=self.FARAWAY,
+            result="timeout",
             failed_at=_fmt_systemd(NOW - timedelta(hours=2)),
             log=log,
         )

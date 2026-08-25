@@ -17,6 +17,7 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from clients.ib_client import IBTimeoutError
 from .. import ib_executor
 
 logger = logging.getLogger("radon.historical")
@@ -219,6 +220,11 @@ async def head_timestamp(req: HeadTimestampRequest, request: Request):
             )
     except ConnectionError as e:
         raise HTTPException(status_code=503, detail=str(e))
+    # IBTimeoutError subclasses IBError, not ConnectionError: a gateway
+    # that is merely slow (or sitting at 2FA) is a 503 like any other
+    # upstream unavailability, never an unhandled 500.
+    except IBTimeoutError as e:
+        raise HTTPException(status_code=503, detail=str(e))
 
     if not ts:
         return {"timestamp": None}
@@ -247,6 +253,8 @@ async def historical_bars(req: HistoricalBarsRequest, request: Request):
                 use_rth=req.use_rth,
             )
     except ConnectionError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except IBTimeoutError as e:
         raise HTTPException(status_code=503, detail=str(e))
 
     return {

@@ -24,6 +24,12 @@ export default defineConfig({
       ".pi/tests/**/*.test.ts",
     ],
     environment: "node",
+    fileParallelism: true,
+    maxWorkers: "100%",
+    // Shard VMs plus coverage have timed out 5s jsdom tests (newsfeed
+    // pagination on shard 5, theta-harvester on shard 7). One CI retry
+    // is cheaper than a red deploy gate; local stays fail-fast.
+    retry: process.env.CI ? 1 : 0,
     // Pin NODE_ENV=test for every run. Vitest defaults to "test", but an ambient
     // shell `NODE_ENV=development` (common in a dev session) leaks through and
     // overrides it — silently flipping code paths that branch on NODE_ENV (e.g.
@@ -38,6 +44,10 @@ export default defineConfig({
     setupFiles: ["./vitest.setup.ts"],
     coverage: {
       provider: "v8",
+      // Default v8 reporters include html/clover/json. Writing those artifacts
+      // for the 25k-line include set is a large fraction of the 307s CI job.
+      // The ratchet is thresholds, not report files.
+      reporter: ["text"],
       // Non-regressing RATCHET, not a vanity target. Each threshold sits ~2%
       // below current measured coverage so the suite passes today while
       // catching a regression. Raise these over time as coverage climbs;

@@ -541,13 +541,36 @@ def scan_ticker(
     )
 
 
+# R-095: 9dab450e made the exit rule "any non-zero result count -> exit 0",
+# and `failed_tickers` mixes three unrelated outcomes. A name with no LEAPs is
+# ordinary on a largecaps universe; a UWRateLimitError is the daily cap
+# tripping. Only the latter class counts toward exhaustion, and once it
+# dominates the run the scan is an outage, not a short list.
+MAX_PROVIDER_FAILURE_RATIO = 0.25
+
+
+def scan_is_exhausted(results: int, provider_failures: int) -> bool:
+    """True when provider errors, not empty universes, produced the result set."""
+    attempted = results + provider_failures
+    if attempted <= 0:
+        return True
+    return (provider_failures / attempted) > MAX_PROVIDER_FAILURE_RATIO
+
+
 def scan_universe(
     tickers: List[str],
     min_gap: float,
     workers: int = 16,
     failed_tickers: Optional[List[str]] = None,
+    provider_failures: Optional[List[str]] = None,
 ) -> List[ScanResult]:
-    """Scan tickers in parallel with one shared UWClient."""
+    """Scan tickers in parallel with one shared UWClient.
+
+    ``failed_tickers`` keeps its original meaning (anything that produced no
+    ScanResult) for the payload. ``provider_failures`` is the strict subset
+    that is the PROVIDER's fault — a rate limit or an exception — which is
+    what decides whether the run was exhausted (R-095).
+    """
     workers = max(1, workers)
     quiet = workers > 1
     results: List[ScanResult] = []
@@ -566,11 +589,15 @@ def scan_universe(
                         print(f"  ✗ {ticker}: rate limited, skip")
                         if failed_tickers is not None:
                             failed_tickers.append(ticker)
+                        if provider_failures is not None:
+                            provider_failures.append(ticker)
                         continue
                     except Exception as exc:
                         print(f"  ✗ Error scanning {ticker}: {exc}")
                         if failed_tickers is not None:
                             failed_tickers.append(ticker)
+                        if provider_failures is not None:
+                            provider_failures.append(ticker)
                         continue
                     if result:
                         results.append(result)
@@ -852,12 +879,15 @@ def main():
     print(f"Data: Unusual Whales (HV, IV) · Yahoo Finance (LAST RESORT fallback)")
     
     failed_tickers = []
+    provider_failures: List[str] = []
     results = scan_universe(
         tickers,
         args.min_gap,
         workers=args.workers,
         failed_tickers=failed_tickers,
+        provider_failures=provider_failures,
     )
+    exhausted = scan_is_exhausted(len(results), len(provider_failures))
     
     # Summary
     print(f"\n{'='*60}")
@@ -891,6 +921,8 @@ def main():
     if args.json:
         json_data = build_json_payload(results, args.min_gap, universe, tickers)
         json_data["failed_tickers"] = failed_tickers
+        json_data["provider_failures"] = provider_failures
+        json_data["status"] = "degraded" if exhausted else "ok"
         json_path = output_path.with_suffix(".json")
         json_path.parent.mkdir(parents=True, exist_ok=True)
         json_path.write_text(json.dumps(json_data, indent=2))
@@ -906,11 +938,34 @@ def main():
         print(f"✓ Dashboard cache saved to {cache_path}")
         # No leap table in Turso — the file cache is canonical; the
         # service_health row lets the banner spot a stale scheduled scan.
-        mirror_scan_snapshot("leap-scan", json_data)
+        # R-095: an exhausted run must not heartbeat ok. `data/leap.json`
+        # still carries whatever did resolve, but the row says error so the
+        # banner and the watchdog see a 2-name LEAP tab for what it is.
+        health_error = (
+            {
+                "message": (
+                    f"leap-scan exhausted: {len(provider_failures)} provider "
+                    f"failures vs {len(results)} results "
+                    f"(cap {MAX_PROVIDER_FAILURE_RATIO:.0%})"
+                ),
+                "class": "provider_exhausted",
+            }
+            if exhausted
+            else None
+        )
+        mirror_scan_snapshot("leap-scan", json_data, health_error=health_error)
+
+    if exhausted:
+        print(
+            f"✗ leap-scan exhausted: {len(provider_failures)} provider failures "
+            f"vs {len(results)} results",
+            file=sys.stderr,
+        )
+        return 1
 
     # Names without LEAPs are expected on a largecaps universe. A nonempty
     # failed_tickers list is recorded in the payload; only zero valid results
-    # fail the oneshot (P1 2026-08-20).
+    # or a provider wipeout fail the oneshot (P1 2026-08-20, R-095).
     return 0
 
 

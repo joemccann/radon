@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Activity } from "lucide-react";
 import BrushMinimap from "./BrushMinimap";
+import PanelRefreshError from "./PanelRefreshError";
 import CriHistoryChart, { type ChartSeries } from "./CriHistoryChart";
 import HistoryRangeChips from "./HistoryRangeChips";
 import InfoTooltip from "./InfoTooltip";
@@ -43,7 +44,7 @@ function regimeTone(regime: CreditRegime | null | undefined): "pos" | "neg" | "w
 }
 
 export default function CreditSpreadPanel() {
-  const { data, loading, syncing, lastSync } = useCreditSpread();
+  const { data, loading, syncing, lastSync, error } = useCreditSpread();
   const { isMobile, hasMounted } = useViewport();
   const compact = hasMounted && isMobile;
 
@@ -122,6 +123,7 @@ export default function CreditSpreadPanel() {
             Credit
             <InfoTooltip text={INFO_TOOLTIP} />
           </div>
+          <PanelRefreshError error={error} testId="credit-spread-refresh-error" />
           {lastSync && (
             <span style={{ fontFamily: "var(--font-mono)", fontSize: "9px", color: "var(--text-muted)" }}>
               {new Date(lastSync).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}

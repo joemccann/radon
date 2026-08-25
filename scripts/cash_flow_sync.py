@@ -119,6 +119,11 @@ EXIT_STATEMENT_NOT_READY = 12
 EXIT_PARSE_ERROR = 13
 EXIT_WRITE_ERROR = 14
 EXIT_FLEX_LOCKOUT = 15
+# R-100: a pre-flight embargo short-circuit performs NO HTTP, so it is not
+# evidence of a fresh IBKR 1025 and must never re-arm the token-wide
+# deadline. It exited 15 like a real lockout, and the daemon handler mapped
+# 15 straight back to record_lockout — every arming path extended the outage.
+EXIT_FLEX_PREFLIGHT_EMBARGO = 16
 
 
 def _classify(raw_type: str, amount: float) -> str:
@@ -575,11 +580,27 @@ def fetch_statement_xml(
     delays = poll_delays(
         budget, initial=poll_sleep, cap=max_poll_sleep, max_polls=max_polls
     )
+    # R-103: the schedule sizes SLEEP to the budget, but the urlopen in the
+    # same loop body was charged nowhere — worst case 30 x 30 + 420 = 1320s
+    # against a 480s SIGKILL, and even a benign 3s GetStatement latency put
+    # the run past it. HTTP time is now MEASURED and charged against the same
+    # budget, and each read is bounded by what is left of it.
+    elapsed = 0.0
+    polls = 0
     for sleep_s in delays:
+        if elapsed + sleep_s > budget:
+            break
         time.sleep(sleep_s)
+        elapsed += sleep_s
+        remaining = budget - elapsed
+        if remaining <= 0:
+            break
+        polls += 1
         params2 = urlencode({"t": token, "q": ref_code, "v": "3"})
-        resp2 = urlopen(f"{_GET_URL}?{params2}", timeout=30)
+        started = time.monotonic()
+        resp2 = urlopen(f"{_GET_URL}?{params2}", timeout=min(30.0, remaining))
         xml_text = resp2.read().decode("utf-8")
+        elapsed += max(0.0, time.monotonic() - started)
         if "<FlexStatements" in xml_text:
             return xml_text
         try:
@@ -590,7 +611,7 @@ def fetch_statement_xml(
             raise error
 
     raise _StatementNotReady(
-        f"Flex statement not ready after {len(delays)} polls "
+        f"Flex statement not ready after {polls} polls "
         f"({budget:.0f}s budget)"
     )
 
@@ -759,8 +780,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             return EXIT_THROTTLE
         if type(exc).__name__ == "FlexTokenLocked":
             print(f"ERR: {exc}", file=sys.stderr)
-            _emit_status("error", "lockout", code="1025", message=str(exc))
-            return EXIT_FLEX_LOCKOUT
+            _emit_status("error", "preflight_embargo", code="1025", message=str(exc))
+            return EXIT_FLEX_PREFLIGHT_EMBARGO
         print(f"ERR: cash flow fetch failed: {exc}", file=sys.stderr)
         _emit_status("error", "transport", message=str(exc))
         return EXIT_STATEMENT_NOT_READY

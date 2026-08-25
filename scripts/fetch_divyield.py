@@ -34,8 +34,9 @@ import json
 import os
 import re
 import sys
+import time
 from bisect import bisect_right
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -60,6 +61,9 @@ from clients.index_constituents import (
     resolve_constituents,
 )
 from db import writer
+from utils.ipv4_first import prefer_ipv4
+
+prefer_ipv4()
 
 # ── constants ─────────────────────────────────────────────────────
 SERVICE = "div-yield"
@@ -70,6 +74,12 @@ MIN_VALID_FRACTION = 0.8
 LEADER_COUNT = 10
 FETCH_WORKERS = 6
 FETCH_TIMEOUT_S = 30
+# Wall-clock ceiling for the Yahoo sweep. 2026-08-24: ~20s/chart made
+# 503 tickers / 6 workers ~28 min; TimeoutStartSec=900 SIGTERM'd the
+# oneshot (Result=timeout) with nothing persisted. Must fit inside
+# cloud/services/radon-divyield.service TimeoutStartSec with one
+# in-flight FETCH_TIMEOUT_S of slack.
+SWEEP_BUDGET_S = 1800
 HISTORY_READ_PAGE_ROWS = 500
 
 GITHUB_CONSTITUENTS_URL = (
@@ -95,7 +105,7 @@ _WIKI_SYMBOL_RE = re.compile(r"\{\{[A-Za-z]*[Ss]ymbol\|([A-Z][A-Z0-9.\-]*)\}\}")
 
 
 def _log(message: str) -> None:
-    print(f"[{SERVICE}] {message}", file=sys.stderr)
+    print(f"[{SERVICE}] {message}", file=sys.stderr, flush=True)
 
 
 def _iso_utc_now() -> str:
@@ -199,10 +209,16 @@ def _chart_session_date(chart: dict[str, Any]) -> Optional[str]:
 
 
 def sweep_yields(tickers: list[str]) -> tuple[dict[str, float], int, Optional[str]]:
-    """Parallel Yahoo sweep -> (yields_by_ticker, quote_errors, data_date)."""
+    """Parallel Yahoo sweep -> (yields_by_ticker, quote_errors, data_date).
+
+    Stops submitting/waiting at SWEEP_BUDGET_S so systemd TimeoutStartSec
+    cannot SIGTERM the oneshot mid-pool. Unfinished tickers count as
+    quote_errors; ensure_plausible_payload still refuses a <80% sweep.
+    """
     yields: dict[str, float] = {}
     errors = 0
     data_date: Optional[str] = None
+    deadline = time.monotonic() + SWEEP_BUDGET_S
 
     def fetch_one(ticker: str) -> tuple[str, Optional[dict[str, Any]]]:
         try:
@@ -211,18 +227,43 @@ def sweep_yields(tickers: list[str]) -> tuple[dict[str, float], int, Optional[st
             _log(f"quote: {ticker} failed: {exc}")
             return ticker, None
 
-    with ThreadPoolExecutor(max_workers=FETCH_WORKERS) as pool:
-        for done, (ticker, chart) in enumerate(pool.map(fetch_one, tickers), 1):
-            if done % 100 == 0:
-                _log(f"quote sweep {done}/{len(tickers)}")
-            trailing = compute_trailing_yield(chart) if chart is not None else None
-            if trailing is None:
-                errors += 1
-                continue
-            yields[ticker] = trailing
-            session = _chart_session_date(chart)
-            if session and (data_date is None or session > data_date):
-                data_date = session
+    pool = ThreadPoolExecutor(max_workers=FETCH_WORKERS)
+    pending = {pool.submit(fetch_one, ticker) for ticker in tickers}
+    done_count = 0
+    try:
+        while pending:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                _log(
+                    f"quote sweep wall-clock budget spent "
+                    f"({done_count}/{len(tickers)}); deferring the rest"
+                )
+                break
+            finished, pending = wait(
+                pending, timeout=remaining, return_when=FIRST_COMPLETED
+            )
+            if not finished:
+                _log(
+                    f"quote sweep wall-clock budget spent "
+                    f"({done_count}/{len(tickers)}); deferring the rest"
+                )
+                break
+            for fut in finished:
+                ticker, chart = fut.result()
+                trailing = compute_trailing_yield(chart) if chart is not None else None
+                if trailing is None:
+                    errors += 1
+                else:
+                    yields[ticker] = trailing
+                    session = _chart_session_date(chart) if chart is not None else None
+                    if session and (data_date is None or session > data_date):
+                        data_date = session
+                done_count += 1
+                if done_count % 100 == 0:
+                    _log(f"quote sweep {done_count}/{len(tickers)}")
+        errors += len(pending)
+    finally:
+        pool.shutdown(wait=True, cancel_futures=True)
     return yields, errors, data_date
 
 

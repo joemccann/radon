@@ -110,7 +110,13 @@ EXIT_CONFIG_ERROR = 1
 EXIT_THROTTLE = 10
 EXIT_FLEX_APP_ERROR = 11
 EXIT_FLEX_LOCKOUT = 15
-LOCKOUT_EMBARGO_DAYS = 7
+# See cash_flow_sync.EXIT_FLEX_PREFLIGHT_EMBARGO (R-100): the subprocess
+# refused to SendRequest because the shared sidecar was already armed. That
+# is the embargo WORKING; it must not extend the deadline.
+EXIT_FLEX_PREFLIGHT_EMBARGO = 16
+# R-134: single-sourced from utils.flex_embargo — the two copies had already
+# started to disagree with each other across four call sites.
+from utils.flex_embargo import LOCKOUT_DAYS as LOCKOUT_EMBARGO_DAYS  # noqa: E402
 
 _SOFT_EXIT_CLASSES = {
     12: "not_ready",
@@ -240,6 +246,10 @@ class CashFlowSyncHandler(BaseHandler):
     def __init__(self) -> None:
         super().__init__()
         self._backoff_state: Dict[str, Any] = _throttle_backoff.initial_state()
+        # R-109: a run the daemon's deadline killed keeps executing in its
+        # worker thread. Generations let its late bookkeeping be refused.
+        self._run_generation = 0
+        self._retired_generation = 0
 
     # ------------------------------------------------------------------
     # State persistence — circuit breaker survives daemon restarts.
@@ -275,7 +285,12 @@ class CashFlowSyncHandler(BaseHandler):
         failed cycle and lives in Turso, so it survives whatever ate the
         file. Read-only, best-effort, and only ever ADDS an embargo.
         """
-        next_attempt = _persisted_next_attempt_at(self.service_name or "cash-flow-sync")
+        # R-104/R-108: prefer the SHARED sidecar — any Flex caller may have
+        # armed it, and a missing state file must not forget their lockout.
+        shared = self._shared_embargo_until()
+        next_attempt = shared or _persisted_next_attempt_at(
+            self.service_name or "cash-flow-sync"
+        )
         if not next_attempt:
             return
         try:
@@ -296,11 +311,35 @@ class CashFlowSyncHandler(BaseHandler):
     # ------------------------------------------------------------------
     # Cadence override — daily window + circuit breaker.
     # ------------------------------------------------------------------
+    def _shared_embargo_until(self) -> Optional[str]:
+        """The token-wide deadline any Flex caller may have armed.
+
+        R-104: `is_due` used to gate only on this handler's PRIVATE backoff
+        state, so a lockout armed by perf-twr or the blotter left the daily
+        window open — the subprocess spawned, died on the embargo, and (per
+        R-100) extended the lockout another week.
+        """
+        try:
+            from utils.flex_embargo import active_until
+            return active_until()
+        except Exception:
+            return None
+
+    def _adopt_shared_embargo(self) -> None:
+        until = self._shared_embargo_until()
+        if not until:
+            return
+        self._backoff_state = dict(self._backoff_state)
+        self._backoff_state["blocked_until"] = until
+
     def is_due(self) -> bool:
         if not self._enabled:
             return False
 
         now_utc = _now_utc()
+
+        if self._shared_embargo_until():
+            return False
 
         if _throttle_backoff.is_blocked(self._backoff_state, now_utc=now_utc):
             return False
@@ -353,9 +392,19 @@ class CashFlowSyncHandler(BaseHandler):
         it with a plain ok/error.
         """
         started_at = self._utc_now_iso()
+        # R-109: the daemon's hard deadline abandons this call but the thread
+        # keeps running. Whichever finishes LAST used to win — a late
+        # _mark_success cleared blocked_until and wrote an ok row over the
+        # embargo the deadline path had just recorded. Stamp a generation at
+        # entry; every write below refuses if the run has since been retired.
+        self._run_generation += 1
+        generation = self._run_generation
+
         try:
             result = self._execute_inner()
         except Exception as exc:
+            if self._is_retired(generation):
+                raise
             self._record_failure(started_at, str(exc), exc=exc)
             raise
 
@@ -367,8 +416,17 @@ class CashFlowSyncHandler(BaseHandler):
         # 2026-05-14 latching bug impossible regardless of test stubs.
         inner_error = result.get("error") if result.get("status") == "error" else None
         if inner_error:
-            self._record_failure(started_at, str(inner_error))
+            if not self._is_retired(generation):
+                self._record_failure(started_at, str(inner_error))
             raise RuntimeError(str(inner_error))
+
+        if self._is_retired(generation):
+            logger.warning(
+                "cash_flow_sync run %s finished after its deadline kill — "
+                "success bookkeeping refused so the recorded embargo stands",
+                generation,
+            )
+            return result
 
         self._mark_success()
         self.record_cycle_health("ok", started_at=started_at)
@@ -378,6 +436,19 @@ class CashFlowSyncHandler(BaseHandler):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+    def retire_current_run(self) -> None:
+        """Disown the in-flight run after the daemon's deadline killed it.
+
+        R-109: without this the late worker thread's `_mark_success` cleared
+        `blocked_until` and wrote an `ok` row over the failure the deadline
+        path recorded, and the soft-attempt counter could be double-counted
+        for one attempt.
+        """
+        self._retired_generation = self._run_generation
+
+    def _is_retired(self, generation: int) -> bool:
+        return generation <= self._retired_generation
+
     def record_deadline_failure(self, message: str) -> None:
         """Called by the daemon when its hard deadline kills this handler.
 
@@ -433,6 +504,10 @@ class CashFlowSyncHandler(BaseHandler):
             )
         elif failure_class == "lockout":
             self._record_lockout(now_utc)
+        elif failure_class == "preflight_embargo":
+            # The shared sidecar already holds the deadline; mirror it into
+            # the private backoff state so is_due agrees, but never re-arm.
+            self._adopt_shared_embargo()
         elif failure_class == "config":
             self._record_config_error(now_utc)
         elif failure_class == "permanent":
@@ -599,6 +674,9 @@ class CashFlowSyncHandler(BaseHandler):
         code = result.returncode
         if code == EXIT_THROTTLE:
             return FlexThrottleError(str(status.get("code") or "unknown"), message)
+        if code == EXIT_FLEX_PREFLIGHT_EMBARGO:
+            return SyncFailure(message, flex_class="preflight_embargo",
+                               code=str(status.get("code") or "1025"))
         if code == EXIT_FLEX_LOCKOUT:
             return SyncFailure(message, flex_class="lockout",
                                code=str(status.get("code") or "1025"))

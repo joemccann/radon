@@ -300,6 +300,11 @@ def fetch_flex_xml(
         _arm_lockout(err_code)
         raise RuntimeError(f"Flex SendRequest failed code={err_code}: {err_msg}")
     ref_code = ref.text.strip()  # type: ignore[union-attr]
+    # R-103: `elapsed` counted SLEEP only, so ~29 x 120s of urlopen on top of
+    # the 420s budget made the real worst case ~65 minutes against
+    # TimeoutStartSec=600 and run_script(timeout=180). HTTP time is now
+    # MEASURED and charged against the same budget, and each read is bounded
+    # by what is left of it.
     elapsed = 0.0
     sleep_s = float(poll_secs)
     for _ in range(max_polls):
@@ -308,8 +313,15 @@ def fetch_flex_xml(
         _time.sleep(sleep_s)
         elapsed += sleep_s
         sleep_s = min(sleep_s * 2, 15.0)
+        remaining = FLEX_POLL_BUDGET_SECONDS - elapsed
+        if remaining <= 0:
+            break
         params2 = urlencode({"t": token, "q": ref_code, "v": "3"})
-        resp2 = urlopen(f"{_FLEX_GET}?{params2}", timeout=read_timeout)  # noqa: S310
+        started = _time.monotonic()
+        resp2 = urlopen(  # noqa: S310
+            f"{_FLEX_GET}?{params2}", timeout=min(float(read_timeout), remaining)
+        )
+        elapsed += max(0.0, _time.monotonic() - started)
         xml_text = resp2.read().decode("utf-8")
         # Do not match FlexStatementResponse: that wrapper is the ERROR
         # envelope, and "<FlexStatement" is a prefix of it. Treating 1025
@@ -1656,6 +1668,37 @@ def build_and_persist(*, persist: bool = True, allow_inferred_flows: bool = Fals
     return payload
 
 
+# R-159: this job wrote NO service_health row and always exited 0 — `--check`
+# is the only non-zero path and the unit's ExecStart does not pass it. `perf-twr`
+# was in neither watchdog catalog, so on a Flex 1025 lockout the builder
+# returned status=degraded, systemd recorded success, and check.py treated "no
+# row" as dormant while /performance served stale returns.
+_PERF_TWR_SERVICE = "perf-twr"
+_PERF_TWR_OK_STATUSES = frozenset({"ok"})
+
+
+def _perf_twr_state(status: object) -> str:
+    """Map the payload's own status onto a service_health state.
+
+    `stale` is deliberately an ERROR here: `--check` tolerates it because a
+    stale-but-valid payload can still be served, but a builder that cannot
+    advance the curve is exactly what this row exists to surface.
+    """
+    return "ok" if str(status or "") in _PERF_TWR_OK_STATUSES else "error"
+
+
+def _record_perf_twr_health(status: object, error: object = None) -> None:
+    """Best-effort heartbeat. A failed write must never fail the build."""
+    try:
+        from db.writer import record_service_health
+
+        record_service_health(
+            _PERF_TWR_SERVICE, _perf_twr_state(status), error=error,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"[perf_twr] health row non-fatal: {exc}", file=_sys.stderr)
+
+
 def main() -> None:
     import argparse
 
@@ -1681,6 +1724,20 @@ def main() -> None:
     payload = build_and_persist(
         persist=not args.no_persist, allow_inferred_flows=args.allow_inferred_flows
     )
+    if not args.no_persist:
+        _record_perf_twr_health(
+            payload.get("status"),
+            error=None
+            if _perf_twr_state(payload.get("status")) == "ok"
+            else {
+                "message": (
+                    f"perf-twr status={payload.get('status')} "
+                    f"flows={payload.get('flows_status')} "
+                    f"nav_source={payload.get('nav_source')}"
+                ),
+                "class": "degraded_build",
+            },
+        )
     summary = (
         f"[perf_twr] status={payload['status']} "
         f"period={payload['period_start']}..{payload['period_end']} "
