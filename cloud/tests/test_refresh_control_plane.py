@@ -431,9 +431,12 @@ def test_restart_services_refreshes_before_restart_and_installs_units_after() ->
     deploy = DEPLOY.read_text(encoding="utf-8")
     restart = function_body(deploy, "restart_services")
     assert "refresh_control_plane" in restart
-    assert restart.index("activate_staged_release") < restart.index("refresh_control_plane")
-    assert restart.index("refresh_control_plane") < restart.index("start_services_after_transition")
-    assert restart.index("start_services_after_transition") < restart.index("install_release_units")
+    stop_at = restart.index("stop_services_for_transition")
+    activate_at = restart.index("activate_staged_release", stop_at)
+    refresh_at = restart.index("refresh_control_plane", stop_at)
+    start_at = restart.index("start_services_after_transition")
+    install_at = restart.index("install_release_units", start_at)
+    assert activate_at < refresh_at < start_at < install_at
     refresh = function_body(deploy, "refresh_control_plane")
     assert "refresh-control-plane" in refresh
     assert "refresh-control-plane-privileged" not in refresh
