@@ -1926,6 +1926,111 @@ check_units_stable
         assert result.returncode == 0, result.stdout + result.stderr
         assert slept.read_text(encoding="utf-8").strip() == "3"
 
+    def test_check_units_stable_skips_sleep_when_units_were_not_restarted(
+        self, tmp_path: Path
+    ) -> None:
+        fake_bin = tmp_path / "bin"
+        fake_bin.mkdir()
+        slept = tmp_path / "slept"
+        _write_executable(
+            fake_bin / "systemctl",
+            f"""#!{sys.executable}
+import sys
+if sys.argv[1] == "is-active":
+    raise SystemExit(0)
+if sys.argv[1] == "show":
+    print(0)
+    raise SystemExit(0)
+raise SystemExit(2)
+""",
+        )
+        _write_executable(
+            fake_bin / "sleep",
+            f"""#!{sys.executable}
+from pathlib import Path
+import sys
+Path({str(slept)!r}).write_text(sys.argv[1], encoding="utf-8")
+""",
+        )
+        shell = f"""
+set -euo pipefail
+source {DEPLOY!s}
+PATH={fake_bin!s}:$PATH
+UNITS_RESTARTED=0
+snapshot_unit_restarts
+STABILITY_STARTED_AT=$((SECONDS - 1))
+check_units_stable
+"""
+        result = subprocess.run(
+            ["bash", "-c", shell],
+            env={
+                **os.environ,
+                "PATH": f"{fake_bin}:{os.environ['PATH']}",
+                "RADON_DEPLOY_UNIT_STABILITY_SECONDS": "40",
+            },
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert not slept.exists()
+
+    def test_payload_paths_changed_ignores_docs_and_tests(self, tmp_path: Path) -> None:
+        fake_bin = tmp_path / "bin"
+        fake_bin.mkdir()
+        _write_executable(
+            fake_bin / "git",
+            f"""#!{sys.executable}
+import sys
+if sys.argv[1] == "-C":
+    sys.argv = sys.argv[3:]
+if sys.argv[:2] == ["diff", "--name-only"]:
+    print("docs/cloud-services.md")
+    print("scripts/tests/test_foo.py")
+    print(".github/workflows/ci.yml")
+    raise SystemExit(0)
+raise SystemExit(2)
+""",
+        )
+        result = subprocess.run(
+            ["bash", "-c", f"source {DEPLOY!s}; payload_paths_changed a b"],
+            env={**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"},
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 1, result.stdout + result.stderr
+
+    def test_payload_paths_changed_detects_web_runtime(self, tmp_path: Path) -> None:
+        fake_bin = tmp_path / "bin"
+        fake_bin.mkdir()
+        _write_executable(
+            fake_bin / "git",
+            f"""#!{sys.executable}
+import sys
+if sys.argv[1] == "-C":
+    sys.argv = sys.argv[3:]
+if sys.argv[:2] == ["diff", "--name-only"]:
+    print("web/app/page.tsx")
+    raise SystemExit(0)
+raise SystemExit(2)
+""",
+        )
+        result = subprocess.run(
+            ["bash", "-c", f"source {DEPLOY!s}; payload_paths_changed a b"],
+            env={**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"},
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    def test_restart_services_skips_helper_when_payloads_match(
+        self, deploy_text: str
+    ) -> None:
+        body = function_body(deploy_text, "restart_services")
+        assert "payload_paths_changed" in body
+        assert "UNITS_RESTARTED=0" in body
+        assert "stop_services_for_transition" in body
+        assert "start_services_after_transition" in body
+
     def test_topology_is_reverified_after_core_stability_hold(self, deploy_text: str) -> None:
         gate = function_body(deploy_text, "deploy_gate")
         stability = gate.index("check_units_stable")
@@ -2117,8 +2222,10 @@ class TestFrozenArtifacts:
         assert "&" in staged
         assert main.find("build_staged_release") < main.find("restart_services")
         restart = function_body(deploy_text, "restart_services")
-        assert restart.find("stop_services_for_transition") < restart.find(
-            "activate_staged_release"
+        stop_at = restart.find("stop_services_for_transition")
+        assert stop_at >= 0
+        assert stop_at < restart.find(
+            "activate_staged_release", stop_at
         ) < restart.find("start_services_after_transition")
 
     def test_seed_staged_node_modules_reuses_live_tree_when_lockfiles_match(
@@ -2996,7 +3103,9 @@ class TestCloudSecretScan:
             "\n".join(str(step.get("run", "")) for step in job["steps"])
             for job in pytest_jobs
         ]
-        assert any("pytest cloud/tests" in commands for commands in commands_by_job)
+        cloud = jobs["cloud-tests"]
+        assert "cloud/tests/test_" in str(cloud["strategy"]["matrix"]["include"])
+        assert "matrix.paths" in "\n".join(str(step.get("run", "")) for step in cloud["steps"])
         all_commands = [
             "\n".join(str(step.get("run", "")) for step in job["steps"])
             for job in jobs.values()

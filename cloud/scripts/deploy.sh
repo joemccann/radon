@@ -94,6 +94,7 @@ readonly DEPLOY_KILL_AFTER="${DEPLOY_KILL_AFTER:-30}"
 readonly BUN_VERSION="1.3.14"
 
 readonly SERVICES=(radon-nextjs radon-api radon-relay radon-monitor radon-newsfeed)
+UNITS_RESTARTED=1
 
 # Required env vars that MUST be present before a deploy touches services.
 # Prefer /etc/radon/env when that regular file exists; else ~/radon-cloud/.env.
@@ -1097,13 +1098,49 @@ start_services_after_transition() {
   DEPLOY_TEARDOWN_STARTED=0
 }
 
+payload_paths_changed() {
+  local prev="$1"
+  local new="$2"
+  local path
+  if [[ -z "$prev" || -z "$new" || "$prev" == "$new" || "$prev" =~ ^0+$ ]]; then
+    return 0
+  fi
+  while IFS= read -r path; do
+    [[ -z "$path" ]] && continue
+    case "$path" in
+      docs/*|tasks/*|.claude/*|.agents/*|notebooks/*|.github/*|*.md)
+        continue
+        ;;
+      scripts/tests/*|cloud/tests/*|web/tests/*|web/e2e/*|site/*)
+        continue
+        ;;
+      web/*|lib/*|scripts/*|cloud/services/*|cloud/scripts/*|cloud/config/*| \
+      requirements*|pyproject.toml|bun.lock|package.json|*.service)
+        return 0
+        ;;
+    esac
+    return 0
+  done < <(git -C "$RADON_DIR" diff --name-only "$prev" "$new")
+  return 1
+}
+
 restart_services() {
   local requested_sha="${1:-}"
   local previous_sha="${2:-}"
   local status=0
+  UNITS_RESTARTED=1
 
   if [[ -n "$requested_sha" ]]; then
     prepare_release_transition "$requested_sha" "$previous_sha" || return $?
+  fi
+  if [[ -n "$requested_sha" && -n "$previous_sha" ]] \
+    && ! payload_paths_changed "$previous_sha" "$requested_sha"; then
+    log_info "No runtime payload changes; promoting without unit restart"
+    activate_staged_release "$requested_sha" "$previous_sha" || return $?
+    refresh_control_plane || return 1
+    install_release_units
+    UNITS_RESTARTED=0
+    return 0
   fi
   stop_services_for_transition
   if [[ -n "$requested_sha" ]]; then
@@ -1212,6 +1249,9 @@ check_units_stable() {
   fi
   elapsed=$((SECONDS - STABILITY_STARTED_AT))
   remaining=$((UNIT_STABILITY_SECONDS - elapsed))
+  if [[ "${UNITS_RESTARTED:-1}" != "1" ]]; then
+    remaining=0
+  fi
   if (( remaining > 0 )); then
     sleep "$remaining"
   fi
