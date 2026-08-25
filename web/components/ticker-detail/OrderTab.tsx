@@ -12,6 +12,7 @@ import { computeLegImpliedValue } from "@/lib/impliedValue";
 import { useRiskFreeRate } from "@/lib/useRiskFreeRate";
 import ModifyOrderModal from "@/components/ModifyOrderModal";
 import { OrderQuoteTelemetry } from "@/components/QuoteTelemetry";
+import { buildQuoteTelemetryModel, comboQuotePriceData } from "@/lib/quoteTelemetry";
 import OrderErrorBanner from "@/components/OrderErrorBanner";
 import type { ModifyOrderRequest } from "@/lib/orderModify";
 import { checkNakedShortRisk, type NakedShortPortfolio, type OrderPayload } from "@/lib/nakedShortGuard";
@@ -780,6 +781,22 @@ function ComboOrderForm({
       ?? { bid: null, ask: null, mid: null };
   }, [position, prices, ticker]);
 
+  // A BAG has no quote of its own, so feed the net through the same model
+  // every single-leg surface uses rather than hand-building a second one.
+  // Session OHLV stays null on purpose: no exchange publishes a combo's
+  // high, low or volume, so those render "---" instead of a borrowed number.
+  const comboQuoteModel = useMemo(() => {
+    if (netPrices.bid == null && netPrices.ask == null) return null;
+    return buildQuoteTelemetryModel(
+      comboQuotePriceData({
+        symbol: ticker,
+        bid: netPrices.bid,
+        ask: netPrices.ask,
+        last: netPrices.mid,
+      }),
+    );
+  }, [ticker, netPrices.bid, netPrices.ask, netPrices.mid]);
+
   const parsedQty = parseInt(quantity, 10);
   const parsedPrice = parseFloat(limitPrice);
   const isValid = !isNaN(parsedQty) && parsedQty > 0 && Number.isFinite(parsedPrice) && parsedPrice !== 0;
@@ -932,6 +949,8 @@ function ComboOrderForm({
 
   return (
     <div className="order-form">
+      <OrderQuoteTelemetry model={comboQuoteModel} label={position.structure} />
+
       {/* Spread price strip — always visible at top */}
       <div className="spread-price-strip">
         <div className="spread-price-item">

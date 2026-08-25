@@ -216,3 +216,99 @@ describe("OrderTab new-order quote telemetry", () => {
     expect(container.querySelector(".order-form .price-bar-empty")?.textContent).toBe("No real-time data");
   });
 });
+
+const HELD_SPREAD: PortfolioPosition = {
+  id: 8,
+  ticker: "NVDA",
+  structure: "Bull Call Spread $190.0/$200.0",
+  structure_type: "Bull Call Spread",
+  risk_profile: "defined",
+  expiry: "2026-09-18",
+  contracts: 4,
+  direction: "COMBO",
+  entry_cost: 1600,
+  max_risk: 1600,
+  market_value: 2000,
+  kelly_optimal: null,
+  target: null,
+  stop: null,
+  entry_date: "2026-07-01",
+  legs: [
+    {
+      direction: "LONG", contracts: 4, type: "Call", strike: 190,
+      entry_cost: 2400, avg_cost: 600, market_price: 7, market_value: 2800,
+      market_price_is_calculated: false,
+    },
+    {
+      direction: "SHORT", contracts: 4, type: "Call", strike: 200,
+      entry_cost: 800, avg_cost: 200, market_price: 2, market_value: 800,
+      market_price_is_calculated: false,
+    },
+  ],
+};
+
+function legPrice(symbol: string, bid: number, ask: number): PriceData {
+  return { ...stockPrice(), symbol, bid, ask, last: (bid + ask) / 2, volume: null, high: null, low: null, open: null, close: null };
+}
+
+/**
+ * The combo branch of the Order tab is its own order-entry surface ("Place
+ * Combo Order") and was shipped without the telemetry block that the
+ * single-leg branch got - it showed only its three-field net BID/MID/ASK
+ * strip. Caught on production after the first rollout.
+ */
+describe("OrderTab combo quote telemetry", () => {
+  it("renders the nine-field telemetry block on the combo order form", () => {
+    const prices = {
+      NVDA: stockPrice(),
+      NVDA_20260918_190_C: legPrice("NVDA_20260918_190_C", 7.0, 7.4),
+      NVDA_20260918_200_C: legPrice("NVDA_20260918_200_C", 2.0, 2.2),
+    };
+    const { container } = render(
+      <OrderTab
+        ticker="NVDA"
+        position={HELD_SPREAD}
+        portfolio={null}
+        prices={prices}
+        openOrders={[]}
+        tickerPriceData={prices.NVDA}
+      />,
+    );
+
+    expect(telemetryLabels(container)).toEqual(
+      expect.arrayContaining(["BID", "MID", "ASK", "SPREAD", "VOLUME", "HIGH", "LOW", "DAY"]),
+    );
+    const values = telemetryValues(container);
+    // Natural spread: BUY leg pays ask, SELL leg receives bid -> 7.4 - 2.0 = 5.40 ask,
+    // 7.0 - 2.2 = 4.80 bid. A combo has no session OHLV, so those read "---".
+    expect(values.BID).toBe("$4.80");
+    expect(values.ASK).toBe("$5.40");
+    expect(values.VOLUME).toBe("---");
+    expect(values.HIGH).toBe("---");
+    expect(values.DAY).toBe("---");
+    // MARK, not LAST: the net is calculated, never a printed trade.
+    expect(values.MARK).toBe("$5.10");
+  });
+
+  it("keeps the combo net BID/MID/ASK quick-fill buttons", () => {
+    const prices = {
+      NVDA: stockPrice(),
+      NVDA_20260918_190_C: legPrice("NVDA_20260918_190_C", 7.0, 7.4),
+      NVDA_20260918_200_C: legPrice("NVDA_20260918_200_C", 2.0, 2.2),
+    };
+    const { container } = render(
+      <OrderTab
+        ticker="NVDA"
+        position={HELD_SPREAD}
+        portfolio={null}
+        prices={prices}
+        openOrders={[]}
+        tickerPriceData={prices.NVDA}
+      />,
+    );
+    const quick = [...container.querySelectorAll("button.btn-quick")].map((b) => b.textContent ?? "");
+    expect(quick.some((t) => t.startsWith("BID"))).toBe(true);
+    expect(quick.some((t) => t.startsWith("MID"))).toBe(true);
+    expect(quick.some((t) => t.startsWith("ASK"))).toBe(true);
+  });
+});
