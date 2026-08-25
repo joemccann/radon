@@ -1,3 +1,24 @@
+# Task: P1 radon-bpi Result=timeout (page bbaa065b, 2026-08-24 23:30Z)
+
+## Dependency graph
+
+- B1 depends_on: [] - Red: tarpitted Yahoo spark/chart stop inside SWEEP_BUDGET_S
+- B2 depends_on: [B1] - Shared run deadline; exit before TimeoutStartSec=6900
+- B3 depends_on: [B2] - Runbook case + focused pytest
+
+## Checklist
+
+- [x] B1 Red tests
+- [x] B2 Wall-clock budget (do not raise TimeoutStartSec; R-071 stands)
+- [x] B3 Runbook `bpi-yahoo-sweep-timeout`
+
+## Review
+
+- Focused pytest: `test_bpi_scan.py` 35 passed; `TestBpiScanBudget` 3 passed
+- Live: 21:30Z Result=timeout at 6900s mid-RUT spark; 23:30 catch-up already running; no unit restart
+
+---
+
 # Task: flow-refresh oneshot shed page (2026-08-24)
 
 ## Dependency graph

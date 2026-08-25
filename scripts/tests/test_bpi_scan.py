@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from contextlib import contextmanager
 from datetime import date, timedelta
 from pathlib import Path
@@ -359,6 +360,91 @@ class TestPersistenceGating:
         monkeypatch.setattr(bpi, "scan_index", lambda idx, **kw: dict(missing))
         bpi.run_scan(["NDX"], backfill=False, no_db=False)
         assert json.loads((recorded["data_dir"] / "bpi.json").read_text()) == existing
+
+
+class TestSweepBudget:
+    """2026-08-24 21:30Z: radon-bpi Result=timeout after TimeoutStartSec=6900.
+    NDX+SPX persisted; RUT spark of 1996 members (100 x 20-symbol chunks at
+    ~60s) was still running at InactiveEnter 23:26:31Z. systemd SIGTERM,
+    NRestarts=0, P1 page. The 23:30 catch-up fired (R-071) but the process
+    must exit before systemd kills it so the unit does not page."""
+
+    def test_tarpitted_spark_stops_inside_the_wall_clock_budget(self, monkeypatch):
+        monkeypatch.setattr(bpi, "SWEEP_BUDGET_S", 0.15, raising=False)
+        monkeypatch.setattr(bpi, "YAHOO_COURTESY_SLEEP_S", 0.0)
+        monkeypatch.setattr(bpi, "SPARK_BATCH_SIZE", 2)
+
+        def hang(_req, timeout=None):
+            time.sleep(0.4)
+            raise TimeoutError("yahoo tarpit")
+
+        monkeypatch.setattr("urllib.request.urlopen", hang)
+        members = [f"T{i:02d}" for i in range(16)]
+        started = time.monotonic()
+        fetched = bpi._fetch_members_spark(members)
+        elapsed = time.monotonic() - started
+        # 8 sequential 0.4s chunks would take ~3.2s without a budget.
+        assert elapsed < 1.0
+        assert fetched == {}
+
+    def test_tarpitted_chart_fallback_stops_inside_the_wall_clock_budget(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(bpi, "SWEEP_BUDGET_S", 0.15, raising=False)
+        monkeypatch.setattr(bpi, "FETCH_WORKERS", 2)
+        monkeypatch.setattr(bpi, "YAHOO_COURTESY_SLEEP_S", 0.0)
+
+        def hang(_symbol, _range_str):
+            time.sleep(0.4)
+            return {"2026-08-24": 1.0}
+
+        monkeypatch.setattr(bpi, "_fetch_yahoo_daily", hang)
+        members = [f"T{i:02d}" for i in range(8)]
+        started = time.monotonic()
+        fetched = bpi._fetch_members(members, "1mo")
+        elapsed = time.monotonic() - started
+        # map() over 8/2 workers is ~1.6s; in-flight workers may finish one
+        # 0.4s fetch after the deadline.
+        assert elapsed < 1.0
+        assert len(fetched) < len(members)
+
+    def test_run_scan_passes_one_shared_deadline_to_every_index(
+        self, recorded, monkeypatch
+    ):
+        seen: list = []
+
+        def fake_scan(idx, **kw):
+            seen.append(kw.get("sweep_deadline"))
+            return {
+                "missing": True,
+                "index_symbol": idx,
+                "reason": "insufficient_history",
+            }
+
+        monkeypatch.setattr(bpi, "scan_index", fake_scan)
+        monkeypatch.setattr(bpi, "SWEEP_BUDGET_S", 30.0, raising=False)
+        t0 = time.monotonic()
+        bpi.run_scan(["NDX", "SPX", "RUT"], backfill=False, no_db=True)
+        assert seen == [seen[0], seen[0], seen[0]]
+        assert seen[0] is not None
+        assert t0 < seen[0] <= t0 + 31
+
+    def test_sweep_budget_fits_inside_unit_start_timeout(self):
+        service = (
+            Path(__file__).resolve().parents[2]
+            / "cloud"
+            / "services"
+            / "radon-bpi.service"
+        )
+        timeout_line = next(
+            line
+            for line in service.read_text().splitlines()
+            if line.startswith("TimeoutStartSec=")
+        )
+        unit_timeout = int(timeout_line.split("=", 1)[1])
+        assert bpi.SWEEP_BUDGET_S + bpi.FETCH_TIMEOUT_S <= unit_timeout
+        # R-071: do not raise TimeoutStartSec past the 23:30 catch-up gap.
+        assert unit_timeout <= 7200 - 120
 
 
 class TestCliContract:
