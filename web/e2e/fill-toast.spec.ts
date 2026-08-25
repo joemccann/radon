@@ -142,7 +142,7 @@ async function setupMocks(page: Page) {
       body: JSON.stringify(ordersPayload(executed)),
     });
   });
-  await page.route("**/api/portfolio", (route) =>
+  await page.route("**/api/portfolio**", (route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",

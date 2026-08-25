@@ -62,7 +62,7 @@ async function stubApis(page: import("@playwright/test").Page) {
   await page.route("**/api/orders", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(ORDERS) }),
   );
-  await page.route("**/api/portfolio", (route) =>
+  await page.route("**/api/portfolio**", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(PORTFOLIO) }),
   );
   await page.route("**/api/regime", (route) =>
