@@ -65,7 +65,7 @@ const ORDERS = {
 
 /** Stub all API routes so the app renders without a live backend. */
 async function stubRoutes(page: import("@playwright/test").Page) {
-  await page.route("**/api/portfolio", (r) =>
+  await page.route("**/api/portfolio**", (r) =>
     r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(PORTFOLIO) }),
   );
   await page.route("**/api/orders", (r) =>
