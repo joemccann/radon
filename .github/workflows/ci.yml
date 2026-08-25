@@ -288,7 +288,11 @@ jobs:
           RADON_API_TEST_MODE: "1"
         run: |
           if [ -z "${TURSO_DEMO_DB_URL}" ] && [ -z "${TURSO_DB_URL}" ]; then
-            echo "no demo env configured on this runner — nothing to check"
+            # TEST_AUDIT T-130: neither TURSO_DEMO_DB_URL nor
+            # TURSO_DEMO_APP_DB_URL is provisioned as a repo/environment
+            # secret, so this guard has never executed. Annotate the run so
+            # the skip is visible on every workflow, not buried in a log.
+            echo "::warning title=Demo isolation guard SKIPPED::TURSO_DEMO_DB_URL / TURSO_DEMO_APP_DB_URL secrets are not provisioned; scripts/ci/check_demo_isolation.py did not run"
             exit 0
           fi
           python3 scripts/ci/check_demo_isolation.py
