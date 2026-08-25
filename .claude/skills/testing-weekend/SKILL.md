@@ -279,3 +279,25 @@ how this loop improves as the codebase grows.
   (an `apply_` stamping claim that needs a `contract.secType` the agent's repro
   omitted). Reproduce the top P1 in-process from the cited file (a 10-line
   python heredoc), read the cited lines of every P0/P1, and only then number.
+- **2026-08-25 (remediate): this runner has no `rtk`, no `setsid`, and no
+  `pytest-xdist`.** Bare `git` is the only git here and its output was
+  trustworthy (the 2026-08-16 rtk lesson applies only where rtk is installed —
+  check `which rtk` first). `pytest-xdist` is CI-only like `pytest-asyncio`
+  was: install it in the shared venv before verifying anything under
+  `-n auto --dist loadfile` (a new shard is only proven with CI's flags).
+  `setsid` does not exist on darwin: detach a long job with
+  `subprocess.Popen(..., start_new_session=True)`, never `nohup setsid`.
+- **2026-08-25 (remediate): the closing 3× gate does not fit the Bash tool's
+  600 s cap.** One serial round (pytest ~275 s + vitest ~300 s + cloud
+  ~185 s) already exceeds it and a backgrounded tool call is still killed at
+  the cap. Run the rounds from a detached script that writes one file per
+  gate run plus a done marker, and arm a Monitor on the marker — do not
+  chain nine background calls. Also `setopt nullglob` before any
+  `rm -f pattern-*`: zsh aborts the whole line on a non-matching glob and the
+  launch that followed silently never happened.
+- **2026-08-25 (remediate): a red that SIGKILLs the runner is not a usable
+  red.** The T-127 reproduction (`run_module` spawned in the caller's process
+  group, then `killpg` on timeout) killed pytest itself on the first attempt.
+  When the defect under test is "signals the wrong group", record the signal
+  call instead of delivering it (patch `os.killpg`), assert on the recorded
+  pgid, and keep a real child so the pgid observation stays honest.
