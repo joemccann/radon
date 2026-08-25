@@ -6,6 +6,7 @@ import { ApprovalGate, AskComposer, EngineTrace } from "@/components/agent";
 import { buildTurnSteps, describeEngines } from "@/lib/agent/turnSteps";
 import type {
   ApiMessage,
+  AssistantOrderInput,
   AssistantOrderProposal,
   AssistantToolEvent,
   Message,
@@ -23,8 +24,16 @@ import {
   streamMessage,
 } from "@/lib/chat";
 import MarkdownRenderer from "./MarkdownRenderer";
+import { OrderQuoteTelemetry } from "@/components/QuoteTelemetry";
 import { OrderRiskGate } from "@/lib/order/risk/OrderRiskGate";
 import type { OrderRiskInput, OrderRiskState } from "@/lib/order/risk/useOrderRisk";
+import { computeNetOptionQuote, formatExpiry, type OrderLeg } from "@/lib/optionsChainUtils";
+import { optionKey, type PriceData } from "@/lib/pricesProtocol";
+import {
+  buildQuoteTelemetryModel,
+  comboQuotePriceData,
+  type QuoteTelemetryModel,
+} from "@/lib/quoteTelemetry";
 
 type ChatPanelProps = {
   activeSection: WorkspaceSection;
@@ -40,7 +49,15 @@ type ChatPanelProps = {
    */
   seedPrompt?: string | null;
   onSeedConsumed?: () => void;
+  /**
+   * Live quotes, keyed the way `usePrices` keys them (ticker for a stock,
+   * `optionKey()` for a contract). The proposal gate reads the one instrument
+   * it is about to route out of this map.
+   */
+  prices?: Record<string, PriceData>;
 };
+
+const NO_PRICES: Record<string, PriceData> = {};
 
 /**
  * Request lifecycle as a named union, not scattered booleans. Each state maps
@@ -96,12 +113,81 @@ function proposalRiskInput(proposal: AssistantOrderProposal | null): OrderRiskIn
   };
 }
 
+/** Names the instrument the way its ticket names it, e.g. "MU 2026-09-18 $120 C". */
+function proposalQuoteLabel(input: AssistantOrderInput): string {
+  if (input.type === "option") {
+    return `${input.ticker} ${formatExpiry(input.expiry)} $${input.strike} ${input.right}`;
+  }
+  if (input.type === "combo") {
+    return `${input.ticker} ${input.structure ?? "Combo"}`;
+  }
+  return input.ticker;
+}
+
+/**
+ * A BAG is not a quoted instrument: net the legs with the shared combo
+ * calculation, then hand that net quote to the SAME model builder every
+ * single-leg surface uses.
+ */
+function comboQuoteModel(
+  input: Extract<AssistantOrderInput, { type: "combo" }>,
+  prices: Record<string, PriceData>,
+): QuoteTelemetryModel | null {
+  const legs: OrderLeg[] = input.legs.map((leg, index) => ({
+    id: `${input.ticker}-${index}`,
+    action: leg.action,
+    right: leg.right,
+    strike: leg.strike,
+    expiry: leg.expiry,
+    quantity: leg.ratio,
+    limitPrice: null,
+  }));
+  const net = computeNetOptionQuote(legs, prices, input.ticker);
+  if (net.bid == null && net.ask == null) return null;
+  return buildQuoteTelemetryModel(
+    comboQuotePriceData({ symbol: input.ticker, bid: net.bid, ask: net.ask, last: net.mid }),
+  );
+}
+
+type ProposalQuote = {
+  label: string;
+  priceData: PriceData | null;
+  model: QuoteTelemetryModel | null;
+};
+
+/**
+ * The proposal's own quote: the underlying for a stock, the contract for a
+ * single-leg option, the net market for a combo.
+ */
+function proposalQuote(
+  proposal: AssistantOrderProposal | null,
+  prices: Record<string, PriceData>,
+): ProposalQuote | null {
+  if (!proposal) return null;
+  const input = proposal.input;
+  const label = proposalQuoteLabel(input);
+  if (input.type === "combo") {
+    return { label, priceData: null, model: comboQuoteModel(input, prices) };
+  }
+  const key =
+    input.type === "option"
+      ? optionKey({
+          symbol: input.ticker,
+          expiry: input.expiry,
+          strike: input.strike,
+          right: input.right,
+        })
+      : input.ticker;
+  return { label, priceData: prices[key] ?? null, model: null };
+}
+
 export default function ChatPanel({
   activeSection,
   portfolio,
   isOpen = true,
   seedPrompt = null,
   onSeedConsumed,
+  prices = NO_PRICES,
 }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [status, setStatus] = useState<ChatStatus>("idle");
@@ -114,6 +200,7 @@ export default function ChatPanel({
   const [isPlacing, setPlacing] = useState(false);
   const [riskState, setRiskState] = useState<OrderRiskState | null>(null);
   const riskInput = useMemo(() => proposalRiskInput(proposal), [proposal]);
+  const quote = useMemo(() => proposalQuote(proposal, prices), [proposal, prices]);
   const [showJump, setShowJump] = useState(false);
 
   const messagesRef = useRef<HTMLDivElement | null>(null);
@@ -383,6 +470,16 @@ export default function ChatPanel({
               <ApprovalGate
                 title="Confirmation required"
                 body={proposal.summary}
+                quote={
+                  quote ? (
+                    <OrderQuoteTelemetry
+                      priceData={quote.priceData}
+                      model={quote.model}
+                      label={quote.label}
+                      density="tight"
+                    />
+                  ) : null
+                }
                 options={[{ id: "route", label: "Route as proposed", meta: "AS PROPOSED" }]}
                 busy={isPlacing}
                 confirmDisabled={riskState?.okToSubmit !== true}

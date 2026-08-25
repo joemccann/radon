@@ -317,6 +317,7 @@ function StockOrderForm({
   bid,
   ask,
   mid,
+  priceData,
 }: {
   ticker: string;
   position: PortfolioPosition | null;
@@ -324,6 +325,7 @@ function StockOrderForm({
   bid: number | null;
   ask: number | null;
   mid: number | null;
+  priceData: PriceData | null;
 }) {
   const orderActions = useOrderActionsOptional();
   const defaultAction: SingleLegOrderAction = position != null ? "SELL" : "BUY";
@@ -403,6 +405,8 @@ function StockOrderForm({
       bid={bid}
       mid={mid}
       ask={ask}
+      priceData={priceData}
+      quoteLabel={ticker}
       showQuickButtonPrices={false}
       isValid={isValid}
       limitPrice={limitPrice}
@@ -511,6 +515,9 @@ export default function BookTab({
   const spread = bid != null && ask != null ? ask - bid : null;
   const last = priceData?.last ?? null;
   const lastLabel = priceData?.lastIsCalculated ? "MARK" : "LAST";
+  // The stock ticket always trades the UNDERLYING, so its quote telemetry must
+  // read the stock's own quote even while the book is focused on an option leg.
+  const stockPriceData = resolvedBookKey === ticker ? priceData : prices[ticker] ?? null;
   const isIndex = isIndexSymbol(ticker);
 
   const selectedOptionLeg = optionLegBooks.find((leg) => leg.key === resolvedBookKey) ?? null;
@@ -665,7 +672,9 @@ export default function BookTab({
 
       {isIndex ? (
         <>
-          {hasFuturesSupport(ticker) && <FuturesOrderForm ticker={ticker} />}
+          {hasFuturesSupport(ticker) && (
+            <FuturesOrderForm ticker={ticker} priceData={tickerPriceData ?? prices[ticker] ?? null} />
+          )}
           {hasIndexOptionsSupport(ticker) && (
             <div style={{ marginTop: hasFuturesSupport(ticker) ? "24px" : "0" }}>
               <IndexOptionOrderForm ticker={ticker} />
@@ -683,6 +692,7 @@ export default function BookTab({
           bid={bid}
           ask={ask}
           mid={mid}
+          priceData={stockPriceData}
         />
       )}
 

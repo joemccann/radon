@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { OrderQuoteTelemetry } from "@/components/QuoteTelemetry";
 import { OrderRiskGate, type OrderRiskInput, type OrderRiskState } from "@/lib/order";
+import type { PriceData } from "@/lib/pricesProtocol";
 import { placeOrderFeedback, type PlaceOrderFeedback } from "@/lib/orders/placeOrderFeedback";
 import type { PortfolioData } from "@/lib/types";
 
@@ -46,6 +48,15 @@ export interface ListedContractOrderFormProps {
    * price-or-qty); the gate then renders nothing.
    */
   buildRiskInput: (values: ListedOrderFormValues) => OrderRiskInput | null;
+  /**
+   * Live quote for the contract being traded — the SELECTED future / index
+   * option, never the cash underlying. Adapters that cannot name a price key
+   * for the listed contract omit it and the panel says "No real-time data"
+   * rather than quoting a different instrument.
+   */
+  priceData?: PriceData | null;
+  /** Instrument label rendered above the quote fields (e.g. "VIX 2026-09-16 $20 C"). */
+  quoteLabel?: string;
   /** Live portfolio snapshot routed into `<OrderRiskGate>`. */
   portfolio: PortfolioData | null | undefined;
   /** Telemetry surface tag for `<OrderRiskGate>`. */
@@ -91,6 +102,8 @@ export function ListedContractOrderForm({
   notionalLabel,
   limitPriceLabel,
   limitPriceStep,
+  priceData,
+  quoteLabel,
   buildRiskInput,
   portfolio,
   surface,
@@ -182,6 +195,8 @@ export function ListedContractOrderForm({
       >
         {eyebrow}
       </div>
+
+      <OrderQuoteTelemetry priceData={priceData ?? null} label={quoteLabel} density="tight" />
 
       {contractSelector}
 
