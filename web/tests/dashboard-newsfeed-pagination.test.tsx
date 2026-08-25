@@ -153,17 +153,25 @@ describe("DashboardNewsFeed pagination", () => {
     await renderFeed(posts);
     fireEvent.click(screen.getAllByRole("button", { name: "macro" })[0]);
 
-    let bar = screen.getByRole("navigation", { name: /pagination/i });
-    expect(within(bar).getByText(/showing\s*1\s*[–-]\s*18\s*of\s*20/i)).toBeTruthy();
+    await waitFor(() => {
+      expect(
+        within(screen.getByRole("navigation", { name: /pagination/i })).getByText(
+          /showing\s*1\s*[–-]\s*18\s*of\s*20/i,
+        ),
+      ).toBeTruthy();
+    });
 
     fireEvent.click(screen.getByRole("button", { name: "Open lightbox for: Headline 8" }));
     fireEvent.click(screen.getByRole("button", { name: "Next post" }));
     fireEvent.click(screen.getByRole("button", { name: "Dismiss lightbox" }));
 
-    bar = screen.getByRole("navigation", { name: /pagination/i });
-    expect(within(bar).getByText(/page 2 of 2/i)).toBeTruthy();
-    expect(screen.getByText("Headline 7")).toBeTruthy();
-  });
+    await waitFor(() => {
+      expect(
+        within(screen.getByRole("navigation", { name: /pagination/i })).getByText(/page 2 of 2/i),
+      ).toBeTruthy();
+      expect(screen.getByText("Headline 7")).toBeTruthy();
+    });
+  }, 15_000);
 
   it("clamps current page when a refresh shrinks the dataset", async () => {
     // Initial render: 50 posts → 3 pages

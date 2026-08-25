@@ -489,9 +489,76 @@ jobs:
           path: web/test-results/
           retention-days: 7
 
+  stage-release:
+    name: Prestage VPS release
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    concurrency:
+      group: ci-stage-release-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Prestage via SSH
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: radon
+          key: ${{ secrets.VPS_SSH_KEY }}
+          command_timeout: 15m
+          script: |
+            set -euo pipefail
+            SHA='${{ github.sha }}'
+            RUN_ID='${{ github.run_id }}.${{ github.run_attempt }}'
+            RADON="${HOME}/radon"
+            LEGACY_CLOUD="${HOME}/radon-cloud"
+            if [[ -f /etc/radon/env && ! -L /etc/radon/env ]]; then
+              ENV_FILE=/etc/radon/env
+            else
+              ENV_FILE="${LEGACY_CLOUD}/.env"
+            fi
+            RUNNER_ROOT="${HOME}/.radon-deploy-runners"
+            RUNNER="${RUNNER_ROOT}/${SHA}.${RUN_ID}.prestage"
+            RUNNER_INDEX_LOCK="${RUNNER_ROOT}/.index.lock"
+            RADON_CONTROL_PLANE_READY="${RADON_CONTROL_PLANE_READY:-/var/lib/radon/control-plane-ready}"
+            if [[ ! -f "$RADON_CONTROL_PLANE_READY" || -L "$RADON_CONTROL_PLANE_READY" ]]; then
+              echo "control plane not ready; skipping prestage"
+              exit 0
+            fi
+            git -C "$RADON" fetch --prune origin main
+            if ! git -C "$RADON" cat-file -e "${SHA}:cloud/scripts/deploy.sh" 2>/dev/null; then
+              echo "release has no monorepo deploy.sh; skipping prestage"
+              exit 0
+            fi
+            umask 077
+            mkdir -p "$RUNNER_ROOT"
+            exec {RUNNER_INDEX_FD}>"$RUNNER_INDEX_LOCK"
+            flock "$RUNNER_INDEX_FD"
+            if [[ ! -d "$RUNNER" ]]; then
+              RUNNER_TMP="$(mktemp -d "${RUNNER_ROOT}/.runner.XXXXXX")"
+              trap 'rm -rf -- "$RUNNER_TMP"' EXIT
+              git -C "$RADON" archive "$SHA" cloud | tar -x -C "$RUNNER_TMP"
+              printf '%s\n' "$SHA" > "$RUNNER_TMP/.target-sha"
+              chmod -R a-w "$RUNNER_TMP/cloud" "$RUNNER_TMP/.target-sha"
+              mv "$RUNNER_TMP" "$RUNNER"
+              trap - EXIT
+            fi
+            exec {RUNNER_ACTIVE_FD}>"$RUNNER/.active.lock"
+            flock "$RUNNER_ACTIVE_FD"
+            exec {RUNNER_INDEX_FD}>&-
+            [[ "$(cat "$RUNNER/.target-sha")" == "$SHA" ]]
+            [[ -x "$RUNNER/cloud/scripts/deploy.sh" ]]
+            export RADON_DIR="$RADON"
+            export RADON_CLOUD_DIR="$RUNNER/cloud"
+            export RADON_DEPLOY_SUPPORT_DIR="$RUNNER/cloud/scripts"
+            export RADON_DEPLOY_ENV_FILE="$ENV_FILE"
+            export RADON_CONTROL_PLANE_READY
+            export RADON_DEPLOY_STAGE=1
+            bash "$RUNNER/cloud/scripts/deploy.sh" "$SHA"
+
   deploy:
     name: Deploy to VPS
-    needs: [secret-scan, web-tests, web-coverage, py-tests, py-coverage, cloud-tests, perimeter-smoke]
+    needs: [secret-scan, web-tests, web-coverage, py-tests, py-coverage, cloud-tests, perimeter-smoke, stage-release]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     # Outer budget: deploy.sh gets 15m, then 30s to kill descendants. A root
