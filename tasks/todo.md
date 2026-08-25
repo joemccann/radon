@@ -3609,3 +3609,68 @@ Per /indicator swarm (spec: docs/indicators/skew.md). Slug/service `skew`, tab S
 - [x] HHLEV (`/regime/hhlev`, service `hhlev`, migration 0057): Z.1 household liabilities as pct of net worth (TLBSHNO/TNWBSHNO via keyless fredgraph CSV; keyed API fallback). 304 quarters 1945Q4+; current 11.78% DELEVERAGED; 2009Q1 peak 24.26 — matches the JPM chart. Full-history re-upsert per run (Z.1 revisions).
 - Cross-cutting fixes: `scripts/utils/ipv4_first.py` (VPS IPv6 blackholes Yahoo/GitHub → 60s/request in urllib; wired into all three fetchers), midnight-safe `_TODAY` anchors in test_divyield/test_hyad (CI 00:0x UTC flake), HYAD strip merged to 5 cells (fixed 5-col grid).
 - Evidence: red suites (25+27+33 pytest, 5/5/16/17 vitest) → per-lane green → full gates 7,097 pytest + 1,012 cloud + 7,162 vitest + typecheck → live screenshots docs/indicators/{divyield,hyad,hhlev}-tab.png → Turso rows verified → CI + deploy per run links in git log.
+
+# Task: Portfolio page-load performance audit (2026-08-25)
+
+## Dependency graph
+
+- T1 depends_on: [] - Establish repository/runtime constraints, available profiling surfaces, and audit success criteria.
+- T2 depends_on: [T1] - Trace `/portfolio` client rendering, hooks, fetches, and request sequencing; identify waterfalls and bundle/render costs.
+- T3 depends_on: [T1] - Trace portfolio API handlers through FastAPI/data stores; inspect SQL, query plans, indexes, timeouts, and server-side cache behavior.
+- T4 depends_on: [T1] - Research current Next.js, React, Core Web Vitals, and HTTP/data caching guidance from primary sources; map only applicable practices.
+- T5 depends_on: [T1] - Profile the runnable application and capture navigation/resource timing, API latency, cache headers, and rendered-state evidence.
+- T6 depends_on: [T2, T3, T4, T5] - Synthesize evidence into a prioritized, browser-viewable HTML report with code-path and caching diagrams.
+- T7 depends_on: [T6] - Validate report links/content/visuals, open it in the in-app browser, and record review evidence.
+
+## Checklist
+
+- [x] T1 Establish constraints and audit plan.
+- [x] T2 Trace portfolio frontend and network paths.
+- [x] T3 Trace APIs, database queries, and server caching.
+- [x] T4 Research applicable current best practices.
+- [x] T5 Capture runtime/browser measurements.
+- [x] T6 Build the HTML report.
+- [x] T7 Verify and open the report.
+
+## Review
+
+- Root cause: commit `e0f508bd` made an unknown snapshot stale on first render, triggering a live-sync POST about 9 ms after the cached GET. The POST invalidates the GET result, so `/portfolio` waits for the 35-second live-IB path.
+- Database: the required snapshot lookup is indexed; two unused journal scans inflate the response by about 14.4 KB. `/api/orders` adds two serial uncached queries. Current short TTLs miss the 30-second polling cadence.
+- Frontend: the route loads about 448 KB Brotli JS, a 316,954-byte shared workspace chunk, about 46 KB CSS, and 21 unrelated route-prefetch requests.
+- Deliverable: `tasks/artifacts/show-me-portfolio-page-load-performance.html`, with detailed traces in the three adjacent audit artifacts.
+- Verification: production compile passed; focused portfolio cadence Playwright passed; report validated at 1440×1000 and 390×844 with zero horizontal overflow.
+
+# Task: Implement portfolio page-load performance plan (2026-08-25)
+
+## Dependency graph
+
+- T1 depends_on: [] - Isolate a feature branch from current `origin/main`, preserve unrelated worktree files, and confirm audited baselines.
+- T2 depends_on: [T1] - Add a failing cold-load regression and fix the initial portfolio GET/live-sync POST invalidation race without weakening stale-data recovery.
+- T3 depends_on: [T1] - Remove portfolio response queries unused by `/portfolio`, parallelize independent order queries, add bounded server-side single-flight caching with mutation-safe invalidation, and batch the live-sync journal basis reads.
+- T4 depends_on: [T1] - Seed `/portfolio` from a server snapshot, deduplicate risk-free-rate requests, suppress unsolicited route prefetch, and split the portfolio client bundle from the omnibus workspace chunk.
+- T5 depends_on: [T2, T3, T4] - Integrate the parallel workstreams, review correctness and cache contracts, and resolve any overlap with the smallest production diff.
+- T6 depends_on: [T5] - Run focused regressions, affected suites, typecheck, lint, production compile, and the full web test suite.
+- T7 depends_on: [T6] - Run authless Playwright portfolio E2E and visually verify desktop/mobile behavior with screenshots and request-timing evidence.
+- T8 depends_on: [T7] - Review staged scope, commit only task-owned paths, push the branch, create a draft PR, and verify GitHub CI status.
+
+## Checklist
+
+- [x] T1 Isolate branch and confirm baselines.
+- [x] T2 Fix cold-load synchronization race with regression coverage.
+- [x] T3 Optimize API/database query, cache, and live-sync basis paths with regressions.
+- [x] T4 Remove the hydration fetch waterfall and reduce startup/bundle/prefetch overhead with regressions.
+- [x] T5 Integrate and review the implementation.
+- [x] T6 Complete focused and full verification.
+- [x] T7 Complete browser and visual verification.
+- [ ] T8 Publish and verify the PR.
+
+## Review
+
+- Result: `/portfolio` now paints a cached/server-seeded snapshot before any stale recovery POST, with RSC seeding capped at 750 ms during a Turso outage.
+- API/database: the base portfolio GET performs one indexed snapshot statement instead of three statements and omits about 14.4 KB of orders-only entry-date metadata; orders statements run concurrently behind a mutation-safe 2-second single-flight cache; live journal basis reads collapse from one query per ticker/contract to 200-row `trade_id` cursor pages with exact legacy ordering.
+- Client: the portfolio surface no longer loads the 248.2 KB Brotli omnibus workspace chunk; its route chunk is 16.4 KB Brotli, a 93.4% reduction. Persistent navigation produces zero automatic RSC prefetches. Risk-free-rate consumers share one request and cache only confirmed non-stale FRED observations.
+- Browser: desktop cold-load cadence passed 4/4; manual desktop/mobile captures had zero horizontal overflow and zero unrelated RSC prefetches. Mobile rendered the card surface with no desktop table. The broader mobile spec was 4/5 with one pre-existing stale return-percentage fixture expecting a price-derived value while mocked live prices are absent.
+- Verification: final web suite 7,085/7,085; affected Python 263/263; journal-sync 55/55; TypeScript, ESLint (0 errors, 14 baseline warnings), Python compilation, and Next compile passed. Full Python recorded 7,933 passed and 46 failed under the active Flex embargo; four touched-path failures were pagination-unaware fakes and were fixed/rerun green, leaving 42 unrelated Flex-lockout baseline failures.
+- Local output-trace audit remains baseline-red because the development checkout contains 14.2 GB across 7,333 backup/archive files traced by the existing orders/place route; production compile itself passed.
+
+- Pending.

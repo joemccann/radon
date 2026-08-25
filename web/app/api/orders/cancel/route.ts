@@ -10,6 +10,7 @@ import {
   EMPTY_ORDERS,
   readOrdersSnapshotFromDb,
 } from "@/lib/orders/readOrdersFromDb";
+import { invalidateOrdersSnapshotCache } from "@/lib/orders/ordersReadCache";
 import {
   isWorkingOrderMissingDetail,
   workingOrderMissingMessage,
@@ -72,10 +73,13 @@ export async function POST(request: Request): Promise<Response> {
     });
 
     // Refresh orders after cancel
+    invalidateOrdersSnapshotCache();
     try {
       await radonFetch("/orders/refresh", { method: "POST", timeout: 10_000 });
     } catch {
       // Non-fatal
+    } finally {
+      invalidateOrdersSnapshotCache();
     }
     const orders = await readOrdersSnapshotBestEffort();
 
@@ -85,12 +89,15 @@ export async function POST(request: Request): Promise<Response> {
       orders,
     });
   } catch (error) {
+    invalidateOrdersSnapshotCache();
     if (error instanceof RadonApiError) {
       if (isWorkingOrderMissingDetail(error.detail)) {
         try {
           await radonFetch("/orders/refresh", { method: "POST", timeout: 10_000 });
         } catch {
           // Non-fatal
+        } finally {
+          invalidateOrdersSnapshotCache();
         }
         const orders = await readOrdersSnapshotBestEffort();
         const tif = orders.open_orders.find((order) =>

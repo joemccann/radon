@@ -348,6 +348,12 @@ export type PortfolioData = {
   contract_open_dates?: Record<string, string>;
 };
 
+/** Serializable server-to-client seed for the portfolio hook. */
+export type PortfolioSnapshotSeed = {
+  data: PortfolioData;
+  warning: string | null;
+};
+
 export type PerformanceSeriesPoint = {
   date: string;
   equity: number;

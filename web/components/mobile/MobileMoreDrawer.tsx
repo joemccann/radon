@@ -163,6 +163,7 @@ function MobileMoreDrawerView({
                     <Link
                       key={link.label}
                       href={link.href}
+                      prefetch={false}
                       className="mobile-drawer__link"
                       onClick={onClose}
                       data-testid={`mobile-drawer-${link.label.toLowerCase().replace(/\s+/g, "-")}`}
