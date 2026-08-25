@@ -2406,11 +2406,11 @@ body[data-mobile="true"] .dashboard-surface__feed {
   grid-template-columns: 26px 72px minmax(120px, 1fr) 84px 72px 44px;
 }
 
-.signals-hero__row--strength {
-  /* The gate ladder is the shrink absorber (minmax(0,…)): fixed tracks +
-     the ticker's 90px floor must fit the narrowest panel the dashboard
-     grid allows, or PASSED/STATE overflow the panel border. */
-  grid-template-columns: 26px 72px minmax(90px, 1fr) minmax(0, 196px) 52px 90px;
+.signals-hero__row--cone {
+  /* The ticker/spot/expiry cell is the shrink absorber: fixed tracks + its
+     120px floor must fit the narrowest panel the dashboard grid allows, or
+     WING %ILE/REGIME overflow the panel border. */
+  grid-template-columns: 26px 72px minmax(120px, 1fr) 76px 104px;
 }
 
 a.signals-hero__row:hover { background: var(--bg-panel-raised); }
@@ -2502,26 +2502,6 @@ a.signals-hero__row:hover { background: var(--bg-panel-raised); }
 
 .signals-hero__dte { color: var(--text-secondary); }
 
-.signals-hero__passed {
-  display: flex;
-  align-items: baseline;
-  gap: 3px;
-  justify-content: flex-end;
-}
-
-.signals-hero__passed-count {
-  font-size: 14px;
-  font-variant-numeric: tabular-nums;
-}
-.signals-hero__passed-count--strong { color: var(--signal-strong); }
-.signals-hero__passed-count--warn { color: var(--warn); }
-.signals-hero__passed-count--fault { color: var(--text-primary); }
-
-.signals-hero__passed-total {
-  font-size: 10px;
-  color: var(--text-muted);
-}
-
 .signals-hero__badge {
   display: inline-flex;
   align-items: center;
@@ -2550,40 +2530,6 @@ a.signals-hero__row:hover { background: var(--bg-panel-raised); }
   background: color-mix(in srgb, var(--fault) 10%, transparent);
 }
 .signals-hero__badge--neutral { color: var(--text-secondary); }
-
-/* 7-gate ladder */
-.gate-ladder {
-  display: flex;
-  align-items: stretch;
-  gap: 1px;
-  height: 20px;
-  background: var(--line-grid);
-  border: 1px solid var(--line-grid);
-  border-radius: 2px;
-  overflow: hidden;
-}
-
-.gate-ladder__cell {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: 1;
-  font-family: var(--font-mono);
-  font-size: 9px;
-  font-weight: 500;
-  letter-spacing: 0.04em;
-  background: var(--bg-panel);
-  color: var(--text-muted);
-}
-
-.gate-ladder__cell--fail {
-  background: color-mix(in srgb, var(--fault) 12%, transparent);
-  color: var(--fault);
-}
-
-.gate-ladder__cell--unknown {
-  color: color-mix(in srgb, var(--text-muted) 50%, transparent);
-}
 
 /* ───────────────────────────────────────────────────────────
    Catalysts quadrant — grouped upcoming events.

@@ -4,19 +4,26 @@ import { useState } from "react";
 import Link from "next/link";
 
 import { useThetaHarvester } from "@/lib/useThetaHarvester";
-import { useStrengthConfirmation } from "@/lib/useStrengthConfirmation";
+import { useVolCone } from "@/lib/useVolCone";
 import {
+  coneFillPct,
   formatScanSample,
-  gateCells,
-  scoreTone,
-  strengthBadge,
   thetaStructLabel,
+  volConeExpiryLabel,
+  volConeTone,
 } from "@/lib/scannerHero";
+import {
+  formatIvPct,
+  formatPercentile,
+  formatVolConeRegime,
+  volConeOrderHref,
+  volConeTradeAriaLabel,
+} from "@/lib/volCone";
 import { fmtMoney } from "@/lib/format/money";
 
 const TOP_N = 4;
 
-type Tab = "theta" | "strength";
+type Tab = "theta" | "cone";
 
 function rank(i: number): string {
   return String(i + 1).padStart(2, "0");
@@ -30,16 +37,18 @@ function rank(i: number): string {
 export default function ScannerHero() {
   const [tab, setTab] = useState<Tab>("theta");
   const theta = useThetaHarvester(tab === "theta");
-  const strength = useStrengthConfirmation(tab === "strength");
+  const cone = useVolCone(tab === "cone");
 
-  const active = tab === "theta" ? theta : strength;
-  const scanTime = active.data?.scan_time ?? null;
-  const scanned = active.data?.tickers_scanned ?? null;
-  const candidates = active.data?.candidates_found ?? null;
+  // The vol-cone payload counts names scanned and cheap-cone hits rather than
+  // the scanner-shaped tickers_scanned / candidates_found.
+  const scanTime = (tab === "theta" ? theta.data?.scan_time : cone.data?.scan_time) ?? null;
+  const scanned = tab === "theta" ? theta.data?.tickers_scanned ?? null : cone.data?.count ?? null;
+  const candidates =
+    tab === "theta" ? theta.data?.candidates_found ?? null : cone.data?.hit_count ?? null;
   const shown =
     tab === "theta"
       ? Math.min(TOP_N, theta.data?.results?.length ?? 0)
-      : Math.min(TOP_N, strength.data?.results?.length ?? 0);
+      : Math.min(TOP_N, cone.data?.hits?.length ?? 0);
 
   return (
     <section className="signals-hero snapshot-card">
@@ -59,11 +68,11 @@ export default function ScannerHero() {
           </button>
           <button
             type="button"
-            className={`signals-hero__tab${tab === "strength" ? " is-active" : ""}`}
-            onClick={() => setTab("strength")}
-            aria-pressed={tab === "strength"}
+            className={`signals-hero__tab${tab === "cone" ? " is-active" : ""}`}
+            onClick={() => setTab("cone")}
+            aria-pressed={tab === "cone"}
           >
-            7-Step Strength
+            Vol Cone
           </button>
         </div>
       </header>
@@ -117,64 +126,59 @@ export default function ScannerHero() {
             ))}
           </div>
         )
-      ) : strength.loading && !strength.data ? (
-        <div className="news-feed-empty">Loading strength confirmation…</div>
-      ) : strength.error ? (
-        <div className="news-feed-error" role="alert">{strength.error}</div>
-      ) : !strength.data?.results?.length ? (
-        <div className="news-feed-empty">No strength candidates in the last scan.</div>
+      ) : cone.loading && !cone.data ? (
+        <div className="news-feed-empty">Loading vol cone…</div>
+      ) : cone.error ? (
+        <div className="news-feed-error" role="alert">{cone.error}</div>
+      ) : !cone.data?.hits?.length ? (
+        <div className="news-feed-empty">No cheap vol cones in the last scan.</div>
       ) : (
-        <div className="signals-hero__table" role="table" aria-label="Strength confirmation candidates">
-          <div className="signals-hero__row signals-hero__row--head signals-hero__row--strength" role="row">
+        <div className="signals-hero__table" role="table" aria-label="Vol cone candidates">
+          <div className="signals-hero__row signals-hero__row--head signals-hero__row--cone" role="row">
             <span>#</span>
-            <span>Score</span>
-            <span>Ticker · Spot</span>
-            <span>Gate Ladder</span>
-            <span className="num">Passed</span>
-            <span className="num">State</span>
+            <span>ATM IV</span>
+            <span>Ticker · Spot · Expiry</span>
+            <span className="num">Wing %ile</span>
+            <span className="num">Regime</span>
           </div>
-          {strength.data.results.slice(0, TOP_N).map((row, i) => {
-            const badge = strengthBadge(row.verdict);
+          {cone.data.hits.slice(0, TOP_N).map((row, i) => {
+            const tone = volConeTone(row.regime);
+            const ariaLabel = volConeTradeAriaLabel(row);
             return (
               <Link
-                key={row.ticker}
-                href={`/${row.ticker}`}
-                className="signals-hero__row signals-hero__row--strength"
+                key={`${row.ticker}:${row.expiry}`}
+                href={volConeOrderHref(row) ?? `/${row.ticker}`}
+                className="signals-hero__row signals-hero__row--cone"
                 role="row"
+                aria-label={ariaLabel ?? undefined}
               >
                 <span className="signals-hero__rank">{rank(i)}</span>
                 <span className="signals-hero__score">
-                  <span className="signals-hero__score-value">{row.score}</span>
-                  <span className="signals-hero__score-bar">
+                  <span className="signals-hero__score-value">{formatIvPct(row.atm_iv)}</span>
+                  {/* Bar reads like the other tabs: longer is better, and on a
+                      cone cheaper is better, so the p10 floor fills it. */}
+                  <span
+                    className="signals-hero__score-bar"
+                    title={`ATM IV vs this expiry's 90/10 cone · ${formatPercentile(row.atm_percentile)} of sessions cheaper`}
+                  >
                     <span
-                      className={`signals-hero__score-fill signals-hero__score-fill--${scoreTone(row.score)}`}
-                      style={{ width: `${Math.max(0, Math.min(100, row.score)).toFixed(0)}%` }}
+                      className={`signals-hero__score-fill signals-hero__score-fill--${tone}`}
+                      style={{ width: `${coneFillPct(row).toFixed(0)}%` }}
                     />
                   </span>
                 </span>
                 <span className="signals-hero__ticker-cell">
                   <span className="signals-hero__ticker">{row.ticker}</span>
-                  <span className="signals-hero__struct">{fmtMoney(row.spot)}</span>
+                  <span
+                    className="signals-hero__struct"
+                    title={volConeExpiryLabel(row)}
+                  >{`${fmtMoney(row.spot)} · ${volConeExpiryLabel(row)}`}</span>
                 </span>
-                <span className="gate-ladder" aria-label={`${row.groups_passed} of 7 gates passed`}>
-                  {gateCells(row).map((cell) => (
-                    <span
-                      key={cell.code}
-                      title={cell.title}
-                      className={`gate-ladder__cell${cell.passed === false ? " gate-ladder__cell--fail" : ""}${cell.passed == null ? " gate-ladder__cell--unknown" : ""}`}
-                    >
-                      {cell.code}
-                    </span>
-                  ))}
-                </span>
-                <span className="num signals-hero__passed">
-                  <span className={`signals-hero__passed-count signals-hero__passed-count--${scoreTone(row.score)}`}>
-                    {row.groups_passed}
-                  </span>
-                  <span className="signals-hero__passed-total">/7</span>
-                </span>
+                <span className="num signals-hero__dte">{formatPercentile(row.wing_score)}</span>
                 <span className="num">
-                  <span className={`signals-hero__badge signals-hero__badge--${badge.tone}`}>{badge.label}</span>
+                  <span className={`signals-hero__badge signals-hero__badge--${tone}`}>
+                    {formatVolConeRegime(row.regime)}
+                  </span>
                 </span>
               </Link>
             );

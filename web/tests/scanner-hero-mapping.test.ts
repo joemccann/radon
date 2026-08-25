@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
-  GATE_CODES,
+  conePosition,
+  coneFillPct,
   formatScanSample,
-  gateCells,
-  scoreTone,
-  strengthBadge,
   thetaStructLabel,
+  volConeExpiryLabel,
+  volConeTone,
 } from "../lib/scannerHero";
-import type { StrengthConfirmationResult, ThetaHarvesterResult } from "../lib/types";
+import type { ThetaHarvesterResult } from "../lib/types";
+import type { VolConeName } from "../lib/volCone";
 
 function thetaResult(putStrike: number, callStrike: number): ThetaHarvesterResult {
   const leg = (strike: number, right: "C" | "P") => ({
@@ -55,35 +56,27 @@ function thetaResult(putStrike: number, callStrike: number): ThetaHarvesterResul
   };
 }
 
-function strengthResult(
-  passedGroups: string[],
-  verdict = "WATCHLIST",
-): StrengthConfirmationResult {
-  const groups = [
-    "Q-SCORES",
-    "NET GEX",
-    "CALL POSITIONING",
-    "TERM STRUCTURE",
-    "VOLATILITY SMILE",
-    "SYSTEMATIC POSITIONING",
-    "MARKET BREADTH",
-  ];
+function coneName(overrides: Partial<VolConeName> = {}): VolConeName {
   return {
-    ticker: "ROST",
-    verdict,
-    score: Math.round((passedGroups.length / 7) * 100),
-    groups_passed: passedGroups.length,
-    spot: 243.29,
-    factors: groups.map((group) => ({
-      group,
-      passed: passedGroups.includes(group),
-      checks_passed: passedGroups.includes(group) ? 2 : 0,
-      checks_total: 2,
-      source: "UW",
-      checks: [],
-      notes: [],
-    })),
-    errors: [],
+    ticker: "NKE",
+    spot: 72.4,
+    expiry: "2026-09-18",
+    month: "SEP",
+    dte: 24,
+    atm_iv: 0.28,
+    call_10_iv: 0.3,
+    put_10_iv: 0.31,
+    call_10_strike: 79.6,
+    put_10_strike: 65.2,
+    p10: 0.26,
+    p90: 0.46,
+    atm_percentile: 0.04,
+    call_10_percentile: 0.05,
+    put_10_percentile: 0.07,
+    wing_score: 0.06,
+    regime: "CHEAP_WINGS",
+    series: [],
+    ...overrides,
   };
 }
 
@@ -97,46 +90,49 @@ describe("thetaStructLabel", () => {
   });
 });
 
-describe("gateCells", () => {
-  it("returns 7 cells in canonical order with stable codes", () => {
-    const cells = gateCells(strengthResult(["Q-SCORES", "CALL POSITIONING"]));
-    expect(cells).toHaveLength(7);
-    expect(cells.map((c) => c.code)).toEqual([...GATE_CODES]);
-    expect(cells[0]).toMatchObject({ code: "Q", passed: true });
-    expect(cells[1]).toMatchObject({ code: "GX", passed: false });
-    expect(cells[2]).toMatchObject({ code: "CL", passed: true });
+describe("conePosition", () => {
+  it("places ATM IV inside the 90/10 cone", () => {
+    expect(conePosition(coneName({ atm_iv: 0.36, p10: 0.26, p90: 0.46 }))).toBeCloseTo(0.5, 6);
   });
 
-  it("marks a missing factor group as unknown, not failed", () => {
-    const result = strengthResult(["Q-SCORES"]);
-    result.factors = result.factors.filter((f) => f.group !== "MARKET BREADTH");
-    const cells = gateCells(result);
-    expect(cells[6]).toMatchObject({ code: "BR", passed: null });
+  it("clamps a print below the floor and above the ceiling", () => {
+    expect(conePosition(coneName({ atm_iv: 0.2 }))).toBe(0);
+    expect(conePosition(coneName({ atm_iv: 0.9 }))).toBe(1);
   });
 
-  it("carries the factor group as the title", () => {
-    const cells = gateCells(strengthResult([]));
-    expect(cells[4].title).toContain("VOLATILITY SMILE");
+  it("returns null for a missing IV or a degenerate cone", () => {
+    expect(conePosition(coneName({ atm_iv: null }))).toBeNull();
+    expect(conePosition(coneName({ p10: null }))).toBeNull();
+    expect(conePosition(coneName({ p10: 0.4, p90: 0.4 }))).toBeNull();
   });
 });
 
-describe("strengthBadge", () => {
-  it("maps verdicts to badge tones", () => {
-    expect(strengthBadge("REAL_STRENGTH_CONFIRMED")).toEqual({ label: "CONFIRMED", tone: "strong" });
-    expect(strengthBadge("WATCHLIST")).toEqual({ label: "PARTIAL", tone: "warn" });
-    expect(strengthBadge("WEAK")).toEqual({ label: "WEAK", tone: "fault" });
+describe("coneFillPct", () => {
+  // The bar reads like every other one on the panel: longer is better, and
+  // cheap is better, so the floor of the cone fills the whole bar.
+  it("fills the bar as the print gets cheaper", () => {
+    expect(coneFillPct(coneName({ atm_iv: 0.26 }))).toBe(100);
+    expect(coneFillPct(coneName({ atm_iv: 0.36 }))).toBeCloseTo(50, 6);
+    expect(coneFillPct(coneName({ atm_iv: 0.46 }))).toBe(0);
   });
 
-  it("passes unknown verdicts through with neutral tone", () => {
-    expect(strengthBadge("SOMETHING_ELSE")).toEqual({ label: "SOMETHING_ELSE", tone: "neutral" });
+  it("draws nothing when the cone is unusable", () => {
+    expect(coneFillPct(coneName({ atm_iv: null }))).toBe(0);
   });
 });
 
-describe("scoreTone", () => {
-  it("buckets score into strong / warn / fault", () => {
-    expect(scoreTone(85)).toBe("strong");
-    expect(scoreTone(57)).toBe("warn");
-    expect(scoreTone(43)).toBe("fault");
+describe("volConeTone", () => {
+  it("maps regimes to score tones", () => {
+    expect(volConeTone("CHEAP_WINGS")).toBe("strong");
+    expect(volConeTone("CHEAP_ATM")).toBe("warn");
+    expect(volConeTone("RICH")).toBe("fault");
+    expect(volConeTone("NEUTRAL")).toBe("fault");
+  });
+});
+
+describe("volConeExpiryLabel", () => {
+  it("pairs the monthly expiry with its DTE", () => {
+    expect(volConeExpiryLabel({ expiry: "2026-09-18", dte: 24 })).toBe("SEP 18 · 24D");
   });
 });
 

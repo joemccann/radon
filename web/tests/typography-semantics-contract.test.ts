@@ -29,7 +29,7 @@ describe("workspace typography semantics", () => {
     expect(source("components/ServiceHealthBanner.tsx")).toContain('title={fullMessage}');
     expect(source("components/ticker-detail/OptionsChainTab.tsx")).toContain('title={`${ticker} ${formatExpiry(leg.expiry)}');
     expect(source("components/dashboard/CatalystsQuadrant.tsx")).toContain('title={row.title}');
-    expect(source("components/dashboard/ScannerHero.tsx")).toContain('title={cell.title}');
+    expect(source("components/dashboard/ScannerHero.tsx")).toContain('title={volConeExpiryLabel(row)}');
     expect(source("components/mobile/MobileAppBar.tsx")).toContain('className="mobile-app-bar__title" title={title}');
   });
 });
