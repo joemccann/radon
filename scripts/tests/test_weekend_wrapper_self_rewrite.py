@@ -335,8 +335,14 @@ def test_an_unknown_mode_is_refused(tmp_path: Path, loop: str) -> None:
 
 @pytest.mark.parametrize("loop", LOOP_IDS)
 def test_two_instances_in_one_clone_do_not_both_run(tmp_path: Path, loop: str) -> None:
-    """R-116: the runner clone is single-writer. The holder must COMPLETE."""
-    cfg = _build(tmp_path, loop, attack="longer", attack_on="agent", agent_sleep=4)
+    """R-116: the runner clone is single-writer. The holder must COMPLETE.
+
+    No rewrite attack here on purpose: the second instance reads the wrapper
+    from disk at process start, which is the one window the wrap does not
+    close, so stacking the attack on this case asserts a guarantee the design
+    does not make and races the agent stub under parallel CI load.
+    """
+    cfg = _build(tmp_path, loop, agent_sleep=4)
     holder = subprocess.Popen(
         _argv(cfg, "audit"),
         cwd=cfg["clone"],
