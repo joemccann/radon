@@ -361,3 +361,20 @@ def test_pytest_shard_union_equals_recursive_collection() -> None:
     )
     stray = sorted(sharded - on_disk)
     assert not stray, f"shard globs reach outside the collection roots: {stray[:6]}"
+
+
+def test_pytest_coverage_ratchet_measures_branches() -> None:
+    """TEST_AUDIT T-123: the 56 ratchet was rebased (T-050) on combined
+    statement+branch coverage. The shard rewrite dropped ``--cov-branch`` and
+    nothing re-enabled branch measurement, so the combined report scored
+    statement-only (~2pt easier) under the same threshold. Branch must be on
+    either via the invocation or ``[tool.coverage.run] branch = true``."""
+    import tomllib
+
+    pyproject = tomllib.loads((WORKFLOW.parents[2] / "pyproject.toml").read_text(encoding="utf-8"))
+    run_cfg = pyproject.get("tool", {}).get("coverage", {}).get("run", {})
+    commands = _job_commands(_workflow()["jobs"]["py-tests"])
+    assert run_cfg.get("branch") is True or "--cov-branch" in commands, (
+        "pytest coverage ratchet is scoring statement-only; the 56 threshold "
+        "was set against statement+branch (T-050)"
+    )
