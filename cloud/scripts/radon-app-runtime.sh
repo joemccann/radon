@@ -106,7 +106,7 @@ cmd_run() {
     --cap-drop ALL \
     --security-opt no-new-privileges \
     --cgroupns host \
-    --cgroup-parent="system.slice/${unit}" \
+    --cgroup-parent=system.slice \
     --env-file "$ENV_FILE" \
     --env RADON_DB_NO_REPLICA=1 \
     -w "$workdir" \
