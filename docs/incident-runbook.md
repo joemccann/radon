@@ -147,7 +147,7 @@ Incident: 2026-07-08, P1.
 `feedback_deploy_stop_clean_fails_inflight_scan_oneshots`.
 
 - **Mechanism:** `deploy.sh` stop-clean stops every `radon-*` unit,
-  including long `Type=oneshot` writers (`radon-bpi` TimeoutStartSec=9000,
+  including long `Type=oneshot` writers (`radon-bpi` TimeoutStartSec=6900,
   weekday sweep 35-105 min). systemd records `Result=signal`,
   `NRestarts=0`. The unit recovers on its next timer fire. The
   continuous units watchdog used to page that as a P1 outage.
@@ -276,6 +276,51 @@ on the daily 22:40 UTC timer.** Peak: 2026-08-23 23:57Z, page `c52496dd…`.
   `test_page_responder.py::test_timeout_reruns_when_a_fix_deployed_after_the_failure`.
 - **Code:** `scripts/fetch_divyield.py` (`SWEEP_BUDGET_S`, `sweep_yields`),
   `cloud/services/radon-divyield.service` (`TimeoutStartSec=2100`).
+
+---
+
+## bpi-yahoo-sweep-timeout
+
+**`radon-bpi.service` oneshot pages P1 `Result=timeout` (`NRestarts=0`)
+on the weekday 21:30 UTC fire.** Peak: 2026-08-24 23:30Z, page `bbaa065b…`.
+
+- **Mechanism:** `bpi_scan.py --index all` spark-batches NDX/SPX/RUT
+  member closes (20 symbols/chunk, sequential). Weekday 21:30 is a
+  full-universe refetch. 2026-08-24: NDX 8 min, SPX 22 min, then RUT
+  1996 members (~100 chunks at ~60s) still running when systemd
+  SIGTERM'd at `TimeoutStartSec=6900` (21:31:31Z start → InactiveEnter
+  23:26:31Z). `Type=oneshot` has no `Restart=`, so `NRestarts=0`.
+  Unit watchdog pages P1. NDX+SPX had already upserted; RUT did not.
+  Heartbeat sits outside the kill, so `bpi-scan` stays on the prior
+  cycle. R-071 sized 6900 to unstick the 23:30 catch-up; that fire
+  did start. Raising `TimeoutStartSec` would swallow it again.
+- **Detection:** journal `history: 1996 members, fetching 1996` then
+  silence until systemd timeout; `systemctl show radon-bpi.service
+  -p Result,NRestarts` → `timeout` / `0`; ExecMainStart to
+  InactiveEnter is exactly `TimeoutStartSec`. Edge and
+  `:8321/health/lite` stay up. `service_health.bpi-scan` may still
+  be `ok` from an earlier catch-up.
+- **Discriminating check:** `Result=timeout` after an NDX/SPX persist
+  and a RUT `fetching NNNN` line with no `spark wall-clock budget
+  spent` / `RUT: Turso history`. `Result=signal` is deploy stop-clean
+  (do not raise the budget). If `/health/lite` is down too → API,
+  stand down.
+- **Remediation (code):** process-wide `SWEEP_BUDGET_S=6600` shared
+  across NDX+SPX+RUT. Spark chunks and chart-fallback
+  `wait(..., FIRST_COMPLETED)` stop submitting at the deadline so the
+  process exits, heartbeats, and leaves unfinished members to the
+  23:30 / 11:00 catch-up. `TimeoutStartSec` stays 6900 (R-071).
+  Do not restart-flap the hung run; after the fix deploys, one
+  `radon unit restart radon-bpi` if the next timer is >12h out.
+- **Regression:**
+  `test_bpi_scan.py::TestSweepBudget`
+  (`test_tarpitted_spark_stops_inside_the_wall_clock_budget`,
+  `test_tarpitted_chart_fallback_stops_inside_the_wall_clock_budget`,
+  `test_run_scan_passes_one_shared_deadline_to_every_index`,
+  `test_sweep_budget_fits_inside_unit_start_timeout`).
+- **Code:** `scripts/bpi_scan.py` (`SWEEP_BUDGET_S`,
+  `_fetch_members_spark`, `_fetch_members`),
+  `cloud/services/radon-bpi.service` (`TimeoutStartSec=6900`).
 
 ---
 

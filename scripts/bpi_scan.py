@@ -23,7 +23,7 @@ import json
 import os
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -65,6 +65,15 @@ BACKFILL_RANGE = "2y"           # Yahoo range for --backfill (all members)
 INCREMENTAL_RANGE = "1mo"       # Yahoo range for stale members only
 FETCH_WORKERS = 8               # plan-capped Yahoo concurrency
 YAHOO_COURTESY_SLEEP_S = 0.25
+FETCH_TIMEOUT_S = 30            # spark + per-symbol chart urlopen
+# Wall-clock ceiling for the whole NDX/SPX/RUT Yahoo sweep. 2026-08-24
+# 21:30Z: RUT spark of 1996 members (~100 x 20-symbol chunks at ~60s)
+# was still running when systemd SIGTERM'd at TimeoutStartSec=6900
+# (Result=timeout, NRestarts=0, P1). Must end inside
+# cloud/services/radon-bpi.service TimeoutStartSec with one in-flight
+# FETCH_TIMEOUT_S plus persist slack. Do not raise TimeoutStartSec —
+# R-071 keeps it under the 21:30→23:30 catch-up gap.
+SWEEP_BUDGET_S = 6600
 CLOSE_READ_CALENDAR_DAYS = 800  # ~2y of sessions + weekend/holiday slack
 
 # Turso Hrana bounding (scripts/CLAUDE.md): keep every SELECT's row count
@@ -201,7 +210,11 @@ def _missing_payload(index_symbol: str, reason: str, taken_at: str) -> dict[str,
 # ── member close history (Turso store + Yahoo-only fetch) ─────────
 
 def ensure_member_history(
-    members: list[str], *, backfill: bool, no_db: bool
+    members: list[str],
+    *,
+    backfill: bool,
+    no_db: bool,
+    sweep_deadline: float | None = None,
 ) -> tuple[dict[str, dict[str, float]], dict[str, int]]:
     """Date-indexed closes per member plus fetch counters.
 
@@ -221,14 +234,14 @@ def ensure_member_history(
     )
 
     if backfill:
-        fetched = _fetch_members(to_fetch, BACKFILL_RANGE)
+        fetched = _fetch_members(to_fetch, BACKFILL_RANGE, sweep_deadline)
     else:
         # Batch-first: the spark endpoint serves ~100 symbols per request, so
         # the nightly full-universe staleness sweep is ~26 requests instead of
         # ~2,600 chart calls (which Yahoo tarpitted to ~60s each on
         # 2026-07-27, blowing the unit's start budget). Stragglers the batch
         # left stale fall back to per-symbol chart (meta-close recovery).
-        fetched = _fetch_members_spark(to_fetch)
+        fetched = _fetch_members_spark(to_fetch, sweep_deadline)
         stragglers = members_still_stale(to_fetch, fetched, last_complete)
         if stragglers:
             print(
@@ -236,7 +249,9 @@ def ensure_member_history(
                 "spark batch left stale",
                 file=sys.stderr,
             )
-            for member, bars in _fetch_members(stragglers, INCREMENTAL_RANGE).items():
+            for member, bars in _fetch_members(
+                stragglers, INCREMENTAL_RANGE, sweep_deadline
+            ).items():
                 merged = dict(fetched.get(member, {}))
                 merged.update(bars)
                 fetched[member] = merged
@@ -269,12 +284,55 @@ def ensure_member_history(
     return closes, counts
 
 
-def _fetch_members(members: list[str], range_str: str) -> dict[str, dict[str, float]]:
+def _sweep_deadline(deadline: float | None) -> float:
+    return time.monotonic() + SWEEP_BUDGET_S if deadline is None else deadline
+
+
+def _fetch_members(
+    members: list[str],
+    range_str: str,
+    deadline: float | None = None,
+) -> dict[str, dict[str, float]]:
+    """Per-symbol chart fetch. Stops submitting/waiting at SWEEP_BUDGET_S
+    so systemd TimeoutStartSec cannot SIGTERM the oneshot mid-pool.
+    Unfinished members are omitted; ensure_member_history uses stored
+    closes and the catch-up timer retries them."""
     if not members:
         return {}
-    with ThreadPoolExecutor(max_workers=FETCH_WORKERS) as pool:
-        series = pool.map(lambda m: _fetch_yahoo_daily(m, range_str), members)
-        return dict(zip(members, series))
+    stop_at = _sweep_deadline(deadline)
+    results: dict[str, dict[str, float]] = {}
+    pool = ThreadPoolExecutor(max_workers=FETCH_WORKERS)
+    pending = {pool.submit(_fetch_yahoo_daily, m, range_str): m for m in members}
+    done_count = 0
+    try:
+        while pending:
+            remaining = stop_at - time.monotonic()
+            if remaining <= 0:
+                print(
+                    f"  history: chart wall-clock budget spent "
+                    f"({done_count}/{len(members)}); deferring the rest",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                break
+            finished, _still = wait(
+                pending, timeout=remaining, return_when=FIRST_COMPLETED
+            )
+            if not finished:
+                print(
+                    f"  history: chart wall-clock budget spent "
+                    f"({done_count}/{len(members)}); deferring the rest",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                break
+            for fut in finished:
+                member = pending.pop(fut)
+                results[member] = fut.result()
+                done_count += 1
+    finally:
+        pool.shutdown(wait=True, cancel_futures=True)
+    return results
 
 
 SPARK_BATCH_SIZE = 20           # symbols per spark request — >20 gets HTTP 400
@@ -312,27 +370,61 @@ def members_still_stale(
     return [m for m in members if last_complete not in fetched.get(m, {})]
 
 
-def _fetch_members_spark(members: list[str]) -> dict[str, dict[str, float]]:
-    """Batched latest-closes fetch via the multi-symbol spark endpoint."""
+def _fetch_spark_chunk(chunk: list[str]) -> dict[str, dict[str, float]]:
     from urllib.parse import quote
     from urllib.request import Request, urlopen
 
+    url = (
+        "https://query1.finance.yahoo.com/v8/finance/spark"
+        f"?symbols={quote(','.join(chunk))}&range={SPARK_RANGE}&interval=1d"
+    )
+    req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urlopen(req, timeout=FETCH_TIMEOUT_S) as resp:
+        payload = json.load(resp)
+    return parse_yahoo_spark(payload)
+
+
+def _fetch_members_spark(
+    members: list[str], deadline: float | None = None
+) -> dict[str, dict[str, float]]:
+    """Batched latest-closes fetch via the multi-symbol spark endpoint.
+
+    Sequential chunks stop at SWEEP_BUDGET_S so a tarpitted RUT universe
+    cannot hold the oneshot past TimeoutStartSec (2026-08-24 21:30Z).
+    """
+    if not members:
+        return {}
+    stop_at = _sweep_deadline(deadline)
     fetched: dict[str, dict[str, float]] = {}
     for i in range(0, len(members), SPARK_BATCH_SIZE):
+        remaining = stop_at - time.monotonic()
+        if remaining <= 0:
+            print(
+                f"  history: spark wall-clock budget spent "
+                f"({i}/{len(members)}); deferring the rest",
+                file=sys.stderr,
+                flush=True,
+            )
+            break
         chunk = members[i : i + SPARK_BATCH_SIZE]
-        time.sleep(YAHOO_COURTESY_SLEEP_S)
-        url = (
-            "https://query1.finance.yahoo.com/v8/finance/spark"
-            f"?symbols={quote(','.join(chunk))}&range={SPARK_RANGE}&interval=1d"
-        )
-        req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        time.sleep(min(YAHOO_COURTESY_SLEEP_S, max(0.0, remaining)))
+        remaining = stop_at - time.monotonic()
+        if remaining <= 0:
+            print(
+                f"  history: spark wall-clock budget spent "
+                f"({i}/{len(members)}); deferring the rest",
+                file=sys.stderr,
+                flush=True,
+            )
+            break
         try:
-            with urlopen(req, timeout=30) as resp:
-                payload = json.load(resp)
+            fetched.update(_fetch_spark_chunk(chunk))
         except Exception as exc:
-            print(f"  Yahoo spark: chunk {i // SPARK_BATCH_SIZE} failed: {exc}", file=sys.stderr)
+            print(
+                f"  Yahoo spark: chunk {i // SPARK_BATCH_SIZE} failed: {exc}",
+                file=sys.stderr,
+            )
             continue
-        fetched.update(parse_yahoo_spark(payload))
     return fetched
 
 
@@ -349,7 +441,7 @@ def _fetch_yahoo_daily(symbol: str, range_str: str) -> dict[str, float]:
     )
     req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
     try:
-        with urlopen(req, timeout=30) as resp:
+        with urlopen(req, timeout=FETCH_TIMEOUT_S) as resp:
             result = json.load(resp)["chart"]["result"][0]
     except Exception as exc:
         print(f"  Yahoo: {symbol} failed: {exc}", file=sys.stderr)
@@ -465,7 +557,13 @@ def _drop_cached_db_connection() -> None:
 
 # ── scan + persistence ────────────────────────────────────────────
 
-def scan_index(index_symbol: str, *, backfill: bool = False, no_db: bool = False) -> dict[str, Any]:
+def scan_index(
+    index_symbol: str,
+    *,
+    backfill: bool = False,
+    no_db: bool = False,
+    sweep_deadline: float | None = None,
+) -> dict[str, Any]:
     taken_at = _now_iso()
     print(f"BPI SCAN: {index_symbol} ({INDEX_NAMES[index_symbol]})", file=sys.stderr)
     tickers, source = resolve_constituents(
@@ -476,7 +574,9 @@ def scan_index(index_symbol: str, *, backfill: bool = False, no_db: bool = False
         tickers = tickers[:cap]
         print(f"  smoke cap active: first {cap} members only", file=sys.stderr)
 
-    closes, fetch_counts = ensure_member_history(tickers, backfill=backfill, no_db=no_db)
+    closes, fetch_counts = ensure_member_history(
+        tickers, backfill=backfill, no_db=no_db, sweep_deadline=sweep_deadline
+    )
     member_series = {
         member: member_signal_series(series)
         for member, series in closes.items()
@@ -495,19 +595,33 @@ def scan_index(index_symbol: str, *, backfill: bool = False, no_db: bool = False
     )
 
 
-def run_scan(indices: list[str], *, backfill: bool, no_db: bool) -> dict[str, Any]:
+def run_scan(
+    indices: list[str],
+    *,
+    backfill: bool,
+    no_db: bool,
+    sweep_deadline: float | None = None,
+) -> dict[str, Any]:
     """Scan each index, persist gated payloads, mirror to disk.
 
     The whole run sits inside one service_cycle: any hard failure writes
     the error row (+ retry embargo) and re-raises, so the timer slot is
     never latched on a retryable failure. Gated (missing) payloads exit
-    cleanly — the heartbeat is still written.
+    cleanly — the heartbeat is still written. One wall-clock deadline
+    covers NDX+SPX+RUT so a tarpitted later index cannot spend a fresh
+    SWEEP_BUDGET_S after earlier indices already used the start budget.
     """
     generated_at = _now_iso()
+    deadline = _sweep_deadline(sweep_deadline)
     results: dict[str, Any] = {}
     with _heartbeat_cycle(no_db) as cycle:
         for index_symbol in indices:
-            payload = scan_index(index_symbol, backfill=backfill, no_db=no_db)
+            payload = scan_index(
+                index_symbol,
+                backfill=backfill,
+                no_db=no_db,
+                sweep_deadline=deadline,
+            )
             if payload.get("missing"):
                 print(
                     f"  {index_symbol}: {payload.get('reason')}; no rows/snapshot written",

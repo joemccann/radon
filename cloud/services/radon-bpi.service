@@ -27,6 +27,8 @@ StandardError=journal
 # inter-fire gap is 7200s, worst-compressed to 7080s by the timer's
 # RandomizedDelaySec=120 on the first fire; 6900 stays under it with
 # margin while still covering the measured tarpit worst case.
+# 2026-08-24: a tarpitted RUT spark still ran past 6900s (Result=timeout).
+# bpi_scan.SWEEP_BUDGET_S=6600 exits first; do not raise this value.
 TimeoutStartSec=6900
 
 [Install]

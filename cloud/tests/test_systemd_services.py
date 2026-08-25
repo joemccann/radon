@@ -884,7 +884,9 @@ class TestBpiScanBudget:
     stale, so radon-bpi's "incremental" run is a full-universe refetch
     (~35-45 min with Yahoo courtesy sleeps). TimeoutStartSec=1200 killed
     the 2026-07-27 run mid-SPX (Result=timeout, watchdog paged); the
-    budget must cover a full sweep with headroom."""
+    budget must cover a full sweep with headroom. 2026-08-24: 6900s still
+    SIGTERM'd a tarpitted RUT spark — the process now self-limits at
+    SWEEP_BUDGET_S=6600; this TimeoutStartSec must not rise (R-071)."""
 
     def test_service_start_budget_covers_full_universe_sweep(self, unit):
         svc = unit("radon-bpi.service")["Service"]
