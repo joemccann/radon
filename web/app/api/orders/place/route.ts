@@ -27,6 +27,7 @@ import {
   CLIENT_KEY_TTL_MS,
   IndeterminatePlacementError,
 } from "@/lib/orders/orderIdempotency";
+import { invalidateOrdersSnapshotCache } from "@/lib/orders/ordersReadCache";
 
 export const runtime = "nodejs";
 
@@ -193,6 +194,7 @@ export async function POST(request: Request): Promise<Response> {
           timeout: 30_000,
         },
       );
+      invalidateOrdersSnapshotCache();
       const orders = await readOrdersSnapshotBestEffort();
       return setNoStoreResponseHeaders(
         NextResponse.json({ ...paperResult, demo: true, paper: true, orders, requestId }),
@@ -394,6 +396,7 @@ export async function POST(request: Request): Promise<Response> {
         return result;
       });
     } catch (placeErr) {
+      invalidateOrdersSnapshotCache();
       if (placeErr instanceof OrderRejectedError) {
         const reason =
           placeErr.initialStatus === "Unknown"
@@ -431,10 +434,14 @@ export async function POST(request: Request): Promise<Response> {
     const orderResult = placement.value;
 
     // Refresh orders after placement
+    invalidateOrdersSnapshotCache();
     try {
       await radonFetch("/orders/refresh", { method: "POST", timeout: 10_000 });
     } catch {
       // Non-fatal — order was placed, refresh failed
+    } finally {
+      // A GET racing the refresh may have repopulated the old snapshot.
+      invalidateOrdersSnapshotCache();
     }
     const orders = await readOrdersSnapshotBestEffort();
 
@@ -452,6 +459,7 @@ export async function POST(request: Request): Promise<Response> {
     });
     return setNoStoreResponseHeaders(response, requestId);
   } catch (error) {
+    invalidateOrdersSnapshotCache();
     if (error instanceof RadonApiError) {
       return setNoStoreResponseHeaders(
         jsonApiError({

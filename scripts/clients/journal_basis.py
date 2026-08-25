@@ -5,16 +5,20 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
 logger = logging.getLogger(__name__)
 
 
-# Both journal queries below SELECT exactly these columns, in this order.
+# Rows passed to the derivation layer use exactly these columns, in this order.
 # Real libsql_experimental cursors return plain tuples, so name-based access
 # must fall back to position or every row silently reads as empty (CTA-01,
-# layer 2 — the .rows AttributeError was masking this).
+# layer 2 — the .rows AttributeError was masking this). The paginated DB reader
+# selects trade_id as a fourth cursor column and normalizes it back to this
+# stable row shape before derivation.
 _JOURNAL_COLUMNS = ("payload", "filled_at", "written_at")
+_PAGED_JOURNAL_COLUMNS = ("trade_id", *_JOURNAL_COLUMNS)
+_JOURNAL_PAGE_SIZE = 200
 
 
 def _row_value(row: Any, key: str) -> Any:
@@ -23,6 +27,17 @@ def _row_value(row: Any, key: str) -> Any:
     if isinstance(row, (tuple, list)):
         try:
             return row[_JOURNAL_COLUMNS.index(key)]
+        except (ValueError, IndexError):
+            return None
+    return getattr(row, key, None)
+
+
+def _paged_row_value(row: Any, key: str) -> Any:
+    if isinstance(row, dict):
+        return row.get(key)
+    if isinstance(row, (tuple, list)):
+        try:
+            return row[_PAGED_JOURNAL_COLUMNS.index(key)]
         except (ValueError, IndexError):
             return None
     return getattr(row, key, None)
@@ -193,6 +208,234 @@ def _row_is_before_cutoff(row: Any, before: str) -> bool:
     return str(timestamp)[:10] < str(before)[:10]
 
 
+def _fetch_journal_rows_for_tickers(db, tickers: Iterable[str]) -> list[Any]:
+    """Fetch ticker history in bounded Hrana pages, then restore legacy order."""
+    normalized_tickers = tuple(
+        sorted({_normalize_ticker(ticker) for ticker in tickers if _normalize_ticker(ticker)})
+    )
+    if not normalized_tickers:
+        return []
+
+    placeholders = ", ".join("?" for _ in normalized_tickers)
+    cursor = ""
+    accumulated: list[tuple[str, tuple[Any, Any, Any]]] = []
+
+    while True:
+        result = db.execute(
+            f"""
+            SELECT trade_id, payload, filled_at, written_at
+            FROM journal
+            WHERE trade_id > ?
+              AND UPPER(COALESCE(
+                  json_extract(payload, '$.ticker'),
+                  json_extract(payload, '$.symbol'),
+                  ''
+              )) IN ({placeholders})
+            ORDER BY trade_id ASC
+            LIMIT ?
+            """,
+            (cursor, *normalized_tickers, _JOURNAL_PAGE_SIZE),
+        )
+        page = list(result.fetchall())
+        if not page:
+            break
+
+        for row in page:
+            trade_id = str(_paged_row_value(row, "trade_id") or "")
+            if not trade_id or trade_id <= cursor:
+                raise RuntimeError("journal basis pagination returned a non-advancing trade_id")
+            accumulated.append(
+                (
+                    trade_id,
+                    (
+                        _paged_row_value(row, "payload"),
+                        _paged_row_value(row, "filled_at"),
+                        _paged_row_value(row, "written_at"),
+                    ),
+                )
+            )
+
+        next_cursor = accumulated[-1][0]
+        if next_cursor <= cursor:
+            raise RuntimeError("journal basis pagination cursor did not advance")
+        cursor = next_cursor
+        if len(page) < _JOURNAL_PAGE_SIZE:
+            break
+
+    def sort_key(item: tuple[str, tuple[Any, Any, Any]]) -> tuple[Any, ...]:
+        trade_id, row = item
+        payload = _payload_from_row(row)
+        ticker = _normalize_ticker(payload.get("ticker") or payload.get("symbol"))
+        filled_at = _row_value(row, "filled_at")
+        written_at = _row_value(row, "written_at")
+        effective_at = filled_at if filled_at is not None else written_at
+
+        # SQLite sorts NULL before text in ASC order. Preserve the old query's
+        # ticker/effective-time/written-time semantics exactly, with trade_id as
+        # a deterministic tie-breaker for rows whose timestamps are identical.
+        return (
+            ticker,
+            effective_at is not None,
+            str(effective_at or ""),
+            written_at is not None,
+            str(written_at or ""),
+            trade_id,
+        )
+
+    accumulated.sort(key=sort_key)
+    return [row for _trade_id, row in accumulated]
+
+
+def _derive_journal_state_from_rows(
+    rows: Iterable[Any],
+    *,
+    basis_tickers: Iterable[str] = (),
+    option_net_keys: Iterable[str] = (),
+    stock_net_tickers: Iterable[str] = (),
+    before: Optional[str] = None,
+) -> tuple[dict[str, float], dict[str, float]]:
+    """Pure row processor shared by the single-target and batched readers."""
+    normalized_basis_tickers = {
+        _normalize_ticker(ticker) for ticker in basis_tickers if _normalize_ticker(ticker)
+    }
+    normalized_stock_tickers = {
+        _normalize_ticker(ticker)
+        for ticker in stock_net_tickers
+        if _normalize_ticker(ticker)
+    }
+    normalized_option_keys = {str(key) for key in option_net_keys if str(key)}
+
+    buckets: dict[str, dict[str, Any]] = {}
+    basis_counted_parts: dict[str, set[str]] = {
+        ticker: set() for ticker in normalized_basis_tickers
+    }
+    net_qty_lookup = {key: 0.0 for key in sorted(normalized_option_keys)}
+    net_qty_lookup.update(
+        {f"{ticker}|STK": 0.0 for ticker in sorted(normalized_stock_tickers)}
+    )
+    net_counted_parts = {key: set() for key in net_qty_lookup}
+
+    for row in rows:
+        payload = _payload_from_row(row)
+        ticker = _normalize_ticker(payload.get("ticker") or payload.get("symbol"))
+        if not ticker:
+            continue
+
+        key = _bucket_key(payload)
+        qty_raw = payload.get("contracts")
+        if qty_raw is None:
+            qty_raw = payload.get("shares")
+        try:
+            qty = abs(float(qty_raw))
+        except (TypeError, ValueError):
+            continue
+
+        signed_qty = _signed_qty(payload.get("action"), qty)
+        if signed_qty == 0:
+            continue
+        exec_parts = _exec_id_parts(payload)
+
+        if before is None or _row_is_before_cutoff(row, before):
+            net_target: Optional[str] = None
+            if key in normalized_option_keys:
+                net_target = key
+            elif (
+                ticker in normalized_stock_tickers
+                and payload.get("strike") is None
+                and not payload.get("right")
+            ):
+                net_target = f"{ticker}|STK"
+
+            if net_target is not None and _claim_exec_parts(
+                net_counted_parts[net_target],
+                exec_parts,
+                ticker if net_target.endswith("|STK") else net_target,
+            ):
+                net_qty_lookup[net_target] += signed_qty
+
+        if ticker not in normalized_basis_tickers or key is None:
+            continue
+
+        try:
+            total_cost = float(payload.get("total_cost"))
+        except (TypeError, ValueError):
+            continue
+
+        persisted_open_basis = payload.get("open_basis")
+        try:
+            persisted_open_basis = (
+                float(persisted_open_basis)
+                if persisted_open_basis is not None
+                else None
+            )
+        except (TypeError, ValueError):
+            persisted_open_basis = None
+
+        if not _claim_exec_parts(basis_counted_parts[ticker], exec_parts, key):
+            continue
+
+        bucket = buckets.setdefault(
+            key,
+            {"net_qty": 0.0, "fills": [], "latest_persisted_open_basis": None},
+        )
+        bucket["net_qty"] += signed_qty
+        bucket["fills"].append(
+            {
+                "signed_qty": signed_qty,
+                "qty": qty,
+                "total_cost": total_cost,
+            }
+        )
+        if persisted_open_basis is not None:
+            bucket["latest_persisted_open_basis"] = persisted_open_basis
+
+    open_basis_lookup: dict[str, float] = {}
+    for key, bucket in buckets.items():
+        net_qty = float(bucket["net_qty"])
+        if net_qty == 0:
+            continue
+
+        if bucket["latest_persisted_open_basis"] is not None:
+            open_basis_lookup[key] = round(bucket["latest_persisted_open_basis"], 4)
+            continue
+
+        opening_sign = 1 if net_qty > 0 else -1
+        opening_qty = 0.0
+        opening_cost = 0.0
+        for fill in bucket["fills"]:
+            if (1 if fill["signed_qty"] > 0 else -1) != opening_sign:
+                continue
+            opening_qty += fill["qty"]
+            opening_cost += fill["total_cost"]
+
+        if opening_qty <= 0:
+            continue
+
+        avg_per_contract = opening_cost / opening_qty
+        open_basis_lookup[key] = round(avg_per_contract * abs(net_qty), 4)
+
+    return open_basis_lookup, net_qty_lookup
+
+
+def compute_open_basis_and_net_qty_for_tickers(
+    db,
+    *,
+    tickers: Iterable[str],
+    contract_keys: Iterable[str],
+) -> tuple[dict[str, float], dict[str, float]]:
+    """Read current option tickers once and derive basis plus net quantities."""
+    normalized_tickers = tuple(
+        sorted({_normalize_ticker(ticker) for ticker in tickers if _normalize_ticker(ticker)})
+    )
+    normalized_contract_keys = tuple(sorted({str(key) for key in contract_keys if str(key)}))
+    rows = _fetch_journal_rows_for_tickers(db, normalized_tickers)
+    return _derive_journal_state_from_rows(
+        rows,
+        basis_tickers=normalized_tickers,
+        option_net_keys=normalized_contract_keys,
+    )
+
+
 def prior_net_qty_for_contract(
     db,
     *,
@@ -246,61 +489,21 @@ def prior_net_qty_for_contract(
         if target_key is None:
             return 0.0
 
-    result = db.execute(
-        """
-        SELECT payload, filled_at, written_at
-        FROM journal
-        WHERE UPPER(COALESCE(
-            json_extract(payload, '$.ticker'),
-            json_extract(payload, '$.symbol'),
-            ''
-        )) = ?
-        ORDER BY COALESCE(filled_at, written_at) ASC, written_at ASC
-        """,
-        (normalized_ticker,),
+    rows = _fetch_journal_rows_for_tickers(db, (normalized_ticker,))
+    if target_key is None:
+        _, net_qty_lookup = _derive_journal_state_from_rows(
+            rows,
+            stock_net_tickers=(normalized_ticker,),
+            before=before,
+        )
+        return net_qty_lookup[f"{normalized_ticker}|STK"]
+
+    _, net_qty_lookup = _derive_journal_state_from_rows(
+        rows,
+        option_net_keys=(target_key,),
+        before=before,
     )
-
-    net_qty = 0.0
-    # Executions already accounted for by an earlier row, so a rehydrate
-    # composite and the per-fill rows it collapses can't both be counted.
-    counted_parts: set[str] = set()
-    for row in result.fetchall():
-        if before is not None and not _row_is_before_cutoff(row, before):
-            continue
-
-        payload = _payload_from_row(row)
-        if _normalize_ticker(payload.get("ticker") or payload.get("symbol")) != normalized_ticker:
-            continue
-
-        if target_key is not None:
-            if _bucket_key(payload) != target_key:
-                continue
-        else:
-            # STK match: skip rows that look like options (have strike/right).
-            if payload.get("strike") is not None or payload.get("right"):
-                continue
-
-        qty_raw = payload.get("contracts")
-        if qty_raw is None:
-            qty_raw = payload.get("shares")
-        try:
-            qty = abs(float(qty_raw))
-        except (TypeError, ValueError):
-            continue
-
-        signed_qty = _signed_qty(payload.get("action"), qty)
-        if signed_qty == 0:
-            continue
-        if not _claim_exec_parts(
-            counted_parts,
-            _exec_id_parts(payload),
-            target_key or normalized_ticker,
-        ):
-            continue
-
-        net_qty += signed_qty
-
-    return net_qty
+    return net_qty_lookup[target_key]
 
 
 def compute_open_basis_for_ticker(db, ticker: str) -> dict[str, float]:
@@ -315,111 +518,9 @@ def compute_open_basis_for_ticker(db, ticker: str) -> dict[str, float]:
     if not normalized_ticker:
         return {}
 
-    result = db.execute(
-        """
-        SELECT payload, filled_at, written_at
-        FROM journal
-        WHERE UPPER(COALESCE(
-            json_extract(payload, '$.ticker'),
-            json_extract(payload, '$.symbol'),
-            ''
-        )) = ?
-        ORDER BY COALESCE(filled_at, written_at) ASC, written_at ASC
-        """,
-        (normalized_ticker,),
+    rows = _fetch_journal_rows_for_tickers(db, (normalized_ticker,))
+    open_basis_lookup, _ = _derive_journal_state_from_rows(
+        rows,
+        basis_tickers=(normalized_ticker,),
     )
-
-    buckets: dict[str, dict[str, Any]] = {}
-    # Executions already accounted for by an earlier row (see
-    # ``_claim_exec_parts``). Exec ids are globally unique, so one set covers
-    # every bucket in this ticker's scan.
-    counted_parts: set[str] = set()
-    for row in result.fetchall():
-        payload = _payload_from_row(row)
-        if _normalize_ticker(payload.get("ticker") or payload.get("symbol")) != normalized_ticker:
-            continue
-
-        key = _bucket_key(payload)
-        if key is None:
-            continue
-
-        qty_raw = payload.get("contracts")
-        if qty_raw is None:
-            qty_raw = payload.get("shares")
-        try:
-            qty = abs(float(qty_raw))
-        except (TypeError, ValueError):
-            continue
-
-        signed_qty = _signed_qty(payload.get("action"), qty)
-        if signed_qty == 0:
-            continue
-
-        try:
-            total_cost = float(payload.get("total_cost"))
-        except (TypeError, ValueError):
-            continue
-
-        # `open_basis` is persisted by journal_rehydrate.py on every row
-        # as the basis allocated to the still-open residual after that
-        # row. When present, the latest row's value supersedes the
-        # bucket-level lot-match recomputation below — that's the whole
-        # point of persisting it. Stays None for rows written by the
-        # real-time daemon (journal_sync.py), which still need the
-        # fallback compute path.
-        persisted_open_basis = payload.get("open_basis")
-        try:
-            persisted_open_basis = (
-                float(persisted_open_basis)
-                if persisted_open_basis is not None
-                else None
-            )
-        except (TypeError, ValueError):
-            persisted_open_basis = None
-
-        if not _claim_exec_parts(counted_parts, _exec_id_parts(payload), key):
-            continue
-
-        bucket = buckets.setdefault(
-            key,
-            {"net_qty": 0.0, "fills": [], "latest_persisted_open_basis": None},
-        )
-        bucket["net_qty"] += signed_qty
-        bucket["fills"].append(
-            {
-                "signed_qty": signed_qty,
-                "qty": qty,
-                "total_cost": total_cost,
-            }
-        )
-        # Rows arrive ORDER BY filled_at ASC so the last write wins —
-        # exactly what we want for "basis as of latest row".
-        if persisted_open_basis is not None:
-            bucket["latest_persisted_open_basis"] = persisted_open_basis
-
-    open_basis_lookup: dict[str, float] = {}
-    for key, bucket in buckets.items():
-        net_qty = float(bucket["net_qty"])
-        if net_qty == 0:
-            continue
-
-        if bucket["latest_persisted_open_basis"] is not None:
-            open_basis_lookup[key] = round(bucket["latest_persisted_open_basis"], 4)
-            continue
-
-        opening_sign = 1 if net_qty > 0 else -1
-        opening_qty = 0.0
-        opening_cost = 0.0
-        for fill in bucket["fills"]:
-            if (1 if fill["signed_qty"] > 0 else -1) != opening_sign:
-                continue
-            opening_qty += fill["qty"]
-            opening_cost += fill["total_cost"]
-
-        if opening_qty <= 0:
-            continue
-
-        avg_per_contract = opening_cost / opening_qty
-        open_basis_lookup[key] = round(avg_per_contract * abs(net_qty), 4)
-
     return open_basis_lookup

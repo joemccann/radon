@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { RefreshCw } from "lucide-react";
-import type { OrdersData, WorkspaceSection } from "@/lib/types";
+import type { OrdersData, PortfolioSnapshotSeed, WorkspaceSection } from "@/lib/types";
 import { navItems } from "@/lib/data";
 import { resolveSectionFromPath } from "@/lib/chat";
 import { usePortfolio } from "@/lib/usePortfolio";
@@ -39,6 +39,9 @@ import InstrumentSkeleton from "@/components/ui/InstrumentSkeleton";
 const WorkspaceSections = dynamic(() => import("@/components/WorkspaceSections"), {
   loading: () => <InstrumentSkeleton testId="workspace-sections-skeleton" />,
 });
+const PortfolioSections = dynamic(() => import("@/components/PortfolioSections"), {
+  loading: () => <InstrumentSkeleton testId="portfolio-sections-skeleton" />,
+});
 import FooterTelemetryStrip from "@/components/FooterTelemetryStrip";
 import { useTickerDetail } from "@/lib/TickerDetailContext";
 import { assessMargin, rankOf, type MarginLevel } from "@/lib/marginWarning";
@@ -53,9 +56,10 @@ import CommandPalette from "@/components/CommandPalette";
 type WorkspaceShellProps = {
   section?: WorkspaceSection;
   tickerParam?: string;
+  initialPortfolio?: PortfolioSnapshotSeed;
 };
 
-export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellProps) {
+export default function WorkspaceShell({ section, tickerParam, initialPortfolio }: WorkspaceShellProps) {
   const { theme: resolvedTheme, toggleTheme } = useTheme();
   const getRealtimeToken = useRealtimeAuth();
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -64,6 +68,7 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
   const { isMobile, hasMounted } = useViewport();
   const showMobileChrome = isMobile && hasMounted;
   const activeSection: WorkspaceSection = section ?? resolveSectionFromPath(pathname, "dashboard");
+  const isOrdersPage = activeSection === "orders";
   const isOptionsWorkspace = activeSection === "options";
   const navLabel = navItems.find((item) => item.route === activeSection)?.label ?? "Dashboard";
   const activeLabel = activeSection === "ticker-detail" && tickerParam ? tickerParam : navLabel;
@@ -78,7 +83,17 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
   // independent of the equities session above.
   const globexOpen = useGlobexOpen();
 
-  const { data: portfolio, syncing: portfolioSyncing, error: portfolioError, lastSync: portfolioLastSync, syncNow: portfolioSyncNow } = usePortfolio(isMarketActive);
+  const {
+    data: portfolio,
+    loading: portfolioLoading,
+    syncing: portfolioSyncing,
+    error: portfolioError,
+    lastSync: portfolioLastSync,
+    syncNow: portfolioSyncNow,
+  } = usePortfolio(isMarketActive, {
+    initialSnapshot: initialPortfolio,
+    includeEntryDates: isOrdersPage,
+  });
 
   const portfolioSymbols = useMemo(
     () => (portfolio?.positions ?? []).map((p) => p.ticker),
@@ -100,11 +115,18 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
   // Bridge order-actions context → toasts & orders updater
   const { drainNotifications, setOrdersUpdater } = useOrderActions();
 
-  const isOrdersPage = activeSection === "orders";
   // Poll cached orders on the orders page (always), and elsewhere during market hours.
   const shouldAutoSyncOrders = isOrdersPage || isMarketActive;
   // Live IB refresh remains an explicit operator action; initial cached read always runs.
-  const { data: orders, syncing: ordersSyncing, error: ordersError, lastSync: ordersLastSync, syncNow: ordersSyncNow, updateData: updateOrdersData } = useOrders(shouldAutoSyncOrders);
+  const {
+    data: orders,
+    loading: ordersLoading,
+    syncing: ordersSyncing,
+    error: ordersError,
+    lastSync: ordersLastSync,
+    syncNow: ordersSyncNow,
+    updateData: updateOrdersData,
+  } = useOrders(shouldAutoSyncOrders);
 
   const orderSymbols = useMemo(
     () => (orders?.open_orders ?? []).map((o) => o.contract.symbol),
@@ -484,9 +506,17 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
       ? "Sync failed. Reconstruction incomplete."
       : "No sample yet. Reconstruction unavailable.";
 
-  // A render that surfaces a stale snapshot triggers the producer sync
-  // itself — the stale pill's Sync button remains the manual fallback.
-  useAutoSyncOnStale(isStale, syncNow, syncTarget, !isDemoMode, stalenessTick);
+  // A null timestamp during the initial cached read is not yet evidence of a
+  // blackout. Let that GET paint first; a completed missing/stale snapshot
+  // still arms recovery, while explicit syncs retain generation protection.
+  const initialSnapshotSettled = isOrdersPage ? !ordersLoading : !portfolioLoading;
+  useAutoSyncOnStale(
+    isStale,
+    syncNow,
+    syncTarget,
+    !isDemoMode && initialSnapshotSettled,
+    stalenessTick,
+  );
 
   // Sections that render live marks from the prices map. Scanner/discover (and
   // other non-price modules) must not receive a new `prices` identity on every
@@ -560,7 +590,9 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
 
           {activeSection !== "dashboard" && activeSection !== "ticker-detail" && activeSection !== "watchlist" && activeSection !== "admin" && activeSection !== "preferences" && activeSection !== "profile" && activeSection !== "alerts" && activeSection !== "workflow" && !isOptionsWorkspace ? <div className={isStale ? "metric-cards--stale" : undefined}><MetricCards portfolio={portfolio} prices={prices} realizedPnl={todayRealizedPnl} executedOrders={executedOrders} section={activeSection} /></div> : null}
 
-          {activeSection !== "dashboard" ? (
+          {activeSection === "portfolio" ? (
+            <PortfolioSections portfolio={portfolio} prices={pricesForSections} />
+          ) : activeSection !== "dashboard" ? (
             <WorkspaceSections
               section={activeSection}
               portfolio={portfolio}

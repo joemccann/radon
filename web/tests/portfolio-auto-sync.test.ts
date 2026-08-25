@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { PORTFOLIO_SNAPSHOT_CACHE_TTL_MS } from "../lib/portfolio/portfolioReadCache";
 
 /**
  * Verifies that GET /api/portfolio is a read-only snapshot surface. Browser
@@ -124,6 +125,57 @@ describe("GET /api/portfolio — cache-only polling", () => {
     expect(mockRadonFetch).not.toHaveBeenCalled();
   });
 
+  it("keeps the API accessor's single direct-read retry", async () => {
+    const portfolio = makePortfolio("2026-07-10T20:00:00.000Z");
+    mockExecute
+      .mockRejectedValueOnce(new Error("first Turso read failed"))
+      .mockResolvedValueOnce({
+        rows: [{ taken_at: portfolio.last_sync, payload: JSON.stringify(portfolio) }],
+      });
+
+    const { GET } = await import("../app/api/portfolio/route");
+    const response = await GET();
+
+    expect(response.status).toBe(200);
+    expect(mockExecute).toHaveBeenCalledTimes(2);
+    expect(mockRadonFetch).not.toHaveBeenCalled();
+  });
+
+  it("bounds the RSC seed to one short DB attempt and absorbs its late rejection", async () => {
+    vi.useFakeTimers();
+    let rejectDb!: (error: Error) => void;
+    mockExecute.mockReturnValue(new Promise((_resolve, reject) => {
+      rejectDb = reject;
+    }));
+    try {
+      const {
+        PORTFOLIO_SEED_TIMEOUT_MS,
+        readPortfolioSnapshotSeed,
+      } = await import("../lib/portfolio/readPortfolioSnapshot.server");
+      let settled = false;
+      const seed = readPortfolioSnapshotSeed().then((value) => {
+        settled = true;
+        return value;
+      });
+
+      await vi.advanceTimersByTimeAsync(PORTFOLIO_SEED_TIMEOUT_MS - 1);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(seed).resolves.toBeUndefined();
+      expect(mockExecute).toHaveBeenCalledTimes(1);
+
+      // The direct read can reject after the page has already fallen back to
+      // the client GET. Its rejection must remain observed, not surface as an
+      // unhandled promise after the RSC response has completed.
+      rejectDb(new Error("late Turso rejection"));
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(mockExecute).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps repeated weekend GETs free of IB side effects", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-11T18:00:00.000Z"));
@@ -153,7 +205,7 @@ describe("GET /api/portfolio — cache-only polling", () => {
       const fresh = await GET();
       expect(fresh.headers.get("X-Sync-Warning")).toBeNull();
 
-      vi.advanceTimersByTime(3_001);
+      vi.advanceTimersByTime(PORTFOLIO_SNAPSHOT_CACHE_TTL_MS + 1);
       mockExecute.mockRejectedValue(new Error("turso down"));
       const degraded = await GET();
 

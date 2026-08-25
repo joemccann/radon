@@ -8,12 +8,18 @@ import {
   setNoStoreResponseHeaders,
 } from "@/lib/apiContracts";
 import { dbExecute } from "@/lib/dbExecute";
-import { cachedRead, cachedReadResult } from "@/lib/dbCache";
 import { buildContractEntryDates, type JournalEntryRow } from "@/lib/entryDates";
 import {
-  isPortfolioSnapshotUnexpectedlyStale,
-  PORTFOLIO_SNAPSHOT_STALE_WARNING,
-} from "@/lib/portfolioSnapshotFreshness";
+  invalidatePortfolioReadCaches,
+  readCachedPortfolioContractOpenDates,
+  readCachedPortfolioTradeLogDates,
+} from "@/lib/portfolio/portfolioReadCache";
+import {
+  readPortfolioFromDb,
+  readPortfolioSnapshot,
+  type PortfolioSnapshot,
+  withoutPortfolioEntryDates,
+} from "@/lib/portfolio/readPortfolioSnapshot.server";
 
 // Disable Next.js static caching: this handler reads live Turso state.
 // Without this, the framework freezes the first response and serves stale
@@ -23,43 +29,6 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const DB_READ_TIMEOUT_MS = 3_000;
-// Server-side coalescing of the polled GET reads. The snapshot is the hot one;
-// staleWhileError serves the last good portfolio through a brief Turso stall
-// without turning a browser read into an IB synchronization request.
-// Trade-log dates are day-granularity, so a longer TTL is invisible.
-const SNAPSHOT_CACHE_TTL_MS = 3_000;
-const SNAPSHOT_MAX_STALE_MS = 60_000;
-const TRADE_LOG_DATES_CACHE_TTL_MS = 10_000;
-
-type PortfolioSnapshot = {
-  data: Record<string, unknown>;
-  takenAt: string;
-  timestampMs: number | null;
-};
-
-function parseTimestampMs(value: unknown): number | null {
-  if (typeof value !== "string" || value.length === 0) return null;
-  const ms = Date.parse(value);
-  return Number.isFinite(ms) ? ms : null;
-}
-
-/** Read the latest portfolio snapshot from Turso. */
-async function readPortfolioFromDb(): Promise<PortfolioSnapshot | null> {
-  const result = await dbExecute({
-    sql: `SELECT taken_at, payload FROM portfolio_snapshots ORDER BY taken_at DESC LIMIT 1`,
-    args: [],
-  }, { label: "portfolio snapshot", timeoutMs: DB_READ_TIMEOUT_MS });
-  if (result.rows.length === 0) return null;
-  const row = result.rows[0] as unknown as { taken_at?: string; payload?: string };
-  if (typeof row.payload !== "string") return null;
-  const data = JSON.parse(row.payload) as Record<string, unknown>;
-  const takenAt = typeof row.taken_at === "string" ? row.taken_at : "";
-  return {
-    data,
-    takenAt,
-    timestampMs: parseTimestampMs(data.last_sync) ?? parseTimestampMs(takenAt),
-  };
-}
 
 /** Load ticker → latest trade date.
  *
@@ -157,8 +126,8 @@ async function loadPortfolioEntryDates(): Promise<{
   contract_open_dates: Record<string, string>;
 }> {
   const [trade_log_dates, contract_open_dates] = await Promise.all([
-    cachedRead("portfolio:tradeLogDates", TRADE_LOG_DATES_CACHE_TTL_MS, loadTradeLogDates),
-    cachedRead("portfolio:contractOpenDates", TRADE_LOG_DATES_CACHE_TTL_MS, loadContractOpenDates),
+    readCachedPortfolioTradeLogDates(loadTradeLogDates),
+    readCachedPortfolioContractOpenDates(loadContractOpenDates),
   ]);
   return { trade_log_dates, contract_open_dates };
 }
@@ -166,9 +135,10 @@ async function loadPortfolioEntryDates(): Promise<{
 async function portfolioResponseFromSnapshot(
   snapshot: PortfolioSnapshot,
   requestId: string,
-  warning?: string,
+  warning: string | null,
+  includeEntryDates: boolean,
 ): Promise<Response> {
-  const entryDates = await loadPortfolioEntryDates();
+  const entryDates = includeEntryDates ? await loadPortfolioEntryDates() : {};
   const response = NextResponse.json({ ...snapshot.data, ...entryDates });
   if (warning) {
     response.headers.set("X-Sync-Warning", warning);
@@ -192,48 +162,25 @@ function unavailablePortfolioResponse(
   ));
 }
 
-export async function GET(): Promise<Response> {
-  const access = await requireRouteAccess(undefined, { rate: { key: "portfolio:route", limit: 20, windowMs: 60_000 } });
+export async function GET(request?: Request): Promise<Response> {
+  const access = await requireRouteAccess(request, { rate: { key: "portfolio:route", limit: 20, windowMs: 60_000 } });
   if (!access.ok) return access.response;
   const requestId = getRequestId();
+  const includeEntryDates = request
+    ? new URL(request.url).searchParams.get("include") === "entry-dates"
+    : false;
   try {
-    const cachedSnapshot = await cachedReadResult(
-      "portfolio:snapshot",
-      SNAPSHOT_CACHE_TTL_MS,
-      readPortfolioFromDb,
-      { staleWhileError: true, maxStaleMs: SNAPSHOT_MAX_STALE_MS },
-    );
-    const snapshot = cachedSnapshot.value;
-    if (!snapshot) {
+    const read = await readPortfolioSnapshot();
+    if (!read) {
       return unavailablePortfolioResponse(requestId, "Portfolio snapshot unavailable");
     }
-    const warnings: string[] = [];
-    if (cachedSnapshot.staleWhileError) {
-      warnings.push("Turso read failed; serving last in-memory portfolio snapshot");
-    }
-    // Age relative to portfolio-sync schedule (RTH tight, weekend wide).
-    // Do not treat expected off-hours lag as LIVE DATA DEGRADED.
-    if (isPortfolioSnapshotUnexpectedlyStale(snapshot.timestampMs)) {
-      warnings.push(PORTFOLIO_SNAPSHOT_STALE_WARNING);
-    }
-    if (warnings.length > 0) {
-      return portfolioResponseFromSnapshot(
-        snapshot,
-        requestId,
-        warnings.join("; "),
-      );
-    }
-
-    return portfolioResponseFromSnapshot(snapshot, requestId);
+    return portfolioResponseFromSnapshot(
+      read.snapshot,
+      requestId,
+      read.warning,
+      includeEntryDates,
+    );
   } catch (error) {
-    // dbExecute has already invalidated a failed client operation. Retry once
-    // without turning a browser GET into live IB work.
-    try {
-      const retry = await readPortfolioFromDb();
-      if (retry) return portfolioResponseFromSnapshot(retry, requestId);
-    } catch {
-      // fall through to the explicit unavailable response below
-    }
     const message = error instanceof Error ? error.message : "Failed to read portfolio";
     return unavailablePortfolioResponse(requestId, `Turso portfolio read failed: ${message}`);
   }
@@ -249,10 +196,17 @@ export async function POST(): Promise<Response> {
   const requestId = getRequestId();
   try {
     const data = await radonFetch("/portfolio/sync", { method: "POST", timeout: 35_000 });
-    const entryDates = await loadPortfolioEntryDates();
-    const response = NextResponse.json({ ...data, ...entryDates });
+    // The sync can publish both a portfolio snapshot and new journal fills;
+    // do not merge its live response with pre-sync entry-date maps.
+    invalidatePortfolioReadCaches();
+    const response = NextResponse.json(
+      withoutPortfolioEntryDates(data),
+    );
     return setNoStoreResponseHeaders(response, requestId);
   } catch {
+    // The upstream can time out after publishing both snapshot and fills.
+    // Invalidate every derived read before resolving the indeterminate result.
+    invalidatePortfolioReadCaches();
     let snapshot: PortfolioSnapshot | null = null;
     try {
       snapshot = await readPortfolioFromDb();
@@ -270,8 +224,7 @@ export async function POST(): Promise<Response> {
     }
     if (snapshot) {
       console.warn("[Portfolio] Sync failed, serving latest Turso snapshot");
-      const entryDates = await loadPortfolioEntryDates();
-      const res = NextResponse.json({ ...snapshot.data, ...entryDates });
+      const res = NextResponse.json(snapshot.data);
       res.headers.set("X-Sync-Warning", "IB sync failed - serving latest Turso snapshot");
       return setNoStoreResponseHeaders(res, requestId);
     }
