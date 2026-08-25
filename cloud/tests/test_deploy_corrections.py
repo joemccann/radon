@@ -1868,6 +1868,62 @@ deploy_gate
         result = subprocess.run(["bash", "-c", shell], capture_output=True, text=True)
         assert result.returncode == 1
 
+    def test_stability_clock_starts_before_surface_probes(self, deploy_text: str) -> None:
+        gate = function_body(deploy_text, "deploy_gate")
+        snap = gate.index("snapshot_unit_restarts")
+        assert snap < gate.index("check_health_lite")
+        assert snap < gate.index("check_units_stable")
+        stable = function_body(deploy_text, "check_units_stable")
+        assert "snapshot_unit_restarts" in stable
+        assert "STABILITY_STARTED_AT" in stable
+
+    def test_check_units_stable_sleeps_only_the_remaining_window(
+        self, tmp_path: Path
+    ) -> None:
+        fake_bin = tmp_path / "bin"
+        fake_bin.mkdir()
+        slept = tmp_path / "slept"
+        _write_executable(
+            fake_bin / "systemctl",
+            f"""#!{sys.executable}
+import sys
+if sys.argv[1] == "is-active":
+    raise SystemExit(0)
+if sys.argv[1] == "show":
+    print(0)
+    raise SystemExit(0)
+raise SystemExit(2)
+""",
+        )
+        _write_executable(
+            fake_bin / "sleep",
+            f"""#!{sys.executable}
+from pathlib import Path
+import sys
+Path({str(slept)!r}).write_text(sys.argv[1], encoding="utf-8")
+""",
+        )
+        shell = f"""
+set -euo pipefail
+source {DEPLOY!s}
+PATH={fake_bin!s}:$PATH
+snapshot_unit_restarts
+STABILITY_STARTED_AT=$((SECONDS - 7))
+check_units_stable
+"""
+        result = subprocess.run(
+            ["bash", "-c", shell],
+            env={
+                **os.environ,
+                "PATH": f"{fake_bin}:{os.environ['PATH']}",
+                "RADON_DEPLOY_UNIT_STABILITY_SECONDS": "10",
+            },
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert slept.read_text(encoding="utf-8").strip() == "3"
+
     def test_topology_is_reverified_after_core_stability_hold(self, deploy_text: str) -> None:
         gate = function_body(deploy_text, "deploy_gate")
         stability = gate.index("check_units_stable")
@@ -2033,18 +2089,406 @@ class TestFrozenArtifacts:
             assert body.count("bun install --frozen-lockfile") >= 2
             assert "npm install" not in body and "npm ci" not in body
             assert body.count("node_modules/.bin/playwright install chromium chromium-headless-shell") >= 2
+        assert "ms-playwright" in build or "PLAYWRIGHT_BROWSERS_PATH" in build
         assert 'BUN_VERSION="1.3.14"' in deploy_text
         assert "bun --version" in build
+        seed = function_body(deploy_text, "seed_staged_node_modules")
+        assert "cmp -s" in seed
+        assert "node_modules" in seed
+        assert ".deploy-reuse-live" in seed
+        assert "should_rebuild_next" in seed
+        assert "cp -a --link" not in seed
+        assert build.index("seed_staged_node_modules") < build.index("bun install")
+        activate = function_body(deploy_text, "activate_staged_release")
+        assert ".deploy-reuse-live" in activate
+        assert "live_python_env_matches" in activate
+        rebuild = function_body(deploy_text, "should_rebuild_next")
+        assert "lib/tools" in rebuild
+        assert "web/.next" in rebuild
+        assert "should_rebuild_next" in build
+        assert "bun run build" in build
         main = function_body(deploy_text, "main")
+        assert "RADON_WHEEL_CACHE" in function_body(deploy_text, "prepare_python_wheels")
+        staged = function_body(deploy_text, "build_staged_release")
+        assert staged.index("build_nextjs_at") < staged.index("wait")
+        assert staged.index("prepare_python_wheels") < staged.index("wait")
+        assert "&" in staged
         assert main.find("build_staged_release") < main.find("restart_services")
         restart = function_body(deploy_text, "restart_services")
         assert restart.find("stop_services_for_transition") < restart.find(
             "activate_staged_release"
         ) < restart.find("start_services_after_transition")
 
+    def test_seed_staged_node_modules_reuses_live_tree_when_lockfiles_match(
+        self, tmp_path: Path
+    ) -> None:
+        fake_bin = tmp_path / "bin"
+        fake_bin.mkdir()
+        _write_executable(
+            fake_bin / "git",
+            f"""#!{sys.executable}
+import sys
+if "rev-parse" in sys.argv:
+    print("abc123")
+    raise SystemExit(0)
+if "diff" in sys.argv:
+    raise SystemExit(0)
+raise SystemExit(2)
+""",
+        )
+        live = tmp_path / "live"
+        staged = tmp_path / "staged"
+        flags = tmp_path / "seeded"
+        for root in (live, staged):
+            (root / "web").mkdir(parents=True)
+            (root / "bun.lock").write_text("root-lock\n", encoding="utf-8")
+            (root / "web" / "bun.lock").write_text("web-lock\n", encoding="utf-8")
+        (live / "node_modules").mkdir()
+        (live / "node_modules" / "sentinel").write_text("root-deps\n", encoding="utf-8")
+        (live / "web" / "node_modules").mkdir()
+        (live / "web" / "node_modules" / "sentinel").write_text(
+            "web-deps\n", encoding="utf-8"
+        )
+        (live / "web" / ".next").mkdir()
+        (live / "web" / ".next" / "BUILD_ID").write_text("live-build\n", encoding="utf-8")
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f"source {DEPLOY!s}; seed_staged_node_modules {staged!s}; "
+                f'printf "%s %s\\n" "$SEEDED_ROOT_NODE_MODULES" "$SEEDED_WEB_NODE_MODULES" > {flags}',
+            ],
+            env={
+                **os.environ,
+                "RADON_DIR": str(live),
+                "PATH": f"{fake_bin}:{os.environ['PATH']}",
+            },
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert not (staged / "node_modules").exists()
+        assert not (staged / "web" / "node_modules").exists()
+        assert not (staged / "web" / ".next").exists()
+        assert (live / "node_modules" / "sentinel").read_text(encoding="utf-8") == (
+            "root-deps\n"
+        )
+        marker = (staged / ".deploy-reuse-live").read_text(encoding="utf-8").splitlines()
+        assert marker == ["node_modules", "web/node_modules", "web/.next"]
+        assert flags.read_text(encoding="utf-8").strip() == "1 1"
+
+    def test_seed_staged_node_modules_copies_when_next_must_rebuild(
+        self, tmp_path: Path
+    ) -> None:
+        fake_bin = tmp_path / "bin"
+        fake_bin.mkdir()
+        _write_executable(
+            fake_bin / "git",
+            f"""#!{sys.executable}
+import sys
+if "rev-parse" in sys.argv:
+    print("abc123")
+    raise SystemExit(0)
+if "diff" in sys.argv:
+    print("web/app/page.tsx")
+    raise SystemExit(0)
+raise SystemExit(2)
+""",
+        )
+        live = tmp_path / "live"
+        staged = tmp_path / "staged"
+        for root in (live, staged):
+            (root / "web").mkdir(parents=True)
+            (root / "bun.lock").write_text("root-lock\n", encoding="utf-8")
+            (root / "web" / "bun.lock").write_text("web-lock\n", encoding="utf-8")
+        (live / "node_modules").mkdir()
+        (live / "node_modules" / "sentinel").write_text("root-deps\n", encoding="utf-8")
+        (live / "web" / "node_modules").mkdir()
+        (live / "web" / "node_modules" / "sentinel").write_text(
+            "web-deps\n", encoding="utf-8"
+        )
+        (live / "web" / ".next").mkdir()
+        (live / "web" / ".next" / "BUILD_ID").write_text("live-build\n", encoding="utf-8")
+        result = subprocess.run(
+            ["bash", "-c", f"source {DEPLOY!s}; seed_staged_node_modules {staged!s}"],
+            env={
+                **os.environ,
+                "RADON_DIR": str(live),
+                "PATH": f"{fake_bin}:{os.environ['PATH']}",
+            },
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert not (staged / ".deploy-reuse-live").exists()
+        assert (staged / "node_modules" / "sentinel").read_text(encoding="utf-8") == (
+            "root-deps\n"
+        )
+        assert (staged / "web" / ".next" / "BUILD_ID").read_text(encoding="utf-8") == (
+            "live-build\n"
+        )
+
+    def test_should_rebuild_next_skips_when_inputs_match_and_next_exists(
+        self, tmp_path: Path
+    ) -> None:
+        fake_bin = tmp_path / "bin"
+        fake_bin.mkdir()
+        _write_executable(
+            fake_bin / "git",
+            f"""#!{sys.executable}
+import sys
+if "rev-parse" in sys.argv:
+    print("abc123")
+    raise SystemExit(0)
+if "diff" in sys.argv:
+    raise SystemExit(0)
+raise SystemExit(2)
+""",
+        )
+        live = tmp_path / "live"
+        staged = tmp_path / "staged"
+        live.mkdir()
+        (staged / "web" / ".next").mkdir(parents=True)
+        result = subprocess.run(
+            ["bash", "-c", f"source {DEPLOY!s}; should_rebuild_next {staged!s}"],
+            env={
+                **os.environ,
+                "PATH": f"{fake_bin}:{os.environ['PATH']}",
+                "RADON_DIR": str(live),
+            },
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 1, result.stdout + result.stderr
+
+    def test_should_rebuild_next_when_web_inputs_change(self, tmp_path: Path) -> None:
+        fake_bin = tmp_path / "bin"
+        fake_bin.mkdir()
+        _write_executable(
+            fake_bin / "git",
+            f"""#!{sys.executable}
+import sys
+if "rev-parse" in sys.argv:
+    print("abc123")
+    raise SystemExit(0)
+if "diff" in sys.argv:
+    print("web/app/page.tsx")
+    raise SystemExit(0)
+raise SystemExit(2)
+""",
+        )
+        live = tmp_path / "live"
+        staged = tmp_path / "staged"
+        live.mkdir()
+        (staged / "web" / ".next").mkdir(parents=True)
+        result = subprocess.run(
+            ["bash", "-c", f"source {DEPLOY!s}; should_rebuild_next {staged!s}"],
+            env={
+                **os.environ,
+                "PATH": f"{fake_bin}:{os.environ['PATH']}",
+                "RADON_DIR": str(live),
+            },
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    def test_should_rebuild_next_when_seeded_next_is_missing(self, tmp_path: Path) -> None:
+        staged = tmp_path / "staged"
+        staged.mkdir()
+        result = subprocess.run(
+            ["bash", "-c", f"source {DEPLOY!s}; should_rebuild_next {staged!s}"],
+            env={**os.environ, "RADON_DIR": str(tmp_path / "live")},
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    def test_should_rebuild_next_skips_when_live_next_exists_and_inputs_match(
+        self, tmp_path: Path
+    ) -> None:
+        fake_bin = tmp_path / "bin"
+        fake_bin.mkdir()
+        _write_executable(
+            fake_bin / "git",
+            f"""#!{sys.executable}
+import sys
+if "rev-parse" in sys.argv:
+    print("abc123")
+    raise SystemExit(0)
+if "diff" in sys.argv:
+    raise SystemExit(0)
+raise SystemExit(2)
+""",
+        )
+        live = tmp_path / "live"
+        staged = tmp_path / "staged"
+        (live / "web" / ".next").mkdir(parents=True)
+        staged.mkdir()
+        result = subprocess.run(
+            ["bash", "-c", f"source {DEPLOY!s}; should_rebuild_next {staged!s}"],
+            env={
+                **os.environ,
+                "PATH": f"{fake_bin}:{os.environ['PATH']}",
+                "RADON_DIR": str(live),
+            },
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 1, result.stdout + result.stderr
+
+    def test_seed_staged_node_modules_skips_when_lockfiles_differ(
+        self, tmp_path: Path
+    ) -> None:
+        live = tmp_path / "live"
+        staged = tmp_path / "staged"
+        (live / "web").mkdir(parents=True)
+        (staged / "web").mkdir(parents=True)
+        (live / "bun.lock").write_text("live-lock\n", encoding="utf-8")
+        (staged / "bun.lock").write_text("staged-lock\n", encoding="utf-8")
+        (live / "web" / "bun.lock").write_text("web-lock\n", encoding="utf-8")
+        (staged / "web" / "bun.lock").write_text("web-lock\n", encoding="utf-8")
+        (live / "node_modules").mkdir()
+        (live / "node_modules" / "sentinel").write_text("live\n", encoding="utf-8")
+        result = subprocess.run(
+            ["bash", "-c", f"source {DEPLOY!s}; seed_staged_node_modules {staged!s}"],
+            env={**os.environ, "RADON_DIR": str(live)},
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert not (staged / "node_modules").exists()
+
+    def test_prepare_python_wheels_reuses_hashed_host_cache(self, tmp_path: Path) -> None:
+        fake_bin = tmp_path / "bin"
+        fake_bin.mkdir()
+        pip_log = tmp_path / "pip.log"
+        _write_executable(
+            fake_bin / "sha256sum",
+            f"""#!{sys.executable}
+print("cafef00d" + "0" * 56)
+""",
+        )
+        _write_executable(
+            fake_bin / "pip",
+            f"""#!{sys.executable}
+from pathlib import Path
+Path({str(pip_log)!r}).write_text("called\\n", encoding="utf-8")
+raise SystemExit(1)
+""",
+        )
+        release = tmp_path / "release"
+        (release / "scripts").mkdir(parents=True)
+        (release / "requirements.txt").write_text("fastapi==0.1\\n", encoding="utf-8")
+        (release / "scripts" / "requirements-api.txt").write_text(
+            "uvicorn==0.1\\n", encoding="utf-8"
+        )
+        cache_root = tmp_path / "wheel-cache"
+        cached = cache_root / ("cafef00d" + "0" * 56)
+        cached.mkdir(parents=True)
+        (cached / "fastapi-0.1-py3-none-any.whl").write_bytes(b"wheel")
+        venv_bin = tmp_path / "venv" / "bin"
+        venv_bin.mkdir(parents=True)
+        _write_executable(venv_bin / "python", "#!/bin/sh\nexit 0\n")
+        (venv_bin / "pip").symlink_to(fake_bin / "pip")
+        env = os.environ.copy()
+        env["PATH"] = f"{fake_bin}:{env['PATH']}"
+        env["RADON_SHA256SUM"] = str(fake_bin / "sha256sum")
+        env["RADON_WHEEL_CACHE"] = str(cache_root)
+        env["VENV_DIR"] = str(tmp_path / "venv")
+        result = subprocess.run(
+            ["bash", "-c", f"source {DEPLOY!s}; prepare_python_wheels {release!s}"],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert not pip_log.exists()
+        staged = release / ".deploy-wheels" / "target" / "fastapi-0.1-py3-none-any.whl"
+        assert staged.read_bytes() == b"wheel"
+        assert (release / ".deploy-wheels" / "target").is_symlink()
+
+    def test_validate_release_artifacts_accepts_live_reuse_marker(
+        self, tmp_path: Path
+    ) -> None:
+        live = tmp_path / "live"
+        staged = tmp_path / "staged"
+        (live / "web" / ".next").mkdir(parents=True)
+        (live / "web" / "node_modules").mkdir(parents=True)
+        (live / "node_modules").mkdir()
+        (staged / "web").mkdir(parents=True)
+        (staged / "web" / ".env").write_text("NEXT_PUBLIC_X=1\n", encoding="utf-8")
+        (staged / ".deploy-reuse-live").write_text(
+            "node_modules\nweb/node_modules\nweb/.next\n", encoding="utf-8"
+        )
+        result = subprocess.run(
+            ["bash", "-c", f"source {DEPLOY!s}; validate_release_artifacts {staged!s}"],
+            env={**os.environ, "RADON_DIR": str(live)},
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    def test_install_target_python_env_skips_when_requirements_hash_matches(
+        self, tmp_path: Path
+    ) -> None:
+        fake_bin = tmp_path / "bin"
+        fake_bin.mkdir()
+        pip_log = tmp_path / "pip.log"
+        _write_executable(
+            fake_bin / "sha256sum",
+            f"""#!{sys.executable}
+print("cafef00d" + "0" * 56)
+""",
+        )
+        _write_executable(
+            fake_bin / "python3.13",
+            f"""#!{sys.executable}
+from pathlib import Path
+Path({str(pip_log)!r}).write_text("venv-called\\n", encoding="utf-8")
+raise SystemExit(1)
+""",
+        )
+        live = tmp_path / "live"
+        release = tmp_path / "release"
+        venv_bin = live / ".venv" / "bin"
+        venv_bin.mkdir(parents=True)
+        _write_executable(
+            venv_bin / "python",
+            f"""#!{sys.executable}
+import sys
+if "-c" in sys.argv:
+    raise SystemExit(0)
+raise SystemExit(0)
+""",
+        )
+        (live / ".venv" / ".radon-req-hash").write_text(
+            "cafef00d" + "0" * 56 + "\n", encoding="utf-8"
+        )
+        (release / "scripts").mkdir(parents=True)
+        (release / "requirements.txt").write_text("fastapi==0.1\n", encoding="utf-8")
+        (release / "scripts" / "requirements-api.txt").write_text(
+            "uvicorn==0.1\n", encoding="utf-8"
+        )
+        env = os.environ.copy()
+        env["PATH"] = f"{fake_bin}:{env['PATH']}"
+        env["RADON_DIR"] = str(live)
+        env["VENV_DIR"] = str(live / ".venv")
+        env["RADON_SHA256SUM"] = str(fake_bin / "sha256sum")
+        env["RADON_SYSTEM_PYTHON"] = str(fake_bin / "python3.13")
+        result = subprocess.run(
+            ["bash", "-c", f"source {DEPLOY!s}; install_target_python_env {release!s}"],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert not pip_log.exists()
+
     def test_candidate_venv_matches_api_runtime_dependency_contract(self, deploy_text: str) -> None:
         wheels = function_body(deploy_text, "prepare_python_wheels")
         install = function_body(deploy_text, "install_target_python_env")
+        assert ".radon-req-hash" in install
         validate_python = function_body(deploy_text, "validate_target_python_env")
         setup_python = function_body(SETUP.read_text(encoding="utf-8"), "setup_python")
         for body in (wheels, install, setup_python):
@@ -2153,6 +2597,165 @@ run_as_radon() {{ printf '%s\\n' "$*" >> {calls!s}; }}
         assert guard < build
         for unit in ("radon-nextjs.service", "radon-relay.service", "radon-newsfeed.service"):
             assert unit in post_setup[guard - 300 : build]
+
+
+class TestPrestage:
+    SHA = "a" * 40
+
+    def _artifact_tree(self, root: Path) -> None:
+        (root / "web" / "node_modules").mkdir(parents=True)
+        (root / "web" / ".next").mkdir(parents=True)
+        (root / "node_modules").mkdir()
+        (root / "web" / ".env").write_text("NEXT_PUBLIC_X=1\n", encoding="utf-8")
+
+    def test_write_and_load_prestage_round_trip(self, tmp_path: Path) -> None:
+        staged = tmp_path / "staged"
+        self._artifact_tree(staged)
+        marker = tmp_path / "prestage"
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f"source {DEPLOY!s}; STAGED_RELEASE_DIR={staged!s}; "
+                f"write_prestage {self.SHA}; load_prestage {self.SHA}; "
+                'printf "%s\\n" "$STAGED_RELEASE_DIR"',
+            ],
+            env={
+                **os.environ,
+                "RADON_DIR": str(tmp_path / "live"),
+                "RADON_DEPLOY_PRESTAGE": str(marker),
+            },
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert staged.resolve().as_posix() in result.stdout
+        assert not marker.exists()
+
+    def test_load_prestage_rejects_sha_mismatch(self, tmp_path: Path) -> None:
+        staged = tmp_path / "staged"
+        self._artifact_tree(staged)
+        marker = tmp_path / "prestage"
+        marker.write_text(f"{'b' * 40}\n{staged}\n", encoding="utf-8")
+        result = subprocess.run(
+            ["bash", "-c", f"source {DEPLOY!s}; load_prestage {self.SHA}"],
+            env={
+                **os.environ,
+                "RADON_DIR": str(tmp_path / "live"),
+                "RADON_DEPLOY_PRESTAGE": str(marker),
+            },
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 1
+
+    def test_stage_builds_without_restart_or_gate(self, tmp_path: Path) -> None:
+        calls = tmp_path / "calls"
+        staged = tmp_path / "staged"
+        staged.mkdir()
+        marker = tmp_path / "prestage"
+        sha = self.SHA
+        shell = f"""
+set -euo pipefail
+source {DEPLOY!s}
+preflight_control_plane() {{ return 0; }}
+preflight_env() {{ return 0; }}
+current_commit() {{ printf '%s\\n' {sha}; }}
+git() {{
+  case "$*" in
+    *"rev-parse origin/main"*) printf '%s\\n' {sha} ;;
+    *) return 0 ;;
+  esac
+}}
+verify_tracked_drift_matches_target() {{ return 0; }}
+build_staged_release() {{
+  printf 'build\\n' >> {calls!s}
+  STAGED_RELEASE_DIR={staged!s}
+}}
+restart_services() {{ printf 'restart\\n' >> {calls!s}; }}
+deploy_gate() {{ printf 'gate\\n' >> {calls!s}; return 0; }}
+short_log() {{ printf 'log\\n'; }}
+RADON_DEPLOY_STAGE=1 main {sha}
+"""
+        result = subprocess.run(
+            ["bash", "-c", shell],
+            env={
+                **os.environ,
+                "RADON_DIR": str(tmp_path / "live"),
+                "RADON_CLOUD_DIR": str(ROOT),
+                "RADON_DEPLOY_PRESTAGE": str(marker),
+                "RADON_DEPLOY_STAGE": "1",
+                "RADON_DEPLOY_GREEN_MARKER": str(tmp_path / "green"),
+                "RADON_DEPLOY_TRANSITION_JOURNAL": str(tmp_path / "journal.json"),
+            },
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert calls.read_text(encoding="utf-8").splitlines() == ["build"]
+        assert marker.exists()
+        assert marker.read_text(encoding="utf-8").splitlines()[0] == sha
+
+    def test_promote_reuses_prestage_and_skips_build(self, tmp_path: Path) -> None:
+        calls = tmp_path / "calls"
+        staged = tmp_path / "staged"
+        self._artifact_tree(staged)
+        marker = tmp_path / "prestage"
+        sha = self.SHA
+        marker.write_text(f"{sha}\n{staged}\n", encoding="utf-8")
+        shell = f"""
+set -euo pipefail
+source {DEPLOY!s}
+preflight_control_plane() {{ return 0; }}
+preflight_env() {{ return 0; }}
+current_commit() {{ printf '%s\\n' {'0' * 40}; }}
+git() {{
+  case "$*" in
+    *"rev-parse origin/main"*) printf '%s\\n' {sha} ;;
+    *) return 0 ;;
+  esac
+}}
+verify_tracked_drift_matches_target() {{ return 0; }}
+build_staged_release() {{ printf 'build\\n' >> {calls!s}; }}
+restart_services() {{ printf 'restart\\n' >> {calls!s}; }}
+deploy_gate() {{ return 0; }}
+write_transition_phase() {{ return 0; }}
+record_deploy_marker() {{ return 0; }}
+write_green_marker() {{ return 0; }}
+finalize_release_artifacts() {{ return 0; }}
+sync_scheduled_units() {{ return 0; }}
+notify_release_live() {{ return 0; }}
+sudo() {{ return 0; }}
+short_log() {{ printf 'log\\n'; }}
+main {sha}
+"""
+        result = subprocess.run(
+            ["bash", "-c", shell],
+            env={
+                **os.environ,
+                "RADON_DIR": str(tmp_path / "live"),
+                "RADON_CLOUD_DIR": str(ROOT),
+                "RADON_DEPLOY_PRESTAGE": str(marker),
+                "RADON_DEPLOY_GREEN_MARKER": str(tmp_path / "green"),
+                "RADON_DEPLOY_TRANSITION_JOURNAL": str(tmp_path / "journal.json"),
+            },
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert calls.read_text(encoding="utf-8").splitlines() == ["restart"]
+        assert not marker.exists()
+
+    def test_supervisor_stage_skips_when_lock_or_journal_busy(self, deploy_text: str) -> None:
+        supervise = function_body(deploy_text, "supervise_deploy_command")
+        main = function_body(deploy_text, "main")
+        assert "RADON_DEPLOY_STAGE" in supervise
+        assert "skipping prestage" in supervise
+        assert "RADON_DEPLOY_STAGE" in main
+        assert "write_prestage" in main
+        assert "load_prestage" in main
+        assert main.find("write_prestage") < main.find("restart_services")
+        assert main.find("load_prestage") < main.find("restart_services")
 
 
 class TestRequiredEnvironment:
@@ -2377,18 +2980,39 @@ class TestCloudSecretScan:
 
     def test_root_ci_runs_full_python313_cloud_suite(self) -> None:
         workflow = yaml.safe_load(ROOT_CI.read_text(encoding="utf-8"))
-        job = workflow["jobs"]["cloud-tests"]
-        setup_uv = next(
-            step for step in job["steps"] if "astral-sh/setup-uv" in step.get("uses", "")
+        jobs = workflow["jobs"]
+        pytest_jobs = [
+            job
+            for job in jobs.values()
+            if re.search(
+                r"python\s+-m\s+pytest",
+                "\n".join(str(step.get("run", "")) for step in job["steps"]),
+            )
+        ]
+        assert len(pytest_jobs) >= 2
+        commands_by_job = [
+            "\n".join(str(step.get("run", "")) for step in job["steps"])
+            for job in pytest_jobs
+        ]
+        assert any("pytest cloud/tests" in commands for commands in commands_by_job)
+        all_commands = [
+            "\n".join(str(step.get("run", "")) for step in job["steps"])
+            for job in jobs.values()
+        ]
+        assert any("fail-under=56" in commands for commands in all_commands)
+        for job in pytest_jobs:
+            setup_uv = next(
+                step
+                for step in job["steps"]
+                if "astral-sh/setup-uv" in step.get("uses", "")
+            )
+            assert setup_uv["with"]["python-version"] == "3.13"
+            commands = "\n".join(str(step.get("run", "")) for step in job["steps"])
+            assert re.search(r"python\s+-m\s+pytest(?:\s|$)", commands)
+        assert any(
+            "requirements-test.txt" in "\n".join(str(step.get("run", "")) for step in job["steps"])
+            for job in pytest_jobs
         )
-        assert setup_uv["with"]["python-version"] == "3.13"
-        commands = "\n".join(str(step.get("run", "")) for step in job["steps"])
-        assert "requirements-test.txt" in commands
-        assert "pytest cloud/tests" in commands
-        unit_commands = "\n".join(
-            str(step.get("run", "")) for step in workflow["jobs"]["py-tests"]["steps"]
-        )
-        assert "pytest cloud/tests" not in unit_commands
 
     def test_custom_rules_reject_literal_tws_assignments_and_examples(self) -> None:
         config = tomllib.loads(GITLEAKS_CONFIG.read_text(encoding="utf-8"))
