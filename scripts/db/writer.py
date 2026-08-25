@@ -958,19 +958,6 @@ def upsert_credit_spread_rows(rows: list[dict[str, Any]], recorded_at: Optional[
     db.commit()
 
 
-DIVYIELD_UPSERT_SQL = """
-INSERT INTO divyield_history
-  (date, pct_above, count_above, total, y10, approximate, recorded_at)
-VALUES (?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT(date) DO UPDATE SET
-  pct_above   = excluded.pct_above,
-  count_above = excluded.count_above,
-  total       = excluded.total,
-  y10         = excluded.y10,
-  approximate = excluded.approximate,
-  recorded_at = excluded.recorded_at
-"""
-
 
 def upsert_divyield_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
     """DIVYIELD indicator — one row per date, idempotent on date.
@@ -1013,18 +1000,6 @@ def upsert_divyield_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] 
     db.commit()
 
 
-HYAD_UPSERT_SQL = """
-INSERT INTO hyad_history
-  (date, advances, declines, unchanged, total, recorded_at)
-VALUES (?, ?, ?, ?, ?, ?)
-ON CONFLICT(date) DO UPDATE SET
-  advances    = excluded.advances,
-  declines    = excluded.declines,
-  unchanged   = excluded.unchanged,
-  total       = excluded.total,
-  recorded_at = excluded.recorded_at
-"""
-
 
 def upsert_hyad_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
     """HYAD indicator — one row per date, idempotent on date.
@@ -1065,17 +1040,6 @@ def upsert_hyad_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = No
         )
     db.commit()
 
-
-HHLEV_UPSERT_SQL = """
-INSERT INTO hhlev_history
-  (date, leverage_pct, liabilities_musd, net_worth_musd, recorded_at)
-VALUES (?, ?, ?, ?, ?)
-ON CONFLICT(date) DO UPDATE SET
-  leverage_pct     = excluded.leverage_pct,
-  liabilities_musd = excluded.liabilities_musd,
-  net_worth_musd   = excluded.net_worth_musd,
-  recorded_at      = excluded.recorded_at
-"""
 
 
 def upsert_hhlev_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
@@ -1169,20 +1133,9 @@ _TRIN_SAMPLE_ON_CONFLICT = (
     "up_vol = excluded.up_vol, down_vol = excluded.down_vol, "
     "source = excluded.source, recorded_at = excluded.recorded_at"
 )
-TRIN_SAMPLE_UPSERT_SQL = (
-    f"INSERT INTO trin_samples {_TRIN_SAMPLE_COLUMNS} "
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
-    f"{_TRIN_SAMPLE_ON_CONFLICT}"
-)
-
 _TRIN_DAILY_ON_CONFLICT = (
     "ON CONFLICT(date) DO UPDATE SET close = excluded.close, recorded_at = excluded.recorded_at"
 )
-TRIN_DAILY_UPSERT_SQL = (
-    f"INSERT INTO trin_daily (date, close, recorded_at) VALUES (?, ?, ?) {_TRIN_DAILY_ON_CONFLICT}"
-)
-
-
 def _trin_sample_params(row: dict[str, Any], stamp: str) -> tuple:
     def _optional_float(value: Any) -> Optional[float]:
         return None if value is None else float(value)
