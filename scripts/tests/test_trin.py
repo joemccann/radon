@@ -178,6 +178,29 @@ class TestBuildOutput:
         assert current["ma10"] == pytest.approx(0.60)
         assert current["state"] == "in_zone"
 
+    # TEST_AUDIT T-131: the R-099 guard lived only in classify_state's
+    # `source` argument, and build_output never passed one — so a delayed
+    # (type 3/4) IB print rendered a live IN ZONE badge off a 15-minute-old
+    # MA(10) with heartbeat ok. The only test of the guard called the
+    # classifier by hand.
+    def test_delayed_prints_do_not_promote_the_badge_to_in_zone(self, daily):
+        samples = []
+        for hour, trin in enumerate([0.60] * 10):
+            base = SESSION_OPEN_UTC - timedelta(days=1) if hour < 7 else SESSION_OPEN_UTC
+            ts = (base + timedelta(minutes=(hour % 7) * 60 + 10)).isoformat().replace("+00:00", "Z")
+            samples.append({"ts": ts, "session_date": session_date(ts), "trin": trin, "source": "ib-delayed"})
+        current = build_output(samples, daily)["current"]
+        assert current["ma10"] == pytest.approx(0.60)
+        assert current["state"] != "in_zone"
+
+    def test_live_prints_still_reach_in_zone(self, daily):
+        samples = []
+        for hour, trin in enumerate([0.60] * 10):
+            base = SESSION_OPEN_UTC - timedelta(days=1) if hour < 7 else SESSION_OPEN_UTC
+            ts = (base + timedelta(minutes=(hour % 7) * 60 + 10)).isoformat().replace("+00:00", "Z")
+            samples.append({"ts": ts, "session_date": session_date(ts), "trin": trin, "source": "ib"})
+        assert build_output(samples, daily)["current"]["state"] == "in_zone"
+
     def test_no_samples_yet_still_carries_daily(self, daily):
         payload = build_output([], daily)
         assert payload["hourly"] == []

@@ -246,7 +246,10 @@ def _current(samples: list[Sample], hourly: list[dict[str, Any]], daily: list[Da
         "session_date": latest.get("session_date"),
         "trin": latest.get("trin"),
         "ma10": ma10,
-        "state": classify_state(ma10),
+        # R-099 / T-131: the source gate is only real if the writer passes
+        # the print's provenance; a delayed or cached latest sample may not
+        # promote the badge to in_zone.
+        "state": classify_state(ma10, latest.get("source")),
         "adv": latest.get("adv"),
         "dec": latest.get("dec"),
         "up_vol": latest.get("up_vol"),
