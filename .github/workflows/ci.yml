@@ -158,7 +158,11 @@ jobs:
       matrix:
         # Isolate test_i* and scripts/api/tests; those two buckets dominated
         # wall-clock under the previous a-c / d-g / h-i / rest split.
-        shard: [scripts-ac, scripts-df, scripts-i, scripts-ghjm, scripts-npsz, scripts-rs, rest-api, rest]
+        # scripts-daemons: the test_*.py globs match FILES only, so the
+        # monitor_daemon/ and watchdog/ subdirectories need their own shard
+        # (TEST_AUDIT T-122 — 752 tests left CI unnoticed without it).
+        # test_ci_deploy_concurrency.py asserts shard-union == recursive.
+        shard: [scripts-ac, scripts-df, scripts-i, scripts-ghjm, scripts-npsz, scripts-rs, scripts-daemons, rest-api, rest]
         include:
           - shard: scripts-ac
             paths: "scripts/tests/test_[a-c]*.py"
@@ -172,6 +176,8 @@ jobs:
             paths: "scripts/tests/test_[n-p]*.py scripts/tests/test_[t-z]*.py"
           - shard: scripts-rs
             paths: "scripts/tests/test_[r-s]*.py"
+          - shard: scripts-daemons
+            paths: "scripts/tests/test_monitor_daemon scripts/tests/test_watchdog"
           - shard: rest-api
             paths: scripts/api/tests
           - shard: rest

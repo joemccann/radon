@@ -93,3 +93,11 @@ Darwin cloud baseline on THIS host is 34, not the first pass's 12: no bash >= 4
 
 Added-file determinism 3×: 44 python `483 passed` ×3, 29 vitest `238 passed` ×3, 7 cloud `92 passed` ×3.
 CI at the same SHA is green but its sharded pytest (`424e66da`) collects 407 of 463 files — `test_monitor_daemon/` and `test_watchdog/` (752 tests) gate nothing (T-122, P0); the ratchet also quietly moved from statement+branch to statement-only (T-123). 34 findings filed (T-122…T-155); see `TEST_AUDIT.md` `## Delta audit 2026-08-25`.
+
+## Remediation 2026-08-25 (Tuesday, remediate mode)
+
+Runner venv lacked `pytest-xdist` (CI-only install, same class as T-119); installed `pytest-xdist==3.8.0` / `pytest-cov==7.1.0` from `requirements-dev.txt` before any shard verification. Environment fixed, repo untouched.
+
+| Task | Status | Commits | Evidence |
+|---|---|---|---|
+| T-122 | DONE | see commit | `test_pytest_shard_union_equals_recursive_collection` expands every `matrix.include[*].paths` glob (dirs recursively) and asserts set-equality with the `test_*.py` modules under the four collection roots. Red: `56 test modules are collected by NO pytest shard` (all of `test_monitor_daemon/`, `test_watchdog/`). Green: ninth shard `scripts-daemons` (`paths: "scripts/tests/test_monitor_daemon scripts/tests/test_watchdog"`); pinned shard list updated. New shard under the CI flags (`-n auto --dist loadfile`): `752 passed in 8.47s`. `test_ci_deploy_concurrency.py` 18 passed. Coverage re-measure recorded under T-123. |
