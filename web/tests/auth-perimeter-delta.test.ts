@@ -17,25 +17,10 @@ const read = (rel: string) => readFileSync(join(REPO, rel), "utf-8");
 // ---------------------------------------------------------------------------
 // R-179 — /api/ib/ws-ticket must not mint from an anonymous caller
 // ---------------------------------------------------------------------------
+// Behaviour (401 / minted token / rate ceiling) lives in
+// auth-perimeter-behaviour.test.ts (T-128); only the matrix classification
+// stays here.
 describe("R-179: ws-ticket requires a caller identity", () => {
-  it("has a route-local guard", () => {
-    const src = read("web/app/api/ib/ws-ticket/route.ts");
-    expect(src).toContain("requireRouteAccess");
-  });
-
-  it("does not forward an undefined token to the upstream mint", () => {
-    const src = read("web/app/api/ib/ws-ticket/route.ts");
-    // `token: undefined` makes radonFetch omit the header, and FastAPI then
-    // treats the call as loopback-trusted — the Next.js server IS loopback.
-    expect(src).not.toMatch(/^\s*token,\s*$/m);
-    expect(src).not.toContain("? authHeader.slice");
-  });
-
-  it("mints from the authenticated principal's own token", () => {
-    const src = read("web/app/api/ib/ws-ticket/route.ts");
-    expect(src).toMatch(/access\.principal|principal\.token/);
-  });
-
   it("is no longer classified as middleware-perimeter-only", () => {
     const src = read("web/tests/route-local-authz-matrix.test.ts");
     const bucket = src
@@ -48,22 +33,8 @@ describe("R-179: ws-ticket requires a caller identity", () => {
 // ---------------------------------------------------------------------------
 // R-180 — a subprocess-spawning POST is not read-only market data
 // ---------------------------------------------------------------------------
+// Behaviour lives in auth-perimeter-behaviour.test.ts (T-128).
 describe("R-180: the garch scan POST carries its own guard", () => {
-  it("guards before it does anything else", () => {
-    const src = read("web/app/api/garch-convergence/scan/route.ts");
-    expect(src).toContain("requireRouteAccess");
-    const body = src.split("export async function POST(")[1];
-    const guardAt = body.indexOf("requireRouteAccess");
-    const workAt = body.indexOf("radonFetch");
-    expect(guardAt).toBeGreaterThanOrEqual(0);
-    expect(guardAt).toBeLessThan(workAt);
-  });
-
-  it("rate-limits like its leap/scan sibling", () => {
-    const src = read("web/app/api/garch-convergence/scan/route.ts");
-    expect(src).toMatch(/rate:\s*\{/);
-  });
-
   it("leaves the read-only bucket", () => {
     const src = read("web/tests/route-local-authz-matrix.test.ts");
     const bucket = src
@@ -147,29 +118,5 @@ describe("R-182: demoBlockadeRoute is not undone two lines later", () => {
       } as never,
     );
     expect(access.ok).toBe(false);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// R-186 — the probe bearer is one shared static token
-// ---------------------------------------------------------------------------
-describe("R-186: the probe path is rate-limited and narrowed", () => {
-  it("rate-limits the bearer path", () => {
-    const src = read("web/app/api/service-health/route.ts");
-    const body = src.split("export async function GET(")[1];
-    expect(body).toMatch(/probeRate|rateLimit|checkRate/i);
-  });
-
-  it("serves the probe a reduced payload, not every last_error", () => {
-    const src = read("web/app/api/service-health/route.ts");
-    expect(src).toMatch(/probeAuthorized/);
-    // The probe needs states and freshness, not writer-supplied diagnostics.
-    expect(src).toMatch(/probeView|probePayload|forProbe/);
-  });
-
-  it("an operator session still sees the full diagnostic payload", () => {
-    const src = read("web/app/api/service-health/route.ts");
-    expect(src).toContain("last_error");
-    expect(src).toContain("error_summary");
   });
 });

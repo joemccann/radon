@@ -209,6 +209,7 @@ def test_pytest_shards_then_combines_coverage_ratchet() -> None:
         "scripts-ghjm",
         "scripts-npsz",
         "scripts-rs",
+        "scripts-daemons",
         "rest-api",
         "rest",
     ]
@@ -336,3 +337,63 @@ def test_ci_uses_frozen_bun_lockfile_contract_for_both_workspaces() -> None:
         assert commands.count("bun install --frozen-lockfile") == 2
         assert "&" in commands
         assert "wait" in commands
+
+
+# TEST_AUDIT T-122: the sharded matrix must reach every test module the
+# pre-shard recursive invocation collected. A `test_[a-c]*.py` glob cannot
+# match a directory, so scripts/tests/test_monitor_daemon/ and
+# scripts/tests/test_watchdog/ (752 tests over fills, exit orders, journal
+# sync and the whole watchdog) silently left CI on 424e66da while the
+# workflow stayed green. Set-equality, not shard names.
+PY_COLLECTION_ROOTS = ("scripts/tests", "scripts/api/tests", "scripts/trade_blotter", "tests")
+
+
+def _test_modules_under(root: Path, base: Path) -> set[str]:
+    return {str(f.relative_to(root)) for f in base.rglob("test_*.py")}
+
+
+def _expand_shard_paths(root: Path, paths: str) -> set[str]:
+    out: set[str] = set()
+    for token in paths.split():
+        target = root / token
+        if target.is_dir():
+            out |= _test_modules_under(root, target)
+        else:
+            out |= {str(f.relative_to(root)) for f in root.glob(token) if f.is_file()}
+    return out
+
+
+def test_pytest_shard_union_equals_recursive_collection() -> None:
+    root = WORKFLOW.parents[2]
+    py_tests = _workflow()["jobs"]["py-tests"]
+    sharded: set[str] = set()
+    for item in py_tests["strategy"]["matrix"]["include"]:
+        sharded |= _expand_shard_paths(root, str(item["paths"]))
+    on_disk: set[str] = set()
+    for base in PY_COLLECTION_ROOTS:
+        on_disk |= _test_modules_under(root, root / base)
+    assert on_disk, "collection roots moved; update PY_COLLECTION_ROOTS"
+    missing = sorted(on_disk - sharded)
+    assert not missing, (
+        f"{len(missing)} test modules are collected by NO pytest shard "
+        f"(CI reads green without running them): {missing[:6]}"
+    )
+    stray = sorted(sharded - on_disk)
+    assert not stray, f"shard globs reach outside the collection roots: {stray[:6]}"
+
+
+def test_pytest_coverage_ratchet_measures_branches() -> None:
+    """TEST_AUDIT T-123: the 56 ratchet was rebased (T-050) on combined
+    statement+branch coverage. The shard rewrite dropped ``--cov-branch`` and
+    nothing re-enabled branch measurement, so the combined report scored
+    statement-only (~2pt easier) under the same threshold. Branch must be on
+    either via the invocation or ``[tool.coverage.run] branch = true``."""
+    import tomllib
+
+    pyproject = tomllib.loads((WORKFLOW.parents[2] / "pyproject.toml").read_text(encoding="utf-8"))
+    run_cfg = pyproject.get("tool", {}).get("coverage", {}).get("run", {})
+    commands = _job_commands(_workflow()["jobs"]["py-tests"])
+    assert run_cfg.get("branch") is True or "--cov-branch" in commands, (
+        "pytest coverage ratchet is scoring statement-only; the 56 threshold "
+        "was set against statement+branch (T-050)"
+    )

@@ -27,6 +27,7 @@ from .journal_basis import (
     _payload_from_row,
     _row_value,
     _signed_qty,
+    contract_fill_fingerprint,
 )
 
 logger = logging.getLogger(__name__)
@@ -162,6 +163,12 @@ def _journal_entry(row: Any) -> Optional[dict[str, Any]]:
         price = float(payload.get("fill_price"))
     except (TypeError, ValueError):
         return None
+    action = str(payload.get("action") or "").strip().upper()
+    # A rehydrated CLOSED row is a round trip, not a directional fill:
+    # `_signed_qty` maps it to -qty, which the replay would read as an
+    # opening SHORT and then attribute realized P&L to the next BUY (T-124).
+    if action == "CLOSED":
+        return None
     signed_qty = _signed_qty(payload.get("action"), qty)
     if signed_qty == 0:
         return None
@@ -178,7 +185,8 @@ def _journal_entry(row: Any) -> Optional[dict[str, Any]]:
         "parts": _exec_id_parts(payload),
         "qty": qty,
         "is_buy": signed_qty > 0,
-        "is_close": str(payload.get("action") or "").strip().upper() in CLOSING_ACTIONS,
+        "is_close": action in CLOSING_ACTIONS,
+        "fingerprint": contract_fill_fingerprint(payload),
         "notional": qty * price * multiplier,
         "commission": commission,
     }
@@ -191,9 +199,12 @@ def _replay_contract(
     realized: dict[str, float] = {}
     position_qty = 0.0
     avg_basis_per_unit = 0.0
+    seen_fingerprints: dict[tuple, set[str]] = {}
 
     for entry in entries:
         if not _claim_exec_parts(counted_parts, entry["parts"], key):
+            continue
+        if _already_journaled_under_other_namespace(seen_fingerprints, entry, key):
             continue
         qty = entry["qty"]
         is_buy = entry["is_buy"]
@@ -232,3 +243,32 @@ def _replay_contract(
             realized[entry["parts"][0]] = round(pnl, 4)
 
     return realized
+
+
+def _id_namespaces(parts: list[str]) -> set[str]:
+    """Flex rehydrate keys rows on the numeric Flex ``tradeID``; the real-time
+    daemon and ``executed_orders`` key on the dotted IB API execId."""
+    return {"flex" if part.isdigit() else "api" for part in parts}
+
+
+def _already_journaled_under_other_namespace(
+    seen: dict[tuple, set[str]], entry: dict[str, Any], key: str
+) -> bool:
+    """True when this fill (contract, session date, signed qty) was already
+    replayed from a row keyed in the OTHER id namespace — the same close
+    written by both writers (T-124). Two equal same-day partials from ONE
+    writer share a namespace and both count, as in the backfill."""
+    fingerprint = entry.get("fingerprint")
+    namespaces = _id_namespaces(entry["parts"])
+    if fingerprint is None or not namespaces:
+        return False
+    prior = seen.setdefault(fingerprint, set())
+    if prior and prior.isdisjoint(namespaces):
+        logger.info(
+            "journal_realized: %s skipped %s — same fill already journaled under %s",
+            key, "+".join(entry["parts"]), "/".join(sorted(prior)),
+        )
+        return True
+    prior |= namespaces
+    return False
+

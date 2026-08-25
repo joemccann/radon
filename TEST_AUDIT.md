@@ -2447,6 +2447,754 @@ renumbered from T-097. The first pass's audit text, ledger line and
   boundary, and env clamping at the $50M ceiling. Red 3/4 before the change;
   `test_order_limits.py` 33 green, `scripts/tests` 6229 green after.
 
+## Delta audit 2026-08-25
+
+Range `4985a7f8..27665c43` — 68 commits, 513 files, +36639/-2008. 187 test
+files changed (90 added: 44 `scripts/tests|scripts/api/tests|tests` python,
+7 `cloud/tests`, 29 `web/tests|site|lib`, 5 `web/e2e`; 97 modified). The
+range contains the merged 2026-08-22 weekend PRs (#75 testing, #78/#85
+reliability), the CI sharding rewrite (`424e66da`, #88), four new regime
+indicators (DIVYIELD, HYAD, HHLEV, TRIN), and the orders realized-P&L
+basis change (`c09fc347`/`7cfcdfd9`). PR #82 (`testing/weekend-2026-08-23`,
+T-081…T-121 remediation, files **T-121**) is still OPEN and NOT in this
+range; it was re-triaged from its branch only for numbering, which
+continues at **T-122**. PART A (§1–§10) and the prior delta sections are
+untouched. Six read-only agents fanned out over the rubric dimensions;
+every finding below was spot-verified by the lead against the cited lines.
+
+### Standing sweeps
+
+**Gates from the repo root, serial (clean tree, HEAD `27665c43`, darwin
+runner `Joes-Mac-Mini`, bash 3.2.57, homebrew `sha256sum` present):**
+
+| Gate | Round 1 |
+|---|---|
+| `python3.13 -m pytest` (recursive, = pre-shard CI) | 7816 passed, 1 skipped, 90 deselected (274.4s) |
+| `npx vitest run` (root config) | 701 files / 7328 passed, 0 failed |
+| `python3.13 -m pytest cloud/tests -q` | **34 failed**, 1025 passed, 4 skipped (185.7s) |
+
+- The 34 cloud reds are the T-118 darwin baseline: `git worktree add
+  /tmp/tw0825/base 4985a7f8` + the same invocation → `34 failed, 888
+  passed, 4 skipped`, sorted `FAILED` lists **byte-identical** (`diff`
+  empty). Delta: +137 cloud passed, 0 new reds. 13 in
+  `test_bootstrap_control_plane.py`, 21 in `test_ib_gateway_control.py`.
+- CI at the same SHA (run 32808681820) is green — but see **T-122**: CI's
+  pytest is no longer the recursive invocation this table records.
+
+**Determinism, scoped to the delta's ADDED test files (3× each, serial,
+after the gates):** 44 python files `483 passed` ×3 (45.3/45.1/45.0s); 29
+vitest files `238 passed` ×3; 7 cloud files `92 passed` ×3. The 97
+modified test files were covered by the single full-gate round only; the
+scoped ×3 over 187 files would have been three more full runs, and the
+skill's own lesson says to say so rather than pretend.
+
+**Gate reach — RED.** The sharded pytest matrix (`ci.yml:161-178`)
+expands `scripts/tests/test_[a-c]*.py`-style globs that match FILES only:
+`scripts/tests/test_monitor_daemon/` (33 files) and
+`scripts/tests/test_watchdog/` (23 files) are collected by no job.
+`--collect-only` full: 463 files; union of the eight shard path sets: 407;
+difference = exactly those 56 files, **752 tests**. CI evidence: shard sum
+7064 passed vs `7788 passed` on the last pre-shard run (job 97594311235,
+`7cfcdfd9`); combined coverage `TOTAL 53304 19630 63%` vs `65.80%`
+pre-shard, ratchet 56 still green. Filed as **T-122 (P0)**. Vitest
+sharding is complete: 8 shards = 698 files / 7293 tests (88+88+87×6),
+matching the pre-shard 695/7281 plus this delta's 3 new files.
+
+**Coverage-ratchet honesty — two moves, neither reported.** (1)
+`--cov-branch` was dropped from the pytest invocation (`ci.yml` diff
+`-… --cov=scripts --cov=api --cov-branch --cov-report=term-missing
+--cov-fail-under=56` → `+… --cov=scripts --cov=api --cov-fail-under=0`)
+and `pyproject.toml` gained only `relative_files = true`; the 56 ratchet
+now scores statement-only (`Stmts Miss Cover` header, no `Branch`
+column), the metric it was rebased on under T-050 was statement+branch —
+**T-123**. (2) `vitest.config.ts:60-63` thresholds unchanged at 75/71/65
+and the new `scripts/ci/merge_vitest_coverage.py` reproduces the pre-shard
+`All files` line to within 0.05pt, but its denominator is whatever the
+shards emitted and `web/lib/**/*.tsx` is outside every `include` glob —
+**T-135**. No blanket exclude added; the `--exclude` trio is unchanged.
+
+**New skips — none.** 36,639 added lines parsed (python3.13 over the
+patch) for `test|it|describe.(skip|only|todo|fixme)`,
+`pytest.mark.skip|skipif|xfail`, `pytest.skip(`: zero hits; every `xit(`
+match is `exit(`. No `.only(`.
+
+**CI workflow delta — 256 lines.** Sharding (above); `deploy.needs`
+gained `web-coverage`, `py-coverage`, `cloud-tests` (`ci.yml:494`);
+`cloud-tests` invocation unchanged; `-m 'not integration'` still applied
+via `addopts` (local collect on the `scripts-ghjm` globs = CI's `[1115
+items]`); `DOCS_CONTRACT_BASE` + `fetch-depth: 0` only on `scripts-df`,
+which is the shard that holds the only history-dependent test
+(`test_docs_contract.py`). The Playwright job is still `(non-gating)`,
+its curated list (`ci.yml:468-483`) and `web/playwright.config.ts` are
+byte-unchanged while the delta added five specs (T-090/T-116 evidence,
+not refiled). The new "Demo isolation guard" step is a permanent no-op —
+**T-130**.
+
+**Runner toolchain:** `python3.13 -c "import pytest_asyncio"` ok, node
+v24.14.0, `node_modules/.bin/vitest` present, tree clean, no stash. The
+T-119 toolchain pins landed in this delta (`requirements-dev.txt`:
+pytest 9.0.2 / pytest-cov 7.1.0 / xdist 3.8.0).
+
+### Re-triage of the standing NEW_FINDINGS items
+
+- **E2E testid backlog — STILL OPEN, still zero movement on the money
+  surfaces.** Base-vs-HEAD `data-testid` counts: `MetricCards` 4 → 4,
+  `SharePnlButton` 0 → 0, `SingleLegOrderTicket` 1 → 1, `Toast` 0 → 0,
+  `ModifyOrderModal` 0 → 0, `CancelOrderDialog` 0 → 0. The five new
+  regime/book specs key on CSS classes again — **T-139** (delta to T-091).
+- **`next dev` in the CI Playwright container — STILL OPEN (infra).**
+  `web/playwright.config.ts` zero-line diff; CI still overrides with
+  `PLAYWRIGHT_WEBSERVER_CMD`.
+- **`pytest cloud/tests` red on macOS — STILL OPEN (T-088/T-118).** 34 on
+  this host, byte-identical to the base SHA. One NEW hard dependency on a
+  GNU `sha256sum` binary landed in the delta — **T-141**.
+- **Unreproduced 10-failure vitest round (2026-08-17) — NOT reproduced.**
+  One full round `7328 passed`, plus 3× of the 29 added files under
+  agent load; still no named tests.
+- **Day Move `next start` vs `next dev` / T-117 — MOVED, and the T-117
+  remedy is now wrong.** `web/lib/ibDailyPnlSession.ts:32-40` compares
+  the snapshot's `last_sync` date with the clock; pinning `page.clock`
+  to a Wednesday with the specs' `new Date()` fixtures renders MARKET
+  CLOSED — **T-154**.
+- **`e2e/performance-twr-payload.spec.ts` — RESOLVED (T-079), still
+  uncurated.** Unchanged this delta.
+
+### Convergences (two agents, same file:line, filed once)
+
+| Finding | Agents | What both landed on |
+|---|---|---|
+| T-122 | lead, blast-radius | shard globs cannot match `test_monitor_daemon/`, `test_watchdog/` |
+| T-125 | money-path, net-negative | `ModifyOrderModal.tsx:397-401` exclude arg has no modal-level test |
+| T-126 | money-path, net-negative | `evening_execution_sweep.py:286` overlay call deletable green |
+| T-130 | gate-drift, net-negative | `check_demo_isolation` step satisfied by a comment; never executes |
+| T-136 | gate-drift, fragility | `_free_port` bind-0/close/rebind under `-n auto` |
+
+### P0 — money-losing gaps
+
+- **T-122 [P0] CI's sharded pytest no longer collects
+  `scripts/tests/test_monitor_daemon/` or `scripts/tests/test_watchdog/`:
+  752 tests over the fill monitor, exit orders, journal sync, cash-flow
+  sync, throttle ladder and the entire watchdog gate nothing, and CI reads
+  green.** `.github/workflows/ci.yml:161-178` (`paths:
+  "scripts/tests/test_[a-c]*.py"` … `"scripts/tests/test_[r-s]*.py"`,
+  `scripts/api/tests`, `scripts/trade_blotter tests`), executed at
+  `:219` as `python -m pytest ${{ matrix.paths }}`. A glob ending in `.py`
+  cannot match a directory and no shard names either subdir. Pre-shard the
+  invocation was recursive (`git show 4985a7f8:.github/workflows/ci.yml`
+  `:157`). Measured: `--collect-only` recursive 463 files vs shard-union
+  407; `pytest --collect-only scripts/tests/test_monitor_daemon
+  scripts/tests/test_watchdog` → `752 tests collected`. CI: shard sum 7064
+  passed (jobs 97683726376…97683726687) vs `7788 passed` at `7cfcdfd9`
+  (job 97594311235); coverage 65.80% → 63%, ratchet 56 untouched, deploy
+  ran. Every test T-055…T-121 wrote under those two dirs (T-063 evening
+  sweep, T-094/T-110 disk, T-111 suppression bounds, T-103 in-flight
+  suppression, the exit-orders OCA test added in this delta) is now
+  decorative. The delta's own guard,
+  `scripts/tests/test_ci_deploy_concurrency.py:181-200`, asserts the shard
+  NAMES and `"test_[a-c]" in include`, never the union.
+  **AC:** RED — a test that expands every `matrix.include[*].paths` glob
+  against the tree and asserts set-equality with `pytest --collect-only -q`
+  over `scripts/tests` (fails today by 56 files). GREEN — a ninth shard
+  (`paths: "scripts/tests/test_monitor_daemon scripts/tests/test_watchdog"`)
+  or `.py`-less globs; keep the union test. Re-measure the combined
+  coverage and record it (it will rise back toward 65.8); the threshold
+  stays 56 per T-050.
+
+### P1 — correctness gaps
+
+- **T-123 [P1] The pytest coverage ratchet silently changed metric from
+  statement+branch to statement-only.** `ci.yml` removed
+  `--cov-branch --cov-report=term-missing` with the shard rewrite
+  (`git diff 4985a7f8..HEAD -- .github/workflows/ci.yml` lines
+  `-          --cov=scripts --cov=api --cov-branch --cov-report=term-missing`
+  / `+          --cov=scripts --cov=api`); `pyproject.toml:12-20` has no
+  `branch = true`; `ci.yml:269` applies `--fail-under=56` to the combined
+  file. Pre-shard job 97594311235 printed `Name Stmts Miss Branch BrPart
+  Cover` / `TOTAL 53152 17089 16094 2207 66%`; post-shard job 97683987384
+  prints `Name Stmts Miss Cover` / `TOTAL 53304 19630 63%`. Statement-only
+  ran ~2pt above combined pre-shard (67.85% vs 65.80%), so the comparable
+  combined figure today is ~61%, unmeasured; the deleted T-050 comment in
+  `ci.yml` stated the rebase was on "combined statement+branch". Neither
+  `TEST_AUDIT.md` nor `TEST_LOG.md` mentions the shard change (grep
+  `shard|424e66da`: 0). A dropped `else`/guard on exit-orders or
+  order-limits no longer moves the number at all. **AC:** RED — `coverage
+  report` on the combined data prints no `Branch` column. GREEN — `branch =
+  true` under `[tool.coverage.run]` (or restore `--cov-branch` at
+  `ci.yml:221`), re-measure with T-122 fixed, log the figure in
+  `TEST_LOG.md`; if it lands under 56, report per T-050, never lower.
+- **T-124 [P1] `journal_realized` replay treats a `CLOSED` row as an
+  opening short and can stamp a journal realized P&L onto an OPENING fill;
+  a close journaled under two id namespaces silently falls back to IB's
+  drifted figure.** `scripts/clients/journal_realized.py:35`
+  (`CLOSING_ACTIONS = {"SELL_OPTION", "BUY_TO_CLOSE"}` — no `CLOSED`),
+  `:155-184` (`_journal_entry` accepts `CLOSED` because
+  `journal_basis._signed_qty` at `journal_basis.py:93` maps it to −qty),
+  `:195-232` (replay dedupes only by `_claim_exec_parts`), `:112-121`
+  (`apply_journal_realized_pnl` keys on `execId` alone, never the side).
+  `journal_basis.py:108-133` already documents both hazards
+  (`contract_fill_fingerprint` exists for the API-execId/Flex-tradeID
+  namespace split and explicitly skips `CLOSED` at `:133`); the new module
+  uses neither. `scripts/journal_rehydrate.py:229,431-445` emits `CLOSED`
+  rows with `fill_price`/`contracts`/composite `ib_exec_id` from Flex.
+  Reproduced in-process: rows `[CLOSED a+b 10@2.00, BUY_OPTION o1
+  10@1.00]` → `{'o1': 998.0}`; rows `[BUY o1 10@1, SELL e2 10@3, SELL 777
+  10@3]` → `{}`. The delta's test `scripts/tests/test_journal_realized.py`
+  covers only same-namespace composites (`:121-128`) and never a `CLOSED`
+  row. Consequence: `WorkspaceSections.tsx:168` (`isClosing =
+  e.realizedPNL != null`) shows the re-entry OPEN as a +$998 close and
+  `web/lib/realized-pnl.ts:55` adds it to day-realized; the dual-namespace
+  case keeps `realizedPNLSource: "ib"` on exactly the fills `c09fc347`
+  shipped to correct. **AC:** RED — (a) the `CLOSED`+`BUY` case must yield
+  no `o1` key and `apply_journal_realized_pnl` must leave a `BOT`-side
+  fill untouched; (b) the dual-namespace case must yield `{"e2": 2000.0}`.
+  GREEN — skip `CLOSED` like `journal_basis.py:133`, dedupe by
+  `contract_fill_fingerprint` before replay, gate `apply_` on the closing
+  side.
+- **T-125 [P1] `bc08e87b` (modify modal counted its own order against
+  held combo units) is guarded only at the pure helper; the one-line
+  wiring that was actually broken can be reverted green.**
+  `web/components/ModifyOrderModal.tsx:397-401` passes `{ permId, orderId
+  }` as the exclude arg; `web/tests/combo-close-out-working-orders.test.ts:138-148`
+  calls `workingSellComboUnits(...)` directly with its own `exclude`.
+  `web/tests/modify-order-close-pnl.test.tsx` renders the modal seven
+  times (`:108,123,138,351,380,401,422`) with zero `openOrders`, so
+  `ModifyOrderModal.tsx:304` defaults it to `null` and
+  `workingSellComboUnits` is always 0 — dropping the third argument at
+  `:400` keeps every test green. Failure: modify a working SELL 250×
+  combo against 250 held → `workingSellUnits=250` consumes the position →
+  opening credit-spread branch → Max Gain / Max Loss instead of Est.
+  Realized P&L, broker what-if on a "new" spread. **AC:** RED — render
+  `ModifyOrderModal` with `order.permId=9001` and
+  `openOrders.open_orders=[that same 250-unit order]`, portfolio holding
+  250; expect `Est. Realized P&L` present and `Max Loss` absent; fails
+  with the exclude arg removed or keyed on the wrong id. GREEN — current
+  code.
+- **T-126 [P1] The evening-sweep half of `7cfcdfd9` (persist journal
+  realized P&L at write time) is unwired-green: the overlay call is
+  deletable and its `try/except` swallows the import.**
+  `scripts/monitor_daemon/handlers/evening_execution_sweep.py:110-118`
+  (`except Exception: logger.warning("… overlay skipped")`), `:286` (the
+  call). `scripts/tests/test_monitor_daemon/test_evening_execution_sweep.py`
+  has no `overlay|get_db|journal_realized` reference; `:246-247` mocks
+  `upsert_executed_order` without asserting payload P&L. Contrast the
+  `ib_orders` leg, which has a real test
+  (`scripts/tests/test_ib_orders_dual_write.py:271-291`). After-hours
+  fills are mirrored ONLY by the sweep (`ib_client.py:999-1002` `fills()`
+  is session-scoped), so an outsideRth close keeps IB's drifted
+  `realizedPNL` in `executed_orders` permanently. And per T-122, this
+  file is not run by CI at all today. **AC:** RED — sweep test with
+  journal rows for the contract and `db.client.get_db` stubbed (the
+  `_FakeDb` in `test_journal_realized.py:199-209`), asserting the mirrored
+  payload carries `realizedPNL == journal value` and `realizedPNLSource ==
+  "journal"`; second case `get_db` raising → IB figure kept AND a warning
+  logged. Must catch removing `:286`.
+- **T-127 [P1] `run_module` spawns without `start_new_session=True`; the
+  R-136 "children are signalled as a group" test is a substring check
+  that two of three sites satisfy, and on the third the cancel helper
+  `killpg`s the API's own process group.** `scripts/api/subprocess.py:284-289`
+  and `:366-371` carry `start_new_session=True`; `:420-425` (`run_module`)
+  does not; `:236-238` `_terminate_child` does `os.killpg(os.getpgid(pid),
+  signal.SIGKILL)`. `scripts/tests/test_silent_degradation_bounds.py:173-178`
+  asserts `"start_new_session=True" in src`; its `_Proc` fakes
+  (`:125-140`) define no `pid`, so the `killpg` branch executes in no
+  test. `scripts/api/server.py:4104` calls
+  `run_module("trade_blotter.flex_query", ["--json"], timeout=120)`;
+  uvicorn is the unit's main process (`cloud/services/radon-api.service:44`).
+  A `/blotter` Flex fetch over 120s (routine under a 1018/1025 throttle)
+  → `asyncio.TimeoutError` → `_terminate_child` → `getpgid(child)` is
+  uvicorn's group → SIGKILL lands on radon-api. **AC:** RED — parametrize
+  over `run_script`, `run_script_raw`, `run_module` with a real `sleep 30`
+  child; assert `os.getpgid(proc.pid) != os.getpgid(os.getpid())` before
+  termination and that the test process survives `_terminate_child`;
+  `run_module` fails today. GREEN — `start_new_session=True` at `:420`,
+  and `_terminate_child` refuses `killpg` when the child shares the
+  caller's group.
+- **T-128 [P1] The R-179/R-180/R-186 auth-perimeter fixes on the
+  WS-ticket, GARCH-scan and service-health routes are pinned by regexes
+  over route SOURCE; no behavioural test exercises the guard, the rate
+  limit, or the reduced probe payload.**
+  `web/tests/auth-perimeter-delta.test.ts:21-37`
+  (`toContain("requireRouteAccess")`, `not.toMatch(/^\s*token,\s*$/m)`,
+  `toMatch(/access\.principal|principal\.token/)`), `:52-65` (`guardAt <
+  workAt` via `indexOf`, `toMatch(/rate:\s*\{/)`), `:157-174`
+  (`toMatch(/probeRate|rateLimit|checkRate/i)`,
+  `toMatch(/probeView|probePayload|forProbe/)`). Behavioural siblings never
+  cover the case: `web/tests/ws-ticket-local.test.ts:19,37,56`,
+  `web/tests/leap-garch-scan-route.test.ts:32-152` (no 401/429),
+  `web/tests/service-health-probe-bearer.test.ts:48-77` (auth only).
+  Sources `web/app/api/ib/ws-ticket/route.ts:20-28`,
+  `web/app/api/garch-convergence/scan/route.ts:24-25,56`,
+  `web/app/api/service-health/route.ts:118-131,202-203`. Mutations that
+  stay green: delete the `requireRouteAccess` CALL and keep the import;
+  `token: undefined,` (not matched by the shorthand regex); a comment
+  naming `rateLimit`; dropping `rows.map(forProbe)` at `:202` while
+  `forProbe` at `:118` remains. **AC:** RED — import each handler with
+  `routeAccess` mocked denied → 401 and `radonFetch` not called; allowed →
+  upstream receives `token: <principal token>`; service-health: 31st probe
+  in a minute → 429, probe body has no `last_error` while an operator body
+  does. GREEN — current code; delete the regex file.
+- **T-129 [P1] `test_a_degraded_payload_records_error` monkeypatches
+  `_record_perf_twr_health` and then asserts on the lambda it installed;
+  the real writer, which swallows every exception, never runs.**
+  `scripts/tests/test_watchdog_catalog_and_journal_bound.py:129-140`
+  (`monkeypatch.setattr(builder, "_record_perf_twr_health", lambda …)`,
+  then `builder._record_perf_twr_health("degraded", …)`, `assert
+  recorded[0][0] == "degraded"`); `:122-127` is `"record_service_health"
+  in builder or "service_cycle" in builder`. Source
+  `scripts/perf_twr_builder.py:1662-1671` (`except Exception: print(…
+  non-fatal)`), `:1697-1710`. R-159 was "perf-twr writes no row on a Flex
+  1025": replace the wrapper body with `pass` or break the `db.writer`
+  import — both tests green, no row written, `check.py` reads "no row" as
+  dormant. **AC:** RED — patch `db.writer.record_service_health`, call the
+  real `_record_perf_twr_health("degraded", error=…)`, assert one call
+  `("perf-twr", "error", …)`; then `main()` with `build_and_persist`
+  stubbed to `{"status": "degraded"}` asserting the row. Must catch
+  `_perf_twr_state("degraded")` → `"ok"`.
+- **T-130 [P1] The "Demo isolation guard" CI step is a permanent no-op —
+  the secrets it reads do not exist — and the test that says it is
+  "wired" is satisfied by a comment.** `.github/workflows/ci.yml:278-288`
+  exits 0 when both `TURSO_DEMO_DB_URL` and `TURSO_DB_URL` are empty; job
+  97683987384 prints `no demo env configured on this runner — nothing to
+  check`; `gh api repos/joemccann/radon/actions/secrets` lists only
+  `TURSO_AUTH_TOKEN`, `TURSO_DB_URL`, the job binds no `environment:`,
+  and `environments/production/secrets` has neither demo key.
+  `scripts/tests/test_demo_isolation_is_wired.py:75-80` asserts
+  `"check_demo_isolation" in workflow`, which the comment at `ci.yml:270-277`
+  satisfies with the step deleted. `docs/demo-environment.md:27` names
+  the wrong job. R-156/REL-065 closed as "wired" while the guard's only
+  executions are the unit test's dict fixtures. **AC:** RED — a test that
+  parses `ci.yml` as YAML and asserts a step whose `run` invokes the
+  script AND that it cannot short-circuit (no unconditional `exit 0`), or
+  a step that runs `check_demo_isolation.py` against a committed demo env
+  file so exit 1 is reachable. GREEN — provision the two secrets on the
+  runner (operator) or check in a demo env fixture; fix the doc.
+- **T-131 [P1] TRIN's R-099 "delayed print may not promote to IN ZONE"
+  guard is dead in production: `build_output` calls `classify_state(ma10)`
+  without `source`, and the only test of the guard calls the classifier
+  directly.** `scripts/fetch_trin.py:249` (`"state": classify_state(ma10)`),
+  `:140-154` (guard fires only when `source is not None`);
+  `scripts/tests/test_honest_exhaustion_oneshots.py:130-148` passes
+  `source=sample["source"]` by hand; `scripts/tests/test_trin.py:171-179`
+  drives `build_output` with samples carrying no `source`. Coverage of
+  the four indicator suites: `fetch_trin.py:154` never executed.
+  `web/components/TrinPanel.tsx:179-206` colours on `current.state`. IB
+  answers type 3/4 at 10:00 ET → `_build_sample` records
+  `source="ib-delayed"` (correct) → `build_output` renders a live IN ZONE
+  badge off a 15-minute-old MA(10), heartbeat `ok`. REL-049 recorded R-099
+  as DONE. **AC:** RED — `build_output([ten samples trin=0.60,
+  source="ib-delayed"], daily)["current"]["state"] != "in_zone"` (returns
+  `"in_zone"` today). GREEN — pass the latest sample's `source` (or the
+  window's dominant source) at `:249`.
+- **T-132 [P1] (delta to T-084) The DIVYIELD/HYAD/HHLEV/TRIN
+  "idempotent upsert" tests execute DEAD SQL constants or a hand-built
+  tuple; none of the four production writer bodies is executed by any
+  test.** `scripts/db/writer.py:972-983` `DIVYIELD_UPSERT_SQL` is unused by
+  `upsert_divyield_rows` (`:986-1024`, inline SQL at `:1015-1022`);
+  `:1027-1037` vs `:1040-1077` (HYAD); `:1080-1089` vs `:1092-1131`
+  (HHLEV); `:1209-1226` `_trin_sample_params` is called only from the
+  writer. Tests: `scripts/tests/test_divyield.py:324-335`,
+  `test_hyad.py:346-356`, `test_hhlev.py:383-394` (`db.execute(writer.X_UPSERT_SQL, …)`),
+  `test_trin.py:260-268`; every `TestPersistResult` stubs the writer.
+  Replacing all six writer functions with raising stubs leaves the four
+  `TestStorage` classes `19 passed` (only the three `test_writer_arity`
+  signature checks fail). A column swap in `params.extend(...)`
+  (`count_above`/`total`, `adv`/`dec`) ships to Turso on the next timer
+  fire with green CI. **AC:** RED — recording-sqlite test on the REAL
+  `upsert_*_rows` (pattern `test_ivrank.py:339-378`) called twice for one
+  date, asserting the SELECT-back row and a single row; swap two params →
+  red. GREEN — no source change; delete the three dead constants.
+- **T-133 [P1] `run()` of DIVYIELD, HYAD and HHLEV is never executed; a
+  regression that stops writing history rows while heartbeating `ok` is
+  invisible.** `scripts/fetch_divyield.py:473-512` (`rows = [new_row]`
+  `:494`, `persist_result(payload, rows)` `:511`);
+  `scripts/fetch_hyad.py:385-414` (`changed` `:402-404`, persist `:413`);
+  `fetch_hhlev.py:323-334`. No test imports `run`, `fetch_window`,
+  `fetch_constituents`, `load_history` or `_turso_history`
+  (`test_divyield.py:25-36`, `test_hyad.py:26-33`, `test_hhlev.py:35-44`).
+  Coverage: `fetch_divyield.py` missing `159-176, 422-428, 474-512`;
+  `fetch_hyad.py` missing `303-329, 376-382, 388-414`; `fetch_hhlev.py`
+  missing `324-334`. `changed` computed against a stale `stored_by_date`
+  → `persist_result(payload, [])` daily: snapshot + `ok` heartbeat
+  written, `*_history` never grows, the 26h/120h watchdog windows stay
+  green. **AC:** RED — drive `run()` with the fetchers and
+  `_turso_history` stubbed (populated history, one new date) and assert
+  `("rows", 1)` in the recorded writer calls; mutate `changed → []` /
+  `rows → []` → red. GREEN — no source change.
+- **T-134 [P1] `test_grok_responder_fails_closed.py` pins the Grok
+  agent's sandbox to a secrets path the delta EMPTIED, and the assertion
+  is satisfied by a comment; the new secrets file is readable by the
+  agent.** `a0716084` moved secrets to `/etc/radon/env`
+  (`cloud/scripts/setup-vps.sh:21`, `:473-475` chmod 0600 chown
+  radon:radon); `cloud/services/radon-grok-page-responder.service:9`
+  runs `User=radon` and `:27` lists `InaccessiblePaths=/var/run/docker.sock
+  /usr/bin/docker /usr/local/sbin/radon-deploy-root /home/radon/radon-cloud`
+  — `/etc/radon/env` absent. `scripts/tests/test_grok_responder_fails_closed.py:160-164`
+  asserts `"/home/radon/radon-cloud/.env" in unit`, matched by the comments
+  at unit `:11` and `:24`; `cloud/tests/test_p2_host_paths.py:25-27`
+  explicitly exempts this unit. Green while the agent can read IB Flex,
+  Clerk and UW secrets. **AC:** RED — assert `/etc/radon/env` appears in
+  the unit's `InaccessiblePaths=` line (parse the directive, not the
+  file). GREEN — add it, keep the legacy path.
+
+### P2 — fragility / structure
+
+- **T-135 [P2] (delta to T-072) The merged vitest denominator is
+  execution-dependent for `web/lib/**/*.tsx`; the merge script never
+  reconciles against `include`.** `vitest.config.ts:66-72` (`web/lib/**/*.ts`
+  — no `.tsx`; the two explicit `.tsx` excludes at `:76-77` show the leak
+  is known); `scripts/ci/merge_vitest_coverage.py:54-72` unions whatever
+  the shards emitted. Run 32808681820 artifacts: shard 1 = 665 files /
+  27005 lines, shard 5 = 663 / 26867; `web/lib/ThemeContext.tsx`,
+  `web/lib/og-charts.tsx` present only where executed; of 19
+  `web/lib/**/*.tsx` on disk, `IBStatusContext.tsx` and
+  `RealtimeAuthContext.tsx` never enter the denominator. Direction is
+  inflation. (Otherwise honest: merged 78.84/74.86/66.90 vs pre-shard
+  78.81/74.81/66.89.) **AC:** RED — `scripts/tests/test_merge_vitest_coverage.py`
+  case asserting every merged key matches an `include` glob (fails on
+  `ThemeContext.tsx`). GREEN — add `web/lib/**/*.tsx` to `include`,
+  re-measure, report per T-050 if a threshold dips.
+- **T-136 [P2] `_free_port` bind-0/close/rebind stubs plus a 10s dead
+  sleep, now run under `-n auto --dist loadfile`.**
+  `scripts/tests/test_leap_garch_no_duplicate_scan.py:49-55` (used
+  `:192,:210,:229`; `:229` `test_connection_refused_still_falls_back` needs
+  NOBODY on a port it just released), `:80` `time.sleep(10)` on a
+  single-threaded `HTTPServer` whose `__exit__` `shutdown()` (`:99-100`)
+  blocks for it (measured 10.5s/10.3s per param, `6 passed in 23.23s`);
+  `scripts/tests/test_run_flow_refresh_wrapper.py:28-34` (used
+  `:216,:236,:262,:281,:298`); `test_run_vcg_refresh_wrapper.py:35`,
+  `test_run_signals_refresh_wrapper.py:42`, `test_run_portfolio_refresh_retry.py`
+  — all `scripts-rs` (`ci.yml:183-184`), 4 workers, no `xdist_group`
+  anywhere in the gated dirs. **AC:** RED — two copies in parallel workers
+  with a forced identical port → refused-case fails. GREEN — stubs bind
+  `("127.0.0.1", 0)` and read `server_port`; refused case targets a socket
+  the test holds bound-but-not-listening; the hang handler waits on a
+  `threading.Event` released in `__exit__`.
+- **T-137 [P2] Wall-clock `elapsed < 1.0` assertions with ~0.6s headroom
+  in the TimeoutStartSec tests, and a 1s real-time window in the flow-tab
+  cooldown test.** `scripts/tests/test_bpi_scan.py:378-391,398-411`,
+  `scripts/tests/test_divyield.py:357-368` (0.4s faked sleeps vs
+  `SWEEP_BUDGET_S=0.15`, source waits in-flight workers:
+  `fetch_divyield.py:266`, `bpi_scan.py:334`);
+  `scripts/api/tests/test_flow_tab_cooldown.py:93-98` (`_flow_tab_last =
+  monotonic() - (COOLDOWN - 1)` then two `TestClient` POSTs inside the
+  second). 3× isolated `test_divyield.py`: 32/32/32 in 1.63/1.33/1.03s —
+  a load-margin risk, not an observed flake. **AC:** RED — raise the fake
+  latency to 0.9s → fails with the budget logic unchanged. GREEN — assert
+  the deterministic observable (`errors >= len(tickers) - FETCH_WORKERS`,
+  `len(fetched) <= FETCH_WORKERS`, hang call-count `== 1`); inject
+  `time.monotonic` in the cooldown test.
+- **T-138 [P2] `test_relay_container_watchdog.py` gives a cold Python
+  interpreter 0.5s to deliver `READY=1`.**
+  `cloud/tests/test_relay_container_watchdog.py:26` (`WATCHDOG_SEC =
+  0.25`), `:70-76` and `:92-96` (`_collect_notify(..., monotonic() +
+  WATCHDOG_SEC * 2)` then `assert "READY=1" in messages`); child is
+  `Popen([sys.executable, "-c", CHILD])` at `:64-69`. Durations 0.52/0.51s
+  — the window is consumed by design. **AC:** RED — shim `sys.executable`
+  with `sleep 0.6` before exec → both fail. GREEN — block on `READY=1`
+  with a 10s bound, then open the `WATCHDOG_SEC*2` observation window.
+- **T-139 [P2] (delta to T-091) Four new regime specs and the book spec
+  key state on CSS classes where `aria-current` exists.**
+  `web/e2e/divyield-tab.spec.ts:99`, `hhlev-tab.spec.ts:99`,
+  `hyad-tab.spec.ts:100`, `trin-tab.spec.ts:91`
+  (`.regime-rail__item[data-tab=…]` `toHaveClass(/active/)`) while
+  `web/components/RegimeRail.tsx:70` renders `aria-current="page"`; also
+  `svg path[stroke]` at `:117/:117/:119/:110`;
+  `web/e2e/book-depth-client-nav.spec.ts:132` `.book-feed-pill`
+  (`OrderBook.tsx:126`). **AC:** RED — rename the `active` class → four
+  specs fail with no behaviour change. GREEN —
+  `getByRole("button", { name: /Dividend Yield/ })` +
+  `toHaveAttribute("aria-current", "page")`.
+- **T-140 [P2] Calendar-triggered reds (bundle).** (a)
+  `web/tests/display-honesty-delta.test.ts:117-125` asserts
+  `market_holidays.json` contains `thisYear + 1` from
+  `new Date().getUTCFullYear()`; keys are `2023…2027`, so the vitest gate
+  goes red at 2027-01-01T00:00Z with no code change — a tripwire in a
+  merge gate. (b) `cd15f40a` "midnight-safe test dates" is incomplete:
+  `scripts/tests/test_hhlev.py:55,350` (import-time `date.today()`) vs
+  `:206` (call-time) — not red today because nothing compares the two
+  clocks. **AC:** (a) RED — `vi.setSystemTime("2027-01-01")` → fails now;
+  GREEN — add 2028 now and freeze the test clock to a fixed date that
+  documents the horizon (or move the horizon check to a scheduled job).
+  (b) single `_TODAY` in `test_hhlev.py`.
+- **T-141 [P2] (delta to T-088) `test_refresh_control_plane.py`
+  hard-asserts a GNU `sha256sum` binary while the same file ships a
+  `shasum -a 256` shim.** `cloud/tests/test_refresh_control_plane.py:498-499`
+  (`assert shutil.which("sha256sum") is not None`), consumed at
+  `:524-535,:538-544`; shim at `:131-135`. Passes here only because
+  `/opt/homebrew/bin/sha256sum` exists. **AC:** RED — run with homebrew
+  off PATH → both preflight tests `AssertionError`. GREEN — write the
+  `:131-135` shim into `tmp_path` and pass it as `RADON_SHA256SUM`.
+- **T-142 [P2] The display/serving honesty tranches (R-124/R-125/R-135/
+  R-193/R-196/R-167/R-168) guard component and route WIRING by
+  substring; the behavioural halves test the helper only.**
+  `web/tests/panel-freshness-honesty.test.ts:27-39`
+  (`toContain("PanelRefreshError")` — `TrinPanel.tsx:165` `error={null}`
+  stays green; no other test references the component), `:65-75`
+  (`toMatch(/result\.ok && result\.fresh/)`) and
+  `web/tests/serving-honesty-delta.test.ts:27-31`
+  (`toContain("isDegraded")` — `web/app/api/trin/route.ts:53` `isDegraded:
+  () => false` stays green; `trin-api.test.ts` has no
+  fresher-degraded-vs-older-real case), `:120-143` (lozenge by
+  `indexOf`/first-statement regex — `CashFlowsSection.tsx:134-152`, moving
+  the early return one statement down reintroduces R-135 green),
+  `serving-honesty-delta.test.ts:147-161` (`FLAGGABLE_REGIME_TABS`
+  substrings), `web/tests/relay-disconnect-honesty.test.ts:83-92,127-146`
+  (`toContain("disconnected")` satisfied by `EventName.disconnected` at
+  `ib_realtime_server.js:2425`; deleting the write at `:2760-2778` stays
+  green — T-087 class). **AC:** per item, render/route the observable:
+  `TrinPanel` with `{ error: "boom", data }` → `trin-refresh-error`
+  visible; `GET /api/trin` with a newer degraded db row and an older real
+  disk row → `source === "disk"`; `CashFlowsSection` throttled with no
+  `last_synced_at` → `Never synced · Flex throttled`; relay stale-check
+  extracted into `scripts/lib/staleDataMachine.js` and asserted via a
+  `writeRelayHealth("error", {reason: "ib_disconnected"})` call.
+- **T-143 [P2] `test_unbounded_io_bounds.py` pins the incident-store
+  sweep with a conditional that is `assert True` in the current tree, and
+  verifies `_executed_orders_since` paging with a fake that implements
+  the keyset itself (T-086 class).**
+  `scripts/tests/test_unbounded_io_bounds.py:215-217` (`assert
+  "prune_resolved" in src.split("def reconcile")[1] if "def reconcile" in
+  src else True`; `scripts/incident_watchdog/store.py` has no `def
+  reconcile` — the call site is `record_cycle` at `:132`), `:19-36`
+  (`page = [r for r in self.rows if cursor is None or r[0] > cursor]`,
+  `cursor = params[-2]`), `:73-89`;
+  `scripts/monitor_daemon/handlers/expiry_sweep.py:328-343`. `exec_id > ?`
+  → `>= ?` at `:332` never advances on a table over 500 rows (daemon
+  loops) while the fake still pages. **AC:** RED — call `record_cycle` on
+  a dir with an expired resolved incident and assert it is gone;
+  in-memory sqlite with 1,001 `executed_orders` rows → 1,001 returned in
+  exactly 3 SELECTs. Must catch `>=` and a `LIMIT` without `ORDER BY`.
+- **T-144 [P2] Seven smaller substring/tautology guards from the
+  REL-052/-068/-069 tranches (bundle).** (a)
+  `scripts/tests/test_uw_budget_coverage_delta.py:113-121`
+  `"_HOLD_MARKET_STATUS" in inspect.getsource(vc)`; `fetch_vol_cone.py:937`
+  `"closed" if hold else "open"` stays green, `test_vol_cone.py:596` never
+  reads `market_status`. (b) `scripts/tests/test_flex_caller_coverage.py:92-97,109-115`
+  `"raise_if_blocked" in source` — `blotter_service.py:163` import vs
+  `:166` call; delete the call, still green. (c)
+  `scripts/tests/test_resource_accounting_bounds.py:193-214` constants by
+  name; `scripts/newsfeed/media.js:233-235` (name in a comment), `:311`
+  `length: wanted.length` stays green; no JS test for `media.js`. (d)
+  `scripts/tests/test_cadence_and_growth_bounds.py:79-105`
+  `"pruneMediaTree" in src` — satisfied by the import at `push_media.js:12`
+  with the call at `:101` removed; `pruneMediaTree` has no test anywhere.
+  (e) `scripts/tests/test_indicator_storage_hygiene.py:86-95`
+  `"credit_spread_history" in source` + `:97-124` with `_turso_series`
+  mocked — the SELECT never executes (T-084 shape). (f)
+  `cloud/tests/test_control_plane_bounds.py:55-76` `"continue" in loop or
+  "failed_enables" in loop`, `re.search(r"return 1", block)` — `|| {
+  failed_enables+=("$unit"); return 1; }` reintroduces the R-184
+  truncation green; `test_install_units.py` already runs the helper under
+  bash with shims. (g) `web/tests/flow-tabs-get-only.test.ts:9-15`
+  `toContain("interval: 0")` — a comment satisfies it. **AC:** per item,
+  replace the substring with the observable: (a) `run_intraday(...)["market_status"]
+  == "held"` on a budget hold; (b) `raise_if_blocked` raising →
+  `SendRequest` never called; (c) 12 URLs with a fetch stub recording
+  concurrency → max 4; (d) `pruneMediaTree(tmp)` removes over-retention
+  files; (e) sqlite-backed `_turso_series`; (f) run the enable loop under
+  bash with a failing `systemctl` shim, assert every unit attempted; (g)
+  spy `useSyncHook` options.
+- **T-145 [P2] Web money-path residue from the delta (bundle).** (a)
+  `web/tests/auto-sync-claim.test.ts:41-58` re-implements the claim store
+  from `web/lib/useAutoSyncOnStale.ts:27-55`; `:61-72`'s
+  `filter(Boolean).length == 1` holds with or without the lock because
+  `claimUnderStore` is synchronous — only `toHaveBeenCalledTimes(5)`
+  distinguishes; make the fake store's `write` assert the lock is held.
+  (b) `scripts/api/server.py:434,439-461,508-515` — a persistent
+  capacity-shed keeps stamping orders-sync `ok` every 5 min (a wedged lane
+  per T-065 never pages); `scripts/tests/test_orders_sync_loop.py`
+  hand-types the shed marker instead of importing it from
+  `scripts/api/subprocess.py:277`; RED — N≥3 consecutive shed ticks must
+  stop stamping `ok`. (c) `web/lib/boundedShutdown.ts:13`
+  `SHUTDOWN_GRACE_MS` and the `register()` wiring in
+  `web/instrumentation.ts:22-27` are unpinned (`bounded-shutdown.test.ts:28,42,54`
+  pass `graceMs` explicitly); RED — default grace < the deploy's 60s
+  inactive wait; `10_000 → 100_000` must fail. (d)
+  `web/components/PositionTable.tsx:269` stock-leg branch of `displaySign`
+  has no assertion (`position-table-short-leg-sign.test.tsx` has no stock
+  leg). (e) `web/tests/breadth-panel.test.tsx` "recomputes when the range
+  preset changes" uses `pearsonCorrelation` as its own oracle — assert a
+  hand-derived value.
+- **T-146 [P2] (delta to T-112) HHLEV `fetch_rows` is unexecuted, and
+  its ladder falls back to the keyed FRED API only on a transport
+  exception — a 200 with an empty/HTML body never engages the fallback.**
+  `scripts/fetch_hhlev.py:286-296` (`except Exception → fetch_via_api()`;
+  the success path returns `[]` untouched), `:119-137`
+  (`parse_fredgraph_csv` yields `[]` without the two columns), `:326`
+  (`ensure_plausible_series` raises). Tests import neither `fetch_rows`
+  nor `fetch_via_api` (`test_hhlev.py:35-44`); coverage missing
+  `271-283, 290-296`. **AC:** RED — stub `fetch_fredgraph_csv` → `"<html>"`
+  and `fetch_via_api` → fixture rows; assert `fetch_rows()` returns 304
+  rows (returns `[]`). GREEN — fall back when the parse yields `<
+  MIN_QUARTERS`; add the ordering test (CSV hit must not call the API).
+- **T-147 [P2] HYAD backfill (`c9093e53`, year windows fixing observed
+  2020-11-24 corruption) and DIVYIELD backfill have zero tests.**
+  `scripts/fetch_hyad.py:419-453` (year loop `:431-437`),
+  `scripts/fetch_divyield.py:517-632` (`monthly_yields_for_chart`,
+  `build_backfill_rows`, `run_backfill`); coverage missing
+  `fetch_hyad.py:427-453`, `fetch_divyield.py:520-632`. **AC:** RED —
+  stub `fetch_breadth_page` to record `(bond_type, start, end)`; assert
+  windows tile `BACKFILL_START..today` with no gaps/overlaps; mutate
+  `today.year + 1 → today.year` → red. DIVYIELD: 14-month synthetic chart,
+  TTM window excludes month 13.
+- **T-148 [P2] `_LockedIB` serialization (`055a6766`) is untested;
+  removing the lock stays green while two scanners call it from thread
+  pools.** `scripts/utils/uw_surface.py:96-105` (`with self._lock:` at
+  `:104`), callers `scripts/leap_scanner_uw.py:571-573`,
+  `scripts/theta_harvester_scanner.py:751-752` (ThreadPoolExecutor over
+  the shared adapter); `scripts/tests/test_uw_surface.py:150-198` assert
+  connect kwargs / disconnect order only. ib_insync is not thread-safe:
+  concurrent `reqHistoricalData` corrupts the session and the "IB-first"
+  rule silently becomes UW-first after the first collision. **AC:** RED —
+  fake IB whose `get_historical_data` sleeps 50ms and records overlap;
+  call from 4 threads, assert max concurrency == 1; delete the `with` →
+  red.
+- **T-149 [P2] `scripts/testing_weekend.sh` (rewritten in `33ec31c4` as
+  the daily cycle) has no runner lock, a single-attempt `git fetch`, and
+  zero tests; its reliability twin got both, with tests.**
+  `scripts/testing_weekend.sh:128-133` (`git fetch origin --quiet` then
+  `reset --hard`), no `acquire_runner_lock` (cf.
+  `scripts/reliability_weekend.sh:27,50`); `grep -rn testing_weekend
+  scripts/tests` → 0. `scripts/tests/test_ops_plane_bounds.py:219-260` and
+  `test_weekend_runner_fetch_retry.py:33-59` cover only the reliability
+  script. A 00:00 fire overlapping a still-running cycle `reset --hard`s
+  under the running agent; one port-22 blackhole at midnight (the
+  2026-08-23 event) kills the day. **AC:** RED — port both test classes
+  to `testing_weekend.sh` (`--lock-lib-only; fetch_origin_with_retry` with
+  a git shim failing twice; held-lock refusal). GREEN — source a shared
+  helper lib rather than copy.
+- **T-150 [P2] (delta to T-094/T-066) The `a0716084` + `59650568` cloud
+  cutover is guarded entirely by substring greps; the caddy-traverse
+  guard and restart path are never executed.**
+  `cloud/tests/test_p2_host_paths.py:16-94` (all `read_text` + `in text`;
+  `:82-94` asserts `"usermod -aG radon caddy"` and `"restart caddy"`
+  within 400 chars) over the `cloud/scripts/setup-vps.sh` block added in
+  `59650568`. The grant inside a branch that never runs → every
+  media.radon.run request 403s again (the 2026-08-23 regression) with green
+  CI. **AC:** RED — run the function under bash with `id`/`usermod`/
+  `systemctl` shims (pattern `test_bootstrap_control_plane.py`), asserting
+  `usermod` then `restart caddy` when `id` lacks `radon` and neither when
+  it has it; invert the guard → red.
+- **T-151 [P2] `scripts/utils/ipv4_first.py` (`cd15f40a`, the fix for the
+  60s/request VPS v6 blackhole) has no test; flipping the sort key to
+  IPv6-first stays green.** `scripts/utils/ipv4_first.py:23-29`; installed
+  at import in `fetch_divyield.py:64-66`, `fetch_hyad.py:53-55`,
+  `fetch_hhlev.py:52-54`; `grep -rln ipv4_first scripts/tests` → none.
+  **AC:** RED — monkeypatch `_original_getaddrinfo` → `[AF_INET6,
+  AF_INET]`, assert `socket.getaddrinfo(...)[0][0] == AF_INET` after
+  `prefer_ipv4()`, plus `fetch_divyield.socket.getaddrinfo is
+  _ipv4_first_getaddrinfo`.
+- **T-152 [P2] The scan admission gate (`9bee5b85`) is tested
+  sequentially only; the concurrent double-admit the lock exists for is
+  unexercised.** `scripts/api/server.py:3047-3063` (`async with
+  gate.lock:` then re-`_admit()`), `scripts/api/tests/test_scan_gate.py:112-160`
+  (sequential `client.post` pairs). Remove the lock or the inner
+  `_admit()` → the 5s poll storm from the 2026-08-24 incident spawns N
+  parallel `cri_scan.py` again, tests green. **AC:** RED —
+  `asyncio.gather` two `_gated_scan` calls against a `run` that awaits an
+  Event; assert `run` invoked once and the second returns `read_cached()`;
+  delete the inner `_admit()` → red.
+- **T-153 [P2] Untouched cash-flow cadence/seed tests now depend on a
+  gitignored runtime file.** `scripts/monitor_daemon/handlers/cash_flow_sync.py:341`
+  (`is_due` False if `_shared_embargo_until()`) and `:290` →
+  `utils/flex_embargo.active_until()` (`:151`) reads `SIDECAR` =
+  `data/flex_token_embargo.json` (`:29`); Turso rehydrate is inert under
+  pytest. Untouched tests never patch `SIDECAR`:
+  `test_cash_flow_sync_cadence.py:68,103,125,169,178,224,309`,
+  `test_cash_flow_sync_timeout_retry_budget.py:261,277`,
+  `test_corrupt_state_preserves_embargo.py:92`. Red on any host with a
+  live sidecar (any local Flex 1025 within 7 days). **AC:** RED — write
+  `{"next_attempt_at": <now+1d>}` to the real path, run the cadence file.
+  GREEN — autouse fixture in `test_monitor_daemon/conftest.py`
+  monkeypatching `utils.flex_embargo.SIDECAR` to `tmp_path` (pattern
+  `test_flex_query_lockout.py:20-24`).
+- **T-154 [P2] (delta to T-117) T-117's prescribed GREEN is now invalid:
+  the daily P&L gate compares the snapshot's `last_sync` date with the
+  clock.** `web/lib/ibDailyPnlSession.ts:32-40` (`:37` falls back to wall
+  clock only when `last_sync` is absent), wired at
+  `web/components/MetricCards.tsx:642`, `web/lib/dashboardKpis.ts:47`.
+  Untouched specs generate `last_sync: new Date().toISOString()` in the
+  Node process: `web/e2e/day-move-ib-daily-pnl.spec.ts:6,64` (asserts
+  `:269-280`), `web/e2e/account-day-move-ib-daily-pnl.spec.ts:6,63`
+  (`:216-239`), `web/e2e/account-metric-cards.spec.ts:25,50` (curated in
+  CI). Pinning `page.clock` to a Wednesday now renders MARKET CLOSED on
+  every real day but that one. `web/tests/day-pnl-non-trading-day.test.tsx:155-162`
+  has zero `last_sync` keys, so "TODAY on a trading day" passes via the
+  `!lastSync` fallback and never exercises the new gate. **AC:** RED —
+  pin the clock to 2026-08-19 with fixtures as-is. GREEN — derive fixture
+  `last_sync` from the pinned instant; add a prior-session `last_sync` +
+  trading-day clock case expecting MARKET CLOSED.
+- **T-155 [P2] `test_grouping_newcomers.py` proves its IB late-joiner
+  contract with a service that is no longer IB-classified or produced.**
+  `exit-orders` was removed from `scripts/watchdog/services.py`
+  SCHEDULED_SERVICES/BUCKETS (`f54ce626`; `requires_ib` `:527-535`
+  returns False for unknown) and from `web/lib/serviceHealthWindows.ts`;
+  the handler is unregistered (`scripts/monitor_daemon/run.py:91-95`,
+  R-141). `scripts/tests/test_watchdog/test_grouping_newcomers.py:31`
+  (`NEWCOMER = "exit-orders"`, docstring "Continuous-bucket IB writer"),
+  assertions `:84-107`; `grouping.py:191` now routes it down the
+  per-service path, so it pages for an unrelated reason.
+  `test_monitor_daemon/test_handler_heartbeat.py:146-190` pins heartbeat
+  rows for an unregistered handler. **AC:** RED — `assert
+  services_mod.requires_ib(NEWCOMER)` at module top. GREEN — `NEWCOMER =
+  "fill-monitor"` (`services.py:78`).
+
+### Not findings (checked, clean)
+
+- Adequately tested in the delta (a revert or mutation is caught):
+  `c09fc347` core average-cost math (`test_journal_realized.py:66-79`,
+  hand-derived 749.0/2247.0); `7cfcdfd9` `ib_orders` leg
+  (`test_ib_orders_dual_write.py:271-291`); `89be36ff`
+  (`position-table-short-leg-sign.test.tsx:104-111,124-139`, real
+  `PositionTable`); `27665c43` 429 handling
+  (`use-portfolio-sync-429.test.ts:56-68,98-128`); `b7532743`/`c60f6e7d`
+  (real provider/component tests); `c54f72fe` (`test_flex_token_embargo.py`
+  reconstruct cases, satisfies T-100 AC(3)); `872a3ed6`/`91459df1`
+  (`test_run_flow_refresh_wrapper.py` real bash + HTTP stub); `48d27c41`
+  (`test_units.py` oneshot latch — but see T-122); `26168ed5`/`d6b566d9`
+  TimeoutStartSec budgets (real tarpit tests, unit-file read); migrations
+  0054–0057 applied via `executescript` in all four indicator suites; the
+  four API routes (`divyield-api.test.ts:92-140` and siblings, in-memory
+  libsql); `a80ab063` (`test_systemd_services.py:523-538` pins the
+  OnCalendar); `d7451d2b` (`test_deploy_corrections.py` sources the real
+  `deploy.sh`); `33ec31c4` notify half (`test_weekend_notify.py:15-154`).
+- Best new tests in the delta, cited as the standard:
+  `test_journal_realized.py:66-79`; `auto-sync-claim.test.ts:61-72` (five
+  tabs, one claim — modulo T-145a); `test_backfill_journal_from_executed_orders.py:894-919`
+  (real sqlite, re-run after partial); `test_nested_deadlines.py:75-120`
+  (fake monotonic clock charges HTTP latency to the poll budget);
+  `test_monitor_daemon/test_exit_orders_oca.py:87-100` (OCA group per
+  journal row — not run by CI, T-122).
+- T-089 remediated in-delta (Popen-driven bind); T-062/T-097/T-102 no new
+  instances; `position-pnl-pct-structures-catalog.test.ts:508-538`
+  rewrote the 24% expectation to `null` in the correct direction (T-059
+  resolved, not pinned). No new bare `toBeDefined()` / `assert result`.
+- Shared-state checks clean: `test_ib_executor_isolation.py:31-35`,
+  `test_probe_thread_loop.py:50-54`, `test_scan_gate.py:89-95`,
+  `test_flow_tab_cooldown.py:26-32`, `resetAutoSyncCooldowns` in
+  `beforeEach`. Every other time-dependent delta test uses fake timers or
+  an injected clock (`bounded-shutdown.test.ts:16`,
+  `newsfeed-shutdown.test.ts:14`, `auto-sync-loop-bounded.test.ts:33`,
+  `test_nested_deadlines.py:81-82`, `test_menthorq_bootstrap_deadline.py:129`).
+- Untouched tests judged still honest against the delta's source
+  changes: `test_cash_flow_sync_cli.py:423-443`, `test_flex_query_lockout.py`,
+  `kpi-strip.test.tsx`, `open-order-combos.test.ts` +
+  `open-order-combo-modify.test.ts` + `options-chain-utils.test.ts` (77/77
+  vs the R-166 ratio change), `fastapi-migration.test.ts:166,211`,
+  `iei-hyg-api.test.ts` (IEI/HYG only in a comment after the TSY/HY
+  rename), `test_demo_scan_guards.py`, `test_suppression_bounds.py:261,279`,
+  `test_historical_pool.py:53-75`, `test_docs_contract.py` (all five
+  instruction files still carry the Yahoo rule).
+
+### Runner-clone hygiene (operator note)
+
+Tree clean at start, no stash, no parked WIP. `git worktree` at
+`/tmp/tw0825/base` (`4985a7f8`) was used for the cloud baseline and
+removed after. PR #82 (`testing/weekend-2026-08-23`) is still open; when
+it merges, this PR's `TEST_AUDIT.md` / `TEST_LOG.md` appends will need a
+trivial append-order conflict resolution — nothing here rewrites its
+lines.
+
 ## 11 · Audit ledger
 
 The weekend loop (`.claude/skills/testing-weekend/`) reads the last line
@@ -2457,3 +3205,4 @@ Delta findings continue the T-### numbering in dated `## Delta audit` sections.
 - Audited through: `71de8a33` on 2026-08-16 — 24 new findings (T-055…T-078: 3 P0, 7 P1, 14 P2) over 202 commits / 1169 files. Gates ×3 green except one load-sensitive vitest race (T-062). No new skips, no exclusion growth, no threshold moved.
 - Audited through: `4985a7f8` on 2026-08-22 — 17 new findings (T-080…T-096: 1 P0, 7 P1, 9 P2) over 167 commits / 565 files. Gates ×2 serial: vitest 7036 green ×2; pytest 7216 green on run 2, one sleep-race red on run 1 (T-089, 3/3 isolated green); cloud 12 red ×2 on darwin (10 known sha256sum + 2 new, T-088). No new skips, no exclusion growth, no threshold moved.
 - Audited through: `4985a7f8` on 2026-08-22 (second pass, different host) — 24 ADDITIONAL findings (T-097…T-120: 13 P1, 11 P2) on the same range; 8 more converged with the first pass and were dropped, 3 are deltas to T-088/T-090/T-094. pytest 7216 green on rounds 1 and 3, T-089's sleep race red on round 2; vitest 7036 green ×3; cloud 34-red ×3, byte-identical to the same run at `71de8a33` (bash 3.2 on this host, T-118). No new skips, no `.only`, no exclusion growth, no threshold moved.
+- Audited through: `27665c43` on 2026-08-25 — 34 new findings (T-122…T-155: 1 P0, 12 P1, 21 P2) over 68 commits / 513 files. Gates serial: pytest 7816 green (recursive; CI's sharded matrix drops 752 of them, T-122); vitest 7328 green / 701 files; cloud 34 red on darwin, byte-identical to the base SHA (T-118). Added-file determinism 3×3 green. No new skips, no `.only`, no exclusion growth; vitest thresholds unchanged; pytest ratchet metric silently switched to statement-only (T-123).

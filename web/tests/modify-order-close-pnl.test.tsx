@@ -375,6 +375,53 @@ describe("ModifyOrderModal combo close-out P&L", () => {
     expect(summary.queryByText("$4,165")).toBeNull();
   });
 
+  // TEST_AUDIT T-125: bc08e87b's one-line wiring (exclude the order being
+  // modified from the working-SELL count) was guarded only at the pure
+  // helper; every modal render passed no `openOrders`, so dropping the
+  // exclude argument stayed green while a full-size modify against 250
+  // held read as a fresh opening credit spread.
+  it("excludes the order being modified from the working-SELL count", () => {
+    const order = cbrsComboOrder();
+    render(
+      <ModifyOrderModal
+        order={order}
+        loading={false}
+        prices={cbrsComboPrices()}
+        portfolio={cbrsHeldReversal()}
+        openOrders={{ open_orders: [order] }}
+        onConfirm={vi.fn()}
+        onClose={() => {}}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText(/New Net Price/i), { target: { value: "8" } });
+    const summary = within(document.querySelector(".order-confirm-summary") as HTMLElement);
+
+    expect(summary.getByText("Est. Realized P&L:")).toBeTruthy();
+    expect(summary.getByText("$15,000")).toBeTruthy();
+    expect(summary.queryByText("Max Loss:")).toBeNull();
+    expect(summary.queryByText("Max Gain:")).toBeNull();
+  });
+
+  it("still counts a DIFFERENT working SELL combo against the held units", () => {
+    const sibling = { ...cbrsComboOrder(), orderId: 89, permId: 1857172000 };
+    render(
+      <ModifyOrderModal
+        order={cbrsComboOrder()}
+        loading={false}
+        prices={cbrsComboPrices()}
+        portfolio={cbrsHeldReversal()}
+        openOrders={{ open_orders: [cbrsComboOrder(), sibling] }}
+        onConfirm={vi.fn()}
+        onClose={() => {}}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText(/New Net Price/i), { target: { value: "8" } });
+    const summary = within(document.querySelector(".order-confirm-summary") as HTMLElement);
+
+    expect(summary.queryByText("Est. Realized P&L:")).toBeNull();
+    expect(summary.getByText("Max Loss:")).toBeTruthy();
+  });
+
   it("scales combo close basis for a partial quantity", () => {
     render(
       <ModifyOrderModal

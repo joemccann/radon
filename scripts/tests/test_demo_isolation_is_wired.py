@@ -86,3 +86,39 @@ class TestTheGuardIsActuallyInvoked:
             "the doc must name where the guard runs so the next reader can "
             "verify the claim instead of trusting it"
         )
+
+    # TEST_AUDIT T-130: `"check_demo_isolation" in workflow` was satisfied by
+    # a COMMENT with the step deleted, the doc named the wrong job, and the
+    # step's skip branch printed one log line nobody reads. Parse the YAML:
+    # a step must actually run the script, the doc must name that step's
+    # job, and a skip must surface as a GitHub warning annotation.
+    def _guard_step(self):
+        import yaml
+
+        workflow = yaml.load(
+            (REPO / ".github" / "workflows" / "ci.yml").read_text(), Loader=yaml.BaseLoader
+        )
+        for job_name, job in workflow["jobs"].items():
+            for step in job.get("steps", []):
+                if "scripts/ci/check_demo_isolation.py" in str(step.get("run", "")):
+                    return job_name, step
+        raise AssertionError("no CI step runs scripts/ci/check_demo_isolation.py")
+
+    def test_a_step_runs_the_script_and_the_doc_names_its_job(self):
+        job_name, step = self._guard_step()
+        assert "python3 scripts/ci/check_demo_isolation.py" in step["run"]
+        doc = (REPO / "docs" / "demo-environment.md").read_text()
+        assert f"`{job_name}` job" in doc, (
+            f"docs/demo-environment.md must name the `{job_name}` job that runs the guard"
+        )
+
+    def test_the_skip_branch_is_a_visible_warning_not_a_silent_exit(self):
+        _job_name, step = self._guard_step()
+        run = step["run"]
+        import re
+
+        assert re.search(r"::warning( [^:\n]*)?::", run), (
+            "when the demo secrets are absent the guard must annotate the run, "
+            "not vanish behind `exit 0`"
+        )
+        assert "TURSO_DEMO_DB_URL" in step.get("env", {})

@@ -8,7 +8,8 @@ StartLimitIntervalSec=0
 Type=oneshot
 User=radon
 WorkingDirectory=/home/radon/radon-page-responder
-# NEVER /home/radon/radon-cloud/.env — that file has IB Flex, Clerk, UW, archive.
+# NEVER /home/radon/radon-cloud/.env or /etc/radon/env — those carry IB Flex,
+# Clerk, UW, archive (T-134: the secrets moved to /etc/radon/env in a0716084).
 EnvironmentFile=/home/radon/radon-page-responder.env
 Environment=GROK_PAGE_NO_DOTENV=1
 Environment=GROK_PAGE_SYNC_REMOTE=1
@@ -24,7 +25,7 @@ PrivateTmp=yes
 # real secrets off disk: /home/radon/radon-cloud/.env is 0600 radon-owned and
 # this unit runs as radon. ProtectHome=tmpfs would also hide the clone and the
 # venv it executes from, so the secrets are denied by path instead.
-InaccessiblePaths=/var/run/docker.sock /usr/bin/docker /usr/local/sbin/radon-deploy-root /home/radon/radon-cloud
+InaccessiblePaths=/var/run/docker.sock /usr/bin/docker /usr/local/sbin/radon-deploy-root /home/radon/radon-cloud -/etc/radon/env
 ReadOnlyPaths=/home/radon
 # The grok CLI writes its session state under ~/.grok; with only the clone
 # writable every fix attempt died at session creation ("Read-only file

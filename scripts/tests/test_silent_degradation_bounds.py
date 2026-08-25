@@ -9,7 +9,9 @@ is used, and a FRED overlay that swallows a revoked key.
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
+from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -269,3 +271,96 @@ class TestFredOverlayIsHonest:
         rows = [_econ_row()]
         mod.apply_fred_actuals(rows, lambda _s: {"date": "2026-08-21", "value": "."}, NOW)
         assert rows[0]["actual"] == ""
+
+
+# --------------------------------------------------------------------------
+# TEST_AUDIT T-127 — every spawner detaches the child into its own session,
+# and the cancel helper never SIGKILLs the caller's own process group.
+# The substring test above is satisfied by two of three sites; run_module
+# (used by /blotter's Flex fetch, routinely >120s under a throttle) spawned
+# in uvicorn's group, so its timeout path killpg'd radon-api itself.
+# --------------------------------------------------------------------------
+_SLEEPING_CHILD = [sys.executable, "-c", "import time; time.sleep(30)"]
+
+
+def _spawn_via(spawner_name: str):
+    """Drive a real spawner with a real (sleeping) child; record the child's
+    process group while it is alive, before the spawner's timeout kills it."""
+    import asyncio as _asyncio
+
+    from api import subprocess as mod
+
+    observed: dict = {}
+    real_exec = _asyncio.create_subprocess_exec
+
+    async def recording_exec(*cmd, **kwargs):
+        proc = await real_exec(*_SLEEPING_CHILD, **kwargs)
+        observed["child_pgid"] = os.getpgid(proc.pid)
+        observed["kwargs"] = kwargs
+        return proc
+
+    async def go():
+        # The spawner's timeout path killpg's the child's group. Before the
+        # fix that group IS this test process's, so record instead of
+        # delivering — the red must not SIGKILL the runner to show itself.
+        with patch.object(mod.asyncio, "create_subprocess_exec", recording_exec), patch(
+            "api.subprocess.os.killpg",
+            side_effect=lambda pgid, sig: observed.setdefault("killpg", []).append(pgid),
+        ):
+            spawner = getattr(mod, spawner_name)
+            if spawner_name == "run_module":
+                await spawner("time", [], timeout=0.2)
+            else:
+                await spawner(str(REPO / "scripts" / "fetch_ticker.py"), [], timeout=0.2)
+        return observed
+
+    return _asyncio.run(go())
+
+
+class TestChildrenRunInTheirOwnProcessGroup:
+    @pytest.mark.parametrize("spawner", ["run_script", "run_script_raw", "run_module"])
+    def test_child_is_not_in_the_callers_group(self, spawner):
+        observed = _spawn_via(spawner)
+        assert "child_pgid" in observed, "spawner never reached create_subprocess_exec"
+        assert observed["child_pgid"] != os.getpgid(os.getpid()), (
+            f"{spawner} spawned in the caller's process group; its timeout "
+            "path would killpg the API server itself"
+        )
+        assert os.getpgid(os.getpid()) not in observed.get("killpg", [])
+
+    def test_terminate_child_refuses_to_kill_its_own_group(self):
+        import asyncio as _asyncio
+        import subprocess as _sp
+
+        from api.subprocess import _terminate_child
+
+        # Same group as this test process (no new session), exactly what
+        # run_module produced before the fix.
+        child = _sp.Popen(_SLEEPING_CHILD)
+        killpg_calls: list = []
+        try:
+            with patch("api.subprocess.os.killpg", side_effect=lambda pgid, sig: killpg_calls.append(pgid)):
+
+                class _Adapter:
+                    """asyncio-Process shape over a Popen child."""
+                    pid = child.pid
+
+                    @property
+                    def returncode(self):
+                        return child.poll()
+
+                    def kill(self):
+                        child.kill()
+
+                    async def wait(self):
+                        return child.wait()
+
+                _asyncio.run(_terminate_child(_Adapter(), reap_timeout=5.0))
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait()
+        assert os.getpgid(os.getpid()) not in killpg_calls, (
+            "_terminate_child SIGKILLed the caller's own process group"
+        )
+        assert child.poll() is not None, "child was not killed directly"
