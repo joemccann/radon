@@ -27,6 +27,8 @@ import {
   riskPriceForOrderType,
 } from "@/lib/order/stopOrder";
 import OrderTypeToggle from "@/components/OrderTypeToggle";
+import { OrderQuoteTelemetry } from "@/components/QuoteTelemetry";
+import { buildQuoteTelemetryModel, comboQuotePriceData } from "@/lib/quoteTelemetry";
 
 function toNakedShortPortfolio(portfolio: PortfolioData | null | undefined): NakedShortPortfolio {
   if (!portfolio) return { positions: [] };
@@ -42,20 +44,24 @@ function toNakedShortPortfolio(portfolio: PortfolioData | null | undefined): Nak
   };
 }
 
-/** Net BID/ASK/MID for the combo (signed sum of leg quotes), or one leg's quote. */
+/**
+ * Net BID/ASK/MID for the combo (signed sum of leg quotes), or one leg's quote.
+ * `priceData` is the leg's own live quote (null on a combo, which has no single
+ * PriceData) so the telemetry panel reads the traded instrument's session stats.
+ */
 function useTargetQuote(
   position: PortfolioPosition,
   prices: Record<string, PriceData>,
   target: TradeTarget,
-): { bid: number | null; ask: number | null; mid: number | null } {
+): { bid: number | null; ask: number | null; mid: number | null; priceData: PriceData | null } {
   return useMemo(() => {
     if (target.kind === "leg") {
       const leg = position.legs[target.index];
       const key = leg ? legPriceKey(position.ticker, position.expiry, leg) : null;
-      const lp = key ? prices[key] : null;
+      const lp = (key ? prices[key] : null) ?? null;
       const bid = lp?.bid ?? null;
       const ask = lp?.ask ?? null;
-      return { bid, ask, mid: bid != null && ask != null ? (bid + ask) / 2 : null };
+      return { bid, ask, mid: bid != null && ask != null ? (bid + ask) / 2 : null, priceData: lp };
     }
     let netBid = 0;
     let netAsk = 0;
@@ -68,10 +74,10 @@ function useTargetQuote(
       netBid += sign * lp.bid;
       netAsk += sign * lp.ask;
     }
-    if (!ok) return { bid: null, ask: null, mid: null };
+    if (!ok) return { bid: null, ask: null, mid: null, priceData: null };
     const bid = Math.min(netBid, netAsk);
     const ask = Math.max(netBid, netAsk);
-    return { bid, ask, mid: (bid + ask) / 2 };
+    return { bid, ask, mid: (bid + ask) / 2, priceData: null };
   }, [position, prices, target]);
 }
 
@@ -114,7 +120,15 @@ export default function PositionTradeTicket({
 
   const reset = () => setConfirmStep(false);
 
-  const { bid, ask, mid } = useTargetQuote(position, prices, target);
+  const { bid, ask, mid, priceData: legPriceData } = useTargetQuote(position, prices, target);
+
+  const comboQuoteModel = useMemo(() => {
+    if (target.kind !== "combo") return null;
+    if (bid == null && ask == null) return null;
+    return buildQuoteTelemetryModel(
+      comboQuotePriceData({ symbol: position.ticker, bid, ask, last: mid }),
+    );
+  }, [target.kind, position.ticker, bid, ask, mid]);
 
   const parsedQty = parseInt(quantity, 10);
   const parsedPrice = parseFloat(limitPrice);
@@ -212,6 +226,12 @@ export default function PositionTradeTicket({
           esc ✕
         </button>
       </div>
+
+      <OrderQuoteTelemetry
+        priceData={legPriceData}
+        model={comboQuoteModel}
+        label={subjectLabel}
+      />
 
       <div className="order-field">
         <label className="order-label">Action</label>

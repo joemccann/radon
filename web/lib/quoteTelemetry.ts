@@ -72,6 +72,49 @@ export function formatSpreadTelemetry(
   return `${fmtPrice(spread)} / ${((spread / midMagnitude) * 100).toFixed(2)}%`;
 }
 
+export type ComboNetQuote = {
+  symbol: string;
+  bid: number | null;
+  ask: number | null;
+  last?: number | null;
+};
+
+/**
+ * A BAG/combo is not a quoted instrument: every combo surface holds only a
+ * signed per-leg sum (`computeNetOptionQuote`, `ComboOrderForm.netPrices`,
+ * `useTargetQuote`). Wrap that net quote in a PriceData so a combo ticket feeds
+ * the SAME `buildQuoteTelemetryModel` every single-leg surface uses instead of
+ * hand-rolling a second model. Session OHLV stays null because no exchange
+ * publishes a combo's high/low/volume — those fields render "---" honestly.
+ */
+export function comboQuotePriceData({ symbol, bid, ask, last }: ComboNetQuote): PriceData {
+  const { mid } = getQuoteMetrics({ bid, ask });
+  return {
+    symbol,
+    last: last ?? mid,
+    lastIsCalculated: true,
+    bid,
+    ask,
+    bidSize: null,
+    askSize: null,
+    volume: null,
+    high: null,
+    low: null,
+    open: null,
+    close: null,
+    week52High: null,
+    week52Low: null,
+    avgVolume: null,
+    delta: null,
+    gamma: null,
+    theta: null,
+    vega: null,
+    impliedVol: null,
+    undPrice: null,
+    timestamp: new Date().toISOString(),
+  };
+}
+
 function formatMetricValue(value: number | null): string {
   return value != null ? fmtPrice(value) : "---";
 }

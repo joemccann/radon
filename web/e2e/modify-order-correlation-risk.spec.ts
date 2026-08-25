@@ -89,6 +89,31 @@ async function stubApis(page: import("@playwright/test").Page) {
   );
 }
 
+/**
+ * Measure the header's title and gate in a SINGLE evaluate.
+ *
+ * Two sequential `boundingBox()` calls are two round-trips, and the modal
+ * reflows once shortly after it opens (the mono webfont swaps in and every
+ * row above the banner re-measures). Straddling that reflow compares a
+ * pre-shift `title.y` against a post-shift `gate.y` and reports a gap no
+ * single frame ever had - main measured 5.85 against this 6px tolerance
+ * purely by luck. Reading both rects in one frame, after fonts settle, is
+ * what "on one row" actually means, and it is stricter than the old form:
+ * a genuine wrap puts the gap at a full row height (~24px), not 4px.
+ */
+async function headerGeometry(banner: import("@playwright/test").Locator) {
+  await banner.page().evaluate(() => document.fonts?.ready);
+  return banner.evaluate((el) => {
+    const rect = (selector: string) => {
+      const node = el.querySelector(selector);
+      if (!node) return null;
+      const { x, y, width } = node.getBoundingClientRect();
+      return { x, y, width };
+    };
+    return { title: rect(".crb-title"), gate: rect(".crb-gate") };
+  });
+}
+
 test("modify modal keeps correlation risk header on one row with ticker chips", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "dark" });
   await page.addInitScript(() => {
@@ -105,10 +130,7 @@ test("modify modal keeps correlation risk header on one row with ticker chips", 
   await expect(banner).toBeVisible();
   await expect(banner).toContainText("Gate 3: correlation measurement unavailable");
 
-  const title = banner.locator(".crb-title");
-  const gate = banner.locator(".crb-gate");
-  const titleBox = await title.boundingBox();
-  const gateBox = await gate.boundingBox();
+  const { title: titleBox, gate: gateBox } = await headerGeometry(banner);
   expect(titleBox).toBeTruthy();
   expect(gateBox).toBeTruthy();
   expect(Math.abs((titleBox?.y ?? 0) - (gateBox?.y ?? 0))).toBeLessThan(6);
@@ -120,8 +142,7 @@ test("modify modal keeps correlation risk header on one row with ticker chips", 
   await expect(dialog.getByRole("button", { name: "Modify Order" })).toBeVisible();
 
   await page.setViewportSize({ width: 393, height: 852 });
-  const titleMobile = await title.boundingBox();
-  const gateMobile = await gate.boundingBox();
+  const { title: titleMobile, gate: gateMobile } = await headerGeometry(banner);
   expect(titleMobile).toBeTruthy();
   expect(gateMobile).toBeTruthy();
   expect(Math.abs((titleMobile?.y ?? 0) - (gateMobile?.y ?? 0))).toBeLessThan(6);

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useTickerDetailOptional } from "@/lib/TickerDetailContext";
 import { useFuturesChain, type FuturesChainContract } from "@/lib/useFuturesChain";
 import { type LinearOrderRiskInput } from "@/lib/order";
+import type { PriceData } from "@/lib/pricesProtocol";
 import type { PortfolioData } from "@/lib/types";
 import {
   ListedContractOrderForm,
@@ -18,6 +19,15 @@ interface FuturesOrderFormProps {
    * branch (added 2026-05-26 via OrderRiskInput discriminated union).
    */
   portfolio?: PortfolioData | null;
+  /**
+   * Live quote for the INDEX the futures chain is listed against (VIX), which
+   * is the only feed keyed for this surface — no PriceData is keyed by a
+   * future's conId anywhere in the app. Threaded from the parent so the
+   * telemetry panel re-renders on tick; the panel is labelled with the index
+   * symbol so the operator never reads it as the front-month contract's own
+   * book.
+   */
+  priceData?: PriceData | null;
 }
 
 function formatExpiry(date: string): string {
@@ -45,7 +55,7 @@ function formatExpiry(date: string): string {
  * sees the actual exposure (1 VIX future at 19 = $19,000 notional,
  * ~$5,500 initial margin).
  */
-export function FuturesOrderForm({ ticker, portfolio }: FuturesOrderFormProps) {
+export function FuturesOrderForm({ ticker, portfolio, priceData }: FuturesOrderFormProps) {
   const symbol = ticker.toUpperCase();
   const tickerDetail = useTickerDetailOptional();
   const { data, loading, error } = useFuturesChain(symbol);
@@ -209,6 +219,8 @@ export function FuturesOrderForm({ ticker, portfolio }: FuturesOrderFormProps) {
       notionalLabel="Notional"
       limitPriceLabel="Limit Price"
       limitPriceStep={selectedContract?.minTick ?? 0.05}
+      priceData={priceData ?? null}
+      quoteLabel={`${symbol} Index`}
       buildRiskInput={buildRiskInput}
       portfolio={portfolio}
       surface="futures-form"

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import ChatPanel from "@/components/ChatPanel";
 import { subscribeAsk } from "@/lib/agent/askBus";
+import type { PriceData } from "@/lib/pricesProtocol";
 import type { WorkspaceSection } from "@/lib/types";
 import type { PortfolioData } from "@/lib/types";
 
@@ -16,9 +17,11 @@ import type { PortfolioData } from "@/lib/types";
 type ChatLauncherProps = {
   activeSection: WorkspaceSection;
   portfolio: PortfolioData | null | undefined;
+  /** Live quotes from the shell's single relay subscription, for the approval gate. */
+  prices?: Record<string, PriceData>;
 };
 
-export default function ChatLauncher({ activeSection, portfolio }: ChatLauncherProps) {
+export default function ChatLauncher({ activeSection, portfolio, prices }: ChatLauncherProps) {
   const [open, setOpen] = useState(false);
   // A prompt handed over from another surface (newsfeed follow-up chips).
   // Consumed once by ChatPanel, then cleared so it can't re-fire on re-render.
@@ -74,6 +77,7 @@ export default function ChatLauncher({ activeSection, portfolio }: ChatLauncherP
           isOpen={open}
           seedPrompt={seedPrompt}
           onSeedConsumed={() => setSeedPrompt(null)}
+          prices={prices}
         />
       </div>
     </div>
