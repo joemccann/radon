@@ -104,3 +104,65 @@ describe("SingleLegOrderTicket quote telemetry", () => {
     expect(getByRole("button", { name: "ASK" })).toBeTruthy();
   });
 });
+
+/**
+ * The position drawer renders the telemetry block itself, ABOVE the order
+ * form. Threading `priceData` into the nested ticket as well made the drawer
+ * print the same nine fields twice, stacked - caught on production. The
+ * drawer must show exactly one.
+ */
+describe("InstrumentDetailModal renders exactly one telemetry block", () => {
+  it("does not duplicate the quote panel inside the nested order ticket", async () => {
+    const { default: InstrumentDetailModal } = await import("@/components/InstrumentDetailModal");
+    const leg = {
+      direction: "LONG" as const,
+      contracts: 50,
+      type: "Call" as const,
+      strike: 575,
+      entry_cost: 21250,
+      avg_cost: 425,
+      market_price: 4.35,
+      market_value: 21750,
+      market_price_is_calculated: false,
+    };
+    const price: PriceData = {
+      symbol: "META_20260828_575_C",
+      last: 4.35,
+      lastIsCalculated: false,
+      bid: 4.2,
+      ask: 4.45,
+      bidSize: 10,
+      askSize: 12,
+      volume: 1060,
+      high: 6.4,
+      low: 3.55,
+      open: 5.0,
+      close: 3.65,
+      week52High: null,
+      week52Low: null,
+      avgVolume: null,
+      delta: null,
+      gamma: null,
+      theta: null,
+      vega: null,
+      impliedVol: null,
+      undPrice: null,
+      timestamp: new Date().toISOString(),
+    };
+
+    render(
+      <InstrumentDetailModal
+        leg={leg}
+        ticker="META"
+        expiry="2026-08-28"
+        prices={{ META_20260828_575_C: price }}
+        onClose={() => {}}
+        portfolio={null}
+      />,
+    );
+
+    // Modal portals to document.body, so scope the count to the whole document.
+    const panels = document.querySelectorAll(".price-bar");
+    expect(panels.length).toBe(1);
+  });
+});
