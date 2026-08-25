@@ -343,11 +343,19 @@ class TestStorage:
         names = {r[1] for r in db.execute("PRAGMA index_list(hyad_history)")}
         assert "idx_hyad_history_date_desc" in names
 
-    def test_upsert_is_idempotent_per_date(self, db):
+    # TEST_AUDIT T-132: exercises the REAL writer, not a dead SQL constant.
+    def test_upsert_is_idempotent_per_date(self, db, monkeypatch):
         from db import writer
 
-        db.execute(writer.HYAD_UPSERT_SQL, (DATA_DATE, 1200, 1500, 70, 3100, "r1"))
-        db.execute(writer.HYAD_UPSERT_SQL, (DATA_DATE, 1227, 1504, 69, 3163, "r2"))
+        monkeypatch.setattr(writer, "get_db", lambda: db)
+        writer.upsert_hyad_rows(
+            [{"date": DATA_DATE, "advances": 1200, "declines": 1500, "unchanged": 70, "total": 3100}],
+            recorded_at="r1",
+        )
+        writer.upsert_hyad_rows(
+            [{"date": DATA_DATE, "advances": 1227, "declines": 1504, "unchanged": 69, "total": 3163}],
+            recorded_at="r2",
+        )
         rows = list(
             db.execute(
                 "SELECT date, advances, declines, unchanged, total, recorded_at FROM hyad_history"

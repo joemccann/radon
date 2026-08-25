@@ -321,11 +321,20 @@ class TestStorage:
         )
         assert list(db.execute("SELECT approximate FROM divyield_history")) == [(0,)]
 
-    def test_upsert_is_idempotent_per_date(self, db):
+    # TEST_AUDIT T-132: this used to execute a dead SQL constant the writer
+    # never used; the REAL `upsert_divyield_rows` body (inline SQL + a
+    # hand-built params tuple) was executed by no test, so a column swap
+    # in `params.extend(...)` shipped to Turso green.
+    def test_upsert_is_idempotent_per_date(self, db, monkeypatch):
         from db import writer
 
-        db.execute(writer.DIVYIELD_UPSERT_SQL, (DATA_DATE, 3.58, 18, 502, 4.70, 0, "r1"))
-        db.execute(writer.DIVYIELD_UPSERT_SQL, (DATA_DATE, 3.78, 19, 503, 4.74, 0, "r2"))
+        monkeypatch.setattr(writer, "get_db", lambda: db)
+        row = {"date": DATA_DATE, "pct_above": 3.58, "count_above": 18, "total": 502, "y10": 4.70}
+        writer.upsert_divyield_rows([row], recorded_at="r1")
+        writer.upsert_divyield_rows(
+            [{**row, "pct_above": 3.78, "count_above": 19, "total": 503, "y10": 4.74}],
+            recorded_at="r2",
+        )
         rows = list(
             db.execute(
                 "SELECT date, pct_above, count_above, total, y10, approximate, recorded_at"

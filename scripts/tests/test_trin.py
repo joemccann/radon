@@ -280,15 +280,25 @@ class TestStorage:
         ]
         assert [r[1] for r in db.execute("PRAGMA table_info(trin_daily)")] == ["date", "close", "recorded_at"]
 
-    def test_upserts_are_idempotent(self, db):
+    # TEST_AUDIT T-132: drives the REAL writers (`_trin_sample_params` is
+    # the only place the column order lives) instead of a hand-built tuple.
+    def test_upserts_are_idempotent(self, db, monkeypatch):
         from db import writer
 
-        db.execute(writer.TRIN_SAMPLE_UPSERT_SQL, ("2026-08-21T13:35:00Z", "2026-08-21", 0.70, None, None, None, None, "ib", "r1"))
-        db.execute(writer.TRIN_SAMPLE_UPSERT_SQL, ("2026-08-21T13:35:00Z", "2026-08-21", 0.68, 1500, 1300, 2.0e9, 1.5e9, "ib", "r2"))
-        assert list(db.execute("SELECT trin, adv, recorded_at FROM trin_samples")) == [(0.68, 1500, "r2")]
-        db.execute(writer.TRIN_DAILY_UPSERT_SQL, ("2026-08-21", 0.70, "r1"))
-        db.execute(writer.TRIN_DAILY_UPSERT_SQL, ("2026-08-21", 0.68, "r2"))
-        assert list(db.execute("SELECT close FROM trin_daily")) == [(0.68,)]
+        monkeypatch.setattr(writer, "get_db", lambda: db)
+        ts = "2026-08-21T13:35:00Z"
+        writer.upsert_trin_samples([{"ts": ts, "session_date": "2026-08-21", "trin": 0.70}], recorded_at="r1")
+        writer.upsert_trin_samples(
+            [{"ts": ts, "session_date": "2026-08-21", "trin": 0.68, "adv": 1500, "dec": 1300,
+              "up_vol": 2.0e9, "down_vol": 1.5e9, "source": "ib-delayed"}],
+            recorded_at="r2",
+        )
+        assert list(db.execute(
+            "SELECT ts, session_date, trin, adv, dec, up_vol, down_vol, source, recorded_at FROM trin_samples"
+        )) == [(ts, "2026-08-21", 0.68, 1500, 1300, 2.0e9, 1.5e9, "ib-delayed", "r2")]
+        writer.upsert_trin_daily_rows([("2026-08-21", 0.70)], recorded_at="r1")
+        writer.upsert_trin_daily_rows([("2026-08-21", 0.68)], recorded_at="r2")
+        assert list(db.execute("SELECT date, close, recorded_at FROM trin_daily")) == [("2026-08-21", 0.68, "r2")]
 
 
 class TestCli:
