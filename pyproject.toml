@@ -18,6 +18,11 @@ omit = ["scripts/tests/*", "scripts/api/tests/*", "scripts/trade_blotter/test_*.
 # CI shards pytest; combine needs repo-relative paths so
 # /home/runner/work/... does not fork the same file into two rows.
 relative_files = true
+# The 56 ratchet (ci.yml py-coverage) was rebased on statement+branch
+# coverage (T-050). The shard rewrite dropped --cov-branch from the
+# invocation; measure branches here so the metric cannot drift again
+# (TEST_AUDIT T-123).
+branch = true
 
 [tool.pytest.ini_options]
 # Pin import roots so collection is cwd-independent. Without this, running

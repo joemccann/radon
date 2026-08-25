@@ -126,18 +126,55 @@ class TestPerfTwrWritesAHealthRow:
             "a Flex 1025 lockout is a silent degraded payload"
         )
 
+    # TEST_AUDIT T-129: this test used to monkeypatch `_record_perf_twr_health`
+    # with a lambda and then assert on the lambda it installed — the REAL
+    # writer (which swallows every exception) never ran, so a `pass` body or
+    # a broken `db.writer` import stayed green while no row was written and
+    # check.py read "no row" as dormant. Patch the writer it calls instead.
     def test_a_degraded_payload_records_error(self, monkeypatch):
+        import db.writer as writer
         import perf_twr_builder as builder
 
         recorded: list[tuple] = []
         monkeypatch.setattr(
-            builder,
-            "_record_perf_twr_health",
-            lambda status, **kw: recorded.append((status, kw)),
-            raising=False,
+            writer,
+            "record_service_health",
+            lambda service, state, **kw: recorded.append((service, state, kw)),
         )
         builder._record_perf_twr_health("degraded", error={"message": "flex lockout"})
-        assert recorded and recorded[0][0] == "degraded"
+        assert recorded == [
+            ("perf-twr", "error", {"error": {"message": "flex lockout"}}),
+        ]
+
+    def test_main_writes_the_error_row_for_a_degraded_build(self, monkeypatch, capsys):
+        import db.writer as writer
+        import perf_twr_builder as builder
+
+        recorded: list[tuple] = []
+        monkeypatch.setattr(
+            writer,
+            "record_service_health",
+            lambda service, state, **kw: recorded.append((service, state, kw)),
+        )
+        monkeypatch.setattr(
+            builder,
+            "build_and_persist",
+            lambda **kw: {
+                "status": "degraded",
+                "flows_status": "quarantined",
+                "nav_source": "flex",
+                "period_start": "2026-01-02",
+                "period_end": "2026-08-22",
+            },
+        )
+        monkeypatch.setattr(sys, "argv", ["perf_twr_builder.py"])
+        builder.main()
+        assert len(recorded) == 1
+        service, state, kw = recorded[0]
+        assert (service, state) == ("perf-twr", "error")
+        assert kw["error"]["class"] == "degraded_build"
+        assert "status=degraded" in kw["error"]["message"]
+        assert capsys.readouterr().out == "", "stdout is reserved for the result JSON"
 
     def test_the_health_writer_maps_status_to_state(self):
         import perf_twr_builder as builder

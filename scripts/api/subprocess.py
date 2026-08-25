@@ -232,7 +232,12 @@ async def _terminate_child(proc, *, reap_timeout: float = CHILD_REAP_TIMEOUT_SEC
     pid = getattr(proc, "pid", None)
     if pid:
         try:
-            os.killpg(os.getpgid(pid), signal.SIGKILL)
+            pgid = os.getpgid(pid)
+            # A child that shares our group (spawned without a new session)
+            # must never route SIGKILL through killpg — that lands on the
+            # API server itself (T-127).
+            if pgid != os.getpgid(0):
+                os.killpg(pgid, signal.SIGKILL)
         except (ProcessLookupError, PermissionError, OSError):
             pass
     try:
@@ -422,6 +427,7 @@ async def run_module(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=str(SCRIPTS_DIR),
+            start_new_session=True,
         )
 
         stdout_bytes, stderr_bytes = await asyncio.wait_for(

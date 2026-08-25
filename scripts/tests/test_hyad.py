@@ -313,6 +313,45 @@ class TestPersistResult:
         assert ("health", "hy-ad", "ok") in persist_calls
 
 
+# TEST_AUDIT T-133: `run()` was executed by no test (see test_divyield.py).
+class TestRun:
+    def test_only_new_or_revised_days_are_written(self, persist_calls, monkeypatch):
+        import fetch_hyad as fh
+
+        window = _synthetic_rows(3)
+        stored = [dict(window[0]), dict(window[1])]
+        monkeypatch.setattr(fh, "fetch_window", lambda start, end: window)
+        monkeypatch.setattr(fh, "_turso_history", lambda: stored)
+        monkeypatch.setattr(fh, "_spx_by_date", lambda: {})
+
+        payload = fh.run()
+
+        assert ("rows", 1) in persist_calls
+        assert ("health", "hy-ad", "ok") in persist_calls
+        assert payload["data_date"] == window[-1]["date"]
+
+    def test_a_revised_stored_day_is_rewritten(self, persist_calls, monkeypatch):
+        import fetch_hyad as fh
+
+        window = _synthetic_rows(2)
+        stored = [dict(window[0]), {**window[1], "advances": window[1]["advances"] - 5}]
+        monkeypatch.setattr(fh, "fetch_window", lambda start, end: window)
+        monkeypatch.setattr(fh, "_turso_history", lambda: stored)
+        monkeypatch.setattr(fh, "_spx_by_date", lambda: {})
+
+        fh.run()
+
+        assert ("rows", 1) in persist_calls
+
+    def test_an_empty_window_is_a_retryable_failure_not_a_heartbeat(self, persist_calls, monkeypatch):
+        import fetch_hyad as fh
+
+        monkeypatch.setattr(fh, "fetch_window", lambda start, end: [])
+        with pytest.raises(RuntimeError):
+            fh.run()
+        assert persist_calls == []
+
+
 class TestStorage:
     @pytest.fixture()
     def db(self):
@@ -343,11 +382,19 @@ class TestStorage:
         names = {r[1] for r in db.execute("PRAGMA index_list(hyad_history)")}
         assert "idx_hyad_history_date_desc" in names
 
-    def test_upsert_is_idempotent_per_date(self, db):
+    # TEST_AUDIT T-132: exercises the REAL writer, not a dead SQL constant.
+    def test_upsert_is_idempotent_per_date(self, db, monkeypatch):
         from db import writer
 
-        db.execute(writer.HYAD_UPSERT_SQL, (DATA_DATE, 1200, 1500, 70, 3100, "r1"))
-        db.execute(writer.HYAD_UPSERT_SQL, (DATA_DATE, 1227, 1504, 69, 3163, "r2"))
+        monkeypatch.setattr(writer, "get_db", lambda: db)
+        writer.upsert_hyad_rows(
+            [{"date": DATA_DATE, "advances": 1200, "declines": 1500, "unchanged": 70, "total": 3100}],
+            recorded_at="r1",
+        )
+        writer.upsert_hyad_rows(
+            [{"date": DATA_DATE, "advances": 1227, "declines": 1504, "unchanged": 69, "total": 3163}],
+            recorded_at="r2",
+        )
         rows = list(
             db.execute(
                 "SELECT date, advances, declines, unchanged, total, recorded_at FROM hyad_history"

@@ -350,6 +350,22 @@ class TestPersistResult:
 DATA_DATE = (date.today() - timedelta(days=1)).isoformat()
 
 
+# TEST_AUDIT T-133: `run()` was executed by no test (see test_divyield.py).
+class TestRun:
+    def test_every_run_writes_the_full_revised_series(self, persist_calls, monkeypatch):
+        import fetch_hhlev as fh
+
+        rows = parse_fredgraph_csv(CSV_TEXT)
+        monkeypatch.setattr(fh, "fetch_rows", lambda: (rows, "2026-06-12T12:00:00Z"))
+
+        payload = fh.run()
+
+        assert ("rows", len(rows)) in persist_calls
+        assert ("health", "hhlev", "ok") in persist_calls
+        assert payload["data_date"] == LATEST_DATE
+        assert "2026-06-12T12:00:00Z" in json.dumps(payload)
+
+
 class TestStorage:
     @pytest.fixture()
     def db(self):
@@ -380,11 +396,19 @@ class TestStorage:
         names = {r[1] for r in db.execute("PRAGMA index_list(hhlev_history)")}
         assert "idx_hhlev_history_date_desc" in names
 
-    def test_upsert_is_idempotent_per_date(self, db):
+    # TEST_AUDIT T-132: exercises the REAL writer, not a dead SQL constant.
+    def test_upsert_is_idempotent_per_date(self, db, monkeypatch):
         from db import writer
 
-        db.execute(writer.HHLEV_UPSERT_SQL, (DATA_DATE, 11.5, 21000000.0, 182000000.0, "r1"))
-        db.execute(writer.HHLEV_UPSERT_SQL, (DATA_DATE, 11.78, 21560050.0, 182979889.0, "r2"))
+        monkeypatch.setattr(writer, "get_db", lambda: db)
+        writer.upsert_hhlev_rows(
+            [{"date": DATA_DATE, "leverage_pct": 11.5, "liabilities_musd": 21000000.0, "net_worth_musd": 182000000.0}],
+            recorded_at="r1",
+        )
+        writer.upsert_hhlev_rows(
+            [{"date": DATA_DATE, "leverage_pct": 11.78, "liabilities_musd": 21560050.0, "net_worth_musd": 182979889.0}],
+            recorded_at="r2",
+        )
         rows = list(
             db.execute(
                 "SELECT date, leverage_pct, liabilities_musd, net_worth_musd, recorded_at"
