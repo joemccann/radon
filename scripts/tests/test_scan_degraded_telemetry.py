@@ -23,6 +23,8 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
+import garch_convergence as garch  # noqa: E402
+import leap_scanner_uw as leap  # noqa: E402
 import strength_confirmation_scanner as strength  # noqa: E402
 import theta_harvester_scanner as theta  # noqa: E402
 from clients.uw_client import UWRateLimitError  # noqa: E402
@@ -325,3 +327,123 @@ def test_strength_route_blocked_scan_does_not_consume_cooldown(app_client, monke
     assert resp.status_code == 200
     assert resp.json()["scan_status"] == "uw-budget-blocked"
     assert server._strength_last_scan == COOLDOWN_EXPIRED
+
+
+# ── GARCH / LEAP preset scans (T-109) ─────────────────────────────
+#
+# The two schedulers that burned the quota had no brake at all: the only
+# guard was a string grep over a shell DEFAULT that RADON_*_REFRESH_PRESET
+# overrides at runtime. A preset (universe) scan must refuse under the brake
+# and write the same distinguishable error row the theta harvester writes.
+
+
+def _refuse_uw_fetch(*_a, **_k):
+    raise AssertionError("UW fetch attempted under the universe-scan brake")
+
+
+def _blocked_garch(monkeypatch, tmp_path, argv: list[str]) -> tuple[list[tuple], Path, list]:
+    cache = tmp_path / "garch_convergence.json"
+    mirrored: list = []
+    monkeypatch.setattr(garch, "_CACHE_PATH", cache)
+    monkeypatch.setattr(garch, "should_block_universe_scan", lambda: True)
+    monkeypatch.setattr(
+        garch,
+        "resolve_inputs",
+        lambda tickers, preset: (["NVDA", "AMD"], [["NVDA", "AMD"]], "stub", "shared driver"),
+    )
+    monkeypatch.setattr(garch, "fetch_all_tickers", _refuse_uw_fetch)
+    monkeypatch.setattr(garch, "UWClient", _refuse_uw_fetch)
+    monkeypatch.setattr(garch, "mirror_scan_snapshot", lambda *a, **k: mirrored.append(a))
+    monkeypatch.setattr(sys, "argv", ["garch_convergence.py", *argv])
+    return _capture_degraded(monkeypatch, garch), cache, mirrored
+
+
+def test_garch_preset_scan_refuses_under_budget_block(tmp_path, monkeypatch, capsys) -> None:
+    calls, cache, mirrored = _blocked_garch(
+        monkeypatch, tmp_path, ["--preset", "largecaps", "--json", "--no-open"]
+    )
+
+    garch.main()
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["scan_status"] == "uw-budget-blocked"
+    assert payload["universe"] == "preset:largecaps"
+    assert not cache.exists()
+    assert mirrored == []
+    assert len(calls) == 1
+    (service, reason, message), kwargs = calls[0]
+    assert service == "garch-scan"
+    assert reason == "uw-budget-blocked"
+    assert "budget block" in message
+    assert kwargs["next_attempt_at"]
+
+
+def test_garch_budget_block_returns_prior_cache_marked_transient(tmp_path, monkeypatch, capsys) -> None:
+    calls, cache, _mirrored = _blocked_garch(
+        monkeypatch, tmp_path, ["--preset", "largecaps", "--json", "--no-open"]
+    )
+    prior = {"scan_time": "T0", "universe": "preset:largecaps", "tickers": {}, "pairs": [{"pair": ["NVDA", "AMD"]}]}
+    cache.write_text(json.dumps(prior))
+
+    garch.main()
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["scan_status"] == "uw-budget-blocked"
+    assert payload["pairs"] == prior["pairs"]
+    assert json.loads(cache.read_text()) == prior
+    assert len(calls) == 1
+
+
+def test_garch_explicit_tickers_bypass_budget_block(tmp_path, monkeypatch) -> None:
+    calls, _cache, _mirrored = _blocked_garch(
+        monkeypatch, tmp_path, ["--tickers", "NVDA,AMD", "--json", "--no-open"]
+    )
+
+    with pytest.raises(AssertionError, match="UW fetch attempted"):
+        garch.main()
+
+    assert calls == []
+
+
+def _blocked_leap(monkeypatch, tmp_path, argv: list[str]) -> tuple[list[tuple], Path, list]:
+    cache = tmp_path / "leap.json"
+    mirrored: list = []
+    monkeypatch.setattr(leap, "DASHBOARD_CACHE_PATH", cache)
+    monkeypatch.setattr(leap, "should_block_universe_scan", lambda: True)
+    monkeypatch.setattr(
+        leap, "resolve_scan_inputs", lambda explicit, preset: (["AAPL", "MSFT"], f"preset:{preset}")
+        if not explicit else (list(explicit), "explicit"),
+    )
+    monkeypatch.setattr(leap, "scan_universe", _refuse_uw_fetch)
+    monkeypatch.setattr(leap, "UWClient", _refuse_uw_fetch)
+    monkeypatch.setattr(leap, "mirror_scan_snapshot", lambda *a, **k: mirrored.append(a))
+    monkeypatch.setattr(
+        sys, "argv", ["leap_scanner_uw.py", *argv, "--json", "--output", str(tmp_path / "report.html")]
+    )
+    return _capture_degraded(monkeypatch, leap), cache, mirrored
+
+
+def test_leap_preset_scan_refuses_under_budget_block(tmp_path, monkeypatch) -> None:
+    calls, cache, mirrored = _blocked_leap(monkeypatch, tmp_path, ["--preset", "largecaps"])
+    prior = {"scan_time": "T0", "results": [{"ticker": "SPY"}]}
+    cache.write_text(json.dumps(prior))
+
+    assert leap.main() == 0
+
+    assert json.loads(cache.read_text()) == prior
+    assert mirrored == []
+    assert len(calls) == 1
+    (service, reason, message), kwargs = calls[0]
+    assert service == "leap-scan"
+    assert reason == "uw-budget-blocked"
+    assert "budget block" in message
+    assert kwargs["next_attempt_at"]
+
+
+def test_leap_explicit_tickers_bypass_budget_block(tmp_path, monkeypatch) -> None:
+    calls, _cache, _mirrored = _blocked_leap(monkeypatch, tmp_path, ["SPY", "QQQ"])
+
+    with pytest.raises(AssertionError, match="UW fetch attempted"):
+        leap.main()
+
+    assert calls == []

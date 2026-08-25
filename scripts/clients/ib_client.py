@@ -493,19 +493,24 @@ class IBClient:
     ) -> bool:
         """Poll ``predicate`` while draining IB events. Cap at ``timeout``.
 
-        Elapsed time is the sum of ``ib.sleep`` steps (not wall clock) so
-        mocked sleeps in tests stay instant and do not busy-loop.
+        The cap is a ``time.monotonic()`` deadline captured at entry, because
+        ``ib.sleep(secs)`` runs the event loop for AT LEAST ``secs`` and a
+        blocked handler can stretch one step far past ``poll``. The loop is
+        additionally bounded to ``ceil(timeout / poll)`` steps so an instant
+        (mocked) sleep still terminates.
         Returns True as soon as ``predicate`` is true; False on timeout.
         """
         if timeout <= 0:
             return bool(predicate())
         if predicate():
             return True
-        elapsed = 0.0
-        while elapsed < timeout:
-            step = min(poll, timeout - elapsed)
-            self._ib.sleep(step)
-            elapsed += step
+        deadline = time.monotonic() + timeout
+        max_steps = math.ceil(timeout / poll)
+        for _ in range(max_steps):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            self._ib.sleep(min(poll, remaining))
             if predicate():
                 return True
             # R-118: a socket that drops mid-wait will never satisfy the
@@ -513,7 +518,8 @@ class IBClient:
             # gateway byte-identical to a healthy one.
             if not self.is_connected():
                 logger.warning(
-                    "wait_until abandoned after %.2fs: IB socket closed", elapsed
+                    "wait_until abandoned after %.2fs: IB socket closed",
+                    timeout - (deadline - time.monotonic()),
                 )
                 return False
         return bool(predicate())

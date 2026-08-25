@@ -2435,6 +2435,44 @@ appended on top, with the eight converged findings dropped and the rest
 renumbered from T-097. The first pass's audit text, ledger line and
 `TEST_LOG.md` row are byte-unchanged.
 
+## Delta audit 2026-08-23 (second host, surfaced by remediation)
+
+### P1 — correctness gaps
+
+- **T-121 [P1] Six rendered tables sit in no horizontal-overflow container at
+  all — the 2026-08-18 vol-cone mobile bug, unfixed, in six other places.**
+  Surfaced by inverting `web/tests/table-scroll-wrapper-contract.test.ts`
+  under T-113: the old contract only inspected classNames that ALREADY
+  contained `table-scroll`/`table-wrap`, so a table with no wrapper class was
+  never looked at. Enumerating every `<table>` in `web/components` +
+  `web/app` and requiring an ancestor with an `overflow-x` rule (global CSS or
+  the component's CSS module) or an inline `overflowX` leaves six unwrapped:
+  `WorkspaceSections.tsx:OrdersSections` and `:HistoricalTradesSection` (both
+  inside `div.section > div.section-body`),
+  `equibles-cot/EquiblesCotPanel.tsx:CotBoardTable` (`.data-table`, which has
+  NO stylesheet rule of any kind),
+  `flow-analysis/DailyDarkPoolHistory.tsx:DailyTable` (`.ticker-flow-daily`),
+  `ticker-detail/RatingsTab.tsx:RatingsChangesTable` (`.pos-legs-table` inside
+  `div.ratings-changes` — note `.pos-legs-table-wrap { overflow-x: auto }`
+  exists at `globals.css:8577` and is simply not used here), and
+  `ticker-detail/SeasonalityTab.tsx:SeasonalityDetailTable`
+  (`div.seasonality-detail`). Verified per class: none of `.section-body`,
+  `.data-table`, `.ticker-flow-daily`, `.ratings-changes`,
+  `.seasonality-detail` names an `overflow-x` rule anywhere in `globals.css`
+  or a module. Not a measurement artefact and not a design choice — the one
+  table that IS deliberately unwrapped
+  (`OptionsExposurePanel`, `table-layout: fixed` with per-column widths and
+  ellipsis truncation) now says so with `data-overflow-exempt`. Pinned as
+  `KNOWN_UNWRAPPED_T121` in the inverted contract under an EQUALITY assertion,
+  so a seventh reds immediately and fixing one reds until its entry is
+  removed. **AC:** RED — the entries above are the red list today; green —
+  wrap each in a container carrying an `overflow-x` rule (or reuse
+  `.pos-legs-table-wrap`), remove its `KNOWN_UNWRAPPED_T121` entry, and verify
+  at 390px in a browser per Mandatory Rule 3. NOT fixed by the run that filed
+  it: six UI changes need browser verification, which is outside a
+  test-quality remediation task.
+
+
 ## Remediation 2026-08-23
 
 - **T-080 DONE.** Operator decision: $10M is not policy; it stays the default
@@ -2446,6 +2484,26 @@ renumbered from T-097. The first pass's audit text, ledger line and
   strangle clearing it, a lowered cap refusing the same order, the cap±1
   boundary, and env clamping at the $50M ceiling. Red 3/4 before the change;
   `test_order_limits.py` 33 green, `scripts/tests` 6229 green after.
+- **T-081 DONE.** `load_flows_from_turso` (`scripts/perf_twr_builder.py`) buckets rows by `flow_type`: classified rows win per date over the builder's `external` mirror (`_MIRRORED_FLOW_TYPE`, reused by `_external_flow_rows`). New `TestLoadFlowsFromTursoCountsAMirroredRowOnce` (3 tests, real sqlite with 0035 applied, only `get_db` stubbed) in `tests/test_perf_twr_flows_turso_fallback.py`. Red 160014.26 for an 80007.13 deposit; green after. 210 perf-TWR tests green.
+- **T-097 DONE.** `scripts/clients/ib_client.py` `wait_until` is now a wall-clock deadline (`time.monotonic()`) plus a `ceil(timeout/poll)` step cap. Red 1.24s wall for a 0.2s timeout under a 0.2s-overrunning sleep; green after. Step assertion relaxed to `<= ceil(timeout/poll)` (the `== 4` pinned the defect).
+- **T-082 DONE.** `scripts/ib_sync.py` `wait_for_streaming_data` releases only on a valid account `dailyPnL` (`account_daily_pnl_is_ready` in `ib_client.py`). Red: nan `dailyPnL` + valid `unrealizedPnL` reported ready; green after. Guard tests for a quoteless ticker and a nan PnLSingle pin the two loops against deletion.
+- **T-086 DONE.** Real-sqlite keyset test (`TestRehashKeysetPagingRealSqlite`, 25 rows / 2 accounts / tied `ingested_at` / `PAGE_SIZE=10`) in `scripts/tests/test_position_execution_fact_tolerated_hash.py`. Red under the AND-form WHERE mutation (10 of 25 rows skipped), green with the row-value comparison; source unchanged.
+- **T-098 DONE.** `scripts/db/writer.py` tolerated-drift UPDATE carries the full denormalized column set through `_execution_fact_columns(item)`, shared with INSERT, so a converged row equals a fresh insert. Red: `price` column stuck at 4.15 after a 9.99 restatement, `multiplier` stuck at 100.0 after 1; green after. Option (a) chosen over widening the gate because `normalize_execution` documents that avgPrice drift must not raise.
+- **T-102 DONE.** Holiday table extended 2028…2030 (29 dates, NYSE observance rules, independently re-derived and byte-matched). Both the TS and Python readers now carry a `currentYear+2` horizon assertion plus a derived MLK-Monday non-trading-day check, so the next expiry fails a year early instead of silently.
+- **T-105 DONE.** Role-scoped counter reset pinned with a status()-driven fake and per-tick assertions; reconnect mirror added. Red 2 failed under the ANY-role mutation, green 8 passed with source unchanged.
+- **T-083 DONE.** Per-position Day P&L now gated on the IB session via `withSessionIbDailyPnl()` in `PositionTable`; crypto carve-out kept. Red `+$13,952` rendered on a Saturday for an equity option; green blank, with weekday and crypto controls. 454 related tests green, tsc clean.
+- **T-101 DONE.** Cancel All / Halt confirm gates now behaviorally pinned (zero POSTs before confirm, exactly one after, zero on dismiss). Red 4 failed under the direct-`runAction` mutation, green 7/7 with source unchanged.
+- **T-107 DONE.** `usePathname` → context → `Providers` wiring pinned end to end. Red under both deletion mutations (empty pathname; provider removed), green 2/2 with source unchanged.
+- **T-103 DONE.** `in_flight` deploy-collateral suppression bounded to the 60-min window and gated on a live (not stranded) transition journal, sharing `external_probe`'s rule. Red `['P3'] == ['P1']` for a 20h-old in-flight kill; green 297 in `test_watchdog/`; mutant caught.
+- **T-084 DONE.** Idempotent-upsert tests for `iei_hyg_history` / `credit_spread_history` execute the production writers on a recording sqlite; dead SQL constants removed. Red 4 failed under a column-swap mutation, green after with the mutation reverted.
+- **T-099 DONE.** Both indicator jobs now heartbeat `error` + `stale_source` when IB, UW and Yahoo all fail (mirrors `fetch_ivrank`); no cache raises. Red `('health', <svc>, 'ok')` written over unconfirmed data, green after; the legitimate unchanged-day `ok` path is pinned separately.
+- **T-087 DONE.** Relay health detail now produced by an extracted builder the test imports; R-061 mutation reds 2, green 11/11 and 373 related.
+- **T-108 DONE.** Demo-mirror account-table purge retries via `retryOperation` and fails the run on persistent error instead of warning. Red: transient 502 not retried, persistent 502 resolved `{failures: []}`; green after. Source-grep guard now reds when the loop is deleted.
+- **T-085 DONE.** Suppressed-submit contract asserted behaviorally on all eight order surfaces; ChatPanel found genuinely defective (dedup message discarded) and fixed. Red 8/8 under the mutation (ChatPanel red unmutated), green 189 across 27 files.
+- **T-100 DONE.** Flex 1025 embargo is now token-wide and durable: `service_health` row read back when the sidecar is missing, unwritable sidecar still arms via the row, `record_lockout` raises when neither sink lands. Three AC reds reproduced; green across 17 files. Pre-existing `hrana_execute`-for-SELECT bug in the monitor handler noted for the next audit.
+- **T-106 DONE.** Vol-cone payload carries `intraday_count`; the panel labels a partial live pass honestly and marks un-refreshed rows AS OF their own last session. Red `KeyError: 'intraday_count'` / `LIVE 1/2 NAMES` not found; green after.
+- **T-109 DONE.** GARCH and LEAP preset scans now honour the UW universe-scan brake with the theta harvester's degraded-telemetry row; the shell-default grep is a resolved-ticker-count guard (1666 ceiling; `indexes` at 2600 reds it). Five reds reproduced, green across nine files.
+- **T-104 DONE (deploy control-plane change - needs operator eye).** Rollback now reverts exactly the units the failed release promoted via a helper-side transaction journal (`revert-units`); the restore branch call sequence is pinned. Red `'revert-units' in [...]` on a gate-failing deploy; green 24 in `test_install_units.py`, cloud FAILED list unchanged. Control-plane sources changed: root bootstrap run required before the first deploy.
 
 ## Delta audit 2026-08-25
 

@@ -265,6 +265,102 @@ how this loop improves as the codebase grows.
   weekend (T-117). Nothing in the changed-test list would have surfaced it.
   After cataloguing changed tests, ask the inverse question: which EXISTING
   tests does this source change now describe differently?
+- **2026-08-23 (remediate): an absent audit phase does NOT mean "only
+  re-verify gates".** This cycle's audit never ran (PR #75 had merged the
+  2026-08-22 findings at 11:17 and no 2026-08-23 branch existed), but the
+  backlog still held 20 un-DONE P1s from T-081…T-109. Step 1's "create from
+  `origin/main`, then only re-verify" applies when the backlog is EMPTY;
+  otherwise create the branch and work the newest non-P2 stragglers exactly as
+  if this run's audit had filed them. The remediation bullets go under a
+  `## Remediation <date>` section in `TEST_AUDIT.md` and a dated table in
+  `TEST_LOG.md`.
+- **2026-08-23 (remediate): fan the backlog out to one worktree per task
+  group; cherry-pick back serially.** `git worktree add --detach /tmp/...`
+  plus symlinked `node_modules` (root AND `web/`) gives each subagent a clean
+  tree; the shared venv needs nothing. Group findings that touch the SAME
+  test file into one agent (T-082+T-097, T-084+T-099, T-086+T-098 here) or
+  the cherry-picks conflict. The main clone stays untouched, so a baseline
+  gate can run there while the agents work, and each `cherry-pick -n` +
+  docs row + push is one durable commit. Sixteen P1s landed in ~15 minutes
+  of wall clock this way versus one-at-a-time.
+- **2026-08-23 (remediate): a subagent's "green" is scoped; re-read the
+  source diff before landing.** Two things the per-task reports could not
+  show: (a) the relay is ESM with socket side effects on import, so T-087's
+  builder was never executed by the relay in any test — verify by hand that
+  the variables the extracted call uses (`freshness`) are in scope at the
+  call site; (b) `_read_deploy_evidence` gained a `now` kwarg (T-103) and its
+  second caller lived in `grok_page_responder.py`, outside the agent's
+  scoped run. Grep every caller of a changed signature in the LANDED tree,
+  not the worktree.
+- **2026-08-23 (remediate): the darwin cloud baseline grew by three
+  `sha256sum`-class reds without any test being wrong.** At `4985a7f8`
+  this host reads 12; at `2e904678` it reads 15 because
+  `test_refresh_control_plane.py` (new in the delta) also asserts
+  `shutil.which("sha256sum")`. Same rule as the audit lesson: sort the
+  `FAILED` lines, run the base SHA in a worktree, `diff` — and record the
+  new list in the log so the next run does not misattribute it.
+- **2026-08-23 (remediate): two hosts remediated the same branch at once —
+  the 2026-08-22 "check origin first" lesson is necessary but not
+  sufficient for REMEDIATE.** Both runs fetched at pre-flight, found no
+  branch, and created it; the second host's first push was rejected, it
+  reset onto this host's tip (correctly) and started from the BOTTOM of the
+  P1 list — which this host had already fanned out in parallel, so T-100,
+  T-106, T-108, T-109 were still at risk of being done twice. Rails:
+  push the EMPTY branch immediately after creating it (this host did, and
+  that is what made the second host detect the collision); before EVERY
+  landing, `rtk proxy git fetch origin` and rebase onto the remote tip with
+  `rtk proxy git rebase` (never force-push, never `git pull`); keep the
+  per-task landing script inserting rows ABOVE any other host's section
+  in `TEST_LOG.md` so the two tables do not interleave; and list every
+  landed T-### in the PR body as soon as it lands, because the PR body is
+  the only channel the other host reads. A `TEST_LOG.md` conflict on
+  rebase is expected; resolve it by keeping both sections, never by
+  dropping a row.
+- **2026-08-23 (remediate, second host): a CLAIM COMMENT on the PR is what
+  actually de-conflicts two live runs.** The "check origin first" rail did not
+  fire here — `origin/testing/weekend-2026-08-23` did not exist at pre-flight
+  and appeared before the first push — so the first two tasks (T-081, T-109)
+  were done twice and thrown away. What stopped it was posting a comment on
+  the weekend PR naming the exact T-### items this host would take, BEFORE
+  starting them; zero collisions across the five that followed. Do it as soon
+  as the branch exists: list the items, say which end of the list you are
+  working from, and re-`fetch` before every landing.
+- **2026-08-23 (remediate, second host): a duplicate task is not wasted if you
+  DIFF the two answers.** Both hosts fixed T-081; comparing the two
+  implementations is what found that the landed one keys precedence on
+  `report_date` alone, which drops a second account's mirror-only row.
+  Reset onto the other host's tip, drop your commit, then probe their fix with
+  YOUR test cases before moving on. That was the only surviving product change
+  from this host's first hour.
+- **2026-08-23 (remediate): `rtk` is not installed on every runner.** The
+  2026-08-16 lesson mandates `rtk proxy git …`; on this host `rtk` is not on
+  PATH at all and bare `git` is correct and trustworthy. Check
+  `command -v rtk` at pre-flight and follow that rail only where the proxy
+  actually exists — otherwise every git call fails with exit 127 and the run
+  looks blocked.
+- **2026-08-23 (remediate): check `uptime` before calling a vitest round red.**
+  One full gate read `13 failed / 7169 passed`, 11 of them bare
+  `Test timed out in 5000ms` across nine unrelated files, with the run taking
+  336 s instead of ~110 s. Load average was 66 (`corespotlightd` at 367% CPU).
+  The nine files were 44-passed in isolation and the next full run was
+  7182 passed in 107 s. Capture the reporter output to a file, name the files,
+  re-run them in isolation, and record the load average alongside the counts.
+- **2026-08-23 (remediate): a new tree-walking contract test must be timed, not
+  just made green.** The first draft of the inverted table-overflow contract
+  built a fresh RegExp against the whole ~1 MB `globals.css` for every class
+  token of every ancestor of every tag: 4.5-6 s against vitest's 5 s default,
+  so it flaked 8/8 on a TIMEOUT rather than an assertion. Precompute the
+  stylesheet side once and re-run the new file 3x checking the reported
+  duration, not only the pass count.
+- **2026-08-23 (remediate): inverting a net-negative contract surfaces PRODUCT
+  defects — budget for filing them, not for fixing them.** Turning the
+  table-wrapper test from "named wrappers must be styled" into "every table
+  must have an overflow ancestor" produced six real horizontal-overflow bugs
+  (T-121). Fixing them is six UI changes needing 390px browser verification,
+  which is outside a test-quality task. Pin them in a named list under an
+  EQUALITY assertion — so a seventh reds immediately and fixing one reds until
+  its entry is removed — and file the finding. Do NOT skip them, and do NOT
+  quietly widen the rule until they pass.
 - **2026-08-25 (audit): when CI's test invocation changes shape, diff COLLECTION, not
   pass counts.** `424e66da` sharded pytest into shell globs (`test_[a-c]*.py`) that
   cannot match a directory; CI stayed green while 752 tests in two subdirectories

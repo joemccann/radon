@@ -524,3 +524,49 @@ class TestWriteFailureIsolation:
 
         assert code == cash_flow_sync.EXIT_OK
         assert len(healthy.written) == 16
+
+
+class TestLockoutRecordedHonestly:
+    """T-100: exit 15 must say whether the token-wide embargo actually landed.
+    `record_lockout` raises FlexLockoutNotRecorded when neither the sidecar
+    nor the service_health row was written; the status line must not read
+    as recorded in that case."""
+
+    LOCKED = (
+        "<FlexStatementResponse><Status>Fail</Status>"
+        "<ErrorCode>1025</ErrorCode>"
+        "<ErrorMessage>Too many failed attempts. Please review your "
+        "configuration.</ErrorMessage></FlexStatementResponse>"
+    )
+
+    def test_status_line_reports_embargo_recorded_when_a_sink_landed(
+        self, credentials, writer
+    ):
+        with patch.object(cash_flow_sync, "urlopen") as mock_urlopen, \
+             patch.object(cash_flow_sync.time, "sleep"), \
+             patch("utils.flex_embargo.record_lockout", return_value="2026-08-28T13:58:26Z"):
+            mock_urlopen.side_effect = [_xml_response(self.LOCKED)]
+            code, stdout, _ = _run("--no-file")
+
+        assert code == cash_flow_sync.EXIT_FLEX_LOCKOUT
+        status = _status_line(stdout)
+        assert status["class"] == "lockout"
+        assert status["embargo_recorded"] is True
+
+    def test_status_line_reports_embargo_not_recorded_when_no_sink_landed(
+        self, credentials, writer
+    ):
+        from utils.flex_embargo import FlexLockoutNotRecorded
+
+        with patch.object(cash_flow_sync, "urlopen") as mock_urlopen, \
+             patch.object(cash_flow_sync.time, "sleep"), \
+             patch("utils.flex_embargo.record_lockout",
+                   side_effect=FlexLockoutNotRecorded("2026-08-28T13:58:26Z")):
+            mock_urlopen.side_effect = [_xml_response(self.LOCKED)]
+            code, stdout, stderr = _run("--no-file")
+
+        assert code == cash_flow_sync.EXIT_FLEX_LOCKOUT
+        status = _status_line(stdout)
+        assert status["class"] == "lockout"
+        assert status["embargo_recorded"] is False
+        assert "not recorded" in stderr.lower()

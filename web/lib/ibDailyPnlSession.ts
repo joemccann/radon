@@ -68,3 +68,19 @@ export function sessionPositions(
   if (isIbDailyPnlCurrent(now)) return portfolio.positions;
   return portfolio.positions.filter(isCryptoPosition);
 }
+
+/**
+ * `ib_daily_pnl` (IB reqPnLSingle) is re-baselined on weekends and holidays
+ * just like the account aggregate, so outside a live session every equity row
+ * would show a five-figure "day" P&L under a MARKET CLOSED card. Mask it on
+ * those days; spot crypto keeps its own because it trades through them.
+ */
+export function withSessionIbDailyPnl(
+  positions: PortfolioPosition[],
+  now: Date = new Date(),
+): PortfolioPosition[] {
+  if (isIbDailyPnlCurrent(now)) return positions;
+  return positions.map((pos) =>
+    isCryptoPosition(pos) || pos.ib_daily_pnl == null ? pos : { ...pos, ib_daily_pnl: null },
+  );
+}

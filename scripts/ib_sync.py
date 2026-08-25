@@ -56,7 +56,6 @@ from clients.ib_client import (
     DEFAULT_GATEWAY_PORT,
     is_valid_ib_number,
     pnl_daily_is_ready,
-    pnl_is_ready,
     ticker_has_quote,
 )
 from clients.ib_timing import PhaseTimer

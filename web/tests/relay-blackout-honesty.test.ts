@@ -14,15 +14,23 @@
  * health.
  *
  * This suite composes the REAL writer decision (summarizeSubscriptionFreshness
- * + decideHealthWrite) with the REAL evaluator (evaluateRelayTick), replaying
- * the relay's stale-check loop (ib_realtime_server.js) including its degraded
- * write branch — the same seam-level topology as
- * relay-idle-heartbeat-freshness.test.ts, because each side's unit tests were
- * individually green while the composition lied.
+ * + decideHealthWrite) and the REAL row builder (buildRelayHealthDetail, the
+ * one the relay spreads into both write branches) with the REAL evaluator
+ * (evaluateRelayTick), replaying the relay's stale-check loop
+ * (ib_realtime_server.js) including its degraded write branch — the same
+ * seam-level topology as relay-idle-heartbeat-freshness.test.ts, because each
+ * side's unit tests were individually green while the composition lied.
+ *
+ * T-087: the payload itself is never hand-mirrored here. The relay cannot be
+ * imported without opening its sockets, so the builder is the seam, and a
+ * source guard pins the relay to it.
  */
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import {
+  buildRelayHealthDetail,
   decideHealthWrite,
   STALE_CHECK_INTERVAL_MS,
   STALE_DATA_THRESHOLD_MS,
@@ -56,9 +64,8 @@ function iso(ms: number): string {
  * Replay of the relay's stale-check cycle over a pinned clock, mirroring the
  * ib_realtime_server.js call site: subjects are built from symbolSubscribers ×
  * symbolStates (`active: tickerId != null`), decideHealthWrite chooses, and the
- * write branches produce the exact row payloads the relay writes — ok
- * heartbeat and degraded error alike, with last_tick_at and tick_age_secs
- * derived from the SAME lastTickTimestamp.
+ * write branches spread the REAL buildRelayHealthDetail output — ok heartbeat
+ * and degraded error alike — exactly as the relay does.
  */
 function runRelayLoop({
   startMs,
@@ -103,10 +110,7 @@ function runRelayLoop({
         })),
         now,
       );
-      const { activeSubscriptions, subscribedSymbols } = freshness as {
-        activeSubscriptions: number;
-        subscribedSymbols: number;
-      };
+      const { activeSubscriptions, subscribedSymbols } = freshness;
 
       const { heartbeat, clearError, degraded } = decideHealthWrite({
         now,
@@ -134,10 +138,7 @@ function runRelayLoop({
           state: "ok",
           detail: {
             heartbeat: "tick",
-            last_tick_at: iso(lastTickTimestamp),
-            tick_age_secs: Math.round((now - lastTickTimestamp) / 1000),
-            active_subscriptions: activeSubscriptions,
-            subscribed_symbols: subscribedSymbols,
+            ...buildRelayHealthDetail(now, lastTickTimestamp, freshness),
           },
         });
       }
@@ -150,10 +151,7 @@ function runRelayLoop({
           detail: {
             message: `IB nulled all market-data subscriptions (${subscribedSymbols} symbols subscribed, 0 active)`,
             reason: "subscriptions_nulled",
-            last_tick_at: iso(lastTickTimestamp),
-            tick_age_secs: Math.round((now - lastTickTimestamp) / 1000),
-            active_subscriptions: activeSubscriptions,
-            subscribed_symbols: subscribedSymbols,
+            ...buildRelayHealthDetail(now, lastTickTimestamp, freshness),
           },
         });
       }
@@ -179,6 +177,49 @@ function blackoutRun(opts: { inErrorAtStart?: boolean } = {}) {
     ],
   });
 }
+
+describe("T-087: buildRelayHealthDetail is the relay's row payload", () => {
+  const lastTickTimestamp = SESSION_START_MS;
+  const now = SESSION_START_MS + BLACKOUT_MS;
+
+  it("derives last_tick_at AND tick_age_secs from lastTickTimestamp, carrying the freshness counts", () => {
+    const freshness = { activeSubscriptions: 0, subscribedSymbols: SYMBOLS.length, lastTickAt: lastTickTimestamp };
+    expect(buildRelayHealthDetail(now, lastTickTimestamp, freshness)).toEqual({
+      last_tick_at: iso(lastTickTimestamp),
+      tick_age_secs: BLACKOUT_MS / 1000,
+      active_subscriptions: 0,
+      subscribed_symbols: SYMBOLS.length,
+    });
+  });
+
+  it("ignores freshness.lastTickAt — the idle substitution (R-061) must not zero the age", () => {
+    const idle = summarizeSubscriptionFreshness([], now);
+    expect(idle.lastTickAt, "precondition: idle summary substitutes now").toBe(now);
+    const detail = buildRelayHealthDetail(now, lastTickTimestamp, idle);
+    expect(detail.tick_age_secs).toBe(BLACKOUT_MS / 1000);
+    expect(detail.last_tick_at).toBe(iso(lastTickTimestamp));
+    expect(Math.round((now - Date.parse(detail.last_tick_at)) / 1000)).toBe(detail.tick_age_secs);
+  });
+
+  it("ignores freshness.lastTickAt when it disagrees with the relay's lastTickTimestamp", () => {
+    const olderSubject = lastTickTimestamp - 4 * STALE_DATA_THRESHOLD_MS;
+    const freshness = { activeSubscriptions: 2, subscribedSymbols: 3, lastTickAt: olderSubject };
+    const detail = buildRelayHealthDetail(now, lastTickTimestamp, freshness);
+    expect(detail.last_tick_at).toBe(iso(lastTickTimestamp));
+    expect(detail.tick_age_secs).toBe(BLACKOUT_MS / 1000);
+    expect(detail).toMatchObject({ active_subscriptions: 2, subscribed_symbols: 3 });
+  });
+
+  it("source guard: the relay spreads the builder into both write branches and hand-rolls neither field", () => {
+    // Supplement to the behavioural cases above: ib_realtime_server.js opens
+    // sockets on import, so pin the call site textually instead.
+    const relaySource = readFileSync(new URL("../../scripts/ib_realtime_server.js", import.meta.url), "utf8");
+    const builderCalls = relaySource.match(/\.\.\.buildRelayHealthDetail\(now, lastTickTimestamp, freshness\)/g) ?? [];
+    expect(builderCalls, "ok heartbeat + degraded and disconnected error rows").toHaveLength(3);
+    expect(relaySource).not.toMatch(/tick_age_secs:/);
+    expect(relaySource).not.toMatch(/last_tick_at:/);
+  });
+});
 
 describe("REL-035: IB 354s every subscription — the relay must not report idle-healthy", () => {
   it("pins the scenario inside RTH on both clocks", () => {
@@ -220,6 +261,7 @@ describe("REL-035: IB 354s every subscription — the relay must not report idle
   it("last_tick_at and tick_age_secs come from the same source in every row", () => {
     const { writes } = blackoutRun();
     expect(writes.length).toBeGreaterThan(0);
+    expect(writes.some((w) => w.state === "error")).toBe(true);
     for (const write of writes) {
       const fromTimestamp = Math.round((write.atMs - Date.parse(String(write.detail.last_tick_at))) / 1000);
       expect(write.detail.tick_age_secs, `row at ${iso(write.atMs)} is self-contradictory`).toBe(fromTimestamp);

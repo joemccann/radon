@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from utils.presets import load_preset
 from utils.uw_budget import (
     CALLER_ENV,
     DAILY_LIMIT,
@@ -146,20 +148,46 @@ def test_tallies_stay_bounded(tmp_path: Path) -> None:
     assert len(payload["by_endpoint"]) <= MAX_TRACKED_KEYS
 
 
-def test_scheduled_scans_do_not_default_to_the_full_index_union() -> None:
-    """Unattended GARCH / LEAP scans must not default to `indexes`.
+# Scheduled preset scans: GARCH runs three times a trading day
+# (cloud/services/radon-garch.timer), LEAP once (radon-leap.timer), and each
+# ticker costs ~3 UW requests (OHLC, IV, LEAP chain). Together they must stay
+# under the universe-scan brake, or the brake blocks every later scan.
+SCHEDULED_PRESET_SCANS_PER_DAY = 4
+UW_REQUESTS_PER_TICKER = 3
+MAX_SCHEDULED_PRESET_TICKERS = UNIVERSE_BLOCK_AT // (
+    SCHEDULED_PRESET_SCANS_PER_DAY * UW_REQUESTS_PER_TICKER
+)
 
-    `indexes` is 2494 tickers at 3 UW requests each (~7.5k hits per scan).
-    GARCH alone runs it three times a trading day, so the two schedulers
-    spent ~30k of the 40k daily cap before anything else asked for data.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SCHEDULED_PRESET_DEFAULTS = {
+    "scripts/run_garch_refresh.sh": r"RADON_GARCH_REFRESH_PRESET:-([a-z0-9-]+)\}",
+    "scripts/run_leap_refresh.sh": r"RADON_LEAP_REFRESH_PRESET:-([a-z0-9-]+)\}",
+    "web/components/WorkspaceSections.tsx": r"preset: \"([a-z0-9-]+)\"",
+}
+
+
+def _default_presets(relative: str, pattern: str) -> set[str]:
+    found = set(re.findall(pattern, (REPO_ROOT / relative).read_text()))
+    assert found, f"{relative}: no default preset matched {pattern!r}"
+    return found
+
+
+def test_scheduled_scan_defaults_resolve_under_the_universe_brake(index_preset_dir) -> None:
+    """Guard the SIZE of the default universe, not the spelling of its name.
+
+    A string grep for `largecaps` passes for a superset preset and for a
+    comment; resolving the default through `load_preset` does not.
     """
-    root = Path(__file__).resolve().parents[2]
-    entry_points = (
-        "scripts/run_garch_refresh.sh",
-        "scripts/run_leap_refresh.sh",
-        "web/components/WorkspaceSections.tsx",
-    )
-    for relative in entry_points:
-        source = (root / relative).read_text()
-        assert '"indexes"' not in source and "-indexes}" not in source, relative
-        assert "largecaps" in source, relative
+    for relative, pattern in SCHEDULED_PRESET_DEFAULTS.items():
+        for name in _default_presets(relative, pattern):
+            resolved = len(load_preset(name).tickers)
+            assert resolved < MAX_SCHEDULED_PRESET_TICKERS, (
+                f"{relative} defaults to {name!r}: {resolved} tickers x "
+                f"{UW_REQUESTS_PER_TICKER} requests x {SCHEDULED_PRESET_SCANS_PER_DAY} "
+                f"scans/day exceeds the {UNIVERSE_BLOCK_AT} universe brake"
+            )
+
+
+def test_full_index_union_would_trip_the_universe_brake(index_preset_dir) -> None:
+    """The ceiling has teeth: `indexes` (the preset that burned the quota) fails it."""
+    assert len(load_preset("indexes").tickers) >= MAX_SCHEDULED_PRESET_TICKERS

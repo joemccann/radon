@@ -58,6 +58,8 @@ from utils.ib_preflight import (
 # ── constants ─────────────────────────────────────────────────────
 SERVICE = "iei-hyg"
 IEI_HYG_JSON = _PROJECT_DIR / "data" / "iei_hyg.json"
+NO_SOURCE = "none"
+STATUS_STALE_SOURCE = "stale_source"
 
 WINDOW_SESSIONS = 252
 # R-126: `extremes_window` is a trailing slice, so on a 30-session series the
@@ -280,7 +282,7 @@ def fetch_closes(
     _take(fetch_ib or fetch_ib_closes, wanted, "ib", closes, sources)
     _take(fetch_uw or fetch_uw_closes, wanted, "uw", closes, sources)
     _take(fetch_yahoo or fetch_yahoo_closes, wanted, "yahoo", closes, sources)
-    return closes, combine_source(sources) or "none", dict(sources)
+    return closes, combine_source(sources) or NO_SOURCE, dict(sources)
 
 
 # ── series assembly ───────────────────────────────────────────────
@@ -415,7 +417,8 @@ def persist_result(
     """Dual-write: Turso rows + snapshot + heartbeat, then the JSON fallback.
 
     Refuses an empty series entirely. Snapshot + heartbeat run EVERY cycle
-    so the staleness banner notices a silent writer.
+    so the staleness banner notices a silent writer; the heartbeat is an
+    error when no source confirmed the series (stale_source).
     """
     if not payload["series"]:
         _log("refusing to persist empty series")
@@ -425,12 +428,12 @@ def persist_result(
     if changed_rows:
         writer.upsert_iei_hyg_rows(changed_rows, recorded_at=scan_time)
     writer.upsert_scan_snapshot(SERVICE, scan_time, payload)
-    if health_error is None:
-        writer.record_service_health(SERVICE, "ok", finished_at=scan_time)
-    else:
-        writer.record_service_health(
-            SERVICE, "error", finished_at=scan_time, error=health_error,
-        )
+    writer.record_service_health(
+        SERVICE,
+        "ok" if health_error is None else "error",
+        finished_at=scan_time,
+        error=health_error,
+    )
     _write_json_cache(payload)
 
 
@@ -475,32 +478,43 @@ def load_cached_series() -> list[dict[str, Any]]:
     return _json_series()
 
 
+def _serve_cached(cached: list[dict[str, Any]]) -> dict[str, Any]:
+    """IB, UW and Yahoo all down: re-serve the cache as stale_source, page.
+
+    R-098: see fetch_credit_spread; a dead source lived only in
+    payload["source"], which nothing reads.
+    """
+    if not cached:
+        raise RuntimeError(f"{SERVICE}: IB, UW and Yahoo all failed with no cached series")
+    payload = {**build_output(cached, source=NO_SOURCE), "status": STATUS_STALE_SOURCE}
+    through = payload["current"]["date"]
+    _log(f"all sources down; re-serving cached series through {through}")
+    health_error = {
+        "message": (
+            f"{SERVICE}: every source failed (IB, UW, Yahoo); serving the "
+            f"cached series through {through}"
+        ),
+        "class": "source_down",
+    }
+    persist_result(payload, [], health_error)
+    return payload
+
+
 def run() -> dict[str, Any]:
     _log("fetching IEI, HYG and DXY (IB -> UW -> Yahoo)")
     closes, source, source_by_ticker = fetch_closes()
+    cached = load_cached_series()
+    if source == NO_SOURCE:
+        return _serve_cached(cached)
     fresh = align_series(
         closes.get(IEI_SYMBOL, {}), closes.get(HYG_SYMBOL, {}), closes.get(DXY_SYMBOL, {})
     )
-    cached = load_cached_series()
     series = merge_series(cached, fresh)
     new_rows = diff_new_rows(cached, series)
     if not new_rows:
         _log("source unchanged; refreshing snapshot only")
     payload = build_output(series, source=source, source_by_ticker=source_by_ticker)
-    # R-098: see fetch_credit_spread — a dead source lived only in
-    # payload["source"], which nothing reads.
-    health_error = (
-        {
-            "message": (
-                "iei-hyg: every source failed (IB, UW, Yahoo); serving the "
-                f"cached series through {payload.get('as_of') or 'the last row'}"
-            ),
-            "class": "source_down",
-        }
-        if not source or source == "none"
-        else None
-    )
-    persist_result(payload, new_rows, health_error)
+    persist_result(payload, new_rows)
     return payload
 
 

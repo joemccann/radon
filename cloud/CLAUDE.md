@@ -216,7 +216,11 @@ commit is the whole procedure -- no root SSH. An edit whose hash is NOT
 bumped is left uninstalled (the drift audit then flags it), so the
 drift-allowlist acknowledgment still covers a deliberate pending window;
 `tests/test_unit_install_acknowledgment.py` fails CI otherwise. A unit
-absent from the manifest is never installed.
+absent from the manifest is never installed. `install-units` journals what
+it promoted under `/var/lib/radon/deploy`; a rollback runs
+`radon-deploy-root revert-units` after the checkout restore and before
+`recover`, which disables and removes the units the failed release added and
+restores the bodies it replaced. `commit-transition` closes the journal.
 
 Allowlisted units (`config/auto-sync-units.txt`) get a second, tighter
 publish after a green deploy: `radon-deploy-root sync-scheduled-units`
