@@ -3,9 +3,37 @@
  */
 
 import React from "react";
-import { render } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, render } from "@testing-library/react";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import GammaRotationPanel from "../components/GammaRotationPanel";
+
+// jsdom doesn't ship ResizeObserver; the chart wires one up on mount to size
+// itself to its container.
+// jsdom ships no ResizeObserver and reports every rect as 0x0, so the chart
+// can never measure itself here. This stub records the observers so a test can
+// drive a resize and assert the chart redraws into the new box.
+const observers: Array<(entries: Array<{ contentRect: { width: number; height: number } }>) => void> = [];
+
+function resizeTo(rect: { width: number; height: number }) {
+  observers.forEach((cb) => cb([{ contentRect: rect }]));
+}
+
+beforeAll(() => {
+  class StubResizeObserver {
+    constructor(cb: (entries: Array<{ contentRect: { width: number; height: number } }>) => void) {
+      observers.push(cb);
+    }
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  (globalThis as unknown as { ResizeObserver: typeof StubResizeObserver }).ResizeObserver =
+    StubResizeObserver;
+});
+
+afterEach(() => {
+  observers.length = 0;
+});
 
 const mockUseGammaRotation = vi.fn();
 
@@ -128,5 +156,58 @@ describe("GammaRotationPanel", () => {
     expect(path.match(/M/g)).toHaveLength(2);
     expect(path).not.toContain("NaN");
     expect(container.textContent).toContain("+4.5σ");
+  });
+});
+
+
+/**
+ * The divergence field sat in a grid cell as tall as the SPY+TLT stack beside
+ * it but drew into a fixed 708x260 viewBox, so it letterboxed and left a large
+ * dead band under the plot. It also labelled a single date, which makes a
+ * 90-session series unreadable as a timeline.
+ *
+ * The fix measures the container and draws in pixel space, so these assert the
+ * behaviour (fills the box, tracks its height, labels a real axis) rather than
+ * any particular scaling trick.
+ */
+describe("GammaRotationPanel divergence field", () => {
+  function renderChart() {
+    mockUseGammaRotation.mockReturnValue({ data: MOCK_GRG, loading: false, error: null });
+    return render(<GammaRotationPanel />);
+  }
+
+  it("fills its container box rather than scaling to a fixed aspect ratio", () => {
+    const { container } = renderChart();
+    const svg = container.querySelector("[data-testid='grg-chart'] svg");
+    expect(svg).toBeTruthy();
+    expect(svg?.getAttribute("width")).toBe("100%");
+    expect(svg?.getAttribute("height")).toBe("100%");
+  });
+
+  it("redraws into the measured height so the plot grows with the cell", () => {
+    const { container } = renderChart();
+    const svg = container.querySelector("[data-testid='grg-chart'] svg");
+    const before = svg?.getAttribute("viewBox");
+
+    act(() => {
+      resizeTo({ width: 1200, height: 820 });
+    });
+
+    const after = svg?.getAttribute("viewBox");
+    expect(after).not.toBe(before);
+    expect(after).toBe("0 0 1200 820");
+  });
+
+  it("labels several dates across the x-axis, not just the last one", () => {
+    const { container } = renderChart();
+    act(() => {
+      resizeTo({ width: 1200, height: 820 });
+    });
+    const ticks = container.querySelectorAll("[data-testid='grg-x-tick']");
+    expect(ticks.length).toBeGreaterThanOrEqual(2);
+    const labels = [...ticks].map((t) => t.textContent);
+    // First and last session always anchor the axis.
+    expect(labels[0]).toBe("2026-05-27");
+    expect(labels[labels.length - 1]).toBe("2026-05-29");
   });
 });
