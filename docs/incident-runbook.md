@@ -178,18 +178,27 @@ Incident: 2026-07-08, P1.
   `:8321/health/lite` stayed up; BPI recovered on a later timer
   (`Result=success`). Kill-before-green and in_flight now use the
   24h oneshot recovery horizon against any post-kill green.
+- **2026-08-25 16:20Z:** page `a70a393e`. BPI stop-cleaned at
+  12:41:04Z; green `78a9e353` at 15:14:53Z (kill-to-marker ~2.5h →
+  P3). Successor deploy at 16:19 wrote a fresh transition journal;
+  `in_flight` short-circuited past kill-before-green so the 60-min
+  age cap re-paged the latched oneshot as P1. Edge and
+  `:8321/health/lite` stayed up. Classifier now evaluates
+  kill-before-green before the in_flight branch.
 - **Discriminating check:** `InactiveEnterTimestamp` before a later
   green-marker mtime (within the 24h oneshot horizon) or within
   60 min after the last green (cancelled stack / not-yet-green);
   sibling oneshots often fail the same second; `Result=timeout` /
-  `exit-code` is a different class (do not downgrade).
+  `exit-code` is a different class (do not downgrade). A fresh
+  successor journal does not override kill-before-green.
 - **Remediation:** classifier only, do not restart. Exit-code and
   start-limit-hit stay P1.
 - **Regression:** `test_units.py::TestDeployCollateralSignalKill`
   (`test_stacked_deploy_signal_kill_34min_before_green_is_p3`,
   `test_signal_kill_after_last_green_during_cancelled_stack_is_p3`,
   `test_oneshot_still_failed_61min_after_stop_clean_is_p3`,
-  `test_stacked_successor_green_158min_after_kill_is_p3`).
+  `test_stacked_successor_green_158min_after_kill_is_p3`,
+  `test_latched_kill_before_green_not_repaged_by_successor_inflight_journal`).
 - **Code:** `scripts/watchdog/units.py` (`DEPLOY_COLLATERAL_WINDOW_SECS=3600`,
   `KILL_BEFORE_GREEN_FROZEN_CAP_SECS=86400`).
 
