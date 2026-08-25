@@ -265,3 +265,17 @@ how this loop improves as the codebase grows.
   weekend (T-117). Nothing in the changed-test list would have surfaced it.
   After cataloguing changed tests, ask the inverse question: which EXISTING
   tests does this source change now describe differently?
+- **2026-08-25 (audit): when CI's test invocation changes shape, diff COLLECTION, not
+  pass counts.** `424e66da` sharded pytest into shell globs (`test_[a-c]*.py`) that
+  cannot match a directory; CI stayed green while 752 tests in two subdirectories
+  stopped running. `pytest --collect-only -q` over the full tree vs the union of the
+  CI path sets, `sort -u` on the file names, `comm -23` — two minutes, and it is
+  the only check that sees a silent drop. Pull the per-job pass counts from CI
+  (`gh api repos/{owner}/{repo}/actions/jobs/<id>/logs`; `gh run view --job --log`
+  returns empty on this host) and compare the shard SUM to the last unsharded run.
+- **2026-08-25 (audit): agent-reported findings need a lead spot-check before
+  filing, and it is cheap.** Six agents returned ~45 candidates; every one the
+  lead re-read at the cited line held, but two summaries overstated a mechanism
+  (an `apply_` stamping claim that needs a `contract.secType` the agent's repro
+  omitted). Reproduce the top P1 in-process from the cited file (a 10-line
+  python heredoc), read the cited lines of every P0/P1, and only then number.

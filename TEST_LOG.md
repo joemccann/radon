@@ -82,3 +82,14 @@ Darwin cloud baseline on THIS host is 34, not the first pass's 12: no bash >= 4
 `FAILED` lists byte-identical. 24 additional findings filed (T-097…T-120);
 8 converged with the first pass and were dropped. See `TEST_AUDIT.md`
 `## Delta audit 2026-08-22 (second pass)`.
+
+## Delta audit 2026-08-25 (Tuesday, audit mode)
+
+| Gate | Round 1 |
+|---|---|
+| `python3.13 -m pytest` (recursive) | 7816 passed, 1 skipped, 90 deselected (274.4s) |
+| `npx vitest run` | 701 files / 7328 passed |
+| `pytest cloud/tests` | 34 failed, 1025 passed, 4 skipped (darwin, bash 3.2; list byte-identical to `4985a7f8` in a worktree) |
+
+Added-file determinism 3×: 44 python `483 passed` ×3, 29 vitest `238 passed` ×3, 7 cloud `92 passed` ×3.
+CI at the same SHA is green but its sharded pytest (`424e66da`) collects 407 of 463 files — `test_monitor_daemon/` and `test_watchdog/` (752 tests) gate nothing (T-122, P0); the ratchet also quietly moved from statement+branch to statement-only (T-123). 34 findings filed (T-122…T-155); see `TEST_AUDIT.md` `## Delta audit 2026-08-25`.
