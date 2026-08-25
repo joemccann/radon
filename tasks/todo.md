@@ -3662,7 +3662,7 @@ Per /indicator swarm (spec: docs/indicators/skew.md). Slug/service `skew`, tab S
 - [x] T5 Integrate and review the implementation.
 - [x] T6 Complete focused and full verification.
 - [x] T7 Complete browser and visual verification.
-- [ ] T8 Publish and verify the PR.
+- [x] T8 Publish and verify the PR.
 
 ## Review
 
@@ -3673,4 +3673,4 @@ Per /indicator swarm (spec: docs/indicators/skew.md). Slug/service `skew`, tab S
 - Verification: final web suite 7,085/7,085; affected Python 263/263; journal-sync 55/55; TypeScript, ESLint (0 errors, 14 baseline warnings), Python compilation, and Next compile passed. Full Python recorded 7,933 passed and 46 failed under the active Flex embargo; four touched-path failures were pagination-unaware fakes and were fixed/rerun green, leaving 42 unrelated Flex-lockout baseline failures.
 - Local output-trace audit remains baseline-red because the development checkout contains 14.2 GB across 7,333 backup/archive files traced by the existing orders/place route; production compile itself passed.
 
-- Pending.
+- PR: `#97` at commit `1e15b612`; replacement CI passed every build, security, Vitest, coverage, Python, perimeter, Playwright, Vercel preview, and app-image check.
