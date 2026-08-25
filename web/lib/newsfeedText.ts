@@ -42,8 +42,56 @@ function isSingleQuoteGlyph(character: string): boolean {
   return SINGLE_QUOTE_GLYPHS.includes(character);
 }
 
+/**
+ * Scrape line breaks carry two different meanings and `white-space: pre-wrap`
+ * renders both literally. A newline inside one of themarketear's own blocks is
+ * a source wrap with no semantics — HTML would have collapsed it to a space —
+ * while the extractor's own join between blocks is a real paragraph boundary.
+ *
+ * Census, Turso `posts` 2026-08-25: 5,277 bodies, 1,038 carrying a newline,
+ * 1,932 newlines, and not one blank-line paragraph break in the whole table.
+ *   next line starts lowercase                   ×42     wrap  -> join
+ *   previous line ends on a function word        ×7      wrap  -> join
+ *   previous ends '.?!”"' and next opens         ×1,599  block -> paragraph
+ *   everything else — list items, data rows      ×284    -> keep the break
+ * All 49 join cases were read off production by hand; none is a list item.
+ */
+/** Words that cannot end a sentence, so a break after one is a source wrap. */
+const CONTINUATION_WORDS = new Set([
+  "a", "an", "and", "are", "as", "at", "be", "been", "but", "by", "for", "from",
+  "in", "into", "is", "its", "of", "on", "or", "over", "than", "that", "the",
+  "their", "this", "to", "under", "was", "were", "with",
+]);
+
+function isSourceWrap(before: string, after: string): boolean {
+  if (/^\p{Ll}/u.test(after)) return true;
+  const lastWord = before.match(/[\p{L}'’-]+$/u)?.[0].toLowerCase() ?? "";
+  return CONTINUATION_WORDS.has(lastWord);
+}
+
+/** A trailing ellipsis is a lead-in ("Forward P/E ratios...") or a thought
+ *  trailing off, never a paragraph end — what follows belongs to the block. */
+function isParagraphBoundary(before: string, after: string): boolean {
+  if (/(\.\.\.|…)$/.test(before)) return false;
+  return /[.?!”"]$/.test(before) && /^[\p{Lu}“"‘]/u.test(after);
+}
+
+/** Rewrap one block: source wraps become spaces, sentence boundaries become
+ *  paragraph breaks, list and data lines keep their own line. */
+function rewrapBlock(block: string): string {
+  const lines = block.split("\n").map((line) => line.trim()).filter(Boolean);
+  if (lines.length === 0) return "";
+  return lines.reduce((text, line) => {
+    if (isSourceWrap(text, line)) return `${text} ${line}`;
+    if (isParagraphBoundary(text, line)) return `${text}\n\n${line}`;
+    return `${text}\n${line}`;
+  });
+}
+
 function collapseScrapeWhitespace(raw: string): string {
-  return raw.replace(/\r\n?/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  const text = raw.replace(/\r\n?/g, "\n").trim();
+  if (!text) return text;
+  return text.split(/\n{2,}/).map(rewrapBlock).filter(Boolean).join("\n\n");
 }
 
 function opensWithUnpartneredDoubleQuote(text: string): boolean {
