@@ -127,6 +127,37 @@ class TestRealizedByExecId:
         ]
         assert realized_pnl_by_exec_id(rows) == {"c1": 1000.0}
 
+    # TEST_AUDIT T-124: a rehydrated CLOSED row is a round trip, not a
+    # directional fill. `_signed_qty` maps it to -qty, so the replay read it
+    # as an opening SHORT and stamped a realized figure onto the next BUY —
+    # a re-entry OPEN rendered as a +$998 close on /orders.
+    def test_closed_round_trip_row_is_not_an_opening_short(self):
+        rows = [
+            _row("a+b", "CLOSED", 10, 2.00, 0.0, _C60, "2026-08-07", "w1"),
+            _row("o1", "BUY_OPTION", 10, 1.00, 0.0, _C60, "2026-08-24", "w2"),
+        ]
+        assert realized_pnl_by_exec_id(rows) == {}
+
+    # TEST_AUDIT T-124: the same close journaled by the real-time daemon
+    # (IB API execId) and by Flex rehydrate (numeric tradeID) is one fill.
+    # Counted twice it over-closes the position and the whole contract falls
+    # back to IB's drifted figure — on exactly the fills c09fc347 fixed.
+    def test_same_close_under_api_and_flex_ids_counts_once(self):
+        rows = [
+            _row("o1", "BUY_OPTION", 10, 1.00, 0.0, _C60, "2026-08-07", "w1"),
+            _row("e2", "SELL_OPTION", 10, 3.00, 0.0, _C60, "2026-08-24", "w2"),
+            _row("777", "SELL_OPTION", 10, 3.00, 0.0, _C60, "2026-08-24", "w3"),
+        ]
+        assert realized_pnl_by_exec_id(rows) == {"e2": 2000.0}
+
+    def test_two_equal_same_day_partials_from_one_writer_both_count(self):
+        rows = [
+            _row("o1", "BUY_OPTION", 20, 1.00, 0.0, _C60, "2026-08-07", "w1"),
+            _row("c1", "SELL_OPTION", 10, 3.00, 0.0, _C60, "2026-08-24", "w2"),
+            _row("c2", "SELL_OPTION", 10, 3.00, 0.0, _C60, "2026-08-24", "w3"),
+        ]
+        assert realized_pnl_by_exec_id(rows) == {"c1": 2000.0, "c2": 2000.0}
+
     def test_bag_and_stock_rows_are_ignored(self):
         rows = [
             (json.dumps({"ticker": "SLV", "action": "BUY_OPTION", "contracts": 10,
@@ -210,6 +241,17 @@ class _FakeDb:
 
 
 class TestOverlayWithDb:
+    def test_closed_row_does_not_stamp_the_reentry_open(self):
+        db = _FakeDb(rows=[
+            _row("a+b", "CLOSED", 10, 2.00, 0.0, _C60, "2026-08-07", "w1"),
+            _row("o1", "BUY_OPTION", 10, 1.00, 0.0, _C60, "2026-08-24", "w2"),
+        ])
+        fills = [_fill("o1", "SLV", 60.0, "C", "BOT", 10, None)]
+        overlay_journal_realized_pnl(db, fills)
+        assert fills[0]["realizedPNL"] is None
+        assert "realizedPNLSource" not in fills[0]
+        assert "ibRealizedPNL" not in fills[0]
+
     def test_persists_journal_figure_on_the_fill_payload(self):
         db = _FakeDb(rows=[
             _row("o1", "BUY_OPTION", 10, 1.00, 0.0, _C60, "2026-08-07", "w1"),
