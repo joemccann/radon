@@ -244,6 +244,7 @@ function LegOrderForm({
       bid={bid}
       mid={mid}
       ask={ask}
+      priceData={priceData}
       showQuickButtonPrices={true}
       isValid={isValid}
       limitPrice={limitPrice}

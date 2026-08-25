@@ -580,7 +580,7 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
       </main>
 
       <ToastContainer toasts={toasts} exitingIds={exitingIds} onDismiss={dismissToast} />
-      <ChatLauncher activeSection={activeSection} portfolio={portfolio} />
+      <ChatLauncher activeSection={activeSection} portfolio={portfolio} prices={prices} />
       <DemoWelcomeModal />
       <CommandPalette
         open={paletteOpen}
