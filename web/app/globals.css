@@ -9,6 +9,14 @@
 :root {
   --sidebar-width: 220px;
   --header-height: 48px;
+
+  /* Translucent signal washes — badge and panel-trace fills.
+     Defined once here on purpose: custom properties substitute lazily, so a
+     single color-mix tracks whichever theme's --signal-core / --warn / --fault
+     is in scope. A baked rgba would stay the dark value on a white canvas. */
+  --wash-signal: color-mix(in srgb, var(--signal-core) 8%, transparent);
+  --wash-warn: color-mix(in srgb, var(--warn) 9%, transparent);
+  --wash-fault: color-mix(in srgb, var(--fault) 10%, transparent);
   /* next/font/local injects `--font-sans` and `--font-mono` on <html>.
      Fallback values here keep the cascade sane when CSS loads before
      hydration; the next/font variable will override on mount. */
