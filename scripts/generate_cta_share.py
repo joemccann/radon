@@ -45,6 +45,7 @@ from utils.cta_history import (  # noqa: E402
     payload_is_valid,
 )
 from utils.cta_llm import generate_share_copy  # noqa: E402
+from utils.cta_percentiles import normalize_pctile, reconcile_tables  # noqa: E402
 from utils.cta_sync import latest_closed_trading_day  # noqa: E402
 
 CACHE_DIR = PROJECT_ROOT / "data" / "menthorq_cache"
@@ -80,18 +81,26 @@ def _load_cta_from_disk() -> Optional[dict]:
     return data if payload_is_valid(data) else None
 
 
+def _reconciled(payload: dict) -> dict:
+    """Every card and the tweet read the payload through here, so a percentile
+    the vision extractor rounded away can never reach the copy."""
+    if payload and payload.get("tables"):
+        payload = {**payload, "tables": reconcile_tables(payload["tables"])}
+    return payload
+
+
 def load_cta(target_date: Optional[str] = None) -> dict:
     if target_date:
         path = CACHE_DIR / f"cta_{target_date}.json"
         if not path.exists():
             raise FileNotFoundError(f"CTA cache not found for {target_date}")
         with open(path) as f:
-            return json.load(f)
+            return _reconciled(json.load(f))
 
     candidates = [d for d in (_load_cta_from_db(), _load_cta_from_disk()) if d]
     if not candidates:
         raise FileNotFoundError("No CTA data found in Turso or the local cache.")
-    return max(candidates, key=lambda d: d.get("date") or "")
+    return _reconciled(max(candidates, key=lambda d: d.get("date") or ""))
 
 
 def assess_freshness(data_date: str, now: Optional[datetime] = None) -> dict:
@@ -119,26 +128,12 @@ def spx_row(payload: dict) -> Optional[dict]:
     return get_row(main, "s&p") or get_row(main, "e-mini")
 
 
-def pctile_label(p: int) -> str:
+def pctile_label(p) -> str:
+    if p is None: return "---"
     if p == 1: return "1st"
     if p == 2: return "2nd"
     if p == 3: return "3rd"
     return f"{p}th"
-
-
-def normalize_pctile(p) -> int:
-    """Percentile as 0-100. The main table ships 0-100 ints; the index and
-    commodity tables ship 0-1 fractions. Both reach this module.
-
-    Disambiguate by TYPE, not by range: an int 1 is the 1st percentile (max
-    short) while a float 1.0 is the 100th (max long). A range test alone reads
-    them identically and silently inverts the entire narrative.
-    """
-    if isinstance(p, bool) or not isinstance(p, (int, float)):
-        return 50
-    if isinstance(p, int):
-        return max(0, min(100, p))
-    return int(round(p * 100)) if 0.0 <= p <= 1.0 else int(round(p))
 
 
 def assess_positioning(r: dict) -> dict:
@@ -401,9 +396,9 @@ def card2_equity(data: dict, ds: str) -> str:
         if not r:
             continue
         pctile = r["percentile_3m"]
-        if pctile <= 5:
+        if pctile is not None and pctile <= 5:
             extreme_count += 1
-        pctile_style = 'background:rgba(232,93,108,0.2);color:#E85D6C;font-weight:700;padding:1px 5px;border-radius:2px' if pctile <= 10 else 'color:#94a3b8'
+        pctile_style = 'background:rgba(232,93,108,0.2);color:#E85D6C;font-weight:700;padding:1px 5px;border-radius:2px' if pctile is not None and pctile <= 10 else 'color:#94a3b8'
         ago_sign = "+" if r["position_1m_ago"] > 0 else ""
         rows_html += f"""
         <tr style="border-bottom:1px solid rgba(30,41,59,0.5)">
@@ -454,7 +449,7 @@ def card2_equity(data: dict, ds: str) -> str:
 def card3_commodities(data: dict, ds: str) -> str:
     comm = data["tables"]["commodity"]
     crowded = sorted(
-        [r for r in comm if r["percentile_3m"] >= 80 and r["position_today"] > 0],
+        [r for r in comm if r["percentile_3m"] is not None and r["percentile_3m"] >= 80 and r["position_today"] > 0],
         key=lambda r: -r["percentile_3m"]
     )[:5]
 
