@@ -130,7 +130,10 @@ export function posColor(v: number): string {
   return OG.text;
 }
 
-export function pctileBg(v: number): string {
+export function pctileBg(v: number | null | undefined): string {
+  // A percentile that could not be trusted carries no tint — an unknown must
+  // not paint the same max-short red as a real 0th.
+  if (v == null) return "transparent";
   if (v <= 10) return ogSeriesFill("fault", 0.25);
   if (v <= 25) return ogSeriesFill("fault", 0.12);
   if (v <= 40) return ogSeriesFill("caution", 0.12);

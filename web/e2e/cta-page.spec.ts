@@ -12,6 +12,8 @@
 
 import { test, expect } from "@playwright/test";
 
+import { reconcileCtaTables } from "../lib/ctaPercentiles";
+
 // ── Mock data ────────────────────────────────────────────────────────────────
 
 const CRI_MOCK = {
@@ -124,6 +126,29 @@ const CTA_CURRENCY_DECIMAL_MOCK = {
       { underlying: "Canadian Dollar", position_today: 1.36, position_yesterday: 1.2, position_1m_ago: 1.03, percentile_1m: 0.57, percentile_3m: 0.84, percentile_1y: 0.65, z_score_3m: 1.01 },
     ],
   },
+};
+
+// The 2026-08-25 payload exactly as Turso stored it: the main table's SPX and
+// NQ percentiles were rounded to 0 by the vision extractor while the index
+// table holds the same two rows on the fractional scale. Piped through the
+// same reconciliation the CTA route applies, so the page sees what the server
+// would really serve for that session.
+const CTA_ROUNDED_PERCENTILE_MOCK = {
+  ...CTA_MOCK,
+  date: "2026-08-25",
+  tables: reconcileCtaTables({
+    main: [
+      { underlying: "E-Mini S&P 500 Index", position_today: 3.66, position_yesterday: 3.85, position_1m_ago: 1.69, percentile_1m: 0, percentile_3m: 0, percentile_1y: 0, z_score_3m: 1.48 },
+      { underlying: "CME Nasdaq 100 Index", position_today: 2.52, position_yesterday: 2.69, position_1m_ago: 1.59, percentile_1m: 0, percentile_3m: 0, percentile_1y: 0, z_score_3m: 0.26 },
+      { underlying: "Brent", position_today: -1.33, position_yesterday: -0.83, position_1m_ago: 0.99, percentile_1m: 5, percentile_3m: 2, percentile_1y: 5, z_score_3m: -1.89 },
+    ],
+    index: [
+      { underlying: "E-Mini S&P 500 Index", position_today: 3.66, position_yesterday: 3.85, position_1m_ago: 1.69, percentile_1m: 0.43, percentile_3m: 0.81, percentile_1y: 0.88, z_score_3m: 1.48 },
+      { underlying: "CME Nasdaq 100 Index", position_today: 2.52, position_yesterday: 2.69, position_1m_ago: 1.59, percentile_1m: 0.38, percentile_3m: 0.52, percentile_1y: 0.68, z_score_3m: 0.26 },
+    ],
+    commodity: [],
+    currency: [],
+  }),
 };
 
 const PORTFOLIO_EMPTY = {
@@ -313,5 +338,24 @@ test.describe("/regime page — CTA section removed, D3 history chart present", 
     const paths = chart.locator("path");
     const hasContent = (await circles.count()) > 0 || (await paths.count()) > 0;
     expect(hasContent).toBe(true);
+  });
+});
+
+test.describe("/cta rounded-percentile repair", () => {
+  test("a +1.48 z-score long reads as high percentile, not 0th MAX SHORT", async ({ page }) => {
+    await setupMocks(page, { cta: CTA_ROUNDED_PERCENTILE_MOCK });
+    await page.goto("/cta");
+
+    const table = page.locator('[data-testid="sortable-cta-table"]').first();
+    await table.waitFor({ timeout: 10_000 });
+
+    const spxRow = table.locator("tbody tr", { hasText: "E-Mini S&P 500 Index" }).first();
+    await expect(spxRow).toContainText("81");
+    await expect(spxRow).toContainText("1.48");
+
+    // The verdict banner reads off the same percentile — a heavy long must
+    // never publish as MAX SHORT.
+    await expect(page.locator("body")).not.toContainText("MAX SHORT");
+    await expect(page.locator("body")).not.toContainText("0th pctile");
   });
 });

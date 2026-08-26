@@ -20,6 +20,8 @@ import sys
 from pathlib import Path
 from typing import Callable, Iterable, Optional
 
+from utils.cta_percentiles import reconcile_tables
+
 PROJECT_DIR = Path(__file__).resolve().parents[2]
 CTA_CACHE_DIR = PROJECT_DIR / "data" / "menthorq_cache"
 
@@ -30,6 +32,15 @@ HISTORY_LOOKBACK = 12
 TRACKED_TABLES = ("main", "index", "commodity", "currency")
 
 _NAME_NOISE = ("E-Mini ", "CME ", "ICE MSCI ", "Micro ", " Index", " Futures")
+
+
+def reconciled_payload(data: dict) -> dict:
+    """A prior session is only comparable to today once its percentiles sit on
+    the same repaired scale — otherwise a rounded-away 0 in the archive reads as
+    a regime change that never happened."""
+    if data and data.get("tables"):
+        return {**data, "tables": reconcile_tables(data["tables"])}
+    return data
 
 
 def payload_is_valid(data: object) -> bool:
@@ -73,7 +84,7 @@ def _load_history_from_db(current_date: str, limit: int) -> list[dict]:
             continue
         if payload_is_valid(data):
             data.setdefault("date", row[0])
-            payloads.append(data)
+            payloads.append(reconciled_payload(data))
     return payloads
 
 
@@ -95,7 +106,7 @@ def _load_history_from_disk(current_date: str, cache_dir: Path, limit: int) -> l
         if not payload_is_valid(data):
             continue
         data.setdefault("date", data_date)
-        payloads.append(data)
+        payloads.append(reconciled_payload(data))
         if len(payloads) >= limit:
             break
     return payloads

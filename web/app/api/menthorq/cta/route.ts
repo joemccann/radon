@@ -7,6 +7,7 @@ import { join } from "path";
 import { getDb } from "@/lib/db";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 import { isUsTradingDay } from "@/lib/serviceHealthWindows";
+import { reconcileCtaTables } from "@/lib/ctaPercentiles";
 
 export const runtime = "nodejs";
 // Disable Next.js's default static caching for route handlers. The route reads
@@ -224,7 +225,7 @@ async function readLatestCtaFromDb(): Promise<{
         date: typeof raw.date === "string" ? raw.date : row.date,
         fetched_at:
           typeof raw.fetched_at === "string" ? raw.fetched_at : row.fetched_at,
-        tables: (raw.tables as CtaTables) ?? null,
+        tables: reconcileCtaTables((raw.tables as CtaTables) ?? null),
       },
       latestFile: `db:menthorq_cta/${row.date}`,
       mtimeMs: Number.isFinite(mtimeMs) ? mtimeMs : null,
@@ -268,7 +269,7 @@ async function readLatestCtaFromDisk(): Promise<{
       data: {
         date: typeof raw.date === "string" ? raw.date : null,
         fetched_at: typeof raw.fetched_at === "string" ? raw.fetched_at : null,
-        tables: (raw.tables as CtaTables) ?? null,
+        tables: reconcileCtaTables((raw.tables as CtaTables) ?? null),
       },
       latestFile,
       mtimeMs: fileStat.mtimeMs,
