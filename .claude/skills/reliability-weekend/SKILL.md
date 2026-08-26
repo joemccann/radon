@@ -334,3 +334,42 @@ how this loop improves as the codebase grows.
   behaviour explicitly. The defect that survives verification is "a money-path invariant is
   resting on a default nobody pinned or tested", which is real regardless of how the upstream
   actually behaves.
+
+- 2026-08-26 (remediate): **a comment that quotes the code it explains will
+  satisfy or break your own source-level assertion.** This bit four times in
+  one run: a `SuccessExitStatus=75` grep matched the comment saying it was
+  removed; a slice keyed on `stop_services_for_transition` ended inside the
+  branch comment naming that function; a `python3.13 -m venv` slice ended in
+  the guard comment quoting it; a `write_text` assertion matched the comment
+  naming the old call. Strip comment lines before ANY structural assertion
+  over a source file — it is cheaper than rediscovering it per finding.
+- 2026-08-26 (remediate): **a finding's proposed remedy can be wrong even when
+  the defect is real.** R-232 asked for `--cgroup-parent=<unit>`; Docker's
+  systemd driver takes a slice, not a unit path, and `test_app_runtime.py`
+  already asserted that with the reason inline. R-264's "dead" bash `case`
+  pattern matches (bash tokenizes alternatives). R-214's second claim named
+  the wrong variable. R-251's "still resolving" window is unreachable because
+  the component returns a coverage skeleton first. Test the REMEDY against the
+  repo's existing assertions before writing it — the pinned test that
+  contradicts you is usually right and usually says why.
+- 2026-08-26 (remediate): **fix the whole class, not the cited site.** R-252
+  named two refresh sites; `grep` found four. R-237/R-239/R-267 were filed
+  against `reliability_weekend.sh` and applied identically to
+  `testing_weekend.sh`. R-270 named the render path and the sort extractor
+  repeated the expression verbatim. Budget one grep per finding.
+- 2026-08-26 (remediate): **run `cloud/tests` after every task, not just at the
+  end.** REL-077's 2FA change broke a cloud test that only surfaced two tasks
+  later, and the cause was structural — `ib-gateway-control.sh` is a ONE-SHOT
+  process, so a confirmation streak carried across calls could never confirm
+  for it. Cross-suite fallout from a scripts/ change is normal here; the
+  stashed clean-tree baseline diff is the only way to see it quickly.
+- 2026-08-26 (remediate): a sibling-module import (`from test_caddyfile import
+  ...`, `from test_run_flow_refresh_wrapper import ...`) works from the test
+  directory and fails collection from the repo root, where pytest actually
+  runs. `sys.path.insert(0, str(Path(__file__).resolve().parent))` at the top
+  of the new file; two tasks lost a full-gate run to this.
+- 2026-08-26 (remediate): 24 backlog tasks over ~17h at roughly one full gate
+  per task (pytest ~5min, vitest ~1.5min) is ~2.5h of gate time alone. Run the
+  two gates SEQUENTIALLY (concurrent runs starve CPU and produce phantom
+  failures), and run the cheap targeted suite first — it catches most
+  regressions in seconds.
