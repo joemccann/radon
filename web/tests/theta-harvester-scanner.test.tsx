@@ -9,6 +9,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import ThetaHarvesterScanner, { formatThetaEarningsLabel } from "../components/ThetaHarvesterScanner";
 import type { ThetaHarvesterData, ThetaHarvesterEarnings, ThetaHarvesterResult } from "../lib/types";
 
+// TEST_AUDIT T-161: this file and dashboard-newsfeed-pagination are
+// the two jsdom suites that blew the 5s default under CI shard +
+// coverage load, and were the sole reason a suite-wide `retry` was
+// added to vitest.config.ts. The retry is gone; the headroom is local
+// to the files that need it, so a real failure here still fails on the
+// first run.
+vi.setConfig({ testTimeout: 20_000, hookTimeout: 20_000 });
+
 const pushMock = vi.fn();
 
 vi.mock("next/link", () => ({

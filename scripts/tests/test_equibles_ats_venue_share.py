@@ -611,3 +611,37 @@ class TestAtsVenueShareStorage:
         sql, params = ats_venue_share_upsert(rows, "2026-08-11T00:00:00Z")
         db.execute(sql, params)
         assert db.execute("SELECT COUNT(*) FROM equibles_ats_venue_share").fetchone()[0] == 6
+
+
+# ── silent-failure hole: construction must heartbeat ──────────────
+
+
+class TestConstructionFailureIsReported:
+    """A rejected/absent key raises at EquiblesClient() — BEFORE any fetch.
+
+    That construction used to sit outside the health-reporting block, so the
+    oneshot died with no `service_health` row at all: not even an error row.
+    `equibles-ats-venue-share` is registered for freshness
+    (scripts/watchdog/services.py, web/lib/serviceHealthWindows.ts), so a row
+    that never arrives is silent rather than stale and nothing alerts.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _capture_health(self, tmp_path, monkeypatch):
+        import fetch_equibles_ats_venue_share as mod
+
+        monkeypatch.setattr(mod, "ATS_VENUE_SHARE_JSON", tmp_path / "ats_venue_share.json")
+        self.health = []
+        monkeypatch.setattr(
+            mod, "_record_health",
+            lambda state, scan_time, error=None: self.health.append(state),
+        )
+        self.mod = mod
+
+    def test_run_heartbeats_error_when_the_key_is_absent(self, monkeypatch):
+        from clients.equibles_client import EquiblesAuthError
+
+        monkeypatch.delenv("EQUIBLES_API_KEY", raising=False)
+        with pytest.raises(EquiblesAuthError):
+            self.mod.run(tickers=["AAPL"])
+        assert self.health == ["error"]

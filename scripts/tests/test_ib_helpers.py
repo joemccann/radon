@@ -41,6 +41,31 @@ def test_portfolio_snapshot_receives_live_correlation_report(monkeypatch):
     assert portfolio["risk_budget"]["breaches"][0]["tickers"] == ["AAA", "BBB"]
 
 
+def test_measurement_failure_does_not_block_the_snapshot(monkeypatch):
+    """T-166: the Gate-3 measurement is attached inside the per-minute snapshot
+    build. A measurement failure must fail open - the snapshot still returns,
+    ``risk_budget`` is an explicit ``None`` (banner hidden, never faked) and the
+    exception does not propagate into the positions/bankroll write."""
+    import portfolio_risk
+
+    def _boom(_portfolio):
+        raise RuntimeError("price history unavailable")
+
+    monkeypatch.setattr(portfolio_risk, "load_price_series_for_portfolio", _boom)
+
+    portfolio = {
+        "bankroll": 100_000,
+        "positions": [{"ticker": "AAA", "risk_profile": "defined", "max_risk": 2_000}],
+        "account_summary": {"net_liquidation": 100_000},
+    }
+
+    out = attach_correlation_risk_report(portfolio)
+
+    assert out is portfolio
+    assert portfolio["risk_budget"] is None
+    assert portfolio["account_summary"] == {"net_liquidation": 100_000}
+
+
 # ── safe_float ──────────────────────────────────────────────────────
 
 class TestSafeFloat:

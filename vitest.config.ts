@@ -26,10 +26,14 @@ export default defineConfig({
     environment: "node",
     fileParallelism: true,
     maxWorkers: "100%",
-    // Shard VMs plus coverage have timed out 5s jsdom tests (newsfeed
-    // pagination on shard 5, theta-harvester on shard 7). One CI retry
-    // is cheaper than a red deploy gate; local stays fail-fast.
-    retry: process.env.CI ? 1 : 0,
+    // Never retry (TEST_AUDIT T-161). A suite-wide retry turns any intermittent
+    // failure in an order-safety or money-math file into a green deploy gate,
+    // and it suppresses exactly the first-failure signal the repo's "re-run the
+    // suspect file in isolation" rule depends on. The two jsdom files that
+    // timed out under shard + coverage load (newsfeed pagination, theta-
+    // harvester scanner) raise their own `testTimeout` via `vi.setConfig`
+    // instead: a slow test is honest about being slow, a retry is not.
+    retry: 0,
     // Pin NODE_ENV=test for every run. Vitest defaults to "test", but an ambient
     // shell `NODE_ENV=development` (common in a dev session) leaks through and
     // overrides it — silently flipping code paths that branch on NODE_ENV (e.g.

@@ -28,7 +28,7 @@ export type RiskBudgetReport = {
   book_budget: number;
 };
 
-export type CorrelationBannerLevel = "none" | "info" | "critical";
+export type CorrelationBannerLevel = "none" | "info" | "unmeasured" | "critical";
 
 export type CorrelationClusterRow = {
   tickers: string[];
@@ -91,6 +91,33 @@ export function correlationRiskBanner(
   }
 
   if (report.clusters.length > 0) {
+    const measured = `${report.clusters.length} correlated cluster${
+      report.clusters.length === 1 ? "" : "s"
+    }`;
+
+    // Gate 3 may not return a clean verdict on a book it only partly measured:
+    // the backfill ladder leaves underlyings without price history unmeasured
+    // for long stretches, so a "within budget" headline would be a false all
+    // clear over exposure that was never correlated at all.
+    if (insufficientData.length > 0) {
+      const unmeasured = `${insufficientData.length} position${
+        insufficientData.length === 1 ? "" : "s"
+      }`;
+      return {
+        gate: 3,
+        level: "unmeasured",
+        headline: `Gate 3: partial correlation read, ${unmeasured} unmeasured`,
+        detail:
+          `${measured} ${report.clusters.length === 1 ? "sits" : "sit"} inside ` +
+          `the book budget, but ${unmeasured} ` +
+          `${insufficientData.length === 1 ? "lacks" : "lack"} the price ` +
+          "history to correlate. This is not a full book verdict.",
+        clusterCount: report.clusters.length,
+        breachedClusters: [],
+        insufficientData,
+      };
+    }
+
     return {
       gate: 3,
       level: "info",

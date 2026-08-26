@@ -8974,6 +8974,7 @@ body[data-mobile="true"] .orders-command-strip__jump:active {
 }
 .crb[data-level="critical"] { --crb-accent: var(--fault); }
 .crb[data-level="info"] { --crb-accent: var(--signal-core); }
+.crb[data-level="unmeasured"] { --crb-accent: var(--warn); }
 .crb[data-level="none"] { --crb-accent: var(--positive); }
 
 .crb-header {

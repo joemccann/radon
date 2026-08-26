@@ -176,6 +176,29 @@ describe("GET /api/portfolio — cache-only polling", () => {
     }
   });
 
+  it("returns the cached snapshot payload from the RSC seed", async () => {
+    vi.useFakeTimers();
+    // Friday RTH so a fresh snapshot carries no age warning.
+    vi.setSystemTime(new Date("2026-07-10T19:00:00.000Z"));
+    try {
+      const portfolio = makePortfolio(new Date(Date.now() - 10_000).toISOString());
+      portfolio.bankroll = 137_425.5;
+      mockDbPortfolio(portfolio);
+
+      const { readPortfolioSnapshotSeed } = await import(
+        "../lib/portfolio/readPortfolioSnapshot.server"
+      );
+      const result = await readPortfolioSnapshotSeed();
+
+      expect(result?.data.bankroll).toBe(137_425.5);
+      expect(result?.data.last_sync).toBe(portfolio.last_sync);
+      expect(result?.warning).toBeNull();
+      expect(mockRadonFetch).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps repeated weekend GETs free of IB side effects", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-11T18:00:00.000Z"));

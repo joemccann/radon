@@ -318,6 +318,23 @@ def _store_closes(conn, symbol, closes, source="ib"):
     conn.commit()
 
 
+class _FakeClock:
+    """Injected monotonic clock: time only moves when a fetcher burns it.
+
+    Keeps the wall-clock budget assertions deterministic and instant - no test
+    is allowed to actually sleep for the length of an IB history request.
+    """
+
+    def __init__(self, start=1_000.0):
+        self.t = float(start)
+
+    def __call__(self):
+        return self.t
+
+    def advance(self, seconds):
+        self.t += float(seconds)
+
+
 def _stub_fetchers(monkeypatch, sink, ib=None, uw=None, yahoo=None):
     """Replace the IB/UW/Yahoo rungs with recorders returning fixed series."""
     import portfolio_risk
@@ -510,6 +527,78 @@ class TestTursoPriceSource:
 
         assert set(series) == {"AAA"}
         assert len(series["AAA"]) >= portfolio_risk.MIN_CLOSES_TARGET
+
+    def test_backfill_is_wall_clock_bounded(self, price_db, tmp_path, monkeypatch):
+        """T-166: ib_sync runs this ladder INSIDE the per-minute snapshot build.
+
+        Four symbols x a ~30s IB rung is a two-minute stall on the
+        ``portfolio_snapshots`` write that feeds positions, bankroll and
+        ``account_summary`` -> ``assessMargin``. The run must stop at
+        ``BACKFILL_TOTAL_BUDGET_S`` and leave the rest for the next minute.
+        """
+        import portfolio_risk
+
+        clock = _FakeClock()
+        rung_s = 30.0  # IBClient.connect(timeout=10) + get_historical_data(timeout=20)
+        attempted = []
+
+        monkeypatch.setattr(portfolio_risk, "_ib_reachable", lambda: True)
+
+        def _slow_ib(symbol):
+            attempted.append(symbol)
+            clock.advance(rung_s)
+            return dict(_dated_closes(_DEEP_RET))
+
+        monkeypatch.setattr(portfolio_risk, "_fetch_ib_closes", _slow_ib)
+        monkeypatch.setattr(portfolio_risk, "_fetch_uw_closes", lambda symbol: {})
+        monkeypatch.setattr(portfolio_risk, "_fetch_yahoo_closes", lambda symbol: {})
+
+        symbols = ["AAA", "BBB", "CCC", "DDD"]
+        start = clock()
+        fetched = portfolio_risk.backfill_price_history(symbols, clock=clock)
+
+        # Bounded by the budget plus at most the one rung already in flight.
+        assert clock() - start <= portfolio_risk.BACKFILL_TOTAL_BUDGET_S + rung_s
+        assert len(attempted) < len(symbols)
+        assert set(fetched) == set(attempted)
+
+        # Symbols the budget never reached are still due on the next run - the
+        # throttle must not record them as retried-and-failed.
+        assert portfolio_risk._due_for_backfill(symbols) == [
+            s for s in symbols if s not in attempted
+        ]
+
+    def test_budget_is_checked_between_ladder_rungs(
+        self, price_db, tmp_path, monkeypatch
+    ):
+        """One slow rung must not buy the ladder two more rungs: once the budget
+        is spent, IB -> UW -> Yahoo stops where it stands."""
+        import portfolio_risk
+
+        clock = _FakeClock()
+        calls = []
+
+        monkeypatch.setattr(portfolio_risk, "_ib_reachable", lambda: True)
+
+        def _rung(name, seconds):
+            def _stub(symbol):
+                calls.append(name)
+                clock.advance(seconds)
+                return {}
+
+            return _stub
+
+        monkeypatch.setattr(
+            portfolio_risk,
+            "_fetch_ib_closes",
+            _rung("ib", portfolio_risk.BACKFILL_TOTAL_BUDGET_S + 1),
+        )
+        monkeypatch.setattr(portfolio_risk, "_fetch_uw_closes", _rung("uw", 1.0))
+        monkeypatch.setattr(portfolio_risk, "_fetch_yahoo_closes", _rung("yahoo", 1.0))
+
+        assert portfolio_risk.backfill_price_history(["AAA"], clock=clock) == {}
+        assert calls == ["ib"]
+
 
 
 class TestPriceHistoryReader:

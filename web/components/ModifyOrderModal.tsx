@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { OpenOrder, PortfolioData, PortfolioLeg } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
-import { optionKey } from "@/lib/pricesProtocol";
+import { oldestQuoteTimestamp, optionKey } from "@/lib/pricesProtocol";
 import type { ModifyComboLeg, ModifyOrderRequest } from "@/lib/orderModify";
 import Modal from "./Modal";
 import { getQuoteMetrics } from "@/lib/quoteTelemetry";
@@ -189,6 +189,9 @@ export function resolveOrderPriceData(
     let netAsk = 0;
     let netLast = 0;
     let resolved = false;
+    // Freshness of the BAG net is the freshness of its stalest leg, never the
+    // wall clock: the operator confirms a replacement limit against this quote.
+    let legQuotes: PriceData[] = [];
 
     // Primary: use combo legs from the order itself (resolved during sync)
     const quoteLegs = editedLegs?.length
@@ -215,7 +218,8 @@ export function resolveOrderPriceData(
         });
         const lp = prices[key];
         if (!lp || lp.bid == null || lp.ask == null) { allAvailable = false; break; }
-        
+        legQuotes.push(lp);
+
         // Natural market: BUY leg = pay ask / receive bid, SELL leg = receive bid / pay ask
         const ratio = Number.isInteger(Number(cl.ratio)) && Number(cl.ratio) > 0 ? Number(cl.ratio) : 0;
         if (ratio === 0) { allAvailable = false; break; }
@@ -241,13 +245,15 @@ export function resolveOrderPriceData(
         netBid = 0;
         netAsk = 0;
         netLast = 0;
+        legQuotes = [];
         let allAvailable = true;
         for (const leg of pos.legs) {
           const key = legPriceKey(pos.ticker, pos.expiry, leg);
           if (!key) { allAvailable = false; break; }
           const lp = prices[key];
           if (!lp || lp.bid == null || lp.ask == null) { allAvailable = false; break; }
-          
+          legQuotes.push(lp);
+
           // Natural market: LONG leg = pay ask / receive bid, SHORT leg = receive bid / pay ask
           if (leg.direction === "LONG") {
             netAsk += lp.ask;  // To BUY combo: pay ask on LONG legs
@@ -293,7 +299,7 @@ export function resolveOrderPriceData(
       vega: null,
       impliedVol: null,
       undPrice: null,
-      timestamp: new Date().toISOString(),
+      timestamp: oldestQuoteTimestamp(legQuotes) ?? "",
     };
   }
 

@@ -1,6 +1,10 @@
 import type { PriceData } from "@/lib/pricesProtocol";
 import { fmtPrice } from "@/lib/positionUtils";
 
+// Lives with PriceData so the net-quote builders can stamp combo freshness
+// without importing this module (which would close an import cycle).
+export { oldestQuoteTimestamp } from "@/lib/pricesProtocol";
+
 export type QuoteTelemetryFieldKey =
   | "bid"
   | "mid"
@@ -77,6 +81,13 @@ export type ComboNetQuote = {
   bid: number | null;
   ask: number | null;
   last?: number | null;
+  /**
+   * ISO timestamp of the OLDEST leg quote the net was summed from. A combo is
+   * only as fresh as its stalest leg. Omit it when the caller genuinely has no
+   * leg freshness: the combo then fails closed and renders as a closed market
+   * rather than borrowing the wall clock and passing itself off as live.
+   */
+  timestamp?: string | null;
 };
 
 /**
@@ -86,8 +97,12 @@ export type ComboNetQuote = {
  * the SAME `buildQuoteTelemetryModel` every single-leg surface uses instead of
  * hand-rolling a second model. Session OHLV stays null because no exchange
  * publishes a combo's high/low/volume — those fields render "---" honestly.
+ *
+ * Freshness comes from `timestamp` (the oldest leg quote), never from the wall
+ * clock. A combo whose legs last ticked hours ago must relabel to CLOSE the way
+ * a single leg does, because the net is what prefills the limit price.
  */
-export function comboQuotePriceData({ symbol, bid, ask, last }: ComboNetQuote): PriceData {
+export function comboQuotePriceData({ symbol, bid, ask, last, timestamp }: ComboNetQuote): PriceData {
   const { mid } = getQuoteMetrics({ bid, ask });
   return {
     symbol,
@@ -111,7 +126,10 @@ export function comboQuotePriceData({ symbol, bid, ask, last }: ComboNetQuote): 
     vega: null,
     impliedVol: null,
     undPrice: null,
-    timestamp: new Date().toISOString(),
+    // Never the wall clock: the net carries its stalest leg's age, and an empty
+    // string (no leg freshness available) parses to NaN, so `hasLiveQuote`
+    // reports the combo as not live instead of guessing.
+    timestamp: timestamp ?? "",
   };
 }
 

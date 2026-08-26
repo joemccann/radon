@@ -36,7 +36,7 @@ import { computeLegImpliedValue, computePositionImpliedValue, resolveUnderlyingS
 import { useRiskFreeRate } from "@/lib/useRiskFreeRate";
 import { useColumnVisibility } from "@/lib/useColumnVisibility";
 import { useViewport } from "@/lib/useViewport";
-import { isIbDailyPnlCurrent, withSessionIbDailyPnl } from "@/lib/ibDailyPnlSession";
+import { isIbDailyPnlFromCurrentSession, withSessionIbDailyPnl } from "@/lib/ibDailyPnlSession";
 import { ColumnsToggle, type ColumnsToggleEntry } from "./ColumnsToggle";
 import MobilePositionList from "./mobile/MobilePositionList";
 
@@ -577,10 +577,11 @@ export default function PositionTable({
   const positionExtract = useMemo(() => makePositionExtract(prices, riskFreeRate), [prices, riskFreeRate]);
   // IB streams (and re-baselines) per-position dailyPnL on non-trading days
   // too; gate the rows on the same session the Day P&L card uses.
-  const sessionToday = isIbDailyPnlCurrent();
+  const lastSync = portfolio?.last_sync ?? null;
+  const sessionToday = isIbDailyPnlFromCurrentSession(lastSync);
   const sessionPositions = useMemo(
-    () => (sessionToday ? positions : withSessionIbDailyPnl(positions)),
-    [positions, sessionToday],
+    () => (sessionToday ? positions : withSessionIbDailyPnl(positions, new Date(), lastSync)),
+    [lastSync, positions, sessionToday],
   );
   const { sorted, sort, toggle } = useSort(sessionPositions, positionExtract);
   // Implied columns are only meaningful for option positions. Hide them entirely
