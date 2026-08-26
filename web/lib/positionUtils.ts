@@ -528,7 +528,7 @@ export function isSameDay(pos: PortfolioPosition): boolean {
  *  Sign-aware: `pos.contracts` is a positive magnitude, so a SHORT's market
  *  value must read negative for `mv − entry_cost` to be a signed P&L. */
 function computeStockRtMv(pos: PortfolioPosition, prices?: Record<string, PriceData>): number | null {
-  const last = prices?.[pos.ticker]?.last;
+  const last = (prices?.[pos.ticker] ?? prices?.[pos.ticker.toUpperCase()])?.last;
   if (last == null || last <= 0) return null;
   return positionDirectionSign(pos) * last * Math.abs(pos.contracts);
 }
@@ -538,14 +538,44 @@ function computeRtMv(pos: PortfolioPosition, prices?: Record<string, PriceData>)
   if (pos.structure_type === "Stock" || !prices) return null;
   let rtMv = 0;
   for (const leg of pos.legs) {
+    // A zero-contract leg is worth nothing whatever it prices at; letting an
+    // unresolvable one null the whole walk drops the position to its stale
+    // synced value.
+    if (!Number.isFinite(leg.contracts) || leg.contracts <= 0) continue;
+    // A stock leg inside a combo has no option key — it prices off the
+    // underlying's own quote, with the synced leg price underneath.
     const key = legPriceKey(pos.ticker, pos.expiry, leg);
-    const lp = key ? prices[key] : null;
+    const lp = key
+      ? prices[key] ?? null
+      : leg.type === "Stock"
+        ? prices[pos.ticker] ?? prices[pos.ticker.toUpperCase()] ?? null
+        : null;
     const current = resolveRealtimePrice(lp, leg.market_price, Boolean(leg.market_price_is_calculated)).price;
     if (current == null) return null;
     const sign = leg.direction === "LONG" ? 1 : -1;
     rtMv += sign * current * leg.contracts * getLegMultiplier(leg);
   }
   return rtMv;
+}
+
+/**
+ * THE real-time market value of a position — the only one.
+ *
+ * Every surface that renders a market value, a P&L, or a Today P&L must take
+ * it from here. A second walk of the same legs is not a duplicate helper, it
+ * is a second market value: on 2026-08-26 the mobile card priced a same-day
+ * META short put off the raw `last` while `getTodayPnlDollars` priced it off
+ * the `resolveRealtimePrice` mid, and the card published +$1,097 total against
+ * -$103 today for a position that had no yesterday. Callers fall back with
+ * `?? resolveMarketValue(pos)` when nothing resolves; they do not re-walk.
+ */
+export function resolveRealtimeMarketValue(
+  pos: PortfolioPosition,
+  prices?: Record<string, PriceData>,
+): number | null {
+  return pos.structure_type === "Stock"
+    ? computeStockRtMv(pos, prices)
+    : computeRtMv(pos, prices);
 }
 
 /* ─── Option daily change ─────────────────────────────────── */
