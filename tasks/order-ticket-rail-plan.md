@@ -52,16 +52,22 @@ shift correctly between themes (repo rule):
     --wash-warn:   color-mix(in srgb, var(--warn) 9%, transparent);
     --wash-fault:  color-mix(in srgb, var(--fault) 10%, transparent);
 
-## Stages
+## Status — all stages shipped 2026-08-26
 
-- **S1 — dock layout (desktop).** Move the builder into a 384px right rail beside the chain;
-  render the existing pieces in the design's order. No transmit-path change yet.
-- **S2 — risk block + P&L sparkline.** The 2-col risk grid, TOTAL / FUNDS AFTER, and the
-  breakeven-marked expiry curve, fed from `useOrderRisk`.
-- **S3 — verify → transmit gate.** `VERIFY ORDER →` step 1, review step 2, and the unbounded-risk
-  acknowledgement that arms transmit. Touches the live submit path — most dangerous stage, ship alone.
-- **S4 — chain ↔ ticket bidirectional highlight.** Selected legs highlighted in the chain rows.
-- **S5 — mobile bottom sheet (Turn 2).** Peek dock → ticket sheet → verify & transmit, ≥44px targets.
+- **S1 — dock layout (desktop).** DONE `f6e20160`. Chain 908px, dock 384px, side by side.
+- **S2 — risk block + payoff curve.** DONE `bb61845b`. Exact intrinsic payoff in `lib/order/payoff.ts`.
+- **S3 — verify → transmit gate.** DONE `1649746c`. Also fixed a LocateFeeChip crash it surfaced.
+- **S4 — chain ↔ ticket highlight.** DONE `65937d83`. Per side, not per row.
+- **S5 — mobile bottom sheet.** DONE `c572f5cb`. Same risk panel and same gate, 44px ack row.
 
-Each stage: failing test first, full suite + tsc green, then land. S3 additionally needs live
-browser verification before it is called done.
+Each stage was red/green with a live browser check before landing.
+
+## Deliberately not built
+
+- **P(PROFIT)** renders `---`. It needs a volatility model the order pipeline does not produce.
+  A plausible-looking probability beside a transmit button is worse than an honest blank, because
+  an operator may size against it. The repo has a Python-parity Black-Scholes lib
+  (`lib/blackScholes.ts`), so a proper POP is a well-scoped follow-up — it just should not be
+  guessed at inside a layout change.
+- **CONFIDENCE 0.84** from the canvas. Same reason: no producer for it.
+- **1b Execution Dock** and **1c Staged Review**. These are alternatives to 1a, not further work.
