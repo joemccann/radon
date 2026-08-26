@@ -12,6 +12,11 @@ RADON_ARCHIVE_S3_ACCESS_KEY_ID
 RADON_ARCHIVE_S3_SECRET_ACCESS_KEY
 RADON_ARCHIVE_S3_REGION
 UW_TOKEN
+# Equibles — the five radon-equibles-*.timer oneshots (short-crowding, filing
+# forensics, 13F, ATS venue share, COT) construct EquiblesClient(), which
+# raises EquiblesAuthError when this is unset. Required here so the deploy
+# preflight fails closed instead of shipping units that die on every fire.
+EQUIBLES_API_KEY
 IB_FLEX_TOKEN
 IB_FLEX_QUERY_ID
 IB_FLEX_NAV_QUERY_ID
