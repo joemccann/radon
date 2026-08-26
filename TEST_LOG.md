@@ -254,3 +254,8 @@ having run no tests at all. Needs an operator eye: T-160 (both coverage
 ratchets left `deploy.needs` and `main` carries no `required_status_checks`),
 T-161 (suite-wide `retry: 1` under CI), T-164 (installing caddy in the
 `cloud-tests` job is a CI change).
+
+## Remediation 2026-08-26
+
+| Task | Status | Commits | Evidence |
+|---|---|---|---|
