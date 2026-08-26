@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import math
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
@@ -69,10 +70,21 @@ STALE_TOLERANCE_DAYS = 10
 # it on a deploy costs one extra attempt.
 BACKFILL_MAX_SYMBOLS_PER_RUN = 4
 BACKFILL_RETRY_S = 6 * 3600
+# Total wall clock the backfill ladder may spend inside one call. The loader
+# runs on the live portfolio-sync path, so it is bounded rather than left to
+# BACKFILL_MAX_SYMBOLS_PER_RUN x (IB connect + history + UW + Yahoo). R-206.
+BACKFILL_WALL_CLOCK_BUDGET_S = 45.0
 _BACKFILL_MARKER_PATH = _DATA_DIR / "price_risk_backfill.json"
 
 IB_HISTORY_DURATION = "1 Y"
 IB_HISTORY_TIMEOUT_S = 20
+IB_CONNECT_TIMEOUT_S = 10
+YAHOO_TIMEOUT_S = 30
+# Worst case for ONE symbol: IB connect + IB history + Yahoo, each with its own
+# timeout. The budget above is checked BEFORE a symbol starts, so one whole
+# call is bounded by budget + this. Kept as a constant so the guarantee is
+# checkable rather than implied. R-206.
+BACKFILL_SYMBOL_WORST_CASE_S = IB_CONNECT_TIMEOUT_S + IB_HISTORY_TIMEOUT_S + YAHOO_TIMEOUT_S
 
 
 # ── Position → underlying mapping ────────────────────────────────────────────
@@ -392,7 +404,15 @@ def load_price_series_for_portfolio(
 
     if unusable:
         for ticker, closes in _load_disk_cache_series(unusable, stocks_dir).items():
-            if not _has_target_depth(series.get(ticker)):
+            # Test the DISK series, the way the Turso and backfill paths above
+            # do. Gating only on what is already present installed an
+            # arbitrarily old cache as a current correlation input: the ticker
+            # then passed `_usable_return_count >= 5`, so it never reached
+            # `insufficient_data`, while `_aligned_returns` intersects DATES
+            # and found too few shared days against a fresh sibling — no
+            # cluster, no insufficiency, a clean bill of health over a
+            # concentration the gate exists to surface. R-204.
+            if _has_target_depth(closes) and not _has_target_depth(series.get(ticker)):
                 series[ticker] = closes
 
     return {t: s for t, s in series.items() if s}
@@ -421,15 +441,35 @@ def backfill_price_history(symbols: Sequence[str]) -> Dict[str, Dict[str, float]
     due = _due_for_backfill(symbols)[:BACKFILL_MAX_SYMBOLS_PER_RUN]
     if not due:
         return {}
-    _record_backfill_attempt(due)
 
     fetched: Dict[str, Dict[str, float]] = {}
+    started = time.monotonic()
     for symbol in due:
+        # `attach_correlation_risk_report` runs every minute during RTH, and a
+        # DEAD gateway is the expensive case — `_ib_reachable` proceeds
+        # optimistically on an unreachable /health, so it is one 10 s connect
+        # timeout per symbol before the ladder even reaches UW. Stop at the
+        # budget rather than letting four symbols serialize into ~240 s inside
+        # the live sync. R-206.
+        if time.monotonic() - started >= BACKFILL_WALL_CLOCK_BUDGET_S:
+            print(
+                f"  backfill budget spent; {symbol} and later symbols deferred",
+                file=sys.stderr,
+            )
+            break
+        # Stamped per symbol AFTER the attempt. Stamping all four up front
+        # blacked out symbols the run never reached. R-205.
         closes, source = _fetch_closes_via_ladder(symbol)
+        _record_backfill_attempt([symbol])
         if not closes:
             print(f"  no daily closes for {symbol} from IB/UW/Yahoo", file=sys.stderr)
             continue
-        _persist_closes(symbol, closes, source)
+        # A transient Turso write failure must not discard closes already in
+        # hand, nor abort the remaining symbols. R-205.
+        try:
+            _persist_closes(symbol, closes, source)
+        except Exception as exc:  # noqa: BLE001 - the fetch still succeeded
+            print(f"  could not persist {symbol} closes: {exc}", file=sys.stderr)
         fetched[symbol] = closes
     return fetched
 
@@ -467,7 +507,7 @@ def _fetch_ib_closes(symbol: str) -> Dict[str, float]:
 
     client = IBClient()
     try:
-        client.connect(client_id="auto", timeout=10)
+        client.connect(client_id="auto", timeout=IB_CONNECT_TIMEOUT_S)
         bars = client.get_historical_data(
             Stock(symbol, "SMART", "USD"),
             duration=IB_HISTORY_DURATION,
@@ -525,7 +565,7 @@ def _fetch_yahoo_closes(symbol: str) -> Dict[str, float]:
     )
     try:
         req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urlopen(req, timeout=30) as resp:
+        with urlopen(req, timeout=YAHOO_TIMEOUT_S) as resp:
             result = json.load(resp)["chart"]["result"][0]
     except Exception as exc:  # noqa: BLE001 - measurement stays "insufficient"
         print(f"  Yahoo daily closes failed for {symbol}: {exc}", file=sys.stderr)
