@@ -223,13 +223,21 @@ describe("MobileOrderTicket — two-step confirm gates placement", () => {
 });
 
 describe("MobileOrderTicket — okToSubmit gating", () => {
-  it("allows submitting an unbounded naked short and still renders the Gate 1 warning", async () => {
+  it("allows submitting an unbounded naked short once acknowledged, and still renders the Gate 1 warning", async () => {
     // Gate 4 (no naked shorts) disabled 2026-04-30: an UNBOUNDED short is
-    // submittable — desktop parity with OrderTab — while Gate 1 stays an
+    // still SUBMITTABLE — desktop parity with OrderTab — and Gate 1 stays an
     // advisory warning in the confirm summary.
+    //
+    // What changed (order-ticket-rail, 2026-08-26): the ticket now also asks
+    // the operator to acknowledge unbounded loss before send arms. That is an
+    // extra client-side condition on top of okToSubmit, not a new refusal —
+    // the order remains permitted, it just cannot go out unread.
     const { getByTestId } = renderTicket({ legs: [makeLeg({ action: "SELL" })] });
     fireEvent.click(getByTestId("mobile-order-ticket-review"));
     const submit = getByTestId("mobile-order-ticket-submit") as HTMLButtonElement;
+    await waitFor(() => expect(getByTestId("ticket-unbounded-ack")).toBeTruthy());
+    expect(submit.disabled).toBe(true);
+    fireEvent.click(getByTestId("ticket-unbounded-ack"));
     await waitFor(() => expect(submit.disabled).toBe(false));
 
     // Gate 1 advisory must render alongside the enabled submit. The sheet
