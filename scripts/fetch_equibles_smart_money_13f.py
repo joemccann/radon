@@ -745,15 +745,23 @@ def _write_db_cache(payload: dict[str, Any]) -> None:
         writer.ensure_no_replica_for_writers()
     except Exception:  # noqa: BLE001 — stripped env; disk cache still applies
         pass
+    # Separate try blocks on purpose. equibles_13f_snapshots is the ONLY table
+    # /api/equibles-smart-money-13f reads; the holder rows are depth nothing
+    # queries yet. Sharing one try meant a single failed holder chunk (a liquid
+    # name writes hundreds of rows) skipped the snapshot upsert and left the
+    # ticker blank in the UI.
     try:
         _upsert_holder_rows(
             payload["ticker"], payload["report_date"], payload["holders"], payload["scan_time"]
         )
+    except Exception as exc:  # noqa: BLE001 — best-effort mirror, disk is the fallback
+        print(f"[{SERVICE}] holder rows non-fatal: {exc}", file=sys.stderr)
+    try:
         _upsert_snapshot(
             payload["ticker"], payload["report_date"], payload["scan_time"], payload
         )
     except Exception as exc:  # noqa: BLE001 — best-effort mirror, disk is the fallback
-        print(f"[{SERVICE}] db cache non-fatal: {exc}", file=sys.stderr)
+        print(f"[{SERVICE}] snapshot non-fatal: {exc}", file=sys.stderr)
 
 
 def _write_json_cache(payload: dict[str, Any]) -> None:
@@ -808,9 +816,13 @@ def run(
 ) -> dict[str, Any]:
     """One ticker's 13F depth payload, persisted, with a cycle heartbeat."""
     now = now or datetime.now(timezone.utc)
-    resolved = _resolve_client(client)
-    requests_before = getattr(resolved, "request_count", 0)
+    # Client construction is INSIDE the try: an absent or rejected
+    # EQUIBLES_API_KEY raises EquiblesAuthError from EquiblesClient.__init__,
+    # and outside the try that killed the oneshot before any health row was
+    # written at all — silent, not stale, so nothing alerted.
     try:
+        resolved = _resolve_client(client)
+        requests_before = getattr(resolved, "request_count", 0)
         market = market if market is not None else fetch_market_snapshot(resolved)
         payload = _run_ticker(ticker, client=resolved, market=market, now=now, persist=persist)
     except Exception:
@@ -832,8 +844,8 @@ def run_many(
 ) -> list[dict[str, Any]]:
     """Whole cycle: one market-wide fetch shared across every ticker."""
     now = now or datetime.now(timezone.utc)
-    resolved = _resolve_client(client)
     try:
+        resolved = _resolve_client(client)  # inside the try — see run()
         market = fetch_market_snapshot(resolved)
         payloads = [
             _run_ticker(t, client=resolved, market=market, now=now, persist=persist)
@@ -897,6 +909,9 @@ def main() -> None:
 
     tickers = [t.upper() for t in args.tickers] or watchlist_tickers()
     if not tickers:
+        # Exit 2 without a health row is invisible: the service is registered
+        # for freshness, so the watchdog only ever sees a row that never came.
+        _record_health("error")
         parser.error("no tickers given and the watchlist is empty")
 
     payloads = run_many(tickers)
