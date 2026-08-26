@@ -7,6 +7,8 @@ import PanelRefreshError from "./PanelRefreshError";
 import CriHistoryChart, { type ChartSeries } from "./CriHistoryChart";
 import HistoryRangeChips from "./HistoryRangeChips";
 import InfoTooltip from "./InfoTooltip";
+import FreshnessRail from "./FreshnessRail";
+import { IV_RANK_REFRESH } from "@/lib/refreshSchedule";
 import MetricCell from "./mobile/MetricCell";
 import SectionEmptyState from "./SectionEmptyState";
 import SpectralLoader from "./SpectralLoader";
@@ -162,13 +164,12 @@ export default function IvRankPanel() {
         </div>
 
         {compact ? (
-          <div className="m-regime-grid2x2" data-testid="ivrank-mobile-grid">
+          <div className="m-regime-grid2x2 m-regime-grid2x2--fill-last" data-testid="ivrank-mobile-grid">
             <MetricCell label="IV RANK" value={formatRank(current.iv_rank)} />
             <MetricCell label="REGIME" value={regime ?? "---"} />
             <MetricCell label="1M IV" value={formatIvPercent(current.iv)} />
             <MetricCell label="IV PCTILE" value={formatPctPoints(current.iv_pct)} />
             <MetricCell label="1Y IV RANGE" value={formatIvRange(current.iv_1y_low, current.iv_1y_high)} />
-            <MetricCell label="AS OF" value={data.as_of ?? current.date} />
           </div>
         ) : (
           <RegimeStrip>
@@ -221,13 +222,15 @@ export default function IvRankPanel() {
               }
               sub={<>PREMIUM VS TRAILING YEAR</>}
             />
-            <RegimeStripCell
-              testId="ivrank-strip-asof"
-              label="AS OF"
-              value={data.as_of ?? current.date}
-            />
           </RegimeStrip>
         )}
+
+        <FreshnessRail
+          schedule={IV_RANK_REFRESH}
+          asOf={data.as_of ?? current.date}
+          testId="ivrank-freshness-rail"
+          asOfTestId="ivrank-strip-asof"
+        />
       </div>
 
       {/* ── Rank over the 1M IV series ────────────────────── */}
