@@ -1070,6 +1070,22 @@ function FlowSectionsBody() {
   const watchArr = data?.watch ?? [];
   const neutralArr = data?.neutral ?? [];
   const totalScanned = data?.positions_scanned ?? 0;
+  // "5 Trading Days" was a literal in the JSX beside two payload-derived
+  // numbers, so it carried their authority while consulting nothing. The
+  // producer's real window is whatever `daily_buy_ratios` covers — a scan
+  // that got short upstream data covers fewer. UI Copy Rules forbid the
+  // hardcoded form for exactly this reason. R-269.
+  const darkPoolSessions = useMemo(() => {
+    const dates = new Set<string>();
+    for (const bucket of [data?.supports, data?.against, data?.watch, data?.neutral]) {
+      for (const position of bucket ?? []) {
+        for (const day of position.daily_buy_ratios ?? []) {
+          if (day.date) dates.add(day.date);
+        }
+      }
+    }
+    return dates.size;
+  }, [data]);
 
   const actionItems = againstArr.filter((p) => p.strength >= 15);
 
@@ -1265,7 +1281,7 @@ function FlowSectionsBody() {
       <div className="section">
         <div className="report-meta">
           {lastSync
-            ? `Report Generated: ${new Date(lastSync).toLocaleString()} • Source: UW API • Dark Pool Lookback: 5 Trading Days • ${totalScanned} Positions Scanned`
+            ? `Report Generated: ${new Date(lastSync).toLocaleString()} • Source: UW API • Dark Pool Lookback: ${darkPoolSessions > 0 ? `${darkPoolSessions} Trading Day${darkPoolSessions === 1 ? "" : "s"}` : "unavailable"} • ${totalScanned} Positions Scanned`
             : "Awaiting initial flow analysis..."}
         </div>
       </div>
