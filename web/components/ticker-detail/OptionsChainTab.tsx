@@ -569,7 +569,11 @@ function OrderBuilder({
   if (legs.length === 0) return null;
 
   return (
-    <div className="order-builder" ref={builderRef} data-prefilled={prefillLabel ? "true" : undefined}>
+    <div
+      className="order-builder order-builder--rail"
+      ref={builderRef}
+      data-prefilled={prefillLabel ? "true" : undefined}
+    >
       <div className="order-builder-section order-builder-section--structure">
         <div className="order-builder-header">
           <span className="order-builder-title">
@@ -1372,7 +1376,10 @@ export default function OptionsChainTab({
         </div>
       </div>
 
-      {/* Chain grid */}
+      {/* Chain grid + docked ticket rail. The ticket sits BESIDE the chain
+          rather than under it, so legs, price, risk and CTA stay readable
+          without scrolling and the chain keeps its full height. */}
+      <div className="chain-rail" data-docked={orderLegs.length > 0 ? "true" : "false"}>
       {loadingStrikes ? (
         <div style={{ padding: "24px 0", textAlign: "center" }}>
           <SpectralLoader label="Loading chain" />
@@ -1444,7 +1451,7 @@ export default function OptionsChainTab({
         </div>
       )}
 
-      {/* Order Builder */}
+      {/* Order Builder — the dock */}
       <OrderBuilder
         ticker={ticker}
         legs={orderLegs}
@@ -1458,6 +1465,7 @@ export default function OptionsChainTab({
         onUpdateLeg={handleUpdateLeg}
         onClearLegs={handleClearLegs}
       />
+      </div>
     </div>
   );
 }

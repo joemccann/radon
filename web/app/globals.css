@@ -12556,6 +12556,46 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
 
 /* ─── Order Builder (dense instrument ticket, content-packed) ─── */
 
+/* Docked ticket rail — chain keeps its column, the ticket sits beside it so
+   legs, price, risk and CTA are readable without scrolling. Below the
+   breakpoint the rail unstacks and the ticket returns to full width. */
+.chain-rail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.chain-rail[data-docked="true"] {
+  grid-template-columns: minmax(0, 1fr) 384px;
+}
+
+.chain-rail .chain-grid-wrapper {
+  min-width: 0;
+}
+
+.order-builder--rail {
+  position: sticky;
+  top: 8px;
+  /* Never taller than the viewport: the ticket scrolls internally so the
+     transmit CTA stays reachable on a short window. */
+  max-height: calc(100dvh - 96px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 1180px) {
+  .chain-rail[data-docked="true"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .order-builder--rail {
+    position: static;
+    max-height: none;
+    overflow-y: visible;
+  }
+}
+
 .order-builder {
   margin-top: 8px;
   padding: 10px 12px;
