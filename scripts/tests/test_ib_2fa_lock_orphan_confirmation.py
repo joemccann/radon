@@ -37,6 +37,7 @@ from utils import ib_2fa_lock
 def _redirect_lock_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     path = tmp_path / "ib-2fa-push-lock.json"
     monkeypatch.setenv("IB_2FA_LOCK_PATH", str(path))
+    monkeypatch.setattr(ib_2fa_lock, "ORPHAN_CONFIRM_INTERVAL_SECS", 0.0)
     ib_2fa_lock.reset_orphan_state()
     return path
 
@@ -47,11 +48,17 @@ def _past_grace(base: float = 1000.0) -> float:
 
 class TestOrphanNeedsConfirmation:
     def test_one_failed_probe_does_not_revoke_a_live_lease(self, monkeypatch):
+        """A single transient OSError from `socket.create_connection`.
+
+        `_gateway_port_listening` swallows refused, ETIMEDOUT under host load,
+        EMFILE and a misconfigured IB_GATEWAY_HOST alike, so one failure is
+        not evidence the gateway is gone — the port answers on the retry.
+        """
         probes = {"n": 0}
 
         def flaky_probe():
             probes["n"] += 1
-            return False  # a single transient OSError from create_connection
+            return probes["n"] > 1
 
         monkeypatch.setattr(ib_2fa_lock, "_gateway_port_listening", flaky_probe)
         ib_2fa_lock.acquire_2fa_push_lock("restart-cli", ttl_secs=600, now=1000.0)
@@ -59,17 +66,34 @@ class TestOrphanNeedsConfirmation:
         held = ib_2fa_lock.check_2fa_push_lock(now=_past_grace())
         assert held is not None, "one unretried probe revoked a live lease"
         assert held.holder == "restart-cli"
+        assert probes["n"] > 1, "the probe was never retried"
 
     def test_a_sustained_outage_still_revokes(self, monkeypatch):
-        monkeypatch.setattr(ib_2fa_lock, "_gateway_port_listening", lambda: False)
+        probes = {"n": 0}
+
+        def always_down():
+            probes["n"] += 1
+            return False
+
+        monkeypatch.setattr(ib_2fa_lock, "_gateway_port_listening", always_down)
         ib_2fa_lock.acquire_2fa_push_lock("restart-cli", ttl_secs=600, now=1000.0)
 
-        now = _past_grace()
-        # Confirmation requires the port to be OBSERVED down more than once.
-        for _ in range(ib_2fa_lock.ORPHAN_CONFIRM_PROBES):
-            result = ib_2fa_lock.check_2fa_push_lock(now=now)
-            now += 1.0
-        assert result is None, "a genuinely dead gateway must still free the lease"
+        assert ib_2fa_lock.check_2fa_push_lock(now=_past_grace()) is None, (
+            "a genuinely dead gateway must still free the lease"
+        )
+        assert probes["n"] == ib_2fa_lock.ORPHAN_CONFIRM_PROBES
+
+    def test_confirmation_happens_within_one_call(self, monkeypatch):
+        """A one-shot caller gets exactly ONE `_is_orphaned` invocation.
+
+        `ib-gateway-control.sh` is a legitimate revoker and never runs long
+        enough to accumulate a streak across calls, so the confirmation cannot
+        live in cross-call state.
+        """
+        monkeypatch.setattr(ib_2fa_lock, "_gateway_port_listening", lambda: False)
+        ib_2fa_lock.acquire_2fa_push_lock("restart-cli", ttl_secs=600, now=1000.0)
+        ib_2fa_lock.reset_orphan_state()
+        assert ib_2fa_lock.check_2fa_push_lock(now=_past_grace()) is None
 
     def test_a_prior_successful_probe_resets_the_confirmation(self, monkeypatch):
         state = {"up": True}
@@ -83,7 +107,13 @@ class TestOrphanNeedsConfirmation:
         assert ib_2fa_lock.check_2fa_push_lock(now=now + 1) is not None
 
     def test_a_second_holder_cannot_steal_on_one_failed_probe(self, monkeypatch):
-        monkeypatch.setattr(ib_2fa_lock, "_gateway_port_listening", lambda: False)
+        probes = {"n": 0}
+
+        def flaky_probe():
+            probes["n"] += 1
+            return probes["n"] > 1
+
+        monkeypatch.setattr(ib_2fa_lock, "_gateway_port_listening", flaky_probe)
         ib_2fa_lock.acquire_2fa_push_lock("restart-cli", ttl_secs=600, now=1000.0)
 
         ok, current = ib_2fa_lock.acquire_2fa_push_lock(

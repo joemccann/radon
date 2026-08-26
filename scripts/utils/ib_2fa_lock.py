@@ -102,9 +102,9 @@ _orphan_reported: Optional[tuple[str, float]] = None
 # compose restart or a slow IBC startup legitimately keeps the port unbound.
 # R-210.
 ORPHAN_CONFIRM_PROBES = 3
-# (holder, acquired_at) -> consecutive port-down observations for that lease.
-_orphan_down_streak: Optional[tuple[tuple[str, float], int]] = None
-# True once this process has ever seen the port accept for the current lease.
+ORPHAN_CONFIRM_INTERVAL_SECS = 0.4
+# Identity of a lease whose gateway this process has seen ANSWER. A lease that
+# was serving a moment ago is in a restart, not abandoned.
 _orphan_seen_up: Optional[tuple[str, float]] = None
 
 
@@ -273,9 +273,8 @@ def _gateway_port_listening() -> bool:
 
 def reset_orphan_state() -> None:
     """Clear the per-process orphan-confirmation memory (tests, CLI reruns)."""
-    global _orphan_reported, _orphan_down_streak, _orphan_seen_up
+    global _orphan_reported, _orphan_seen_up
     _orphan_reported = None
-    _orphan_down_streak = None
     _orphan_seen_up = None
 
 
@@ -293,27 +292,29 @@ def _is_orphaned(lock: PushLock, now: float) -> bool:
     observed down ORPHAN_CONFIRM_PROBES times in a row, and any successful
     observation for this lease resets the count. R-210.
     """
-    global _orphan_reported, _orphan_down_streak, _orphan_seen_up
+    global _orphan_reported, _orphan_seen_up
     identity = (lock.holder, lock.acquired_at)
 
     if now - lock.acquired_at < GATEWAY_DOWN_GRACE_SECS:
         return False
 
-    if _gateway_port_listening():
-        _orphan_seen_up = identity
-        _orphan_down_streak = None
-        return False
+    # Confirm WITHIN this call. A one-shot caller (ib-gateway-control.sh) gets
+    # exactly one `_is_orphaned` invocation, so a streak carried across calls
+    # would never confirm for it — and it is a legitimate revoker. Probes are
+    # only reached once past the grace window and only when the port is down,
+    # so the young-lease fast path still opens no socket at all.
+    for attempt in range(ORPHAN_CONFIRM_PROBES):
+        if _gateway_port_listening():
+            _orphan_seen_up = identity
+            return False
+        if attempt + 1 < ORPHAN_CONFIRM_PROBES:
+            time.sleep(ORPHAN_CONFIRM_INTERVAL_SECS)
 
-    streak = _orphan_down_streak[1] + 1 if (
-        _orphan_down_streak and _orphan_down_streak[0] == identity
-    ) else 1
-    # A lease whose gateway was answering a moment ago is in a restart, not
-    # gone; make it re-earn the full confirmation from scratch.
-    if _orphan_seen_up == identity and streak < ORPHAN_CONFIRM_PROBES:
-        _orphan_down_streak = (identity, streak)
-        return False
-    _orphan_down_streak = (identity, streak)
-    if streak < ORPHAN_CONFIRM_PROBES:
+    if _orphan_seen_up == identity:
+        # This process watched the port answer for this very lease a moment
+        # ago: a restart, not an abandoned holder. Make the next call re-earn
+        # the confirmation from a clean slate rather than revoking now.
+        _orphan_seen_up = None
         return False
 
     if _orphan_reported != identity:
@@ -323,7 +324,7 @@ def _is_orphaned(lock: PushLock, now: float) -> bool:
             "across %d consecutive probes",
             lock.holder,
             now - lock.acquired_at,
-            streak,
+            ORPHAN_CONFIRM_PROBES,
         )
     return True
 

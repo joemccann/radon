@@ -24,7 +24,9 @@ def _redirect_lock_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path
     /var/lib/radon/ib-2fa-push-lock.json is never touched."""
     path = tmp_path / "ib-2fa-push-lock.json"
     monkeypatch.setenv("IB_2FA_LOCK_PATH", str(path))
-    # The orphan confirmation streak is per-process module state (R-210).
+    # Orphan confirmation retries in-call (R-210); zero the interval so the
+    # suite does not pay 0.8s per revocation.
+    monkeypatch.setattr(ib_2fa_lock, "ORPHAN_CONFIRM_INTERVAL_SECS", 0.0)
     ib_2fa_lock.reset_orphan_state()
     return path
 
@@ -324,27 +326,13 @@ def _past_grace(base: float = 1000.0) -> float:
     return base + ib_2fa_lock.GATEWAY_DOWN_GRACE_SECS + 1
 
 
-def _confirm_down(now: float) -> None:
-    """Observe the port down enough times to confirm an orphan (R-210).
-
-    One unretried 350 ms connect is not evidence a gateway is gone —
-    `_gateway_port_listening` swallows every OSError — and revoking a LIVE
-    lease is the expensive mistake, so confirmation now takes
-    ORPHAN_CONFIRM_PROBES consecutive observations.
-    """
-    for i in range(ib_2fa_lock.ORPHAN_CONFIRM_PROBES - 1):
-        ib_2fa_lock.check_2fa_push_lock(now=now + i)
-
-
 def test_check_drops_lease_once_gateway_port_is_down_past_grace(gateway_port_down):
     ib_2fa_lock.acquire_2fa_push_lock("radon-cloud.ib-gateway-control", now=1000.0)
-    _confirm_down(_past_grace())
     assert ib_2fa_lock.check_2fa_push_lock(now=_past_grace()) is None
 
 
 def test_acquire_succeeds_over_a_lease_orphaned_by_a_downed_gateway(gateway_port_down):
     ib_2fa_lock.acquire_2fa_push_lock("radon-cloud.ib-gateway-control", now=1000.0)
-    _confirm_down(_past_grace())
     ok, lock = ib_2fa_lock.acquire_2fa_push_lock("ib-watchdog", now=_past_grace())
     assert ok is True
     assert lock is not None and lock.holder == "ib-watchdog"
@@ -368,7 +356,6 @@ def test_lease_is_honoured_while_the_gateway_awaits_the_2fa_tap(gateway_port_up)
 
 def test_remaining_secs_reports_zero_for_an_orphaned_lease(gateway_port_down):
     ib_2fa_lock.acquire_2fa_push_lock("radon-cloud.ib-gateway-control", now=1000.0)
-    _confirm_down(_past_grace())
     assert ib_2fa_lock.remaining_lock_secs(now=_past_grace()) == 0
 
 
