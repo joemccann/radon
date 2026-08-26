@@ -170,7 +170,10 @@ jobs:
         with:
           pattern: vitest-coverage-*
           path: coverage-artifacts
-      - run: python3 scripts/ci/merge_vitest_coverage.py --root coverage-artifacts
+      # --expect-shards must match the web-tests shard count above. The merge
+      # downloads with a glob, so without it a partial artifact download was
+      # gated as if it were the whole suite. R-241.
+      - run: python3 scripts/ci/merge_vitest_coverage.py --root coverage-artifacts --expect-shards 8
 
   py-tests:
     name: pytest (${{ matrix.shard }})
