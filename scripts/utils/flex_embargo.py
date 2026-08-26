@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -29,6 +30,12 @@ from .atomic_io import atomic_save
 log = logging.getLogger(__name__)
 
 LOCKOUT_CODES = frozenset({"1025"})
+# How long an UNKNOWN lockout state blocks. Long enough that a transient Turso
+# blip cannot let a caller through, short enough that a genuinely clear token
+# is not embargoed for the full 7 days on a store outage. R-212.
+UNKNOWN_STATE_BLOCK_HOURS = 1.0
+# How long a manual clear() suppresses health-row rehydration. R-213.
+CLEAR_SUPPRESSION_HOURS = 24.0
 LOCKOUT_DAYS = 7
 SERVICE = "flex-web-service"
 CASH_FLOW_SERVICE = "cash-flow-sync"
@@ -83,11 +90,20 @@ def _arm_sidecar(until: str, code: str = "1025") -> bool:
     return True
 
 
+# IBKR's own 1025 wording. A bare "1025" substring is NOT evidence: the
+# cash-flow handler writes any failure message into `last_error` with no
+# `code` key and re-stamps `last_attempt_finished_at` every failed run, so a
+# reference id or an HTTP body containing those four digits used to mint a
+# brand-new 7-day deadline that `record_lockout`'s extend-only guard then read
+# as the incumbent. R-213.
+_LOCKOUT_PHRASES = ("too many failed attempts", "error 1025", "code 1025", "1025:")
+
+
 def _is_1025_error(parsed: dict[str, Any]) -> bool:
     if is_lockout_code(parsed.get("code")):
         return True
-    blob = f"{parsed.get('message') or ''} {parsed.get('code') or ''}".lower()
-    return "1025" in blob or "too many failed attempts" in blob
+    blob = f"{parsed.get('message') or ''}".lower()
+    return any(phrase in blob for phrase in _LOCKOUT_PHRASES)
 
 
 def _deadline_from_health_row(row: Any) -> Optional[datetime]:
@@ -118,22 +134,57 @@ def _deadline_from_health_row(row: Any) -> Optional[datetime]:
     return max(candidates) if candidates else None
 
 
-def _health_rows(service: str) -> list[Any]:
-    """Bounded SELECT only. hrana_execute is write-only (returns None)."""
-    try:
-        from db.hrana_http import hrana_query
-    except Exception:
-        return []
-    try:
-        rows = hrana_query(
-            "SELECT state, last_attempt_finished_at, last_error "
-            "FROM service_health WHERE service = ?",
-            (service,),
-        )
-    except Exception as exc:
-        log.warning("flex_embargo: service_health read failed, fail-open: %s", exc)
-        return []
+class FlexEmbargoStoreUnavailable(RuntimeError):
+    """The durable lockout record could not be read. Not the same as 'no lockout'."""
+
+
+def _query_health_rows(service: str) -> list[Any]:
+    """Bounded SELECT only. hrana_execute is write-only (returns None).
+
+    Raises rather than swallowing: the caller must be able to tell a read
+    FAILURE from an empty result. R-212.
+    """
+    from db.hrana_http import hrana_query
+
+    rows = hrana_query(
+        "SELECT state, last_attempt_finished_at, last_error "
+        "FROM service_health WHERE service = ?",
+        (service,),
+    )
     return list(rows) if rows else []
+
+
+def _durable_store_available() -> bool:
+    """True when a durable lockout record could exist to be lost.
+
+    Fail-closed only makes sense against a store that is actually configured.
+    When Turso credentials are absent — a laptop without `.env`, a unit test —
+    the sidecar is the ONLY record, so its absence is genuine information and
+    blocking on it would embargo Flex for a misconfiguration. R-212.
+    """
+    if os.environ.get("PYTEST_CURRENT_TEST") and os.environ.get("RADON_DB_TEST_WRITE_OK") != "1":
+        return False
+    try:
+        from db.hrana_http import http_url_from_libsql, read_env
+    except Exception:
+        return False
+    try:
+        db_url, token = read_env()
+    except Exception:
+        return False
+    return bool(http_url_from_libsql(db_url) and token)
+
+
+def _health_rows(service: str) -> list[Any]:
+    try:
+        return _query_health_rows(service)
+    except Exception as exc:
+        log.warning("flex_embargo: service_health read failed: %s", exc)
+        if not _durable_store_available():
+            # Nothing durable was ever there to lose; the sidecar's absence is
+            # the whole answer.
+            return []
+        raise FlexEmbargoStoreUnavailable(str(exc)) from exc
 
 
 def _rehydrate_from_health() -> Optional[datetime]:
@@ -143,24 +194,31 @@ def _rehydrate_from_health() -> Optional[datetime]:
     sidecar silently dropped a live 7-day lockout. Fail closed on 1025
     evidence in either writer's row, else fail open.
     """
-    try:
-        for service in (SERVICE, CASH_FLOW_SERVICE):
-            rows = _health_rows(service)
-            if not rows:
-                continue
-            deadline = _deadline_from_health_row(rows[0])
-            if deadline is not None:
-                return deadline
-    except Exception:
-        return None
+    for service in (SERVICE, CASH_FLOW_SERVICE):
+        rows = _health_rows(service)
+        if not rows:
+            continue
+        deadline = _deadline_from_health_row(rows[0])
+        if deadline is not None:
+            return deadline
     return None
 
 
 def _stored_deadline() -> Optional[datetime]:
+    """Incumbent deadline for the extend-only guard, or None if unknown.
+
+    An unreadable store means "no known incumbent" HERE, which makes
+    `record_lockout` arm a fresh deadline — the safe direction for arming.
+    `active_until` handles the unknown state separately, because there the
+    safe direction is the opposite one. R-212.
+    """
     stored = _read_sidecar()
     if stored is not None:
         return stored
-    return _rehydrate_from_health()
+    try:
+        return _rehydrate_from_health()
+    except FlexEmbargoStoreUnavailable:
+        return None
 
 
 def active_until(*, now: Optional[datetime] = None) -> Optional[str]:
@@ -168,7 +226,21 @@ def active_until(*, now: Optional[datetime] = None) -> Optional[str]:
     moment = now or datetime.now(timezone.utc)
     stored = _read_sidecar()
     if stored is None:
-        stored = _rehydrate_from_health()
+        if _cleared_marker_covers(moment):
+            return None
+        try:
+            stored = _rehydrate_from_health()
+        except FlexEmbargoStoreUnavailable:
+            # No sidecar AND no readable durable record. Treating that as
+            # "not blocked" sends every Flex caller into a live IBKR lockout,
+            # and each such SendRequest extends the lockout at IBKR's end.
+            # Fail closed for a bounded window instead. R-212.
+            log.warning(
+                "flex_embargo: lockout state unknown (no sidecar, store "
+                "unreadable) — blocking for %.0fh",
+                UNKNOWN_STATE_BLOCK_HOURS,
+            )
+            return _utc_iso(moment + timedelta(hours=UNKNOWN_STATE_BLOCK_HOURS))
         if stored is None:
             return None
         if moment >= stored:
@@ -176,7 +248,9 @@ def active_until(*, now: Optional[datetime] = None) -> Optional[str]:
         _arm_sidecar(_utc_iso(stored))
         return _utc_iso(stored)
     if moment >= stored:
-        clear()
+        # Natural lapse, not a manual escape: unlink WITHOUT the suppression
+        # marker, so a genuinely new lockout after this point still arms.
+        _unlink_sidecar()
         _heartbeat_ok()
         return None
     return _utc_iso(stored)
@@ -217,11 +291,49 @@ def record_lockout(code: str = "1025", *, now: Optional[datetime] = None) -> str
     return until
 
 
-def clear() -> None:
+def _unlink_sidecar() -> None:
     try:
         SIDECAR.unlink(missing_ok=True)
     except OSError:
         pass
+
+
+def _cleared_path() -> Path:
+    return SIDECAR.with_name(SIDECAR.name + ".cleared")
+
+
+def _cleared_marker_covers(moment: datetime) -> bool:
+    """True while a manual clear() still suppresses health-row rehydration.
+
+    Without this, deleting the sidecar was undone by the very next
+    `active_until()`: it found no sidecar, rehydrated from the still-`error`
+    row and RE-ARMED. The marker lapses on its own so a genuinely new lockout
+    is not suppressed forever. R-213.
+    """
+    try:
+        raw = _cleared_path().read_text(encoding="utf-8").strip()
+    except OSError:
+        return False
+    cleared_at = _parse_iso(raw)
+    if cleared_at is None:
+        return False
+    return moment < cleared_at + timedelta(hours=CLEAR_SUPPRESSION_HOURS)
+
+
+def clear(*, now: Optional[datetime] = None) -> None:
+    """Drop a live embargo and stop the health rows re-arming it.
+
+    Also resets the two writers' rows, so the banner does not stay red and
+    `_rehydrate_from_health` has nothing to mint from once the marker lapses.
+    """
+    moment = now or datetime.now(timezone.utc)
+    _unlink_sidecar()
+    try:
+        _cleared_path().parent.mkdir(parents=True, exist_ok=True)
+        _cleared_path().write_text(_utc_iso(moment), encoding="utf-8")
+    except OSError as exc:
+        log.warning("flex_embargo: clear marker not written: %s", exc)
+    _heartbeat_ok()
 
 
 def is_lockout_code(code: Optional[str]) -> bool:
@@ -238,10 +350,13 @@ def _heartbeat_ok() -> None:
         from db.writer import record_service_health
     except Exception:
         return
-    try:
-        record_service_health(SERVICE, "ok")
-    except Exception:
-        return
+    # Both writers, not just flex-web-service: `_rehydrate_from_health` also
+    # consults cash-flow-sync, and nothing ever reset that row. R-213.
+    for service in (SERVICE, CASH_FLOW_SERVICE):
+        try:
+            record_service_health(service, "ok")
+        except Exception:
+            continue
 
 
 def _heartbeat(until: str, code: str) -> bool:
@@ -266,3 +381,37 @@ def _heartbeat(until: str, code: str) -> bool:
         log.warning("flex_embargo: service_health write failed: %s", exc)
         return False
     return True
+
+
+# --- CLI entry point ---------------------------------------------------------
+#
+# `clear()` previously had no caller outside `active_until`'s own lapse branch,
+# so the only manual escape from a bad embargo was deleting the sidecar — which
+# the next `active_until()` silently undid by rehydrating from the still-error
+# health row. R-213.
+
+
+def main(argv: Optional[list[str]] = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Flex token 1025 embargo")
+    parser.add_argument(
+        "command", choices=("status", "clear"),
+        help="status: print the live deadline. clear: drop it and reset the rows.",
+    )
+    args = parser.parse_args(argv)
+
+    if args.command == "status":
+        until = active_until()
+        print(f"flex embargo active until {until}" if until else "flex embargo: none")
+        return 0
+
+    before = active_until()
+    clear()
+    after = active_until()
+    print(f"cleared flex embargo (was {before or 'none'}, now {after or 'none'})")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
