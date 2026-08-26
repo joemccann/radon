@@ -67,6 +67,25 @@ describe("correlationRiskBanner", () => {
     expect(banner!.clusterCount).toBe(1);
   });
 
+  it("refuses a clean within-budget verdict while positions are unmeasured", () => {
+    const calmCluster = { ...BREACH_CLUSTER, aggregate_exposure: 0.01, breached: false };
+    const banner = correlationRiskBanner(
+      report({
+        clusters: [calmCluster],
+        breaches: [],
+        insufficient_data: ["THIN", "NEW"],
+      }),
+    );
+    // A gate that reads clean on exposure it never measured is a gate failure.
+    expect(banner!.level).toBe("unmeasured");
+    expect(banner!.headline).not.toMatch(/within budget/);
+    expect(banner!.headline).toContain("Gate 3");
+    expect(banner!.headline).toContain("2");
+    expect(banner!.headline).not.toContain("\u2014");
+    expect(banner!.insufficientData).toEqual(["THIN", "NEW"]);
+    expect(banner!.clusterCount).toBe(1);
+  });
+
   it("notes insufficient-data tickers without crashing", () => {
     const banner = correlationRiskBanner(
       report({ insufficient_data: ["THIN", "NEW"] }),

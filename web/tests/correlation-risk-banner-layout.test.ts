@@ -41,6 +41,16 @@ describe("CorrelationRiskBanner layout CSS", () => {
     expect(chip).not.toMatch(/border-radius:\s*(?:[5-9]|\d{2,})px/);
   });
 
+  it("gives the unmeasured level its own non-calm accent token", async () => {
+    const css = await readSource("../app/globals.css");
+    const unmeasured = cssBlock(css, '.crb[data-level="unmeasured"]');
+
+    expect(unmeasured).toContain("--crb-accent");
+    expect(unmeasured).toContain("var(--warn)");
+    expect(unmeasured).not.toContain("var(--positive)");
+    expect(unmeasured).not.toMatch(/#[0-9a-fA-F]{3,8}/);
+  });
+
   it("stays a compact instrument module with a 4px outer radius", async () => {
     const css = await readSource("../app/globals.css");
     const module = cssBlock(css, ".crb");
