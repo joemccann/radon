@@ -15,8 +15,12 @@
  * resolveRealtimePrice to prefer the mid, a leg expiry that moves the price
  * key, and a missing quote that drops one walk to `market_price`.
  *
- * Run count is deliberately modest — each run mounts two React trees. The
- * seam is narrow and 120 draws saturate it; breadth lives in the lib suite.
+ * Run counts are deliberately modest — each run mounts a React tree, and the
+ * desktop table is the expensive one (full row, every column). The seam is
+ * narrow and these draws saturate it; breadth lives in the lib suite. Each
+ * property carries an explicit timeout: vitest's 5s default is a per-TEST
+ * budget, and a property is hundreds of renders, so the default turned CI red
+ * on a slower runner while passing locally.
  */
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -33,9 +37,13 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
 afterEach(cleanup);
 
-const FC_OPTS = process.env.RADON_FUZZ_RANDOM === "1"
-  ? { numRuns: 120 }
-  : { numRuns: 120, seed: 42 };
+const SEED = process.env.RADON_FUZZ_RANDOM === "1" ? {} : { seed: 42 };
+/** Mobile card: cheap to mount. */
+const FC_OPTS = { numRuns: 120, ...SEED };
+/** Desktop table: ~10x the render cost, so fewer draws over the same seam. */
+const FC_OPTS_DESKTOP = { numRuns: 40, ...SEED };
+/** A property is hundreds of renders; vitest's 5s per-test default is not it. */
+const PROPERTY_TIMEOUT_MS = 120_000;
 
 function todayET(): string {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -183,7 +191,7 @@ describe("same-day P&L identity, as rendered (property)", () => {
       }),
       FC_OPTS,
     );
-  });
+  }, PROPERTY_TIMEOUT_MS);
 
   it("S2 — the desktop row's Today P&L equals its P&L column", () => {
     fc.assert(
@@ -204,9 +212,9 @@ describe("same-day P&L identity, as rendered (property)", () => {
           view.unmount();
         }
       }),
-      FC_OPTS,
+      FC_OPTS_DESKTOP,
     );
-  });
+  }, PROPERTY_TIMEOUT_MS);
 
   it("S3 — desktop and mobile publish the same market value for one position", () => {
     fc.assert(
@@ -236,7 +244,7 @@ describe("same-day P&L identity, as rendered (property)", () => {
           mobile.unmount();
         }
       }),
-      FC_OPTS,
+      FC_OPTS_DESKTOP,
     );
-  });
+  }, PROPERTY_TIMEOUT_MS);
 });
