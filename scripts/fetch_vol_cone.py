@@ -929,13 +929,15 @@ def run_intraday(
             client = _DefaultClient()
         names = _apply_live_points(client, names, session)
 
-    live = any(name.get("is_intraday") for name in names)
+    intraday_count = sum(1 for name in names if name.get("is_intraday"))
+    live = intraday_count > 0
     source_as_of = session if live else max(
         name["series"][-1]["date"] for name in names
     )
     payload = build_output(names, scan_time, source_as_of)
     payload["market_status"] = _HOLD_MARKET_STATUS if hold else "open"
     payload["is_intraday"] = live
+    payload["intraday_count"] = intraday_count
     payload["hold_reason"] = hold
     # A "market closed" hold is the honest one; anything else is degradation.
     _write_intraday_db_cache(

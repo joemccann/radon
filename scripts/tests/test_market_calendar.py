@@ -5,12 +5,14 @@ these cases pin the behavior that gates the orders-sync / portfolio-sync loop.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from utils.market_calendar import (
     is_market_open_et,
+    load_holidays,
     market_state,
     parse_liquid_hours,
+    _is_trading_day,
     _resolve_market_state,
 )
 
@@ -85,3 +87,24 @@ def test_market_state_juneteenth_closed_via_static():
     st = market_state(_utc(2026, 6, 19, 17))
     assert st["is_open"] is False
     assert st["reason"] == "static:holiday"
+
+
+# ── static holiday table horizon (T-102) ─────────────────────────────────
+# A year missing from scripts/config/market_holidays.json degrades to
+# weekday-only, so every holiday silently becomes a trading day. Pin a
+# two-year horizon so the next expiry fails here a year early.
+
+def _third_monday_of_january(year: int) -> date:
+    first = date(year, 1, 1)
+    return first + timedelta(days=(7 - first.weekday()) % 7 + 14)
+
+
+def test_static_holiday_table_covers_two_years_ahead():
+    horizon_year = datetime.now().year + 2
+    assert load_holidays(horizon_year), f"market_holidays.json has no {horizon_year} entry"
+
+
+def test_mlk_monday_two_years_ahead_is_not_a_trading_day():
+    mlk = _third_monday_of_january(datetime.now().year + 2)
+    assert mlk.weekday() == 0
+    assert _is_trading_day(datetime(mlk.year, mlk.month, mlk.day, 12)) is False

@@ -34,6 +34,10 @@ export interface VolConeName {
   wing_score: number | null;
   regime: VolConeRegime;
   series: VolConeSeriesPoint[];
+  /** True when this name's top point is a live sample of the open session.
+   *  The live pass refreshes only the cheap tail plus the watchlist, so a
+   *  live payload still carries names on their last completed close. */
+  is_intraday?: boolean;
 }
 
 export interface VolConeData {
@@ -45,6 +49,8 @@ export interface VolConeData {
    *  than a completed close. The percentile is current; the distribution it
    *  is ranked against is still completed sessions only. */
   is_intraday?: boolean;
+  /** How many names carry is_intraday; never more than count. */
+  intraday_count?: number;
   count: number;
   hit_count: number;
   current: VolConeName | null;

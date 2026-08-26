@@ -67,6 +67,9 @@ describe("placeOrderFeedback", () => {
   });
 });
 
+// Source-count guard only; the per-surface behavioral contract (render, submit
+// against deduplicated:true, assert the warning state) lives in
+// order-dedup-surfaces.test.tsx (T-085).
 describe("every order-entry surface renders the place response through placeOrderFeedback", () => {
   const read = (rel: string) => readFileSync(path.join(WEB_DIR, rel), "utf8");
   const calls = (src: string) => (src.match(/placeOrderFeedback\(/g) ?? []).length;

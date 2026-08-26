@@ -113,6 +113,40 @@ class TestToleratedHashConverges:
         # The stored row is untouched by a refused write.
         assert json.loads(_row(conn)[3])["price"] == 4.15
 
+    def test_avg_price_restatement_reaches_the_price_column(self):
+        """T-098: replay storage supplies avgPrice, which the conflict gate
+        deliberately ignores, so the tolerated branch must carry the derived
+        price into the denormalized column or the row never converges."""
+        from db.writer import upsert_position_execution_fact
+
+        conn = _fresh_db()
+        replay = {k: v for k, v in BASE_EXECUTION.items() if k != "price"}
+        assert upsert_position_execution_fact(dict(replay, avgPrice=4.15), db=conn) is True
+
+        assert upsert_position_execution_fact(dict(replay, avgPrice=9.99), db=conn) is True
+
+        price, payload = conn.execute(
+            "SELECT price, payload FROM position_execution_facts WHERE exec_id = ?",
+            (BASE_EXECUTION["execId"],),
+        ).fetchone()
+        assert json.loads(payload)["avgPrice"] == 9.99
+        assert price == 9.99
+
+    def test_multiplier_restatement_reaches_the_multiplier_column(self):
+        from db.writer import upsert_position_execution_fact
+
+        conn = _fresh_db()
+        assert upsert_position_execution_fact(dict(BASE_EXECUTION), db=conn) is True
+
+        assert upsert_position_execution_fact(dict(BASE_EXECUTION, multiplier=1), db=conn) is True
+
+        multiplier, payload = conn.execute(
+            "SELECT multiplier, payload FROM position_execution_facts WHERE exec_id = ?",
+            (BASE_EXECUTION["execId"],),
+        ).fetchone()
+        assert json.loads(payload)["multiplier"] == 1
+        assert multiplier == 1
+
 
 class _TieShufflingDb:
     """Simulates Hrana's non-deterministic tie order: every query re-sorts
@@ -196,3 +230,56 @@ class TestRehashKeysetPaging:
         found = [row["exec_id"] for row in stale]
         assert sorted(found) == [f"exec-{i:04d}" for i in range(25)]
         assert len(found) == len(set(found)), "a tie was double-counted across pages"
+
+
+STALE_HASH = "0" * 64
+
+
+def _seed_stale_facts(conn: sqlite3.Connection, layout: dict[str, int]) -> list[tuple[str, str]]:
+    """Insert one stale-hash fact per (account, exec) with every ingested_at tied.
+
+    Exec ids restart at exec-0000 in every account so the second account's
+    rows sort BELOW the first page's cursor on exec_id alone — the shape a
+    column-wise (AND-form) keyset predicate skips and a row-value
+    comparison does not.
+    """
+    keys: list[tuple[str, str]] = []
+    for account_id, count in layout.items():
+        for i in range(count):
+            exec_id = f"exec-{i:04d}"
+            payload = dict(BASE_EXECUTION, execId=exec_id, acctNumber=account_id)
+            conn.execute(
+                "INSERT INTO position_execution_facts "
+                "(account_id, exec_id, revision, payload_sha256, perm_id, order_ref, "
+                "con_id, side, quantity, price, multiplier, currency, filled_at, "
+                "payload, ingested_at) "
+                "VALUES (?, ?, 1, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    account_id, exec_id, STALE_HASH, payload["orderRef"],
+                    payload["conId"], payload["side"], payload["shares"],
+                    payload["price"], payload["multiplier"], payload["currency"],
+                    payload["time"], json.dumps(payload), "2026-08-14T00:00:00Z",
+                ),
+            )
+            keys.append((account_id, exec_id))
+    conn.commit()
+    return keys
+
+
+class TestRehashKeysetPagingRealSqlite:
+    """T-086: the keyset predicate is executed by real sqlite, not re-implemented
+    by the fake — a column-wise AND predicate drops the second account."""
+
+    def test_two_accounts_with_overlapping_exec_ids_are_all_found(self, monkeypatch):
+        import rehash_position_execution_facts as rehash_mod
+
+        conn = _fresh_db()
+        expected = _seed_stale_facts(conn, {"U1111111": 13, "U2222222": 12})
+        assert len(expected) == 25
+        monkeypatch.setattr(rehash_mod, "PAGE_SIZE", 10)
+
+        stale = rehash_mod.find_stale_rows(conn)
+
+        found = [(row["account_id"], row["exec_id"]) for row in stale]
+        assert len(found) == len(set(found)), "a row was double-counted across pages"
+        assert sorted(found) == sorted(expected)

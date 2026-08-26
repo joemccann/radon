@@ -7868,6 +7868,11 @@ body[data-mobile="true"] .orders-command-strip__jump:active {
 .price-bar-value { font-family: var(--font-mono); font-size: 12px; font-weight: 500; }
 .price-bar-value.positive { color: var(--positive); }
 .price-bar-value.negative { color: var(--negative); }
+/* Tight density: same nine fields, smaller spacing + type so the panel fits a
+   narrow inline order ticket or a mobile bottom sheet. Never drops a field. */
+.price-bar--tight { gap: 4px 8px; padding: 6px 0; }
+.price-bar--tight .price-bar-label { font-size: 8px; }
+.price-bar--tight .price-bar-value { font-size: 11px; }
 
 /* Price chart */
 .price-chart-panel { border-top: none; }
@@ -14910,6 +14915,22 @@ body[data-mobile="true"] .garch-scanner__table tbody td {
 .grg-chart-wrap {
   min-height: 306px;
   padding: 12px;
+  /* The chart sits beside the SPY/TLT stack, so its grid cell is as tall as
+     that stack. Stretch the plot into the whole cell instead of letting a
+     fixed-ratio SVG letterbox and leave a dead band underneath. */
+  display: flex;
+  flex-direction: column;
+}
+
+.grg-chart-plot {
+  flex: 1;
+  /* Without this a flex child refuses to shrink below its content height and
+     the ResizeObserver never settles. */
+  min-height: 0;
+}
+
+.grg-chart-plot svg {
+  display: block;
 }
 
 .grg-chart-head {

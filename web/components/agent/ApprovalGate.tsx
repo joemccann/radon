@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
 /**
  * ApprovalGate — structured human-in-the-loop confirmation. Adopted from
@@ -20,6 +20,12 @@ type ApprovalGateProps = {
   title?: string;
   /** Declarative condition statement, e.g. the order summary + why gated. */
   body: string;
+  /**
+   * Telemetry rendered above the handling options, e.g. the nine-field
+   * <OrderQuoteTelemetry> block for the instrument being routed. The gate stays
+   * presentational: the caller owns the quote, the gate owns the layout.
+   */
+  quote?: ReactNode;
   options: GateOption[];
   defaultOptionId?: string;
   /** Mono expiry telemetry, e.g. "EXPIRES 09:32:00 ET". */
@@ -38,6 +44,7 @@ type ApprovalGateProps = {
 export default function ApprovalGate({
   title = "Confirmation required",
   body,
+  quote,
   options,
   defaultOptionId,
   expiry,
@@ -56,6 +63,7 @@ export default function ApprovalGate({
       </div>
       <div className="approval-gate__body">
         <p className="approval-gate__statement">{body}</p>
+        {quote}
         <div className="approval-gate__options" role="radiogroup" aria-label="Handling options">
           {options.map((opt) => (
             <button

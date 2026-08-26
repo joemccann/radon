@@ -49,7 +49,7 @@ function makeOpenOrder(overrides: Record<string, unknown> = {}) {
 
 async function stubOrdersPage(page: Page, orders: unknown) {
   await page.unrouteAll({ behavior: "ignoreErrors" });
-  await page.route("**/api/portfolio", (r) =>
+  await page.route("**/api/portfolio**", (r) =>
     r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(PORTFOLIO) }),
   );
   await page.route("**/api/orders**", (r) =>

@@ -56,13 +56,11 @@ from clients.ib_client import (
     DEFAULT_GATEWAY_PORT,
     is_valid_ib_number,
     pnl_daily_is_ready,
-    pnl_is_ready,
     ticker_has_quote,
 )
 from clients.ib_timing import PhaseTimer
 from clients.journal_basis import (
-    compute_open_basis_for_ticker,
-    prior_net_qty_for_contract,
+    compute_open_basis_and_net_qty_for_tickers,
 )
 from db.client import get_db
 from db.readers import (
@@ -736,12 +734,7 @@ def build_journal_basis_lookup(client: IBClient, db=None) -> dict[str, float]:
             return _with_net_qty(lookup, net_qty_lookup)
 
     tickers = sorted({str(pos.contract.symbol).strip().upper() for pos in option_positions})
-    for ticker in tickers:
-        try:
-            lookup.update(compute_open_basis_for_ticker(db, ticker))
-        except Exception as exc:
-            print(f"  Warning: journal basis lookup failed for {ticker}: {exc}")
-
+    journal_keys: set[str] = set()
     for pos in option_positions:
         contract = pos.contract
         journal_key = _journal_basis_key(
@@ -750,19 +743,21 @@ def build_journal_basis_lookup(client: IBClient, db=None) -> dict[str, float]:
             getattr(contract, "right", None),
             getattr(contract, "strike", None),
         )
-        if not journal_key or journal_key in net_qty_lookup:
-            continue
-        try:
-            net_qty_lookup[journal_key] = prior_net_qty_for_contract(
-                db,
-                ticker=contract.symbol,
-                sec_type=contract.secType,
-                strike=getattr(contract, "strike", None),
-                right=getattr(contract, "right", None),
-                expiry=getattr(contract, "lastTradeDateOrContractMonth", None),
-            )
-        except Exception as exc:
-            print(f"  Warning: journal net-qty lookup failed for {journal_key}: {exc}")
+        if journal_key:
+            journal_keys.add(journal_key)
+
+    try:
+        lookup, net_qty_lookup = compute_open_basis_and_net_qty_for_tickers(
+            db,
+            tickers=tickers,
+            contract_keys=sorted(journal_keys),
+        )
+    except Exception as exc:
+        joined_tickers = ", ".join(tickers)
+        print(
+            "  Warning: journal basis batch lookup failed for "
+            f"{joined_tickers}, falling back to IB avgCost: {exc}"
+        )
 
     return _with_net_qty(lookup, net_qty_lookup)
 

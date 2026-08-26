@@ -9,7 +9,7 @@ dispatch path.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -575,6 +575,18 @@ class TestDeployCollateralSignalKill:
         )
         assert [o.severity for o in outcomes] == ["P3"]
 
+    def test_signal_kill_hours_before_inflight_journal_stays_p1(self):
+        """T-103: a live deploy (fresh journal) can only own kills inside
+        the single-deploy window. A SIGTERM 20h old is not this deploy's
+        stop-clean collateral — it must page P1, not ride the digest."""
+        killed = self.WINDOW_NOW - timedelta(hours=20)
+        current = units.parse_show_output(self._signal_block(killed))
+        outcomes = units.evaluate(
+            current=current, previous={}, now=self.WINDOW_NOW,
+            deploy={"marker_mtime": None, "in_flight": True, "journal_age_seconds": 120},
+        )
+        assert [o.severity for o in outcomes] == ["P1"]
+
     def test_signal_kill_during_a_STRANDED_journal_stays_p1(self):
         killed = self.WINDOW_NOW.replace(minute=48)
         current = units.parse_show_output(self._signal_block(killed))
@@ -673,6 +685,29 @@ class TestDeployCollateralSignalKill:
         outcomes = units.evaluate(
             current=current, previous={}, now=now,
             deploy={"marker_mtime": marker, "in_flight": False},
+        )
+        assert len(outcomes) == 1
+        assert outcomes[0].severity == "P3"
+        assert "deploy" in outcomes[0].message.lower()
+
+    def test_latched_kill_before_green_not_repaged_by_successor_inflight_journal(self):
+        """2026-08-25 16:20Z page a70a393e: radon-bpi stop-cleaned at
+        12:41:04Z; green 15:14:53Z (kill-to-marker ~2.5h → P3). A
+        successor deploy at 16:19 wrote a fresh transition journal.
+        ``in_flight`` short-circuited past kill-before-green, so the
+        60-min age cap re-paged the still-latched oneshot as P1 even
+        though edge /health/lite stayed up."""
+        killed = datetime(2026, 8, 25, 12, 41, 4, tzinfo=timezone.utc)
+        marker = datetime(2026, 8, 25, 15, 14, 53, tzinfo=timezone.utc)
+        now = datetime(2026, 8, 25, 16, 20, 0, tzinfo=timezone.utc)
+        current = units.parse_show_output(self._signal_block(killed))
+        outcomes = units.evaluate(
+            current=current, previous={}, now=now,
+            deploy={
+                "marker_mtime": marker,
+                "in_flight": True,
+                "journal_age_seconds": 60,
+            },
         )
         assert len(outcomes) == 1
         assert outcomes[0].severity == "P3"

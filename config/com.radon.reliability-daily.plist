@@ -5,12 +5,17 @@
     <key>Label</key>
     <string>com.radon.reliability-daily</string>
 
-    <!-- __WEEKEND_REPO__ is substituted by scripts/setup_reliability_weekend.sh -->
+    <!-- __WEEKEND_REPO__ is substituted by scripts/setup_reliability_weekend.sh.
+         The clone is restored BEFORE the wrapper is read: a wrapper left
+         corrupt on disk dies at the top, before the ground_truth that
+         would have restored it, and every later fire repeats that
+         silently. Skipped while a live run holds the lock, so the fire
+         cannot reset the tree under a running agent. -->
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>__WEEKEND_REPO__/scripts/reliability_weekend.sh</string>
-        <string>cycle</string>
+        <string>-c</string>
+        <string>C=__WEEKEND_REPO__; kill -0 "$(cat "$C/.weekend-runner.lock/pid" 2&gt;/dev/null)" 2&gt;/dev/null || { git -C "$C" fetch -q origin &amp;&amp; git -C "$C" checkout -f -q main &amp;&amp; git -C "$C" reset --hard -q origin/main; }; exec /bin/bash "$C/scripts/reliability_weekend.sh" cycle</string>
     </array>
 
     <key>WorkingDirectory</key>

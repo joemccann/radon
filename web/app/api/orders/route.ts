@@ -2,6 +2,7 @@ import { requireRouteAccess } from "@/lib/routeAccess";
 import { NextResponse } from "next/server";
 import { radonFetch } from "@/lib/radonApi";
 import { readOrdersSnapshotFromDb } from "@/lib/orders/readOrdersFromDb";
+import { invalidateOrdersSnapshotCache } from "@/lib/orders/ordersReadCache";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 
 export const runtime = "nodejs";
@@ -43,6 +44,7 @@ export async function POST(): Promise<Response> {
     }
     await syncInFlight;
   } catch {
+    invalidateOrdersSnapshotCache();
     let cached;
     try {
       cached = await readOrdersSnapshotFromDb();
@@ -70,6 +72,7 @@ export async function POST(): Promise<Response> {
     );
   }
 
+  invalidateOrdersSnapshotCache();
   try {
     const data = await readOrdersSnapshotFromDb();
     return setNoStoreResponseHeaders(NextResponse.json(data), requestId);

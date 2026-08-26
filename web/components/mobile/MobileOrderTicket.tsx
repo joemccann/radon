@@ -11,8 +11,10 @@ import {
   normalizeComboOrder,
   formatExpiry,
 } from "@/lib/optionsChainUtils";
-import { normalizeOptionExpiry } from "@/lib/pricesProtocol";
+import { normalizeOptionExpiry, optionKey } from "@/lib/pricesProtocol";
 import type { PriceData } from "@/lib/pricesProtocol";
+import { OrderQuoteTelemetry } from "@/components/QuoteTelemetry";
+import { buildQuoteTelemetryModel, comboQuotePriceData } from "@/lib/quoteTelemetry";
 import type { PortfolioData } from "@/lib/types";
 import { fmtPrice } from "@/lib/positionUtils";
 import {
@@ -196,6 +198,40 @@ export default function MobileOrderTicket({
     }),
     [netQuote.bid, netQuote.mid, netQuote.ask, isCombo],
   );
+
+  // The same nine-field telemetry the position drawer renders, for the exact
+  // instrument being traded: the leg's own live quote when single-leg, the
+  // signed net quote wrapped as a PriceData when it is a combo (no exchange
+  // publishes a BAG's session OHLV, so those fields read "---").
+  const quoteTelemetryModel = useMemo(() => {
+    const soleLeg = !isCombo && legs.length === 1 ? legs[0] : null;
+    if (soleLeg) {
+      const key = optionKey({
+        symbol: ticker,
+        expiry: soleLeg.expiry,
+        strike: soleLeg.strike,
+        right: soleLeg.right,
+      });
+      return buildQuoteTelemetryModel(prices[key] ?? null);
+    }
+    if (signedQuote.bid == null && signedQuote.ask == null) return null;
+    return buildQuoteTelemetryModel(
+      comboQuotePriceData({
+        symbol: ticker,
+        bid: signedQuote.bid,
+        ask: signedQuote.ask,
+        last: signedQuote.mid,
+      }),
+    );
+  }, [isCombo, legs, prices, ticker, signedQuote.bid, signedQuote.ask, signedQuote.mid]);
+
+  const quoteTelemetryLabel = useMemo(() => {
+    const soleLeg = !isCombo && legs.length === 1 ? legs[0] : null;
+    if (soleLeg) {
+      return `${ticker} ${formatExpiry(soleLeg.expiry)} $${soleLeg.strike} ${soleLeg.right}`;
+    }
+    return `${ticker} ${structure || "Combo"} NET`;
+  }, [isCombo, legs, ticker, structure]);
 
   // Auto-populate to mid on first availability + on structure changes.
   useEffect(() => {
@@ -708,6 +744,12 @@ export default function MobileOrderTicket({
 
           {/* 2. Price stepper — after legs */}
           <div className="mobile-ticket__price-section">
+            <OrderQuoteTelemetry
+              model={quoteTelemetryModel}
+              label={quoteTelemetryLabel}
+              density="tight"
+            />
+
             {/* F3: Bid/Mid/Ask are tappable quick-set chips — one tap fills the
                 limit input from the live combo quote. */}
             <div className="mobile-ticket__quote">

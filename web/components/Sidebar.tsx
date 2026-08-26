@@ -142,6 +142,7 @@ export default function Sidebar({ activeSection, actionTone }: SidebarProps) {
                       <Link
                         key={item.label}
                         href={item.href}
+                        prefetch={false}
                         className={item.route === activeSection ? "nav-item active" : "nav-item"}
                         aria-current={item.route === activeSection ? "page" : undefined}
                         aria-label={collapsed ? item.label : undefined}
@@ -177,6 +178,7 @@ export default function Sidebar({ activeSection, actionTone }: SidebarProps) {
 
       <Link
         href="/profile"
+        prefetch={false}
         className={`sidebar-user-card${profileActive ? " sidebar-user-card--active" : ""}`}
         aria-current={profileActive ? "page" : undefined}
         aria-label={collapsed ? "Profile" : undefined}

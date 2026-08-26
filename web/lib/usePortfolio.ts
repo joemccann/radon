@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { PortfolioData } from "./types";
+import type { PortfolioData, PortfolioSnapshotSeed } from "./types";
 import { readOfflineMeta } from "./offline/offlineStatus";
 import {
   reportFetchFailure,
@@ -24,43 +24,70 @@ type UsePortfolioReturn = {
   syncNow: () => void;
 };
 
-export function usePortfolio(active: boolean = true): UsePortfolioReturn {
-  const [data, setData] = useState<PortfolioData | null>(null);
-  const [loading, setLoading] = useState(true);
+type UsePortfolioOptions = {
+  initialSnapshot?: PortfolioSnapshotSeed;
+  includeEntryDates?: boolean;
+};
+
+export function usePortfolio(
+  active: boolean = true,
+  options: UsePortfolioOptions = {},
+): UsePortfolioReturn {
+  const { initialSnapshot, includeEntryDates = false } = options;
+  const endpoint = includeEntryDates
+    ? "/api/portfolio?include=entry-dates"
+    : "/api/portfolio";
+  const [data, setData] = useState<PortfolioData | null>(() => initialSnapshot?.data ?? null);
+  const [loading, setLoading] = useState(() => initialSnapshot === undefined);
   const [syncing, setSyncing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [lastSync, setLastSync] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(() => initialSnapshot?.warning ?? null);
+  const [lastSync, setLastSync] = useState<string | null>(() => initialSnapshot?.data.last_sync ?? null);
   const syncingRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollCachedRef = useRef<() => Promise<void>>(async () => {});
-  const warningSnapshotRef = useRef<string | null>(null);
+  const warningSnapshotRef = useRef<string | null>(
+    initialSnapshot?.warning ? initialSnapshot.data.last_sync : null,
+  );
   const dataGenerationRef = useRef(0);
-  const readingRef = useRef(false);
+  const readingEndpointRef = useRef<string | null>(null);
+  const latestReadIdRef = useRef(0);
+  const currentEndpointRef = useRef(endpoint);
   const lastReadAtRef = useRef(0);
   const rateLimitedUntilRef = useRef(0);
-  const hasDataRef = useRef(false);
-  const initialLoadStartedRef = useRef(false);
+  const hasDataRef = useRef(initialSnapshot !== undefined);
+  const initialLoadStartedRef = useRef(initialSnapshot !== undefined);
   const previousActiveRef = useRef(active);
   const mountedRef = useRef(true);
   const activeRef = useRef(active);
   const routeKey = useRouteRefreshKey();
   const lastRouteKeyRef = useRef(routeKey);
+  const lastEndpointRef = useRef(endpoint);
   activeRef.current = active;
+  currentEndpointRef.current = endpoint;
 
   const fetchPortfolio = useCallback(async (): Promise<number | null> => {
     const pendingRateLimitMs = rateLimitedUntilRef.current - Date.now();
     if (pendingRateLimitMs > 0) return pendingRateLimitMs;
-    if (readingRef.current) return null;
-    readingRef.current = true;
+    // Deduplicate only an identical read. A route transition from the base
+    // snapshot to the /orders entry-date variant must start immediately even
+    // if the old endpoint is still resolving.
+    if (readingEndpointRef.current === endpoint) return null;
+    const readId = latestReadIdRef.current + 1;
+    latestReadIdRef.current = readId;
+    readingEndpointRef.current = endpoint;
     const generation = dataGenerationRef.current;
     let networkResolved = false;
     let retryDelayMs: number | null = null;
     try {
-      const res = await fetch("/api/portfolio", {
+      const res = await fetch(endpoint, {
         cache: "no-store",
         signal: AbortSignal.timeout(GET_FETCH_TIMEOUT_MS),
       });
       networkResolved = true;
+      if (
+        readId !== latestReadIdRef.current
+        || endpoint !== currentEndpointRef.current
+      ) return retryDelayMs;
       if (res.status === 429) {
         const retryAfterSeconds = Number(res.headers.get("Retry-After"));
         if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
@@ -79,7 +106,12 @@ export function usePortfolio(active: boolean = true): UsePortfolioReturn {
       else reportFetchSuccess();
       if (!res.ok) throw new Error(`Failed to fetch portfolio (${res.status})`);
       const json = (await res.json()) as PortfolioData;
-      if (!mountedRef.current || generation !== dataGenerationRef.current) return retryDelayMs;
+      if (
+        !mountedRef.current
+        || readId !== latestReadIdRef.current
+        || endpoint !== currentEndpointRef.current
+        || generation !== dataGenerationRef.current
+      ) return retryDelayMs;
       hasDataRef.current = true;
       setData(json);
       setLastSync(json.last_sync);
@@ -93,17 +125,27 @@ export function usePortfolio(active: boolean = true): UsePortfolioReturn {
       rateLimitedUntilRef.current = 0;
       setError(null);
     } catch (err) {
-      if (!networkResolved) reportFetchFailure();
-      if (mountedRef.current && generation === dataGenerationRef.current) {
+      const isCurrentRead = readId === latestReadIdRef.current
+        && endpoint === currentEndpointRef.current;
+      if (!networkResolved && isCurrentRead) reportFetchFailure();
+      if (
+        mountedRef.current
+        && isCurrentRead
+        && generation === dataGenerationRef.current
+      ) {
         setError(err instanceof Error ? err.message : "Unknown error");
       }
     } finally {
-      readingRef.current = false;
-      lastReadAtRef.current = Date.now();
-      if (mountedRef.current) setLoading(false);
+      if (readId === latestReadIdRef.current) {
+        readingEndpointRef.current = null;
+        lastReadAtRef.current = Date.now();
+        if (mountedRef.current && endpoint === currentEndpointRef.current) {
+          setLoading(false);
+        }
+      }
     }
     return retryDelayMs;
-  }, []);
+  }, [endpoint]);
 
   const scheduleNext = useCallback((delay: number) => {
     if (!mountedRef.current || !activeRef.current) return;
@@ -145,7 +187,13 @@ export function usePortfolio(active: boolean = true): UsePortfolioReturn {
       if (!mountedRef.current || syncGeneration !== dataGenerationRef.current) return;
       dataGenerationRef.current += 1;
       hasDataRef.current = true;
-      setData(json);
+      setData((current) => includeEntryDates
+        ? {
+            ...json,
+            trade_log_dates: current?.trade_log_dates,
+            contract_open_dates: current?.contract_open_dates,
+          }
+        : json);
       setLastSync(json.last_sync);
       const warning = res.headers.get("X-Sync-Warning");
       if (warning) {
@@ -161,7 +209,7 @@ export function usePortfolio(active: boolean = true): UsePortfolioReturn {
       syncingRef.current = false;
       if (mountedRef.current) setSyncing(false);
     }
-  }, []);
+  }, [includeEntryDates]);
 
   const syncNow = useCallback(() => {
     void doSync();
@@ -184,6 +232,18 @@ export function usePortfolio(active: boolean = true): UsePortfolioReturn {
     });
   }, [fetchPortfolio, scheduleNext]);
 
+  // `WorkspaceShell` survives client navigation. The endpoint changes when
+  // entering or leaving /orders even if the hook instance does not remount;
+  // fetch that exact variant immediately and let the request-id guard discard
+  // any older base response still in flight.
+  useEffect(() => {
+    if (endpoint === lastEndpointRef.current) return;
+    lastEndpointRef.current = endpoint;
+    void fetchPortfolio().then((retryDelayMs) => {
+      if (retryDelayMs !== null && activeRef.current) scheduleNext(retryDelayMs);
+    });
+  }, [endpoint, fetchPortfolio, scheduleNext]);
+
   // Client navigations often keep this hook mounted (same shell instance).
   // The mount GET never re-runs, so without a pathname trigger the next
   // snapshot waits for the 30s poll — the latent delay on every route change.
@@ -204,7 +264,7 @@ export function usePortfolio(active: boolean = true): UsePortfolioReturn {
       timerRef.current = null;
     }
     if (active) {
-      const freshReadInFlight = readingRef.current;
+      const freshReadInFlight = readingEndpointRef.current !== null;
       const recentlyRead = Date.now() - lastReadAtRef.current < POLL_INTERVAL_MS;
       scheduleNext(becameActive && !freshReadInFlight && !recentlyRead ? 500 : POLL_INTERVAL_MS);
     }

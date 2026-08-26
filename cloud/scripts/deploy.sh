@@ -94,6 +94,7 @@ readonly DEPLOY_KILL_AFTER="${DEPLOY_KILL_AFTER:-30}"
 readonly BUN_VERSION="1.3.14"
 
 readonly SERVICES=(radon-nextjs radon-api radon-relay radon-monitor radon-newsfeed)
+UNITS_RESTARTED=1
 
 # Required env vars that MUST be present before a deploy touches services.
 # Prefer /etc/radon/env when that regular file exists; else ~/radon-cloud/.env.
@@ -1017,6 +1018,7 @@ recover_pending_transition() {
   DEPLOY_SERVICES_RECOVERED=0
   sudo "$DEPLOY_ROOT_HELPER" stop-clean || return 1
   restore_release_backup "$JOURNAL_PREVIOUS_SHA" "$JOURNAL_BACKUP_DIR" || return 1
+  revert_release_units
   sudo "$DEPLOY_ROOT_HELPER" recover || return 1
   DEPLOY_SERVICES_RECOVERED=1
   DEPLOY_TEARDOWN_STARTED=0
@@ -1096,13 +1098,54 @@ start_services_after_transition() {
   DEPLOY_TEARDOWN_STARTED=0
 }
 
+payload_paths_changed() {
+  local prev="$1"
+  local new="$2"
+  local path
+  local paths
+  if [[ -z "$prev" || -z "$new" || "$prev" == "$new" || "$prev" =~ ^0+$ ]]; then
+    return 0
+  fi
+  # Fail open: unknown git state must restart, not skip the fleet.
+  if ! paths="$(git -C "$RADON_DIR" diff --name-only "$prev" "$new" 2>/dev/null)"; then
+    return 0
+  fi
+  while IFS= read -r path; do
+    [[ -z "$path" ]] && continue
+    case "$path" in
+      docs/*|tasks/*|.claude/*|.agents/*|notebooks/*|.github/*|*.md)
+        continue
+        ;;
+      scripts/tests/*|cloud/tests/*|web/tests/*|web/e2e/*|site/*)
+        continue
+        ;;
+      web/*|lib/*|scripts/*|cloud/services/*|cloud/scripts/*|cloud/config/*| \
+      requirements*|pyproject.toml|bun.lock|package.json|*.service)
+        return 0
+        ;;
+    esac
+    return 0
+  done <<< "$paths"
+  return 1
+}
+
 restart_services() {
   local requested_sha="${1:-}"
   local previous_sha="${2:-}"
   local status=0
+  UNITS_RESTARTED=1
 
   if [[ -n "$requested_sha" ]]; then
     prepare_release_transition "$requested_sha" "$previous_sha" || return $?
+  fi
+  if [[ -n "$requested_sha" && -n "$previous_sha" ]] \
+    && ! payload_paths_changed "$previous_sha" "$requested_sha"; then
+    log_info "No runtime payload changes; promoting without unit restart"
+    activate_staged_release "$requested_sha" "$previous_sha" || return $?
+    refresh_control_plane || return 1
+    install_release_units
+    UNITS_RESTARTED=0
+    return 0
   fi
   stop_services_for_transition
   if [[ -n "$requested_sha" ]]; then
@@ -1136,6 +1179,19 @@ restart_services() {
 install_release_units() {
   if ! sudo "$DEPLOY_ROOT_HELPER" install-units; then
     log_warn "Unit install reported a failure; the drift audit will flag any gap"
+  fi
+}
+
+# Rollback counterpart (T-104). The helper journals what install-units
+# promoted; revert-units disables and removes the units the failed release
+# added and restores the bodies it replaced. Runs after the checkout restore
+# and before `recover` starts the core services, so nextjs/newsfeed come up
+# on the restored bodies. Non-fatal like the install -- a failed revert must
+# not keep the restored release down -- but logged as an error because an
+# armed timer pointing at a missing script pages on every fire.
+revert_release_units() {
+  if ! sudo "$DEPLOY_ROOT_HELPER" revert-units; then
+    log_error "Unit revert reported a failure; units the failed release installed may still be armed"
   fi
 }
 
@@ -1198,6 +1254,9 @@ check_units_stable() {
   fi
   elapsed=$((SECONDS - STABILITY_STARTED_AT))
   remaining=$((UNIT_STABILITY_SECONDS - elapsed))
+  if [[ "${UNITS_RESTARTED:-1}" != "1" ]]; then
+    remaining=0
+  fi
   if (( remaining > 0 )); then
     sleep "$remaining"
   fi

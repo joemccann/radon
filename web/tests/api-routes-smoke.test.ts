@@ -532,6 +532,10 @@ describe("GET /api/risk-free-rate", () => {
     const body = (await jsonOf(res)) as Record<string, unknown>;
     expect(body.rate).toBeCloseTo(0.0435, 4);
     expect(body.source).toBe("FRED:DFF");
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining("fredgraph.csv?id=DFF"),
+      { next: { revalidate: 86_400 } },
+    );
   });
 
   it("returns 200 with stale fallback when FRED is unreachable", async () => {

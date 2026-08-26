@@ -5,6 +5,7 @@ import {
   runNewsfeedMirror,
 } from "../db/mirror_newsfeed_to_demo.js";
 import {
+  PURGED_ACCOUNT_TABLES,
   isTransientTursoError,
   runMarketMirror,
 } from "../db/mirror_market_snapshots_to_demo.js";
@@ -248,6 +249,98 @@ describe("demo market mirror reliability", () => {
     })).rejects.toThrow(/required table failures: scan_snapshots/);
 
     expect(src.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("purges flow_analysis_snapshots from the demo DB by default (T-108)", async () => {
+    // Account-derived rows must never exist in the public demo database; the
+    // recurring job is the only enforcement, so the default purge list must
+    // actually issue the DELETE.
+    expect(PURGED_ACCOUNT_TABLES).toEqual(["flow_analysis_snapshots"]);
+    const src = { execute: vi.fn() };
+    const dst = {
+      execute: vi.fn().mockResolvedValue({ rows: [] }),
+      batch: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const result = await runMarketMirror({
+      src,
+      dst,
+      tables: { latestOne: [], perKey: [], history: [] },
+      maxAttempts: 3,
+      sleep: vi.fn().mockResolvedValue(undefined),
+      log: vi.fn(),
+      now: () => "2026-08-23T00:00:00.000Z",
+      runId: "t108-purge",
+    });
+
+    expect(result.failures).toEqual([]);
+    expect(dst.execute).toHaveBeenCalledWith("DELETE FROM flow_analysis_snapshots");
+    expect(src.execute).not.toHaveBeenCalled();
+  });
+
+  it("retries a transient purge 502 then completes (T-108)", async () => {
+    const dst = {
+      execute: vi.fn()
+        .mockRejectedValueOnce(turso502())
+        .mockResolvedValue({ rows: [] }),
+      batch: vi.fn().mockResolvedValue(undefined),
+    };
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const logs = [];
+
+    const result = await runMarketMirror({
+      src: { execute: vi.fn() },
+      dst,
+      tables: { latestOne: [], perKey: [], history: [] },
+      maxAttempts: 3,
+      sleep,
+      log: (entry) => logs.push(entry),
+      now: () => "2026-08-23T00:00:00.000Z",
+      runId: "t108-retry",
+    });
+
+    expect(result.failures).toEqual([]);
+    expect(dst.execute).toHaveBeenCalledTimes(2);
+    expect(dst.execute).toHaveBeenNthCalledWith(2, "DELETE FROM flow_analysis_snapshots");
+    expect(sleep).toHaveBeenCalledTimes(1);
+    expect(logs).toContainEqual(expect.objectContaining({
+      run_id: "t108-retry",
+      phase: "flow_analysis_snapshots:account_purge",
+      event: "retry",
+      attempt: 1,
+    }));
+  });
+
+  it("fails the run when the purge 502 persists past the budget (T-108)", async () => {
+    // The purge used to warn "[mirror] SKIP purge" and exit 0 with
+    // account-derived rows still live on demo.radon.run.
+    const dst = {
+      execute: vi.fn().mockRejectedValue(turso502()),
+      batch: vi.fn().mockResolvedValue(undefined),
+    };
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const logs = [];
+
+    await expect(runMarketMirror({
+      src: { execute: vi.fn() },
+      dst,
+      tables: { latestOne: [], perKey: [], history: [] },
+      maxAttempts: 3,
+      sleep,
+      log: (entry) => logs.push(entry),
+      now: () => "2026-08-23T00:00:00.000Z",
+      runId: "t108-fail",
+    })).rejects.toThrow(/account-data purge failed for flow_analysis_snapshots/);
+
+    expect(dst.execute).toHaveBeenCalledTimes(3);
+    expect(dst.execute).toHaveBeenCalledWith("DELETE FROM flow_analysis_snapshots");
+    expect(sleep).toHaveBeenCalledTimes(2);
+    expect(logs).toContainEqual(expect.objectContaining({
+      run_id: "t108-fail",
+      phase: "flow_analysis_snapshots:account_purge",
+      event: "failed",
+      attempt: 3,
+    }));
   });
 });
 

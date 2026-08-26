@@ -82,7 +82,7 @@ const JOURNAL = {
 
 async function setupBaseMocks(page: Page) {
   await page.unrouteAll({ behavior: "ignoreErrors" });
-  await page.route("**/api/portfolio", (route) =>
+  await page.route("**/api/portfolio**", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(PORTFOLIO) }),
   );
   await page.route("**/api/flex-token", (route) =>

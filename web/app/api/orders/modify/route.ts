@@ -12,6 +12,7 @@ import {
   readOrdersSnapshotFromDb,
   type OrdersSnapshot,
 } from "@/lib/orders/readOrdersFromDb";
+import { invalidateOrdersSnapshotCache } from "@/lib/orders/ordersReadCache";
 import {
   isWorkingOrderMissingDetail,
   workingOrderMissingMessage,
@@ -213,10 +214,13 @@ export async function POST(request: Request): Promise<Response> {
         timeout: 180_000,
       });
 
+      invalidateOrdersSnapshotCache();
       try {
         await radonFetch("/orders/refresh", { method: "POST", timeout: 10_000 });
       } catch {
         // Non-fatal
+      } finally {
+        invalidateOrdersSnapshotCache();
       }
       const orders = await readOrdersSnapshotBestEffort();
 
@@ -267,10 +271,13 @@ export async function POST(request: Request): Promise<Response> {
     });
 
     // Refresh orders after modify
+    invalidateOrdersSnapshotCache();
     try {
       await radonFetch("/orders/refresh", { method: "POST", timeout: 10_000 });
     } catch {
       // Non-fatal
+    } finally {
+      invalidateOrdersSnapshotCache();
     }
     const orders = await readOrdersSnapshotFromDb();
 
@@ -290,12 +297,15 @@ export async function POST(request: Request): Promise<Response> {
       orders,
     });
   } catch (error) {
+    invalidateOrdersSnapshotCache();
     if (error instanceof RadonApiError) {
       if (isWorkingOrderMissingDetail(error.detail)) {
         try {
           await radonFetch("/orders/refresh", { method: "POST", timeout: 10_000 });
         } catch {
           // Non-fatal: still return the missing-order copy
+        } finally {
+          invalidateOrdersSnapshotCache();
         }
         const orders = await readOrdersSnapshotBestEffort();
         const tif = existingTif ?? findOpenOrder(orders, orderId, permId)?.tif;

@@ -175,7 +175,47 @@ def test_test_mode_short_circuits(monkeypatch):
 
 # ---------------------------------------------------------------------------
 # R-060: healthy money roles must not mask a wedged data role from the ladder.
+# The predicate is NOT stubbed here: a status()-driven fake pool exercises the
+# real role-scoped `_pool_has_connected_accounted_slot(ib_pool, roles=stuck)`
+# call, so reverting to the ANY-role form goes red (T-105).
 # ---------------------------------------------------------------------------
+
+_WEDGED_DATA = {
+    "sync": {"connected": True, "client_id": 3, "managed_accounts": ["U1"]},
+    "orders": {"connected": True, "client_id": 4, "managed_accounts": ["U1"]},
+    "data": {"connected": False, "client_id": 5, "managed_accounts": []},
+}
+_ALL_HEALTHY = {
+    "sync": {"connected": True, "client_id": 3, "managed_accounts": ["U1"]},
+    "orders": {"connected": True, "client_id": 4, "managed_accounts": ["U1"]},
+    "data": {"connected": True, "client_id": 5, "managed_accounts": ["U1"]},
+}
+
+
+def _status_driven_pool(monkeypatch, snapshots):
+    """Install a fake ib_pool whose status() yields successive snapshots
+    (the last one sticks) and an authenticated Gateway probe. Only the probe
+    is stubbed — the role-scoped accounted predicate runs for real.
+    """
+    from unittest.mock import MagicMock
+
+    import api.ib_gateway as ibg
+
+    queue = list(snapshots)
+    pool = MagicMock()
+    pool.status.side_effect = lambda: queue.pop(0) if len(queue) > 1 else queue[0]
+    monkeypatch.setattr(server, "ib_pool", pool)
+
+    async def _probe(timeout=8.0):
+        return (True, ["U1"])
+
+    monkeypatch.setattr(ibg, "_probe_authenticated", _probe)
+    return pool
+
+
+def _tick():
+    server._pool_recovery_state["last_attempt_at"] = 0.0
+    asyncio.run(server._recover_stuck_pool_guarded())
 
 
 def test_wedged_data_with_healthy_money_roles_counts_toward_ladder(monkeypatch):
@@ -183,31 +223,52 @@ def test_wedged_data_with_healthy_money_roles_counts_toward_ladder(monkeypatch):
     Gateway probe authenticated, recovery not taking. The ANY-role accounted
     check used to reset the counter every tick so os._exit never fired.
     """
-    from unittest.mock import MagicMock
-
-    import api.ib_gateway as ibg
-
     _patch_recover(monkeypatch, [False])
     restarts = _patch_restart_hook(monkeypatch)
+    _status_driven_pool(monkeypatch, [_WEDGED_DATA])
 
-    pool = MagicMock()
-    pool.status.side_effect = lambda: {
-        "sync": {"connected": True, "client_id": 3, "managed_accounts": ["U1"]},
-        "orders": {"connected": True, "client_id": 4, "managed_accounts": ["U1"]},
-        "data": {"connected": False, "client_id": 5, "managed_accounts": []},
-    }
-    monkeypatch.setattr(server, "ib_pool", pool)
-
-    async def _probe(timeout=8.0):
-        return (True, ["U1"])
-
-    monkeypatch.setattr(ibg, "_probe_authenticated", _probe)
-
-    for _ in range(server.POOL_RECOVERY_MAX_BEFORE_RESTART):
-        server._pool_recovery_state["last_attempt_at"] = 0.0
-        asyncio.run(server._recover_stuck_pool_guarded())
+    threshold = server.POOL_RECOVERY_MAX_BEFORE_RESTART
+    for i in range(threshold - 1):
+        _tick()
+        assert server._pool_recovery_state["consecutive_failures"] == i + 1, (
+            f"tick {i}: healthy orders/sync must not reset the ladder while data is wedged"
+        )
+        assert restarts["n"] == 0, f"restart fired too early at tick {i}"
+    _tick()
 
     assert restarts["n"] == 1, (
         "wedged data role never counted toward the escalation ladder — the "
         "ANY-role accounted check reset it on healthy orders/sync"
     )
+    assert server._pool_recovery_state["consecutive_failures"] == 0
+
+
+def test_stuck_role_reconnecting_resets_counter_without_restart(monkeypatch):
+    """Mirror case: the STUCK role itself comes back between the disconnected
+    re-derivation and the accounted re-read (raced recovery). That re-read is
+    the only thing allowed to clear the ladder; no restart may fire.
+    """
+    _patch_recover(monkeypatch, [False])
+    restarts = _patch_restart_hook(monkeypatch)
+    # Per tick the guard reads status() twice: disconnected-roles, then the
+    # role-scoped accounted check. Two verified-fail ticks (4 wedged reads),
+    # then a tick whose second read shows data recovered.
+    _status_driven_pool(
+        monkeypatch,
+        [_WEDGED_DATA, _WEDGED_DATA, _WEDGED_DATA, _WEDGED_DATA, _WEDGED_DATA, _ALL_HEALTHY],
+    )
+
+    _tick()
+    _tick()
+    assert server._pool_recovery_state["consecutive_failures"] == 2
+
+    _tick()
+    assert server._pool_recovery_state["consecutive_failures"] == 0, (
+        "role-scoped re-read showing data recovered must clear the ladder"
+    )
+    assert restarts["n"] == 0, "recovered data role must not escalate"
+
+    for _ in range(server.POOL_RECOVERY_MAX_BEFORE_RESTART):
+        _tick()
+    assert restarts["n"] == 0
+    assert server._pool_recovery_state["consecutive_failures"] == 0

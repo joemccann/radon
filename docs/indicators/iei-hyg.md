@@ -103,10 +103,16 @@ Public functions the tests import (composed-method style, pure where possible):
 - `pct_rank(ratio, low, high) -> float`
 - `build_output(series, scan_time=None, source="ib") -> payload`
 - `merge_series(cached, fresh)`, `diff_new_rows(cached, series)` (compare `(date, iei_close, hyg_close, dxy_close)`)
-- `persist_result(payload, changed_rows)` — refuses an empty series; then in order
-  `writer.ensure_no_replica_for_writers()`, `upsert_iei_hyg_rows` (only if changed),
-  `upsert_scan_snapshot("iei-hyg", scan_time, payload)`,
-  `record_service_health("iei-hyg", "ok", finished_at=scan_time)`, atomic JSON cache.
+- `persist_result(payload, changed_rows, *, health_error=None)` — refuses an empty
+  series; then in order `writer.ensure_no_replica_for_writers()`, `upsert_iei_hyg_rows`
+  (only if changed), `upsert_scan_snapshot("iei-hyg", scan_time, payload)`,
+  `record_service_health("iei-hyg", "ok" | "error", finished_at=scan_time, error=...)`,
+  atomic JSON cache.
+- All three sources down (`fetch_closes` source `"none"`): `run` re-serves the JSON
+  cache through `_serve_cached` as `status: "stale_source"` with an `error` heartbeat
+  (mirrors `fetch_ivrank`), so the watchdog pages instead of reading a fresh `ok`
+  over data no source confirmed. No cache → `RuntimeError`, nothing persisted. An
+  unchanged day where a source DID answer is still an `ok` heartbeat.
 - `main(argv)` — `--json` prints the payload to stdout; progress to stderr.
 
 Payload:
@@ -192,8 +198,10 @@ INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (53, dateti
 - `scripts/tests/test_iei_hyg.py` (written first, red): fixture parse + alignment
   facts above; `classify_state` boundaries (equality is the edge; degenerate
   min==max → neutral); `pct_rank`; `build_output` current fields; migration executed
-  into in-memory sqlite pins columns + version 53 + idempotent upsert; `persist_result`
-  ordering with a monkeypatched writer and the empty-series refusal;
+  into in-memory sqlite pins columns + version 53 + idempotent upsert through the
+  REAL `upsert_iei_hyg_rows` (recording `get_db()` stand-in); `persist_result`
+  ordering with a monkeypatched writer and the empty-series refusal; all-sources-down
+  → `stale_source` + `error` heartbeat over a populated cache, `RuntimeError` without;
   `uw_regular_closes` filter; `--json` CLI.
 - `web/tests/iei-hyg-api.test.ts`, `web/tests/iei-hyg-panel.test.tsx`,
   `web/e2e/iei-hyg-tab.spec.ts` per the pattern skill (mock the hook in the panel test).

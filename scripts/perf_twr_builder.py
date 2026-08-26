@@ -558,25 +558,53 @@ def _row_values(row: Any, *keys: str) -> Tuple[Any, ...]:
     return tuple(row[i] for i in range(len(keys)))
 
 
+# The builder's own mirror of a net subperiod flow; never a classified source row.
+_MIRRORED_FLOW_TYPE = "external"
+
+
 def load_flows_from_turso() -> Optional[Dict[str, float]]:
     """Last-known-good external flows, netted per report date.
 
     The symmetric counterpart to `load_nav_from_turso`. Returns None when
     nothing is mirrored yet; an empty result is NOT a verified zero.
     """
-    rows = _query_turso("SELECT report_date, amount FROM external_flows ORDER BY report_date ASC")
+    rows = _query_turso(
+        "SELECT account_id, report_date, amount, flow_type FROM external_flows"
+        " ORDER BY report_date ASC"
+    )
     if rows is None:
         return None
 
-    out: Dict[str, float] = {}
+    # Two writers share this table under distinct PK flow_type values: the
+    # backfill classifies `deposit|withdrawal|acats`, the builder mirrors its
+    # own net subperiod flow as `external`. Both describe the same cash
+    # movement, so a date that carries classified rows must not also count
+    # its `external` mirror (T-081: one $80k deposit read as $160k).
+    #
+    # The PK is (account_id, report_date, flow_type) and `_statements` fans a
+    # multi-statement Flex document out per accountId, so the mirror/classified
+    # pair only ever describes the same movement WITHIN one account. Deciding
+    # precedence on the date alone drops a second account's flow instead.
+    classified: Dict[Tuple[str, str], float] = {}
+    mirrored: Dict[Tuple[str, str], float] = {}
     for row in rows:
-        report_date, amount = _row_values(row, "report_date", "amount")
+        account_id, report_date, amount, flow_type = _row_values(
+            row, "account_id", "report_date", "amount", "flow_type"
+        )
         normalized = _normalize_date(report_date)
         value = _optional_float(amount)
-        if normalized and value is not None:
-            # One date can carry several flow_type rows; the subperiod maths
-            # only ever needs their net.
-            out[normalized] = out.get(normalized, 0.0) + value
+        if not normalized or value is None:
+            continue
+        key = (str(account_id or DEFAULT_ACCOUNT_ID), normalized)
+        bucket = mirrored if flow_type == _MIRRORED_FLOW_TYPE else classified
+        bucket[key] = bucket.get(key, 0.0) + value
+
+    per_account = dict(mirrored)
+    per_account.update(classified)
+
+    out: Dict[str, float] = {}
+    for (_account_id, normalized), value in per_account.items():
+        out[normalized] = out.get(normalized, 0.0) + value
     return out or None
 
 
@@ -1512,7 +1540,7 @@ def _external_flow_rows(payload: Mapping[str, Any], account_id: str) -> List[Dic
             "account_id": account_id,
             "report_date": row["date"],
             "amount": row["c"],
-            "flow_type": "external",
+            "flow_type": _MIRRORED_FLOW_TYPE,
             "note": payload.get("flows_source") or "",
         }
         for row in payload.get("subperiods") or []

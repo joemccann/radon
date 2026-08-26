@@ -124,7 +124,7 @@ const BLOTTER_MOCK = {
 async function stubOrdersPage(page: import("@playwright/test").Page) {
   await page.unrouteAll({ behavior: "ignoreErrors" });
 
-  await page.route("**/api/portfolio", (route) =>
+  await page.route("**/api/portfolio**", (route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",

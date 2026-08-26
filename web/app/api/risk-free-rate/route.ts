@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
  * decimal (e.g. 0.0364 for 3.64%). FRED publishes a free CSV without
  * authentication. We pull the last 30 days and pick the latest non-stale row.
  *
- * Cached 24h via Next.js fetch revalidation. On any failure the route
+ * The public FRED read is cached for 24h via Next.js fetch revalidation. On any failure the route
  * returns rate=0 with `stale: true` so callers can fall back to a 0
  * risk-free rate without throwing.
  */
@@ -27,7 +27,7 @@ async function fetchLatestDff(): Promise<{ rate: number; asOf: string } | null> 
   const cosd = since.toISOString().slice(0, 10);
 
   const res = await fetch(`${FRED_DFF_URL}&cosd=${cosd}`, {
-    cache: "no-store",
+    next: { revalidate: REVALIDATE_SECONDS },
   });
   if (!res.ok) return null;
 
