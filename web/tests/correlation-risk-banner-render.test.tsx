@@ -87,6 +87,26 @@ describe("CorrelationRiskBanner", () => {
     expect(banner.querySelector(".crb-gate")?.textContent).toMatch(/GATE 3/);
   });
 
+  it("never renders a calm level while positions are unmeasured", () => {
+    const CALM = { ...BREACH, aggregate_exposure: 0.01, breached: false };
+    render(
+      <CorrelationRiskBanner
+        report={report({
+          clusters: [CALM],
+          breaches: [],
+          insufficient_data: ["THIN", "NEW"],
+        })}
+      />,
+    );
+    const banner = screen.getByTestId("correlation-risk-banner");
+    const level = banner.getAttribute("data-level");
+    expect(["none", "info"]).not.toContain(level);
+    expect(level).toBe("unmeasured");
+    expect(banner.textContent).not.toMatch(/within budget/);
+    expect(banner.textContent).toMatch(/2 positions unmeasured/);
+    expect(screen.getByTestId("crb-insufficient-data").textContent).toContain("THIN");
+  });
+
   it("renders measurement-unavailable as a Gate-3 info module", () => {
     render(
       <CorrelationRiskBanner
