@@ -15,13 +15,14 @@ No live network: every test drives a stub client.
 """
 import json
 import sqlite3
+import sys
 from datetime import date
 from typing import Optional
 from pathlib import Path
 
 import pytest
 
-from clients.equibles_client import EquiblesServerError
+from clients.equibles_client import EquiblesAuthError, EquiblesServerError
 from fetch_equibles_filing_forensics import (
     ATM_REMAINING_MATERIAL_USD,
     BUYBACK_REMAINING_MATERIAL_USD,
@@ -583,6 +584,30 @@ class TestRun:
         client = _StubClient()
         self.mod.run(["AAPL", "MSFT", "NVDA"], client=client, today=TODAY)
         assert client.calls.count("screener") == 1
+
+    # ── silent-failure hole ───────────────────────────────────────
+    #
+    # An absent or rejected EQUIBLES_API_KEY raises inside EquiblesClient()
+    # itself. That construction used to sit OUTSIDE the block that owns health
+    # reporting, so the oneshot died before any `_record_health` call and no
+    # `service_health` row was written at all — not even an error row. The
+    # service is registered for freshness (scripts/watchdog/services.py,
+    # web/lib/serviceHealthWindows.ts), so a row that never appears is silent,
+    # not stale, and nothing alerts.
+
+    def test_run_heartbeats_error_when_the_key_is_absent(self, monkeypatch):
+        monkeypatch.delenv("EQUIBLES_API_KEY", raising=False)
+        with pytest.raises(EquiblesAuthError):
+            self.mod.run(["AAPL"], today=TODAY)
+        assert self.health and self.health[0][0] == "error"
+
+    def test_an_empty_watchlist_heartbeats_error_and_still_exits_2(self, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["fetch_equibles_filing_forensics.py"])
+        monkeypatch.setattr(self.mod, "load_watchlist_tickers", lambda: [])
+        with pytest.raises(SystemExit) as excinfo:
+            self.mod.main()
+        assert excinfo.value.code == 2
+        assert self.health and self.health[0][0] == "error"
 
 
 # ── migration + upsert ────────────────────────────────────────────

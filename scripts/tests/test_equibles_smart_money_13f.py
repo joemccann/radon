@@ -9,6 +9,7 @@ Dates are window-relative (today minus N quarters) so the suite cannot rot.
 """
 import json
 import sqlite3
+import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -638,3 +639,73 @@ class TestStorage:
         db.execute(mod.SNAPSHOT_UPSERT_SQL, ("AAPL", LATEST_QUARTER, "t2", '{"v":2}'))
         rows = db.execute("SELECT scan_time, payload FROM equibles_13f_snapshots").fetchall()
         assert rows == [("t2", '{"v":2}')]
+
+
+# ── silent-failure hole: construction + CLI exits must heartbeat ───
+
+
+def _hrana_drop(*_args, **_kwargs):
+    raise RuntimeError("SERVER_ERROR: stream not found")
+
+
+class TestConstructionFailureIsReported:
+    """A rejected/absent key raises at EquiblesClient() — BEFORE any fetch.
+
+    That construction used to sit outside the health-reporting try, so the
+    oneshot died with no `service_health` row at all: not even an error row.
+    The service is registered for freshness (scripts/watchdog/services.py,
+    web/lib/serviceHealthWindows.ts), so a never-written row is the
+    registration gap docs/operations.md warns about — silent, not stale.
+    """
+
+    def test_run_heartbeats_error_when_the_key_is_absent(self, recorder, monkeypatch):
+        monkeypatch.delenv("EQUIBLES_API_KEY", raising=False)
+        with pytest.raises(EquiblesAuthError):
+            mod.run("AAPL")
+        assert recorder.health == [("error",)]
+
+    def test_run_many_heartbeats_error_when_the_key_is_absent(self, recorder, monkeypatch):
+        monkeypatch.delenv("EQUIBLES_API_KEY", raising=False)
+        with pytest.raises(EquiblesAuthError):
+            mod.run_many(["AAPL", "MSFT"])
+        assert recorder.health == [("error",)]
+
+
+class TestCliExitsHeartbeat:
+    def test_an_empty_watchlist_heartbeats_error_and_still_exits_2(self, recorder, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["fetch_equibles_smart_money_13f.py"])
+        monkeypatch.setattr(mod, "watchlist_tickers", lambda: [])
+        with pytest.raises(SystemExit) as excinfo:
+            mod.main()
+        assert excinfo.value.code == 2
+        assert recorder.health == [("error",)]
+
+
+class TestSnapshotSurvivesAHolderFailure:
+    """equibles_13f_snapshots is the ONLY table the API route reads.
+
+    Holder rows and the snapshot shared one try, so any holder-insert failure
+    (a Hrana stream drop on a liquid name's 500 rows) skipped the snapshot
+    upsert and the ticker stayed blank in the UI.
+    """
+
+    PAYLOAD = {
+        "ticker": "AAPL",
+        "report_date": LATEST_QUARTER,
+        "scan_time": "2026-08-25T00:00:00Z",
+        "holders": [],
+    }
+
+    def test_a_holder_insert_failure_still_lands_the_snapshot(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(mod, "CACHE_DIR", tmp_path / "equibles_13f")
+        snapshots: list[tuple] = []
+        monkeypatch.setattr(mod, "_upsert_holder_rows", _hrana_drop)
+        monkeypatch.setattr(mod, "_upsert_snapshot", lambda *a, **k: snapshots.append(a))
+        mod._write_db_cache(dict(self.PAYLOAD))
+        assert [s[0] for s in snapshots] == ["AAPL"]
+
+    def test_a_snapshot_failure_stays_non_fatal(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(mod, "CACHE_DIR", tmp_path / "equibles_13f")
+        monkeypatch.setattr(mod, "_upsert_holder_rows", lambda *a, **k: None)
+        monkeypatch.setattr(mod, "_upsert_snapshot", _hrana_drop)
+        mod._write_db_cache(dict(self.PAYLOAD))

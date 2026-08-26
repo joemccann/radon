@@ -715,6 +715,65 @@ sudo systemctl start radon-media-backup.service   # optional immediate run
 journalctl -u radon-media-backup -n 50 --no-pager
 ```
 
+## Equibles (`EQUIBLES_API_KEY` — production required)
+
+Five oneshot timers pull the Equibles REST surface. All of them construct
+`EquiblesClient` (`scripts/clients/equibles_client.py`), which raises
+`EquiblesAuthError` at construction when `EQUIBLES_API_KEY` is unset or
+rejected. No IB dependency; the Equibles API is the only source.
+
+| Unit | When (UTC) | Script | Heartbeat | Freshness window |
+|---|---|---|---|---|
+| `radon-equibles-short-crowding.timer` | daily **09:30** | `scripts/fetch_equibles_short_crowding.py` | `equibles-short-crowding` | 26h |
+| `radon-equibles-13f.timer` | **Mon 09:45** | `scripts/fetch_equibles_smart_money_13f.py` | `equibles-13f` | 8d |
+| `radon-equibles-filings.timer` | daily **10:00** | `scripts/fetch_equibles_filing_forensics.py` | `equibles-filing-forensics` | 26h |
+| `radon-equibles-ats.timer` | **Tue 09:15** | `scripts/fetch_equibles_ats_venue_share.py` | `equibles-ats-venue-share` | 8d |
+| `radon-equibles-cot.timer` | **Sat 01:00** | `scripts/fetch_equibles_cot_positioning.py` | `equibles-cot-positioning` | 8d |
+
+Windows are registered in `scripts/watchdog/services.py` and
+`web/lib/serviceHealthWindows.ts`. All five are in the watchdog's
+`freshness` + `error` alert buckets.
+
+| | |
+|---|---|
+| Provider | [Equibles](https://api.equibles.com/v1) — Bearer key |
+| Allowance | Pro plan 100,000 requests/day, shared REST + MCP, resets 00:00 UTC. Every paginated page bills separately, so `max_pages` is bounded in the client. |
+| Env contract | root `.env.example`, `cloud/.env.example`, `cloud/config/required-env.txt` |
+| VPS secrets | `/etc/radon/env` (`EnvironmentFile=` on every unit) |
+| Ticker scope | `fetch_equibles_smart_money_13f.py` and `fetch_equibles_filing_forensics.py` read the Turso `watchlist` table. A ticker off the watchlist has no row, and both API routes serve `missing: true` for it. |
+| Tables | `equibles_13f_snapshots` (the route's only read), `equibles_13f_holders` (write-only depth), `equibles_filing_forensics`, `equibles_short_interest` + `equibles_squeeze_scores`, `equibles_ats_venue_share`, `cot_positioning` |
+| Demo mirror | `equibles_13f_snapshots` + `equibles_filing_forensics` are mirrored per ticker by `scripts/db/mirror_market_snapshots_to_demo.js`. `equibles_13f_holders` is not — nothing reads it. |
+
+**Fail-closed:** `EQUIBLES_API_KEY` is in `cloud/config/required-env.txt`, so
+`cloud/scripts/check-env.py` refuses the deploy preflight when it is unset. It
+was absent from that contract until 2026-08-25, which let the preflight pass
+with no key: every unit then raised at client construction and — because the
+raise happened outside the block that owns health reporting — died writing NO
+`service_health` row at all, not even an error row. Both producers now report
+an `error` heartbeat for a construction failure, a rejected key, an exhausted
+allowance, and an empty watchlist before exiting.
+
+Read-only operator checks on the VPS:
+
+```bash
+# is the key present (name only, never the value)
+sudo grep -c '^EQUIBLES_API_KEY=' /etc/radon/env
+# has any Equibles timer ever succeeded
+systemctl list-timers 'radon-equibles-*' --all --no-pager
+for u in short-crowding 13f filings ats cot; do
+  systemctl show "radon-equibles-$u.service" \
+    -p Result -p ExecMainStatus -p ActiveEnterTimestamp --no-pager
+done
+journalctl -u radon-equibles-13f -u radon-equibles-filings -n 100 --no-pager
+```
+
+Heartbeat rows (a row that never appears is the failure mode above):
+
+```sql
+SELECT service, state, finished_at FROM service_health
+WHERE service LIKE 'equibles-%' ORDER BY finished_at DESC;
+```
+
 ## Retired: beta.radon.run (2026-08-20)
 
 The staging clone was never finished. Repo copies of `deploy/beta/`, the

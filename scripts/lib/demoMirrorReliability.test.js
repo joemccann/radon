@@ -5,6 +5,9 @@ import {
   runNewsfeedMirror,
 } from "../db/mirror_newsfeed_to_demo.js";
 import {
+  HISTORY,
+  LATEST_ONE,
+  PER_KEY,
   PURGED_ACCOUNT_TABLES,
   isTransientTursoError,
   runMarketMirror,
@@ -415,5 +418,68 @@ describe("account-data purge (REL-049 / R-097)", () => {
     })).rejects.toThrow(/account-data purge failed/);
 
     expect(dst.batch).not.toHaveBeenCalled();
+  });
+});
+
+describe("equibles per-ticker decks reach the demo database", () => {
+  // Both Equibles per-ticker surfaces (13F positioning, filing-forensics
+  // dossier) were absent from every mirror list, so demo.radon.run could never
+  // show them for any ticker no matter what production held.
+  const byTable = Object.fromEntries(PER_KEY.map((entry) => [entry.table, entry]));
+
+  it("mirrors the newest 13F vintage per ticker on the column the route reads", () => {
+    // web/app/api/equibles-smart-money-13f/route.ts orders by report_date DESC.
+    expect(byTable.equibles_13f_snapshots).toEqual({
+      table: "equibles_13f_snapshots",
+      key: "ticker",
+      orderCol: "report_date",
+    });
+  });
+
+  it("mirrors the filing-forensics dossier per ticker", () => {
+    expect(byTable.equibles_filing_forensics).toEqual({
+      table: "equibles_filing_forensics",
+      key: "ticker",
+      orderCol: "as_of",
+    });
+  });
+
+  it("leaves equibles_13f_holders out — nothing reads it", () => {
+    // The holder rows are write-only depth: the panel renders payload.holders
+    // out of the snapshot JSON, and no route or component queries the table.
+    const named = [...LATEST_ONE, ...PER_KEY, ...HISTORY].map((e) => e.table);
+    expect(named).not.toContain("equibles_13f_holders");
+  });
+
+  it("issues the per-key query and prune for both equibles tables", async () => {
+    const src = {
+      execute: vi.fn(async (sql) => {
+        const table = String(sql).match(/FROM (\w+)/)?.[1];
+        return { columns: ["ticker", "payload", "rn"], rows: [{ ticker: "AAPL", payload: "{}" }] };
+      }),
+    };
+    const dst = { execute: vi.fn().mockResolvedValue({ rows: [] }), batch: vi.fn().mockResolvedValue(undefined) };
+
+    const result = await runMarketMirror({
+      src,
+      dst,
+      tables: {
+        latestOne: [],
+        perKey: [byTable.equibles_13f_snapshots, byTable.equibles_filing_forensics],
+        history: [],
+        purgedAccountTables: [],
+      },
+      maxAttempts: 1,
+      sleep: vi.fn().mockResolvedValue(undefined),
+      log: () => {},
+      now: () => "2026-08-25T12:00:00.000Z",
+      runId: "equibles",
+    });
+
+    expect(result.failures).toEqual([]);
+    expect(result.total).toBe(2);
+    const read = src.execute.mock.calls.map((c) => String(c[0]));
+    expect(read.some((s) => /PARTITION BY ticker ORDER BY report_date DESC/.test(s))).toBe(true);
+    expect(read.some((s) => /PARTITION BY ticker ORDER BY as_of DESC/.test(s))).toBe(true);
   });
 });
