@@ -431,3 +431,57 @@ how this loop improves as the codebase grows.
   Add to the standing sweeps: dump `deploy.needs` + `deploy.if` at BOTH the
   base SHA and HEAD and diff them, then check branch protection over the API.
   Collection coverage and gate enforcement are two different questions.
+
+- **2026-08-26 (remediate): `gh pr edit --body-file` ABORTS on this repo** with
+  `GraphQL: Projects (classic) is being deprecated … (repository.pullRequest.projectCards)`
+  — and it aborts AFTER printing nothing else, so it reads like a success until
+  you re-read the body and find the old text. The PR body is one of the three
+  dead-man channels, so a silent no-op here is exactly the failure this loop
+  exists to prevent. Use the REST path instead:
+  `gh api -X PATCH repos/{owner}/{repo}/pulls/<n> --input <json-with-body>`,
+  then VERIFY with
+  `gh api repos/{owner}/{repo}/pulls/<n> --jq '.body' | grep -c '<a phrase you just wrote>'`.
+  `gh pr comment` and `gh issue comment` are unaffected.
+- **2026-08-26 (remediate): 12 concurrent worktree agents drove load average to
+  179 on this host, and that makes every agent-reported count untrustworthy.**
+  The fan-out itself was the right call — 17 P0/P1 findings landed in roughly
+  35 minutes of wall clock — but six of the twelve agents independently hit
+  slow or timing-shaped test behaviour, and one stalled outright. Two rails:
+  (a) cap the fan-out at about 6 concurrent agents on this machine and run a
+  second wave, rather than launching all groups at once; (b) treat every agent
+  "green" as SCOPED evidence only, and re-run the landed change's own tests in
+  the main clone after each cherry-pick. Doing that caught nothing wrong this
+  run, but it is what makes the closing gate a confirmation rather than a
+  discovery. Never run the closing 3x gate until the fan-out is fully drained.
+- **2026-08-26 (remediate): a worktree with symlinked `node_modules` cannot
+  start vitest on this host** — `@rollup/rollup-darwin-arm64` resolves relative
+  to the symlink's real path and is absent, so vitest dies at startup. Three
+  agents hit it independently and each worked around it by installing that one
+  binding to a scratch dir and setting `NODE_PATH`, which is the right move:
+  the main clone is UNAFFECTED (verified with a scoped `npx vitest run` before
+  trusting the closing gate) and nothing in the repo was modified. Put the
+  workaround in the agent prompt next time instead of making each one discover
+  it, and always smoke-test vitest in the MAIN clone before concluding the
+  suite is broken.
+- **2026-08-26 (remediate): two agents branched from the same base can land
+  CONTRADICTORY pins — diff the landed tree, not the two reports.** T-162
+  wrapped `run()` in the credit-spread and IEI/HYG producers; T-163, working
+  in a sibling worktree from the same base, added an AST class contract whose
+  `_UNGUARDED_CTOR_BASELINE` pins both of those modules as unguarded. Read
+  together the two reports look like a direct conflict that would red the suite
+  after both land. They do not conflict — the baseline entries are
+  `fetch_uw_closes`, a different function from the `run()` T-162 wrapped — but
+  the only way to know is to RUN the contract in the landed tree (22 passed).
+  Whenever two task groups touch the same module from separate worktrees, run
+  the second one's contract test immediately after the second cherry-pick,
+  before moving on.
+- **2026-08-26 (remediate): resume a stalled agent, do not take over its task.**
+  One agent stopped with `Staged. Waiting on the full-suite confirmation before
+  committing.` — it had done ~95k tokens of work and staged everything, but a
+  full-suite run under load-179 was never going to return. `SendMessage` to its
+  agent id resumed it from its own transcript; the reply told it to run only
+  the SCOPED set, that the lead owns the closing full gate, and to commit and
+  report. It finished correctly in one round. Re-doing that task in the main
+  clone would have thrown away all of that context. Say explicitly in the
+  ORIGINAL prompt that the lead owns the full gate and the agent must never run
+  one — that is what caused the stall.
