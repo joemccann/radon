@@ -118,7 +118,11 @@ export default function PositionTradeTicket({
   const [error, setError] = useState<string | null>(null);
   const [riskState, setRiskState] = useState<OrderRiskState | null>(null);
 
-  const reset = () => setConfirmStep(false);
+  // Clearing the verdict is part of the reset. OrderRiskGate is mounted only
+  // inside the confirm step, so backing out and editing the order leaves the
+  // PREVIOUS shape's verdict in place, and the button that appears on the next
+  // Review click is gated by it. R-209.
+  const reset = () => { setConfirmStep(false); setRiskState(null); };
 
   const { bid, ask, mid, priceData: legPriceData } = useTargetQuote(position, prices, target);
 
@@ -165,12 +169,20 @@ export default function PositionTradeTicket({
     return `${leg.direction} ${leg.type} $${leg.strike}`;
   }, [target, position]);
 
-  const okToSubmit = riskState?.okToSubmit !== false; // null (pre-confirm) allowed
+  // Fail CLOSED. `!== false` permitted any state other than an explicit false,
+  // including the null the gate publishes through a post-commit effect — so
+  // "Confirm Order" was enabled before any verdict existed. Every sibling
+  // surface uses `=== true`, and web/CLAUDE.md states the contract that way.
+  // R-209.
+  const okToSubmit = riskState?.okToSubmit === true;
 
   const handlePlace = useCallback(async () => {
     if (!isValid) return;
     if (!confirmStep) { setConfirmStep(true); return; }
     if (!built) return;
+    // The `disabled` attribute was the only thing between a coverage-unresolved
+    // order and the broker. R-209.
+    if (!okToSubmit) return;
     setLoading(true);
     setError(null);
     try {
@@ -206,7 +218,7 @@ export default function PositionTradeTicket({
     } finally {
       setLoading(false);
     }
-  }, [isValid, confirmStep, built, portfolio, orderActions, action, parsedQty, position.ticker, subjectLabel, riskExecutionPrice, onOrderPlaced, onClose, target.kind, orderType, parsedPrice, parsedStop]);
+  }, [isValid, confirmStep, built, okToSubmit, portfolio, orderActions, action, parsedQty, position.ticker, subjectLabel, riskExecutionPrice, onOrderPlaced, onClose, target.kind, orderType, parsedPrice, parsedStop]);
 
   const closingHint =
     built?.isClosing === false
@@ -360,7 +372,7 @@ export default function PositionTradeTicket({
       <div className="order-submit">
         {confirmStep ? (
           <div className="order-confirm-row">
-            <button className="btn-secondary" onClick={() => setConfirmStep(false)} disabled={loading}>Back</button>
+            <button className="btn-secondary" onClick={reset} disabled={loading}>Back</button>
             <button
               className={`btn-primary ${action === "SELL" ? "btn-danger" : ""}`}
               onClick={handlePlace}
