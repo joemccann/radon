@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import React from "react";
 import WorkspaceSections from "../components/WorkspaceSections";
+import PortfolioSections from "../components/PortfolioSections";
 import type { PortfolioData, PortfolioPosition, TradeEntry } from "@/lib/types";
 
 vi.mock("../components/TickerLink", () => ({
@@ -104,8 +105,7 @@ describe("WorkspaceSections table search placement", () => {
       avg_kelly_optimal: null,
     };
 
-    render(React.createElement(WorkspaceSections, {
-      section: "portfolio",
+    render(React.createElement(PortfolioSections, {
       portfolio,
     }));
 

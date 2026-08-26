@@ -113,7 +113,7 @@ const ORDERS_BUY_TO_CLOSE_NO_REALIZED_PNL = {
 
 async function setup(page: Page) {
   await page.unrouteAll({ behavior: "ignoreErrors" });
-  await page.route("**/api/portfolio", (route) =>
+  await page.route("**/api/portfolio**", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(PORTFOLIO_WITH_SHORT_PUT) }),
   );
   await page.route("**/api/orders", (route) =>

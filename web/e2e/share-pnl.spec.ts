@@ -351,7 +351,7 @@ async function stubOrdersShareApis(page: import("@playwright/test").Page) {
     };
   });
 
-  await page.route("**/api/portfolio", (route) =>
+  await page.route("**/api/portfolio**", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(PORTFOLIO_MOCK) }),
   );
   await page.route("**/api/orders", (route) =>

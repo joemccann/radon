@@ -300,7 +300,7 @@ async function installMockWebSocket(
 async function stubApis(page: import("@playwright/test").Page) {
   await page.unrouteAll({ behavior: "ignoreErrors" });
 
-  await page.route("**/api/portfolio", (route) =>
+  await page.route("**/api/portfolio**", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(PORTFOLIO) }),
   );
   await page.route("**/api/orders", (route) =>
@@ -435,7 +435,7 @@ test.describe("Combo order modify flow", () => {
       ],
     };
     await stubApis(page);
-    await page.route("**/api/portfolio", (route) =>
+    await page.route("**/api/portfolio**", (route) =>
       route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(portfolio) }),
     );
 
@@ -462,7 +462,7 @@ test.describe("Combo order modify flow", () => {
     await installMockWebSocket(page, MSFT_PRICE_FIXTURES);
     await page.unrouteAll({ behavior: "ignoreErrors" });
 
-    await page.route("**/api/portfolio", (route) =>
+    await page.route("**/api/portfolio**", (route) =>
       route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(MSFT_PORTFOLIO) }),
     );
     await page.route("**/api/orders", (route) =>

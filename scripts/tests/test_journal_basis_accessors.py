@@ -89,12 +89,59 @@ class _FakeCursor:
 
 class _FakeDb:
     def __init__(self, rows):
-        self._rows = rows
+        self._rows = [
+            self._with_trade_id(row, index)
+            for index, row in enumerate(rows, start=1)
+        ]
         self.calls = []
 
     def execute(self, sql, params=()):
         self.calls.append((sql, params))
-        return _FakeCursor(self._rows)
+        cursor = str(params[0])
+        tickers = {str(value) for value in params[1:-1]}
+        limit = int(params[-1])
+        matching = [
+            row
+            for row in self._rows
+            if self._trade_id(row) > cursor and self._ticker(row) in tickers
+        ]
+        matching.sort(key=self._trade_id)
+        return _FakeCursor(matching[:limit])
+
+    @staticmethod
+    def _with_trade_id(row, index):
+        trade_id = f"test-{index:08d}"
+        if isinstance(row, dict):
+            return {"trade_id": trade_id, **row}
+        if isinstance(row, (tuple, list)):
+            return (trade_id, *row)
+        return SimpleNamespace(
+            trade_id=trade_id,
+            payload=getattr(row, "payload", None),
+            filled_at=getattr(row, "filled_at", None),
+            written_at=getattr(row, "written_at", None),
+        )
+
+    @staticmethod
+    def _trade_id(row):
+        if isinstance(row, dict):
+            return str(row["trade_id"])
+        if isinstance(row, (tuple, list)):
+            return str(row[0])
+        return str(row.trade_id)
+
+    @staticmethod
+    def _ticker(row):
+        if isinstance(row, dict):
+            raw_payload = row.get("payload")
+        elif isinstance(row, (tuple, list)):
+            raw_payload = row[1]
+        else:
+            raw_payload = getattr(row, "payload", None)
+        payload = json.loads(raw_payload) if isinstance(raw_payload, str) else raw_payload
+        if not isinstance(payload, dict):
+            return ""
+        return str(payload.get("ticker") or payload.get("symbol") or "").upper()
 
 
 # ---------------------------------------------------------------------------
