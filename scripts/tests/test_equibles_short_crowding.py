@@ -553,3 +553,37 @@ class TestStorage:
         )
         rows = db.execute("SELECT ticker, score, rank FROM equibles_squeeze_scores").fetchall()
         assert rows == [("AAPL", 81.0, 9)]
+
+
+# ── silent-failure hole: construction must heartbeat ──────────────
+
+
+class TestConstructionFailureIsReported:
+    """A rejected/absent key raises at EquiblesClient() — BEFORE any fetch.
+
+    That construction used to sit outside the health-reporting block, so the
+    oneshot died with no `service_health` row at all: not even an error row.
+    `equibles-short-crowding` is registered for freshness
+    (scripts/watchdog/services.py, web/lib/serviceHealthWindows.ts), so a row
+    that never arrives is silent rather than stale and nothing alerts.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _capture_health(self, tmp_path, monkeypatch):
+        import fetch_equibles_short_crowding as mod
+
+        monkeypatch.setattr(mod, "SHORT_CROWDING_JSON", tmp_path / "equibles_short_crowding.json")
+        self.health = []
+        monkeypatch.setattr(
+            mod, "_record_health",
+            lambda state, scan_time, error=None: self.health.append(state),
+        )
+        self.mod = mod
+
+    def test_run_heartbeats_error_when_the_key_is_absent(self, monkeypatch):
+        from clients.equibles_client import EquiblesAuthError
+
+        monkeypatch.delenv("EQUIBLES_API_KEY", raising=False)
+        with pytest.raises(EquiblesAuthError):
+            self.mod.run(tickers=["AAPL"])
+        assert self.health == ["error"]

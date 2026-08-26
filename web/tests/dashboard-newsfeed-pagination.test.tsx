@@ -8,6 +8,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import DashboardNewsFeed from "../components/DashboardNewsFeed";
 
+// TEST_AUDIT T-161: this file and theta-harvester-scanner are
+// the two jsdom suites that blew the 5s default under CI shard +
+// coverage load, and were the sole reason a suite-wide `retry` was
+// added to vitest.config.ts. The retry is gone; the headroom is local
+// to the files that need it, so a real failure here still fails on the
+// first run.
+vi.setConfig({ testTimeout: 20_000, hookTimeout: 20_000 });
+
 vi.mock("next/image", () => ({
   default: ({ src, alt }: { src: string; alt: string }) =>
     React.createElement("img", { src, alt }),

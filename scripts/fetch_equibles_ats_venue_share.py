@@ -588,13 +588,19 @@ def run(
     start_date = end_date - timedelta(weeks=lookback_weeks)
 
     owned_client = client is None
-    if owned_client:
-        from clients.equibles_client import EquiblesClient
-        client = EquiblesClient()
-
     series_by_ticker: dict[str, list[dict[str, Any]]] = {}
     errors: list[dict[str, Any]] = []
+    # Client construction is INSIDE the health-reporting try: an absent or
+    # rejected EQUIBLES_API_KEY raises EquiblesAuthError from
+    # EquiblesClient.__init__, and outside the try that killed the oneshot
+    # before any _record_health call, so NO service_health row was written at
+    # all. The service is registered for freshness, so a row that never
+    # arrives is silent rather than stale and nothing alerts.
     try:
+        if owned_client:
+            from clients.equibles_client import EquiblesClient
+            client = EquiblesClient()
+
         for ticker in tickers or watchlist_tickers():
             try:
                 series = _fetch_ticker(
@@ -605,8 +611,11 @@ def run(
                 continue
             if series:
                 series_by_ticker[ticker] = series
+    except Exception as exc:  # noqa: BLE001 — re-raised; the row must exist first
+        _record_health("error", scan_time, error={"message": f"cycle aborted: {exc}"})
+        raise
     finally:
-        if owned_client:
+        if owned_client and client is not None:
             client.close()
 
     payload = build_payload(series_by_ticker, scan_time, errors)

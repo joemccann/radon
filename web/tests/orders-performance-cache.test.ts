@@ -14,6 +14,8 @@ import {
   readCachedOrdersSnapshot,
 } from "@/lib/orders/ordersReadCache";
 import {
+  PORTFOLIO_ENTRY_DATES_CACHE_TTL_MS,
+  PORTFOLIO_SNAPSHOT_CACHE_TTL_MS,
   invalidatePortfolioReadCaches,
   readCachedPortfolioContractOpenDates,
   readCachedPortfolioSnapshot,
@@ -72,6 +74,11 @@ const MUTATING_ORDER_ROUTES = [
   "app/api/orders/modify/route.ts",
 ];
 
+// Structural floor only: presence + ordering of the invalidate/read pair.
+// The reachability contract this cannot express — that the SECOND, post-refresh
+// invalidate exists, so a GET racing `/orders/refresh` cannot serve the mutating
+// route its own stale snapshot — is driven behaviourally in
+// web/tests/orders-place-cache-race.test.ts (T-169).
 describe("order mutation cache invalidation contract", () => {
   it.each(MUTATING_ORDER_ROUTES)("%s explicitly invalidates the orders snapshot cache", async (path) => {
     const source = await readFile(join(REPO_ROOT, path), "utf8");
@@ -84,17 +91,87 @@ describe("order mutation cache invalidation contract", () => {
 });
 
 describe("portfolio read cache policy", () => {
-  it("uses the shared 15-second snapshot and 60-second entry-date bounds", async () => {
-    const source = await readFile(join(REPO_ROOT, "lib/portfolio/portfolioReadCache.ts"), "utf8");
-    expect(source).toMatch(/PORTFOLIO_SNAPSHOT_CACHE_TTL_MS\s*=\s*15_000/);
-    expect(source).toMatch(/PORTFOLIO_ENTRY_DATES_CACHE_TTL_MS\s*=\s*60_000/);
+  // T-168: the declared constant AND the wiring. Asserting the source text of
+  // the declaration left `cachedReadResult(key, 0, ...)` green, so every read
+  // could miss the cache while the regex still matched. Literal 14_999/15_001
+  // boundaries (never the constant itself) keep this from going self-referential.
+  it("serves one snapshot fetch for the whole 15-second window, then refetches", async () => {
+    expect(PORTFOLIO_SNAPSHOT_CACHE_TTL_MS).toBe(15_000);
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce("snapshot-v1")
+      .mockResolvedValueOnce("snapshot-v2");
+
+    await expect(readCachedPortfolioSnapshot(fetcher)).resolves.toMatchObject({ value: "snapshot-v1" });
+    await expect(readCachedPortfolioSnapshot(fetcher)).resolves.toMatchObject({ value: "snapshot-v1" });
+    vi.setSystemTime(14_999);
+    await expect(readCachedPortfolioSnapshot(fetcher)).resolves.toMatchObject({ value: "snapshot-v1" });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+
+    vi.setSystemTime(15_001);
+    await expect(readCachedPortfolioSnapshot(fetcher)).resolves.toMatchObject({ value: "snapshot-v2" });
+    expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
+  it("serves one entry-date fetch for the whole 60-second window, then refetches", async () => {
+    expect(PORTFOLIO_ENTRY_DATES_CACHE_TTL_MS).toBe(60_000);
+    const tradeDates = vi.fn()
+      .mockResolvedValueOnce("trade-v1")
+      .mockResolvedValueOnce("trade-v2");
+    const contractDates = vi.fn()
+      .mockResolvedValueOnce("contract-v1")
+      .mockResolvedValueOnce("contract-v2");
+
+    await expect(readCachedPortfolioTradeLogDates(tradeDates)).resolves.toBe("trade-v1");
+    await expect(readCachedPortfolioContractOpenDates(contractDates)).resolves.toBe("contract-v1");
+    vi.setSystemTime(59_999);
+    await expect(readCachedPortfolioTradeLogDates(tradeDates)).resolves.toBe("trade-v1");
+    await expect(readCachedPortfolioContractOpenDates(contractDates)).resolves.toBe("contract-v1");
+    expect(tradeDates).toHaveBeenCalledTimes(1);
+    expect(contractDates).toHaveBeenCalledTimes(1);
+
+    vi.setSystemTime(60_001);
+    await expect(readCachedPortfolioTradeLogDates(tradeDates)).resolves.toBe("trade-v2");
+    await expect(readCachedPortfolioContractOpenDates(contractDates)).resolves.toBe("contract-v2");
+    expect(tradeDates).toHaveBeenCalledTimes(2);
+    expect(contractDates).toHaveBeenCalledTimes(2);
+  });
+
+  // T-169 sibling: the old bridging regex over the route source stayed green if
+  // the invalidation was wrapped in an env guard. Drive the real handler and
+  // prove a caller re-reading INSIDE the TTL sees post-sync values.
   it("invalidates all portfolio read caches on the successful live-sync path", async () => {
-    const source = await readFile(join(REPO_ROOT, "app/api/portfolio/route.ts"), "utf8");
-    expect(source).toMatch(
-      /await\s+radonFetch\(\s*["']\/portfolio\/sync[\s\S]*?invalidatePortfolioReadCaches\s*\(\s*\)/,
-    );
+    const radonFetch = vi.fn().mockResolvedValue({ positions: [], bankroll: 1 });
+    vi.doMock("@/lib/radonApi", () => ({
+      radonFetch,
+      radonFetchText: vi.fn(),
+      radonErrorDetailText: (detail: unknown) => String(detail),
+      coerceRadonErrorDetail: (detail: unknown) => detail,
+      RadonApiError: class RadonApiError extends Error {},
+    }));
+    const { POST } = await import("../app/api/portfolio/route");
+
+    const snapshot = vi.fn()
+      .mockResolvedValueOnce("snapshot-v1")
+      .mockResolvedValueOnce("snapshot-v2");
+    const tradeDates = vi.fn()
+      .mockResolvedValueOnce("trade-v1")
+      .mockResolvedValueOnce("trade-v2");
+    const contractDates = vi.fn()
+      .mockResolvedValueOnce("contract-v1")
+      .mockResolvedValueOnce("contract-v2");
+    await readCachedPortfolioSnapshot(snapshot);
+    await readCachedPortfolioTradeLogDates(tradeDates);
+    await readCachedPortfolioContractOpenDates(contractDates);
+
+    const response = await POST();
+    expect(response.status).toBe(200);
+    expect(radonFetch).toHaveBeenCalledWith("/portfolio/sync", expect.objectContaining({ method: "POST" }));
+
+    // 1s in: every TTL is still live, so only a real invalidation yields v2.
+    vi.setSystemTime(1_000);
+    await expect(readCachedPortfolioSnapshot(snapshot)).resolves.toMatchObject({ value: "snapshot-v2" });
+    await expect(readCachedPortfolioTradeLogDates(tradeDates)).resolves.toBe("trade-v2");
+    await expect(readCachedPortfolioContractOpenDates(contractDates)).resolves.toBe("contract-v2");
   });
 
   it("invalidates snapshot and both entry-date caches after a successful sync", async () => {

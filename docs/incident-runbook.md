@@ -706,6 +706,44 @@ transient Turso HTTP 502 reading `scan_snapshots`.** Peak: 2026-08-21
 
 ---
 
+## demo-mirror-schema-lag
+
+**`radon-demo-mirror.service` oneshot pages P1 `Result=exit-code` with
+`no such table` on a newly mirrored market table.** Peak: 2026-08-26
+21:46:08Z, page `01b4bac1…`.
+
+- **Mechanism:** weekday 21:45 UTC oneshot mirrors market-analytics tables
+  prod → demo. Prod schema advances via `radon-api` `ExecStartPre=migrate.py`.
+  The demo Turso is a separate DB and was never on that path, so it stayed at
+  `schema_migrations` max=26 while prod reached 57. Commit `3b2945b7` added
+  `equibles_13f_snapshots` + `equibles_filing_forensics` to `PER_KEY`; the
+  dest write failed with `SQLITE_UNKNOWN: no such table`, sibling tables
+  (scanner, gex, cri, breadth, …) mirrored fine, unit exited 1 /
+  `NRestarts=0`. Edge and `:8321/health/lite` stayed up — not a Turso
+  platform outage.
+- **Discriminating check:** journal
+  `FAIL equibles_* (dest write failed: … no such table: equibles_*)` then
+  `FAILED: required table failures: equibles_13f_snapshots,
+  equibles_filing_forensics`; other `[mirror] <table>: N row(s)` lines in
+  the same run; demo canary
+  `SELECT MAX(version) FROM schema_migrations` far behind prod / missing
+  the new table. Transient Turso 502 is
+  `demo-mirror-scan-snapshots-502`. Deploy stop-clean is `Result=signal`.
+- **Remediation (code):** `migrate.py --demo` applies
+  `scripts/db/migrations` to `TURSO_DEMO_*` (refuses the prod marker;
+  requires `radon-demo`). `radon-demo-mirror.service` runs it as
+  `ExecStartPre` before the Node mirror. The unit is on
+  `RERUNNABLE_ONESHOT_UNITS` so the page responder can
+  `reset-failed` + `start` after a green deploy (next timer is ~24h).
+  Manual: `python3.13 scripts/db/migrate.py --demo` then start the unit.
+- **Regression:** `test_migrate.py::TestMigrateDemoTarget`;
+  `test_systemd_services.py::TestDemoMirrorSchemaGate`.
+- **Code:** `scripts/db/migrate.py` (`resolve_target`,
+  `apply_pending_migrations`, `--demo`);
+  `cloud/services/radon-demo-mirror.service`.
+
+---
+
 ## signals-refresh-capacity-502
 
 **`radon-signals-refresh.service` oneshot pages P1 `Result=exit-code` when

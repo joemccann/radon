@@ -462,6 +462,27 @@ def _write_json_cache(payload: dict[str, Any]) -> None:
     os.replace(tmp, CREDIT_SPREAD_JSON)
 
 
+def _record_error_health(message: str, error_class: str) -> None:
+    """Error heartbeat for the paths that never reach a full persist_result.
+
+    T-162: a row that NEVER appears is worse than a stale one
+    (docs/operations.md). This service carries a 26h watchdog window, so a
+    cycle that dies — or returns early on an empty series — without any
+    `record_service_health` call reads as ordinary staleness a day later.
+    Best-effort: a broken writer must not mask the original failure.
+    """
+    try:
+        writer.ensure_no_replica_for_writers()
+        writer.record_service_health(
+            SERVICE,
+            "error",
+            finished_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            error={"message": message, "class": error_class},
+        )
+    except Exception as exc:  # noqa: BLE001 — best-effort mirror
+        print(f"[{SERVICE}] error heartbeat non-fatal: {exc}", file=sys.stderr)
+
+
 def persist_result(
     payload: dict[str, Any],
     rows_changed_rows: list[dict[str, Any]],
@@ -469,12 +490,16 @@ def persist_result(
 ) -> None:
     """Dual-write: Turso rows + snapshot + heartbeat, then the JSON fallback.
 
-    Refuses an empty series entirely. Snapshot + heartbeat run EVERY cycle
-    so the staleness banner notices a silent writer; the heartbeat is an
-    error when no source confirmed the series (stale_source).
+    Refuses an empty series entirely, but still heartbeats an error so the
+    refusal is visible. Snapshot + heartbeat run EVERY cycle so the staleness
+    banner notices a silent writer; the heartbeat is an error when no source
+    confirmed the series (stale_source).
     """
     if not payload["series"]:
         print(f"[{SERVICE}] refusing to persist empty series", file=sys.stderr)
+        _record_error_health(
+            f"{SERVICE}: refusing to persist an empty series", "empty_series"
+        )
         return
 
     scan_time = payload["scan_time"]
@@ -558,24 +583,35 @@ def _serve_cached(cached: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def run() -> dict[str, Any]:
+    """One cycle. Raises loudly on a hard failure — AND leaves an error row.
+
+    T-162: `_serve_cached` raises when every source is down with no cache, and
+    that raise used to kill the oneshot before anything touched
+    `service_health`. The whole body is inside the health-reporting block
+    (docs/operations.md) so an outage is recorded, not merely silent.
+    """
     print(f"[{SERVICE}] fetching HYG and SPX (IB → UW → Yahoo)", file=sys.stderr)
-    closes, sources = fetch_closes()
-    cached = _read_cached_series()
-    source = combine_source(sources) or NO_SOURCE
-    if source == NO_SOURCE:
-        return _serve_cached(cached)
-    hyg = closes.get(HYG_SYMBOL, {})
-    spx = closes.get(SPX_SYMBOL, {})
+    try:
+        closes, sources = fetch_closes()
+        cached = _read_cached_series()
+        source = combine_source(sources) or NO_SOURCE
+        if source == NO_SOURCE:
+            return _serve_cached(cached)
+        hyg = closes.get(HYG_SYMBOL, {})
+        spx = closes.get(SPX_SYMBOL, {})
 
-    fresh = build_series(align_series(hyg, spx))
-    series = merge_series(cached, fresh)
-    new_rows = diff_new_rows(cached, series)
+        fresh = build_series(align_series(hyg, spx))
+        series = merge_series(cached, fresh)
+        new_rows = diff_new_rows(cached, series)
 
-    if not new_rows:
-        print(f"[{SERVICE}] source unchanged; refreshing snapshot only", file=sys.stderr)
+        if not new_rows:
+            print(f"[{SERVICE}] source unchanged; refreshing snapshot only", file=sys.stderr)
 
-    payload = build_output(series, source=source, source_by_ticker=sources)
-    persist_result(payload, new_rows)
+        payload = build_output(series, source=source, source_by_ticker=sources)
+        persist_result(payload, new_rows)
+    except Exception as exc:
+        _record_error_health(f"{SERVICE}: {exc}", "cycle_failed")
+        raise
     return payload
 
 

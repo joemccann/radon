@@ -226,6 +226,29 @@ export function normalizeOptionContract(contract: OptionContract): OptionContrac
   };
 }
 
+/**
+ * The stalest timestamp across a combo's leg quotes, or undefined when any leg
+ * is missing a parseable one. Unknown leg age is not "fresh": returning
+ * undefined makes `comboQuotePriceData` fail closed.
+ */
+export function oldestQuoteTimestamp(
+  legQuotes: Array<Pick<PriceData, "timestamp"> | null | undefined>,
+): string | undefined {
+  if (legQuotes.length === 0) return undefined;
+  let oldestMs = Infinity;
+  let oldestIso: string | undefined;
+  for (const quote of legQuotes) {
+    const iso = quote?.timestamp;
+    const ms = iso ? Date.parse(iso) : NaN;
+    if (!Number.isFinite(ms)) return undefined;
+    if (ms < oldestMs) {
+      oldestMs = ms;
+      oldestIso = iso ?? undefined;
+    }
+  }
+  return oldestIso;
+}
+
 /** Build composite key for an option contract: SYMBOL_YYYYMMDD_STRIKE_RIGHT */
 export function optionKey(c: OptionContract): string {
   const normalized = normalizeOptionContract(c);

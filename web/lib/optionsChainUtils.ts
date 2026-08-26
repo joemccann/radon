@@ -1,5 +1,5 @@
 import type { PriceData } from "@/lib/pricesProtocol";
-import { optionKey } from "@/lib/pricesProtocol";
+import { oldestQuoteTimestamp, optionKey } from "@/lib/pricesProtocol";
 
 /* ─── Types ─── */
 
@@ -228,6 +228,13 @@ export type NetOptionQuote = {
   bid: number | null;
   ask: number | null;
   mid: number | null;
+  /**
+   * ISO timestamp of the stalest leg quote the net was built from, or undefined
+   * when any leg contributed a price with no known age (a manual leg override,
+   * or a leg the relay never quoted). Feeds `comboQuotePriceData` so a combo
+   * cannot render an hours-old net as a live market.
+   */
+  asOf?: string;
 };
 
 /**
@@ -256,6 +263,9 @@ export function computeNetOptionQuote(
   let netAsk = 0;
   // Proceeds to SELL the combo = receive bid on BUY legs, pay ask on SELL legs
   let netBid = 0;
+  // Freshness sources, one per leg. A manually overridden leg contributes null
+  // so the whole net reports an unknown age instead of a borrowed one.
+  const quoteAges: Array<PriceData | null> = [];
 
   for (const leg of legs) {
     const key = optionKey({
@@ -271,6 +281,7 @@ export function computeNetOptionQuote(
     const quoteSource = pd && !leg.priceManuallySet;
     const bid = quoteSource ? pd?.bid : leg.limitPrice;
     const ask = quoteSource ? pd?.ask : leg.limitPrice;
+    quoteAges.push(quoteSource ? pd : null);
 
     if (bid == null || ask == null) {
       return { bid: null, ask: null, mid: null };
@@ -291,7 +302,7 @@ export function computeNetOptionQuote(
   const ask = Math.max(netBid, netAsk);
   const mid = (bid + ask) / 2;
 
-  return { bid, ask, mid };
+  return { bid, ask, mid, asOf: oldestQuoteTimestamp(quoteAges) };
 }
 
 /* ─── ATM strike finder ─── */

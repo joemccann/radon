@@ -362,3 +362,204 @@ class TestEveryWriterIsRegistered:
             "\nRegister each in web/lib/serviceHealthWindows.ts with a "
             "deliberate window + category + requires_ib."
         )
+
+
+# ── T-163: a registered producer must never die before its heartbeat ──
+#
+# Registration (above) only buys a freshness window. A producer that dies
+# BEFORE it ever calls its health writer leaves no row at all, and a row that
+# never arrives is silent rather than stale: the banner shows an outage the
+# watchdog cannot attribute. The canonical instance is API-client
+# construction — `EquiblesClient()` raises `EquiblesAuthError` from
+# `__init__` when the key is unset or rejected — sitting above the try that
+# owns health reporting.
+
+_HEALTH_WRITE_CALL = "record_service_health"
+_SERVICE_CONSTANTS = {"SERVICE", "SERVICE_NAME"}
+_CLIENT_CTOR = re.compile(r"^[A-Z]\w*Client$")
+
+
+def _called_names(node: ast.AST) -> set[str]:
+    """Every callee name reachable under `node` (bare and attribute calls)."""
+    names: set[str] = set()
+    for child in ast.walk(node):
+        if isinstance(child, ast.Call):
+            func = child.func
+            if isinstance(func, ast.Name):
+                names.add(func.id)
+            elif isinstance(func, ast.Attribute):
+                names.add(func.attr)
+    return names
+
+
+def _declares_service_constant(tree: ast.Module) -> bool:
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            if any(
+                isinstance(t, ast.Name) and t.id in _SERVICE_CONSTANTS for t in node.targets
+            ):
+                return True
+        elif isinstance(node, ast.AnnAssign):
+            if isinstance(node.target, ast.Name) and node.target.id in _SERVICE_CONSTANTS:
+                return True
+    return False
+
+
+def _health_writer_functions(tree: ast.Module) -> set[str]:
+    """Names of defs whose own body writes a `service_health` row."""
+    return {
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and _HEALTH_WRITE_CALL in _called_names(node)
+    }
+
+
+def _enclosing_function(tree: ast.Module) -> dict[int, str]:
+    """id(node) -> name of the innermost def containing it."""
+    owner: dict[int, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for child in ast.walk(node):
+                owner[id(child)] = node.name
+    return owner
+
+
+def _health_guarded_try_blocks(tree: ast.Module, health_fns: set[str]) -> list[ast.Try]:
+    """Try nodes with an `except` handler that writes a health row."""
+    guarded = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Try):
+            continue
+        for handler in node.handlers:
+            called = _called_names(handler)
+            if _HEALTH_WRITE_CALL in called or called & health_fns:
+                guarded.append(node)
+                break
+    return guarded
+
+
+def _client_construction_sites(tree: ast.Module) -> list[ast.Call]:
+    return [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and _CLIENT_CTOR.match(node.func.id)
+    ]
+
+
+def _unguarded_client_constructions(tree: ast.Module) -> list[str]:
+    """Client constructions with no health row between them and the exit."""
+    health_fns = _health_writer_functions(tree)
+    guarded_blocks = _health_guarded_try_blocks(tree, health_fns)
+
+    protected_nodes: set[int] = set()
+    protected_callees: set[str] = set()
+    for block in guarded_blocks:
+        for stmt in block.body:
+            for child in ast.walk(stmt):
+                protected_nodes.add(id(child))
+            protected_callees |= _called_names(stmt)
+
+    owner = _enclosing_function(tree)
+    violations: list[tuple[str, int, str]] = []
+    for call in _client_construction_sites(tree):
+        if id(call) in protected_nodes:
+            continue
+        # Indirect: the ctor lives in a helper (`_resolve_client`) or in
+        # `run()`, and the CALLER wraps it in a health-guarded try.
+        if owner.get(id(call)) in protected_callees:
+            continue
+        violations.append(
+            (owner.get(id(call), "<module>"), call.lineno, call.func.id)
+        )
+    return violations
+
+
+# Pre-existing sites, recorded 2026-08-26 with the check that found them.
+# NOT sanctioned — they are the same silent-death shape as T-163, just in
+# producers T-163 did not scope. This list may shrink, never grow: fix the
+# site and delete its entry. `test_the_baseline_has_no_stale_entries` fails
+# if an entry is fixed but left here.
+_UNGUARDED_CTOR_BASELINE = {
+    "scripts/fetch_credit_spread.py::fetch_uw_closes",
+    "scripts/fetch_iei_hyg.py::fetch_uw_closes",
+    "scripts/fetch_ivrank.py::_real_ib_fetch",
+    "scripts/fetch_trin.py::sample_live",
+    "scripts/fetch_vixcor.py::run",
+    "scripts/ib_reconcile.py::connect_ib",
+}
+
+
+class TestRegisteredProducersHeartbeatBeforeDying:
+    """Static structure check: no API client is built outside a health block.
+
+    WHAT IT CATCHES: a module that declares `SERVICE`/`SERVICE_NAME` and owns
+    a `record_service_health` writer, but constructs a `*Client` where no
+    enclosing `try` has an `except` handler that writes a health row — either
+    directly, or one level up via the function the ctor lives in. That is the
+    exact T-163/`3b2945b7` regression shape.
+
+    WHAT IT CANNOT CATCH: it is AST-only and one caller-hop deep. It does not
+    prove the handler writes the RIGHT service name or an `error` state, does
+    not follow a ctor buried two helpers down, does not model dynamic
+    factories or `getattr` construction, and says nothing about non-ctor
+    early exits (`sys.exit`, `parser.error`) — the per-producer tests in
+    scripts/tests/test_equibles_*.py own those behaviours at runtime.
+    """
+
+    def _producer_modules(self):
+        return [
+            (path, tree)
+            for path, tree in _PARSED_TREES
+            if tree is not None
+            and _declares_service_constant(tree)
+            and _health_writer_functions(tree)
+        ]
+
+    def test_the_equibles_producers_are_all_in_scope(self):
+        covered = {path.name for path, _ in self._producer_modules()}
+        expected = {
+            "fetch_equibles_smart_money_13f.py",
+            "fetch_equibles_filing_forensics.py",
+            "fetch_equibles_ats_venue_share.py",
+            "fetch_equibles_short_crowding.py",
+            "fetch_equibles_cot_positioning.py",
+        }
+        assert expected <= covered, (
+            "the collector stopped seeing Equibles producers: "
+            f"{sorted(expected - covered)}"
+        )
+
+    def _offenders(self) -> dict[str, str]:
+        """key -> human-readable site, for every unguarded construction."""
+        found: dict[str, str] = {}
+        for path, tree in self._producer_modules():
+            rel = path.relative_to(_PROJECT_ROOT).as_posix()
+            for func, lineno, ctor in _unguarded_client_constructions(tree):
+                found[f"{rel}::{func}"] = f"{rel}:{lineno} {ctor}() in {func}()"
+        return found
+
+    def test_no_producer_constructs_its_client_outside_the_health_block(self):
+        new = {
+            key: site
+            for key, site in self._offenders().items()
+            if key not in _UNGUARDED_CTOR_BASELINE
+        }
+        assert not new, (
+            "Client construction outside the health-reporting block. An unset "
+            "or rejected API key raises in __init__, so these oneshots die "
+            "writing NO service_health row at all — silent, not stale, and "
+            "nothing alerts:\n  " + "\n  ".join(sorted(new.values())) +
+            "\nMove the construction inside a try whose except handler "
+            "records an `error` heartbeat and re-raises."
+        )
+
+    def test_the_baseline_has_no_stale_entries(self):
+        stale = _UNGUARDED_CTOR_BASELINE - set(self._offenders())
+        assert not stale, (
+            "These baseline entries no longer construct outside the health "
+            f"block: {sorted(stale)}. Delete them — the list may shrink, "
+            "never grow."
+        )
