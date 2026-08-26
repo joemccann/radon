@@ -213,3 +213,44 @@ Runner venv lacked `pytest-xdist` (CI-only install, same class as T-119); instal
 | T-130 | BLOCKED (operator) — automated half DONE | see commit | Tests now parse `ci.yml` as YAML: a step must `run` `scripts/ci/check_demo_isolation.py` and `docs/demo-environment.md` must name that step's job (red: doc said `py-tests`, the step is in `py-coverage`); the skip branch must emit a `::warning …::` annotation (red: bare `exit 0`). Green: doc corrected; skip now annotates every workflow run "Demo isolation guard SKIPPED". The AC's "cannot short-circuit" half needs the `TURSO_DEMO_DB_URL` / `TURSO_DEMO_APP_DB_URL` secrets provisioned (repo has no demo env template to run the guard against, and an unconditional run reds every CI until they exist) — operator decision, see PR body. `test_demo_isolation_is_wired.py` 8 passed, `test_ci_deploy_concurrency.py` 19 passed. |
 | T-132 | DONE | see commit | The four `TestStorage` idempotent-upsert tests (`test_divyield.py`, `test_hyad.py`, `test_hhlev.py`, `test_trin.py`) now wire `writer.get_db` to the migration-loaded sqlite and call the REAL `upsert_*_rows` twice for one date, asserting the SELECT-back row. Mutation: `count_above`/`total` swapped in `upsert_divyield_rows` and `adv`/`dec` swapped in `_trin_sample_params` → 2 failed (was 0). Five dead constants (`DIVYIELD/HYAD/HHLEV_UPSERT_SQL`, `TRIN_SAMPLE/DAILY_UPSERT_SQL`) deleted from `writer.py` — no other user. Four suites + honest-exhaustion: 124 passed. |
 | T-133 | DONE | see commit | `TestRun` classes in `test_divyield.py` (2), `test_hyad.py` (3), `test_hhlev.py` (1) drive the real `run()` with the fetchers / `_turso_history` / `_latest_y10` / `_spx_by_date` stubbed and assert the recorded writer calls: a new date → `("rows", 1)` before the snapshot; an unchanged day → no row but the `ok` heartbeat; a revised stored HYAD day → rewritten; an empty HYAD window → `RuntimeError` with NO heartbeat; HHLEV → all 304 rows every run. Mutations `rows → []` / `changed → []` / `persist_result(payload, [])` → 4 failed (was 0). Green on current code: three files 98 passed. No source change. |
+
+## Delta audit 2026-08-26 (Wednesday, audit mode)
+
+Range `27665c43..HEAD` (`1b326772`) — 33 commits, 236 files. Tree clean at
+start (only the wrapper's own `.weekend-runner.lock/`); no stash, no parked
+WIP. `rtk` is not installed on this host, so bare `git` was used throughout.
+
+| Gate | Round 1 |
+|---|---|
+| `python3.13 -m pytest` (recursive) | 7996 passed, 1 skipped, 90 deselected (435.4s) |
+| `npx vitest run` | 723 files / 7498 passed (90.5s) |
+| `python3.13 -m pytest cloud/tests` | 34 failed, 1062 passed, 5 skipped (230.6s) |
+
+**CI cross-check:** summed the per-job `passed` counts from all 12 `pytest (*)`
+jobs of CI run `32926657735` at this same SHA — `1606+960+759+381+748+1170+546+766+721+339
+= 7996`, identical to the local recursive run. Re-ran the T-122 shard-union
+set-diff independently: py-tests 466/466, cloud-tests 30/30, zero uncovered and
+zero double-covered.
+
+**Cloud baseline:** attributed by running the base SHA in
+`git worktree add --detach /tmp/base27665c43 27665c43`. Sorted `FAILED` lists
+diffed **byte-identical, 34 both sides** — all the known darwin `sha256sum` /
+bash-3.2 class (T-118). Passed 1025 → 1062, skips 4 → 5; the one added skip is
+the new caddy mechanism test (T-164). Worktree removed after.
+
+**Added-file determinism 3×** (26 added test files, since the delta touches 75
+of `web/tests` and 36 of `scripts/tests` and a scoped re-run would again
+collapse into a full gate): pytest `60 passed` ×3 (50.8s / 52.5s / 53.0s),
+vitest `121 passed` ×3. Load average 6.6–28 across all runs; no round was
+load-red.
+
+34 findings filed (T-156…T-189: 3 P0, 14 P1, 17 P2); see `TEST_AUDIT.md`
+`## Delta audit 2026-08-26`. Headline: `42641124`'s CI path filter assumes
+`scripts/`↔pytest and `web/`↔vitest are disjoint, but this repo deliberately
+uses each gate to assert contracts on the other tree — so a `scripts/`-only
+push skips the only runner of 11 `scripts/lib/**/*.test.js` files, a
+`web/`-only push skips the ⛔ PII plate guard, and a `docs/`-only push deploys
+having run no tests at all. Needs an operator eye: T-160 (both coverage
+ratchets left `deploy.needs` and `main` carries no `required_status_checks`),
+T-161 (suite-wide `retry: 1` under CI), T-164 (installing caddy in the
+`cloud-tests` job is a CI change).
