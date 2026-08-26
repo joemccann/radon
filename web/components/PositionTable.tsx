@@ -32,7 +32,7 @@ import {
   resolveRealtimePrice,
 } from "@/lib/positionUtils";
 import { computeLegImpliedValue, computePositionImpliedValue, resolveUnderlyingSpot } from "@/lib/impliedValue";
-import { useRiskFreeRate } from "@/lib/useRiskFreeRate";
+import { useRiskFreeRateState } from "@/lib/useRiskFreeRate";
 import { useColumnVisibility } from "@/lib/useColumnVisibility";
 import { useViewport } from "@/lib/useViewport";
 import { isIbDailyPnlCurrent, withSessionIbDailyPnl } from "@/lib/ibDailyPnlSession";
@@ -155,7 +155,7 @@ export const POSITION_COLUMN_DEFAULTS: Record<PositionToggleableColumnKey, boole
 
 export type PositionColumnVisibility = Record<PositionToggleableColumnKey, boolean>;
 
-function makePositionExtract(prices?: Record<string, PriceData>, riskFreeRate = 0) {
+function makePositionExtract(prices?: Record<string, PriceData>, riskFreeRate: number | null = null) {
   return (pos: PortfolioPosition, key: PositionSortKey): string | number | null => {
     const isStock = pos.structure_type === "Stock";
     const _stockLast = prices?.[pos.ticker]?.last;
@@ -182,11 +182,11 @@ function makePositionExtract(prices?: Record<string, PriceData>, riskFreeRate = 
         return getLastPrice(pos);
       }
       case "implied": {
-        if (isStock || !prices) return null;
+        if (isStock || !prices || riskFreeRate == null) return null;
         return computePositionImpliedValue(pos, prices, { riskFreeRate }).netPerContract;
       }
       case "implied_market_value": {
-        if (isStock || !prices) return null;
+        if (isStock || !prices || riskFreeRate == null) return null;
         return computePositionImpliedValue(pos, prices, { riskFreeRate }).netNotional;
       }
       case "daily_chg": return isStock ? getStockDailyChg(pos, prices) : getOptionDailyChg(pos, prices);
@@ -338,7 +338,7 @@ function LegRow({
 
 /* ─── Position row ─────────────────────────────────────── */
 
-function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImplied = false, columns, realtimePrice, prices, riskFreeRate = 0, onLegClick }: { pos: PortfolioPosition; showExpiry?: boolean; showUnderlying?: boolean; showImplied?: boolean; columns: PositionColumnVisibility; realtimePrice?: PriceData | null; prices?: Record<string, PriceData>; riskFreeRate?: number; onLegClick?: (leg: PortfolioLeg, pos: PortfolioPosition) => void }) {
+function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImplied = false, columns, realtimePrice, prices, riskFreeRate = null, onLegClick }: { pos: PortfolioPosition; showExpiry?: boolean; showUnderlying?: boolean; showImplied?: boolean; columns: PositionColumnVisibility; realtimePrice?: PriceData | null; prices?: Record<string, PriceData>; riskFreeRate?: number | null; onLegClick?: (leg: PortfolioLeg, pos: PortfolioPosition) => void }) {
   const [legsExpanded, setLegsExpanded] = useState(false);
   const hasMultipleLegs = pos.legs.length > 1;
 
@@ -413,14 +413,14 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
   // Black-Scholes implied per-share, signed-summed across legs. null for stocks
   // or when any leg lacks IV / spot.
   const impliedNet = useMemo(() => {
-    if (isStock || !prices) return null;
+    if (isStock || !prices || riskFreeRate == null) return null;
     return computePositionImpliedValue(pos, prices, { riskFreeRate }).netPerContract;
   }, [isStock, pos, prices, riskFreeRate]);
 
   // Black-Scholes implied dollar notional (= netNotional). Signed: long debit
   // positions positive, short/credit positions negative.
   const impliedNotional = useMemo(() => {
-    if (isStock || !prices) return null;
+    if (isStock || !prices || riskFreeRate == null) return null;
     return computePositionImpliedValue(pos, prices, { riskFreeRate }).netNotional;
   }, [isStock, pos, prices, riskFreeRate]);
 
@@ -530,6 +530,7 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
         const key = legPriceKey(pos.ticker, pos.expiry, leg);
         const legResult =
           leg.type === "Stock" || leg.strike == null || leg.strike === 0 || !prices
+          || riskFreeRate == null
             ? null
             : computeLegImpliedValue(
                 {
@@ -589,7 +590,11 @@ export default function PositionTable({
   columnVisibility?: PositionColumnVisibility;
 }) {
   const { isMobile, hasMounted } = useViewport();
-  const riskFreeRate = useRiskFreeRate();
+  // null until FRED answers. The Implied columns are Black-Scholes output the
+  // operator compares against Last Price, so pricing them off a defaulted
+  // r = 0 while the rate is UNKNOWN is a silently wrong number, not a
+  // conservative one. R-229.
+  const { rate: riskFreeRate } = useRiskFreeRateState();
   const positionExtract = useMemo(() => makePositionExtract(prices, riskFreeRate), [prices, riskFreeRate]);
   // IB streams (and re-baselines) per-position dailyPnL on non-trading days
   // too; gate the rows on the same session the Day P&L card uses.
