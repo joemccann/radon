@@ -1,5 +1,6 @@
 import type { PriceData } from "@/lib/pricesProtocol";
 import { optionKey } from "@/lib/pricesProtocol";
+import { oldestQuoteTimestamp } from "@/lib/quoteTelemetry";
 
 /* ─── Types ─── */
 
@@ -228,6 +229,8 @@ export type NetOptionQuote = {
   bid: number | null;
   ask: number | null;
   mid: number | null;
+  /** Oldest leg stamp the net was built from; null when it cannot be known. R-208. */
+  timestamp: string | null;
 };
 
 /**
@@ -250,12 +253,13 @@ export function computeNetOptionQuote(
   prices: Record<string, PriceData>,
   ticker: string,
 ): NetOptionQuote {
-  if (legs.length === 0) return { bid: null, ask: null, mid: null };
+  if (legs.length === 0) return { bid: null, ask: null, mid: null, timestamp: null };
 
   // Cost to BUY the combo = pay ask on BUY legs, receive bid on SELL legs
   let netAsk = 0;
   // Proceeds to SELL the combo = receive bid on BUY legs, pay ask on SELL legs
   let netBid = 0;
+  const legQuotes: Array<PriceData | null> = [];
 
   for (const leg of legs) {
     const key = optionKey({
@@ -273,8 +277,11 @@ export function computeNetOptionQuote(
     const ask = quoteSource ? pd?.ask : leg.limitPrice;
 
     if (bid == null || ask == null) {
-      return { bid: null, ask: null, mid: null };
+      return { bid: null, ask: null, mid: null, timestamp: null };
     }
+    // A manually-priced leg carries no market age; that makes the net's age
+    // unknown, which is the honest answer. R-208.
+    legQuotes.push(quoteSource ? pd : null);
 
     if (leg.action === "BUY") {
       // BUY leg: pay ask to acquire, receive bid to liquidate
@@ -291,7 +298,7 @@ export function computeNetOptionQuote(
   const ask = Math.max(netBid, netAsk);
   const mid = (bid + ask) / 2;
 
-  return { bid, ask, mid };
+  return { bid, ask, mid, timestamp: oldestQuoteTimestamp(legQuotes) };
 }
 
 /* ─── ATM strike finder ─── */

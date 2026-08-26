@@ -778,7 +778,7 @@ function ComboOrderForm({
   // are positive. Same math as `resolveSpreadPriceData`.
   const netPrices = useMemo(() => {
     return resolveNaturalSpreadQuote(ticker, position, prices)
-      ?? { bid: null, ask: null, mid: null };
+      ?? { bid: null, ask: null, mid: null, timestamp: null };
   }, [position, prices, ticker]);
 
   // A BAG has no quote of its own, so feed the net through the same model
@@ -793,9 +793,10 @@ function ComboOrderForm({
         bid: netPrices.bid,
         ask: netPrices.ask,
         last: netPrices.mid,
+        timestamp: netPrices.timestamp,
       }),
     );
-  }, [ticker, netPrices.bid, netPrices.ask, netPrices.mid]);
+  }, [ticker, netPrices.bid, netPrices.ask, netPrices.mid, netPrices.timestamp]);
 
   const parsedQty = parseInt(quantity, 10);
   const parsedPrice = parseFloat(limitPrice);

@@ -625,7 +625,17 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, op
 
         <div className={`modify-layout${isComboOrder ? " modify-layout-combo" : ""}`}>
           <div className="modify-primary-panel">
-            <OrderQuoteTelemetry priceData={priceData} label={order.symbol} density="tight" />
+            {/* The MARKET, not the resting-limit-doctored quote. `priceData`
+                clamps `ask` down to the operator's own limit on a SELL, so
+                giving it nine-field market weight printed a self-referential
+                MID and a SPREAD measured against the order itself. A BAG's
+                signed net is also captioned as a net rather than as the bare
+                underlying symbol. R-255. */}
+            <OrderQuoteTelemetry
+              priceData={marketPriceData}
+              label={isComboOrder ? `${order.symbol} net` : order.symbol}
+              density="tight"
+            />
 
             {order.orderType === "STP LMT" && order.auxPrice != null && (
               <div className="modify-stop-row">

@@ -195,8 +195,9 @@ export default function MobileOrderTicket({
       bid: signedNet(netQuote.bid),
       mid: signedNet(netQuote.mid),
       ask: signedNet(netQuote.ask),
+      timestamp: netQuote.timestamp,
     }),
-    [netQuote.bid, netQuote.mid, netQuote.ask, isCombo],
+    [netQuote.bid, netQuote.mid, netQuote.ask, netQuote.timestamp, isCombo],
   );
 
   // The same nine-field telemetry the position drawer renders, for the exact
@@ -221,9 +222,10 @@ export default function MobileOrderTicket({
         bid: signedQuote.bid,
         ask: signedQuote.ask,
         last: signedQuote.mid,
+        timestamp: signedQuote.timestamp,
       }),
     );
-  }, [isCombo, legs, prices, ticker, signedQuote.bid, signedQuote.ask, signedQuote.mid]);
+  }, [isCombo, legs, prices, ticker, signedQuote.bid, signedQuote.ask, signedQuote.mid, signedQuote.timestamp]);
 
   const quoteTelemetryLabel = useMemo(() => {
     const soleLeg = !isCombo && legs.length === 1 ? legs[0] : null;

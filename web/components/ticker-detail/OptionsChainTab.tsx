@@ -324,8 +324,9 @@ function OrderBuilder({
       bid: signedNetPrice(netPrices.bid),
       mid: signedNetPrice(netPrices.mid),
       ask: signedNetPrice(netPrices.ask),
+      timestamp: netPrices.timestamp,
     };
-  }, [netPrices.bid, netPrices.mid, netPrices.ask, signedNetPrice]);
+  }, [netPrices.bid, netPrices.mid, netPrices.ask, netPrices.timestamp, signedNetPrice]);
 
   // One quote for whatever is being ticketed: the contract's own book for a
   // single leg, the net combo book wrapped as a PriceData for a spread. Both
@@ -333,9 +334,9 @@ function OrderBuilder({
   const quotePriceData = useMemo((): PriceData | null => {
     if (legs.length === 0) return null;
     if (isCombo) {
-      const { bid, ask, mid } = signedNetPrices;
+      const { bid, ask, mid, timestamp } = signedNetPrices;
       if (bid == null || ask == null) return null;
-      return comboQuotePriceData({ symbol: ticker, bid, ask, last: mid });
+      return comboQuotePriceData({ symbol: ticker, bid, ask, last: mid, timestamp });
     }
     const leg = legs[0];
     return prices[optionKey({

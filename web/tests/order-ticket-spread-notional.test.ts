@@ -109,12 +109,17 @@ describe("order-ticket spread telemetry", () => {
     expect(html).toContain("$1.20 / 30.77%");
   });
 
-  it("applies resting limit overlay in the modify-order modal", () => {
-    // Order is BUY at limit $3.9, market bid=$3.3, ask=$4.5
-    // applyRestingLimitToQuote raises bid to max(3.3, 3.9) = 3.9
-    // New spread: ask - bid = 4.5 - 3.9 = 0.6
-    // New mid: (3.9 + 4.5) / 2 = 4.2
-    // Spread %: 0.6 / 4.2 = 14.29%
+  it("shows the market in the panel and the resting-limit overlay on the quick buttons", () => {
+    // Was "applies resting limit overlay in the modify-order modal", which
+    // asserted the DOCTORED spread ($0.60 / 14.29%) in the nine-field panel —
+    // i.e. it pinned R-255. Order is BUY at limit $3.9 against a market of
+    // bid $3.30 / ask $4.50: applyRestingLimitToQuote raises bid to 3.90, so
+    // the panel was reporting a spread measured against the operator's own
+    // order, with full market weight, captioned with the order's symbol.
+    //
+    // The overlay is still applied where it is meaningful — the reference
+    // quick-fill buttons, whose job is "what can I actually get" — which is
+    // the half of this case that was always right.
     const html = renderToStaticMarkup(
       React.createElement(ModifyOrderModal, {
         order: openOrder,
@@ -126,6 +131,11 @@ describe("order-ticket spread telemetry", () => {
       }),
     );
 
-    expect(html).toContain("$0.60 / 14.29%");
+    // Panel: the true market, same figures the instrument ticket shows.
+    expect(html).toContain("$1.20 / 30.77%");
+    expect(html).not.toContain("$0.60 / 14.29%");
+    // Quick buttons: still overlaid (bid raised to the resting 3.90, mid 4.20).
+    expect(html).toContain("BID 3.90");
+    expect(html).toContain("MID 4.20");
   });
 });

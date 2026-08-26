@@ -72,11 +72,46 @@ export function formatSpreadTelemetry(
   return `${fmtPrice(spread)} / ${((spread / midMagnitude) * 100).toFixed(2)}%`;
 }
 
+/**
+ * Age of a synthesized net quote: the OLDEST leg it was built from.
+ *
+ * Null when any leg's stamp is missing or unparseable — an unknown leg makes
+ * the whole net's age unknown, and the caller must render it as not-live
+ * rather than inherit the render clock. R-208.
+ */
+export function oldestQuoteTimestamp(
+  quotes: Array<Pick<PriceData, "timestamp"> | null | undefined>,
+): string | null {
+  if (quotes.length === 0) return null;
+  let oldest: { ms: number; iso: string } | null = null;
+  for (const quote of quotes) {
+    const iso = quote?.timestamp;
+    if (!iso) return null;
+    const ms = Date.parse(iso);
+    if (!Number.isFinite(ms)) return null;
+    if (!oldest || ms < oldest.ms) oldest = { ms, iso };
+  }
+  return oldest?.iso ?? null;
+}
+
 export type ComboNetQuote = {
   symbol: string;
   bid: number | null;
   ask: number | null;
   last?: number | null;
+  /**
+   * Whether `last` is DERIVED rather than a printed trade. Defaults to true
+   * because every current caller passes the net mid; it is a parameter so a
+   * caller with a genuine traded net can say so, rather than the wrapper
+   * asserting "calculated" for a value it knows nothing about. R-208.
+   */
+  lastIsCalculated?: boolean;
+  /**
+   * ISO timestamp of the OLDEST leg quote the net was built from. Omit it only
+   * when the age genuinely cannot be established — the combo then reads as not
+   * live, which is the honest answer. R-208.
+   */
+  timestamp?: string | null;
 };
 
 /**
@@ -87,12 +122,14 @@ export type ComboNetQuote = {
  * hand-rolling a second model. Session OHLV stays null because no exchange
  * publishes a combo's high/low/volume — those fields render "---" honestly.
  */
-export function comboQuotePriceData({ symbol, bid, ask, last }: ComboNetQuote): PriceData {
+export function comboQuotePriceData({
+  symbol, bid, ask, last, lastIsCalculated = true, timestamp,
+}: ComboNetQuote): PriceData {
   const { mid } = getQuoteMetrics({ bid, ask });
   return {
     symbol,
     last: last ?? mid,
-    lastIsCalculated: true,
+    lastIsCalculated,
     bid,
     ask,
     bidSize: null,
@@ -111,7 +148,11 @@ export function comboQuotePriceData({ symbol, bid, ask, last }: ComboNetQuote): 
     vega: null,
     impliedVol: null,
     undPrice: null,
-    timestamp: new Date().toISOString(),
+    // The oldest leg's stamp, NOT the render clock. Stamping `now` made
+    // `hasLiveQuote` structurally unable to reject a combo, so a frozen relay
+    // rendered a stale book as a live quote on every combo surface. An absent
+    // stamp deliberately falls through to "not live" rather than to "now".
+    timestamp: timestamp ?? "",
   };
 }
 

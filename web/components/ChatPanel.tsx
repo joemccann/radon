@@ -145,7 +145,13 @@ function comboQuoteModel(
   const net = computeNetOptionQuote(legs, prices, input.ticker);
   if (net.bid == null && net.ask == null) return null;
   return buildQuoteTelemetryModel(
-    comboQuotePriceData({ symbol: input.ticker, bid: net.bid, ask: net.ask, last: net.mid }),
+    comboQuotePriceData({
+      symbol: input.ticker,
+      bid: net.bid,
+      ask: net.ask,
+      last: net.mid,
+      timestamp: net.timestamp,
+    }),
   );
 }
 
