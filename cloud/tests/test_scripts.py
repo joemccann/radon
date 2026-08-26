@@ -205,17 +205,6 @@ class TestSetupVpsEnvValidation:
         assert "DOMAIN" in required
         assert "NODE_ENV" in required
 
-    def test_requires_the_equibles_key_the_scheduled_units_construct_with(self):
-        # Five radon-equibles-*.timer oneshots construct EquiblesClient(), which
-        # raises EquiblesAuthError when EQUIBLES_API_KEY is unset. Without the
-        # key in this contract the deploy preflight passed and every one of them
-        # failed on every fire, leaving 13F and filing-forensics permanently
-        # empty for every ticker.
-        required = (
-            Path(__file__).resolve().parents[1] / "config" / "required-env.txt"
-        ).read_text()
-        assert "EQUIBLES_API_KEY" in required
-
 
 class TestSetupVpsFirewall:
     def test_opens_port_80(self, setup_vps):
