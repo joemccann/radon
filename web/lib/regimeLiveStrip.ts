@@ -67,6 +67,31 @@ export function resolveCrashTriggerState(args: {
   };
 }
 
+type CriReading = {
+  score: number;
+  level: string;
+  components: { vix: number; vvix: number; correlation: number; momentum: number };
+};
+
+/**
+ * Decide whether there is a crash-risk reading to draw at all.
+ *
+ * The panel used to fall back to a literal `{score: 0, level: "LOW"}` when the
+ * payload carried no `cri`. Zero is not a neutral placeholder: it is the
+ * calmest value the hero, the level badge and all four `ComponentBar`s can
+ * show, and it is also a legal real reading, so a dead feed and a quiet market
+ * rendered identically. An absent reading is now absent. R-200.
+ */
+export function resolveCriDisplay(
+  data: { missing?: boolean; cri?: CriReading | null } | null | undefined,
+  liveCri: CriReading | null | undefined,
+): { available: boolean; cri: CriReading | null } {
+  if (liveCri) return { available: true, cri: liveCri };
+  const cached = data?.cri ?? null;
+  if (!cached || data?.missing) return { available: false, cri: null };
+  return { available: true, cri: cached };
+}
+
 export function resolveRegimeStripLiveState({
   prices,
   data,
