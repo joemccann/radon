@@ -89,15 +89,28 @@ DEADMAN_LABEL="reliability-weekend"
 # Title prefix the skill opens/updates its PR under.
 PR_TITLE_PREFIX="Reliability weekend"
 
+# R-239: the ERR trap used to be armed only inside run_phase, so everything
+# from here down — the cd, the marker check, the lock, the mkdir and the
+# rotation pipeline under `set -o pipefail` — exited on a full disk, a moved
+# clone or a held lock with nothing but a line on stderr. The file header
+# claims every outcome is reported; for the prologue that was false.
+trap on_crash ERR
+
 cd "$REPO"
 [[ -f .radon-weekend-runner ]] || {
   echo "REFUSING: $REPO is not the dedicated weekend runner clone" >&2
+  report "REFUSED" "$REPO is not the dedicated weekend runner clone" 0 || true
   exit 2
 }
 
 RUNNER_LOCK="$REPO/.weekend-runner.lock"
 acquire_runner_lock "$RUNNER_LOCK" || {
   echo "REFUSING: another weekend run owns $REPO" >&2
+  # The expensive instance: acquire_runner_lock only reclaims when
+  # `kill -0 $held` fails, so a recorded pid reused by ANY live unrelated
+  # process makes every subsequent daily fire exit 3 in under a second. That
+  # must page, not vanish. R-239.
+  report "REFUSED (lock held)" "another weekend run owns $REPO (pid $(cat "$RUNNER_LOCK/pid" 2>/dev/null || echo unknown)); if no cycle is running, the recorded pid was reused — remove $RUNNER_LOCK" 0 || true
   exit 3
 }
 trap 'release_runner_lock "$RUNNER_LOCK"' EXIT
@@ -105,8 +118,19 @@ trap 'release_runner_lock "$RUNNER_LOCK"' EXIT
 LOG_DIR="$REPO/logs/reliability-weekend"
 mkdir -p "$LOG_DIR"
 STAMP="$(date +%Y%m%dT%H%M%S)"
-# Keep the newest 30 run logs.
-ls -1t "$LOG_DIR" 2>/dev/null | tail -n +31 | while IFS= read -r old; do
+# Keep the newest 30 run logs. NEVER the launchd sinks: the plist points
+# StandardOutPath/StandardErrorPath at launchd-cycle.log/.err inside this same
+# directory, and launchd-cycle.err only gets an mtime bump when something
+# writes to stderr — so it sorts old and was unlinked once ~30 per-phase logs
+# accumulated, taking the only forensics for a prologue death with it. Worse,
+# the rotation runs BEFORE run_phase, so the rest of that same invocation
+# wrote to a deleted inode launchd still held open. R-267.
+# `|| true` on the grep: it exits 1 when it filters everything out (an empty
+# or sinks-only log dir), and `set -o pipefail` would turn that into a
+# prologue death — now a REPORTED one, thanks to the trap above.
+ls -1t "$LOG_DIR" 2>/dev/null \
+  | { grep -v -e '^launchd-cycle\.log$' -e '^launchd-cycle\.err$' || true; } \
+  | tail -n +31 | while IFS= read -r old; do
   rm -f -- "$LOG_DIR/$old"
 done
 
@@ -114,7 +138,9 @@ PHASE=""
 CAP_SECS=0
 # Whole-cycle wall-clock budget, measured from process start. Worst case
 # without it is audit 2h + 8 remediate rounds x 6h = 50h, which would swallow
-# two daily fires. 20h leaves the next 00:00 fire clear.
+# two daily fires. The check subtracts the next round's CAP_SECS, so the
+# WHOLE cycle is bounded by this number rather than by this number plus one
+# more cap — see the deadline test in run_phase. R-238.
 CYCLE_BUDGET_SECS="${RADON_WEEKEND_CYCLE_BUDGET_SECS:-72000}"
 CYCLE_DEADLINE=$((SECONDS + CYCLE_BUDGET_SECS))
 MAX_ROUNDS=1
@@ -232,8 +258,28 @@ run_round() {
 run_phase() {
   begin_phase "$1"
   trap on_crash ERR
+  # The continuation loop's deadline check guards rounds 2..N, but round 1 of
+  # each phase was unchecked — so a cycle already past its budget in the audit
+  # phase still launched a full remediate round. With this, the whole cycle is
+  # bounded by CYCLE_BUDGET_SECS. R-238.
+  if [[ $SECONDS -ge $((CYCLE_DEADLINE - CAP_SECS)) ]]; then
+    RC=75
+    echo "[weekend] cycle budget cannot cover a ${CAP_SECS}s $PHASE phase — skipping" | tee -a "$RUN_LOG"
+    report "SKIPPED (cycle budget)" "the cycle had no room left for a ${CAP_SECS}s $PHASE phase; the next daily fire picks it up" 0 || true
+    return 0
+  fi
   echo "[weekend] $PHASE start $STAMP repo=$REPO cap=${CAP_SECS}s" | tee -a "$RUN_LOG"
-  ground_truth
+  # NOT bare. Under `set -Eeuo pipefail` with the ERR trap armed, a failed
+  # fetch made on_crash report and then the shell exit anyway — so
+  # `run_phase audit` never returned and `run_phase remediate` was never run
+  # and never reported, contradicting the comment on the cycle branch. The
+  # phase now records the failure and carries on to its own reporting. R-237.
+  if ! ground_truth; then
+    RC=70
+    report "GROUND TRUTH FAILED" "could not refresh the clone (network or git); the phase did not run" 0 || true
+    echo "[weekend] $PHASE done rc=$RC" | tee -a "$RUN_LOG"
+    return 0
+  fi
 
   # R-185: `timeout claude` returning 124 (cap) or any non-zero agent exit is
   # an EXPECTED outcome these rounds handle — but the ERR trap was still armed
@@ -250,8 +296,14 @@ run_phase() {
     # A daily job must finish inside its own day. launchd will not start a
     # second instance of a running label, so a cycle that overruns silently
     # eats the next fire and the dead-man goes quiet for a full day.
-    if [[ $SECONDS -ge $CYCLE_DEADLINE ]]; then
-      echo "[weekend] cycle budget exhausted after round $round — stopping" | tee -a "$RUN_LOG"
+    # Room for the round's OWN cap, not just for the instant of the check.
+    # `SECONDS -ge CYCLE_DEADLINE` passing at CYCLE_BUDGET_SECS-1 still
+    # launched a further CAP_SECS, so the effective cap was
+    # CYCLE_BUDGET_SECS + CAP_SECS = 26h against a 24h launchd period — and
+    # launchd will not start a second instance of a running label, so the next
+    # 00:00 fire was dropped with no record anywhere. R-238.
+    if [[ $SECONDS -ge $((CYCLE_DEADLINE - CAP_SECS)) ]]; then
+      echo "[weekend] cycle budget cannot cover another ${CAP_SECS}s round after round $round — stopping" | tee -a "$RUN_LOG"
       break
     fi
     report "ROUND $round $([[ $RC -eq 124 ]] && echo TIMEOUT || echo "FAILED (exit $RC)") — continuing" \
@@ -288,10 +340,12 @@ ${tail_text}
 if [[ "$MODE" == "cycle" ]]; then
   # Remediate runs regardless of the audit rc — backlog may exist even when
   # the audit phase failed. Exit non-zero if either phase failed.
+  set +e
   run_phase audit
   RC_AUDIT=$RC
   run_phase remediate
   RC_REMEDIATE=$RC
+  set -e
   echo "[weekend] cycle done audit_rc=$RC_AUDIT remediate_rc=$RC_REMEDIATE"
   [[ $RC_AUDIT -ne 0 ]] && exit "$RC_AUDIT"
   exit "$RC_REMEDIATE"
