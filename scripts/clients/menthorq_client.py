@@ -169,7 +169,10 @@ Return ONLY a JSON array of objects with these exact fields:
 Rules:
 - "underlying" is the asset name exactly as shown in the table
 - Position values are decimal numbers as shown (can be negative)
-- Percentiles are integers (e.g. 38 means 38th percentile)
+- Copy each percentile EXACTLY as displayed, digit for digit. Some cards show
+  them as 0-100 integers (38) and some as 0-1 decimals (0.38). Never convert
+  between the two scales and never round a decimal to an integer — reporting
+  0.38 as 0 turns a mid-range reading into a max-short one.
 - Z-scores are decimal numbers as shown (e.g. -1.56)
 - Include ALL rows from the table
 - Return ONLY the JSON array, no markdown, no explanation"""
