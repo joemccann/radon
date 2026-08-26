@@ -217,9 +217,18 @@ def persist_calls(monkeypatch, tmp_path):
 
 
 class TestPersistResult:
-    def test_refuses_empty_series(self, persist_calls):
+    def test_empty_series_heartbeats_error_instead_of_going_silent(self, persist_calls):
+        """No rows, no snapshot — but the cycle still has to leave a row.
+
+        docs/operations.md:187: a row that NEVER appears is worse than a stale
+        one. credit-spread carries a 26h watchdog window, so a silent return
+        reads as ordinary staleness a day after a hard failure.
+        """
         persist_result(build_output([]), [])
-        assert persist_calls == []
+        assert "rows" not in [c[0] for c in persist_calls]
+        assert ("snapshot", "credit-spread") not in persist_calls
+        assert ("health", "credit-spread", "error") in persist_calls
+        assert ("health", "credit-spread", "ok") not in persist_calls
 
     def test_changed_rows_write_everything_in_order(self, persist_calls):
         import fetch_credit_spread as fcs
@@ -280,14 +289,21 @@ class TestAllSourcesDown:
         assert ("snapshot", "credit-spread") in persist_calls
         assert json.loads(fcs.CREDIT_SPREAD_JSON.read_text())["status"] == "stale_source"
 
-    def test_no_cache_raises_and_never_heartbeats(self, persist_calls, monkeypatch):
+    def test_no_cache_heartbeats_error_before_it_raises(self, persist_calls, monkeypatch):
+        """Raise loudly AND leave a row — the raise is the contract, silence is not.
+
+        Every source down with no cache is a hard outage. Dying before any
+        `record_service_health` call leaves the 26h watchdog window looking at
+        a service that merely went stale (docs/operations.md:187).
+        """
         import fetch_credit_spread as fcs
 
         _stub_all_sources_down(monkeypatch)
 
         with pytest.raises(RuntimeError):
             fcs.run()
-        assert persist_calls == []
+        assert ("health", "credit-spread", "error") in persist_calls
+        assert ("health", "credit-spread", "ok") not in persist_calls
 
     def test_unchanged_day_with_a_live_source_is_still_ok(self, persist_calls, monkeypatch):
         import fetch_credit_spread as fcs
