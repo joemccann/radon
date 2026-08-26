@@ -60,8 +60,29 @@ jobs:
       - name: Scan repo history for committed secrets
         run: gitleaks detect --source . --config cloud/.gitleaks.toml --redact --no-banner --verbose
 
+  changes:
+    name: Path filter
+    runs-on: ubuntu-latest
+    outputs:
+      python: ${{ steps.filter.outputs.python }}
+      web: ${{ steps.filter.outputs.web }}
+    concurrency:
+      group: ci-changes-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: filter
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: python3 scripts/ci/path_filter.py
+
   web-tests:
     name: Vitest (shard ${{ matrix.shard }}/8)
+    needs: [changes]
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -133,6 +154,7 @@ jobs:
   web-coverage:
     name: Vitest coverage ratchet
     needs: [web-tests]
+    if: needs.web-tests.result == 'success'
     runs-on: ubuntu-latest
     concurrency:
       group: ci-web-coverage-${{ github.ref }}
@@ -152,17 +174,19 @@ jobs:
 
   py-tests:
     name: pytest (${{ matrix.shard }})
+    needs: [changes]
+    if: needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        # Isolate test_i* and scripts/api/tests; those two buckets dominated
-        # wall-clock under the previous a-c / d-g / h-i / rest split.
+        # Isolate test_i* and scripts/api/tests. Split g-h / j-m because the
+        # combined ghjm bucket was the pytest wall (~82s).
         # scripts-daemons: the test_*.py globs match FILES only, so the
         # monitor_daemon/ and watchdog/ subdirectories need their own shard
         # (TEST_AUDIT T-122 — 752 tests left CI unnoticed without it).
         # test_ci_deploy_concurrency.py asserts shard-union == recursive.
-        shard: [scripts-ac, scripts-df, scripts-i, scripts-ghjm, scripts-npsz, scripts-rs, scripts-daemons, rest-api, rest]
+        shard: [scripts-ac, scripts-df, scripts-i, scripts-gh, scripts-jm, scripts-npsz, scripts-rs, scripts-daemons, rest-api, rest]
         include:
           - shard: scripts-ac
             paths: "scripts/tests/test_[a-c]*.py"
@@ -170,8 +194,10 @@ jobs:
             paths: "scripts/tests/test_[d-f]*.py"
           - shard: scripts-i
             paths: "scripts/tests/test_i*.py"
-          - shard: scripts-ghjm
-            paths: "scripts/tests/test_[g-h]*.py scripts/tests/test_[j-m]*.py"
+          - shard: scripts-gh
+            paths: "scripts/tests/test_[g-h]*.py"
+          - shard: scripts-jm
+            paths: "scripts/tests/test_[j-m]*.py"
           - shard: scripts-npsz
             paths: "scripts/tests/test_[n-p]*.py scripts/tests/test_[t-z]*.py"
           - shard: scripts-rs
@@ -238,6 +264,7 @@ jobs:
   py-coverage:
     name: pytest coverage ratchet
     needs: [py-tests]
+    if: needs.py-tests.result == 'success'
     runs-on: ubuntu-latest
     concurrency:
       group: ci-py-coverage-${{ github.ref }}
@@ -298,10 +325,21 @@ jobs:
           python3 scripts/ci/check_demo_isolation.py
 
   cloud-tests:
-    name: pytest (cloud infra)
+    name: pytest (cloud ${{ matrix.shard }})
+    needs: [changes]
+    if: needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [al, mz]
+        include:
+          - shard: al
+            paths: "cloud/tests/test_[a-l]*.py"
+          - shard: mz
+            paths: "cloud/tests/test_[m-z]*.py"
     concurrency:
-      group: ci-cloud-tests-${{ github.ref }}
+      group: ci-cloud-tests-${{ github.ref }}-${{ matrix.shard }}
       cancel-in-progress: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -323,10 +361,12 @@ jobs:
       # cloud/tests/conftest.py collides with scripts/tests/conftest.py on the
       # import path `tests.conftest`. Running it after unit pytest serialized
       # ~60s onto the deploy critical path.
-      - run: python -m pytest cloud/tests -q
+      - run: python -m pytest ${{ matrix.paths }} -q
 
   perimeter-smoke:
     name: Perimeter smoke (next start + curl)
+    needs: [changes]
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     concurrency:
       group: ci-perimeter-smoke-${{ github.ref }}
@@ -421,6 +461,8 @@ jobs:
 
   e2e-financial-smoke:
     name: Playwright P0-financial smoke (non-gating)
+    needs: [changes]
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     # The earlier "chromium can't reach loopback" reading (2026-06-13) was a
     # misdiagnosis: the navigation actually failed because a Clerk DEVELOPMENT
@@ -568,8 +610,19 @@ jobs:
 
   deploy:
     name: Deploy to VPS
-    needs: [secret-scan, web-tests, web-coverage, py-tests, py-coverage, cloud-tests, perimeter-smoke, stage-release]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    # Coverage merge stays a required workflow job but is omitted here so
+    # deploy starts when shards pass. Combine needs a barrier VM; putting it
+    # on a matrix shard cannot wait for siblings.
+    needs: [secret-scan, changes, web-tests, py-tests, cloud-tests, perimeter-smoke, stage-release]
+    if: >-
+      github.ref == 'refs/heads/main' && github.event_name == 'push' && !cancelled()
+      && needs.secret-scan.result == 'success'
+      && needs.changes.result == 'success'
+      && (needs.web-tests.result == 'success' || needs.web-tests.result == 'skipped')
+      && (needs.py-tests.result == 'success' || needs.py-tests.result == 'skipped')
+      && (needs.cloud-tests.result == 'success' || needs.cloud-tests.result == 'skipped')
+      && (needs.perimeter-smoke.result == 'success' || needs.perimeter-smoke.result == 'skipped')
+      && (needs.stage-release.result == 'success' || needs.stage-release.result == 'failure' || needs.stage-release.result == 'skipped')
     runs-on: ubuntu-latest
     # Outer budget: deploy.sh gets 15m, then 30s to kill descendants. A root
     # action can hold its lifecycle lock for 180s. Worst-case durable recovery

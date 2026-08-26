@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useIndexOptionsChain } from "@/lib/useIndexOptionsChain";
+import { useTickerDetailOptional } from "@/lib/TickerDetailContext";
+import { optionKey } from "@/lib/pricesProtocol";
 import { type OrderRiskInput } from "@/lib/order";
 import type { PortfolioData } from "@/lib/types";
 import {
@@ -92,6 +94,26 @@ export function IndexOptionOrderForm({ ticker, portfolio }: IndexOptionOrderForm
     () => expiryContracts.find((c) => c.conId === selectedConId) ?? null,
     [expiryContracts, selectedConId],
   );
+
+  // Quote telemetry for the STRIKE the operator is about to trade. Keyed on the
+  // selected contract so the panel never falls back to the cash index, whose
+  // bid/ask/high/low describe a different instrument. No quote for that key
+  // (relay not subscribed to it) → the shared panel renders its empty state.
+  const tickerDetail = useTickerDetailOptional();
+  const prices = tickerDetail?.getPrices();
+  const quote = useMemo(() => {
+    if (!selectedContract) return { priceData: null, label: undefined as string | undefined };
+    const key = optionKey({
+      symbol,
+      expiry: selectedContract.lastTradeDateOrContractMonth,
+      strike: selectedContract.strike,
+      right: selectedContract.right === "P" ? "P" : "C",
+    });
+    return {
+      priceData: prices?.[key] ?? null,
+      label: `${symbol} ${formatExpiry(selectedContract.lastTradeDateOrContractMonth)} $${selectedContract.strike} ${selectedContract.right}`,
+    };
+  }, [prices, selectedContract, symbol]);
 
   // Build the chokepoint input. Index options (SPX/NDX/VIX) are cash-settled
   // but the risk model is identical to equity options for the structures the
@@ -241,6 +263,8 @@ export function IndexOptionOrderForm({ ticker, portfolio }: IndexOptionOrderForm
       notionalLabel="Notional (limit × qty × 100)"
       limitPriceLabel="Limit Price (per share, x100 = contract)"
       limitPriceStep={selectedContract?.minTick ?? 0.05}
+      priceData={quote.priceData}
+      quoteLabel={quote.label}
       buildRiskInput={buildRiskInput}
       portfolio={portfolio}
       surface="index-option-form"

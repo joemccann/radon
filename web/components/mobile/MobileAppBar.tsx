@@ -138,6 +138,7 @@ function MobileAppBarView({
           ) : null}
           <Link
             href="/profile"
+            prefetch={false}
             className={`mobile-app-bar__avatar tap-target${profileActive ? " mobile-app-bar__avatar--active" : ""}`}
             aria-label="Profile"
             data-testid="mobile-app-bar-profile"

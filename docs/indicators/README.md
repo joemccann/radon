@@ -32,6 +32,12 @@ builder `PREFILLED FROM VOL CONE` off that `src`. Any other `src` falls back to
 `PREFILLED FROM THETA HARVESTER`, so a new indicator that prefills the builder
 must add its own `src` value rather than reuse one.
 
+A price-series indicator whose every source (IB, UW, Yahoo) fails must re-serve
+its cache as `status: "stale_source"` with an `error` heartbeat, never a fresh `ok`
+over unconfirmed data: the watchdog gates purely on the 26h heartbeat window, so an
+`ok` here pins it open through a permanent outage. Pattern: `fetch_ivrank._serve_cached`,
+mirrored by [ivrank.md](ivrank.md), [credit.md](credit.md) and [iei-hyg.md](iei-hyg.md).
+
 A derived indicator must tell an explained parent lag apart from a broken
 parent, or a spent UW daily cap fails its unit and pages a P1 every run. See
 [skew2d.md](skew2d.md) "Parent lag — stale vs embargoed".

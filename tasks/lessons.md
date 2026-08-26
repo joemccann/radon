@@ -1,5 +1,18 @@
 # Lessons
 
+## 2026-08-25 — Kill-before-green beats a successor in_flight journal
+
+- Page `a70a393e`: latched `radon-bpi` `Result=signal` from 12:41Z stop-clean
+  (green 15:14Z) was re-paged P1 at 16:20Z when a successor deploy wrote a
+  fresh transition journal. `in_flight` short-circuited past kill-before-green;
+  the 60-min age cap then failed on the old kill.
+- Evaluate kill-before-green (24h oneshot horizon) before the in_flight branch.
+  A fresh journal only owns kills inside the single-deploy window that are not
+  already explained by a post-kill green marker.
+- Discriminator: `InactiveEnterTimestamp` before green-marker mtime within 24h
+  + sibling oneshot `Result=signal` + edge `/health/lite` up → classifier only,
+  do not restart.
+
 ## 2026-08-23 — A persisted 1025/permanent row is still a live lockout
 
 - `75ded753` stopped classifying NEW 1025s as permanent. It did not rewrite

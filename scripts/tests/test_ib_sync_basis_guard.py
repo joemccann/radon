@@ -35,16 +35,29 @@ class _FakeCursor:
 
 class _FakeDb:
     def __init__(self, rows):
-        self._rows = rows
+        self._rows = [
+            (f"test-{index:08d}", *row)
+            for index, row in enumerate(rows, start=1)
+        ]
         self.calls = []
 
     def execute(self, sql, params=()):
         self.calls.append((sql, params))
-        return _FakeCursor(self._rows)
+        cursor = str(params[0])
+        tickers = {str(value) for value in params[1:-1]}
+        limit = int(params[-1])
+        rows = []
+        for row in self._rows:
+            trade_id, payload_json, _filled_at, _written_at = row
+            payload = json.loads(payload_json)
+            ticker = str(payload.get("ticker") or payload.get("symbol") or "").upper()
+            if trade_id > cursor and ticker in tickers:
+                rows.append(row)
+        return _FakeCursor(rows[:limit])
 
 
 def _journal_row(payload: dict, filled_at: str) -> tuple:
-    # Driver-faithful row shape: (payload, filled_at, written_at) tuple.
+    # Derivation-row shape; _FakeDb adds the paginated trade_id cursor column.
     return (json.dumps(payload), filled_at, filled_at)
 
 

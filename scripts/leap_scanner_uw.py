@@ -53,7 +53,13 @@ from urllib.error import HTTPError, URLError
 from dataclasses import dataclass, field, asdict
 
 from clients.uw_client import UWClient, UWAPIError, UWRateLimitError
+from utils.scan_health import (
+    SCAN_STATUS_BUDGET_BLOCKED,
+    next_quota_reset_iso,
+    record_scan_degraded,
+)
 from utils.ticker_args import parse_ticker_list
+from utils.uw_budget import should_block_universe_scan
 from utils.uw_surface import fetch_daily_closes, scan_ib_session
 
 try:
@@ -793,6 +799,21 @@ def build_json_payload(results, min_gap, universe, requested_tickers):
     }
 
 
+def refuse_budget_blocked_scan(universe: str) -> None:
+    """Refuse a universe scan under the UW daily budget brake (theta precedent).
+
+    Writes the distinguishable service_health row and leaves data/leap.json
+    untouched so the dashboard keeps the last good scan.
+    """
+    print(f"UW daily budget block; skipping universe scan ({universe})", file=sys.stderr)
+    record_scan_degraded(
+        "leap-scan",
+        SCAN_STATUS_BUDGET_BLOCKED,
+        f"UW daily budget block; universe scan skipped ({universe})",
+        next_attempt_at=next_quota_reset_iso(),
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="LEAP IV Mispricing Scanner (UW primary, Yahoo LAST RESORT)",
@@ -842,6 +863,9 @@ def main():
         sys.exit(1)
     if not explicit_tickers and args.preset and args.preset not in PRESETS:
         print(f"📂 Loaded preset: {args.preset} ({len(tickers)} tickers)")
+    if not explicit_tickers and should_block_universe_scan():
+        refuse_budget_blocked_scan(universe)
+        return 0
     
     print(f"\n{'='*60}")
     print("LEAP IV MISPRICING SCANNER")

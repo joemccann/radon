@@ -18,6 +18,7 @@ import yaml
 WORKFLOW = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "ci.yml"
 TEST_JOBS = (
     "secret-scan",
+    "changes",
     "web-tests",
     "web-coverage",
     "py-tests",
@@ -97,7 +98,9 @@ def test_stage_release_overlaps_gating_jobs_and_is_cancelable() -> None:
     jobs = _workflow()["jobs"]
     stage = jobs["stage-release"]
     assert "needs" not in stage or stage.get("needs") in (None, [], "")
-    assert stage["if"] == jobs["deploy"]["if"]
+    assert "refs/heads/main" in stage["if"]
+    assert "push" in stage["if"]
+    assert "refs/heads/main" in jobs["deploy"]["if"]
     concurrency = stage.get("concurrency", {})
     assert concurrency.get("cancel-in-progress") == "true"
     assert "github.ref" in concurrency.get("group", "")
@@ -119,7 +122,8 @@ def _job_commands(job: dict) -> str:
 def test_ci_runs_cloud_infra_pytest() -> None:
     jobs = _workflow()["jobs"]
     cloud = jobs["cloud-tests"]
-    assert "pytest cloud/tests" in _job_commands(cloud)
+    assert "matrix.paths" in _job_commands(cloud)
+    assert "cloud/tests" in str(cloud["strategy"]["matrix"]["include"])
     assert "pytest cloud/tests" not in _job_commands(jobs["py-tests"]), (
         "cloud infra tests must run as their own job so they leave the unit "
         "pytest critical path"
@@ -206,7 +210,8 @@ def test_pytest_shards_then_combines_coverage_ratchet() -> None:
         "scripts-ac",
         "scripts-df",
         "scripts-i",
-        "scripts-ghjm",
+        "scripts-gh",
+        "scripts-jm",
         "scripts-npsz",
         "scripts-rs",
         "scripts-daemons",
@@ -282,17 +287,58 @@ def test_pytest_filename_shards_partition_scripts_tests() -> None:
     assert "tests" in other_paths
 
 
-def test_coverage_ratchets_gate_deploy() -> None:
+def test_coverage_ratchets_do_not_serialize_deploy() -> None:
     jobs = _workflow()["jobs"]
     needs = jobs["deploy"]["needs"]
-    assert "web-coverage" in needs
-    assert "py-coverage" in needs
+    assert "web-coverage" not in needs
+    assert "py-coverage" not in needs
     assert "web-tests" in needs
     assert "py-tests" in needs
     assert "cloud-tests" in needs
     assert "stage-release" in needs
     assert "merge_vitest_coverage" in _job_commands(jobs["web-coverage"])
     assert "fail-under=56" in _job_commands(jobs["py-coverage"])
+
+
+def test_path_filter_skips_the_other_gate() -> None:
+    jobs = _workflow()["jobs"]
+    assert jobs["changes"]["outputs"]["python"]
+    assert jobs["changes"]["outputs"]["web"]
+    assert "path_filter.py" in _job_commands(jobs["changes"])
+    assert jobs["web-tests"]["needs"] == ["changes"]
+    assert "web" in jobs["web-tests"]["if"]
+    assert jobs["py-tests"]["needs"] == ["changes"]
+    assert "python" in jobs["py-tests"]["if"]
+    assert jobs["cloud-tests"]["needs"] == ["changes"]
+    assert jobs["perimeter-smoke"]["needs"] == ["changes"]
+
+
+def test_deploy_accepts_skipped_test_jobs() -> None:
+    deploy_if = _workflow()["jobs"]["deploy"]["if"]
+    for job in ("web-tests", "py-tests", "cloud-tests", "perimeter-smoke"):
+        assert f"needs.{job}.result == 'skipped'" in deploy_if
+    assert "needs.changes.result == 'success'" in deploy_if
+    assert "web-coverage" not in deploy_if
+
+
+def test_cloud_infra_shards_partition_cloud_tests() -> None:
+    cloud = _workflow()["jobs"]["cloud-tests"]
+    include = cloud["strategy"]["matrix"]["include"]
+    files = [
+        path.name
+        for path in (WORKFLOW.parents[2] / "cloud" / "tests").glob("test_*.py")
+    ]
+    assigned = {name: [] for name in files}
+    for row in include:
+        for token in str(row["paths"]).split():
+            pattern = Path(token.strip('"')).name
+            for name in files:
+                if fnmatch.fnmatch(name, pattern):
+                    assigned[name].append(pattern)
+    overlap = {name: hits for name, hits in assigned.items() if len(hits) > 1}
+    missing = [name for name, hits in assigned.items() if not hits]
+    assert overlap == {}
+    assert missing == []
 
 
 def test_py_coverage_installs_coverage_only() -> None:

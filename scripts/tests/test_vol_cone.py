@@ -683,3 +683,51 @@ class TestRunIntraday:
         with pytest.raises(ValueError, match="no stored cone"):
             self.mod.run_intraday(client=client, now=self.OPEN)
         assert client.calls == []
+
+    def _seed_rich_beside_nvda(self, monkeypatch):
+        """NVDA rides the cheap tail; RICH's latest close tops its own cone,
+        so ``intraday_targets`` leaves RICH on last night's numbers."""
+        nvda = self._seed_history(monkeypatch)
+        by_date = sorted(nvda, key=lambda row: row["date"])
+        rich = [
+            {
+                **row,
+                "ticker": "RICH",
+                "atm_iv": 0.30 + i * 0.01,
+                "call_10_iv": 0.30 + i * 0.01,
+                "put_10_iv": 0.30 + i * 0.01,
+            }
+            for i, row in enumerate(by_date)
+        ]
+        monkeypatch.setattr(self.mod, "_read_history_rows", lambda: nvda + rich)
+
+    def test_only_names_that_earn_a_refresh_are_marked_live(self, monkeypatch):
+        """T-106: a partial refresh must say how partial. ``any()`` alone lets
+        the tab stamp every row LIVE while the rich tail shows yesterday's IV."""
+        self._seed_rich_beside_nvda(monkeypatch)
+        client = _StubClient(
+            {("NVDA", "2026-09-18", self.SESSION): NVDA_CURRENT},
+            {},
+            {"NVDA": NVDA_SPOT, "RICH": 100.0},
+        )
+        payload = self.mod.run_intraday(client=client, now=self.OPEN)
+
+        by_ticker = {name["ticker"]: name for name in payload["names"]}
+        assert by_ticker["NVDA"]["is_intraday"] is True
+        assert by_ticker["RICH"].get("is_intraday") is not True
+        assert by_ticker["RICH"]["series"][-1]["date"] == WEEKLY[-1]["date"]
+        assert client.calls == [("NVDA", "2026-09-18", self.SESSION)]
+        assert payload["is_intraday"] is True
+        assert payload["count"] == 2
+        assert payload["intraday_count"] == 1
+
+    def test_closed_market_reports_nothing_live(self, monkeypatch):
+        """Kills the ``payload["is_intraday"] = True`` mutation."""
+        self._seed_rich_beside_nvda(monkeypatch)
+        client = _StubClient({}, {}, {"NVDA": NVDA_SPOT, "RICH": 100.0})
+        payload = self.mod.run_intraday(client=client, now=self.CLOSED)
+
+        assert client.calls == []
+        assert payload["is_intraday"] is False
+        assert payload["intraday_count"] == 0
+        assert all(not name.get("is_intraday") for name in payload["names"])

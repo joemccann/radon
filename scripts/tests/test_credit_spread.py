@@ -209,7 +209,7 @@ def persist_calls(monkeypatch, tmp_path):
     monkeypatch.setattr(
         fcs.writer,
         "record_service_health",
-        lambda service, state, finished_at=None: calls.append(
+        lambda service, state, finished_at=None, error=None: calls.append(
             ("health", service, state)
         ),
     )
@@ -243,6 +243,93 @@ class TestPersistResult:
         assert ("health", "credit-spread", "ok") in persist_calls
 
 
+CACHED_ROW = {"date": "2026-08-20", "hyg_close": HYG_LAST, "spx_close": SPX_LAST}
+CACHED_SCAN_TIME = "2026-08-20T21:45:00Z"
+
+
+def _stub_all_sources_down(monkeypatch) -> None:
+    import fetch_credit_spread as fcs
+
+    for name in ("fetch_ib_closes", "fetch_uw_closes", "fetch_yahoo_closes"):
+        monkeypatch.setattr(fcs, name, lambda tickers: {})
+
+
+class TestAllSourcesDown:
+    """IB, UW and Yahoo all empty: the cache is re-served as stale_source and the
+    heartbeat is an error so the watchdog pages instead of reading a fresh ok."""
+
+    def test_cached_series_is_reserved_as_stale_source_with_error_heartbeat(
+        self, persist_calls, monkeypatch
+    ):
+        import fetch_credit_spread as fcs
+
+        fcs.CREDIT_SPREAD_JSON.write_text(
+            json.dumps(build_output([CACHED_ROW], scan_time=CACHED_SCAN_TIME, source="yahoo"))
+        )
+        _stub_all_sources_down(monkeypatch)
+
+        payload = fcs.run()
+
+        assert ("health", "credit-spread", "error") in persist_calls
+        assert ("health", "credit-spread", "ok") not in persist_calls
+        assert payload["status"] == "stale_source"
+        assert payload["count"] == 1
+        assert payload["current"]["date"] == CACHED_ROW["date"]
+        assert payload["scan_time"] != CACHED_SCAN_TIME
+        assert "rows" not in [c[0] for c in persist_calls]
+        assert ("snapshot", "credit-spread") in persist_calls
+        assert json.loads(fcs.CREDIT_SPREAD_JSON.read_text())["status"] == "stale_source"
+
+    def test_no_cache_raises_and_never_heartbeats(self, persist_calls, monkeypatch):
+        import fetch_credit_spread as fcs
+
+        _stub_all_sources_down(monkeypatch)
+
+        with pytest.raises(RuntimeError):
+            fcs.run()
+        assert persist_calls == []
+
+    def test_unchanged_day_with_a_live_source_is_still_ok(self, persist_calls, monkeypatch):
+        import fetch_credit_spread as fcs
+
+        fcs.CREDIT_SPREAD_JSON.write_text(
+            json.dumps(build_output([CACHED_ROW], scan_time=CACHED_SCAN_TIME, source="ib"))
+        )
+        monkeypatch.setattr(
+            fcs,
+            "fetch_ib_closes",
+            lambda tickers: {
+                HYG_SYMBOL: {CACHED_ROW["date"]: HYG_LAST},
+                SPX_SYMBOL: {CACHED_ROW["date"]: SPX_LAST},
+            },
+        )
+
+        payload = fcs.run()
+
+        assert "status" not in payload
+        assert "rows" not in [c[0] for c in persist_calls]
+        assert ("health", "credit-spread", "ok") in persist_calls
+
+
+class _RecordingConnection:
+    """sqlite3 stand-in for the Hrana client that refuses executemany."""
+
+    def __init__(self, conn: sqlite3.Connection):
+        self._conn = conn
+        self.statements: list[tuple[str, tuple]] = []
+        self.commits = 0
+
+    def execute(self, sql: str, params: tuple = ()):  # noqa: D102
+        self.statements.append((sql, tuple(params)))
+        return self._conn.execute(sql, params)
+
+    def executemany(self, *_args, **_kwargs):  # noqa: D102
+        raise AssertionError("executemany is one Hrana round-trip per row")
+
+    def commit(self):  # noqa: D102
+        self.commits += 1
+
+
 class TestCreditSpreadStorage:
     @pytest.fixture()
     def db(self):
@@ -254,6 +341,15 @@ class TestCreditSpreadStorage:
         yield conn
         conn.close()
 
+    @pytest.fixture()
+    def recording_writer(self, db, monkeypatch):
+        """The REAL db.writer with get_db() wired to the in-memory 0051 schema."""
+        from db import writer
+
+        recording = _RecordingConnection(db)
+        monkeypatch.setattr(writer, "get_db", lambda: recording)
+        return writer, recording
+
     def test_migration_registers_version_51(self, db):
         versions = [r[0] for r in db.execute("SELECT version FROM schema_migrations")]
         assert versions == [51]
@@ -262,17 +358,42 @@ class TestCreditSpreadStorage:
         cols = [r[1] for r in db.execute("PRAGMA table_info(credit_spread_history)")]
         assert cols == ["date", "hyg_close", "spx_close", "recorded_at"]
 
-    def test_upsert_is_idempotent_per_date(self, db):
-        from db import writer
+    def test_upsert_is_idempotent_per_date(self, db, recording_writer):
+        writer, recording = recording_writer
+        stale = {"date": "2026-08-20", "hyg_close": 79.0, "spx_close": 7600.0}
+        fresh = {"date": "2026-08-20", "hyg_close": HYG_LAST, "spx_close": SPX_LAST}
 
-        args_old = ("2026-08-20", 79.0, 7600.0, "2026-08-20T21:45:00Z")
-        args_new = ("2026-08-20", HYG_LAST, SPX_LAST, "2026-08-21T21:45:00Z")
-        db.execute(writer.CREDIT_SPREAD_UPSERT_SQL, args_old)
-        db.execute(writer.CREDIT_SPREAD_UPSERT_SQL, args_new)
+        writer.upsert_credit_spread_rows([stale], recorded_at="2026-08-20T21:45:00Z")
+        writer.upsert_credit_spread_rows([fresh], recorded_at="2026-08-21T21:45:00Z")
+
         rows = list(
-            db.execute("SELECT date, hyg_close, spx_close FROM credit_spread_history")
+            db.execute(
+                "SELECT date, hyg_close, spx_close, recorded_at FROM credit_spread_history"
+            )
         )
-        assert rows == [("2026-08-20", HYG_LAST, SPX_LAST)]
+        assert rows == [("2026-08-20", HYG_LAST, SPX_LAST, "2026-08-21T21:45:00Z")]
+        assert recording.commits == 2
+        assert all(
+            "ON CONFLICT(date) DO UPDATE" in sql for sql, _ in recording.statements
+        )
+
+    def test_upsert_chunks_many_rows_into_multi_row_inserts(self, db, recording_writer):
+        writer, recording = recording_writer
+        rows = [
+            {"date": f"2025-{m:02d}-{d:02d}", "hyg_close": 70.0 + m, "spx_close": 6000.0 + d}
+            for m in range(1, 13)
+            for d in range(1, 29)
+        ]
+
+        writer.upsert_credit_spread_rows(rows, recorded_at="2026-08-21T21:45:00Z")
+
+        assert db.execute("SELECT COUNT(*) FROM credit_spread_history").fetchone() == (
+            len(rows),
+        )
+        assert len(recording.statements) < len(rows)
+        assert db.execute(
+            "SELECT hyg_close, spx_close FROM credit_spread_history WHERE date = '2025-12-28'"
+        ).fetchone() == (82.0, 6028.0)
 
 
 HYG_BARS = {"2026-08-19": 79.4, "2026-08-20": HYG_LAST}

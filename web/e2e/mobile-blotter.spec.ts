@@ -57,7 +57,7 @@ const BLOTTER_MOCK = {
 
 async function setupMocks(page: Page) {
   await page.unrouteAll({ behavior: "ignoreErrors" });
-  await page.route("**/api/portfolio", (route) =>
+  await page.route("**/api/portfolio**", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(PORTFOLIO_EMPTY) }),
   );
   await page.route("**/api/orders", (route) =>

@@ -36,6 +36,7 @@ import {
 import { LRUCache } from "./lib/lru-cache.js";
 import { RateLimiter } from "./lib/rate-limiter.js";
 import {
+  buildRelayHealthDetail,
   decideHealthWrite,
   farmStateAfterIdleDrain,
   isFarmStateCode,
@@ -2768,10 +2769,7 @@ staleCheckTimer = setInterval(() => {
     void writeRelayHealth("error", {
       message: `IB socket disconnected for ${downSecs}s during market hours with ${subscribedSymbols} symbols subscribed`,
       reason: "ib_disconnected",
-      last_tick_at: new Date(lastTickTimestamp).toISOString(),
-      tick_age_secs: Math.round((now - lastTickTimestamp) / 1000),
-      active_subscriptions: activeSubscriptions,
-      subscribed_symbols: subscribedSymbols,
+      ...buildRelayHealthDetail(now, lastTickTimestamp, freshness),
     });
     return;
   }
@@ -2792,10 +2790,7 @@ staleCheckTimer = setInterval(() => {
     // contradict each other (R-061).
     void writeRelayHealth("ok", {
       heartbeat: "tick",
-      last_tick_at: new Date(lastTickTimestamp).toISOString(),
-      tick_age_secs: Math.round((now - lastTickTimestamp) / 1000),
-      active_subscriptions: activeSubscriptions,
-      subscribed_symbols: subscribedSymbols,
+      ...buildRelayHealthDetail(now, lastTickTimestamp, freshness),
     });
   }
 
@@ -2816,10 +2811,7 @@ staleCheckTimer = setInterval(() => {
     void writeRelayHealth("error", {
       message: `IB nulled all market-data subscriptions (${subscribedSymbols} symbols subscribed, 0 active) with no ticks for ${Math.round(elapsed / 1000)}s during market hours`,
       reason: "subscriptions_nulled",
-      last_tick_at: new Date(lastTickTimestamp).toISOString(),
-      tick_age_secs: Math.round((now - lastTickTimestamp) / 1000),
-      active_subscriptions: activeSubscriptions,
-      subscribed_symbols: subscribedSymbols,
+      ...buildRelayHealthDetail(now, lastTickTimestamp, freshness),
     });
   }
 

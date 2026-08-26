@@ -14,7 +14,9 @@ SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 import ib_sync  # noqa: E402
+from clients import journal_basis  # noqa: E402
 from clients.journal_basis import (  # noqa: E402
+    compute_open_basis_and_net_qty_for_tickers,
     compute_open_basis_for_ticker,
     prior_net_qty_for_contract,
 )
@@ -35,12 +37,52 @@ class _FakeCursor:
 
 class _FakeDb:
     def __init__(self, rows):
+        self._rows = [
+            (f"test-{index:08d}", *row)
+            for index, row in enumerate(rows, start=1)
+        ]
+        self.calls = []
+
+    def execute(self, sql, params=()):
+        self.calls.append((sql, params))
+        cursor = str(params[0])
+        tickers = {str(value) for value in params[1:-1]}
+        limit = int(params[-1])
+        matches = []
+        for row in self._rows:
+            trade_id, payload_json, _filled_at, _written_at = row
+            payload = json.loads(payload_json)
+            ticker = str(payload.get("ticker") or payload.get("symbol") or "").upper()
+            if trade_id > cursor and ticker in tickers:
+                matches.append(row)
+        return _FakeCursor(matches[:limit])
+
+
+class _CursorPagedDb:
+    """Driver-faithful cursor fake for journal trade_id pagination."""
+
+    def __init__(self, rows):
         self._rows = rows
         self.calls = []
 
     def execute(self, sql, params=()):
         self.calls.append((sql, params))
-        return _FakeCursor(self._rows)
+        assert "trade_id > ?" in sql
+        assert "ORDER BY trade_id ASC" in sql
+        assert "LIMIT ?" in sql
+
+        cursor = str(params[0])
+        tickers = {str(value) for value in params[1:-1]}
+        limit = int(params[-1])
+        matches = []
+        for row in self._rows:
+            trade_id, payload_json, _filled_at, _written_at = row
+            payload = json.loads(payload_json)
+            ticker = str(payload.get("ticker") or payload.get("symbol") or "").upper()
+            if trade_id > cursor and ticker in tickers:
+                matches.append(row)
+        matches.sort(key=lambda row: row[0])
+        return _FakeCursor(matches[:limit])
 
 
 def _journal_row(payload: dict, filled_at: str) -> tuple:
@@ -332,3 +374,352 @@ def test_fetch_positions_and_collapse_positions_use_journal_basis_for_combo_entr
     assert combo["entry_cost"] == pytest.approx(-1.31, abs=0.01)
     assert combo["legs"][0]["ib_avg_cost"] == pytest.approx(2730.50, abs=0.0001)
     assert combo["legs"][1]["ib_avg_cost"] == pytest.approx(2596.50, abs=0.0001)
+
+
+def test_build_journal_basis_lookup_batches_all_option_contracts_in_one_query():
+    """The live-sync lookup must preserve legacy math without its journal N+1."""
+    part_a = "0001de5f.69f22890.01.01"
+    part_b = "0001de5f.69f23721.02.01"
+    rows = [
+        _journal_row(
+            {
+                "ticker": "WULF",
+                "action": "BUY_OPTION",
+                "contracts": 8,
+                "total_cost": 800.0,
+                "right": "C",
+                "strike": 17,
+                "expiry": "20270115",
+                "ib_exec_id": part_a,
+            },
+            "2026-07-10T10:00:00Z",
+        ),
+        _journal_row(
+            {
+                "ticker": "NVDA",
+                "action": "SELL_TO_OPEN",
+                "contracts": 4,
+                "total_cost": 2000.0,
+                "open_basis": 1987.65432,
+                "right": "P",
+                "strike": 100,
+                "expiry": "20261218",
+                "ib_exec_id": "nvda-open",
+            },
+            "2026-07-10T10:00:01Z",
+        ),
+        _journal_row(
+            {
+                "ticker": "WULF",
+                "action": "BUY_OPTION",
+                "contracts": 69,
+                "total_cost": 6900.0,
+                "right": "C",
+                "strike": 17,
+                "expiry": "20270115",
+                "ib_exec_id": part_b,
+            },
+            "2026-07-10T10:00:02Z",
+        ),
+        # The rehydrated composite duplicates the first two per-fill rows.
+        _journal_row(
+            {
+                "ticker": "WULF",
+                "action": "BUY_OPTION",
+                "contracts": 77,
+                "total_cost": 7777.0,
+                "right": "C",
+                "strike": 17,
+                "expiry": "20270115",
+                "ib_exec_id": f"{part_a}+{part_b}",
+            },
+            "2026-07-10T10:00:03Z",
+        ),
+        # A distinct contract proves per-contract net-quantity isolation.
+        _journal_row(
+            {
+                "ticker": "WULF",
+                "action": "BUY_OPTION",
+                "contracts": 10,
+                "total_cost": 1500.0,
+                "right": "C",
+                "strike": 20,
+                "expiry": "20270115",
+                "ib_exec_id": "wulf-20-open",
+            },
+            "2026-07-10T10:00:04Z",
+        ),
+        # Partial close leaves 52 contracts at the original $100 basis.
+        _journal_row(
+            {
+                "ticker": "WULF",
+                "action": "SELL_OPTION",
+                "contracts": 25,
+                "total_cost": 2500.0,
+                "right": "C",
+                "strike": 17,
+                "expiry": "20270115",
+                "ib_exec_id": "wulf-17-close",
+            },
+            "2026-07-11T10:00:00Z",
+        ),
+    ]
+    positions = [
+        _make_position(
+            symbol="WULF",
+            sec_type="OPT",
+            position=52,
+            avg_cost=101.0,
+            strike=17,
+            right="C",
+            expiry="20270115",
+        ),
+        _make_position(
+            symbol="WULF",
+            sec_type="OPT",
+            position=10,
+            avg_cost=151.0,
+            strike=20,
+            right="C",
+            expiry="20270115",
+        ),
+        _make_position(
+            symbol="NVDA",
+            sec_type="OPT",
+            position=-4,
+            avg_cost=510.0,
+            strike=100,
+            right="P",
+            expiry="20261218",
+        ),
+    ]
+    client = SimpleNamespace(get_positions=lambda: positions)
+
+    legacy_db = _FakeDb(rows)
+    legacy_basis = {}
+    for ticker in ("NVDA", "WULF"):
+        legacy_basis.update(compute_open_basis_for_ticker(legacy_db, ticker))
+    legacy_net_qty = {
+        "WULF|20270115|C|17.0": prior_net_qty_for_contract(
+            legacy_db,
+            ticker="WULF",
+            sec_type="OPT",
+            strike=17,
+            right="C",
+            expiry="20270115",
+        ),
+        "WULF|20270115|C|20.0": prior_net_qty_for_contract(
+            legacy_db,
+            ticker="WULF",
+            sec_type="OPT",
+            strike=20,
+            right="C",
+            expiry="20270115",
+        ),
+        "NVDA|20261218|P|100.0": prior_net_qty_for_contract(
+            legacy_db,
+            ticker="NVDA",
+            sec_type="OPT",
+            strike=100,
+            right="P",
+            expiry="20261218",
+        ),
+    }
+    assert len(legacy_db.calls) == 5
+    assert legacy_basis == {
+        "NVDA|20261218|P|100.0": 1987.6543,
+        "WULF|20270115|C|17.0": 5200.0,
+        "WULF|20270115|C|20.0": 1500.0,
+    }
+    assert legacy_net_qty == {
+        "WULF|20270115|C|17.0": 52.0,
+        "WULF|20270115|C|20.0": 10.0,
+        "NVDA|20261218|P|100.0": -4.0,
+    }
+
+    batched_db = _FakeDb(rows)
+    batched = ib_sync.build_journal_basis_lookup(client, db=batched_db)
+
+    assert len(batched_db.calls) == 1
+    assert batched_db.calls[0][1] == ("", "NVDA", "WULF", 200)
+    expected_bytes = json.dumps(
+        {"basis": legacy_basis, "net_qty": legacy_net_qty},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    actual_bytes = json.dumps(
+        {"basis": dict(batched), "net_qty": batched.net_qty},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    assert actual_bytes == expected_bytes
+
+
+def test_batched_journal_basis_pages_by_trade_id_and_preserves_ordered_bytes(monkeypatch):
+    """Each Hrana response is bounded without changing chronological semantics."""
+    rows = [
+        # trade_id order deliberately disagrees with effective-time order. The
+        # close must still be the latest persisted basis after Python sorting.
+        (
+            "001-close-first-by-id",
+            json.dumps({
+                "ticker": "WULF",
+                "action": "SELL_OPTION",
+                "contracts": 5,
+                "total_cost": 500.0,
+                "open_basis": 500.0,
+                "right": "C",
+                "strike": 17,
+                "expiry": "20270115",
+                "ib_exec_id": "wulf-close",
+            }),
+            "2026-07-11T10:00:00Z",
+            "2026-07-11T10:00:01Z",
+        ),
+        (
+            "002-nvda",
+            json.dumps({
+                "ticker": "NVDA",
+                "action": "SELL_TO_OPEN",
+                "contracts": 4,
+                "total_cost": 2000.0,
+                "open_basis": 1987.65432,
+                "right": "P",
+                "strike": 100,
+                "expiry": "20261218",
+                "ib_exec_id": "nvda-open",
+            }),
+            "2026-07-10T10:00:01Z",
+            "2026-07-10T10:00:02Z",
+        ),
+        (
+            "003-unrelated",
+            json.dumps({
+                "ticker": "AAPL",
+                "action": "BUY_OPTION",
+                "contracts": 99,
+                "total_cost": 9900.0,
+                "right": "C",
+                "strike": 200,
+                "expiry": "20270115",
+                "ib_exec_id": "unrelated",
+            }),
+            "2026-07-09T10:00:00Z",
+            "2026-07-09T10:00:01Z",
+        ),
+        (
+            "004-wulf-other-contract",
+            json.dumps({
+                "ticker": "WULF",
+                "action": "BUY_OPTION",
+                "contracts": 2,
+                "total_cost": 300.0,
+                "open_basis": 300.0,
+                "right": "C",
+                "strike": 20,
+                "expiry": "20270115",
+                "ib_exec_id": "wulf-20-open",
+            }),
+            "2026-07-10T10:00:02Z",
+            "2026-07-10T10:00:03Z",
+        ),
+        (
+            "999-open-last-by-id",
+            json.dumps({
+                "ticker": "WULF",
+                "action": "BUY_OPTION",
+                "contracts": 10,
+                "total_cost": 1000.0,
+                "open_basis": 1000.0,
+                "right": "C",
+                "strike": 17,
+                "expiry": "20270115",
+                "ib_exec_id": "wulf-open",
+            }),
+            "2026-07-10T10:00:00Z",
+            "2026-07-10T10:00:01Z",
+        ),
+    ]
+    kwargs = {
+        "tickers": ("NVDA", "WULF"),
+        "contract_keys": (
+            "NVDA|20261218|P|100.0",
+            "WULF|20270115|C|17.0",
+            "WULF|20270115|C|20.0",
+        ),
+    }
+
+    monkeypatch.setattr(journal_basis, "_JOURNAL_PAGE_SIZE", 100)
+    single_page_db = _CursorPagedDb(rows)
+    single_page = compute_open_basis_and_net_qty_for_tickers(single_page_db, **kwargs)
+
+    monkeypatch.setattr(journal_basis, "_JOURNAL_PAGE_SIZE", 2)
+    paged_db = _CursorPagedDb(rows)
+    paged = compute_open_basis_and_net_qty_for_tickers(paged_db, **kwargs)
+
+    expected_bytes = json.dumps(
+        {
+            "basis": {
+                "NVDA|20261218|P|100.0": 1987.6543,
+                "WULF|20270115|C|17.0": 500.0,
+                "WULF|20270115|C|20.0": 300.0,
+            },
+            "net_qty": {
+                "NVDA|20261218|P|100.0": -4.0,
+                "WULF|20270115|C|17.0": 5.0,
+                "WULF|20270115|C|20.0": 2.0,
+            },
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    single_page_bytes = json.dumps(
+        {"basis": single_page[0], "net_qty": single_page[1]},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    paged_bytes = json.dumps(
+        {"basis": paged[0], "net_qty": paged[1]},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+
+    assert single_page_bytes == expected_bytes
+    assert paged_bytes == expected_bytes
+    assert len(single_page_db.calls) == 1
+    assert len(paged_db.calls) == 3
+    assert paged_db.calls[0][1] == ("", "NVDA", "WULF", 2)
+    assert paged_db.calls[1][1] == ("002-nvda", "NVDA", "WULF", 2)
+    assert paged_db.calls[2][1] == ("999-open-last-by-id", "NVDA", "WULF", 2)
+
+
+def test_build_journal_basis_lookup_batch_failure_keeps_ib_fallback(capsys):
+    class _FailingDb:
+        def __init__(self):
+            self.calls = 0
+
+        def execute(self, _sql, _params=()):
+            self.calls += 1
+            raise RuntimeError("journal unavailable")
+
+    position = _make_position(
+        symbol="NVDA",
+        sec_type="OPT",
+        position=2,
+        avg_cost=510.0,
+        strike=100,
+        right="C",
+        expiry="20261218",
+    )
+    client = SimpleNamespace(get_positions=lambda: [position])
+    db = _FailingDb()
+
+    lookup = ib_sync.build_journal_basis_lookup(client, db=db)
+    positions = ib_sync.fetch_positions(client, journal_basis_lookup=lookup)
+
+    assert db.calls == 1
+    assert dict(lookup) == {}
+    assert lookup.net_qty == {}
+    assert positions[0]["avgCost"] == pytest.approx(510.0)
+    assert positions[0]["entry_cost"] == pytest.approx(1020.0)
+    assert "falling back to IB avgCost" in capsys.readouterr().out

@@ -1,0 +1,914 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Radon Portfolio Page-Load Performance Audit</title>
+  <style>
+    :root {
+      --canvas: #0a0f14;
+      --panel: #0f1519;
+      --raised: #151c22;
+      --grid: #1e293b;
+      --signal: #05ad98;
+      --ink: #dce7ea;
+      --muted: #8ea0a8;
+      --faint: #5f727b;
+      --warn: #e3a95b;
+      --bad: #e46f65;
+      --info: #79a7ff;
+      --white: #f3f7f7;
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      background: var(--canvas);
+      color: var(--ink);
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 16px;
+      line-height: 1.6;
+      font-kerning: normal;
+    }
+
+    a { color: var(--signal); text-underline-offset: 3px; }
+    a:hover { color: var(--white); }
+    a:focus-visible, summary:focus-visible {
+      outline: 2px solid var(--signal);
+      outline-offset: 3px;
+    }
+
+    code, .mono, .eyebrow, .metric-value, th, .tag, .device-label, .rail-time {
+      font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-variant-numeric: tabular-nums;
+    }
+
+    code {
+      color: var(--white);
+      font-size: 0.88em;
+      overflow-wrap: anywhere;
+    }
+
+    .shell {
+      width: min(1480px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 32px 0 72px;
+    }
+
+    .masthead {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.65fr);
+      gap: 32px;
+      align-items: end;
+      padding: 24px 0 32px;
+      border-bottom: 1px solid var(--grid);
+    }
+
+    .eyebrow, .device-label {
+      color: var(--signal);
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    h1, h2, h3, p { margin-top: 0; }
+
+    h1 {
+      margin-bottom: 12px;
+      max-width: 16ch;
+      color: var(--white);
+      font-size: clamp(2.35rem, 5.7vw, 5.6rem);
+      font-weight: 650;
+      letter-spacing: -0.055em;
+      line-height: 0.95;
+    }
+
+    .dek {
+      margin: 0;
+      max-width: 64ch;
+      color: var(--muted);
+      font-size: 1.05rem;
+    }
+
+    .audit-meta {
+      display: grid;
+      gap: 10px;
+      padding-left: 20px;
+      border-left: 1px solid var(--grid);
+    }
+
+    .meta-row {
+      display: grid;
+      grid-template-columns: 112px minmax(0, 1fr);
+      gap: 16px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--grid);
+    }
+
+    .meta-row span:first-child {
+      color: var(--faint);
+      font-size: 0.78rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .meta-row strong { color: var(--white); font-size: 0.94rem; }
+
+    .jump-nav {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding: 20px 0;
+      border-bottom: 1px solid var(--grid);
+    }
+
+    .jump-nav a, .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 32px;
+      padding: 5px 10px;
+      border: 1px solid var(--grid);
+      border-radius: 999px;
+      color: var(--muted);
+      font-size: 0.72rem;
+      letter-spacing: 0.04em;
+      text-decoration: none;
+      text-transform: uppercase;
+    }
+
+    .jump-nav a:hover { border-color: var(--signal); color: var(--white); }
+
+    .section { padding-top: 52px; }
+
+    .section-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(240px, 0.42fr);
+      gap: 24px;
+      align-items: end;
+      margin-bottom: 20px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--grid);
+    }
+
+    .section-head h2 {
+      margin-bottom: 0;
+      color: var(--white);
+      font-size: clamp(1.55rem, 3vw, 2.45rem);
+      font-weight: 600;
+      letter-spacing: -0.035em;
+      line-height: 1.08;
+    }
+
+    .section-head p { margin: 0; color: var(--muted); font-size: 0.9rem; }
+
+    .verdict {
+      display: grid;
+      grid-template-columns: 118px minmax(0, 1fr);
+      border: 1px solid var(--bad);
+      background: var(--panel);
+    }
+
+    .verdict-label {
+      display: grid;
+      place-items: center;
+      min-height: 136px;
+      padding: 16px;
+      border-right: 1px solid var(--bad);
+      color: var(--bad);
+      text-align: center;
+    }
+
+    .verdict-body { padding: 24px; }
+
+    .verdict-body h2 {
+      margin-bottom: 8px;
+      color: var(--white);
+      font-size: clamp(1.45rem, 2.8vw, 2.2rem);
+      line-height: 1.15;
+    }
+
+    .verdict-body p { margin: 0; max-width: 92ch; color: var(--muted); }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      margin-top: 16px;
+      border-top: 1px solid var(--grid);
+      border-left: 1px solid var(--grid);
+    }
+
+    .metric {
+      min-height: 138px;
+      padding: 18px 16px;
+      border-right: 1px solid var(--grid);
+      border-bottom: 1px solid var(--grid);
+      background: var(--panel);
+    }
+
+    .metric-value {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--white);
+      font-size: clamp(1.4rem, 3vw, 2.25rem);
+      line-height: 1;
+    }
+
+    .metric-value.bad { color: var(--bad); }
+    .metric-value.warn { color: var(--warn); }
+    .metric-value.signal { color: var(--signal); }
+    .metric-label { color: var(--muted); font-size: 0.8rem; line-height: 1.35; }
+
+    .finding-grid {
+      display: grid;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      border-top: 1px solid var(--grid);
+      border-left: 1px solid var(--grid);
+    }
+
+    .finding {
+      grid-column: span 6;
+      min-height: 310px;
+      padding: 22px;
+      border-right: 1px solid var(--grid);
+      border-bottom: 1px solid var(--grid);
+      background: var(--panel);
+    }
+
+    .finding.primary { grid-column: span 12; min-height: auto; }
+    .finding-number { color: var(--faint); font-size: 0.72rem; }
+    .finding h3 { margin: 12px 0 10px; color: var(--white); font-size: 1.2rem; line-height: 1.25; }
+    .finding p { color: var(--muted); font-size: 0.92rem; }
+    .finding ul { margin: 14px 0 0; padding-left: 18px; color: var(--muted); font-size: 0.9rem; }
+    .finding li + li { margin-top: 8px; }
+
+    .priority-line {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .tag.p0 { border-color: var(--bad); color: var(--bad); }
+    .tag.p1 { border-color: var(--warn); color: var(--warn); }
+    .tag.p2 { border-color: var(--info); color: var(--info); }
+    .tag.safe { border-color: var(--signal); color: var(--signal); }
+
+    .race {
+      padding: 24px;
+      border: 1px solid var(--grid);
+      background: var(--panel);
+    }
+
+    .race-scale {
+      display: grid;
+      grid-template-columns: 112px minmax(0, 1fr);
+      gap: 16px;
+      align-items: center;
+    }
+
+    .race-scale + .race-scale { margin-top: 16px; }
+    .rail-label { color: var(--muted); font-size: 0.82rem; }
+
+    .rail {
+      position: relative;
+      height: 42px;
+      border-left: 1px solid var(--grid);
+      border-right: 1px solid var(--grid);
+      background: var(--canvas);
+    }
+
+    .rail-bar {
+      position: absolute;
+      top: 8px;
+      height: 26px;
+      border: 1px solid currentColor;
+      background: var(--raised);
+    }
+
+    .rail-bar.get { left: 4.2%; width: 13.1%; color: var(--signal); }
+    .rail-bar.post { left: 4.5%; width: 86.4%; color: var(--bad); }
+    .rail-marker {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 99%;
+      width: 2px;
+      background: var(--warn);
+    }
+
+    .rail-time {
+      position: absolute;
+      top: 50%;
+      left: 8px;
+      transform: translateY(-50%);
+      color: var(--white);
+      font-size: 0.7rem;
+      white-space: nowrap;
+    }
+
+    .race-notes {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 1px;
+      margin-top: 24px;
+      background: var(--grid);
+      border: 1px solid var(--grid);
+    }
+
+    .race-note { padding: 14px; background: var(--raised); }
+    .race-note strong { display: block; color: var(--white); font-size: 0.83rem; }
+    .race-note span { color: var(--muted); font-size: 0.75rem; }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      align-items: stretch;
+    }
+
+    .flow-node {
+      position: relative;
+      min-height: 148px;
+      padding: 18px;
+      border: 1px solid var(--grid);
+      background: var(--panel);
+    }
+
+    .flow-node:not(:last-child)::after {
+      content: "→";
+      position: absolute;
+      top: 50%;
+      right: -12px;
+      z-index: 2;
+      width: 24px;
+      color: var(--signal);
+      text-align: center;
+      transform: translateY(-50%);
+      background: var(--canvas);
+    }
+
+    .flow-node strong { display: block; margin: 8px 0; color: var(--white); font-size: 0.95rem; }
+    .flow-node p { margin: 0; color: var(--muted); font-size: 0.8rem; line-height: 1.45; }
+
+    .db-grid {
+      display: grid;
+      grid-template-columns: 0.8fr 1.2fr;
+      gap: 16px;
+    }
+
+    .panel {
+      min-width: 0;
+      border: 1px solid var(--grid);
+      background: var(--panel);
+    }
+
+    .table-wrap { max-width: 100%; }
+
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      min-height: 42px;
+      padding: 8px 14px;
+      border-bottom: 1px solid var(--grid);
+      background: var(--raised);
+    }
+
+    .panel-body { padding: 18px; }
+    .panel-body p:last-child { margin-bottom: 0; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.84rem;
+    }
+
+    th, td {
+      padding: 12px 10px;
+      border-bottom: 1px solid var(--grid);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th { color: var(--faint); font-size: 0.68rem; letter-spacing: 0.06em; text-transform: uppercase; }
+    td { color: var(--muted); }
+    td strong { color: var(--white); }
+    tr:last-child td { border-bottom: 0; }
+
+    .scan { color: var(--bad); }
+    .index { color: var(--signal); }
+
+    .bar-list { display: grid; gap: 14px; }
+    .bar-row { display: grid; grid-template-columns: 156px minmax(0, 1fr) 88px; gap: 12px; align-items: center; }
+    .bar-label { color: var(--muted); font-size: 0.8rem; }
+    .bar-track { height: 12px; border: 1px solid var(--grid); background: var(--canvas); }
+    .bar-fill { height: 100%; background: var(--signal); }
+    .bar-fill.bad { background: var(--bad); }
+    .bar-fill.warn { background: var(--warn); }
+    .bar-value { color: var(--white); font-size: 0.75rem; text-align: right; }
+
+    .plan {
+      display: grid;
+      grid-template-columns: 92px minmax(0, 1fr) 168px 168px;
+      border-top: 1px solid var(--grid);
+      border-left: 1px solid var(--grid);
+    }
+
+    .plan-row { display: contents; }
+    .plan-cell {
+      padding: 16px;
+      border-right: 1px solid var(--grid);
+      border-bottom: 1px solid var(--grid);
+      background: var(--panel);
+    }
+
+    .plan-cell.step { color: var(--signal); }
+    .plan-cell strong { display: block; margin-bottom: 5px; color: var(--white); }
+    .plan-cell p { margin: 0; color: var(--muted); font-size: 0.82rem; }
+
+    .cache-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .cache-card { border: 1px solid var(--grid); background: var(--panel); }
+    .cache-card h3 { margin: 0; padding: 12px 16px; border-bottom: 1px solid var(--grid); color: var(--white); font-size: 0.95rem; }
+    .cache-card ul { margin: 0; padding: 16px 18px 18px 34px; color: var(--muted); font-size: 0.86rem; }
+    .cache-card li + li { margin-top: 9px; }
+
+    .cwv-note {
+      padding: 14px 16px;
+      border: 1px solid var(--warn);
+      color: var(--muted);
+      background: var(--panel);
+      font-size: 0.84rem;
+    }
+
+    details {
+      border: 1px solid var(--grid);
+      background: var(--panel);
+    }
+
+    details + details { margin-top: 10px; }
+    summary { cursor: pointer; padding: 14px 16px; color: var(--white); font-weight: 600; }
+    details[open] summary { border-bottom: 1px solid var(--grid); }
+    .detail-body { padding: 16px; color: var(--muted); font-size: 0.86rem; }
+    .detail-body ul { margin: 0; padding-left: 20px; }
+
+    .sources {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px 28px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .sources li { padding-bottom: 10px; border-bottom: 1px solid var(--grid); color: var(--muted); font-size: 0.84rem; }
+
+    .footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 24px;
+      margin-top: 56px;
+      padding-top: 18px;
+      border-top: 1px solid var(--grid);
+      color: var(--faint);
+      font-size: 0.76rem;
+    }
+
+    @media (max-width: 1100px) {
+      .metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .finding { grid-column: span 12; min-height: auto; }
+      .db-grid, .cache-grid { grid-template-columns: 1fr; }
+      .flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .flow-node::after { display: none; }
+      .plan { grid-template-columns: 72px minmax(0, 1fr); }
+      .plan-cell:nth-child(3), .plan-cell:nth-child(4) { grid-column: span 1; }
+    }
+
+    @media (max-width: 720px) {
+      .shell { width: min(100% - 20px, 1480px); padding-top: 12px; }
+      .masthead, .section-head { grid-template-columns: 1fr; gap: 18px; }
+      .audit-meta { padding-left: 0; border-left: 0; }
+      .verdict { grid-template-columns: 1fr; }
+      .verdict-label { min-height: 52px; border-right: 0; border-bottom: 1px solid var(--bad); }
+      .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .race-scale { grid-template-columns: 1fr; gap: 5px; }
+      .race-notes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .flow { grid-template-columns: 1fr; }
+      .bar-row { grid-template-columns: 1fr 72px; }
+      .bar-track { grid-row: 2; grid-column: 1 / -1; }
+      .plan { grid-template-columns: 1fr; }
+      .plan-row { display: grid; grid-template-columns: 1fr; }
+      .sources { grid-template-columns: 1fr; }
+      .footer { flex-direction: column; }
+      .table-wrap { overflow-x: auto; }
+      table { min-width: 720px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="masthead">
+      <div>
+        <p class="eyebrow">Radon / Performance audit / Portfolio</p>
+        <h1>Page load waits on live sync.</h1>
+        <p class="dek">The deterioration is reproducible. A cold tab starts the cached portfolio GET, classifies the still-empty client state as a blackout, then launches a live IB sync POST. The POST invalidates the faster GET result, so positions wait for the slower producer path.</p>
+      </div>
+      <div class="audit-meta" aria-label="Audit metadata">
+        <div class="meta-row"><span>Audit date</span><strong>2026-08-25</strong></div>
+        <div class="meta-row"><span>Checkout</span><strong><code>88514b9b</code></strong></div>
+        <div class="meta-row"><span>Framework</span><strong>Next.js 16.2.9 / React 19.2</strong></div>
+        <div class="meta-row"><span>Method</span><strong>Production build, controlled browser trace, live read-only Turso plans</strong></div>
+      </div>
+    </header>
+
+    <nav class="jump-nav" aria-label="Report sections">
+      <a href="#verdict">Verdict</a>
+      <a href="#race">Cold-load race</a>
+      <a href="#findings">Findings</a>
+      <a href="#database">Database</a>
+      <a href="#bundle">Bundle</a>
+      <a href="#plan">Remediation</a>
+      <a href="#cache">Caching</a>
+      <a href="#measurement">Measurement</a>
+    </nav>
+
+    <section class="section" id="verdict">
+      <div class="verdict">
+        <div class="verdict-label">
+          <span class="device-label">P0<br>Regression</span>
+        </div>
+        <div class="verdict-body">
+          <h2>Commit <code>e0f508bd</code> on Aug 24 put live synchronization on the cold-load critical path.</h2>
+          <p>The reliability change correctly made a missing timestamp read as unknown instead of healthy. The shell cannot distinguish “initial GET still pending” from “backend has no usable snapshot,” so the recovery POST fires about 9 ms after the GET. <code>doSync()</code> advances <code>dataGenerationRef</code>, and <code>fetchPortfolio()</code> then discards the earlier generation at <code>lib/usePortfolio.ts:82</code>.</p>
+        </div>
+      </div>
+
+      <div class="metrics" aria-label="Key evidence">
+        <div class="metric"><span class="metric-value bad">3,476 ms</span><span class="metric-label">Rows visible in the controlled 3 s POST trace</span></div>
+        <div class="metric"><span class="metric-value signal">602 ms</span><span class="metric-label">Cached GET had already completed, then was ignored</span></div>
+        <div class="metric"><span class="metric-value warn">448 KB</span><span class="metric-label">Approximate brotli route JavaScript before auth resources</span></div>
+        <div class="metric"><span class="metric-value bad">2 scans</span><span class="metric-label">Journal-wide reads blocking the default portfolio payload</span></div>
+        <div class="metric"><span class="metric-value warn">21</span><span class="metric-label">Unrelated sidebar RSC prefetch requests observed cold</span></div>
+        <div class="metric"><span class="metric-value bad">11/min</span><span class="metric-label">Steady RTH Turso statements from one portfolio tab</span></div>
+      </div>
+    </section>
+
+    <section class="section" id="race">
+      <div class="section-head">
+        <div><span class="device-label">Trace 01</span><h2>The cached read loses the race by design.</h2></div>
+        <p>Controlled Playwright run against the production build. The GET delay was 455 ms; the POST delay was 3 s. The payload carried a current timestamp.</p>
+      </div>
+
+      <div class="race">
+        <div class="race-scale">
+          <div class="rail-label">Cached GET</div>
+          <div class="rail" aria-label="GET begins at 146 milliseconds and finishes at 602 milliseconds">
+            <div class="rail-bar get"><span class="rail-time">146 → 602 ms</span></div>
+          </div>
+        </div>
+        <div class="race-scale">
+          <div class="rail-label">Live sync POST</div>
+          <div class="rail" aria-label="POST begins at 155 milliseconds and finishes at 3158 milliseconds">
+            <div class="rail-bar post"><span class="rail-time">155 → 3,158 ms</span></div>
+            <div class="rail-marker" title="Rows visible at 3,476 ms"></div>
+          </div>
+        </div>
+        <div class="race-notes">
+          <div class="race-note"><strong>146 ms</strong><span>Mount effect starts <code>GET /api/portfolio</code>.</span></div>
+          <div class="race-note"><strong>155 ms</strong><span>Unknown state claims auto-sync and starts POST.</span></div>
+          <div class="race-note"><strong>602 ms</strong><span>GET returns, but generation mismatch rejects it.</span></div>
+          <div class="race-note"><strong>3,476 ms</strong><span>Rows render only after the delayed POST response.</span></div>
+        </div>
+      </div>
+
+      <div class="flow" style="margin-top:16px">
+        <div class="flow-node"><span class="device-label">01 / Mount</span><strong><code>lastSync = null</code></strong><p>The client has not received the cached snapshot yet.</p></div>
+        <div class="flow-node"><span class="device-label">02 / Classify</span><strong><code>unknown → isStale</code></strong><p><code>useSnapshotStaleness</code> treats missing data as untrusted.</p></div>
+        <div class="flow-node"><span class="device-label">03 / Supersede</span><strong><code>generation 0 → 1</code></strong><p>The producer POST advances the data generation before either request settles.</p></div>
+        <div class="flow-node"><span class="device-label">04 / Wait</span><strong>GET is ignored</strong><p>Useful content waits on live IB, bounded by 35 s upstream and 42 s in the browser.</p></div>
+      </div>
+    </section>
+
+    <section class="section" id="findings">
+      <div class="section-head">
+        <div><span class="device-label">Priority register</span><h2>Six changes account for most of the recoverable load cost.</h2></div>
+        <p>Priority reflects direct critical-path evidence, not a generic performance checklist.</p>
+      </div>
+
+      <div class="finding-grid">
+        <article class="finding primary">
+          <div class="priority-line"><span class="tag p0">P0</span><span class="finding-number mono">F-01 / Cold state</span></div>
+          <h3>Let the initial GET settle before blackout recovery can POST.</h3>
+          <p>Render a usable GET snapshot immediately. Only trigger producer recovery after the initial read finishes and proves missing or stale. If a background sync runs, it must not invalidate an already successful snapshot response.</p>
+          <ul>
+            <li>Regression: fast fresh GET plus delayed POST must paint GET data first.</li>
+            <li>Recovery: missing GET must still arm the producer sync.</li>
+            <li>Stale data: paint the stale snapshot with warning provenance while refresh runs.</li>
+          </ul>
+        </article>
+
+        <article class="finding">
+          <div class="priority-line"><span class="tag p0">P0</span><span class="finding-number mono">F-02 / API payload</span></div>
+          <h3>Remove orders-only entry-date maps from <code>/api/portfolio</code>.</h3>
+          <p>The default response waits for two journal-wide JSON scans after the indexed snapshot lookup. The portfolio UI does not read either map; only the executed-order share path does.</p>
+          <ul>
+            <li>Snapshot payload: 11,194 B.</li>
+            <li>Merged response: 25,565 B.</li>
+            <li>Move maps to an orders-only endpoint or an explicit include mode.</li>
+          </ul>
+        </article>
+
+        <article class="finding">
+          <div class="priority-line"><span class="tag p0">P0</span><span class="finding-number mono">F-03 / JavaScript</span></div>
+          <h3>Split the 4,193-line all-routes workspace module.</h3>
+          <p><code>WorkspaceSections</code> is one delayed chunk, but it statically imports portfolio, orders, scanner, regime, admin, workflow, profile, options, ticker, mobile, and performance code before switching at runtime.</p>
+          <ul>
+            <li>Dynamic chunk: 1,198,604 B raw / 248,220 B brotli.</li>
+            <li>Cold route JavaScript: approximately 448 KB brotli.</li>
+            <li>Create statically analyzable route-specific imports and a compressed budget.</li>
+          </ul>
+        </article>
+
+        <article class="finding">
+          <div class="priority-line"><span class="tag p1">P1</span><span class="finding-number mono">F-04 / Navigation</span></div>
+          <h3>Stop viewport prefetching the entire workstation during cold load.</h3>
+          <p>Visible sidebar links initiated 21 unrelated RSC requests across two waves while the current route was loading. Disable automatic prefetch for the fixed rail, then prefetch on focus or pointer intent.</p>
+        </article>
+
+        <article class="finding">
+          <div class="priority-line"><span class="tag p1">P1</span><span class="finding-number mono">F-05 / Data boundary</span></div>
+          <h3>Start the snapshot on the server, not after hydration.</h3>
+          <p><code>app/portfolio/page.tsx</code> renders only the client shell. The first portfolio read began around 136 to 146 ms after navigation in local production traces. A dynamic Server Component boundary can pass initial data into a narrow client surface, while no-store polling continues for updates.</p>
+        </article>
+
+        <article class="finding">
+          <div class="priority-line"><span class="tag p1">P1</span><span class="finding-number mono">F-06 / Background work</span></div>
+          <h3>Defer and deduplicate noncritical shell work.</h3>
+          <p>The cold shell starts profile, service health, flex token, orders, relay health, two sockets, optional quote fallbacks, and up to three identical risk-free-rate requests. Keep the portfolio snapshot first.</p>
+          <ul>
+            <li>Use one client in-flight cache/provider for the daily risk-free scalar.</li>
+            <li>Defer footer detail and closed overlays until after primary paint.</li>
+            <li>Route-scope quote subjects; share one relay connection manager.</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" id="database">
+      <div class="section-head">
+        <div><span class="device-label">Query path</span><h2>The indexed snapshot is followed by avoidable full scans.</h2></div>
+        <p>Read-only measurements used the configured production Turso database. Timings include the audit client path, not VPS request TTFB.</p>
+      </div>
+
+      <div class="db-grid">
+        <div class="panel">
+          <div class="panel-head"><span class="device-label">Critical response</span><span class="tag p0">3 statements</span></div>
+          <div class="panel-body">
+            <div class="flow" style="grid-template-columns:1fr">
+              <div class="flow-node"><span class="device-label">Q1</span><strong>Latest snapshot</strong><p class="index">Primary-key index; 1 row; 24.5 to 112.4 ms in five direct-source samples.</p></div>
+              <div class="flow-node"><span class="device-label">Q2 + Q3</span><strong>Entry-date maps</strong><p class="scan">Two full journal scans run in parallel, but only after Q1 and before JSON can return.</p></div>
+              <div class="flow-node"><span class="device-label">Response</span><strong>Snapshot + unused maps</strong><p>Raw response grows by roughly 14.4 KB before transport compression.</p></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><span class="device-label">Production explain</span><span class="tag">1,601 journal rows</span></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Query</th><th>Plan</th><th>Rows</th><th>Five-run range</th><th>Use on portfolio</th></tr></thead>
+              <tbody>
+                <tr><td><strong>Q1 snapshot</strong></td><td class="index">PK index</td><td>1</td><td>24.5–112.4 ms</td><td>Required</td></tr>
+                <tr><td><strong>Q2 ticker dates</strong></td><td class="scan">SCAN + temp B-tree</td><td>305</td><td>33.0–59.4 ms</td><td>Unused</td></tr>
+                <tr><td><strong>Q3 contract dates</strong></td><td class="scan">SCAN journal</td><td>1,184</td><td>49.6–141.4 ms</td><td>Unused</td></tr>
+                <tr><td><strong>Q4 open orders</strong></td><td class="scan">SCAN + sort</td><td>3</td><td>One 368.9 ms audit sample</td><td>Partial shell use</td></tr>
+                <tr><td><strong>Q5 executions</strong></td><td class="index">fill-time index</td><td>88</td><td>One 147.8 ms audit sample</td><td>Today P&amp;L only</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top:16px">
+        <div class="panel-head"><span class="device-label">RTH query cadence / one tab</span><span class="tag p1">11 statements per minute</span></div>
+        <div class="panel-body">
+          <div class="bar-list">
+            <div class="bar-row"><span class="bar-label">Portfolio poll</span><div class="bar-track"><div class="bar-fill bad" style="width:55%"></div></div><span class="bar-value mono">6 / min</span></div>
+            <div class="bar-row"><span class="bar-label">Orders poll</span><div class="bar-track"><div class="bar-fill warn" style="width:36%"></div></div><span class="bar-value mono">4 / min</span></div>
+            <div class="bar-row"><span class="bar-label">Service health</span><div class="bar-track"><div class="bar-fill" style="width:9%"></div></div><span class="bar-value mono">1 / min</span></div>
+          </div>
+          <p style="margin-top:18px;color:var(--muted);font-size:.84rem">The client polls portfolio and orders every 30 s. Current portfolio caches expire after 3 s and 10 s, so one steady tab misses every cache. The caches coalesce only nearly simultaneous tabs. Orders has no server single-flight cache and reads open plus executed orders serially.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="bundle">
+      <div class="section-head">
+        <div><span class="device-label">Client payload</span><h2>The route pays for code it does not render.</h2></div>
+        <p>File-level brotli measurements from the successful production build. External Clerk resources are excluded.</p>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><span class="device-label">Cold compressed transfer budget</span><span class="tag p1">Before HTML + auth</span></div>
+        <div class="panel-body">
+          <div class="bar-list">
+            <div class="bar-row"><span class="bar-label">Route entry JS</span><div class="bar-track"><div class="bar-fill warn" style="width:40%"></div></div><span class="bar-value mono">200 KB</span></div>
+            <div class="bar-row"><span class="bar-label">WorkspaceSections JS</span><div class="bar-track"><div class="bar-fill bad" style="width:50%"></div></div><span class="bar-value mono">248 KB</span></div>
+            <div class="bar-row"><span class="bar-label">Route CSS</span><div class="bar-track"><div class="bar-fill" style="width:9%"></div></div><span class="bar-value mono">46 KB</span></div>
+            <div class="bar-row"><span class="bar-label">Fonts</span><div class="bar-track"><div class="bar-fill" style="width:51%"></div></div><span class="bar-value mono">256 KB</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="finding-grid" style="margin-top:16px">
+        <article class="finding">
+          <div class="priority-line"><span class="tag p1">Module graph</span></div>
+          <h3>One switch, every route implementation.</h3>
+          <p>The portfolio branch appears at <code>WorkspaceSections.tsx:4150</code>, after 69 static imports and thousands of lines of scanner, journal, orders, admin, options, regime, workflow, and ticker code have entered the same client chunk.</p>
+        </article>
+        <article class="finding">
+          <div class="priority-line"><span class="tag p2">Global CSS</span></div>
+          <h3>All workstation feature styles load from the root.</h3>
+          <p><code>globals.css</code> is about 503 KB of source and contributes roughly 45 KB brotli to every route. Keep tokens and shell primitives global; move feature rules into route-level CSS Modules after the section split.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" id="plan">
+      <div class="section-head">
+        <div><span class="device-label">Implementation plan</span><h2>Fix the critical path before tuning the pool.</h2></div>
+        <p>Each stage has an observable acceptance check. No recommendation requires browser or CDN caching of portfolio state.</p>
+      </div>
+
+      <div class="plan" role="table" aria-label="Recommended implementation plan">
+        <div class="plan-row" role="row">
+          <div class="plan-cell step mono" role="cell">01</div>
+          <div class="plan-cell" role="cell"><strong>Initial read wins</strong><p>Gate auto-sync until GET settles; preserve blackout and stale-background-refresh behavior.</p></div>
+          <div class="plan-cell" role="cell"><strong>Impact</strong><p>Removes live IB from first paint.</p></div>
+          <div class="plan-cell" role="cell"><strong>Proof</strong><p>Delayed POST test paints GET first.</p></div>
+        </div>
+        <div class="plan-row" role="row">
+          <div class="plan-cell step mono" role="cell">02</div>
+          <div class="plan-cell" role="cell"><strong>Snapshot-only API</strong><p>Move entry-date maps to the orders share path; default GET issues exactly Q1.</p></div>
+          <div class="plan-cell" role="cell"><strong>Impact</strong><p>Removes two scans and ~14.4 KB.</p></div>
+          <div class="plan-cell" role="cell"><strong>Proof</strong><p>No <code>FROM journal</code> on base GET.</p></div>
+        </div>
+        <div class="plan-row" role="row">
+          <div class="plan-cell step mono" role="cell">03</div>
+          <div class="plan-cell" role="cell"><strong>Route-specific client chunks</strong><p>Extract portfolio and dynamically import every other workspace independently.</p></div>
+          <div class="plan-cell" role="cell"><strong>Impact</strong><p>Reduces parse, compile, and transfer.</p></div>
+          <div class="plan-cell" role="cell"><strong>Proof</strong><p>No omnibus chunk; compressed budget passes.</p></div>
+        </div>
+        <div class="plan-row" role="row">
+          <div class="plan-cell step mono" role="cell">04</div>
+          <div class="plan-cell" role="cell"><strong>Server initial data</strong><p>Call extracted snapshot access directly from the Server Component and seed the client store.</p></div>
+          <div class="plan-cell" role="cell"><strong>Impact</strong><p>Removes hydration-to-fetch waterfall.</p></div>
+          <div class="plan-cell" role="cell"><strong>Proof</strong><p>No redundant mount GET for seeded data.</p></div>
+        </div>
+        <div class="plan-row" role="row">
+          <div class="plan-cell step mono" role="cell">05</div>
+          <div class="plan-cell" role="cell"><strong>Quiet the shell</strong><p>Disable rail viewport prefetch; parallelize and 2 s single-flight orders; dedupe risk-free rate; defer telemetry.</p></div>
+          <div class="plan-cell" role="cell"><strong>Impact</strong><p>Fewer competing requests and DB reads.</p></div>
+          <div class="plan-cell" role="cell"><strong>Proof</strong><p>One GET; zero unrelated RSC prefetches.</p></div>
+        </div>
+        <div class="plan-row" role="row">
+          <div class="plan-cell step mono" role="cell">06</div>
+          <div class="plan-cell" role="cell"><strong>Batch sync journal reads</strong><p>Read all current option tickers once; verify any expression index with production EXPLAIN.</p></div>
+          <div class="plan-cell" role="cell"><strong>Impact</strong><p>Replaces up to 28 repeated statements.</p></div>
+          <div class="plan-cell" role="cell"><strong>Proof</strong><p>One bounded journal read per sync phase.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="cache">
+      <div class="section-head">
+        <div><span class="device-label">Cache policy</span><h2>Coalesce work without making trading data stale.</h2></div>
+        <p>HTTP freshness and application-memory coalescing are separate decisions.</p>
+      </div>
+
+      <div class="cache-grid">
+        <article class="cache-card">
+          <h3><span class="tag safe">Keep</span> Live-data boundaries</h3>
+          <ul>
+            <li><code>/api/portfolio</code>, orders, watchlist, health, tickets, and realtime data remain <code>force-dynamic</code> where required and <code>no-store</code> in the client and response.</li>
+            <li>Service worker continues to bypass navigations, RSC data, <code>/api</code>, and <code>/ws</code>.</li>
+            <li>Static hashed JavaScript already sends one-year immutable caching.</li>
+            <li>Direct-to-cloud remains the default; do not reintroduce <code>data/replica.db</code>.</li>
+          </ul>
+        </article>
+        <article class="cache-card">
+          <h3><span class="tag p1">Add</span> Safe coalescing</h3>
+          <ul>
+            <li>Persist the last successful portfolio snapshot in a client provider or module store, paint it immediately, then no-store revalidate.</li>
+            <li>After removing entry maps, raise the server snapshot coalescing TTL from 3 s toward 15 s and measure.</li>
+            <li>Wrap the combined orders read in a 2 s single-flight cache, invalidated on order mutations.</li>
+            <li>Cache the daily risk-free scalar with bounded server revalidation and a client in-flight promise.</li>
+          </ul>
+        </article>
+      </div>
+
+      <div class="table-wrap panel" style="margin-top:16px">
+        <table>
+          <thead><tr><th>Surface</th><th>Current</th><th>Decision</th><th>Reason</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Portfolio HTTP</strong></td><td>No-store</td><td class="index">Preserve</td><td>User-specific trading state must not enter browser or CDN caches.</td></tr>
+            <tr><td><strong>Portfolio DB read</strong></td><td>3 s TTL + single-flight</td><td class="index">15 s candidate after F-02</td><td>The writer runs every 60 s; measure freshness and order-risk constraints before changing.</td></tr>
+            <tr><td><strong>Entry-date maps</strong></td><td>10 s on every portfolio response</td><td class="index">Orders-only, revision or 60 s TTL</td><td>Day-granularity metadata is not a live mark.</td></tr>
+            <tr><td><strong>Orders DB read</strong></td><td>Two serial uncached reads</td><td class="index">Parallel + 2 s single-flight</td><td>Collapses simultaneous tabs while preserving operational recency.</td></tr>
+            <tr><td><strong>Risk-free rate</strong></td><td>Up to 3 client GETs; upstream no-store</td><td class="index">One client promise + 24 h server revalidation</td><td>Stable daily public scalar, not disk-backed live state.</td></tr>
+            <tr><td><strong>Static chunks</strong></td><td>One-year immutable</td><td class="index">Preserve</td><td>Reduce referenced assets, not their cache lifetime.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section" id="measurement">
+      <div class="section-head">
+        <div><span class="device-label">Measurement quality</span><h2>What was measured, and what still needs field data.</h2></div>
+        <p>The audit does not present local loopback paint times as production user experience.</p>
+      </div>
+
+      <div class="cwv-note">
+        <strong style="color:var(--white)">Core Web Vitals status:</strong> production p75 LCP, INP, and CLS are not instrumented. The local synthetic build produced FCP/LCP at 60 ms, which reflects the static shell rather than portfolio completion. Synthetic CLS was 0.110, just above the good threshold, with the main shift coming from the section replacement. Treat these as diagnostic signals only. Good field thresholds are LCP ≤ 2.5 s, INP ≤ 200 ms, and CLS ≤ 0.1.
+      </div>
+
+      <div class="table-wrap panel" style="margin-top:16px">
+        <table>
+          <thead><tr><th>Metric</th><th>Evidence</th><th>Rating</th><th>Next measurement</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Portfolio content visible</strong></td><td>3,476 ms in controlled 3 s POST race</td><td class="scan">Reproduced blocker</td><td>Production field mark after first position row or confirmed empty state.</td></tr>
+            <tr><td><strong>LCP</strong></td><td>60 ms local shell only</td><td>Not representative</td><td>Route-tagged p75 desktop/mobile via <code>useReportWebVitals</code>.</td></tr>
+            <tr><td><strong>INP</strong></td><td>Not measured</td><td>Unknown</td><td>Field telemetry and interaction trace after quote updates.</td></tr>
+            <tr><td><strong>CLS</strong></td><td>0.110 local synthetic</td><td class="scan">Needs improvement signal</td><td>Reserve table/skeleton geometry; validate p75 field CLS.</td></tr>
+            <tr><td><strong>API server time</strong></td><td>Query plans and direct samples only</td><td>Partial</td><td>Add sanitized <code>Server-Timing</code> for auth, snapshot, entry maps, serialization.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div style="margin-top:16px">
+        <details open>
+          <summary>Method and constraints</summary>
+          <div class="detail-body">
+            <ul>
+              <li>Built the current checkout with <code>next build --experimental-build-mode=compile</code> and served it with <code>next start</code>.</li>
+              <li>Used controlled API responses to isolate browser ordering, bundle loading, request initiation, and the GET/POST generation race.</li>
+              <li>Ran read-only production Turso queries and <code>EXPLAIN QUERY PLAN</code>; no IB actions or database writes were performed.</li>
+              <li>Chrome DevTools trace tooling was unavailable, so Playwright Performance APIs and build artifacts supplied the browser evidence.</li>
+              <li>Measurements from the development Mac include local topology and are not substituted for VPS TTFB or field p75 metrics.</li>
+            </ul>
+          </div>
+        </details>
+        <details>
+          <summary>Regression tests required with implementation</summary>
+          <div class="detail-body">
+            <ul>
+              <li>Fast fresh GET plus delayed POST: rows paint from GET; POST cannot invalidate them.</li>
+              <li>Missing GET: producer recovery still fires once under shared cooldown.</li>
+              <li>Base portfolio GET: exactly one snapshot query and no journal SQL.</li>
+              <li>Cold browser: one initial portfolio GET, no automatic POST for a fresh snapshot, zero unrelated RSC viewport prefetches.</li>
+              <li>Bundle contract: portfolio no longer references the omnibus workspace chunk and stays below an agreed compressed budget.</li>
+              <li>Orders coalescing: concurrent GETs share one parallel pair of statements; mutations invalidate the entry.</li>
+            </ul>
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <section class="section" id="sources">
+      <div class="section-head">
+        <div><span class="device-label">Evidence and sources</span><h2>Primary references.</h2></div>
+        <p>Current framework and performance guidance was checked against official documentation.</p>
+      </div>
+
+      <ul class="sources">
+        <li><a href="portfolio-frontend-performance-audit.md">Frontend trace archive</a>: exact request inventory, bundle files, render path, and controlled race.</li>
+        <li><a href="portfolio-api-db-performance-audit.md">API and DB archive</a>: SQL inventory, production plans, timings, cache matrix, and sync N+1.</li>
+        <li><a href="portfolio-performance-best-practices.md">Best-practices archive</a>: official-source mapping to exact Radon files.</li>
+        <li><a href="https://nextjs.org/docs/app/guides/lazy-loading">Next.js lazy loading</a>: defer Client Components and libraries to reduce initial JavaScript.</li>
+        <li><a href="https://nextjs.org/docs/app/getting-started/server-and-client-components">Next.js Server and Client Components</a>: read near the data source and pass serializable initial data.</li>
+        <li><a href="https://nextjs.org/docs/app/getting-started/fetching-data">Next.js fetching data</a>: parallel work, streaming, and avoiding request waterfalls.</li>
+        <li><a href="https://nextjs.org/docs/app/getting-started/css">Next.js CSS</a>: keep global CSS global and colocate route/component styles.</li>
+        <li><a href="https://react.dev/reference/rsc/server-components">React Server Components</a>: client-effect fetching creates sequential client-server round trips.</li>
+        <li><a href="https://web.dev/articles/defining-core-web-vitals-thresholds">web.dev Core Web Vitals thresholds</a>: p75 LCP, INP, and CLS quality boundaries.</li>
+        <li><a href="https://vercel.com/docs/caching/cdn-cache">Vercel CDN cache</a>: do not CDN-cache authenticated or user-specific data.</li>
+        <li><a href="https://docs.turso.tech/help/usage-and-billing">Turso query inspection</a>: use query plans and measure rows scanned, not just rows returned.</li>
+        <li><a href="https://docs.turso.tech/sql-reference/statements/create-index">Turso CREATE INDEX</a>: expression indexes must match the actual predicate and plan.</li>
+      </ul>
+    </section>
+
+    <footer class="footer">
+      <span>Radon operator workstation / Portfolio page-load audit</span>
+      <span>Report-only task. Production code, database state, and IB state were not changed.</span>
+    </footer>
+  </main>
+</body>
+</html>

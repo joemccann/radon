@@ -102,6 +102,46 @@ function stopRowSelect(event: MouseEvent) {
   event.stopPropagation();
 }
 
+function liveNameCount(names: readonly VolConeName[]): number {
+  return names.filter((name) => name.is_intraday).length;
+}
+
+/** Strip copy for the source cell. A partial live pass says how partial. */
+function sourceStatus(
+  isIntraday: boolean | undefined,
+  liveCount: number,
+  total: number,
+): { label: string; sub: string } {
+  if (!isIntraday) return { label: "SOURCE DATE", sub: "SESSION AS OF" };
+  if (liveCount > 0 && liveCount < total) {
+    return { label: `SOURCE (LIVE ${liveCount}/${total})`, sub: `LIVE ${liveCount}/${total} NAMES` };
+  }
+  return { label: "SOURCE (LIVE)", sub: "LIVE THIS SESSION" };
+}
+
+function lastSessionDate(name: VolConeName): string {
+  return name.series[name.series.length - 1]?.date ?? "---";
+}
+
+function RowAsOfMarker({ name }: { name: VolConeName }) {
+  const asOf = lastSessionDate(name);
+  return (
+    <span
+      data-testid="vol-cone-row-stale"
+      aria-label={`${name.ticker} not refreshed this session, as of ${asOf}`}
+      style={{
+        marginLeft: "6px",
+        fontFamily: "var(--font-mono)",
+        fontSize: "9px",
+        letterSpacing: "0.08em",
+        color: "var(--text-muted)",
+      }}
+    >
+      AS OF {asOf}
+    </span>
+  );
+}
+
 export default function VolConePanel() {
   const { data, loading, syncing, lastSync } = useVolCone();
   const { isMobile, hasMounted } = useViewport();
@@ -155,6 +195,9 @@ export default function VolConePanel() {
   const regimeLabel = formatVolConeRegime(current.regime);
   const regimeColor = volConeRegimeColor(current.regime);
   const analysis = selected ? buildVolConeAnalysis(selected) : null;
+  const liveCount = liveNameCount(names);
+  const source = sourceStatus(data.is_intraday, liveCount, names.length);
+  const showAsOfMarker = (name: VolConeName) => liveCount > 0 && !name.is_intraday;
 
   return (
     <>
@@ -180,7 +223,7 @@ export default function VolConePanel() {
             <MetricCell label="WING" value={formatPercentile(current.wing_score)} />
             <MetricCell label="REGIME" value={regimeLabel} tone={regimeTone(current.regime)} />
             <MetricCell
-              label={data.is_intraday ? "SOURCE (LIVE)" : "SOURCE DATE"}
+              label={source.label}
               value={data.source_as_of ?? "---"}
             />
           </div>
@@ -224,7 +267,7 @@ export default function VolConePanel() {
               testId="vol-cone-strip-source"
               label="SOURCE DATE"
               value={data.source_as_of ?? "---"}
-              sub={<>{data.is_intraday ? "LIVE THIS SESSION" : "SESSION AS OF"}</>}
+              sub={<>{source.sub}</>}
             />
           </RegimeStrip>
         )}
@@ -304,6 +347,7 @@ export default function VolConePanel() {
                         ) : (
                           name.ticker
                         )}
+                        {showAsOfMarker(name) && <RowAsOfMarker name={name} />}
                       </td>
                       <td>{formatMonthlyExpiry(name.expiry)}</td>
                       <td className="right">{name.dte}</td>
