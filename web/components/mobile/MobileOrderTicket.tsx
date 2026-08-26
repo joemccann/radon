@@ -13,6 +13,8 @@ import {
 } from "@/lib/optionsChainUtils";
 import { normalizeOptionExpiry, optionKey } from "@/lib/pricesProtocol";
 import type { PriceData } from "@/lib/pricesProtocol";
+import TicketRiskBlock from "@/components/ticker-detail/TicketRiskBlock";
+import { netPremiumForPayoff, payoffAtExpiry, payoffCurve } from "@/lib/order/payoff";
 import { OrderQuoteTelemetry } from "@/components/QuoteTelemetry";
 import { buildQuoteTelemetryModel, comboQuotePriceData } from "@/lib/quoteTelemetry";
 import type { PortfolioData } from "@/lib/types";
@@ -382,6 +384,45 @@ export default function MobileOrderTicket({
   // read-only preview so the operator sees max loss / max gain before Review.
   const teaserState = useOrderRisk(riskInput, portfolio);
 
+  /**
+   * Same gate as the desktop rail, rotated onto the phone. A gate that exists
+   * on desktop but not here would be worse than no gate: the operator learns
+   * to trust it and then meets a surface that does not have it.
+   */
+  const payoffLegs = useMemo(
+    () =>
+      legs.map((leg) => ({
+        action: leg.action,
+        right: leg.right,
+        strike: leg.strike,
+        quantity: leg.quantity,
+      })),
+    [legs],
+  );
+
+  const gateRiskState = riskState ?? teaserState;
+
+  const unboundedLoss = useMemo(() => {
+    if (gateRiskState?.summary.maxLossUnbounded !== true) return null;
+    const premium = netPremiumForPayoff(payoffLegs, legs.length > 1, signedLimitPrice);
+    const curve = payoffCurve(payoffLegs, premium, { spot: spot ?? 0 });
+    const turn = curve.breakevens.length > 0 ? curve.breakevens[curve.breakevens.length - 1] : null;
+    const atZero = payoffAtExpiry(payoffLegs, premium, 0) * 100 * (totalQty || 1);
+    const parts: string[] = [];
+    if (turn != null) parts.push(`Loss grows without limit beyond ${turn.toFixed(2)}`);
+    if (Number.isFinite(atZero) && atZero < 0) {
+      parts.push(`and reaches $${Math.abs(atZero).toLocaleString("en-US", { maximumFractionDigits: 0 })} at zero`);
+    }
+    return { sentence: parts.length > 0 ? `${parts.join(" ")}.` : "Loss grows without limit." };
+  }, [gateRiskState, payoffLegs, legs.length, signedLimitPrice, spot, totalQty]);
+
+  const [riskAcknowledged, setRiskAcknowledged] = useState(false);
+  useEffect(() => {
+    setRiskAcknowledged(false);
+  }, [confirmStep, signedLimitPrice, totalQty, legs.length]);
+
+  const transmitArmed = unboundedLoss == null || riskAcknowledged;
+
   const okToSubmit = riskState?.okToSubmit === true;
 
   // P2: step by an adaptive tick derived from the current price magnitude.
@@ -535,6 +576,19 @@ export default function MobileOrderTicket({
   const footer = confirmStep ? (
     <>
       {statusBlock}
+      {unboundedLoss && (
+        <div className="ticket-unbounded" data-testid="ticket-unbounded-warning">
+          <label className="ticket-unbounded-row tap-target">
+            <input
+              type="checkbox"
+              data-testid="ticket-unbounded-ack"
+              checked={riskAcknowledged}
+              onChange={(e) => setRiskAcknowledged(e.target.checked)}
+            />
+            <span>MAX LOSS UNBOUNDED. {unboundedLoss.sentence} Acknowledge to enable send.</span>
+          </label>
+        </div>
+      )}
       <div className="mobile-ticket__footer-row">
         <button
           type="button"
@@ -549,7 +603,7 @@ export default function MobileOrderTicket({
           type="button"
           className={`mobile-ticket__submit${submitColorClass ? ` ${submitColorClass}` : ""}`}
           onClick={handleSubmit}
-          disabled={!isValid || submitting || legs.length === 0 || !okToSubmit}
+          disabled={!isValid || submitting || legs.length === 0 || !okToSubmit || !transmitArmed}
           data-testid="mobile-order-ticket-submit"
         >
           {submitting ? (
@@ -566,6 +620,23 @@ export default function MobileOrderTicket({
   ) : (
     <>
       {statusBlock}
+      {legs.length > 0 && (
+        <div className="mobile-ticket__risk-block">
+          <TicketRiskBlock
+            legs={payoffLegs}
+            netPremium={netPremiumForPayoff(payoffLegs, legs.length > 1, signedLimitPrice)}
+            spot={spot ?? 0}
+            maxGain={gateRiskState?.summary.maxGain ?? null}
+            maxLoss={gateRiskState?.summary.maxLoss ?? null}
+            maxLossUnbounded={gateRiskState?.summary.maxLossUnbounded === true}
+            marginRequirement={gateRiskState?.summary.marginImpact?.requirement ?? null}
+            fundsAfter={gateRiskState?.summary.marginImpact?.availableAfter ?? null}
+            total={gateRiskState?.summary.totalCost ?? null}
+            totalLabel={gateRiskState?.summary.totalLabel ?? "TOTAL"}
+            isCredit={netPremiumForPayoff(payoffLegs, legs.length > 1, signedLimitPrice) < 0}
+          />
+        </div>
+      )}
       {riskTeaser ? (
         <div className="mobile-ticket__teaser" data-testid="mobile-order-ticket-teaser">
           {notionalDollars != null ? (
@@ -636,6 +707,21 @@ export default function MobileOrderTicket({
               <span className="mobile-ticket__confirm-value">{tif}</span>
             </div>
           </div>
+
+          {/* Same risk panel as the desktop rail, above the CTA. */}
+          <TicketRiskBlock
+            legs={payoffLegs}
+            netPremium={netPremiumForPayoff(payoffLegs, legs.length > 1, signedLimitPrice)}
+            spot={spot ?? 0}
+            maxGain={gateRiskState?.summary.maxGain ?? null}
+            maxLoss={gateRiskState?.summary.maxLoss ?? null}
+            maxLossUnbounded={gateRiskState?.summary.maxLossUnbounded === true}
+            marginRequirement={gateRiskState?.summary.marginImpact?.requirement ?? null}
+            fundsAfter={gateRiskState?.summary.marginImpact?.availableAfter ?? null}
+            total={gateRiskState?.summary.totalCost ?? null}
+            totalLabel={gateRiskState?.summary.totalLabel ?? "TOTAL"}
+            isCredit={netPremiumForPayoff(payoffLegs, legs.length > 1, signedLimitPrice) < 0}
+          />
 
           {/* Full risk summary — the single OrderRiskGate chokepoint. */}
           <div className="mobile-ticket__risk" data-testid="mobile-order-ticket-risk">
