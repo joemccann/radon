@@ -69,8 +69,13 @@ function regimeTone(regime: VolConeName["regime"]): "pos" | "warn" | "neg" | "mu
   return "mut";
 }
 
-function finiteBrushValue(value: number | null | undefined): number {
-  return value != null && Number.isFinite(value) ? value : 0;
+/** Null stays null. `VolConeSeriesPoint.atm_iv` is `number | null` and the
+ *  type comment says "Nulls are preserved for chart gaps" — the main chart
+ *  honours that, but the brush plotted a missing session as 0% implied vol, a
+ *  floor spike. The brush is what the trader drags to pick the chart window,
+ *  so a gap read as a crash-low vol print. R-273. */
+function brushValue(value: number | null | undefined): number | null {
+  return value != null && Number.isFinite(value) ? value : null;
 }
 
 function formatWingStrikes(put: number | null, call: number | null): string {
@@ -143,7 +148,7 @@ function RowAsOfMarker({ name }: { name: VolConeName }) {
 }
 
 export default function VolConePanel() {
-  const { data, loading, syncing, lastSync } = useVolCone();
+  const { data, loading, syncing, lastSync, error } = useVolCone();
   const { isMobile, hasMounted } = useViewport();
   const compact = hasMounted && isMobile;
 
@@ -175,6 +180,20 @@ export default function VolConePanel() {
 
   if ((loading || syncing) && !data) {
     return <SpectralLoader label="Loading UW vol cone scan" />;
+  }
+
+  if (error && !data) {
+    // Without this the component fell through to the empty state below, whose
+    // copy ("Data appears after the first successful pull") renders a fetch
+    // fault verbatim as a benign pre-population state — there was no code
+    // path here that could display an error at all. R-246.
+    return (
+      <SectionEmptyState
+        icon={Cone}
+        headline="Vol cone unavailable"
+        secondary={`The last /api/vol-cone request failed: ${error}`}
+      />
+    );
   }
 
   if (!data || data.missing || !data.current) {
@@ -487,7 +506,7 @@ export default function VolConePanel() {
         />
         {total >= 2 && (
           <BrushMinimap
-            values={series.map((point) => finiteBrushValue(point.atm_iv))}
+            values={series.map((point) => brushValue(point.atm_iv))}
             range={chartRange}
             onRangeChange={(range) => setCustomRange(range)}
             onCustom={() => setPreset("custom")}

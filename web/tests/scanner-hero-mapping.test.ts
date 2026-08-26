@@ -116,8 +116,12 @@ describe("coneFillPct", () => {
     expect(coneFillPct(coneName({ atm_iv: 0.46 }))).toBe(0);
   });
 
-  it("draws nothing when the cone is unusable", () => {
-    expect(coneFillPct(coneName({ atm_iv: null }))).toBe(0);
+  it("reports an unusable cone as unavailable, not as a zero fill", () => {
+    // Was `.toBe(0)`. That collided with the legitimate 0 for a name at or
+    // above the p90 ceiling — and the bar reads longer-is-better, so a
+    // candidate whose bounds failed to compute rendered a real IV number
+    // beside an empty bar that reads as maximally rich. R-272.
+    expect(coneFillPct(coneName({ atm_iv: null }))).toBeNull();
   });
 });
 
