@@ -284,16 +284,21 @@ def _journal_row(exec_id, action, qty, price, date, written):
     return (json.dumps(payload), date, written)
 
 
-class _FakeOverlayDb:
-    """The libsql surface `overlay_journal_realized_pnl` reads through."""
+def _paged_hrana_query(rows):
+    """Serve the overlay's keyset pages over the bounded transport (R-203).
 
-    def __init__(self, rows):
-        self._rows = rows
+    The overlay no longer reads the journal through ``db.client.get_db()``;
+    it drives ``journal_basis``'s 200-row keyset pager over Hrana HTTP, so
+    the fake stamps an ascending ``trade_id`` and honours cursor + LIMIT.
+    """
+    paged = [(f"t{index:04d}", *row) for index, row in enumerate(rows)]
 
-    def execute(self, sql, args=()):
-        cursor = MagicMock()
-        cursor.fetchall.return_value = self._rows
-        return cursor
+    def query(sql, args=(), timeout=None):
+        cursor = args[0]
+        limit = int(args[-1])
+        return [row for row in paged if row[0] > cursor][:limit]
+
+    return query
 
 
 def _option_close_row(exec_id: str, ib_pnl: float) -> dict:
@@ -311,13 +316,13 @@ def _option_close_row(exec_id: str, ib_pnl: float) -> dict:
 
 
 class TestMirrorCarriesJournalRealizedPnl:
-    def _run(self, monkeypatch, get_db):
-        import db.client as db_client
+    def _run(self, monkeypatch, hrana_query):
+        import db.hrana_http as hrana_http
         import monitor_daemon.handlers.evening_execution_sweep as sweep_mod
 
         mirrored = MagicMock(name="upsert_executed_order")
         monkeypatch.setattr(sweep_mod, "upsert_executed_order", mirrored)
-        monkeypatch.setattr(db_client, "get_db", get_db)
+        monkeypatch.setattr(hrana_http, "hrana_query", hrana_query)
         h = EveningExecutionSweepHandler()
         with patch(
             "monitor_daemon.handlers.evening_execution_sweep.IBClient",
@@ -339,13 +344,13 @@ class TestMirrorCarriesJournalRealizedPnl:
             _journal_row("o1", "BUY_OPTION", 10, 1.00, "2026-08-07", "w1"),
             _journal_row("0001.EVE.03", "SELL_OPTION", 10, 3.00, "2026-08-24", "w2"),
         ]
-        payload = self._run(monkeypatch, lambda: _FakeOverlayDb(rows))
+        payload = self._run(monkeypatch, _paged_hrana_query(rows))
         assert payload["realizedPNL"] == 2000.0
         assert payload["realizedPNLSource"] == "journal"
         assert payload["ibRealizedPNL"] == 1234.56
 
     def test_journal_unreachable_keeps_ib_figure_and_warns(self, captured_journal_upserts, monkeypatch, caplog):
-        def boom():
+        def boom(sql, args=(), timeout=None):
             raise RuntimeError("turso down")
 
         with caplog.at_level("WARNING", logger="monitor_daemon.handlers.evening_execution_sweep"):

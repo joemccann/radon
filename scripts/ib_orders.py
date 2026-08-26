@@ -252,9 +252,11 @@ def save_orders(data: dict):
 def _overlay_journal_realized_pnl(executed: list) -> None:
     try:
         from clients.journal_realized import overlay_journal_realized_pnl
-        from db.client import get_db
 
-        overlay_journal_realized_pnl(get_db(), executed)
+        # Reads the journal over the bounded transport itself (R-203): this
+        # runs inside service_cycle("orders-sync") before the per-execId
+        # executed_orders upserts, so it must not be able to wedge the cycle.
+        overlay_journal_realized_pnl(executed)
     except Exception as exc:  # noqa: BLE001 — advisory; IB figures stay
         print(f"  Warning: journal realized P&L overlay skipped: {exc}", file=sys.stderr)
 

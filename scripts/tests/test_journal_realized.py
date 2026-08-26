@@ -195,28 +195,33 @@ class TestApplyToFills:
 class TestLoadForFills:
     def test_queries_only_option_fill_tickers(self):
         calls = []
+        rows = [
+            _row("o1", "BUY_OPTION", 10, 1.00, 0.0, _C60, "2026-08-07", "w1"),
+            _row("c1", "SELL_OPTION", 10, 3.00, 0.0, _C60, "2026-08-24", "w2"),
+        ]
 
-        def execute(sql, args=()):
-            calls.append((sql, tuple(args)))
-            return [
-                _row("o1", "BUY_OPTION", 10, 1.00, 0.0, _C60, "2026-08-07", "w1"),
-                _row("c1", "SELL_OPTION", 10, 3.00, 0.0, _C60, "2026-08-24", "w2"),
-            ]
+        class _RecordingDb(_FakeDb):
+            def execute(_self, sql, args=()):
+                calls.append((sql, tuple(args)))
+                return _FakeDb.execute(_self, sql, args)
 
         fills = [
             _fill("c1", "SLV", 60.0, "C", "SLD", 10, 1.0),
             {"execId": "stk", "contract": {"symbol": "AAPL", "secType": "STK"}, "side": "BOT",
              "quantity": 5, "realizedPNL": None},
         ]
-        assert journal_realized_pnl_for_fills(execute, fills) == {"c1": 2000.0}
+        assert journal_realized_pnl_for_fills(_RecordingDb(rows=rows), fills) == {"c1": 2000.0}
+        # One full page ends the walk; only the option ticker is bound.
         assert len(calls) == 1
-        assert calls[0][1] == ("SLV",)
+        assert "SLV" in calls[0][1]
+        assert "AAPL" not in calls[0][1]
 
     def test_no_option_fills_skips_the_query(self):
-        def execute(sql, args=()):
-            raise AssertionError("must not query")
+        class _Refuse:
+            def execute(_self, sql, args=()):
+                raise AssertionError("must not query")
 
-        assert journal_realized_pnl_for_fills(execute, []) == {}
+        assert journal_realized_pnl_for_fills(_Refuse(), []) == {}
 
 
 class _FakeCursor:
@@ -228,16 +233,25 @@ class _FakeCursor:
 
 
 class _FakeDb:
-    """Mirrors the libsql connection surface the writers hand over."""
+    """Paging reader surface the keyset pager drives (R-203).
+
+    Rows are supplied in the legacy ``(payload, filled_at, written_at)`` shape
+    and stamped with a synthetic ascending ``trade_id`` here, matching the
+    four columns ``_fetch_journal_rows_for_tickers`` selects.
+    """
 
     def __init__(self, rows=None, error=None):
-        self._rows = rows or []
+        self._rows = [
+            (f"t{index:04d}", *row) for index, row in enumerate(rows or [])
+        ]
         self._error = error
 
     def execute(self, sql, args=()):
         if self._error:
             raise self._error
-        return _FakeCursor(self._rows)
+        cursor = args[0]
+        limit = int(args[-1])
+        return _FakeCursor([row for row in self._rows if row[0] > cursor][:limit])
 
 
 class TestOverlayWithDb:
@@ -247,7 +261,7 @@ class TestOverlayWithDb:
             _row("o1", "BUY_OPTION", 10, 1.00, 0.0, _C60, "2026-08-24", "w2"),
         ])
         fills = [_fill("o1", "SLV", 60.0, "C", "BOT", 10, None)]
-        overlay_journal_realized_pnl(db, fills)
+        overlay_journal_realized_pnl(fills, reader=db)
         assert fills[0]["realizedPNL"] is None
         assert "realizedPNLSource" not in fills[0]
         assert "ibRealizedPNL" not in fills[0]
@@ -258,7 +272,7 @@ class TestOverlayWithDb:
             _row("c1", "SELL_OPTION", 10, 3.00, 0.0, _C60, "2026-08-24", "w2"),
         ])
         fills = [_fill("c1", "SLV", 60.0, "C", "SLD", 10, 1234.5)]
-        overlay_journal_realized_pnl(db, fills)
+        overlay_journal_realized_pnl(fills, reader=db)
         assert fills[0]["realizedPNL"] == 2000.0
         assert fills[0]["ibRealizedPNL"] == 1234.5
         assert fills[0]["realizedPNLSource"] == "journal"
@@ -266,6 +280,159 @@ class TestOverlayWithDb:
     def test_journal_read_failure_keeps_ib_figure(self):
         db = _FakeDb(error=RuntimeError("stream not found"))
         fills = [_fill("c1", "SLV", 60.0, "C", "SLD", 10, 1234.5)]
-        overlay_journal_realized_pnl(db, fills)
+        overlay_journal_realized_pnl(fills, reader=db)
         assert fills[0]["realizedPNL"] == 1234.5
         assert "ibRealizedPNL" not in fills[0]
+
+
+class TestDroppedRowCompleteness:
+    """R-198: a row dropped for a non-quantity reason must not be invisible.
+
+    Both existing guards are quantity-only. Dropping a row removes its
+    quantity AND its cost together, so the two errors cancel exactly and the
+    replay fabricates realized P&L against a basis that is too low, with no
+    warning. The overlay then persists it into ``executed_orders.payload``.
+    """
+
+    def test_null_fill_price_open_refuses_instead_of_overstating(self, caplog):
+        # BUY 10 @ $1 (kept), BUY 10 @ $3 (dropped: fill_price null),
+        # SELL 10 @ $5. True average basis is $2/unit -> pnl $3,000.
+        # Replaying only the kept open gives a $1 basis -> $4,000, and the
+        # `qty (10) > abs(position_qty) (10)` guard is false, so nothing fires.
+        broken = _row("o2", "BUY_OPTION", 10, 3.00, 0.0, _C60, "2026-08-11", "w2")
+        payload = json.loads(broken[0])
+        payload["fill_price"] = None
+        rows = [
+            _row("o1", "BUY_OPTION", 10, 1.00, 0.0, _C60, "2026-08-07", "w1"),
+            (json.dumps(payload), broken[1], broken[2]),
+            _row("c1", "SELL_OPTION", 10, 5.00, 0.0, _C60, "2026-08-20", "w3"),
+        ]
+        with caplog.at_level("WARNING"):
+            realized = realized_pnl_by_exec_id(rows)
+        assert realized == {}, (
+            "a contract with an unusable journal row must keep IB's realizedPNL, "
+            f"not publish a fabricated figure: {realized}"
+        )
+        assert any("incomplete" in r.message.lower() or "incomplete" in r.getMessage().lower()
+                   for r in caplog.records), "the refusal must be logged"
+
+    def test_missing_contracts_field_refuses(self):
+        broken = _row("o2", "BUY_OPTION", 10, 3.00, 0.0, _C60, "2026-08-11", "w2")
+        payload = json.loads(broken[0])
+        payload.pop("contracts")
+        rows = [
+            _row("o1", "BUY_OPTION", 10, 1.00, 0.0, _C60, "2026-08-07", "w1"),
+            (json.dumps(payload), broken[1], broken[2]),
+            _row("c1", "SELL_OPTION", 10, 5.00, 0.0, _C60, "2026-08-20", "w3"),
+        ]
+        assert realized_pnl_by_exec_id(rows) == {}
+
+    def test_unrecognised_action_refuses(self):
+        broken = _row("o2", "TRANSFER", 10, 3.00, 0.0, _C60, "2026-08-11", "w2")
+        rows = [
+            _row("o1", "BUY_OPTION", 10, 1.00, 0.0, _C60, "2026-08-07", "w1"),
+            broken,
+            _row("c1", "SELL_OPTION", 10, 5.00, 0.0, _C60, "2026-08-20", "w3"),
+        ]
+        assert realized_pnl_by_exec_id(rows) == {}
+
+    def test_a_broken_row_does_not_taint_a_different_contract(self):
+        broken = _row("x1", "BUY_OPTION", 10, 3.00, 0.0, _C70, "2026-08-11", "w2")
+        payload = json.loads(broken[0])
+        payload["fill_price"] = None
+        rows = [
+            _row("o1", "BUY_OPTION", 10, 1.00, 0.0, _C60, "2026-08-07", "w1"),
+            (json.dumps(payload), broken[1], broken[2]),
+            _row("c1", "SELL_OPTION", 10, 5.00, 0.0, _C60, "2026-08-20", "w3"),
+        ]
+        realized = realized_pnl_by_exec_id(rows)
+        assert realized == {"c1": 4000.0}
+
+    def test_overlay_keeps_ib_figure_when_the_journal_is_unusable(self):
+        broken = _row("o2", "BUY_OPTION", 10, 3.00, 0.0, _C60, "2026-08-11", "w2")
+        payload = json.loads(broken[0])
+        payload["fill_price"] = None
+        rows = [
+            _row("o1", "BUY_OPTION", 10, 1.00, 0.0, _C60, "2026-08-07", "w1"),
+            (json.dumps(payload), broken[1], broken[2]),
+            _row("c1", "SELL_OPTION", 10, 5.00, 0.0, _C60, "2026-08-20", "w3"),
+        ]
+
+        fills = [_fill("c1", "SLV", 60.0, "C", "SLD", 10, 1234.0)]
+        overlay_journal_realized_pnl(fills, reader=_FakeDb(rows=rows))
+        assert fills[0]["realizedPNL"] == 1234.0
+        assert fills[0].get("realizedPNLSource") != "journal"
+
+
+class TestBoundedJournalRead:
+    """R-203: this read sits inside the orders-sync money path.
+
+    The unpaginated, unbounded ``SELECT ... WHERE ticker IN (...)`` over the
+    sync ``libsql_experimental`` connection exposes no execute timeout and
+    holds the GIL while blocked, so a stall wedges orders-sync with no
+    heartbeat and no executed-order rows landing. The sibling
+    ``journal_basis._fetch_journal_rows_for_tickers`` was converted to a
+    200-row keyset pager for exactly this reason.
+    """
+
+    def _paged_row(self, trade_id, *args, **kwargs):
+        payload, filled_at, written_at = _row(*args, **kwargs)
+        return (trade_id, payload, filled_at, written_at)
+
+    def test_read_is_paged_at_two_hundred_rows_per_statement(self):
+        statements = []
+        # 450 rows for one contract: 200 + 200 + 50.
+        rows = [
+            self._paged_row(
+                f"t{i:04d}", f"o{i}", "BUY_OPTION", 1, 1.00, 0.0, _C60, "2026-08-07", f"w{i}"
+            )
+            for i in range(450)
+        ]
+
+        class _Pager:
+            def execute(_self, sql, args=()):
+                statements.append((sql, tuple(args)))
+                cursor = args[0]
+                limit = args[-1]
+                page = [row for row in rows if row[0] > cursor][: int(limit)]
+                return _FakeCursor(page)
+
+        fills = [_fill("o0", "SLV", 60.0, "C", "BOT", 1, None)]
+        journal_realized_pnl_for_fills(_Pager(), fills)
+
+        assert len(statements) == 3, f"expected keyset pagination, got {len(statements)}"
+        for sql, args in statements:
+            assert "LIMIT" in sql.upper(), sql
+            assert args[-1] == 200, args
+
+    def test_overlay_does_not_read_the_journal_over_the_unbounded_connection(
+        self, monkeypatch
+    ):
+        """The default overlay transport must be the bounded one.
+
+        ``db.client.get_db()`` is the sync libsql connection whose own module
+        docstring states it exposes no connect or execute timeout.
+        """
+        import db.client as db_client
+
+        def _refuse():
+            raise AssertionError(
+                "journal_realized must not read the journal over get_db()"
+            )
+
+        monkeypatch.setattr(db_client, "get_db", _refuse)
+        calls = []
+
+        def _fake_hrana_query(sql, args=(), timeout=None):
+            calls.append((sql, tuple(args)))
+            return []
+
+        import db.hrana_http as hrana_http
+
+        monkeypatch.setattr(hrana_http, "hrana_query", _fake_hrana_query)
+
+        fills = [_fill("c1", "SLV", 60.0, "C", "SLD", 10, 1234.5)]
+        overlay_journal_realized_pnl(fills)
+        assert fills[0]["realizedPNL"] == 1234.5
+        assert calls, "the overlay must have gone through the bounded transport"
+        assert "journal" in calls[0][0].lower()

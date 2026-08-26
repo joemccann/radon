@@ -17,10 +17,11 @@ principle as the ``ib_sync`` journal-basis guard).
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Iterable, Optional, Sequence
+from typing import Any, Iterable, Optional, Sequence
 
 from .journal_basis import (
     _bucket_key,
+    _fetch_journal_rows_for_tickers,
     _claim_exec_parts,
     _exec_id_parts,
     _normalize_ticker,
@@ -35,7 +36,6 @@ logger = logging.getLogger(__name__)
 OPTION_MULTIPLIER = 100.0
 CLOSING_ACTIONS = {"SELL_OPTION", "BUY_TO_CLOSE"}
 
-JournalExecute = Callable[[str, Sequence[Any]], Iterable[Any]]
 
 
 def realized_pnl_by_exec_id(rows: Iterable[Any]) -> dict[str, float]:
@@ -46,55 +46,87 @@ def realized_pnl_by_exec_id(rows: Iterable[Any]) -> dict[str, float]:
     BAG envelopes (``right == "?"``) and stock rows are ignored.
     """
     buckets: dict[str, list[dict[str, Any]]] = {}
+    unusable: set[str] = set()
     for row in _ordered(rows):
         entry = _journal_entry(row)
         if entry is None:
+            key = _unusable_fill_key(row)
+            if key is not None:
+                unusable.add(key)
             continue
         buckets.setdefault(entry["key"], []).append(entry)
 
     realized: dict[str, float] = {}
     counted_parts: set[str] = set()
     for key, entries in buckets.items():
+        if key in unusable:
+            # Both replay guards are quantity-only, and a dropped row removes
+            # its quantity and its cost together, so they cancel and the
+            # replay silently prices the close against too small a basis.
+            # The shortfall is only visible here, where the row was seen.
+            logger.warning(
+                "journal_realized: %s has a journal row that is not a usable fill — "
+                "journal incomplete, keeping IB realizedPNL",
+                key,
+            )
+            continue
         realized.update(_replay_contract(key, entries, counted_parts))
     return realized
 
 
 def journal_realized_pnl_for_fills(
-    execute: JournalExecute, fills: Sequence[dict[str, Any]]
+    db: Any, fills: Sequence[dict[str, Any]]
 ) -> dict[str, float]:
-    """Load the journal for the option tickers in ``fills`` and replay it."""
+    """Load the journal for the option tickers in ``fills`` and replay it.
+
+    Reads through ``journal_basis._fetch_journal_rows_for_tickers``, the
+    200-row keyset pager. The previous unpaginated ``WHERE ticker IN (...)``
+    had no LIMIT and no date bound over a monotonically growing table, on a
+    path that runs inside ``service_cycle("orders-sync")``. R-203.
+    """
     tickers = sorted({t for t in (_option_fill_ticker(f) for f in fills) if t})
     if not tickers:
         return {}
-    placeholders = ", ".join("?" for _ in tickers)
-    rows = execute(
-        f"""
-        SELECT payload, filled_at, written_at
-        FROM journal
-        WHERE UPPER(COALESCE(
-            json_extract(payload, '$.ticker'),
-            json_extract(payload, '$.symbol'),
-            ''
-        )) IN ({placeholders})
-        ORDER BY COALESCE(filled_at, written_at) ASC, written_at ASC
-        """,
-        tuple(tickers),
-    )
-    return realized_pnl_by_exec_id(rows)
+    return realized_pnl_by_exec_id(_fetch_journal_rows_for_tickers(db, tickers))
 
 
-def overlay_journal_realized_pnl(db, fills: Sequence[dict[str, Any]]) -> None:
+class _HranaCursor:
+    def __init__(self, rows: list[tuple]) -> None:
+        self._rows = rows
+
+    def fetchall(self) -> list[tuple]:
+        return self._rows
+
+
+class _BoundedJournalReader:
+    """``execute(...).fetchall()`` surface backed by the bounded transport.
+
+    Lets the shared keyset pager run over Hrana HTTP, which has a real socket
+    timeout, instead of ``db.client.get_db()`` — the sync
+    ``libsql_experimental`` connection that exposes no execute timeout and
+    holds the GIL while blocked. R-203.
+    """
+
+    def execute(self, sql: str, args: Sequence[Any] = ()) -> _HranaCursor:
+        from db import hrana_http  # noqa: PLC0415 — lazy; libsql optional
+
+        return _HranaCursor(hrana_http.hrana_query(sql, args))
+
+
+def overlay_journal_realized_pnl(
+    fills: Sequence[dict[str, Any]], *, reader: Any = None
+) -> None:
     """Write-time overlay for the ``executed_orders`` writers.
 
-    ``db`` is a libsql connection (``execute(...).fetchall()``). Best-effort:
-    a journal read failure leaves IB's figures untouched so the sync itself
-    never fails on the overlay.
+    Best-effort: a journal read failure leaves IB's figures untouched so the
+    sync itself never fails on the overlay. ``reader`` exists for injection;
+    the default is the bounded transport.
     """
     if not fills:
         return
     try:
         realized = journal_realized_pnl_for_fills(
-            lambda sql, args: db.execute(sql, args).fetchall(), fills
+            reader if reader is not None else _BoundedJournalReader(), fills
         )
     except Exception as exc:  # noqa: BLE001 — overlay is advisory
         logger.warning("journal_realized: overlay skipped: %s", exc)
@@ -190,6 +222,26 @@ def _journal_entry(row: Any) -> Optional[dict[str, Any]]:
         "notional": qty * price * multiplier,
         "commission": commission,
     }
+
+
+def _unusable_fill_key(row: Any) -> Optional[str]:
+    """Bucket key of a row that names a contract but is not a usable fill.
+
+    ``None`` for rows the replay excludes BY DESIGN and whose exclusion keeps
+    the inventory balanced: rows with no full contract key (BAG envelopes,
+    stock), and rehydrated ``CLOSED`` round trips, which carry no net quantity
+    and whose P&L is realized elsewhere (T-124). Everything else — a missing
+    or non-numeric ``contracts``/``fill_price``, an action ``_signed_qty``
+    does not recognise — is a fill this contract's history is missing, and the
+    contract must fall back to IB's own figure. R-198.
+    """
+    payload = _payload_from_row(row)
+    key = _bucket_key(payload)
+    if key is None:
+        return None
+    if str(payload.get("action") or "").strip().upper() == "CLOSED":
+        return None
+    return key
 
 
 def _replay_contract(
