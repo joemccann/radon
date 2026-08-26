@@ -41,6 +41,8 @@ import { comboQuotePriceData } from "@/lib/quoteTelemetry";
 import { useViewport } from "@/lib/useViewport";
 import MobileChainLadder from "@/components/mobile/MobileChainLadder";
 import ComboSkewPanel from "@/components/ComboSkewPanel";
+import TicketRiskBlock from "@/components/ticker-detail/TicketRiskBlock";
+import { netPremiumForPayoff } from "@/lib/order/payoff";
 import { placeOrderFeedback } from "@/lib/orders/placeOrderFeedback";
 
 /* ─── Types ─── */
@@ -433,6 +435,19 @@ function OrderBuilder({
   // Pull the resolved state for the coverage chip + (later) submit gating.
   // Calling `useOrderRisk` directly here is equivalent to the gate; the gate
   // wraps both the hook and the summary render below.
+  // Per-combo legs for the exact expiry payoff. Ratio-normalised so the curve
+  // describes ONE combo, matching the "RISK · PER 1× COMBO" heading.
+  const payoffLegs = useMemo(
+    () =>
+      quotingLegs.map((leg) => ({
+        action: leg.action as "BUY" | "SELL",
+        right: leg.right as "C" | "P",
+        strike: leg.strike,
+        quantity: leg.quantity,
+      })),
+    [quotingLegs],
+  );
+
   const riskState = useOrderRisk(riskInput, portfolio);
   const submitPermitted = chainOrderSubmitPermitted(isValidPrice, riskState, isCombo, isDebit);
 
@@ -840,6 +855,25 @@ function OrderBuilder({
         </div>
 
         <OrderErrorBanner error={error} />
+
+        {/* Risk sits ABOVE the CTA so unbounded loss is read before the button,
+            not after it. Presentation only — the gate below remains the
+            chokepoint that decides whether the order may be submitted. */}
+        {riskState && (
+          <TicketRiskBlock
+            legs={payoffLegs}
+            netPremium={netPremiumForPayoff(payoffLegs, isCombo, signedLimitPrice)}
+            spot={spot ?? 0}
+            maxGain={riskState.summary.maxGain ?? null}
+            maxLoss={riskState.summary.maxLoss ?? null}
+            maxLossUnbounded={riskState.summary.maxLossUnbounded === true}
+            marginRequirement={riskState.summary.marginImpact?.requirement ?? null}
+            fundsAfter={riskState.summary.marginImpact?.availableAfter ?? null}
+            total={riskState.summary.totalCost ?? null}
+            totalLabel={riskState.summary.totalLabel ?? "TOTAL"}
+            isCredit={netPremiumForPayoff(payoffLegs, isCombo, signedLimitPrice) < 0}
+          />
+        )}
 
         {confirmStep && (
           <OrderRiskGate

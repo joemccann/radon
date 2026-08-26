@@ -12596,6 +12596,84 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
   }
 }
 
+/* Ticket risk panel — sits above the CTA so max loss is read before the
+   transmit button. Every cell is a real figure or "---"; nothing is padded
+   with a zero to keep the grid tidy. */
+.ticket-risk {
+  border: 1px solid var(--line-grid);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.ticket-risk-head {
+  display: flex;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line-grid);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.ticket-risk-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--line-grid);
+}
+
+.ticket-risk-cell {
+  background: var(--bg-panel);
+  padding: 8px 10px;
+}
+
+.ticket-risk-cell-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.ticket-risk-cell-value {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.ticket-risk-cell-value--gain { color: var(--signal-core); font-weight: 600; }
+.ticket-risk-cell-value--loss { color: var(--fault); font-weight: 600; }
+.ticket-risk-cell-value--warn { color: var(--warn); }
+
+.ticket-risk-total {
+  display: flex;
+  justify-content: space-between;
+  padding: 7px 10px;
+  border-top: 1px solid var(--line-grid);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.ticket-risk-payoff-wrap {
+  padding: 8px 10px;
+  border-top: 1px solid var(--line-grid);
+}
+
+.ticket-risk-payoff {
+  display: block;
+  width: 100%;
+  height: 72px;
+}
+
+.ticket-risk-payoff-axis {
+  display: flex;
+  justify-content: space-between;
+  padding-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  color: var(--text-muted);
+}
+
 .order-builder {
   margin-top: 8px;
   padding: 10px 12px;
