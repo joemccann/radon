@@ -20,7 +20,10 @@
  * A future third route — a mismatched option key, a market_price fallback on
  * one side only, a new price field — fails here without anyone predicting it.
  *
- * Seed pinned to 42 for CI reproducibility; RADON_FUZZ_RANDOM=1 explores.
+ * Seed pinned to 42 for CI reproducibility; RADON_FUZZ_RANDOM=1 explores. Each
+ * property carries an explicit timeout: vitest's 5s default is a per-TEST
+ * budget and a property is a thousand cases, which is fine locally and not
+ * always fine on a loaded CI runner.
  */
 import { describe, expect, it } from "vitest";
 import fc from "fast-check";
@@ -41,6 +44,7 @@ import type { PortfolioPosition } from "@/lib/types";
 const FC_OPTS = process.env.RADON_FUZZ_RANDOM === "1"
   ? { numRuns: 1000 }
   : { numRuns: 1000, seed: 42 };
+const PROPERTY_TIMEOUT_MS = 60_000;
 
 function todayET(): string {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -179,7 +183,7 @@ describe("same-day P&L identity (property)", () => {
       }),
       FC_OPTS,
     );
-  });
+  }, PROPERTY_TIMEOUT_MS);
 
   it("P2 — no quote can make a same-day position read its stale ib_daily_pnl", () => {
     fc.assert(
@@ -191,7 +195,7 @@ describe("same-day P&L identity (property)", () => {
       }),
       FC_OPTS,
     );
-  });
+  }, PROPERTY_TIMEOUT_MS);
 
   it("P3 — the same-day day-change % is Today P&L over the entry cost", () => {
     fc.assert(
@@ -205,7 +209,7 @@ describe("same-day P&L identity (property)", () => {
       }),
       FC_OPTS,
     );
-  });
+  }, PROPERTY_TIMEOUT_MS);
 
   it("P4 — an overnight position is NOT forced onto the entry baseline", () => {
     // The guard against over-correcting: the identity is same-day only. If a
@@ -232,7 +236,7 @@ describe("same-day P&L identity (property)", () => {
       underlying: { last: 577.39, bid: null, ask: null, close: 582.4, present: true },
     }, "2026-01-05");
     expect(getTodayPnlDollars(pos, prices)).not.toBe(surfaceTotalPnl(pos, prices));
-  });
+  }, PROPERTY_TIMEOUT_MS);
 
   it("P5 — a same-day STOCK position obeys the same identity", () => {
     const arbStock = fc.record({
@@ -269,5 +273,5 @@ describe("same-day P&L identity (property)", () => {
       }),
       FC_OPTS,
     );
-  });
+  }, PROPERTY_TIMEOUT_MS);
 });
