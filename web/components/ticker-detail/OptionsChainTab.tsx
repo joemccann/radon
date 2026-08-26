@@ -335,7 +335,7 @@ function OrderBuilder({
     if (isCombo) {
       const { bid, ask, mid } = signedNetPrices;
       if (bid == null || ask == null) return null;
-      return comboQuotePriceData({ symbol: ticker, bid, ask, last: mid });
+      return comboQuotePriceData({ symbol: ticker, bid, ask, last: mid, timestamp: netPrices.asOf });
     }
     const leg = legs[0];
     return prices[optionKey({
@@ -344,7 +344,7 @@ function OrderBuilder({
       strike: leg.strike,
       right: leg.right,
     })] ?? null;
-  }, [legs, isCombo, signedNetPrices, prices, ticker]);
+  }, [legs, isCombo, signedNetPrices, netPrices.asOf, prices, ticker]);
 
   const quoteLabel = useMemo(() => {
     if (legs.length === 0) return "";
