@@ -90,6 +90,102 @@ describe("cached polling does not amplify IB live sync", () => {
     second.unmount();
   });
 
+  it("paints a server-seeded portfolio synchronously and starts no-store polling after 30 seconds", async () => {
+    const refreshed = { ...portfolio, bankroll: 101_000 };
+    const fetchMock = vi.fn().mockResolvedValue(response(refreshed));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const hook = renderHook(() => usePortfolio(true, {
+      initialSnapshot: {
+        data: portfolio,
+        warning: "Turso read failed; serving last in-memory portfolio snapshot",
+      },
+    }));
+
+    expect(hook.result.current.loading).toBe(false);
+    expect(hook.result.current.data).toEqual(portfolio);
+    expect(hook.result.current.error).toContain("Turso read failed");
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(29_999);
+      await Promise.resolve();
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/portfolio",
+      expect.objectContaining({ cache: "no-store" }),
+    );
+    expect(hook.result.current.data?.bankroll).toBe(101_000);
+    hook.unmount();
+  });
+
+  it("requests entry-date enrichment only when explicitly enabled", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response(portfolio));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const hook = renderHook(() => usePortfolio(false, { includeEntryDates: true }));
+    await flush();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/portfolio?include=entry-dates",
+      expect.objectContaining({ cache: "no-store" }),
+    );
+    hook.unmount();
+  });
+
+  it("starts an enriched read immediately and ignores a pending base response on endpoint change", async () => {
+    let resolveBase!: (value: Response) => void;
+    const baseResponse = new Promise<Response>((resolve) => {
+      resolveBase = resolve;
+    });
+    const enriched = {
+      ...portfolio,
+      bankroll: 102_000,
+      trade_log_dates: { AAPL: "2026-08-25" },
+      contract_open_dates: { "AAPL|20260918|C|250": "2026-08-25" },
+    };
+    const fetchMock = vi.fn((url: string) => url.includes("include=entry-dates")
+      ? Promise.resolve(response(enriched))
+      : baseResponse);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const hook = renderHook(
+      ({ includeEntryDates }: { includeEntryDates: boolean }) =>
+        usePortfolio(false, { includeEntryDates }),
+      { initialProps: { includeEntryDates: false } },
+    );
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/portfolio");
+
+    hook.rerender({ includeEntryDates: true });
+    await flush();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/portfolio?include=entry-dates");
+    expect(hook.result.current.data?.bankroll).toBe(102_000);
+    expect(hook.result.current.data?.trade_log_dates).toEqual({ AAPL: "2026-08-25" });
+
+    resolveBase(response({ ...portfolio, bankroll: 99_000 }));
+    await flush();
+
+    expect(hook.result.current.data?.bankroll).toBe(102_000);
+    expect(hook.result.current.data?.contract_open_dates).toEqual({
+      "AAPL|20260918|C|250": "2026-08-25",
+    });
+    hook.unmount();
+  });
+
   it("two active orders hooks poll cached GET and never auto-POST", async () => {
     const fetchMock = vi.fn().mockResolvedValue(response(orders));
     vi.stubGlobal("fetch", fetchMock);

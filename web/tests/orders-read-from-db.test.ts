@@ -64,6 +64,60 @@ const execPayload = (execId: string, time = todayFillIso) => ({
 });
 
 describe("readOrdersFromDb", () => {
+  it("starts the independent open and executed order queries concurrently", async () => {
+    let resolveOpen!: (value: { rows: MockRow[] }) => void;
+    let resolveExecuted!: (value: { rows: MockRow[] }) => void;
+    const execute = vi.fn().mockImplementation(({ sql }: { sql: string }) => {
+      if (/FROM\s+open_orders/i.test(sql)) {
+        return new Promise<{ rows: MockRow[] }>((resolve) => { resolveOpen = resolve; });
+      }
+      return new Promise<{ rows: MockRow[] }>((resolve) => { resolveExecuted = resolve; });
+    });
+    vi.doMock("@/lib/db", () => ({
+      getDb: () => ({ execute }),
+      syncDb: vi.fn().mockResolvedValue(undefined),
+      resetDb: vi.fn(),
+    }));
+
+    const { readOrdersFromDb } = await import("../lib/orders/readOrdersFromDb");
+    const pending = readOrdersFromDb();
+
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
+    resolveOpen({ rows: [] });
+    resolveExecuted({ rows: [] });
+    await expect(pending).resolves.toBeNull();
+  });
+
+  it("coalesces concurrent snapshot callers into one two-query DB read", async () => {
+    process.env.RADON_DB_CACHE_FORCE = "1";
+    const execute = vi.fn().mockResolvedValue({ rows: [] });
+    vi.doMock("@/lib/db", () => ({
+      getDb: () => ({ execute }),
+      syncDb: vi.fn().mockResolvedValue(undefined),
+      resetDb: vi.fn(),
+    }));
+
+    try {
+      const { __clearDbCache } = await import("../lib/dbCache");
+      const { readOrdersSnapshotFromDb } = await import("../lib/orders/readOrdersFromDb");
+      const { invalidateOrdersSnapshotCache } = await import("../lib/orders/ordersReadCache");
+      __clearDbCache();
+
+      await Promise.all([
+        readOrdersSnapshotFromDb(),
+        readOrdersSnapshotFromDb(),
+      ]);
+      await readOrdersSnapshotFromDb();
+      expect(execute).toHaveBeenCalledTimes(2);
+
+      invalidateOrdersSnapshotCache();
+      await readOrdersSnapshotFromDb();
+      expect(execute).toHaveBeenCalledTimes(4);
+    } finally {
+      delete process.env.RADON_DB_CACHE_FORCE;
+    }
+  });
+
   it("returns null when both tables are empty", async () => {
     mockGetDb([], []);
     const { readOrdersFromDb } = await import("../lib/orders/readOrdersFromDb");

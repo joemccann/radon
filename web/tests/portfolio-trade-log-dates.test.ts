@@ -72,6 +72,44 @@ beforeEach(() => {
 });
 
 describe("GET /api/portfolio — trade_log_dates source", () => {
+  it("keeps the base portfolio read to one snapshot statement with no journal scan", async () => {
+    mockDb({
+      portfolio: {
+        ...makePortfolio(),
+        trade_log_dates: { LEGACY: "2025-01-01" },
+        contract_open_dates: { "LEGACY|20260101|C|1": "2025-01-01" },
+      },
+    });
+    const { GET } = await import("../app/api/portfolio/route");
+    const res = await GET(new Request("http://localhost/api/portfolio"));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.trade_log_dates).toBeUndefined();
+    expect(body.contract_open_dates).toBeUndefined();
+    expect(mockExecute).toHaveBeenCalledTimes(1);
+    const statements = mockExecute.mock.calls.map(([statement]) => String(statement.sql));
+    expect(statements[0]).toMatch(/FROM\s+portfolio_snapshots/i);
+    expect(statements.join("\n")).not.toMatch(/FROM\s+journal/i);
+  });
+
+  it("returns a live sync snapshot without entry-date maps", async () => {
+    mockRadonFetch.mockResolvedValue({
+      ...makePortfolio(),
+      trade_log_dates: { LEGACY: "2025-01-01" },
+      contract_open_dates: { "LEGACY|20260101|C|1": "2025-01-01" },
+    });
+
+    const { POST } = await import("../app/api/portfolio/route");
+    const res = await POST();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.trade_log_dates).toBeUndefined();
+    expect(body.contract_open_dates).toBeUndefined();
+    expect(mockExecute).not.toHaveBeenCalled();
+  });
+
   it("derives trade_log_dates from the journal table", async () => {
     mockDb({
       journalRows: [
@@ -84,7 +122,7 @@ describe("GET /api/portfolio — trade_log_dates source", () => {
     );
 
     const { GET } = await import("../app/api/portfolio/route");
-    const res = await GET();
+    const res = await GET(new Request("http://localhost/api/portfolio?include=entry-dates"));
     const body = await res.json();
 
     expect(res.status).toBe(200);
@@ -103,7 +141,7 @@ describe("GET /api/portfolio — trade_log_dates source", () => {
     );
 
     const { GET } = await import("../app/api/portfolio/route");
-    const res = await GET();
+    const res = await GET(new Request("http://localhost/api/portfolio?include=entry-dates"));
     const body = await res.json();
 
     expect(res.status).toBe(200);
@@ -124,7 +162,7 @@ describe("GET /api/portfolio — trade_log_dates source", () => {
     });
 
     const { GET } = await import("../app/api/portfolio/route");
-    const res = await GET();
+    const res = await GET(new Request("http://localhost/api/portfolio?include=entry-dates"));
     const body = await res.json();
 
     expect(res.status).toBe(200);
@@ -139,7 +177,7 @@ describe("GET /api/portfolio — trade_log_dates source", () => {
     );
 
     const { GET } = await import("../app/api/portfolio/route");
-    const res = await GET();
+    const res = await GET(new Request("http://localhost/api/portfolio?include=entry-dates"));
     const body = await res.json();
 
     expect(res.status).toBe(200);

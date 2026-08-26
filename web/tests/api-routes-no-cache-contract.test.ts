@@ -121,7 +121,7 @@ const DB_FIRST_ROUTES: { path: string; dbHelperPattern: RegExp }[] = [
   { path: "app/api/scanner/route.ts", dbHelperPattern: /readScannerFromDb\s*\(/ },
   { path: "app/api/flow-analysis/route.ts", dbHelperPattern: /readFlowAnalysisFromDb\s*\(/ },
   { path: "app/api/performance/route.ts", dbHelperPattern: /readPerformanceFromDb\s*\(/ },
-  { path: "app/api/portfolio/route.ts", dbHelperPattern: /readPortfolioFromDb\s*\(/ },
+  { path: "app/api/portfolio/route.ts", dbHelperPattern: /readPortfolioSnapshot\s*\(/ },
   { path: "app/api/journal/route.ts", dbHelperPattern: /readJournalFromDb\s*\(/ },
   // cash-flows reads via FastAPI proxy which queries Turso server-side
   { path: "app/api/cash-flows/route.ts", dbHelperPattern: /radonFetch\s*\(\s*[`"']\/cash-flows/ },
@@ -184,13 +184,13 @@ describe("Turso source-of-truth — orders routes must not read data/orders.json
 });
 
 describe("Turso source-of-truth — portfolio route must not read flat JSON", () => {
-  it("app/api/portfolio/route.ts reads portfolio and trade dates from Turso only", async () => {
+  it("app/api/portfolio/route.ts reads the snapshot and optional trade dates from Turso only", async () => {
     const src = await readFile(join(REPO_ROOT, "app/api/portfolio/route.ts"), "utf8");
     const stripped = src
       .replace(/\/\*[\s\S]*?\*\//g, "")
       .replace(/(^|[^:])\/\/[^\n]*/g, "$1");
 
-    expect(stripped).toMatch(/readPortfolioFromDb\s*\(/);
+    expect(stripped).toMatch(/readPortfolioSnapshot\s*\(/);
     expect(stripped).toMatch(/FROM\s+journal/i);
     expect(stripped).not.toContain("data/portfolio.json");
     expect(stripped).not.toContain("data/trade_log.json");

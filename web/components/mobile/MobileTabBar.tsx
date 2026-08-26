@@ -60,6 +60,7 @@ export default function MobileTabBar({ onOpenMore }: MobileTabBarProps) {
           <Link
             key={tab.label}
             href={tab.href ?? "#"}
+            prefetch={false}
             className={className}
             data-testid={`mobile-tab-${tab.label.toLowerCase()}`}
           >

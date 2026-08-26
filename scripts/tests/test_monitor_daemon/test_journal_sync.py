@@ -674,10 +674,32 @@ class TestSellCloseLabeling:
     def _fake_db(self, rows):
         # Real libsql cursors expose fetchall(), NOT .rows (CTA-01): keep the
         # fake driver-faithful so a .rows regression fails here.
-        result = MagicMock(spec=["fetchall"])
-        result.fetchall.return_value = rows
+        paginated = [
+            (f"test-{index:08d}", *row)
+            for index, row in enumerate(rows, start=1)
+        ]
+
+        def execute(sql, params=()):
+            result = MagicMock(spec=["fetchall"])
+            if "WHERE trade_id > ?" not in str(sql):
+                result.fetchall.return_value = []
+                return result
+
+            cursor = str(params[0])
+            tickers = {str(value) for value in params[1:-1]}
+            limit = int(params[-1])
+            matching = []
+            for row in paginated:
+                trade_id, payload_json, _filled_at, _written_at = row
+                payload = json.loads(payload_json)
+                ticker = str(payload.get("ticker") or payload.get("symbol") or "").upper()
+                if trade_id > cursor and ticker in tickers:
+                    matching.append(row)
+            result.fetchall.return_value = matching[:limit]
+            return result
+
         db = MagicMock()
-        db.execute.return_value = result
+        db.execute.side_effect = execute
         return db
 
     def _row(self, payload: dict, filled_at: str = "2026-04-15T10:00:00Z") -> tuple:

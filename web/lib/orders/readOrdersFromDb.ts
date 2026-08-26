@@ -9,6 +9,7 @@ import { withTimeout } from "@/lib/asyncTimeout";
 import type { OrdersData } from "@tools/schemas/ib-orders";
 import { filterExecutedToEtToday } from "@/lib/orders/executedToday";
 import { isPriorSessionDayOrder } from "@/lib/orders/workingOrders";
+import { readCachedOrdersSnapshot } from "@/lib/orders/ordersReadCache";
 
 export type OrdersSnapshot = Static<typeof OrdersData>;
 
@@ -59,26 +60,27 @@ export async function readOrdersFromDb(): Promise<OrdersSnapshot | null> {
     resetDb(syncIdentity);
   }
 
-  const openResult = await dbExecute(
-    {
-      sql: `SELECT payload, updated_at FROM open_orders ORDER BY updated_at DESC`,
-      args: [],
-    },
-    { timeoutMs: DB_READ_TIMEOUT_MS, label: "open orders" },
-  );
-
   const cutoff = new Date(
     Date.now() - EXECUTED_SQL_LOOKBACK_HOURS * 60 * 60 * 1000,
   ).toISOString();
-  const execResult = await dbExecute(
-    {
-      sql: `SELECT payload, fill_time FROM executed_orders
-            WHERE fill_time >= ?
-            ORDER BY fill_time DESC`,
-      args: [cutoff],
-    },
-    { timeoutMs: DB_READ_TIMEOUT_MS, label: "executed orders" },
-  );
+  const [openResult, execResult] = await Promise.all([
+    dbExecute(
+      {
+        sql: `SELECT payload, updated_at FROM open_orders ORDER BY updated_at DESC`,
+        args: [],
+      },
+      { timeoutMs: DB_READ_TIMEOUT_MS, label: "open orders" },
+    ),
+    dbExecute(
+      {
+        sql: `SELECT payload, fill_time FROM executed_orders
+              WHERE fill_time >= ?
+              ORDER BY fill_time DESC`,
+        args: [cutoff],
+      },
+      { timeoutMs: DB_READ_TIMEOUT_MS, label: "executed orders" },
+    ),
+  ]);
 
   const open: Open[] = [];
   let latestOpenSync = "";
@@ -117,5 +119,7 @@ export async function readOrdersFromDb(): Promise<OrdersSnapshot | null> {
 }
 
 export async function readOrdersSnapshotFromDb(): Promise<OrdersSnapshot> {
-  return (await readOrdersFromDb()) ?? EMPTY_ORDERS;
+  return readCachedOrdersSnapshot(
+    async () => (await readOrdersFromDb()) ?? EMPTY_ORDERS,
+  );
 }
