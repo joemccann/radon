@@ -26,9 +26,17 @@ else
 fi
 
 usage() {
-  echo "usage: radon-app-runtime {pull|run <unit>}" >&2
+  echo "usage: radon-app-runtime {pull|run <unit>|stop <unit>}" >&2
   exit 64
 }
+
+# Tag used when the pinned SHA was never pushed. app-images.yml sets
+# cancel-in-progress, so a second push to main inside the 60-minute build
+# budget cancels the first build and SHA1's `Push SHA tags to GHCR` step never
+# runs — while ci.yml's deploy deliberately does not wait on app-images, so
+# SHA1 still deploys. Without a fallback all five app units docker-run a
+# `manifest unknown` at once. R-234.
+RADON_APP_IMAGE_FALLBACK_TAG="${RADON_APP_IMAGE_FALLBACK_TAG:-latest}"
 
 image_tag() {
   if [[ -n "${RADON_APP_IMAGE_TAG:-}" ]]; then
@@ -42,12 +50,34 @@ image_tag() {
   printf 'latest\n'
 }
 
+image_available() {
+  "$DOCKER" manifest inspect "$1" >/dev/null 2>&1
+}
+
+# Resolve a repo to a tag that actually exists, preferring the pinned SHA.
+resolve_image() {
+  local repo="$1"
+  local pinned="${repo}:$(image_tag)"
+  if image_available "$pinned"; then
+    printf '%s\n' "$pinned"
+    return 0
+  fi
+  local fallback="${repo}:${RADON_APP_IMAGE_FALLBACK_TAG}"
+  if image_available "$fallback"; then
+    printf 'image %s unavailable; falling back to %s\n' "$pinned" "$fallback" >&2
+    printf '%s\n' "$fallback"
+    return 0
+  fi
+  printf 'neither %s nor %s is available\n' "$pinned" "$fallback" >&2
+  return 69
+}
+
 python_image() {
-  printf 'ghcr.io/joemccann/radon-python:%s\n' "$(image_tag)"
+  resolve_image 'ghcr.io/joemccann/radon-python'
 }
 
 node_image() {
-  printf 'ghcr.io/joemccann/radon-node:%s\n' "$(image_tag)"
+  resolve_image 'ghcr.io/joemccann/radon-node'
 }
 
 is_app_unit() {
@@ -74,6 +104,16 @@ cmd_pull() {
   "$DOCKER" pull "$(node_image)"
 }
 
+cmd_stop() {
+  local unit="${1:-}"
+  [[ -n "$unit" ]] || usage
+  refuse_host_plane "$unit"
+  is_app_unit "$unit" || exit 64
+  # Idempotent: ExecStopPost runs on every stop, including ones where the
+  # container already exited on its own. R-232.
+  "$DOCKER" rm -f "$unit" >/dev/null 2>&1 || true
+}
+
 cmd_run() {
   local unit="${1:-}"
   local ids image workdir
@@ -95,6 +135,20 @@ cmd_run() {
     radon-relay.service|radon-newsfeed.service) image="$(node_image)" ;;
     *) exit 64 ;;
   esac
+
+  # R-232, and its limit: the container's processes land in
+  # system.slice/docker-<id>.scope, NOT the unit's cgroup, so systemd's
+  # KillMode=control-group sweep and the post-TimeoutStopSec SIGKILL reach only
+  # the `docker run` client and the container survives as an orphan holding
+  # --name and both state bind mounts. Pointing --cgroup-parent at the unit is
+  # NOT the fix: Docker's systemd cgroup driver accepts a slice, not a unit
+  # path (asserted in cloud/tests/test_app_runtime.py). The reachable half is
+  # reaping the orphan — here on the way in, and via ExecStopPost= in each
+  # runtime-container.conf example on the way out. Without this the restart
+  # fails on `Conflict. The container name "/<unit>" is already in use`, and
+  # Restart=always + RestartSec=5 + StartLimitBurst=5 parks the unit
+  # start-limit-hit inside 25s while the orphan keeps writing to data/.
+  "$DOCKER" rm -f "$unit" >/dev/null 2>&1 || true
 
   set -- \
     run \
@@ -145,6 +199,10 @@ cmd_run() {
 
 [[ $# -ge 1 ]] || usage
 case "$1" in
+  stop)
+    [[ $# -eq 2 ]] || usage
+    cmd_stop "$2"
+    ;;
   pull)
     [[ $# -eq 1 ]] || usage
     cmd_pull
