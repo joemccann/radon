@@ -244,3 +244,96 @@ class TestOwnership:
             return
         hits = _violations(changed, data["rules"])
         assert not hits, "docs contract:\n  " + "\n  ".join(hits)
+
+
+# ── T-163: preflight claims must match the preflight contract ─────
+#
+# `1b326772` removed EQUIBLES_API_KEY from cloud/config/required-env.txt and
+# deleted its only assertion, leaving two docs asserting a fail-closed guard
+# that no longer exists. Nothing noticed. This closes that loop in both
+# directions: a doc may not claim a key IS in the contract when it is absent,
+# and may not claim one is NOT there when it is present.
+
+_REQUIRED_ENV = _ROOT / "cloud" / "config" / "required-env.txt"
+_PREFLIGHT_DOCS = ("docs/cloud-services.md", "docs/operations.md")
+_CONTRACT_PATH = "required-env.txt"
+_CODE_SPAN = re.compile(r"`[^`]*`")
+_ENV_NAME = re.compile(r"`([A-Z][A-Z0-9_]{2,})`")
+_NEGATION = re.compile(r"\b(not|NOT|never|no longer|absent|missing|held out)\b")
+
+
+def _required_env_names() -> set[str]:
+    text = _REQUIRED_ENV.read_text(encoding="utf-8")
+    return {
+        line.strip()
+        for line in text.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+
+
+def _sentences(paragraph: str) -> list[str]:
+    """Split on sentence ends, holding dotted code spans together.
+
+    `cloud/config/required-env.txt` and `check-env.py` are full of periods, so
+    the dots inside backticks are masked before the split and restored after.
+    """
+    masked = _CODE_SPAN.sub(lambda m: m.group(0).replace(".", "\x00"), paragraph)
+    parts = re.split(r"(?<=[.!?])\s+", masked)
+    return [part.replace("\x00", ".") for part in parts if part.strip()]
+
+
+def _claim_units(text: str) -> list[str]:
+    """Markdown split into claim-sized units: one sentence or table row each.
+
+    Wrapped prose is rejoined before splitting so a claim broken across two
+    source lines reads as one sentence. Table rows stay one unit per row so an
+    unrelated row in the same table cannot lend its env names to a neighbour.
+    """
+    units: list[str] = []
+    for block in text.split("\n\n"):
+        lines = [line for line in block.splitlines() if line.strip()]
+        if not lines:
+            continue
+        if all(line.lstrip().startswith("|") for line in lines):
+            units.extend(lines)
+        else:
+            units.extend(_sentences(" ".join(lines)))
+    return units
+
+
+class TestPreflightContractClaims:
+    """Docs claiming check-env.py fails closed on a key must match reality.
+
+    Polarity is read per claim unit: a unit naming the contract file and
+    carrying a negation ("NOT in", "no longer", "held out") asserts absence,
+    otherwise it asserts presence. Coarse by design — it cannot parse an
+    argument, only whether the names a unit ties to the contract file are
+    actually in it.
+    """
+
+    def test_the_contract_file_is_parseable(self):
+        names = _required_env_names()
+        assert "TURSO_DB_URL" in names, f"required-env.txt parse looks wrong: {sorted(names)[:5]}"
+
+    def test_no_doc_misstates_the_required_env_contract(self):
+        required = _required_env_names()
+        wrong: list[str] = []
+        for rel in _PREFLIGHT_DOCS:
+            path = _ROOT / rel
+            assert path.is_file(), f"{rel} is missing"
+            for unit in _claim_units(path.read_text(encoding="utf-8")):
+                if _CONTRACT_PATH not in unit:
+                    continue
+                negated = bool(_NEGATION.search(unit))
+                for name in _ENV_NAME.findall(unit):
+                    present = name in required
+                    if negated and present:
+                        wrong.append(f"{rel}: claims {name} is NOT in the contract, but it is")
+                    elif not negated and not present:
+                        wrong.append(f"{rel}: claims {name} IS in the contract, but it is absent")
+
+        assert not wrong, (
+            "Doc claims about cloud/config/required-env.txt do not match the "
+            "file:\n  " + "\n  ".join(sorted(set(wrong))) +
+            "\nFix the doc, or add the key to the contract deliberately."
+        )
