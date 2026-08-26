@@ -600,21 +600,31 @@ def run(
     scan_time = now.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
     today = now.astimezone(timezone.utc).date()
 
-    if client is None:
-        from clients.equibles_client import EquiblesClient
-        client = EquiblesClient()
+    # Client construction is INSIDE the health-reporting try: an absent or
+    # rejected EQUIBLES_API_KEY raises EquiblesAuthError from
+    # EquiblesClient.__init__, and outside the try that killed the oneshot
+    # before any _record_health call, so NO service_health row was written at
+    # all. The service is registered for freshness, so a row that never
+    # arrives is silent rather than stale and nothing alerts.
+    try:
+        if client is None:
+            from clients.equibles_client import EquiblesClient
+            client = EquiblesClient()
 
-    requests_before = getattr(client, "request_count", 0)
-    universe = resolve_universe(tickers)
-    entries = [entry for entry in (_fetch_entry(client, t, today) for t in universe) if entry]
-    board = _fetch_board(client)
+        requests_before = getattr(client, "request_count", 0)
+        universe = resolve_universe(tickers)
+        entries = [entry for entry in (_fetch_entry(client, t, today) for t in universe) if entry]
+        board = _fetch_board(client)
 
-    payload = build_payload(
-        entries=entries,
-        board=board,
-        scan_time=scan_time,
-        requests_used=getattr(client, "request_count", 0) - requests_before,
-    )
+        payload = build_payload(
+            entries=entries,
+            board=board,
+            scan_time=scan_time,
+            requests_used=getattr(client, "request_count", 0) - requests_before,
+        )
+    except Exception as exc:  # noqa: BLE001 — re-raised; the row must exist first
+        _record_health("error", scan_time, error={"message": f"cycle aborted: {exc}"})
+        raise
 
     if not is_payload_valid(payload):
         _record_health(
