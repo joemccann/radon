@@ -20,13 +20,20 @@
 
 import { test, expect, type Page } from "@playwright/test";
 
+import { watchPortfolioRequests } from "./portfolio-request-guard";
+
 const ROUTES = ["/dashboard", "/portfolio", "/orders", "/journal", "/scanner"];
 
 async function stubAllApis(page: Page) {
   await page.unrouteAll({ behavior: "ignoreErrors" });
-  await page.route("**/api/portfolio", (route) =>
-    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ positions: [], last_sync: new Date().toISOString(), bankroll: 0, peak_value: 0, total_deployed_pct: 0, total_deployed_dollars: 0, remaining_capacity_pct: 100, position_count: 0, defined_risk_count: 0, undefined_risk_count: 0, avg_kelly_optimal: null, exposure: {}, violations: [] }) }),
-  );
+  const portfolioGuard = watchPortfolioRequests(page);
+  // "**/api/portfolio**" — the /orders route asks for
+  // "/api/portfolio?include=entry-dates" and the bare glob does not match a
+  // URL with a query string (T-172).
+  await page.route("**/api/portfolio**", (route) => {
+    portfolioGuard.record(route.request().url());
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ positions: [], last_sync: new Date().toISOString(), bankroll: 0, peak_value: 0, total_deployed_pct: 0, total_deployed_dollars: 0, remaining_capacity_pct: 100, position_count: 0, defined_risk_count: 0, undefined_risk_count: 0, avg_kelly_optimal: null, exposure: {}, violations: [] }) });
+  });
   await page.route("**/api/orders", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ open_orders: [], executed_orders: [], open_count: 0, executed_count: 0, last_sync: new Date().toISOString() }) }),
   );
@@ -58,6 +65,8 @@ async function stubAllApis(page: Page) {
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ symbol: "AAPL", expiry: "20260320", exchange: "SMART", strikes: [195, 200, 205], multiplier: "100" }) }),
   );
   await page.route("**/api/prices**", (route) => route.abort());
+
+  return portfolioGuard;
 }
 
 test.describe("PWA shell assertions", () => {
@@ -138,7 +147,7 @@ test.describe("PWA shell assertions", () => {
 test.describe("Mobile chrome on every primary route", () => {
   for (const route of ROUTES) {
     test(`${route} mounts MobileShell, locks data-mobile, no horizontal scroll`, async ({ page }) => {
-      await stubAllApis(page);
+      const portfolioGuard = await stubAllApis(page);
       await page.goto(route);
 
       await expect(page.getByTestId("mobile-tab-bar")).toBeVisible();
@@ -151,6 +160,10 @@ test.describe("Mobile chrome on every primary route", () => {
       }));
       // Allow 1px rounding slack
       expect(widths.scrollWidth).toBeLessThanOrEqual(widths.clientWidth + 1);
+
+      // No /api/portfolio* request may escape the mock into the real server.
+      // /orders adds "?include=entry-dates", which a bare glob misses (T-172).
+      await portfolioGuard.assertAllRouted();
     });
   }
 });
