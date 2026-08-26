@@ -221,9 +221,10 @@ export default function MobileOrderTicket({
         bid: signedQuote.bid,
         ask: signedQuote.ask,
         last: signedQuote.mid,
+        timestamp: netQuote.asOf,
       }),
     );
-  }, [isCombo, legs, prices, ticker, signedQuote.bid, signedQuote.ask, signedQuote.mid]);
+  }, [isCombo, legs, prices, ticker, signedQuote.bid, signedQuote.ask, signedQuote.mid, netQuote.asOf]);
 
   const quoteTelemetryLabel = useMemo(() => {
     const soleLeg = !isCombo && legs.length === 1 ? legs[0] : null;

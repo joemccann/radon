@@ -3,7 +3,7 @@ import type {
   PositionReturnCapitalPayloadV2,
 } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
-import { optionKey } from "@/lib/pricesProtocol";
+import { oldestQuoteTimestamp, optionKey } from "@/lib/pricesProtocol";
 
 /* ─── Formatters ──────────────────────────────────────────── */
 
@@ -412,7 +412,7 @@ export function resolveNaturalSpreadQuote(
   ticker: string,
   position: PortfolioPosition,
   prices: Record<string, PriceData>,
-): { bid: number; ask: number; mid: number } | null {
+): { bid: number; ask: number; mid: number; asOf?: string } | null {
   if (position.legs.length < 2) return null;
   const signedByKey = new Map<string, number>();
   for (const leg of position.legs) {
@@ -427,9 +427,12 @@ export function resolveNaturalSpreadQuote(
   const divisor = netLegs.map(([, signed]) => Math.abs(signed)).reduce(integerGcd);
   let bid = 0;
   let ask = 0;
+  // The spread is only as fresh as its stalest leg.
+  const legQuotes: PriceData[] = [];
   for (const [key, signed] of netLegs) {
     const quote = prices[key];
     if (!quote || quote.bid == null || quote.ask == null) return null;
+    legQuotes.push(quote);
     const ratio = Math.abs(signed) / divisor;
     if (signed > 0) {
       bid += ratio * quote.bid;
@@ -440,7 +443,7 @@ export function resolveNaturalSpreadQuote(
     }
   }
   if (bid > ask) return null;
-  return { bid, ask, mid: (bid + ask) / 2 };
+  return { bid, ask, mid: (bid + ask) / 2, asOf: oldestQuoteTimestamp(legQuotes) };
 }
 
 /**
