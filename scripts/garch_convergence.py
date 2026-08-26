@@ -103,8 +103,8 @@ class TickerVol:
     hv252: float = 0.0
     leap_atm_iv: float = 0.0      # ATM LEAP IV (~50Δ)
     leap_30d_iv: float = 0.0      # 30Δ LEAP IV
-    iv_rank: float = 0.0
-    current_iv: float = 0.0
+    iv_rank: Optional[float] = None
+    current_iv: Optional[float] = None
     leap_count: int = 0
     has_leaps: bool = False
     error: Optional[str] = None
@@ -129,7 +129,7 @@ class PairAnalysis:
     lagger: str = ""
     divergence: float = 0.0           # IV/HV ratio A - IV/HV ratio B
     lagger_hv_iv_gap: float = 0.0     # lagger HV20 - lagger LEAP IV
-    lagger_iv_rank: float = 0.0
+    lagger_iv_rank: Optional[float] = None
     shared_vol_driver: str = ""
     # Gate pass/fail
     gate_divergence: bool = False
@@ -206,18 +206,30 @@ def _calc_hv(prices: List[float], period: int) -> float:
 
 # ── UW data fetchers ─────────────────────────────────────────────
 
-def _fetch_uw_iv(ticker: str, client: UWClient) -> Tuple[float, float]:
-    """Current IV and IV rank from UW. Returns (iv%, rank%)."""
+def _fetch_uw_iv(
+    ticker: str, client: UWClient
+) -> Tuple[Optional[float], Optional[float]]:
+    """Current IV and IV rank from UW. ``(None, None)`` when UW cannot answer.
+
+    The sentinel is not cosmetic. Zero is the most bullish value every
+    downstream threshold tests for — gate 4 wants ``< 50``, the STRONG tier
+    wants ``< 30`` — and ``UWRateLimitError`` and ``UWAuthError`` both
+    subclass ``UWAPIError``, so returning a literal ``(0.0, 0.0)`` on a quota
+    or auth failure manufactured STRONG long-vol ideas out of an outage.
+    Zero is also a legal real value, so nothing downstream could separate the
+    two. R-199.
+    """
     try:
         data = client.get_iv_rank(ticker)
-        if "data" in data and data["data"]:
-            latest = data["data"][0]
-            iv = float(latest.get("volatility") or 0) * 100
-            rank = float(latest.get("iv_rank_1y") or 0)
-            return iv, rank
-    except UWAPIError:
-        pass
-    return 0.0, 0.0
+    except UWAPIError as exc:
+        print(f"⚠ UW IV rank unavailable for {ticker}: {exc}", file=sys.stderr)
+        return None, None
+    if "data" in data and data["data"]:
+        latest = data["data"][0]
+        iv = float(latest.get("volatility") or 0) * 100
+        rank = float(latest.get("iv_rank_1y") or 0)
+        return iv, rank
+    return None, None
 
 
 def _fetch_uw_leaps(ticker: str, client: UWClient, min_year: int = 2027) -> List[Dict]:
@@ -274,6 +286,10 @@ def fetch_ticker_vol(ticker: str, uw_client: UWClient, ib: Any = None) -> Ticker
 
     # UW: IV rank + current IV
     tv.current_iv, tv.iv_rank = _fetch_uw_iv(ticker, uw_client)
+    if tv.iv_rank is None:
+        # Keep the HV series — it came from a different source — but mark the
+        # ticker so analyze_pair refuses it and the tab can render degraded.
+        tv.error = "UW IV rank unavailable"
 
     # UW: LEAP options
     leaps = _fetch_uw_leaps(ticker, uw_client)
@@ -345,6 +361,15 @@ def analyze_pair(
         return pa
     if not vb.has_leaps:
         pa.failing_gates.append(f"{b}: no LEAPs")
+        return pa
+    # has_leaps comes from a DIFFERENT UW endpoint, so it says nothing about
+    # whether the IV-rank call succeeded. Gate 4 and the signal tier both read
+    # iv_rank; an absent one cannot be allowed to pass them by default.
+    if va.iv_rank is None:
+        pa.failing_gates.append(f"{a}: IV rank unavailable")
+        return pa
+    if vb.iv_rank is None:
+        pa.failing_gates.append(f"{b}: IV rank unavailable")
         return pa
 
     # Determine leader/lagger by IV/HV60 ratio (higher = leader)
@@ -470,6 +495,13 @@ def _gate_icon(passed: bool) -> str:
 def _signal_pill(sig: str) -> str:
     m = {"STRONG": "positive", "MODERATE": "warning", "WEAK": "warning", "NONE": "negative"}
     return _pill(sig, m.get(sig, ""))
+
+
+def _iv_rank_cell(rank: Optional[float], pct: bool = False) -> str:
+    """An unavailable IV rank must read as unavailable, never as a number."""
+    if rank is None:
+        return '<span class="text-muted">—</span>'
+    return f"{rank:.0f}%" if pct else f"{rank:.0f}"
 
 
 def _iv_status(tv: TickerVol) -> str:
@@ -600,7 +632,7 @@ def generate_html(
                     f'<tr><td>{tk} <span class="text-muted">({role})</span></td>'
                     f'<td class="text-right">{tv.iv_hv60:.2f}</td>'
                     f'<td class="text-right">{tv.hv20_minus_iv:+.1f}</td>'
-                    f'<td class="text-right">{tv.iv_rank:.0f}</td></tr>'
+                    f'<td class="text-right">{_iv_rank_cell(tv.iv_rank)}</td></tr>'
                 )
             else:
                 body_parts.append(
@@ -659,7 +691,7 @@ def generate_html(
             f'<td class="text-center">{_gate_icon(pa.gate_divergence)} {pa.divergence:.2f}</td>'
             f'<td class="text-center">{_gate_icon(pa.gate_hv_gap)} {pa.lagger_hv_iv_gap:+.1f}</td>'
             f'<td class="text-center">{_gate_icon(pa.gate_vol_driver)}</td>'
-            f'<td class="text-center">{_gate_icon(pa.gate_iv_rank)} {pa.lagger_iv_rank:.0f}%</td>'
+            f'<td class="text-center">{_gate_icon(pa.gate_iv_rank)} {_iv_rank_cell(pa.lagger_iv_rank, pct=True)}</td>'
             f'<td class="text-center">{_gate_icon(pa.gate_liquidity)}</td>'
             f'<td class="text-center">{_signal_pill(pa.signal)}</td></tr>'
         )
@@ -681,7 +713,7 @@ def generate_html(
                 f"<tr><td><strong>{pa.lagger}</strong></td>"
                 f"<td>Pair: {pa.leader}↔{pa.lagger}. Divergence {pa.divergence:.2f}.</td>"
                 f'<td class="text-right {gap_cls}">{pa.lagger_hv_iv_gap:+.1f}</td>'
-                f'<td class="text-right">{pa.lagger_iv_rank:.0f}%</td></tr>'
+                f'<td class="text-right">{_iv_rank_cell(pa.lagger_iv_rank, pct=True)}</td></tr>'
             )
         body_parts.append("</tbody></table></div></div>")
 
@@ -716,6 +748,7 @@ def to_json(
             t: {
                 "price": v.price, "hv20": v.hv20, "hv60": v.hv60, "hv252": v.hv252,
                 "leap_atm_iv": v.leap_atm_iv, "iv_rank": v.iv_rank,
+                "error": v.error,
                 "iv_hv60": round(v.iv_hv60, 3), "hv20_minus_iv": round(v.hv20_minus_iv, 1),
                 "has_leaps": v.has_leaps, "leap_count": v.leap_count,
             }
