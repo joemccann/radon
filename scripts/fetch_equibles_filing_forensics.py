@@ -659,24 +659,34 @@ def run(
     today: Optional[date] = None,
 ) -> dict[str, Any]:
     """Refresh every ticker's dossier, persisting only the usable ones."""
-    if client is None:
-        from clients.equibles_client import EquiblesClient
-        client = EquiblesClient()
+    # Client construction is INSIDE the health-reporting try: an absent or
+    # rejected EQUIBLES_API_KEY raises EquiblesAuthError from
+    # EquiblesClient.__init__, and outside the try that killed the oneshot
+    # before any _record_health call, so NO service_health row was written at
+    # all. The service is registered for freshness, so a row that never
+    # arrives is silent rather than stale and nothing alerts.
+    try:
+        if client is None:
+            from clients.equibles_client import EquiblesClient
+            client = EquiblesClient()
 
-    as_of = _now_iso()
-    today = today or datetime.now(timezone.utc).date()
-    going_concern = fetch_going_concern_universe(client)
+        as_of = _now_iso()
+        today = today or datetime.now(timezone.utc).date()
+        going_concern = fetch_going_concern_universe(client)
 
-    dossiers: list[dict[str, Any]] = []
-    skipped: list[str] = []
-    for ticker in tickers:
-        dossier = fetch_dossier(client, ticker, going_concern, today=today, as_of=as_of)
-        if not has_usable_data(dossier):
-            skipped.append(dossier["ticker"])
-            continue
-        _write_db_row(dossier)
-        _write_json_cache(dossier)
-        dossiers.append(dossier)
+        dossiers: list[dict[str, Any]] = []
+        skipped: list[str] = []
+        for ticker in tickers:
+            dossier = fetch_dossier(client, ticker, going_concern, today=today, as_of=as_of)
+            if not has_usable_data(dossier):
+                skipped.append(dossier["ticker"])
+                continue
+            _write_db_row(dossier)
+            _write_json_cache(dossier)
+            dossiers.append(dossier)
+    except Exception as exc:  # noqa: BLE001 — re-raised; the row must exist first
+        _record_health("error", {"message": f"cycle aborted: {exc}"})
+        raise
 
     persisted = len(dossiers)
     if persisted or not tickers:
@@ -714,6 +724,9 @@ def main() -> None:
 
     tickers = [t.upper() for t in args.tickers] or load_watchlist_tickers()
     if not tickers:
+        # Exit 2 without a health row is invisible: the service is registered
+        # for freshness, so the watchdog only ever sees a row that never came.
+        _record_health("error", {"message": "no tickers given and the watchlist is empty"})
         parser.error("no tickers given and data/watchlist.json is empty or absent")
 
     result = run(tickers)

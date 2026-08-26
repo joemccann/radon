@@ -40,6 +40,15 @@ export const LATEST_ONE = [
 export const PER_KEY = [
   { table: "scan_snapshots", key: "service", orderCol: "scan_time" },
   { table: "gex_snapshots", key: "ticker", orderCol: "scan_time" },
+  // Equibles per-ticker decks. orderCol matches the column each API route
+  // sorts on so the mirrored row is the one the demo actually serves:
+  // equibles-smart-money-13f orders by report_date DESC, filing-forensics
+  // keys on the ticker PK and reports as_of.
+  // equibles_13f_holders is deliberately NOT mirrored — the holder rows are
+  // write-only depth (retention.py prunes them; no route or component queries
+  // the table). The panel renders payload.holders out of the snapshot JSON.
+  { table: "equibles_13f_snapshots", key: "ticker", orderCol: "report_date" },
+  { table: "equibles_filing_forensics", key: "ticker", orderCol: "as_of" },
 ];
 
 // Date-keyed history windows (regime charts need a run of sessions).
