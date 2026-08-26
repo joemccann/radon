@@ -155,6 +155,21 @@ export const POSITION_COLUMN_DEFAULTS: Record<PositionToggleableColumnKey, boole
 
 export type PositionColumnVisibility = Record<PositionToggleableColumnKey, boolean>;
 
+/** Per-contract price from a market value, or null when it is not derivable. */
+function finiteOrNull(mv: number | null | undefined, pos: PortfolioPosition): number | null {
+  const divisor = pos.contracts * getMultiplier(pos);
+  if (mv == null || !Number.isFinite(divisor) || divisor === 0) return null;
+  const value = mv / divisor;
+  return Number.isFinite(value) ? value : null;
+}
+
+
+/** `fmtUsd` keeps magnitudes; leg cells need the sign to match the header. */
+function fmtSignedUsd(value: number): string {
+  return `${value < 0 ? "-" : ""}${fmtUsd(Math.abs(value))}`;
+}
+
+
 function makePositionExtract(prices?: Record<string, PriceData>, riskFreeRate: number | null = null) {
   return (pos: PortfolioPosition, key: PositionSortKey): string | number | null => {
     const isStock = pos.structure_type === "Stock";
@@ -178,7 +193,8 @@ function makePositionExtract(prices?: Record<string, PriceData>, riskFreeRate: n
       case "avg_entry": return getAvgEntry(pos);
       case "last_price": {
         if (isStock && rtStockLast != null) return rtStockLast;
-        if (optRtMv != null) return optRtMv / (pos.contracts * getMultiplier(pos));
+        // Same zero-divisor guard as the render path. R-270.
+        if (optRtMv != null) return finiteOrNull(optRtMv, pos);
         return getLastPrice(pos);
       }
       case "implied": {
@@ -316,14 +332,20 @@ function LegRow({
       )}
       {columns.daily_chg && <td></td>}
       {columns.today_pnl && <td></td>}
+      {/* Signed, like the parent row's equivalents (`mv` carries
+          positionDirectionSign and Initial Value renders getInitialValue,
+          which is negative for a short). Unsigned, a credit spread showed a
+          header Initial Value of −$400 above leg rows reading $1,200 and
+          $1,600 — the short leg's credit rendered as a positive debit, with
+          no arithmetic that reconciles the legs to the header. R-244. */}
       {columns.market_value && (
-        <td className="right cell-muted">{legMv != null ? fmtUsd(legMv) : "—"}</td>
+        <td className="right cell-muted">{legMv != null ? fmtSignedUsd(sign * legMv) : "—"}</td>
       )}
       {columns.entry_cost && (
-        <td className="right cell-muted">{fmtPrice(legEc)}</td>
+        <td className="right cell-muted">{fmtPrice(sign * legEc)}</td>
       )}
       {columns.initial_value && (
-        <td className="right cell-muted">{fmtUsd(legEc)}</td>
+        <td className="right cell-muted">{fmtSignedUsd(sign * legEc)}</td>
       )}
       {columns.pnl && (
         <td className={`right cell-muted ${legPnl != null ? (legPnl >= 0 ? "positive" : "negative") : ""}`}>
@@ -391,7 +413,11 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
   const returnBasis = resolveReturnCapital(pos);
   const returnTitle = describeReturnCapital(returnBasis);
   const avgEntry = getAvgEntry(pos);
-  const lastPrice = rtLast ?? (optionsRt ? mv! / (pos.contracts * getMultiplier(pos)) : getLastPrice(pos));
+  // `pos.contracts` is typed `number` with no positivity constraint, so a row
+  // flattened mid-sync (or a partial payload) divided by zero and reached
+  // fmtPrice's .toLocaleString() as Infinity/NaN — printing `$∞`/`$NaN` and
+  // driving the up/down flash. R-270.
+  const lastPrice = rtLast ?? (optionsRt ? finiteOrNull(mv, pos) : getLastPrice(pos));
   const lastPriceIsCalculated = rtLast != null ? false : optionsRt ? optionsRt.priceIsCalculated : getLastPriceIsCalculated(pos);
   const { direction: priceDirection, flashDirection } = usePriceDirection(lastPrice);
   // Stock: daily change from underlying WS price
