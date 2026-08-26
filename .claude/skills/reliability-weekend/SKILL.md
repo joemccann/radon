@@ -306,3 +306,31 @@ how this loop improves as the codebase grows.
   `ssh.github.com:443`; the plist PATH carries `~/.bun/bin`. After any
   loop change, run `setup_reliability_weekend.sh` and confirm
   `launchctl list | grep reliability-daily`.
+- 2026-08-26 (audit): **markdown tables break on a raw `|` inside a finding.** Nine of 76
+  rows carried one — `502|503`, `placeOrder|place_order`, a `case` pattern, an `||` fallback.
+  Escape `|` as `\|` in the `where` and `text` cells at generation time, and validate by
+  splitting on `(?<!\\)\|` — `line.count('|')` counts the escaped ones too and will tell you
+  the fix did not work when it did. Four pre-existing rows in the frozen sections have the
+  same defect; leave them alone.
+- 2026-08-26 (audit): the ascending-id assertion from last week is necessary but not
+  sufficient — write the validation regex as `R-\d{3}`, not `R-2\d\d`. The narrower pattern
+  silently skipped R-198 and R-199 (the two highest-severity rows in the section) and still
+  reported "ascending: True".
+- 2026-08-26 (audit): nine subsystem walks capped at ~21 files each all finished in 5-8
+  minutes with none lost to the stream watchdog, against last week's death at ~37 files. The
+  cap is the load-bearing part, not the category split. Giving each walk a pre-filtered list
+  of the already-filed R-### findings touching ITS files (grep the findings index by basename)
+  cost one script and produced near-zero re-reports across 76 findings.
+- 2026-08-26 (audit): **run the standing sweeps in the lead context and then distrust their
+  scope.** Sweeps 1-5 and 7 held and sweep 6 found a real gap (`ib_execute.py` has the halt
+  but no `check_order_limits`) — but sweep 7 as written compares only the DELTA's jobs against
+  the two watchdog catalogs, so it never looked at `breadth-scan`, a five-minute RTH timer with
+  no `SCHEDULED_SERVICES` entry at all. An agent found it. Enumerate every service name
+  reachable from a `cloud/services/*.timer`, not just the ones the diff touched.
+- 2026-08-26 (audit): when an agent rates something P0 on a mechanism that depends on an
+  unpinned third-party default (here: whether Caddy replays a POST without `retry_match`),
+  do not take the rating and do not silently drop the finding. File it one severity down with
+  the contingency written into the row, and point the acceptance criteria at pinning the
+  behaviour explicitly. The defect that survives verification is "a money-path invariant is
+  resting on a default nobody pinned or tested", which is real regardless of how the upstream
+  actually behaves.

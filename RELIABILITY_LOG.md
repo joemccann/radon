@@ -232,3 +232,20 @@ Backlog: `RELIABILITY_AUDIT.md` §Delta remediation backlog (2026-08-22, both pa
 - **NF triage 2026-08-22 (delta audit):** NF-1 (Gate-3 bankroll-% cap) still open; compounded by R-087 (combo risk cap moved to a hardcoded $10M, 40× the notional cap it replaced) — folded into REL-041. NF-2 (unpaginated journal/history reads on the unbounded transport) still open; one new instance R-120 (`trin_daily`) folded into REL-052. NF-3 (relay stale-feed does not gate the order UI) still open, unchanged in the range. NF-4 (aggregated Flex buckets vs 1:1 fingerprints) still open; sibling defect R-088 (exec-id skip never spends the fingerprint claim) filed as REL-042. REL-021b remainder unchanged (all P2).
 - **NF-5 (from 2026-08-22 audit, UW budget):** `uw_budget._archive_unlocked` rewrites `data/uw_budget_history.jsonl` non-atomically under the budget flock, and `POST /uw/usage/record` runs an unbounded `LOCK_EX` on the default executor shared with `_bounded_pool_call`. Both in REL-052; noted here because the REL-036 work that introduced the shared counter is otherwise clean.
 - **NF-6 (from 2026-08-22 audit, retry classifiers):** `mirror_market_snapshots_to_demo.isTransientTursoError` treats every `TypeError` as a network blip; `knowledge/ingest.py` retries SQLITE_BUSY on a flat 1 s grid that cannot span the 6 s contention its own commit measured. Both in REL-052.
+
+- **NF triage 2026-08-26 (delta audit):** NF-1 (Gate-3 bankroll-% cap) still open and widened by
+  R-250 — the static caps standing in for it are not wired into `ib_execute.py` at all, and
+  `risk_reversal.py:501-504` renders a `--yes` invocation of that placer into the operator's own
+  report; folded into REL-074. NF-2 (unpaginated journal reads on the unbounded transport) still
+  open; one new money-path instance R-203 (`journal_realized_pnl_for_fills`), notable because the
+  same delta converted the sibling `journal_basis` to a 200-row keyset pager — folded into REL-071.
+  NF-3 (relay stale-feed does not gate the order UI) still open and materially worse: R-214 gives
+  the relay a concrete mechanism for publishing a fresh `last_tick_at` having never received a
+  tick, so the banner NF-3 names as the only cover never appears; folded into REL-079. NF-4
+  (aggregated Flex buckets vs 1:1 fingerprints) unchanged. NF-5 (UW budget non-atomic archive +
+  unbounded LOCK_EX) and NF-6 (retry classifiers) unchanged. REL-021b remainder unchanged (all P2).
+- **NF-8 (from 2026-08-26 audit, standing-sweep scope):** sweep 7 as written compares only the
+  delta's own jobs against the two watchdog catalogs, which is why `breadth-scan` (R-236) — a
+  five-minute RTH timer whose job has written a `breadth-scan` heartbeat since before the anchor —
+  has never been checked by it. The sweep needs to enumerate every service name reachable from a
+  `cloud/services/*.timer` and assert membership in both catalogs. REL-088 carries it.
