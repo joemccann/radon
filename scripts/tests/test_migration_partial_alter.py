@@ -56,7 +56,7 @@ class TestVersionIsRecordedWithTheStatements:
         un-replayable."""
         import inspect
 
-        source = inspect.getsource(migrate.main)
+        source = inspect.getsource(migrate.apply_pending_migrations)
         body = source[source.index("for version, name, path in pending"):]
         insert_at = body.index("INSERT OR IGNORE INTO schema_migrations")
         assert body[:insert_at].count("db.commit()") == 0, (
