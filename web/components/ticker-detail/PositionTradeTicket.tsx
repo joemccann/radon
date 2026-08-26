@@ -28,7 +28,7 @@ import {
 } from "@/lib/order/stopOrder";
 import OrderTypeToggle from "@/components/OrderTypeToggle";
 import { OrderQuoteTelemetry } from "@/components/QuoteTelemetry";
-import { buildQuoteTelemetryModel, comboQuotePriceData } from "@/lib/quoteTelemetry";
+import { buildQuoteTelemetryModel, comboQuotePriceData, oldestQuoteTimestamp } from "@/lib/quoteTelemetry";
 
 function toNakedShortPortfolio(portfolio: PortfolioData | null | undefined): NakedShortPortfolio {
   if (!portfolio) return { positions: [] };
@@ -53,7 +53,14 @@ function useTargetQuote(
   position: PortfolioPosition,
   prices: Record<string, PriceData>,
   target: TradeTarget,
-): { bid: number | null; ask: number | null; mid: number | null; priceData: PriceData | null } {
+): {
+  bid: number | null;
+  ask: number | null;
+  mid: number | null;
+  priceData: PriceData | null;
+  /** Stalest leg timestamp behind a combo net, undefined when unknown. */
+  asOf?: string;
+} {
   return useMemo(() => {
     if (target.kind === "leg") {
       const leg = position.legs[target.index];
@@ -61,15 +68,24 @@ function useTargetQuote(
       const lp = (key ? prices[key] : null) ?? null;
       const bid = lp?.bid ?? null;
       const ask = lp?.ask ?? null;
-      return { bid, ask, mid: bid != null && ask != null ? (bid + ask) / 2 : null, priceData: lp };
+      return {
+        bid,
+        ask,
+        mid: bid != null && ask != null ? (bid + ask) / 2 : null,
+        priceData: lp,
+        asOf: lp?.timestamp,
+      };
     }
     let netBid = 0;
     let netAsk = 0;
     let ok = true;
+    // The combo net is only as fresh as its stalest leg.
+    const legQuotes: PriceData[] = [];
     for (const leg of position.legs) {
       const key = legPriceKey(position.ticker, position.expiry, leg);
       const lp = key ? prices[key] : null;
       if (!lp || lp.bid == null || lp.ask == null) { ok = false; break; }
+      legQuotes.push(lp);
       const sign = leg.direction === "LONG" ? 1 : -1;
       netBid += sign * lp.bid;
       netAsk += sign * lp.ask;
@@ -77,7 +93,13 @@ function useTargetQuote(
     if (!ok) return { bid: null, ask: null, mid: null, priceData: null };
     const bid = Math.min(netBid, netAsk);
     const ask = Math.max(netBid, netAsk);
-    return { bid, ask, mid: (bid + ask) / 2, priceData: null };
+    return {
+      bid,
+      ask,
+      mid: (bid + ask) / 2,
+      priceData: null,
+      asOf: oldestQuoteTimestamp(legQuotes),
+    };
   }, [position, prices, target]);
 }
 
@@ -120,15 +142,15 @@ export default function PositionTradeTicket({
 
   const reset = () => setConfirmStep(false);
 
-  const { bid, ask, mid, priceData: legPriceData } = useTargetQuote(position, prices, target);
+  const { bid, ask, mid, asOf, priceData: legPriceData } = useTargetQuote(position, prices, target);
 
   const comboQuoteModel = useMemo(() => {
     if (target.kind !== "combo") return null;
     if (bid == null && ask == null) return null;
     return buildQuoteTelemetryModel(
-      comboQuotePriceData({ symbol: position.ticker, bid, ask, last: mid }),
+      comboQuotePriceData({ symbol: position.ticker, bid, ask, last: mid, timestamp: asOf }),
     );
-  }, [target.kind, position.ticker, bid, ask, mid]);
+  }, [target.kind, position.ticker, bid, ask, mid, asOf]);
 
   const parsedQty = parseInt(quantity, 10);
   const parsedPrice = parseFloat(limitPrice);

@@ -1,5 +1,7 @@
 import { test, expect } from "@playwright/test";
 
+import { watchPortfolioRequests } from "./portfolio-request-guard";
+
 const PORTFOLIO = {
   bankroll: 100_000,
   peak_value: 100_000,
@@ -141,12 +143,17 @@ function installMockWebSocket(page: import("@playwright/test").Page) {
 }
 
 function stubApis(page: import("@playwright/test").Page) {
+  const portfolioGuard = watchPortfolioRequests(page);
+
   page.route("**/api/orders", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(ORDERS) }),
   );
-  page.route("**/api/portfolio", (route) =>
-    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(PORTFOLIO) }),
-  );
+  // "**/api/portfolio**" — /orders asks for "/api/portfolio?include=entry-dates"
+  // and the bare glob does not match a URL with a query string (T-172).
+  page.route("**/api/portfolio**", (route) => {
+    portfolioGuard.record(route.request().url());
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(PORTFOLIO) });
+  });
   page.route("**/api/regime", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ score: 15, cri: { score: 15 } }) }),
   );
@@ -160,11 +167,13 @@ function stubApis(page: import("@playwright/test").Page) {
       body: JSON.stringify({ as_of: new Date().toISOString(), summary: { realized_pnl: 0 }, closed_trades: [], open_trades: [] }),
     }),
   );
+
+  return portfolioGuard;
 }
 
 test("modify modal shows the resting sell limit as the effective ask", async ({ page }) => {
   await installMockWebSocket(page);
-  stubApis(page);
+  const portfolioGuard = stubApis(page);
 
   await page.goto("http://127.0.0.1:3000/orders");
 
@@ -175,4 +184,8 @@ test("modify modal shows the resting sell limit as the effective ask", async ({ 
   const dialog = page.locator(".modify-order-modal");
   await expect(dialog).toContainText(/ASK\s*\$5\.05/);
   await expect(dialog).not.toContainText(/ASK\s*\$5\.10/);
+
+  // No /api/portfolio* request may escape the mock into the real server.
+  await portfolioGuard.assertAllRouted();
+  expect(portfolioGuard.seen.some((url) => url.includes("include=entry-dates"))).toBe(true);
 });

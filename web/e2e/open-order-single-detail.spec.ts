@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { watchPortfolioRequests } from "./portfolio-request-guard";
+
 const PORTFOLIO_MOCK = {
   bankroll: 100_000,
   peak_value: 100_000,
@@ -152,13 +154,18 @@ const ORDERS_MOCK = {
 async function stubApis(page: import("@playwright/test").Page) {
   await page.unrouteAll({ behavior: "ignoreErrors" });
 
-  await page.route("**/api/portfolio", (route) =>
-    route.fulfill({
+  const portfolioGuard = watchPortfolioRequests(page);
+
+  // "**/api/portfolio**" — /orders asks for "/api/portfolio?include=entry-dates"
+  // and the bare glob does not match a URL with a query string (T-172).
+  await page.route("**/api/portfolio**", (route) => {
+    portfolioGuard.record(route.request().url());
+    return route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify(PORTFOLIO_MOCK),
-    }),
-  );
+    });
+  });
 
   await page.route("**/api/orders", (route) =>
     route.fulfill({
@@ -195,11 +202,13 @@ async function stubApis(page: import("@playwright/test").Page) {
   );
 
   await page.route("**/api/prices", (route) => route.abort());
+
+  return portfolioGuard;
 }
 
 test.describe("Orders open-order single detail rendering", () => {
   test("renders single option order detail alongside combo detail", async ({ page }) => {
-    await stubApis(page);
+    const portfolioGuard = await stubApis(page);
     await page.goto("http://127.0.0.1:3000/orders");
 
     const singleOptionRow = page.locator("tbody tr").filter({ hasText: "AAOI" }).filter({ hasText: "$5.00" }).first();
@@ -209,5 +218,9 @@ test.describe("Orders open-order single detail rendering", () => {
     const comboRow = page.locator("tbody tr").filter({ hasText: "Risk Reversal" }).first();
     await expect(comboRow).toContainText("Short Put 85");
     await expect(comboRow).toContainText("Long Call 115");
+
+    // No /api/portfolio* request may escape the mock into the real server.
+    await portfolioGuard.assertAllRouted();
+    expect(portfolioGuard.seen.some((url) => url.includes("include=entry-dates"))).toBe(true);
   });
 });
