@@ -13,7 +13,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 
 import PositionTable from "../components/PositionTable";
-import type { PortfolioPosition } from "../lib/types";
+import type { PortfolioData, PortfolioPosition } from "../lib/types";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock("../components/InstrumentDetailModal", () => ({ default: () => null }));
@@ -97,8 +97,26 @@ function rowTextAt(instant: string, positions: PortfolioPosition[], ticker: stri
   return row?.textContent ?? "";
 }
 
+function rowTextWithSyncAt(
+  instant: string,
+  lastSync: string,
+  positions: PortfolioPosition[],
+  ticker: string,
+): string {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date(instant));
+  showAllColumns();
+  const portfolio = { positions, last_sync: lastSync } as unknown as PortfolioData;
+  render(<PositionTable positions={positions} showUnderlying portfolio={portfolio} />);
+  const row = screen.getByText(ticker).closest("tr");
+  expect(row).not.toBeNull();
+  return row?.textContent ?? "";
+}
+
 const SATURDAY = "2026-08-22T21:23:00Z"; // Sat 17:23 ET
 const FRIDAY_RTH = "2026-08-21T18:30:00Z"; // Fri 14:30 ET
+const MONDAY_PREOPEN = "2026-08-24T12:00:00Z"; // Mon 08:00 ET
+const MONDAY_SYNC = "2026-08-24T11:55:00Z"; // Mon 07:55 ET
 
 describe("PositionTable Today P&L on a non-trading day", () => {
   it("blanks an equity option's IB daily P&L on Saturday", () => {
@@ -115,5 +133,26 @@ describe("PositionTable Today P&L on a non-trading day", () => {
   it("keeps spot crypto's IB daily P&L on Saturday", () => {
     const text = rowTextAt(SATURDAY, [CRYPTO], "BTC");
     expect(text).toContain("+$1,000");
+  });
+});
+
+/**
+ * T-171: the wall-clock gate above only knows what day it is NOW. The number
+ * it guards was captured by the producer at `portfolio.last_sync`. When the
+ * producer stalls on Saturday and the operator opens the dashboard Monday
+ * 08:00 ET, `isUsTradingDay` is true, so the row prints Saturday's phantom
+ * per-position day P&L under a Day P&L card that (correctly, via
+ * `isIbDailyPnlFromCurrentSession`) reads `--`. Row and card must agree.
+ */
+describe("PositionTable Today P&L when the snapshot predates today's session", () => {
+  it("blanks an equity option's IB daily P&L on Monday when the sync is Saturday's", () => {
+    const text = rowTextWithSyncAt(MONDAY_PREOPEN, SATURDAY, [EQUITY_OPTION], "AAPL");
+    expect(text).not.toContain("13,952");
+    expect(text).not.toContain("13,951");
+  });
+
+  it("shows the IB daily P&L when the sync is from the current session", () => {
+    const text = rowTextWithSyncAt(MONDAY_PREOPEN, MONDAY_SYNC, [EQUITY_OPTION], "AAPL");
+    expect(text).toContain("+$13,952");
   });
 });
