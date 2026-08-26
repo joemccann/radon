@@ -397,3 +397,37 @@ how this loop improves as the codebase grows.
   When the defect under test is "signals the wrong group", record the signal
   call instead of delivering it (patch `os.killpg`), assert on the recorded
   pgid, and keep a real child so the pgid observation stays honest.
+
+- **2026-08-26 (audit): a squash-merged weekend PR leaves its branch looking
+  orphaned — check the CONTENT, not the ancestry.**
+  `git merge-base --is-ancestor origin/testing/weekend-2026-08-25 HEAD` said
+  NOT MERGED and the branch read 15 commits ahead of `main`, which looks
+  exactly like a remediate phase that pushed after its PR closed. It was a
+  squash merge: PR #90 landed as the single commit `e690c85b` and every one of
+  those 15 commits' changes is on `main`. Settle it by grepping for the actual
+  fix (`grep -n scripts-daemons .github/workflows/ci.yml` for T-122's ninth
+  shard), not by ancestry. Do this before writing "N commits are stranded on
+  origin" into an audit.
+- **2026-08-26 (audit): a "checked and clean" from one agent does NOT refute a
+  positive finding from another — their scopes differ, and the lead has to
+  re-derive from source.** The blast-radius agent concluded "no weekend
+  false-red found" for the new `PositionTable` wall-clock gate; the
+  fragile-mechanisms agent found one at
+  `account-day-move-ib-daily-pnl.spec.ts:239`. The fragile agent was right, and
+  the reason the other missed it is instructive: it looked for a spec asserting
+  "the Today P&L cell" and `:239` asserts over `wulfRow.locator("td")` — the
+  whole row. Two reads of `positionUtils.ts:656` and `PositionTable.tsx:507-508`
+  settled it in one tool call. When two agents' territories overlap, treat a
+  negative as "did not find", never as "is not there", and always spend the
+  one call to check the cited line yourself.
+- **2026-08-26 (audit): a diff of a CI gate's SHAPE hides a change to who
+  ENFORCES it.** The shard-union check (the 2026-08-25 lesson) came back clean
+  — 466/466 py, 30/30 cloud, and the CI shard pass counts summed to the local
+  recursive total exactly. The regression was one level up: `deploy.needs` had
+  quietly dropped `web-coverage` and `py-coverage`, and
+  `gh api repos/{owner}/{repo}/branches/main/protection` returns no
+  `required_status_checks` key at all, so the ci.yml comment's "deferred to
+  required workflow job status" pointed at a mechanism that does not exist.
+  Add to the standing sweeps: dump `deploy.needs` + `deploy.if` at BOTH the
+  base SHA and HEAD and diff them, then check branch protection over the API.
+  Collection coverage and gate enforcement are two different questions.
