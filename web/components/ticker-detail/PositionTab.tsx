@@ -9,6 +9,7 @@ import {
   fmtPrice,
   resolveEntryCost,
   resolveMarketValue,
+  resolveRealtimeMarketValue,
   getAvgEntry,
   getMultiplier,
   legPriceKey,
@@ -221,8 +222,14 @@ function PositionView({
     if (isStock) {
       const rt = prices[position.ticker];
       const last = rt?.last != null && rt.last > 0 ? rt.last : null;
-      return last != null ? { mv: last * position.contracts, lastPrice: last } : null;
+      // Sign-aware via the shared resolver: `position.contracts` is a positive
+      // magnitude, so a SHORT read as `last * contracts` turns `mv - entryCost`
+      // into a SUM and reports a phantom gain.
+      const mv = resolveRealtimeMarketValue(position, prices);
+      return mv != null && last != null ? { mv, lastPrice: last } : null;
     }
+    // A multi-leg position quoted as a spread prices off that quote, not off
+    // the legs — the combo's own market is the better mark.
     if (spreadPriceData?.last != null) {
       const mult = getMultiplier(position);
       const units = heldComboUnits(position);
@@ -231,15 +238,11 @@ function PositionView({
         lastPrice: spreadPriceData.last,
       };
     }
-    // Options: compute from leg-level prices
-    let rtMv = 0;
-    for (const leg of position.legs) {
-      const key = legPriceKey(position.ticker, position.expiry, leg);
-      const lp = key ? prices[key] : null;
-      if (!lp || lp.last == null || lp.last <= 0) return null;
-      const sign = leg.direction === "LONG" ? 1 : -1;
-      rtMv += sign * lp.last * leg.contracts * 100;
-    }
+    // Options: ONE market value per position, shared with the table, the
+    // mobile card and getTodayPnlDollars. A tab-local walk of the same legs is
+    // a second market value for the same position.
+    const rtMv = resolveRealtimeMarketValue(position, prices);
+    if (rtMv == null) return null;
     const mult = getMultiplier(position);
     const units = heldComboUnits(position);
     return { mv: rtMv, lastPrice: units > 0 ? rtMv / (units * mult) : null };

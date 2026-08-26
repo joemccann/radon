@@ -63,28 +63,36 @@ describe("MobilePositionList — short stock P&L sign", () => {
     expect(container.textContent ?? "").toMatch(/-\$95,59\d/);
   });
 
-  it("suppresses complete position P&L when any active option leg lacks a live quote", () => {
-    const spread: PortfolioPosition = {
-      id: 7,
-      ticker: "AAPL",
-      structure: "Bull Call Spread",
-      structure_type: "Vertical",
-      risk_profile: "defined",
-      expiry: "2026-09-18",
-      contracts: 1,
-      direction: "DEBIT",
-      entry_cost: 300,
-      max_risk: 300,
-      market_value: 500,
-      kelly_optimal: null,
-      target: null,
-      stop: null,
-      entry_date: "2026-08-01",
-      legs: [
-        { direction: "LONG", contracts: 1, type: "Call", strike: 200, entry_cost: 500, avg_cost: 5, market_price: 7, market_value: 700 },
-        { direction: "SHORT", contracts: 1, type: "Call", strike: 210, entry_cost: -200, avg_cost: -2, market_price: 2, market_value: -200 },
-      ],
-    };
+  const spread: PortfolioPosition = {
+    id: 7,
+    ticker: "AAPL",
+    structure: "Bull Call Spread",
+    structure_type: "Vertical",
+    risk_profile: "defined",
+    expiry: "2026-09-18",
+    contracts: 1,
+    direction: "DEBIT",
+    entry_cost: 300,
+    max_risk: 300,
+    market_value: 500,
+    kelly_optimal: null,
+    target: null,
+    stop: null,
+    entry_date: "2026-08-01",
+    legs: [
+      { direction: "LONG", contracts: 1, type: "Call", strike: 200, entry_cost: 500, avg_cost: 5, market_price: 7, market_value: 700 },
+      { direction: "SHORT", contracts: 1, type: "Call", strike: 210, entry_cost: -200, avg_cost: -2, market_price: 2, market_value: -200 },
+    ],
+  };
+
+  it("prices a leg with no live quote off its synced mark, same as every other surface", () => {
+    // Until 2026-08-26 the card had its own leg walk that read `prices[k].last`
+    // and nothing else, so one missing WS quote blanked the whole position to
+    // N/A while the desktop table — resolving through `resolveRealtimePrice`,
+    // which falls back to the leg's last synced mark — showed +$200 for the
+    // same spread. Two answers for one position is the bug class that made a
+    // same-day META short put read +$1,097 total against -$103 today. One
+    // resolver now, so a leg without a tick is marked, not dropped.
     const { container } = render(
       <MobilePositionList
         positions={[spread]}
@@ -92,6 +100,30 @@ describe("MobilePositionList — short stock P&L sign", () => {
       />,
     );
 
+    const text = container.textContent ?? "";
+    expect(text).toMatch(/\+\$200(\.00)?\b/);
+    expect(text).not.toContain("N/A");
+  });
+
+  it("still suppresses P&L for a leg with no price anywhere", () => {
+    // The concern behind the old suppression survives: a leg that has neither
+    // a live quote nor a synced mark cannot be valued, and the card must not
+    // publish a partial sum as if it were the position.
+    const unpriced: PortfolioPosition = {
+      ...spread,
+      id: 8,
+      market_value: null as unknown as number,
+      legs: [
+        spread.legs[0],
+        { ...spread.legs[1], market_price: null as unknown as number, market_value: null as unknown as number },
+      ],
+    };
+    const { container } = render(
+      <MobilePositionList
+        positions={[unpriced]}
+        prices={{ AAPL_20260918_200_C: pd({ last: 7 }) }}
+      />,
+    );
     const text = container.textContent ?? "";
     expect(text).not.toContain("+$400.00");
     expect(text).toContain("N/A");
