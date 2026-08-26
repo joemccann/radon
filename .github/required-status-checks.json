@@ -1,0 +1,17 @@
+{
+  "_comment": [
+    "Hand-maintained mirror of the required status checks on `main`, read by",
+    "scripts/tests/test_ci_deploy_concurrency.py so the contract can be checked",
+    "offline (a test that called the GitHub API would be unrunnable on a fork",
+    "and flaky on a rate limit).",
+    "",
+    "`contexts` is EMPTY because it is empty on GitHub: `gh api",
+    "repos/{owner}/{repo}/branches/main/protection` returns no",
+    "`required_status_checks` key. This file cannot verify live GitHub state, so",
+    "listing a context here without applying it over the API would create a",
+    "false green. Apply the protection first, confirm with the API, then declare",
+    "it here."
+  ],
+  "branch": "main",
+  "contexts": []
+}
