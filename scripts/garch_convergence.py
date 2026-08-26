@@ -50,6 +50,7 @@ if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
 from clients.uw_client import UWClient, UWAPIError
+from utils.atomic_io import atomic_save
 from utils.scan_health import (
     SCAN_STATUS_BUDGET_BLOCKED,
     next_quota_reset_iso,
@@ -919,7 +920,11 @@ Examples:
         # (data/leap.json) added in commit f2bd329 / 35da343.
         cache_path = _CACHE_PATH
         cache_path.parent.mkdir(parents=True, exist_ok=True)
-        cache_path.write_text(json.dumps(json_data, indent=2))
+        # atomic_save, not write_text: this file is CANONICAL (no table
+        # behind it), so a SIGTERM or a full disk mid-write truncates the only
+        # copy and the route serves a JSONDecodeError with nothing to fall
+        # back to. bpi_scan.py already writes its mirror this way. R-260.
+        atomic_save(str(cache_path), json_data)
         print(f"✓ Dashboard cache saved to {cache_path}", file=sys.stderr)
         # No garch table in Turso — the file cache is canonical; the
         # service_health row lets the banner spot a stale scheduled scan.
