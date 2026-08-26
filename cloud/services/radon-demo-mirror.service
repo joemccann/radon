@@ -9,6 +9,10 @@ User=radon
 WorkingDirectory=/home/radon/radon
 EnvironmentFile=/etc/radon/env
 Environment=RADON_DB_NO_REPLICA=1
+# Demo Turso is not covered by radon-api's migrate ExecStartPre. Without this,
+# adding a table to the mirror (equibles_13f_snapshots / filing_forensics,
+# 2026-08-26) pages P1 no-such-table while prod is current.
+ExecStartPre=/usr/bin/timeout 120 /home/radon/radon/.venv/bin/python3.13 /home/radon/radon/scripts/db/migrate.py --demo
 ExecStart=/usr/bin/node scripts/db/mirror_market_snapshots_to_demo.js
 TimeoutStartSec=300
 

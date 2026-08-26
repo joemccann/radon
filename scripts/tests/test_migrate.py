@@ -189,3 +189,122 @@ class TestConnectWithRetry:
 
     def test_backoff_ladder_is_2_5_15(self, migrate_module):
         assert tuple(migrate_module.RETRY_BACKOFF_SECONDS) == (2, 5, 15)
+
+
+class TestMigrateDemoTarget:
+    """2026-08-26 P1: radon-demo-mirror wrote equibles_13f_snapshots /
+    equibles_filing_forensics into a demo Turso still at schema_migrations
+    max=26. Prod migrate.py only targets TURSO_DB_URL; nothing advanced the
+    demo schema, so dest writes failed with 'no such table'."""
+
+    def test_resolve_target_demo_uses_demo_env(self, migrate_module, monkeypatch):
+        monkeypatch.setenv(
+            "TURSO_DEMO_DB_URL", "libsql://radon-demo-joemccann.aws-us-west-2.turso.io"
+        )
+        monkeypatch.setenv("TURSO_DEMO_AUTH_TOKEN", "demo-tok")
+        monkeypatch.setenv("TURSO_DB_URL", "libsql://radon-joemccann.aws-us-west-2.turso.io")
+        monkeypatch.setenv("TURSO_AUTH_TOKEN", "prod-tok")
+        url, token = migrate_module.resolve_target(demo=True)
+        assert "radon-demo" in url
+        assert token == "demo-tok"
+
+    def test_resolve_target_demo_refuses_prod_marker(self, migrate_module, monkeypatch):
+        monkeypatch.setenv(
+            "TURSO_DEMO_DB_URL", "libsql://radon-joemccann.aws-us-west-2.turso.io"
+        )
+        monkeypatch.setenv("TURSO_DEMO_AUTH_TOKEN", "tok")
+        with pytest.raises(SystemExit, match="REFUSING"):
+            migrate_module.resolve_target(demo=True)
+
+    def test_resolve_target_demo_requires_demo_marker(self, migrate_module, monkeypatch):
+        monkeypatch.setenv(
+            "TURSO_DEMO_DB_URL", "libsql://some-other-db.aws-us-west-2.turso.io"
+        )
+        monkeypatch.setenv("TURSO_DEMO_AUTH_TOKEN", "tok")
+        with pytest.raises(SystemExit, match="radon-demo"):
+            migrate_module.resolve_target(demo=True)
+
+    def test_resolve_target_prod_default_unchanged(self, migrate_module, monkeypatch):
+        monkeypatch.setenv("TURSO_DB_URL", "libsql://radon-joemccann.turso.io")
+        monkeypatch.setenv("TURSO_AUTH_TOKEN", "prod-tok")
+        url, token = migrate_module.resolve_target(demo=False)
+        assert url.endswith("radon-joemccann.turso.io")
+        assert token == "prod-tok"
+
+    def test_apply_pending_creates_equibles_tables_from_real_migrations(
+        self, migrate_module, monkeypatch, tmp_path
+    ):
+        """Reproduce the 2026-08-26 topology: demo at v26, pending includes
+        0043/0045; after apply the mirrored tables must exist."""
+        d = tmp_path / "migrations"
+        d.mkdir()
+        (d / "0043_equibles_smart_money_13f.sql").write_text(
+            "CREATE TABLE IF NOT EXISTS equibles_13f_snapshots (\n"
+            "  ticker TEXT NOT NULL, report_date TEXT NOT NULL,\n"
+            "  scan_time TEXT NOT NULL, payload TEXT NOT NULL,\n"
+            "  PRIMARY KEY (ticker, report_date)\n"
+            ");\n"
+            "INSERT OR IGNORE INTO schema_migrations (version, applied_at) "
+            "VALUES (43, datetime('now'));\n"
+        )
+        (d / "0045_equibles_filing_forensics.sql").write_text(
+            "CREATE TABLE IF NOT EXISTS equibles_filing_forensics (\n"
+            "  ticker TEXT PRIMARY KEY, as_of TEXT NOT NULL,\n"
+            "  flag_count INTEGER NOT NULL, data_complete INTEGER NOT NULL,\n"
+            "  payload TEXT NOT NULL, recorded_at TEXT NOT NULL\n"
+            ");\n"
+            "INSERT OR IGNORE INTO schema_migrations (version, applied_at) "
+            "VALUES (45, datetime('now'));\n"
+        )
+        monkeypatch.setattr(migrate_module, "MIGRATIONS_DIR", d)
+
+        tables: set[str] = set()
+        applied: set[int] = {26}
+
+        class FakeDb:
+            def execute(self, sql, params=None):
+                text = " ".join(str(sql).split())
+                if text.startswith("CREATE TABLE IF NOT EXISTS schema_migrations"):
+                    return self
+                if text.startswith("SELECT version FROM schema_migrations"):
+                    self._rows = [(v,) for v in sorted(applied)]
+                    return self
+                if text.startswith("CREATE TABLE IF NOT EXISTS equibles_13f_snapshots"):
+                    tables.add("equibles_13f_snapshots")
+                    return self
+                if text.startswith("CREATE TABLE IF NOT EXISTS equibles_filing_forensics"):
+                    tables.add("equibles_filing_forensics")
+                    return self
+                if text.startswith("INSERT OR IGNORE INTO schema_migrations"):
+                    version = int(params[0]) if params else None
+                    if version is None:
+                        # From the migration file's own INSERT ... VALUES (N, ...)
+                        import re
+                        m = re.search(r"VALUES\s*\((\d+)", text, re.I)
+                        version = int(m.group(1)) if m else None
+                    if version is not None:
+                        applied.add(version)
+                    return self
+                return self
+
+            def fetchall(self):
+                return list(getattr(self, "_rows", []))
+
+            def commit(self):
+                return None
+
+        db = FakeDb()
+        # Match libsql cursor chaining: execute(...).fetchall()
+        original_execute = db.execute
+
+        def execute_and_chain(sql, params=None):
+            original_execute(sql, params)
+            return db
+
+        db.execute = execute_and_chain  # type: ignore[method-assign]
+
+        pending = migrate_module.apply_pending_migrations(db)
+        assert pending == 2
+        assert "equibles_13f_snapshots" in tables
+        assert "equibles_filing_forensics" in tables
+        assert 43 in applied and 45 in applied

@@ -10,12 +10,17 @@ Idempotent: running twice with no new migrations is a no-op.
 
 Usage:
     python3.13 scripts/db/migrate.py
+    python3.13 scripts/db/migrate.py --demo
 
-Env: TURSO_DB_URL + TURSO_AUTH_TOKEN required (loaded from .env / web/.env).
+Env (prod, default): TURSO_DB_URL + TURSO_AUTH_TOKEN.
+Env (--demo): TURSO_DEMO_DB_URL + TURSO_DEMO_AUTH_TOKEN. Refuses any URL
+containing the production marker; requires the demo marker. radon-demo-mirror
+runs this as ExecStartPre so mirrored tables exist before the Node write.
 """
 
 from __future__ import annotations
 
+import argparse
 import os
 import re
 import sys
@@ -37,13 +42,17 @@ RETRY_BACKOFF_SECONDS = (2, 5, 15)
 
 _TRANSPORT_ERROR_MARKERS = ("hrana", "dns", "timeout", "timed out", "connection")
 
+# Same markers the market/newsfeed demo mirrors use — refuse to migrate prod
+# when invoked as --demo, and require the demo DB name.
+_PROD_URL_MARKER = "radon-joemccann"
+_DEMO_URL_MARKER = "radon-demo"
+
 _BOOTSTRAP_SQL = """
     CREATE TABLE IF NOT EXISTS schema_migrations (
       version    INTEGER PRIMARY KEY,
       applied_at TEXT    NOT NULL
     )
     """
-
 
 def _is_transport_error(exc: BaseException) -> bool:
     """libsql_experimental raises bare ValueError for everything, so classify
@@ -113,7 +122,29 @@ def _is_already_applied(exc: BaseException) -> bool:
     return any(marker in message for marker in _ALREADY_APPLIED_MARKERS)
 
 
-def main() -> None:
+def resolve_target(*, demo: bool) -> tuple[str, str]:
+    """Return (url, token) for prod (default) or the isolated demo Turso."""
+    if demo:
+        url = os.environ.get("TURSO_DEMO_DB_URL")
+        token = os.environ.get("TURSO_DEMO_AUTH_TOKEN")
+        if not url or not token:
+            sys.stderr.write(
+                "TURSO_DEMO_DB_URL and TURSO_DEMO_AUTH_TOKEN must be set "
+                "for --demo (the SEPARATE demo Turso DB).\n"
+            )
+            sys.exit(2)
+        if _PROD_URL_MARKER in url:
+            raise SystemExit(
+                "REFUSING TO MIGRATE: --demo target URL "
+                f"({url!r}) contains the production marker {_PROD_URL_MARKER!r}."
+            )
+        if _DEMO_URL_MARKER not in url:
+            raise SystemExit(
+                "REFUSING TO MIGRATE: --demo target URL "
+                f"({url!r}) is missing the demo marker {_DEMO_URL_MARKER!r}."
+            )
+        return url, token
+
     url = os.environ.get("TURSO_DB_URL")
     token = os.environ.get("TURSO_AUTH_TOKEN")
     if not url or not token:
@@ -122,27 +153,27 @@ def main() -> None:
             "(see web/.env or root .env).\n"
         )
         sys.exit(1)
+    return url, token
 
-    try:
-        import libsql_experimental as libsql  # type: ignore[import-untyped]
-    except ImportError:
-        sys.stderr.write(
-            "libsql_experimental is not installed in this venv. "
-            "Run: pip install libsql-experimental\n"
-        )
-        sys.exit(1)
 
-    db = _connect_with_retry(libsql, url, token)
+def apply_pending_migrations(db) -> int:
+    """Apply pending numbered SQL migrations to an open connection.
 
-    applied = {row[0] for row in db.execute("SELECT version FROM schema_migrations").fetchall()}
+    Returns the number of migration files applied. Idempotent.
+    """
+    applied = {
+        row[0] for row in db.execute("SELECT version FROM schema_migrations").fetchall()
+    }
     migrations = _list_migrations()
     pending = [m for m in migrations if m[0] not in applied]
 
     if not pending:
-        print(f"[migrate] nothing to apply — {len(applied)} migration(s) already at latest")
-        return
+        print(
+            f"[migrate] nothing to apply — {len(applied)} migration(s) already at latest"
+        )
+        return 0
 
-    print(f"[migrate] applying {len(pending)} migration(s) → {url}")
+    print(f"[migrate] applying {len(pending)} migration(s)")
     for version, name, path in pending:
         print(f"[migrate] → {name}")
         sql = path.read_text(encoding="utf-8")
@@ -172,12 +203,40 @@ def main() -> None:
         # version lands with the statements, not in a second round trip that
         # a dropped connection can lose.
         db.execute(
-            "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, datetime('now'))",
+            "INSERT OR IGNORE INTO schema_migrations (version, applied_at) "
+            "VALUES (?, datetime('now'))",
             (version,),
         )
         db.commit()
 
     print("[migrate] done")
+    return len(pending)
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--demo",
+        action="store_true",
+        help="Apply migrations to TURSO_DEMO_* (demo.radon.run), never prod",
+    )
+    args = parser.parse_args(argv)
+
+    url, token = resolve_target(demo=args.demo)
+
+    try:
+        import libsql_experimental as libsql  # type: ignore[import-untyped]
+    except ImportError:
+        sys.stderr.write(
+            "libsql_experimental is not installed in this venv. "
+            "Run: pip install libsql-experimental\n"
+        )
+        sys.exit(1)
+
+    label = "demo" if args.demo else "prod"
+    print(f"[migrate] target={label} → {url}")
+    db = _connect_with_retry(libsql, url, token)
+    apply_pending_migrations(db)
 
 
 if __name__ == "__main__":
