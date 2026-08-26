@@ -88,6 +88,7 @@ function StrikeRow({
   atmRef,
   sideFilter,
   riskFreeRate,
+  staged,
 }: {
   ticker: string;
   expiry: string;
@@ -101,6 +102,8 @@ function StrikeRow({
   atmRef?: React.Ref<HTMLTableRowElement>;
   sideFilter: "both" | "calls" | "puts";
   riskFreeRate: number;
+  /** Which sides of THIS strike are staged in the ticket. */
+  staged?: { call: boolean; put: boolean };
 }) {
   const callData = prices[callKey] ?? null;
   const putData = prices[putKey] ?? null;
@@ -144,6 +147,10 @@ function StrikeRow({
     [ticker, expiry, strike, prices, riskFreeRate],
   );
 
+  // Bidirectional reference: a leg staged in the ticket stays visible in the
+  // chain row it came from, per side.
+  const callTint = staged?.call ? " chain-cell--staged-call" : "";
+  const putTint = staged?.put ? " chain-cell--staged-put" : "";
   const rowClass = `chain-row ${isAtm ? "chain-row-atm" : ""}`;
   const showCalls = sideFilter !== "puts";
   const showPuts = sideFilter !== "calls";
@@ -153,37 +160,37 @@ function StrikeRow({
       {/* Call side */}
       {showCalls && (
         <>
-          <td className="chain-cell chain-greek">{callDelta != null ? callDelta.toFixed(2) : ""}</td>
-          <td className="chain-cell chain-iv">{callIV != null ? (callIV * 100).toFixed(1) : ""}</td>
+          <td className={`chain-cell chain-greek${callTint}`}>{callDelta != null ? callDelta.toFixed(2) : ""}</td>
+          <td className={`chain-cell chain-iv${callTint}`}>{callIV != null ? (callIV * 100).toFixed(1) : ""}</td>
           <td
-            className="chain-cell chain-implied"
+            className={`chain-cell chain-implied${callTint}`}
             title="Black-Scholes implied (theoretical) per-share price"
           >
             {callImplied != null ? fmtPrice(callImplied) : ""}
           </td>
-          <td className="chain-cell chain-vol">{callVol != null ? callVol.toLocaleString() : ""}</td>
+          <td className={`chain-cell chain-vol${callTint}`}>{callVol != null ? callVol.toLocaleString() : ""}</td>
           <td
-            className="chain-cell chain-bid chain-clickable"
+            className={`chain-cell chain-bid chain-clickable${callTint}`}
             onClick={() => onClickCall(strike, "SELL")}
             title="Sell call"
           >
             {callBid != null ? fmtPrice(callBid) : "---"}
           </td>
           <td
-            className="chain-cell chain-mid chain-clickable"
+            className={`chain-cell chain-mid chain-clickable${callTint}`}
             onClick={() => onClickCall(strike, "BUY")}
             title="Buy call"
           >
             {callMid != null ? fmtPrice(callMid) : "---"}
           </td>
           <td
-            className="chain-cell chain-ask chain-clickable"
+            className={`chain-cell chain-ask chain-clickable${callTint}`}
             onClick={() => onClickCall(strike, "BUY")}
             title="Buy call"
           >
             {callAsk != null ? fmtPrice(callAsk) : "---"}
           </td>
-          <td className="chain-cell chain-last">{callLast != null ? fmtPrice(callLast) : ""}</td>
+          <td className={`chain-cell chain-last${callTint}`}>{callLast != null ? fmtPrice(callLast) : ""}</td>
         </>
       )}
 
@@ -195,37 +202,37 @@ function StrikeRow({
       {/* Put side */}
       {showPuts && (
         <>
-          <td className="chain-cell chain-last">{putLast != null ? fmtPrice(putLast) : ""}</td>
+          <td className={`chain-cell chain-last${putTint}`}>{putLast != null ? fmtPrice(putLast) : ""}</td>
           <td
-            className="chain-cell chain-bid chain-clickable"
+            className={`chain-cell chain-bid chain-clickable${putTint}`}
             onClick={() => onClickPut(strike, "SELL")}
             title="Sell put"
           >
             {putBid != null ? fmtPrice(putBid) : "---"}
           </td>
           <td
-            className="chain-cell chain-mid chain-clickable"
+            className={`chain-cell chain-mid chain-clickable${putTint}`}
             onClick={() => onClickPut(strike, "BUY")}
             title="Buy put"
           >
             {putMid != null ? fmtPrice(putMid) : "---"}
           </td>
           <td
-            className="chain-cell chain-ask chain-clickable"
+            className={`chain-cell chain-ask chain-clickable${putTint}`}
             onClick={() => onClickPut(strike, "BUY")}
             title="Buy put"
           >
             {putAsk != null ? fmtPrice(putAsk) : "---"}
           </td>
-          <td className="chain-cell chain-vol">{putVol != null ? putVol.toLocaleString() : ""}</td>
+          <td className={`chain-cell chain-vol${putTint}`}>{putVol != null ? putVol.toLocaleString() : ""}</td>
           <td
-            className="chain-cell chain-implied"
+            className={`chain-cell chain-implied${putTint}`}
             title="Black-Scholes implied (theoretical) per-share price"
           >
             {putImplied != null ? fmtPrice(putImplied) : ""}
           </td>
-          <td className="chain-cell chain-iv">{putIV != null ? (putIV * 100).toFixed(1) : ""}</td>
-          <td className="chain-cell chain-greek">{putDelta != null ? putDelta.toFixed(2) : ""}</td>
+          <td className={`chain-cell chain-iv${putTint}`}>{putIV != null ? (putIV * 100).toFixed(1) : ""}</td>
+          <td className={`chain-cell chain-greek${putTint}`}>{putDelta != null ? putDelta.toFixed(2) : ""}</td>
         </>
       )}
     </tr>
@@ -1009,6 +1016,24 @@ export default function OptionsChainTab({
   const [loadingStrikes, setLoadingStrikes] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [orderLegs, setOrderLegs] = useState<OrderLeg[]>([]);
+
+  /**
+   * Strikes staged in the ticket, per side. Drives the chain tint so the
+   * operator can see which contracts are in the order without reading the
+   * ticket back. Keyed by strike; a call and a put at the same strike are
+   * tracked separately.
+   */
+  const stagedSides = useMemo(() => {
+    const map = new Map<number, { call: boolean; put: boolean }>();
+    for (const leg of orderLegs) {
+      const current = map.get(leg.strike) ?? { call: false, put: false };
+      if (leg.right === "C") current.call = true;
+      if (leg.right === "P") current.put = true;
+      map.set(leg.strike, current);
+    }
+    return map;
+  }, [orderLegs]);
+
   // Filter state is deep-linked into the URL (?expiry=&side=&strikes=) — seed
   // from the URL on mount, write back on change. See useChainUrlState.
   const chainUrl = useChainUrlState();
@@ -1480,6 +1505,9 @@ export default function OptionsChainTab({
           rather than under it, so legs, price, risk and CTA stay readable
           without scrolling and the chain keeps its full height. */}
       <div className="chain-rail" data-docked={orderLegs.length > 0 ? "true" : "false"}>
+      {/* One grid child per column: the chain and its hint row travel together,
+          otherwise the hint becomes a third child and wraps the dock below. */}
+      <div className="chain-rail-main">
       {loadingStrikes ? (
         <div style={{ padding: "24px 0", textAlign: "center" }}>
           <SpectralLoader label="Loading chain" />
@@ -1543,6 +1571,7 @@ export default function OptionsChainTab({
                     atmRef={isAtm ? atmRef : undefined}
                     sideFilter={sideFilter}
                     riskFreeRate={riskFreeRate}
+                    staged={stagedSides.get(row.strike)}
                   />
                 );
               })}
@@ -1550,6 +1579,14 @@ export default function OptionsChainTab({
           </table>
         </div>
       )}
+
+      {orderLegs.length > 0 && (
+        <div className="chain-rail-hint">
+          <span>CLICK BID/ASK → ADDS LEG TO TICKET</span>
+          <span>SELECTED LEGS HIGHLIGHTED IN CHAIN</span>
+        </div>
+      )}
+      </div>
 
       {/* Order Builder — the dock */}
       <OrderBuilder
