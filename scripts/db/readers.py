@@ -8,7 +8,7 @@ the legacy JSON-shaped dictionaries.
 from __future__ import annotations
 
 import json
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 try:
     from .client import get_db
@@ -79,6 +79,46 @@ def read_latest_portfolio_snapshot(db: Optional[Any] = None) -> Optional[dict[st
     if not rows:
         return None
     return _json_payload(_cell(rows[0], 0, "payload"))
+
+
+PRICE_HISTORY_SYMBOL_CHUNK = 60
+
+
+def read_price_history_closes(
+    symbols: Sequence[str],
+    since: Optional[str] = None,
+    db: Optional[Any] = None,
+) -> dict[str, dict[str, float]]:
+    """Daily closes per symbol from ``price_history_daily`` (migration 0029).
+
+    Chunked on the symbol list and bounded by ``since`` (YYYY-MM-DD) so one
+    call never streams an unbounded row set over Hrana — see scripts/CLAUDE.md
+    §Turso Hrana I/O Bounding.
+    """
+    wanted = [s for s in dict.fromkeys(symbols) if s]
+    if not wanted:
+        return {}
+
+    target = _db(db)
+    closes: dict[str, dict[str, float]] = {}
+    for start in range(0, len(wanted), PRICE_HISTORY_SYMBOL_CHUNK):
+        chunk = wanted[start:start + PRICE_HISTORY_SYMBOL_CHUNK]
+        placeholders = ", ".join("?" for _ in chunk)
+        sql = (
+            "SELECT symbol, date, close FROM price_history_daily "
+            f"WHERE symbol IN ({placeholders})"
+        )
+        params: tuple = tuple(chunk)
+        if since:
+            sql += " AND date >= ?"
+            params += (since,)
+        for row in target.execute(sql + " ORDER BY symbol, date", params).fetchall():
+            close = _cell(row, 2, "close")
+            if close is None:
+                continue
+            symbol = str(_cell(row, 0, "symbol"))
+            closes.setdefault(symbol, {})[str(_cell(row, 1, "date"))] = float(close)
+    return closes
 
 
 def read_portfolio_positions(db: Optional[Any] = None) -> list[dict[str, Any]]:
