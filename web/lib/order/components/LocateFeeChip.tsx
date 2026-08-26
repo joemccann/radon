@@ -100,7 +100,10 @@ import React from "react";
 export function LocateFeeChip({ status, data }: LocateFeeChipProps) {
   const label = chipLabel(status, data);
   const asOf = formatAsOf(data.as_of);
-  const source = data.source !== "none" ? data.source.toUpperCase() : null;
+  // `!== "none"` also passes for undefined, and a payload missing `source`
+  // then threw and took the whole order ticket down at the confirm step.
+  const source =
+    typeof data.source === "string" && data.source !== "none" ? data.source.toUpperCase() : null;
 
   return (
     <div

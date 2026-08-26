@@ -42,7 +42,7 @@ import { useViewport } from "@/lib/useViewport";
 import MobileChainLadder from "@/components/mobile/MobileChainLadder";
 import ComboSkewPanel from "@/components/ComboSkewPanel";
 import TicketRiskBlock from "@/components/ticker-detail/TicketRiskBlock";
-import { netPremiumForPayoff } from "@/lib/order/payoff";
+import { netPremiumForPayoff, payoffAtExpiry, payoffCurve } from "@/lib/order/payoff";
 import { placeOrderFeedback } from "@/lib/orders/placeOrderFeedback";
 
 /* ─── Types ─── */
@@ -451,6 +451,38 @@ function OrderBuilder({
   const riskState = useOrderRisk(riskInput, portfolio);
   const submitPermitted = chainOrderSubmitPermitted(isValidPrice, riskState, isCombo, isDebit);
 
+  /**
+   * The acknowledgement an operator gives is specific to the order in front of
+   * them, so it resets whenever they leave the review step or change the
+   * order. A stale tick must never arm a different ticket.
+   */
+  const [riskAcknowledged, setRiskAcknowledged] = useState(false);
+  useEffect(() => {
+    setRiskAcknowledged(false);
+  }, [confirmStep, signedLimitPrice, totalQty, structure, legs.length]);
+
+  /**
+   * Real figures for the acknowledgement, from the same exact payoff the risk
+   * block draws — where the position turns loss-making, and what it costs if
+   * the underlying goes to zero. Boilerplate would be easier to ignore.
+   */
+  const unboundedLoss = useMemo(() => {
+    if (riskState?.summary.maxLossUnbounded !== true) return null;
+    const premium = netPremiumForPayoff(payoffLegs, isCombo, signedLimitPrice);
+    const curve = payoffCurve(payoffLegs, premium, { spot: spot ?? 0 });
+    const turn = curve.breakevens.length > 0 ? curve.breakevens[curve.breakevens.length - 1] : null;
+    const atZero = payoffAtExpiry(payoffLegs, premium, 0) * 100 * (totalQty || 1);
+    const parts: string[] = [];
+    if (turn != null) parts.push(`Loss grows without limit beyond ${turn.toFixed(2)}`);
+    if (Number.isFinite(atZero) && atZero < 0) {
+      parts.push(`and reaches ${fmtPrice(Math.abs(atZero))} at zero`);
+    }
+    return { sentence: parts.length > 0 ? `${parts.join(" ")}.` : "Loss grows without limit." };
+  }, [riskState, payoffLegs, isCombo, signedLimitPrice, spot, totalQty]);
+
+  /** Bounded risk needs no acknowledgement; unbounded risk needs an explicit one. */
+  const transmitArmed = unboundedLoss == null || riskAcknowledged;
+
   const handlePlace = useCallback(async () => {
     if (!confirmStep) {
       if (!submitPermitted) return;
@@ -458,6 +490,9 @@ function OrderBuilder({
       return;
     }
     if (!submitPermitted) return;
+    // Defence in depth: the disabled button is UI, this is the actual gate.
+    // An unbounded-risk order never reaches the wire unacknowledged.
+    if (!transmitArmed) return;
 
     setLoading(true);
     setError(null);
@@ -890,12 +925,32 @@ function OrderBuilder({
           </div>
         )}
 
+        {/* Unbounded risk must be acknowledged before transmit arms. This only
+            ever ADDS a condition on top of `submitPermitted` — the risk gate
+            stays the chokepoint and this can never loosen it. */}
+        {confirmStep && unboundedLoss && (
+          <div className="ticket-unbounded" data-testid="ticket-unbounded-warning">
+            <label className="ticket-unbounded-row">
+              <input
+                type="checkbox"
+                data-testid="ticket-unbounded-ack"
+                checked={riskAcknowledged}
+                onChange={(e) => setRiskAcknowledged(e.target.checked)}
+              />
+              <span>
+                MAX LOSS UNBOUNDED. {unboundedLoss.sentence} Acknowledge to enable transmit.
+              </span>
+            </label>
+          </div>
+        )}
+
         <div className="order-submit order-builder-submit">
           {confirmStep ? (
             <div className="order-confirm-row">
               <button
                 type="button"
                 className="btn-secondary"
+                data-testid="ticket-back"
                 onClick={() => setConfirmStep(false)}
                 disabled={loading}
               >
@@ -904,21 +959,32 @@ function OrderBuilder({
               <button
                 type="button"
                 className={`btn-primary ${isDebit === false ? "btn-danger" : ""}`}
+                data-testid="ticket-transmit"
                 onClick={handlePlace}
-                disabled={loading || !submitPermitted}
+                disabled={loading || !submitPermitted || !transmitArmed}
               >
-                {loading ? "Placing..." : "Confirm Order"}
+                {loading
+                  ? "Transmitting..."
+                  : transmitArmed
+                    ? `Transmit ${structure || "Order"}`
+                    : "Transmit — awaiting acknowledgement"}
               </button>
             </div>
           ) : (
-            <button
-              type="button"
-              className="btn-primary order-builder-place"
-              onClick={handlePlace}
-              disabled={!submitPermitted}
-            >
-              Place {structure || "Order"}
-            </button>
+            <>
+              <button
+                type="button"
+                className="btn-primary order-builder-place"
+                data-testid="ticket-verify"
+                onClick={handlePlace}
+                disabled={!submitPermitted}
+              >
+                Verify order →
+              </button>
+              <div className="ticket-step-hint">
+                <span>STEP 1 OF 2 · TRANSMIT FOLLOWS REVIEW</span>
+              </div>
+            </>
           )}
         </div>
       </div>

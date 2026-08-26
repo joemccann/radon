@@ -12596,6 +12596,44 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
   }
 }
 
+/* Unbounded-risk acknowledgement. Deliberately loud: it is the last thing
+   between the operator and an order with no loss bound. */
+.ticket-unbounded {
+  border: 1px solid var(--fault);
+  border-radius: 4px;
+  background: var(--wash-fault);
+  padding: 8px 10px;
+}
+
+.ticket-unbounded-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.ticket-unbounded-row input {
+  /* 16px keeps the hit target honest without dominating the row. */
+  width: 16px;
+  height: 16px;
+  margin: 1px 0 0;
+  flex-shrink: 0;
+  accent-color: var(--fault);
+}
+
+.ticket-step-hint {
+  display: flex;
+  padding-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
 /* Ticket risk panel — sits above the CTA so max loss is read before the
    transmit button. Every cell is a real figure or "---"; nothing is padded
    with a zero to keep the grid tidy. */
