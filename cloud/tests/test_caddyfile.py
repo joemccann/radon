@@ -172,19 +172,81 @@ SHUTDOWN_GRACE_SECONDS = 10
 MIN_RETRY_WINDOW_SECONDS = SHUTDOWN_GRACE_SECONDS + 2
 
 
+# Caddy's default when lb_try_interval is omitted.
+CADDY_DEFAULT_TRY_INTERVAL_SECONDS = 0.25
+# A retry loop that re-dials less often than this turns a restart gap into a
+# visibly hung request instead of an invisible one, and only makes a handful of
+# attempts across the window.
+MAX_RETRY_INTERVAL_SECONDS = 1.0
+
+
+def strip_comments(content):
+    """Drop Caddyfile `#` comments, leaving quoted and backticked literals alone.
+
+    The Caddyfile carries a WARNING COMMENT naming `fail_duration`, so any
+    assertion about proxy settings has to read the active config only.
+    """
+    kept = []
+    for line in content.splitlines():
+        quote = None
+        cut = None
+        for index, char in enumerate(line):
+            if quote is not None:
+                if char == quote:
+                    quote = None
+            elif char in "\"`":
+                quote = char
+            elif char == "#" and (index == 0 or line[index - 1].isspace()):
+                cut = index
+                break
+        kept.append(line if cut is None else line[:cut])
+    return "\n".join(kept)
+
+
 def reverse_proxy_block(content, upstream):
-    """Return the body of the `reverse_proxy <upstream>` block, '' if inline."""
-    match = re.search(
-        r"reverse_proxy\s+" + re.escape(upstream) + r"\s*(\{(?:[^{}]|\{[^{}]*\})*\})?",
-        content,
-    )
-    assert match, f"no reverse_proxy directive for {upstream}"
-    return match.group(1) or ""
+    """Return the body of the `reverse_proxy <upstream>` block, '' if inline.
+
+    Brace-balanced (the health block nests `handle_response`) and
+    quote-aware (it responds with a JSON literal full of braces), so a setting
+    can only satisfy or trip an assertion from inside the block it belongs to.
+    """
+    active = strip_comments(content)
+    directive = re.search(r"reverse_proxy\s+" + re.escape(upstream) + r"\b", active)
+    assert directive, f"no reverse_proxy directive for {upstream}"
+    rest = active[directive.end():]
+    opener = re.match(r"[^\S\n]*\{", rest)
+    if not opener:
+        return ""
+    start = opener.end() - 1
+    depth = 0
+    quote = None
+    for index in range(start, len(rest)):
+        char = rest[index]
+        if quote is not None:
+            if char == quote:
+                quote = None
+        elif char in "\"`":
+            quote = char
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return rest[start:index + 1]
+    raise AssertionError(f"unbalanced braces in the reverse_proxy {upstream} block")
 
 
 def retry_window_seconds(block):
     match = re.search(r"lb_try_duration\s+(\d+)s", block)
     return int(match.group(1)) if match else 0
+
+
+def retry_interval_seconds(block):
+    match = re.search(r"lb_try_interval\s+(\d+(?:\.\d+)?)(ms|s)\b", block)
+    if not match:
+        return CADDY_DEFAULT_TRY_INTERVAL_SECONDS
+    value = float(match.group(1))
+    return value / 1000 if match.group(2) == "ms" else value
 
 
 class TestUpstreamRestartWindow:
@@ -211,11 +273,47 @@ class TestUpstreamRestartWindow:
             "radon-api restart; ws-ticket calls 502 through every deploy"
         )
 
+    @pytest.mark.parametrize("upstream", ["localhost:3000", "localhost:8321"])
+    def test_retry_interval_re_dials_across_the_gap(self, caddy_dir, upstream):
+        block = reverse_proxy_block(read_caddyfile(caddy_dir), upstream)
+        interval = retry_interval_seconds(block)
+        assert 0 < interval <= MAX_RETRY_INTERVAL_SECONDS, (
+            f"lb_try_interval {interval}s on {upstream} is too coarse: the "
+            "retry loop barely re-dials inside the window, so a restart gap "
+            "still reaches the browser as a failure"
+        )
+        assert interval < retry_window_seconds(block), (
+            f"lb_try_interval {interval}s on {upstream} outlasts "
+            "lb_try_duration; the proxy gives up after a single dial"
+        )
+
     def test_edge_health_status_stays_fast(self, caddy_dir):
         block = reverse_proxy_block(read_caddyfile(caddy_dir), "127.0.0.1:8330")
         assert retry_window_seconds(block) == 0, (
             "the edge health floor must answer immediately; a retry window "
             "would make the probe hang instead of reporting unreachable"
+        )
+
+
+class TestSingleUpstreamStaysInThePool:
+    """The retry window only helps while the upstream is still in the pool.
+
+    `fail_duration` switches on passive health checking. With exactly one
+    upstream behind the proxy, a single refused dial during a restart marks
+    that upstream down and `lb_try_duration` has nothing left to retry
+    against -- Caddy 502s immediately, which is the incident 717e8d5d fixed.
+    The Caddyfile says so in a comment; a comment is not a test. Scoped to the
+    proxy block so the warning comment itself neither satisfies nor trips it.
+    """
+
+    @pytest.mark.parametrize("upstream", ["localhost:3000", "localhost:8321"])
+    def test_no_fail_duration_on_the_single_upstream_blocks(self, caddy_dir, upstream):
+        block = reverse_proxy_block(read_caddyfile(caddy_dir), upstream)
+        assert "fail_duration" not in block, (
+            f"reverse_proxy {upstream} sets fail_duration: the only upstream "
+            "gets marked down on the first refused dial of a deploy restart, "
+            "the lb_try_duration retry loop never runs, and every request in "
+            "the gap 502s again"
         )
 
 
