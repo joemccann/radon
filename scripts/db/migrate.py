@@ -220,7 +220,9 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="Apply migrations to TURSO_DEMO_* (demo.radon.run), never prod",
     )
-    args = parser.parse_args(argv)
+    # Explicit argv (including []) so library callers / tests are not polluted
+    # by the process's sys.argv (pytest injects the test file path).
+    args = parser.parse_args([] if argv is None else argv)
 
     url, token = resolve_target(demo=args.demo)
 
@@ -240,4 +242,4 @@ def main(argv: list[str] | None = None) -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])
