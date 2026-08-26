@@ -368,8 +368,10 @@ describe("OptionsChainTab order builder — a suppressed duplicate is a warning,
     expect(row150).toBeTruthy();
     fireEvent.click(row150!.querySelector(".chain-mid.chain-clickable")!);
 
-    await clickWhenEnabled(/^Place /);
-    await clickWhenEnabled("Confirm Order");
+    // The chain ticket is a two-step verify-then-transmit. A long call has a
+    // bounded max loss, so transmit arms without an acknowledgement.
+    await clickWhenEnabled(/^Verify order/i);
+    await clickWhenEnabled(/^Transmit /i);
 
     await expectSuppressedNotification(fetchMock);
   });
