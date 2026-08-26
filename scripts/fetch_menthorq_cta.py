@@ -35,6 +35,7 @@ CACHE_DIR = _PROJECT_DIR / "data" / "menthorq_cache"
 
 from utils.env_loader import load_env_file
 from utils.atomic_io import atomic_save
+from utils.cta_percentiles import reconcile_tables
 
 # Load .env from project root (before any os.environ reads)
 load_env_file(_PROJECT_DIR / ".env")
@@ -116,7 +117,10 @@ Return ONLY a JSON array of objects with these exact fields:
 Rules:
 - "underlying" is the asset name exactly as shown in the table
 - Position values are decimal numbers as shown (can be negative)
-- Percentiles are integers (e.g. 38 means 38th percentile)
+- Copy each percentile EXACTLY as displayed, digit for digit. Some cards show
+  them as 0-100 integers (38) and some as 0-1 decimals (0.38). Never convert
+  between the two scales and never round a decimal to an integer — reporting
+  0.38 as 0 turns a mid-range reading into a max-short one.
 - Z-scores are decimal numbers as shown (e.g. -1.56)
 - Include ALL rows from the table
 - Return ONLY the JSON array, no markdown, no explanation"""
@@ -228,6 +232,23 @@ def fetch_menthorq_cta(
     if not tables or not any(tables.values()):
         print("  ERROR: No CTA data extracted.", file=sys.stderr)
         return None
+
+    # Percentiles land on two different scales and Vision rounds the fractional
+    # one to 0/1 — reconcile before anything persists, so the corruption never
+    # reaches the page, the share cards or the history comparisons.
+    tables = reconcile_tables(tables)
+    dropped = [
+        f"{table}/{row.get('underlying')}"
+        for table, rows in tables.items()
+        for row in rows or []
+        if row.get("percentile_3m") is None
+    ]
+    if dropped:
+        print(
+            f"  WARN: {len(dropped)} row(s) had percentiles their z-score contradicts: "
+            f"{', '.join(dropped[:6])}",
+            file=sys.stderr,
+        )
 
     # Cache
     p = write_cache(date_str, tables)

@@ -5,6 +5,7 @@ import { readdir, readFile } from "fs/promises";
 import { join } from "path";
 import { loadFonts } from "@/lib/og-fonts";
 import { OG, posColor, pctileBg, zColor, zOpacity, fmt } from "@/lib/og-theme";
+import { reconcileCtaTables } from "@/lib/ctaPercentiles";
 
 export const runtime = "nodejs";
 
@@ -15,9 +16,9 @@ type CtaRow = {
   position_today: number;
   position_yesterday: number;
   position_1m_ago: number;
-  percentile_1m: number;
-  percentile_3m: number;
-  percentile_1y: number;
+  percentile_1m: number | null;
+  percentile_3m: number | null;
+  percentile_1y: number | null;
   z_score_3m: number;
 };
 
@@ -94,8 +95,9 @@ async function loadLatestCta(
     const data = JSON.parse(raw) as CtaCache;
     if (!data.tables) return data;
 
-    // Remove duplicate benchmark rows across sections
-    data.tables = deduplicateTables(data.tables);
+    // Same reconciliation the CTA route applies: rounded-away percentiles are
+    // repaired from the duplicate row before dedupe drops it.
+    data.tables = deduplicateTables(reconcileCtaTables(data.tables));
 
     if (section) {
       const filtered: Record<string, CtaRow[]> = {};
@@ -184,10 +186,9 @@ function TableHeader() {
 }
 
 function DataRow({ row }: { row: CtaRow }) {
-  const pctileYDisplay =
-    typeof row.percentile_1y === "number" && row.percentile_1y > 100
-      ? fmt(row.percentile_1y)
-      : String(row.percentile_1y);
+  const pctileText = (value: number | null) =>
+    value == null ? "---" : value > 100 ? fmt(value) : String(value);
+  const pctileYDisplay = pctileText(row.percentile_1y);
 
   return (
     <div
@@ -248,7 +249,7 @@ function DataRow({ row }: { row: CtaRow }) {
           padding: "2px 4px",
         }}
       >
-        {row.percentile_1m}
+        {pctileText(row.percentile_1m)}
       </span>
       <span
         style={{
@@ -259,7 +260,7 @@ function DataRow({ row }: { row: CtaRow }) {
           padding: "2px 4px",
         }}
       >
-        {row.percentile_3m}
+        {pctileText(row.percentile_3m)}
       </span>
       <span
         style={{

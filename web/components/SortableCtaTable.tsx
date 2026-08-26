@@ -44,8 +44,11 @@ function posColor(v: number): string {
   return "var(--text-primary)";
 }
 
-function pctileBg(v: number): string {
-  const normalized = normalizeCtaPercentile(v) ?? v;
+function pctileBg(v: number | null | undefined): string {
+  const normalized = normalizeCtaPercentile(v);
+  // No tint for a percentile that could not be trusted — an unknown must not
+  // paint the same max-short red as a real 0th.
+  if (normalized == null) return "transparent";
   if (normalized <= 10) return "color-mix(in srgb, var(--fault) 25%, transparent)";
   if (normalized <= 25) return "color-mix(in srgb, var(--fault) 12%, transparent)";
   if (normalized <= 40) return "color-mix(in srgb, var(--warning) 12%, transparent)";
@@ -93,20 +96,21 @@ function ctaSortValue(row: CtaRow, key: CtaSortKey): number {
 /* ─── Flag helpers ───────────────────────────────────── */
 
 function flagForRow(r: CtaRow): { kind: "short" | "long"; tooltip: string } | null {
-  const p = normalizeCtaPercentile(r.percentile_3m) ?? r.percentile_3m;
+  const p = normalizeCtaPercentile(r.percentile_3m);
   const z = r.z_score_3m;
-  const isExtreme = p <= 10 || p >= 90 || Math.abs(z) >= 1.5;
+  const isExtreme = (p != null && (p <= 10 || p >= 90)) || Math.abs(z) >= 1.5;
   if (!isExtreme) return null;
 
-  const isShort = r.position_today < 0 && (p <= 10 || z <= -1.5);
-  const isLong  = r.position_today > 0 && (p >= 90 || z >= 1.5);
+  const isShort = r.position_today < 0 && ((p != null && p <= 10) || z <= -1.5);
+  const isLong  = r.position_today > 0 && ((p != null && p >= 90) || z >= 1.5);
+  const pctileText = p == null ? "--" : `${Math.round(p)}th`;
 
   if (isShort) {
     const flipped = r.position_1m_ago > 0;
     return {
       kind: "short",
       tooltip: [
-        `${Math.round(p)}th pctile (3M), z ${fmt(z)}.`,
+        `${pctileText} pctile (3M), z ${fmt(z)}.`,
         flipped ? `Flipped from ${fmt(r.position_1m_ago)} long 1M ago.` : null,
         Math.abs(z) >= 2.0
           ? "Extreme short. Violent covering risk on any bullish catalyst."
@@ -118,7 +122,7 @@ function flagForRow(r: CtaRow): { kind: "short" | "long"; tooltip: string } | nu
     return {
       kind: "long",
       tooltip: [
-        `${Math.round(p)}th pctile (3M), z ${fmt(z)}.`,
+        `${pctileText} pctile (3M), z ${fmt(z)}.`,
         "Crowded long. Mean reversion risk elevated.",
       ].join(" "),
     };
