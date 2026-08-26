@@ -13,11 +13,13 @@ WorkingDirectory=/home/radon/radon
 EnvironmentFile=/etc/radon/env
 Environment=RADON_UW_CALLER=flow-refresh
 ExecStart=/usr/bin/bash /home/radon/radon/scripts/run_flow_refresh.sh
-# R-067 / R-170: wrapper SHED_EXIT=75 is EX_TEMPFAIL (subprocess lane full).
-# SuccessExitStatus keeps a leaked 75 inactive, not failed. The wrapper
-# remaps an all-shed run to exit 0 so a host that has not yet installed
-# this unit file still does not page.
-SuccessExitStatus=75
+# R-265: SuccessExitStatus=75 is deliberately ABSENT. The wrapper already
+# remaps an all-shed run to exit 0, so the mapping was redundant for the case
+# it named — and 75 is EX_TEMPFAIL generally, so it also made a permanently
+# shedding unit (itself the incident) indistinguishable from a clean run in
+# `systemctl is-failed`, in the unit watchdog and in the journal's Result=.
+# A shed now writes a `flow-refresh` service_health row instead, which is a
+# signal the watchdog can actually act on.
 StandardOutput=journal
 StandardError=journal
 # Three sequential POSTs, each bounded at 180s by the wrapper curl deadline.
