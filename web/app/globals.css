@@ -9,6 +9,14 @@
 :root {
   --sidebar-width: 220px;
   --header-height: 48px;
+
+  /* Translucent signal washes — badge and panel-trace fills.
+     Defined once here on purpose: custom properties substitute lazily, so a
+     single color-mix tracks whichever theme's --signal-core / --warn / --fault
+     is in scope. A baked rgba would stay the dark value on a white canvas. */
+  --wash-signal: color-mix(in srgb, var(--signal-core) 8%, transparent);
+  --wash-warn: color-mix(in srgb, var(--warn) 9%, transparent);
+  --wash-fault: color-mix(in srgb, var(--fault) 10%, transparent);
   /* next/font/local injects `--font-sans` and `--font-mono` on <html>.
      Fallback values here keep the cascade sane when CSS loads before
      hydration; the next/font variable will override on mount. */
@@ -12547,6 +12555,188 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
 .chain-side-toggle-btn.active { background: var(--bg-panel-raised); color: var(--text-primary); }
 
 /* ─── Order Builder (dense instrument ticket, content-packed) ─── */
+
+/* Docked ticket rail — chain keeps its column, the ticket sits beside it so
+   legs, price, risk and CTA are readable without scrolling. Below the
+   breakpoint the rail unstacks and the ticket returns to full width. */
+.chain-rail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.chain-rail[data-docked="true"] {
+  grid-template-columns: minmax(0, 1fr) 384px;
+}
+
+.chain-rail-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.chain-rail .chain-grid-wrapper {
+  min-width: 0;
+}
+
+.order-builder--rail {
+  position: sticky;
+  top: 8px;
+  /* Never taller than the viewport: the ticket scrolls internally so the
+     transmit CTA stays reachable on a short window. */
+  max-height: calc(100dvh - 96px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 1180px) {
+  .chain-rail[data-docked="true"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .order-builder--rail {
+    position: static;
+    max-height: none;
+    overflow-y: visible;
+  }
+}
+
+/* Staged legs stay visible in the chain they came from, per side, so the
+   operator can see what is in the ticket without reading it back. A wash, not
+   a fill: the quote numbers must stay the most legible thing in the row. */
+.chain-cell--staged-call,
+.chain-cell--staged-put {
+  background: var(--wash-signal);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--signal-core) 22%, transparent);
+}
+
+.chain-rail-hint {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 2px 0;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+/* Unbounded-risk acknowledgement. Deliberately loud: it is the last thing
+   between the operator and an order with no loss bound. */
+.ticket-unbounded {
+  border: 1px solid var(--fault);
+  border-radius: 4px;
+  background: var(--wash-fault);
+  padding: 8px 10px;
+}
+
+.ticket-unbounded-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.ticket-unbounded-row input {
+  /* 16px keeps the hit target honest without dominating the row. */
+  width: 16px;
+  height: 16px;
+  margin: 1px 0 0;
+  flex-shrink: 0;
+  accent-color: var(--fault);
+}
+
+.ticket-step-hint {
+  display: flex;
+  padding-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+/* Ticket risk panel — sits above the CTA so max loss is read before the
+   transmit button. Every cell is a real figure or "---"; nothing is padded
+   with a zero to keep the grid tidy. */
+.ticket-risk {
+  border: 1px solid var(--line-grid);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.ticket-risk-head {
+  display: flex;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line-grid);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.ticket-risk-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--line-grid);
+}
+
+.ticket-risk-cell {
+  background: var(--bg-panel);
+  padding: 8px 10px;
+}
+
+.ticket-risk-cell-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.ticket-risk-cell-value {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.ticket-risk-cell-value--gain { color: var(--signal-core); font-weight: 600; }
+.ticket-risk-cell-value--loss { color: var(--fault); font-weight: 600; }
+.ticket-risk-cell-value--warn { color: var(--warn); }
+
+.ticket-risk-total {
+  display: flex;
+  justify-content: space-between;
+  padding: 7px 10px;
+  border-top: 1px solid var(--line-grid);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.ticket-risk-payoff-wrap {
+  padding: 8px 10px;
+  border-top: 1px solid var(--line-grid);
+}
+
+.ticket-risk-payoff {
+  display: block;
+  width: 100%;
+  height: 72px;
+}
+
+.ticket-risk-payoff-axis {
+  display: flex;
+  justify-content: space-between;
+  padding-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  color: var(--text-muted);
+}
 
 .order-builder {
   margin-top: 8px;
