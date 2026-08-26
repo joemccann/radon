@@ -22,9 +22,15 @@ export interface LocateFeeChipProps {
   data: ShortAvailabilityData;
 }
 
-function formatAsOf(isoString: string): string {
+function formatAsOf(isoString: string): string | null {
+  // A missing or unparseable timestamp renders nothing. `new Date(undefined)`
+  // does not throw, it yields "Invalid Date", which the catch below never
+  // caught and the chip printed verbatim as "as of Invalid Date".
+  if (typeof isoString !== "string" || isoString.length === 0) return null;
+  const parsed = new Date(isoString);
+  if (Number.isNaN(parsed.getTime())) return null;
   try {
-    return new Date(isoString).toLocaleTimeString("en-US", {
+    return parsed.toLocaleTimeString("en-US", {
       hour: "2-digit",
       minute: "2-digit",
       timeZoneName: "short",

@@ -33,8 +33,16 @@ describe("LocateFeeChip with a partial payload", () => {
     expect(() => render(<LocateFeeChip status="available" data={partial} />)).not.toThrow();
   });
 
-  it("survives a payload with no timestamp", () => {
+  it("omits the timestamp line rather than printing Invalid Date", () => {
     const partial = { ...(BASE as object), as_of: undefined } as never;
-    expect(() => render(<LocateFeeChip status="available" data={partial} />)).not.toThrow();
+    const { container } = render(<LocateFeeChip status="available" data={partial} />);
+    expect(container.textContent).not.toContain("Invalid Date");
+    expect(container.textContent).not.toContain("as of");
+  });
+
+  it("omits the timestamp line for an unparseable date", () => {
+    const partial = { ...(BASE as object), as_of: "not-a-date" } as never;
+    const { container } = render(<LocateFeeChip status="available" data={partial} />);
+    expect(container.textContent).not.toContain("Invalid Date");
   });
 });

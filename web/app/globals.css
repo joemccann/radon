@@ -12570,6 +12570,12 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
   grid-template-columns: minmax(0, 1fr) 384px;
 }
 
+.chain-rail-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .chain-rail .chain-grid-wrapper {
   min-width: 0;
 }
@@ -12594,6 +12600,26 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
     max-height: none;
     overflow-y: visible;
   }
+}
+
+/* Staged legs stay visible in the chain they came from, per side, so the
+   operator can see what is in the ticket without reading it back. A wash, not
+   a fill: the quote numbers must stay the most legible thing in the row. */
+.chain-cell--staged-call,
+.chain-cell--staged-put {
+  background: var(--wash-signal);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--signal-core) 22%, transparent);
+}
+
+.chain-rail-hint {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 2px 0;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
 }
 
 /* Unbounded-risk acknowledgement. Deliberately loud: it is the last thing
