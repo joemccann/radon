@@ -115,6 +115,9 @@ def test_relay_source_pings_watchdog_when_socket_present() -> None:
     assert "WATCHDOG=1" in src
     assert "NOTIFY_SOCKET" in src
     assert "sdNotify" in src
+    assert "systemd-notify" in src
+    assert "UNIX-SENDTO" in src
+    assert "socat" in src
 
 
 def test_container_dropin_forwards_notify_socket() -> None:

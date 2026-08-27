@@ -99,6 +99,8 @@ class TestPythonImage:
     def test_user_radon_is_final(self) -> None:
         text = PYTHON_DF.read_text(encoding="utf-8")
         assert _final_user(text) == "radon"
+        assert "--uid 1000" in text
+        assert "chmod 755 /home/radon" in text
 
 
 class TestNodeImage:
@@ -120,7 +122,16 @@ class TestNodeImage:
     def test_user_radon_is_final(self) -> None:
         text = NODE_DF.read_text(encoding="utf-8")
         assert _final_user(text) == "radon"
-        assert "--uid 1000" not in text
+        assert "--uid 1000" in text
+        assert "chmod 755 /home/radon" in text
+        assert "web/public/data" in text
+        assert "socat" in text
+
+    def test_clerk_public_env_is_required_at_build(self) -> None:
+        text = NODE_DF.read_text(encoding="utf-8")
+        assert 'ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=""' not in text
+        assert "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" in text
+        assert 'test -n "$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY"' in text
 
 
 class TestImageSafety:
