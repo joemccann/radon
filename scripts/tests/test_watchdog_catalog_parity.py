@@ -60,20 +60,61 @@ def _timer_backed_services() -> set[str]:
 _STATE_LITERALS = frozenset({"ok", "error", "warn", "degraded", "paused", "syncing"})
 
 
+# Most jobs pass a module-level constant rather than a literal
+# (`record_service_health(SERVICE, ...)`), which a literal-only scan cannot
+# see. Resolve the constant from its own assignment in the same file.
+_SERVICE_CONST = re.compile(
+    r'^(SERVICE|SERVICE_NAME|HEALTH_SERVICE)\s*=\s*"([a-z0-9-]+)"', re.MULTILINE
+)
+
+
 def _names_in(text: str) -> set[str]:
+    consts = {name: value for name, value in _SERVICE_CONST.findall(text)}
     found = set(re.findall(r'mirror_scan_snapshot\(\s*"([a-z0-9-]+)"', text))
     found |= set(re.findall(r'record_service_health\(\s*"([a-z0-9-]+)"', text))
+    for call in ("mirror_scan_snapshot", "record_service_health"):
+        for ident in re.findall(rf"{call}\(\s*([A-Z_]+)\b", text):
+            if ident in consts:
+                found.add(consts[ident])
     return found - _STATE_LITERALS
 
 
 def _resolve(rel: str) -> Path | None:
+    stripped = rel.lstrip("/").replace("home/radon/radon/", "")
     for candidate in (
-        REPO / rel.lstrip("/").replace("home/radon/radon/", ""),
+        REPO / stripped,
         _SCRIPTS_DIR / Path(rel).name,
+        # `-I /usr/local/lib/radon/<x>.py` is an INSTALLED copy; its source of
+        # truth is the cloud tree.
+        REPO / "cloud" / "scripts" / Path(rel).name,
     ):
         if candidate.exists():
             return candidate
+    # `-m scripts.watchdog` is a PACKAGE, not a module: `_exec_targets` maps it
+    # to `scripts/watchdog.py`, which does not exist. Its entry point is
+    # `scripts/watchdog/__main__.py`. Four of the fleet's units are packages.
+    if stripped.endswith(".py"):
+        pkg_main = REPO / stripped[: -len(".py")] / "__main__.py"
+        if pkg_main.exists():
+            return pkg_main
     return None
+
+
+def _exec_targets(exec_start: str) -> set[str]:
+    """Every source file an ExecStart line actually runs.
+
+    A `\\.(py|sh)` scan alone sees neither of the two forms this fleet uses
+    most: `python -m scripts.data_refresh` names no file at all, and a `node`
+    ExecStart names a `.js`. Both returned an EMPTY set, so the parity check
+    below asserted precisely nothing about those units — `radon-refresh`,
+    `radon-incident-watchdog` and `radon-demo-mirror` were invisible to it
+    rather than exempt from it. R-277.
+    """
+    targets = set(re.findall(r"([A-Za-z0-9_./-]+\.(?:py|sh|js))", exec_start))
+    # `-m package.module` -> `package/module.py`
+    for dotted in re.findall(r"-m\s+([A-Za-z0-9_.]+)", exec_start):
+        targets.add(dotted.replace(".", "/") + ".py")
+    return targets
 
 
 def _health_names_written_by(unit_stem: str) -> set[str]:
@@ -89,14 +130,14 @@ def _health_names_written_by(unit_stem: str) -> set[str]:
         line for line in unit.splitlines() if line.startswith("ExecStart")
     )
     names: set[str] = set()
-    for rel in re.findall(r"([A-Za-z0-9_./-]+\.(?:py|sh))", exec_start):
+    for rel in _exec_targets(exec_start):
         path = _resolve(rel)
         if path is None:
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
         names |= _names_in(text)
         if path.suffix == ".sh":
-            for inner in re.findall(r"(scripts/[A-Za-z0-9_./-]+\.py)", text):
+            for inner in re.findall(r"(scripts/[A-Za-z0-9_./-]+\.(?:py|js))", text):
                 inner_path = _resolve(inner)
                 if inner_path is not None:
                     names |= _names_in(inner_path.read_text(encoding="utf-8", errors="replace"))
@@ -214,3 +255,106 @@ class TestFlapBucketIsNotAdvertisedBeyondItsReach:
                 "consecutive samples inside a RestartSec window and can never "
                 "get them"
             )
+
+
+# ── R-277: every timer-backed unit is accounted for ──────────────────────────
+#
+# The parity check below only constrains health names it can FIND. A unit whose
+# ExecStart could not be parsed, or whose job writes no row at all, was not
+# exempt from the invariant — it was invisible to it, which reads identically
+# and is what let `radon-refresh`, `radon-incident-watchdog` and
+# `radon-demo-mirror` sit outside both catalogs unnoticed.
+#
+# These two maps make the gap ENUMERATED instead of invisible. Every entry is a
+# real gap or a real exemption; a NEW unit in neither fails the test, so the
+# class cannot grow silently while it is worked down.
+
+# Units whose job DOES call record_service_health, under a name this static
+# parser cannot resolve (built at runtime, or passed in by a caller). Not a
+# reliability gap — a parser limitation, tracked so it is not mistaken for one.
+HEALTH_NAME_UNRESOLVED = {
+    "radon-ib-watchdog",
+    "radon-nextjs-db-watchdog",
+    "radon-perf-twr",
+    "radon-watchdog-continuous",
+    "radon-watchdog-daily",
+    "radon-watchdog-error",
+    "radon-watchdog-intraday",
+}
+
+# Units that write NO service_health row at all. Each is a real observability
+# gap: the unit can fail on every fire and nothing in either catalog notices.
+# Listed rather than fixed here because each needs its own writer and its own
+# freshness window; carried as the standing remainder of R-277.
+NO_HEALTH_WRITER = {
+    "radon-bpi",
+    "radon-cta-sync",
+    "radon-db-backup",
+    "radon-db-retention",
+    "radon-demo-mirror",
+    "radon-drift-audit",
+    "radon-forecast-nightly",
+    "radon-grok-page-responder",
+    "radon-host-metrics",
+    "radon-incident-watchdog",
+    "radon-knowledge",
+    "radon-llm-index",
+    "radon-media-backup",
+    "radon-portfolio-archive",
+    "radon-portfolio-sync",
+    "radon-refresh",
+    "radon-signals-refresh",
+}
+
+
+class TestEveryTimerBackedUnitIsAccountedFor:
+    def test_no_unit_is_silently_outside_the_invariant(self):
+        unaccounted = sorted(
+            unit
+            for unit in _timer_backed_services()
+            if not _health_names_written_by(unit)
+            and unit not in HEALTH_NAME_UNRESOLVED
+            and unit not in NO_HEALTH_WRITER
+        )
+        assert not unaccounted, (
+            "these timer-backed units contribute no catalogued health name and "
+            "are in neither exempt list, so nothing notices when they fail on "
+            f"every fire: {unaccounted}"
+        )
+
+    def test_the_exempt_lists_name_only_real_units(self):
+        """A stale entry would silently re-open the hole it was covering."""
+        units = _timer_backed_services()
+        stale = sorted((HEALTH_NAME_UNRESOLVED | NO_HEALTH_WRITER) - set(units))
+        assert not stale, f"exempt entries for units that no longer exist: {stale}"
+
+    def test_every_exempt_unit_still_lacks_a_resolvable_name(self):
+        """When a unit starts contributing a name, drop it from the list."""
+        fixed = sorted(
+            unit
+            for unit in (HEALTH_NAME_UNRESOLVED | NO_HEALTH_WRITER)
+            if _health_names_written_by(unit)
+        )
+        assert not fixed, (
+            f"these units now contribute a health name; remove them: {fixed}"
+        )
+
+    def test_every_exec_start_resolves_to_a_real_file(self):
+        """An unresolvable ExecStart makes the parity check assert nothing.
+
+        `-m scripts.watchdog` names a PACKAGE, a `node` ExecStart names a
+        `.js`, and the drift auditor runs an installed copy under
+        /usr/local/lib. All three resolved to nothing before R-277.
+        """
+        unresolved = {}
+        for unit_stem in sorted(_timer_backed_services()):
+            unit = (SERVICES_DIR / f"{unit_stem}.service").read_text(encoding="utf-8")
+            exec_start = "\n".join(
+                line for line in unit.splitlines() if line.startswith("ExecStart")
+            )
+            targets = _exec_targets(exec_start)
+            if targets and not any(_resolve(t) for t in targets):
+                unresolved[unit_stem] = sorted(targets)
+        assert not unresolved, (
+            f"ExecStart targets that resolve to no file in-tree: {unresolved}"
+        )

@@ -286,6 +286,11 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // single missed firing.
   // MenthorQ source via Playwright — no IB dependency.
   "cta-sync": { open: 25 * HOUR, extended: 25 * HOUR, closed: 72 * HOUR, category: "scheduled", requires_ib: false },
+  // ``menthorq-cta`` is the EXTRACTION-quality row written by the same
+  // radon-cta-sync.timer firings (R-297): `error` when more than half the
+  // rows lost their percentile to the z-score check. Same cadence as
+  // ``cta-sync`` above, so the same windows apply.
+  "menthorq-cta": { open: 25 * HOUR, extended: 25 * HOUR, closed: 72 * HOUR, category: "scheduled", requires_ib: false },
 
   // Market-hours-only writers: triggered by the FastAPI scan endpoints
   // during the trading day, dormant on nights and weekends. The
