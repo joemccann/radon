@@ -501,6 +501,47 @@ Re-check with `turso plan show` after any plan change. Nightly dumps remain mand
 | `radon-db-backup.timer` | **09:00** | Full Turso dump after archive + retention. |
 | `radon-media-backup.timer` | **10:15** | Mirror `media.radon.run` tree (`/home/radon/radon-cloud/media`) → B2 prefix `media/`. Heartbeat: `media-backup`. `TimeoutStartSec=3600`. |
 
+## Disk cleanup (weekly)
+
+2026-08-27: the watchdog `root-disk-usage` check paged P1 at 98% of the 75G
+root filesystem (1.7 GiB free). Nothing on the box pruned the per-SHA
+`ghcr.io/joemccann/radon-{node,python}` image pairs (~5.8G per deploy), and
+`deploy.sh`'s best-effort `cleanup_staged_release_path` had leaked seven
+`stage.`/`backup.` worktrees under `/home/radon/.radon-releases` going back to
+Jul 11. `radon-disk-cleanup` automates the manual reclaim.
+
+| Piece | Where | What |
+|---|---|---|
+| `radon-disk-cleanup.timer` | VPS | Weekly **Sun 03:20 UTC**, `RandomizedDelaySec=300`, `Persistent=true`. Clear of portfolio-archive (05:40), db-retention (08:10) and db-backup (09:00). |
+| `radon-disk-cleanup.service` | VPS | Oneshot, `User=root` (root-only docker socket + journald vacuum), `TimeoutStartSec=900`. Runs the control-plane copy at `/usr/local/lib/radon/disk_cleanup.py` under `python3 -I`, never the radon-writable checkout. |
+| `cloud/scripts/disk_cleanup.py` | VPS | Five categories: stale app images, dangling layers, leaked release worktrees, npm/pip caches, journald. |
+| `service_health` heartbeat | row `disk-cleanup` | Written on EVERY run — `ok` with per-category bytes plus free-space before/after, `error` naming the failing categories. 8-day freshness window. |
+
+Retention constants (`cloud/scripts/disk_cleanup.py`):
+
+- `KEEP_IMAGE_PAIRS = 2` — keeps the `radon-node` / `radon-python` pair matching
+  the live checkout's HEAD **plus** the two newest pairs. An unresolvable HEAD
+  prunes nothing.
+- `RELEASE_MAX_AGE_DAYS = 3` — removes `stage.<sha>.XXXXXX` / `backup.<sha>.XXXXXX`
+  worktrees older than that, then drops their stale `.git/worktrees/<name>`
+  records by filesystem op (root never runs `git` inside a repo the radon
+  account can configure).
+- `JOURNAL_VACUUM_SIZE = "200M"`.
+
+Never touched: the running `ghcr.io/gnzsnz/ib-gateway` and
+`willfarrell/autoheal` images, `/home/radon/radon` (the live tree),
+`~/.cache/{ms-playwright,huggingface,fastembed,radon-wheels}`, and
+`/home/radon/radon-cloud/backups` — DB backup retention is `db_backup.py`'s
+`RETENTION_DAYS = 30` and shrinking it is an operator policy call.
+
+A category that finds nothing is a normal run. A category that RAISES flips
+the heartbeat to `error` but does not fail the unit: a wedged docker daemon
+must not also park the timer.
+
+Both units are **control-plane**, so `install-units` skips them by design and
+the root `bootstrap-control-plane.sh` run is what installs them and clears
+their `config/installed-units.sha256` entries.
+
 ### CREDIT spread (`radon-credit-spread.timer`)
 
 Daily `21:45 UTC` (`RandomizedDelaySec=300`), oneshot

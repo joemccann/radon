@@ -1,0 +1,16 @@
+[Unit]
+Description=Radon disk cleanup -- weekly, Sunday off-hours
+
+[Timer]
+# Sunday 03:20 UTC: the weekend slot the operator asked for, and deliberately
+# clear of every DB-maintenance window -- portfolio-archive (05:40 + 2h),
+# db-retention (08:10), db-backup (09:00) -- and of the 02:15/02:20/02:35
+# nightly cluster above it. Not :00/:30 to stay off the top-of-hour scheduler
+# herd. Persistent so a missed firing (host down) replays on the next boot
+# instead of skipping a whole week; the disk fills either way.
+OnCalendar=Sun *-*-* 03:20:00 UTC
+RandomizedDelaySec=300
+Persistent=true
+
+[Install]
+WantedBy=timers.target

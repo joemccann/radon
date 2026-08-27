@@ -304,10 +304,17 @@ class TestDur02BrakeAndFlapReach:
 # real gap or a real exemption; a NEW unit in neither fails the test, so the
 # class cannot grow silently while it is worked down.
 
-# Units whose job DOES call record_service_health, under a name this static
-# parser cannot resolve (built at runtime, or passed in by a caller). Not a
-# reliability gap — a parser limitation, tracked so it is not mistaken for one.
+# Units whose job DOES write a service_health row, under a name this static
+# parser cannot resolve (built at runtime, passed in by a caller, or written
+# through the cloud tree's own bounded stdlib libSQL pipeline rather than
+# record_service_health). Not a reliability gap — a parser limitation, tracked
+# so it is not mistaken for one.
 HEALTH_NAME_UNRESOLVED = {
+    # cloud/scripts/disk_cleanup.py heartbeats `disk-cleanup` on every run via
+    # its own write_service_health (same bounded stdlib shape as db_backup.py /
+    # drift_audit.py, which never touch the libsql bindings). The name is
+    # registered in BOTH catalogs; only this literal scan cannot see it.
+    "radon-disk-cleanup",
     "radon-ib-watchdog",
     "radon-nextjs-db-watchdog",
     "radon-perf-twr",
