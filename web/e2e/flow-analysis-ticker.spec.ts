@@ -254,4 +254,43 @@ test.describe("Flow Analysis per-ticker route", () => {
 
     expect(scanCalls).toBeGreaterThanOrEqual(1);
   });
+
+  test("capacity 502 shows scan failed, not ANALYZING", async ({ page }) => {
+    await setupBaseMocks(page);
+    await page.route("**/api/informed-flow/**", (r) =>
+      r.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ticker: "JOBY",
+          congress_trades: [],
+          insider_trades: [],
+          institutional_summary: null,
+        }),
+      }),
+    );
+    await page.route("**/api/flow-analysis/JOBY**", async (route) => {
+      const req = route.request();
+      if (req.method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ ticker: "JOBY", missing: true, cache_meta: { is_stale: true } }),
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 502,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "Radon API 502: Subprocess capacity exhausted" }),
+      });
+    });
+
+    await page.goto("/flow-analysis/JOBY");
+
+    const report = page.getByTestId("ticker-flow-report");
+    await expect(report.getByRole("alert")).toContainText(/Scan lane is full/i);
+    await expect(report.getByRole("status")).toContainText(/Scan failed/i);
+    await expect(report).not.toContainText(/Analyzing JOBY/i);
+  });
 });

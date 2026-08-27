@@ -1,3 +1,24 @@
+# Task: flow-report ticker capacity 502 (JOBY, 2026-08-27)
+
+## Dependency graph
+
+- F1 depends_on: [] - Red tests: ticker POST retries capacity shed; UI not ANALYZING
+- F2 depends_on: [F1] - Retry helper on POST /flow-analysis/{ticker}; operator copy
+- F3 depends_on: [F2] - Runbook `flow-report-ticker-capacity-502`
+
+## Checklist
+
+- [x] F1 Red tests
+- [x] F2 Server retry + SignalBadge Scan failed
+- [x] F3 Runbook + focused pytest/vitest green
+
+## Review
+
+- Focused pytest `test_flow_report_capacity_shed.py` 3 passed
+- Focused vitest `flow-report-capacity-error` 3 passed; analyzing-loader still 3 passed
+
+---
+
 # Task: P1 radon-bpi Result=timeout (page bbaa065b, 2026-08-24 23:30Z)
 
 ## Dependency graph
