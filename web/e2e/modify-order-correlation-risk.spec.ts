@@ -128,7 +128,9 @@ test("modify modal keeps correlation risk header on one row with ticker chips", 
 
   const banner = page.getByTestId("correlation-risk-banner");
   await expect(banner).toBeVisible();
-  await expect(banner).toContainText("Gate 3: correlation measurement unavailable");
+  await expect(banner.locator(".crb-headline")).toContainText(/Gate 3:/);
+  await expect(banner.locator(".crb-headline")).toContainText(/correlation/i);
+  await expect(banner.locator(".crb-detail")).toContainText(/price history/i);
 
   const { title: titleBox, gate: gateBox } = await headerGeometry(banner);
   expect(titleBox).toBeTruthy();
