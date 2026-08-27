@@ -82,6 +82,9 @@ IBKR rejection text embeds literal `<br>` tokens. `web/lib/orderError.ts:formatO
 
 ## Calculations — Correctness Rules
 
+### Limit-priced max gain / max loss
+The ticket limit is the fill. Do not subtract quoted half-spread or estimated exit from structural max. A short put's max gain is the credit at the limit (CBRS 40× $182.5 put @ $4 → $16,000, not $12,248). Round-trip cost stays on `computeOrderRisk(..., { roundTripCost })` for mid-fill backtests only. Tests: `order-cost-quotes.test.tsx`, `short-put-limit-max-gain.test.tsx`.
+
 ### Sign Convention
 Credits negative, debits positive. **Never `Math.abs()` on option prices without approval.** Preserve sign through entire display pipeline.
 

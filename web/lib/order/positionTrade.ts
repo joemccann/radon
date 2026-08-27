@@ -247,10 +247,10 @@ export function buildPositionTradeOrder(params: {
   limitPrice: number;
   tif: "DAY" | "GTC";
   /**
-   * FU7: optional live entry quote (net combo or single-leg, per-unit positive
-   * magnitudes). Threaded into the OPENING branches only so the F1 cost model
-   * renders net-of-cost max-loss/max-gain. Close-out branches surface realised
-   * P&L and have no risk math to adjust, so the quote is ignored there.
+   * Optional live entry quote (net combo or single-leg, per-unit positive
+   * magnitudes). Threaded into OPENING branches only. Ticket max-gain/max-loss
+   * stay structural at the limit; do not charge quoted spread on top of it.
+   * Close-out branches surface realised P&L and ignore the quote.
    */
   quote?: { bid: number | null; ask: number | null } | null;
   /**

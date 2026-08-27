@@ -1,5 +1,11 @@
 # Lessons
 
+## 2026-08-27 — Ticket max gain is the limit fill, not mid minus spread
+
+- CBRS 40× short $182.5 put, limit $4: TOTAL $16,000 CR, MAX GAIN $12,248.
+- FU7 folded `estimateRoundTripCost` (quoted half-spread on entry + estimated exit) into `useOrderRisk` on top of the limit. Bid 2.50 / ask 4.30 → $3,752 haircut.
+- The limit is the fill. At-expiry max is not an exit trade. Leave round-trip cost on `computeOrderRisk(..., { roundTripCost })` for mid-fill backtests only.
+
 ## 2026-08-25 — Kill-before-green beats a successor in_flight journal
 
 - Page `a70a393e`: latched `radon-bpi` `Result=signal` from 12:41Z stop-clean
