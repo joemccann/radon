@@ -271,3 +271,63 @@ T-161 (suite-wide `retry: 1` under CI), T-164 (installing caddy in the
 | T-165 | DONE | (this commit) | Gate 3 no longer reads clean on a partially measured book. `correlationRiskBanner.ts` gains an `"unmeasured"` level: the within-budget branch (clusters present, no breaches) now returns `unmeasured` with the headline `Gate 3: partial correlation read, N positions unmeasured` whenever `insufficient_data` is non-empty, instead of `Gate 3: N correlated clusters within budget`. `9fd59f7c` made partial measurement the steady state (`BACKFILL_MAX_SYMBOLS_PER_RUN = 4`, `BACKFILL_RETRY_S = 6h`), so this was a live gate failure, not an edge case. Red: `expected 'info' to be 'unmeasured'`; `expected ['none','info'] to not include 'info'`; `expected '' to contain '--crb-accent'` — 3 files / 3 failed, 15 passed. No component change was needed (`CorrelationRiskBanner.tsx` passes `banner.level` straight to `data-level` and only hides on `none`); the existing `showUnavailable` escape hatch for the no-cluster case is untouched, so `OrderRiskGate` and `AttributionPanel` are unchanged there. Accent is a brand token (`--warn`), no raw hex, no radius change. Green: 3 banner files / 18 passed; 11 consumer files / 113 passed; `tsc --noEmit` clean of correlation diagnostics. |
 | T-171 | DONE | (this commit) | Per-position Day P&L now gates on sync PROVENANCE, not the wall clock, closing R-107 one level down: `withSessionIbDailyPnl(positions, now, lastSync)` delegates to `isIbDailyPnlFromCurrentSession` instead of `isIbDailyPnlCurrent(now)`, and `PositionTable` passes `portfolio?.last_sync`. Crypto carve-out unchanged. Red (Monday 08:00 ET, sync = the previous Saturday, equity option carrying `ib_daily_pnl: 13951.76`): `expected '…' not to contain '13,952'`, received `———+$13,952$25,000…` — 1 failed / 4 passed, with the three pre-existing specs GREEN throughout, which is the finding. Green: 5 passed in file; 23 files / 178 tests across every `position-table*` / `day-pnl*` / `mobile-position*` / `dashboard-kpis` / `account-*` suite; 9 files / 55 tests across the remaining PositionTable and MetricCards consumers; `tsc --noEmit` clean on the touched files. Tests pin the clock with fake timers so they cannot false-red on a real weekend (T-117 class). Callers swept repo-wide: `MetricCards.tsx:642,645` and `dashboardKpis.ts:47` were already provenance-aware and are untouched; `PortfolioSections.tsx:117,148,179` already passes `portfolio`, so production gets `last_sync`; no `scripts/` callers. |
 | T-162 | DONE | (this commit) | The credit-spread and IEI/HYG fetchers now heartbeat an `error` row before dying, instead of two tests pinning the silence `docs/operations.md:187` calls worse than staleness. Both `assert persist_calls == []` tests were rewritten (not deleted) to `test_no_cache_heartbeats_error_before_it_raises`, requiring BOTH `pytest.raises(RuntimeError)` AND `("health", "<service>", "error") in persist_calls` plus no `"ok"` row; the two `test_refuses_empty_series` tests that pinned the same silence on the second exit path were rewritten to the same contract. Red: 4 failed (`assert ('health','credit-spread','error') in []` x2, `('health','iei-hyg','error') in []` x2), 2 passed, 64 deselected. Source fix: `_record_error_health()` in each producer mirrors `fetch_equibles_smart_money_13f.py`'s `_record_health` (no new mechanism; `error` is the writer's state, there is no `degraded`), best-effort so a broken writer cannot mask the original failure; `run()` wraps the cycle, records, then bare-`raise`s. The `RuntimeError` in `_serve_cached` was NOT weakened. Green: 70 passed in the two files; 30 passed in `test_service_registration_completeness.py` + `test_silent_degradation_bounds.py`; 91 passed across the five other importers. |
+
+## Delta audit 2026-08-27 (Thursday, audit mode)
+
+Range `1b326772..HEAD` (`789aabea`) — 43 commits, 264 files. Tree clean at
+start (only the wrapper's own `.weekend-runner.lock/`); no stash, no parked
+WIP. `rtk` is not installed on this host, so bare `git` was used throughout.
+`origin/testing/weekend-2026-08-27` did not exist at pre-flight; the empty
+branch was pushed immediately as the cross-host collision signal.
+
+| Gate | Round 1 |
+|---|---|
+| `python3.13 -m pytest` (recursive) | **7 failed**, 8153 passed, 1 skipped, 90 deselected (397.8s) |
+| `npx vitest run` | 758 files / **1 failed** / 7702 passed |
+| `pytest cloud/tests` | 34 failed, 1099 passed, 13 skipped (darwin; FAILED list byte-identical to `1b326772` in a worktree) |
+
+**The 7 pytest reds are REAL and `main` is red (T-237).** All seven are in
+`scripts/tests/test_portfolio_risk_gate3_measurability.py`, added by `789aabea`
+(reliability PR #100), and they reproduce **7/7 in isolation in 2.26s** —
+`AttributeError: module 'portfolio_risk' has no attribute
+'BACKFILL_WALL_CLOCK_BUDGET_S'. Did you mean: 'BACKFILL_TOTAL_BUDGET_S'?`
+The constant has never existed (`git log -S` returns nothing); the real one is
+`BACKFILL_TOTAL_BUDGET_S = 20.0` at `scripts/portfolio_risk.py:84`, which is
+what the T-166 remediation landed last weekend. CI at this SHA agrees: run
+`33038426120` is `failure` on `pytest (scripts-npsz)`, with `Prestage VPS
+release`, `pytest coverage ratchet` and `Deploy to VPS` all correctly SKIPPED.
+The deploy gate held; the consequence is that production has not deployed
+since that merge. Load was 21 at the start of the gate and 10.8 at the end, so
+load is not the explanation — the distribution (7 reds in ONE file,
+AttributeError-shaped) is what separates this from the 2026-08-23 flake class.
+
+**The 1 vitest red IS the load class (T-238).**
+`portfolio-startup-performance-contract.test.ts:172` at **5041ms** against the
+5000ms default, under load average 36. Green **8 passed ×3** in isolation
+(2.91 / 3.30 / 3.65s). Filed as P2 for the margin, not as a regression.
+
+**Cloud baseline unchanged at 34.** Sorted `FAILED` lists at HEAD and at
+`1b326772` (`git worktree add --detach /tmp/base_1b326772`) diffed
+**byte-identical, 34 both sides** — the known darwin `sha256sum` / bash-3.2
+class (T-118). Passed 1062 → 1099, skips 5 → 13; the eight added skips are
+exactly the two new files filed as T-204 and T-205.
+
+**Collection union clean on all three gates** (py 478 collected vs 479 shard
+union, the one extra being `test_menthorq_integration.py` which is deselected
+locally by `-m 'not integration'`; cloud 33/33; vitest 758/758), so T-122
+holds. **Enforcement strengthened** — T-160 is fixed, `deploy.needs` 7 → 9
+with both coverage ratchets restored. No `.only` anywhere; four new skip
+constructs (8 outcomes), none linked to a T-###; no exclusion growth; no
+threshold moved, and the coverage measurement got stricter twice.
+
+49 findings filed (T-190…T-238: 6 P0, 23 P1, 20 P2); see `TEST_AUDIT.md`
+`## Delta audit 2026-08-27`. Needs an operator eye: T-237 (prod undeployed),
+T-205 (no workflow installs caddy, so the order-duplication guard never runs),
+T-222 (`main` has no required status checks), T-223 (14 of 150 e2e specs run,
+gating nothing).
+
+**Runner hazard recorded:** this audit's draft was overwritten mid-run by the
+reliability loop, which uses a separate clone but shares `/tmp` and had chosen
+the same generic scratch filename. No repo file was affected and no finding
+was lost; all scratch moved to `/tmp/tw-2026-08-27/` and the gate counts were
+re-verified from copies. Lesson appended to the skill.

@@ -5081,6 +5081,29 @@ in 2026-08-25 and 2026-08-26. Scope was the added files; counts in
   **AC:** extend `_unit_files()` to walk `*.service.d/*.conf` and require a
   manifest entry; editing `common.conf` without a sha bump must red.
 
+- **T-238 [P2] A new contract test sits at ~50% of the default 5 s timeout, so
+  it flakes under any concurrent load.**
+  `web/tests/portfolio-startup-performance-contract.test.ts:172`
+  (`renders nothing for the portfolio section so the workspace never owns it`)
+  failed the full vitest gate at **5041ms** — the 5000ms default, blown by
+  41 ms — under load average 36. Re-run in isolation it is **8 passed ×3** at
+  2.91 / 3.30 / 3.65 s wall (tests 2.37–2.79 s), so the assertion is correct
+  and this is the load-sensitive class, NOT a regression. It is filed anyway
+  because the margin is the defect: the file is the T-167/T-170 behavioural
+  rewrite from last weekend, and its import-graph walk plus four component
+  renders consume roughly half the budget with nothing left for a busy runner
+  — precisely the 2026-08-23 lesson about timing a new tree-walking contract
+  rather than only making it green. This host runs two weekend loops
+  concurrently, so contention is the normal condition, not the exception.
+  **AC:** red — run the file 3× and assert the reported per-test duration for
+  `:172` stays under half the configured timeout; it does not today under
+  load. Green — either hoist the import-graph parse into a
+  module-scope `beforeAll` shared across the file's cases (the parse is
+  invariant), or raise this file's `testTimeout` via `vi.setConfig` with the
+  measured headroom stated in a comment, the pattern T-161 already established
+  for the two named jsdom suites. Do NOT re-enable a blanket `retry` — T-161
+  removed it deliberately.
+
 ## 11 · Audit ledger
 
 The weekend loop (`.claude/skills/testing-weekend/`) reads the last line
@@ -5093,4 +5116,4 @@ Delta findings continue the T-### numbering in dated `## Delta audit` sections.
 - Audited through: `4985a7f8` on 2026-08-22 (second pass, different host) — 24 ADDITIONAL findings (T-097…T-120: 13 P1, 11 P2) on the same range; 8 more converged with the first pass and were dropped, 3 are deltas to T-088/T-090/T-094. pytest 7216 green on rounds 1 and 3, T-089's sleep race red on round 2; vitest 7036 green ×3; cloud 34-red ×3, byte-identical to the same run at `71de8a33` (bash 3.2 on this host, T-118). No new skips, no `.only`, no exclusion growth, no threshold moved.
 - Audited through: `27665c43` on 2026-08-25 — 34 new findings (T-122…T-155: 1 P0, 12 P1, 21 P2) over 68 commits / 513 files. Gates serial: pytest 7816 green (recursive; CI's sharded matrix drops 752 of them, T-122); vitest 7328 green / 701 files; cloud 34 red on darwin, byte-identical to the base SHA (T-118). Added-file determinism 3×3 green. No new skips, no `.only`, no exclusion growth; vitest thresholds unchanged; pytest ratchet metric silently switched to statement-only (T-123).
 - Audited through: `1b326772` on 2026-08-26 — 34 new findings (T-156…T-189: 3 P0, 14 P1, 17 P2) over 33 commits / 236 files. Gates serial round 1: pytest 7996 green (recursive; CI's 12 shards sum to the identical 7996, so T-122 holds); vitest 723 files / 7498 green; cloud 34 red on darwin, FAILED list byte-identical to the base SHA in a worktree (T-118). Added-file determinism 3×3 green (pytest 60, vitest 121). One new skip (`test_caddyfile.py:229`, filed as T-164), no `.only`, no exclusion growth, no threshold moved — but both coverage ratchets left `deploy.needs` and `main` has no required status checks (T-160).
-- Audited through: `789aabea` on 2026-08-27 — 48 new findings (T-190…T-237: 6 P0, 23 P1, 19 P2) over 43 commits / 264 files. Gates serial: pytest **7 failed** / 8153 passed — deterministic, all in `test_portfolio_risk_gate3_measurability.py`, reproduced 7/7 in isolation, filed as T-237 (`main` is red; CI at this SHA also failed and correctly skipped deploy); cloud 34 red on darwin, FAILED list byte-identical to the base SHA in a worktree (T-118); vitest recorded in `TEST_LOG.md`. Collection union clean on all three gates (py 478/479 shard union, cloud 33/33, vitest 758/758) so T-122 holds. Enforcement STRENGTHENED — T-160 is fixed, `deploy.needs` went 7 → 9 with both coverage ratchets restored. Four new skips (8 outcomes), none linked to a T-### (T-204, T-205); no `.only`; no exclusion growth; no threshold moved — the coverage measurement got stricter twice.
+- Audited through: `789aabea` on 2026-08-27 — 49 new findings (T-190…T-238: 6 P0, 23 P1, 20 P2) over 43 commits / 264 files. Gates serial: pytest **7 failed** / 8153 passed — deterministic, all in `test_portfolio_risk_gate3_measurability.py`, reproduced 7/7 in isolation, filed as T-237 (`main` is red; CI at this SHA also failed and correctly skipped deploy); cloud 34 red on darwin, FAILED list byte-identical to the base SHA in a worktree (T-118); vitest 758 files / **1 failed** / 7702 passed — a single 5041ms timeout on `portfolio-startup-performance-contract.test.ts:172` under load 36, green 8/8 ×3 in isolation, filed as T-238 (load class, not a regression). Collection union clean on all three gates (py 478/479 shard union, cloud 33/33, vitest 758/758) so T-122 holds. Enforcement STRENGTHENED — T-160 is fixed, `deploy.needs` went 7 → 9 with both coverage ratchets restored. Four new skips (8 outcomes), none linked to a T-### (T-204, T-205); no `.only`; no exclusion growth; no threshold moved — the coverage measurement got stricter twice.
