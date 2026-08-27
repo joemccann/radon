@@ -1,3 +1,24 @@
+# Task: META avg entry lagged IB VWAP vs fill (2026-08-27)
+
+## Dependency graph
+
+- A1 depends_on: [] - Red: session-fill cover overrides stale IB/journal avgCost
+- A2 depends_on: [A1] - build_fill_basis + fetch_positions cover; skip carry-forward
+- A3 depends_on: [A2] - Focused pytest + avg-entry vitest
+
+## Checklist
+
+- [x] A1 Red tests
+- [x] A2 Session-fill exact cover
+- [x] A3 Green
+
+## Review
+
+- pytest `test_ib_sync_fill_basis.py` 5 passed
+- vitest `position-table-short-stock-avg-entry` 10 passed
+
+---
+
 # Task: P1 radon-bpi Result=timeout (page bbaa065b, 2026-08-24 23:30Z)
 
 ## Dependency graph

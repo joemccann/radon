@@ -608,6 +608,7 @@ def collapse_positions(positions: list) -> list:
                 "entry_cost": leg['entry_cost'],
                 "avg_cost": leg['avgCost'],
                 "ib_avg_cost": leg.get('ibAvgCost'),
+                "basis_source": leg.get("basis_source"),
                 "market_price": leg.get('marketPrice'),
                 "market_value": leg.get('marketValue'),
                 "market_price_is_calculated": bool(leg.get('marketPriceIsCalculated'))
@@ -628,6 +629,13 @@ def collapse_positions(positions: list) -> list:
             "market_value": round(total_market_value, 2) if total_market_value is not None else None,
             "market_price_is_calculated": bool(is_market_price_calculated) if total_market_value is not None else False,
             "ib_daily_pnl": ib_daily_pnl,
+            "basis_source": (
+                "session_fills"
+                if formatted_legs and all(
+                    l.get("basis_source") == "session_fills" for l in formatted_legs
+                )
+                else None
+            ),
             "legs": formatted_legs,
             "kelly_optimal": None,
             "target": None,
@@ -782,11 +790,49 @@ def _with_net_qty(lookup: dict, net_qty_lookup: dict) -> "_BasisLookup":
     return enriched
 
 
-def fetch_positions(client: IBClient, journal_basis_lookup: Optional[dict[str, float]] = None) -> list:
+def _session_fill_cover(fill: dict, position_size: float):
+    """Newest same-sign session fills whose qty exactly equals live size.
+
+    Returns (entry_cost_dollars, avg_cost_per_contract) or None. An exact
+    cover is the blotter's current OPEN row; a miss (overnight inventory,
+    a reduce, an add) leaves IB/journal basis in place.
+    """
+    if not fill or position_size == 0:
+        return None
+    sign = 1 if position_size > 0 else -1
+    need = abs(float(position_size))
+    picked: list[tuple[float, float]] = []
+    picked_qty = 0.0
+    for lot in reversed(fill.get("lots") or []):
+        try:
+            signed = float(lot["signed_qty"])
+            price = float(lot["per_share"])
+        except (TypeError, ValueError, KeyError):
+            continue
+        if signed == 0 or (1 if signed > 0 else -1) != sign:
+            continue
+        qty = abs(signed)
+        picked.append((qty, price))
+        picked_qty += qty
+        if picked_qty >= need - 1e-9:
+            break
+    if abs(picked_qty - need) > 1e-9:
+        return None
+    vwap = sum(qty * price for qty, price in picked) / need
+    entry_cost = need * vwap * 100.0
+    return abs(entry_cost), entry_cost / need
+
+
+def fetch_positions(
+    client: IBClient,
+    journal_basis_lookup: Optional[dict[str, float]] = None,
+    fill_basis_lookup: Optional[dict] = None,
+) -> list:
     """Fetch all positions from IB"""
     positions = client.get_positions()
     journal_basis_lookup = journal_basis_lookup or {}
     journal_net_qty_lookup = getattr(journal_basis_lookup, "net_qty", {}) or {}
+    fill_basis_lookup = fill_basis_lookup or {}
 
     formatted = []
     for pos in positions:
@@ -809,6 +855,7 @@ def fetch_positions(client: IBClient, journal_basis_lookup: Optional[dict[str, f
             getattr(contract, 'right', None),
             getattr(contract, 'strike', None),
         )
+        basis_source = "ib"
         if journal_key and journal_key in journal_basis_lookup and position_size != 0:
             journal_net = journal_net_qty_lookup.get(journal_key)
             # SIGNED equality: |+10| == |-10| let a sign-flipped journal
@@ -822,12 +869,22 @@ def fetch_positions(client: IBClient, journal_basis_lookup: Optional[dict[str, f
             if basis_is_complete:
                 entry_cost = abs(float(journal_basis_lookup[journal_key]))
                 avg_cost = entry_cost / abs(position_size)
+                basis_source = "journal"
             else:
                 print(
                     f"  Warning: journal basis SKIPPED for {journal_key}: "
                     f"journal_net_qty={journal_net} != position_qty={position_size} "
                     f"— keeping IB avgCost (incomplete journal)"
                 )
+
+        # Session fills whose newest same-sign qty exactly covers live size
+        # beat IB avgCost and a same-sized stale journal lot (META 575C
+        # 2026-08-27: blotter $5.55, AVG ENTRY $4.69).
+        fill = fill_basis_lookup.get(journal_key) if journal_key else None
+        fill_cover = _session_fill_cover(fill, position_size) if fill else None
+        if fill_cover is not None:
+            entry_cost, avg_cost = fill_cover
+            basis_source = "session_fills"
         
         formatted.append({
             "account_id": getattr(pos, 'account', '') or '',
@@ -836,6 +893,7 @@ def fetch_positions(client: IBClient, journal_basis_lookup: Optional[dict[str, f
             "position": position_size,
             "avgCost": avg_cost,
             "ibAvgCost": ib_avg_cost,
+            "basis_source": basis_source,
             "entry_cost": round(entry_cost, 2),
             "expiry": parse_expiry(contract),
             "strike": getattr(contract, 'strike', None),
@@ -1140,17 +1198,93 @@ def build_account_summary(account: dict, pnl_data: dict) -> dict:
     }
 
 
-def build_fill_dates(client) -> dict:
+def _fill_exec_time(fill) -> datetime:
+    raw = getattr(getattr(fill, "execution", None), "time", None)
+    if raw is None:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    if isinstance(raw, datetime):
+        return raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)
+    try:
+        parsed = datetime.fromisoformat(str(raw)[:19])
+    except ValueError:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _fill_signed_qty(side, shares) -> float:
+    label = str(side or "").strip().upper()
+    try:
+        qty = abs(float(shares or 0))
+    except (TypeError, ValueError):
+        return 0.0
+    if label in {"BOT", "BUY", "B"}:
+        return qty
+    if label in {"SLD", "SELL", "S"}:
+        return -qty
+    return 0.0
+
+
+def build_fill_basis(fills) -> dict[str, dict]:
+    """FIFO remaining inventory from this session's option fills.
+
+    Keyed like journal basis (``TICKER|YYYYMMDD|R|STRIKE``). Used when IB
+    avgCost is a lagged VWAP and the journal still holds a same-sized stale
+    open lot — Today's Executed Orders already shows the live fill price.
+    """
+    buckets: dict[str, list[tuple[datetime, float, float]]] = {}
+    for fill in fills or []:
+        contract = getattr(fill, "contract", None)
+        execution = getattr(fill, "execution", None)
+        if contract is None or execution is None:
+            continue
+        if getattr(contract, "secType", None) != "OPT":
+            continue
+        key = _journal_basis_key(
+            getattr(contract, "symbol", None),
+            getattr(contract, "lastTradeDateOrContractMonth", None),
+            getattr(contract, "right", None),
+            getattr(contract, "strike", None),
+        )
+        if not key:
+            continue
+        signed = _fill_signed_qty(
+            getattr(execution, "side", None), getattr(execution, "shares", 0)
+        )
+        price = getattr(execution, "avgPrice", None)
+        if price is None:
+            price = getattr(execution, "price", None)
+        try:
+            price_f = float(price)
+        except (TypeError, ValueError):
+            continue
+        if signed == 0 or not math.isfinite(price_f):
+            continue
+        buckets.setdefault(key, []).append((_fill_exec_time(fill), signed, price_f))
+
+    out: dict[str, dict] = {}
+    for key, rows in buckets.items():
+        rows.sort(key=lambda row: row[0])
+        out[key] = {
+            "lots": [
+                {"signed_qty": signed, "per_share": price}
+                for _when, signed, price in rows
+            ]
+        }
+    return out
+
+
+def build_fill_dates(client, fills=None) -> dict:
     """Extract earliest execution date per contract from IB session fills.
 
     Returns dict keyed by "TICKER|EXPIRY|RIGHT|STRIKE" → "YYYY-MM-DD".
     Covers same-session trades that haven't appeared in Flex Query (blotter) yet.
     """
     fill_dates: dict[str, str] = {}
-    try:
-        fills = client.get_fills()
-    except Exception:
-        return fill_dates
+    if fills is None:
+        try:
+            fills = client.get_fills()
+        except Exception:
+            return fill_dates
 
     for fill in fills:
         contract = fill.contract
@@ -1330,9 +1464,11 @@ def convert_to_portfolio_format(account: dict, collapsed_positions: list, pnl_da
             journal_corrected = (
                 ac is not None and ibc is not None and abs(float(ac) - float(ibc)) > 1e-6
             )
+            session_fill_basis = pos.get("basis_source") == "session_fills"
             drifted = ibc is not None and abs(pb["per_unit"] - float(ibc)) > 1e-6
             if (
                 not journal_corrected
+                and not session_fill_basis
                 and drifted
                 and cur_dir == pb["direction"]
                 and 0 < cur_contracts <= pb["contracts"]
@@ -1588,9 +1724,18 @@ def main():
 
         # Fetch positions while PnL streams
         journal_basis_lookup = build_journal_basis_lookup(client)
+        try:
+            session_fills = client.get_fills()
+        except Exception:
+            session_fills = []
+        fill_basis_lookup = build_fill_basis(session_fills)
         positions = [
             position
-            for position in fetch_positions(client, journal_basis_lookup=journal_basis_lookup)
+            for position in fetch_positions(
+                client,
+                journal_basis_lookup=journal_basis_lookup,
+                fill_basis_lookup=fill_basis_lookup,
+            )
             if not position.get("account_id") or position.get("account_id") == ib_account
         ]
         margin_observed_through = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -1718,7 +1863,7 @@ def main():
 
         # Sync or emit JSON if requested
         if args.sync or args.json_output:
-            fill_dates = build_fill_dates(client)
+            fill_dates = build_fill_dates(client, fills=session_fills)
             portfolio = convert_to_portfolio_format(account, collapsed, pnl_data, fill_dates=fill_dates)
 
         if args.sync and portfolio is not None:
