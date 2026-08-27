@@ -654,13 +654,29 @@ def trigger_restart(unit: str, dry_run: bool = False) -> bool:
     except subprocess.CalledProcessError as exc:
         LOG.error("restart handoff failed: rc=%s stderr=%s", exc.returncode, exc.stderr)
         if is_preheld_gateway:
-            ib_2fa_lock.release_2fa_push_lock(expected_holder=WATCHDOG_LOCK_HOLDER)
+            _release_preheld_lease()
         return False
     except subprocess.TimeoutExpired:
         LOG.error("restart handoff timed out after %ss", timeout)
         if is_preheld_gateway:
-            ib_2fa_lock.release_2fa_push_lock(expected_holder=WATCHDOG_LOCK_HOLDER)
+            _release_preheld_lease()
         return False
+
+
+def _release_preheld_lease() -> None:
+    """Roll the preheld Gateway lease back after a failed handoff, bounded.
+
+    The exclusive guard spans ``_write_lock_file``'s two fsyncs, so an
+    unbounded release here wedges the oneshot on a stalled disk. The lease
+    still auto-expires at its TTL if the guard is unavailable. T-200.
+    """
+    try:
+        ib_2fa_lock.release_2fa_push_lock(
+            expected_holder=WATCHDOG_LOCK_HOLDER,
+            guard_timeout_secs=LOCK_OP_TIMEOUT_SECS,
+        )
+    except ib_2fa_lock.GuardLockTimeout as exc:
+        LOG.warning("preheld lease rollback deferred: %s", exc)
 
 
 # --- service_health write ---------------------------------------------------
