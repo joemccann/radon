@@ -431,11 +431,51 @@ ORDERS_SYNC_INTERVAL_SECS = 5 * 60  # 5 min — comfortably under the 10-min wat
 # scan storms pin it, ib_orders.py is not on the reserved order lane.
 ORDERS_SYNC_SHED_RETRIES = 2
 ORDERS_SYNC_SHED_RETRY_DELAY_SECS = 8.0
+# Operator POST /flow-analysis/{ticker} shares that general lane. Fail-fast
+# 502 leaves the UI on ANALYZING with a raw capacity error. Retry the claim
+# with the same budget as orders-sync; persistent shed still 502s.
+FLOW_REPORT_SHED_RETRIES = 2
+FLOW_REPORT_SHED_RETRY_DELAY_SECS = 8.0
 _CAPACITY_SHED_MARKER = "subprocess capacity exhausted"
 
 
 def _is_capacity_shed(error: Optional[str]) -> bool:
     return bool(error) and _CAPACITY_SHED_MARKER in error.lower()
+
+
+async def _run_script_retrying_capacity(
+    script: str,
+    args: list[str],
+    *,
+    timeout: float,
+    retries: int,
+    delay_s: float,
+    label: str,
+) -> ScriptResult:
+    """Re-claim a general-lane slot after a capacity shed.
+
+    The claim is fail-fast. Peer scans often free a slot in seconds, so a
+    bounded sleep-and-retry is the operator-facing equivalent of the
+    orders-sync / flow-refresh wrappers. Real script failures do not retry.
+    """
+    result = await run_script(script, args, timeout=timeout)
+    attempts = 0
+    while (
+        not result.ok
+        and _is_capacity_shed(result.error)
+        and attempts < retries
+    ):
+        attempts += 1
+        logger.info(
+            "%s: capacity shed — retry %d/%d in %.0fs",
+            label,
+            attempts,
+            retries,
+            delay_s,
+        )
+        await asyncio.sleep(delay_s)
+        result = await run_script(script, args, timeout=timeout)
+    return result
 
 
 # A shed is not a healthy run: ib_orders.py never spawned and neither
@@ -2342,10 +2382,15 @@ async def run_flow_report(ticker: str):
 
     # 20 trading-day dark-pool history (flow_report DEFAULT_LOOKBACK_DAYS).
     # Cold liquid names paginate UW heavily; allow longer than the old 120s.
-    result = await run_script(
+    # Capacity shed is retryable: the general lane is often full for seconds
+    # because GET /informed-flow/{ticker} and hourly scans share it.
+    result = await _run_script_retrying_capacity(
         "flow_report.py",
         [upper, "--days", "20"],
         timeout=300,
+        retries=FLOW_REPORT_SHED_RETRIES,
+        delay_s=FLOW_REPORT_SHED_RETRY_DELAY_SECS,
+        label=f"flow-report {upper}",
     )
     if not result.ok:
         raise HTTPException(status_code=502, detail=result.error)
