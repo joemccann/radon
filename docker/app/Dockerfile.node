@@ -34,8 +34,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # node:22-bookworm-slim already owns uid 1000 (`node`). Host radon is 1000;
 # the wrapper remaps --user to that uid, so the image user must match.
-RUN userdel node \
-    && groupdel node \
+RUN userdel node || true \
+    && groupdel node || true \
     && groupadd --gid 1000 radon \
     && useradd --system --uid 1000 --gid 1000 --create-home --home-dir /home/radon --shell /usr/sbin/nologin radon \
     && mkdir -p /home/radon/radon/web/public/data \
