@@ -108,26 +108,33 @@ export function useOrders(active: boolean = true): UseOrdersReturn {
     // the open-order snapshot cannot change. `active` reflects route/panel
     // selection, not visibility. R-263.
     const hidden = typeof document !== "undefined" && document.visibilityState === "hidden";
-    let failed = false;
-    if (!hidden) {
-      try {
-        await fetchOrders();
-        failureStreakRef.current = 0;
-      } catch {
-        failed = true;
-      }
+    if (hidden) {
+      // No request was issued, so this tick is neither a success nor a
+      // failure. It used to fall through to the `errorRef` check below, which
+      // walked `failureStreakRef` up every 30s while backgrounded, so the
+      // first real failure after the tab returned jumped straight to the
+      // 5-minute ceiling instead of the first rung. R-263.
+      if (mountedRef.current && activeRef.current) scheduleNext(POLL_INTERVAL_MS);
+      return;
     }
+    let failed = false;
+    try {
+      await fetchOrders();
+    } catch {
+      failed = true;
+    }
+    // `fetchOrders` swallows its own error into `errorRef`, so the catch above
+    // is not the failure signal — the mirrored ref is. Resetting the streak on
+    // the way past it pinned every outage to the first rung forever.
     if (errorRef.current) failed = true;
     if (failed) failureStreakRef.current += 1;
     else failureStreakRef.current = 0;
     // And back off on failure. The route answers a Turso outage with 503 by
     // design, and the next poll was still exactly 30s later, forever. R-263.
-    const delay = hidden
-      ? POLL_INTERVAL_MS
-      : Math.min(
-          MAX_POLL_INTERVAL_MS,
-          POLL_INTERVAL_MS * 2 ** Math.max(0, failureStreakRef.current),
-        );
+    const delay = Math.min(
+      MAX_POLL_INTERVAL_MS,
+      POLL_INTERVAL_MS * 2 ** Math.max(0, failureStreakRef.current),
+    );
     if (mountedRef.current && activeRef.current) scheduleNext(delay);
   }, [fetchOrders, scheduleNext]);
   pollCachedRef.current = pollCached;
