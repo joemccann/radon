@@ -73,10 +73,21 @@ def _run(
 ) -> subprocess.CompletedProcess[str]:
     docker_log = tmp_path / "docker.log"
     fake_docker = tmp_path / "docker"
+    # A tag named in RADON_TEST_MISSING_TAGS is absent from BOTH the registry
+    # and the local store, which is how the pinned-SHA preflight and its
+    # fallback to :latest are exercised. Failing only `manifest inspect` would
+    # let T-198's local-store fallback resolve the missing tag and the
+    # :latest fallback would never be reached; a test wanting the local store
+    # to answer passes its own `docker_body`.
     _write_executable(
         fake_docker,
         (docker_body or """#!/bin/bash
 printf '%s\\n' "$*" >> {log}
+if [ "$2" = "inspect" ] && [ "$1" = "manifest" -o "$1" = "image" ]; then
+  for missing in ${{RADON_TEST_MISSING_TAGS:-}}; do
+    [ "$3" = "$missing" ] && exit 1
+  done
+fi
 exit 0
 """).format(log=repr(docker_log.as_posix())),
     )

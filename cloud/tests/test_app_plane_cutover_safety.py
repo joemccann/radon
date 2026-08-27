@@ -43,7 +43,10 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from test_app_runtime import _run as _run_runtime  # noqa: E402
 from test_caddyfile import read_caddyfile  # noqa: E402,F401  (path bootstrap)
+
+PYTHON_REPO = "ghcr.io/joemccann/radon-python"
 
 CLOUD = Path(__file__).resolve().parents[1]
 DEPLOY = CLOUD / "scripts" / "deploy.sh"
@@ -188,19 +191,48 @@ class TestImageBuildCarriesPublicEnv:
 
 
 class TestImageTagIsPreflighted:
-    def test_run_checks_the_tag_before_depending_on_it(self):
-        text = RUNTIME.read_text(encoding="utf-8")
-        assert "manifest inspect" in text or "image_available" in text, (
-            "the run path pins the exact deploy SHA with no fallback and no "
-            "existence check, so a cancelled image build fails all five units"
-        )
+    """T-232: drive the runtime with a stub docker; do not grep the script.
 
-    def test_there_is_a_fallback_when_the_sha_tag_is_absent(self):
-        text = RUNTIME.read_text(encoding="utf-8")
-        assert "RADON_APP_IMAGE_FALLBACK_TAG" in text or ":latest" in text, (
-            "no fallback tag, so a cancelled build is an unrecoverable "
-            "manifest unknown across api, nextjs, relay, monitor and newsfeed"
+    `"manifest inspect" in text` and `"RADON_APP_IMAGE_FALLBACK_TAG" in text`
+    match a helper that nothing on the run path calls, and match the comment
+    block that explains R-234 — which is how T-198 stayed hidden. These run
+    `radon-app-runtime run` in test mode and read the docker call log.
+    """
+
+    def test_run_checks_the_tag_before_depending_on_it(self, tmp_path):
+        result = _run_runtime(tmp_path, ["run", "radon-api.service"])
+        assert result.returncode == 0, result.stderr
+        calls = [
+            line
+            for line in result.docker_log.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        assert calls[0] == f"manifest inspect {PYTHON_REPO}:testsha", (
+            "the run path pins the exact deploy SHA and docker-runs it with no "
+            f"existence check, so a cancelled image build fails all five units: {calls}"
         )
+        launch = next(line for line in calls if line.startswith("run "))
+        assert f"{PYTHON_REPO}:testsha" in launch, launch
+
+    def test_there_is_a_fallback_when_the_sha_tag_is_absent(self, tmp_path):
+        result = _run_runtime(
+            tmp_path,
+            ["run", "radon-api.service"],
+            extra_env={"RADON_TEST_MISSING_TAGS": f"{PYTHON_REPO}:testsha"},
+        )
+        assert result.returncode == 0, result.stderr
+        calls = [
+            line
+            for line in result.docker_log.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        assert f"manifest inspect {PYTHON_REPO}:latest" in calls, calls
+        launch = next(line for line in calls if line.startswith("run "))
+        assert f"{PYTHON_REPO}:latest" in launch, (
+            "no usable fallback tag, so a cancelled build is an unrecoverable "
+            f"manifest unknown across api, nextjs, relay, monitor and newsfeed: {launch}"
+        )
+        assert "falling back" in result.stderr
 
 
 class TestDropInsResetExecStartPre:
