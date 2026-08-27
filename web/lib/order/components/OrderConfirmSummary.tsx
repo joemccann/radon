@@ -82,8 +82,8 @@ export function OrderConfirmSummary({
   if (summary.coverageStatus !== "resolved") {
     const pendingLabel =
       summary.coverageStatus === "no-portfolio"
-        ? "Coverage indeterminate — portfolio not in scope"
-        : "Coverage indeterminate — portfolio resolving";
+        ? "Coverage indeterminate: portfolio not in scope"
+        : "Coverage indeterminate: portfolio resolving";
     return (
       <div
         className={`order-confirm-summary order-confirm-summary-pending ${className}`.trim()}

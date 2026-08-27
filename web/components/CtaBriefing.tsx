@@ -236,7 +236,7 @@ function buildNarrative(
         `SPX CTAs at the ${formatCtaPercentileLabel(spx.percentile_3m)} percentile of their 3M range${flipped ? `, having flipped from ${fmt(spx.position_1m_ago)} long one month ago` : ""}.`
       );
     } else if (spxPctile >= 90) {
-      parts.push(`SPX CTAs at the ${formatCtaPercentileLabel(spx.percentile_3m)} percentile of their 3M range — heavily long.`);
+      parts.push(`SPX CTAs at the ${formatCtaPercentileLabel(spx.percentile_3m)} percentile of their 3M range, heavily long.`);
     }
   }
 
@@ -272,7 +272,7 @@ function buildNarrative(
   const spxShort = getSpxRow(main);
   if (spxShort && (pctile(spxShort.percentile_3m) ?? 101) <= 10 && spxShort.position_1m_ago > 0) {
     parts.push(
-      "Positioning is a mean-reversion coil — any bullish catalyst risks violent CTA short-covering across all equity classes."
+      "Positioning is a mean-reversion coil. Any bullish catalyst risks violent CTA short-covering across all equity classes."
     );
   }
 

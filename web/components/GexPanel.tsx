@@ -476,7 +476,7 @@ export default function GexPanel({ marketState }: GexPanelProps) {
         </div>
         <div className="section-body" style={{ padding: "24px", textAlign: "center" }}>
           <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--text-muted)" }}>
-            No GEX data available — run a scan to populate.
+            No GEX data available. Run a scan to populate.
           </span>
         </div>
       </div>
@@ -525,7 +525,7 @@ export default function GexPanel({ marketState }: GexPanelProps) {
             </span>
           )}
           <ShareReportModal
-            modalTitle="GEX REPORT — SHARE TO X"
+            modalTitle="GEX REPORT: SHARE TO X"
             shareEndpoint="/api/gex/share"
             buttonTitle="Share GEX report to X"
             iconSize={11}

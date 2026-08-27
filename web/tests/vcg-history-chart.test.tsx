@@ -145,7 +145,7 @@ describe("VcgPanel — 20-session history chart", () => {
     const { container } = render(React.createElement(VcgPanel, { prices: {} }));
     const html = container.innerHTML;
     const chartIdx = html.indexOf('data-testid="vcg-history-chart-section"');
-    const tableIdx = html.indexOf("VCG History — Recent 20 Sessions");
+    const tableIdx = html.indexOf("VCG History: Recent 20 Sessions");
     expect(chartIdx).toBeGreaterThan(-1);
     expect(tableIdx).toBeGreaterThan(-1);
     expect(chartIdx).toBeLessThan(tableIdx);

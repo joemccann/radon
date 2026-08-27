@@ -141,7 +141,7 @@ export default function BacktestPanel() {
   return (
     <div className="backtest-panel">
       <div className="backtest-header">
-        <h2 className="backtest-title">Strategy Backtest — {result?.label ?? "Crash Risk Index (CRI)"}</h2>
+        <h2 className="backtest-title">Strategy Backtest: {result?.label ?? "Crash Risk Index (CRI)"}</h2>
         {result?.entry_doc && <p className="backtest-entry-doc">{result.entry_doc}</p>}
       </div>
 
@@ -172,7 +172,7 @@ export default function BacktestPanel() {
 
           {metrics.n_trades === 0 ? (
             <div className="backtest-empty">
-              No entry signals fired over the available history — the documented
+              No entry signals fired over the available history. The documented
               entry rule never triggered. This is a valid result, not an error.
             </div>
           ) : (
