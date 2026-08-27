@@ -187,6 +187,11 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # (weekend/holiday runs are 304 heartbeats). Uniform 26h window mirrors its
     # cor parent. Cboe CDN plus Turso cor_history only — no IB dependency.
     "vixcor":           {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # vixts — radon-vixts.timer, daily 02:45 UTC every calendar day, in the
+    # slot after straddle/cor/vixcor so the Cboe CDN hits stay staggered
+    # (weekend/holiday runs are 304 heartbeats). Uniform 26h window mirrors
+    # its Cboe siblings. Cboe CDN only — no IB dependency.
+    "vixts":            {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # ivrank — radon-ivrank.timer, daily 22:10 UTC every calendar day, after
     # the 16:00 ET close year-round (weekend/holiday runs are unchanged-data
     # heartbeats). Uniform 26h window matches its daily siblings. IB primary
@@ -449,6 +454,9 @@ BUCKETS: dict[str, list[str]] = {
         # behind its radon-cor parent) — hourly check surfaces a missed run
         # within 1h of the 26h window expiring.
         "vixcor",
+        # Daily 02:45 UTC Cboe VIX/VIX3M term-structure pull — hourly check
+        # surfaces a missed run within 1h of the 26h window expiring.
+        "vixts",
         # Daily 22:10 UTC SPY 1M IV rank pull (post-close, IB primary with a
         # UW fallback) — hourly check surfaces a missed run within 1h of the
         # 26h window expiring.

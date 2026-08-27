@@ -18,6 +18,7 @@ Owner specs for regime tabs and the cheap-wing scanner. Add a row here when a sp
 | divyield | `/regime/divyield` | `div-yield` | [divyield.md](divyield.md) |
 | hyad | `/regime/hyad` | `hy-ad` | [hyad.md](hyad.md) |
 | hhlev | `/regime/hhlev` | `hhlev` | [hhlev.md](hhlev.md) |
+| vixts | `/regime/vixts` | `vixts` | [vixts.md](vixts.md) |
 
 `divyield` oneshot `TimeoutStartSec=2100` covers a tarpitted Yahoo constituent sweep (`SWEEP_BUDGET_S=1800` plus one in-flight fetch). 900s SIGTERM'd the 2026-08-24 run.
 

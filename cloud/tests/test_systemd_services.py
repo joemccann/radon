@@ -120,6 +120,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-hyad.timer",
     "radon-hhlev.service",
     "radon-hhlev.timer",
+    "radon-vixts.service",
+    "radon-vixts.timer",
 ]
 
 LONG_RUNNING_SERVICES = [

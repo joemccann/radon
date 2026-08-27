@@ -218,6 +218,12 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // legitimate quarterly lag, never writer health. FRED HTTP only, no IB.
   "hhlev": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
+  // ``vixts`` — radon-vixts.timer fires daily 02:45 UTC every calendar day,
+  // ten minutes behind radon-vixcor so the Cboe CDN hits stay staggered
+  // (weekend and holiday runs are 304 heartbeats), so a uniform 26h window
+  // matches its cor / vixcor / straddle siblings. Cboe CDN CSVs only — no IB.
+  "vixts": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+
   // ``trin`` — radon-trin.timer samples NYSE A/D + volume from IB every 5 minutes during RTH (3 missed cycles flag); off-hours the close heartbeat holds a day.
   // R-122: 24h closed against a Mon-Fri-only timer went stale every Saturday
   // evening. 3 days covers the Fri -> Mon gap, like the other RTH writers.

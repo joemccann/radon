@@ -473,6 +473,22 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
     expect(requiresIb("hhlev")).toBe(false);
   });
 
+  // ``vixts`` — radon-vixts.timer fires daily 02:45 UTC every calendar day,
+  // ten minutes behind radon-vixcor so the Cboe CDN hits stay staggered
+  // (weekend and holiday runs are 304 heartbeats), so a uniform 26h window
+  // matches its vixcor / cor siblings. Cboe CDN CSVs only — no IB.
+  it("vixts is registered as scheduled with a uniform 26h window", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["vixts"]).toBeDefined();
+    expect(getServiceCategory("vixts")).toBe("scheduled");
+    for (const state of ["open", "extended", "closed"] as MarketState[]) {
+      expect(getFreshnessWindowMs("vixts", state)).toBe(26 * HOUR);
+      expect(getFreshnessWindowMs("vixts", state)).toBe(
+        getFreshnessWindowMs("vixcor", state),
+      );
+    }
+    expect(requiresIb("vixts")).toBe(false);
+  });
+
   // ``credit-spread`` — radon-credit-spread.timer fires daily 21:45 UTC
   // including weekends (heartbeat), so a uniform 26h window matches its
   // yield-curve sibling. IB-primary with UW/Yahoo fallback; Yahoo is
