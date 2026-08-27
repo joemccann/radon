@@ -1119,7 +1119,7 @@ function FlowSectionsBody() {
               </div>
               {actionItems.map((item) => (
                 <div key={`${item.ticker}-${item.position}`} className="alert-item">
-                  <span className="alert-ticker">{item.ticker}</span> — {item.position}: {item.note}
+                  <span className="alert-ticker">{item.ticker}</span>, {item.position}: {item.note}
                 </div>
               ))}
             </div>
@@ -1184,7 +1184,7 @@ function FlowSectionsBody() {
             </div>
             {actionItems.map((item) => (
               <div key={`${item.ticker}-${item.position}`} className="alert-item">
-                <span className="alert-ticker">{item.ticker}</span> — {item.position}: {item.note}
+                <span className="alert-ticker">{item.ticker}</span>, {item.position}: {item.note}
               </div>
             ))}
           </div>

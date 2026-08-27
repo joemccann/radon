@@ -85,9 +85,9 @@ function tierColor(tier: 1 | 2 | 3 | null): string {
 
 function tierLabel(tier: 1 | 2 | 3 | null): string {
   switch (tier) {
-    case 1: return "TIER 1 — CRITICAL";
-    case 2: return "TIER 2 — HIGH";
-    case 3: return "TIER 3 — ELEVATED";
+    case 1: return "TIER 1: CRITICAL";
+    case 2: return "TIER 2: HIGH";
+    case 3: return "TIER 3: ELEVATED";
     default: return "NO ACTIVE TIER";
   }
 }
@@ -102,9 +102,9 @@ function vvixSeverityColor(sev: string): string {
 
 function vvixSeverityDesc(sev: string): string {
   switch (sev) {
-    case "extreme":  return "VVIX far above 120 — maximum vol-of-vol stress";
-    case "elevated": return "VVIX above 110 — second-order stress signal";
-    default:         return "VVIX below 110 — vol regime stable";
+    case "extreme":  return "VVIX far above 120: maximum vol-of-vol stress";
+    case "elevated": return "VVIX above 110: second-order stress signal";
+    default:         return "VVIX below 110: vol regime stable";
   }
 }
 
@@ -297,7 +297,7 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
               {data.credit_proxy}
             </span>
             <ShareReportModal
-              modalTitle="VCG REPORT — SHARE TO X"
+              modalTitle="VCG REPORT: SHARE TO X"
               shareEndpoint="/api/vcg/share"
               buttonTitle="Share VCG report to X"
               iconSize={11}
@@ -537,7 +537,7 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
           drill-down UX, regardless of the chart's selected range. */}
       <div className="section">
         <div className="section-header">
-          <div className="section-title">VCG History — Recent 20 Sessions</div>
+          <div className="section-title">VCG History: Recent 20 Sessions</div>
         </div>
         <div className="section-body table-wrap">
           <table>

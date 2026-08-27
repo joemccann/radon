@@ -145,7 +145,7 @@ export function OrderActionsProvider({ children }: { children: ReactNode }) {
           pushOrdersData(data);
           pushNotification({
             type: "error",
-            message: `${order.symbol} cancellation failed — order still open. Try cancelling again.`,
+            message: `${order.symbol} cancellation failed. Order still open. Try cancelling again.`,
             duration: 0,
           });
         } else {

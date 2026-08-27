@@ -155,10 +155,10 @@ export function describeRunReport(report: RunReport): string {
     return `Ran clean through ${report.steps.length} node${report.steps.length === 1 ? "" : "s"}`;
   }
   if (report.requires_confirmation) {
-    return `Blocked at ${report.blocked_by ?? "order node"} — confirmation required`;
+    return `Blocked at ${report.blocked_by ?? "order node"}: confirmation required`;
   }
   if (report.blocked_gate) {
-    return `Blocked at ${report.blocked_by} — ${report.blocked_gate} gate failed`;
+    return `Blocked at ${report.blocked_by}: ${report.blocked_gate} gate failed`;
   }
   return `Blocked at ${report.blocked_by ?? "a node"}`;
 }

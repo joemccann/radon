@@ -103,7 +103,7 @@ export default function CtaPage() {
             headline: `MAX SHORT · ${formatCtaPercentileLabel(spx.percentile_3m)} pctile (3M), z ${spx.z_score_3m.toFixed(2)}.`,
             body: [
               flipped ? `Flipped from ${spx.position_1m_ago.toFixed(2)} long one month ago.` : null,
-              bondShortCount >= 2 ? `${bondShortCount} bond contracts at 0th pctile — full duration short.` : null,
+              bondShortCount >= 2 ? `${bondShortCount} bond contracts at 0th pctile, full duration short.` : null,
               "Violent short-covering likely on any bullish catalyst.",
             ].filter(Boolean).join(" "),
           };
@@ -154,7 +154,7 @@ export default function CtaPage() {
           return {
             kind: "long",
             headline: `LONG USD · ${formatCtaPercentileLabel(dxy.percentile_3m)} pctile.`,
-            body: `${shorts.length} currency pairs short at extreme levels. Dollar strength trade crowded — watch for reversal if risk appetite returns.`,
+            body: `${shorts.length} currency pairs short at extreme levels. Dollar strength trade crowded. Watch for reversal if risk appetite returns.`,
           };
         }
         if (shorts.length > 0 && longs.length > 0) {
@@ -352,7 +352,7 @@ export default function CtaPage() {
           }}
         >
           <span style={{ flex: 1, display: "flex", alignItems: "baseline", gap: "8px" }}>
-            MENTHORQ CTA POSITIONING — {ctaData?.date ?? "---"}{" "}
+            MENTHORQ CTA POSITIONING: {ctaData?.date ?? "---"}{" "}
             <InfoTooltip text={SECTION_TOOLTIPS["MENTHORQ CTA POSITIONING"]} />
             {fetchLabel && (
               <span style={{ fontWeight: 400, fontSize: "9px", color: "var(--text-muted)", letterSpacing: "0.06em" }}>
@@ -362,7 +362,7 @@ export default function CtaPage() {
           </span>
           {ctaData?.tables && (
             <ShareReportModal
-              modalTitle="CTA REPORT — SHARE TO X"
+              modalTitle="CTA REPORT: SHARE TO X"
               shareEndpoint="/api/menthorq/cta/share"
               buttonTitle="Share CTA report to X"
               iconSize={11}

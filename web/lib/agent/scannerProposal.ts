@@ -51,7 +51,7 @@ function statementFor(result: ThetaHarvesterResult): string {
   if (setup && !isEngineSetupToken(setup)) return setup;
   if (!setup) {
     const edge = Number.isFinite(result.iv_rv_edge) ? result.iv_rv_edge.toFixed(1) : "---";
-    return `${structureStatement(result)} — IV/RV edge ${edge}, range score ${result.range_score}.`;
+    return `${structureStatement(result)}: IV/RV edge ${edge}, range score ${result.range_score}.`;
   }
   return structureStatement(result);
 }

@@ -974,7 +974,7 @@ function OrderBuilder({
                   ? "Transmitting..."
                   : transmitArmed
                     ? `Transmit ${structure || "Order"}`
-                    : "Transmit — awaiting acknowledgement"}
+                    : "Transmit: awaiting acknowledgement"}
               </button>
             </div>
           ) : (

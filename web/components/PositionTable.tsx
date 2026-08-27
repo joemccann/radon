@@ -671,7 +671,7 @@ export default function PositionTable({
             onClick={toggleDensity}
             aria-label={`Switch to ${density === "compact" ? "comfortable" : "compact"} density`}
             data-testid="density-toggle"
-            title={density === "compact" ? "Compact density — click for comfortable" : "Comfortable density — click for compact"}
+            title={density === "compact" ? "Compact density, click for comfortable" : "Comfortable density, click for compact"}
           >
             {density === "compact" ? "Comfortable" : "Compact"}
           </button>
