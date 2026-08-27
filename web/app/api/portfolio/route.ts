@@ -15,6 +15,7 @@ import {
   readCachedPortfolioTradeLogDates,
 } from "@/lib/portfolio/portfolioReadCache";
 import {
+  PortfolioSnapshotCorruptError,
   readPortfolioFromDb,
   readPortfolioSnapshot,
   type PortfolioSnapshot,
@@ -147,6 +148,25 @@ async function portfolioResponseFromSnapshot(
   return setNoStoreResponseHeaders(response, requestId);
 }
 
+/** An unparseable stored payload is persistence corruption, not an outage.
+ *  Reported as DB_UNAVAILABLE it sends the operator to restart Turso, which
+ *  cannot help: the repair is re-running the portfolio sync. R-257. */
+function corruptPortfolioResponse(
+  requestId: string,
+  error: PortfolioSnapshotCorruptError,
+): Response {
+  console.error("[portfolio] stored snapshot is corrupt:", error.message);
+  return setNoStoreResponseHeaders(
+    jsonApiError({
+      message: `Stored portfolio snapshot is corrupt; re-run the portfolio sync: ${error.message}`,
+      status: 500,
+      code: "SNAPSHOT_CORRUPT",
+      requestId,
+    }),
+    requestId,
+  );
+}
+
 function unavailablePortfolioResponse(
   requestId: string,
   message: string,
@@ -181,6 +201,9 @@ export async function GET(request?: Request): Promise<Response> {
       includeEntryDates,
     );
   } catch (error) {
+    if (error instanceof PortfolioSnapshotCorruptError) {
+      return corruptPortfolioResponse(requestId, error);
+    }
     const message = error instanceof Error ? error.message : "Failed to read portfolio";
     return unavailablePortfolioResponse(requestId, `Turso portfolio read failed: ${message}`);
   }
@@ -211,6 +234,9 @@ export async function POST(): Promise<Response> {
     try {
       snapshot = await readPortfolioFromDb();
     } catch (error) {
+      if (error instanceof PortfolioSnapshotCorruptError) {
+        return corruptPortfolioResponse(requestId, error);
+      }
       const message = error instanceof Error ? error.message : "Sync failed and Turso portfolio read failed";
       return setNoStoreResponseHeaders(
         jsonApiError({
