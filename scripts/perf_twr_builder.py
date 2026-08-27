@@ -501,23 +501,23 @@ def _fetch_nav_document() -> Optional[FlexDocument]:
         return FlexDocument(query_id=query_id, error=str(exc))
 
 
-def get_nav_snapshots() -> NavResolution:
-    """Resolve NAV: live Flex -> disk cache -> Turso.
+def get_nav_snapshots(*, sendrequest: bool = False) -> NavResolution:
+    """Resolve NAV. Live Flex only when ``sendrequest`` is true.
 
-    The fetched statement travels with the result so the flows query can be
-    parsed out of the document already in memory. IBKR throttles repeat
-    requests for one query id into an embargo, and with
-    `IB_FLEX_FLOWS_QUERY_ID` unset both queries resolve to the same id.
+    Default is disk then Turso. Page-driven and weekday jobs must not
+    SendRequest. A saved statement uses ``build_and_persist(from_file=...)``.
     """
-    document = _fetch_nav_document()
-    entries, gap_dates = consolidate_nav(
-        parse_nav_by_account(document.xml)
-        if document is not None and document.xml is not None
-        else {}
-    )
-    if entries:
-        _cache_nav_to_disk(entries)
-        return NavResolution(entries, "flex_live", tuple(gap_dates), document)
+    document: Optional[FlexDocument] = None
+    if sendrequest:
+        document = _fetch_nav_document()
+        entries, gap_dates = consolidate_nav(
+            parse_nav_by_account(document.xml)
+            if document is not None and document.xml is not None
+            else {}
+        )
+        if entries:
+            _cache_nav_to_disk(entries)
+            return NavResolution(entries, "flex_live", tuple(gap_dates), document)
 
     disk = load_nav_from_disk()
     if disk:
@@ -1631,9 +1631,36 @@ def _apply_mirrored_flow_coverage(
     )
 
 
-def build_and_persist(*, persist: bool = True, allow_inferred_flows: bool = False) -> Dict[str, Any]:
+def _resolution_from_file(path: str) -> NavResolution:
+    xml = _Path(path).read_text(encoding="utf-8")
+    from lib.flex_classify import ACTIVITY, FlexClassifyError, classify_flex_xml
+
+    try:
+        kind = classify_flex_xml(xml)
+    except FlexClassifyError as exc:
+        raise RuntimeError(f"not_activity_statement:{exc}") from exc
+    if kind != ACTIVITY:
+        raise RuntimeError(f"not_activity_statement:{kind}")
+    query_id = _os.environ.get("IB_FLEX_NAV_QUERY_ID") or "from-file"
+    document = FlexDocument(query_id=query_id, xml=xml)
+    entries, gap_dates = consolidate_nav(parse_nav_by_account(xml))
+    if not entries:
+        return NavResolution({}, "none", (), document)
+    return NavResolution(entries, "flex_from_file", tuple(gap_dates), document)
+
+
+def build_and_persist(
+    *,
+    persist: bool = True,
+    allow_inferred_flows: bool = False,
+    from_file: Optional[str] = None,
+    sendrequest: bool = False,
+) -> Dict[str, Any]:
     """Resolve NAV + flows, apply the gates, assemble and optionally persist."""
-    resolution = get_nav_snapshots()
+    if from_file:
+        resolution = _resolution_from_file(from_file)
+    else:
+        resolution = get_nav_snapshots(sendrequest=sendrequest)
     observations = [
         NavObservation(date=d, nav=float(v)) for d, v in sorted(resolution.by_date.items())
     ]
@@ -1719,10 +1746,28 @@ def main() -> None:
         action="store_true",
         help="Apply inferred flows for quarantined sessions (diagnostic; forces degraded)",
     )
+    parser.add_argument(
+        "--from-file",
+        metavar="PATH",
+        help="Parse a saved Activity Flex statement. No Flex Web Service call. No disk-cache fallback.",
+    )
+    parser.add_argument(
+        "--sendrequest",
+        action="store_true",
+        help="Permit a live Flex SendRequest (Sunday recon, after embargo).",
+    )
     args = parser.parse_args()
 
+    if args.sendrequest and not args.from_file:
+        from utils.flex_send import assert_sendrequest_permitted
+
+        assert_sendrequest_permitted(allowed=True)
+
     payload = build_and_persist(
-        persist=not args.no_persist, allow_inferred_flows=args.allow_inferred_flows
+        persist=not args.no_persist,
+        allow_inferred_flows=args.allow_inferred_flows,
+        from_file=args.from_file,
+        sendrequest=args.sendrequest,
     )
     if not args.no_persist:
         _record_perf_twr_health(

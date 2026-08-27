@@ -128,15 +128,16 @@ EXPECTED_ROWS = [
     {"id": "40930382802", "date": "2026-06-24", "type": "Withdrawal", "amount": -60000.0,
      "currency": "USD", "description": "DISBURSEMENT INITIATED BY ACCOUNT HOLDER",
      "raw_type": "Deposits/Withdrawals"},
-    # Same transactionID on all three — IBKR really does reuse it. No dedupe.
+    # Same IBKR transactionID on all three. Suffix #n so upsert cannot
+    # last-write-wins the $38.18 on the first two rows.
     {"id": "41191444701", "date": "2026-07-06", "type": "Interest", "amount": -23.71,
      "currency": "USD", "description": "USD BORROW FEES FOR JUN-2026",
      "raw_type": "Broker Interest Paid"},
-    {"id": "41191444701", "date": "2026-07-06", "type": "Interest", "amount": 61.89,
+    {"id": "41191444701#1", "date": "2026-07-06", "type": "Interest", "amount": 61.89,
      "currency": "USD",
      "description": "USD IBKR MANAGED SECURITIES (SYEP) FOR JUN-2026",
      "raw_type": "Broker Interest Received"},
-    {"id": "41191444701", "date": "2026-07-06", "type": "Interest", "amount": 182.03,
+    {"id": "41191444701#2", "date": "2026-07-06", "type": "Interest", "amount": 182.03,
      "currency": "USD", "description": "USD SHORT CREDIT INTEREST FOR JUN-2026",
      "raw_type": "Broker Interest Received"},
     # No reportDate — date falls back to dateTime "20260708;120000".
@@ -202,9 +203,18 @@ class TestParseCashTransactions:
         assert "99999999999" not in {r["id"] for r in self._parse_fixture()}
 
     def test_keeps_every_row_sharing_a_duplicated_transaction_id(self):
-        """IBKR reuses 41191444701 across three distinct 2026-07-06 rows."""
-        shared = [r for r in self._parse_fixture() if r["id"] == "41191444701"]
+        """IBKR reuses 41191444701 across three distinct 2026-07-06 rows.
+
+        Ids must be unique so upsert_cash_flow_rows cannot last-write-wins
+        the $38.18 that sits on the first two rows.
+        """
+        shared = [
+            r
+            for r in self._parse_fixture()
+            if r["id"] == "41191444701" or str(r["id"]).startswith("41191444701#")
+        ]
         assert len(shared) == 3
+        assert len({r["id"] for r in shared}) == 3
         # -23.71 + 61.89 + 182.03 = 220.21
         assert round(sum(r["amount"] for r in shared), 2) == 220.21
 
@@ -247,7 +257,8 @@ class TestFetchDelegatesToParser:
             return resp
 
         with patch.object(cash_flow_sync, "urlopen") as mock_urlopen, \
-             patch.object(cash_flow_sync.time, "sleep"):
+             patch.object(cash_flow_sync.time, "sleep"), \
+             patch.object(cash_flow_sync, "_raise_if_token_locked"):
             mock_urlopen.side_effect = [_resp(send_ref), _resp(statement)]
             rows = cash_flow_sync.fetch_cash_transactions(
                 "tok", "qid", max_polls=2, poll_sleep=0

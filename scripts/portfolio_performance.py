@@ -665,9 +665,11 @@ def build_nav_equity_curve(nav_history: Dict[str, float]) -> Optional[pd.DataFra
 def _raise_if_flex_locked() -> None:
     try:
         from utils.flex_embargo import raise_if_blocked
+        from utils.flex_send import assert_sendrequest_permitted
     except Exception:  # noqa: BLE001 — embargo is advisory here
         return
     raise_if_blocked()
+    assert_sendrequest_permitted(allowed=False)
 
 
 def _arm_flex_lockout_if_needed(root) -> None:

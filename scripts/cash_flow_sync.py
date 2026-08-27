@@ -432,12 +432,14 @@ def parse_cash_transactions(xml_text: str) -> list[dict[str, Any]]:
         details plus a -102,000 aggregate). Keeping them double-counts.
       * `amount` of exactly zero — nothing moved.
 
-    Rows sharing a `transactionID` are all kept; IBKR genuinely reuses ids
-    across distinct transactions.
+    Rows sharing a `transactionID` are all kept. The first keeps that id;
+    later ones get `{transactionID}#{n}` so upsert cannot last-write-wins
+    the extra amounts (2026-07-06 interest trio: $38.18).
 
     Returns a list of dicts ready to feed `upsert_cash_flow_rows`.
     """
     out: list[dict[str, Any]] = []
+    seen_ids: dict[str, int] = {}
     root = ET.fromstring(xml_text)
     for ct in root.findall(".//CashTransaction"):
         txn_id = (ct.get("transactionID") or "").strip()
@@ -446,10 +448,13 @@ def parse_cash_transactions(xml_text: str) -> list[dict[str, Any]]:
         amt = float(ct.get("amount") or 0.0)
         if amt == 0.0:
             continue
+        occurrence = seen_ids.get(txn_id, 0)
+        seen_ids[txn_id] = occurrence + 1
+        unique_id = txn_id if occurrence == 0 else f"{txn_id}#{occurrence}"
         raw_type = (ct.get("type") or "").strip()
         date_str = _normalize_date(ct.get("reportDate") or ct.get("dateTime") or "")
         out.append({
-            "id": txn_id,
+            "id": unique_id,
             "date": date_str,
             "type": _classify(raw_type, amt),
             "amount": amt,
@@ -703,11 +708,14 @@ def _record_token_lockout(code: str) -> bool:
     return True
 
 
-def _fetch_live_statement() -> str:
+def _fetch_live_statement(*, sendrequest: bool = False) -> str:
+    from utils.flex_send import assert_sendrequest_permitted
+
     token = os.environ.get("IB_FLEX_TOKEN")
     query_id = os.environ.get("IB_FLEX_NAV_QUERY_ID")
     if not token or not query_id:
         raise _ConfigError("IB_FLEX_TOKEN / IB_FLEX_NAV_QUERY_ID not configured")
+    assert_sendrequest_permitted(allowed=sendrequest)
     return fetch_statement_xml(token, query_id)
 
 
@@ -739,6 +747,11 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="YYYY-MM-DD",
         help="Only keep rows dated on or after this date.",
     )
+    parser.add_argument(
+        "--sendrequest",
+        action="store_true",
+        help="Permit a live Flex SendRequest (Sunday recon, after embargo).",
+    )
     return parser
 
 
@@ -751,7 +764,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             xml_text = _read_statement_file(args.from_file)
             source = args.from_file
         else:
-            xml_text = _fetch_live_statement()
+            xml_text = _fetch_live_statement(sendrequest=args.sendrequest)
             source = "flex"
     except _ConfigError as exc:
         print(f"ERR: {exc}", file=sys.stderr)
@@ -782,6 +795,10 @@ def main(argv: Optional[list[str]] = None) -> int:
             print(f"ERR: {exc}", file=sys.stderr)
             _emit_status("error", "preflight_embargo", code="1025", message=str(exc))
             return EXIT_FLEX_PREFLIGHT_EMBARGO
+        if type(exc).__name__ == "FlexSendDisabled":
+            print(f"SKIP: {exc}", file=sys.stderr)
+            _emit_status("ok", "file_ingest_only", message=str(exc))
+            return EXIT_OK
         print(f"ERR: cash flow fetch failed: {exc}", file=sys.stderr)
         _emit_status("error", "transport", message=str(exc))
         return EXIT_STATEMENT_NOT_READY

@@ -3082,18 +3082,15 @@ async def journal_reconcile():
 
 @app.post("/journal/rehydrate")
 async def journal_rehydrate(days: int = 365):
-    """Backfill the Turso journal from IB Flex Query (up to 365 days).
+    """Removed. Journal recon is file ingest (flex_delivery_ingest / --from-file).
 
-    Idempotent: each row carries an ib_exec_id and existing rows are
-    skipped on re-run. Use this after multi-day reconcile gaps where
-    in-session fills (24h window) are no longer reachable.
+    Live fills stay on journal_sync. A page-driven SendRequest is how this
+    token earned Flex 1025.
     """
-    result = await run_script("journal_rehydrate.py", ["--days", str(days)], timeout=300)
-    if not result.ok:
-        raise HTTPException(status_code=502, detail=result.error)
-    if result.data and result.data.get("ok") is False:
-        raise HTTPException(status_code=502, detail=result.data.get("error", "Rehydrate failed"))
-    return result.data or {"ok": True, "imported": 0, "skipped": 0}
+    raise HTTPException(
+        status_code=404,
+        detail="Journal rehydrate is file-ingest only. Use journal_rehydrate.py --from-file.",
+    )
 
 
 # ── Intraday scan admission (regime / breadth / vcg / gex) ──────────
@@ -4213,11 +4210,11 @@ async def internals_skew_history(
 
 @app.post("/blotter")
 async def blotter_sync():
-    """Run IB Flex Query for historical trades. 120s timeout."""
-    result = await run_module("trade_blotter.flex_query", ["--json"], timeout=120)
-    if not result.ok:
-        raise HTTPException(status_code=502, detail=result.error)
-    return result.data
+    """Removed. Historical blotter is Turso journal. Flex recon is --from-file."""
+    raise HTTPException(
+        status_code=404,
+        detail="POST /blotter is file-ingest only. GET /orders reads journal_sync.",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -4290,14 +4287,10 @@ async def performance_sync():
     failing, EVERY GET /api/performance blocked on a full builder run — the
     request storm that earned the 1025 in the first place.
     """
-    global _running_build
-    if _running_build is not None and not _running_build.done():
-        return await _running_build
-
-    _refuse_rebuild_or_none()  # raises 503 on lockout / 429 on cooldown
-    _record_rebuild_attempt()
-    _running_build = asyncio.create_task(_do_performance_rebuild())
-    return await _running_build
+    raise HTTPException(
+        status_code=404,
+        detail="Performance rebuild is file-ingest only. Use perf_twr_builder.py --from-file.",
+    )
 
 
 # Floor between on-demand rebuilds. Every rebuild attempts an IBKR Flex fetch,
@@ -4382,21 +4375,10 @@ async def performance_background():
     Refuses a duplicate while one is in flight, and refuses a fresh Flex fetch
     inside the cooldown window or during a token lockout.
     """
-    global _running_build
-    if _running_build is not None and not _running_build.done():
-        return {"status": "already_running"}
-
-    refusal = _rebuild_refusal()
-    if refusal is not None:
-        logger.warning("background performance rebuild refused: %s", refusal)
-        return JSONResponse(
-            status_code=503 if refusal["status"] == "lockout" else 429,
-            content=refusal,
-        )
-
-    _record_rebuild_attempt()
-    _running_build = asyncio.create_task(_do_performance_rebuild())
-    return {"status": "accepted"}
+    return JSONResponse(
+        status_code=404,
+        content={"status": "file_ingest_only", "detail": "Use perf_twr_builder.py --from-file."},
+    )
 
 
 _EQUITY_OPTIONS_CHAIN_TIMEOUT_S = 45.0

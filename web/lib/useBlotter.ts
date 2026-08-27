@@ -15,6 +15,7 @@ export function useBlotter(active = false): UseBlotterReturn {
   const result = useSyncHook<BlotterData>(
     {
       endpoint: "/api/blotter",
+      hasPost: false,
       extractTimestamp: (data) => data.as_of || null,
       showBackgroundError: true,
     },

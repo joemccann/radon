@@ -1163,6 +1163,9 @@ class IBClient:
             IBError: If the Flex query fails.
         """
         try:
+            from utils.flex_send import assert_sendrequest_permitted
+
+            assert_sendrequest_permitted(allowed=False)
             report = FlexReport(token=token, queryId=query_id)
             self.logger.info("Flex query %d executed successfully", query_id)
             return report

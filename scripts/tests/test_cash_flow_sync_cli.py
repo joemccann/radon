@@ -116,6 +116,20 @@ def _status_line(stdout: str) -> dict:
 class TestFromFile:
     """Ingest a manual export with zero credentials and zero network."""
 
+    def test_live_fetch_without_sendrequest_does_not_open_a_socket(
+        self, no_network, no_credentials, writer, monkeypatch
+    ):
+        monkeypatch.setenv("IB_FLEX_TOKEN", "test-token")
+        monkeypatch.setenv("IB_FLEX_NAV_QUERY_ID", "1442520")
+        code, stdout, _ = _run("--no-file")
+        assert code in (
+            cash_flow_sync.EXIT_OK,
+            cash_flow_sync.EXIT_FLEX_PREFLIGHT_EMBARGO,
+        )
+        if code == cash_flow_sync.EXIT_OK:
+            assert _status_line(stdout)["class"] == "file_ingest_only"
+
+
     def test_writes_every_parsed_row(self, no_network, no_credentials, writer):
         code, stdout, _ = _run("--from-file", str(LEGACY_FIXTURE), "--no-file")
 
@@ -170,8 +184,8 @@ class TestDryRun:
         assert status["rows"] == 16
 
     def test_reports_which_rows_are_new(self, no_network, no_credentials, monkeypatch):
-        """Only 41191444701 (the reused-id interest trio) is already stored,
-        so 16 parsed - 3 known = 13 new ids."""
+        """Only 41191444701 (first of the reused-id interest trio) is stored,
+        so 16 unique ids - 1 known = 15 new."""
         import db.writer as writer_mod
 
         exploding = MagicMock(side_effect=AssertionError("dry-run must not write"))
@@ -181,7 +195,7 @@ class TestDryRun:
         )
 
         _, stdout, _ = _run("--from-file", str(LEGACY_FIXTURE), "--dry-run")
-        assert _status_line(stdout)["new_rows"] == 13
+        assert _status_line(stdout)["new_rows"] == 15
 
     def test_unreadable_baseline_does_not_fail_the_run(
         self, no_network, no_credentials, monkeypatch
@@ -365,6 +379,11 @@ _SEND_OK = (
 def credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("IB_FLEX_TOKEN", "test-token")
     monkeypatch.setenv("IB_FLEX_NAV_QUERY_ID", "1442520")
+    monkeypatch.setattr("utils.flex_embargo.raise_if_blocked", lambda: None)
+    monkeypatch.setattr(
+        "utils.flex_send.assert_sendrequest_permitted", lambda **kwargs: None
+    )
+    monkeypatch.setattr(cash_flow_sync, "_raise_if_token_locked", lambda: None)
 
 
 class TestExitCodes:
@@ -375,7 +394,7 @@ class TestExitCodes:
         with patch.object(cash_flow_sync, "urlopen") as mock_urlopen, \
              patch.object(cash_flow_sync.time, "sleep"):
             mock_urlopen.side_effect = [_xml_response(_SEND_OK), _xml_response(statement)]
-            code, stdout, _ = _run("--no-file")
+            code, stdout, _ = _run("--no-file", "--sendrequest")
         assert code == cash_flow_sync.EXIT_OK
         assert _status_line(stdout)["class"] == "ok"
 
@@ -390,7 +409,7 @@ class TestExitCodes:
         with patch.object(cash_flow_sync, "urlopen") as mock_urlopen, \
              patch.object(cash_flow_sync.time, "sleep"):
             mock_urlopen.side_effect = [_xml_response(body)]
-            code, stdout, _ = _run("--no-file")
+            code, stdout, _ = _run("--no-file", "--sendrequest")
 
         assert code == cash_flow_sync.EXIT_THROTTLE
         status = _status_line(stdout)
@@ -414,7 +433,7 @@ class TestExitCodes:
         with patch.object(cash_flow_sync, "urlopen") as mock_urlopen, \
              patch.object(cash_flow_sync.time, "sleep"):
             mock_urlopen.side_effect = [_xml_response(body)] * 4
-            code, stdout, _ = _run("--no-file")
+            code, stdout, _ = _run("--no-file", "--sendrequest")
 
         assert code != cash_flow_sync.EXIT_THROTTLE
         assert code != cash_flow_sync.EXIT_FLEX_APP_ERROR  # not permanent either
@@ -437,7 +456,7 @@ class TestExitCodes:
              patch.object(cash_flow_sync.time, "sleep") as mock_sleep, \
              patch.object(cash_flow_sync, "_record_token_lockout"):
             mock_urlopen.side_effect = [_xml_response(body)]
-            code, stdout, _ = _run("--no-file")
+            code, stdout, _ = _run("--no-file", "--sendrequest")
 
         assert code == cash_flow_sync.EXIT_FLEX_LOCKOUT
         assert _status_line(stdout)["class"] == "lockout"
@@ -454,7 +473,7 @@ class TestExitCodes:
         with patch.object(cash_flow_sync, "urlopen") as mock_urlopen, \
              patch.object(cash_flow_sync.time, "sleep"):
             mock_urlopen.side_effect = [_xml_response(body)]
-            code, stdout, _ = _run("--no-file")
+            code, stdout, _ = _run("--no-file", "--sendrequest")
 
         assert code == cash_flow_sync.EXIT_FLEX_APP_ERROR
         assert _status_line(stdout)["class"] == "flex_app_error"
@@ -467,7 +486,7 @@ class TestExitCodes:
             mock_urlopen.side_effect = [_xml_response(_SEND_OK)] + [
                 _xml_response(not_ready) for _ in range(20)
             ]
-            code, stdout, _ = _run("--no-file")
+            code, stdout, _ = _run("--no-file", "--sendrequest")
 
         assert code == cash_flow_sync.EXIT_STATEMENT_NOT_READY
         assert _status_line(stdout)["class"] == "not_ready"
@@ -477,13 +496,13 @@ class TestExitCodes:
         with patch.object(cash_flow_sync, "urlopen") as mock_urlopen, \
              patch.object(cash_flow_sync.time, "sleep"):
             mock_urlopen.side_effect = [_xml_response(_SEND_OK), _xml_response(torn)]
-            code, stdout, _ = _run("--no-file")
+            code, stdout, _ = _run("--no-file", "--sendrequest")
 
         assert code == cash_flow_sync.EXIT_PARSE_ERROR
         assert _status_line(stdout)["class"] == "parse_error"
 
     def test_missing_credentials_exits_config_error(self, no_credentials, writer):
-        code, stdout, _ = _run("--no-file")
+        code, stdout, _ = _run("--no-file", "--sendrequest")
         assert code == cash_flow_sync.EXIT_CONFIG_ERROR
         assert _status_line(stdout)["class"] == "config_error"
 
@@ -546,7 +565,7 @@ class TestLockoutRecordedHonestly:
              patch.object(cash_flow_sync.time, "sleep"), \
              patch("utils.flex_embargo.record_lockout", return_value="2026-08-28T13:58:26Z"):
             mock_urlopen.side_effect = [_xml_response(self.LOCKED)]
-            code, stdout, _ = _run("--no-file")
+            code, stdout, _ = _run("--no-file", "--sendrequest")
 
         assert code == cash_flow_sync.EXIT_FLEX_LOCKOUT
         status = _status_line(stdout)
@@ -563,7 +582,7 @@ class TestLockoutRecordedHonestly:
              patch("utils.flex_embargo.record_lockout",
                    side_effect=FlexLockoutNotRecorded("2026-08-28T13:58:26Z")):
             mock_urlopen.side_effect = [_xml_response(self.LOCKED)]
-            code, stdout, stderr = _run("--no-file")
+            code, stdout, stderr = _run("--no-file", "--sendrequest")
 
         assert code == cash_flow_sync.EXIT_FLEX_LOCKOUT
         status = _status_line(stdout)

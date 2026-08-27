@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { readFile } from "fs/promises";
 import { join } from "path";
 import { isPerformanceBehindPortfolioSync } from "@/lib/performanceFreshness";
-import { radonFetch } from "@/lib/radonApi";
+
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 import { dbExecute } from "@/lib/dbExecute";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
@@ -82,10 +82,7 @@ let lastBackgroundRebuildAtMs = 0;
  * §4.4: keep SWR — serve stale immediately, rebuild in background.
  */
 function triggerBackgroundRebuild(): void {
-  const now = Date.now();
-  if (now - lastBackgroundRebuildAtMs < MIN_REBUILD_INTERVAL_MS) return;
-  lastBackgroundRebuildAtMs = now;
-  radonFetch("/performance/background", { method: "POST", timeout: 5_000 }).catch(() => {});
+  // File-ingest only. A GET must never SendRequest.
 }
 
 /**
@@ -214,17 +211,10 @@ export async function GET(): Promise<Response> {
   // insufficient_data is still a valid 200 — surface warnings, SWR in
   // background so a Flex backfill can fill the gap without blocking.
   if (cachedPerformance) {
-    triggerBackgroundRebuild();
     return setNoStoreResponseHeaders(NextResponse.json(cachedPerformance), requestId);
   }
 
-  // Cold start: no cache at all — must block on full TWR builder
-  try {
-    const data = await radonFetch("/performance", { method: "POST", timeout: 180_000 });
-    return setNoStoreResponseHeaders(NextResponse.json(data), requestId);
-  } catch {
-    return setNoStoreResponseHeaders(NextResponse.json(navUnavailablePayload()), requestId);
-  }
+  return setNoStoreResponseHeaders(NextResponse.json(navUnavailablePayload()), requestId);
 }
 
 export async function POST(): Promise<Response> {
@@ -235,13 +225,11 @@ export async function POST(): Promise<Response> {
   });
   if (!access.ok) return access.response;
   const requestId = getRequestId();
-  try {
-    const data = await radonFetch("/performance", { method: "POST", timeout: 190_000 });
-    return setNoStoreResponseHeaders(NextResponse.json(data), requestId);
-  } catch {
-    return setNoStoreResponseHeaders(
-      NextResponse.json({ error: "Performance metrics temporarily unavailable" }, { status: 502 }),
-      requestId,
-    );
-  }
+  return setNoStoreResponseHeaders(
+    NextResponse.json(
+      { error: "Performance rebuild is file-ingest only. Use --from-file." },
+      { status: 404 },
+    ),
+    requestId,
+  );
 }

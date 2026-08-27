@@ -1,7 +1,6 @@
 import { requireRouteAccess } from "@/lib/routeAccess";
 
 import { NextResponse } from "next/server";
-import { radonFetch } from "@/lib/radonApi";
 import { dbExecute } from "@/lib/dbExecute";
 import { cachedRead } from "@/lib/dbCache";
 import {
@@ -89,30 +88,12 @@ export async function GET(): Promise<Response> {
 }
 
 export async function POST(): Promise<Response> {
-  const access = await requireRouteAccess(undefined, {
-    operatorOnly: true,
-    rate: { key: "blotter-rehydrate", limit: 2, windowMs: 60_000 },
-    durableRateTier: "C",
-  });
-  if (!access.ok) return access.response;
   const requestId = getRequestId();
-  try {
-    await radonFetch("/journal/rehydrate", { method: "POST", timeout: 300_000 });
-    const blotter = await buildFromJournal();
-    return setNoStoreResponseHeaders(NextResponse.json(blotter ?? emptyBlotter()), requestId);
-  } catch {
-    const blotter = await buildFromJournal();
-    if (blotter) {
-      const res = NextResponse.json(blotter);
-      res.headers.set(
-        "X-Sync-Warning",
-        "Blotter sync failed - serving Turso journal",
-      );
-      return setNoStoreResponseHeaders(res, requestId);
-    }
-    return setNoStoreResponseHeaders(
-      NextResponse.json({ error: "Blotter sync failed" }, { status: 502 }),
-      requestId,
-    );
-  }
+  return setNoStoreResponseHeaders(
+    NextResponse.json(
+      { error: "Blotter rehydrate is file-ingest only. GET reads journal_sync." },
+      { status: 404 },
+    ),
+    requestId,
+  );
 }
