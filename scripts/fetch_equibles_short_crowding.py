@@ -415,6 +415,27 @@ def is_payload_valid(payload: dict[str, Any]) -> bool:
     return bool(payload.get("entries"))
 
 
+# A cycle covering less than this fraction of the resolved universe is not a
+# cycle, it is a partial read that happens to have some rows in it.
+MIN_COVERAGE_RATIO = 0.6
+# Below this many requested tickers the ratio says nothing useful — one failure
+# out of two is 50% — and the run is almost always a deliberate `--tickers`
+# override rather than the scheduled watchlist sweep. The all-empty gate still
+# applies at every size.
+MIN_UNIVERSE_FOR_RATIO = 5
+
+
+def has_sufficient_coverage(covered: int, requested: int) -> bool:
+    if requested <= 0:
+        return False
+    if requested < MIN_UNIVERSE_FOR_RATIO:
+        return covered > 0
+    return covered / requested >= MIN_COVERAGE_RATIO
+
+
+
+
+
 # ── universe ──────────────────────────────────────────────────────
 
 def _watchlist_tickers() -> list[str]:
@@ -560,12 +581,15 @@ def _write_json_cache(payload: dict[str, Any]) -> None:
 # ── orchestration ─────────────────────────────────────────────────
 
 def _fetch_entry(client: Any, ticker: str, today: date) -> Optional[dict[str, Any]]:
-    """One ticker's scoreboard row. A single failure must not abort the cycle."""
-    try:
-        interest = client.get_short_interest(ticker, limit=SETTLEMENT_HISTORY_LIMIT)
-    except Exception as exc:  # noqa: BLE001 — per-ticker isolation
-        print(f"[short-crowding] {ticker} short-interest failed: {exc}", file=sys.stderr)
-        return None
+    """One ticker's scoreboard row. A single failure must not abort the cycle.
+
+    A rate limit or a rejected key is NOT a single failure — every remaining
+    ticker fails for the same reason — so those propagate. R-295.
+    """
+    # No swallow here: the caller's loop does the accounting, so the REASON a
+    # ticker dropped out survives instead of becoming an indistinguishable
+    # `None`. Cycle-fatal errors pass through it untouched.
+    interest = client.get_short_interest(ticker, limit=SETTLEMENT_HISTORY_LIMIT)
 
     try:
         squeeze = normalize_squeeze_score(client.get_short_squeeze_scores(ticker=ticker))
@@ -599,6 +623,13 @@ def run(
     now = now or datetime.now(timezone.utc)
     scan_time = now.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
     today = now.astimezone(timezone.utc).date()
+    universe: list[str] = []
+    errors: list[dict[str, Any]] = []
+
+    from clients.equibles_client import EquiblesAuthError, EquiblesRateLimitError
+
+    # Both subclass EquiblesAPIError; neither is a per-ticker condition.
+    _CYCLE_FATAL = (EquiblesAuthError, EquiblesRateLimitError)
 
     # Client construction is INSIDE the health-reporting try: an absent or
     # rejected EQUIBLES_API_KEY raises EquiblesAuthError from
@@ -613,7 +644,22 @@ def run(
 
         requests_before = getattr(client, "request_count", 0)
         universe = resolve_universe(tickers)
-        entries = [entry for entry in (_fetch_entry(client, t, today) for t in universe) if entry]
+        # Error accounting the loop did not have AT ALL: a comprehension that
+        # drops every falsy entry cannot tell "this ticker has no short
+        # interest" from "this ticker's fetch failed". R-295.
+        entries = []
+        for ticker in universe:
+            try:
+                entry = _fetch_entry(client, ticker, today)
+            except _CYCLE_FATAL:
+                raise
+            except Exception as exc:  # noqa: BLE001 — per-ticker isolation
+                print(f"[short-crowding] {ticker} failed: {exc}", file=sys.stderr)
+                errors.append({"ticker": ticker, "error": str(exc)})
+                continue
+            if entry:
+                entries.append(entry)
+
         board = _fetch_board(client)
 
         payload = build_payload(
@@ -622,8 +668,17 @@ def run(
             scan_time=scan_time,
             requests_used=getattr(client, "request_count", 0) - requests_before,
         )
+        payload["errors"] = errors
     except Exception as exc:  # noqa: BLE001 — re-raised; the row must exist first
-        _record_health("error", scan_time, error={"message": f"cycle aborted: {exc}"})
+        _record_health(
+            "error",
+            scan_time,
+            error={
+                "message": f"cycle aborted: {exc}",
+                "requested": len(universe),
+                "failed": len(errors),
+            },
+        )
         raise
 
     if not is_payload_valid(payload):
@@ -634,9 +689,35 @@ def run(
         )
         return {**payload, "missing": True}
 
+    # Coverage gate: `is_payload_valid` passes on ONE entry out of forty, so a
+    # cycle that served one ticker was written as `ok` AND replaced the
+    # complete scoreboard underneath it. R-295.
+    covered = len(payload.get("entries") or [])
+    if not has_sufficient_coverage(covered, len(universe)):
+        _record_health(
+            "error",
+            scan_time,
+            error={
+                "message": (
+                    f"partial cycle: {covered}/{len(universe)} tickers covered, "
+                    f"below the {MIN_COVERAGE_RATIO:.0%} floor"
+                ),
+                "requested": len(universe),
+                "covered": covered,
+                "failed": len(errors),
+            },
+        )
+        return {**payload, "partial": True}
+
     _write_db_cache(payload, scan_time)
     _write_json_cache(payload)
-    _record_health("ok", scan_time)
+    _record_health(
+        "ok",
+        scan_time,
+        error={"requested": len(universe), "covered": covered, "failed": len(errors)}
+        if errors
+        else None,
+    )
     return payload
 
 

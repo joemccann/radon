@@ -243,12 +243,23 @@ def fetch_menthorq_cta(
         for row in rows or []
         if row.get("percentile_3m") is None
     ]
+    total = sum(len(rows or []) for rows in tables.values())
     if dropped:
         print(
             f"  WARN: {len(dropped)} row(s) had percentiles their z-score contradicts: "
             f"{', '.join(dropped[:6])}",
             file=sys.stderr,
         )
+
+    # A stderr WARN is invisible to the watchdog. An extraction that nulled most
+    # of its percentiles produced a payload that LOOKS complete — every row is
+    # present, every position and z-score is real — while the column the whole
+    # surface reads is gone. That has to reach `service_health`. R-297.
+    _record_health(
+        "error" if _extraction_degraded(len(dropped), total) else "ok",
+        rows=total,
+        dropped=len(dropped),
+    )
 
     # Cache
     p = write_cache(date_str, tables)
@@ -260,6 +271,45 @@ def fetch_menthorq_cta(
 # ══════════════════════════════════════════════════════════════════
 # Helper: Find asset in MenthorQ tables
 # ══════════════════════════════════════════════════════════════════
+
+# Above this share of rows nulled, the vision extraction did not merely lose a
+# row or two — it mis-scaled the percentile column, and the payload's apparent
+# completeness is misleading.
+MAX_DROPPED_RATIO = 0.5
+HEALTH_SERVICE = "menthorq-cta"
+
+
+def _extraction_degraded(dropped: int, total: int) -> bool:
+    if total <= 0:
+        return True
+    return dropped / total > MAX_DROPPED_RATIO
+
+
+def _record_health(state: str, *, rows: int, dropped: int) -> None:
+    """Writer-state heartbeat so a degraded extraction is visible to the fleet."""
+    try:
+        from db import writer
+    except ImportError:
+        return
+    error = (
+        {
+            "message": f"{dropped}/{rows} rows lost their percentile to the z-score check",
+            "rows": rows,
+            "dropped": dropped,
+        }
+        if state != "ok"
+        else None
+    )
+    try:
+        writer.record_service_health(
+            HEALTH_SERVICE,
+            state,
+            finished_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            error=error,
+        )
+    except Exception as exc:  # noqa: BLE001 — best-effort mirror
+        print(f"[menthorq-cta] health write non-fatal: {exc}", file=sys.stderr)
+
 
 def find_by_underlying(
     table: List[Dict[str, Any]],
