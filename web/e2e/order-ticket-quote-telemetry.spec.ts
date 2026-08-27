@@ -369,7 +369,7 @@ test.describe("Portfolio order ticket quote telemetry", () => {
 
     await expandLegs.click();
 
-    const legTrigger = page.locator(".leg-clickable", { hasText: "LONG 25x Call $105" }).first();
+    const legTrigger = page.locator(".leg-clickable", { hasText: "LONG Call $105" }).first();
     await legTrigger.waitFor({ timeout: 5_000 });
     await legTrigger.click();
 
@@ -423,7 +423,7 @@ test.describe("Portfolio order ticket quote telemetry", () => {
     await page.getByLabel("Expand legs for EWY").waitFor({ timeout: 10_000 });
 
     await page.getByLabel("Expand legs for EWY").click();
-    await page.locator(".leg-clickable", { hasText: "LONG 2500x Stock" }).click();
+    await page.locator(".leg-clickable", { hasText: "LONG Stock" }).click();
 
     const dialog = page.getByRole("dialog", { name: "EWY Stock" });
     await expect(dialog).toBeVisible();

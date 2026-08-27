@@ -267,7 +267,7 @@ describe("InstrumentDetailModal buy-to-cover", () => {
     );
 
     fireEvent.click(screen.getByLabelText("Expand legs for MU"));
-    fireEvent.click(screen.getByText("SHORT 5x Call $1250"));
+    fireEvent.click(screen.getByText("SHORT Call $1250"));
     enterLimitAndReview("0.05");
 
     const text = summaryText();

@@ -6342,7 +6342,9 @@ td.negative, .negative {
 /* ── Cell utility classes ── */
 
 .cell-muted { opacity: 0.7; font-size: 0.85em; }
-.cell-indent { padding-left: 1.5rem; }
+/* Leg descriptions sit in the narrow Structure column now that the contract
+   count moved to the Qty column, so keep them on one line. */
+.cell-indent { padding-left: 1.5rem; white-space: nowrap; }
 .section-message { padding: 12px 16px; }
 
 /* ─── Leg disclosure toggle ─── */

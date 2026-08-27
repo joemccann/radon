@@ -218,7 +218,7 @@ test("portfolio spread legs expand without rtLast runtime errors", async ({ page
 
   await croxRow.getByLabel("Expand legs for CROX").click();
 
-  await expect(page.locator("table tbody tr")).toContainText(["LONG 1x Call $80", "SHORT 1x Call $95"]);
+  await expect(page.locator("table tbody tr")).toContainText(["LONG Call $80", "SHORT Call $95"]);
   await expect(page.locator("table tbody tr")).toContainText(["$450", "$125"]);
   expect(pageErrors).not.toContain("rtLast is not defined");
 });
@@ -233,7 +233,7 @@ test("portfolio leg modal buy-to-cover keeps portfolio scope and close debit P&L
   await expect(muRow).toBeVisible();
 
   await muRow.getByLabel("Expand legs for MU").click();
-  await page.getByText("SHORT 5x Call $1250").click();
+  await page.getByText("SHORT Call $1250").click();
 
   const dialog = page.getByRole("dialog", { name: /MU \$1250 Call 2026-06-26/i });
   await expect(dialog).toBeVisible();
