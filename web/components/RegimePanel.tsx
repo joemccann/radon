@@ -15,6 +15,7 @@ import MarginDebtPanel from "./MarginDebtPanel";
 import StraddlePanel from "./StraddlePanel";
 import CorPanel from "./CorPanel";
 import VixCorPanel from "./VixCorPanel";
+import VixTsPanel from "./VixTsPanel";
 import IvRankPanel from "./IvRankPanel";
 import SkewPanel from "./SkewPanel";
 import Skew2dPanel from "./Skew2dPanel";
@@ -57,6 +58,7 @@ import { buildRailStatuses, REGIME_TABS, REGIME_TAB_LABEL, type RegimeTab } from
 const MOBILE_TAB_LABEL: Partial<Record<RegimeTab, string>> = {
   skew2d: "SKEW 2D",
   vixcor: "VIX-COR",
+  vixts: "VIX TS",
   ivrank: "IV RANK",
   "iei-hyg": "TSY/HY",
   trin: "TRIN",
@@ -69,7 +71,7 @@ const MOBILE_TAB_LABEL: Partial<Record<RegimeTab, string>> = {
 function tabFromPathname(pathname: string | null): RegimeTab {
   if (!pathname) return "cri";
   // Longest prefix first within each family: skew2d before skew, vixcor before cor.
-  const match = pathname.match(/^\/regime\/(cri|vcg|gex|grg|breadth|bpi|margin|straddle|vixcor|ivrank|cor|skew2d|skew|curve|credit|iei-hyg|trin|divyield|hyad|hhlev|cot|ats|short|llm|backtest)(?:\/|$)/);
+  const match = pathname.match(/^\/regime\/(cri|vcg|gex|grg|breadth|bpi|margin|straddle|vixcor|vixts|ivrank|cor|skew2d|skew|curve|credit|iei-hyg|trin|divyield|hyad|hhlev|cot|ats|short|llm|backtest)(?:\/|$)/);
   if (match && (REGIME_TABS as readonly string[]).includes(match[1])) {
     return match[1] as RegimeTab;
   }
@@ -347,7 +349,7 @@ export default function RegimePanel({
 
   const tabBar = compact ? (
     <div className="m-regime-tabs" role="tablist" aria-label="Regime tabs">
-      {(["cri", "vcg", "gex", "grg", "breadth", "trin", "divyield", "hyad", "bpi", "margin", "hhlev", "credit", "iei-hyg", "straddle", "cor", "vixcor", "ivrank", "skew", "skew2d", "curve", "cot", "ats", "short", "llm", "backtest"] as RegimeTab[]).map((t) => (
+      {(["cri", "vcg", "gex", "grg", "breadth", "trin", "divyield", "hyad", "bpi", "margin", "hhlev", "credit", "iei-hyg", "straddle", "cor", "vixcor", "vixts", "ivrank", "skew", "skew2d", "curve", "cot", "ats", "short", "llm", "backtest"] as RegimeTab[]).map((t) => (
         <button
           key={t}
           type="button"
@@ -420,6 +422,10 @@ export default function RegimePanel({
 
   if (activeTab === "vixcor") {
     return renderShell(<VixCorPanel />);
+  }
+
+  if (activeTab === "vixts") {
+    return renderShell(<VixTsPanel />);
   }
 
   if (activeTab === "ivrank") {

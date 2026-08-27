@@ -1086,6 +1086,62 @@ def upsert_hhlev_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = N
     db.commit()
 
 
+_VIXTS_INSERT_HEAD = (
+    "INSERT INTO vixts_history (date, vix_close, vix3m_close, ratio, spx_close, recorded_at) "
+)
+_VIXTS_ROW_PLACEHOLDER = "(?, ?, ?, ?, ?, ?)"
+_VIXTS_ON_CONFLICT = (
+    " ON CONFLICT(date) DO UPDATE SET "
+    "vix_close = excluded.vix_close, vix3m_close = excluded.vix3m_close, "
+    "ratio = excluded.ratio, spx_close = excluded.spx_close, "
+    "recorded_at = excluded.recorded_at"
+)
+
+# Single-row form of the same upsert, exposed so tests can pin idempotency
+# against a plain sqlite3 stand-in for libsql.
+VIXTS_UPSERT_SQL = (
+    f"{_VIXTS_INSERT_HEAD}VALUES {_VIXTS_ROW_PLACEHOLDER}{_VIXTS_ON_CONFLICT}"
+)
+
+
+def _vixts_params(row: dict[str, Any], stamp: str) -> tuple:
+    spx = row.get("spx")
+    return (
+        row["date"],
+        float(row["vix"]),
+        float(row["vix3m"]),
+        float(row["ratio"]),
+        None if spx is None else float(spx),
+        stamp,
+    )
+
+
+def upsert_vixts_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
+    """VIX TS indicator — one row per joined session, idempotent on date.
+
+    Chunked multi-row INSERTs (Hrana I/O bounding): Cboe serves full history
+    on every pull, so EVERY changed run passes all ~4,250 joined sessions,
+    which per-row would be thousands of statements on one stream (the
+    rv-ratio 2026-07-21 502 incident). spx_close stays nullable — the SPX
+    overlay is a left join.
+    """
+    if not rows:
+        return
+    stamp = recorded_at or _now_iso()
+    db = get_db()
+    for start in range(0, len(rows), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = rows[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        placeholders = ", ".join(_VIXTS_ROW_PLACEHOLDER for _ in chunk)
+        params: list[Any] = []
+        for row in chunk:
+            params.extend(_vixts_params(row, stamp))
+        db.execute(
+            f"{_VIXTS_INSERT_HEAD}VALUES {placeholders}{_VIXTS_ON_CONFLICT}",
+            tuple(params),
+        )
+    db.commit()
+
+
 def _iei_hyg_params(row: dict[str, Any], stamp: str) -> tuple:
     dxy = row.get("dxy_close")
     return (
