@@ -19,14 +19,19 @@ from scripts.clients.ib_client import IBClient
 from scripts.utils.ib_preflight import IB_REQUEST_TIMEOUT_S
 
 # Transient-handshake resilience. The Gateway serialises API handshakes, so a
-# connect issued while several scheduled scans are claiming their own sockets
-# can time out even though the Gateway is authenticated and healthy — ib_insync
+# connect issued while other subprocesses are claiming their own sockets can
+# time out even though the Gateway is authenticated and healthy — ib_insync
 # surfaces that as `API connection failed: TimeoutError()`, which the
 # auto-allocator does not treat as a collision and therefore does not rotate.
-# Production 2026-08-27: /options/expirations?symbol=NOW 504'd on the single
-# attempt and served in 1.1s two minutes later. Sibling `ib_chain.py` already
-# retries this class; the budget below leaves room for the two bounded IB
-# requests inside _EQUITY_OPTIONS_CHAIN_TIMEOUT_S (45s).
+# Production 2026-08-27 14:22:10: /options/expirations?symbol=NOW 504'd on its
+# single attempt while ten browser-driven POST /portfolio/sync calls in 90s
+# were each spawning an ib_sync.py that claimed a socket; the same request
+# served in 1.1s two minutes later. ib_sync.py is 51 of the 53 connect
+# failures in that 24h window — the real fix is shedding the multi-tab sync
+# fan-in, and this retry only stops the chain losing that race.
+# Sibling `ib_chain.py` already retries this class; the budget below leaves
+# room for the two bounded IB requests inside
+# _EQUITY_OPTIONS_CHAIN_TIMEOUT_S (45s).
 CONNECT_ATTEMPTS = 3
 CONNECT_TIMEOUT_S = 4
 CONNECT_BACKOFF_S = 1.0
