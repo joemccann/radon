@@ -276,3 +276,33 @@ Backlog: `RELIABILITY_AUDIT.md` §Delta remediation backlog (2026-08-22, both pa
   five-minute RTH timer whose job has written a `breadth-scan` heartbeat since before the anchor —
   has never been checked by it. The sweep needs to enumerate every service name reachable from a
   `cloud/services/*.timer` and assert membership in both catalogs. REL-088 carries it.
+
+- **NF triage 2026-08-27 (delta audit):** NF-1 (Gate-3 bankroll-% cap) still open and unchanged
+  in this range; the delta's order-path defects are display and gate-parity failures (R-278…R-281),
+  not sizing, so nothing folds into it this week. NF-2 (unpaginated journal reads on the unbounded
+  transport) — the REL-071 pager that was meant to close the money-path instance is itself defective
+  in a new way: R-319 shows its lexicographic `trade_id` cursor can skip a concurrently written fill
+  across the heterogeneous id namespaces, reaching the same dropped-row outcome through the fix.
+  Folded into REL-108. NF-3 (relay stale-feed does not gate the order UI) still open, unchanged in
+  the range, but the same *shape* recurred on a second surface: R-281 shows the mobile ticket's
+  unbounded-risk acknowledgement is enforced only by a `disabled` prop, so a gate the operator was
+  taught to trust on desktop is cosmetic on the phone. Folded into REL-095. NF-4 (aggregated Flex
+  buckets vs 1:1 fingerprints) unchanged. NF-5 (UW budget non-atomic archive + unbounded LOCK_EX)
+  unchanged. NF-6 (retry classifiers) still open and widened: R-296 adds the credit-spread and
+  IEI/HYG UW legs, where a bare `except Exception` makes `UWAuthError`/`UWRateLimitError`
+  indistinguishable from "no bars" and demotes silently to Yahoo with an `ok` heartbeat.
+  NF-7 (partial close on expiry day) unchanged. NF-8 (standing-sweep scope) was closed by REL-088
+  last week and is **re-opened as R-277**: the test it produced parses ExecStart with
+  `([A-Za-z0-9_./-]+\.(?:py|sh))`, which matches neither `python -m package.module` nor a `.js`
+  target, so eight timer-backed units — `radon-demo-mirror`, `radon-refresh`,
+  `radon-incident-watchdog`, `radon-ib-watchdog` and all four `radon-watchdog-*` — resolve to an
+  empty name set and are asserted on by nothing. Three of them write no `service_health` row at all
+  and sit in neither catalog. Carried by REL-103. REL-021b remainder unchanged (all P2).
+- **NF-9 (from 2026-08-27 audit, health rows that never appear):** two more registered producers
+  can exit without writing any `service_health` row, which `docs/operations.md:187` calls worse than
+  a stale one. `ib_reconcile.main()` has a `try:`/`finally:` with no `except` (R-275), so a mid-run
+  IB or Turso failure on the reconciliation spine is silent behind a 3-day closed window; and
+  `fetch_vixcor.run()` contains no `try` at all (R-276), so every raise before `_write_db` exits the
+  daily oneshot with nothing. Both are in REL-103. Filed here as well because the class — "the
+  health row is written at the end of the happy path" — is not specific to these two files and is
+  worth re-sweeping as its own pass rather than one finding at a time.
