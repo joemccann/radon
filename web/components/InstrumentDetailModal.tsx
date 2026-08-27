@@ -229,7 +229,7 @@ function LegOrderForm({
       netPremium: action === "SELL" ? -parsedPrice : parsedPrice,
       description,
       totalCost: action === "SELL" ? -totalCost : totalCost,
-      // FU7: thread the single-leg live quote for net-of-cost risk.
+      // Live quote travels with the opening input; do not fold spread into max gain.
       quote: { bid, ask },
     };
   }, [isValid, parsedQty, parsedPrice, parsedStop, orderType, action, ticker, strikeStr, right, isStock, leg.strike, leg.direction, leg.contracts, leg.avg_cost, expiry, bid, ask]);

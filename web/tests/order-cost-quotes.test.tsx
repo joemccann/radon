@@ -1,18 +1,16 @@
 /**
  * @vitest-environment jsdom
  *
- * FU7 — live quotes threaded into the order-risk chokepoint so the F1 cost
- * model (web/lib/order/costs.ts) renders net-of-cost max-loss / max-gain.
+ * Limit-priced tickets fill at `netPremium`. Live bid/ask still travel on
+ * `OptionOrderRiskInput.quote` (surfaces keep threading them) but must not
+ * haircut structural max-gain / max-loss: charging half the quoted spread on
+ * top of a limit double-counts entry slippage, and at-expiry max is not an
+ * exit trade. CBRS 40× short $182.5 put @ $4 rendered MAX GAIN $12,248 against
+ * a $16,000 credit (bid 2.50 / ask 4.30).
  *
- * F1 built `computeOrderRisk(legs, netPremium, comboQuantity, { roundTripCost })`
- * but nothing fed live quotes, so the net-of-cost path was dead. This wires an
- * optional per-order `quote: { bid, ask }` into `OptionOrderRiskInput`. When
- * present, `useOrderRisk` calls `estimateRoundTripCost` and folds the round-trip
- * cost into the augmented summary: max-loss grows by the cost, max-gain shrinks
- * by it. When absent, behavior is byte-for-byte identical (back-compat).
- *
- * The surface assertion confirms `OptionsChainTab` passes the net bid/ask it
- * already computes into the gate, so net-of-cost actually renders in the UI.
+ * `computeOrderRisk(..., { roundTripCost })` remains the backtest path that
+ * fills at mid. Surfaces that open (not close) still attach `quote` so that
+ * path stays reachable; the ticket verdict stays structural.
  */
 import React from "react";
 import { afterEach, describe, expect, it } from "vitest";
@@ -54,7 +52,7 @@ function bullCallSpreadInput(
   };
 }
 
-describe("useOrderRisk — net-of-cost when quotes supplied (FU7)", () => {
+describe("useOrderRisk — limit fill is structural max, not quoted-spread net", () => {
   it("without quotes → gross max-loss / max-gain (unchanged, back-compat)", () => {
     const { result } = renderHook(() =>
       useOrderRisk(bullCallSpreadInput(), emptyPortfolio),
@@ -64,27 +62,48 @@ describe("useOrderRisk — net-of-cost when quotes supplied (FU7)", () => {
     expect(result.current!.summary.maxGain).toBeCloseTo(800, 6);
   });
 
-  it("with quotes → loss UP and gain DOWN by the F1 round-trip cost", () => {
-    // Net combo quote: bid 1.80 / ask 2.20 → half-spread 0.20/share.
+  it("limit-priced short put max gain is the credit, not credit minus quoted spread", () => {
+    // CBRS 2026-08-27: 40× $182.5 put sold at a $4 limit. Bid 2.50 / ask 4.30
+    // (52% spread). Folding the F1 round-trip (half-spread on entry + estimated
+    // exit) into the verdict rendered MAX GAIN $12,248 against a $16,000 credit.
+    // The limit IS the fill; at-expiry max is not an exit trade.
+    const input: OptionOrderRiskInput = {
+      type: "options",
+      ticker: "CBRS",
+      chainLegs: [
+        { action: "SELL", right: "P", strike: 182.5, expiry: "20260828", quantity: 40 },
+      ],
+      netPremium: -4,
+      description: "Short Put @ 4.00",
+      totalCost: -16_000,
+      quote: { bid: 2.5, ask: 4.3 },
+    };
+    const { result } = renderHook(() => useOrderRisk(input, emptyPortfolio));
+    expect(result.current).not.toBeNull();
+
+    const rt = estimateRoundTripCost({
+      contracts: 40,
+      numLegs: 1,
+      entryBid: 2.5,
+      entryAsk: 4.3,
+    });
+    expect(rt).toBeCloseTo(3_752, 0);
+
+    expect(result.current!.summary.maxGain).toBe(16_000);
+    expect(result.current!.summary.maxLoss).toBe(714_000);
+    expect(result.current!.summary.totalCost).toBe(-16_000);
+    expect(result.current!.summary.maxGain).not.toBe(16_000 - rt);
+    expect(result.current!.summary.maxLoss).not.toBe(714_000 + rt);
+  });
+
+  it("quoted spread does not haircut a limit-priced debit spread", () => {
     const quote = { bid: 1.8, ask: 2.2 };
     const { result } = renderHook(() =>
       useOrderRisk(bullCallSpreadInput({ quote }), emptyPortfolio),
     );
     expect(result.current).not.toBeNull();
-
-    // Derive the expected cost from the F1 model directly (no hand-math):
-    // 2-leg combo, 1 contract, entry quote = 1.80/2.20, exit quote unknown
-    // → exit falls back to the estimated half-spread.
-    const rt = estimateRoundTripCost({
-      contracts: 1,
-      numLegs: 2,
-      entryBid: 1.8,
-      entryAsk: 2.2,
-    });
-    expect(rt).toBeGreaterThan(0);
-
-    expect(result.current!.summary.maxLoss).toBeCloseTo(200 + rt, 6);
-    expect(result.current!.summary.maxGain).toBeCloseTo(800 - rt, 6);
+    expect(result.current!.summary.maxLoss).toBeCloseTo(200, 6);
+    expect(result.current!.summary.maxGain).toBeCloseTo(800, 6);
   });
 
   it("quotes never bound an unbounded leg (naked short call stays UNBOUNDED)", () => {
@@ -105,7 +124,7 @@ describe("useOrderRisk — net-of-cost when quotes supplied (FU7)", () => {
     expect(result.current!.summary.maxLoss).toBeNull();
   });
 
-  it("partial quote (only bid) → falls back to estimated half-spread but still applies cost", () => {
+  it("partial quote leaves structural max-loss / max-gain unchanged", () => {
     const { result: withPartial } = renderHook(() =>
       useOrderRisk(
         bullCallSpreadInput({ quote: { bid: 1.8, ask: null } }),
@@ -115,15 +134,8 @@ describe("useOrderRisk — net-of-cost when quotes supplied (FU7)", () => {
     const { result: withNone } = renderHook(() =>
       useOrderRisk(bullCallSpreadInput(), emptyPortfolio),
     );
-    // A null ask makes the entry half-spread fall back to the estimate (same
-    // as no quote on the entry leg), but cost is still applied — so loss/gain
-    // differ from the no-quote (gross) path.
-    expect(withPartial.current!.summary.maxLoss).toBeGreaterThan(
-      withNone.current!.summary.maxLoss!,
-    );
-    expect(withPartial.current!.summary.maxGain).toBeLessThan(
-      withNone.current!.summary.maxGain!,
-    );
+    expect(withPartial.current!.summary.maxLoss).toBe(withNone.current!.summary.maxLoss);
+    expect(withPartial.current!.summary.maxGain).toBe(withNone.current!.summary.maxGain);
   });
 
   it("close-out branch ignores quotes (no risk math to adjust)", () => {

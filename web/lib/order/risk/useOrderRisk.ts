@@ -50,7 +50,6 @@ import {
   estimateInitialMargin,
   type MarginEstimate,
 } from "./internal/marginEstimate";
-import { estimateRoundTripCost } from "../costs";
 import type { RiskBudgetReport } from "@/lib/correlationRiskBanner";
 
 export type { ChainOrderLeg, CoveringPortfolioLeg };
@@ -113,14 +112,13 @@ export interface OptionOrderRiskInput {
   /**
    * Optional live entry quote for the order as a whole (the signed NET combo
    * quote for multi-leg, or the positive single option quote for single-leg).
-   * When supplied, `useOrderRisk` runs the F1 cost
-   * model (`estimateRoundTripCost`) and folds the round-trip cost into the
-   * risk verdict: bounded max-loss grows by the cost, bounded max-gain shrinks
-   * by it (clamped at 0). Unbounded legs stay unbounded.
-   *
-   * Absent (the historical default) → no cost adjustment; behavior is
-   * byte-for-byte identical to before FU7. A null bid/ask falls back to the
-   * estimated half-spread inside the cost model rather than disabling cost.
+   * Surfaces still thread this so opening payloads stay quote-aware. It must
+   * NOT haircut ticket max-gain / max-loss: `netPremium` is a limit fill, and
+   * charging half the quoted spread on top of that limit double-counts entry
+   * slippage (CBRS 40× short $182.5 put @ $4: $16,000 credit rendered as
+   * $12,248). At-expiry max is also not an exit trade. The F1 round-trip
+   * model stays on `computeOrderRisk(..., { roundTripCost })` for mid-fill
+   * backtests.
    */
   quote?: { bid: number | null; ask: number | null } | null;
   /**
@@ -819,29 +817,14 @@ export function useOrderRisk(
 
     const adjustedNetPremium = opt.netPremium + augmented.netPremiumAdjustment;
 
-    // F1 net-of-cost (FU7): when the surface threads a live entry quote, run
-    // the shared cost model and fold the round-trip cost into the verdict.
-    // `comboQuantity` is the per-combo contract count; `chainLegs.length` is
-    // the structural leg count (NOT the augmented riskLegs, which include
-    // injected virtual coverage legs that aren't separately ticketed). Absent
-    // a quote, `costs` is undefined and `computeOrderRisk` is a pure no-op.
-    const costs =
-      opt.quote != null
-        ? {
-            roundTripCost: estimateRoundTripCost({
-              contracts: augmented.comboQuantity,
-              numLegs: opt.chainLegs.length,
-              entryBid: opt.quote.bid,
-              entryAsk: opt.quote.ask,
-            }),
-          }
-        : undefined;
-
+    // Limit-priced opening orders fill at `netPremium`. Do not fold quoted
+    // half-spread + estimated exit into the ticket verdict: that double-counts
+    // entry slippage and treats at-expiry max as a close. Backtests that fill
+    // at mid still pass `{ roundTripCost }` into `computeOrderRisk` directly.
     const risk = computeOrderRisk(
       augmented.riskLegs,
       adjustedNetPremium,
       augmented.comboQuantity,
-      costs,
     );
 
     const coveredCall = isFullyStockCoveredCall(opt, augmented.coveringLegs);

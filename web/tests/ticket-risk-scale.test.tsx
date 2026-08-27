@@ -203,11 +203,9 @@ describe("the risk panel names the scale its dollars are on", () => {
 
   it("prices MAX LOSS for every contract staged, not for one", async () => {
     await bullCallSpread(10);
-    // A 6.30 debit x 10 contracts x 100, plus the cost model's transaction
-    // estimate. Collapsing to one combo reads a few hundred dollars, which is
-    // what a ratio-normalised leg quantity would produce.
+    // A 6.30 debit x 10 contracts x 100. Collapsing to one combo reads a few
+    // hundred dollars, which is what a ratio-normalised leg quantity would produce.
     const maxLoss = usd(riskCell("MAX LOSS"));
-    expect(maxLoss).toBeGreaterThanOrEqual(6_300);
-    expect(maxLoss).toBeLessThan(8_000);
+    expect(maxLoss).toBe(6_300);
   });
 });

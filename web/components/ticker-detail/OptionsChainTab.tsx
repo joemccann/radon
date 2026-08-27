@@ -427,12 +427,8 @@ function OrderBuilder({
       netPremium,
       description,
       totalCost: isCredit ? -totalCost : totalCost,
-      // FU7: thread the live net entry quote so `useOrderRisk` renders
-      // net-of-cost max-loss/max-gain via the F1 cost model. `netPrices` are
-      // per-combo-unit positive magnitudes (computed from each leg's WS quote)
-      // — exactly the entry-quote shape the cost model expects. When bid/ask
-      // are null (off-hours), the cost model falls back to its estimated
-      // half-spread; the risk verdict is unchanged shape, just cost-aware.
+      // Live net quote travels with the input; `useOrderRisk` must not haircut
+      // limit-priced max-gain/max-loss with the quoted spread.
       quote: { bid: netPrices.bid, ask: netPrices.ask },
       // Phase-1 margin estimate: thread the already-resolved underlying spot so
       // a naked single-leg short surfaces a Reg-T requirement (not maxLoss).

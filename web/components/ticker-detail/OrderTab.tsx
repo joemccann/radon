@@ -496,8 +496,7 @@ function NewOrderForm({
       netPremium: legAction === "SELL" ? -riskPrice : riskPrice,
       description,
       totalCost: action === "SELL" ? -totalCost : totalCost,
-      // FU7: thread the single-leg live quote so net-of-cost renders. Off-hours
-      // null bid/ask falls back to the F1 estimated half-spread inside the hook.
+      // Live quote travels with the opening input; do not fold spread into max gain.
       quote: { bid, ask },
       // Phase-1 margin: underlying spot for the naked-short Reg-T estimate.
       underlyingSpot: tickerPriceData?.last ?? null,

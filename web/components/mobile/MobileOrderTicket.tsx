@@ -378,7 +378,7 @@ export default function MobileOrderTicket({
       netPremium,
       description,
       totalCost: isCredit ? -totalCost : totalCost,
-      // FU7: signed per-unit combo quote for net-of-cost risk.
+      // Live net quote travels with the input; do not fold spread into max gain.
       quote: { bid: netQuote.bid, ask: netQuote.ask },
       // Phase-1 margin: underlying spot for the naked-short Reg-T estimate.
       underlyingSpot: spot ?? null,
