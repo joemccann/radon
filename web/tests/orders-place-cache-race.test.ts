@@ -197,6 +197,60 @@ describe("POST /api/orders/cancel vs a GET racing the refresh", () => {
   });
 });
 
+describe("POST /api/orders/modify when the post-modify refresh is unavailable", () => {
+  /** T-193. IB has ALREADY ACCEPTED the modify — `/orders/modify` resolved. Only
+   *  the follow-up `/orders/refresh` fell over (10s budget, slow Turso). There is
+   *  no refreshed book to confirm against, so the route must report "unconfirmed
+   *  here, keep polling" (the client's own modify poll is the confirmation
+   *  authority) rather than "modify failed". A 502 sends the operator back to
+   *  re-modify an order that was already replaced at IB. */
+  it("does not report a 502 failure on a modify IB accepted", async () => {
+    openRows = [openRow(1, 5)];
+    mockRadonFetch.mockImplementation((url: string) => {
+      if (url === "/orders/modify") return Promise.resolve({ message: "modified" });
+      if (url === "/orders/refresh") return Promise.reject(new Error("timeout after 10000ms"));
+      return Promise.resolve({});
+    });
+
+    const { POST } = await import("../app/api/orders/modify/route");
+    const response = await POST(new Request("http://localhost/api/orders/modify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ orderId: 1, newPrice: 7 }),
+    }));
+    const body = await response.json() as { status?: string; error?: string; orders: unknown };
+
+    expect(response.status).toBe(200);
+    expect(body.status).toBe("ok");
+    // Nothing to confirm against: the route must not hand back the pre-modify
+    // book, and must not invent one.
+    expect(body.orders).toBeNull();
+  });
+
+  /** The other half of the distinction: when the refresh DID land and the book
+   *  refutes the modify, 502 is still correct. Guards the T-193 fix against
+   *  becoming an unconditional 200. */
+  it("still returns 502 when the refreshed book refutes the modify", async () => {
+    openRows = [openRow(1, 5)];
+    mockRadonFetch.mockImplementation((url: string) => {
+      if (url === "/orders/modify") return Promise.resolve({ message: "modified" });
+      if (url === "/orders/refresh") return Promise.resolve({ status: "ok" });
+      return Promise.resolve({});
+    });
+
+    const { POST } = await import("../app/api/orders/modify/route");
+    const response = await POST(new Request("http://localhost/api/orders/modify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ orderId: 1, newPrice: 7 }),
+    }));
+
+    expect(response.status).toBe(502);
+    const body = await response.json() as { error: string };
+    expect(body.error).toContain("not confirmed");
+  });
+});
+
 describe("POST /api/orders/modify vs a GET racing the refresh", () => {
   it("confirms the new limit price instead of 502-ing on the stale cached snapshot", async () => {
     openRows = [openRow(1, 5)];

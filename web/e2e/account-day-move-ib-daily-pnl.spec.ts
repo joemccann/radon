@@ -1,9 +1,10 @@
 import { expect, test } from "@playwright/test";
+import { TRADING_DAY_ISO, freezeToTradingDay } from "./tradingDayClock";
 
 const PORTFOLIO_MOCK = {
   bankroll: 1_089_652.28,
   peak_value: 1_089_652.28,
-  last_sync: new Date().toISOString(),
+  last_sync: TRADING_DAY_ISO,
   total_deployed_pct: 3.68,
   total_deployed_dollars: 40_076.51,
   remaining_capacity_pct: 96.32,
@@ -60,7 +61,7 @@ const PORTFOLIO_MOCK = {
 };
 
 const ORDERS_EMPTY = {
-  last_sync: new Date().toISOString(),
+  last_sync: TRADING_DAY_ISO,
   open_orders: [],
   executed_orders: [],
   open_count: 0,
@@ -90,7 +91,7 @@ const PRICE_FIXTURES = {
     vega: null,
     impliedVol: 0.934928093906453,
     undPrice: 14.743120193481445,
-    timestamp: new Date().toISOString(),
+    timestamp: TRADING_DAY_ISO,
   },
 };
 
@@ -194,7 +195,7 @@ async function stubApis(page: import("@playwright/test").Page) {
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        as_of: new Date().toISOString(),
+        as_of: TRADING_DAY_ISO,
         summary: { realized_pnl: 0 },
         closed_trades: [],
         open_trades: [],
@@ -204,6 +205,9 @@ async function stubApis(page: import("@playwright/test").Page) {
 }
 
 test("dashboard day move card prefers IB daily P&L for same-day option positions", async ({ page }) => {
+  // Registered FIRST: page.addInitScript runs in registration order, so the
+  // quote-fixture stamps below must be built under the frozen clock too.
+  await freezeToTradingDay(page);
   await installMockWebSocket(page);
   await stubApis(page);
 
@@ -225,6 +229,9 @@ test("dashboard day move card prefers IB daily P&L for same-day option positions
 });
 
 test("portfolio row uses the live option market around bid/ask, not a stale WULF last trade", async ({ page }) => {
+  // Registered FIRST: page.addInitScript runs in registration order, so the
+  // quote-fixture stamps below must be built under the frozen clock too.
+  await freezeToTradingDay(page);
   await installMockWebSocket(page);
   await stubApis(page);
 

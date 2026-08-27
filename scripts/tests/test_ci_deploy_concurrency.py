@@ -293,34 +293,83 @@ def test_pytest_shards_then_combines_coverage_ratchet() -> None:
     assert "scripts" in sparse
 
 
-def test_pytest_filename_shards_partition_scripts_tests() -> None:
-    py_tests = _workflow()["jobs"]["py-tests"]
-    include = py_tests["strategy"]["matrix"]["include"]
-    filename_globs: list[str] = []
-    other_paths: list[str] = []
-    for row in include:
-        for token in str(row["paths"]).split():
-            token = token.strip('"')
-            if token.startswith("scripts/tests/"):
-                filename_globs.append(Path(token).name)
-            else:
-                other_paths.append(token)
-    files = [
-        path.name
-        for path in (WORKFLOW.parents[2] / "scripts" / "tests").glob("test_*.py")
+def _shard_tokens(job: str) -> list[str]:
+    """Every whitespace-separated path token in a matrix job's `paths`."""
+    include = _workflow()["jobs"][job]["strategy"]["matrix"]["include"]
+    return [
+        token.strip('"').rstrip("/")
+        for row in include
+        for token in str(row["paths"]).split()
     ]
-    assigned = {name: [] for name in files}
-    for pattern in filename_globs:
-        for name in files:
-            if fnmatch.fnmatch(name, pattern):
-                assigned[name].append(pattern)
-    overlap = {name: hits for name, hits in assigned.items() if len(hits) > 1}
-    missing = [name for name, hits in assigned.items() if not hits]
+
+
+def _partition(
+    tests_dir: Path, prefix: str, tokens: list[str]
+) -> tuple[dict[str, list[str]], list[str], list[str]]:
+    """(overlapped files, unsharded files, unsharded subdirs) for one tests tree.
+
+    Directories count as much as files. The `test_[a-c]*.py` shard globs match
+    FILES only, so a new subdirectory runs 0 tests while CI stays green — that
+    was the T-122 defect (752 tests), and it can recur because the guard used to
+    build its universe from a non-recursive `glob("test_*.py")`. A subdirectory
+    is only covered when a shard names it verbatim. T-216.
+    """
+    owned = [token for token in tokens if token.startswith(prefix)]
+    globs = [Path(token).name for token in owned]
+    files = [path.name for path in tests_dir.glob("test_*.py")]
+    assigned = {
+        name: [glob for glob in globs if fnmatch.fnmatch(name, glob)] for name in files
+    }
+    subdirs = [
+        path.name
+        for path in tests_dir.iterdir()
+        if path.is_dir()
+        and (path.name.startswith("test_") or any(path.rglob("test_*.py")))
+    ]
+    return (
+        {name: hits for name, hits in assigned.items() if len(hits) > 1},
+        sorted(name for name, hits in assigned.items() if not hits),
+        sorted(name for name in subdirs if f"{prefix}{name}" not in owned),
+    )
+
+
+def test_pytest_filename_shards_partition_scripts_tests() -> None:
+    tokens = _shard_tokens("py-tests")
+    overlap, missing, unsharded_dirs = _partition(
+        WORKFLOW.parents[2] / "scripts" / "tests", "scripts/tests/", tokens
+    )
     assert overlap == {}
     assert missing == []
+    assert unsharded_dirs == [], (
+        "subdirectories of scripts/tests/ that no py-tests shard names verbatim "
+        f"(a filename glob cannot match a directory): {unsharded_dirs}"
+    )
+    other_paths = [token for token in tokens if not token.startswith("scripts/tests/")]
     assert "scripts/api/tests" in other_paths
     assert "scripts/trade_blotter" in other_paths
     assert "tests" in other_paths
+
+
+def test_shard_partition_guard_reds_for_an_unlisted_subdirectory(tmp_path: Path) -> None:
+    """The guard must fail for a directory no shard names. T-216.
+
+    Run against a fixture tree rather than the checkout so it keeps proving the
+    rule once the real shards are correct.
+    """
+    tests_dir = tmp_path / "scripts" / "tests"
+    (tests_dir / "test_monitor_daemon").mkdir(parents=True)
+    (tests_dir / "test_monitor_daemon" / "test_handler.py").write_text("", encoding="utf-8")
+    (tests_dir / "test_newdaemon").mkdir()
+    (tests_dir / "test_newdaemon" / "test_handler.py").write_text("", encoding="utf-8")
+    (tests_dir / "fixtures").mkdir()
+    (tests_dir / "test_alpha.py").write_text("", encoding="utf-8")
+    tokens = ["scripts/tests/test_[a-c]*.py", "scripts/tests/test_monitor_daemon"]
+
+    overlap, missing, unsharded_dirs = _partition(tests_dir, "scripts/tests/", tokens)
+
+    assert overlap == {}
+    assert missing == []
+    assert unsharded_dirs == ["test_newdaemon"]
 
 
 def test_coverage_ratchets_gate_the_deploy() -> None:
@@ -393,23 +442,16 @@ def test_deploy_accepts_skipped_test_jobs() -> None:
 
 
 def test_cloud_infra_shards_partition_cloud_tests() -> None:
-    cloud = _workflow()["jobs"]["cloud-tests"]
-    include = cloud["strategy"]["matrix"]["include"]
-    files = [
-        path.name
-        for path in (WORKFLOW.parents[2] / "cloud" / "tests").glob("test_*.py")
-    ]
-    assigned = {name: [] for name in files}
-    for row in include:
-        for token in str(row["paths"]).split():
-            pattern = Path(token.strip('"')).name
-            for name in files:
-                if fnmatch.fnmatch(name, pattern):
-                    assigned[name].append(pattern)
-    overlap = {name: hits for name, hits in assigned.items() if len(hits) > 1}
-    missing = [name for name, hits in assigned.items() if not hits]
+    tokens = _shard_tokens("cloud-tests")
+    overlap, missing, unsharded_dirs = _partition(
+        WORKFLOW.parents[2] / "cloud" / "tests", "cloud/tests/", tokens
+    )
     assert overlap == {}
     assert missing == []
+    assert unsharded_dirs == [], (
+        "subdirectories of cloud/tests/ that no cloud-tests shard names verbatim "
+        f"(a filename glob cannot match a directory): {unsharded_dirs}"
+    )
 
 
 def test_py_coverage_installs_coverage_only() -> None:

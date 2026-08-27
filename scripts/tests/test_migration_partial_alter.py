@@ -50,17 +50,57 @@ class TestAlreadyAppliedStatements:
 
 
 class TestVersionIsRecordedWithTheStatements:
-    def test_the_version_insert_shares_one_commit_with_the_ddl(self):
+    def test_the_version_insert_shares_one_commit_with_the_ddl(self, monkeypatch, tmp_path):
         """R-153: the runner committed the DDL, THEN recorded the version in a
         second commit. Anything that killed it in between made the migration
-        un-replayable."""
-        import inspect
+        un-replayable.
 
-        source = inspect.getsource(migrate.apply_pending_migrations)
-        body = source[source.index("for version, name, path in pending"):]
-        insert_at = body.index("INSERT OR IGNORE INTO schema_migrations")
-        assert body[:insert_at].count("db.commit()") == 0, (
-            "the DDL is still committed before the version row is even issued"
+        T-232: this read `inspect.getsource(apply_pending_migrations)` and
+        counted `db.commit()` ahead of the INSERT. A text scan over one
+        function had to be re-pointed once already (9565d37d) when the loop
+        moved, and a commit reached through a helper walks straight past it.
+        Run the migrations instead and assert the ORDER of the calls.
+        """
+        events: list[str] = []
+
+        class _Cursor:
+            def fetchall(self):
+                return []
+
+        class _Db:
+            def execute(self, sql, args=()):
+                if "SELECT version FROM schema_migrations" in sql:
+                    return _Cursor()
+                if "INSERT OR IGNORE INTO schema_migrations" in sql:
+                    events.append(f"version:{args[0]}")
+                else:
+                    events.append(f"stmt:{sql.strip().split()[0].upper()}")
+                return _Cursor()
+
+            def commit(self):
+                events.append("commit")
+
+        monkeypatch.setattr(
+            migrate,
+            "_list_migrations",
+            lambda: [
+                (50, "0050_alter.sql", _write(tmp_path, "0050", "ALTER TABLE t ADD COLUMN disk_pct REAL;")),
+                (51, "0051_next.sql", _write(tmp_path, "0051", "CREATE TABLE credit_spread_history (a TEXT);")),
+            ],
+        )
+
+        assert migrate.apply_pending_migrations(_Db()) == 2
+
+        assert events == [
+            "stmt:ALTER",
+            "version:50",
+            "commit",
+            "stmt:CREATE",
+            "version:51",
+            "commit",
+        ], (
+            "the DDL is committed before the version row is even issued, so a "
+            f"drop in between leaves the migration un-replayable: {events}"
         )
 
     def test_a_partially_applied_migration_replays_and_records(self, monkeypatch, tmp_path):

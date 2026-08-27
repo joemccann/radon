@@ -352,6 +352,9 @@ def card4_cta_squeeze(data: dict, ds: str) -> str:
 
     flipped = spx_today is not None and spx_1m is not None and spx_today < 0 and spx_1m > 0
     is_extreme = spx_pctile is not None and spx_pctile <= 10
+    # A percentile the reconciler nulled out is not a reading. Fall back to the
+    # vol-targeting sentence rather than labelling `None` as an ordinal.
+    has_pctile = spx_row is not None and spx_pctile is not None
 
     # Exposure bar: scale 0-200%
     bar_width = min(exposure / 2, 100)
@@ -366,7 +369,7 @@ def card4_cta_squeeze(data: dict, ds: str) -> str:
       {"Squeeze Coil Loaded" if is_extreme else "CTA Positioning Elevated"}
     </div>
     <div style="font-size:13px;color:#64748b;margin-bottom:20px;line-height:1.4">
-      {"SPX CTAs at the " + pctile_label(spx_pctile) + " percentile of their 3M range" + (", having flipped from " + f"{spx_1m:.2f} long to {spx_today:.2f} short in 30 days" if flipped else "") + ". Any bullish catalyst triggers violent short-covering." if spx_row else f"Vol-targeting model: {exposure:.1f}% implied exposure, ${est_selling:.0f}B in forced selling pipeline."}
+      {"SPX CTAs at the " + pctile_label(spx_pctile) + " percentile of their 3M range" + (", having flipped from " + f"{spx_1m:.2f} long to {spx_today:.2f} short in 30 days" if flipped else "") + ". Any bullish catalyst triggers violent short-covering." if has_pctile else f"Vol-targeting model: {exposure:.1f}% implied exposure, ${est_selling:.0f}B in forced selling pipeline."}
     </div>
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:18px">
       <div style="background:#0f1519;border:1px solid #1e293b;border-radius:3px;padding:10px;text-align:center">
@@ -431,8 +434,8 @@ def build_tweet(data: dict, ds: str) -> str:
     conditions_met = sum([spx_met, conditions.get("realized_vol_gt_25", False), conditions.get("cor1m_gt_60", False)])
 
     spx_line = ""
-    if spx_row:
-        p = spx_row.get("percentile_3m", 0)
+    if spx_row and spx_row.get("percentile_3m") is not None:
+        p = spx_row["percentile_3m"]
         z = spx_row.get("z_score_3m", 0)
         spx_line = f"\n> SPX CTA position at {pctile_label(p)} percentile (3M) · z-score {z:.2f}"
 
@@ -445,7 +448,14 @@ def build_tweet(data: dict, ds: str) -> str:
 
     spx_pos = spx_row.get("position_today", 0) if spx_row else 0
     spx_z = spx_row.get("z_score_3m", 0) if spx_row else 0
-    spx_pctile = spx_row.get("percentile_3m", 0) if spx_row else 0
+    spx_pctile = spx_row.get("percentile_3m") if spx_row else None
+    # Drop the parenthetical entirely when the percentile was nulled; the old
+    # `.get(..., 0)` default never fired because the key exists carrying None.
+    pctile_clause = (
+        ""
+        if spx_pctile is None
+        else f"{pctile_label(round(spx_pctile * 100) if spx_pctile < 1 else int(spx_pctile))} pctile, "
+    )
 
     if triggered:
         hook = (
@@ -508,7 +518,7 @@ def build_tweet(data: dict, ds: str) -> str:
         )
         cta_note = (
             f"CTA positioning: SPX at {spx_pos:+.2f} "
-            f"({pctile_label(round(spx_pctile * 100) if spx_pctile < 1 else int(spx_pctile))} pctile, z={spx_z:.2f}). "
+            f"({pctile_clause}z={spx_z:.2f}). "
             f"{'Max short territory — any bullish catalyst triggers violent covering.' if spx_z < -1.5 else 'Reducing but not yet at extremes.'}"
         )
 

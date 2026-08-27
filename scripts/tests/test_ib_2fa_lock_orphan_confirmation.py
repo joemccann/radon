@@ -37,8 +37,7 @@ from utils import ib_2fa_lock
 def _redirect_lock_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     path = tmp_path / "ib-2fa-push-lock.json"
     monkeypatch.setenv("IB_2FA_LOCK_PATH", str(path))
-    monkeypatch.setattr(ib_2fa_lock, "ORPHAN_CONFIRM_INTERVAL_SECS", 0.0)
-    ib_2fa_lock.reset_orphan_state()
+    # Orphan-state reset + zeroed interval now live in conftest.py. T-226.
     return path
 
 

@@ -223,5 +223,54 @@ class TestHistoryLoader:
         assert cta_history.load_prior_payloads("2026-08-07", cache_dir=tmp_path / "nope") == []
 
 
+class TestNulledPriorPercentiles:
+    """`reconciled_payload` runs the z-guard over every archived session, so a
+    prior day can arrive with `percentile_3m: None`. `assess_positioning`
+    substitutes 50 for that null, which republishes the unknown session as a
+    mid-range read and lets the change copy assert a move that never happened.
+    """
+
+    # z 0.20 implies the 58th; the archived 95 disagrees by more than the
+    # limit, so the whole trio nulls out on load.
+    NULLED = payload("2026-08-06", [spx(3.60, 1.60, 0.20, 95)])
+
+    @pytest.fixture
+    def cache_dir(self, tmp_path):
+        cache = tmp_path / "menthorq_cache"
+        cache.mkdir()
+        (cache / "cta_2026-08-06.json").write_text(json.dumps(self.NULLED))
+        return cache
+
+    def _context(self, priors):
+        return cta_history.derive_change_context(
+            DAY_2, priors, assess=gcs.assess_positioning, find_spx=gcs.spx_row
+        )
+
+    def test_the_archived_percentile_nulls_out_on_load(self, cache_dir):
+        priors = cta_history.load_prior_payloads("2026-08-07", cache_dir=cache_dir)
+
+        assert priors[0]["tables"]["main"][0]["percentile_3m"] is None
+
+    def test_prior_pctile_is_not_a_fabricated_50(self, cache_dir):
+        priors = cta_history.load_prior_payloads("2026-08-07", cache_dir=cache_dir)
+
+        assert self._context(priors)["spx_delta"]["prior_pctile"] is None
+
+    def test_the_change_copy_omits_a_percentile_move_it_cannot_measure(self, cache_dir):
+        priors = cta_history.load_prior_payloads("2026-08-07", cache_dir=cache_dir)
+        tweet = gcs.build_tweet(DAY_2, "2026-08-07", priors=priors)
+
+        assert "percentile" not in tweet.split("Since the 2026-08-06 read:")[1].split("\n")[0]
+        # The measurements that DID survive are still narrated.
+        assert "+3.60" in tweet and "+3.69" in tweet
+
+    def test_a_readable_prior_still_narrates_the_percentile_move(self):
+        ctx = self._context([DAY_1])
+        tweet = gcs.build_tweet(DAY_2, "2026-08-07", priors=[DAY_1])
+
+        assert ctx["spx_delta"]["prior_pctile"] == 97
+        assert "97th to 100th percentile" in tweet
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -80,6 +80,13 @@ WEB_READS = (
 # PYTHON: the ⛔ PII plate guard reads site/public/plates, the account-figure
 # guard reads web/lib/chat.ts, and the DUR-07 replica guard scans web/lib,
 # web/app, web/components. T-157.
+#
+# The three root FILES are web-owned but python-asserted:
+# scripts/tests/test_merge_vitest_coverage.py holds the only assertion pinning
+# the vitest coverage thresholds, and test_ci_deploy_concurrency.py reads
+# vitest.config.ts / bun.lock while cloud/tests/test_payload_case_patterns.py
+# reads package.json. Without them a config-only push skipped the entire python
+# gate, so a ratchet could be lowered with nothing running anywhere. T-192.
 PYTHON_READS = (
     ".claude/",
     ".github/",
@@ -96,6 +103,9 @@ PYTHON_READS = (
     "tasks/",
     "tests/",
     "web/",
+    "bun.lock",
+    "package.json",
+    "vitest.config.ts",
 )
 
 

@@ -56,9 +56,11 @@
             # upstream connection, and — critically — produced NO 5xx, which is
             # why @edge_health_status below could keep answering 200 through a
             # total front-end hang. R-219.
-            dial_timeout 5s
-            response_header_timeout 30s
-            read_timeout 300s
+            transport http {
+                dial_timeout 5s
+                response_header_timeout 30s
+                read_timeout 300s
+            }
         }
     }
 
@@ -96,21 +98,23 @@
             lb_try_interval 250ms
 
             # This block serves POST /api/orders/place, /cancel and /modify.
-            # Without retry_match the restriction rests on an unpinned Caddy
+            # Without lb_retry_match the restriction rests on an unpinned Caddy
             # default, and there is no idempotency key anywhere on this path
             # (R-009: orderRef never returned; R-022: no server-side submission
             # record), so nothing downstream could collapse a duplicate and the
             # operator's only evidence would be two fills. State it. R-220.
-            retry_match {
+            lb_retry_match {
                 method GET HEAD
             }
 
             # Same reasoning as the /api/ib/* block above. read_timeout is
             # generous on purpose: it bounds a dead connection without cutting
             # a legitimately streamed response. R-219.
-            dial_timeout 5s
-            response_header_timeout 30s
-            read_timeout 300s
+            transport http {
+                dial_timeout 5s
+                response_header_timeout 30s
+                read_timeout 300s
+            }
         }
     }
 }

@@ -72,6 +72,30 @@ if [ -z "$PYTHON_BIN" ]; then
     exit 1
 fi
 
+mkdir -p logs
+
+# Best-effort durable signal. Nothing on the shed or skip paths wrote a
+# service_health row, so the watchdog had no error row either. R-221 / R-265.
+_flow_health() {
+    RADON_FLOW_HEALTH_STATE="$1" RADON_FLOW_HEALTH_MESSAGE="$2" \
+        "$PYTHON_BIN" - >>"logs/flow_refresh.err.log" 2>&1 <<'HEALTHPY' || true
+import os
+import sys
+sys.path.insert(0, 'scripts')
+try:
+    from db.hrana_http import write_service_health_http
+    state = os.environ["RADON_FLOW_HEALTH_STATE"]
+    message = os.environ.get("RADON_FLOW_HEALTH_MESSAGE") or ""
+    write_service_health_http(
+        "flow-refresh",
+        state,
+        error=None if state == "ok" else {"message": message, "class": "flow-refresh"},
+    )
+except Exception as exc:
+    print(f"flow-refresh health write skipped: {exc}", file=sys.stderr)
+HEALTHPY
+}
+
 # "no" is a VERDICT, not a fallback. This used to swallow twice - a bare
 # `except Exception: print('no')` inside and `|| echo "no"` outside - so a
 # broken venv, a renamed utils.market_calendar or a corrupt holiday calendar
@@ -116,8 +140,6 @@ RETRY_DELAY="${RADON_FLOW_REFRESH_RETRY_DELAY_SECS:-8}"
 # the caller can tell a capacity shed from a real scan failure.
 SHED_EXIT=75
 
-mkdir -p logs
-
 # The API raises HTTPException(502, detail=result.error) for EVERY failure -
 # capacity exhaustion, a nonzero script exit, an asyncio timeout at the script
 # deadline, invalid JSON, any other exception. Status alone therefore cannot
@@ -139,28 +161,6 @@ _retryable_flow_shed() {
     # $1 = attempt (0-based), $2 = curl exit, $3 = http code, $4 = body
     [ "$1" -lt "$RETRY_LIMIT" ] || return 1
     _is_capacity_shed "$2" "$3" "$4"
-}
-
-# Best-effort durable signal. Nothing on the shed or skip paths wrote a
-# service_health row, so the watchdog had no error row either. R-221 / R-265.
-_flow_health() {
-    RADON_FLOW_HEALTH_STATE="$1" RADON_FLOW_HEALTH_MESSAGE="$2" \
-        "$PYTHON_BIN" - >>"logs/flow_refresh.err.log" 2>&1 <<'HEALTHPY' || true
-import os
-import sys
-sys.path.insert(0, 'scripts')
-try:
-    from db.hrana_http import write_service_health_http
-    state = os.environ["RADON_FLOW_HEALTH_STATE"]
-    message = os.environ.get("RADON_FLOW_HEALTH_MESSAGE") or ""
-    write_service_health_http(
-        "flow-refresh",
-        state,
-        error=None if state == "ok" else {"message": message, "class": "flow-refresh"},
-    )
-except Exception as exc:
-    print(f"flow-refresh health write skipped: {exc}", file=sys.stderr)
-HEALTHPY
 }
 
 refresh_scan() {

@@ -389,16 +389,21 @@ export default function MobileOrderTicket({
    * Same gate as the desktop rail, rotated onto the phone. A gate that exists
    * on desktop but not here would be worse than no gate: the operator learns
    * to trust it and then meets a surface that does not have it.
+   *
+   * Per-combo legs for the exact expiry payoff, ratio-normalised the same way
+   * the rail does it. Raw quantities divide the lot size into the premium (a
+   * 10-lot 970 call sold at 2.98 breaks even at 970.30 instead of 972.98) and
+   * then get scaled by `totalQty` a second time in the sentence below.
    */
   const payoffLegs = useMemo(
     () =>
-      legs.map((leg) => ({
+      quotingLegs.map((leg) => ({
         action: leg.action,
         right: leg.right,
         strike: leg.strike,
         quantity: leg.quantity,
       })),
-    [legs],
+    [quotingLegs],
   );
 
   const gateRiskState = riskState ?? teaserState;
@@ -455,6 +460,9 @@ export default function MobileOrderTicket({
     // Review button sets confirmStep; handleSubmit never places until then.
     if (!confirmStep) return;
     if (!isValid || !okToSubmit) return;
+    // Defence in depth: the disabled button is UI, this is the actual gate.
+    // An unbounded-risk order never reaches the wire unacknowledged.
+    if (!transmitArmed) return;
     setSubmitting(true);
     setError(null);
     setSuccess(null);

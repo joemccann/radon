@@ -50,8 +50,29 @@ image_tag() {
   printf 'latest\n'
 }
 
-image_available() {
+image_in_registry() {
   "$DOCKER" manifest inspect "$1" >/dev/null 2>&1
+}
+
+image_in_local_store() {
+  "$DOCKER" image inspect "$1" >/dev/null 2>&1
+}
+
+# A registry probe alone is not a liveness contract. A GHCR 429, an outage or
+# an expired root credential fails BOTH manifest probes under `set -euo
+# pipefail`, resolve_image returns 69 and every ExecStart exits — while the
+# correct image is already pulled. With Restart=always + StartLimitBurst=5
+# that parks radon-api, radon-nextjs, radon-relay, radon-monitor and
+# radon-newsfeed start-limit-hit on a registry outage alone. T-198.
+image_available() {
+  if image_in_registry "$1"; then
+    return 0
+  fi
+  if image_in_local_store "$1"; then
+    printf 'image %s is not reachable in the registry; using the local store copy\n' "$1" >&2
+    return 0
+  fi
+  return 1
 }
 
 # Resolve a repo to a tag that actually exists, preferring the pinned SHA.

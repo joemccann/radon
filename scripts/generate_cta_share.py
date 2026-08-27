@@ -671,11 +671,19 @@ def change_sentences(context: dict) -> list:
     delta = context.get("spx_delta")
 
     if prior_date and delta:
-        lines.append(
-            f"> Since the {prior_date} read: SPX {delta['prior_position']:+.2f} to "
-            f"{delta['position']:+.2f}, z {delta['prior_z']:.2f} to {delta['z']:.2f}, "
-            f"{pctile_label(delta['prior_pctile'])} to {pctile_label(delta['pctile'])} percentile"
-        )
+        moves = [
+            f"SPX {delta['prior_position']:+.2f} to {delta['position']:+.2f}",
+            f"z {delta['prior_z']:.2f} to {delta['z']:.2f}",
+        ]
+        # A percentile the z-guard nulled is not a reading on either side, so
+        # the move between them was never measured. Drop the clause instead of
+        # narrating a swing off a substituted midpoint.
+        if delta["prior_pctile"] is not None and delta["pctile"] is not None:
+            moves.append(
+                f"{pctile_label(delta['prior_pctile'])} to "
+                f"{pctile_label(delta['pctile'])} percentile"
+            )
+        lines.append(f"> Since the {prior_date} read: " + ", ".join(moves))
 
     if prior_date and context.get("entered_extreme"):
         names = ", ".join(context["entered_extreme"][:6])

@@ -10,6 +10,47 @@ SCRIPTS_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 sys.path.insert(0, str(SCRIPTS_DIR / "trade_blotter"))
 
+# Captured before any test can patch it, so `real_orphan_confirm_interval`
+# hands back the production value rather than the zeroed one.
+try:
+    from utils import ib_2fa_lock as _ib_2fa_lock
+except Exception:  # pragma: no cover - module is stdlib-only, import can't fail
+    _ib_2fa_lock = None
+REAL_ORPHAN_CONFIRM_INTERVAL_SECS = (
+    _ib_2fa_lock.ORPHAN_CONFIRM_INTERVAL_SECS if _ib_2fa_lock is not None else 0.0
+)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_ib_2fa_lock_orphan_state(monkeypatch):
+    """Reset the process-wide orphan-confirmation memory around every test.
+
+    R-210 put two mutable module globals (`_orphan_reported`, `_orphan_seen_up`)
+    and a real inter-probe `time.sleep` in `ib_2fa_lock`. Eleven test files
+    import the module; only two reset the globals, so inside one xdist worker a
+    revocation outcome depended on file order and every unguarded revocation
+    paid the real sleep. Owned here so every importer gets it. Mirrored in
+    scripts/api/tests/conftest.py, which is a separate rootdir subtree. T-226.
+    """
+    if _ib_2fa_lock is None:
+        yield
+        return
+    _ib_2fa_lock.reset_orphan_state()
+    monkeypatch.setattr(_ib_2fa_lock, "ORPHAN_CONFIRM_INTERVAL_SECS", 0.0)
+    yield
+    _ib_2fa_lock.reset_orphan_state()
+
+
+@pytest.fixture
+def real_orphan_confirm_interval(monkeypatch):
+    """Restore the production inter-probe interval for tests that measure cost."""
+    monkeypatch.setattr(
+        _ib_2fa_lock,
+        "ORPHAN_CONFIRM_INTERVAL_SECS",
+        REAL_ORPHAN_CONFIRM_INTERVAL_SECS,
+    )
+    return REAL_ORPHAN_CONFIRM_INTERVAL_SECS
+
 
 @pytest.fixture(autouse=True)
 def _reset_menthorq_auth_embargo():

@@ -74,7 +74,9 @@ class TestOrderLimitsAreEnforced:
         )
         assert placed == [], "an over-cap order reached the broker"
         assert code != 0
-        assert "limit" in capsys.readouterr().out.lower()
+        out = capsys.readouterr().out
+        assert "limit" in out.lower()
+        assert "RADON_MAX_STOCK_ORDER_QTY" in out, f"the wrong quantity cap fired: {out}"
 
     def test_over_cap_notional_is_refused(self, not_halted, monkeypatch, capsys):
         monkeypatch.setenv("RADON_MAX_ORDER_NOTIONAL", "100")
@@ -108,6 +110,64 @@ class TestOrderLimitsAreEnforced:
             placed,
         )
         assert placed, "the caps must not refuse an order inside them"
+
+    def test_option_notional_is_refused_with_the_100x_multiplier(
+        self, not_halted, monkeypatch, capsys
+    ):
+        """Options are the instrument Radon actually trades, and the report's
+        own rendered command is `--type option ... --yes`. 20 contracts at
+        $200 is $400,000 of premium — the x100 multiplier, not $4,000."""
+        monkeypatch.setenv("RADON_MAX_ORDER_NOTIONAL", "100000")
+        monkeypatch.setenv("RADON_MAX_ORDER_QTY", "500")
+        monkeypatch.setenv("RADON_MAX_STOCK_ORDER_QTY", "50000")
+        placed: list = []
+        code = _run(
+            ["--type", "option", "--symbol", "AAPL", "--expiry", "20260116",
+             "--strike", "200", "--right", "C", "--qty", "20",
+             "--side", "SELL", "--limit", "200.00", "--yes", "--no-log"],
+            placed,
+        )
+        assert placed == [], "an over-notional OPTION order reached the broker"
+        assert code == 4, "the caps must refuse with the order-limit exit code"
+        out = capsys.readouterr().out
+        assert "RADON_MAX_ORDER_NOTIONAL" in out, f"a different cap fired: {out}"
+        assert "$400,000" in out, f"the x100 option multiplier was not applied: {out}"
+
+    def test_option_quantity_is_bound_by_the_contract_cap_not_the_stock_cap(
+        self, not_halted, monkeypatch, capsys
+    ):
+        """Pins WHICH cap fires: the stock cap and the notional cap are both
+        wide open here, so only RADON_MAX_ORDER_QTY can refuse this."""
+        monkeypatch.setenv("RADON_MAX_ORDER_QTY", "5")
+        monkeypatch.setenv("RADON_MAX_STOCK_ORDER_QTY", "50000")
+        monkeypatch.setenv("RADON_MAX_ORDER_NOTIONAL", "1000000")
+        placed: list = []
+        code = _run(
+            ["--type", "option", "--symbol", "AAPL", "--expiry", "20260116",
+             "--strike", "200", "--right", "C", "--qty", "20",
+             "--side", "SELL", "--limit", "200.00", "--yes", "--no-log"],
+            placed,
+        )
+        assert placed == [], "an over-cap OPTION quantity reached the broker"
+        assert code == 4
+        out = capsys.readouterr().out
+        assert "RADON_MAX_ORDER_QTY" in out and "RADON_MAX_STOCK_ORDER_QTY" not in out, (
+            f"the wrong quantity cap fired: {out}"
+        )
+
+    def test_a_within_cap_option_order_still_places(self, not_halted, monkeypatch):
+        """Positive control: the two refusals above must be the caps firing,
+        not the option branch failing for some unrelated reason."""
+        monkeypatch.setenv("RADON_MAX_ORDER_QTY", "500")
+        monkeypatch.setenv("RADON_MAX_ORDER_NOTIONAL", "1000000")
+        placed: list = []
+        _run(
+            ["--type", "option", "--symbol", "AAPL", "--expiry", "20260116",
+             "--strike", "200", "--right", "C", "--qty", "2",
+             "--side", "SELL", "--limit", "5.00", "--yes", "--no-log"],
+            placed,
+        )
+        assert placed, "the caps must not refuse an option order inside them"
 
     def test_dry_run_still_exits_before_the_caps_matter(self, not_halted):
         placed: list = []

@@ -158,20 +158,23 @@ def _durable_store_available() -> bool:
     """True when a durable lockout record could exist to be lost.
 
     Fail-closed only makes sense against a store that is actually configured.
-    When Turso credentials are absent — a laptop without `.env`, a unit test —
-    the sidecar is the ONLY record, so its absence is genuine information and
-    blocking on it would embargo Flex for a misconfiguration. R-212.
+    When Turso credentials are absent — a laptop without `.env` — the sidecar
+    is the ONLY record, so its absence is genuine information and blocking on
+    it would embargo Flex for a misconfiguration. R-212.
+
+    FAILING to read the credentials is not the same as their absence. On that
+    path a `TURSO_DB_URL` in the environment is the evidence that a durable
+    record could exist, and the guard stays CLOSED — reading a transient
+    import or env-load failure as "unconfigured" waves every Flex caller into
+    a live IBKR 1025 lockout, and each SendRequest extends it.
     """
-    if os.environ.get("PYTEST_CURRENT_TEST") and os.environ.get("RADON_DB_TEST_WRITE_OK") != "1":
-        return False
     try:
         from db.hrana_http import http_url_from_libsql, read_env
-    except Exception:
-        return False
-    try:
+
         db_url, token = read_env()
-    except Exception:
-        return False
+    except Exception as exc:
+        log.warning("flex_embargo: durable-store probe failed: %s", exc)
+        return bool(os.environ.get("TURSO_DB_URL"))
     return bool(http_url_from_libsql(db_url) and token)
 
 

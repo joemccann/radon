@@ -35,7 +35,10 @@ unlinked, and unlinked BEFORE `run_phase`.
 
 from __future__ import annotations
 
+import os
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -55,6 +58,48 @@ def _uncommented(path: Path) -> str:
         line for line in path.read_text(encoding="utf-8").splitlines()
         if not line.lstrip().startswith("#")
     )
+
+
+BASH = shutil.which("bash") or "/bin/bash"
+
+
+def _rotation_block(path: Path) -> str:
+    """The rotation pipeline lifted verbatim, so a test can RUN it."""
+    text = path.read_text(encoding="utf-8")
+    start = text.index('ls -1t "$LOG_DIR"')
+    end = text.index("\ndone\n", start) + len("\ndone\n")
+    return text[start:end]
+
+
+def _fake_runner_clone(tmp_path: Path, name: str) -> Path:
+    """A marker-bearing clone whose runner lock is held by a LIVE pid."""
+    repo = tmp_path / f"radon-{name}"
+    repo.mkdir()
+    (repo / ".radon-weekend-runner").write_text("", encoding="utf-8")
+    lock = repo / ".weekend-runner.lock"
+    lock.mkdir()
+    # This process is alive, so acquire_runner_lock cannot reclaim the lock.
+    (lock / "pid").write_text(f"{os.getpid()}\n", encoding="utf-8")
+    return repo
+
+
+def _stub_bin(tmp_path: Path, gh_log: Path) -> Path:
+    """`gh` that records every call; `claude` that can never run for real."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
+    gh.write_text(
+        "#!/bin/sh\n"
+        f'printf "%s\\n" "$*" >> "{gh_log}"\n'
+        'if [ "$1 $2" = "issue list" ]; then echo 4242; fi\n'
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    gh.chmod(0o755)
+    claude = bin_dir / "claude"
+    claude.write_text("#!/bin/sh\necho 'stub claude must never run' >&2\nexit 9\n", encoding="utf-8")
+    claude.chmod(0o755)
+    return bin_dir
 
 
 class TestGroundTruthFailureStillReportsRemediate:
@@ -95,11 +140,21 @@ class TestCycleBudgetBoundsTheWholeRun:
             "clear; launchd will not start a second instance of a running "
             "label, so the next 00:00 fire is dropped with no record"
         )
-        checks = re.findall(r"CYCLE_DEADLINE - CAP_SECS", body)
-        assert len(checks) >= 2, (
-            "the deadline is subtracted from in the continuation loop but not "
-            "before the first round of a phase, so a cycle already past its "
-            f"budget still launches a full round: {len(checks)} check(s)"
+        # Counting occurrences is satisfied by a duplicated dead line, so
+        # check WHERE they sit relative to the round they must guard. T-209.
+        phase = body[body.index("run_phase() {"):]
+        phase = phase[: phase.index("\n}\n") + 3]
+        rounds = [m.start() for m in re.finditer(r"^\s*run_round\s*$", phase, re.M)]
+        assert rounds, "run_phase no longer calls run_round"
+        guards = [m.start() for m in re.finditer(r"CYCLE_DEADLINE - CAP_SECS", phase)]
+        assert any(g < rounds[0] for g in guards), (
+            "round 1 of a phase is launched without checking the deadline, so "
+            "a cycle already past its budget in the audit phase still runs a "
+            f"full remediate round: guards at {guards}, first round at {rounds[0]}"
+        )
+        assert any(g > rounds[0] for g in guards), (
+            "the continuation loop relaunches rounds without rechecking the "
+            f"deadline: guards at {guards}, first round at {rounds[0]}"
         )
 
     def test_a_round_is_not_started_without_room_for_its_cap(self):
@@ -124,13 +179,38 @@ class TestPrologueDeathsAreReported:
             )
 
     @pytest.mark.parametrize("name", sorted(LOOPS))
-    def test_a_held_lock_is_reported_not_just_exited(self, name):
-        body = _uncommented(LOOPS[name])
-        lock_branch = body[body.index("acquire_runner_lock"):]
-        lock_branch = lock_branch[: lock_branch.index("LOG_DIR=")]
-        assert "report" in lock_branch, (
+    def test_a_held_lock_is_reported_not_just_exited(self, name, tmp_path):
+        """T-209: run the prologue against a held lock and watch `gh`.
+
+        `"report" in lock_branch` matches any identifier containing "report",
+        and matched while the call itself was dead: report() interpolates
+        PHASE/STAMP/RUN_LOG, none of which exist yet in the prologue, so
+        `set -u` killed the shell before the first gh call.
+        """
+        repo = _fake_runner_clone(tmp_path, name)
+        gh_log = tmp_path / "gh.log"
+        bin_dir = _stub_bin(tmp_path, gh_log)
+        proc = subprocess.run(
+            [BASH, str(LOOPS[name]), "cycle"],
+            env={
+                **os.environ,
+                "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+                "RADON_WEEKEND_REPO": str(repo),
+            },
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert proc.returncode == 3, (proc.returncode, proc.stdout, proc.stderr)
+        calls = gh_log.read_text(encoding="utf-8") if gh_log.exists() else ""
+        assert "issue comment" in calls, (
             "a stale pid reused by a live unrelated process makes every daily "
-            "fire exit 3 in under a second, with no signal at all"
+            "fire exit 3 in under a second, with no dead-man comment at all: "
+            f"gh calls={calls!r} stderr={proc.stderr!r}"
+        )
+        assert str(os.getpid()) in calls, (
+            "the dead-man comment must name the holding pid, or the operator "
+            f"cannot tell a live cycle from a reused pid: {calls!r}"
         )
 
 
@@ -153,17 +233,52 @@ class TestTestingPlistCanResolveBun:
 
 
 class TestRotationSparesTheLaunchdSinks:
+    """R-267, T-209: the rotation block is EXECUTED here, not grepped.
+
+    Asserting `"launchd-cycle" in rotation` is satisfied by the exact inverse
+    behaviour: flipping the block's `grep -v` to `grep` rotates ONLY the two
+    sinks, deleting exactly the forensics this class exists to protect, and
+    the substring is still there.
+    """
+
     @pytest.mark.parametrize("name", sorted(LOOPS))
-    def test_rotation_never_unlinks_the_launchd_sinks(self, name):
-        body = _uncommented(LOOPS[name])
-        rotation = body[body.index("ls -1t \"$LOG_DIR\""):]
-        rotation = rotation[: rotation.index("done") + 4]
-        assert "launchd-cycle" in rotation, (
-            "the plists point StandardOutPath/StandardErrorPath into the "
-            "rotated directory, so the only forensics for a prologue death "
-            "are eventually unlinked — and unlinked BEFORE run_phase, so the "
-            "rest of the invocation writes to a deleted inode"
+    def test_rotation_prunes_run_logs_and_keeps_the_launchd_sinks(self, name, tmp_path):
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        base = 1_700_000_000
+        for i in range(38):
+            run_log = log_dir / f"audit-20260827T{i:06d}.log"
+            run_log.write_text("run log", encoding="utf-8")
+            os.utime(run_log, (base + i, base + i))
+        # The sinks sort OLDEST: launchd-cycle.err only gets an mtime bump
+        # when something writes to stderr, so age alone never spares them.
+        for sink in ("launchd-cycle.log", "launchd-cycle.err"):
+            path = log_dir / sink
+            path.write_text("forensics", encoding="utf-8")
+            os.utime(path, (base - 1, base - 1))
+
+        proc = subprocess.run(
+            [BASH, "-c", "set -Eeuo pipefail\n" + _rotation_block(LOOPS[name])],
+            env={**os.environ, "LOG_DIR": str(log_dir)},
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
+        assert proc.returncode == 0, proc.stderr
+
+        after = {entry.name for entry in log_dir.iterdir()}
+        for sink in ("launchd-cycle.log", "launchd-cycle.err"):
+            assert sink in after, (
+                f"{name}: rotation unlinked {sink}. The plists point "
+                "StandardOutPath/StandardErrorPath there, so the only "
+                "forensics for a prologue death are gone — and gone BEFORE "
+                "run_phase, so the rest of that invocation writes to a "
+                f"deleted inode: {sorted(after)}"
+            )
+            assert (log_dir / sink).read_text(encoding="utf-8") == "forensics"
+        survivors = sorted(entry for entry in after if entry.startswith("audit-"))
+        assert len(survivors) == 30, f"{name}: kept {len(survivors)} run logs: {survivors}"
+        assert survivors[0] == "audit-20260827T000008.log", survivors[0]
 
 
 class TestSetupGuardsTheSharedVenv:

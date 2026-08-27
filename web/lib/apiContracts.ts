@@ -15,6 +15,9 @@ export type ErrorCode =
   | "UPSTREAM_TIMEOUT_ORDER_INDETERMINATE"
   | "VALIDATION_ERROR"
   | "DB_UNAVAILABLE"
+  // A stored row exists but will not parse. The database is fine; the
+  // persisted payload is not, so retrying re-reads the same bad bytes.
+  | "SNAPSHOT_CORRUPT"
   | "INTERNAL_ERROR";
 
 export type CacheState = "HIT" | "MISS" | "STALE" | "BYPASS";

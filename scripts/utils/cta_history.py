@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 from typing import Callable, Iterable, Optional
 
-from utils.cta_percentiles import reconcile_tables
+from utils.cta_percentiles import normalize_pctile, reconcile_tables
 
 PROJECT_DIR = Path(__file__).resolve().parents[2]
 CTA_CACHE_DIR = PROJECT_DIR / "data" / "menthorq_cache"
@@ -174,6 +174,18 @@ def regime_label(
     return "in-range"
 
 
+def _published_pctile(row: dict) -> Optional[int]:
+    """The 3M percentile as published, or None when the z-guard nulled it.
+
+    `assess_positioning` substitutes 50 for a missing percentile, which is fine
+    for a meter position but not for a delta: it turns an unknown archived
+    session into a mid-range reading and lets the change copy narrate a move
+    that was never measured.
+    """
+    value = (row or {}).get("percentile_3m")
+    return None if value is None else normalize_pctile(value)
+
+
 def _spx_delta(
     current: dict,
     prior: dict,
@@ -190,8 +202,8 @@ def _spx_delta(
         "prior_position": was["today"],
         "z": now["z"],
         "prior_z": was["z"],
-        "pctile": now["pctile"],
-        "prior_pctile": was["pctile"],
+        "pctile": _published_pctile(now_row),
+        "prior_pctile": _published_pctile(prior_row),
     }
 
 

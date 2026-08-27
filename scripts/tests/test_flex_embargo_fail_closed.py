@@ -146,6 +146,65 @@ class TestClearHasACaller:
         assert "none" in capsys.readouterr().out
 
 
+class TestTheDurableStoreSwitchItself:
+    """`_durable_store_available` is the SOLE switch between fail-closed and
+    fail-open, and every other test in this file monkeypatches it away, so the
+    real body had zero assertions on it.
+
+    Env only. Nothing here opens a socket, and nothing here may ever issue a
+    Flex SendRequest: each one EXTENDS a live IBKR 1025 lockout.
+    """
+
+    def test_configured_credentials_report_a_durable_store(self, monkeypatch):
+        monkeypatch.setenv("TURSO_DB_URL", "libsql://radon-test.turso.io")
+        monkeypatch.setenv("TURSO_AUTH_TOKEN", "test-token")
+        assert fe._durable_store_available() is True
+
+    def test_absent_credentials_report_no_durable_store(self, monkeypatch):
+        monkeypatch.delenv("TURSO_DB_URL", raising=False)
+        monkeypatch.delenv("TURSO_AUTH_TOKEN", raising=False)
+        assert fe._durable_store_available() is False
+
+    def test_a_credential_read_failure_against_a_configured_url_fails_closed(
+        self, monkeypatch
+    ):
+        """R-212: a transient failure to LOAD credentials is not evidence that
+        no durable record exists. Reading it as "unconfigured" sends every Flex
+        caller into a live 1025 lockout."""
+        import db.hrana_http as hrana
+
+        monkeypatch.setenv("TURSO_DB_URL", "libsql://radon-test.turso.io")
+        monkeypatch.setenv("TURSO_AUTH_TOKEN", "test-token")
+        monkeypatch.setattr(
+            hrana, "read_env",
+            lambda: (_ for _ in ()).throw(RuntimeError("env not loaded yet")),
+        )
+        assert fe._durable_store_available() is True
+
+    def test_a_read_failure_with_no_configured_url_still_fails_open(
+        self, monkeypatch
+    ):
+        import db.hrana_http as hrana
+
+        monkeypatch.delenv("TURSO_DB_URL", raising=False)
+        monkeypatch.setattr(
+            hrana, "read_env",
+            lambda: (_ for _ in ()).throw(RuntimeError("env not loaded yet")),
+        )
+        assert fe._durable_store_available() is False
+
+    def test_the_guard_has_no_pytest_branch(self):
+        """A `PYTEST_CURRENT_TEST` branch in production code guarantees the
+        natural path can never run under pytest."""
+        source = (
+            Path(fe.__file__).read_text(encoding="utf-8")
+        )
+        assert "PYTEST_CURRENT_TEST" not in source, (
+            "the fail-closed switch short-circuits under pytest, so no test "
+            "can reach the code production runs"
+        )
+
+
 def test_an_unconfigured_store_does_not_embargo_flex(monkeypatch):
     """Fail-closed applies to a CONFIGURED store that failed to answer.
 

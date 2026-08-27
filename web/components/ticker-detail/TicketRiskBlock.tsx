@@ -96,7 +96,7 @@ export default function TicketRiskBlock({
   return (
     <div className="ticket-risk" data-testid="ticket-risk">
       <div className="ticket-risk-head">
-        <span>RISK · PER 1× COMBO</span>
+        <span>RISK · ORDER TOTAL</span>
       </div>
 
       <div className="ticket-risk-grid">

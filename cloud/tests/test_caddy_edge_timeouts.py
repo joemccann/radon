@@ -36,6 +36,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 # The shipped-config helpers live beside this file; pytest's rootdir is the
 # repo, so the directory is not on sys.path by default.
@@ -152,6 +153,7 @@ class TestRideOutMatchesItsNamedClient:
 # GET against a dead port, so neither the hung-upstream nor the non-idempotent
 # case was covered in either direction (R-219, R-220).
 
+import fnmatch
 import http.server
 import os
 import shutil
@@ -165,6 +167,7 @@ import urllib.request
 
 
 CADDY_BIN = os.environ.get("RADON_CADDY_BIN", "caddy")
+CI_WORKFLOW = REPO / ".github" / "workflows" / "ci.yml"
 
 
 class _NeverAnswers(http.server.BaseHTTPRequestHandler):
@@ -204,7 +207,26 @@ class _CountsPosts(http.server.BaseHTTPRequestHandler):
         pass
 
 
+def _require_caddy():
+    if shutil.which(CADDY_BIN) is None:
+        raise AssertionError(
+            f"{CADDY_BIN} is not on PATH. CI installs caddy in the cloud-tests "
+            "shard that collects this file (T-205); locally, point "
+            "RADON_CADDY_BIN at a binary or set RADON_SKIP_CADDY_E2E=1 to skip "
+            "the edge mechanism tests."
+        )
+
+
+def _caddy_env(tmp_path):
+    return {
+        **os.environ,
+        "XDG_DATA_HOME": str(tmp_path / "data"),
+        "XDG_CONFIG_HOME": str(tmp_path / "config"),
+    }
+
+
 def _run_caddy(tmp_path, proxy_port, upstream_port, block):
+    _require_caddy()
     config = tmp_path / "Caddyfile"
     config.write_text(
         "{\n\tadmin off\n\tgrace_period 20s\n}\n\n"
@@ -215,21 +237,115 @@ def _run_caddy(tmp_path, proxy_port, upstream_port, block):
     )
     return subprocess.Popen(
         [CADDY_BIN, "run", "--config", str(config), "--adapter", "caddyfile"],
-        env={
-            **os.environ,
-            "XDG_DATA_HOME": str(tmp_path / "data"),
-            "XDG_CONFIG_HOME": str(tmp_path / "config"),
-        },
+        env=_caddy_env(tmp_path),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
 
 
+class TestCiProvidesTheCaddyBinary:
+    """T-205 (a direct T-164 recurrence): a binary-gated guard CI cannot run.
+
+    `TestEdgeMechanism` is the ONLY executable proof of the R-219 bound on a
+    hung upstream and the R-220 non-replay of a severed
+    `POST /api/orders/place`. R-220 is an order-duplication guard on a path
+    with no idempotency key, where the operator's only evidence would be two
+    fills. With no caddy binary anywhere in CI, both were covered on the gate
+    that ships production by regex over the Caddyfile text alone, and a Caddy
+    release that changes `retry_match` semantics shipped green.
+    """
+
+    def _cloud_tests_job(self):
+        workflow = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))
+        job = workflow["jobs"]["cloud-tests"]
+        return job
+
+    def _shard_that_collects_this_file(self, job) -> str:
+        name = Path(__file__).name
+        shards = [
+            entry["shard"]
+            for entry in job["strategy"]["matrix"]["include"]
+            if fnmatch.fnmatch(name, Path(entry["paths"]).name)
+        ]
+        assert len(shards) == 1, (
+            f"{name} is collected by shards {shards}; the caddy install step "
+            "cannot be targeted"
+        )
+        return shards[0]
+
+    def test_a_cloud_tests_shard_installs_caddy(self):
+        job = self._cloud_tests_job()
+        shard = self._shard_that_collects_this_file(job)
+        providers = [
+            step for step in job["steps"]
+            if "caddy" in str(step.get("run", "")).lower()
+            or "RADON_CADDY_BIN" in str(step.get("env", ""))
+        ]
+        assert providers, (
+            "no step in the cloud-tests job installs caddy or sets "
+            "RADON_CADDY_BIN, so TestEdgeMechanism skips on the gate that "
+            "ships production and the R-219 / R-220 fixes are proved by regex "
+            "over Caddyfile text only"
+        )
+        for step in providers:
+            condition = str(step.get("if", ""))
+            assert not condition or shard in condition, (
+                f"the caddy step is gated {condition!r} but this file is "
+                f"collected by shard {shard!r}"
+            )
+
+    def test_the_only_escape_is_the_declared_env_var(self):
+        marks = [
+            mark for mark in getattr(TestEdgeMechanism, "pytestmark", [])
+            if mark.name == "skipif"
+        ]
+        assert len(marks) == 1, f"expected one skipif on TestEdgeMechanism, got {marks}"
+        condition, reason = marks[0].args[0], marks[0].kwargs.get("reason", "")
+        assert "RADON_SKIP_CADDY_E2E" in reason
+        # Nobody opted out of this process, so the class must be running.
+        # A gate on the binary's mere presence trips here on any host without
+        # caddy — which is exactly how T-164 recurred as T-205.
+        assert not condition or os.environ.get("RADON_SKIP_CADDY_E2E") == "1", (
+            "TestEdgeMechanism is skipped without an explicit opt-out, so the "
+            "R-219 and R-220 proofs are decorative again"
+        )
+
+
 @pytest.mark.skipif(
-    shutil.which(CADDY_BIN) is None,
-    reason="needs a caddy binary; set RADON_CADDY_BIN to run the edge mechanism tests",
+    os.environ.get("RADON_SKIP_CADDY_E2E") == "1",
+    reason="RADON_SKIP_CADDY_E2E=1 local-dev escape (T-205). CI installs caddy.",
 )
 class TestEdgeMechanism:
+    def test_the_shipped_caddyfile_adapts(self, caddy_dir, tmp_path):
+        """The regex assertions above pass on a Caddyfile Caddy cannot parse.
+
+        `retry_match` and bare `dial_timeout` / `response_header_timeout` /
+        `read_timeout` are the JSON and transport spellings, not reverse_proxy
+        subdirectives; the adapter rejects them outright. Every text assertion
+        in this file was green on a config `caddy validate` refuses, so
+        `configure_caddy` and the deploy's Caddyfile gate could never install
+        it and R-219 / R-220 / R-258 were never actually in force at the edge.
+        `adapt` rather than `validate`: adapting is the syntax check, while
+        validating also provisions the log writer against /var/log/caddy.
+        T-205.
+        """
+        _require_caddy()
+        result = subprocess.run(
+            [
+                CADDY_BIN, "adapt",
+                "--config", str(caddy_dir / "Caddyfile"),
+                "--adapter", "caddyfile",
+            ],
+            env={**_caddy_env(tmp_path), "DOMAIN": "app.radon.run"},
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert result.returncode == 0, (
+            "the shipped Caddyfile does not adapt, so no host can install "
+            f"it:\n{result.stderr}"
+        )
+
     def test_a_hung_upstream_becomes_a_5xx_within_a_bound(self, caddy_dir, tmp_path):
         block = reverse_proxy_block(read_caddyfile(caddy_dir), APP_UPSTREAM)
         header_timeout = _directive_seconds(block, "response_header_timeout")
