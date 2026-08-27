@@ -1,9 +1,10 @@
 import { test, expect } from "@playwright/test";
+import { TRADING_DAY_ISO, freezeToTradingDay } from "./tradingDayClock";
 
 const PORTFOLIO = {
   bankroll: 1_098_051.01,
   peak_value: 1_098_051.01,
-  last_sync: new Date().toISOString(),
+  last_sync: TRADING_DAY_ISO,
   total_deployed_pct: 3.65,
   total_deployed_dollars: 40_076.51,
   remaining_capacity_pct: 96.35,
@@ -61,7 +62,7 @@ const PORTFOLIO = {
 };
 
 const ORDERS = {
-  last_sync: new Date().toISOString(),
+  last_sync: TRADING_DAY_ISO,
   open_orders: [],
   executed_orders: [],
   open_count: 0,
@@ -91,7 +92,7 @@ const PRICE_FIXTURES = {
     vega: null,
     impliedVol: null,
     undPrice: null,
-    timestamp: new Date().toISOString(),
+    timestamp: TRADING_DAY_ISO,
   },
   WULF_20270115_17_C: {
     symbol: "WULF_20270115_17_C",
@@ -115,7 +116,7 @@ const PRICE_FIXTURES = {
     vega: null,
     impliedVol: 0.81,
     undPrice: 12.4,
-    timestamp: new Date().toISOString(),
+    timestamp: TRADING_DAY_ISO,
   },
 };
 
@@ -249,12 +250,15 @@ async function stubApis(page: import("@playwright/test").Page) {
     route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ as_of: new Date().toISOString(), summary: { realized_pnl: 0 }, closed_trades: [], open_trades: [] }),
+      body: JSON.stringify({ as_of: TRADING_DAY_ISO, summary: { realized_pnl: 0 }, closed_trades: [], open_trades: [] }),
     }),
   );
 }
 
 test("portfolio day move prefers IB daily P&L over positive mark-to-close math for same-day WULF position", async ({ page }) => {
+  // Registered FIRST: page.addInitScript runs in registration order, so the
+  // quote-fixture stamps below must be built under the frozen clock too.
+  await freezeToTradingDay(page);
   await installMockWebSocket(page);
   await stubApis(page);
 

@@ -360,6 +360,26 @@ jobs:
           if [ -f cloud/requirements-test.txt ]; then
             uv pip install -r cloud/requirements-test.txt
           fi
+      # cloud/tests/test_caddy_edge_timeouts.py::TestEdgeMechanism is the only
+      # EXECUTABLE proof of the R-219 bound on a hung upstream and the R-220
+      # non-replay of a severed POST /api/orders/place. R-220 is an
+      # order-duplication guard on a path with no idempotency key. Without a
+      # caddy binary both skip, and a Caddy release that changes retry_match
+      # semantics ships green. Deliberately tracks stable rather than pinning:
+      # detecting that semantics change is the point. T-205 (T-164 recurrence).
+      - name: Install caddy (edge mechanism tests)
+        if: matrix.shard == 'al'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$(gh api repos/caddyserver/caddy/releases/latest --jq .tag_name)"
+          curl -fsSL \
+            "https://github.com/caddyserver/caddy/releases/download/${tag}/caddy_${tag#v}_linux_amd64.tar.gz" \
+            -o /tmp/caddy.tar.gz
+          tar -xzf /tmp/caddy.tar.gz -C /tmp caddy
+          sudo install -m 0755 /tmp/caddy /usr/local/bin/caddy
+          caddy version
       # Separate job: pyproject.toml norecursedirs includes cloud/ because
       # cloud/tests/conftest.py collides with scripts/tests/conftest.py on the
       # import path `tests.conftest`. Running it after unit pytest serialized

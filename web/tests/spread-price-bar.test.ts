@@ -191,4 +191,40 @@ describe("resolveSpreadPriceData", () => {
     expect(result?.bid).toBeCloseTo(4.9, 2);
     expect(result?.ask).toBeCloseTo(5.2, 2);
   });
+
+  /* ── Freshness: T-217, the same defect class T-158 closed in
+       `comboQuotePriceData`. The spread header's BID/MID/ASK is only as fresh
+       as its stalest leg. Stamping the wall clock makes an hours-old quote
+       render as live. Window-relative: the leg ages are offsets from a fixed
+       base, never a hardcoded date. ── */
+  describe("freshness carries the stalest leg, not the wall clock", () => {
+    const BASE_MS = Date.parse("2026-03-02T15:30:00.000Z");
+    const iso = (minutesAgo: number) => new Date(BASE_MS - minutesAgo * 60_000).toISOString();
+
+    it("stamps the oldest leg quote timestamp, not now", () => {
+      const stalest = iso(20);
+      const prices: Record<string, PriceData> = {
+        "GOOG_20260320_315_C": makePriceData({ symbol: "GOOG", bid: 8.50, ask: 8.80, timestamp: iso(12) }),
+        "GOOG_20260320_340_C": makePriceData({ symbol: "GOOG", bid: 4.00, ask: 4.20, timestamp: stalest }),
+      };
+
+      const result = resolveSpreadPriceData("GOOG", bullCallSpread, prices);
+      expect(result).not.toBeNull();
+      expect(result!.timestamp).toBe(stalest);
+    });
+
+    it("fails closed with an unparseable stamp when a leg has no usable quote age", () => {
+      const prices: Record<string, PriceData> = {
+        "GOOG_20260320_315_C": makePriceData({ symbol: "GOOG", bid: 8.50, ask: 8.80, timestamp: iso(3) }),
+        "GOOG_20260320_340_C": makePriceData({ symbol: "GOOG", bid: 4.00, ask: 4.20, timestamp: "" }),
+      };
+
+      const result = resolveSpreadPriceData("GOOG", bullCallSpread, prices);
+      expect(result).not.toBeNull();
+      // Unknown leg age is not "fresh". An empty stamp parses to NaN so the
+      // header relabels to CLOSE rather than borrowing the wall clock.
+      expect(result!.timestamp).toBe("");
+      expect(Number.isNaN(Date.parse(result!.timestamp))).toBe(true);
+    });
+  });
 });

@@ -94,3 +94,43 @@ def test_reconcile_tolerates_missing_and_empty_tables():
 @pytest.mark.parametrize("raw,expected", [(0.9, 90), (90, 90), (0, 0), (None, 50), ("x", 50)])
 def test_normalize_pctile_keeps_its_existing_contract(raw, expected):
     assert normalize_pctile(raw) == expected
+
+
+# The vision extractor returns a null z for any row it cannot read. Both copies
+# of the row then have an unverifiable gap, and a strict `<` tie-break lets the
+# first table win — which republishes the rounded 0 over the good 81.
+NULL_Z_SPX = {
+    "main": [
+        {"underlying": "E-Mini S&P 500 Index", "position_today": 3.66, "position_yesterday": 3.85, "position_1m_ago": 1.69, "percentile_1m": 0, "percentile_3m": 0, "percentile_1y": 0, "z_score_3m": None},
+    ],
+    "index": [
+        {"underlying": "E-Mini S&P 500 Index", "position_today": 3.66, "position_yesterday": 3.85, "position_1m_ago": 1.69, "percentile_1m": 0.43, "percentile_3m": 0.81, "percentile_1y": 0.88, "z_score_3m": None},
+    ],
+}
+
+
+def test_prefers_the_unrounded_row_when_no_z_score_can_arbitrate():
+    out = reconcile_tables(NULL_Z_SPX)
+    for table in ("main", "index"):
+        assert out[table][0]["percentile_3m"] == 81
+        assert out[table][0]["percentile_1m"] == 43
+        assert out[table][0]["percentile_1y"] == 88
+
+
+def test_repair_does_not_depend_on_table_order():
+    forward = reconcile_tables(NULL_Z_SPX)
+    reversed_tables = {k: NULL_Z_SPX[k] for k in reversed(list(NULL_Z_SPX))}
+    assert reconcile_tables(reversed_tables)["main"] == forward["main"]
+
+
+def test_invents_nothing_when_every_copy_of_a_null_z_row_is_rounded():
+    out = reconcile_tables({
+        "main": [
+            {"underlying": "Gold", "position_today": -1.9, "percentile_1m": 0, "percentile_3m": 0, "percentile_1y": 1, "z_score_3m": None},
+        ],
+        "commodity": [
+            {"underlying": "Gold", "position_today": -1.9, "percentile_1m": 0, "percentile_3m": 0, "percentile_1y": 1, "z_score_3m": None},
+        ],
+    })
+    assert out["main"][0]["percentile_3m"] == 0
+    assert out["main"][0]["percentile_1y"] == 1

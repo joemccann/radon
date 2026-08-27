@@ -10,7 +10,7 @@
 
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import MobileOrderTicket from "@/components/mobile/MobileOrderTicket";
 import type { PriceData } from "@/lib/pricesProtocol";
@@ -78,17 +78,36 @@ function renderTicket() {
   );
 }
 
+const fetchMock = vi.fn(() =>
+  Promise.resolve(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } })),
+);
+
 beforeEach(() => {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(() => Promise.resolve(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }))),
-  );
+  fetchMock.mockClear();
+  vi.stubGlobal("fetch", fetchMock);
 });
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
+
+/**
+ * The React click handler behind a node, reached past its `disabled`
+ * attribute. `disabled` is UI; the finding is whether the handler itself
+ * refuses, so the test has to call what the button would call.
+ */
+function reactOnClick(node: HTMLElement): () => void {
+  const key = Object.keys(node).find((k) => k.startsWith("__reactProps$"));
+  if (!key) throw new Error("no React props on node");
+  const props = (node as unknown as Record<string, { onClick?: () => void }>)[key];
+  if (typeof props.onClick !== "function") throw new Error("node has no onClick");
+  return props.onClick;
+}
+
+function placeCalls() {
+  return fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/orders/place"));
+}
 
 describe("mobile ticket transmit gate", () => {
   it("shows the same nine-cell risk block the desktop rail shows", async () => {
@@ -117,6 +136,35 @@ describe("mobile ticket transmit gate", () => {
       const submit = screen.getByTestId("mobile-order-ticket-submit") as HTMLButtonElement;
       expect(submit.disabled).toBe(false);
     });
+  });
+
+  it("never POSTs an unacknowledged unbounded order, disabled attribute aside", async () => {
+    renderTicket();
+    fireEvent.click(await screen.findByTestId("mobile-order-ticket-review"));
+    const ack = (await screen.findByTestId("ticket-unbounded-ack")) as HTMLInputElement;
+    expect(ack.checked).toBe(false);
+
+    const submit = screen.getByTestId("mobile-order-ticket-submit");
+    await act(async () => {
+      reactOnClick(submit)();
+    });
+
+    expect(placeCalls()).toEqual([]);
+  });
+
+  it("still transmits once the acknowledgement is given", async () => {
+    renderTicket();
+    fireEvent.click(await screen.findByTestId("mobile-order-ticket-review"));
+    fireEvent.click(await screen.findByTestId("ticket-unbounded-ack"));
+    await waitFor(() => {
+      expect((screen.getByTestId("mobile-order-ticket-submit") as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    await act(async () => {
+      reactOnClick(screen.getByTestId("mobile-order-ticket-submit"))();
+    });
+
+    await waitFor(() => expect(placeCalls()).toHaveLength(1));
   });
 
   it("keeps the acknowledgement checkbox at a real tap target size", async () => {

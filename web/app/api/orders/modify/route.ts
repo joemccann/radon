@@ -93,10 +93,11 @@ function findOpenOrder(
 }
 
 function isModifyConfirmed(
-  // null when the post-modify refresh failed: the broker state was never
-  // mirrored back, so there is nothing to confirm against and the caller
-  // must not treat a pre-modify book as confirmation. R-252.
-  orders: OrdersSnapshot | null,
+  // Non-null by construction: when the post-modify refresh failed the broker
+  // state was never mirrored back, so there is nothing to confirm against —
+  // the caller must neither treat a pre-modify book as confirmation (R-252)
+  // nor read a missing book as refutation (T-193), and so never calls in.
+  orders: OrdersSnapshot,
   orderId: number,
   permId: number,
   newPrice?: number,
@@ -294,7 +295,14 @@ export async function POST(request: Request): Promise<Response> {
     if (refreshed) invalidateOrdersSnapshotCache();
     const orders = refreshed ? await readOrdersSnapshotFromDb() : null;
 
-    if (!isModifyConfirmed(orders, orderId, permId, newPrice, newQuantity)) {
+    // `orders` is null ONLY when the refresh never landed — IB has already
+    // accepted the modify at this point, so there is no book to confirm
+    // against and nothing has refuted it either. Reporting failure here sends
+    // the operator back to re-modify an order that was already replaced at IB.
+    // Mirror the cancel twin: `status: "ok"` with `orders: null`, and let the
+    // client's own modify poll be the confirmation authority. 502 stays
+    // reserved for a refreshed book that REFUTES the modify. T-193.
+    if (orders && !isModifyConfirmed(orders, orderId, permId, newPrice, newQuantity)) {
       return NextResponse.json(
         {
           error: "Modify not confirmed by refreshed orders",

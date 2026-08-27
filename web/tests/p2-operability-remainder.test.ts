@@ -25,7 +25,8 @@
  *
  * R-263: `useOrders` had no visibility gate and no failure backoff, so a
  * backgrounded tab issued a live Turso read every 30s through the night, and
- * a 503 was retried at exactly 30s forever.
+ * a 503 was retried at exactly 30s forever. Now covered behaviourally in
+ * `use-orders-visibility-backoff.test.tsx`.
  *
  * R-269: the flow footer asserted "Dark Pool Lookback: 5 Trading Days" as a
  * literal beside two payload-derived numbers.
@@ -112,18 +113,13 @@ describe("the portfolio snapshot reader separates corruption from outage", () =>
   });
 });
 
-describe("useOrders stops polling a hidden tab and backs off", () => {
-  it("gates on document visibility", () => {
-    const src = source("lib/useOrders.ts");
-    expect(src).toContain('document.visibilityState === "hidden"');
-  });
-
-  it("has a bounded failure backoff", () => {
-    const src = source("lib/useOrders.ts");
-    expect(src).toContain("MAX_POLL_INTERVAL_MS");
-    expect(src).toContain("failureStreakRef");
-  });
-});
+// R-263 (useOrders visibility gate + failure backoff) used to live here as
+// three `toContain` greps over lib/useOrders.ts. They had no signal: inverting
+// the gate at its use site — so the hook polls only while the tab is HIDDEN and
+// the live orders book never refreshes — kept every grepped literal in place
+// and all three green, as did a streak that reset on every poll. Both
+// mechanisms are now mounted and observed in
+// web/tests/use-orders-visibility-backoff.test.tsx.
 
 describe("the flow footer derives its lookback", () => {
   it("no longer hardcodes the trading-day window", () => {

@@ -125,3 +125,45 @@ describe("reconcileCtaTables scale detection", () => {
     expect(out.commodity[0].percentile_3m).toBe(95);
   });
 });
+
+describe("reconcileCtaTables with no z-score to arbitrate", () => {
+  // The vision extractor returns a null z for any row it cannot read. Both
+  // copies of the row then have an unverifiable gap, and a strict `<` lets the
+  // first table win, republishing the rounded 0 over the good 81.
+  const nullZ = {
+    main: [
+      { underlying: "E-Mini S&P 500 Index", position_today: 3.66, position_yesterday: 3.85, position_1m_ago: 1.69, percentile_1m: 0, percentile_3m: 0, percentile_1y: 0, z_score_3m: null },
+    ],
+    index: [
+      { underlying: "E-Mini S&P 500 Index", position_today: 3.66, position_yesterday: 3.85, position_1m_ago: 1.69, percentile_1m: 0.43, percentile_3m: 0.81, percentile_1y: 0.88, z_score_3m: null },
+    ],
+  };
+
+  it("prefers the unrounded row in every table", () => {
+    const out = reconcileCtaTables(nullZ);
+    for (const table of ["main", "index"] as const) {
+      expect(out[table][0].percentile_3m).toBe(81);
+      expect(out[table][0].percentile_1m).toBe(43);
+      expect(out[table][0].percentile_1y).toBe(88);
+    }
+  });
+
+  it("does not depend on table order", () => {
+    const forward = reconcileCtaTables(nullZ);
+    const backward = reconcileCtaTables({ index: nullZ.index, main: nullZ.main });
+    expect(backward.main).toEqual(forward.main);
+  });
+
+  it("invents nothing when every copy of a null-z row is rounded", () => {
+    const out = reconcileCtaTables({
+      main: [
+        { underlying: "Gold", position_today: -1.9, percentile_1m: 0, percentile_3m: 0, percentile_1y: 1, z_score_3m: null },
+      ],
+      commodity: [
+        { underlying: "Gold", position_today: -1.9, percentile_1m: 0, percentile_3m: 0, percentile_1y: 1, z_score_3m: null },
+      ],
+    });
+    expect(out.main[0].percentile_3m).toBe(0);
+    expect(out.main[0].percentile_1y).toBe(1);
+  });
+});

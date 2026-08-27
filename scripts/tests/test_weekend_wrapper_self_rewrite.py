@@ -316,12 +316,22 @@ def test_the_printed_smoke_test_line_still_works(tmp_path: Path, loop: str) -> N
 
 
 @pytest.mark.parametrize("loop", LOOP_IDS)
-def test_a_clone_without_the_marker_is_refused_silently(tmp_path: Path, loop: str) -> None:
+def test_a_clone_without_the_marker_is_refused_and_reported(tmp_path: Path, loop: str) -> None:
+    """T-209: the refusal lands on the dead-man issue, and pages nobody.
+
+    This asserted `_comments(cfg) == []` while the branch's own
+    `report "REFUSED" ... 0` was dead code — report() was defined further down
+    main() and its PHASE/STAMP were unset, so the prologue could not report at
+    all. A stderr line on the runner is not a signal anyone sees.
+    """
     cfg = _build(tmp_path, loop, marker=False)
     result = _run(cfg, "audit")
     assert result.returncode == 2, _why(result, cfg)
     assert "REFUSING" in result.stderr
-    assert _comments(cfg) == []
+    comments = _comments(cfg)
+    assert len(comments) == 1, _why(result, cfg)
+    assert "REFUSED" in comments[0], comments
+    # Third arg 0: the rolling issue carries it, no 00:00 Pushover.
     assert _pages(cfg) == 0
 
 

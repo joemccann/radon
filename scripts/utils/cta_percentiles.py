@@ -79,6 +79,26 @@ def _normalized_trio(row: dict) -> list[Optional[int]]:
     ]
 
 
+def _rounded_rank(trio: list[Optional[int]]) -> int:
+    """How much a trio looks like a fractional card read as integers: rounding
+    collapses every column onto 0 or 1. Lower is more informative.
+    """
+    present = [v for v in trio if v is not None]
+    if not present:
+        return 2
+    return 1 if all(v in (0, 1) for v in present) else 0
+
+
+def _candidate_rank(trio: list[Optional[int]], gap: float) -> tuple:
+    """Lower wins. A z-score that can arbitrate always beats one that cannot;
+    among rows no z-score can arbitrate, the trio that survived rounding wins.
+    Without this, `inf < inf` is False and whichever table came first wins —
+    which republishes the rounded row over the good one.
+    """
+    finite = math.isfinite(gap)
+    return (0 if finite else 1, gap if finite else 0.0, _rounded_rank(trio))
+
+
 def reconcile_tables(tables: Optional[dict]) -> Optional[dict]:
     """Normalize every percentile to 0-100, repair a row whose percentiles were
     rounded away by copying the same row from another table, and null out what
@@ -88,7 +108,7 @@ def reconcile_tables(tables: Optional[dict]) -> Optional[dict]:
     if not tables:
         return tables if tables is None else {}
 
-    best: dict[tuple, tuple[list[Optional[int]], float]] = {}
+    best: dict[tuple, tuple[list[Optional[int]], tuple]] = {}
     for rows in tables.values():
         for row in rows or []:
             trio = _normalized_trio(row)
@@ -99,8 +119,9 @@ def reconcile_tables(tables: Optional[dict]) -> Optional[dict]:
                 else abs(trio[1] - implied)
             )
             key = _row_key(row)
-            if key not in best or gap < best[key][1]:
-                best[key] = (trio, gap)
+            rank = _candidate_rank(trio, gap)
+            if key not in best or rank < best[key][1]:
+                best[key] = (trio, rank)
 
     out: dict[str, list[dict]] = {}
     for table, rows in tables.items():
