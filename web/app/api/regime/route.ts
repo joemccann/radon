@@ -297,9 +297,33 @@ export async function GET(): Promise<Response> {
   // Keep market_open aligned with the current session state for every request.
   (data as Record<string, unknown>).market_open = currentMarketOpen;
 
+  if (!result) {
+    // Every source is dead: Turso unreachable AND no readable cache on disk.
+    // EMPTY_CRI's defaults are not neutral — score 0 / level "LOW" /
+    // triggered false / exposure 200 is the CALMEST reading the panel can
+    // draw, and it is a legal real reading, so nothing downstream could tell
+    // "CRI is 0" from "CRI is unknown". Strip the fabricated blocks and say
+    // so instead. R-200.
+    const degraded = data as Record<string, unknown>;
+    degraded.missing = true;
+    degraded.cri = null;
+    degraded.cta = null;
+    degraded.crash_trigger = null;
+    triggerBackgroundScan();
+    const missingResponse = NextResponse.json(degraded);
+    missingResponse.headers.set("X-Sync-Warning", "cri-source-unavailable");
+    return setCacheResponseHeaders(missingResponse, {
+      maxAgeSeconds: 0,
+      staleWhileRevalidateSeconds: 0,
+      requestId,
+      cacheState: "MISS",
+      tags: ["regime"],
+    });
+  }
+
   // Stale-while-revalidate: return cached data immediately,
   // kick off a background scan if today's data is stale or from stale date.
-  if (!result || await isCacheStale(result.path, data)) {
+  if (await isCacheStale(result.path, data)) {
     triggerBackgroundScan();
   }
 

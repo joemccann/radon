@@ -28,7 +28,10 @@ StandardError=journal
 # RandomizedDelaySec=120 on the first fire; 6900 stays under it with
 # margin while still covering the measured tarpit worst case.
 # 2026-08-24: a tarpitted RUT spark still ran past 6900s (Result=timeout).
-# bpi_scan.SWEEP_BUDGET_S=6600 exits first; do not raise this value.
+# bpi_scan.SWEEP_BUDGET_S=6300 bounds the Yahoo sweep and PERSIST_RESERVE_S=600
+# is left for the Turso read/write phase that follows it, so a run that stops
+# exactly on the fetch budget is not SIGTERMed inside upsert_bpi_history_rows
+# (R-225). Their sum is asserted against this value; do not raise it.
 TimeoutStartSec=6900
 
 [Install]

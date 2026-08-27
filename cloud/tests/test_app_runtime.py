@@ -100,9 +100,13 @@ def test_runtime_script_exists_and_is_executable() -> None:
     assert mode & 0o111
 
 
-def test_usage_is_pull_or_run_unit() -> None:
+def test_usage_is_pull_or_run_or_stop_unit() -> None:
+    # `stop` is new (R-232): the container lives in
+    # system.slice/docker-<id>.scope rather than the unit's cgroup, so
+    # KillMode=control-group reaps only the `docker run` client and each
+    # drop-in calls this verb from ExecStopPost to reap the container itself.
     text = RUNTIME.read_text(encoding="utf-8")
-    assert "usage: radon-app-runtime {pull|run <unit>}" in text
+    assert "usage: radon-app-runtime {pull|run <unit>|stop <unit>}" in text
 
 
 def test_non_root_is_refused_outside_test_mode() -> None:

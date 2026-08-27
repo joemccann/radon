@@ -187,6 +187,11 @@ describe("T-087: buildRelayHealthDetail is the relay's row payload", () => {
     expect(buildRelayHealthDetail(now, lastTickTimestamp, freshness)).toEqual({
       last_tick_at: iso(lastTickTimestamp),
       tick_age_secs: BLACKOUT_MS / 1000,
+      // R-214: the row now states whether a tick was EVER seen. A relay that
+      // started, connected and received zero data used to publish
+      // `last_tick_at = <process start>` here, which this exact-shape
+      // assertion could not distinguish from a real tick.
+      ticks_seen: true,
       active_subscriptions: 0,
       subscribed_symbols: SYMBOLS.length,
     });

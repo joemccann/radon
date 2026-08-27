@@ -98,6 +98,40 @@ _restart_lock = asyncio.Lock()
 # until login completes.
 BACKOFF_LADDER_SECS: List[int] = [60, 120, 300, 900, 1800, 3600]  # 1m,2m,5m,15m,30m,60m
 
+# The lease guard is held across _write_lock_file's two fsyncs, so an
+# unbounded flock hangs the FastAPI handler that reads it — with no timeout and
+# no log line. ib_watchdog has wrapped both entry points since REL-004; these
+# two call sites were never converted. R-211.
+LOCK_OP_TIMEOUT_SECS = 5.0
+
+
+def _check_2fa_push_lock_bounded(now: float):
+    """Bounded ``check_2fa_push_lock``. On timeout report a held lease so the
+    caller DEFERS rather than firing a second push blind."""
+    try:
+        return ib_2fa_lock.check_2fa_push_lock(
+            now=now, guard_timeout_secs=LOCK_OP_TIMEOUT_SECS
+        )
+    except ib_2fa_lock.GuardLockTimeout as exc:
+        logger.warning("2FA lock check abandoned (%s); treating as held", exc)
+        return ib_2fa_lock.PushLock(
+            holder="guard-timeout",
+            acquired_at=now,
+            expires_at=now + ib_2fa_lock.DEFAULT_LOCK_TTL_SECS,
+            reason=f"lease guard busy: {exc}",
+        )
+
+
+def _remaining_lock_secs_bounded(now: float) -> int:
+    try:
+        return ib_2fa_lock.remaining_lock_secs(
+            now=now, guard_timeout_secs=LOCK_OP_TIMEOUT_SECS
+        )
+    except ib_2fa_lock.GuardLockTimeout as exc:
+        logger.warning("2FA lock read abandoned (%s); reporting unknown", exc)
+        return -1
+
+
 _restart_state: Dict = {
     "attempt_count": 0,            # consecutive unconfirmed attempts
     "next_attempt_after": 0.0,     # epoch seconds; restart() refuses before this
@@ -166,7 +200,7 @@ def restart_backoff_state() -> Dict:
     push from another holder.
     """
     now = time.time()
-    lock = ib_2fa_lock.check_2fa_push_lock(now=now)
+    lock = _check_2fa_push_lock_bounded(now)
     push_lock = None
     if lock is not None:
         push_lock = {
@@ -1375,7 +1409,7 @@ async def restart_ib_gateway(pool=None) -> Dict:
                     "treating as awaiting_2fa, next attempt allowed in %ds (attempt #%d). "
                     "2FA push lock held for %ds.",
                     delay, _restart_state["attempt_count"],
-                    ib_2fa_lock.remaining_lock_secs(now=now),
+                    _remaining_lock_secs_bounded(now),
                 )
                 # Record the awaiting_2fa observation in the transition tracker
                 # so the next "authenticated" sighting fires the recovery edge.
@@ -1394,7 +1428,7 @@ async def restart_ib_gateway(pool=None) -> Dict:
                 "IB Gateway restart: port did not come up — next attempt allowed in %ds (attempt #%d). "
                 "2FA push lock held for %ds.",
                 delay, _restart_state["attempt_count"],
-                ib_2fa_lock.remaining_lock_secs(now=now),
+                _remaining_lock_secs_bounded(now),
             )
             _auth_transition_state["previous_auth_state"] = "unreachable"
             # Lock stays HELD — even on a fully-down restart, IBC may

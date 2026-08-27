@@ -38,6 +38,18 @@ export default function PortfolioSections({ portfolio, prices }: PortfolioSectio
   const definedPositions = positions.filter((p) => p.risk_profile === "defined");
   const equityPositions = positions.filter((p) => p.risk_profile === "equity");
   const undefinedPositions = positions.filter((p) => p.risk_profile === "undefined" || p.risk_profile === "complex");
+  // The three buckets are exact string matches, so a position whose
+  // `risk_profile` is null, absent, or a producer value this build does not
+  // know falls into none of them and used to be rendered NOWHERE — not
+  // greyed, not flagged, just missing from a page that looked complete. The
+  // pills each report only their own bucket, so nothing reconciled them
+  // against positions.length. R-242.
+  const bucketed = new Set([
+    ...definedPositions.map((p) => p.id),
+    ...equityPositions.map((p) => p.id),
+    ...undefinedPositions.map((p) => p.id),
+  ]);
+  const unclassifiedPositions = positions.filter((p) => !bucketed.has(p.id));
 
   const extractPositionSearchText = useCallback(
     (p: PortfolioPosition) => `${p.ticker} ${p.structure} ${p.direction} ${p.expiry}`,
@@ -177,6 +189,46 @@ export default function PortfolioSections({ portfolio, prices }: PortfolioSectio
           </div>
           <div className="section-body">
             <PositionTable positions={equityFilter.filtered} showExpiry={false} prices={prices} portfolio={portfolio} tableId="positions-equity" columnVisibility={equityCols.visible} />
+          </div>
+        </div>
+      )}
+
+      {unclassifiedPositions.length > 0 && (
+        <div className="section">
+          <div className="section-header">
+            <h2 className="section-title">
+              <TriangleAlert size={14} />
+              Unclassified Positions
+            </h2>
+            <span className="pill warning">{unclassifiedPositions.length} UNCLASSIFIED</span>
+          </div>
+          <div className="section-body">
+            <div className="alert-item">
+              These positions carry no recognised risk profile. They are shown here so the
+              book on this page reconciles with the snapshot; their risk bucket is unknown.
+            </div>
+            <PositionTable positions={unclassifiedPositions} prices={prices} showExpiry />
+          </div>
+        </div>
+      )}
+
+      {positions.length === 0 && (
+        <div className="section">
+          <div className="section-header">
+            <h2 className="section-title">
+              <TriangleAlert size={14} />
+              No Open Positions
+            </h2>
+          </div>
+          <div className="section-body">
+            {/* Without this the only output was the live-source footer below,
+                so a degraded snapshot and a genuinely flat book were
+                byte-identical on screen — and the footer's "Source: IB
+                Gateway" actively reinforced the wrong reading. R-243. */}
+            <div className="alert-item">
+              The last sync returned no open positions. If that is unexpected, the
+              snapshot may be incomplete — re-sync before trading off this page.
+            </div>
           </div>
         </div>
       )}

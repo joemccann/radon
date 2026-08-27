@@ -28,9 +28,29 @@ jobs:
           cp docker/app/.dockerignore .dockerignore
           docker build -f docker/app/Dockerfile.python -t radon-python:ci .
       - name: Build node image
+        env:
+          # NEXT_PUBLIC_* are COMPILE-TIME inlined by the Next build, so an
+          # unset build arg ships an empty string into the client bundle and
+          # radon-app-runtime's --env-file cannot repair it at runtime: no
+          # Clerk publishable key and no API base URL for every browser
+          # session. The host-plane path gets this right via deploy.sh's
+          # write_web_env; the image path did not. R-233.
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ vars.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+          NEXT_PUBLIC_RADON_API_URL: ${{ vars.NEXT_PUBLIC_RADON_API_URL }}
+          NEXT_PUBLIC_IB_REALTIME_WS_URL: ${{ vars.NEXT_PUBLIC_IB_REALTIME_WS_URL }}
         run: |
+          set -euo pipefail
+          for name in NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY NEXT_PUBLIC_RADON_API_URL NEXT_PUBLIC_IB_REALTIME_WS_URL; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::$name is empty; the client bundle would ship without it" >&2
+              exit 1
+            fi
+          done
           cp docker/app/.dockerignore .dockerignore
-          docker build -f docker/app/Dockerfile.node -t radon-node:ci .
+          docker build -f docker/app/Dockerfile.node -t radon-node:ci . \
+            --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY="$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" \
+            --build-arg NEXT_PUBLIC_RADON_API_URL="$NEXT_PUBLIC_RADON_API_URL" \
+            --build-arg NEXT_PUBLIC_IB_REALTIME_WS_URL="$NEXT_PUBLIC_IB_REALTIME_WS_URL"
       - name: Push SHA tags to GHCR
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |

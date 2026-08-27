@@ -27,6 +27,7 @@ import { MAX_FOCUSED_DEPTH_SUBJECTS } from "@/lib/usePrices";
 function mergeCalculatedMark(
   priceData: PriceData | undefined,
   position: PortfolioPosition,
+  lastSync: string | null,
 ): PriceData | null {
   const leg = position.legs[0];
   // `market_price` on the leg is IB's model mark (sync writes it on every
@@ -51,7 +52,11 @@ function mergeCalculatedMark(
       low: null,
       open: null,
       close: null,
-      timestamp: new Date().toISOString(),
+      // The portfolio snapshot's own sync time, NOT the render clock. `last`
+      // here is IB's mark from the last sync, potentially hours old, and
+      // consumers (BookTab) age this exact object. `lastIsCalculated` marks
+      // the price as derived; the AGE was simply fabricated. R-271.
+      timestamp: lastSync ?? "",
     } as PriceData;
   }
 
@@ -61,10 +66,12 @@ function mergeCalculatedMark(
   return { ...priceData, last: fallbackLast, lastIsCalculated: true };
 }
 
-function resolveTickerQuoteTelemetry(
+export function resolveTickerQuoteTelemetry(
   ticker: string,
   position: PortfolioPosition | null,
   prices: Record<string, PriceData>,
+  /** `portfolio.last_sync` — the age of any mark synthesized below. R-271. */
+  lastSync: string | null = null,
 ): { priceData: PriceData | null; label?: string; priceKey?: string; isSpreadNet?: boolean } {
   if (!position || position.structure_type === "Stock") {
     return { priceData: prices[ticker] ?? null };
@@ -77,7 +84,7 @@ function resolveTickerQuoteTelemetry(
     const leg = position.legs[0];
     const key = legPriceKey(ticker, position.expiry, leg);
     if (key) {
-      const merged = mergeCalculatedMark(prices[key], position);
+      const merged = mergeCalculatedMark(prices[key], position, lastSync);
       if (merged) {
         const strike = leg.strike ? `$${leg.strike}` : "";
         const type = leg.type === "Call" ? "C" : leg.type === "Put" ? "P" : "";
@@ -182,8 +189,8 @@ export default function TickerDetailContent({
     () =>
       viewUnderlying
         ? { priceData: prices[ticker] ?? null, priceKey: undefined, isSpreadNet: false }
-        : resolveTickerQuoteTelemetry(ticker, position, prices),
-    [ticker, position, prices, viewUnderlying],
+        : resolveTickerQuoteTelemetry(ticker, position, prices, portfolio?.last_sync ?? null),
+    [ticker, position, prices, viewUnderlying, portfolio?.last_sync],
   );
 
   // The focused subject's depth book key: a user-pinned leg (e.g. a combo leg's

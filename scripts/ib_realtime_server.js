@@ -635,7 +635,12 @@ let ibConnectionIssue = null;
  * escalation cooldown all live in lib/staleDataMachine.js — the decision is
  * pure; this layer wires the real IB socket, timer, and service_health write.
  */
-let lastTickTimestamp = Date.now();
+// null until markTick() sees a REAL tick. Seeding Date.now() made a relay
+// that started, connected and received zero market data publish
+// `last_tick_at = <process start>` with `tick_age_secs ~ 0` — a fabricated
+// tick, indistinguishable in service_health from a genuinely live data
+// plane, and reset on every restart. R-214.
+let lastTickTimestamp = null;
 let staleCheckTimer = null;
 let ibGatewayRestarting = false;
 // Consecutive reconnect cycles this stale episode (reset when ticks resume).

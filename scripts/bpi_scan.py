@@ -73,7 +73,14 @@ FETCH_TIMEOUT_S = 30            # spark + per-symbol chart urlopen
 # cloud/services/radon-bpi.service TimeoutStartSec with one in-flight
 # FETCH_TIMEOUT_S plus persist slack. Do not raise TimeoutStartSec —
 # R-071 keeps it under the 21:30→23:30 catch-up gap.
-SWEEP_BUDGET_S = 6600
+SWEEP_BUDGET_S = 6300
+# Wall clock reserved for the phase AFTER the Yahoo sweep: _read_stored_max_dates,
+# _store_fetched, ~100 chunked _read_stored_closes SELECTs for RUT alone, and
+# _persist_index's upserts — for three indices. The sweep deadline covered only
+# the fetch, so a run that stopped exactly on budget could still be SIGTERMed
+# inside upsert_bpi_history_rows, leaving bpi_history partially written and the
+# service_cycle finally unexecuted. R-225.
+PERSIST_RESERVE_S = 600
 CLOSE_READ_CALENDAR_DAYS = 800  # ~2y of sessions + weekend/holiday slack
 
 # Turso Hrana bounding (scripts/CLAUDE.md): keep every SELECT's row count
@@ -171,7 +178,17 @@ def build_index_payload(
     if len(rows) < MIN_SESSIONS:
         return _missing_payload(index_symbol, "insufficient_history", taken_at)
     latest = rows[-1]
-    if member_count <= 0 or latest["members"] < MIN_LATEST_COVERAGE * member_count:
+    # `latest["members"]` counts RESOLVED members, and aggregate_bpi
+    # carry-forwards each member's last known state — so a member frozen at
+    # yesterday's bar because the sweep was cut off still counts. The 80%
+    # gate could therefore never see a truncated sweep: 400 of 1996 members
+    # carrying today's bar was published as a fresh, complete BPI that was
+    # 80% yesterday's breadth. Count only members that actually reported the
+    # latest session. R-224.
+    members_fresh = sum(
+        1 for dates, _states in member_series.values() if dates and dates[-1] >= latest["date"]
+    )
+    if member_count <= 0 or members_fresh < MIN_LATEST_COVERAGE * member_count:
         return _missing_payload(index_symbol, "insufficient_coverage", taken_at)
 
     return {
@@ -182,6 +199,9 @@ def build_index_payload(
         "as_of_session": latest["date"],
         "bpi": latest["bpi"],
         "members": latest["members"],
+        # Members that reported the latest session THIS run, as against the
+        # carried-forward `members` above. R-224.
+        "members_fresh": members_fresh,
         "bullish": latest["bullish"],
         "state": classify_state(latest["bpi"]),
         "cross_up_30": detect_cross_up_30(rows),
@@ -282,6 +302,27 @@ def ensure_member_history(
         "stored": sum(1 for m in closes if m not in ok_fetches),
     }
     return closes, counts
+
+
+def install_sigterm_unwind() -> None:
+    """Turn SIGTERM into a SystemExit so context managers unwind.
+
+    SIGTERM's default disposition terminates the process without unwinding, so
+    a systemd timeout during the write phase skipped the `service_cycle`
+    `finally` entirely and left no error row — the `Result=timeout,
+    NRestarts=0` shape 26168ed5 set out to eliminate. R-225.
+    """
+    import signal
+
+    def _unwind(signum, _frame):
+        print(f"  received signal {signum}; unwinding", file=sys.stderr)
+        raise SystemExit(143)
+
+    try:
+        signal.signal(signal.SIGTERM, _unwind)
+    except (ValueError, OSError):
+        # Not the main thread, or a platform without SIGTERM.
+        pass
 
 
 def _sweep_deadline(deadline: float | None) -> float:
@@ -612,6 +653,7 @@ def run_scan(
     SWEEP_BUDGET_S after earlier indices already used the start budget.
     """
     generated_at = _now_iso()
+    install_sigterm_unwind()
     deadline = _sweep_deadline(sweep_deadline)
     results: dict[str, Any] = {}
     with _heartbeat_cycle(no_db) as cycle:

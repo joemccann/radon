@@ -198,6 +198,10 @@ export default function OptionsExposurePanel({ symbol }: OptionsExposurePanelPro
   if (error && !data) {
     return <MeasurementState kind="error" message={error} onRetry={() => void refresh()} />;
   }
+  // A failed refresh BEHIND a loaded payload used to be dropped entirely, so
+  // the prior exposure ladder stayed on screen with no fault indicator at all.
+  // R-247.
+  const refreshFailed = error && data ? error : null;
   if (!data) {
     return <MeasurementState kind="empty" message={`No exposure measurement returned for ${normalizedSymbol}.`} />;
   }
@@ -231,6 +235,14 @@ export default function OptionsExposurePanel({ symbol }: OptionsExposurePanelPro
             <h2 id="options-exposure-heading">Options exposure</h2>
             <span className={styles.symbol}>{data.symbol}</span>
             {!data.complete ? <span className={styles.partial}>PARTIAL</span> : null}
+            {/* The ladder below is the LAST good payload; the current refresh
+                failed. Without this it stayed on screen indistinguishable
+                from a live one. R-247. */}
+            {refreshFailed ? (
+              <span className={styles.partial} title={refreshFailed} role="status">
+                REFRESH FAILED
+              </span>
+            ) : null}
           </div>
         </div>
         <div className={styles.telemetry}>

@@ -682,6 +682,29 @@ def _empty_payload(ticker: str, now: datetime) -> dict[str, Any]:
 # ── persistence ───────────────────────────────────────────────────
 
 
+def _holder_params(
+    ticker: str, report_date: str, chunk: list[dict[str, Any]], recorded_at: str
+) -> list[Any]:
+    params: list[Any] = []
+    for holder in chunk:
+        params.extend(
+            (
+                ticker,
+                report_date,
+                holder["cik"],
+                holder["institution"],
+                holder["shares"],
+                holder["value_usd"],
+                holder["pct_of_institutional_total"],
+                holder["position_type"],
+                holder["change_in_shares"],
+                holder["change_type"],
+                recorded_at,
+            )
+        )
+    return params
+
+
 def _upsert_holder_rows(
     ticker: str, report_date: str, holders: list[dict[str, Any]], recorded_at: str
 ) -> None:
@@ -696,27 +719,23 @@ def _upsert_holder_rows(
     from db.client import get_db
 
     db = get_db()
-    for start in range(0, len(holders), _HOLDER_INSERT_CHUNK_ROWS):
-        chunk = holders[start:start + _HOLDER_INSERT_CHUNK_ROWS]
-        params: list[Any] = []
-        for holder in chunk:
-            params.extend(
-                (
-                    ticker,
-                    report_date,
-                    holder["cik"],
-                    holder["institution"],
-                    holder["shares"],
-                    holder["value_usd"],
-                    holder["pct_of_institutional_total"],
-                    holder["position_type"],
-                    holder["change_in_shares"],
-                    holder["change_type"],
-                    recorded_at,
-                )
-            )
-        db.execute(_holder_upsert_sql(len(chunk)), tuple(params))
-    db.commit()
+    # One commit covers N chunks, so a failure on chunk k used to leave
+    # chunks 0..k-1 applied and k..N absent — a truncated set for that
+    # (ticker, report_date), silently mixed with the previous quarter's rows
+    # because the upsert is not preceded by a delete. Roll the whole write
+    # back instead. R-227.
+    try:
+        for start in range(0, len(holders), _HOLDER_INSERT_CHUNK_ROWS):
+            chunk = holders[start:start + _HOLDER_INSERT_CHUNK_ROWS]
+            params = _holder_params(ticker, report_date, chunk, recorded_at)
+            db.execute(_holder_upsert_sql(len(chunk)), tuple(params))
+        db.commit()
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:  # noqa: BLE001 — a dead connection is already rolled back
+            pass
+        raise
 
 
 def _upsert_snapshot(ticker: str, report_date: str, scan_time: str, payload: dict[str, Any]) -> None:
@@ -750,12 +769,17 @@ def _write_db_cache(payload: dict[str, Any]) -> None:
     # queries yet. Sharing one try meant a single failed holder chunk (a liquid
     # name writes hundreds of rows) skipped the snapshot upsert and left the
     # ticker blank in the UI.
+    holders_persisted = True
     try:
         _upsert_holder_rows(
             payload["ticker"], payload["report_date"], payload["holders"], payload["scan_time"]
         )
     except Exception as exc:  # noqa: BLE001 — best-effort mirror, disk is the fallback
+        holders_persisted = False
         print(f"[{SERVICE}] holder rows non-fatal: {exc}", file=sys.stderr)
+    # The snapshot carries the full `holders` array and `holder_count`, so
+    # without this it asserted completeness the rows table did not have. R-227.
+    payload["holders_persisted"] = holders_persisted
     try:
         _upsert_snapshot(
             payload["ticker"], payload["report_date"], payload["scan_time"], payload

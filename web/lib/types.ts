@@ -744,6 +744,11 @@ export type GarchTickerVol = {
   hv20_minus_iv: number;
   has_leaps: boolean;
   leap_count: number;
+  /** Set when the scan could not price this ticker (e.g. UW quota or auth
+   *  failure on the IV-rank endpoint). `iv_rank` is null alongside it — the
+   *  writer used to publish a fabricated 0, which is the most bullish value
+   *  every downstream threshold tests for. R-199. */
+  error?: string | null;
 };
 
 export type GarchConvergenceData = {

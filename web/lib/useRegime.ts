@@ -21,6 +21,12 @@ export type CriData = {
   scan_time: string;
   market_open?: boolean;
   date: string;
+  /** True when every CRI source was unreachable. `cri`, `cta` and
+   *  `crash_trigger` are null alongside it — the route used to substitute
+   *  EMPTY_CRI, whose defaults are the CALMEST reading the panel can draw and
+   *  are also legal real values, so a dead feed was indistinguishable from a
+   *  quiet market. R-200. */
+  missing?: boolean;
   vix: number;
   vvix: number;
   spy: number;
@@ -41,13 +47,13 @@ export type CriData = {
       correlation: number;
       momentum: number;
     };
-  };
+  } | null;
   cta: {
     realized_vol: number;
     exposure_pct: number;
     forced_reduction_pct: number;
     est_selling_bn: number;
-  };
+  } | null;
   menthorq_cta: {
     date: string;
     source: string;
@@ -62,7 +68,7 @@ export type CriData = {
       cor1m_gt_60: boolean;
     };
     values: Record<string, unknown>;
-  };
+  } | null;
   history: CriHistoryEntry[];
   nq_skew_history?: Array<{
     date: string;
@@ -109,6 +115,12 @@ export const REGIME_SYNC_CONFIG = {
   extractTimestamp: (d: CriData) => d.scan_time || null,
   shouldRetry: (d: CriData) => needsCurrentEtSessionRetry(d),
   retryIntervalMs: REGIME_STALE_RETRY_MS,
+  // needsCurrentEtSessionRetry fires on `!scan_time`, and a degraded payload
+  // carries exactly that forever — the response being retried is the one that
+  // can never satisfy the predicate. Without a ceiling this was 12 GET/min per
+  // tab against a route limited to 20/min. R-230.
+  maxRetryDelayMs: 60_000,
+  maxRetryAttempts: 6,
   retryMethod: "GET" as const,
 };
 

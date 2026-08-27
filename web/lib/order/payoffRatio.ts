@@ -25,7 +25,16 @@ export type PayoffRatio =
   /** Capped loss, unbounded upside (long call / long straddle tail). */
   | { kind: "uncapped" }
   /** Loss is unbounded — no multiple is meaningful. */
-  | { kind: "undefined-risk" };
+  | { kind: "undefined-risk" }
+  /**
+   * ONE bound resolved and the other did not — Gate 1 cannot be taken, but
+   * this structure is not a close-out either. Rendering nothing here (the old
+   * `null`) was indistinguishable from a structure that legitimately has no
+   * ratio. BOTH bounds null stays `null`: with coverage resolved that IS the
+   * close-out shape, and the still-resolving window never reaches this row
+   * because `OrderConfirmSummary` returns its coverage skeleton first. R-251.
+   */
+  | { kind: "unmeasured" };
 
 interface PayoffInput {
   maxGain?: number | null;
@@ -42,12 +51,21 @@ export function computePayoffRatio(summary: PayoffInput): PayoffRatio | null {
   if (summary.maxLossUnbounded === true) return { kind: "undefined-risk" };
 
   const maxLoss = summary.maxLoss;
-  if (maxLoss == null || maxLoss <= 0) return null;
+  const maxGain = summary.maxGain;
+  // Both absent: a close-out, which has no ratio to take. One absent: Gate 1
+  // is UNMEASURED, which is a different statement and used to render the same
+  // (as nothing at all). R-251.
+  if (maxLoss == null && maxGain == null && summary.maxGainUnbounded !== true) return null;
+  if (maxLoss == null) return { kind: "unmeasured" };
+  if (maxLoss <= 0) return null;
 
+  // `maxGainUnbounded` alone is not a Gate 1 pass: it was rendered green with
+  // data-meets-convexity="true" and no computation behind it, on e.g. a large
+  // long-call debit whose realistic payoff is nowhere near 2:1. R-251.
   if (summary.maxGainUnbounded === true) return { kind: "uncapped" };
 
-  const maxGain = summary.maxGain;
-  if (maxGain == null || maxGain <= 0) return null;
+  if (maxGain == null) return { kind: "unmeasured" };
+  if (maxGain <= 0) return null;
 
   const ratio = maxGain / maxLoss;
   return { kind: "ratio", ratio, meetsConvexity: ratio >= CONVEXITY_MIN_RATIO };

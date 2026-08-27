@@ -15,6 +15,16 @@ afterEach(cleanup);
 // (Implied ON, Implied MV OFF). Tests that need MV visible enable it
 // explicitly via localStorage before render.
 beforeEach(() => {
+  // R-229: the Implied columns now render "—" until FRED resolves, so this
+  // file's expected values — computed with r = 0 — were silently relying on
+  // the old unresolved-means-zero default. Seed a RESOLVED 0%, which is a
+  // legal reading, so the arithmetic below is unchanged and the assumption is
+  // explicit. The unresolved case is asserted in
+  // risk-free-rate-unavailable.test.tsx.
+  seedRiskFreeRateForTests(0);
+});
+
+beforeEach(() => {
   window.localStorage.clear();
 });
 
@@ -25,6 +35,7 @@ function enableAllImpliedColumns() {
   );
 }
 import PositionTable from "../components/PositionTable";
+import { seedRiskFreeRateForTests } from "@/lib/useRiskFreeRate";
 import { bsPut } from "../lib/blackScholes";
 import { yearsToExpiry } from "../lib/impliedValue";
 import type { PortfolioPosition } from "../lib/types";

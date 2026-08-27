@@ -95,6 +95,17 @@ _PORT_PROBE_TIMEOUT_SECS = 0.35
 # every poll, so the warning is logged once per lease instead of every 2s until
 # the next acquire overwrites the file.
 _orphan_reported: Optional[tuple[str, float]] = None
+# Consecutive port-down observations required before a live lease is treated as
+# orphaned. `_gateway_port_listening` swallows every OSError from a 350 ms
+# connect — refused, ETIMEDOUT under host load, EMFILE, a misconfigured
+# IB_GATEWAY_HOST — so one probe is not evidence a gateway is gone, while a
+# compose restart or a slow IBC startup legitimately keeps the port unbound.
+# R-210.
+ORPHAN_CONFIRM_PROBES = 3
+ORPHAN_CONFIRM_INTERVAL_SECS = 0.4
+# Identity of a lease whose gateway this process has seen ANSWER. A lease that
+# was serving a moment ago is in a restart, not abandoned.
+_orphan_seen_up: Optional[tuple[str, float]] = None
 
 
 def _lock_path() -> Path:
@@ -260,24 +271,60 @@ def _gateway_port_listening() -> bool:
         return False
 
 
+def reset_orphan_state() -> None:
+    """Clear the per-process orphan-confirmation memory (tests, CLI reruns)."""
+    global _orphan_reported, _orphan_seen_up
+    _orphan_reported = None
+    _orphan_seen_up = None
+
+
 def _is_orphaned(lock: PushLock, now: float) -> bool:
     """True when no push can still be in flight behind ``lock``.
 
     Age is checked first so the socket probe stays off the hot path: /health
     reads the lease on every poll and a young lease is always honoured.
+
+    Revoking a LIVE lease is the expensive mistake: `acquire_2fa_push_lock`
+    then overwrites the holder's record, and the real holder's release becomes
+    a no-op because the holder no longer matches — leaving the thief's lease
+    for its full TTL and producing exactly the stacked pushes this module
+    exists to prevent. So one failed probe is not enough: the port must be
+    observed down ORPHAN_CONFIRM_PROBES times in a row, and any successful
+    observation for this lease resets the count. R-210.
     """
+    global _orphan_reported, _orphan_seen_up
+    identity = (lock.holder, lock.acquired_at)
+
     if now - lock.acquired_at < GATEWAY_DOWN_GRACE_SECS:
         return False
-    if _gateway_port_listening():
+
+    # Confirm WITHIN this call. A one-shot caller (ib-gateway-control.sh) gets
+    # exactly one `_is_orphaned` invocation, so a streak carried across calls
+    # would never confirm for it — and it is a legitimate revoker. Probes are
+    # only reached once past the grace window and only when the port is down,
+    # so the young-lease fast path still opens no socket at all.
+    for attempt in range(ORPHAN_CONFIRM_PROBES):
+        if _gateway_port_listening():
+            _orphan_seen_up = identity
+            return False
+        if attempt + 1 < ORPHAN_CONFIRM_PROBES:
+            time.sleep(ORPHAN_CONFIRM_INTERVAL_SECS)
+
+    if _orphan_seen_up == identity:
+        # This process watched the port answer for this very lease a moment
+        # ago: a restart, not an abandoned holder. Make the next call re-earn
+        # the confirmation from a clean slate rather than revoking now.
+        _orphan_seen_up = None
         return False
-    global _orphan_reported
-    identity = (lock.holder, lock.acquired_at)
+
     if _orphan_reported != identity:
         _orphan_reported = identity
         logger.warning(
-            "2FA lease held by %r ignored: Gateway port down for %.0fs",
+            "2FA lease held by %r ignored: Gateway port down for %.0fs "
+            "across %d consecutive probes",
             lock.holder,
             now - lock.acquired_at,
+            ORPHAN_CONFIRM_PROBES,
         )
     return True
 
@@ -378,6 +425,7 @@ def consume_2fa_push_lock(
     consumed_path: Path,
     *,
     now: Optional[float] = None,
+    guard_timeout_secs: Optional[float] = None,
 ) -> tuple[bool, Optional[PushLock]]:
     """Atomically verify and mark one exact active lease as consumed.
 
@@ -389,7 +437,9 @@ def consume_2fa_push_lock(
     now = now if now is not None else time.time()
     consumed_path = Path(consumed_path)
     consumed_guard = consumed_path.with_suffix(consumed_path.suffix + ".guard")
-    with _guard(exclusive=True):
+    # Bounded for the same reason as remaining_lock_secs: the exclusive guard
+    # spans _write_lock_file's fsyncs. R-211.
+    with _guard(exclusive=True, timeout_secs=guard_timeout_secs):
         existing = _read_lock_file()
         if (
             existing is None
@@ -419,12 +469,20 @@ def consume_2fa_push_lock(
         return True, existing
 
 
-def remaining_lock_secs(now: Optional[float] = None) -> int:
+def remaining_lock_secs(
+    now: Optional[float] = None,
+    *,
+    guard_timeout_secs: Optional[float] = None,
+) -> int:
     """Seconds until the active lock expires, or 0 if free.
 
-    Convenience wrapper for /health and operator endpoints.
+    Convenience wrapper for /health and operator endpoints. The deadline is
+    forwarded: without it ``_guard`` takes the blocking-flock branch, and the
+    guard is held across ``_write_lock_file``'s two fsyncs, so a stalled disk
+    hung every /health poll inside the FastAPI handler with no timeout and no
+    log line. R-211.
     """
-    lock = check_2fa_push_lock(now)
+    lock = check_2fa_push_lock(now, guard_timeout_secs=guard_timeout_secs)
     if lock is None:
         return 0
     now = now if now is not None else time.time()

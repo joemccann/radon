@@ -6,7 +6,12 @@
     # forever, the Type=notify unit never re-signals READY, systemd sits in
     # `reloading`, and the admin endpoint times out shutting down. A bounded
     # grace period makes `systemctl reload caddy` actually finish.
-    grace_period 10s
+    #
+    # It must be at least as long as the longest `lb_try_duration` below: the
+    # deploy reloads Caddy whenever the Caddyfile changes, i.e. concurrently
+    # with the upstream restarts the retry loop exists to absorb, and a
+    # shorter grace hard-cut that loop during the one event it is for. R-258.
+    grace_period 20s
 }
 
 {$DOMAIN:app.radon.run} {
@@ -41,6 +46,19 @@
         reverse_proxy localhost:8321 {
             lb_try_duration 15s
             lb_try_interval 250ms
+
+            # lb_try_* only retries a failed CONNECTION attempt. It does
+            # nothing for an upstream that accepts the socket and never writes
+            # a response header — the dominant radon-api failure mode here
+            # (R-014's data-role lock held by a wedged gateway, R-060's zombie
+            # pool client). Caddy's defaults for all three are 0 (unlimited),
+            # so such a request hung forever, pinned a handler goroutine and an
+            # upstream connection, and — critically — produced NO 5xx, which is
+            # why @edge_health_status below could keep answering 200 through a
+            # total front-end hang. R-219.
+            dial_timeout 5s
+            response_header_timeout 30s
+            read_timeout 300s
         }
     }
 
@@ -76,6 +94,23 @@
         reverse_proxy localhost:3000 {
             lb_try_duration 15s
             lb_try_interval 250ms
+
+            # This block serves POST /api/orders/place, /cancel and /modify.
+            # Without retry_match the restriction rests on an unpinned Caddy
+            # default, and there is no idempotency key anywhere on this path
+            # (R-009: orderRef never returned; R-022: no server-side submission
+            # record), so nothing downstream could collapse a duplicate and the
+            # operator's only evidence would be two fills. State it. R-220.
+            retry_match {
+                method GET HEAD
+            }
+
+            # Same reasoning as the /api/ib/* block above. read_timeout is
+            # generous on purpose: it bounds a dead connection without cutting
+            # a legitimately streamed response. R-219.
+            dial_timeout 5s
+            response_header_timeout 30s
+            read_timeout 300s
         }
     }
 }

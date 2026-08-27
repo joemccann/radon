@@ -904,6 +904,11 @@ activate_staged_release() {
   if live_python_env_matches "$STAGED_RELEASE_DIR"; then
     reuse_venv=1
   fi
+  # Caller-asserted: the units are still RUNNING, so the live .venv must not
+  # move regardless of whether .radon-req-hash happens to exist. R-231.
+  if [[ "${RADON_DEPLOY_KEEP_LIVE_VENV:-0}" == "1" ]]; then
+    reuse_venv=1
+  fi
 
   for artifact in "${ROLLBACK_ARTIFACTS[@]}"; do
     if [[ "$artifact" == ".venv" && "$reuse_venv" == 1 ]]; then
@@ -1141,7 +1146,17 @@ restart_services() {
   if [[ -n "$requested_sha" && -n "$previous_sha" ]] \
     && ! payload_paths_changed "$previous_sha" "$requested_sha"; then
     log_info "No runtime payload changes; promoting without unit restart"
-    activate_staged_release "$requested_sha" "$previous_sha" || return $?
+    # Services stay UP through this branch (contrast the normal path below,
+    # which calls stop_services_for_transition first). activate_staged_release
+    # skips the .venv move only when live_python_env_matches succeeds, and
+    # that requires .radon-req-hash — a file only install_target_python_env
+    # ever writes, so on a host that has never taken that path it does not
+    # exist and the venv is moved out from under radon-api, radon-monitor and
+    # every .venv/bin/python timer oneshot. payload_paths_changed already
+    # proved no runtime path changed (its arm covers requirements*), so the
+    # live env is correct by construction here. R-231.
+    RADON_DEPLOY_KEEP_LIVE_VENV=1 \
+      activate_staged_release "$requested_sha" "$previous_sha" || return $?
     refresh_control_plane || return 1
     install_release_units
     UNITS_RESTARTED=0
@@ -1254,9 +1269,11 @@ check_units_stable() {
   fi
   elapsed=$((SECONDS - STABILITY_STARTED_AT))
   remaining=$((UNIT_STABILITY_SECONDS - elapsed))
-  if [[ "${UNITS_RESTARTED:-1}" != "1" ]]; then
-    remaining=0
-  fi
+  # No special case for UNITS_RESTARTED=0. That branch does not restart units,
+  # but it DOES git reset --hard the live checkout and promote artifacts under
+  # running services, so it is the one path where an unexplained unit failure
+  # has no restart to correlate with — exactly the path that needs a settle
+  # window, not the one that can skip it. R-231.
   if (( remaining > 0 )); then
     sleep "$remaining"
   fi

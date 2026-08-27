@@ -74,14 +74,19 @@ export async function POST(request: Request): Promise<Response> {
 
     // Refresh orders after cancel
     invalidateOrdersSnapshotCache();
+    let refreshed = false;
     try {
       await radonFetch("/orders/refresh", { method: "POST", timeout: 10_000 });
+      refreshed = true;
     } catch {
-      // Non-fatal
-    } finally {
-      invalidateOrdersSnapshotCache();
+      // Non-fatal for THIS response, but the read below would otherwise hit
+      // Turso before the broker state was mirrored back and return the
+      // pre-cancel/pre-modify book — which then repopulates the
+      // process-global `orders:snapshot` key for 2s and is served to every
+      // polling tab and every other route as authoritative. R-252.
     }
-    const orders = await readOrdersSnapshotBestEffort();
+    if (refreshed) invalidateOrdersSnapshotCache();
+    const orders = refreshed ? await readOrdersSnapshotBestEffort() : null;
 
     return NextResponse.json({
       status: "ok",
@@ -92,15 +97,20 @@ export async function POST(request: Request): Promise<Response> {
     invalidateOrdersSnapshotCache();
     if (error instanceof RadonApiError) {
       if (isWorkingOrderMissingDetail(error.detail)) {
+        // Same reasoning as the success path: a failed refresh means the
+        // broker state was never mirrored back, so this read would return the
+        // PRE-cancel book — and would then repopulate the process-global 2s
+        // snapshot with it for every reader. R-252.
+        let refreshedAfterMiss = false;
         try {
           await radonFetch("/orders/refresh", { method: "POST", timeout: 10_000 });
+          refreshedAfterMiss = true;
         } catch {
           // Non-fatal
-        } finally {
-          invalidateOrdersSnapshotCache();
         }
-        const orders = await readOrdersSnapshotBestEffort();
-        const tif = orders.open_orders.find((order) =>
+        if (refreshedAfterMiss) invalidateOrdersSnapshotCache();
+        const orders = refreshedAfterMiss ? await readOrdersSnapshotBestEffort() : null;
+        const tif = orders?.open_orders.find((order) =>
           (permId > 0 && order.permId === permId)
           || (orderId > 0 && order.orderId === orderId),
         )?.tif;

@@ -41,10 +41,20 @@ export default function ScannerHero() {
 
   // The vol-cone payload counts names scanned and cheap-cone hits rather than
   // the scanner-shaped tickers_scanned / candidates_found.
+  // The vol-cone GET contract is HTTP 200 with `missing: true` (web/lib/volCone.ts),
+  // and VolConePanel already branches on it. ScannerHero did not — so a total
+  // outage painted as a completed scan that found nothing, with the meta rail
+  // reinforcing it because `?? null` only fires on `undefined`, leaving
+  // scanned/candidates at 0 rather than "—". R-245.
+  const coneMissing = tab === "cone" && Boolean(cone.data?.missing);
   const scanTime = (tab === "theta" ? theta.data?.scan_time : cone.data?.scan_time) ?? null;
-  const scanned = tab === "theta" ? theta.data?.tickers_scanned ?? null : cone.data?.count ?? null;
+  const scanned = tab === "theta"
+    ? theta.data?.tickers_scanned ?? null
+    : coneMissing ? null : cone.data?.count ?? null;
   const candidates =
-    tab === "theta" ? theta.data?.candidates_found ?? null : cone.data?.hit_count ?? null;
+    tab === "theta"
+      ? theta.data?.candidates_found ?? null
+      : coneMissing ? null : cone.data?.hit_count ?? null;
   const shown =
     tab === "theta"
       ? Math.min(TOP_N, theta.data?.results?.length ?? 0)
@@ -130,6 +140,10 @@ export default function ScannerHero() {
         <div className="news-feed-empty">Loading vol cone…</div>
       ) : cone.error ? (
         <div className="news-feed-error" role="alert">{cone.error}</div>
+      ) : coneMissing ? (
+        <div className="news-feed-error" role="alert">
+          Vol cone data unavailable — the last scan produced no payload. This is an outage, not an empty result.
+        </div>
       ) : !cone.data?.hits?.length ? (
         <div className="news-feed-empty">No cheap vol cones in the last scan.</div>
       ) : (
@@ -157,15 +171,24 @@ export default function ScannerHero() {
                   <span className="signals-hero__score-value">{formatIvPct(row.atm_iv)}</span>
                   {/* Bar reads like the other tabs: longer is better, and on a
                       cone cheaper is better, so the p10 floor fills it. */}
-                  <span
-                    className="signals-hero__score-bar"
-                    title={`ATM IV vs this expiry's 90/10 cone · ${formatPercentile(row.atm_percentile)} of sessions cheaper`}
-                  >
+                  {/* A null fill means the cone could not be positioned —
+                      distinct from a 0% fill, which is a real reading for a
+                      name at the p90 ceiling. R-272. */}
+                  {coneFillPct(row) == null ? (
+                    <span className="signals-hero__score-bar signals-hero__score-bar--unavailable" title="Cone bounds unavailable for this expiry">
+                      <span className="signals-hero__score-unavailable">—</span>
+                    </span>
+                  ) : (
                     <span
-                      className={`signals-hero__score-fill signals-hero__score-fill--${tone}`}
-                      style={{ width: `${coneFillPct(row).toFixed(0)}%` }}
-                    />
-                  </span>
+                      className="signals-hero__score-bar"
+                      title={`ATM IV vs this expiry's 90/10 cone · ${formatPercentile(row.atm_percentile)} of sessions cheaper`}
+                    >
+                      <span
+                        className={`signals-hero__score-fill signals-hero__score-fill--${tone}`}
+                        style={{ width: `${coneFillPct(row)!.toFixed(0)}%` }}
+                      />
+                    </span>
+                  )}
                 </span>
                 <span className="signals-hero__ticker-cell">
                   <span className="signals-hero__ticker">{row.ticker}</span>

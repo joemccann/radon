@@ -134,11 +134,20 @@ async def test_orders_sync_tick_retries_capacity_shed_then_succeeds():
 
 
 @pytest.mark.asyncio
-async def test_orders_sync_tick_persistent_capacity_shed_heartbeats_ok():
-    """Two consecutive 5-min sheds left orders-sync silent past the 10-min
-    watchdog window (19m silent, market open). Persistent shed is R-170:
-    the general lane is full, not a writer fault. Heartbeat ok so
-    _check_stale cannot page; the next tick retries the sync."""
+async def test_orders_sync_tick_capacity_shed_heartbeats_without_claiming_ok():
+    """Was ``..._heartbeats_ok``, which asserted ``args[1] == "ok"``.
+
+    The reason the row exists is unchanged and still asserted: two consecutive
+    5-min sheds left orders-sync silent past the 10-min watchdog window (19m
+    silent, market open), and a shed is R-170 — the general lane is full, not
+    a writer fault — so the row must stay fresh and `_check_stale` must not
+    page. What changed is the CLAIM it made: `"ok"` with `error: None` says
+    ib_orders.py ran, when it never spawned and neither open_orders nor
+    executed_orders was touched. `"warn"` keeps the row fresh (the watchdog's
+    error bucket fires only on `state == "error"`) while a sustained streak
+    escalates — see test_scan_admission_and_shed_honesty.py. R-216.
+    """
+    srv._reset_orders_sync_shed_state()
     captured: list[tuple] = []
 
     def fake_hrana(sql, args=(), *rest, **kwargs):
@@ -161,7 +170,8 @@ async def test_orders_sync_tick_persistent_capacity_shed_heartbeats_ok():
     sql, args = captured[0]
     assert "INSERT INTO service_health" in sql
     assert args[0] == "orders-sync"
-    assert args[1] == "ok"
+    assert args[1] == "warn"
+    assert args[1] != "ok", "a tick that never ran must not report healthy"
 
 
 @pytest.mark.asyncio

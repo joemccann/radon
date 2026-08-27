@@ -216,8 +216,15 @@ function isExcludedOrder(
   exclude: { permId?: number | null; orderId?: number | null } | null | undefined,
 ): boolean {
   if (!exclude) return false;
-  if (exclude.permId != null && Number(row.permId) === exclude.permId) return true;
-  if (exclude.orderId != null && Number(row.orderId) === exclude.orderId) return true;
+  // permId is globally unique at IB. orderId is per-client-session and is
+  // reused across clientIds and across restarts, while open_orders is a full
+  // multi-client snapshot — so matching on it when a permId was supplied can
+  // exclude a DIFFERENT working SELL BAG on the same ticker and under-count
+  // workingSellUnits, reopening the R-112 over-close hole for that order.
+  // orderId is a fallback for rows that have no permId, not a second identity.
+  // R-207.
+  if (exclude.permId != null) return Number(row.permId) === exclude.permId;
+  if (exclude.orderId != null) return Number(row.orderId) === exclude.orderId;
   return false;
 }
 

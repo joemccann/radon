@@ -297,10 +297,18 @@ function GateList({ gates }: { gates: GammaRotationGate[] }) {
   );
 }
 
-function GammaRotationBody({ data, lastSync, syncing }: { data: GammaRotationData; lastSync: string | null; syncing: boolean }) {
+function GammaRotationBody({ data, lastSync, syncing, refreshFailed }: { data: GammaRotationData; lastSync: string | null; syncing: boolean; refreshFailed?: string | null }) {
   const tone = interpretationColor(data.signal.interpretation);
   const gammaRotationIsStale = isGammaRotationStale(data);
-  const freshnessState = syncing ? "syncing" : gammaRotationIsStale ? "stale" : data.market_open ? "live" : "fresh";
+  // `if (error && !data)` was the ONLY consumer of `error`, so once a payload
+  // had ever loaded a sustained failure left the whole populated panel on
+  // screen with a badge derived entirely from the stale cached payload — and
+  // `isGammaRotationStale` returns false for a same-session payload while the
+  // market is closed, so a feed that stopped at 10:00 badged "fresh" all
+  // afternoon while the fetches were 500ing. R-247.
+  const freshnessState = refreshFailed
+    ? "stale"
+    : syncing ? "syncing" : gammaRotationIsStale ? "stale" : data.market_open ? "live" : "fresh";
   const freshnessBadgeClass = `grg-status-badge grg-status-badge-${freshnessState}`;
   return (
     <div className="section grg-panel regime-relationship-panel">
@@ -431,5 +439,5 @@ export default function GammaRotationPanel({ marketState }: GammaRotationPanelPr
     );
   }
 
-  return <GammaRotationBody data={data} lastSync={lastSync} syncing={syncing} />;
+  return <GammaRotationBody data={data} lastSync={lastSync} syncing={syncing} refreshFailed={error} />;
 }

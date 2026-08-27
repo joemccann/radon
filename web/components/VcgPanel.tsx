@@ -226,6 +226,28 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
 
   if (!data) return null;
 
+  if (!data.signal) {
+    // Every VCG source was unreachable. Rendering the strip here would paint
+    // a "DIVERGENCE" regime pill and a "NORMAL" interpretation and suppress
+    // the RISK-OFF and EDR pills, which reads as an affirmative all-clear on
+    // a dead feed. R-228.
+    return (
+      <div className="section">
+        <div className="section-header">
+          <div className="section-title">
+            <Zap size={14} />
+            Volatility-Credit Gap
+          </div>
+        </div>
+        <div className="section-body" style={{ padding: "16px" }}>
+          <div className="alert-item bearish">
+            Vol-credit feed unavailable: the last read reached neither the database nor the on-disk cache, so there is no signal to show.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const sig = data.signal;
   const attr = sig.attribution;
   const interpColor = interpretationColor(sig.interpretation);

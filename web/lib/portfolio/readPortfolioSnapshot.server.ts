@@ -37,6 +37,12 @@ function parseTimestampMs(value: unknown): number | null {
   return Number.isFinite(ms) ? ms : null;
 }
 
+/** Raised when a stored snapshot cannot be parsed. Distinct from a transport
+ *  failure so the route can report corruption rather than DB_UNAVAILABLE. */
+export class PortfolioSnapshotCorruptError extends Error {
+  readonly code = "SNAPSHOT_CORRUPT" as const;
+}
+
 /** Direct-to-cloud read used by the API and the server-rendered portfolio page. */
 export async function readPortfolioFromDb(): Promise<PortfolioSnapshot | null> {
   const result = await dbExecute({
@@ -47,7 +53,22 @@ export async function readPortfolioFromDb(): Promise<PortfolioSnapshot | null> {
 
   const row = result.rows[0] as unknown as { taken_at?: string; payload?: string };
   if (typeof row.payload !== "string") return null;
-  const data = withoutPortfolioEntryDates(JSON.parse(row.payload) as PortfolioData);
+  // A truncated or non-JSON payload is PERSISTENCE CORRUPTION, not a database
+  // availability problem. Unguarded, the SyntaxError raised inside the cache
+  // fetcher could not be helped by staleWhileError (it is not a transport
+  // error, and the retry re-reads the same corrupt row and throws
+  // identically), and the route filed it as DB_UNAVAILABLE / "Turso portfolio
+  // read failed: Unexpected token…". R-257.
+  let parsed: PortfolioData;
+  try {
+    parsed = JSON.parse(row.payload) as PortfolioData;
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new PortfolioSnapshotCorruptError(
+      `portfolio_snapshots.payload is not valid JSON (taken_at=${row.taken_at ?? "unknown"}): ${detail}`,
+    );
+  }
+  const data = withoutPortfolioEntryDates(parsed);
   const takenAt = typeof row.taken_at === "string" ? row.taken_at : "";
   return {
     data,
@@ -111,7 +132,13 @@ export async function readPortfolioSnapshotSeed(): Promise<PortfolioSnapshotSeed
     if (!cached.value) return undefined;
     const read = withFreshnessWarning(cached.value, cached.staleWhileError);
     return { data: read.snapshot.data, warning: read.warning };
-  } catch {
+  } catch (err) {
+    // The RSC seed path swallowed everything, so an unparseable stored
+    // snapshot silently degraded the server-rendered page to the client GET
+    // with no log and no trace. Corruption at least says so. R-257.
+    if (err instanceof PortfolioSnapshotCorruptError) {
+      console.error("[portfolio] stored snapshot is corrupt:", err.message);
+    }
     return undefined;
   }
 }

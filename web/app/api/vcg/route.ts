@@ -131,12 +131,34 @@ export async function GET(): Promise<Response> {
 
   (data as Record<string, unknown>).market_open = currentMarketOpen;
 
+  if (!cached) {
+    // Both the Turso row and data/vcg.json were unreadable. EMPTY_VCG's
+    // defaults are an affirmative reading — regime "DIVERGENCE",
+    // interpretation "NORMAL", ro/edr 0 which suppress the RISK-OFF and EDR
+    // pills — so a dead feed rendered as "no risk-off signal". R-228.
+    const degraded = data as Record<string, unknown>;
+    degraded.missing = true;
+    degraded.signal = null;
+    triggerBackgroundScan();
+    const missingResponse = NextResponse.json(degraded);
+    missingResponse.headers.set("X-Sync-Warning", "vcg-source-unavailable");
+    return setCacheResponseHeaders(missingResponse, {
+      maxAgeSeconds: 0,
+      staleWhileRevalidateSeconds: 0,
+      requestId,
+      cacheState: "MISS",
+      tags: ["vcg"],
+    });
+  }
+
   // Stale-while-revalidate. `cached` is the FRESHER of DB row and disk
   // JSON, so a stale verdict here means BOTH sources are stale — a frozen
   // DB mirror alone can no longer loop the background rescan.
-  const stale = cached
-    ? isVcgDataStale(cached as { scan_time?: string; market_open?: boolean }, expectedVcgSessionDate(), currentMarketOpen)
-    : true;
+  const stale = isVcgDataStale(
+    cached as { scan_time?: string; market_open?: boolean },
+    expectedVcgSessionDate(),
+    currentMarketOpen,
+  );
 
   if (stale) {
     triggerBackgroundScan();

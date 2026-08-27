@@ -23,11 +23,18 @@ export function conePosition(
   return Math.max(0, Math.min(1, (atm - p10) / (p90 - p10)));
 }
 
-/** Score-bar fill percent. The bar reads like every other one on this panel —
- *  longer is better — so a full bar means ATM IV is sitting on the cone floor. */
-export function coneFillPct(name: Pick<VolConeName, "atm_iv" | "p10" | "p90">): number {
+/** Score-bar fill percent, or null when the cone cannot be positioned.
+ *
+ *  The bar reads like every other one on this panel — longer is better — so a
+ *  full bar means ATM IV is sitting on the cone floor. Returning 0 for an
+ *  UNAVAILABLE cone collided with the legitimate 0 for a name at or above the
+ *  p90 ceiling: a candidate whose bounds failed to compute rendered a real IV
+ *  number next to an empty bar that reads as maximally rich. R-272. */
+export function coneFillPct(
+  name: Pick<VolConeName, "atm_iv" | "p10" | "p90">,
+): number | null {
   const position = conePosition(name);
-  return position == null ? 0 : (1 - position) * 100;
+  return position == null ? null : (1 - position) * 100;
 }
 
 /** Cheap wings are the tradeable print; cheap ATM alone is the softer one. */

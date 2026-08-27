@@ -17,7 +17,13 @@ export async function getWsTicket(clerkToken: string): Promise<string> {
       Authorization: `Bearer ${clerkToken}`,
       "Content-Type": "application/json",
     },
-    signal: AbortSignal.timeout(8_000),
+    // Must outlast the edge's lb_try_duration for /api/ib/* (15s in
+    // cloud/caddy/Caddyfile). At 8s the client abandoned the request seven
+    // seconds before Caddy's retry loop would have reached the restarted
+    // radon-api, so the ride-out that exists for exactly this call never
+    // helped it — the ticket fetch still failed on every deploy gap and the
+    // price-WebSocket reconnect backoff fired as before. R-218.
+    signal: AbortSignal.timeout(16_000),
   });
 
   if (!res.ok) {

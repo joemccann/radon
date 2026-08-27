@@ -80,15 +80,28 @@ DEADMAN_LABEL="testing-weekend"
 # Title prefix the skill opens/updates its PR under.
 PR_TITLE_PREFIX="Testing weekend"
 
+# R-239: the ERR trap used to be armed only inside run_phase, so everything
+# from here down — the cd, the marker check, the lock, the mkdir and the
+# rotation pipeline under `set -o pipefail` — exited on a full disk, a moved
+# clone or a held lock with nothing but a line on stderr. The file header
+# claims every outcome is reported; for the prologue that was false.
+trap on_crash ERR
+
 cd "$REPO"
 [[ -f .radon-weekend-runner ]] || {
   echo "REFUSING: $REPO is not the dedicated weekend runner clone" >&2
+  report "REFUSED" "$REPO is not the dedicated weekend runner clone" 0 || true
   exit 2
 }
 
 RUNNER_LOCK="$REPO/.weekend-runner.lock"
 acquire_runner_lock "$RUNNER_LOCK" || {
   echo "REFUSING: another weekend run owns $REPO" >&2
+  # The expensive instance: acquire_runner_lock only reclaims when
+  # `kill -0 $held` fails, so a recorded pid reused by ANY live unrelated
+  # process makes every subsequent daily fire exit 3 in under a second. That
+  # must page, not vanish. R-239.
+  report "REFUSED (lock held)" "another weekend run owns $REPO (pid $(cat "$RUNNER_LOCK/pid" 2>/dev/null || echo unknown)); if no cycle is running, the recorded pid was reused — remove $RUNNER_LOCK" 0 || true
   exit 3
 }
 trap 'release_runner_lock "$RUNNER_LOCK"' EXIT
@@ -96,8 +109,19 @@ trap 'release_runner_lock "$RUNNER_LOCK"' EXIT
 LOG_DIR="$REPO/logs/testing-weekend"
 mkdir -p "$LOG_DIR"
 STAMP="$(date +%Y%m%dT%H%M%S)"
-# Keep the newest 30 run logs.
-ls -1t "$LOG_DIR" 2>/dev/null | tail -n +31 | while IFS= read -r old; do
+# Keep the newest 30 run logs. NEVER the launchd sinks: the plist points
+# StandardOutPath/StandardErrorPath at launchd-cycle.log/.err inside this same
+# directory, and launchd-cycle.err only gets an mtime bump when something
+# writes to stderr — so it sorts old and was unlinked once ~30 per-phase logs
+# accumulated, taking the only forensics for a prologue death with it. Worse,
+# the rotation runs BEFORE run_phase, so the rest of that same invocation
+# wrote to a deleted inode launchd still held open. R-267.
+# `|| true` on the grep: it exits 1 when it filters everything out (an empty
+# or sinks-only log dir), and `set -o pipefail` would turn that into a
+# prologue death — now a REPORTED one, thanks to the trap above.
+ls -1t "$LOG_DIR" 2>/dev/null \
+  | { grep -v -e '^launchd-cycle\.log$' -e '^launchd-cycle\.err$' || true; } \
+  | tail -n +31 | while IFS= read -r old; do
   rm -f -- "$LOG_DIR/$old"
 done
 
@@ -169,8 +193,24 @@ on_crash() {
 
 # Fresh ground truth. Any leftover state from a killed prior run is
 # discarded — the branch/PR on GitHub is the durable state.
+# R-237: this loop's fetch was a bare single attempt while the reliability
+# loop already had a bounded retry (3f96dc31, added for the 2026-08-23 port-22
+# blackhole). Same shape, same reason.
+FETCH_ATTEMPTS="${RADON_WEEKEND_FETCH_ATTEMPTS:-3}"
+FETCH_PAUSE_SECS="${RADON_WEEKEND_FETCH_PAUSE_SECS:-60}"
+
+fetch_origin_with_retry() {
+  local attempt
+  for (( attempt = 1; attempt <= FETCH_ATTEMPTS; attempt++ )); do
+    git fetch origin --quiet && return 0
+    echo "[weekend] git fetch origin failed — attempt $attempt/$FETCH_ATTEMPTS" >&2
+    if (( attempt < FETCH_ATTEMPTS )); then sleep "$FETCH_PAUSE_SECS"; fi
+  done
+  return 1
+}
+
 ground_truth() {
-  git fetch origin --quiet
+  fetch_origin_with_retry
   git checkout -f --quiet main
   git reset --hard --quiet origin/main
   git clean -fdq --exclude=.radon-weekend-runner --exclude=.weekend-runner.lock --exclude=logs/ --exclude=.env --exclude=.env.ib-mode --exclude=web/.env
@@ -191,7 +231,18 @@ run_phase() {
   begin_phase "$1"
   trap on_crash ERR
   echo "[testing-weekend] $PHASE start $STAMP repo=$REPO cap=${CAP_SECS}s" | tee -a "$RUN_LOG"
-  ground_truth
+  # NOT bare. Under `set -Eeuo pipefail` with the ERR trap armed, a failed
+  # fetch made on_crash report and then the shell exit anyway — so
+  # `run_phase audit` never returned and `run_phase remediate` was never run
+  # and never reported, contradicting the comment on the cycle branch. This
+  # loop was the exposed one: its fetch was a bare single attempt while
+  # reliability already had fetch_origin_with_retry. R-237.
+  if ! ground_truth; then
+    RC=70
+    report "GROUND TRUTH FAILED" "could not refresh the clone (network or git); the phase did not run" 0 || true
+    echo "[testing-weekend] $PHASE done rc=$RC" | tee -a "$RUN_LOG"
+    return 0
+  fi
 
   # Attempt clock is per phase: under cycle the remediate phase must not
   # inherit the audit phase's elapsed seconds and insta-timeout.
@@ -241,10 +292,12 @@ ${tail_text}
 if [[ "$MODE" == "cycle" ]]; then
   # Remediate runs regardless of the audit rc — backlog may exist even when
   # the audit phase failed. Exit non-zero if either phase failed.
+  set +e
   run_phase audit
   RC_AUDIT=$RC
   run_phase remediate
   RC_REMEDIATE=$RC
+  set -e
   echo "[testing-weekend] cycle done audit_rc=$RC_AUDIT remediate_rc=$RC_REMEDIATE"
   [[ $RC_AUDIT -ne 0 ]] && exit "$RC_AUDIT"
   exit "$RC_REMEDIATE"

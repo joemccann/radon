@@ -16,7 +16,16 @@ Three signals, one alert max per unit per cycle (highest severity wins):
     (P3: the next timer is the retry). ``Result=start-limit-hit`` is
     called out explicitly because it requires a manual operator action.
   * ``flap``     — SubState=auto-restart observed in two consecutive
-    watchdog cycles. P1 (sustained crash loop).
+    watchdog cycles. P1 (sustained crash loop). **Unreachable for any
+    DUR-02-braked unit**: ``auto-restart`` is occupied only for
+    ``RestartSec`` per restart (5s api/nextjs, 10s monitor, 2s health), and
+    the brake parks the unit ``failed`` in ``RestartSec x StartLimitBurst``
+    — roughly 25s — so two five-minute samples cannot both land inside a
+    five-second window. Real coverage for that shape is the
+    ``Result=start-limit-hit`` branch below, which does page P1. The only
+    unit ``flap`` can catch is an UNBRAKED ``radon-*`` unit looping with a
+    long ``RestartSec``; kept for that case rather than removed, but it is
+    not a second independent P1 signal. R-268.
   * ``delta``    — NRestarts increased since the last cycle. P3 early
     signal; NRestarts only counts systemd-initiated Restart= restarts,
     never manual/deploy ``systemctl restart`` (those reset it to 0).

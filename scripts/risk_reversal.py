@@ -498,10 +498,11 @@ def _build_execution_cmd(combo: Dict, ticker: str, label: str) -> str:
           <div class="callout-title">{label}</div>
           <pre style="font-size:12px; white-space:pre-wrap; margin-top:8px;">
 # Leg 1: Sell {short_label}
-python3 scripts/ib_execute.py --type option --symbol {ticker} --expiry {combo["expiry"]} --strike {combo["short_strike"]:.0f} --right {short_right_flag} --qty {combo["max_qty"]} --side SELL --limit {combo["short_bid"]:.2f} --thesis "{thesis}" --yes
+python3 scripts/ib_execute.py --type option --symbol {ticker} --expiry {combo["expiry"]} --strike {combo["short_strike"]:.0f} --right {short_right_flag} --qty {combo["max_qty"]} --side SELL --limit {combo["short_bid"]:.2f} --thesis "{thesis}"
 
 # Leg 2: Buy {long_label}
-python3 scripts/ib_execute.py --type option --symbol {ticker} --expiry {combo["expiry"]} --strike {combo["long_strike"]:.0f} --right {long_right_flag} --qty {combo["max_qty"]} --side BUY --limit {combo["long_ask"]:.2f} --thesis "{thesis}" --yes</pre>
+python3 scripts/ib_execute.py --type option --symbol {ticker} --expiry {combo["expiry"]} --strike {combo["long_strike"]:.0f} --right {long_right_flag} --qty {combo["max_qty"]} --side BUY --limit {combo["long_ask"]:.2f} --thesis "{thesis}"</pre>
+          <div class="text-muted" style="font-size:11px; margin-top:6px;">Each command stops at a CONFIRM ORDER? prompt. The quantity above is this report's own sizing, not a broker-verified one.</div>
         </div>"""
 
 

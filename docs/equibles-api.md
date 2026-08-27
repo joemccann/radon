@@ -197,6 +197,39 @@ Derive all freshness copy from the payload's own date field. Never hardcode.
 
 ---
 
+## Quota exhaustion is fatal to a cycle, not to one source
+
+`EquiblesAuthError` and `EquiblesRateLimitError` make **every** subsequent call
+fail, so both jobs re-raise them out of their per-source error handling rather
+than degrading one section:
+
+- `fetch_equibles_smart_money_13f._cycle_fatal_errors()` — `_safe_call` re-raises.
+- `fetch_equibles_filing_forensics._cycle_fatal_errors()` — `_fetch_source` re-raises.
+
+The two lists are asserted equal
+(`scripts/tests/test_equibles_quota_and_completeness.py`). Swallowing them
+turned one 429 into `STATUS_ERROR` for every source of every remaining ticker,
+marked those tickers `skipped`, and still heartbeat `ok` because one ticker had
+landed before the trip — exit 0 and a green banner over 29 of 30 stale
+dossiers (R-226).
+
+An ordinary endpoint fault still degrades only its own source. That
+distinction is the whole point: a thin day and a dead integration must not
+produce the same health row.
+
+## Holder rows are written all-or-nothing
+
+`_upsert_holder_rows` writes N chunked multi-row INSERTs under one commit. A
+failure on chunk *k* used to leave chunks 0..*k*-1 applied and *k*..N absent —
+and because the upsert is not preceded by a delete, that truncated set mixed
+silently with the previous quarter's surviving rows while
+`equibles_13f_snapshots` (which carries the full `holders` array and
+`holder_count`) asserted completeness. The write now rolls back as a unit, and
+the snapshot carries `holders_persisted` so a consumer can tell when the depth
+rows are behind the summary (R-227).
+
+---
+
 ## Reproducing this document
 
 The probe scripts that produced these observations are not committed (they read the production

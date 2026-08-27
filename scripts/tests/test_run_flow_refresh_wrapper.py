@@ -100,12 +100,16 @@ class _FastApiStub:
         fail_paths: frozenset[str] = frozenset(),
         flaky_paths: frozenset[str] = frozenset(),
         fail_status: int = 500,
+        fail_body: bytes = b'{"detail": "stub failure"}',
     ) -> None:
         self.calls: list[str] = []
         self.hits: dict[str, int] = {}
         self._fail_paths = fail_paths
         self._flaky_paths = flaky_paths
         self._fail_status = fail_status
+        # The wrapper classifies a shed from the BODY, not the status: the API
+        # answers 502 for every failure class (R-221).
+        self._fail_body = fail_body
         self._server = HTTPServer(("127.0.0.1", port), self._handler())
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
 
@@ -124,10 +128,12 @@ class _FastApiStub:
                     code = recorder._fail_status
                 else:
                     code = 200
+                body = b'{"ok": true}' if code == 200 else recorder._fail_body
                 self.send_response(code)
                 self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
-                self.wfile.write(b'{"ok": true}')
+                self.wfile.write(body)
 
             def log_message(self, *_args: object) -> None:
                 return
@@ -240,6 +246,10 @@ def test_http_502_then_ok_retries_without_direct_fallback(tmp_path: Path) -> Non
         port,
         flaky_paths=frozenset({SCAN_PATH, FLOW_PATH, DISCOVER_PATH}),
         fail_status=502,
+        # The body is the shed signal now: the API answers 502 for EVERY
+        # failure class, so status alone cannot tell a capacity shed from a
+        # scanner traceback (R-221). This is the 2026-08-24 body verbatim.
+        fail_body=b'{"detail": "Subprocess capacity exhausted (3 active, lane cap 3, hard cap 4)"}',
     )
     stub.start()
     try:
@@ -269,6 +279,8 @@ def test_http_503_then_ok_retries(tmp_path: Path) -> None:
         port,
         flaky_paths=frozenset({SCAN_PATH}),
         fail_status=503,
+        # See the 502 case above: the body carries the shed signal (R-221).
+        fail_body=b'{"detail": "Subprocess capacity exhausted (3 active, lane cap 3)"}',
     )
     stub.start()
     try:
@@ -315,6 +327,10 @@ def test_persistent_502_sheds_without_direct_fallback(tmp_path: Path) -> None:
         port,
         fail_paths=frozenset({SCAN_PATH, FLOW_PATH, DISCOVER_PATH}),
         fail_status=502,
+        # The body is the shed signal now: the API answers 502 for EVERY
+        # failure class, so status alone cannot tell a capacity shed from a
+        # scanner traceback (R-221). This is the 2026-08-24 body verbatim.
+        fail_body=b'{"detail": "Subprocess capacity exhausted (3 active, lane cap 3, hard cap 4)"}',
     )
     stub.start()
     try:

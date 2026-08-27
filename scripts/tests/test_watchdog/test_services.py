@@ -110,6 +110,11 @@ class TestServiceCatalogContract:
         expected = {
             "vcg-scan",
             "cri-scan",
+            # R-236: registered this run. Verified the same way as the rest —
+            # scripts/breadth_scan.py:59 imports DEFAULT_HOST from
+            # clients.ib_client and :118 calls ib.connect(DEFAULT_HOST, ...);
+            # NYSE A/D and TICK are sampled from IB index feeds.
+            "breadth-scan",
             "orders-sync",
             "portfolio-sync",
             "fill-monitor",

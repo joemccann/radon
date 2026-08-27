@@ -146,7 +146,7 @@ async function setupMocks(page: Page) {
   await installMockWebSocket(page, OPTION_KEY);
 
   const json = (body: unknown) => ({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
-  await page.route("**/api/portfolio", (route) => route.fulfill(json(PORTFOLIO_MOCK)));
+  await page.route("**/api/portfolio**", (route) => route.fulfill(json(PORTFOLIO_MOCK)));
   await page.route("**/api/orders", (route) => route.fulfill(json(ORDERS_EMPTY)));
   await page.route("**/api/flex-token", (route) => route.fulfill(json({ ok: true, days_until_expiry: 14 })));
   await page.route("**/api/ib-status", (route) => route.fulfill(json({ connected: true })));

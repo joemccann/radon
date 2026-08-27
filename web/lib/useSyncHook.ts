@@ -8,8 +8,12 @@ import {
   reportOfflineServed,
 } from "./offline/offlineSignals";
 import { useRouteRefreshKey } from "./RouteRefreshContext";
+import { resolveRetryDelayMs } from "./syncRetrySchedule";
 
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+/** Backoff ceiling and attempt cap for the stale-data retry. R-230. */
+const DEFAULT_MAX_RETRY_DELAY_MS = 60_000;
+const DEFAULT_MAX_RETRY_ATTEMPTS = 6;
 type RetryMethod = "GET" | "POST";
 
 type UseSyncConfig<T> = {
@@ -19,6 +23,10 @@ type UseSyncConfig<T> = {
   extractTimestamp?: (data: T) => string | null;
   shouldRetry?: (data: T) => boolean;
   retryIntervalMs?: number;
+  /** Ceiling for the retry backoff. R-230. */
+  maxRetryDelayMs?: number;
+  /** Give up after this many retries and fall back to the poll interval. */
+  maxRetryAttempts?: number;
   retryMethod?: RetryMethod;
   showBackgroundError?: boolean;
   /**
@@ -53,6 +61,8 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
     extractTimestamp,
     shouldRetry,
     retryIntervalMs = 0,
+    maxRetryDelayMs = DEFAULT_MAX_RETRY_DELAY_MS,
+    maxRetryAttempts = DEFAULT_MAX_RETRY_ATTEMPTS,
     retryMethod = "POST",
     showBackgroundError = false,
     loadWhenInactive = true,
@@ -65,6 +75,8 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
   const [lastSync, setLastSync] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Retries issued for the current stale streak; reset on a fresh payload. */
+  const retryAttemptRef = useRef(0);
   /** R-106: one request per verb at a time. */
   const inFlightRef = useRef<Set<RetryMethod>>(new Set());
   const didInitialSync = useRef(false);
@@ -81,6 +93,32 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
       retryTimeoutRef.current = null;
     }
   }, []);
+
+  /**
+   * Arm the next stale-data retry, or stop.
+   *
+   * The streak counter is what makes this bounded: a payload that no longer
+   * needs a retry resets it, and a payload that always needs one walks the
+   * backoff ladder and then gives up, leaving the normal poll interval to
+   * pick up the recovery. R-230.
+   */
+  const armRetry = useCallback((json: T) => {
+    if (!active || !shouldRetry?.(json)) {
+      retryAttemptRef.current = 0;
+      return;
+    }
+    const delay = resolveRetryDelayMs({
+      baseMs: retryIntervalMs,
+      attempt: retryAttemptRef.current,
+      maxDelayMs: maxRetryDelayMs,
+      maxAttempts: maxRetryAttempts,
+    });
+    if (delay === null) return;
+    retryAttemptRef.current += 1;
+    retryTimeoutRef.current = setTimeout(() => {
+      void requestRef.current(retryMethod, true);
+    }, delay);
+  }, [active, shouldRetry, retryIntervalMs, maxRetryDelayMs, maxRetryAttempts, retryMethod]);
 
   const executeRequest = useCallback(async (method: RetryMethod, background = false) => {
     // R-106: a wedged endpoint (FastAPI blocked on UW / MenthorQ) used to
@@ -114,11 +152,7 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
       setError(null);
 
       clearRetry();
-      if (active && shouldRetry?.(json) && retryIntervalMs > 0) {
-        retryTimeoutRef.current = setTimeout(() => {
-          void requestRef.current(retryMethod, true);
-        }, retryIntervalMs);
-      }
+      armRetry(json);
     } catch (err) {
       if (!networkResolved) reportFetchFailure();
       // Only show error if we don't already have valid cached data —
@@ -135,7 +169,7 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
         setSyncing(false);
       }
     }
-  }, [active, clearRetry, endpoint, extractTimestamp, retryIntervalMs, retryMethod, shouldRetry, showBackgroundError]);
+  }, [armRetry, clearRetry, endpoint, extractTimestamp, showBackgroundError]);
 
   requestRef.current = executeRequest;
 
@@ -180,11 +214,7 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
         didInitialRead.current = true;
 
         clearRetry();
-        if (active && shouldRetry?.(json) && retryIntervalMs > 0) {
-          retryTimeoutRef.current = setTimeout(() => {
-            void requestRef.current(retryMethod, true);
-          }, retryIntervalMs);
-        }
+        armRetry(json);
 
         // Auto-sync on first load when the hook is active. GET-only endpoints
         // already hydrated above — do not immediately re-GET the same cache.
@@ -205,7 +235,7 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
     };
 
     void init();
-  }, [active, clearRetry, endpoint, hasPost, loadWhenInactive, triggerSync, extractTimestamp, retryIntervalMs, retryMethod, shouldRetry]);
+  }, [active, armRetry, clearRetry, endpoint, hasPost, loadWhenInactive, triggerSync, extractTimestamp]);
 
   // If the hook mounted while inactive (with loadWhenInactive), issue the first
   // POST/sync when it later becomes active. When loadWhenInactive is false the
