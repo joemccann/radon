@@ -139,12 +139,19 @@ describe("reconcileCtaTables with no z-score to arbitrate", () => {
     ],
   };
 
-  it("prefers the unrounded row in every table", () => {
+  it("publishes nothing for a row no z-score can verify", () => {
+    // R-289 / REL-099(b) supersedes the earlier "prefer the unrounded copy"
+    // expectation here. The vision pass that mangles the percentile column is
+    // the same one that drops the z, so a missing z is evidence AGAINST the
+    // row, not a neutral absence — and the path where the check does not exist
+    // must be the reject path, not the pass path. The unrounded 0.81 sibling is
+    // still preferred when picking the trio; it just is not published while
+    // nothing can check it.
     const out = reconcileCtaTables(nullZ);
     for (const table of ["main", "index"] as const) {
-      expect(out[table][0].percentile_3m).toBe(81);
-      expect(out[table][0].percentile_1m).toBe(43);
-      expect(out[table][0].percentile_1y).toBe(88);
+      expect(out[table][0].percentile_3m).toBeNull();
+      expect(out[table][0].percentile_1m).toBeNull();
+      expect(out[table][0].percentile_1y).toBeNull();
     }
   });
 
@@ -163,7 +170,9 @@ describe("reconcileCtaTables with no z-score to arbitrate", () => {
         { underlying: "Gold", position_today: -1.9, percentile_1m: 0, percentile_3m: 0, percentile_1y: 1, z_score_3m: null },
       ],
     });
-    expect(out.main[0].percentile_3m).toBe(0);
-    expect(out.main[0].percentile_1y).toBe(1);
+    // Nothing is invented — and with no z on either copy, nothing is published
+    // either (R-289). The original 0/1 pass-through was the unverifiable path.
+    expect(out.main[0].percentile_3m).toBeNull();
+    expect(out.main[0].percentile_1y).toBeNull();
   });
 });
