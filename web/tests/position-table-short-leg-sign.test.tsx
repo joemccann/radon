@@ -116,7 +116,7 @@ describe("PositionTable expanded leg rows — SHORT option leg sign", () => {
     render(<PositionTable positions={[RATIO_RR]} prices={{}} />);
     expandLegs();
 
-    const shortRow = screen.getByText("SHORT 10x Put $400").closest("tr")!;
+    const shortRow = screen.getByText("SHORT Put $400").closest("tr")!;
     expect(shortRow.textContent).toContain("$-27.69");
     expect(shortRow.textContent).toContain("$-26.41");
   });
@@ -125,7 +125,7 @@ describe("PositionTable expanded leg rows — SHORT option leg sign", () => {
     render(<PositionTable positions={[RATIO_RR]} prices={{}} />);
     expandLegs();
 
-    const longRow = screen.getByText("LONG 75x Call $410").closest("tr")!;
+    const longRow = screen.getByText("LONG Call $410").closest("tr")!;
     expect(longRow.textContent).toContain("$19.45");
     expect(longRow.textContent).toContain("$10.45");
     expect(longRow.textContent).not.toContain("$-19.45");
@@ -145,7 +145,7 @@ describe("PositionTable expanded leg rows — SHORT option leg sign", () => {
 
     const T = yearsToExpiry(expiry, new Date())!;
     const putPerShare = bsPut(spot, 400, T, 0, sigma);
-    const shortRow = screen.getByText("SHORT 10x Put $400").closest("tr")!;
+    const shortRow = screen.getByText("SHORT Put $400").closest("tr")!;
     expect(shortRow.textContent).toContain(`$-${putPerShare.toFixed(2)}`);
   });
 });

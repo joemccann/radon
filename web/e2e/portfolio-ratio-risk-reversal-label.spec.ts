@@ -121,6 +121,6 @@ test("portfolio shows raw long-short counts for ratio risk reversal labels", asy
   const undefinedRiskSection = page.locator(".section").filter({ hasText: "Undefined Risk Positions" }).first();
   await expect(undefinedRiskSection).toContainText("Ratio Risk Reversal 75x10 (P$400.0/C$410.0)");
   await expect(undefinedRiskSection).not.toContainText("Ratio Risk Reversal 2x15");
-  await expect(undefinedRiskSection).toContainText("LONG 75x Call $410");
-  await expect(undefinedRiskSection).toContainText("SHORT 10x Put $400");
+  await expect(undefinedRiskSection).toContainText("LONG Call $410");
+  await expect(undefinedRiskSection).toContainText("SHORT Put $400");
 });

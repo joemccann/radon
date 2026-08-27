@@ -1,7 +1,7 @@
 /** Operator-facing copy for a per-ticker flow-report failure. */
 
 export function isSubprocessCapacityError(message: string | null | undefined): boolean {
-  return Boolean(message) && /subprocess capacity exhausted/i.test(message);
+  return message != null && /subprocess capacity exhausted/i.test(message);
 }
 
 export function flowReportErrorCopy(message: string | null | undefined): string {
