@@ -574,6 +574,7 @@ function OrderBuilder({
     structure,
     signedLimitPrice,
     submitPermitted,
+    transmitArmed,
   ]);
 
   // OrderPriceStrip prices (combo) or single-leg signed mid
