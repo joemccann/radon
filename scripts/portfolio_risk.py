@@ -88,6 +88,9 @@ BACKFILL_TOTAL_BUDGET_S = 20.0
 # call bound above is checkable rather than implied.
 BACKFILL_SYMBOL_WORST_CASE_S = 30.0
 BACKFILL_LADDER_RUNGS = 3
+# Source marker for a ladder that ran out of wall-clock budget between rungs,
+# as distinct from one that asked all three sources and got nothing.
+_LADDER_DEADLINE = "deadline"
 _BACKFILL_MARKER_PATH = _DATA_DIR / "price_risk_backfill.json"
 
 IB_HISTORY_DURATION = "1 Y"
@@ -465,10 +468,28 @@ def backfill_price_history(
                 file=sys.stderr,
             )
             break
-        # Recorded before the fetch: a symbol whose ladder ran has been tried,
-        # however it ends, and must not be retried on the next minute's sync.
+        try:
+            closes, source = _fetch_closes_via_ladder(symbol, deadline, clock)
+        except Exception:
+            # A raising ladder IS an attempt: record it, or the next minute's
+            # sync retries the same failure immediately.
+            _record_backfill_attempt([symbol])
+            raise
+        if source == _LADDER_DEADLINE:
+            # The ladder abandoned this symbol part-way because the budget ran
+            # out mid-flight. It was NOT tried against all three sources, so
+            # stamping the 6h blackout here would starve a symbol nothing ever
+            # fetched. Leave it due, exactly as a symbol never started is.
+            print(
+                f"  backfill budget spent mid-ladder for {symbol}; "
+                f"still due on the next run",
+                file=sys.stderr,
+            )
+            continue
+        # Recorded after the ladder returns: a symbol tried against all three
+        # sources has been tried, however it ends, and must not be retried on
+        # the next minute's sync.
         _record_backfill_attempt([symbol])
-        closes, source = _fetch_closes_via_ladder(symbol, deadline, clock)
         if not closes:
             print(f"  no daily closes for {symbol} from IB/UW/Yahoo", file=sys.stderr)
             continue
@@ -488,19 +509,22 @@ def _fetch_closes_via_ladder(
     """Data Source Priority: IB every cycle, then UW, then Yahoo.
 
     The deadline is re-checked between rungs so one slow rung cannot spend the
-    whole run's budget three times over.
+    whole run's budget three times over. An abort returns the
+    ``_LADDER_DEADLINE`` source so the caller can tell "budget ran out
+    part-way" from "all three sources were asked and had nothing" — only the
+    latter earns the retry blackout.
     """
     if _ib_reachable():
         closes = _fetch_ib_closes(symbol)
         if closes:
             return closes, "ib"
     if deadline is not None and clock() >= deadline:
-        return {}, ""
+        return {}, _LADDER_DEADLINE
     closes = _fetch_uw_closes(symbol)
     if closes:
         return closes, "uw"
     if deadline is not None and clock() >= deadline:
-        return {}, ""
+        return {}, _LADDER_DEADLINE
     return _fetch_yahoo_closes(symbol), "yahoo"
 
 

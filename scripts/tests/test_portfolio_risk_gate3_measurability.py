@@ -184,3 +184,85 @@ class TestLoaderIsTimeBoxed:
             * portfolio_risk.BACKFILL_SYMBOL_WORST_CASE_S
         )
         assert bound < unbounded
+
+
+class TestDeadlineAbortIsNotAFailedAttempt:
+    """R-284 / REL-098(b): the 6h blackout is for symbols that were TRIED.
+
+    `_record_backfill_attempt` fired before the ladder ran, so a symbol the
+    ladder abandoned mid-flight because the wall-clock budget expired was
+    stamped as retried-and-failed for six hours — despite never having been
+    asked of UW or Yahoo at all. The loop already leaves a symbol it never
+    STARTED as due; a symbol it started and abandoned is in the same position
+    and must be treated the same way.
+    """
+
+    def test_a_symbol_abandoned_mid_ladder_stays_due(self, marker, monkeypatch):
+        clock = {"t": 0.0}
+
+        # The REAL ladder, driven through a clock that jumps past the deadline
+        # during the IB rung, so its own between-rung re-check does the abort.
+        def slow_ib(symbol):
+            clock["t"] += portfolio_risk.BACKFILL_TOTAL_BUDGET_S + 1
+            return {}
+
+        monkeypatch.setattr(portfolio_risk, "_ib_reachable", lambda: True)
+        monkeypatch.setattr(portfolio_risk, "_fetch_ib_closes", slow_ib)
+        monkeypatch.setattr(portfolio_risk, "_fetch_uw_closes", _never_called)
+        monkeypatch.setattr(portfolio_risk, "_fetch_yahoo_closes", _never_called)
+        monkeypatch.setattr(portfolio_risk, "_persist_closes", lambda *a: None)
+
+        portfolio_risk.backfill_price_history(["AAA"], clock=lambda: clock["t"])
+
+        assert portfolio_risk._due_for_backfill(["AAA"]) == ["AAA"], (
+            "a symbol the ladder abandoned on the wall-clock budget was blacked "
+            "out for 6h without UW or Yahoo ever being asked"
+        )
+
+    def test_a_genuine_three_rung_miss_is_still_blacked_out(self, marker, monkeypatch):
+        monkeypatch.setattr(portfolio_risk, "_ib_reachable", lambda: True)
+        monkeypatch.setattr(portfolio_risk, "_fetch_ib_closes", lambda s: {})
+        monkeypatch.setattr(portfolio_risk, "_fetch_uw_closes", lambda s: {})
+        monkeypatch.setattr(portfolio_risk, "_fetch_yahoo_closes", lambda s: {})
+        monkeypatch.setattr(portfolio_risk, "_persist_closes", lambda *a: None)
+
+        portfolio_risk.backfill_price_history(["AAA"])
+
+        assert portfolio_risk._due_for_backfill(["AAA"]) == [], (
+            "a symbol asked of all three sources must not be retried every minute"
+        )
+
+    def test_a_raising_ladder_still_counts_as_an_attempt(self, marker, monkeypatch):
+        def boom(symbol, deadline=None, clock=None):
+            raise RuntimeError("ladder blew up")
+
+        monkeypatch.setattr(portfolio_risk, "_fetch_closes_via_ladder", boom)
+        with pytest.raises(RuntimeError):
+            portfolio_risk.backfill_price_history(["AAA"])
+        assert portfolio_risk._due_for_backfill(["AAA"]) == [], (
+            "a raising ladder must not be retried on the next minute's sync"
+        )
+
+    def test_the_log_line_does_not_claim_three_sources_it_never_asked(
+        self, marker, monkeypatch, capsys
+    ):
+        clock = {"t": 0.0}
+
+        def ladder(symbol, deadline=None, ladder_clock=None):
+            clock["t"] += portfolio_risk.BACKFILL_TOTAL_BUDGET_S + 1
+            return {}, portfolio_risk._LADDER_DEADLINE
+
+        monkeypatch.setattr(portfolio_risk, "_fetch_closes_via_ladder", ladder)
+        monkeypatch.setattr(portfolio_risk, "_persist_closes", lambda *a: None)
+        portfolio_risk.backfill_price_history(["AAA"], clock=lambda: clock["t"])
+
+        err = capsys.readouterr().err
+        assert "IB/UW/Yahoo" not in err, (
+            "the abort path claimed all three sources were tried"
+        )
+
+
+def _never_called(symbol):
+    raise AssertionError(
+        "the ladder must abort on the deadline before reaching this rung"
+    )
