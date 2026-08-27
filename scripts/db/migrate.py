@@ -242,4 +242,8 @@ def main(argv: list[str] | None = None) -> None:
 
 
 if __name__ == "__main__":
+    # main() parses [] when argv is None, so this forwarding IS the only
+    # thing that lets --demo reach argparse. Dropping it makes
+    # radon-demo-mirror's ExecStartPre migrate prod and exit 0.
+    # Pinned by TestMigrateEntrypointArgv in scripts/tests/test_migrate.py.
     main(sys.argv[1:])
