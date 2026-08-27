@@ -261,3 +261,7 @@ def test_image_workflow_exists_and_is_not_a_deploy_need() -> None:
     assert "--ignorefile" not in wf
     assert "packages: write" in wf
     assert "environment:" not in wf
+    assert "--build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" in wf
+    assert "--build-arg NEXT_PUBLIC_RADON_API_URL" in wf
+    assert "--build-arg NEXT_PUBLIC_IB_REALTIME_WS_URL" in wf
+    assert "vars.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" in wf

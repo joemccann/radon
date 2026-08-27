@@ -29,11 +29,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libxfixes3 \
       libxkbcommon0 \
       libxrandr2 \
+      socat \
     && rm -rf /var/lib/apt/lists/*
 
-RUN useradd --system --create-home --home-dir /home/radon --shell /usr/sbin/nologin radon \
-    && mkdir -p /home/radon/radon \
-    && chown -R radon:radon /home/radon
+# node:22-bookworm-slim already owns uid 1000 (`node`). Host radon is 1000;
+# the wrapper remaps --user to that uid, so the image user must match.
+RUN userdel node || true \
+    && groupdel node || true \
+    && groupadd --gid 1000 radon \
+    && useradd --system --uid 1000 --gid 1000 --create-home --home-dir /home/radon --shell /usr/sbin/nologin radon \
+    && mkdir -p /home/radon/radon/web/public/data \
+    && chown -R radon:radon /home/radon \
+    && chmod 755 /home/radon
 
 WORKDIR /home/radon/radon
 
@@ -46,11 +53,14 @@ RUN bun install --frozen-lockfile
 WORKDIR /home/radon/radon/web
 RUN bun install --frozen-lockfile
 
-ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=""
-ARG NEXT_PUBLIC_RADON_API_URL=""
-ARG NEXT_PUBLIC_IB_REALTIME_WS_URL=""
+ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+ARG NEXT_PUBLIC_RADON_API_URL
+ARG NEXT_PUBLIC_IB_REALTIME_WS_URL
 ARG NEXT_PUBLIC_CLERK_SIGN_IN_URL="/sign-in"
 ARG NEXT_PUBLIC_CLERK_SIGN_UP_URL="/sign-up"
+RUN test -n "$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" \
+    && test -n "$NEXT_PUBLIC_RADON_API_URL" \
+    && test -n "$NEXT_PUBLIC_IB_REALTIME_WS_URL"
 ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY \
     NEXT_PUBLIC_RADON_API_URL=$NEXT_PUBLIC_RADON_API_URL \
     NEXT_PUBLIC_IB_REALTIME_WS_URL=$NEXT_PUBLIC_IB_REALTIME_WS_URL \
@@ -59,7 +69,7 @@ ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 RUN bun run build \
-    && mkdir -p /ms-playwright \
+    && mkdir -p /ms-playwright /home/radon/radon/web/public/data \
     && bun x playwright install chromium chromium-headless-shell \
     && chown -R radon:radon /home/radon/radon /ms-playwright
 

@@ -4,9 +4,11 @@
 #   cp docker/app/.dockerignore .dockerignore && docker build -f docker/app/Dockerfile.python .
 FROM python:3.13-slim
 
-RUN useradd --system --create-home --home-dir /home/radon --shell /usr/sbin/nologin radon \
+RUN groupadd --gid 1000 radon \
+    && useradd --system --uid 1000 --gid 1000 --create-home --home-dir /home/radon --shell /usr/sbin/nologin radon \
     && mkdir -p /home/radon/radon/scripts \
-    && chown -R radon:radon /home/radon
+    && chown -R radon:radon /home/radon \
+    && chmod 755 /home/radon
 
 WORKDIR /home/radon/radon
 
