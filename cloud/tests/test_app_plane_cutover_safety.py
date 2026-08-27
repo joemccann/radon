@@ -35,6 +35,7 @@ unit's migrate step still runs — as root, against production Turso — and
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -69,6 +70,45 @@ def _function_body(text: str, name: str) -> str:
             if depth == 0:
                 return text[start:i + 1]
     raise AssertionError(f"unterminated {name}")
+
+
+# Drop-in examples whose skip is DECLARED at collection rather than taken at
+# runtime, so `-rs` counts it and nothing hides behind a green dot. T-204.
+# The value is the reason. This list may shrink, never grow: every per-unit
+# example must reach the assertion.
+DROP_IN_SKIP_BASELINE = {
+    # The fleet-wide template exists to say "do NOT copy this to
+    # radon-.service.d" (prefix matching would override radon-ib-gateway and
+    # radon-health). It declares no ExecStart override at all, so there is no
+    # ExecStart/ExecStartPre pairing to assert.
+    "radon-.service.d": "T-204: fleet template declares no ExecStart override",
+}
+
+
+def _drop_in_example_params():
+    params = []
+    for example in sorted(SERVICES.glob("*.service.d/runtime-container.conf.example")):
+        unit_dir = example.parent.name
+        reason = DROP_IN_SKIP_BASELINE.get(unit_dir)
+        params.append(
+            pytest.param(
+                example,
+                id=unit_dir,
+                marks=pytest.mark.skip(reason=reason) if reason else (),
+            )
+        )
+    return params
+
+
+DROP_IN_EXAMPLES = _drop_in_example_params()
+
+
+def _directives(example: Path) -> str:
+    """These files are commented templates; read the directive lines."""
+    return "\n".join(
+        re.sub(r"^#\s?", "", line)
+        for line in example.read_text(encoding="utf-8").splitlines()
+    )
 
 
 class TestNoRestartPromoteIsSafe:
@@ -112,9 +152,7 @@ class TestContainerLifecycleIsSweepable:
             "makes every restart Conflict into start-limit-hit"
         )
 
-    @pytest.mark.parametrize(
-        "example", sorted(SERVICES.glob("*.service.d/runtime-container.conf.example"))
-    )
+    @pytest.mark.parametrize("example", DROP_IN_EXAMPLES)
     def test_every_container_drop_in_reaps_the_container_on_stop(self, example):
         """The cgroup half of R-232 is NOT fixable as the finding proposes.
 
@@ -125,10 +163,8 @@ class TestContainerLifecycleIsSweepable:
         `docker run` client. The reachable fix is reaping the container
         explicitly — on the way in via `docker rm -f`, and here on the way out.
         """
-        text = example.read_text(encoding="utf-8")
-        directives = "\n".join(re.sub(r"^#\s?", "", line) for line in text.splitlines())
-        if "ExecStart=/usr/local/sbin/radon-app-runtime" not in directives:
-            pytest.skip(f"{example.parent.name} declares no container ExecStart")
+        directives = _directives(example)
+        assert "ExecStart=/usr/local/sbin/radon-app-runtime run %n" in directives
         assert "ExecStopPost=/usr/local/sbin/radon-app-runtime stop %n" in directives, (
             f"{example.parent.name} leaves the container running after the unit "
             "stops, holding --name and both state bind mounts"
@@ -168,22 +204,90 @@ class TestImageTagIsPreflighted:
 
 
 class TestDropInsResetExecStartPre:
-    @pytest.mark.parametrize(
-        "example", sorted(SERVICES.glob("*.service.d/runtime-container.conf.example"))
-    )
+    @pytest.mark.parametrize("example", DROP_IN_EXAMPLES)
     def test_every_example_that_resets_execstart_also_resets_execstartpre(self, example):
-        text = example.read_text(encoding="utf-8")
-        # These files are commented templates; look at the directive lines.
-        directives = "\n".join(
-            re.sub(r"^#\s?", "", line) for line in text.splitlines()
-        )
-        if "ExecStart=" not in directives:
-            pytest.skip(f"{example.name} declares no ExecStart override")
-        base = SERVICES / example.parent.name.replace(".service.d", ".service")
-        if base.exists() and "ExecStartPre=" not in base.read_text(encoding="utf-8"):
-            pytest.skip(f"{base.name} has no ExecStartPre to reset")
+        # Unconditional: a base unit that has no ExecStartPre TODAY can gain
+        # one without anyone touching the drop-in, and `ExecStartPre=` in the
+        # drop-in is inert when there is nothing to reset. Skipping the four
+        # units whose base has no ExecStartPre left the guard asserting for
+        # radon-api alone. T-204.
+        directives = _directives(example)
+        assert "ExecStart=" in directives
         assert "ExecStartPre=" in directives, (
-            f"{example.name} resets ExecStart but leaves the base unit's "
-            "ExecStartPre running — as root, against production Turso, and "
-            "203/EXEC once the host .venv is retired"
+            f"{example.parent.name} resets ExecStart but does not reset "
+            "ExecStartPre, so a base-unit ExecStartPre runs as root, against "
+            "production Turso, and 203/EXECs once the host .venv is retired"
+        )
+
+
+class TestTheDropInGuardIsNotDecorative:
+    """T-204: a parametrized guard that skips 5 of its 6 cases asserts nothing.
+
+    `test_every_example_that_resets_execstart_also_resets_execstartpre` is
+    parametrized over the six `runtime-container.conf.example` files, but two
+    runtime `pytest.skip` calls left exactly ONE param reaching the assertion.
+    A drop-in that resets `ExecStart` and orphans the base unit's
+    `ExecStartPre` — running as root against production Turso, per the test's
+    own failure message — was caught for `radon-api` only. Counting executed
+    params here is the only way to keep a runtime skip from quietly returning.
+    """
+
+    NODE = "TestDropInsResetExecStartPre"
+
+    def _counts(self) -> tuple[int, int]:
+        result = subprocess.run(
+            [
+                sys.executable, "-m", "pytest",
+                f"{Path(__file__).name}::{self.NODE}",
+                "-q", "-p", "no:cacheprovider",
+            ],
+            cwd=str(Path(__file__).resolve().parent),
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        summary = result.stdout.strip().splitlines()[-1]
+        passed = re.search(r"(\d+) passed", summary)
+        skipped = re.search(r"(\d+) skipped", summary)
+        assert "error" not in summary.lower(), result.stdout + result.stderr
+        return (
+            int(passed.group(1)) if passed else 0,
+            int(skipped.group(1)) if skipped else 0,
+        )
+
+    def test_the_baseline_has_no_stale_entries(self):
+        missing = sorted(
+            name for name in DROP_IN_SKIP_BASELINE
+            if not (SERVICES / name / "runtime-container.conf.example").is_file()
+        )
+        assert not missing, (
+            f"baselined drop-ins that no longer exist: {missing}. Delete them."
+        )
+        now_assertable = sorted(
+            name for name in DROP_IN_SKIP_BASELINE
+            if "ExecStart=" in _directives(
+                SERVICES / name / "runtime-container.conf.example"
+            )
+        )
+        assert not now_assertable, (
+            f"{now_assertable} now declare an ExecStart override, so the "
+            "ExecStart/ExecStartPre pairing IS assertable for them. Drop them "
+            "from DROP_IN_SKIP_BASELINE — the list may shrink, never grow."
+        )
+
+    def test_every_per_unit_example_is_outside_the_baseline(self):
+        baselined = sorted(
+            name for name in DROP_IN_SKIP_BASELINE if name != "radon-.service.d"
+        )
+        assert not baselined, (
+            f"per-unit drop-ins were baselined out of the guard: {baselined}. "
+            "Only the fleet-wide template may be skipped."
+        )
+
+    def test_at_least_two_parametrized_cases_actually_run(self):
+        executed, skipped = self._counts()
+        assert executed >= 2, (
+            f"{self.NODE} executed {executed} of {executed + skipped} "
+            "parametrized cases. A guard that skips its way to a single unit "
+            "does not guard the fleet."
         )
