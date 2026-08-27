@@ -863,6 +863,43 @@ heartbeats.** Peak: 2026-08-24 19:30Z, page `60096761…`, 19m silent
 
 ---
 
+## flow-report-ticker-capacity-502
+
+**Operator `/flow-analysis/{TICKER}` ANALYZE returns instant HTTP 502
+`Subprocess capacity exhausted` while the hero stays on ANALYZING.** Peak:
+2026-08-27, JOBY.
+
+- **Mechanism:** `POST /flow-analysis/{ticker}` runs `flow_report.py` on the
+  general `run_script` lane (hard cap 4 / lane cap 3). Hourly scans and the
+  sibling `GET /informed-flow/{ticker}` spawn pin the lane. `_claim_subprocess_slot`
+  is fail-fast, so ANALYZE 502s in milliseconds. `/health/lite` stays 200.
+  The ticker hook then sets `status=error` with no cached report; SignalBadge
+  treated error-without-verdict as ANALYZING and rendered the raw
+  `Radon API 502: …` string.
+- **Discriminating check:** UI `Radon API 502: Subprocess capacity exhausted`
+  under an ANALYZING hero; radon-api
+  `Subprocess capacity exhausted for flow_report.py (3 active, lane cap 3,
+  hard cap 4)`; informed-flow panel still populated; `/health/lite` 200.
+  Script-failed 502 logs `Script flow_report.py failed (code 1)` and takes
+  seconds. Portfolio-tab `POST /flow-analysis` cooldown path is
+  `flow-refresh-capacity-502`.
+- **Remediation (code):** retry capacity shed on the ticker POST
+  (`FLOW_REPORT_SHED_RETRIES` default 2,
+  `FLOW_REPORT_SHED_RETRY_DELAY_SECS` default 8), same budget as
+  orders-sync. Persistent shed still 502. UI maps the capacity string to
+  operator copy and shows `Scan failed` instead of ANALYZING.
+- **Regression:**
+  `test_flow_report_capacity_shed.py::test_flow_report_retries_capacity_shed_then_succeeds`,
+  `test_flow_report_persistent_capacity_shed_still_502`,
+  `test_flow_report_real_script_failure_does_not_retry`,
+  `web/tests/flow-report-capacity-error.test.tsx`,
+  `web/e2e/flow-analysis-ticker.spec.ts` (`capacity 502 shows scan failed`).
+- **Code:** `scripts/api/server.py` (`_run_script_retrying_capacity`,
+  `run_flow_report`); `web/lib/flowReportError.ts`;
+  `web/components/flow-analysis/TickerFlowReport.tsx`.
+
+---
+
 ## service-health-degraded / service-down (generic cases)
 
 `service-health-degraded`: `/api/service-health` body lists failing rows (error,

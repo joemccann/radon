@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isFlowReportStale } from "@/lib/flowReportStaleness";
+import { flowReportErrorCopy } from "@/lib/flowReportError";
 
 /**
  * Cache-then-scan hook for a single-ticker flow report.
@@ -108,7 +109,7 @@ export function useTickerFlowReport(ticker: string | null): UseTickerFlowReportR
     } catch (err) {
       if (signal.aborted) return;
       const message = err instanceof Error ? err.message : "Flow scan failed";
-      setError(message);
+      setError(flowReportErrorCopy(message));
       // Preserve any previously-cached data — caller decides how to display.
       setStatus("error");
     }
@@ -158,7 +159,7 @@ export function useTickerFlowReport(ticker: string | null): UseTickerFlowReportR
       } catch (err) {
         if (signal.aborted) return;
         const message = err instanceof Error ? err.message : "Failed to load report";
-        setError(message);
+        setError(flowReportErrorCopy(message));
         setData(null);
         setStatus("error");
       }

@@ -9,6 +9,7 @@ import SignalCard from "@/components/mobile/SignalCard";
 import SpectralLoader from "@/components/SpectralLoader";
 import { useViewport } from "@/lib/useViewport";
 import DailyDarkPoolHistory from "@/components/flow-analysis/DailyDarkPoolHistory";
+import { flowReportErrorCopy } from "@/lib/flowReportError";
 
 type Props = {
   ticker: string;
@@ -36,12 +37,12 @@ export default function TickerFlowReport({ ticker }: Props) {
 
   return (
     <div className="ticker-flow-report" data-testid="ticker-flow-report">
-      <SignalBadge ticker={ticker} verdict={verdict} status={status} onRefresh={refresh} />
+      <SignalBadge ticker={ticker} verdict={verdict} status={status} error={error} onRefresh={refresh} />
 
       {error && (
         <div className="section">
           <div className="section-body">
-            <div className="alert-item bearish" role="alert">{error}</div>
+            <div className="alert-item bearish" role="alert">{flowReportErrorCopy(error)}</div>
           </div>
         </div>
       )}
@@ -190,7 +191,7 @@ function MobileTickerFlowReport({
 
       {error && (
         <div style={{ padding: "8px 16px" }}>
-          <div className="alert-item bearish" role="alert">{error}</div>
+          <div className="alert-item bearish" role="alert">{flowReportErrorCopy(error)}</div>
         </div>
       )}
 
@@ -391,17 +392,20 @@ function SignalBadge({
   ticker,
   verdict,
   status,
+  error,
   onRefresh,
 }: {
   ticker: string;
   verdict: Verdict | null;
   status: ReturnType<typeof useTickerFlowReport>["status"];
+  error: string | null;
   onRefresh: () => void;
 }) {
   const direction = verdict?.direction ?? null;
   const meta = directionMeta(direction);
   const Icon = meta.Icon;
-  const showVerdict = status === "fresh" || status === "error" || status === "scanning";
+  const failed = status === "error" && !verdict;
+  const showVerdict = !failed && (status === "fresh" || status === "error" || status === "scanning");
 
   return (
     <section className="section ticker-flow-hero">
@@ -434,12 +438,14 @@ function SignalBadge({
         </div>
         <div className="ticker-flow-badge-body">
           <div className="ticker-flow-badge-label">
-            {showVerdict && verdict ? meta.label : `Analyzing ${ticker}`}
+            {failed ? "Scan failed" : showVerdict && verdict ? meta.label : `Analyzing ${ticker}`}
           </div>
           <div className="ticker-flow-badge-rationale">
-            {showVerdict && verdict
-              ? verdict.rationale
-              : "Reconstructing dark pool and options flow"}
+            {failed
+              ? flowReportErrorCopy(error)
+              : showVerdict && verdict
+                ? verdict.rationale
+                : "Reconstructing dark pool and options flow"}
           </div>
         </div>
         {showVerdict && verdict && (
