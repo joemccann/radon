@@ -744,17 +744,18 @@ Windows are registered in `scripts/watchdog/services.py` and
 | Tables | `equibles_13f_snapshots` (the route's only read), `equibles_13f_holders` (write-only depth), `equibles_filing_forensics`, `equibles_short_interest` + `equibles_squeeze_scores`, `equibles_ats_venue_share`, `cot_positioning` |
 | Demo mirror | `equibles_13f_snapshots` + `equibles_filing_forensics` are mirrored per ticker by `scripts/db/mirror_market_snapshots_to_demo.js`. `equibles_13f_holders` is not — nothing reads it. |
 
-**Fail-closed:** `EQUIBLES_API_KEY` is deliberately NOT in
-`cloud/config/required-env.txt`, so `cloud/scripts/check-env.py` does not gate
-the deploy preflight on it. It was added to that contract on 2026-08-25 and
-held back out again on 2026-08-26; putting it back is an operator call taken on
-the host, not a code change. The guard is per producer instead. All five build
-their Equibles client inside the block that owns health reporting, so a
-construction failure, a rejected key, an exhausted allowance, and an empty
-watchlist each leave an `error` heartbeat before the process exits. That
-heartbeat, not the preflight, is what surfaces a missing key. Until 2026-08-25
-the construction sat outside that block and the oneshots died writing no
-`service_health` row at all, not even an error row.
+**Fail-closed:** `EQUIBLES_API_KEY` is in
+`cloud/config/required-env.txt`, so `cloud/scripts/check-env.py` gates the
+deploy preflight on it and a host without the key fails the deploy instead of
+shipping five units that die on every fire. The key was added to that contract
+on 2026-08-25, taken back out on 2026-08-26, and restored the same day by
+PR #104. A second guard sits per producer. All five build their Equibles client
+inside the block that owns health reporting, so a construction failure, a
+rejected key, an exhausted allowance, and an empty watchlist each leave an
+`error` heartbeat before the process exits. The preflight catches an unset key
+at deploy time; that heartbeat catches a key the API rejects later. Until
+2026-08-25 the construction sat outside that block and the oneshots died
+writing no `service_health` row at all.
 
 Read-only operator checks on the VPS:
 
