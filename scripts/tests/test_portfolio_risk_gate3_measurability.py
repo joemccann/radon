@@ -82,7 +82,7 @@ class TestBackfillBlackoutIsPerSymbolAndAfterTheAttempt:
     def test_a_persist_failure_does_not_discard_the_other_symbols(self, marker, monkeypatch):
         attempted: list[str] = []
 
-        def ladder(symbol):
+        def ladder(symbol, deadline=None, clock=None):
             attempted.append(symbol)
             return ({"2026-08-20": 10.0}, "ib")
 
@@ -103,7 +103,7 @@ class TestBackfillBlackoutIsPerSymbolAndAfterTheAttempt:
     def test_a_fetched_series_survives_a_persist_failure(self, marker, monkeypatch):
         monkeypatch.setattr(
             portfolio_risk, "_fetch_closes_via_ladder",
-            lambda s: ({"2026-08-20": 10.0}, "ib"),
+            lambda s, deadline=None, clock=None: ({"2026-08-20": 10.0}, "ib"),
         )
         monkeypatch.setattr(
             portfolio_risk, "_persist_closes",
@@ -115,7 +115,9 @@ class TestBackfillBlackoutIsPerSymbolAndAfterTheAttempt:
     def test_the_blackout_is_stamped_per_symbol_after_the_attempt(self, marker, monkeypatch):
         monkeypatch.setattr(
             portfolio_risk, "_fetch_closes_via_ladder",
-            lambda s: ({"2026-08-20": 10.0}, "ib") if s == "AAA" else (None, None),
+            lambda s, deadline=None, clock=None: (
+                ({"2026-08-20": 10.0}, "ib") if s == "AAA" else ({}, "")
+            ),
         )
         monkeypatch.setattr(portfolio_risk, "_persist_closes", lambda *a: None)
 
@@ -128,7 +130,7 @@ class TestBackfillBlackoutIsPerSymbolAndAfterTheAttempt:
         monkeypatch.setattr(portfolio_risk, "BACKFILL_MAX_SYMBOLS_PER_RUN", 2)
         monkeypatch.setattr(
             portfolio_risk, "_fetch_closes_via_ladder",
-            lambda s: ({"2026-08-20": 10.0}, "ib"),
+            lambda s, deadline=None, clock=None: ({"2026-08-20": 10.0}, "ib"),
         )
         monkeypatch.setattr(portfolio_risk, "_persist_closes", lambda *a: None)
 
@@ -144,18 +146,19 @@ class TestLoaderIsTimeBoxed:
         """
         calls: list[str] = []
         clock = {"t": 0.0}
-        monkeypatch.setattr(portfolio_risk.time, "monotonic", lambda: clock["t"])
 
-        def slow_ladder(symbol):
+        def slow_ladder(symbol, deadline=None, ladder_clock=None):
             calls.append(symbol)
             # A dead gateway: this symbol burned the whole budget on connect
             # timeouts before the ladder even reached UW.
-            clock["t"] += portfolio_risk.BACKFILL_WALL_CLOCK_BUDGET_S
-            return (None, None)
+            clock["t"] += portfolio_risk.BACKFILL_TOTAL_BUDGET_S
+            return ({}, "")
 
         monkeypatch.setattr(portfolio_risk, "_fetch_closes_via_ladder", slow_ladder)
         monkeypatch.setattr(portfolio_risk, "_persist_closes", lambda *a: None)
-        portfolio_risk.backfill_price_history(["AAA", "BBB", "CCC", "DDD"])
+        portfolio_risk.backfill_price_history(
+            ["AAA", "BBB", "CCC", "DDD"], clock=lambda: clock["t"]
+        )
         assert len(calls) == 1, (
             f"the ladder kept going past its wall-clock budget: {calls}"
         )
@@ -169,14 +172,15 @@ class TestLoaderIsTimeBoxed:
         inside two portfolio-sync cadences.
         """
         bound = (
-            portfolio_risk.BACKFILL_WALL_CLOCK_BUDGET_S
+            portfolio_risk.BACKFILL_TOTAL_BUDGET_S
             + portfolio_risk.BACKFILL_SYMBOL_WORST_CASE_S
         )
         assert bound <= 120, f"a single loader call can block for {bound}s"
         # And the unbounded shape the finding measured — four symbols each
-        # running the full ladder — is no longer reachable.
+        # running the full three-rung ladder — is no longer reachable.
         unbounded = (
             portfolio_risk.BACKFILL_MAX_SYMBOLS_PER_RUN
+            * portfolio_risk.BACKFILL_LADDER_RUNGS
             * portfolio_risk.BACKFILL_SYMBOL_WORST_CASE_S
         )
         assert bound < unbounded

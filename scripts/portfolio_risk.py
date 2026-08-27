@@ -82,6 +82,12 @@ STALE_TOLERANCE_DAYS = 10
 BACKFILL_MAX_SYMBOLS_PER_RUN = 4
 BACKFILL_RETRY_S = 6 * 3600
 BACKFILL_TOTAL_BUDGET_S = 20.0
+# The worst a symbol already in flight can cost once the budget is spent. The
+# deadline is re-checked BETWEEN rungs, so it is one slow rung (IB connect 10s
+# + history 20s, or Yahoo urlopen 30s) rather than a whole ladder. Named so the
+# call bound above is checkable rather than implied.
+BACKFILL_SYMBOL_WORST_CASE_S = 30.0
+BACKFILL_LADDER_RUNGS = 3
 _BACKFILL_MARKER_PATH = _DATA_DIR / "price_risk_backfill.json"
 
 IB_HISTORY_DURATION = "1 Y"
@@ -404,8 +410,13 @@ def load_price_series_for_portfolio(
         unusable = [t for t in wanted if not _has_target_depth(series.get(t))]
 
     if unusable:
+        # The legacy disk cache is not pruned by age, so it can hold a series
+        # that ended over a year ago. It has to clear the same depth AND
+        # freshness bar as the DB series it is standing in for; installing it
+        # on the strength of the DB series being unusable made a long-dead
+        # cache file look like a current correlation input.
         for ticker, closes in _load_disk_cache_series(unusable, stocks_dir).items():
-            if not _has_target_depth(series.get(ticker)):
+            if not _has_target_depth(series.get(ticker)) and _has_target_depth(closes):
                 series[ticker] = closes
 
     return {t: s for t, s in series.items() if s}
@@ -461,7 +472,12 @@ def backfill_price_history(
         if not closes:
             print(f"  no daily closes for {symbol} from IB/UW/Yahoo", file=sys.stderr)
             continue
-        _persist_closes(symbol, closes, source)
+        # Closes already in hand are the point of the run; a Turso hiccup must
+        # not discard them, nor abort the remaining symbols' attempts.
+        try:
+            _persist_closes(symbol, closes, source)
+        except Exception as exc:  # noqa: BLE001 - persistence is best-effort here
+            print(f"  could not persist {symbol} closes: {exc}", file=sys.stderr)
         fetched[symbol] = closes
     return fetched
 
