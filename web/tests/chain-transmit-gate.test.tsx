@@ -126,4 +126,23 @@ describe("ticket transmit gate", () => {
     expect((ack as HTMLInputElement).checked).toBe(false);
     expect(transmitButton().disabled).toBe(true);
   });
+
+  // Arming the button is not the same as being able to send. The submit
+  // handler re-checks the acknowledgement, so it must see the CURRENT one —
+  // a handler memoised without it stays closed over `false` forever and the
+  // armed button silently does nothing (production 2026-08-27).
+  it("transmits the order once acknowledged", async () => {
+    await shortCallTicket();
+    fireEvent.click(verifyButton());
+    fireEvent.click(await screen.findByTestId("ticket-unbounded-ack"));
+    await waitFor(() => expect(transmitButton().disabled).toBe(false));
+
+    fireEvent.click(transmitButton());
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([input]) => String(input).includes("/api/orders/place")),
+      ).toBe(true),
+    );
+  });
 });
