@@ -12858,6 +12858,14 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
   border-top: 1px solid var(--line-grid);
 }
 
+.ticket-risk-payoff-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  padding-bottom: 4px;
+}
+
 .ticket-risk-payoff {
   display: block;
   width: 100%;
