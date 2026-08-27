@@ -116,11 +116,11 @@ describe("PositionTable expanded leg rows", () => {
 
     fireEvent.click(screen.getByLabelText("Expand legs for CROX"));
 
-    const longLegRow = screen.getByText("LONG 1x Call $80").closest("tr");
+    const longLegRow = screen.getByText("LONG Call $80").closest("tr");
     expect(longLegRow).not.toBeNull();
     expect(longLegRow?.textContent).toContain("$450");
 
-    const shortLegRow = screen.getByText("SHORT 1x Call $95").closest("tr");
+    const shortLegRow = screen.getByText("SHORT Call $95").closest("tr");
     expect(shortLegRow).not.toBeNull();
     expect(shortLegRow?.textContent).toContain("$125");
   });

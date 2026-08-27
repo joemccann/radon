@@ -272,23 +272,32 @@ function LegRow({
   const signedMarketPrice = marketPrice != null ? displaySign * marketPrice : null;
   const { direction: priceDirection, flashDirection } = usePriceDirection(signedMarketPrice);
 
-  // The leg-description cell spans across the columns to the right of Ticker
-  // up through Direction: Structure, optional Qty, Direction (each gated).
-  const descColSpan =
-    (columns.structure ? 1 : 0) + (columns.qty ? 1 : 0) + (columns.direction ? 1 : 0);
+  // The leg description takes the first visible of Structure, Direction, Qty;
+  // the contract count takes the Qty column so it lines up under the combo's
+  // own quantity instead of repeating inline in the description.
+  const descColumn = columns.structure
+    ? "structure"
+    : columns.direction
+      ? "direction"
+      : columns.qty
+        ? "qty"
+        : null;
+  const legDescription = (
+    <td
+      className={`cell-indent cell-muted ${onLegClick ? "leg-clickable" : ""}`}
+      onClick={onLegClick ? () => onLegClick(leg) : undefined}
+    >
+      {leg.direction} {leg.type}{leg.strike ? ` $${leg.strike}` : ""}
+    </td>
+  );
 
   return (
     <tr className={flashDirection ? `last-price-${flashDirection}` : undefined}>
       <td></td>
-      {descColSpan > 0 && (
-        <td
-          colSpan={descColSpan}
-          className={`cell-indent cell-muted ${onLegClick ? "leg-clickable" : ""}`}
-          onClick={onLegClick ? () => onLegClick(leg) : undefined}
-        >
-          {leg.direction} {leg.contracts}x {leg.type}{leg.strike ? ` $${leg.strike}` : ""}
-        </td>
-      )}
+      {columns.structure && legDescription}
+      {columns.qty &&
+        (descColumn === "qty" ? legDescription : <td className="right cell-muted">{leg.contracts}</td>)}
+      {columns.direction && (descColumn === "direction" ? legDescription : <td></td>)}
       {showUnderlying && <td></td>}
       {columns.avg_entry && (
         <td className="right cell-muted">{fmtPrice(displaySign * (Math.abs(leg.avg_cost) / mult))}</td>
