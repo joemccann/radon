@@ -269,9 +269,14 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // Source: scripts/gex_scan.py uses UWClient only — no IB dependency.
   "gex-scan": { open: 30 * MIN, extended: 30 * MIN, closed: 1 * DAY, category: "on-demand", requires_ib: false },
   "gamma-rotation-scan": { open: 30 * MIN, extended: 30 * MIN, closed: 1 * DAY, category: "on-demand", requires_ib: false },
-  // ``breadth-scan`` writes when a user POSTs /breadth/scan — NYSE A/D +
-  // TICK internals sampled from IB index feeds, so requires_ib=true.
-  "breadth-scan": { open: 30 * MIN, extended: 30 * MIN, closed: 1 * DAY, category: "on-demand", requires_ib: true },
+  // ``breadth-scan`` is SCHEDULED, not on-demand: radon-breadth.timer fires
+  // every 5 min across ET trading hours. It was catalogued on-demand, which
+  // coerces a past-window row into the informational `dormant` state instead
+  // of the degraded `stale` one — and it was absent from the watchdog catalog
+  // entirely, so nothing on either side noticed a frozen feed. NYSE A/D +
+  // TICK internals sampled from IB index feeds, so requires_ib=true. Windows
+  // mirror scripts/watchdog/services.py. R-236.
+  "breadth-scan": { open: 15 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "scheduled", requires_ib: true },
   // ``vcg-scan`` has an autonomous 5-min cadence during market hours
   // (radon-vcg-refresh.timer / com.radon.vcg-refresh). The 15-min open
   // window tolerates 3 missed cycles before flagging — long enough to

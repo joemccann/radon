@@ -82,8 +82,8 @@ export function OrderConfirmSummary({
   if (summary.coverageStatus !== "resolved") {
     const pendingLabel =
       summary.coverageStatus === "no-portfolio"
-        ? "Coverage indeterminate — portfolio not in scope"
-        : "Coverage indeterminate — portfolio resolving";
+        ? "Coverage indeterminate: portfolio not in scope"
+        : "Coverage indeterminate: portfolio resolving";
     return (
       <div
         className={`order-confirm-summary order-confirm-summary-pending ${className}`.trim()}
@@ -231,13 +231,15 @@ export function OrderConfirmSummary({
             <span className="order-confirm-metric-label">Payoff:</span>
             <span
               className={`order-confirm-metric-value ${
-                payoff.kind === "uncapped" || payoff.meetsConvexity
+                payoff.kind === "ratio" && payoff.meetsConvexity
                   ? "order-confirm-positive"
                   : ""
               }`.trim()}
               data-testid="order-payoff-ratio"
+              // UNCAPPED is not an asserted Gate 1 pass — it is an uncomputed
+              // one — and UNMEASURED is not a pass at all. R-251.
               data-meets-convexity={
-                payoff.kind === "uncapped" ? "true" : payoff.meetsConvexity ? "true" : "false"
+                payoff.kind === "ratio" && payoff.meetsConvexity ? "true" : "false"
               }
               style={
                 payoff.kind === "ratio" && !payoff.meetsConvexity
@@ -245,7 +247,11 @@ export function OrderConfirmSummary({
                   : undefined
               }
             >
-              {payoff.kind === "uncapped" ? "UNCAPPED" : formatPayoffRatio(payoff.ratio)}
+              {payoff.kind === "uncapped"
+                ? "UNCAPPED"
+                : payoff.kind === "unmeasured"
+                  ? "NOT MEASURED"
+                  : formatPayoffRatio(payoff.ratio)}
               {payoff.kind === "ratio" && !payoff.meetsConvexity && (
                 <span
                   style={{ marginLeft: "6px", fontSize: "0.85em", color: "var(--text-muted)" }}

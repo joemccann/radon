@@ -54,7 +54,13 @@ export const SHUTDOWN_GRACE_MS = 10_000;
  * left the process alive until systemd's SIGKILL (90 s) — longer than the
  * deploy waits for the unit to go inactive. Abort, then exit after the grace.
  */
-export function createShutdown({ controller, exit = process.exit, graceMs = SHUTDOWN_GRACE_MS }) {
+export function createShutdown({
+  controller,
+  exit = process.exit,
+  graceMs = SHUTDOWN_GRACE_MS,
+  /** () => boolean — true while a scrape cycle is mid-flight. */
+  isCycleInFlight = () => false,
+}) {
   let started = false;
   return function shutdown(signalName) {
     if (started) return;
@@ -62,8 +68,22 @@ export function createShutdown({ controller, exit = process.exit, graceMs = SHUT
     console.info(`[newsfeed] received ${signalName} — shutting down`);
     controller.abort();
     const timer = setTimeout(() => {
-      console.warn(`[newsfeed] shutdown grace of ${graceMs}ms elapsed — exiting`);
-      exit(0);
+      // Exit 0 for a clean stop, NON-ZERO when the grace expired with a cycle
+      // still running. The abort signal is only checked between cycles, so a
+      // SIGTERM landing mid-cycle kills the process between persistPosts
+      // (disk) and upsertPosts (Turso) — and exiting 0 made systemd's
+      // Restart=on-failure treat that truncated cycle as a clean stop, with
+      // nothing but a console.warn recording that work was dropped. R-262.
+      const truncated = isCycleInFlight();
+      if (truncated) {
+        console.warn(
+          `[newsfeed] shutdown grace of ${graceMs}ms elapsed MID-CYCLE — exiting non-zero; `
+          + "a cycle was truncated between the disk write and the Turso upsert",
+        );
+      } else {
+        console.warn(`[newsfeed] shutdown grace of ${graceMs}ms elapsed — exiting`);
+      }
+      exit(truncated ? 75 : 0);
     }, graceMs);
     timer.unref?.();
   };

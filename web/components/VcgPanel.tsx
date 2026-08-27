@@ -85,9 +85,9 @@ function tierColor(tier: 1 | 2 | 3 | null): string {
 
 function tierLabel(tier: 1 | 2 | 3 | null): string {
   switch (tier) {
-    case 1: return "TIER 1 — CRITICAL";
-    case 2: return "TIER 2 — HIGH";
-    case 3: return "TIER 3 — ELEVATED";
+    case 1: return "TIER 1: CRITICAL";
+    case 2: return "TIER 2: HIGH";
+    case 3: return "TIER 3: ELEVATED";
     default: return "NO ACTIVE TIER";
   }
 }
@@ -102,9 +102,9 @@ function vvixSeverityColor(sev: string): string {
 
 function vvixSeverityDesc(sev: string): string {
   switch (sev) {
-    case "extreme":  return "VVIX far above 120 — maximum vol-of-vol stress";
-    case "elevated": return "VVIX above 110 — second-order stress signal";
-    default:         return "VVIX below 110 — vol regime stable";
+    case "extreme":  return "VVIX far above 120: maximum vol-of-vol stress";
+    case "elevated": return "VVIX above 110: second-order stress signal";
+    default:         return "VVIX below 110: vol regime stable";
   }
 }
 
@@ -226,6 +226,28 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
 
   if (!data) return null;
 
+  if (!data.signal) {
+    // Every VCG source was unreachable. Rendering the strip here would paint
+    // a "DIVERGENCE" regime pill and a "NORMAL" interpretation and suppress
+    // the RISK-OFF and EDR pills, which reads as an affirmative all-clear on
+    // a dead feed. R-228.
+    return (
+      <div className="section">
+        <div className="section-header">
+          <div className="section-title">
+            <Zap size={14} />
+            Volatility-Credit Gap
+          </div>
+        </div>
+        <div className="section-body" style={{ padding: "16px" }}>
+          <div className="alert-item bearish">
+            Vol-credit feed unavailable: the last read reached neither the database nor the on-disk cache, so there is no signal to show.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const sig = data.signal;
   const attr = sig.attribution;
   const interpColor = interpretationColor(sig.interpretation);
@@ -275,7 +297,7 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
               {data.credit_proxy}
             </span>
             <ShareReportModal
-              modalTitle="VCG REPORT — SHARE TO X"
+              modalTitle="VCG REPORT: SHARE TO X"
               shareEndpoint="/api/vcg/share"
               buttonTitle="Share VCG report to X"
               iconSize={11}
@@ -515,7 +537,7 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
           drill-down UX, regardless of the chart's selected range. */}
       <div className="section">
         <div className="section-header">
-          <div className="section-title">VCG History — Recent 20 Sessions</div>
+          <div className="section-title">VCG History: Recent 20 Sessions</div>
         </div>
         <div className="section-body table-wrap">
           <table>

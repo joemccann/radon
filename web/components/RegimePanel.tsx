@@ -43,6 +43,7 @@ import { chartSeriesColor } from "@/lib/chartSystem";
 import {
   CRASH_TRIGGER_CORRELATION_THRESHOLD,
   resolveCrashTriggerState,
+  resolveCriDisplay,
   resolveRegimeStripLiveState,
 } from "@/lib/regimeLiveStrip";
 import { useRegime } from "@/lib/useRegime";
@@ -117,8 +118,8 @@ function fmtSigned(v: number | null | undefined, decimals = 2): string {
 /* ─── Component Bar ──────────────────────────────────── */
 
 const COMPONENT_TOOLTIPS: Record<string, string> = {
-  VIX: "CBOE Volatility Index — 30-day implied vol of SPX. Score rises as VIX exceeds 20 (elevated) and 30 (high). Extreme spikes indicate tail-risk hedging by institutional players.",
-  VVIX: "Vol-of-VIX — measures expected volatility of VIX itself. Score rises with absolute level and VVIX/VIX ratio >5, signalling second-order stress and unstable vol regimes.",
+  VIX: "CBOE Volatility Index: 30-day implied vol of SPX. Score rises as VIX exceeds 20 (elevated) and 30 (high). Extreme spikes indicate tail-risk hedging by institutional players.",
+  VVIX: "Vol-of-VIX measures expected volatility of VIX itself. Score rises with absolute level and VVIX/VIX ratio >5, signalling second-order stress and unstable vol regimes.",
   CORRELATION: "Cboe 1-Month Implied Correlation Index (COR1M). High COR1M (>60) means the market expects the largest S&P 500 stocks to move together, reducing diversification and signalling herding risk.",
   MOMENTUM: "SPX distance below 100-day MA combined with VIX 5-day rate of change. Captures both price trend stress and velocity of volatility acceleration.",
 };
@@ -164,7 +165,7 @@ export default function RegimePanel({
   dataEndpoint,
   shareEndpoint,
   shareContentEndpoint,
-  shareModalTitle = "REGIME REPORT — SHARE TO X",
+  shareModalTitle = "REGIME REPORT: SHARE TO X",
   shareButtonTitle = "Share Regime report to X",
   shareContentTitle = "Regime Share Preview",
   marketState,
@@ -317,8 +318,11 @@ export default function RegimePanel({
     });
   }, [data, effectiveHasLive, liveVix, liveVvix, liveSpy, activeCorrChange, safeActiveCorr]);
 
-  const cri = liveCri ?? (data?.cri ? { ...data.cri, level: data.cri.level as CriLevel } : { score: 0, level: "LOW" as CriLevel, components: { vix: 0, vvix: 0, correlation: 0, momentum: 0 } });
-  const color = levelColor(cri.level);
+  const criDisplay = resolveCriDisplay(data, liveCri);
+  const cri = criDisplay.cri
+    ? { ...criDisplay.cri, level: criDisplay.cri.level as CriLevel }
+    : null;
+  const color = levelColor(cri?.level ?? ("LOW" as CriLevel));
   const ma = data?.spx_100d_ma;
   const spxBelowMa = ma && spyVal != null
     ? spyVal < ma
@@ -335,12 +339,12 @@ export default function RegimePanel({
   const railStatuses = useMemo(
     () =>
       buildRailStatuses({
-        cri: data ? { score: cri.score, level: cri.level } : null,
+        cri: cri ? { score: cri.score, level: cri.level } : null,
         cor1m: activeCorr,
         vcg: railVcgData,
         gex: railGexData,
       }),
-    [data, cri.score, cri.level, activeCorr, railVcgData, railGexData],
+    [cri?.score, cri?.level, activeCorr, railVcgData, railGexData],
   );
 
   const tabBar = compact ? (
@@ -494,6 +498,19 @@ export default function RegimePanel({
         icon={Shield}
         headline="No crash-risk data yet"
         secondary="Run Sync Now in the header to compute the current crash-risk regime."
+      />,
+    );
+  }
+
+  if (!cri) {
+    // Every CRI source was unreachable and no live quote can stand in. Drawing
+    // the hero here would show 0 /100 LOW with four green component bars — the
+    // calmest possible reading — for a feed that is dead. R-200.
+    return renderShell(
+      <SectionEmptyState
+        icon={Shield}
+        headline="Crash-risk feed unavailable"
+        secondary="The last read reached neither the database nor the on-disk cache, so there is no crash-risk reading to show. Run Sync Now to retry."
       />,
     );
   }
@@ -686,7 +703,7 @@ export default function RegimePanel({
                 borderLeft: "2px solid var(--warning, #F5A623)",
               }}
             >
-              MARKET CLOSED — END OF DAY VALUES
+              MARKET CLOSED: END OF DAY VALUES
             </div>
           )}
 

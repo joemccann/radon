@@ -250,26 +250,35 @@ def _closing_fill():
     }
 
 
-def _stub_db_client(monkeypatch, *, rows=None, error=None):
+def _stub_journal_transport(monkeypatch, *, rows=None, error=None):
+    """Serve the overlay's journal pages over the bounded transport.
+
+    R-203 moved this read off ``db.client.get_db()`` — the sync
+    ``libsql_experimental`` connection with no execute timeout — and onto the
+    ``journal_basis`` 200-row keyset pager over Hrana HTTP, so the stub
+    stamps an ascending ``trade_id`` and honours cursor + LIMIT.
+    """
     import json
 
-    class _Cursor:
-        def fetchall(self):
-            return [(json.dumps(r), r["date"], f"w{i}") for i, r in enumerate(rows or [])]
+    import db.hrana_http as hrana_http
 
-    class _Db:
-        def execute(self, sql, args=()):
-            if error:
-                raise error
-            return _Cursor()
+    paged = [
+        (f"t{index:04d}", json.dumps(row), row["date"], f"w{index}")
+        for index, row in enumerate(rows or [])
+    ]
 
-    fake = types.ModuleType("db.client")
-    fake.get_db = lambda: _Db()  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "db.client", fake)
+    def query(sql, args=(), timeout=None):
+        if error:
+            raise error
+        cursor = args[0]
+        limit = int(args[-1])
+        return [row for row in paged if row[0] > cursor][:limit]
+
+    monkeypatch.setattr(hrana_http, "hrana_query", query)
 
 
 def test_dual_write_persists_journal_realized_pnl_over_ib(mock_writer, monkeypatch):
-    _stub_db_client(monkeypatch, rows=[_JOURNAL_OPEN, _JOURNAL_CLOSE])
+    _stub_journal_transport(monkeypatch, rows=[_JOURNAL_OPEN, _JOURNAL_CLOSE])
     import ib_orders
 
     ib_orders._dual_write_orders_to_db({"open_orders": [], "executed_orders": [_closing_fill()]})
@@ -281,7 +290,7 @@ def test_dual_write_persists_journal_realized_pnl_over_ib(mock_writer, monkeypat
 
 
 def test_dual_write_keeps_ib_realized_pnl_when_journal_unreadable(mock_writer, monkeypatch):
-    _stub_db_client(monkeypatch, error=RuntimeError("stream not found"))
+    _stub_journal_transport(monkeypatch, error=RuntimeError("stream not found"))
     import ib_orders
 
     ib_orders._dual_write_orders_to_db({"open_orders": [], "executed_orders": [_closing_fill()]})

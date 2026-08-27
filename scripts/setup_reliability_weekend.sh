@@ -59,6 +59,18 @@ if kill -0 "$(cat "$WEEKEND_REPO/.weekend-runner.lock/pid" 2>/dev/null)" 2>/dev/
   echo "  a weekend run is in flight in $WEEKEND_REPO; re-run when it finishes"
   exit 1
 fi
+# The SIBLING loop's clone too. WEEKEND_VENV is literally the same path in
+# both setups, and both wrappers prepend it to the running agent's PATH — so
+# the `python3.13 -m venv` + `pip install` below would mutate the interpreter
+# and site-packages a live testing agent is executing against, mid-run.
+# The guard above was written for the clone ("A live cycle owns this clone")
+# and never extended to the shared $WEEKEND_ROOT both loops depend on. R-266.
+SIBLING_REPO="$WEEKEND_ROOT/radon-testing"
+if [[ -d "$SIBLING_REPO" ]] \
+  && kill -0 "$(cat "$SIBLING_REPO/.weekend-runner.lock/pid" 2>/dev/null)" 2>/dev/null; then
+  echo "  a weekend run is in flight in $SIBLING_REPO and shares $WEEKEND_VENV; re-run when it finishes"
+  exit 1
+fi
 # An already-provisioned clone must carry the current config/ and scripts/
 # before the job is installed from it. main is force-reset; any weekend
 # branch and its commits survive.

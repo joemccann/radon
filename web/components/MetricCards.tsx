@@ -769,7 +769,7 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
       {/* ACCOUNT: Unrealized P&L → position-level open P&L (entry cost vs market value) */}
       <PnlBreakdownModal
         open={unrealizedModalOpen}
-        title="Unrealized P&L — Open Positions"
+        title="Unrealized P&L: Open Positions"
         formula={
           "Unrealized P&L = SUM( market_value − entry_cost ) per position\n" +
           "Entry cost and market value are signed (credits and short marks negative)\n" +
@@ -788,7 +788,7 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
       {/* TODAY'S P&L: Day Move → per-position intraday change (close → current) */}
       <PnlBreakdownModal
         open={dayMoveModalOpen}
-        title="Day Move — Intraday P&L"
+        title="Day Move: Intraday P&L"
         formula={
           "Day Move = stocks: (last − close) × shares; options: IB reqPnLSingle daily P&L when available, else sign × (last − close) × contracts × multiplier\n" +
           "sign = +1 LONG, −1 SHORT  |  multiplier = 100 for options, 1 for stocks\n" +
@@ -834,8 +834,8 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
           formula={
             "Day P&L = SUM( current_price − yesterday_close ) × position_size\n" +
             (acct.daily_pnl != null
-              ? "Source: Interactive Brokers reqPnL() — account-level, updated in real-time\n"
-              : "Source: Current prices versus prior-session closes — estimated\n") +
+              ? "Source: Interactive Brokers reqPnL(), account-level, updated in real-time\n"
+              : "Source: Current prices versus prior-session closes, estimated\n") +
             "Note: Includes all open positions across stocks, options, and other instruments"
           }
           onClose={() => setDayPnlModalOpen(false)}
@@ -1019,7 +1019,7 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
           formula={
             "Initial Margin = Margin required to open current positions\n" +
             "Source: Interactive Brokers accountValues (InitMarginReq)\n" +
-            "Higher than Maintenance Margin — must be met when entering a trade"
+            "Higher than Maintenance Margin, must be met when entering a trade"
           }
           onClose={() => setInitMarginModalOpen(false)}
         />

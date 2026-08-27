@@ -438,13 +438,40 @@ def _is_capacity_shed(error: Optional[str]) -> bool:
     return bool(error) and _CAPACITY_SHED_MARKER in error.lower()
 
 
+# A shed is not a healthy run: ib_orders.py never spawned and neither
+# open_orders nor executed_orders was touched. The heartbeat exists so a
+# transient capacity shed does not trip the 10-min stale window (R-170), but
+# an UNBOUNDED run of them must still become visible — otherwise a saturated
+# lane leaves orders-sync green with a fresh timestamp over an orders table
+# that has not moved, and a fill or a cancel inside that window is invisible.
+# R-216.
+ORDERS_SYNC_MAX_CONSECUTIVE_SHEDS = 3
+_orders_sync_consecutive_sheds = 0
+
+
+def _reset_orders_sync_shed_state() -> None:
+    """Called after a successful sync, and by tests."""
+    global _orders_sync_consecutive_sheds
+    _orders_sync_consecutive_sheds = 0
+
+
 async def _heartbeat_orders_sync_skip(reason: str) -> None:
-    """Keep the orders-sync row fresh when this tick cannot spawn ib_orders.py.
+    """Record a tick that could not spawn ib_orders.py — as a shed, not an OK.
 
     Capacity shed is R-170: the general lane is full, not a writer fault.
-    Without this, two consecutive 5-min sheds trip the 10-min stale window
-    (2026-08-24 19:30Z page 60096761, 19m silent while IB stayed up).
+    Without any row, two consecutive 5-min sheds trip the 10-min stale window
+    (2026-08-24 19:30Z page 60096761, 19m silent while IB stayed up). With a
+    fabricated healthy row, a permanent shed is silent forever. So: a distinct
+    non-ok state, and an escalation to `error` once the streak passes the
+    ceiling. R-216.
     """
+    global _orders_sync_consecutive_sheds
+    _orders_sync_consecutive_sheds += 1
+    streak = _orders_sync_consecutive_sheds
+    escalated = streak > ORDERS_SYNC_MAX_CONSECUTIVE_SHEDS
+    # "warn" is the repo's existing vocabulary (web/lib/serviceHealth.ts:16);
+    # it is not "ok" and it is not yet a page.
+    state = "error" if escalated else "warn"
     try:
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         await asyncio.to_thread(
@@ -452,10 +479,17 @@ async def _heartbeat_orders_sync_skip(reason: str) -> None:
             SERVICE_HEALTH_UPSERT_SQL,
             service_health_upsert_args(
                 "orders-sync",
-                "ok",
+                state,
                 started_at=now,
                 finished_at=now,
-                error=None,
+                error={
+                    "message": (
+                        f"orders sync shed for subprocess capacity "
+                        f"({streak} consecutive): {reason}"
+                    ),
+                    "class": "capacity-shed",
+                    "consecutive_sheds": streak,
+                },
             ),
         )
     except Exception:
@@ -506,6 +540,7 @@ async def _orders_sync_tick() -> None:
         outcome = await _coordinated_orders_sync()
     if outcome.ok:
         logger.info("orders-sync loop: sync complete")
+        _reset_orders_sync_shed_state()
         return
     if _is_capacity_shed(outcome.error):
         logger.warning(
@@ -3025,6 +3060,27 @@ async def journal_rehydrate(days: int = 365):
 SCAN_GATES: dict[str, ScanGate] = {
     name: ScanGate(name) for name in ("regime", "breadth", "vcg", "gex")
 }
+# Gates keyed by (scan, subject). A single shared "gex" gate meant a
+# caller-supplied ticker could arm a 60 s failure backoff for EVERY ticker —
+# repeating one bogus request held the real SPX panel dead — and, because
+# gex.json holds exactly one ticker's payload, a successful NDX scan armed a
+# cooldown whose cache read returned None for an SPX poll, so two tickers
+# polled alternately spawned back-to-back 120 s subprocesses forever. R-217.
+_SUBJECT_SCAN_GATES: dict[tuple[str, str], ScanGate] = {}
+
+
+def _scan_gate_for(scan: str, subject: str) -> ScanGate:
+    key = (scan, subject.strip().upper())
+    gate = _SUBJECT_SCAN_GATES.get(key)
+    if gate is None:
+        gate = ScanGate(f"{scan}:{key[1]}")
+        _SUBJECT_SCAN_GATES[key] = gate
+    return gate
+
+
+def _reset_scan_gates() -> None:
+    """Drop every per-subject gate (tests)."""
+    _SUBJECT_SCAN_GATES.clear()
 
 
 async def _gated_scan(
@@ -3034,22 +3090,34 @@ async def _gated_scan(
     on_fresh: Callable[[ScriptResult], dict] = lambda result: result.data,
 ) -> dict:
     def _admit() -> Optional[dict]:
+        # Cache FIRST. Checking the backoff first turned a single transient
+        # failure into a hard 429 for 60 s even with a good cache written
+        # seconds earlier sitting on disk — a blank panel where stale-but-
+        # correct data was available. R-259.
+        if gate.in_backoff() or gate.in_cooldown():
+            cached = read_cached()
+            if cached is not None:
+                return cached
         if gate.in_backoff():
             raise HTTPException(
                 status_code=429,
                 detail=f"{gate.name} scan backing off after a failure",
                 headers=gate.retry_after_header(),
             )
-        if gate.in_cooldown():
-            return read_cached()
         return None
 
+    # `is not None`, not truthiness: `_read_cache` returns whatever json.loads
+    # produced, and an empty-object cache ({} — a truncated write, or a scan
+    # that legitimately found no rows) is falsy. That reported a miss while the
+    # cooldown said otherwise, so every 5 s poll fell through and spawned
+    # another 120 s run_script — a permanent subprocess treadmill, invisible in
+    # the response. R-259.
     hit = _admit()
-    if hit:
+    if hit is not None:
         return hit
     async with gate.lock:
         hit = _admit()
-        if hit:
+        if hit is not None:
             return hit
         result = await run()
         if not result.ok:
@@ -3904,7 +3972,7 @@ async def gex_scan(ticker: str = "SPX"):
         return result.data
 
     return await _gated_scan(
-        SCAN_GATES["gex"],
+        _scan_gate_for("gex", ticker),
         lambda: _gex_cache_for_ticker(_read_cache(DATA_DIR / "gex.json"), ticker),
         lambda: run_script("gex_scan.py", ["--json", "--ticker", ticker], timeout=120),
         _persist,

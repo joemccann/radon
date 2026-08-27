@@ -15,7 +15,7 @@ export default function TickerNotFound() {
       gap: "16px",
     }}>
       <span style={{ fontSize: "11px", letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--fault, #E85D6C)" }}>
-        404 — Instrument Not Found
+        404: Instrument Not Found
       </span>
       <span style={{ fontSize: "12px" }}>
         The requested ticker path is not a valid instrument identifier.

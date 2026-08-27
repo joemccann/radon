@@ -446,6 +446,23 @@ def main():
                   f"({get_halt_state().get('reason', 'manual halt')})")
             sys.exit(3)
 
+        # Server-side fat-finger bounds (REL-005), the same caps every other
+        # placer funnels through (ib_place_order.py, api/server.py place and
+        # modify). This file honoured the halt but not the caps, and
+        # risk_reversal.py renders a `--yes` invocation of it into the
+        # operator's own report. R-250.
+        from order_limits import check_order_limits
+        violation = check_order_limits({
+            "type": args.type,
+            "symbol": args.symbol,
+            "action": args.side,
+            "quantity": args.qty,
+            "limitPrice": limit_price,
+        })
+        if violation:
+            print(f"✗ ORDER REFUSED — {violation['message']}")
+            sys.exit(4)
+
         # Confirm
         if not args.yes:
             print(f"\n" + "=" * 50)

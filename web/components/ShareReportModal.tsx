@@ -16,7 +16,7 @@ function buildStaleNotice(data: ShareResponse): string | null {
   if (!data.stale) return null;
   const dataDate = data.data_date ?? "an earlier session";
   const expected = data.expected_date ?? "the latest closed session";
-  return `STALE DATA — this report reflects ${dataDate}; the latest closed session is ${expected}. Wait for the data sync to land before posting.`;
+  return `STALE DATA: this report reflects ${dataDate}; the latest closed session is ${expected}. Wait for the data sync to land before posting.`;
 }
 
 type ShareReportModalProps = {

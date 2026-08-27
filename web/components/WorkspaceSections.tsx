@@ -176,7 +176,8 @@ function execOrderDescription(e: ExecutedOrder): string {
 function execOrderShareData(e: ExecutedOrder): SharePnlData {
   return {
     description: execOrderDescription(e),
-    pnl: e.realizedPNL ?? 0,
+    // NOT `?? 0` — see SharePnlData.pnl. R-249.
+    pnl: e.realizedPNL ?? null,
     pnlPct: e.realizedPNL != null && e.avgPrice != null && e.avgPrice > 0
       ? (e.realizedPNL / (e.avgPrice * e.quantity * (e.contract.secType === "OPT" ? 100 : 1))) * 100
       : null,
@@ -507,7 +508,7 @@ export function positionGroupShareData(
 
   return {
     description: group.description,
-    pnl: group.totalPnL ?? 0,
+    pnl: group.totalPnL ?? null,
     pnlPct,
     commission: group.totalCommission,
     fillPrice: group.netPrice,
@@ -858,10 +859,12 @@ export function groupExecutedOrders(
 
 function blotterShareData(t: BlotterTrade): SharePnlData {
   const lastExec = t.executions.length > 0 ? t.executions[t.executions.length - 1] : null;
-  const realizedPnl = t.realized_pnl ?? 0;
+  const realizedPnl = t.realized_pnl ?? null;
   const realizedBasisRaw = t.realized_cost_basis ?? t.cost_basis;
   const realizedBasis = realizedBasisRaw != null ? Math.abs(realizedBasisRaw) : 0;
-  const pnlPct = realizedBasis > 0 ? (realizedPnl / realizedBasis) * 100 : null;
+  const pnlPct = realizedPnl != null && realizedBasis > 0
+    ? (realizedPnl / realizedBasis) * 100
+    : null;
   // Derive per-unit entry/exit from execution prices (weighted average)
   let entryPrice: number | null = null;
   let exitPrice: number | null = null;
@@ -1067,6 +1070,22 @@ function FlowSectionsBody() {
   const watchArr = data?.watch ?? [];
   const neutralArr = data?.neutral ?? [];
   const totalScanned = data?.positions_scanned ?? 0;
+  // "5 Trading Days" was a literal in the JSX beside two payload-derived
+  // numbers, so it carried their authority while consulting nothing. The
+  // producer's real window is whatever `daily_buy_ratios` covers — a scan
+  // that got short upstream data covers fewer. UI Copy Rules forbid the
+  // hardcoded form for exactly this reason. R-269.
+  const darkPoolSessions = useMemo(() => {
+    const dates = new Set<string>();
+    for (const bucket of [data?.supports, data?.against, data?.watch, data?.neutral]) {
+      for (const position of bucket ?? []) {
+        for (const day of position.daily_buy_ratios ?? []) {
+          if (day.date) dates.add(day.date);
+        }
+      }
+    }
+    return dates.size;
+  }, [data]);
 
   const actionItems = againstArr.filter((p) => p.strength >= 15);
 
@@ -1100,7 +1119,7 @@ function FlowSectionsBody() {
               </div>
               {actionItems.map((item) => (
                 <div key={`${item.ticker}-${item.position}`} className="alert-item">
-                  <span className="alert-ticker">{item.ticker}</span> — {item.position}: {item.note}
+                  <span className="alert-ticker">{item.ticker}</span>, {item.position}: {item.note}
                 </div>
               ))}
             </div>
@@ -1165,7 +1184,7 @@ function FlowSectionsBody() {
             </div>
             {actionItems.map((item) => (
               <div key={`${item.ticker}-${item.position}`} className="alert-item">
-                <span className="alert-ticker">{item.ticker}</span> — {item.position}: {item.note}
+                <span className="alert-ticker">{item.ticker}</span>, {item.position}: {item.note}
               </div>
             ))}
           </div>
@@ -1262,7 +1281,7 @@ function FlowSectionsBody() {
       <div className="section">
         <div className="report-meta">
           {lastSync
-            ? `Report Generated: ${new Date(lastSync).toLocaleString()} • Source: UW API • Dark Pool Lookback: 5 Trading Days • ${totalScanned} Positions Scanned`
+            ? `Report Generated: ${new Date(lastSync).toLocaleString()} • Source: UW API • Dark Pool Lookback: ${darkPoolSessions > 0 ? `${darkPoolSessions} Trading Day${darkPoolSessions === 1 ? "" : "s"}` : "unavailable"} • ${totalScanned} Positions Scanned`
             : "Awaiting initial flow analysis..."}
         </div>
       </div>
@@ -3908,7 +3927,12 @@ export function HistoricalTradesSection({
                       </td>
                       <td className="right">{t.total_quantity ?? t.net_quantity}</td>
                       <td className="right">{t.total_commission != null ? fmtPrice(t.total_commission) : "---"}</td>
-                      <td className={`right ${(t.realized_pnl ?? 0) >= 0 ? "positive" : "negative"}`}>
+                      {/* Colour only a KNOWN value. `(t.realized_pnl ?? 0) >= 0`
+                          painted a null P&L green while the text correctly
+                          rendered `---`, so on a blotter scanned by colour an
+                          unknown close was indistinguishable from a
+                          profitable one. R-248. */}
+                      <td className={`right ${t.realized_pnl == null ? "" : t.realized_pnl >= 0 ? "positive" : "negative"}`}>
                         {t.realized_pnl != null ? (
                           <>
                             {t.realized_pnl >= 0 ? "+" : ""}{fmtPrice(t.realized_pnl)}

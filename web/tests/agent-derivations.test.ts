@@ -385,7 +385,7 @@ describe("buildScannerProposal", () => {
 
   it("uses ticker + formatted structure when setup is empty", () => {
     const proposal = buildScannerProposal([candidate({ setup: "" })]);
-    expect(proposal?.statement).toBe("MU SHORT 95P / 105C — IV/RV edge 18.0, range score 82.");
+    expect(proposal?.statement).toBe("MU SHORT 95P / 105C: IV/RV edge 18.0, range score 82.");
     expect(proposal?.statement).not.toContain("[object Object]");
   });
 });

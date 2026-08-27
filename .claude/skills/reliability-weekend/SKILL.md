@@ -306,3 +306,70 @@ how this loop improves as the codebase grows.
   `ssh.github.com:443`; the plist PATH carries `~/.bun/bin`. After any
   loop change, run `setup_reliability_weekend.sh` and confirm
   `launchctl list | grep reliability-daily`.
+- 2026-08-26 (audit): **markdown tables break on a raw `|` inside a finding.** Nine of 76
+  rows carried one — `502|503`, `placeOrder|place_order`, a `case` pattern, an `||` fallback.
+  Escape `|` as `\|` in the `where` and `text` cells at generation time, and validate by
+  splitting on `(?<!\\)\|` — `line.count('|')` counts the escaped ones too and will tell you
+  the fix did not work when it did. Four pre-existing rows in the frozen sections have the
+  same defect; leave them alone.
+- 2026-08-26 (audit): the ascending-id assertion from last week is necessary but not
+  sufficient — write the validation regex as `R-\d{3}`, not `R-2\d\d`. The narrower pattern
+  silently skipped R-198 and R-199 (the two highest-severity rows in the section) and still
+  reported "ascending: True".
+- 2026-08-26 (audit): nine subsystem walks capped at ~21 files each all finished in 5-8
+  minutes with none lost to the stream watchdog, against last week's death at ~37 files. The
+  cap is the load-bearing part, not the category split. Giving each walk a pre-filtered list
+  of the already-filed R-### findings touching ITS files (grep the findings index by basename)
+  cost one script and produced near-zero re-reports across 76 findings.
+- 2026-08-26 (audit): **run the standing sweeps in the lead context and then distrust their
+  scope.** Sweeps 1-5 and 7 held and sweep 6 found a real gap (`ib_execute.py` has the halt
+  but no `check_order_limits`) — but sweep 7 as written compares only the DELTA's jobs against
+  the two watchdog catalogs, so it never looked at `breadth-scan`, a five-minute RTH timer with
+  no `SCHEDULED_SERVICES` entry at all. An agent found it. Enumerate every service name
+  reachable from a `cloud/services/*.timer`, not just the ones the diff touched.
+- 2026-08-26 (audit): when an agent rates something P0 on a mechanism that depends on an
+  unpinned third-party default (here: whether Caddy replays a POST without `retry_match`),
+  do not take the rating and do not silently drop the finding. File it one severity down with
+  the contingency written into the row, and point the acceptance criteria at pinning the
+  behaviour explicitly. The defect that survives verification is "a money-path invariant is
+  resting on a default nobody pinned or tested", which is real regardless of how the upstream
+  actually behaves.
+
+- 2026-08-26 (remediate): **a comment that quotes the code it explains will
+  satisfy or break your own source-level assertion.** This bit four times in
+  one run: a `SuccessExitStatus=75` grep matched the comment saying it was
+  removed; a slice keyed on `stop_services_for_transition` ended inside the
+  branch comment naming that function; a `python3.13 -m venv` slice ended in
+  the guard comment quoting it; a `write_text` assertion matched the comment
+  naming the old call. Strip comment lines before ANY structural assertion
+  over a source file — it is cheaper than rediscovering it per finding.
+- 2026-08-26 (remediate): **a finding's proposed remedy can be wrong even when
+  the defect is real.** R-232 asked for `--cgroup-parent=<unit>`; Docker's
+  systemd driver takes a slice, not a unit path, and `test_app_runtime.py`
+  already asserted that with the reason inline. R-264's "dead" bash `case`
+  pattern matches (bash tokenizes alternatives). R-214's second claim named
+  the wrong variable. R-251's "still resolving" window is unreachable because
+  the component returns a coverage skeleton first. Test the REMEDY against the
+  repo's existing assertions before writing it — the pinned test that
+  contradicts you is usually right and usually says why.
+- 2026-08-26 (remediate): **fix the whole class, not the cited site.** R-252
+  named two refresh sites; `grep` found four. R-237/R-239/R-267 were filed
+  against `reliability_weekend.sh` and applied identically to
+  `testing_weekend.sh`. R-270 named the render path and the sort extractor
+  repeated the expression verbatim. Budget one grep per finding.
+- 2026-08-26 (remediate): **run `cloud/tests` after every task, not just at the
+  end.** REL-077's 2FA change broke a cloud test that only surfaced two tasks
+  later, and the cause was structural — `ib-gateway-control.sh` is a ONE-SHOT
+  process, so a confirmation streak carried across calls could never confirm
+  for it. Cross-suite fallout from a scripts/ change is normal here; the
+  stashed clean-tree baseline diff is the only way to see it quickly.
+- 2026-08-26 (remediate): a sibling-module import (`from test_caddyfile import
+  ...`, `from test_run_flow_refresh_wrapper import ...`) works from the test
+  directory and fails collection from the repo root, where pytest actually
+  runs. `sys.path.insert(0, str(Path(__file__).resolve().parent))` at the top
+  of the new file; two tasks lost a full-gate run to this.
+- 2026-08-26 (remediate): 24 backlog tasks over ~17h at roughly one full gate
+  per task (pytest ~5min, vitest ~1.5min) is ~2.5h of gate time alone. Run the
+  two gates SEQUENTIALLY (concurrent runs starve CPU and produce phantom
+  failures), and run the cheap targeted suite first — it catches most
+  regressions in seconds.

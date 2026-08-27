@@ -97,6 +97,15 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # Matches web/lib/serviceHealthWindows.ts.
     "cri-scan":         {"open": 35 * _MIN, "closed": 3 * _DAY, "requires_ib": True},
     "vcg-scan":         {"open": 15 * _MIN, "closed": 3 * _DAY, "requires_ib": True},
+    # radon-breadth.timer fires every 5 min across ET trading hours into
+    # run_breadth_scan.sh -> breadth_scan.py's mirror_scan_snapshot. It was in
+    # NEITHER catalog, so it appeared in no BUCKETS list and check.py — which
+    # iterates BUCKETS and nothing else — never evaluated it: disable the
+    # timer and breadth froze silently, with the web banner staying
+    # informational because its category said "on-demand". units.py is not a
+    # backstop; it fires only on ActiveState=failed. Same class as the
+    # nextjs-db-read registration above (REL-033). R-236.
+    "breadth-scan":     {"open": 15 * _MIN, "closed": 3 * _DAY, "requires_ib": True},
     "cta-sync":         {"open": 25 * _HOUR, "closed": 72 * _HOUR, "requires_ib": False},
     # Daily-cadence writers (mirror web/lib/serviceHealthWindows.ts):
     #  * llm-token-index — radon-llm-index.timer, once/UTC-day 06:30; pulls
@@ -356,6 +365,7 @@ OPEN_BELL_GRACE_SERVICES: frozenset[str] = frozenset({
 BUCKETS: dict[str, list[str]] = {
     "intraday": [
         "vcg-scan",
+        "breadth-scan",
         "cri-scan",
         "orders-sync",
         "portfolio-sync",

@@ -30,7 +30,26 @@ export function createBackgroundScanTrigger({
     if (inFlight || now() < blockedUntil) return false;
     inFlight = true;
     console.log(`[${label}] Background scan triggered via FastAPI`);
-    run()
+    // These triggers are built once per process with
+    // `run: () => radonFetch(...)`, and radonFetch constructs a `new URL`
+    // from env — so a SYNCHRONOUS throw propagated straight out of trigger()
+    // before any handler was attached and left `inFlight` true for the life
+    // of the Node process. From then on every poll returned false with no
+    // log, no backoff timestamp and no error, and the routes served their
+    // last cached snapshot indefinitely while appearing to revalidate.
+    // `run()` stays synchronous here on purpose; only the throw is caught.
+    // R-256.
+    let pending: Promise<unknown>;
+    try {
+      pending = run();
+    } catch (err: unknown) {
+      inFlight = false;
+      blockedUntil = now() + backoffMs;
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[${label}] Background scan threw synchronously (backing off ${backoffMs / 1000}s):`, message);
+      return true;
+    }
+    pending
       .then(() => {
         console.log(`[${label}] Background scan complete`);
       })

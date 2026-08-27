@@ -3,6 +3,8 @@
 import configparser
 from pathlib import Path
 
+import pathlib
+
 import pytest
 
 EXPECTED_SERVICE_FILES = [
@@ -405,8 +407,19 @@ class TestFlowRefresh:
         assert "run_flow_refresh.sh" in svc["execstart"]
         assert int(svc["timeoutstartsec"]) <= 600
         assert "RADON_UW_CALLER=flow-refresh" in raw
-        # R-067 / R-170: wrapper SHED_EXIT=75 must not enter failed.
-        assert svc.get("successexitstatus") == "75"
+        # R-265: the SuccessExitStatus mapping is deliberately GONE. Its
+        # stated purpose — keeping a leaked SHED_EXIT=75 out of `failed` —
+        # was already covered by the wrapper remapping an all-shed run to
+        # exit 0, and 75 is EX_TEMPFAIL generally, so the mapping also made a
+        # permanently shedding unit (itself the incident) indistinguishable
+        # from a clean run in `systemctl is-failed`. The wrapper writes a
+        # `flow-refresh` service_health row on the shed path instead. The
+        # original intent is still asserted, one line down.
+        assert svc.get("successexitstatus") is None
+        assert "exit 0" in (
+            pathlib.Path(__file__).resolve().parents[2]
+            / "scripts" / "run_flow_refresh.sh"
+        ).read_text(encoding="utf-8"), "the wrapper must still remap an all-shed run"
 
     def test_timer_is_hourly_et(self, unit, services_dir):
         raw = (services_dir / "radon-flow-refresh.timer").read_text()

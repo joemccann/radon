@@ -170,7 +170,10 @@ jobs:
         with:
           pattern: vitest-coverage-*
           path: coverage-artifacts
-      - run: python3 scripts/ci/merge_vitest_coverage.py --root coverage-artifacts
+      # --expect-shards must match the web-tests shard count above. The merge
+      # downloads with a glob, so without it a partial artifact download was
+      # gated as if it were the whole suite. R-241.
+      - run: python3 scripts/ci/merge_vitest_coverage.py --root coverage-artifacts --expect-shards 8
 
   py-tests:
     name: pytest (${{ matrix.shard }})
@@ -543,10 +546,21 @@ jobs:
 
   stage-release:
     name: Prestage VPS release
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    # This job SSHes into the live trading host and runs the pushed commit's
+    # own deploy.sh there, so it must wait on exactly the gate `deploy` waits
+    # on. Without it, untested code executed on production before a single
+    # test ran, and `continue-on-error` hid the fact. R-201.
+    needs: [secret-scan, changes, web-tests, py-tests, cloud-tests, perimeter-smoke]
+    if: >-
+      github.ref == 'refs/heads/main' && github.event_name == 'push' && !cancelled()
+      && needs.secret-scan.result == 'success'
+      && needs.changes.result == 'success'
+      && (needs.web-tests.result == 'success' || needs.web-tests.result == 'skipped')
+      && (needs.py-tests.result == 'success' || needs.py-tests.result == 'skipped')
+      && (needs.cloud-tests.result == 'success' || needs.cloud-tests.result == 'skipped')
+      && (needs.perimeter-smoke.result == 'success' || needs.perimeter-smoke.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    continue-on-error: true
     concurrency:
       group: ci-stage-release-${{ github.ref }}
       cancel-in-progress: true

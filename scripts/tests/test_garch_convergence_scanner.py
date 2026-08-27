@@ -142,3 +142,80 @@ def test_fetch_prices_ib_miss_calls_uw_ohlc(monkeypatch):
 
     assert uw.calls == [("NVDA", "1d")]
     assert prices == [float(i) for i in range(1, 61)]
+
+
+class TestUwIvRankUnavailable:
+    """R-199: a UW quota or auth failure must not read as the most bullish IV rank.
+
+    ``_fetch_uw_iv`` swallowed ``UWAPIError`` — which both ``UWRateLimitError``
+    and ``UWAuthError`` subclass — and returned a literal ``(0.0, 0.0)``. Zero
+    is the *most* bullish value every downstream threshold tests for: gate 4
+    wants ``< 50``, the STRONG tier wants ``< 30``, and a fabricated zero
+    ``current_iv`` maximises the HV-IV gap too. A quota-exhausted run therefore
+    manufactures STRONG long-vol trade ideas that are indistinguishable from a
+    healthy scan.
+    """
+
+    def _client_raising(self, exc):
+        class _Client:
+            def get_iv_rank(_self, ticker):
+                raise exc
+
+        return _Client()
+
+    def _vol(self, ticker, **kwargs):
+        tv = garch.TickerVol(ticker=ticker)
+        tv.hv20, tv.hv60, tv.hv252 = 60.0, 40.0, 45.0
+        tv.leap_atm_iv = 20.0
+        tv.leap_count, tv.has_leaps = 4, True
+        for key, value in kwargs.items():
+            setattr(tv, key, value)
+        return tv
+
+    @pytest.mark.parametrize("exc_name", ["UWRateLimitError", "UWAuthError"])
+    def test_fetch_returns_a_sentinel_not_a_zero_rank(self, exc_name):
+        from clients import uw_client as uw
+
+        exc = getattr(uw, exc_name)("quota exhausted")
+        iv, rank = garch._fetch_uw_iv("NVDA", self._client_raising(exc))
+        assert rank is None, f"{exc_name} must not resolve to a real IV rank"
+        assert iv is None
+
+    def test_analyze_pair_refuses_a_pair_with_no_iv_rank(self):
+        va = self._vol("NVDA", iv_rank=None, error="UW IV rank unavailable")
+        vb = self._vol("AMD", iv_rank=35.0)
+        pa = garch.analyze_pair("NVDA", "AMD", {"NVDA": va, "AMD": vb}, "AI capex")
+        assert pa.signal == "NONE", (
+            f"a pair missing an IV rank must not be emitted as {pa.signal}"
+        )
+        assert any("NVDA" in gate for gate in pa.failing_gates), pa.failing_gates
+
+    def test_a_quota_failure_cannot_manufacture_a_strong_signal(self):
+        # Divergence and HV gap both clear the STRONG thresholds; only the
+        # fabricated iv_rank == 0.0 was standing between this pair and STRONG.
+        leader = self._vol("NVDA", leap_atm_iv=60.0, iv_rank=45.0)
+        lagger = self._vol("AMD", leap_atm_iv=10.0, iv_rank=None,
+                           error="UW IV rank unavailable")
+        pa = garch.analyze_pair("NVDA", "AMD", {"NVDA": leader, "AMD": lagger}, "AI capex")
+        assert pa.signal != "STRONG"
+        assert pa.lagger_iv_rank != 0.0
+
+    def test_to_json_carries_the_ticker_error(self):
+        payload = garch.to_json(
+            {"NVDA": self._vol("NVDA", iv_rank=None, error="UW IV rank unavailable")},
+            [],
+        )
+        entry = payload["tickers"]["NVDA"]
+        assert entry["error"] == "UW IV rank unavailable"
+        assert entry["iv_rank"] is None, (
+            "a null rank must reach the tab as null, not as a plausible 0"
+        )
+
+    def test_healthy_fetch_is_unchanged(self):
+        class _Client:
+            def get_iv_rank(_self, ticker):
+                return {"data": [{"volatility": 0.42, "iv_rank_1y": 31.5}]}
+
+        iv, rank = garch._fetch_uw_iv("NVDA", _Client())
+        assert rank == 31.5
+        assert iv == pytest.approx(42.0)

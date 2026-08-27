@@ -4,6 +4,7 @@ import { useEffect } from "react";
 
 import {
   claimAutoSyncFire,
+  releaseAutoSyncClaim,
   type AutoSyncState,
   type ClaimStore,
 } from "./autoSyncClaim";
@@ -99,13 +100,13 @@ export function useAutoSyncOnStale(
   useEffect(() => {
     if (!enabled) return;
     if (!stale) {
-      // The producer succeeded: the next stale window starts fresh. Reset
-      // from the merged view so a tab that never won a claim still clears
-      // the shared ladder, and a stale in-memory timestamp never rewinds it.
-      const current = readState(target);
-      if (current && current.consecutive !== 0) {
-        writeState(target, { lastFiredAt: current.lastFiredAt, consecutive: 0 });
-      }
+      // The producer succeeded: the next stale window starts fresh. The reset
+      // takes the SAME Web Lock the claim takes — read-then-write here was
+      // unlocked, so a claim another tab won in between was rewound to the
+      // pre-claim lastFiredAt with the backoff zeroed, and any tab with an
+      // older or empty in-memory map then read the rewound record and fired
+      // immediately. R-215.
+      void releaseAutoSyncClaim({ target, store, locks: webLocks() });
       return;
     }
     const claimed = claimAutoSyncFire({ target, now: Date.now(), store, locks: webLocks() });

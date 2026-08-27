@@ -472,9 +472,27 @@ def _rows_of(payload: Any) -> list[dict[str, Any]]:
     return []
 
 
+def _cycle_fatal_errors() -> tuple[type[BaseException], ...]:
+    """Errors that kill the whole cycle rather than one source.
+
+    Same carve-out as the sibling 13F job, for the same stated reason: a
+    rejected key or an exhausted daily allowance makes EVERY call fail, so
+    swallowing them turned one quota trip into `STATUS_ERROR` for every source
+    of every remaining ticker, marked them `skipped`, and still heartbeat
+    `ok` because one ticker had landed before the trip. R-226.
+    """
+    try:
+        from clients.equibles_client import EquiblesAuthError, EquiblesRateLimitError
+    except ImportError:  # pragma: no cover — stripped env
+        return ()
+    return (EquiblesAuthError, EquiblesRateLimitError)
+
+
 def _fetch_source(call: Callable[[], Any]) -> SourceResult:
     try:
         payload = call()
+    except _cycle_fatal_errors():
+        raise
     except Exception as exc:  # noqa: BLE001 — an unknown fault is still "unknown", not "clear"
         return SourceResult(STATUS_ERROR, [], error=str(exc))
     rows = _rows_of(payload)

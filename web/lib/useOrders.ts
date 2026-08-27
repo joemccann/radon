@@ -11,6 +11,8 @@ import {
 import { useRouteRefreshKey } from "./RouteRefreshContext";
 
 const POLL_INTERVAL_MS = 30_000;
+/** Ceiling for the failure backoff. R-263. */
+const MAX_POLL_INTERVAL_MS = 5 * 60_000;
 const GET_FETCH_TIMEOUT_MS = 12_000;
 const POST_FETCH_TIMEOUT_MS = 42_000;
 
@@ -28,7 +30,13 @@ export function useOrders(active: boolean = true): UseOrdersReturn {
   const [data, setData] = useState<OrdersData | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setErrorState] = useState<string | null>(null);
+  // Mirrored so the poll loop can read the outcome without re-rendering
+  // itself into a new closure. R-263.
+  const setError = useCallback((value: string | null) => {
+    errorRef.current = value;
+    setErrorState(value);
+  }, []);
   const [lastSync, setLastSync] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncingRef = useRef(false);
@@ -39,6 +47,9 @@ export function useOrders(active: boolean = true): UseOrdersReturn {
   const initialLoadStartedRef = useRef(false);
   const previousActiveRef = useRef(active);
   const mountedRef = useRef(true);
+  /** Consecutive failed polls, for the backoff ladder. R-263. */
+  const failureStreakRef = useRef(0);
+  const errorRef = useRef<string | null>(null);
   const activeRef = useRef(active);
   const routeKey = useRouteRefreshKey();
   const lastRouteKeyRef = useRef(routeKey);
@@ -91,8 +102,33 @@ export function useOrders(active: boolean = true): UseOrdersReturn {
   }, []);
 
   const pollCached = useCallback(async () => {
-    await fetchOrders();
-    if (mountedRef.current && activeRef.current) scheduleNext(POLL_INTERVAL_MS);
+    // Skip the network entirely while the tab is hidden. Without this a
+    // backgrounded tab left on the orders surface issued a no-store GET —
+    // a live Turso read — every 30s through the night and the weekend, when
+    // the open-order snapshot cannot change. `active` reflects route/panel
+    // selection, not visibility. R-263.
+    const hidden = typeof document !== "undefined" && document.visibilityState === "hidden";
+    let failed = false;
+    if (!hidden) {
+      try {
+        await fetchOrders();
+        failureStreakRef.current = 0;
+      } catch {
+        failed = true;
+      }
+    }
+    if (errorRef.current) failed = true;
+    if (failed) failureStreakRef.current += 1;
+    else failureStreakRef.current = 0;
+    // And back off on failure. The route answers a Turso outage with 503 by
+    // design, and the next poll was still exactly 30s later, forever. R-263.
+    const delay = hidden
+      ? POLL_INTERVAL_MS
+      : Math.min(
+          MAX_POLL_INTERVAL_MS,
+          POLL_INTERVAL_MS * 2 ** Math.max(0, failureStreakRef.current),
+        );
+    if (mountedRef.current && activeRef.current) scheduleNext(delay);
   }, [fetchOrders, scheduleNext]);
   pollCachedRef.current = pollCached;
 

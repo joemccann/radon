@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import type { PriceData } from "@/lib/pricesProtocol";
 import {
@@ -109,6 +110,27 @@ export type OrderQuoteTelemetryProps = {
  * SPREAD LAST VOLUME / HIGH LOW DAY. Same model, same formatter, and the same
  * closed-market fallback the portfolio position drawer gets.
  */
+/**
+ * A clock that advances on its own.
+ *
+ * The staleness check used to be evaluated only as a side effect of rendering,
+ * with `nowMs` defaulting to `Date.now()` at call time — so it fired reliably
+ * only when something ELSE on the page re-rendered. The event that would
+ * normally cause that is the very one that has stopped happening: a new tick.
+ * Only runs while there is a quote to age. R-253.
+ */
+const QUOTE_AGE_TICK_MS = 30_000;
+
+function useQuoteAgeClock(active: boolean): number {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const id = setInterval(() => setNowMs(Date.now()), QUOTE_AGE_TICK_MS);
+    return () => clearInterval(id);
+  }, [active]);
+  return nowMs;
+}
+
 export function OrderQuoteTelemetry({
   priceData = null,
   model,
@@ -116,9 +138,10 @@ export function OrderQuoteTelemetry({
   fallback,
   density = "default",
 }: OrderQuoteTelemetryProps) {
+  const nowMs = useQuoteAgeClock(model == null && priceData != null);
   return (
     <QuoteTelemetryPanel
-      model={model ?? buildQuoteTelemetryModel(priceData ?? null, fallback ?? null)}
+      model={model ?? buildQuoteTelemetryModel(priceData ?? null, fallback ?? null, nowMs)}
       label={label}
       fields={BAR_FIELDS}
       variant="bar"

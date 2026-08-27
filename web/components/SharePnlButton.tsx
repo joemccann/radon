@@ -10,7 +10,12 @@ const POPOVER_EXIT_REDUCED_MS = 80;
 
 export type SharePnlData = {
   description: string;
-  pnl: number;
+  /** null when the realized P&L is UNKNOWN. IB routinely reports
+   *  `realizedPNL: null` on fills it has not matched, and the companion
+   *  `pnlPct` already returns null for the same inputs — so a `?? 0` at
+   *  construction rendered a hard $0 next to a blank percentage, which reads
+   *  as a scratch trade rather than an unmeasured one. R-249. */
+  pnl: number | null;
   pnlPct: number | null;
   commission: number | null;
   fillPrice: number | null;
@@ -49,14 +54,14 @@ function cashtagTicker(desc: string): string {
 
 export function buildTweetText(
   description: string,
-  pnl: number,
+  pnl: number | null,
   pnlPct: number | null,
   showDollar: boolean,
   showPct: boolean,
   holdTime?: string | null,
 ): string {
   const parts: string[] = [];
-  if (showDollar) parts.push(fmtDollar(pnl));
+  if (showDollar && pnl != null) parts.push(fmtDollar(pnl));
   if (showPct && pnlPct != null && Number.isFinite(pnlPct)) parts.push(fmtPct(pnlPct));
   const pnlStr = parts.join(" ");
   const tagged = cashtagTicker(description);
@@ -113,7 +118,7 @@ export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps)
   const generateImage = useCallback(async () => {
     const params = new URLSearchParams();
     params.set("description", data.description);
-    if (showDollar) params.set("pnl", String(data.pnl));
+    if (showDollar && data.pnl != null) params.set("pnl", String(data.pnl));
     if (showPct && data.pnlPct != null) params.set("pnlPct", String(data.pnlPct));
     // Note: commission is intentionally NOT passed to the image API
     if (data.entryPrice != null) params.set("entryPrice", String(data.entryPrice));
