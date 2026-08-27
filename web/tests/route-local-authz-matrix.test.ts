@@ -58,7 +58,7 @@ const MIDDLEWARE_PERIMETER_ONLY_ROUTES = [
   "flex-token", "flow-surprise", "futures-quote", "garch-convergence",
   "hhlev", "hyad", "index-quote",
   "informed-flow/[ticker]", "ivrank", "llm-token-index", "margin-debt", "prices",
-  "profile", "risk-free-rate", "skew", "skew2d", "straddle", "vixcor",
+  "profile", "risk-free-rate", "skew", "skew2d", "straddle", "vixcor", "vixts",
   "vol-cone", "watchlist", "watchlist/[symbol]", "workflow", "yield-curve",
   "yield-curve/live",
 ] as const;

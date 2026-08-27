@@ -100,8 +100,10 @@ BACKOFF_LADDER_SECS: List[int] = [60, 120, 300, 900, 1800, 3600]  # 1m,2m,5m,15m
 
 # The lease guard is held across _write_lock_file's two fsyncs, so an
 # unbounded flock hangs the FastAPI handler that reads it — with no timeout and
-# no log line. ib_watchdog has wrapped both entry points since REL-004; these
-# two call sites were never converted. R-211.
+# no log line. R-211 converted the two READ paths here; the WRITE paths (acquire
+# and release), which are the ones that actually hold the exclusive guard across
+# both fsyncs, were left unbounded until T-200. Every ib_2fa_lock call in this
+# module now goes through a bounded wrapper below.
 LOCK_OP_TIMEOUT_SECS = 5.0
 
 
@@ -130,6 +132,50 @@ def _remaining_lock_secs_bounded(now: float) -> int:
     except ib_2fa_lock.GuardLockTimeout as exc:
         logger.warning("2FA lock read abandoned (%s); reporting unknown", exc)
         return -1
+
+
+def _acquire_2fa_push_lock_bounded(holder: str, *, reason: str, now: float):
+    """Bounded ``acquire_2fa_push_lock``. On timeout report a synthetic held
+    lease so the caller DEFERS: a guard we could not read may be covering a
+    push already in flight, and cycling the Gateway blind stacks a second one.
+
+    This is the WRITE path — it holds the exclusive guard across
+    ``_write_lock_file``'s two fsyncs, so it is the call most able to hang.
+    """
+    try:
+        return ib_2fa_lock.acquire_2fa_push_lock(
+            holder,
+            reason=reason,
+            now=now,
+            guard_timeout_secs=LOCK_OP_TIMEOUT_SECS,
+        )
+    except ib_2fa_lock.GuardLockTimeout as exc:
+        logger.warning("2FA lock acquire abandoned (%s); deferring the cycle", exc)
+        return (
+            False,
+            ib_2fa_lock.PushLock(
+                holder="guard-timeout",
+                acquired_at=now,
+                expires_at=now + ib_2fa_lock.DEFAULT_LOCK_TTL_SECS,
+                reason=f"lease guard busy: {exc}",
+            ),
+        )
+
+
+def _release_2fa_push_lock_bounded(*, expected_holder: Optional[str] = None):
+    """Bounded ``release_2fa_push_lock``. A release that cannot take the guard
+    is logged and skipped — the lease still auto-expires at its TTL, which is
+    strictly better than hanging the caller inside a FastAPI handler."""
+    try:
+        return ib_2fa_lock.release_2fa_push_lock(
+            expected_holder=expected_holder,
+            guard_timeout_secs=LOCK_OP_TIMEOUT_SECS,
+        )
+    except ib_2fa_lock.GuardLockTimeout as exc:
+        logger.warning(
+            "2FA lock release abandoned (%s); lease will expire at its TTL", exc
+        )
+        return None
 
 
 _restart_state: Dict = {
@@ -198,6 +244,12 @@ def restart_backoff_state() -> Dict:
     Includes ``push_lock`` so operators inspecting /health can tell at a
     glance whether a fresh restart would be blocked by an in-flight 2FA
     push from another holder.
+
+    BLOCKING. The ``push_lock`` read reaches ``_is_orphaned``, which runs
+    ORPHAN_CONFIRM_PROBES socket connects with sleeps between them whenever a
+    lease is held past its grace and the port is down — the incident state, and
+    ~1.85s per call. Async callers must reach it via ``asyncio.to_thread``.
+    T-201.
     """
     now = time.time()
     lock = _check_2fa_push_lock_bounded(now)
@@ -232,7 +284,7 @@ def reset_restart_backoff() -> Dict:
     previous = {k: _restart_state[k] for k in ("attempt_count", "next_attempt_after", "last_outcome")}
     _restart_state["attempt_count"] = 0
     _restart_state["next_attempt_after"] = 0.0
-    released = ib_2fa_lock.release_2fa_push_lock()
+    released = _release_2fa_push_lock_bounded()
     return {
         "reset": True,
         "previous": previous,
@@ -243,7 +295,7 @@ def reset_restart_backoff() -> Dict:
 def _acquire_gateway_push_lease(holder: str, *, reason: str) -> Optional[Dict]:
     """Acquire the cross-process lease or return a structured refusal."""
     now = time.time()
-    acquired, current = ib_2fa_lock.acquire_2fa_push_lock(
+    acquired, current = _acquire_2fa_push_lock_bounded(
         holder, reason=reason, now=now
     )
     if acquired:
@@ -1048,7 +1100,7 @@ async def handle_auth_state_transition(
     # Only clear the startup holder we own, and only on a real authentication
     # edge. An unconditional release could erase a different actor's newly
     # acquired lease while that actor is already starting another cycle.
-    ib_2fa_lock.release_2fa_push_lock(
+    _release_2fa_push_lock_bounded(
         expected_holder=IB_GATEWAY_ENSURE_LOCK_HOLDER
     )
 
@@ -1218,7 +1270,7 @@ async def check_ib_gateway(
         # The admin panel uses this state to prevent duplicate IBKR pushes.
         # It is local control-plane state and must be present regardless of
         # where the Gateway itself runs.
-        result["restart_backoff"] = restart_backoff_state()
+        result["restart_backoff"] = await asyncio.to_thread(restart_backoff_state)
         if not result.get("port_listening") or result.get("upstream_dead"):
             result["auth_state"] = "unreachable"
         elif pool_status:
@@ -1242,7 +1294,7 @@ async def check_ib_gateway(
         result = await _check_launchd()
 
     result["auth_state"] = _derive_auth_state(result, pool_status)
-    result["restart_backoff"] = restart_backoff_state()
+    result["restart_backoff"] = await asyncio.to_thread(restart_backoff_state)
 
     if pool is not None:
         await handle_auth_state_transition(result["auth_state"], pool)
@@ -1343,7 +1395,7 @@ async def restart_ib_gateway(pool=None) -> Dict:
         # Refuse whenever any restart operation already fired a push. Holder
         # names identify components, not logical operations, so same-holder
         # reentry is still a second Gateway cycle and remains blocked.
-        acquired, current_lock = ib_2fa_lock.acquire_2fa_push_lock(
+        acquired, current_lock = _acquire_2fa_push_lock_bounded(
             IB_GATEWAY_LOCK_HOLDER,
             reason="restart_ib_gateway",
             now=now,
@@ -1387,7 +1439,7 @@ async def restart_ib_gateway(pool=None) -> Dict:
                 result["auth_state"] = "authenticated"
                 # Release the lock — login completed, other restart paths
                 # can proceed when they need to (e.g. a future bounce).
-                ib_2fa_lock.release_2fa_push_lock(expected_holder=IB_GATEWAY_LOCK_HOLDER)
+                _release_2fa_push_lock_bounded(expected_holder=IB_GATEWAY_LOCK_HOLDER)
                 logger.info("IB Gateway restart verified — accounts: %s", accounts)
                 # Drive the same auth-transition handler the periodic probe
                 # uses, so a successful restart that lands the system back at

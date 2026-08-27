@@ -394,6 +394,11 @@ export default function MobileOrderTicket({
    * Same gate as the desktop rail, rotated onto the phone. A gate that exists
    * on desktop but not here would be worse than no gate: the operator learns
    * to trust it and then meets a surface that does not have it.
+   *
+   * Per-combo legs for the exact expiry payoff, ratio-normalised the same way
+   * the rail does it. Raw quantities divide the lot size into the premium (a
+   * 10-lot 970 call sold at 2.98 breaks even at 970.30 instead of 972.98) and
+   * then get scaled by `totalQty` a second time in the sentence below.
    */
   // Ratio-normalised so the curve describes ONE combo, matching
   // OptionsChainTab's payoffLegs. Built from `legs` the quantity was applied

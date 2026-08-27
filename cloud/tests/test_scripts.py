@@ -12,6 +12,17 @@ import stat
 import pytest
 
 
+def contract_keys() -> list[str]:
+    """`cloud/config/required-env.txt` as check-env.py's `required_keys()`
+    reads it: comment lines stripped, not a raw substring search."""
+    contract = Path(__file__).resolve().parents[1] / "config" / "required-env.txt"
+    return [
+        line.strip()
+        for line in contract.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -211,10 +222,11 @@ class TestSetupVpsEnvValidation:
         # key in this contract the deploy preflight passed and every one of them
         # failed on every fire, leaving 13F and filing-forensics permanently
         # empty for every ticker.
-        required = (
-            Path(__file__).resolve().parents[1] / "config" / "required-env.txt"
-        ).read_text()
-        assert "EQUIBLES_API_KEY" in required
+        #
+        # Parse the contract the way check-env.py's required_keys() does. A
+        # substring check against the raw file survives `# EQUIBLES_API_KEY`,
+        # which the preflight skips — T-163 verbatim, with this test green.
+        assert "EQUIBLES_API_KEY" in contract_keys()
 
 
 class TestSetupVpsFirewall:

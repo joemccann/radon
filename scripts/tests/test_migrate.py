@@ -7,6 +7,7 @@ script twice on Hetzner during deploy (idempotency check).
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -308,3 +309,85 @@ class TestMigrateDemoTarget:
         assert "equibles_13f_snapshots" in tables
         assert "equibles_filing_forensics" in tables
         assert 43 in applied and 45 in applied
+
+
+class TestMigrateEntrypointArgv:
+    """T-202: `main(argv=None)` deliberately parses `[]` so library callers and
+    pytest's own sys.argv cannot leak into argparse. That makes the ENTRYPOINT
+    the only thing that forwards `--demo`: revert `main(sys.argv[1:])` to a bare
+    `main()` and `radon-demo-mirror`'s ExecStartPre silently migrates PROD, exits
+    0, and the demo DB stays at its old schema_migrations max — the 2026-08-26 P1
+    recurs behind a green preflight. Nothing tested that forwarding, so these two
+    pin it: one on `main` itself, one on the real `__main__` entrypoint.
+    """
+
+    def test_main_with_demo_argv_targets_demo_db(self, migrate_module, monkeypatch):
+        monkeypatch.setenv(
+            "TURSO_DEMO_DB_URL", "libsql://radon-demo-joemccann.aws-us-west-2.turso.io"
+        )
+        monkeypatch.setenv("TURSO_DEMO_AUTH_TOKEN", "demo-tok")
+        monkeypatch.setenv("TURSO_DB_URL", "libsql://radon-joemccann.aws-us-west-2.turso.io")
+        monkeypatch.setenv("TURSO_AUTH_TOKEN", "prod-tok")
+
+        connected: list[tuple[str, str]] = []
+
+        def fake_connect(libsql, url, token):
+            connected.append((url, token))
+            return MagicMock()
+
+        monkeypatch.setattr(migrate_module, "_connect_with_retry", fake_connect)
+        monkeypatch.setattr(migrate_module, "apply_pending_migrations", lambda db: 0)
+        monkeypatch.setitem(sys.modules, "libsql_experimental", MagicMock())
+
+        migrate_module.main(["--demo"])
+
+        assert len(connected) == 1
+        url, token = connected[0]
+        assert "radon-demo" in url, f"--demo did not reach argparse; connected to {url!r}"
+        assert token == "demo-tok"
+
+    def test_module_entrypoint_forwards_demo_flag(self, tmp_path):
+        """Run the file the systemd unit runs. A `libsql_experimental` stub on
+        PYTHONPATH records the URL instead of opening a socket, so no live DB is
+        touched and no retry ladder is slept through."""
+        repo_root = Path(__file__).resolve().parent.parent.parent
+        recorded = tmp_path / "connected_url.txt"
+        stub_dir = tmp_path / "stub"
+        stub_dir.mkdir()
+        (stub_dir / "libsql_experimental.py").write_text(
+            "def connect(url, auth_token=None):\n"
+            f"    open({str(recorded)!r}, 'w').write(url)\n"
+            # Wording matters: `_is_transport_error` retries anything mentioning
+            # a connection, which would sleep the 2/5/15 ladder here.
+            "    raise RuntimeError('stub libsql: no live socket in tests')\n",
+            encoding="utf-8",
+        )
+
+        env = dict(os.environ)
+        env["PYTHONPATH"] = str(stub_dir)
+        env["TURSO_DEMO_DB_URL"] = "libsql://radon-demo-joemccann.aws-us-west-2.turso.io"
+        env["TURSO_DEMO_AUTH_TOKEN"] = "demo-tok"
+        # Fake prod creds too: if the entrypoint drops `--demo`, it must fail
+        # against this placeholder, never against the real production Turso.
+        env["TURSO_DB_URL"] = "libsql://radon-joemccann-PLACEHOLDER.invalid"
+        env["TURSO_AUTH_TOKEN"] = "prod-tok-placeholder"
+
+        result = subprocess.run(
+            [sys.executable, str(repo_root / "scripts" / "db" / "migrate.py"), "--demo"],
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=str(repo_root),
+            timeout=120,
+        )
+
+        assert recorded.exists(), (
+            "migrate.py never reached the connect step; "
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        url = recorded.read_text(encoding="utf-8")
+        assert "radon-demo" in url, (
+            "`python migrate.py --demo` did not resolve the demo target — the "
+            f"entrypoint dropped the flag and connected to {url!r}"
+        )
+        assert "target=demo" in result.stdout

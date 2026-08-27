@@ -44,19 +44,52 @@ def _write_executable(path: Path, body: str) -> None:
     path.chmod(0o755)
 
 
+# Stub docker that answers `manifest inspect` (registry) and `image inspect`
+# (local store) independently, so resolve_image can be exercised against a
+# GHCR outage without touching a real registry. Every other verb succeeds.
+_SELECTIVE_DOCKER = """#!/bin/bash
+printf '%s\\n' "$*" >> {log}
+if [[ "$1 $2" == "manifest inspect" ]]; then
+  for ok in ${{RADON_STUB_REGISTRY_TAGS:-}}; do
+    [[ "$3" == "$ok" ]] && exit 0
+  done
+  exit 1
+fi
+if [[ "$1 $2" == "image inspect" ]]; then
+  for ok in ${{RADON_STUB_LOCAL_TAGS:-}}; do
+    [[ "$3" == "$ok" ]] && exit 0
+  done
+  exit 1
+fi
+exit 0
+"""
+
+
 def _run(
     tmp_path: Path,
     args: list[str],
     extra_env: dict[str, str] | None = None,
+    docker_body: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     docker_log = tmp_path / "docker.log"
     fake_docker = tmp_path / "docker"
+    # A tag named in RADON_TEST_MISSING_TAGS is absent from BOTH the registry
+    # and the local store, which is how the pinned-SHA preflight and its
+    # fallback to :latest are exercised. Failing only `manifest inspect` would
+    # let T-198's local-store fallback resolve the missing tag and the
+    # :latest fallback would never be reached; a test wanting the local store
+    # to answer passes its own `docker_body`.
     _write_executable(
         fake_docker,
-        f"""#!/bin/bash
-printf '%s\\n' "$*" >> {docker_log.as_posix()!r}
+        (docker_body or """#!/bin/bash
+printf '%s\\n' "$*" >> {log}
+if [ "$2" = "inspect" ] && [ "$1" = "manifest" -o "$1" = "image" ]; then
+  for missing in ${{RADON_TEST_MISSING_TAGS:-}}; do
+    [ "$3" = "$missing" ] && exit 1
+  done
+fi
 exit 0
-""",
+""").format(log=repr(docker_log.as_posix())),
     )
     fake_id = tmp_path / "id"
     _write_executable(fake_id, "#!/bin/bash\necho 1000\n")
@@ -141,6 +174,81 @@ def test_run_does_not_docker_pull(tmp_path: Path) -> None:
     log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
     assert "pull " not in log
     assert "run " in log
+
+
+# --- T-198: resolve_image must survive a GHCR outage --------------------------
+# `image_available` probes the REGISTRY. Under `set -euo pipefail` a GHCR 429,
+# outage or expired root credential fails both the SHA and the `latest` probe,
+# resolve_image returns 69 and `image="$(python_image)"` exits — while the
+# correct image is already in the local store. Restart=always +
+# StartLimitBurst=5 then parks all five app units start-limit-hit. These three
+# tests execute the real resolution ladder against a stub docker; the shipped
+# coverage was two string greps in test_app_plane_cutover_safety.py.
+
+PYTHON_REPO = "ghcr.io/joemccann/radon-python"
+
+
+def _resolve(
+    tmp_path: Path, registry_tags: str, local_tags: str
+) -> subprocess.CompletedProcess[str]:
+    return _run(
+        tmp_path,
+        ["run", "radon-api.service"],
+        extra_env={
+            "RADON_STUB_REGISTRY_TAGS": registry_tags,
+            "RADON_STUB_LOCAL_TAGS": local_tags,
+        },
+        docker_body=_SELECTIVE_DOCKER,
+    )
+
+
+def _run_line(result: subprocess.CompletedProcess[str]) -> str:
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    lines = [line for line in log.splitlines() if line.startswith("run ")]
+    assert lines, f"no docker run in log:\n{log}\nstderr:\n{result.stderr}"
+    return lines[-1]
+
+
+def test_run_falls_back_to_latest_when_the_sha_tag_was_never_pushed(
+    tmp_path: Path,
+) -> None:
+    # R-234: app-images.yml cancels in-progress builds, so SHA1's tags can be
+    # missing while ci.yml still deploys SHA1.
+    result = _resolve(tmp_path, f"{PYTHON_REPO}:latest", "")
+    assert result.returncode == 0, result.stderr
+    assert f"{PYTHON_REPO}:latest" in _run_line(result)
+
+
+def test_run_uses_the_local_image_when_the_registry_cannot_be_reached(
+    tmp_path: Path,
+) -> None:
+    # T-198: neither probe reaches GHCR, but the pinned image is already in the
+    # local store. Parking five units on a registry outage is the defect.
+    result = _resolve(tmp_path, "", f"{PYTHON_REPO}:testsha")
+    assert result.returncode == 0, (
+        "a GHCR outage parked the unit even though the pinned image is in the "
+        f"local store\nstderr:\n{result.stderr}"
+    )
+    assert f"{PYTHON_REPO}:testsha" in _run_line(result)
+
+
+def test_run_falls_back_to_a_local_latest_when_the_sha_is_nowhere(
+    tmp_path: Path,
+) -> None:
+    result = _resolve(tmp_path, "", f"{PYTHON_REPO}:latest")
+    assert result.returncode == 0, result.stderr
+    assert f"{PYTHON_REPO}:latest" in _run_line(result)
+
+
+def test_run_exits_69_when_the_image_is_absent_from_registry_and_local_store(
+    tmp_path: Path,
+) -> None:
+    result = _resolve(tmp_path, "", "")
+    assert result.returncode == 69, result.stderr
+    assert "neither" in result.stderr
+    log_path = result.docker_log  # type: ignore[attr-defined]
+    log = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
+    assert not [line for line in log.splitlines() if line.startswith("run ")]
 
 
 @pytest.mark.parametrize("unit", APP_UNITS)
@@ -261,3 +369,7 @@ def test_image_workflow_exists_and_is_not_a_deploy_need() -> None:
     assert "--ignorefile" not in wf
     assert "packages: write" in wf
     assert "environment:" not in wf
+    assert "--build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" in wf
+    assert "--build-arg NEXT_PUBLIC_RADON_API_URL" in wf
+    assert "--build-arg NEXT_PUBLIC_IB_REALTIME_WS_URL" in wf
+    assert "vars.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" in wf

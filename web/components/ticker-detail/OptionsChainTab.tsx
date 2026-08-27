@@ -444,7 +444,8 @@ function OrderBuilder({
   // Calling `useOrderRisk` directly here is equivalent to the gate; the gate
   // wraps both the hook and the summary render below.
   // Per-combo legs for the exact expiry payoff. Ratio-normalised so the curve
-  // describes ONE combo, matching the "RISK · PER 1× COMBO" heading.
+  // describes ONE combo. Breakevens are price levels, so they are the same
+  // at any lot size; the panel's dollar cells are order totals.
   const payoffLegs = useMemo(
     () =>
       quotingLegs.map((leg) => ({

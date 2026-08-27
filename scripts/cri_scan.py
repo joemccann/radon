@@ -1313,6 +1313,7 @@ def generate_html_report(
         if spx:
             pos_t = spx.get("position_today", 0)
             pctl_3m = normalize_pctile(spx.get("percentile_3m"))
+            pctl_1y = normalize_pctile(spx.get("percentile_1y"))
             z3 = spx.get("z_score_3m", 0)
             # Color code: low percentile = bearish (red), high = bullish (green).
             # `None` is not a number to compare — the reconciler nulls a
@@ -1335,8 +1336,8 @@ def generate_html_report(
   </div>
   <div class="metric">
     <div class="metric-label">3M Percentile</div>
-    <div class="metric-value {pctl_cls}">{pctl_3m}</div>
-    <div class="metric-change">1Y: {spx.get('percentile_1y', '---')}</div>
+    <div class="metric-value {pctl_cls}">{'---' if pctl_3m is None else pctl_3m}</div>
+    <div class="metric-change">1Y: {'---' if pctl_1y is None else pctl_1y}</div>
   </div>
   <div class="metric">
     <div class="metric-label">3M Z-Score</div>
@@ -1366,12 +1367,12 @@ def generate_html_report(
                 pt = entry.get("position_today", "---")
                 py_ = entry.get("position_yesterday", "---")
                 p1m = entry.get("position_1m_ago", "---")
-                pctl = entry.get("percentile_3m", "---")
+                pctl = entry.get("percentile_3m")
                 zs = entry.get("z_score_3m", "---")
                 pt_str = f"{pt:.2f}" if isinstance(pt, (int, float)) else str(pt)
                 py_str = f"{py_:.2f}" if isinstance(py_, (int, float)) else str(py_)
                 p1m_str = f"{p1m:.2f}" if isinstance(p1m, (int, float)) else str(p1m)
-                pctl_str = str(pctl) if isinstance(pctl, (int, float)) else str(pctl)
+                pctl_str = str(pctl) if isinstance(pctl, (int, float)) else "---"
                 zs_str = f"{zs:.2f}" if isinstance(zs, (int, float)) else str(zs)
                 # Highlight low percentiles
                 row_cls = ""

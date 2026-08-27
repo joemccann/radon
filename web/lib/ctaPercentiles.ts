@@ -131,6 +131,34 @@ function normalizedTrio(row: CtaRowLike): (number | null)[] {
 }
 
 /**
+ * How much a trio looks like a fractional card read as integers: rounding
+ * collapses every column onto 0 or 1. Lower is more informative.
+ */
+function roundedRank(trio: (number | null)[]): number {
+  const present = trio.filter((v): v is number => v != null);
+  if (present.length === 0) return 2;
+  return present.every((v) => v === 0 || v === 1) ? 1 : 0;
+}
+
+/**
+ * Lower wins. A z-score that can arbitrate always beats one that cannot; among
+ * rows no z-score can arbitrate, the trio that survived rounding wins. Without
+ * this, `Infinity < Infinity` is false and whichever table came first wins —
+ * which republishes the rounded row over the good one.
+ */
+function candidateRank(trio: (number | null)[], gap: number): [number, number, number] {
+  const finite = Number.isFinite(gap);
+  return [finite ? 0 : 1, finite ? gap : 0, roundedRank(trio)];
+}
+
+function ranksBetter(a: [number, number, number], b: [number, number, number]): boolean {
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return a[i] < b[i];
+  }
+  return false;
+}
+
+/**
  * Normalize every percentile to 0-100, repair a row whose percentiles were
  * rounded away by copying the same row from another table, and null out what
  * neither survives: a percentile its own z-score flatly contradicts is not a
@@ -142,20 +170,24 @@ export function reconcileCtaTables(tables: CtaTablesLike | null | undefined): Ct
   if (!tables) return null;
 
   // Best trio per shared row: the one whose 3M percentile its z-score agrees with.
-  const best = new Map<string, { trio: (number | null)[]; gap: number; rounded: boolean }>();
+  const best = new Map<
+    string,
+    { trio: (number | null)[]; rank: [number, number, number]; rounded: boolean }
+  >();
   for (const rows of Object.values(tables)) {
     for (const row of rows ?? []) {
       const trio = normalizedTrio(row);
       const implied = ctaPercentileFromZ(num(row.z_score_3m));
       const gap = implied == null || trio[1] == null ? Infinity : Math.abs(trio[1] - implied);
       const key = rowKey(row);
+      const rank = candidateRank(trio, gap);
       const current = best.get(key);
       // The signature travels with the trio: once a rounded cell is repaired
       // from an unrounded copy in another table, the repaired value is a real
       // percentile and must be judged on the ordinary noise limit, not the
       // tight one the rounded cell would have earned.
-      if (!current || gap < current.gap) {
-        best.set(key, { trio, gap, rounded: hasRoundingSignature(row) });
+      if (!current || ranksBetter(rank, current.rank)) {
+        best.set(key, { trio, rank, rounded: hasRoundingSignature(row) });
       }
     }
   }

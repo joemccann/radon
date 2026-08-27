@@ -496,7 +496,11 @@ export function resolveSpreadPriceData(
     vega: null,
     impliedVol: null,
     undPrice: null,
-    timestamp: new Date().toISOString(),
+    // Never the wall clock: the spread carries its stalest leg's age (T-217,
+    // the same defect T-158 closed in `comboQuotePriceData`). An empty string
+    // (no leg freshness available) parses to NaN, so the header reports the
+    // spread as not live instead of passing a stale quote off as current.
+    timestamp: natural.asOf ?? "",
   };
 }
 

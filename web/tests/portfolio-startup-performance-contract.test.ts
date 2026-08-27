@@ -15,6 +15,17 @@ import { join } from "node:path";
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+// T-238: two cases here `await import(...)` the workspace module graph, so the
+// FIRST of them pays Vite's transform of that whole graph inside its own
+// per-test budget. Measured on this runner: a hard `Test timed out in 5000ms`
+// twice in a row at load average 42, then 6852 / 7854 / 8068 ms at load ~35
+// once the ceiling was raised. A host running two weekend loops at once is the
+// normal condition here, not the exception. 20s is the same ceiling T-161 set
+// for the two jsdom suites it fixed and keeps the worst measured case under
+// half the budget. This raises the ceiling only; it does NOT re-enable the
+// blanket `retry` T-161 deliberately removed, so a genuine hang still fails.
+vi.setConfig({ testTimeout: 20_000, hookTimeout: 20_000 });
+
 const WEB = join(import.meta.dirname, "..");
 const source = (path: string) => readFileSync(join(WEB, path), "utf8");
 

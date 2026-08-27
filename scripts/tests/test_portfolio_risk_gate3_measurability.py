@@ -145,19 +145,22 @@ class TestLoaderIsTimeBoxed:
         `attach_correlation_risk_report` runs every minute during RTH.
         """
         calls: list[str] = []
-        clock = {"t": 0.0}
+        now = {"t": 0.0}
 
-        def slow_ladder(symbol, deadline=None, ladder_clock=None):
+        def clock():
+            return now["t"]
+
+        def slow_ladder(symbol, deadline=None, _clock=None):
             calls.append(symbol)
             # A dead gateway: this symbol burned the whole budget on connect
             # timeouts before the ladder even reached UW.
-            clock["t"] += portfolio_risk.BACKFILL_TOTAL_BUDGET_S
+            now["t"] += portfolio_risk.BACKFILL_TOTAL_BUDGET_S
             return ({}, "")
 
         monkeypatch.setattr(portfolio_risk, "_fetch_closes_via_ladder", slow_ladder)
         monkeypatch.setattr(portfolio_risk, "_persist_closes", lambda *a: None)
         portfolio_risk.backfill_price_history(
-            ["AAA", "BBB", "CCC", "DDD"], clock=lambda: clock["t"]
+            ["AAA", "BBB", "CCC", "DDD"], clock=clock
         )
         assert len(calls) == 1, (
             f"the ladder kept going past its wall-clock budget: {calls}"

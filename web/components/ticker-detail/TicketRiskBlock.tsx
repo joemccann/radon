@@ -108,7 +108,7 @@ export default function TicketRiskBlock({
           curve below is per-combo. One heading claiming "PER 1× COMBO" over
           both was wrong for six of the cells (R-280). */}
       <div className="ticket-risk-head">
-        <span>RISK · WHOLE ORDER</span>
+        <span>RISK · ORDER TOTAL</span>
       </div>
 
       <div className="ticket-risk-grid">

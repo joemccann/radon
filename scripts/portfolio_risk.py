@@ -419,7 +419,15 @@ def load_price_series_for_portfolio(
         # on the strength of the DB series being unusable made a long-dead
         # cache file look like a current correlation input.
         for ticker, closes in _load_disk_cache_series(unusable, stocks_dir).items():
-            if not _has_target_depth(series.get(ticker)) and _has_target_depth(closes):
+            if _has_target_depth(series.get(ticker)):
+                continue
+            # The cached series itself must clear the same depth AND freshness
+            # bar. Testing only the Turso side installed a year-old cache as a
+            # current correlation input: the ticker looked measurable, then
+            # shared too few dates with a fresh sibling to correlate, so the
+            # pair silently vanished from the report instead of landing in
+            # insufficient_data (R-204).
+            if _has_target_depth(closes):
                 series[ticker] = closes
 
     return {t: s for t, s in series.items() if s}
@@ -493,13 +501,16 @@ def backfill_price_history(
         if not closes:
             print(f"  no daily closes for {symbol} from IB/UW/Yahoo", file=sys.stderr)
             continue
-        # Closes already in hand are the point of the run; a Turso hiccup must
-        # not discard them, nor abort the remaining symbols' attempts.
+        # Closes already in hand are the caller's answer whether or not the
+        # write-back lands, and one symbol's write failure must not abandon the
+        # symbols after it. An unguarded _persist_closes raised straight out of
+        # the loop: the fetched series was dropped on the floor and the rest of
+        # `due` went unattempted for the whole retry window (R-205).
+        fetched[symbol] = closes
         try:
             _persist_closes(symbol, closes, source)
-        except Exception as exc:  # noqa: BLE001 - persistence is best-effort here
-            print(f"  could not persist {symbol} closes: {exc}", file=sys.stderr)
-        fetched[symbol] = closes
+        except Exception as exc:  # noqa: BLE001 - Turso write is best-effort
+            print(f"  failed to persist {symbol} closes: {exc}", file=sys.stderr)
     return fetched
 
 

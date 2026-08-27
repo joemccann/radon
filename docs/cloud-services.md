@@ -573,6 +573,22 @@ into `hhlev_history` and heartbeats `hhlev` regardless. Installed by the
 deploy's `install-units` verb from `installed-units.sha256`. Spec:
 [`indicators/hhlev.md`](indicators/hhlev.md).
 
+### VIX TS (`radon-vixts.timer`)
+
+Daily `02:45 UTC` (`RandomizedDelaySec=120`), oneshot `scripts/fetch_vixts.py`,
+`TimeoutStartSec=300`. VIX / VIX3M term-structure ratio: below 1.00 the curve
+is in contango, above it is in backwardation. Three Cboe CDN files
+(`VIX_History.csv`, `VIX3M_History.csv`, `SPX_History.csv`) pulled through the
+shared `CboeClient` with per-file `If-Modified-Since`; when all three return
+304 the run reuses the cached payload and refreshes only the snapshot and
+heartbeat. 02:45 clears both the EDT and EST publication windows and sits
+after straddle 02:15, cor 02:20 and vixcor 02:35 so the CDN hits stay
+staggered. Runs every calendar day; weekend and holiday runs are 304
+heartbeats that keep `vixts` inside its 26h window. Single-source, so a
+plausibility guard raises rather than latching `ok` over a truncated or
+implausible series. Installed by the deploy's `install-units` verb from
+`installed-units.sha256`. Spec: [`indicators/vixts.md`](indicators/vixts.md).
+
 ### IV RANK (`radon-ivrank.timer`)
 
 Daily `22:10 UTC` (`RandomizedDelaySec=120`), oneshot

@@ -89,79 +89,6 @@ DEADMAN_LABEL="reliability-weekend"
 # Title prefix the skill opens/updates its PR under.
 PR_TITLE_PREFIX="Reliability weekend"
 
-# R-239: the ERR trap used to be armed only inside run_phase, so everything
-# from here down — the cd, the marker check, the lock, the mkdir and the
-# rotation pipeline under `set -o pipefail` — exited on a full disk, a moved
-# clone or a held lock with nothing but a line on stderr. The file header
-# claims every outcome is reported; for the prologue that was false.
-trap on_crash ERR
-
-cd "$REPO"
-[[ -f .radon-weekend-runner ]] || {
-  echo "REFUSING: $REPO is not the dedicated weekend runner clone" >&2
-  report "REFUSED" "$REPO is not the dedicated weekend runner clone" 0 || true
-  exit 2
-}
-
-RUNNER_LOCK="$REPO/.weekend-runner.lock"
-acquire_runner_lock "$RUNNER_LOCK" || {
-  echo "REFUSING: another weekend run owns $REPO" >&2
-  # The expensive instance: acquire_runner_lock only reclaims when
-  # `kill -0 $held` fails, so a recorded pid reused by ANY live unrelated
-  # process makes every subsequent daily fire exit 3 in under a second. That
-  # must page, not vanish. R-239.
-  report "REFUSED (lock held)" "another weekend run owns $REPO (pid $(cat "$RUNNER_LOCK/pid" 2>/dev/null || echo unknown)); if no cycle is running, the recorded pid was reused — remove $RUNNER_LOCK" 0 || true
-  exit 3
-}
-trap 'release_runner_lock "$RUNNER_LOCK"' EXIT
-
-LOG_DIR="$REPO/logs/reliability-weekend"
-mkdir -p "$LOG_DIR"
-STAMP="$(date +%Y%m%dT%H%M%S)"
-# Keep the newest 30 run logs. NEVER the launchd sinks: the plist points
-# StandardOutPath/StandardErrorPath at launchd-cycle.log/.err inside this same
-# directory, and launchd-cycle.err only gets an mtime bump when something
-# writes to stderr — so it sorts old and was unlinked once ~30 per-phase logs
-# accumulated, taking the only forensics for a prologue death with it. Worse,
-# the rotation runs BEFORE run_phase, so the rest of that same invocation
-# wrote to a deleted inode launchd still held open. R-267.
-# `|| true` on the grep: it exits 1 when it filters everything out (an empty
-# or sinks-only log dir), and `set -o pipefail` would turn that into a
-# prologue death — now a REPORTED one, thanks to the trap above.
-ls -1t "$LOG_DIR" 2>/dev/null \
-  | { grep -v -e '^launchd-cycle\.log$' -e '^launchd-cycle\.err$' || true; } \
-  | tail -n +31 | while IFS= read -r old; do
-  rm -f -- "$LOG_DIR/$old"
-done
-
-PHASE=""
-CAP_SECS=0
-# Whole-cycle wall-clock budget, measured from process start. Worst case
-# without it is audit 2h + 8 remediate rounds x 6h = 50h, which would swallow
-# two daily fires. The check subtracts the next round's CAP_SECS, so the
-# WHOLE cycle is bounded by this number rather than by this number plus one
-# more cap — see the deadline test in run_phase. R-238.
-CYCLE_BUDGET_SECS="${RADON_WEEKEND_CYCLE_BUDGET_SECS:-72000}"
-CYCLE_DEADLINE=$((SECONDS + CYCLE_BUDGET_SECS))
-MAX_ROUNDS=1
-RUN_LOG="$LOG_DIR/$MODE-$STAMP.log"
-RC=0
-
-begin_phase() {
-  PHASE="$1"
-  # Audit fans out ~6 read agents (cap 2h); remediation is the long half
-  # (cap 6h per round). Remediation must finish the backlog, not defer it to
-  # a future run: a round that dies on the cap (or crashes) is relaunched as
-  # a continuation round against the same weekend branch — per-task commits
-  # are the durable state — until a round exits 0 or the backstop trips.
-  CAP_SECS=$([[ "$PHASE" == "audit" ]] && echo 7200 || echo 21600)
-  MAX_ROUNDS=$([[ "$PHASE" == "remediate" ]] && echo 8 || echo 1)
-  # One log per phase: the transient-network detector and the report tail
-  # both read $RUN_LOG.
-  RUN_LOG="$LOG_DIR/$PHASE-$STAMP.log"
-  RC=0
-}
-
 resolve_pr_url() {
   # Newest-updated open PR the skill opened for this loop. A gh failure or
   # no match must yield an empty string, never a non-zero exit under set -e.
@@ -211,6 +138,87 @@ log: \`${RUN_LOG##*/}\` on the runner"
 
 on_crash() {
   report "CRASHED (exit $?)" "wrapper died before the agent finished — check the runner"
+}
+
+# These four are defined HERE, above the trap, and not further down beside
+# begin_phase: the prologue's REFUSED branches and the ERR trap below call
+# report(), and a function defined later in main() is not yet defined when
+# they run — every prologue death died on "report: command not found", then on
+# unset PHASE/STAMP/RUN_LOG under `set -u`, so no issue comment and no page
+# were ever sent for the very failures the trap exists to catch. T-209.
+PHASE="prologue"
+STAMP="$(date +%Y%m%dT%H%M%S)"
+RUN_LOG="prologue (no phase log yet)"
+
+# R-239: the ERR trap used to be armed only inside run_phase, so everything
+# from here down — the cd, the marker check, the lock, the mkdir and the
+# rotation pipeline under `set -o pipefail` — exited on a full disk, a moved
+# clone or a held lock with nothing but a line on stderr. The file header
+# claims every outcome is reported; for the prologue that was false.
+trap on_crash ERR
+
+cd "$REPO"
+[[ -f .radon-weekend-runner ]] || {
+  echo "REFUSING: $REPO is not the dedicated weekend runner clone" >&2
+  report "REFUSED" "$REPO is not the dedicated weekend runner clone" 0 || true
+  exit 2
+}
+
+RUNNER_LOCK="$REPO/.weekend-runner.lock"
+acquire_runner_lock "$RUNNER_LOCK" || {
+  echo "REFUSING: another weekend run owns $REPO" >&2
+  # The expensive instance: acquire_runner_lock only reclaims when
+  # `kill -0 $held` fails, so a recorded pid reused by ANY live unrelated
+  # process makes every subsequent daily fire exit 3 in under a second. That
+  # must page, not vanish. R-239.
+  report "REFUSED (lock held)" "another weekend run owns $REPO (pid $(cat "$RUNNER_LOCK/pid" 2>/dev/null || echo unknown)); if no cycle is running, the recorded pid was reused — remove $RUNNER_LOCK" 0 || true
+  exit 3
+}
+trap 'release_runner_lock "$RUNNER_LOCK"' EXIT
+
+LOG_DIR="$REPO/logs/reliability-weekend"
+mkdir -p "$LOG_DIR"
+# Keep the newest 30 run logs. NEVER the launchd sinks: the plist points
+# StandardOutPath/StandardErrorPath at launchd-cycle.log/.err inside this same
+# directory, and launchd-cycle.err only gets an mtime bump when something
+# writes to stderr — so it sorts old and was unlinked once ~30 per-phase logs
+# accumulated, taking the only forensics for a prologue death with it. Worse,
+# the rotation runs BEFORE run_phase, so the rest of that same invocation
+# wrote to a deleted inode launchd still held open. R-267.
+# `|| true` on the grep: it exits 1 when it filters everything out (an empty
+# or sinks-only log dir), and `set -o pipefail` would turn that into a
+# prologue death — now a REPORTED one, thanks to the trap above.
+ls -1t "$LOG_DIR" 2>/dev/null \
+  | { grep -v -e '^launchd-cycle\.log$' -e '^launchd-cycle\.err$' || true; } \
+  | tail -n +31 | while IFS= read -r old; do
+  rm -f -- "$LOG_DIR/$old"
+done
+
+CAP_SECS=0
+# Whole-cycle wall-clock budget, measured from process start. Worst case
+# without it is audit 2h + 8 remediate rounds x 6h = 50h, which would swallow
+# two daily fires. The check subtracts the next round's CAP_SECS, so the
+# WHOLE cycle is bounded by this number rather than by this number plus one
+# more cap — see the deadline test in run_phase. R-238.
+CYCLE_BUDGET_SECS="${RADON_WEEKEND_CYCLE_BUDGET_SECS:-72000}"
+CYCLE_DEADLINE=$((SECONDS + CYCLE_BUDGET_SECS))
+MAX_ROUNDS=1
+RUN_LOG="$LOG_DIR/$MODE-$STAMP.log"
+RC=0
+
+begin_phase() {
+  PHASE="$1"
+  # Audit fans out ~6 read agents (cap 2h); remediation is the long half
+  # (cap 6h per round). Remediation must finish the backlog, not defer it to
+  # a future run: a round that dies on the cap (or crashes) is relaunched as
+  # a continuation round against the same weekend branch — per-task commits
+  # are the durable state — until a round exits 0 or the backstop trips.
+  CAP_SECS=$([[ "$PHASE" == "audit" ]] && echo 7200 || echo 21600)
+  MAX_ROUNDS=$([[ "$PHASE" == "remediate" ]] && echo 8 || echo 1)
+  # One log per phase: the transient-network detector and the report tail
+  # both read $RUN_LOG.
+  RUN_LOG="$LOG_DIR/$PHASE-$STAMP.log"
+  RC=0
 }
 
 # Fresh ground truth. Any leftover state from a killed prior run is

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -34,6 +35,7 @@ if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
 from watchdog import services as services_mod  # noqa: E402
+from watchdog import units as units_mod  # noqa: E402
 
 REPO = _SCRIPTS_DIR.parent
 SERVICES_DIR = REPO / "cloud" / "services"
@@ -209,7 +211,7 @@ class TestCatalogParity:
         )
 
 
-class TestFlapBucketIsNotAdvertisedBeyondItsReach:
+class TestDur02BrakeAndFlapReach:
     """R-268: `flap` cannot fire for any DUR-02-braked unit.
 
     `_flap_alert` needs `SubState == "auto-restart"` in TWO consecutive
@@ -219,42 +221,75 @@ class TestFlapBucketIsNotAdvertisedBeyondItsReach:
     `StartLimitBurst=5` systemd parks a crash-looping unit as `failed` about
     25 seconds in. Two five-minute samples cannot both land inside a
     five-second window. This is not an outage gap: `Result=start-limit-hit`
-    does page P1. It is a dead bucket that makes the module read as having two
-    independent P1 signals when it has one.
+    does page P1.
+
+    T-208: the two tests here used to assert the brake arithmetic as an
+    invariant (`to_park < cycle_seconds`) and the module docstring as prose,
+    which blessed the dead path — a genuine fix (shorter cycle, or keying on
+    `NRestarts`) went red — while `continue`-ing past any unit missing the
+    directives, so deleting `StartLimitBurst` passed. What actually has to
+    hold is that the brake IS declared, and that the braked crash loop pages
+    P1 through the `start-limit-hit` branch. Both are asserted below.
     """
 
     UNITS_PATH = _SCRIPTS_DIR / "watchdog" / "units.py"
+    BRAKED_UNITS = ("radon-api", "radon-nextjs", "radon-monitor", "radon-health")
 
-    def test_the_docstring_states_the_limitation(self):
-        text = self.UNITS_PATH.read_text(encoding="utf-8")
-        header = text[: text.index('"""', text.index('"""') + 3)]
-        flap = header[header.index("``flap``"):]
-        flap = flap[: flap.index("``delta``")]
-        assert "Unreachable" in flap and "start-limit-hit" in flap, (
-            "the module advertises `flap` as the sustained-crash-loop signal "
-            "without noting that a braked unit reaches `failed` first, so it "
-            "reads as having two independent P1 signals when it has one"
-        )
+    def test_the_braked_units_declare_the_dur_02_brake(self):
+        """No silent skip: a unit that drops a directive must fail, not pass.
 
-    def test_braked_units_reach_the_start_limit_before_two_cycles(self):
-        cycle_seconds = 5 * 60
-        for unit_name in ("radon-api", "radon-nextjs", "radon-monitor", "radon-health"):
+        `flap` is documented as unreachable for these units precisely BECAUSE
+        the brake parks them first, so the brake going missing is the change
+        that would invalidate the reasoning — it must not pass unnoticed.
+        """
+        required = ("RestartSec", "StartLimitIntervalSec", "StartLimitBurst")
+        gaps: dict[str, list[str]] = {}
+        for unit_name in self.BRAKED_UNITS:
             unit = SERVICES_DIR / f"{unit_name}.service"
             if not unit.exists():
+                gaps[unit_name] = ["unit file is missing"]
                 continue
             text = unit.read_text(encoding="utf-8")
-            restart_sec = re.search(r"^RestartSec=(\d+)", text, re.M)
-            burst = re.search(r"^StartLimitBurst=(\d+)", text, re.M)
-            if not (restart_sec and burst):
-                continue
-            # Time systemd spends looping before parking the unit `failed`.
-            to_park = int(restart_sec.group(1)) * int(burst.group(1))
-            assert to_park < cycle_seconds, (
-                f"{unit_name} parks in {to_park}s, well inside one "
-                f"{cycle_seconds}s watchdog cycle — `flap` needs two "
-                "consecutive samples inside a RestartSec window and can never "
-                "get them"
-            )
+            absent = [
+                directive for directive in required
+                if not re.search(rf"^{directive}=(\d+)", text, re.M)
+            ]
+            if absent:
+                gaps[unit_name] = absent
+        assert not gaps, (
+            "DUR-02 brake directives missing — a crash-looping unit restarts "
+            f"forever instead of parking as start-limit-hit: {gaps}"
+        )
+
+    def test_the_braked_crash_loop_pages_p1_through_start_limit_hit(self):
+        """The covering alarm for the braked shape, asserted as behaviour.
+
+        Sampled at the five-minute cadence, a braked crash loop is already
+        parked `failed` — so the P1 must come from the `failed` branch, and
+        `_flap_alert` must NOT be what carries it.
+        """
+        now = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+        parked = {
+            "Id": "radon-api.service",
+            "ActiveState": "failed",
+            "SubState": "failed",
+            "Result": "start-limit-hit",
+            "NRestarts": 5,
+            "Type": "simple",
+        }
+        previous = {"radon-api.service": {"nrestarts": 5, "auto_restart": False}}
+
+        outcomes = units_mod.evaluate(current=[parked], previous=previous, now=now)
+        assert [o.severity for o in outcomes] == ["P1"], outcomes
+        assert "start-limit-hit" in outcomes[0].message
+        assert "reset-failed" in outcomes[0].message, (
+            "a parked unit never auto-recovers, so the page must name the "
+            "manual action"
+        )
+        assert units_mod._flap_alert(parked, previous, now) is None, (
+            "flap is not the signal that covers a braked unit — the parked "
+            "unit is no longer in auto-restart"
+        )
 
 
 # ── R-277: every timer-backed unit is accounted for ──────────────────────────
