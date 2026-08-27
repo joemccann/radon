@@ -1,3 +1,4 @@
+import { computeCtaImageHeight, MAX_IMAGE_ROWS } from "@/lib/ctaImageLayout";
 import { requireRouteAccess } from "@/lib/routeAccess";
 
 import { ImageResponse } from "next/og";
@@ -8,6 +9,8 @@ import { OG, posColor, pctileBg, zColor, zOpacity, fmt } from "@/lib/og-theme";
 import { reconcileCtaTables } from "@/lib/ctaPercentiles";
 
 export const runtime = "nodejs";
+// A satori render holding the whole bitmap must not be able to run unbounded.
+export const maxDuration = 30;
 
 const CACHE_DIR = join(process.cwd(), "..", "data", "menthorq_cache");
 
@@ -301,15 +304,22 @@ export async function GET(request: Request) {
 
   const fonts = await loadFonts();
 
-  // Calculate height based on row count
+  // Truncate before laying out, not after: the row count comes from a cache
+  // FILE, so a malformed extraction could otherwise ask for a canvas tens of
+  // thousands of pixels tall on a Node-runtime satori render. R-310.
+  let budget = MAX_IMAGE_ROWS;
+  for (const key of Object.keys(data.tables)) {
+    const rows = data.tables[key] ?? [];
+    if (rows.length > budget) data.tables[key] = rows.slice(0, Math.max(0, budget));
+    budget -= data.tables[key].length;
+  }
+
   const totalRows = Object.values(data.tables).reduce(
     (sum, rows) => sum + rows.length,
     0
   );
   const sectionCount = Object.keys(data.tables).length;
-  // Title: 50px, per section header: 36px, table header: 28px, per row: 28px, padding: 20px
-  const height =
-    50 + sectionCount * (36 + 28) + totalRows * 28 + 20;
+  const height = computeCtaImageHeight({ sectionCount, totalRows });
 
   const activeSections = SECTIONS.filter(
     (key) => data.tables[key] && data.tables[key].length > 0
