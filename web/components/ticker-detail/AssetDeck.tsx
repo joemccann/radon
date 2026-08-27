@@ -16,7 +16,7 @@ import FilingForensicsDossier from "@/components/equibles/FilingForensicsDossier
 
 const DECK_TITLE: Record<DeckKey, string> = {
   c: "Chain",
-  p: "Position — Full",
+  p: "Full Position",
   n: "News",
   r: "Ratings",
   s: "Seasonal",

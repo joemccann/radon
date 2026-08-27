@@ -34,6 +34,36 @@
   --text-metric: 28px;
   --tracking-meta: 0.03em;
   --tracking-label: 0.02em;
+
+  /* ---- Canonical scales. New rules MUST consume these tokens rather than
+     introducing fresh literals. Existing rules are migrated in a later pass;
+     nothing below is refactored yet. ---- */
+
+  /* Spacing: the brand's 8px base grid with a 4px micro step for dense
+     terminal chrome (hairline gutters, badge padding, icon insets). */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* Radius: capped at the brand's 4px panel ceiling. --radius-sm is the
+     micro corner (grips, ticks); --radius-capsule is badges only. */
+  --radius: 4px;
+  --radius-sm: 2px;
+  --radius-capsule: 999px;
+
+  /* Motion: three durations and one easing curve. --duration-quick is for
+     state paint (hover/active), --duration-fast for controls, --duration-medium
+     for entering surfaces. Distances bound any translate on those transitions. */
+  --duration-quick: 80ms;
+  --duration-fast: 150ms;
+  --duration-medium: 250ms;
+  --ease-standard: cubic-bezier(0.22, 1, 0.36, 1);
+  --distance-micro: 4px;
+  --distance-base: 8px;
+
   --ease-out: cubic-bezier(0.25, 1, 0.5, 1);
   /* Paint-only control transitions (never `all`). Append transform where press-scale applies. */
   --transition-controls: background-color 150ms var(--ease-out), border-color 150ms var(--ease-out), color 150ms var(--ease-out);
@@ -777,7 +807,7 @@ body {
   text-transform: uppercase;
   white-space: nowrap;
   line-height: 1;
-  box-shadow: 0 1px 2px oklch(0 0 0 / 0.12), 0 4px 12px oklch(0 0 0 / 0.16);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--bg-canvas) 80%, transparent);
   opacity: 0;
   pointer-events: none;
   z-index: 60;
@@ -2942,9 +2972,7 @@ a.signals-hero__row:hover { background: var(--bg-panel-raised); }
 .chat-launcher__scrim {
   position: absolute;
   inset: 0;
-  background: color-mix(in srgb, var(--bg-canvas) 78%, transparent);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  background: color-mix(in srgb, var(--bg-canvas) 92%, transparent);
   border: 0;
   cursor: pointer;
 }
@@ -2990,10 +3018,8 @@ a.signals-hero__row:hover { background: var(--bg-panel-raised); }
   padding: 6px 18px;
   min-height: 26px;
   flex-shrink: 0;
-  background: color-mix(in srgb, var(--bg-canvas) 92%, transparent);
+  background: var(--bg-canvas);
   border-top: 1px solid var(--line-grid);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
   font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: 0.08em;
@@ -4841,17 +4867,9 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh--rail {
 .newsfeed-lightbox__scrim {
   position: absolute;
   inset: 0;
-  /* Two-layer darken: brand canvas at near-opaque kills the teal hue bleed
-     of the prior 86% scrim, while the layered darken pass drops underlying
-     chrome into the void so the panel reads as the sole focal point. */
-  background:
-    linear-gradient(
-      color-mix(in srgb, var(--bg-canvas) 60%, transparent),
-      color-mix(in srgb, var(--bg-canvas) 60%, transparent)
-    ),
-    color-mix(in srgb, var(--bg-canvas) 97%, transparent);
-  backdrop-filter: blur(12px) saturate(60%);
-  -webkit-backdrop-filter: blur(12px) saturate(60%);
+  /* Single near-opaque canvas scrim at the composite alpha the old two-layer
+     stack produced (0.60 over 0.97 = 0.988). No blur, no layering. */
+  background: color-mix(in srgb, var(--bg-canvas) 98%, transparent);
   border: 0;
   cursor: zoom-out;
   padding: 0;
@@ -4876,12 +4894,8 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh--rail {
   width: 100%;
   max-height: inherit;
   overflow: hidden;
-  /* Layered shadow: tight crisp bezel, wide soft ambient void, signal-core halo. */
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--bg-canvas) 80%, transparent),
-    0 2px 8px color-mix(in srgb, var(--bg-canvas) 90%, transparent),
-    0 32px 96px color-mix(in srgb, var(--bg-canvas) 80%, transparent),
-    0 0 64px color-mix(in srgb, var(--signal-core) 6%, transparent);
+  /* Single hairline bezel. The 98% scrim does the separation work. */
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--bg-canvas) 80%, transparent);
   animation: newsfeed-lightbox-rise 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
@@ -4938,7 +4952,7 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh--rail {
   z-index: 3;
   width: 44px;
   height: 44px;
-  background: color-mix(in srgb, var(--bg-canvas) 78%, transparent);
+  background: var(--bg-panel-raised);
   border: 1px solid color-mix(in srgb, var(--signal-core) 22%, var(--line-grid));
   border-radius: 4px;
   color: var(--text-primary);
@@ -4947,8 +4961,6 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh--rail {
   justify-content: center;
   cursor: pointer;
   transition: border-color 150ms ease, background 150ms ease, color 150ms ease, transform 150ms ease;
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
 }
 
 .newsfeed-lightbox__nav--prev { left: 24px; }
@@ -5529,12 +5541,10 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh--rail {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-secondary);
-  background: color-mix(in srgb, var(--bg-panel) 88%, transparent);
+  background: var(--bg-panel);
   border: 1px solid var(--border-dim);
   border-radius: 4px;
   cursor: pointer;
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
   transition: opacity 160ms ease, transform 160ms ease;
 }
 
@@ -9259,7 +9269,7 @@ body[data-mobile="true"] .table-wrap td { white-space: nowrap; }
   background: var(--bg-panel-raised);
   border: 1px solid var(--border-dim);
   border-radius: 4px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--bg-canvas) 80%, transparent);
   padding: 6px;
   display: flex;
   flex-direction: column;
@@ -15829,8 +15839,8 @@ body[data-mobile="true"] .toast-container {
   width: min(640px, calc(100vw - 32px));
   background: var(--bg-panel);
   border: 1px solid var(--border-dim);
-  border-radius: 6px;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.42);
+  border-radius: var(--radius);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--bg-canvas) 80%, transparent);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -16684,7 +16694,7 @@ body[data-mobile="true"] .toast-container {
   background: var(--bg-panel-raised);
   border: 1px solid var(--border-focus);
   border-radius: 4px;
-  box-shadow: 0 4px 16px color-mix(in srgb, var(--bg-base) 60%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--bg-canvas) 80%, transparent);
 }
 
 .mobile-chain__quickadd-buy,
@@ -18772,8 +18782,7 @@ body[data-mobile="true"] td.right {
   margin-bottom: 14px;
   border: 1px solid var(--border-subtle, color-mix(in srgb, var(--neutral) 22%, transparent));
   border-radius: 4px;
-  background: color-mix(in srgb, var(--bg-panel-raised, #141414) 92%, transparent);
-  backdrop-filter: blur(6px);
+  background: var(--bg-panel-raised);
   font-size: 13px;
   font-family: var(--font-mono, ui-monospace, monospace);
   color: var(--text-secondary);
@@ -19314,8 +19323,11 @@ body[data-mobile="true"] td.right {
   position: relative;
   background: var(--bg-panel);
   border-top: 1px solid var(--line-grid);
-  border-top-left-radius: 14px;
-  border-top-right-radius: 14px;
+  /* A bottom sheet's top corners are the affordance that says "this slid up
+     over the content". Flattening them to the 4px panel cap reads as a stuck
+     panel rather than a sheet, so the contract exempts this one shape. */
+  border-top-left-radius: 14px; /* radius-exempt: sheet-grab-edge */
+  border-top-right-radius: 14px; /* radius-exempt: sheet-grab-edge */
   padding-bottom: var(--safe-bottom);
   /* dvh, never vh: iOS resolves vh against the large viewport (toolbar
      collapsed), pushing the sticky footer below the visible area. The

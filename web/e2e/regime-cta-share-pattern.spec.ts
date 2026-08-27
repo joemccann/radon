@@ -144,7 +144,7 @@ test.describe("/regime and /cta share UX", () => {
     await page.goto("/regime");
 
     await page.getByRole("button", { name: "Share to X" }).click();
-    await expectShareModal(page, "REGIME REPORT — SHARE TO X");
+    await expectShareModal(page, "REGIME REPORT: SHARE TO X");
 
     await page.keyboard.press("Escape");
     await expect(page.locator(".cta-share-backdrop")).toBeHidden();
@@ -155,7 +155,7 @@ test.describe("/regime and /cta share UX", () => {
     await page.goto("/cta");
 
     await page.getByRole("button", { name: "Share to X" }).click();
-    await expectShareModal(page, "CTA REPORT — SHARE TO X");
+    await expectShareModal(page, "CTA REPORT: SHARE TO X");
 
     await page.locator(".cta-share-close").click();
     await expect(page.locator(".cta-share-backdrop")).toBeHidden();
