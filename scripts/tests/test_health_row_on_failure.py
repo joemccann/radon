@@ -112,3 +112,30 @@ class TestVixcorRecordsItsOwnFailure:
         with pytest.raises(Exception):
             fetch_vixcor.run(client=_Client())
         assert rows, "the zero-rows path exited with no service_health row"
+
+
+class TestIvrankStaleContractHolds:
+    """R-304: the panel's degraded affordance depends on this status surviving.
+
+    Pinned at the WRITER so the contract cannot drift out from under the UI.
+    """
+
+    def test_both_feeds_down_still_marks_the_payload_stale_source(self, monkeypatch):
+        import fetch_ivrank
+
+        monkeypatch.setattr(
+            fetch_ivrank, "load_prior_payload",
+            lambda: {"as_of": "2026-08-21", "current": {"iv_rank": 10.5}, "status": "ok"},
+        )
+        payload = fetch_ivrank._serve_cached("2026-08-27T00:00:00Z", ["ib down", "uw down"])
+        assert payload["status"] == fetch_ivrank.STATUS_STALE_SOURCE
+        # The restamp is the whole reason the panel needs the flag.
+        assert payload["scan_time"] == "2026-08-27T00:00:00Z"
+        assert payload["as_of"] == "2026-08-21"
+
+    def test_no_cached_payload_raises_rather_than_serving_nothing(self, monkeypatch):
+        import fetch_ivrank
+
+        monkeypatch.setattr(fetch_ivrank, "load_prior_payload", lambda: None)
+        with pytest.raises(RuntimeError):
+            fetch_ivrank._serve_cached("2026-08-27T00:00:00Z", ["ib down", "uw down"])
