@@ -521,3 +521,69 @@ how this loop improves as the codebase grows.
   but "main has been red and undeployed since". A darwin-only red would have
   shown CI green; this showed CI red, which is a different and more urgent
   report.
+
+- **2026-08-27 (remediate): a P0 may already be fixed in an OPEN PR — check
+  before you write a line of code.** The audit's headline (T-237, `main` is
+  red) was already fixed by open PR #109, correctly and more completely than
+  the audit described: the audit named one of THREE causes, and renaming the
+  constant alone still left the file 7-red (the ladder stubs take one argument
+  where `_fetch_closes_via_ladder` takes three, and a second constant did not
+  exist either). Fifteen minutes of duplicate work was avoided by
+  `gh pr list --state open` at pre-flight and reading the one PR whose title
+  matched the finding. Add to step 1, next to the origin-branch check:
+  `gh pr list --state open --limit 20` and grep the titles against the P0 list.
+  Then say so explicitly in the log, the PR body and the claim comment — a
+  finding left undone for a good reason has to be distinguishable from one
+  that was missed.
+- **2026-08-27 (remediate): converting a skipped-or-grepping test into a real
+  one is the highest-yield work this loop does, because the thing it was not
+  testing is often BROKEN.** Two of this run's conversions found live
+  production defects, not test gaps: running the caddy edge tests for the first
+  time (T-205) proved `cloud/caddy/Caddyfile` does not adapt at all — both
+  installers gate on `caddy validate`, so R-219/R-220/R-258 were never in force
+  at the edge while 14 text-regex assertions shipped green; and executing this
+  loop's OWN dead-man forensics (T-209) proved `report()` is defined below the
+  prologue that calls it, so every prologue death was silent. Budget for the
+  fallout: prefer the finding whose AC is "make this actually run" over the one
+  whose AC is "add a case", and verify the fallout yourself rather than
+  trusting the agent — a public release binary in `/tmp` settled the Caddyfile
+  question in two commands, both directions.
+- **2026-08-27 (remediate): two agents off the same base WILL collide in one
+  file, and the resolution is always "keep both", never "take one side".**
+  Two conflicts this run. (a) T-197 and T-232 both converted the same
+  grep-to-behaviour test; T-197's version was strictly richer (three extra
+  tests), so it was kept — but T-232's unique contribution was asserting the
+  row's MESSAGE, not just its state, and that was merged in rather than
+  dropped. (b) T-198 added a `docker_body` parameter to a fake `docker` while
+  T-232 added `RADON_TEST_MISSING_TAGS` to the same stub. Keeping both is not
+  enough: the merged stub failed only `manifest inspect` for a missing tag, so
+  T-198's new local-store fallback resolved it and T-232's `:latest` fallback
+  was never reached — one test red on landing. The fix was to make the FAKE
+  honest (a tag missing from the registry is missing from the local store too),
+  which is a fixture correction, not a weakening. Always run the second
+  agent's own tests immediately after the second cherry-pick.
+- **2026-08-27 (remediate): `str.format()` is applied to shell-stub heredocs
+  in this repo's cloud tests — a literal `{` in bash is a format field.**
+  Adding `if { [ "$1" = a ] || [ "$1" = b ]; }` to a fake `docker` turned
+  1 failure into 15, because `.format()` tried to interpret the brace group.
+  Use a brace-free test (`[ "$1" = a -o "$1" = b ]`) or double the braces.
+  The symptom — a small edit exploding the failure count — is the tell.
+- **2026-08-27 (remediate): fix the load-class flake BEFORE the closing gate,
+  not after.** `portfolio-startup-performance-contract.test.ts` (T-238, filed
+  P2 for a 41ms margin) hard-timed-out twice consecutively **in isolation** at
+  load average 42 while verifying an unrelated agent's work. Left alone it
+  would have redded the closing 3x gate and cost a round of re-runs to
+  attribute. A P2 that will red your own verification is worth promoting for
+  the duration of the run. The honest fix was `vi.setConfig` per the T-161
+  pattern, with the measured numbers written into the comment — not the AC's
+  suggested `beforeAll` hoist, which would not have helped because the cost is
+  a dynamic import, and a `beforeAll` only moves that under `hookTimeout`.
+- **2026-08-27 (remediate): a claim comment plus a running landed-table on the
+  PR is what makes an 8-agent fan-out legible.** Posting the claimed T-### list
+  BEFORE starting, then editing a cumulative table onto the PR after every
+  landing, meant the PR was a truthful dead-man signal at every moment of the
+  run rather than only at the end. `gh pr comment` works on this repo;
+  `gh pr edit --body-file` still aborts on the Projects-classic GraphQL
+  deprecation, so the body goes through
+  `gh api -X PATCH repos/{owner}/{repo}/pulls/<n> --input <json>` and is
+  verified with a grep for a phrase you just wrote.
