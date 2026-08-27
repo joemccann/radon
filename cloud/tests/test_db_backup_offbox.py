@@ -1,8 +1,15 @@
 """Tests for the off-box (Backblaze B2) leg of scripts/db_backup.py.
 
-No live B2, no boto3 import: the S3 client is always stubbed. The local
-gzip dump is the critical path — every failure mode here must leave it on
-disk and still heartbeat.
+No live B2 and NO boto3 dependency: the CI cloud-tests job installs only
+requirements-dev.txt + cloud/requirements-test.txt, neither of which
+carries boto3, and db_backup.py imports it lazily precisely so these tests
+never need it. Tests that must reach the transport install a fake ``boto3``
+/ ``botocore`` module tree in ``sys.modules`` (see _install_fake_boto3), so
+the real lazy-import path in ``_s3_client`` / ``_transfer_config`` is
+exercised and the stub client is what actually gets driven.
+
+The local gzip dump is the critical path — every failure mode here must
+leave it on disk and still heartbeat.
 """
 
 import gzip
@@ -10,6 +17,7 @@ import importlib.util
 import pathlib
 import sqlite3
 import sys
+import types
 
 import pytest
 
@@ -81,9 +89,61 @@ class _Stamp:
         return self._epoch
 
 
+def _install_fake_boto3(monkeypatch, client):
+    """Put a minimal fake boto3/botocore in sys.modules and return the kwargs
+    db_backup passes into them.
+
+    Stubbing beats adding the dependency: cloud/requirements-test.txt is a
+    deliberately minimal three-line file, and the module documents its
+    import as lazy so unit runs never pull botocore/s3transfer. monkeypatch
+    restores sys.modules after each test.
+    """
+    seen: dict = {}
+
+    class _TransferConfig:
+        def __init__(self, **kwargs):
+            seen["transfer"] = kwargs
+
+    class _Config:
+        def __init__(self, **kwargs):
+            seen["botocore_config"] = kwargs
+
+    def _make_client(service, **kwargs):
+        seen["service"] = service
+        seen["client"] = kwargs
+        return client
+
+    boto3_mod = types.ModuleType("boto3")
+    s3_mod = types.ModuleType("boto3.s3")
+    transfer_mod = types.ModuleType("boto3.s3.transfer")
+    botocore_mod = types.ModuleType("botocore")
+    botocore_config_mod = types.ModuleType("botocore.config")
+
+    boto3_mod.client = _make_client
+    boto3_mod.s3 = s3_mod
+    s3_mod.transfer = transfer_mod
+    transfer_mod.TransferConfig = _TransferConfig
+    botocore_mod.config = botocore_config_mod
+    botocore_config_mod.Config = _Config
+
+    for name, module in (
+        ("boto3", boto3_mod),
+        ("boto3.s3", s3_mod),
+        ("boto3.s3.transfer", transfer_mod),
+        ("botocore", botocore_mod),
+        ("botocore.config", botocore_config_mod),
+    ):
+        monkeypatch.setitem(sys.modules, name, module)
+    return seen
+
+
 class TestNoBoto3AtImport:
-    def test_boto3_is_never_imported_by_the_module(self):
-        assert "boto3" not in sys.modules
+    def test_module_import_does_not_pull_boto3(self):
+        """The lazy import is load-bearing: the CI cloud-tests job has no
+        boto3, so an eager import would break the whole module."""
+        before = "boto3" in sys.modules
+        _load_module()
+        assert ("boto3" in sys.modules) is before
 
 
 class TestS3ConfigFromEnv:
@@ -305,9 +365,7 @@ def backup_env(monkeypatch, tmp_path):
 
 class TestLocalDumpSurvivesUploadFailure:
     def test_dump_is_written_and_kept_when_b2_upload_raises(self, backup_env, monkeypatch):
-        monkeypatch.setattr(
-            db_backup, "_s3_client", lambda cfg: _StubClient(fail_on="radon-")
-        )
+        _install_fake_boto3(monkeypatch, _StubClient(fail_on="radon-"))
 
         detail = db_backup.run_backup()
 
@@ -329,9 +387,7 @@ class TestLocalDumpSurvivesUploadFailure:
         assert "credential" in detail["offbox_error"].lower()
 
     def test_upload_failure_heartbeats_error_and_exits_nonzero(self, backup_env, monkeypatch):
-        monkeypatch.setattr(
-            db_backup, "_s3_client", lambda cfg: _StubClient(fail_on="radon-")
-        )
+        _install_fake_boto3(monkeypatch, _StubClient(fail_on="radon-"))
         beats: list[tuple] = []
         monkeypatch.setattr(
             db_backup,
@@ -352,7 +408,7 @@ class TestLocalDumpSurvivesUploadFailure:
 
     def test_successful_upload_heartbeats_ok_with_bytes_uploaded(self, backup_env, monkeypatch):
         client = _StubClient()
-        monkeypatch.setattr(db_backup, "_s3_client", lambda cfg: client)
+        _install_fake_boto3(monkeypatch, client)
         beats: list[tuple] = []
         monkeypatch.setattr(
             db_backup,
@@ -368,3 +424,21 @@ class TestLocalDumpSurvivesUploadFailure:
         assert detail["offbox_uploaded"] == 1
         assert detail["offbox_bytes_uploaded"] == detail["size_bytes"]
         assert "b2 1/1" in detail["summary"]
+
+    def test_transport_is_bounded_and_multipart(self, backup_env, monkeypatch):
+        """A wedged B2 must not hang the unit past TimeoutStartSec, so the
+        socket timeouts / retries / multipart chunking have to reach boto3."""
+        seen = _install_fake_boto3(monkeypatch, _StubClient())
+        monkeypatch.setattr(db_backup, "write_service_health", lambda *a, **k: None)
+
+        assert db_backup.main() == 0
+
+        assert seen["service"] == "s3"
+        assert seen["client"]["endpoint_url"] == FULL_ARCHIVE_ENV[
+            "RADON_ARCHIVE_S3_ENDPOINT"
+        ]
+        assert seen["botocore_config"]["connect_timeout"] == db_backup.S3_CONNECT_TIMEOUT
+        assert seen["botocore_config"]["read_timeout"] == db_backup.S3_READ_TIMEOUT
+        assert seen["botocore_config"]["retries"]["max_attempts"] == db_backup.S3_MAX_ATTEMPTS
+        assert seen["transfer"]["multipart_chunksize"] == db_backup.MULTIPART_CHUNK_BYTES
+        assert seen["transfer"]["max_concurrency"] == db_backup.MULTIPART_CONCURRENCY
