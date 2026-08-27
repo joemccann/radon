@@ -1926,9 +1926,20 @@ check_units_stable
         assert result.returncode == 0, result.stdout + result.stderr
         assert slept.read_text(encoding="utf-8").strip() == "3"
 
-    def test_check_units_stable_skips_sleep_when_units_were_not_restarted(
+    def test_check_units_stable_settles_even_when_units_were_not_restarted(
         self, tmp_path: Path
     ) -> None:
+        """Was ``..._skips_sleep_when_units_were_not_restarted``.
+
+        That skip is R-231: the UNITS_RESTARTED=0 branch does not restart
+        units, but it DOES ``git reset --hard`` the live checkout and promote
+        artifacts while radon-api, radon-monitor and every ``.venv/bin/python``
+        timer oneshot are running. It is therefore the one path where an
+        unexplained unit failure has no restart to correlate with — the path
+        that most needs a settle window, not the one that can skip it. The
+        rest of the case (the check runs, the units are inspected, the exit is
+        clean) is unchanged.
+        """
         fake_bin = tmp_path / "bin"
         fake_bin.mkdir()
         slept = tmp_path / "slept"
@@ -1972,7 +1983,10 @@ check_units_stable
             text=True,
         )
         assert result.returncode == 0, result.stdout + result.stderr
-        assert not slept.exists()
+        assert slept.exists(), (
+            "the promote path that mutates the live tree under running "
+            "services skipped its settle window entirely"
+        )
 
     def test_payload_paths_changed_ignores_docs_and_tests(self, tmp_path: Path) -> None:
         fake_bin = tmp_path / "bin"

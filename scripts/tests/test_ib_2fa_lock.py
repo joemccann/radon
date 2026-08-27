@@ -24,6 +24,10 @@ def _redirect_lock_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path
     /var/lib/radon/ib-2fa-push-lock.json is never touched."""
     path = tmp_path / "ib-2fa-push-lock.json"
     monkeypatch.setenv("IB_2FA_LOCK_PATH", str(path))
+    # Orphan confirmation retries in-call (R-210); zero the interval so the
+    # suite does not pay 0.8s per revocation.
+    monkeypatch.setattr(ib_2fa_lock, "ORPHAN_CONFIRM_INTERVAL_SECS", 0.0)
+    ib_2fa_lock.reset_orphan_state()
     return path
 
 

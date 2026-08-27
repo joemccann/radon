@@ -115,10 +115,22 @@ def test_deploy_passes_the_explicit_workflow_sha() -> None:
     assert "RADON_DEPLOY_ENV_FILE" in script
 
 
-def test_stage_release_overlaps_gating_jobs_and_is_cancelable() -> None:
+def test_stage_release_is_gated_and_cancelable() -> None:
+    """Was ``..._overlaps_gating_jobs_and_is_cancelable``.
+
+    The overlap half asserted ``"needs" not in stage`` and
+    ``continue-on-error: true`` — i.e. it pinned the R-201 hole: the job SSHes
+    to the live trading host and runs the pushed commit's own deploy.sh, so
+    overlapping the gate meant untested code executed on production, and
+    ``continue-on-error`` kept that invisible. Both assertions are inverted
+    here; the cancelability and separate-concurrency-group half, which is what
+    keeps a superseded prestage from colliding with the real deploy, is
+    unchanged. The gate membership itself is asserted in
+    ``test_ci_gate_integrity.py``.
+    """
     jobs = _workflow()["jobs"]
     stage = jobs["stage-release"]
-    assert "needs" not in stage or stage.get("needs") in (None, [], "")
+    assert stage.get("needs"), "stage-release must wait on the test gate"
     assert "refs/heads/main" in stage["if"]
     assert "push" in stage["if"]
     assert "refs/heads/main" in jobs["deploy"]["if"]
@@ -126,7 +138,10 @@ def test_stage_release_overlaps_gating_jobs_and_is_cancelable() -> None:
     assert concurrency.get("cancel-in-progress") == "true"
     assert "github.ref" in concurrency.get("group", "")
     assert concurrency.get("group") != "deploy-production"
-    assert stage.get("continue-on-error") in ("true", True)
+    assert stage.get("continue-on-error") not in ("true", True), (
+        "a failed prestage against production must be a red job; deploy still "
+        "tolerates it via needs.stage-release.result == 'failure'"
+    )
     ssh_step = next(step for step in stage["steps"] if "ssh-action" in step.get("uses", ""))
     script = ssh_step["with"]["script"]
     assert "RADON_DEPLOY_STAGE=1" in script

@@ -57,6 +57,13 @@ export interface ListedContractOrderFormProps {
   priceData?: PriceData | null;
   /** Instrument label rendered above the quote fields (e.g. "VIX 2026-09-16 $20 C"). */
   quoteLabel?: string;
+  /**
+   * Disclosure rendered OUTSIDE the quote panel when the quote shown is not
+   * the traded contract's own book. The `Index` suffix in `quoteLabel` sat
+   * inside the panel the numbers were in, which is not a disclosure the
+   * operator reads while typing a limit into the input below it. R-254.
+   */
+  quoteProvenance?: string;
   /** Live portfolio snapshot routed into `<OrderRiskGate>`. */
   portfolio: PortfolioData | null | undefined;
   /** Telemetry surface tag for `<OrderRiskGate>`. */
@@ -104,6 +111,7 @@ export function ListedContractOrderForm({
   limitPriceStep,
   priceData,
   quoteLabel,
+  quoteProvenance,
   buildRiskInput,
   portfolio,
   surface,
@@ -197,6 +205,9 @@ export function ListedContractOrderForm({
       </div>
 
       <OrderQuoteTelemetry priceData={priceData ?? null} label={quoteLabel} density="tight" />
+      {quoteProvenance && (
+        <div className="order-quote-provenance">{quoteProvenance}</div>
+      )}
 
       {contractSelector}
 

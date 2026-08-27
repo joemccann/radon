@@ -20,6 +20,11 @@ WEB_PREFIXES = (
     "web/",
     "site/",
     "lib/",
+    # vitest.config.ts includes scripts/lib/**/*.test.js (the WS relay's
+    # stale-tick ladder, reconnect gate and backpressure suites). pytest
+    # collects none of them, so this prefix must arm the web gate too — the
+    # "scripts/" python match below is not enough. R-202.
+    "scripts/lib/",
     "brand/",
     "vitest.config.ts",
     "package.json",

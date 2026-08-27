@@ -72,21 +72,32 @@ if [ -z "$PYTHON_BIN" ]; then
     exit 1
 fi
 
-IS_TRADING=$("$PYTHON_BIN" - <<'PY' 2>/dev/null || echo "no"
+# "no" is a VERDICT, not a fallback. This used to swallow twice - a bare
+# `except Exception: print('no')` inside and `|| echo "no"` outside - so a
+# broken venv, a renamed utils.market_calendar or a corrupt holiday calendar
+# all printed "Market closed" and exited 0, on every hourly fire, with the
+# three flow tabs frozen and nothing but successful oneshots to show for it.
+# R-223.
+IS_TRADING=$("$PYTHON_BIN" - <<'PY' 2>>"logs/flow_refresh.err.log"
 import sys
-try:
-    sys.path.insert(0, 'scripts')
-    from utils.market_calendar import market_state
-    print('yes' if market_state().get('is_open') else 'no')
-except Exception:
-    print('no')
+sys.path.insert(0, 'scripts')
+from utils.market_calendar import market_state
+print('yes' if market_state().get('is_open') else 'no')
 PY
-)
+) || IS_TRADING="unknown"
 
-if [ "$IS_TRADING" = "no" ]; then
-    echo "$(date): Market closed - skipping flow refresh"
-    exit 0
-fi
+case "$IS_TRADING" in
+    yes) ;;
+    no)
+        echo "$(date): Market closed - skipping flow refresh"
+        exit 0
+        ;;
+    *)
+        echo "$(date): Could not determine market state (probe failed); not skipping blind" >&2
+        _flow_health "error" "market-state probe failed; flow refresh did not run"
+        exit 1
+        ;;
+esac
 
 FASTAPI_HOST="${RADON_FLOW_REFRESH_FASTAPI_HOST:-127.0.0.1}"
 FASTAPI_PORT="${RADON_FLOW_REFRESH_FASTAPI_PORT:-8321}"
@@ -107,14 +118,49 @@ SHED_EXIT=75
 
 mkdir -p logs
 
-_retryable_flow_shed() {
-    # $1 = attempt (0-based), $2 = curl exit, $3 = http code
-    [ "$1" -lt "$RETRY_LIMIT" ] || return 1
-    [ "$2" -eq 0 ] || return 1
-    case "$3" in
-        502|503) return 0 ;;
+# The API raises HTTPException(502, detail=result.error) for EVERY failure -
+# capacity exhaustion, a nonzero script exit, an asyncio timeout at the script
+# deadline, invalid JSON, any other exception. Status alone therefore cannot
+# tell a shed from a fault, and the body is the only signal there is; the
+# marker matches scripts/api/server.py's _CAPACITY_SHED_MARKER. R-221.
+CAPACITY_SHED_MARKER="subprocess capacity exhausted"
+
+_is_capacity_shed() {
+    # $1 = curl exit, $2 = http code, $3 = response body
+    [ "$1" -eq 0 ] || return 1
+    case "$2" in
+        502|503) ;;
+        *) return 1 ;;
     esac
-    return 1
+    printf '%s' "$3" | tr '[:upper:]' '[:lower:]' | grep -qF "$CAPACITY_SHED_MARKER"
+}
+
+_retryable_flow_shed() {
+    # $1 = attempt (0-based), $2 = curl exit, $3 = http code, $4 = body
+    [ "$1" -lt "$RETRY_LIMIT" ] || return 1
+    _is_capacity_shed "$2" "$3" "$4"
+}
+
+# Best-effort durable signal. Nothing on the shed or skip paths wrote a
+# service_health row, so the watchdog had no error row either. R-221 / R-265.
+_flow_health() {
+    RADON_FLOW_HEALTH_STATE="$1" RADON_FLOW_HEALTH_MESSAGE="$2" \
+        "$PYTHON_BIN" - >>"logs/flow_refresh.err.log" 2>&1 <<'HEALTHPY' || true
+import os
+import sys
+sys.path.insert(0, 'scripts')
+try:
+    from db.hrana_http import write_service_health_http
+    state = os.environ["RADON_FLOW_HEALTH_STATE"]
+    message = os.environ.get("RADON_FLOW_HEALTH_MESSAGE") or ""
+    write_service_health_http(
+        "flow-refresh",
+        state,
+        error=None if state == "ok" else {"message": message, "class": "flow-refresh"},
+    )
+except Exception as exc:
+    print(f"flow-refresh health write skipped: {exc}", file=sys.stderr)
+HEALTHPY
 }
 
 refresh_scan() {
@@ -123,7 +169,7 @@ refresh_scan() {
     local fallback_args=("$@")
     local url="http://${FASTAPI_HOST}:${FASTAPI_PORT}${endpoint}"
     local attempt=0
-    local HTTP_CODE=000 CURL_EXIT=28
+    local HTTP_CODE=000 CURL_EXIT=28 RESPONSE_BODY="" BODY_FILE=""
     local SCAN_DEADLINE=$((SECONDS + SCAN_TIMEOUT))
     local remaining delay
 
@@ -134,13 +180,16 @@ refresh_scan() {
             echo "$(date): ${label} scan deadline (${SCAN_TIMEOUT}s) reached" >&2
             break
         fi
-        HTTP_CODE=$(curl -sS -X POST -m "$remaining" -o /dev/null -w "%{http_code}" "$url")
+        BODY_FILE="$(mktemp)"
+        HTTP_CODE=$(curl -sS -X POST -m "$remaining" -o "$BODY_FILE" -w "%{http_code}" "$url")
         CURL_EXIT=$?
+        RESPONSE_BODY="$(cat "$BODY_FILE" 2>/dev/null)"
+        rm -f "$BODY_FILE"
         if [ "$CURL_EXIT" -eq 0 ] && [[ "$HTTP_CODE" == 2* ]]; then
             echo "$(date): ${label} refresh via FastAPI complete (OK)"
             return 0
         fi
-        if ! _retryable_flow_shed "$attempt" "$CURL_EXIT" "$HTTP_CODE"; then
+        if ! _retryable_flow_shed "$attempt" "$CURL_EXIT" "$HTTP_CODE" "$RESPONSE_BODY"; then
             break
         fi
         attempt=$((attempt + 1))
@@ -160,7 +209,7 @@ refresh_scan() {
     # top-of-hour breadth / portfolio / peer scans hold the slots, so the
     # retry budget cannot clear a multi-minute hold. This wrapper runs hourly:
     # the next slot picks the scan up.
-    if [ "$CURL_EXIT" -eq 0 ] && { [ "$HTTP_CODE" = "502" ] || [ "$HTTP_CODE" = "503" ]; }; then
+    if _is_capacity_shed "$CURL_EXIT" "$HTTP_CODE" "$RESPONSE_BODY"; then
         echo "$(date): ${label} shed for subprocess capacity (http=${HTTP_CODE}); the next slot retries" >&2
         return "$SHED_EXIT"
     fi
@@ -170,8 +219,14 @@ refresh_scan() {
         return 1
     fi
 
-    echo "$(date): ${label}: FastAPI unavailable, fallback to ${fallback_args[*]}"
-    if "$PYTHON_BIN" "${fallback_args[@]}" \
+    # Bounded by what is LEFT of this scan's budget. The fallback used to run
+    # outside SCAN_DEADLINE entirely - connection-refused is instant, so with
+    # FastAPI down all three scans reached an unbounded python run and systemd
+    # SIGTERMed the cgroup mid-write. R-222.
+    remaining=$((SCAN_DEADLINE - SECONDS))
+    [ "$remaining" -gt 0 ] || remaining=1
+    echo "$(date): ${label}: FastAPI unavailable, fallback to ${fallback_args[*]} (${remaining}s budget)"
+    if timeout "${remaining}s" "$PYTHON_BIN" "${fallback_args[@]}" \
         >/dev/null 2>>"logs/flow_refresh.err.log"; then
         echo "$(date): ${label} fallback refresh complete (OK)"
         return 0
@@ -204,8 +259,12 @@ fi
 
 if [ "$SHED" -gt 0 ]; then
     echo "$(date): Flow refresh shed ${SHED} scan(s) for subprocess capacity; the next slot retries" >&2
+    # Exit 0 still, so a transient shed does not page - but the row records
+    # that no scan ran, which is what makes a PERMANENT shed visible. R-265.
+    _flow_health "warn" "shed ${SHED} scan(s) for subprocess capacity"
     exit 0
 fi
 
 echo "$(date): Flow refresh complete (OK)"
+_flow_health "ok" ""
 exit 0

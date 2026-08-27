@@ -8,6 +8,34 @@ let inFlight: Promise<void> | null = null;
 let storeGeneration = 0;
 const listeners = new Set<() => void>();
 const CLIENT_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+/**
+ * Retry ladder for an UNRESOLVED rate. Without one, `loadRiskFreeRate` fired
+ * only from a `useEffect(..., [])` per consumer mount and short-circuited on
+ * `inFlight`, so on a long-lived WorkspaceShell session a single transient
+ * FRED miss at page load pinned the rate for the rest of the session. R-229.
+ */
+const RETRY_BASE_MS = 60_000;
+const RETRY_MAX_MS = 15 * 60_000;
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+let retryAttempt = 0;
+
+function clearRetry() {
+  if (retryTimer !== null) {
+    clearTimeout(retryTimer);
+    retryTimer = null;
+  }
+  retryAttempt = 0;
+}
+
+function scheduleRetry() {
+  if (retryTimer !== null) return;
+  const delay = Math.min(RETRY_MAX_MS, RETRY_BASE_MS * 2 ** retryAttempt);
+  retryAttempt += 1;
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    void loadRiskFreeRate();
+  }, delay);
+}
 
 function subscribe(listener: () => void) {
   listeners.add(listener);
@@ -16,8 +44,8 @@ function subscribe(listener: () => void) {
   };
 }
 
-function getSnapshot() {
-  return cachedRate ?? 0;
+function getSnapshot(): number | null {
+  return cachedRate;
 }
 
 function loadRiskFreeRate() {
@@ -41,13 +69,20 @@ function loadRiskFreeRate() {
         || data.stale !== false
         || typeof data.rate !== "number"
         || !Number.isFinite(data.rate)
-      ) return;
+      ) {
+        // Not a fresh observation. Keep any last-good value and arm the
+        // ladder, because nothing else will retry this session. R-229.
+        scheduleRetry();
+        return;
+      }
       cachedRate = data.rate;
       cachedAt = Date.now();
+      clearRetry();
       listeners.forEach((listener) => listener());
     })
     .catch(() => {
-      // Preserve a last-good value (or the initial 0). A later mount retries.
+      // Preserve any last-good value; the ladder recovers the session.
+      scheduleRetry();
     })
     .finally(() => {
       if (inFlight === request) inFlight = null;
@@ -63,7 +98,44 @@ export function resetRiskFreeRateCacheForTests() {
   cachedRate = null;
   cachedAt = 0;
   inFlight = null;
+  clearRetry();
   listeners.clear();
+}
+
+/**
+ * Test seam: install a resolved rate so a component test can exercise the
+ * Black-Scholes columns without stubbing the route. The columns now render
+ * "—" while the rate is UNRESOLVED (R-229), which is the point — but that
+ * makes an unrelated test's silence about the rate an implicit assertion.
+ */
+export function seedRiskFreeRateForTests(rate: number) {
+  cachedRate = rate;
+  cachedAt = Date.now();
+  clearRetry();
+  listeners.forEach((listener) => listener());
+}
+
+export type RiskFreeRateState = {
+  /** null until a real FRED:DFF observation lands. */
+  rate: number | null;
+  /** False while the rate is unknown — NOT the same as a rate of 0. */
+  resolved: boolean;
+};
+
+/**
+ * The rate with its resolution state. Prefer this wherever a 0 would be a
+ * meaningful reading: `useRiskFreeRate()` collapses "unknown" onto 0, which
+ * is exactly what made a dead FRED indistinguishable from a zero-rate world
+ * at every layer of the option-value chain. R-229.
+ */
+export function useRiskFreeRateState(): RiskFreeRateState {
+  const rate = useSyncExternalStore(subscribe, getSnapshot, () => null);
+
+  useEffect(() => {
+    void loadRiskFreeRate();
+  }, []);
+
+  return { rate, resolved: rate !== null };
 }
 
 /**
@@ -75,11 +147,5 @@ export function resetRiskFreeRateCacheForTests() {
  * cache. An expired value remains renderable while one revalidation runs.
  */
 export function useRiskFreeRate(): number {
-  const rate = useSyncExternalStore(subscribe, getSnapshot, () => 0);
-
-  useEffect(() => {
-    void loadRiskFreeRate();
-  }, []);
-
-  return rate;
+  return useRiskFreeRateState().rate ?? 0;
 }

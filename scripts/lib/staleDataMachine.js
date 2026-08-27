@@ -362,15 +362,25 @@ export function shouldRequestGatewayRestart(gatewayMode) {
  * contradict each other inside one row (R-061). ``freshness`` contributes only
  * its subscription counts.
  *
+ * ``lastTickTimestamp`` is ``null`` until a real tick arrives. It used to be
+ * seeded ``Date.now()`` at module load, so a relay that started, connected and
+ * received ZERO market data published ``last_tick_at = <process start>`` and
+ * ``tick_age_secs ~ 0`` — a tick that never happened, stamped into
+ * ``service_health`` and read as proof of a live data plane. ``ticks_seen``
+ * makes the two cases distinguishable downstream, which they were not: the
+ * rows were byte-identical. R-214.
+ *
  * @param {number} now                                   Current epoch ms.
- * @param {number} lastTickTimestamp                     Epoch ms of the relay's last real tick.
+ * @param {number|null} lastTickTimestamp                Epoch ms of the relay's last real tick, or null if none.
  * @param {{activeSubscriptions: number, subscribedSymbols: number}} freshness
- * @returns {{last_tick_at: string, tick_age_secs: number, active_subscriptions: number, subscribed_symbols: number}}
+ * @returns {{last_tick_at: string|null, tick_age_secs: number|null, ticks_seen: boolean, active_subscriptions: number, subscribed_symbols: number}}
  */
 export function buildRelayHealthDetail(now, lastTickTimestamp, freshness) {
+  const ticked = Number.isFinite(lastTickTimestamp);
   return {
-    last_tick_at: new Date(lastTickTimestamp).toISOString(),
-    tick_age_secs: Math.round((now - lastTickTimestamp) / 1000),
+    last_tick_at: ticked ? new Date(lastTickTimestamp).toISOString() : null,
+    tick_age_secs: ticked ? Math.round((now - lastTickTimestamp) / 1000) : null,
+    ticks_seen: ticked,
     active_subscriptions: freshness.activeSubscriptions,
     subscribed_symbols: freshness.subscribedSymbols,
   };

@@ -150,15 +150,34 @@ export function createScraper(overrides = {}) {
     const cycleStart = Date.now();
     const cycleStartIso = new Date(cycleStart).toISOString();
 
-    await authenticateIfNeeded();
-    const handle = await getBrowser();
+    // recordServiceHealth is only reachable from inside runScrapeCycle, but
+    // these three steps run BEFORE it — and they are the two most likely
+    // sustained failures: a rejected session and an unreachable
+    // themarketear. Unguarded, they wrote ZERO rows, so the last `ok` row
+    // simply aged and the health surface said "no recent update" rather than
+    // "auth is broken", with the error text only in the journal. R-261.
+    let handle;
+    try {
+      await authenticateIfNeeded();
+      handle = await getBrowser();
 
-    // Re-navigate every cycle so we always have fresh DOM (prior cycle could
-    // have left the page in any state).
-    await handle.page.goto("https://themarketear.com/newsfeed", {
-      waitUntil: "domcontentloaded",
-      timeout: 30_000,
-    });
+      // Re-navigate every cycle so we always have fresh DOM (prior cycle could
+      // have left the page in any state).
+      await handle.page.goto("https://themarketear.com/newsfeed", {
+        waitUntil: "domcontentloaded",
+        timeout: 30_000,
+      });
+    } catch (err) {
+      await recordServiceHealth("newsfeed-scraper", "error", {
+        startedAt: cycleStartIso,
+        finishedAt: new Date().toISOString(),
+        error: {
+          message: `newsfeed pre-cycle failure: ${err?.message ?? String(err)}`,
+          class: "newsfeed-precycle",
+        },
+      }).catch(() => {});
+      throw err;
+    }
     if (typeof handle.page.waitForLoadState === "function") {
       await handle.page
         .waitForLoadState("networkidle", { timeout: 15_000 })
@@ -228,8 +247,20 @@ export function createScraper(overrides = {}) {
   return { paths, scrapeOnce, closeBrowser, authenticateIfNeeded, requestReauth };
 }
 
-export async function run({ intervalMs = INTERVAL_MS, signal, ...overrides } = {}) {
+export async function run({ intervalMs = INTERVAL_MS, signal, onCycleState, ...overrides } = {}) {
   const { paths, scrapeOnce, closeBrowser } = createScraper(overrides);
+
+  // R-262: the shutdown timer needs to know whether it is cutting a cycle in
+  // half. The abort signal is only checked BETWEEN cycles, so nothing else
+  // can tell.
+  const trackedScrapeOnce = async () => {
+    onCycleState?.(true);
+    try {
+      return await scrapeOnce();
+    } finally {
+      onCycleState?.(false);
+    }
+  };
 
   await fs.ensureDir(paths.dataDir);
   await fs.ensureDir(paths.archiveDir);
@@ -241,7 +272,7 @@ export async function run({ intervalMs = INTERVAL_MS, signal, ...overrides } = {
   try {
     await runForever({
       intervalMs,
-      scrapeOnce,
+      scrapeOnce: trackedScrapeOnce,
       signal,
       onCycleError: (err) => console.error(`[newsfeed] cycle failed: ${err.message}`),
     });
@@ -286,11 +317,18 @@ if (isDirectExecution()) {
       });
   } else {
     const controller = new AbortController();
-    const shutdown = createShutdown({ controller });
+    let cycleInFlight = false;
+    // R-262: exit non-zero when the grace expires with a cycle still running,
+    // so systemd's Restart=on-failure does not treat a truncated cycle as a
+    // clean stop.
+    const shutdown = createShutdown({
+      controller,
+      isCycleInFlight: () => cycleInFlight,
+    });
     process.on("SIGINT", () => shutdown("SIGINT"));
     process.on("SIGTERM", () => shutdown("SIGTERM"));
 
-    run({ signal: controller.signal })
+    run({ signal: controller.signal, onCycleState: (v) => { cycleInFlight = v; } })
       .then(() => process.exit(0))
       .catch((err) => {
         console.error(`[newsfeed] fatal: ${err.message}`);

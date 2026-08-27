@@ -317,7 +317,12 @@ describe("positionGroupShareData", () => {
       ],
     };
     const data = positionGroupShareData(group);
-    expect(data.pnl).toBe(0);
+    // Was `expect(data.pnl).toBe(0)` — that is R-249. `totalPnL` is null here
+    // (an OPENING group has no realized P&L), and the `?? 0` turned that into
+    // a hard $0 on the share card next to the blank percentage below, which
+    // reads as a scratch trade rather than an unmeasured one. The pnlPct half
+    // of this case was always right and is unchanged.
+    expect(data.pnl).toBeNull();
     expect(data.pnlPct).toBeNull();
   });
 

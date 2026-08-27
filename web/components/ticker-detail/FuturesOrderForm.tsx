@@ -221,6 +221,12 @@ export function FuturesOrderForm({ ticker, portfolio, priceData }: FuturesOrderF
       limitPriceStep={selectedContract?.minTick ?? 0.05}
       priceData={priceData ?? null}
       quoteLabel={`${symbol} Index`}
+      // The panel above is spot, not the selected contract's book. A VIX
+      // derivative prices off the forward curve for its own expiry — a
+      // front-month future at 19 against a cash index at 15 is normal — and
+      // the HIGH / LOW / VOLUME / DAY cells describe the index's session, not
+      // the contract's. R-254.
+      quoteProvenance={`${symbol} cash index, not the book for the contract selected below. Futures price off the forward curve for their own expiry.`}
       buildRiskInput={buildRiskInput}
       portfolio={portfolio}
       surface="futures-form"

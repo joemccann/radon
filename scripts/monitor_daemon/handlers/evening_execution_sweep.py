@@ -111,9 +111,9 @@ def _overlay_journal_realized_pnl(rows: List[Dict[str, Any]]) -> None:
     """Journal average-cost realized P&L over IB's drifted figure (advisory)."""
     try:
         from clients.journal_realized import overlay_journal_realized_pnl  # noqa: PLC0415
-        from db.client import get_db  # noqa: PLC0415
 
-        overlay_journal_realized_pnl(get_db(), rows)
+        # Bounded transport, paged read — see R-203.
+        overlay_journal_realized_pnl(rows)
     except Exception as exc:  # noqa: BLE001
         logger.warning("evening_execution_sweep: realized P&L overlay skipped: %s", exc)
 

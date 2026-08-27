@@ -64,6 +64,36 @@ function relayRow(overrides: Partial<RelayHealthRow> = {}, detail?: Record<strin
   };
 }
 
+describe("evaluateRelayTick — a relay that never ticked (R-214)", () => {
+  // The relay used to seed `lastTickTimestamp = Date.now()` at module load, so
+  // a process that started, connected and received ZERO market data published
+  // `last_tick_at = <process start>` with `tick_age_secs ~ 0`. That row was
+  // byte-identical to a genuinely live one, and this probe read it as proof of
+  // a live data plane. The writer now emits nulls plus `ticks_seen: false`.
+  const neverTicked = {
+    heartbeat: "tick",
+    last_tick_at: null,
+    tick_age_secs: null,
+    ticks_seen: false,
+    active_subscriptions: 12,
+    subscribed_symbols: 12,
+  };
+
+  it("is not fresh", () => {
+    const check = evaluateRelayTick(relayRow({}, neverTicked), "open", OPEN_NOW);
+    expect(check.fresh).toBe(false);
+  });
+
+  it("reports an unknown age rather than a fabricated one", () => {
+    const check = evaluateRelayTick(relayRow({}, neverTicked), "open", OPEN_NOW);
+    expect(check.age_secs).toBeNull();
+  });
+
+  it("still reads a genuinely fresh relay as fresh", () => {
+    expect(evaluateRelayTick(relayRow(), "open", OPEN_NOW).fresh).toBe(true);
+  });
+});
+
 describe("evaluateRelayTick", () => {
   it("is not applicable outside RTH", () => {
     expect(evaluateRelayTick(relayRow(), "extended", EXTENDED_NOW)).toEqual(NOT_APPLICABLE);

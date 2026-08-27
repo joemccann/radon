@@ -42,6 +42,7 @@ import { chartSeriesColor } from "@/lib/chartSystem";
 import {
   CRASH_TRIGGER_CORRELATION_THRESHOLD,
   resolveCrashTriggerState,
+  resolveCriDisplay,
   resolveRegimeStripLiveState,
 } from "@/lib/regimeLiveStrip";
 import { useRegime } from "@/lib/useRegime";
@@ -315,8 +316,11 @@ export default function RegimePanel({
     });
   }, [data, effectiveHasLive, liveVix, liveVvix, liveSpy, activeCorrChange, safeActiveCorr]);
 
-  const cri = liveCri ?? (data?.cri ? { ...data.cri, level: data.cri.level as CriLevel } : { score: 0, level: "LOW" as CriLevel, components: { vix: 0, vvix: 0, correlation: 0, momentum: 0 } });
-  const color = levelColor(cri.level);
+  const criDisplay = resolveCriDisplay(data, liveCri);
+  const cri = criDisplay.cri
+    ? { ...criDisplay.cri, level: criDisplay.cri.level as CriLevel }
+    : null;
+  const color = levelColor(cri?.level ?? ("LOW" as CriLevel));
   const ma = data?.spx_100d_ma;
   const spxBelowMa = ma && spyVal != null
     ? spyVal < ma
@@ -333,12 +337,12 @@ export default function RegimePanel({
   const railStatuses = useMemo(
     () =>
       buildRailStatuses({
-        cri: data ? { score: cri.score, level: cri.level } : null,
+        cri: cri ? { score: cri.score, level: cri.level } : null,
         cor1m: activeCorr,
         vcg: railVcgData,
         gex: railGexData,
       }),
-    [data, cri.score, cri.level, activeCorr, railVcgData, railGexData],
+    [cri?.score, cri?.level, activeCorr, railVcgData, railGexData],
   );
 
   const tabBar = compact ? (
@@ -488,6 +492,19 @@ export default function RegimePanel({
         icon={Shield}
         headline="No crash-risk data yet"
         secondary="Run Sync Now in the header to compute the current crash-risk regime."
+      />,
+    );
+  }
+
+  if (!cri) {
+    // Every CRI source was unreachable and no live quote can stand in. Drawing
+    // the hero here would show 0 /100 LOW with four green component bars — the
+    // calmest possible reading — for a feed that is dead. R-200.
+    return renderShell(
+      <SectionEmptyState
+        icon={Shield}
+        headline="Crash-risk feed unavailable"
+        secondary="The last read reached neither the database nor the on-disk cache, so there is no crash-risk reading to show. Run Sync Now to retry."
       />,
     );
   }

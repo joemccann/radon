@@ -9,6 +9,7 @@ import {
   FARM_OK_CODES,
   FARM_DOWN_CODES,
   shouldWriteTickHeartbeat,
+  buildRelayHealthDetail,
   TICK_HEARTBEAT_INTERVAL_MS,
   decideHealthWrite,
   shouldRequestGatewayRestart,
@@ -513,5 +514,51 @@ describe("shouldRequestGatewayRestart (relay may only restart container-owned ga
     expect(shouldRequestGatewayRestart("launchd")).toBe(false);
     expect(shouldRequestGatewayRestart("local")).toBe(false);
     expect(shouldRequestGatewayRestart(undefined)).toBe(false);
+  });
+});
+
+describe("buildRelayHealthDetail — never-ticked sentinel (R-214)", () => {
+  // `lastTickTimestamp` is seeded `Date.now()` at module load and `markTick`
+  // is its only other writer, so a relay that starts, connects and receives
+  // ZERO market data wrote a heartbeat claiming `last_tick_at = <process
+  // start>` and `tick_age_secs ~ 0` — a fabricated tick, stamped into
+  // service_health and read by the freshness probe as proof of a live data
+  // plane. The same seed also reset the staleness clock on every restart, so
+  // a crash-looping relay never accumulated enough elapsed time to trip the
+  // ladder. Nothing downstream could tell the two cases apart.
+  const freshness = { activeSubscriptions: 3, subscribedSymbols: 3 };
+  const NOW = Date.parse("2026-08-26T15:00:00Z");
+
+  it("does not report a fresh tick when none has ever arrived", () => {
+    const detail = buildRelayHealthDetail(NOW, null, freshness);
+    expect(detail.last_tick_at).toBeNull();
+    expect(detail.tick_age_secs).toBeNull();
+  });
+
+  it("says so explicitly so a consumer can branch on it", () => {
+    const detail = buildRelayHealthDetail(NOW, null, freshness);
+    expect(detail.ticks_seen).toBe(false);
+  });
+
+  it("reports a real tick unchanged", () => {
+    const tickAt = NOW - 42_000;
+    const detail = buildRelayHealthDetail(NOW, tickAt, freshness);
+    expect(detail.last_tick_at).toBe(new Date(tickAt).toISOString());
+    expect(detail.tick_age_secs).toBe(42);
+    expect(detail.ticks_seen).toBe(true);
+  });
+
+  it("still carries the subscription counts either way", () => {
+    for (const stamp of [null, NOW - 1000]) {
+      const detail = buildRelayHealthDetail(NOW, stamp, freshness);
+      expect(detail.active_subscriptions).toBe(3);
+      expect(detail.subscribed_symbols).toBe(3);
+    }
+  });
+
+  it("treats a non-finite stamp as never-ticked rather than as Invalid Date", () => {
+    const detail = buildRelayHealthDetail(NOW, undefined, freshness);
+    expect(detail.last_tick_at).toBeNull();
+    expect(detail.ticks_seen).toBe(false);
   });
 });
