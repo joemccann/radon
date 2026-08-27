@@ -241,13 +241,16 @@ describe("<ServiceControlPanel /> flash target", () => {
 describe("<AdminWorkspace /> flash lifecycle", () => {
   it("flashes the row on successful action and clears after the timer fires", async () => {
     vi.useFakeTimers();
-    let actionFired = false;
+    // Matched on the FULL path, not a `includes("/api/admin/services/")`
+    // prefix: a wrong unit or a wrong action segment must fail this test
+    // rather than satisfy it.
+    const startedUnits: string[] = [];
     stubFetch((url, init) => {
       if (url.endsWith("/api/admin/services") && (!init || init.method === undefined)) {
         return jsonResponse(SERVICES);
       }
-      if (url.includes("/api/admin/services/") && init?.method === "POST") {
-        actionFired = true;
+      if (url === "/api/admin/services/radon-cta-sync.service/start" && init?.method === "POST") {
+        startedUnits.push(url);
         return jsonResponse({ ok: true, detail: "started", returncode: 0 });
       }
       return jsonResponse(HEALTHY);
@@ -270,7 +273,7 @@ describe("<AdminWorkspace /> flash lifecycle", () => {
       await Promise.resolve();
     });
 
-    expect(actionFired).toBe(true);
+    expect(startedUnits).toEqual(["/api/admin/services/radon-cta-sync.service/start"]);
     const row = screen.getByTestId("service-row-radon-cta-sync.service");
     expect(row.className).toContain("admin-row-flash");
 

@@ -102,6 +102,25 @@ FASTAPI_HOST="${RADON_LEAP_REFRESH_FASTAPI_HOST:-127.0.0.1}"
 FASTAPI_PORT="${RADON_LEAP_REFRESH_FASTAPI_PORT:-8321}"
 FASTAPI_TIMEOUT_SECS="${RADON_SCAN_FASTAPI_TIMEOUT_SECS:-3610}"
 FASTAPI_URL="http://${FASTAPI_HOST}:${FASTAPI_PORT}/leap/scan?preset=${PRESET}&min_gap=${MIN_GAP}"
+# Daily oneshot at 10:00 ET shares the FastAPI lane with the top-of-hour
+# pile-up. 2026-08-27 14:00:20Z: instant 502 capacity shed, GARCH cleared
+# the same lane at 14:02. Wait up to SHED_WAIT for a slot; keep the 3610s
+# scan budget intact (TimeoutStartSec=3900 → 240s headroom).
+SHED_WAIT_SECS="${RADON_LEAP_SHED_WAIT_SECS:-240}"
+RETRY_DELAY="${RADON_LEAP_REFRESH_RETRY_DELAY_SECS:-15}"
+# Matches scripts/api/server.py _CAPACITY_SHED_MARKER. Status alone cannot
+# tell a shed from a script-failed 502 (R-221).
+CAPACITY_SHED_MARKER="subprocess capacity exhausted"
+
+_is_capacity_shed() {
+    # $1 = curl exit, $2 = http code, $3 = response body
+    [ "$1" -eq 0 ] || return 1
+    case "$2" in
+        502|503) ;;
+        *) return 1 ;;
+    esac
+    printf '%s' "$3" | tr '[:upper:]' '[:lower:]' | grep -qF "$CAPACITY_SHED_MARKER"
+}
 
 # Try FastAPI first — preserves the dual-write + service_health path the
 # dashboard "Run latest →" button uses. 3610s matches the FastAPI timeout
@@ -112,14 +131,38 @@ echo "$(date): POST ${FASTAPI_URL}"
 # running too many scans, and a -m timeout means FastAPI's child may still be
 # mid-flight — falling back on either launches a duplicate outside
 # MAX_CONCURRENT_SUBPROCESSES and outside the cooldown. Same guard as
-# run_signals_refresh.sh.
-HTTP_CODE=$(curl -sS -X POST -m "$FASTAPI_TIMEOUT_SECS" -o /dev/null \
-    -w "%{http_code}" "${FASTAPI_URL}" 2>/tmp/leap-refresh.curl.err)
-CURL_EXIT=$?
-if [ "$CURL_EXIT" -eq 0 ] && [[ "$HTTP_CODE" == 2* ]]; then
-    echo "$(date): LEAP refresh via FastAPI complete (OK)"
-    exit 0
-fi
+# run_signals_refresh.sh. Capacity shed is retried inside SHED_WAIT_SECS;
+# other non-7 outcomes still refuse the direct fallback.
+attempt=0
+SHED_DEADLINE=$((SECONDS + SHED_WAIT_SECS))
+HTTP_CODE=000
+CURL_EXIT=28
+RESPONSE_BODY=""
+while :; do
+    BODY_FILE="$(mktemp)"
+    HTTP_CODE=$(curl -sS -X POST -m "$FASTAPI_TIMEOUT_SECS" -o "$BODY_FILE" \
+        -w "%{http_code}" "${FASTAPI_URL}" 2>/tmp/leap-refresh.curl.err)
+    CURL_EXIT=$?
+    RESPONSE_BODY="$(cat "$BODY_FILE" 2>/dev/null || true)"
+    rm -f "$BODY_FILE"
+    if [ "$CURL_EXIT" -eq 0 ] && [[ "$HTTP_CODE" == 2* ]]; then
+        echo "$(date): LEAP refresh via FastAPI complete (OK)"
+        exit 0
+    fi
+    if ! _is_capacity_shed "$CURL_EXIT" "$HTTP_CODE" "$RESPONSE_BODY"; then
+        break
+    fi
+    remaining=$((SHED_DEADLINE - SECONDS))
+    if [ "$remaining" -le 0 ]; then
+        echo "$(date): LEAP shed for subprocess capacity (http=${HTTP_CODE}) after ${attempt} retries; not launching duplicate" >&2
+        exit 1
+    fi
+    attempt=$((attempt + 1))
+    delay="$RETRY_DELAY"
+    [ "$delay" -gt "$remaining" ] && delay="$remaining"
+    echo "$(date): LEAP FastAPI capacity shed (curl=${CURL_EXIT} http=${HTTP_CODE}) - retry ${attempt} in ${delay}s"
+    sleep "$delay"
+done
 
 if [ "$CURL_EXIT" -ne 7 ]; then
     echo "$(date): LEAP FastAPI outcome indeterminate (curl=${CURL_EXIT}, http=${HTTP_CODE}); not launching duplicate" >&2

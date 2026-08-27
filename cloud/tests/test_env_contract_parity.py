@@ -50,10 +50,10 @@ EXEMPT: dict[str, str] = {
     "RADON_CTA_SYNC_SOURCE": "argparse default for --source; the CLI flag is the contract",
     # Feature flags whose unset state is the safe one.
     "RADON_AUTH_DISABLED": "local-dev escape hatch; unset is the production state",
-    # Demo instance. Neither secret is provisioned (see .github/workflows/ci.yml
-    # demo-isolation guard); the mirror skips when they are absent.
-    "TURSO_DEMO_DB_URL": "demo mirror only; not provisioned, the job skips without it",
-    "TURSO_DEMO_AUTH_TOKEN": "demo mirror only; not provisioned, the job skips without it",
+    # TURSO_DEMO_DB_URL / TURSO_DEMO_AUTH_TOKEN are deliberately NOT exempt.
+    # R-300 moved them into cloud/config/required-env.txt: radon-demo-mirror's
+    # ExecStartPre runs `migrate.py --demo`, whose resolve_target() exits 2 when
+    # either is unset, so the unit fails on every fire rather than skipping.
     # Override knobs with an in-code default URL/binary.
     "CBOE_DAILY_PRICES_BASE_URL": "override for _DEFAULT_BASE_URL in clients/cboe_client.py",
     "FINRA_MARGIN_XLSX_URL": "override for _DEFAULT_XLSX_URL in clients/finra_client.py",
