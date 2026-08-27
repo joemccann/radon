@@ -426,6 +426,10 @@ BUCKETS: dict[str, list[str]] = {
         "menthorq-session",
         "menthorq-login-probe",
         "cta-sync",
+        # Same timer as cta-sync, so the same daily age check. Without it the
+        # row carries a freshness window nothing evaluates and only _check_error
+        # would ever see it.
+        "menthorq-cta",
         # Once-per-day writers — hourly check surfaces a delay within 1h
         # of the window expiring.
         "llm-token-index",
