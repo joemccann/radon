@@ -7,7 +7,7 @@ import subprocess
 from functools import lru_cache
 from pathlib import Path
 
-from ci.path_filter import classify, write_output
+from ci.path_filter import DOC_SUFFIXES, classify, write_output
 
 _ROOT = Path(__file__).resolve().parents[2]
 
@@ -48,6 +48,23 @@ def _top_level_trees() -> tuple[str, ...]:
 
 
 @lru_cache(maxsize=1)
+def _root_level_files() -> tuple[str, ...]:
+    """Every tracked root-level FILE, e.g. ('package.json', 'vitest.config.ts', ...).
+
+    `_top_level_trees()` derives directories only, so a root file a python test
+    reads by name was invisible to the routing guards below. T-192.
+    """
+    listing = subprocess.run(
+        ["git", "ls-files"],
+        cwd=_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+    return tuple(sorted(line for line in listing if line and "/" not in line))
+
+
+@lru_cache(maxsize=1)
 def _slash_literal_re() -> re.Pattern[str]:
     """`scripts/foo.py`, `"../../cloud/services"` — a path literal in any language.
 
@@ -69,7 +86,22 @@ def _pathlib_segment_re() -> re.Pattern[str]:
     return re.compile(rf"""[\w.]*(?:ROOT|REPO|DIR|root|repo|dir)\s*/\s*["']({tops})["']""")
 
 
-def _referenced_trees(files: list[Path], patterns: list[re.Pattern[str]]) -> dict[str, str]:
+@lru_cache(maxsize=1)
+def _root_file_re() -> re.Pattern[str]:
+    """`"vitest.config.ts"` — a root-level filename named in any language.
+
+    The boundaries keep `web/package.json` and `pyproject.toml.bak` from
+    registering as reads of the ROOT file of that name.
+    """
+    names = "|".join(re.escape(name) for name in _root_level_files())
+    return re.compile(
+        rf"""(?:^|(?<=[\s"'`(,=\[]))({names})(?=["'`\s,)\]:]|$)""", re.MULTILINE
+    )
+
+
+def _referenced_trees(
+    files: list[Path], patterns: list[re.Pattern[str]], suffix: str = "/"
+) -> dict[str, str]:
     """Map each referenced top-level tree -> the file that proves the read."""
     found: dict[str, str] = {}
     for path in files:
@@ -79,7 +111,7 @@ def _referenced_trees(files: list[Path], patterns: list[re.Pattern[str]]) -> dic
             continue
         for pattern in patterns:
             for match in pattern.finditer(text):
-                found.setdefault(f"{match.group(1)}/", str(path.relative_to(_ROOT)))
+                found.setdefault(f"{match.group(1)}{suffix}", str(path.relative_to(_ROOT)))
     return found
 
 
@@ -260,3 +292,44 @@ def test_executable_code_under_skip_prefixes_runs_both_gates() -> None:
 
 def test_documentation_assets_under_skip_prefixes_still_skip() -> None:
     assert classify(["docs/brand-identity.md", "docs/images/flow.png"]) == (False, False)
+
+
+# --- T-192: root-level FILES are read by python tests too -------------------
+
+
+def test_root_web_config_change_still_runs_python_gate() -> None:
+    """`vitest.config.ts` is pinned by a PYTHON test.
+
+    scripts/tests/test_merge_vitest_coverage.py holds the ONLY assertion on the
+    vitest coverage thresholds and scripts/tests/test_ci_deploy_concurrency.py
+    reads the config itself, so a config-only push was skipping the whole python
+    gate, i.e. the only gate that can catch a lowered ratchet.
+    """
+    assert classify(["vitest.config.ts"]) == (True, True)
+    assert classify(["package.json"]) == (True, True)
+    assert classify(["bun.lock"]) == (True, True)
+    # PYTHON_READS only ever switches a gate ON: a python-owned root file must
+    # still leave the web gate off.
+    assert classify(["pyproject.toml"]) == (True, False)
+
+
+def test_every_root_file_read_by_a_python_test_routes_to_the_python_gate() -> None:
+    """Same derivation as the tree guard, one level up: root FILES. T-192.
+
+    Documentation-suffixed root files are excluded on purpose: `_is_documentation`
+    makes a `.md`-only range skip both gates by design (path_filter's module
+    docstring), so asserting on them here would contradict that contract.
+    """
+    reads = _referenced_trees(list(_python_test_files()), [_root_file_re()], suffix="")
+    assert "vitest.config.ts" in reads, (
+        "expected the python test trees to read vitest.config.ts; derivation is broken"
+    )
+    unrouted = {
+        name: proof
+        for name, proof in reads.items()
+        if not name.endswith(DOC_SUFFIXES) and not classify([name])[0]
+    }
+    assert not unrouted, (
+        "root files read by python tests that do NOT turn on the python gate: "
+        + ", ".join(f"{name} (read by {proof})" for name, proof in sorted(unrouted.items()))
+    )
