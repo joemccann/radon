@@ -13,6 +13,8 @@ import {
   type OrderIntent,
   type OrderStatusTone,
 } from "@/lib/orders/orderDisplay";
+import { classifyDisplayRowSession } from "@/lib/orders/sessionWindow";
+import SessionWindowChip from "../orders/SessionWindowChip";
 import Card from "./Card";
 import BottomSheet from "./BottomSheet";
 import SectionEmptyState from "../SectionEmptyState";
@@ -245,6 +247,7 @@ function OrderSheetSummary({
   portfolio: readonly PortfolioPosition[] | undefined;
 }) {
   const intent = rowIntent(row, portfolio);
+  const session = classifyDisplayRowSession(row);
 
   if (row.kind === "combo") {
     const first = row.orders[0];
@@ -269,6 +272,7 @@ function OrderSheetSummary({
           <Metric label="Limit" value={limitLabel(row.limitPrice, row.orderType)} />
           <Metric label="Status" value={status} />
           <Metric label="TIF" value={row.tif || "--"} />
+          <Metric label="Session" value={session.hint} />
         </div>
         <div className="mobile-card__detail" data-testid="mobile-order-sheet-legs">
           {row.orders.map((leg) => {
@@ -311,6 +315,7 @@ function OrderSheetSummary({
         <Metric label="Limit" value={limitLabel(o.limitPrice, o.orderType, o.auxPrice)} />
         <Metric label="Status" value={status} />
         <Metric label="TIF" value={o.tif || "--"} />
+        <Metric label="Session" value={session.hint} />
       </div>
     </div>
   );
@@ -433,6 +438,7 @@ export default function MobileOrderList({
           const action = rowAction(row);
           const intent = rowIntent(row, portfolioPositions);
           const tone = rowCardTone(intent, action, row.kind === "combo");
+          const session = classifyDisplayRowSession(row);
           const id = row.kind === "combo" ? row.id : `single-${row.order.permId}`;
 
           return (
@@ -466,7 +472,10 @@ export default function MobileOrderList({
                 </div>
                 <div className="mobile-card__chevron-row">
                   <span className="mobile-card__subtitle">{summary.subtitle}</span>
-                  <StatusChip label={summary.status} tone={summary.statusTone} />
+                  <span className="mobile-order-session-group">
+                    <StatusChip label={summary.status} tone={summary.statusTone} />
+                    <SessionWindowChip session={session} testId="mobile-order-session" />
+                  </span>
                 </div>
               </Card>
             </div>

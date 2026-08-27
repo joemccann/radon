@@ -48,6 +48,7 @@ const OpenOrder = Type.Object({
   remaining: Type.Number(),
   avgFillPrice: Type.Union([Type.Number(), Type.Null()]),
   tif: Type.String(),
+  outsideRth: Type.Optional(Type.Boolean({ description: "Allow fill outside regular trading hours" })),
 });
 
 const ExecutedOrder = Type.Object({

@@ -188,6 +188,7 @@ def fetch_open_orders(client: IBClient) -> list:
             "remaining": float(status.remaining),
             "avgFillPrice": safe_float(status.avgFillPrice),
             "tif": order.tif,  # DAY, GTC, IOC, etc.
+            "outsideRth": bool(getattr(order, "outsideRth", False)),
         })
 
     return orders

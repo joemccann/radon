@@ -4,7 +4,7 @@
  * Mobile open-order card UX: partial fill qty, intent-based card tone,
  * and non-empty action sheet summary.
  */
-import { describe, it, expect, afterEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { render, cleanup, screen, fireEvent } from "@testing-library/react";
 import MobileOrderList from "../components/mobile/MobileOrderList";
 import type { OpenOrder, PortfolioPosition } from "../lib/types";
@@ -38,6 +38,7 @@ function makeOrder(overrides: Partial<OpenOrder> = {}): OpenOrder {
     remaining: overrides.remaining ?? totalQuantity,
     avgFillPrice: overrides.avgFillPrice ?? null,
     tif: overrides.tif ?? "DAY",
+    outsideRth: overrides.outsideRth,
   };
 }
 
@@ -427,5 +428,82 @@ describe("MobileOrderList display", () => {
     );
     fireEvent.click(screen.getByTestId("mobile-order-single-1001"));
     expect(container.textContent ?? "").not.toMatch(EM_DASH);
+  });
+});
+
+describe("MobileOrderList session window", () => {
+  const OPEN_NOW = new Date("2026-07-09T15:00:00.000Z");
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(OPEN_NOW);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("shows RTH on an option card and EXT on STK outsideRth", () => {
+    const option = makeOrder({
+      permId: 1001,
+      tif: "DAY",
+      contract: {
+        conId: 1,
+        symbol: "AAPL",
+        secType: "OPT",
+        strike: 200,
+        right: "C",
+        expiry: "2026-08-21",
+      },
+    });
+    const stk = makeOrder({
+      orderId: 2,
+      permId: 1002,
+      symbol: "TQQQ",
+      tif: "GTC",
+      outsideRth: true,
+      contract: {
+        conId: 2,
+        symbol: "TQQQ",
+        secType: "STK",
+        strike: null,
+        right: null,
+        expiry: null,
+      },
+    });
+    render(
+      <MobileOrderList
+        rows={[singleRow(option), singleRow(stk)]}
+        canModify={() => true}
+        onRequestCancel={noop}
+        onRequestModify={noop}
+      />,
+    );
+
+    const optionCard = screen.getByTestId("mobile-order-single-1001");
+    const stkCard = screen.getByTestId("mobile-order-single-1002");
+    const optionSession = optionCard.querySelector('[data-testid="mobile-order-session"]');
+    const stkSession = stkCard.querySelector('[data-testid="mobile-order-session"]');
+    expect(optionSession).toBeTruthy();
+    expect(stkSession).toBeTruthy();
+    expect(optionSession?.textContent).toBe("RTH");
+    expect(stkSession?.textContent).toBe("EXT");
+  });
+
+  it("adds a Session metric with the fill-window hint in the sheet", () => {
+    const order = makeOrder({ tif: "DAY" });
+    render(
+      <MobileOrderList
+        rows={[singleRow(order)]}
+        canModify={() => true}
+        onRequestCancel={noop}
+        onRequestModify={noop}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("mobile-order-single-1001"));
+    const summary = screen.getByTestId("mobile-order-sheet-summary");
+    expect(summary.textContent).toMatch(/Session/);
+    expect(summary.textContent).toMatch(/will not fill after 16:00 ET/i);
+    expect(summary.textContent ?? "").not.toMatch(EM_DASH);
   });
 });
