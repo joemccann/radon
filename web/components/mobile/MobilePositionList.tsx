@@ -14,10 +14,10 @@ import {
   getPnlPct,
   resolveReturnCapital,
   describeReturnCapital,
-  positionDirectionSign,
   getOptionDailyChg,
   getTodayPnlDollars,
   resolveRealtimePrice,
+  resolveRealtimeMarketValue,
 } from "@/lib/positionUtils";
 import { resolveUnderlyingSpot } from "@/lib/impliedValue";
 import TickerLink from "@/components/TickerLink";
@@ -65,52 +65,19 @@ function fmtPct(value: number | null | undefined): string {
   return `${sign}${Math.abs(value).toFixed(2)}%`;
 }
 
-function getOptionRtMv(pos: PortfolioPosition, prices?: Record<string, PriceData>): number | null | undefined {
-  if (pos.structure_type === "Stock") return null;
-  if (!prices) return undefined;
-  let total = 0;
-  let activeLegs = 0;
-  let resolvedLegs = 0;
-  for (const leg of pos.legs) {
-    if (!Number.isFinite(leg.contracts) || leg.contracts <= 0) continue;
-    activeLegs += 1;
-    if (leg.type === "Stock") {
-      const stockKey = pos.ticker.toUpperCase();
-      const stockLast = prices?.[stockKey]?.last;
-      if (stockLast != null && Number.isFinite(stockLast) && stockLast > 0) {
-        total += (leg.direction === "LONG" ? 1 : -1) * stockLast * leg.contracts;
-        resolvedLegs += 1;
-      }
-      continue;
-    }
-    if (leg.strike == null || !pos.expiry) continue;
-    const expiry = pos.expiry.replace(/-/g, "");
-    const right = leg.type === "Call" ? "C" : "P";
-    const k = optionKey({ symbol: pos.ticker.toUpperCase(), expiry, strike: leg.strike, right });
-    const last = prices?.[k]?.last;
-    if (last != null && Number.isFinite(last) && last > 0) {
-      total += (leg.direction === "LONG" ? 1 : -1) * last * leg.contracts * 100;
-      resolvedLegs += 1;
-    }
-  }
-  if (activeLegs === 0 || resolvedLegs === 0) return undefined;
-  return resolvedLegs === activeLegs ? total : null;
-}
-
 function PositionCard({ pos, prices, showExpiry, onLegClick }: { pos: PortfolioPosition; prices?: Record<string, PriceData>; showExpiry: boolean; onLegClick: (leg: PortfolioLeg, pos: PortfolioPosition) => void }) {
   const [expanded, setExpanded] = useState(false);
 
   const isStock = pos.structure_type === "Stock";
   const stockLast = prices?.[pos.ticker.toUpperCase()]?.last;
   const rtStockLast = stockLast != null && stockLast > 0 ? stockLast : null;
-  const optRtMv = getOptionRtMv(pos, prices);
-  // Sign-aware: `pos.contracts` is a positive magnitude, so a SHORT must carry
-  // the direction sign or its MV reads positive and `mv - ec` (signed) becomes
-  // a SUM — the MU short showed +$2.19M instead of its true ~+$80k. Mirrors the
-  // desktop PositionTable fix; the option / resolveMarketValue paths are signed.
-  const mv = isStock && rtStockLast != null
-    ? positionDirectionSign(pos) * rtStockLast * Math.abs(pos.contracts)
-    : optRtMv === undefined ? resolveMarketValue(pos) : optRtMv;
+  // ONE market value per position, shared with getTodayPnlDollars and the
+  // desktop table. A card-local walk of the same legs is a second market value,
+  // and a same-day position's Today P&L then contradicts its own total — the
+  // 2026-08-26 META card read +$1,097 total against -$103 today. Sign-aware
+  // throughout: `pos.contracts` is a positive magnitude, so a SHORT carries the
+  // direction sign or `mv - ec` becomes a SUM (the MU +$2.19M bug).
+  const mv = resolveRealtimeMarketValue(pos, prices) ?? resolveMarketValue(pos);
   // `ec` drives the P&L math (signed, unchanged); `displayEc` is the signed
   // credit/debit the operator reads, via the same helper as the desktop
   // Initial Value column.
@@ -156,7 +123,7 @@ function PositionCard({ pos, prices, showExpiry, onLegClick }: { pos: PortfolioP
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
             <div style={{ textAlign: "right" }}>
-              <div style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums", fontWeight: 600, fontSize: 14, color: pnlTone === "pos" ? "var(--positive)" : pnlTone === "neg" ? "var(--negative)" : "var(--text-muted)" }}>
+              <div data-testid="mobile-position-pnl" style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums", fontWeight: 600, fontSize: 14, color: pnlTone === "pos" ? "var(--positive)" : pnlTone === "neg" ? "var(--negative)" : "var(--text-muted)" }}>
                 {fmtPnl(pnl)}
               </div>
               <div title={returnTitle} style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: pnlTone === "pos" ? "var(--positive)" : pnlTone === "neg" ? "var(--negative)" : "var(--text-muted)" }}>

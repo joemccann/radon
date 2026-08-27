@@ -624,16 +624,23 @@ jobs:
 
   deploy:
     name: Deploy to VPS
-    # Coverage merge stays a required workflow job but is omitted here so
-    # deploy starts when shards pass. Combine needs a barrier VM; putting it
-    # on a matrix shard cannot wait for siblings.
-    needs: [secret-scan, changes, web-tests, py-tests, cloud-tests, perimeter-smoke, stage-release]
+    # TEST_AUDIT T-160: the coverage-combine jobs are back on `needs`. They were
+    # dropped so deploy could start the moment the shards went green, deferring
+    # enforcement to a "required workflow job" — but `main` carries no
+    # `required_status_checks` at all, so nothing enforced them and both
+    # ratchets (vitest lines/functions/branches, pytest --cov-fail-under=56)
+    # were advisory. Combine genuinely needs its own barrier VM, so this costs
+    # the deploy critical path ~1min. Gating and that latency cannot both be
+    # had; a coverage regression must be able to fail the release.
+    needs: [secret-scan, changes, web-tests, web-coverage, py-tests, py-coverage, cloud-tests, perimeter-smoke, stage-release]
     if: >-
       github.ref == 'refs/heads/main' && github.event_name == 'push' && !cancelled()
       && needs.secret-scan.result == 'success'
       && needs.changes.result == 'success'
       && (needs.web-tests.result == 'success' || needs.web-tests.result == 'skipped')
+      && (needs.web-coverage.result == 'success' || needs.web-coverage.result == 'skipped')
       && (needs.py-tests.result == 'success' || needs.py-tests.result == 'skipped')
+      && (needs.py-coverage.result == 'success' || needs.py-coverage.result == 'skipped')
       && (needs.cloud-tests.result == 'success' || needs.cloud-tests.result == 'skipped')
       && (needs.perimeter-smoke.result == 'success' || needs.perimeter-smoke.result == 'skipped')
       && (needs.stage-release.result == 'success' || needs.stage-release.result == 'failure' || needs.stage-release.result == 'skipped')

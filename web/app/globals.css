@@ -9,6 +9,14 @@
 :root {
   --sidebar-width: 220px;
   --header-height: 48px;
+
+  /* Translucent signal washes — badge and panel-trace fills.
+     Defined once here on purpose: custom properties substitute lazily, so a
+     single color-mix tracks whichever theme's --signal-core / --warn / --fault
+     is in scope. A baked rgba would stay the dark value on a white canvas. */
+  --wash-signal: color-mix(in srgb, var(--signal-core) 8%, transparent);
+  --wash-warn: color-mix(in srgb, var(--warn) 9%, transparent);
+  --wash-fault: color-mix(in srgb, var(--fault) 10%, transparent);
   /* next/font/local injects `--font-sans` and `--font-mono` on <html>.
      Fallback values here keep the cascade sane when CSS loads before
      hydration; the next/font variable will override on mount. */
@@ -8970,6 +8978,7 @@ body[data-mobile="true"] .orders-command-strip__jump:active {
 }
 .crb[data-level="critical"] { --crb-accent: var(--fault); }
 .crb[data-level="info"] { --crb-accent: var(--signal-core); }
+.crb[data-level="unmeasured"] { --crb-accent: var(--warn); }
 .crb[data-level="none"] { --crb-accent: var(--positive); }
 
 .crb-header {
@@ -10846,6 +10855,126 @@ tr {
   }
 }
 
+/* ── Freshness rail ─────────────────────────────────────────────
+   Where an indicator's data stands, and when it moves. Sits directly
+   under a statistic strip and shares its seam, so it reads as the
+   strip's own footer rather than a second panel. The track is the
+   point: the wait between scheduled runs drawn as a length. */
+.freshness-rail {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(40px, 1fr) minmax(0, auto);
+  align-items: center;
+  gap: 20px;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border-dim);
+  padding: 12px 16px;
+}
+
+.freshness-rail-side {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.freshness-rail-side--end {
+  align-items: flex-end;
+  text-align: right;
+}
+
+.freshness-rail-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.freshness-rail-anchor {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+/* Tabular figures are the whole reason this reads as an instrument and not a
+   toy: without them every tick shifts the digits sideways. */
+.freshness-rail-countdown {
+  font-family: var(--font-mono);
+  /* Peer-sized with .regime-strip-value on purpose. The rail is meta about the
+     panel; larger digits would out-shout the statistics it annotates. */
+  font-size: 20px;
+  font-weight: 500;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.freshness-rail-note {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.freshness-rail-track {
+  height: 2px;
+  background: color-mix(in srgb, var(--text-muted) 38%, transparent);
+  overflow: hidden;
+}
+
+.freshness-rail-track-fill {
+  height: 100%;
+  background: var(--signal-core);
+  /* No transition — the fill advances once a second and easing would smear a
+     tick into a slide. */
+}
+
+/* Waiting on a session the market has closed: the reading is genuinely behind,
+   but the job has not missed anything yet. Muted, not alarming. */
+.freshness-rail[data-state="behind"] .freshness-rail-track-fill {
+  background: color-mix(in srgb, var(--signal-core) 70%, transparent);
+}
+
+/* The run fired and the session still is not here. This is the only state that
+   earns a colour — and it takes --warn, never --fault: the data is late, not
+   wrong (mirrors ivrankRegimeColor's restraint). */
+.freshness-rail[data-state="overdue"] .freshness-rail-countdown,
+.freshness-rail[data-state="overdue"] .freshness-rail-note {
+  color: var(--warn-text);
+}
+
+.freshness-rail[data-state="overdue"] .freshness-rail-track-fill {
+  background: var(--warn);
+}
+
+.freshness-rail[data-state="pending"] .freshness-rail-countdown {
+  color: var(--text-muted);
+}
+
+@media (max-width: 760px) {
+  .freshness-rail {
+    grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+    gap: 6px 12px;
+    padding: 11px 14px;
+  }
+
+  /* The track spans the full width underneath both readings, where it still
+     reads as a single span of time rather than a gutter between two columns. */
+  .freshness-rail-track {
+    grid-column: 1 / -1;
+    order: 3;
+    margin-top: 4px;
+  }
+
+  .freshness-rail-countdown {
+    font-size: 18px;
+  }
+}
+
 /* VOL CONE selected-name analysis */
 .vol-cone-analysis .vol-cone-analysis-metrics {
   display: grid;
@@ -12551,6 +12680,188 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
 .chain-side-toggle-btn.active { background: var(--bg-panel-raised); color: var(--text-primary); }
 
 /* ─── Order Builder (dense instrument ticket, content-packed) ─── */
+
+/* Docked ticket rail — chain keeps its column, the ticket sits beside it so
+   legs, price, risk and CTA are readable without scrolling. Below the
+   breakpoint the rail unstacks and the ticket returns to full width. */
+.chain-rail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.chain-rail[data-docked="true"] {
+  grid-template-columns: minmax(0, 1fr) 384px;
+}
+
+.chain-rail-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.chain-rail .chain-grid-wrapper {
+  min-width: 0;
+}
+
+.order-builder--rail {
+  position: sticky;
+  top: 8px;
+  /* Never taller than the viewport: the ticket scrolls internally so the
+     transmit CTA stays reachable on a short window. */
+  max-height: calc(100dvh - 96px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 1180px) {
+  .chain-rail[data-docked="true"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .order-builder--rail {
+    position: static;
+    max-height: none;
+    overflow-y: visible;
+  }
+}
+
+/* Staged legs stay visible in the chain they came from, per side, so the
+   operator can see what is in the ticket without reading it back. A wash, not
+   a fill: the quote numbers must stay the most legible thing in the row. */
+.chain-cell--staged-call,
+.chain-cell--staged-put {
+  background: var(--wash-signal);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--signal-core) 22%, transparent);
+}
+
+.chain-rail-hint {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 2px 0;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+/* Unbounded-risk acknowledgement. Deliberately loud: it is the last thing
+   between the operator and an order with no loss bound. */
+.ticket-unbounded {
+  border: 1px solid var(--fault);
+  border-radius: 4px;
+  background: var(--wash-fault);
+  padding: 8px 10px;
+}
+
+.ticket-unbounded-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.ticket-unbounded-row input {
+  /* 16px keeps the hit target honest without dominating the row. */
+  width: 16px;
+  height: 16px;
+  margin: 1px 0 0;
+  flex-shrink: 0;
+  accent-color: var(--fault);
+}
+
+.ticket-step-hint {
+  display: flex;
+  padding-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+/* Ticket risk panel — sits above the CTA so max loss is read before the
+   transmit button. Every cell is a real figure or "---"; nothing is padded
+   with a zero to keep the grid tidy. */
+.ticket-risk {
+  border: 1px solid var(--line-grid);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.ticket-risk-head {
+  display: flex;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line-grid);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.ticket-risk-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--line-grid);
+}
+
+.ticket-risk-cell {
+  background: var(--bg-panel);
+  padding: 8px 10px;
+}
+
+.ticket-risk-cell-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.ticket-risk-cell-value {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.ticket-risk-cell-value--gain { color: var(--signal-core); font-weight: 600; }
+.ticket-risk-cell-value--loss { color: var(--fault); font-weight: 600; }
+.ticket-risk-cell-value--warn { color: var(--warn); }
+
+.ticket-risk-total {
+  display: flex;
+  justify-content: space-between;
+  padding: 7px 10px;
+  border-top: 1px solid var(--line-grid);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.ticket-risk-payoff-wrap {
+  padding: 8px 10px;
+  border-top: 1px solid var(--line-grid);
+}
+
+.ticket-risk-payoff {
+  display: block;
+  width: 100%;
+  height: 72px;
+}
+
+.ticket-risk-payoff-axis {
+  display: flex;
+  justify-content: space-between;
+  padding-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  color: var(--text-muted);
+}
 
 .order-builder {
   margin-top: 8px;
@@ -19833,6 +20144,13 @@ body[data-mobile="true"] .strength-card__head {
   border: 1px solid var(--line-grid);
   margin-bottom: 8px;
 }
+/* An odd cell count leaves a hole in the last row. Where a panel opts in, the
+   final cell takes the full width instead — which also stops the widest
+   readings (a 1Y IV range) from wrapping in a half-width cell. */
+.m-regime-grid2x2--fill-last > div:last-child:nth-child(odd) {
+  grid-column: span 2;
+}
+
 .m-regime-grid2x2 > div {
   background: var(--bg-panel);
   padding: 10px 12px;

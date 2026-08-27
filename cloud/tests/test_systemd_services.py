@@ -1075,3 +1075,20 @@ class TestPerMinuteStartLimits:
     def test_skew_specifically_has_the_raised_burst(self, unit):
         svc = unit("radon-skew.service")["Unit"]
         assert int(svc["startlimitburst"]) >= 10
+
+
+class TestDemoMirrorSchemaGate:
+    """2026-08-26 P1: mirror wrote equibles tables the demo DB did not have
+    because nothing ran scripts/db/migrations against TURSO_DEMO_*. The unit
+    must migrate the demo schema before the Node mirror runs."""
+
+    def test_demo_mirror_migrates_demo_schema_before_mirror(self, services_dir):
+        raw = (services_dir / "radon-demo-mirror.service").read_text()
+        pre = next(
+            (line for line in raw.splitlines() if line.startswith("ExecStartPre=")),
+            "",
+        )
+        assert pre, "radon-demo-mirror.service needs ExecStartPre=migrate --demo"
+        assert "migrate.py" in pre
+        assert "--demo" in pre
+        assert "TimeoutStartSec=300" in raw

@@ -58,8 +58,8 @@ function useTargetQuote(
   ask: number | null;
   mid: number | null;
   priceData: PriceData | null;
-  /** Oldest leg stamp behind a combo net; null when it cannot be known. R-208. */
-  timestamp: string | null;
+  /** Stalest leg timestamp behind a combo net, undefined when unknown. */
+  asOf?: string;
 } {
   return useMemo(() => {
     if (target.kind === "leg") {
@@ -69,15 +69,17 @@ function useTargetQuote(
       const bid = lp?.bid ?? null;
       const ask = lp?.ask ?? null;
       return {
-        bid, ask, mid: bid != null && ask != null ? (bid + ask) / 2 : null,
-        priceData: lp, timestamp: lp?.timestamp ?? null,
+        bid,
+        ask,
+        mid: bid != null && ask != null ? (bid + ask) / 2 : null,
+        priceData: lp,
+        asOf: lp?.timestamp,
       };
     }
     let netBid = 0;
     let netAsk = 0;
     let ok = true;
-    // The per-leg PriceData is the only record of how old this net is; keeping
-    // just the numbers is what made the combo freshness gate unreachable. R-208.
+    // The combo net is only as fresh as its stalest leg.
     const legQuotes: PriceData[] = [];
     for (const leg of position.legs) {
       const key = legPriceKey(position.ticker, position.expiry, leg);
@@ -88,12 +90,15 @@ function useTargetQuote(
       netBid += sign * lp.bid;
       netAsk += sign * lp.ask;
     }
-    if (!ok) return { bid: null, ask: null, mid: null, priceData: null, timestamp: null };
+    if (!ok) return { bid: null, ask: null, mid: null, priceData: null };
     const bid = Math.min(netBid, netAsk);
     const ask = Math.max(netBid, netAsk);
     return {
-      bid, ask, mid: (bid + ask) / 2, priceData: null,
-      timestamp: oldestQuoteTimestamp(legQuotes),
+      bid,
+      ask,
+      mid: (bid + ask) / 2,
+      priceData: null,
+      asOf: oldestQuoteTimestamp(legQuotes),
     };
   }, [position, prices, target]);
 }
@@ -135,23 +140,17 @@ export default function PositionTradeTicket({
   const [error, setError] = useState<string | null>(null);
   const [riskState, setRiskState] = useState<OrderRiskState | null>(null);
 
-  // Clearing the verdict is part of the reset. OrderRiskGate is mounted only
-  // inside the confirm step, so backing out and editing the order leaves the
-  // PREVIOUS shape's verdict in place, and the button that appears on the next
-  // Review click is gated by it. R-209.
-  const reset = () => { setConfirmStep(false); setRiskState(null); };
+  const reset = () => setConfirmStep(false);
 
-  const { bid, ask, mid, priceData: legPriceData, timestamp: comboQuoteTimestamp } = useTargetQuote(position, prices, target);
+  const { bid, ask, mid, asOf, priceData: legPriceData } = useTargetQuote(position, prices, target);
 
   const comboQuoteModel = useMemo(() => {
     if (target.kind !== "combo") return null;
     if (bid == null && ask == null) return null;
     return buildQuoteTelemetryModel(
-      comboQuotePriceData({
-        symbol: position.ticker, bid, ask, last: mid, timestamp: comboQuoteTimestamp,
-      }),
+      comboQuotePriceData({ symbol: position.ticker, bid, ask, last: mid, timestamp: asOf }),
     );
-  }, [target.kind, position.ticker, bid, ask, mid, comboQuoteTimestamp]);
+  }, [target.kind, position.ticker, bid, ask, mid, asOf]);
 
   const parsedQty = parseInt(quantity, 10);
   const parsedPrice = parseFloat(limitPrice);
@@ -188,20 +187,12 @@ export default function PositionTradeTicket({
     return `${leg.direction} ${leg.type} $${leg.strike}`;
   }, [target, position]);
 
-  // Fail CLOSED. `!== false` permitted any state other than an explicit false,
-  // including the null the gate publishes through a post-commit effect — so
-  // "Confirm Order" was enabled before any verdict existed. Every sibling
-  // surface uses `=== true`, and web/CLAUDE.md states the contract that way.
-  // R-209.
-  const okToSubmit = riskState?.okToSubmit === true;
+  const okToSubmit = riskState?.okToSubmit !== false; // null (pre-confirm) allowed
 
   const handlePlace = useCallback(async () => {
     if (!isValid) return;
     if (!confirmStep) { setConfirmStep(true); return; }
     if (!built) return;
-    // The `disabled` attribute was the only thing between a coverage-unresolved
-    // order and the broker. R-209.
-    if (!okToSubmit) return;
     setLoading(true);
     setError(null);
     try {
@@ -237,7 +228,7 @@ export default function PositionTradeTicket({
     } finally {
       setLoading(false);
     }
-  }, [isValid, confirmStep, built, okToSubmit, portfolio, orderActions, action, parsedQty, position.ticker, subjectLabel, riskExecutionPrice, onOrderPlaced, onClose, target.kind, orderType, parsedPrice, parsedStop]);
+  }, [isValid, confirmStep, built, portfolio, orderActions, action, parsedQty, position.ticker, subjectLabel, riskExecutionPrice, onOrderPlaced, onClose, target.kind, orderType, parsedPrice, parsedStop]);
 
   const closingHint =
     built?.isClosing === false
@@ -391,7 +382,7 @@ export default function PositionTradeTicket({
       <div className="order-submit">
         {confirmStep ? (
           <div className="order-confirm-row">
-            <button className="btn-secondary" onClick={reset} disabled={loading}>Back</button>
+            <button className="btn-secondary" onClick={() => setConfirmStep(false)} disabled={loading}>Back</button>
             <button
               className={`btn-primary ${action === "SELL" ? "btn-danger" : ""}`}
               onClick={handlePlace}

@@ -18,7 +18,18 @@
 import { describe, it, expect } from "vitest";
 
 import { resolveReturnCapital, describeReturnCapital } from "../lib/positionUtils";
+import { lastCompletedSessionDate } from "../lib/marketSession";
 import type { PortfolioPosition } from "../lib/types";
+
+/**
+ * A NAV date is judged against the wall clock: past a two-session staleness
+ * budget, `buildPerformanceView` gates every return to null. A fixture that
+ * hardcodes one is a time bomb — "2026-08-22" passed until 2026-08-26, then
+ * turned three sessions stale and failed CI on main every run after. Any test
+ * asserting a return SURVIVES must date its payload from the same clock the
+ * reader uses.
+ */
+const FRESH_NAV_DATE = lastCompletedSessionDate();
 
 function position(
   legs: Array<{
@@ -117,7 +128,10 @@ describe("MWR is plausibility-gated like TWR", () => {
     const view = buildPerformanceView({
       schema_version: 2,
       status: "ok",
-      as_of: "2026-08-22",
+      // Fresh, so the suppression under test is the PLAUSIBILITY gate. A
+      // stale NAV date would null these anyway and the assertion would hold
+      // with the gate removed entirely.
+      as_of: FRESH_NAV_DATE,
       calendar_days: 30,
       n_returns: 60,
       twr: { cum_return: 9.51, annualized: { value: null, n: 60, min_n: 20 } },
@@ -139,7 +153,7 @@ describe("MWR is plausibility-gated like TWR", () => {
     const view = buildPerformanceView({
       schema_version: 2,
       status: "ok",
-      as_of: "2026-08-22",
+      as_of: FRESH_NAV_DATE,
       calendar_days: 400,
       n_returns: 300,
       twr: { cum_return: 0.12, annualized: { value: 0.11, n: 300, min_n: 20 } },

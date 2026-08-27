@@ -68,23 +68,24 @@ STALE_TOLERANCE_DAYS = 10
 # 390x/day: at most this many symbols per invocation, and never the same symbol
 # twice inside the retry window. The marker is a rate-limiter, not data — losing
 # it on a deploy costs one extra attempt.
+#
+# The third bound is wall clock. Both bounds above cap the NUMBER of fetches;
+# neither caps how long one takes. A rung can burn ~30s on its own (IB:
+# connect timeout 10s + get_historical_data timeout 20s; Yahoo: urlopen
+# timeout 30s), so an uncapped run of 4 symbols x 3 rungs is a ~6-minute stall
+# on a loader that runs every 60s - and the stall lands on the
+# portfolio_snapshots write that feeds positions, bankroll and account_summary.
+# 20s leaves the worst case at budget + the one rung already in flight (~50s),
+# still inside the cadence, while a healthy ladder finishes in well under it
+# and defers nothing. Symbols the budget never reached are simply not attempted
+# and stay due for the next run.
 BACKFILL_MAX_SYMBOLS_PER_RUN = 4
 BACKFILL_RETRY_S = 6 * 3600
-# Total wall clock the backfill ladder may spend inside one call. The loader
-# runs on the live portfolio-sync path, so it is bounded rather than left to
-# BACKFILL_MAX_SYMBOLS_PER_RUN x (IB connect + history + UW + Yahoo). R-206.
-BACKFILL_WALL_CLOCK_BUDGET_S = 45.0
+BACKFILL_TOTAL_BUDGET_S = 20.0
 _BACKFILL_MARKER_PATH = _DATA_DIR / "price_risk_backfill.json"
 
 IB_HISTORY_DURATION = "1 Y"
 IB_HISTORY_TIMEOUT_S = 20
-IB_CONNECT_TIMEOUT_S = 10
-YAHOO_TIMEOUT_S = 30
-# Worst case for ONE symbol: IB connect + IB history + Yahoo, each with its own
-# timeout. The budget above is checked BEFORE a symbol starts, so one whole
-# call is bounded by budget + this. Kept as a constant so the guarantee is
-# checkable rather than implied. R-206.
-BACKFILL_SYMBOL_WORST_CASE_S = IB_CONNECT_TIMEOUT_S + IB_HISTORY_TIMEOUT_S + YAHOO_TIMEOUT_S
 
 
 # ── Position → underlying mapping ────────────────────────────────────────────
@@ -404,15 +405,7 @@ def load_price_series_for_portfolio(
 
     if unusable:
         for ticker, closes in _load_disk_cache_series(unusable, stocks_dir).items():
-            # Test the DISK series, the way the Turso and backfill paths above
-            # do. Gating only on what is already present installed an
-            # arbitrarily old cache as a current correlation input: the ticker
-            # then passed `_usable_return_count >= 5`, so it never reached
-            # `insufficient_data`, while `_aligned_returns` intersects DATES
-            # and found too few shared days against a fresh sibling — no
-            # cluster, no insufficiency, a clean bill of health over a
-            # concentration the gate exists to surface. R-204.
-            if _has_target_depth(closes) and not _has_target_depth(series.get(ticker)):
+            if not _has_target_depth(series.get(ticker)):
                 series[ticker] = closes
 
     return {t: s for t, s in series.items() if s}
@@ -431,58 +424,67 @@ def _has_target_depth(series: Optional[Dict[str, float]]) -> bool:
 # ── Backfill ladder (IB -> UW -> Yahoo, persisted to Turso) ──────────────────
 
 
-def backfill_price_history(symbols: Sequence[str]) -> Dict[str, Dict[str, float]]:
+def backfill_price_history(
+    symbols: Sequence[str], clock=time.monotonic
+) -> Dict[str, Dict[str, float]]:
     """Fetch and persist daily closes for symbols Turso cannot serve.
 
-    Bounded by ``BACKFILL_MAX_SYMBOLS_PER_RUN`` and the per-symbol retry
-    marker; a run that fetches nothing returns ``{}`` and the caller reports
-    those tickers as insufficient rather than guessing.
+    Bounded three ways: ``BACKFILL_MAX_SYMBOLS_PER_RUN``, the per-symbol retry
+    marker, and a ``BACKFILL_TOTAL_BUDGET_S`` wall-clock budget measured on
+    ``clock`` (monotonic; injectable so tests need no real sleep). A run that
+    fetches nothing returns ``{}`` and the caller reports those tickers as
+    insufficient rather than guessing.
+
+    A symbol whose ladder is never started because the budget is spent is left
+    unrecorded, so the retry throttle still sees it as due on the next run
+    rather than as retried-and-failed for ``BACKFILL_RETRY_S``.
     """
     due = _due_for_backfill(symbols)[:BACKFILL_MAX_SYMBOLS_PER_RUN]
     if not due:
         return {}
 
+    deadline = clock() + BACKFILL_TOTAL_BUDGET_S
     fetched: Dict[str, Dict[str, float]] = {}
-    started = time.monotonic()
-    for symbol in due:
-        # `attach_correlation_risk_report` runs every minute during RTH, and a
-        # DEAD gateway is the expensive case — `_ib_reachable` proceeds
-        # optimistically on an unreachable /health, so it is one 10 s connect
-        # timeout per symbol before the ladder even reaches UW. Stop at the
-        # budget rather than letting four symbols serialize into ~240 s inside
-        # the live sync. R-206.
-        if time.monotonic() - started >= BACKFILL_WALL_CLOCK_BUDGET_S:
+    for index, symbol in enumerate(due):
+        if clock() >= deadline:
+            deferred = ", ".join(due[index:])
             print(
-                f"  backfill budget spent; {symbol} and later symbols deferred",
+                f"  backfill budget ({BACKFILL_TOTAL_BUDGET_S:g}s) spent; "
+                f"deferring {deferred} to the next run",
                 file=sys.stderr,
             )
             break
-        # Stamped per symbol AFTER the attempt. Stamping all four up front
-        # blacked out symbols the run never reached. R-205.
-        closes, source = _fetch_closes_via_ladder(symbol)
+        # Recorded before the fetch: a symbol whose ladder ran has been tried,
+        # however it ends, and must not be retried on the next minute's sync.
         _record_backfill_attempt([symbol])
+        closes, source = _fetch_closes_via_ladder(symbol, deadline, clock)
         if not closes:
             print(f"  no daily closes for {symbol} from IB/UW/Yahoo", file=sys.stderr)
             continue
-        # A transient Turso write failure must not discard closes already in
-        # hand, nor abort the remaining symbols. R-205.
-        try:
-            _persist_closes(symbol, closes, source)
-        except Exception as exc:  # noqa: BLE001 - the fetch still succeeded
-            print(f"  could not persist {symbol} closes: {exc}", file=sys.stderr)
+        _persist_closes(symbol, closes, source)
         fetched[symbol] = closes
     return fetched
 
 
-def _fetch_closes_via_ladder(symbol: str) -> tuple:
-    """Data Source Priority: IB every cycle, then UW, then Yahoo."""
+def _fetch_closes_via_ladder(
+    symbol: str, deadline: Optional[float] = None, clock=time.monotonic
+) -> tuple:
+    """Data Source Priority: IB every cycle, then UW, then Yahoo.
+
+    The deadline is re-checked between rungs so one slow rung cannot spend the
+    whole run's budget three times over.
+    """
     if _ib_reachable():
         closes = _fetch_ib_closes(symbol)
         if closes:
             return closes, "ib"
+    if deadline is not None and clock() >= deadline:
+        return {}, ""
     closes = _fetch_uw_closes(symbol)
     if closes:
         return closes, "uw"
+    if deadline is not None and clock() >= deadline:
+        return {}, ""
     return _fetch_yahoo_closes(symbol), "yahoo"
 
 
@@ -507,7 +509,7 @@ def _fetch_ib_closes(symbol: str) -> Dict[str, float]:
 
     client = IBClient()
     try:
-        client.connect(client_id="auto", timeout=IB_CONNECT_TIMEOUT_S)
+        client.connect(client_id="auto", timeout=10)
         bars = client.get_historical_data(
             Stock(symbol, "SMART", "USD"),
             duration=IB_HISTORY_DURATION,
@@ -565,7 +567,7 @@ def _fetch_yahoo_closes(symbol: str) -> Dict[str, float]:
     )
     try:
         req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urlopen(req, timeout=YAHOO_TIMEOUT_S) as resp:
+        with urlopen(req, timeout=30) as resp:
             result = json.load(resp)["chart"]["result"][0]
     except Exception as exc:  # noqa: BLE001 - measurement stays "insufficient"
         print(f"  Yahoo daily closes failed for {symbol}: {exc}", file=sys.stderr)

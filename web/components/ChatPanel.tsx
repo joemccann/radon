@@ -150,7 +150,7 @@ function comboQuoteModel(
       bid: net.bid,
       ask: net.ask,
       last: net.mid,
-      timestamp: net.timestamp,
+      timestamp: net.asOf,
     }),
   );
 }

@@ -1,6 +1,5 @@
 import type { PriceData } from "@/lib/pricesProtocol";
-import { optionKey } from "@/lib/pricesProtocol";
-import { oldestQuoteTimestamp } from "@/lib/quoteTelemetry";
+import { oldestQuoteTimestamp, optionKey } from "@/lib/pricesProtocol";
 
 /* ─── Types ─── */
 
@@ -229,8 +228,13 @@ export type NetOptionQuote = {
   bid: number | null;
   ask: number | null;
   mid: number | null;
-  /** Oldest leg stamp the net was built from; null when it cannot be known. R-208. */
-  timestamp: string | null;
+  /**
+   * ISO timestamp of the stalest leg quote the net was built from, or undefined
+   * when any leg contributed a price with no known age (a manual leg override,
+   * or a leg the relay never quoted). Feeds `comboQuotePriceData` so a combo
+   * cannot render an hours-old net as a live market.
+   */
+  asOf?: string;
 };
 
 /**
@@ -253,13 +257,15 @@ export function computeNetOptionQuote(
   prices: Record<string, PriceData>,
   ticker: string,
 ): NetOptionQuote {
-  if (legs.length === 0) return { bid: null, ask: null, mid: null, timestamp: null };
+  if (legs.length === 0) return { bid: null, ask: null, mid: null };
 
   // Cost to BUY the combo = pay ask on BUY legs, receive bid on SELL legs
   let netAsk = 0;
   // Proceeds to SELL the combo = receive bid on BUY legs, pay ask on SELL legs
   let netBid = 0;
-  const legQuotes: Array<PriceData | null> = [];
+  // Freshness sources, one per leg. A manually overridden leg contributes null
+  // so the whole net reports an unknown age instead of a borrowed one.
+  const quoteAges: Array<PriceData | null> = [];
 
   for (const leg of legs) {
     const key = optionKey({
@@ -275,13 +281,11 @@ export function computeNetOptionQuote(
     const quoteSource = pd && !leg.priceManuallySet;
     const bid = quoteSource ? pd?.bid : leg.limitPrice;
     const ask = quoteSource ? pd?.ask : leg.limitPrice;
+    quoteAges.push(quoteSource ? pd : null);
 
     if (bid == null || ask == null) {
-      return { bid: null, ask: null, mid: null, timestamp: null };
+      return { bid: null, ask: null, mid: null };
     }
-    // A manually-priced leg carries no market age; that makes the net's age
-    // unknown, which is the honest answer. R-208.
-    legQuotes.push(quoteSource ? pd : null);
 
     if (leg.action === "BUY") {
       // BUY leg: pay ask to acquire, receive bid to liquidate
@@ -298,7 +302,7 @@ export function computeNetOptionQuote(
   const ask = Math.max(netBid, netAsk);
   const mid = (bid + ask) / 2;
 
-  return { bid, ask, mid, timestamp: oldestQuoteTimestamp(legQuotes) };
+  return { bid, ask, mid, asOf: oldestQuoteTimestamp(quoteAges) };
 }
 
 /* ─── ATM strike finder ─── */

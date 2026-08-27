@@ -9,6 +9,7 @@ finish and every deploy must name the exact commit it intends to release.
 from __future__ import annotations
 
 import fnmatch
+import json
 import re
 from pathlib import Path
 
@@ -16,6 +17,12 @@ import yaml
 
 
 WORKFLOW = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "ci.yml"
+# Hand-maintained mirror of `main`'s branch-protection required contexts. Read
+# from disk on purpose: this suite must run offline, and a test that calls the
+# GitHub API would be unrunnable on a fork and flaky on a rate limit.
+REQUIRED_STATUS_CHECKS = (
+    Path(__file__).resolve().parents[2] / ".github" / "required-status-checks.json"
+)
 TEST_JOBS = (
     "secret-scan",
     "changes",
@@ -26,6 +33,20 @@ TEST_JOBS = (
     "cloud-tests",
     "perimeter-smoke",
 )
+
+
+def _declared_required_status_checks() -> set[str]:
+    """Contexts the operator has declared as required status checks on `main`.
+
+    Empty today: `gh api repos/{owner}/{repo}/branches/main/protection` returns
+    no `required_status_checks` key at all. Adding a context here is a claim
+    about live GitHub state that this test cannot verify — apply it over the API
+    first, then declare it.
+    """
+    if not REQUIRED_STATUS_CHECKS.exists():
+        return set()
+    declared = json.loads(REQUIRED_STATUS_CHECKS.read_text(encoding="utf-8"))
+    return set(declared.get("contexts", []))
 
 
 def _workflow() -> dict:
@@ -302,11 +323,38 @@ def test_pytest_filename_shards_partition_scripts_tests() -> None:
     assert "tests" in other_paths
 
 
-def test_coverage_ratchets_do_not_serialize_deploy() -> None:
+def test_coverage_ratchets_gate_the_deploy() -> None:
+    """Both ratchets must be able to fail a release (TEST_AUDIT T-160).
+
+    Was ``test_coverage_ratchets_do_not_serialize_deploy``, which asserted the
+    ratchets were ABSENT from ``deploy.needs`` so the deploy would not wait on
+    the coverage-combine barrier VM. That traded a real gate for ~1min of
+    latency: with the ratchets off ``needs``, a coverage regression published a
+    green deploy. Latency and gating are irreconcilable here — you cannot block
+    on a job without waiting for it — so the safety arm wins.
+
+    A ratchet counts as gating if EITHER it is in ``deploy.needs`` with the same
+    ``success || skipped`` shape the test jobs use, OR its job name is a
+    required status check on ``main``. The second arm is read from a checked-in
+    declaration, never over the API, so this suite stays offline in CI.
+    """
     jobs = _workflow()["jobs"]
     needs = jobs["deploy"]["needs"]
-    assert "web-coverage" not in needs
-    assert "py-coverage" not in needs
+    deploy_if = jobs["deploy"]["if"]
+    declared = _declared_required_status_checks()
+    for job in ("web-coverage", "py-coverage"):
+        on_needs = (
+            job in needs
+            and f"needs.{job}.result == 'success'" in deploy_if
+            and f"needs.{job}.result == 'skipped'" in deploy_if
+        )
+        required_check = {job, jobs[job]["name"]} & declared
+        assert on_needs or required_check, (
+            f"{job} can neither fail the deploy job nor block a push to main: "
+            f"it is not in deploy.needs with a success||skipped clause, and "
+            f"neither {job!r} nor {jobs[job]['name']!r} is declared in "
+            f"{REQUIRED_STATUS_CHECKS.name}. Its threshold is advisory."
+        )
     assert "web-tests" in needs
     assert "py-tests" in needs
     assert "cloud-tests" in needs
@@ -330,10 +378,18 @@ def test_path_filter_skips_the_other_gate() -> None:
 
 def test_deploy_accepts_skipped_test_jobs() -> None:
     deploy_if = _workflow()["jobs"]["deploy"]["if"]
-    for job in ("web-tests", "py-tests", "cloud-tests", "perimeter-smoke"):
+    # web-coverage / py-coverage are `if: needs.<gate>-tests.result == 'success'`,
+    # so a path-filtered push skips them too — they need the same clause.
+    for job in (
+        "web-tests",
+        "py-tests",
+        "cloud-tests",
+        "perimeter-smoke",
+        "web-coverage",
+        "py-coverage",
+    ):
         assert f"needs.{job}.result == 'skipped'" in deploy_if
     assert "needs.changes.result == 'success'" in deploy_if
-    assert "web-coverage" not in deploy_if
 
 
 def test_cloud_infra_shards_partition_cloud_tests() -> None:

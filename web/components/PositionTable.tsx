@@ -14,6 +14,7 @@ import {
   fmtPrice,
   fmtPriceOrCalculated,
   resolveMarketValue,
+  resolveRealtimeMarketValue,
   resolveEntryCost,
   positionDirectionSign,
   getAvgEntry,
@@ -35,7 +36,7 @@ import { computeLegImpliedValue, computePositionImpliedValue, resolveUnderlyingS
 import { useRiskFreeRateState } from "@/lib/useRiskFreeRate";
 import { useColumnVisibility } from "@/lib/useColumnVisibility";
 import { useViewport } from "@/lib/useViewport";
-import { isIbDailyPnlCurrent, withSessionIbDailyPnl } from "@/lib/ibDailyPnlSession";
+import { isIbDailyPnlFromCurrentSession, withSessionIbDailyPnl } from "@/lib/ibDailyPnlSession";
 import { ColumnsToggle, type ColumnsToggleEntry } from "./ColumnsToggle";
 import MobilePositionList from "./mobile/MobilePositionList";
 
@@ -70,20 +71,6 @@ function useDensity(tableId: string): [DensityMode, () => void] {
 
 function getLegMultiplier(leg: { type: string }): number {
   return leg.type === "Stock" ? 1 : 100;
-}
-
-function getOptionRtMv(pos: PortfolioPosition, prices?: Record<string, PriceData>): number | null {
-  if (pos.structure_type === "Stock") return null;
-  let rtMv = 0;
-  for (const leg of pos.legs) {
-    const key = legPriceKey(pos.ticker, pos.expiry, leg);
-    const lp = key && prices ? prices[key] : null;
-    const current = resolveRealtimePrice(lp, leg.market_price, Boolean(leg.market_price_is_calculated)).price;
-    if (current == null) return null;
-    const sign = leg.direction === "LONG" ? 1 : -1;
-    rtMv += sign * current * leg.contracts * getLegMultiplier(leg);
-  }
-  return rtMv;
 }
 
 /* ─── Sort extract factory ─────────────────────────────── */
@@ -175,15 +162,13 @@ function makePositionExtract(prices?: Record<string, PriceData>, riskFreeRate: n
     const isStock = pos.structure_type === "Stock";
     const _stockLast = prices?.[pos.ticker]?.last;
     const rtStockLast = _stockLast != null && _stockLast > 0 ? _stockLast : null;
-    const optRtMv = getOptionRtMv(pos, prices);
-    // Sign-aware market value for a real-time stock quote: `pos.contracts` is a
-    // positive magnitude, so a SHORT must carry the direction sign or its MV
-    // reads positive and `mv - entryCost` (signed) becomes a SUM — a short with
-    // a risen price then shows a huge phantom GAIN. resolveEntryCost / the
-    // resolveMarketValue fallback are already signed; this aligns the live path.
-    const mv = isStock && rtStockLast != null
-      ? positionDirectionSign(pos) * rtStockLast * Math.abs(pos.contracts)
-      : optRtMv ?? resolveMarketValue(pos);
+    // ONE market value per position, shared with getTodayPnlDollars and the
+    // mobile card. Sign-aware throughout: `pos.contracts` is a positive
+    // magnitude, so a SHORT carries the direction sign or `mv - entryCost`
+    // becomes a SUM and a short whose price rose shows a phantom GAIN.
+    const rtMv = resolveRealtimeMarketValue(pos, prices);
+    const optRtMv = isStock ? null : rtMv;
+    const mv = rtMv ?? resolveMarketValue(pos);
     switch (key) {
       case "ticker": return pos.ticker;
       case "structure": return pos.structure;
@@ -368,10 +353,11 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
   const isStock = pos.structure_type === "Stock";
   const rtLast = isStock && realtimePrice?.last != null && realtimePrice.last > 0 ? realtimePrice.last : null;
 
-  // For options: compute real-time MV and daily change from leg-level WS prices
+  // For options: the close-based daily figures from leg-level WS prices. The
+  // market value is NOT recomputed here — it comes from
+  // resolveRealtimeMarketValue, the one walk every surface shares.
   const optionsRt = useMemo(() => {
     if (isStock) return null;
-    let rtMv = 0;
     let rtDailyPnl = 0;
     let rtCloseValue = 0;
     let hasCloseData = false;
@@ -385,7 +371,6 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
       priceIsCalculated = priceIsCalculated || resolved.isCalculated;
       const sign = leg.direction === "LONG" ? 1 : -1;
       const multiplier = getLegMultiplier(leg);
-      rtMv += sign * current * leg.contracts * multiplier;
       const close = lp?.close;
       if (close != null && close > 0) {
         rtDailyPnl += sign * (current - close) * leg.contracts * multiplier;
@@ -394,19 +379,18 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
       }
     }
     return {
-      mv: rtMv,
       dailyPnl: hasCloseData ? rtDailyPnl : null,
       closeValue: rtCloseValue,
       priceIsCalculated,
     };
   }, [isStock, prices, pos.legs, pos.ticker, pos.expiry]);
 
-  // Sign-aware: `rtLast` is stock-only (line ~294) and `pos.contracts` is a
-  // positive magnitude, so a SHORT must carry the direction sign — else MV reads
-  // positive and `mv - entryCost` (signed) becomes a SUM, showing a short with a
-  // risen price as a huge phantom GAIN (the +$2.3M/+202% MU bug). The option /
-  // resolveMarketValue fallback paths are already signed.
-  const mv = rtLast != null ? positionDirectionSign(pos) * rtLast * Math.abs(pos.contracts) : optionsRt?.mv ?? resolveMarketValue(pos);
+  // ONE market value per position — the same walk the sort extract, the mobile
+  // card and getTodayPnlDollars use. Sign-aware: `pos.contracts` is a positive
+  // magnitude, so a SHORT must carry the direction sign, else `mv - entryCost`
+  // becomes a SUM and a short whose price rose reads as a huge phantom GAIN
+  // (the +$2.3M/+202% MU bug).
+  const mv = resolveRealtimeMarketValue(pos, prices) ?? resolveMarketValue(pos);
   const entryCost = resolveEntryCost(pos);
   const pnl = getPnlDollars(pos, mv);
   const pnlPct = getPnlPct(pos, mv);
@@ -624,10 +608,11 @@ export default function PositionTable({
   const positionExtract = useMemo(() => makePositionExtract(prices, riskFreeRate), [prices, riskFreeRate]);
   // IB streams (and re-baselines) per-position dailyPnL on non-trading days
   // too; gate the rows on the same session the Day P&L card uses.
-  const sessionToday = isIbDailyPnlCurrent();
+  const lastSync = portfolio?.last_sync ?? null;
+  const sessionToday = isIbDailyPnlFromCurrentSession(lastSync);
   const sessionPositions = useMemo(
-    () => (sessionToday ? positions : withSessionIbDailyPnl(positions)),
-    [positions, sessionToday],
+    () => (sessionToday ? positions : withSessionIbDailyPnl(positions, new Date(), lastSync)),
+    [lastSync, positions, sessionToday],
   );
   const { sorted, sort, toggle } = useSort(sessionPositions, positionExtract);
   // Implied columns are only meaningful for option positions. Hide them entirely

@@ -41,6 +41,8 @@ import { comboQuotePriceData } from "@/lib/quoteTelemetry";
 import { useViewport } from "@/lib/useViewport";
 import MobileChainLadder from "@/components/mobile/MobileChainLadder";
 import ComboSkewPanel from "@/components/ComboSkewPanel";
+import TicketRiskBlock from "@/components/ticker-detail/TicketRiskBlock";
+import { netPremiumForPayoff, payoffAtExpiry, payoffCurve } from "@/lib/order/payoff";
 import { placeOrderFeedback } from "@/lib/orders/placeOrderFeedback";
 
 /* ─── Types ─── */
@@ -86,6 +88,7 @@ function StrikeRow({
   atmRef,
   sideFilter,
   riskFreeRate,
+  staged,
 }: {
   ticker: string;
   expiry: string;
@@ -99,6 +102,8 @@ function StrikeRow({
   atmRef?: React.Ref<HTMLTableRowElement>;
   sideFilter: "both" | "calls" | "puts";
   riskFreeRate: number;
+  /** Which sides of THIS strike are staged in the ticket. */
+  staged?: { call: boolean; put: boolean };
 }) {
   const callData = prices[callKey] ?? null;
   const putData = prices[putKey] ?? null;
@@ -142,6 +147,10 @@ function StrikeRow({
     [ticker, expiry, strike, prices, riskFreeRate],
   );
 
+  // Bidirectional reference: a leg staged in the ticket stays visible in the
+  // chain row it came from, per side.
+  const callTint = staged?.call ? " chain-cell--staged-call" : "";
+  const putTint = staged?.put ? " chain-cell--staged-put" : "";
   const rowClass = `chain-row ${isAtm ? "chain-row-atm" : ""}`;
   const showCalls = sideFilter !== "puts";
   const showPuts = sideFilter !== "calls";
@@ -151,37 +160,37 @@ function StrikeRow({
       {/* Call side */}
       {showCalls && (
         <>
-          <td className="chain-cell chain-greek">{callDelta != null ? callDelta.toFixed(2) : ""}</td>
-          <td className="chain-cell chain-iv">{callIV != null ? (callIV * 100).toFixed(1) : ""}</td>
+          <td className={`chain-cell chain-greek${callTint}`}>{callDelta != null ? callDelta.toFixed(2) : ""}</td>
+          <td className={`chain-cell chain-iv${callTint}`}>{callIV != null ? (callIV * 100).toFixed(1) : ""}</td>
           <td
-            className="chain-cell chain-implied"
+            className={`chain-cell chain-implied${callTint}`}
             title="Black-Scholes implied (theoretical) per-share price"
           >
             {callImplied != null ? fmtPrice(callImplied) : ""}
           </td>
-          <td className="chain-cell chain-vol">{callVol != null ? callVol.toLocaleString() : ""}</td>
+          <td className={`chain-cell chain-vol${callTint}`}>{callVol != null ? callVol.toLocaleString() : ""}</td>
           <td
-            className="chain-cell chain-bid chain-clickable"
+            className={`chain-cell chain-bid chain-clickable${callTint}`}
             onClick={() => onClickCall(strike, "SELL")}
             title="Sell call"
           >
             {callBid != null ? fmtPrice(callBid) : "---"}
           </td>
           <td
-            className="chain-cell chain-mid chain-clickable"
+            className={`chain-cell chain-mid chain-clickable${callTint}`}
             onClick={() => onClickCall(strike, "BUY")}
             title="Buy call"
           >
             {callMid != null ? fmtPrice(callMid) : "---"}
           </td>
           <td
-            className="chain-cell chain-ask chain-clickable"
+            className={`chain-cell chain-ask chain-clickable${callTint}`}
             onClick={() => onClickCall(strike, "BUY")}
             title="Buy call"
           >
             {callAsk != null ? fmtPrice(callAsk) : "---"}
           </td>
-          <td className="chain-cell chain-last">{callLast != null ? fmtPrice(callLast) : ""}</td>
+          <td className={`chain-cell chain-last${callTint}`}>{callLast != null ? fmtPrice(callLast) : ""}</td>
         </>
       )}
 
@@ -193,37 +202,37 @@ function StrikeRow({
       {/* Put side */}
       {showPuts && (
         <>
-          <td className="chain-cell chain-last">{putLast != null ? fmtPrice(putLast) : ""}</td>
+          <td className={`chain-cell chain-last${putTint}`}>{putLast != null ? fmtPrice(putLast) : ""}</td>
           <td
-            className="chain-cell chain-bid chain-clickable"
+            className={`chain-cell chain-bid chain-clickable${putTint}`}
             onClick={() => onClickPut(strike, "SELL")}
             title="Sell put"
           >
             {putBid != null ? fmtPrice(putBid) : "---"}
           </td>
           <td
-            className="chain-cell chain-mid chain-clickable"
+            className={`chain-cell chain-mid chain-clickable${putTint}`}
             onClick={() => onClickPut(strike, "BUY")}
             title="Buy put"
           >
             {putMid != null ? fmtPrice(putMid) : "---"}
           </td>
           <td
-            className="chain-cell chain-ask chain-clickable"
+            className={`chain-cell chain-ask chain-clickable${putTint}`}
             onClick={() => onClickPut(strike, "BUY")}
             title="Buy put"
           >
             {putAsk != null ? fmtPrice(putAsk) : "---"}
           </td>
-          <td className="chain-cell chain-vol">{putVol != null ? putVol.toLocaleString() : ""}</td>
+          <td className={`chain-cell chain-vol${putTint}`}>{putVol != null ? putVol.toLocaleString() : ""}</td>
           <td
-            className="chain-cell chain-implied"
+            className={`chain-cell chain-implied${putTint}`}
             title="Black-Scholes implied (theoretical) per-share price"
           >
             {putImplied != null ? fmtPrice(putImplied) : ""}
           </td>
-          <td className="chain-cell chain-iv">{putIV != null ? (putIV * 100).toFixed(1) : ""}</td>
-          <td className="chain-cell chain-greek">{putDelta != null ? putDelta.toFixed(2) : ""}</td>
+          <td className={`chain-cell chain-iv${putTint}`}>{putIV != null ? (putIV * 100).toFixed(1) : ""}</td>
+          <td className={`chain-cell chain-greek${putTint}`}>{putDelta != null ? putDelta.toFixed(2) : ""}</td>
         </>
       )}
     </tr>
@@ -324,9 +333,8 @@ function OrderBuilder({
       bid: signedNetPrice(netPrices.bid),
       mid: signedNetPrice(netPrices.mid),
       ask: signedNetPrice(netPrices.ask),
-      timestamp: netPrices.timestamp,
     };
-  }, [netPrices.bid, netPrices.mid, netPrices.ask, netPrices.timestamp, signedNetPrice]);
+  }, [netPrices.bid, netPrices.mid, netPrices.ask, signedNetPrice]);
 
   // One quote for whatever is being ticketed: the contract's own book for a
   // single leg, the net combo book wrapped as a PriceData for a spread. Both
@@ -334,9 +342,9 @@ function OrderBuilder({
   const quotePriceData = useMemo((): PriceData | null => {
     if (legs.length === 0) return null;
     if (isCombo) {
-      const { bid, ask, mid, timestamp } = signedNetPrices;
+      const { bid, ask, mid } = signedNetPrices;
       if (bid == null || ask == null) return null;
-      return comboQuotePriceData({ symbol: ticker, bid, ask, last: mid, timestamp });
+      return comboQuotePriceData({ symbol: ticker, bid, ask, last: mid, timestamp: netPrices.asOf });
     }
     const leg = legs[0];
     return prices[optionKey({
@@ -345,7 +353,7 @@ function OrderBuilder({
       strike: leg.strike,
       right: leg.right,
     })] ?? null;
-  }, [legs, isCombo, signedNetPrices, prices, ticker]);
+  }, [legs, isCombo, signedNetPrices, netPrices.asOf, prices, ticker]);
 
   const quoteLabel = useMemo(() => {
     if (legs.length === 0) return "";
@@ -434,8 +442,53 @@ function OrderBuilder({
   // Pull the resolved state for the coverage chip + (later) submit gating.
   // Calling `useOrderRisk` directly here is equivalent to the gate; the gate
   // wraps both the hook and the summary render below.
+  // Per-combo legs for the exact expiry payoff. Ratio-normalised so the curve
+  // describes ONE combo, matching the "RISK · PER 1× COMBO" heading.
+  const payoffLegs = useMemo(
+    () =>
+      quotingLegs.map((leg) => ({
+        action: leg.action as "BUY" | "SELL",
+        right: leg.right as "C" | "P",
+        strike: leg.strike,
+        quantity: leg.quantity,
+      })),
+    [quotingLegs],
+  );
+
   const riskState = useOrderRisk(riskInput, portfolio);
   const submitPermitted = chainOrderSubmitPermitted(isValidPrice, riskState, isCombo, isDebit);
+
+  /**
+   * The acknowledgement an operator gives is specific to the order in front of
+   * them, so it resets whenever they leave the review step or change the
+   * order. A stale tick must never arm a different ticket.
+   */
+  const [riskAcknowledged, setRiskAcknowledged] = useState(false);
+  useEffect(() => {
+    setRiskAcknowledged(false);
+  }, [confirmStep, signedLimitPrice, totalQty, structure, legs.length]);
+
+  /**
+   * Real figures for the acknowledgement, from the same exact payoff the risk
+   * block draws — where the position turns loss-making, and what it costs if
+   * the underlying goes to zero. Boilerplate would be easier to ignore.
+   */
+  const unboundedLoss = useMemo(() => {
+    if (riskState?.summary.maxLossUnbounded !== true) return null;
+    const premium = netPremiumForPayoff(payoffLegs, isCombo, signedLimitPrice);
+    const curve = payoffCurve(payoffLegs, premium, { spot: spot ?? 0 });
+    const turn = curve.breakevens.length > 0 ? curve.breakevens[curve.breakevens.length - 1] : null;
+    const atZero = payoffAtExpiry(payoffLegs, premium, 0) * 100 * (totalQty || 1);
+    const parts: string[] = [];
+    if (turn != null) parts.push(`Loss grows without limit beyond ${turn.toFixed(2)}`);
+    if (Number.isFinite(atZero) && atZero < 0) {
+      parts.push(`and reaches ${fmtPrice(Math.abs(atZero))} at zero`);
+    }
+    return { sentence: parts.length > 0 ? `${parts.join(" ")}.` : "Loss grows without limit." };
+  }, [riskState, payoffLegs, isCombo, signedLimitPrice, spot, totalQty]);
+
+  /** Bounded risk needs no acknowledgement; unbounded risk needs an explicit one. */
+  const transmitArmed = unboundedLoss == null || riskAcknowledged;
 
   const handlePlace = useCallback(async () => {
     if (!confirmStep) {
@@ -444,6 +497,9 @@ function OrderBuilder({
       return;
     }
     if (!submitPermitted) return;
+    // Defence in depth: the disabled button is UI, this is the actual gate.
+    // An unbounded-risk order never reaches the wire unacknowledged.
+    if (!transmitArmed) return;
 
     setLoading(true);
     setError(null);
@@ -570,7 +626,11 @@ function OrderBuilder({
   if (legs.length === 0) return null;
 
   return (
-    <div className="order-builder" ref={builderRef} data-prefilled={prefillLabel ? "true" : undefined}>
+    <div
+      className="order-builder order-builder--rail"
+      ref={builderRef}
+      data-prefilled={prefillLabel ? "true" : undefined}
+    >
       <div className="order-builder-section order-builder-section--structure">
         <div className="order-builder-header">
           <span className="order-builder-title">
@@ -838,6 +898,25 @@ function OrderBuilder({
 
         <OrderErrorBanner error={error} />
 
+        {/* Risk sits ABOVE the CTA so unbounded loss is read before the button,
+            not after it. Presentation only — the gate below remains the
+            chokepoint that decides whether the order may be submitted. */}
+        {riskState && (
+          <TicketRiskBlock
+            legs={payoffLegs}
+            netPremium={netPremiumForPayoff(payoffLegs, isCombo, signedLimitPrice)}
+            spot={spot ?? 0}
+            maxGain={riskState.summary.maxGain ?? null}
+            maxLoss={riskState.summary.maxLoss ?? null}
+            maxLossUnbounded={riskState.summary.maxLossUnbounded === true}
+            marginRequirement={riskState.summary.marginImpact?.requirement ?? null}
+            fundsAfter={riskState.summary.marginImpact?.availableAfter ?? null}
+            total={riskState.summary.totalCost ?? null}
+            totalLabel={riskState.summary.totalLabel ?? "TOTAL"}
+            isCredit={netPremiumForPayoff(payoffLegs, isCombo, signedLimitPrice) < 0}
+          />
+        )}
+
         {confirmStep && (
           <OrderRiskGate
             input={riskInput}
@@ -853,12 +932,32 @@ function OrderBuilder({
           </div>
         )}
 
+        {/* Unbounded risk must be acknowledged before transmit arms. This only
+            ever ADDS a condition on top of `submitPermitted` — the risk gate
+            stays the chokepoint and this can never loosen it. */}
+        {confirmStep && unboundedLoss && (
+          <div className="ticket-unbounded" data-testid="ticket-unbounded-warning">
+            <label className="ticket-unbounded-row">
+              <input
+                type="checkbox"
+                data-testid="ticket-unbounded-ack"
+                checked={riskAcknowledged}
+                onChange={(e) => setRiskAcknowledged(e.target.checked)}
+              />
+              <span>
+                MAX LOSS UNBOUNDED. {unboundedLoss.sentence} Acknowledge to enable transmit.
+              </span>
+            </label>
+          </div>
+        )}
+
         <div className="order-submit order-builder-submit">
           {confirmStep ? (
             <div className="order-confirm-row">
               <button
                 type="button"
                 className="btn-secondary"
+                data-testid="ticket-back"
                 onClick={() => setConfirmStep(false)}
                 disabled={loading}
               >
@@ -867,21 +966,32 @@ function OrderBuilder({
               <button
                 type="button"
                 className={`btn-primary ${isDebit === false ? "btn-danger" : ""}`}
+                data-testid="ticket-transmit"
                 onClick={handlePlace}
-                disabled={loading || !submitPermitted}
+                disabled={loading || !submitPermitted || !transmitArmed}
               >
-                {loading ? "Placing..." : "Confirm Order"}
+                {loading
+                  ? "Transmitting..."
+                  : transmitArmed
+                    ? `Transmit ${structure || "Order"}`
+                    : "Transmit — awaiting acknowledgement"}
               </button>
             </div>
           ) : (
-            <button
-              type="button"
-              className="btn-primary order-builder-place"
-              onClick={handlePlace}
-              disabled={!submitPermitted}
-            >
-              Place {structure || "Order"}
-            </button>
+            <>
+              <button
+                type="button"
+                className="btn-primary order-builder-place"
+                data-testid="ticket-verify"
+                onClick={handlePlace}
+                disabled={!submitPermitted}
+              >
+                Verify order →
+              </button>
+              <div className="ticket-step-hint">
+                <span>STEP 1 OF 2 · TRANSMIT FOLLOWS REVIEW</span>
+              </div>
+            </>
           )}
         </div>
       </div>
@@ -906,6 +1016,24 @@ export default function OptionsChainTab({
   const [loadingStrikes, setLoadingStrikes] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [orderLegs, setOrderLegs] = useState<OrderLeg[]>([]);
+
+  /**
+   * Strikes staged in the ticket, per side. Drives the chain tint so the
+   * operator can see which contracts are in the order without reading the
+   * ticket back. Keyed by strike; a call and a put at the same strike are
+   * tracked separately.
+   */
+  const stagedSides = useMemo(() => {
+    const map = new Map<number, { call: boolean; put: boolean }>();
+    for (const leg of orderLegs) {
+      const current = map.get(leg.strike) ?? { call: false, put: false };
+      if (leg.right === "C") current.call = true;
+      if (leg.right === "P") current.put = true;
+      map.set(leg.strike, current);
+    }
+    return map;
+  }, [orderLegs]);
+
   // Filter state is deep-linked into the URL (?expiry=&side=&strikes=) — seed
   // from the URL on mount, write back on change. See useChainUrlState.
   const chainUrl = useChainUrlState();
@@ -1373,7 +1501,13 @@ export default function OptionsChainTab({
         </div>
       </div>
 
-      {/* Chain grid */}
+      {/* Chain grid + docked ticket rail. The ticket sits BESIDE the chain
+          rather than under it, so legs, price, risk and CTA stay readable
+          without scrolling and the chain keeps its full height. */}
+      <div className="chain-rail" data-docked={orderLegs.length > 0 ? "true" : "false"}>
+      {/* One grid child per column: the chain and its hint row travel together,
+          otherwise the hint becomes a third child and wraps the dock below. */}
+      <div className="chain-rail-main">
       {loadingStrikes ? (
         <div style={{ padding: "24px 0", textAlign: "center" }}>
           <SpectralLoader label="Loading chain" />
@@ -1437,6 +1571,7 @@ export default function OptionsChainTab({
                     atmRef={isAtm ? atmRef : undefined}
                     sideFilter={sideFilter}
                     riskFreeRate={riskFreeRate}
+                    staged={stagedSides.get(row.strike)}
                   />
                 );
               })}
@@ -1445,7 +1580,15 @@ export default function OptionsChainTab({
         </div>
       )}
 
-      {/* Order Builder */}
+      {orderLegs.length > 0 && (
+        <div className="chain-rail-hint">
+          <span>CLICK BID/ASK → ADDS LEG TO TICKET</span>
+          <span>SELECTED LEGS HIGHLIGHTED IN CHAIN</span>
+        </div>
+      )}
+      </div>
+
+      {/* Order Builder — the dock */}
       <OrderBuilder
         ticker={ticker}
         legs={orderLegs}
@@ -1459,6 +1602,7 @@ export default function OptionsChainTab({
         onUpdateLeg={handleUpdateLeg}
         onClearLegs={handleClearLegs}
       />
+      </div>
     </div>
   );
 }

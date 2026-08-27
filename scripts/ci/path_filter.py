@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Classify a SHA range as python-gate, web-gate, both, or neither.
 
-Used by .github/workflows/ci.yml so a web/-only push skips pytest and a
-scripts/-only push skips vitest. Shared files (CI yaml, lockfiles that both
-gates consume) run both. Docs-only ranges skip both test gates.
+Used by .github/workflows/ci.yml to skip a test gate that cannot be affected
+by the range. A gate is skipped only when NOTHING in the range is owned or
+read by it: the trees each gate's own tests read across the tree boundary are
+routed to that gate too (WEB_READS / PYTHON_READS below), so a change can
+never skip the gate that asserts on it. Documentation-only ranges (.md, and
+images under the skip prefixes) skip both gates.
 """
 
 from __future__ import annotations
@@ -43,10 +46,67 @@ SKIP_PREFIXES = (
     ".agents/",
     "notebooks/",
 )
+# A skip prefix skips DOCUMENTATION, not the whole subtree. docs/ also holds
+# runtime data (docs/options-structures.json is read by two vitest suites,
+# docs/owners.json is the map the docs contract runs on) and .claude/ holds
+# executable hooks/workflows. T-159.
+DOC_SUFFIXES = (".md", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico")
+
+# Cross-tree reads: trees whose files are consumed by the OTHER gate's tests.
+# Both tuples are derived from the checkout and pinned by
+# scripts/tests/test_path_filter.py, which re-derives them on every run from
+# vitest.config.ts's test.include globs and from the path literals inside
+# web/tests, lib/tools/__tests__, site/lib, scripts/lib, .pi/tests and
+# tests/, scripts/tests/, cloud/tests/. Adding a new cross-tree read without
+# updating these turns that test red. They only ever switch a gate ON.
+#
+# WEB: vitest is the sole runner of scripts/lib/**/*.test.js (pytest cannot
+# collect .js) and web/tests reads scripts/ and cloud/ source directly
+# (refresh-schedule reads cloud/services/*, market-state-holiday imports
+# scripts/config/market_holidays.json). T-156.
+WEB_READS = (
+    ".pi/",
+    "cloud/",
+    "data/",
+    "docs/",
+    "lib/",
+    "logs/",
+    "scripts/",
+    "site/",
+    "tasks/",
+    "tests/",
+    "web/",
+)
+# PYTHON: the ⛔ PII plate guard reads site/public/plates, the account-figure
+# guard reads web/lib/chat.ts, and the DUR-07 replica guard scans web/lib,
+# web/app, web/components. T-157.
+PYTHON_READS = (
+    ".claude/",
+    ".github/",
+    ".pi/",
+    "cloud/",
+    "config/",
+    "data/",
+    "docker/",
+    "docs/",
+    "lib/",
+    "logs/",
+    "scripts/",
+    "site/",
+    "tasks/",
+    "tests/",
+    "web/",
+)
 
 
 def _matches(path: str, prefixes: tuple[str, ...]) -> bool:
     return any(path == prefix.rstrip("/") or path.startswith(prefix) for prefix in prefixes)
+
+
+def _is_documentation(path: str) -> bool:
+    if path.endswith(".md"):
+        return True
+    return _matches(path, SKIP_PREFIXES) and path.endswith(DOC_SUFFIXES)
 
 
 def classify(paths: list[str]) -> tuple[bool, bool]:
@@ -57,17 +117,20 @@ def classify(paths: list[str]) -> tuple[bool, bool]:
     web = False
     saw_runtime = False
     for path in paths:
-        if _matches(path, SKIP_PREFIXES) or path.endswith(".md"):
+        if _is_documentation(path):
             continue
         saw_runtime = True
         if _matches(path, SHARED_PREFIXES):
             python = True
             web = True
             continue
-        if _matches(path, WEB_PREFIXES):
+        if _matches(path, WEB_PREFIXES + WEB_READS):
             web = True
-        if _matches(path, PYTHON_PREFIXES):
+        if _matches(path, PYTHON_PREFIXES + PYTHON_READS):
             python = True
+        # Unknown runtime trees still run both gates. Deliberately measured
+        # against the OWNED prefixes only: a cross-tree read must never be the
+        # thing that stops an unclassified path from running both gates.
         if not _matches(path, WEB_PREFIXES + PYTHON_PREFIXES + SHARED_PREFIXES):
             python = True
             web = True
