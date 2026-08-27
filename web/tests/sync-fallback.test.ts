@@ -155,17 +155,29 @@ describe("GET /api/portfolio — cached snapshot only", () => {
   });
 
   it("serves a stale snapshot with a warning and no background IB sync", async () => {
-    const snapshot = makePortfolio("2026-03-13T15:45:00Z");
-    mockPortfolioDb(snapshot);
+    // `portfolio-sync` is an RTH_ONLY_SERVICES member, so while the market is
+    // open isStale() measures age from TODAY'S OPEN, not from the snapshot. In
+    // the first 10 minutes of the session even a months-old snapshot is inside
+    // the window, no warning is set, and this read a null header — which is
+    // exactly what CI hit at 09:36 ET. Pin the clock mid-session so the case
+    // under test is staleness rather than the hour CI happened to run.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-03-20T18:00:00Z")); // Fri 14:00 ET
+    try {
+      const snapshot = makePortfolio("2026-03-13T15:45:00Z");
+      mockPortfolioDb(snapshot);
 
-    const { GET } = await import("../app/api/portfolio/route");
-    const response = await GET();
-    const body = await response.json();
+      const { GET } = await import("../app/api/portfolio/route");
+      const response = await GET();
+      const body = await response.json();
 
-    expect(response.status).toBe(200);
-    expect(body.last_sync).toBe(snapshot.last_sync);
-    expect(response.headers.get("X-Sync-Warning")).toContain("stale");
-    expect(mockRadonFetch).not.toHaveBeenCalled();
+      expect(response.status).toBe(200);
+      expect(body.last_sync).toBe(snapshot.last_sync);
+      expect(response.headers.get("X-Sync-Warning")).toContain("stale");
+      expect(mockRadonFetch).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
