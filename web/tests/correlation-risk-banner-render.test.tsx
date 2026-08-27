@@ -107,7 +107,13 @@ describe("CorrelationRiskBanner", () => {
     expect(screen.getByTestId("crb-insufficient-data").textContent).toContain("THIN");
   });
 
-  it("renders measurement-unavailable as a Gate-3 info module", () => {
+  // Was asserted as level "info" via the component's `showUnavailable` path.
+  // R-283 moved the decision into `correlationRiskBanner`, so an unmeasured
+  // book now reports the same `unmeasured` level as its sibling case above
+  // instead of two different levels for one condition. The original intent —
+  // this case renders a Gate-3 module rather than nothing, and names the
+  // tickers it could not measure — is what is asserted here.
+  it("renders an unmeasured book as a Gate-3 module naming the tickers", () => {
     render(
       <CorrelationRiskBanner
         report={report({ insufficient_data: ["ADBE", "CBRS", "META"] })}
@@ -115,9 +121,16 @@ describe("CorrelationRiskBanner", () => {
       />,
     );
     const banner = screen.getByTestId("correlation-risk-banner");
-    expect(banner.getAttribute("data-level")).toBe("info");
-    expect(banner.textContent).toMatch(/Gate 3: correlation measurement unavailable/);
+    expect(banner.getAttribute("data-level")).toBe("unmeasured");
+    expect(banner.textContent).not.toMatch(/no correlated concentration/i);
+    expect(banner.textContent).toMatch(/3 positions/);
     const chips = Array.from(banner.querySelectorAll(".crb-ticker")).map((el) => el.textContent);
     expect(chips).toEqual(["ADBE", "CBRS", "META"]);
+  });
+
+  it("still renders the unavailable module when there is no report at all", () => {
+    render(<CorrelationRiskBanner report={null} showUnavailable />);
+    const banner = screen.getByTestId("correlation-risk-banner");
+    expect(banner.textContent).toMatch(/Gate 3: correlation measurement unavailable/);
   });
 });

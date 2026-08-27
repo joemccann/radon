@@ -43,34 +43,42 @@ function deriveEquityPosture(main: CtaRow[]): {
   );
   if (!spx) return { label: "UNKNOWN", cssColor: "var(--text-muted)", borderColor: "var(--border-dim)", bgColor: "transparent" };
 
-  const pctile = normalizeCtaPercentile(spx.percentile_3m) ?? 50;
+  // `?? 50` published a confident neutral reading of a percentile the
+  // reconciler had just refused to stand behind. `null` fails every
+  // comparison below, so the z-score — which is what nulled it — decides
+  // alone. R-292.
+  const pctile = normalizeCtaPercentile(spx.percentile_3m);
   const z = spx.z_score_3m;
+  // Neither input survived: NEUTRAL would be a claim about a row we cannot read.
+  if (pctile == null && !Number.isFinite(z)) {
+    return { label: "UNKNOWN", cssColor: "var(--text-muted)", borderColor: "var(--border-dim)", bgColor: "transparent" };
+  }
 
-  if (pctile <= 5 || z <= -2.0) return {
+  if ((pctile != null && pctile <= 5) || z <= -2.0) return {
     label: "EXTREME SHORT",
     cssColor: "var(--negative)",
     borderColor: "color-mix(in srgb, var(--fault) 40%, transparent)",
     bgColor: "color-mix(in srgb, var(--fault) 5%, transparent)",
   };
-  if (pctile <= 15 || z <= -1.5) return {
+  if ((pctile != null && pctile <= 15) || z <= -1.5) return {
     label: "HEAVY SHORT",
     cssColor: "var(--negative)",
     borderColor: "color-mix(in srgb, var(--fault) 30%, transparent)",
     bgColor: "color-mix(in srgb, var(--fault) 4%, transparent)",
   };
-  if (pctile <= 30) return {
+  if (pctile != null && pctile <= 30) return {
     label: "SHORT",
     cssColor: "var(--warning)",
     borderColor: "color-mix(in srgb, var(--warning) 35%, transparent)",
     bgColor: "color-mix(in srgb, var(--warning) 4%, transparent)",
   };
-  if (pctile >= 95 || z >= 2.0) return {
+  if ((pctile != null && pctile >= 95) || z >= 2.0) return {
     label: "EXTREME LONG",
     cssColor: "var(--positive)",
     borderColor: "color-mix(in srgb, var(--signal-core) 40%, transparent)",
     bgColor: "color-mix(in srgb, var(--signal-core) 5%, transparent)",
   };
-  if (pctile >= 80 || z >= 1.5) return {
+  if ((pctile != null && pctile >= 80) || z >= 1.5) return {
     label: "HEAVY LONG",
     cssColor: "var(--positive)",
     borderColor: "color-mix(in srgb, var(--signal-core) 30%, transparent)",
@@ -112,10 +120,10 @@ function getCurrencyExtremes(currency: CtaRow[]): { shorts: CtaRow[]; longs: Cta
 /** Derive squeeze risk label */
 function deriveSqueezeRisk(spx: CtaRow | undefined): { label: string; cssColor: string } {
   if (!spx) return { label: "UNKNOWN", cssColor: "var(--text-muted)" };
-  const pctile = normalizeCtaPercentile(spx.percentile_3m) ?? 50;
+  const pctile = normalizeCtaPercentile(spx.percentile_3m);
   const z = spx.z_score_3m;
-  if (pctile <= 5 || z <= -2.0) return { label: "ELEVATED", cssColor: "var(--warning)" };
-  if (pctile <= 15 || z <= -1.5) return { label: "MODERATE", cssColor: "var(--warning)" };
+  if ((pctile != null && pctile <= 5) || z <= -2.0) return { label: "ELEVATED", cssColor: "var(--warning)" };
+  if ((pctile != null && pctile <= 15) || z <= -1.5) return { label: "MODERATE", cssColor: "var(--warning)" };
   return { label: "LOW", cssColor: "var(--text-muted)" };
 }
 
@@ -230,12 +238,12 @@ function buildNarrative(
 
   if (spx) {
     const flipped = spx.position_1m_ago > 0 && spx.position_today < 0;
-    const spxPctile = pctile(spx.percentile_3m) ?? 50;
-    if (spxPctile <= 10) {
+    const spxPctile = pctile(spx.percentile_3m);
+    if (spxPctile != null && spxPctile <= 10) {
       parts.push(
         `SPX CTAs at the ${formatCtaPercentileLabel(spx.percentile_3m)} percentile of their 3M range${flipped ? `, having flipped from ${fmt(spx.position_1m_ago)} long one month ago` : ""}.`
       );
-    } else if (spxPctile >= 90) {
+    } else if (spxPctile != null && spxPctile >= 90) {
       parts.push(`SPX CTAs at the ${formatCtaPercentileLabel(spx.percentile_3m)} percentile of their 3M range, heavily long.`);
     }
   }
@@ -300,6 +308,17 @@ export default function CtaBriefing({ tables, estSellingBn, dayChangeBn = null }
   const tags = deriveSignalTags(tables);
   const narrative = buildNarrative(tables, estSellingBn, dayChangeBn ?? null);
   const crowded = getCrowdedCommodityLongs(commodity);
+  // An unknown percentile takes the neutral tone, not the extreme-short red a
+  // `?? 50` would never have produced nor the primary a real reading earns.
+  const spxPctile = spx ? pctile(spx.percentile_3m) : null;
+  const spxMetricTone =
+    spxPctile == null
+      ? "var(--text-muted)"
+      : spxPctile <= 15
+        ? "var(--negative)"
+        : spxPctile >= 85
+          ? "var(--positive)"
+          : "var(--text-primary)";
 
   return (
     <div
@@ -333,7 +352,7 @@ export default function CtaBriefing({ tables, estSellingBn, dayChangeBn = null }
           <div className="cta-briefing-metric-label">SPX 3M PCTILE</div>
           <div
             className="cta-briefing-metric-value"
-            style={{ color: spx && (pctile(spx.percentile_3m) ?? 50) <= 15 ? "var(--negative)" : spx && (pctile(spx.percentile_3m) ?? 50) >= 85 ? "var(--positive)" : "var(--text-primary)" }}
+            style={{ color: spxMetricTone }}
           >
             {spx != null ? formatCtaPercentileLabel(spx.percentile_3m) : "---"}
           </div>

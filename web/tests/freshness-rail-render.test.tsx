@@ -53,11 +53,13 @@ describe("FreshnessRail", () => {
     expect(screen.getByTestId("rail-countdown").textContent).toBe("1h 10m");
   });
 
+  // Was rendered at slot + 20m. R-307 makes that the writer's own run window;
+  // the alarm now waits out the grace. Same intent, past it.
   it("reads DUE, in warn tone, once the run has fired without delivering", () => {
-    renderAt("2026-08-26T22:30:00Z", "2026-08-25");
+    renderAt("2026-08-26T23:30:00Z", "2026-08-25");
     expect(screen.getByTestId("rail-countdown").textContent).toBe("Due");
     expect(screen.getByTestId("rail").getAttribute("data-state")).toBe("overdue");
-    expect(screen.getByTestId("rail").textContent).toContain("20m 00s past the run");
+    expect(screen.getByTestId("rail").textContent).toContain("1h 20m past the run");
   });
 
   it("ticks", () => {
@@ -72,9 +74,22 @@ describe("FreshnessRail", () => {
     expect(screen.getByTestId("rail-asof").textContent).toBe("2026-08-25");
   });
 
-  it("renders without a data date", () => {
+  // Was asserted as data-state "current" — a panel holding NO date rendered
+  // the calm state with a ticking countdown, which is the one thing it cannot
+  // honestly claim. R-306 gives it its own state. The original intent (the
+  // rail renders, does not crash, and shows "---" for the date) is kept.
+  it("renders without a data date, as unknown rather than current", () => {
     renderAt("2026-08-26T19:00:00Z", null);
     expect(screen.getByTestId("rail-asof").textContent).toBe("---");
-    expect(screen.getByTestId("rail").getAttribute("data-state")).toBe("current");
+    expect(screen.getByTestId("rail").getAttribute("data-state")).toBe("unknown");
+    expect(screen.getByTestId("rail").textContent).toContain("Unknown");
+  });
+
+  it("labels its clocks with a timezone so a bare time is not ambiguous", () => {
+    renderAt("2026-08-26T19:00:00Z", "2026-08-25");
+    // R-309: the rail showed "Today 18:10" with no zone marker, next to an
+    // `asOf` that is an ET session date.
+    const text = screen.getByTestId("rail").textContent ?? "";
+    expect(text).toMatch(/\b(GMT|UTC|[A-Z]{2,5}T)\b/);
   });
 });

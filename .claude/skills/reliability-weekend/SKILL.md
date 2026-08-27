@@ -372,4 +372,34 @@ how this loop improves as the codebase grows.
   per task (pytest ~5min, vitest ~1.5min) is ~2.5h of gate time alone. Run the
   two gates SEQUENTIALLY (concurrent runs starve CPU and produce phantom
   failures), and run the cheap targeted suite first — it catches most
-  regressions in seconds.
+  regressions in seconds.- 2026-08-27 (audit): **review the previous weekend's own remediation as a walk, not just via the
+  sweeps.** The 2026-08-26 merge squashed 24 backlog items across 134 files, written unattended and
+  reviewed only by CI. A seventh walk pointed at its five P0 fixes found that two did not hold —
+  REL-070's `stage-release` still races two coverage jobs deploy blocks on, and REL-071's new
+  completeness guard is blind to contract-identity corruption, which is the same fabricated-P&L
+  outcome the P0 named. Four fixes were confirmed holding, which is itself worth recording. The
+  standing sweeps cannot find this class: they check that a mechanism is PRESENT, not that it
+  covers what the finding claimed.
+- 2026-08-27 (audit): **a finding's own fix can be the next finding.** R-274, R-299 and R-319 are
+  all defects in last week's remediation, and R-277 re-opens NF-8 — the REL-088 test written to
+  close the catalog-parity sweep parses ExecStart with a `.py|.sh` regex that matches neither
+  `python -m package.module` nor `.js`, so eight units are asserted on by nothing while the test
+  reports green. When a fix ships as "a test now enforces this", audit the test's SCOPE next week,
+  not its presence. Enumerate the real population in the lead context and diff it against what the
+  test actually iterates.
+- 2026-08-27 (audit): the auto-escape belongs at emission, not in the source strings. Hand-writing
+  `\|` inside the finding text worked for the findings table but the backlog table failed on a
+  `(totalQty || 1)` I forgot. Run every cell through `re.sub(r'(?<!\\)\|', r'\|', cell)` at
+  generation time — the negative lookbehind makes it idempotent, so manually-escaped and
+  forgotten pipes both come out right, and the 4-cell assertion then passes first try.
+- 2026-08-27 (audit): **assert backlog coverage programmatically.** A set-difference between the
+  emitted R-numbers and the R-numbers referenced across all backlog rows caught nothing this run,
+  but it is the check that makes "46 findings, 15 tasks" trustworthy without re-reading both
+  tables. Pair it with the ascending-id assertion; both are three lines.
+- 2026-08-27 (audit): seven walks capped at ~15 files each all finished in 4-6 minutes with none
+  lost to the stream watchdog. Three cross-walk duplicates appeared exactly where last week's
+  lesson predicted — one defect reached from two directions, and one TS/Python twin that must be
+  ONE finding because a fix on either side alone leaves the defect live. Also expect walks to
+  DISAGREE: one filed `oldestQuoteTimestamp`'s fail-closed aggregation as a defect and another
+  listed the same code as clean. The lead resolved it by reading the docstring, which states the
+  intent verbatim; file the half that survives and record the rejected half in the row.

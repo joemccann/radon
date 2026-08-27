@@ -35,8 +35,35 @@ const PERCENTILE_FIELDS = ["percentile_1m", "percentile_3m", "percentile_1y"] as
 // Widest gap seen between a sound percentile and the one its z-score implies,
 // across every menthorq_cta payload on record, is ~24 points (thin-tailed
 // series like Natural Gas). 35 sits clear of that and still catches every
-// rounded row that inverts a narrative.
+// rounded row that inverts a narrative UPWARD.
 const Z_DISAGREEMENT_LIMIT = 35;
+
+// One flat limit is one-sided. Rounding a fraction always lands on 0 or 1, so
+// rounding DOWN (0.30 -> 0) yields a gap of 30 and sails under 35, while
+// rounding UP (0.65 -> 1) yields 64 and is caught. The low half is exactly the
+// half that inverts a narrative into "max short". A stored 0 or 1 carries no
+// information the z-score cannot check precisely — a genuine 0th percentile
+// implies a z at the same extreme — so inside that band the limit is tight.
+// Above it the stored number is a real integer percentile subject to ordinary
+// extractor noise, and only a gross disagreement is evidence. R-288.
+const ROUNDED_FRACTION_BAND = 1;
+const ROUNDED_FRACTION_LIMIT = 2;
+
+/**
+ * Whether the row's 3M cell carries the rounding SIGNATURE — an integral value
+ * inside 0-1, which is exactly and only what rounding a fraction produces.
+ *
+ * Keyed on the raw cell rather than the normalized one on purpose: a 0.65
+ * rounded up to 1 is re-scaled to 100 by the fractional tie-break, and 100 is
+ * not in the band even though the cell it came from is the artifact. A genuine
+ * 0th, 1st or 100th percentile has the signature too, and passes — its z-score
+ * agrees to well under two points.
+ */
+function hasRoundingSignature(row: CtaRowLike): boolean {
+  const cell = num(row.percentile_3m);
+  return cell != null && cell >= 0 && cell <= 1 && Number.isInteger(cell);
+}
+
 
 /** Abramowitz & Stegun 7.1.26 — max error 1.5e-7, ample at percentile scale. */
 function erf(x: number): number {
@@ -80,10 +107,23 @@ function rowKey(row: CtaRowLike): string {
 function normalizedTrio(row: CtaRowLike): (number | null)[] {
   const raw = PERCENTILE_FIELDS.map((field) => num(row[field]));
   const present = raw.filter((v): v is number => v != null);
-  const fractional =
-    present.length > 0 &&
-    present.every((v) => v >= 0 && v <= 1) &&
-    present.some((v) => !Number.isInteger(v));
+  const inUnitRange = present.length > 0 && present.every((v) => v >= 0 && v <= 1);
+  // A non-integer inside 0-1 can only be a fraction.
+  let fractional = inUnitRange && present.some((v) => !Number.isInteger(v));
+
+  // A trio of INTEGRAL values inside 0-1 (`[0.0, 1.0, 0.0]`) is ambiguous: it
+  // reads as the 0th/1st percentile on an integer card and as the 0th/100th on
+  // a fractional one, and the two are opposite narratives. The z-score measures
+  // the same 3M window, so let it break the tie rather than defaulting to the
+  // reading that inverts it. R-290.
+  if (inUnitRange && !fractional) {
+    const implied = ctaPercentileFromZ(num(row.z_score_3m));
+    const asIs = raw[1];
+    if (implied != null && asIs != null) {
+      fractional = Math.abs(asIs * 100 - implied) < Math.abs(asIs - implied);
+    }
+  }
+
   return raw.map((v) => {
     if (v == null) return null;
     return Math.max(0, Math.min(100, Math.round(fractional ? v * 100 : v)));
@@ -130,7 +170,10 @@ export function reconcileCtaTables(tables: CtaTablesLike | null | undefined): Ct
   if (!tables) return null;
 
   // Best trio per shared row: the one whose 3M percentile its z-score agrees with.
-  const best = new Map<string, { trio: (number | null)[]; rank: [number, number, number] }>();
+  const best = new Map<
+    string,
+    { trio: (number | null)[]; rank: [number, number, number]; rounded: boolean }
+  >();
   for (const rows of Object.values(tables)) {
     for (const row of rows ?? []) {
       const trio = normalizedTrio(row);
@@ -139,7 +182,13 @@ export function reconcileCtaTables(tables: CtaTablesLike | null | undefined): Ct
       const key = rowKey(row);
       const rank = candidateRank(trio, gap);
       const current = best.get(key);
-      if (!current || ranksBetter(rank, current.rank)) best.set(key, { trio, rank });
+      // The signature travels with the trio: once a rounded cell is repaired
+      // from an unrounded copy in another table, the repaired value is a real
+      // percentile and must be judged on the ordinary noise limit, not the
+      // tight one the rounded cell would have earned.
+      if (!current || ranksBetter(rank, current.rank)) {
+        best.set(key, { trio, rank, rounded: hasRoundingSignature(row) });
+      }
     }
   }
 
@@ -149,11 +198,24 @@ export function reconcileCtaTables(tables: CtaTablesLike | null | undefined): Ct
       const chosen = best.get(rowKey(row));
       const trio = chosen ? chosen.trio : normalizedTrio(row);
       const implied = ctaPercentileFromZ(num(row.z_score_3m));
+      const stored = trio[1];
+      // No usable z-score means nothing checks this percentile at all. An
+      // unverifiable number is not a number to publish. R-289.
+      const unverifiable = implied == null;
+      const gap = implied != null && stored != null ? Math.abs(stored - implied) : null;
+      const rounded = chosen ? chosen.rounded : hasRoundingSignature(row);
       const contradicted =
-        implied != null && trio[1] != null && Math.abs(trio[1] - implied) > Z_DISAGREEMENT_LIMIT;
+        gap != null && gap > (rounded ? ROUNDED_FRACTION_LIMIT : Z_DISAGREEMENT_LIMIT);
+      // Scope: a contradiction on a row carrying the rounding signature says
+      // the whole TRIO was mis-scaled by the extractor, so all three go. A
+      // gross disagreement on a real integer percentile is evidence about the
+      // 3M column the z actually measures, and must not blank 1M and 1Y with
+      // it. R-291 (scoping clause).
+      const wholeTrioSuspect = unverifiable || (contradicted && rounded);
       const next: CtaRowLike = { ...row };
       PERCENTILE_FIELDS.forEach((field, i) => {
-        next[field] = contradicted ? null : trio[i];
+        const dropped = wholeTrioSuspect || (contradicted && field === "percentile_3m");
+        next[field] = dropped ? null : trio[i];
       });
       return next;
     });

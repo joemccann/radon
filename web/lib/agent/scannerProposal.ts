@@ -50,8 +50,13 @@ function statementFor(result: ThetaHarvesterResult): string {
   const setup = result.setup?.trim();
   if (setup && !isEngineSetupToken(setup)) return setup;
   if (!setup) {
+    // `range_score` was interpolated raw one clause after `iv_rv_edge` was
+    // guarded, so a result missing it rendered the literal "range score
+    // undefined" in a sentence the operator is meant to size a trade against.
+    // R-313.
     const edge = Number.isFinite(result.iv_rv_edge) ? result.iv_rv_edge.toFixed(1) : "---";
-    return `${structureStatement(result)}: IV/RV edge ${edge}, range score ${result.range_score}.`;
+    const range = Number.isFinite(result.range_score) ? String(result.range_score) : "---";
+    return `${structureStatement(result)}: IV/RV edge ${edge}, range score ${range}.`;
   }
   return structureStatement(result);
 }
@@ -60,7 +65,12 @@ function alternativesFrom(rest: ThetaHarvesterResult[]): ProposalAlternative[] {
   return rest.slice(0, MAX_ALTERNATIVES).map((row) => ({
     id: row.ticker,
     label: `${row.ticker} ${thetaStructLabel(row)}`,
-    meta: row.verdict === ACTIONABLE_VERDICT ? `SCORE ${Math.round(row.score)}` : row.verdict,
+    // Same hole: `Math.round(undefined)` is NaN, so a row missing its score
+    // advertised "SCORE NaN". Fall back to the verdict, which is always present.
+    meta:
+      row.verdict === ACTIONABLE_VERDICT && Number.isFinite(row.score)
+        ? `SCORE ${Math.round(row.score)}`
+        : row.verdict,
   }));
 }
 

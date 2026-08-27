@@ -9,6 +9,8 @@ import { barChartSvg, heatmapSvg, lineChartSvg } from "@/lib/og-charts";
 import { requireRouteAccess } from "@/lib/routeAccess";
 
 export const runtime = "nodejs";
+// A satori render holding the whole bitmap must not run unbounded (R-310).
+export const maxDuration = 30;
 
 const CACHE_DIR = join(process.cwd(), "..", "data", "menthorq_cache");
 

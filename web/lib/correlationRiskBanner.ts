@@ -132,6 +132,28 @@ export function correlationRiskBanner(
     };
   }
 
+  // No clusters AND nothing measurable is the case where the LEAST is known,
+  // so it must not produce the strongest all-clear. "No correlated
+  // concentration detected" over a book whose price history never arrived
+  // reads as a verdict; it is the absence of one. R-283.
+  if (insufficientData.length > 0) {
+    const unmeasured = `${insufficientData.length} position${
+      insufficientData.length === 1 ? "" : "s"
+    }`;
+    return {
+      gate: 3,
+      level: "unmeasured",
+      headline: "Gate 3: correlation unmeasured",
+      detail:
+        `No correlated clusters were found, but ${unmeasured} ` +
+        `${insufficientData.length === 1 ? "lacks" : "lack"} the price history ` +
+        "to correlate. This is not a clean-book verdict.",
+      clusterCount: 0,
+      breachedClusters: [],
+      insufficientData,
+    };
+  }
+
   return {
     gate: 3,
     level: "none",

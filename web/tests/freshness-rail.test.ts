@@ -46,13 +46,23 @@ describe("computeFreshnessRail", () => {
     expect(rail.awaitingSession).toBeNull();
   });
 
-  it("flags overdue when the slot has passed and the session never landed", () => {
-    // 18:30 ET and the panel still holds Tuesday: the 18:10 run should have
-    // written Wednesday and did not.
-    const rail = computeFreshnessRail(IV_RANK_REFRESH, "2026-08-25", WED_1830_ET);
+  // Was asserted at 18:30 ET — 20 minutes past the 18:10 slot. R-307 makes
+  // that window the writer's own: RandomizedDelaySec=120 plus the job's
+  // runtime plus the panel's hourly poll. Alarming inside it is a false page
+  // every evening. The case keeps its intent — a run that fired and delivered
+  // nothing IS overdue — measured from past the grace.
+  it("flags overdue when the run has fired, delivered nothing, and the grace is spent", () => {
+    const wellPastSlot = new Date("2026-08-26T23:30:00Z"); // 19:30 ET, slot + 80m
+    const rail = computeFreshnessRail(IV_RANK_REFRESH, "2026-08-25", wellPastSlot);
     expect(rail.overdue).toBe(true);
     expect(rail.behind).toBe(true);
-    expect(rail.msOverdue).toBe(20 * 60 * 1000);
+    expect(rail.msOverdue).toBe(80 * 60 * 1000);
+  });
+
+  it("is BEHIND but not yet alarming inside the writer's own run window", () => {
+    const rail = computeFreshnessRail(IV_RANK_REFRESH, "2026-08-25", WED_1830_ET);
+    expect(rail.behind).toBe(true);
+    expect(rail.overdue).toBe(false);
   });
 
   it("fills the track with the elapsed share of the interval between runs", () => {
@@ -65,7 +75,10 @@ describe("computeFreshnessRail", () => {
   it("clamps the track to the interval at both ends", () => {
     const atSlot = new Date("2026-08-26T22:10:00Z");
     expect(computeFreshnessRail(IV_RANK_REFRESH, "2026-08-26", atSlot).elapsedFraction).toBe(0);
-    const overdue = computeFreshnessRail(IV_RANK_REFRESH, "2026-08-25", WED_1830_ET);
+    // Past the R-307 writer grace, so this is a genuine late run.
+    const overdue = computeFreshnessRail(
+      IV_RANK_REFRESH, "2026-08-25", new Date("2026-08-26T23:30:00Z"),
+    );
     expect(overdue.elapsedFraction).toBe(1);
   });
 

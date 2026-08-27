@@ -595,7 +595,15 @@ def collapse_positions(positions: list) -> list:
                 "multiplier": leg.get('multiplier'),
                 "direction": "LONG" if leg['position'] > 0 else "SHORT",
                 "contracts": int(abs(leg['position'])),
-                "type": "Call" if leg.get('right') == 'C' else ("Put" if leg.get('right') == 'P' else "Stock"),
+                # A FUT leg is not stock: typed as "Stock" the web multiplier
+                # resolver valued it at 1x, and before that at 100x. The
+                # persisted `multiplier` above is what prices it. R-287.
+                "type": (
+                    "Call" if leg.get('right') == 'C'
+                    else "Put" if leg.get('right') == 'P'
+                    else "Future" if str(leg.get('secType') or '').upper() in {"FUT", "CONTFUT"}
+                    else "Stock"
+                ),
                 "strike": leg.get('strike'),
                 "entry_cost": leg['entry_cost'],
                 "avg_cost": leg['avgCost'],

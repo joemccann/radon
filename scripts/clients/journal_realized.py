@@ -36,6 +36,24 @@ logger = logging.getLogger(__name__)
 OPTION_MULTIPLIER = 100.0
 CLOSING_ACTIONS = {"SELL_OPTION", "BUY_TO_CLOSE"}
 
+# A BAG envelope marks itself with this right; it is a by-design exclusion.
+_BAG_RIGHT = "?"
+_OPTION_SHAPE_FIELDS = ("right", "strike", "expiry")
+# Poison scopes for a row too corrupt to name its own bucket key (R-274).
+_ANY = "*"
+_ALL_UNUSABLE = "*|*"
+
+
+
+def _is_unusable(key: str, unusable: set[str]) -> bool:
+    """Whether ``key``'s contract is covered by any recorded poison scope."""
+    if not unusable:
+        return False
+    return (
+        key in unusable
+        or _ALL_UNUSABLE in unusable
+        or f"{key.split('|')[0]}|{_ANY}" in unusable
+    )
 
 
 def realized_pnl_by_exec_id(rows: Iterable[Any]) -> dict[str, float]:
@@ -59,7 +77,7 @@ def realized_pnl_by_exec_id(rows: Iterable[Any]) -> dict[str, float]:
     realized: dict[str, float] = {}
     counted_parts: set[str] = set()
     for key, entries in buckets.items():
-        if key in unusable:
+        if _is_unusable(key, unusable):
             # Both replay guards are quantity-only, and a dropped row removes
             # its quantity and its cost together, so they cancel and the
             # replay silently prices the close against too small a basis.
@@ -224,24 +242,57 @@ def _journal_entry(row: Any) -> Optional[dict[str, Any]]:
     }
 
 
+def _is_option_shaped(payload: dict[str, Any]) -> bool:
+    """Whether the row CLAIMS to describe an option contract.
+
+    Shape, not normalisability. A row naming a strike, an expiry or a right
+    is asserting it is an option fill even when one of those fields is
+    malformed and ``_bucket_key`` therefore refuses it — that is the case
+    R-274 is about. The three by-design non-options are excluded first: an
+    explicitly declared non-option ``sec_type``, a BAG envelope (which marks
+    itself with ``right == "?"``), and a stock row, which names none of the
+    three fields at all.
+    """
+    sec_type = str(payload.get("sec_type") or payload.get("secType") or "").strip().upper()
+    if sec_type in {"OPT", "FOP"}:
+        return True
+    if sec_type in {"STK", "BAG", "FUT", "CASH", "CFD", "BOND"}:
+        return False
+    if str(payload.get("right") or "").strip() == _BAG_RIGHT:
+        return False
+    return any(
+        str(payload.get(field) or "").strip() not in {"", "None"}
+        for field in _OPTION_SHAPE_FIELDS
+    )
+
+
 def _unusable_fill_key(row: Any) -> Optional[str]:
     """Bucket key of a row that names a contract but is not a usable fill.
 
-    ``None`` for rows the replay excludes BY DESIGN and whose exclusion keeps
-    the inventory balanced: rows with no full contract key (BAG envelopes,
-    stock), and rehydrated ``CLOSED`` round trips, which carry no net quantity
-    and whose P&L is realized elsewhere (T-124). Everything else — a missing
-    or non-numeric ``contracts``/``fill_price``, an action ``_signed_qty``
-    does not recognise — is a fill this contract's history is missing, and the
-    contract must fall back to IB's own figure. R-198.
+    ``None`` for the three rows the replay excludes BY DESIGN and whose
+    exclusion keeps the inventory balanced: a BAG envelope, a stock leg, and
+    a rehydrated ``CLOSED`` round trip, which carries no net quantity and
+    whose P&L is realized elsewhere (T-124). Everything else — a missing or
+    non-numeric ``contracts``/``fill_price``, an action ``_signed_qty`` does
+    not recognise (R-198), or a contract field that does not normalise
+    (R-274) — is a fill this contract's history is missing, and the contract
+    must fall back to IB's own figure.
+
+    A row whose contract fields are corrupt cannot name its own bucket, so it
+    poisons by the widest scope it can still identify: ``TICKER|*`` when the
+    ticker survived, ``*|*`` when nothing did. Over-poisoning costs an IB
+    fallback; under-poisoning fabricates a P&L figure.
     """
     payload = _payload_from_row(row)
-    key = _bucket_key(payload)
-    if key is None:
-        return None
     if str(payload.get("action") or "").strip().upper() == "CLOSED":
         return None
-    return key
+    key = _bucket_key(payload)
+    if key is not None:
+        return key
+    if not _is_option_shaped(payload):
+        return None
+    ticker = _normalize_ticker(payload.get("ticker") or payload.get("symbol"))
+    return f"{ticker}|{_ANY}" if ticker else _ALL_UNUSABLE
 
 
 def _replay_contract(

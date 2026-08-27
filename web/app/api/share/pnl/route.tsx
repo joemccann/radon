@@ -4,6 +4,8 @@ import { OG } from "@/lib/og-theme";
 import { rateLimit, clientIp, SHARE_PNL_LIMIT, SHARE_WINDOW_MS } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
+// A satori render holding the whole bitmap must not run unbounded (R-310).
+export const maxDuration = 30;
 
 function fmtDollar(v: number): string {
   const abs = Math.abs(v);

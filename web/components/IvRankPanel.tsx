@@ -141,9 +141,18 @@ export default function IvRankPanel() {
     },
   ];
 
-  const clock = data.scan_time
-    ? new Date(data.scan_time).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
-    : null;
+  // Both-feeds-down re-serves the PREVIOUS payload with a fresh `scan_time`
+  // (fetch_ivrank._serve_cached), so the clock would tick over a reading that
+  // has not moved. `degraded_uw` means only UW answered. Neither was surfaced
+  // at all: a dead-feed render was pixel-identical to a healthy one. R-304.
+  const degraded =
+    data.status === "stale_source" || data.status === "degraded_uw" ? data.status : null;
+
+  const clock = degraded
+    ? data.as_of
+    : data.scan_time
+      ? new Date(data.scan_time).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+      : null;
 
   return (
     <>
@@ -156,6 +165,29 @@ export default function IvRankPanel() {
             <InfoTooltip text={IVRANK_TOOLTIP} />
           </div>
           <PanelRefreshError error={error} testId="ivrank-refresh-error" />
+          {degraded && (
+            <span
+              data-testid="ivrank-degraded"
+              title={
+                degraded === "stale_source"
+                  ? "Both IB and UW failed; showing the last good reading."
+                  : "UW did not answer; this reading is from IB alone."
+              }
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: "9px",
+                letterSpacing: "0.08em",
+                color: "var(--warning)",
+                border: "1px solid var(--warning)",
+                padding: "2px 5px",
+                textTransform: "uppercase",
+                lineHeight: 1,
+                borderRadius: "999px",
+              }}
+            >
+              {degraded === "stale_source" ? "STALE" : "DEGRADED"}
+            </span>
+          )}
           {clock && (
             <span style={{ fontFamily: "var(--font-mono)", fontSize: "9px", color: "var(--text-muted)" }}>
               {clock}

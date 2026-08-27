@@ -150,13 +150,15 @@ def assess_positioning(r: dict) -> dict:
     today = r.get("position_today") or 0.0
     ago = r.get("position_1m_ago") or 0.0
     z = r.get("z_score_3m") or 0.0
-    pctile = normalize_pctile(r.get("percentile_3m", 50))
+    # No `, 50` default: an absent or nulled percentile is UNKNOWN, and the
+    # z-score in the same row still carries the extremity read on its own.
+    pctile = normalize_pctile(r.get("percentile_3m"))
 
     side = "long" if today > 0.05 else "short" if today < -0.05 else "neutral"
 
     # Extreme = far from the 3M mean OR pinned to an end of the 3M range.
-    is_extreme = abs(z) >= 1.5 or pctile >= 90 or pctile <= 10
-    if abs(z) >= 2.5 or pctile >= 98 or pctile <= 2:
+    is_extreme = abs(z) >= 1.5 or (pctile is not None and (pctile >= 90 or pctile <= 10))
+    if abs(z) >= 2.5 or (pctile is not None and (pctile >= 98 or pctile <= 2)):
         severity = "HIGH"
     elif is_extreme:
         severity = "ELEVATED"
@@ -186,7 +188,9 @@ def assess_positioning(r: dict) -> dict:
         "flipped": (ago > 0 > today) or (ago < 0 < today),
         "extended": abs(today) > abs(ago) and not ((ago > 0 > today) or (ago < 0 < today)),
         # Marker position on a MAX SHORT (left) .. MAX LONG (right) track.
-        "meter_pct": max(2, min(98, pctile)),
+        # None when there is no percentile: the renderer must omit the marker
+        # rather than park it at the midpoint, which reads as "neutral".
+        "meter_pct": None if pctile is None else max(2, min(98, pctile)),
     }
 
 
@@ -734,21 +738,21 @@ def build_tweet(data: dict, ds: str, priors: Optional[list] = None) -> str:
     extreme_short_indexes = [
         clean_underlying_name(r.get("underlying", ""))
         for r in (index_table or [])
-        if normalize_pctile(r.get("percentile_3m", 50)) <= 5
+        if (_p := normalize_pctile(r.get("percentile_3m"))) is not None and _p <= 5
     ]
 
     # Extreme index LONGS — the mirror case the old code could not see.
     extreme_long_indexes = [
         clean_underlying_name(r.get("underlying", ""))
         for r in (index_table or [])
-        if normalize_pctile(r.get("percentile_3m", 50)) >= 95
+        if (_p := normalize_pctile(r.get("percentile_3m"))) is not None and _p >= 95
     ]
 
     # Find extreme commodity longs (crowded trades)
     extreme_long_commodities = []
     for r in (commodity_table or []):
-        p = normalize_pctile(r.get("percentile_3m", 50))
-        if p >= 85:
+        p = normalize_pctile(r.get("percentile_3m"))
+        if p is not None and p >= 85:
             extreme_long_commodities.append((r.get("underlying", ""), p))
 
     # ── Build narrative based on the data ──
@@ -759,12 +763,12 @@ def build_tweet(data: dict, ds: str, priors: Optional[list] = None) -> str:
     if spx_z >= 2.0:
         hook = (
             f"🚨 CTAs just hit a {abs(spx_z):.1f} standard deviation LONG on SPX futures, "
-            f"the most stretched positioning in {'a year' if spx_pctile >= 99 else '3 months'}."
+            f"the most stretched positioning in {'a year' if spx_pctile is not None and spx_pctile >= 99 else '3 months'}."
         )
     elif spx_z <= -2.0:
         hook = (
             f"🚨 CTAs just hit a {abs(spx_z):.1f} standard deviation short on SPX futures, "
-            f"the most extreme positioning in {'a year' if spx_pctile <= 1 else '3 months'}."
+            f"the most extreme positioning in {'a year' if spx_pctile is not None and spx_pctile <= 1 else '3 months'}."
         )
     elif spx_z >= 1.5:
         hook = (
@@ -945,10 +949,10 @@ def build_llm_facts(data: dict, ds: str, priors: Optional[list] = None) -> dict:
         "crowded_commodity_longs": [
             {
                 "name": clean_underlying_name(r.get("underlying", "")),
-                "percentile_3m": normalize_pctile(r.get("percentile_3m", 50)),
+                "percentile_3m": normalize_pctile(r.get("percentile_3m")),
             }
             for r in (commodity_table or [])
-            if normalize_pctile(r.get("percentile_3m", 50)) >= 85
+            if (_p := normalize_pctile(r.get("percentile_3m"))) is not None and _p >= 85
         ],
         "est_forced_selling_bn": est_selling_bn(data),
         "change_since_prior_session": derive_change_context(

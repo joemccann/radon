@@ -227,6 +227,14 @@ export default function ChatPanel({
     if (atBottomRef.current) scrollToBottom();
   }, [messages, scrollToBottom]);
 
+  // A long turn types for many seconds. Without this, unmounting the panel
+  // mid-stream left the loop running to completion, calling setMessages on a
+  // component that is gone. R-312.
+  const streamAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => {
+    return () => streamAbortRef.current?.abort();
+  }, []);
+
   const onTranscriptScroll = useCallback(() => {
     const el = messagesRef.current;
     if (!el) return;
@@ -243,6 +251,9 @@ export default function ChatPanel({
   }, [scrollToBottom]);
 
   const sendMessage = async (prompt: string) => {
+    // One controller per turn: a new send supersedes the previous stream.
+    streamAbortRef.current?.abort();
+    streamAbortRef.current = new AbortController();
     const cleaned = prompt.trim();
     if (!cleaned || isBusy) {
       return;
@@ -287,13 +298,17 @@ export default function ChatPanel({
       if (piCommand) {
         const assistantContent = await requestPiReply(piCommand);
         setStatus("streaming");
-        await streamMessage(assistantId, assistantContent, setMessages);
+        await streamMessage(assistantId, assistantContent, setMessages, {
+          signal: streamAbortRef.current?.signal,
+        });
       } else {
         const turn = await requestAssistantTurn(conversation, cleaned);
         setTurnTools(turn.toolEvents);
         setTurnModel(turn.model);
         setStatus("streaming");
-        await streamMessage(assistantId, turn.content, setMessages);
+        await streamMessage(assistantId, turn.content, setMessages, {
+          signal: streamAbortRef.current?.signal,
+        });
         // F7: never auto-execute. A destructive order proposal is surfaced as
         // a confirm card the operator must explicitly accept.
         if (turn.proposal) {

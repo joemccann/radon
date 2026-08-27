@@ -4,6 +4,13 @@ TWS_PASSWORD
 TRADING_MODE
 TURSO_DB_URL
 TURSO_AUTH_TOKEN
+# Isolated demo Turso. radon-demo-mirror.service carries an ExecStartPre that
+# runs `migrate.py --demo`, and resolve_target() sys.exit(2)s when either is
+# unset — so without them the unit fails on EVERY fire and the demo schema
+# silently stops migrating. Required here so the deploy preflight fails closed
+# rather than shipping a unit that cannot start. R-300.
+TURSO_DEMO_DB_URL
+TURSO_DEMO_AUTH_TOKEN
 # Backblaze B2 (S3 API) — portfolio_snapshots cold-archive off-box store.
 # Required for radon-portfolio-archive.service (fails closed without these).
 RADON_ARCHIVE_S3_ENDPOINT

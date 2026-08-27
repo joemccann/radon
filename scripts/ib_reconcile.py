@@ -539,6 +539,14 @@ def main():
                 label = e.get("symbol") or e.get("ticker")
                 log(f"     - {label}: expiry {e.get('expiry')}", "info")
 
+    except Exception as exc:  # noqa: BLE001 — re-raised; the row must exist first
+        # The try had only a `finally`, so any raise between the IB fetch and
+        # the health write left NO service_health row at all — and the freshness
+        # window for this service is three days, so a mid-run IB or Turso
+        # failure was silent for that long. R-275.
+        log(f"reconciliation aborted: {exc}", "error")
+        _record_health("error", {"reason": "run_failed", "error": str(exc)})
+        raise
     finally:
         client.disconnect()
         log("Disconnected from IB")

@@ -18,6 +18,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 from clients.journal_realized import (  # noqa: E402
+    _unusable_fill_key,
     apply_journal_realized_pnl,
     journal_realized_pnl_for_fills,
     overlay_journal_realized_pnl,
@@ -362,6 +363,103 @@ class TestDroppedRowCompleteness:
         overlay_journal_realized_pnl(fills, reader=_FakeDb(rows=rows))
         assert fills[0]["realizedPNL"] == 1234.0
         assert fills[0].get("realizedPNLSource") != "journal"
+
+
+class TestContractIdentityCorruption:
+    """R-274 / REL-094: a malformed OPT row must be UNUSABLE, not excluded.
+
+    ``_unusable_fill_key`` reported "excluded by design" for every row whose
+    ``_bucket_key`` came back ``None``. Three of those are genuinely by
+    design (BAG envelope, stock leg, rehydrated ``CLOSED``); a row that
+    NAMES an option but carries a malformed ``right`` / ``strike`` /
+    ``expiry`` is not — it is a fill the contract's history is missing, and
+    dropping it silently fabricates realized P&L exactly as R-198 described.
+    """
+
+    @staticmethod
+    def _corrupted(field, value):
+        """BUY 10 @ $1 + BUY 10 @ $3 (``field`` corrupted) + SELL 10 @ $5.
+
+        True average basis is $2/unit -> $3,000. Replaying only the kept
+        open prices the close against $1 -> $4,000, and neither
+        quantity-only guard fires because the dropped row removed its
+        quantity and its cost together.
+        """
+        broken = _row("o2", "BUY_OPTION", 10, 3.00, 0.0, _C60, "2026-08-11", "w2")
+        payload = json.loads(broken[0])
+        payload[field] = value
+        return [
+            _row("o1", "BUY_OPTION", 10, 1.00, 0.0, _C60, "2026-08-07", "w1"),
+            (json.dumps(payload), broken[1], broken[2]),
+            _row("c1", "SELL_OPTION", 10, 5.00, 0.0, _C60, "2026-08-20", "w3"),
+        ]
+
+    def test_empty_right_refuses_instead_of_fabricating(self, caplog):
+        with caplog.at_level("WARNING"):
+            realized = realized_pnl_by_exec_id(self._corrupted("right", ""))
+        assert realized == {}, (
+            "an option row whose `right` does not normalise is a MISSING fill, "
+            f"not a by-design exclusion; must keep IB's figure, got {realized}"
+        )
+        assert any("incomplete" in r.getMessage().lower() for r in caplog.records)
+
+    def test_null_strike_refuses_instead_of_fabricating(self):
+        assert realized_pnl_by_exec_id(self._corrupted("strike", None)) == {}
+
+    def test_unparseable_expiry_refuses_instead_of_fabricating(self):
+        assert realized_pnl_by_exec_id(self._corrupted("expiry", "JAN 2027")) == {}
+
+    def test_missing_right_field_entirely_refuses(self):
+        broken = _row("o2", "BUY_OPTION", 10, 3.00, 0.0, _C60, "2026-08-11", "w2")
+        payload = json.loads(broken[0])
+        payload.pop("right")
+        rows = [
+            _row("o1", "BUY_OPTION", 10, 1.00, 0.0, _C60, "2026-08-07", "w1"),
+            (json.dumps(payload), broken[1], broken[2]),
+            _row("c1", "SELL_OPTION", 10, 5.00, 0.0, _C60, "2026-08-20", "w3"),
+        ]
+        assert realized_pnl_by_exec_id(rows) == {}
+
+    def test_corruption_on_another_ticker_does_not_taint_slv(self):
+        broken = _row("x1", "BUY_OPTION", 10, 3.00, 0.0,
+                      {"ticker": "GLD", "strike": 300.0, "right": "C", "expiry": "20261016"},
+                      "2026-08-11", "w2")
+        payload = json.loads(broken[0])
+        payload["right"] = ""
+        rows = [
+            _row("o1", "BUY_OPTION", 10, 1.00, 0.0, _C60, "2026-08-07", "w1"),
+            (json.dumps(payload), broken[1], broken[2]),
+            _row("c1", "SELL_OPTION", 10, 5.00, 0.0, _C60, "2026-08-20", "w3"),
+        ]
+        assert realized_pnl_by_exec_id(rows) == {"c1": 4000.0}
+
+    def test_bag_envelope_is_still_excluded_by_design(self):
+        bag = json.dumps({"ticker": "SLV", "action": "BUY_OPTION", "contracts": 10,
+                          "fill_price": 2.0, "commission": 0.0, "total_cost": 2000.0,
+                          "ib_exec_id": "bag1", "right": "?", "date": "2026-08-07"})
+        assert _unusable_fill_key((bag, "2026-08-07", "w1")) is None
+
+    def test_stock_leg_is_still_excluded_by_design(self):
+        stk = json.dumps({"ticker": "AAPL", "action": "BUY", "shares": 100,
+                          "fill_price": 210.0, "commission": 0.0,
+                          "ib_exec_id": "stk1", "date": "2026-08-07"})
+        assert _unusable_fill_key((stk, "2026-08-07", "w1")) is None
+
+    def test_rehydrated_closed_row_is_still_excluded_by_design(self):
+        closed = _row("cl1", "CLOSED", 10, 3.00, 0.0, _C60, "2026-08-11", "w2")
+        assert _unusable_fill_key(closed) is None
+
+    def test_bag_and_stock_rows_do_not_block_a_healthy_replay(self):
+        """The pre-existing by-design exclusions keep their exact behaviour."""
+        rows = [
+            (json.dumps({"ticker": "SLV", "action": "BUY_OPTION", "contracts": 10,
+                         "fill_price": 2.0, "commission": 0.0, "total_cost": 2000.0,
+                         "ib_exec_id": "bag1", "right": "?", "date": "2026-08-07"}),
+             "2026-08-07", "w1"),
+            _row("o1", "BUY_OPTION", 10, 1.00, 0.0, _C60, "2026-08-07", "w2"),
+            _row("c1", "SELL_OPTION", 10, 3.00, 0.0, _C60, "2026-08-24", "w3"),
+        ]
+        assert realized_pnl_by_exec_id(rows) == {"c1": 2000.0}
 
 
 class TestBoundedJournalRead:

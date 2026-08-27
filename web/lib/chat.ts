@@ -321,24 +321,51 @@ export async function requestPiReply(command: string): Promise<string> {
   return formatPiPayload(canonicalCommand, normalized);
 }
 
-export async function streamMessage(messageId: string, fullText: string, setMessages: Dispatch<SetStateAction<Message[]>>) {
+/**
+ * Chunks a reply is allowed to type out. At 8ms a chunk this is the ceiling on
+ * how long a turn can hold the panel: a 400 KB reply is ~3,300 chunks and ~27
+ * seconds of forced typing with no way to stop it. Past the cap the remainder
+ * lands in ONE write, so the full text always renders — only the animation is
+ * bounded. R-312.
+ */
+export const MAX_STREAM_CHUNKS = 240;
+
+export async function streamMessage(
+  messageId: string,
+  fullText: string,
+  setMessages: Dispatch<SetStateAction<Message[]>>,
+  options: { signal?: AbortSignal } = {},
+) {
+  const { signal } = options;
   const chunk = 120;
   let rendered = "";
   const source = fullText.length ? fullText : "No output returned from PI command.";
   const parts = source.match(new RegExp(`.{1,${chunk}}`, "gs"));
 
-  if (!parts) {
+  const write = (content: string) =>
     setMessages((current) =>
-      current.map((message) => (message.id === messageId ? { ...message, content: source } : message)),
+      current.map((message) => (message.id === messageId ? { ...message, content } : message)),
     );
+
+  if (!parts) {
+    write(source);
     return;
   }
 
-  for (const piece of parts) {
+  // Everything past the cap is written in one go rather than dropped.
+  const animated = parts.slice(0, MAX_STREAM_CHUNKS);
+  const remainder = parts.slice(MAX_STREAM_CHUNKS).join("");
+
+  for (const piece of animated) {
+    // An unmounted panel must stop calling setMessages, not run to completion.
+    if (signal?.aborted) return;
     rendered += piece;
-    setMessages((current) => current.map((message) => (message.id === messageId ? { ...message, content: rendered } : message)));
+    write(rendered);
     await sleep(8);
   }
+
+  if (signal?.aborted) return;
+  if (remainder) write(rendered + remainder);
 }
 
 export function resolveSectionFromPath(pathname: string | null, fallback: WorkspaceSection): WorkspaceSection {

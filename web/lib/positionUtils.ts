@@ -96,7 +96,17 @@ export function resolveMarketValue(pos: PortfolioPosition): number | null {
   return single?.market_value ?? null;
 }
 
-function getLegMultiplier(leg: { type: string }): number {
+/**
+ * The contract multiplier for ONE leg.
+ *
+ * `ib_sync.fetch_positions` persists IB's own `multiplier` per leg, so prefer
+ * it: a futures leg is neither 1 nor 100 (ES is 50, MES 5, NQ 20) and the old
+ * two-way Stock/option split valued every one of them at 100x. The type
+ * default is only the fallback for rows written before the field existed.
+ */
+function getLegMultiplier(leg: { type: string; multiplier?: string | number | null }): number {
+  const persisted = Number(leg.multiplier);
+  if (Number.isFinite(persisted) && persisted > 0) return persisted;
   return leg.type === "Stock" ? 1 : 100;
 }
 
@@ -544,6 +554,7 @@ function computeStockRtMv(pos: PortfolioPosition, prices?: Record<string, PriceD
 function computeRtMv(pos: PortfolioPosition, prices?: Record<string, PriceData>): number | null {
   if (pos.structure_type === "Stock" || !prices) return null;
   let rtMv = 0;
+  let contributed = false;
   for (const leg of pos.legs) {
     // A zero-contract leg is worth nothing whatever it prices at; letting an
     // unresolvable one null the whole walk drops the position to its stale
@@ -561,8 +572,13 @@ function computeRtMv(pos: PortfolioPosition, prices?: Record<string, PriceData>)
     if (current == null) return null;
     const sign = leg.direction === "LONG" ? 1 : -1;
     rtMv += sign * current * leg.contracts * getLegMultiplier(leg);
+    contributed = true;
   }
-  return rtMv;
+  // No leg contributed, so 0 is the absence of a market value, not one. The
+  // deleted mobile helper guarded this; without it the caller's
+  // `?? resolveMarketValue` never fires and the position renders $0.00 with a
+  // full-loss P&L against its own entry cost.
+  return contributed ? rtMv : null;
 }
 
 /**

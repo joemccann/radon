@@ -203,3 +203,46 @@ class TestOperatorAllowlistInterlock:
     def test_env_example_pins_interlock_on(self, root):
         env_vars = parse_env_vars(read_env_example(root))
         assert env_vars.get("RADON_REQUIRE_OPERATOR_ALLOWLIST") == "1"
+
+
+class TestDemoMigrationEnvContract:
+    """R-300 (REL-102b): the demo migration cannot start without its keys.
+
+    `radon-demo-mirror.service` gained an `ExecStartPre` that runs
+    `scripts/db/migrate.py --demo`, and `resolve_target()` `sys.exit(2)`s when
+    `TURSO_DEMO_DB_URL` or `TURSO_DEMO_AUTH_TOKEN` is unset. Neither key was in
+    the deploy contract, so the preflight shipped a unit that fails on every
+    fire — and the demo schema silently stops migrating.
+    """
+
+    KEYS = ("TURSO_DEMO_DB_URL", "TURSO_DEMO_AUTH_TOKEN")
+
+    def _contract_keys(self, root):
+        contract = (root / "config" / "required-env.txt").read_text()
+        return [
+            line.strip()
+            for line in contract.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+
+    def test_the_preflight_gates_on_both_demo_keys(self, root):
+        keys = self._contract_keys(root)
+        for key in self.KEYS:
+            assert key in keys, f"{key} is not gated by the deploy preflight"
+
+    def test_env_example_documents_both_demo_keys(self, root):
+        env_vars = parse_env_vars(read_env_example(root))
+        for key in self.KEYS:
+            assert key in env_vars, f"{key} is undocumented in .env.example"
+
+    def test_the_unit_and_the_contract_name_the_same_keys(self, root):
+        """The ExecStartPre's own requirement is what the contract must gate."""
+        unit = (root / "services" / "radon-demo-mirror.service").read_text()
+        assert "migrate.py --demo" in unit, (
+            "the demo-mirror unit no longer runs the migration; re-scope this test"
+        )
+        migrate = (root.parent / "scripts" / "db" / "migrate.py").read_text()
+        demo_branch = migrate[migrate.index("def resolve_target") :]
+        for key in self.KEYS:
+            assert key in demo_branch, f"{key} is not what migrate.py --demo reads"
+            assert key in self._contract_keys(root)
