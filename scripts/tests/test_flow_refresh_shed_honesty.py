@@ -24,6 +24,7 @@ a normal weekend skip, on every hourly fire.
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 import textwrap
@@ -55,6 +56,9 @@ def _stage_broken_calendar_python(bin_dir: Path) -> Path:
         textwrap.dedent(
             """\
             #!/bin/bash
+            if [ -n "${RADON_FLOW_HEALTH_STATE:-}" ]; then
+                exec /usr/bin/env python3 "$@"
+            fi
             if [ "$1" = "-" ]; then
                 cat >/dev/null
                 echo "ModuleNotFoundError: utils.market_calendar" >&2
@@ -68,6 +72,48 @@ def _stage_broken_calendar_python(bin_dir: Path) -> Path:
         ),
     )
     return py
+
+
+HEALTH_CALLS = "data/health_calls.jsonl"
+
+
+def _stage_health_recorder(repo_dir: Path) -> Path:
+    """Stand in for `db.hrana_http` so the row the wrapper writes is observable.
+
+    `_flow_health` sends its heredoc to `$PYTHON_BIN -` with cwd at the repo
+    root and `scripts` on sys.path, so a module staged here is what the import
+    resolves to. Never touches Turso.
+    """
+    db_dir = repo_dir / "scripts" / "db"
+    db_dir.mkdir(parents=True, exist_ok=True)
+    (db_dir / "__init__.py").write_text("", encoding="utf-8")
+    (db_dir / "hrana_http.py").write_text(
+        textwrap.dedent(
+            f"""\
+            import json
+            from pathlib import Path
+
+
+            def write_service_health_http(service, state, *, error=None, **_kwargs):
+                path = Path({HEALTH_CALLS!r})
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with path.open("a", encoding="utf-8") as handle:
+                    print(json.dumps([service, state, error]), file=handle)
+            """
+        ),
+        encoding="utf-8",
+    )
+    return repo_dir / HEALTH_CALLS
+
+
+def _health_writes(calls_path: Path) -> list[tuple[str, str]]:
+    if not calls_path.exists():
+        return []
+    return [
+        (json.loads(line)[0], json.loads(line)[1])
+        for line in calls_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
 
 class TestMarketStateIsDeterminable:
@@ -189,9 +235,70 @@ class TestPermanentShedIsVisible:
             "indistinguishable from a clean run in systemctl is-failed"
         )
 
-    def test_a_shed_writes_a_service_health_row(self):
-        source = WRAPPER.read_text(encoding="utf-8")
-        assert "service_health" in source or "record_service_health" in source, (
-            "nothing on the shed path writes a health row, so the watchdog "
-            "has no error row either"
+    def test_a_shed_writes_a_service_health_row(self, tmp_path):
+        """A grep for "service_health" is satisfied by `_flow_health`'s BODY
+        even when no caller ever reaches it. Assert the WRITE."""
+        repo = _repo(tmp_path)
+        calls = _stage_health_recorder(repo)
+        python_bin = _stage_python(tmp_path / "bin", trading_day=True)
+        port = _free_port()
+        stub = _FastApiStub(
+            port,
+            fail_paths=frozenset({SCAN_PATH, "/flow-analysis", "/discover"}),
+            fail_status=502,
+            fail_body=b'{"detail": "Subprocess capacity exhausted (3 active, lane cap 3)"}',
         )
+        stub.start()
+        try:
+            result = _run(repo, python_bin, port, retries=0)
+        finally:
+            stub.stop()
+
+        assert result.returncode == 0, result.stderr or result.stdout
+        assert _health_writes(calls) == [("flow-refresh", "warn")], (
+            "a permanent shed left the watchdog with no row: "
+            f"{_health_writes(calls)}"
+        )
+
+
+class TestTheProbeOutageWritesItsRow:
+    """R-221 / R-265: the market-state-probe outage is the silence the row
+    exists to close, and it is the one caller placed BEFORE the definition."""
+
+    def test_a_failed_probe_writes_exactly_one_error_row(self, tmp_path):
+        repo = _repo(tmp_path)
+        calls = _stage_health_recorder(repo)
+        python_bin = _stage_broken_calendar_python(tmp_path / "bin")
+        result = _run(repo, python_bin, _free_port())
+
+        assert result.returncode != 0
+        assert _health_writes(calls) == [("flow-refresh", "error")], (
+            "the market-state-probe outage wrote no service_health row: "
+            f"{_health_writes(calls)}"
+        )
+
+    def test_the_probe_outage_does_not_abort_on_an_undefined_function(self, tmp_path):
+        repo = _repo(tmp_path)
+        _stage_health_recorder(repo)
+        python_bin = _stage_broken_calendar_python(tmp_path / "bin")
+        result = _run(repo, python_bin, _free_port())
+
+        assert "command not found" not in (result.stdout + result.stderr), (
+            "bash resolves functions in source order; the health call runs "
+            "before `_flow_health` is defined"
+        )
+
+    def test_a_clean_run_writes_an_ok_row(self, tmp_path):
+        repo = _repo(tmp_path)
+        calls = _stage_health_recorder(repo)
+        python_bin = _stage_python(tmp_path / "bin", trading_day=True)
+        port = _free_port()
+        stub = _FastApiStub(port)
+        stub.start()
+        try:
+            result = _run(repo, python_bin, port)
+        finally:
+            stub.stop()
+
+        assert result.returncode == 0, result.stderr or result.stdout
+        assert _health_writes(calls) == [("flow-refresh", "ok")]

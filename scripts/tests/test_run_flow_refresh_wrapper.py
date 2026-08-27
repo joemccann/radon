@@ -56,6 +56,11 @@ def _stage_python(bin_dir: Path, *, trading_day: bool = True) -> Path:
         textwrap.dedent(
             f"""\
             #!/bin/bash
+            # The health heredoc is the only other `python -` the wrapper runs;
+            # it must reach a real interpreter so the row is observable.
+            if [ -n "${{RADON_FLOW_HEALTH_STATE:-}}" ]; then
+                exec /usr/bin/env python3 "$@"
+            fi
             if [ "$1" = "-" ]; then
                 cat >/dev/null
                 echo "{'yes' if trading_day else 'no'}"
