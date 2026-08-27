@@ -145,7 +145,14 @@ def _repo(tmp_path: Path, spec: dict, marker: Path) -> tuple[Path, Path]:
     return repo, py
 
 
-def _run(repo: Path, py: Path, spec: dict, port: int, timeout_secs: str | None = None):
+def _run(
+    repo: Path,
+    py: Path,
+    spec: dict,
+    port: int,
+    timeout_secs: str | None = None,
+    extra_env: dict | None = None,
+):
     env = {
         **os.environ,
         "RADON_PYTHON_BIN": str(py),
@@ -153,6 +160,8 @@ def _run(repo: Path, py: Path, spec: dict, port: int, timeout_secs: str | None =
     }
     if timeout_secs is not None:
         env["RADON_SCAN_FASTAPI_TIMEOUT_SECS"] = timeout_secs
+    if extra_env:
+        env.update(extra_env)
     return subprocess.run(
         ["bash", str(repo / "scripts" / spec["wrapper"])],
         cwd=repo,
@@ -170,17 +179,32 @@ def test_capacity_502_does_not_launch_a_direct_duplicate(tmp_path, name):
     marker = tmp_path / "direct-ran"
     repo, py = _repo(tmp_path, spec, marker)
     port = _free_port()
+    # Leap waits out capacity shed (2026-08-27); keep the wait tiny here so
+    # the no-duplicate assertion stays fast. Garch still fails on first 502.
+    extra = (
+        {
+            "RADON_LEAP_SHED_WAIT_SECS": "2",
+            "RADON_LEAP_REFRESH_RETRY_DELAY_SECS": "1",
+        }
+        if name == "leap"
+        else None
+    )
 
     with _Stub(port, 502) as stub:
-        result = _run(repo, py, spec, port)
+        result = _run(repo, py, spec, port, extra_env=extra)
 
-    assert stub.calls == [spec["path"]], stub.calls
     assert not marker.exists(), (
         f"{spec['scanner']} ran directly after a 502 — outside "
         "MAX_CONCURRENT_SUBPROCESSES and outside the FastAPI cooldown"
     )
     assert result.returncode != 0, result.stdout + result.stderr
-    assert "indeterminate" in (result.stdout + result.stderr).lower()
+    combined = (result.stdout + result.stderr).lower()
+    if name == "leap":
+        assert len(stub.calls) >= 2, stub.calls
+        assert "capacity" in combined or "shed" in combined
+    else:
+        assert stub.calls == [spec["path"]], stub.calls
+        assert "indeterminate" in combined
 
 
 @pytest.mark.parametrize("name", sorted(WRAPPERS))

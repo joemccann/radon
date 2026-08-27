@@ -409,6 +409,49 @@ largecaps scan.** Peak: 2026-08-20 14:15Z, page `99554c7a…`. Recurred
 
 ---
 
+## leap-capacity-502
+
+**`radon-leap.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+on an instant FastAPI 502 capacity shed at the 10:00 ET timer.** Peak:
+2026-08-27 14:00:20Z, page `4e9ebc66…`.
+
+- **Mechanism:** daily timer POSTs `/leap/scan?preset=largecaps`. At the
+  top of the hour peer scanners fill the shared `run_script` lanes
+  (hard cap 4 / lane cap 3). The POST returned instant HTTP 502 with
+  journal `Subprocess capacity exhausted for leap_scanner_uw.py
+  (3 active, lane cap 3, hard cap 4)`. `/health/lite` stayed 200 /
+  authenticated. The wrapper (R-144) treated any non-exit-7 response as
+  indeterminate, refused the direct fallback, and exited 1 once.
+  `Type=oneshot` has no `Restart=`, so `NRestarts=0`. Next timer ~24h;
+  `leap.json` stayed on the prior day. Same window's GARCH POST at
+  14:02:02Z completed OK — the lane cleared within ~2 minutes.
+- **Detection:** unit journal
+  `LEAP FastAPI outcome indeterminate (curl=0, http=502)` in the same
+  second as the POST; radon-api
+  `Subprocess capacity exhausted for leap_scanner_uw.py`; ExecMainStart
+  equals InactiveEnter (instant fail); `/health/lite` 200.
+- **Discriminating check:** instant 502 with the capacity-exhausted
+  body (this case). A long run that ends
+  `Script leap_scanner_uw.py failed (code 1)` after `SCAN COMPLETE` is
+  `leap-partial-ticker-exit-pages-p1`. `Result=signal` is deploy
+  stop-clean. If `/health/lite` is down too → API/IB, stand down.
+- **Remediation (code):** wait/retry HTTP 502/503 only when the body
+  matches `subprocess capacity exhausted` (R-221), charged against
+  `RADON_LEAP_SHED_WAIT_SECS` default 240 (fits under
+  `TimeoutStartSec=3900` with the 3610s scan curl). Keep the
+  no-duplicate rule for every other non-exit-7 outcome. Persistent shed
+  after the wait still exits 1 (daily; next slot is tomorrow). After
+  deploy, `reset-failed` + start (unit is on `RERUNNABLE_ONESHOT_UNITS`)
+  or wait for the next timer.
+- **Regression:**
+  `test_leap_capacity_shed_retry.py::test_capacity_502_then_ok_retries_without_direct_fallback`,
+  `test_script_failed_502_does_not_retry_as_shed`,
+  `test_persistent_capacity_shed_no_duplicate_still_fails`.
+- **Code:** `scripts/run_leap_refresh.sh`
+  (`RADON_LEAP_SHED_WAIT_SECS`, `CAPACITY_SHED_MARKER`).
+
+---
+
 ## knowledge-ingest-sqlite-busy
 
 **`radon-knowledge.service` oneshot exits `Result=exit-code` on a single
