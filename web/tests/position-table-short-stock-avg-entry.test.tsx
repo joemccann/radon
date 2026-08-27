@@ -165,6 +165,25 @@ describe("getAvgEntry — pure", () => {
   it("SHORT single-leg option returns a NEGATIVE per-contract entry (premium is a credit)", () => {
     expect(getAvgEntry(META_SHORT_CALL)).toBeCloseTo(-1.74, 2);
   });
+
+  it("same-day long call avg entry is fill dollars / (qty × 100), not IB's lagged VWAP", () => {
+    // 25 META 575C @ $5.55 fill → $13,875 debit. IB avgCost still $4.69/share
+    // would display $4.69 if we used it; blotter net price is $5.55.
+    const metaLong: PortfolioPosition = {
+      ...AMD_LONG_PUT,
+      ticker: "META",
+      structure: "Long Call $575.0",
+      structure_type: "Long Call",
+      contracts: 25,
+      entry_cost: 13875,
+      max_risk: 13875,
+      legs: [
+        { direction: "LONG", contracts: 25, type: "Call", strike: 575,
+          entry_cost: 13875, avg_cost: 555, market_price: 5.78, market_value: 14450 },
+      ],
+    };
+    expect(getAvgEntry(metaLong)).toBeCloseTo(5.55, 2);
+  });
 });
 
 /* ─── rendered cell ────────────────────────────────────── */
@@ -214,5 +233,29 @@ describe("PositionTable — Avg Entry never negative for SHORT stock", () => {
       />,
     );
     expect(avgEntryCellText("META")).toBe("$-1.74");
+  });
+
+  it("renders $5.55 for a 25-lot long call whose entry is the $5.55 fill", () => {
+    const metaLong: PortfolioPosition = {
+      ...AMD_LONG_PUT,
+      ticker: "META",
+      structure: "Long Call $575.0",
+      structure_type: "Long Call",
+      contracts: 25,
+      entry_cost: 13875,
+      max_risk: 13875,
+      legs: [
+        { direction: "LONG", contracts: 25, type: "Call", strike: 575,
+          entry_cost: 13875, avg_cost: 555, market_price: 5.78, market_value: 14450 },
+      ],
+    };
+    render(
+      <PositionTable
+        positions={[metaLong]}
+        prices={{}}
+        columnVisibility={makeVisibility({ avg_entry: true })}
+      />,
+    );
+    expect(avgEntryCellText("META")).toBe("$5.55");
   });
 });
