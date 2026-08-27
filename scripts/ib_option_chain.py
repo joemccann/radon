@@ -10,12 +10,31 @@ import argparse
 import asyncio
 import json
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scripts.clients.ib_client import IBClient
 from scripts.utils.ib_preflight import IB_REQUEST_TIMEOUT_S
+
+# Transient-handshake resilience. The Gateway serialises API handshakes, so a
+# connect issued while other subprocesses are claiming their own sockets can
+# time out even though the Gateway is authenticated and healthy — ib_insync
+# surfaces that as `API connection failed: TimeoutError()`, which the
+# auto-allocator does not treat as a collision and therefore does not rotate.
+# Production 2026-08-27 14:22:10: /options/expirations?symbol=NOW 504'd on its
+# single attempt while ten browser-driven POST /portfolio/sync calls in 90s
+# were each spawning an ib_sync.py that claimed a socket; the same request
+# served in 1.1s two minutes later. ib_sync.py is 51 of the 53 connect
+# failures in that 24h window — the real fix is shedding the multi-tab sync
+# fan-in, and this retry only stops the chain losing that race.
+# Sibling `ib_chain.py` already retries this class; the budget below leaves
+# room for the two bounded IB requests inside
+# _EQUITY_OPTIONS_CHAIN_TIMEOUT_S (45s).
+CONNECT_ATTEMPTS = 3
+CONNECT_TIMEOUT_S = 4
+CONNECT_BACKOFF_S = 1.0
 
 
 def _normalize_expiry(expiry) -> str:
@@ -66,6 +85,24 @@ def _preferred_multiplier(chains) -> str:
     return str(getattr(chains[0], "multiplier", ""))
 
 
+def _connect_with_retry(client, port: int, client_id) -> None:
+    """Connect, retrying a transient handshake timeout within a bounded budget.
+
+    Raises the last exception when every attempt fails, so the caller's error
+    envelope still names the timeout and the endpoint still answers 504.
+    """
+    for attempt in range(1, CONNECT_ATTEMPTS + 1):
+        try:
+            client.connect(
+                port=port, client_id=client_id, timeout=CONNECT_TIMEOUT_S
+            )
+            return
+        except Exception:
+            if attempt == CONNECT_ATTEMPTS:
+                raise
+            time.sleep(CONNECT_BACKOFF_S)
+
+
 def _set_ib_request_timeout(ib, timeout_s: float = IB_REQUEST_TIMEOUT_S) -> None:
     """Bound sync ib_insync requests; default RequestTimeout can block forever."""
     setattr(ib, "RequestTimeout", timeout_s)
@@ -113,7 +150,7 @@ def main():
     client = IBClient()
 
     try:
-        client.connect(port=args.port, client_id=client_id)
+        _connect_with_retry(client, args.port, client_id)
 
         # Qualify the underlying to get a valid conId (required by reqSecDefOptParams).
         # Index symbols (VIX, SPX, NDX, RUT, XSP, VVIX) MUST be qualified as
