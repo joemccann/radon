@@ -485,3 +485,39 @@ how this loop improves as the codebase grows.
   clone would have thrown away all of that context. Say explicitly in the
   ORIGINAL prompt that the lead owns the full gate and the agent must never run
   one — that is what caused the stall.
+
+- **2026-08-27 (audit): the two loops keep separate CLONES but SHARE `/tmp` —
+  namespace every scratch file.** Mid-run, `/tmp/delta_section.md` (this
+  audit's drafted findings) was silently OVERWRITTEN by the reliability loop's
+  own draft: REL-numbered content, same generic filename, different clone. It
+  surfaced only because an integrity check reported the five P0 findings as
+  "missing" from a file that had been 71 KB a moment earlier. `/tmp/gates/`
+  had the same problem — it already held files from the other loop that looked
+  like yesterday's run. Nothing in the repo was touched and no finding was
+  lost, but the P0 block had to be rewritten from the agent reports. Rails:
+  put ALL scratch under `/tmp/tw-<date>/` (and the reliability loop under
+  `/tmp/rel-<date>/`), never a bare `/tmp/<generic>.md`; and when an integrity
+  check says content vanished, re-read the file before assuming your own bug.
+- **2026-08-27 (audit): BSD grep here does not support `\|` alternation, and it
+  fails SILENTLY.** `grep -n 'T-190\|T-194' file` returned zero hits on a file
+  that contained both, which briefly read as confirmation that the content was
+  gone. The existing lesson covers `--glob` and piped mangling; add this. Use
+  `grep -E`, or parse in a `python3.13` heredoc — which is what settled it.
+- **2026-08-27 (audit): a concentrated red is not load flake — check the FILE
+  distribution before invoking the load rule.** The pytest gate came back
+  `7 failed / 8153 passed` under load average 21, which fits the 2026-08-23
+  load-flake profile exactly. It was not: all 7 were in ONE file and reproduced
+  7/7 in isolation in 2.26 s. The tell is distribution — the 2026-08-23 flake
+  was 11 timeouts across NINE unrelated files. Scattered + timeout-shaped means
+  load; concentrated + AttributeError-shaped means real. It was real (T-237,
+  `main` red), and treating it as flake would have shipped an audit that said
+  the tree was green.
+- **2026-08-27 (audit): when a gate is red, ask whether CI agrees BEFORE
+  attributing it to your host.** Two commands settled T-237 end to end:
+  `gh run list --json headSha,conclusion` filtered to the HEAD sha (failure),
+  then `gh run view <id> --json jobs` for which job (`pytest (scripts-npsz)`)
+  and what the gate did about it (`Deploy to VPS` skipped). That last part is
+  the finding's real weight — the gate HELD, so the story is not "CI missed it"
+  but "main has been red and undeployed since". A darwin-only red would have
+  shown CI green; this showed CI red, which is a different and more urgent
+  report.
