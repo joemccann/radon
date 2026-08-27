@@ -14,7 +14,11 @@ def trusted_client(monkeypatch, tmp_path):
     monkeypatch.setattr(server, "is_trusted_local_request", lambda request: True)
     monkeypatch.setattr(server, "test_mode", False)
     monkeypatch.setattr(trading_halt, "HALT_FILE", tmp_path / "halt.json")
-    return TestClient(server.app)
+    server._order_rate_timestamps.clear()
+    try:
+        yield TestClient(server.app)
+    finally:
+        server._order_rate_timestamps.clear()
 
 
 def _replacement():
