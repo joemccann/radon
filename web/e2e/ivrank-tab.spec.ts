@@ -162,6 +162,34 @@ test.describe("/regime/ivrank — SPY 1M IV rank tab", () => {
     await expect(page.locator('[data-testid="ivrank-uw-check"]')).toContainText("UW CROSS-CHECK 10.6");
   });
 
+  test("the freshness rail counts down to the next scheduled sample", async ({ page }) => {
+    await setupMocks(page);
+    await page.goto("/regime/ivrank");
+
+    const rail = page.locator('[data-testid="ivrank-freshness-rail"]');
+    await rail.waitFor({ timeout: 15_000 });
+
+    // The date the panel holds, and the countdown to the run that replaces it.
+    await expect(rail).toContainText(LAST.date);
+    await expect(rail).toContainText("Next sample");
+
+    // The clock starts in an effect, so the countdown resolves after hydration
+    // rather than shipping a server-rendered time that would mismatch.
+    const countdown = page.locator('[data-testid="ivrank-freshness-rail-countdown"]');
+    await expect(countdown).not.toHaveText("--", { timeout: 15_000 });
+    await expect(countdown).toHaveText(/^(\d+h \d{2}m|\d+m \d{2}s|\d+s|Due)$/);
+
+    // Whatever the state, it is one of the four the rail models.
+    await expect(rail).toHaveAttribute("data-state", /^(current|behind|overdue)$/);
+
+    // The track is drawn, and its fill never exceeds the interval.
+    const fillWidth = await rail.locator(".freshness-rail-track-fill").evaluate(
+      (node) => (node as HTMLElement).style.width,
+    );
+    expect(Number.parseFloat(fillWidth)).toBeGreaterThanOrEqual(0);
+    expect(Number.parseFloat(fillWidth)).toBeLessThanOrEqual(100);
+  });
+
   test("renders the chart with real paths and a visible brush", async ({ page }) => {
     await setupMocks(page);
     await page.goto("/regime/ivrank");

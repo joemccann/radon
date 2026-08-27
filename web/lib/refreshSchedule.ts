@@ -1,5 +1,5 @@
 /**
- * Frontend source of truth for the Equibles indicator refresh timers.
+ * Frontend source of truth for indicator refresh timers.
  *
  * Each constant mirrors the OnCalendar line of its systemd timer in
  * cloud/services/ — tests/refresh-schedule.test.ts pins them to the unit
@@ -24,6 +24,13 @@ export const SHORT_CROWDING_REFRESH: UtcSchedule = {
   cadence: "daily",
   hourUtc: 9,
   minuteUtc: 30,
+};
+
+/** cloud/services/radon-ivrank.timer */
+export const IV_RANK_REFRESH: UtcSchedule = {
+  cadence: "daily",
+  hourUtc: 22,
+  minuteUtc: 10,
 };
 
 /** cloud/services/radon-equibles-cot.timer */
