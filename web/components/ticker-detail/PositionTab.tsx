@@ -128,7 +128,7 @@ function LegsDisclosure({
                         type="button"
                         className={`pos-leg-book${focusedBookKey === key ? " active" : ""}`}
                         aria-pressed={focusedBookKey === key}
-                        title={focusedBookKey === key ? "Showing this leg's book — click to return" : "Show this leg's order book"}
+                        title={focusedBookKey === key ? "Showing this leg's book, click to return" : "Show this leg's order book"}
                         onClick={() => ctx.setFocusedBookKey(focusedBookKey === key ? null : key)}
                         data-testid={`pos-leg-book-${i}`}
                       >

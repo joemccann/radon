@@ -247,7 +247,7 @@ export function IndexOptionOrderForm({ ticker, portfolio }: IndexOptionOrderForm
                 onChange={(e) => setSelectedConId(parseInt(e.target.value, 10))}
                 className="futures-form-select"
               >
-                <option value="">— pick a strike —</option>
+                <option value="">Pick a strike</option>
                 {expiryContracts.map((c) => (
                   <option key={c.conId} value={c.conId}>
                     ${c.strike} {c.right}

@@ -66,7 +66,7 @@ export default function RegimeRail({ activeTab, onSelect, statuses }: RegimeRail
                   key={tab}
                   type="button"
                   data-tab={tab}
-                  aria-label={`${REGIME_TAB_LABEL[tab]} — ${group.label}`}
+                  aria-label={`${REGIME_TAB_LABEL[tab]}: ${group.label}`}
                   aria-current={active ? "page" : undefined}
                   className={`regime-rail__item${active ? " active" : ""}`}
                   onClick={() => onSelect(tab)}

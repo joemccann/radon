@@ -112,7 +112,7 @@ export function computeLinearRisk(input: LinearRiskInput): OrderRisk {
       maxLossUnbounded: true,
       maxGainUnbounded: false,
       hasUndefinedRisk: true,
-      undefinedRiskReason: "Uncovered short — linear instrument has no price ceiling",
+      undefinedRiskReason: "Uncovered short: linear instrument has no price ceiling",
     };
   }
 

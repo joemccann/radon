@@ -208,7 +208,7 @@ export function FuturesOrderForm({ ticker, portfolio, priceData }: FuturesOrderF
           >
             {data.contracts.map((c) => (
               <option key={c.conId} value={c.conId}>
-                {c.localSymbol} — {formatExpiry(c.lastTradeDateOrContractMonth)}
+                {c.localSymbol}, {formatExpiry(c.lastTradeDateOrContractMonth)}
               </option>
             ))}
           </select>

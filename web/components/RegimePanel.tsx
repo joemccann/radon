@@ -115,8 +115,8 @@ function fmtSigned(v: number | null | undefined, decimals = 2): string {
 /* ─── Component Bar ──────────────────────────────────── */
 
 const COMPONENT_TOOLTIPS: Record<string, string> = {
-  VIX: "CBOE Volatility Index — 30-day implied vol of SPX. Score rises as VIX exceeds 20 (elevated) and 30 (high). Extreme spikes indicate tail-risk hedging by institutional players.",
-  VVIX: "Vol-of-VIX — measures expected volatility of VIX itself. Score rises with absolute level and VVIX/VIX ratio >5, signalling second-order stress and unstable vol regimes.",
+  VIX: "CBOE Volatility Index: 30-day implied vol of SPX. Score rises as VIX exceeds 20 (elevated) and 30 (high). Extreme spikes indicate tail-risk hedging by institutional players.",
+  VVIX: "Vol-of-VIX measures expected volatility of VIX itself. Score rises with absolute level and VVIX/VIX ratio >5, signalling second-order stress and unstable vol regimes.",
   CORRELATION: "Cboe 1-Month Implied Correlation Index (COR1M). High COR1M (>60) means the market expects the largest S&P 500 stocks to move together, reducing diversification and signalling herding risk.",
   MOMENTUM: "SPX distance below 100-day MA combined with VIX 5-day rate of change. Captures both price trend stress and velocity of volatility acceleration.",
 };
@@ -162,7 +162,7 @@ export default function RegimePanel({
   dataEndpoint,
   shareEndpoint,
   shareContentEndpoint,
-  shareModalTitle = "REGIME REPORT — SHARE TO X",
+  shareModalTitle = "REGIME REPORT: SHARE TO X",
   shareButtonTitle = "Share Regime report to X",
   shareContentTitle = "Regime Share Preview",
   marketState,
@@ -680,7 +680,7 @@ export default function RegimePanel({
                 borderLeft: "2px solid var(--warning, #F5A623)",
               }}
             >
-              MARKET CLOSED — END OF DAY VALUES
+              MARKET CLOSED: END OF DAY VALUES
             </div>
           )}
 

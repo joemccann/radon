@@ -8,38 +8,38 @@ export const SECTION_TOOLTIPS: Record<string, string> = {
 
   "Flow Supports Position":
     "Positions where dark pool flow direction matches your trade thesis. " +
-    "Derived from Unusual Whales dark pool prints — accumulation flow confirms long bias, " +
+    "Derived from Unusual Whales dark pool prints: accumulation flow confirms long bias, " +
     "distribution confirms short bias. Supporting flow increases conviction to hold or add.",
 
   "Flow Against Position":
     "Positions where institutional dark pool activity contradicts your trade direction. " +
     "Distribution flow against a long position may signal smart money exiting. " +
-    "Contradicting flow is a risk signal — consider reducing size or tightening stops.",
+    "Contradicting flow is a risk signal, consider reducing size or tightening stops.",
 
   "Neutral / Low Signal":
-    "Positions with no clear institutional flow signal — dark pool activity is balanced " +
+    "Positions with no clear institutional flow signal: dark pool activity is balanced " +
     "or volume is too low to draw conclusions. These positions rely on thesis alone " +
     "without flow confirmation. Monitor for emerging signals.",
 
   "Watch Closely":
-    "Positions flagged for elevated risk — flow may be shifting, approaching key levels, " +
+    "Positions flagged for elevated risk: flow may be shifting, approaching key levels, " +
     "or showing early signs of institutional repositioning. These warrant daily review " +
     "and potential action if conditions deteriorate.",
 
   /* ── Portfolio ───────────────────────────────────────── */
 
   "Defined Risk Positions":
-    "Options positions with capped maximum loss — vertical spreads, long options, or " +
+    "Options positions with capped maximum loss: vertical spreads, long options, or " +
     "debit structures where loss is limited to premium paid or spread width minus credit. " +
     "All positions must pass Gate 1 (convexity: gain >= 2x loss). P&L uses IB mark-to-market.",
 
   "Undefined Risk Positions":
-    "Positions with theoretically unlimited or very large potential loss — naked shorts, " +
+    "Positions with theoretically unlimited or very large potential loss: naked shorts, " +
     "short strangles, or ratio spreads. These require heightened monitoring and strict " +
     "sizing discipline. Max 2.5% bankroll per position via Kelly criterion.",
 
   "Equity Positions":
-    "Stock and ETF positions — long or short equity without options overlay. " +
+    "Stock and ETF positions, long or short equity without options overlay. " +
     "Daily P&L = (last - prior close) x quantity. Total P&L = market value minus entry cost. " +
     "These carry directional equity risk without the convexity properties of options.",
 
@@ -71,7 +71,7 @@ export const SECTION_TOOLTIPS: Record<string, string> = {
   /* ── Orders ──────────────────────────────────────────── */
 
   "Open Orders":
-    "Pending orders in IB Gateway — limit orders, stop-limits, and pending manual entries. " +
+    "Pending orders in IB Gateway: limit orders, stop-limits, and pending manual entries. " +
     "Last Price shows the current market mid for the contract. Orders can be modified " +
     "(price/quantity) or cancelled directly. Status reflects IB order state " +
     "(PreSubmitted, Submitted, Filled, Cancelled).",
@@ -134,18 +134,18 @@ export const SECTION_TOOLTIPS: Record<string, string> = {
   "MAIN INDICES":
     "CTA positioning in major equity indices (S&P 500, Nasdaq 100, etc). " +
     "Position Today vs Yesterday shows daily shift. Percentiles rank current positioning " +
-    "over 1M/3M/1Y windows. Z-Score measures standard deviations from 3-month mean — " +
+    "over 1M/3M/1Y windows. Z-Score measures standard deviations from 3-month mean: " +
     "below -1.5 signals extreme underweight (potential forced selling).",
 
   "INDEX FUTURES":
     "CTA positioning in broader index futures. Same methodology as Main Indices " +
     "but covers additional contracts. Low percentiles + negative z-scores indicate " +
-    "CTAs are underweight — potential for forced selling if vol rises further.",
+    "CTAs are underweight, potential for forced selling if vol rises further.",
 
   "COMMODITIES":
     "CTA positioning in commodity futures (crude oil, gold, etc). " +
     "Commodity CTAs adjust position size based on trailing realized vol. " +
-    "Extreme z-scores signal crowded trades — reversals can be sharp.",
+    "Extreme z-scores signal crowded trades, reversals can be sharp.",
 
   "CURRENCIES":
     "CTA positioning in FX futures. Currency trend followers tend to build " +

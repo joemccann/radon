@@ -38,7 +38,7 @@ export default function HostMetricsStrip({
 
   const { latest, stale } = summary;
   const sampledAgo = formatRelativeTime(latest.taken_at);
-  const staleSub = `sampler silent — last ${sampledAgo}`;
+  const staleSub = `sampler silent, last ${sampledAgo}`;
 
   const cpu = latest.cpu_pct;
   const memAvail = latest.mem_avail_mb;

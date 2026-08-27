@@ -192,7 +192,7 @@ describe("RegimeRail — grouped rail rendering + navigation", () => {
 
   it("items carry a group-scoped aria-label so strip buttons keep unique names", () => {
     const { container } = renderRail();
-    expect(container.querySelector('[data-tab="vcg"]')!.getAttribute("aria-label")).toBe("VCG — Composite");
+    expect(container.querySelector('[data-tab="vcg"]')!.getAttribute("aria-label")).toBe("VCG: Composite");
   });
 });
 

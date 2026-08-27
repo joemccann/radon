@@ -213,7 +213,7 @@ export function _checkNakedShortRiskImpl(
       if (totalShortCalls > coveredContracts) {
         return {
           allowed: false,
-          reason: `Naked short call in combo: SELL call leg not covered by long call for ${order.symbol} — add a long call leg or hold ${uncoveredRatio * order.quantity * 100} shares`,
+          reason: `Naked short call in combo: SELL call leg not covered by long call for ${order.symbol}. Add a long call leg or hold ${uncoveredRatio * order.quantity * 100} shares`,
         };
       }
     }

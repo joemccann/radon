@@ -223,7 +223,7 @@ export function formatPortfolioPayload(raw: unknown): string {
     };
 
     lines.push(
-      `${index + 1}. ${entry.ticker ?? "UNKNOWN"} — ${entry.structure ?? "No structure"} (` +
+      `${index + 1}. ${entry.ticker ?? "UNKNOWN"}: ${entry.structure ?? "No structure"} (` +
         `expiry: ${entry.expiry ?? "N/A"}, entry cost: ${formatCurrency(entry.entry_cost)})`,
     );
     if (entry.risk_profile) {

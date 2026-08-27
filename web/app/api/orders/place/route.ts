@@ -176,7 +176,7 @@ export async function POST(request: Request): Promise<Response> {
     if (demoDecision.action === "block-expired") {
       return setNoStoreResponseHeaders(
         jsonApiError({
-          message: "Demo trial expired — order not placed.",
+          message: "Demo trial expired. Order not placed.",
           status: 403,
           code: "UNAUTHORIZED",
           requestId,
@@ -400,7 +400,7 @@ export async function POST(request: Request): Promise<Response> {
       if (placeErr instanceof OrderRejectedError) {
         const reason =
           placeErr.initialStatus === "Unknown"
-            ? `no acknowledgement (${placeErr.initialStatus}) — order may not have reached IB`
+            ? `no acknowledgement (${placeErr.initialStatus}), order may not have reached IB`
             : placeErr.initialStatus;
         return setNoStoreResponseHeaders(
           jsonApiError({
