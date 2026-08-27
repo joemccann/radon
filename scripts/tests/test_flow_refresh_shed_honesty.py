@@ -106,6 +106,21 @@ def _stage_health_recorder(repo_dir: Path) -> Path:
     return repo_dir / HEALTH_CALLS
 
 
+def _health_messages(calls_path: Path) -> list[str]:
+    """The `message` the wrapper put in each row, for asserting WHAT was said.
+
+    `_flow_health` passes `error=` a dict (`{"message": ..., "class": ...}`),
+    so the text lives one level in.
+    """
+    if not calls_path.exists():
+        return []
+    return [
+        (json.loads(line)[2] or {}).get("message", "")
+        for line in calls_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
 def _health_writes(calls_path: Path) -> list[tuple[str, str]]:
     if not calls_path.exists():
         return []
@@ -259,6 +274,9 @@ class TestPermanentShedIsVisible:
             "a permanent shed left the watchdog with no row: "
             f"{_health_writes(calls)}"
         )
+        # T-232: the row must also SAY what was shed. A row whose message lost
+        # the count is a row the watchdog cannot act on.
+        assert "shed 3" in _health_messages(calls)[0], _health_messages(calls)
 
 
 class TestTheProbeOutageWritesItsRow:
