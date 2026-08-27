@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FlexQueryResponse queryName="Trade Confirmation" type="TC">
+<FlexStatements count="1">
+<FlexStatement accountId="U0000000" fromDate="20260804" toDate="20260804" period="LastBusinessDay" whenGenerated="20260805;073000">
+<Trades>
+<Trade accountId="U0000000" symbol="NAK" assetCategory="STK" tradeDate="20260804" dateTime="20260804;115321" quantity="-18628" tradePrice="1.585" buySell="SELL" ibCommission="-1.25" tradeID="9998092102" />
+</Trades>
+</FlexStatement>
+</FlexStatements>
+</FlexQueryResponse>

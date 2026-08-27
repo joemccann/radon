@@ -615,9 +615,17 @@ describe("POST /api/orders/place (via radonFetch)", () => {
 // POST /api/blotter — via radonFetch
 // =============================================================================
 
-describe("POST /api/blotter (via radonFetch)", () => {
-  it("rehydrates journal then returns Turso-derived blotter data", async () => {
-    mockRadonFetch.mockResolvedValue({ ok: true, imported: 0, skipped: 0 });
+describe("POST /api/blotter", () => {
+  it("is 404 file-ingest only and never calls journal/rehydrate", async () => {
+    const { POST } = await import("../app/api/blotter/route");
+    const res = await POST();
+    expect(res.status).toBe(404);
+    expect(mockRadonFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /api/blotter reads journal without SendRequest", () => {
+  it("returns Turso-derived blotter and does not POST rehydrate", async () => {
     mockExecute.mockResolvedValue({
       rows: [
         {
@@ -637,58 +645,12 @@ describe("POST /api/blotter (via radonFetch)", () => {
         },
       ],
     });
-
-    const { POST } = await import("../app/api/blotter/route");
-    const res = await POST();
+    const { GET } = await import("../app/api/blotter/route");
+    const res = await GET();
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.summary.closed_trades).toBe(1);
-    expect(mockRadonFetch).toHaveBeenCalledWith(
-      "/journal/rehydrate",
-      expect.objectContaining({ method: "POST" }),
-    );
-  });
-
-  it("falls back to journal-derived blotter on failure", async () => {
-    mockRadonFetch.mockRejectedValue(new Error("Flex query timed out"));
-    mockExecute.mockResolvedValue({
-      rows: [
-        {
-          payload: JSON.stringify({
-            id: 1,
-            date: "2026-03-13",
-            ticker: "AAPL",
-            action: "SELL_OPTION",
-            fill_price: 12,
-            total_cost: 1200,
-            contracts: 1,
-            commission: 1,
-            realized_pnl: 200,
-            ib_exec_id: "AAPL-OLD",
-          }),
-          filled_at: "2026-03-13T15:00:00Z",
-        },
-      ],
-    });
-
-    const { POST } = await import("../app/api/blotter/route");
-    const res = await POST();
-    expect(res.status).toBe(200);
-    expect(res.headers.get("X-Sync-Warning")).toContain("Turso journal");
-    const body = await res.json();
-    expect(body.summary.closed_trades).toBe(1);
-    expect(body.closed_trades[0].symbol).toBe("AAPL");
-  });
-
-  it("returns 502 on failure when journal is unavailable", async () => {
-    mockRadonFetch.mockRejectedValue(new Error("Flex query timed out"));
-    mockExecute.mockResolvedValue({ rows: [] });
-
-    const { POST } = await import("../app/api/blotter/route");
-    const res = await POST();
-    expect(res.status).toBe(502);
-    const body = await res.json();
-    expect(body.error).toBe("Blotter sync failed");
+    expect(mockRadonFetch).not.toHaveBeenCalled();
   });
 });
 

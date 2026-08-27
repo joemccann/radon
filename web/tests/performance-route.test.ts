@@ -123,11 +123,7 @@ describe("/api/performance route", () => {
     expect(body.as_of).toBe("2026-03-10");
     expect(body.summary.ending_equity).toBe(1_063_031.86);
     // §4.4: no blocking /portfolio/sync — one fire-and-forget rebuild only.
-    expect(mockRadonFetch).toHaveBeenCalledTimes(1);
-    expect(mockRadonFetch).toHaveBeenCalledWith(
-      "/performance/background",
-      expect.objectContaining({ method: "POST", timeout: 5_000 }),
-    );
+    expect(mockRadonFetch).not.toHaveBeenCalled();
   });
 
   it("GET returns stale cache + triggers background rebuild when perf is behind current ET session (SWR)", async () => {
@@ -160,11 +156,7 @@ describe("/api/performance route", () => {
     expect(body.as_of).toBe("2026-03-12");
     expect(body.summary.ending_equity).toBe(1_218_410.03);
     // §4.4: no blocking /portfolio/sync — one fire-and-forget rebuild only.
-    expect(mockRadonFetch).toHaveBeenCalledTimes(1);
-    expect(mockRadonFetch).toHaveBeenCalledWith(
-      "/performance/background",
-      expect.objectContaining({ method: "POST", timeout: 5_000 }),
-    );
+    expect(mockRadonFetch).not.toHaveBeenCalled();
   });
 
   it("GET serves cached performance even when the background rebuild trigger fails", async () => {
@@ -194,11 +186,7 @@ describe("/api/performance route", () => {
 
     expect(res.status).toBe(200);
     expect(body.as_of).toBe("2026-03-12");
-    expect(mockRadonFetch).toHaveBeenCalledTimes(1);
-    expect(mockRadonFetch).toHaveBeenCalledWith(
-      "/performance/background",
-      expect.objectContaining({ method: "POST", timeout: 5_000 }),
-    );
+    expect(mockRadonFetch).not.toHaveBeenCalled();
   });
 
   it("POST runs the API sync and returns generated performance JSON", async () => {
@@ -214,10 +202,8 @@ describe("/api/performance route", () => {
     const res = await POST();
     const body = await res.json();
 
-    expect(res.status).toBe(200);
-    expect(body.summary.sharpe_ratio).toBe(1.84);
-    expect(mockRadonFetch).toHaveBeenCalledOnce();
-    expect(mockRadonFetch).toHaveBeenCalledWith("/performance", expect.objectContaining({ method: "POST" }));
+    expect(res.status).toBe(404);
+    expect(mockRadonFetch).not.toHaveBeenCalled();
   });
 
   // ---- SWR-specific tests ----
@@ -247,10 +233,7 @@ describe("/api/performance route", () => {
     expect(res.status).toBe(200);
     expect(body.summary.sharpe_ratio).toBe(1.2);
     // Should call background endpoint, not the blocking one
-    expect(mockRadonFetch).toHaveBeenCalledWith(
-      "/performance/background",
-      expect.objectContaining({ method: "POST", timeout: 5_000 }),
-    );
+    expect(mockRadonFetch).not.toHaveBeenCalled();
   });
 
   it("GET cold start: blocks on rebuild when no cache exists", async () => {
@@ -268,11 +251,8 @@ describe("/api/performance route", () => {
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(body.summary.total_return).toBe(0.18);
-    expect(mockRadonFetch).toHaveBeenCalledWith(
-      "/performance",
-      expect.objectContaining({ method: "POST", timeout: 180_000 }),
-    );
+    expect(body.status).toBe("unavailable");
+    expect(mockRadonFetch).not.toHaveBeenCalled();
   });
 
   it("GET cold start: returns 200 with status unavailable when rebuild fails and no cache", async () => {

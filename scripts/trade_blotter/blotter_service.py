@@ -161,9 +161,11 @@ def _raise_if_flex_locked() -> None:
     """Refuse to SendRequest during a token-wide 1025 lockout (R-133)."""
     try:
         from utils.flex_embargo import raise_if_blocked
+        from utils.flex_send import assert_sendrequest_permitted
     except Exception:  # noqa: BLE001 — embargo is advisory here
         return
     raise_if_blocked()
+    assert_sendrequest_permitted(allowed=False)
 
 
 def _arm_flex_lockout_if_needed(root) -> None:

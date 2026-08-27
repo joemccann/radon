@@ -985,9 +985,9 @@ class TestFlexQuery:
 
         client = IBClient()
         client.connect(client_id=1)
-        result = client.run_flex_query(query_id=123456, token="test_token")
-
-        MockFlexReport.assert_called_once_with(token="test_token", queryId=123456)
+        with pytest.raises(IBError, match="Flex query"):
+            client.run_flex_query(query_id=123456, token="test_token")
+        MockFlexReport.assert_not_called()
 
     @patch("clients.ib_client.FlexReport")
     @patch("clients.ib_client.IB")

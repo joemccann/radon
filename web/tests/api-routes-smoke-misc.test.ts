@@ -219,18 +219,11 @@ describe("GET /api/performance", () => {
 });
 
 describe("POST /api/performance", () => {
-  it("returns 200 on FastAPI success", async () => {
-    mockRadonFetch.mockResolvedValueOnce({ as_of: "now", metrics: {} });
+  it("is 404 file-ingest only", async () => {
     const { POST } = await import("../app/api/performance/route");
     const res = await POST();
-    expect(res.status).toBe(200);
-  });
-
-  it("returns 502 envelope on FastAPI failure", async () => {
-    mockRadonFetch.mockRejectedValueOnce(new Error("upstream down"));
-    const { POST } = await import("../app/api/performance/route");
-    const res = await POST();
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(404);
+    expect(mockRadonFetch).not.toHaveBeenCalled();
   });
 });
 
