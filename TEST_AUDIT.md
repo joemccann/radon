@@ -5104,6 +5104,79 @@ in 2026-08-25 and 2026-08-26. Scope was the added files; counts in
   for the two named jsdom suites. Do NOT re-enable a blanket `retry` — T-161
   removed it deliberately.
 
+## Remediation 2026-08-27
+
+Worked the 2026-08-27 backlog top-down. **Every P0 and P1 this cycle's audit
+filed is DONE — T-190 … T-217 (5 P0, 23 P1)** — plus three P2s taken because
+they blocked honest verification (T-226, T-232, T-238). 26 commits on
+`testing/weekend-2026-08-27`, PR #112.
+
+**T-237, the sixth P0, was deliberately NOT worked here.** Open PR #109
+(`fix/portfolio-risk-gate3-api-drift`) already fixes it, source and test.
+Reproduced locally first: the audit named one of THREE causes. Renaming
+`BACKFILL_WALL_CLOCK_BUDGET_S` alone still leaves 7 red, because the ladder
+stubs take one argument where `_fetch_closes_via_ladder` takes
+`(symbol, deadline, clock)`, and `BACKFILL_SYMBOL_WORST_CASE_S` does not exist
+either. Merging #109 is what un-reds `main`.
+
+### Findings whose remediation exposed a live defect
+
+- **T-205 → `cloud/caddy/Caddyfile` does not adapt, and never did.**
+  `retry_match` and bare `dial_timeout` / `response_header_timeout` /
+  `read_timeout` are the JSON and transport spellings, not `reverse_proxy`
+  subdirectives. `configure_caddy` (`setup-vps.sh:542`) and
+  `deploy-root-helper.sh:604` both gate on `caddy validate`, so the file could
+  never be installed: **R-219, R-220 and R-258 were never in force at the
+  edge** while all 14 text-regex assertions shipped green. R-220 is the
+  POST-replay guard on `/api/orders/place`. Confirmed independently against
+  caddy v2.11.4 — pre-fix errors `unrecognized subdirective dial_timeout, at
+  Caddyfile:59`; post-fix logs `adapted config to JSON`.
+- **T-209 → both weekend wrappers died silently in their prologue.**
+  `report()`, `on_crash()`, `notify_phase()` and `resolve_pr_url()` are defined
+  below the prologue in `main()`, so the REFUSED branches and the prologue ERR
+  trap called a function that did not exist yet. Held lock, wrong clone, full
+  disk and moved clone all produced no issue comment and no page — the exact
+  dead-man failure this loop exists to prevent. The guarding test asserted
+  `_comments == []`, encoding the dead report as the contract.
+- **T-207 → the orders backoff could never leave rung one.**
+  `failureStreakRef.current = 0` ran right after `await fetchOrders()`, which
+  swallows its error into `errorRef` rather than throwing, so the streak was
+  zeroed before the failure was counted. Measured 60s/60s/60s against an
+  intended 120s/240s ladder; the 5-minute ceiling was unreachable.
+- **T-190/T-211 → the mobile ticket.** The payoff was built from raw legs
+  while the desktop rail ratio-normalises, so every breakeven and the
+  unbounded-risk figure the operator reads before transmitting were wrong by
+  the lot size (a 10-lot short straddle read `$9,694,040` against `$964,040`);
+  and `handleSubmit` had no `transmitArmed` guard, so an unacknowledged naked
+  short call reached `/api/orders/place`.
+
+### Corrections to the audit's own text
+
+- **T-190:** a bare 10-lot short put cannot produce the unbounded-loss
+  sentence — `legRisk` bounds a short put and returns
+  `maxLossUnbounded: false`. The repro needs an uncovered short call. The
+  rendered mobile breakeven is `969.47`, not `970.30`, because `payoffCurve`
+  samples 96 points and interpolates across the strike kink. The lot-size
+  factor is confirmed exactly.
+- **T-191:** the rounded row destroys the good percentile in BOTH tables, not
+  only in `main` — slightly worse than recorded.
+- **T-226:** the storm file's pass/fail was already order-independent, since
+  its assertions never read the globals. The provable leak is the state itself
+  plus the wasted real sleeps.
+- **T-208:** there is no `flap` key in `BUCKETS`, so that half of the AC did
+  not apply; `_flap_alert` was kept, not deleted, because `test_units.py`
+  already reds on its removal.
+
+### Deferred
+
+- **Older non-P2 stragglers from T-081…T-189 were not re-triaged this run.**
+  The 28 items from this cycle's own audit consumed the budget. They remain
+  open backlog.
+- **Follow-up filed in prose, not as a task:** `acquire_2fa_push_lock` still
+  runs its confirmation probes INSIDE the exclusive guard
+  (`ib_2fa_lock.py:375`), burning the 5s reader deadline. Named in T-201's
+  text, outside its AC.
+
 ## 11 · Audit ledger
 
 The weekend loop (`.claude/skills/testing-weekend/`) reads the last line
