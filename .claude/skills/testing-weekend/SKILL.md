@@ -21,7 +21,7 @@ sequentially in this loop's own clone.
    no `radon restart`, no docker commands against it. Tests use fakes/mocks
    only — never a live IB connection, never a live order.
 2. **Never push to `main`.** All changes land on a branch
-   `testing/weekend-<YYYY-MM-DD>` and a PR. The human merge is the deploy
+   `testing/<YYYY-MM-DD>` and a PR. The human merge is the deploy
    trigger.
 3. **Never run against the operator's working clone.** Refuse (exit
    nonzero, say why) unless the file `.radon-weekend-runner` exists in the
@@ -89,8 +89,8 @@ loop's job; yours is whether the tests guarding it are real.
    section (cite file:line, severity P0/P1/P2, continuing T-numbers) and
    add backlog rows with red/green acceptance criteria. Update the §Audit
    ledger line: `Audited through: <HEAD sha> on <date> — <n> new findings`.
-6. Commit to the weekend branch, push the branch, and open (or update)
-   the weekend PR titled `Testing weekend <date>` with the delta summary
+6. Commit to the nightly branch, push the branch, and open (or update)
+   the nightly PR titled `Testing <date>` with the delta summary
    in the body. Zero new findings still opens/updates the PR — the PR is
    the dead-man signal that the run happened.
 
@@ -99,7 +99,7 @@ loop's job; yours is whether the tests guarding it are real.
 Goal: work the newest un-DONE P0/P1 backlog items (this run's first,
 then any older non-P2 stragglers), exactly by the PART B contract:
 
-1. Check out the weekend branch (create from `origin/main` if the audit
+1. Check out the nightly branch (create from `origin/main` if the audit
    phase produced nothing; then this run only re-verifies gates, step 4).
 2. Per task, in severity order: (a) demonstrate the gap red FIRST — for a
    missing test, write it and show it fail against the defect (or show it
@@ -125,8 +125,8 @@ then any older non-P2 stragglers), exactly by the PART B contract:
 
 Every phase outcome is reported three ways, so a silent-dead runner shows up
 the next morning at the latest: a comment on the rolling GitHub issue
-labeled `testing-weekend`, a Pushover notification per phase carrying the
-status and the weekend PR link when one exists, and the PR itself.
+labeled `testing-nightly`, a Pushover notification per phase carrying the
+status and the nightly PR link when one exists, and the PR itself.
 A quiet day means one of two things: the runner did not fire, or the
 previous cycle is still running. launchd will not start a second instance of
 a running label, so a long remediate phase legitimately suppresses that day's
@@ -179,7 +179,7 @@ how this loop improves as the codebase grows.
     output on this runner cannot be trusted for state decisions.
   - Never `git pull`. Sync with `rtk proxy git fetch origin` plus an explicit
     `merge --ff-only` you chose deliberately.
-  - `rtk proxy git push` the weekend branch immediately after every task
+  - `rtk proxy git push` the nightly branch immediately after every task
     commit, not once at the end. The branch on origin is the only durable copy;
     "push at the end of the run" is a single point of failure.
   - Recovery if it happens anyway: `rtk proxy git reflog` still holds the
@@ -209,7 +209,7 @@ how this loop improves as the codebase grows.
   `performance-twr-payload.spec.ts` was caught as permanently red before
   it could red the job.
 - **2026-08-22 (audit): last weekend's remediation lands inside this week's
-  delta.** The ledger SHA is the audit HEAD, not the merge of the weekend PR,
+  delta.** The ledger SHA is the audit HEAD, not the merge of the nightly PR,
   so the range `71de8a33..HEAD` re-contained T-055…T-079 and the reliability
   loop's REL-0xx source commits. Re-triage them as ordinary delta rather than
   exempting them (two findings this run — T-086, T-087 — were on REL-038
@@ -226,7 +226,7 @@ how this loop improves as the codebase grows.
   discovered the first when `git push` was rejected — after it had already
   numbered 32 findings from T-080, colliding with all 17 the first had
   pushed. Do this in step 1, right after the clean-tree check:
-  `git fetch origin && git rev-parse --verify origin/testing/weekend-<date>`.
+  `git fetch origin && git rev-parse --verify origin/testing/<date>`.
   If it exists, read its audit section FIRST and continue numbering after it.
   Recovery if you find out late: never force-push over the other run. Reset
   onto its tip, drop your duplicates, renumber the rest from its highest
@@ -321,7 +321,7 @@ how this loop improves as the codebase grows.
   fire here — `origin/testing/weekend-2026-08-23` did not exist at pre-flight
   and appeared before the first push — so the first two tasks (T-081, T-109)
   were done twice and thrown away. What stopped it was posting a comment on
-  the weekend PR naming the exact T-### items this host would take, BEFORE
+  the nightly PR naming the exact T-### items this host would take, BEFORE
   starting them; zero collisions across the five that followed. Do it as soon
   as the branch exists: list the items, say which end of the list you are
   working from, and re-`fetch` before every landing.
@@ -398,7 +398,7 @@ how this loop improves as the codebase grows.
   call instead of delivering it (patch `os.killpg`), assert on the recorded
   pgid, and keep a real child so the pgid observation stays honest.
 
-- **2026-08-26 (audit): a squash-merged weekend PR leaves its branch looking
+- **2026-08-26 (audit): a squash-merged nightly PR leaves its branch looking
   orphaned — check the CONTENT, not the ancestry.**
   `git merge-base --is-ancestor origin/testing/weekend-2026-08-25 HEAD` said
   NOT MERGED and the branch read 15 commits ahead of `main`, which looks
