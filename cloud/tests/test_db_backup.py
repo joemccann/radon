@@ -4,6 +4,7 @@ import importlib.util
 import io
 import pathlib
 import sqlite3
+import sys
 
 import pytest
 
@@ -11,10 +12,14 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
 def _load_module():
+    name = "db_backup"
     spec = importlib.util.spec_from_file_location(
-        "db_backup", ROOT / "scripts" / "db_backup.py"
+        name, ROOT / "scripts" / "db_backup.py"
     )
     module = importlib.util.module_from_spec(spec)
+    # dataclasses require the module to be present in sys.modules during class
+    # creation when loaded via spec_from_file_location.
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 

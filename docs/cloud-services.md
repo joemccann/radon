@@ -821,3 +821,60 @@ sudo systemctl daemon-reload
 | 5 | ~~Verify Turso plan PITR~~ | **Verified 2026-07-13** — org Pro, **90d PITR**; `turso plan show` (not `org show`) |
 | 6 | ~~Off-box portfolio archive (`RADON_ARCHIVE_S3_*`)~~ | **Done** — Backblaze B2 `radon-archive` (2026-07-13) |
 | 7 | Continuous journal-gap SLI | **Done** — `journal-gap-sli` monitor handler (5m) |
+
+## DB backup off-box copy (B2 `db_backups/`)
+
+Closes the single-copy risk in "DB backup & restore" above: until 2026-08-27
+the only copy of the nightly Turso dumps lived on the VPS root filesystem
+(`/home/radon/radon-cloud/backups/db`, 13G and growing ~55%/month at
+`RETENTION_DAYS = 30`), on the same 75G disk that hit 98% that night.
+`scripts/db_backup_pull.sh` is a manual laptop-initiated rsync pull, not an
+automated off-box push, and is not a backup strategy.
+
+| Piece | Value |
+|---|---|
+| Owner | `cloud/scripts/db_backup.py` — the SAME oneshot that writes the dump. No new systemd unit, no new `service_health` row. |
+| Unit | Unchanged `radon-db-backup.service` + `.timer` (09:00 UTC). `TimeoutStartSec=19500` already covers dump + upload. |
+| Target | S3-compatible API to the existing B2 bucket `radon-archive`, prefix **`db_backups/`** (never collides with `portfolio_snapshots/` or `media/`). |
+| Credentials | `RADON_ARCHIVE_S3_*` from `/etc/radon/env` (already required-env). Optional per-field overrides `RADON_DB_BACKUP_S3_{ENDPOINT,BUCKET,ACCESS_KEY_ID,SECRET_ACCESS_KEY,REGION}` and `RADON_DB_BACKUP_PREFIX`, same shape as `RADON_MEDIA_BACKUP_S3_*`. |
+| Local retention | `RETENTION_DAYS = 30` — **unchanged**, operator policy. |
+| Remote retention | `REMOTE_RETENTION_DAYS = 365`. Off-boxing a 30-day window would buy nothing; a year of nightly dumps is ~190 GB in B2 at current sizes. |
+| Transport bound | Multipart at 64 MB chunks, 4 threads, botocore `connect_timeout=30` / `read_timeout=300` / 3 attempts, plus a `UPLOAD_BUDGET_SECS = 3600` wall-clock ceiling. |
+| Heartbeat | Existing `db-backup` row, extended detail: `offbox_bucket`, `offbox_prefix`, `offbox_uploaded`, `offbox_bytes_uploaded`, `offbox_deferred`, `offbox_remote_pruned`, and `offbox_error`. Summary gains `; b2 <uploaded>/<planned> (<bytes> B), deferred N, remote pruned N`. |
+
+### Fail-degraded, deliberately
+
+`media_backup.py` fails **closed** — no credentials, unit fails, nothing
+written. `db_backup.py` is the opposite by design and says so in its
+docstring: the local gzip is the critical path and the upload is not. A
+wedged, misconfigured, or credential-less B2 never deletes, truncates, or
+skips the on-box dump. The run still writes the file, then reports the
+upload failure to the journal and flips the `db-backup` heartbeat to
+`error` (exit 1). A red `db-backup` row therefore means "check whether the
+dump or only the upload failed" — `offbox_error` in the detail distinguishes
+them, and `size_bytes` is still populated when the dump itself was fine.
+
+### Idempotent, resumable, and the first-run backfill
+
+Each run lists `db_backups/` once and uploads only dumps that are absent
+remotely or present at a different size. Uploads run **newest first**, so
+tonight's dump always goes before any backfill of the older window.
+
+The first run after deploy therefore backfills the whole local retention
+window (~30 dumps, ~13 GB) rather than only that night's file. If the
+`UPLOAD_BUDGET_SECS` ceiling is reached the remainder is reported as
+`offbox_deferred` and the next night resumes exactly where this one
+stopped — no re-upload of what already landed. Expect the backlog to clear
+over the first one to three nights; steady state is one ~530 MB object per
+night.
+
+### Verify
+
+```bash
+journalctl -u radon-db-backup -n 50 --no-pager | grep ' b2 '
+# object listing (from a host with the B2 credentials)
+aws s3 ls "s3://radon-archive/db_backups/" --endpoint-url "$RADON_ARCHIVE_S3_ENDPOINT" | tail
+```
+
+Restore is unchanged: pull the object, then follow the "Restore runbook"
+above against the downloaded `radon-<stamp>.sql.gz`.
