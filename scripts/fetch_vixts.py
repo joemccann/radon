@@ -147,6 +147,24 @@ def _write_db(
         print(f"[vixts] db cache non-fatal: {exc}", file=sys.stderr)
 
 
+def _record_startup_failure(scan_time: str, exc: Exception) -> None:
+    """Heartbeat an error row for a failure that predates any payload."""
+    if writer is None:
+        return
+    try:
+        writer.record_service_health(
+            SERVICE,
+            "error",
+            finished_at=scan_time,
+            error={
+                "message": f"vixts client init failed: {exc}",
+                "class": "client_init_failed",
+            },
+        )
+    except Exception as inner:  # noqa: BLE001 — best-effort mirror
+        print(f"[vixts] startup health write non-fatal: {inner}", file=sys.stderr)
+
+
 # ── payload ───────────────────────────────────────────────────────
 
 def build_payload(
@@ -200,8 +218,15 @@ def run(client: Optional[Any] = None, *, now: Optional[datetime] = None) -> dict
     now = now or datetime.now(timezone.utc)
     scan_time = now.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
     if client is None:
-        from clients.cboe_client import CboeClient
-        client = CboeClient()
+        try:
+            from clients.cboe_client import CboeClient
+            client = CboeClient()
+        except Exception as exc:  # noqa: BLE001 — re-raised after the heartbeat
+            # A ctor that raises here would otherwise kill the oneshot before
+            # any service_health row exists: silent, not stale, and nothing
+            # alerts. Heartbeat the failure, then let it propagate.
+            _record_startup_failure(scan_time, exc)
+            raise
 
     cached = _read_json_cache()
     texts, stamps = _fetch_all(client, (cached or {}).get("source_last_modified") or {})
