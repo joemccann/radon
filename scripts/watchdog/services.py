@@ -107,6 +107,10 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # nextjs-db-read registration above (REL-033). R-236.
     "breadth-scan":     {"open": 15 * _MIN, "closed": 3 * _DAY, "requires_ib": True},
     "cta-sync":         {"open": 25 * _HOUR, "closed": 72 * _HOUR, "requires_ib": False},
+    # Extraction-quality row written by the same radon-cta-sync.timer firings
+    # (R-297): `error` when more than half the rows lost their percentile to
+    # the z-score check. Same cadence as cta-sync, so the same windows.
+    "menthorq-cta":     {"open": 25 * _HOUR, "closed": 72 * _HOUR, "requires_ib": False},
     # Daily-cadence writers (mirror web/lib/serviceHealthWindows.ts):
     #  * llm-token-index — radon-llm-index.timer, once/UTC-day 06:30; pulls
     #    Artificial Analysis only, no IB. Has not fired on weekends in
@@ -422,6 +426,10 @@ BUCKETS: dict[str, list[str]] = {
         "menthorq-session",
         "menthorq-login-probe",
         "cta-sync",
+        # Same timer as cta-sync, so the same daily age check. Without it the
+        # row carries a freshness window nothing evaluates and only _check_error
+        # would ever see it.
+        "menthorq-cta",
         # Once-per-day writers — hourly check surfaces a delay within 1h
         # of the window expiring.
         "llm-token-index",
