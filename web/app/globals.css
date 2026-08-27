@@ -7188,6 +7188,66 @@ body[data-mobile="true"] .orders-command-strip__jump:active {
   outline-offset: -1px;
 }
 
+.open-order-row--ext {
+  box-shadow: inset 2px 0 0 0 var(--signal-core);
+}
+
+.open-order-row--ext.open-order-row--selected {
+  box-shadow:
+    inset 2px 0 0 0 var(--signal-core),
+    inset 0 0 0 1px color-mix(in srgb, var(--signal-core) 35%, var(--border-dim));
+}
+
+.open-order-status-cell {
+  white-space: nowrap;
+}
+
+.order-session-chip {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border-dim);
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--text-muted) 8%, transparent);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.order-session-chip--extended {
+  color: var(--signal-core-text);
+  border-color: color-mix(in srgb, var(--signal-core) 45%, var(--border-dim));
+  background: color-mix(in srgb, var(--signal-core) 10%, transparent);
+}
+
+.order-session-chip--expires {
+  color: var(--warn-text);
+  border-color: color-mix(in srgb, var(--warning) 50%, var(--border-dim));
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+}
+
+.order-session-chip--rth {
+  color: var(--text-muted);
+  border-color: var(--border-dim);
+  background: color-mix(in srgb, var(--text-muted) 8%, transparent);
+}
+
+.order-session-count {
+  color: var(--text-muted);
+  border-color: var(--border-dim);
+}
+
+.order-session-count--extended {
+  color: var(--signal-core-text);
+  border-color: color-mix(in srgb, var(--signal-core) 45%, var(--border-dim));
+}
+
 .open-order-select-th,
 .open-order-select-td {
   width: 28px;
@@ -19647,6 +19707,17 @@ body[data-mobile="true"] button {
 }
 .m-order-status--muted {
   color: var(--text-muted);
+}
+
+.mobile-order-session-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.mobile-order-session-group .order-session-chip {
+  margin-left: 0;
 }
 
 body[data-mobile="true"] .scanner-page-shell {

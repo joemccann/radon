@@ -72,6 +72,11 @@ import {
   summarizeOpenOrders,
 } from "@/lib/orders/orderDisplay";
 import {
+  classifyDisplayRowSession,
+  summarizeSessionWindows,
+} from "@/lib/orders/sessionWindow";
+import SessionWindowChip from "./orders/SessionWindowChip";
+import {
   filterExecutedToEtToday,
   formatExecutedFillTime,
 } from "@/lib/orders/executedToday";
@@ -3021,6 +3026,8 @@ function OrdersSections({
 
   const canModify = (o: OpenOrder) => o.orderType === "LMT" || o.orderType === "STP LMT";
   const openOrdersSummary = summarizeOpenOrders(orders.open_orders);
+  const now = new Date();
+  const sessionCounts = summarizeSessionWindows(openOrderRows, now);
   const lastSyncLabel = orders.last_sync
     ? formatRelativeTime(orders.last_sync)
     : null;
@@ -3117,6 +3124,12 @@ function OrdersSections({
               inputRef={openOrdersFilterRef}
             />
             <span className="pill defined">{orders.open_count} ORDERS</span>
+            <span className="pill order-session-count" data-testid="open-orders-rth-count">
+              {sessionCounts.rth} RTH
+            </span>
+            <span className="pill order-session-count order-session-count--extended" data-testid="open-orders-ext-count">
+              {sessionCounts.ext} EXT
+            </span>
           </div>
         </div>
         <div className="section-body">
@@ -3207,6 +3220,8 @@ function OrdersSections({
                   const rowKey = openOrderRowKey(o);
                   const isKeyboardSelected = keyboardSelectedKey === rowKey;
                   const isBulkSelected = bulkSelectedKeys.has(rowKey);
+                  const session = classifyDisplayRowSession(o, now);
+                  const sessionRowClass = session.eligibility === "extended" ? "open-order-row--ext" : "";
                   const selectCell = (
                     <td className="open-order-select-td" onClick={(e) => e.stopPropagation()}>
                       <input
@@ -3248,6 +3263,7 @@ function OrdersSections({
                       isPendingCancel ? "row-pending-cancel" : "",
                       isPendingModify ? "row-pending-modify" : "",
                       isKeyboardSelected ? "open-order-row--selected" : "",
+                      sessionRowClass,
                       "open-order-row",
                     ].filter(Boolean).join(" ");
 
@@ -3313,13 +3329,14 @@ function OrdersSections({
                             value={prices ? resolveComboImpliedMv(o.orders, prices, riskFreeRate) : null}
                           />
                         )}
-                        <td>
+                        <td className="open-order-status-cell">
                           <span
                             className={statusPillClass(comboStatus.tone)}
                             title={comboStatus.raw}
                           >
                             {comboStatus.label}
                           </span>
+                          <SessionWindowChip session={session} />
                         </td>
                         {orderColumns.tif && <td>{o.tif}</td>}
                         <td className="actions-cell">
@@ -3375,6 +3392,7 @@ function OrdersSections({
                     isPendingCancel ? "row-pending-cancel" : "",
                     isPendingModify ? "row-pending-modify" : "",
                     isKeyboardSelected ? "open-order-row--selected" : "",
+                    sessionRowClass,
                     "open-order-row",
                   ].filter(Boolean).join(" ");
                   return (
@@ -3450,13 +3468,14 @@ function OrdersSections({
                           value={prices ? resolveSingleOrderImpliedMv(o.order, prices, riskFreeRate) : null}
                         />
                       )}
-                      <td>
+                      <td className="open-order-status-cell">
                         <span
                           className={statusPillClass(singleStatus.tone)}
                           title={singleStatus.raw}
                         >
                           {singleStatus.label}
                         </span>
+                        <SessionWindowChip session={session} />
                       </td>
                       {orderColumns.tif && <td>{o.order.tif}</td>}
                       <td className="actions-cell">

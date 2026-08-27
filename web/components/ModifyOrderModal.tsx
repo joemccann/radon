@@ -309,7 +309,7 @@ export function resolveOrderPriceData(
 export default function ModifyOrderModal({ order, loading, prices, portfolio, openOrders = null, onConfirm, onClose }: ModifyOrderModalProps) {
   const [newPrice, setNewPrice] = useState("");
   const [newQuantity, setNewQuantity] = useState("");
-  const [outsideRth, setOutsideRth] = useState(false);
+  const [outsideRth, setOutsideRth] = useState(() => Boolean(order?.outsideRth));
   const [editableLegs, setEditableLegs] = useState<EditableComboLeg[]>([]);
 
   // Reset price only when a different order is selected (by permId), not on every re-render
@@ -321,7 +321,7 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, op
     if (order?.totalQuantity != null) {
       setNewQuantity(String(order.totalQuantity));
     }
-    setOutsideRth(false);
+    setOutsideRth(Boolean(order?.outsideRth));
     setEditableLegs(buildEditableComboLegs(order));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderPermId]);
@@ -520,10 +520,11 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, op
   const priceChanged = isValidPrice && Math.abs(parsedNew - currentPrice) >= 0.005;
   const quantityChanged = isValidQuantity && parsedQuantity !== currentQuantity;
   const legsChanged = isComboOrder && currentLegsSnapshot !== originalLegsSnapshot;
+  const outsideRthChanged = outsideRth !== Boolean(order.outsideRth);
   const canSubmit = !loading && riskState?.okToSubmit === true && (
     isComboOrder
       ? Boolean(isValidPrice && isValidQuantity && normalizedLegs && (priceChanged || quantityChanged || legsChanged))
-      : Boolean((priceChanged || quantityChanged || outsideRth) && isValidPrice && isValidQuantity)
+      : Boolean((priceChanged || quantityChanged || outsideRthChanged) && isValidPrice && isValidQuantity)
   );
 
   const delta = isValidPrice ? parsedNew - currentPrice : 0;
@@ -605,7 +606,7 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, op
     const request: ModifyOrderRequest = {};
     if (priceChanged) request.newPrice = parsedNew;
     if (quantityChanged) request.newQuantity = parsedQuantity!;
-    if (outsideRth) request.outsideRth = true;
+    if (outsideRthChanged) request.outsideRth = outsideRth;
     onConfirm(request);
   };
 

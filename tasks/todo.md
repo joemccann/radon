@@ -1,3 +1,29 @@
+# Task: Open-order after-RTH session window (2026-08-27)
+
+## Dependency graph
+
+- T1 depends_on: [] - Classifier `sessionWindow.ts` + failing unit tests
+- T2 depends_on: [T1] - Serialize `outsideRth` from IB open-order snapshot
+- T3 depends_on: [T1] - Desktop /orders status session chip, header counts, row marker
+- T4 depends_on: [T1] - Mobile order card + sheet session chip (393x852)
+- T5 depends_on: [T2, T3, T4] - Focused vitest/pytest + Playwright + commit/push
+
+## Checklist
+
+- [x] T1 Red classifier tests
+- [x] T2 IB `outsideRth` on open-order payload
+- [x] T3 Desktop treatment
+- [x] T4 Mobile treatment
+- [x] T5 Verify + ship
+
+## Review
+
+- vitest 43 passed (session-window, command-strip, mobile-order-list, modify-init)
+- pytest `test_ib_orders_outside_rth.py` + `test_ib_helpers.py` 63 passed
+- Playwright 3 passed (desktop + mobile 393x852)
+
+---
+
 # Task: META avg entry lagged IB VWAP vs fill (2026-08-27)
 
 ## Dependency graph

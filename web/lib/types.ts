@@ -261,6 +261,8 @@ export type OpenOrder = {
   remaining: number;
   avgFillPrice: number | null;
   tif: string;
+  /** IB outsideRth. Missing/undefined is false (IB default). */
+  outsideRth?: boolean;
   orderRef?: string | null;
   ocaGroup?: string | null;
   parentId?: number | null;

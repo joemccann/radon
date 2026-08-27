@@ -313,3 +313,103 @@ describe("orders command strip", () => {
     expect(screen.getByRole("button", { name: "Cancel All" })).toBeTruthy();
   });
 });
+
+describe("open-order session window", () => {
+  function renderMixedSessionOrders() {
+    const optionDay = makeOpenOrder({
+      orderId: 1,
+      permId: 1001,
+      tif: "DAY",
+      symbol: "AAPL",
+      contract: {
+        conId: 10,
+        symbol: "AAPL",
+        secType: "OPT",
+        strike: 200,
+        right: "C",
+        expiry: "2026-08-21",
+      },
+    });
+    const tqqqExt = makeOpenOrder({
+      orderId: 2,
+      permId: 1002,
+      tif: "GTC",
+      outsideRth: true,
+      symbol: "TQQQ",
+      contract: {
+        conId: 20,
+        symbol: "TQQQ",
+        secType: "STK",
+        strike: null,
+        right: null,
+        expiry: null,
+      },
+    });
+    const orders: OrdersData = {
+      last_sync: NOW.toISOString(),
+      open_count: 2,
+      executed_count: 0,
+      executed_orders: [],
+      open_orders: [optionDay, tqqqExt],
+    };
+    render(
+      React.createElement(WorkspaceSections, {
+        section: "orders",
+        orders,
+        prices: {},
+        portfolio: null,
+      }),
+    );
+    return { optionDay, tqqqExt };
+  }
+
+  it("shows RTH chip on option DAY and EXT chip on TQQQ GTC outsideRth", () => {
+    renderMixedSessionOrders();
+
+    const optionRow = screen.getByTestId("open-order-row-1-1001");
+    const tqqqRow = screen.getByTestId("open-order-row-2-1002");
+
+    const optionChip = optionRow.querySelector('[data-testid="order-session-chip"]');
+    const tqqqChip = tqqqRow.querySelector('[data-testid="order-session-chip"]');
+    expect(optionChip).toBeTruthy();
+    expect(tqqqChip).toBeTruthy();
+    expect(optionChip?.getAttribute("data-session")).toBe("rth-only");
+    expect(optionChip?.textContent).toBe("RTH");
+    expect(optionChip?.getAttribute("title")).toMatch(/will not fill after 16:00 ET/i);
+    expect(tqqqChip?.getAttribute("data-session")).toBe("extended");
+    expect(tqqqChip?.textContent).toBe("EXT");
+    expect(tqqqChip?.getAttribute("title")).toMatch(/can fill after 16:00 ET/i);
+    expect(optionChip?.getAttribute("title") ?? "").not.toMatch(/\u2014/);
+    expect(tqqqChip?.getAttribute("title") ?? "").not.toMatch(/\u2014/);
+
+    expect(optionRow.textContent).toMatch(/DAY/);
+    expect(tqqqRow.textContent).toMatch(/GTC/);
+    expect(tqqqRow.className).toMatch(/open-order-row--ext/);
+    expect(optionRow.className).not.toMatch(/open-order-row--ext/);
+  });
+
+  it("puts RTH/EXT counts next to ORDERS, not on the command strip", () => {
+    renderMixedSessionOrders();
+
+    const strip = screen.getByTestId("orders-command-strip");
+    expect(strip.querySelector('[data-testid="open-orders-rth-count"]')).toBeNull();
+    expect(strip.querySelector('[data-testid="open-orders-ext-count"]')).toBeNull();
+    expect(strip.querySelectorAll(".orders-command-strip__stat")).toHaveLength(4);
+
+    expect(screen.getByTestId("open-orders-rth-count").textContent).toBe("1 RTH");
+    expect(screen.getByTestId("open-orders-ext-count").textContent).toBe("1 EXT");
+    expect(screen.getByText("2 ORDERS")).toBeTruthy();
+  });
+
+  it("keeps session chips visible after hiding the TIF column", () => {
+    renderMixedSessionOrders();
+
+    fireEvent.click(screen.getByTitle("Show or hide columns"));
+    fireEvent.click(screen.getByRole("checkbox", { name: "TIF" }));
+
+    const optionRow = screen.getByTestId("open-order-row-1-1001");
+    const tqqqRow = screen.getByTestId("open-order-row-2-1002");
+    expect(optionRow.querySelector('[data-testid="order-session-chip"]')?.textContent).toBe("RTH");
+    expect(tqqqRow.querySelector('[data-testid="order-session-chip"]')?.textContent).toBe("EXT");
+  });
+});
