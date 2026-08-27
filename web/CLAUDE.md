@@ -102,6 +102,7 @@ Per-leg: `sign × (last - close) × contracts × 100`. Impl: `getOptionDailyChg(
 ### Entry-Date Resolution (`ib_sync.py`)
 
 Strict ordered fallback, MOST → LEAST specific:
+0. **session fills covering the WHOLE live position** — net signed session-fill qty == live size means the contract was flat at the session open, so nothing older can be this lot's entry
 1. blotter (per-contract: `ticker|expiry|right|strike`)
 2. trade_log (`ticker|structure`)
 3. IB fills (per-contract, same-session)
@@ -109,6 +110,8 @@ Strict ordered fallback, MOST → LEAST specific:
 5. **today** ← brand-new positions land here
 
 **Never use per-ticker blotter fallback.** Test: `test_combo_entry_date.py`.
+
+Step 0 outranks the journal because the journal keeps the EARLIEST date per contract and hands back a prior round-trip's date when a contract is reopened. META 575C 2026-08-28 was closed 2026-08-26, reopened 2026-08-27, and rendered Today P&L -$9,425 against a -$1,750 total. Test: `test_session_open_entry_date.py`.
 
 ### Position Cache Refresh
 
