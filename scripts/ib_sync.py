@@ -586,6 +586,14 @@ def collapse_positions(positions: list) -> list:
         else:
             ib_daily_pnl = None
 
+        # Session-open date: only when EVERY leg was opened this session. One
+        # overnight leg (or a stock leg, which has no per-contract fill key)
+        # means the structure is not same-day.
+        leg_session_dates = [leg.get("session_fill_date") for leg in legs]
+        session_fill_date = (
+            min(leg_session_dates) if leg_session_dates and all(leg_session_dates) else None
+        )
+
         # Format legs for subtree
         formatted_legs = []
         for leg in sorted(legs, key=lambda x: (x.get('right', 'Z'), x.get('strike', 0))):
@@ -629,6 +637,7 @@ def collapse_positions(positions: list) -> list:
             "market_value": round(total_market_value, 2) if total_market_value is not None else None,
             "market_price_is_calculated": bool(is_market_price_calculated) if total_market_value is not None else False,
             "ib_daily_pnl": ib_daily_pnl,
+            "session_fill_date": session_fill_date,
             "basis_source": (
                 "session_fills"
                 if formatted_legs and all(
@@ -823,6 +832,37 @@ def _session_fill_cover(fill: dict, position_size: float):
     return abs(entry_cost), entry_cost / need
 
 
+def _session_fill_open_date(fill: dict, position_size: float) -> Optional[str]:
+    """ET date the live position was opened, when this session's fills are ALL
+    of it. Otherwise None.
+
+    Net signed session qty == live size means the contract was flat when the
+    session began: every unit held now was filled today, so the position is
+    same-day and yesterday's close is not a baseline for it. This has to beat
+    the journal, which keeps the EARLIEST date per contract and therefore hands
+    back a prior round-trip's date when a contract is reopened (META 575C
+    2026-08-28: closed 2026-08-26, reopened 2026-08-27, Today P&L rendered
+    -$9,425 against a -$1,750 total). Overnight inventory or a partial add
+    leaves the net short of the live size and returns None.
+    """
+    lots = (fill or {}).get("lots") or []
+    if not lots or not position_size:
+        return None
+    net = 0.0
+    dates: list[str] = []
+    for lot in lots:
+        try:
+            net += float(lot["signed_qty"])
+        except (TypeError, ValueError, KeyError):
+            return None
+        date = lot.get("date")
+        if date:
+            dates.append(date)
+    if abs(net - float(position_size)) > 1e-9 or not dates:
+        return None
+    return min(dates)
+
+
 def fetch_positions(
     client: IBClient,
     journal_basis_lookup: Optional[dict[str, float]] = None,
@@ -885,6 +925,7 @@ def fetch_positions(
         if fill_cover is not None:
             entry_cost, avg_cost = fill_cover
             basis_source = "session_fills"
+        session_fill_date = _session_fill_open_date(fill, position_size) if fill else None
         
         formatted.append({
             "account_id": getattr(pos, 'account', '') or '',
@@ -894,6 +935,7 @@ def fetch_positions(
             "avgCost": avg_cost,
             "ibAvgCost": ib_avg_cost,
             "basis_source": basis_source,
+            "session_fill_date": session_fill_date,
             "entry_cost": round(entry_cost, 2),
             "expiry": parse_expiry(contract),
             "strike": getattr(contract, 'strike', None),
@@ -1211,6 +1253,16 @@ def _fill_exec_time(fill) -> datetime:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
+def _et_date(when: datetime) -> Optional[str]:
+    """ET calendar day for a fill timestamp, or None when there isn't one.
+    `_fill_exec_time` returns `datetime.min` for a missing/unparsable time, and
+    shifting that back to ET underflows."""
+    try:
+        return when.astimezone(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
 def _fill_signed_qty(side, shares) -> float:
     label = str(side or "").strip().upper()
     try:
@@ -1266,8 +1318,15 @@ def build_fill_basis(fills) -> dict[str, dict]:
         rows.sort(key=lambda row: row[0])
         out[key] = {
             "lots": [
-                {"signed_qty": signed, "per_share": price}
-                for _when, signed, price in rows
+                {
+                    "signed_qty": signed,
+                    "per_share": price,
+                    # ET trading day, not the host's — a 20:00 ET fill is
+                    # already tomorrow in UTC, and `entry_date` is compared
+                    # against an ET `today`.
+                    "date": _et_date(when),
+                }
+                for when, signed, price in rows
             ]
         }
     return out
@@ -1429,6 +1488,9 @@ def convert_to_portfolio_format(account: dict, collapsed_positions: list, pnl_da
         # Reversal P$320/C$330 was assigned 2026-04-22 because an unrelated
         # AMD 295P existed in the blotter — see test_combo_entry_date.py).
         #
+        #   0. session fills that account for the WHOLE live position — the
+        #      contract was flat at the session open, so nothing older can be
+        #      this lot's entry (see `_session_fill_open_date`)
         #   1. journal (per-contract: ticker|expiry|right|strike)
         #   2. journal (ticker|structure)
         #   3. IB fills (per-contract, same-session)
@@ -1437,7 +1499,8 @@ def convert_to_portfolio_format(account: dict, collapsed_positions: list, pnl_da
         #              same-day P&L branch fires correctly. We deliberately
         #              do NOT use a per-ticker blotter fallback or "unknown".
         pos['entry_date'] = (
-            blotter_contract_date
+            pos.get("session_fill_date")
+            or blotter_contract_date
             or trade_log_dates.get(f"{ticker}|{structure}")
             or fill_contract_date
             or prev_dates.get(key)
