@@ -13,6 +13,7 @@ import { fileURLToPath } from "url";
 import {
   ATS_VENUE_SHARE_REFRESH,
   COT_POSITIONING_REFRESH,
+  IV_RANK_REFRESH,
   SHORT_CROWDING_REFRESH,
   dataAgeDays,
   nextRefreshLabel,
@@ -49,6 +50,10 @@ describe("schedule constants are pinned to the systemd timers", () => {
     expect(expectedOnCalendar(SHORT_CROWDING_REFRESH)).toBe(
       timerOnCalendar("radon-equibles-short-crowding.timer"),
     );
+  });
+
+  it("IV rank mirrors radon-ivrank.timer", () => {
+    expect(expectedOnCalendar(IV_RANK_REFRESH)).toBe(timerOnCalendar("radon-ivrank.timer"));
   });
 
   it("COT positioning mirrors radon-equibles-cot.timer", () => {
