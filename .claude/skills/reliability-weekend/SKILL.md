@@ -22,7 +22,7 @@ sequentially in this loop's own clone.
 2. **Never place, modify, or cancel a live order.** Fault injection is
    fakes/mocks only. Never set or clear the production trading halt.
 3. **Never push to `main`.** All changes land on a branch
-   `reliability/weekend-<YYYY-MM-DD>` and a PR. The human merge is the
+   `reliability/<YYYY-MM-DD>` and a PR. The human merge is the
    deploy trigger.
 4. **Never run against the operator's working clone.** Refuse (exit
    nonzero, say why) unless the file `.radon-weekend-runner` exists in the
@@ -70,8 +70,8 @@ Goal: a DELTA audit — judge what changed, don't re-audit the world.
    backlog rows (continuing REL-numbers) with fault-injection acceptance
    criteria. Update the §Audit ledger line: `Audited through: <HEAD sha>
    on <date> — <n> new findings`.
-6. Commit to the weekend branch, push the branch, and open (or update)
-   the weekend PR titled `Reliability weekend <date>` with the delta
+6. Commit to the nightly branch, push the branch, and open (or update)
+   the nightly PR titled `Reliability <date>` with the delta
    summary in the body. Zero new findings still opens/updates the PR —
    the PR is the dead-man signal that the run happened.
 
@@ -83,7 +83,7 @@ P0, then P1, then P2 (this run's items first, then older stragglers)
 run is not an outcome; every backlog item ends this run as DONE or
 BLOCKED-with-root-cause.
 
-1. Check out the weekend branch (create from `origin/main` if the audit
+1. Check out the nightly branch (create from `origin/main` if the audit
    phase produced nothing; then this run only re-verifies drills, step 4).
    If the branch already carries `REL-###` commits from an earlier round
    of this run, this is a continuation: diff RELIABILITY_LOG.md
@@ -114,8 +114,8 @@ BLOCKED-with-root-cause.
 
 Every phase outcome is reported three ways, so a silent-dead runner shows up
 the next morning at the latest: a comment on the rolling GitHub issue
-labeled `reliability-weekend`, a Pushover notification per phase carrying
-the status and the weekend PR link when one exists, and the PR itself.
+labeled `reliability-nightly`, a Pushover notification per phase carrying
+the status and the nightly PR link when one exists, and the PR itself.
 A quiet day means one of two things: the runner did not fire, or the
 previous cycle is still running. launchd will not start a second instance of
 a running label, so a long remediate phase legitimately suppresses that day's
@@ -228,7 +228,7 @@ how this loop improves as the codebase grows.
   agent's file list contained both the unit and the two catalogs. Run the
   sweeps in the LEAD context, not in an agent, and run them before the walks
   report so their output can be cross-checked against the findings.
-- 2026-08-22 (audit): **check for a remote weekend branch BEFORE numbering
+- 2026-08-22 (audit): **check for a remote nightly branch BEFORE numbering
   anything.** Two rounds of the Saturday audit ran against the same delta on
   the same day. The second finished a complete 81-finding section numbered
   R-084…R-164 and only discovered the collision when `git push` was rejected —
@@ -236,7 +236,7 @@ how this loop improves as the codebase grows.
   onto the remote, diffing 81 findings against 56 by file:line, dropping the 23
   duplicates and renumbering the rest to R-140…R-197. Do this FIRST, every run,
   before the walks are even launched:
-  `git ls-remote --heads origin reliability/weekend-<date>` and, if it exists,
+  `git ls-remote --heads origin reliability/<date>` and, if it exists,
   `git fetch` it and read its `## Delta audit` section — then scope the walks to
   what it did not cover, and start numbering after its highest R-###.
   Corollary: never `git push --force` to resolve this. The remote round is
@@ -256,7 +256,7 @@ how this loop improves as the codebase grows.
   Split the row at the id field, rewrite the body only, then set the id. Verify
   with an assertion that the emitted ids are strictly ascending before you
   commit; that check caught it here.
-- 2026-08-23 (remediate, continuation): **the weekend PR can already be
+- 2026-08-23 (remediate, continuation): **the nightly PR can already be
   MERGED when a continuation round finishes.** Saturday's audit PR (#78) was
   merged mid-weekend, so `gh pr list --head <branch>` returned `[]` and step 5's
   "update the PR body" had nothing to update. Check `--state all` before

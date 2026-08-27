@@ -75,17 +75,19 @@ WEEKEND_ROOT="$(dirname "$REPO")"
 VENV="$WEEKEND_ROOT/venv"
 # Activate the venv so any python3.13 calls inside the agent use it.
 [[ -f "$VENV/bin/activate" ]] && export PATH="$VENV/bin:$PATH"
-DEADMAN_TITLE="Weekend testing runner"
-DEADMAN_LABEL="testing-weekend"
-# Title prefix the skill opens/updates its PR under.
-PR_TITLE_PREFIX="Testing weekend"
+DEADMAN_TITLE="Nightly testing runner"
+DEADMAN_LABEL="testing-nightly"
+# Branch prefix the skill opens/updates its PR from. Matched on the head
+# ref, not the title: the title is now `Testing <date>`, which a
+# hand-written PR could also start with.
+PR_BRANCH_PREFIX="testing/"
 
 resolve_pr_url() {
   # Newest-updated open PR the skill opened for this loop. A gh failure or
   # no match must yield an empty string, never a non-zero exit under set -e.
   local url
-  url="$(gh pr list --state open --limit 20 --json url,title,updatedAt \
-    -q "[.[] | select(.title | startswith(\"$PR_TITLE_PREFIX\"))] | sort_by(.updatedAt) | reverse | .[0].url" \
+  url="$(gh pr list --state open --limit 20 --json url,headRefName,updatedAt \
+    -q "[.[] | select(.headRefName | startswith(\"$PR_BRANCH_PREFIX\"))] | sort_by(.updatedAt) | reverse | .[0].url" \
     2>/dev/null || true)"
   [[ "$url" == "null" ]] && url=""
   printf '%s' "$url"
@@ -115,7 +117,7 @@ log: \`${RUN_LOG##*/}\` on the runner"
     --json number -q '.[0].number' 2>/dev/null || true)"
   if [[ -z "$issue" ]]; then
     gh issue create --title "$DEADMAN_TITLE" --label "$DEADMAN_LABEL" \
-      --body "Rolling dead-man for the weekend testing loop. A missing daily comment means the runner did not fire." \
+      --body "Rolling dead-man for the nightly testing loop. A missing daily comment means the runner did not fire." \
       >/dev/null 2>&1 || true
     issue="$(gh issue list --label "$DEADMAN_LABEL" --state open \
       --json number -q '.[0].number' 2>/dev/null || true)"
