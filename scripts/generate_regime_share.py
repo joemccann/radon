@@ -31,6 +31,7 @@ PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
 from utils.card_screenshot import screenshot_card  # noqa: E402
+from utils.cta_percentiles import normalize_pctile, reconcile_tables  # noqa: E402
 
 DATA_DIR = PROJECT_ROOT / "data"
 SCHEDULED_DIR = DATA_DIR / "cri_scheduled"
@@ -83,7 +84,13 @@ def load_cri(target_date: Optional[str] = None) -> dict:
 
 # ── Helpers ───────────────────────────────────────────────────────
 
-def pctile_label(p: int) -> str:
+def pctile_label(p) -> str:
+    """Ordinal label, or `---` when there is no percentile.
+
+    The reconciler nulls a percentile its own z-score contradicts; unguarded
+    this rendered the literal string "Noneth". R-293.
+    """
+    if p is None: return "---"
     if p == 1: return "1st"
     if p == 2: return "2nd"
     if p == 3: return "3rd"
@@ -416,7 +423,10 @@ def build_tweet(data: dict, ds: str) -> str:
     est_selling = cta.get("est_selling_bn", 0) or 0
 
     menthorq = data.get("menthorq_cta") or {}
-    tables = menthorq.get("tables", {}) if isinstance(menthorq, dict) else {}
+    # Same reconciliation the CTA share path applies. Without it this surface
+    # reads the RAW rounded percentiles the reconciler exists to repair, so the
+    # two share images could tell opposite stories from one payload. R-293.
+    tables = reconcile_tables(menthorq.get("tables")) or {} if isinstance(menthorq, dict) else {}
     main = tables.get("main", []) if isinstance(tables, dict) else []
     spx_row = None
     for r in main:
@@ -445,7 +455,9 @@ def build_tweet(data: dict, ds: str) -> str:
 
     spx_pos = spx_row.get("position_today", 0) if spx_row else 0
     spx_z = spx_row.get("z_score_3m", 0) if spx_row else 0
-    spx_pctile = spx_row.get("percentile_3m", 0) if spx_row else 0
+    # `0` is the MAX SHORT reading, so defaulting a missing percentile to it
+    # publishes the most alarming story available for the absence of data.
+    spx_pctile = normalize_pctile(spx_row.get("percentile_3m")) if spx_row else None
 
     if triggered:
         hook = (
@@ -508,7 +520,7 @@ def build_tweet(data: dict, ds: str) -> str:
         )
         cta_note = (
             f"CTA positioning: SPX at {spx_pos:+.2f} "
-            f"({pctile_label(round(spx_pctile * 100) if spx_pctile < 1 else int(spx_pctile))} pctile, z={spx_z:.2f}). "
+            f"({pctile_label(spx_pctile)} pctile, z={spx_z:.2f}). "
             f"{'Max short territory — any bullish catalyst triggers violent covering.' if spx_z < -1.5 else 'Reducing but not yet at extremes.'}"
         )
 

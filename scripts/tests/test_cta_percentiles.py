@@ -91,6 +91,16 @@ def test_reconcile_tolerates_missing_and_empty_tables():
     assert reconcile_tables({"main": [], "index": None}) == {"main": [], "index": []}
 
 
-@pytest.mark.parametrize("raw,expected", [(0.9, 90), (90, 90), (0, 0), (None, 50), ("x", 50)])
-def test_normalize_pctile_keeps_its_existing_contract(raw, expected):
+# `(None, 50)` and `("x", 50)` were the OLD contract, changed deliberately by
+# R-291: returning the median for a value the reconciler had just nulled — for
+# contradicting its own z-score, or for having no z-score to check it — put a
+# confident "the 50th percentile" in front of every reader downstream. The rest
+# of the contract (scale disambiguation by TYPE) is unchanged and still pinned.
+@pytest.mark.parametrize("raw,expected", [(0.9, 90), (90, 90), (0, 0), (1, 1), (1.0, 100)])
+def test_normalize_pctile_keeps_its_scale_contract(raw, expected):
     assert normalize_pctile(raw) == expected
+
+
+@pytest.mark.parametrize("raw", [None, "x", ""])
+def test_normalize_pctile_reports_an_unknown_percentile_as_none(raw):
+    assert normalize_pctile(raw) is None

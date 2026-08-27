@@ -28,16 +28,23 @@ PERCENTILE_FIELDS = ("percentile_1m", "percentile_3m", "percentile_1y")
 Z_DISAGREEMENT_LIMIT = 35
 
 
-def normalize_pctile(p: Any) -> int:
-    """Percentile as 0-100. The main table ships 0-100 ints; the index and
-    commodity tables ship 0-1 fractions. Both reach this module.
+def normalize_pctile(p: Any) -> Optional[int]:
+    """Percentile as 0-100, or ``None`` when there is no percentile.
 
-    Disambiguate by TYPE, not by range: an int 1 is the 1st percentile (max
-    short) while a float 1.0 is the 100th (max long). A range test alone reads
-    them identically and silently inverts the entire narrative.
+    The main table ships 0-100 ints; the index and commodity tables ship 0-1
+    fractions. Both reach this module. Disambiguate by TYPE, not by range: an
+    int 1 is the 1st percentile (max short) while a float 1.0 is the 100th
+    (max long). A range test alone reads them identically and silently inverts
+    the entire narrative.
+
+    ``None`` for anything non-numeric. This used to return 50, which turned a
+    percentile the reconciler had DELIBERATELY nulled — because its own z-score
+    contradicted it, or because no z-score could verify it — back into a
+    confident "the 50th percentile" for every reader downstream. An absent
+    percentile is not a median one. R-291.
     """
     if isinstance(p, bool) or not isinstance(p, (int, float)):
-        return 50
+        return None
     if isinstance(p, int):
         return max(0, min(100, p))
     return int(round(p * 100)) if 0.0 <= p <= 1.0 else int(round(p))
