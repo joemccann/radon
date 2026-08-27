@@ -550,7 +550,12 @@ jobs:
     # own deploy.sh there, so it must wait on exactly the gate `deploy` waits
     # on. Without it, untested code executed on production before a single
     # test ran, and `continue-on-error` hid the fact. R-201.
-    needs: [secret-scan, changes, web-tests, py-tests, cloud-tests, perimeter-smoke]
+    #
+    # Keep this list identical to `deploy.needs` minus `stage-release` itself.
+    # `test_ci_gate_integrity.py` derives the gate FROM `deploy.needs` and will
+    # fail if the two drift again — which is how web-coverage and py-coverage
+    # were found missing here. R-299.
+    needs: [secret-scan, changes, web-tests, web-coverage, py-tests, py-coverage, cloud-tests, perimeter-smoke]
     if: >-
       github.ref == 'refs/heads/main' && github.event_name == 'push' && !cancelled()
       && needs.secret-scan.result == 'success'
