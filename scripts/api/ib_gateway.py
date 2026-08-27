@@ -244,6 +244,12 @@ def restart_backoff_state() -> Dict:
     Includes ``push_lock`` so operators inspecting /health can tell at a
     glance whether a fresh restart would be blocked by an in-flight 2FA
     push from another holder.
+
+    BLOCKING. The ``push_lock`` read reaches ``_is_orphaned``, which runs
+    ORPHAN_CONFIRM_PROBES socket connects with sleeps between them whenever a
+    lease is held past its grace and the port is down — the incident state, and
+    ~1.85s per call. Async callers must reach it via ``asyncio.to_thread``.
+    T-201.
     """
     now = time.time()
     lock = _check_2fa_push_lock_bounded(now)
@@ -1264,7 +1270,7 @@ async def check_ib_gateway(
         # The admin panel uses this state to prevent duplicate IBKR pushes.
         # It is local control-plane state and must be present regardless of
         # where the Gateway itself runs.
-        result["restart_backoff"] = restart_backoff_state()
+        result["restart_backoff"] = await asyncio.to_thread(restart_backoff_state)
         if not result.get("port_listening") or result.get("upstream_dead"):
             result["auth_state"] = "unreachable"
         elif pool_status:
@@ -1288,7 +1294,7 @@ async def check_ib_gateway(
         result = await _check_launchd()
 
     result["auth_state"] = _derive_auth_state(result, pool_status)
-    result["restart_backoff"] = restart_backoff_state()
+    result["restart_backoff"] = await asyncio.to_thread(restart_backoff_state)
 
     if pool is not None:
         await handle_auth_state_transition(result["auth_state"], pool)
