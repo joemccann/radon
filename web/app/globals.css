@@ -10965,6 +10965,14 @@ tr {
   color: var(--text-muted);
 }
 
+/* No data date at all. Muted, not amber: nothing is known to be LATE — the
+   panel simply holds no date, which is not the same claim. R-306. */
+.freshness-rail[data-state="unknown"] .freshness-rail-countdown,
+.freshness-rail[data-state="unknown"] .freshness-rail-note,
+.freshness-rail[data-state="unknown"] .freshness-rail-anchor {
+  color: var(--text-muted);
+}
+
 @media (max-width: 760px) {
   .freshness-rail {
     grid-template-columns: minmax(0, 1fr) minmax(0, auto);
@@ -12856,6 +12864,14 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
 .ticket-risk-payoff-wrap {
   padding: 8px 10px;
   border-top: 1px solid var(--line-grid);
+}
+
+.ticket-risk-payoff-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  padding-bottom: 4px;
 }
 
 .ticket-risk-payoff {

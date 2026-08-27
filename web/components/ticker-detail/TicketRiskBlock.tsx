@@ -33,9 +33,18 @@ type TicketRiskBlockProps = {
 
 const DASH = "---";
 
-function usd(value: number | null, fractionDigits = 2): string {
+/**
+ * Signed by default. A negative FUNDS AFTER means the order overdraws the
+ * account; rendering it as `$12,000` made "short" and "spare" the same six
+ * characters (R-279). Callers that genuinely want a magnitude — MAX GAIN,
+ * MAX LOSS and the total, whose sign the label already carries — pass
+ * `magnitude`.
+ */
+function usd(value: number | null, fractionDigits = 2, magnitude = false): string {
   if (value == null || !Number.isFinite(value)) return DASH;
-  return `$${Math.abs(value).toLocaleString("en-US", {
+  const shown = magnitude ? Math.abs(value) : value;
+  const sign = shown < 0 ? "-" : "";
+  return `${sign}$${Math.abs(shown).toLocaleString("en-US", {
     minimumFractionDigits: fractionDigits,
     maximumFractionDigits: fractionDigits,
   })}`;
@@ -95,38 +104,47 @@ export default function TicketRiskBlock({
 
   return (
     <div className="ticket-risk" data-testid="ticket-risk">
+      {/* The grid is fed from the WHOLE-ORDER risk summary; only the payoff
+          curve below is per-combo. One heading claiming "PER 1× COMBO" over
+          both was wrong for six of the cells (R-280). */}
       <div className="ticket-risk-head">
         <span>RISK · ORDER TOTAL</span>
       </div>
 
       <div className="ticket-risk-grid">
-        <Cell label="MAX GAIN" value={usd(maxGain)} tone={maxGain != null ? "gain" : undefined} />
+        <Cell label="MAX GAIN" value={usd(maxGain, 2, true)} tone={maxGain != null ? "gain" : undefined} />
         <Cell
           label="MAX LOSS"
-          value={maxLossUnbounded ? "UNBOUNDED" : usd(maxLoss)}
+          value={maxLossUnbounded ? "UNBOUNDED" : usd(maxLoss, 2, true)}
           tone={maxLossUnbounded || maxLoss != null ? "loss" : undefined}
         />
         <Cell label="BREAKEVENS" value={breakevenLabel} />
         <Cell label="P(PROFIT)" value={DASH} />
         <Cell
           label="MARGIN REQ"
-          value={usd(marginRequirement, 0)}
+          value={usd(marginRequirement, 0, true)}
           tone={marginRequirement != null ? "warn" : undefined}
         />
-        <Cell label="FUNDS AFTER" value={usd(fundsAfter, 0)} />
+        <Cell
+          label="FUNDS AFTER"
+          value={usd(fundsAfter, 0)}
+          tone={fundsAfter != null && fundsAfter < 0 ? "loss" : undefined}
+        />
       </div>
 
       <div className="ticket-risk-total">
         <span>
           {totalLabel}{" "}
           <strong className={isCredit ? "ticket-risk-cell-value--gain" : undefined}>
-            {total == null ? DASH : `${usd(total)}${isCredit ? " CR" : " DR"}`}
+            {total == null ? DASH : `${usd(total, 2, true)}${isCredit ? " CR" : " DR"}`}
           </strong>
         </span>
       </div>
 
       {geometry && (
         <div className="ticket-risk-payoff-wrap">
+          {/* This curve and the BREAKEVENS cell are the per-combo figures. */}
+          <div className="ticket-risk-payoff-label">AT EXPIRY · PER 1× COMBO</div>
           <svg
             className="ticket-risk-payoff"
             viewBox={`0 0 ${CURVE_W} ${CURVE_H}`}

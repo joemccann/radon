@@ -38,8 +38,19 @@ function localDayKey(date: Date): number {
 
 /** "Today 18:10" reads faster than a date, and the date is only worth spelling
  *  out once the wait crosses into a day the reader has to think about. */
+/** The viewer's own zone abbreviation, so a bare "18:10" is not ambiguous. */
+function zoneMarker(target: Date): string {
+  const part = new Intl.DateTimeFormat([], { timeZoneName: "short" })
+    .formatToParts(target)
+    .find((p) => p.type === "timeZoneName");
+  return part?.value ?? "";
+}
+
 function targetLabel(target: Date, now: Date): string {
-  const time = target.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  const zone = zoneMarker(target);
+  const time =
+    target.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }) +
+    (zone ? ` ${zone}` : "");
   const delta = localDayKey(target) - localDayKey(now);
   if (delta === 0) return `Today ${time}`;
   if (delta === 1) return `Tomorrow ${time}`;
@@ -58,7 +69,18 @@ export default function FreshnessRail({ schedule, asOf, testId, asOfTestId }: Fr
   }, []);
 
   const rail = now ? computeFreshnessRail(schedule, asOf, now) : null;
-  const state = !rail ? "pending" : rail.overdue ? "overdue" : rail.behind ? "behind" : "current";
+  // An unknown date is its own state: the rail used to render the calm
+  // "Current" note with a ticking countdown over a panel holding no date at
+  // all. R-306.
+  const state = !rail
+    ? "pending"
+    : rail.unknown
+      ? "unknown"
+      : rail.overdue
+        ? "overdue"
+        : rail.behind
+          ? "behind"
+          : "current";
 
   const countdown = rail ? (rail.overdue ? "Due" : formatCountdown(rail.msRemaining)) : "--";
   const note = !rail
@@ -68,9 +90,11 @@ export default function FreshnessRail({ schedule, asOf, testId, asOfTestId }: Fr
       : targetLabel(rail.nextSampleAt, now!);
   const anchorNote = !rail
     ? null
-    : rail.awaitingSession
-      ? `Awaiting ${rail.awaitingSession}`
-      : "Current";
+    : rail.unknown
+      ? "Unknown"
+      : rail.awaitingSession
+        ? `Awaiting ${rail.awaitingSession}`
+        : "Current";
 
   return (
     <div

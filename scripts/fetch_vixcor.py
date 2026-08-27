@@ -429,6 +429,27 @@ def build_payload(
 
 # ── orchestration ─────────────────────────────────────────────────
 
+def _record_error_health(message: str, error_class: str) -> None:
+    """Error heartbeat for the paths that never reach `_write_db`.
+
+    A row that NEVER appears is worse than a stale one: this service's
+    freshness window is measured in days, so a cycle that dies silently is
+    indistinguishable from one that simply has not fired yet. Best-effort — a
+    broken writer must not mask the original failure.
+    """
+    try:
+        from db import writer
+
+        writer.record_service_health(
+            SERVICE,
+            "error",
+            finished_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            error={"message": message, "class": error_class},
+        )
+    except Exception as exc:  # noqa: BLE001 — best-effort mirror
+        print(f"[vixcor] error heartbeat non-fatal: {exc}", file=sys.stderr)
+
+
 def run(
     client: Optional[Any] = None,
     *,
@@ -449,66 +470,75 @@ def run(
 
         client = CboeClient()
 
-    cached = load_prior_payload()
-    cached_stamp = ((cached or {}).get("source_last_modified") or {}).get("vix")
-    text, last_modified = client.fetch_history(VIX_SYMBOL, if_modified_since=cached_stamp)
+    # `run()` had no `try` at all, so every raise between here and `_write_db`
+    # — a Cboe fetch failure, an unparseable CSV, and both explicit ValueErrors
+    # below — exited the daily oneshot with NO service_health row. The service
+    # carries a multi-day freshness window, so that read as ordinary staleness
+    # days later rather than as the failure it was. R-276.
+    try:
+        cached = load_prior_payload()
+        cached_stamp = ((cached or {}).get("source_last_modified") or {}).get("vix")
+        text, last_modified = client.fetch_history(VIX_SYMBOL, if_modified_since=cached_stamp)
 
-    if cached and text is None:
-        print("[vixcor] all sources unchanged (304); refreshing snapshot only", file=sys.stderr)
-        payload, health_error = restate_cached_payload(cached, scan_time=scan_time, now=now)
-        _write_db(payload, scan_time, rows_changed=False, health_error=health_error)
+        if cached and text is None:
+            print("[vixcor] all sources unchanged (304); refreshing snapshot only", file=sys.stderr)
+            payload, health_error = restate_cached_payload(cached, scan_time=scan_time, now=now)
+            _write_db(payload, scan_time, rows_changed=False, health_error=health_error)
+            persist_json(payload)
+            return payload
+
+        if text is None:
+            text, last_modified = client.fetch_history(VIX_SYMBOL)
+        if text is None:
+            raise ValueError("vixcor: no VIX history returned and no cached payload")
+
+        vix_rows = parse_index_csv(text)
+        cor3m_rows = load_cor3m_rows()
+        joined = join_series(vix_rows, cor3m_rows)
+        if not joined:
+            raise ValueError("vixcor series computed to zero rows")
+
+        expected_session = _expected_session(now)
+        parent_as_of = max(row["date"] for row in cor3m_rows)
+        vix_as_of = max(row["date"] for row in vix_rows)
+        lag_sessions = count_vix_sessions_between(
+            [row["date"] for row in vix_rows], parent_as_of, expected_session
+        )
+        status, health_error = _parent_lag_state(
+            lag_sessions,
+            parent_as_of=parent_as_of,
+            expected_session=expected_session,
+            now=now,
+        )
+
+        payload = build_payload(
+            joined,
+            scan_time=scan_time,
+            source_last_modified={"vix": last_modified},
+            status=status,
+            expected_session=expected_session,
+            lag_sessions=lag_sessions,
+            parent_as_of=parent_as_of,
+            vix_as_of=vix_as_of,
+            market_status=_market_status(now),
+        )
+        print(
+            f"[vixcor] {payload['count']} joined sessions through {payload['as_of']} "
+            f"({payload['corr_count']} with a 20-session reading)",
+            file=sys.stderr,
+        )
+        _write_db(
+            payload,
+            scan_time,
+            rows_changed=True,
+            vix_tail=_vix_tail(vix_rows, backfill=backfill),
+            health_error=health_error,
+        )
         persist_json(payload)
         return payload
-
-    if text is None:
-        text, last_modified = client.fetch_history(VIX_SYMBOL)
-    if text is None:
-        raise ValueError("vixcor: no VIX history returned and no cached payload")
-
-    vix_rows = parse_index_csv(text)
-    cor3m_rows = load_cor3m_rows()
-    joined = join_series(vix_rows, cor3m_rows)
-    if not joined:
-        raise ValueError("vixcor series computed to zero rows")
-
-    expected_session = _expected_session(now)
-    parent_as_of = max(row["date"] for row in cor3m_rows)
-    vix_as_of = max(row["date"] for row in vix_rows)
-    lag_sessions = count_vix_sessions_between(
-        [row["date"] for row in vix_rows], parent_as_of, expected_session
-    )
-    status, health_error = _parent_lag_state(
-        lag_sessions,
-        parent_as_of=parent_as_of,
-        expected_session=expected_session,
-        now=now,
-    )
-
-    payload = build_payload(
-        joined,
-        scan_time=scan_time,
-        source_last_modified={"vix": last_modified},
-        status=status,
-        expected_session=expected_session,
-        lag_sessions=lag_sessions,
-        parent_as_of=parent_as_of,
-        vix_as_of=vix_as_of,
-        market_status=_market_status(now),
-    )
-    print(
-        f"[vixcor] {payload['count']} joined sessions through {payload['as_of']} "
-        f"({payload['corr_count']} with a 20-session reading)",
-        file=sys.stderr,
-    )
-    _write_db(
-        payload,
-        scan_time,
-        rows_changed=True,
-        vix_tail=_vix_tail(vix_rows, backfill=backfill),
-        health_error=health_error,
-    )
-    persist_json(payload)
-    return payload
+    except Exception as exc:  # noqa: BLE001 — re-raised; the row must exist first
+        _record_error_health(f"{SERVICE}: {exc}", "cycle_failed")
+        raise
 
 
 # ── CLI ───────────────────────────────────────────────────────────

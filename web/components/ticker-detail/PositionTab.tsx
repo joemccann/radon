@@ -231,12 +231,13 @@ function PositionView({
     // A multi-leg position quoted as a spread prices off that quote, not off
     // the legs — the combo's own market is the better mark.
     if (spreadPriceData?.last != null) {
-      const mult = getMultiplier(position);
-      const units = heldComboUnits(position);
-      return {
-        mv: spreadPriceData.last * units * mult,
-        lastPrice: spreadPriceData.last,
-      };
+      // The combo quote is the better MARK, but it is not a market value:
+      // `getMultiplier(position)` collapses to 1 the moment any leg is stock,
+      // so a covered call valued its short calls at 1x and disagreed with
+      // PositionTable by the option notional. Market value stays with the one
+      // shared per-leg walk; the spread quote supplies only the price. R-285.
+      const rtMv = resolveRealtimeMarketValue(position, prices);
+      if (rtMv != null) return { mv: rtMv, lastPrice: spreadPriceData.last };
     }
     // Options: ONE market value per position, shared with the table, the
     // mobile card and getTodayPnlDollars. A tab-local walk of the same legs is

@@ -225,7 +225,7 @@ export default function AttributionPanel({
   return (
     <div data-testid="attribution-panel">
       {/* Gate-3 correlation risk-budget guard */}
-      <CorrelationRiskBanner report={riskBudget} />
+      <CorrelationRiskBanner report={riskBudget} showUnavailable />
 
       {/* Strategy Attribution */}
       <div className="sx">

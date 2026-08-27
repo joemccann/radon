@@ -281,6 +281,7 @@ function OrderBuilder({
   const [limitPrice, setLimitPrice] = useState("");
   const [priceManuallySet, setPriceManuallySet] = useState(false);
   const [loading, setLoading] = useState(false);
+  const inFlightRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const orderActions = useOrderActionsOptional();
   const [confirmStep, setConfirmStep] = useState(false);
@@ -501,6 +502,10 @@ function OrderBuilder({
     // Defence in depth: the disabled button is UI, this is the actual gate.
     // An unbounded-risk order never reaches the wire unacknowledged.
     if (!transmitArmed) return;
+    // `loading` is state, so it is not visible to a second call in the same
+    // tick; the ref is what actually stops a double-send (R-281).
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
 
     setLoading(true);
     setError(null);
@@ -555,6 +560,7 @@ function OrderBuilder({
     } catch {
       setError("Network error placing order");
     } finally {
+      inFlightRef.current = false;
       setLoading(false);
     }
   }, [

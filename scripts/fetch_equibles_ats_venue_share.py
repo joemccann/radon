@@ -442,6 +442,24 @@ def payload_has_data(payload: dict[str, Any]) -> bool:
     return bool(payload.get("current"))
 
 
+# A cycle covering less than this fraction of the resolved universe is not a
+# cycle, it is a partial read that happens to have some rows in it.
+MIN_COVERAGE_RATIO = 0.6
+# Below this many requested tickers the ratio says nothing useful — one failure
+# out of two is 50% — and the run is almost always a deliberate `--tickers`
+# override rather than the scheduled watchlist sweep. The all-empty gate still
+# applies at every size.
+MIN_UNIVERSE_FOR_RATIO = 5
+
+
+def has_sufficient_coverage(covered: int, requested: int) -> bool:
+    if requested <= 0:
+        return False
+    if requested < MIN_UNIVERSE_FOR_RATIO:
+        return covered > 0
+    return covered / requested >= MIN_COVERAGE_RATIO
+
+
 # ── persistence ───────────────────────────────────────────────────
 
 def ats_venue_share_upsert(
@@ -580,7 +598,15 @@ def run(
     One ticker's failure is recorded and stepped over: a 404 on a delisted
     watchlist name must not cost the other tickers their refresh.
     """
-    from clients.equibles_client import EquiblesAPIError
+    from clients.equibles_client import (
+        EquiblesAPIError,
+        EquiblesAuthError,
+        EquiblesRateLimitError,
+    )
+
+    # Both subclass EquiblesAPIError, so the per-ticker handler below caught
+    # them. Neither is a per-ticker condition.
+    _CYCLE_FATAL = (EquiblesAuthError, EquiblesRateLimitError)
 
     now = now or datetime.now(timezone.utc)
     scan_time = now.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -590,6 +616,7 @@ def run(
     owned_client = client is None
     series_by_ticker: dict[str, list[dict[str, Any]]] = {}
     errors: list[dict[str, Any]] = []
+    universe: list[str] = list(tickers) if tickers else []
     # Client construction is INSIDE the health-reporting try: an absent or
     # rejected EQUIBLES_API_KEY raises EquiblesAuthError from
     # EquiblesClient.__init__, and outside the try that killed the oneshot
@@ -601,18 +628,37 @@ def run(
             from clients.equibles_client import EquiblesClient
             client = EquiblesClient()
 
-        for ticker in tickers or watchlist_tickers():
+        universe = list(tickers or watchlist_tickers())
+        for ticker in universe:
             try:
                 series = _fetch_ticker(
                     client, ticker, start_date.isoformat(), end_date.isoformat()
                 )
+            except _CYCLE_FATAL:
+                # An exhausted allowance or a rejected key is not a gap in THIS
+                # ticker's data — every remaining ticker fails for the same
+                # reason. Swallowing it per-ticker turned one condition into 37
+                # individual "errors" and still finished the cycle. R-294.
+                raise
             except EquiblesAPIError as exc:
                 errors.append({"ticker": ticker, "error": str(exc), "code": exc.code})
                 continue
             if series:
                 series_by_ticker[ticker] = series
     except Exception as exc:  # noqa: BLE001 — re-raised; the row must exist first
-        _record_health("error", scan_time, error={"message": f"cycle aborted: {exc}"})
+        # Carry the coverage counts: an abort at ticket 3 of 40 and an abort at
+        # ticket 39 are very different operational facts, and "cycle aborted"
+        # alone cannot tell them apart.
+        _record_health(
+            "error",
+            scan_time,
+            error={
+                "message": f"cycle aborted: {exc}",
+                "requested": len(universe),
+                "covered": len(series_by_ticker),
+                "failed": len(errors),
+            },
+        )
         raise
     finally:
         if owned_client and client is not None:
@@ -620,12 +666,47 @@ def run(
 
     payload = build_payload(series_by_ticker, scan_time, errors)
     if not payload_has_data(payload):
-        _record_health("error", scan_time, error={"message": "no ticker produced a series"})
+        _record_health(
+            "error",
+            scan_time,
+            error={
+                "message": "no ticker produced a series",
+                "requested": len(universe),
+                "failed": len(errors),
+            },
+        )
         return payload
+
+    # Coverage gate. `payload_has_data` passes on ONE ticker out of forty, so a
+    # cycle that served 3 and then died was written as `ok` AND replaced the
+    # complete snapshot underneath it. A thin cycle is reported, and the good
+    # snapshot is left alone. R-294.
+    covered = len(series_by_ticker)
+    if not has_sufficient_coverage(covered, len(universe)):
+        _record_health(
+            "error",
+            scan_time,
+            error={
+                "message": (
+                    f"partial cycle: {covered}/{len(universe)} tickers covered, "
+                    f"below the {MIN_COVERAGE_RATIO:.0%} floor"
+                ),
+                "requested": len(universe),
+                "covered": covered,
+                "failed": len(errors),
+            },
+        )
+        return {**payload, "partial": True}
 
     _write_db_cache(payload, scan_time)
     _write_json_cache(payload)
-    _record_health("ok", scan_time)
+    _record_health(
+        "ok",
+        scan_time,
+        error={"requested": len(universe), "covered": covered, "failed": len(errors)}
+        if errors
+        else None,
+    )
     return payload
 
 

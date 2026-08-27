@@ -55,6 +55,7 @@ except Exception:
     pass
 
 from clients.ib_client import DEFAULT_HOST
+from utils.cta_percentiles import normalize_pctile
 from utils.ib_preflight import (
     IB_REQUEST_TIMEOUT_S,
     ib_auth_state as _ib_auth_state,
@@ -1143,6 +1144,13 @@ def print_summary(result: Dict[str, Any], market_open: bool) -> None:
 # HTML Report
 # ══════════════════════════════════════════════════════════════════
 
+def _pctile_tone_class(p: Optional[int]) -> str:
+    """Tone for a 3M percentile cell; neutral when there is no percentile."""
+    if p is None:
+        return "text-muted"
+    return "text-negative" if p < 25 else "text-positive" if p > 75 else "text-warning"
+
+
 def generate_html_report(
     result: Dict[str, Any],
     market_open: bool,
@@ -1304,21 +1312,14 @@ def generate_html_report(
         spx = menthorq.get("spx")
         if spx:
             pos_t = spx.get("position_today", 0)
-            # The reconciler nulls a percentile its own z-score contradicts, and
-            # the key is present carrying that null, so a `.get` default never
-            # fires. Skip the band rather than substituting a midpoint: a
-            # fabricated 50 reads on the card as a real reading.
-            pctl_3m = spx.get("percentile_3m")
-            pctl_1y = spx.get("percentile_1y")
+            pctl_3m = normalize_pctile(spx.get("percentile_3m"))
+            pctl_1y = normalize_pctile(spx.get("percentile_1y"))
             z3 = spx.get("z_score_3m", 0)
-            # Color code: low percentile = bearish (red), high = bullish (green)
-            pctl_cls = (
-                ""
-                if pctl_3m is None
-                else "text-negative" if pctl_3m < 25
-                else "text-positive" if pctl_3m > 75
-                else "text-warning"
-            )
+            # Color code: low percentile = bearish (red), high = bullish (green).
+            # `None` is not a number to compare — the reconciler nulls a
+            # percentile its own z-score contradicts, and `None < 25` raised a
+            # TypeError that took the whole scan down. R-298.
+            pctl_cls = _pctile_tone_class(pctl_3m)
             z_cls = "text-negative" if z3 < -1.5 else "text-positive" if z3 > 1.5 else ""
 
             body_parts.append(f"""

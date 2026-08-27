@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Minus, Plus, X } from "lucide-react";
 import {
   type OrderLeg,
@@ -15,6 +15,7 @@ import { normalizeOptionExpiry, optionKey } from "@/lib/pricesProtocol";
 import type { PriceData } from "@/lib/pricesProtocol";
 import TicketRiskBlock from "@/components/ticker-detail/TicketRiskBlock";
 import { netPremiumForPayoff, payoffAtExpiry, payoffCurve } from "@/lib/order/payoff";
+import { OPTION_MULTIPLIER } from "@/lib/order/costs";
 import { OrderQuoteTelemetry } from "@/components/QuoteTelemetry";
 import { buildQuoteTelemetryModel, comboQuotePriceData } from "@/lib/quoteTelemetry";
 import type { PortfolioData } from "@/lib/types";
@@ -168,6 +169,7 @@ export default function MobileOrderTicket({
   const [priceManuallySet, setPriceManuallySet] = useState(false);
   const [confirmStep, setConfirmStep] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const inFlightRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<PlaceOrderFeedback | null>(null);
   const [riskState, setRiskState] = useState<OrderRiskState | null>(null);
@@ -179,6 +181,9 @@ export default function MobileOrderTicket({
   const netPrice = computeNetPrice(pricingLegs, prices);
   const isDebit = netPrice != null ? netPrice > 0 : null;
   const totalQty = normalizedOrder?.quantity ?? (legs.length > 0 ? legs[0].quantity : 1);
+  // One named source for the contract multiplier instead of a `* 100`
+  // repeated at four sites (R-278).
+  const contractMultiplier = OPTION_MULTIPLIER;
 
   const quotingLegs = useMemo(() => {
     if (legs.length === 0) return legs;
@@ -305,7 +310,7 @@ export default function MobileOrderTicket({
   // regardless of whether live WS bid/ask have populated.
   const riskInput: OrderRiskInput | null = useMemo(() => {
     if (!isValidPrice || legs.length === 0) return null;
-    const totalCost = reviewPrice * totalQty * 100;
+    const totalCost = reviewPrice * totalQty * contractMultiplier;
     const description = `${structure || "Option"} @ ${fmtPrice(reviewPrice)}`;
 
     // Close-out branch (single-leg only). Mirrors OrderTab: the gate's
@@ -314,7 +319,7 @@ export default function MobileOrderTicket({
     // bug that read −$635,055 on a $19,389.45 winner).
     if (singleLeg && closeKind && heldContract) {
       const qty = Math.max(1, Math.trunc(singleLeg.quantity));
-      const gross = reviewPrice * qty * 100;
+      const gross = reviewPrice * qty * contractMultiplier;
       if (closeKind === "sell-to-close") {
         return {
           ticker,
@@ -395,6 +400,9 @@ export default function MobileOrderTicket({
    * 10-lot 970 call sold at 2.98 breaks even at 970.30 instead of 972.98) and
    * then get scaled by `totalQty` a second time in the sentence below.
    */
+  // Ratio-normalised so the curve describes ONE combo, matching
+  // OptionsChainTab's payoffLegs. Built from `legs` the quantity was applied
+  // twice: once inside the curve and again at `* (totalQty || 1)` below.
   const payoffLegs = useMemo(
     () =>
       quotingLegs.map((leg) => ({
@@ -413,14 +421,14 @@ export default function MobileOrderTicket({
     const premium = netPremiumForPayoff(payoffLegs, legs.length > 1, signedLimitPrice);
     const curve = payoffCurve(payoffLegs, premium, { spot: spot ?? 0 });
     const turn = curve.breakevens.length > 0 ? curve.breakevens[curve.breakevens.length - 1] : null;
-    const atZero = payoffAtExpiry(payoffLegs, premium, 0) * 100 * (totalQty || 1);
+    const atZero = payoffAtExpiry(payoffLegs, premium, 0) * contractMultiplier * (totalQty || 1);
     const parts: string[] = [];
     if (turn != null) parts.push(`Loss grows without limit beyond ${turn.toFixed(2)}`);
     if (Number.isFinite(atZero) && atZero < 0) {
       parts.push(`and reaches $${Math.abs(atZero).toLocaleString("en-US", { maximumFractionDigits: 0 })} at zero`);
     }
     return { sentence: parts.length > 0 ? `${parts.join(" ")}.` : "Loss grows without limit." };
-  }, [gateRiskState, payoffLegs, legs.length, signedLimitPrice, spot, totalQty]);
+  }, [gateRiskState, payoffLegs, legs.length, signedLimitPrice, spot, totalQty, contractMultiplier]);
 
   const [riskAcknowledged, setRiskAcknowledged] = useState(false);
   useEffect(() => {
@@ -460,9 +468,14 @@ export default function MobileOrderTicket({
     // Review button sets confirmStep; handleSubmit never places until then.
     if (!confirmStep) return;
     if (!isValid || !okToSubmit) return;
-    // Defence in depth: the disabled button is UI, this is the actual gate.
-    // An unbounded-risk order never reaches the wire unacknowledged.
+    // Defence in depth, same as the desktop rail: the disabled button is UI,
+    // this is the actual gate. An unbounded-risk order never reaches the wire
+    // unacknowledged (R-281).
     if (!transmitArmed) return;
+    // `submitting` is state, so it is not visible to a second call in the
+    // same tick; the ref is what actually stops a double-send.
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     setSubmitting(true);
     setError(null);
     setSuccess(null);
@@ -527,6 +540,7 @@ export default function MobileOrderTicket({
     } catch {
       setError("Network error placing order");
     } finally {
+      inFlightRef.current = false;
       setSubmitting(false);
     }
   };
@@ -553,7 +567,7 @@ export default function MobileOrderTicket({
 
   // Teasers (build view). Notional = |limit| × totalQty × 100. The verb tracks
   // the cash direction: a debit is paid, a credit is received.
-  const notionalDollars = isValidPrice ? Math.abs(reviewPrice) * totalQty * 100 : null;
+  const notionalDollars = isValidPrice ? Math.abs(reviewPrice) * totalQty * contractMultiplier : null;
   const notionalVerb = netIsCredit ? "receive" : "pay";
   const riskTeaser = (() => {
     if (!teaserState) return null;
