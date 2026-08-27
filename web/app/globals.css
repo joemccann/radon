@@ -10965,6 +10965,14 @@ tr {
   color: var(--text-muted);
 }
 
+/* No data date at all. Muted, not amber: nothing is known to be LATE — the
+   panel simply holds no date, which is not the same claim. R-306. */
+.freshness-rail[data-state="unknown"] .freshness-rail-countdown,
+.freshness-rail[data-state="unknown"] .freshness-rail-note,
+.freshness-rail[data-state="unknown"] .freshness-rail-anchor {
+  color: var(--text-muted);
+}
+
 @media (max-width: 760px) {
   .freshness-rail {
     grid-template-columns: minmax(0, 1fr) minmax(0, auto);
