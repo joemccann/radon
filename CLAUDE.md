@@ -72,6 +72,8 @@ Any gate fails → stop. Name the gate.
 - After any UI change, verify live in the browser (Playwright or claude-in-chrome) and capture a screenshot as evidence — do not claim a fix works based on tests alone.
 - If tests pass/fail inconsistently, re-run the suspect test file in isolation before concluding your change caused it; test-ordering pollution and pre-existing flake are common in this repo.
 - Always confirm `pwd` before running vitest/pytest — cwd drift has repeatedly produced bogus failures.
+- **A gated action is tested at the wire, not at the button.** Any control that fires a network call from behind a guard (a `disabled` prop, an acknowledgement, a confirm step, an `okToSubmit` / `permitted` / `armed` flag) needs a test that clicks it in its ARMED state and asserts the REQUEST — full URL string, method, payload shape — plus a paired assertion that nothing fired while the gate was still closed. Stub `fetch` and render the component that OWNS the fetch, not a presentational child: a test that stops at a `vi.fn()` prop, at `button.disabled === false`, at label text, or at dialog visibility has verified the gate and nothing on the wire. Match the full path (`"/api/admin/services/radon-api.service/stop"`), never `url.includes("/api/…")`, so a wrong unit, action, or endpoint fails. Reference: `web/tests/admin-action-request-assertions.test.tsx`, `web/tests/chain-transmit-gate.test.tsx`.
+- **`react-hooks/exhaustive-deps` is a WARNING here and does not block CI.** Treat a `useCallback` handler whose dep array omits a guard or state value its body reads as a defect to fix on sight — that is exactly how an armed Transmit button shipped closed over a stale acknowledgement and silently sent no order (2026-08-27).
 
 ## UI Copy Rules
 
