@@ -19,6 +19,7 @@ client copy told the operator to refresh for a proven-persistent condition.
 from __future__ import annotations
 
 import asyncio
+import re
 import sys
 from pathlib import Path
 
@@ -180,3 +181,135 @@ class TestExhaustedShedIsDistinct:
             )
         )
         assert result.ok is True
+
+
+class TestTheShedBudgetIsActuallySpent:
+    """2026-08-28: /flow-analysis/AMZN served a Jun 16 report.
+
+    A capacity shed is fail-fast — `_claim_subprocess_slot` returns False with
+    no awaits — so the whole retry chain cost ~21s of a 120s budget and 502'd
+    at 18:24:21 while the journal shows general-lane slots freeing every few
+    seconds (regime/gex/vcg scans completing at 18:24:30-35). The Next.js
+    route then served the June cache. `retries` was the real bound, never the
+    deadline it was paired with.
+    """
+
+    @staticmethod
+    def _budget_clock(monkeypatch, calls, timeouts):
+        clock = {"t": 0.0}
+
+        async def _run(_script, _args, *, timeout):
+            calls.append(clock["t"])
+            timeouts.append(timeout)
+            return _shed_result()
+
+        async def _sleep(secs):
+            clock["t"] += secs
+
+        monkeypatch.setattr(server, "run_script", _run)
+        monkeypatch.setattr(server.asyncio, "sleep", _sleep)
+        monkeypatch.setattr(server.time, "monotonic", lambda: clock["t"])
+
+    def test_a_shed_chain_probes_the_lane_for_most_of_its_budget(self, monkeypatch):
+        calls: list[float] = []
+        timeouts: list[float] = []
+        self._budget_clock(monkeypatch, calls, timeouts)
+
+        result = asyncio.run(
+            server._run_script_retrying_capacity(
+                "flow_report.py", ["AMZN"],
+                timeout=300,
+                retries=server.FLOW_REPORT_SHED_RETRIES,
+                delay_s=server.FLOW_REPORT_SHED_RETRY_DELAY_SECS,
+                label="t",
+                deadline_s=server.FLOW_REPORT_TOTAL_DEADLINE_SECS,
+                min_run_s=server.FLOW_REPORT_MIN_RUN_SECS,
+            )
+        )
+
+        assert result.ok is False
+        assert len(calls) >= 5, (
+            "three fail-fast probes spend ~21s of the budget and hand the "
+            f"operator a months-old cache; probed at {calls}"
+        )
+
+    def test_the_backoff_is_capped_so_late_probes_still_happen(self, monkeypatch):
+        calls: list[float] = []
+        timeouts: list[float] = []
+        self._budget_clock(monkeypatch, calls, timeouts)
+
+        asyncio.run(
+            server._run_script_retrying_capacity(
+                "flow_report.py", ["AMZN"],
+                timeout=300,
+                retries=server.FLOW_REPORT_SHED_RETRIES,
+                delay_s=server.FLOW_REPORT_SHED_RETRY_DELAY_SECS,
+                label="t",
+                deadline_s=server.FLOW_REPORT_TOTAL_DEADLINE_SECS,
+                min_run_s=server.FLOW_REPORT_MIN_RUN_SECS,
+            )
+        )
+
+        gaps = [b - a for a, b in zip(calls, calls[1:])]
+        assert gaps, "the chain must retry at least once"
+        # Gaps are differences of an accumulated float clock, so a capped 20.0
+        # reads back as 20.000000000000007. Compare with a tolerance, not ==.
+        assert max(gaps) <= server._SHED_BACKOFF_CAP_SECS + 1e-6, (
+            f"uncapped exponential backoff swallows the budget; gaps={gaps}"
+        )
+
+    def test_it_never_claims_a_slot_it_cannot_finish_the_scan_in(self, monkeypatch):
+        calls: list[float] = []
+        timeouts: list[float] = []
+        self._budget_clock(monkeypatch, calls, timeouts)
+
+        asyncio.run(
+            server._run_script_retrying_capacity(
+                "flow_report.py", ["AMZN"],
+                timeout=300,
+                retries=server.FLOW_REPORT_SHED_RETRIES,
+                delay_s=server.FLOW_REPORT_SHED_RETRY_DELAY_SECS,
+                label="t",
+                deadline_s=server.FLOW_REPORT_TOTAL_DEADLINE_SECS,
+                min_run_s=server.FLOW_REPORT_MIN_RUN_SECS,
+            )
+        )
+
+        assert timeouts, "at least one attempt must run"
+        assert all(t >= server.FLOW_REPORT_MIN_RUN_SECS for t in timeouts), (
+            "a slot claimed with less budget than a scan needs burns the lane "
+            f"and the UW spend on a run that must time out; timeouts={timeouts}"
+        )
+
+
+class TestTheBudgetFitsARealScan:
+    """A 20-session AMZN pull measured 81s. A budget that cannot seat one real
+    scan plus a retry window can only ever serve cache."""
+
+    def test_the_deadline_seats_a_real_scan_and_a_retry_window(self):
+        assert server.FLOW_REPORT_TOTAL_DEADLINE_SECS >= (
+            server.FLOW_REPORT_MIN_RUN_SECS + 60.0
+        ), "no room to probe for a slot before the scan itself has to start"
+
+    def test_the_route_answers_before_the_edge_cuts_it(self):
+        """Caddy 502s the app upstream that has not written a response header
+        within `response_header_timeout`. A route that waits longer than that
+        can only ever hand the operator a raw edge 502 in place of Radon's own
+        answer — and the scan it was waiting for now lands on its own."""
+        repo = Path(__file__).resolve().parents[3]
+        route = (
+            repo / "web" / "app" / "api" / "flow-analysis" / "[ticker]" / "route.ts"
+        )
+        match = re.search(r"timeout:\s*([\d_]+)", route.read_text())
+        assert match, "the route must declare an explicit radonFetch timeout"
+        route_secs = int(match.group(1).replace("_", "")) / 1000
+
+        caddyfile = (repo / "cloud" / "caddy" / "Caddyfile").read_text()
+        app_block = caddyfile.split("reverse_proxy localhost:3000")[1]
+        edge = re.search(r"response_header_timeout\s+(\d+)s", app_block)
+        assert edge, "the app upstream must state its response_header_timeout"
+
+        assert route_secs < int(edge.group(1)), (
+            f"a {route_secs}s route wait outlives the {edge.group(1)}s edge bound, "
+            "so the operator gets a raw 502 instead of the dated cache"
+        )
