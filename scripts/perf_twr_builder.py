@@ -570,6 +570,11 @@ def _row_values(row: Any, *keys: str) -> Tuple[Any, ...]:
 _MIRRORED_FLOW_TYPE = "external"
 
 
+# Cents. Below this the two writers agree for practical purposes.
+_FLOW_DIVERGENCE_TOLERANCE = 0.01
+_FLOW_SOURCE_DIVERGENCE: Dict[Tuple[str, str], Tuple[float, float]] = {}
+
+
 def load_flows_from_turso() -> Optional[Dict[str, float]]:
     """Last-known-good external flows, netted per report date.
 
@@ -607,13 +612,53 @@ def load_flows_from_turso() -> Optional[Dict[str, float]]:
         bucket = mirrored if flow_type == _MIRRORED_FLOW_TYPE else classified
         bucket[key] = bucket.get(key, 0.0) + value
 
+    # Classified rows win for a key they cover (T-081), but the two sources
+    # DISAGREEING for that key is new information, not a tie to break
+    # silently: the `--from-file` path parses CashTransaction + Transfers
+    # directly and sums both, so a session carrying a deposit AND an ACATS
+    # publishes a different net depending on which invocation last wrote
+    # performance.json. Precedence is unchanged; the divergence is now
+    # recorded so the caller can floor the payload status. R-345.
+    _FLOW_SOURCE_DIVERGENCE.clear()
     per_account = dict(mirrored)
-    per_account.update(classified)
+    for key, value in classified.items():
+        prior = per_account.get(key)
+        if prior is not None and abs(prior - value) > _FLOW_DIVERGENCE_TOLERANCE:
+            _FLOW_SOURCE_DIVERGENCE[key] = (prior, value)
+        per_account[key] = value
 
     out: Dict[str, float] = {}
     for (_account_id, normalized), value in per_account.items():
         out[normalized] = out.get(normalized, 0.0) + value
     return out or None
+
+
+def flow_source_divergences() -> Dict[Tuple[str, str], Tuple[float, float]]:
+    """`(account_id, report_date) -> (mirrored_net, classified_net)` for every
+    key the two `external_flows` writers disagreed on in the last load."""
+    return dict(_FLOW_SOURCE_DIVERGENCE)
+
+
+def flow_divergence_warnings() -> List[Dict[str, Any]]:
+    """One `warn` per disagreeing session. `warn` floors the payload to stale,
+    which is the honest state when the same session nets two ways. R-345."""
+    return [
+        _warning(
+            "FLOWS_SOURCE_DISAGREEMENT",
+            "warn",
+            f"External flows for {report_date} net to {classified} from the "
+            f"classified rows and {mirrored} from this builder's own mirror; "
+            "the no-fetch and --from-file paths would publish different "
+            "returns for that session.",
+            account_id=account_id,
+            report_date=report_date,
+            mirrored=mirrored,
+            classified=classified,
+        )
+        for (account_id, report_date), (mirrored, classified) in sorted(
+            _FLOW_SOURCE_DIVERGENCE.items()
+        )
+    ]
 
 
 _COVERAGE_SQL = "SELECT MAX(report_date) AS report_date FROM twr_subperiods"
@@ -722,7 +767,10 @@ def _flows_after_fetch_failure(reason: str) -> Tuple[FlowSet, List[Dict[str, Any
         f"[perf_twr] Serving {len(mirrored)} mirrored flows from Turso after Flex failure",
         file=_sys.stderr,
     )
-    return FlowSet(status=FlowsStatus.OK, by_date=mirrored, source="turso"), []
+    return (
+        FlowSet(status=FlowsStatus.OK, by_date=mirrored, source="turso"),
+        flow_divergence_warnings(),
+    )
 
 
 def resolve_flows(
