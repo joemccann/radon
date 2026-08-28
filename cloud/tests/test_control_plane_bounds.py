@@ -9,6 +9,8 @@ can grow without anyone deciding to grow it.
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -111,10 +113,54 @@ class TestDeadManDoesNotCryWolf:
             "a genuine wrapper death after the agent finishes must still page"
         )
 
-    def test_the_real_outcome_is_still_reported(self, wrapper):
+    def test_the_real_outcome_is_still_reported(self, wrapper, tmp_path):
+        """T-239: RUN the classifier instead of grepping for `report "OK"`.
+
+        The grep this replaces matched a literal call spelling, so it said
+        nothing about which outcomes the dead-man channels can actually carry.
+        It also could not see the defect T-239 fixed: the status used to be
+        keyed on the agent's exit code alone, and `claude -p` exits 0 after
+        killing unfinished background work, so a phase cut in half reported OK.
+        """
         src = wrapper.read_text()
-        assert 'report "OK"' in src
-        assert "TIMEOUT" in src
+        assert "phase_status" in src and 'report "$status"' in src, (
+            "the phase outcome must flow through one classifier the tests can "
+            "run; a bare literal call cannot be checked for what it omits"
+        )
+        start = src.index("BG_CEILING_MARKER=")
+        block = src[start:src.index("\n}\n", src.index("phase_status() {", start)) + 3]
+
+        clean = tmp_path / "clean.log"
+        clean.write_text("[weekend] audit start\nall done\n", encoding="utf-8")
+        truncated = tmp_path / "truncated.log"
+        truncated.write_text(
+            "Background tasks still running after 600s; terminating.\n",
+            encoding="utf-8",
+        )
+
+        def status(rc: int, log: Path) -> str:
+            proc = subprocess.run(
+                [
+                    shutil.which("bash") or "/bin/bash",
+                    "-c",
+                    "set -Eeuo pipefail\nCAP_SECS=7200\n"
+                    + block
+                    + f'\nphase_status {rc} "{log}"\n',
+                ],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            assert proc.returncode == 0, (proc.returncode, proc.stderr)
+            return proc.stdout.strip()
+
+        assert status(0, clean) == "OK"
+        assert status(124, clean) == "TIMEOUT after 7200s"
+        assert status(9, clean) == "FAILED (exit 9)"
+        assert status(0, truncated) != "OK", (
+            "a phase the harness truncated still pages OK, so the operator "
+            "cannot tell it from a finished run"
+        )
 
 
 # --------------------------------------------------------------------------
