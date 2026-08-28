@@ -14,9 +14,9 @@ P1/P2 (steps 1-5 code) are on `main` (`26668ef8`). Timer not enabled. No SendReq
 
 ## Checklist
 
-- [ ] S6 Pin host key + first list-dir (blocked on written Flex grant)
-- [ ] S7 Portal ticks (stop: human mailbox still Email)
-- [ ] S8 Puller + timer (timer disabled until S6 file exists)
+- [x] S6 Pin host key + first list-dir (2026-08-28). Host `ftp2.interactivebrokers.com` `64.190.196.110` RSA SHA256:C3STmRsxF9UfYvQ8yeJ9vwvK7lMHQ2FcMHchtQd7/wg. Dir `outgoing` empty (first files 8/31).
+- [ ] S7 Confirm Portal: only 1442520 + 1422766 ticked. IBKR already set Last Business Day XML. Stop if extra reports are on sFTP.
+- [x] S8 Puller + timer (timer disabled until S6 file exists; `flex_sftp_pull.py` stub-SSH tests; not-installed ack)
 - [ ] S9 Dual-run then demote
 
 ## Stops
