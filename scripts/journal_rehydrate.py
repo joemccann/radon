@@ -671,6 +671,9 @@ def rehydrate(
         existing: Optional existing journal-shaped payload for tests.
         xml_text: Saved Flex statement. Makes no network call.
     """
+    # Only the saved-statement path can see per-row parse drops; a live
+    # `fetch_executions` returns rows and no tally. R-330.
+    dropped_rows = 0
     if xml_text is not None:
         from lib.flex_classify import TRADES, FlexClassifyError, classify_flex_xml
         from trade_blotter.flex_query import FlexQueryFetcher
@@ -686,7 +689,9 @@ def rehydrate(
                 "skipped": 0,
                 "error": f"not_trade_statement:{kind}",
             }
-        executions = FlexQueryFetcher(token="x", query_id="x")._parse_xml(xml_text)
+        executions, dropped_rows = FlexQueryFetcher(
+            token="x", query_id="x"
+        ).parse_xml_with_drops(xml_text)
         fetcher = _XmlExecutionFetcher(executions)
 
     if fetcher is None:
@@ -731,23 +736,52 @@ def rehydrate(
     updated, imported, skipped, latest_date = rehydrate_from_executions(executions, existing)
 
     if imported > 0:
+        # The loop is per-entry with no transaction, so entries written before
+        # a failure ARE committed. Reporting `imported: 0` sent the operator
+        # to re-run against a canonical store they believed was untouched.
+        # R-327.
+        written = 0
         try:
             from db.writer import upsert_journal_entry
             for entry in updated["trades"][-imported:]:
                 trade_id = str(entry.get("ib_exec_id") or f"{entry.get('date')}#{entry.get('id')}")
                 upsert_journal_entry(trade_id, entry, filled_at=entry.get("date"))
+                written += 1
         except Exception as exc:  # noqa: BLE001
             return {
                 "ok": False,
-                "imported": 0,
+                "imported": written,
                 "skipped": skipped,
-                "error": f"Failed to write Turso journal: {exc}",
+                "dropped_rows": dropped_rows,
+                "error": (
+                    f"Failed to write Turso journal after {written} of "
+                    f"{imported} entries: {exc}"
+                ),
             }
+
+    if dropped_rows:
+        # Fail CLOSED on a row-level parse drop. `_parse_xml` warns and
+        # continues per row, so a file whose tail carries a corrupted
+        # attribute imported the head and returned ok — the missing fills were
+        # not in `skipped` either, and nothing downstream could tell. R-330.
+        return {
+            "ok": False,
+            "imported": imported,
+            "skipped": skipped,
+            "dropped_rows": dropped_rows,
+            "latest_date": latest_date,
+            "executions_seen": len(executions),
+            "error": (
+                f"{dropped_rows} <Trade> row(s) failed to parse; the canonical "
+                "trades store would be silently short by that many fills"
+            ),
+        }
 
     return {
         "ok": True,
         "imported": imported,
         "skipped": skipped,
+        "dropped_rows": 0,
         "latest_date": latest_date,
         "executions_seen": len(executions),
     }

@@ -122,12 +122,18 @@ class TestFromFile:
         monkeypatch.setenv("IB_FLEX_TOKEN", "test-token")
         monkeypatch.setenv("IB_FLEX_NAV_QUERY_ID", "1442520")
         code, stdout, _ = _run("--no-file")
-        assert code in (
-            cash_flow_sync.EXIT_OK,
-            cash_flow_sync.EXIT_FLEX_PREFLIGHT_EMBARGO,
-        )
-        if code == cash_flow_sync.EXIT_OK:
-            assert _status_line(stdout)["class"] == "file_ingest_only"
+        # R-328/R-360: this branch used to report `ok` / EXIT_OK, which held
+        # the 25h cash-flow-sync freshness window green on a nightly no-op,
+        # and it could also come back EXIT_FLEX_PREFLIGHT_EMBARGO purely from
+        # sidecar state for a run that opens no socket. Both are gone: no
+        # source means a distinct EXIT_FLEX_SEND_DISABLED and a non-`ok`
+        # status. The ORIGINAL intent — no socket is opened, `no_network`
+        # would explode if one were — is unchanged and still enforced by the
+        # fixture.
+        assert code == cash_flow_sync.EXIT_FLEX_SEND_DISABLED
+        status = _status_line(stdout)
+        assert status["class"] == "file_ingest_only"
+        assert status["status"] != "ok"
 
 
     def test_writes_every_parsed_row(self, no_network, no_credentials, writer):

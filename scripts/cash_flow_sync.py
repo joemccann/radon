@@ -125,6 +125,10 @@ EXIT_FLEX_LOCKOUT = 15
 # deadline. It exited 15 like a real lockout, and the daemon handler mapped
 # 15 straight back to record_lockout — every arming path extended the outage.
 EXIT_FLEX_PREFLIGHT_EMBARGO = 16
+# A run with no statement source did no work. Distinct from EXIT_OK so the
+# 25h cash-flow-sync freshness window is not held green by a nightly no-op,
+# and distinct from the error codes because nothing failed. R-328.
+EXIT_FLEX_SEND_DISABLED = 17
 
 
 def _classify(raw_type: str, amount: float) -> str:
@@ -846,9 +850,14 @@ def main(argv: Optional[list[str]] = None) -> int:
             _emit_status("error", "preflight_embargo", code="1025", message=str(exc))
             return EXIT_FLEX_PREFLIGHT_EMBARGO
         if type(exc).__name__ == "FlexSendDisabled":
+            # NOT `ok`, and NOT EXIT_OK. The scheduled daily unit passes
+            # neither --from-file nor --sendrequest, so this branch runs every
+            # night; reporting healthy meant the 25h `cash-flow-sync`
+            # staleness window could never fire — the exact stale-data
+            # condition it exists to catch. R-328.
             print(f"SKIP: {exc}", file=sys.stderr)
-            _emit_status("ok", "file_ingest_only", message=str(exc))
-            return EXIT_OK
+            _emit_status("skipped", "file_ingest_only", message=str(exc))
+            return EXIT_FLEX_SEND_DISABLED
         print(f"ERR: cash flow fetch failed: {exc}", file=sys.stderr)
         _emit_status("error", "transport", message=str(exc))
         return EXIT_STATEMENT_NOT_READY
