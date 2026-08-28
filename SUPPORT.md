@@ -1,7 +1,7 @@
 # Support
 
-Radon is a proprietary, single-operator trading system. Clones are
-unsupported. There is no community, no SLA, and no third-party help
+Radon is an open-source (Apache-2.0 OR MIT), single-operator trading system.
+Clones are unsupported. There is no community, no SLA, and no third-party help
 channel.
 
 | Need | Where |

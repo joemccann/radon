@@ -6,7 +6,7 @@
 
 ![CI](https://github.com/joemccann/radon/actions/workflows/ci.yml/badge.svg)
 ![version](https://img.shields.io/badge/version-0.7.0-05AD98)
-![license](https://img.shields.io/badge/license-proprietary-1e293b)
+![license](https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-05AD98)
 
 **Market-structure reconstruction.** Radon surfaces convex options trades from dark pool and OTC flow, the volatility surface, and cross-asset positioning. Every candidate runs a hard three-gate framework before sizing.
 
@@ -25,6 +25,7 @@ Flow signal or nothing. No narrative trades, no chart-pattern trades.
 - [Deployment](#deployment)
 - [Tests](#tests)
 - [Maintainers and help](#maintainers-and-help)
+- [License](#license)
 
 ## What it does
 
@@ -178,3 +179,14 @@ Mocked API calls cover most of the surface. Order-route integration uses an isol
 Maintained by Joe McCann. Single operator. Clones are unsupported. See [`SUPPORT.md`](SUPPORT.md).
 
 Security reports: [`SECURITY.md`](SECURITY.md). Do not open a public issue for a vulnerability.
+
+## License
+
+Dual-licensed under either of
+
+- Apache License, Version 2.0 ([`LICENSE-APACHE`](LICENSE-APACHE) or <http://www.apache.org/licenses/LICENSE-2.0>)
+- MIT license ([`LICENSE-MIT`](LICENSE-MIT) or <http://opensource.org/licenses/MIT>)
+
+at your option. `SPDX-License-Identifier: Apache-2.0 OR MIT`
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in this work by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.
