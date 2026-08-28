@@ -1,6 +1,7 @@
 """Tests for caddy/Caddyfile configuration."""
 
 import contextlib
+import errno
 import http.server
 import os
 import re
@@ -9,6 +10,7 @@ import socket
 import subprocess
 import threading
 import time
+import urllib.error
 import urllib.request
 
 import pytest
@@ -330,10 +332,73 @@ class _RestoredUpstream(http.server.BaseHTTPRequestHandler):
         pass
 
 
-def free_port():
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
+@contextlib.contextmanager
+def held_port():
+    """Reserve an ephemeral port and KEEP it bound for the caller's lifetime.
+
+    Binding, closing and returning the bare number leaves a TOCTOU window: the
+    number is unowned from that moment until the test finally uses it, and the
+    kernel hands it to whatever binds next. Two concurrent edge tests then draw
+    the same port and one of them dies on EADDRINUSE. Holding the socket keeps
+    the reservation for as long as the test needs it.
+
+    A test that needs the port to REFUSE connections (a stopped unit, not a
+    wedged one) has to give the reservation up first -- on darwin a
+    bound-but-unlistening socket swallows the SYN instead of resetting it -- so
+    use `release_to_peer` at the point the gap has to start, not at draw time.
+    """
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    try:
+        yield sock
+    finally:
+        sock.close()
+
+
+def port_of(sock):
+    return sock.getsockname()[1]
+
+
+def release_to_peer(sock):
+    """Give the reservation up at the last possible moment.
+
+    For a peer that has to bind the port itself (caddy), which cannot be handed
+    an already-bound socket.
+    """
+    port = port_of(sock)
+    sock.close()
+    return port
+
+
+def serve_on(sock, handler):
+    """Start a ThreadingHTTPServer on the ALREADY-BOUND socket from `held_port`.
+
+    The reservation is handed straight to the server, so the port is never
+    unowned between the draw and the listen.
+    """
+    server = http.server.ThreadingHTTPServer(
+        sock.getsockname()[:2], handler, bind_and_activate=False
+    )
+    server.socket.close()
+    server.socket = sock
+    server.server_name, server.server_port = sock.getsockname()
+    server.server_activate()
+    threading.Thread(
+        target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True
+    ).start()
+    return server
+
+
+def stop_serving(server):
+    """Stop the loop AND close the listener.
+
+    `shutdown()` alone only ends `serve_forever`; the listening socket stays
+    open for the rest of the pytest process.
+    """
+    with contextlib.suppress(Exception):
+        server.shutdown()
+    with contextlib.suppress(Exception):
+        server.server_close()
 
 
 def wait_for_listener(port, deadline):
@@ -365,62 +430,103 @@ class TestRestartWindowMechanism:
     def test_request_during_an_upstream_gap_is_served_not_502ed(
         self, caddy_dir, tmp_path
     ):
-        upstream_port = free_port()
-        proxy_port = free_port()
         proxied = reverse_proxy_block(read_caddyfile(caddy_dir), "localhost:3000")
-        config = tmp_path / "Caddyfile"
-        config.write_text(
-            "{\n\tadmin off\n\tgrace_period 10s\n}\n\n"
-            f"http://127.0.0.1:{proxy_port} {{\n"
-            "\thandle {\n"
-            f"\t\treverse_proxy 127.0.0.1:{upstream_port} {proxied}\n"
-            "\t}\n}\n"
-        )
+        order = []
+        request_issued = threading.Event()
 
-        caddy = subprocess.Popen(
-            [CADDY_BIN, "run", "--config", str(config), "--adapter", "caddyfile"],
-            env={
-                **os.environ,
-                "XDG_DATA_HOME": str(tmp_path / "data"),
-                "XDG_CONFIG_HOME": str(tmp_path / "config"),
-            },
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        upstream = []
-        try:
-            assert wait_for_listener(proxy_port, time.monotonic() + 10), (
-                "caddy never started listening"
+        with held_port() as upstream_sock, held_port() as proxy_sock:
+            # Both ports stay reserved across the slow setup below; each is
+            # released only at the instant its owner needs it.
+            upstream_port = port_of(upstream_sock)
+            proxy_port = release_to_peer(proxy_sock)
+            config = tmp_path / "Caddyfile"
+            config.write_text(
+                "{\n\tadmin off\n\tgrace_period 10s\n}\n\n"
+                f"http://127.0.0.1:{proxy_port} {{\n"
+                "\thandle {\n"
+                f"\t\treverse_proxy 127.0.0.1:{upstream_port} {proxied}\n"
+                "\t}\n}\n"
             )
 
-            # Nothing is listening on the upstream port yet -- exactly what
-            # radon-nextjs looks like between systemd's stop and `next start`.
-            def serve_after_the_gap():
-                time.sleep(1.5)
-                server = http.server.ThreadingHTTPServer(
-                    ("127.0.0.1", upstream_port), _RestoredUpstream
+            caddy = subprocess.Popen(
+                [CADDY_BIN, "run", "--config", str(config), "--adapter", "caddyfile"],
+                env={
+                    **os.environ,
+                    "XDG_DATA_HOME": str(tmp_path / "data"),
+                    "XDG_CONFIG_HOME": str(tmp_path / "config"),
+                },
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            upstream = []
+            try:
+                assert wait_for_listener(proxy_port, time.monotonic() + 10), (
+                    "caddy never started listening"
                 )
-                upstream.append(server)
-                server.serve_forever(poll_interval=0.05)
 
-            threading.Thread(target=serve_after_the_gap, daemon=True).start()
+                # The gap starts here: the reservation is given up so the port
+                # REFUSES connections, exactly what radon-nextjs looks like
+                # between systemd's stop and `next start`.
+                release_to_peer(upstream_sock)
+                with socket.socket() as probe:
+                    probe.settimeout(0.5)
+                    refusal = probe.connect_ex(("127.0.0.1", upstream_port))
+                assert refusal == errno.ECONNREFUSED, (
+                    f"the upstream port answered connect_ex with {refusal} "
+                    f"({errno.errorcode.get(refusal, '?')}), not ECONNREFUSED: "
+                    "this is a wedged upstream, not the restart gap, and a SYN "
+                    "the kernel merely swallows gets retransmitted onto the "
+                    "restored listener with no retry loop involved"
+                )
 
-            started = time.monotonic()
-            with urllib.request.urlopen(
-                f"http://127.0.0.1:{proxy_port}/admin", timeout=30
-            ) as response:
-                status, body = response.status, response.read()
-            waited = time.monotonic() - started
+                def serve_after_the_gap():
+                    request_issued.wait(30)
+                    # Hold the gap open across several lb_try_interval re-dials
+                    # so the retry loop must actually run. A stimulus, not a
+                    # bound on the behaviour being asserted.
+                    time.sleep(retry_interval_seconds(proxied) * 4)
+                    server = http.server.ThreadingHTTPServer(
+                        ("127.0.0.1", upstream_port), _RestoredUpstream
+                    )
+                    upstream.append(server)
+                    order.append("upstream-listening")
+                    server.serve_forever(poll_interval=0.05)
 
-            assert status == 200, f"upstream gap surfaced as HTTP {status}"
-            assert body == b"admin", body
-            assert waited >= 1.0, (
-                f"answered in {waited:.2f}s -- the request cannot have waited "
-                "out the gap, so this is not the retry path"
-            )
-        finally:
-            for server in upstream:
-                with contextlib.suppress(Exception):
-                    server.shutdown()
-            caddy.terminate()
-            caddy.wait(timeout=10)
+                threading.Thread(target=serve_after_the_gap, daemon=True).start()
+
+                order.append("request-issued")
+                request_issued.set()
+                try:
+                    with urllib.request.urlopen(
+                        f"http://127.0.0.1:{proxy_port}/admin",
+                        # Safety net only, and derived: the edge's own retry
+                        # window plus the drain it exists to cover.
+                        timeout=retry_window_seconds(proxied)
+                        + SHUTDOWN_GRACE_SECONDS,
+                    ) as response:
+                        status, body = response.status, response.read()
+                except urllib.error.HTTPError as exc:
+                    pytest.fail(
+                        f"the upstream gap surfaced as HTTP {exc.code}: the "
+                        "edge forwarded the restart straight to the browser "
+                        "instead of riding it out"
+                    )
+                order.append("response")
+
+                assert status == 200, f"upstream gap surfaced as HTTP {status}"
+                assert body == b"admin", body
+                # The ordering fact, not an elapsed float: the request was in
+                # flight while the port refused connections, and it was
+                # answered only after the upstream came back. An elapsed bound
+                # is calibrated to the stub's sleep and to host load, so it
+                # reds on a slow machine and greens on a fast wrong one.
+                assert order == [
+                    "request-issued",
+                    "upstream-listening",
+                    "response",
+                ], f"the 200 did not come from the retry path: {order}"
+            finally:
+                for server in upstream:
+                    stop_serving(server)
+                caddy.terminate()
+                caddy.wait(timeout=10)
