@@ -19334,6 +19334,12 @@ body[data-mobile="true"] td.right {
 .m-metric__value--mut  { color: var(--text-muted); }
 
 /* ── .m-signal-card ── */
+.m-signal-card-link {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+
 .m-signal-card {
   display: flex;
   flex-direction: column;

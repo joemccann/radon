@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import Link from "next/link";
 import { CheckCircle2, Loader2, Search, ShieldCheck, XCircle } from "lucide-react";
 import InfoTooltip from "./InfoTooltip";
 import ScannerInstrumentShell from "./ScannerInstrumentShell";
@@ -64,6 +65,20 @@ const FACTOR_TEST_ID: Record<string, string> = {
   "SYSTEMATIC POSITIONING": "sys",
   "MARKET BREADTH": "breadth",
 };
+
+/**
+ * Deep-link a row into the ticker's chain deck. A StrengthCandidate is
+ * ticker-level only — no expiry, no strike, no right — so `?deck=c` opens the
+ * chain and the order builder stays empty rather than guessing a contract.
+ * Null whenever the row cannot address a tradable destination.
+ */
+export function strengthOrderHref(row: StrengthConfirmationResult): string | null {
+  const ticker = row.ticker.trim().toUpperCase();
+  if (!ticker) return null;
+  if (row.verdict === "WEAK") return null;
+  const params = new URLSearchParams({ deck: "c", src: "strength" });
+  return `/${encodeURIComponent(ticker)}?${params.toString()}`;
+}
 
 function extract(row: StrengthConfirmationResult, key: StrengthSortKey): string | number | null {
   switch (key) {
@@ -167,6 +182,22 @@ function FactorCells({ row }: { row: StrengthConfirmationResult }) {
         );
       })}
     </>
+  );
+}
+
+function SpotChainLink({ row }: { row: StrengthConfirmationResult }) {
+  const href = strengthOrderHref(row);
+  if (!href) return <>{fmtPrice(row.spot)}</>;
+  const ticker = row.ticker.trim().toUpperCase();
+  return (
+    <Link
+      href={href}
+      className="ticker-link"
+      data-testid={`strength-order-link-${ticker}`}
+      title={`Open the ${ticker} options chain`}
+    >
+      {fmtPrice(row.spot)}
+    </Link>
   );
 }
 
@@ -319,7 +350,9 @@ export default function StrengthConfirmationScanner({
                     </td>
                     <td className="right">{row.score.toFixed(0)}</td>
                     <td className="right">{row.groups_passed}/7</td>
-                    <td className="right">{fmtPrice(row.spot)}</td>
+                    <td className="right">
+                      <SpotChainLink row={row} />
+                    </td>
                     <FactorCells row={row} />
                     <td className="mono">{failedFactors(row)}</td>
                     <td>
@@ -338,7 +371,9 @@ export default function StrengthConfirmationScanner({
                 <div className="strength-card__head">
                   <div>
                     <TickerLink ticker={row.ticker} />
-                    <div className="strength-card__meta">{row.groups_passed}/7 · {fmtPrice(row.spot)}</div>
+                    <div className="strength-card__meta">
+                      {row.groups_passed}/7 · <SpotChainLink row={row} />
+                    </div>
                   </div>
                   <StatusPill row={row} />
                 </div>

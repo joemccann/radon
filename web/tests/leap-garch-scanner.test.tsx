@@ -7,7 +7,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import LeapScanner, { leapOrderHref } from "../components/LeapScanner";
-import GarchConvergenceScanner from "../components/GarchConvergenceScanner";
+import GarchConvergenceScanner, { garchOrderHref } from "../components/GarchConvergenceScanner";
 import type { GarchConvergenceData, LeapData } from "../lib/types";
 
 afterEach(() => {
@@ -83,6 +83,19 @@ const garchData: GarchConvergenceData = {
       signal: "NONE",
       gates_passed: false,
       failing_gates: ["Edge"],
+      expected_iv: null,
+      expected_move: null,
+    },
+    {
+      pair: ["TSM", "ASML"],
+      leader: "",
+      lagger: "",
+      divergence: 0,
+      lagger_hv_iv_gap: 0,
+      lagger_iv_rank: null,
+      signal: "",
+      gates_passed: false,
+      failing_gates: ["MISSING_DATA"],
       expected_iv: null,
       expected_move: null,
     },
@@ -273,6 +286,26 @@ describe("LeapScanner", () => {
   });
 });
 
+describe("garchOrderHref", () => {
+  it("deep-links the lagger into the chain deck", () => {
+    expect(garchOrderHref(garchData.pairs[0])).toBe("/AMD?deck=c&src=garch");
+  });
+
+  it("uppercases and encodes the lagger", () => {
+    expect(garchOrderHref({ ...garchData.pairs[0], lagger: "brk.b" })).toBe(
+      "/BRK.B?deck=c&src=garch",
+    );
+  });
+
+  it("has no destination for a row that fails its gates", () => {
+    expect(garchOrderHref(garchData.pairs[1])).toBeNull();
+  });
+
+  it("has no destination for a row with no established lagger", () => {
+    expect(garchOrderHref(garchData.pairs[2])).toBeNull();
+  });
+});
+
 describe("GarchConvergenceScanner", () => {
   it("renders pair rows with signal and gate status", () => {
     const onScan = vi.fn();
@@ -301,6 +334,20 @@ describe("GarchConvergenceScanner", () => {
     fireEvent.click(within(section).getByTestId("garch-filter-actionable"));
     expect(within(section).getByTestId("garch-row-NVDA-AMD")).toBeTruthy();
     expect(within(section).queryByTestId("garch-row-GOOGL-META")).toBeNull();
+  });
+
+  it("links an actionable lagger into the chain deck and leaves failed rows alone", () => {
+    render(<GarchConvergenceScanner data={garchData} />);
+    const section = screen.getByTestId("garch-scanner-section");
+
+    const link = within(section).getByTestId("garch-order-link-AMD");
+    expect(link.getAttribute("href")).toBe("/AMD?deck=c&src=garch");
+    expect(link.textContent).toBe("AMD");
+
+    expect(within(section).queryByTestId("garch-order-link-META")).toBeNull();
+    const failed = within(section).getByTestId("garch-row-GOOGL-META");
+    const failedLinks = Array.from(failed.querySelectorAll("a"));
+    expect(failedLinks.map((a) => a.getAttribute("href"))).toEqual(["/META"]);
   });
 
   it("renders the empty state when no scan is on file", () => {

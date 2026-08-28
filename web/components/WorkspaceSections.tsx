@@ -1,6 +1,7 @@
 "use client";
 
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Bell,
@@ -1346,6 +1347,20 @@ function scannerDirTone(dir: string): "pos" | "neg" | "mut" {
   return "mut";
 }
 
+/**
+ * Open a flow row's ticker on the chain deck. Dark-pool prints carry no
+ * contract, so this is a ticker-level link: `?deck=c` lands on the chain with
+ * its default ATM window and an empty builder. Null when there is nothing to
+ * trade — a blank ticker, or a row the scanner itself could not read.
+ */
+export function flowOrderHref(row: ScannerSignal): string | null {
+  const ticker = row.ticker.trim();
+  if (!ticker) return null;
+  if (row.signal === "NONE" || row.signal === "ERROR") return null;
+  const params = new URLSearchParams({ deck: "c", src: "flow" });
+  return `/${encodeURIComponent(ticker.toUpperCase())}?${params.toString()}`;
+}
+
 function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
   const router = useRouter();
   const pathname = usePathname();
@@ -1837,21 +1852,37 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
                 </tr>
               </thead>
               <tbody>
-                {sorted.map((row) => (
-                  <tr key={`scanner-${row.ticker}`}>
-                    <td><TickerLink ticker={row.ticker} /></td>
-                    <td><span className={signalClass(row.signal)}>{row.signal}</span></td>
-                    <td><span className={`pill ${dirClass(row.direction)}`}>{row.direction}</span></td>
-                    <td className="right">
-                      {row.score.toFixed(1)}
-                      <SigMeter value={row.score} tone={row.direction === "ACCUMULATION" ? "pos" : row.direction === "DISTRIBUTION" ? "neg" : "mut"} />
-                    </td>
-                    <td className="right">{row.strength.toFixed(1)}</td>
-                    <td className="right">{row.buy_ratio != null ? `${(row.buy_ratio * 100).toFixed(1)}%` : "—"}</td>
-                    <td className="right">{row.sustained_days > 0 ? `${row.sustained_days}d` : "—"}</td>
-                    <td className="right">{row.num_prints.toLocaleString()}</td>
-                  </tr>
-                ))}
+                {sorted.map((row) => {
+                  const orderHref = flowOrderHref(row);
+                  return (
+                    <tr key={`scanner-${row.ticker}`}>
+                      <td>
+                        {orderHref ? (
+                          <Link
+                            href={orderHref}
+                            className="ticker-link"
+                            data-testid={`flow-order-link-${row.ticker}`}
+                            title={`Open the ${row.ticker.toUpperCase()} options chain`}
+                          >
+                            {row.ticker}
+                          </Link>
+                        ) : (
+                          <TickerLink ticker={row.ticker} />
+                        )}
+                      </td>
+                      <td><span className={signalClass(row.signal)}>{row.signal}</span></td>
+                      <td><span className={`pill ${dirClass(row.direction)}`}>{row.direction}</span></td>
+                      <td className="right">
+                        {row.score.toFixed(1)}
+                        <SigMeter value={row.score} tone={row.direction === "ACCUMULATION" ? "pos" : row.direction === "DISTRIBUTION" ? "neg" : "mut"} />
+                      </td>
+                      <td className="right">{row.strength.toFixed(1)}</td>
+                      <td className="right">{row.buy_ratio != null ? `${(row.buy_ratio * 100).toFixed(1)}%` : "—"}</td>
+                      <td className="right">{row.sustained_days > 0 ? `${row.sustained_days}d` : "—"}</td>
+                      <td className="right">{row.num_prints.toLocaleString()}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -1899,6 +1930,35 @@ function discoverBiasTone(bias: string): "pos" | "neg" | "warn" | "mut" {
   if (bias === "BULLISH" || bias === "CALLS") return "pos";
   if (bias === "BEARISH" || bias === "PUTS") return "neg";
   return "mut";
+}
+
+/**
+ * Deep-link a discover candidate into its chain deck. Mirrors `leapOrderHref`
+ * minus the contract params: discover rows are ticker-level (calls / puts are
+ * alert counts, not strikes), so there is no expiry, strike, or right to seed
+ * the order builder with. Null when the row cannot name a ticker.
+ */
+export function discoverOrderHref(candidate: DiscoverCandidate): string | null {
+  const ticker = candidate.ticker.trim().toUpperCase();
+  if (!ticker) return null;
+  const params = new URLSearchParams({ deck: "c", src: "discover" });
+  return `/${encodeURIComponent(ticker)}?${params.toString()}`;
+}
+
+function DiscoverTickerCell({ candidate }: { candidate: DiscoverCandidate }) {
+  const href = discoverOrderHref(candidate);
+  if (!href) return <TickerLink ticker={candidate.ticker} />;
+  const ticker = candidate.ticker.trim().toUpperCase();
+  return (
+    <Link
+      href={href}
+      className="ticker-link"
+      data-testid={`discover-order-link-${ticker}`}
+      title={`Open the ${ticker} options chain`}
+    >
+      {candidate.ticker}
+    </Link>
+  );
 }
 
 export const DISCOVER_MOBILE_SORT_KEYS: { key: DiscoverSortKey; label: string }[] = [
@@ -1986,41 +2046,55 @@ function DiscoverSections() {
 
         {mobileSortedCandidates.length > 0 && (
           <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "8px 16px 16px" }} data-testid="mobile-discover-list">
-            {mobileSortedCandidates.map((c) => (
-              <SignalCard
-                key={`discover-mobile-${c.ticker}`}
-                ticker={c.ticker}
-                score={Math.round(c.score)}
-                signals={[
-                  {
-                    label: c.dp_direction === "ACCUMULATION" ? "ACCUM" : c.dp_direction === "DISTRIBUTION" ? "DISTRIB" : c.dp_direction,
-                    tone: discoverDpTone(c.dp_direction),
-                  },
-                  {
-                    label: c.options_bias,
-                    tone: discoverBiasTone(c.options_bias),
-                  },
-                ]}
-                stats={[
-                  {
-                    label: "Buy Ratio",
-                    value: `${(c.dp_buy_ratio * 100).toFixed(1)}%`,
-                  },
-                  {
-                    label: "Premium",
-                    value: fmtPremium(c.total_premium),
-                  },
-                  {
-                    label: "Sweeps",
-                    value: String(c.sweeps),
-                  },
-                  {
-                    label: "Alerts",
-                    value: String(c.alerts),
-                  },
-                ]}
-              />
-            ))}
+            {mobileSortedCandidates.map((c) => {
+              const orderHref = discoverOrderHref(c);
+              const card = (
+                <SignalCard
+                  key={`discover-mobile-${c.ticker}`}
+                  ticker={c.ticker}
+                  score={Math.round(c.score)}
+                  signals={[
+                    {
+                      label: c.dp_direction === "ACCUMULATION" ? "ACCUM" : c.dp_direction === "DISTRIBUTION" ? "DISTRIB" : c.dp_direction,
+                      tone: discoverDpTone(c.dp_direction),
+                    },
+                    {
+                      label: c.options_bias,
+                      tone: discoverBiasTone(c.options_bias),
+                    },
+                  ]}
+                  stats={[
+                    {
+                      label: "Buy Ratio",
+                      value: `${(c.dp_buy_ratio * 100).toFixed(1)}%`,
+                    },
+                    {
+                      label: "Premium",
+                      value: fmtPremium(c.total_premium),
+                    },
+                    {
+                      label: "Sweeps",
+                      value: String(c.sweeps),
+                    },
+                    {
+                      label: "Alerts",
+                      value: String(c.alerts),
+                    },
+                  ]}
+                />
+              );
+              if (!orderHref) return card;
+              return (
+                <Link
+                  key={`discover-mobile-${c.ticker}`}
+                  href={orderHref}
+                  className="m-signal-card-link"
+                  data-testid={`discover-order-link-${c.ticker.trim().toUpperCase()}`}
+                >
+                  {card}
+                </Link>
+              );
+            })}
           </div>
         )}
       </div>
@@ -2077,7 +2151,7 @@ function DiscoverSections() {
               <tbody>
                 {sorted.map((c) => (
                   <tr key={c.ticker}>
-                    <td><TickerLink ticker={c.ticker} /></td>
+                    <td><DiscoverTickerCell candidate={c} /></td>
                     <td className="right">
                       <span className={scoreClass(c.score)}>{c.score.toFixed(1)}</span>
                     </td>

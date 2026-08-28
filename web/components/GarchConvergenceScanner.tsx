@@ -28,6 +28,19 @@ type GarchConvergenceScannerProps = {
 const GARCH_SECTION_HELP =
   "Cross-asset vol repricing: correlated pairs where the leader's vol has moved but the lagger's has not. Divergence is the composite lag metric. A row is actionable only when all four gates pass; failing gates are named.";
 
+/**
+ * Deep-link a pair's lagger into the chain deck. The GARCH payload carries no
+ * expiry, strike or right, so there is no `legs` prefill to build and the deck
+ * lands on its default ladder. Null for a row that fails its gates: a failed
+ * row is not actionable, and the producer never assigns a lagger on the
+ * early-return rows, so there is no contract to address.
+ */
+export function garchOrderHref(row: GarchPair): string | null {
+  if (!row.gates_passed || !row.lagger) return null;
+  const params = new URLSearchParams({ deck: "c", src: "garch" });
+  return `/${encodeURIComponent(row.lagger.toUpperCase())}?${params.toString()}`;
+}
+
 function extract(row: GarchPair, key: GarchSortKey): string | number | null {
   switch (key) {
     case "pair": return `${row.pair[0]}-${row.pair[1]}`;
@@ -255,6 +268,7 @@ export default function GarchConvergenceScanner({
                   const key = `${p.pair[0]}-${p.pair[1]}`;
                   const leader = p.leader || p.pair[0];
                   const lagger = p.lagger || p.pair[1];
+                  const orderHref = garchOrderHref(p);
                   return (
                     <tr
                       key={key}
@@ -275,9 +289,14 @@ export default function GarchConvergenceScanner({
                       </td>
                       <td>
                         <Link
-                          href={`/${encodeURIComponent(lagger)}`}
+                          href={orderHref ?? `/${encodeURIComponent(lagger)}`}
                           className="ticker-link garch-lagger-link"
-                          title={`Open ${lagger} (lagger; led by ${leader})`}
+                          data-testid={orderHref ? `garch-order-link-${lagger.toUpperCase()}` : undefined}
+                          title={
+                            orderHref
+                              ? `Open the ${lagger} options chain (lagger; led by ${leader})`
+                              : `Open ${lagger} (lagger; led by ${leader})`
+                          }
                         >
                           {lagger}
                         </Link>
