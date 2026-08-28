@@ -5,7 +5,7 @@ Deterministic trade reconciliation and P&L calculation for Interactive Brokers.
 ## Features
 
 - **Real-time fills** via IB API (`blotter.py`)
-- **Historical trades** via IB Flex Query (`flex_query.py`)
+- **Historical trades** via IBKR sFTP (`1422766`, `radon-flex-pull`) plus `--from-file`. Live Flex Web Service is recon-only. See `docs/flex-sftp-setup.md`.
 - **Spread identification** (put spreads, call spreads, risk reversals, collars)
 - **Commission tracking** included in all P&L calculations
 - **Decimal precision** for accurate financial calculations
@@ -48,23 +48,18 @@ pip install ib_insync requests
 | IB Gateway Paper | 4002 |
 | IB Gateway Live | 4001 |
 
-### Flex Query (for historical data)
+### Flex Query (historical recon)
 
-1. Login to [IB Account Management](https://www.interactivebrokers.com/sso/Login)
-2. Navigate to: **Reports → Flex Queries → Create Activity Flex Query**
-3. Configure:
-   - Sections: ☑️ Trades, ☑️ Commission Details
-   - Period: Last 365 Calendar Days
-   - Format: XML
-4. Save and note the **Query ID**
-5. Go to: **Reports → Settings → Flex Web Service**
-6. Generate token and note it
-7. Add to environment:
+Routine path is sFTP of Trade History `1422766` (Last Business Day, XML, PGP).
+Install: [`docs/flex-sftp-setup.md`](../../docs/flex-sftp-setup.md).
+
+Same-day fills: IB Gateway / `journal_sync`, not Flex.
 
 ```bash
-export IB_FLEX_TOKEN="your_token"
-export IB_FLEX_QUERY_ID="your_query_id"
+python3.13 scripts/journal_rehydrate.py --from-file /path/to/1422766.xml
 ```
+
+Do not weekday `flex_query.py` SendRequest. `IB_FLEX_QUERY_ID=1422766`. Token is recon-only.
 
 ## Architecture
 
