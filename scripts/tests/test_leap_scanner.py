@@ -15,6 +15,8 @@ from leap_scanner_uw import (
     calculate_hv,
     approximate_delta,
     build_json_payload,
+    pick_best_mispriced_leap,
+    LeapOption,
     get_current_iv,
     get_leap_options,
     resolve_explicit_tickers,
@@ -206,6 +208,76 @@ class TestBuildJsonPayload:
     def test_indexes_universe_stamp(self):
         payload = build_json_payload([], 10.0, "preset:indexes", ["NVDA", "AAPL"])
         assert payload["universe"] == "preset:indexes"
+
+
+class TestPickBestMispricedLeap:
+    def _leap(self, strike, iv, oi=100, expiry="2027-01-15"):
+        return LeapOption(
+            symbol=f"NVDA{expiry.replace('-', '')[2:]}C{int(strike * 1000):08d}",
+            expiry=expiry,
+            strike=strike,
+            right="C",
+            iv=iv,
+            volume=10,
+            oi=oi,
+            delta_approx=0.5,
+        )
+
+    def test_picks_the_widest_gap_contract(self):
+        leaps = [self._leap(200, 30.0), self._leap(210, 22.0), self._leap(220, 26.0)]
+        assert pick_best_mispriced_leap(leaps, hv_20=45.0).strike == 210
+
+    def test_breaks_iv_ties_on_open_interest(self):
+        leaps = [self._leap(200, 22.0, oi=50), self._leap(210, 22.0, oi=900)]
+        assert pick_best_mispriced_leap(leaps, hv_20=45.0).strike == 210
+
+    def test_empty_group_has_no_contract(self):
+        assert pick_best_mispriced_leap([], hv_20=45.0) is None
+
+
+class TestBestLeapPayload:
+    """The scanner page deep-links its best row into the chain order builder,
+    so the payload has to name the contract — ticker + gap alone cannot."""
+
+    def _result(self, best_leap):
+        return ScanResult(
+            ticker="NVDA",
+            vol_data=VolData(
+                ticker="NVDA", price=180.0, hv_20=45.0, hv_60=40.0, hv_252=35.0, avg_hv=40.0
+            ),
+            current_iv=25.0,
+            iv_rank=30.0,
+            leaps=[best_leap] if best_leap else [],
+            best_gap=20.0,
+            is_mispriced=True,
+            best_leap=best_leap,
+        )
+
+    def test_emits_the_contract_the_order_builder_needs(self):
+        leap = LeapOption(
+            symbol="NVDA270115C00210000",
+            expiry="2027-01-15",
+            strike=210.0,
+            right="C",
+            iv=22.0,
+            volume=12,
+            oi=900,
+            delta_approx=0.42,
+        )
+        payload = build_json_payload([self._result(leap)], 10.0, "explicit", ["NVDA"])
+        best = payload["results"][0]["best_leap"]
+        assert best["expiry"] == "2027-01-15"
+        assert best["strike"] == 210.0
+        assert best["right"] == "C"
+        assert best["iv"] == 22.0
+        assert best["gap"] == 23.0  # hv_20 45 - iv 22
+        assert best["delta"] == 0.42
+        assert best["oi"] == 900
+        assert best["symbol"] == "NVDA270115C00210000"
+
+    def test_absent_contract_serializes_as_null(self):
+        payload = build_json_payload([self._result(None)], 10.0, "explicit", ["NVDA"])
+        assert payload["results"][0]["best_leap"] is None
 
 
 class TestResolveScanInputs:
