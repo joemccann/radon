@@ -10,6 +10,7 @@ import SpectralLoader from "@/components/SpectralLoader";
 import { useViewport } from "@/lib/useViewport";
 import DailyDarkPoolHistory from "@/components/flow-analysis/DailyDarkPoolHistory";
 import { flowReportErrorCopy } from "@/lib/flowReportError";
+import { flowReportAgeLabel } from "@/lib/flowReportStaleness";
 
 /** The scan the server actually runs is `--days 20` (server.py). Every piece
  * of window copy derives from this or from the payload's own
@@ -26,6 +27,7 @@ export default function TickerFlowReport({ ticker }: Props) {
   const verdict = useMemo(() => deriveVerdict(data), [data]);
   const isAnalyzing = status === "loading" || status === "scanning";
   const { isMobile, hasMounted } = useViewport();
+  const cachedAge = data && isServingCachedReport(status) ? flowReportAgeLabel(data) : null;
 
   if (hasMounted && isMobile) {
     return (
@@ -36,6 +38,7 @@ export default function TickerFlowReport({ ticker }: Props) {
         status={status}
         error={error}
         isAnalyzing={isAnalyzing}
+        cachedAge={cachedAge}
         onRefresh={refresh}
       />
     );
@@ -43,9 +46,9 @@ export default function TickerFlowReport({ ticker }: Props) {
 
   return (
     <div className="ticker-flow-report" data-testid="ticker-flow-report">
-      <SignalBadge ticker={ticker} verdict={verdict} status={status} error={error} onRefresh={refresh} />
+      <SignalBadge ticker={ticker} verdict={verdict} status={status} error={error} cachedAge={cachedAge} onRefresh={refresh} />
 
-      {error && (
+      {error && !cachedAge && (
         <div className="section">
           <div className="section-body">
             <div className="alert-item bearish" role="alert">{flowReportErrorCopy(error)}</div>
@@ -61,12 +64,20 @@ export default function TickerFlowReport({ ticker }: Props) {
         />
       )}
 
-      {data && <ReportSections data={data} isAnalyzing={isAnalyzing} />}
+      {data && <ReportSections data={data} isAnalyzing={isAnalyzing} cachedAge={cachedAge} />}
     </div>
   );
 }
 
 type Verdict = ReturnType<typeof classifyFlowSignal>;
+
+type FlowReportStatus = ReturnType<typeof useTickerFlowReport>["status"];
+
+/** The hook preserves the previous report on any failed scan, so these two
+ * statuses render real figures that did not come from a completed scan. */
+function isServingCachedReport(status: FlowReportStatus): boolean {
+  return status === "error" || status === "stale";
+}
 
 /* ── Mobile ticker flow report ── */
 
@@ -92,14 +103,16 @@ function MobileTickerFlowReport({
   status,
   error,
   isAnalyzing,
+  cachedAge,
   onRefresh,
 }: {
   ticker: string;
   data: FlowReportData | null;
   verdict: Verdict | null;
-  status: ReturnType<typeof useTickerFlowReport>["status"];
+  status: FlowReportStatus;
   error: string | null;
   isAnalyzing: boolean;
+  cachedAge: string | null;
   onRefresh: () => void;
 }) {
   const [section, setSection] = useState<MobileFlowSection>("overview");
@@ -201,9 +214,17 @@ function MobileTickerFlowReport({
         </button>
       </div>
 
-      {error && (
+      {error && !cachedAge && (
         <div style={{ padding: "8px 16px" }}>
           <div className="alert-item bearish" role="alert">{flowReportErrorCopy(error)}</div>
+        </div>
+      )}
+
+      {cachedAge && (
+        <div style={{ padding: "8px 16px" }}>
+          <div className="alert-item bearish" role="alert" data-testid="flow-stale-age">
+            Last good scan {cachedAge}. Every figure below is from that scan, not from live flow.
+          </div>
         </div>
       )}
 
@@ -405,12 +426,14 @@ function SignalBadge({
   verdict,
   status,
   error,
+  cachedAge,
   onRefresh,
 }: {
   ticker: string;
   verdict: Verdict | null;
-  status: ReturnType<typeof useTickerFlowReport>["status"];
+  status: FlowReportStatus;
   error: string | null;
+  cachedAge: string | null;
   onRefresh: () => void;
 }) {
   const direction = verdict?.direction ?? null;
@@ -427,7 +450,7 @@ function SignalBadge({
   // "Too Many Requests" strip above a hero still showing BULLISH with
   // yesterday's rationale, and the `Retry-After` the route sets was read by
   // nobody.
-  const servingStale = showVerdict && (status === "error" || status === "stale");
+  const servingStale = showVerdict && isServingCachedReport(status);
 
   return (
     <section className="section ticker-flow-hero">
@@ -464,7 +487,7 @@ function SignalBadge({
             {failed ? "Scan failed" : showVerdict && verdict ? meta.label : `Analyzing ${ticker}`}
             {servingStale && verdict && (
               <span className="ticker-flow-badge-stale" data-testid="flow-hero-stale">
-                {" "}LAST GOOD SCAN
+                {" "}LAST GOOD SCAN{cachedAge ? ` · ${cachedAge}` : ""}
               </span>
             )}
           </div>
@@ -532,12 +555,30 @@ function AnalyzingPanel({
   );
 }
 
+/** The figures below this strip are real, and they are old: /flow-analysis/AMZN
+ * served a Jun 16 aggregate through late August because every live scan lost
+ * the general subprocess lane. The age and only the age — the hero carries WHY
+ * the scan did not complete, and this exists to outlive scrolling past it. */
+function CachedReportAge({ ageLabel }: { ageLabel: string }) {
+  return (
+    <section className="section">
+      <div className="section-body">
+        <div className="alert-item bearish" role="alert" data-testid="flow-stale-age">
+          Last good scan {ageLabel}. Every figure below is from that scan, not from live flow.
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function ReportSections({
   data,
   isAnalyzing,
+  cachedAge,
 }: {
   data: FlowReportData;
   isAnalyzing: boolean;
+  cachedAge: string | null;
 }) {
   const dpAgg = data.dark_pool?.aggregate ?? {};
   const buyRatio = dpAgg.dp_buy_ratio;
@@ -550,6 +591,8 @@ function ReportSections({
 
   return (
     <>
+      {cachedAge && <CachedReportAge ageLabel={cachedAge} />}
+
       <section className="section">
         <div className="section-header">
           <div className="section-title">Dark Pool Aggregate</div>
