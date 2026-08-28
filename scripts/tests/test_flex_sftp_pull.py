@@ -110,8 +110,10 @@ def test_list_dir_uses_sftp_dash4_and_batch_stdin(tmp_path):
     assert fake.inputs[0].strip().splitlines()[1] == "ls"
 
 
-def test_empty_remote_is_error_heartbeat_not_sendrequest(tmp_path, monkeypatch):
+def test_empty_remote_before_first_delivery_is_ok_skip(tmp_path, monkeypatch):
     import flex_sftp_pull as pull
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
 
     heartbeats = []
     monkeypatch.setattr(pull, "_heartbeat", lambda state, error=None: heartbeats.append((state, error)))
@@ -124,10 +126,35 @@ def test_empty_remote_is_error_heartbeat_not_sendrequest(tmp_path, monkeypatch):
         runner=FakeSftp({}),
         decrypt=lambda data, **k: data,
         ingest=lambda xml, **k: {"ok": True},
+        now=datetime(2026, 8, 28, 12, 0, tzinfo=ZoneInfo("America/New_York")),
     )
     assert code == 0
     assert heartbeats[0][0] == "ok"
     assert "empty" in str(heartbeats[0][1]).lower()
+
+
+def test_empty_remote_after_first_delivery_is_error(tmp_path, monkeypatch):
+    import flex_sftp_pull as pull
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    heartbeats = []
+    monkeypatch.setattr(pull, "_heartbeat", lambda state, error=None: heartbeats.append((state, error)))
+    config = _ssh_config(tmp_path / "ssh_config")
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    code = pull.run(
+        config=config,
+        inbox=inbox,
+        runner=FakeSftp({}),
+        decrypt=lambda data, **k: data,
+        ingest=lambda xml, **k: {"ok": True},
+        now=datetime(2026, 9, 1, 7, 30, tzinfo=ZoneInfo("America/New_York")),
+    )
+    assert code == 1
+    assert heartbeats[0][0] == "error"
+    assert "empty" in str(heartbeats[0][1]).lower()
+    assert "2026-08-31" in str(heartbeats[0][1])
 
 
 def test_host_key_failure_is_fail_closed(tmp_path, monkeypatch):
