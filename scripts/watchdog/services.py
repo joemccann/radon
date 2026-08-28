@@ -100,6 +100,9 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # radon-perf-twr.timer fires Tue..Sat 07:30 ET; 26h open catches a missed
     # weekday run, 4d closed covers the Sat->Tue gap like cash-flow-sync.
     "perf-twr":         {"open": 26 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
+    # radon-flex-pull.timer Tue..Sat 07:30/08:30 ET. Empty outgoing is ok
+    # through 2026-08-31, then error. Same weekend gap as perf-twr.
+    "flex-pull":        {"open": 26 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
     "flex-token-check": {"open": 25 * _HOUR, "closed": 25 * _HOUR, "requires_ib": False},
     "menthorq-session": {"open": 25 * _HOUR, "closed": 25 * _HOUR, "requires_ib": False},
     # Daily LIVE probe of the MenthorQ credential re-login chain (the
@@ -445,6 +448,7 @@ BUCKETS: dict[str, list[str]] = {
         # lockout, a throttle embargo or a dead timer, and /performance keeps
         # serving the last snapshot until someone eyeballs the page.
         "perf-twr",
+        "flex-pull",
         # Daily 20:30 ET evening execution sweep (monitor daemon) — hourly
         # check surfaces a missed run within 1h of the 26h window expiring.
         "execution-sweep",

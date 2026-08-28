@@ -197,6 +197,8 @@ EXPECTED_AUTO_SYNC_UNITS = (
     "radon-equibles-filings.timer",
     "radon-equibles-short-crowding.service",
     "radon-equibles-short-crowding.timer",
+    "radon-flex-pull.service",
+    "radon-flex-pull.timer",
     "radon-flow-refresh.service",
     "radon-flow-refresh.timer",
     "radon-forecast-nightly.service",

@@ -25,6 +25,9 @@ def test_fleet_units_load_etc_radon_env() -> None:
         if path.name == "radon-grok-page-responder.service":
             assert value == STRIPPED_ENV, path.name
             continue
+        if path.name == "radon-flex-pull.service":
+            assert value.lstrip("-") == "/var/lib/radon/flex-secrets/env", path.name
+            continue
         assert value == CANONICAL_ENV, path.name
     assert found >= 40
 

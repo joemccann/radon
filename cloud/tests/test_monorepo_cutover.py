@@ -526,6 +526,10 @@ def test_runtime_code_paths_are_canonical_while_secret_path_remains_stable() -> 
                     assert line == (
                         "EnvironmentFile=/home/radon/radon-page-responder.env"
                     ), name
+                elif name == "radon-flex-pull.service":
+                    assert line.lstrip("EnvironmentFile=").lstrip("-") == (
+                        "/var/lib/radon/flex-secrets/env"
+                    ), name
                 else:
                     assert line == f"EnvironmentFile={CANONICAL_ENV_FILE}", name
             if line.startswith(("WorkingDirectory=", "ExecStart=", "ExecStop=")):
