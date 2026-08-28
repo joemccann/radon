@@ -417,7 +417,17 @@ function SignalBadge({
   const meta = directionMeta(direction);
   const Icon = meta.Icon;
   const failed = status === "error" && !verdict;
-  const showVerdict = !failed && (status === "fresh" || status === "error" || status === "scanning");
+  const showVerdict =
+    !failed
+    && (status === "fresh" || status === "error" || status === "stale" || status === "scanning");
+  // R-358: `showVerdict` deliberately includes `error`, and the hook preserves
+  // prior data on POST failure by design — so on any failure that left a
+  // cached verdict the hero rendered the direction label and rationale with
+  // NO staleness marking, identical to a fresh report. A 429 yielded a raw
+  // "Too Many Requests" strip above a hero still showing BULLISH with
+  // yesterday's rationale, and the `Retry-After` the route sets was read by
+  // nobody.
+  const servingStale = showVerdict && (status === "error" || status === "stale");
 
   return (
     <section className="section ticker-flow-hero">
@@ -444,6 +454,7 @@ function SignalBadge({
         aria-live="polite"
         data-direction={direction ?? "PENDING"}
         data-status={status}
+        data-stale={servingStale ? "true" : undefined}
       >
         <div className="ticker-flow-badge-icon">
           {showVerdict && verdict ? <Icon size={28} /> : <PulseDot />}
@@ -451,6 +462,11 @@ function SignalBadge({
         <div className="ticker-flow-badge-body">
           <div className="ticker-flow-badge-label">
             {failed ? "Scan failed" : showVerdict && verdict ? meta.label : `Analyzing ${ticker}`}
+            {servingStale && verdict && (
+              <span className="ticker-flow-badge-stale" data-testid="flow-hero-stale">
+                {" "}LAST GOOD SCAN
+              </span>
+            )}
           </div>
           <div className="ticker-flow-badge-rationale">
             {failed
@@ -459,6 +475,11 @@ function SignalBadge({
                 ? verdict.rationale
                 : "Reconstructing dark pool and options flow"}
           </div>
+          {servingStale && error && (
+            <div className="ticker-flow-badge-stale-note" data-testid="flow-hero-stale-note">
+              {flowReportErrorCopy(error)}
+            </div>
+          )}
         </div>
         {showVerdict && verdict && (
           <div className="ticker-flow-badge-conviction">
