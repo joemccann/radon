@@ -5177,6 +5177,39 @@ either. Merging #109 is what un-reds `main`.
   (`ib_2fa_lock.py:375`), burning the 5s reader deadline. Named in T-201's
   text, outside its AC.
 
+## Delta audit 2026-08-28 (surfaced by remediation)
+
+This cycle's audit phase filed nothing (see the Remediation section below), so
+this is not a delta audit of the codebase. It is the ONE finding that
+remediation could not avoid making, because it is why the audit produced
+nothing.
+
+- **T-239 [P0] A phase the harness truncates exits 0, and both weekend
+  wrappers page `OK` on it.**
+  `claude -p` terminates unfinished background tasks at its print-mode
+  background-wait ceiling (600 s by default), prints
+  `Background tasks still running after 600s; terminating.` and then exits
+  **0**. `scripts/testing_weekend.sh:284-297` and
+  `scripts/reliability_weekend.sh:332-345` classify the phase on that exit
+  code alone, so a run cut off with its last agent still working is
+  indistinguishable from one that finished. Neither wrapper sets
+  `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`, so the ceiling is a second, shorter,
+  silent cap sitting inside the `timeout "$remain"` the wrapper believes is
+  the only one.
+  **Observed, not theorised:** the 2026-08-28 audit phase was cut at 600 s. It
+  left `origin/testing/2026-08-28` an empty branch at `c6d08fbd`, no
+  `## Delta audit 2026-08-28` section, no ledger line and no PR, against a
+  24-commit / 262-file / +23,193-line delta — and reported **OK** on all three
+  dead-man channels. Issue #83's last comment carries the harness message
+  verbatim. This is the T-209 failure mode (a dead-man signal that lies)
+  re-entering through a different door, and it would have recurred nightly.
+  **AC:** the agent child process must actually see
+  `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0` (spawn it and read the value back —
+  an assignment that never reaches the child satisfies any source grep); and a
+  run log carrying the harness message must classify as something other than
+  `OK`, with the TIMEOUT / FAILED / OK classifications pinned unchanged so the
+  fix cannot become a blanket downgrade.
+
 ## Remediation 2026-08-28
 
 **This cycle's AUDIT PHASE PRODUCED NOTHING — operator action item.** The
@@ -5214,3 +5247,4 @@ Delta findings continue the T-### numbering in dated `## Delta audit` sections.
 - Audited through: `27665c43` on 2026-08-25 — 34 new findings (T-122…T-155: 1 P0, 12 P1, 21 P2) over 68 commits / 513 files. Gates serial: pytest 7816 green (recursive; CI's sharded matrix drops 752 of them, T-122); vitest 7328 green / 701 files; cloud 34 red on darwin, byte-identical to the base SHA (T-118). Added-file determinism 3×3 green. No new skips, no `.only`, no exclusion growth; vitest thresholds unchanged; pytest ratchet metric silently switched to statement-only (T-123).
 - Audited through: `1b326772` on 2026-08-26 — 34 new findings (T-156…T-189: 3 P0, 14 P1, 17 P2) over 33 commits / 236 files. Gates serial round 1: pytest 7996 green (recursive; CI's 12 shards sum to the identical 7996, so T-122 holds); vitest 723 files / 7498 green; cloud 34 red on darwin, FAILED list byte-identical to the base SHA in a worktree (T-118). Added-file determinism 3×3 green (pytest 60, vitest 121). One new skip (`test_caddyfile.py:229`, filed as T-164), no `.only`, no exclusion growth, no threshold moved — but both coverage ratchets left `deploy.needs` and `main` has no required status checks (T-160).
 - Audited through: `789aabea` on 2026-08-27 — 49 new findings (T-190…T-238: 6 P0, 23 P1, 20 P2) over 43 commits / 264 files. Gates serial: pytest **7 failed** / 8153 passed — deterministic, all in `test_portfolio_risk_gate3_measurability.py`, reproduced 7/7 in isolation, filed as T-237 (`main` is red; CI at this SHA also failed and correctly skipped deploy); cloud 34 red on darwin, FAILED list byte-identical to the base SHA in a worktree (T-118); vitest 758 files / **1 failed** / 7702 passed — a single 5041ms timeout on `portfolio-startup-performance-contract.test.ts:172` under load 36, green 8/8 ×3 in isolation, filed as T-238 (load class, not a regression). Collection union clean on all three gates (py 478/479 shard union, cloud 33/33, vitest 758/758) so T-122 holds. Enforcement STRENGTHENED — T-160 is fixed, `deploy.needs` went 7 → 9 with both coverage ratchets restored. Four new skips (8 outcomes), none linked to a T-### (T-204, T-205); no `.only`; no exclusion growth; no threshold moved — the coverage measurement got stricter twice.
+- Audited through: **NOT ADVANCED** on 2026-08-28 — the audit phase was truncated by the harness background-wait ceiling at 600 s (T-239), filed no findings and no PR, and reported `OK`. `789aabea..c6d08fbd` (24 commits / 262 files / +23,193 lines) is **UNAUDITED**; the next audit must take `789aabea` as its base, not `c6d08fbd`. The remediation phase that followed worked the P2 backlog and filed T-239 against the truncation itself.
