@@ -1269,6 +1269,27 @@ def _fetch_all_histories(
     return marks_by_contract, missing_contracts
 
 
+def _flex_unavailability_reason(exc: BaseException) -> str:
+    """Name WHY the Flex fills are unavailable. R-353.
+
+    `FlexSendDisabled` is the file-ingest-only policy; `FlexTokenLocked` is a
+    live 1025 embargo. Neither clears on its own, so reporting them as a
+    transient outage buries a state that needs an operator.
+    """
+    name = type(exc).__name__
+    if name == "FlexSendDisabled":
+        return (
+            "Live IB Flex Query is DISABLED by policy (file-ingest only), not "
+            "unavailable. This will not clear on its own"
+        )
+    if name == "FlexTokenLocked":
+        return (
+            "Live IB Flex Query is LOCKED OUT by a 1025 token embargo, not "
+            "unavailable. This will not clear until the embargo expires"
+        )
+    return "Live IB Flex Query unavailable"
+
+
 def build_payload(benchmark_symbol: str = "SPY") -> dict:
     # 1. Load portfolio snapshot
     portfolio = load_portfolio_snapshot()
