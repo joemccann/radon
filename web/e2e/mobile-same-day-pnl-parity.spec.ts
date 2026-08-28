@@ -170,7 +170,10 @@ test.describe("mobile same-day P&L parity", () => {
     await expect(card).toBeVisible({ timeout: 20_000 });
 
     const headline = money(await card.getByTestId("mobile-position-pnl").textContent());
-    const todayCell = card.locator("text=Today").locator("..");
+    // Select the metric cell by its own testid. The label text is copy and the
+    // card's DOM nesting is layout, so neither may decide which node this
+    // number is read from.
+    const todayCell = card.getByTestId("mobile-position-today");
     const today = money(await todayCell.textContent());
 
     expect(headline).not.toBeNull();
