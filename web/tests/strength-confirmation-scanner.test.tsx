@@ -6,8 +6,12 @@ import React from "react";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import StrengthConfirmationScanner from "../components/StrengthConfirmationScanner";
-import type { StrengthConfirmationData, StrengthFactorAssessment } from "../lib/types";
+import StrengthConfirmationScanner, { strengthOrderHref } from "../components/StrengthConfirmationScanner";
+import type {
+  StrengthConfirmationData,
+  StrengthConfirmationResult,
+  StrengthFactorAssessment,
+} from "../lib/types";
 
 vi.mock("@/lib/useTickerNav", () => ({
   useTickerNav: () => ({
@@ -71,6 +75,44 @@ const data: StrengthConfirmationData = {
     },
   ],
 };
+
+const weakRow: StrengthConfirmationResult = {
+  ticker: "INTC",
+  verdict: "WEAK",
+  score: 41,
+  groups_passed: 3,
+  spot: 33.7,
+  factors: groups.map((group) => factor(group, group === "Q-SCORES" || group === "NET GEX" || group === "MARKET BREADTH")),
+  errors: [],
+};
+
+const dataWithWeak: StrengthConfirmationData = {
+  ...data,
+  tickers_scanned: 3,
+  candidates_found: 3,
+  results: [...data.results, weakRow],
+};
+
+describe("strengthOrderHref", () => {
+  it("deep-links the ticker into the chain deck with no invented contract", () => {
+    expect(strengthOrderHref(data.results[0])).toBe("/AAPL?deck=c&src=strength");
+    expect(strengthOrderHref(data.results[1])).toBe("/MSFT?deck=c&src=strength");
+  });
+
+  it("uppercases and encodes the ticker", () => {
+    expect(strengthOrderHref({ ...data.results[0], ticker: "brk.b" })).toBe(
+      "/BRK.B?deck=c&src=strength",
+    );
+  });
+
+  it("has no destination for a WEAK row", () => {
+    expect(strengthOrderHref(weakRow)).toBeNull();
+  });
+
+  it("has no destination for a row without a ticker", () => {
+    expect(strengthOrderHref({ ...data.results[0], ticker: "   " })).toBeNull();
+  });
+});
 
 describe("StrengthConfirmationScanner", () => {
   it("renders desktop factor rows, mobile cards, and scan actions", () => {
@@ -163,5 +205,34 @@ describe("StrengthConfirmationScanner", () => {
       "descending",
     );
     expect(firstTicker()).toBe("MSFT");
+  });
+
+  it("links actionable rows into the chain order builder on desktop and mobile", () => {
+    render(<StrengthConfirmationScanner data={dataWithWeak} />);
+
+    const links = screen.getAllByTestId("strength-order-link-AAPL");
+    expect(links.length).toBe(2);
+    for (const link of links) {
+      expect(link.getAttribute("href")).toBe("/AAPL?deck=c&src=strength");
+    }
+
+    const watchlist = screen.getAllByTestId("strength-order-link-MSFT");
+    expect(watchlist.length).toBe(2);
+    for (const link of watchlist) {
+      expect(link.getAttribute("href")).toBe("/MSFT?deck=c&src=strength");
+    }
+
+    expect(screen.queryAllByTestId("strength-order-link-INTC").length).toBe(0);
+    expect(screen.getAllByText("INTC").length).toBeGreaterThan(0);
+  });
+
+  it("renders no order link when the row cannot address a ticker", () => {
+    render(
+      <StrengthConfirmationScanner
+        data={{ ...data, results: [{ ...data.results[0], ticker: "   " }] }}
+      />,
+    );
+
+    expect(screen.queryAllByRole("link").length).toBe(0);
   });
 });
