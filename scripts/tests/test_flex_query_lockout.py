@@ -21,12 +21,25 @@ def sidecar(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     path = tmp_path / "flex_token_embargo.json"
     monkeypatch.setattr("utils.flex_embargo.SIDECAR", path)
     monkeypatch.setattr("utils.flex_embargo._heartbeat", lambda *a, **k: None)
+    monkeypatch.setattr("utils.flex_embargo._durable_store_available", lambda: False)
     return path
 
 
-def test_fetch_executions_skips_sendrequest_when_locked(sidecar: Path):
+def _freeze_before_embargo_lapse(monkeypatch: pytest.MonkeyPatch) -> None:
+    frozen = datetime(2026, 8, 23, 22, 0, tzinfo=timezone.utc)
+
+    class _FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return frozen if tz is None else frozen.astimezone(tz)
+
+    monkeypatch.setattr("utils.flex_embargo.datetime", _FrozenDateTime)
+
+
+def test_fetch_executions_skips_sendrequest_when_locked(sidecar: Path, monkeypatch: pytest.MonkeyPatch):
     from trade_blotter.flex_query import FlexQueryFetcher
 
+    _freeze_before_embargo_lapse(monkeypatch)
     record_lockout("1025", now=datetime(2026, 8, 21, 13, 58, 26, tzinfo=timezone.utc))
     fetcher = FlexQueryFetcher(token="tok", query_id="1422766")
     with patch("trade_blotter.flex_query._http_get_text") as http:
