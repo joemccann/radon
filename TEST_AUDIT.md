@@ -5210,6 +5210,97 @@ nothing.
   `OK`, with the TIMEOUT / FAILED / OK classifications pinned unchanged so the
   fix cannot become a blanket downgrade.
 
+### Findings surfaced by the 2026-08-28 remediation (T-240 … T-246)
+
+Each was found while working an unrelated backlog item, verified at the cited
+line by the lead, and left UNFIXED because it is outside the AC that surfaced
+it. Filed so the next audit does not have to rediscover them.
+
+- **T-240 [P1] `letClerkLoad`'s route handler outlives the page, and the pattern
+  is copy-pasted across roughly a dozen regime tab specs.** Its proxying
+  `route.fetch` is still in flight at teardown, so a run fails on a route
+  callback rather than on an assertion, and hits a DIFFERENT test each time.
+  Fixed in `web/e2e/ivrank-tab.spec.ts` under T-234 with
+  `page.unrouteAll({ behavior: "ignoreErrors" })` in `afterEach`; unfixed in
+  `cor`, `hyad`, `bpi`, `hhlev`, `trin`, `divyield`, `vixts`, `vixcor`,
+  `margin-debt`, `skew2d`, `straddle` and `credit-spread`. Likely a broad source
+  of what reads as flake in this suite. **AC:** apply the same `afterEach` to
+  every spec using `letClerkLoad`, and assert in a contract test that a spec
+  importing it also unroutes.
+
+- **T-241 [P2] `toHaveClass(/active/)` is a SUBSTRING match, so renaming
+  `active` to `is-active` does not red it.** Roughly 15 regime tab specs rely on
+  that assertion for "this tab is selected". Confirmed under T-234: the styling
+  refactor that broke every class LOCATOR left the `toHaveClass` assertions
+  passing. The assertion is weaker than it reads. **AC:** assert
+  `data-state="active"` (or an exact class list) instead; renaming the class
+  must red.
+
+- **T-242 [P1] The BPI stale flag is computed against a DIFFERENT session
+  resolution than the one the bars were filtered by.** `ensure_member_history`
+  resolves `last_completed_session_date()` once at `scripts/bpi_scan.py:247`
+  (`last_complete`, used to pick laggards to fetch) and `build_index_payload`
+  resolves it AGAIN at `:213` to compute `"stale": latest["date"] <
+  last_completed_session_date()`. Verified at both lines. A real run whose fetch
+  phase straddles 16:00 ET filters member bars against yesterday's session and
+  then labels the resulting payload stale against today's, so a COMPLETE sweep
+  is persisted to Turso and the disk mirror with a spurious `stale: true`. This
+  is the production half of T-227, which fixed only the test fixture.
+  **AC:** resolve the anchor once in `scan_index` and thread it into
+  `build_index_payload`; red — a fake clock that flips the resolution between
+  the two calls must currently produce `stale: true` on a complete sweep.
+
+- **T-243 [P2] No deploy path reinstalls the fleet-wide drop-in.**
+  `cloud/services/radon-.service.d/common.conf` — the drop-in that sets
+  `RADON_DB_NO_REPLICA=1` on every `radon-*` unit, the DUR-07 belt-and-braces
+  named in CLAUDE.md — is written ONLY by `setup-vps.sh:install_fleet_dropin`,
+  at provisioning time. `install-units`' regex
+  (`deploy-root-helper.sh:779`) matches bare `radon-*.{service,timer}`,
+  `sync-scheduled-units` is allowlist-driven, and the file is absent from
+  `CONTROL_PLANE_SOURCES`. So an edit reaches production only via a manual root
+  copy or a full re-provision. T-236 added the sha256 pin, which makes the
+  divergence visible at review time, and `drift_audit.py` reports it live as
+  `fleet-dropin` — but nothing closes it. **AC:** either add it to an installer
+  verb, or assert in a test that the pin and the drift report are the only
+  intended mechanism and document it as manual.
+
+- **T-244 [P2] Two `fmtUsd` implementations disagree on where the minus sign
+  goes, and one docstring is wrong about its own function.**
+  `web/lib/positionUtils.ts:15` is
+  `` `$${normalizeRoundedZero(n, 0).toLocaleString("en-US", …)}` ``, so a
+  negative renders `$-50` — minus AFTER the dollar sign. `web/lib/format.ts:23`
+  `fmtUsd` renders `-$50` (explicit `value < 0 ? "-" : ""` prefix). Both
+  position surfaces import the `positionUtils` one, so every short's Market
+  Value cell publishes `$-50`. Verified at both lines. Additionally
+  `web/lib/format.ts:19-21` `fmtUsdRound` has the SAME shape as the
+  `positionUtils` one while its docstring promises `"$45,678" / "-$1,234"` — the
+  docstring describes behaviour the function does not have. Surfaced under
+  T-220: this is exactly why that file's `money()` helper never matched negative
+  market values, so S3's comparison was `null === null` for every negative draw.
+  Values agreed, so there is no cross-surface mismatch; it is a formatting
+  inconsistency plus a false docstring. **AC:** one shared formatter, or a
+  contract test asserting both spellings agree; red — assert `fmtUsd(-50)` is
+  `"-$50"` from both modules.
+
+- **T-245 [P2] `ScanGate.mark_failure()` does not clear `_last_success`.**
+  `mark_success()` clears `_last_failure`, but not the reverse. In `_gated_scan`,
+  `on_fresh` raising `HTTPException` (the GEX ticker-mismatch 502 path at
+  `scripts/api/server.py:4007`) calls `mark_failure()` while a prior success's
+  cooldown is still live. `retry_after()` takes the `max` of both so it is
+  benign today, but `_admit()` then reads the cache under `in_cooldown()`, and
+  for `/gex/scan` the cache is ticker-scoped, so a mismatched write can leave the
+  gate reporting a cooldown for a payload that never landed. Surfaced under
+  T-230. **AC:** a case where a success is followed by a failure and the gate is
+  asked for its cache; assert it does not serve a cooldown for an unlanded
+  payload.
+
+- **T-246 [P2] A matcher wider than intended.**
+  `web/tests/same-day-pnl-surface-parity.test.tsx:157` builds a `RegExp` from an
+  unescaped label, so its `.` matches `,`. Harmless now that T-233 pins the
+  locale, but it is still a matcher that accepts strings it was not meant to.
+  **AC:** escape the label before constructing the pattern; a label containing a
+  regex metacharacter must match literally.
+
 ## Remediation 2026-08-28
 
 **This cycle's AUDIT PHASE PRODUCED NOTHING — operator action item.** The
