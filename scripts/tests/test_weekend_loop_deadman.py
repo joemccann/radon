@@ -317,3 +317,153 @@ class TestSetupGuardsTheSharedVenv:
             f"{name} setup re-creates the shared venv without checking whether "
             "the other loop's cycle is executing against it"
         )
+
+
+def _claude_invocation_line(path: Path) -> str:
+    """The `timeout ... claude -p` command lifted verbatim, so a test can RUN it.
+
+    The invocation is a multi-line backslash continuation; join it back into
+    one command so it can be handed to `bash -c`.
+    """
+    lines = path.read_text(encoding="utf-8").splitlines()
+    start = next(
+        i
+        for i, line in enumerate(lines)
+        if "claude -p" in line
+        and "timeout" in line
+        and not line.lstrip().startswith("#")
+    )
+    out = []
+    for line in lines[start:]:
+        out.append(line.rstrip().rstrip("\\").rstrip())
+        if not line.rstrip().endswith("\\"):
+            break
+    return " ".join(part.strip() for part in out)
+
+
+def _phase_status_block(path: Path) -> str:
+    """`phase_status` lifted verbatim, so a test can RUN it rather than grep it."""
+    text = path.read_text(encoding="utf-8")
+    assert "phase_status() {" in text and "BG_CEILING_MARKER=" in text, (
+        f"{path.name} has no phase_status/BG_CEILING_MARKER pair, so the "
+        "status the dead-man channels carry is keyed on the agent's exit code "
+        "alone — and `claude -p` exits 0 after killing unfinished background "
+        "work. That is the T-239 defect, not a renamed helper."
+    )
+    # From the marker constant, so the block is self-contained: a marker that
+    # drifts away from the function it feeds would otherwise pass here and
+    # fail under `set -u` in production.
+    start = text.index("BG_CEILING_MARKER=")
+    end = text.index("\n}\n", text.index("phase_status() {", start)) + len("\n}\n")
+    return text[start:end]
+
+
+class TestBackgroundWorkIsNotSilentlyKilled:
+    """T-239: the 2026-08-28 audit phase filed nothing and reported OK.
+
+    `claude -p` terminates unfinished background tasks at its print-mode
+    background-wait ceiling (600 s by default), prints
+    `Background tasks still running after 600s; terminating.` and then exits
+    **0**. The wrapper keys its dead-man status purely on that exit code, so a
+    phase cut off with its last agent still working is indistinguishable from
+    one that finished. That run left `origin/testing/2026-08-28` an empty
+    branch, no `## Delta audit 2026-08-28` section, no ledger line and no PR,
+    against a 24-commit / 262-file delta — and paged **OK**.
+
+    Two independent guarantees, both executed here rather than grepped:
+    prevention (the ceiling is lifted, so the harness waits and the `timeout`
+    remains the only cap) and honesty (if it is ever cut off anyway, the
+    status the operator sees is not "OK").
+    """
+
+    MARKER = "Background tasks still running after"
+
+    @pytest.mark.parametrize("name", sorted(LOOPS))
+    def test_the_ceiling_is_lifted_for_the_real_child_process(self, name, tmp_path):
+        """RUN the lifted invocation with a stub `claude` that records its env.
+
+        A source grep for the variable name is satisfied by an assignment that
+        never reaches the child — e.g. one set in a subshell, or after the
+        call. This spawns the process and reads the value back out of it.
+        """
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        env_log = tmp_path / "child-env.txt"
+        claude = bin_dir / "claude"
+        claude.write_text(
+            "#!/bin/sh\n"
+            f'printf "%s" "${{CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS-<unset>}}" > "{env_log}"\n'
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        claude.chmod(0o755)
+        run_log = tmp_path / "phase.log"
+        proc = subprocess.run(
+            [
+                BASH,
+                "-c",
+                "set -Eeuo pipefail\n"
+                f'PHASE=audit\nremain=30\nRUN_LOG="{run_log}"\n'
+                + _claude_invocation_line(LOOPS[name]),
+            ],
+            env={**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"},
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
+        seen = env_log.read_text(encoding="utf-8") if env_log.exists() else "<never ran>"
+        assert seen == "0", (
+            f"{name}: the agent child sees "
+            f"CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS={seen!r}. At anything other "
+            "than 0 the harness kills unfinished background work after that "
+            "many milliseconds and exits 0 anyway, so a phase can be cut in "
+            "half and still page OK — which is exactly what happened to the "
+            "2026-08-28 audit. The `timeout $remain` above is the cap; the "
+            "harness ceiling must not be a second, shorter, silent one."
+        )
+
+    @pytest.mark.parametrize("name", sorted(LOOPS))
+    def test_a_truncated_phase_is_not_reported_as_ok(self, name, tmp_path):
+        """RUN `phase_status` over a log carrying the real harness message."""
+        block = _phase_status_block(LOOPS[name])
+        truncated = tmp_path / "truncated.log"
+        truncated.write_text(
+            "[weekend] audit start 20260828T000007 repo=/x cap=7200s\n"
+            "Background tasks still running after 600s; terminating. Set "
+            "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 to wait indefinitely.\n"
+            "Last agent still working. Waiting on it and the drain monitor.\n",
+            encoding="utf-8",
+        )
+        clean = tmp_path / "clean.log"
+        clean.write_text("[weekend] audit start\nall done\n", encoding="utf-8")
+
+        def status(rc: int, log: Path) -> str:
+            proc = subprocess.run(
+                [
+                    BASH,
+                    "-c",
+                    "set -Eeuo pipefail\nCAP_SECS=7200\n"
+                    + block
+                    + f'\nphase_status {rc} "{log}"\n',
+                ],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            assert proc.returncode == 0, (proc.returncode, proc.stderr)
+            return proc.stdout.strip()
+
+        assert status(0, truncated) != "OK", (
+            f"{name}: a phase the harness cut off mid-flight reported OK. The "
+            "dead-man channels then say the run succeeded, and the operator "
+            "cannot tell it from a real one without opening the branch."
+        )
+        assert "TRUNCATED" in status(0, truncated), status(0, truncated)
+        # The other three classifications must be unchanged.
+        assert status(0, clean) == "OK", status(0, clean)
+        assert status(124, clean) == "TIMEOUT after 7200s", status(124, clean)
+        assert status(9, clean) == "FAILED (exit 9)", status(9, clean)
+        # A truncated run that ALSO timed out is a timeout, not a truncation:
+        # the cap is the more specific fact and it already implies partial work.
+        assert status(124, truncated) == "TIMEOUT after 7200s", status(124, truncated)

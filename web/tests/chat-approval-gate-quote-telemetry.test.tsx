@@ -26,6 +26,23 @@ import ApprovalGate from "@/components/agent/ApprovalGate";
 import ChatPanel from "@/components/ChatPanel";
 import type { PriceData } from "@/lib/pricesProtocol";
 
+// TEST_AUDIT T-177: the four `findByRole(..., { timeout: 8000 })` waits below
+// are only reachable when the per-test timeout exceeds 8000. Vitest's default
+// is 5000 and `vitest.config.ts` sets none, so a slow run died at 5s with an
+// opaque "Test timed out in 5000ms" and the locator's own ceiling never fired
+// — the operator never saw WHICH element was missing. Raised per FILE (the
+// T-161 pattern used by dashboard-newsfeed-pagination and theta-harvester-
+// scanner), never suite-wide, because `retry: 0` means a slow test has to be
+// honest about being slow.
+//
+// The 8s ceiling is kept, not dropped: measured 2026-08-28 on the macOS gate,
+// this file alone, the `confirm` wait itself ran 115 / 127 / 233 / 390 ms on a
+// warm run, 435 / 600 / 636 / 1672 ms cold, and 605 / 1063 / 1309 / 1916 ms
+// under `--coverage`. The 1.9s peak is already ~2x React Testing Library's
+// 1000ms default, so deleting the argument would trade an opaque timeout for a
+// flaky one on a loaded shard.
+vi.setConfig({ testTimeout: 10_000, hookTimeout: 10_000 });
+
 afterEach(cleanup);
 
 const NINE_LABELS = ["BID", "MID", "ASK", "SPREAD", "VOLUME", "HIGH", "LOW", "DAY"];

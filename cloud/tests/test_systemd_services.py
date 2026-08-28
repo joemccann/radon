@@ -1101,3 +1101,50 @@ class TestDemoMirrorSchemaGate:
         assert "migrate.py" in pre
         assert "--demo" in pre
         assert "TimeoutStartSec=300" in raw
+
+
+# ---------------------------------------------------------------------------
+# radon-newsfeed.service
+# ---------------------------------------------------------------------------
+
+
+class TestNewsfeedShutdownExitStatus:
+    """T-229: exit 75 on a mid-cycle SIGTERM must not read as `failed`.
+
+    scripts/newsfeed/scheduler.js:86 exits 75 when the shutdown grace expires
+    with a scrape cycle still in flight (R-262 — the truncated-cycle signal).
+    The scraper loops every 120 s, so an ordinary `systemctl stop` during a
+    deploy lands mid-cycle most of the time. Without SuccessExitStatus=75 that
+    deliberate signal leaves the unit in `failed`, which
+    scripts/watchdog/units.py pages on, and Restart=on-failure then restarts it
+    5 x 30 s = 150 s < StartLimitIntervalSec=300 straight into
+    Result=start-limit-hit: a parked newsfeed nobody restarts.
+
+    75 is the repo's established EX_TEMPFAIL convention, already paired with
+    SuccessExitStatus=75 in radon-db-retention.service and
+    radon-db-backup.service.
+    """
+
+    FILENAME = "radon-newsfeed.service"
+
+    def test_truncated_cycle_exit_is_not_a_unit_failure(self, unit):
+        svc = unit(self.FILENAME)["Service"]
+        assert svc.get("successexitstatus") == "75", (
+            "radon-newsfeed.service must declare SuccessExitStatus=75: the "
+            "scheduler exits 75 on a SIGTERM that lands mid-cycle, so without "
+            "it an ordinary deploy stop parks the unit failed and the watchdog "
+            "pages for a routine restart"
+        )
+
+    def test_restart_ladder_would_otherwise_park_the_unit(self, unit):
+        """The blast radius, pinned: the ladder cannot outlast the window, so
+        a repeated exit-75 without the mapping ends at start-limit-hit."""
+        cfg = unit(self.FILENAME)
+        burst = int(cfg["Unit"]["startlimitburst"])
+        interval = int(cfg["Unit"]["startlimitintervalsec"])
+        restart_sec = int(cfg["Service"]["restartsec"])
+        assert cfg["Service"]["restart"] == "on-failure"
+        assert burst * restart_sec < interval, (
+            "if this ever stops holding, re-derive the reason "
+            "SuccessExitStatus=75 is load-bearing here"
+        )

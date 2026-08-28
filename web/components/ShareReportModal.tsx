@@ -178,6 +178,7 @@ export default function ShareReportModal({
       {dialogOpen && (
         <div
           className="cta-share-backdrop"
+          data-testid="share-modal-backdrop"
           onClick={closeModal}
           role="dialog"
           aria-modal="true"
@@ -185,21 +186,23 @@ export default function ShareReportModal({
         >
           <div
             className="cta-share-modal"
+            data-testid="share-modal-panel"
             ref={panelRef}
             tabIndex={-1}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="cta-share-header">
-              <span className="cta-share-title">{modalTitle}</span>
+              <span className="cta-share-title" data-testid="share-modal-title">{modalTitle}</span>
               <a
                 className="cta-share-close"
+                data-testid="share-modal-download"
                 href={shareUrl}
                 download="radon-share-preview.html"
                 aria-label="Download preview"
               >
                 <Download size={14} />
               </a>
-              <button className="cta-share-close" onClick={closeModal} aria-label="Close">
+              <button className="cta-share-close" data-testid="share-modal-close" onClick={closeModal} aria-label="Close">
                 <X size={14} />
               </button>
             </div>
@@ -221,6 +224,7 @@ export default function ShareReportModal({
             )}
             <iframe
               className="cta-share-iframe"
+              data-testid="share-modal-iframe"
               src={shareUrl}
               title={shareContentTitle}
               // allow-scripts WITHOUT allow-same-origin: a static share-card

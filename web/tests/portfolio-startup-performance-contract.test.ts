@@ -211,27 +211,51 @@ describe("portfolio startup performance contracts", () => {
     expect(container.querySelector(`[data-testid="lazy-chunk-${workspaceChunk}"]`)).toBeNull();
   });
 
+  /**
+   * T-186: the stub answers with a real Response instead of `undefined`. A spy
+   * returning undefined makes a genuine `await fetch(...)` in the RSC die on
+   * `res.json()` BEFORE the no-round-trip assertion runs, so the file reds with
+   * "Cannot read properties of undefined" and never names the contract it
+   * guards. Answering the call lets the RSC finish and lets the assertion that
+   * owns this contract be the one that fails.
+   */
+  const answeringFetchSpy = () => {
+    const spy = vi.fn(async () => new Response("{}", {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", spy);
+    return spy;
+  };
+
   it("seeds the portfolio page from the server instead of a client fetch waterfall", async () => {
     const seed = { data: { bankroll: 42_000 }, warning: null };
     readSeedSpy.mockResolvedValue(seed);
-    const fetchSpy = vi.fn();
-    vi.stubGlobal("fetch", fetchSpy);
+    const fetchSpy = answeringFetchSpy();
 
     const page = await import("../app/portfolio/page");
     const element = await page.default();
 
+    // Asserted FIRST: a round trip is the defect this test exists for, so it
+    // must be the failure the reader sees, not a downstream seed mismatch.
+    expect(fetchSpy, "the RSC must not issue its own HTTP round trip").not.toHaveBeenCalled();
     expect(page.dynamic).toBe("force-dynamic");
     expect(readSeedSpy).toHaveBeenCalledTimes(1);
     expect((element.props as { initialPortfolio?: unknown }).initialPortfolio).toBe(seed);
-    expect(fetchSpy, "the RSC must not issue its own HTTP round trip").not.toHaveBeenCalled();
   });
 
   it("skips the RSC DB read under the authless Playwright harness", async () => {
     vi.stubEnv("RADON_AUTHLESS_TEST", "1");
+    // T-186: this path was the one unstubbed `fetch` in the file. A real
+    // `await fetch(...)` in the RSC escaped as live egress to localhost:3000
+    // (ECONNREFUSED, or a hit on whatever is actually listening) rather than a
+    // named failure. The authless path owes the same no-round-trip contract.
+    const fetchSpy = answeringFetchSpy();
 
     const page = await import("../app/portfolio/page");
     const element = await page.default();
 
+    expect(fetchSpy, "the authless RSC must not issue an HTTP round trip either").not.toHaveBeenCalled();
     expect(readSeedSpy).not.toHaveBeenCalled();
     expect((element.props as { initialPortfolio?: unknown }).initialPortfolio).toBeUndefined();
   });

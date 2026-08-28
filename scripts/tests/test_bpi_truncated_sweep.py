@@ -25,10 +25,12 @@ the fetch phase to the persist phase.
 
 from __future__ import annotations
 
+import contextlib
 import re
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -37,12 +39,30 @@ if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
 import bpi_scan as bpi  # noqa: E402
+from utils import market_calendar  # noqa: E402
+
+_ET = ZoneInfo("America/New_York")
+
+# T-227: `last_completed_session_date` flips at exactly 16:00 ET, and this
+# module used to resolve it TWICE per test — once to build the session
+# fixtures, once inside `build_index_payload` to compute `stale`. A run that
+# straddled the close built against yesterday and graded against today, so
+# `assert payload["stale"] is False` reds for reasons that have nothing to do
+# with the code under test. One frozen trading day, injected everywhere.
+_ANCHOR_SESSION = "2026-08-26"  # a Wednesday, no holiday
 
 
-def _sessions(n: int) -> list[str]:
+@pytest.fixture(autouse=True)
+def _pin_session_anchor(monkeypatch):
+    """Freeze the session anchor for the whole module (see _ANCHOR_SESSION)."""
+    monkeypatch.setattr(
+        bpi, "last_completed_session_date", lambda *_a, **_k: _ANCHOR_SESSION
+    )
+
+
+def _sessions(n: int, anchor: str = _ANCHOR_SESSION) -> list[str]:
     out: list[str] = []
-    day = bpi.last_completed_session_date()
-    day = date.fromisoformat(day)
+    day = date.fromisoformat(anchor)
     while len(out) < n:
         if day.weekday() < 5:
             out.append(day.isoformat())
@@ -144,3 +164,149 @@ class TestPersistPhaseHasBudget:
         )
         with pytest.raises(SystemExit):
             installed[signal.SIGTERM](signal.SIGTERM, None)
+
+    def test_run_scan_itself_installs_the_handler(self, monkeypatch, tmp_path):
+        """T-231(a): the test above calls `install_sigterm_unwind()` directly,
+        so deleting `run_scan`'s call to it left the suite green while a
+        systemd `Result=timeout` again killed the process without unwinding
+        `service_cycle`'s finally. Pin the CALL SITE: spy `signal.signal` and
+        assert the handler lands as part of run_scan's own execution."""
+        import signal
+
+        installed: dict = {}
+        monkeypatch.setattr(
+            signal, "signal", lambda sig, handler: installed.__setitem__(sig, handler)
+        )
+        monkeypatch.setenv(bpi.DATA_DIR_ENV, str(tmp_path))
+
+        bpi.run_scan([], backfill=False, no_db=True)
+
+        assert signal.SIGTERM in installed, (
+            "run_scan did not install the SIGTERM unwind during its own run; a "
+            "systemd timeout skips service_cycle's finally and writes no error row"
+        )
+        with pytest.raises(SystemExit):
+            installed[signal.SIGTERM](signal.SIGTERM, None)
+
+
+class _FakeClock:
+    """Only `monotonic` is used by the code paths under test."""
+
+    def __init__(self, now: float):
+        self.now = now
+
+    def monotonic(self) -> float:
+        return self.now
+
+
+class TestPersistReserveGatesTheWrite:
+    """T-231(b): `PERSIST_RESERVE_S` was read by nothing but the arithmetic
+    assertion above — a "reserve" that production ignored. run_scan now gates
+    each index's Turso write on `time.monotonic() < deadline + PERSIST_RESERVE_S`.
+    """
+
+    def _run(self, monkeypatch, tmp_path, *, now, sweep_deadline, reserve):
+        monkeypatch.setenv(bpi.DATA_DIR_ENV, str(tmp_path))
+        monkeypatch.setattr(bpi, "time", _FakeClock(now))
+        monkeypatch.setattr(bpi, "PERSIST_RESERVE_S", reserve)
+
+        persisted: list[str] = []
+        monkeypatch.setattr(
+            bpi, "_persist_index", lambda symbol, _payload: persisted.append(symbol)
+        )
+        monkeypatch.setattr(
+            bpi,
+            "scan_index",
+            lambda symbol, **_kw: {
+                "index_symbol": symbol,
+                "missing": False,
+                "taken_at": "2099-01-01T00:00:00Z",
+                "_bpi_rows": [],
+            },
+        )
+        monkeypatch.setattr(
+            bpi,
+            "_heartbeat_cycle",
+            contextlib.contextmanager(lambda _no_db: iter([None])),
+        )
+
+        bpi.run_scan(
+            ["RUT"], backfill=False, no_db=False, sweep_deadline=sweep_deadline
+        )
+        return persisted
+
+    def test_a_write_inside_the_reserve_still_persists(self, monkeypatch, tmp_path):
+        persisted = self._run(
+            monkeypatch, tmp_path, now=1_000.0, sweep_deadline=900.0, reserve=600
+        )
+        assert persisted == ["RUT"], (
+            "100s past the fetch budget with a 600s reserve is the normal case; "
+            "the gate must not change real-world behaviour"
+        )
+
+    def test_a_write_past_the_reserve_is_skipped(self, monkeypatch, tmp_path):
+        persisted = self._run(
+            monkeypatch, tmp_path, now=1_000.0, sweep_deadline=300.0, reserve=600
+        )
+        assert persisted == [], (
+            "700s past the fetch budget exhausted the 600s reserve, yet the "
+            "Turso write was started anyway — that is the SIGTERM-mid-upsert "
+            "window R-225 set out to close"
+        )
+
+    def test_the_reserve_value_is_what_moves_the_gate(self, monkeypatch, tmp_path):
+        """Mutating PERSIST_RESERVE_S must change observable behaviour: same
+        clock, same deadline, only the constant differs."""
+        args = dict(now=1_000.0, sweep_deadline=300.0)
+        assert self._run(monkeypatch, tmp_path, reserve=600, **args) == []
+        assert self._run(monkeypatch, tmp_path, reserve=5_000, **args) == ["RUT"]
+
+
+class TestTheSessionAnchorIsResolvedOnce:
+    """T-227: the module's fixtures and `build_index_payload` must agree on ONE
+    session, or a run that straddles 16:00 ET reds on `stale`."""
+
+    def test_the_1600_et_flip_is_real(self):
+        before = market_calendar.last_completed_session_date(
+            datetime(2026, 8, 27, 15, 59, tzinfo=_ET)
+        )
+        after = market_calendar.last_completed_session_date(
+            datetime(2026, 8, 27, 16, 0, tzinfo=_ET)
+        )
+        assert (before, after) == ("2026-08-26", "2026-08-27"), (
+            "the anchor flips at exactly 16:00 ET on a trading day"
+        )
+
+    def test_a_straddling_run_would_have_reddened_the_old_two_call_anchoring(
+        self, monkeypatch
+    ):
+        """Deliberately re-resolve per call, exactly as this module used to:
+        the build consumes 15:59 ET, the `stale` computation consumes 16:00 ET.
+        """
+        flip = iter(["2026-08-26", "2026-08-27"])
+        monkeypatch.setattr(
+            bpi,
+            "last_completed_session_date",
+            lambda *_a, **_k: next(flip, "2026-08-27"),
+        )
+        sessions = _sessions(60, anchor=bpi.last_completed_session_date())
+        payload = _payload(
+            {f"M{i}": _series(sessions) for i in range(1000)}, member_count=1000
+        )
+        assert payload["stale"] is True, (
+            "the straddle no longer diverges, so this module's false-red is "
+            "not what T-227 described"
+        )
+
+    def test_the_pinned_anchor_does_not_flip_across_calls(self):
+        assert bpi.last_completed_session_date() == _ANCHOR_SESSION
+        assert bpi.last_completed_session_date() == _ANCHOR_SESSION
+        assert _sessions(60)[-1] == _ANCHOR_SESSION
+
+    def test_a_complete_sweep_is_never_stale_under_the_pinned_anchor(self):
+        sessions = _sessions(60)
+        payload = _payload(
+            {f"M{i}": _series(sessions) for i in range(1000)}, member_count=1000
+        )
+        assert payload["as_of_session"] == _ANCHOR_SESSION
+        assert payload["stale"] is False

@@ -5177,6 +5177,221 @@ either. Merging #109 is what un-reds `main`.
   (`ib_2fa_lock.py:375`), burning the 5s reader deadline. Named in T-201's
   text, outside its AC.
 
+## Delta audit 2026-08-28 (surfaced by remediation)
+
+This cycle's audit phase filed nothing (see the Remediation section below), so
+this is not a delta audit of the codebase. It is the ONE finding that
+remediation could not avoid making, because it is why the audit produced
+nothing.
+
+- **T-239 [P0] A phase the harness truncates exits 0, and both weekend
+  wrappers page `OK` on it.**
+  `claude -p` terminates unfinished background tasks at its print-mode
+  background-wait ceiling (600 s by default), prints
+  `Background tasks still running after 600s; terminating.` and then exits
+  **0**. `scripts/testing_weekend.sh:284-297` and
+  `scripts/reliability_weekend.sh:332-345` classify the phase on that exit
+  code alone, so a run cut off with its last agent still working is
+  indistinguishable from one that finished. Neither wrapper sets
+  `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`, so the ceiling is a second, shorter,
+  silent cap sitting inside the `timeout "$remain"` the wrapper believes is
+  the only one.
+  **Observed, not theorised:** the 2026-08-28 audit phase was cut at 600 s. It
+  left `origin/testing/2026-08-28` an empty branch at `c6d08fbd`, no
+  `## Delta audit 2026-08-28` section, no ledger line and no PR, against a
+  24-commit / 262-file / +23,193-line delta — and reported **OK** on all three
+  dead-man channels. Issue #83's last comment carries the harness message
+  verbatim. This is the T-209 failure mode (a dead-man signal that lies)
+  re-entering through a different door, and it would have recurred nightly.
+  **AC:** the agent child process must actually see
+  `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0` (spawn it and read the value back —
+  an assignment that never reaches the child satisfies any source grep); and a
+  run log carrying the harness message must classify as something other than
+  `OK`, with the TIMEOUT / FAILED / OK classifications pinned unchanged so the
+  fix cannot become a blanket downgrade.
+
+### Findings surfaced by the 2026-08-28 remediation (T-240 … T-246)
+
+Each was found while working an unrelated backlog item, verified at the cited
+line by the lead, and left UNFIXED because it is outside the AC that surfaced
+it. Filed so the next audit does not have to rediscover them.
+
+- **T-240 [P1] `letClerkLoad`'s route handler outlives the page, and the pattern
+  is copy-pasted across roughly a dozen regime tab specs.** Its proxying
+  `route.fetch` is still in flight at teardown, so a run fails on a route
+  callback rather than on an assertion, and hits a DIFFERENT test each time.
+  Fixed in `web/e2e/ivrank-tab.spec.ts` under T-234 with
+  `page.unrouteAll({ behavior: "ignoreErrors" })` in `afterEach`; unfixed in
+  `cor`, `hyad`, `bpi`, `hhlev`, `trin`, `divyield`, `vixts`, `vixcor`,
+  `margin-debt`, `skew2d`, `straddle` and `credit-spread`. Likely a broad source
+  of what reads as flake in this suite. **AC:** apply the same `afterEach` to
+  every spec using `letClerkLoad`, and assert in a contract test that a spec
+  importing it also unroutes.
+
+- **T-241 [P2] `toHaveClass(/active/)` is a SUBSTRING match, so renaming
+  `active` to `is-active` does not red it.** Roughly 15 regime tab specs rely on
+  that assertion for "this tab is selected". Confirmed under T-234: the styling
+  refactor that broke every class LOCATOR left the `toHaveClass` assertions
+  passing. The assertion is weaker than it reads. **AC:** assert
+  `data-state="active"` (or an exact class list) instead; renaming the class
+  must red.
+
+- **T-242 [P1] The BPI stale flag is computed against a DIFFERENT session
+  resolution than the one the bars were filtered by.** `ensure_member_history`
+  resolves `last_completed_session_date()` once at `scripts/bpi_scan.py:247`
+  (`last_complete`, used to pick laggards to fetch) and `build_index_payload`
+  resolves it AGAIN at `:213` to compute `"stale": latest["date"] <
+  last_completed_session_date()`. Verified at both lines. A real run whose fetch
+  phase straddles 16:00 ET filters member bars against yesterday's session and
+  then labels the resulting payload stale against today's, so a COMPLETE sweep
+  is persisted to Turso and the disk mirror with a spurious `stale: true`. This
+  is the production half of T-227, which fixed only the test fixture.
+  **AC:** resolve the anchor once in `scan_index` and thread it into
+  `build_index_payload`; red — a fake clock that flips the resolution between
+  the two calls must currently produce `stale: true` on a complete sweep.
+
+- **T-243 [P2] No deploy path reinstalls the fleet-wide drop-in.**
+  `cloud/services/radon-.service.d/common.conf` — the drop-in that sets
+  `RADON_DB_NO_REPLICA=1` on every `radon-*` unit, the DUR-07 belt-and-braces
+  named in CLAUDE.md — is written ONLY by `setup-vps.sh:install_fleet_dropin`,
+  at provisioning time. `install-units`' regex
+  (`deploy-root-helper.sh:779`) matches bare `radon-*.{service,timer}`,
+  `sync-scheduled-units` is allowlist-driven, and the file is absent from
+  `CONTROL_PLANE_SOURCES`. So an edit reaches production only via a manual root
+  copy or a full re-provision. T-236 added the sha256 pin, which makes the
+  divergence visible at review time, and `drift_audit.py` reports it live as
+  `fleet-dropin` — but nothing closes it. **AC:** either add it to an installer
+  verb, or assert in a test that the pin and the drift report are the only
+  intended mechanism and document it as manual.
+
+- **T-244 [P2] Two `fmtUsd` implementations disagree on where the minus sign
+  goes, and one docstring is wrong about its own function.**
+  `web/lib/positionUtils.ts:15` is
+  `` `$${normalizeRoundedZero(n, 0).toLocaleString("en-US", …)}` ``, so a
+  negative renders `$-50` — minus AFTER the dollar sign. `web/lib/format.ts:23`
+  `fmtUsd` renders `-$50` (explicit `value < 0 ? "-" : ""` prefix). Both
+  position surfaces import the `positionUtils` one, so every short's Market
+  Value cell publishes `$-50`. Verified at both lines. Additionally
+  `web/lib/format.ts:19-21` `fmtUsdRound` has the SAME shape as the
+  `positionUtils` one while its docstring promises `"$45,678" / "-$1,234"` — the
+  docstring describes behaviour the function does not have. Surfaced under
+  T-220: this is exactly why that file's `money()` helper never matched negative
+  market values, so S3's comparison was `null === null` for every negative draw.
+  Values agreed, so there is no cross-surface mismatch; it is a formatting
+  inconsistency plus a false docstring. **AC:** one shared formatter, or a
+  contract test asserting both spellings agree; red — assert `fmtUsd(-50)` is
+  `"-$50"` from both modules.
+
+- **T-245 [P2] `ScanGate.mark_failure()` does not clear `_last_success`.**
+  `mark_success()` clears `_last_failure`, but not the reverse. In `_gated_scan`,
+  `on_fresh` raising `HTTPException` (the GEX ticker-mismatch 502 path at
+  `scripts/api/server.py:4007`) calls `mark_failure()` while a prior success's
+  cooldown is still live. `retry_after()` takes the `max` of both so it is
+  benign today, but `_admit()` then reads the cache under `in_cooldown()`, and
+  for `/gex/scan` the cache is ticker-scoped, so a mismatched write can leave the
+  gate reporting a cooldown for a payload that never landed. Surfaced under
+  T-230. **AC:** a case where a success is followed by a failure and the gate is
+  asked for its cache; assert it does not serve a cooldown for an unlanded
+  payload.
+
+- **T-249 [P2] The header-timeout guard accepts Caddy's UNLIMITED default.**
+  `cloud/tests/test_caddyfile.py::test_the_header_timeout_is_short_enough_to_surface`
+  asserts the parsed value is `<= 60`, and `0 <= 60`, so
+  `response_header_timeout 0s` — which is Caddy's spelling for "no limit" —
+  passes the very guard meant to bound it. Demonstrated under T-224: mutating
+  the `localhost:3000` block to `0s` left all EIGHT regex/text assertions in the
+  file passing, and only the new wire-level mechanism test caught it ("the edge
+  forwarded the upstream's late response header instead of giving up first").
+  The mechanism test now covers this mutant, so the exposure is closed in
+  practice, but the text assertion is still wrong on its own terms and will
+  mislead the next reader. **AC:** require `0 < value <= 60`; a `0s` config must
+  red the text assertion, not only the mechanism one.
+
+- **T-248 [P2] A standing, clock-INDEPENDENT false-red in the day-move spec,
+  caused by a credential prerequisite rather than by anything under test.**
+  `web/e2e/account-day-move-ib-daily-pnl.spec.ts:244` asserts
+  `toContainText("C$4.48")` on `td.last-price-cell`, and receives `"$4.48"` — the
+  plain portfolio-fixture `market_price` with no `C` calculated-price marker — at
+  BOTH a weekend clock and the pinned trading-day clock. The spec's
+  `MockWebSocket` is never constructed and no ws-ticket request is made, so no
+  live quote ever reaches the row. Root cause: `RealtimeAuthProvider`
+  (`web/lib/RealtimeAuthContext.tsx`) sources `getToken` unconditionally from
+  Clerk's `useAuth()`, and `buildAuthenticatedWebSocketUrl`
+  (`web/lib/realtimeSocketAuth.ts:29-40`) throws "Realtime auth token
+  unavailable" on a null token. Neither runner clone has a `web/.env`, so the
+  spec cannot go fully green on this machine regardless of the clock. CI holds
+  this spec out of the curated e2e list (`ci.yml:500-503`), so it is a LOCAL-only
+  red — but it is a permanent one that will keep costing a re-run to attribute.
+  **AC:** either stub the realtime auth boundary so the spec is self-contained,
+  or mark it `test.skip` behind an explicit `web/.env` precondition with the
+  reason linked here. Do NOT leave it silently red.
+
+  Related environment fact worth recording: **this spec fails 100% under
+  `next dev --turbopack`, at any clock**, which is `playwright.config`'s default
+  webServer. The spec replaces `window.WebSocket` globally, which breaks Next's
+  dev HMR client (`socket.addEventListener is not a function`), hydration aborts,
+  zero `/api/*` requests fire and the page renders the SSR shell. Only a prebuilt
+  `next start` gives a meaningful signal. Anyone re-verifying must build first.
+
+- **T-247 [P0] The T-124 realized-P&L correction is INERT in production, and
+  the test that guards it passes only on a fixture accident.**
+  `_ordered` (`scripts/clients/journal_realized.py:190-201`) sorts a day by
+  `(day, execution_time, written_at, index)`. A real Flex row carries NO
+  `execution_time` — `journal_rehydrate` never writes the key (grep: zero
+  occurrences in the file) — so `str(... or "")` yields `""`, which sorts
+  FIRST. The Flex row therefore wins attribution and the DAEMON's row is the one
+  suppressed. The surviving key is then a Flex `tradeID`
+  (`scripts/trade_blotter/flex_query.py:274` takes
+  `trade.get("tradeID") or trade.get("execId")`, so it is digit-only), and no IB
+  fill ever carries a `tradeID`, so `apply_journal_realized_pnl` matches
+  nothing and **both** partials ship IB's drifted figure. All three lines
+  verified by the lead. This hits the GENUINE-duplicate case too, which means
+  the SLV +$18,511-vs-+$30,069 correction that T-124 exists to deliver never
+  lands in production at all.
+  `test_same_close_under_api_and_flex_ids_counts_once` passes only because its
+  fixture gives NEITHER row an `execution_time`, so the tie falls through to
+  `written_at` and the daemon row happens to survive — the opposite of what
+  production does. Pinned as-is under T-184 by
+  `test_a_real_flex_row_has_no_execution_time_so_it_wins_the_attribution`; the
+  behaviour is recorded, not fixed.
+  **AC:** the root fix is upstream — `flex_query.py:274` prefers `tradeID` over
+  the Flex `ibExecID`; carrying `ibExecID` would let `_claim_exec_parts` dedupe
+  exactly and retire the namespace heuristic entirely. Red: a fixture where the
+  daemon row HAS an `execution_time` and the Flex row does not must currently
+  suppress the daemon row and produce an unmatchable key; green: the daemon row
+  survives and `apply_journal_realized_pnl` matches an IB fill.
+
+- **T-246 [P2] A matcher wider than intended.**
+  `web/tests/same-day-pnl-surface-parity.test.tsx:157` builds a `RegExp` from an
+  unescaped label, so its `.` matches `,`. Harmless now that T-233 pins the
+  locale, but it is still a matcher that accepts strings it was not meant to.
+  **AC:** escape the label before constructing the pattern; a label containing a
+  regex metacharacter must match literally.
+
+## Remediation 2026-08-28
+
+**This cycle's AUDIT PHASE PRODUCED NOTHING — operator action item.** The
+wrapper created and pushed `origin/testing/2026-08-28` at `c6d08fbd` and then
+exited without appending a `## Delta audit 2026-08-28` section, a ledger line,
+or a PR. The range is NOT empty: `789aabea..c6d08fbd` is 24 commits / 262 files
+/ +23193 lines, including the whole IB Flex file-ingest rework, the RTH-fill
+orders surface, the B2 nightly-dump job and the VPS disk-cleanup timer. **That
+delta is unaudited.** Next audit must treat `789aabea` (not `c6d08fbd`) as the
+base so the range is re-covered.
+
+**Backlog state at the start of this remediation: zero un-DONE P0 or P1.**
+- T-190 … T-217 (5 P0, 23 P1) all landed 2026-08-27, PR #112.
+- T-237, the one P0 left open there, is fixed on `main` — PR #109 merged
+  2026-08-27 12:51Z. Re-verified here:
+  `pytest scripts/tests/test_portfolio_risk_gate3_measurability.py` is
+  12 passed / 0.32 s at `c6d08fbd`.
+- T-003 … T-053 (the frozen PART A P0/P1s) landed pre-log via PRs #13/#14,
+  per the `TEST_LOG.md` header contract; T-050 remains the one open straggler
+  there and is still a maintainer threshold decision.
+
+So this run works the newest **P2** stragglers in severity-then-recency order,
+which is the next rung of the PART B contract.
+
 ## 11 · Audit ledger
 
 The weekend loop (`.claude/skills/testing-weekend/`) reads the last line
@@ -5190,3 +5405,4 @@ Delta findings continue the T-### numbering in dated `## Delta audit` sections.
 - Audited through: `27665c43` on 2026-08-25 — 34 new findings (T-122…T-155: 1 P0, 12 P1, 21 P2) over 68 commits / 513 files. Gates serial: pytest 7816 green (recursive; CI's sharded matrix drops 752 of them, T-122); vitest 7328 green / 701 files; cloud 34 red on darwin, byte-identical to the base SHA (T-118). Added-file determinism 3×3 green. No new skips, no `.only`, no exclusion growth; vitest thresholds unchanged; pytest ratchet metric silently switched to statement-only (T-123).
 - Audited through: `1b326772` on 2026-08-26 — 34 new findings (T-156…T-189: 3 P0, 14 P1, 17 P2) over 33 commits / 236 files. Gates serial round 1: pytest 7996 green (recursive; CI's 12 shards sum to the identical 7996, so T-122 holds); vitest 723 files / 7498 green; cloud 34 red on darwin, FAILED list byte-identical to the base SHA in a worktree (T-118). Added-file determinism 3×3 green (pytest 60, vitest 121). One new skip (`test_caddyfile.py:229`, filed as T-164), no `.only`, no exclusion growth, no threshold moved — but both coverage ratchets left `deploy.needs` and `main` has no required status checks (T-160).
 - Audited through: `789aabea` on 2026-08-27 — 49 new findings (T-190…T-238: 6 P0, 23 P1, 20 P2) over 43 commits / 264 files. Gates serial: pytest **7 failed** / 8153 passed — deterministic, all in `test_portfolio_risk_gate3_measurability.py`, reproduced 7/7 in isolation, filed as T-237 (`main` is red; CI at this SHA also failed and correctly skipped deploy); cloud 34 red on darwin, FAILED list byte-identical to the base SHA in a worktree (T-118); vitest 758 files / **1 failed** / 7702 passed — a single 5041ms timeout on `portfolio-startup-performance-contract.test.ts:172` under load 36, green 8/8 ×3 in isolation, filed as T-238 (load class, not a regression). Collection union clean on all three gates (py 478/479 shard union, cloud 33/33, vitest 758/758) so T-122 holds. Enforcement STRENGTHENED — T-160 is fixed, `deploy.needs` went 7 → 9 with both coverage ratchets restored. Four new skips (8 outcomes), none linked to a T-### (T-204, T-205); no `.only`; no exclusion growth; no threshold moved — the coverage measurement got stricter twice.
+- Audited through: **NOT ADVANCED** on 2026-08-28 — the audit phase was truncated by the harness background-wait ceiling at 600 s (T-239), filed no findings and no PR, and reported `OK`. `789aabea..c6d08fbd` (24 commits / 262 files / +23,193 lines) is **UNAUDITED**; the next audit must take `789aabea` as its base, not `c6d08fbd`. The remediation phase that followed worked the P2 backlog and filed T-239 against the truncation itself.

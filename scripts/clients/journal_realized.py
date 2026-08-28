@@ -353,17 +353,34 @@ def _replay_contract(
     position_qty = 0.0
     avg_basis_per_unit = 0.0
     seen_fingerprints: dict[tuple, set[str]] = {}
+    basis_tainted = False
+    position_may_be_short = False
 
     for entry in entries:
         if not _claim_exec_parts(counted_parts, entry["parts"], key):
             continue
-        if _already_journaled_under_other_namespace(seen_fingerprints, entry, key):
-            continue
         qty = entry["qty"]
         is_buy = entry["is_buy"]
-        cash = entry["notional"] + entry["commission"] if is_buy else entry["notional"] - entry["commission"]
         signed_qty = qty if is_buy else -qty
         same_direction = position_qty == 0 or (position_qty > 0) == is_buy
+
+        if _already_journaled_under_other_namespace(seen_fingerprints, entry, key):
+            # T-184: the fingerprint cannot separate a cross-writer duplicate
+            # from two genuinely distinct equal-size same-day partials, so the
+            # suppression is deliberate — under-count rather than double-count.
+            # What it may have cost has to be carried forward: a suppressed
+            # OPENING fill takes its cost out of the average along with its
+            # quantity, so the basis is unreliable from here on; a suppressed
+            # REDUCING fill leaves the per-unit basis intact but the position
+            # possibly long, which only misprices figures once a later opening
+            # fill blends against that phantom inventory.
+            if same_direction:
+                basis_tainted = True
+            else:
+                position_may_be_short = True
+            continue
+
+        cash = entry["notional"] + entry["commission"] if is_buy else entry["notional"] - entry["commission"]
 
         if entry["is_close"] and same_direction:
             logger.warning(
@@ -374,6 +391,8 @@ def _replay_contract(
             return {}
 
         if same_direction:
+            if position_may_be_short:
+                basis_tainted = True
             current_basis = avg_basis_per_unit * abs(position_qty)
             position_qty += signed_qty
             avg_basis_per_unit = (current_basis + cash) / abs(position_qty)
@@ -393,6 +412,14 @@ def _replay_contract(
         if position_qty == 0:
             avg_basis_per_unit = 0.0
         if len(entry["parts"]) == 1:
+            if basis_tainted:
+                logger.warning(
+                    "journal_realized: %s withholding %s — a cross-writer fill "
+                    "suppression left the replayed basis unreliable, journal "
+                    "incomplete, keeping IB realizedPNL",
+                    key, entry["parts"][0],
+                )
+                continue
             realized[entry["parts"][0]] = round(pnl, 4)
 
     return realized

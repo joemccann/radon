@@ -144,6 +144,7 @@ function PositionCard({ pos, prices, showExpiry, onLegClick }: { pos: PortfolioP
             label="Today"
             value={fmtPnl(todayPnl)}
             tone={toneFor(todayPnl)}
+            testId="mobile-position-today"
           />
           <MetricCell
             label="Return %"

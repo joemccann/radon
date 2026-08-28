@@ -79,7 +79,9 @@ SWEEP_BUDGET_S = 6300
 # _persist_index's upserts — for three indices. The sweep deadline covered only
 # the fetch, so a run that stopped exactly on budget could still be SIGTERMed
 # inside upsert_bpi_history_rows, leaving bpi_history partially written and the
-# service_cycle finally unexecuted. R-225.
+# service_cycle finally unexecuted. R-225. Enforced in run_scan: an index whose
+# fetch overran past `fetch deadline + PERSIST_RESERVE_S` has no reserve left to
+# write in, so its Turso write is skipped rather than started into a SIGTERM.
 PERSIST_RESERVE_S = 600
 CLOSE_READ_CALENDAR_DAYS = 800  # ~2y of sessions + weekend/holiday slack
 
@@ -655,6 +657,7 @@ def run_scan(
     generated_at = _now_iso()
     install_sigterm_unwind()
     deadline = _sweep_deadline(sweep_deadline)
+    persist_deadline = deadline + PERSIST_RESERVE_S
     results: dict[str, Any] = {}
     with _heartbeat_cycle(no_db) as cycle:
         for index_symbol in indices:
@@ -670,7 +673,19 @@ def run_scan(
                     file=sys.stderr,
                 )
             elif not no_db:
-                _persist_index(index_symbol, payload)
+                # The write phase is ~130 chunked Hrana SELECTs plus the
+                # upserts; PERSIST_RESERVE_S is the wall clock set aside for
+                # it. Past that, starting the write only buys a SIGTERM
+                # mid-upsert and a half-written bpi_history. R-225/T-231.
+                if time.monotonic() >= persist_deadline:
+                    print(
+                        f"  {index_symbol}: persist reserve "
+                        f"({PERSIST_RESERVE_S}s) exhausted; skipping the Turso "
+                        "write, the catch-up pass retries it",
+                        file=sys.stderr,
+                    )
+                else:
+                    _persist_index(index_symbol, payload)
             payload.pop("_bpi_rows", None)
             results[index_symbol] = payload
         if cycle is not None:

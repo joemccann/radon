@@ -104,7 +104,7 @@ ab8b768a69862a9eb348cf34403f278853052e4e26dacfab9aac15eb1f7957c1  radon-trin.tim
 c8472292237a54a4da240b2f7b54e8a6d3ef2a658d00e9b079f8b6e612d7428b  radon-signals-refresh.service
 d125a8d231f7d801b64ec3328fde2994d0ed979ab17541646c99336328bcb1a0  radon-vol-cone.timer
 d3bb821a7943f1a97f2a3ba4e408d9ac6e12cfabccade2c96dd65e490b589a79  radon-flow-refresh.timer
-27912c05b971233ee10d801267254ea0b5660084e9003c7529aa18f00cf81385  radon-newsfeed.service
+ecc66b04d92fc0cf7bd6a84d14f08eb767df64e2dcf846098334c213965bf306  radon-newsfeed.service
 a8ac39c72e5624445a7f73ca83247da792ebaea72de184ecfc1d570ea2ab0122  radon-signals-refresh.timer
 dc889c664bcdc0481298c8f51730ccedbe4a1b918b3f2c4c380ac55367780fc5  radon-vcg-refresh.timer
 11af9f369841e624051af7376e8d5e17c038bdc21788fc904ffa24ac9e585934  radon-portfolio-archive.service
@@ -140,3 +140,12 @@ d25e52ea594eba7cd7421793dec6b0e6e554ea3055628b812e2d5b7508fd29f6  radon-vixts.se
 # verify-control-plane preflight can pass.
 e8a7dca2f2f2c7d1176010a2c4df4e4a60842a6bb1cb34682d2ce9c815c11938  radon-disk-cleanup.service
 71f51588972f5eaf42e4047f35435df870d7249fd4f18d8f47ed923aac19ec16  radon-disk-cleanup.timer
+
+# T-236: the FLEET-WIDE systemd prefix drop-in. Not a unit -- systemd applies
+# "radon-.service.d/" to every unit named radon-*, so this one file's blast
+# radius is the whole fleet, and it was the only installed artifact under
+# services/ with no sha256 pin. Installed by setup-vps.sh:install_fleet_dropin
+# (NOT by the per-release install-units verb, whose manifest regex matches bare
+# radon-*.{service,timer} names only and ignores this line by design); the
+# daily drift audit compares it live as `fleet-dropin`.
+16b56fc5c731cefb4d8184e01c9da042aa1a623b3bd23b6face060e9d0b4df08  radon-.service.d/common.conf

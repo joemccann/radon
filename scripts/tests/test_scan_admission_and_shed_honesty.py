@@ -166,3 +166,145 @@ class TestAdmitOrdering:
             "an empty-object cache was falsy, so the cooldown was bypassed and "
             "another 120s subprocess was spawned on every poll"
         )
+
+
+class TestSubjectGateMapIsBounded:
+    """T-230: `_SUBJECT_SCAN_GATES` is keyed on a caller-supplied ticker.
+
+    `/gex/scan` admits any <=10-char alnum symbol, so every novel value minted
+    a gate in a dict with no cap and no eviction, in a process that lives for
+    days. Two costs, not one: the map grows for the lifetime of the process,
+    AND each novel key hands back a COLD gate, so a caller cycling symbols
+    never meets a cooldown and spawns a fresh 120 s `run_script` every time.
+
+    Eviction has to stay fail-CLOSED. Dropping a gate that is currently in
+    cooldown or backoff is worse than keeping it: the next poll for that
+    subject re-mints it cold and bypasses the exact backoff that was evicted,
+    which is the R-217 storm re-entering through the cache. So only IDLE gates
+    are evictable (LRU), and when every gate is armed a novel subject is
+    REFUSED rather than admitted.
+    """
+
+    @staticmethod
+    def _subjects(n: int, prefix: str = "T") -> list[str]:
+        return [f"{prefix}{i:05d}" for i in range(n)]
+
+    def test_five_hundred_distinct_tickers_do_not_grow_the_map_without_bound(self):
+        srv._reset_scan_gates()
+        for subject in self._subjects(500):
+            srv._scan_gate_for("gex", subject)
+
+        size = len(srv._SUBJECT_SCAN_GATES)
+        assert size < 500, (
+            f"500 caller-supplied tickers minted {size} gates: the map has no "
+            "ceiling and grows for the life of the process"
+        )
+        assert size <= srv.MAX_SUBJECT_SCAN_GATES, (
+            f"map holds {size} gates, ceiling is {srv.MAX_SUBJECT_SCAN_GATES}"
+        )
+
+    def test_eviction_is_lru_not_arbitrary(self):
+        srv._reset_scan_gates()
+        ceiling = srv.MAX_SUBJECT_SCAN_GATES
+        subjects = self._subjects(ceiling)
+        for subject in subjects:
+            srv._scan_gate_for("gex", subject)
+        assert len(srv._SUBJECT_SCAN_GATES) == ceiling
+
+        # Touch the oldest key so it is now the most-recently-used, and keep
+        # the identity so a silent re-mint cannot pass as a survivor.
+        oldest, second_oldest = subjects[0], subjects[1]
+        touched = srv._scan_gate_for("gex", oldest)
+
+        srv._scan_gate_for("gex", "NOVELAAA")
+
+        assert srv._SUBJECT_SCAN_GATES.get(("gex", oldest)) is touched, (
+            "eviction dropped the most-recently-used gate"
+        )
+        assert ("gex", second_oldest) not in srv._SUBJECT_SCAN_GATES, (
+            "eviction is not LRU: the least-recently-used idle gate survived"
+        )
+        assert len(srv._SUBJECT_SCAN_GATES) == ceiling
+
+    def test_a_gate_in_cooldown_is_never_evicted(self):
+        srv._reset_scan_gates()
+        ceiling = srv.MAX_SUBJECT_SCAN_GATES
+
+        # SPX is the FIRST key inserted, so it is the eviction candidate under
+        # a naive LRU — and it is the one gate holding a live cooldown.
+        spx = srv._scan_gate_for("gex", "SPX")
+        spx.mark_success()
+        assert spx.in_cooldown() is True
+
+        for subject in self._subjects(ceiling * 2, prefix="C"):
+            srv._scan_gate_for("gex", subject)
+
+        assert srv._SUBJECT_SCAN_GATES.get(("gex", "SPX")) is spx, (
+            "the gate holding a live cooldown was evicted; the next SPX poll "
+            "re-mints it cold and spawns another 120s subprocess"
+        )
+        assert spx.in_cooldown() is True
+        assert len(srv._SUBJECT_SCAN_GATES) <= ceiling
+
+    def test_a_gate_in_backoff_is_never_evicted(self):
+        srv._reset_scan_gates()
+        ceiling = srv.MAX_SUBJECT_SCAN_GATES
+
+        spx = srv._scan_gate_for("gex", "SPX")
+        spx.mark_failure()
+        assert spx.in_backoff() is True
+
+        for subject in self._subjects(ceiling * 2, prefix="B"):
+            srv._scan_gate_for("gex", subject)
+
+        assert srv._SUBJECT_SCAN_GATES.get(("gex", "SPX")) is spx, (
+            "the gate holding a live failure backoff was evicted; the next "
+            "poll re-mints it cold and bypasses the backoff entirely"
+        )
+        assert spx.in_backoff() is True
+        assert len(srv._SUBJECT_SCAN_GATES) <= ceiling
+
+    def test_a_novel_subject_is_refused_when_every_gate_is_armed(self):
+        srv._reset_scan_gates()
+        ceiling = srv.MAX_SUBJECT_SCAN_GATES
+        for subject in self._subjects(ceiling, prefix="A"):
+            srv._scan_gate_for("gex", subject).mark_failure()
+        assert len(srv._SUBJECT_SCAN_GATES) == ceiling
+
+        overflow = srv._scan_gate_for("gex", "NOVELBBB")
+
+        assert len(srv._SUBJECT_SCAN_GATES) == ceiling, (
+            "a novel subject grew the map past the ceiling because every "
+            "existing gate was armed and none could be evicted"
+        )
+        assert overflow.in_backoff() is True, (
+            "with the whole map armed, a novel subject was handed a COLD gate "
+            "and admitted — exactly the storm the gates exist to stop"
+        )
+
+    @pytest.mark.asyncio
+    async def test_the_overflow_subject_gets_429_not_a_subprocess(self):
+        srv._reset_scan_gates()
+        for subject in self._subjects(srv.MAX_SUBJECT_SCAN_GATES, prefix="O"):
+            srv._scan_gate_for("gex", subject).mark_failure()
+
+        ran: list[int] = []
+
+        async def run():
+            ran.append(1)
+            return ScriptResult(ok=True, data={"scan_time": "x"}, error=None)
+
+        with pytest.raises(srv.HTTPException) as exc:
+            await srv._gated_scan(
+                srv._scan_gate_for("gex", "NOVELCCC"), lambda: None, run
+            )
+
+        assert exc.value.status_code == 429
+        assert ran == [], "an overflowing novel subject still spawned a subprocess"
+
+    def test_an_evicted_idle_gate_does_not_leak_across_scans(self):
+        """The key is (scan, subject); the ceiling must not merge namespaces."""
+        srv._reset_scan_gates()
+        gex = srv._scan_gate_for("gex", "SPX")
+        vcg = srv._scan_gate_for("vcg", "SPX")
+        assert gex is not vcg
