@@ -61,7 +61,10 @@ def join_series(
     SPX is a LEFT join used only for the chart overlay, so a date the SPX
     file has not published yet still emits a row with ``spx: None``.
 
-    A non-positive VIX3M close drops its row entirely rather than dividing.
+    A non-positive VIX3M close RAISES. It used to `continue`, which made the
+    `bad_leg` guard in `ensure_plausible_series` unreachable and turned Cboe
+    publishing zero closes for three days into a silent three-day hole that
+    passed every guard and heartbeat `ok`. R-363.
     """
     vix_by_date = _by_date(vix_rows)
     vix3m_by_date = _by_date(vix3m_rows)
@@ -71,7 +74,10 @@ def join_series(
     for date in sorted(set(vix_by_date) & set(vix3m_by_date)):
         vix3m = vix3m_by_date[date]
         if vix3m <= 0:
-            continue
+            raise ValueError(
+                f"vixts row {date} carries a non-positive vix3m ({vix3m}); "
+                "dropping it would leave a silent hole in the series"
+            )
         vix = vix_by_date[date]
         series.append(
             {
@@ -130,9 +136,18 @@ def ensure_plausible_series(series: list[dict[str, Any]]) -> None:
         raise ValueError(
             f"vixts row {bad_leg['date']} carries a non-positive vix3m ({bad_leg['vix3m']})"
         )
-    latest = series[-1]
-    if not RATIO_SANITY_MIN <= latest["ratio"] <= RATIO_SANITY_MAX:
+    # EVERY row, not just `series[-1]`. One garbled VIX_History.csv row
+    # parsing as CLOSE=999.0 anywhere in the ~4,250-row history inflated
+    # `max`, `days_backwardation` and `pct_backwardation`, making the chart
+    # axis and the panel's "percent of sessions" copy wrong with
+    # service_health green. R-364.
+    bad_ratio = next(
+        (row for row in series
+         if not RATIO_SANITY_MIN <= row["ratio"] <= RATIO_SANITY_MAX),
+        None,
+    )
+    if bad_ratio is not None:
         raise ValueError(
-            f"vixts latest ratio {latest['ratio']} on {latest['date']} is outside "
+            f"vixts ratio {bad_ratio['ratio']} on {bad_ratio['date']} is outside "
             f"the sane band [{RATIO_SANITY_MIN}, {RATIO_SANITY_MAX}]"
         )

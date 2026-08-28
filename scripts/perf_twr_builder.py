@@ -542,14 +542,22 @@ def _query_turso(sql: str) -> Optional[List[Any]]:
     if not _os.environ.get("TURSO_DB_URL") or not _os.environ.get("TURSO_AUTH_TOKEN"):
         return None
     try:
-        try:
-            from db.client import get_db  # type: ignore
-        except ImportError:
-            from scripts.db.client import get_db  # type: ignore
-
-        return get_db().execute(sql).fetchall()
+        return _query_turso_strict(sql)
     except Exception:  # noqa: BLE001
         return None
+
+
+def _query_turso_strict(sql: str) -> Optional[List[Any]]:
+    """`_query_turso` without the blanket swallow, for callers that must tell
+    an unreachable Turso from an empty result (R-321)."""
+    if not _os.environ.get("TURSO_DB_URL") or not _os.environ.get("TURSO_AUTH_TOKEN"):
+        return None
+    try:
+        from db.client import get_db  # type: ignore
+    except ImportError:
+        from scripts.db.client import get_db  # type: ignore
+
+    return get_db().execute(sql).fetchall()
 
 
 def _row_values(row: Any, *keys: str) -> Tuple[Any, ...]:
@@ -560,6 +568,11 @@ def _row_values(row: Any, *keys: str) -> Tuple[Any, ...]:
 
 # The builder's own mirror of a net subperiod flow; never a classified source row.
 _MIRRORED_FLOW_TYPE = "external"
+
+
+# Cents. Below this the two writers agree for practical purposes.
+_FLOW_DIVERGENCE_TOLERANCE = 0.01
+_FLOW_SOURCE_DIVERGENCE: Dict[Tuple[str, str], Tuple[float, float]] = {}
 
 
 def load_flows_from_turso() -> Optional[Dict[str, float]]:
@@ -599,13 +612,74 @@ def load_flows_from_turso() -> Optional[Dict[str, float]]:
         bucket = mirrored if flow_type == _MIRRORED_FLOW_TYPE else classified
         bucket[key] = bucket.get(key, 0.0) + value
 
+    # Classified rows win for a key they cover (T-081), but the two sources
+    # DISAGREEING for that key is new information, not a tie to break
+    # silently: the `--from-file` path parses CashTransaction + Transfers
+    # directly and sums both, so a session carrying a deposit AND an ACATS
+    # publishes a different net depending on which invocation last wrote
+    # performance.json. Precedence is unchanged; the divergence is now
+    # recorded so the caller can floor the payload status. R-345.
+    _FLOW_SOURCE_DIVERGENCE.clear()
     per_account = dict(mirrored)
-    per_account.update(classified)
+    for key, value in classified.items():
+        prior = per_account.get(key)
+        if prior is not None and abs(prior - value) > _FLOW_DIVERGENCE_TOLERANCE:
+            _FLOW_SOURCE_DIVERGENCE[key] = (prior, value)
+        per_account[key] = value
 
     out: Dict[str, float] = {}
     for (_account_id, normalized), value in per_account.items():
         out[normalized] = out.get(normalized, 0.0) + value
     return out or None
+
+
+def flow_source_divergences() -> Dict[Tuple[str, str], Tuple[float, float]]:
+    """`(account_id, report_date) -> (mirrored_net, classified_net)` for every
+    key the two `external_flows` writers disagreed on in the last load."""
+    return dict(_FLOW_SOURCE_DIVERGENCE)
+
+
+def flow_divergence_warnings() -> List[Dict[str, Any]]:
+    """One `warn` per disagreeing session. `warn` floors the payload to stale,
+    which is the honest state when the same session nets two ways. R-345."""
+    return [
+        _warning(
+            "FLOWS_SOURCE_DISAGREEMENT",
+            "warn",
+            f"External flows for {report_date} net to {classified} from the "
+            f"classified rows and {mirrored} from this builder's own mirror; "
+            "the no-fetch and --from-file paths would publish different "
+            "returns for that session.",
+            account_id=account_id,
+            report_date=report_date,
+            mirrored=mirrored,
+            classified=classified,
+        )
+        for (account_id, report_date), (mirrored, classified) in sorted(
+            _FLOW_SOURCE_DIVERGENCE.items()
+        )
+    ]
+
+
+_COVERAGE_SQL = "SELECT MAX(report_date) AS report_date FROM twr_subperiods"
+
+
+def load_flows_coverage_state() -> Tuple[Optional[str], bool]:
+    """``(covered_through, query_succeeded)``.
+
+    `_query_turso` returns None both when the query RAISED and when it came
+    back empty, and the caller cannot tell an unreachable Turso from a
+    genuinely empty `twr_subperiods`. Both mean zero verified coverage, but
+    only the first is an infrastructure failure the operator needs told
+    about, so the two are reported separately. R-321.
+    """
+    try:
+        rows = _query_turso_strict(_COVERAGE_SQL)
+    except Exception:  # noqa: BLE001 — the read is advisory; the caller fails closed
+        return None, False
+    if not rows:
+        return None, True
+    return _normalize_date(_row_values(rows[0], "report_date")[0]), True
 
 
 def load_flows_coverage_through() -> Optional[str]:
@@ -614,11 +688,11 @@ def load_flows_coverage_through() -> Optional[str]:
     `external_flows` only stores dates that HAD a flow, so its own MAX says
     nothing about coverage. `twr_subperiods` carries a row per session with an
     explicit zero, which makes its MAX the honest coverage marker.
+
+    ``None`` means NO verified coverage — never "all covered". Callers must
+    fail closed on it; see `bound_observations_to_coverage`.
     """
-    rows = _query_turso("SELECT MAX(report_date) AS report_date FROM twr_subperiods")
-    if not rows:
-        return None
-    return _normalize_date(_row_values(rows[0], "report_date")[0])
+    return load_flows_coverage_state()[0]
 
 
 def bound_observations_to_coverage(
@@ -628,9 +702,15 @@ def bound_observations_to_coverage(
 
     Chaining a session the mirror never saw asserts "no external flow that day"
     on no evidence — the invented zero that inflates TWR.
+
+    An absent ``covered_through`` is ZERO verified coverage, so it drops
+    EVERYTHING. It previously returned the full series untouched, which made
+    the one mechanism `FLOWS_SOURCE_MIRROR`'s `info` severity defers to fail
+    open on both of its None paths — an unreachable Turso and an empty
+    `twr_subperiods`. R-321.
     """
     if not covered_through:
-        return observations
+        return []
     return [o for o in observations if o.date <= covered_through]
 
 
@@ -687,7 +767,10 @@ def _flows_after_fetch_failure(reason: str) -> Tuple[FlowSet, List[Dict[str, Any
         f"[perf_twr] Serving {len(mirrored)} mirrored flows from Turso after Flex failure",
         file=_sys.stderr,
     )
-    return FlowSet(status=FlowsStatus.OK, by_date=mirrored, source="turso"), []
+    return (
+        FlowSet(status=FlowsStatus.OK, by_date=mirrored, source="turso"),
+        flow_divergence_warnings(),
+    )
 
 
 def resolve_flows(
@@ -1621,12 +1704,21 @@ def _apply_mirrored_flow_coverage(
     if flows.source != "turso" or not observations:
         return observations, flows, []
 
-    covered_through = load_flows_coverage_through()
+    covered_through, query_ok = load_flows_coverage_state()
     bounded = bound_observations_to_coverage(observations, covered_through)
     if not bounded:
         return observations, FlowSet.failed(
             f"mirrored_flows_cover_nothing_through_{covered_through or 'unknown'}"
-        ), []
+        ), [
+            _warning(
+                "FLOWS_COVERAGE_QUERY_FAILED",
+                "warn",
+                "The mirrored-flow coverage query failed, so no session can be "
+                "shown to have verified flows; the TWR build is held rather "
+                "than chained against implied zero flows.",
+                flows_source="turso",
+            )
+        ] if not query_ok else []
 
     dropped = len(observations) - len(bounded)
     return (

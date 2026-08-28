@@ -18,12 +18,16 @@ import { flowReportErrorCopy } from "@/lib/flowReportError";
  *      - error → preserve cached data if any, expose error
  */
 
-export type FlowReportStatus = "idle" | "loading" | "scanning" | "fresh" | "error";
+/** `stale`: a POST came back 200 but degraded — cached data, not a scan. */
+export type FlowReportStatus =
+  | "idle" | "loading" | "scanning" | "fresh" | "stale" | "error";
 
 export type FlowReportData = {
   ticker: string;
   /** When true the cache is empty — no scan has run yet for this ticker. */
   missing?: boolean;
+  /** Set by the route when it served cache instead of a completed scan. */
+  is_stale?: boolean;
   fetched_at?: string;
   lookback_days?: number;
   verdict?: { direction: "BULLISH" | "NEUTRAL" | "BEARISH"; confidence: number };
@@ -105,6 +109,18 @@ export function useTickerFlowReport(ticker: string | null): UseTickerFlowReportR
       const payload = (await res.json()) as FlowReportData;
       if (signal.aborted) return;
       setData(payload);
+      // R-350: the route returns HTTP 200 with `{...cached, is_stale: true}`
+      // plus an `X-Sync-Warning` header when its own 130s timeout fires, a
+      // FastAPI 401 comes back, or a capacity shed persists — so accepting
+      // any 200 as a completed scan rendered a scan that never ran as a FRESH
+      // directional verdict with no banner. `isFlowReportStale` was consulted
+      // only on the GET path.
+      const warning = res.headers.get("X-Sync-Warning");
+      if (payload?.is_stale === true || warning) {
+        setError(flowReportErrorCopy(warning ?? "Scan did not complete; showing the last cached report."));
+        setStatus("stale");
+        return;
+      }
       setStatus("fresh");
     } catch (err) {
       if (signal.aborted) return;
@@ -167,6 +183,17 @@ export function useTickerFlowReport(ticker: string | null): UseTickerFlowReportR
     [triggerScan],
   );
 
+  // R-349: this effect used to read `triggerRef.current` — a REF — in its dep
+  // array behind an exhaustive-deps suppression, while `refresh` both mutated
+  // that ref AND called `load` directly. One Refresh click therefore issued
+  // TWO independent load cycles: `refresh`'s own `load(A)` set state
+  // synchronously before its first await, and the resulting re-render made
+  // the effect's dep compare 1 against the captured 0, aborting the in-flight
+  // controller and firing `load` again. A client-side abort does not stop an
+  // already-spawned FastAPI subprocess, so two 300s `flow_report.py` runs
+  // occupied the general lane — the operator's own Refresh manufacturing the
+  // capacity shed. `refresh` is now the SOLE caller for a re-scan and the
+  // suppression is gone.
   useEffect(() => {
     if (!ticker) {
       setData(null);
@@ -178,12 +205,9 @@ export function useTickerFlowReport(ticker: string | null): UseTickerFlowReportR
     return () => {
       inflightRef.current?.abort();
     };
-    // re-run when ticker or refresh trigger changes
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ticker, triggerRef.current]);
+  }, [ticker, load]);
 
   const refresh = useCallback(() => {
-    triggerRef.current += 1;
     if (ticker) load(ticker);
   }, [ticker, load]);
 

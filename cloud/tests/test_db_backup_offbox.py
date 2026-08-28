@@ -74,6 +74,13 @@ class _StubClient:
         self.uploaded.append((str(path), key))
         self.objects[key] = (pathlib.Path(path).stat().st_size, 0.0)
 
+    def head_object(self, Bucket, Key):  # noqa: N803 — boto3 kwarg casing
+        """R-372: sync_offbox now CONFIRMS every upload landed at the expected
+        size before counting it, so the double needs the head_object surface."""
+        if Key not in self.objects:
+            raise RuntimeError(f"NoSuchKey: {Key}")
+        return {"ContentLength": self.objects[Key][0]}
+
     def delete_object(self, Bucket, Key):  # noqa: N803 — boto3 kwarg casing
         self.deleted.append(Key)
         self.objects.pop(Key, None)

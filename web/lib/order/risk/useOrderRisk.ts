@@ -292,6 +292,32 @@ function brand(
 
 type MarginImpact = NonNullable<OrderPresentationSummary["marginImpact"]>;
 
+/** Every numeric figure the confirm panel renders is a real number.
+ *
+ * `okToSubmit` gated on coverage alone, so a non-finite input (a blank Limit
+ * on a STP ticket reaching `netPremium` as NaN) armed Transmit on a risk
+ * verdict that reads `NaN` in every tile. Unbounded risk stays advisory —
+ * it is expressed as `maxLossUnbounded` with a `null` figure, not as a
+ * non-finite number. R-322.
+ */
+function summaryFiguresAreFinite(summary: OrderPresentationSummary): boolean {
+  const figures: unknown[] = [
+    summary.totalCost,
+    summary.maxGain,
+    summary.maxLoss,
+    summary.breakeven,
+    summary.estimatedPnl,
+    summary.marginImpact?.requirement,
+    summary.marginImpact?.availableBefore,
+    summary.marginImpact?.availableAfter,
+  ];
+  return figures.every(
+    (value) => typeof value !== "number" || Number.isFinite(value),
+  );
+}
+
+
+
 /**
  * Resolve the operator-visible margin baseline from the account summary.
  * Prefers AvailableFunds; falls back to BuyingPower. Returns null + a
@@ -712,7 +738,7 @@ export function useOrderRisk(
         return withCorrelation({
           summary: brand(closeSummary, coverageStatus, traceId),
           coverageStatus,
-          okToSubmit: true,
+          okToSubmit: summaryFiguresAreFinite(closeSummary),
           coveringLegs: [],
         });
       }
@@ -739,8 +765,10 @@ export function useOrderRisk(
       };
 
       // Unbounded / undefined risk is advisory (Gate 1 warning), not a
-      // block — only unresolved coverage disables submit.
-      const okToSubmit = coverageStatus === "resolved";
+      // block — only unresolved coverage and a non-finite figure disable
+      // submit.
+      const okToSubmit =
+        coverageStatus === "resolved" && summaryFiguresAreFinite(resolved);
 
       return withCorrelation({
         summary: brand(resolved, coverageStatus, traceId),
@@ -800,7 +828,10 @@ export function useOrderRisk(
       return withCorrelation({
         summary: brand(closeSummary, coverageStatus, traceId),
         coverageStatus,
-        okToSubmit: coverageStatus === "resolved" && residualRisk == null,
+        okToSubmit:
+          coverageStatus === "resolved"
+          && residualRisk == null
+          && summaryFiguresAreFinite(closeSummary),
         coveringLegs: [],
       });
     }
@@ -844,8 +875,10 @@ export function useOrderRisk(
     };
 
     // Unbounded / undefined risk is advisory (Gate 1 warning), not a
-    // block — only unresolved coverage disables submit.
-    const okToSubmit = coverageStatus === "resolved";
+    // block — only unresolved coverage and a non-finite figure disable
+    // submit.
+    const okToSubmit =
+      coverageStatus === "resolved" && summaryFiguresAreFinite(resolved);
 
     return withCorrelation({
       summary: brand(resolved, coverageStatus, traceId),

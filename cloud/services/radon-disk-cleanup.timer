@@ -6,11 +6,16 @@ Description=Radon disk cleanup -- weekly, Sunday off-hours
 # clear of every DB-maintenance window -- portfolio-archive (05:40 + 2h),
 # db-retention (08:10), db-backup (09:00) -- and of the 02:15/02:20/02:35
 # nightly cluster above it. Not :00/:30 to stay off the top-of-hour scheduler
-# herd. Persistent so a missed firing (host down) replays on the next boot
-# instead of skipping a whole week; the disk fills either way.
+# herd.
 OnCalendar=Sun *-*-* 03:20:00 UTC
 RandomizedDelaySec=300
-Persistent=true
+# NO Persistent=true, deliberately. A missed firing replaying at boot voids
+# this timer's own "Sunday 03:20 UTC, clear of every DB-maintenance window"
+# argument above: a Tuesday 14:30 UTC reboot after a missed Sunday would replay
+# a DESTRUCTIVE sweep during US market hours, rmtree-ing caches, removing app
+# images and vacuuming journald while live trading and possibly a deploy are in
+# progress. Missing one weekly reclaim costs a week of disk; replaying it into
+# an active session costs the session. R-369.
 
 [Install]
 WantedBy=timers.target

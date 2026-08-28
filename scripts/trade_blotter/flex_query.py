@@ -39,7 +39,7 @@ import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import urlopen
@@ -179,24 +179,46 @@ class FlexQueryFetcher:
         raise RuntimeError("Flex Query timed out after 120 seconds")
     
     def _parse_xml(self, xml_content: str) -> List[Execution]:
-        """Parse Flex Query XML response into executions."""
+        """Parse Flex Query XML response into executions.
+
+        Kept for callers that only want the rows. The per-row parse is
+        fail-OPEN by design (one malformed attribute must not lose a whole
+        statement), so any caller that treats the result as COMPLETE has to
+        use `parse_xml_with_drops` and act on the tally. R-330.
+        """
+        return self.parse_xml_with_drops(xml_content)[0]
+
+    def parse_xml_with_drops(self, xml_content: str) -> Tuple[List[Execution], int]:
+        """``(executions, dropped_row_count)``.
+
+        The drop count was previously discarded, so a file whose last 60 of
+        200 `<Trade>` rows carried a corrupted attribute imported 140 fills
+        and reported success — the missing fills were not in `skipped`
+        either, and nothing downstream could tell. R-330.
+        """
         root = ET.fromstring(xml_content)
         executions = []
-        
+        dropped = 0
+
         # Find all Trade elements
         for trade in root.findall(".//Trade"):
             try:
                 exec = self._parse_trade_element(trade)
-                if exec:
-                    executions.append(exec)
             except Exception as e:
                 print(f"Warning: Failed to parse trade: {e}")
+                dropped += 1
                 continue
-        
+            if exec:
+                executions.append(exec)
+            else:
+                # `_parse_trade_element` returns None for a row missing
+                # `symbol` — a silent drop, not a by-design exclusion.
+                dropped += 1
+
         # Sort by time
         executions.sort(key=lambda e: e.time)
-        
-        return executions
+
+        return executions, dropped
     
     def _parse_trade_element(self, trade: ET.Element) -> Optional[Execution]:
         """Parse a single Trade XML element."""

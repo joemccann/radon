@@ -331,6 +331,12 @@ class TestUnitFiles:
     def test_service_runs_the_root_owned_control_plane_copy(self, services_dir):
         text = (services_dir / "radon-disk-cleanup.service").read_text()
         assert "User=root" in text
-        assert "ExecStart=/usr/bin/python3 -I /usr/local/lib/radon/disk_cleanup.py" in text
+        # R-341 wrapped ExecStart in flock on the deploy lock, so the literal
+        # prefix moved. The ORIGINAL intent of this assertion — root runs the
+        # root-owned control-plane copy under -I, never the radon-writable
+        # checkout — is unchanged and asserted exactly, as a suffix.
+        assert text.count("ExecStart=") == 1
+        assert "/usr/bin/python3 -I /usr/local/lib/radon/disk_cleanup.py" in text
+        assert "/home/radon/radon/cloud/scripts/disk_cleanup.py" not in text
         assert "EnvironmentFile=" not in text
         assert "Environment=PATH=" in text
