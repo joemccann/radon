@@ -541,6 +541,39 @@ def test_pytest_shard_union_equals_recursive_collection() -> None:
     assert not stray, f"shard globs reach outside the collection roots: {stray[:6]}"
 
 
+def test_cloud_shard_union_equals_recursive_collection() -> None:
+    """The cloud-tests matrix must reach every module under cloud/tests/.
+
+    TEST_AUDIT T-173. ``test_cloud_infra_shards_partition_cloud_tests`` builds
+    its universe from a NON-recursive ``glob("test_*.py")``, so it can only
+    reason about a subdirectory through the separate name heuristic in
+    ``_partition``; it never checks that the shard union equals what pytest
+    actually collects. That is the T-122 shape (752 tests left CI while the
+    workflow stayed green), and cloud/tests/ is one ``mkdir`` away from it.
+
+    Swapping ``_partition`` itself to ``rglob`` is NOT the fix: it is shared
+    with the py-tests guard, whose shards name ``scripts/tests/test_watchdog``
+    and ``scripts/tests/test_monitor_daemon`` as DIRECTORY tokens, and a
+    recursive file listing there reports every already-sharded module inside
+    them as unsharded. Set-equality against recursive collection is the check
+    that generalises, so cloud gets the same one py-tests has.
+    """
+    root = WORKFLOW.parents[2]
+    cloud_tests = _workflow()["jobs"]["cloud-tests"]
+    sharded: set[str] = set()
+    for item in cloud_tests["strategy"]["matrix"]["include"]:
+        sharded |= _expand_shard_paths(root, str(item["paths"]))
+    on_disk = _test_modules_under(root, root / "cloud" / "tests")
+    assert on_disk, "cloud/tests moved; this guard is measuring nothing"
+    missing = sorted(on_disk - sharded)
+    assert not missing, (
+        f"{len(missing)} cloud test modules are collected by NO cloud-tests "
+        f"shard (CI reads green without running them): {missing[:6]}"
+    )
+    stray = sorted(sharded - on_disk)
+    assert not stray, f"cloud shard globs reach outside cloud/tests: {stray[:6]}"
+
+
 def test_pytest_coverage_ratchet_measures_branches() -> None:
     """TEST_AUDIT T-123: the 56 ratchet was rebased (T-050) on combined
     statement+branch coverage. The shard rewrite dropped ``--cov-branch`` and
