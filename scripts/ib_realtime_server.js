@@ -22,7 +22,7 @@ import fs from "node:fs";
 import path from "node:path";
 import http from "node:http";
 import net from "node:net";
-import { execFile, spawn } from "node:child_process";
+import { createSdNotifier } from "./lib/sdNotify.js";
 import { WebSocketServer } from "ws";
 import { IBApi, EventName, SecType, OptionType, TickByTickDataType } from "@stoqey/ib";
 import { classifyIBConnectionError } from "./ib_connection_status.js";
@@ -98,37 +98,14 @@ const SD_NOTIFY_SOCKET = process.env.NOTIFY_SOCKET || "";
 const SD_WATCHDOG_USEC = parseInt(process.env.WATCHDOG_USEC || "0", 10);
 const sdWatchdogEnabled = Boolean(SD_NOTIFY_SOCKET && SD_WATCHDOG_USEC > 0);
 
-function sdNotifyViaSocat(state) {
-  const child = spawn(
-    "socat",
-    ["-t0", "-", `UNIX-SENDTO:${SD_NOTIFY_SOCKET}`],
-    { stdio: ["pipe", "ignore", "ignore"] },
-  );
-  child.stdin.end(state);
-}
-
-function sdNotify(state) {
-  if (!sdWatchdogEnabled) return;
-  try {
-    // Fire-and-forget; the callback swallows ENOENT / send errors so a watchdog
-    // hiccup can never throw or block the event loop. Host has systemd-notify;
-    // the app-plane node image has socat and no systemd.
-    execFile("systemd-notify", [state], (err) => {
-      if (!err) return;
-      try {
-        sdNotifyViaSocat(state);
-      } catch {
-        /* never propagate into the loop */
-      }
-    });
-  } catch {
-    try {
-      sdNotifyViaSocat(state);
-    } catch {
-      /* never propagate into the loop */
-    }
-  }
-}
+// Extracted to scripts/lib/sdNotify.js so the ENOENT paths are testable in
+// isolation, and so the async `error` events that used to escape the try
+// around the socat spawn have listeners attached before any write. R-335.
+const sdNotify = createSdNotifier({
+  socket: SD_NOTIFY_SOCKET,
+  watchdogUsec: SD_WATCHDOG_USEC,
+  log: (message) => console.warn(`[relay] ${message}`),
+});
 
 function parseArgs(argv) {
   const args = {
