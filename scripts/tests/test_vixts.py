@@ -160,13 +160,22 @@ class TestJoinSeries:
         assert series[0]["ratio"] == 0.8484           # 15.45 / 18.21 = 0.848435...
         assert series[0]["ratio"] == round(15.45 / 18.21, 4)
 
-    def test_non_positive_vix3m_row_is_dropped_never_divided(self):
-        series = join_series(
-            _rows([("2026-08-24", 15.85), ("2026-08-25", 15.45)]),
-            _rows([("2026-08-24", 0.0), ("2026-08-25", 18.21)]),
-            _rows([]),
-        )
-        assert [r["date"] for r in series] == ["2026-08-25"]
+    def test_non_positive_vix3m_row_raises_and_is_never_divided(self):
+        """R-363: this asserted the row was DROPPED, which was the defect.
+
+        Dropping made `ensure_plausible_series`'s `bad_leg` guard unreachable,
+        so Cboe publishing zero closes for three days left a silent three-day
+        hole that passed every guard and heartbeat `ok`. The original intent —
+        never divide by a non-positive VIX3M — is unchanged and is still
+        enforced; only the outcome moved from a silent drop to a raise, which
+        is what the guard downstream was always written to expect.
+        """
+        with pytest.raises(ValueError, match="non-positive vix3m"):
+            join_series(
+                _rows([("2026-08-24", 15.85), ("2026-08-25", 15.45)]),
+                _rows([("2026-08-24", 0.0), ("2026-08-25", 18.21)]),
+                _rows([]),
+            )
 
     def test_series_is_ascending(self):
         dates = [r["date"] for r in _fixture_series()]
