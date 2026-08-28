@@ -72,9 +72,12 @@ def subperiod_on(payload, iso_date):
 
 
 def flex_backed_payload(monkeypatch, tmp_path, xml, *, calls=None):
-    """Run the real `build_and_persist` ingest path over one canned statement."""
+    """Run the real `build_and_persist` ingest path over one canned statement.
+
+    File ingest, not SendRequest: weekday TWR must not hit Flex Web Service.
+    """
     monkeypatch.setenv("IB_FLEX_TOKEN", "tok")
-    monkeypatch.setenv("IB_FLEX_NAV_QUERY_ID", "1497709")
+    monkeypatch.setenv("IB_FLEX_NAV_QUERY_ID", "1442520")
     monkeypatch.delenv("IB_FLEX_FLOWS_QUERY_ID", raising=False)
     monkeypatch.setattr(builder, "_NAV_CACHE_PATH", tmp_path / "nav_history_ib.json")
     monkeypatch.setattr(builder, "_IB_NAV_CACHE_DIR", tmp_path / "absent")
@@ -88,7 +91,9 @@ def flex_backed_payload(monkeypatch, tmp_path, xml, *, calls=None):
         return xml
 
     monkeypatch.setattr(builder, "fetch_flex_xml", _fetch)
-    return builder.build_and_persist(persist=False)
+    statement = tmp_path / "activity.xml"
+    statement.write_text(xml, encoding="utf-8")
+    return builder.build_and_persist(persist=False, from_file=str(statement))
 
 
 # ===========================================================================
@@ -248,7 +253,9 @@ def test_flows_d5_a_multi_account_statement_sums_nav_as_well_as_flows(
     """NAV is last-statement-wins (`out[report_date] = ...`) while flows sum
     every `<FlexStatement>`, which published a TWR of -284.5% as "ok"."""
     xml = fx.flex_statement_xml(
-        accounts=fx.MULTI_ACCOUNT_NAV, cash_transactions=fx.MULTI_ACCOUNT_DEPOSITS
+        accounts=fx.MULTI_ACCOUNT_NAV,
+        cash_transactions=fx.MULTI_ACCOUNT_DEPOSITS,
+        include_transfer_section=True,
     )
 
     payload = flex_backed_payload(monkeypatch, tmp_path, xml)
@@ -288,9 +295,8 @@ def test_flows_d6_a_blank_nav_attribute_is_not_a_nav_of_zero(monkeypatch, tmp_pa
 
 
 def test_flows_d7_one_flex_fetch_per_distinct_query_id(monkeypatch, tmp_path):
-    """`IB_FLEX_FLOWS_QUERY_ID` is unset in production, so NAV and flows resolve
-    to the same query id and the builder requests it twice, seconds apart.
-    IBKR throttles repeat requests for one query id into an embargo."""
+    """File ingest never SendRequests. The Activity statement already carries
+    NAV and flows; a second Web Service hit is how 1001 became 1025."""
     xml = fx.flex_statement_xml(
         accounts={"U111": {"2026-01-05": 100_000.0, "2026-01-06": 101_000.0}}
     )
@@ -298,9 +304,7 @@ def test_flows_d7_one_flex_fetch_per_distinct_query_id(monkeypatch, tmp_path):
 
     flex_backed_payload(monkeypatch, tmp_path, xml, calls=calls)
 
-    assert calls, "the builder never called Flex at all"
-    assert len(calls) == len(set(calls)), f"the same query id was fetched twice: {calls}"
-    assert set(calls) == {"1497709"}
+    assert calls == [], f"file ingest SendRequested: {calls}"
 
 
 # ===========================================================================

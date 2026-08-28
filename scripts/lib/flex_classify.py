@@ -25,8 +25,14 @@ def classify_flex_xml(xml_text: str) -> str:
         raise FlexClassifyError(f"unreadable_xml:{exc}") from exc
 
     has_nav = root.find(".//EquitySummaryByReportDateInBase") is not None
-    has_cash = root.find(".//CashTransaction") is not None
-    has_transfer = root.find(".//Transfer") is not None
+    # Section presence, not row presence: a Last Business Day file with no
+    # ACATS still has <Transfers></Transfers>. Requiring a <Transfer> child
+    # rejected every quiet session.
+    has_cash = (
+        root.find(".//CashTransactions") is not None
+        or root.find(".//CashTransaction") is not None
+    )
+    has_transfer = root.find(".//Transfers") is not None
     has_trade = root.find(".//Trade") is not None
 
     if has_nav and has_cash and has_transfer:

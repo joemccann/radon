@@ -45,6 +45,21 @@ def test_missing_transfers_is_reject():
         classify_flex_xml(xml)
 
 
+def test_empty_transfers_section_is_activity():
+    """A session with no ACATS is still 1442520."""
+    xml = (
+        "<FlexQueryResponse><FlexStatements>"
+        "<FlexStatement>"
+        "<EquitySummaryInBase>"
+        '<EquitySummaryByReportDateInBase reportDate="20260105" total="1" />'
+        "</EquitySummaryInBase>"
+        "<CashTransactions></CashTransactions>"
+        "<Transfers></Transfers>"
+        "</FlexStatement></FlexStatements></FlexQueryResponse>"
+    )
+    assert classify_flex_xml(xml) == ACTIVITY
+
+
 def test_garbage_is_reject():
     with pytest.raises(FlexClassifyError, match="unreadable"):
         classify_flex_xml("not xml")

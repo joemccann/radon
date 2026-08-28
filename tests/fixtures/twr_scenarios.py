@@ -776,7 +776,7 @@ def flex_statement_xml(
     accounts: Mapping[str, Mapping[str, object]],
     cash_transactions: Optional[Mapping[str, Iterable[Mapping[str, object]]]] = None,
     include_cash_section: bool = True,
-    include_transfer_section: bool = False,
+    include_transfer_section: bool = True,
 ) -> str:
     """A Flex activity statement carrying NAV, and optionally flows, per account.
 

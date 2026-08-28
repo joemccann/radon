@@ -690,7 +690,11 @@ def _flows_after_fetch_failure(reason: str) -> Tuple[FlowSet, List[Dict[str, Any
     return FlowSet(status=FlowsStatus.OK, by_date=mirrored, source="turso"), []
 
 
-def resolve_flows(document: Optional[FlexDocument] = None) -> Tuple[FlowSet, List[Dict[str, Any]]]:
+def resolve_flows(
+    document: Optional[FlexDocument] = None,
+    *,
+    allow_fetch: bool = True,
+) -> Tuple[FlowSet, List[Dict[str, Any]]]:
     """Resolve external flows plus any coverage warnings about the statement.
 
     The NAV statement is reused when the flows query id matches it, so one
@@ -698,6 +702,9 @@ def resolve_flows(document: Optional[FlexDocument] = None) -> Tuple[FlowSet, Lis
     FAILED this run is not requested again either. Retrying it cannot succeed
     seconds later on the same token, and the repeat is what escalates a
     transient 1001 into a 1025 "too many failed attempts" lockout.
+
+    ``allow_fetch=False`` (file ingest / weekday timer) never SendRequests.
+    An Activity statement already carries CashTransaction + Transfers.
     """
     token = _os.environ.get("IB_FLEX_TOKEN")
     query_id = _flows_query_id()
@@ -714,11 +721,25 @@ def resolve_flows(document: Optional[FlexDocument] = None) -> Tuple[FlowSet, Lis
         )
         return _flows_after_fetch_failure(reason)
 
+    if already_attempted:
+        statement = document.xml if document is not None else None
+    elif not allow_fetch:
+        if document is not None and document.xml:
+            statement = document.xml
+        else:
+            return FlowSet.failed("file_ingest_no_fetch"), []
+    else:
+        statement = None
+
     try:
-        statement = document.xml if already_attempted else fetch_flex_xml(token, query_id)
+        if statement is None:
+            statement = fetch_flex_xml(token, query_id)
     except Exception as exc:  # noqa: BLE001
         print(f"[perf_twr] Flex flows fetch failed: {exc}", file=_sys.stderr)
         return _flows_after_fetch_failure(str(exc))
+
+    if not statement:
+        return FlowSet.failed("empty_statement"), []
 
     coverage = _transfers_section_warnings(statement, query_id)
     try:
@@ -1665,7 +1686,10 @@ def build_and_persist(
         NavObservation(date=d, nav=float(v)) for d, v in sorted(resolution.by_date.items())
     ]
     if observations:
-        flows, coverage = resolve_flows(resolution.document)
+        flows, coverage = resolve_flows(
+            resolution.document,
+            allow_fetch=bool(sendrequest) and not from_file,
+        )
     else:
         flows, coverage = FlowSet.failed("no_nav_series"), []
 
