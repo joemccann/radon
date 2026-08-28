@@ -13,6 +13,7 @@ if [[ "${RADON_APP_RUNTIME_TEST_MODE:-0}" == "1" ]]; then
   ENV_FILE="${RADON_TEST_ENV_FILE:?test env file is required}"
   DATA_DIR="${RADON_TEST_DATA_DIR:?test data dir is required}"
   MEDIA_DIR="${RADON_TEST_MEDIA_DIR:?test media dir is required}"
+  STATE_DIR="${RADON_TEST_STATE_DIR:?test state dir is required}"
 else
   if (( EUID != 0 )); then
     echo "radon-app-runtime must run as root" >&2
@@ -23,6 +24,7 @@ else
   ENV_FILE=/etc/radon/env
   DATA_DIR=/home/radon/radon/data
   MEDIA_DIR=/var/lib/radon/media
+  STATE_DIR=/var/lib/radon
 fi
 
 usage() {
@@ -184,8 +186,10 @@ cmd_run() {
     --cgroup-parent=system.slice \
     --env-file "$ENV_FILE" \
     --env RADON_DB_NO_REPLICA=1 \
+    --env PYTHONPATH=/home/radon/radon/scripts \
     -w "$workdir" \
     -v "${DATA_DIR}:/home/radon/radon/data" \
+    -v "${STATE_DIR}:/var/lib/radon" \
     -v "${MEDIA_DIR}:/var/lib/radon/media"
 
   if [[ -n "${NOTIFY_SOCKET:-}" && "${NOTIFY_SOCKET}" == /* ]]; then
