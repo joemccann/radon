@@ -72,6 +72,8 @@ readonly SERVICE_FILES=(
   radon-drift-audit.timer
   radon-db-backup.service
   radon-db-backup.timer
+  radon-disk-cleanup.service
+  radon-disk-cleanup.timer
   radon-portfolio-archive.service
   radon-portfolio-archive.timer
   radon-media-backup.service

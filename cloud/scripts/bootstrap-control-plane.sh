@@ -112,6 +112,7 @@ readonly -a SOURCES=(
   scripts/ib-gateway-control.sh
   scripts/operator-radon.sh
   scripts/drift_audit.py
+  scripts/disk_cleanup.py
   scripts/radon-app-runtime.sh
   config/sudoers.d/radon-deploy
   config/sudoers.d/radon-monitor
@@ -132,6 +133,8 @@ readonly -a SOURCES=(
   services/radon-refresh.timer
   services/radon-db-backup.service
   services/radon-db-backup.timer
+  services/radon-disk-cleanup.service
+  services/radon-disk-cleanup.timer
   services/radon-drift-audit.service
   services/radon-drift-audit.timer
   services/radon-nextjs-db-watchdog.service
@@ -142,6 +145,7 @@ readonly -a LOGICAL_TARGETS=(
   /usr/local/bin/radon-ib-gateway-control
   /usr/local/bin/radon
   /usr/local/lib/radon/drift_audit.py
+  /usr/local/lib/radon/disk_cleanup.py
   /usr/local/sbin/radon-app-runtime
   /etc/sudoers.d/radon-deploy
   /etc/sudoers.d/radon-monitor
@@ -162,24 +166,26 @@ readonly -a LOGICAL_TARGETS=(
   /etc/systemd/system/radon-refresh.timer
   /etc/systemd/system/radon-db-backup.service
   /etc/systemd/system/radon-db-backup.timer
+  /etc/systemd/system/radon-disk-cleanup.service
+  /etc/systemd/system/radon-disk-cleanup.timer
   /etc/systemd/system/radon-drift-audit.service
   /etc/systemd/system/radon-drift-audit.timer
   /etc/systemd/system/radon-nextjs-db-watchdog.service
   /etc/systemd/system/radon-nextjs-db-watchdog.timer
 )
 readonly -a MODES=(
-  0755 0755 0755 0644 0755
+  0755 0755 0755 0644 0644 0755
   0440 0440 0440 0440
   0644
   0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644
-  0644 0644 0644
+  0644 0644 0644 0644 0644
 )
 readonly -a KINDS=(
-  shell shell shell python shell
+  shell shell shell python python shell
   sudoers sudoers sudoers sudoers
   polkit
-  systemd systemd systemd systemd systemd systemd systemd systemd systemd
-  systemd systemd systemd systemd systemd systemd systemd systemd systemd
+  systemd systemd systemd systemd systemd systemd systemd systemd systemd systemd
+  systemd systemd systemd systemd systemd systemd systemd systemd systemd systemd
 )
 
 [[ "${#SOURCES[@]}" -eq "${#LOGICAL_TARGETS[@]}" && \
