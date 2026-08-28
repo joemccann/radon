@@ -139,6 +139,11 @@ readonly -a SOURCES=(
   services/radon-drift-audit.timer
   services/radon-nextjs-db-watchdog.service
   services/radon-nextjs-db-watchdog.timer
+  services/radon-api.service.d/runtime-container.conf
+  services/radon-nextjs.service.d/runtime-container.conf
+  services/radon-relay.service.d/runtime-container.conf
+  services/radon-monitor.service.d/runtime-container.conf
+  services/radon-newsfeed.service.d/runtime-container.conf
 )
 readonly -a LOGICAL_TARGETS=(
   /usr/local/sbin/radon-deploy-root
@@ -172,12 +177,18 @@ readonly -a LOGICAL_TARGETS=(
   /etc/systemd/system/radon-drift-audit.timer
   /etc/systemd/system/radon-nextjs-db-watchdog.service
   /etc/systemd/system/radon-nextjs-db-watchdog.timer
+  /etc/systemd/system/radon-api.service.d/runtime-container.conf
+  /etc/systemd/system/radon-nextjs.service.d/runtime-container.conf
+  /etc/systemd/system/radon-relay.service.d/runtime-container.conf
+  /etc/systemd/system/radon-monitor.service.d/runtime-container.conf
+  /etc/systemd/system/radon-newsfeed.service.d/runtime-container.conf
 )
 readonly -a MODES=(
   0755 0755 0755 0644 0644 0755
   0440 0440 0440 0440
   0644
   0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644
+  0644 0644 0644 0644 0644
   0644 0644 0644 0644 0644
 )
 readonly -a KINDS=(
@@ -186,6 +197,7 @@ readonly -a KINDS=(
   polkit
   systemd systemd systemd systemd systemd systemd systemd systemd systemd systemd
   systemd systemd systemd systemd systemd systemd systemd systemd systemd systemd
+  dropin dropin dropin dropin dropin
 )
 
 [[ "${#SOURCES[@]}" -eq "${#LOGICAL_TARGETS[@]}" && \
@@ -316,6 +328,16 @@ for index in "${!SOURCES[@]}"; do
       ;;
     systemd)
       SYSTEMD_CANDIDATES+=("$staged_path")
+      ;;
+    dropin)
+      grep -q '^Type=simple$' "$staged_path" || \
+        die "drop-in must set Type=simple: $relative_source"
+      grep -q 'ExecStart=/usr/local/sbin/radon-app-runtime run %n' "$staged_path" || \
+        die "drop-in must ExecStart radon-app-runtime: $relative_source"
+      grep -q 'ExecStartPre=' "$staged_path" || \
+        die "drop-in must reset ExecStartPre: $relative_source"
+      grep -q 'radon-ib-gateway' "$staged_path" && \
+        die "drop-in must not mention Gateway: $relative_source"
       ;;
     *)
       die "unknown validator for: $relative_source"

@@ -129,6 +129,31 @@ ARTIFACTS = (
         "/etc/systemd/system/radon-nextjs-db-watchdog.timer",
         0o644,
     ),
+    Artifact(
+        "services/radon-api.service.d/runtime-container.conf",
+        "/etc/systemd/system/radon-api.service.d/runtime-container.conf",
+        0o644,
+    ),
+    Artifact(
+        "services/radon-nextjs.service.d/runtime-container.conf",
+        "/etc/systemd/system/radon-nextjs.service.d/runtime-container.conf",
+        0o644,
+    ),
+    Artifact(
+        "services/radon-relay.service.d/runtime-container.conf",
+        "/etc/systemd/system/radon-relay.service.d/runtime-container.conf",
+        0o644,
+    ),
+    Artifact(
+        "services/radon-monitor.service.d/runtime-container.conf",
+        "/etc/systemd/system/radon-monitor.service.d/runtime-container.conf",
+        0o644,
+    ),
+    Artifact(
+        "services/radon-newsfeed.service.d/runtime-container.conf",
+        "/etc/systemd/system/radon-newsfeed.service.d/runtime-container.conf",
+        0o644,
+    ),
 )
 
 
