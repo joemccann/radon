@@ -727,7 +727,7 @@ def resolve_flows(
         if document is not None and document.xml:
             statement = document.xml
         else:
-            return FlowSet.failed("file_ingest_no_fetch"), []
+            return _flows_after_fetch_failure("file_ingest_no_fetch")
     else:
         statement = None
 
