@@ -23,7 +23,7 @@
  * on a slower runner while passing locally.
  */
 import React from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import fc from "fast-check";
 
@@ -45,16 +45,39 @@ const FC_OPTS_DESKTOP = { numRuns: 40, ...SEED };
 /** A property is hundreds of renders; vitest's 5s per-test default is not it. */
 const PROPERTY_TIMEOUT_MS = 120_000;
 
-function todayET(): string {
+/** The ET calendar date of a GIVEN instant — never of "now", so the caller
+ *  has to say which moment it means. */
+function etDate(instant: Date): string {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York",
     year: "numeric", month: "2-digit", day: "2-digit",
-  }).formatToParts(new Date());
+  }).formatToParts(instant);
   const get = (type: string) => parts.find((p) => p.type === type)!.value;
   return `${get("year")}-${get("month")}-${get("day")}`;
 }
 
-const TODAY = todayET();
+/** The suite's clock, frozen.
+ *
+ *  `TODAY` is read once at MODULE LOAD, while `positionUtils.isSameDay` calls
+ *  `todayInET()` again at ASSERTION time. A run that crosses 00:00 ET reads
+ *  two different dates from those two points: the same-day branch stops
+ *  firing mid-suite, the fixture becomes an overnight position, and the
+ *  identity goes red for a reason that has nothing to do with the code under
+ *  test. Freezing the clock makes both reads the same instant.
+ *
+ *  Only `Date` is faked — the timer queue stays real so React's scheduling is
+ *  untouched. */
+const FROZEN_NOW = new Date("2026-08-26T20:00:00Z"); // 2026-08-26 16:00 ET
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(FROZEN_NOW);
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+const TODAY = etDate(FROZEN_NOW);
 const TICKER = "META";
 
 function priceData(overrides: Partial<PriceData>): PriceData {
@@ -167,11 +190,54 @@ function build(spec: fc.Value<typeof arbPosition> extends never ? never : {
   return { pos, prices };
 }
 
-/** The dollar figures a rendered node carries, normalised so "-$103" and
- *  "-$103" compare regardless of the surface's own prefix conventions. */
-function money(text: string): string | null {
-  const match = text.match(/-?\$[\d,]+/);
-  return match ? match[0].replace("+", "") : null;
+/** The dollar figures a rendered node carries, normalised so "-$103", "$-103"
+ *  and "+$103"/"$103" compare regardless of the surface's own prefix
+ *  conventions. `positionUtils.fmtUsd` puts the minus AFTER the dollar sign
+ *  ("$-50") while the signed cells put it before ("-$50"), so both forms have
+ *  to reduce to one.
+ *
+ *  THROWS when the node carries no dollar figure. Returning `null` made a
+ *  surface that rendered "—" on both sides of the identity satisfy it by
+ *  being equally blank, which is a way the identity can BREAK, not hold. */
+function money(text: string): string {
+  const match = text.match(/(-?)\$(-?)([\d,]+)/);
+  if (!match) {
+    throw new Error(`no dollar figure in rendered text: ${JSON.stringify(text)}`);
+  }
+  const negative = match[1] === "-" || match[2] === "-";
+  return `${negative ? "-" : ""}$${match[3]}`;
+}
+
+/** One draw, used only to render a table whose header row we can read. */
+const PROBE_SPEC = {
+  right: "Call" as const, direction: "LONG" as const, strike: 580, contracts: 10,
+  entryPerContract: 5, quote: { kind: "tight" as const, mid: 6 },
+  legExpiryDiffers: false, ibDailyPnl: null, syncedPerContract: 6,
+};
+
+/** The desktop column indices, read ONCE from a rendered table so they can be
+ *  asserted OUTSIDE the property.
+ *
+ *  Inside a fast-check property a bare `return` is a PASSING case, so an
+ *  index guard there ("if the column is missing, skip") turns every draw into
+ *  a silent no-op the moment a header is renamed or a column is hidden by
+ *  default via `columnVisibility` — exactly the surface regression this file
+ *  exists to catch. The lookup belongs where a miss can fail the test. */
+function desktopHeaderIndices(): { today: number; pnl: number; marketValue: number } {
+  const { pos, prices } = build(PROBE_SPEC);
+  const view = render(<PositionTable positions={[pos]} prices={prices} />);
+  try {
+    const headers = Array.from(
+      screen.getByText(TICKER).closest("table")!.querySelectorAll("thead th"),
+    ).map((th) => th.textContent?.trim().toUpperCase() ?? "");
+    return {
+      today: headers.findIndex((h) => h.startsWith("TODAY")),
+      pnl: headers.findIndex((h) => h === "P&L"),
+      marketValue: headers.findIndex((h) => h.startsWith("MARKET VALUE") || h === "MV"),
+    };
+  } finally {
+    view.unmount();
+  }
 }
 
 describe("same-day P&L identity, as rendered (property)", () => {
@@ -194,6 +260,10 @@ describe("same-day P&L identity, as rendered (property)", () => {
   }, PROPERTY_TIMEOUT_MS);
 
   it("S2 — the desktop row's Today P&L equals its P&L column", () => {
+    const { today: todayIdx, pnl: pnlIdx } = desktopHeaderIndices();
+    expect(todayIdx, "desktop table publishes no TODAY … column").toBeGreaterThanOrEqual(0);
+    expect(pnlIdx, "desktop table publishes no P&L column").toBeGreaterThanOrEqual(0);
+
     fc.assert(
       fc.property(arbPosition, (spec) => {
         const { pos, prices } = build(spec);
@@ -201,12 +271,6 @@ describe("same-day P&L identity, as rendered (property)", () => {
         try {
           const row = screen.getByText(TICKER).closest("tr")!;
           const cells = Array.from(row.querySelectorAll("td")).map((td) => td.textContent ?? "");
-          const headerCells = Array.from(
-            row.closest("table")!.querySelectorAll("thead th"),
-          ).map((th) => th.textContent?.trim().toUpperCase() ?? "");
-          const todayIdx = headerCells.findIndex((h) => h.startsWith("TODAY"));
-          const pnlIdx = headerCells.findIndex((h) => h === "P&L");
-          if (todayIdx < 0 || pnlIdx < 0) return;
           expect(money(cells[todayIdx] ?? "")).toBe(money(cells[pnlIdx] ?? ""));
         } finally {
           view.unmount();
@@ -217,19 +281,17 @@ describe("same-day P&L identity, as rendered (property)", () => {
   }, PROPERTY_TIMEOUT_MS);
 
   it("S3 — desktop and mobile publish the same market value for one position", () => {
+    const { marketValue: mvIdx } = desktopHeaderIndices();
+    expect(mvIdx, "desktop table publishes no MARKET VALUE column").toBeGreaterThanOrEqual(0);
+
     fc.assert(
       fc.property(arbPosition, (spec) => {
         const { pos, prices } = build(spec);
         const desktop = render(<PositionTable positions={[pos]} prices={prices} />);
-        let desktopMv: string | null = null;
+        let desktopMv: string;
         try {
           const row = screen.getByText(TICKER).closest("tr")!;
           const cells = Array.from(row.querySelectorAll("td")).map((td) => td.textContent ?? "");
-          const headerCells = Array.from(
-            row.closest("table")!.querySelectorAll("thead th"),
-          ).map((th) => th.textContent?.trim().toUpperCase() ?? "");
-          const mvIdx = headerCells.findIndex((h) => h.startsWith("MARKET VALUE") || h === "MV");
-          if (mvIdx < 0) return;
           desktopMv = money(cells[mvIdx] ?? "");
         } finally {
           desktop.unmount();

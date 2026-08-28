@@ -43,10 +43,14 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from test_caddyfile import (  # noqa: E402
-    free_port,
+    held_port,
+    port_of,
     read_caddyfile,
+    release_to_peer,
     retry_window_seconds,
     reverse_proxy_block,
+    serve_on,
+    stop_serving,
     wait_for_listener,
 )
 
@@ -153,6 +157,7 @@ class TestRideOutMatchesItsNamedClient:
 # GET against a dead port, so neither the hung-upstream nor the non-idempotent
 # case was covered in either direction (R-219, R-220).
 
+import contextlib
 import fnmatch
 import http.server
 import os
@@ -169,26 +174,51 @@ import urllib.request
 CADDY_BIN = os.environ.get("RADON_CADDY_BIN", "caddy")
 CI_WORKFLOW = REPO / ".github" / "workflows" / "ci.yml"
 
+# The stub writes its response header this long AFTER the edge's own
+# response_header_timeout. A stimulus, not a bound on correct behaviour: it
+# gives the assertion a second event to order the edge's answer against, so an
+# edge that has no bound at all is caught FORWARDING the late header rather
+# than timing the client out inconclusively.
+LATE_HEADER_MARGIN_SECONDS = 8
 
-class _NeverAnswers(http.server.BaseHTTPRequestHandler):
-    """Accepts the socket and never writes a response header.
+
+class _AnswersOnlyAfterTheEdgesBound(http.server.BaseHTTPRequestHandler):
+    """Accepts the socket and holds the response header open.
 
     This is the dominant radon-api failure mode in this repo: R-014's
     data-role lock held by a wedged gateway, R-060's zombie pool client. It is
     exactly the case `lb_try_duration` cannot help with, because the connection
     attempt SUCCEEDS.
+
+    The handler blocks on an Event rather than a fixed sleep so teardown can
+    release it: a `time.sleep(120)` handler pins its accepted connection — and
+    the server object, and therefore the listening socket — for the rest of the
+    pytest process.
     """
 
     protocol_version = "HTTP/1.1"
+    release = threading.Event()
+    LATE_BODY = b"late"
 
-    def do_GET(self):
-        time.sleep(120)
+    def _hang(self):
+        if not type(self).release.wait(300):
+            return
+        with contextlib.suppress(OSError):
+            body = type(self).LATE_BODY
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
 
-    def do_POST(self):
-        time.sleep(120)
+    do_GET = _hang
+    do_POST = _hang
 
     def log_message(self, *args):
         pass
+
+    def handle_one_request(self):
+        with contextlib.suppress(OSError):
+            super().handle_one_request()
 
 
 class _CountsPosts(http.server.BaseHTTPRequestHandler):
@@ -225,8 +255,11 @@ def _caddy_env(tmp_path):
     }
 
 
-def _run_caddy(tmp_path, proxy_port, upstream_port, block):
+def _run_caddy(tmp_path, proxy_sock, upstream_port, block):
     _require_caddy()
+    # caddy binds the listener itself, so the reservation is given up at the
+    # last possible moment instead of at draw time.
+    proxy_port = release_to_peer(proxy_sock)
     config = tmp_path / "Caddyfile"
     config.write_text(
         "{\n\tadmin off\n\tgrace_period 20s\n}\n\n"
@@ -351,58 +384,91 @@ class TestEdgeMechanism:
         header_timeout = _directive_seconds(block, "response_header_timeout")
         assert header_timeout is not None
 
-        upstream_port, proxy_port = free_port(), free_port()
-        server = http.server.ThreadingHTTPServer(("127.0.0.1", upstream_port), _NeverAnswers)
-        threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05},
-                         daemon=True).start()
-        caddy = _run_caddy(tmp_path, proxy_port, upstream_port, block)
-        try:
-            assert wait_for_listener(proxy_port, time.monotonic() + 10)
-            started = time.monotonic()
+        stub = _AnswersOnlyAfterTheEdgesBound
+        stub.release = threading.Event()
+        late_header = threading.Timer(
+            header_timeout + LATE_HEADER_MARGIN_SECONDS, stub.release.set
+        )
+
+        with held_port() as upstream_sock, held_port() as proxy_sock:
+            server = serve_on(upstream_sock, stub)
+            proxy_port = port_of(proxy_sock)
+            caddy = _run_caddy(tmp_path, proxy_sock, port_of(upstream_sock), block)
             try:
-                urllib.request.urlopen(
-                    f"http://127.0.0.1:{proxy_port}/admin",
-                    timeout=header_timeout + 30,
+                assert wait_for_listener(proxy_port, time.monotonic() + 10)
+                late_header.start()
+                try:
+                    with urllib.request.urlopen(
+                        f"http://127.0.0.1:{proxy_port}/admin",
+                        # Safety net only, and derived: it has to outlast the
+                        # stub's late header so a missing bound shows up as a
+                        # forwarded 200 rather than an inconclusive timeout.
+                        timeout=header_timeout + LATE_HEADER_MARGIN_SECONDS * 2,
+                    ) as response:
+                        status, body = response.status, response.read()
+                except urllib.error.HTTPError as exc:
+                    status, body = exc.code, exc.read()
+                except (TimeoutError, OSError, urllib.error.URLError) as exc:
+                    pytest.fail(
+                        "the edge never answered a hung upstream at all "
+                        f"({exc!r}); the hang was forwarded to the client"
+                    )
+
+                # Ordering, not a stopwatch. The stub DOES answer, one
+                # LATE_HEADER_MARGIN_SECONDS after the edge's own stated bound,
+                # so the response itself says which came first and no elapsed
+                # float is involved: its body means the edge rode out an
+                # arbitrarily wedged upstream and emitted no 5xx at all, which
+                # is exactly why @edge_health_status could keep answering 200
+                # through a total front-end hang (R-219).
+                assert body != _AnswersOnlyAfterTheEdgesBound.LATE_BODY, (
+                    "the edge forwarded the upstream's late response header "
+                    "instead of giving up first: it does not bound a wedged "
+                    "upstream, so the hang produces no 5xx anywhere"
                 )
-                pytest.fail("a hung upstream produced a normal response")
-            except urllib.error.HTTPError as exc:
-                status = exc.code
-            waited = time.monotonic() - started
-            assert 500 <= status < 600, (
-                f"the edge answered {status}; @edge_health_status only maps "
-                "502/503/504, so a total front-end hang stayed invisible"
-            )
-            assert waited < header_timeout + 20, f"took {waited:.1f}s"
-        finally:
-            server.shutdown()
-            caddy.terminate()
-            caddy.wait(timeout=10)
+                assert 500 <= status < 600, (
+                    f"the edge answered {status}; @edge_health_status only maps "
+                    "502/503/504, so a total front-end hang stayed invisible"
+                )
+            finally:
+                late_header.cancel()
+                stub.release.set()
+                stop_serving(server)
+                caddy.terminate()
+                caddy.wait(timeout=10)
 
     def test_a_severed_post_is_not_replayed(self, caddy_dir, tmp_path):
         block = reverse_proxy_block(read_caddyfile(caddy_dir), APP_UPSTREAM)
         _CountsPosts.seen = []
+        # The client deadline is the edge's own retry window plus one dial, both
+        # read from the shipped config: a severed POST cannot legitimately take
+        # longer than the loop that would replay it.
+        dial_timeout = _directive_seconds(block, "dial_timeout")
+        assert dial_timeout is not None
+        deadline = retry_window_seconds(block) + dial_timeout
 
-        upstream_port, proxy_port = free_port(), free_port()
-        server = http.server.ThreadingHTTPServer(("127.0.0.1", upstream_port), _CountsPosts)
-        threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05},
-                         daemon=True).start()
-        caddy = _run_caddy(tmp_path, proxy_port, upstream_port, block)
-        try:
-            assert wait_for_listener(proxy_port, time.monotonic() + 10)
-            request = urllib.request.Request(
-                f"http://127.0.0.1:{proxy_port}/api/orders/place",
-                data=b'{"symbol":"SPY"}',
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            with pytest.raises(Exception):
-                urllib.request.urlopen(request, timeout=40)
-            assert len(_CountsPosts.seen) == 1, (
-                f"the edge replayed a severed order POST {len(_CountsPosts.seen)}x; "
-                "there is no idempotency key on this path, so the operator's "
-                "only evidence would be two fills"
-            )
-        finally:
-            server.shutdown()
-            caddy.terminate()
-            caddy.wait(timeout=10)
+        with held_port() as upstream_sock, held_port() as proxy_sock:
+            server = serve_on(upstream_sock, _CountsPosts)
+            proxy_port = port_of(proxy_sock)
+            caddy = _run_caddy(tmp_path, proxy_sock, port_of(upstream_sock), block)
+            try:
+                assert wait_for_listener(proxy_port, time.monotonic() + 10)
+                request = urllib.request.Request(
+                    f"http://127.0.0.1:{proxy_port}/api/orders/place",
+                    data=b'{"symbol":"SPY"}',
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with pytest.raises(Exception):
+                    urllib.request.urlopen(request, timeout=deadline)
+                # Caddy answers the client only once it has stopped retrying, so
+                # the tally at this point is final.
+                assert _CountsPosts.seen == ["/api/orders/place"], (
+                    f"the edge replayed a severed order POST: {_CountsPosts.seen}; "
+                    "there is no idempotency key on this path, so the operator's "
+                    "only evidence would be two fills"
+                )
+            finally:
+                stop_serving(server)
+                caddy.terminate()
+                caddy.wait(timeout=10)
