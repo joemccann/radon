@@ -38,7 +38,7 @@ Archived session artifacts live in [`docs/archive/`](archive/).
 | Topic | Doc |
 |-------|-----|
 | Regime and scanner indicator specs | [`docs/indicators/README.md`](indicators/README.md) |
-| AI boom leading indicators (WIP tape) | [`docs/ai-boom-leading-indicators.md`](ai-boom-leading-indicators.md) |
+| AI boom leading indicators | [`docs/ai-boom-leading-indicators.md`](ai-boom-leading-indicators.md) |
 | Equibles market-structure API | [`docs/equibles-api.md`](equibles-api.md) |
 | Strategy specs | [`docs/strategies.md`](strategies.md) |
 | VCG-R research notes | [`docs/cross_asset_volatility_credit_gap_spec_(VCG).md`](cross_asset_volatility_credit_gap_spec_(VCG).md) |
