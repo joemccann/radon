@@ -495,3 +495,82 @@ class TestVixTsStorage:
         db.execute(writer.VIXTS_UPSERT_SQL, args2)
         rows = db.execute("SELECT date, ratio, spx_close FROM vixts_history").fetchall()
         assert rows == [("2026-08-14", 0.7720, 7700.0)]
+
+
+# ── R-362 / REL-130: a duplicate date must not kill the run mid-history ─────
+
+class TestVixtsUpsertDedupsByDate:
+    """SQLite refuses to UPSERT one conflict target twice inside a single
+    INSERT, so a doubled row from the SPX left join or a Cboe double-publish
+    raised "ON CONFLICT DO UPDATE command does not affect row a second time"
+    and killed the run with earlier chunks already committed. The sibling
+    `upsert_cash_flow_rows` dedups explicitly for exactly this reason.
+    """
+
+    def _sqlite_db(self, tmp_path):
+        import sqlite3
+
+        conn = sqlite3.connect(tmp_path / "vixts.db")
+        conn.execute(
+            "CREATE TABLE vixts_history (date TEXT PRIMARY KEY, vix_close REAL, "
+            "vix3m_close REAL, ratio REAL, spx_close REAL, recorded_at TEXT)"
+        )
+        return conn
+
+    def _row(self, date, ratio):
+        return {"date": date, "vix": 18.0, "vix3m": 20.0, "ratio": ratio, "spx": 4000.0}
+
+    def test_the_emitted_statement_carries_one_row_per_date(self, monkeypatch):
+        """Asserted at the PARAMETERS, not against a live engine.
+
+        The failure R-362 describes is libsql/older-SQLite raising "ON
+        CONFLICT DO UPDATE command does not affect row a second time"; this
+        runner's SQLite is 3.53.4, which relaxed that restriction and silently
+        accepts the duplicate, so a round trip through `sqlite3` cannot show
+        the defect. What the fix guarantees is engine-independent and is what
+        is pinned here: the statement the writer emits never names one
+        conflict target twice.
+        """
+        import db.writer as writer
+
+        calls: list[tuple[str, tuple]] = []
+
+        class _Capture:
+            def execute(self, sql, params=()):
+                calls.append((sql, params))
+
+            def commit(self):
+                pass
+
+        monkeypatch.setattr(writer, "get_db", lambda: _Capture())
+        writer.upsert_vixts_rows(
+            [
+                self._row("2026-08-24", 0.90),
+                self._row("2026-08-25", 0.91),
+                self._row("2026-08-25", 0.92),  # duplicate date, later wins
+            ],
+            recorded_at="2026-08-26T00:00:00Z",
+        )
+
+        assert len(calls) == 1
+        sql, params = calls[0]
+        # Six binds per row.
+        assert len(params) % 6 == 0
+        dates = [params[i] for i in range(0, len(params), 6)]
+        assert dates == ["2026-08-24", "2026-08-25"], (
+            f"one row per conflict target; got {dates}"
+        )
+        ratios = [params[i + 3] for i in range(0, len(params), 6)]
+        assert ratios == [0.90, 0.92], "the LAST row for a date wins"
+        assert sql.count("(?, ?, ?, ?, ?, ?)") == 2
+
+    def test_a_clean_series_is_unchanged(self, tmp_path, monkeypatch):
+        import db.writer as writer
+
+        conn = self._sqlite_db(tmp_path)
+        monkeypatch.setattr(writer, "get_db", lambda: conn)
+        writer.upsert_vixts_rows(
+            [self._row(f"2026-08-{d:02d}", 0.9) for d in range(1, 6)],
+            recorded_at="2026-08-26T00:00:00Z",
+        )
+        assert conn.execute("SELECT COUNT(*) FROM vixts_history").fetchone()[0] == 5

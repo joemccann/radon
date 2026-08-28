@@ -11,6 +11,12 @@ import { useViewport } from "@/lib/useViewport";
 import DailyDarkPoolHistory from "@/components/flow-analysis/DailyDarkPoolHistory";
 import { flowReportErrorCopy } from "@/lib/flowReportError";
 
+/** The scan the server actually runs is `--days 20` (server.py). Every piece
+ * of window copy derives from this or from the payload's own
+ * `lookback_days`; hardcoding it told the operator "5 sessions" during the
+ * scan and "20 Trading Days" when it landed. R-357. */
+const DEFAULT_LOOKBACK_DAYS = 20;
+
 type Props = {
   ticker: string;
 };
@@ -47,7 +53,13 @@ export default function TickerFlowReport({ ticker }: Props) {
         </div>
       )}
 
-      {isAnalyzing && !data && <AnalyzingPanel ticker={ticker} status={status} />}
+      {isAnalyzing && !data && (
+        <AnalyzingPanel
+          ticker={ticker}
+          status={status}
+          lookbackDays={DEFAULT_LOOKBACK_DAYS}
+        />
+      )}
 
       {data && <ReportSections data={data} isAnalyzing={isAnalyzing} />}
     </div>
@@ -215,7 +227,7 @@ function MobileTickerFlowReport({
         {section === "overview" && (
           <>
             {!data && isAnalyzing && (
-              <SpectralLoader label={`Sampling ${ticker} flow · 5 sessions`} />
+              <SpectralLoader label={`Sampling ${ticker} flow · ${DEFAULT_LOOKBACK_DAYS} sessions`} />
             )}
             {verdict && (
               <SignalCard
@@ -463,12 +475,24 @@ function PulseDot() {
   return <span className="ticker-flow-pulse" aria-hidden="true" />;
 }
 
-function AnalyzingPanel({ ticker, status }: { ticker: string; status: string }) {
+function AnalyzingPanel({
+  ticker,
+  status,
+  lookbackDays,
+}: {
+  ticker: string;
+  status: string;
+  lookbackDays: number;
+}) {
   // The hero badge above already announces "Analyzing {ticker}". This panel
   // names the sample being taken, so the two read as one thought.
+  //
+  // The count is DERIVED, never hardcoded: the scan the server runs is
+  // `--days 20`, so "5 sessions" told the operator one sample size during the
+  // scan and the footer told them another when it landed. R-357.
   const label =
     status === "scanning"
-      ? `Sampling ${ticker} flow · 5 sessions`
+      ? `Sampling ${ticker} flow · ${lookbackDays} sessions`
       : `Loading cached ${ticker} report`;
   return (
     <section className="section">
@@ -476,7 +500,7 @@ function AnalyzingPanel({ ticker, status }: { ticker: string; status: string }) 
         <div className="ticker-flow-analyzing">
           <SpectralLoader label={label} />
           <ul className="ticker-flow-analyzing-steps">
-            <li>Pulling dark pool prints across the last 5 trading sessions</li>
+            <li>Pulling dark pool prints across the last {lookbackDays} trading sessions</li>
             <li>Reconstructing buy / sell pressure from NBBO mid-cross</li>
             <li>Aggregating institutional options flow</li>
             <li>Synthesizing directional verdict</li>
@@ -571,7 +595,7 @@ function ReportSections({
       <section className="section">
         <div className="report-meta">
           {data.fetched_at
-            ? `Report Generated: ${new Date(data.fetched_at).toLocaleString()} - Source: UW API - Dark Pool Lookback: ${data.lookback_days ?? 20} Trading Days`
+            ? `Report Generated: ${new Date(data.fetched_at).toLocaleString()} - Source: UW API - Dark Pool Lookback: ${data.lookback_days ?? DEFAULT_LOOKBACK_DAYS} Trading Days`
             : "No report timestamp available"}
           {isAnalyzing ? " - Refreshing in background..." : ""}
         </div>

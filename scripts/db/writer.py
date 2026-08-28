@@ -1165,10 +1165,20 @@ def upsert_vixts_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = N
     """
     if not rows:
         return
+    # SQLite refuses to UPSERT one conflict target twice inside a single
+    # INSERT, so a duplicate date — a doubled row from the SPX left join, or a
+    # Cboe double-publish — raised "ON CONFLICT DO UPDATE command does not
+    # affect row a second time" and killed the run mid-history with earlier
+    # chunks already committed. Last wins, exactly as `upsert_cash_flow_rows`
+    # dedups for the same reason. R-362.
+    deduped: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        deduped[str(row.get("date"))] = row
+    ordered = list(deduped.values())
     stamp = recorded_at or _now_iso()
     db = get_db()
-    for start in range(0, len(rows), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
-        chunk = rows[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+    for start in range(0, len(ordered), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = ordered[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
         placeholders = ", ".join(_VIXTS_ROW_PLACEHOLDER for _ in chunk)
         params: list[Any] = []
         for row in chunk:
