@@ -58,6 +58,19 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # never-firing watchdog is itself staleness-checked — without this its
     # row could sit stale forever with nobody watching (REL-033).
     "nextjs-db-read":   {"open": 5 * _MIN, "closed": 5 * _MIN, "requires_ib": False},
+    # R-325: three timer-backed units wrote no service_health row and were in
+    # neither catalog, so a job that stopped firing was invisible to check.py.
+    # Each now heartbeats and is staleness-checked on its own cadence.
+    #
+    # radon-refresh.timer: Mon-Fri 13..21:00,15,30,45 UTC (every 15 min through
+    # RTH). Open window tolerates two missed fires; the job self-skips holidays
+    # and weekends, so the closed window absorbs the whole weekend.
+    "data-refresh":     {"open": 35 * _MIN, "closed": 3 * _DAY, "requires_ib": False},
+    # radon-incident-watchdog.timer: every 5 min, around the clock.
+    "incident-watchdog": {"open": 15 * _MIN, "closed": 15 * _MIN, "requires_ib": False},
+    # radon-demo-mirror.timer: Mon-Fri 21:45 UTC, once a day. Closed window
+    # absorbs the weekend gap between Friday's and Monday's runs.
+    "demo-mirror":      {"open": 26 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
     # Market-hours-only writers (gated by MonitorDaemon's
     # requires_market_hours=True). Mirrors web/lib/serviceHealthWindows.ts;
     # closed window absorbs the longest weekend gap so the banner doesn't
@@ -376,6 +389,9 @@ BUCKETS: dict[str, list[str]] = {
     "intraday": [
         "vcg-scan",
         "breadth-scan",
+        # The 15-min RTH driver behind cri/vcg/gex. The scans heartbeat their
+        # own names; nothing observed the DRIVER until R-325.
+        "data-refresh",
         "cri-scan",
         "orders-sync",
         "portfolio-sync",
@@ -401,6 +417,8 @@ BUCKETS: dict[str, list[str]] = {
         # rather than `failed`, so units.py missed it too — the Turso-wedge
         # auto-restart off with an ok row on the board.
         "nextjs-db-read",
+        # Around-the-clock 5-minute prober (R-325).
+        "incident-watchdog",
         "fill-monitor",
         "journal-sync",
         # Always-on heartbeat (writes service_health every 60s cycle).
@@ -421,6 +439,8 @@ BUCKETS: dict[str, list[str]] = {
     ],
     "daily": [
         "cash-flow-sync",
+        # Weekday 21:45 UTC prod->demo market-analytics mirror (R-325).
+        "demo-mirror",
         # R-159: the TWR builder (Tue..Sat 07:30 ET). Silent means a Flex
         # lockout, a throttle embargo or a dead timer, and /performance keeps
         # serving the last snapshot until someone eyeballs the page.
