@@ -33,6 +33,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-watchdog-error.timer",
     "radon-db-backup.service",
     "radon-db-backup.timer",
+    "radon-disk-cleanup.service",
+    "radon-disk-cleanup.timer",
     "radon-portfolio-archive.service",
     "radon-portfolio-archive.timer",
     "radon-media-backup.service",
@@ -153,8 +155,13 @@ STATIC_SERVICES = {
 # The drift audit must read 0440 root sudoers and run `docker inspect`, so it
 # stays root -- but it executes a root-owned control-plane copy of the audit,
 # never the radon-writable checkout (cloud/tests/test_root_execution_paths.py).
+# The weekend disk sweep must talk to the root-only docker engine socket
+# (radon is deliberately not in group docker) and vacuum journald -- so it
+# stays root, and like the drift audit it executes a root-owned
+# control-plane copy, never the radon-writable checkout.
 ROOT_REQUIRED_SERVICES = {
     "radon-drift-audit.service",
+    "radon-disk-cleanup.service",
 }
 
 

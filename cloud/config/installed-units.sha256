@@ -132,3 +132,11 @@ d0c1ec2309131f1f1f311a864c6bfcb5088264ea456501b92091ccc6d937f4ee  radon-hhlev.se
 193ddc6b460b38ced6750ed0e6995fabdc5ce63bb37b4a898316ac5f5e3e1196  radon-hhlev.timer
 d25e52ea594eba7cd7421793dec6b0e6e554ea3055628b812e2d5b7508fd29f6  radon-vixts.service
 1735ba1cf04d7c7e42f734425eec6eb29eecc7923865742fa08d3c4be62abaf8  radon-vixts.timer
+
+# Weekend disk cleanup (2026-08-27 root-disk-usage P1). CONTROL-PLANE units:
+# `install-units` skips them by design, so the copy that clears these two
+# entries is the root `bootstrap-control-plane.sh` run, which the same commit's
+# CONTROL_PLANE_SOURCES growth already requires before the next deploy's
+# verify-control-plane preflight can pass.
+0213ae19e9bd1d51ae6c1c53eb871e10eac71546b013c2685228d8f174599b40  radon-disk-cleanup.service
+6d725a92326516355eda4486b5a8e77069681ed0acf7596f3170d3666c9fec06  radon-disk-cleanup.timer

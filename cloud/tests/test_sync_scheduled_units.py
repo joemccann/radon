@@ -41,6 +41,8 @@ CONTROL_PLANE_UNITS = {
     "radon-refresh.timer",
     "radon-db-backup.service",
     "radon-db-backup.timer",
+    "radon-disk-cleanup.service",
+    "radon-disk-cleanup.timer",
     "radon-drift-audit.service",
     "radon-drift-audit.timer",
     "radon-nextjs-db-watchdog.service",

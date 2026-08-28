@@ -34,6 +34,7 @@ ARTIFACTS = (
     # Root runs the audit, so its payload cannot live in the radon-writable
     # checkout. It is data for a root-owned interpreter, hence 0644 not 0755.
     Artifact("scripts/drift_audit.py", "/usr/local/lib/radon/drift_audit.py", 0o644),
+    Artifact("scripts/disk_cleanup.py", "/usr/local/lib/radon/disk_cleanup.py", 0o644),
     Artifact("scripts/radon-app-runtime.sh", "/usr/local/sbin/radon-app-runtime", 0o755),
     Artifact("config/sudoers.d/radon-deploy", "/etc/sudoers.d/radon-deploy", 0o440),
     Artifact("config/sudoers.d/radon-monitor", "/etc/sudoers.d/radon-monitor", 0o440),
@@ -96,6 +97,16 @@ ARTIFACTS = (
     Artifact(
         "services/radon-db-backup.timer",
         "/etc/systemd/system/radon-db-backup.timer",
+        0o644,
+    ),
+    Artifact(
+        "services/radon-disk-cleanup.service",
+        "/etc/systemd/system/radon-disk-cleanup.service",
+        0o644,
+    ),
+    Artifact(
+        "services/radon-disk-cleanup.timer",
+        "/etc/systemd/system/radon-disk-cleanup.timer",
         0o644,
     ),
     Artifact(

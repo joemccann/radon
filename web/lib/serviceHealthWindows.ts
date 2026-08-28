@@ -534,6 +534,14 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // Polymarket only — no IB.
   "event-odds": { open: 7 * HOUR, extended: 7 * HOUR, closed: 4 * DAY, category: "scheduled", requires_ib: false },
 
+  // ``disk-cleanup`` is the WEEKLY root-filesystem reclaim on the VPS
+  // (cloud/scripts/disk_cleanup.py via radon-disk-cleanup.timer, Sun 03:20
+  // UTC) — stale deploy images, leaked release worktrees, npm/pip caches,
+  // journald. Heartbeats ok/error on every run. Uniform 8d window on the
+  // preset-rebalance weekly precedent: weekly cadence plus timer jitter, so
+  // one missed Sunday surfaces before the second. Docker + local disk only.
+  "disk-cleanup": { open: 8 * DAY, extended: 8 * DAY, closed: 8 * DAY, category: "scheduled", requires_ib: false },
+
 };
 
 const DEFAULT_WINDOW: Window = {

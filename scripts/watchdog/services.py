@@ -346,6 +346,12 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # event-odds — laptop launchd 3x weekday, holiday-aware. Windows
     # match catalysts (7h open / 4d closed). Polymarket only — no IB.
     "event-odds": {"open": 7 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
+    # disk-cleanup — WEEKLY root-filesystem reclaim on the VPS
+    # (cloud/scripts/disk_cleanup.py via radon-disk-cleanup.timer, Sun 03:20
+    # UTC). Heartbeats ok/error every run. 8-day window uses the
+    # preset-rebalance weekly precedent (cadence + timer jitter). Docker +
+    # local disk + journald only — no IB dependency.
+    "disk-cleanup": {"open": 8 * _DAY, "closed": 8 * _DAY, "requires_ib": False},
 }
 
 
@@ -514,6 +520,9 @@ BUCKETS: dict[str, list[str]] = {
         "db-retention",
         # Nightly media.radon.run tree backup to B2 — 48h window.
         "media-backup",
+        # Weekly weekend disk cleanup on the VPS — hourly check surfaces a
+        # missed sweep within 1h of the 8-day window expiring.
+        "disk-cleanup",
         # Equibles daily + weekly + event-odds. Hourly check surfaces a
         # missed fire within 1h of the window expiring (preset-rebalance
         # weekly precedent).
