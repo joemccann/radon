@@ -4,7 +4,11 @@ Status: FINAL after adversarial review 2026-08-24 (`docs/flex-sftp-cutover-revie
 Remaining ops: steps 6-9 on `feat/flex-sftp-steps-6-9` (`docs/show-me-flex-sftp-ops.html`, `tasks/todo.md`).
 P1/P2 file ingest is on `main`.
 Date: 2026-08-24
-Does **not** supersede `docs/flex-delivery-architecture.md` until IBKR grants **Client Portal Flex Query** sFTP in writing. Until then email ingest is the default transport; sFTP is the preferred transport **if granted**.
+IBKR granted Client Portal Flex Query sFTP on 2026-08-28 (Devon / filedelivery). First files **2026-08-31**. Host `ftp2.interactivebrokers.com` (`64.190.196.110`) port 22, dir `outgoing`, key auth, PGP imported. Host key RSA SHA256:C3STmRsxF9UfYvQ8yeJ9vwvK7lMHQ2FcMHchtQd7/wg.
+
+Queries: `1442520` Equity Summary in Base XML Last Business Day (**SOD**). `1422766` Trade History XML Last Business Day (**EOD**). Do not add other reports.
+
+S6 list-dir 2026-08-28: `outgoing` empty. Do not ingest. Do not enable the timer until a file exists.
 
 Routine Flex must stop using `SendRequest` regardless of transport. That is the 1025 fix. sFTP is how the VPS talks to IBKR afterward, outbound only.
 
@@ -229,7 +233,7 @@ Rollback: local-directory fetcher + Portal XML. Never "just SendRequest" during 
 
 1. **flex-inbox ingest** — migration, TWR + journal_rehydrate `--from-file` strict, local fetcher, section-classifier tests, `synced_at` insert-only, `last_synced_at` from `flex_deliveries`. No IBKR.
 2. **kill weekday SendRequest** — blotter GET-only; 404 rehydrate/blotter POSTs; performance file-only; grep allowlist; e2e journal_sync.
-3. **sFTP puller** — OpenSSH IPv4, pinned known_hosts, PGP in-memory, stub server tests. Timer **not** enabled.
+3. **sFTP puller** — `scripts/flex_sftp_pull.py` OpenSSH IPv4, pinned known_hosts, PGP in-memory, stub-SSH tests. Units in `cloud/services/radon-flex-pull.{service,timer}` with `not-installed` ack. Timer **not** enabled. Not on `auto-sync-units.txt`.
 4. **docs** — STALE 1497709; fix `flex_query.py` comment; runbook; this file.
 5. **systemd** — unit + `auto-sync-units.txt` + `installed-units.sha256`. Enable timer only after Flex grant.
 
