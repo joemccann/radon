@@ -83,6 +83,7 @@ export default function FreshnessRail({ schedule, asOf, testId, asOfTestId }: Fr
           : "current";
 
   const countdown = rail ? (rail.overdue ? "Due" : formatCountdown(rail.msRemaining)) : "--";
+  const fillPct = rail ? (rail.elapsedFraction * 100).toFixed(2) : "0.00";
   const note = !rail
     ? null
     : rail.overdue
@@ -118,11 +119,18 @@ export default function FreshnessRail({ schedule, asOf, testId, asOfTestId }: Fr
       </div>
 
       {/* The wait as a length. No transition: the fill moves once a second and
-          an eased width would smear rather than tick. */}
+          an eased width would smear rather than tick.
+
+          `data-fill-pct` is the number the fill MEANS; the inline width is how
+          this stylesheet happens to draw it today. Tests read the attribute, so
+          moving the drawing to a custom property or a transform stays a styling
+          change instead of a broken assertion. */}
       <div className="freshness-rail-track" aria-hidden="true">
         <div
           className="freshness-rail-track-fill"
-          style={{ width: rail ? `${(rail.elapsedFraction * 100).toFixed(2)}%` : "0%" }}
+          data-testid={`${testId}-fill`}
+          data-fill-pct={fillPct}
+          style={{ width: `${fillPct}%` }}
         />
       </div>
 

@@ -87,6 +87,21 @@ const MISSING_IVRANK = {
   uw_check: null,
 };
 
+// The instant the freshness-rail assertions are written against, shared with
+// web/tests/freshness-rail.test.ts: 2026-08-26 is a Wednesday and 21:00 UTC is
+// 17:00 ET, after the close and before the 22:10 UTC radon-ivrank.timer slot.
+const RAIL_NOW = "2026-08-26T21:00:00Z";
+// The session the panel holds: Tuesday, one behind the close that just printed.
+const RAIL_AS_OF = "2026-08-25";
+
+const RAIL_PAYLOAD = {
+  ...IVRANK_MOCK,
+  scan_time: RAIL_NOW,
+  as_of: RAIL_AS_OF,
+  expected_session: "2026-08-26",
+  current: { ...IVRANK_MOCK.current, date: RAIL_AS_OF },
+};
+
 const PORTFOLIO_EMPTY = {
   bankroll: 100_000,
   positions: [],
@@ -144,12 +159,23 @@ async function setupMocks(page: Page, payload: Record<string, unknown> = IVRANK_
   );
 }
 
+// `letClerkLoad` proxies the Clerk assets with a real `route.fetch`. When the
+// test body finishes while one of those is still in flight, Playwright closes
+// the page out from under the handler and the run fails on a route callback
+// that has nothing to do with the assertions. Draining the routes before
+// teardown is the documented remedy and the one the error text names.
+test.afterEach(async ({ page }) => {
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+});
+
 test.describe("/regime/ivrank — SPY 1M IV rank tab", () => {
   test("activates the IV RANK tab and renders the summary strip", async ({ page }) => {
     await setupMocks(page);
     await page.goto("/regime/ivrank");
 
-    await expect(page.locator('.regime-rail__item[data-tab="ivrank"]')).toHaveClass(/active/);
+    // aria-current is the contract for "this is the open tab"; the `active`
+    // class is how the stylesheet draws it. T-234.
+    await expect(page.locator('[data-tab="ivrank"]')).toHaveAttribute("aria-current", "page");
 
     const rank = page.locator('[data-testid="ivrank-rank-value"]');
     await rank.waitFor({ timeout: 15_000 });
@@ -162,32 +188,42 @@ test.describe("/regime/ivrank — SPY 1M IV rank tab", () => {
     await expect(page.locator('[data-testid="ivrank-uw-check"]')).toContainText("UW CROSS-CHECK 10.6");
   });
 
-  test("the freshness rail counts down to the next scheduled sample", async ({ page }) => {
-    await setupMocks(page);
+  test("the freshness rail counts down to the IV RANK slot, to the minute", async ({ page }) => {
+    // A rail counting down to the WRONG slot — the page reading a schedule
+    // constant that is not IV_RANK_REFRESH — satisfied a shape check, and so
+    // did a hardcoded `data-state`. Pin the clock and assert the figures
+    // web/tests/freshness-rail.test.ts derives for this instant. T-221.
+    await page.clock.setFixedTime(new Date(RAIL_NOW));
+    await setupMocks(page, RAIL_PAYLOAD);
     await page.goto("/regime/ivrank");
 
-    const rail = page.locator('[data-testid="ivrank-freshness-rail"]');
+    const rail = page.getByTestId("ivrank-freshness-rail");
     await rail.waitFor({ timeout: 15_000 });
 
     // The date the panel holds, and the countdown to the run that replaces it.
-    await expect(rail).toContainText(LAST.date);
+    await expect(rail).toContainText(RAIL_AS_OF);
     await expect(rail).toContainText("Next sample");
 
     // The clock starts in an effect, so the countdown resolves after hydration
     // rather than shipping a server-rendered time that would mismatch.
-    const countdown = page.locator('[data-testid="ivrank-freshness-rail-countdown"]');
+    const countdown = page.getByTestId("ivrank-freshness-rail-countdown");
     await expect(countdown).not.toHaveText("--", { timeout: 15_000 });
-    await expect(countdown).toHaveText(/^(\d+h \d{2}m|\d+m \d{2}s|\d+s|Due)$/);
 
-    // Whatever the state, it is one of the four the rail models.
-    await expect(rail).toHaveAttribute("data-state", /^(current|behind|overdue)$/);
+    // radon-ivrank.timer fires 22:10 UTC. 21:00 UTC is 1h10m short of it, and
+    // any other schedule constant lands on a different number.
+    await expect(countdown).toHaveText("1h 10m");
 
-    // The track is drawn, and its fill never exceeds the interval.
-    const fillWidth = await rail.locator(".freshness-rail-track-fill").evaluate(
-      (node) => (node as HTMLElement).style.width,
+    // 17:00 ET Wednesday: Wednesday's close has printed and the panel holds
+    // Tuesday, so the rail is BEHIND — not "current", and not yet "overdue",
+    // because the run that owes the session has not fired.
+    await expect(rail).toHaveAttribute("data-state", "behind");
+    await expect(rail).toContainText("Awaiting 2026-08-26");
+
+    // 22h50m of the 24h interval has elapsed since the 2026-08-25 22:10 run.
+    await expect(page.getByTestId("ivrank-freshness-rail-fill")).toHaveAttribute(
+      "data-fill-pct",
+      "95.14",
     );
-    expect(Number.parseFloat(fillWidth)).toBeGreaterThanOrEqual(0);
-    expect(Number.parseFloat(fillWidth)).toBeLessThanOrEqual(100);
   });
 
   test("renders the chart with real paths and a visible brush", async ({ page }) => {
