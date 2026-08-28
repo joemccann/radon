@@ -1,3 +1,38 @@
+# Task: Profile overhaul — preferences + secure credentials (2026-08-28) [WIP]
+
+Blocked on operator answers (asked 2026-08-28): scope of /preferences merge, which
+credentials are UI-managed vs bootstrap-only, save effect (env overlay + reload vs
+manual sync), IB Flex live-validation (throttle embargo — recommend format-only),
+MenthorQ/TheMarketEar Playwright validation depth, cheekiness level vs brand voice,
+operator-only access confirmation.
+
+## Dependency graph
+
+- P1 depends_on: [] - Secret store module: libsodium/age-encrypted values in local
+  SQLite on host; master key via systemd-creds `LoadCredential` (TPM-sealed where
+  available). CRUD + audit events. Red tests first.
+- P2 depends_on: [P1] - FastAPI credentials routes (operator-only, redacted reads,
+  never return plaintext after write).
+- P3 depends_on: [P2] - Per-service async validators (Anthropic, UW, Exa, Cerebras,
+  xAI, MDW, Pushover, ...; IB Flex format-only pending answer).
+- P4 depends_on: [] - Profile page IA: fold preferences in (pending answer on
+  /preferences merge), new Credentials tab.
+- P5 depends_on: [P2, P3, P4] - Credentials UI: masked inputs, submit -> async
+  validate -> cheeky error copy on failure.
+- P6 depends_on: [P5] - Gated-action wire tests (full URL + payload), Playwright
+  E2E, screenshots.
+
+## Checklist
+
+- [ ] P1 Secret store (red/green)
+- [ ] P2 FastAPI CRUD
+- [ ] P3 Async validators
+- [ ] P4 Profile IA
+- [ ] P5 Credentials UI
+- [ ] P6 E2E + verify
+
+---
+
 # Task: Open-order after-RTH session window (2026-08-27)
 
 ## Dependency graph
