@@ -12763,12 +12763,35 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
 
 /* Docked ticket rail — chain keeps its column, the ticket sits beside it so
    legs, price, risk and CTA are readable without scrolling. Below the
-   breakpoint the rail unstacks and the ticket returns to full width. */
+   breakpoint the rail unstacks and the ticket returns to full width.
+
+   The deck is height-locked, so the chain is the deck body's only child and
+   fills it exactly: chain table and ticket are then the ONLY scroll
+   containers. Without this the deck body scrolls too, and a ticket sized off
+   the viewport (`100dvh`) overflows its much shorter scrollport — the risk
+   block and transmit CTA are reachable only by scrolling the panel AROUND the
+   form, never the form. */
+.asset-deck-body:has(.chain-tab) {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.chain-tab {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 0 0;
+}
+
 .chain-rail {
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 12px;
-  align-items: start;
+  align-items: stretch;
 }
 
 .chain-rail[data-docked="true"] {
@@ -12777,32 +12800,55 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
 
 .chain-rail-main {
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
 
+/* The chain takes whatever height the toolbar and hint leave it — a fixed box
+   would either strand empty deck below it or clip rows on a short window.
+   `0 1 auto` hugs a short chain and shrinks-to-scroll a long one. */
 .chain-rail .chain-grid-wrapper {
+  flex: 0 1 auto;
   min-width: 0;
+  min-height: 0;
+  max-height: none;
 }
 
+/* Hugs its content, caps at the deck and scrolls itself past that — so the
+   risk block and TRANSMIT are always reachable from inside the ticket. */
 .order-builder--rail {
-  position: sticky;
-  top: 8px;
-  /* Never taller than the viewport: the ticket scrolls internally so the
-     transmit CTA stays reachable on a short window. */
-  max-height: calc(100dvh - 96px);
+  align-self: start;
+  max-height: 100%;
+  margin-top: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
 
+/* Narrow: the rail unstacks, so the deck body goes back to being the single
+   scroll container and both panes size to content. */
 @media (max-width: 1180px) {
-  .chain-rail[data-docked="true"] {
-    grid-template-columns: minmax(0, 1fr);
+  .asset-deck-body:has(.chain-tab) {
+    overflow-y: auto;
+    display: block;
+  }
+
+  .chain-tab {
+    display: block;
+  }
+
+  .chain-rail,
+  .chain-rail-main {
+    display: block;
+  }
+
+  .chain-rail .chain-grid-wrapper {
+    max-height: 520px;
   }
 
   .order-builder--rail {
-    position: static;
-    max-height: none;
+    height: auto;
+    margin-top: 12px;
     overflow-y: visible;
   }
 }
