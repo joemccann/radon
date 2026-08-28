@@ -5177,6 +5177,30 @@ either. Merging #109 is what un-reds `main`.
   (`ib_2fa_lock.py:375`), burning the 5s reader deadline. Named in T-201's
   text, outside its AC.
 
+## Remediation 2026-08-28
+
+**This cycle's AUDIT PHASE PRODUCED NOTHING — operator action item.** The
+wrapper created and pushed `origin/testing/2026-08-28` at `c6d08fbd` and then
+exited without appending a `## Delta audit 2026-08-28` section, a ledger line,
+or a PR. The range is NOT empty: `789aabea..c6d08fbd` is 24 commits / 262 files
+/ +23193 lines, including the whole IB Flex file-ingest rework, the RTH-fill
+orders surface, the B2 nightly-dump job and the VPS disk-cleanup timer. **That
+delta is unaudited.** Next audit must treat `789aabea` (not `c6d08fbd`) as the
+base so the range is re-covered.
+
+**Backlog state at the start of this remediation: zero un-DONE P0 or P1.**
+- T-190 … T-217 (5 P0, 23 P1) all landed 2026-08-27, PR #112.
+- T-237, the one P0 left open there, is fixed on `main` — PR #109 merged
+  2026-08-27 12:51Z. Re-verified here:
+  `pytest scripts/tests/test_portfolio_risk_gate3_measurability.py` is
+  12 passed / 0.32 s at `c6d08fbd`.
+- T-003 … T-053 (the frozen PART A P0/P1s) landed pre-log via PRs #13/#14,
+  per the `TEST_LOG.md` header contract; T-050 remains the one open straggler
+  there and is still a maintainer threshold decision.
+
+So this run works the newest **P2** stragglers in severity-then-recency order,
+which is the next rung of the PART B contract.
+
 ## 11 · Audit ledger
 
 The weekend loop (`.claude/skills/testing-weekend/`) reads the last line
