@@ -183,3 +183,56 @@ describe("GET /api/vixts", () => {
     expect(route.dynamic).toBe("force-dynamic");
   });
 });
+
+// ── R-332 / R-366 / REL-118: the route obeys its own freshness budget ──────
+//
+// The handler served on `result.ok` ALONE, so the `VIXTS_MAX_AGE_MS` budget
+// declared at the top of the route and passed into `dbFirstRead` was computed
+// and discarded. Every sibling Cboe/daily route uses
+// `result.ok && result.fresh ? result.data : staleCollapse(...)`; the vixcor
+// route is the direct twin. A dead `radon-vixts.service` therefore kept
+// serving a week-old snapshot with no `stale` or `missing` marker, and
+// `VixTsPanel` rendered a confident coloured regime badge for a dead feed.
+//
+// R-366: the `dbFirstRead` call also omitted `isDegraded: isMissingPayload`,
+// so source selection was on timestamp alone and a heartbeat payload carrying
+// `missing: true` with a newer scan_time outranked a complete older snapshot.
+
+describe("GET /api/vixts freshness budget", () => {
+  it("collapses an eight-day-old snapshot to the stale shape", async () => {
+    const ancient = new Date(Date.now() - 8 * 24 * 60 * 60_000).toISOString();
+    await insertSnapshot(buildPayload({ scan_time: ancient }));
+    const { GET } = await import("../app/api/vixts/route");
+    const json = await jsonOf(await GET());
+
+    expect(json.stale).toBe(true);
+    expect(json.missing).toBe(true);
+    expect(json.scan_time).toBe(ancient);
+    expect(json.current).toBeNull();
+  });
+
+  it("still serves a snapshot inside the 48h budget verbatim", async () => {
+    const recent = new Date(Date.now() - 12 * 60 * 60_000).toISOString();
+    await insertSnapshot(buildPayload({ scan_time: recent }));
+    const { GET } = await import("../app/api/vixts/route");
+    const json = await jsonOf(await GET());
+
+    expect(json.stale).toBeUndefined();
+    expect(json.missing).toBeUndefined();
+    expect((json.current as Payload).ratio).toBe(0.8455);
+  });
+
+  it("does not let a newer missing:true payload outrank a complete older one", async () => {
+    const older = new Date(Date.now() - 6 * 60 * 60_000).toISOString();
+    const newer = new Date(Date.now() - 60_000).toISOString();
+    await insertSnapshot(buildPayload({ scan_time: older }));
+    mockReadFile.mockResolvedValue(
+      JSON.stringify({ missing: true, scan_time: newer, series: [], current: null }),
+    );
+    const { GET } = await import("../app/api/vixts/route");
+    const json = await jsonOf(await GET());
+
+    expect(json.missing).toBeUndefined();
+    expect((json.current as Payload).ratio).toBe(0.8455);
+  });
+});

@@ -574,14 +574,18 @@ jobs:
     # Keep this list identical to `deploy.needs` minus `stage-release` itself.
     # `test_ci_gate_integrity.py` derives the gate FROM `deploy.needs` and will
     # fail if the two drift again — which is how web-coverage and py-coverage
-    # were found missing here. R-299.
+    # were found missing here. R-299. It also asserts every gate job appears in
+    # the `if:` BELOW: `!cancelled()` is a status function, so GitHub drops the
+    # implicit success() on `needs` and only the expression gates. R-324.
     needs: [secret-scan, changes, web-tests, web-coverage, py-tests, py-coverage, cloud-tests, perimeter-smoke]
     if: >-
       github.ref == 'refs/heads/main' && github.event_name == 'push' && !cancelled()
       && needs.secret-scan.result == 'success'
       && needs.changes.result == 'success'
       && (needs.web-tests.result == 'success' || needs.web-tests.result == 'skipped')
+      && (needs.web-coverage.result == 'success' || needs.web-coverage.result == 'skipped')
       && (needs.py-tests.result == 'success' || needs.py-tests.result == 'skipped')
+      && (needs.py-coverage.result == 'success' || needs.py-coverage.result == 'skipped')
       && (needs.cloud-tests.result == 'success' || needs.cloud-tests.result == 'skipped')
       && (needs.perimeter-smoke.result == 'success' || needs.perimeter-smoke.result == 'skipped')
     runs-on: ubuntu-latest

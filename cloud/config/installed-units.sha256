@@ -138,8 +138,8 @@ d25e52ea594eba7cd7421793dec6b0e6e554ea3055628b812e2d5b7508fd29f6  radon-vixts.se
 # entries is the root `bootstrap-control-plane.sh` run, which the same commit's
 # CONTROL_PLANE_SOURCES growth already requires before the next deploy's
 # verify-control-plane preflight can pass.
-0213ae19e9bd1d51ae6c1c53eb871e10eac71546b013c2685228d8f174599b40  radon-disk-cleanup.service
-6d725a92326516355eda4486b5a8e77069681ed0acf7596f3170d3666c9fec06  radon-disk-cleanup.timer
+e8a7dca2f2f2c7d1176010a2c4df4e4a60842a6bb1cb34682d2ce9c815c11938  radon-disk-cleanup.service
+71f51588972f5eaf42e4047f35435df870d7249fd4f18d8f47ed923aac19ec16  radon-disk-cleanup.timer
 
 # T-236: the FLEET-WIDE systemd prefix drop-in. Not a unit -- systemd applies
 # "radon-.service.d/" to every unit named radon-*, so this one file's blast

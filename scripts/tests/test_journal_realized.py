@@ -449,6 +449,72 @@ class TestContractIdentityCorruption:
         closed = _row("cl1", "CLOSED", 10, 3.00, 0.0, _C60, "2026-08-11", "w2")
         assert _unusable_fill_key(closed) is None
 
+    # --- R-320 / REL-109: corruption that NORMALISES must poison too -------
+    #
+    # REL-094 keyed usability on `_bucket_key` returning None, so a contract
+    # field that is malformed but still normalises forms its own phantom
+    # bucket and never reaches the shape test. The healthy triple's true
+    # realized is $3,000; each case below fabricated $4,000 with no warning.
+
+    def test_zero_numeric_strike_refuses_instead_of_fabricating(self, caplog):
+        with caplog.at_level("WARNING"):
+            realized = realized_pnl_by_exec_id(self._corrupted("strike", 0))
+        assert realized == {}, (
+            "strike 0 normalises to '0.0' and forms a phantom bucket, so the "
+            f"healthy bucket prices its close against half a basis; got {realized}"
+        )
+        assert any("incomplete" in r.getMessage().lower() for r in caplog.records)
+
+    def test_zero_string_strike_refuses_instead_of_fabricating(self):
+        assert realized_pnl_by_exec_id(self._corrupted("strike", "0")) == {}
+
+    def test_negative_strike_refuses_instead_of_fabricating(self):
+        assert realized_pnl_by_exec_id(self._corrupted("strike", -60.0)) == {}
+
+    def test_impossible_calendar_expiry_refuses_instead_of_fabricating(self):
+        """Eight digits pass `_normalize_expiry` without being a real date."""
+        assert realized_pnl_by_exec_id(self._corrupted("expiry", "20261340")) == {}
+
+    def test_all_three_contract_fields_falsy_is_not_read_as_a_stock_leg(self):
+        """`_is_option_shaped` tested truthiness, so 0/'' read as field-absent.
+
+        A row that NAMES right, strike and expiry is asserting it is an
+        option fill even when all three are falsy — it must poison, not be
+        waved through as the by-design stock exclusion.
+        """
+        broken = _row("o2", "BUY_OPTION", 10, 3.00, 0.0, _C60, "2026-08-11", "w2")
+        payload = json.loads(broken[0])
+        payload["right"] = ""
+        payload["strike"] = 0
+        payload["expiry"] = ""
+        row = (json.dumps(payload), broken[1], broken[2])
+        assert _unusable_fill_key(row) == "SLV|*", (
+            "all three option fields present-but-falsy must be read as a "
+            "corrupt OPTION row, not as a stock leg naming none of them"
+        )
+
+    def test_zero_strike_is_field_presence_not_truthiness(self):
+        """A numeric 0 strike is PRESENT; only a missing key is absent."""
+        payload = {"ticker": "SLV", "action": "BUY_OPTION", "contracts": 10,
+                   "fill_price": 3.0, "commission": 0.0, "ib_exec_id": "z1",
+                   "date": "2026-08-11", "strike": 0}
+        assert _unusable_fill_key((json.dumps(payload), "2026-08-11", "w1")) == "SLV|*"
+
+    def test_plausible_contract_corruption_still_poisons_the_whole_ticker(self):
+        """Poison scope must be TICKER|*, not the phantom bucket's own key."""
+        assert _unusable_fill_key(
+            self._corrupted("strike", 0)[1]
+        ) == "SLV|*"
+
+    def test_healthy_triple_is_untouched_by_the_plausibility_domain(self):
+        """The plausibility check must not poison a legitimate replay."""
+        rows = [
+            _row("o1", "BUY_OPTION", 10, 1.00, 0.0, _C60, "2026-08-07", "w1"),
+            _row("o2", "BUY_OPTION", 10, 3.00, 0.0, _C60, "2026-08-11", "w2"),
+            _row("c1", "SELL_OPTION", 10, 5.00, 0.0, _C60, "2026-08-20", "w3"),
+        ]
+        assert realized_pnl_by_exec_id(rows) == {"c1": 3000.0}
+
     def test_bag_and_stock_rows_do_not_block_a_healthy_replay(self):
         """The pre-existing by-design exclusions keep their exact behaviour."""
         rows = [

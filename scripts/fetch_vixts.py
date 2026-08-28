@@ -58,6 +58,9 @@ from lib.vixts_math import (  # noqa: E402
 VIXTS_JSON = _PROJECT_DIR / "data" / "vixts.json"
 
 SERVICE = "vixts"
+# Calendar days of cache lag tolerated on the all-304 path before the run
+# stops calling itself fresh. One session plus a weekend. R-333.
+_MAX_CACHE_LAG_DAYS = 4
 
 # SPX_History.csv genuinely publishes its close under an "SPX" column, not
 # "CLOSE" (same quirk as VVIX_History.csv), so the column is per-symbol.
@@ -135,16 +138,29 @@ def _write_db(
             "message": f"vixts row upsert failed: {exc}",
             "class": "db_write_failed",
         }
+    snapshot_error: Optional[dict[str, Any]] = None
     try:
         writer.upsert_scan_snapshot(SERVICE, scan_time, payload)
+    except Exception as exc:  # noqa: BLE001
+        # Same argument R-192 made for the row upsert, applied one statement
+        # later: a failed snapshot must not take the HEARTBEAT down with it.
+        # Sharing one try meant a snapshot failure produced no service_health
+        # row at all, which is the R-331 outcome by another route.
+        print(f"[vixts] snapshot write failed: {exc}", file=sys.stderr)
+        snapshot_error = {
+            "message": f"vixts snapshot write failed: {exc}",
+            "class": "db_write_failed",
+        }
+    error = health_error or row_error or snapshot_error
+    try:
         writer.record_service_health(
             SERVICE,
-            "ok" if (health_error is None and row_error is None) else "error",
+            "ok" if error is None else "error",
             finished_at=scan_time,
-            error=health_error or row_error,
+            error=error,
         )
     except Exception as exc:  # noqa: BLE001 — best-effort mirror
-        print(f"[vixts] db cache non-fatal: {exc}", file=sys.stderr)
+        print(f"[vixts] health heartbeat non-fatal: {exc}", file=sys.stderr)
 
 
 def _record_startup_failure(scan_time: str, exc: Exception) -> None:
@@ -228,13 +244,33 @@ def run(client: Optional[Any] = None, *, now: Optional[datetime] = None) -> dict
             _record_startup_failure(scan_time, exc)
             raise
 
+    # R-331 (NF-9): everything past the client constructor used to be
+    # uncovered, so a raise from _fetch_all / parse / join / plausibility /
+    # write exited the oneshot with NO service_health row and yesterday's `ok`
+    # left standing — the R-276 class recurring in a file written the same
+    # week R-276 was fixed in fetch_vixcor. Mirror that fix: heartbeat the
+    # failure, then let it propagate so the run stays retryable.
+    try:
+        return _run_cycle(client, scan_time=scan_time, now=now)
+    except Exception as exc:  # noqa: BLE001 — re-raised after the heartbeat
+        _record_cycle_failure(scan_time, exc)
+        raise
+
+
+def _run_cycle(client: Any, *, scan_time: str, now: datetime) -> dict[str, Any]:
     cached = _read_json_cache()
     texts, stamps = _fetch_all(client, (cached or {}).get("source_last_modified") or {})
 
     if cached and all(text is None for text in texts.values()):
         print("[vixts] all sources unchanged (304); refreshing snapshot only", file=sys.stderr)
-        payload = {**cached, "scan_time": scan_time}
-        _write_db(payload, scan_time, rows_changed=False)
+        # A conditional GET reuses the previous numbers, so it must re-derive
+        # the previous VERDICT too. Writing a bare `ok` here let a stuck CDN
+        # edge answering 304 indefinitely hold the 26h window green with the
+        # ratio frozen at an old session: only `scan_time` may advance while
+        # the data stands still. Same contract as
+        # `fetch_vixcor.restate_cached_payload`. R-333.
+        payload, health_error = restate_cached_payload(cached, scan_time=scan_time, now=now)
+        _write_db(payload, scan_time, rows_changed=False, health_error=health_error)
         _write_json_cache(payload)
         return payload
 
@@ -254,6 +290,67 @@ def run(client: Optional[Any] = None, *, now: Optional[datetime] = None) -> dict
     _write_db(payload, scan_time, rows_changed=True)
     _write_json_cache(payload)
     return payload
+
+
+def restate_cached_payload(
+    cached: dict[str, Any], *, scan_time: str, now: datetime
+) -> tuple[dict[str, Any], Optional[dict[str, Any]]]:
+    """Re-age the freshness verdict of the payload a 304 reuses. R-333."""
+    from utils.market_calendar import last_completed_session_date
+
+    payload = {**cached, "scan_time": scan_time}
+    data_date = str(cached.get("data_date") or "")
+    expected_session = last_completed_session_date(now)
+    payload["expected_session"] = expected_session
+    if not data_date:
+        payload["status"] = "stale_source"
+        return payload, {
+            "message": "vixts cache carries no data_date; cannot age the 304 reuse",
+            "class": "stale_source",
+        }
+    lag_days = _calendar_days_between(data_date, expected_session)
+    payload["lag_days"] = lag_days
+    # One session of lag is the normal shape between the timer fire and Cboe
+    # publishing; beyond that the source is not moving.
+    if lag_days > _MAX_CACHE_LAG_DAYS:
+        payload["status"] = "stale_source"
+        return payload, {
+            "message": (
+                f"vixts cache is dated {data_date} against an expected "
+                f"{expected_session} ({lag_days} calendar days); the source is "
+                "answering 304 while standing still"
+            ),
+            "class": "stale_source",
+        }
+    payload["status"] = "ok"
+    return payload, None
+
+
+def _calendar_days_between(start: str, end: str) -> int:
+    from datetime import date as _date
+
+    try:
+        return (_date.fromisoformat(end) - _date.fromisoformat(start)).days
+    except ValueError:
+        return _MAX_CACHE_LAG_DAYS + 1
+
+
+def _record_cycle_failure(scan_time: str, exc: Exception) -> None:
+    """Heartbeat an error row for any failure inside the fetch/build cycle."""
+    if writer is None:
+        return
+    try:
+        writer.record_service_health(
+            SERVICE,
+            "error",
+            finished_at=scan_time,
+            error={
+                "message": f"vixts cycle failed: {exc}",
+                "class": "cycle_failed",
+            },
+        )
+    except Exception as inner:  # noqa: BLE001 — best-effort mirror
+        print(f"[vixts] cycle health write non-fatal: {inner}", file=sys.stderr)
 
 
 # ── CLI ───────────────────────────────────────────────────────────

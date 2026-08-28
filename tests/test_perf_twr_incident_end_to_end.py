@@ -46,7 +46,10 @@ def flex_outage_with_mirror(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(builder, "fetch_flex_xml", _boom)
     monkeypatch.setattr(builder, "load_nav_from_disk", lambda: dict(nav))
     monkeypatch.setattr(builder, "load_flows_from_turso", lambda: {"2026-08-13": -80_000.0})
-    monkeypatch.setattr(builder, "load_flows_coverage_through", lambda: "2026-08-14")
+    # R-321: the coverage read now reports whether the QUERY succeeded as well
+    # as what it covered, because None previously meant both "empty table" and
+    # "Turso unreachable" and the bound read either as full coverage.
+    monkeypatch.setattr(builder, "load_flows_coverage_state", lambda: ("2026-08-14", True))
     monkeypatch.setattr(builder, "load_benchmark_closes", lambda *a, **k: {})
     monkeypatch.setattr(builder, "get_risk_free_rate", lambda **k: (0.0, ""))
 
@@ -88,7 +91,7 @@ def test_serving_a_mirror_does_not_by_itself_gate_the_page(flex_outage_with_mirr
 
 def test_nav_past_mirror_coverage_is_not_chained(flex_outage_with_mirror, monkeypatch):
     """Coverage stops a session early: 08-14 must not be chained on no evidence."""
-    monkeypatch.setattr(builder, "load_flows_coverage_through", lambda: "2026-08-13")
+    monkeypatch.setattr(builder, "load_flows_coverage_state", lambda: ("2026-08-13", True))
 
     payload = builder.build_and_persist(persist=False)
 

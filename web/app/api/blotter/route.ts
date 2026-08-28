@@ -78,7 +78,18 @@ export async function GET(): Promise<Response> {
   try {
     const blotter = await buildFromJournal();
     if (blotter) return setNoStoreResponseHeaders(NextResponse.json(blotter), requestId);
-    return setNoStoreResponseHeaders(NextResponse.json(emptyBlotter()), requestId);
+    // A journal read that returned ZERO rows is not a flat book. A replica
+    // pointed at the wrong database, or a journal not yet rehydrated, was
+    // indistinguishable from a genuinely empty one: `realized_pnl: 0` served
+    // as authoritative with `as_of: ""`, which `useBlotter` maps to null so
+    // no timestamp contradicted it, and POST returns 404 so the operator
+    // could not force a rebuild. R-375.
+    const response = setNoStoreResponseHeaders(
+      NextResponse.json({ ...emptyBlotter(), missing: true as const }),
+      requestId,
+    );
+    response.headers.set("X-Radon-Stale", "1");
+    return response;
   } catch {
     return setNoStoreResponseHeaders(
       NextResponse.json({ error: "Blotter data unavailable" }, { status: 503 }),
