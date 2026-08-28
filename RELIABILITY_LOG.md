@@ -321,3 +321,36 @@ Backlog: `RELIABILITY_AUDIT.md` §Delta remediation backlog (2026-08-22, both pa
   daily oneshot with nothing. Both are in REL-103. Filed here as well because the class — "the
   health row is written at the end of the happy path" — is not specific to these two files and is
   worth re-sweeping as its own pass rather than one finding at a time.
+- **NF triage 2026-08-28 (delta audit):** NF-1 (Gate-3 bankroll-% cap) still open and unchanged;
+  this range's order-path defects are a NaN risk verdict (R-322) and guard-coverage gaps
+  (R-336…R-338, R-351), not sizing. NF-2 (unpaginated journal reads) unchanged — R-319's keyset
+  pager is carried by REL-108 and was not touched in this range. NF-3 (relay stale-feed does not
+  gate the order UI) still open; the adjacent surface got worse rather than better, in that
+  R-350 shows the flow-report hook renders a scan that never completed as a FRESH directional
+  verdict. NF-4 (aggregated Flex buckets vs 1:1 fingerprints) is now **materially worse and is
+  the week's theme**: the new file-ingest path ships a `flex_deliveries` fingerprint table that
+  nothing writes or reads (R-326), so the dedup contract its own migration comment asserts is
+  unimplemented, and the row-level keys carrying idempotency in its place are ordinal-derived
+  and unstable across a reissued statement (R-329). Carried by REL-115. NF-5 (UW budget
+  non-atomic archive + unbounded LOCK_EX) unchanged. NF-6 (retry classifiers) widened again:
+  R-334 adds the equity-chain connect retry, which catches bare `Exception` and so retries a
+  2FA-pending Gateway and client-id exhaustion identically to a handshake timeout, and R-353
+  adds the Flex guard rewritten into a generic transport error. NF-7 (partial close on expiry
+  day) unchanged. **NF-8 (standing-sweep scope) is re-opened for the second consecutive week as
+  R-325.** REL-088 closed it, R-277 re-opened it, REL-103(c) closed it again by widening
+  `_exec_targets` — and the blindness was never in `_exec_targets`. It is in `_names_in`, which
+  sees only literal and three-named-constant arguments, so running the module's own
+  `_health_names_written_by` over `cloud/services/*.timer` in the lead context shows **25 of 54**
+  timer-backed units still yield an empty name set with `EXEMPT = {}`. The parity assertion
+  iterates only the names it resolved, so an unparseable unit is skipped rather than flagged.
+  Carried by REL-114. The standing lesson stands: when a fix ships as "a test now enforces this",
+  audit the test's SCOPE, and enumerate the real population in the lead context rather than
+  trusting the test's own iteration.
+- **NF-9 (health rows that never appear) — confirmed as a recurring class, not two files.** Filed
+  last week against `ib_reconcile.main()` and `fetch_vixcor.run()`. This week `fetch_vixts.py`
+  (R-331) shipped with the identical defect — a `try`/`except` covering only the client
+  constructor, leaving the whole fetch/parse/join/validate/write block uncovered — in a file
+  written the same week `fetch_vixcor` was fixed for it, and its own `vixts_math.py:120` docstring
+  claims the error heartbeat it does not write. The pattern "heartbeat the constructor, leave the
+  body bare" is now three-for-three, so the remediation should sweep every registered producer for
+  it rather than fixing the named file. Carried by REL-117.
