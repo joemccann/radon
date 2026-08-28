@@ -9,6 +9,7 @@ control). pull is a short root action via sudoers; run is systemd-only.
 from __future__ import annotations
 
 import os
+import re
 import stat
 import subprocess
 from pathlib import Path
@@ -97,8 +98,10 @@ exit 0
     env_file.write_text("NODE_ENV=production\n", encoding="utf-8")
     data_dir = tmp_path / "data"
     media_dir = tmp_path / "media"
+    state_dir = tmp_path / "state"
     data_dir.mkdir()
     media_dir.mkdir()
+    state_dir.mkdir()
     notify = tmp_path / "notify.sock"
     notify.write_bytes(b"")
     env = {
@@ -109,6 +112,7 @@ exit 0
         "RADON_TEST_ENV_FILE": str(env_file),
         "RADON_TEST_DATA_DIR": str(data_dir),
         "RADON_TEST_MEDIA_DIR": str(media_dir),
+        "RADON_TEST_STATE_DIR": str(state_dir),
         "RADON_APP_IMAGE_TAG": "testsha",
         "NOTIFY_SOCKET": str(notify),
         "WATCHDOG_USEC": "45000000",
@@ -290,6 +294,22 @@ def test_run_api_binds_all_interfaces_with_proxy_headers(tmp_path: Path) -> None
     assert "8321" in log
     assert "--proxy-headers" in log
     assert "127.0.0.1" in log  # forwarded-allow-ips
+
+
+def test_run_binds_var_lib_radon_state(tmp_path: Path) -> None:
+    result = _run(tmp_path, ["run", "radon-api.service"])
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert re.search(r"-v \S+:/var/lib/radon(?:\s|$)", log), log
+    assert ":/var/lib/radon/media" in log
+
+
+@pytest.mark.parametrize("unit", ("radon-api.service", "radon-monitor.service"))
+def test_run_python_units_set_scripts_pythonpath(tmp_path: Path, unit: str) -> None:
+    result = _run(tmp_path, ["run", unit])
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert "PYTHONPATH=/home/radon/radon/scripts" in log
 
 
 @pytest.mark.parametrize("unit", FORBIDDEN_UNITS)
