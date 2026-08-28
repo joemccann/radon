@@ -4,12 +4,15 @@
 
 import React from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import WorkspaceSections from "../components/WorkspaceSections";
+import WorkspaceSections, { discoverOrderHref } from "../components/WorkspaceSections";
+import type { DiscoverCandidate } from "../lib/types";
 
 const replaceMock = vi.hoisted(() => vi.fn());
 const searchParamsMock = vi.hoisted(() => vi.fn(() => new URLSearchParams("")));
+const discoverCandidatesMock = vi.hoisted(() => ({ current: [] as DiscoverCandidate[] }));
+const viewportMock = vi.hoisted(() => ({ isMobile: false, hasMounted: true }));
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/scanner",
@@ -18,7 +21,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/lib/useViewport", () => ({
-  useViewport: () => ({ isMobile: false, hasMounted: true }),
+  useViewport: () => ({ isMobile: viewportMock.isMobile, hasMounted: viewportMock.hasMounted }),
 }));
 
 vi.mock("@/lib/useTickerNav", () => ({
@@ -58,29 +61,8 @@ vi.mock("@/lib/useDiscover", () => ({
     data: {
       discovery_time: "2026-06-24T15:05:00Z",
       alerts_analyzed: 7,
-      candidates_found: 1,
-      candidates: [
-        {
-          ticker: "MSFT",
-          score: 72.5,
-          score_breakdown: {},
-          alerts: 3,
-          total_premium: 1_250_000,
-          calls: 8,
-          puts: 1,
-          options_bias: "BULLISH",
-          sweeps: 2,
-          avg_vol_oi: 4.2,
-          sector: "Technology",
-          issue_type: "Common Stock",
-          dp_direction: "ACCUMULATION",
-          dp_strength: 64.1,
-          dp_buy_ratio: 0.68,
-          dp_sustained_days: 2,
-          dp_total_prints: 19,
-          confluence: true,
-        },
-      ],
+      candidates_found: discoverCandidatesMock.current.length,
+      candidates: discoverCandidatesMock.current,
     },
     loading: false,
     syncing: false,
@@ -89,6 +71,30 @@ vi.mock("@/lib/useDiscover", () => ({
     syncNow: vi.fn(),
   }),
 }));
+
+function discoverCandidate(overrides: Partial<DiscoverCandidate> = {}): DiscoverCandidate {
+  return {
+    ticker: "MSFT",
+    score: 72.5,
+    score_breakdown: {},
+    alerts: 3,
+    total_premium: 1_250_000,
+    calls: 8,
+    puts: 1,
+    options_bias: "BULLISH",
+    sweeps: 2,
+    avg_vol_oi: 4.2,
+    sector: "Technology",
+    issue_type: "Common Stock",
+    dp_direction: "ACCUMULATION",
+    dp_strength: 64.1,
+    dp_buy_ratio: 0.68,
+    dp_sustained_days: 2,
+    dp_total_prints: 19,
+    confluence: true,
+    ...overrides,
+  };
+}
 
 vi.mock("@/lib/useThetaHarvester", () => ({
   useThetaHarvester: () => ({
@@ -109,6 +115,12 @@ vi.mock("@/lib/useStrengthConfirmation", () => ({
     syncNow: vi.fn(),
   }),
 }));
+
+beforeEach(() => {
+  discoverCandidatesMock.current = [discoverCandidate()];
+  viewportMock.isMobile = false;
+  viewportMock.hasMounted = true;
+});
 
 afterEach(() => {
   cleanup();
@@ -151,5 +163,52 @@ describe("Scanner flow header tooltips", () => {
     expect(screen.getByText("MSFT")).toBeTruthy();
     expect(screen.getByText("ACCUMULATION")).toBeTruthy();
     expect(screen.getByText("BULLISH")).toBeTruthy();
+  });
+});
+
+describe("Discover order links", () => {
+  function renderDiscover() {
+    searchParamsMock.mockReturnValue(new URLSearchParams("mode=discover"));
+    return render(<WorkspaceSections section="scanner" />);
+  }
+
+  function orderLinks(container: HTMLElement): HTMLAnchorElement[] {
+    return Array.from(container.querySelectorAll<HTMLAnchorElement>('a[data-testid^="discover-order-link-"]'));
+  }
+
+  it("builds a chain deck href from the ticker alone", () => {
+    expect(discoverOrderHref(discoverCandidate({ ticker: "googl" }))).toBe("/GOOGL?deck=c&src=discover");
+  });
+
+  it("returns null when the row cannot address a ticker", () => {
+    expect(discoverOrderHref(discoverCandidate({ ticker: "   " }))).toBeNull();
+    expect(discoverOrderHref(discoverCandidate({ ticker: "" }))).toBeNull();
+  });
+
+  it("links the desktop discover ticker cell into the chain order builder", () => {
+    const { container } = renderDiscover();
+
+    expect(screen.getByTestId("discover-order-link-MSFT").getAttribute("href")).toBe("/MSFT?deck=c&src=discover");
+    expect(orderLinks(container)).toHaveLength(1);
+  });
+
+  it("omits the order link for a row whose ticker is blank", () => {
+    discoverCandidatesMock.current = [discoverCandidate({ ticker: "   " }), discoverCandidate({ ticker: "XLE" })];
+
+    const { container } = renderDiscover();
+
+    const links = orderLinks(container);
+    expect(links).toHaveLength(1);
+    expect(links[0].getAttribute("href")).toBe("/XLE?deck=c&src=discover");
+  });
+
+  it("links mobile discover cards to the same chain order builder href", () => {
+    viewportMock.isMobile = true;
+
+    const { container } = renderDiscover();
+
+    expect(screen.getByTestId("mobile-discover-list")).toBeTruthy();
+    expect(screen.getByTestId("discover-order-link-MSFT").getAttribute("href")).toBe("/MSFT?deck=c&src=discover");
+    expect(orderLinks(container)).toHaveLength(1);
   });
 });
