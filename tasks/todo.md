@@ -1,3 +1,33 @@
+# Task: Flex sFTP remaining (steps 6-9)
+
+Canonical operator board: `docs/show-me-flex-sftp-ops.html`
+Plan: `docs/flex-sftp-cutover.md`
+
+P1/P2 (steps 1-5 code) are on `main` (`26668ef8`). Timer not enabled. No SendRequest.
+
+## Dependency graph
+
+- S6 depends_on: [] - Written Flex grant from filedelivery@. Then VPS: pin host key, IPv4-only ssh_config, first list-dir. Do not ingest. Do not `accept-new`.
+- S7 depends_on: [S6] - Portal: method sFTP only if step 2 inventory did not stop. Tick only 1442520 and 1422766. Period Last Business Day. XML. No `IB_FLEX_FLOWS_QUERY_ID`.
+- S8 depends_on: [S6] - Code: OpenSSH IPv4 puller, PGP in-memory, classify, `flex-inbox`, stub-SSH tests. Enable `radon-flex-pull.timer` Tue-Sat 07:30 ET only after a file is on the remote. Empty dir: 08:30 list-dir retry. No SendRequest.
+- S9 depends_on: [S7, S8] - Dual-run sFTP vs Portal Run `--from-file`. First SendRequest recon Sun after embargo (`raise_if_blocked()` first). Weekday SendRequest = 0.
+
+## Checklist
+
+- [ ] S6 Pin host key + first list-dir (blocked on written Flex grant)
+- [ ] S7 Portal ticks (stop: human mailbox still Email)
+- [ ] S8 Puller + timer (timer disabled until S6 file exists)
+- [ ] S9 Dual-run then demote
+
+## Stops
+
+- Grant is reporting-integration / master-sub → refuse. Email ingest.
+- Human mailbox still needs a statement → do not flip method to sFTP.
+- Host-key change, PGP fail, IPv6, 365-day nightly file, ambiguous XML → fail closed.
+- `/orders` still POSTs rehydrate → do not enable the timer.
+
+---
+
 # Task: Open-order after-RTH session window (2026-08-27)
 
 ## Dependency graph

@@ -1,6 +1,8 @@
 # Flex sFTP cutover
 
-Status: FINAL after adversarial review 2026-08-24 (`docs/flex-sftp-cutover-review.md`)
+Status: FINAL after adversarial review 2026-08-24 (`docs/flex-sftp-cutover-review.md`).
+Remaining ops: steps 6-9 on `feat/flex-sftp-steps-6-9` (`docs/show-me-flex-sftp-ops.html`, `tasks/todo.md`).
+P1/P2 file ingest is on `main`.
 Date: 2026-08-24
 Does **not** supersede `docs/flex-delivery-architecture.md` until IBKR grants **Client Portal Flex Query** sFTP in writing. Until then email ingest is the default transport; sFTP is the preferred transport **if granted**.
 
