@@ -1441,7 +1441,14 @@ export default function OptionsChainTab({
   }
 
   return (
-    <div className="chain-tab" style={{ padding: "8px 0" }}>
+    <div className="chain-tab">
+      {/* Chain column + docked ticket rail. The rail owns the whole deck
+          height: the toolbar, chain and hint ride in the left column so the
+          ticket starts level with them instead of below a full-width bar. */}
+      <div className="chain-rail" data-docked={orderLegs.length > 0 ? "true" : "false"}>
+      {/* One grid child per column: toolbar, chain and hint travel together,
+          otherwise the hint becomes a third child and wraps the dock below. */}
+      <div className="chain-rail-main">
       {/* Expiry selector */}
       <div className="chain-expiry-bar">
         <label
@@ -1505,13 +1512,6 @@ export default function OptionsChainTab({
         </div>
       </div>
 
-      {/* Chain grid + docked ticket rail. The ticket sits BESIDE the chain
-          rather than under it, so legs, price, risk and CTA stay readable
-          without scrolling and the chain keeps its full height. */}
-      <div className="chain-rail" data-docked={orderLegs.length > 0 ? "true" : "false"}>
-      {/* One grid child per column: the chain and its hint row travel together,
-          otherwise the hint becomes a third child and wraps the dock below. */}
-      <div className="chain-rail-main">
       {loadingStrikes ? (
         <div style={{ padding: "24px 0", textAlign: "center" }}>
           <SpectralLoader label="Loading chain" />
