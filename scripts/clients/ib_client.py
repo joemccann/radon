@@ -1162,10 +1162,15 @@ class IBClient:
         Raises:
             IBError: If the Flex query fails.
         """
-        try:
-            from utils.flex_send import assert_sendrequest_permitted
+        # ABOVE the try, deliberately. The guard and the 1025 embargo check it
+        # invokes are POLICY, not transport: wrapping them made a by-design
+        # block and a real token lockout indistinguishable from a Flex outage,
+        # and `portfolio_performance` then degraded to the stale blotter cache
+        # warning "Live IB Flex Query unavailable" for both. R-353.
+        from utils.flex_send import assert_sendrequest_permitted
 
-            assert_sendrequest_permitted(allowed=False)
+        assert_sendrequest_permitted(allowed=False)
+        try:
             report = FlexReport(token=token, queryId=query_id)
             self.logger.info("Flex query %d executed successfully", query_id)
             return report

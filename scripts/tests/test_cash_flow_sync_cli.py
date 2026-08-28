@@ -122,12 +122,18 @@ class TestFromFile:
         monkeypatch.setenv("IB_FLEX_TOKEN", "test-token")
         monkeypatch.setenv("IB_FLEX_NAV_QUERY_ID", "1442520")
         code, stdout, _ = _run("--no-file")
-        assert code in (
-            cash_flow_sync.EXIT_OK,
-            cash_flow_sync.EXIT_FLEX_PREFLIGHT_EMBARGO,
-        )
-        if code == cash_flow_sync.EXIT_OK:
-            assert _status_line(stdout)["class"] == "file_ingest_only"
+        # R-328/R-360: this branch used to report `ok` / EXIT_OK, which held
+        # the 25h cash-flow-sync freshness window green on a nightly no-op,
+        # and it could also come back EXIT_FLEX_PREFLIGHT_EMBARGO purely from
+        # sidecar state for a run that opens no socket. Both are gone: no
+        # source means a distinct EXIT_FLEX_SEND_DISABLED and a non-`ok`
+        # status. The ORIGINAL intent — no socket is opened, `no_network`
+        # would explode if one were — is unchanged and still enforced by the
+        # fixture.
+        assert code == cash_flow_sync.EXIT_FLEX_SEND_DISABLED
+        status = _status_line(stdout)
+        assert status["class"] == "file_ingest_only"
+        assert status["status"] != "ok"
 
 
     def test_writes_every_parsed_row(self, no_network, no_credentials, writer):
@@ -184,14 +190,20 @@ class TestDryRun:
         assert status["rows"] == 16
 
     def test_reports_which_rows_are_new(self, no_network, no_credentials, monkeypatch):
-        """Only 41191444701 (first of the reused-id interest trio) is stored,
-        so 16 unique ids - 1 known = 15 new."""
+        """Only one member of the reused-id interest trio is stored, so
+        16 unique ids - 1 known = 15 new.
+
+        R-329: the trio's ids are content-hashed now, so the stored id is the
+        hash rather than the bare `41191444701`. Same arithmetic, same intent.
+        """
         import db.writer as writer_mod
 
         exploding = MagicMock(side_effect=AssertionError("dry-run must not write"))
         monkeypatch.setattr(writer_mod, "upsert_cash_flow_rows", exploding, raising=False)
         monkeypatch.setattr(
-            cash_flow_sync, "_load_existing_cash_flow_ids", lambda: {"41191444701"}
+            cash_flow_sync,
+            "_load_existing_cash_flow_ids",
+            lambda: {"41191444701#9fd9517999ea"},
         )
 
         _, stdout, _ = _run("--from-file", str(LEGACY_FIXTURE), "--dry-run")

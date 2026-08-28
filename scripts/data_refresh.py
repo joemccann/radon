@@ -100,11 +100,25 @@ def _run_scan(script: str, args: list[str], out_path: Path, timeout: int = 120) 
     return True
 
 
+SERVICE_NAME = "data-refresh"
+
+
 def main() -> int:
     if not _is_trading_day():
         _log("Market holiday or weekend — skipping data refresh")
         return 0
 
+    # R-325: this unit fires every 15 min through RTH and wrote NO
+    # service_health row, so it sat in neither watchdog catalog and a refresh
+    # loop that stopped firing was invisible to check.py. The individual scans
+    # heartbeat their own names, but nothing observed the DRIVER.
+    from db.service_cycle import service_cycle  # noqa: PLC0415 — optional dep
+
+    with service_cycle(SERVICE_NAME, market_hours_class="intraday"):
+        return _refresh()
+
+
+def _refresh() -> int:
     cri_ok = _run_scan("cri_scan.py", ["--json"], _DATA_DIR / "cri.json", timeout=120)
     vcg_ok = _run_scan("vcg_scan.py", ["--json"], _DATA_DIR / "vcg.json", timeout=120)
     # GEX had NO autonomous scheduler (unlike vcg's radon-vcg-refresh.timer), so

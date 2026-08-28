@@ -12,15 +12,32 @@ A contract only yields figures when its journal history is COMPLETE: a
 close that meets an empty or smaller open position means fills are missing,
 and every figure for that contract is dropped rather than trusted (same
 principle as the ``ib_sync`` journal-basis guard).
+
+Completeness is enforced on TWO axes, and one of them is bounded. A row
+that cannot name its contract, or that names an impossible one (a
+non-positive strike, a right outside ``C``/``P``, an expiry that is not a
+real calendar date), poisons its whole ticker so the contract falls back to
+IB's figure — R-274, extended by R-320. What this module CANNOT detect is a
+contract field corrupted into a different but still-listable contract (a
+strike of 600 where the fill was 60, an expiry shifted to another real
+Wednesday): that row mints a well-formed key, forms its own bucket, and is
+indistinguishable from a legitimate second position held on the same
+ticker. Closing that residue needs an authoritative contract set — IB
+positions or contract details — which this entry point does not receive.
+Callers holding one should cross-check before trusting a figure here.
 """
 
 from __future__ import annotations
 
 import logging
+from datetime import date
 from typing import Any, Iterable, Optional, Sequence
 
 from .journal_basis import (
     _bucket_key,
+    _normalize_expiry,
+    _normalize_right,
+    _normalize_strike,
     _fetch_journal_rows_for_tickers,
     _claim_exec_parts,
     _exec_id_parts,
@@ -60,8 +77,11 @@ def realized_pnl_by_exec_id(rows: Iterable[Any]) -> dict[str, float]:
     """Map each single-execution closing journal row to its realized P&L.
 
     ``rows`` are ``(payload, filled_at, written_at)`` journal rows for any
-    number of tickers. Only option rows with a full contract key take part;
-    BAG envelopes (``right == "?"``) and stock rows are ignored.
+    number of tickers. Only option rows whose contract key both normalises
+    and describes a contract that could exist take part; BAG envelopes
+    (``right == "?"``) and stock rows are ignored, and anything else that
+    fails either test poisons its ticker rather than being dropped. See the
+    module header for the residual case this cannot see (R-320).
     """
     buckets: dict[str, list[dict[str, Any]]] = {}
     unusable: set[str] = set()
@@ -206,7 +226,7 @@ def _ordered(rows: Iterable[Any]) -> list[Any]:
 def _journal_entry(row: Any) -> Optional[dict[str, Any]]:
     payload = _payload_from_row(row)
     key = _bucket_key(payload)
-    if key is None:
+    if key is None or not _is_plausible_contract(payload):
         return None
     try:
         qty = abs(float(payload.get("contracts")))
@@ -260,10 +280,40 @@ def _is_option_shaped(payload: dict[str, Any]) -> bool:
         return False
     if str(payload.get("right") or "").strip() == _BAG_RIGHT:
         return False
-    return any(
-        str(payload.get(field) or "").strip() not in {"", "None"}
-        for field in _OPTION_SHAPE_FIELDS
-    )
+    # PRESENCE, not truthiness: a numeric 0 strike and an empty-string right
+    # are both malformed VALUES of a field the row chose to name, which is
+    # precisely the corruption case. Reading them as "field absent" routed
+    # them to the stock exclusion. R-320.
+    return any(field in payload for field in _OPTION_SHAPE_FIELDS)
+
+
+def _is_plausible_contract(payload: dict[str, Any]) -> bool:
+    """Whether a key that NORMALISES also describes a contract that can exist.
+
+    ``_bucket_key`` only asks whether each field parses. A strike of ``0``
+    parses to ``"0.0"`` and an expiry of ``20261340`` is eight digits, so
+    both mint a well-formed key for a contract that cannot be listed — the
+    row then forms its own phantom bucket, taking its quantity AND its cost
+    out of the real one, and the replay prices the close against a basis
+    that is short by exactly the missing open. R-320.
+
+    ``right`` needs no check here: ``_normalize_right`` already collapses
+    anything outside ``C``/``P`` to ``""``, which fails ``_bucket_key``.
+    """
+    strike = _normalize_strike(payload.get("strike"))
+    try:
+        if strike is None or float(strike) <= 0:
+            return False
+    except (TypeError, ValueError):
+        return False
+    if _normalize_right(payload.get("right")) not in {"C", "P"}:
+        return False
+    expiry = _normalize_expiry(payload.get("expiry"))
+    try:
+        date(int(expiry[0:4]), int(expiry[4:6]), int(expiry[6:8]))
+    except ValueError:
+        return False
+    return True
 
 
 def _unusable_fill_key(row: Any) -> Optional[str]:
@@ -287,7 +337,7 @@ def _unusable_fill_key(row: Any) -> Optional[str]:
     if str(payload.get("action") or "").strip().upper() == "CLOSED":
         return None
     key = _bucket_key(payload)
-    if key is not None:
+    if key is not None and _is_plausible_contract(payload):
         return key
     if not _is_option_shaped(payload):
         return None

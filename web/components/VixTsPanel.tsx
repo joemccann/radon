@@ -10,6 +10,7 @@ import MetricCell from "./mobile/MetricCell";
 import SectionEmptyState from "./SectionEmptyState";
 import SpectralLoader from "./SpectralLoader";
 import { RegimeStrip, RegimeStripCell } from "./RegimeStrip";
+import { getFreshnessWindowMs, getMarketStateFromDate } from "@/lib/serviceHealthWindows";
 import { chartSeriesColor } from "@/lib/chartSystem";
 import { presetRange, type RangePresetSlug } from "@/lib/historyRange";
 import {
@@ -71,11 +72,34 @@ function formatDayTick(d: Date): string {
   });
 }
 
-function formatClockTime(raw: string | null | undefined): string | null {
-  if (!raw) return null;
+/** Writer freshness as an AGE, plus a verdict against the shared catalog.
+ *
+ * A bare hour:minute was the panel's only writer-freshness signal, so a
+ * snapshot written eight days ago rendered as "2:47 AM" — visually identical
+ * to a run that finished this morning. The threshold comes from the same
+ * `serviceHealthWindows` entry the watchdog reads, never from a literal, so
+ * the panel cannot drift from the catalog. R-365.
+ */
+function writerAge(
+  raw: string | null | undefined,
+  now: number = Date.now(),
+): { label: string; state: "current" | "behind" | "unknown" } {
+  if (!raw) return { label: "---", state: "unknown" };
   const d = new Date(raw);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  if (Number.isNaN(d.getTime())) return { label: "---", state: "unknown" };
+
+  const ageMs = Math.max(0, now - d.getTime());
+  const windowMs = getFreshnessWindowMs("vixts", getMarketStateFromDate(new Date(now)));
+  const minutes = Math.floor(ageMs / 60_000);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+  const magnitude =
+    days >= 1 ? `${days}d` : hours >= 1 ? `${hours}h` : `${minutes}m`;
+
+  return {
+    label: `${magnitude} ago`,
+    state: ageMs > windowMs ? "behind" : "current",
+  };
 }
 
 export default function VixTsPanel() {
@@ -119,7 +143,7 @@ export default function VixTsPanel() {
   const current = data.current;
   const regime = current.regime ?? vixTsRegimeLabel(current.ratio);
   const regimeColor = vixTsRegimeColor(regime);
-  const clock = formatClockTime(data.scan_time);
+  const writer = writerAge(data.scan_time);
   const sourceSession = data.data_date ?? current.date ?? "---";
 
   const rows: VixTsChartRow[] = series.map((p) => ({
@@ -159,11 +183,18 @@ export default function VixTsPanel() {
             VIX Term Structure
             <InfoTooltip text={INFO_TOOLTIP} />
           </div>
-          {clock && (
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: "9px", color: "var(--text-muted)" }}>
-              {clock}
-            </span>
-          )}
+          <span
+            data-testid="vixts-writer-age"
+            data-state={writer.state}
+            title={data.scan_time ? `Writer last wrote ${data.scan_time}` : "No writer timestamp"}
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: "9px",
+              color: writer.state === "behind" ? "var(--warning)" : "var(--text-muted)",
+            }}
+          >
+            {writer.label}
+          </span>
         </div>
 
         {compact ? (

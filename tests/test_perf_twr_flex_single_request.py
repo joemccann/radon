@@ -150,8 +150,19 @@ class TestMirroredFlowsAreBoundedByVerifiedCoverage:
 
         assert [o.date for o in bounded] == ["2026-08-13", "2026-08-14"]
 
-    def test_no_coverage_marker_leaves_observations_untouched(self):
-        """A live Flex fetch has no mirror bound to apply."""
+    def test_no_coverage_marker_means_no_verified_coverage(self):
+        """R-321: this case asserted the fail-open, and was rewritten.
+
+        Its stated intent — "a live Flex fetch has no mirror bound to apply" —
+        is right, but this was the wrong mechanism for it. A live fetch never
+        reaches the bound at all: `_apply_mirrored_flow_coverage` returns early
+        on `flows.source != "turso"`, which is what
+        `scripts/tests/test_twr_coverage_bound.py::test_live_flex_flows_are_
+        still_unbounded` now pins. Reaching the bound with NO coverage marker
+        means the coverage query errored or `twr_subperiods` is empty — zero
+        verified sessions, not all of them — and returning the full series
+        there is the invented zero this class exists to prevent.
+        """
         observations = [builder.NavObservation("2026-08-14", 120.0)]
 
-        assert builder.bound_observations_to_coverage(observations, None) == observations
+        assert list(builder.bound_observations_to_coverage(observations, None)) == []

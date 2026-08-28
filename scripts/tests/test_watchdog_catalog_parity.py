@@ -64,18 +64,38 @@ _STATE_LITERALS = frozenset({"ok", "error", "warn", "degraded", "paused", "synci
 
 # Most jobs pass a module-level constant rather than a literal
 # (`record_service_health(SERVICE, ...)`), which a literal-only scan cannot
-# see. Resolve the constant from its own assignment in the same file.
+# see.
+#
+# R-325: matching only the three names `SERVICE`/`SERVICE_NAME`/
+# `HEALTH_SERVICE` left `perf_twr_builder.py`'s `_PERF_TWR_SERVICE` — and every
+# other privately-named constant — unresolvable, and the unit therefore looked
+# like it wrote nothing. Resolve ANY module-level `NAME = "literal"` binding
+# instead; the call-site match still decides which of them is a service name,
+# so widening the assignment pattern cannot invent one.
 _SERVICE_CONST = re.compile(
-    r'^(SERVICE|SERVICE_NAME|HEALTH_SERVICE)\s*=\s*"([a-z0-9-]+)"', re.MULTILINE
+    r'^(?:const |let |var )?(_?[A-Z][A-Z0-9_]*)\s*=\s*"([a-z0-9-]+)"', re.MULTILINE
+)
+
+# R-325: `service_cycle(SERVICE, market_hours_class=...)` is the fleet's third
+# health writer — it opens and closes a `service_health` row around the job —
+# and the scan did not know the call existed, so every job that heartbeats
+# through it (bpi_scan, and the wrappers that import it) resolved to an empty
+# name set and read as "writes no row".
+_HEALTH_CALLS = (
+    "mirror_scan_snapshot",
+    "record_service_health",
+    "service_cycle",
+    # The node writers spell it camelCase (`scripts/db/writer.js`).
+    "recordServiceHealth",
 )
 
 
 def _names_in(text: str) -> set[str]:
     consts = {name: value for name, value in _SERVICE_CONST.findall(text)}
-    found = set(re.findall(r'mirror_scan_snapshot\(\s*"([a-z0-9-]+)"', text))
-    found |= set(re.findall(r'record_service_health\(\s*"([a-z0-9-]+)"', text))
-    for call in ("mirror_scan_snapshot", "record_service_health"):
-        for ident in re.findall(rf"{call}\(\s*([A-Z_]+)\b", text):
+    found: set[str] = set()
+    for call in _HEALTH_CALLS:
+        found |= set(re.findall(rf'{call}\(\s*"([a-z0-9-]+)"', text))
+        for ident in re.findall(rf"{call}\(\s*(_?[A-Z][A-Z0-9_]*)\b", text):
             if ident in consts:
                 found.add(consts[ident])
     return found - _STATE_LITERALS
@@ -304,82 +324,116 @@ class TestDur02BrakeAndFlapReach:
 # real gap or a real exemption; a NEW unit in neither fails the test, so the
 # class cannot grow silently while it is worked down.
 
-# Units whose job DOES write a service_health row, under a name this static
-# parser cannot resolve (built at runtime, passed in by a caller, or written
-# through the cloud tree's own bounded stdlib libSQL pipeline rather than
-# record_service_health). Not a reliability gap — a parser limitation, tracked
-# so it is not mistaken for one.
-HEALTH_NAME_UNRESOLVED = {
-    # cloud/scripts/disk_cleanup.py heartbeats `disk-cleanup` on every run via
-    # its own write_service_health (same bounded stdlib shape as db_backup.py /
-    # drift_audit.py, which never touch the libsql bindings). The name is
-    # registered in BOTH catalogs; only this literal scan cannot see it.
-    "radon-disk-cleanup",
-    "radon-ib-watchdog",
-    "radon-nextjs-db-watchdog",
-    "radon-perf-twr",
-    "radon-watchdog-continuous",
-    "radon-watchdog-daily",
-    "radon-watchdog-error",
-    "radon-watchdog-intraday",
-}
-
-# Units that write NO service_health row at all. Each is a real observability
-# gap: the unit can fail on every fire and nothing in either catalog notices.
-# Listed rather than fixed here because each needs its own writer and its own
-# freshness window; carried as the standing remainder of R-277.
-NO_HEALTH_WRITER = {
-    "radon-bpi",
-    "radon-cta-sync",
-    "radon-db-backup",
-    "radon-db-retention",
-    "radon-demo-mirror",
-    "radon-drift-audit",
-    "radon-forecast-nightly",
-    "radon-grok-page-responder",
-    "radon-host-metrics",
-    "radon-incident-watchdog",
-    "radon-knowledge",
-    "radon-llm-index",
-    "radon-media-backup",
-    "radon-portfolio-archive",
-    "radon-portfolio-sync",
-    "radon-refresh",
-    "radon-signals-refresh",
+# R-325: these were two bare `set`s, so an entry recorded WHICH bucket a unit
+# was in but never WHY, and the two buckets were the only distinction. A unit
+# added to either was indistinguishable from a decision, which is exactly the
+# shape NF-8 keeps re-opening in. Every entry now carries its own reason, and
+# `test_every_exempt_unit_states_a_reason` fails on an empty one.
+#
+# Two kinds of entry, both named in the reason text:
+#   "parser:" — the job DOES heartbeat, under a name this static scan cannot
+#               resolve (built at runtime, or written through the cloud tree's
+#               own bounded stdlib libSQL pipeline rather than
+#               record_service_health). Not a reliability gap.
+#   "gap:"    — the job writes NO service_health row at all. A real
+#               observability gap: the unit can fail on every fire and nothing
+#               in either catalog notices. Each needs its own writer AND its
+#               own freshness window, so each is its own task; carried as the
+#               standing remainder of R-277.
+EXEMPT_UNITS: dict[str, str] = {
+    "radon-disk-cleanup": (
+        "parser: cloud/scripts/disk_cleanup.py heartbeats `disk-cleanup` on "
+        "every run via its own write_service_health (same bounded stdlib shape "
+        "as db_backup.py / drift_audit.py, which never touch the libsql "
+        "bindings). Registered in BOTH catalogs; only this literal scan cannot "
+        "see it."
+    ),
+    "radon-ib-watchdog": (
+        "parser: heartbeats through the watchdog package's own writer under a "
+        "name assembled at runtime."
+    ),
+    "radon-watchdog-continuous": (
+        "parser: `python -m scripts.watchdog` writes its rows through the "
+        "watchdog package, keyed on the bucket passed on the command line."
+    ),
+    "radon-watchdog-daily": "parser: same as radon-watchdog-continuous.",
+    "radon-watchdog-error": "parser: same as radon-watchdog-continuous.",
+    "radon-watchdog-intraday": "parser: same as radon-watchdog-continuous.",
+    "radon-db-backup": (
+        "gap: writes no service_health row; failure is visible only as a "
+        "systemd unit failure."
+    ),
+    "radon-db-retention": "gap: writes no service_health row.",
+    "radon-drift-audit": "gap: writes no service_health row.",
+    "radon-forecast-nightly": "gap: writes no service_health row.",
+    "radon-grok-page-responder": "gap: writes no service_health row.",
+    "radon-host-metrics": "gap: writes no service_health row.",
+    "radon-media-backup": "gap: writes no service_health row.",
+    "radon-portfolio-archive": "gap: writes no service_health row.",
+    "radon-portfolio-sync": "gap: writes no service_health row.",
+    "radon-signals-refresh": "gap: writes no service_health row.",
 }
 
 
 class TestEveryTimerBackedUnitIsAccountedFor:
-    def test_no_unit_is_silently_outside_the_invariant(self):
+    def test_every_timer_backed_unit_writes_a_health_row_or_is_exempt(self):
+        """R-325: the assertion the suite was missing.
+
+        `test_every_timer_backed_writer_is_in_both_catalogs` iterates only the
+        names it RESOLVED, so a unit the parser could not read was skipped
+        rather than flagged — which reads identically to being fine. This is
+        the complementary check: no timer-backed unit may be silently outside
+        the invariant.
+        """
         unaccounted = sorted(
             unit
             for unit in _timer_backed_services()
-            if not _health_names_written_by(unit)
-            and unit not in HEALTH_NAME_UNRESOLVED
-            and unit not in NO_HEALTH_WRITER
+            if not _health_names_written_by(unit) and unit not in EXEMPT_UNITS
         )
         assert not unaccounted, (
             "these timer-backed units contribute no catalogued health name and "
-            "are in neither exempt list, so nothing notices when they fail on "
-            f"every fire: {unaccounted}"
+            "carry no EXEMPT_UNITS reason, so nothing notices when they fail "
+            f"on every fire: {unaccounted}"
         )
 
     def test_the_exempt_lists_name_only_real_units(self):
         """A stale entry would silently re-open the hole it was covering."""
-        units = _timer_backed_services()
-        stale = sorted((HEALTH_NAME_UNRESOLVED | NO_HEALTH_WRITER) - set(units))
+        stale = sorted(set(EXEMPT_UNITS) - _timer_backed_services())
         assert not stale, f"exempt entries for units that no longer exist: {stale}"
 
     def test_every_exempt_unit_still_lacks_a_resolvable_name(self):
         """When a unit starts contributing a name, drop it from the list."""
         fixed = sorted(
-            unit
-            for unit in (HEALTH_NAME_UNRESOLVED | NO_HEALTH_WRITER)
-            if _health_names_written_by(unit)
+            unit for unit in EXEMPT_UNITS if _health_names_written_by(unit)
         )
         assert not fixed, (
             f"these units now contribute a health name; remove them: {fixed}"
         )
+
+    def test_every_exempt_unit_states_a_reason(self):
+        """An exemption without a reason is an oversight wearing a decision."""
+        unreasoned = sorted(
+            unit
+            for unit, reason in EXEMPT_UNITS.items()
+            if not reason.strip()
+            or not reason.strip().startswith(("parser:", "gap:"))
+        )
+        assert not unreasoned, (
+            "every EXEMPT_UNITS entry must state whether the unit heartbeats "
+            "under a name this parser cannot resolve (`parser:`) or writes no "
+            f"row at all (`gap:`): {unreasoned}"
+        )
+
+    def test_the_service_cycle_and_private_constant_writers_are_resolved(self):
+        """Pins the two forms R-325 named, so the widening cannot regress.
+
+        `bpi_scan.py` heartbeats through `service_cycle(SERVICE_NAME, ...)` —
+        a call the scan did not know existed — and `perf_twr_builder.py` binds
+        its name to `_PERF_TWR_SERVICE`, which the old three-name constant
+        pattern did not match. Both units read as "writes no row".
+        """
+        assert "bpi-scan" in _health_names_written_by("radon-bpi")
+        assert "perf-twr" in _health_names_written_by("radon-perf-twr")
 
     def test_every_exec_start_resolves_to_a_real_file(self):
         """An unresolvable ExecStart makes the parity check assert nothing.

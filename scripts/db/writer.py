@@ -649,6 +649,44 @@ def _journal_payload_with_compact_expiry(payload: dict[str, Any]) -> dict[str, A
     return {**payload, "expiry": compact}
 
 
+def claim_flex_delivery(
+    content_sha256: str,
+    *,
+    classified_as: str,
+    period_from: Optional[str] = None,
+    period_to: Optional[str] = None,
+    source_path: Optional[str] = None,
+) -> bool:
+    """Claim one Flex file for ingest. True when THIS call won the claim.
+
+    `flex_deliveries` was inert: the digest was computed and echoed into a
+    result dict, the table appeared nowhere outside its own migration, and the
+    migration comment "content_sha256 is the PK so the same file is never
+    applied twice" was simply false. Ingest idempotency rested entirely on the
+    row-level upsert keys, which R-329 showed were ordinal-derived and unstable
+    across a reissued statement. R-326.
+
+    `ON CONFLICT DO NOTHING` makes the claim atomic: a second ingest of the
+    same bytes affects zero rows and the caller skips every writer.
+    """
+    db = get_db()
+    result = db.execute(
+        "INSERT INTO flex_deliveries "
+        "(content_sha256, classified_as, period_from, period_to, ingested_at, source_path) "
+        "VALUES (?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(content_sha256) DO NOTHING",
+        (
+            content_sha256,
+            classified_as,
+            period_from,
+            period_to,
+            _now_iso(),
+            source_path,
+        ),
+    )
+    return int(getattr(result, "rows_affected", 0) or 0) > 0
+
+
 def upsert_journal_entry(trade_id: str, payload: dict[str, Any], filled_at: Optional[str] = None) -> None:
     """Upsert one journal row over bounded Hrana HTTP (real socket timeout).
 
@@ -1127,10 +1165,20 @@ def upsert_vixts_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = N
     """
     if not rows:
         return
+    # SQLite refuses to UPSERT one conflict target twice inside a single
+    # INSERT, so a duplicate date — a doubled row from the SPX left join, or a
+    # Cboe double-publish — raised "ON CONFLICT DO UPDATE command does not
+    # affect row a second time" and killed the run mid-history with earlier
+    # chunks already committed. Last wins, exactly as `upsert_cash_flow_rows`
+    # dedups for the same reason. R-362.
+    deduped: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        deduped[str(row.get("date"))] = row
+    ordered = list(deduped.values())
     stamp = recorded_at or _now_iso()
     db = get_db()
-    for start in range(0, len(rows), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
-        chunk = rows[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+    for start in range(0, len(ordered), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = ordered[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
         placeholders = ", ".join(_VIXTS_ROW_PLACEHOLDER for _ in chunk)
         params: list[Any] = []
         for row in chunk:

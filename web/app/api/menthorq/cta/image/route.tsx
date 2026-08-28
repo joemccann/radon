@@ -309,9 +309,15 @@ export async function GET(request: Request) {
   // thousands of pixels tall on a Node-runtime satori render. R-310.
   let budget = MAX_IMAGE_ROWS;
   for (const key of Object.keys(data.tables)) {
+    // Assign unconditionally and decrement from the LOCAL slice: the previous
+    // form read `data.tables[key].length` on the ORIGINAL (possibly null)
+    // value even though the line above had defensively substituted [], so a
+    // cache file carrying `"tables": {"main": null}` threw TypeError and the
+    // share-image route 500'd instead of rendering. R-376.
     const rows = data.tables[key] ?? [];
-    if (rows.length > budget) data.tables[key] = rows.slice(0, Math.max(0, budget));
-    budget -= data.tables[key].length;
+    const kept = rows.slice(0, Math.max(0, budget));
+    data.tables[key] = kept;
+    budget -= kept.length;
   }
 
   const totalRows = Object.values(data.tables).reduce(

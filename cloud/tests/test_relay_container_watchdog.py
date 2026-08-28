@@ -22,6 +22,7 @@ DROPIN = (
 )
 RUNTIME = CLOUD / "scripts" / "radon-app-runtime.sh"
 RELAY_JS = REPO / "scripts" / "ib_realtime_server.js"
+SD_NOTIFY_JS = REPO / "scripts" / "lib" / "sdNotify.js"
 
 WATCHDOG_SEC = 0.25
 CHILD = r"""
@@ -110,14 +111,39 @@ def test_host_relay_unit_is_notify_watchdog() -> None:
     assert "ExecStart=/usr/bin/node scripts/ib_realtime_server.js" in text
 
 
+def _uncommented(path) -> str:
+    """Source with comment lines stripped.
+
+    A comment that quotes the code it explains satisfies a structural
+    assertion for the wrong reason: this test passed its `systemd-notify`
+    check off a leftover comment after the implementation had moved out.
+    """
+    return "\n".join(
+        line for line in path.read_text(encoding="utf-8").splitlines()
+        if not line.lstrip().startswith(("//", "*", "/*"))
+    )
+
+
 def test_relay_source_pings_watchdog_when_socket_present() -> None:
-    src = RELAY_JS.read_text(encoding="utf-8")
+    """R-335 extracted the notifier to scripts/lib/sdNotify.js.
+
+    The relay exported nothing, so the ENOENT crash-loop could not be
+    injected. This test's intent — the relay pings the watchdog and the socat
+    fallback exists — is unchanged; only which file holds each half moved.
+    """
+    src = _uncommented(RELAY_JS)
     assert "WATCHDOG=1" in src
     assert "NOTIFY_SOCKET" in src
     assert "sdNotify" in src
-    assert "systemd-notify" in src
-    assert "UNIX-SENDTO" in src
-    assert "socat" in src
+    assert "./lib/sdNotify.js" in src
+
+    notifier = _uncommented(SD_NOTIFY_JS)
+    assert "systemd-notify" in notifier
+    assert "UNIX-SENDTO" in notifier
+    assert "socat" in notifier
+    # The listeners are the whole point of the extraction.
+    assert 'child.on("error"' in notifier
+    assert 'child.stdin?.on("error"' in notifier
 
 
 def test_container_dropin_forwards_notify_socket() -> None:

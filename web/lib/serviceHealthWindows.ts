@@ -83,6 +83,15 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // radon-nextjs-db-watchdog fires every 60s around the clock. Registered so
   // a wedged or never-firing watchdog is itself staleness-checked (REL-033).
   "nextjs-db-read": { open: 5 * MIN, extended: 5 * MIN, closed: 5 * MIN, category: "scheduled", requires_ib: false },
+  // R-325: three timer-backed units wrote no service_health row and sat in
+  // neither catalog. Windows mirror scripts/watchdog/services.py.
+  // radon-refresh.timer fires every 15 min through RTH (Mon-Fri 13..21 UTC);
+  // the job self-skips holidays and weekends, so `closed` absorbs the weekend.
+  "data-refresh": { open: 35 * MIN, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: false },
+  // radon-incident-watchdog.timer fires every 5 min around the clock.
+  "incident-watchdog": { open: 15 * MIN, extended: 15 * MIN, closed: 15 * MIN, category: "scheduled", requires_ib: false },
+  // radon-demo-mirror.timer fires weekdays at 21:45 UTC, once a day.
+  "demo-mirror": { open: 26 * HOUR, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
 
   // Market-hours-only IB feeds. The monitor daemon gates these on
   // `requires_market_hours=True`, so they only run 09:30–16:00 ET. The

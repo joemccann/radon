@@ -77,15 +77,6 @@ const MIN_REBUILD_INTERVAL_MS = 5 * 60_000;
 let lastBackgroundRebuildAtMs = 0;
 
 /**
- * Fire-and-forget background rebuild trigger.
- * 5s timeout, swallow all errors — caller already returned cached data.
- * §4.4: keep SWR — serve stale immediately, rebuild in background.
- */
-function triggerBackgroundRebuild(): void {
-  // File-ingest only. A GET must never SendRequest.
-}
-
-/**
  * Freshness comes from the payload's own full-ISO `generated_at` (payload v2),
  * falling back to the legacy `last_sync` and only then to the row key. Two
  * writers wrote `taken_at` in two shapes; a date-only key reads as ~midnight
@@ -197,21 +188,22 @@ export async function GET(): Promise<Response> {
   const stale = perfRead.ok ? !perfRead.fresh : true;
   const behindPortfolio = isCacheBehindPortfolio(cachedPerformance, portfolioSnapshot);
 
-  // §4.4 shouldRebuild: TTL-gated staleness OR portfolio freshness lag.
-  // Covers both "served snapshot is past its market-state window" and
-  // "performance last_sync/as_of lags portfolio last_sync" (twr_subperiods
-  // vs nav_snapshots check is inside the builder; the route gates on
-  // isPerformanceBehindPortfolioSync).
-  const shouldRebuild = !cachedPerformance || stale || behindPortfolio;
-
-  if (!shouldRebuild && cachedPerformance) {
-    return setNoStoreResponseHeaders(NextResponse.json(cachedPerformance), requestId);
-  }
-
-  // insufficient_data is still a valid 200 — surface warnings, SWR in
-  // background so a Flex backfill can fill the gap without blocking.
+  // The route used to compute both of these and then DISCARD them: the
+  // `!shouldRebuild` branch and the `cachedPerformance` branch returned the
+  // byte-identical response, and `triggerBackgroundRebuild` was an empty
+  // function. A payload three days past its 60-minute CLOSED TTL was served
+  // with no stale flag, no header and nothing to trigger a refresh — and the
+  // payload's own honesty markers do not cover it, because
+  // `nav_sessions_behind` and every NAV_STALE warning are frozen at BUILD
+  // time, so a payload built Friday still reads ok / 0 on Monday. R-346.
   if (cachedPerformance) {
-    return setNoStoreResponseHeaders(NextResponse.json(cachedPerformance), requestId);
+    const degraded = stale || behindPortfolio;
+    const body = degraded
+      ? { ...cachedPerformance, stale: true as const, stale_reason: stale ? "ttl" : "behind_portfolio" }
+      : cachedPerformance;
+    const response = setNoStoreResponseHeaders(NextResponse.json(body), requestId);
+    if (degraded) response.headers.set("X-Radon-Stale", "1");
+    return response;
   }
 
   return setNoStoreResponseHeaders(NextResponse.json(navUnavailablePayload()), requestId);

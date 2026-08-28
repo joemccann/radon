@@ -19,6 +19,7 @@ import re
 import sys
 from datetime import datetime, timedelta, timezone
 import sys
+import random
 import time
 import uuid
 from collections import deque
@@ -435,8 +436,20 @@ ORDERS_SYNC_SHED_RETRY_DELAY_SECS = 8.0
 # 502 leaves the UI on ANALYZING with a raw capacity error. Retry the claim
 # with the same budget as orders-sync; persistent shed still 502s.
 FLOW_REPORT_SHED_RETRIES = 2
-FLOW_REPORT_SHED_RETRY_DELAY_SECS = 8.0
+# NOT 8.0 like orders-sync: a shared constant put both retry chains on the
+# same 8s grid, contending in lockstep against a lane already saturated. R-355.
+FLOW_REPORT_SHED_RETRY_DELAY_SECS = 5.0
+# The Next.js proxy gives up at 130s and takes its stale-cache branch, so a
+# chain that outlives this deadline holds a general-lane slot for a response
+# nobody will read — extending the saturation for the next caller. Worst case
+# was 3 x 300 + 16 = 916s. R-354.
+FLOW_REPORT_TOTAL_DEADLINE_SECS = 120.0
 _CAPACITY_SHED_MARKER = "subprocess capacity exhausted"
+
+# One in-flight scan per ticker. Nothing deduped concurrent requests, so N
+# browser tabs on the same symbol each claimed a slot. R-354.
+_FLOW_REPORT_INFLIGHT: dict[str, "asyncio.Task"] = {}
+_FLOW_REPORT_INFLIGHT_LOCK: Optional["asyncio.Lock"] = None
 
 
 def _is_capacity_shed(error: Optional[str]) -> bool:
@@ -451,6 +464,7 @@ async def _run_script_retrying_capacity(
     retries: int,
     delay_s: float,
     label: str,
+    deadline_s: Optional[float] = None,
 ) -> ScriptResult:
     """Re-claim a general-lane slot after a capacity shed.
 
@@ -458,23 +472,63 @@ async def _run_script_retrying_capacity(
     bounded sleep-and-retry is the operator-facing equivalent of the
     orders-sync / flow-refresh wrappers. Real script failures do not retry.
     """
-    result = await run_script(script, args, timeout=timeout)
+    started = time.monotonic()
+
+    def _budget_left() -> Optional[float]:
+        if deadline_s is None:
+            return None
+        return deadline_s - (time.monotonic() - started)
+
+    def _attempt_timeout() -> float:
+        left = _budget_left()
+        return timeout if left is None else max(1.0, min(timeout, left))
+
+    result = await run_script(script, args, timeout=_attempt_timeout())
     attempts = 0
     while (
         not result.ok
         and _is_capacity_shed(result.error)
         and attempts < retries
     ):
+        # Exponential with jitter. A fixed delay meant every client shed in the
+        # same instant retried in the same instant — synchronised waves against
+        # a lane that is by definition already saturated. R-355.
+        backoff = delay_s * (2 ** attempts) * (0.5 + random.random())
+        left = _budget_left()
+        if left is not None and left <= backoff:
+            logger.info(
+                "%s: capacity shed and the %.0fs deadline is spent — giving up "
+                "after %d attempt(s) rather than holding a lane slot",
+                label, deadline_s, attempts + 1,
+            )
+            return ScriptResult(
+                ok=False,
+                data=None,
+                error=(
+                    f"{_CAPACITY_SHED_MARKER}: still shed after {attempts + 1} "
+                    f"attempts within the {deadline_s:.0f}s budget"
+                ),
+            )
         attempts += 1
         logger.info(
-            "%s: capacity shed — retry %d/%d in %.0fs",
+            "%s: capacity shed — retry %d/%d in %.1fs",
             label,
             attempts,
             retries,
-            delay_s,
+            backoff,
         )
-        await asyncio.sleep(delay_s)
-        result = await run_script(script, args, timeout=timeout)
+        await asyncio.sleep(backoff)
+        result = await run_script(script, args, timeout=_attempt_timeout())
+    if not result.ok and _is_capacity_shed(result.error) and attempts >= retries > 0:
+        # R-356: the client cannot otherwise tell a first shed from one the
+        # server already proved persistent across its whole budget.
+        result = ScriptResult(
+            ok=False,
+            data=None,
+            error=(
+                f"{_CAPACITY_SHED_MARKER}: still shed after {attempts + 1} attempts"
+            ),
+        )
     return result
 
 
@@ -2057,13 +2111,13 @@ async def _run_flow_tab(
         return await demo_scan_response(demo_key, demo_payload)
     cache_path = DATA_DIR / cache_name
     lock = _flow_tab_locks.setdefault(name, asyncio.Lock())
-    now = _time.monotonic()
+    now = time.monotonic()
     if not force and now - _flow_tab_last.get(name, 0.0) < FLOW_TAB_COOLDOWN_S:
         cached = _read_cache(cache_path)
         if cached:
             return cached
     async with lock:
-        if not force and _time.monotonic() - _flow_tab_last.get(name, 0.0) < FLOW_TAB_COOLDOWN_S:
+        if not force and time.monotonic() - _flow_tab_last.get(name, 0.0) < FLOW_TAB_COOLDOWN_S:
             cached = _read_cache(cache_path)
             if cached:
                 return cached
@@ -2073,7 +2127,7 @@ async def _run_flow_tab(
         if result.data and result.data.get("error"):
             raise HTTPException(status_code=400, detail=result.data["error"])
         _write_cache(cache_path, result.data)
-        _flow_tab_last[name] = _time.monotonic()
+        _flow_tab_last[name] = time.monotonic()
         return result.data
 
 
@@ -2391,6 +2445,7 @@ async def run_flow_report(ticker: str):
         retries=FLOW_REPORT_SHED_RETRIES,
         delay_s=FLOW_REPORT_SHED_RETRY_DELAY_SECS,
         label=f"flow-report {upper}",
+        deadline_s=FLOW_REPORT_TOTAL_DEADLINE_SECS,
     )
     if not result.ok:
         raise HTTPException(status_code=502, detail=result.error)
@@ -3319,14 +3374,14 @@ async def leap_scan(preset: str = "largecaps", min_gap: float = 10.0, tickers: s
     import time as _time
     if _leap_scan_lock is None:
         _leap_scan_lock = asyncio.Lock()
-    now = _time.monotonic()
+    now = time.monotonic()
     is_ticker_scan = bool(requested)
     if not is_ticker_scan and now - _leap_last_scan < LEAP_COOLDOWN_S:
         cached = _read_cache(DATA_DIR / "leap.json")
         if _scan_cache_matches_preset(cached, preset):
             return cached
     async with _leap_scan_lock:
-        if not is_ticker_scan and _time.monotonic() - _leap_last_scan < LEAP_COOLDOWN_S:
+        if not is_ticker_scan and time.monotonic() - _leap_last_scan < LEAP_COOLDOWN_S:
             cached = _read_cache(DATA_DIR / "leap.json")
             if _scan_cache_matches_preset(cached, preset):
                 return cached
@@ -3351,7 +3406,7 @@ async def leap_scan(preset: str = "largecaps", min_gap: float = 10.0, tickers: s
         if not result.ok:
             raise HTTPException(status_code=502, detail=result.error)
         if not is_ticker_scan:
-            _leap_last_scan = _time.monotonic()
+            _leap_last_scan = time.monotonic()
         # The leap scanner subprocess wrote the JSON cache atomically AND
         # recorded its own service_health[leap-scan] row (db/scan_mirror.py).
         cached = _read_cache(DATA_DIR / "leap.json")
@@ -3462,14 +3517,14 @@ async def theta_harvester_scan(
         )
     if _theta_scan_lock is None:
         _theta_scan_lock = asyncio.Lock()
-    now = _time.monotonic()
+    now = time.monotonic()
     is_ticker_scan = bool(ticker)
     if not is_ticker_scan and now - _theta_last_scan < THETA_COOLDOWN_S:
         cached = _read_cache(DATA_DIR / "theta_harvester.json")
         if _theta_cache_matches(cached, preset, min_dte, max_dte, min_credit):
             return cached
     async with _theta_scan_lock:
-        if not is_ticker_scan and _time.monotonic() - _theta_last_scan < THETA_COOLDOWN_S:
+        if not is_ticker_scan and time.monotonic() - _theta_last_scan < THETA_COOLDOWN_S:
             cached = _read_cache(DATA_DIR / "theta_harvester.json")
             if _theta_cache_matches(cached, preset, min_dte, max_dte, min_credit):
                 return cached
@@ -3494,7 +3549,7 @@ async def theta_harvester_scan(
         # A budget-blocked / coverage-failed scan never ran — stamping the 1h
         # cooldown would pin the stale snapshot for another hour (R-070).
         if not is_ticker_scan and not scan_status:
-            _theta_last_scan = _time.monotonic()
+            _theta_last_scan = time.monotonic()
         if scan_status and payload is not None:
             return payload
         cached = _read_cache(DATA_DIR / "theta_harvester.json")
@@ -3554,14 +3609,14 @@ async def strength_confirmation_scan(preset: str = "ndx100", limit: int = 0, tic
         )
     if _strength_scan_lock is None:
         _strength_scan_lock = asyncio.Lock()
-    now = _time.monotonic()
+    now = time.monotonic()
     is_ticker_scan = bool(ticker)
     if not is_ticker_scan and now - _strength_last_scan < STRENGTH_COOLDOWN_S:
         cached = _read_cache(DATA_DIR / "strength_confirmation.json")
         if _strength_cache_matches_preset(cached, preset):
             return cached
     async with _strength_scan_lock:
-        if not is_ticker_scan and _time.monotonic() - _strength_last_scan < STRENGTH_COOLDOWN_S:
+        if not is_ticker_scan and time.monotonic() - _strength_last_scan < STRENGTH_COOLDOWN_S:
             cached = _read_cache(DATA_DIR / "strength_confirmation.json")
             if _strength_cache_matches_preset(cached, preset):
                 return cached
@@ -3581,7 +3636,7 @@ async def strength_confirmation_scan(preset: str = "ndx100", limit: int = 0, tic
         # A budget-blocked / coverage-failed scan never ran — stamping the 1h
         # cooldown would pin the stale snapshot for another hour (R-070).
         if not is_ticker_scan and not scan_status:
-            _strength_last_scan = _time.monotonic()
+            _strength_last_scan = time.monotonic()
         if scan_status and payload is not None:
             return payload
         cached = _read_cache(DATA_DIR / "strength_confirmation.json")
@@ -3922,14 +3977,14 @@ async def garch_convergence_scan(preset: str = "largecaps", tickers: str = ""):
     import time as _time
     if _garch_scan_lock is None:
         _garch_scan_lock = asyncio.Lock()
-    now = _time.monotonic()
+    now = time.monotonic()
     is_ticker_scan = bool(requested)
     if not is_ticker_scan and now - _garch_last_scan < GARCH_COOLDOWN_S:
         cached = _read_cache(DATA_DIR / "garch_convergence.json")
         if _scan_cache_matches_preset(cached, preset):
             return cached
     async with _garch_scan_lock:
-        if not is_ticker_scan and _time.monotonic() - _garch_last_scan < GARCH_COOLDOWN_S:
+        if not is_ticker_scan and time.monotonic() - _garch_last_scan < GARCH_COOLDOWN_S:
             cached = _read_cache(DATA_DIR / "garch_convergence.json")
             if _scan_cache_matches_preset(cached, preset):
                 return cached
@@ -3952,7 +4007,7 @@ async def garch_convergence_scan(preset: str = "largecaps", tickers: str = ""):
         if not result.ok:
             raise HTTPException(status_code=502, detail=result.error)
         if not is_ticker_scan:
-            _garch_last_scan = _time.monotonic()
+            _garch_last_scan = time.monotonic()
         cached = _read_cache(DATA_DIR / "garch_convergence.json")
         return cached or {
             "scan_time": "",
@@ -4037,13 +4092,13 @@ async def gamma_rotation_scan():
     import time as _time
     if _gamma_rotation_scan_lock is None:
         _gamma_rotation_scan_lock = asyncio.Lock()
-    now = _time.monotonic()
+    now = time.monotonic()
     if now - _gamma_rotation_last_scan < GAMMA_ROTATION_COOLDOWN_S:
         cached = _read_cache(DATA_DIR / "gamma_rotation_gap.json")
         if cached:
             return cached
     async with _gamma_rotation_scan_lock:
-        if _time.monotonic() - _gamma_rotation_last_scan < GAMMA_ROTATION_COOLDOWN_S:
+        if time.monotonic() - _gamma_rotation_last_scan < GAMMA_ROTATION_COOLDOWN_S:
             cached = _read_cache(DATA_DIR / "gamma_rotation_gap.json")
             if cached:
                 return cached
@@ -4051,7 +4106,7 @@ async def gamma_rotation_scan():
         if not result.ok:
             raise HTTPException(status_code=502, detail=result.error)
         _write_cache(DATA_DIR / "gamma_rotation_gap.json", result.data)
-        _gamma_rotation_last_scan = _time.monotonic()
+        _gamma_rotation_last_scan = time.monotonic()
         return result.data
 
 
@@ -4080,7 +4135,7 @@ async def llm_token_index(days: int = Query(default=180, ge=1, le=3650)):
     timer fires.
     """
     import time as _time
-    now = _time.monotonic()
+    now = time.monotonic()
     if (
         _llm_token_index_cache["data"] is not None
         and _llm_token_index_cache["days"] == days

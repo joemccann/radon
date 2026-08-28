@@ -69,11 +69,18 @@ def _run(monkeypatch, capsys, client, argv=("--symbol", "NOW")):
 
 
 def test_transient_handshake_timeout_is_retried(monkeypatch, capsys):
-    client = _FakeClient(fail_connects=2)
+    """R-352 shrank the attempt count, so derive it rather than hardcode 3.
+
+    The original intent — a transient handshake timeout does NOT fail the
+    request — is unchanged: the last attempt still succeeds. Only the literal
+    `3` moved, because the retry budget is now derived from the caller's 45s
+    cap instead of asserted to fit inside it.
+    """
+    client = _FakeClient(fail_connects=ib_option_chain.CONNECT_ATTEMPTS - 1)
     out = _run(monkeypatch, capsys, client)
     assert "error" not in out, out
     assert out["expirations"] == ["20260828", "20260904"]
-    assert client.connect_calls == 3
+    assert client.connect_calls == ib_option_chain.CONNECT_ATTEMPTS
     assert client.disconnected is True
 
 

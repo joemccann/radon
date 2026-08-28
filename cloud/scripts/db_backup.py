@@ -76,10 +76,42 @@ MULTIPART_CONCURRENCY = 4
 # bounded memory instead of a ~700 MB fetchall on the fattest table.
 BATCH_SIZE = 500
 
-REPO_ROOT = Path(os.environ.get("RADON_REPO_ROOT", "/home/radon/radon"))
-BACKUP_DIR = Path(
-    os.environ.get("RADON_DB_BACKUP_DIR", "/home/radon/radon-cloud/backups/db")
-)
+def _path_env(key: str, default: str) -> Path:
+    """`os.environ.get(key, default)` returns "" for a SET-BUT-EMPTY variable,
+    and `Path("")` is the CURRENT DIRECTORY.
+
+    `radon-db-backup.service` loads /etc/radon/env wholesale, so a blanked or
+    trailing-edit `RADON_DB_BACKUP_DIR=` line resolved BACKUP_DIR to
+    `WorkingDirectory=/home/radon/radon` — `mkdir(exist_ok=True)` succeeded
+    silently, the dump landed in the live repo checkout, the retention loop
+    unlinked every *.sql.gz older than 30 days IN THE REPO, and sync_offbox
+    uploaded whatever it found there. R-344.
+    """
+    raw = (os.environ.get(key) or "").strip()
+    return Path(raw or default)
+
+
+REPO_ROOT = _path_env("RADON_REPO_ROOT", "/home/radon/radon")
+BACKUP_DIR = _path_env("RADON_DB_BACKUP_DIR", "/home/radon/radon-cloud/backups/db")
+
+
+def assert_safe_backup_dir(path: Path, repo_root: Path = None) -> Path:
+    """Refuse a backup dir that could put the retention unlink in the repo.
+
+    Called before any mkdir, any dump and any unlink. R-344.
+    """
+    root = REPO_ROOT if repo_root is None else repo_root
+    candidate = Path(path)
+    if not candidate.is_absolute():
+        raise ValueError(f"backup dir must be absolute, got {candidate!r}")
+    resolved = candidate.resolve() if candidate.exists() else candidate
+    root_resolved = root.resolve() if root.exists() else root
+    if resolved == root_resolved or root_resolved in resolved.parents:
+        raise ValueError(
+            f"refusing a backup dir inside the repo checkout: {resolved} "
+            f"(the retention pass unlinks *.sql.gz there)"
+        )
+    return candidate
 
 _INTERNAL_PREFIXES = ("sqlite_", "libsql_", "_litestream")
 
@@ -421,6 +453,12 @@ def list_remote_dumps(client, bucket: str, prefix: str) -> dict[str, RemoteObjec
     return out
 
 
+def _confirm_upload(client, bucket: str, key: str) -> int:
+    """Bytes the object actually holds in the bucket. Raises when absent."""
+    head = client.head_object(Bucket=bucket, Key=key)
+    return int(head["ContentLength"])
+
+
 def sync_offbox(
     backup_dir: Path,
     cfg: dict[str, str],
@@ -465,9 +503,24 @@ def sync_offbox(
             break
         path = backup_dir / name
         kwargs = {"Config": transfer} if transfer is not None else {}
-        client.upload_file(str(path), bucket, object_key_for(prefix, name), **kwargs)
+        key = object_key_for(prefix, name)
+        expected = path.stat().st_size
+        client.upload_file(str(path), bucket, key, **kwargs)
+        # CONFIRM before counting, and RAISE on a mismatch rather than
+        # recording it — an upload failure already propagates here by design,
+        # heartbeats `error` and exits non-zero, and a short landing is an
+        # upload failure that the API call happened not to report. It was
+        # counted as `b2 1/1` with state=ok, and `select_uploadable` re-uploads
+        # only on a size DIFFERENCE, so the corruption was never detected while
+        # the local original ran down its 30-day retention. R-372.
+        landed = _confirm_upload(client, bucket, key)
+        if landed != expected:
+            raise RuntimeError(
+                f"off-box upload of {key} landed at {landed} bytes, "
+                f"expected {expected}; local dump retained"
+            )
         uploaded += 1
-        bytes_uploaded += path.stat().st_size
+        bytes_uploaded += expected
 
     prune_now = time.time() if now is None else now
     prunable = select_remote_prunable(
@@ -611,6 +664,7 @@ def run_backup() -> dict:
         tmp_path.unlink(missing_ok=True)
 
     now = time.time()
+    assert_safe_backup_dir(BACKUP_DIR)
     entries = [(p.name, p.stat().st_mtime) for p in BACKUP_DIR.iterdir() if p.is_file()]
     pruned = select_prunable(entries, now)
     for name in pruned:

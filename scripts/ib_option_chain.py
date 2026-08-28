@@ -29,12 +29,41 @@ from scripts.utils.ib_preflight import IB_REQUEST_TIMEOUT_S
 # served in 1.1s two minutes later. ib_sync.py is 51 of the 53 connect
 # failures in that 24h window — the real fix is shedding the multi-tab sync
 # fan-in, and this retry only stops the chain losing that race.
-# Sibling `ib_chain.py` already retries this class; the budget below leaves
-# room for the two bounded IB requests inside
-# _EQUITY_OPTIONS_CHAIN_TIMEOUT_S (45s).
-CONNECT_ATTEMPTS = 3
-CONNECT_TIMEOUT_S = 4
+# Sibling `ib_chain.py` already retries this class. The budget is DERIVED from
+# the caller's cap rather than asserted to fit it: `server.py`'s
+# `_EQUITY_OPTIONS_CHAIN_TIMEOUT_S` is 45s and `_qualify_underlying` plus
+# `_request_option_chains` each take `IB_REQUEST_TIMEOUT_S` (15s), so the
+# connect phase gets what is left minus a margin for interpreter startup and
+# the error envelope itself. The previous 3 x 4s + 2 x 1s = 14s put the worst
+# case at 44s before startup, so the `except Exception` that prints the JSON
+# error envelope never ran and the operator got a bare subprocess-timeout
+# string. R-352.
+_CALLER_CAP_S = 45.0
+_ENVELOPE_MARGIN_S = 5.0
+CONNECT_BUDGET_S = _CALLER_CAP_S - 2 * IB_REQUEST_TIMEOUT_S - _ENVELOPE_MARGIN_S
+CONNECT_ATTEMPTS = 2
 CONNECT_BACKOFF_S = 1.0
+CONNECT_TIMEOUT_S = (
+    CONNECT_BUDGET_S - (CONNECT_ATTEMPTS - 1) * CONNECT_BACKOFF_S
+) / CONNECT_ATTEMPTS
+
+# Failure classes a retry cannot help. A Gateway awaiting 2FA will not become
+# available inside the budget, and every extra attempt re-enters
+# `_connect_auto_allocate`, which walks all 30 ids in SUBPROCESS_ID_RANGE on an
+# in-use error — up to 90 serialised handshakes on the same queue
+# `ib_place_order.py` must win to transmit an order. `ib_option_chain.py` is
+# not in `_NON_IDEMPOTENT_IB_SCRIPTS`, so the server's `auth_state` refusal
+# never covers it. R-334.
+_TERMINAL_CONNECT_MARKERS = (
+    "2fa",
+    "two-factor",
+    "awaiting",
+    "not authenticated",
+    "logged out",
+    "auth",
+    "in use",
+    "all client ids",
+)
 
 
 def _normalize_expiry(expiry) -> str:
@@ -85,11 +114,22 @@ def _preferred_multiplier(chains) -> str:
     return str(getattr(chains[0], "multiplier", ""))
 
 
+def _is_terminal_connect_error(exc: BaseException) -> bool:
+    """Whether retrying this connect failure can only cost time. R-334."""
+    text = str(exc).lower()
+    return any(marker in text for marker in _TERMINAL_CONNECT_MARKERS)
+
+
 def _connect_with_retry(client, port: int, client_id) -> None:
     """Connect, retrying a transient handshake timeout within a bounded budget.
 
+    ONLY the transient class retries. A 2FA-pending or logged-out Gateway and
+    client-id exhaustion re-raise on the first attempt: neither resolves inside
+    the budget, and each extra attempt re-enters the auto-allocator's 30-id
+    walk on the queue the order path must win. R-334.
+
     Raises the last exception when every attempt fails, so the caller's error
-    envelope still names the timeout and the endpoint still answers 504.
+    envelope still names the failure and the endpoint still answers 504.
     """
     for attempt in range(1, CONNECT_ATTEMPTS + 1):
         try:
@@ -97,8 +137,8 @@ def _connect_with_retry(client, port: int, client_id) -> None:
                 port=port, client_id=client_id, timeout=CONNECT_TIMEOUT_S
             )
             return
-        except Exception:
-            if attempt == CONNECT_ATTEMPTS:
+        except Exception as exc:
+            if attempt == CONNECT_ATTEMPTS or _is_terminal_connect_error(exc):
                 raise
             time.sleep(CONNECT_BACKOFF_S)
 

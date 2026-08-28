@@ -282,12 +282,19 @@ function LegRow({
       : columns.qty
         ? "qty"
         : null;
+  // The count lives in the Qty cell ONLY while that cell is actually
+  // rendering it. Column visibility is user-controlled and persisted, so with
+  // Qty hidden — or with the description displaced INTO the Qty cell — a 1x2
+  // ratio rendered byte-identically to a 1x1 vertical and an uncovered ratio
+  // read as defined risk. R-339.
+  const qtyCellShowsCount = columns.qty && descColumn !== "qty";
   const legDescription = (
     <td
       className={`cell-indent cell-muted ${onLegClick ? "leg-clickable" : ""}`}
       onClick={onLegClick ? () => onLegClick(leg) : undefined}
     >
-      {leg.direction} {leg.type}{leg.strike ? ` $${leg.strike}` : ""}
+      {leg.direction} {qtyCellShowsCount ? "" : `${leg.contracts}x `}
+      {leg.type}{leg.strike ? ` $${leg.strike}` : ""}
     </td>
   );
 

@@ -1065,6 +1065,15 @@ a systemd `OnFailure=` hook). Env: `INCIDENT_WATCHDOG_{NEXTJS,API,HEALTH}_BASE`,
 `INCIDENT_WATCHDOG_DIR`, `INCIDENT_WATCHDOG_GREEN_MARKER`,
 `INCIDENT_WATCHDOG_REPO_DIR`, `RADON_PROBE_FRESHNESS_TOKEN`.
 
+The `--once` (timer) path wraps its cycle in `service_cycle("incident-watchdog",
+market_hours_class="continuous")`, so the prober itself is staleness-checked on
+the `continuous` bucket and in `web/lib/serviceHealthWindows.ts` (15 min open
+and closed, matching the 5-minute timer). It previously wrote no
+`service_health` row at all and sat in neither catalog, so a wedged prober was
+silent by nature (R-325). The heartbeat closes `ok` BEFORE the exit code is
+set: an open P1 is a FINDING, not a watchdog failure, and recording `error`
+whenever the tool did its job would make the row useless.
+
 It intentionally does NOT restart anything and does NOT page — remediation
 stays with the dedicated units (`feedback_ib_auto_recovery_conservative`,
 `feedback_watchdog_works_dont_deploy_autoheal`), and paging stays with
