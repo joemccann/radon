@@ -18,16 +18,46 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from lib.flex_classify import ACTIVITY, TRADES, FlexClassifyError, classify_flex_xml
+from lib.flex_classify import (
+    ACTIVITY,
+    TRADES,
+    FlexClassifyError,
+    classify_flex_xml,
+    statement_metadata,
+)
 
 
 def _sha256(xml_text: str) -> str:
     return hashlib.sha256(xml_text.encode("utf-8")).hexdigest()
 
 
+def claim_flex_delivery(content_sha256: str, **kwargs: Any) -> bool:
+    """Indirection so the claim is injectable in tests. See db.writer."""
+    from db.writer import claim_flex_delivery as _claim  # noqa: PLC0415
+
+    return _claim(content_sha256, **kwargs)
+
+
 def ingest_xml(xml_text: str, *, source_path: str = "") -> Dict[str, Any]:
     kind = classify_flex_xml(xml_text)
     digest = _sha256(xml_text)
+    meta = statement_metadata(xml_text)
+    # BEFORE any writer: re-applying a statement is not idempotent (R-329), so
+    # the fingerprint has to gate the run rather than annotate it. R-326.
+    if not claim_flex_delivery(
+        digest,
+        classified_as=kind,
+        period_from=meta["period_from"],
+        period_to=meta["period_to"],
+        source_path=source_path or None,
+    ):
+        return {
+            "ok": True,
+            "outcome": "duplicate",
+            "classified_as": kind,
+            "content_sha256": digest,
+            "source_path": source_path,
+        }
     if kind == ACTIVITY:
         import cash_flow_sync
         import perf_twr_builder
@@ -35,9 +65,23 @@ def ingest_xml(xml_text: str, *, source_path: str = "") -> Dict[str, Any]:
         if not source_path:
             raise FlexClassifyError("activity ingest requires a filesystem path")
         cash_code = cash_flow_sync.main(["--from-file", source_path, "--no-file"])
+        if cash_code != 0:
+            # `upsert_cash_flow_rows` chunks its writes, so a failure leaves the
+            # earlier chunks committed. Building the TWR series over a
+            # half-written `cash_flows` and persisting it as authoritative
+            # turns a partial write into a published number. R-323.
+            return {
+                "ok": False,
+                "classified_as": kind,
+                "content_sha256": digest,
+                "cash_exit": cash_code,
+                "twr_status": None,
+                "error": f"cash_flow_sync failed (exit {cash_code}); TWR not rebuilt",
+                "source_path": source_path,
+            }
         twr = perf_twr_builder.build_and_persist(from_file=source_path, persist=True)
         return {
-            "ok": cash_code == 0 and twr.get("status") in ("ok", "stale"),
+            "ok": twr.get("status") in ("ok", "stale"),
             "classified_as": kind,
             "content_sha256": digest,
             "cash_exit": cash_code,
@@ -82,10 +126,20 @@ def main(argv: List[str] | None = None) -> int:
     results = []
     ok = True
     for path in paths:
+        # Per-file isolation: earlier files have already mutated `cash_flows`,
+        # `journal` and TWR by the time a later one fails, so letting anything
+        # but a classify error escape aborted the batch with nothing printed
+        # and the remaining files unprocessed. R-361.
         try:
             result = ingest_path(path)
         except FlexClassifyError as exc:
             result = {"ok": False, "error": str(exc), "source_path": str(path)}
+        except Exception as exc:  # noqa: BLE001 — one bad file must not abort the batch
+            result = {
+                "ok": False,
+                "error": f"{type(exc).__name__}: {exc}",
+                "source_path": str(path),
+            }
         results.append(result)
         ok = ok and bool(result.get("ok"))
     print(json.dumps({"ok": ok, "results": results, "ran_at": datetime.now(timezone.utc).isoformat()}))

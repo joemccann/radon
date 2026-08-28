@@ -184,14 +184,20 @@ class TestDryRun:
         assert status["rows"] == 16
 
     def test_reports_which_rows_are_new(self, no_network, no_credentials, monkeypatch):
-        """Only 41191444701 (first of the reused-id interest trio) is stored,
-        so 16 unique ids - 1 known = 15 new."""
+        """Only one member of the reused-id interest trio is stored, so
+        16 unique ids - 1 known = 15 new.
+
+        R-329: the trio's ids are content-hashed now, so the stored id is the
+        hash rather than the bare `41191444701`. Same arithmetic, same intent.
+        """
         import db.writer as writer_mod
 
         exploding = MagicMock(side_effect=AssertionError("dry-run must not write"))
         monkeypatch.setattr(writer_mod, "upsert_cash_flow_rows", exploding, raising=False)
         monkeypatch.setattr(
-            cash_flow_sync, "_load_existing_cash_flow_ids", lambda: {"41191444701"}
+            cash_flow_sync,
+            "_load_existing_cash_flow_ids",
+            lambda: {"41191444701#9fd9517999ea"},
         )
 
         _, stdout, _ = _run("--from-file", str(LEGACY_FIXTURE), "--dry-run")

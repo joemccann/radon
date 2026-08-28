@@ -649,6 +649,44 @@ def _journal_payload_with_compact_expiry(payload: dict[str, Any]) -> dict[str, A
     return {**payload, "expiry": compact}
 
 
+def claim_flex_delivery(
+    content_sha256: str,
+    *,
+    classified_as: str,
+    period_from: Optional[str] = None,
+    period_to: Optional[str] = None,
+    source_path: Optional[str] = None,
+) -> bool:
+    """Claim one Flex file for ingest. True when THIS call won the claim.
+
+    `flex_deliveries` was inert: the digest was computed and echoed into a
+    result dict, the table appeared nowhere outside its own migration, and the
+    migration comment "content_sha256 is the PK so the same file is never
+    applied twice" was simply false. Ingest idempotency rested entirely on the
+    row-level upsert keys, which R-329 showed were ordinal-derived and unstable
+    across a reissued statement. R-326.
+
+    `ON CONFLICT DO NOTHING` makes the claim atomic: a second ingest of the
+    same bytes affects zero rows and the caller skips every writer.
+    """
+    db = get_db()
+    result = db.execute(
+        "INSERT INTO flex_deliveries "
+        "(content_sha256, classified_as, period_from, period_to, ingested_at, source_path) "
+        "VALUES (?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(content_sha256) DO NOTHING",
+        (
+            content_sha256,
+            classified_as,
+            period_from,
+            period_to,
+            _now_iso(),
+            source_path,
+        ),
+    )
+    return int(getattr(result, "rows_affected", 0) or 0) > 0
+
+
 def upsert_journal_entry(trade_id: str, payload: dict[str, Any], filled_at: Optional[str] = None) -> None:
     """Upsert one journal row over bounded Hrana HTTP (real socket timeout).
 

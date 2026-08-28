@@ -71,6 +71,7 @@ Throttle handling:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -439,8 +440,16 @@ def parse_cash_transactions(xml_text: str) -> list[dict[str, Any]]:
     Returns a list of dicts ready to feed `upsert_cash_flow_rows`.
     """
     out: list[dict[str, Any]] = []
-    seen_ids: dict[str, int] = {}
     root = ET.fromstring(xml_text)
+    # First pass: which transactionIDs are carried by more than one row. Only
+    # those need disambiguating, and knowing it up front keeps the id a pure
+    # function of the row's own content rather than of its position. R-329.
+    counts: dict[str, int] = {}
+    for ct in root.findall(".//CashTransaction"):
+        tid = (ct.get("transactionID") or "").strip()
+        if tid and float(ct.get("amount") or 0.0) != 0.0:
+            counts[tid] = counts.get(tid, 0) + 1
+    duplicated = {tid for tid, n in counts.items() if n > 1}
     for ct in root.findall(".//CashTransaction"):
         txn_id = (ct.get("transactionID") or "").strip()
         if not txn_id:
@@ -448,21 +457,62 @@ def parse_cash_transactions(xml_text: str) -> list[dict[str, Any]]:
         amt = float(ct.get("amount") or 0.0)
         if amt == 0.0:
             continue
-        occurrence = seen_ids.get(txn_id, 0)
-        seen_ids[txn_id] = occurrence + 1
-        unique_id = txn_id if occurrence == 0 else f"{txn_id}#{occurrence}"
         raw_type = (ct.get("type") or "").strip()
         date_str = _normalize_date(ct.get("reportDate") or ct.get("dateTime") or "")
+        description = (ct.get("description") or "").strip() or None
+        # R-329: the suffix used to be the row's DOCUMENT POSITION
+        # (`txn_id if occurrence == 0 else f"{txn_id}#{occurrence}"`), so the
+        # id of a given economic row moved whenever IBKR reissued the
+        # statement with a sibling dropped, reordered, or a row inserted
+        # ahead. `upsert_cash_flow_rows` is insert/update-only with no delete
+        # pass, so the stale id survived as a phantom row and the cash-flow
+        # total was overstated. Keying the suffix on the row's own CONTENT
+        # makes the same economics map to the same id every time.
+        unique_id = _disambiguated_id(
+            txn_id, raw_type, amt, date_str, description, duplicated
+        )
         out.append({
             "id": unique_id,
             "date": date_str,
             "type": _classify(raw_type, amt),
             "amount": amt,
             "currency": (ct.get("currency") or "USD").upper(),
-            "description": (ct.get("description") or "").strip() or None,
+            "description": description,
             "raw_type": raw_type or None,
         })
     return out
+
+
+def _disambiguated_id(
+    txn_id: str,
+    raw_type: str,
+    amount: float,
+    date_str: str,
+    description: str | None,
+    duplicated: set[str],
+) -> str:
+    """A stable id for one of several rows sharing a `transactionID`.
+
+    IBKR really does issue one transactionID per posting batch with one row
+    per sub-category, so the id alone is not unique. A row whose id appears
+    ONCE in the statement keeps the raw IBKR id — the overwhelmingly common
+    case, and changing it would rewrite every existing key for nothing.
+
+    Every row of a duplicated id is suffixed with a short hash of its own
+    content, INCLUDING the first: "first keeps the raw id" is still an ordinal
+    rule, so a row inserted ahead of the trio would take the unsuffixed id and
+    push the original onto a hash. Suffixing all of them makes the mapping a
+    pure function of the row's economics, independent of how many siblings
+    there are or what order they arrive in. R-329.
+
+    Membership of `duplicated` is computed in a first pass over the whole
+    document, so it cannot depend on position either.
+    """
+    if txn_id not in duplicated:
+        return txn_id
+    fingerprint = "|".join((raw_type, f"{amount!r}", date_str, description or ""))
+    digest = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()[:12]
+    return f"{txn_id}#{digest}"
 
 
 def describe_statement_shape(xml_text: str) -> dict[str, Any]:
