@@ -124,6 +124,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-hhlev.timer",
     "radon-vixts.service",
     "radon-vixts.timer",
+    "radon-flex-pull.service",
+    "radon-flex-pull.timer",
 ]
 
 LONG_RUNNING_SERVICES = [
@@ -144,9 +146,9 @@ IB_GATEWAY_DEPENDENTS = [
 
 ENV_FILE_PATH = "/etc/radon/env"
 STRIPPED_ENV_SERVICES = {
-    "radon-grok-page-responder.service",
+    "radon-grok-page-responder.service": "/home/radon/radon-page-responder.env",
+    "radon-flex-pull.service": "/var/lib/radon/flex-secrets/env",
 }
-STRIPPED_ENV_FILE_PATH = "/home/radon/radon-page-responder.env"
 STATIC_SERVICES = {
     "radon-refresh.service",
     "radon-drift-audit.service",
@@ -876,7 +878,7 @@ class TestCrossCutting:
             if env_file is None:
                 continue
             if name in STRIPPED_ENV_SERVICES:
-                assert env_file == STRIPPED_ENV_FILE_PATH, (
+                assert env_file == STRIPPED_ENV_SERVICES[name], (
                     f"{name} must not load production secrets; "
                     f"got EnvironmentFile={env_file}"
                 )
@@ -971,6 +973,30 @@ class TestLeapGarchScanBudget:
         assert int(svc["timeoutstartsec"]) >= 3900
 
 
+class TestFlexPull:
+    """sFTP puller is shipped disabled. enable --now would fire against an empty remote."""
+
+    def test_oneshot_stripped_env_and_timeout(self, unit):
+        svc = unit("radon-flex-pull.service")["Service"]
+        assert svc["type"] == "oneshot"
+        assert int(svc["timeoutstartsec"]) >= 120
+        assert svc["environmentfile"] == STRIPPED_ENV_SERVICES["radon-flex-pull.service"]
+        assert "/etc/radon/env" not in svc["environmentfile"]
+        assert "flex_sftp_pull.py" in svc["execstart"]
+        hidden = svc.get("inaccessiblepaths", "")
+        assert "/etc/radon/env" in hidden
+
+    def test_timer_is_morning_after_with_empty_dir_retry(self, services_dir):
+        text = (services_dir / "radon-flex-pull.timer").read_text()
+        assert "OnCalendar=Tue..Sat *-*-* 07:30:00 America/New_York" in text
+        assert "OnCalendar=Tue..Sat *-*-* 08:30:00 America/New_York" in text
+
+    def test_not_on_auto_sync_allowlist(self):
+        allowlist = Path(__file__).resolve().parent.parent / "config" / "auto-sync-units.txt"
+        text = allowlist.read_text()
+        assert "radon-flex-pull" not in text
+
+
 class TestGrokPageResponder:
     """Dedicated clone + stripped env. Never the live checkout."""
 
@@ -979,7 +1005,7 @@ class TestGrokPageResponder:
         assert svc["type"] == "oneshot"
         assert int(svc["timeoutstartsec"]) >= 3900
         assert svc["workingdirectory"] == "/home/radon/radon-page-responder"
-        assert svc["environmentfile"] == STRIPPED_ENV_FILE_PATH
+        assert svc["environmentfile"] == STRIPPED_ENV_SERVICES["radon-grok-page-responder.service"]
         assert "radon-cloud/.env" not in svc["environmentfile"]
         assert "grok_page_responder.py" in svc["execstart"]
         assert "/home/radon/radon/.venv" not in svc["execstart"]

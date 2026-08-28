@@ -1,0 +1,13 @@
+[Unit]
+Description=Radon Flex sFTP pull - morning after, once Flex has finalized the session (do not enable until grant)
+
+[Timer]
+# Tue..Sat 07:30 ET picks up the prior session. 08:30 ET is the empty-dir
+# list-dir retry. Do not systemctl enable this timer until a written Flex
+# Query sFTP grant exists and a file has been seen on the remote.
+OnCalendar=Tue..Sat *-*-* 07:30:00 America/New_York
+OnCalendar=Tue..Sat *-*-* 08:30:00 America/New_York
+Persistent=true
+
+[Install]
+WantedBy=timers.target
