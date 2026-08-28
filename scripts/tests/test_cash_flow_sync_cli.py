@@ -170,13 +170,15 @@ class TestFromFile:
         assert writer.calls == []
 
     def test_ytd_detail_export_parses(self, no_network, no_credentials, writer):
-        """The current query shape: 3 DETAIL rows, none id-less."""
+        """DETAIL cash rows plus cash ACATS on <Transfer>. STK ACATS omitted."""
         code, _, _ = _run("--from-file", str(YTD_FIXTURE), "--no-file")
         assert code == cash_flow_sync.EXIT_OK
         assert [r["id"] for r in writer.written] == [
-            "37134609475", "37155398573", "37308647311",
+            "37134609475", "37155398573", "37308647311", "37884824874",
         ]
-        assert [r["type"] for r in writer.written] == ["Fee", "Interest", "Deposit"]
+        assert [r["type"] for r in writer.written] == [
+            "Fee", "Interest", "Deposit", "Withdrawal",
+        ]
 
 
 class TestDryRun:

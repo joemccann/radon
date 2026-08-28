@@ -14,6 +14,9 @@ import cash_flow_sync
 from cash_flow_sync import _classify, _normalize_date, parse_cash_transactions
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "cash_transactions_flex_sample.xml"
+YTD_FIXTURE = (
+    Path(__file__).resolve().parent / "fixtures" / "cash_transactions_flex_ytd_detail_sample.xml"
+)
 
 
 class TestClassify:
@@ -249,6 +252,48 @@ class TestParseCashTransactions:
             "</FlexStatement></FlexStatements></FlexQueryResponse>"
         )
         assert parse_cash_transactions(empty) == []
+
+    def test_cash_acats_is_a_withdrawal(self):
+        """1442520 carries cash ACATS on <Transfer>, not <CashTransaction>."""
+        rows = parse_cash_transactions(YTD_FIXTURE.read_text(encoding="utf-8"))
+        cash = [r for r in rows if r["id"] == "37884824874"]
+        assert cash == [
+            {
+                "id": "37884824874",
+                "date": "2026-02-06",
+                "type": "Withdrawal",
+                "amount": -305947.84,
+                "currency": "USD",
+                "description": "ACATS",
+                "raw_type": "Transfer:ACATS:IN",
+            }
+        ]
+
+    def test_stk_acats_with_zero_cash_is_not_a_cash_flow(self):
+        rows = parse_cash_transactions(YTD_FIXTURE.read_text(encoding="utf-8"))
+        assert "37884824872" not in {r["id"] for r in rows}
+
+    def test_cash_acats_deposit_uses_signed_cash_transfer(self):
+        xml = (
+            "<FlexQueryResponse><FlexStatements count='1'><FlexStatement>"
+            "<Transfers><Transfer accountId='U0000000' currency='USD' "
+            "assetCategory='CASH' reportDate='20260213' type='ACATS' "
+            "direction='IN' cashTransfer='289.69' transactionID='38036618138' "
+            "description='ACATS CASH' /></Transfers>"
+            "</FlexStatement></FlexStatements></FlexQueryResponse>"
+        )
+        rows = parse_cash_transactions(xml)
+        assert rows == [
+            {
+                "id": "38036618138",
+                "date": "2026-02-13",
+                "type": "Deposit",
+                "amount": 289.69,
+                "currency": "USD",
+                "description": "ACATS CASH",
+                "raw_type": "Transfer:ACATS:IN",
+            }
+        ]
 
 
 class TestFetchDelegatesToParser:

@@ -431,11 +431,15 @@ def parse_cash_transactions(xml_text: str) -> list[dict[str, Any]]:
     Lets a saved statement be replayed after a throttle embargo, and makes
     the parse rules testable without ever hitting the Flex Web Service.
 
-    Two rows are dropped:
+    Two CashTransaction rows are dropped:
       * no `transactionID` — IBKR emits per-day aggregate rows alongside the
         detail rows they summarize (2026-06-24 carries -42,000 and -60,000
         details plus a -102,000 aggregate). Keeping them double-counts.
       * `amount` of exactly zero — nothing moved.
+
+    Cash `<Transfer>` rows (`assetCategory=CASH`, non-zero `cashTransfer`)
+    become Deposit/Withdrawal. Securities ACATS with cash 0 are not cash
+    flows (TWR already counts them as external flow).
 
     Rows sharing a `transactionID` are all kept. The first keeps that id;
     later ones get `{transactionID}#{n}` so upsert cannot last-write-wins
@@ -452,6 +456,10 @@ def parse_cash_transactions(xml_text: str) -> list[dict[str, Any]]:
     for ct in root.findall(".//CashTransaction"):
         tid = (ct.get("transactionID") or "").strip()
         if tid and float(ct.get("amount") or 0.0) != 0.0:
+            counts[tid] = counts.get(tid, 0) + 1
+    for node in root.findall(".//Transfer"):
+        tid = _cash_transfer_id_and_amount(node)[0]
+        if tid:
             counts[tid] = counts.get(tid, 0) + 1
     duplicated = {tid for tid, n in counts.items() if n > 1}
     for ct in root.findall(".//CashTransaction"):
@@ -484,6 +492,10 @@ def parse_cash_transactions(xml_text: str) -> list[dict[str, Any]]:
             "description": description,
             "raw_type": raw_type or None,
         })
+    for node in root.findall(".//Transfer"):
+        row = _cash_transfer_row(node, duplicated)
+        if row is not None:
+            out.append(row)
     return out
 
 
@@ -517,6 +529,42 @@ def _disambiguated_id(
     fingerprint = "|".join((raw_type, f"{amount!r}", date_str, description or ""))
     digest = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()[:12]
     return f"{txn_id}#{digest}"
+
+
+def _cash_transfer_id_and_amount(node: ET.Element) -> tuple[str, float]:
+    if (node.get("assetCategory") or "").strip().upper() != "CASH":
+        return "", 0.0
+    txn_id = (node.get("transactionID") or "").strip()
+    try:
+        amt = float((node.get("cashTransfer") or "0").replace(",", ""))
+    except ValueError:
+        return "", 0.0
+    if not txn_id or amt == 0.0:
+        return "", 0.0
+    return txn_id, amt
+
+
+def _cash_transfer_row(node: ET.Element, duplicated: set[str]) -> Optional[dict[str, Any]]:
+    """Cash ACATS / wires on <Transfer>. Securities ACATS (cash 0) stay out."""
+    txn_id, amt = _cash_transfer_id_and_amount(node)
+    if not txn_id:
+        return None
+    desc = (node.get("description") or "").strip()
+    if desc in ("", "--"):
+        desc = (node.get("type") or "ACATS").strip() or "ACATS"
+    xfer_type = (node.get("type") or "ACATS").strip() or "ACATS"
+    direction = (node.get("direction") or "").strip().upper()
+    raw_type = f"Transfer:{xfer_type}:{direction}" if direction else f"Transfer:{xfer_type}"
+    date_str = _normalize_date(node.get("reportDate") or node.get("dateTime") or "")
+    return {
+        "id": _disambiguated_id(txn_id, raw_type, amt, date_str, desc, duplicated),
+        "date": date_str,
+        "type": "Deposit" if amt > 0 else "Withdrawal",
+        "amount": amt,
+        "currency": (node.get("currency") or "USD").upper(),
+        "description": desc,
+        "raw_type": raw_type,
+    }
 
 
 def describe_statement_shape(xml_text: str) -> dict[str, Any]:
@@ -601,8 +649,8 @@ def statement_shape_warnings(shape: dict[str, Any]) -> list[str]:
         )
     if shape["has_transfers_section"]:
         warnings.append(
-            f"statement carries {shape['transfer_count']} <Transfer> row(s), which "
-            "cash_flows does not ingest — external capital flow is understated"
+            f"statement carries {shape['transfer_count']} <Transfer> row(s); "
+            "cash ACATS are cash_flows, securities ACATS are TWR-only"
         )
     if shape["non_usd_rows"]:
         others = [c for c in shape["currencies"] if c != "USD"]
