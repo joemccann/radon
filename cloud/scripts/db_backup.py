@@ -19,6 +19,23 @@ pattern as drift_audit.py) so a wedged libsql client can never block the
 liveness signal. libsql_experimental has no client-side timeouts (DUR-09),
 so the real bound is the unit's TimeoutStartSec.
 
+Off-box copy (B2): after the local dump lands, every ``*.sql.gz`` in
+BACKUP_DIR that is missing from the ``radon-archive`` bucket under
+``db_backups/`` is uploaded, so the first run backfills the whole local
+window and later runs push only the new night. Credentials default to
+``RADON_ARCHIVE_S3_*`` with optional ``RADON_DB_BACKUP_S3_*`` overrides,
+exactly like media_backup.py.
+
+DELIBERATE DIVERGENCE from media_backup.py, which fails CLOSED: here the
+local gzip is the critical path and the upload is not. A wedged or
+unconfigured B2 never deletes, truncates, or skips the on-box dump -- the
+run still writes the file, then reports the upload failure through the
+journal and an ``error`` service_health heartbeat (exit 1). Fail-degraded
+in that one direction only.
+
+Remote retention is REMOTE_RETENTION_DAYS, deliberately longer than the
+on-box RETENTION_DAYS; off-boxing a 30-day window would buy nothing.
+
 Restore runbook: main repo docs/cloud-services.md "DB backup & restore".
 """
 from __future__ import annotations
@@ -29,13 +46,31 @@ import os
 import sys
 import time
 import urllib.request
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 SERVICE_NAME = "db-backup"
 RETENTION_DAYS = 30
+# Off-box copies outlive the on-box window by design -- a year of nightly
+# dumps in B2 is the whole reason for pushing them off a 75 GB root fs.
+# Local RETENTION_DAYS stays the operator's call and is untouched by this.
+REMOTE_RETENTION_DAYS = 365
+DEFAULT_S3_PREFIX = "db_backups/"
 TURSO_TIMEOUT = 10
 SUMMARY_CAP = 300
+# Wall-clock ceiling for the upload leg. The unit allows TimeoutStartSec
+# 19500s and a healthy dump eats ~1500s, so 3600s leaves ample headroom
+# while capping a slow first backfill (30 x ~530 MB): whatever does not fit
+# is deferred to tomorrow's run, which resumes where this one stopped.
+UPLOAD_BUDGET_SECS = 3600
+# Bounded transport: botocore has NO default socket timeout, so a wedged B2
+# would otherwise hang until TimeoutStartSec kills the whole unit.
+S3_CONNECT_TIMEOUT = 30
+S3_READ_TIMEOUT = 300
+S3_MAX_ATTEMPTS = 3
+MULTIPART_CHUNK_BYTES = 64 * 1024 * 1024
+MULTIPART_CONCURRENCY = 4
 # Rows per SELECT page. Direct-to-cloud throughput is ~1 MB/s and
 # portfolio_snapshots rows are ~12 KB, so 500 rows ≈ 6 MB / ~7 s per page —
 # bounded memory instead of a ~700 MB fetchall on the fattest table.
@@ -91,6 +126,112 @@ def select_prunable(entries, now_secs: float, retention_days: int = RETENTION_DA
         name
         for name, mtime in entries
         if name.endswith(".sql.gz") and mtime < cutoff
+    ]
+
+
+@dataclass(frozen=True)
+class RemoteObject:
+    """One object under the off-box dump prefix (size + mtime for compare)."""
+
+    key: str
+    size: int
+    mtime: float
+
+
+def normalize_endpoint(url: str) -> str:
+    """B2 console often copies host-only; boto3 requires a scheme."""
+    ep = (url or "").strip()
+    if ep and not ep.startswith(("http://", "https://")):
+        return "https://" + ep
+    return ep
+
+
+def s3_config_from_env(env: dict[str, str] | None = None) -> dict[str, str] | None:
+    """Resolve B2/S3 config for the off-box dump copy.
+
+    Preference order per field:
+      1. ``RADON_DB_BACKUP_S3_*`` when set (dedicated application key)
+      2. fall back to ``RADON_ARCHIVE_S3_*`` (shared radon-archive bucket)
+
+    Prefix: ``RADON_DB_BACKUP_PREFIX`` else ``db_backups/``. It never
+    inherits ``RADON_ARCHIVE_S3_PREFIX`` -- dumps must not land in the
+    portfolio_snapshots tree.
+
+    Returns ``None`` when endpoint/bucket/key/secret are incomplete.
+    """
+    env = env if env is not None else dict(os.environ)
+
+    def pick(db_key: str, archive_key: str) -> str:
+        return (env.get(db_key) or env.get(archive_key) or "").strip()
+
+    cfg = {
+        "endpoint_url": normalize_endpoint(
+            pick("RADON_DB_BACKUP_S3_ENDPOINT", "RADON_ARCHIVE_S3_ENDPOINT")
+        ),
+        "bucket": pick("RADON_DB_BACKUP_S3_BUCKET", "RADON_ARCHIVE_S3_BUCKET"),
+        "access_key": pick(
+            "RADON_DB_BACKUP_S3_ACCESS_KEY_ID", "RADON_ARCHIVE_S3_ACCESS_KEY_ID"
+        ),
+        "secret_key": pick(
+            "RADON_DB_BACKUP_S3_SECRET_ACCESS_KEY",
+            "RADON_ARCHIVE_S3_SECRET_ACCESS_KEY",
+        ),
+    }
+    if not all(cfg.values()):
+        return None
+
+    prefix = (env.get("RADON_DB_BACKUP_PREFIX") or DEFAULT_S3_PREFIX).strip()
+    if prefix and not prefix.endswith("/"):
+        prefix += "/"
+    cfg["region"] = pick("RADON_DB_BACKUP_S3_REGION", "RADON_ARCHIVE_S3_REGION") or "auto"
+    cfg["prefix"] = prefix or DEFAULT_S3_PREFIX
+    return cfg
+
+
+def object_key_for(prefix: str, name: str) -> str:
+    """Join the S3 prefix with a dump basename (no leading slash)."""
+    clean = prefix.lstrip("/")
+    if clean and not clean.endswith("/"):
+        clean += "/"
+    return clean + name.lstrip("/")
+
+
+def is_dump_name(name: str) -> bool:
+    """Only completed dumps ship off-box (never the ``.tmp`` in-progress
+    file, which starts with a dot and ends ``.tmp``)."""
+    return name.endswith(".sql.gz") and not name.startswith(".")
+
+
+def select_uploadable(local_entries, remote_by_key, prefix: str) -> list[str]:
+    """Dump names missing off-box or differing in size, NEWEST FIRST.
+
+    ``local_entries`` is an iterable of ``(name, size_bytes)``. Newest-first
+    means tonight's dump is uploaded before any backfill of the older
+    window, so a budget-truncated run always protects the newest data.
+    Size compare is enough: a dump filename carries its UTC timestamp and is
+    never rewritten once ``os.replace`` has landed it.
+    """
+    planned = []
+    for name, size in local_entries:
+        if not is_dump_name(name):
+            continue
+        remote = remote_by_key.get(object_key_for(prefix, name))
+        if remote is None or remote.size != size:
+            planned.append(name)
+    return sorted(planned, reverse=True)
+
+
+def select_remote_prunable(
+    entries, now_secs: float, retention_days: int = REMOTE_RETENTION_DAYS
+) -> list[str]:
+    """Off-box object keys (``*.sql.gz`` ONLY) past the remote window.
+
+    ``entries`` is an iterable of ``(key, mtime_secs)``. Separate from
+    :func:`select_prunable` on purpose: remote keeps a far longer tail.
+    """
+    cutoff = now_secs - retention_days * 86400
+    return [
+        key for key, mtime in entries if key.endswith(".sql.gz") and mtime < cutoff
     ]
 
 
@@ -216,6 +357,160 @@ def dump_database(db, out, batch_size: int = BATCH_SIZE) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Off-box copy to Backblaze B2 (S3 API) -- never the critical path
+# ---------------------------------------------------------------------------
+
+
+def _s3_client(cfg: dict[str, str]):
+    import boto3  # lazy: unit tests and credential-less runs never import it
+    from botocore.config import Config
+
+    return boto3.client(
+        "s3",
+        endpoint_url=cfg["endpoint_url"],
+        aws_access_key_id=cfg["access_key"],
+        aws_secret_access_key=cfg["secret_key"],
+        region_name=cfg["region"],
+        config=Config(
+            connect_timeout=S3_CONNECT_TIMEOUT,
+            read_timeout=S3_READ_TIMEOUT,
+            retries={"max_attempts": S3_MAX_ATTEMPTS, "mode": "standard"},
+        ),
+    )
+
+
+def _transfer_config():
+    """Multipart so a ~500 MB dump uploads in bounded, retryable chunks."""
+    from boto3.s3.transfer import TransferConfig
+
+    return TransferConfig(
+        multipart_threshold=MULTIPART_CHUNK_BYTES,
+        multipart_chunksize=MULTIPART_CHUNK_BYTES,
+        max_concurrency=MULTIPART_CONCURRENCY,
+        use_threads=True,
+    )
+
+
+def _object_mtime(obj) -> float:
+    stamp = obj.get("LastModified")
+    try:
+        return float(stamp.timestamp())
+    except Exception:  # noqa: BLE001 - an unparseable stamp must never prune
+        return float("inf")
+
+
+def list_remote_dumps(client, bucket: str, prefix: str) -> dict[str, RemoteObject]:
+    """Index every object under ``prefix`` as ``{key: RemoteObject}``."""
+    out: dict[str, RemoteObject] = {}
+    token = None
+    while True:
+        kwargs = {"Bucket": bucket, "Prefix": prefix}
+        if token:
+            kwargs["ContinuationToken"] = token
+        resp = client.list_objects_v2(**kwargs)
+        for obj in resp.get("Contents") or []:
+            key = obj["Key"]
+            out[key] = RemoteObject(
+                key=key, size=int(obj["Size"]), mtime=_object_mtime(obj)
+            )
+        if not resp.get("IsTruncated"):
+            break
+        token = resp.get("NextContinuationToken")
+        if not token:
+            break
+    return out
+
+
+def sync_offbox(
+    backup_dir: Path,
+    cfg: dict[str, str],
+    *,
+    client=None,
+    now: float | None = None,
+    budget_secs: float = UPLOAD_BUDGET_SECS,
+    clock=time.monotonic,
+) -> dict:
+    """Push every local dump missing from B2, then prune the remote tail.
+
+    Idempotent: an object already present at the same size is skipped, so a
+    re-run costs one LIST. Resumable: uploads run newest-first and stop when
+    ``budget_secs`` is spent, leaving the rest for the next nightly run --
+    that is how the existing 30-dump local window backfills without any one
+    run overrunning TimeoutStartSec.
+    """
+    transfer = None
+    if client is None:
+        # Real transport only: an injected client is a test double, and
+        # building a TransferConfig would import boto3 for nothing.
+        client = _s3_client(cfg)
+        transfer = _transfer_config()
+
+    bucket = cfg["bucket"]
+    prefix = cfg["prefix"]
+    local = [
+        (path.name, path.stat().st_size)
+        for path in backup_dir.iterdir()
+        if path.is_file()
+    ]
+    remote = list_remote_dumps(client, bucket, prefix)
+    planned = select_uploadable(local, remote, prefix)
+
+    started = clock()
+    uploaded = 0
+    bytes_uploaded = 0
+    deferred = 0
+    for index, name in enumerate(planned):
+        if clock() - started >= budget_secs:
+            deferred = len(planned) - index
+            break
+        path = backup_dir / name
+        kwargs = {"Config": transfer} if transfer is not None else {}
+        client.upload_file(str(path), bucket, object_key_for(prefix, name), **kwargs)
+        uploaded += 1
+        bytes_uploaded += path.stat().st_size
+
+    prune_now = time.time() if now is None else now
+    prunable = select_remote_prunable(
+        [(obj.key, obj.mtime) for obj in remote.values()], prune_now
+    )
+    for key in prunable:
+        client.delete_object(Bucket=bucket, Key=key)
+
+    dumps = [name for name, _size in local if is_dump_name(name)]
+    return {
+        "bucket": bucket,
+        "prefix": prefix,
+        "local_dumps": len(dumps),
+        "planned": len(planned),
+        "uploaded": uploaded,
+        "bytes_uploaded": bytes_uploaded,
+        "deferred": deferred,
+        "skipped_present": len(dumps) - len(planned),
+        "remote_pruned": len(prunable),
+    }
+
+
+def run_offbox(backup_dir: Path) -> tuple[dict | None, str | None]:
+    """Best-effort off-box leg. Returns ``(summary, error)``; NEVER raises.
+
+    The local dump has already landed by the time this runs, and nothing
+    here may remove or rewrite it. A failure is reported, not fatal to the
+    artifact -- see the module docstring on the deliberate divergence from
+    media_backup.py.
+    """
+    cfg = s3_config_from_env()
+    if cfg is None:
+        return None, (
+            "off-box upload skipped: B2 credentials missing (set "
+            "RADON_ARCHIVE_S3_* or RADON_DB_BACKUP_S3_*)"
+        )
+    try:
+        return sync_offbox(backup_dir, cfg), None
+    except Exception as exc:  # noqa: BLE001 - upload is not the critical path
+        return None, f"{exc.__class__.__name__}: {exc}"
+
+
+# ---------------------------------------------------------------------------
 # service_health heartbeat (stdlib libSQL HTTP pipeline -- bounded, no libsql)
 # ---------------------------------------------------------------------------
 
@@ -322,19 +617,45 @@ def run_backup() -> dict:
         (BACKUP_DIR / name).unlink(missing_ok=True)
 
     size = final_path.stat().st_size
+
+    # Off-box leg LAST and non-fatal: the artifact above is already durable.
+    offbox, offbox_error = run_offbox(BACKUP_DIR)
+
     duration = round(time.monotonic() - started, 1)
-    return {
-        "summary": (
-            f"dumped {stats['tables']} tables / {stats['rows']} rows -> "
-            f"{final_path.name} ({size} bytes) in {duration}s; pruned {len(pruned)}"
-        )[:SUMMARY_CAP],
+    summary = (
+        f"dumped {stats['tables']} tables / {stats['rows']} rows -> "
+        f"{final_path.name} ({size} bytes) in {duration}s; pruned {len(pruned)}"
+    )
+    if offbox_error:
+        summary += f"; b2 FAILED: {offbox_error[:160]}"
+    else:
+        summary += (
+            f"; b2 {offbox['uploaded']}/{offbox['planned']} "
+            f"({offbox['bytes_uploaded']} B), deferred {offbox['deferred']}, "
+            f"remote pruned {offbox['remote_pruned']}"
+        )
+    detail = {
+        "summary": summary[:SUMMARY_CAP],
         "path": str(final_path),
         "size_bytes": size,
         "duration_secs": duration,
         "tables": stats["tables"],
         "rows": stats["rows"],
         "pruned": len(pruned),
+        "offbox_error": offbox_error,
     }
+    if offbox:
+        detail.update(
+            {
+                "offbox_bucket": offbox["bucket"],
+                "offbox_prefix": offbox["prefix"],
+                "offbox_uploaded": offbox["uploaded"],
+                "offbox_bytes_uploaded": offbox["bytes_uploaded"],
+                "offbox_deferred": offbox["deferred"],
+                "offbox_remote_pruned": offbox["remote_pruned"],
+            }
+        )
+    return detail
 
 
 def main() -> int:
@@ -350,14 +671,19 @@ def main() -> int:
             print(f"service_health write failed: {write_exc}", file=sys.stderr)
         return 1
 
-    print(f"db-backup: {detail['summary']}")
+    # The dump itself succeeded; only the off-box copy can still be red.
+    state = "error" if detail.get("offbox_error") else "ok"
+    print(
+        f"db-backup: {detail['summary']}",
+        file=sys.stderr if state == "error" else sys.stdout,
+    )
     try:
-        write_service_health("ok", detail, started_at)
+        write_service_health(state, detail, started_at)
     except Exception as exc:  # noqa: BLE001 - bounded write, surface the failure
         print(f"service_health write failed: {exc}", file=sys.stderr)
         return 1
-    print("service_health row written: db-backup = ok")
-    return 0
+    print(f"service_health row written: db-backup = {state}")
+    return 1 if state == "error" else 0
 
 
 if __name__ == "__main__":
