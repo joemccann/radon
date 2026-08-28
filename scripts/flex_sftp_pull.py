@@ -221,7 +221,7 @@ def run(
         return 1
 
     if not names:
-        _heartbeat("error", "empty remote directory")
+        _heartbeat("ok", "empty remote directory; waiting for IBKR delivery")
         return 0
 
     _ensure_inbox(inbox)

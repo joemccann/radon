@@ -878,7 +878,7 @@ class TestCrossCutting:
             if env_file is None:
                 continue
             if name in STRIPPED_ENV_SERVICES:
-                assert env_file == STRIPPED_ENV_SERVICES[name], (
+                assert env_file.lstrip("-") == STRIPPED_ENV_SERVICES[name], (
                     f"{name} must not load production secrets; "
                     f"got EnvironmentFile={env_file}"
                 )
@@ -974,13 +974,13 @@ class TestLeapGarchScanBudget:
 
 
 class TestFlexPull:
-    """sFTP puller is shipped disabled. enable --now would fire against an empty remote."""
+    """sFTP puller. Empty outgoing is ok skip, not a page."""
 
     def test_oneshot_stripped_env_and_timeout(self, unit):
         svc = unit("radon-flex-pull.service")["Service"]
         assert svc["type"] == "oneshot"
         assert int(svc["timeoutstartsec"]) >= 120
-        assert svc["environmentfile"] == STRIPPED_ENV_SERVICES["radon-flex-pull.service"]
+        assert svc["environmentfile"].lstrip("-") == STRIPPED_ENV_SERVICES["radon-flex-pull.service"]
         assert "/etc/radon/env" not in svc["environmentfile"]
         assert "flex_sftp_pull.py" in svc["execstart"]
         hidden = svc.get("inaccessiblepaths", "")
@@ -991,10 +991,11 @@ class TestFlexPull:
         assert "OnCalendar=Tue..Sat *-*-* 07:30:00 America/New_York" in text
         assert "OnCalendar=Tue..Sat *-*-* 08:30:00 America/New_York" in text
 
-    def test_not_on_auto_sync_allowlist(self):
+    def test_on_auto_sync_allowlist(self):
         allowlist = Path(__file__).resolve().parent.parent / "config" / "auto-sync-units.txt"
         text = allowlist.read_text()
-        assert "radon-flex-pull" not in text
+        assert "radon-flex-pull.service" in text
+        assert "radon-flex-pull.timer" in text
 
 
 class TestGrokPageResponder:

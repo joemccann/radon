@@ -1,5 +1,5 @@
 [Unit]
-Description=Radon Flex sFTP pull (OpenSSH IPv4 client; timer disabled until Flex grant)
+Description=Radon Flex sFTP pull (OpenSSH IPv4 client)
 After=network.target
 StartLimitIntervalSec=300
 StartLimitBurst=5
@@ -10,8 +10,9 @@ User=radon
 UMask=0077
 WorkingDirectory=/home/radon/radon
 # Not /etc/radon/env: that file carries TWS_PASSWORD. Turso + sFTP live here.
-EnvironmentFile=/var/lib/radon/flex-secrets/env
+EnvironmentFile=-/var/lib/radon/flex-secrets/env
 Environment=RADON_DB_NO_REPLICA=1
+ExecStartPre=+/usr/bin/install -d -o radon -g radon -m 0700 /var/lib/radon/flex-inbox
 ExecCondition=/usr/bin/test -f /home/radon/radon/scripts/flex_sftp_pull.py
 ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/flex_sftp_pull.py
 StandardOutput=journal
@@ -21,7 +22,7 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectHome=read-only
 InaccessiblePaths=-/etc/radon/env -/home/radon/radon-cloud/.env
-ReadWritePaths=/var/lib/radon/flex-inbox
+ReadWritePaths=/var/lib/radon/flex-inbox /var/lib/radon/flex-secrets
 
 [Install]
 WantedBy=multi-user.target
