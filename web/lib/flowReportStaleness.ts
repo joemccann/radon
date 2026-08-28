@@ -69,3 +69,45 @@ export const FLOW_REPORT_STALENESS = {
   MARKET_HOURS_TTL_MS,
   AFTER_HOURS_TTL_MS,
 };
+
+/** Report date in market time, `YYYY-MM-DD` — the format the daily history
+ * table already uses. UTC would move an after-hours scan to the next day. */
+function marketDate(when: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(when);
+}
+
+function calendarDaysApart(from: string, to: string): number {
+  return Math.round(
+    (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000,
+  );
+}
+
+/**
+ * "2026-06-16 · 73 days old" — the age of a report, for rendering next to the
+ * figures it produced. Returns null when no timestamp is usable.
+ *
+ * A cached flow report is served whenever a live scan fails, and the cache has
+ * no upper age: /flow-analysis/AMZN served a June report through August. The
+ * verdict, the aggregate and the options bias all render identically to a
+ * fresh scan, so the age has to travel with them.
+ */
+export function flowReportAgeLabel(
+  report: FlowReportLike | null | undefined,
+  now: Date = new Date(),
+): string | null {
+  const ts = flowReportTimestamp(report);
+  if (!ts) return null;
+  const parsed = parseScanTime(ts);
+  if (!parsed) return null;
+
+  const reportDate = marketDate(parsed);
+  const days = Math.max(0, calendarDaysApart(reportDate, marketDate(now)));
+  if (days === 0) return `${reportDate} · today`;
+  if (days === 1) return `${reportDate} · 1 day old`;
+  return `${reportDate} · ${days} days old`;
+}

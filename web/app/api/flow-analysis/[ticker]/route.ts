@@ -103,9 +103,17 @@ export async function POST(_req: Request, ctx: Params): Promise<Response> {
   }
 
   try {
+    // Caddy bounds this upstream at a 30s `response_header_timeout`
+    // (cloud/caddy/Caddyfile), and a 20-session AMZN pull measures 81s before
+    // FastAPI has even probed the saturated general lane for a slot. A 130s
+    // wait here could therefore only ever end as a raw edge 502, so answer
+    // first with the cache branch below and let the scan land on its own:
+    // FastAPI detaches it from this request and writes the cache when it
+    // finishes, so the next load is fresh. Pinned under the edge bound by
+    // `test_the_route_answers_before_the_edge_cuts_it`.
     const data = await radonFetch(`/flow-analysis/${ticker}`, {
       method: "POST",
-      timeout: 130_000,
+      timeout: 25_000,
     });
     const cache_meta = buildCacheMeta(cachePathFor(ticker));
     return setNoStoreResponseHeaders(

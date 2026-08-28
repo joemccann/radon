@@ -18197,6 +18197,23 @@ body[data-mobile="true"] td.right {
   color: var(--fault);
 }
 
+/* A cached verdict's age must not read as part of the direction. R-358 added
+   this span with no styling, so "BULLISH" and "LAST GOOD SCAN 2026-06-16" ran
+   together at 22px as one headline. */
+.ticker-flow-badge-stale {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--warn-text) 34%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--warn-text) 12%, transparent);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--warn-text);
+  vertical-align: middle;
+}
+
 .ticker-flow-badge-rationale {
   font-family: var(--font-sans);
   font-size: 12px;

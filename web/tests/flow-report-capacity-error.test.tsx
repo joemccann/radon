@@ -111,3 +111,68 @@ describe("TickerFlowReport hero — a preserved verdict is marked stale", () => 
     expect(screen.queryByTestId("flow-hero-stale")).toBeNull();
   });
 });
+
+/* ── 2026-08-28: a cached report must name its own age in the body ──────────
+ *
+ * /flow-analysis/AMZN served the Jun 16 cache after a capacity 502. The hero
+ * chip said "LAST GOOD SCAN" without a date, and DARK POOL AGGREGATE /
+ * OPTIONS FLOW BIAS rendered byte-identically to a fresh scan. The operator
+ * found the ten-week gap by reading ISO dates in the history table.
+ */
+describe("TickerFlowReport — a stale report names its own age", () => {
+  const JUNE = {
+    ticker: "AMZN",
+    fetched_at: "2026-06-16T23:43:00Z",
+    verdict: { direction: "BULLISH" as const, confidence: 27, rationale: "Sustained DP buying" },
+    dark_pool: {
+      aggregate: { flow_direction: "NEUTRAL", flow_strength: 4, dp_buy_ratio: 0.52, num_prints: 2500 },
+      daily: [{ date: "2026-06-16", flow_direction: "DISTRIBUTION", flow_strength: 70, dp_buy_ratio: 0.15, num_prints: 500 }],
+    },
+    options_flow: { bias: "STRONGLY_BULLISH", put_call_ratio: 0.16 },
+  };
+
+  function renderWith(state: Record<string, unknown>) {
+    Object.assign(hookState, state);
+    return render(<TickerFlowReport ticker="AMZN" />);
+  }
+
+  afterEach(() => {
+    Object.assign(hookState, {
+      data: null,
+      status: "error",
+      error: "Radon API 502: Subprocess capacity exhausted",
+      refresh: () => {},
+    });
+    vi.useRealTimers();
+  });
+
+  function freezeToday() {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-28T18:24:00Z"));
+  }
+
+  it("dates the cached figures above the numbers themselves", () => {
+    freezeToday();
+    renderWith({ data: JUNE, status: "stale", error: "Scan did not complete" });
+    expect(screen.getByTestId("flow-stale-age").textContent).toContain("2026-06-16");
+    expect(screen.getByTestId("flow-stale-age").textContent).toContain("73 days old");
+  });
+
+  it("dates the hero chip too", () => {
+    freezeToday();
+    renderWith({ data: JUNE, status: "stale", error: "Scan did not complete" });
+    expect(screen.getByTestId("flow-hero-stale").textContent).toContain("2026-06-16");
+  });
+
+  it("marks a capacity 502 that left a cached report standing", () => {
+    freezeToday();
+    renderWith({ data: JUNE, status: "error", error: "Radon API 502: Subprocess capacity exhausted" });
+    expect(screen.getByTestId("flow-stale-age").textContent).toContain("73 days old");
+  });
+
+  it("adds no age strip to a fresh report", () => {
+    freezeToday();
+    renderWith({ data: { ...JUNE, fetched_at: "2026-08-28T18:20:00Z" }, status: "fresh", error: null });
+    expect(screen.queryByTestId("flow-stale-age")).toBeNull();
+  });
+});
