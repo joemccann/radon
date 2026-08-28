@@ -547,6 +547,21 @@ Incident: 2026-08-15 00:24Z, P1 page `34ab3e3c…`.
     snapshot, exit 0 so the unit does not page. Ticker eval lookups still
     exit 1. Other 429s still fail the oneshot.
     Regression: `test_fetch_oi_changes.py::test_market_uw_daily_quota_exits_zero_and_embargoes_until_reset`.
+- **(g) data-refresh soft-fail silence (2026-08-28, `cri-scan`):**
+  `radon-refresh.timer` runs `scripts.data_refresh` every 15m. `cri_scan.py`
+  only heartbeats `service_health[cri-scan]` at successful completion. When
+  the parent kills the child at the budget, no row is written; two consecutive
+  kills freeze `updated_at` past the 35m open window and page stale
+  (`silent for 43m`, page `441a4316…`, last ok 14:31Z, timeouts 14:45/15:00Z).
+  Neighbouring cycles finished in 63-103s against the old 120s ceiling; IB
+  pool stayed connected and vcg/gex completed in seconds. Discriminating
+  check: journal `cri_scan.py timed out after Ns — keeping existing cri.json`
+  with `Data refresh complete (cri: FAIL, …)` while `/health` `ib_pool` is
+  connected. Not IB 2FA, not Turso. Fix: raise cri budget to 180s (still
+  fits `TimeoutStartSec=480` with vcg/gex at 120s) and parent-heartbeat
+  `error` + `next_attempt_at` on every soft-fail so `_check_stale` cannot
+  page silence. Regression: `test_data_refresh.py::test_run_scan_timeout_heartbeats_cri_scan_error`,
+  `test_cri_scan_budget_exceeds_observed_slow_path`.
 - **Detection:** `GET /api/probe/freshness` (bearer `RADON_PROBE_FRESHNESS_TOKEN`,
   always 200) — `all_fresh: false` with the failing `checks` named; it is already
   market-state aware, so `all_fresh: null` off-hours is normal.
