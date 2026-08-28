@@ -5294,6 +5294,34 @@ it. Filed so the next audit does not have to rediscover them.
   asked for its cache; assert it does not serve a cooldown for an unlanded
   payload.
 
+- **T-247 [P0] The T-124 realized-P&L correction is INERT in production, and
+  the test that guards it passes only on a fixture accident.**
+  `_ordered` (`scripts/clients/journal_realized.py:190-201`) sorts a day by
+  `(day, execution_time, written_at, index)`. A real Flex row carries NO
+  `execution_time` — `journal_rehydrate` never writes the key (grep: zero
+  occurrences in the file) — so `str(... or "")` yields `""`, which sorts
+  FIRST. The Flex row therefore wins attribution and the DAEMON's row is the one
+  suppressed. The surviving key is then a Flex `tradeID`
+  (`scripts/trade_blotter/flex_query.py:274` takes
+  `trade.get("tradeID") or trade.get("execId")`, so it is digit-only), and no IB
+  fill ever carries a `tradeID`, so `apply_journal_realized_pnl` matches
+  nothing and **both** partials ship IB's drifted figure. All three lines
+  verified by the lead. This hits the GENUINE-duplicate case too, which means
+  the SLV +$18,511-vs-+$30,069 correction that T-124 exists to deliver never
+  lands in production at all.
+  `test_same_close_under_api_and_flex_ids_counts_once` passes only because its
+  fixture gives NEITHER row an `execution_time`, so the tie falls through to
+  `written_at` and the daemon row happens to survive — the opposite of what
+  production does. Pinned as-is under T-184 by
+  `test_a_real_flex_row_has_no_execution_time_so_it_wins_the_attribution`; the
+  behaviour is recorded, not fixed.
+  **AC:** the root fix is upstream — `flex_query.py:274` prefers `tradeID` over
+  the Flex `ibExecID`; carrying `ibExecID` would let `_claim_exec_parts` dedupe
+  exactly and retire the namespace heuristic entirely. Red: a fixture where the
+  daemon row HAS an `execution_time` and the Flex row does not must currently
+  suppress the daemon row and produce an unmatchable key; green: the daemon row
+  survives and `apply_journal_realized_pnl` matches an IB fill.
+
 - **T-246 [P2] A matcher wider than intended.**
   `web/tests/same-day-pnl-surface-parity.test.tsx:157` builds a `RegExp` from an
   unescaped label, so its `.` matches `,`. Harmless now that T-233 pins the
