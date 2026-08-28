@@ -82,54 +82,53 @@ FAKE_PERF_DATA = {
 
 
 @pytest.mark.anyio
-async def test_post_performance_returns_result(client, tmp_path):
-    """POST /performance returns the build result."""
+async def test_post_performance_is_file_ingest_only(client, tmp_path):
+    """P2: page-driven POST /performance is 404. Timer + --from-file own rebuilds."""
     from api.subprocess import ScriptResult
     mock_result = ScriptResult(ok=True, data=FAKE_PERF_DATA)
 
-    with patch("api.server.run_script", AsyncMock(return_value=mock_result)), \
+    with patch("api.server.run_script", AsyncMock(return_value=mock_result)) as run, \
          patch("api.server._write_cache"), \
          patch("api.server._running_build", None):
         import api.server
         api.server._running_build = None
         resp = await client.post("/performance")
 
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["period_label"] == "YTD"
-    assert "_checksum" not in data
+    assert resp.status_code == 404
+    assert "file-ingest" in resp.json()["detail"].lower()
+    run.assert_not_called()
 
 
 @pytest.mark.anyio
-async def test_background_returns_202(client):
-    """POST /performance/background returns 202 accepted."""
+async def test_background_is_file_ingest_only(client):
+    """P2: POST /performance/background must not SendRequest."""
     from api.subprocess import ScriptResult
     mock_result = ScriptResult(ok=True, data=FAKE_PERF_DATA)
 
-    with patch("api.server.run_script", AsyncMock(return_value=mock_result)), \
+    with patch("api.server.run_script", AsyncMock(return_value=mock_result)) as run, \
          patch("api.server._write_cache"):
         import api.server
         api.server._running_build = None
         resp = await client.post("/performance/background")
 
-    assert resp.status_code == 202
-    assert resp.json()["status"] == "accepted"
+    assert resp.status_code == 404
+    run.assert_not_called()
 
 
 @pytest.mark.anyio
-async def test_background_dedup_returns_already_running(client):
-    """Second background call while build in-flight returns already_running."""
+async def test_background_does_not_start_a_build_when_one_is_inflight(client):
+    """A 404 must not piggyback into a live Flex rebuild either."""
     import api.server
 
-    # Simulate an in-flight task
     never_done = asyncio.get_running_loop().create_future()
     fake_task = asyncio.ensure_future(never_done)
     api.server._running_build = fake_task
 
     try:
-        resp = await client.post("/performance/background")
-        assert resp.status_code == 202
-        assert resp.json()["status"] == "already_running"
+        with patch("api.server.run_script", AsyncMock()) as run:
+            resp = await client.post("/performance/background")
+        assert resp.status_code == 404
+        run.assert_not_called()
     finally:
         fake_task.cancel()
         try:
@@ -139,8 +138,8 @@ async def test_background_dedup_returns_already_running(client):
 
 
 @pytest.mark.anyio
-async def test_post_piggybacks_on_inflight_task(client):
-    """POST /performance awaits an in-flight task instead of starting a new one."""
+async def test_concurrent_posts_do_not_start_a_build(client):
+    """Two page loads must not become even one SendRequest."""
     import api.server
     from api.subprocess import ScriptResult
 
@@ -155,20 +154,14 @@ async def test_post_piggybacks_on_inflight_task(client):
     with patch("api.server.run_script", slow_build), \
          patch("api.server._write_cache"):
         api.server._running_build = None
-
-        # Fire two concurrent POST requests
         r1, r2 = await asyncio.gather(
             client.post("/performance"),
             client.post("/performance"),
         )
 
-    assert r1.status_code == 200
-    assert r2.status_code == 200
-    # Both should get the same data
-    assert r1.json()["period_label"] == "YTD"
-    assert r2.json()["period_label"] == "YTD"
-    # Only one build should have occurred
-    assert call_count == 1
+    assert r1.status_code == 404
+    assert r2.status_code == 404
+    assert call_count == 0
 
 
 @pytest.mark.anyio
@@ -190,7 +183,7 @@ async def test_atomic_write_cache_survives_crash(tmp_path):
 
 @pytest.mark.anyio
 async def test_no_internal_metadata_in_response(client):
-    """Response from POST /performance must not contain _checksum or cache metadata."""
+    """A 404 rebuild must not leak cache metadata either."""
     from api.subprocess import ScriptResult
     mock_result = ScriptResult(ok=True, data=FAKE_PERF_DATA)
 
@@ -200,6 +193,7 @@ async def test_no_internal_metadata_in_response(client):
         api.server._running_build = None
         resp = await client.post("/performance")
 
+    assert resp.status_code == 404
     data = resp.json()
     assert "_checksum" not in data
     assert "fetched_at" not in data

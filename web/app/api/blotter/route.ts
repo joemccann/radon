@@ -88,6 +88,12 @@ export async function GET(): Promise<Response> {
 }
 
 export async function POST(): Promise<Response> {
+  const access = await requireRouteAccess(undefined, {
+    operatorOnly: true,
+    rate: { key: "blotter-rehydrate", limit: 2, windowMs: 60_000 },
+    durableRateTier: "C",
+  });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   return setNoStoreResponseHeaders(
     NextResponse.json(

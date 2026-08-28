@@ -71,7 +71,7 @@ class TestOneFlexRequestPerQueryIdPerRun:
         monkeypatch.setattr(builder, "load_nav_from_disk", lambda: {"2026-08-14": 1.0})
         monkeypatch.setattr(builder, "load_flows_from_turso", lambda: None)
 
-        resolution = builder.get_nav_snapshots()
+        resolution = builder.get_nav_snapshots(sendrequest=True)
         builder.resolve_flows(resolution.document)
 
         assert flex_down == [NAV_QUERY_ID], (
@@ -86,7 +86,7 @@ class TestOneFlexRequestPerQueryIdPerRun:
         monkeypatch.setattr(builder, "load_nav_from_disk", lambda: {"2026-08-14": 1.0})
         monkeypatch.setattr(builder, "load_flows_from_turso", lambda: None)
 
-        resolution = builder.get_nav_snapshots()
+        resolution = builder.get_nav_snapshots(sendrequest=True)
         flows, _coverage = builder.resolve_flows(resolution.document)
 
         assert flows.status is FlowsStatus.FAILED
@@ -104,7 +104,7 @@ class TestOneFlexRequestPerQueryIdPerRun:
         monkeypatch.setattr(builder, "load_nav_from_disk", lambda: {"2026-08-14": 1.0})
         monkeypatch.setattr(builder, "load_flows_from_turso", lambda: None)
 
-        resolution = builder.get_nav_snapshots()
+        resolution = builder.get_nav_snapshots(sendrequest=True)
         builder.resolve_flows(resolution.document)
 
         assert flex_down == [NAV_QUERY_ID, "9999999"]
