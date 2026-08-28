@@ -5294,6 +5294,19 @@ it. Filed so the next audit does not have to rediscover them.
   asked for its cache; assert it does not serve a cooldown for an unlanded
   payload.
 
+- **T-249 [P2] The header-timeout guard accepts Caddy's UNLIMITED default.**
+  `cloud/tests/test_caddyfile.py::test_the_header_timeout_is_short_enough_to_surface`
+  asserts the parsed value is `<= 60`, and `0 <= 60`, so
+  `response_header_timeout 0s` — which is Caddy's spelling for "no limit" —
+  passes the very guard meant to bound it. Demonstrated under T-224: mutating
+  the `localhost:3000` block to `0s` left all EIGHT regex/text assertions in the
+  file passing, and only the new wire-level mechanism test caught it ("the edge
+  forwarded the upstream's late response header instead of giving up first").
+  The mechanism test now covers this mutant, so the exposure is closed in
+  practice, but the text assertion is still wrong on its own terms and will
+  mislead the next reader. **AC:** require `0 < value <= 60`; a `0s` config must
+  red the text assertion, not only the mechanism one.
+
 - **T-248 [P2] A standing, clock-INDEPENDENT false-red in the day-move spec,
   caused by a credential prerequisite rather than by anything under test.**
   `web/e2e/account-day-move-ib-daily-pnl.spec.ts:244` asserts
