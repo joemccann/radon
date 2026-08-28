@@ -434,3 +434,45 @@ how this loop improves as the codebase grows.
   that "the mirror's age is policed by the coverage bound below" — i.e. the one mechanism the
   severity defers to is the one that fails open. That sentence is what makes it a P0, and it came
   from reading 25 lines of context the walk had already cited.
+- 2026-08-28 (remediate): **a second weekend loop was running full suites in a sibling clone
+  the whole time** (`radon-weekend/radon-testing`, the testing-weekend cycle). Load average hit
+  58; a `pytest -q` that baselines at 7m36s took over 20 minutes and had to be killed. Check
+  `ps ax | grep -E "vitest run|pytest"` for OTHER clones before planning the gate cadence, and
+  when one is present run the cheap targeted suite per task and batch the full gate at tranche
+  boundaries — three gates for 22 tasks, not 22. Also: run pytest and vitest SEQUENTIALLY even
+  across clones; one vitest file (`stale-option-quote-guard`) failed only under that contention
+  and passed on isolated re-run.
+- 2026-08-28 (remediate): **a finding's acceptance criteria can name a remedy the repo forbids.**
+  R-341 asked for an `ExecStart` flock like `radon-db-backup.service`, but the deploy lock lives
+  at `/home/radon/.radon-deploy.lock` and `cloud/tests/test_root_execution_paths.py` rejects ANY
+  `/home/radon` path in a `User=root` ExecStart — the first implementation went red on exactly
+  that test. Taking the lock in-process with `O_NOFOLLOW` satisfies both and closes a hole the
+  ExecStart form would have left open. Same shape as last week's lesson: test the remedy against
+  the repo's existing assertions first, and when a guard blocks you, read WHY before routing
+  around it.
+- 2026-08-28 (remediate): **the pinned test that goes red can be telling you the fix is wrong in
+  DIRECTION, not just in detail.** REL-127 unified two coverage tests behind "net session qty ==
+  live size", which made `test_close_then_reopen_uses_new_fill_price` fail. It was right: selling
+  the overnight 25 and rebuying 25 means the 25 held now ARE today's fills, so the honest
+  resolution is that BOTH mechanisms cover, not neither. A FIFO walk gives that. When a pinned
+  test contradicts a conservative fix, check whether the conservative answer is actually the
+  correct one before rewriting the test.
+- 2026-08-28 (remediate): **a test that round-trips through `sqlite3` cannot prove a libsql
+  constraint.** R-362 is "ON CONFLICT DO UPDATE command does not affect row a second time"; this
+  runner's SQLite is 3.53.4, which RELAXED that restriction, so the duplicate silently succeeded
+  and the test passed against the UNFIXED writer. Pin what the fix guarantees and what is
+  engine-independent instead — here, the parameters of the emitted statement — and always verify
+  red by stashing the source, never by reasoning that it must be red.
+- 2026-08-28 (remediate): four separate test-authoring bugs cost round trips and all four are
+  mechanical: `_warning(**context)` nests extras under `context` (not top level); importing
+  `lib.twr_math` when the module under test imports `scripts.lib.twr_math` loads a SECOND enum
+  class so every `is` check fails; `monkeypatch.setattr(server.asyncio, "sleep", lambda: asyncio
+  .sleep(0))` recurses because `server.asyncio` IS the global module; and `asyncio.run` consumes
+  a `time.monotonic()` call during loop setup, so a call-counting clock stub hands the wrong
+  value to the code's own `started`. Advance a fake clock from inside the fake work, not by call
+  ordinal.
+- 2026-08-28 (remediate): **say which half of a finding you did not close, in the row and in the
+  PR.** R-320's `strike=600` / `expiry='20260819'` cases are information-theoretically
+  unreachable from journal rows alone, and REL-128's per-ticker in-flight dedupe was deliberately
+  left out as a new shared-mutable-state surface. Both are recorded with the reason rather than
+  quietly dropped, which is the difference between a BLOCKED sub-part and an unnoticed gap.
