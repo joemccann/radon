@@ -707,9 +707,10 @@ class TestTimerOneshotExecutionBounds:
     The breadth and VCG endpoints each cap their scan child at 120 seconds;
     their wrapper has a 130-second HTTP deadline plus a direct fallback, so a
     240-second service ceiling leaves normal-path room while releasing the
-    five-minute timer before its next slot. ``data_refresh`` runs three
-    sequential 120-second children, so 480 seconds preserves that documented
-    budget and still leaves seven minutes for the next 15-minute cadence.
+    five-minute timer before its next slot. ``data_refresh`` runs cri at
+    180s plus vcg/gex at 120s each (sum 420s), so 480 seconds preserves that
+    documented budget and still leaves seven minutes for the next 15-minute
+    cadence.
     """
 
     EXECUTION_CAPS = {
