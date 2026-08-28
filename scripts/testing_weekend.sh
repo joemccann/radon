@@ -129,6 +129,29 @@ log: \`${RUN_LOG##*/}\` on the runner"
   return 0
 }
 
+# T-239: `claude -p` terminates unfinished background tasks at its print-mode
+# background-wait ceiling and then exits **0**, so a phase cut off with its
+# last agent still working is indistinguishable from one that finished. The
+# 2026-08-28 audit was cut at 600s, filed nothing against a 24-commit delta,
+# left an empty branch and no PR — and paged OK. The ceiling is lifted at the
+# invocation below (the `timeout` is the cap); this is the second guarantee,
+# so that if it is ever cut off anyway the operator is not told it succeeded.
+BG_CEILING_MARKER="Background tasks still running after"
+
+phase_status() {
+  # rc + run log -> the one status string every dead-man channel carries.
+  local rc="$1" run_log="$2"
+  if [[ $rc -eq 124 ]]; then
+    printf 'TIMEOUT after %ss' "$CAP_SECS"
+  elif [[ $rc -ne 0 ]]; then
+    printf 'FAILED (exit %s)' "$rc"
+  elif grep -qF "$BG_CEILING_MARKER" "$run_log" 2>/dev/null; then
+    printf 'TRUNCATED (background work killed before the phase finished)'
+  else
+    printf 'OK'
+  fi
+}
+
 on_crash() {
   report "CRASHED (exit $?)" "wrapper died before the agent finished — check the runner"
 }
@@ -266,7 +289,7 @@ run_phase() {
   while :; do
     remain=$((CAP_SECS - (SECONDS - start_ts)))
     if [[ $remain -le 60 ]]; then RC=124; break; fi
-    timeout "$remain" claude -p "/testing-weekend $PHASE" \
+    CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 timeout "$remain" claude -p "/testing-weekend $PHASE" \
       --dangerously-skip-permissions \
       --output-format text >> "$RUN_LOG" 2>&1
     RC=$?
@@ -282,20 +305,28 @@ run_phase() {
 
   local tail_text
   tail_text="$(tail -c 1500 "$RUN_LOG" 2>/dev/null || true)"
-  if [[ $RC -eq 0 ]]; then
-    report "OK" "\`\`\`
+  local status
+  status="$(phase_status "$RC" "$RUN_LOG")"
+  case "$status" in
+    OK)
+      report "$status" "\`\`\`
 ${tail_text}
-\`\`\`"
-  elif [[ $RC -eq 124 ]]; then
-    report "TIMEOUT after ${CAP_SECS}s" "partial work may exist on the weekend branch/PR
+\`\`\`" ;;
+    TRUNCATED*)
+      report "$status" "the harness killed unfinished background work and the agent still exited 0 — this phase's output is INCOMPLETE and must not be read as a finished run
 \`\`\`
 ${tail_text}
-\`\`\`"
-  else
-    report "FAILED (exit $RC)" "\`\`\`
+\`\`\`" ;;
+    TIMEOUT*)
+      report "$status" "partial work may exist on the weekend branch/PR
+\`\`\`
 ${tail_text}
-\`\`\`"
-  fi
+\`\`\`" ;;
+    *)
+      report "$status" "\`\`\`
+${tail_text}
+\`\`\`" ;;
+  esac
   echo "[testing-weekend] $PHASE done rc=$RC" | tee -a "$RUN_LOG"
 }
 
