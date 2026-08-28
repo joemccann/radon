@@ -96,8 +96,9 @@ describe("useTickerFlowReport — a degraded 200 is not a scan (R-350)", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const { result } = renderHook(() => useTickerFlowReport("AAPL"));
-    await waitFor(() => expect(result.current.status).not.toBe("scanning"));
-    expect(result.current.status).toBe("stale");
+    // Wait for the end state. `not.toBe("scanning")` matches the initial
+    // `loading` tick and flakes in CI as loading vs stale.
+    await waitFor(() => expect(result.current.status).toBe("stale"));
     expect(result.current.error).toBeTruthy();
   });
 
@@ -111,8 +112,7 @@ describe("useTickerFlowReport — a degraded 200 is not a scan (R-350)", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const { result } = renderHook(() => useTickerFlowReport("AAPL"));
-    await waitFor(() => expect(result.current.status).not.toBe("scanning"));
-    expect(result.current.status).toBe("stale");
+    await waitFor(() => expect(result.current.status).toBe("stale"));
   });
 
   it("still reports fresh for a genuinely completed scan", async () => {
