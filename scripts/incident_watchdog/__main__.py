@@ -20,6 +20,14 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+# Same pattern as scripts/watchdog/__main__.py: systemd
+# `python -m scripts.incident_watchdog --once` from the repo root does not
+# put scripts/ on sys.path, so `from db.service_cycle` raises
+# ModuleNotFoundError (page 05511a4f, 2026-08-28 16:05Z).
+_SCRIPTS_DIR = Path(__file__).resolve().parent.parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
 from .classify import classify
 from .probes import gather_findings
 from .store import record_cycle

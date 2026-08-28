@@ -1089,11 +1089,52 @@ silent by nature (R-325). The heartbeat closes `ok` BEFORE the exit code is
 set: an open P1 is a FINDING, not a watchdog failure, and recording `error`
 whenever the tool did its job would make the row useless.
 
+`__main__.py` prepends `scripts/` to `sys.path` (same as
+`scripts/watchdog/__main__.py`) so the systemd `-m` invocation can resolve
+`from db.service_cycle`. Without that, R-325 parks the oneshot
+`Result=exit-code` every 5 minutes (`incident-watchdog-db-import-exit`).
+
 It intentionally does NOT restart anything and does NOT page — remediation
 stays with the dedicated units (`feedback_ib_auto_recovery_conservative`,
 `feedback_watchdog_works_dont_deploy_autoheal`), and paging stays with
 `scripts/watchdog`. This tool's job is evidence: a structured artifact a human
 or `/incident` can act on.
+
+---
+
+## incident-watchdog-db-import-exit
+
+**`radon-incident-watchdog.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) on the 5-minute timer after R-325.** Peak: 2026-08-28
+16:05Z, page `05511a4f…`.
+
+- **Mechanism:** R-325 wrapped `--once` in
+  `from db.service_cycle import service_cycle`. systemd ExecStart is
+  `python -m scripts.incident_watchdog --once` with
+  `WorkingDirectory` = repo root and no `PYTHONPATH`. That puts the repo
+  root on `sys.path`, not `scripts/`, so `db` is not a top-level package.
+  `Type=oneshot` has no `Restart=`, so `NRestarts=0`. The 16:00 cycle
+  still ran the pre-R-325 body (exit 0); the checkout fast-forwarded
+  02133f8b at 16:02Z; 16:05 crashed. `scripts/watchdog/__main__.py`
+  already documents this exact `-m` topology.
+- **Detection:** journal
+  `ModuleNotFoundError: No module named 'db'` at
+  `scripts/incident_watchdog/__main__.py` `from db.service_cycle`;
+  `systemctl show … -p Result,NRestarts` → `exit-code` / `0`. Edge and
+  `:8321/health/lite` stay up. Prior cycle 5 min earlier was OK JSON.
+- **Discriminating check:** traceback is ImportError on `db` at process
+  start (ExecMainStart equals InactiveEnter). A probe/classify exception
+  after a JSON summary is a different class. `Result=signal` is deploy
+  stop-clean. If `/health/lite` is down too → API, stand down.
+- **Remediation (code):** prepend `scripts/` to `sys.path` in
+  `__main__.py` before the `db.service_cycle` import, same as
+  `scripts/watchdog/__main__.py`. Do not add a unit `PYTHONPATH` as the
+  only fix — the `-m` entry point must be self-contained. After deploy,
+  next timer (5 min) recovers; `reset-failed` is not required once the
+  next fire exits 0.
+- **Regression:**
+  `test_incident_watchdog.py::TestSystemdDashMImport::test_dash_m_once_resolves_db_without_pythonpath`.
+- **Code:** `scripts/incident_watchdog/__main__.py`.
 
 ## Laptop responder + pending-diagnoses session hook
 
