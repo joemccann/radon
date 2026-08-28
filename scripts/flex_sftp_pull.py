@@ -2,8 +2,8 @@
 """Pull Flex Query files from IB-hosted sFTP. No Flex Web Service.
 
 OpenSSH client, IPv4 only, pinned known_hosts, PGP decrypt in memory.
-Timer is shipped disabled until a written Flex grant and a file exists
-on the remote. Empty directory is an error heartbeat, never a token fetch.
+Empty outgoing is ok skip through 2026-08-31 (IBKR first delivery).
+After that date an empty remote is an error heartbeat. Never a token fetch.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 from xml.etree import ElementTree as ET
@@ -30,6 +31,7 @@ DEFAULT_INBOX = Path("/var/lib/radon/flex-inbox")
 DEFAULT_GNUPG = Path("/var/lib/radon/flex-secrets/gnupg")
 SFTP_HOST_ALIAS = "ibkr-flex"
 DEFAULT_REMOTE_DIR = "outgoing"
+FIRST_DELIVERY_DATE = date(2026, 8, 31)
 MAX_NIGHTLY_SPAN_DAYS = 5
 KEEP_GPG = 3
 
@@ -201,6 +203,14 @@ def _default_ingest(xml_text: str, *, source_path: str = "") -> Dict[str, Any]:
         tmp.unlink(missing_ok=True)
 
 
+def empty_remote_is_expected(now: Optional[datetime] = None) -> bool:
+    """IBKR first drop is 2026-08-31. After that date, empty is a miss."""
+    moment = now or datetime.now(ZoneInfo("America/New_York"))
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=ZoneInfo("America/New_York"))
+    return moment.astimezone(ZoneInfo("America/New_York")).date() <= FIRST_DELIVERY_DATE
+
+
 def run(
     *,
     config: Path,
@@ -210,6 +220,7 @@ def run(
     ingest: Optional[Callable[..., Dict[str, Any]]] = None,
     gnupg_home: Path = DEFAULT_GNUPG,
     remote_dir: str = DEFAULT_REMOTE_DIR,
+    now: Optional[datetime] = None,
 ) -> int:
     decrypt_fn = decrypt or (lambda data, **k: _gpg_decrypt(data, gnupg_home=gnupg_home))
     ingest_fn = ingest or _default_ingest
@@ -221,8 +232,11 @@ def run(
         return 1
 
     if not names:
-        _heartbeat("ok", "empty remote directory; waiting for IBKR delivery")
-        return 0
+        if empty_remote_is_expected(now):
+            _heartbeat("ok", "empty remote directory; waiting for IBKR delivery")
+            return 0
+        _heartbeat("error", "empty remote directory after 2026-08-31 delivery start")
+        return 1
 
     _ensure_inbox(inbox)
     failed = False
