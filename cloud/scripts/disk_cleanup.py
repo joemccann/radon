@@ -47,16 +47,19 @@ drift_audit.py reporting drift.
 """
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import time
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Iterable, NamedTuple
+from typing import Callable, Iterable, NamedTuple, Optional
 
 SERVICE_NAME = "disk-cleanup"
 SUMMARY_CAP = 900
@@ -74,6 +77,90 @@ JOURNALCTL_BIN = "/usr/bin/journalctl"
 LIVE_TREE = Path("/home/radon/radon")
 RELEASES_DIR = Path("/home/radon/.radon-releases")
 WORKTREE_ADMIN_DIR = LIVE_TREE / ".git" / "worktrees"
+# deploy.sh:119. A deploy that dies mid-transition leaves this pending, naming
+# the stage and backup worktrees under RELEASES_DIR. The backup dir IS the
+# rollback source `restore_release_backup` reads, and it is exactly the shape
+# `select_prunable_releases` matches on. R-340.
+TRANSITION_JOURNAL_FILE = Path("/home/radon/.radon-deploy-transition.json")
+
+# radon-app-runtime.sh:39 sets RADON_APP_IMAGE_FALLBACK_TAG (default `latest`)
+# and resolve_image falls back to it when the pinned SHA manifest probe fails.
+# It is not a 40-hex SHA so it is never head_tag, and being old it is never in
+# the newest pairs — so the sweep deleted the one copy that survives a GHCR
+# outage. Under RADON_RUNTIME=host no container holds it, so the daemon does
+# not refuse either. R-342.
+DEFAULT_IMAGE_FALLBACK_TAG = "latest"
+
+# Plausibility ceilings. A selector regression — a widened RELEASE_NAME_RE, a
+# PROTECTED_PATHS typo — used to reach production as an unrecoverable rmtree on
+# its first firing rather than as a refusal. R-368.
+MAX_PRUNE_PATHS = 24
+MAX_RECLAIM_BYTES = 64 * 1024**3
+
+# Set by --dry-run: every selector still runs and every size is still
+# reported, but nothing is deleted. R-368.
+DRY_RUN = False
+
+
+class ReclaimCeilingExceeded(RuntimeError):
+    """A category's computed target set is implausibly large; refuse it."""
+
+
+# deploy.sh:103. `cleanup_caches` unconditionally rmtree's ~/.npm/_cacache and
+# ~/.cache/pip with NO age threshold, so a CI deploy in its dependency-build
+# phase when this timer fires has those trees deleted underneath bun install /
+# pip, producing a failed or silently corrupt build promoted into the release.
+# The job took no lock of any kind. R-341.
+DEPLOY_LOCK_FILE = Path("/home/radon/.radon-deploy.lock")
+# Well under TimeoutStartSec=900, so a deploy that outlasts this skips the
+# weekly reclaim rather than wedging the unit.
+DEPLOY_LOCK_TIMEOUT_S = 600.0
+DEPLOY_LOCK_POLL_S = 5.0
+EX_TEMPFAIL = 75
+
+
+@contextlib.contextmanager
+def acquire_deploy_lock(path: Path = None, timeout_s: float = None):
+    """Hold the production deploy lock, or yield False when a deploy owns it.
+
+    O_NOFOLLOW: the lock file sits under /home/radon, which the radon account
+    owns, so root must refuse to follow it anywhere. A missing lock file means
+    no deploy has ever run on this host, which is not a reason to refuse the
+    sweep.
+    """
+    lock_path = DEPLOY_LOCK_FILE if path is None else path
+    budget = DEPLOY_LOCK_TIMEOUT_S if timeout_s is None else timeout_s
+    try:
+        fd = os.open(lock_path, os.O_RDONLY | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        yield True
+        return
+    except OSError as exc:
+        print(f"[disk-cleanup] refusing deploy lock {lock_path}: {exc}", file=sys.stderr)
+        yield False
+        return
+
+    deadline = time.monotonic() + budget
+    try:
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    yield False
+                    return
+                time.sleep(DEPLOY_LOCK_POLL_S)
+        try:
+            yield True
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
+def image_fallback_tag() -> str:
+    return os.environ.get("RADON_APP_IMAGE_FALLBACK_TAG") or DEFAULT_IMAGE_FALLBACK_TAG
 
 # Ours to prune: one pair per deployed SHA, pulled by radon-app-runtime.
 MANAGED_IMAGE_REPOSITORIES = (
@@ -206,6 +293,7 @@ def select_prunable_images(
     ordered = sorted(newest_per_tag, key=lambda tag: (newest_per_tag[tag], tag), reverse=True)
     keep = set(ordered[:keep_pairs])
     keep.add(head_tag)
+    keep.add(image_fallback_tag())
     return sorted(
         (image for image in managed if image.tag not in keep),
         key=lambda image: (image.repository, image.tag),
@@ -218,12 +306,47 @@ def is_protected_path(path: Path) -> bool:
     A protected path's ANCESTORS are protected too: removing /home/radon/.cache
     would take ms-playwright and the Chronos weights with it.
     """
-    candidate = Path(path)
+    # RESOLVED, both sides. Comparing unresolved Paths let an ANCESTOR symlink
+    # defeat the check entirely: replacing /home/radon/.cache with a link to
+    # /var/lib/radon made remove_tree(/home/radon/.cache/pip) compare clean and
+    # root-rmtree /var/lib/radon/pip. The radon account owns /home/radon and is
+    # the adversary this module's docstring names. R-343.
+    candidate = _resolve(Path(path))
     for protected in PROTECTED_PATHS:
-        if candidate == protected:
+        resolved = _resolve(Path(protected))
+        if candidate == resolved:
             return True
-        if protected in candidate.parents or candidate in protected.parents:
+        if resolved in candidate.parents or candidate in resolved.parents:
             return True
+    return False
+
+
+def _resolve(path: Path) -> Path:
+    """Fully-resolved path, falling back to the lexical form when absent."""
+    try:
+        return path.resolve()
+    except OSError:
+        return path
+
+
+def has_symlink_component(path: Path) -> bool:
+    """True when ANY component of ``path`` is a symlink, not just the leaf.
+
+    `remove_tree` checked `path.is_symlink()` on the final component only, so
+    a link one level up was invisible to it. R-343.
+    """
+    current = Path(path)
+    seen: set[Path] = set()
+    while current not in seen:
+        seen.add(current)
+        try:
+            if current.is_symlink():
+                return True
+        except OSError:
+            return True
+        if current.parent == current:
+            break
+        current = current.parent
     return False
 
 
@@ -240,6 +363,13 @@ def select_prunable_releases(
     deploy.sh's two mktemp templates, so /home/radon/radon -- the live tree --
     is unreachable by construction as well as by is_protected_path.
     """
+    live = live_transition_paths()
+    if live is None:
+        # A journal that exists but cannot be read means a deploy is
+        # mid-flight and we cannot tell WHICH directories it owns. Refuse the
+        # whole category rather than guess; a week of leaked worktrees costs
+        # disk, deleting the rollback source costs the rollback. R-340.
+        return []
     cutoff = now_secs - max_age_days * 86400
     selected = []
     for path, mtime in entries:
@@ -250,10 +380,39 @@ def select_prunable_releases(
             continue
         if is_protected_path(candidate):
             continue
+        if str(candidate) in live:
+            continue
         if mtime >= cutoff:
             continue
         selected.append(candidate)
     return sorted(selected)
+
+
+def live_transition_paths() -> Optional[set[str]]:
+    """Directories a pending deploy transition still owns.
+
+    Empty set when no journal exists (the normal case). ``None`` when a
+    journal exists but cannot be parsed — the caller must then refuse the
+    whole category, because an unreadable journal still means a deploy is
+    mid-flight. R-340.
+    """
+    try:
+        raw = TRANSITION_JOURNAL_FILE.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return set()
+    except OSError:
+        return None
+    try:
+        record = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(record, dict):
+        return None
+    return {
+        str(record[key])
+        for key in ("stage_dir", "backup_dir")
+        if record.get(key)
+    }
 
 
 def select_stale_worktree_admin_dirs(
@@ -357,9 +516,14 @@ def remove_tree(path: Path) -> int:
     """
     if is_protected_path(path):
         raise ValueError(f"refusing to remove protected path: {path}")
-    if path.is_symlink() or not path.is_dir():
+    if has_symlink_component(path):
+        raise ValueError(f"refusing to remove path reached through a symlink: {path}")
+    if not path.is_dir():
         return 0
     size = dir_size(path)
+    if DRY_RUN:
+        print(f"[disk-cleanup] DRY RUN would remove {path} ({size} bytes)", file=sys.stderr)
+        return size
     shutil.rmtree(path)
     return size
 
@@ -375,13 +539,49 @@ def cleanup_docker_images() -> tuple[int, str]:
         ])
     )
     prunable = select_prunable_images(images, head)
+    _enforce_ceiling("docker-images", len(prunable), sum(i.size_bytes for i in prunable))
     reclaimed = 0
     removed = 0
+    failed = 0
     for image in prunable:
-        _run([DOCKER_BIN, "image", "rm", f"{image.repository}:{image.tag}"])
+        if DRY_RUN:
+            reclaimed += image.size_bytes
+            removed += 1
+            continue
+        try:
+            # `_run` uses check=True, so the FIRST failing rm used to abort the
+            # whole loop and discard the accounting: one image still referenced
+            # by a stopped container meant zero reclaimed, week after week, on
+            # a full root filesystem. R-371.
+            _run([DOCKER_BIN, "image", "rm", f"{image.repository}:{image.tag}"])
+        except Exception as exc:  # noqa: BLE001 - one image must not stop the sweep
+            failed += 1
+            print(
+                f"[disk-cleanup] image rm {image.repository}:{image.tag} failed: {exc}",
+                file=sys.stderr,
+            )
+            continue
         reclaimed += image.size_bytes
         removed += 1
-    return reclaimed, f"removed {removed} image(s), keeping HEAD {head[:12]} + {KEEP_IMAGE_PAIRS} newest pairs"
+    suffix = f", {failed} failed" if failed else ""
+    return reclaimed, (
+        f"removed {removed} image(s){suffix}, keeping HEAD {head[:12]} + "
+        f"{KEEP_IMAGE_PAIRS} newest pairs + fallback {image_fallback_tag()}"
+    )
+
+
+def _enforce_ceiling(category: str, path_count: int, byte_count: int) -> None:
+    """Refuse a category whose computed target set is implausibly large."""
+    if path_count > MAX_PRUNE_PATHS:
+        raise ReclaimCeilingExceeded(
+            f"{category}: {path_count} targets exceeds MAX_PRUNE_PATHS "
+            f"({MAX_PRUNE_PATHS}); refusing rather than deleting"
+        )
+    if byte_count > MAX_RECLAIM_BYTES:
+        raise ReclaimCeilingExceeded(
+            f"{category}: {byte_count} bytes exceeds MAX_RECLAIM_BYTES "
+            f"({MAX_RECLAIM_BYTES}); refusing rather than deleting"
+        )
 
 
 def cleanup_dangling_images() -> tuple[int, str]:
@@ -402,7 +602,9 @@ def cleanup_release_worktrees() -> tuple[int, str]:
 
     reclaimed = 0
     removed = 0
-    for path in select_prunable_releases(entries, time.time()):
+    prunable = select_prunable_releases(entries, time.time())
+    _enforce_ceiling("release-worktrees", len(prunable), 0)
+    for path in prunable:
         reclaimed += remove_tree(path)
         removed += 1
 
@@ -418,7 +620,17 @@ def cleanup_release_worktrees() -> tuple[int, str]:
             admin_entries.append((admin, bool(gitdir) and Path(gitdir).exists()))
     pruned_admin = 0
     for admin in select_stale_worktree_admin_dirs(admin_entries):
-        shutil.rmtree(admin, ignore_errors=True)
+        # Through remove_tree, not a bare rmtree: the bare call bypassed
+        # is_protected_path entirely and deleted inside /home/radon/radon/.git,
+        # the tree this module's docstring asserts is unreachable. R-370.
+        try:
+            remove_tree(admin)
+        except ValueError as exc:
+            print(f"[disk-cleanup] refused admin dir {admin}: {exc}", file=sys.stderr)
+            continue
+        except OSError as exc:
+            print(f"[disk-cleanup] admin dir {admin} vanished: {exc}", file=sys.stderr)
+            continue
         pruned_admin += 1
     return (
         reclaimed,
@@ -603,8 +815,29 @@ def write_service_health(state: str, detail: dict | None, started_at: str) -> No
         raise RuntimeError(f"service_health upsert rejected: {json.dumps(first)[:300]}")
 
 
-def main() -> int:
+def main(argv: Optional[list[str]] = None) -> int:
+    global DRY_RUN
+    args = list(sys.argv[1:] if argv is None else argv)
+    # --dry-run: run every selector and report every size, delete nothing.
+    # Without it a selector regression reached production as an unrecoverable
+    # rmtree on its first firing. R-368.
+    if "--dry-run" in args:
+        DRY_RUN = True
+        print("[disk-cleanup] DRY RUN: nothing will be deleted", file=sys.stderr)
+
     started_at = datetime.now(timezone.utc).isoformat()
+    with acquire_deploy_lock() as held:
+        if not held:
+            print(
+                "[disk-cleanup] a deployment owns the production deploy lock; "
+                "skipping this weekly reclaim",
+                file=sys.stderr,
+            )
+            return EX_TEMPFAIL
+        return _run_and_heartbeat(started_at)
+
+
+def _run_and_heartbeat(started_at: str) -> int:
     try:
         outcome = run_cleanup()
     except Exception as exc:  # noqa: BLE001 - a crash must still heartbeat
