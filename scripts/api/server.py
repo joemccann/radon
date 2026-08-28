@@ -21,7 +21,7 @@ from datetime import datetime, timedelta, timezone
 import sys
 import time
 import uuid
-from collections import deque
+from collections import OrderedDict, deque
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -3108,21 +3108,57 @@ SCAN_GATES: dict[str, ScanGate] = {
 # gex.json holds exactly one ticker's payload, a successful NDX scan armed a
 # cooldown whose cache read returned None for an SPX poll, so two tickers
 # polled alternately spawned back-to-back 120 s subprocesses forever. R-217.
-_SUBJECT_SCAN_GATES: dict[tuple[str, str], ScanGate] = {}
+#
+# The key is caller-supplied (/gex/scan takes any <=10-char alnum ticker) and
+# the process lives for days, so the map needs a ceiling. Eviction is
+# fail-CLOSED: only an IDLE gate is evictable, because re-minting an armed gate
+# hands the next poll a COLD gate that bypasses the very cooldown/backoff that
+# was dropped — R-217 re-entering through the eviction path. When every gate is
+# armed, a novel subject is refused on the shared overflow gate instead of
+# growing the map or displacing a live backoff. T-230.
+MAX_SUBJECT_SCAN_GATES = 256
+
+_SUBJECT_SCAN_GATES: "OrderedDict[tuple[str, str], ScanGate]" = OrderedDict()
+_OVERFLOW_SCAN_GATE = ScanGate("scan-overflow")
+
+
+def _evict_idle_scan_gate() -> bool:
+    """Drop the least-recently-used gate that is neither cooling down nor backing off."""
+    victim = next(
+        (
+            key
+            for key, gate in _SUBJECT_SCAN_GATES.items()
+            if not gate.in_cooldown() and not gate.in_backoff()
+        ),
+        None,
+    )
+    if victim is None:
+        return False
+    del _SUBJECT_SCAN_GATES[victim]
+    return True
 
 
 def _scan_gate_for(scan: str, subject: str) -> ScanGate:
     key = (scan, subject.strip().upper())
     gate = _SUBJECT_SCAN_GATES.get(key)
-    if gate is None:
-        gate = ScanGate(f"{scan}:{key[1]}")
-        _SUBJECT_SCAN_GATES[key] = gate
+    if gate is not None:
+        _SUBJECT_SCAN_GATES.move_to_end(key)
+        return gate
+    if len(_SUBJECT_SCAN_GATES) >= MAX_SUBJECT_SCAN_GATES and not _evict_idle_scan_gate():
+        # Every tracked subject is already cooling down or backing off, i.e.
+        # the host is saturated. Admitting a novel subject here is exactly the
+        # subprocess storm the gates exist to stop, so refuse it.
+        _OVERFLOW_SCAN_GATE.mark_failure()
+        return _OVERFLOW_SCAN_GATE
+    gate = ScanGate(f"{scan}:{key[1]}")
+    _SUBJECT_SCAN_GATES[key] = gate
     return gate
 
 
 def _reset_scan_gates() -> None:
     """Drop every per-subject gate (tests)."""
     _SUBJECT_SCAN_GATES.clear()
+    _OVERFLOW_SCAN_GATE.reset()
 
 
 async def _gated_scan(
