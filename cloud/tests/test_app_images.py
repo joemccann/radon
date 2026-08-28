@@ -203,3 +203,21 @@ class TestRuntimeContainerDropin:
         assert "scripts/radon-app-runtime.sh" in sources
         assert "/usr/local/sbin/radon-app-runtime" in targets
         assert "runtime-container.conf.example" not in sources
+
+    def test_live_dropins_are_control_plane_and_type_simple(self) -> None:
+        sources = _readonly_array(BOOTSTRAP.read_text(encoding="utf-8"), "SOURCES")
+        helper = _readonly_array(HELPER.read_text(encoding="utf-8"), "CONTROL_PLANE_SOURCES")
+        assert "radon-ib-gateway.service.d" not in sources
+        assert "radon-health.service.d" not in sources
+        for unit in APP_UNITS:
+            rel = f"services/{unit}.d/runtime-container.conf"
+            live = CLOUD_ROOT / "services" / f"{unit}.d" / "runtime-container.conf"
+            assert live.is_file(), unit
+            text = live.read_text(encoding="utf-8")
+            assert "Type=simple" in text, unit
+            assert "WatchdogSec=infinity" in text, unit
+            assert "ExecStart=/usr/local/sbin/radon-app-runtime run %n" in text, unit
+            assert "ExecStartPre=" in text, unit
+            assert "ib-gateway" not in text, unit
+            assert rel in sources, unit
+            assert rel in helper, unit
