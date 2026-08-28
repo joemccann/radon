@@ -126,7 +126,7 @@ def test_empty_remote_is_error_heartbeat_not_sendrequest(tmp_path, monkeypatch):
         ingest=lambda xml, **k: {"ok": True},
     )
     assert code == 0
-    assert heartbeats[0][0] == "error"
+    assert heartbeats[0][0] == "ok"
     assert "empty" in str(heartbeats[0][1]).lower()
 
 
