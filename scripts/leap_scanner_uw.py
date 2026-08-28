@@ -233,6 +233,9 @@ class ScanResult:
     leaps: List[LeapOption]
     best_gap: float
     is_mispriced: bool
+    # The single contract behind `best_gap` — the dashboard deep-links it into
+    # the chain order builder, which needs an expiry and a strike, not a gap.
+    best_leap: Optional[LeapOption] = None
 
 
 def get_uw_history(
@@ -437,6 +440,18 @@ def get_leap_options(ticker: str, min_year: int = 2027, _client: UWClient = None
     return leaps
 
 
+def pick_best_mispriced_leap(
+    leaps: List[LeapOption], hv_20: float
+) -> Optional[LeapOption]:
+    """The contract carrying the widest realized-vs-implied gap in a group.
+
+    Ties on IV go to the deeper open interest — same edge, better fill.
+    """
+    if not leaps:
+        return None
+    return max(leaps, key=lambda leap: (hv_20 - leap.iv, leap.oi))
+
+
 def approximate_delta(strike: float, price: float, iv: float, dte: int) -> float:
     """Rough delta approximation based on moneyness."""
     if price == 0 or dte == 0:
@@ -507,6 +522,7 @@ def scan_ticker(
     }
 
     best_gap = 0
+    best_leap: Optional[LeapOption] = None
     is_mispriced = False
 
     emit("\n  LEAP IV Analysis:")
@@ -523,6 +539,8 @@ def scan_ticker(
         if gap_20 >= min_gap or gap_60 >= min_gap:
             status = "🔥 MISPRICED"
             is_mispriced = True
+            if gap_20 > best_gap or best_leap is None:
+                best_leap = pick_best_mispriced_leap(group_leaps, vol_data.hv_20)
             if gap_20 > best_gap:
                 best_gap = gap_20
 
@@ -538,7 +556,8 @@ def scan_ticker(
         iv_rank=iv_rank,
         leaps=leaps,
         best_gap=best_gap,
-        is_mispriced=is_mispriced
+        is_mispriced=is_mispriced,
+        best_leap=best_leap,
     )
 
 
@@ -775,6 +794,23 @@ def resolve_scan_inputs(explicit_tickers=None, preset=None):
     return list(load_preset(preset).tickers), universe
 
 
+def best_leap_payload(leap: Optional[LeapOption], hv_20: float) -> Optional[dict]:
+    """Serialize the headline contract for the dashboard's order deep-link."""
+    if leap is None:
+        return None
+    return {
+        "symbol": leap.symbol,
+        "expiry": leap.expiry,
+        "strike": leap.strike,
+        "right": leap.right,
+        "iv": leap.iv,
+        "delta": round(leap.delta_approx, 2),
+        "gap": round(hv_20 - leap.iv, 1),
+        "oi": leap.oi,
+        "volume": leap.volume,
+    }
+
+
 def build_json_payload(results, min_gap, universe, requested_tickers):
     """Build the data/leap.json envelope, stamped with the scanned universe."""
     return {
@@ -794,6 +830,7 @@ def build_json_payload(results, min_gap, universe, requested_tickers):
                 "leap_count": len(r.leaps),
                 "best_gap": r.best_gap,
                 "is_mispriced": r.is_mispriced,
+                "best_leap": best_leap_payload(r.best_leap, r.vol_data.hv_20),
             }
             for r in results
         ],

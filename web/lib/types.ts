@@ -694,6 +694,21 @@ export type ScannerData = {
 // long-dated IV diverges from realized vol; `best_gap` is the headline
 // signal (HV − IV in vol points). `is_mispriced` is the script's own
 // boolean classification.
+/** The single contract behind `best_gap`, emitted by leap_scanner_uw.py so the
+ *  scanner can deep-link it into the chain order builder. Absent on scans
+ *  written before the field existed. */
+export type LeapBestContract = {
+  symbol: string;
+  expiry: string;
+  strike: number;
+  right: "C" | "P";
+  iv: number;
+  delta: number;
+  gap: number;
+  oi: number;
+  volume: number;
+};
+
 export type LeapResult = {
   ticker: string;
   price: number | null;
@@ -705,6 +720,7 @@ export type LeapResult = {
   leap_count: number;
   best_gap: number;
   is_mispriced: boolean;
+  best_leap?: LeapBestContract | null;
 };
 
 export type LeapData = {

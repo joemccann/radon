@@ -369,6 +369,7 @@ class TestLeapWiring:
             leaps=[],
             best_gap=15.0,
             is_mispriced=True,
+            best_leap=None,
         )
         monkeypatch.setattr(leap_scanner_uw, "UWClient", lambda: nullcontext(object()))
         monkeypatch.setattr(leap_scanner_uw, "scan_ticker", lambda *a, **kw: result)

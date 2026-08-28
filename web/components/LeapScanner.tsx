@@ -9,6 +9,8 @@ import SectionEmptyState from "./SectionEmptyState";
 import { SigMeter } from "./SigMeter";
 import SortTh from "./SortTh";
 import { useSort } from "@/lib/useSort";
+import { serializeLegsParam } from "@/lib/useChainUrlState";
+import { formatExpiry } from "@/lib/optionsChainUtils";
 import type { LeapData, LeapResult } from "@/lib/types";
 
 type LeapSortKey = "ticker" | "price" | "iv" | "iv_rank" | "hv_20" | "hv_252" | "leaps" | "best_gap" | "status";
@@ -25,6 +27,42 @@ type LeapScannerProps = {
 
 const LEAP_SECTION_HELP =
   "Long-dated IV mispricing scan: tickers where LEAP implied vol trades below realized vol. best_gap is the headline signal (HV − IV in vol points); MISPRICED rows clear the scan's own gap threshold.";
+
+/**
+ * Deep-link a row's headline LEAP into the chain order builder, prefilled as a
+ * long call. Mirrors `thetaOrderHref`: `?deck=c` opens the chain deck, `legs`
+ * seeds the builder. Null for scans written before the scanner emitted
+ * contract detail — a gap alone cannot address a strike.
+ */
+export function leapOrderHref(row: LeapResult): string | null {
+  const contract = row.best_leap;
+  if (!contract) return null;
+  const legs = serializeLegsParam([
+    { action: "BUY", quantity: 1, strike: contract.strike, right: contract.right },
+  ]);
+  if (!legs) return null;
+  const params = new URLSearchParams({
+    deck: "c",
+    expiry: formatExpiry(contract.expiry),
+    strikes: "100",
+    legs,
+    src: "leap",
+  });
+  return `/${encodeURIComponent(row.ticker.toUpperCase())}?${params.toString()}`;
+}
+
+function contractLabel(row: LeapResult): string {
+  const contract = row.best_leap;
+  if (!contract) return row.ticker.toUpperCase();
+  return `${row.ticker.toUpperCase()} ${contract.strike}${contract.right}`;
+}
+
+function widestMispriced(rows: LeapResult[]): LeapResult | null {
+  return rows.reduce<LeapResult | null>((best, row) => {
+    if (!row.is_mispriced || !row.best_leap) return best;
+    return best == null || row.best_gap > best.best_gap ? row : best;
+  }, null);
+}
 
 function extract(row: LeapResult, key: LeapSortKey): string | number | null {
   switch (key) {
@@ -62,6 +100,8 @@ export default function LeapScanner({
   const rows = data?.results ?? [];
   const { sorted, sort, toggle } = useSort(rows, extract, "best_gap", "desc");
   const mispricedCount = rows.filter((r) => r.is_mispriced).length;
+  const bestRow = widestMispriced(rows);
+  const bestHref = bestRow ? leapOrderHref(bestRow) : null;
 
   return (
     <ScannerInstrumentShell
@@ -79,6 +119,16 @@ export default function LeapScanner({
         <div className="theta-harvester__meta">
           {lastSync && <span className="report-meta">{new Date(lastSync).toLocaleTimeString()}</span>}
           <span className="pill defined">{mispricedCount} MISPRICED</span>
+          {bestRow && bestHref && (
+            <Link
+              href={bestHref}
+              className="theta-scan-button"
+              data-testid="leap-best-order-link"
+              title={`Open the ${contractLabel(bestRow)} LEAP in the order builder`}
+            >
+              TRADE BEST · {contractLabel(bestRow)}
+            </Link>
+          )}
           {onTickerScan && (
             <ScannerTickerSearch
               id="leap-ticker-search"
@@ -144,30 +194,46 @@ export default function LeapScanner({
                 </tr>
               </thead>
               <tbody>
-                {sorted.map((r) => (
-                  <tr key={r.ticker}>
-                    <td>
-                      <Link href={`/${encodeURIComponent(r.ticker)}`} className="ticker-link">
-                        {r.ticker}
-                      </Link>
-                    </td>
-                    <td className="right">{r.price != null ? `$${fmt(r.price, 2)}` : "---"}</td>
-                    <td className="right">{fmt(r.current_iv)}</td>
-                    <td className="right">
-                      {fmt(r.iv_rank)}
-                      <SigMeter value={r.iv_rank ?? null} tone={r.is_mispriced ? "pos" : "mut"} />
-                    </td>
-                    <td className="right">{fmt(r.hv_20)}</td>
-                    <td className="right">{fmt(r.hv_252)}</td>
-                    <td className="right">{r.leap_count}</td>
-                    <td className="right">{signed(r.best_gap)}</td>
-                    <td>
-                      <span className={`pill ${r.is_mispriced ? "defined" : "undefined"}`}>
-                        {r.is_mispriced ? "MISPRICED" : "FAIR"}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
+                {sorted.map((r) => {
+                  const orderHref = leapOrderHref(r);
+                  return (
+                    <tr key={r.ticker}>
+                      <td>
+                        <Link href={`/${encodeURIComponent(r.ticker)}`} className="ticker-link">
+                          {r.ticker}
+                        </Link>
+                      </td>
+                      <td className="right">{r.price != null ? `$${fmt(r.price, 2)}` : "---"}</td>
+                      <td className="right">{fmt(r.current_iv)}</td>
+                      <td className="right">
+                        {fmt(r.iv_rank)}
+                        <SigMeter value={r.iv_rank ?? null} tone={r.is_mispriced ? "pos" : "mut"} />
+                      </td>
+                      <td className="right">{fmt(r.hv_20)}</td>
+                      <td className="right">{fmt(r.hv_252)}</td>
+                      <td className="right">{r.leap_count}</td>
+                      <td className="right">
+                        {orderHref ? (
+                          <Link
+                            href={orderHref}
+                            className="ticker-link"
+                            data-testid={`leap-order-link-${r.ticker}`}
+                            title={`Open the ${contractLabel(r)} LEAP in the order builder`}
+                          >
+                            {signed(r.best_gap)}
+                          </Link>
+                        ) : (
+                          signed(r.best_gap)
+                        )}
+                      </td>
+                      <td>
+                        <span className={`pill ${r.is_mispriced ? "defined" : "undefined"}`}>
+                          {r.is_mispriced ? "MISPRICED" : "FAIR"}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
