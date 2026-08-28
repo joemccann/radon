@@ -53,3 +53,89 @@ describe("resolveRegimeStripLiveState", () => {
     expect(state.vvixValue).toBe(98.73);
   });
 });
+
+/**
+ * Production defect 2026-08-28 09:27 ET: the VIX tile rendered
+ * "14.76  -1.89 (-11.35%)" while VIX was actually UP 1.65% on the day.
+ * -1.89 off 14.76 implies a 16.65 baseline — a close from an earlier
+ * session, never yesterday's. The day-change baseline must be the previous
+ * SESSION's close, not a scan-time spot reading and not a relay tick-9
+ * close that has been frozen in the relay's memory for weeks.
+ */
+describe("regime strip day-change baseline", () => {
+  const history = [
+    { date: "2026-08-24", vix: 15.85, vvix: 88.64, spy: 763.47, cor1m: 9.29 },
+    { date: "2026-08-25", vix: 15.45, vvix: 85.67, spy: 765.91, cor1m: 9.53 },
+    { date: "2026-08-26", vix: 15.21, vvix: 85.24, spy: 766.08, cor1m: 9.43 },
+    { date: "2026-08-27", vix: 14.51, vvix: 84.34, spy: 768.43, cor1m: 9.09 },
+    { date: "2026-08-28", vix: 14.76, vvix: 88.7, spy: 767.05, cor1m: 9.51 },
+  ];
+
+  it("prefers the previous session close over a stale relay tick-9 close", () => {
+    const state = resolveRegimeStripLiveState({
+      marketOpen: true,
+      sessionDate: "2026-08-27",
+      prices: {
+        VIX: { last: 14.76, close: 16.65 } as never,
+        VVIX: { last: 88.7, close: 80.9 } as never,
+      },
+      data: { date: "2026-08-28", vix: 14.76, vvix: 88.7, history },
+    });
+
+    expect(state.vixClose).toBe(14.51);
+    expect(state.vvixClose).toBe(84.34);
+    const pct = ((state.liveVix! - state.vixClose!) / state.vixClose!) * 100;
+    expect(pct).toBeCloseTo(1.72, 2);
+  });
+
+  it("never uses the scan-time spot reading as a previous close", () => {
+    const state = resolveRegimeStripLiveState({
+      marketOpen: true,
+      sessionDate: "2026-08-27",
+      prices: { VIX: { last: 14.76 } as never },
+      data: { date: "2026-08-28", vix: 16.65, history },
+    });
+
+    expect(state.vixClose).toBe(14.51);
+  });
+
+  it("skips today's still-forming daily bar", () => {
+    const state = resolveRegimeStripLiveState({
+      marketOpen: true,
+      sessionDate: "2026-08-27",
+      prices: { SPY: { last: 767.05 } as never },
+      data: { date: "2026-08-28", spy: 767.05, history },
+    });
+
+    expect(state.spyClose).toBe(768.43);
+  });
+
+  it("withholds a baseline when the cached payload predates the session", () => {
+    const state = resolveRegimeStripLiveState({
+      marketOpen: true,
+      sessionDate: "2026-08-27",
+      prices: { VIX: { last: 14.76 } as never },
+      data: {
+        date: "2026-08-04",
+        vix: 16.65,
+        history: [
+          { date: "2026-08-03", vix: 15.86, vvix: 90.81, spy: 700.1, cor1m: 5.53 },
+          { date: "2026-08-04", vix: 16.65, vvix: 92.57, spy: 701.2, cor1m: 6.99 },
+        ],
+      },
+    });
+
+    expect(state.vixClose).toBeNull();
+  });
+
+  it("falls back to the relay close when the payload carries no history", () => {
+    const state = resolveRegimeStripLiveState({
+      marketOpen: true,
+      sessionDate: "2026-08-27",
+      prices: { VIX: { last: 14.76, close: 14.51 } as never },
+      data: { date: "2026-08-28", vix: 14.76 },
+    });
+
+    expect(state.vixClose).toBe(14.51);
+  });
+});
