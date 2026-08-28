@@ -53,6 +53,7 @@ Archived session artifacts live in [`docs/archive/`](archive/).
 | IB Gateway Docker (laptop) | [`docs/ib-gateway-docker.md`](ib-gateway-docker.md) |
 | IB connection troubleshooting | [`docs/ib-connection-troubleshooting.md`](ib-connection-troubleshooting.md) |
 | IB Gateway recovery / 2FA | [`docs/ib-gateway-recovery.md`](ib-gateway-recovery.md) |
+| IB Flex sFTP setup (install) | [`docs/flex-sftp-setup.md`](flex-sftp-setup.md) |
 | IB Flex transfers / TWR | [`docs/ib-flex-transfers-runbook.md`](ib-flex-transfers-runbook.md) |
 | Performance reconstruction | [`docs/performance-reconstruction.md`](performance-reconstruction.md) |
 | Chart system | [`docs/chart-system.md`](chart-system.md) |

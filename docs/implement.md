@@ -453,7 +453,8 @@ python3.13 scripts/trade_blotter/flex_query.py
 python3.13 scripts/trade_blotter/flex_query.py --symbol EWY
 ```
 
-Requires `IB_FLEX_TOKEN` and `IB_FLEX_QUERY_ID` environment variables.
+Routine historical ingest is sFTP (`docs/flex-sftp-setup.md`), not this CLI.
+`IB_FLEX_QUERY_ID=1422766`. Token is `--sendrequest` recon only.
 
 ---
 

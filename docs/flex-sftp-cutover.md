@@ -1,8 +1,7 @@
 # Flex sFTP cutover
 
-Status: FINAL after adversarial review 2026-08-24 (`docs/flex-sftp-cutover-review.md`).
-Remaining ops: steps 6-9 on `feat/flex-sftp-steps-6-9` (`docs/show-me-flex-sftp-ops.html`, `tasks/todo.md`).
-P1/P2 file ingest is on `main`.
+Status: LIVE on `main` (timer enabled 2026-08-28). Install recipe: [`flex-sftp-setup.md`](flex-sftp-setup.md).
+Adversarial review 2026-08-24: `docs/flex-sftp-cutover-review.md`.
 Date: 2026-08-24
 IBKR granted Client Portal Flex Query sFTP on 2026-08-28 (Devon / filedelivery). First files **2026-08-31**. Host `ftp2.interactivebrokers.com` (`64.190.196.110`) port 22, dir `outgoing`, key auth, PGP imported. Host key RSA SHA256:C3STmRsxF9UfYvQ8yeJ9vwvK7lMHQ2FcMHchtQd7/wg.
 

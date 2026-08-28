@@ -1004,10 +1004,10 @@ the 2FA lock).
 
 ## flex-1025-lockout
 
-**IBKR Flex code 1025 is a token lockout. A persisted `class=permanent` row
-plus a missing sidecar will SendRequest at the next 08:00 ET window and
-extend it.** Operator lozenge: `SYNCED 7D AGO · FLEX LOCKOUT. DO NOT RETRY.
-INGEST WITH --FROM-FILE, RETRY 08:00 ET TOMORROW`.
+**IBKR Flex code 1025 is a token lockout.** Routine ingest is sFTP
+(`docs/flex-sftp-setup.md`). Do not SendRequest to recover. Use
+`--from-file` or wait for `radon-flex-pull`. A persisted `class=permanent`
+row plus a missing sidecar used to SendRequest at the next 08:00 ET window.
 
 - **Mechanism:** 1025 is undocumented ("Too many failed attempts"), earned by
   retrying 1001. `75ded753` classified new 1025s as lockout (exit 15, 7-day
@@ -1031,8 +1031,8 @@ python3.13 -c "from utils.flex_embargo import active_until, is_blocked; print(is
   the 2026-08-21 row) even if `next_attempt_at` is the next 08:00 ET window.
   A 1012/config permanent row must not reconstruct as a 7-day lockout.
 - **Remediation:** reconstruct the sidecar from Turso; do not probe Flex.
-  Recover the table with `python3.13 -m scripts.cash_flow_sync --from-file`.
-  Portal Run on query `1442520` only. Do not set `IB_FLEX_FLOWS_QUERY_ID`.
+  Recover with `--from-file` or the sFTP inbox. Portal Run on `1442520` only.
+  Do not set `IB_FLEX_FLOWS_QUERY_ID`.
 - **Fix commits:** `75ded753` (new 1025s), plus the reconstruction commit
   that made a missing sidecar + `class=permanent` 1025 fail closed through
   `last_attempt+7d`.

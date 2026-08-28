@@ -640,6 +640,22 @@ ranked over the trailing 252 sessions. Heartbeat `ivrank`. Units are listed in
 (`not-installed` allowlist expires 2026-12-31). Spec:
 [`indicators/ivrank.md`](indicators/ivrank.md).
 
+### Flex sFTP pull (`radon-flex-pull.timer`)
+
+Install dependency: IBKR-hosted sFTP, not Flex Web Service. Full recipe:
+[`flex-sftp-setup.md`](flex-sftp-setup.md).
+
+`Tue..Sat 07:30 ET` plus `08:30 ET` empty-dir retry. Oneshot
+`scripts/flex_sftp_pull.py`. Heartbeat `flex-pull`. Stripped env
+`/var/lib/radon/flex-secrets/env` (no `TWS_PASSWORD`). Units on
+`auto-sync-units.txt`.
+
+Queries: `1442520` SOD (NAV + cash + transfers), `1422766` EOD (trades).
+Period Last Business Day, XML, PGP. Empty `outgoing` through 2026-08-31 is
+ok skip; from 2026-09-01 empty is error. Miss does not SendRequest.
+
+Same-day blotter is Gateway `journal_sync`. This timer is T+1 recon.
+
 ### TWR performance builder (`radon-perf-twr.timer`)
 
 `Tue..Sat 07:30 ET` (`RandomizedDelaySec=300`), oneshot
