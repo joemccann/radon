@@ -2,7 +2,8 @@
  * @vitest-environment jsdom
  *
  * Feed headlines must NOT be outbound links to the source (Market Ear).
- * The footer Link pill remains the only outbound anchor per post.
+ * The footer source-link pill is gone too, so a post carries no outbound
+ * anchor at all.
  */
 import React from "react";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
@@ -63,11 +64,9 @@ describe("DashboardNewsFeed headline", () => {
     expect(headline.closest("a")).toBeNull();
   });
 
-  it("keeps the footer Link pill as the only outbound anchor", async () => {
+  it("leaves no outbound anchor anywhere on the post", async () => {
     await renderFeed();
     const item = screen.getAllByTestId("news-feed-item")[0];
-    const anchors = item.querySelectorAll("a[href]");
-    expect(anchors).toHaveLength(1);
-    expect(anchors[0].getAttribute("data-testid")).toBe("news-feed-link-pill");
+    expect(item.querySelectorAll("a[href]")).toHaveLength(0);
   });
 });
