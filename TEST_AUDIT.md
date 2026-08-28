@@ -5294,6 +5294,32 @@ it. Filed so the next audit does not have to rediscover them.
   asked for its cache; assert it does not serve a cooldown for an unlanded
   payload.
 
+- **T-248 [P2] A standing, clock-INDEPENDENT false-red in the day-move spec,
+  caused by a credential prerequisite rather than by anything under test.**
+  `web/e2e/account-day-move-ib-daily-pnl.spec.ts:244` asserts
+  `toContainText("C$4.48")` on `td.last-price-cell`, and receives `"$4.48"` — the
+  plain portfolio-fixture `market_price` with no `C` calculated-price marker — at
+  BOTH a weekend clock and the pinned trading-day clock. The spec's
+  `MockWebSocket` is never constructed and no ws-ticket request is made, so no
+  live quote ever reaches the row. Root cause: `RealtimeAuthProvider`
+  (`web/lib/RealtimeAuthContext.tsx`) sources `getToken` unconditionally from
+  Clerk's `useAuth()`, and `buildAuthenticatedWebSocketUrl`
+  (`web/lib/realtimeSocketAuth.ts:29-40`) throws "Realtime auth token
+  unavailable" on a null token. Neither runner clone has a `web/.env`, so the
+  spec cannot go fully green on this machine regardless of the clock. CI holds
+  this spec out of the curated e2e list (`ci.yml:500-503`), so it is a LOCAL-only
+  red — but it is a permanent one that will keep costing a re-run to attribute.
+  **AC:** either stub the realtime auth boundary so the spec is self-contained,
+  or mark it `test.skip` behind an explicit `web/.env` precondition with the
+  reason linked here. Do NOT leave it silently red.
+
+  Related environment fact worth recording: **this spec fails 100% under
+  `next dev --turbopack`, at any clock**, which is `playwright.config`'s default
+  webServer. The spec replaces `window.WebSocket` globally, which breaks Next's
+  dev HMR client (`socket.addEventListener is not a function`), hydration aborts,
+  zero `/api/*` requests fire and the page renders the SSR shell. Only a prebuilt
+  `next start` gives a meaningful signal. Anyone re-verifying must build first.
+
 - **T-247 [P0] The T-124 realized-P&L correction is INERT in production, and
   the test that guards it passes only on a fixture accident.**
   `_ordered` (`scripts/clients/journal_realized.py:190-201`) sorts a day by
