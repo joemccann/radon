@@ -73,6 +73,19 @@ function optionFetchErrorMessage(data: Record<string, unknown>, fallback: string
   return detail && detail !== error ? `${error}: ${detail}` : error;
 }
 
+/** Names the scanner that seeded `?legs=`. Unknown / absent stays on the
+ *  Theta Harvester wording it shipped with — that was the only seeder then. */
+function prefillLabelForSource(src: string | null | undefined): string {
+  switch (src) {
+    case "vol-cone":
+      return "PREFILLED FROM VOL CONE";
+    case "leap":
+      return "PREFILLED FROM LEAP SCAN";
+    default:
+      return "PREFILLED FROM THETA HARVESTER";
+  }
+}
+
 /* ─── Chain Strike Row ─── */
 
 function StrikeRow({
@@ -1141,11 +1154,7 @@ export default function OptionsChainTab({
     }));
 
     setOrderLegs(nextLegs);
-    setPrefillLabel(
-      searchParams?.get("src") === "vol-cone"
-        ? "PREFILLED FROM VOL CONE"
-        : "PREFILLED FROM THETA HARVESTER",
-    );
+    setPrefillLabel(prefillLabelForSource(searchParams?.get("src")));
     appliedLegsParamRef.current = signature;
   }, [ticker, selectedExpiry, chainUrl.legsParamRaw, chainUrl.urlExpiry, chainUrl.urlLegs, searchParams]);
 
