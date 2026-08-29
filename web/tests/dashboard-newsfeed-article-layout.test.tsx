@@ -66,11 +66,11 @@ describe("DashboardNewsFeed article layout", () => {
     expect(document.querySelector(".news-feed-live-badge")!.textContent).toBe("LIVE");
   });
 
-  it("renders a mono meta row: stamp · Market Ear · read time", async () => {
+  it("renders a mono meta row: stamp · read time, with no source attribution", async () => {
     await renderFeed([POST]);
     const meta = document.querySelector("[data-testid='news-feed-meta']")!;
     const cells = Array.from(meta.querySelectorAll("span")).map((s) => s.textContent);
-    expect(cells).toEqual([formatAbsolute(POST.timestamp), "Market Ear", "2 min read"]);
+    expect(cells).toEqual([formatAbsolute(POST.timestamp), "2 min read"]);
   });
 
   it("places the tag strip between the meta row and the body", async () => {
@@ -83,20 +83,20 @@ describe("DashboardNewsFeed article layout", () => {
     expect(order.indexOf("news-feed-tags")).toBeLessThan(order.indexOf("news-feed-summary"));
   });
 
-  it("wraps the chart in a figure with a caption crediting the source", async () => {
+  it("wraps the chart in a figure with a caption naming the chart only", async () => {
     await renderFeed([POST]);
     const figure = document.querySelector("figure.news-feed-figure")!;
     expect(figure.querySelector("img.news-feed-image")).not.toBeNull();
     const caption = figure.querySelector("figcaption")!;
-    expect(caption.textContent).toContain(POST.title);
-    expect(caption.textContent).toContain("Source · Market Ear");
+    expect(caption.textContent).toBe(`Chart · ${POST.title}`);
+    expect(caption.textContent).not.toContain("Market Ear");
   });
 
-  it("labels the footer pill as the source link", async () => {
+  it("renders no source-link pill in the footer", async () => {
     await renderFeed([POST]);
-    const pill = screen.getByTestId("news-feed-link-pill");
-    expect(pill.textContent).toBe("Source link");
-    expect(pill.getAttribute("href")).toBe("https://themarketear.com/posts/p1");
+    expect(screen.queryByTestId("news-feed-link-pill")).toBeNull();
+    const footer = screen.getByTestId("news-feed-footer");
+    expect(footer.textContent).not.toContain("Source link");
   });
 });
 
