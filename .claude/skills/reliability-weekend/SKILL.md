@@ -476,3 +476,38 @@ how this loop improves as the codebase grows.
   unreachable from journal rows alone, and REL-128's per-ticker in-flight dedupe was deliberately
   left out as a new shared-mutable-state surface. Both are recorded with the reason rather than
   quietly dropped, which is the difference between a BLOCKED sub-part and an unnoticed gap.
+- 2026-08-29 (audit): **a walk can be right about the defect and backwards about the mechanism.** The
+  control-plane walk filed the new container drop-ins as invisible to `drift_audit`. Reading
+  `_live_unit_counter` in the lead context showed the opposite and worse: the live side merges
+  `<unit>.d/*.conf` and the repo side does not, so the auditor goes permanently RED on all five app
+  units, and the allowlist (verified: two entries, both `not-installed:radon-llm-index.*`) does not
+  acknowledge them. File the verified reading and record the rejected half IN the row — "drift is
+  invisible" and "drift is permanently red" have opposite fixes, and an allowlist entry would have
+  been the wrong one.
+- 2026-08-29 (audit): **when a fix's anti-recurrence mechanism is free text, audit the text against
+  the code.** REL-114 closed NF-8 by adding `EXEMPT_UNITS` with a `parser:` / `gap:` reason per
+  entry. The count genuinely improved (25-of-54 to 16-of-55) and the new assertion is legitimately
+  green — but `test_every_exempt_unit_states_a_reason` checks only the PREFIX, and eight of ten
+  `gap: writes no service_health row` labels are false. Two lines of Python (resolve each exempt
+  unit's ExecStart, grep the target for `write_service_health`) turned a green suite into a P1. Run
+  that check on every exemption list a remediation introduces, the week after it ships.
+- 2026-08-29 (audit): the delta's dominant defect class was **suppression added to stop a false
+  page**, five mechanisms across `probes.py`, `external_probe.py` and `data_refresh.py`, four of them
+  unbounded. Two questions catch all four and neither needs deep reading: does the suppression have a
+  DWELL bound (how long may this state persist before it pages anyway), and what is its ORDERING
+  against the checks it precedes. `aggregate_state` has no timestamp input at all — a one-line grep
+  for any clock in the module proved it. Filed as standing class NF-10.
+- 2026-08-29 (audit): nine walks capped at ~12 files each finished in 4-9 minutes with none lost to
+  the stream watchdog. Two walks were told to EXECUTE rather than read (the journal_realized P0 and
+  the remediation regression) and both returned literal command output that settled claims a reading
+  walk would have left plausible — the `strike`/`right` halves of REL-109 verified holding, the
+  `expiry`-lifetime half verified NOT implemented, and REL-110's two `None` causes verified
+  separated. Budget one executing walk per P0 fix under review; it is the difference between "the
+  mechanism is present" and "the mechanism covers the claim".
+- 2026-08-29 (audit): the backlog-coverage set difference earned its place this run — it caught that
+  every `R-###` reference in the 18 backlog rows was written against the pre-numbering draft order,
+  so twelve of eighteen tasks pointed at the wrong findings. Two further mechanics matter: apply the
+  per-task remap SIMULTANEOUSLY through one `re.sub` callback (the corrections chained, e.g.
+  R-385 to R-386 while R-384 to R-385), and keep the remap OFF the task's own id field. Also, a
+  finding body containing `payload["date"]` breaks a double-quoted Python literal in the generator —
+  write repo code samples with single quotes inside the table strings.
