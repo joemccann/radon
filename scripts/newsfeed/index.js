@@ -49,10 +49,10 @@ function buildTextTaggerOrNull({ projectRoot }) {
   }
 }
 
-function buildVisionTaggerOrNull({ projectRoot, publicRoot }) {
+function buildVisionTaggerOrNull({ projectRoot, mediaDir }) {
   try {
     return createVisionTagger({
-      publicRoot,
+      mediaDir,
       getTaxonomySnapshot: async () => (await loadTaxonomy(projectRoot)).tags,
     });
   } catch (err) {
@@ -208,7 +208,7 @@ export function createScraper(overrides = {}) {
       recordServiceHealth,
       buildTextTagger: () => buildTextTaggerOrNull({ projectRoot: paths.projectRoot }),
       buildVisionTagger: () =>
-        buildVisionTaggerOrNull({ projectRoot: paths.projectRoot, publicRoot: paths.publicRoot }),
+        buildVisionTaggerOrNull({ projectRoot: paths.projectRoot, mediaDir: paths.mediaDir }),
       onNewTags: async (tags) => {
         const additions = await appendTagsToTaxonomy(paths.projectRoot, tags);
         if (additions.length > 0) {

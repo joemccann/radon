@@ -43,14 +43,16 @@ function detectMediaType(filename) {
   return null;
 }
 
-// Resolves a post's first image URL to the on-disk file under publicRoot.
+// Resolves a post's first image URL to the on-disk file inside mediaDir —
+// the same directory the downloader wrote it to (resolveScraperPaths owns
+// that location; rebuilding it from publicRoot here made a second copy that
+// went stale the moment the container runtime moved the tree).
 // Accepts either form:
 //   - absolute  `https://media.radon.run/<file>`   (current — written by media.js)
 //   - relative  `/media/<file>` or `media/<file>`  (legacy — kept for
 //                                                   posts written before
 //                                                   the absolute migration)
-// Always lands at `<publicRoot>/media/<file>` on disk regardless of input.
-function resolveImageAbsolutePath(post, publicRoot) {
+function resolveImageAbsolutePath(post, mediaDir) {
   if (!Array.isArray(post.images) || post.images.length === 0) return null;
   const src = post.images[0];
   if (typeof src !== "string" || src.length === 0) return null;
@@ -66,10 +68,10 @@ function resolveImageAbsolutePath(post, publicRoot) {
     }
   }
   const trimmed = rel.replace(/^\//, "");
-  // Bare filenames (no `media/` prefix) still land under `media/` because
-  // that's where the on-disk file actually sits.
-  const prefixed = trimmed.startsWith("media/") ? trimmed : `media/${trimmed}`;
-  return path.join(publicRoot, prefixed);
+  // Legacy `/media/<file>` URLs carry a prefix that is already implied by
+  // mediaDir; strip it so both URL shapes land on the same file.
+  const filename = trimmed.startsWith("media/") ? trimmed.slice("media/".length) : trimmed;
+  return path.join(mediaDir, filename);
 }
 
 function buildUserPrompt(post) {
@@ -188,22 +190,22 @@ function parseTagsFromText(text) {
 export function createVisionTagger({
   apiKey = process.env.ANTHROPIC_API_KEY,
   model = DEFAULT_MODEL,
-  publicRoot,
+  mediaDir,
   getTaxonomySnapshot,
   readImage = (p) => fs.promises.readFile(p),
 } = {}) {
   if (!apiKey) {
     throw new Error("createVisionTagger: ANTHROPIC_API_KEY is not set");
   }
-  if (!publicRoot) {
-    throw new Error("createVisionTagger: publicRoot is required");
+  if (!mediaDir) {
+    throw new Error("createVisionTagger: mediaDir is required");
   }
   if (typeof getTaxonomySnapshot !== "function") {
     throw new Error("createVisionTagger: getTaxonomySnapshot callback is required");
   }
 
   async function tagPost(post) {
-    const imgPath = resolveImageAbsolutePath(post, publicRoot);
+    const imgPath = resolveImageAbsolutePath(post, mediaDir);
     if (!imgPath) return null;
     const mediaType = detectMediaType(imgPath);
     if (!mediaType) return null;

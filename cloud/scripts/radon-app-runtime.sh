@@ -7,6 +7,10 @@ set -euo pipefail
 
 readonly APP_UNITS="radon-api.service radon-nextjs.service radon-relay.service radon-monitor.service radon-newsfeed.service"
 
+# Where the media volume lands INSIDE the container. Fixed regardless of the
+# host path, because Caddy's root and the newsfeed's download dir must agree.
+readonly MEDIA_DIR_IN_CONTAINER=/var/lib/radon/media
+
 if [[ "${RADON_APP_RUNTIME_TEST_MODE:-0}" == "1" ]]; then
   DOCKER="${RADON_TEST_DOCKER:?test docker is required}"
   ID_BIN="${RADON_TEST_ID:?test id is required}"
@@ -202,7 +206,7 @@ cmd_run() {
     --env PYTHONPATH=/home/radon/radon/scripts \
     -w "$workdir" \
     -v "${DATA_DIR}:/home/radon/radon/data" \
-    -v "${MEDIA_DIR}:/var/lib/radon/media" \
+    -v "${MEDIA_DIR}:${MEDIA_DIR_IN_CONTAINER}" \
     -v "${LEASE_DIR}:/var/lib/radon/ib-lease"
 
   if [[ -n "${NOTIFY_SOCKET:-}" && "${NOTIFY_SOCKET}" == /* ]]; then
@@ -225,11 +229,20 @@ cmd_run() {
       newsfeed_browsers="${RADON_NEWSFEED_BROWSERS_PATH:-/home/radon/.cache/ms-playwright}"
       newsfeed_scripts="${RADON_NEWSFEED_SCRIPTS_PATH:-/home/radon/radon/scripts/newsfeed}"
     fi
+    # The scraper's default media dir is <repo>/web/public/media, which lives
+    # in the image layer and is discarded on every restart, while Caddy serves
+    # the bind mount above. Point the downloader straight at the mount and
+    # override the HOST-shaped RADON_MEDIA_REMOTE that --env-file carries in
+    # (/home/radon/radon-cloud/media/ does not exist in the container), so the
+    # rsync hop collapses to a no-op instead of failing on an image with no
+    # rsync. Without this every scraped image 404s on media.radon.run.
     set -- "$@" --ipc host \
       --env PLAYWRIGHT_CHROMIUM_SANDBOX=0 \
       --env PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
       -v "${newsfeed_browsers}:/ms-playwright" \
-      -v "${newsfeed_scripts}:/home/radon/radon/scripts/newsfeed"
+      -v "${newsfeed_scripts}:/home/radon/radon/scripts/newsfeed" \
+      --env "RADON_NEWSFEED_MEDIA_DIR=${MEDIA_DIR_IN_CONTAINER}" \
+      --env "RADON_MEDIA_REMOTE=${MEDIA_DIR_IN_CONTAINER}/"
   fi
 
   set -- "$@" "$image"

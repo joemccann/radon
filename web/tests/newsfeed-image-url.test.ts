@@ -250,7 +250,7 @@ describe("vision_tagger.js — resolveImageAbsolutePath handles both URL forms",
     expect(
       __resolveImageAbsolutePath(
         { images: ["https://media.radon.run/abc.png"] },
-        "/root",
+        "/root/media",
       ),
     ).toBe("/root/media/abc.png");
   });
@@ -260,7 +260,7 @@ describe("vision_tagger.js — resolveImageAbsolutePath handles both URL forms",
       "../../scripts/newsfeed/vision_tagger.js"
     );
     expect(
-      __resolveImageAbsolutePath({ images: ["/media/abc.png"] }, "/root"),
+      __resolveImageAbsolutePath({ images: ["/media/abc.png"] }, "/root/media"),
     ).toBe("/root/media/abc.png");
   });
 
@@ -269,7 +269,7 @@ describe("vision_tagger.js — resolveImageAbsolutePath handles both URL forms",
       "../../scripts/newsfeed/vision_tagger.js"
     );
     expect(
-      __resolveImageAbsolutePath({ images: ["media/abc.png"] }, "/root"),
+      __resolveImageAbsolutePath({ images: ["media/abc.png"] }, "/root/media"),
     ).toBe("/root/media/abc.png");
   });
 
@@ -278,7 +278,7 @@ describe("vision_tagger.js — resolveImageAbsolutePath handles both URL forms",
       "../../scripts/newsfeed/vision_tagger.js"
     );
     expect(
-      __resolveImageAbsolutePath({ images: ["http://"] }, "/root"),
+      __resolveImageAbsolutePath({ images: ["http://"] }, "/root/media"),
     ).toBeNull();
   });
 });
