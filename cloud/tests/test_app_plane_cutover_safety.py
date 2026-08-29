@@ -89,14 +89,32 @@ DROP_IN_SKIP_BASELINE = {
 
 
 def _drop_in_example_params():
+    """Both the `.example` docs AND the real installed drop-ins.
+
+    T-281: `702ae26a` shipped five REAL
+    `*.service.d/runtime-container.conf` files and taught
+    `bootstrap-control-plane.sh` to install them to `/etc/systemd/system/`,
+    and `8cd7909b` pinned their hashes into `installed-units.sha256`. This
+    glob still matched `.example` only, so the guard below inspected
+    DOCUMENTATION and never once looked at a file that actually reaches the
+    host. All five currently DO reset ExecStartPre, so this is a coverage
+    hole rather than a live defect — but a sixth unit added without the reset
+    ships green.
+    """
     params = []
-    for example in sorted(SERVICES.glob("*.service.d/runtime-container.conf.example")):
+    candidates = sorted(
+        SERVICES.glob("*.service.d/runtime-container.conf")
+    ) + sorted(SERVICES.glob("*.service.d/runtime-container.conf.example"))
+    for example in candidates:
         unit_dir = example.parent.name
-        reason = DROP_IN_SKIP_BASELINE.get(unit_dir)
+        installed = example.suffix != ".example"
+        # The baseline is about a template that declares no ExecStart at all.
+        # An INSTALLED file is never a template, so it is never baselined.
+        reason = None if installed else DROP_IN_SKIP_BASELINE.get(unit_dir)
         params.append(
             pytest.param(
                 example,
-                id=unit_dir,
+                id=f"{unit_dir}{'' if installed else '.example'}",
                 marks=pytest.mark.skip(reason=reason) if reason else (),
             )
         )
@@ -322,4 +340,31 @@ class TestTheDropInGuardIsNotDecorative:
             f"{self.NODE} executed {executed} of {executed + skipped} "
             "parametrized cases. A guard that skips its way to a single unit "
             "does not guard the fleet."
+        )
+
+    def test_every_installed_drop_in_reaches_the_assertion(self):
+        """T-281: the floor that keeps the guard on the DEPLOYED files.
+
+        The `.example` files are documentation; these are the ones
+        `bootstrap-control-plane.sh` copies to `/etc/systemd/system/` and
+        `installed-units.sha256` pins. Counting them here means a new unit
+        cannot ship a drop-in that the guard silently never opens.
+        """
+        installed = sorted(
+            path.parent.name
+            for path in SERVICES.glob("*.service.d/runtime-container.conf")
+        )
+        assert installed, "no installed runtime-container drop-ins found at all"
+
+        executed, skipped = self._counts()
+        assert executed >= len(installed) + 1, (
+            f"{self.NODE} executed {executed} cases but there are "
+            f"{len(installed)} INSTALLED drop-ins ({installed}) plus their "
+            "per-unit examples. An installed drop-in is not reaching the "
+            "ExecStart/ExecStartPre assertion."
+        )
+        assert not any(name in DROP_IN_SKIP_BASELINE for name in installed), (
+            "an INSTALLED drop-in was baselined out of the guard. The "
+            "baseline exists for templates that declare no ExecStart "
+            "override; a file that ships to the host is never that."
         )
