@@ -1,0 +1,24 @@
+[Unit]
+Description=Radon MKTNews headlines hub (upstream flash WS, loopback fan-out)
+After=network-online.target radon-api.service
+Wants=network-online.target
+
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=radon
+UMask=0077
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/etc/radon/env
+Environment=RADON_DB_NO_REPLICA=1
+Environment=WS_BIND_HOST=127.0.0.1
+ExecStart=/usr/bin/node /home/radon/radon/scripts/mktnews/index.js --serve
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
