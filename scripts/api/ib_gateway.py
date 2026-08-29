@@ -42,7 +42,7 @@ logger = logging.getLogger("radon.ib_gateway")
 
 # Identifier used when this module takes the shared 2FA push lock. Other
 # restart paths (ib_watchdog.py, ib_orderly_restart.py, …) use distinct
-# holder strings so a glance at /var/lib/radon/ib-2fa-push-lock.json tells
+# holder strings so a glance at /var/lib/radon/ib-lease/ib-2fa-push-lock.json tells
 # the operator which component is mid-2FA-cycle.
 IB_GATEWAY_LOCK_HOLDER = "scripts.api.ib_gateway.restart_ib_gateway"
 IB_GATEWAY_ENSURE_LOCK_HOLDER = "scripts.api.ib_gateway.ensure_ib_gateway"

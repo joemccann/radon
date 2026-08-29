@@ -36,7 +36,7 @@ the watchdog, operator control, and launchd setup/manual starts. Docker,
 launchd, and IBC automatic restart schedules must remain disabled.
 
 State file path: ``IB_2FA_LOCK_PATH`` env, defaulting to
-``/var/lib/radon/ib-2fa-push-lock.json`` on Linux and the per-user
+``/var/lib/radon/ib-lease/ib-2fa-push-lock.json`` on Linux and the per-user
 Application Support directory on macOS.
 """
 
@@ -74,7 +74,15 @@ DEFAULT_LOCK_TTL_SECS = 600
 # the systemd-managed FastAPI + ib_watchdog services). macOS launch agents use
 # the per-user Application Support directory so every local control plane can
 # share the lease without root privileges. Override via env for dev/test.
-DEFAULT_LOCK_PATH = "/var/lib/radon/ib-2fa-push-lock.json"
+# Its own subdirectory, not /var/lib/radon itself. The lease is the one piece of
+# control-plane state an APP container writes, and the app containers no longer
+# get the state directory: /var/lib/radon also holds control-plane-ready, the
+# manifest digest and the root deploy transaction journal, and write permission
+# on that parent is all an unlink/rename needs. `radon-app-runtime.sh` binds
+# only this directory (plus media/) into the container, so a host unit and the
+# containerised FastAPI resolve the SAME shared lease. R-381.
+DEFAULT_LOCK_DIR = "/var/lib/radon/ib-lease"
+DEFAULT_LOCK_PATH = f"{DEFAULT_LOCK_DIR}/ib-2fa-push-lock.json"
 
 # A pending IBKR push always has a live Gateway behind it: the container binds
 # the API port before IBC starts waiting for the tap (auth_state=awaiting_2fa is

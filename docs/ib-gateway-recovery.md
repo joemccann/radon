@@ -18,7 +18,7 @@ Symptoms before the lock:
 
 ### 1. Cross-process push lock
 
-`scripts/utils/ib_2fa_lock.py` reads/writes `/var/lib/radon/ib-2fa-push-lock.json`. 10-min TTL.
+`scripts/utils/ib_2fa_lock.py` reads/writes `/var/lib/radon/ib-lease/ib-2fa-push-lock.json`. 10-min TTL.
 
 Every restart path that fires a push acquires the lock first. While held, restart requests REJECTED with `reason="2fa_push_in_flight"`.
 
