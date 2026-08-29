@@ -1,12 +1,33 @@
 """R-391 / R-392 / REL-138: the drop-ins keep the supervision and the drift signal.
 
-R-391: base `radon-relay.service` is `Type=notify` + `WatchdogSec=45`; base
-`radon-monitor.service` is `Type=notify` + `WatchdogSec=900`, the latter
-installed BY REL-008 to catch the alive-but-dead loop wedge. Both drop-ins
-overrode to `Type=simple` + `WatchdogSec=infinity`, so systemd stopped waiting
-for `READY=1` and stopped requiring keepalives -- reverting REL-008 and DUR-17
-and making the `NOTIFY_SOCKET` / `WATCHDOG_USEC` plumbing in
-`radon-app-runtime.sh` dead code.
+R-391 (SUPERSEDED 2026-08-29, see below): base `radon-relay.service` is
+`Type=notify` + `WatchdogSec=45`; base `radon-monitor.service` is
+`Type=notify` + `WatchdogSec=900`, the latter installed BY REL-008 to catch the
+alive-but-dead loop wedge. R-391 made both drop-ins inherit that contract
+instead of overriding it to `Type=simple` + `WatchdogSec=infinity`.
+
+Those drop-ins could not be installed until the privileged gate was fixed, so
+R-391 first reached production on 2026-08-29 -- and both units immediately
+restart-looped. systemd attributes a notify datagram to a unit by the SENDER'S
+CGROUP. `radon-app-runtime.sh` runs the payload under
+`--cgroup-parent=system.slice`, so the container lands in
+`/system.slice/docker-<id>.scope`, never in `/system.slice/<unit>`; the
+datagram is unattributable, `Type=notify` hangs at `activating` until
+TimeoutStartSec, and the unit restart-loops.
+
+Measured, not inferred:
+
+  * the app side is correct -- running `radon-node` with `NOTIFY_SOCKET` set
+    delivers `READY=1` (`ib_realtime_server.js:383`), and `socat` in the image
+    reaches a host socket
+  * the placement cannot be fixed: docker's systemd cgroup driver rejects
+    `--cgroup-parent=system.slice/<unit>.service` with "cgroup-parent for
+    systemd cgroup should be a valid slice named as xxx.slice"
+
+So a CONTAINERISED unit cannot satisfy `Type=notify`, and these tests now pin
+that constraint rather than the contract it makes impossible. The supervision
+R-391 restored is genuinely lost and needs a different mechanism; it is not
+re-established by the drop-in.
 
 R-392: `_check_units` merges the LIVE unit with its drop-ins but compares
 against the repo BASE unit alone, so every setting a drop-in adds reads as
@@ -56,50 +77,52 @@ def _dropin(unit: str) -> str:
     return (SERVICES / f"{unit}.d" / "runtime-container.conf").read_text(encoding="utf-8")
 
 
-class TestSupervisionSurvivesContainerisation:
+class TestContainerisedUnitsCannotUseNotify:
+    """The 2026-08-29 production regression, pinned as a constraint.
+
+    A drop-in that asks systemd to wait for `READY=1` from a process systemd
+    cannot attribute to the unit is not stricter supervision -- it is a
+    guaranteed restart loop. Every one of these units runs its payload in a
+    container placed outside the unit cgroup.
+    """
+
     @pytest.mark.parametrize("unit", APP_UNITS)
-    def test_the_dropin_does_not_downgrade_the_service_type(self, unit):
-        base_type = _directive(_base(unit), "Type") or "simple"
-        drop_type = _directive(_dropin(unit), "Type")
-        assert drop_type == base_type, (
-            f"{unit}: base is Type={base_type} but the drop-in forces "
-            f"Type={drop_type}; systemd stops waiting for READY=1"
+    def test_no_containerised_dropin_asks_for_notify(self, unit):
+        drop_type = _directive(_dropin(unit), "Type") or "simple"
+        assert drop_type != "notify", (
+            f"{unit}: the payload runs under --cgroup-parent=system.slice, so its "
+            "READY=1 is unattributable and systemd hangs at `activating` until "
+            "TimeoutStartSec, then restart-loops (observed in production "
+            "2026-08-29). Docker refuses --cgroup-parent=system.slice/<unit>."
         )
 
     @pytest.mark.parametrize("unit", APP_UNITS)
-    def test_the_dropin_does_not_disable_the_watchdog(self, unit):
-        base_wd = _directive(_base(unit), "WatchdogSec")
-        drop_wd = _directive(_dropin(unit), "WatchdogSec")
-        if base_wd is None:
-            return  # the base never had one; nothing to preserve
-        assert drop_wd in (None, base_wd), (
-            f"{unit}: base WatchdogSec={base_wd}, drop-in={drop_wd}. A relay "
-            "that stops delivering ticks, or a monitor wedged on an IB socket, "
-            "used to get SIGABRT and a restart; with infinity it sits "
-            "active (running) forever with a dead socket."
+    def test_a_notify_dropin_would_have_to_neutralise_the_watchdog_too(self, unit):
+        """`WatchdogSec` without a reachable notify socket is a timed SIGABRT."""
+        if (_directive(_base(unit), "WatchdogSec")) is None:
+            return
+        assert _directive(_dropin(unit), "WatchdogSec") == "infinity", (
+            f"{unit}: the base declares a watchdog the container can never feed, "
+            "so the drop-in must disable it explicitly rather than inherit it."
         )
 
-    def test_the_two_notify_units_keep_their_watchdogs(self):
-        """The specific regression: REL-008 (monitor 900s) and DUR-17 (relay 45s)."""
+    def test_the_base_units_keep_their_watchdogs_for_a_host_run(self):
+        """Unchanged by this: the base units are still correct off-container."""
         assert _directive(_base("radon-monitor.service"), "WatchdogSec") == "900"
         assert _directive(_base("radon-relay.service"), "WatchdogSec") == "45"
-        for unit in ("radon-monitor.service", "radon-relay.service"):
-            # Strip comments first: the explanatory comment QUOTES the value it
-            # is explaining, and would satisfy or break this assertion by itself.
-            body = "\n".join(
-                ln for ln in _dropin(unit).splitlines() if not ln.lstrip().startswith("#")
-            )
-            assert "infinity" not in body, unit
 
-    def test_the_notify_socket_plumbing_is_reachable(self):
-        """`WATCHDOG_USEC` is only set for a Type=notify unit with a watchdog."""
+    def test_the_dropin_states_why_supervision_is_downgraded(self):
+        """A bare `Type=simple` reads as an oversight; this one is a finding."""
+        for unit in ("radon-monitor.service", "radon-relay.service"):
+            body = _dropin(unit)
+            assert "cgroup" in body.lower(), unit
+            assert "2026-08-29" in body, unit
+
+    def test_the_notify_plumbing_is_still_forwarded_for_a_future_fix(self):
+        """Harmless while unused, and the only thing a real fix would reuse."""
         source = RUNTIME.read_text(encoding="utf-8")
         assert "WATCHDOG_USEC" in source
         assert "NOTIFY_SOCKET" in source
-        notify_units = [
-            u for u in APP_UNITS if (_directive(_dropin(u), "Type") or "simple") == "notify"
-        ]
-        assert set(notify_units) == {"radon-monitor.service", "radon-relay.service"}, notify_units
 
 
 class TestDriftAuditSeesTheRepoDropins:
