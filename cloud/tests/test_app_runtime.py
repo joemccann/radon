@@ -310,6 +310,44 @@ def test_run_forwards_notify_through_a_proxy_in_the_unit_cgroup(tmp_path: Path) 
     assert str(tmp_path / "notify.sock") not in log
 
 
+def test_notify_proxy_outlives_the_run_handoff_and_relays_while_docker_runs(tmp_path: Path) -> None:
+    """The forwarder is spawned before `exec docker`; it must still be alive
+    once the container is up. The first implementation started it inside a
+    $(...) substitution, so its parent was a subshell that had already exited
+    and the proxy quit within 250ms: the socket file stayed behind and the
+    container got `Connection refused` on every READY=1 (live probe
+    2026-08-29 17:26Z). Asserted at the wire: a datagram sent to the proxy
+    socket while the fake docker is still running must reach NOTIFY_SOCKET."""
+    d = Path(tempfile.mkdtemp(prefix="rdn", dir="/tmp"))
+    upstream_path = d / "u"
+    upstream = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    upstream.bind(str(upstream_path))
+    fake_docker = tmp_path / "docker"
+    _write_executable(fake_docker, "#!/bin/bash\nif [[ \"$1\" == run ]]; then sleep 3; fi\nexit 0\n")
+    env = {**_runtime_env(tmp_path, fake_docker), "NOTIFY_SOCKET": str(upstream_path)}
+    proxy_socket = Path(env["RADON_TEST_NOTIFY_PROXY_DIR"]) / "radon-relay.service.sock"
+    proc = subprocess.Popen(
+        ["bash", str(RUNTIME), "run", "radon-relay.service"],
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        deadline = time.monotonic() + 5
+        while not proxy_socket.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert proxy_socket.exists()
+        time.sleep(0.8)  # past the proxy's parent poll interval
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        client.sendto(b"READY=1\n", str(proxy_socket))
+        upstream.settimeout(5)
+        assert b"READY=1" in upstream.recv(256)
+    finally:
+        proc.kill()
+        proc.wait(timeout=5)
+        upstream.close()
+
+
 def _proxy_dir_from(result: subprocess.CompletedProcess[str]) -> str:
     return result.proxy_dir  # type: ignore[attr-defined]
 
