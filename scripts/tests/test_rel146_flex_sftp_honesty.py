@@ -209,7 +209,14 @@ class TestTheClaimNamesTheDeliveredFile:
 
         monkeypatch.setattr(journal_rehydrate, "rehydrate", lambda **_k: {"ok": True})
 
-        pull._default_ingest("<FlexQueryResponse/>", source_path="/var/lib/radon/flex-inbox/activity.xml")
+        # An inbox-SHAPED path under tmp_path, not the literal production one:
+        # `_default_ingest` writes the plaintext to `source_path` itself (R-419),
+        # so naming /var/lib/radon/flex-inbox made the test fail with
+        # FileNotFoundError on every machine that is not the VPS. What is under
+        # test is the RECORDED name, and that is a basename either way.
+        inbox = tmp_path / "flex-inbox"
+        inbox.mkdir()
+        pull._default_ingest("<FlexQueryResponse/>", source_path=str(inbox / "activity.xml"))
 
         assert recorded and recorded[0] is not None
         assert "activity" in recorded[0], recorded

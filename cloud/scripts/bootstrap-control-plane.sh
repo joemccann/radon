@@ -333,8 +333,12 @@ for index in "${!SOURCES[@]}"; do
       # Kept byte-for-byte in step with dropin_body_is_valid() in
       # deploy-root-helper.sh; test_rel133_control_plane_recovery.py pins the
       # two gates against each other. R-394.
-      grep -q '^Type=simple$' "$staged_path" || \
-        die "drop-in must set Type=simple: $relative_source"
+      # NOT Type=simple only: R-391 moved the monitor and relay drop-ins to
+      # Type=notify + WatchdogSec because forcing simple made systemd stop
+      # requiring keepalives, and a relay with a dead socket sat
+      # `active (running)` forever. Both gates refused what the repo ships.
+      grep -qE '^Type=(simple|notify)$' "$staged_path" || \
+        die "drop-in must set Type=simple or Type=notify: $relative_source"
       grep -q '^ExecStart=/usr/local/sbin/radon-app-runtime run %n$' "$staged_path" || \
         die "drop-in must ExecStart radon-app-runtime: $relative_source"
       grep -q '^ExecStartPre=$' "$staged_path" || \

@@ -28,6 +28,8 @@ from pathlib import Path
 import libsql_experimental as libsql
 import pytest
 
+from unittest.mock import MagicMock
+
 SCRIPTS = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -37,6 +39,21 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures"
 ACTIVITY_XML = FIXTURES / "cash_transactions_flex_ytd_detail_sample.xml"
 
 SHA = "a" * 64
+
+
+def test_the_driver_under_test_is_the_real_one():
+    """This whole file is worthless against a stub.
+
+    A peer module installed a process-wide `sys.modules["libsql_experimental"]`
+    MagicMock at import time, so collection order decided whether these tests
+    exercised the driver or a mock — and a mock passes `rowcount` and
+    `fetchall()` back as MagicMocks, which is exactly the seam T-250 exists to
+    close. Fail with a sentence rather than a MagicMock comparison.
+    """
+    assert not isinstance(getattr(libsql, "connect", None), MagicMock), (
+        "libsql_experimental is a stub installed by another test module; these "
+        "tests prove nothing about the real driver"
+    )
 
 
 @pytest.fixture

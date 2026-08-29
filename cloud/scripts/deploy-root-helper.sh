@@ -1103,8 +1103,8 @@ sync_scheduled_units() {
 # pins the two against each other so they cannot drift. R-394.
 dropin_body_is_valid() {
   local path="$1" label="${2:-$1}"
-  grep -q '^Type=simple$' "$path" || {
-    echo "drop-in must set Type=simple: ${label}" >&2
+  grep -qE '^Type=(simple|notify)$' "$path" || {
+    echo "drop-in must set Type=simple or Type=notify: ${label}" >&2
     return 1
   }
   grep -q '^ExecStart=/usr/local/sbin/radon-app-runtime run %n$' "$path" || {
