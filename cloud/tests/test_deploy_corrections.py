@@ -854,6 +854,11 @@ recover_pending_transition
             "/usr/local/sbin/radon-deploy-root commit-transition",
             "-n -l -- /usr/local/sbin/radon-deploy-root sync-scheduled-units",
             "/usr/local/sbin/radon-deploy-root sync-scheduled-units",
+            # The edge config publishes on the same verified-release path as
+            # the unit sync; before this, cloud/caddy/Caddyfile was the one
+            # release artifact no deploy shipped.
+            "-n -l -- /usr/local/sbin/radon-deploy-root publish-caddy",
+            "/usr/local/sbin/radon-deploy-root publish-caddy",
         ]
 
     def test_verified_journal_finalizes_when_unit_sync_refuses_stale_head(
