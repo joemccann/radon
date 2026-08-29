@@ -71,17 +71,17 @@ class TestRouting:
     def test_websocket_route_to_8765(self, caddy_dir):
         content = read_caddyfile(caddy_dir)
         assert re.search(r"handle\s+/ws\*", content)
-        assert "localhost:8765" in content
+        assert "127.0.0.1:8765" in content
 
     def test_api_ib_route_to_8321(self, caddy_dir):
         content = read_caddyfile(caddy_dir)
         assert re.search(r"handle_path\s+/api/ib/\*", content)
-        assert "localhost:8321" in content
+        assert "127.0.0.1:8321" in content
 
     def test_default_route_to_3000(self, caddy_dir):
         content = read_caddyfile(caddy_dir)
         assert re.search(r"handle\s*\{", content, re.MULTILINE)
-        assert "localhost:3000" in content
+        assert "127.0.0.1:3000" in content
 
     def test_handle_path_used_for_api_ib(self, caddy_dir):
         content = read_caddyfile(caddy_dir)
@@ -90,6 +90,24 @@ class TestRouting:
         assert match.group(1) == "handle_path", (
             "/api/ib/* must use handle_path (not handle) for prefix stripping"
         )
+
+    def test_reverse_proxy_does_not_dial_localhost_hostname(self, caddy_dir):
+        # `localhost` prefers ::1. Relay binds 127.0.0.1:8765 only, so
+        # reverse_proxy localhost:8765 502s with connection refused. Same
+        # trap hit [::1]:3000 during nextjs restarts (2026-08-25).
+        content = read_caddyfile(caddy_dir)
+        stripped = re.sub(r"(?m)^\s*#.*$", "", content)
+        assert not re.search(r"reverse_proxy\s+localhost:", stripped), (
+            "reverse_proxy must dial 127.0.0.1, not localhost"
+        )
+
+    def test_edge_health_status_maps_dial_errors_to_200(self, caddy_dir):
+        content = read_caddyfile(caddy_dir)
+        block = reverse_proxy_block(content, "127.0.0.1:8330")
+        assert "handle_response" in block
+        status_section = content.split("@edge_health_status", 1)[1].split("\n    handle {", 1)[0]
+        assert "handle_errors" in status_section
+        assert '{"reachable":false,"observer":"caddy"}' in status_section
 
 
 class TestRetiredBetaStack:
@@ -262,20 +280,20 @@ class TestUpstreamRestartWindow:
     """
 
     def test_app_proxy_retries_across_the_restart_gap(self, caddy_dir):
-        block = reverse_proxy_block(read_caddyfile(caddy_dir), "localhost:3000")
+        block = reverse_proxy_block(read_caddyfile(caddy_dir), "127.0.0.1:3000")
         assert retry_window_seconds(block) >= MIN_RETRY_WINDOW_SECONDS, (
             "the app upstream has no retry window that outlasts a radon-nextjs "
             "restart; every request during the deploy gap 502s"
         )
 
     def test_api_proxy_retries_across_the_restart_gap(self, caddy_dir):
-        block = reverse_proxy_block(read_caddyfile(caddy_dir), "localhost:8321")
+        block = reverse_proxy_block(read_caddyfile(caddy_dir), "127.0.0.1:8321")
         assert retry_window_seconds(block) >= MIN_RETRY_WINDOW_SECONDS, (
             "the /api/ib/* upstream has no retry window that outlasts a "
             "radon-api restart; ws-ticket calls 502 through every deploy"
         )
 
-    @pytest.mark.parametrize("upstream", ["localhost:3000", "localhost:8321"])
+    @pytest.mark.parametrize("upstream", ["127.0.0.1:3000", "127.0.0.1:8321"])
     def test_retry_interval_re_dials_across_the_gap(self, caddy_dir, upstream):
         block = reverse_proxy_block(read_caddyfile(caddy_dir), upstream)
         interval = retry_interval_seconds(block)
@@ -308,7 +326,7 @@ class TestSingleUpstreamStaysInThePool:
     proxy block so the warning comment itself neither satisfies nor trips it.
     """
 
-    @pytest.mark.parametrize("upstream", ["localhost:3000", "localhost:8321"])
+    @pytest.mark.parametrize("upstream", ["127.0.0.1:3000", "127.0.0.1:8321"])
     def test_no_fail_duration_on_the_single_upstream_blocks(self, caddy_dir, upstream):
         block = reverse_proxy_block(read_caddyfile(caddy_dir), upstream)
         assert "fail_duration" not in block, (
@@ -430,7 +448,7 @@ class TestRestartWindowMechanism:
     def test_request_during_an_upstream_gap_is_served_not_502ed(
         self, caddy_dir, tmp_path
     ):
-        proxied = reverse_proxy_block(read_caddyfile(caddy_dir), "localhost:3000")
+        proxied = reverse_proxy_block(read_caddyfile(caddy_dir), "127.0.0.1:3000")
         order = []
         request_issued = threading.Event()
 

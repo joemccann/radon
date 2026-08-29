@@ -305,7 +305,7 @@ class TestTheBudgetFitsARealScan:
         route_secs = int(match.group(1).replace("_", "")) / 1000
 
         caddyfile = (repo / "cloud" / "caddy" / "Caddyfile").read_text()
-        app_block = caddyfile.split("reverse_proxy localhost:3000")[1]
+        app_block = caddyfile.split("reverse_proxy 127.0.0.1:3000")[1]
         edge = re.search(r"response_header_timeout\s+(\d+)s", app_block)
         assert edge, "the app upstream must state its response_header_timeout"
 
