@@ -209,6 +209,11 @@ export default function ChatPanel({
   const riskInput = useMemo(() => proposalRiskInput(proposal), [proposal]);
   const quote = useMemo(() => proposalQuote(proposal, prices), [proposal, prices]);
   const [showJump, setShowJump] = useState(false);
+  // The composer owns the picker, but the starter-prompt pills send turns of
+  // their own. Mirroring the selection here keeps a pill on the model the
+  // operator can see selected instead of silently falling to the server
+  // default. "" until the catalog answers, which the API layer omits.
+  const [selectedModelId, setSelectedModelId] = useState("");
 
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const atBottomRef = useRef(true);
@@ -251,7 +256,11 @@ export default function ChatPanel({
     scrollToBottom();
   }, [scrollToBottom]);
 
-  const sendMessage = async (prompt: string, attachments: ChatImageAttachment[] = []) => {
+  const sendMessage = async (
+    prompt: string,
+    attachments: ChatImageAttachment[] = [],
+    modelId = "",
+  ) => {
     // One controller per turn: a new send supersedes the previous stream.
     streamAbortRef.current?.abort();
     streamAbortRef.current = new AbortController();
@@ -309,7 +318,7 @@ export default function ChatPanel({
           signal: streamAbortRef.current?.signal,
         });
       } else {
-        const turn = await requestAssistantTurn(conversation, cleaned, attachments);
+        const turn = await requestAssistantTurn(conversation, cleaned, attachments, modelId);
         setTurnTools(turn.toolEvents);
         setTurnModel(turn.model);
         setStatus("streaming");
@@ -408,7 +417,7 @@ export default function ChatPanel({
                       type="button"
                       key={prompt}
                       className="chat-empty-card"
-                      onClick={() => sendMessage(prompt)}
+                      onClick={() => sendMessage(prompt, [], selectedModelId)}
                     >
                       <span className="chat-empty-card__slash">/</span>
                       {prompt}
@@ -539,7 +548,7 @@ export default function ChatPanel({
                   <button
                     type="button"
                     key={prompt}
-                    onClick={() => sendMessage(prompt)}
+                    onClick={() => sendMessage(prompt, [], selectedModelId)}
                     className="pill-chip"
                   >
                     /{prompt}
@@ -550,7 +559,10 @@ export default function ChatPanel({
             <AskComposer
               busy={isBusy}
               focusKey={isOpen}
-              onSubmit={(text, _engine, attachments) => void sendMessage(text, attachments)}
+              onSubmit={(text, modelId, attachments) =>
+                void sendMessage(text, attachments, modelId)
+              }
+              onModelChange={setSelectedModelId}
             />
           </div>
         </div>

@@ -158,6 +158,11 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # Data age (a quarter can be ~100+ days old) is legitimate and never
     # conflated with writer health. FRED HTTP only — no IB dependency.
     "hhlev":            {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # model-catalog — radon-model-catalog.timer, daily 03:10 UTC every
+    # calendar day (provider model lists move on release cadence, not market
+    # cadence, so weekend runs heartbeat like any other). Uniform 26h window.
+    # Provider HTTP only — no IB dependency.
+    "model-catalog":    {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # yield-curve — radon-yield-curve.timer, daily 22:30 UTC every calendar
     # day (weekend/holiday runs heartbeat with no new Treasury rows). Uniform
     # 26h window: no weekend/holiday gap to widen for. treasury.gov + Yahoo
@@ -494,6 +499,9 @@ BUCKETS: dict[str, list[str]] = {
         # Daily 13:20 UTC FRED Z.1 household-leverage pull — hourly check
         # surfaces a missed run within 1h of the 26h window expiring.
         "hhlev",
+        # Daily 03:10 UTC LLM provider frontier model list refresh — hourly
+        # check surfaces a missed run within 1h of the 26h window expiring.
+        "model-catalog",
         # Daily 22:30 UTC Treasury yield-curve pull — hourly check surfaces
         # a missed run within 1h of the 26h window expiring.
         "yield-curve",

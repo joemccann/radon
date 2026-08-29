@@ -1,0 +1,17 @@
+{
+  "models": [
+    { "id": "grok-4.6", "aliases": ["grok-latest"], "created": 1782777600, "fingerprint": "fp_grok46", "input_modalities": ["text", "image"], "output_modalities": ["text"], "version": "1.0.0", "object": "model", "owned_by": "xai", "long_context_threshold": 128000 },
+    { "id": "grok-4.5", "aliases": [], "created": 1779753600, "fingerprint": "fp_grok45", "input_modalities": ["text", "image"], "output_modalities": ["text"], "version": "1.0.0", "object": "model", "owned_by": "xai", "long_context_threshold": 128000 },
+    { "id": "grok-4.3", "aliases": [], "created": 1773360000, "fingerprint": "fp_grok43", "input_modalities": ["text", "image"], "output_modalities": ["text"], "version": "1.0.0", "object": "model", "owned_by": "xai", "long_context_threshold": 128000 },
+    { "id": "grok-4.20-0309-reasoning", "aliases": [], "created": 1772064000, "fingerprint": "fp_grok420r", "input_modalities": ["text"], "output_modalities": ["text"], "version": "1.0.0", "object": "model", "owned_by": "xai", "long_context_threshold": 128000 },
+    { "id": "grok-4.20-0309-non-reasoning", "aliases": [], "created": 1772064000, "fingerprint": "fp_grok420n", "input_modalities": ["text"], "output_modalities": ["text"], "version": "1.0.0", "object": "model", "owned_by": "xai", "long_context_threshold": 128000 },
+    { "id": "grok-4.20-multi-agent-0309", "aliases": [], "created": 1772064000, "fingerprint": "fp_grok420m", "input_modalities": ["text"], "output_modalities": ["text"], "version": "1.0.0", "object": "model", "owned_by": "xai", "long_context_threshold": 128000 },
+    { "id": "grok-4.1-fast", "aliases": [], "created": 1765238400, "fingerprint": "fp_grok41f", "input_modalities": ["text"], "output_modalities": ["text"], "version": "1.0.0", "object": "model", "owned_by": "xai", "long_context_threshold": 128000 },
+    { "id": "grok-build-0.1", "aliases": [], "created": 1780358400, "fingerprint": "fp_grokbuild", "input_modalities": ["text"], "output_modalities": ["text"], "version": "1.0.0", "object": "model", "owned_by": "xai", "long_context_threshold": 128000 },
+    { "id": "grok-2-1212", "aliases": [], "created": 1733961600, "fingerprint": "fp_grok2", "input_modalities": ["text"], "output_modalities": ["text"], "version": "1.0.0", "object": "model", "owned_by": "xai", "long_context_threshold": 32000 },
+    { "id": "grok-2-vision-1212", "aliases": [], "created": 1733961600, "fingerprint": "fp_grok2v", "input_modalities": ["text", "image"], "output_modalities": ["text"], "version": "1.0.0", "object": "model", "owned_by": "xai", "long_context_threshold": 32000 },
+    { "id": "grok-imagine-image-2.0", "aliases": [], "created": 1781136000, "fingerprint": "fp_img20", "input_modalities": ["text"], "output_modalities": ["image"], "version": "1.0.0", "object": "model", "owned_by": "xai", "long_context_threshold": 32000 },
+    { "id": "grok-imagine-video-1.5", "aliases": [], "created": 1781136000, "fingerprint": "fp_vid15", "input_modalities": ["text"], "output_modalities": ["video"], "version": "1.0.0", "object": "model", "owned_by": "xai", "long_context_threshold": 32000 },
+    { "id": "grok-voice-think-fast-2.0", "aliases": [], "created": 1781136000, "fingerprint": "fp_voice20", "input_modalities": ["audio", "text"], "output_modalities": ["audio"], "version": "1.0.0", "object": "model", "owned_by": "xai", "long_context_threshold": 32000 }
+  ]
+}

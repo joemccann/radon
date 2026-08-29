@@ -1152,6 +1152,49 @@ def upsert_hhlev_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = N
     db.commit()
 
 
+def upsert_llm_model_catalog_rows(
+    rows: list[dict[str, Any]], refreshed_at: Optional[str] = None
+) -> None:
+    """LLM model catalog — one row per provider, idempotent on provider.
+
+    The stamp parameter is ``refreshed_at`` rather than the module's usual
+    ``recorded_at`` because it is what the picker renders as the catalog's
+    freshness (``LlmModelOption.refreshedAt``), not a bookkeeping column.
+    At most one row per provider, so a single multi-row INSERT.
+
+    A row carries its OWN ``refreshed_at`` when the refresh job carried it
+    forward from a provider whose poll failed or rate-limited. That per-row
+    stamp wins over the batch stamp: restamping a carried-forward row with
+    this run's time would report a model last seen live weeks ago as
+    refreshed today. The batch stamp applies only to rows without one.
+    """
+    if not rows:
+        return
+    stamp = refreshed_at or _now_iso()
+    db = get_db()
+    placeholders = ", ".join("(?, ?, ?, ?)" for _ in rows)
+    params: list[Any] = []
+    for row in rows:
+        params.extend(
+            (
+                row["provider"],
+                row["model_id"],
+                row["display_name"],
+                row.get("refreshed_at") or stamp,
+            )
+        )
+    db.execute(
+        "INSERT INTO llm_model_catalog (provider, model_id, display_name, refreshed_at) "
+        f"VALUES {placeholders} "
+        "ON CONFLICT(provider) DO UPDATE SET "
+        "model_id = excluded.model_id, "
+        "display_name = excluded.display_name, "
+        "refreshed_at = excluded.refreshed_at",
+        tuple(params),
+    )
+    db.commit()
+
+
 _VIXTS_INSERT_HEAD = (
     "INSERT INTO vixts_history (date, vix_close, vix3m_close, ratio, spx_close, recorded_at) "
 )
