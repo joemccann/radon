@@ -12,6 +12,12 @@
 import { radonFetch, RadonApiError } from "@/lib/radonApi";
 import type { LlmTool } from "@/lib/llm/provider";
 import { backendQueryPath, isBackendPathAllowed } from "@/lib/assistant/backend";
+import {
+  callApi,
+  createAssistantTurnBudget,
+  listApis,
+  type AssistantTurnBudget,
+} from "@/lib/assistant/dispatch";
 import { rankVerticalSpreads, type ChainContract, type SpreadKind } from "@/lib/assistant/spreads";
 import {
   fetchJournalRowsInRange,
@@ -47,6 +53,8 @@ export type AssistantPrincipal = {
   userId: string;
   token?: string;
 };
+
+export { createAssistantTurnBudget, type AssistantTurnBudget };
 
 const READ_TIMEOUT_MS = 130_000;
 const KNOWLEDGE_TIMEOUT_MS = 30_000;
@@ -776,6 +784,50 @@ export const ASSISTANT_TOOLS: AssistantTool[] = [
     run: (input, token) => runFetchBackend(input, token),
   },
   {
+    name: "list_apis",
+    description:
+      "Search the Radon HTTP API catalog. Use this before call_api when you do not know the exact path. Returns matching operations (method, path, capability, summary, input hint).",
+    destructive: false,
+    input_schema: {
+      type: "object",
+      properties: {
+        q: { type: "string", description: "Search query, e.g. watchlist or gex scan" },
+      },
+      required: ["q"],
+    },
+    run: (input) => Promise.resolve(listApis(input)),
+  },
+  {
+    name: "call_api",
+    description:
+      "Call a catalogued Radon HTTP API as the current signed-in user. Watchlist is GET/POST /api/watchlist and DELETE /api/watchlist/{symbol}. Do not guess paths; use list_apis first. Orders cannot be placed through this tool (use place_order). Admin, IB restart, and /pi/exec are refused.",
+    destructive: false,
+    input_schema: {
+      type: "object",
+      properties: {
+        method: {
+          type: "string",
+          enum: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+          description: "HTTP method. Default GET.",
+        },
+        path: {
+          type: "string",
+          description: "HTTP path beginning with /, e.g. /api/watchlist or /quote/AAPL",
+        },
+        query: {
+          type: "object",
+          additionalProperties: { type: "string" },
+          description: "Optional query string fields",
+        },
+        body: {
+          type: "object",
+          description: "JSON body for POST/PUT/PATCH/DELETE. Ignored on GET. Max 8KB.",
+        },
+      },
+      required: ["path"],
+    },
+  },
+  {
     name: "place_order",
     description:
       "Propose a stock, option, or combo order. This is a destructive action: it is NOT executed automatically. The user must confirm the proposal before any order is sent. For a vertical, set type=combo and include both legs with expiry/strike/right/action/ratio.",
@@ -861,6 +913,7 @@ export async function executeTool(
   name: string,
   input: Record<string, unknown>,
   principal: AssistantPrincipal,
+  budget: AssistantTurnBudget = createAssistantTurnBudget(),
 ): Promise<ToolResult> {
   if (!principal?.userId) {
     return { ok: false, error: "Verified principal required." };
@@ -869,10 +922,16 @@ export async function executeTool(
   if (!tool) {
     return { ok: false, error: `Unknown tool: ${name}` };
   }
-  if (tool.destructive || !tool.run) {
+  if (tool.destructive) {
     return { ok: false, error: `Tool ${name} is destructive and requires user confirmation.` };
   }
   try {
+    if (name === "call_api") {
+      return callApi(input, principal, budget);
+    }
+    if (!tool.run) {
+      return { ok: false, error: `Tool ${name} cannot be executed.` };
+    }
     const data = await tool.run(input, principal.token);
     return { ok: true, data };
   } catch (error) {
