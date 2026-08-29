@@ -42,13 +42,19 @@ def test_local_aggregate_recovery_requires_healthy_schema_v2() -> None:
 
     response = MagicMock()
     response.status = 200
+    # `generated_at` and the two sections are now REQUIRED evidence: an
+    # aggregate produced before the off-box sample cannot describe its recovery,
+    # and `degraded` only clears when the serving path is green. R-399.
     response.read.return_value = (
-        b'{"schema_version":2,"ok":true,"overall_state":"up"}'
+        b'{"schema_version":2,"ok":true,"overall_state":"up",'
+        b'"generated_at":"2026-08-29T12:00:00Z",'
+        b'"probes":{"api":{"state":"up"}},"units":{"radon-api.service":{"state":"up"}}}'
     )
+    sampled_at = datetime(2026, 8, 29, 11, 0, 0, tzinfo=timezone.utc)
     with patch.object(external_probe.urllib.request, "urlopen") as urlopen:
         urlopen.return_value.__enter__.return_value = response
         assert external_probe._local_aggregate_is_healthy() is True
-        assert external_probe._local_aggregate_clears_offbox_down() is True
+        assert external_probe._local_aggregate_clears_offbox_down(sampled_at) is True
 
 
 def test_local_starting_aggregate_does_not_clear_offbox_down() -> None:
@@ -153,7 +159,9 @@ def test_recovered_local_aggregate_clears_fresh_aggregate_failure(monkeypatch) -
             detail="aggregate_down",
         ),
     )
-    monkeypatch.setattr(external_probe, "_local_aggregate_clears_offbox_down", lambda: True)
+    monkeypatch.setattr(
+        external_probe, "_local_aggregate_clears_offbox_down", lambda *_a, **_k: True
+    )
 
     outcome = external_probe.check_external_probe(now=NOW)
 
@@ -176,7 +184,9 @@ def test_still_unhealthy_local_aggregate_keeps_fresh_failure_active(monkeypatch)
         ),
     )
     monkeypatch.setattr(external_probe, "_local_aggregate_is_healthy", lambda: False)
-    monkeypatch.setattr(external_probe, "_local_aggregate_clears_offbox_down", lambda: False)
+    monkeypatch.setattr(
+        external_probe, "_local_aggregate_clears_offbox_down", lambda *_a, **_k: False
+    )
 
     outcome = external_probe.check_external_probe(now=NOW)
 
@@ -194,11 +204,16 @@ def test_local_degraded_aggregate_clears_fresh_aggregate_down() -> None:
     response = MagicMock()
     response.status = 200
     response.read.return_value = (
-        b'{"schema_version":2,"ok":false,"overall_state":"degraded"}'
+        b'{"schema_version":2,"ok":false,"overall_state":"degraded",'
+        b'"generated_at":"2026-08-29T12:00:00Z",'
+        b'"probes":{"api":{"state":"up"},"ib-gateway":{"state":"down"}},'
+        b'"units":{"radon-api.service":{"state":"up"},'
+        b'"radon-newsfeed.service":{"state":"down"}}}'
     )
+    sampled_at = datetime(2026, 8, 29, 11, 0, 0, tzinfo=timezone.utc)
     with patch.object(external_probe.urllib.request, "urlopen") as urlopen:
         urlopen.return_value.__enter__.return_value = response
-        assert external_probe._local_aggregate_clears_offbox_down() is True
+        assert external_probe._local_aggregate_clears_offbox_down(sampled_at) is True
         assert external_probe._local_aggregate_is_healthy() is False
 
     from scripts.watchdog import external_probe as ep
@@ -213,7 +228,7 @@ def test_local_degraded_aggregate_clears_fresh_aggregate_down() -> None:
                 detail="aggregate_down",
             ),
         ),
-        patch.object(ep, "_local_aggregate_clears_offbox_down", lambda: True),
+        patch.object(ep, "_local_aggregate_clears_offbox_down", lambda *_a, **_k: True),
     ):
         outcome = ep.check_external_probe(now=NOW)
 

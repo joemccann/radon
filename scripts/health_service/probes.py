@@ -134,6 +134,9 @@ def parse_unit_states(raw: str) -> dict:
 
 
 UNIT_STATE_MAX_AGE_SECS = 30.0
+# Probe evidence gets the same treatment as unit evidence. The refresh interval
+# is 5s, so 30s is six missed sweeps. R-401.
+PROBE_STATE_MAX_AGE_SECS = 30.0
 STATUS_SCHEMA_VERSION = 2
 
 # Non-edge components: reported in /status, but a failure here must not
@@ -159,13 +162,17 @@ DEPENDENCY_UNITS = frozenset({
 })
 
 
-def _unit_evidence_current(units_age_secs) -> bool:
+def _evidence_current(age_secs, bound: float) -> bool:
     return (
-        not isinstance(units_age_secs, bool)
-        and isinstance(units_age_secs, (int, float))
-        and math.isfinite(units_age_secs)
-        and 0 <= units_age_secs <= UNIT_STATE_MAX_AGE_SECS
+        not isinstance(age_secs, bool)
+        and isinstance(age_secs, (int, float))
+        and math.isfinite(age_secs)
+        and 0 <= age_secs <= bound
     )
+
+
+def _unit_evidence_current(units_age_secs) -> bool:
+    return _evidence_current(units_age_secs, UNIT_STATE_MAX_AGE_SECS)
 
 
 def _nested_api_state(probe_results: dict) -> str | None:
@@ -222,7 +229,8 @@ def _nested_api_state(probe_results: dict) -> str | None:
 
 
 def aggregate_state(probe_results: dict, units: dict,
-                    health_service: str = "ok", units_age_secs=None) -> str:
+                    health_service: str = "ok", units_age_secs=None,
+                    probes_age_secs=None) -> str:
     """Return the canonical state for this daemon's direct observations.
 
     The off-box ``external_probe`` row is deliberately excluded: folding an old
@@ -243,6 +251,14 @@ def aggregate_state(probe_results: dict, units: dict,
             state = str(value.get("state", "unknown")).lower()
             target = dependency_states if name in DEPENDENCY_PROBES else serving_states
             target.append(state)
+    # Probe evidence is age-gated exactly like unit evidence: `ProbeCache`
+    # keeps its last value through every failure, so an hours-old dict would
+    # otherwise report `radon-api: up` the moment the unit reads `active`.
+    # `None` means the caller has no age to offer (a bare `run_probes`), which
+    # is current by construction. R-401.
+    probes_current = probes_age_secs is None or _evidence_current(
+        probes_age_secs, PROBE_STATE_MAX_AGE_SECS
+    )
     units_current = _unit_evidence_current(units_age_secs)
     dependency_stuck = False
     if units_current:
@@ -270,6 +286,7 @@ def aggregate_state(probe_results: dict, units: dict,
         health_service != "ok"
         or not states
         or not units_current
+        or not probes_current
     ):
         return "unknown"
     if any(state == "unknown" for state in states):
@@ -299,7 +316,8 @@ def aggregate_state(probe_results: dict, units: dict,
 
 def build_status(probes: dict, units: dict, generated_at: str,
                  health_service: str = "ok", units_age_secs=None,
-                 service_health=None, external_probe=None) -> dict:
+                 service_health=None, external_probe=None,
+                 probes_age_secs=None) -> dict:
     """Assemble the always-200 /status body. Degraded sources are fields, never
     error codes (per feedback_http_status_for_real_errors.md).
 
@@ -313,6 +331,7 @@ def build_status(probes: dict, units: dict, generated_at: str,
         units,
         health_service,
         units_age_secs,
+        probes_age_secs,
     )
     return {
         "schema_version": STATUS_SCHEMA_VERSION,
@@ -323,6 +342,7 @@ def build_status(probes: dict, units: dict, generated_at: str,
         "probes": probes,
         "units": units,
         "units_age_secs": units_age_secs,
+        "probes_age_secs": probes_age_secs,
         "service_health": service_health
         if service_health is not None
         else {"state": "unknown", "detail": "not_collected", "rows": []},
