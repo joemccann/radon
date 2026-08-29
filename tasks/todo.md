@@ -1,3 +1,26 @@
+# Task: Whole-repo code-path map + WebGL viewer (2026-08-29)
+
+## Dependency graph
+
+- C1 depends_on: [] - Generator `tools/codemap/generate_codemap.py`: walk web/site/scripts/cloud/lib/tests, resolve TS/JS + Python imports, emit codemap.json + codemap.data.js with precomputed layout
+- C2 depends_on: [C1] - Pytest coverage for resolvers, test-flag detection, layout, JSON shape
+- C3 depends_on: [C1] - WebGL viewer `tools/codemap/index.html`: pan/zoom/hover/select/search/area filters, brand tokens
+- C4 depends_on: [C2, C3] - Generate artifacts, browser-verify with screenshot, commit + PR
+
+## Checklist
+
+- [x] C1 Generator
+- [x] C2 Tests
+- [x] C3 Viewer
+- [x] C4 Verify + ship
+
+## Review
+
+- 2,817 nodes / 5,502 internal edges across web, site, scripts, cloud, lib, tests
+- Focused pytest 22 passed; ruff clean; viewer verified in headless Chrome from file:// (overview + selection screenshots)
+
+---
+
 # Task: Resolve testing/2026-08-29 merge conflicts (2026-08-29)
 
 ## Dependency graph

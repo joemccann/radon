@@ -1,0 +1,600 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>RADON · CODE PATH MAP</title>
+<style>
+  :root {
+    --bg-canvas: #0a0f14;
+    --bg-panel: #0f1519;
+    --bg-raised: #1e252b;
+    --line-grid: #2e3947;
+    --text-primary: #e2e8f0;
+    --text-secondary: #94a3b8;
+    --text-muted: #758192;
+    --signal-core: #05AD98;
+    --signal-strong: #0FCFB5;
+    --warn: #F5A623;
+    --dislocation: #e55fb5;
+    --extreme: #9e80f6;
+    --neutral: #94a3b8;
+    --font-ui: Inter, ui-sans-serif, system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; background: var(--bg-canvas); color: var(--text-primary); font-family: var(--font-ui); }
+  #gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; }
+  #gl.dragging { cursor: grabbing; }
+
+  #panel {
+    position: absolute; top: 16px; left: 16px; width: 320px; max-height: calc(100% - 32px);
+    background: var(--bg-panel); border: 1px solid var(--line-grid); border-radius: 4px;
+    display: flex; flex-direction: column; overflow: hidden; z-index: 10;
+  }
+  #panel header {
+    padding: 10px 12px; border-bottom: 1px solid var(--line-grid);
+    display: flex; align-items: baseline; justify-content: space-between;
+  }
+  #panel header h1 { font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: 0.03em; color: var(--signal-core); }
+  #panel header .meta { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+  #panel .body { padding: 12px; overflow-y: auto; }
+  .section-label { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.03em; color: var(--text-muted); margin: 12px 0 6px; }
+  .section-label:first-child { margin-top: 0; }
+
+  #search {
+    width: 100%; padding: 6px 8px; font-family: var(--font-mono); font-size: 12px;
+    background: var(--bg-canvas); color: var(--text-primary);
+    border: 1px solid var(--line-grid); border-radius: 4px; outline: none;
+  }
+  #search:focus { border-color: var(--signal-core); }
+  #search-results { margin-top: 4px; }
+  #search-results div {
+    font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary);
+    padding: 3px 6px; border-radius: 4px; cursor: pointer;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  #search-results div:hover { background: var(--bg-raised); color: var(--text-primary); }
+
+  .legend-row {
+    display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 4px;
+    cursor: pointer; font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary);
+  }
+  .legend-row:hover { background: var(--bg-raised); }
+  .legend-row.off { opacity: 0.35; }
+  .legend-row .swatch { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+  .legend-row .count { margin-left: auto; color: var(--text-muted); font-size: 11px; }
+
+  .toggle-row {
+    display: flex; align-items: center; gap: 8px; padding: 4px 6px;
+    font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary); cursor: pointer; border-radius: 4px;
+  }
+  .toggle-row:hover { background: var(--bg-raised); }
+  .toggle-row .box {
+    width: 12px; height: 12px; border: 1px solid var(--line-grid); border-radius: 2px; flex: none;
+    display: inline-flex; align-items: center; justify-content: center; font-size: 10px; color: var(--signal-core);
+  }
+
+  #selection { border-top: 1px solid var(--line-grid); padding: 12px; overflow-y: auto; max-height: 42vh; }
+  #selection .empty { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); line-height: 1.6; }
+  #sel-path { font-family: var(--font-mono); font-size: 12px; color: var(--signal-strong); word-break: break-all; margin-bottom: 6px; }
+  #sel-stats { font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary); margin-bottom: 8px; }
+  .dep-list div {
+    font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary);
+    padding: 2px 6px; border-radius: 4px; cursor: pointer;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .dep-list div:hover { background: var(--bg-raised); color: var(--text-primary); }
+
+  #panel footer { padding: 8px 12px; border-top: 1px solid var(--line-grid); font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); line-height: 1.7; }
+  #reset {
+    background: var(--bg-canvas); color: var(--text-secondary); border: 1px solid var(--line-grid);
+    border-radius: 4px; font-family: var(--font-mono); font-size: 11px; padding: 4px 10px; cursor: pointer; margin-top: 10px;
+  }
+  #reset:hover { border-color: var(--signal-core); color: var(--text-primary); }
+
+  #tooltip {
+    position: absolute; pointer-events: none; display: none; z-index: 20;
+    background: var(--bg-raised); border: 1px solid var(--line-grid); border-radius: 4px;
+    padding: 4px 8px; font-family: var(--font-mono); font-size: 11px; color: var(--text-primary);
+    max-width: 420px; word-break: break-all;
+  }
+  .group-label {
+    position: absolute; pointer-events: none; transform: translate(-50%, -50%); z-index: 5;
+    font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.03em; color: var(--text-muted);
+    text-shadow: 0 0 6px var(--bg-canvas), 0 0 2px var(--bg-canvas); white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div id="tooltip"></div>
+<div id="labels"></div>
+
+<div id="panel">
+  <header>
+    <h1>RADON · CODE PATH MAP</h1>
+    <span class="meta" id="meta-counts"></span>
+  </header>
+  <div class="body">
+    <div class="section-label">SEARCH</div>
+    <input id="search" type="text" placeholder="path substring" spellcheck="false" autocomplete="off" />
+    <div id="search-results"></div>
+    <div class="section-label">AREAS</div>
+    <div id="legend"></div>
+    <div class="section-label">LAYERS</div>
+    <div class="toggle-row" id="toggle-tests"><span class="box" id="tests-box">x</span><span>test files</span><span class="count" id="tests-count"></span></div>
+    <button id="reset">RESET VIEW</button>
+  </div>
+  <div id="selection">
+    <div class="empty" id="sel-empty">No file selected. Hover to inspect, click a node to trace its imports and importers. Drag to pan, wheel to zoom.</div>
+    <div id="sel-detail" style="display:none">
+      <div id="sel-path"></div>
+      <div id="sel-stats"></div>
+      <div class="section-label">IMPORTS <span id="out-count"></span></div>
+      <div class="dep-list" id="sel-out"></div>
+      <div class="section-label">IMPORTED BY <span id="in-count"></span></div>
+      <div class="dep-list" id="sel-in"></div>
+    </div>
+  </div>
+  <footer id="meta-footer"></footer>
+</div>
+
+<script src="codemap.data.js"></script>
+<script>
+"use strict";
+(function () {
+  const DATA = window.CODEMAP;
+  if (!DATA) {
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);color:var(--text-secondary)">codemap.data.js missing. Run: python3 tools/codemap/generate_codemap.py</div>'
+    );
+    return;
+  }
+
+  const AREA_COLORS = {
+    web: [0x05 / 255, 0xad / 255, 0x98 / 255],
+    scripts: [0x9e / 255, 0x80 / 255, 0xf6 / 255],
+    site: [0xe5 / 255, 0x5f / 255, 0xb5 / 255],
+    cloud: [0xf5 / 255, 0xa6 / 255, 0x23 / 255],
+    lib: [0x0f / 255, 0xcf / 255, 0xb5 / 255],
+    tests: [0x94 / 255, 0xa3 / 255, 0xb8 / 255],
+  };
+  const AREA_CSS = { web: "#05AD98", scripts: "#9e80f6", site: "#e55fb5", cloud: "#F5A623", lib: "#0FCFB5", tests: "#94a3b8" };
+  const OUT_EDGE = [0x0f / 255, 0xcf / 255, 0xb5 / 255]; // imports (signal strong)
+  const IN_EDGE = [0xf5 / 255, 0xa6 / 255, 0x23 / 255]; // imported by (warn)
+
+  const nodes = DATA.nodes;
+  const edges = DATA.edges;
+  const groups = DATA.groups;
+  const N = nodes.length;
+  const E = edges.length;
+
+  const outAdj = new Map();
+  const inAdj = new Map();
+  edges.forEach(([s, t]) => {
+    (outAdj.get(s) || outAdj.set(s, []).get(s)).push(t);
+    (inAdj.get(t) || inAdj.set(t, []).get(t)).push(s);
+  });
+
+  // ---------- state ----------
+  const areaOn = {};
+  Object.keys(DATA.meta.areas).forEach((a) => (areaOn[a] = true));
+  let showTests = true;
+  let selected = -1;
+  let hovered = -1;
+  const visible = new Uint8Array(N);
+
+  function nodeArea(i) { return groups[nodes[i].g].area; }
+  function recomputeVisible() {
+    for (let i = 0; i < N; i++) {
+      const n = nodes[i];
+      visible[i] = areaOn[nodeArea(i)] && (showTests || !n.test) ? 1 : 0;
+    }
+  }
+
+  // ---------- webgl ----------
+  const canvas = document.getElementById("gl");
+  const gl = canvas.getContext("webgl", { antialias: true, alpha: false });
+  if (!gl) {
+    document.body.insertAdjacentHTML("beforeend", '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);color:var(--text-secondary)">WebGL unavailable in this browser.</div>');
+    return;
+  }
+
+  function compile(type, src) {
+    const sh = gl.createShader(type);
+    gl.shaderSource(sh, src);
+    gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(sh));
+    return sh;
+  }
+  function program(vs, fs) {
+    const p = gl.createProgram();
+    gl.attachShader(p, compile(gl.VERTEX_SHADER, vs));
+    gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+    return p;
+  }
+
+  const VS_COMMON =
+    "uniform vec2 u_cam; uniform float u_scale; uniform vec2 u_half;" +
+    "vec2 project(vec2 pos) { return (pos - u_cam) * u_scale / u_half * vec2(1.0, -1.0); }";
+
+  const nodeProg = program(
+    VS_COMMON +
+      "attribute vec2 a_pos; attribute vec4 a_color; attribute float a_size; varying vec4 v_color;" +
+      "void main() { gl_Position = vec4(project(a_pos), 0.0, 1.0); gl_PointSize = a_size; v_color = a_color; }",
+    "precision mediump float; varying vec4 v_color;" +
+      "void main() { vec2 d = gl_PointCoord - vec2(0.5); float r = length(d);" +
+      "float a = 1.0 - smoothstep(0.42, 0.5, r); if (a <= 0.0) discard;" +
+      "gl_FragColor = vec4(v_color.rgb, v_color.a * a); }"
+  );
+  const edgeProg = program(
+    VS_COMMON +
+      "attribute vec2 a_pos; attribute vec4 a_color; varying vec4 v_color;" +
+      "void main() { gl_Position = vec4(project(a_pos), 0.0, 1.0); v_color = a_color; }",
+    "precision mediump float; varying vec4 v_color; void main() { gl_FragColor = v_color; }"
+  );
+
+  const nodePos = new Float32Array(N * 2);
+  for (let i = 0; i < N; i++) { nodePos[i * 2] = nodes[i].x; nodePos[i * 2 + 1] = nodes[i].y; }
+  const nodeColor = new Float32Array(N * 4);
+  const nodeSize = new Float32Array(N);
+
+  const edgePos = new Float32Array(E * 4);
+  for (let e = 0; e < E; e++) {
+    const [s, t] = edges[e];
+    edgePos[e * 4] = nodes[s].x; edgePos[e * 4 + 1] = nodes[s].y;
+    edgePos[e * 4 + 2] = nodes[t].x; edgePos[e * 4 + 3] = nodes[t].y;
+  }
+  const edgeColor = new Float32Array(E * 8);
+
+  function makeBuffer(data, dynamic) {
+    const b = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, b);
+    gl.bufferData(gl.ARRAY_BUFFER, data, dynamic ? gl.DYNAMIC_DRAW : gl.STATIC_DRAW);
+    return b;
+  }
+  const bNodePos = makeBuffer(nodePos, false);
+  const bNodeColor = makeBuffer(nodeColor, true);
+  const bNodeSize = makeBuffer(nodeSize, true);
+  const bEdgePos = makeBuffer(edgePos, false);
+  const bEdgeColor = makeBuffer(edgeColor, true);
+
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+  // ---------- camera ----------
+  const dpr = window.devicePixelRatio || 1;
+  const cam = { x: 0, y: 0, scale: 1 };
+  let width = 0, height = 0;
+
+  function resize() {
+    width = window.innerWidth;
+    height = window.innerHeight;
+    canvas.width = Math.round(width * dpr);
+    canvas.height = Math.round(height * dpr);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    requestDraw();
+  }
+
+  function fitView() {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (let i = 0; i < N; i++) {
+      minX = Math.min(minX, nodePos[i * 2]); maxX = Math.max(maxX, nodePos[i * 2]);
+      minY = Math.min(minY, nodePos[i * 2 + 1]); maxY = Math.max(maxY, nodePos[i * 2 + 1]);
+    }
+    cam.x = (minX + maxX) / 2;
+    cam.y = (minY + maxY) / 2;
+    cam.scale = 0.9 * Math.min(width / (maxX - minX + 1), height / (maxY - minY + 1));
+    requestDraw();
+  }
+
+  function screenToWorld(sx, sy) {
+    return [(sx - width / 2) / cam.scale + cam.x, (sy - height / 2) / cam.scale + cam.y];
+  }
+  function worldToScreen(wx, wy) {
+    return [(wx - cam.x) * cam.scale + width / 2, (wy - cam.y) * cam.scale + height / 2];
+  }
+
+  // ---------- picking grid ----------
+  const CELL = 40;
+  const grid = new Map();
+  for (let i = 0; i < N; i++) {
+    const key = Math.floor(nodePos[i * 2] / CELL) + ":" + Math.floor(nodePos[i * 2 + 1] / CELL);
+    (grid.get(key) || grid.set(key, []).get(key)).push(i);
+  }
+  function pick(sx, sy) {
+    const [wx, wy] = screenToWorld(sx, sy);
+    const tol = 12 / cam.scale;
+    const cx = Math.floor(wx / CELL), cy = Math.floor(wy / CELL);
+    let best = -1, bestD = tol * tol;
+    const reach = Math.max(1, Math.ceil(tol / CELL));
+    for (let dx = -reach; dx <= reach; dx++) {
+      for (let dy = -reach; dy <= reach; dy++) {
+        const cell = grid.get(cx + dx + ":" + (cy + dy));
+        if (!cell) continue;
+        for (const i of cell) {
+          if (!visible[i]) continue;
+          const ddx = nodePos[i * 2] - wx, ddy = nodePos[i * 2 + 1] - wy;
+          const d = ddx * ddx + ddy * ddy;
+          if (d < bestD) { bestD = d; best = i; }
+        }
+      }
+    }
+    return best;
+  }
+
+  // ---------- styling ----------
+  function restyle() {
+    const neighborsOut = new Set(selected >= 0 ? outAdj.get(selected) || [] : []);
+    const neighborsIn = new Set(selected >= 0 ? inAdj.get(selected) || [] : []);
+    const hasSel = selected >= 0;
+
+    for (let i = 0; i < N; i++) {
+      const n = nodes[i];
+      const base = AREA_COLORS[nodeArea(i)] || AREA_COLORS.tests;
+      let r = base[0], g = base[1], b = base[2];
+      let a = n.test ? 0.55 : 0.9;
+      let size = 3 + Math.sqrt(n.in + n.out) * 1.5;
+      if (!visible[i]) a = 0;
+      else if (hasSel) {
+        if (i === selected) { a = 1; size += 4; }
+        else if (neighborsOut.has(i) || neighborsIn.has(i)) a = 1;
+        else a = 0.07;
+      }
+      if (i === hovered && visible[i]) { a = 1; size += 2; }
+      const zoomBoost = Math.pow(Math.max(cam.scale, 0.02), 0.3);
+      nodeSize[i] = Math.min(26, Math.max(2.5, size * zoomBoost)) * dpr;
+      nodeColor[i * 4] = r; nodeColor[i * 4 + 1] = g; nodeColor[i * 4 + 2] = b; nodeColor[i * 4 + 3] = a;
+    }
+
+    for (let e = 0; e < E; e++) {
+      const [s, t] = edges[e];
+      let cs, ct, a;
+      if (!visible[s] || !visible[t]) { a = 0; cs = ct = [0, 0, 0]; }
+      else if (hasSel) {
+        if (s === selected) { cs = ct = OUT_EDGE; a = 0.8; }
+        else if (t === selected) { cs = ct = IN_EDGE; a = 0.8; }
+        else { cs = ct = [1, 1, 1]; a = 0.012; }
+      } else {
+        cs = AREA_COLORS[nodeArea(s)] || AREA_COLORS.tests;
+        ct = AREA_COLORS[nodeArea(t)] || AREA_COLORS.tests;
+        a = 0.10;
+      }
+      edgeColor[e * 8] = cs[0]; edgeColor[e * 8 + 1] = cs[1]; edgeColor[e * 8 + 2] = cs[2]; edgeColor[e * 8 + 3] = a;
+      edgeColor[e * 8 + 4] = ct[0]; edgeColor[e * 8 + 5] = ct[1]; edgeColor[e * 8 + 6] = ct[2]; edgeColor[e * 8 + 7] = a;
+    }
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, bNodeColor);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, nodeColor);
+    gl.bindBuffer(gl.ARRAY_BUFFER, bNodeSize);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, nodeSize);
+    gl.bindBuffer(gl.ARRAY_BUFFER, bEdgeColor);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, edgeColor);
+    requestDraw();
+  }
+
+  // ---------- draw ----------
+  let drawQueued = false;
+  function requestDraw() {
+    if (drawQueued) return;
+    drawQueued = true;
+    requestAnimationFrame(draw);
+  }
+  function bindAttr(prog, name, buffer, size) {
+    const loc = gl.getAttribLocation(prog, name);
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0);
+  }
+  function setUniforms(prog) {
+    gl.uniform2f(gl.getUniformLocation(prog, "u_cam"), cam.x, cam.y);
+    gl.uniform1f(gl.getUniformLocation(prog, "u_scale"), cam.scale);
+    gl.uniform2f(gl.getUniformLocation(prog, "u_half"), width / 2, height / 2);
+  }
+  function draw() {
+    drawQueued = false;
+    gl.clearColor(0x0a / 255, 0x0f / 255, 0x14 / 255, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    gl.useProgram(edgeProg);
+    setUniforms(edgeProg);
+    bindAttr(edgeProg, "a_pos", bEdgePos, 2);
+    bindAttr(edgeProg, "a_color", bEdgeColor, 4);
+    gl.drawArrays(gl.LINES, 0, E * 2);
+
+    gl.useProgram(nodeProg);
+    setUniforms(nodeProg);
+    bindAttr(nodeProg, "a_pos", bNodePos, 2);
+    bindAttr(nodeProg, "a_color", bNodeColor, 4);
+    bindAttr(nodeProg, "a_size", bNodeSize, 1);
+    gl.drawArrays(gl.POINTS, 0, N);
+
+    positionLabels();
+  }
+
+  // ---------- group labels ----------
+  const labelHost = document.getElementById("labels");
+  const labelEls = groups.map((grp) => {
+    const el = document.createElement("div");
+    el.className = "group-label";
+    el.textContent = grp.id + " · " + grp.count;
+    labelHost.appendChild(el);
+    return el;
+  });
+  function positionLabels() {
+    for (let i = 0; i < groups.length; i++) {
+      const grp = groups[i];
+      const el = labelEls[i];
+      if (!areaOn[grp.area]) { el.style.display = "none"; continue; }
+      const rPx = grp.r * cam.scale;
+      if (rPx < 26) { el.style.display = "none"; continue; }
+      const [sx, sy] = worldToScreen(grp.x, grp.y - grp.r * 1.02);
+      if (sx < -200 || sx > width + 200 || sy < -50 || sy > height + 50) { el.style.display = "none"; continue; }
+      el.style.display = "block";
+      el.style.left = sx + "px";
+      el.style.top = sy + "px";
+      el.style.opacity = Math.min(1, (rPx - 26) / 40) * 0.9;
+    }
+  }
+
+  // ---------- interaction ----------
+  const tooltip = document.getElementById("tooltip");
+  let dragging = false, moved = false, lastX = 0, lastY = 0;
+
+  canvas.addEventListener("mousedown", (ev) => {
+    dragging = true; moved = false; lastX = ev.clientX; lastY = ev.clientY;
+    canvas.classList.add("dragging");
+  });
+  window.addEventListener("mouseup", (ev) => {
+    canvas.classList.remove("dragging");
+    if (dragging && !moved && ev.target === canvas) {
+      const hit = pick(ev.clientX, ev.clientY);
+      select(hit);
+    }
+    dragging = false;
+  });
+  window.addEventListener("mousemove", (ev) => {
+    if (dragging) {
+      const dx = ev.clientX - lastX, dy = ev.clientY - lastY;
+      if (Math.abs(dx) + Math.abs(dy) > 2) moved = true;
+      cam.x -= dx / cam.scale;
+      cam.y -= dy / cam.scale;
+      lastX = ev.clientX; lastY = ev.clientY;
+      requestDraw();
+      return;
+    }
+    if (ev.target !== canvas) { setHover(-1, ev); return; }
+    setHover(pick(ev.clientX, ev.clientY), ev);
+  });
+  function setHover(i, ev) {
+    if (i !== hovered) { hovered = i; restyle(); }
+    if (i >= 0) {
+      tooltip.style.display = "block";
+      tooltip.textContent = nodes[i].id + "  (" + nodes[i].loc + " loc · in " + nodes[i].in + " · out " + nodes[i].out + ")";
+      tooltip.style.left = Math.min(ev.clientX + 14, width - 440) + "px";
+      tooltip.style.top = ev.clientY + 14 + "px";
+    } else {
+      tooltip.style.display = "none";
+    }
+  }
+  canvas.addEventListener("wheel", (ev) => {
+    ev.preventDefault();
+    const factor = Math.exp(-ev.deltaY * 0.0016);
+    const [wx, wy] = screenToWorld(ev.clientX, ev.clientY);
+    cam.scale = Math.min(60, Math.max(0.01, cam.scale * factor));
+    const [wx2, wy2] = screenToWorld(ev.clientX, ev.clientY);
+    cam.x += wx - wx2;
+    cam.y += wy - wy2;
+    restyle();
+  }, { passive: false });
+
+  // ---------- selection panel ----------
+  const selEmpty = document.getElementById("sel-empty");
+  const selDetail = document.getElementById("sel-detail");
+  function depRow(i) {
+    const el = document.createElement("div");
+    el.textContent = nodes[i].id;
+    el.style.color = AREA_CSS[nodeArea(i)] || "";
+    el.addEventListener("click", () => { select(i); centerOn(i); });
+    return el;
+  }
+  function select(i) {
+    selected = i;
+    if (i < 0) {
+      selEmpty.style.display = "block";
+      selDetail.style.display = "none";
+    } else {
+      const n = nodes[i];
+      selEmpty.style.display = "none";
+      selDetail.style.display = "block";
+      document.getElementById("sel-path").textContent = n.id;
+      document.getElementById("sel-stats").textContent =
+        n.lang + " · " + n.loc + " loc · " + (n.test ? "test file" : "product file");
+      const outs = (outAdj.get(i) || []).slice().sort((a, b) => nodes[a].id.localeCompare(nodes[b].id));
+      const ins = (inAdj.get(i) || []).slice().sort((a, b) => nodes[a].id.localeCompare(nodes[b].id));
+      document.getElementById("out-count").textContent = "· " + outs.length;
+      document.getElementById("in-count").textContent = "· " + ins.length;
+      const outHost = document.getElementById("sel-out");
+      const inHost = document.getElementById("sel-in");
+      outHost.textContent = ""; inHost.textContent = "";
+      outs.forEach((d) => outHost.appendChild(depRow(d)));
+      ins.forEach((d) => inHost.appendChild(depRow(d)));
+    }
+    restyle();
+  }
+  function centerOn(i) {
+    cam.x = nodes[i].x;
+    cam.y = nodes[i].y;
+    cam.scale = Math.max(cam.scale, 4);
+    restyle();
+  }
+
+  // ---------- search ----------
+  const searchInput = document.getElementById("search");
+  const searchResults = document.getElementById("search-results");
+  searchInput.addEventListener("input", () => {
+    const q = searchInput.value.trim().toLowerCase();
+    searchResults.textContent = "";
+    if (q.length < 2) return;
+    let shown = 0;
+    for (let i = 0; i < N && shown < 20; i++) {
+      if (nodes[i].id.toLowerCase().includes(q)) {
+        const el = document.createElement("div");
+        el.textContent = nodes[i].id;
+        el.addEventListener("click", () => { select(i); centerOn(i); });
+        searchResults.appendChild(el);
+        shown++;
+      }
+    }
+  });
+
+  // ---------- legend / toggles ----------
+  const legend = document.getElementById("legend");
+  Object.keys(DATA.meta.areas).forEach((area) => {
+    const row = document.createElement("div");
+    row.className = "legend-row";
+    row.innerHTML =
+      '<span class="swatch" style="background:' + (AREA_CSS[area] || "#94a3b8") + '"></span>' +
+      "<span>" + area + '</span><span class="count">' + DATA.meta.areas[area] + "</span>";
+    row.addEventListener("click", () => {
+      areaOn[area] = !areaOn[area];
+      row.classList.toggle("off", !areaOn[area]);
+      recomputeVisible();
+      restyle();
+    });
+    legend.appendChild(row);
+  });
+  const testsBox = document.getElementById("tests-box");
+  document.getElementById("toggle-tests").addEventListener("click", () => {
+    showTests = !showTests;
+    testsBox.textContent = showTests ? "x" : "";
+    recomputeVisible();
+    restyle();
+  });
+  document.getElementById("tests-count").textContent = nodes.filter((n) => n.test).length;
+  document.getElementById("reset").addEventListener("click", () => { select(-1); fitView(); restyle(); });
+
+  // ---------- meta ----------
+  document.getElementById("meta-counts").textContent = N + " files · " + E + " edges";
+  document.getElementById("meta-footer").textContent =
+    "generated " + DATA.meta.generated_at + " · python3 tools/codemap/generate_codemap.py";
+
+  // ---------- boot ----------
+  window.addEventListener("resize", resize);
+  resize();
+  fitView();
+  recomputeVisible();
+  restyle();
+  const preselect = new URLSearchParams(location.search).get("select");
+  if (preselect) {
+    const idx = nodes.findIndex((n) => n.id === preselect);
+    if (idx >= 0) { select(idx); centerOn(idx); }
+  }
+})();
+</script>
+</body>
+</html>
