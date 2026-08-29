@@ -246,6 +246,38 @@ class TestClassifyProbes:
         result = probe.classify_probes(_ok_probe(), _ok_probe(payload=degraded))
         assert result == {"ok": 1, "detail": "edge_ok:aggregate_degraded"}
 
+    def test_newsfeed_unit_down_payload_keeps_edge_ok(self):
+        # 2026-08-29 page 0b7726f8: newsfeed flap must not write aggregate_down.
+        degraded = health_service_probes.build_status(
+            {
+                "radon-api": {
+                    "state": "up",
+                    "payload": {
+                        "service_state": "reachable",
+                        "auth_state": "authenticated",
+                        "upstream_dead": False,
+                        "port_listening": True,
+                    },
+                },
+                "radon-relay": {"state": "up"},
+                "radon-nextjs": {"state": "up"},
+                "ib-gateway": {"state": "up"},
+            },
+            {
+                "radon-api.service": {"state": "up"},
+                "radon-relay.service": {"state": "up"},
+                "radon-monitor.service": {"state": "up"},
+                "radon-nextjs.service": {"state": "up"},
+                "radon-ib-gateway.service": {"state": "up"},
+                "radon-newsfeed.service": {"state": "down"},
+            },
+            "t",
+            units_age_secs=0,
+        )
+        assert degraded["overall_state"] == "degraded"
+        result = probe.classify_probes(_ok_probe(), _ok_probe(payload=degraded))
+        assert result == {"ok": 1, "detail": "edge_ok:aggregate_degraded"}
+
     def test_valid_schema_v2_down_is_distinct_from_invalid_payload(self):
         result = probe.classify_probes(
             _ok_probe(),

@@ -695,6 +695,21 @@ Incident: 2026-08-15 00:24Z, P1 page `34ab3e3c…`.
   admin panel), then approve the 2FA push. Regression tests:
   `test_health_service.py::TestStatusResponse::test_gateway_only_down_degrades_instead_of_down`,
   `test_health_probe.py::TestClassifyProbes::test_schema_v2_degraded_keeps_edge_ok`.
+- **Sidecar unit flap → false "edge unhealthy" (2026-08-29, page
+  `0b7726f8`):** `radon-newsfeed.service` Restart=always flaps
+  (`NRestarts` in the dozens; `InactiveEnterTimestamp` within the same
+  minute as the page) while api/relay/nextjs stay up. Newsfeed and monitor
+  were counted as serving-path units, so the aggregate went `down`, the
+  off-box row wrote `aggregate_down`, and continuous paged P1 edge
+  unhealthy alongside the correct newsfeed unit page. Discriminating
+  check: `https://app.radon.run/edge-health/ping` 200 + `/sign-in` 200 +
+  `:8330/status` probes for api/relay/nextjs `up` + only
+  `radon-newsfeed.service` / `radon-monitor.service` downish → NOT an edge
+  outage. Those units are now `DEPENDENCY_UNITS` (degraded, not down);
+  on-box continuous still pages the sidecar itself. Regression:
+  `test_newsfeed_only_unit_down_degrades_instead_of_down`,
+  `test_monitor_only_unit_down_degrades_instead_of_down`,
+  `test_newsfeed_unit_down_payload_keeps_edge_ok`.
 
 ---
 
