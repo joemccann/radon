@@ -1,0 +1,273 @@
+import crypto from "node:crypto";
+import net from "node:net";
+import { afterEach, describe, expect, it } from "vitest";
+import { WebSocket } from "ws";
+
+import { createHeadlinesHub } from "./hub.js";
+import { parseFrame } from "./protocol.js";
+import { RING_SIZE } from "./normalize.js";
+
+const FLASH = {
+  type: "flash",
+  data: {
+    id: "h1",
+    time: "2026-08-29T20:35:56.000Z",
+    important: 1,
+    data: { content: "Explosions heard in Kyiv." },
+    impact: [{ symbol: "WTI", impact: "bearish" }],
+  },
+};
+
+const AUTHLESS = {
+  clerkConfigured: false,
+  allowUnauthenticatedDev: true,
+  bindHost: "127.0.0.1",
+  requireClerk: false,
+};
+
+function waitOpen(ws) {
+  return new Promise((resolve, reject) => {
+    ws.once("open", resolve);
+    ws.once("error", reject);
+    ws.once("unexpected-response", (_req, res) => {
+      reject(Object.assign(new Error(`upgrade ${res.statusCode}`), { statusCode: res.statusCode }));
+    });
+  });
+}
+
+function collect(ws, n, timeoutMs = 1500) {
+  const messages = [];
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("timed out collecting frames")), timeoutMs);
+    ws.on("message", (data) => {
+      messages.push(JSON.parse(data.toString()));
+      if (messages.length >= n) {
+        clearTimeout(timer);
+        resolve(messages);
+      }
+    });
+  });
+}
+
+function listenPort(hub) {
+  return Number(new URL(hub.address()).port);
+}
+
+function rawUpgrade(port, requestTarget, extraHeaders = "") {
+  return new Promise((resolve, reject) => {
+    const socket = net.connect({ host: "127.0.0.1", port }, () => {
+      const key = crypto.randomBytes(16).toString("base64");
+      socket.write(
+        `GET ${requestTarget} HTTP/1.1\r\n` +
+          `Host: 127.0.0.1:${port}\r\n` +
+          "Upgrade: websocket\r\n" +
+          "Connection: Upgrade\r\n" +
+          `Sec-WebSocket-Key: ${key}\r\n` +
+          "Sec-WebSocket-Version: 13\r\n" +
+          extraHeaders +
+          "\r\n",
+      );
+    });
+    const timer = setTimeout(() => {
+      socket.destroy();
+      reject(new Error(`upgrade timeout for ${requestTarget}`));
+    }, 1500);
+    socket.once("data", (buf) => {
+      clearTimeout(timer);
+      const status = Number(String(buf).split(" ")[1]);
+      socket.destroy();
+      resolve(status);
+    });
+    socket.once("error", (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+}
+
+describe("createHeadlinesHub", () => {
+  const hubs = [];
+
+  afterEach(async () => {
+    while (hubs.length) await hubs.pop().stop();
+  });
+
+  async function boot(overrides = {}) {
+    const hub = createHeadlinesHub({
+      security: AUTHLESS,
+      listenHost: "127.0.0.1",
+      listenPort: 0,
+      connectUpstream: null,
+      ...overrides,
+    });
+    hubs.push(hub);
+    await hub.listen();
+    return hub;
+  }
+
+  it("sends a snapshot then live headlines, never time ticks or upstream hosts", async () => {
+    const hub = await boot();
+    hub.ingest(parseFrame(JSON.stringify(FLASH)));
+    hub.ingest(parseFrame('{"type":"time","data":99}'));
+    const ws = new WebSocket(hub.address());
+    const frames = await collect(ws, 1);
+    hub.ingest(
+      parseFrame(
+        JSON.stringify({
+          type: "flash",
+          data: { id: "h2", data: { content: "Jobless claims 218k vs 225k." } },
+        }),
+      ),
+    );
+    const next = await collect(ws, 1);
+    const live = [...frames, ...next];
+    ws.close();
+    expect(live[0]).toEqual({
+      type: "snapshot",
+      items: [
+        {
+          kind: "headline",
+          id: "h1",
+          time: "2026-08-29T20:35:56.000Z",
+          important: true,
+          content: "Explosions heard in Kyiv.",
+          impact: [{ symbol: "WTI", impact: "bearish" }],
+        },
+      ],
+    });
+    expect(live[live.length - 1].type).toBe("headline");
+    expect(JSON.stringify(live)).not.toMatch(/"type":"time"/);
+  });
+
+  it("still fans out a headline whose body mentions the upstream host", async () => {
+    const hub = await boot();
+    const ws = new WebSocket(hub.address());
+    const pending = collect(ws, 2);
+    await waitOpen(ws);
+    hub.ingest(
+      parseFrame(
+        JSON.stringify({
+          type: "flash",
+          data: { id: "mention", data: { content: "Screenshot from mktnews.net is circulating." } },
+        }),
+      ),
+    );
+    const frames = await pending;
+    ws.close();
+    const live = frames.find((row) => row.type === "headline");
+    expect(live.item.content).toContain("mktnews.net");
+  });
+
+  it("rejects the wrong path", async () => {
+    const hub = await boot();
+    const ws = new WebSocket(hub.address().replace("/ws-headlines", "/ws"));
+    await expect(waitOpen(ws)).rejects.toMatchObject({ statusCode: 404 });
+  });
+
+  it("rejects a missing ticket when the handshake looks like a browser", async () => {
+    const hub = await boot();
+    const ws = new WebSocket(hub.address(), {
+      headers: { Origin: "http://localhost:3000" },
+    });
+    await expect(waitOpen(ws)).rejects.toMatchObject({ statusCode: 401 });
+  });
+
+  it("rejects loopback upgrades that arrived through a proxy", async () => {
+    const hub = await boot();
+    const ws = new WebSocket(hub.address(), {
+      headers: { "x-forwarded-for": "203.0.113.9" },
+    });
+    await expect(waitOpen(ws)).rejects.toMatchObject({ statusCode: 401 });
+  });
+
+  it("accepts a validated ticket from a browser handshake", async () => {
+    const fetchImpl = async () => ({ ok: true });
+    const hub = await boot({
+      security: { ...AUTHLESS, allowUnauthenticatedDev: false, clerkConfigured: true },
+      fetchImpl,
+    });
+    const ws = new WebSocket(`${hub.address()}?ticket=good`, {
+      headers: { Origin: "http://localhost:3000" },
+    });
+    const pending = collect(ws, 1);
+    await waitOpen(ws);
+    const [snap] = await pending;
+    ws.close();
+    expect(snap.type).toBe("snapshot");
+  });
+
+  it("caps the ring", async () => {
+    const hub = await boot({ ringSize: 3 });
+    for (let i = 0; i < 6; i += 1) {
+      hub.ingest(
+        parseFrame(
+          JSON.stringify({ type: "flash", data: { id: `id-${i}`, data: { content: `n${i}` } } }),
+        ),
+      );
+    }
+    expect(hub.ring.map((row) => row.id)).toEqual(["id-3", "id-4", "id-5"]);
+  });
+
+  it("drops oversized frames on ingest and ingestRaw", async () => {
+    const hub = await boot({ maxFrameBytes: 64 });
+    expect(hub.ingestRaw("x".repeat(200))).toBe(false);
+    const huge = parseFrame(
+      JSON.stringify({
+        type: "flash",
+        data: { id: "huge", data: { content: "K".repeat(200) } },
+      }),
+    );
+    expect(hub.ingest(huge)).toBe(false);
+    expect(hub.ring).toEqual([]);
+  });
+
+  it("binds loopback even if asked for a public host", async () => {
+    const hub = await boot({
+      listenHost: "0.0.0.0",
+      security: { ...AUTHLESS, bindHost: "0.0.0.0" },
+    });
+    expect(hub.listenHost).toBe("127.0.0.1");
+  });
+
+  it("refuses a connect storm past MAX_CLIENTS", async () => {
+    const hub = await boot({ maxClients: 1 });
+    const first = new WebSocket(hub.address());
+    await waitOpen(first);
+    const second = new WebSocket(hub.address());
+    await expect(waitOpen(second)).rejects.toMatchObject({ statusCode: 503 });
+    first.close();
+  });
+
+  it("ignores Host-header steering of the upgrade path", async () => {
+    const hub = await boot();
+    const ws = new WebSocket(hub.address().replace("/ws-headlines", "/"), {
+      headers: { Host: "api.mktnews.net" },
+    });
+    await expect(waitOpen(ws)).rejects.toMatchObject({ statusCode: 404 });
+  });
+
+  it("rejects request-targets that are not origin-form /ws-headlines", async () => {
+    const hub = await boot();
+    const port = listenPort(hub);
+    const rejected = [
+      "/./ws-headlines",
+      "/x/../ws-headlines",
+      "ws-headlines",
+      "//api.mktnews.net/ws-headlines",
+      "http://api.mktnews.net/ws-headlines",
+      "/ws-headlinesX",
+      "/ws-headlines/extra",
+    ];
+    for (const target of rejected) {
+      expect(await rawUpgrade(port, target), target).not.toBe(101);
+    }
+    expect(await rawUpgrade(port, "/ws-headlines")).toBe(101);
+    expect(await rawUpgrade(port, "/ws-headlines?ticket=dev")).toBe(101);
+  });
+});
+
+describe("RING_SIZE", () => {
+  it("stays bounded", () => {
+    expect(RING_SIZE).toBe(50);
+  });
+});

@@ -22,6 +22,9 @@ WEEKEND_VENV="$WEEKEND_ROOT/venv"
 # every round hard-resets and cleans that clone.
 WEEKEND_ENV="$WEEKEND_ROOT/.env"
 LAUNCH_AGENTS="$HOME/Library/LaunchAgents"
+# The checkout this script lives in is the source of the gitignored env files
+# the runner clone cannot get from `git clone`. Override for an unusual layout.
+SRC_REPO="${RADON_WEEKEND_SRC_REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 ORIGIN_URL="$(git config --get remote.origin.url 2>/dev/null || echo git@github.com:joemccann/radon.git)"
 
 fail=0
@@ -35,6 +38,18 @@ check() {
   fi
 }
 
+# Same report shape as `check`, but advisory only: an absent env file must not
+# block installing the job on a fresh machine — the provisioning step below
+# says what it did instead.
+advise() {
+  local name="$1"; shift
+  if "$@" >/dev/null 2>&1; then
+    echo "  ok  $name"
+  else
+    echo "  MISSING  $name  ($*)"
+  fi
+}
+
 echo "[1/4] toolchain"
 check "claude CLI"        command -v claude
 check "gh CLI (authed)"   gh auth status
@@ -44,8 +59,17 @@ check "bun"               command -v bun
 check "node"              command -v node
 check "git ssh to origin" git ls-remote --exit-code "$ORIGIN_URL" HEAD
 check "pushover creds"    grep -qE '^PUSHOVER_(USER|TOKEN)=.+' "$WEEKEND_ENV"
+check "bash 4+ (cloud/tests)" bash -c '((BASH_VERSINFO[0] >= 4))'
+check "caddy (cloud/tests edge)" command -v caddy
+advise "$SRC_REPO/web/.env (else no dev server, so no browser verification)" \
+  test -s "$SRC_REPO/web/.env"
 if [[ $fail -ne 0 ]]; then
   echo "Fix the MISSING items above, then re-run."
+  echo "  bash 3.2 leaves 34 cloud/tests permanently red on this runner (13 in"
+  echo "  test_bootstrap_control_plane.py via 'exec {fd}<>', 21 in"
+  echo "  test_ib_gateway_control.py via 'mapfile'); no caddy leaves 3 more."
+  echo "  Installing either MOVES the recorded darwin baseline — the next audit"
+  echo "  must re-record the FAILED list in the same run."
 fi
 
 echo "[2/4] dedicated runner clone at $WEEKEND_REPO"
@@ -79,6 +103,41 @@ git -C "$WEEKEND_REPO" checkout -f --quiet main
 git -C "$WEEKEND_REPO" reset --hard --quiet origin/main
 touch "$WEEKEND_REPO/.radon-weekend-runner"
 mkdir -p "$WEEKEND_REPO/logs/testing-weekend"
+
+# web/.env is gitignored, so a fresh `git clone` can never carry it and the
+# nightly hard-reset would drop it anyway; both wrappers already exclude it
+# from their per-round `git clean`. Without it the Next dev server cannot
+# boot, so the loop cannot do the browser verification CLAUDE.md requires
+# (T-248 filed the resulting permanent local false-red on 2026-08-29).
+#
+# ONLY web/.env. The root .env is deliberately NOT provisioned: python-dotenv
+# already walks up from the clone to $WEEKEND_ROOT/.env, which carries the
+# same TURSO/IB keys, so a copy is redundant, and it would put IB_FLEX_TOKEN
+# in a second place. web/.env is read by Next, never by pytest.
+# Re-copied every setup run so a rotated key propagates. Never inline a value.
+provision_env_file() {
+  local rel="$1"
+  local src="$SRC_REPO/$rel"
+  local dst="$WEEKEND_REPO/$rel"
+  if [[ ! -s "$src" ]]; then
+    echo "  skipped $rel (none at $src; the loops run without it)"
+    return 0
+  fi
+  if [[ -s "$dst" && "$dst" -nt "$src" ]]; then
+    echo "  kept $rel (clone copy is newer than $src)"
+    return 0
+  fi
+  mkdir -p "$(dirname "$dst")"
+  install -m 600 "$src" "$dst"
+  echo "  provisioned $rel from $SRC_REPO (0600)"
+}
+if [[ "$SRC_REPO" == "$WEEKEND_REPO" ]]; then
+  echo "  MISSING  env provisioning: run setup from your own checkout, not the runner clone"
+else
+  for env_rel in web/.env; do
+    provision_env_file "$env_rel"
+  done
+fi
 
 if [[ ! -f "$WEEKEND_ENV" ]]; then
   cat > "$WEEKEND_ENV" <<'EOF'

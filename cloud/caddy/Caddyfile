@@ -30,6 +30,10 @@
         format json
     }
 
+    handle /ws-headlines {
+        reverse_proxy localhost:8766
+    }
+
     handle /ws* {
         reverse_proxy 127.0.0.1:8765
     }
@@ -88,6 +92,40 @@
             handle_response @down {
                 header Content-Type application/json
                 respond `{"reachable":false,"observer":"caddy"}` 200
+            }
+        }
+    }
+
+    # The assistant turn needs longer than the generic guard below allows.
+    # 2026-08-29: the operator pasted a chart into chat and got a 504 while
+    # radon-nextjs was still working on the turn. /api/assistant rode the
+    # catch-all, whose R-219 guard abandons a request after 30s without a
+    # response header. That route is NON-STREAMING: it runs the whole
+    # multi-round runAssistantLoop and writes its JSON only at the end, so a
+    # turn emits no header at all until it has finished, and it budgets itself
+    # maxDuration 300. The radon-nextjs journal already had a plain text turn
+    # answering at 55.3s; a vision turn plus the portfolio tool rounds a
+    # "how does this relate to my TLT position" question forces is strictly
+    # more work than that.
+    #
+    # Scoped to this one path on purpose. Raising the guard globally would undo
+    # R-219 for every other route, where an upstream that accepts the socket
+    # and never writes a header must still become an observable 5xx quickly.
+    #
+    # No lb_try_duration here, deliberately: this path is POST-only and has no
+    # idempotency key, so a retry loop could replay a vision turn the operator
+    # is billed for and re-run its tool calls. Caddy's default is zero retries.
+    #
+    # A bump only moves the cliff: a turn slower than this still 504s, because
+    # nothing is written until the loop finishes. The durable fix is for the
+    # route to start writing a response early (stream, or flush a header before
+    # the first round). R-262.
+    handle /api/assistant* {
+        reverse_proxy 127.0.0.1:3000 {
+            transport http {
+                dial_timeout 5s
+                response_header_timeout 180s
+                read_timeout 300s
             }
         }
     }

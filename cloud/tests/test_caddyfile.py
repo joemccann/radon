@@ -73,6 +73,19 @@ class TestRouting:
         assert re.search(r"handle\s+/ws\*", content)
         assert "127.0.0.1:8765" in content
 
+    def test_headlines_websocket_before_generic_ws(self, caddy_dir):
+        content = read_caddyfile(caddy_dir)
+        active = "\n".join(
+            line for line in content.splitlines() if not line.lstrip().startswith("#")
+        )
+        headlines = active.find("handle /ws-headlines")
+        generic = active.find("handle /ws*")
+        assert headlines != -1, "Caddy must proxy /ws-headlines"
+        assert generic != -1
+        assert headlines < generic, "/ws-headlines must win over /ws*"
+        assert "handle /ws-headlines*" not in active
+        assert "localhost:8766" in active
+
     def test_api_ib_route_to_8321(self, caddy_dir):
         content = read_caddyfile(caddy_dir)
         assert re.search(r"handle_path\s+/api/ib/\*", content)
@@ -201,6 +214,11 @@ CADDY_DEFAULT_TRY_INTERVAL_SECONDS = 0.25
 # attempts across the window.
 MAX_RETRY_INTERVAL_SECONDS = 1.0
 
+# The Next.js app and the FastAPI IB surface. Both are dialled from more than
+# one place in the Caddyfile, so the tests name them once.
+APP_UPSTREAM = "127.0.0.1:3000"
+IB_UPSTREAM = "127.0.0.1:8321"
+
 
 def strip_comments(content):
     """Drop Caddyfile `#` comments, leaving quoted and backticked literals alone.
@@ -225,25 +243,17 @@ def strip_comments(content):
     return "\n".join(kept)
 
 
-def reverse_proxy_block(content, upstream):
-    """Return the body of the `reverse_proxy <upstream>` block, '' if inline.
+def _balanced_block(text, start):
+    """The `{...}` run beginning at `start`, brace-balanced and quote-aware.
 
-    Brace-balanced (the health block nests `handle_response`) and
-    quote-aware (it responds with a JSON literal full of braces), so a setting
-    can only satisfy or trip an assertion from inside the block it belongs to.
+    Quote-aware because the health block responds with a JSON literal full of
+    braces, so a setting can only satisfy or trip an assertion from inside the
+    block it belongs to.
     """
-    active = strip_comments(content)
-    directive = re.search(r"reverse_proxy\s+" + re.escape(upstream) + r"\b", active)
-    assert directive, f"no reverse_proxy directive for {upstream}"
-    rest = active[directive.end():]
-    opener = re.match(r"[^\S\n]*\{", rest)
-    if not opener:
-        return ""
-    start = opener.end() - 1
     depth = 0
     quote = None
-    for index in range(start, len(rest)):
-        char = rest[index]
+    for index in range(start, len(text)):
+        char = text[index]
         if quote is not None:
             if char == quote:
                 quote = None
@@ -254,8 +264,47 @@ def reverse_proxy_block(content, upstream):
         elif char == "}":
             depth -= 1
             if depth == 0:
-                return rest[start:index + 1]
-    raise AssertionError(f"unbalanced braces in the reverse_proxy {upstream} block")
+                return text[start:index + 1]
+    raise AssertionError("unbalanced braces")
+
+
+def reverse_proxy_block(content, upstream):
+    """Return the body of the `reverse_proxy <upstream>` block, '' if inline."""
+    active = strip_comments(content)
+    directive = re.search(r"reverse_proxy\s+" + re.escape(upstream) + r"\b", active)
+    assert directive, f"no reverse_proxy directive for {upstream}"
+    rest = active[directive.end():]
+    opener = re.match(r"[^\S\n]*\{", rest)
+    if not opener:
+        return ""
+    return _balanced_block(rest, opener.end() - 1)
+
+
+def handle_block(content, matcher=None):
+    """Body of a `handle` block, selected by its matcher; None = the catch-all.
+
+    Two `handle` blocks now dial 127.0.0.1:3000 — the `/api/assistant*` one
+    (R-262) and the catch-all everything else rides — so an assertion about
+    "the app proxy" has to say which one it means instead of taking whichever
+    `reverse_proxy 127.0.0.1:3000` appears first in the file.
+    """
+    active = strip_comments(content)
+    pattern = r"handle\s*\{" if matcher is None else r"handle\s+" + re.escape(matcher) + r"\s*\{"
+    match = re.search(pattern, active)
+    assert match, f"no handle block for matcher {matcher!r}"
+    return _balanced_block(active, match.end() - 1)
+
+
+def proxy_block(content, upstream):
+    """The proxy block for an upstream, disambiguating the shared app port.
+
+    `127.0.0.1:3000` is scoped to the catch-all `handle`: that is the block
+    every route but `/api/assistant*` rides, and the block R-219's short header
+    timeout and R-220's retry restriction are about.
+    """
+    if upstream == APP_UPSTREAM:
+        return reverse_proxy_block(handle_block(content), upstream)
+    return reverse_proxy_block(content, upstream)
 
 
 def retry_window_seconds(block):
@@ -282,7 +331,7 @@ class TestUpstreamRestartWindow:
     """
 
     def test_app_proxy_retries_across_the_restart_gap(self, caddy_dir):
-        block = reverse_proxy_block(read_caddyfile(caddy_dir), "127.0.0.1:3000")
+        block = proxy_block(read_caddyfile(caddy_dir), APP_UPSTREAM)
         assert retry_window_seconds(block) >= MIN_RETRY_WINDOW_SECONDS, (
             "the app upstream has no retry window that outlasts a radon-nextjs "
             "restart; every request during the deploy gap 502s"
@@ -297,7 +346,7 @@ class TestUpstreamRestartWindow:
 
     @pytest.mark.parametrize("upstream", ["127.0.0.1:3000", "127.0.0.1:8321"])
     def test_retry_interval_re_dials_across_the_gap(self, caddy_dir, upstream):
-        block = reverse_proxy_block(read_caddyfile(caddy_dir), upstream)
+        block = proxy_block(read_caddyfile(caddy_dir), upstream)
         interval = retry_interval_seconds(block)
         assert 0 < interval <= MAX_RETRY_INTERVAL_SECONDS, (
             f"lb_try_interval {interval}s on {upstream} is too coarse: the "
@@ -330,7 +379,7 @@ class TestSingleUpstreamStaysInThePool:
 
     @pytest.mark.parametrize("upstream", ["127.0.0.1:3000", "127.0.0.1:8321"])
     def test_no_fail_duration_on_the_single_upstream_blocks(self, caddy_dir, upstream):
-        block = reverse_proxy_block(read_caddyfile(caddy_dir), upstream)
+        block = proxy_block(read_caddyfile(caddy_dir), upstream)
         assert "fail_duration" not in block, (
             f"reverse_proxy {upstream} sets fail_duration: the only upstream "
             "gets marked down on the first refused dial of a deploy restart, "
@@ -450,7 +499,7 @@ class TestRestartWindowMechanism:
     def test_request_during_an_upstream_gap_is_served_not_502ed(
         self, caddy_dir, tmp_path
     ):
-        proxied = reverse_proxy_block(read_caddyfile(caddy_dir), "127.0.0.1:3000")
+        proxied = proxy_block(read_caddyfile(caddy_dir), APP_UPSTREAM)
         order = []
         request_issued = threading.Event()
 

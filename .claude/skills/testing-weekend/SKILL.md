@@ -107,8 +107,12 @@ then any older non-P2 stragglers), exactly by the PART B contract:
    correct); for a net-negative test, show what real defect it passes
    over; (b) implement surgically; (c) show green; (d) run the full gates
    from the repo root (`python3.13 -m pytest`, `npx vitest run`, and
-   `pytest cloud/tests` when units/cloud files changed); (e) append the
-   TEST_LOG.md row with red/green counts; (f) commit with the T-### id.
+   `pytest cloud/tests` when units/cloud files changed); when the task
+   changed UI, also run the relevant `web/e2e` spec in the worktree and
+   attach the screenshot: the clone-copied `node_modules` is what makes
+   that possible, and CLAUDE.md does not accept unit-only evidence for
+   UI; (e) append the TEST_LOG.md row with red/green counts; (f) commit
+   with the T-### id.
    Source-code fixes are in scope ONLY when a test correctly fails
    against a real defect the audit identified — fix the defect, keep the
    test; never the reverse.
@@ -195,12 +199,20 @@ how this loop improves as the codebase grows.
   reproduced and had to be logged as an observation rather than a finding.
   Write the full reporter output to a file per gate run and read the tail
   from that file, so a flake round is nameable the first time it happens.
-- **2026-08-17 (remediate): `pytest cloud/tests` is 10-red on macOS on
-  `origin/main` too.** Ten `sha256sum`-dependent control-plane tests cannot
-  pass on a darwin runner. Diff the failure LIST against a clean
-  `origin/main` worktree before treating any cloud red as yours; the count
-  alone is not a signal. Baseline as of this run: `10 failed, 848 passed,
-  4 skipped`.
+- **2026-08-17 (remediate): `pytest cloud/tests` is red on macOS on
+  `origin/main` too.** Diff the failure LIST against a clean `origin/main`
+  worktree before treating any cloud red as yours; the count alone is not a
+  signal. Baseline as of this run: `10 failed, 848 passed, 4 skipped`, then
+  attributed to `sha256sum`. **That attribution is STALE as of 2026-08-29**
+  — `/opt/homebrew/bin/sha256sum` exists on this host and no `sha256sum`
+  red remains. The current darwin baseline is `37 failed`: 13 in
+  `test_bootstrap_control_plane.py` (`exec {fd}<>` is bash 4+ and
+  `/bin/bash` here is 3.2, so it exits 127), 21 in
+  `test_ib_gateway_control.py` (`operator-radon.sh` uses `mapfile`, bash
+  4+), 3 in `test_caddy_edge_timeouts.py` (no `caddy` on PATH).
+  `setup_testing_weekend.sh` now checks both and names the consequence;
+  installing either MOVES this baseline, so re-record the FAILED list in
+  the same run.
 - **2026-08-17 (remediate): pre-flight a spec under `next start` before
   curating it into CI.** The e2e job builds and serves a production
   server, and this repo has a documented dev-vs-prod divergence. Every
@@ -217,7 +229,9 @@ how this loop improves as the codebase grows.
 - **2026-08-22 (audit): the darwin cloud baseline is a LIST, not a count, and
   it moves.** Round 1 read `12 failed` against a recorded baseline of 10; the
   diff of `FAILED` lines against the 2026-08-17 list is what separated two
-  new `sha256sum`-shim reds (T-088) from the known ten. Always `sort` the
+  new environment-shim reds (T-088) from the known ten. (The environment
+  cause has since changed from `sha256sum` to bash 3.2 + missing `caddy`;
+  the list is 37 today.) Always `sort` the
   `FAILED` lines to a file and `diff` them; update the recorded baseline in
   the audit whenever it changes.
 - **2026-08-22 (audit, second pass): CHECK `origin` FOR AN EXISTING WEEKEND
@@ -276,13 +290,20 @@ how this loop improves as the codebase grows.
   `TEST_LOG.md`.
 - **2026-08-23 (remediate): fan the backlog out to one worktree per task
   group; cherry-pick back serially.** `git worktree add --detach /tmp/...`
-  plus symlinked `node_modules` (root AND `web/`) gives each subagent a clean
-  tree; the shared venv needs nothing. Group findings that touch the SAME
-  test file into one agent (T-082+T-097, T-084+T-099, T-086+T-098 here) or
-  the cherry-picks conflict. The main clone stays untouched, so a baseline
-  gate can run there while the agents work, and each `cherry-pick -n` +
-  docs row + push is one durable commit. Sixteen P1s landed in ~15 minutes
-  of wall clock this way versus one-at-a-time.
+  plus an APFS clone copy of `node_modules` (`cp -Rc <clone>/node_modules
+  <wt>/node_modules` and the same for `web/`; fall back to `cp -R` off APFS)
+  gives each subagent a clean tree; the shared venv needs nothing. NEVER
+  symlink `node_modules`: a symlink out of the worktree root breaks BOTH
+  gates. vitest cannot resolve `@rollup/rollup-darwin-arm64` through the
+  link's real path, and Turbopack hard-fails the Playwright webServer with
+  `Symlink [project]/web/node_modules is invalid, it points out of the
+  filesystem root`, so the worktree cannot run e2e at all. `cp -Rc` is
+  copy-on-write, so it costs seconds and near-zero disk. Group findings that
+  touch the SAME test file into one agent (T-082+T-097, T-084+T-099,
+  T-086+T-098 here) or the cherry-picks conflict. The main clone stays
+  untouched, so a baseline gate can run there while the agents work, and
+  each `cherry-pick -n` + docs row + push is one durable commit. Sixteen
+  P1s landed in ~15 minutes of wall clock this way versus one-at-a-time.
 - **2026-08-23 (remediate): a subagent's "green" is scoped; re-read the
   source diff before landing.** Two things the per-task reports could not
   show: (a) the relay is ESM with socket side effects on import, so T-087's
@@ -293,10 +314,11 @@ how this loop improves as the codebase grows.
   scoped run. Grep every caller of a changed signature in the LANDED tree,
   not the worktree.
 - **2026-08-23 (remediate): the darwin cloud baseline grew by three
-  `sha256sum`-class reds without any test being wrong.** At `4985a7f8`
+  environment-class reds without any test being wrong.** At `4985a7f8`
   this host reads 12; at `2e904678` it reads 15 because
-  `test_refresh_control_plane.py` (new in the delta) also asserts
-  `shutil.which("sha256sum")`. Same rule as the audit lesson: sort the
+  `test_refresh_control_plane.py` was new in the delta. (The `sha256sum`
+  cause named at the time is stale; as of 2026-08-29 the baseline is 37 and
+  the cause is bash 3.2 + missing `caddy`.) Same rule as the audit lesson: sort the
   `FAILED` lines, run the base SHA in a worktree, `diff` — and record the
   new list in the log so the next run does not misattribute it.
 - **2026-08-23 (remediate): two hosts remediated the same branch at once —
@@ -453,16 +475,18 @@ how this loop improves as the codebase grows.
   the main clone after each cherry-pick. Doing that caught nothing wrong this
   run, but it is what makes the closing gate a confirmation rather than a
   discovery. Never run the closing 3x gate until the fan-out is fully drained.
-- **2026-08-26 (remediate): a worktree with symlinked `node_modules` cannot
-  start vitest on this host** — `@rollup/rollup-darwin-arm64` resolves relative
-  to the symlink's real path and is absent, so vitest dies at startup. Three
-  agents hit it independently and each worked around it by installing that one
-  binding to a scratch dir and setting `NODE_PATH`, which is the right move:
-  the main clone is UNAFFECTED (verified with a scoped `npx vitest run` before
-  trusting the closing gate) and nothing in the repo was modified. Put the
-  workaround in the agent prompt next time instead of making each one discover
-  it, and always smoke-test vitest in the MAIN clone before concluding the
-  suite is broken.
+- **2026-08-26 (remediate): SUPERSEDED by the `cp -Rc` rule at the fan-out
+  bullet above. Kept for the symptom.** A worktree with symlinked
+  `node_modules` cannot start vitest on this host: `@rollup/rollup-darwin-arm64`
+  resolves relative to the symlink's real path and is absent, so vitest dies at
+  startup. Three agents hit it independently and each worked around it by
+  installing that one binding to a scratch dir and setting `NODE_PATH`; do NOT
+  do that any more, clone-copy `node_modules` instead, because the `NODE_PATH`
+  patch rescues vitest but leaves e2e dead, which is worse because it looks
+  green. The main clone is UNAFFECTED (verified with a scoped `npx vitest run`
+  before trusting the closing gate) and nothing in the repo was modified.
+  Always smoke-test vitest in the MAIN clone before concluding the suite is
+  broken.
 - **2026-08-26 (remediate): two agents branched from the same base can land
   CONTRADICTORY pins — diff the landed tree, not the two reports.** T-162
   wrapped `run()` in the credit-spread and IEI/HYG producers; T-163, working
