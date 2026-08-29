@@ -49,7 +49,17 @@ describe("assistant tool-calling loop", () => {
     const { ASSISTANT_TOOLS, isDestructiveTool } = await import("@/lib/assistant/tools");
 
     const names = ASSISTANT_TOOLS.map((tool) => tool.name);
-    expect(names).toEqual(expect.arrayContaining(["get_flow", "run_scan", "get_gex", "get_portfolio", "place_order"]));
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "get_flow",
+        "run_scan",
+        "get_gex",
+        "get_portfolio",
+        "place_order",
+        "list_apis",
+        "call_api",
+      ]),
+    );
 
     for (const tool of ASSISTANT_TOOLS) {
       expect(tool).toHaveProperty("input_schema");
