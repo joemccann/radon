@@ -32,19 +32,48 @@ acquire_runner_lock() {
   local dir="$1" held
   if ! mkdir "$dir" 2>/dev/null; then
     held="$(cat "$dir/pid" 2>/dev/null || true)"
-    if [[ -n "$held" ]] && kill -0 "$held" 2>/dev/null; then
+    if [[ -z "$held" ]]; then
+      # No pid yet means the winner is between its mkdir and its pid write.
+      # That window used to skip the `kill -0` test entirely — the loser read
+      # an empty pid, called the lock stale, `rm -rf`d it and took it, and two
+      # cycles then ran `git clean -fdq` in the same clone. Absent evidence is
+      # not evidence of staleness. R-411.
+      echo "weekend runner lock held (pid not yet published): $dir" >&2
+      return 1
+    fi
+    if kill -0 "$held" 2>/dev/null; then
       echo "weekend runner lock held by pid $held ($dir)" >&2
       return 1
     fi
-    echo "[weekend] reclaiming stale runner lock (pid ${held:-unknown})" >&2
+    echo "[weekend] reclaiming stale runner lock (pid $held)" >&2
     rm -rf -- "$dir"
     mkdir "$dir" 2>/dev/null || { echo "cannot take runner lock $dir" >&2; return 1; }
   fi
-  echo "$$" > "$dir/pid"
+  # Rename the pid in so it is never half-written to a reader. R-411.
+  printf '%s\n' "$$" > "$dir/pid.tmp" && mv -f "$dir/pid.tmp" "$dir/pid"
   return 0
 }
 
-release_runner_lock() { rm -rf -- "$1"; }
+release_runner_lock() {
+  # ONLY the owner unlocks. Unconditional `rm -rf` meant the first run's EXIT
+  # trap unlocked the SECOND run's tree on its way out. R-411.
+  local dir="${1:-}" held
+  [[ -n "$dir" && -d "$dir" ]] || return 0
+  held="$(cat "$dir/pid" 2>/dev/null || true)"
+  [[ "$held" == "$$" ]] || return 0
+  rm -rf -- "$dir"
+}
+
+# Every network call in this wrapper is bounded, INCLUDING the dead-man channel
+# itself: a hung issue-comment call inside the crash handler wedged the wrapper
+# while it was trying to report its own death, holding the runner lock and
+# dropping every subsequent daily fire. R-409.
+NET_TIMEOUT_SECS="${RADON_WEEKEND_NET_TIMEOUT_SECS:-120}"
+net_bounded() { timeout "$NET_TIMEOUT_SECS" "$@"; }
+
+# A VPN flap that establishes TCP and then stalls hangs an ssh transport with
+# no keepalive, and the attempt-count retry below bounds attempts, not time.
+GIT_SSH_BOUNDED="ssh -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3"
 
 # The 00:00 fetch is the cycle's single point of failure: 2026-08-23 one run
 # died here on a port-22 blackhole (NordVPN) before the agent started.
@@ -54,7 +83,7 @@ FETCH_PAUSE_SECS="${RADON_WEEKEND_FETCH_PAUSE_SECS:-60}"
 fetch_origin_with_retry() {
   local attempt
   for (( attempt = 1; attempt <= FETCH_ATTEMPTS; attempt++ )); do
-    git fetch origin --quiet && return 0
+    net_bounded git -c "core.sshCommand=$GIT_SSH_BOUNDED" fetch origin --quiet && return 0
     echo "[weekend] git fetch origin failed — attempt $attempt/$FETCH_ATTEMPTS" >&2
     if (( attempt < FETCH_ATTEMPTS )); then sleep "$FETCH_PAUSE_SECS"; fi
   done
@@ -95,7 +124,7 @@ resolve_pr_url() {
   # Newest-updated open PR the skill opened for this loop. A gh failure or
   # no match must yield an empty string, never a non-zero exit under set -e.
   local url
-  url="$(gh pr list --state open --limit 20 --json url,headRefName,updatedAt \
+  url="$(net_bounded gh pr list --state open --limit 20 --json url,headRefName,updatedAt \
     -q "[.[] | select(.headRefName | startswith(\"$PR_BRANCH_PREFIX\"))] | sort_by(.updatedAt) | reverse | .[0].url" \
     2>/dev/null || true)"
   [[ "$url" == "null" ]] && url=""
@@ -122,16 +151,16 @@ report() {
 ${detail}
 log: \`${RUN_LOG##*/}\` on the runner"
   local issue
-  issue="$(gh issue list --label "$DEADMAN_LABEL" --state open \
+  issue="$(net_bounded gh issue list --label "$DEADMAN_LABEL" --state open \
     --json number -q '.[0].number' 2>/dev/null || true)"
   if [[ -z "$issue" ]]; then
-    gh issue create --title "$DEADMAN_TITLE" --label "$DEADMAN_LABEL" \
+    net_bounded gh issue create --title "$DEADMAN_TITLE" --label "$DEADMAN_LABEL" \
       --body "Rolling dead-man for the nightly reliability loop. A missing daily comment means the runner did not fire." \
       >/dev/null 2>&1 || true
-    issue="$(gh issue list --label "$DEADMAN_LABEL" --state open \
+    issue="$(net_bounded gh issue list --label "$DEADMAN_LABEL" --state open \
       --json number -q '.[0].number' 2>/dev/null || true)"
   fi
-  [[ -n "$issue" ]] && gh issue comment "$issue" --body "$body" >/dev/null 2>&1 || true
+  [[ -n "$issue" ]] && net_bounded gh issue comment "$issue" --body "$body" >/dev/null 2>&1 || true
   if [[ "$push" == "1" ]]; then
     notify_phase "$status"
   fi
@@ -149,12 +178,17 @@ BG_CEILING_MARKER="Background tasks still running after"
 
 phase_status() {
   # rc + run log -> the one status string every dead-man channel carries.
-  local rc="$1" run_log="$2"
+  # `mark` is the size of $run_log before THIS round's invocation. RUN_LOG is
+  # per PHASE and appended by every retry and continuation round, so grepping
+  # the whole file made a round-1 ceiling message report a finished round 8 as
+  # TRUNCATED forever — a permanent false alarm on exactly the long
+  # remediations the detector was added to protect. R-426.
+  local rc="$1" run_log="$2" mark="${3:-0}"
   if [[ $rc -eq 124 ]]; then
     printf 'TIMEOUT after %ss' "$CAP_SECS"
   elif [[ $rc -ne 0 ]]; then
     printf 'FAILED (exit %s)' "$rc"
-  elif grep -qF "$BG_CEILING_MARKER" "$run_log" 2>/dev/null; then
+  elif tail -c "+$((mark + 1))" "$run_log" 2>/dev/null | grep -qF "$BG_CEILING_MARKER"; then
     printf 'TRUNCATED (background work killed before the phase finished)'
   else
     printf 'OK'
@@ -163,6 +197,32 @@ phase_status() {
 
 on_crash() {
   report "CRASHED (exit $?)" "wrapper died before the agent finished — check the runner"
+}
+
+# Bash runs the EXIT trap on an untrapped SIGTERM, so the lock released and the
+# process exited 143 — but `on_crash` never ran, so launchd's ExitTimeOut kill,
+# a `launchctl bootout`, an operator kill and a reboot mid-cycle all produced
+# exactly the same observable as "the runner did not fire". SKILL.md tells the
+# operator to read quiet as "still running", so they waited. R-384.
+ROUND_PID=""
+kill_round_group() {
+  [[ -n "$ROUND_PID" ]] || return 0
+  # `timeout` (deliberately WITHOUT --foreground) makes itself the round's
+  # process-group leader, so the negative pid reaches claude and anything it
+  # left behind. --foreground would signal only timeout's direct child, which
+  # is the opposite of what reaping orphaned subagents needs — they would keep
+  # writing into the clone while the next round runs `git clean -fdq`. R-386.
+  kill -TERM -- "-$ROUND_PID" 2>/dev/null || kill -TERM "$ROUND_PID" 2>/dev/null || true
+  ROUND_PID=""
+}
+
+on_signal() {
+  local sig="$1"
+  trap - INT TERM HUP ERR EXIT
+  kill_round_group
+  report "KILLED (SIG${sig})" "the wrapper was signalled before the phase finished — launchd ExitTimeOut, a bootout, an operator kill or a reboot; partial work may exist on the weekend branch"
+  release_runner_lock "${RUNNER_LOCK:-}"
+  exit 143
 }
 
 # These four are defined HERE, above the trap, and not further down beside
@@ -181,11 +241,14 @@ RUN_LOG="prologue (no phase log yet)"
 # clone or a held lock with nothing but a line on stderr. The file header
 # claims every outcome is reported; for the prologue that was false.
 trap on_crash ERR
+trap 'on_signal INT' INT
+trap 'on_signal TERM' TERM
+trap 'on_signal HUP' HUP
 
 cd "$REPO"
 [[ -f .radon-weekend-runner ]] || {
   echo "REFUSING: $REPO is not the dedicated weekend runner clone" >&2
-  report "REFUSED" "$REPO is not the dedicated weekend runner clone" 0 || true
+  report "REFUSED" "$REPO is not the dedicated weekend runner clone" || true
   exit 2
 }
 
@@ -196,7 +259,7 @@ acquire_runner_lock "$RUNNER_LOCK" || {
   # `kill -0 $held` fails, so a recorded pid reused by ANY live unrelated
   # process makes every subsequent daily fire exit 3 in under a second. That
   # must page, not vanish. R-239.
-  report "REFUSED (lock held)" "another weekend run owns $REPO (pid $(cat "$RUNNER_LOCK/pid" 2>/dev/null || echo unknown)); if no cycle is running, the recorded pid was reused — remove $RUNNER_LOCK" 0 || true
+  report "REFUSED (lock held)" "another weekend run owns $REPO (pid $(cat "$RUNNER_LOCK/pid" 2>/dev/null || echo unknown)); if no cycle is running, the recorded pid was reused — remove $RUNNER_LOCK" || true
   exit 3
 }
 trap 'release_runner_lock "$RUNNER_LOCK"' EXIT
@@ -238,7 +301,9 @@ begin_phase() {
   # a future run: a round that dies on the cap (or crashes) is relaunched as
   # a continuation round against the same weekend branch — per-task commits
   # are the durable state — until a round exits 0 or the backstop trips.
-  CAP_SECS=$([[ "$PHASE" == "audit" ]] && echo 7200 || echo 21600)
+  CAP_SECS=$([[ "$PHASE" == "audit" ]] \
+    && echo "${RADON_WEEKEND_AUDIT_CAP_SECS:-7200}" \
+    || echo "${RADON_WEEKEND_REMEDIATE_CAP_SECS:-21600}")
   MAX_ROUNDS=$([[ "$PHASE" == "remediate" ]] && echo 8 || echo 1)
   # One log per phase: the transient-network detector and the report tail
   # both read $RUN_LOG.
@@ -248,7 +313,21 @@ begin_phase() {
 
 # Fresh ground truth. Any leftover state from a killed prior run is
 # discarded — the branch/PR on GitHub is the durable state.
+# Re-ground for a continuation round: a killed session may leave a dirty tree.
+# main is force-reset; the local weekend branch and its commits survive. Bare,
+# this ran with the ERR trap disarmed and `set -e` on, so the cap SIGTERMing
+# claude mid-commit left `.git/index.lock`, the next `git checkout -f` failed,
+# errexit terminated main, and the whole daily run ended with no comment and no
+# page while the backlog was unfinished. R-385.
+reground_for_continuation() {
+  rm -f .git/index.lock
+  git checkout -f --quiet main \
+    && git reset --hard --quiet origin/main \
+    && git clean -fdq --exclude=.radon-weekend-runner --exclude=.weekend-runner.lock --exclude=logs/ --exclude=.env --exclude=.env.ib-mode --exclude=web/.env
+}
+
 ground_truth() {
+  rm -f .git/index.lock
   fetch_origin_with_retry
   git checkout -f --quiet main
   git reset --hard --quiet origin/main
@@ -271,15 +350,34 @@ is_transient_network_failure() {
   tail -c 500 "$RUN_LOG" | grep -qE 'API Error|ENOTFOUND|Connection lost|Execution error'
 }
 
+KILL_AFTER_SECS="${RADON_WEEKEND_KILL_AFTER_SECS:-60}"
+ROUND_LOG_MARK=0
+
 run_round() {
   local attempt=1 start_ts=$SECONDS remain
   while :; do
     remain=$((CAP_SECS - (SECONDS - start_ts)))
     if [[ $remain -le 60 ]]; then RC=124; break; fi
-    CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 timeout "$remain" claude -p "/reliability-weekend $PHASE" \
+    ROUND_LOG_MARK=$(( $(wc -c < "$RUN_LOG" 2>/dev/null || echo 0) ))
+    # Backgrounded and `wait`ed rather than run in the foreground: bash defers
+    # trap handling until a foreground child completes, so a SIGTERM to the
+    # wrapper was not acted on until `claude` finished on its own — which is
+    # never, in the case that matters. `-k` escalates to SIGKILL so a claude
+    # blocked on a hung child cannot make the cap advisory. R-384, R-386.
+    CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 timeout -k "$KILL_AFTER_SECS" "$remain" claude -p "/reliability-weekend $PHASE" \
       --dangerously-skip-permissions \
-      --output-format text >> "$RUN_LOG" 2>&1
+      --output-format text >> "$RUN_LOG" 2>&1 &
+    ROUND_PID=$!
+    local round_start=$SECONDS
+    wait "$ROUND_PID"
     RC=$?
+    ROUND_PID=""
+    kill_round_group
+    # The exit code for a `-k` escalation is not portable: GNU coreutils 9.4
+    # reports 137 when the SIGKILL is what actually ended the child, not 124.
+    # The cap is OUR clock, so classify from it rather than from the code, or a
+    # round the cap genuinely killed is reported as a crash. R-386.
+    if (( RC != 0 && SECONDS - round_start >= remain )); then RC=124; fi
     [[ $RC -eq 0 || $RC -eq 124 || $attempt -ge $MAX_ATTEMPTS ]] && break
     is_transient_network_failure || break
     echo "[weekend] transient network failure (rc=$RC) — attempt $attempt/$MAX_ATTEMPTS, retrying in ${RETRY_PAUSE_SECS}s" | tee -a "$RUN_LOG"
@@ -298,7 +396,7 @@ run_phase() {
   if [[ $SECONDS -ge $((CYCLE_DEADLINE - CAP_SECS)) ]]; then
     RC=75
     echo "[weekend] cycle budget cannot cover a ${CAP_SECS}s $PHASE phase — skipping" | tee -a "$RUN_LOG"
-    report "SKIPPED (cycle budget)" "the cycle had no room left for a ${CAP_SECS}s $PHASE phase; the next daily fire picks it up" 0 || true
+    report "SKIPPED (cycle budget)" "the cycle had no room left for a ${CAP_SECS}s $PHASE phase; the next daily fire picks it up" || true
     return 0
   fi
   echo "[weekend] $PHASE start $STAMP repo=$REPO cap=${CAP_SECS}s" | tee -a "$RUN_LOG"
@@ -309,7 +407,7 @@ run_phase() {
   # phase now records the failure and carries on to its own reporting. R-237.
   if ! ground_truth; then
     RC=70
-    report "GROUND TRUTH FAILED" "could not refresh the clone (network or git); the phase did not run" 0 || true
+    report "GROUND TRUTH FAILED" "could not refresh the clone (network or git); the phase did not run" || true
     echo "[weekend] $PHASE done rc=$RC" | tee -a "$RUN_LOG"
     return 0
   fi
@@ -342,11 +440,11 @@ run_phase() {
     report "ROUND $round $([[ $RC -eq 124 ]] && echo TIMEOUT || echo "FAILED (exit $RC)") — continuing" \
       "backlog not finished; relaunching a continuation round (committed tasks are durable on the weekend branch)" 0
     round=$((round+1))
-    # Re-ground for the continuation: a killed session may leave a dirty tree.
-    # main is force-reset; the local weekend branch and its commits survive.
-    git checkout -f --quiet main
-    git reset --hard --quiet origin/main
-    git clean -fdq --exclude=.radon-weekend-runner --exclude=.weekend-runner.lock --exclude=logs/ --exclude=.env --exclude=.env.ib-mode --exclude=web/.env
+    if ! reground_for_continuation; then
+      RC=70
+      report "GROUND TRUTH FAILED (round $round)" "could not re-ground the clone for a continuation round; the backlog is UNFINISHED and partial work is on the weekend branch" || true
+      break
+    fi
   done
   # A genuine wrapper death AFTER the rounds finished must still page.
   trap on_crash ERR
@@ -354,7 +452,7 @@ run_phase() {
   local tail_text
   tail_text="$(tail -c 1500 "$RUN_LOG" 2>/dev/null || true)"
   local status
-  status="$(phase_status "$RC" "$RUN_LOG")"
+  status="$(phase_status "$RC" "$RUN_LOG" "$ROUND_LOG_MARK")"
   case "$status" in
     OK)
       report "$status" "\`\`\`

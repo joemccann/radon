@@ -38,14 +38,22 @@ def claim_flex_delivery(content_sha256: str, **kwargs: Any) -> bool:
     return _claim(content_sha256, **kwargs)
 
 
-def release_flex_delivery(content_sha256: str) -> None:
+def release_flex_delivery(content_sha256: str) -> bool:
     """Indirection so the release is injectable in tests. See db.writer."""
     from db.writer import release_flex_delivery as _release  # noqa: PLC0415
 
-    _release(content_sha256)
+    return _release(content_sha256)
 
 
-def ingest_xml(xml_text: str, *, source_path: str = "") -> Dict[str, Any]:
+def ingest_xml(
+    xml_text: str, *, source_path: str = "", record_as: str | None = None
+) -> Dict[str, Any]:
+    """`source_path` is the path the writers READ; `record_as` is what the claim
+    records. They differ for the sFTP puller, which reads from a private temp
+    file it then unlinks — recording that made `flex_deliveries.source_path`, the
+    only column linking a fingerprint back to a delivered statement, a dead
+    `/tmp/...` inside the unit's PrivateTmp namespace. R-419.
+    """
     kind = classify_flex_xml(xml_text)
     digest = _sha256(xml_text)
     meta = statement_metadata(xml_text)
@@ -56,7 +64,7 @@ def ingest_xml(xml_text: str, *, source_path: str = "") -> Dict[str, Any]:
         classified_as=kind,
         period_from=meta["period_from"],
         period_to=meta["period_to"],
-        source_path=source_path or None,
+        source_path=record_as or source_path or None,
     ):
         return {
             "ok": True,
@@ -65,6 +73,29 @@ def ingest_xml(xml_text: str, *, source_path: str = "") -> Dict[str, Any]:
             "content_sha256": digest,
             "source_path": source_path,
         }
+    # The claim is a LEASE on work in progress, not a record that the work
+    # succeeded. An ingest that fails or raises hands it back, or the same bytes
+    # become permanently unretryable behind a green heartbeat while `cash_flows`
+    # stays half-applied. R-379.
+    try:
+        result = _apply_classified(kind, xml_text, digest, source_path)
+    except BaseException:
+        _release_claim(digest)
+        raise
+    if not result.get("ok"):
+        _release_claim(digest)
+    return result
+
+
+def _release_claim(digest: str) -> None:
+    """Best-effort release. A failure here must not mask the ingest failure."""
+    try:
+        release_flex_delivery(digest)
+    except Exception as exc:  # noqa: BLE001 — the caller is already failing
+        print(f"[flex-ingest] claim release failed for {digest}: {exc}", file=sys.stderr)
+
+
+def _apply_classified(kind: str, xml_text: str, digest: str, source_path: str) -> Dict[str, Any]:
     if kind == ACTIVITY:
         import cash_flow_sync
         import perf_twr_builder
@@ -81,7 +112,6 @@ def ingest_xml(xml_text: str, *, source_path: str = "") -> Dict[str, Any]:
             # The claim was taken before the writers, so hand it back: without
             # this the operator's re-drop of the fixed file is a "duplicate"
             # no-op and the half-written chunks are never repaired. T-257.
-            release_flex_delivery(digest)
             return {
                 "ok": False,
                 "classified_as": kind,
@@ -92,8 +122,6 @@ def ingest_xml(xml_text: str, *, source_path: str = "") -> Dict[str, Any]:
                 "source_path": source_path,
             }
         twr = perf_twr_builder.build_and_persist(from_file=source_path, persist=True)
-        if twr.get("status") not in ("ok", "stale"):
-            release_flex_delivery(digest)
         return {
             "ok": twr.get("status") in ("ok", "stale"),
             "classified_as": kind,
@@ -108,8 +136,6 @@ def ingest_xml(xml_text: str, *, source_path: str = "") -> Dict[str, Any]:
         if not source_path:
             raise FlexClassifyError("trades ingest requires a filesystem path")
         result = journal_rehydrate.rehydrate(xml_text=xml_text)
-        if not result.get("ok"):
-            release_flex_delivery(digest)
         return {
             "ok": bool(result.get("ok")),
             "classified_as": kind,

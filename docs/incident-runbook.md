@@ -670,7 +670,7 @@ Incident: 2026-08-15 00:24Z, P1 page `34ab3e3c…`.
   bounded restart); stuck-2FA recovery requires `upstream_dead=false`; ≤2
   stuck-2FA restarts/hour.
 - **2FA push stacking:** stacked pushes reject all approvals; every restart path
-  goes through `ib_2fa_lock.py` (`/var/lib/radon/ib-2fa-push-lock.json`). Use the
+  goes through `ib_2fa_lock.py` (`/var/lib/radon/ib-lease/ib-2fa-push-lock.json`). Use the
   lock-held `POST /ib/restart`, never a raw `radon restart` alongside the
   watchdog.
 - **False awaiting-2FA after deploy:** fresh radon-api reports `awaiting_2fa` for
@@ -726,6 +726,52 @@ Incident: 2026-08-15 00:24Z, P1 page `34ab3e3c…`.
   `test_nextjs_unit_starting_stays_starting`,
   `test_newsfeed_unit_starting_payload_keeps_edge_ok`,
   `test_local_degraded_aggregate_clears_fresh_aggregate_down`.
+
+---
+
+## newsfeed-container-playwright-missing
+
+**`radon-newsfeed.service` crash-loops `Result=exit-code` after the
+container cutover because Chromium is not at the path Playwright
+expects.** Peak: 2026-08-29 08:45Z, page `3e952746…`, NRestarts=21.
+
+- **Mechanism:** the runtime-container drop-in `docker run`s
+  `node scripts/newsfeed/index.js` from the node image. Image ENV is
+  `PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`. `Dockerfile.node` ran
+  `bun x playwright install` from WORKDIR `web/`, which is not the
+  repo-root `playwright@1.59.1` the scraper imports
+  (`scripts/newsfeed/browser.js`). Runtime launch looked up
+  `/ms-playwright/chromium_headless_shell-1217/...` and threw
+  `Executable doesn't exist`. `runForever` exits after 3 consecutive
+  cycle failures; `Restart=on-failure` / `RestartSec=30` loops every
+  ~5 min and never hits `StartLimitBurst=5`. Host cache already had
+  revision 1217 at `/home/radon/.cache/ms-playwright`. Sibling app
+  units stayed `NRestarts=0`. Edge and `:8321/health/lite` stayed up.
+- **Detection:** unit `NRestarts` climbing, `SubState=auto-restart` in
+  two consecutive watchdog cycles; Turso `newsfeed-scraper` error
+  `newsfeed pre-cycle failure: browserType.launch: Executable doesn't
+  exist at /ms-playwright/chromium_headless_shell-1217/...`;
+  `posts.json` frozen at the last host-runtime cycle.
+- **Discriminating check:** health row names `/ms-playwright` and
+  `Executable doesn't exist`; host
+  `~/.cache/ms-playwright/chromium_headless_shell-1217` is present;
+  `/health/lite` authenticated. `Result=signal` is deploy stop-clean.
+  A themarketear `page.goto` timeout is a different class (cycle
+  error, not launch). If `/health/lite` is down too → API/IB, stand
+  down.
+- **Remediation (code):** wrapper bind-mounts the host Playwright
+  cache onto `/ms-playwright` and overlays `scripts/newsfeed` from the
+  live checkout so `--no-sandbox` applies before the next image.
+  Dockerfile installs via `./node_modules/.bin/playwright` from
+  `/home/radon/radon`. After deploy, `refresh-control-plane` updates
+  the wrapper; the unit picks up the mount on the next RestartSec.
+- **Regression:**
+  `test_app_runtime.py::test_run_newsfeed_mounts_host_playwright_browsers`,
+  `test_app_images.py::TestNodeImage::test_playwright_install_uses_repo_root_binary`,
+  `web/tests/newsfeed-scraper.test.ts` (`launches chromium without a
+  sandbox when PLAYWRIGHT_CHROMIUM_SANDBOX=0`).
+- **Code:** `cloud/scripts/radon-app-runtime.sh`,
+  `docker/app/Dockerfile.node`, `scripts/newsfeed/browser.js`.
 
 ---
 
@@ -792,6 +838,51 @@ transient Turso HTTP 502 reading `scan_snapshots`.** Peak: 2026-08-21
   `test_demo_seed_guard.py::test_market_mirror_retries_transient_turso_502`.
 - **Code:** `scripts/db/mirror_market_snapshots_to_demo.js`
   (`isTransientTursoError`, `runMarketMirror`).
+
+---
+
+## media-backup-b2-connection-closed
+
+**`radon-media-backup.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) on a single B2 `ConnectionClosedError` during PUT.** Peak:
+2026-08-29 10:17Z, page `02ccb70e…`.
+
+- **Mechanism:** daily 10:15 UTC oneshot walks `/var/lib/radon/media` and
+  uploads size-new files to B2 prefix `media/`. `_s3_client` had no botocore
+  timeouts or retries (unlike `db_backup.py` on the same bucket). One
+  `ConnectionClosedError` on PUT of a single PNG aborted the loop; remaining
+  planned files were never attempted. `Type=oneshot` has no `Restart=`, so
+  `NRestarts=0` until the next calendar fire (~24h). Unit watchdog pages P1.
+  Same-host `radon-db-backup` had already uploaded 31 dumps to that bucket
+  ~1h earlier; credentials exist. Not fail-closed (missing `RADON_ARCHIVE_S3_*`).
+- **Detection:** journal
+  `media-backup failed: ConnectionClosedError: Connection was closed before
+  we received a valid response from endpoint URL:
+  "https://s3.us-west-004.backblazeb2.com/radon-archive/media/<file>.png"`;
+  `systemctl show … -p Result,NRestarts` → `exit-code` / `0`; ExecMainStart
+  to InactiveEnter is a few seconds. Edge and `:8321/health/lite` stay up.
+  Prior nights `ok: true` with `uploaded` in the dozens.
+- **Discriminating check:** `ConnectionClosedError` / `connection was closed`
+  on a PUT URL under `media/` (this case). Fail-closed missing-creds text is
+  ops (secret). `Result=signal` is deploy stop-clean. If `/health/lite` is
+  down too → API, stand down. B2 platform outage (every object, db-backup
+  also red) → stand down.
+- **Remediation (code):** botocore `Config` with
+  `connect_timeout=30` / `read_timeout=300` / `retries max_attempts=3 mode=standard`
+  plus application-level retry on transient transport errors so an injected
+  client (and a client whose retries are already spent) still retries the
+  file and continues the rest of the plan. Persistent closed-connection
+  still exits 1. Do not restart-flap; next timer (10:15 UTC) or one
+  `radon unit restart radon-media-backup` after the fix deploys. Unit is
+  not on `RERUNNABLE_ONESHOT_UNITS`.
+- **Regression:**
+  `cloud/tests/test_media_backup.py::TestTransientB2UploadRetry`
+  (`test_connection_closed_on_first_png_retries_and_uploads_the_rest`,
+  `test_persistent_connection_closed_still_fails_the_unit`,
+  `test_non_transient_upload_error_is_not_retried`,
+  `test_s3_client_uses_bounded_standard_retries`).
+- **Code:** `cloud/scripts/media_backup.py`
+  (`_s3_client`, `call_s3_with_retry`, `is_transient_s3_error`, `upload_file`).
 
 ---
 

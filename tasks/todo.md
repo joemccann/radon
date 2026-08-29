@@ -1,3 +1,21 @@
+# Task: Resolve testing/2026-08-29 merge conflicts (2026-08-29)
+
+## Dependency graph
+
+- M1 depends_on: [] - Fetch main, inspect divergence, identify conflicting files and intended state
+- M2 depends_on: [M1] - Resolve conflicts surgically, preserving both remediation and reliability fixes
+- M3 depends_on: [M2] - Run focused validation for touched files and inspect final diff
+- M4 depends_on: [M3] - Secret scan, review, CodeQL, commit/push, PR reply
+
+## Checklist
+
+- [x] M1 Inspect divergence and conflict set
+- [x] M2 Resolve merge conflicts
+- [x] M3 Verify focused tests
+- [ ] M4 Review, scan, ship
+
+---
+
 # Task: Flex sFTP remaining (steps 6-9)
 
 Canonical operator board: `docs/show-me-flex-sftp-ops.html`

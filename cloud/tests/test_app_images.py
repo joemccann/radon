@@ -68,7 +68,8 @@ def _start_lines(text: str) -> list[str]:
 
 
 def _dropin_for(unit: str) -> Path:
-    return CLOUD_ROOT / "services" / f"{unit}.d" / "runtime-container.conf.example"
+    # The SHIPPED drop-in, not the deleted `.conf.example`. R-420.
+    return CLOUD_ROOT / "services" / f"{unit}.d" / "runtime-container.conf"
 
 
 class TestAppDockerfilesExist:
@@ -116,8 +117,26 @@ class TestNodeImage:
         assert "bun run build" in text
         assert "playwright" in text.lower()
         assert "bunx" not in text
-        assert "bun x playwright" in text
         assert "next start" in text or '"next", "start"' in text or "npm run start" in text
+
+    def test_playwright_install_uses_repo_root_binary(self) -> None:
+        """Newsfeed imports playwright from the repo-root package
+        (scripts/newsfeed/browser.js). `bun x playwright install` from
+        WORKDIR web fetched a CLI revision that was not
+        chromium_headless_shell-1217, so launch failed with Executable
+        doesn't exist and the unit crash-looped (page 3e952746).
+        """
+        text = NODE_DF.read_text(encoding="utf-8")
+        assert "bun x playwright" not in text
+        assert "./node_modules/.bin/playwright install chromium chromium-headless-shell" in text
+        workdir = None
+        install_workdir = None
+        for line in text.splitlines():
+            if line.startswith("WORKDIR "):
+                workdir = line.split(maxsplit=1)[1].strip()
+            if "node_modules/.bin/playwright install" in line:
+                install_workdir = workdir
+        assert install_workdir == "/home/radon/radon", install_workdir
 
     def test_user_radon_is_final(self) -> None:
         text = NODE_DF.read_text(encoding="utf-8")
@@ -170,7 +189,13 @@ class TestRuntimeContainerDropin:
             if line.strip():
                 assert line.lstrip().startswith("#")
 
-    def test_per_unit_examples_call_wrapper_and_stay_commented(self) -> None:
+    def test_per_unit_dropins_call_the_wrapper(self) -> None:
+    # R-420: the per-unit drop-ins are LIVE artifacts now — `bootstrap-control-
+    # plane.sh` and `refresh_install_file` install the real `.conf` for all five
+    # on every deploy — so the `.conf.example` files that said "MUST NOT be
+    # installed" were deleted and these assertions moved onto the shipped file.
+    # The FLEET template (`radon-.service.d`) keeps its example: nothing installs
+    # a fleet-wide runtime-container drop-in, and it exists to say so.
         for unit in APP_UNITS:
             path = _dropin_for(unit)
             assert path.is_file(), unit
@@ -180,9 +205,6 @@ class TestRuntimeContainerDropin:
             assert "radon-app-runtime run %n" in text, unit
             assert "NotifyAccess=all" in text, unit
             assert "User=root" in text, unit
-            for line in text.splitlines():
-                if line.strip():
-                    assert line.lstrip().startswith("#"), f"{unit}: {line}"
 
     def test_example_not_in_bootstrap_sources(self) -> None:
         sources = _readonly_array(BOOTSTRAP.read_text(encoding="utf-8"), "SOURCES")

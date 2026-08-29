@@ -21,7 +21,7 @@ import json
 import subprocess
 import sys
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -48,11 +48,6 @@ _SCRIPT_SERVICES = {
     "gex_scan.py": "gex-scan",
 }
 
-# Align with service_cycle.SOFT_RETRY_EMBARGO_SECS — long enough to cover the
-# next 15-min timer fire without re-paging the error bucket every cycle.
-_SOFT_FAIL_EMBARGO_SECS = 15 * 60
-
-
 def _log(msg: str) -> None:
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"{ts}: {msg}", file=sys.stderr, flush=True)
@@ -78,9 +73,15 @@ def _heartbeat_soft_fail(script: str, reason: str) -> None:
     service = _SCRIPT_SERVICES.get(script)
     if not service:
         return
-    next_attempt = (
-        datetime.now(timezone.utc) + timedelta(seconds=_SOFT_FAIL_EMBARGO_SECS)
-    ).isoformat().replace("+00:00", "Z")
+    # NO `next_attempt_at`. In this repo that field is a writer's own
+    # CIRCUIT-BREAKER embargo, not "the next cadence fire", and two independent
+    # consumers read it as documented-normal quiet: `watchdog/check.py`
+    # suppresses the alert past hysteresis while it is in the future, and
+    # `incident_watchdog/classify.py::_is_expected_quiet` drops the row with no
+    # hysteresis at all. A fresh 15-minute value rewritten every cycle is always
+    # in the future, so a permanently-failing cri-scan fired exactly once and
+    # was silent forever after. An ordinary next-cadence retry earns no
+    # suppression. R-395.
     try:
         from db import writer  # noqa: PLC0415 — optional on stripped hosts
         ensure = getattr(writer, "ensure_no_replica_for_writers", None)
@@ -91,7 +92,7 @@ def _heartbeat_soft_fail(script: str, reason: str) -> None:
             "error",
             started_at=_iso_now(),
             finished_at=_iso_now(),
-            error={"message": reason, "next_attempt_at": next_attempt},
+            error={"message": reason},
         )
     except Exception as exc:  # noqa: BLE001 — telemetry must not mask soft-fail
         _log(f"{service} soft-fail heartbeat failed: {exc}")

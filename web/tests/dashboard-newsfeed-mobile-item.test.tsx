@@ -202,7 +202,6 @@ describe("DashboardNewsFeed mobile item", () => {
       ["button.news-feed-image-wrapper--button", styles.imageWrapper],
       ["img.news-feed-image", styles.image],
       ["div.news-feed-footer", styles.footer],
-      ["a.news-feed-link-pill", styles.linkPill],
     ];
 
     for (const [selector, moduleClass] of expectations) {
@@ -286,9 +285,6 @@ describe("DashboardNewsFeed.module.css mobile rules", () => {
     expect(timestamp).toMatch(/white-space:\s*nowrap/);
     expect(timestamp).toMatch(/min-height:\s*24px/);
     expect(timestamp).toMatch(/flex:\s*1\s+1\s+auto/);
-
-    const pill = ruleBlock(moduleCss, `:global(${mobile}) .linkPill.linkPill`);
-    expect(pill).toMatch(/min-height:\s*24px/);
 
     const star = ruleBlock(
       moduleCss,

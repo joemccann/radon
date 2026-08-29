@@ -128,7 +128,16 @@ describe("regime strip day-change baseline", () => {
     expect(state.vixClose).toBeNull();
   });
 
-  it("falls back to the relay close when the payload carries no history", () => {
+  it("does NOT fall back to the relay close when the payload carries no history", () => {
+    // This case REQUIRED the fallback. `prices.VIX.close` is IB's tick-9 close
+    // cached in the relay's memory for the life of the process, which this
+    // module's own docblock says can be sessions behind — and the guard was
+    // `data?.history?.length`, so the fallback fired exactly when history was
+    // EMPTY, which IS the degraded case (the regime route sets `history: []` on
+    // any upstream failure, `missing: true` or EMPTY_CRI). The half that still
+    // matters — a payload with no anchorable history yields no baseline, and
+    // the strip draws nothing rather than a wrong signed percentage — is what
+    // is asserted now. R-404.
     const state = resolveRegimeStripLiveState({
       marketOpen: true,
       sessionDate: "2026-08-27",
@@ -136,6 +145,6 @@ describe("regime strip day-change baseline", () => {
       data: { date: "2026-08-28", vix: 14.76 },
     });
 
-    expect(state.vixClose).toBe(14.51);
+    expect(state.vixClose).toBeNull();
   });
 });

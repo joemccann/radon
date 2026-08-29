@@ -296,12 +296,39 @@ def test_run_api_binds_all_interfaces_with_proxy_headers(tmp_path: Path) -> None
     assert "127.0.0.1" in log  # forwarded-allow-ips
 
 
-def test_run_binds_var_lib_radon_state(tmp_path: Path) -> None:
+def test_run_binds_only_the_narrow_state_subdirectories(tmp_path: Path) -> None:
+    """R-381: media and the 2FA lease, never /var/lib/radon itself.
+
+    This case used to REQUIRE the whole-directory bind. Write permission on that
+    parent is all an unlink/rename needs, and it holds control-plane-ready, the
+    manifest digest and the root deploy transaction journal. The half that still
+    matters -- the app can reach the media and lease directories -- is kept.
+    """
     result = _run(tmp_path, ["run", "radon-api.service"])
     assert result.returncode == 0, result.stderr
     log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
-    assert re.search(r"-v \S+:/var/lib/radon(?:\s|$)", log), log
+    assert not re.search(r"-v \S+:/var/lib/radon(?:\s|$)", log), log
     assert ":/var/lib/radon/media" in log
+    assert ":/var/lib/radon/ib-lease" in log
+
+
+def test_run_newsfeed_mounts_host_playwright_browsers(tmp_path: Path) -> None:
+    """Page 3e952746: container newsfeed crash-looped because Playwright
+    looked up chromium_headless_shell-1217 under the image ENV
+    /ms-playwright, which `bun x playwright install` never populated with
+    that revision. Host deploy already caches 1217 at radon's ms-playwright
+    dir. Bind that cache onto /ms-playwright so the current image can
+    launch without waiting for a new GHCR tag (R-234).
+    """
+    result = _run(tmp_path, ["run", "radon-newsfeed.service"])
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    state_dir = tmp_path / "state"
+    assert f"{state_dir / 'ms-playwright'}:/ms-playwright" in log, log
+    assert "PLAYWRIGHT_BROWSERS_PATH=/ms-playwright" in log
+    assert "--ipc host" in log
+    assert "PLAYWRIGHT_CHROMIUM_SANDBOX=0" in log
+    assert f"{tmp_path / 'data' / 'newsfeed-scripts'}:/home/radon/radon/scripts/newsfeed" in log, log
 
 
 @pytest.mark.parametrize("unit", ("radon-api.service", "radon-monitor.service"))

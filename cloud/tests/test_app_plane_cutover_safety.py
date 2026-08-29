@@ -102,10 +102,11 @@ def _drop_in_example_params():
     ships green.
     """
     params = []
-    candidates = sorted(
-        SERVICES.glob("*.service.d/runtime-container.conf")
-    ) + sorted(SERVICES.glob("*.service.d/runtime-container.conf.example"))
-    for example in candidates:
+    # The SHIPPED drop-ins, plus the fleet template that is still an example.
+    # R-420.
+    candidates = sorted(SERVICES.glob("*.service.d/runtime-container.conf"))
+    candidates += sorted(SERVICES.glob("*.service.d/runtime-container.conf.example"))
+    for example in sorted(candidates, key=lambda p: p.parent.name):
         unit_dir = example.parent.name
         installed = example.suffix != ".example"
         # The baseline is about a template that declares no ExecStart at all.
@@ -355,12 +356,17 @@ class TestTheDropInGuardIsNotDecorative:
             for path in SERVICES.glob("*.service.d/runtime-container.conf")
         )
         assert installed, "no installed runtime-container drop-ins found at all"
+        extra_examples = sum(
+            1
+            for path in SERVICES.glob("*.service.d/runtime-container.conf.example")
+            if path.parent.name not in DROP_IN_SKIP_BASELINE
+        )
 
         executed, skipped = self._counts()
-        assert executed >= len(installed) + 1, (
+        assert executed >= len(installed) + extra_examples, (
             f"{self.NODE} executed {executed} cases but there are "
-            f"{len(installed)} INSTALLED drop-ins ({installed}) plus their "
-            "per-unit examples. An installed drop-in is not reaching the "
+            f"{len(installed)} INSTALLED drop-ins ({installed}) and "
+            f"{extra_examples} unbaselined examples. An installed drop-in is not reaching the "
             "ExecStart/ExecStartPre assertion."
         )
         assert not any(name in DROP_IN_SKIP_BASELINE for name in installed), (

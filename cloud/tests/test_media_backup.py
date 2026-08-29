@@ -194,3 +194,150 @@ class TestMainFailClosed:
         assert rc == 1
         assert heartbeats and heartbeats[0][0] == "error"
         assert "fail-closed" in heartbeats[0][1]["summary"]
+
+
+CFG = {
+    "endpoint_url": "https://s3.us-west-004.backblazeb2.com",
+    "bucket": "radon-archive",
+    "access_key": "AK",
+    "secret_key": "SK",
+    "region": "us-west-004",
+    "prefix": "media/",
+}
+
+# Production 2026-08-29 10:17Z: botocore raised this class with this text
+# on PUT of one PNG; the oneshot then exited 1 with the rest of the planned
+# files never attempted (page 02ccb70e).
+_CLOSED_MSG = (
+    'Connection was closed before we received a valid response from endpoint '
+    'URL: "https://s3.us-west-004.backblazeb2.com/radon-archive/media/'
+    'c-ahtw9rmk-01-441c6ce148ef.png".'
+)
+
+
+class ConnectionClosedError(Exception):
+    """Stand-in for botocore.exceptions.ConnectionClosedError (CI has no boto3)."""
+
+
+class _FakeS3:
+    """list_objects_v2 + upload_file double. No real B2."""
+
+    def __init__(self, *, fail_on=None, fail_times=1):
+        self.uploads: list[str] = []
+        self.attempts: list[str] = []
+        self._fail_on = fail_on
+        self._fail_times = fail_times
+        self._failed = 0
+
+    def list_objects_v2(self, **kwargs):
+        return {"Contents": [], "IsTruncated": False}
+
+    def upload_file(self, path, bucket, key, ExtraArgs=None):
+        self.attempts.append(key)
+        if (
+            self._fail_on is not None
+            and key.endswith(self._fail_on)
+            and self._failed < self._fail_times
+        ):
+            self._failed += 1
+            raise ConnectionClosedError(_CLOSED_MSG)
+        self.uploads.append(key)
+
+
+class TestTransientB2UploadRetry:
+    """Page 02ccb70e: one ConnectionClosedError must not fail the nightly unit."""
+
+    def test_connection_closed_on_first_png_retries_and_uploads_the_rest(
+        self, tmp_path, monkeypatch
+    ):
+        (tmp_path / "c-ahtw9rmk-01-441c6ce148ef.png").write_bytes(b"png-a")
+        (tmp_path / "other.png").write_bytes(b"png-b")
+        monkeypatch.setattr(media_backup.time, "sleep", lambda _s: None)
+        client = _FakeS3(fail_on="c-ahtw9rmk-01-441c6ce148ef.png", fail_times=1)
+
+        summary = media_backup.run_backup(tmp_path, CFG, client=client)
+
+        assert summary["uploaded"] == 2
+        assert summary["local_files"] == 2
+        assert client.uploads == [
+            "media/c-ahtw9rmk-01-441c6ce148ef.png",
+            "media/other.png",
+        ]
+        assert client.attempts.count("media/c-ahtw9rmk-01-441c6ce148ef.png") == 2
+
+    def test_persistent_connection_closed_still_fails_the_unit(
+        self, tmp_path, monkeypatch
+    ):
+        (tmp_path / "c-ahtw9rmk-01-441c6ce148ef.png").write_bytes(b"png-a")
+        monkeypatch.setattr(media_backup.time, "sleep", lambda _s: None)
+        heartbeats = []
+        monkeypatch.setattr(
+            media_backup,
+            "write_service_health",
+            lambda state, detail, started_at: heartbeats.append((state, detail)),
+        )
+        monkeypatch.setattr(media_backup, "s3_config_from_env", lambda: CFG)
+        monkeypatch.setattr(
+            media_backup,
+            "_s3_client",
+            lambda _cfg: _FakeS3(
+                fail_on="c-ahtw9rmk-01-441c6ce148ef.png", fail_times=99
+            ),
+        )
+
+        rc = media_backup.main(["--media-dir", str(tmp_path)])
+
+        assert rc == 1
+        assert heartbeats and heartbeats[0][0] == "error"
+        assert "ConnectionClosedError" in heartbeats[0][1]["summary"]
+
+    def test_non_transient_upload_error_is_not_retried(self, tmp_path, monkeypatch):
+        (tmp_path / "a.png").write_bytes(b"png")
+        monkeypatch.setattr(media_backup.time, "sleep", lambda _s: None)
+        calls = {"n": 0}
+
+        class Denied:
+            def list_objects_v2(self, **kwargs):
+                return {"Contents": [], "IsTruncated": False}
+
+            def upload_file(self, path, bucket, key, ExtraArgs=None):
+                calls["n"] += 1
+                raise PermissionError("Access Denied")
+
+        with pytest.raises(PermissionError):
+            media_backup.run_backup(tmp_path, CFG, client=Denied())
+        assert calls["n"] == 1
+
+    def test_s3_client_uses_bounded_standard_retries(self, monkeypatch):
+        import sys
+        import types
+
+        seen: dict = {}
+
+        class _Config:
+            def __init__(self, **kwargs):
+                seen["botocore_config"] = kwargs
+
+        def _make_client(service, **kwargs):
+            seen["service"] = service
+            seen["client"] = kwargs
+            return object()
+
+        boto3_mod = types.ModuleType("boto3")
+        botocore_mod = types.ModuleType("botocore")
+        botocore_config_mod = types.ModuleType("botocore.config")
+        boto3_mod.client = _make_client
+        botocore_mod.config = botocore_config_mod
+        botocore_config_mod.Config = _Config
+        monkeypatch.setitem(sys.modules, "boto3", boto3_mod)
+        monkeypatch.setitem(sys.modules, "botocore", botocore_mod)
+        monkeypatch.setitem(sys.modules, "botocore.config", botocore_config_mod)
+
+        media_backup._s3_client(CFG)
+
+        assert seen["service"] == "s3"
+        cfg = seen["botocore_config"]
+        assert cfg["connect_timeout"] == media_backup.S3_CONNECT_TIMEOUT
+        assert cfg["read_timeout"] == media_backup.S3_READ_TIMEOUT
+        assert cfg["retries"]["max_attempts"] == media_backup.S3_MAX_ATTEMPTS
+        assert cfg["retries"]["mode"] == "standard"

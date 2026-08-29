@@ -113,6 +113,12 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # Matches web/lib/serviceHealthWindows.ts.
     "cri-scan":         {"open": 35 * _MIN, "closed": 3 * _DAY, "requires_ib": True},
     "vcg-scan":         {"open": 15 * _MIN, "closed": 3 * _DAY, "requires_ib": True},
+    # gex-scan — the 15-minute RTH driver runs it (data_refresh._SCRIPT_SERVICES
+    # maps gex_scan.py -> "gex-scan"), but it was in neither this catalog nor
+    # the error bucket derived from it, so check.py never evaluated it and a
+    # failing gex_scan was invisible. Same windows as its vcg-scan sibling;
+    # UWClient only, so no IB dependency. R-422.
+    "gex-scan":         {"open": 15 * _MIN, "closed": 3 * _DAY, "requires_ib": False},
     # radon-breadth.timer fires every 5 min across ET trading hours into
     # run_breadth_scan.sh -> breadth_scan.py's mirror_scan_snapshot. It was in
     # NEITHER catalog, so it appeared in no BUCKETS list and check.py — which
@@ -298,6 +304,17 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # uniform 26h (cadence + timer jitter). Filesystem + systemctl
     # only — no IB dependency.
     "config-drift":     {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # flow-refresh — hourly RTH driver behind the dark-pool flow tables
+    # (scripts/run_flow_refresh.sh via radon-flow-refresh.timer,
+    # Mon..Fri 09..16:00 ET). It has always written its own ok/error row
+    # through write_service_health_http; it was in NEITHER catalog, so
+    # nothing aged it. Surfaced by R-412's widened resolver.
+    "flow-refresh":     {"open": 3 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
+    # forecast-nightly — Chronos-2 backfill + calibration
+    # (scripts/nightly_forecast.py via radon-forecast-nightly.timer,
+    # 07:00 UTC, 24/7). R-402: the unit wrote no row on any path, so a
+    # throwing backfill left the forecast tables silently not advancing.
+    "forecast-nightly": {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # db-backup — nightly full Turso dump on the VPS (radon-cloud
     # scripts/db_backup.py via radon-db-backup.timer, 07:52 UTC, 24/7).
     # Heartbeats ok/error every run with size + duration detail. 48h
@@ -385,12 +402,15 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
 OPEN_BELL_GRACE_SERVICES: frozenset[str] = frozenset({
     "theta-harvester",
     "strength-confirmation",
+    # Same shape: hourly, RTH-only, on the daily check cadence.
+    "flow-refresh",
 })
 
 
 BUCKETS: dict[str, list[str]] = {
     "intraday": [
         "vcg-scan",
+        "gex-scan",
         "breadth-scan",
         # The 15-min RTH driver behind cri/vcg/gex. The scans heartbeat their
         # own names; nothing observed the DRIVER until R-325.
@@ -442,6 +462,13 @@ BUCKETS: dict[str, list[str]] = {
     ],
     "daily": [
         "cash-flow-sync",
+        # Daily 07:00 UTC Chronos-2 backfill + calibration. Nothing observed
+        # it: the unit wrote no row on any path, so a throwing backfill left
+        # the forecast tables silently not advancing. R-402.
+        "forecast-nightly",
+        # Hourly RTH dark-pool flow driver. It always wrote its own row; it
+        # was simply in neither catalog, so nothing aged it. R-412.
+        "flow-refresh",
         # Weekday 21:45 UTC prod->demo market-analytics mirror (R-325).
         "demo-mirror",
         # R-159: the TWR builder (Tue..Sat 07:30 ET). Silent means a Flex

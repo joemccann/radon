@@ -1560,6 +1560,28 @@ def is_post_close_cboe_official_window(now: Optional[datetime] = None) -> bool:
 # CLI
 # ══════════════════════════════════════════════════════════════════
 
+# One in-flight cri_scan per host. The handle is kept in a module global for the
+# life of the process: closing it releases the flock. R-423.
+CRI_SCAN_LOCK_PATH = "/tmp/radon-cri-scan.lock"
+_scan_lock_handle = None
+
+
+def _acquire_scan_lock():
+    """The open file handle when this process won, `None` when one is running."""
+    global _scan_lock_handle
+
+    import fcntl  # noqa: PLC0415 — POSIX-only, and only this path needs it
+
+    path = os.environ.get("RADON_CRI_SCAN_LOCK") or CRI_SCAN_LOCK_PATH
+    try:
+        handle = open(path, "a+")  # noqa: SIM115 — held for the process lifetime
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return None
+    _scan_lock_handle = handle
+    return handle
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Crash Risk Index (CRI) Scanner",
@@ -1610,6 +1632,27 @@ Examples:
                 print("  Serving cached CRI (market closed); skipping IB/UW fetch.", file=sys.stderr)
                 print(json.dumps(cached, indent=2))
                 return
+
+    # Advisory, NON-BLOCKING. cri_scan held no lock at all, so a browser POST
+    # landing during a 15-minute timer fire ran a SECOND scan concurrently for
+    # up to 180s — both racing the same `data/cri.json` write and the same IB
+    # client-id range (50-61). A loser serves the cache rather than queueing
+    # behind a run that may take three minutes. R-423.
+    lock_handle = _acquire_scan_lock()
+    if lock_handle is None:
+        if args.json:
+            try:
+                from utils.scan_cache_gate import cached_scan_if_fresh
+
+                cached = cached_scan_if_fresh(_PROJECT_DIR / "data" / "cri.json", force=True)
+            except Exception:
+                cached = None
+            if cached is not None:
+                print("  Another CRI scan is in flight; serving cache.", file=sys.stderr)
+                print(json.dumps(cached, indent=2))
+                return
+        print("  Another CRI scan is in flight and no cache is available.", file=sys.stderr)
+        sys.exit(75)
 
     t_start = time.time()
 

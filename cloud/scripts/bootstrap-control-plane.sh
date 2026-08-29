@@ -330,14 +330,35 @@ for index in "${!SOURCES[@]}"; do
       SYSTEMD_CANDIDATES+=("$staged_path")
       ;;
     dropin)
+      # Kept byte-for-byte in step with dropin_body_is_valid() in
+      # deploy-root-helper.sh; test_rel133_control_plane_recovery.py pins the
+      # two gates against each other. R-394.
       grep -q '^Type=simple$' "$staged_path" || \
         die "drop-in must set Type=simple: $relative_source"
-      grep -q 'ExecStart=/usr/local/sbin/radon-app-runtime run %n' "$staged_path" || \
+      grep -q '^ExecStart=/usr/local/sbin/radon-app-runtime run %n$' "$staged_path" || \
         die "drop-in must ExecStart radon-app-runtime: $relative_source"
-      grep -q 'ExecStartPre=' "$staged_path" || \
+      grep -q '^ExecStartPre=$' "$staged_path" || \
         die "drop-in must reset ExecStartPre: $relative_source"
       grep -q 'radon-ib-gateway' "$staged_path" && \
-        die "drop-in must not mention Gateway: $relative_source"
+        die "drop-in must not mention radon-ib-gateway: $relative_source"
+      grep -qE '^Exec[A-Za-z]*=[^ ]*/home/radon' "$staged_path" && \
+        die "drop-in must not execute from /home/radon: $relative_source"
+      # A drop-in is only parsed by `systemd-analyze verify` beside its base
+      # unit, so stage the pair and hand the BASE unit to the verifier. Without
+      # this the artifacts that define five root-run units skipped verification
+      # entirely. R-394.
+      dropin_base_name="$(basename "$(dirname "$relative_source")" .d)"
+      dropin_base_source="$CLOUD_ROOT/services/$dropin_base_name"
+      if [[ -f "$dropin_base_source" && ! -L "$dropin_base_source" ]]; then
+        dropin_verify_dir="$STAGE_DIR/verify/$index"
+        mkdir -p "$dropin_verify_dir/${dropin_base_name}.d"
+        install -m 0644 "$dropin_base_source" "$dropin_verify_dir/$dropin_base_name"
+        install -m 0644 "$staged_path" \
+          "$dropin_verify_dir/${dropin_base_name}.d/$(basename "$relative_source")"
+        SYSTEMD_CANDIDATES+=("$dropin_verify_dir/$dropin_base_name")
+      else
+        die "drop-in has no base unit to verify against: $relative_source"
+      fi
       ;;
     *)
       die "unknown validator for: $relative_source"

@@ -476,3 +476,78 @@ how this loop improves as the codebase grows.
   unreachable from journal rows alone, and REL-128's per-ticker in-flight dedupe was deliberately
   left out as a new shared-mutable-state surface. Both are recorded with the reason rather than
   quietly dropped, which is the difference between a BLOCKED sub-part and an unnoticed gap.
+- 2026-08-29 (audit): **a walk can be right about the defect and backwards about the mechanism.** The
+  control-plane walk filed the new container drop-ins as invisible to `drift_audit`. Reading
+  `_live_unit_counter` in the lead context showed the opposite and worse: the live side merges
+  `<unit>.d/*.conf` and the repo side does not, so the auditor goes permanently RED on all five app
+  units, and the allowlist (verified: two entries, both `not-installed:radon-llm-index.*`) does not
+  acknowledge them. File the verified reading and record the rejected half IN the row — "drift is
+  invisible" and "drift is permanently red" have opposite fixes, and an allowlist entry would have
+  been the wrong one.
+- 2026-08-29 (audit): **when a fix's anti-recurrence mechanism is free text, audit the text against
+  the code.** REL-114 closed NF-8 by adding `EXEMPT_UNITS` with a `parser:` / `gap:` reason per
+  entry. The count genuinely improved (25-of-54 to 16-of-55) and the new assertion is legitimately
+  green — but `test_every_exempt_unit_states_a_reason` checks only the PREFIX, and eight of ten
+  `gap: writes no service_health row` labels are false. Two lines of Python (resolve each exempt
+  unit's ExecStart, grep the target for `write_service_health`) turned a green suite into a P1. Run
+  that check on every exemption list a remediation introduces, the week after it ships.
+- 2026-08-29 (audit): the delta's dominant defect class was **suppression added to stop a false
+  page**, five mechanisms across `probes.py`, `external_probe.py` and `data_refresh.py`, four of them
+  unbounded. Two questions catch all four and neither needs deep reading: does the suppression have a
+  DWELL bound (how long may this state persist before it pages anyway), and what is its ORDERING
+  against the checks it precedes. `aggregate_state` has no timestamp input at all — a one-line grep
+  for any clock in the module proved it. Filed as standing class NF-10.
+- 2026-08-29 (audit): nine walks capped at ~12 files each finished in 4-9 minutes with none lost to
+  the stream watchdog. Two walks were told to EXECUTE rather than read (the journal_realized P0 and
+  the remediation regression) and both returned literal command output that settled claims a reading
+  walk would have left plausible — the `strike`/`right` halves of REL-109 verified holding, the
+  `expiry`-lifetime half verified NOT implemented, and REL-110's two `None` causes verified
+  separated. Budget one executing walk per P0 fix under review; it is the difference between "the
+  mechanism is present" and "the mechanism covers the claim".
+- 2026-08-29 (audit): the backlog-coverage set difference earned its place this run — it caught that
+  every `R-###` reference in the 18 backlog rows was written against the pre-numbering draft order,
+  so twelve of eighteen tasks pointed at the wrong findings. Two further mechanics matter: apply the
+  per-task remap SIMULTANEOUSLY through one `re.sub` callback (the corrections chained, e.g.
+  R-385 to R-386 while R-384 to R-385), and keep the remap OFF the task's own id field. Also, a
+  finding body containing `payload["date"]` breaks a double-quoted Python literal in the generator —
+  write repo code samples with single quotes inside the table strings.
+
+- 2026-08-29 (remediate): **a finding's remedy can be a REGRESSION the pinned tests catch, and they
+  were right every time.** Four this run. R-428's "check the limits on the modify path" classified a
+  `secType == "BAG"` order as `type: "combo"`, and `check_order_limits` fails CLOSED on a combo whose
+  `legs` it cannot read — a `comboLeg` carries a conId, not a strike — so that shape refused EVERY
+  combo modify and placement; `check_quantity_limit` is the bound actually derivable at a funnel.
+  R-421's "divide the reserve by `len(indices)`" made a SINGLE-index bpi run demand a reserve sized
+  for three; dividing by `len(INDEX_NAMES)` is what the finding meant. R-386 asked for
+  `timeout --foreground`, which stops timeout creating its own process group and therefore defeats
+  the orphan reaping the SAME finding asks for. R-402 asked to register `signals-refresh`, whose
+  wrapper POSTs two scanners that each write their own already-catalogued row — a key nothing writes
+  ages to stale and pages forever. Test the remedy against the repo's existing assertions first.
+- 2026-08-29 (remediate): **widening a scope-limited test surfaces real gaps immediately, and they
+  are in scope.** Teaching `_names_in` the bounded-stdlib writer shape (REL-141) dropped the
+  unresolved set from 16/55 to 7/55 AND surfaced `flow-refresh` — an hourly RTH job that had always
+  written its own health row and was in NEITHER catalog, which no scoped walk had found. Merging
+  drop-ins into `_unit_texts` (REL-133) surfaced five `User=root` units with no pinned PATH. Adding
+  the `place_order` tripwire (REL-145) surfaced `clients/ib_client.py`, the transport every caller
+  goes through. Budget for one extra fix per widened guard; the guard finding the gap on its first
+  run is the guard working.
+- 2026-08-29 (remediate): the comment-quotes-its-own-code trap bit twice more, once in a test I
+  wrote (`assert "infinity" not in _dropin(unit)` matched the comment explaining the removal) and
+  once in the parity resolver itself — `run_flow_refresh.sh` mentions `scripts/api/server.py` in a
+  COMMENT about a shed marker, so every health name that file writes was attributed to the
+  flow-refresh timer. Strip comments before ANY structural scan, in test AND in source-walking code.
+- 2026-08-29 (remediate): **editing the running wrapper is safe only via rename.** REL-137 rewrites
+  `reliability_weekend.sh` while this very loop is executing it. Bash reads a script lazily by byte
+  offset, so `Path.write_text` (truncate + rewrite of the SAME inode) can strand the live run at a
+  stale offset. Every edit went through `tempfile.mkstemp` in the same directory plus `os.replace`,
+  which hands the running shell an untouched old inode. The file header already says this for `cp`;
+  it applies to any in-place writer, including Python's.
+- 2026-08-29 (remediate): a `-k` filter is not a gate. `pytest -k "scan or gate or api or catalog"`
+  matched 7645 of 8686 tests and read like a full run at a glance. When reporting a targeted result,
+  report the DESELECTED count too, or the number means nothing.
+- 2026-08-29 (remediate): three findings this run were closed only PARTIALLY and each says so in its
+  own row — R-424's `service_health` row (no error-only catalog category exists, and a scheduled key
+  for a no-cadence signal ages to stale and pages forever), R-408's browser screenshot (this runner
+  clone has no `web/.env`, so the app cannot boot), and R-402's `signals-refresh` registration
+  (deliberately refused, above). Writing the reason into the row is the difference between a known
+  residual and a silent gap.

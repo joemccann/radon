@@ -24,6 +24,7 @@ const SIDE_PARAM = "side";
 const STRIKES_PARAM = "strikes";
 const EXPIRY_PARAM = "expiry";
 const LEGS_PARAM = "legs";
+const SRC_PARAM = "src";
 
 const ALLOWED_STRIKES = [10, 15, 25, 50, 100] as const;
 const DEFAULT_STRIKES = 15;
@@ -148,6 +149,17 @@ export function useChainUrlState(): ChainUrlState {
       apply(EXPIRY_PARAM, expiryVal);
       apply(SIDE_PARAM, sideVal);
       apply(STRIKES_PARAM, strikesVal);
+
+      // R-378: the URL named an expiry the chain could not honour, so this write
+      // is rewriting ?expiry to the fallback. Leaving ?legs and ?src behind means
+      // that on the next pass the requested expiry MATCHES the fallback and the
+      // prefill arms a contract nobody selected, under a ticket still naming the
+      // scanner. A contract that was not honoured does not survive the rewrite.
+      const requested = searchParams?.get(EXPIRY_PARAM) ?? null;
+      if (requested && expiryVal && formatExpiry(requested) !== expiryVal) {
+        params.delete(LEGS_PARAM);
+        params.delete(SRC_PARAM);
+      }
 
       const query = params.toString();
       const url = query ? `${pathname}?${query}` : pathname ?? "/";
