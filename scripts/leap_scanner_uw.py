@@ -443,13 +443,25 @@ def get_leap_options(ticker: str, min_year: int = 2027, _client: UWClient = None
 def pick_best_mispriced_leap(
     leaps: List[LeapOption], hv_20: float
 ) -> Optional[LeapOption]:
-    """The contract carrying the widest realized-vs-implied gap in a group.
+    """The widest realized-vs-implied gap among the group's TRADEABLE contracts.
 
-    Ties on IV go to the deeper open interest — same edge, better fill.
+    `hv_20` is constant across the group, so `(hv_20 - iv, oi)` was purely
+    argmin(IV): `oi` broke only an exact tie on an IV rounded to 2dp, which
+    essentially never happens, and the "ties go to the deeper open interest"
+    promise was inoperative. `get_leap_options` rejects only `iv == 0`, so
+    `oi=0`/`volume=0` contracts survive into the pool — and the lowest quoted IV
+    in a delta bucket is systematically the STALEST or least-traded quote. That
+    contract was then serialised as `best_leap` and deep-linked as the headline
+    TRADE BEST order.
+
+    A contract qualifies on resting open interest OR on today's volume; with
+    neither there is nothing to fill against, and `None` suppresses the link
+    rather than pointing it at a dead quote. R-387.
     """
-    if not leaps:
+    tradeable = [leap for leap in leaps if leap.oi > 0 or leap.volume > 0]
+    if not tradeable:
         return None
-    return max(leaps, key=lambda leap: (hv_20 - leap.iv, leap.oi))
+    return max(tradeable, key=lambda leap: (hv_20 - leap.iv, leap.oi))
 
 
 def approximate_delta(strike: float, price: float, iv: float, dte: int) -> float:
@@ -539,10 +551,14 @@ def scan_ticker(
         if gap_20 >= min_gap or gap_60 >= min_gap:
             status = "🔥 MISPRICED"
             is_mispriced = True
-            if gap_20 > best_gap or best_leap is None:
-                best_leap = pick_best_mispriced_leap(group_leaps, vol_data.hv_20)
+            # `best_leap` comes ONLY from the group that set `best_gap`. Under
+            # `or best_leap is None` a ticker mispriced solely via `gap_60` got
+            # a contract while `best_gap` stayed at its 0 initialiser, so the
+            # row rendered a MISPRICED anchor reading `+0.0` that still armed a
+            # live order. R-388.
             if gap_20 > best_gap:
                 best_gap = gap_20
+                best_leap = pick_best_mispriced_leap(group_leaps, vol_data.hv_20)
 
         emit(f"    {group_name}: IV={avg_iv:.1f}% | Gap vs HV20: {gap_20:+.1f}% | vs HV60: {gap_60:+.1f}% {status}")
 

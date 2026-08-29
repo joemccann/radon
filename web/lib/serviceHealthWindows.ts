@@ -278,7 +278,9 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // ``gex-scan`` still flows through ``record_service_health`` only when
   // a user POSTs the scan endpoint, so it's on-demand for banner purposes.
   // Source: scripts/gex_scan.py uses UWClient only — no IB dependency.
-  "gex-scan": { open: 30 * MIN, extended: 30 * MIN, closed: 1 * DAY, category: "on-demand", requires_ib: false },
+  // SCHEDULED, not on-demand: data_refresh's 15-minute RTH driver runs it, so
+  // the same windows as its vcg-scan sibling. R-422.
+  "gex-scan": { open: 15 * MIN, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: false },
   "gamma-rotation-scan": { open: 30 * MIN, extended: 30 * MIN, closed: 1 * DAY, category: "on-demand", requires_ib: false },
   // ``breadth-scan`` is SCHEDULED, not on-demand: radon-breadth.timer fires
   // every 5 min across ET trading hours. It was catalogued on-demand, which
@@ -440,6 +442,19 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // weekends are normal run days so no wide closed window is needed.
   // Reads the filesystem + systemctl only — no IB dependency.
   "config-drift": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+
+  // ``flow-refresh`` is the hourly RTH dark-pool flow driver
+  // (scripts/run_flow_refresh.sh via radon-flow-refresh.timer,
+  // Mon..Fri 09..16:00 ET). It has always written its own ok/error row
+  // through write_service_health_http; it was in NEITHER catalog, so nothing
+  // aged it. Surfaced by R-412's widened resolver.
+  "flow-refresh": { open: 3 * HOUR, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
+
+  // ``forecast-nightly`` is the Chronos-2 backfill + calibration
+  // (scripts/nightly_forecast.py via radon-forecast-nightly.timer, 07:00 UTC,
+  // 24/7). R-402: it wrote no row on any path, so a throwing backfill left the
+  // forecast tables silently not advancing with nothing at the edge saying so.
+  "forecast-nightly": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
   // ``db-backup`` is the nightly full Turso dump on the VPS (radon-cloud
   // scripts/db_backup.py via radon-db-backup.timer, 07:52 UTC, 24/7 —
@@ -630,6 +645,8 @@ const RTH_ONLY_SERVICES = new Set([
   // only, so their open-window age must be measured from today's open.
   "theta-harvester",
   "strength-confirmation",
+  // Same shape: radon-flow-refresh.timer is Mon..Fri 09..16:00 ET.
+  "flow-refresh",
   "orders-sync",
   "portfolio-sync",
   "journal-sync",

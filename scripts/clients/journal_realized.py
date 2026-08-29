@@ -313,6 +313,15 @@ def _is_plausible_contract(payload: dict[str, Any]) -> bool:
         date(int(expiry[0:4]), int(expiry[4:6]), int(expiry[6:8]))
     except ValueError:
         return False
+    # A calendar-valid date is not enough: an option cannot be FILLED after it
+    # has expired, so an `expiry` before the row's own session date is a
+    # corruption (`19700101`, or a field swap copying an earlier fill date).
+    # Both mint a well-formed key, form a phantom bucket that takes its cost out
+    # of the real one, and publish a fabricated figure with no warning. Equality
+    # is legitimate -- 0DTE is a real trade. R-407.
+    row_date = str(payload.get("date") or "").replace("-", "")[:8]
+    if len(row_date) == 8 and row_date.isdigit() and expiry < row_date:
+        return False
     return True
 
 
@@ -352,7 +361,7 @@ def _replay_contract(
     realized: dict[str, float] = {}
     position_qty = 0.0
     avg_basis_per_unit = 0.0
-    seen_fingerprints: dict[tuple, set[str]] = {}
+    seen_fingerprints: dict[tuple, dict[str, Any]] = {}
     basis_tainted = False
     position_may_be_short = False
 
@@ -364,23 +373,39 @@ def _replay_contract(
         signed_qty = qty if is_buy else -qty
         same_direction = position_qty == 0 or (position_qty > 0) == is_buy
 
-        if _already_journaled_under_other_namespace(seen_fingerprints, entry, key):
-            # T-184: the fingerprint cannot separate a cross-writer duplicate
-            # from two genuinely distinct equal-size same-day partials, so the
-            # suppression is deliberate — under-count rather than double-count.
-            # What it may have cost has to be carried forward: a suppressed
-            # OPENING fill takes its cost out of the average along with its
-            # quantity, so the basis is unreliable from here on; a suppressed
-            # REDUCING fill leaves the per-unit basis intact but the position
-            # possibly long, which only misprices figures once a later opening
-            # fill blends against that phantom inventory.
+        cash = entry["notional"] + entry["commission"] if is_buy else entry["notional"] - entry["commission"]
+
+        suppressed, cash_matched = _already_journaled_under_other_namespace(
+            seen_fingerprints, entry, key, cash
+        )
+        if suppressed:
+            # T-184: the fingerprint is (contract, session date, signed qty) and
+            # cannot see price, so it cannot separate a cross-writer duplicate
+            # from two genuinely distinct equal-size same-day partials — hence
+            # the suppression, and hence the carried taint.
+            #
+            # But CASH is decidable, and it is the only thing the taint is about.
+            # An identical-cash suppression is a PROVEN duplicate (R-049: one
+            # fill written by the realtime daemon under a dotted API execId and
+            # again by Flex rehydrate under a numeric tradeID), and the
+            # post-suppression basis is exactly right. Tainting there discarded
+            # every later figure for the contract and fell back to IB's drifted
+            # avgCost number — on every contract Flex has rehydrated, which is
+            # the normal production state. R-383.
+            # A suppressed OPENING fill takes its cost out of the average along
+            # with its quantity. At IDENTICAL cash the average is invariant to
+            # whether the fill is counted once or twice, so the basis is exact
+            # either way and there is nothing to taint.
             if same_direction:
-                basis_tainted = True
+                if not cash_matched:
+                    basis_tainted = True
             else:
+                # A suppressed REDUCING fill is different: cash equality says
+                # nothing about the QUANTITY, and the position is left possibly
+                # long, which misprices figures once a later opening fill blends
+                # against that phantom inventory. Always carried.
                 position_may_be_short = True
             continue
-
-        cash = entry["notional"] + entry["commission"] if is_buy else entry["notional"] - entry["commission"]
 
         if entry["is_close"] and same_direction:
             logger.warning(
@@ -409,10 +434,19 @@ def _replay_contract(
         basis_closed = avg_basis_per_unit * qty
         pnl = cash - basis_closed if position_qty > 0 else basis_closed - cash
         position_qty += signed_qty
+        # The withhold decision belongs to THIS fill, which was priced against
+        # the tainted basis; the reset below applies from the next one on.
+        withheld = basis_tainted
         if position_qty == 0:
             avg_basis_per_unit = 0.0
+            # A flat position already resets the basis, and the taint is a
+            # statement ABOUT that basis. Carrying it past zero withheld every
+            # figure for the rest of the journal's history on a contract
+            # re-entered even once after a single suppressed open. R-406.
+            basis_tainted = False
+            position_may_be_short = False
         if len(entry["parts"]) == 1:
-            if basis_tainted:
+            if withheld:
                 logger.warning(
                     "journal_realized: %s withholding %s — a cross-writer fill "
                     "suppression left the replayed basis unreliable, journal "
@@ -432,23 +466,34 @@ def _id_namespaces(parts: list[str]) -> set[str]:
 
 
 def _already_journaled_under_other_namespace(
-    seen: dict[tuple, set[str]], entry: dict[str, Any], key: str
-) -> bool:
-    """True when this fill (contract, session date, signed qty) was already
-    replayed from a row keyed in the OTHER id namespace — the same close
-    written by both writers (T-124). Two equal same-day partials from ONE
-    writer share a namespace and both count, as in the backfill."""
+    seen: dict[tuple, dict[str, Any]], entry: dict[str, Any], key: str, cash: float
+) -> tuple[bool, bool]:
+    """``(suppressed, cash_matched)`` for this fill.
+
+    Suppressed when this fill (contract, session date, signed qty) was already
+    replayed from a row keyed in the OTHER id namespace — the same close written
+    by both writers (T-124). Two equal same-day partials from ONE writer share a
+    namespace and both count, as in the backfill.
+
+    ``cash_matched`` reports whether the suppressed row carried the SAME cash as
+    the one already counted. The fingerprint cannot see price, but this can, and
+    it is the difference between a proven cross-writer duplicate (basis after
+    suppression is exact) and two distinct partials (basis is short by one).
+    R-383.
+    """
     fingerprint = entry.get("fingerprint")
     namespaces = _id_namespaces(entry["parts"])
     if fingerprint is None or not namespaces:
-        return False
-    prior = seen.setdefault(fingerprint, set())
-    if prior and prior.isdisjoint(namespaces):
+        return False, False
+    prior = seen.setdefault(fingerprint, {"namespaces": set(), "cash": cash})
+    if prior["namespaces"] and prior["namespaces"].isdisjoint(namespaces):
+        matched = round(prior["cash"], 4) == round(cash, 4)
         logger.info(
-            "journal_realized: %s skipped %s — same fill already journaled under %s",
-            key, "+".join(entry["parts"]), "/".join(sorted(prior)),
+            "journal_realized: %s skipped %s — same fill already journaled under %s (cash %s)",
+            key, "+".join(entry["parts"]), "/".join(sorted(prior["namespaces"])),
+            "matches" if matched else "DIFFERS",
         )
-        return True
-    prior |= namespaces
-    return False
+        return True, matched
+    prior["namespaces"] |= namespaces
+    return False, False
 

@@ -17,9 +17,10 @@ from pathlib import Path
 CLOUD = Path(__file__).resolve().parents[1]
 REPO = CLOUD.parent
 RELAY_UNIT = CLOUD / "services" / "radon-relay.service"
-DROPIN = (
-    CLOUD / "services" / "radon-relay.service.d" / "runtime-container.conf.example"
-)
+# The SHIPPED drop-in: the `.conf.example` that said "MUST NOT be installed" was
+# deleted once bootstrap and refresh_install_file began installing the real one
+# on every deploy. R-420.
+DROPIN = CLOUD / "services" / "radon-relay.service.d" / "runtime-container.conf"
 RUNTIME = CLOUD / "scripts" / "radon-app-runtime.sh"
 RELAY_JS = REPO / "scripts" / "ib_realtime_server.js"
 SD_NOTIFY_JS = REPO / "scripts" / "lib" / "sdNotify.js"

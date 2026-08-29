@@ -17,12 +17,32 @@ function parseLocal(input: string | null | undefined): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-function isSameLocalDay(a: Date, b: Date): boolean {
-  return (
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
-  );
+/**
+ * A TRADING day, named explicitly rather than inherited from the process.
+ *
+ * `vitest.config.ts` pins `TZ=America/New_York` for the suite and nothing pins
+ * TZ for the runtime, so every `getFullYear()/getMonth()/getDate()` here used
+ * to answer ET in the tests and UTC on the server: an exit stamped
+ * `2026-08-29T01:00:00Z` is Aug 28 in the pinned suite and Aug 29 in
+ * production, flipping same-day-trade classification and the entry-before-exit
+ * rejection between test and prod. The pin made TZ-independence untestable
+ * rather than guaranteed. A trading day is ET by definition, so say so. R-405.
+ */
+const EXCHANGE_DAY = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "America/New_York",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+/** `YYYYMMDD` as a number, in the exchange timezone. */
+function exchangeDayNumber(input: string | null | undefined, parsed: Date): number {
+  const m = DATE_ONLY_RE.exec(input ?? "");
+  // A bare "YYYY-MM-DD" already IS a calendar day; converting it through a
+  // timezone would shift it for any viewer west of the exchange.
+  if (m) return Number(m[1]) * 10_000 + Number(m[2]) * 100 + Number(m[3]);
+  const [y, mo, d] = EXCHANGE_DAY.format(parsed).split("-");
+  return Number(y) * 10_000 + Number(mo) * 100 + Number(d);
 }
 
 /**
@@ -37,8 +57,7 @@ export function isEarlierLocalDay(
   const a = parseLocal(candidate);
   const b = parseLocal(reference);
   if (!a || !b) return false;
-  const dayNumber = (d: Date) => d.getFullYear() * 10_000 + d.getMonth() * 100 + d.getDate();
-  return dayNumber(a) < dayNumber(b);
+  return exchangeDayNumber(candidate, a) < exchangeDayNumber(reference, b);
 }
 
 const MINUTE = 60_000;
@@ -63,7 +82,11 @@ export function formatHoldDuration(
   // A date-only entry carries no intra-day information: when it falls on the
   // exit's own local day, the only measurable span is "since local midnight",
   // which fabricates an hours-scale hold. Omit the field instead.
-  if (entryTime != null && DATE_ONLY_RE.test(entryTime) && isSameLocalDay(entry, exit)) {
+  if (
+    entryTime != null
+    && DATE_ONLY_RE.test(entryTime)
+    && exchangeDayNumber(entryTime, entry) === exchangeDayNumber(exitTime, exit)
+  ) {
     return null;
   }
 

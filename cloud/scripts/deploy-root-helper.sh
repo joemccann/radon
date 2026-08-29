@@ -1098,6 +1098,34 @@ sync_scheduled_units() {
   return 0
 }
 
+# Drop-in content gate. Mirrors the `dropin` validator in
+# bootstrap-control-plane.sh; cloud/tests/test_rel133_control_plane_recovery.py
+# pins the two against each other so they cannot drift. R-394.
+dropin_body_is_valid() {
+  local path="$1" label="${2:-$1}"
+  grep -q '^Type=simple$' "$path" || {
+    echo "drop-in must set Type=simple: ${label}" >&2
+    return 1
+  }
+  grep -q '^ExecStart=/usr/local/sbin/radon-app-runtime run %n$' "$path" || {
+    echo "drop-in must ExecStart radon-app-runtime: ${label}" >&2
+    return 1
+  }
+  grep -q '^ExecStartPre=$' "$path" || {
+    echo "drop-in must reset ExecStartPre: ${label}" >&2
+    return 1
+  }
+  if grep -q 'radon-ib-gateway' "$path"; then
+    echo "drop-in must not mention radon-ib-gateway: ${label}" >&2
+    return 1
+  fi
+  if grep -qE '^Exec[A-Za-z]*=[^ ]*/home/radon' "$path"; then
+    echo "drop-in must not execute from /home/radon: ${label}" >&2
+    return 1
+  fi
+  return 0
+}
+
 refresh_install_file() {
   local source="$1"
   local dest="$2"
@@ -1136,6 +1164,28 @@ refresh_install_file() {
         return 73
       fi
       ;;
+    */radon-*.service.d/*.conf)
+      # An operator who followed the (now deleted) .conf.example instructions
+      # and hand-copied a drop-in to this exact path has it overwritten with no
+      # backup and no journal entry, unlike install_manifest_units'
+      # UNIT_BACKUP_PREFIX snapshot. Record what was replaced so the change is
+      # at least attributable in the deploy log. R-420.
+      if [[ -f "$dest" && ! -L "$dest" ]]; then
+        local previous
+        previous="$(file_sha256 "$dest" 2>/dev/null || echo unknown)"
+        if [[ "$previous" != "$(file_sha256 "$candidate" 2>/dev/null || echo unknown)" ]]; then
+          echo "replacing drop-in ${dest} (previous digest ${previous})" >&2
+        fi
+      fi
+      # The same rules bootstrap-control-plane.sh enforces. That path almost
+      # never runs; THIS one installs the drop-in on every deploy, out of the
+      # radon-writable /home/radon/radon/cloud, and had no arm at all. A drop-in
+      # is the root-run unit definition of all five app services. R-394.
+      if ! dropin_body_is_valid "$candidate" "$dest"; then
+        "$RM" -f "$candidate"
+        return 73
+      fi
+      ;;
   esac
   if ! mv -f -- "$candidate" "$dest"; then
     "$RM" -f "$candidate"
@@ -1153,6 +1203,14 @@ write_control_plane_manifest_and_ready() {
     source_rel="${CONTROL_PLANE_SOURCES[$index]}"
     dest="${CONTROL_PLANE_ROOT}${CONTROL_PLANE_TARGETS[$index]}"
     if [[ ! -f "$dest" || -L "$dest" ]]; then
+      # Same rollback shape as the skip in refresh_control_plane: a drop-in that
+      # this checkout does not ship, and that was never installed, is not a
+      # manifest entry. R-380.
+      case "$source_rel" in
+        services/*.service.d/*.conf)
+          [[ -f "${CLOUD_SOURCE}/${source_rel}" ]] || continue
+          ;;
+      esac
       "$RM" -f "$tmp_manifest"
       echo "installed control-plane target is unavailable after refresh: ${CONTROL_PLANE_TARGETS[$index]}" >&2
       return 73
@@ -1201,6 +1259,16 @@ refresh_control_plane() {
     source="${CLOUD_SOURCE}/${source_rel}"
     dest="${CONTROL_PLANE_ROOT}${CONTROL_PLANE_TARGETS[$index]}"
     if [[ ! -f "$source" || -L "$source" ]]; then
+      # A drop-in source is absent from every checkout before 702ae26a, and the
+      # INSTALLED helper is always the newest one, so a rollback enumerates
+      # sources the restored tree does not have. Aborting here left all five app
+      # units stopped with no path back; skip and warn instead. R-380.
+      case "$source_rel" in
+        services/*.service.d/*.conf)
+          echo "control-plane source absent, leaving installed copy in place: ${source_rel}" >&2
+          continue
+          ;;
+      esac
       echo "control-plane source is missing or is not a regular file: ${source_rel}" >&2
       return 66
     fi
