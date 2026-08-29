@@ -73,6 +73,8 @@ export function emptyThetaHarvesterPayload() {
   };
 }
 
+export const radonCapability = "read";
+
 export async function readThetaHarvesterCache(): Promise<Record<string, unknown> | null> {
   const raw = await readFile(CACHE_PATH, "utf-8");
   return JSON.parse(raw) as Record<string, unknown>;

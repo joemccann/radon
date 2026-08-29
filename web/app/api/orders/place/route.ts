@@ -99,6 +99,8 @@ function indeterminatePlacementDetail(error: IndeterminatePlacementError): strin
   return `Placement was not confirmed (${reason}). The idempotency key is held so an identical resubmit cannot double-place.`;
 }
 
+export const radonCapability = "mutate.trading";
+
 export async function POST(request: Request): Promise<Response> {
   const access = await requireRouteAccess(request, {
     operatorOnly: true,

@@ -71,6 +71,7 @@ Modify (lockstep pins — miss one and a test fails, which is the point):
 ## 3. API route (`web/app/api/<name>/route.ts`)
 
 - `export const dynamic = "force-dynamic"; export const runtime = "nodejs";` — GET only unless there is a real on-demand trigger (breadth's POST proxies FastAPI with cooldown + single-flight).
+- `export const radonCapability = "read";` (GET market data). On-demand POST scans use a method map with `read.spawn`. Unclassified routes fail `web/tests/assistant-catalog-pin.test.ts`.
 - Read through **`dbFirstRead`** (`web/lib/dbFirstRead.ts`): `fromDb` selects the latest `scan_snapshots` row (`WHERE service = '<name>' ORDER BY scan_time DESC LIMIT 1`), `fromDisk` reads `data/<name>.json`, and the helper serves whichever content timestamp is fresher.
 - `MAX_AGE_MS` derives from the real cadence with slack (daily timer → 48h; 5-min timer → 30min), commented with the reasoning: "older than X means the writer is down."
 - **Missing contract**: absent data is `HTTP 200` + a frozen `{ missing: true, scan_time: null, series: [], ... }` object — never a 4xx (feedback_http_status_for_real_errors).

@@ -20,6 +20,10 @@ Every Next.js GET handler reading live disk state (`data/*.json`, `data/menthorq
 
 The covered route + hook set is pinned by the contract test: `web/tests/api-routes-no-cache-contract.test.ts`.
 
+## Assistant catalog pin
+
+Every `web/app/api/**/route.ts(x)` must `export const radonCapability` (`read` | `read.spawn` | `mutate.workspace` | `mutate.trading` | `admin` | `internal`, or a method map of those). Unclassified routes fail `web/tests/assistant-catalog-pin.test.ts`. New GET indicator routes are usually `"read"`.
+
 **Offline-fallback exception (SW only, shipped 2026-07-22).** The service worker intercepts HTML navigations plus an allowlisted `/api` GET set NETWORK-FIRST. Cache Storage (a separate store from the HTTP cache the contract targets) is written on ok responses with real payloads and read ONLY when `fetch()` rejects (network failure) — never on `res.ok === false`, never as a race/timeout. Offline-served responses carry `X-Radon-Offline: 1` + `X-Radon-Cached-At`. Online behavior is byte-identical; `force-dynamic` + `no-store` remain mandatory and untouched. Decision logic lives in `web/public/sw-decisions.js`, pinned by `web/tests/sw-decisions.test.ts` + `web/tests/sw-smoke.test.ts`. Details that bite:
 
 - Degraded 200s never enter the cache: `missing: true` bodies and per-route `API_BODY_VALIDATORS` (scanner needs `scan_time`, ticker-info needs non-empty `uw_info`) protect last-known-good from being overwritten by a 200-shaped failure.

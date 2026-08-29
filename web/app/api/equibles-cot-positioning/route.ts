@@ -50,6 +50,8 @@ async function readCotFromDisk(): Promise<TimestampedRead<Record<string, unknown
   return { data, timestampMs: contentTimestampMs(data.scan_time) };
 }
 
+export const radonCapability = "read";
+
 export async function GET(): Promise<Response> {
   const requestId = getRequestId();
   const result = await dbFirstRead({

@@ -6,6 +6,8 @@ import { getRequestId, jsonApiError, setNoStoreResponseHeaders } from "@/lib/api
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+export const radonCapability = "mutate.workspace";
+
 export async function DELETE(
   _req: Request,
   { params }: { params: Promise<{ post_id: string }> },

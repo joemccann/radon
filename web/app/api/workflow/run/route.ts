@@ -12,6 +12,8 @@ export const runtime = "nodejs";
 // FastAPI (`POST /workflow/run`) where the Python executor lives. Order-emitting
 // nodes block unless `confirm_order` is passed — the OrderRiskGate confirmation.
 
+export const radonCapability = "mutate.trading";
+
 export async function POST(req: Request): Promise<Response> {
   const access = await requireRouteAccess(req, {
     operatorOnly: true,

@@ -25,6 +25,8 @@ async function fetchYahooIndexQuote(symbol: string): Promise<PriceData | null> {
   return fetchYahooChartQuote(symbol, yahooSymbol);
 }
 
+export const radonCapability = "read";
+
 export async function GET(request: Request): Promise<Response> {
   const requestId = getRequestId();
   const { searchParams } = new URL(request.url);

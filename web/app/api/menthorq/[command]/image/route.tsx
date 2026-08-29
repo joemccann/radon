@@ -465,6 +465,8 @@ export function resolveMenthorqRenderer(
   };
 }
 
+export const radonCapability = "read";
+
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ command: string }> }

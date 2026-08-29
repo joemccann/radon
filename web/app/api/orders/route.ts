@@ -10,6 +10,8 @@ export const dynamic = "force-dynamic";
 
 let syncInFlight: Promise<void> | null = null;
 
+export const radonCapability = { GET: "read", POST: "mutate.workspace" };
+
 export async function GET(): Promise<Response> {
   const access = await requireRouteAccess();
   if (!access.ok) return access.response;

@@ -143,6 +143,8 @@ const triggerBackgroundScan = createBackgroundScanTrigger({
 // path stays uncached so a user-triggered rescan always reads the freshest.
 const GEX_CACHE_TTL_MS = 5_000;
 
+export const radonCapability = { GET: "read", POST: "read.spawn" };
+
 export async function GET(): Promise<Response> {
   const access = await requireRouteAccess(undefined, { rate: { key: "gex:route", limit: 20, windowMs: 60_000 } });
   if (!access.ok) return access.response;

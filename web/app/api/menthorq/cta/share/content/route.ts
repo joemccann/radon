@@ -3,6 +3,8 @@ import { isAllowedShareCardPath, readShareCard } from "@/lib/shareReportPath";
 
 export const runtime = "nodejs";
 
+export const radonCapability = "internal";
+
 export async function GET(req: NextRequest): Promise<Response> {
   const rawPath = req.nextUrl.searchParams.get("path");
   if (!rawPath) {

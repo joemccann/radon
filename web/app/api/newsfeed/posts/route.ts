@@ -65,6 +65,8 @@ async function fetchPosts() {
   return result.rows.map((r) => rowToPost(r as unknown as PostRow));
 }
 
+export const radonCapability = "read";
+
 export async function GET() {
   const access = await requireRouteAccess();
   if (!access.ok) return access.response;

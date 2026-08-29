@@ -34,6 +34,8 @@ async function setClerkMetadata(
   await client.users.updateUserMetadata(userId, { publicMetadata });
 }
 
+export const radonCapability = "internal";
+
 export async function POST(request: Request): Promise<Response> {
   const requestId = getRequestId();
   const ok = (body: Record<string, unknown>, status = 200) =>

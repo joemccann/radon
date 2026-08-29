@@ -15,6 +15,8 @@ import { getRequestId, jsonApiError, setNoStoreResponseHeaders } from "@/lib/api
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+export const radonCapability = "mutate.trading";
+
 export async function POST(request: Request): Promise<Response> {
   const access = await requireRouteAccess(undefined, { rate: { key: "paper/place:route", limit: 20, windowMs: 60_000 } });
   if (!access.ok) return access.response;

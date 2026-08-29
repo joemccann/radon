@@ -56,6 +56,8 @@ function validationFailure(
   );
 }
 
+export const radonCapability = { GET: "read", PUT: "mutate.workspace", DELETE: "mutate.workspace" };
+
 export async function GET(): Promise<Response> {
   const access = await requireRouteAccess();
   if (!access.ok) return access.response;

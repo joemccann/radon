@@ -42,6 +42,8 @@ function parseGraph(raw: string): unknown {
   }
 }
 
+export const radonCapability = { GET: "read", POST: "mutate.workspace" };
+
 export async function GET(): Promise<Response> {
   const requestId = getRequestId();
   const { userId } = await auth();

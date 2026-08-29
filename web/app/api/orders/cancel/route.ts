@@ -31,6 +31,8 @@ async function readOrdersSnapshotBestEffort() {
   }
 }
 
+export const radonCapability = "mutate.trading";
+
 export async function POST(request: Request): Promise<Response> {
   const access = await requireRouteAccess(request, {
     operatorOnly: true,

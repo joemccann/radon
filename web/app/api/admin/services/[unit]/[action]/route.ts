@@ -13,6 +13,8 @@ export const runtime = "nodejs";
 const ALLOWED_ACTIONS = new Set(["start", "stop", "restart"]);
 const UNIT_PATTERN = /^radon-[a-z0-9-]+(?:\.service|\.timer)?$|^radon-ib-gateway\.service$/;
 
+export const radonCapability = "admin";
+
 export async function POST(
   _req: NextRequest,
   { params }: { params: Promise<{ unit: string; action: string }> },
