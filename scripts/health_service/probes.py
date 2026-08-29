@@ -93,6 +93,13 @@ def unit_coarse_state(active_state: str, sub_state: str) -> str:
     if active_state == "failed":
         return "down"
     if active_state in ("activating", "reloading"):
+        # `activating` + `auto-restart` is systemd's signature for a crash loop:
+        # the unit is not on its way up, it has already failed and is being
+        # respawned. A unit with a bad config spends 100% of its life there and
+        # never reaches `active`, so reading it as "starting" reported a
+        # permanently dead service as a transient. R-397.
+        if sub_state == "auto-restart":
+            return "down"
         return "starting"
     if active_state in ("inactive", "deactivating"):
         return "down"
@@ -136,6 +143,14 @@ STATUS_SCHEMA_VERSION = 2
 # newsfeed / monitor: sidecars — Restart=always flaps briefly read as unit
 # "down" or "starting" and were paging edge-unhealthy (2026-08-29 pages
 # 0b7726f8 / 344f0592).
+# How long a dependency may sit non-`up` before its failure stops being a flap.
+# `degraded` converts off-box to an explicit non-page, so with no dwell bound a
+# permanently dead radon-monitor (the fill / order / journal daemon) was edge
+# green forever. 15 minutes absorbs every Restart=always flap the 2026-08-29
+# pages were about and still catches a death well inside one trading session.
+# R-382.
+DEPENDENCY_DWELL_LIMIT_SECS = 900.0
+
 DEPENDENCY_PROBES = frozenset({"ib-gateway"})
 DEPENDENCY_UNITS = frozenset({
     "radon-ib-gateway.service",
@@ -229,12 +244,21 @@ def aggregate_state(probe_results: dict, units: dict,
             target = dependency_states if name in DEPENDENCY_PROBES else serving_states
             target.append(state)
     units_current = _unit_evidence_current(units_age_secs)
+    dependency_stuck = False
     if units_current:
         for name, value in (units or {}).items():
             if isinstance(value, dict):
                 state = str(value.get("state", "unknown")).lower()
-                target = dependency_states if name in DEPENDENCY_UNITS else serving_states
+                is_dependency = name in DEPENDENCY_UNITS
+                target = dependency_states if is_dependency else serving_states
                 target.append(state)
+                # `non_up_secs` is stamped by UnitStateCache: how long this unit
+                # has been continuously not-`up`. None means the cache has no
+                # dwell evidence, which must never invent an escalation.
+                if is_dependency and state != "up":
+                    dwell = value.get("non_up_secs")
+                    if isinstance(dwell, (int, float)) and dwell >= DEPENDENCY_DWELL_LIMIT_SECS:
+                        dependency_stuck = True
     nested_api_state = _nested_api_state(probe_results)
     if nested_api_state is not None:
         dependency_states.append(nested_api_state)
@@ -250,10 +274,19 @@ def aggregate_state(probe_results: dict, units: dict,
         return "unknown"
     if any(state == "unknown" for state in states):
         return "unknown"
-    if any(state in _DOWNISH for state in dependency_states):
-        return "degraded"
+    if dependency_stuck:
+        # Past the dwell bound this is not a flap. Suppressing it forever meant
+        # a dead fill/order/journal daemon read as edge-green. R-382.
+        return "down"
+    # The serving-path verdict is decided BEFORE the dependency suppression: a
+    # failed sidecar must never make a serving-path signal invisible. Ordered
+    # the other way, `systemctl reload radon-nextjs` wedging in ExecReload was
+    # silent whenever radon-newsfeed happened to be failed at the same moment,
+    # and pageable when it was not. R-398.
     if any(state == "starting" for state in serving_states):
         return "starting"
+    if any(state in _DOWNISH for state in dependency_states):
+        return "degraded"
     if any(state == "starting" for state in dependency_states):
         # Sidecar Restart=always spends the flap in activating. Collapsing
         # the aggregate to "starting" made the off-box probe write

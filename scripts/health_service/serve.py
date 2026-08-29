@@ -141,6 +141,12 @@ class UnitStateCache:
         self._lock = threading.Lock()
         self._value: dict = {}
         self._updated = None
+        # unit -> monotonic-ish wall clock when it was first seen not-`up`.
+        # `aggregate_state` needs a DWELL, not a snapshot: without one a unit
+        # that died two seconds ago and one failed for a week were the same
+        # input, and the dependency suppression made the second edge-green
+        # forever. R-382.
+        self._non_up_since: dict = {}
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._loop, name="unit-state-cache", daemon=True)
 
@@ -167,9 +173,20 @@ class UnitStateCache:
             parsed = probes.parse_unit_states(out.stdout)
             if out.returncode != 0 or set(parsed) != set(self._units):
                 return
+            now = time.time()
+            for uid, props in parsed.items():
+                if props.get("state") == "up":
+                    self._non_up_since.pop(uid, None)
+                    props["non_up_secs"] = None
+                else:
+                    since = self._non_up_since.setdefault(uid, now)
+                    props["non_up_secs"] = round(now - since, 1)
+            for uid in list(self._non_up_since):
+                if uid not in parsed:
+                    self._non_up_since.pop(uid, None)
             with self._lock:
                 self._value = parsed
-                self._updated = time.time()
+                self._updated = now
         except Exception:
             pass  # keep last value; age reflects staleness
 
