@@ -134,7 +134,8 @@ STATUS_SCHEMA_VERSION = 2
 # aggregate_down; these units already have their own on-box alarms.
 # ib-gateway: broker dependency (2026-08-09 weekend clean-exit false P1).
 # newsfeed / monitor: sidecars — Restart=always flaps briefly read as unit
-# "down" and were paging edge-unhealthy (2026-08-29 page 0b7726f8).
+# "down" or "starting" and were paging edge-unhealthy (2026-08-29 pages
+# 0b7726f8 / 344f0592).
 DEPENDENCY_PROBES = frozenset({"ib-gateway"})
 DEPENDENCY_UNITS = frozenset({
     "radon-ib-gateway.service",
@@ -251,8 +252,13 @@ def aggregate_state(probe_results: dict, units: dict,
         return "unknown"
     if any(state in _DOWNISH for state in dependency_states):
         return "degraded"
-    if any(state == "starting" for state in states):
+    if any(state == "starting" for state in serving_states):
         return "starting"
+    if any(state == "starting" for state in dependency_states):
+        # Sidecar Restart=always spends the flap in activating. Collapsing
+        # the aggregate to "starting" made the off-box probe write
+        # aggregate_down (page 344f0592) while api/relay/nextjs stayed up.
+        return "degraded"
     if all(state in {"up", "ok", "healthy"} for state in states):
         return "up"
     return "unknown"

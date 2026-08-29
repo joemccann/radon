@@ -710,6 +710,22 @@ Incident: 2026-08-15 00:24Z, P1 page `34ab3e3c…`.
   `test_newsfeed_only_unit_down_degrades_instead_of_down`,
   `test_monitor_only_unit_down_degrades_instead_of_down`,
   `test_newsfeed_unit_down_payload_keeps_edge_ok`.
+- **Sidecar activating → false aggregate_down (2026-08-29, page
+  `344f0592`):** same newsfeed Restart=always storm (NRestarts=105,
+  InactiveEnter 06:49:29Z) but sampled in `activating` ("starting"),
+  not `down`. 35071d85 only reclassified sidecar *down*; the starting
+  check still scanned every unit, so the aggregate stayed `starting`
+  and the off-box probe mapped that to `aggregate_down` while
+  api/relay/nextjs and the public edge (`/edge-health/ping` 200,
+  `/sign-in` 200) stayed up. Sidecar-only starting is now `degraded`
+  (same as sidecar down). Serving-path starting stays `starting`.
+  Local watchdog recovery from a stale off-box `aggregate_down` now
+  accepts schema-v2 `degraded` as well as `up`. Regression:
+  `test_newsfeed_only_unit_starting_degrades_instead_of_starting`,
+  `test_monitor_only_unit_starting_degrades_instead_of_starting`,
+  `test_nextjs_unit_starting_stays_starting`,
+  `test_newsfeed_unit_starting_payload_keeps_edge_ok`,
+  `test_local_degraded_aggregate_clears_fresh_aggregate_down`.
 
 ---
 

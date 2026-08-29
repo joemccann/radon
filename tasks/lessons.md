@@ -1,5 +1,14 @@
 # Lessons
 
+## 2026-08-29 — Sidecar Restart=always is activating, not just down
+
+- Page `0b7726f8` moved newsfeed/monitor `down` onto DEPENDENCY_UNITS.
+- Page `344f0592` sampled the same storm in `activating`. The starting
+  check still scanned every unit, so overall_state stayed `starting` and
+  the off-box probe wrote `aggregate_down` while ping and `/sign-in` were 200.
+- Classify sidecar `starting` like sidecar `down`: degraded, not an edge
+  outage. Serving-path starting stays `starting`.
+
 ## 2026-08-27 — Ticket max gain is the limit fill, not mid minus spread
 
 - CBRS 40× short $182.5 put, limit $4: TOTAL $16,000 CR, MAX GAIN $12,248.

@@ -30,7 +30,10 @@ beforeAll(() => {
   }
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  vi.useRealTimers();
+  cleanup();
+});
 
 // ── Shared mock account summary ──────────────────────────────────────────────
 
@@ -160,6 +163,10 @@ describe("AccountMetricModal — rendered copy", () => {
   });
 
   test("DAY MOVE card", () => {
+    // Pin to a US session: on weekends the card is MARKET CLOSED and not
+    // clickable, which failed shard 7 on 35071d85 (Saturday 2026-08-29).
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-21T18:30:00Z")); // Fri 14:30 ET
     const { title, formula } = openCard("Day Move");
     expect(title).toBe("Day Move: Intraday P&L");
     expect(formula).toBe(

@@ -425,6 +425,101 @@ class TestStatusResponse:
         assert body["overall_state"] == "degraded"
         assert body["ok"] is False
 
+    def test_newsfeed_only_unit_starting_degrades_instead_of_starting(self):
+        # 2026-08-29 page 344f0592: Restart=always spends the flap in
+        # activating ("starting"), not failed/down. 35071d85 moved down onto
+        # DEPENDENCY_UNITS but the starting check still scanned every unit, so
+        # overall_state stayed "starting" and the off-box probe mapped that to
+        # aggregate_down while api/relay/nextjs stayed up.
+        body = probes.build_status(
+            {
+                "radon-api": {
+                    "state": "up",
+                    "payload": {
+                        "service_state": "reachable",
+                        "auth_state": "authenticated",
+                        "upstream_dead": False,
+                        "port_listening": True,
+                    },
+                },
+                "radon-relay": {"state": "up"},
+                "radon-nextjs": {"state": "up"},
+                "ib-gateway": {"state": "up"},
+            },
+            {
+                "radon-api.service": {"state": "up"},
+                "radon-relay.service": {"state": "up"},
+                "radon-monitor.service": {"state": "up"},
+                "radon-nextjs.service": {"state": "up"},
+                "radon-ib-gateway.service": {"state": "up"},
+                "radon-newsfeed.service": {"state": "starting"},
+            },
+            "t",
+            units_age_secs=0,
+        )
+        assert body["overall_state"] == "degraded"
+        assert body["ok"] is False
+
+    def test_monitor_only_unit_starting_degrades_instead_of_starting(self):
+        body = probes.build_status(
+            {
+                "radon-api": {
+                    "state": "up",
+                    "payload": {
+                        "service_state": "reachable",
+                        "auth_state": "authenticated",
+                        "upstream_dead": False,
+                        "port_listening": True,
+                    },
+                },
+                "radon-relay": {"state": "up"},
+                "radon-nextjs": {"state": "up"},
+                "ib-gateway": {"state": "up"},
+            },
+            {
+                "radon-api.service": {"state": "up"},
+                "radon-relay.service": {"state": "up"},
+                "radon-monitor.service": {"state": "starting"},
+                "radon-nextjs.service": {"state": "up"},
+                "radon-ib-gateway.service": {"state": "up"},
+                "radon-newsfeed.service": {"state": "up"},
+            },
+            "t",
+            units_age_secs=0,
+        )
+        assert body["overall_state"] == "degraded"
+        assert body["ok"] is False
+
+    def test_nextjs_unit_starting_stays_starting(self):
+        body = probes.build_status(
+            {
+                "radon-api": {
+                    "state": "up",
+                    "payload": {
+                        "service_state": "reachable",
+                        "auth_state": "authenticated",
+                        "upstream_dead": False,
+                        "port_listening": True,
+                    },
+                },
+                "radon-relay": {"state": "up"},
+                "radon-nextjs": {"state": "up"},
+                "ib-gateway": {"state": "up"},
+            },
+            {
+                "radon-api.service": {"state": "up"},
+                "radon-relay.service": {"state": "up"},
+                "radon-monitor.service": {"state": "up"},
+                "radon-nextjs.service": {"state": "starting"},
+                "radon-ib-gateway.service": {"state": "up"},
+                "radon-newsfeed.service": {"state": "up"},
+            },
+            "t",
+            units_age_secs=0,
+        )
+        assert body["overall_state"] == "starting"
+        assert body["ok"] is False
+
     def test_stale_cached_unit_down_does_not_override_healthy_live_probes(self):
         body = probes.build_status(
             {"radon-relay": {"state": "up"}},
