@@ -18,6 +18,7 @@
 
 import { chat, type LlmMessage, type LlmToolCall, type LlmUsage } from "@/lib/llm/provider";
 import {
+  createAssistantTurnBudget,
   executeTool,
   isDestructiveTool,
   isKnowledgeTool,
@@ -242,6 +243,7 @@ export async function runAssistantLoop(
   if (!principal?.userId) throw new Error("Verified assistant principal required");
   const messages: LoopMessage[] = turns.map((turn) => ({ role: turn.role, content: turn.content }));
   const toolEvents: ToolEvent[] = [];
+  const spawnBudget = createAssistantTurnBudget();
   const priorResults = new Map<string, string>();
   const usage: LlmUsage = { inputTokens: 0, outputTokens: 0 };
   let model = "unknown";
@@ -337,7 +339,7 @@ export async function runAssistantLoop(
         });
         continue;
       }
-      const result = await executeTool(call.name, call.input, principal);
+      const result = await executeTool(call.name, call.input, principal, spawnBudget);
       let content = stringifyToolResult(result);
       if (result.ok && isKnowledgeTool(call.name)) {
         try {
