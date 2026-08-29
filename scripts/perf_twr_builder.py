@@ -794,18 +794,6 @@ def resolve_flows(
     if not token or not query_id:
         return FlowSet.failed("flex_not_configured"), []
 
-    if document is not None and document.query_id != query_id:
-        # ONE Flex SendRequest per run, whatever IB_FLEX_FLOWS_QUERY_ID says.
-        # The NAV statement is the Activity query, so it already carries
-        # CashTransactions + Transfers; a second request against a token that
-        # has spent its attempt is what escalates a 1001 into a 1025. T-258.
-        print(
-            f"[perf_twr] Flex flows query {query_id} ignored: statement "
-            f"{document.query_id} was already requested this run (one Flex "
-            "request per run)",
-            file=_sys.stderr,
-        )
-        query_id = document.query_id
     already_attempted = document is not None and document.query_id == query_id
     if already_attempted and document.xml is None:
         reason = document.error or "nav_fetch_failed"
