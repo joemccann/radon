@@ -8,13 +8,13 @@
 //     at-zero figure. The desktop builds the same array from
 //     `normalizeComboOrder(legs).legs` so the curve describes ONE combo,
 //     which is what the "RISK · PER 1× COMBO" heading claims.
-// (b) `transmitArmed` gated only the button's `disabled` prop. The desktop
-//     also re-checks it inside the submit handler ("the disabled button is
-//     UI, this is the actual gate"), so a programmatic or races-with-render
-//     submit cannot put unbounded risk on the wire unacknowledged.
-
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+//
+// (b) used to live here as a grep over the handler's source text. It moved to
+//     the behavioural gate tests (`mobile-ticket-transmit-gate` /
+//     `chain-transmit-gate`), which drive the handler and assert the wire: the
+//     production defect CLAUDE.md cites (2026-08-27) had the guard TEXT
+//     present and still shipped, because the handler was memoised without
+//     `transmitArmed` in its deps and closed over a stale `false`.
 
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -192,52 +192,5 @@ describe("mobile ticket payoff is per-1x, like the desktop rail", () => {
     // 10-lot quantity and `* (totalQty || 1)` applied it a second time.
     expect(sentence).toContain(fmt(perCombo));
     expect(sentence).not.toContain(fmt(perCombo * qty));
-  });
-});
-
-// React will not dispatch a click to a button its own props mark disabled,
-// so no rendered interaction can reach `handleSubmit` while `transmitArmed`
-// is false — which is exactly why the check must ALSO exist inside the
-// handler. The desktop rail says so in as many words ("the disabled button is
-// UI, this is the actual gate"). The invariant is therefore structural: the
-// early return exists and precedes the network call.
-describe("both submit handlers re-check the unbounded gate", () => {
-  /** Comment lines are stripped: a comment naming the code satisfies the match. */
-  function sourceOf(rel: string): string {
-    const raw = readFileSync(resolve(__dirname, "..", rel), "utf8");
-    return raw
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      .split("\n")
-      .filter((line) => !line.trim().startsWith("//"))
-      .join("\n");
-  }
-
-  function submitBody(src: string, handler: string): string {
-    const from = src.indexOf(handler);
-    expect(from).toBeGreaterThan(-1);
-    const to = src.indexOf("fetch(", from);
-    expect(to).toBeGreaterThan(from);
-    return src.slice(from, to);
-  }
-
-  it("mobile: handleSubmit early-returns on an unacknowledged unbounded loss", () => {
-    const body = submitBody(sourceOf("components/mobile/MobileOrderTicket.tsx"), "const handleSubmit");
-    expect(body).toMatch(/if\s*\(\s*!transmitArmed\s*\)\s*return/);
-  });
-
-  it("desktop: handlePlace keeps the same early return", () => {
-    const body = submitBody(sourceOf("components/ticker-detail/OptionsChainTab.tsx"), "const handlePlace");
-    expect(body).toMatch(/if\s*\(\s*!transmitArmed\s*\)\s*return/);
-  });
-
-  it("both handlers guard re-entrancy with a ref, not just the state flag", () => {
-    for (const [rel, handler] of [
-      ["components/mobile/MobileOrderTicket.tsx", "const handleSubmit"],
-      ["components/ticker-detail/OptionsChainTab.tsx", "const handlePlace"],
-    ] as const) {
-      const body = submitBody(sourceOf(rel), handler);
-      expect(body).toMatch(/if\s*\(\s*inFlightRef\.current\s*\)\s*return/);
-      expect(body).toMatch(/inFlightRef\.current\s*=\s*true/);
-    }
   });
 });
