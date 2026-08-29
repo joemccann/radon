@@ -118,7 +118,23 @@ class TestGateSaturationIsVisible:
         server = importlib.import_module("api.server")
         emitted: list = []
         monkeypatch.setattr(server, "_write_scan_gate_saturation_row", lambda detail: emitted.append(detail))
-        monkeypatch.setattr(server, "_SCAN_GATE_SATURATION_REPORTED_AT", 0.0, raising=False)
+        monkeypatch.setattr(server, "_SCAN_GATE_SATURATION_REPORTED_AT", None, raising=False)
+        for _ in range(20):
+            server._record_scan_gate_saturation()
+        assert len(emitted) == 1, emitted
+
+    def test_the_first_burst_after_a_reboot_is_still_reported(self, monkeypatch):
+        """`time.monotonic()` counts host UPTIME, so a `0.0` sentinel does not
+        mean "never reported" — it means "reported at boot". On a host less
+        than 300s old the whole first burst was swallowed. Green on any
+        long-lived machine, red on a fresh CI runner."""
+        import importlib
+
+        server = importlib.import_module("api.server")
+        emitted: list = []
+        monkeypatch.setattr(server, "_write_scan_gate_saturation_row", lambda detail: emitted.append(detail))
+        monkeypatch.setattr(server, "_SCAN_GATE_SATURATION_REPORTED_AT", None, raising=False)
+        monkeypatch.setattr(server.time, "monotonic", lambda: 90.0)
         for _ in range(20):
             server._record_scan_gate_saturation()
         assert len(emitted) == 1, emitted
