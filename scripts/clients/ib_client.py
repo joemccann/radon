@@ -702,6 +702,33 @@ class IBClient:
             IBOrderError: If the order placement fails.
         """
         self._require_connection()
+        # LAST funnel. Every caller is expected to check the limits itself and
+        # report the refusal in its own vocabulary, but this is the one place a
+        # new call site cannot go around — a guard that lives only in the caller
+        # is the inversion ib_place_order.py was restructured to avoid. Pure
+        # function over a process-local snapshot (app_preferences contract: no
+        # inline I/O, never raises), so double-checking costs nothing. R-427/R-428.
+        from order_limits import check_order_limits, check_quantity_limit  # noqa: PLC0415
+
+        # A BAG's leg detail (strikes, ratios) is not derivable here — a
+        # `comboLeg` carries a conId, not a strike — and `check_order_limits`
+        # fails CLOSED on a combo whose legs it cannot read. Refusing every
+        # combo at the transport would break legitimate placement, so the funnel
+        # applies the bound it CAN compute (the stricter contract-quantity cap,
+        # which is the fat-finger class) and leaves the leg-ratio and max-loss
+        # branches to the caller, which has the legs. R-427/R-428.
+        sec_type = str(getattr(contract, "secType", "") or "")
+        if sec_type == "BAG":
+            violation = check_quantity_limit(getattr(order, "totalQuantity", 0))
+        else:
+            violation = check_order_limits({
+                "type": "stock" if sec_type == "STK" else "option",
+                "quantity": getattr(order, "totalQuantity", 0),
+                "symbol": getattr(contract, "symbol", ""),
+                "limitPrice": getattr(order, "lmtPrice", None),
+            })
+        if violation:
+            raise IBOrderError(violation["message"])
         try:
             trade = self._ib.placeOrder(contract, order)
             self.logger.info(
