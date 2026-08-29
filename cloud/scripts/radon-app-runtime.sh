@@ -19,6 +19,8 @@ if [[ "${RADON_APP_RUNTIME_TEST_MODE:-0}" == "1" ]]; then
   MEDIA_DIR="${RADON_TEST_MEDIA_DIR:?test media dir is required}"
   STATE_DIR="${RADON_TEST_STATE_DIR:?test state dir is required}"
   LEASE_DIR="${STATE_DIR}/ib-lease"
+  PYTHON="${RADON_TEST_PYTHON:-$(command -v python3)}"
+  NOTIFY_PROXY_DIR="${RADON_TEST_NOTIFY_PROXY_DIR:-${STATE_DIR}/notify}"
 else
   if (( EUID != 0 )); then
     echo "radon-app-runtime must run as root" >&2
@@ -31,10 +33,12 @@ else
   MEDIA_DIR=/var/lib/radon/media
   STATE_DIR=/var/lib/radon
   LEASE_DIR=/var/lib/radon/ib-lease
+  PYTHON=/usr/bin/python3
+  NOTIFY_PROXY_DIR=/run/radon-app-runtime
 fi
 
 usage() {
-  echo "usage: radon-app-runtime {pull|run <unit>|stop <unit>}" >&2
+  echo "usage: radon-app-runtime {pull|run <unit>|stop <unit>|notify-proxy <listen> <upstream>}" >&2
   exit 64
 }
 
@@ -143,9 +147,73 @@ cmd_stop() {
   "$DOCKER" rm -f "$unit" >/dev/null 2>&1 || true
 }
 
+
+# systemd accepts sd_notify datagrams only from PIDs inside the unit's cgroup.
+# The container's PIDs live in system.slice/docker-<id>.scope (see the
+# --cgroup-parent note in cmd_run), so a READY=1 sent from inside the
+# container straight to $NOTIFY_SOCKET is silently dropped even with
+# NotifyAccess=all: under Type=notify the relay hit "start operation timed
+# out" twice on 2026-08-29 and the drop-in was hot-patched to Type=simple,
+# which then failed every deploy's control-plane preflight. This forwarder
+# is a child of the ExecStart process, so it IS in the cgroup. It owns the
+# socket the container sees and relays every datagram to systemd. R-429.
+cmd_notify_proxy() {
+  local listen="${1:-}" upstream="${2:-}"
+  [[ -n "$listen" && -n "$upstream" ]] || usage
+  exec "$PYTHON" - "$listen" "$upstream" <<'PY'
+import os, socket, sys
+listen, upstream = sys.argv[1], sys.argv[2]
+try:
+    os.unlink(listen)
+except FileNotFoundError:
+    pass
+inbound = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+inbound.bind(listen)
+os.chmod(listen, 0o666)
+outbound = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+# Exit with the ExecStart process (the docker client, which exec'd over the
+# bash parent), so a stopped unit never leaves a forwarder holding fds.
+parent = os.getppid()
+inbound.settimeout(0.25)
+while True:
+    try:
+        data = inbound.recv(65536)
+    except TimeoutError:
+        if os.getppid() != parent:
+            raise SystemExit(0)
+        continue
+    if not data:
+        continue
+    try:
+        outbound.sendto(data, upstream)
+    except OSError as exc:
+        print(f"notify proxy: forward failed: {exc}", file=sys.stderr)
+PY
+}
+
+# Starts the forwarder for one unit and prints the socket path the container
+# must use as NOTIFY_SOCKET. Refuses to launch the container if the socket
+# never appears: without it a Type=notify unit can only time out.
+start_notify_proxy() {
+  local unit="$1" upstream="$2" listen attempt
+  listen="${NOTIFY_PROXY_DIR}/${unit}.sock"
+  mkdir -p -m 0755 "$NOTIFY_PROXY_DIR" || {
+    echo "radon-app-runtime: notify proxy dir is unavailable: ${NOTIFY_PROXY_DIR}" >&2
+    return 71
+  }
+  rm -f "$listen"
+  "$0" notify-proxy "$listen" "$upstream" &
+  for attempt in $(seq 1 50); do
+    [[ -S "$listen" ]] && { printf '%s\n' "$listen"; return 0; }
+    sleep 0.1
+  done
+  echo "radon-app-runtime: notify proxy for ${unit} did not bind ${listen}" >&2
+  return 71
+}
+
 cmd_run() {
   local unit="${1:-}"
-  local ids image workdir
+  local ids image workdir notify_socket
   [[ -n "$unit" ]] || usage
   refuse_host_plane "$unit"
   is_app_unit "$unit" || {
@@ -210,8 +278,9 @@ cmd_run() {
     -v "${LEASE_DIR}:/var/lib/radon/ib-lease"
 
   if [[ -n "${NOTIFY_SOCKET:-}" && "${NOTIFY_SOCKET}" == /* ]]; then
-    set -- "$@" --env NOTIFY_SOCKET --env WATCHDOG_USEC \
-      --mount "type=bind,src=${NOTIFY_SOCKET},dst=${NOTIFY_SOCKET}"
+    notify_socket="$(start_notify_proxy "$unit" "$NOTIFY_SOCKET")" || exit $?
+    set -- "$@" --env "NOTIFY_SOCKET=${notify_socket}" --env WATCHDOG_USEC \
+      --mount "type=bind,src=${notify_socket},dst=${notify_socket}"
   fi
   if [[ "$unit" == "radon-newsfeed.service" ]]; then
     # Page 3e952746: the image ENV is PLAYWRIGHT_BROWSERS_PATH=/ms-playwright,
@@ -280,6 +349,10 @@ case "$1" in
   run)
     [[ $# -eq 2 ]] || usage
     cmd_run "$2"
+    ;;
+  notify-proxy)
+    [[ $# -eq 3 ]] || usage
+    cmd_notify_proxy "$2" "$3"
     ;;
   *)
     usage
