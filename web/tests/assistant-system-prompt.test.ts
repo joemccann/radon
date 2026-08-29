@@ -51,6 +51,9 @@ describe("assistant system prompt", () => {
     expect(SYSTEM_PROMPT).toContain("get_quote");
     expect(SYSTEM_PROMPT).toContain("rank_spreads");
     expect(SYSTEM_PROMPT).toContain("run_evaluate");
+    expect(SYSTEM_PROMPT).toContain("list_apis");
+    expect(SYSTEM_PROMPT).toContain("call_api");
+    expect(SYSTEM_PROMPT).toContain("/api/watchlist");
     expect(SYSTEM_PROMPT).toContain("Never invent a spot price");
     // No em dashes in user-facing-adjacent copy.
     expect(SYSTEM_PROMPT).not.toContain("—");
