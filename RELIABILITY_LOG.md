@@ -385,3 +385,53 @@ Backlog: `RELIABILITY_AUDIT.md` §Delta audit 2026-08-28 §Backlog. Order: P0, t
   claims the error heartbeat it does not write. The pattern "heartbeat the constructor, leave the
   body bare" is now three-for-three, so the remediation should sweep every registered producer for
   it rather than fixing the named file. Carried by REL-117.
+- **NF triage 2026-08-29 (delta audit):** NF-1 (Gate-3 bankroll-% cap) still open and unchanged;
+  this range's order-path defects are a wrong-contract deep link (R-378) and two guard-coverage
+  gaps the standing sweep found (R-427, R-428), not sizing. NF-2 (unpaginated journal reads /
+  R-319's keyset cursor) unchanged — re-confirmed at HEAD by walking the id namespaces actually
+  written (`0000e0d5.1a2b3c4d.01.01` API execIds, `885511223` Flex numerics, `2026-08-07#12` and
+  `SLV_2026-08-07...` date-prefixed forms) against `journal_basis.py:211-262`'s BINARY-collation
+  `trade_id > ?` cursor; still carried by REL-108, not re-filed. NF-3 (relay stale-feed does not
+  gate the order UI) still open; the adjacent surface got worse rather than better, in that R-378
+  arms the order builder from a scanner deep link with no staleness gate at all and R-415 renders
+  the LEAP scan age as a bare clock directly beside that link. NF-4 (aggregated Flex buckets vs 1:1
+  fingerprints) is **materially worse and is again the week's money-path theme**: REL-115's
+  `flex_deliveries` fingerprint is now real and load-bearing, but it is claimed before any writer
+  runs and never released, so the twice-daily sFTP retry re-offers the same bytes forever and a
+  half-written `cash_flows` reports `duplicate`/`ok` (R-379), while the remote `outgoing` directory
+  is never cleaned so the missed-delivery detector is unreachable (R-389) and a `<Transfer>` sharing
+  a `transactionID` with a `<CashTransaction>` is double-booked (R-390). Carried by REL-132, REL-146
+  and REL-147. NF-5 (UW budget non-atomic archive + unbounded LOCK_EX) unchanged. NF-6 (retry
+  classifiers) unchanged in this range. NF-7 (partial close on expiry day) unchanged. **NF-8
+  (standing-sweep scope) is re-opened for the THIRD consecutive week as R-412.** REL-088 closed it,
+  R-277 re-opened it, REL-103(c) closed it, R-325 re-opened it, REL-114 closed it by widening
+  `_names_in` and adding `EXEMPT_UNITS` — and the count genuinely improved from 25-of-54 to
+  16-of-55. But the mechanism REL-114 added to stop the recurrence is a free-text reason field whose
+  only assertion is that it starts with `parser:` or `gap:`, and eight of the ten `gap:` entries are
+  false: `_HEALTH_CALLS` omits `write_service_health`, the bounded-stdlib writer every
+  `cloud/scripts` job uses, and `_names_in` reads the call's first argument, which for that writer is
+  a state literal. `test_every_exempt_unit_still_lacks_a_resolvable_name` then guarantees the parser
+  can never dislodge the false text. Carried by REL-141. The lesson stands and sharpens: when a fix
+  ships as "a test now enforces this", audit the test's SCOPE **and the truth of any free text it
+  introduces**, in the lead context, against the code.
+- **NF-9 (health rows that never appear) — four-for-four.** Filed against `ib_reconcile.main()` and
+  `fetch_vixcor.run()`, then `fetch_vixts.py`; this week `flex_sftp_pull.run()` (R-400) ships with
+  the identical shape in a job the SAME delta added to both watchdog catalogs — a narrow `except`
+  covering only `validate_ssh_config` + `list_remote_gpg`, with the whole fetch/decrypt/ingest body
+  and both filesystem helpers outside every handler. A Turso failure during `ingest_xml` exits the
+  unit non-zero with no row, and the 26h/4d windows added alongside it keep `flex-pull` green until
+  Tuesday. REL-140(c) carries it, and the remediation should sweep every registered producer for the
+  shape rather than fixing the named file.
+- **NF-10 (new, from the 2026-08-29 audit): a suppression added to stop a false page needs a dwell
+  bound, an ordering rule, and a scope test — this range shipped five and four are unbounded.**
+  `probes.py`'s dependency partitioning has no timestamp anywhere, so `degraded` is a pure snapshot
+  verdict and a permanently dead `radon-monitor` — the fill/order/journal daemon — is edge-green
+  forever (R-382); `unit_coarse_state` accepts `sub_state` and never reads it, so a crash loop and a
+  normal start are the same input (R-397); the dependency branch is ordered ahead of the serving
+  branch, so a sidecar failure swallows a serving-path signal (R-398); `degraded` is accepted as
+  recovery evidence for an off-box `aggregate_down` with no freshness gate on the local payload
+  (R-399); and `data_refresh`'s soft-fail heartbeat writes a `next_attempt_at` that two independent
+  consumers read as a circuit-breaker embargo, so a permanently-failing cri-scan pages exactly once
+  (R-395). The class is not specific to these five files and is worth a standing sweep of its own:
+  every mechanism that converts a failure into a non-page must answer "for how long?" and "what
+  else does it swallow?". Carried by REL-135, REL-139 and REL-140.
