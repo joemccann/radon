@@ -98,17 +98,36 @@ export function resolveCriDisplay(
 
 /**
  * Widest gap (calendar days) tolerated between the session a day change is
- * anchored to and the newest daily close the cached payload actually carries.
- * Covers a holiday-extended weekend; beyond that the scan is too old to price
- * today's move against and the baseline is withheld instead of invented.
+ * anchored to and the newest daily close the cached payload carries. Only ever
+ * reached when no WEEKDAY was skipped, so it bounds a holiday-extended weekend
+ * and nothing else.
  */
-const MAX_PREVIOUS_CLOSE_GAP_DAYS = 7;
+const MAX_PREVIOUS_CLOSE_GAP_DAYS = 4;
 
 function calendarDaysBetween(from: string, to: string): number {
   const start = Date.parse(`${from}T00:00:00Z`);
   const end = Date.parse(`${to}T00:00:00Z`);
   if (!Number.isFinite(start) || !Number.isFinite(end)) return Number.POSITIVE_INFINITY;
   return Math.abs(end - start) / 86_400_000;
+}
+
+/**
+ * Weekdays strictly between two dates. This is what separates a HOLIDAY from a
+ * DEAD SCAN, and a pure calendar bound cannot: a 3-day gap is Fri->Mon over
+ * Labor Day (no weekday skipped) and equally Mon->Thu after the CRI timer died
+ * for two sessions (Tue and Wed skipped). The 7-day bound accepted both, so a
+ * 4-session-old close was rendered as today's move with no stale marker. R-403.
+ */
+function skippedWeekdaysBetween(from: string, to: string): number {
+  const start = Date.parse(`${from}T00:00:00Z`);
+  const end = Date.parse(`${to}T00:00:00Z`);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return Number.POSITIVE_INFINITY;
+  let skipped = 0;
+  for (let ms = start + 86_400_000; ms < end; ms += 86_400_000) {
+    const weekday = new Date(ms).getUTCDay();
+    if (weekday !== 0 && weekday !== 6) skipped += 1;
+  }
+  return skipped;
 }
 
 /**
@@ -137,7 +156,12 @@ export function resolvePreviousSessionClose(
     const entry = history[index];
     const date = entry?.date;
     if (typeof date !== "string" || date > sessionDate) continue;
-    if (calendarDaysBetween(date, sessionDate) > MAX_PREVIOUS_CLOSE_GAP_DAYS) return null;
+    // The anchor must BE the session, or be separated from it only by days on
+    // which no session could have happened. R-403.
+    if (date !== sessionDate) {
+      if (skippedWeekdaysBetween(date, sessionDate) > 0) return null;
+      if (calendarDaysBetween(date, sessionDate) > MAX_PREVIOUS_CLOSE_GAP_DAYS) return null;
+    }
     const close = entry[series];
     return typeof close === "number" && Number.isFinite(close) && close > 0 ? close : null;
   }
@@ -155,17 +179,19 @@ export function resolveRegimeStripLiveState({
   const liveSpy = marketOpen ? prices.SPY?.last ?? null : null;
   const liveCor1m = marketOpen ? prices.COR1M?.last ?? null : null;
 
-  // The relay's tick-9 close is the fallback ONLY when the payload carries no
-  // daily history to anchor against. Once history exists it is authoritative:
-  // a history that cannot reach `sessionDate` means the cached scan is too old
-  // to price today's move, and no baseline beats a wrong one.
-  const previousClose = (series: "vix" | "vvix" | "spy", relayClose: number | null | undefined) =>
-    data?.history?.length
-      ? resolvePreviousSessionClose(data.history, series, sessionDate)
-      : relayClose ?? null;
-  const vixClose = previousClose("vix", prices.VIX?.close);
-  const vvixClose = previousClose("vvix", prices.VVIX?.close);
-  const spyClose = previousClose("spy", prices.SPY?.close);
+  // There is no relay fallback. `prices.*.close` is IB's tick-9 close cached in
+  // the relay's memory for the life of the process, which the docblock above
+  // already says can be sessions behind — and the guard was
+  // `data?.history?.length`, so the fallback fired exactly when history was
+  // EMPTY, which IS the degraded case: the regime route sets `history: []` on
+  // any upstream failure, `missing: true` or EMPTY_CRI. The one state where the
+  // data is least trustworthy was the one that drew a signed, coloured day
+  // change with no stale marker. An absent baseline renders absent. R-404.
+  const previousClose = (series: "vix" | "vvix" | "spy") =>
+    resolvePreviousSessionClose(data?.history, series, sessionDate);
+  const vixClose = previousClose("vix");
+  const vvixClose = previousClose("vvix");
+  const spyClose = previousClose("spy");
 
   const vixValue = liveVix ?? data?.vix ?? null;
   const vvixValue = liveVvix ?? data?.vvix ?? null;
