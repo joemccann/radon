@@ -191,9 +191,12 @@ while True:
 PY
 }
 
-# Starts the forwarder for one unit and prints the socket path the container
-# must use as NOTIFY_SOCKET. Refuses to launch the container if the socket
-# never appears: without it a Type=notify unit can only time out.
+# Starts the forwarder for one unit and sets NOTIFY_PROXY_SOCKET to the path
+# the container must use as NOTIFY_SOCKET. Refuses to launch the container if
+# the socket never appears: without it a Type=notify unit can only time out.
+# Must run in THIS shell, never in a $(...) substitution: the forwarder exits
+# when its parent changes, and a subshell parent is gone the moment it
+# returns, which left a dead socket behind on the first live probe.
 start_notify_proxy() {
   local unit="$1" upstream="$2" listen attempt
   listen="${NOTIFY_PROXY_DIR}/${unit}.sock"
@@ -204,7 +207,7 @@ start_notify_proxy() {
   rm -f "$listen"
   "$0" notify-proxy "$listen" "$upstream" &
   for attempt in $(seq 1 50); do
-    [[ -S "$listen" ]] && { printf '%s\n' "$listen"; return 0; }
+    [[ -S "$listen" ]] && { NOTIFY_PROXY_SOCKET="$listen"; return 0; }
     sleep 0.1
   done
   echo "radon-app-runtime: notify proxy for ${unit} did not bind ${listen}" >&2
@@ -213,7 +216,7 @@ start_notify_proxy() {
 
 cmd_run() {
   local unit="${1:-}"
-  local ids image workdir notify_socket
+  local ids image workdir
   [[ -n "$unit" ]] || usage
   refuse_host_plane "$unit"
   is_app_unit "$unit" || {
@@ -278,9 +281,9 @@ cmd_run() {
     -v "${LEASE_DIR}:/var/lib/radon/ib-lease"
 
   if [[ -n "${NOTIFY_SOCKET:-}" && "${NOTIFY_SOCKET}" == /* ]]; then
-    notify_socket="$(start_notify_proxy "$unit" "$NOTIFY_SOCKET")" || exit $?
-    set -- "$@" --env "NOTIFY_SOCKET=${notify_socket}" --env WATCHDOG_USEC \
-      --mount "type=bind,src=${notify_socket},dst=${notify_socket}"
+    start_notify_proxy "$unit" "$NOTIFY_SOCKET" || exit $?
+    set -- "$@" --env "NOTIFY_SOCKET=${NOTIFY_PROXY_SOCKET}" --env WATCHDOG_USEC \
+      --mount "type=bind,src=${NOTIFY_PROXY_SOCKET},dst=${NOTIFY_PROXY_SOCKET}"
   fi
   if [[ "$unit" == "radon-newsfeed.service" ]]; then
     # Page 3e952746: the image ENV is PLAYWRIGHT_BROWSERS_PATH=/ms-playwright,
