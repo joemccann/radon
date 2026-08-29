@@ -44,9 +44,9 @@ usage() {
 
 # Tag used when the pinned SHA was never pushed. app-images.yml sets
 # cancel-in-progress, so a second push to main inside the 60-minute build
-# budget cancels the first build and SHA1's `Push SHA tags to GHCR` step never
-# runs — while ci.yml's deploy deliberately does not wait on app-images, so
-# SHA1 still deploys. Without a fallback all five app units docker-run a
+# budget cancels the first build and SHA1's GHCR push steps never run while
+# ci.yml's deploy deliberately does not wait on app-images, so SHA1 still
+# deploys. Without a fallback all five app units docker-run a
 # `manifest unknown` at once. R-234.
 RADON_APP_IMAGE_FALLBACK_TAG="${RADON_APP_IMAGE_FALLBACK_TAG:-latest}"
 
