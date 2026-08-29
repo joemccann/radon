@@ -303,7 +303,8 @@ describe("SERVICE_FRESHNESS_WINDOWS — category field", () => {
     ["discover", "scheduled"],
     ["flow-analysis", "scheduled"],
     ["analyst-ratings", "on-demand"],
-    ["gex-scan", "on-demand"],
+    // R-422: data_refresh's 15-minute RTH driver runs it, so it is scheduled.
+    ["gex-scan", "scheduled"],
     // cta-sync is scheduled by radon-cta-sync.timer on Hetzner — flipped
     // from on-demand when the autonomous timer landed.
     ["cta-sync", "scheduled"],

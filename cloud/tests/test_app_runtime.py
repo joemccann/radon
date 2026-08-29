@@ -296,12 +296,20 @@ def test_run_api_binds_all_interfaces_with_proxy_headers(tmp_path: Path) -> None
     assert "127.0.0.1" in log  # forwarded-allow-ips
 
 
-def test_run_binds_var_lib_radon_state(tmp_path: Path) -> None:
+def test_run_binds_only_the_narrow_state_subdirectories(tmp_path: Path) -> None:
+    """R-381: media and the 2FA lease, never /var/lib/radon itself.
+
+    This case used to REQUIRE the whole-directory bind. Write permission on that
+    parent is all an unlink/rename needs, and it holds control-plane-ready, the
+    manifest digest and the root deploy transaction journal. The half that still
+    matters -- the app can reach the media and lease directories -- is kept.
+    """
     result = _run(tmp_path, ["run", "radon-api.service"])
     assert result.returncode == 0, result.stderr
     log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
-    assert re.search(r"-v \S+:/var/lib/radon(?:\s|$)", log), log
+    assert not re.search(r"-v \S+:/var/lib/radon(?:\s|$)", log), log
     assert ":/var/lib/radon/media" in log
+    assert ":/var/lib/radon/ib-lease" in log
 
 
 def test_run_newsfeed_mounts_host_playwright_browsers(tmp_path: Path) -> None:

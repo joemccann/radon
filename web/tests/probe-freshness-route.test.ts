@@ -103,7 +103,10 @@ describe("/api/probe/freshness", () => {
     expect(body.generated_at).toBe(iso(OPEN_NOW));
     expect(body.checks.relay_tick).toEqual({ applicable: true, age_secs: 10, fresh: true });
     expect(body.checks.vcg_scan).toEqual({ applicable: true, age_secs: 300, fresh: true });
-    expect(body.checks.gex_scan).toEqual({ applicable: false, age_secs: null, fresh: null });
+    // Scheduled since R-422: the 15-minute RTH driver runs it, so a fresh scan
+    // time now participates in all_fresh instead of being null-skipped.
+    expect(body.checks.gex_scan.applicable).toBe(true);
+    expect(body.checks.gex_scan.fresh).toBe(true);
     expect(body.checks.journal).toEqual({ applicable: true, age_secs: 3600, fresh: true });
     expect(body.all_fresh).toBe(true);
     expect(body.database_ok).toBe(true);

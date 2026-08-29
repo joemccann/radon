@@ -3173,6 +3173,52 @@ SCAN_GATES: dict[str, ScanGate] = {
 # growing the map or displacing a live backoff. T-230.
 MAX_SUBJECT_SCAN_GATES = 256
 
+# ONE definition of the cri_scan child budget, shared by the 15-minute timer
+# driver and the browser's /regime/scan. R-423.
+from data_refresh import CRI_SCAN_TIMEOUT_SECS  # noqa: E402,PLC0415
+
+# Saturation of the subject-gate map is a HOST condition, not a per-request
+# failure: `_evict_idle_scan_gate` cannot evict while every tracked subject is
+# inside the 120s cooldown, so it is sticky, and the only externally visible
+# artifact was a 429 whose detail read "backing off after a failure". One record
+# per burst, not one per request. R-424.
+SCAN_GATE_SATURATION_REPORT_INTERVAL_S = 300.0
+_SCAN_GATE_SATURATION_REPORTED_AT = 0.0
+
+
+def _scan_gate_overflow_detail() -> str:
+    return (
+        f"scan-gate map saturated: all {MAX_SUBJECT_SCAN_GATES} tracked subjects "
+        "are cooling down or backing off, so a novel subject is refused rather "
+        "than spawning a subprocess storm"
+    )
+
+
+def _write_scan_gate_saturation_row(detail: str) -> None:
+    """DELIBERATELY log-only. R-424 asked for a `service_health` row as well.
+
+    There is no honest name to write it under: `radon-api` is a UNIT, not a
+    health name, and `check.py` only ever reads names in `SCHEDULED_SERVICES` —
+    while `test_python_does_not_track_non_scheduled_services` requires every
+    entry there to be `category: "scheduled"` in the web catalog, i.e. to have a
+    CADENCE. Saturation has none: an absent row is the normal state, so a
+    scheduled key for it would age to stale and page forever. The durable trace
+    is this WARNING plus the 429 detail the caller actually sees; closing the
+    row half needs an error-only catalog category, which does not exist yet.
+    """
+    logger.warning("%s", detail)
+
+
+def _record_scan_gate_saturation() -> None:
+    global _SCAN_GATE_SATURATION_REPORTED_AT
+
+    detail = _scan_gate_overflow_detail()
+    now = time.monotonic()
+    if now - _SCAN_GATE_SATURATION_REPORTED_AT < SCAN_GATE_SATURATION_REPORT_INTERVAL_S:
+        return
+    _SCAN_GATE_SATURATION_REPORTED_AT = now
+    _write_scan_gate_saturation_row(detail)
+
 _SUBJECT_SCAN_GATES: "OrderedDict[tuple[str, str], ScanGate]" = OrderedDict()
 _OVERFLOW_SCAN_GATE = ScanGate("scan-overflow")
 
@@ -3203,6 +3249,7 @@ def _scan_gate_for(scan: str, subject: str) -> ScanGate:
         # Every tracked subject is already cooling down or backing off, i.e.
         # the host is saturated. Admitting a novel subject here is exactly the
         # subprocess storm the gates exist to stop, so refuse it.
+        _record_scan_gate_saturation()
         _OVERFLOW_SCAN_GATE.mark_failure()
         return _OVERFLOW_SCAN_GATE
     gate = ScanGate(f"{scan}:{key[1]}")
@@ -3232,9 +3279,19 @@ async def _gated_scan(
             if cached is not None:
                 return cached
         if gate.in_backoff():
+            # The overflow gate is SHARED and is marked failed the instant the
+            # map saturates, so "backing off after a failure" named the wrong
+            # cause — the caller's own scan never ran and never failed. A
+            # dashboard widening its ticker list past the cap silently 429'd
+            # every novel ticker with a message that pointed at the scan. R-424.
+            detail = (
+                _scan_gate_overflow_detail()
+                if gate is _OVERFLOW_SCAN_GATE
+                else f"{gate.name} scan backing off after a failure"
+            )
             raise HTTPException(
                 status_code=429,
-                detail=f"{gate.name} scan backing off after a failure",
+                detail=detail,
                 headers=gate.retry_after_header(),
             )
         return None
@@ -3278,7 +3335,11 @@ async def regime_scan():
     return await _gated_scan(
         SCAN_GATES["regime"],
         lambda: _read_cache(DATA_DIR / "cri.json"),
-        lambda: run_script("cri_scan.py", ["--json"], timeout=120),
+        # The SAME budget the timer child gets. At 120 the browser path
+        # SIGKILLed exactly the slow-IB runs (60-103s) the timer budget was
+        # raised to 180 to accommodate, which armed the regime scan gate for
+        # 60s and 502'd the panel. R-423.
+        lambda: run_script("cri_scan.py", ["--json"], timeout=CRI_SCAN_TIMEOUT_SECS),
         _persist,
     )
 

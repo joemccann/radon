@@ -8,6 +8,7 @@ import ScannerTickerSearch from "./ScannerTickerSearch";
 import SectionEmptyState from "./SectionEmptyState";
 import { SigMeter } from "./SigMeter";
 import SortTh from "./SortTh";
+import { SERVICE_FRESHNESS_WINDOWS } from "@/lib/serviceHealthWindows";
 import { useSort } from "@/lib/useSort";
 import { serializeLegsParam } from "@/lib/useChainUrlState";
 import { formatExpiry } from "@/lib/optionsChainUtils";
@@ -57,10 +58,54 @@ function contractLabel(row: LeapResult): string {
   return `${row.ticker.toUpperCase()} ${contract.strike}${contract.right}`;
 }
 
+/** The gap the LINKED contract actually carries, which is what the link arms. */
+function anchorGap(row: LeapResult): number | null {
+  const gap = row.best_leap?.gap;
+  return typeof gap === "number" && Number.isFinite(gap) ? gap : null;
+}
+
+/** Staleness bound for the LEAP scan, derived from the catalog rather than a
+ *  literal: `radon-leap.timer` is the writer and `serviceHealthWindows`
+ *  already states the age at which its row goes stale. R-415. */
+const LEAP_STALE_MS = SERVICE_FRESHNESS_WINDOWS["leap-scan"].open;
+
+function scanAgeMs(lastSync: string | null | undefined): number | null {
+  if (!lastSync) return null;
+  const ts = Date.parse(lastSync);
+  return Number.isFinite(ts) ? Math.max(0, Date.now() - ts) : null;
+}
+
+function isScanStale(lastSync: string | null | undefined): boolean {
+  const age = scanAgeMs(lastSync);
+  // Unknown is not stale: a caller that passes no timestamp at all has told us
+  // nothing, and suppressing on silence would hide the link on every surface
+  // that does not wire the prop. A DATED scan past the window is suppressed.
+  return age != null && age > LEAP_STALE_MS;
+}
+
+function formatScanAge(lastSync: string | null | undefined): string {
+  const age = scanAgeMs(lastSync);
+  if (age == null) return "SCAN AGE UNKNOWN";
+  const minutes = Math.round(age / 60_000);
+  const label =
+    minutes < 60
+      ? `${minutes}m ago`
+      : minutes < 60 * 24
+        ? `${Math.round(minutes / 60)}h ago`
+        : `${Math.round(minutes / (60 * 24))}d ago`;
+  return age > LEAP_STALE_MS ? `${label} · STALE` : label;
+}
+
 function widestMispriced(rows: LeapResult[]): LeapResult | null {
+  // Ranked on the contract's own gap, not the group's `best_gap`: a ticker
+  // whose linked contract is worth 18 vol points used to lose the headline slot
+  // to one whose contract is worth 6, because `best_gap` describes the delta
+  // bucket rather than the contract the button opens. R-388.
   return rows.reduce<LeapResult | null>((best, row) => {
-    if (!row.is_mispriced || !row.best_leap) return best;
-    return best == null || row.best_gap > best.best_gap ? row : best;
+    const gap = anchorGap(row);
+    if (!row.is_mispriced || !row.best_leap || gap == null) return best;
+    const bestGap = best == null ? null : anchorGap(best);
+    return bestGap == null || gap > bestGap ? row : best;
   }, null);
 }
 
@@ -100,7 +145,16 @@ export default function LeapScanner({
   const rows = data?.results ?? [];
   const { sorted, sort, toggle } = useSort(rows, extract, "best_gap", "desc");
   const mispricedCount = rows.filter((r) => r.is_mispriced).length;
-  const bestRow = widestMispriced(rows);
+  // `data.scan_time` is the scan's own stamp; `lastSync` is what the parent
+  // wired. Either dates the payload.
+  const scanStamp = lastSync ?? data?.scan_time ?? null;
+  const scanIsStale = isScanStale(scanStamp);
+  // A bare clock with no date made a three-day-old `data/leap.json` read as
+  // today's scan — inline with an order-entry link that had no staleness gate
+  // at all. Combined with R-095 (a partially-failed run still writes
+  // `leap.json` and an `ok` health row), that promoted a contract into the
+  // order builder as a fresh verdict. R-415.
+  const bestRow = scanIsStale ? null : widestMispriced(rows);
   const bestHref = bestRow ? leapOrderHref(bestRow) : null;
 
   return (
@@ -117,7 +171,11 @@ export default function LeapScanner({
       }
       controls={
         <div className="theta-harvester__meta">
-          {lastSync && <span className="report-meta">{new Date(lastSync).toLocaleTimeString()}</span>}
+          {scanStamp && (
+            <span className="report-meta" data-testid="leap-scan-age">
+              {formatScanAge(scanStamp)}
+            </span>
+          )}
           <span className="pill defined">{mispricedCount} MISPRICED</span>
           {bestRow && bestHref && (
             <Link
@@ -220,7 +278,7 @@ export default function LeapScanner({
                             data-testid={`leap-order-link-${r.ticker}`}
                             title={`Open the ${contractLabel(r)} LEAP in the order builder`}
                           >
-                            {signed(r.best_gap)}
+                            {signed(anchorGap(r) ?? r.best_gap)}
                           </Link>
                         ) : (
                           signed(r.best_gap)

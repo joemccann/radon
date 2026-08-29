@@ -12783,6 +12783,11 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
   display: flex;
   flex-direction: column;
   padding: 8px 0 0;
+  /* Last resort. Above 1180px the only inner scrollports are
+     .chain-grid-wrapper and .order-builder--rail, so any OTHER child — the
+     expiry bar, the hint line, and notably an error or empty-chain block — was
+     clipped with no scrollbar anywhere on the page. R-425. */
+  overflow-y: auto;
 }
 
 .chain-rail {
@@ -12871,6 +12876,34 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
   font-size: 9px;
   letter-spacing: 0.08em;
   color: var(--text-muted);
+}
+
+/* A deep link named a contract the chain cannot serve. Says so rather than
+   letting the ticket sit empty with no explanation (R-378, R-413). */
+/* Provenance marker on a realized-P&L cell that fell back to IB's own figure.
+   Deliberately quiet: it flags a degraded number, it does not shout. R-408. */
+.fills-source-marker {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 4px;
+  border: 1px solid var(--warn);
+  border-radius: 2px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--warn);
+  vertical-align: middle;
+}
+
+.chain-prefill-unavailable {
+  border: 1px solid var(--warn);
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin-bottom: 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--warn);
 }
 
 /* Unbounded-risk acknowledgement. Deliberately loud: it is the last thing

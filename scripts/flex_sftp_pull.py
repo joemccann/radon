@@ -31,29 +31,83 @@ DEFAULT_INBOX = Path("/var/lib/radon/flex-inbox")
 DEFAULT_GNUPG = Path("/var/lib/radon/flex-secrets/gnupg")
 SFTP_HOST_ALIAS = "ibkr-flex"
 DEFAULT_REMOTE_DIR = "outgoing"
+# 2026-08-31 is a MONDAY and the timer fires Tue..Sat, so the last run inside
+# the `<=` grace window is Sat 2026-08-29 and the first scheduled run after it
+# is already past the cutover — the grace bought zero scheduled runs, and any
+# slip in IBKR onboarding paged twice a day until a code deploy. R-416.
 FIRST_DELIVERY_DATE = date(2026, 8, 31)
+FIRST_DELIVERY_ENV = "RADON_FLEX_FIRST_DELIVERY"
 MAX_NIGHTLY_SPAN_DAYS = 5
 KEEP_GPG = 3
 
-REQUIRED_CONFIG = (
-    "IdentitiesOnly yes",
-    "AddressFamily inet",
-    "StrictHostKeyChecking yes",
-)
+# Directive -> the value it must carry, or None when any value will do.
+# ConnectTimeout / ServerAliveInterval are required because `_sftp`'s own
+# `timeout=` bounds the PROCESS while these bound the SESSION, and a
+# UserKnownHostsFile pin is what the module docstring already claims. R-417/418.
+REQUIRED_CONFIG: dict[str, Optional[str]] = {
+    "IdentitiesOnly": "yes",
+    "AddressFamily": "inet",
+    "StrictHostKeyChecking": "yes",
+    "UserKnownHostsFile": None,
+    "ConnectTimeout": None,
+    "ServerAliveInterval": None,
+}
+
+# Well under the unit's TimeoutStartSec=120: past that systemd SIGKILLs the
+# process, `_heartbeat` never runs, and there is no error row at all — only a
+# `failed` unit, surfaced a day later by the 26h window. R-417.
+SFTP_TIMEOUT_SECS = 45
 
 
 class FlexSftpError(RuntimeError):
     """Fail-closed sFTP / PGP / period error. Never a token fetch."""
 
 
-def validate_ssh_config(path: Path) -> None:
+_INSECURE_HOST_KEY = {"no", "off", "accept-new"}
+
+
+def _host_block_directives(text: str, alias: str) -> list[tuple[str, str]]:
+    """Directives that apply to `alias`, in file order, comments stripped.
+
+    ssh_config is FIRST-MATCH-WINS, so an `off` placed ABOVE the required
+    literal is what connects — while a raw `in text` scan saw the required line
+    and passed. A commented-out requirement, or one scoped to an unrelated
+    `Host` block, satisfied the same scan. R-418.
+    """
+    directives: list[tuple[str, str]] = []
+    in_block = False
+    for raw in text.splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        key, _, value = line.partition(" ")
+        if key.lower() == "host":
+            patterns = value.replace(",", " ").split()
+            in_block = any(p == alias or p == "*" for p in patterns)
+            continue
+        if in_block:
+            directives.append((key, value.strip()))
+    return directives
+
+
+def validate_ssh_config(path: Path, alias: str = SFTP_HOST_ALIAS) -> None:
     if not path.is_file():
         raise FlexSftpError(f"ssh_config_missing:{path}")
-    text = path.read_text()
-    lowered = text.lower()
-    if "accept-new" in lowered or "stricthostkeychecking no" in lowered:
-        raise FlexSftpError("ssh_config: accept-new/insecure host key checking forbidden")
-    missing = [line for line in REQUIRED_CONFIG if line not in text]
+    directives = _host_block_directives(path.read_text(), alias)
+    effective: dict[str, str] = {}
+    for key, value in directives:
+        effective.setdefault(key.lower(), value)  # first match wins
+
+    strict = effective.get("stricthostkeychecking", "")
+    if strict.lower() in _INSECURE_HOST_KEY:
+        raise FlexSftpError(
+            f"ssh_config: StrictHostKeyChecking {strict!r} is not fail-closed"
+        )
+    missing = [
+        key for key, want in REQUIRED_CONFIG.items()
+        if key.lower() not in effective
+        or (want is not None and effective[key.lower()].lower() != want.lower())
+    ]
     if missing:
         raise FlexSftpError(f"ssh_config missing {missing}")
 
@@ -71,6 +125,7 @@ def _sftp(
         capture_output=True,
         text=True,
         check=False,
+        timeout=SFTP_TIMEOUT_SECS,
     )
 
 
@@ -190,7 +245,14 @@ def _heartbeat(state: str, error: Optional[Any] = None) -> None:
 
 
 def _default_ingest(xml_text: str, *, source_path: str = "") -> Dict[str, Any]:
-    del source_path
+    """Ingest from a private temp file, but RECORD the delivered filename.
+
+    The temp file is load-bearing — the activity branch runs
+    `cash_flow_sync --from-file <path>` — but recording that path made
+    `flex_deliveries.source_path`, the only column linking a fingerprint back to
+    a delivered statement, a permanently dead `/tmp/...` inside the unit's
+    PrivateTmp namespace. R-419.
+    """
     import flex_delivery_ingest
 
     with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False) as handle:
@@ -198,20 +260,75 @@ def _default_ingest(xml_text: str, *, source_path: str = "") -> Dict[str, Any]:
         tmp = Path(handle.name)
     try:
         os.chmod(tmp, 0o600)
-        return flex_delivery_ingest.ingest_xml(xml_text, source_path=str(tmp))
+        return flex_delivery_ingest.ingest_xml(
+            xml_text,
+            source_path=str(tmp),
+            record_as=Path(source_path).name if source_path else None,
+        )
     finally:
         tmp.unlink(missing_ok=True)
 
 
+def first_delivery_date() -> date:
+    """Cutover date, overridable so a slip needs no code deploy. R-416."""
+    raw = (os.environ.get(FIRST_DELIVERY_ENV) or "").strip()
+    if not raw:
+        return FIRST_DELIVERY_DATE
+    try:
+        return date.fromisoformat(raw)
+    except ValueError:
+        print(
+            f"[flex-pull] ignoring unparseable {FIRST_DELIVERY_ENV}={raw!r}",
+            file=sys.stderr,
+        )
+        return FIRST_DELIVERY_DATE
+
+
 def empty_remote_is_expected(now: Optional[datetime] = None) -> bool:
-    """IBKR first drop is 2026-08-31. After that date, empty is a miss."""
+    """Before the first IBKR drop an empty directory is normal; after it, a miss."""
     moment = now or datetime.now(ZoneInfo("America/New_York"))
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=ZoneInfo("America/New_York"))
-    return moment.astimezone(ZoneInfo("America/New_York")).date() <= FIRST_DELIVERY_DATE
+    return moment.astimezone(ZoneInfo("America/New_York")).date() <= first_delivery_date()
 
 
 def run(
+    *,
+    config: Path,
+    inbox: Path,
+    runner=subprocess.run,
+    decrypt: Optional[Callable[..., str]] = None,
+    ingest: Optional[Callable[..., Dict[str, Any]]] = None,
+    gnupg_home: Path = DEFAULT_GNUPG,
+    remote_dir: str = DEFAULT_REMOTE_DIR,
+    now: Optional[datetime] = None,
+) -> int:
+    """Outer heartbeat guarantee (NF-9). The body below writes a row on the
+    happy path and on the failures it anticipates, but `_ensure_inbox`,
+    `retain_newest_gpg`, a `TimeoutExpired` from the sftp runner or the decrypt,
+    and anything out of `ingest_xml` (a Turso write failure, `ET.ParseError`)
+    all escaped every handler. The unit then exited non-zero with NO row
+    written, the previous `ok` row stayed newest, and the 26h/4d windows kept
+    `flex-pull` green over a job that had not run. R-400.
+    """
+    try:
+        return _run(
+            config=config,
+            inbox=inbox,
+            runner=runner,
+            decrypt=decrypt,
+            ingest=ingest,
+            gnupg_home=gnupg_home,
+            remote_dir=remote_dir,
+            now=now,
+        )
+    except Exception as exc:  # noqa: BLE001 — the row is the point
+        print(f"[flex-pull] unhandled: {type(exc).__name__}: {exc}", file=sys.stderr)
+        _heartbeat("error", f"{type(exc).__name__}: {exc}")
+        return 1
+
+
+def _run(
     *,
     config: Path,
     inbox: Path,
@@ -252,9 +369,19 @@ def run(
             result = ingest_fn(xml_text, source_path=str(dest.with_suffix(".xml")))
             if not result.get("ok", True):
                 raise FlexSftpError(f"ingest_failed:{result}")
-            ingested += 1
-        except (FlexSftpError, FlexClassifyError, OSError) as exc:
-            print(f"[flex-pull] {name}: {exc}", file=sys.stderr)
+            # `_sftp` issues no `rm` or `rename`, so a delivered file is never
+            # removed remotely — once IBKR delivers once, `names` is never empty
+            # again and the missed-delivery detector above can never fire. Every
+            # run then re-pulls the same statement, each returning
+            # `outcome: "duplicate"`, which passed `ok` and counted as progress.
+            # Only a NEW statement is progress. R-389.
+            if result.get("outcome") != "duplicate":
+                ingested += 1
+        except Exception as exc:  # noqa: BLE001 — one bad file must not abort the batch
+            # Was `(FlexSftpError, FlexClassifyError, OSError)`, which covered
+            # neither a `TimeoutExpired` from the decrypt nor anything out of
+            # `ingest_xml`. R-400.
+            print(f"[flex-pull] {name}: {type(exc).__name__}: {exc}", file=sys.stderr)
             failed = True
             continue
 
@@ -262,8 +389,15 @@ def run(
     if failed:
         _heartbeat("error", "one or more files rejected")
         return 1
+    if not ingested and not empty_remote_is_expected(now):
+        _heartbeat(
+            "error",
+            "no NEW statement applied; the remote directory is stale "
+            "(IBKR has stopped delivering, or every file is already ingested)",
+        )
+        return 1
     _heartbeat("ok")
-    return 0 if ingested else 1
+    return 0
 
 
 def main(argv: Optional[List[str]] = None) -> int:

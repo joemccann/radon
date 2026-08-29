@@ -90,7 +90,11 @@ DROP_IN_SKIP_BASELINE = {
 
 def _drop_in_example_params():
     params = []
-    for example in sorted(SERVICES.glob("*.service.d/runtime-container.conf.example")):
+    # The SHIPPED drop-ins, plus the fleet template that is still an example.
+    # R-420.
+    candidates = sorted(SERVICES.glob("*.service.d/runtime-container.conf"))
+    candidates += sorted(SERVICES.glob("*.service.d/runtime-container.conf.example"))
+    for example in sorted(candidates, key=lambda p: p.parent.name):
         unit_dir = example.parent.name
         reason = DROP_IN_SKIP_BASELINE.get(unit_dir)
         params.append(

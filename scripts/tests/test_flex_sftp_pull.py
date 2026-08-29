@@ -31,6 +31,10 @@ def _ssh_config(path: Path) -> Path:
                 "  AddressFamily inet",
                 "  UserKnownHostsFile /tmp/known_hosts",
                 "  StrictHostKeyChecking yes",
+                # R-417: `_sftp`'s own `timeout=` bounds the PROCESS; these
+                # bound the SESSION, and REQUIRED_CONFIG now demands both.
+                "  ConnectTimeout 15",
+                "  ServerAliveInterval 15",
             ]
         )
         + "\n"

@@ -687,6 +687,24 @@ def claim_flex_delivery(
     return int(getattr(result, "rows_affected", 0) or 0) > 0
 
 
+def release_flex_delivery(content_sha256: str) -> bool:
+    """Release a claim whose ingest did not complete. True when a row was dropped.
+
+    The claim is taken BEFORE the writers run, so it is a lease on work in
+    progress — not a record that the work succeeded. Nothing released it, so a
+    `cash_flow_sync` that failed mid-chunk left `cash_flows` half-applied AND
+    permanently unretryable: the same bytes re-dropped (or re-pulled by the
+    08:30 sFTP run) lost the claim, skipped every writer and heartbeated `ok`.
+    R-379.
+    """
+    db = get_db()
+    result = db.execute(
+        "DELETE FROM flex_deliveries WHERE content_sha256 = ?",
+        (content_sha256,),
+    )
+    return int(getattr(result, "rows_affected", 0) or 0) > 0
+
+
 def upsert_journal_entry(trade_id: str, payload: dict[str, Any], filled_at: Optional[str] = None) -> None:
     """Upsert one journal row over bounded Hrana HTTP (real socket timeout).
 
