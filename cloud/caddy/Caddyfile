@@ -30,6 +30,10 @@
         format json
     }
 
+    handle /ws-headlines {
+        reverse_proxy localhost:8766
+    }
+
     handle /ws* {
         reverse_proxy 127.0.0.1:8765
     }
