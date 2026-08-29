@@ -16,6 +16,7 @@ export default defineConfig({
       "lib/tools/__tests__/**/*.test.ts",
       "site/lib/**/*.test.ts",
       "scripts/lib/**/*.test.js",
+      "scripts/mktnews/**/*.test.js",
       "web/tests/**/*.test.ts",
       "web/tests/**/*.test.tsx",
       // T-058: the PI extension security tests (browser command boundary,

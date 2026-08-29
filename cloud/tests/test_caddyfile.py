@@ -73,6 +73,19 @@ class TestRouting:
         assert re.search(r"handle\s+/ws\*", content)
         assert "127.0.0.1:8765" in content
 
+    def test_headlines_websocket_before_generic_ws(self, caddy_dir):
+        content = read_caddyfile(caddy_dir)
+        active = "\n".join(
+            line for line in content.splitlines() if not line.lstrip().startswith("#")
+        )
+        headlines = active.find("handle /ws-headlines")
+        generic = active.find("handle /ws*")
+        assert headlines != -1, "Caddy must proxy /ws-headlines"
+        assert generic != -1
+        assert headlines < generic, "/ws-headlines must win over /ws*"
+        assert "handle /ws-headlines*" not in active
+        assert "localhost:8766" in active
+
     def test_api_ib_route_to_8321(self, caddy_dir):
         content = read_caddyfile(caddy_dir)
         assert re.search(r"handle_path\s+/api/ib/\*", content)
