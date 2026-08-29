@@ -155,8 +155,10 @@ The full `/health` (IB auth state) is used only by the pre-teardown `wait_for_ga
 
 #### Manual server-only deploy (when CI is unusable)
 
-When Actions is down or a deploy requires privileged recovery, preserve the
-manifest boundary: compare `/home/radon/radon` to the exact tested SHA,
+A control-plane edit no longer needs this: the deploy job runs
+`radon-deploy-root sync-control-plane` before `deploy.sh` and installs the
+GitHub-main-tip bundle itself (R-430). When Actions is down or a deploy
+requires privileged recovery, preserve the manifest boundary: compare `/home/radon/radon` to the exact tested SHA,
 fast-forward as `radon` if it is behind, run the root bootstrap from that
 checkout, then rerun CI. The command sequence and live verification contract
 are maintained in [`cloud/CLAUDE.md`](../cloud/CLAUDE.md) and

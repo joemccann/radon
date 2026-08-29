@@ -10,8 +10,12 @@ from __future__ import annotations
 
 import os
 import re
+import sys
+import socket
 import stat
 import subprocess
+import tempfile
+import time
 from pathlib import Path
 
 import pytest
@@ -66,6 +70,36 @@ exit 0
 """
 
 
+def _runtime_env(tmp_path: Path, fake_docker: Path | None = None) -> dict[str, str]:
+    fake_id = tmp_path / "id"
+    _write_executable(fake_id, "#!/bin/bash\necho 1000\n")
+    env_file = tmp_path / "env"
+    env_file.write_text("NODE_ENV=production\n", encoding="utf-8")
+    data_dir = tmp_path / "data"
+    media_dir = tmp_path / "media"
+    state_dir = tmp_path / "state"
+    for d in (data_dir, media_dir, state_dir):
+        d.mkdir(exist_ok=True)
+    notify = tmp_path / "notify.sock"
+    notify.write_bytes(b"")
+    # macOS AF_UNIX sockaddr is 104 bytes; pytest tmp_path overflows it.
+    proxy_dir = Path(tempfile.mkdtemp(prefix="rdn", dir="/tmp"))
+    return {
+        **os.environ,
+        "RADON_APP_RUNTIME_TEST_MODE": "1",
+        "RADON_TEST_DOCKER": str(fake_docker or tmp_path / "docker"),
+        "RADON_TEST_ID": str(fake_id),
+        "RADON_TEST_ENV_FILE": str(env_file),
+        "RADON_TEST_DATA_DIR": str(data_dir),
+        "RADON_TEST_MEDIA_DIR": str(media_dir),
+        "RADON_TEST_STATE_DIR": str(state_dir),
+        "RADON_APP_IMAGE_TAG": "testsha",
+        "NOTIFY_SOCKET": str(notify),
+        "WATCHDOG_USEC": "45000000",
+        "RADON_TEST_NOTIFY_PROXY_DIR": str(proxy_dir),
+    }
+
+
 def _run(
     tmp_path: Path,
     args: list[str],
@@ -92,31 +126,7 @@ fi
 exit 0
 """).format(log=repr(docker_log.as_posix())),
     )
-    fake_id = tmp_path / "id"
-    _write_executable(fake_id, "#!/bin/bash\necho 1000\n")
-    env_file = tmp_path / "env"
-    env_file.write_text("NODE_ENV=production\n", encoding="utf-8")
-    data_dir = tmp_path / "data"
-    media_dir = tmp_path / "media"
-    state_dir = tmp_path / "state"
-    data_dir.mkdir()
-    media_dir.mkdir()
-    state_dir.mkdir()
-    notify = tmp_path / "notify.sock"
-    notify.write_bytes(b"")
-    env = {
-        **os.environ,
-        "RADON_APP_RUNTIME_TEST_MODE": "1",
-        "RADON_TEST_DOCKER": str(fake_docker),
-        "RADON_TEST_ID": str(fake_id),
-        "RADON_TEST_ENV_FILE": str(env_file),
-        "RADON_TEST_DATA_DIR": str(data_dir),
-        "RADON_TEST_MEDIA_DIR": str(media_dir),
-        "RADON_TEST_STATE_DIR": str(state_dir),
-        "RADON_APP_IMAGE_TAG": "testsha",
-        "NOTIFY_SOCKET": str(notify),
-        "WATCHDOG_USEC": "45000000",
-    }
+    env = _runtime_env(tmp_path, fake_docker)
     if extra_env:
         env.update(extra_env)
     result = subprocess.run(
@@ -127,6 +137,7 @@ exit 0
         timeout=10,
     )
     result.docker_log = docker_log  # type: ignore[attr-defined]
+    result.proxy_dir = env["RADON_TEST_NOTIFY_PROXY_DIR"]  # type: ignore[attr-defined]
     return result
 
 
@@ -142,8 +153,11 @@ def test_usage_is_pull_or_run_or_stop_unit() -> None:
     # system.slice/docker-<id>.scope rather than the unit's cgroup, so
     # KillMode=control-group reaps only the `docker run` client and each
     # drop-in calls this verb from ExecStopPost to reap the container itself.
+    # `notify-proxy` (R-429) is the in-cgroup sd_notify forwarder `run`
+    # spawns for itself; it is never a sudoers verb.
     text = RUNTIME.read_text(encoding="utf-8")
-    assert "usage: radon-app-runtime {pull|run <unit>|stop <unit>}" in text
+    assert "usage: radon-app-runtime {pull|run <unit>|stop <unit>|notify-proxy <listen> <upstream>}" in text
+    assert "notify-proxy" not in SUDOERS.read_text(encoding="utf-8")
 
 
 def test_non_root_is_refused_outside_test_mode() -> None:
@@ -277,13 +291,70 @@ def test_run_allowlisted_unit_uses_host_net_and_radon_user(
     assert "ib-gateway" not in log
 
 
-def test_run_forwards_notify_socket(tmp_path: Path) -> None:
+def test_run_forwards_notify_through_a_proxy_in_the_unit_cgroup(tmp_path: Path) -> None:
+    """R-429: the container's PIDs live in system.slice/docker-<id>.scope, so
+    systemd drops a READY=1 sent straight from the container even with
+    NotifyAccess=all (relay start timed out twice on 2026-08-29 under
+    Type=notify). The wrapper must hand the container a socket owned by a
+    forwarder that IS in the unit cgroup, never the systemd socket itself."""
     result = _run(tmp_path, ["run", "radon-relay.service"])
     assert result.returncode == 0, result.stderr
     log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
-    assert "NOTIFY_SOCKET" in log
-    assert "WATCHDOG_USEC" in log
-    assert "type=bind" in log or "bind," in log
+    proxy_dir = _proxy_dir_from(result)
+    proxy_socket = f"{proxy_dir}/radon-relay.service.sock"
+    assert f"--env NOTIFY_SOCKET={proxy_socket}" in log
+    assert f"type=bind,src={proxy_socket},dst={proxy_socket}" in log
+    assert "--env WATCHDOG_USEC" in log
+    raw = re.search(r"NOTIFY_SOCKET=(\S+)", log)
+    assert raw and raw.group(1) == proxy_socket
+    assert str(tmp_path / "notify.sock") not in log
+
+
+def _proxy_dir_from(result: subprocess.CompletedProcess[str]) -> str:
+    return result.proxy_dir  # type: ignore[attr-defined]
+
+
+def test_run_refuses_to_start_when_the_notify_proxy_cannot_bind(tmp_path: Path) -> None:
+    missing = "/nonexistent-radon-proxy-dir"
+    result = _run(
+        tmp_path,
+        ["run", "radon-relay.service"],
+        extra_env={"RADON_TEST_NOTIFY_PROXY_DIR": missing, "RADON_TEST_PYTHON": "/bin/false"},
+    )
+    assert result.returncode == 71, result.stderr
+    assert "notify proxy" in result.stderr
+    log = (tmp_path / "docker.log").read_text(encoding="utf-8")
+    assert not [line for line in log.splitlines() if line.startswith("run ")], log
+
+
+def test_notify_proxy_relays_ready_and_watchdog_datagrams() -> None:
+    d = Path(tempfile.mkdtemp(prefix="rdn", dir="/tmp"))
+    upstream_path = d / "u"
+    listen_path = d / "l"
+    upstream = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    upstream.bind(str(upstream_path))
+    proc = subprocess.Popen(
+        ["bash", str(RUNTIME), "notify-proxy", str(listen_path), str(upstream_path)],
+        env={**_runtime_env(d), "RADON_TEST_PYTHON": sys.executable},
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        deadline = time.monotonic() + 5
+        while not listen_path.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert listen_path.exists(), proc.stderr.read() if proc.poll() is not None else "no socket"
+        assert stat.S_IMODE(listen_path.stat().st_mode) == 0o666
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        client.sendto(b"READY=1\n", str(listen_path))
+        client.sendto(b"WATCHDOG=1\n", str(listen_path))
+        upstream.settimeout(5)
+        got = upstream.recv(256) + upstream.recv(256)
+        assert b"READY=1" in got and b"WATCHDOG=1" in got
+    finally:
+        proc.kill()
+        proc.wait(timeout=5)
+        upstream.close()
 
 
 def test_run_api_binds_all_interfaces_with_proxy_headers(tmp_path: Path) -> None:
