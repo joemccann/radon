@@ -145,6 +145,7 @@ Schema: `scripts/db/migrations/0001_init.sql`. Writers: `scripts/db/writer.{js,p
 
 - NEVER use `git add -A`, `git add .`, or whole-file/whole-directory staging. Stage only the specific files you edited (`git add path/to/file`), and run `git status` before every commit to confirm no untracked WIP (journals, scratch files, notebooks) was swept in.
 - Before pushing, wait for the previous deploy to finish. Do not push rapid-fire commits — cancelled in-flight deploys have corrupted the Next.js build and caused a production outage.
+- After `gh pr create`, and again after the PR merges, `git checkout main` and fast-forward from `origin/main`. Do not keep sitting on the feature branch.
 
 ---
 

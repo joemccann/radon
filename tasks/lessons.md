@@ -1,5 +1,14 @@
 # Lessons
 
+## 2026-08-29 — Checkout main after a PR is opened or merged
+
+- After `gh pr create`, and again after the PR merges, `git checkout main` and
+  fast-forward from `origin/main`. Do not keep the session sitting on the
+  feature branch.
+- Delete the local feature branch only after origin has deleted it (or after
+  an explicit local `-D` once the PR is merged). Never leave HEAD on a branch
+  the operator already deleted.
+
 ## 2026-08-29 — Container newsfeed needs the host Playwright revision
 
 - Page `3e952746`: `radon-newsfeed` crash-looped after the container

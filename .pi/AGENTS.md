@@ -40,6 +40,7 @@ When a scoped `AGENTS.md` and this root file conflict, prefer the more specific 
 - For non-trivial work, update `tasks/todo.md` first with a dependency graph using IDs like `T1`, `T2` and `depends_on: []`.
 - Track checklist progress as work completes and add a review section before final response.
 - After any user correction, update `tasks/lessons.md` with a rule that prevents repeating the mistake.
+- After `gh pr create`, and again after the PR merges, `git checkout main` and fast-forward from `origin/main`. Do not keep sitting on the feature branch.
 - Never revert user changes. Check `git status --short --branch` before edits and ignore unrelated dirty files.
 - Use `rg` / `rg --files` first for search.
 
