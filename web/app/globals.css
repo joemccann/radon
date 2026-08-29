@@ -20898,9 +20898,9 @@ body[data-mobile="true"] .alerts-rule__channel {
 .ask-composer__input:focus { outline: none; }
 .ask-composer__rail { display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--line-grid); padding: 8px 12px; }
 .ask-composer__spacer { flex: 1; }
-.ask-composer__engine { display: flex; align-items: center; gap: 6px; border: 1px solid var(--line-grid); border-radius: 4px; padding: 3px 8px; }
-.ask-composer__engine-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; color: var(--text-muted); }
-.ask-composer__engine select {
+.ask-composer__model { display: flex; align-items: center; gap: 6px; border: 1px solid var(--line-grid); border-radius: 4px; padding: 3px 8px; }
+.ask-composer__model-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; color: var(--text-muted); }
+.ask-composer__model select {
   background: transparent; border: none; color: var(--text-secondary);
   font-family: var(--font-mono); font-size: var(--text-meta); letter-spacing: 0.06em;
 }

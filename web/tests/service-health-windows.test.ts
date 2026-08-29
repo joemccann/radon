@@ -474,6 +474,20 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
     expect(requiresIb("hhlev")).toBe(false);
   });
 
+  // ``model-catalog``: radon-model-catalog.timer fires daily 03:10 UTC every
+  // calendar day, refreshing the chat picker's frontier model per keyed LLM
+  // provider. Provider releases follow a release cadence, not a market one,
+  // so weekend runs heartbeat and a uniform 26h window applies. Provider
+  // HTTP only, no IB.
+  it("model-catalog is registered as scheduled with a uniform 26h window", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["model-catalog"]).toBeDefined();
+    expect(getServiceCategory("model-catalog")).toBe("scheduled");
+    for (const state of ["open", "extended", "closed"] as MarketState[]) {
+      expect(getFreshnessWindowMs("model-catalog", state)).toBe(26 * HOUR);
+    }
+    expect(requiresIb("model-catalog")).toBe(false);
+  });
+
   // ``vixts`` — radon-vixts.timer fires daily 02:45 UTC every calendar day,
   // ten minutes behind radon-vixcor so the Cboe CDN hits stay staggered
   // (weekend and holiday runs are 304 heartbeats), so a uniform 26h window

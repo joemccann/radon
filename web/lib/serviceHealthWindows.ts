@@ -229,6 +229,13 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // legitimate quarterly lag, never writer health. FRED HTTP only, no IB.
   "hhlev": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
+  // ``model-catalog``: radon-model-catalog.timer fires daily 03:10 UTC every
+  // calendar day, refreshing the chat picker's frontier model per LLM
+  // provider whose API key is present. Provider releases are not a market
+  // cadence, so weekend runs heartbeat like any other and a uniform 26h
+  // window applies. Provider HTTP only, no IB.
+  "model-catalog": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+
   // ``vixts`` — radon-vixts.timer fires daily 02:45 UTC every calendar day,
   // ten minutes behind radon-vixcor so the Cboe CDN hits stay staggered
   // (weekend and holiday runs are 304 heartbeats), so a uniform 26h window

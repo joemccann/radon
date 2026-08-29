@@ -231,12 +231,17 @@ export async function requestAssistantTurn(
   history: ApiMessage[],
   latestMessage: string,
   attachments: ChatImageAttachment[] = [],
+  /** Catalog model id from the composer's picker. "" leaves the choice to the server. */
+  model = "",
 ): Promise<AssistantTurn> {
   const response = await fetch("/api/assistant", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       messages: [...history, buildUserMessage(latestMessage, attachments)],
+      // Omitted rather than sent empty: the route treats an absent model as
+      // "unchanged behavior", and validates any id it does receive.
+      ...(model ? { model } : {}),
     }),
   });
 
