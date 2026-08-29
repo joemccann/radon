@@ -670,7 +670,7 @@ Incident: 2026-08-15 00:24Z, P1 page `34ab3e3c…`.
   bounded restart); stuck-2FA recovery requires `upstream_dead=false`; ≤2
   stuck-2FA restarts/hour.
 - **2FA push stacking:** stacked pushes reject all approvals; every restart path
-  goes through `ib_2fa_lock.py` (`/var/lib/radon/ib-2fa-push-lock.json`). Use the
+  goes through `ib_2fa_lock.py` (`/var/lib/radon/ib-lease/ib-2fa-push-lock.json`). Use the
   lock-held `POST /ib/restart`, never a raw `radon restart` alongside the
   watchdog.
 - **False awaiting-2FA after deploy:** fresh radon-api reports `awaiting_2fa` for

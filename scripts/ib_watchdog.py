@@ -72,7 +72,7 @@ LOG = logging.getLogger("ib_watchdog")
 
 # Identifier used when the watchdog holds the 2FA push lock. Distinct
 # from the FastAPI restart_ib_gateway holder so an operator inspecting
-# /var/lib/radon/ib-2fa-push-lock.json sees which component fired the
+# /var/lib/radon/ib-lease/ib-2fa-push-lock.json sees which component fired the
 # active push.
 WATCHDOG_LOCK_HOLDER = "scripts.ib_watchdog.trigger_restart"
 logging.basicConfig(
