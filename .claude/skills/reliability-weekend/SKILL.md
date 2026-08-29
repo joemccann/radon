@@ -511,3 +511,43 @@ how this loop improves as the codebase grows.
   R-385 to R-386 while R-384 to R-385), and keep the remap OFF the task's own id field. Also, a
   finding body containing `payload["date"]` breaks a double-quoted Python literal in the generator —
   write repo code samples with single quotes inside the table strings.
+
+- 2026-08-29 (remediate): **a finding's remedy can be a REGRESSION the pinned tests catch, and they
+  were right every time.** Four this run. R-428's "check the limits on the modify path" classified a
+  `secType == "BAG"` order as `type: "combo"`, and `check_order_limits` fails CLOSED on a combo whose
+  `legs` it cannot read — a `comboLeg` carries a conId, not a strike — so that shape refused EVERY
+  combo modify and placement; `check_quantity_limit` is the bound actually derivable at a funnel.
+  R-421's "divide the reserve by `len(indices)`" made a SINGLE-index bpi run demand a reserve sized
+  for three; dividing by `len(INDEX_NAMES)` is what the finding meant. R-386 asked for
+  `timeout --foreground`, which stops timeout creating its own process group and therefore defeats
+  the orphan reaping the SAME finding asks for. R-402 asked to register `signals-refresh`, whose
+  wrapper POSTs two scanners that each write their own already-catalogued row — a key nothing writes
+  ages to stale and pages forever. Test the remedy against the repo's existing assertions first.
+- 2026-08-29 (remediate): **widening a scope-limited test surfaces real gaps immediately, and they
+  are in scope.** Teaching `_names_in` the bounded-stdlib writer shape (REL-141) dropped the
+  unresolved set from 16/55 to 7/55 AND surfaced `flow-refresh` — an hourly RTH job that had always
+  written its own health row and was in NEITHER catalog, which no scoped walk had found. Merging
+  drop-ins into `_unit_texts` (REL-133) surfaced five `User=root` units with no pinned PATH. Adding
+  the `place_order` tripwire (REL-145) surfaced `clients/ib_client.py`, the transport every caller
+  goes through. Budget for one extra fix per widened guard; the guard finding the gap on its first
+  run is the guard working.
+- 2026-08-29 (remediate): the comment-quotes-its-own-code trap bit twice more, once in a test I
+  wrote (`assert "infinity" not in _dropin(unit)` matched the comment explaining the removal) and
+  once in the parity resolver itself — `run_flow_refresh.sh` mentions `scripts/api/server.py` in a
+  COMMENT about a shed marker, so every health name that file writes was attributed to the
+  flow-refresh timer. Strip comments before ANY structural scan, in test AND in source-walking code.
+- 2026-08-29 (remediate): **editing the running wrapper is safe only via rename.** REL-137 rewrites
+  `reliability_weekend.sh` while this very loop is executing it. Bash reads a script lazily by byte
+  offset, so `Path.write_text` (truncate + rewrite of the SAME inode) can strand the live run at a
+  stale offset. Every edit went through `tempfile.mkstemp` in the same directory plus `os.replace`,
+  which hands the running shell an untouched old inode. The file header already says this for `cp`;
+  it applies to any in-place writer, including Python's.
+- 2026-08-29 (remediate): a `-k` filter is not a gate. `pytest -k "scan or gate or api or catalog"`
+  matched 7645 of 8686 tests and read like a full run at a glance. When reporting a targeted result,
+  report the DESELECTED count too, or the number means nothing.
+- 2026-08-29 (remediate): three findings this run were closed only PARTIALLY and each says so in its
+  own row — R-424's `service_health` row (no error-only catalog category exists, and a scheduled key
+  for a no-cadence signal ages to stale and pages forever), R-408's browser screenshot (this runner
+  clone has no `web/.env`, so the app cannot boot), and R-402's `signals-refresh` registration
+  (deliberately refused, above). Writing the reason into the row is the difference between a known
+  residual and a silent gap.
