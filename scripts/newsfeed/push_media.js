@@ -8,6 +8,7 @@
 import { spawn } from "node:child_process";
 import {
   ensurePublicMediaPermissions,
+  isSameMediaTree,
   localMediaDest,
   pruneMediaTree,
 } from "./mediaPermissions.js";
@@ -29,6 +30,16 @@ export async function pushMedia({
   remote = REMOTE,
   timeoutMs = RSYNC_TIMEOUT_MS,
 } = {}) {
+  // The container runtime bind-mounts the Caddy-served volume onto the
+  // scraper's own media dir, so the images are already at their destination.
+  // rsync is not in the node image; spawning it here failed every cycle and
+  // left mediaDirty latched while media.radon.run 404'd (2026-08-29).
+  if (isSameMediaTree(local, remote)) {
+    const inPlace = { ok: true, transferred: 0, repairMode: "in-place" };
+    await repairLocalTree(inPlace, localMediaDest(remote));
+    return inPlace;
+  }
+
   const result = await new Promise((resolve) => {
     // R-137: `--ignore-existing` skipped every pre-fix 0600 image forever, so
     // they stayed 403 on media.radon.run permanently, and the post-transfer
@@ -89,28 +100,35 @@ export async function pushMedia({
     const dest = localMediaDest(remote);
     if (dest) {
       result.repairMode = "local-chmod";
-      // R-171: readdir + stat over the WHOLE tree on every 2-minute cycle, at
-      // a cost growing linearly in a directory that only grows. rsync's own
-      // --chmod already sets the mode on transferred files; this sweep is the
-      // backstop for files written before that landed, so it does not need to
-      // run 720 times a day.
-      if (Date.now() - lastSweepAt >= SWEEP_MIN_INTERVAL_MS) {
-        lastSweepAt = Date.now();
-        try {
-          result.repaired = await ensurePublicMediaPermissions(dest);
-          result.pruned = await pruneMediaTree(dest);
-        } catch (err) {
-          result.repaired = 0;
-          result.repairError = err instanceof Error ? err.message : String(err);
-        }
-      } else {
-        result.repairMode = "local-chmod-skipped";
-      }
+      await repairLocalTree(result, dest);
     } else {
       result.repairMode = "rsync-chmod";
     }
   }
   return result;
+}
+
+// Files written under UMask=0077 land 0600 and Caddy 403s them. rsync's own
+// --chmod already sets the mode on transferred files, so this sweep is only
+// the backstop for files written before that landed — and for the in-place
+// tree, where there is no rsync to do it.
+//
+// R-171: readdir + stat over the WHOLE tree on every 2-minute cycle costs
+// linearly in a directory that only grows, so it does not run 720 times a day.
+async function repairLocalTree(result, dest) {
+  if (!dest) return;
+  if (Date.now() - lastSweepAt < SWEEP_MIN_INTERVAL_MS) {
+    result.repairMode = `${result.repairMode}-skipped`;
+    return;
+  }
+  lastSweepAt = Date.now();
+  try {
+    result.repaired = await ensurePublicMediaPermissions(dest);
+    result.pruned = await pruneMediaTree(dest);
+  } catch (err) {
+    result.repaired = 0;
+    result.repairError = err instanceof Error ? err.message : String(err);
+  }
 }
 
 // Run directly: `bun run scripts/newsfeed/push_media.js [local] [remote]`
