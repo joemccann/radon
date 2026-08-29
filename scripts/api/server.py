@@ -3257,7 +3257,10 @@ from data_refresh import CRI_SCAN_TIMEOUT_SECS  # noqa: E402,PLC0415
 # artifact was a 429 whose detail read "backing off after a failure". One record
 # per burst, not one per request. R-424.
 SCAN_GATE_SATURATION_REPORT_INTERVAL_S = 300.0
-_SCAN_GATE_SATURATION_REPORTED_AT = 0.0
+# None, NOT 0.0: `time.monotonic()` counts host uptime, so `0.0` reads as
+# "reported at boot" and swallowed the whole first burst on any host less than
+# SCAN_GATE_SATURATION_REPORT_INTERVAL_S old. The sentinel has to mean never.
+_SCAN_GATE_SATURATION_REPORTED_AT: Optional[float] = None
 
 
 def _scan_gate_overflow_detail() -> str:
@@ -3288,7 +3291,11 @@ def _record_scan_gate_saturation() -> None:
 
     detail = _scan_gate_overflow_detail()
     now = time.monotonic()
-    if now - _SCAN_GATE_SATURATION_REPORTED_AT < SCAN_GATE_SATURATION_REPORT_INTERVAL_S:
+    reported_at = _SCAN_GATE_SATURATION_REPORTED_AT
+    if (
+        reported_at is not None
+        and now - reported_at < SCAN_GATE_SATURATION_REPORT_INTERVAL_S
+    ):
         return
     _SCAN_GATE_SATURATION_REPORTED_AT = now
     _write_scan_gate_saturation_row(detail)
