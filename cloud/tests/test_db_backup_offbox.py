@@ -14,9 +14,11 @@ leave it on disk and still heartbeat.
 
 import gzip
 import importlib.util
+import os
 import pathlib
 import sqlite3
 import sys
+import time
 import types
 
 import pytest
@@ -449,3 +451,222 @@ class TestLocalDumpSurvivesUploadFailure:
         assert seen["botocore_config"]["retries"]["max_attempts"] == db_backup.S3_MAX_ATTEMPTS
         assert seen["transfer"]["multipart_chunksize"] == db_backup.MULTIPART_CHUNK_BYTES
         assert seen["transfer"]["max_concurrency"] == db_backup.MULTIPART_CONCURRENCY
+
+
+class TestRunOffboxNeverRaises:
+    """T-261: `run_offbox`'s docstring is the contract — "Returns
+    ``(summary, error)``; NEVER raises." — and nothing asserted it.
+
+    `sync_offbox` one layer down propagates on purpose
+    (``test_upload_failure_propagates``); `run_offbox` is the wrapper that
+    converts that propagation into a non-fatal ``(None, error)`` so the
+    already-landed local dump is not reported as a failed backup. Without
+    the try/except, `run_backup` aborts AFTER the dump landed and pruning
+    ran, `main`'s outer handler writes "backup failed: ...", and the
+    operator is told the dump failed when it did not.
+    """
+
+    def test_a_raising_sync_is_returned_as_an_error_string(self, monkeypatch, tmp_path):
+        for key, value in FULL_ARCHIVE_ENV.items():
+            monkeypatch.setenv(key, value)
+
+        def _boom(*_args, **_kwargs):
+            raise RuntimeError("b2 wedged")
+
+        monkeypatch.setattr(db_backup, "sync_offbox", _boom)
+
+        summary, error = db_backup.run_offbox(tmp_path)
+
+        assert summary is None
+        assert error == "RuntimeError: b2 wedged"
+
+    def test_a_non_runtime_exception_is_also_swallowed(self, monkeypatch, tmp_path):
+        for key, value in FULL_ARCHIVE_ENV.items():
+            monkeypatch.setenv(key, value)
+
+        def _boom(*_args, **_kwargs):
+            raise ValueError("malformed endpoint")
+
+        monkeypatch.setattr(db_backup, "sync_offbox", _boom)
+
+        summary, error = db_backup.run_offbox(tmp_path)
+
+        assert summary is None
+        assert error == "ValueError: malformed endpoint"
+
+    def test_missing_credentials_short_circuit_before_the_transport(
+        self, monkeypatch, tmp_path
+    ):
+        for key in FULL_ARCHIVE_ENV:
+            monkeypatch.delenv(key, raising=False)
+        for key in (
+            "RADON_DB_BACKUP_S3_ENDPOINT",
+            "RADON_DB_BACKUP_S3_BUCKET",
+            "RADON_DB_BACKUP_S3_ACCESS_KEY_ID",
+            "RADON_DB_BACKUP_S3_SECRET_ACCESS_KEY",
+        ):
+            monkeypatch.delenv(key, raising=False)
+        called = []
+        monkeypatch.setattr(
+            db_backup, "sync_offbox", lambda *a, **k: called.append(a) or {}
+        )
+
+        summary, error = db_backup.run_offbox(tmp_path)
+
+        assert summary is None
+        assert "credentials missing" in error
+        assert called == [], "no transport may be attempted without credentials"
+
+    def test_a_success_is_returned_with_no_error(self, monkeypatch, tmp_path):
+        for key, value in FULL_ARCHIVE_ENV.items():
+            monkeypatch.setenv(key, value)
+        monkeypatch.setattr(
+            db_backup, "sync_offbox", lambda *a, **k: {"uploaded": 1, "planned": 1}
+        )
+
+        summary, error = db_backup.run_offbox(tmp_path)
+
+        assert error is None
+        assert summary == {"uploaded": 1, "planned": 1}
+
+
+class TestARaisingOffboxLegStillReportsTheLandedDump:
+    """T-261, the caller half: a wedged off-box leg must heartbeat ``error``
+    while the detail still names the dump that DID land, and exit 1."""
+
+    def test_main_heartbeats_error_naming_the_landed_dump(self, backup_env, monkeypatch):
+        def _boom(*_args, **_kwargs):
+            raise RuntimeError("b2 wedged")
+
+        monkeypatch.setattr(db_backup, "sync_offbox", _boom)
+        beats: list[tuple] = []
+        monkeypatch.setattr(
+            db_backup,
+            "write_service_health",
+            lambda state, detail, started_at: beats.append((state, detail)),
+        )
+
+        rc = db_backup.main()
+
+        assert rc == 1
+        assert len(beats) == 1
+        state, detail = beats[0]
+        assert state == "error"
+        assert detail["offbox_error"] == "RuntimeError: b2 wedged"
+
+        dumps = sorted(backup_env.glob("*.sql.gz"))
+        assert len(dumps) == 1
+        # The operator must be pointed at the artifact that IS on disk, not
+        # told "backup failed" for a dump that landed fine.
+        assert detail["path"] == str(dumps[0])
+        assert detail["size_bytes"] == dumps[0].stat().st_size > 0
+        assert not detail["summary"].startswith("backup failed")
+
+
+def _empty_source_db():
+    """A database whose `sqlite_master` is empty — a credential rotation
+    pointing at a fresh DB, or a libsql read that returned no rows."""
+    return sqlite3.connect(":memory:")
+
+
+def _rowless_source_db():
+    """Schema present, every table empty."""
+    conn = sqlite3.connect(":memory:")
+    conn.executescript("CREATE TABLE journal (id INTEGER PRIMARY KEY, ticker TEXT);")
+    conn.commit()
+    return conn
+
+
+class TestAnEmptyDumpIsNotABackup:
+    """T-262: `dump_database` reports ``{"tables": 0, "rows": 0}`` without
+    complaint and `run_backup` had no plausibility floor between the dump
+    and the prune/upload.
+
+    What shipped: a ~120-byte valid gzip is promoted, `select_prunable`
+    deletes every real dump past the 30-day window, `sync_offbox` pushes the
+    empty artifact to B2, and the heartbeat records ``ok`` with
+    "dumped 0 tables / 0 rows -> ... (118 bytes); b2 1/1". Within 30 days
+    every local AND remote copy is empty and the health row never said so.
+    `lib/vixts_math.py:MIN_SERIES_ROWS` is the same floor for the same
+    reason.
+    """
+
+    def _seed_expired_dumps(self, backup_dir):
+        old = time.time() - 60 * 86400
+        names = ["radon-2026-06-01T090000Z.sql.gz", "radon-2026-06-02T090000Z.sql.gz"]
+        for name in names:
+            path = backup_dir / name
+            path.write_bytes(b"real dump")
+            os.utime(path, (old, old))
+        return names
+
+    def test_a_tableless_dump_neither_prunes_nor_uploads(self, backup_env, monkeypatch):
+        expired = self._seed_expired_dumps(backup_env)
+        client = _StubClient()
+        _install_fake_boto3(monkeypatch, client)
+        monkeypatch.setattr(db_backup, "_open_cloud_db", _empty_source_db)
+
+        with pytest.raises(RuntimeError, match="0 tables"):
+            db_backup.run_backup()
+
+        for name in expired:
+            assert (backup_env / name).exists(), "prune ran on an empty dump"
+        assert client.uploaded == [], "an empty dump was pushed off-box"
+        assert sorted(p.name for p in backup_env.glob("*.sql.gz")) == sorted(expired), (
+            "the empty artifact must not be promoted alongside the real dumps"
+        )
+
+    def test_a_rowless_dump_neither_prunes_nor_uploads(self, backup_env, monkeypatch):
+        expired = self._seed_expired_dumps(backup_env)
+        client = _StubClient()
+        _install_fake_boto3(monkeypatch, client)
+        monkeypatch.setattr(db_backup, "_open_cloud_db", _rowless_source_db)
+
+        with pytest.raises(RuntimeError, match="0 rows"):
+            db_backup.run_backup()
+
+        for name in expired:
+            assert (backup_env / name).exists()
+        assert client.uploaded == []
+
+    def test_no_in_progress_tmp_file_is_left_behind(self, backup_env, monkeypatch):
+        _install_fake_boto3(monkeypatch, _StubClient())
+        monkeypatch.setattr(db_backup, "_open_cloud_db", _empty_source_db)
+
+        with pytest.raises(RuntimeError):
+            db_backup.run_backup()
+
+        assert list(backup_env.glob(".*.tmp")) == []
+
+    def test_main_heartbeats_error_and_exits_nonzero(self, backup_env, monkeypatch):
+        _install_fake_boto3(monkeypatch, _StubClient())
+        monkeypatch.setattr(db_backup, "_open_cloud_db", _empty_source_db)
+        beats: list[tuple] = []
+        monkeypatch.setattr(
+            db_backup,
+            "write_service_health",
+            lambda state, detail, started_at: beats.append((state, detail)),
+        )
+
+        rc = db_backup.main()
+
+        assert rc == 1
+        assert len(beats) == 1
+        state, detail = beats[0]
+        assert state == "error", "an empty dump must never heartbeat ok"
+        assert "0 tables" in detail["summary"]
+
+    def test_a_populated_dump_is_still_promoted_pruned_and_uploaded(
+        self, backup_env, monkeypatch
+    ):
+        expired = self._seed_expired_dumps(backup_env)
+        client = _StubClient()
+        _install_fake_boto3(monkeypatch, client)
+
+        detail = db_backup.run_backup()
+
+        assert detail["tables"] == 1
+        assert detail["rows"] == 1
+        assert detail["pruned"] == len(expired)
+        assert detail["offbox_error"] is None
+        assert len(client.uploaded) == 1
