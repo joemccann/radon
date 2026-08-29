@@ -115,16 +115,22 @@ describe("Regime strip day change — baseline selection", () => {
     expect(dayChangeText()).toBeNull();
   });
 
-  it("falls back to the relay close only when the payload carries no history", () => {
+  it("withholds the baseline when the payload carries no history at all", () => {
+    // NOT a relay-close fallback. `prices.VIX.close` is IB's tick-9 close
+    // cached in the relay's memory for the life of the process, and the guard
+    // that read it fired exactly when history was empty — which is the
+    // DEGRADED case, since the regime route sets `history: []` on any upstream
+    // failure. R-404 removed that fallback; this case was written against the
+    // behaviour it replaced and asserted the relay close (14.52) instead.
     const state = resolveRegimeStripLiveState({
       sessionDate: SESSION,
       prices: { VIX: quote(14.76, 14.52) },
       data: { vix: 16.65 },
     });
 
-    expect(state.vixClose).toBe(14.52);
+    expect(state.vixClose).toBeNull();
     render(<DayChange last={state.liveVix} close={state.vixClose} />);
-    expect(dayChangeText()).toBe("+0.24 (+1.65%)");
+    expect(dayChangeText()).toBeNull();
   });
 
   it("renders nothing while the market is closed and there is no live last", () => {
