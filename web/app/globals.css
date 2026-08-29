@@ -12873,6 +12873,19 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
   color: var(--text-muted);
 }
 
+/* A deep link named a contract the chain cannot serve. Says so rather than
+   letting the ticket sit empty with no explanation (R-378, R-413). */
+.chain-prefill-unavailable {
+  border: 1px solid var(--warn);
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin-bottom: 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--warn);
+}
+
 /* Unbounded-risk acknowledgement. Deliberately loud: it is the last thing
    between the operator and an order with no loss bound. */
 .ticket-unbounded {
