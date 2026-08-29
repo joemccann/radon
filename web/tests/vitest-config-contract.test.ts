@@ -26,6 +26,10 @@ const configSource = readFileSync(join(REPO_ROOT, "vitest.config.ts"), "utf-8");
 const SLOW_JSDOM_FILES = [
   "web/tests/dashboard-newsfeed-pagination.test.tsx",
   "web/tests/theta-harvester-scanner.test.tsx",
+  // T-311: node-environment, but the same class — each case drives a real
+  // route handler through a held-open refresh, so the file sat under 2x
+  // margin against the 5000 ms default and timed out under load.
+  "web/tests/orders-place-cache-race.test.ts",
 ];
 
 /** The `test.env` block, parsed out of the config source. */
