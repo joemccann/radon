@@ -100,6 +100,8 @@ UNITS_RESTARTED=1
 # Prefer /etc/radon/env when that regular file exists; else ~/radon-cloud/.env.
 # Discord vars are intentionally absent — the notification stack uses Pushover.
 readonly ENV_FILE_DEFAULT="$(_default_env_file)"
+readonly APP_RUNTIME_HELPER="${RADON_APP_RUNTIME_HELPER:-/usr/local/sbin/radon-app-runtime}"
+readonly APP_IMAGE_PREPULL_TIMEOUT="${RADON_APP_IMAGE_PREPULL_TIMEOUT:-600}"
 readonly DEPLOY_LOCK_FILE="${RADON_DEPLOY_LOCK_FILE:-/home/radon/.radon-deploy.lock}"
 readonly GREEN_MARKER_FILE="${RADON_DEPLOY_GREEN_MARKER:-/home/radon/.radon-last-green-deploy}"
 readonly DEPLOY_ROOT_HELPER="${RADON_DEPLOY_ROOT_HELPER:-/usr/local/sbin/radon-deploy-root}"
@@ -306,6 +308,24 @@ sync_scheduled_units() {
     return 1
   fi
   log_success "Scheduled units match the GitHub main tip allowlist"
+}
+
+# Pull the target release's app image pair BEFORE teardown, while the current
+# release still serves. Without this every containerised deploy pulled a 4.8G
+# image after restart and failed the HTTP gate on a container still
+# downloading (no green deploy since the drop-ins went live). Warn-and-proceed:
+# `run` resolves the pinned tag or :latest on its own. R-431.
+prepull_app_images() {
+  local requested_sha="$1"
+  if ! sudo -n -l -- "$APP_RUNTIME_HELPER" pull "$requested_sha" >/dev/null 2>&1; then
+    log_warn "App image prepull is not granted yet; containers will pull at restart"
+    return 0
+  fi
+  log_info "Prepulling app images for ${requested_sha:0:7} while the current release still serves..."
+  if ! timeout "$APP_IMAGE_PREPULL_TIMEOUT" sudo -n "$APP_RUNTIME_HELPER" pull "$requested_sha"; then
+    log_warn "App image prepull failed; containers will resolve images at restart"
+  fi
+  return 0
 }
 
 refresh_control_plane() {
@@ -1597,6 +1617,8 @@ main() {
   if ! load_prestage "$requested_sha"; then
     build_staged_release "$requested_sha"
   fi
+
+  prepull_app_images "$requested_sha"
 
   log_info "Promoting staged artifacts and restarting services..."
   restart_services "$requested_sha" "$prev_commit"

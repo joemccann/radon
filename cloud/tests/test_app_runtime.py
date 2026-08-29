@@ -156,7 +156,7 @@ def test_usage_is_pull_or_run_or_stop_unit() -> None:
     # `notify-proxy` (R-429) is the in-cgroup sd_notify forwarder `run`
     # spawns for itself; it is never a sudoers verb.
     text = RUNTIME.read_text(encoding="utf-8")
-    assert "usage: radon-app-runtime {pull|run <unit>|stop <unit>|notify-proxy <listen> <upstream>}" in text
+    assert "usage: radon-app-runtime {pull [<sha>]|run <unit>|stop <unit>|notify-proxy <listen> <upstream>}" in text
     assert "notify-proxy" not in SUDOERS.read_text(encoding="utf-8")
 
 
@@ -184,6 +184,70 @@ def test_pull_pulls_only_app_images(tmp_path: Path) -> None:
     assert "gnzsnz" not in log
     assert "docker.sock" not in log
     assert "caddy" not in log.lower()
+
+
+_IMAGE_STORE_DOCKER = """#!/bin/bash
+printf '%s\\n' "$*" >> {log}
+case "$1 $2" in
+  "manifest inspect"|"image inspect") exit 0 ;;
+  "ps --format")
+    printf '%s\\n' ghcr.io/joemccann/radon-node:${{RADON_STUB_PREVIOUS}} ghcr.io/joemccann/radon-python:${{RADON_STUB_PREVIOUS}}
+    ;;
+  "images --format")
+    for t in ${{RADON_STUB_TAGS:-}}; do printf '%s:%s\\n' "$4" "$t"; done
+    ;;
+esac
+exit 0
+"""
+
+
+def test_pull_with_a_release_sha_pins_that_pair_and_prunes_stale_pairs(tmp_path: Path) -> None:
+    """R-431: the deploy pre-pulls the pair `run` will resolve for the target
+    release, then drops SHA-tagged pairs that are neither the target, the
+    fallback tag, nor in use by a running container (the previous release
+    keeps its pair so a rollback never pulls)."""
+    target = "a" * 40
+    previous = "b" * 40
+    stale = "c" * 40
+    result = _run(
+        tmp_path,
+        ["pull", target],
+        extra_env={
+            "RADON_STUB_PREVIOUS": previous,
+            "RADON_STUB_TAGS": f"latest {target} {previous} {stale} weird-tag",
+        },
+        docker_body=_IMAGE_STORE_DOCKER,
+    )
+    assert result.returncode == 0, result.stderr
+    lines = result.docker_log.read_text(encoding="utf-8").splitlines()  # type: ignore[attr-defined]
+    assert f"pull ghcr.io/joemccann/radon-python:{target}" in lines
+    assert f"pull ghcr.io/joemccann/radon-node:{target}" in lines
+    assert "pull ghcr.io/joemccann/radon-python:testsha" not in lines
+    removed = sorted(line for line in lines if line.startswith("rmi "))
+    assert removed == sorted([
+        f"rmi ghcr.io/joemccann/radon-node:{stale}",
+        f"rmi ghcr.io/joemccann/radon-python:{stale}",
+    ])
+    assert "gnzsnz" not in "\n".join(lines) and "ib-gateway" not in "\n".join(lines)
+
+
+def test_pull_without_a_sha_never_removes_images(tmp_path: Path) -> None:
+    result = _run(
+        tmp_path,
+        ["pull"],
+        extra_env={"RADON_STUB_PREVIOUS": "b" * 40, "RADON_STUB_TAGS": "latest " + "c" * 40},
+        docker_body=_IMAGE_STORE_DOCKER,
+    )
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert "rmi " not in log
+
+
+def test_pull_rejects_anything_but_a_release_sha(tmp_path: Path) -> None:
+    for bad in ("latest", "abc", "../x", "A" * 40):
+        result = _run(tmp_path, ["pull", bad])
+        assert result.returncode == 64, bad
+        assert "pull " not in (tmp_path / "docker.log").read_text(encoding="utf-8") if (tmp_path / "docker.log").exists() else True
 
 
 def test_run_does_not_docker_pull(tmp_path: Path) -> None:
@@ -481,6 +545,10 @@ def test_helper_does_not_own_run_or_pull() -> None:
 def test_sudoers_grants_exact_pull_not_run() -> None:
     text = SUDOERS.read_text(encoding="utf-8")
     assert "/usr/local/sbin/radon-app-runtime pull" in text
+    # The prepull verb takes a release SHA; the wrapper refuses anything
+    # that is not 40 hex chars, so the glob cannot reach `run` or a shell.
+    assert "/usr/local/sbin/radon-app-runtime pull [0-9a-f]*" in text
+    assert "radon-app-runtime pull *" not in text
     assert "radon-app-runtime run" not in text
     assert "radon-app-runtime *" not in text
     assert "docker.sock" not in text
