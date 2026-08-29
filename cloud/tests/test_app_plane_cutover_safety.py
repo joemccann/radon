@@ -40,6 +40,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -215,10 +216,33 @@ class TestImageBuildCarriesPublicEnv:
         assert "next-clerk-guard" in text
 
     def test_the_workflow_pushes_latest_only_after_the_node_image_bakes(self):
-        workflow = WORKFLOW.read_text(encoding="utf-8")
-        assert "radon-node:latest" in workflow
-        push = workflow.split("Push SHA tags to GHCR", 1)[-1]
-        assert "radon-node:latest" in push
+        jobs = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+        node = jobs["node-image"]
+        python = jobs["python-image"]
+        node_blob = yaml.dump(node)
+        python_blob = yaml.dump(python)
+        assert "Dockerfile.node" in node_blob
+        assert "radon-node:latest" in node_blob
+        assert "Dockerfile.python" not in node_blob
+        assert "radon-python:latest" not in node_blob
+        assert "Dockerfile.python" in python_blob
+        assert "radon-python:latest" in python_blob
+        assert "Dockerfile.node" not in python_blob
+        assert "radon-node:latest" not in python_blob
+
+    def test_python_and_node_image_jobs_run_in_parallel(self):
+        """One runner doing python then node serializes ~2m of node behind 34s
+        of python, then four sequential GHCR pushes. Sibling jobs with no
+        needs: cut wall clock to the slower image."""
+        parsed = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+        jobs = parsed["jobs"]
+        assert "python-image" in jobs
+        assert "node-image" in jobs
+        assert "needs" not in jobs["python-image"]
+        assert "needs" not in jobs["node-image"]
+        concurrency = parsed.get("concurrency") or jobs["python-image"].get("concurrency")
+        assert concurrency
+        assert concurrency.get("cancel-in-progress") is True
 
 
 class TestImageTagIsPreflighted:
