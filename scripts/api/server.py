@@ -435,15 +435,28 @@ ORDERS_SYNC_SHED_RETRY_DELAY_SECS = 8.0
 # Operator POST /flow-analysis/{ticker} shares that general lane. Fail-fast
 # 502 leaves the UI on ANALYZING with a raw capacity error. Retry the claim
 # with the same budget as orders-sync; persistent shed still 502s.
-FLOW_REPORT_SHED_RETRIES = 2
+# A shed is fail-fast — `_claim_subprocess_slot` returns False with no awaits —
+# so 2 retries cost ~21s of a 120s budget and 502'd while the journal showed
+# general-lane slots freeing every few seconds. /flow-analysis/AMZN served a
+# Jun 16 report through 2026-08-28 on exactly that. The deadline below is the
+# real bound; this is the ceiling that keeps the loop finite.
+FLOW_REPORT_SHED_RETRIES = 12
 # NOT 8.0 like orders-sync: a shared constant put both retry chains on the
 # same 8s grid, contending in lockstep against a lane already saturated. R-355.
 FLOW_REPORT_SHED_RETRY_DELAY_SECS = 5.0
-# The Next.js proxy gives up at 130s and takes its stale-cache branch, so a
-# chain that outlives this deadline holds a general-lane slot for a response
-# nobody will read — extending the saturation for the next caller. Worst case
-# was 3 x 300 + 16 = 916s. R-354.
-FLOW_REPORT_TOTAL_DEADLINE_SECS = 120.0
+# Uncapped, the exponential doubling spends the whole budget on two sleeps.
+_SHED_BACKOFF_CAP_SECS = 20.0
+# A 20-session AMZN pull measured 81s end to end. Claiming a slot with less
+# budget than that left burns the lane and the UW spend on a run that must
+# time out, so the chain stops probing below it.
+FLOW_REPORT_MIN_RUN_SECS = 90.0
+# Total wall clock one scan may occupy a general-lane slot for, probing
+# included. Worst case was 3 x 300 + 16 = 916s of saturation for the next
+# caller. R-354. Sized to seat one real scan plus a retry window. No longer
+# tied to the HTTP round trip: the edge cuts the browser at 30s either way, so
+# `_scan_once_per_ticker` detaches the scan and this budget bounds the CACHE
+# WRITE, not a response anyone is still waiting on.
+FLOW_REPORT_TOTAL_DEADLINE_SECS = 225.0
 _CAPACITY_SHED_MARKER = "subprocess capacity exhausted"
 
 # One in-flight scan per ticker. Nothing deduped concurrent requests, so N
@@ -456,6 +469,47 @@ def _is_capacity_shed(error: Optional[str]) -> bool:
     return bool(error) and _CAPACITY_SHED_MARKER in error.lower()
 
 
+def _flow_report_inflight_lock() -> "asyncio.Lock":
+    """Created on first use: the loop does not exist at import time."""
+    global _FLOW_REPORT_INFLIGHT_LOCK
+    if _FLOW_REPORT_INFLIGHT_LOCK is None:
+        _FLOW_REPORT_INFLIGHT_LOCK = asyncio.Lock()
+    return _FLOW_REPORT_INFLIGHT_LOCK
+
+
+async def _scan_once_per_ticker(ticker: str, scan) -> Any:
+    """Collapse concurrent scans of one ticker onto a single detached run.
+
+    Two properties, both load-bearing:
+
+    Dedupe — N tabs on one symbol each claimed a general-lane slot, so the
+    operator's own duplicates were part of the saturation that then shed the
+    scan they were all waiting for.
+
+    Detachment — Caddy bounds the app upstream at a 30s
+    `response_header_timeout` and a 20-session AMZN pull measures 81s, so the
+    browser request is always cut first. Shielding the scan from its caller's
+    cancellation lets the cache write land anyway, so the next page load is
+    fresh instead of replaying the same doomed scan.
+    """
+    lock = _flow_report_inflight_lock()
+    async with lock:
+        task = _FLOW_REPORT_INFLIGHT.get(ticker)
+        if task is None or task.done():
+            task = asyncio.create_task(scan())
+            # Nobody may be awaiting when this settles; consume the outcome so
+            # a detached failure is not an "exception was never retrieved" log.
+            task.add_done_callback(
+                lambda t: None if t.cancelled() else t.exception()
+            )
+            _FLOW_REPORT_INFLIGHT[ticker] = task
+    try:
+        return await asyncio.shield(task)
+    finally:
+        if task.done() and _FLOW_REPORT_INFLIGHT.get(ticker) is task:
+            _FLOW_REPORT_INFLIGHT.pop(ticker, None)
+
+
 async def _run_script_retrying_capacity(
     script: str,
     args: list[str],
@@ -465,12 +519,17 @@ async def _run_script_retrying_capacity(
     delay_s: float,
     label: str,
     deadline_s: Optional[float] = None,
+    min_run_s: Optional[float] = None,
 ) -> ScriptResult:
     """Re-claim a general-lane slot after a capacity shed.
 
     The claim is fail-fast. Peer scans often free a slot in seconds, so a
     bounded sleep-and-retry is the operator-facing equivalent of the
     orders-sync / flow-refresh wrappers. Real script failures do not retry.
+
+    `min_run_s` is the shortest window the script can finish in. Once less
+    than that remains, probing stops: a slot claimed too late burns the lane
+    and the upstream spend on a run that is guaranteed to time out.
     """
     started = time.monotonic()
 
@@ -483,6 +542,13 @@ async def _run_script_retrying_capacity(
         left = _budget_left()
         return timeout if left is None else max(1.0, min(timeout, left))
 
+    def _can_seat_a_run(after_backoff: float) -> bool:
+        left = _budget_left()
+        if left is None:
+            return True
+        remaining = left - after_backoff
+        return remaining > 0 and (min_run_s is None or remaining >= min_run_s)
+
     result = await run_script(script, args, timeout=_attempt_timeout())
     attempts = 0
     while (
@@ -493,12 +559,14 @@ async def _run_script_retrying_capacity(
         # Exponential with jitter. A fixed delay meant every client shed in the
         # same instant retried in the same instant — synchronised waves against
         # a lane that is by definition already saturated. R-355.
-        backoff = delay_s * (2 ** attempts) * (0.5 + random.random())
-        left = _budget_left()
-        if left is not None and left <= backoff:
+        backoff = min(
+            _SHED_BACKOFF_CAP_SECS,
+            delay_s * (2 ** attempts) * (0.5 + random.random()),
+        )
+        if not _can_seat_a_run(backoff):
             logger.info(
-                "%s: capacity shed and the %.0fs deadline is spent — giving up "
-                "after %d attempt(s) rather than holding a lane slot",
+                "%s: capacity shed and the %.0fs deadline no longer seats a run "
+                "— giving up after %d attempt(s) rather than holding a lane slot",
                 label, deadline_s, attempts + 1,
             )
             return ScriptResult(
@@ -2434,6 +2502,11 @@ async def run_flow_report(ticker: str):
                 pass
         return demo_disabled_payload(f"Live flow analysis for {upper}")
 
+    return await _scan_once_per_ticker(upper, lambda: _scan_and_cache(upper))
+
+
+async def _scan_and_cache(upper: str) -> dict:
+    """One flow scan for one ticker: run it, gate it, persist it, return it."""
     # 20 trading-day dark-pool history (flow_report DEFAULT_LOOKBACK_DAYS).
     # Cold liquid names paginate UW heavily; allow longer than the old 120s.
     # Capacity shed is retryable: the general lane is often full for seconds
@@ -2446,6 +2519,7 @@ async def run_flow_report(ticker: str):
         delay_s=FLOW_REPORT_SHED_RETRY_DELAY_SECS,
         label=f"flow-report {upper}",
         deadline_s=FLOW_REPORT_TOTAL_DEADLINE_SECS,
+        min_run_s=FLOW_REPORT_MIN_RUN_SECS,
     )
     if not result.ok:
         raise HTTPException(status_code=502, detail=result.error)
