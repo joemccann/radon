@@ -16,6 +16,8 @@ import { tickersBodyToRaw, validateTickerList } from "@/lib/scanTickerList";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+export const radonCapability = "read.spawn";
+
 export async function POST(request: Request): Promise<Response> {
   const access = await requireRouteAccess(undefined, { rate: { key: "leap/scan:route", limit: 20, windowMs: 60_000 } });
   if (!access.ok) return access.response;

@@ -5,6 +5,8 @@ import { radonFetchText, RadonApiError } from "@/lib/radonApi";
 
 export const runtime = "nodejs";
 
+export const radonCapability = "internal";
+
 export async function GET(req: NextRequest): Promise<Response> {
   const rawPath = req.nextUrl.searchParams.get("path");
   if (!rawPath) {

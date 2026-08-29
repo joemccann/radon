@@ -119,6 +119,8 @@ function forProbe(row: ServiceHealthRow): ServiceHealthRow {
   return { ...row, last_error: null, error_summary: null };
 }
 
+export const radonCapability = "read";
+
 export async function GET(request?: Request): Promise<Response> {
   // Dual-auth (DUR-16): the loopback watchdog authenticates with the probe
   // bearer and has no Clerk session — a valid bearer must not fall through

@@ -48,6 +48,8 @@ function observationIsCurrent(asOf: string, now = new Date()): boolean {
   return Number.isFinite(observed) && now.getTime() - observed <= MAX_OBSERVATION_AGE_MS;
 }
 
+export const radonCapability = "read";
+
 export async function GET() {
   try {
     const result = await fetchLatestDff();

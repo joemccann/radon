@@ -41,6 +41,8 @@ async function readCachedFuturesChain(
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+export const radonCapability = "read";
+
 export async function GET(request: Request): Promise<Response> {
   const access = await requireRouteAccess(undefined, { rate: { key: "futures/chain:route", limit: 20, windowMs: 60_000 } });
   if (!access.ok) return access.response;

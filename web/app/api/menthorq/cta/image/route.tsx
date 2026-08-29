@@ -291,6 +291,8 @@ function DataRow({ row }: { row: CtaRow }) {
   );
 }
 
+export const radonCapability = "read";
+
 export async function GET(request: Request) {
   const access = await requireRouteAccess(undefined, { rate: { key: "menthorq/cta/image:route", limit: 20, windowMs: 60_000 } });
   if (!access.ok) return access.response;

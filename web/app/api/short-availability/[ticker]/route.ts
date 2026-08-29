@@ -19,6 +19,8 @@ type Params = { params: Promise<{ ticker: string }> };
  * Always returns 200 per the missing:true semantics contract
  * (see feedback_http_status_for_real_errors.md).
  */
+export const radonCapability = "read";
+
 export async function GET(_req: Request, ctx: Params): Promise<Response> {
   const access = await requireRouteAccess(undefined, { rate: { key: "short-availability/[ticker]:route", limit: 20, windowMs: 60_000 } });
   if (!access.ok) return access.response;

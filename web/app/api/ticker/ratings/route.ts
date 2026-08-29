@@ -22,6 +22,8 @@ function coalescedRatings(ticker: string): Promise<Record<string, unknown>> {
   return pending;
 }
 
+export const radonCapability = "read";
+
 export async function GET(request: Request): Promise<Response> {
   const access = await requireRouteAccess(undefined, { rate: { key: "ticker/ratings:route", limit: 20, windowMs: 60_000 } });
   if (!access.ok) return access.response;

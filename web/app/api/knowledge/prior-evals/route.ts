@@ -18,6 +18,8 @@ function normalizeTicker(raw: string | null): string | null {
   return TICKER_RE.test(upper) ? upper : null;
 }
 
+export const radonCapability = "read";
+
 export async function GET(request: Request): Promise<Response> {
   const access = await requireRouteAccess();
   if (!access.ok) return access.response;

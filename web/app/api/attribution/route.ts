@@ -6,6 +6,8 @@ import { radonFetch } from "@/lib/radonApi";
 
 export const runtime = "nodejs";
 
+export const radonCapability = "read";
+
 export async function GET() {
   const access = await requireRouteAccess(undefined, { rate: { key: "attribution:route", limit: 20, windowMs: 60_000 } });
   if (!access.ok) return access.response;

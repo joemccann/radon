@@ -54,6 +54,8 @@ type WhatIfBody = {
 
 const UNAVAILABLE = { initMargin: null, maintMargin: null, source: "unavailable" as const };
 
+export const radonCapability = "read.spawn";
+
 export async function POST(request: Request): Promise<Response> {
   const access = await requireRouteAccess(request, {
     operatorOnly: true,

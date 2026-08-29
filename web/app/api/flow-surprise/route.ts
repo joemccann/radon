@@ -74,6 +74,8 @@ async function readFlowSurpriseFromDisk(): Promise<TimestampedRead<FlowSurpriseF
   return { data, timestampMs: contentTimestampMs(data.scan_time) };
 }
 
+export const radonCapability = "read";
+
 export async function GET(): Promise<Response> {
   const requestId = getRequestId();
   const cache_meta = buildCacheMeta(FLOW_SURPRISE_CACHE_PATH);

@@ -10,6 +10,8 @@ import { requireRouteAccess } from "@/lib/routeAccess";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+export const radonCapability = "admin";
+
 export async function POST(): Promise<Response> {
   const access = await requireRouteAccess(undefined, { operatorOnly: true });
   if (!access.ok) return access.response;

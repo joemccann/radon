@@ -66,6 +66,8 @@ async function readStatus(url: string): Promise<Record<string, unknown>> {
   }
 }
 
+export const radonCapability = "admin";
+
 export async function GET(): Promise<Response> {
   const access = await requireRouteAccess(undefined, { operatorOnly: true });
   if (!access.ok) return access.response;

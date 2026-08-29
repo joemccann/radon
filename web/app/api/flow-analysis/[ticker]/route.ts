@@ -55,6 +55,8 @@ function cachePathFor(ticker: string): string {
 
 type Params = { params: Promise<{ ticker: string }> };
 
+export const radonCapability = { GET: "read", POST: "read.spawn" };
+
 export async function GET(_req: Request, ctx: Params): Promise<Response> {
   const access = await requireRouteAccess(undefined, { rate: { key: "flow-analysis/[ticker]:route", limit: 20, windowMs: 60_000 } });
   if (!access.ok) return access.response;

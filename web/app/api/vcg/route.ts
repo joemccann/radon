@@ -121,6 +121,8 @@ const triggerBackgroundScan = createBackgroundScanTrigger({
   run: () => radonFetch<Record<string, unknown>>("/vcg/scan", { method: "POST", timeout: 130_000 }),
 });
 
+export const radonCapability = "read";
+
 export async function GET(): Promise<Response> {
   const access = await requireRouteAccess(undefined, { rate: { key: "vcg:route", limit: 20, windowMs: 60_000 } });
   if (!access.ok) return access.response;

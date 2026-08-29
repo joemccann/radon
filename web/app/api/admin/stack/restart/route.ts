@@ -15,6 +15,8 @@ export const runtime = "nodejs";
 // an in-flight success. The UI keeps polling read-only health afterward.
 const PROXY_TIMEOUT_MS = 5_000;
 
+export const radonCapability = "admin";
+
 export async function POST(_req: NextRequest): Promise<Response> {
   const access = await requireRouteAccess(undefined, { operatorOnly: true });
   if (!access.ok) return access.response;

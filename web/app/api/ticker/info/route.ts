@@ -238,6 +238,8 @@ const CACHE_TTL_SECONDS = 20;
 
 /* ─── Route handler ─── */
 
+export const radonCapability = "read";
+
 export async function GET(request: Request): Promise<Response> {
   const access = await requireRouteAccess(undefined, { rate: { key: "ticker/info:route", limit: 20, windowMs: 60_000 } });
   if (!access.ok) return access.response;

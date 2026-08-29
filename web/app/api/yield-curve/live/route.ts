@@ -97,6 +97,8 @@ async function refreshLivePayload(): Promise<Record<string, unknown>> {
   return refreshInFlight;
 }
 
+export const radonCapability = "read";
+
 export async function GET() {
   const requestId = getRequestId();
   if (!cached || Date.now() - cached.at >= CACHE_TTL_MS) {

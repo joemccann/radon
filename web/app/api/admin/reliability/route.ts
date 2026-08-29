@@ -71,6 +71,8 @@ async function readReliabilityPayload(): Promise<ReliabilityHistoryPayload> {
   return { window_ms: RELIABILITY_WINDOW_MS, since, events, baseline, truncated };
 }
 
+export const radonCapability = "admin";
+
 export async function GET(): Promise<Response> {
   const access = await requireRouteAccess(undefined, { operatorOnly: true });
   if (!access.ok) return access.response;

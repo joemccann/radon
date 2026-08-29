@@ -76,6 +76,8 @@ function withSessionStaleness(payload: SnapshotPayload): SnapshotPayload {
   return { ...payload, stale: !isSnapshotCurrent(snapshotLastDate(payload)) };
 }
 
+export const radonCapability = { GET: "read", POST: "read.spawn" };
+
 export async function GET(request: Request): Promise<Response> {
   const access = await requireRouteAccess(undefined, { rate: { key: "options/rv-ratio:route", limit: 20, windowMs: 60_000 } });
   if (!access.ok) return access.response;

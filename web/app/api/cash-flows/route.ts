@@ -10,6 +10,8 @@ import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+export const radonCapability = "read";
+
 export async function GET(req: NextRequest) {
   const access = await requireRouteAccess();
   if (!access.ok) return access.response;

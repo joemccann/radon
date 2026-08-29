@@ -7,6 +7,8 @@ import { withoutAbsoluteReportPaths } from "@/lib/publicShareRoutes";
 
 export const runtime = "nodejs";
 
+export const radonCapability = "internal";
+
 export async function POST(request: Request): Promise<Response> {
   const access = await requireRouteAccess(request, { rate: { key: "share-generator", limit: 10, windowMs: 60_000 } });
   if (!access.ok) return access.response;
