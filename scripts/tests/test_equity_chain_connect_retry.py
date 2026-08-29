@@ -94,23 +94,57 @@ class TestConnectRetryClassifies:
 class TestConnectBudgetFitsTheCallerCap:
     """R-352: the error envelope has to be able to render."""
 
-    def test_worst_case_connect_plus_two_requests_fits_under_the_cap(self):
+    def test_worst_case_connect_plus_two_requests_fits_under_the_cap(self, monkeypatch):
+        """Measured off the real schedule, not off the arithmetic that defines it.
+
+        The old form recomputed `CONNECT_TIMEOUT_S`'s own definition, so it
+        reduced to `CONNECT_BUDGET_S <= CONNECT_BUDGET_S` and could not fail
+        for any attempts/backoff pair.
+        """
+        from scripts.api.server import _EQUITY_OPTIONS_CHAIN_TIMEOUT_S as CAP
         from utils.ib_preflight import IB_REQUEST_TIMEOUT_S
 
-        cap = 45.0
-        worst_connect = (
-            chain.CONNECT_ATTEMPTS * chain.CONNECT_TIMEOUT_S
-            + (chain.CONNECT_ATTEMPTS - 1) * chain.CONNECT_BACKOFF_S
-        )
-        total = worst_connect + 2 * IB_REQUEST_TIMEOUT_S
-        assert total < cap, (
-            f"worst case is {total}s against a {cap}s subprocess cap, so the "
+        slept: list[float] = []
+        monkeypatch.setattr(chain.time, "sleep", slept.append)
+
+        class _Recording:
+            def __init__(self):
+                self.timeouts = []
+
+            def connect(self, **kwargs):
+                self.timeouts.append(kwargs.get("timeout"))
+                raise TimeoutError("connect timed out")
+
+        client = _Recording()
+        with pytest.raises(TimeoutError):
+            chain._connect_with_retry(client, port=4002, client_id="auto")
+
+        assert client.timeouts, "connect() was never given a timeout"
+        assert all(
+            t is not None and t > 0 for t in client.timeouts
+        ), f"an unusable handshake window: {client.timeouts}"
+
+        worst_connect = sum(client.timeouts) + sum(slept)
+        total = worst_connect + 2 * IB_REQUEST_TIMEOUT_S + chain._ENVELOPE_MARGIN_S
+        assert total <= CAP, (
+            f"worst case is {total}s against a {CAP}s subprocess cap, so the "
             "except-clause that prints the JSON error envelope never runs and "
             "the operator gets a bare subprocess-timeout string"
         )
 
-    def test_the_budget_is_derived_from_the_cap_not_hardcoded(self):
-        assert chain.CONNECT_BUDGET_S < 45.0
+    def test_the_module_cap_matches_the_endpoint_that_enforces_it(self):
+        """`_CALLER_CAP_S` is a hand-copy of the server constant; pin the pair.
+
+        The old assertion here was `CONNECT_BUDGET_S < 45.0` under the name
+        "derived from the cap not hardcoded" — a property the source does not
+        have, checked against a fourth copy of the same literal.
+        """
+        from scripts.api.server import _EQUITY_OPTIONS_CHAIN_TIMEOUT_S as CAP
+
+        assert chain._CALLER_CAP_S == CAP, (
+            f"ib_option_chain sizes its retry budget against {chain._CALLER_CAP_S}s "
+            f"but /options/chain kills the subprocess at {CAP}s"
+        )
         assert chain.CONNECT_ATTEMPTS >= 2, "the transient-timeout retry must survive"
 
 
