@@ -39,10 +39,18 @@ def _ssh_config(path: Path) -> Path:
 
 
 class FakeSftp:
-    def __init__(self, files: dict[str, bytes], *, returncode: int = 0, stderr: str = ""):
+    def __init__(
+        self,
+        files: dict[str, bytes],
+        *,
+        returncode: int = 0,
+        stderr: str = "",
+        ls_stdout: str | None = None,
+    ):
         self.files = files
         self.returncode = returncode
         self.stderr = stderr
+        self.ls_stdout = ls_stdout
         self.calls: list[list[str]] = []
         self.inputs: list[str] = []
 
@@ -66,8 +74,12 @@ class FakeSftp:
             if line.startswith("cd "):
                 cwd = line.split(maxsplit=1)[1]
                 continue
-            if line == "ls":
-                completed.stdout = "\n".join(self.files) + ("\n" if self.files else "")
+            if line.split()[0] == "ls":
+                completed.stdout = (
+                    self.ls_stdout
+                    if self.ls_stdout is not None
+                    else "\n".join(self.files) + ("\n" if self.files else "")
+                )
                 return completed
             if line.startswith("get "):
                 _, remote, local = line.split(maxsplit=2)
@@ -107,7 +119,7 @@ def test_list_dir_uses_sftp_dash4_and_batch_stdin(tmp_path):
     assert "-F" in fake.calls[0]
     assert "accept-new" not in " ".join(fake.calls[0])
     assert fake.inputs[0].strip().splitlines()[0] == "cd outgoing"
-    assert fake.inputs[0].strip().splitlines()[1] == "ls"
+    assert fake.inputs[0].strip().splitlines()[1] == "ls -1"
 
 
 def test_empty_remote_before_first_delivery_is_ok_skip(tmp_path, monkeypatch):
@@ -283,3 +295,126 @@ def test_nightly_period_ok_on_last_business_day():
     assert pull.nightly_period_ok(TRADES.read_text()) is True
     assert pull.nightly_period_ok(ACTIVITY_365.read_text()) is False
     assert pull.nightly_period_ok(ACTIVITY_YTD.read_text()) is False
+
+
+def test_list_remote_gpg_parses_columnised_ls(tmp_path):
+    """`sftp ls` is multi-column by default; every name must survive. T-255."""
+    import flex_sftp_pull as pull
+
+    config = _ssh_config(tmp_path / "ssh_config")
+    fake = FakeSftp({}, ls_stdout="a.gpg  b.gpg  c.gpg\n")
+    assert pull.list_remote_gpg(config=config, runner=fake) == ["a.gpg", "b.gpg", "c.gpg"]
+    assert fake.inputs[0].strip().splitlines()[1] == "ls -1"
+
+    mixed = FakeSftp({}, ls_stdout="a.gpg  b.gpg\nc.gpg\nnotes.txt\n")
+    assert pull.list_remote_gpg(config=config, runner=mixed) == ["a.gpg", "b.gpg", "c.gpg"]
+
+
+def test_multi_file_delivery_pulls_every_file(tmp_path, monkeypatch):
+    """Three files on one `ls` line must all be fetched, not just the last. T-255."""
+    import flex_sftp_pull as pull
+
+    monkeypatch.setattr(pull, "_heartbeat", lambda *a, **k: None)
+    config = _ssh_config(tmp_path / "ssh_config")
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    trades = TRADES.read_bytes()
+    fake = FakeSftp(
+        {"one.gpg": trades, "two.gpg": trades, "three.gpg": trades},
+        ls_stdout="one.gpg  two.gpg  three.gpg\n",
+    )
+    ingested = []
+    code = pull.run(
+        config=config,
+        inbox=inbox,
+        runner=fake,
+        decrypt=lambda data, **k: data.decode(),
+        ingest=lambda xml_text, source_path="": ingested.append(source_path) or {"ok": True},
+    )
+    assert code == 0
+    assert len(ingested) == 3
+    assert sorted(p.name for p in inbox.glob("*.gpg")) == ["one.gpg", "three.gpg", "two.gpg"]
+
+
+def test_no_trade_session_trade_confirm_is_ok(tmp_path, monkeypatch):
+    """A quiet session's Trade Confirmation must not page. T-256."""
+    import flex_sftp_pull as pull
+
+    heartbeats = []
+    monkeypatch.setattr(pull, "_heartbeat", lambda state, error=None: heartbeats.append((state, error)))
+    quiet = (
+        '<?xml version="1.0"?><FlexQueryResponse queryName="Trade Confirmation" type="TC">'
+        "<FlexStatements count='1'>"
+        "<FlexStatement accountId='U0000000' fromDate='20260804' toDate='20260804' "
+        "period='LastBusinessDay'><Trades></Trades></FlexStatement>"
+        "</FlexStatements></FlexQueryResponse>"
+    )
+    config = _ssh_config(tmp_path / "ssh_config")
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    code = pull.run(
+        config=config,
+        inbox=inbox,
+        runner=FakeSftp({"quiet.gpg": quiet.encode()}),
+        decrypt=lambda data, **k: data.decode(),
+        ingest=lambda xml_text, source_path="": {"ok": True},
+    )
+    assert code == 0
+    assert heartbeats[-1][0] == "ok"
+
+
+def test_run_without_ingest_drives_default_ingest(tmp_path, monkeypatch):
+    """The production wiring: `run()` with no `ingest=` must reach the writers. T-259."""
+    import flex_delivery_ingest
+    import flex_sftp_pull as pull
+    import journal_rehydrate
+
+    monkeypatch.setattr(pull, "_heartbeat", lambda *a, **k: None)
+    # T-250 (`db.writer.claim_flex_delivery` reads `rows_affected`) is a
+    # different change's lane; stub the claim at flex_delivery_ingest's own
+    # indirection with a stateful fake so the rest of the wiring runs for real.
+    claims: dict[str, dict] = {}
+
+    def fake_claim(digest, **kwargs):
+        if digest in claims:
+            return False
+        claims[digest] = kwargs
+        return True
+
+    monkeypatch.setattr(flex_delivery_ingest, "claim_flex_delivery", fake_claim)
+    rehydrated = []
+    monkeypatch.setattr(
+        journal_rehydrate,
+        "rehydrate",
+        lambda **kwargs: rehydrated.append(kwargs) or {"ok": True, "imported": 1, "skipped": 0},
+    )
+
+    config = _ssh_config(tmp_path / "ssh_config")
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    fake = FakeSftp({"trades.gpg": TRADES.read_bytes()})
+    code = pull.run(config=config, inbox=inbox, runner=fake, decrypt=lambda data, **k: data.decode())
+
+    assert code == 0
+    assert len(rehydrated) == 1
+    assert "NAK" in rehydrated[0]["xml_text"]
+    # Provenance is the inbox file the operator can find, not a random /tmp name.
+    assert list(claims.values())[0]["source_path"] == str(inbox / "trades.xml")
+    # Decrypted plaintext must not linger beside the .gpg.
+    assert list(inbox.glob("*.xml")) == []
+
+    code_again = pull.run(config=config, inbox=inbox, runner=fake, decrypt=lambda data, **k: data.decode())
+    assert code_again == 0
+    assert len(rehydrated) == 1
+
+
+def test_retain_newest_gpg_keep_zero_removes_all(tmp_path):
+    """`files[:-0]` is `files[:0]` — keep=0 must delete, not retain. T-259."""
+    import flex_sftp_pull as pull
+
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    for i in range(3):
+        (inbox / f"{i}.gpg").write_bytes(b"x")
+    pull.retain_newest_gpg(inbox, keep=0)
+    assert list(inbox.glob("*.gpg")) == []
