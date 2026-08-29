@@ -247,6 +247,51 @@ Reported 2026-08-25 as "502 on https://app.radon.run/admin".
 
 ---
 
+## assistant-turn-edge-504
+
+**A chat turn dies with `Assistant service returned an error.` and DevTools
+shows `POST /api/assistant -> 504` after tens of seconds.** Reported
+2026-08-29 after the operator pasted a chart and asked how it related to
+their TLT position.
+
+- **Mechanism:** `/api/assistant` rode the catch-all `handle` in
+  `cloud/caddy/Caddyfile`, whose R-219 guard abandons a request after
+  `response_header_timeout 30s`. The route is NON-STREAMING: it runs the whole
+  multi-round `runAssistantLoop` and writes its JSON only at the end, so a turn
+  emits no response header at all until it has finished, and it declares
+  `maxDuration = 300`. Any turn slower than 30 s therefore reached the operator
+  as a 504 while radon-nextjs was still working on it. The edge's 504 body is
+  not JSON, so `payload.error` in `requestAssistantTurn` was null and the chat
+  fell through to the generic string.
+- **Detection:** the browser gets a 504 on `POST /api/assistant`, but
+  `journalctl -u radon-nextjs | grep '\[assistant\] done'` shows the SAME turn
+  with `outcome=answered` and `ms=` above 30000. The answer existed; nobody
+  received it. `/var/log/caddy/radon.log` (root-readable only) carries the
+  matching `"status":504` with a ~30 s `duration`.
+- **Discriminating check:** an `outcome=error` journal line means the loop
+  itself failed and this is NOT the case (read the error). An `outcome=answered`
+  line whose `ms` exceeds the path's `response_header_timeout`, or no journal
+  line at all with the request still counted at the edge, is this case.
+- **Fix (`cloud/caddy/Caddyfile`):** a dedicated `handle /api/assistant*` with
+  `response_header_timeout 180s` and no `lb_try_duration` (POST-only path with
+  no idempotency key: a retry would replay a billed vision turn). Do NOT raise
+  the guard globally; R-219 needs the catch-all short so a wedged upstream
+  still becomes an observable 5xx.
+- **Known limit:** the bump only moves the cliff. A turn slower than 180 s
+  still 504s because nothing is written until the loop finishes. The durable
+  fix is for the route to start writing a response early (stream, or flush a
+  header before the first round).
+- **Publishing:** as with every edge change, the Caddyfile is NOT shipped by
+  the CI deploy. After merge, on the VPS as `radon`:
+  `sudo -n /usr/local/sbin/radon-deploy-root publish-caddy`.
+- **Regression:** `cloud/tests/test_caddy_edge_timeouts.py::TestTheAssistantTurnOutlivesTheGenericGuard`
+  (the assistant handle exists, outlasts the longest observed answered turn,
+  stays inside the route's own `maxDuration`, never retries, and the generic
+  30 s guard is untouched) and `web/tests/assistant-timeout-copy.test.ts`
+  (a 504 or 408 names the timeout instead of the generic error).
+
+---
+
 ## signals-refresh-curl-timeout-pages-p1
 
 **`radon-signals-refresh.service` oneshot pages P1 `Result=exit-code`

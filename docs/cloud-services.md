@@ -393,7 +393,7 @@ bounded.
 |---|---|---|
 | `radon-db-backup.timer` | VPS | Nightly **09:00 UTC** (after archive 05:40 + retention 08:10), `Persistent=true` |
 | `radon-db-backup.service` | VPS | Oneshot, `User=radon`, `TimeoutStartSec=3600` (libsql has no client timeouts — the unit bound is the real one) |
-| `radon-cloud/scripts/db_backup.py` / monorepo `cloud/scripts/db_backup.py` | VPS | Iterates `sqlite_master` — the ENTIRE DB, no hand-picked table list, so new migration tables are captured automatically. Paged `SELECT`s (500 rows/page). Emits portable SQL (schema + INSERTs), gzip'd to `/home/radon/radon-cloud/backups/db/radon-<UTC>.sql.gz`. Prunes dumps older than 30 days in-script. |
+| `radon-cloud/scripts/db_backup.py` / monorepo `cloud/scripts/db_backup.py` | VPS | Iterates `sqlite_master` — the ENTIRE DB, no hand-picked table list, so new migration tables are captured automatically. Paged `SELECT`s (500 rows/page). Emits portable SQL (schema + INSERTs), gzip'd to `/home/radon/radon-cloud/backups/db/radon-<UTC>.sql.gz`. Prunes dumps older than `RETENTION_DAYS` (7) in-script. |
 | `service_health` heartbeat | row `db-backup` | Written on EVERY run — `ok` with `{size_bytes, duration_secs, tables, rows, pruned}` detail, `error` with the failure summary. 48h freshness window. |
 | `com.radon.db-backup-pull` | laptop launchd | Daily rsync of dump dir over Tailscale into `data/db_backups/` (no `--delete`). |
 
@@ -534,7 +534,7 @@ Never touched: the running `ghcr.io/gnzsnz/ib-gateway` and
 `willfarrell/autoheal` images, `/home/radon/radon` (the live tree),
 `~/.cache/{ms-playwright,huggingface,fastembed,radon-wheels}`, and
 `/home/radon/radon-cloud/backups` — DB backup retention is `db_backup.py`'s
-`RETENTION_DAYS = 30` and shrinking it is an operator policy call.
+`RETENTION_DAYS = 7` (operator call 2026-08-29; was 30) and changing it is an operator policy call.
 
 A category that finds nothing is a normal run. A category that RAISES flips
 the heartbeat to `error` but does not fail the unit: a wedged docker daemon
@@ -921,7 +921,7 @@ automated off-box push, and is not a backup strategy.
 | Unit | Unchanged `radon-db-backup.service` + `.timer` (09:00 UTC). `TimeoutStartSec=19500` already covers dump + upload. |
 | Target | S3-compatible API to the existing B2 bucket `radon-archive`, prefix **`db_backups/`** (never collides with `portfolio_snapshots/` or `media/`). |
 | Credentials | `RADON_ARCHIVE_S3_*` from `/etc/radon/env` (already required-env). Optional per-field overrides `RADON_DB_BACKUP_S3_{ENDPOINT,BUCKET,ACCESS_KEY_ID,SECRET_ACCESS_KEY,REGION}` and `RADON_DB_BACKUP_PREFIX`, same shape as `RADON_MEDIA_BACKUP_S3_*`. |
-| Local retention | `RETENTION_DAYS = 30` — **unchanged**, operator policy. |
+| Local retention | `RETENTION_DAYS = 7` since 2026-08-29 (was 30 at cutover), operator policy; B2 is the archive. |
 | Remote retention | `REMOTE_RETENTION_DAYS = 365`. Off-boxing a 30-day window would buy nothing; a year of nightly dumps is ~190 GB in B2 at current sizes. |
 | Transport bound | Multipart at 64 MB chunks, 4 threads, botocore `connect_timeout=30` / `read_timeout=300` / 3 attempts, plus a `UPLOAD_BUDGET_SECS = 3600` wall-clock ceiling. |
 | Heartbeat | Existing `db-backup` row, extended detail: `offbox_bucket`, `offbox_prefix`, `offbox_uploaded`, `offbox_bytes_uploaded`, `offbox_deferred`, `offbox_remote_pruned`, and `offbox_error`. Summary gains `; b2 <uploaded>/<planned> (<bytes> B), deferred N, remote pruned N`. |

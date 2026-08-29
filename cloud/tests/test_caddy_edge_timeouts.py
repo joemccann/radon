@@ -43,23 +43,29 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from test_caddyfile import (  # noqa: E402
+    APP_UPSTREAM,
+    IB_UPSTREAM,
+    handle_block,
     held_port,
     port_of,
+    proxy_block,
     read_caddyfile,
     release_to_peer,
     retry_window_seconds,
     reverse_proxy_block,
     serve_on,
     stop_serving,
+    strip_comments,
     wait_for_listener,
 )
 
 
 REPO = Path(__file__).resolve().parents[2]
 WS_TICKET = REPO / "web" / "lib" / "wsTicket.ts"
+ASSISTANT_ROUTE = REPO / "web" / "app" / "api" / "assistant" / "route.ts"
 
-APP_UPSTREAM = "127.0.0.1:3000"
-IB_UPSTREAM = "127.0.0.1:8321"
+# The `handle` matcher that carries the assistant turn (R-262).
+ASSISTANT_MATCHER = "/api/assistant*"
 
 
 def _directive_seconds(block: str, name: str) -> float | None:
@@ -82,7 +88,7 @@ class TestUpstreamHangIsBounded:
         "directive", ["dial_timeout", "response_header_timeout", "read_timeout"]
     )
     def test_each_proxy_states_its_timeouts(self, caddy_dir, upstream, directive):
-        block = reverse_proxy_block(read_caddyfile(caddy_dir), upstream)
+        block = proxy_block(read_caddyfile(caddy_dir), upstream)
         assert _directive_seconds(block, directive) is not None, (
             f"{upstream} inherits Caddy's unlimited {directive}; an upstream "
             "that accepts the socket and never answers hangs forever and the "
@@ -91,7 +97,7 @@ class TestUpstreamHangIsBounded:
 
     @pytest.mark.parametrize("upstream", [APP_UPSTREAM, IB_UPSTREAM])
     def test_the_header_timeout_is_short_enough_to_surface(self, caddy_dir, upstream):
-        block = reverse_proxy_block(read_caddyfile(caddy_dir), upstream)
+        block = proxy_block(read_caddyfile(caddy_dir), upstream)
         seconds = _directive_seconds(block, "response_header_timeout")
         assert seconds is not None and seconds <= 60, (
             f"{upstream} response_header_timeout {seconds}s is too long to "
@@ -102,7 +108,7 @@ class TestUpstreamHangIsBounded:
 class TestNonIdempotentRetryIsRestricted:
     def test_the_app_proxy_states_its_retry_restriction(self, caddy_dir):
         content = read_caddyfile(caddy_dir)
-        block = reverse_proxy_block(content, APP_UPSTREAM)
+        block = proxy_block(content, APP_UPSTREAM)
         assert "retry_match" in block, (
             "POST /api/orders/place rides this block with a 15s retry loop and "
             "no stated restriction; order non-duplication must not rest on an "
@@ -110,7 +116,7 @@ class TestNonIdempotentRetryIsRestricted:
         )
 
     def test_the_restriction_names_only_safe_methods(self, caddy_dir):
-        block = reverse_proxy_block(read_caddyfile(caddy_dir), APP_UPSTREAM)
+        block = proxy_block(read_caddyfile(caddy_dir), APP_UPSTREAM)
         match = re.search(r"retry_match\s*\{([^}]*)\}", block) or re.search(
             r"retry_match\s+(.+)", block
         )
@@ -125,7 +131,7 @@ class TestReloadCanAccommodateTheRetry:
         grace = _grace_period_seconds(content)
         assert grace is not None
         windows = [
-            retry_window_seconds(reverse_proxy_block(content, upstream))
+            retry_window_seconds(proxy_block(content, upstream))
             for upstream in (APP_UPSTREAM, IB_UPSTREAM)
         ]
         assert grace >= max(windows), (
@@ -136,7 +142,7 @@ class TestReloadCanAccommodateTheRetry:
 
 class TestRideOutMatchesItsNamedClient:
     def test_the_ib_window_is_not_longer_than_getwsticket_waits(self, caddy_dir):
-        block = reverse_proxy_block(read_caddyfile(caddy_dir), IB_UPSTREAM)
+        block = proxy_block(read_caddyfile(caddy_dir), IB_UPSTREAM)
         window = retry_window_seconds(block)
         source = WS_TICKET.read_text(encoding="utf-8")
         match = re.search(r"AbortSignal\.timeout\((\d[\d_]*)\)", source)
@@ -146,6 +152,107 @@ class TestRideOutMatchesItsNamedClient:
             f"the edge rides out {window}s for a client that aborts at "
             f"{client_secs}s — the ticket fetch still fails, and the abandoned "
             "retry loop keeps dialling a connection nobody is reading"
+        )
+
+
+# The longest assistant turn the radon-nextjs journal has recorded answering
+# upstream: 2026-08-28 18:20:00 UTC, `[assistant] done rounds=2
+# outcome=answered toolCalls=3 ... ms=55278`. The edge killed the client's
+# request 25 seconds before that answer existed.
+OBSERVED_ANSWERED_TURN_SECONDS = 55.278
+
+
+class TestTheAssistantTurnOutlivesTheGenericGuard:
+    """2026-08-29: a pasted-chart turn 504'd at the edge while the route answered.
+
+    The operator pasted a chart and asked how it related to their TLT position.
+    The image uploaded, the turn ran, and the browser got
+    `POST /api/assistant -> 504` after tens of seconds; the chat rendered the
+    generic "Assistant service returned an error."
+
+    `/api/assistant` rode the catch-all `handle`, whose R-219 guard abandons a
+    request after 30 s without a response header. The route is NON-STREAMING
+    (`web/app/api/assistant/route.ts` runs the whole multi-round
+    `runAssistantLoop` and only then writes JSON), so a turn writes NO header
+    until it is completely finished — and it declares `maxDuration = 300`,
+    ten times the edge's patience. The journal proves the mismatch is real and
+    not hypothetical: one recorded turn answered at 55.3 s.
+
+    R-219 is still right for every other route: an upstream that accepts the
+    socket and never writes a header must become an observable 5xx quickly, or
+    a total front-end hang stays invisible to `@edge_health_status`. So the
+    assistant gets its OWN `handle` with its own bound, and the generic guard
+    below stays where it is. R-262.
+    """
+
+    def _assistant_block(self, caddy_dir):
+        content = read_caddyfile(caddy_dir)
+        return reverse_proxy_block(handle_block(content, ASSISTANT_MATCHER), APP_UPSTREAM)
+
+    def test_the_assistant_path_has_its_own_handle(self, caddy_dir):
+        block = self._assistant_block(caddy_dir)
+        assert _directive_seconds(block, "response_header_timeout") is not None, (
+            "/api/assistant has no handle of its own, so it rides the "
+            "catch-all's 30s header guard and every turn slower than that "
+            "reaches the operator as a 504"
+        )
+
+    def test_the_assistant_handle_precedes_the_catch_all(self, caddy_dir):
+        active = strip_comments(read_caddyfile(caddy_dir))
+        assistant = active.find("handle " + ASSISTANT_MATCHER)
+        catch_all = re.search(r"handle\s*\{", active)
+        assert assistant != -1 and catch_all
+        assert assistant < catch_all.start(), (
+            "handle blocks are mutually exclusive in written order; a "
+            "catch-all declared first swallows /api/assistant and the "
+            "dedicated bound never applies"
+        )
+
+    def test_the_assistant_bound_outlasts_an_observed_answered_turn(self, caddy_dir):
+        seconds = _directive_seconds(self._assistant_block(caddy_dir), "response_header_timeout")
+        # Twice the longest turn actually observed answering: a vision turn
+        # carrying a pasted chart plus the portfolio tool rounds the operator's
+        # question forces is strictly more work than that text turn was.
+        assert seconds >= 2 * OBSERVED_ANSWERED_TURN_SECONDS, (
+            f"response_header_timeout {seconds}s leaves no room over the "
+            f"{OBSERVED_ANSWERED_TURN_SECONDS}s turn the journal already "
+            "recorded answering; the 504 cliff has barely moved"
+        )
+
+    def test_the_assistant_bound_stays_inside_the_routes_own_budget(self, caddy_dir):
+        block = self._assistant_block(caddy_dir)
+        seconds = _directive_seconds(block, "response_header_timeout")
+        source = ASSISTANT_ROUTE.read_text(encoding="utf-8")
+        match = re.search(r"maxDuration\s*=\s*(\d+)", source)
+        assert match, "the assistant route no longer states a maxDuration"
+        assert seconds <= int(match.group(1)), (
+            f"the edge waits {seconds}s for a route that gives itself "
+            f"{match.group(1)}s; the extra wait can only ever be spent on a "
+            "request the route has already abandoned"
+        )
+        read_timeout = _directive_seconds(block, "read_timeout")
+        assert read_timeout is not None and seconds <= read_timeout, (
+            "response_header_timeout outlasts read_timeout, so the connection "
+            "is torn down before the header bound it is supposed to honour"
+        )
+
+    def test_the_assistant_block_never_replays_the_turn(self, caddy_dir):
+        block = self._assistant_block(caddy_dir)
+        assert retry_window_seconds(block) == 0, (
+            "a retry window on the assistant handle would replay a severed "
+            "POST /api/assistant: a second vision turn billed to the operator "
+            "and a second set of tool calls, with no idempotency key anywhere"
+        )
+
+    def test_the_generic_guard_is_still_in_force(self, caddy_dir):
+        """R-219 must not have been widened for everything else."""
+        seconds = _directive_seconds(
+            proxy_block(read_caddyfile(caddy_dir), APP_UPSTREAM), "response_header_timeout"
+        )
+        assert seconds is not None and seconds <= 60, (
+            f"the catch-all header guard is {seconds}s: raising it globally "
+            "undoes R-219, and a wedged upstream stops producing an "
+            "observable 5xx for every other route"
         )
 
 
@@ -380,7 +487,7 @@ class TestEdgeMechanism:
         )
 
     def test_a_hung_upstream_becomes_a_5xx_within_a_bound(self, caddy_dir, tmp_path):
-        block = reverse_proxy_block(read_caddyfile(caddy_dir), APP_UPSTREAM)
+        block = proxy_block(read_caddyfile(caddy_dir), APP_UPSTREAM)
         header_timeout = _directive_seconds(block, "response_header_timeout")
         assert header_timeout is not None
 
@@ -438,7 +545,7 @@ class TestEdgeMechanism:
                 caddy.wait(timeout=10)
 
     def test_a_severed_post_is_not_replayed(self, caddy_dir, tmp_path):
-        block = reverse_proxy_block(read_caddyfile(caddy_dir), APP_UPSTREAM)
+        block = proxy_block(read_caddyfile(caddy_dir), APP_UPSTREAM)
         _CountsPosts.seen = []
         # The client deadline is the edge's own retry window plus one dial, both
         # read from the shipped config: a severed POST cannot legitimately take
