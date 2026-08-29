@@ -109,6 +109,7 @@ if [[ "${RADON_DEPLOY_HELPER_TEST_MODE:-0}" == "1" ]]; then
   readonly ROOT_MUTATION_ACTION_TIMEOUT="${RADON_TEST_ROOT_MUTATION_ACTION_TIMEOUT:-${RADON_TEST_ROOT_ACTION_TIMEOUT:-180}}"
   readonly ROOT_VERIFY_ACTION_TIMEOUT="${RADON_TEST_ROOT_VERIFY_ACTION_TIMEOUT:-${RADON_TEST_ROOT_ACTION_TIMEOUT:-30}}"
   readonly ROOT_COMMIT_ACTION_TIMEOUT="${RADON_TEST_ROOT_COMMIT_ACTION_TIMEOUT:-${RADON_TEST_ROOT_ACTION_TIMEOUT:-30}}"
+  readonly ROOT_SYNC_ACTION_TIMEOUT="${RADON_TEST_ROOT_SYNC_ACTION_TIMEOUT:-${RADON_TEST_ROOT_ACTION_TIMEOUT:-300}}"
   readonly ROOT_KILL_AFTER="${RADON_TEST_ROOT_KILL_AFTER:-5}"
   readonly ROOT_LOCK_WAIT="${RADON_TEST_ROOT_LOCK_WAIT:-190}"
   readonly SESSION_PYTHON="${RADON_TEST_SESSION_PYTHON:-$(command -v python3)}"
@@ -118,6 +119,8 @@ if [[ "${RADON_DEPLOY_HELPER_TEST_MODE:-0}" == "1" ]]; then
   readonly CADDY_BIN="${RADON_TEST_CADDY_BIN:-}"
   readonly SYSTEMD_UNIT_DIR="${RADON_TEST_SYSTEMD_UNIT_DIR:-}"
   readonly GIT="${RADON_TEST_GIT:-$(command -v git)}"
+  readonly TAR="${RADON_TEST_TAR:-$(command -v tar)}"
+  readonly BOOTSTRAP_RUNNER="${RADON_TEST_BOOTSTRAP_RUNNER:-/bin/bash}"
   readonly RADON_GIT_DIR="${RADON_TEST_GIT_DIR:-}"
   readonly UNIT_REMOTE="${RADON_TEST_UNIT_REMOTE:-}"
   readonly SYSTEMD_DIR="${RADON_TEST_SYSTEMD_DIR:-}"
@@ -163,6 +166,7 @@ else
   readonly ROOT_MUTATION_ACTION_TIMEOUT=180
   readonly ROOT_VERIFY_ACTION_TIMEOUT=30
   readonly ROOT_COMMIT_ACTION_TIMEOUT=30
+  readonly ROOT_SYNC_ACTION_TIMEOUT=300
   readonly ROOT_KILL_AFTER=5
   readonly ROOT_LOCK_WAIT=190
   readonly SESSION_PYTHON=/usr/bin/python3.13
@@ -171,6 +175,8 @@ else
   readonly CADDY_BIN=/usr/bin/caddy
   readonly SYSTEMD_UNIT_DIR=/etc/systemd/system
   readonly GIT=/usr/bin/git
+  readonly TAR=/usr/bin/tar
+  readonly BOOTSTRAP_RUNNER=/bin/bash
   readonly RADON_GIT_DIR=/home/radon/radon/.git
   readonly UNIT_REMOTE=https://github.com/joemccann/radon.git
   readonly SYSTEMD_DIR=/etc/systemd/system
@@ -206,7 +212,7 @@ prepare_state_dir() {
 }
 
 if (( $# != 1 )); then
-  echo "usage: radon-deploy-root {stop-clean|restart-managed|recover|verify-restored|verify-control-plane|commit-transition|publish-caddy|install-units|revert-units|sync-scheduled-units|refresh-control-plane|refresh-control-plane-privileged}" >&2
+  echo "usage: radon-deploy-root {stop-clean|restart-managed|recover|verify-restored|verify-control-plane|commit-transition|publish-caddy|install-units|revert-units|sync-scheduled-units|sync-control-plane|refresh-control-plane|refresh-control-plane-privileged}" >&2
   exit 64
 fi
 
@@ -1002,6 +1008,83 @@ resolve_trusted_main_tip() {
   printf '%s\n' "$remote_sha"
 }
 
+# The GitHub main tip, required to be present in the local object store (the
+# deploy job fetches it as radon before asking). Unlike
+# resolve_trusted_main_tip this does NOT require HEAD to be the tip: it runs
+# before promote, while HEAD is still the previous release.
+resolve_fetched_main_tip() {
+  local remote_sha
+
+  unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+        GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_EXEC_PATH GIT_SSH GIT_SSH_COMMAND \
+        GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM \
+        GIT_SSL_NO_VERIFY GIT_HTTP_USER_AGENT GIT_PROXY_COMMAND || true
+
+  [[ -n "$GIT" && -n "$RADON_GIT_DIR" && -n "$UNIT_REMOTE" ]] || {
+    echo "control-plane trust-source paths are not configured" >&2
+    return 78
+  }
+  if [[ "$FORCE_GITHUB_REMOTE_CHECK" == "1" ]]; then
+    github_origin_is_allowed "$UNIT_REMOTE" || {
+      echo "control-plane remote is not the GitHub radon repo" >&2
+      return 76
+    }
+  fi
+  remote_sha="$(git_bounded ls-remote --refs "$UNIT_REMOTE" refs/heads/main | awk '{print $1}')" || {
+    echo "could not read the GitHub main tip" >&2
+    return 69
+  }
+  [[ "$remote_sha" =~ ^[0-9a-f]{40}$ ]] || {
+    echo "invalid GitHub main tip" >&2
+    return 69
+  }
+  git_bounded --git-dir="$RADON_GIT_DIR" cat-file -e "${remote_sha}^{commit}" || {
+    echo "local git store is missing the main tip; fetch origin main first" >&2
+    return 66
+  }
+  printf '%s\n' "$remote_sha"
+}
+
+# Installs the control-plane bundle (helpers, sudoers, polkit, control-plane
+# units and drop-ins) at the GitHub main tip by running that tip's own
+# bootstrap-control-plane.sh from a root-owned extraction. Same trust anchor
+# as install-units: content is read through the commit that GitHub reports as
+# main, never from the radon-writable working tree. Bootstrap owns the deploy
+# lock, refuses pending transitions, validates every artifact, installs
+# atomically, and rewrites the readiness manifest; a bundle that is already
+# current is a no-op. Before this verb every helper/sudoers/polkit edit, and
+# every root hot-patch of a drop-in, blocked all deploys at preflight until
+# a human ran bootstrap over SSH (2026-08-21, 2026-08-29). R-430.
+sync_control_plane() {
+  local tip workdir bootstrap rc
+
+  tip="$(resolve_fetched_main_tip)" || return $?
+  workdir="$(mktemp -d "${STATE_DIR}/control-plane-sync.XXXXXX")" || {
+    echo "could not create a root-owned control-plane staging tree" >&2
+    return 73
+  }
+  if ! git_bounded --git-dir="$RADON_GIT_DIR" archive --format=tar "$tip" cloud \
+      | "$TAR" -x -C "$workdir"; then
+    "$RM" -rf "$workdir"
+    echo "could not extract cloud/ at the GitHub main tip ${tip}" >&2
+    return 66
+  fi
+  bootstrap="${workdir}/cloud/scripts/bootstrap-control-plane.sh"
+  if [[ ! -f "$bootstrap" || -L "$bootstrap" ]]; then
+    "$RM" -rf "$workdir"
+    echo "GitHub main tip ${tip} ships no control-plane bootstrap" >&2
+    return 66
+  fi
+  printf 'sync-control-plane: reconciling the installed control plane with %s\n' "$tip"
+  if RADON_BOOTSTRAP_CLOUD_ROOT="${workdir}/cloud" "$BOOTSTRAP_RUNNER" "$bootstrap"; then
+    rc=0
+  else
+    rc=$?
+  fi
+  "$RM" -rf "$workdir"
+  return "$rc"
+}
+
 sync_scheduled_units() {
   local remote_sha allowlist manifest unit expected actual live
   local tmp dest installed=0
@@ -1434,6 +1517,11 @@ root_action_timeout() {
     refresh-control-plane|refresh-control-plane-privileged)
       printf '%s\n' "$ROOT_MUTATION_ACTION_TIMEOUT"
       ;;
+    sync-control-plane)
+      # git archive + bootstrap validation (systemd-analyze, visudo, node,
+      # py_compile) for the whole bundle; not in the job-cancel class.
+      printf '%s\n' "$ROOT_SYNC_ACTION_TIMEOUT"
+      ;;
     verify-restored|verify-control-plane)
       printf '%s\n' "$ROOT_VERIFY_ACTION_TIMEOUT"
       ;;
@@ -1538,6 +1626,9 @@ case "$1" in
     ;;
   sync-scheduled-units)
     sync_scheduled_units
+    ;;
+  sync-control-plane)
+    sync_control_plane
     ;;
   refresh-control-plane)
     refresh_control_plane
