@@ -15,7 +15,7 @@ import { flowReportErrorCopy } from "@/lib/flowReportError";
  * of window copy derives from this or from the payload's own
  * `lookback_days`; hardcoding it told the operator "5 sessions" during the
  * scan and "20 Trading Days" when it landed. R-357. */
-const DEFAULT_LOOKBACK_DAYS = 20;
+export const DEFAULT_LOOKBACK_DAYS = 20;
 
 type Props = {
   ticker: string;

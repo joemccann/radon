@@ -39,3 +39,30 @@ export function computeCtaImageHeight({
   const height = TITLE_H + sections * SECTION_H + rows * ROW_H + PADDING_H;
   return Math.max(1, Math.min(height, MAX_IMAGE_HEIGHT));
 }
+
+/**
+ * Truncate every table to a SHARED row budget, in place.
+ *
+ * Lives here rather than inline in the route so the behaviour is testable
+ * without booting an ImageResponse. Two things it has to get right:
+ *
+ *  - a cache file carrying `"tables": {"main": null}` must render, not throw.
+ *    The original read `data.tables[key].length` off the ORIGINAL (possibly
+ *    null) value even though the line above had substituted []. R-376.
+ *  - once the budget is exhausted the remaining tables truncate to EMPTY.
+ *    A negative `budget` handed straight to `slice` drops rows off the END
+ *    and keeps the rest, so the plate silently grows past MAX_IMAGE_ROWS.
+ */
+export function truncateCtaTables<T>(
+  tables: Record<string, T[] | null | undefined>,
+  max: number = MAX_IMAGE_ROWS,
+): Record<string, T[]> {
+  let budget = max;
+  for (const key of Object.keys(tables)) {
+    const rows = tables[key] ?? [];
+    const kept = rows.slice(0, Math.max(0, budget));
+    tables[key] = kept;
+    budget -= kept.length;
+  }
+  return tables as Record<string, T[]>;
+}
