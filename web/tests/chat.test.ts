@@ -44,8 +44,14 @@ test("routeToPiPrompt routes direct commands", () => {
 test("routeToPiPrompt routes aliases", () => {
   expect(routeToPiPrompt("compare support vs against")).toBe("/scan --top 20");
   expect(routeToPiPrompt("action items")).toBe("/journal --limit 25");
-  expect(routeToPiPrompt("watch list")).toBe("/scan --top 12");
-  expect(routeToPiPrompt("watchlist")).toBe("/scan --top 12");
+});
+
+test("routeToPiPrompt does not map watchlist phrases to /scan", () => {
+  expect(routeToPiPrompt("review watch list")).toBe(null);
+  expect(routeToPiPrompt("watch list")).toBe(null);
+  expect(routeToPiPrompt("watchlist")).toBe(null);
+  expect(routeToPiPrompt("/scan")).toBe("/scan");
+  expect(routeToPiPrompt("portfolio")).toBe("/portfolio");
 });
 
 test("routeToPiPrompt routes analyze to evaluate", () => {

@@ -24,9 +24,6 @@ export const PI_COMMAND_ALIASES: Record<string, string> = {
   "compare support vs against": "/scan --top 20",
   "action items": "/journal --limit 25",
   "what are action items": "/journal --limit 25",
-  "review watch list": "/scan --top 12",
-  "watch list": "/scan --top 12",
-  "watchlist": "/scan --top 12",
 };
 
 export const NAV_GROUP_LABEL: Record<import("./types").NavGroupId, string> = {
