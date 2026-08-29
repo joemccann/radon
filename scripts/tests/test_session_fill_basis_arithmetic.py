@@ -223,3 +223,128 @@ class TestMixedLegBasisIsNamed:
 
     def test_no_legs_is_none(self):
         assert ib_sync._position_basis_source([]) is None
+
+
+class TestMixedBasisRefusesToAggregate:
+    """T-253: naming the blend is not enough — the blend must not ship.
+
+    Roll the short leg of a debit vertical intraday and hold the long leg
+    overnight: the rolled leg takes today's session VWAP, the held leg keeps
+    IB's lagged avgCost, and `total_entry_cost` sums them into a number that
+    corresponds to no actual trade. `max_risk` for a defined-risk structure is
+    that same number, and Gate 3 sizes the 2.5% bankroll cap off it.
+    """
+
+    EXPIRY = "20260828"
+
+    def _position(self, *, strike, right, qty, ib_avg_cost):
+        contract = SimpleNamespace(
+            symbol="META", secType="OPT", strike=strike, right=right,
+            lastTradeDateOrContractMonth=self.EXPIRY, multiplier="100",
+            currency="USD", conId=int(strike) * 10 + (1 if right == "C" else 2),
+        )
+        return SimpleNamespace(
+            contract=contract, position=qty, avgCost=ib_avg_cost, account="U1",
+        )
+
+    def _collapse_partially_rolled_vertical(self):
+        """Long 575C on yesterday's IB basis, short 580C rolled today."""
+        client = SimpleNamespace(get_positions=lambda: [
+            self._position(strike=575.0, right="C", qty=10, ib_avg_cost=500.0),
+            self._position(strike=580.0, right="C", qty=-10, ib_avg_cost=300.0),
+        ])
+        # Only the SHORT leg was traded this session.
+        rolled = [
+            _fill(side="SLD", shares=10, price=4.00, avg_price=4.00,
+                  strike=580.0, expiry=self.EXPIRY,
+                  time="2026-08-28T10:15:00"),
+        ]
+        positions = ib_sync.fetch_positions(
+            client, fill_basis_lookup=ib_sync.build_fill_basis(rolled)
+        )
+        return positions, ib_sync.collapse_positions(positions)
+
+    def test_only_one_leg_is_on_session_basis(self):
+        positions, _ = self._collapse_partially_rolled_vertical()
+        by_strike = {p["strike"]: p for p in positions}
+        assert by_strike[580.0]["basis_source"] == "session_fills"
+        assert by_strike[575.0]["basis_source"] == "ib"
+
+    def test_a_blended_entry_cost_is_not_published(self):
+        _, collapsed = self._collapse_partially_rolled_vertical()
+        [pos] = collapsed
+        assert pos["basis_source"] == "mixed"
+        assert pos["entry_cost"] is None, (
+            "$5,000 of yesterday's IB avgCost minus $4,000 of today's session "
+            "VWAP is a basis for a trade that was never placed"
+        )
+
+    def test_max_risk_is_not_derived_from_a_blended_basis(self):
+        _, collapsed = self._collapse_partially_rolled_vertical()
+        [pos] = collapsed
+        assert pos["risk_profile"] == "defined"
+        assert pos["max_risk"] is None, (
+            "Gate 3 sizes the 2.5% bankroll cap off max_risk"
+        )
+
+    def test_an_all_session_vertical_still_publishes_its_basis(self):
+        """The refusal is scoped to `mixed` — a fully covered structure is fine."""
+        client = SimpleNamespace(get_positions=lambda: [
+            self._position(strike=575.0, right="C", qty=10, ib_avg_cost=500.0),
+            self._position(strike=580.0, right="C", qty=-10, ib_avg_cost=300.0),
+        ])
+        fills = [
+            _fill(side="BOT", shares=10, price=6.00, avg_price=6.00,
+                  strike=575.0, expiry=self.EXPIRY, time="2026-08-28T10:15:00"),
+            _fill(side="SLD", shares=10, price=4.00, avg_price=4.00,
+                  strike=580.0, expiry=self.EXPIRY, time="2026-08-28T10:15:00"),
+        ]
+        positions = ib_sync.fetch_positions(
+            client, fill_basis_lookup=ib_sync.build_fill_basis(fills)
+        )
+        [pos] = ib_sync.collapse_positions(positions)
+        assert pos["basis_source"] == "session_fills"
+        assert pos["entry_cost"] == pytest.approx(2000.0)
+        assert pos["max_risk"] == pytest.approx(2000.0)
+
+
+class TestDeployedCapitalNamesWhatItCannotMeasure:
+    """T-253 lead follow-up. Refusing to publish a blended `entry_cost` makes
+    `total_deployed_dollars` an UNDER-statement, and therefore
+    `remaining_capacity_pct` an OVER-statement — the unsafe direction for
+    Gate 3's 2.5% cap. The omission must be countable, never silent."""
+
+    @staticmethod
+    def _payload(entry_costs):
+        import ib_sync
+
+        collapsed = [
+            {
+                "id": f"p{i}",
+                "entry_cost": cost,
+                "risk_profile": "defined",
+            }
+            for i, cost in enumerate(entry_costs)
+        ]
+        return ib_sync.convert_to_portfolio_format(
+            {"NetLiquidation": 100_000.0}, collapsed, {}
+        )
+
+    def test_a_fully_measured_book_reports_no_omissions(self):
+        payload = self._payload([1_000.0, 4_000.0])
+
+        assert payload["unmeasured_basis_count"] == 0
+        assert payload["total_deployed_dollars"] == 5_000.0
+        assert payload["remaining_capacity_pct"] == 95.0
+
+    def test_a_mixed_basis_position_is_counted_not_silently_dropped(self):
+        payload = self._payload([1_000.0, None, 4_000.0])
+
+        assert payload["unmeasured_basis_count"] == 1, (
+            "a position with no measurable basis vanished from deployed "
+            "capital without being counted, so remaining_capacity_pct reads "
+            "as a fact when it is a ceiling"
+        )
+        # The measured floor is still published, and still honest about being
+        # a floor by virtue of the count above.
+        assert payload["total_deployed_dollars"] == 5_000.0

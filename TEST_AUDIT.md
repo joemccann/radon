@@ -5392,6 +5392,1337 @@ base so the range is re-covered.
 So this run works the newest **P2** stragglers in severity-then-recency order,
 which is the next rung of the PART B contract.
 
+
+## Delta audit 2026-08-29
+
+Range `789aabea..f7b5eeb9` — 61 commits, 366 files, +36023/-2510.
+113 added / 252 modified / 1 deleted; **74 test files added, 116 modified**.
+New findings continue the frozen numbering at **T-250**. PART A (§1–§10) is
+untouched; nothing above this line was rewritten.
+
+**Base note.** The base is `789aabea` (the 2026-08-27 ledger SHA), NOT
+`c6d08fbd`: the 2026-08-28 audit phase was truncated at the harness
+background-wait ceiling (T-239) and explicitly did not advance the ledger. The
+range therefore overlaps last weekend's own remediation — PRs #111/#112 and
+#127/#128 are inside it — and those commits were re-triaged as ordinary delta
+rather than exempted.
+
+**Pre-flight.** Runner clone verified (`.radon-weekend-runner` present, tree
+clean apart from the wrapper's own lock). `rtk` is NOT installed on this host,
+so bare `git` is correct and its output trustworthy (the 2026-08-16 rtk rail
+applies only where the proxy exists). `node` was absent from the agent PATH
+until `~/.nvm/versions/node/v24.14.0/bin` was prepended. The SYSTEM
+`python3.13` has no pytest at all; every gate ran from
+`~/radon-weekend/venv/bin/python3.13` (pytest 9.1.1 + `pytest-asyncio` +
+`pytest-xdist`). `gh` GraphQL is 401 on this host — all GitHub reads went
+through `gh api` REST. `origin/testing/2026-08-29` did not exist at pre-flight;
+it was created and pushed EMPTY immediately per the collision rail. Open PRs at
+pre-flight were #126 and #125, both WIP docs/profile work matching no finding
+subject. All scratch was namespaced to `/tmp/tw-2026-08-29/`.
+
+**Today is Saturday 2026-08-29,** so this audit ran with the weekend-dependent
+class LIVE rather than hypothetical — see the note under T-273.
+
+**Load.** The host ran at load average **74 → 224** for the whole audit
+(`corespotlightd` at 589% CPU, six audit agents, and the reliability loop in
+its own clone). Every timing-shaped red below was re-run in isolation before
+being called anything.
+
+### Standing sweeps
+
+**Gates, round 1, serial, from the repo root (clean tree, HEAD `f7b5eeb9`).**
+Load average during the run was **74 → 224** (`corespotlightd` at 589% CPU plus
+six audit agents plus the reliability loop in its own clone), so every
+timing-shaped red below was re-run in isolation before being called anything.
+
+| Gate | Round 1 | Isolated re-run |
+|---|---|---|
+| `python3.13 -m pytest` (recursive) | **3 failed** / 8558 passed / 1 skipped / 90 deselected, 870 s | all 3 green, `4 passed in 14.82s` |
+| `npx vitest run` | **9 failed** / 7934 passed / 8 skipped (7951), 787 files, 145 s | 9 failed / 18 passed in 3.35 s — DETERMINISTIC, not load |
+| `python3.13 -m pytest cloud/tests` | **37 failed** / 1263 passed / 7 skipped, 272 s | see the darwin baseline below |
+
+**The pytest reds are load, and the distribution says so.** Three failures in
+three unrelated files, all timing-shaped: `assert 2.5310465410002507 < 1.0`
+(`test_divyield.py:420`) and two `assert 1 >= 2` on a retry that had not fired
+(`test_leap_capacity_shed_retry.py:241`,
+`test_leap_garch_no_duplicate_scan.py`). All four tests pass together in
+14.8 s in isolation, at load 162. This is the 2026-08-23 profile
+(scattered + timing-shaped = load), not the 2026-08-27 one (concentrated +
+AttributeError-shaped = real). CI at this SHA had all ten pytest shards green,
+which agrees.
+
+**The vitest reds are NOT load, and are all in files CI does not run.** All 9
+are in `web/tests/integration.test.ts`, `lib/tools/__tests__/kelly.test.ts` and
+`lib/tools/__tests__/runner.test.ts` — the exact three files `ci.yml:143-145`
+excludes with `--exclude`. Isolated they are 9 failed / 18 passed in 3.35 s,
+3/3 identical. So the CI-GATED vitest set is fully green at 7934, and 27 tests
+run nowhere while 9 of them are permanently red on a developer machine.
+
+**The darwin cloud baseline moved 35 → 37, and the LIST explains all of it.**
+Attributed by running the base SHA in a worktree
+(`git worktree add --detach /tmp/tw-2026-08-29/base-wt 789aabea`), sorting both
+`FAILED` lists and diffing them, per the 2026-08-22 rail. Base `789aabea`:
+`35 failed, 1098 passed, 13 skipped`. HEAD `f7b5eeb9`:
+`37 failed, 1263 passed, 7 skipped` (+165 passing tests, matching the five new
+`cloud/tests` files). The diff is exactly four lines:
+
+- **NEW at HEAD (3), all deliberate:**
+  `test_caddy_edge_timeouts.py::TestEdgeMechanism::{test_a_hung_upstream_becomes_a_5xx_within_a_bound, test_a_severed_post_is_not_replayed, test_the_shipped_caddyfile_adapts}`.
+  These are T-205's fix working as designed — this host has no `caddy` binary
+  and `RADON_CADDY_BIN` is unset, so the suite now FAILS loudly where it used
+  to skip silently. Confirmed: `command -v caddy` empty. Not a regression.
+- **GONE at HEAD (1), an improvement:**
+  `test_relay_container_watchdog.py::test_wedged_child_misses_watchdog_inside_container_env`
+  failed at the base SHA and passes at HEAD.
+
+**Recorded darwin baseline for the next run: `37 failed, 1263 passed, 7 skipped`
+on a host with no `caddy` and no GNU coreutils** (34 of the 37 are the standing
+`sha256sum` / `bash >= 4` class, T-118).
+
+**Collection union — clean; T-122 holds.** Recursive `pytest --collect-only -q`
+and the union of all ten `py-tests` shard path-sets both report 8562 collected
+(8652 − 90 deselected); `comm -23` empty in both directions. My local run's
+8558 passed + 3 failed + 1 skipped = 8562 exactly, and the ten CI shard pass
+counts sum to 8561 (= 8562 − 1 skipped). `cloud/tests` 38/38 files, 1307 tests.
+`npx vitest list --filesOnly` = 787 = the filesystem count under the six include
+globs. Every one of the delta's 35 new pytest files and 30 new vitest files is
+reached. The T-122 directory class is now actively asserted by
+`scripts/tests/test_ci_deploy_concurrency.py:336,444`.
+
+**Enforcement — improved at the workflow level, still absent at the branch.**
+`stage-release.needs` GAINED `web-coverage` and `py-coverage` in this delta
+(`ci.yml:580`); `deploy.needs`/`if:` byte-identical at both refs
+(`ci.yml:664`). No T-160-class drop. But
+`gh api repos/joemccann/radon/branches/main/protection` still returns no
+`required_status_checks` key at all — re-confirmed this run, unchanged since
+T-222.
+
+**Coverage-ratchet honesty — clean.** vitest lines 75 / functions 71 /
+branches 65 unchanged; `coverage.exclude` 20 entries unchanged; the three
+ci.yml `--exclude` flags unchanged; pytest `--fail-under=56` unchanged;
+`[tool.coverage.run] omit` 4 entries unchanged; `branch = true` still set;
+`--expect-shards` still 8. `pyproject.toml`, `.coveragerc` and `setup.cfg` are
+untouched in the delta. The only `vitest.config.ts` change PINS `TZ`/`LC_ALL`/
+`LANG` — a tightening. The only `ci.yml` changes are the `stage-release.needs`
+widening and a caddy-install step that UN-skips
+`cloud/tests/test_caddy_edge_timeouts.py::TestEdgeMechanism`. Nothing lowered,
+nothing newly inflated.
+
+**New skips — one, and it is honest.**
+`cloud/tests/test_app_plane_cutover_safety.py:100` marks from a single-entry
+`DROP_IN_SKIP_BASELINE` (`:82-89`) whose reason cites **T-204** and whose
+comment says the dict "may shrink, never grow"; declared at collection so `-rs`
+counts it. Zero added `it.skip` / `describe.skip` / `.only` / `.todo` / `xit` /
+`xdescribe` / `@unittest.skip` / `pytest.mark.xfail` across all 47,036 added
+lines (parsed with a python3.13 line-tracker over added lines only, per the
+BSD-grep lesson). The `skipif` hits at `test_caddy_edge_timeouts.py:333-335`
+are a meta-test asserting the skipif EXISTS, paired with the new install step —
+the opposite of a skip. Eight added bare `return`s, all in handler callbacks or
+following an `expect(...)`.
+
+**Determinism scope.** The delta touches 190 of the repo's test files (74 added,
+116 modified), so the "re-run only delta-touched files 3×" rule again collapses
+into full-gate runs. The scoped 3× was therefore run over the 35 ADDED pytest
+files and the 30 ADDED vitest files instead; results in the table above.
+
+### Re-triage of the standing NEW_FINDINGS items
+
+- **`resolveSpreadPriceData` still stamps the wall clock — CLOSED, FIXED.**
+  Recorded 2026-08-26 as "the fix is now a one-liner" and left for this audit to
+  number. It does not need numbering: `web/lib/positionUtils.ts:503` now reads
+  `timestamp: natural.asOf ?? ""`, and `grep "new Date().toISOString()"
+  web/lib/positionUtils.ts` returns nothing. Landed inside one of the two
+  weekend PRs in this range. Removing it from the standing list.
+
+- **Six more producers construct their API client outside a health block —
+  STILL OPEN, unchanged.** `_UNGUARDED_CTOR_BASELINE`
+  (`scripts/tests/test_service_registration_completeness.py:485-492`) still
+  holds exactly the six entries recorded on 2026-08-26
+  (`fetch_credit_spread.py::fetch_uw_closes`,
+  `fetch_iei_hyg.py::fetch_uw_closes`, `fetch_ivrank.py::_real_ib_fetch`,
+  `fetch_trin.py::sample_live`, `fetch_vixcor.py::run`,
+  `ib_reconcile.py::connect_ib`), with the companion
+  `test_the_baseline_has_no_stale_entries` still guarding shrink-only. Nothing
+  in this delta touched them. Carried forward, still un-numbered by design —
+  each needs its own red/green.
+
+- **E2E testid backlog — STILL OPEN and now measurably WORSE, promoted to
+  T-271 and T-309.** The delta added five e2e specs; none adopted testids for
+  the surfaces they drive (`chain-deck-ticket-scroll.spec.ts` hangs on six raw
+  class chains) and none entered the curated CI list. This is the first delta
+  where the backlog grew rather than eroded.
+
+- **`pytest cloud/tests` is N-red on macOS — the baseline MOVED again, 35 → 37,
+  and every line of the move is explained.** See the darwin baseline paragraph
+  in the sweeps above: the list, not the count, is what settled it, and the base
+  SHA was RUN in a worktree rather than reasoned about. The item stays open —
+  the honest fix is still a portable digest, not another skip.
+
+- **The unreproduced 10-failure vitest round (2026-08-17) — the remedy
+  WORKED.** That item's one actionable was "the weekend loop should persist
+  per-test vitest output on gate runs so the next occurrence is nameable in one
+  shot." This run's gate script writes the full reporter output to
+  `/tmp/tw-2026-08-29/gates/vitest-r1.txt`, and the 9 reds were named,
+  attributed and reproduced in one pass (T-276) instead of being logged as an
+  unnamed observation. Keeping the item open only as the record of why the gate
+  script writes files.
+
+- **`e2e/performance-twr-payload.spec.ts` permanently RED, and the Day Move
+  dev-vs-`next start` divergence — BOTH UNCHANGED.** Neither spec appears
+  anywhere in `.github/workflows/ci.yml` (grep returns nothing), so both remain
+  local-only reds held out of the curated list. No delta commit touched either
+  contract. Carried forward.
+
+- **Pre-existing cross-file pollution in `orders-place-cache-race.test.ts` —
+  REPRODUCED, and the DIAGNOSIS was wrong. Numbered as T-311.** The 2026-08-28
+  log recorded one red under a three-file combination and stated the file was
+  "6-passed ×3 in isolation", concluding cross-file pollution. Re-run at HEAD:
+  the three-file combination is `2 failed / 27 passed`, and the file **in
+  isolation, with no other file in the run**, is `1 failed | 5 passed` on run 1
+  and `6 passed` on run 2 — the same case, the same
+  `AssertionError: expected 0 to be greater than 0`. So the other two files are
+  incidental and the race is intra-file, at
+  `web/tests/orders-place-cache-race.test.ts:131`. Promoted out of the standing
+  list and filed as **T-311**.
+
+### P0
+
+- **T-250 [P0] `claim_flex_delivery` reads an attribute the libsql driver does
+  not have, so it returns `False` unconditionally and the ENTIRE Flex ingest is
+  a silent no-op.** `scripts/db/writer.py:687` is
+  `int(getattr(result, "rows_affected", 0) or 0) > 0`. Verified in-process
+  against the repo's pinned `libsql-experimental==0.0.55`
+  (`requirements.txt:43`): `Connection.execute()` returns a `builtins.Cursor`
+  whose attributes are
+  `['arraysize','close','description','execute','executemany','executescript','fetchall','fetchmany','fetchone','lastrowid','rowcount']`
+  — **`rows_affected` is absent**, `rowcount` is 1 on the first insert and 0 on
+  the conflicting one. `getattr(..., 0)` therefore yields `0` and the claim is
+  `False` even on FIRST sight. Every other rowcount consumer in the repo uses
+  `rowcount` (`scripts/db/writer.py:311`, `:2238`,
+  `scripts/db/retention.py:191`); `rowsAffected` is the JS driver's name
+  (`scripts/db/writer.js:280`). Second defect on the same lines: this is the
+  only INSERT among 60+ writers in `writer.py` with no `db.commit()`.
+  **What ships:** `scripts/flex_delivery_ingest.py:47-60` takes the
+  `"outcome": "duplicate"` branch for every delivery and returns `ok: True`, so
+  `cash_flow_sync`, `perf_twr_builder.build_and_persist` and
+  `journal_rehydrate.rehydrate` are never invoked for any Flex statement.
+  `scripts/flex_sftp_pull.py:253-255` sees `ok=True`, increments `ingested`,
+  heartbeats `"ok"` and exits 0. `radon-flex-pull.timer` (Tue..Sat 07:30 +
+  08:30 ET) reports green forever while `cash_flows`, `journal` and the TWR
+  series never advance — and the claim row IS inserted, so it is unrecoverable
+  without a manual `DELETE FROM flex_deliveries`. Nothing pages. This goes live
+  with the first IBKR drop on **2026-08-31, in two days**.
+  **Why no test catches it:** all four test references
+  (`scripts/tests/test_flex_delivery_fingerprint.py:82,114,135`,
+  `test_flex_delivery_ingest_atomicity.py:42`) `monkeypatch.setattr` the
+  indirection at `flex_delivery_ingest.py:34`. `db.writer.claim_flex_delivery`
+  has **zero** callers in any test.
+  **AC:** RED — bind a real libsql/sqlite `:memory:` over `db.client.get_db`,
+  apply `scripts/db/migrations/0059_flex_deliveries.sql`, assert
+  `claim_flex_delivery(sha, classified_as="activity") is True` then `is False`,
+  assert the row survives a fresh connection (pins the commit), and assert an
+  end-to-end `ingest_xml` runs both writers on the first call and neither on
+  the second. GREEN — `rowcount` + `db.commit()`. Restoring `rows_affected`
+  must red it. *(Converged: found independently by the coverage agent and the
+  flex agent, and re-verified by the lead against the installed driver.)*
+
+- **T-251 [P0] The file CLAUDE.md names as the wire-assertion REFERENCE does
+  not assert the wire.** `web/tests/chain-transmit-gate.test.tsx:143-146`:
+  `fetchMock.mock.calls.some(([input]) => String(input).includes("/api/orders/place"))`.
+  `OptionsChainTab.tsx:556-560` POSTs a combo body with
+  `action: getComboEntryAction(...)`, `quantity`, a SIGNED `limitPrice`, and
+  `legs[].ratio`. `.some(includes(...))` accepts a wrong action, an inverted
+  sign on `limitPrice` (a debit transmitted as a credit), a wrong leg ratio,
+  and — because it is `.some`, not `.toHaveLength(1)` — a double-send. The
+  paired closed-gate half at `:128` stops at
+  `expect(transmitButton().disabled).toBe(true)`, i.e. at the button, so
+  nothing in this file proves the gate is closed ON THE WIRE either. CLAUDE.md
+  cites this exact file as the exemplar for the rule it violates.
+  **AC:** RED — negate `signedLimitPrice` in `OptionsChainTab.tsx`; the file
+  stays green. GREEN — the
+  `web/tests/admin-action-request-assertions.test.tsx:164-167` shape:
+  `expect(sent).toHaveLength(1)`, `sent[0].url === "/api/orders/place"`,
+  `sent[0].method === "POST"`, `JSON.parse(sent[0].body)` matched field by
+  field; plus a `toHaveLength(0)` after driving the React `onClick` past
+  `disabled` while unacknowledged.
+
+- **T-252 [P0] (delta to T-211) The mobile transmit gate's ARMED half asserts a
+  count over a URL substring — no method, no payload.** T-211 fixed the CLOSED
+  half; the armed half was not. `web/tests/mobile-ticket-transmit-gate.test.tsx:108-110`
+  defines `placeCalls()` as
+  `fetchMock.mock.calls.filter(([url]) => String(url).includes("/api/orders/place"))`
+  and `:167` asserts only `toHaveLength(1)`. `MobileOrderTicket.tsx:483-518`
+  builds `action`, `quantity`, `limitPrice`, `tif`, `legs[]` and
+  `ibPlaceFields`. Mutations that stay green: flipping `action` at `:504` (a
+  long call transmits as a naked short call), `quantity: 1` against the 10-lot
+  fixture, dropping `...ibPlaceFields(...)` so a STP goes as a bare market
+  order, or switching `method` to `"GET"`.
+  **AC:** RED — flip `action` at `MobileOrderTicket.tsx:504`. GREEN — capture
+  `[input, init]`; assert `String(input) === "/api/orders/place"`,
+  `init.method === "POST"`, and `JSON.parse(init.body)` deep-equals the
+  expected option body.
+
+- **T-253 [P0] `basis_source: "mixed"` is minted for the exact money-path case
+  it was added to protect, and NOTHING consumes it — the blended `entry_cost`
+  and `max_risk` still ship.** `scripts/ib_sync.py:503-513`
+  (`_position_basis_source`), `:661` (the label), `:542-547`
+  (`total_entry_cost` sums leg `entry_cost` unconditionally), `:580-587`
+  (`max_risk = total_entry_cost`, or `width - abs(total_entry_cost)`). The
+  source comment at `:650-660` states the remedy explicitly: *"`mixed` names
+  it, so the display layer can refuse to aggregate rather than presenting a
+  blended basis as fact."* No display layer does — `grep -rn basis_source web`
+  returns **0 hits**, and `web/lib/types.ts` gained `outsideRth` and
+  `LeapBestContract` in this delta but not `basis_source`. R-374 is LABELLED,
+  not fixed.
+  **What ships:** roll the short leg of a debit vertical intraday and hold the
+  long leg overnight. The rolled leg gets today's session VWAP, the held leg
+  keeps IB's lagged `avgCost`, `collapse_positions` sums them, `max_risk`
+  inherits the blend, and the ticket renders a max-loss for a trade that was
+  never placed. **Gate 3 sizes the 2.5% bankroll cap off that number.**
+  **Why no test catches it:** `scripts/tests/test_session_fill_basis_arithmetic.py:205-225`
+  tests `_position_basis_source` as a pure function over synthetic leg dicts.
+  Nothing feeds a genuinely mixed leg set through `collapse_positions` and
+  asserts the resulting `entry_cost` / `max_risk`, and no web test renders a
+  `mixed` position.
+  **AC:** RED — build two legs for one ticker/expiry, one covered by
+  `fill_basis_lookup` and one not; run `fetch_positions` → `collapse_positions`;
+  today the collapsed row carries a blended number. GREEN — `entry_cost` and
+  `max_risk` are `None` (or carry an explicit `unmeasured` marker) and the web
+  cells render `---`. Making `_position_basis_source` return `"session_fills"`
+  for the mixed case must red both halves.
+
+- **T-254 [P0] The deploy rollback restores a release whose own CI gate never
+  passed, and logs that it did.** `cloud/scripts/deploy.sh:1476` prints
+  `"Rollback complete. Previous release ${prev_commit} passed the deploy gate."`
+  It is not checked. Observed live this run: CI run `33239774951` at HEAD
+  `f7b5eeb9` had all 27 test jobs GREEN and `Deploy to VPS` FAILED
+  (`[ERROR] [gate] relay listener never accepted a connection` …
+  `[ERROR] Post-deploy gate failed`), and rolled back to `e4bc7171`. But
+  `e4bc7171`'s own CI run `33197706791` concluded **failure** at
+  `pytest (cloud mz)`, with `Prestage VPS release` and `Deploy to VPS`
+  **skipped** — verified over the REST API. So production is now serving a SHA
+  the gate rejected, while the log asserts the opposite. Eight commits on
+  `main` (`f7b5eeb9, 35071d85, ae96c05b, 923d9fd8, 8cd7909b, 6d55f99e,
+  5d37599c, 9cd607b8`) are not in production, including BOTH
+  `fix(health): sidecar … must not page edge aggregate_down` commits, so the
+  paging defect they fix is still live. The release gate is enforced on the
+  forward path only.
+  **AC:** RED — a `cloud/tests` case driving the rollback path with a
+  `prev_commit` whose CI conclusion is `failure`; today it rolls back and
+  prints the reassurance. GREEN — the rollback resolves the target SHA's own
+  `ci.yml` conclusion and refuses (or downgrades the message to an explicit
+  warning) when it is not `success`. *(The deploy failure itself is the
+  reliability loop's lane; the untested, false assertion in the rollback path
+  is this one's.)*
+
+### P1
+
+- **T-255 [P1] `sftp ls` is multi-column by default, so only the LAST file on
+  each line is ever pulled.** `scripts/flex_sftp_pull.py:79` sends the batch
+  `cd outgoing\nls` with no `-1`, and `:86-89` parses
+  `line.strip().split()[-1]`. `man 1 sftp` documents `-1  Produce single
+  columnar output` precisely because columnised output is the default.
+  **What ships:** IBKR drops three files; sftp prints
+  `Trades.xml.gpg  Activity.xml.gpg  NAV.xml.gpg` on one line;
+  `list_remote_gpg` returns `["NAV.xml.gpg"]`. The other two are never fetched
+  and `run()` reports `ok` with exit 0 because `ingested == 1`. A partial
+  delivery is indistinguishable from a complete one.
+  **Why no test catches it:** `FakeSftp.__call__`
+  (`scripts/tests/test_flex_sftp_pull.py:70`) emits `"\n".join(self.files)` —
+  one name per line, the exact shape the parser assumes — and
+  `test_list_dir_uses_sftp_dash4_and_batch_stdin` (`:97`) uses a single file.
+  **AC:** RED — a `FakeSftp` whose `ls` stdout is `"a.gpg  b.gpg  c.gpg\n"`
+  (and a mixed `"a.gpg  b.gpg\nc.gpg\n"`); assert
+  `list_remote_gpg(...) == ["a.gpg","b.gpg","c.gpg"]`. GREEN — `ls -1`, or a
+  parser that splits the whole line.
+
+- **T-256 [P1] A no-trade session's Trade Confirmation is rejected and pages,
+  because `has_trade` is a ROW check while its sibling `has_transfer` is a
+  SECTION check.** `scripts/lib/flex_classify.py:73-74`:
+  `has_transfer = root.find(".//Transfers") is not None` sits directly above
+  `has_trade = root.find(".//Trade") is not None`, and the comment three lines
+  up (`:66-68`) explains why the transfer check was relaxed — *"Requiring a
+  `<Transfer>` child rejected every quiet session."* The same reasoning was
+  never applied to `Trades`. Verified: `<FlexStatement><Trades></Trades></FlexStatement>`
+  → `FlexClassifyError ambiguous_or_incomplete:nav=0 cash=0 transfer=0 trade=0`.
+  **What ships:** on any session where the account traded nothing, the nightly
+  `radon-flex-pull` classifies the trade-confirm file as ambiguous,
+  `flex_sftp_pull.py:256-259` sets `failed=True`, heartbeats `error` and exits
+  1 — `flex-pull` goes red in the watchdog daily bucket on a completely healthy
+  day.
+  **Why no test catches it:** `test_flex_classify.py:48`
+  (`test_empty_transfers_section_is_activity`) covers exactly this case for
+  Activity and there is no `Trades` analogue; the fixture
+  `flex_trade_confirm_sample.xml` always carries one `<Trade>`.
+  **AC:** RED/GREEN — `test_empty_trades_section_is_trades`: a
+  `FlexQueryResponse` with `<Trades></Trades>` and no other section asserts
+  `classify_flex_xml(xml) == TRADES`; pair with a `run()` case asserting
+  `code == 0` and an `ok` heartbeat.
+
+- **T-257 [P1] The delivery claim is never released, so a FAILED ingest is
+  permanently skipped.** `scripts/flex_delivery_ingest.py:47` claims before any
+  writer (correct for idempotency), but the failure branches at `:73-81`
+  (`cash_flow_sync` non-zero) and `:97-105` (`journal_rehydrate` `ok:False`)
+  return without deleting the claim row — and the atomicity suite's own
+  docstring establishes that a failed `cash_flow_sync` leaves earlier chunks
+  committed.
+  **What ships:** `X.xml` ingests, `cash_flow_sync` exits 3 leaving
+  `cash_flows` half-written and TWR unbuilt. The operator fixes the transient
+  cause and re-drops `X.xml`; the second run returns
+  `{"ok": True, "outcome": "duplicate"}` — green, exit 0 — and the half-written
+  state is never repaired. Recovery requires a manual DELETE.
+  **Why no test catches it:** `test_flex_delivery_ingest_atomicity.py:34-42`
+  stubs the claim to always-True via an autouse fixture and says so in the
+  docstring, putting the fail-then-retry interaction outside both suites by
+  construction.
+  **AC:** RED — with the stateful fake claim already written at
+  `test_flex_delivery_fingerprint.py:75`, make `cash_flow_sync.main` return 3
+  then 0; the second `ingest_path` returns `outcome == "duplicate"`. GREEN — it
+  re-runs the writers.
+
+- **T-258 [P1] The "exactly ONE Flex request per run" property — the one that
+  costs a 24h-to-168h token embargo when broken — is asserted in a comment,
+  not a test.** CLAUDE.md makes it throttle-critical.
+  `scripts/perf_twr_builder.py:717-718` (`_flows_query_id` falls back to the
+  NAV id) and `:793-806` (`already_attempted = document.query_id == query_id`)
+  implement it. No test references `resolve_flows`, `_flows_query_id` or
+  `IB_FLEX_FLOWS_QUERY_ID`. The only mention anywhere is
+  `scripts/tests/test_nested_deadlines.py:129`,
+  `query_ids = 1  # resolve_flows reuses the single NAV document` — a hardcoded
+  constant inside a systemd-timeout computation that ASSUMES the property.
+  **What ships:** someone sets `IB_FLEX_FLOWS_QUERY_ID`, or a refactor makes
+  `_flows_query_id()` diverge from the NAV id; `already_attempted` is False, a
+  second SendRequest fires in the same run, and the token takes the documented
+  1025 embargo. Every test still passes.
+  **AC:** RED/GREEN — drive `build_and_persist()` with `fetch_flex_xml`
+  replaced by a counter; assert exactly 1 with `IB_FLEX_FLOWS_QUERY_ID` unset,
+  and still 1 (or an explicit refusal) when it is set to a different id.
+
+- **T-259 [P1] The production sFTP→ingest wiring is never exercised end to end
+  — which is the seam that hid T-250.** `scripts/flex_sftp_pull.py:192-203`
+  (`_default_ingest`), `:125-141` (`_gpg_decrypt`), `:106-122` (`pull_gpg`),
+  `:226` (`ingest_fn = ingest or _default_ingest`). All ten tests in
+  `scripts/tests/test_flex_sftp_pull.py` inject `decrypt=` and, where ingest is
+  reached, `ingest=` (`:209-210`), so the default callables — which are what
+  `main()` (`:287-292`) and `cloud/services/radon-flex-pull.service:17`
+  actually run — have zero coverage. Two defects a test would have caught:
+  `_default_ingest` does `del source_path` at `:193`, discarding the caller's
+  `dest.with_suffix(".xml")` path from `:252` so the delivery's provenance
+  records a random `/tmp` name; and `retain_newest_gpg(inbox, keep=0)` at
+  `:173` evaluates `files[:-0]` → `files[:0]` → deletes nothing.
+  **AC:** RED/GREEN — call `pull.run(...)` WITHOUT `ingest=`, with
+  `db.writer.get_db` bound to an in-memory DB carrying migration 0059, and
+  assert rows were actually written rather than `outcome == "duplicate"`;
+  add a `retain_newest_gpg(inbox, keep=0)` case asserting every `.gpg` is
+  removed. Reverting T-250's fix must red the first.
+
+- **T-260 [P1] Three of the four `summaryFiguresAreFinite` gates on
+  `okToSubmit` are untested, so Transmit can arm on a NaN risk verdict.**
+  `web/lib/order/risk/useOrderRisk.ts:303` (helper); call sites `:741` (linear
+  close-out), `:771` (linear open), `:834` (option close-out), `:881` (option
+  open). `web/tests/instrument-detail-stp-nan-risk.test.tsx:169-196` covers
+  ONLY `:881`. The linear close-out path is reachable with a blank Limit:
+  `grossCash = Math.abs(input.limitPrice * input.quantity * input.multiplier)`
+  → `NaN` → `estimatedPnl` `NaN`. Deleting the guard at `:741`, `:771` or
+  `:834` passes the whole suite today, and a stock close ticket re-arms
+  Transmit over a summary reading `NaN` in every tile. Adjacent and
+  pre-existing: `:741` is the only `okToSubmit` in the hook that does not also
+  require `coverageStatus === "resolved"`, so a linear close-out arms under
+  `no-portfolio`.
+  **AC:** RED/GREEN — four `renderHook(() => useOrderRisk(...))` cases (linear
+  open, linear close-out, option close-out, option open), each with one
+  non-finite input asserting `okToSubmit === false` while
+  `coverageStatus === "resolved"`, plus finite twins asserting `true`.
+  Reverting any single call site must red exactly one case.
+
+- **T-261 [P1] `run_offbox`'s "NEVER raises" contract, and its effect on the
+  backup's health state, are untested.** `cloud/scripts/db_backup.py:546-568`
+  (`run_offbox`), called at `:676`; `main()` at `:729-731` sets
+  `state = "error" if detail.get("offbox_error") else "ok"` and returns 1. The
+  docstring is the contract — *"Best-effort off-box leg. Returns
+  `(summary, error)`; NEVER raises."* — and nothing tests it.
+  `grep run_offbox cloud/tests` has no hits;
+  `cloud/tests/test_db_backup_offbox.py` exercises `sync_offbox` one layer down
+  and its `test_upload_failure_propagates` (`:305`) asserts the OPPOSITE
+  behaviour. So the wrapper that converts a propagating failure into a
+  non-fatal `(None, error)` is unverified.
+  **What ships:** if `run_offbox` ever raises (e.g. `s3_config_from_env()` on a
+  malformed endpoint), `run_backup` aborts AFTER the local dump landed and
+  pruning ran, `main`'s outer handler writes `"backup failed: ..."`, and the
+  operator is told the dump failed when it did not.
+  **AC:** RED/GREEN — (a) `sync_offbox` raises → `run_offbox(tmp_path)` returns
+  `(None, "<Type>: msg")` and does not raise; (b) `s3_config_from_env` → `None`
+  gives the credentials-missing string; (c) `main()` with a stubbed
+  `write_service_health` yields `state == "error"`, `detail["path"]` still
+  naming the landed dump, rc 1. Removing the `try/except` reds (a) and (c).
+
+- **T-262 [P1] An EMPTY dump is written, prunes the good ones, uploads, and
+  heartbeats `ok`.** `cloud/scripts/db_backup.py:386` returns
+  `{"tables": 0, "rows": 0}` without complaint, and `run_backup` (`:650-690`)
+  has no plausibility floor between the dump and the prune/upload.
+  **What ships:** `dump_database` sees an empty `sqlite_master` (a credential
+  rotation pointing at a fresh DB, or a libsql read returning no rows). A
+  ~120-byte valid gzip is written, `select_prunable` deletes dumps past the
+  30-day window, `sync_offbox` uploads the empty artifact to B2, and
+  `write_service_health` records `ok` with
+  `summary = "dumped 0 tables / 0 rows -> ... (118 bytes); b2 1/1"`. Within 30
+  days every local AND remote copy is an empty dump — the disaster-recovery
+  artifact is gone and the health row never said so. Contrast
+  `lib/vixts_math.py`, which has `MIN_SERIES_ROWS` for exactly this class.
+  **AC:** RED/GREEN — `run_backup` raises (or heartbeats `error` and skips both
+  the prune and the upload) when `stats["tables"] == 0` or `stats["rows"] == 0`;
+  assert the older dumps still exist and `client.upload_file` was not called.
+
+- **T-263 [P1] The VIXTS changed-source path never ages its own `data_date`;
+  only the 304 path does.** `scripts/fetch_vixts.py:295-326`
+  (`restate_cached_payload`, R-333) computes `expected_session`, `lag_days` and
+  `status` — and runs ONLY on the all-304 branch (`:264-275`). The rebuild
+  branch (`:277-292`) calls `build_payload` (`:186-201`), which emits no
+  `status`, no `lag_days` and no `expected_session` at all, and
+  `_write_db(..., rows_changed=True)` heartbeats `ok`. This matters because
+  `scripts/clients/cboe_client.py:6-9` states the failure mode outright:
+  *"Cboe re-touches Last-Modified intraday WITHOUT appending the session
+  row."*
+  **What ships:** Cboe re-touches the files for two weeks without publishing
+  new sessions. Every night the conditional GET returns 200 → full rebuild →
+  4,252 rows → passes `ensure_plausible_series` (row count and ratio band,
+  never recency) → `service_health` green, API fresh inside the 48h
+  `scan_time` budget, and `/regime/vixts` renders a confident regime badge for
+  a two-week-old session. The defence R-333 built exists on the branch that
+  CANNOT have new data and is missing on the branch that can. Secondary
+  contract bug: `payload.status` is present on one path and absent on the
+  other.
+  **Why no test catches it:** `TestAll304PathReAgesTheVerdict`
+  (`test_vixts_health_and_plausibility.py:183-232`) exercises only the 304
+  branch; `test_changed_source_rebuilds_and_writes_rows` (`test_vixts.py:337`)
+  asserts row writes, never freshness.
+  **AC:** RED/GREEN — drive `run()` with all three sources returning changed
+  text whose newest joined session is 10 calendar days behind
+  `last_completed_session_date(now)`; assert `status == "stale_source"`,
+  `lag_days == 10`, and a non-null `health_error` into `_write_db`. Assert
+  `status == "ok"` with `expected_session` present on the healthy rebuild, so
+  the contract is pinned on BOTH branches.
+
+- **T-264 [P1] VIXTS's "a rejected value writes no row" is never asserted —
+  only "an error row exists" is.**
+  `scripts/tests/test_vixts_health_and_plausibility.py:141-162` monkeypatches
+  `ensure_plausible_series` to raise and asserts an `error` heartbeat landed.
+  The `_Recorder` stubs `upsert_vixts_rows` (`:112`) and `upsert_scan_snapshot`
+  (`:109`) as no-op `pass` and never records their calls, and
+  `_write_json_cache` is not intercepted at all. The ordering in `_run_cycle`
+  (`:281-291`) is correct TODAY — validate, then write — but a plausible future
+  change ("persist what we pulled, then flag it") would push a corrupt 4,252-row
+  series into `vixts_history`, overwrite `data/vixts.json`, AND still emit the
+  error heartbeat this test asserts on. The suite stays green while a ratio of
+  50 lands in the canonical store.
+  **AC:** RED/GREEN — record calls on `_Recorder` and spy `_write_json_cache`;
+  on the plausibility-failure path assert `upsert_vixts_rows` count 0,
+  `upsert_scan_snapshot` count 0, and `VIXTS_JSON` byte-identical to its
+  pre-run contents. Use the REAL `ensure_plausible_series` with a genuinely
+  corrupt series (one row at `ratio=50`) rather than a stubbed raise, so the
+  guard and the ordering are proven together.
+
+- **T-265 [P1] The IB connect-budget assertion is algebraically incapable of
+  failing, and hardcodes a third copy of the caller cap.**
+  `scripts/tests/test_ib_option_chain_connect_retry.py:99-109` (and its
+  duplicate `test_equity_chain_connect_retry.py:94-114`) computes
+  `worst_connect_s = attempts * CONNECT_TIMEOUT_S + (attempts - 1) * CONNECT_BACKOFF_S`
+  and asserts `worst_connect_s + 2 * IB_REQUEST_TIMEOUT_S <= 45.0`. But
+  `scripts/ib_option_chain.py:44-49` DEFINES
+  `CONNECT_TIMEOUT_S = (CONNECT_BUDGET_S - (ATTEMPTS-1)*BACKOFF) / ATTEMPTS`, so
+  the test's expression is that definition solved back and is identically
+  `CONNECT_BUDGET_S` for any attempts, any backoff. Measured in-process at
+  HEAD: `ATTEMPTS 2, TIMEOUT 4.5, BACKOFF 1.0, BUDGET 10.0, CAP 45.0` →
+  `worst = 10.0`, `total = 40.0`, and `total` is pinned at
+  `45 - _ENVELOPE_MARGIN_S` by construction. `CONNECT_ATTEMPTS = 12` is green.
+  The `45.0` is a third hardcoded copy of
+  `scripts/api/server.py:4475 _EQUITY_OPTIONS_CHAIN_TIMEOUT_S` (the source
+  holds a second at `_CALLER_CAP_S`), so lowering the server's real cap to 20 s
+  — R-352's exact failure mode, the JSON error envelope never rendering — reds
+  nothing. The sibling
+  `test_the_budget_is_derived_from_the_cap_not_hardcoded`
+  (`test_equity_chain_connect_retry.py:112-114`) asserts `10.0 < 45.0` and is
+  named for a property the source does not have.
+  **AC:** RED/GREEN — import the cap
+  (`from scripts.api.server import _EQUITY_OPTIONS_CHAIN_TIMEOUT_S as CAP`),
+  assert `ib_option_chain._CALLER_CAP_S == CAP`, and assert the WALL CLOCK:
+  monkeypatch `time.sleep` into an accumulator, drive `main()` against an
+  always-failing client, assert
+  `elapsed + 2*IB_REQUEST_TIMEOUT_S + startup_margin < CAP`. Setting
+  `_EQUITY_OPTIONS_CHAIN_TIMEOUT_S = 20.0` in `server.py` must red it.
+
+- **T-266 [P1] The mobile ticket's transmit guard is verified by grepping the
+  source for the guard's TEXT, with the substitution written down as the
+  rationale.** `web/tests/mobile-ticket-payoff-parity.test.tsx:203-243`:
+  `expect(submitBody(sourceOf("components/mobile/MobileOrderTicket.tsx"), "const handleSubmit")).toMatch(/if\s*\(\s*!transmitArmed\s*\)\s*return/)`.
+  The header comment argues the invariant is "structural" because React will
+  not dispatch to a `disabled` button. It is not: the production bug CLAUDE.md
+  cites (2026-08-27) had the guard text PRESENT and still shipped, because
+  `handleSubmit` was memoised without `transmitArmed` in its deps and closed
+  over a stale `false`. Wrapping `handleSubmit` in
+  `useCallback(..., [legs, prices])` leaves all three of these tests green
+  while the armed button silently sends nothing. The `inFlightRef` greps have
+  the same hole (`inFlightRef.current = true` present but never reset in
+  `finally` matches, and permanently bricks the second order), and
+  `submitBody` slices from the handler name to the first `fetch(`, so a guard
+  MOVED BELOW the fetch still matches.
+  **AC:** RED/GREEN — delete the describe block; drive
+  `reactOnClick(submit)()` twice in one `act()`, unacknowledged then
+  acknowledged, and assert `placeCalls()` is `[]` then exactly 1 with the full
+  payload. Wrapping `handleSubmit` in a `useCallback` missing `transmitArmed`
+  must red it.
+
+- **T-267 [P1] Market-value fidelity on the ticker detail is asserted by
+  grepping a source branch.**
+  `web/tests/market-value-multiplier-fidelity.test.ts:114-133` slices
+  `PositionTab.tsx`'s combo-quote branch out of the file text and asserts
+  `not.toMatch(/mv:\s*spreadPriceData\.last\s*\*/)` plus
+  `toMatch(/resolveRealtimeMarketValue/)`. It never renders `PositionTab`.
+  `mv: (spreadPriceData.last) * units * mult` reintroduces the R-285 defect and
+  evades the negative regex (parenthesised); `mv: rtMv * getMultiplier(position)`
+  — double-applying the multiplier the shared walk already applied — satisfies
+  BOTH regexes. Either mutation makes a covered call disagree with
+  `PositionTable` by the full option notional on a money surface.
+  **AC:** RED/GREEN — render `PositionTab` with the existing `COVERED_CALL`
+  fixture plus a `spreadPriceData.last`; assert the displayed market value
+  equals `resolveRealtimeMarketValue(COVERED_CALL, prices)` (`412500`).
+  `mv: spreadPriceData.last * units * mult` must red it.
+
+- **T-268 [P1] Three source greps plus a verbatim hand-copy of the loop under
+  test.** `web/tests/rel130-derived-copy-and-null-guards.test.ts:35-67` greps
+  `route.tsx` for `"const DEFAULT_LOOKBACK_DAYS = 20"` and
+  `"data.tables[key] = kept"`; `:69-101` then defines
+  `function truncate(data, max)` — a re-typed copy of `route.tsx:310-320`,
+  commented *"The loop verbatim, so the behaviour is tested and not just the
+  text."* The clone is what is exercised, so a real edit to `route.tsx:310-320`
+  (e.g. `budget -= rows.length` instead of `kept.length`, which re-opens the
+  negative-budget path) leaves the clone untouched and both target strings
+  still literally present. Separately, `DEFAULT_LOOKBACK_DAYS = 20` is grepped
+  as a STRING, and `:52` greps `server.py` for the literal `20` — pinning two
+  hardcoded copies of one number rather than proving they agree.
+  **AC:** RED/GREEN — extract the loop to `lib/ctaImageLayout.ts` (alongside
+  `computeCtaImageHeight`, which the sibling test already imports) and call the
+  real export with `{tables:{main:null}}`; `budget -= rows.length` must red it.
+  For the constant, import `DEFAULT_LOOKBACK_DAYS`, assert the rendered strings
+  contain `String(DEFAULT_LOOKBACK_DAYS)`, and parse the `--days` arg out of
+  `server.py` to compare against the imported value.
+
+- **T-269 [P1] A JSX prop's PRESENCE is grepped out of the component source.**
+  `web/tests/gate3-unmeasured-book.test.tsx:69-82` slices from
+  `src.indexOf("<CorrelationRiskBanner")` to the next `/>` and asserts
+  `toMatch(/showUnavailable/)`. `AttributionPanel.tsx:228` renders
+  `<CorrelationRiskBanner report={riskBudget} showUnavailable />`.
+  `showUnavailable={false}` matches the regex. So does
+  `showUnavailable={someFlagThatIsAlwaysFalse}`. So does moving the banner
+  behind a `riskBudget?.clusters.length > 0` conditional, because the JSX TEXT
+  is unchanged — which is precisely the "no Gate-3 module rendered at all"
+  defect the file's own header describes. `CorrelationRiskBanner.tsx:27` gates
+  the unavailable branch on `showUnavailable && ...`, so the false-literal
+  mutation restores the original bug in full.
+  **AC:** RED/GREEN — render
+  `<AttributionPanel riskBudget={NOTHING_MEASURED} ... />` and assert
+  `getByTestId("correlation-risk-banner")` has `data-level="unmeasured"`.
+  `showUnavailable={false}` must red it.
+
+- **T-270 [P1] The outside-RTH modify test asserts a property of its own
+  fixture, and never inspects the modify REQUEST.**
+  `web/tests/modify-order-outside-rth-init.test.tsx:73-74` builds
+  `const order = stockOrder()` and then asserts
+  `expect(order.outsideRth).toBeUndefined()` — a literal constructed one line
+  above, which can never fail and tests no product code. More seriously all
+  three tests stop at `box.checked`; `onConfirm` is a bare `vi.fn()` that is
+  never inspected. `ModifyOrderModal.tsx:606-610` builds `request.outsideRth`
+  only when `outsideRthChanged`. Delete `:609`, or invert it to
+  `request.outsideRth = !outsideRth` — the checkbox still seeds correctly, all
+  three tests pass, and an operator un-ticking EXT on a resting GTC order
+  silently sends no change (or the opposite one) to IB. The only other coverage
+  of that payload is `web/tests/modify-order-ticker-detail.test.ts:106-111`,
+  which is itself `expect(contextSource).toMatch(/outsideRth/)` — a source
+  grep, not a request.
+  **AC:** RED/GREEN — drop `:74`; render with `outsideRth: true`, click the
+  checkbox off, confirm, and assert `onConfirm` received exactly
+  `{ outsideRth: false }`; plus a paired case where only the price changed and
+  `outsideRth` is ABSENT from the request. Deleting
+  `ModifyOrderModal.tsx:609` must red it.
+
+- **T-271 [P1] (delta to T-223) All FIVE e2e specs added in this delta are
+  absent from the curated CI list, and the job still gates nothing.**
+  `ci.yml:541-558` runs a hand-typed list of **14 of 155** spec files,
+  byte-identical at base and HEAD. Missing:
+  `chain-deck-ticket-scroll.spec.ts`, `leap-order-prefill.spec.ts`,
+  `mobile-orders-session.spec.ts`, `orders-session-window.spec.ts`,
+  `vixts-tab.spec.ts`. So order prefill, the session window (an order-ROUTING
+  attribute), the mobile orders shell and the entire new VIXTS tab have zero CI
+  browser evidence. Compounding: the job is titled non-gating (`ci.yml:486`)
+  and appears in neither `stage-release.needs` nor `deploy.needs`, so even the
+  14 curated specs cannot block a release. T-223 filed the 14/150 ratio; this
+  is the delta that shows the ratio is not merely stale but actively diverging
+  — five specs written this week, zero adopted.
+  **AC:** RED/GREEN — a contract test that reds when `ls web/e2e/*.spec.ts`
+  contains a spec absent from BOTH the ci.yml arg list and an explicit,
+  reasoned hold-out allowlist (`performance-twr-payload.spec.ts` and
+  `account-day-move-ib-daily-pnl.spec.ts` are the existing documented
+  hold-outs).
+
+- **T-272 [P1] Two new tests burn 240 REAL 8 ms sleeps each — 2.5 s against
+  vitest's 5000 ms default — on the shared CI gate.**
+  `web/tests/assistant-stream-and-proposal-guards.test.ts:53-68` and `:71-85`
+  both call `streamMessage("m", "y".repeat(400_000), ...)`, and
+  `web/lib/chat.ts:359-365` loops `MAX_STREAM_CHUNKS = 240` times with
+  `await sleep(8)` on real timers — no `vi.useFakeTimers()` anywhere in the
+  file, and `vitest.config.ts` sets no `testTimeout`. Measured on an idle box:
+  `2516ms` and `2480ms`. This file runs on the CI vitest gate (8 shards,
+  `ci.yml:83-139`), and this repo has documented hard
+  `Test timed out in 5000ms` at load average 35-42 (T-161, T-238 — cited in
+  `web/tests/portfolio-startup-performance-contract.test.ts:18-26`). A 2×
+  overshoot false-reds the deploy gate.
+  **AC:** RED/GREEN — `vi.useFakeTimers()` + `vi.advanceTimersByTimeAsync`;
+  both tests must still assert `writes.length ∈ (240, 241]` and full-text
+  equality, and the file's wall time must drop below 200 ms.
+
+- **T-273 [P1] A live-clock minute-boundary race in the IV-rank header
+  assertion.** `web/tests/ivrank-degraded-status.test.tsx:106-115` (mirrored at
+  `:99-104`) computes
+  `const nowClock = new Date().toLocaleTimeString("en-US", {hour:"numeric",minute:"2-digit"})`
+  and asserts `header.textContent` contains it. But the rendered string comes
+  from `IvRankPanel.tsx:154` formatting `data.scan_time`, which the fixture
+  stamped with a SEPARATE `new Date()` at `:57` inside `buildData()`. Two
+  independent live clock reads bracket a full d3 panel render (measured
+  53-354 ms). A minute rollover between them is a silent, unreproducible red on
+  the shared gate. The new `vitest.config.ts` TZ pin does not help — the race is
+  temporal, not zonal.
+  **AC:** RED/GREEN — `vi.setSystemTime(new Date("2026-08-26T19:00:00Z"))` and
+  derive BOTH the fixture `scan_time` and the expected clock string from that
+  one frozen instant. Setting the clock to `...T18:59:59.900Z` and letting the
+  render cross the minute must red the current form and not the fixed one.
+
+- **T-274 [P1] The sidecar paging downgrade asserts its own safety in a
+  COMMENT, and no test asserts the composition.**
+  `scripts/health_service/probes.py:139-144` adds `radon-monitor.service` and
+  `radon-newsfeed.service` to `DEPENDENCY_UNITS`, and `:257-261` maps a
+  dependency-only `starting` to `degraded`.
+  `scripts/watchdog/external_probe.py:94-95` accepts `degraded` as a valid
+  recovery sample and `:262-269` grants the P1 emergency only to a validated
+  off-box DOWN verdict — so after these two commits a dead or flapping
+  `radon-monitor.service` produces NO off-box page. `radon-monitor` is the
+  fill / order / journal daemon: a money path. The justification is a code
+  comment at `probes.py:133-137` — *"these units already have their own on-box
+  alarms."* The two commits' own tests
+  (`scripts/tests/test_health_service.py:417`, `:482`) pin the DOWNGRADE;
+  nothing pins the claim that makes the downgrade safe. The on-box side is
+  tested only for `failed`
+  (`scripts/tests/test_watchdog/test_units.py:112-119`,
+  `active="failed"`, `result="start-limit-hit"`); there is no
+  `active="inactive"` case for a long-lived unit in that file, and no test
+  anywhere composes the two subsystems.
+  **What ships:** a future edit to `_failed_alert` / `_flap_alert`, or a
+  unit-name typo in the watchdog catalogue, makes `radon-monitor` un-alerting
+  on-box. Every test in both files still passes — the health tests only assert
+  "degraded", the watchdog tests only exercise `failed`. Fills stop being
+  recorded and nothing pages from either path.
+  **AC:** RED/GREEN — one test that owns the COMPOSITION, driven off
+  `probes.DEPENDENCY_UNITS` itself so the frozenset cannot grow without on-box
+  cover: for each member assert (a) `aggregate_state` yields `degraded` not
+  `down` when only that unit is down, and (b) `units.evaluate` fires for that
+  same unit name in `failed` AND in `activating`-flap. Removing the unit from
+  the watchdog's alerting catalogue, or adding a sixth member to
+  `DEPENDENCY_UNITS`, must red it. (The `_UNGUARDED_CTOR_BASELINE` pattern from
+  T-163 is the local precedent.)
+
+- **T-275 [P1] A new API test writes into the repo's REAL `data/` directory,
+  breaking the clean-tree precondition both weekend loops depend on.**
+  `scripts/api/tests/test_flow_report_capacity_shed.py` (ADDED in this delta)
+  POSTs `/flow-analysis/JOBY` at `:80`, `:97` and `:111` and never redirects the
+  cache target, while `scripts/api/server.py:2397` defines
+  `_FLOW_REPORTS_DIR = DATA_DIR / "flow_reports"` — the real one.
+  **Reproduced deterministically in isolation, 0.56 s:**
+  `rm -rf data/flow_reports` → clean tree → `pytest <that file> -q` →
+  `3 passed` → `git status --porcelain` shows `?? data/flow_reports/` with a
+  178-byte `JOBY.json`. `git check-ignore` reports the path is NOT ignored.
+  The isolation pattern already exists and is followed correctly by the sibling
+  file for the SAME route: `scripts/tests/test_api_flow_cache.py` patches
+  `patch.object(server, "_FLOW_REPORTS_DIR", tmp_path)` on all six of its cases
+  (`:85`, `:111`, `:139`, `:178`, `:205`, `:212`). The new
+  `scripts/api/tests/conftest.py` adds an autouse fixture but only for the
+  ib_2fa_lock orphan state.
+  **What ships:** (a) running the gate dirties the tree, which is the exact
+  precondition that aborted a prior weekend run at pytest COLLECTION
+  (2026-08-16 lesson); (b) `deploy.sh` carries a tracked-drift guard and the
+  repo already had to untrack `data/tag_taxonomy.json` for runtime mutation
+  tripping it; (c) on a developer machine the write seeds a REAL cache entry
+  that both `web/app/api/flow-analysis/[ticker]/route.ts:18` and the FastAPI
+  GET handler serve, so a test run makes the app show a stub flow report for a
+  live ticker.
+  **AC:** RED/GREEN — an autouse fixture in `scripts/api/tests/conftest.py`
+  pointing `server._FLOW_REPORTS_DIR` at `tmp_path`, plus a contract test
+  asserting the repo `data/` tree is byte-identical before and after the
+  route-touching cases. Removing the fixture must red the contract test.
+
+- **T-276 [P1] Twenty-seven vitest tests run NOWHERE, and nine of them are
+  permanently red.** `ci.yml:143-145` excludes
+  `web/tests/integration.test.ts`, `lib/tools/__tests__/kelly.test.ts` and
+  `lib/tools/__tests__/runner.test.ts` from every shard (the Bun job has no
+  `python3.13`). Locally those three files are the ONLY failures in the whole
+  vitest gate: **9 failed / 18 passed in 3.35 s**, deterministic in isolation,
+  not load. So the CI-gated set is fully green at 7934 while these 27 tests are
+  excluded from CI and red on a developer machine. The frozen PART A audit
+  judged two of them GOOD specifically because they spawn real python
+  (`TEST_AUDIT.md:633`, `:832`); that judgement is now inoperative. Every
+  weekend gate run must hand-attribute these nine, which is exactly how a real
+  vitest regression gets waved through.
+  **AC:** RED/GREEN — either give the shard a python that can run them (and
+  drop the `--exclude` flags), or move them behind an explicit
+  `describe.skipIf(!hasPython3_13)` with the reason linked here so they skip
+  honestly instead of failing. Do NOT simply delete them: `runner.test.ts`
+  carries the 2026-05-22 bare-`python3.13` outage regression (`:92-133`).
+
+- **T-277 [P1] Two live tests pin OPPOSITE `is_blocked()` contracts, and which
+  one is right is decided by an ambient environment variable neither
+  declares.** The delta deleted the `PYTEST_CURRENT_TEST` escape hatch in
+  `scripts/utils/flex_embargo.py:157-178`, replacing it with
+  `return bool(os.environ.get("TURSO_DB_URL"))` on the credential-read failure
+  path. Now `scripts/tests/test_flex_embargo_fail_closed.py:57-65` (CHANGED in
+  the delta) asserts no-sidecar + unreadable store ⇒ `is_blocked() is True`,
+  while the UNTOUCHED
+  `scripts/tests/test_flex_token_embargo.py:219-231`
+  (`test_service_health_outage_fails_open_without_raising`) asserts the
+  identical input shape ⇒ `is_blocked() is False`, docstring *"Documented
+  fail-open"*. **Reproduced by the lead:**
+  `pytest scripts/tests/test_flex_token_embargo.py` → `15 passed`;
+  `TURSO_DB_URL=libsql://radon-fake.turso.io TURSO_AUTH_TOKEN=x pytest ...` →
+  `1 failed, 14 passed`, `assert True is False`. Production (Hetzner,
+  `EnvironmentFile=`) always has `TURSO_DB_URL`, so the untouched test asserts
+  the opposite of what production does and is green here only because this
+  runner clone has no `.env`.
+  **AC:** RED/GREEN — the file must give the same verdict with and without
+  `TURSO_DB_URL` in the environment. Add an explicit
+  `monkeypatch.delenv`/`setenv` pair so each test STATES which store
+  configuration it describes, and invert `:230-231` to the fail-closed verdict
+  the delta actually shipped.
+
+- **T-278 [P1] `POST /api/blotter` is now a 404 and the client stopped POSTing,
+  so the e2e that exists to prove the refresh is dead-red.**
+  `scripts/api/server.py` `blotter_sync()` raises 404 (`26668ef8`),
+  `web/app/api/blotter/route.ts:101-112` returns 404, and
+  `web/lib/useBlotter.ts:18` sets `hasPost: false` (every POST in
+  `web/lib/useSyncHook.ts:177,223,232,250` is gated on it). The UNTOUCHED
+  `web/e2e/orders-historical-trades-refresh.spec.ts:154` mocks `FRESH_BLOTTER`
+  on POST only (`:136-150`) and asserts `text=2 TRADES` and
+  `GOOG 20260320 180C` (`:161-162`), which exist ONLY in `FRESH_BLOTTER`
+  (`:58-80`) — `STALE_BLOTTER` has one AAPL trade. The POST branch is
+  unreachable, so the spec must time out. Invisible because Playwright is not
+  in the gating CI path.
+  **AC:** RED/GREEN — rewrite the spec against the GET-only journal-derived
+  blotter (or delete it and let `web/tests/blotter-from-journal.test.ts` own the
+  contract). It must pass with no POST mock.
+
+- **T-279 [P1] `resolvePreviousSessionClose`'s 7-day gap kills `DayChange` in
+  an untouched layout spec, which now asserts a node that cannot render.**
+  `bc2649f7` added `web/lib/regimeLiveStrip.ts:130-146`
+  (`MAX_PREVIOUS_CLOSE_GAP_DAYS = 7`) and made history authoritative over the
+  relay tick close whenever `data.history.length > 0` (`:162-166`), with
+  `sessionDate` defaulting to the live `lastCompletedSessionDate()`
+  (`RegimePanel.tsx:210` passes none). The UNTOUCHED
+  `web/e2e/regime-strip-responsive.spec.ts` mocks 20 history rows dated
+  `2026-02-01 … 2026-02-20` (`:43-49`) and asserts
+  `expect(vixChangeTextBox).not.toBeNull()` at `:335-346` and `:359-371`.
+  `calendarDaysBetween("2026-02-20", lastCompletedSessionDate())` ≈ 190 > 7, so
+  `vixClose = null`, `<DayChange>` renders nothing, the testid is absent and
+  `boundingBox()` returns null. Same class as T-117/T-248, but PERMANENT rather
+  than weekend-scoped, because the fixture dates never move.
+  **AC:** RED/GREEN — anchor the mock's history to `lastCompletedSessionDate()`
+  (window-relative), or thread `sessionDate` through the page under test. It
+  must pass at HEAD and keep passing six months from now.
+
+- **T-280 [P1] `web/tests/regime-day-change.test.ts` is a hand-copied replica,
+  so the file NAMED for the subject could not have caught the defect it is
+  named after.** `:10-16` is
+  `/** Replica of DayChange logic from RegimePanel.tsx */ function computeDayChange(last, close) {...}`
+  and the file imports nothing from `web/lib` or `web/components`, while
+  `DayChange` is a real exported component (`web/components/RegimeStrip.tsx:32`,
+  consumed at `RegimePanel.tsx:716,724,732,752`). The 2026-08-28 incident (VIX
+  rendered `-1.89 (-11.35%)` off a stale 16.65 baseline) was entirely a
+  BASELINE-SELECTION defect; the arithmetic was never wrong. Nine assertions in
+  the file named `regime-day-change` passed throughout.
+  **AC:** RED/GREEN — import `resolveRegimeStripLiveState` (or render
+  `RegimeStrip`) and assert the day change from a CRI payload + WS price pair
+  with an explicit `sessionDate`. The new case must fail at `bc2649f7^` and
+  pass at HEAD.
+
+- **T-281 [P1] The ExecStartPre drop-in guard globs `.example` only, and this
+  delta shipped the REAL installed drop-ins.** `702ae26a` added five installed
+  control-plane artifacts
+  (`cloud/services/radon-{api,nextjs,relay,monitor,newsfeed}.service.d/runtime-container.conf`)
+  and taught `cloud/scripts/bootstrap-control-plane.sh:142-146,180-184` to
+  install them to `/etc/systemd/system/`; `8cd7909b` pinned their hashes into
+  `cloud/config/installed-units.sha256:152-156`. But
+  `cloud/tests/test_app_plane_cutover_safety.py:91-104` builds its parameters
+  from `SERVICES.glob("*.service.d/runtime-container.conf.example")`, so
+  `TestDropInsResetExecStartPre` (`:238-252`) and its own anti-decorative
+  meta-guard (`:255-`) inspect DOCUMENTATION and never the deployed file. The
+  guard's failure message says *"a base-unit ExecStartPre runs as root, against
+  production Turso, and 203/EXECs once the host .venv is retired."* All five
+  current `.conf` files do reset `ExecStartPre=` (verified, identical sha
+  `74dbd6db…`), so this is a coverage hole rather than a live defect — a SIXTH
+  unit added without the reset ships green.
+  **AC:** RED/GREEN — extend the glob to `*.service.d/runtime-container.conf`
+  (both forms) and raise the meta-guard's floor to cover the five installed
+  files. Deleting `ExecStartPre=` from one `.conf` must red the suite; today it
+  does not.
+
+- **T-282 [P1] `resolve_flows`'s fetch-enabled default is now a TEST-ONLY path,
+  so the whole Turso-mirror fallback contract is verified through a branch
+  production never enters.** `26668ef8`/`3b7f6ff5` added
+  `allow_fetch: bool = True` at `scripts/perf_twr_builder.py:776-780`, and every
+  production caller now passes `False` (`build_and_persist` →
+  `resolve_flows(..., allow_fetch=bool(sendrequest) and not from_file)`), with
+  `POST /performance` and `/performance/background` hard 404s.
+  `get_external_flows_for_nav` (`:838-841`) hardcodes the old default and has
+  ZERO non-test callers. All five cases in
+  `tests/test_perf_twr_flows_turso_fallback.py:66,80,90,100,118` use the
+  fetch-enabled default, and `test_a_live_flex_success_never_consults_turso`
+  (`:105-120`) asserts a live-Flex success path P2 deliberately killed. The
+  REAL path — `allow_fetch=False` with no document, which returns
+  `_flows_after_fetch_failure("file_ingest_no_fetch")` (`:812`) and therefore
+  also falls back to Turso — has no test. Both files pass (`11 passed`)
+  vacuously with respect to shipped behaviour. This is the 2026-08-17 incident's
+  contract.
+  **AC:** RED/GREEN — parametrize the class over `allow_fetch in (True, False)`
+  and add a case calling `resolve_flows(None, allow_fetch=False)` asserting
+  `flows.source == "turso"`. A regression in the `file_ingest_no_fetch` branch
+  must red it.
+
+- **T-283 [P1] The new leap capacity-shed tests drive a REAL bash+python
+  subprocess with real sleeps, and they red under load.** `_run`
+  (`scripts/tests/test_leap_capacity_shed_retry.py:169-192`) spawns
+  `bash scripts/run_leap_refresh.sh` with `RADON_LEAP_SHED_WAIT_SECS=3` and
+  `RADON_LEAP_REFRESH_RETRY_DELAY_SECS=1` against a real `ThreadingHTTPServer`,
+  under a 90 s `subprocess.run` timeout; the wrapper
+  (`scripts/run_leap_refresh.sh:137-164`) then does a real `sleep "$delay"`
+  inside a `SECONDS`-based deadline. **Observed this run** at load ~200:
+  `test_persistent_capacity_shed_no_duplicate_still_fails` (`:241`) and
+  `test_leap_garch_no_duplicate_scan.py::test_capacity_502_does_not_launch_a_direct_duplicate[leap]`
+  both failed `assert 1 >= 2` on `stub.calls == ['/leap/scan']` — the retry
+  never fired inside the wrapper's wall-clock budget. Both are green in
+  isolation (4 passed in 14.82 s at load 162), so the CONTRACT is right and the
+  MECHANISM is load-bound. Distinct from T-136 (that is the `_free_port`
+  bind/close/rebind race; here the stub bound fine and served one request).
+  **AC:** RED/GREEN — drive the retry ladder without wall-clock waits: have the
+  wrapper's sleep honour a `RADON_LEAP_SLEEP_CMD` injection point (or assert
+  against a recorded sleep rather than a slept one), so `stub.calls` reaches 2
+  deterministically. The persistent-shed contract (`returncode != 0`, no
+  duplicate launch, no `fallback` in the output) must still fail when the
+  wrapper stops retrying.
+
+- **T-311 [P1] The orders cache-race suite has an INTRA-file `vi.waitFor` race,
+  not the cross-file pollution the 2026-08-28 log hypothesised — and it is in
+  the CI-gated set.** `web/tests/orders-place-cache-race.test.ts:131`:
+  `await vi.waitFor(() => expect(refreshCallCount()).toBeGreaterThan(0))` inside
+  the shared `raceGetThroughRefresh` helper (`:126-144`), which every case in
+  the file goes through. `vi.waitFor`'s default budget is 1000 ms at a 50 ms
+  interval, and it is waiting for the in-flight `POST` route handler to reach
+  its `/orders/refresh` call — a scheduling dependency, not a timer.
+  **Measured at HEAD, in ISOLATION (no other file in the run):**
+  run 1 → `1 failed | 5 passed`, run 2 → `6 passed`. The failure is always the
+  same case, `returns the just-placed order even though a concurrent GET cached
+  the pre-fill snapshot`, always `AssertionError: expected 0 to be greater than
+  0`. The three-file combination the 2026-08-28 log recorded reproduces too
+  (2 failed / 27 passed), but the isolated red proves the other two files are
+  incidental. It did NOT fire in this run's full vitest gate, which is why it
+  reads as pollution: the full run's different scheduling happens to be kinder.
+  This corrects the standing "Recorded, not remediated" entry from the
+  2026-08-28 remediation, which stated the file was "6-passed ×3 in isolation".
+  **What ships:** nothing — the production contract is right. The cost is a
+  nondeterministic red on the shared deploy gate that costs a re-run to
+  attribute every time it fires.
+  **AC:** RED/GREEN — remove the wall-clock dependency. Await the refresh
+  deterministically: have the mocked `/orders/refresh` implementation resolve a
+  `Deferred` that the helper awaits (so the helper is woken BY the call rather
+  than polling for evidence of it), or raise the `vi.waitFor` timeout and prove
+  the fix by running the file 20× with zero reds. Reverting to the polled form
+  must red under a `setTimeout`-delayed route handler.
+
+### P2
+
+- **T-284 [P2] (delta to T-137) The DIVYIELD sweep-budget `elapsed < 1.0` is no
+  longer "a load-margin risk" — it was OBSERVED red this run.** T-137 filed
+  `scripts/tests/test_divyield.py` (then `:357-368`, now `:402-421`) as a
+  margin risk with the note "3× isolated: 32/32/32 in 1.63/1.33/1.03s — a
+  load-margin risk, not an observed flake." This run, under load ~200, it read
+  `assert 2.5310465410002507 < 1.0` — a 2.5× overshoot of the bound with
+  `SWEEP_BUDGET_S = 0.15` and 0.4 s faked latency, and green again in isolation.
+  Promoting the record from predicted to observed; the AC is unchanged from
+  T-137 (assert the deterministic observable —
+  `errors >= len(tickers) - FETCH_WORKERS`, `len(fetched) <= FETCH_WORKERS`,
+  hang call-count — rather than the elapsed time).
+
+- **T-285 [P2] `list_remote_dumps` pagination is never exercised; the stub
+  always answers `IsTruncated: False`.** `cloud/scripts/db_backup.py:434-453`
+  (the `ContinuationToken` loop) vs
+  `cloud/tests/test_db_backup_offbox.py:62-69`, whose
+  `_StubClient.list_objects_v2` hardcodes
+  `{"Contents": [...], "IsTruncated": False}`. With
+  `REMOTE_RETENTION_DAYS = 365` (`:58`) and one dump/day the steady state sits
+  under S3's 1000-key page, so the loop only matters once retention lapses or
+  the timer fires more often — at which point an unlisted tail is BOTH
+  re-uploaded every night by `select_uploadable` AND invisible to
+  `select_remote_prunable`, so the remote grows unbounded while burning the
+  3600 s upload budget re-sending objects already in the bucket.
+  **AC:** page `_StubClient` at N keys with a real `NextContinuationToken`;
+  assert all keys are returned across pages and exactly `ceil(n/N)` calls are
+  issued. Deleting the `if not resp.get("IsTruncated"): break` continuation
+  must red it.
+
+- **T-286 [P2] `cleanup_caches` is the only destructive category with no
+  reclaim ceiling, and neither it nor `cleanup_journal` has a test.**
+  `cloud/scripts/disk_cleanup.py:642-651` and `:653-659`, against
+  `_enforce_ceiling` at `:573` which IS applied to `docker-images` (`:542`) and
+  `release-worktrees` (`:606`). `cleanup_caches` root-`rmtree`s every
+  `CACHE_TARGETS` entry with no `MAX_PRUNE_PATHS` / `MAX_RECLAIM_BYTES` bound.
+  It does route through `remove_tree`, so `is_protected_path` and
+  `has_symlink_component` still cover it — the residual gap is blast-radius
+  accounting plus the fact that an uncaught `ValueError` from one target
+  abandons every LATER target in the list.
+  `cloud/tests/test_disk_cleanup.py:183` only asserts the targets are not
+  protected; no test calls either function.
+  **AC:** point `CACHE_TARGETS` at tmp dirs; assert `cleanup_caches` enforces
+  the ceiling like its siblings, and that it continues past a target whose
+  removal raises and reports the rest.
+
+- **T-287 [P2] `summarizeSessionWindows` has no test.**
+  `web/lib/orders/sessionWindow.ts:193-204`, consumed at
+  `web/components/WorkspaceSections.tsx:3104`. Every other export in that file
+  is heavily covered by `web/tests/order-session-window.test.ts` (37 cases
+  across R-336/337/338/367); the aggregator is the sole exception —
+  `grep summarizeSessionWindows web/tests web/e2e` has no hits. Worst case is a
+  wrong RTH/EXT count in the orders header, not a wire defect.
+  **AC:** feed a mixed row set (STK + outsideRth, OPT, grouped BAG combo) at a
+  frozen ET clock; assert `{rth, ext}` and `rth + ext === rows.length`.
+  Swapping the increments must red it.
+
+- **T-288 [P2] sFTP host-key PINNING is not enforced; only strictness is, and
+  by whole-file substring.** `scripts/flex_sftp_pull.py:38-58` checks
+  `REQUIRED_CONFIG` with `line not in text` over the ENTIRE file, and does not
+  require `UserKnownHostsFile` at all — despite the module docstring claiming
+  "pinned known_hosts" and `85d17d1d` ("S6 host key pinned"). So (a) a config
+  whose required directives live under a DIFFERENT `Host` stanza while the
+  `ibkr-flex` stanza sets `StrictHostKeyChecking ask` passes validation, and
+  (b) a config with the directives but no `UserKnownHostsFile` passes, falls
+  back to the systemd user's unmanaged `~/.ssh/known_hosts`, and the operator's
+  likely remediation is a manual TOFU append — defeating the pin.
+  `_ssh_config` (`scripts/tests/test_flex_sftp_pull.py:21-38`) always writes a
+  perfect config, so the missing check is invisible.
+  **AC:** `validate_ssh_config` rejects (i) no `UserKnownHostsFile`, (ii) a
+  `UserKnownHostsFile` path that does not exist or holds no entry for the
+  alias, (iii) `StrictHostKeyChecking yes` appearing only in a comment.
+
+- **T-289 [P2] `_write_gpg`, the atomic writer, is dead code, and downloads
+  land non-atomically.** `scripts/flex_sftp_pull.py:98-103` implements
+  tmp-write + `chmod` + `replace`; `pull_gpg` at `:106-122` never calls it —
+  sftp `get` writes `dest` in place, and there are zero callers repo-wide. A
+  download killed mid-transfer (the 120 s `TimeoutStartSec`) leaves a truncated
+  `.gpg` that `retain_newest_gpg` counts toward the keep-3 window. No test
+  references `_write_gpg`, so neither the dead helper nor the non-atomic path
+  is flagged.
+  **AC:** a `FakeSftp` whose `get` writes a partial file then raises; assert no
+  partial file remains at `inbox/<name>.gpg`. Delete `_write_gpg` if in-place
+  is the accepted decision.
+
+- **T-290 [P2] `test_flex_p2_routes.py` never asserts its own stated
+  contract.** The module docstring is *"P2: page-driven Flex POSTs are 404.
+  GET blotter still reads journal."* All four tests are POST-404 assertions
+  (`:24-41`); nothing exercises a GET. `scripts/api/server.py:4302-4308` shows
+  the 404s are explicit handlers, so deleting the GET routes entirely leaves
+  the file green.
+  **AC:** add `test_get_blotter_still_reads_journal` — stub the journal read,
+  `client.get("/blotter")`, assert 200 and a journal-derived row.
+
+- **T-291 [P2] The stale-worktree-admin prune is structurally dead, and both
+  test files lock it in.** `cloud/scripts/disk_cleanup.py:627` routes admin-dir
+  removal through `remove_tree`; `WORKTREE_ADMIN_DIR = LIVE_TREE/.git/worktrees`
+  (`:79`), `LIVE_TREE` is the first entry of `PROTECTED_PATHS` (`:187`), and
+  `is_protected_path` returns True for any descendant (`:319`,
+  `resolved in candidate.parents`). So `remove_tree(admin)` ALWAYS raises
+  `ValueError`, is always caught at `:628`, and `pruned_admin` is permanently 0
+  while the note reports "pruned 0 stale worktree record(s)" under state `ok`.
+  The two suites assert both halves and never join them:
+  `test_disk_cleanup.py:194-208` asserts the selector RETURNS the path;
+  `test_disk_cleanup_safety.py:171-179` asserts removing that exact path
+  RAISES. `.git/worktrees` grows unbounded and the R-370 fix silently became a
+  no-op. (This runner currently carries 12 stale worktrees from the 2026-08-27
+  run under `/tmp/tw-0827/`, which is the same shape locally.)
+  **AC:** an integration test over `cleanup_release_worktrees()` with a fake
+  live tree asserting `pruned_admin == 1` for a stale admin dir, forcing an
+  explicit allowlisted `.git/worktrees/<name>` carve-out rather than the
+  blanket refusal.
+
+- **T-292 [P2] Off-box upload confirmation is byte-count only.**
+  `cloud/scripts/db_backup.py:456-459` (`_confirm_upload` returns
+  `ContentLength`) and `:516-521` compares it to `path.stat().st_size`. A
+  same-length-but-wrong object (a stale multipart reassembly, an overwritten
+  key) passes, and `select_uploadable` (`:237`) re-uploads only on a size
+  DIFFERENCE, so the corruption is never re-detected while the local original
+  ages out. `cloud/tests/test_db_backup_path_and_upload.py:131-172` tests
+  short / missing / correct — all by length.
+  **AC:** assert `upload_file` is called with `ChecksumAlgorithm`/`ContentMD5`
+  (or that `head_object`'s checksum is verified against a locally computed
+  digest), and add a case where `ContentLength` matches but the digest does not,
+  asserting a raise.
+
+- **T-293 [P2] The chain-deck layout contract parses CSS as TEXT, first
+  occurrence only, and is blind to the cascade.**
+  `web/tests/chain-deck-layout.test.tsx:105-145` does
+  `css.slice(css.indexOf(`${selector} {`), css.indexOf("}", at))`.
+  `globals.css` declares `.order-builder--rail` TWICE — at `12820` and again at
+  `12849` inside `@media (max-width: 1180px)` — so `ruleBody` returns the first
+  block only and the media-query variant is never inspected: adding
+  `max-height: 100dvh` there re-opens the "ticket sized off the viewport"
+  defect for every viewport under 1180px with the test green. The same applies
+  to any later override in the 12k-line file. Separately
+  `expect(railBody).toMatch(/flex:\s*1/)` also matches `flex: 1 0 520px`, which
+  is the fixed-box defect the sibling test claims to have removed.
+  **AC:** delete the CSS-text describe block and let
+  `web/e2e/chain-deck-ticket-scroll.spec.ts` (which measures real
+  `scrollHeight`/`clientHeight`) own it; if a unit guard is wanted, assert
+  `getComputedStyle` in the existing jsdom render. Appending
+  `.order-builder--rail { max-height: 100dvh }` to `globals.css` must red it.
+
+- **T-294 [P2] `maxDuration` existence is grepped and its VALUE never read; the
+  row cap is self-asserted in a range.** `web/tests/share-image-bounds.test.ts:44-64`
+  asserts `src` matches `/export const maxDuration\s*=/`, so `= 300`, `= 0` and
+  `= undefined` all pass — the bound the test exists to enforce is never read,
+  and the file's own header says the defect is an UNBOUNDED satori render.
+  `:38-41` asserts `MAX_IMAGE_ROWS` is `> 0` and `< 5000` — a self-asserted
+  range on a constant imported from the module under test, so
+  `MAX_IMAGE_ROWS = 4999` passes while asking satori for a ~140,000px canvas.
+  (The rest of the file — the `computeCtaImageHeight` literals and the
+  font-cache poisoning test — is solid.)
+  **AC:** `const route = await import(rel); expect(route.maxDuration).toBeGreaterThan(0);
+  expect(route.maxDuration).toBeLessThanOrEqual(60);` and replace the range with
+  `expect(computeCtaImageHeight({sectionCount: 3, totalRows: MAX_IMAGE_ROWS})).toBeLessThanOrEqual(MAX_IMAGE_HEIGHT)`.
+  `maxDuration = 0` and `MAX_IMAGE_ROWS = 4999` must both red it.
+
+- **T-295 [P2] "The failed-ticker count was lost" is satisfied by the COVERED
+  count.** `scripts/tests/test_producer_cycle_coverage.py:100-111` asserts
+  `err.get("covered") == 3 and err.get("requested") == 40` and then
+  `any(isinstance(v, int) and v > 0 for v in err.values())` with the message
+  *"the failed-ticker count was lost"*. The second assertion is ENTAILED by the
+  first — `covered == 3` is already an `int > 0` in `err.values()` — so the
+  named invariant is not tested. Remove `dropped`/`failed` from the health
+  error payload and the test stays green while the watchdog loses the one field
+  that distinguishes a 3-of-40 cycle from a 37-of-40 one.
+  **AC:** name the key — `assert err["failed"] == 37`. Dropping that key from
+  `_record_health`'s error dict must red it.
+
+- **T-296 [P2] Two assertions over the test file's OWN literals.**
+  `cloud/tests/test_env_contract_parity.py:234-236` computes
+  `blank = sorted(name for name, reason in EXEMPT.items() if not reason.strip())`
+  and asserts `not blank`, where `EXEMPT` is a dict literal at `:33-62` of the
+  same file — it can only fail if someone edits the test. Same class at
+  `scripts/api/tests/test_flow_report_deadline_and_jitter.py:144-148`, which
+  asserts two `server.py` constants merely DIFFER: `8.0` vs `8.000001` passes
+  while both retry chains stay effectively synchronised, which is the defect
+  R-355 names. (Both files are otherwise strong; these are the noise lines.)
+  **AC:** delete the `EXEMPT`-reason test — reason strings are review material,
+  not runtime behaviour. For the delays assert a real separation:
+  `abs(FLOW_REPORT_SHED_RETRY_DELAY_SECS - ORDERS_SYNC_SHED_RETRY_DELAY_SECS) >= 2.0`.
+
+- **T-297 [P2] `_STARVATION_TIMEOUT_SECS = 2.0` turns an event-loop probe into
+  a load detector.** `scripts/api/tests/test_ib_health_event_loop.py:36`, used
+  at `:44-49` and `:71`. The worker raises `EventLoopBlocked` if a 5 ms-poll
+  heartbeat fails to run within 2.0 s wall clock — a genuine assertion about
+  the code, with a threshold that is wall clock on a shared host. Under the
+  10-way pytest shard matrix (`ci.yml:179-215`) plus a concurrent weekend loop,
+  a >2 s scheduling stall blames `check_ib_gateway`.
+  **AC:** keep the fact (`ticks["n"] == 1`) but make the release edge-triggered
+  — block on `released.wait()` with no timeout and let pytest's own timeout
+  catch a true hang — or raise the bound to ≥30 s. The nominal-blocking build
+  must still fail.
+
+- **T-298 [P2] `elapsed < 1.0` sits at 1.5× the file's OWN documented
+  overshoot floor.** `scripts/tests/test_ib_event_waits.py:147`:
+  `mock_ib.sleep.side_effect = lambda s: time.sleep(0.2)` with
+  `call_count <= 2`. The docstring at `:127-131` states `time.sleep(0.2)`
+  returns in ~0.34 s on this macOS gate (72% overshoot), so the two-step path
+  already measures ~0.68 s against a 1.0 s ceiling. It reds for host load,
+  never for the bug — `call_count` already carries the contract.
+  **AC:** drop the `elapsed` assertion and rely on `call_count <= 2` plus
+  pytest's timeout, or raise the bound to 5 s and rename it a hang guard. The
+  nominal-step build must still fail on `call_count`.
+
+- **T-299 [P2] The leap stub HTTP server falls through WITHOUT listening and
+  says nothing.** `scripts/tests/test_leap_capacity_shed_retry.py:114-127`
+  starts a thread, polls `socket.create_connection` for 2 s, and on timeout
+  executes a bare `return self` — the context manager yields a server that is
+  not accepting, and the test then fails downstream with a `ConnectionRefused`
+  naming neither the retry ladder nor the timeout.
+  **AC:** replace the trailing `return self` with
+  `raise AssertionError("stub HTTP server never listened")` and raise the
+  deadline to 15 s. A genuinely broken shed-retry ladder must still fail on its
+  own assertions. (Related to T-283, which is the same file's wall-clock
+  problem on the other side.)
+
+- **T-300 [P2] `retain_newest_gpg` ordering is manufactured with
+  `time.sleep(0.01)` and then asserted exactly.**
+  `scripts/tests/test_flex_sftp_pull.py:263-277` writes five files 10 ms apart
+  and asserts `remaining == ["2.gpg", "3.gpg", "4.gpg"]`.
+  `scripts/flex_sftp_pull.py:171-174` sorts on `st_mtime` and `sorted` is
+  stable, so ties fall back to `glob` order, which is `os.scandir` order. On a
+  filesystem with coarse mtime granularity (HFS+ 1 s, some NFS/overlay stacks,
+  container bind mounts) all five tie and the wrong three survive,
+  nondeterministically.
+  **AC:** delete the sleep; set explicit mtimes with
+  `os.utime(p, (base + i, base + i))`. The test must still fail if
+  `retain_newest_gpg` sorts descending or uses `st_ctime`.
+
+- **T-301 [P2] Three independent live-clock reads must agree on "today".**
+  `scripts/tests/test_session_open_entry_date.py:29` captures `TODAY_ET` at
+  MODULE IMPORT; each `_fill()` (`:59`) re-reads `datetime.now(ET)`; and
+  `convert_to_portfolio_format` reads `today = datetime.now(ET)` a third time
+  at `scripts/ib_sync.py:1498`. The assertions at `:76`, `:80`, `:105-110` and
+  `:128` require all three to be the same ET calendar day, and the
+  `scripts-rs` shard is minutes long while this loop's own cycle starts at
+  00:00 local. Also: the fixture expiry `"20260828"` (`:32`, `:47`) is already
+  in the past.
+  **AC:** one module-level
+  `NOW_ET = datetime(2026, 8, 26, 11, 0, tzinfo=ZoneInfo("America/New_York"))`
+  passed into `_fill(when=...)`, with `ib_sync.datetime` monkeypatched (or a
+  `now=` parameter added) so `convert_to_portfolio_format` reads the same
+  instant; assertions become `== "2026-08-26"`. Pin the expiry relative to
+  `NOW_ET` too.
+
+- **T-302 [P2] The same `bc2649f7` change silently voided an untouched
+  live-stream spec's day-change coverage.**
+  `web/e2e/regime-live-stream-values.spec.ts:26` supplies a single history row
+  hardcoded `date: "2026-03-11"`, 171 days stale, so at HEAD
+  `vixClose`/`vvixClose`/`spyClose` all resolve to `null` where before the
+  change they used `prices.VIX.close = 24.8`. The spec stays GREEN only because
+  its assertions (`:202-212`) cover the COR1M lane, which uses
+  `cor1m_previous_close`. The VIX/VVIX day-change render path is now
+  unexercised and nobody is told. Sibling case to T-279, which reds; this one
+  passes vacuously.
+  **AC:** make the fixture window-relative (`date: daysAgo(1)`) and add
+  `await expect(vixCell.locator('[data-testid="regime-day-chg"]')).toContainText(...)`.
+  Reverting `resolvePreviousSessionClose` to the relay close must change the
+  asserted figure.
+
+- **T-303 [P2] jsdom globals installed in `beforeEach` and never restored.**
+  `web/tests/use-orders-visibility-backoff.test.tsx:36` assigns
+  `global.fetch = vi.fn(...)` (a plain assignment — `vi.restoreAllMocks()` does
+  not undo it) and `:65-68` does
+  `Object.defineProperty(document, "visibilityState", { get: () => visibility })`,
+  permanently replacing the jsdom accessor. The `afterEach` at `:72-75` only
+  calls `vi.useRealTimers()` and `vi.restoreAllMocks()`. Contained today by
+  per-file jsdom instances, so latent rather than live — it bites the moment
+  `isolate: false` is set or a case is appended to this file expecting the real
+  accessor.
+  **AC:** capture `const realFetch = global.fetch` and the original descriptor
+  via `Object.getOwnPropertyDescriptor(Document.prototype, "visibilityState")`,
+  restore both in `afterEach`, and add a trailing case asserting
+  `document.visibilityState === "visible"` after restore.
+
+- **T-304 [P2] A CSS-class element COUNT stands in for a structural
+  assertion.** `web/tests/orders-command-strip.test.tsx:397` asserts
+  `strip.querySelectorAll(".orders-command-strip__stat")` has length 4, while
+  the surrounding test ("puts RTH/EXT counts next to ORDERS, not on the command
+  strip") already makes the real claim via two `querySelector(...)` null checks
+  at `:394-395`. The count false-reds on any unrelated stat being added or the
+  class being renamed, and goes wrongly green if the RTH chip is added while a
+  different stat is dropped.
+  **AC:** assert the strip's stat LABELS
+  (`["WORKING","PARTIAL","FILLS","LAST SYNC"]`) so a wrong stat, not a wrong
+  count, is what fails.
+
+- **T-305 [P2] `test_bootstrap_installs_runtime_wrapper_not_dropins` now
+  asserts the OPPOSITE of what bootstrap does, and still passes.**
+  `cloud/scripts/bootstrap-control-plane.sh:142-146,180-184` (`702ae26a`) now
+  installs five drop-ins, while `cloud/tests/test_app_runtime.py:353-357`
+  (UNTOUCHED) asserts `"runtime-container.conf.example" not in text`. The
+  assertion is a substring proxy on `.example`, which the new lines do not
+  contain, so the test stays green under a name and intent that are now false.
+  Verified: `pytest '...::test_bootstrap_installs_runtime_wrapper_not_dropins' -q`
+  → `1 passed`.
+  **AC:** rename to `test_bootstrap_installs_the_wrapper_and_the_pinned_dropins`
+  and assert the five
+  `/etc/systemd/system/radon-*.service.d/runtime-container.conf` paths
+  POSITIVELY, keeping the `.example` check as the negative. Removing a drop-in
+  line from bootstrap must red it.
+
+- **T-306 [P2] The aggregate-recovery fail-closed guard is inert: its
+  monkeypatch target no longer gates the branch.** `f7b5eeb9` swapped
+  `scripts/watchdog/external_probe.py:183` from `_local_aggregate_is_healthy()`
+  to the new `_local_aggregate_clears_offbox_down()` (`:75-96`). The UNTOUCHED
+  `scripts/tests/test_watchdog/test_external_probe_deadman.py:225-242`
+  (`test_legacy_aggregate_unhealthy_stays_fail_closed`) still patches the OLD
+  symbol. Proved by direct exercise: patching the old symbol → `fired: True,
+  status: error`; patching the new one → `fired: False, status: healthy`. The
+  patch is a no-op. Its purpose was to prove that broadening the reason match
+  to the legacy `aggregate_unhealthy` string would NOT pick up the recovery
+  bypass; today, if someone broadens `:182`, the unpatched real
+  `_local_aggregate_clears_offbox_down()` fails closed in CI (no `:8330`
+  listener) and the test passes anyway. Contrast
+  `test_watchdog/test_suppression_bounds.py:162,183`, which patches
+  `_local_aggregate_is_healthy` and is CORRECT because that symbol still gates
+  the deploy-window 5xx branch at `:211`.
+  **AC:** patch `_local_aggregate_clears_offbox_down → True`. Widening the
+  reason match at `external_probe.py:182` must then red it; today it does not.
+
+- **T-307 [P2] `test_flows_d7_one_flex_fetch_per_distinct_query_id` kept its
+  name and lost its subject.** `tests/test_perf_twr_ingest.py:297-307` (CHANGED
+  by `26668ef8`) went from asserting
+  `len(calls) == len(set(calls))` and `set(calls) == {"1497709"}` to
+  `assert calls == []`. The name still advertises the query-id dedup guard —
+  the mechanism that stopped a transient 1001 escalating into a 1025 — while
+  the body asserts a different property. Dedup now survives only in
+  `tests/test_perf_twr_flex_single_request.py:74,89,107`, so a reader grepping
+  `test_perf_twr_ingest` for the dedup contract finds a test that no longer
+  tests it.
+  **AC:** rename to `test_file_ingest_never_sendrequests` and leave dedup to
+  `test_perf_twr_flex_single_request.py`. No behavioural change; removes a
+  false signpost.
+
+- **T-308 [P2] Fixture drift: `flex_statement_xml(include_transfer_section=)`
+  default flipped False → True.** `tests/fixtures/twr_scenarios.py:779`
+  (`3b7f6ff5`), to satisfy `scripts/lib/flex_classify.py:69`. Consumers are
+  `tests/test_perf_twr_ingest.py:255,287,300,405` only (the other importers use
+  the unrelated `flex_xml` helper). Every statement built with the default now
+  carries `<Transfers></Transfers>`, so `_transfers_section_warnings()`
+  (`scripts/perf_twr_builder.py:728-749`) returns `[]` instead of the
+  `FLOWS_TRANSFERS_SECTION_ABSENT` error warning. Contained today; a latent
+  weakening of the assertion surface for any test written against the default
+  from now on.
+  **AC:** make `include_transfer_section` a required keyword with no default,
+  forcing each call site to state which statement shape it means.
+
+- **T-309 [P2] `chain-deck-ticket-scroll.spec.ts` hangs on six raw CSS class
+  chains and a font-metric-dependent overflow.**
+  `web/e2e/chain-deck-ticket-scroll.spec.ts:200-232` locates
+  `.asset-deck.open .asset-deck-body`, `.chain-grid`,
+  `.chain-rail-main > .chain-expiry-bar`, `.chain-mid.chain-clickable` and
+  `.order-builder--rail` with zero `data-testid`, then asserts
+  `box.ticketOverflows === true` at viewport 1440×600 — which requires the
+  ticket to be taller than 600 px minus chrome, a function of installed font
+  metrics and the exact five legs clicked. It also goes wrongly GREEN if the
+  deck renders but the ticket collapses to zero legs.
+  **AC:** add `data-testid="chain-deck-body" / "order-ticket-rail" /
+  "order-ticket-submit"`; keep the overflow claim but derive the trigger height
+  from the MEASURED ticket (`viewport = ticketHeight - 100`) rather than a
+  literal 600.
+
+- **T-310 [P2] Eleven regime e2e specs exercise only the FALLBACK branch.**
+  `web/lib/regimeLiveStrip.ts:162-166` consults the relay `close` only when
+  `data.history` is empty, and `web/e2e/regime-day-change.spec.ts:33` mocks
+  `history: []` (assertions at `:112-116`), as do ten untouched siblings
+  (`regime-cor1m.spec.ts`, `regime-live-index-stream*.spec.ts`,
+  `regime-market-closed-eod.spec.ts`, `regime-stale-market-open.spec.ts`,
+  `regime-vix-live-badge.spec.ts`, …). The real `/api/regime` payload always
+  carries `history: CriHistoryEntry[]` (`web/lib/useRegime.ts:9-18,72`), so
+  production never takes the branch these specs cover. Every e2e assertion
+  about the VIX/VVIX/SPY day change describes the fallback.
+  **AC:** give at least one spec a `history` anchored to
+  `lastCompletedSessionDate()` and assert the day change comes from the HISTORY
+  close, not the WS close — make the two disagree so the branch is provable.
+
 ## 11 · Audit ledger
 
 The weekend loop (`.claude/skills/testing-weekend/`) reads the last line
@@ -5406,3 +6737,100 @@ Delta findings continue the T-### numbering in dated `## Delta audit` sections.
 - Audited through: `1b326772` on 2026-08-26 — 34 new findings (T-156…T-189: 3 P0, 14 P1, 17 P2) over 33 commits / 236 files. Gates serial round 1: pytest 7996 green (recursive; CI's 12 shards sum to the identical 7996, so T-122 holds); vitest 723 files / 7498 green; cloud 34 red on darwin, FAILED list byte-identical to the base SHA in a worktree (T-118). Added-file determinism 3×3 green (pytest 60, vitest 121). One new skip (`test_caddyfile.py:229`, filed as T-164), no `.only`, no exclusion growth, no threshold moved — but both coverage ratchets left `deploy.needs` and `main` has no required status checks (T-160).
 - Audited through: `789aabea` on 2026-08-27 — 49 new findings (T-190…T-238: 6 P0, 23 P1, 20 P2) over 43 commits / 264 files. Gates serial: pytest **7 failed** / 8153 passed — deterministic, all in `test_portfolio_risk_gate3_measurability.py`, reproduced 7/7 in isolation, filed as T-237 (`main` is red; CI at this SHA also failed and correctly skipped deploy); cloud 34 red on darwin, FAILED list byte-identical to the base SHA in a worktree (T-118); vitest 758 files / **1 failed** / 7702 passed — a single 5041ms timeout on `portfolio-startup-performance-contract.test.ts:172` under load 36, green 8/8 ×3 in isolation, filed as T-238 (load class, not a regression). Collection union clean on all three gates (py 478/479 shard union, cloud 33/33, vitest 758/758) so T-122 holds. Enforcement STRENGTHENED — T-160 is fixed, `deploy.needs` went 7 → 9 with both coverage ratchets restored. Four new skips (8 outcomes), none linked to a T-### (T-204, T-205); no `.only`; no exclusion growth; no threshold moved — the coverage measurement got stricter twice.
 - Audited through: **NOT ADVANCED** on 2026-08-28 — the audit phase was truncated by the harness background-wait ceiling at 600 s (T-239), filed no findings and no PR, and reported `OK`. `789aabea..c6d08fbd` (24 commits / 262 files / +23,193 lines) is **UNAUDITED**; the next audit must take `789aabea` as its base, not `c6d08fbd`. The remediation phase that followed worked the P2 backlog and filed T-239 against the truncation itself.
+- Audited through: `f7b5eeb9` on 2026-08-29 — 62 new findings (T-250…T-311: 5 P0, 30 P1, 27 P2) over 61 commits / 366 files / +36023-2510, base `789aabea` because the 2026-08-28 audit was truncated (T-239) and did not advance the ledger. Gates round 1 serial under load 74→224: pytest **3 failed** / 8558 passed — all three timing-shaped, in three unrelated files, 4 passed in 14.8s isolated, and CI's ten shards were green at this SHA (load, filed as T-283 and T-284); vitest 787 files / **9 failed** / 7934 passed — deterministic, all 9 in the three files `ci.yml:143-145` EXCLUDES, so the CI-gated set is fully green (T-276); cloud **37 failed** / 1263 passed on darwin vs **35 failed** / 1098 at the base SHA run in a worktree — the 4-line diff is +3 deliberate caddy reds (T-205 working, no `caddy` binary here) and −1 fixed relay watchdog, so the recorded darwin baseline is now 37. Collection union clean on all three gates (pytest 8562 = shard union, cloud 38/38 files, vitest 787/787) so T-122 holds. Enforcement improved — `stage-release.needs` GAINED both coverage ratchets — but `main` still has no `required_status_checks` (T-222 re-confirmed). One new skip, honest and linked to T-204; no `.only`; no exclusion growth; no threshold moved. `resolveSpreadPriceData` closed as fixed; the standing `orders-place-cache-race` item re-diagnosed from cross-file pollution to an intra-file race and numbered T-311.
+
+## Remediation 2026-08-29 — PR #140
+
+All **35 un-DONE P0/P1 findings** from the same cycle's audit are DONE:
+T-250…T-283 plus T-311. The 27 P2s are DEFERRED. Evidence per task, with
+red/green counts, is in `TEST_LOG.md` under `## Remediation 2026-08-29`.
+
+Method: 9 worktree agents in three waves (capped at ~6 concurrent per the
+2026-08-26 rail), with the lead cherry-picking serially, re-deriving the
+headline evidence in the LANDED tree rather than trusting the scoped agent
+report, and pushing after every task commit. Three landings were corrected by
+the lead on review — see below.
+
+### What remediation itself uncovered
+
+Four of these findings were coverage gaps whose subject turned out to be
+BROKEN, which is the pattern the 2026-08-27 lesson predicts:
+
+- **T-262** — the empty-dump path was not hypothetical. Driving the real
+  prune/upload sequence promoted a 168-byte empty dump, pruned two real ones
+  against it, uploaded it off-box and wrote `db-backup = ok`.
+- **T-263** — `fetch_vixts.py`'s rebuild branch emitted no freshness verdict
+  at all, so a stale Cboe series was heartbeat `ok` and rendered a confident
+  regime badge on a two-week-old session. `fetch_vixcor.py` already had the
+  verdict on both branches; vixts was the odd one out.
+- **T-283** — the leap wrapper charged process startup and the first curl
+  round trip to the shed-wait budget, so on a loaded box it could give up
+  with ZERO retries. That is the silent no-retry behind the 2026-08-27 page.
+- **T-277** — the embargo test was green on this clone ONLY because there is
+  no `.env`; with `TURSO_DB_URL` set, as production always has it, the
+  untouched test pinned the opposite of production.
+
+### Lead corrections applied on landing
+
+- **T-258 — the finding's central premise is WRONG, and the source change it
+  produced has been REVERTED.** T-258 states "no test references
+  `resolve_flows`, `_flows_query_id` or `IB_FLEX_FLOWS_QUERY_ID`". The repo
+  has TWO python collection roots and the finding searched only
+  `scripts/tests/`. The root `tests/` tree holds
+  `tests/test_perf_twr_flex_single_request.py`, which references all three
+  and whose `test_a_distinct_flows_query_id_is_still_fetched` deliberately
+  pins the OPPOSITE contract. Implementing the AC as written therefore made a
+  divergent `IB_FLEX_FLOWS_QUERY_ID` a silent no-op — reddening that test
+  (invisible to the task agent, which ran only `scripts/tests`) and turning
+  CLAUDE.md's guidance not to SET the knob into code that IGNORES it. That is
+  a throttle-facing product decision about an operator knob, not a test fix,
+  and the loop's own rail permits a source change only when a test correctly
+  fails against a real defect. The undisputed property — one request per run
+  in the DEFAULT configuration — is kept and mutation-checked; the
+  divergent-id case is pinned as-is in both files, each naming the other.
+- **T-259** — the agent's `_default_ingest` rewrite used `Path.write_text`
+  then `chmod 0600`, leaving DECRYPTED brokerage-statement plaintext
+  world-readable for the width of the ingest. Replaced with
+  `os.open(..., O_CREAT|O_WRONLY|O_TRUNC, 0o600)` before the first byte.
+- **T-253** — withholding the blended aggregate silently made
+  `total_deployed_dollars` an UNDER-statement and `remaining_capacity_pct` an
+  OVER-statement, the unsafe direction for Gate 3's 2.5% cap. The payload now
+  carries `unmeasured_basis_count`.
+- **T-311** — the agent's race fix is correct (8/8 in isolation, where the
+  pre-fix file was 3/6 red), but the file still hard-timed out in 2 of 9 runs
+  under load. That is the T-238 class, not the race, and it would have redded
+  the closing gate. Fixed before it per the 2026-08-27 lesson.
+
+### New findings raised by this phase — for the next audit, NOT fixed here
+
+Recorded rather than chased, per the "no mid-loop chases" rule. Left
+un-numbered; the next audit should triage and number them.
+
+1. **`useOrderRisk.ts:741` is the only `okToSubmit` in the hook that does not
+   also require `coverageStatus === "resolved"`**, so a stock/futures
+   close-out arms Transmit under `no-portfolio` while the option close-out at
+   `:834` refuses. Surfaced by T-260; behaviour deliberately left unchanged.
+2. **`resolveEntryCost` still returns a `number`**, so after T-253 the
+   close-ticket order paths (`ModifyOrderModal`, `OrderTab`,
+   `lib/order/positionTrade`) and the portfolio-level unrealized totals still
+   compute a blended figure for a `mixed` position. Widening it touches 19
+   sites beyond T-253's AC.
+3. **The divergent-`IB_FLEX_FLOWS_QUERY_ID` semantics are genuinely
+   undecided** — see the T-258 correction above. Two tests now pin today's
+   behaviour and name each other; an operator decision is what settles it.
+4. **The e2e job is still non-gating.** T-271 curated five more specs into it
+   (14 → 19, each pre-flighted under `next start` 3/3 green), but the job is
+   in neither `stage-release.needs` nor `deploy.needs`, so none of the 19 can
+   block a release. Same class as T-222, which re-confirmed that `main`
+   carries no `required_status_checks` at all. Both are operator actions
+   outside this branch.
+
+### Darwin cloud baseline — UNCHANGED at 37
+
+`37 failed, 1277 passed, 7 skipped` (the audit recorded `37 failed, 1263
+passed`; the +14 passing are this phase's new cloud tests). Attributed by
+FILE, not by count: 21 `test_ib_gateway_control.py` + 13
+`test_bootstrap_control_plane.py` — the standing `sha256sum` / `bash >= 4`
+class, T-118 — plus 3 deliberate `test_caddy_edge_timeouts.py` reds (T-205
+working as designed; no `caddy` binary on this host). **Zero failures in
+either cloud file this phase touched.**

@@ -108,6 +108,10 @@ FASTAPI_URL="http://${FASTAPI_HOST}:${FASTAPI_PORT}/leap/scan?preset=${PRESET}&m
 # scan budget intact (TimeoutStartSec=3900 → 240s headroom).
 SHED_WAIT_SECS="${RADON_LEAP_SHED_WAIT_SECS:-240}"
 RETRY_DELAY="${RADON_LEAP_REFRESH_RETRY_DELAY_SECS:-15}"
+# Injection point for the ladder's wait (T-283). Production leaves this as
+# `sleep`; the tests substitute a recorder so the retry ladder is driven by
+# the accounted budget instead of the wall clock.
+SLEEP_CMD="${RADON_LEAP_SLEEP_CMD:-sleep}"
 # Matches scripts/api/server.py _CAPACITY_SHED_MARKER. Status alone cannot
 # tell a shed from a script-failed 502 (R-221).
 CAPACITY_SHED_MARKER="subprocess capacity exhausted"
@@ -133,8 +137,15 @@ echo "$(date): POST ${FASTAPI_URL}"
 # MAX_CONCURRENT_SUBPROCESSES and outside the cooldown. Same guard as
 # run_signals_refresh.sh. Capacity shed is retried inside SHED_WAIT_SECS;
 # other non-7 outcomes still refuse the direct fallback.
+# T-283: budget the shed wait against the seconds this loop actually WAITS,
+# not against `SECONDS` since the script started. A `SECONDS`-based deadline
+# charged process startup and the first curl round trip to the wait budget, so
+# on a loaded box the whole budget could be gone before the first retry
+# decision and the wrapper gave up with zero retries — the exact silent
+# no-retry the 2026-08-27 page was about. A shed 502 returns instantly, so in
+# production the two accountings differ by milliseconds.
 attempt=0
-SHED_DEADLINE=$((SECONDS + SHED_WAIT_SECS))
+shed_waited=0
 HTTP_CODE=000
 CURL_EXIT=28
 RESPONSE_BODY=""
@@ -152,7 +163,7 @@ while :; do
     if ! _is_capacity_shed "$CURL_EXIT" "$HTTP_CODE" "$RESPONSE_BODY"; then
         break
     fi
-    remaining=$((SHED_DEADLINE - SECONDS))
+    remaining=$((SHED_WAIT_SECS - shed_waited))
     if [ "$remaining" -le 0 ]; then
         echo "$(date): LEAP shed for subprocess capacity (http=${HTTP_CODE}) after ${attempt} retries; not launching duplicate" >&2
         exit 1
@@ -161,7 +172,8 @@ while :; do
     delay="$RETRY_DELAY"
     [ "$delay" -gt "$remaining" ] && delay="$remaining"
     echo "$(date): LEAP FastAPI capacity shed (curl=${CURL_EXIT} http=${HTTP_CODE}) - retry ${attempt} in ${delay}s"
-    sleep "$delay"
+    "$SLEEP_CMD" "$delay"
+    shed_waited=$((shed_waited + delay))
 done
 
 if [ "$CURL_EXIT" -ne 7 ]; then

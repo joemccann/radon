@@ -15,6 +15,8 @@ import {
   fmtPriceOrCalculated,
   resolveMarketValue,
   resolveRealtimeMarketValue,
+  hasBlendedLegBasis,
+  MIXED_BASIS_TITLE,
   resolveEntryCost,
   positionDirectionSign,
   getAvgEntry,
@@ -413,6 +415,8 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
   const returnBasis = resolveReturnCapital(pos);
   const returnTitle = describeReturnCapital(returnBasis);
   const avgEntry = getAvgEntry(pos);
+  // Legs on disagreeing bases have no aggregate basis to show (T-253).
+  const blendedBasis = hasBlendedLegBasis(pos);
   // `pos.contracts` is typed `number` with no positivity constraint, so a row
   // flattened mid-sync (or a partial payload) divided by zero and reached
   // fmtPrice's .toLocaleString() as Infinity/NaN — printing `$∞`/`$NaN` and
@@ -501,7 +505,11 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
             {underlyingDirection === "down" && <ArrowDown size={11} className="price-trend-icon price-trend-down" aria-label="underlying down" />}
           </td>
         )}
-        {columns.avg_entry && <td className="right">{fmtPrice(avgEntry)}</td>}
+        {columns.avg_entry && (
+          <td className="right" title={blendedBasis ? MIXED_BASIS_TITLE : undefined}>
+            {blendedBasis ? "—" : fmtPrice(avgEntry)}
+          </td>
+        )}
         {columns.last_price && (
           <td className={`right last-price-cell ${flashDirection ? `last-price-${flashDirection}` : ""}`}>
             {lastPrice != null ? fmtPriceOrCalculated(lastPrice, lastPriceIsCalculated) : "—"}
@@ -535,8 +543,16 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
           </td>
         )}
         {columns.market_value && <td className="right">{mv != null ? fmtUsd(mv) : "—"}</td>}
-        {columns.entry_cost && <td className="right">{fmtUsd(entryCost)}</td>}
-        {columns.initial_value && <td className="right">{fmtUsd(getInitialValue(pos))}</td>}
+        {columns.entry_cost && (
+          <td className="right" title={blendedBasis ? MIXED_BASIS_TITLE : undefined}>
+            {blendedBasis ? "—" : fmtUsd(entryCost)}
+          </td>
+        )}
+        {columns.initial_value && (
+          <td className="right" title={blendedBasis ? MIXED_BASIS_TITLE : undefined}>
+            {blendedBasis ? "—" : fmtUsd(getInitialValue(pos))}
+          </td>
+        )}
         {columns.pnl && (
           <td className={`right ${pnl != null ? (pnl >= 0 ? "positive" : "negative") : ""}`}>
             {pnl != null ? `${pnl >= 0 ? "+" : "-"}${fmtUsd(Math.abs(pnl))}` : "—"}

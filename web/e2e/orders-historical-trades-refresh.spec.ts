@@ -90,7 +90,14 @@ const FRESH_BLOTTER = {
   open_trades: [],
 };
 
-async function stubOrdersPage(page: import("@playwright/test").Page) {
+type BlotterStub = {
+  /** Flip to serve FRESH_BLOTTER on every subsequent GET. */
+  serveFresh: () => void;
+  /** Every POST the page issued to /api/blotter. Must stay empty. */
+  posts: string[];
+};
+
+async function stubOrdersPage(page: import("@playwright/test").Page): Promise<BlotterStub> {
   await page.unrouteAll({ behavior: "ignoreErrors" });
 
   await page.route("**/api/portfolio**", (route) =>
@@ -133,32 +140,64 @@ async function stubOrdersPage(page: import("@playwright/test").Page) {
     }),
   );
 
+  // GET-only, exactly like production since 26668ef8: POST /api/blotter is a
+  // 404 ("Blotter rehydrate is file-ingest only. GET reads journal_sync") and
+  // useBlotter sets hasPost: false, so the Refresh button re-GETs. This stub
+  // therefore has NO POST branch — a POST is recorded and answered with the
+  // real 404 so the assertion below, not a timeout, reports the regression.
+  let fresh = false;
+  const posts: string[] = [];
+
   await page.route("**/api/blotter", (route) => {
-    const method = route.request().method();
-    if (method === "POST") {
+    const request = route.request();
+    if (request.method() === "POST") {
+      posts.push(request.url());
       return route.fulfill({
-        status: 200,
+        status: 404,
         contentType: "application/json",
-        body: JSON.stringify(FRESH_BLOTTER),
+        body: JSON.stringify({
+          error: "Blotter rehydrate is file-ingest only. GET reads journal_sync.",
+        }),
       });
     }
 
     return route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(STALE_BLOTTER),
+      body: JSON.stringify(fresh ? FRESH_BLOTTER : STALE_BLOTTER),
     });
   });
+
+  return {
+    serveFresh: () => {
+      fresh = true;
+    },
+    posts,
+  };
 }
 
-test("historical trades auto-refresh from IB Flex data on /orders", async ({ page }) => {
-  await stubOrdersPage(page);
+test("historical trades refresh re-reads the journal-derived blotter on /orders", async ({
+  page,
+}) => {
+  const blotter = await stubOrdersPage(page);
 
   await page.goto("/orders");
 
-  const section = page.locator("text=Historical Trades (30 Days)");
-  await expect(section).toBeVisible({ timeout: 15_000 });
+  const section = page.getByTestId("historical-trades-section");
+  await expect(section.locator("text=Historical Trades (30 Days)")).toBeVisible({
+    timeout: 15_000,
+  });
 
-  await expect(page.locator("text=2 TRADES")).toBeVisible({ timeout: 10_000 });
+  await expect(section.locator("text=1 TRADES")).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator("text=AAPL 20260320 200C")).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator("text=GOOG 20260320 180C")).toHaveCount(0);
+
+  // The journal picked up the second fill; Refresh must surface it via GET.
+  blotter.serveFresh();
+  await section.locator("button.sync-button").click();
+
+  await expect(section.locator("text=2 TRADES")).toBeVisible({ timeout: 10_000 });
   await expect(page.locator("text=GOOG 20260320 180C")).toBeVisible({ timeout: 10_000 });
+
+  expect(blotter.posts).toEqual([]);
 });

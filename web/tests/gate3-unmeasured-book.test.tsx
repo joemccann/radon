@@ -11,16 +11,37 @@
 // no Gate-3 module at all, because `AttributionPanel` did not pass
 // `showUnavailable`.
 
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-
 import React from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render } from "@testing-library/react";
 
 import CorrelationRiskBanner from "@/components/CorrelationRiskBanner";
+import AttributionPanel from "@/components/AttributionPanel";
 import { correlationRiskBanner } from "@/lib/correlationRiskBanner";
-import type { RiskBudgetReport } from "@/lib/types";
+import type { AttributionData, RiskBudgetReport } from "@/lib/types";
+
+const ATTRIBUTION = {
+  total_trades: 1,
+  closed_trades: 1,
+  open_trades: 0,
+  total_realized_pnl: 0,
+  by_strategy: [],
+  by_ticker: [],
+  by_edge: [],
+  by_risk: [],
+  best_ticker: null,
+  worst_ticker: null,
+  kelly_calibration: {},
+} as unknown as AttributionData;
+
+vi.mock("@/lib/useAttribution", () => ({
+  useAttribution: () => ({
+    data: ATTRIBUTION,
+    loading: false,
+    error: null,
+    refetch: () => undefined,
+  }),
+}));
 
 afterEach(cleanup);
 
@@ -67,17 +88,32 @@ describe("an unmeasured book is not a clean book", () => {
 });
 
 describe("the portfolio surface asks for the unavailable state", () => {
-  it("AttributionPanel passes showUnavailable to the banner", () => {
-    const raw = readFileSync(
-      resolve(__dirname, "..", "components/AttributionPanel.tsx"),
-      "utf8",
+  // Was: slice `<CorrelationRiskBanner ... />` out of AttributionPanel.tsx's
+  // text and assert it matches /showUnavailable/. `showUnavailable={false}`
+  // matches that regex and restores the original bug in full, and so does
+  // hiding the whole banner behind a conditional, because the JSX TEXT is
+  // unchanged. Render the panel instead.
+
+  it("renders the Gate-3 module on a book it measured nothing of", () => {
+    const { queryByTestId } = render(<AttributionPanel riskBudget={NOTHING_MEASURED} />);
+    const el = queryByTestId("correlation-risk-banner");
+    expect(el, "no Gate-3 module rendered on the portfolio surface").toBeTruthy();
+    expect(el?.getAttribute("data-level")).toBe("unmeasured");
+  });
+
+  it("renders the unavailable state when the risk-budget report is missing", () => {
+    // The ONLY branch `showUnavailable` actually gates: with no report at all
+    // the banner would otherwise render nothing and Gate 3 would be silent.
+    const { queryByTestId, getByTestId } = render(<AttributionPanel riskBudget={null} />);
+    expect(queryByTestId("correlation-risk-banner")).toBeTruthy();
+    expect(getByTestId("correlation-risk-banner").getAttribute("data-level")).toBe("info");
+    expect(getByTestId("correlation-risk-banner").textContent).toContain(
+      "Gate 3: correlation measurement unavailable",
     );
-    const src = raw
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      .split("\n")
-      .filter((line) => !line.trim().startsWith("//"))
-      .join("\n");
-    const tag = src.slice(src.indexOf("<CorrelationRiskBanner"));
-    expect(tag.slice(0, tag.indexOf("/>"))).toMatch(/showUnavailable/);
+  });
+
+  it("still renders no Gate-3 module for a genuinely clean book", () => {
+    const { queryByTestId } = render(<AttributionPanel riskBudget={NOTHING_TO_MEASURE} />);
+    expect(queryByTestId("correlation-risk-banner")).toBeNull();
   });
 });

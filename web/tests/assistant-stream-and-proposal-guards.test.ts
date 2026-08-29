@@ -29,6 +29,26 @@ function result(over: Record<string, unknown> = {}) {
   } as never;
 }
 
+// T-272: the cap tests walk MAX_STREAM_CHUNKS chunks, each behind a real
+// `await sleep(8)` in `streamMessage`. That is ~2.5s idle, and MEASURED on
+// this runner at load average 112 it was 3935ms and 4894ms — the second
+// within 106ms of vitest's 5000ms default, i.e. a load-shaped false red on
+// the shared gate. Drive the same 240 sleeps on a fake clock instead: the
+// assertions below are unchanged, only the wall clock is.
+async function drainStream(text: string, setMessages: unknown) {
+  vi.useFakeTimers();
+  try {
+    const done = streamMessage("m", text, setMessages as never, {
+      signal: new AbortController().signal,
+    });
+    // One tick past the last chunk's sleep so the remainder write lands too.
+    await vi.advanceTimersByTimeAsync(MAX_STREAM_CHUNKS * 8 + 8);
+    await done;
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
 describe("(a) a stream can be stopped", () => {
   it("stops writing once the signal aborts", async () => {
     const controller = new AbortController();
@@ -58,9 +78,7 @@ describe("(a) a stream can be stopped", () => {
     });
 
     // 400 KB — ~3,300 chunks unbounded.
-    await streamMessage("m", "y".repeat(400_000), setMessages as never, {
-      signal: new AbortController().signal,
-    });
+    await drainStream("y".repeat(400_000), setMessages);
     // MAX_STREAM_CHUNKS animated writes plus ONE final write carrying the
     // remainder — that last write is what the next test's full-text guarantee
     // rests on. Unbounded this was ~3,300 writes.
@@ -77,9 +95,7 @@ describe("(a) a stream can be stopped", () => {
       last = out[0].content;
     });
     const text = "z".repeat(400_000);
-    await streamMessage("m", text, setMessages as never, {
-      signal: new AbortController().signal,
-    });
+    await drainStream(text, setMessages);
     expect(last).toHaveLength(text.length);
   });
 });

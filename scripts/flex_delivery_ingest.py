@@ -108,6 +108,10 @@ def _apply_classified(kind: str, xml_text: str, digest: str, source_path: str) -
             # earlier chunks committed. Building the TWR series over a
             # half-written `cash_flows` and persisting it as authoritative
             # turns a partial write into a published number. R-323.
+            #
+            # The claim was taken before the writers, so hand it back: without
+            # this the operator's re-drop of the fixed file is a "duplicate"
+            # no-op and the half-written chunks are never repaired. T-257.
             return {
                 "ok": False,
                 "classified_as": kind,

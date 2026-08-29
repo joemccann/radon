@@ -634,6 +634,17 @@ def collapse_positions(positions: list) -> list:
                 "market_price_is_calculated": bool(leg.get('marketPriceIsCalculated'))
             })
         
+        # R-374 / T-253: `mixed` means one leg carries today's session VWAP
+        # while another keeps IB's lagged avgCost, so `total_entry_cost` — and
+        # `max_risk`, which Gate 3 sizes the bankroll cap off — describe a
+        # trade that was never placed. Naming the blend was not enough: refuse
+        # to publish the aggregate at all so the display layer renders no value
+        # rather than presenting a blended basis as fact.
+        position_basis_source = _position_basis_source(formatted_legs)
+        basis_is_blended = position_basis_source == "mixed"
+        if basis_is_blended:
+            max_risk = None
+
         collapsed.append({
             "id": position_id,
             "account_id": account_id,
@@ -644,21 +655,13 @@ def collapse_positions(positions: list) -> list:
             "expiry": expiry,
             "contracts": contracts,
             "direction": direction,
-            "entry_cost": round(total_entry_cost, 2),
+            "entry_cost": None if basis_is_blended else round(total_entry_cost, 2),
             "max_risk": round(max_risk, 2) if max_risk is not None else None,
             "market_value": round(total_market_value, 2) if total_market_value is not None else None,
             "market_price_is_calculated": bool(is_market_price_calculated) if total_market_value is not None else False,
             "ib_daily_pnl": ib_daily_pnl,
             "session_fill_date": session_fill_date,
-            # R-374: the per-leg override has no all-legs gate, so rolling ONE
-            # leg of a vertical today gives that leg today's session VWAP while
-            # the held leg keeps IB's lagged avgCost — and `total_entry_cost`
-            # (which feeds `max_risk` for defined-risk structures) is then a sum
-            # corresponding to no actual trade. The position-level source was
-            # `None` for that case, indistinguishable from "no session fills at
-            # all". `mixed` names it, so the display layer can refuse to
-            # aggregate rather than presenting a blended basis as fact.
-            "basis_source": _position_basis_source(formatted_legs),
+            "basis_source": position_basis_source,
             "legs": formatted_legs,
             "kelly_optimal": None,
             "target": None,
@@ -1199,14 +1202,22 @@ def display_portfolio(account: dict, positions: list, collapsed: list = None):
             risk_icon = "✓" if pos['risk_profile'] == 'defined' else "⚠"
             print(f"\n  [{pos['id']}] {pos['ticker']} — {pos['structure']}")
             print(f"      {risk_icon} {pos['risk_profile'].upper()} | {pos['direction']} | {pos['contracts']}x")
-            print(f"      Entry: ${pos['entry_cost']:,.2f}", end="")
+            # `None` = mixed leg basis; there is no aggregate to print.
+            entry_cost = pos['entry_cost']
+            if entry_cost is None:
+                print("      Entry: --- (mixed leg basis)", end="")
+            else:
+                print(f"      Entry: ${entry_cost:,.2f}", end="")
             if pos['max_risk'] is not None:
                 print(f" | Max Risk: ${pos['max_risk']:,.2f}", end="")
             print()
             if pos.get('market_value') is not None:
-                pnl = pos['market_value'] - pos['entry_cost']
-                pnl_pct = (pnl / abs(pos['entry_cost']) * 100) if pos['entry_cost'] != 0 else 0
-                print(f"      Market Value: ${pos['market_value']:,.2f} ({pnl_pct:+.1f}%)")
+                if entry_cost is None:
+                    print(f"      Market Value: ${pos['market_value']:,.2f}")
+                else:
+                    pnl = pos['market_value'] - entry_cost
+                    pnl_pct = (pnl / abs(entry_cost) * 100) if entry_cost != 0 else 0
+                    print(f"      Market Value: ${pos['market_value']:,.2f} ({pnl_pct:+.1f}%)")
             if pos['expiry'] and pos['expiry'] != "N/A":
                 print(f"      Expiry: {pos['expiry']}")
             
@@ -1483,7 +1494,17 @@ def convert_to_portfolio_format(account: dict, collapsed_positions: list, pnl_da
     bankroll = account.get('NetLiquidation', account.get('TotalCashValue', 0))
 
     # Calculate totals from collapsed positions
-    total_deployed = sum(p['entry_cost'] for p in collapsed_positions)
+    # A position with a mixed leg basis publishes no entry_cost, so it
+    # contributes nothing to deployed capital rather than a blended figure.
+    # That makes the total an UNDER-statement, which makes
+    # `remaining_capacity_pct` an OVER-statement — the unsafe direction for
+    # Gate 3's 2.5% cap. Count the omissions so the figure is never silently
+    # wrong: a non-zero count means "deployed is a floor, not the number".
+    # T-253.
+    unmeasured_basis_count = len(
+        [p for p in collapsed_positions if p.get('entry_cost') is None]
+    )
+    total_deployed = sum(p['entry_cost'] or 0 for p in collapsed_positions)
     deployed_pct = (total_deployed / bankroll * 100) if bankroll > 0 else 0
 
     # Derive entry_date from journal rows and the previous portfolio snapshot.
@@ -1658,6 +1679,9 @@ def convert_to_portfolio_format(account: dict, collapsed_positions: list, pnl_da
         "total_deployed_pct": round(deployed_pct, 2),
         "total_deployed_dollars": round(total_deployed, 2),
         "remaining_capacity_pct": round(100 - deployed_pct, 2),
+        # >0 means total_deployed_dollars is a FLOOR and remaining_capacity_pct
+        # a CEILING — that many positions have an unmeasurable (mixed) basis.
+        "unmeasured_basis_count": unmeasured_basis_count,
         "position_count": len(collapsed_positions),
         "defined_risk_count": len([p for p in collapsed_positions if p['risk_profile'] == 'defined']),
         "undefined_risk_count": len([p for p in collapsed_positions if p['risk_profile'] != 'defined']),

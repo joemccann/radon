@@ -1,3 +1,27 @@
+# Task: Resolve testing/2026-08-29 merge conflicts (2026-08-29)
+
+## Dependency graph
+
+- M1 depends_on: [] - Fetch main, inspect divergence, identify conflicting files and intended state
+- M2 depends_on: [M1] - Resolve conflicts surgically, preserving both remediation and reliability fixes
+- M3 depends_on: [M2] - Run focused validation for touched files and inspect final diff
+- M4 depends_on: [M3] - Secret scan, review, CodeQL, commit/push, PR reply
+
+## Checklist
+
+- [x] M1 Inspect divergence and conflict set
+- [x] M2 Resolve merge conflicts
+- [x] M3 Verify focused tests
+- [x] M4 Review, scan, ship
+
+## Review
+
+- `git merge --no-commit --no-ff origin/main` surfaced 3 content conflicts; resolved and finalized as merge commit `a2dfa96f`
+- Focused pytest green: `scripts/tests/test_flex_delivery_claim_writer.py scripts/tests/test_flex_delivery_claim_release.py scripts/tests/test_flex_sftp_pull.py` → 31 passed
+- Focused pytest green: `cloud/tests/test_app_plane_cutover_safety.py cloud/tests/test_unit_install_acknowledgment.py` → 30 passed, 2 skipped
+
+---
+
 # Task: Flex sFTP remaining (steps 6-9)
 
 Canonical operator board: `docs/show-me-flex-sftp-ops.html`

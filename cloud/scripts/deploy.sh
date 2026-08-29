@@ -1482,7 +1482,19 @@ rollback() {
     exit 3
   fi
 
-  log_error "Rollback complete. Previous release ${prev_commit} passed the deploy gate."
+  # T-254: the live gate above proves the restored release SERVES; it says
+  # nothing about whether that SHA ever cleared its own release gate. A SHA
+  # whose ci.yml concluded `failure` never reaches a deploy, so it never gets a
+  # green marker -- the marker is the on-host record of "this SHA passed". Read
+  # it rather than a GitHub API call: the rollback runs on the VPS, where the
+  # network or a token may be unavailable, and a rollback that refuses to
+  # finish strands production. Report honestly, always complete.
+  if green_marker_matches "$prev_commit"; then
+    log_error "Rollback complete. Previous release ${prev_commit} passed the deploy gate."
+  else
+    log_error "Rollback complete, but ${prev_commit} has no green deploy-gate record on this host."
+    log_error "Its own CI gate may never have passed. Production is serving an UNVERIFIED release; verify it manually."
+  fi
   exit 1
 }
 

@@ -71,7 +71,12 @@ def classify_flex_xml(xml_text: str) -> str:
         or root.find(".//CashTransaction") is not None
     )
     has_transfer = root.find(".//Transfers") is not None
-    has_trade = root.find(".//Trade") is not None
+    # Same reasoning as the transfer check above: a session where the account
+    # traded nothing still ships <Trades></Trades>, and requiring a <Trade>
+    # child rejected the whole quiet day.
+    has_trade = (
+        root.find(".//Trades") is not None or root.find(".//Trade") is not None
+    )
 
     if has_nav and has_cash and has_transfer:
         return ACTIVITY
