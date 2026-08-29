@@ -579,3 +579,40 @@ class TestEdgeMechanism:
                 stop_serving(server)
                 caddy.terminate()
                 caddy.wait(timeout=10)
+
+
+class TestTheDeployPublishesTheEdgeConfig:
+    """cloud/caddy/Caddyfile was the one release artifact no deploy shipped.
+
+    Editing it, merging it and watching CI go green published nothing: the repo
+    and /etc/caddy diverged silently until someone ran publish-caddy by hand.
+    It cost two incidents on 2026-08-29 that were both already fixed in the
+    repo and both still broken in production — the assistant 504
+    (`response_header_timeout` on `/api/assistant`) and the headlines
+    websocket dialling `localhost:8766` when the hub listens on 127.0.0.1
+    only, so Caddy resolved ::1 first and never reached it.
+    """
+
+    def test_deploy_publishes_the_caddyfile_after_a_verified_release(self) -> None:
+        deploy = (REPO / "cloud/scripts/deploy.sh").read_text(encoding="utf-8")
+        assert "publish-caddy" in deploy, (
+            "cloud/scripts/deploy.sh never publishes cloud/caddy/Caddyfile, so an "
+            "edge fix can merge green and never reach production"
+        )
+        # Every site that syncs scheduled units has just finished verifying a
+        # release; the edge config belongs on exactly those paths.
+        sync_sites = deploy.count("sync_scheduled_units || log_warn")
+        publish_sites = deploy.count("publish_edge_config || log_warn")
+        assert publish_sites == sync_sites, (
+            f"{publish_sites} edge-config publishes for {sync_sites} unit syncs; "
+            "a verified release that syncs units must also publish the edge config"
+        )
+
+    def test_edge_publish_degrades_to_a_warning_rather_than_failing_a_release(
+        self,
+    ) -> None:
+        deploy = (REPO / "cloud/scripts/deploy.sh").read_text(encoding="utf-8")
+        assert "edge_config_publish_is_granted" in deploy, (
+            "publish-caddy must be grant-checked like sync-scheduled-units so a "
+            "host without the sudoers verb warns instead of failing the deploy"
+        )
