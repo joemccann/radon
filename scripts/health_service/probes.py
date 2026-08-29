@@ -129,6 +129,19 @@ def parse_unit_states(raw: str) -> dict:
 UNIT_STATE_MAX_AGE_SECS = 30.0
 STATUS_SCHEMA_VERSION = 2
 
+# Non-edge components: reported in /status, but a failure here must not
+# collapse the public edge aggregate to "down". Off-box pages P1 on
+# aggregate_down; these units already have their own on-box alarms.
+# ib-gateway: broker dependency (2026-08-09 weekend clean-exit false P1).
+# newsfeed / monitor: sidecars — Restart=always flaps briefly read as unit
+# "down" and were paging edge-unhealthy (2026-08-29 page 0b7726f8).
+DEPENDENCY_PROBES = frozenset({"ib-gateway"})
+DEPENDENCY_UNITS = frozenset({
+    "radon-ib-gateway.service",
+    "radon-newsfeed.service",
+    "radon-monitor.service",
+})
+
 
 def _unit_evidence_current(units_age_secs) -> bool:
     return (
@@ -199,27 +212,27 @@ def aggregate_state(probe_results: dict, units: dict,
     The off-box ``external_probe`` row is deliberately excluded: folding an old
     off-box verdict into the endpoint it probes would create a feedback loop.
     """
-    # The broker dependency is reported but must not masquerade as an edge
-    # outage: IBKR's weekend session shutdown exits the gateway cleanly while
-    # every serving-path component stays up, and collapsing the aggregate to
-    # "down" made the off-box observer page P1 "edge unhealthy
-    # (aggregate_down)" for it (2026-08-09). Gateway-only failure => the NEW
-    # "degraded" state; any serving-path failure still wins as "down". Both
-    # gateway signals count as dependency: the ib-gateway probe AND the
-    # nested FastAPI payload's broker fields (_nested_api_state).
+    # Non-edge dependencies/sidecars are reported but must not masquerade as
+    # an edge outage. Collapsing the aggregate to "down" made the off-box
+    # observer page P1 "edge unhealthy (aggregate_down)" for broker-only
+    # (2026-08-09) and newsfeed-flap (2026-08-29) failures while api/relay/
+    # nextjs stayed up. Dependency-only failure => "degraded"; any serving-
+    # path failure still wins as "down". Nested FastAPI broker fields
+    # (_nested_api_state) count as dependency too.
     _DOWNISH = {"down", "error", "failed", "unhealthy"}
     serving_states = []
     dependency_states = []
     for name, value in (probe_results or {}).items():
         if isinstance(value, dict):
             state = str(value.get("state", "unknown")).lower()
-            (dependency_states if name == "ib-gateway" else serving_states).append(state)
+            target = dependency_states if name in DEPENDENCY_PROBES else serving_states
+            target.append(state)
     units_current = _unit_evidence_current(units_age_secs)
     if units_current:
         for name, value in (units or {}).items():
             if isinstance(value, dict):
                 state = str(value.get("state", "unknown")).lower()
-                target = dependency_states if name == "radon-ib-gateway.service" else serving_states
+                target = dependency_states if name in DEPENDENCY_UNITS else serving_states
                 target.append(state)
     nested_api_state = _nested_api_state(probe_results)
     if nested_api_state is not None:
