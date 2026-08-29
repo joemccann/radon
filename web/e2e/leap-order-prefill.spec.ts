@@ -1,7 +1,14 @@
 import { expect, test, type Page } from "@playwright/test";
 
+// Window-relative, NOT a literal: `LeapScanner.isScanStale` suppresses
+// `bestRow` — and with it the TRADE BEST link this spec clicks — once the scan
+// is older than SERVICE_FRESHNESS_WINDOWS["leap-scan"].open (26h). A hardcoded
+// stamp passes until it crosses that line and then fails forever; this one
+// aged out on 2026-08-28 and took the P0-financial smoke red with it.
+const FRESH_SCAN_TIME = new Date(Date.now() - 5 * 60_000).toISOString();
+
 const LEAP_PAYLOAD = {
-  scan_time: "2026-08-27T18:02:30Z",
+  scan_time: FRESH_SCAN_TIME,
   min_gap: 10,
   universe: "preset:largecaps",
   requested_tickers: [],
@@ -121,7 +128,7 @@ async function stubApis(page: Page) {
 
     if (path === "/api/leap") return json(LEAP_PAYLOAD);
     if (path === "/api/scanner") {
-      return json({ scan_time: "2026-08-27T18:02:30Z", tickers_scanned: 0, signals_found: 0, top_signals: [] });
+      return json({ scan_time: FRESH_SCAN_TIME, tickers_scanned: 0, signals_found: 0, top_signals: [] });
     }
     if (path === "/api/portfolio") {
       return json({
