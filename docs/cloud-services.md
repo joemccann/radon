@@ -632,6 +632,31 @@ plausibility guard raises rather than latching `ok` over a truncated or
 implausible series. Installed by the deploy's `install-units` verb from
 `installed-units.sha256`. Spec: [`indicators/vixts.md`](indicators/vixts.md).
 
+### Model catalog (`radon-model-catalog.timer`)
+
+Daily `03:10 UTC` (`RandomizedDelaySec=300`), oneshot
+`scripts/refresh_model_catalog.py`, `TimeoutStartSec=300`. Picks ONE frontier
+chat model per LLM provider whose API key is present in the unit env
+(`ANTHROPIC_API_KEY` today; `XAI_API_KEY` / `GROK_API_KEY` and `OPENAI_API_KEY`
+light up automatically when added to `/etc/radon/env`) by listing that
+provider's own models endpoint and applying a deterministic filter, sort, head:
+dated snapshots lose to the undated alias they pin, cheap and preview tiers and
+non-chat modalities are dropped, and versions are compared as floats so
+`grok-4.20` reads as 4.2 rather than beating `grok-4.6`. A provider with no key
+is skipped silently, so the chat model picker lists exactly what this
+deployment can call. A provider that errors, times out or rate-limits keeps its
+existing row; a run that resolves no provider at all writes only the heartbeat,
+so a bad poll never blanks a good catalog. Per-provider operator overrides
+(`ANTHROPIC_MODEL`, `OPENAI_MODEL`, `XAI_MODEL` / `GROK_MODEL` — the same
+variables `web/lib/llm/provider.ts` reads) win over discovery, so a bad
+heuristic is recoverable without a deploy. Rows in `llm_model_catalog`, payload
+in `scan_snapshots`, heartbeat `model-catalog`, JSON fallback
+`data/llm_models.json`. A key added to `/etc/radon/env` only becomes visible to
+the picker after `systemctl restart radon-nextjs` — `write_web_env()` rewrites
+`web/.env` on every deploy with `NEXT_PUBLIC_*` only, so provider keys must
+live in the unit env, never in `web/.env` on the host. Installed by the
+deploy's `install-units` verb from `installed-units.sha256`.
+
 ### IV RANK (`radon-ivrank.timer`)
 
 Daily `22:10 UTC` (`RandomizedDelaySec=120`), oneshot

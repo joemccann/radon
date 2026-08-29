@@ -57,7 +57,11 @@ const MIDDLEWARE_PERIMETER_ONLY_ROUTES = [
   "equibles-smart-money-13f",
   "flex-token", "flow-surprise", "futures-quote", "garch-convergence",
   "hhlev", "hyad", "index-quote",
-  "informed-flow/[ticker]", "ivrank", "llm-token-index", "margin-debt", "prices",
+  "informed-flow/[ticker]", "ivrank", "llm-token-index", "margin-debt",
+  // models: read-only chat model picker catalog. Reports WHICH provider keys
+  // are present in this deployment, never any key material — same posture as
+  // its llm-token-index sibling, so the middleware perimeter is the only layer.
+  "models", "prices",
   "profile", "risk-free-rate", "skew", "skew2d", "straddle", "vixcor", "vixts",
   "vol-cone", "watchlist", "watchlist/[symbol]", "workflow", "yield-curve",
   "yield-curve/live",

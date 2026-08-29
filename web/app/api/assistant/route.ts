@@ -2,10 +2,11 @@ import { requireRouteAccess } from "@/lib/routeAccess";
 
 import { NextRequest, NextResponse } from "next/server";
 
-import { runAssistantLoop, type AssistantTurn, type ToolEvent } from "@/lib/assistant/loop";
+import { runAssistantLoop, type AssistantModelSelection, type AssistantTurn, type ToolEvent } from "@/lib/assistant/loop";
 import { recordAssistantTurn, type AssistantTurnToolCall } from "@/lib/assistant/telemetry";
 import { enforceDemoAiQuota } from "@/lib/demo/enforceAiQuota";
 import { etCalendarDateString } from "@/lib/journal/rangePnl";
+import { validateModelId } from "@/lib/llm/catalog";
 
 type ChatRole = "user" | "assistant";
 
@@ -27,6 +28,8 @@ export type ChatMessage = {
 
 export type AssistantPayload = {
   messages: ChatMessage[];
+  /** Model id from the picker. Advisory: only a catalogued id is honored. */
+  model?: string;
 };
 
 export const maxDuration = 300;
@@ -175,6 +178,21 @@ function lastUserContent(messages: ChatMessage[]): string {
   return message ? contentText(message.content) : "";
 }
 
+// A client-supplied model is never trusted: only an id the catalog knows is
+// forwarded, so a caller cannot bill an arbitrary model string. Anything else
+// (unknown id, or a catalog that is down) silently falls back to the
+// deployment default rather than failing the operator's turn.
+async function resolveModelSelection(raw: unknown): Promise<AssistantModelSelection> {
+  const requested = cleanString(raw);
+  if (!requested) return {};
+  try {
+    const model = await validateModelId(requested);
+    return model ? { model: model.id, provider: model.provider } : {};
+  } catch {
+    return {};
+  }
+}
+
 function toTelemetryToolCalls(toolEvents: ToolEvent[]): AssistantTurnToolCall[] {
   return toolEvents.map((event) => ({
     name: event.name,
@@ -220,7 +238,8 @@ export async function POST(request: NextRequest): Promise<Response> {
   const t0 = Date.now();
   try {
     const system = `${SYSTEM_PROMPT} Today is ${etCalendarDateString(new Date())} (America/New_York).`;
-    const result = await runAssistantLoop(toTurns(messages), system, access.principal);
+    const selection = await resolveModelSelection(body?.model);
+    const result = await runAssistantLoop(toTurns(messages), system, access.principal, selection);
 
     const content =
       mock && !result.proposal && isProviderMockContent(result.content)

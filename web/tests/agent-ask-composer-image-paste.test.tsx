@@ -131,9 +131,9 @@ describe("AskComposer — submitting attachments", () => {
     fireEvent.keyDown(textarea, { key: "Enter" });
 
     expect(onSubmit).toHaveBeenCalledTimes(1);
-    const [text, engine, attachments] = onSubmit.mock.calls[0];
+    const [text, modelId, attachments] = onSubmit.mock.calls[0];
     expect(text).toBe("what is this chain telling me");
-    expect(engine).toBe("AUTO");
+    expect(modelId).toBe("");
     expect(attachments).toHaveLength(1);
     expect(attachments[0]).toMatchObject({
       mediaType: "image/png",
