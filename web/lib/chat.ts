@@ -156,6 +156,22 @@ async function readJsonBody<T>(response: Response): Promise<T | null> {
   }
 }
 
+/**
+ * The edge abandons an assistant turn before the route does, and its 504 body
+ * is not JSON, so `payload.error` is empty and the status is the only thing
+ * carrying the reason. "Assistant service returned an error." told the
+ * operator nothing on 2026-08-29 when a pasted-chart turn timed out at the
+ * proxy while the turn itself was still running.
+ */
+const TIMEOUT_STATUSES = new Set([408, 504]);
+
+function assistantErrorMessage(status: number | undefined, error: string | undefined): string {
+  if (typeof status === "number" && TIMEOUT_STATUSES.has(status)) {
+    return "The turn timed out before the assistant answered. A smaller image or a shorter question may get through.";
+  }
+  return error ? `Error: ${error}` : "Assistant service returned an error.";
+}
+
 export async function requestAssistantReply(history: ApiMessage[], latestMessage: string): Promise<string> {
   const response = await fetch("/api/assistant", {
     method: "POST",
@@ -173,10 +189,7 @@ export async function requestAssistantReply(history: ApiMessage[], latestMessage
   const payload = await readJsonBody<AssistantResponse>(response);
 
   if (!response.ok) {
-    if (payload?.error) {
-      return `Error: ${payload.error}`;
-    }
-    return "Assistant service returned an error.";
+    return assistantErrorMessage(response.status, payload?.error);
   }
 
   if (typeof payload?.content === "string" && payload.content.trim()) {
@@ -248,7 +261,7 @@ export async function requestAssistantTurn(
   const payload = await readJsonBody<AssistantResponse>(response);
 
   if (!response.ok) {
-    const message = payload?.error ? `Error: ${payload.error}` : "Assistant service returned an error.";
+    const message = assistantErrorMessage(response.status, payload?.error);
     return { content: message, proposal: null, toolEvents: [], model: null };
   }
 
