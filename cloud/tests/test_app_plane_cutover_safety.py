@@ -208,6 +208,18 @@ class TestImageBuildCarriesPublicEnv:
         for name in NEXT_PUBLIC_ARGS:
             assert f"ARG {name}" in text
 
+    def test_the_client_bundle_must_contain_the_clerk_key(self):
+        text = DOCKERFILE_NODE.read_text(encoding="utf-8")
+        assert "grep -RF" in text
+        assert ".next/static" in text
+        assert "next-clerk-guard" in text
+
+    def test_the_workflow_pushes_latest_only_after_the_node_image_bakes(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        assert "radon-node:latest" in workflow
+        push = workflow.split("Push SHA tags to GHCR", 1)[-1]
+        assert "radon-node:latest" in push
+
 
 class TestImageTagIsPreflighted:
     """T-232: drive the runtime with a stub docker; do not grep the script.

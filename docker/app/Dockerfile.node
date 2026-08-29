@@ -69,6 +69,7 @@ ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 RUN bun run build \
+    && grep -RF -- "$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" .next/static >/dev/null \
     && mkdir -p /ms-playwright /home/radon/radon/web/public/data
 
 # Newsfeed imports playwright from the repo-root package. `bun x` from this
@@ -79,8 +80,11 @@ WORKDIR /home/radon/radon
 RUN ./node_modules/.bin/playwright install chromium chromium-headless-shell \
     && chown -R radon:radon /home/radon/radon /ms-playwright
 
+COPY docker/app/next-clerk-guard.sh /usr/local/bin/next-clerk-guard
+RUN chmod 0755 /usr/local/bin/next-clerk-guard
+
 WORKDIR /home/radon/radon/web
 USER radon
 
 # next start via the web package.json start script
-CMD ["bun", "run", "start"]
+CMD ["/usr/local/bin/next-clerk-guard"]
