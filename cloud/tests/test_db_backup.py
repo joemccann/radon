@@ -103,8 +103,14 @@ class TestSelectPrunable:
 
     def test_keeps_dump_inside_retention_boundary(self):
         now = 1_000_000 * DAY
-        entries = [("radon-edge.sql.gz", now - 30 * DAY + 60)]
+        entries = [("radon-edge.sql.gz", now - db_backup.RETENTION_DAYS * DAY + 60)]
         assert db_backup.select_prunable(entries, now) == []
+
+    def test_local_retention_is_the_operator_window(self):
+        # 2026-08-29: 7 days on-box, B2 holds a year. Thirty days of ~570 MB
+        # dumps were 13 G of the 75 G root fs the night it filled.
+        assert db_backup.RETENTION_DAYS == 7
+        assert db_backup.REMOTE_RETENTION_DAYS > db_backup.RETENTION_DAYS
 
     def test_never_touches_non_dump_files(self):
         now = 1_000_000 * DAY
