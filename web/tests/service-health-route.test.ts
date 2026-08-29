@@ -339,7 +339,11 @@ describe("/api/service-health — category-aware response shape", () => {
         updated_at: dormantTs,
       },
       {
-        service: "gex-scan",
+        // Was `gex-scan`, which R-422 reclassified as SCHEDULED (the 15-minute
+        // RTH driver runs it), so it would count as degraded rather than
+        // dormant. `gamma-rotation-scan` is genuinely on-demand and keeps this
+        // case's shape: one scheduled stale + two on-demand dormant.
+        service: "gamma-rotation-scan",
         state: "ok",
         last_attempt_started_at: dormantTs,
         last_attempt_finished_at: dormantTs,

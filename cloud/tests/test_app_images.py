@@ -68,7 +68,8 @@ def _start_lines(text: str) -> list[str]:
 
 
 def _dropin_for(unit: str) -> Path:
-    return CLOUD_ROOT / "services" / f"{unit}.d" / "runtime-container.conf.example"
+    # The SHIPPED drop-in, not the deleted `.conf.example`. R-420.
+    return CLOUD_ROOT / "services" / f"{unit}.d" / "runtime-container.conf"
 
 
 class TestAppDockerfilesExist:
@@ -170,7 +171,13 @@ class TestRuntimeContainerDropin:
             if line.strip():
                 assert line.lstrip().startswith("#")
 
-    def test_per_unit_examples_call_wrapper_and_stay_commented(self) -> None:
+    def test_per_unit_dropins_call_the_wrapper(self) -> None:
+    # R-420: the per-unit drop-ins are LIVE artifacts now — `bootstrap-control-
+    # plane.sh` and `refresh_install_file` install the real `.conf` for all five
+    # on every deploy — so the `.conf.example` files that said "MUST NOT be
+    # installed" were deleted and these assertions moved onto the shipped file.
+    # The FLEET template (`radon-.service.d`) keeps its example: nothing installs
+    # a fleet-wide runtime-container drop-in, and it exists to say so.
         for unit in APP_UNITS:
             path = _dropin_for(unit)
             assert path.is_file(), unit
@@ -180,9 +187,6 @@ class TestRuntimeContainerDropin:
             assert "radon-app-runtime run %n" in text, unit
             assert "NotifyAccess=all" in text, unit
             assert "User=root" in text, unit
-            for line in text.splitlines():
-                if line.strip():
-                    assert line.lstrip().startswith("#"), f"{unit}: {line}"
 
     def test_example_not_in_bootstrap_sources(self) -> None:
         sources = _readonly_array(BOOTSTRAP.read_text(encoding="utf-8"), "SOURCES")
