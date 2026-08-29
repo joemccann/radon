@@ -95,7 +95,16 @@ def test_run_scan_timeout_heartbeats_cri_scan_error(tmp_path, monkeypatch):
     assert state == "error"
     err = kwargs.get("error") or {}
     assert "timed out" in str(err.get("message", "")).lower()
-    assert err.get("next_attempt_at"), "embargo so error bucket does not re-page every cycle"
+    # This case REQUIRED an embargo. `next_attempt_at` is a writer's own
+    # circuit-breaker embargo in this repo, and two consumers read it as
+    # documented-normal quiet — `watchdog/check.py` past hysteresis and
+    # `incident_watchdog/classify.py` with no hysteresis at all. Rewritten every
+    # cycle it is always in the future, so a permanently-failing cri-scan fired
+    # once and went silent forever. The half that still matters (the error row
+    # exists and names the timeout) is asserted above. R-395.
+    assert "next_attempt_at" not in err, (
+        f"an ordinary next-cadence retry is not a circuit breaker: {err}"
+    )
 
 
 def test_run_scan_success_does_not_parent_heartbeat(tmp_path, monkeypatch):
