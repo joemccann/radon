@@ -22,6 +22,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { __clearDbCache } from "@/lib/dbCache";
 
+// T-311/T-238 class. Every case here drives a real Next route handler through
+// a held-open refresh, so the cost is route import + module graph, not the
+// assertions. Measured on this runner across 5 green runs at load average
+// 53-98: the slowest case ran 995 / 1035 / 1225 / 1294 / 2548 ms, i.e. under
+// 2x margin against vitest's 5000 ms default, and it hard-timed out at
+// 5011 ms in 2 of 9 runs under load. The race itself is fixed (8/8 green in
+// isolation, where the pre-fix file was 3/6 red); this is purely the
+// wall-clock ceiling. Assertions are unchanged and there is no `retry`.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
+
 const mockRadonFetch = vi.fn();
 const mockDbExecute = vi.fn();
 
@@ -100,9 +110,28 @@ function openOrderIds(body: { orders?: { open_orders?: Array<{ orderId: number }
   return (body.orders?.open_orders ?? []).map((order) => order.orderId);
 }
 
-function refreshCallCount(): number {
-  return mockRadonFetch.mock.calls.filter((call) => call[0] === "/orders/refresh").length;
+/** T-311: a `/orders/refresh` stand-in that reports WHEN it was entered.
+ *  The helper below used to poll `vi.waitFor(refreshCallCount() > 0)` for
+ *  evidence of the call — a 1000ms wall-clock budget waiting on a scheduling
+ *  event, which red 3 of 6 isolated runs at load 105-123 with
+ *  `expected 0 to be greater than 0`. `entered` is resolved BY the call, so
+ *  the racing GET is sequenced rather than timed. `landed` is the original
+ *  hold-open deferred: the test still chooses when IB's refresh returns. */
+function refreshGate() {
+  const entered = deferred<void>();
+  const landed = deferred<unknown>();
+  return {
+    entered: entered.promise,
+    landed,
+    /** The mock's return value for `/orders/refresh`. */
+    take(): Promise<unknown> {
+      entered.resolve();
+      return landed.promise;
+    },
+  };
 }
+
+type RefreshGate = ReturnType<typeof refreshGate>;
 
 beforeEach(() => {
   process.env.RADON_DB_CACHE_FORCE = "1";
@@ -126,9 +155,9 @@ afterEach(() => {
 async function raceGetThroughRefresh(
   mutation: Promise<Response>,
   postRefreshRows: ReturnType<typeof openRow>[],
-  refresh: Deferred<unknown>,
+  refresh: RefreshGate,
 ): Promise<{ racedOpenIds: number[] }> {
-  await vi.waitFor(() => expect(refreshCallCount()).toBeGreaterThan(0));
+  await refresh.entered;
 
   // The concurrent poll: populates the orders cache with PRE-refresh Turso state.
   const { GET } = await import("../app/api/orders/route");
@@ -138,7 +167,7 @@ async function raceGetThroughRefresh(
 
   // IB's refresh lands: Turso now holds the post-mutation rowset.
   openRows = postRefreshRows;
-  refresh.resolve({ status: "ok" });
+  refresh.landed.resolve({ status: "ok" });
   await mutation;
   return { racedOpenIds };
 }
@@ -146,12 +175,12 @@ async function raceGetThroughRefresh(
 describe("POST /api/orders/place vs a GET racing the refresh", () => {
   it("returns the just-placed order even though a concurrent GET cached the pre-fill snapshot", async () => {
     openRows = [openRow(1, 5)];
-    const refresh = deferred<unknown>();
+    const refresh = refreshGate();
     mockRadonFetch.mockImplementation((url: string) => {
       if (url === "/orders/place") {
         return Promise.resolve({ orderId: 2, permId: 20, initialStatus: "Submitted", message: "ok" });
       }
-      if (url === "/orders/refresh") return refresh.promise;
+      if (url === "/orders/refresh") return refresh.take();
       return Promise.resolve({});
     });
 
@@ -174,10 +203,10 @@ describe("POST /api/orders/place vs a GET racing the refresh", () => {
 describe("POST /api/orders/cancel vs a GET racing the refresh", () => {
   it("drops the cancelled order from its own response", async () => {
     openRows = [openRow(1, 5), openRow(2, 150)];
-    const refresh = deferred<unknown>();
+    const refresh = refreshGate();
     mockRadonFetch.mockImplementation((url: string) => {
       if (url === "/orders/cancel") return Promise.resolve({ message: "cancelled" });
-      if (url === "/orders/refresh") return refresh.promise;
+      if (url === "/orders/refresh") return refresh.take();
       return Promise.resolve({});
     });
 
@@ -254,10 +283,10 @@ describe("POST /api/orders/modify when the post-modify refresh is unavailable", 
 describe("POST /api/orders/modify vs a GET racing the refresh", () => {
   it("confirms the new limit price instead of 502-ing on the stale cached snapshot", async () => {
     openRows = [openRow(1, 5)];
-    const refresh = deferred<unknown>();
+    const refresh = refreshGate();
     mockRadonFetch.mockImplementation((url: string) => {
       if (url === "/orders/modify") return Promise.resolve({ message: "modified" });
-      if (url === "/orders/refresh") return refresh.promise;
+      if (url === "/orders/refresh") return refresh.take();
       return Promise.resolve({});
     });
 
@@ -279,12 +308,12 @@ describe("POST /api/orders/modify vs a GET racing the refresh", () => {
 
   it("returns the combo replacement from the replace path", async () => {
     openRows = [openRow(1, 5)];
-    const refresh = deferred<unknown>();
+    const refresh = refreshGate();
     mockRadonFetch.mockImplementation((url: string) => {
       if (url === "/orders/replace") {
         return Promise.resolve({ message: "replaced", orderId: 3, permId: 30 });
       }
-      if (url === "/orders/refresh") return refresh.promise;
+      if (url === "/orders/refresh") return refresh.take();
       return Promise.resolve({});
     });
 

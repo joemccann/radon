@@ -42,6 +42,13 @@ SCANNER = "leap_scanner_uw.py"
 PATH = "/leap/scan"
 SHED_BODY = b'{"detail": "Subprocess capacity exhausted (3 active, lane cap 3, hard cap 4)"}'
 SCRIPT_FAIL_BODY = b'{"detail": "Script leap_scanner_uw.py failed (code 1)"}'
+SLEEP_LOG = "sleeps.log"
+
+
+def _sleeps(tmp_path: Path) -> list[int]:
+    """Seconds the ladder ASKED to wait, in order (T-283)."""
+    log = tmp_path / SLEEP_LOG
+    return [int(x) for x in log.read_text().split()] if log.exists() else []
 
 
 def _free_port() -> int:
@@ -151,6 +158,19 @@ def _repo(tmp_path: Path, marker: Path) -> tuple[Path, Path]:
 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
+    # T-283: the retry ladder's wait is RECORDED, not spent. Driving it off
+    # real sleeps inside a `SECONDS` deadline made these cases load-bound —
+    # two of the three reds in the 2026-08-29 gate at load ~200 were here,
+    # both `assert 1 >= 2` because the budget was gone before the first retry.
+    _executable(
+        bin_dir / "sleep-recorder",
+        textwrap.dedent(
+            f"""\
+            #!/bin/bash
+            echo "$1" >> {str(tmp_path / SLEEP_LOG)!r}
+            """
+        ),
+    )
     py = bin_dir / "python3.13"
     _executable(
         py,
@@ -180,6 +200,7 @@ def _run(
         "RADON_LEAP_REFRESH_FASTAPI_PORT": str(port),
         "RADON_LEAP_SHED_WAIT_SECS": shed_wait,
         "RADON_LEAP_REFRESH_RETRY_DELAY_SECS": delay,
+        "RADON_LEAP_SLEEP_CMD": str(repo.parent / "bin" / "sleep-recorder"),
     }
     return subprocess.run(
         ["bash", str(repo / "scripts" / WRAPPER)],
@@ -203,6 +224,7 @@ def test_capacity_502_then_ok_retries_without_direct_fallback(tmp_path: Path) ->
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert stub.calls == [PATH, PATH], stub.calls
+    assert _sleeps(tmp_path) == [1], _sleeps(tmp_path)
     assert not marker.exists(), "direct fallback must not run after a capacity shed"
     combined = (result.stdout + result.stderr).lower()
     assert "retry" in combined
@@ -222,6 +244,7 @@ def test_script_failed_502_does_not_retry_as_shed(tmp_path: Path) -> None:
 
     assert result.returncode != 0, result.stdout + result.stderr
     assert stub.calls == [PATH], stub.calls
+    assert _sleeps(tmp_path) == [], _sleeps(tmp_path)
     assert not marker.exists()
     combined = (result.stdout + result.stderr).lower()
     assert "indeterminate" in combined
@@ -238,8 +261,11 @@ def test_persistent_capacity_shed_no_duplicate_still_fails(tmp_path: Path) -> No
         result = _run(repo, py, port, shed_wait="3", delay="1")
 
     assert result.returncode != 0, result.stdout + result.stderr
-    assert len(stub.calls) >= 2, stub.calls
-    assert all(c == PATH for c in stub.calls)
+    # The ladder is now exact: a 3s budget at a 1s delay buys three waits and
+    # a fourth POST, then gives up. Was `>= 2` because the count was a
+    # function of how fast the box happened to be.
+    assert stub.calls == [PATH] * 4, stub.calls
+    assert _sleeps(tmp_path) == [1, 1, 1], _sleeps(tmp_path)
     assert not marker.exists()
     combined = (result.stdout + result.stderr).lower()
     assert "capacity" in combined or "shed" in combined

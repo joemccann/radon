@@ -130,6 +130,17 @@ def _repo(tmp_path: Path, spec: dict, marker: Path) -> tuple[Path, Path]:
 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
+    # T-283: record the leap wrapper's retry waits instead of sleeping them —
+    # `assert 1 >= 2` here was one of the 2026-08-29 gate's load reds.
+    _executable(
+        bin_dir / "sleep-recorder",
+        textwrap.dedent(
+            """\
+            #!/bin/bash
+            exit 0
+            """
+        ),
+    )
     py = bin_dir / "python3.13"
     _executable(
         py,
@@ -157,6 +168,7 @@ def _run(
         **os.environ,
         "RADON_PYTHON_BIN": str(py),
         spec["port_env"]: str(port),
+        "RADON_LEAP_SLEEP_CMD": str(repo.parent / "bin" / "sleep-recorder"),
     }
     if timeout_secs is not None:
         env["RADON_SCAN_FASTAPI_TIMEOUT_SECS"] = timeout_secs
@@ -200,7 +212,8 @@ def test_capacity_502_does_not_launch_a_direct_duplicate(tmp_path, name):
     assert result.returncode != 0, result.stdout + result.stderr
     combined = (result.stdout + result.stderr).lower()
     if name == "leap":
-        assert len(stub.calls) >= 2, stub.calls
+        # 2s budget at a 1s delay: two waits, three POSTs, then give up.
+        assert stub.calls == [spec["path"]] * 3, stub.calls
         assert "capacity" in combined or "shed" in combined
     else:
         assert stub.calls == [spec["path"]], stub.calls

@@ -12,7 +12,7 @@
  */
 import React from "react";
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { IvRankData, IvRankEntry } from "@/lib/ivrank";
 import IvRankPanel from "@/components/IvRankPanel";
@@ -35,7 +35,25 @@ vi.mock("@/lib/useIvRank", () => ({
   useIvRank: (...args: unknown[]) => mockUseIvRank(...args),
 }));
 
+// T-273: this file used to read the wall clock TWICE — once in `buildData`
+// to stamp `scan_time`, once in the assertion to build the expected string —
+// with a full d3 panel render (measured 53-354ms) between them. A minute
+// rollover in that window was a silent red. Pin one instant, derive BOTH
+// sides from it. Only `Date` is faked so d3's rAF/ResizeObserver path is
+// untouched.
+const FROZEN_NOW = new Date("2026-08-26T19:00:00Z");
+const FROZEN_CLOCK = FROZEN_NOW.toLocaleTimeString("en-US", {
+  hour: "numeric",
+  minute: "2-digit",
+});
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(FROZEN_NOW);
+});
+
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
   mockUseIvRank.mockReset();
 });
@@ -55,7 +73,7 @@ function buildSeries(length = 90): IvRankEntry[] {
 function buildData(overrides: Partial<IvRankData> = {}): IvRankData {
   return {
     // A FRESH restamp — this is exactly what the stale path writes.
-    scan_time: new Date().toISOString(),
+    scan_time: FROZEN_NOW.toISOString(),
     status: "ok",
     source: "ib",
     as_of: "2026-08-21",
@@ -96,22 +114,14 @@ describe("a stale_source payload is not presented as current", () => {
     expect(header).toBeTruthy();
     expect(header.textContent).toContain("2026-08-21");
 
-    const nowClock = new Date().toLocaleTimeString("en-US", {
-      hour: "numeric",
-      minute: "2-digit",
-    });
-    expect(header.textContent).not.toContain(nowClock);
+    expect(header.textContent).not.toContain(FROZEN_CLOCK);
   });
 
   it("still shows the live clock on a healthy payload", () => {
     mockUseIvRank.mockReturnValue(hookState());
     const { container } = render(<IvRankPanel />);
     const header = container.querySelector(".section-header") as HTMLElement;
-    const nowClock = new Date().toLocaleTimeString("en-US", {
-      hour: "numeric",
-      minute: "2-digit",
-    });
-    expect(header.textContent).toContain(nowClock);
+    expect(header.textContent).toContain(FROZEN_CLOCK);
   });
 
   it("marks a degraded_uw payload too", () => {
