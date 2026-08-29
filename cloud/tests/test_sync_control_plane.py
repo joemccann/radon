@@ -268,6 +268,39 @@ supervise_deploy_command bash -c 'printf deployed > {tmp_path / "deployed"}'
         assert (tmp_path / "recovered").exists()
         assert (tmp_path / "deployed").exists()
 
+    def _prepull(self, tmp_path, *, granted: bool, pull_rc: int = 0):
+        log = tmp_path / "sudo.log"
+        shell = f"""
+set -euo pipefail
+source {DEPLOY}
+sudo() {{
+  printf '%s\\n' "$*" >> {log}
+  if [[ "$1" == "-n" && "$2" == "-l" ]]; then return {0 if granted else 1}; fi
+  return {pull_rc}
+}}
+timeout() {{ shift; "$@"; }}
+prepull_app_images {'f' * 40}
+"""
+        result = subprocess.run(["bash", "-c", shell], env={**os.environ}, capture_output=True, text=True, timeout=30)
+        return result, log
+
+    def test_deploy_prepulls_the_release_image_pair_before_restart(self):
+        deploy = DEPLOY.read_text(encoding="utf-8")
+        main = function_body(deploy, "main")
+        assert main.index("build_staged_release") < main.index('prepull_app_images "$requested_sha"') < main.index("restart_services")
+
+    def test_prepull_runs_the_exact_sudo_verb_and_never_fails_the_deploy(self, tmp_path):
+        result, log = self._prepull(tmp_path, granted=True, pull_rc=1)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "prepull failed" in result.stdout + result.stderr
+        assert f"-n /usr/local/sbin/radon-app-runtime pull {'f' * 40}" in log.read_text(encoding="utf-8").splitlines()
+
+    def test_prepull_skips_when_the_verb_is_not_granted(self, tmp_path):
+        result, log = self._prepull(tmp_path, granted=False)
+        assert result.returncode == 0
+        assert "not granted yet" in result.stdout + result.stderr
+        assert f"-n /usr/local/sbin/radon-app-runtime pull {'f' * 40}" not in log.read_text(encoding="utf-8")
+
     def test_prestage_skips_instead_of_failing_when_control_plane_is_not_ready(self, tmp_path):
         shell = f"""
 set -euo pipefail

@@ -90,14 +90,6 @@
                 respond `{"reachable":false,"observer":"caddy"}` 200
             }
         }
-        # handle_response only sees an upstream HTTP response. A dial refused
-        # to :8330 (healthd stopped during deploy) is a Caddy-synthesized 502
-        # that never matches @down, which is how Tier-3 recorded status_http_502
-        # at 318ms while ping still returned 200.
-        handle_errors {
-            header Content-Type application/json
-            respond `{"reachable":false,"observer":"caddy"}` 200
-        }
     }
 
     handle {
@@ -123,6 +115,17 @@
                 response_header_timeout 30s
                 read_timeout 300s
             }
+        }
+    }
+
+    # handle_response on :8330 only sees an upstream HTTP 5xx. A dial refused
+    # (healthd stopped during deploy) is a Caddy-synthesized 502 that never
+    # matches @down. Scope this to the health paths so /ws 502s stay 502s.
+    handle_errors {
+        @edge_health_err path /edge-health/status /status
+        handle @edge_health_err {
+            header Content-Type application/json
+            respond `{"reachable":false,"observer":"caddy"}` 200
         }
     }
 }

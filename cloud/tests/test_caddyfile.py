@@ -105,9 +105,11 @@ class TestRouting:
         content = read_caddyfile(caddy_dir)
         block = reverse_proxy_block(content, "127.0.0.1:8330")
         assert "handle_response" in block
-        status_section = content.split("@edge_health_status", 1)[1].split("\n    handle {", 1)[0]
-        assert "handle_errors" in status_section
-        assert '{"reachable":false,"observer":"caddy"}' in status_section
+        assert "handle_errors" in content
+        assert "@edge_health_err" in content
+        ws_block = content.split("handle /ws*", 1)[1].split("handle_path", 1)[0]
+        assert "handle_errors" not in ws_block
+        assert '{"reachable":false,"observer":"caddy"}' in content
 
 
 class TestRetiredBetaStack:

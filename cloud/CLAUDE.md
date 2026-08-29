@@ -95,7 +95,10 @@ Pushes to `main` run the root CI workflow. The deploy job:
 6. Verifies the installed root control plane against the root-written manifest
    before any dependency build, service stop, or transition journal write.
 7. Builds frozen Bun workspaces and Python wheels in a detached worktree before
-   teardown.
+   teardown, then pre-pulls the release's app image pair
+   (`radon-app-runtime pull <sha>`, sudoers-granted) while the current
+   release still serves; the same verb drops SHA-tagged pairs that are
+   neither the target nor in use by a running container (R-431).
 8. Fsyncs a durable transition journal, snapshots active services and timers,
    promotes artifacts, restores the prior topology, and runs code-controlled
    gates.
