@@ -14,6 +14,16 @@
           }
         ]
       }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "printf '%s' 'RESPONSE FORMAT (CLAUDE.md): closing message is **Done** bullets + **Next** bullets, 100 words max, bullets only, no prose paragraphs. Causes belong in the commit/PR, not chat. Cut: preamble, Worth-noting, corrections narration, diagnosis tables, restating a diff.'"
+          }
+        ]
+      }
     ]
   }
 }
