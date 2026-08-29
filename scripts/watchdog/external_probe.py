@@ -44,16 +44,8 @@ TRANSITION_JOURNAL_STRANDED_AFTER_SECONDS = 3600
 _EDGE_5XX_REASON = re.compile(r"(?:ping|status)_http_5\d\d$")
 
 
-def _local_aggregate_is_healthy(timeout: float = FETCH_TIMEOUT_SECONDS) -> bool:
-    """Confirm recovery from a validated off-box ``aggregate_down`` sample.
-
-    The off-box row is authoritative for perimeter failures, but its irregular
-    GitHub schedule can leave a recovered aggregate red for tens of minutes.
-    The aggregate itself is produced on-box, so a fresh schema-v2 healthy
-    response is sufficient recovery evidence for this one failure class. Never
-    use this fallback for ping/status reachability failures: only an off-box
-    observer can prove that the public perimeter recovered.
-    """
+def _read_local_aggregate(timeout: float = FETCH_TIMEOUT_SECONDS) -> dict | None:
+    """Bounded on-box ``/status`` read. None on transport or parse failure."""
     request = urllib.request.Request(
         LOCAL_STATUS_URL,
         headers={"Accept": "application/json", "User-Agent": "radon-watchdog"},
@@ -61,16 +53,47 @@ def _local_aggregate_is_healthy(timeout: float = FETCH_TIMEOUT_SECONDS) -> bool:
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             if not 200 <= int(response.status) < 300:
-                return False
+                return None
             payload = json.loads(response.read(262_144).decode("utf-8"))
     except Exception:  # noqa: BLE001 - recovery must fail closed
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _local_aggregate_is_healthy(timeout: float = FETCH_TIMEOUT_SECONDS) -> bool:
+    """True only for schema-v2 ``up``. Used by deploy-window 5xx suppression."""
+    payload = _read_local_aggregate(timeout)
+    if payload is None:
         return False
     return (
-        isinstance(payload, dict)
-        and payload.get("schema_version") == 2
+        payload.get("schema_version") == 2
         and payload.get("ok") is True
         and str(payload.get("overall_state") or "").lower() == "up"
     )
+
+
+def _local_aggregate_clears_offbox_down(timeout: float = FETCH_TIMEOUT_SECONDS) -> bool:
+    """Confirm recovery from a validated off-box ``aggregate_down`` sample.
+
+    The off-box row is authoritative for perimeter failures, but its irregular
+    GitHub schedule can leave a recovered aggregate red for tens of minutes.
+    The aggregate itself is produced on-box. Schema-v2 ``up`` (serving path
+    green) and ``degraded`` (sidecar/broker only; ping already proved the edge
+    is serving) are both recovery evidence. Never use this fallback for
+    ping/status reachability failures: only an off-box observer can prove that
+    the public perimeter recovered. ``starting``/``down``/``unknown`` stay
+    fail-closed — those can be a serving-path restart.
+    """
+    payload = _read_local_aggregate(timeout)
+    if payload is None or payload.get("schema_version") != 2:
+        return False
+    state = str(payload.get("overall_state") or "").lower()
+    ok = payload.get("ok")
+    if state == "up":
+        return ok is True
+    if state == "degraded":
+        return ok is False
+    return False
 
 
 def _transition_journal_age_seconds(now: datetime) -> float | None:
@@ -157,7 +180,7 @@ def check_external_probe(*, now: datetime | None = None) -> CheckOutcome:
     if (
         state == reader.VERDICT_DOWN
         and verdict.get("reason") == "aggregate_down"
-        and _local_aggregate_is_healthy()
+        and _local_aggregate_clears_offbox_down()
     ):
         return CheckOutcome(
             service=SERVICE,

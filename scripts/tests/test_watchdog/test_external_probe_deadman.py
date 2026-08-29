@@ -48,6 +48,21 @@ def test_local_aggregate_recovery_requires_healthy_schema_v2() -> None:
     with patch.object(external_probe.urllib.request, "urlopen") as urlopen:
         urlopen.return_value.__enter__.return_value = response
         assert external_probe._local_aggregate_is_healthy() is True
+        assert external_probe._local_aggregate_clears_offbox_down() is True
+
+
+def test_local_starting_aggregate_does_not_clear_offbox_down() -> None:
+    from scripts.watchdog import external_probe
+
+    response = MagicMock()
+    response.status = 200
+    response.read.return_value = (
+        b'{"schema_version":2,"ok":false,"overall_state":"starting"}'
+    )
+    with patch.object(external_probe.urllib.request, "urlopen") as urlopen:
+        urlopen.return_value.__enter__.return_value = response
+        assert external_probe._local_aggregate_clears_offbox_down() is False
+        assert external_probe._local_aggregate_is_healthy() is False
 
 
 def test_local_aggregate_recovery_fails_closed_on_malformed_payload() -> None:
@@ -138,7 +153,7 @@ def test_recovered_local_aggregate_clears_fresh_aggregate_failure(monkeypatch) -
             detail="aggregate_down",
         ),
     )
-    monkeypatch.setattr(external_probe, "_local_aggregate_is_healthy", lambda: True)
+    monkeypatch.setattr(external_probe, "_local_aggregate_clears_offbox_down", lambda: True)
 
     outcome = external_probe.check_external_probe(now=NOW)
 
@@ -161,12 +176,51 @@ def test_still_unhealthy_local_aggregate_keeps_fresh_failure_active(monkeypatch)
         ),
     )
     monkeypatch.setattr(external_probe, "_local_aggregate_is_healthy", lambda: False)
+    monkeypatch.setattr(external_probe, "_local_aggregate_clears_offbox_down", lambda: False)
 
     outcome = external_probe.check_external_probe(now=NOW)
 
     assert outcome.status == "error"
     assert outcome.fired is True
     assert outcome.severity == "P1"
+
+
+def test_local_degraded_aggregate_clears_fresh_aggregate_down() -> None:
+    # 2026-08-29 page 344f0592: sidecar flap makes the on-box aggregate
+    # degraded (ok=false) while the 5-min off-box row is still aggregate_down.
+    # Serving path is up, so local degraded is recovery evidence.
+    from scripts.watchdog import external_probe
+
+    response = MagicMock()
+    response.status = 200
+    response.read.return_value = (
+        b'{"schema_version":2,"ok":false,"overall_state":"degraded"}'
+    )
+    with patch.object(external_probe.urllib.request, "urlopen") as urlopen:
+        urlopen.return_value.__enter__.return_value = response
+        assert external_probe._local_aggregate_clears_offbox_down() is True
+        assert external_probe._local_aggregate_is_healthy() is False
+
+    from scripts.watchdog import external_probe as ep
+
+    with (
+        patch.object(
+            ep.turso_http,
+            "fetch_external_probe",
+            lambda timeout, source=None: _row(
+                ok=0,
+                age_minutes=5,
+                detail="aggregate_down",
+            ),
+        ),
+        patch.object(ep, "_local_aggregate_clears_offbox_down", lambda: True),
+    ):
+        outcome = ep.check_external_probe(now=NOW)
+
+    assert outcome.status == "healthy"
+    assert outcome.fired is False
+    assert outcome.severity is None
+    assert outcome.message == "off-box aggregate recovered locally"
 
 
 def test_legacy_aggregate_unhealthy_stays_fail_closed(monkeypatch) -> None:
