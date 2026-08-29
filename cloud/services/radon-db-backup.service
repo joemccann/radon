@@ -1,5 +1,5 @@
 [Unit]
-Description=Radon nightly Turso DB backup (full sqlite_master dump + 30d prune)
+Description=Radon nightly Turso DB backup (full sqlite_master dump + 7d prune)
 After=network.target
 # DUR-02 pattern: brake crash loops -- after StartLimitBurst starts inside
 # StartLimitIntervalSec, systemd parks the unit as failed instead of
