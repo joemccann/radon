@@ -5471,7 +5471,9 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh--rail {
 .chat-empty-card {
   display: flex;
   align-items: center;
-  gap: 8px;
+  /* The slash and the command are one token ("/portfolio"), so the flex gap
+     must be 0 — an 8px gap rendered it as "/ portfolio". */
+  gap: 0;
   text-align: left;
   padding: 10px 12px;
   border: 1px solid var(--border-dim);
@@ -20871,6 +20873,20 @@ body[data-mobile="true"] .alerts-rule__channel {
   font-family: var(--font-mono); font-size: var(--text-meta);
   color: var(--signal-core-text); background: rgba(5, 173, 152, 0.08);
   border: 1px solid var(--signal-core); border-radius: 3px; padding: 0 5px;
+  cursor: pointer;
+}
+.ask-composer__attachments { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 12px 0; }
+.ask-composer__thumb {
+  position: relative; width: 44px; height: 44px; overflow: hidden;
+  border: 1px solid var(--line-grid); border-radius: 4px; background: var(--bg-panel-raised);
+}
+.ask-composer__thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.ask-composer__thumb-remove {
+  position: absolute; top: 0; right: 0; width: 14px; height: 14px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-size: 10px; line-height: 1;
+  color: var(--text-primary); background: var(--bg-panel);
+  border: 1px solid var(--line-grid); border-radius: 0 4px 0 4px;
   cursor: pointer;
 }
 .ask-composer__input {

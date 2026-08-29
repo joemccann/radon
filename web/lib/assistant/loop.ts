@@ -16,7 +16,7 @@
  * them in `toOpenAiMessages`. String turns from the UI stay strings.
  */
 
-import { chat, type LlmMessage, type LlmToolCall, type LlmUsage } from "@/lib/llm/provider";
+import { chat, type LlmContentBlock, type LlmMessage, type LlmToolCall, type LlmUsage } from "@/lib/llm/provider";
 import {
   createAssistantTurnBudget,
   executeTool,
@@ -46,9 +46,12 @@ const KNOWLEDGE_EXTRACTION_SYSTEM =
 const KNOWLEDGE_BLOCKED_MESSAGE =
   "Retrieved context was isolated, but no safe structured facts could be extracted.";
 
+type TextBlock = { type: "text"; text: string };
+type ImageBlock = Extract<LlmContentBlock, { type: "image" }>;
+
 export type AssistantTurn = {
   role: "user" | "assistant";
-  content: string;
+  content: string | Array<TextBlock | ImageBlock>;
 };
 
 export type ToolEvent = {
@@ -95,11 +98,11 @@ type ToolResultBlock = {
 // `chat()` consumes `LlmMessage[]`; we widen content to the structured block
 // arrays Anthropic accepts. The provider passes content through verbatim.
 type LoopMessage = Omit<LlmMessage, "content"> & {
-  content: string | Array<ToolUseBlock | ToolResultBlock | { type: "text"; text: string }>;
+  content: string | Array<ToolUseBlock | ToolResultBlock | TextBlock | ImageBlock>;
 };
 
 function toAssistantToolUseBlocks(text: string, toolCalls: LlmToolCall[]): LoopMessage {
-  const blocks: Array<ToolUseBlock | { type: "text"; text: string }> = [];
+  const blocks: Array<ToolUseBlock | TextBlock> = [];
   if (text.trim()) blocks.push({ type: "text", text });
   for (const call of toolCalls) {
     blocks.push({ type: "tool_use", id: call.id, name: call.name, input: call.input });
@@ -200,8 +203,18 @@ function logRound(round: number, model: string, toolCalls: LlmToolCall[]): void 
   console.log(`[assistant] round=${round} model=${model} tools=${tools}`);
 }
 
+/** Text of a turn, ignoring any image blocks. */
+function turnText(content: AssistantTurn["content"]): string {
+  if (typeof content === "string") return content;
+  return content
+    .filter((block): block is TextBlock => block.type === "text")
+    .map((block) => block.text)
+    .join(" ");
+}
+
 function hasExplicitOrderIntent(turns: AssistantTurn[]): boolean {
-  const current = [...turns].reverse().find((turn) => turn.role === "user")?.content ?? "";
+  const last = [...turns].reverse().find((turn) => turn.role === "user");
+  const current = last ? turnText(last.content) : "";
   return /\b(?:place|submit|execute|send)\b.{0,40}\b(?:order|buy|sell)\b/i.test(current)
     || /\b(?:buy|sell)\s+\d+(?:\.\d+)?\s+[A-Z]{1,10}\b/i.test(current);
 }
