@@ -12,7 +12,13 @@
 - [x] M1 Inspect divergence and conflict set
 - [x] M2 Resolve merge conflicts
 - [x] M3 Verify focused tests
-- [ ] M4 Review, scan, ship
+- [x] M4 Review, scan, ship
+
+## Review
+
+- `git merge --no-commit --no-ff origin/main` surfaced 3 content conflicts; resolved and finalized as merge commit `a2dfa96f`
+- Focused pytest green: `scripts/tests/test_flex_delivery_claim_writer.py scripts/tests/test_flex_delivery_claim_release.py scripts/tests/test_flex_sftp_pull.py` → 31 passed
+- Focused pytest green: `cloud/tests/test_app_plane_cutover_safety.py cloud/tests/test_unit_install_acknowledgment.py` → 30 passed, 2 skipped
 
 ---
 
