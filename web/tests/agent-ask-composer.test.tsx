@@ -41,12 +41,12 @@ describe("AskComposer — Enter to send", () => {
     expect(onSubmit.mock.calls[0][0]).toBe("scan MU flow");
   });
 
-  it("passes the selected engine as the second argument (AUTO by default)", () => {
+  it("passes the selected model id as the second argument (empty with no catalog)", () => {
     const { onSubmit, textarea } = renderComposer();
     type(textarea, "risk check");
     fireEvent.keyDown(textarea, { key: "Enter" });
 
-    expect(onSubmit.mock.calls[0][1]).toBe("AUTO");
+    expect(onSubmit.mock.calls[0][1]).toBe("");
   });
 
   it("clears the textarea after a send", () => {
@@ -78,7 +78,7 @@ describe("AskComposer — Enter to send", () => {
     type(textarea, "scan MU flow");
     fireEvent.click(screen.getByLabelText("Send"));
 
-    expect(onSubmit).toHaveBeenCalledWith("scan MU flow", "AUTO", []);
+    expect(onSubmit).toHaveBeenCalledWith("scan MU flow", "", []);
   });
 
   it("disables the send button on empty input and enables it once typed", () => {
@@ -136,7 +136,7 @@ describe("AskComposer — IME composition guard", () => {
 
     fireEvent.compositionEnd(textarea);
     fireEvent.keyDown(textarea, { key: "Enter" });
-    expect(onSubmit).toHaveBeenCalledWith("ミュー", "AUTO", []);
+    expect(onSubmit).toHaveBeenCalledWith("ミュー", "", []);
   });
 });
 

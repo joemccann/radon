@@ -16,7 +16,14 @@
  * them in `toOpenAiMessages`. String turns from the UI stay strings.
  */
 
-import { chat, type LlmContentBlock, type LlmMessage, type LlmToolCall, type LlmUsage } from "@/lib/llm/provider";
+import {
+  chat,
+  type LlmContentBlock,
+  type LlmMessage,
+  type LlmProviderName,
+  type LlmToolCall,
+  type LlmUsage,
+} from "@/lib/llm/provider";
 import {
   createAssistantTurnBudget,
   executeTool,
@@ -60,6 +67,15 @@ export type ToolEvent = {
   ok: boolean;
   error?: string;
   repeated?: boolean;
+};
+
+/**
+ * The model the operator picked for this turn, already validated against the
+ * catalog by the route. Empty means the deployment default, unchanged.
+ */
+export type AssistantModelSelection = {
+  model?: string;
+  provider?: LlmProviderName;
 };
 
 export type AssistantLoopOutcome = "answered" | "proposal" | "cap_forced_final" | "cap_fallback";
@@ -252,6 +268,7 @@ export async function runAssistantLoop(
   turns: AssistantTurn[],
   system: string,
   principal: AssistantPrincipal,
+  selection: AssistantModelSelection = {},
 ): Promise<AssistantLoopResult> {
   if (!principal?.userId) throw new Error("Verified assistant principal required");
   const messages: LoopMessage[] = turns.map((turn) => ({ role: turn.role, content: turn.content }));
@@ -272,6 +289,7 @@ export async function runAssistantLoop(
     const response = await chat({
       messages: messages as unknown as LlmMessage[],
       system,
+      ...selection,
       ...(knowledgeBoundaryReached ? {} : { tools: toolSchemas() }),
     });
     model = response.model;
@@ -380,7 +398,7 @@ export async function runAssistantLoop(
   // instead of discarding the turn behind a canned error.
   messages.push({ role: "user", content: CAP_FORCED_FINAL_INSTRUCTION });
   try {
-    const finalResponse = await chat({ messages: messages as unknown as LlmMessage[], system });
+    const finalResponse = await chat({ messages: messages as unknown as LlmMessage[], system, ...selection });
     accumulateUsage(finalResponse.usage);
     logRound(MAX_ROUNDS + 1, finalResponse.model, []);
     const text = finalResponse.text?.trim();

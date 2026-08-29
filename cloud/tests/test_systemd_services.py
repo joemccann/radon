@@ -82,6 +82,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-demo-mirror.timer",
     "radon-margin-debt.service",
     "radon-margin-debt.timer",
+    "radon-model-catalog.service",
+    "radon-model-catalog.timer",
     "radon-oi-changes.service",
     "radon-oi-changes.timer",
     "radon-knowledge.service",
