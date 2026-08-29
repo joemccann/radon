@@ -38,6 +38,13 @@ def claim_flex_delivery(content_sha256: str, **kwargs: Any) -> bool:
     return _claim(content_sha256, **kwargs)
 
 
+def release_flex_delivery(content_sha256: str) -> None:
+    """Indirection so the release is injectable in tests. See db.writer."""
+    from db.writer import release_flex_delivery as _release  # noqa: PLC0415
+
+    _release(content_sha256)
+
+
 def ingest_xml(xml_text: str, *, source_path: str = "") -> Dict[str, Any]:
     kind = classify_flex_xml(xml_text)
     digest = _sha256(xml_text)
@@ -70,6 +77,11 @@ def ingest_xml(xml_text: str, *, source_path: str = "") -> Dict[str, Any]:
             # earlier chunks committed. Building the TWR series over a
             # half-written `cash_flows` and persisting it as authoritative
             # turns a partial write into a published number. R-323.
+            #
+            # The claim was taken before the writers, so hand it back: without
+            # this the operator's re-drop of the fixed file is a "duplicate"
+            # no-op and the half-written chunks are never repaired. T-257.
+            release_flex_delivery(digest)
             return {
                 "ok": False,
                 "classified_as": kind,
@@ -80,6 +92,8 @@ def ingest_xml(xml_text: str, *, source_path: str = "") -> Dict[str, Any]:
                 "source_path": source_path,
             }
         twr = perf_twr_builder.build_and_persist(from_file=source_path, persist=True)
+        if twr.get("status") not in ("ok", "stale"):
+            release_flex_delivery(digest)
         return {
             "ok": twr.get("status") in ("ok", "stale"),
             "classified_as": kind,
@@ -94,6 +108,8 @@ def ingest_xml(xml_text: str, *, source_path: str = "") -> Dict[str, Any]:
         if not source_path:
             raise FlexClassifyError("trades ingest requires a filesystem path")
         result = journal_rehydrate.rehydrate(xml_text=xml_text)
+        if not result.get("ok"):
+            release_flex_delivery(digest)
         return {
             "ok": bool(result.get("ok")),
             "classified_as": kind,
