@@ -420,3 +420,25 @@ def test_image_workflow_exists_and_is_not_a_deploy_need() -> None:
     assert "--build-arg NEXT_PUBLIC_RADON_API_URL" in wf
     assert "--build-arg NEXT_PUBLIC_IB_REALTIME_WS_URL" in wf
     assert "vars.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" in wf
+
+
+def test_run_newsfeed_writes_images_into_the_served_media_volume(tmp_path: Path) -> None:
+    """The scraper's default media dir is <repo>/web/public/media, which lives in
+    the image layer and is discarded on every container restart, while Caddy
+    serves the bind-mounted /var/lib/radon/media. Without this override every
+    image scraped after the container cutover 404s on media.radon.run
+    (2026-08-29 regression: 8 posts, no thumbnails)."""
+    result = _run(tmp_path, ["run", "radon-newsfeed.service"])
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert "RADON_NEWSFEED_MEDIA_DIR=/var/lib/radon/media" in log, log
+
+
+def test_run_newsfeed_points_media_delivery_at_the_mounted_volume(tmp_path: Path) -> None:
+    """/etc/radon/env carries the HOST-shaped RADON_MEDIA_REMOTE
+    (/home/radon/radon-cloud/media/), a path that does not exist inside the
+    container. --env-file would hand it straight to the scraper's rsync push."""
+    result = _run(tmp_path, ["run", "radon-newsfeed.service"])
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert "RADON_MEDIA_REMOTE=/var/lib/radon/media/" in log, log
