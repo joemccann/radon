@@ -6738,3 +6738,99 @@ Delta findings continue the T-### numbering in dated `## Delta audit` sections.
 - Audited through: `789aabea` on 2026-08-27 — 49 new findings (T-190…T-238: 6 P0, 23 P1, 20 P2) over 43 commits / 264 files. Gates serial: pytest **7 failed** / 8153 passed — deterministic, all in `test_portfolio_risk_gate3_measurability.py`, reproduced 7/7 in isolation, filed as T-237 (`main` is red; CI at this SHA also failed and correctly skipped deploy); cloud 34 red on darwin, FAILED list byte-identical to the base SHA in a worktree (T-118); vitest 758 files / **1 failed** / 7702 passed — a single 5041ms timeout on `portfolio-startup-performance-contract.test.ts:172` under load 36, green 8/8 ×3 in isolation, filed as T-238 (load class, not a regression). Collection union clean on all three gates (py 478/479 shard union, cloud 33/33, vitest 758/758) so T-122 holds. Enforcement STRENGTHENED — T-160 is fixed, `deploy.needs` went 7 → 9 with both coverage ratchets restored. Four new skips (8 outcomes), none linked to a T-### (T-204, T-205); no `.only`; no exclusion growth; no threshold moved — the coverage measurement got stricter twice.
 - Audited through: **NOT ADVANCED** on 2026-08-28 — the audit phase was truncated by the harness background-wait ceiling at 600 s (T-239), filed no findings and no PR, and reported `OK`. `789aabea..c6d08fbd` (24 commits / 262 files / +23,193 lines) is **UNAUDITED**; the next audit must take `789aabea` as its base, not `c6d08fbd`. The remediation phase that followed worked the P2 backlog and filed T-239 against the truncation itself.
 - Audited through: `f7b5eeb9` on 2026-08-29 — 62 new findings (T-250…T-311: 5 P0, 30 P1, 27 P2) over 61 commits / 366 files / +36023-2510, base `789aabea` because the 2026-08-28 audit was truncated (T-239) and did not advance the ledger. Gates round 1 serial under load 74→224: pytest **3 failed** / 8558 passed — all three timing-shaped, in three unrelated files, 4 passed in 14.8s isolated, and CI's ten shards were green at this SHA (load, filed as T-283 and T-284); vitest 787 files / **9 failed** / 7934 passed — deterministic, all 9 in the three files `ci.yml:143-145` EXCLUDES, so the CI-gated set is fully green (T-276); cloud **37 failed** / 1263 passed on darwin vs **35 failed** / 1098 at the base SHA run in a worktree — the 4-line diff is +3 deliberate caddy reds (T-205 working, no `caddy` binary here) and −1 fixed relay watchdog, so the recorded darwin baseline is now 37. Collection union clean on all three gates (pytest 8562 = shard union, cloud 38/38 files, vitest 787/787) so T-122 holds. Enforcement improved — `stage-release.needs` GAINED both coverage ratchets — but `main` still has no `required_status_checks` (T-222 re-confirmed). One new skip, honest and linked to T-204; no `.only`; no exclusion growth; no threshold moved. `resolveSpreadPriceData` closed as fixed; the standing `orders-place-cache-race` item re-diagnosed from cross-file pollution to an intra-file race and numbered T-311.
+
+## Remediation 2026-08-29 — PR #140
+
+All **35 un-DONE P0/P1 findings** from the same cycle's audit are DONE:
+T-250…T-283 plus T-311. The 27 P2s are DEFERRED. Evidence per task, with
+red/green counts, is in `TEST_LOG.md` under `## Remediation 2026-08-29`.
+
+Method: 9 worktree agents in three waves (capped at ~6 concurrent per the
+2026-08-26 rail), with the lead cherry-picking serially, re-deriving the
+headline evidence in the LANDED tree rather than trusting the scoped agent
+report, and pushing after every task commit. Three landings were corrected by
+the lead on review — see below.
+
+### What remediation itself uncovered
+
+Four of these findings were coverage gaps whose subject turned out to be
+BROKEN, which is the pattern the 2026-08-27 lesson predicts:
+
+- **T-262** — the empty-dump path was not hypothetical. Driving the real
+  prune/upload sequence promoted a 168-byte empty dump, pruned two real ones
+  against it, uploaded it off-box and wrote `db-backup = ok`.
+- **T-263** — `fetch_vixts.py`'s rebuild branch emitted no freshness verdict
+  at all, so a stale Cboe series was heartbeat `ok` and rendered a confident
+  regime badge on a two-week-old session. `fetch_vixcor.py` already had the
+  verdict on both branches; vixts was the odd one out.
+- **T-283** — the leap wrapper charged process startup and the first curl
+  round trip to the shed-wait budget, so on a loaded box it could give up
+  with ZERO retries. That is the silent no-retry behind the 2026-08-27 page.
+- **T-277** — the embargo test was green on this clone ONLY because there is
+  no `.env`; with `TURSO_DB_URL` set, as production always has it, the
+  untouched test pinned the opposite of production.
+
+### Lead corrections applied on landing
+
+- **T-258 — the finding's central premise is WRONG, and the source change it
+  produced has been REVERTED.** T-258 states "no test references
+  `resolve_flows`, `_flows_query_id` or `IB_FLEX_FLOWS_QUERY_ID`". The repo
+  has TWO python collection roots and the finding searched only
+  `scripts/tests/`. The root `tests/` tree holds
+  `tests/test_perf_twr_flex_single_request.py`, which references all three
+  and whose `test_a_distinct_flows_query_id_is_still_fetched` deliberately
+  pins the OPPOSITE contract. Implementing the AC as written therefore made a
+  divergent `IB_FLEX_FLOWS_QUERY_ID` a silent no-op — reddening that test
+  (invisible to the task agent, which ran only `scripts/tests`) and turning
+  CLAUDE.md's guidance not to SET the knob into code that IGNORES it. That is
+  a throttle-facing product decision about an operator knob, not a test fix,
+  and the loop's own rail permits a source change only when a test correctly
+  fails against a real defect. The undisputed property — one request per run
+  in the DEFAULT configuration — is kept and mutation-checked; the
+  divergent-id case is pinned as-is in both files, each naming the other.
+- **T-259** — the agent's `_default_ingest` rewrite used `Path.write_text`
+  then `chmod 0600`, leaving DECRYPTED brokerage-statement plaintext
+  world-readable for the width of the ingest. Replaced with
+  `os.open(..., O_CREAT|O_WRONLY|O_TRUNC, 0o600)` before the first byte.
+- **T-253** — withholding the blended aggregate silently made
+  `total_deployed_dollars` an UNDER-statement and `remaining_capacity_pct` an
+  OVER-statement, the unsafe direction for Gate 3's 2.5% cap. The payload now
+  carries `unmeasured_basis_count`.
+- **T-311** — the agent's race fix is correct (8/8 in isolation, where the
+  pre-fix file was 3/6 red), but the file still hard-timed out in 2 of 9 runs
+  under load. That is the T-238 class, not the race, and it would have redded
+  the closing gate. Fixed before it per the 2026-08-27 lesson.
+
+### New findings raised by this phase — for the next audit, NOT fixed here
+
+Recorded rather than chased, per the "no mid-loop chases" rule. Left
+un-numbered; the next audit should triage and number them.
+
+1. **`useOrderRisk.ts:741` is the only `okToSubmit` in the hook that does not
+   also require `coverageStatus === "resolved"`**, so a stock/futures
+   close-out arms Transmit under `no-portfolio` while the option close-out at
+   `:834` refuses. Surfaced by T-260; behaviour deliberately left unchanged.
+2. **`resolveEntryCost` still returns a `number`**, so after T-253 the
+   close-ticket order paths (`ModifyOrderModal`, `OrderTab`,
+   `lib/order/positionTrade`) and the portfolio-level unrealized totals still
+   compute a blended figure for a `mixed` position. Widening it touches 19
+   sites beyond T-253's AC.
+3. **The divergent-`IB_FLEX_FLOWS_QUERY_ID` semantics are genuinely
+   undecided** — see the T-258 correction above. Two tests now pin today's
+   behaviour and name each other; an operator decision is what settles it.
+4. **The e2e job is still non-gating.** T-271 curated five more specs into it
+   (14 → 19, each pre-flighted under `next start` 3/3 green), but the job is
+   in neither `stage-release.needs` nor `deploy.needs`, so none of the 19 can
+   block a release. Same class as T-222, which re-confirmed that `main`
+   carries no `required_status_checks` at all. Both are operator actions
+   outside this branch.
+
+### Darwin cloud baseline — UNCHANGED at 37
+
+`37 failed, 1277 passed, 7 skipped` (the audit recorded `37 failed, 1263
+passed`; the +14 passing are this phase's new cloud tests). Attributed by
+FILE, not by count: 21 `test_ib_gateway_control.py` + 13
+`test_bootstrap_control_plane.py` — the standing `sha256sum` / `bash >= 4`
+class, T-118 — plus 3 deliberate `test_caddy_edge_timeouts.py` reds (T-205
+working as designed; no `caddy` binary on this host). **Zero failures in
+either cloud file this phase touched.**
