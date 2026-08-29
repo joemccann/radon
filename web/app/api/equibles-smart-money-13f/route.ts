@@ -83,6 +83,8 @@ async function readFromDisk(
   return { data, timestampMs: contentTimestampMs(data.scan_time as string) };
 }
 
+export const radonCapability = "read";
+
 export async function GET(request: Request): Promise<Response> {
   const requestId = getRequestId();
   const ticker = normalizeTicker(new URL(request.url).searchParams.get("ticker"));

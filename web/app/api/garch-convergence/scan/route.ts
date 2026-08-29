@@ -16,6 +16,8 @@ import { requireRouteAccess } from "@/lib/routeAccess";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+export const radonCapability = "read.spawn";
+
 export async function POST(request: Request): Promise<Response> {
   // R-180: this SPAWNS garch_convergence.py. It was classified as "read-only
   // market data" in the filesystem-pinned matrix, whose own contract says a

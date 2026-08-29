@@ -18,6 +18,8 @@ interface FlexTokenConfig {
   notes: string;
 }
 
+export const radonCapability = "read";
+
 export async function GET(): Promise<Response> {
   try {
     const raw = await readFile(CONFIG_PATH, "utf-8");

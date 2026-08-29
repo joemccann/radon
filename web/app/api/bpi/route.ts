@@ -70,6 +70,8 @@ function withAllIndices(doc: BpiDoc): {
   return { generated_at: doc.generated_at ?? null, indices };
 }
 
+export const radonCapability = "read";
+
 export async function GET(): Promise<Response> {
   const requestId = getRequestId();
   const result = await dbFirstRead({

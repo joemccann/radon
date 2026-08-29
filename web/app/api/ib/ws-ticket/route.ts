@@ -16,6 +16,8 @@ import { requireRouteAccess } from "@/lib/routeAccess";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+export const radonCapability = "admin";
+
 export async function POST(request?: Request) {
   const access = await requireRouteAccess(request, {
     rate: { key: "ib/ws-ticket:route", limit: 30, windowMs: 60_000 },

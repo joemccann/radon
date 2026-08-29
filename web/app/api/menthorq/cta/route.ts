@@ -362,6 +362,8 @@ function triggerBackgroundSync(expectedDate: string): void {
   }
 }
 
+export const radonCapability = "read";
+
 export async function GET(): Promise<Response> {
   const access = await requireRouteAccess(undefined, { rate: { key: "menthorq/cta:route", limit: 20, windowMs: 60_000 } });
   if (!access.ok) return access.response;
