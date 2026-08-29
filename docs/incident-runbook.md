@@ -841,6 +841,51 @@ transient Turso HTTP 502 reading `scan_snapshots`.** Peak: 2026-08-21
 
 ---
 
+## media-backup-b2-connection-closed
+
+**`radon-media-backup.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) on a single B2 `ConnectionClosedError` during PUT.** Peak:
+2026-08-29 10:17Z, page `02ccb70e…`.
+
+- **Mechanism:** daily 10:15 UTC oneshot walks `/var/lib/radon/media` and
+  uploads size-new files to B2 prefix `media/`. `_s3_client` had no botocore
+  timeouts or retries (unlike `db_backup.py` on the same bucket). One
+  `ConnectionClosedError` on PUT of a single PNG aborted the loop; remaining
+  planned files were never attempted. `Type=oneshot` has no `Restart=`, so
+  `NRestarts=0` until the next calendar fire (~24h). Unit watchdog pages P1.
+  Same-host `radon-db-backup` had already uploaded 31 dumps to that bucket
+  ~1h earlier; credentials exist. Not fail-closed (missing `RADON_ARCHIVE_S3_*`).
+- **Detection:** journal
+  `media-backup failed: ConnectionClosedError: Connection was closed before
+  we received a valid response from endpoint URL:
+  "https://s3.us-west-004.backblazeb2.com/radon-archive/media/<file>.png"`;
+  `systemctl show … -p Result,NRestarts` → `exit-code` / `0`; ExecMainStart
+  to InactiveEnter is a few seconds. Edge and `:8321/health/lite` stay up.
+  Prior nights `ok: true` with `uploaded` in the dozens.
+- **Discriminating check:** `ConnectionClosedError` / `connection was closed`
+  on a PUT URL under `media/` (this case). Fail-closed missing-creds text is
+  ops (secret). `Result=signal` is deploy stop-clean. If `/health/lite` is
+  down too → API, stand down. B2 platform outage (every object, db-backup
+  also red) → stand down.
+- **Remediation (code):** botocore `Config` with
+  `connect_timeout=30` / `read_timeout=300` / `retries max_attempts=3 mode=standard`
+  plus application-level retry on transient transport errors so an injected
+  client (and a client whose retries are already spent) still retries the
+  file and continues the rest of the plan. Persistent closed-connection
+  still exits 1. Do not restart-flap; next timer (10:15 UTC) or one
+  `radon unit restart radon-media-backup` after the fix deploys. Unit is
+  not on `RERUNNABLE_ONESHOT_UNITS`.
+- **Regression:**
+  `cloud/tests/test_media_backup.py::TestTransientB2UploadRetry`
+  (`test_connection_closed_on_first_png_retries_and_uploads_the_rest`,
+  `test_persistent_connection_closed_still_fails_the_unit`,
+  `test_non_transient_upload_error_is_not_retried`,
+  `test_s3_client_uses_bounded_standard_retries`).
+- **Code:** `cloud/scripts/media_backup.py`
+  (`_s3_client`, `call_s3_with_retry`, `is_transient_s3_error`, `upload_file`).
+
+---
+
 ## demo-mirror-schema-lag
 
 **`radon-demo-mirror.service` oneshot pages P1 `Result=exit-code` with
