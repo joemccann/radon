@@ -228,16 +228,6 @@
   z-index: 1;
 }
 
-:global(body[data-mobile="true"]) .linkPill.linkPill {
-  display: inline-flex;
-  align-items: center;
-  position: relative;
-  flex: 0 0 auto;
-  min-height: 24px;
-  padding: 0 var(--nf-s2);
-  gap: var(--nf-s1);
-}
-
 :global(body[data-mobile="true"]) .timestamp.timestamp {
   display: inline-flex;
   align-items: center;
@@ -273,7 +263,6 @@
    card's 12px padding, both of which sit well inside those scroll ports. Any
    future pad that could reach a scroll-port edge has to be re-measured. */
 :global(body[data-mobile="true"]) .refresh.refresh::after,
-:global(body[data-mobile="true"]) .linkPill.linkPill::after,
 :global(body[data-mobile="true"]) .footer.footer :global(.star-toggle)::after {
   content: "";
   position: absolute;
