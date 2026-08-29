@@ -278,7 +278,9 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // ``gex-scan`` still flows through ``record_service_health`` only when
   // a user POSTs the scan endpoint, so it's on-demand for banner purposes.
   // Source: scripts/gex_scan.py uses UWClient only — no IB dependency.
-  "gex-scan": { open: 30 * MIN, extended: 30 * MIN, closed: 1 * DAY, category: "on-demand", requires_ib: false },
+  // SCHEDULED, not on-demand: data_refresh's 15-minute RTH driver runs it, so
+  // the same windows as its vcg-scan sibling. R-422.
+  "gex-scan": { open: 15 * MIN, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: false },
   "gamma-rotation-scan": { open: 30 * MIN, extended: 30 * MIN, closed: 1 * DAY, category: "on-demand", requires_ib: false },
   // ``breadth-scan`` is SCHEDULED, not on-demand: radon-breadth.timer fires
   // every 5 min across ET trading hours. It was catalogued on-demand, which

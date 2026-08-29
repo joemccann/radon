@@ -73,16 +73,23 @@ function optionFetchErrorMessage(data: Record<string, unknown>, fallback: string
   return detail && detail !== error ? `${error}: ${detail}` : error;
 }
 
-/** Names the scanner that seeded `?legs=`. Unknown / absent stays on the
- *  Theta Harvester wording it shipped with — that was the only seeder then. */
+/** Names the scanner that seeded `?legs=`.
+ *
+ *  The `default` fired for an ABSENT, misspelled or future-seeder `src`, so a
+ *  hand-edited or shared `?legs=SELL:1x100P` URL was stamped PREFILLED FROM
+ *  THETA HARVESTER — a scanner verdict asserted over a contract no scanner
+ *  produced. Theta now has its own case and the fallback is neutral. R-414. */
 function prefillLabelForSource(src: string | null | undefined): string {
   switch (src) {
     case "vol-cone":
       return "PREFILLED FROM VOL CONE";
     case "leap":
       return "PREFILLED FROM LEAP SCAN";
-    default:
+    case "theta":
+    case "theta-harvester":
       return "PREFILLED FROM THETA HARVESTER";
+    default:
+      return "PREFILLED FROM LINK";
   }
 }
 

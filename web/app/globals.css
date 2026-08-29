@@ -12783,6 +12783,11 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
   display: flex;
   flex-direction: column;
   padding: 8px 0 0;
+  /* Last resort. Above 1180px the only inner scrollports are
+     .chain-grid-wrapper and .order-builder--rail, so any OTHER child — the
+     expiry bar, the hint line, and notably an error or empty-chain block — was
+     clipped with no scrollbar anywhere on the page. R-425. */
+  overflow-y: auto;
 }
 
 .chain-rail {

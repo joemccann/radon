@@ -52,7 +52,14 @@ class TestSoftFailIsNotAnEmbargo:
             def record_service_health(service, state, **kwargs):
                 rows.append((service, state, kwargs))
 
+        # `data_refresh` does `from db import writer`, which resolves the
+        # PACKAGE ATTRIBUTE, not sys.modules — so patching sys.modules alone
+        # worked in isolation and silently did nothing once another test had
+        # already imported db.writer.
+        import db
+
         monkeypatch.setitem(sys.modules, "db.writer", _Writer)
+        monkeypatch.setattr(db, "writer", _Writer, raising=False)
         script = next(iter(data_refresh._SCRIPT_SERVICES))
         data_refresh._heartbeat_soft_fail(script, "cri_scan.py exited 1")
 

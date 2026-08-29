@@ -15,7 +15,9 @@ afterEach(() => {
 });
 
 const leapData: LeapData = {
-  scan_time: "2026-07-02T14:00:00Z",
+  // Fresh: the TRADE BEST link is suppressed past the leap-scan freshness
+  // window, and these cases are about RANKING, not staleness. R-415.
+  scan_time: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
   min_gap: 5,
   results: [
     {
@@ -57,7 +59,7 @@ const leapData: LeapData = {
 };
 
 const garchData: GarchConvergenceData = {
-  scan_time: "2026-07-02T14:05:00Z",
+  scan_time: new Date(Date.now() - 25 * 60 * 1000).toISOString(),
   tickers: {},
   pairs: [
     {
