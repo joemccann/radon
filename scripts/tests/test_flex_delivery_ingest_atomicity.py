@@ -38,12 +38,20 @@ def _claim_always_wins(monkeypatch):
     These cases are about what happens AFTER the file is accepted, so the
     fingerprint gate is stubbed rather than exercised. Its own behaviour is
     covered by `test_flex_delivery_fingerprint.py`.
+
+    T-257 added the paired release; it is recorded rather than granted so the
+    short-circuit case can assert the failed run handed its claim back.
     """
+    released: list[str] = []
     monkeypatch.setattr(ingest, "claim_flex_delivery", lambda _d, **_k: True)
+    monkeypatch.setattr(ingest, "release_flex_delivery", lambda d: released.append(d))
+    return released
 
 
 class TestActivityShortCircuit:
-    def test_twr_is_not_persisted_over_half_written_cash_flows(self, monkeypatch, tmp_path):
+    def test_twr_is_not_persisted_over_half_written_cash_flows(
+        self, monkeypatch, tmp_path, _claim_always_wins
+    ):
         """A failed cash upsert must stop the run BEFORE the TWR build."""
         import cash_flow_sync
         import perf_twr_builder
@@ -71,6 +79,10 @@ class TestActivityShortCircuit:
         )
         assert result["ok"] is False
         assert result["cash_exit"] != 0
+        assert _claim_always_wins == [result["content_sha256"]], (
+            "the failed run kept its delivery claim, so re-dropping the fixed "
+            "file returns 'duplicate' and the half-written chunks stay. T-257"
+        )
 
     def test_a_healthy_activity_file_still_runs_both_writers(self, monkeypatch, tmp_path):
         import cash_flow_sync
