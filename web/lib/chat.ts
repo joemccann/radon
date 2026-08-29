@@ -4,6 +4,7 @@ import type {
   AssistantOrderProposal,
   AssistantResponse,
   AssistantToolEvent,
+  ChatImageAttachment,
   Message,
   PiResponse,
   WorkspaceSection,
@@ -185,6 +186,32 @@ export async function requestAssistantReply(history: ApiMessage[], latestMessage
   return fallbackReply(latestMessage);
 }
 
+/**
+ * The turn's user message. Text-only turns keep the plain-string content shape
+ * the endpoint has always accepted; pasted images promote it to the Anthropic
+ * block array, images first so the model reads them before the question.
+ */
+function buildUserMessage(text: string, attachments: ChatImageAttachment[]): ApiMessage {
+  if (!attachments.length) {
+    return { role: "user", content: text };
+  }
+  return {
+    role: "user",
+    content: [
+      ...attachments.map((attachment) => ({
+        type: "image" as const,
+        source: {
+          type: "base64" as const,
+          media_type: attachment.mediaType,
+          data: attachment.data,
+        },
+      })),
+      // An image-only turn carries no text block: an empty one is not content.
+      ...(text ? [{ type: "text" as const, text }] : []),
+    ],
+  };
+}
+
 export type AssistantTurn = {
   content: string;
   proposal: AssistantOrderProposal | null;
@@ -203,12 +230,13 @@ export type AssistantTurn = {
 export async function requestAssistantTurn(
   history: ApiMessage[],
   latestMessage: string,
+  attachments: ChatImageAttachment[] = [],
 ): Promise<AssistantTurn> {
   const response = await fetch("/api/assistant", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      messages: [...history, { role: "user", content: latestMessage }],
+      messages: [...history, buildUserMessage(latestMessage, attachments)],
     }),
   });
 

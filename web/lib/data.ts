@@ -61,9 +61,9 @@ export const navItems: WorkspaceNavItem[] = [
 
 export const quickPromptsBySection: Record<WorkspaceSection, string[]> = {
   dashboard: ["portfolio", "scan --top 12", "compare support vs against", "review watch list", "help"],
-  "flow-analysis": ["analyze brze", "compare support vs against", "what are action items", "review watch list", "scan --top 12", "evaluate brze", "portfolio"],
+  "flow-analysis": ["analyze nvda", "compare support vs against", "what are action items", "review watch list", "scan --top 12", "evaluate nvda", "portfolio"],
   options: ["evaluate mu", "scan --top 12", "portfolio", "help"],
-  portfolio: ["portfolio", "analyze brze", "journal --limit 10", "evaluate msft", "help"],
+  portfolio: ["portfolio", "analyze nvda", "journal --limit 10", "evaluate msft", "help"],
   performance: ["portfolio", "stress-test", "journal --limit 10", "help"],
   orders: ["portfolio", "journal --limit 10", "scan --top 12", "help"],
   scanner: ["scan --top 25", "scan --min-score 12", "evaluate igv", "discover", "help"],

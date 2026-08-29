@@ -20,6 +20,7 @@ export type LlmRole = "user" | "assistant";
 /** Structured content blocks used by the multi-round tool loop. */
 export type LlmContentBlock =
   | { type: "text"; text: string }
+  | { type: "image"; source: { type: "base64"; media_type: string; data: string } }
   | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
   | { type: "tool_result"; tool_use_id: string; content: string };
 
@@ -269,8 +270,12 @@ type OpenAiResponse = {
   usage?: { prompt_tokens?: number; completion_tokens?: number };
 };
 
+type OpenAiContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+
 type OpenAiOutboundMessage =
-  | { role: string; content: string | null; tool_calls?: OpenAiToolCall[] }
+  | { role: string; content: string | OpenAiContentPart[] | null; tool_calls?: OpenAiToolCall[] }
   | { role: "tool"; tool_call_id: string; content: string };
 
 function openAiConfig(provider: Exclude<LlmProviderName, "grok" | "anthropic" | "gemini">) {
@@ -326,6 +331,7 @@ export function toOpenAiMessages(request: LlmChatRequest): OpenAiOutboundMessage
     const toolUses = blocks.filter(
       (block): block is Extract<LlmContentBlock, { type: "tool_use" }> => block.type === "tool_use",
     );
+    const hasImage = blocks.some((block) => block.type === "image");
 
     if (toolUses.length > 0) {
       messages.push({
@@ -339,6 +345,25 @@ export function toOpenAiMessages(request: LlmChatRequest): OpenAiOutboundMessage
             arguments: JSON.stringify(call.input ?? {}),
           },
         })),
+      });
+      continue;
+    }
+
+    if (hasImage) {
+      // Images force the array content shape; text-only turns stay plain
+      // strings so the provider-side prompt cache keeps hitting.
+      messages.push({
+        role: message.role,
+        content: blocks.flatMap((block): OpenAiContentPart[] => {
+          if (block.type === "text") return [{ type: "text", text: block.text }];
+          if (block.type === "image") {
+            return [{
+              type: "image_url",
+              image_url: { url: `data:${block.source.media_type};base64,${block.source.data}` },
+            }];
+          }
+          return [];
+        }),
       });
       continue;
     }

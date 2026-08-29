@@ -78,7 +78,7 @@ describe("AskComposer — Enter to send", () => {
     type(textarea, "scan MU flow");
     fireEvent.click(screen.getByLabelText("Send"));
 
-    expect(onSubmit).toHaveBeenCalledWith("scan MU flow", "AUTO");
+    expect(onSubmit).toHaveBeenCalledWith("scan MU flow", "AUTO", []);
   });
 
   it("disables the send button on empty input and enables it once typed", () => {
@@ -136,7 +136,7 @@ describe("AskComposer — IME composition guard", () => {
 
     fireEvent.compositionEnd(textarea);
     fireEvent.keyDown(textarea, { key: "Enter" });
-    expect(onSubmit).toHaveBeenCalledWith("ミュー", "AUTO");
+    expect(onSubmit).toHaveBeenCalledWith("ミュー", "AUTO", []);
   });
 });
 
