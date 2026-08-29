@@ -9,6 +9,7 @@ import type {
   AssistantOrderInput,
   AssistantOrderProposal,
   AssistantToolEvent,
+  ChatImageAttachment,
   Message,
   PortfolioData,
   WorkspaceSection,
@@ -250,12 +251,14 @@ export default function ChatPanel({
     scrollToBottom();
   }, [scrollToBottom]);
 
-  const sendMessage = async (prompt: string) => {
+  const sendMessage = async (prompt: string, attachments: ChatImageAttachment[] = []) => {
     // One controller per turn: a new send supersedes the previous stream.
     streamAbortRef.current?.abort();
     streamAbortRef.current = new AbortController();
     const cleaned = prompt.trim();
-    if (!cleaned || isBusy) {
+    // An attachment alone is a complete turn: the composer enables Send with no
+    // text once an image is pasted, so an empty prompt must not drop it here.
+    if ((!cleaned && !attachments.length) || isBusy) {
       return;
     }
     // A new turn invalidates any prior model-controlled destructive intent.
@@ -267,6 +270,7 @@ export default function ChatPanel({
       role: "user",
       timestamp: createTimestamp(),
       content: cleaned,
+      ...(attachments.length ? { attachments } : {}),
     };
 
     const conversation: ApiMessage[] = messages.map((message) => ({
@@ -293,8 +297,11 @@ export default function ChatPanel({
     setTurnTools([]);
     setTurnModel(null);
 
+    // A PI command runs a script and never sees an image, so a turn carrying a
+    // pasted image always goes to the assistant rather than silently dropping it.
+    const piCommand = attachments.length ? null : routeToPiPrompt(cleaned);
+
     try {
-      const piCommand = routeToPiPrompt(cleaned);
       if (piCommand) {
         const assistantContent = await requestPiReply(piCommand);
         setStatus("streaming");
@@ -302,7 +309,7 @@ export default function ChatPanel({
           signal: streamAbortRef.current?.signal,
         });
       } else {
-        const turn = await requestAssistantTurn(conversation, cleaned);
+        const turn = await requestAssistantTurn(conversation, cleaned, attachments);
         setTurnTools(turn.toolEvents);
         setTurnModel(turn.model);
         setStatus("streaming");
@@ -317,7 +324,7 @@ export default function ChatPanel({
       }
       setStatus("done");
     } catch (error) {
-      const isPiCommand = Boolean(routeToPiPrompt(cleaned));
+      const isPiCommand = Boolean(piCommand);
       const fallback = isPiCommand ? "PI command failed to run in this session." : fallbackReply(cleaned);
       const errorMessage =
         error instanceof Error
@@ -442,6 +449,21 @@ export default function ChatPanel({
                           />
                         ) : (
                           <>
+                            {message.attachments?.length ? (
+                              // Same thumbnail treatment the composer used, so
+                              // the operator sees exactly what they sent.
+                              <div className="ask-composer__attachments" aria-label="Attached images">
+                                {message.attachments.map((attachment) => (
+                                  <span key={attachment.id} className="ask-composer__thumb">
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img
+                                      src={`data:${attachment.mediaType};base64,${attachment.data}`}
+                                      alt={attachment.name || "Pasted image"}
+                                    />
+                                  </span>
+                                ))}
+                              </div>
+                            ) : null}
                             <MarkdownRenderer content={message.content} />
                             {isStreamingThis ? (
                               <span className="chat-cursor" aria-hidden="true" />
@@ -520,7 +542,7 @@ export default function ChatPanel({
                     onClick={() => sendMessage(prompt)}
                     className="pill-chip"
                   >
-                    / {prompt}
+                    /{prompt}
                   </button>
                 ))}
               </div>
@@ -528,7 +550,7 @@ export default function ChatPanel({
             <AskComposer
               busy={isBusy}
               focusKey={isOpen}
-              onSubmit={(text) => void sendMessage(text)}
+              onSubmit={(text, _engine, attachments) => void sendMessage(text, attachments)}
             />
           </div>
         </div>

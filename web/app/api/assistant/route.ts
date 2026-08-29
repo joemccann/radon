@@ -9,9 +9,20 @@ import { etCalendarDateString } from "@/lib/journal/rangePnl";
 
 type ChatRole = "user" | "assistant";
 
+export type ChatImageMediaType = "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+
+export type ChatTextBlock = { type: "text"; text: string };
+
+export type ChatImageBlock = {
+  type: "image";
+  source: { type: "base64"; media_type: ChatImageMediaType; data: string };
+};
+
+export type ChatContentBlock = ChatTextBlock | ChatImageBlock;
+
 export type ChatMessage = {
   role: ChatRole;
-  content: string;
+  content: string | ChatContentBlock[];
 };
 
 export type AssistantPayload = {
@@ -40,7 +51,8 @@ export const SYSTEM_PROMPT =
   "JOURNAL CONVENTIONS: The trade journal contains two row families for the same executions: Flex-rehydrate aggregate rows (family flex_agg, composite exec ids, carrying realized_pnl / cost_basis / proceeds / open_basis) and realtime per-fill rows (family fill). " +
   "The same fill can appear in BOTH families; never sum across families without deduping, and rows marked dup:true duplicate an aggregate. " +
   "Closes lot-match against opens by VWAP (per-unit basis = open_basis / quantity), and the matching open may lie OUTSIDE the date window you queried: a close early in a week can realize P&L against an open from a prior week. " +
-  "For realized P&L questions prefer get_realized_pnl: it dedupes and lot-matches for you, attributes P&L to the close date, and handles cross-window opens. Use query_journal only to inspect raw rows.";
+  "For realized P&L questions prefer get_realized_pnl: it dedupes and lot-matches for you, attributes P&L to the close date, and handles cross-window opens. Use query_journal only to inspect raw rows. " +
+  "The operator may attach chart or screenshot images to a message: read every attached image as part of that request.";
 
 const isMockMode = () =>
   process.env.ASSISTANT_MOCK === "1" ||
@@ -50,6 +62,56 @@ function cleanString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+// Trust boundary for pasted images. Anything failing a limit is dropped
+// silently — never thrown, never forwarded unvalidated.
+const IMAGE_MEDIA_TYPES: readonly string[] = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+const MAX_IMAGES_PER_MESSAGE = 4;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const BASE64_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/;
+
+function decodedBase64Bytes(data: string): number {
+  return Math.floor((data.length * 3) / 4);
+}
+
+function safeImageBlock(block: { source?: unknown }): ChatImageBlock | null {
+  const source = block.source as { type?: unknown; media_type?: unknown; data?: unknown } | undefined;
+  if (!source || source.type !== "base64") return null;
+
+  const mediaType = source.media_type;
+  if (typeof mediaType !== "string" || !IMAGE_MEDIA_TYPES.includes(mediaType)) return null;
+
+  const data = source.data;
+  if (typeof data !== "string" || !BASE64_PATTERN.test(data)) return null;
+  if (decodedBase64Bytes(data) > MAX_IMAGE_BYTES) return null;
+
+  return {
+    type: "image",
+    source: { type: "base64", media_type: mediaType as ChatImageMediaType, data },
+  };
+}
+
+function safeContentBlocks(rawContent: unknown[]): ChatContentBlock[] {
+  const blocks: ChatContentBlock[] = [];
+  let images = 0;
+  for (const raw of rawContent) {
+    const block = raw as { type?: unknown; text?: unknown; source?: unknown };
+    if (block?.type === "text") {
+      const text = cleanString(block.text);
+      if (text) blocks.push({ type: "text", text });
+      continue;
+    }
+    if (block?.type === "image") {
+      if (images >= MAX_IMAGES_PER_MESSAGE) continue;
+      const image = safeImageBlock(block);
+      if (image) {
+        blocks.push(image);
+        images += 1;
+      }
+    }
+  }
+  return blocks;
+}
+
 function safeMessages(rawMessages: unknown): ChatMessage[] {
   if (!Array.isArray(rawMessages)) return [];
 
@@ -57,8 +119,15 @@ function safeMessages(rawMessages: unknown): ChatMessage[] {
   for (const item of rawMessages) {
     const role = (item as { role?: unknown }).role;
     const content = (item as { content?: unknown }).content;
-    if ((role === "user" || role === "assistant") && typeof content === "string" && content.trim()) {
-      parsed.push({ role, content: content.trim() });
+    if (role !== "user" && role !== "assistant") continue;
+
+    if (typeof content === "string") {
+      if (content.trim()) parsed.push({ role, content: content.trim() });
+      continue;
+    }
+    if (Array.isArray(content)) {
+      const blocks = safeContentBlocks(content);
+      if (blocks.length) parsed.push({ role, content: blocks });
     }
   }
   return parsed;
@@ -91,8 +160,19 @@ function toTurns(messages: ChatMessage[]): AssistantTurn[] {
   return messages.map((message) => ({ role: message.role, content: message.content }));
 }
 
+// Text only: the fallback reply and telemetry both want a readable string, and
+// an image block carries nothing readable.
+function contentText(content: ChatMessage["content"]): string {
+  if (typeof content === "string") return content;
+  return content
+    .filter((block): block is ChatTextBlock => block.type === "text")
+    .map((block) => block.text)
+    .join(" ");
+}
+
 function lastUserContent(messages: ChatMessage[]): string {
-  return [...messages].reverse().find((message) => message.role === "user")?.content ?? "";
+  const message = [...messages].reverse().find((entry) => entry.role === "user");
+  return message ? contentText(message.content) : "";
 }
 
 function toTelemetryToolCalls(toolEvents: ToolEvent[]): AssistantTurnToolCall[] {

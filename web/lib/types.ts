@@ -12,11 +12,31 @@ export type NavIcon = ComponentType<{
   strokeWidth?: number;
 }>;
 
+/** Media types the assistant endpoint accepts for a pasted image. */
+export type ChatImageMediaType = "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+
+/**
+ * An image pasted into the chat composer. The preview src is built as
+ * `data:${mediaType};base64,${data}` at render time — there is deliberately no
+ * second dataUrl field to drift out of sync.
+ */
+export type ChatImageAttachment = {
+  /** Stable id for React keys and removal. Derived from index + name. */
+  id: string;
+  mediaType: ChatImageMediaType;
+  /** Raw base64 payload, NO "data:" prefix. */
+  data: string;
+  /** Original file name when the clipboard supplied one. */
+  name?: string;
+};
+
 export type Message = {
   id: string;
   role: MessageRole;
   content: string;
   timestamp: string;
+  /** Images the operator pasted with this turn; rendered in their own bubble. */
+  attachments?: ChatImageAttachment[];
 };
 
 export type FlowRow = {
@@ -28,9 +48,18 @@ export type FlowRow = {
   note: string;
 };
 
+/** Anthropic Messages API content blocks, verbatim. */
+export type ApiTextBlock = { type: "text"; text: string };
+export type ApiImageBlock = {
+  type: "image";
+  source: { type: "base64"; media_type: ChatImageMediaType; data: string };
+};
+export type ApiContentBlock = ApiTextBlock | ApiImageBlock;
+
 export type ApiMessage = {
   role: MessageRole;
-  content: string;
+  /** A plain string for a text-only turn; blocks once an image rides along. */
+  content: string | ApiContentBlock[];
 };
 
 export type AssistantToolEvent = {
