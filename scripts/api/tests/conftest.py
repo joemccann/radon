@@ -33,6 +33,25 @@ def _isolate_ib_2fa_lock_orphan_state(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_order_rate_budget():
+    """Reset the process-wide per-minute placement budget around every test.
+
+    `server._order_rate_timestamps` holds every accepted placement inside a
+    rolling 60s window, capped by `RADON_MAX_ORDERS_PER_MIN` (default 10).
+    Eight files in this subtree POST `/orders/place`, and under CI's
+    `-n auto --dist loadfile` one worker runs several of them back to back
+    well inside 60s — so a later test inherited a spent budget and got 429
+    where it asserted 200. Two files cleared the deque by hand, which made the
+    leak look handled while every other file stayed exposed.
+    """
+    import server as _server  # imported here: sys.path is set up above
+
+    _server._order_rate_timestamps.clear()
+    yield
+    _server._order_rate_timestamps.clear()
+
+
+@pytest.fixture(autouse=True)
 def _isolate_flow_reports_dir(tmp_path, monkeypatch):
     """Point the flow-report cache at tmp_path for every test in this subtree.
 
