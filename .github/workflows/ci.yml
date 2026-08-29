@@ -119,11 +119,17 @@ jobs:
       # config resolve from root node_modules; web/tests files resolve their
       # imports from web/node_modules.
       #
-      # Exclude only the integration tests that spawn `python3.13` (via
-      # runScript): integration.test.ts, kelly.test.ts (kelly wrapper →
-      # scripts/kelly.py), and runner.test.ts (runScript → scripts/*.py). The
-      # Bun-only job has no Python, so these ENOENT here; they run locally where
-      # Python exists (this mirrors pytest's `-m 'not integration'`).
+      # NOTE: there are NO --exclude flags here any more (T-276). Three files
+      # used to be excluded wholesale for spawning `python3.13`, which the
+      # Bun-only job does not have. But those files are MIXED: only 9 of their
+      # 27 tests spawn anything. The other 18 — PI command dispatch, the
+      # /api/prices deprecation contract, and the 2026-05-22 bare-`python3.13`
+      # outage regression in resolvePythonBin — need no subprocess and now run
+      # in this gate. The 9 that do skip BY NAME via `hasPython313()`
+      # (web/tests/helpers/python313.ts), so the reason is visible in the run
+      # output instead of buried in this file.
+      # scripts/tests/test_vitest_python_gating.py fails if an --exclude for
+      # any of those three paths comes back.
       # NOTE: data-reader.test.ts is NO LONGER excluded — it was failing only
       # from a non-root cwd (fixtures written cwd-relative while readDataFile
       # reads from resolveProjectRoot()); the test now writes under the project
@@ -140,9 +146,6 @@ jobs:
           --coverage.thresholds.lines=0
           --coverage.thresholds.functions=0
           --coverage.thresholds.branches=0
-          --exclude '**/web/tests/integration.test.ts'
-          --exclude '**/lib/tools/__tests__/kelly.test.ts'
-          --exclude '**/lib/tools/__tests__/runner.test.ts'
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: vitest-coverage-${{ matrix.shard }}
@@ -556,6 +559,11 @@ jobs:
           e2e/orders-realized-pnl-portfolio-fallback.spec.ts
           e2e/orders-partial-realized-pnl.spec.ts
           e2e/share-pnl-entry-exit.spec.ts
+          e2e/chain-deck-ticket-scroll.spec.ts
+          e2e/leap-order-prefill.spec.ts
+          e2e/mobile-orders-session.spec.ts
+          e2e/orders-session-window.spec.ts
+          e2e/vixts-tab.spec.ts
       - name: Upload traces on failure
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
