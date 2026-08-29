@@ -441,6 +441,19 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // Reads the filesystem + systemctl only — no IB dependency.
   "config-drift": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
+  // ``flow-refresh`` is the hourly RTH dark-pool flow driver
+  // (scripts/run_flow_refresh.sh via radon-flow-refresh.timer,
+  // Mon..Fri 09..16:00 ET). It has always written its own ok/error row
+  // through write_service_health_http; it was in NEITHER catalog, so nothing
+  // aged it. Surfaced by R-412's widened resolver.
+  "flow-refresh": { open: 3 * HOUR, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
+
+  // ``forecast-nightly`` is the Chronos-2 backfill + calibration
+  // (scripts/nightly_forecast.py via radon-forecast-nightly.timer, 07:00 UTC,
+  // 24/7). R-402: it wrote no row on any path, so a throwing backfill left the
+  // forecast tables silently not advancing with nothing at the edge saying so.
+  "forecast-nightly": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+
   // ``db-backup`` is the nightly full Turso dump on the VPS (radon-cloud
   // scripts/db_backup.py via radon-db-backup.timer, 07:52 UTC, 24/7 —
   // weekends are normal run days). Heartbeats ok/error on EVERY run with
@@ -630,6 +643,8 @@ const RTH_ONLY_SERVICES = new Set([
   // only, so their open-window age must be measured from today's open.
   "theta-harvester",
   "strength-confirmation",
+  // Same shape: radon-flow-refresh.timer is Mon..Fri 09..16:00 ET.
+  "flow-refresh",
   "orders-sync",
   "portfolio-sync",
   "journal-sync",
