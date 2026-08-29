@@ -73,7 +73,11 @@ FETCH_TIMEOUT_S = 30            # spark + per-symbol chart urlopen
 # cloud/services/radon-bpi.service TimeoutStartSec with one in-flight
 # FETCH_TIMEOUT_S plus persist slack. Do not raise TimeoutStartSec —
 # R-071 keeps it under the 21:30→23:30 catch-up gap.
-SWEEP_BUDGET_S = 6300
+# 6000, not 6300: `persist_deadline` is SWEEP_BUDGET_S + PERSIST_RESERVE_S, and
+# at 6300 that landed exactly on the unit's TimeoutStartSec=6900, so the reserve
+# guard below could only become true at the instant systemd already SIGTERMs the
+# unit — i.e. it was unreachable on the first index. R-421.
+SWEEP_BUDGET_S = 6000
 # Wall clock reserved for the phase AFTER the Yahoo sweep: _read_stored_max_dates,
 # _store_fetched, ~100 chunked _read_stored_closes SELECTs for RUT alone, and
 # _persist_index's upserts — for three indices. The sweep deadline covered only
@@ -325,6 +329,10 @@ def install_sigterm_unwind() -> None:
     except (ValueError, OSError):
         # Not the main thread, or a platform without SIGTERM.
         pass
+
+
+class BpiPersistIncomplete(RuntimeError):
+    """At least one index's Turso write was skipped for want of reserve."""
 
 
 def _sweep_deadline(deadline: float | None) -> float:
@@ -658,7 +666,16 @@ def run_scan(
     install_sigterm_unwind()
     deadline = _sweep_deadline(sweep_deadline)
     persist_deadline = deadline + PERSIST_RESERVE_S
+    # PER INDEX. One absolute point shared by every index meant that at
+    # `persist_deadline - 1` all three passed the guard and all three started a
+    # ~600s persist into a 599s window, so two of three were still SIGTERMed
+    # mid-`upsert_bpi_history_rows` — the very half-write R-225 closed. The
+    # share is a fraction of the FULL index set the reserve was sized for, not
+    # of this invocation's list: PERSIST_RESERVE_S covers all three, so a
+    # single-index run must not be made to demand all of it. R-421.
+    per_index_reserve = PERSIST_RESERVE_S / max(1, len(INDEX_NAMES))
     results: dict[str, Any] = {}
+    skipped: list[str] = []
     with _heartbeat_cycle(no_db) as cycle:
         for index_symbol in indices:
             payload = scan_index(
@@ -677,20 +694,33 @@ def run_scan(
                 # upserts; PERSIST_RESERVE_S is the wall clock set aside for
                 # it. Past that, starting the write only buys a SIGTERM
                 # mid-upsert and a half-written bpi_history. R-225/T-231.
-                if time.monotonic() >= persist_deadline:
+                if persist_deadline - time.monotonic() < per_index_reserve:
                     print(
                         f"  {index_symbol}: persist reserve "
-                        f"({PERSIST_RESERVE_S}s) exhausted; skipping the Turso "
-                        "write, the catch-up pass retries it",
+                        f"({per_index_reserve:.0f}s of {PERSIST_RESERVE_S}s) "
+                        "exhausted; skipping the Turso write, the catch-up pass "
+                        "retries it",
                         file=sys.stderr,
                     )
+                    skipped.append(index_symbol)
+                    payload["persist_skipped"] = True
                 else:
                     _persist_index(index_symbol, payload)
             payload.pop("_bpi_rows", None)
             results[index_symbol] = payload
         if cycle is not None:
             cycle.finished_at = generated_at
-    _write_disk_mirror(results, generated_at)
+        _write_disk_mirror(results, generated_at)
+        if skipped:
+            # Nothing distinguished a run that wrote all three indices to Turso
+            # from one that wrote none: the payload still landed in `results`,
+            # the mirror was restamped with a fresh `generated_at`, and the
+            # cycle exited `ok`. `service_cycle` derives state only from how the
+            # block exits (never set by hand), so the honest way to say
+            # "incomplete" is to leave it by raising. R-396.
+            raise BpiPersistIncomplete(
+                "persist reserve exhausted; no Turso write for: " + ", ".join(skipped)
+            )
     return {"generated_at": generated_at, "indices": results}
 
 
@@ -722,7 +752,13 @@ def _persist_index(index_symbol: str, payload: dict[str, Any]) -> None:
 def _write_disk_mirror(results: dict[str, Any], generated_at: str) -> None:
     """Merge non-missing payloads over the existing mirror; a run with
     nothing fresh leaves the file untouched (never cache empty results)."""
-    fresh = {k: v for k, v in results.items() if not v.get("missing")}
+    # An index whose Turso write was skipped is NOT fresh: restamping
+    # `generated_at` for data the database never received made the JSON mirror
+    # claim currency for a session `bpi_history` has no rows for. R-396.
+    fresh = {
+        k: v for k, v in results.items()
+        if not v.get("missing") and not v.get("persist_skipped")
+    }
     if not fresh:
         return
     path = _data_dir() / "bpi.json"
