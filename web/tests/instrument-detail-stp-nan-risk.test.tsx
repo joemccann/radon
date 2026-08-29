@@ -195,3 +195,179 @@ describe("useOrderRisk finiteness gate", () => {
     expect(result.current.okToSubmit).toBe(true);
   });
 });
+
+/**
+ * T-260: the finiteness gate has FOUR call sites in `useOrderRisk` — linear
+ * close-out, linear open, option close-out, option open — and only the last
+ * was asserted. Deleting any of the other three passed the whole suite while
+ * re-arming Transmit over a summary that reads NaN in every tile. The linear
+ * close-out is reachable from a stock close ticket with a blank Limit:
+ * `grossCash = Math.abs(limitPrice * quantity * multiplier)` → NaN.
+ *
+ * One case per call site, each with a single non-finite input and a finite
+ * twin, so reverting one guard reds exactly one case.
+ */
+describe("useOrderRisk finiteness gate — every call site", () => {
+  afterEach(cleanup);
+
+  const LINEAR_BASE = {
+    type: "linear" as const,
+    ticker: "ABC",
+    quantity: 100,
+    multiplier: 1,
+    instrument: "stock" as const,
+  };
+
+  it("linear open: refuses to arm on a non-finite limit price", () => {
+    const { result } = renderHook(() =>
+      useOrderRisk(
+        {
+          ...LINEAR_BASE,
+          action: "BUY",
+          limitPrice: Number.NaN,
+          description: "BUY 100 ABC @ $NaN",
+        },
+        PORTFOLIO,
+      ),
+    );
+
+    expect(result.current!.coverageStatus).toBe("resolved");
+    expect(result.current!.okToSubmit).toBe(false);
+  });
+
+  it("linear open: arms on a finite limit price", () => {
+    const { result } = renderHook(() =>
+      useOrderRisk(
+        {
+          ...LINEAR_BASE,
+          action: "BUY",
+          limitPrice: 50,
+          description: "BUY 100 ABC @ $50.00",
+        },
+        PORTFOLIO,
+      ),
+    );
+
+    expect(result.current!.coverageStatus).toBe("resolved");
+    expect(result.current!.okToSubmit).toBe(true);
+  });
+
+  it("linear close-out: refuses to arm on a non-finite limit price", () => {
+    const { result } = renderHook(() =>
+      useOrderRisk(
+        {
+          ...LINEAR_BASE,
+          action: "SELL",
+          limitPrice: Number.NaN,
+          description: "SELL 100 ABC @ $NaN",
+          heldQuantity: 100,
+          closeOut: { entryCostDollars: 4_000 },
+        },
+        PORTFOLIO,
+      ),
+    );
+
+    expect(result.current!.coverageStatus).toBe("resolved");
+    expect(result.current!.okToSubmit).toBe(false);
+  });
+
+  it("linear close-out: arms on a finite limit price", () => {
+    const { result } = renderHook(() =>
+      useOrderRisk(
+        {
+          ...LINEAR_BASE,
+          action: "SELL",
+          limitPrice: 50,
+          description: "SELL 100 ABC @ $50.00",
+          heldQuantity: 100,
+          closeOut: { entryCostDollars: 4_000 },
+        },
+        PORTFOLIO,
+      ),
+    );
+
+    expect(result.current!.coverageStatus).toBe("resolved");
+    expect(result.current!.okToSubmit).toBe(true);
+  });
+
+  const OPTION_CLOSE_BASE = {
+    ticker: "ABC",
+    chainLegs: [
+      { action: "SELL" as const, right: "C" as const, strike: 100, expiry: "2026-12-18", quantity: 5 },
+    ],
+    netPremium: -5,
+    closeOut: { entryCostDollars: 2_500 },
+  };
+
+  it("option close-out: refuses to arm on a non-finite total cost", () => {
+    const { result } = renderHook(() =>
+      useOrderRisk(
+        {
+          ...OPTION_CLOSE_BASE,
+          description: "SELL 5x ABC 100C @ $NaN",
+          totalCost: Number.NaN,
+        },
+        PORTFOLIO,
+      ),
+    );
+
+    expect(result.current!.coverageStatus).toBe("resolved");
+    expect(result.current!.okToSubmit).toBe(false);
+  });
+
+  it("option close-out: arms on a finite total cost", () => {
+    const { result } = renderHook(() =>
+      useOrderRisk(
+        {
+          ...OPTION_CLOSE_BASE,
+          description: "SELL 5x ABC 100C @ $5.00",
+          totalCost: 2_500,
+        },
+        PORTFOLIO,
+      ),
+    );
+
+    expect(result.current!.coverageStatus).toBe("resolved");
+    expect(result.current!.okToSubmit).toBe(true);
+  });
+
+  it("option open: refuses to arm on a non-finite net premium", () => {
+    const { result } = renderHook(() =>
+      useOrderRisk(
+        {
+          ticker: "ABC",
+          chainLegs: [
+            { action: "BUY", right: "C", strike: 100, expiry: "2026-12-18", quantity: 5 },
+          ],
+          netPremium: Number.NaN,
+          description: "BUY 5x ABC 100C @ $NaN",
+          totalCost: Number.NaN,
+        },
+        PORTFOLIO,
+      ),
+    );
+
+    expect(result.current!.coverageStatus).toBe("resolved");
+    expect(result.current!.okToSubmit).toBe(false);
+  });
+
+  it("option open: arms on a finite net premium", () => {
+    const { result } = renderHook(() =>
+      useOrderRisk(
+        {
+          ticker: "ABC",
+          chainLegs: [
+            { action: "BUY", right: "C", strike: 100, expiry: "2026-12-18", quantity: 5 },
+          ],
+          netPremium: 4,
+          description: "BUY 5x ABC 100C @ $4.00",
+          totalCost: 2_000,
+        },
+        PORTFOLIO,
+      ),
+    );
+
+    expect(result.current!.coverageStatus).toBe("resolved");
+    expect(result.current!.okToSubmit).toBe(true);
+  });
+});

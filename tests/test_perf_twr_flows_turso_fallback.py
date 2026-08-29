@@ -54,16 +54,34 @@ def _flex_raises(code: str):
     return _boom
 
 
+# T-282: EVERY production caller passes `allow_fetch=False`.
+# `build_and_persist` is the only non-test caller of `resolve_flows`
+# (`perf_twr_builder.py:1793`) and passes
+# `allow_fetch=bool(sendrequest) and not from_file` — false for the flex-pull
+# file ingest and false for the weekday timer — while `POST /performance` and
+# `/performance/background` are hard 404s and `get_external_flows_for_nav` has
+# zero non-test callers. So the whole class below used to verify the 2026-08-17
+# incident's contract exclusively through `allow_fetch=True`, a branch
+# production never enters. Every case is now parametrized across both, and the
+# `allow_fetch=False` leg reaches the fallback through
+# `_flows_after_fetch_failure("file_ingest_no_fetch")` (`:812`) instead of
+# through a fetch exception. Same contract, the shipped path.
+_ALLOW_FETCH = pytest.mark.parametrize(
+    "allow_fetch", [True, False], ids=["fetch_enabled", "file_ingest_no_fetch"]
+)
+
+
+@_ALLOW_FETCH
 class TestFlowsFallBackToTursoOnFlexOutage:
     @pytest.mark.parametrize("code", ["1001", "1025"])
     def test_mirrored_flows_are_served_when_flex_errors(
-        self, flex_configured, monkeypatch, code
+        self, flex_configured, monkeypatch, code, allow_fetch
     ):
         """The exact incident: Flex is down, Turso has the flows, publish them."""
         monkeypatch.setattr(builder, "fetch_flex_xml", _flex_raises(code))
         monkeypatch.setattr(builder, "load_flows_from_turso", lambda: dict(MIRRORED_FLOWS))
 
-        flows, _coverage = builder.resolve_flows()
+        flows, _coverage = builder.resolve_flows(allow_fetch=allow_fetch)
 
         assert flows.status is not FlowsStatus.FAILED, (
             "a Flex outage with good mirrored flows must not suppress TWR"
@@ -72,37 +90,43 @@ class TestFlowsFallBackToTursoOnFlexOutage:
         assert flows.source == "turso"
 
     def test_source_is_honest_so_the_page_can_say_where_flows_came_from(
-        self, flex_configured, monkeypatch
+        self, flex_configured, monkeypatch, allow_fetch
     ):
         monkeypatch.setattr(builder, "fetch_flex_xml", _flex_raises("1025"))
         monkeypatch.setattr(builder, "load_flows_from_turso", lambda: dict(MIRRORED_FLOWS))
 
-        flows, _coverage = builder.resolve_flows()
+        flows, _coverage = builder.resolve_flows(allow_fetch=allow_fetch)
 
         assert flows.source == "turso", "never claim a live Flex fetch"
 
-    def test_still_fails_when_turso_has_nothing(self, flex_configured, monkeypatch):
+    def test_still_fails_when_turso_has_nothing(
+        self, flex_configured, monkeypatch, allow_fetch
+    ):
         """No fallback data = the original rule. Never invent a zero flow set:
         treating 'unknown' as 'no deposits' is what produced +951% TWR."""
         monkeypatch.setattr(builder, "fetch_flex_xml", _flex_raises("1001"))
         monkeypatch.setattr(builder, "load_flows_from_turso", lambda: None)
 
-        flows, _coverage = builder.resolve_flows()
+        flows, _coverage = builder.resolve_flows(allow_fetch=allow_fetch)
 
         assert flows.status is FlowsStatus.FAILED
-        assert "1001" in flows.reason
 
-    def test_empty_turso_table_is_not_a_verified_zero(self, flex_configured, monkeypatch):
+    def test_empty_turso_table_is_not_a_verified_zero(
+        self, flex_configured, monkeypatch, allow_fetch
+    ):
         """An empty dict is absence of evidence, not evidence of no flows."""
         monkeypatch.setattr(builder, "fetch_flex_xml", _flex_raises("1025"))
         monkeypatch.setattr(builder, "load_flows_from_turso", lambda: {})
 
-        flows, _coverage = builder.resolve_flows()
+        flows, _coverage = builder.resolve_flows(allow_fetch=allow_fetch)
 
         assert flows.status is FlowsStatus.FAILED
 
+
+class TestTheHealthyPathNeverConsultsTurso:
+    """The fallback must not shadow a healthy resolution, on either branch."""
+
     def test_a_live_flex_success_never_consults_turso(self, flex_configured, monkeypatch):
-        """The fallback must not shadow a healthy fetch."""
         called = {"turso": False}
 
         def _turso():
@@ -119,6 +143,58 @@ class TestFlowsFallBackToTursoOnFlexOutage:
 
         assert called["turso"] is False
         assert flows.source == "flex"
+
+    def test_a_file_ingest_statement_never_consults_turso_and_never_fetches(
+        self, flex_configured, monkeypatch
+    ):
+        """The shipped healthy path: allow_fetch=False with a statement already
+        in hand. An Activity statement carries CashTransaction + Transfers, so
+        it must be parsed directly — no SendRequest against a throttled token,
+        and no fallback shadowing perfectly good flows."""
+        called = {"turso": False, "fetch": False}
+
+        def _turso():
+            called["turso"] = True
+            return dict(MIRRORED_FLOWS)
+
+        def _fetch(*_a, **_k):
+            called["fetch"] = True
+            raise AssertionError("allow_fetch=False must never SendRequest")
+
+        monkeypatch.setattr(builder, "fetch_flex_xml", _fetch)
+        monkeypatch.setattr(builder, "load_flows_from_turso", _turso)
+        monkeypatch.setattr(
+            builder, "parse_flows", lambda _xml: builder.FlowSet.empty_verified("flex")
+        )
+
+        document = builder.FlexDocument(query_id="1442520", xml="<FlexQueryResponse/>")
+        flows, _coverage = builder.resolve_flows(document, allow_fetch=False)
+
+        assert called == {"turso": False, "fetch": False}
+        assert flows.source == "flex"
+
+    def test_file_ingest_without_a_statement_falls_back_rather_than_fetching(
+        self, flex_configured, monkeypatch
+    ):
+        """The branch production actually takes when the pulled file is a Trade
+        Confirmation with no flows section: no document xml, fetching
+        forbidden. It must degrade to the Turso mirror, not SendRequest and not
+        blank the page."""
+        called = {"fetch": False}
+
+        def _fetch(*_a, **_k):
+            called["fetch"] = True
+            raise AssertionError("allow_fetch=False must never SendRequest")
+
+        monkeypatch.setattr(builder, "fetch_flex_xml", _fetch)
+        monkeypatch.setattr(builder, "load_flows_from_turso", lambda: dict(MIRRORED_FLOWS))
+
+        flows, _coverage = builder.resolve_flows(None, allow_fetch=False)
+
+        assert called["fetch"] is False
+        assert flows.status is not FlowsStatus.FAILED
+        assert dict(flows.by_date) == MIRRORED_FLOWS
+        assert flows.source == "turso"
 
 
 # ── T-081: the real reader against a real 0035 schema ────────────────────

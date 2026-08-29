@@ -131,7 +131,7 @@ def _sftp(
 
 def list_remote_gpg(*, config: Path, runner, remote_dir: str = DEFAULT_REMOTE_DIR) -> List[str]:
     validate_ssh_config(config)
-    result = _sftp(f"cd {remote_dir}\nls", config=config, runner=runner)
+    result = _sftp(f"cd {remote_dir}\nls -1", config=config, runner=runner)
     if result.returncode != 0:
         stderr = result.stderr or ""
         if "host key" in stderr.lower() or "identification has changed" in stderr.lower():
@@ -139,9 +139,12 @@ def list_remote_gpg(*, config: Path, runner, remote_dir: str = DEFAULT_REMOTE_DI
         raise FlexSftpError(f"sftp_ls_failed:{result.returncode}:{stderr.strip()}")
     names = []
     for line in (result.stdout or "").splitlines():
-        name = line.strip().split()[-1] if line.strip() else ""
-        if name.lower().endswith(".gpg"):
-            names.append(name.split("/")[-1])
+        # `ls` is columnised by default, so a three-file delivery can arrive on
+        # one line. `-1` above asks for one per line; this reads every token
+        # regardless, so a server that ignores it still yields every file.
+        for token in line.split():
+            if token.lower().endswith(".gpg"):
+                names.append(token.split("/")[-1])
     return names
 
 
@@ -225,7 +228,7 @@ def _flex_day(value: Optional[str]) -> Optional[date]:
 
 def retain_newest_gpg(inbox: Path, keep: int = KEEP_GPG) -> None:
     files = sorted(inbox.glob("*.gpg"), key=lambda p: p.stat().st_mtime)
-    for stale in files[:-keep] if keep >= 0 else files:
+    for stale in files[:-keep] if keep > 0 else files:
         stale.unlink(missing_ok=True)
 
 
@@ -255,9 +258,22 @@ def _default_ingest(xml_text: str, *, source_path: str = "") -> Dict[str, Any]:
     """
     import flex_delivery_ingest
 
-    with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False) as handle:
-        handle.write(xml_text)
-        tmp = Path(handle.name)
+    # `source_path` is the delivery's provenance — it is what lands in
+    # `flex_deliveries.source_path` — and `ingest_xml` also reads it back off
+    # disk for the activity writers. Write the plaintext THERE rather than to a
+    # random /tmp name, and remove it once the writers are done.
+    if source_path:
+        tmp = Path(source_path)
+        # Create 0600 BEFORE the first byte. `write_text` would create at the
+        # umask default and leave decrypted statement plaintext world-readable
+        # until the chmod below.
+        fd = os.open(tmp, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(xml_text)
+    else:
+        with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False) as handle:
+            handle.write(xml_text)
+            tmp = Path(handle.name)
     try:
         os.chmod(tmp, 0o600)
         return flex_delivery_ingest.ingest_xml(

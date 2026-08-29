@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, writeFileSync, chmodSync, rmSync } from "node:fs
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runScript, resolveProjectRoot, resolvePythonBin, _resetRootCache } from "../runner";
+import { hasPython313, python313Label } from "@/tests/helpers/python313";
 
 describe("resolveProjectRoot", () => {
   beforeEach(() => _resetRootCache());
@@ -22,7 +23,7 @@ describe("resolveProjectRoot", () => {
 });
 
 describe("runScript", () => {
-  it("returns ok: true with parsed JSON for a valid script", async () => {
+  it.skipIf(!hasPython313())(python313Label("returns ok: true with parsed JSON for a valid script"), async () => {
     const result = await runScript("scripts/kelly.py", {
       args: ["--prob", "0.6", "--odds", "2.0"],
       timeout: 10_000,
@@ -45,17 +46,24 @@ describe("runScript", () => {
     }
   });
 
-  it("returns ok: false when script exits non-zero", async () => {
-    // fetch_ticker exits 1 when ticker not verified — use a guaranteed-bad ticker
+  it.skipIf(!hasPython313())(python313Label("returns ok: false when script exits non-zero"), async () => {
     const result = await runScript("scripts/kelly.py", {
       args: ["--prob", "not-a-number"],
       timeout: 10_000,
     });
 
     expect(result.ok).toBe(false);
+    if (!result.ok) {
+      // A NUMBER, not null. `runner.ts` reports exitCode: null when the spawn
+      // itself fails (no interpreter on PATH), so a bare `ok === false` was
+      // satisfied by ENOENT and passed on a machine with no Python at all —
+      // never once proving the non-zero-EXIT path it names. T-276.
+      expect(typeof result.exitCode).toBe("number");
+      expect(result.exitCode).not.toBe(0);
+    }
   });
 
-  it("supports rawOutput mode (no JSON parsing)", async () => {
+  it.skipIf(!hasPython313())(python313Label("supports rawOutput mode (no JSON parsing)"), async () => {
     const result = await runScript("scripts/kelly.py", {
       args: ["--prob", "0.6", "--odds", "2.0"],
       rawOutput: true,
@@ -70,7 +78,7 @@ describe("runScript", () => {
     }
   });
 
-  it("returns schema validation error when output doesn't match schema", async () => {
+  it.skipIf(!hasPython313())(python313Label("returns schema validation error when output doesn't match schema"), async () => {
     const { Type } = await import("@sinclair/typebox");
     const WrongSchema = Type.Object({
       nonexistent_field: Type.String(),

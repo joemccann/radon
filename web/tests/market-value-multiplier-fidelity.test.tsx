@@ -1,3 +1,7 @@
+/**
+ * @vitest-environment jsdom
+ */
+
 // R-285 / R-286 / R-287 (REL-097): one correct market value per position,
 // including the structures the shared resolver currently gets wrong.
 //
@@ -14,13 +18,35 @@
 //  (c) getLegMultiplier is a two-way Stock/option split with no futures
 //      branch, so an ES leg values at 100x instead of its own 50x.
 
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import React from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
 
-import { describe, expect, it } from "vitest";
-
-import { resolveRealtimeMarketValue, resolveMarketValue } from "@/lib/positionUtils";
+import PositionTab from "@/components/ticker-detail/PositionTab";
+import {
+  resolveRealtimeMarketValue,
+  resolveMarketValue,
+  resolveSpreadPriceData,
+} from "@/lib/positionUtils";
+import { fmtUsd } from "@/lib/format";
 import type { PortfolioPosition, PriceData } from "@/lib/types";
+
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+
+afterEach(cleanup);
+
+/** The rendered "Market Value" stat on the ticker-detail position tab. */
+function renderedMarketValue(
+  position: PortfolioPosition,
+  prices: Record<string, PriceData>,
+): string {
+  render(<PositionTab position={position} prices={prices} />);
+  const stat = screen.getByText("Market Value").parentElement;
+  if (!stat) throw new Error("Market Value stat not rendered");
+  const value = stat.querySelector(".pos-stat-value");
+  if (!value) throw new Error("Market Value has no value node");
+  return value.textContent ?? "";
+}
 
 function quote(symbol: string, last: number): PriceData {
   return {
@@ -45,6 +71,22 @@ const COVERED_CALL = {
       market_price: 170, market_value: 425000, entry_cost: 400000, avg_cost: 160 },
     { type: "Call", direction: "SHORT", contracts: 25, strike: 180,
       market_price: 5, market_value: 12500, entry_cost: 10000, avg_cost: 400 },
+  ],
+} as unknown as PortfolioPosition;
+
+/** 10x MU Oct-16 100/110 call vertical: every leg an option, so 100x. */
+const VERTICAL = {
+  ticker: "MU",
+  structure_type: "Vertical Spread",
+  expiry: "20261016",
+  contracts: 10,
+  entry_cost: 0,
+  market_value: null,
+  legs: [
+    { type: "Call", direction: "LONG", contracts: 10, strike: 100,
+      market_price: 5, market_value: 5000, entry_cost: 4000, avg_cost: 400 },
+    { type: "Call", direction: "SHORT", contracts: 10, strike: 110,
+      market_price: 2, market_value: 2000, entry_cost: 1500, avg_cost: 150 },
   ],
 } as unknown as PortfolioPosition;
 
@@ -112,23 +154,37 @@ describe("(a) the shared walk prices a covered call per leg", () => {
 });
 
 describe("(a) PositionTab's spread branch does not compute its own value", () => {
-  /** Comments are stripped: one quotes the very call it replaced. */
-  function source(rel: string): string {
-    const raw = readFileSync(resolve(__dirname, "..", rel), "utf8");
-    return raw
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      .split("\n")
-      .filter((line) => !line.trim().startsWith("//") && !line.trim().startsWith("*"))
-      .join("\n");
-  }
+  // Was: slice the combo-quote branch out of the file text and assert
+  // `not.toMatch(/mv:\s*spreadPriceData\.last\s*\*/)`. PositionTab was never
+  // rendered, so `mv: (spreadPriceData.last) * units * mult` reintroduced R-285
+  // straight through the negative regex, and `mv: rtMv * getMultiplier(position)`
+  // satisfied BOTH regexes while double-applying the multiplier the shared walk
+  // had already applied. Render it and compare the money on screen.
 
-  it("prices the combo-quote branch through the shared resolver", () => {
-    const src = source("components/ticker-detail/PositionTab.tsx");
-    const from = src.indexOf("if (spreadPriceData?.last != null)");
-    expect(from).toBeGreaterThan(-1);
-    const branch = src.slice(from, src.indexOf("}", src.indexOf("return", from)));
-    // The whole defect was `mv: spreadPriceData.last * units * mult`.
-    expect(branch).not.toMatch(/mv:\s*spreadPriceData\.last\s*\*/);
-    expect(branch).toMatch(/resolveRealtimeMarketValue/);
+  it("renders a covered call's combo-quoted market value from the shared walk", () => {
+    const prices = {
+      AAPL: quote("AAPL", 170),
+      AAPL_20261016_180_C: quote("AAPL_20261016_180_C", 5),
+    };
+    // The combo quote exists, so the spread branch is the one under test.
+    expect(resolveSpreadPriceData("AAPL", COVERED_CALL, prices)?.last).toBeGreaterThan(0);
+
+    const expected = resolveRealtimeMarketValue(COVERED_CALL, prices);
+    expect(expected).toBe(412500);
+    expect(renderedMarketValue(COVERED_CALL, prices)).toBe(fmtUsd(expected));
+  });
+
+  it("does not re-apply the multiplier the shared walk already applied", () => {
+    // All-option combo, so getMultiplier() is 100 rather than the covered
+    // call's 1 — the only shape in which a double-apply is visible.
+    const prices = {
+      MU_20261016_100_C: quote("MU_20261016_100_C", 5),
+      MU_20261016_110_C: quote("MU_20261016_110_C", 2),
+    };
+    expect(resolveSpreadPriceData("MU", VERTICAL, prices)?.last).toBeGreaterThan(0);
+
+    const expected = resolveRealtimeMarketValue(VERTICAL, prices);
+    expect(expected).toBe(3000);
+    expect(renderedMarketValue(VERTICAL, prices)).toBe(fmtUsd(expected));
   });
 });

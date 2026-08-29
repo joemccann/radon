@@ -587,3 +587,49 @@ how this loop improves as the codebase grows.
   deprecation, so the body goes through
   `gh api -X PATCH repos/{owner}/{repo}/pulls/<n> --input <json>` and is
   verified with a grep for a phrase you just wrote.
+
+- **2026-08-29 (audit): check `git status` AFTER the gates, not only before.**
+  The clean-tree rail is a pre-flight check in this skill, but a gate run can
+  DIRTY the tree: `scripts/api/tests/test_flow_report_capacity_shed.py` (new in
+  the delta) POSTs `/flow-analysis/JOBY` without redirecting
+  `server._FLOW_REPORTS_DIR`, so every run writes `data/flow_reports/JOBY.json`
+  into the checkout — reproduced isolated in 0.56 s, `3 passed`, file recreated
+  every time (T-275). It surfaced only because a mid-run `git status` (run to
+  confirm the read-only agents were behaving) showed an untracked path that was
+  not there at pre-flight. Two rails: run `git status --porcelain` after each
+  gate and attribute anything new to the file that wrote it; and treat a test
+  that writes into the repo as a P1, not housekeeping — the loop's own
+  clean-tree precondition is what it breaks.
+- **2026-08-29 (audit): "green in the full suite, red in isolation" is a real
+  shape — do not assume isolation is the clean signal.** The standing
+  `orders-place-cache-race.test.ts` item had been recorded as cross-file
+  pollution on the strength of "6-passed ×3 in isolation". At HEAD it is
+  `1 failed | 5 passed` on one isolated run and `6 passed` on the next, always
+  the same case, while the FULL vitest gate passed it — the full run's
+  scheduling happens to be kinder to a `vi.waitFor` polling for an in-flight
+  route handler (T-311). When a finding's diagnosis rests on an isolation run,
+  run it at least twice; one green in isolation proves nothing about a race.
+- **2026-08-29 (audit): probe the installed dependency, do not read the driver
+  docs.** The headline P0 (T-250) is `getattr(result, "rows_affected", 0)`
+  against a libsql Cursor that exposes only `rowcount`. Two agents found it
+  independently, but what made it filable in one tool call was ten lines of
+  python against the PINNED build — `connect(':memory:')`, insert twice, print
+  `dir(cursor)` and both `rowcount`s. Any finding of the form "this code reads
+  an attribute that is not there" should be settled that way before it is
+  written down, never from the source alone.
+- **2026-08-29 (audit): run the gates BEFORE the fan-out, or after it drains —
+  not alongside it.** Launching six audit agents concurrently with round 1 drove
+  load average from 74 to 224 (`corespotlightd` was already at 589% CPU), which
+  made pytest take 870 s instead of ~275 s and produced three timing-shaped reds
+  that all needed isolation re-runs to attribute. The reds were correctly called
+  as load — scattered across three files, timing-shaped, CI green at the same
+  SHA — but the attribution cost several rounds. The agents are read-only and
+  cheap to start late; the gate is the thing whose numbers have to be quotable.
+- **2026-08-29 (audit): running on a Saturday makes the weekend-false-red class
+  LIVE, and that is worth keeping.** `f7b5eeb9` — the newest commit in the
+  delta, authored by the grok responder hours before this run — pins
+  `web/tests/account-metric-modal.test.ts:165-170` to a Friday session because
+  the unpinned test redded vitest shard 7 on Saturday 2026-08-29 and blocked the
+  deploy. That is T-117 / T-248 recurring for a third time, and this audit saw
+  it as a fact in the git log rather than as a hypothesis. Note the day of the
+  week in the audit preamble; it changes what the gate run is evidence of.

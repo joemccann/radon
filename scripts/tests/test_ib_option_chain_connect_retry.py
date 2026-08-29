@@ -96,14 +96,47 @@ def test_connect_retries_are_bounded(monkeypatch, capsys):
     assert "timeout" in out["error"].lower()
 
 
-def test_connect_budget_fits_the_endpoint_timeout():
-    """Worst-case connect must leave room for qualify + reqSecDefOptParams."""
+def test_the_worst_case_connect_schedule_fits_the_callers_subprocess_cap(
+    monkeypatch, capsys
+):
+    """R-352: the JSON error envelope must still render inside the caller's cap.
+
+    MEASURED, not derived. The old form recomputed `CONNECT_TIMEOUT_S`'s own
+    definition and compared it to a third hand-copy of the cap, so it reduced
+    to `CONNECT_BUDGET_S <= CONNECT_BUDGET_S` for any attempts/backoff and
+    could not fail. Here the schedule is whatever `main()` actually spends: the
+    timeouts it hands `client.connect()` plus the backoffs it actually sleeps,
+    against the cap imported from the endpoint that enforces it.
+    """
+    from scripts.api.server import _EQUITY_OPTIONS_CHAIN_TIMEOUT_S as CAP
     from scripts.utils.ib_preflight import IB_REQUEST_TIMEOUT_S
 
-    attempts = ib_option_chain.CONNECT_ATTEMPTS
-    worst_connect_s = (
-        attempts * ib_option_chain.CONNECT_TIMEOUT_S
-        + (attempts - 1) * ib_option_chain.CONNECT_BACKOFF_S
+    assert ib_option_chain._CALLER_CAP_S == CAP, (
+        f"ib_option_chain sizes its retry budget against {ib_option_chain._CALLER_CAP_S}s "
+        f"but /options/chain kills the subprocess at {CAP}s"
     )
-    # scripts/api/server.py:_EQUITY_OPTIONS_CHAIN_TIMEOUT_S
-    assert worst_connect_s + 2 * IB_REQUEST_TIMEOUT_S <= 45.0
+
+    slept: list[float] = []
+    monkeypatch.setattr(ib_option_chain.time, "sleep", slept.append)
+    client = _FakeClient(fail_connects=99)
+    monkeypatch.setattr(ib_option_chain, "IBClient", lambda *a, **k: client)
+    monkeypatch.setattr("sys.argv", ["ib_option_chain.py", "--symbol", "NOW"])
+
+    with pytest.raises(SystemExit):
+        ib_option_chain.main()
+    assert "error" in json.loads(capsys.readouterr().out.strip())
+
+    assert client.connect_timeouts, "connect() was never given a timeout"
+    assert all(
+        t is not None and t > 0 for t in client.connect_timeouts
+    ), f"an unusable handshake window: {client.connect_timeouts}"
+
+    worst_connect_s = sum(client.connect_timeouts) + sum(slept)
+    # _qualify_underlying + _request_option_chains each bounded at
+    # IB_REQUEST_TIMEOUT_S, then the except-clause has to print the envelope.
+    total_s = worst_connect_s + 2 * IB_REQUEST_TIMEOUT_S + ib_option_chain._ENVELOPE_MARGIN_S
+    assert total_s <= CAP, (
+        f"worst case is {total_s}s against a {CAP}s subprocess cap, so the "
+        "except-clause that prints the JSON error envelope never runs and the "
+        "operator gets a bare subprocess-timeout string (R-352)"
+    )

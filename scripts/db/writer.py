@@ -670,7 +670,7 @@ def claim_flex_delivery(
     same bytes affects zero rows and the caller skips every writer.
     """
     db = get_db()
-    result = db.execute(
+    cursor = db.execute(
         "INSERT INTO flex_deliveries "
         "(content_sha256, classified_as, period_from, period_to, ingested_at, source_path) "
         "VALUES (?, ?, ?, ?, ?, ?) "
@@ -684,7 +684,13 @@ def claim_flex_delivery(
             source_path,
         ),
     )
-    return int(getattr(result, "rows_affected", 0) or 0) > 0
+    db.commit()
+    # `rows_affected` is the JS driver's name (writer.js). libsql_experimental's
+    # Cursor has `rowcount` only — 1 on the insert, 0 on the conflict — so the
+    # old getattr default made the claim False on FIRST sight and every
+    # delivery took the "duplicate" branch. T-250.
+    claimed = getattr(cursor, "rowcount", None)
+    return isinstance(claimed, int) and claimed > 0
 
 
 def release_flex_delivery(content_sha256: str) -> bool:
@@ -702,7 +708,11 @@ def release_flex_delivery(content_sha256: str) -> bool:
         "DELETE FROM flex_deliveries WHERE content_sha256 = ?",
         (content_sha256,),
     )
-    return int(getattr(result, "rows_affected", 0) or 0) > 0
+    db.commit()
+    released = getattr(result, "rowcount", None)
+    if not isinstance(released, int):
+        released = getattr(result, "rows_affected", None)
+    return isinstance(released, int) and released > 0
 
 
 def upsert_journal_entry(trade_id: str, payload: dict[str, Any], filled_at: Optional[str] = None) -> None:

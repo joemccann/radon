@@ -154,6 +154,9 @@ class TestWriterReleasesTheRow:
                 executed.append((sql, params))
                 return type("R", (), {"rows_affected": 1})()
 
+            def commit(self):
+                return None
+
         monkeypatch.setattr(writer, "get_db", lambda: _DB())
         assert writer.release_flex_delivery("abc123") is True
         assert len(executed) == 1

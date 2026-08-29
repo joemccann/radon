@@ -71,6 +71,14 @@ S3_READ_TIMEOUT = 300
 S3_MAX_ATTEMPTS = 3
 MULTIPART_CHUNK_BYTES = 64 * 1024 * 1024
 MULTIPART_CONCURRENCY = 4
+# Plausibility floor. `dump_database` reports whatever `sqlite_master` gave
+# it, so an empty read (a credential rotation pointing at a fresh DB, a
+# libsql read returning no rows) produces a valid ~120-byte gzip. Promoting
+# it prunes the 30-day window of real dumps and pushes the empty artifact
+# off-box, with the heartbeat still green. Same floor, same reason, as
+# lib/vixts_math.py:MIN_SERIES_ROWS.
+MIN_DUMP_TABLES = 1
+MIN_DUMP_ROWS = 1
 # Rows per SELECT page. Direct-to-cloud throughput is ~1 MB/s and
 # portfolio_snapshots rows are ~12 KB, so 500 rows ≈ 6 MB / ~7 s per page —
 # bounded memory instead of a ~700 MB fetchall on the fattest table.
@@ -647,6 +655,22 @@ def _open_cloud_db():
     return get_db()
 
 
+def assert_plausible_dump(stats: dict) -> None:
+    """Raise before an implausible dump is promoted, pruned against or shipped.
+
+    Checked while the dump is still the ``.tmp`` file, so a failure leaves
+    yesterday's dumps untouched, nothing uploaded, and no empty artifact on
+    disk for a LATER run's backfill to push off-box. `main` turns the raise
+    into an ``error`` heartbeat and exit 1.
+    """
+    if stats["tables"] < MIN_DUMP_TABLES or stats["rows"] < MIN_DUMP_ROWS:
+        raise RuntimeError(
+            f"implausible dump: {stats['tables']} tables / {stats['rows']} rows "
+            f"(floor {MIN_DUMP_TABLES} tables / {MIN_DUMP_ROWS} rows); "
+            "refusing to promote, prune or upload"
+        )
+
+
 def run_backup() -> dict:
     started = time.monotonic()
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
@@ -659,6 +683,7 @@ def run_backup() -> dict:
     try:
         with gzip.open(tmp_path, "wt", encoding="utf-8") as out:
             stats = dump_database(db, out)
+        assert_plausible_dump(stats)
         os.replace(tmp_path, final_path)
     finally:
         tmp_path.unlink(missing_ok=True)

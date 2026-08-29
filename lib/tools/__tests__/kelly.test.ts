@@ -1,7 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { kelly } from "../wrappers/kelly";
+import { hasPython313, python313Label } from "@/tests/helpers/python313";
 
-describe("kelly wrapper (live)", () => {
+// Every case here spawns `scripts/kelly.py` for real — that IS the contract
+// being tested (the wrapper's job is the subprocess round-trip). It skips by
+// name on a machine without python3.13 rather than being --exclude'd from CI,
+// which used to take the file's siblings down with it. See T-276.
+describe.skipIf(!hasPython313())(python313Label("kelly wrapper (live)"), () => {
   it("calculates kelly for a positive-edge trade", async () => {
     const result = await kelly({ prob: 0.6, odds: 2.0 });
 
