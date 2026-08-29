@@ -298,6 +298,17 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # uniform 26h (cadence + timer jitter). Filesystem + systemctl
     # only — no IB dependency.
     "config-drift":     {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # flow-refresh — hourly RTH driver behind the dark-pool flow tables
+    # (scripts/run_flow_refresh.sh via radon-flow-refresh.timer,
+    # Mon..Fri 09..16:00 ET). It has always written its own ok/error row
+    # through write_service_health_http; it was in NEITHER catalog, so
+    # nothing aged it. Surfaced by R-412's widened resolver.
+    "flow-refresh":     {"open": 3 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
+    # forecast-nightly — Chronos-2 backfill + calibration
+    # (scripts/nightly_forecast.py via radon-forecast-nightly.timer,
+    # 07:00 UTC, 24/7). R-402: the unit wrote no row on any path, so a
+    # throwing backfill left the forecast tables silently not advancing.
+    "forecast-nightly": {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # db-backup — nightly full Turso dump on the VPS (radon-cloud
     # scripts/db_backup.py via radon-db-backup.timer, 07:52 UTC, 24/7).
     # Heartbeats ok/error every run with size + duration detail. 48h
@@ -385,6 +396,8 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
 OPEN_BELL_GRACE_SERVICES: frozenset[str] = frozenset({
     "theta-harvester",
     "strength-confirmation",
+    # Same shape: hourly, RTH-only, on the daily check cadence.
+    "flow-refresh",
 })
 
 
@@ -442,6 +455,13 @@ BUCKETS: dict[str, list[str]] = {
     ],
     "daily": [
         "cash-flow-sync",
+        # Daily 07:00 UTC Chronos-2 backfill + calibration. Nothing observed
+        # it: the unit wrote no row on any path, so a throwing backfill left
+        # the forecast tables silently not advancing. R-402.
+        "forecast-nightly",
+        # Hourly RTH dark-pool flow driver. It always wrote its own row; it
+        # was simply in neither catalog, so nothing aged it. R-412.
+        "flow-refresh",
         # Weekday 21:45 UTC prod->demo market-analytics mirror (R-325).
         "demo-mirror",
         # R-159: the TWR builder (Tue..Sat 07:30 ET). Silent means a Flex
