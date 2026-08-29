@@ -116,8 +116,26 @@ class TestNodeImage:
         assert "bun run build" in text
         assert "playwright" in text.lower()
         assert "bunx" not in text
-        assert "bun x playwright" in text
         assert "next start" in text or '"next", "start"' in text or "npm run start" in text
+
+    def test_playwright_install_uses_repo_root_binary(self) -> None:
+        """Newsfeed imports playwright from the repo-root package
+        (scripts/newsfeed/browser.js). `bun x playwright install` from
+        WORKDIR web fetched a CLI revision that was not
+        chromium_headless_shell-1217, so launch failed with Executable
+        doesn't exist and the unit crash-looped (page 3e952746).
+        """
+        text = NODE_DF.read_text(encoding="utf-8")
+        assert "bun x playwright" not in text
+        assert "./node_modules/.bin/playwright install chromium chromium-headless-shell" in text
+        workdir = None
+        install_workdir = None
+        for line in text.splitlines():
+            if line.startswith("WORKDIR "):
+                workdir = line.split(maxsplit=1)[1].strip()
+            if "node_modules/.bin/playwright install" in line:
+                install_workdir = workdir
+        assert install_workdir == "/home/radon/radon", install_workdir
 
     def test_user_radon_is_final(self) -> None:
         text = NODE_DF.read_text(encoding="utf-8")
