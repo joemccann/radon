@@ -45,7 +45,15 @@ def release_flex_delivery(content_sha256: str) -> bool:
     return _release(content_sha256)
 
 
-def ingest_xml(xml_text: str, *, source_path: str = "") -> Dict[str, Any]:
+def ingest_xml(
+    xml_text: str, *, source_path: str = "", record_as: str | None = None
+) -> Dict[str, Any]:
+    """`source_path` is the path the writers READ; `record_as` is what the claim
+    records. They differ for the sFTP puller, which reads from a private temp
+    file it then unlinks — recording that made `flex_deliveries.source_path`, the
+    only column linking a fingerprint back to a delivered statement, a dead
+    `/tmp/...` inside the unit's PrivateTmp namespace. R-419.
+    """
     kind = classify_flex_xml(xml_text)
     digest = _sha256(xml_text)
     meta = statement_metadata(xml_text)
@@ -56,7 +64,7 @@ def ingest_xml(xml_text: str, *, source_path: str = "") -> Dict[str, Any]:
         classified_as=kind,
         period_from=meta["period_from"],
         period_to=meta["period_to"],
-        source_path=source_path or None,
+        source_path=record_as or source_path or None,
     ):
         return {
             "ok": True,
