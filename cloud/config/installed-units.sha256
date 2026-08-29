@@ -150,9 +150,9 @@ e8a7dca2f2f2c7d1176010a2c4df4e4a60842a6bb1cb34682d2ce9c815c11938  radon-disk-cle
 # daily drift audit compares it live as `fleet-dropin`.
 16b56fc5c731cefb4d8184e01c9da042aa1a623b3bd23b6face060e9d0b4df08  radon-.service.d/common.conf
 c9e4ef36521cb7a923853f5478d6c52d7076fdb24876e38f2bab8feb86c05947  radon-api.service.d/runtime-container.conf
-c9e4ef36521cb7a923853f5478d6c52d7076fdb24876e38f2bab8feb86c05947  radon-monitor.service.d/runtime-container.conf
+947ea4b35741cb58f23ab0ced9954c1be4fc202b44dc0da189a7269be6d7c267  radon-monitor.service.d/runtime-container.conf
 c9e4ef36521cb7a923853f5478d6c52d7076fdb24876e38f2bab8feb86c05947  radon-newsfeed.service.d/runtime-container.conf
 c9e4ef36521cb7a923853f5478d6c52d7076fdb24876e38f2bab8feb86c05947  radon-nextjs.service.d/runtime-container.conf
-c9e4ef36521cb7a923853f5478d6c52d7076fdb24876e38f2bab8feb86c05947  radon-relay.service.d/runtime-container.conf
+90989b1a8d8907ef95c48d054871f818320f61f15d00dcf36eb8b907ca1a31f4  radon-relay.service.d/runtime-container.conf
 c0fbaff90cb1e57758374ac63e7793c7a80108470589d3a0fae071f3976ccfc3  radon-flex-pull.service
 b5532b732c2a1b7347b3ddddcafe5d5b8123ad8671cdfcad9ba3a8176ee88d50  radon-flex-pull.timer

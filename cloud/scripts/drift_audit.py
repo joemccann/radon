@@ -512,6 +512,25 @@ def _live_unit_counter(unit_path: Path) -> Counter:
     return merge_unit_counters(texts)
 
 
+def _repo_unit_counter(repo_path: Path) -> Counter:
+    """Repo base unit merged with its OWN drop-ins, mirroring the live side.
+
+    Comparing a merged live counter against the repo BASE alone made every
+    setting a shipped drop-in adds — `User=root`, the `ExecStartPre=` reset,
+    both `ExecStart=` lines — read as live-only, so all five app units went
+    permanently `unit-mismatch` the moment the container drop-ins were
+    installed, and a permanently-red `config-drift` buries every real drift.
+    Not resolvable with an allowlist entry: the R-058 ratchet is a bounded
+    acknowledgment, not a suppression for a permanent, intended state. R-392.
+    """
+    texts = [_read_repo(repo_path.relative_to(REPO)) or ""]
+    dropin_dir = repo_path.with_name(repo_path.name + ".d")
+    if dropin_dir.is_dir():
+        for conf in sorted(dropin_dir.glob("*.conf")):
+            texts.append(_read_repo(conf.relative_to(REPO)) or "")
+    return merge_unit_counters(texts)
+
+
 def _check_units(drifts: list[dict], known_untracked: list[str]) -> None:
     repo_units = {
         p.name: p
@@ -541,7 +560,7 @@ def _check_units(drifts: list[dict], known_untracked: list[str]) -> None:
             continue
         detail = unit_counter_diff(
             _live_unit_counter(live_path),
-            merge_unit_counters([_read_repo(repo_path.relative_to(REPO)) or ""]),
+            _repo_unit_counter(repo_path),
         )
         if detail:
             drifts.append({"id": f"unit-mismatch:{name}", "detail": detail})
