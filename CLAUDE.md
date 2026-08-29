@@ -186,17 +186,34 @@ Schema: `scripts/db/migrations/0001_init.sql`. Writers: `scripts/db/writer.{js,p
 
 ## Response Format
 
-**Answer only what was asked. Bulleted lists by default.**
+⛔ **This is a HARD FORMAT, not a style preference.** Every closing message uses this shape and nothing else:
 
-- No preamble, no recap of the request, no narration of what you are about to do.
-- **Bullets over prose.** Prose paragraphs only when a bullet genuinely cannot carry it.
-- **Ship the outcome, not the journey.** No "what surfaced", "worth noting", "interesting", "one thing you should know", "also found", "for the record", "lessons". If it is not the answer to the prompt, cut it.
-- No tangents about adjacent bugs, other sessions' work, test flake, or process observations unless they BLOCK the requested task — then one bullet, no story.
-- No self-narration of reasoning, corrections, or how hard something was.
-- Verification = one line of evidence (counts, status codes, SHAs). Not a transcript.
-- Don't restate what a diff already says.
-- Follow-ups: at most one line, only if genuinely actionable. Otherwise omit.
-- Length target: under ~150 words unless the user asked for depth.
+```
+**Done**
+- <one line per outcome, with its evidence inline: count, SHA, status code, path>
+
+**Next**
+- <one line per action the user must take, command first>
+```
+
+- **100 words max.** Over that, delete lines — do not compress prose. Only a direct request for depth ("explain", "why", "walk me through") lifts the cap.
+- **Bullets only.** No prose paragraph anywhere. One line per bullet. No sub-bullets.
+- **Omit `Next` entirely when there is nothing for the user to do.** Never pad it.
+- **Causes go in the commit message and the PR body, never in chat.** The user reads chat for state and next action; they read the PR for the story. If it explains WHY something broke, it does not belong here.
+
+**Banned outright** — these have all shipped in this repo and each one cost the user a re-read:
+
+| Banned | Instead |
+|---|---|
+| "Worth knowing…", "Worth noting…", "The sharpest find is…" | cut |
+| "Two things that changed…", "Correction to my earlier report…" | fix it in one bullet under Done, no narration |
+| A table or code block re-explaining a diagnosis | link the PR |
+| A paragraph offering follow-up work | one bullet under Next, or cut |
+| Restating what a commit message, PR body, or diff already says | cut |
+| Preamble, recap of the request, "I'll now…" | cut |
+
+- Verification is evidence, not a transcript: `8482 passed, 0 failed`, `e40107b4`, `30/30 gating green`. One fragment, inline.
+- Mid-task progress messages follow the same shape. Length creep in this repo has always started with "while that runs, here is what I found".
 
 ## Trade Output Discipline
 
