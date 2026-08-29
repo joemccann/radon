@@ -159,6 +159,11 @@ describe("LeapScanner", () => {
   });
 
   it("picks the widest gap, not the first mispriced row", () => {
+    // R-388: ranking now reads the LINKED CONTRACT's own gap, not the group's
+    // `best_gap`, so the fixture raises both. `best_gap` alone described the
+    // delta bucket rather than the contract the button opens, which is how a
+    // ticker whose contract was worth 18 vol points lost the headline slot to
+    // one whose contract was worth 6.
     const wider = {
       ...leapData,
       results: [
@@ -167,7 +172,12 @@ describe("LeapScanner", () => {
           ...leapData.results[0],
           ticker: "CRM",
           best_gap: 44.8,
-          best_leap: { ...leapData.results[0].best_leap!, strike: 260, expiry: "2027-06-17" },
+          best_leap: {
+            ...leapData.results[0].best_leap!,
+            strike: 260,
+            expiry: "2027-06-17",
+            gap: 44.8,
+          },
         },
       ],
     };

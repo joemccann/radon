@@ -57,10 +57,22 @@ function contractLabel(row: LeapResult): string {
   return `${row.ticker.toUpperCase()} ${contract.strike}${contract.right}`;
 }
 
+/** The gap the LINKED contract actually carries, which is what the link arms. */
+function anchorGap(row: LeapResult): number | null {
+  const gap = row.best_leap?.gap;
+  return typeof gap === "number" && Number.isFinite(gap) ? gap : null;
+}
+
 function widestMispriced(rows: LeapResult[]): LeapResult | null {
+  // Ranked on the contract's own gap, not the group's `best_gap`: a ticker
+  // whose linked contract is worth 18 vol points used to lose the headline slot
+  // to one whose contract is worth 6, because `best_gap` describes the delta
+  // bucket rather than the contract the button opens. R-388.
   return rows.reduce<LeapResult | null>((best, row) => {
-    if (!row.is_mispriced || !row.best_leap) return best;
-    return best == null || row.best_gap > best.best_gap ? row : best;
+    const gap = anchorGap(row);
+    if (!row.is_mispriced || !row.best_leap || gap == null) return best;
+    const bestGap = best == null ? null : anchorGap(best);
+    return bestGap == null || gap > bestGap ? row : best;
   }, null);
 }
 
@@ -220,7 +232,7 @@ export default function LeapScanner({
                             data-testid={`leap-order-link-${r.ticker}`}
                             title={`Open the ${contractLabel(r)} LEAP in the order builder`}
                           >
-                            {signed(r.best_gap)}
+                            {signed(anchorGap(r) ?? r.best_gap)}
                           </Link>
                         ) : (
                           signed(r.best_gap)
