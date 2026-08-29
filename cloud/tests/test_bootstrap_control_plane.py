@@ -157,6 +157,28 @@ ARTIFACTS = (
 )
 
 
+def _dropin_base_units() -> tuple[str, ...]:
+    """`services/<unit>` for every manifested `services/<unit>.d/*.conf`.
+
+    A drop-in is only parsed by `systemd-analyze verify` beside its base unit,
+    so bootstrap stages the pair and refuses when the base unit is missing
+    (R-394). Two of the five base units — radon-nextjs.service and
+    radon-newsfeed.service — are NOT control-plane artifacts: the app tier owns
+    them, only their runtime-container drop-ins are manifested. The sandbox
+    therefore has to stage them even though they are not in ARTIFACTS.
+    """
+    bases = []
+    for artifact in ARTIFACTS:
+        source = Path(artifact.source)
+        # `config/sudoers.d/*` is a .d directory too, and has no base unit.
+        if source.parent.parent.name != "services" or source.parent.suffix != ".d":
+            continue
+        base = f"services/{source.parent.name.removesuffix('.d')}"
+        if base not in bases:
+            bases.append(base)
+    return tuple(bases)
+
+
 def _write_executable(path: Path, body: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body, encoding="utf-8")
@@ -205,6 +227,11 @@ def _sandbox(tmp_path: Path) -> Sandbox:
         destination = source / artifact.source
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(CLOUD_ROOT / artifact.source, destination)
+
+    for base in _dropin_base_units():
+        destination = source / base
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(CLOUD_ROOT / base, destination)
 
     _write_executable(
         fake_bin / "flock",

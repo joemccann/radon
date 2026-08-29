@@ -24,6 +24,7 @@ from __future__ import annotations
 import pathlib
 import re
 import shutil
+import subprocess
 import sys
 
 import pytest
@@ -108,7 +109,9 @@ def _dropin_gate_arm(helper_text: str) -> str:
 
 def test_refresh_install_file_gates_dropin_content() -> None:
     arm = _dropin_gate_arm(ROOT_HELPER.read_text(encoding="utf-8"))
-    assert "Type=simple" in arm
+    # The pattern, not the bare word: the refusal message names both types, so
+    # asserting "Type=simple" passed on the echo line alone.
+    assert "Type=(simple|notify)" in arm
     assert "radon-app-runtime" in arm
     assert "ExecStartPre=" in arm
     assert "radon-ib-gateway" in arm
@@ -168,9 +171,51 @@ def test_the_two_privileged_gates_enforce_the_same_dropin_rules() -> None:
     match = re.search(r"\n\s*dropin\)\s*\n(.*?);;", bootstrap, re.DOTALL)
     assert match, "bootstrap has no dropin validator"
     boot_arm = match.group(1)
-    for rule in ("Type=simple", "radon-app-runtime", "ExecStartPre=", "radon-ib-gateway", "/home/radon"):
+    for rule in (
+        "Type=(simple|notify)", "radon-app-runtime", "ExecStartPre=",
+        "radon-ib-gateway", "/home/radon",
+    ):
         assert rule in arm, rule
         assert rule in boot_arm, rule
+
+
+def _run_shipped_dropin_gate(target: pathlib.Path) -> subprocess.CompletedProcess:
+    """Run the SHIPPED `dropin_body_is_valid` body against one file."""
+    body = function_body(ROOT_HELPER.read_text(encoding="utf-8"), "dropin_body_is_valid")
+    script = f"set -uo pipefail\ndropin_body_is_valid() {{\n{body}\n}}\ndropin_body_is_valid \"$1\"\n"
+    return subprocess.run(
+        ["bash", "-c", script, "bash", str(target)],
+        capture_output=True,
+        text=True,
+    )
+
+
+def _manifested_dropins() -> list[str]:
+    """`services/*.service.d/*.conf` entries in the bootstrap manifest.
+
+    Not a glob over the tree: `services/radon-.service.d/common.conf` is the
+    systemd prefix-glob fleet drop-in that `setup-vps.sh` copies directly, and
+    it never reaches this gate.
+    """
+    bootstrap = (CLOUD_ROOT / "scripts" / "bootstrap-control-plane.sh").read_text(
+        encoding="utf-8"
+    )
+    return sorted(set(re.findall(r"^\s*(services/\S+\.service\.d/\S+\.conf)\s*$", bootstrap, re.M)))
+
+
+@pytest.mark.parametrize("relative", _manifested_dropins(), ids=lambda r: r.split("/")[1])
+def test_every_shipped_dropin_passes_the_privileged_gate(relative) -> None:
+    """What ships must install.
+
+    R-391 moved the monitor and relay drop-ins to `Type=notify` + `WatchdogSec`
+    — forcing `Type=simple` there made systemd stop requiring keepalives, so a
+    relay with a dead socket sat `active (running)` forever. Both privileged
+    gates still hard-required `Type=simple`, so root bootstrap and the
+    every-deploy `refresh_install_file` arm would refuse two of the five
+    drop-ins the repo actually ships. Nothing ran the gate against them.
+    """
+    result = _run_shipped_dropin_gate(CLOUD_ROOT / relative)
+    assert result.returncode == 0, result.stderr
 
 
 def test_bootstrap_stages_dropins_for_systemd_analyze() -> None:
