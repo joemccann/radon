@@ -318,6 +318,27 @@ class TestSetupGuardsTheSharedVenv:
             "the other loop's cycle is executing against it"
         )
 
+    @pytest.mark.parametrize("name", ["reliability", "testing"])
+    def test_each_setup_checks_the_bash_version(self, name):
+        """GAP C: `/bin/bash` on this runner is 3.2, and `cloud/tests` needs 4+.
+
+        `cloud/scripts/operator-radon.sh` uses `mapfile` and
+        `cloud/scripts/bootstrap-control-plane.sh` uses `exec {fd}<>`; both
+        are bash-4 only, and both suites resolve bash from `PATH` themselves.
+        Neither setup ever reads `BASH_VERSINFO`, so the runner installs
+        clean and 34 `cloud/tests` are permanently red with no signal.
+        """
+        text = self.SETUPS[name].read_text(encoding="utf-8")
+        assert "BASH_VERSINFO" in text, (
+            f"{name} setup verifies the toolchain without checking the bash "
+            "version; on bash 3.2 the cloud suite is permanently red and the "
+            "install prints ok"
+        )
+        assert "cloud/tests" in text, (
+            f"{name} setup never names the consequence: an operator reading "
+            "MISSING has no way to know which suite goes red"
+        )
+
 
 def _claude_invocation_line(path: Path) -> str:
     """The `timeout ... claude -p` command lifted verbatim, so a test can RUN it.

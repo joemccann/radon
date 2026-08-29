@@ -164,12 +164,19 @@ how this loop improves as the codebase grows.
   the runner clone does not inherit that. Run the full gate FIRST, and if
   it is red, diff the failure set against `ci.yml`'s install line before
   attributing anything to your own changes.
-- 2026-08-16 (remediate): 10 `cloud/tests` cases fail on darwin only —
-  they assert on a `sha256sum` binary macOS does not ship
-  (`shutil.which("sha256sum")` is `None`). They pass in Linux CI. Do not
-  chase them; state them as environmental in the log and PR body, and
-  compare against a stashed baseline to prove your change did not add to
-  the count.
+- 2026-08-16 (remediate): `cloud/tests` cases fail on darwin only. They
+  pass in Linux CI. Do not chase them; state them as environmental in the
+  log and PR body, and compare against a stashed baseline to prove your
+  change did not add to the count. **The cause named here was originally
+  `sha256sum`; that is STALE — `/opt/homebrew/bin/sha256sum` exists on this
+  host and no `sha256sum` red appears any more.** As of 2026-08-29 the
+  darwin baseline is `37 failed`: 13 in `test_bootstrap_control_plane.py`
+  (`exec {fd}<>` is bash 4+; `/bin/bash` here is 3.2, so it exits 127), 21
+  in `test_ib_gateway_control.py` (`operator-radon.sh` uses `mapfile`,
+  bash 4+), and 3 in `test_caddy_edge_timeouts.py` (no `caddy` on PATH).
+  `setup_reliability_weekend.sh` now checks both and names the
+  consequence. Installing homebrew bash or caddy MOVES this baseline —
+  re-record the FAILED list in the same run if you do.
 - 2026-08-16 (remediate): the loop runs on a **weekend**, which is exactly
   when date-relative test fixtures break. `previous-close-yahoo-daily-array`
   spaced its bars by calendar days, so "yesterday" was a Saturday and the
@@ -548,6 +555,7 @@ how this loop improves as the codebase grows.
 - 2026-08-29 (remediate): three findings this run were closed only PARTIALLY and each says so in its
   own row — R-424's `service_health` row (no error-only catalog category exists, and a scheduled key
   for a no-cadence signal ages to stale and pages forever), R-408's browser screenshot (this runner
-  clone has no `web/.env`, so the app cannot boot), and R-402's `signals-refresh` registration
+  clone had no `web/.env`, so the app could not boot; `setup_reliability_weekend.sh` now provisions
+  it into the clone, so this residual is closed for later runs), and R-402's `signals-refresh` registration
   (deliberately refused, above). Writing the reason into the row is the difference between a known
   residual and a silent gap.
