@@ -293,4 +293,55 @@ test.describe("Flow Analysis per-ticker route", () => {
     await expect(report.getByRole("status")).toContainText(/Scan failed/i);
     await expect(report).not.toContainText(/Analyzing JOBY/i);
   });
+
+  /* 2026-08-28: /flow-analysis/AMZN rendered a Jun 16 aggregate. The scan had
+   * lost the general subprocess lane on every attempt since, so the route kept
+   * serving a cache with no upper age, and DARK POOL AGGREGATE / OPTIONS FLOW
+   * BIAS looked byte-identical to a fresh scan. The operator found the gap by
+   * reading ISO dates in the history table. */
+  test("a served cache names its age above the figures it produced", async ({ page }) => {
+    await setupBaseMocks(page);
+    const DAYS_OLD = 73;
+    const stamped = new Date(Date.now() - DAYS_OLD * 86_400_000);
+    const isoDay = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/New_York",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(stamped);
+    const cached = bullishReport("AMZN", stamped.toISOString());
+
+    await page.route("**/api/flow-analysis/AMZN**", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(cached),
+        });
+        return;
+      }
+      // What the route returns when its own wait elapses: the cache, marked.
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        headers: { "X-Sync-Warning": "Radon API unavailable - serving cached data" },
+        body: JSON.stringify({ ...cached, is_stale: true }),
+      });
+    });
+
+    await page.goto("/flow-analysis/AMZN");
+
+    const strip = page.getByTestId("flow-stale-age");
+    await expect(strip).toBeVisible();
+    await expect(strip).toContainText(isoDay);
+    await expect(strip).toContainText(`${DAYS_OLD} days old`);
+
+    // The dating must be readable without scrolling past the aggregate.
+    const aggregate = page.locator(".section", { hasText: "Dark Pool Aggregate" }).first();
+    const stripBox = await strip.boundingBox();
+    const aggBox = await aggregate.boundingBox();
+    expect(stripBox!.y).toBeLessThan(aggBox!.y);
+
+    await expect(page.getByTestId("flow-hero-stale")).toContainText(isoDay);
+  });
 });

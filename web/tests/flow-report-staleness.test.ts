@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isFlowReportStale,
+  flowReportAgeLabel,
   flowReportTimestamp,
   FLOW_REPORT_STALENESS,
 } from "@/lib/flowReportStaleness";
@@ -95,5 +96,51 @@ describe("isFlowReportStale", () => {
       true, // pretend market open to use the strict 10m TTL
     );
     expect(result).toBe(false);
+  });
+});
+
+/* ── 2026-08-28: /flow-analysis/AMZN rendered a Jun 16 report ───────────────
+ *
+ * The POST 502'd on a capacity shed, the route served the cache, and the hero
+ * said "LAST GOOD SCAN" with no date. Nothing between the operator and a
+ * STRONGLY BULLISH options bias told them the figures were ten weeks old —
+ * only the ISO dates in the history table, which needs scrolling to reach.
+ * A cached report has to name its own age wherever its numbers are shown.
+ */
+describe("flowReportAgeLabel", () => {
+  it("names the report date and how old it is", () => {
+    const now = new Date("2026-08-28T18:24:00Z"); // 14:24 ET
+    expect(
+      flowReportAgeLabel({ fetched_at: "2026-06-16T23:43:00Z" }, now),
+    ).toBe("2026-06-16 · 73 days old");
+  });
+
+  it("says today for a report from the current session", () => {
+    const now = new Date("2026-08-28T18:24:00Z");
+    expect(
+      flowReportAgeLabel({ fetched_at: "2026-08-28T13:05:00Z" }, now),
+    ).toBe("2026-08-28 · today");
+  });
+
+  it("singularises a one day old report", () => {
+    const now = new Date("2026-08-28T18:24:00Z");
+    expect(
+      flowReportAgeLabel({ fetched_at: "2026-08-27T20:00:00Z" }, now),
+    ).toBe("2026-08-27 · 1 day old");
+  });
+
+  it("dates the report in market time, not UTC", () => {
+    // 2026-08-27 21:30 ET is 2026-08-28 01:30 UTC. A UTC label would move an
+    // after-hours scan to the next trading day.
+    const now = new Date("2026-08-28T18:24:00Z");
+    expect(
+      flowReportAgeLabel({ fetched_at: "2026-08-28T01:30:00Z" }, now),
+    ).toBe("2026-08-27 · 1 day old");
+  });
+
+  it("returns null when there is no usable timestamp", () => {
+    expect(flowReportAgeLabel(null)).toBeNull();
+    expect(flowReportAgeLabel({})).toBeNull();
+    expect(flowReportAgeLabel({ fetched_at: "not-a-date" })).toBeNull();
   });
 });
