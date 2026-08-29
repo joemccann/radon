@@ -1515,6 +1515,14 @@ main() {
   fi
 
   if ! preflight_control_plane; then
+    if [[ "${RADON_DEPLOY_STAGE:-0}" == "1" ]]; then
+      # The deploy job runs `radon-deploy-root sync-control-plane` before its
+      # own deploy.sh; prestage is best-effort and must not go red for a
+      # bundle that job will install minutes later. R-430.
+      log_warn "Installed control plane is not ready for this release; skipping prestage (the deploy job syncs it)"
+      trap - TERM INT HUP
+      return 0
+    fi
     log_error "Aborting deploy: installed control plane is not ready for this release."
     return 1
   fi

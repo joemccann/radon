@@ -817,6 +817,12 @@ jobs:
             export RADON_DEPLOY_SUPPORT_DIR="$RUNNER/cloud/scripts"
             export RADON_DEPLOY_ENV_FILE="$ENV_FILE"
             export RADON_CONTROL_PLANE_READY
+            # Reconcile the root-owned control plane with this tip BEFORE
+            # deploy.sh holds the deploy lock (bootstrap needs that lock).
+            # Runs only here, after every gate job is green. R-430.
+            if [[ -f "$RUNNER/cloud/scripts/sync-control-plane.sh" ]]; then
+              bash "$RUNNER/cloud/scripts/sync-control-plane.sh"
+            fi
             bash "$RUNNER/cloud/scripts/deploy.sh" "$SHA"
             "$RUNNER/cloud/scripts/prune-deploy-runners.py" \
               --root "$RUNNER_ROOT" \
