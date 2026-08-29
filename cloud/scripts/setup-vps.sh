@@ -40,6 +40,7 @@ readonly SERVICE_FILES=(
   radon-monitor.service
   radon-health.service
   radon-newsfeed.service
+  radon-mktnews.service
   radon-refresh.service
   radon-refresh.timer
   radon-vcg-refresh.service

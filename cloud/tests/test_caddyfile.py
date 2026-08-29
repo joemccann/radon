@@ -84,7 +84,7 @@ class TestRouting:
         assert generic != -1
         assert headlines < generic, "/ws-headlines must win over /ws*"
         assert "handle /ws-headlines*" not in active
-        assert "localhost:8766" in active
+        assert "127.0.0.1:8766" in active
 
     def test_api_ib_route_to_8321(self, caddy_dir):
         content = read_caddyfile(caddy_dir)

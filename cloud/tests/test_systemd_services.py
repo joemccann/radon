@@ -12,6 +12,7 @@ EXPECTED_SERVICE_FILES = [
     "radon-ib-gateway.service",
     "radon-ib-gateway-preheld-restart.service",
     "radon-monitor.service",
+    "radon-mktnews.service",
     "radon-newsfeed.service",
     "radon-nextjs.service",
     "radon-refresh.service",
