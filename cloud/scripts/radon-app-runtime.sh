@@ -38,7 +38,7 @@ else
 fi
 
 usage() {
-  echo "usage: radon-app-runtime {pull|run <unit>|stop <unit>|notify-proxy <listen> <upstream>}" >&2
+  echo "usage: radon-app-runtime {pull [<sha>]|run <unit>|stop <unit>|notify-proxy <listen> <upstream>}" >&2
   exit 64
 }
 
@@ -132,9 +132,43 @@ refuse_host_plane() {
   esac
 }
 
+# `pull <sha>` is the deploy's pre-teardown step (R-431): it pulls exactly the
+# pair `run` will resolve for that release while the current release still
+# serves, then drops SHA-tagged pairs that are neither the target, the
+# fallback tag, nor in use by a running container (the previous release stays
+# until the deploy after next, so a rollback never pulls). Every deploy since
+# the drop-ins went live had pulled a 4.8G node image AFTER teardown and
+# failed the ~60s HTTP gate on a container still downloading (2026-08-28
+# 4b332fd8 was the last green deploy; 33265501795 and 33266517375 rolled back
+# mid-pull). Untagged SHA pairs at ~5.8G each also filled the 75G disk.
 cmd_pull() {
+  local target="${1:-}"
+  if [[ -n "$target" ]]; then
+    [[ "$target" =~ ^[0-9a-f]{40}$ ]] || {
+      echo "radon-app-runtime: pull takes a 40-hex release SHA" >&2
+      exit 64
+    }
+    RADON_APP_IMAGE_TAG="$target"
+  fi
   "$DOCKER" pull "$(python_image)"
   "$DOCKER" pull "$(node_image)"
+  [[ -n "$target" ]] && prune_stale_app_images "$target"
+  return 0
+}
+
+prune_stale_app_images() {
+  local target="$1" in_use image tag repo
+  in_use="$("$DOCKER" ps --format '{{.Image}}' 2>/dev/null || true)"
+  for repo in ghcr.io/joemccann/radon-node ghcr.io/joemccann/radon-python; do
+    while IFS= read -r image; do
+      [[ -n "$image" ]] || continue
+      tag="${image##*:}"
+      [[ "$tag" =~ ^[0-9a-f]{40}$ ]] || continue
+      [[ "$tag" == "$target" ]] && continue
+      grep -qxF -- "$image" <<< "$in_use" && continue
+      "$DOCKER" rmi "$image" >/dev/null 2>&1 || true
+    done < <("$DOCKER" images --format '{{.Repository}}:{{.Tag}}' "$repo" 2>/dev/null || true)
+  done
 }
 
 cmd_stop() {
@@ -346,8 +380,8 @@ case "$1" in
     cmd_stop "$2"
     ;;
   pull)
-    [[ $# -eq 1 ]] || usage
-    cmd_pull
+    [[ $# -eq 1 || $# -eq 2 ]] || usage
+    cmd_pull "${2:-}"
     ;;
   run)
     [[ $# -eq 2 ]] || usage
