@@ -820,6 +820,12 @@ jobs:
             # Reconcile the root-owned control plane with this tip BEFORE
             # deploy.sh holds the deploy lock (bootstrap needs that lock).
             # Runs only here, after every gate job is green. R-430.
+            # A transition journal left by a failed deploy makes bootstrap
+            # refuse, so recover it first (deploy.sh does exactly this pass
+            # at its own start; here it runs before the sync instead).
+            if grep -q 'RADON_DEPLOY_RECOVER_ONLY' "$RUNNER/cloud/scripts/deploy.sh"; then
+              RADON_DEPLOY_RECOVER_ONLY=1 bash "$RUNNER/cloud/scripts/deploy.sh" "$SHA"
+            fi
             if [[ -f "$RUNNER/cloud/scripts/sync-control-plane.sh" ]]; then
               bash "$RUNNER/cloud/scripts/sync-control-plane.sh"
             fi
