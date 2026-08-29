@@ -222,6 +222,42 @@ def run(
     remote_dir: str = DEFAULT_REMOTE_DIR,
     now: Optional[datetime] = None,
 ) -> int:
+    """Outer heartbeat guarantee (NF-9). The body below writes a row on the
+    happy path and on the failures it anticipates, but `_ensure_inbox`,
+    `retain_newest_gpg`, a `TimeoutExpired` from the sftp runner or the decrypt,
+    and anything out of `ingest_xml` (a Turso write failure, `ET.ParseError`)
+    all escaped every handler. The unit then exited non-zero with NO row
+    written, the previous `ok` row stayed newest, and the 26h/4d windows kept
+    `flex-pull` green over a job that had not run. R-400.
+    """
+    try:
+        return _run(
+            config=config,
+            inbox=inbox,
+            runner=runner,
+            decrypt=decrypt,
+            ingest=ingest,
+            gnupg_home=gnupg_home,
+            remote_dir=remote_dir,
+            now=now,
+        )
+    except Exception as exc:  # noqa: BLE001 — the row is the point
+        print(f"[flex-pull] unhandled: {type(exc).__name__}: {exc}", file=sys.stderr)
+        _heartbeat("error", f"{type(exc).__name__}: {exc}")
+        return 1
+
+
+def _run(
+    *,
+    config: Path,
+    inbox: Path,
+    runner=subprocess.run,
+    decrypt: Optional[Callable[..., str]] = None,
+    ingest: Optional[Callable[..., Dict[str, Any]]] = None,
+    gnupg_home: Path = DEFAULT_GNUPG,
+    remote_dir: str = DEFAULT_REMOTE_DIR,
+    now: Optional[datetime] = None,
+) -> int:
     decrypt_fn = decrypt or (lambda data, **k: _gpg_decrypt(data, gnupg_home=gnupg_home))
     ingest_fn = ingest or _default_ingest
     try:
@@ -253,8 +289,11 @@ def run(
             if not result.get("ok", True):
                 raise FlexSftpError(f"ingest_failed:{result}")
             ingested += 1
-        except (FlexSftpError, FlexClassifyError, OSError) as exc:
-            print(f"[flex-pull] {name}: {exc}", file=sys.stderr)
+        except Exception as exc:  # noqa: BLE001 — one bad file must not abort the batch
+            # Was `(FlexSftpError, FlexClassifyError, OSError)`, which covered
+            # neither a `TimeoutExpired` from the decrypt nor anything out of
+            # `ingest_xml`. R-400.
+            print(f"[flex-pull] {name}: {type(exc).__name__}: {exc}", file=sys.stderr)
             failed = True
             continue
 

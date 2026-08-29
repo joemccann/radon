@@ -97,6 +97,12 @@ class ProbeCache:
         self._interval = interval
         self._lock = threading.Lock()
         self._value: dict = {}
+        # `refresh_once` swallows every exception and keeps the last value, so
+        # without a timestamp a dead `health-probe-cache` thread served an
+        # hours-old probe dict as current — and `aggregate_state` folded it in
+        # unconditionally, unlike unit evidence, which it already age-gates.
+        # R-401.
+        self._updated = None
         self._stop = threading.Event()
         self._thread = threading.Thread(
             target=self._loop, name="health-probe-cache", daemon=True
@@ -120,12 +126,15 @@ class ProbeCache:
                 return
             with self._lock:
                 self._value = value
+                self._updated = time.time()
         except Exception:
             pass
 
     def snapshot(self):
+        """``(value, age_secs)`` — mirrors UnitStateCache. R-401."""
         with self._lock:
-            return dict(self._value)
+            age = None if self._updated is None else round(time.time() - self._updated, 1)
+            return dict(self._value), age
 
 
 class UnitStateCache:
@@ -208,8 +217,12 @@ def status_response(run_probes_fn, unit_cache, now_fn=_now_iso, service_health_c
     external_probe sections degrade to 'unknown'/None on any failure and never
     affect the response code."""
     health = "ok"
+    probes_age = None
     try:
         probe_results = run_probes_fn()
+        # ProbeCache.snapshot returns (value, age); a bare `run_probes` does not.
+        if isinstance(probe_results, tuple):
+            probe_results, probes_age = probe_results
     except Exception:
         probe_results, health = {}, "degraded"
     try:
@@ -226,7 +239,8 @@ def status_response(run_probes_fn, unit_cache, now_fn=_now_iso, service_health_c
         ep = None
     return 200, probes.build_status(probe_results, units, now_fn(),
                                     health_service=health, units_age_secs=age,
-                                    service_health=sh, external_probe=ep)
+                                    service_health=sh, external_probe=ep,
+                                    probes_age_secs=probes_age)
 
 
 def public_status_payload(payload: dict) -> dict:
