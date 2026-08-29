@@ -1165,6 +1165,18 @@ refresh_install_file() {
       fi
       ;;
     */radon-*.service.d/*.conf)
+      # An operator who followed the (now deleted) .conf.example instructions
+      # and hand-copied a drop-in to this exact path has it overwritten with no
+      # backup and no journal entry, unlike install_manifest_units'
+      # UNIT_BACKUP_PREFIX snapshot. Record what was replaced so the change is
+      # at least attributable in the deploy log. R-420.
+      if [[ -f "$dest" && ! -L "$dest" ]]; then
+        local previous
+        previous="$(file_sha256 "$dest" 2>/dev/null || echo unknown)"
+        if [[ "$previous" != "$(file_sha256 "$candidate" 2>/dev/null || echo unknown)" ]]; then
+          echo "replacing drop-in ${dest} (previous digest ${previous})" >&2
+        fi
+      fi
       # The same rules bootstrap-control-plane.sh enforces. That path almost
       # never runs; THIS one installs the drop-in on every deploy, out of the
       # radon-writable /home/radon/radon/cloud, and had no arm at all. A drop-in
