@@ -7,6 +7,8 @@ import type { PortfolioData, PortfolioPosition } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
 import {
   fmtPrice,
+  hasBlendedLegBasis,
+  MIXED_BASIS_TITLE,
   resolveEntryCost,
   resolveMarketValue,
   resolveRealtimeMarketValue,
@@ -251,6 +253,8 @@ function PositionView({
 
   const entryCost = resolveEntryCost(position);
   const avgEntry = getAvgEntry(position);
+  // Legs on disagreeing bases have no aggregate basis to show (T-253).
+  const blendedBasis = hasBlendedLegBasis(position);
   const mv = rtData?.mv ?? resolveMarketValue(position);
   const markUnits = isCombo ? heldComboUnits(position) : position.contracts;
   const lastPrice = rtData?.lastPrice ?? (mv != null && markUnits > 0 ? mv / (markUnits * getMultiplier(position)) : null);
@@ -280,7 +284,9 @@ function PositionView({
         </div>
         <div className="pos-stat">
           <span className="pos-stat-label">Avg Entry</span>
-          <span className={`pos-stat-value ${toneClass(avgEntry) !== "neutral" ? toneClass(avgEntry) : ""}`}>{fmtSignedPrice(avgEntry)}</span>
+          <span className={`pos-stat-value ${!blendedBasis && toneClass(avgEntry) !== "neutral" ? toneClass(avgEntry) : ""}`}>
+            {blendedBasis ? "---" : fmtSignedPrice(avgEntry)}
+          </span>
         </div>
         <div className="pos-stat">
           <span className="pos-stat-label">{lastPriceLabel}</span>
@@ -290,7 +296,9 @@ function PositionView({
         </div>
         <div className="pos-stat">
           <span className="pos-stat-label">Entry Cost</span>
-          <span className="pos-stat-value">{fmtUsd(entryCost)}</span>
+          <span className="pos-stat-value" title={blendedBasis ? MIXED_BASIS_TITLE : undefined}>
+            {blendedBasis ? "---" : fmtUsd(entryCost)}
+          </span>
         </div>
         <div className="pos-stat">
           <span className="pos-stat-label">Market Value</span>

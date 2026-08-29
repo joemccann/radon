@@ -114,6 +114,22 @@ export function getMultiplier(pos: PortfolioPosition): number {
   return pos.structure_type === "Stock" || pos.legs.some((leg) => leg.type === "Stock") ? 1 : 100;
 }
 
+/** Tooltip for any cell suppressed by `hasBlendedLegBasis`. */
+export const MIXED_BASIS_TITLE =
+  "No aggregate basis: some legs were filled this session and others carry IB's prior avgCost.";
+
+/**
+ * T-253: `basis_source: "mixed"` means SOME legs carry this session's fill
+ * VWAP while others still carry IB's lagged avgCost — roll the short leg of a
+ * debit vertical intraday and hold the long leg overnight and that is what
+ * ships. Any aggregate over those legs is the basis of a trade that was never
+ * placed, so `ib_sync.collapse_positions` publishes `entry_cost` and
+ * `max_risk` as `null` and every cell that would present one renders no value.
+ */
+export function hasBlendedLegBasis(pos: PortfolioPosition): boolean {
+  return pos.basis_source === "mixed";
+}
+
 export function resolveEntryCost(pos: PortfolioPosition): number {
   if (pos.legs.length > 1) {
     return pos.legs.reduce((s, l) => {
@@ -121,7 +137,9 @@ export function resolveEntryCost(pos: PortfolioPosition): number {
       return s + sign * Math.abs(l.entry_cost);
     }, 0);
   }
-  return pos.entry_cost;
+  // Only a multi-leg position can be `mixed` (one leg cannot disagree with
+  // itself), so a single leg always has a published aggregate.
+  return pos.entry_cost ?? 0;
 }
 
 export function getAvgEntry(pos: PortfolioPosition): number {
@@ -288,6 +306,11 @@ function isNetDebitPaid(pos: PortfolioPosition, entryCost: number): boolean {
  * and not at all otherwise (R-146). Opening credits stay unavailable.
  */
 export function resolveReturnCapital(pos: PortfolioPosition): ReturnCapitalBasis | null {
+  // A blended leg basis is not a denominator. Gate 3 sizes the 2.5% bankroll
+  // cap off this amount, and neither the max risk nor the net debit of a
+  // partially rolled structure was ever actually paid (T-253).
+  if (hasBlendedLegBasis(pos)) return null;
+
   if (normalizedRiskProfile(pos) === "defined") {
     const maxRisk = pos.max_risk;
     if (maxRisk != null && Number.isFinite(maxRisk) && maxRisk > 0) {
