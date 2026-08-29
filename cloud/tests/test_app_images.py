@@ -151,6 +151,10 @@ class TestNodeImage:
         assert 'ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=""' not in text
         assert "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" in text
         assert 'test -n "$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY"' in text
+        # Runtime env cannot repair a client bundle baked without the key.
+        assert ".next/static" in text
+        assert "grep -RF" in text
+        assert "next-clerk-guard" in text
 
 
 class TestImageSafety:
