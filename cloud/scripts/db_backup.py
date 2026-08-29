@@ -51,7 +51,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 SERVICE_NAME = "db-backup"
-RETENTION_DAYS = 30
+# Operator call 2026-08-29: 7 days on-box. Thirty days of ~570 MB dumps
+# held 13 G of the 75 G root fs the night it hit 100% and every gate failed;
+# B2 keeps a year, so the local window only needs to cover a restore of a
+# very recent dump without a download.
+RETENTION_DAYS = 7
 # Off-box copies outlive the on-box window by design -- a year of nightly
 # dumps in B2 is the whole reason for pushing them off a 75 GB root fs.
 # Local RETENTION_DAYS stays the operator's call and is untouched by this.
