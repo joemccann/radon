@@ -310,6 +310,33 @@ sync_scheduled_units() {
   log_success "Scheduled units match the GitHub main tip allowlist"
 }
 
+# The Caddyfile was the one release artifact no deploy ever shipped. Editing
+# cloud/caddy/Caddyfile, merging it and watching CI go green published nothing,
+# so the repo and /etc/caddy silently diverged until someone ran publish-caddy
+# by hand. It cost two incidents on 2026-08-29: the assistant 504 fix
+# (response_header_timeout on /api/assistant) and the headlines websocket
+# dialling `localhost:8766` when the hub listens on 127.0.0.1 only, so Caddy
+# tried ::1 first and never reached it. Both fixes merged and neither reached
+# the edge. The helper validates the config before it installs and reloads
+# rather than restarts, so a bad Caddyfile fails here instead of taking the
+# edge down; a failure warns like the unit sync rather than failing a release
+# that is already serving.
+edge_config_publish_is_granted() {
+  sudo -n -l -- "$DEPLOY_ROOT_HELPER" publish-caddy >/dev/null 2>&1
+}
+
+publish_edge_config() {
+  if ! edge_config_publish_is_granted; then
+    log_warn "Caddy publish is not granted yet; run cloud/scripts/bootstrap-control-plane.sh once as root"
+    return 0
+  fi
+  if ! sudo "$DEPLOY_ROOT_HELPER" publish-caddy; then
+    log_error "Caddy publish failed"
+    return 1
+  fi
+  log_success "Edge config matches cloud/caddy/Caddyfile"
+}
+
 # Pull the target release's app image pair BEFORE teardown, while the current
 # release still serves. Without this every containerised deploy pulled a 4.8G
 # image after restart and failed the HTTP gate on a container still
@@ -1028,6 +1055,8 @@ recover_pending_transition() {
       sudo "$DEPLOY_ROOT_HELPER" commit-transition || return 1
       sync_scheduled_units || log_warn \
         "Scheduled unit sync failed after a verified release; the next deploy will republish them"
+      publish_edge_config || log_warn \
+        "Caddy publish failed after a verified release; the next deploy will republish it"
       DEPLOY_RELEASE_UNVERIFIED=0
       finalize_release_artifacts "$JOURNAL_STAGE_DIR" "$JOURNAL_BACKUP_DIR"
       log_success "Finalized previously verified release ${JOURNAL_REQUESTED_SHA:0:7}"
@@ -1584,6 +1613,8 @@ main() {
     if deploy_gate; then
       sync_scheduled_units || log_warn \
         "Scheduled unit sync failed on an already-green release; the next deploy will republish them"
+      publish_edge_config || log_warn \
+        "Caddy publish failed on an already-green release; the next deploy will republish it"
       trap - TERM INT HUP
       log_success "Deploy already green: $(short_log)"
       return 0
@@ -1640,6 +1671,8 @@ main() {
     # carry on; the next deploy publishes the units.
     sync_scheduled_units || log_warn \
       "Scheduled unit sync failed after a verified release; the next deploy will republish them"
+    publish_edge_config || log_warn \
+      "Caddy publish failed after a verified release; the next deploy will republish it"
     DEPLOY_RELEASE_UNVERIFIED=0
     finalize_release_artifacts
   fi
