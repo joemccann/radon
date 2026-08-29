@@ -223,6 +223,8 @@ EXPECTED_AUTO_SYNC_UNITS = (
     "radon-margin-debt.timer",
     "radon-media-backup.service",
     "radon-media-backup.timer",
+    "radon-model-catalog.service",
+    "radon-model-catalog.timer",
     "radon-oi-changes.service",
     "radon-oi-changes.timer",
     "radon-perf-twr.service",
