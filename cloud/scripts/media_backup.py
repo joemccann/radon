@@ -46,6 +46,22 @@ DEFAULT_MEDIA_DIR = Path(
     os.environ.get("RADON_MEDIA_DIR", "/var/lib/radon/media")
 )
 DEFAULT_PREFIX = "media/"
+# Bounded transport: botocore has NO default socket timeout. Match
+# db_backup.py so a single B2 ConnectionClosedError cannot fail the
+# nightly oneshot (page 02ccb70e, 2026-08-29).
+S3_CONNECT_TIMEOUT = 30
+S3_READ_TIMEOUT = 300
+S3_MAX_ATTEMPTS = 3
+S3_RETRY_DELAY_SECS = 1.0
+_TRANSIENT_S3_ERROR_NAMES = frozenset(
+    {
+        "ConnectionClosedError",
+        "EndpointConnectionError",
+        "ConnectTimeoutError",
+        "ReadTimeoutError",
+        "ResponseStreamingError",
+    }
+)
 
 # Skip junk that should never be restored as public media.
 _SKIP_NAME_PREFIXES = (".",)
@@ -197,6 +213,30 @@ def content_type_for(path: Path) -> str:
     return guessed or "application/octet-stream"
 
 
+def is_transient_s3_error(exc: BaseException) -> bool:
+    """True for retryable B2/S3 transport faults (not auth / AccessDenied)."""
+    if type(exc).__name__ in _TRANSIENT_S3_ERROR_NAMES:
+        return True
+    text = str(exc).lower()
+    return "connection was closed" in text or "connection reset" in text
+
+
+def call_s3_with_retry(fn, *, attempts: int | None = None, sleep=None):
+    """Run ``fn`` up to ``S3_MAX_ATTEMPTS`` on transient S3 errors."""
+    n = S3_MAX_ATTEMPTS if attempts is None else max(1, int(attempts))
+    sleeper = time.sleep if sleep is None else sleep
+    last: BaseException | None = None
+    for i in range(n):
+        try:
+            return fn()
+        except Exception as exc:  # noqa: BLE001 — classify, then re-raise
+            last = exc
+            if not is_transient_s3_error(exc) or i + 1 >= n:
+                raise
+            sleeper(S3_RETRY_DELAY_SECS)
+    raise last  # pragma: no cover
+
+
 # ---------------------------------------------------------------------------
 # Side-effecting layer
 # ---------------------------------------------------------------------------
@@ -204,6 +244,7 @@ def content_type_for(path: Path) -> str:
 
 def _s3_client(cfg: dict[str, str]):
     import boto3  # lazy: unit tests never import it
+    from botocore.config import Config
 
     return boto3.client(
         "s3",
@@ -211,6 +252,11 @@ def _s3_client(cfg: dict[str, str]):
         aws_access_key_id=cfg["access_key"],
         aws_secret_access_key=cfg["secret_key"],
         region_name=cfg["region"],
+        config=Config(
+            connect_timeout=S3_CONNECT_TIMEOUT,
+            read_timeout=S3_READ_TIMEOUT,
+            retries={"max_attempts": S3_MAX_ATTEMPTS, "mode": "standard"},
+        ),
     )
 
 
@@ -222,7 +268,7 @@ def list_remote_objects(client, bucket: str, prefix: str) -> dict[str, RemoteObj
         kwargs = {"Bucket": bucket, "Prefix": prefix}
         if token:
             kwargs["ContinuationToken"] = token
-        resp = client.list_objects_v2(**kwargs)
+        resp = call_s3_with_retry(lambda: client.list_objects_v2(**kwargs))
         for obj in resp.get("Contents") or []:
             key = obj["Key"]
             out[key] = RemoteObject(key=key, size=int(obj["Size"]))
@@ -236,11 +282,13 @@ def list_remote_objects(client, bucket: str, prefix: str) -> dict[str, RemoteObj
 
 def upload_file(client, path: Path, bucket: str, key: str) -> None:
     extra = {"ContentType": content_type_for(path)}
-    client.upload_file(
-        str(path),
-        bucket,
-        key,
-        ExtraArgs=extra,
+    call_s3_with_retry(
+        lambda: client.upload_file(
+            str(path),
+            bucket,
+            key,
+            ExtraArgs=extra,
+        )
     )
 
 

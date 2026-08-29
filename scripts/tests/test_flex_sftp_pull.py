@@ -31,6 +31,10 @@ def _ssh_config(path: Path) -> Path:
                 "  AddressFamily inet",
                 "  UserKnownHostsFile /tmp/known_hosts",
                 "  StrictHostKeyChecking yes",
+                # R-417: `_sftp`'s own `timeout=` bounds the PROCESS; these
+                # bound the SESSION, and REQUIRED_CONFIG now demands both.
+                "  ConnectTimeout 15",
+                "  ServerAliveInterval 15",
             ]
         )
         + "\n"
@@ -398,8 +402,9 @@ def test_run_without_ingest_drives_default_ingest(tmp_path, monkeypatch):
     assert code == 0
     assert len(rehydrated) == 1
     assert "NAK" in rehydrated[0]["xml_text"]
-    # Provenance is the inbox file the operator can find, not a random /tmp name.
-    assert list(claims.values())[0]["source_path"] == str(inbox / "trades.xml")
+    # Provenance is the delivered filename the operator can map back to sFTP,
+    # not a random /tmp name from PrivateTmp.
+    assert list(claims.values())[0]["source_path"] == "trades.xml"
     # Decrypted plaintext must not linger beside the .gpg.
     assert list(inbox.glob("*.xml")) == []
 

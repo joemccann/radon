@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
-import { ArrowUpRight, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
+import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 
 import { estimateReadMinutes } from "../lib/newsfeedReadTime";
 import { formatAbsolute, formatCompact, formatRelative, formatTime } from "../lib/newsfeedTime";
@@ -33,7 +33,6 @@ function buildPostSnapshot(post: NormalisedPost) {
 }
 
 const PAGE_SIZE = 18;
-const SOURCE_NAME = "Market Ear";
 
 export type { MarketEarPost };
 
@@ -318,7 +317,6 @@ export default function DashboardNewsFeed() {
                   <h3 className={`news-feed-headline ${styles.headline}`}>{post.title}</h3>
                   <div data-testid="news-feed-meta" className={`news-feed-meta ${styles.meta}`}>
                     <span title={absolute}>{absolute}</span>
-                    <span className="news-feed-meta__source">{SOURCE_NAME}</span>
                     <span>{readMinutes} min read</span>
                   </div>
                   {postTags.length > 0 ? (
@@ -388,21 +386,10 @@ export default function DashboardNewsFeed() {
                       </button>
                       <figcaption className={`news-feed-figcaption ${styles.figcaption}`}>
                         <span>Chart · {post.title}</span>
-                        <span>Source · {SOURCE_NAME}</span>
                       </figcaption>
                     </figure>
                   ) : null}
                   <div data-testid="news-feed-footer" className={`news-feed-footer ${styles.footer}`}>
-                    <a
-                      data-testid="news-feed-link-pill"
-                      className={`news-feed-link-pill ${styles.linkPill}`}
-                      href={post.href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      <ArrowUpRight size={11} aria-hidden />
-                      <span>Source link</span>
-                    </a>
                     <span
                       data-testid="news-feed-timestamp"
                       className={`news-feed-timestamp ${styles.timestamp}`}

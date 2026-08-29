@@ -1170,7 +1170,16 @@ restart_services() {
       recover_pending_transition || true
       return "$status"
     fi
-    refresh_control_plane || return 1
+    # This sits between stop_ and start_services_after_transition, so ANY
+    # non-zero return here used to leave all five app units down with no path
+    # back -- including exit 66 on a rollback to a checkout that predates the
+    # container drop-ins, and exit 75 on an in-flight Gateway 2FA transition.
+    # Bring the tier back before propagating. R-380.
+    if ! refresh_control_plane; then
+      log_error "Control-plane refresh failed; restarting the app tier before aborting"
+      start_services_after_transition
+      return 1
+    fi
   fi
   start_services_after_transition
   # R-094: this used to run while the app tier was down. 32 timers in

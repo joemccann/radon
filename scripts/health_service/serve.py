@@ -97,6 +97,12 @@ class ProbeCache:
         self._interval = interval
         self._lock = threading.Lock()
         self._value: dict = {}
+        # `refresh_once` swallows every exception and keeps the last value, so
+        # without a timestamp a dead `health-probe-cache` thread served an
+        # hours-old probe dict as current — and `aggregate_state` folded it in
+        # unconditionally, unlike unit evidence, which it already age-gates.
+        # R-401.
+        self._updated = None
         self._stop = threading.Event()
         self._thread = threading.Thread(
             target=self._loop, name="health-probe-cache", daemon=True
@@ -120,12 +126,15 @@ class ProbeCache:
                 return
             with self._lock:
                 self._value = value
+                self._updated = time.time()
         except Exception:
             pass
 
     def snapshot(self):
+        """``(value, age_secs)`` — mirrors UnitStateCache. R-401."""
         with self._lock:
-            return dict(self._value)
+            age = None if self._updated is None else round(time.time() - self._updated, 1)
+            return dict(self._value), age
 
 
 class UnitStateCache:
@@ -141,6 +150,12 @@ class UnitStateCache:
         self._lock = threading.Lock()
         self._value: dict = {}
         self._updated = None
+        # unit -> monotonic-ish wall clock when it was first seen not-`up`.
+        # `aggregate_state` needs a DWELL, not a snapshot: without one a unit
+        # that died two seconds ago and one failed for a week were the same
+        # input, and the dependency suppression made the second edge-green
+        # forever. R-382.
+        self._non_up_since: dict = {}
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._loop, name="unit-state-cache", daemon=True)
 
@@ -167,9 +182,20 @@ class UnitStateCache:
             parsed = probes.parse_unit_states(out.stdout)
             if out.returncode != 0 or set(parsed) != set(self._units):
                 return
+            now = time.time()
+            for uid, props in parsed.items():
+                if props.get("state") == "up":
+                    self._non_up_since.pop(uid, None)
+                    props["non_up_secs"] = None
+                else:
+                    since = self._non_up_since.setdefault(uid, now)
+                    props["non_up_secs"] = round(now - since, 1)
+            for uid in list(self._non_up_since):
+                if uid not in parsed:
+                    self._non_up_since.pop(uid, None)
             with self._lock:
                 self._value = parsed
-                self._updated = time.time()
+                self._updated = now
         except Exception:
             pass  # keep last value; age reflects staleness
 
@@ -191,8 +217,12 @@ def status_response(run_probes_fn, unit_cache, now_fn=_now_iso, service_health_c
     external_probe sections degrade to 'unknown'/None on any failure and never
     affect the response code."""
     health = "ok"
+    probes_age = None
     try:
         probe_results = run_probes_fn()
+        # ProbeCache.snapshot returns (value, age); a bare `run_probes` does not.
+        if isinstance(probe_results, tuple):
+            probe_results, probes_age = probe_results
     except Exception:
         probe_results, health = {}, "degraded"
     try:
@@ -209,7 +239,8 @@ def status_response(run_probes_fn, unit_cache, now_fn=_now_iso, service_health_c
         ep = None
     return 200, probes.build_status(probe_results, units, now_fn(),
                                     health_service=health, units_age_secs=age,
-                                    service_health=sh, external_probe=ep)
+                                    service_health=sh, external_probe=ep,
+                                    probes_age_secs=probes_age)
 
 
 def public_status_payload(payload: dict) -> dict:

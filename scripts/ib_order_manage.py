@@ -257,6 +257,33 @@ def modify_order(client: IBClient, order_id: int, perm_id: int, new_price: Optio
         from ib_insync import TagValue
         trade.order.smartComboRoutingParams = [TagValue("NonGuaranteed", "1")]
 
+    # R-428: a modify RE-TRANSMITS the order, so the server-side caps apply
+    # here and not only in the FastAPI caller (`check_modify_limits`). The
+    # script is directly invocable on the host, and a guard that lives in the
+    # caller rather than at the placement funnel is the exact inversion
+    # ib_place_order.py was restructured to avoid.
+    from order_limits import check_order_limits, check_quantity_limit
+
+    # A BAG's leg detail (strikes, ratios) is not derivable here — a
+    # `comboLeg` carries a conId, not a strike — and `check_order_limits`
+    # fails CLOSED on a combo whose legs it cannot read. Refusing every
+    # combo at the transport would break legitimate placement, so the funnel
+    # applies the bound it CAN compute (the stricter contract-quantity cap,
+    # which is the fat-finger class) and leaves the leg-ratio and max-loss
+    # branches to the caller, which has the legs. R-427/R-428.
+    if trade.contract.secType == "BAG":
+        violation = check_quantity_limit(trade.order.totalQuantity)
+    else:
+        violation = check_order_limits({
+            "type": "stock" if trade.contract.secType == "STK" else "option",
+            "quantity": trade.order.totalQuantity,
+            "symbol": getattr(trade.contract, "symbol", ""),
+            "limitPrice": getattr(trade.order, "lmtPrice", None),
+        })
+    if violation:
+        output("error", f"{violation['message']} (order not modified).")
+        return
+
     client.place_order(trade.contract, trade.order)
 
     # Wait for refreshed IB state to reflect the requested modify.

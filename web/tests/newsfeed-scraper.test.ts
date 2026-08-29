@@ -98,6 +98,37 @@ describe("browser lifecycle", () => {
     expect((await stat(storageStatePath)).mode & 0o777).toBe(0o600);
     await handle.close();
   });
+
+  it("launches chromium without a sandbox when PLAYWRIGHT_CHROMIUM_SANDBOX=0", async () => {
+    const root = await createTempRoot();
+    const previous = process.env.PLAYWRIGHT_CHROMIUM_SANDBOX;
+    process.env.PLAYWRIGHT_CHROMIUM_SANDBOX = "0";
+    const launch = vi.fn(async () => ({
+      newContext: vi.fn(async () => ({
+        newPage: vi.fn(async () => ({})),
+        close: vi.fn(async () => {}),
+        cookies: vi.fn(async () => []),
+        storageState: vi.fn(async () => ({ cookies: [], origins: [] })),
+      })),
+      close: vi.fn(async () => {}),
+    }));
+    try {
+      const { createBrowser } = await import("../../scripts/newsfeed/browser.js");
+      const handle = await createBrowser({
+        storageStatePath: path.join(root, "storage.json"),
+        launcher: { launch },
+      });
+      expect(launch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          args: expect.arrayContaining(["--no-sandbox", "--disable-dev-shm-usage"]),
+        }),
+      );
+      await handle.close();
+    } finally {
+      if (previous === undefined) delete process.env.PLAYWRIGHT_CHROMIUM_SANDBOX;
+      else process.env.PLAYWRIGHT_CHROMIUM_SANDBOX = previous;
+    }
+  });
 });
 
 describe("scheduler failure bound", () => {

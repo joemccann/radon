@@ -693,18 +693,26 @@ def claim_flex_delivery(
     return isinstance(claimed, int) and claimed > 0
 
 
-def release_flex_delivery(content_sha256: str) -> None:
-    """Drop a claim whose ingest failed, so re-dropping the file retries it.
+def release_flex_delivery(content_sha256: str) -> bool:
+    """Release a claim whose ingest did not complete. True when a row was dropped.
 
-    The claim is taken BEFORE any writer (idempotency), so a run that fails
-    after a partial `cash_flows` write must hand the fingerprint back. Keeping
-    it makes the operator's re-drop return ``outcome: "duplicate"`` — green,
-    exit 0 — and the half-written state is unrepairable without a manual
-    DELETE. T-257.
+    The claim is taken BEFORE the writers run, so it is a lease on work in
+    progress — not a record that the work succeeded. Nothing released it, so a
+    `cash_flow_sync` that failed mid-chunk left `cash_flows` half-applied AND
+    permanently unretryable: the same bytes re-dropped (or re-pulled by the
+    08:30 sFTP run) lost the claim, skipped every writer and heartbeated `ok`.
+    R-379.
     """
     db = get_db()
-    db.execute("DELETE FROM flex_deliveries WHERE content_sha256 = ?", (content_sha256,))
+    result = db.execute(
+        "DELETE FROM flex_deliveries WHERE content_sha256 = ?",
+        (content_sha256,),
+    )
     db.commit()
+    released = getattr(result, "rowcount", None)
+    if not isinstance(released, int):
+        released = getattr(result, "rows_affected", None)
+    return isinstance(released, int) and released > 0
 
 
 def upsert_journal_entry(trade_id: str, payload: dict[str, Any], filled_at: Optional[str] = None) -> None:

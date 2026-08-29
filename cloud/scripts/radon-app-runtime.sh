@@ -14,6 +14,7 @@ if [[ "${RADON_APP_RUNTIME_TEST_MODE:-0}" == "1" ]]; then
   DATA_DIR="${RADON_TEST_DATA_DIR:?test data dir is required}"
   MEDIA_DIR="${RADON_TEST_MEDIA_DIR:?test media dir is required}"
   STATE_DIR="${RADON_TEST_STATE_DIR:?test state dir is required}"
+  LEASE_DIR="${STATE_DIR}/ib-lease"
 else
   if (( EUID != 0 )); then
     echo "radon-app-runtime must run as root" >&2
@@ -25,6 +26,7 @@ else
   DATA_DIR=/home/radon/radon/data
   MEDIA_DIR=/var/lib/radon/media
   STATE_DIR=/var/lib/radon
+  LEASE_DIR=/var/lib/radon/ib-lease
 fi
 
 usage() {
@@ -173,6 +175,17 @@ cmd_run() {
   # start-limit-hit inside 25s while the orphan keeps writing to data/.
   "$DOCKER" rm -f "$unit" >/dev/null 2>&1 || true
 
+  # The container gets NARROW binds, never $STATE_DIR itself. /var/lib/radon
+  # holds control-plane-ready, the manifest digest and the root deploy
+  # transaction journal; the container runs as uid radon and write permission on
+  # the PARENT is all unlink/rename needs, so the whole-directory bind handed the
+  # newsfeed's headless Chromium the ability to delete the readiness gate. The
+  # one thing an app genuinely writes outside media/ is the shared 2FA lease,
+  # which now has its own subdirectory. Create it here: the container can no
+  # longer mkdir it, because the parent is not mounted. R-381.
+  mkdir -p "$LEASE_DIR"
+  chown "$ids" "$LEASE_DIR" 2>/dev/null || true
+
   set -- \
     run \
     --network host \
@@ -189,15 +202,34 @@ cmd_run() {
     --env PYTHONPATH=/home/radon/radon/scripts \
     -w "$workdir" \
     -v "${DATA_DIR}:/home/radon/radon/data" \
-    -v "${STATE_DIR}:/var/lib/radon" \
-    -v "${MEDIA_DIR}:/var/lib/radon/media"
+    -v "${MEDIA_DIR}:/var/lib/radon/media" \
+    -v "${LEASE_DIR}:/var/lib/radon/ib-lease"
 
   if [[ -n "${NOTIFY_SOCKET:-}" && "${NOTIFY_SOCKET}" == /* ]]; then
     set -- "$@" --env NOTIFY_SOCKET --env WATCHDOG_USEC \
       --mount "type=bind,src=${NOTIFY_SOCKET},dst=${NOTIFY_SOCKET}"
   fi
   if [[ "$unit" == "radon-newsfeed.service" ]]; then
-    set -- "$@" --ipc host --env PLAYWRIGHT_CHROMIUM_SANDBOX=0
+    # Page 3e952746: the image ENV is PLAYWRIGHT_BROWSERS_PATH=/ms-playwright,
+    # but `bun x playwright install` during the image build did not leave
+    # chromium_headless_shell-1217 there. Host deploy already caches that
+    # revision at radon's ms-playwright dir. Bind it onto /ms-playwright so
+    # this unit can launch without waiting for a new GHCR tag (R-234).
+    # Overlay scripts/newsfeed from the live checkout so --no-sandbox in
+    # browser.js applies before the next image build.
+    local newsfeed_browsers newsfeed_scripts
+    if [[ "${RADON_APP_RUNTIME_TEST_MODE:-0}" == "1" ]]; then
+      newsfeed_browsers="${RADON_NEWSFEED_BROWSERS_PATH:-${STATE_DIR}/ms-playwright}"
+      newsfeed_scripts="${RADON_NEWSFEED_SCRIPTS_PATH:-${DATA_DIR}/newsfeed-scripts}"
+    else
+      newsfeed_browsers="${RADON_NEWSFEED_BROWSERS_PATH:-/home/radon/.cache/ms-playwright}"
+      newsfeed_scripts="${RADON_NEWSFEED_SCRIPTS_PATH:-/home/radon/radon/scripts/newsfeed}"
+    fi
+    set -- "$@" --ipc host \
+      --env PLAYWRIGHT_CHROMIUM_SANDBOX=0 \
+      --env PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+      -v "${newsfeed_browsers}:/ms-playwright" \
+      -v "${newsfeed_scripts}:/home/radon/radon/scripts/newsfeed"
   fi
 
   set -- "$@" "$image"

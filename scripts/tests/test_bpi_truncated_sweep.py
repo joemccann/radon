@@ -224,15 +224,27 @@ class TestPersistReserveGatesTheWrite:
                 "_bpi_rows": [],
             },
         )
-        monkeypatch.setattr(
-            bpi,
-            "_heartbeat_cycle",
-            contextlib.contextmanager(lambda _no_db: iter([None])),
-        )
+        # A real generator, not `iter([None])`: the skip path now raises through
+        # the context manager, and a list_iterator has no `.throw`.
+        @contextlib.contextmanager
+        def _cycle(_no_db):
+            yield None
 
-        bpi.run_scan(
-            ["RUT"], backfill=False, no_db=False, sweep_deadline=sweep_deadline
-        )
+        monkeypatch.setattr(bpi, "_heartbeat_cycle", _cycle)
+
+        # A skipped Turso write is no longer a clean exit: nothing used to
+        # distinguish a run that persisted every index from one that persisted
+        # none — the mirror was restamped and the cycle heartbeated `ok`. The
+        # skip now leaves the service_cycle by raising, which is the only way to
+        # set its state (feedback_service_health_writer_state_not_event_content).
+        # These cases still assert exactly what they did: WHICH indices were
+        # written. R-396.
+        try:
+            bpi.run_scan(
+                ["RUT"], backfill=False, no_db=False, sweep_deadline=sweep_deadline
+            )
+        except bpi.BpiPersistIncomplete:
+            assert persisted == [], persisted
         return persisted
 
     def test_a_write_inside_the_reserve_still_persists(self, monkeypatch, tmp_path):

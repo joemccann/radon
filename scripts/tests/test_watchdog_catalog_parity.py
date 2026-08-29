@@ -87,7 +87,19 @@ _HEALTH_CALLS = (
     "service_cycle",
     # The node writers spell it camelCase (`scripts/db/writer.js`).
     "recordServiceHealth",
+    # host_metrics_sampler.py / grok_page_responder.py call the bounded Hrana
+    # writer directly, passing the name as a module-level constant. R-412.
+    "write_service_health_http",
 )
+
+# The bounded-stdlib jobs (db_backup, db_retention_sweep, drift_audit,
+# media_backup, archive_portfolio_snapshots, disk_cleanup) each define their OWN
+# `write_service_health(state, detail, started_at)` and take the service name
+# from a module-level constant, so the name never appears as a call argument.
+# The scan could not see the shape at all, and eight units were consequently
+# labelled `gap: writes no service_health row` when they heartbeat on every
+# fire. R-412.
+_LOCAL_HEALTH_WRITER = re.compile(r"^def write_service_health\(", re.MULTILINE)
 
 
 def _names_in(text: str) -> set[str]:
@@ -98,6 +110,8 @@ def _names_in(text: str) -> set[str]:
         for ident in re.findall(rf"{call}\(\s*(_?[A-Z][A-Z0-9_]*)\b", text):
             if ident in consts:
                 found.add(consts[ident])
+    if _LOCAL_HEALTH_WRITER.search(text) and "SERVICE_NAME" in consts:
+        found.add(consts["SERVICE_NAME"])
     return found - _STATE_LITERALS
 
 
@@ -159,7 +173,14 @@ def _health_names_written_by(unit_stem: str) -> set[str]:
         text = path.read_text(encoding="utf-8", errors="replace")
         names |= _names_in(text)
         if path.suffix == ".sh":
-            for inner in re.findall(r"(scripts/[A-Za-z0-9_./-]+\.(?:py|js))", text):
+            # Comments FIRST. `run_flow_refresh.sh` mentions
+            # `scripts/api/server.py` in a comment about a shed marker, which
+            # attributed every name that file writes to the flow-refresh timer.
+            # R-412.
+            code = "\n".join(
+                line for line in text.splitlines() if not line.lstrip().startswith("#")
+            )
+            for inner in re.findall(r"(scripts/[A-Za-z0-9_./-]+\.(?:py|js))", code):
                 inner_path = _resolve(inner)
                 if inner_path is not None:
                     names |= _names_in(inner_path.read_text(encoding="utf-8", errors="replace"))
@@ -341,17 +362,15 @@ class TestDur02BrakeAndFlapReach:
 #               own freshness window, so each is its own task; carried as the
 #               standing remainder of R-277.
 EXEMPT_UNITS: dict[str, str] = {
-    "radon-disk-cleanup": (
-        "parser: cloud/scripts/disk_cleanup.py heartbeats `disk-cleanup` on "
-        "every run via its own write_service_health (same bounded stdlib shape "
-        "as db_backup.py / drift_audit.py, which never touch the libsql "
-        "bindings). Registered in BOTH catalogs; only this literal scan cannot "
-        "see it."
-    ),
-    "radon-ib-watchdog": (
-        "parser: heartbeats through the watchdog package's own writer under a "
-        "name assembled at runtime."
-    ),
+    # Nine former entries were deleted once `_names_in` learned the
+    # bounded-stdlib writer shape (R-412): db-backup, db-retention,
+    # disk-cleanup, drift-audit, grok-page-responder, host-metrics,
+    # ib-watchdog, media-backup and portfolio-archive all RESOLVE now. Ten of
+    # the sixteen entries here were labelled `gap: writes no service_health
+    # row` and that was false for eight of them, which is worse than no
+    # exemption: it told the next reader a monitored job was unmonitored.
+    # `test_rel141_catalog_exemptions_are_true.py` now asserts that every
+    # remaining `gap:` label is TRUE.
     "radon-watchdog-continuous": (
         "parser: `python -m scripts.watchdog` writes its rows through the "
         "watchdog package, keyed on the bucket passed on the command line."
@@ -359,19 +378,19 @@ EXEMPT_UNITS: dict[str, str] = {
     "radon-watchdog-daily": "parser: same as radon-watchdog-continuous.",
     "radon-watchdog-error": "parser: same as radon-watchdog-continuous.",
     "radon-watchdog-intraday": "parser: same as radon-watchdog-continuous.",
-    "radon-db-backup": (
-        "gap: writes no service_health row; failure is visible only as a "
-        "systemd unit failure."
+    "radon-portfolio-sync": (
+        "wrapper: run_portfolio_refresh.sh POSTs FastAPI /portfolio/sync, and "
+        "the row is opened by ib_sync.py's `service_cycle(\"portfolio-sync\")` "
+        "inside the API process. The name IS in both catalogs; the unit's own "
+        "ExecStart chain simply does not contain the writer."
     ),
-    "radon-db-retention": "gap: writes no service_health row.",
-    "radon-drift-audit": "gap: writes no service_health row.",
-    "radon-forecast-nightly": "gap: writes no service_health row.",
-    "radon-grok-page-responder": "gap: writes no service_health row.",
-    "radon-host-metrics": "gap: writes no service_health row.",
-    "radon-media-backup": "gap: writes no service_health row.",
-    "radon-portfolio-archive": "gap: writes no service_health row.",
-    "radon-portfolio-sync": "gap: writes no service_health row.",
-    "radon-signals-refresh": "gap: writes no service_health row.",
+    "radon-signals-refresh": (
+        "wrapper: run_signals_refresh.sh POSTs /theta-harvester/scan and "
+        "/strength-confirmation/scan, each of which writes its own row under "
+        "`theta-harvester` / `strength-confirmation` — both already in both "
+        "catalogs. The wrapper needs no name of its own; registering one would "
+        "add a key nothing writes."
+    ),
 }
 
 
@@ -416,11 +435,13 @@ class TestEveryTimerBackedUnitIsAccountedFor:
             unit
             for unit, reason in EXEMPT_UNITS.items()
             if not reason.strip()
-            or not reason.strip().startswith(("parser:", "gap:"))
+            or not reason.strip().startswith(("parser:", "gap:", "wrapper:"))
         )
         assert not unreasoned, (
             "every EXEMPT_UNITS entry must state whether the unit heartbeats "
-            "under a name this parser cannot resolve (`parser:`) or writes no "
+            "under a name this parser cannot resolve (`parser:`), delegates to "
+            "a process that writes an already-catalogued name (`wrapper:`), or "
+            "writes no "
             f"row at all (`gap:`): {unreasoned}"
         )
 

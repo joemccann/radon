@@ -181,7 +181,9 @@ describe("Options chain URL deep-link", () => {
   });
 
   it("hydrates theta harvester short-strangle legs into the order builder", async () => {
-    searchParamsString = `deck=c&expiry=${NEAR_EXPIRY.dashed}&strikes=100&legs=SELL:1x950P,SELL:1x970C`;
+    // `thetaOrderHref` now emits `src=theta`: the label's default branch went
+    // neutral, so the seeder has to name itself. R-414.
+    searchParamsString = `deck=c&expiry=${NEAR_EXPIRY.dashed}&strikes=100&legs=SELL:1x950P,SELL:1x970C&src=theta`;
     renderChain();
 
     await screen.findByText("PREFILLED FROM THETA HARVESTER");
@@ -209,11 +211,17 @@ describe("Options chain URL deep-link", () => {
     expect(builder!.textContent).toContain("1x $970 Call");
   });
 
-  it("keeps the theta prefill label when src is absent even for long-vol BUY legs", async () => {
+  it("labels a prefill with no src neutrally, not as a scanner verdict", async () => {
+    // This case REQUIRED the theta wording for an ABSENT `src`, which is
+    // exactly the defect: a hand-edited or shared `?legs=` URL was stamped
+    // PREFILLED FROM THETA HARVESTER over a contract no scanner produced. The
+    // half that still matters — a prefill with no src does not claim VOL CONE
+    // or LEAP SCAN either — is kept. R-414.
     searchParamsString = `deck=c&expiry=${NEAR_EXPIRY.dashed}&strikes=100&legs=BUY:1x950P,BUY:1x970C`;
     renderChain();
 
-    await screen.findByText("PREFILLED FROM THETA HARVESTER");
+    await screen.findByText("PREFILLED FROM LINK");
+    expect(screen.queryByText("PREFILLED FROM THETA HARVESTER")).toBeNull();
     expect(screen.queryByText("PREFILLED FROM VOL CONE")).toBeNull();
   });
 });

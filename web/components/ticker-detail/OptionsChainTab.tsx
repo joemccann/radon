@@ -73,16 +73,23 @@ function optionFetchErrorMessage(data: Record<string, unknown>, fallback: string
   return detail && detail !== error ? `${error}: ${detail}` : error;
 }
 
-/** Names the scanner that seeded `?legs=`. Unknown / absent stays on the
- *  Theta Harvester wording it shipped with — that was the only seeder then. */
+/** Names the scanner that seeded `?legs=`.
+ *
+ *  The `default` fired for an ABSENT, misspelled or future-seeder `src`, so a
+ *  hand-edited or shared `?legs=SELL:1x100P` URL was stamped PREFILLED FROM
+ *  THETA HARVESTER — a scanner verdict asserted over a contract no scanner
+ *  produced. Theta now has its own case and the fallback is neutral. R-414. */
 function prefillLabelForSource(src: string | null | undefined): string {
   switch (src) {
     case "vol-cone":
       return "PREFILLED FROM VOL CONE";
     case "leap":
       return "PREFILLED FROM LEAP SCAN";
-    default:
+    case "theta":
+    case "theta-harvester":
       return "PREFILLED FROM THETA HARVESTER";
+    default:
+      return "PREFILLED FROM LINK";
   }
 }
 
@@ -1066,6 +1073,9 @@ export default function OptionsChainTab({
   const appliedLegsParamRef = useRef<string | null>(null);
   const orderBuilderRef = useRef<HTMLDivElement>(null);
   const [prefillLabel, setPrefillLabel] = useState<string | null>(null);
+  // Set when a deep link named a contract the chain cannot serve. The operator
+  // sees why the ticket is empty instead of a silently different ticket.
+  const [prefillUnavailable, setPrefillUnavailable] = useState<string | null>(null);
 
   const focusedExpiry = useMemo(
     () => (focusPosition ? normalizeOptionExpiry(focusPosition.expiry) : null),
@@ -1085,6 +1095,7 @@ export default function OptionsChainTab({
     initialFocusAppliedRef.current = false;
     appliedLegsParamRef.current = null;
     setPrefillLabel(null);
+    setPrefillUnavailable(null);
     setLoadingExpiries(true);
     setError(null);
 
@@ -1140,7 +1151,31 @@ export default function OptionsChainTab({
     if (appliedLegsParamRef.current === signature) return;
 
     const requestedExpiry = chainUrl.urlExpiry ? normalizeOptionExpiry(chainUrl.urlExpiry) : null;
-    if (requestedExpiry && requestedExpiry !== selectedExpiry) return;
+    if (requestedExpiry && requestedExpiry !== selectedExpiry) {
+      // R-378: the requested expiry is not what the chain resolved to. BURN the
+      // signature — leaving it unconsumed lets this same prefill apply on a later
+      // render, once syncUrl has rewritten ?expiry to the fallback and the
+      // mismatch test above passes against an expiry the link never named.
+      appliedLegsParamRef.current = signature;
+      setPrefillUnavailable(
+        `PREFILL CONTRACT UNAVAILABLE: ${formatExpiry(requestedExpiry)} IS NOT LISTED FOR ${ticker}`,
+      );
+      return;
+    }
+
+    // R-413: a strike the venue does not list renders a phantom leg with no
+    // quote. Wait for the chain to load, then require every requested strike.
+    if (strikes.length === 0) return;
+    const missing = chainUrl.urlLegs
+      .filter((leg) => !strikes.includes(leg.strike))
+      .map((leg) => leg.strike);
+    if (missing.length > 0) {
+      appliedLegsParamRef.current = signature;
+      setPrefillUnavailable(
+        `PREFILL CONTRACT UNAVAILABLE: STRIKE ${missing.join(", ")} NOT LISTED FOR ${formatExpiry(selectedExpiry)}`,
+      );
+      return;
+    }
 
     const nextLegs: OrderLeg[] = chainUrl.urlLegs.map((leg) => ({
       id: `${ticker}_${selectedExpiry}_${leg.strike}_${leg.right}`,
@@ -1155,8 +1190,9 @@ export default function OptionsChainTab({
 
     setOrderLegs(nextLegs);
     setPrefillLabel(prefillLabelForSource(searchParams?.get("src")));
+    setPrefillUnavailable(null);
     appliedLegsParamRef.current = signature;
-  }, [ticker, selectedExpiry, chainUrl.legsParamRaw, chainUrl.urlExpiry, chainUrl.urlLegs, searchParams]);
+  }, [ticker, selectedExpiry, strikes, chainUrl.legsParamRaw, chainUrl.urlExpiry, chainUrl.urlLegs, searchParams]);
 
   useEffect(() => {
     if (!prefillLabel || orderLegs.length === 0) return;
@@ -1424,6 +1460,12 @@ export default function OptionsChainTab({
 
   if (showMobileChain) {
     return (
+      <>
+      {prefillUnavailable && (
+        <div className="chain-prefill-unavailable" role="status" data-testid="prefill-unavailable">
+          {prefillUnavailable}
+        </div>
+      )}
       <MobileChainLadder
         ticker={ticker}
         expirations={expirations}
@@ -1446,6 +1488,7 @@ export default function OptionsChainTab({
         onClearLegs={handleClearLegs}
         portfolio={portfolio ?? null}
       />
+      </>
     );
   }
 
@@ -1458,6 +1501,11 @@ export default function OptionsChainTab({
       {/* One grid child per column: toolbar, chain and hint travel together,
           otherwise the hint becomes a third child and wraps the dock below. */}
       <div className="chain-rail-main">
+      {prefillUnavailable && (
+        <div className="chain-prefill-unavailable" role="status" data-testid="prefill-unavailable">
+          {prefillUnavailable}
+        </div>
+      )}
       {/* Expiry selector */}
       <div className="chain-expiry-bar">
         <label

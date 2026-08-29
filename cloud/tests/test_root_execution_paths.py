@@ -50,24 +50,58 @@ PENDING_ROOT_OWNED_PAYLOAD: dict[str, str] = {}
 INTERPRETER_ISOLATION_FLAGS = ("-I", "-P")
 
 
-def _unit_texts() -> dict[str, str]:
-    return {
-        path.name: path.read_text(encoding="utf-8")
-        for path in sorted(SERVICES_DIR.iterdir())
-        if path.is_file() and path.suffix == ".service"
-    }
+def _unit_texts(services_dir: pathlib.Path = SERVICES_DIR) -> dict[str, str]:
+    """Base units with their `*.service.d/*.conf` drop-ins merged in.
+
+    The drop-ins are precisely what flips five `User=radon` units to
+    `User=root`, and they reset `ExecStartPre=`/`ExecStart=` and reinstate
+    `ExecStart=` from scratch. Reading only `*.service` meant the guard below
+    could not see the artifacts it exists to police. R-393.
+    """
+    texts: dict[str, str] = {}
+    for path in sorted(services_dir.iterdir()):
+        if path.is_file() and path.suffix == ".service":
+            texts[path.name] = path.read_text(encoding="utf-8")
+    for path in sorted(services_dir.glob("*.service.d/*.conf")):
+        name = path.parent.name[: -len(".d")]
+        # `radon-.service.d` is a systemd PREFIX drop-in with no base unit of its
+        # own; merging it would invent a phantom `radon-.service`. Only drop-ins
+        # that name a real unit are merged.
+        if name not in texts:
+            continue
+        texts[name] = texts[name] + "\n" + path.read_text(encoding="utf-8")
+    return texts
 
 
 def _directive_values(text: str, prefix: str) -> list[str]:
-    values = []
+    """Values for every directive starting with `prefix`, with reset semantics.
+
+    An empty assignment (`ExecStart=`) clears the values accumulated for THAT
+    exact key, which is how a drop-in replaces a base unit's command rather than
+    appending to it. Without this the merged text above would still report the
+    base unit's `/home/radon` ExecStart that the drop-in overrode. R-393.
+    """
+    per_key: dict[str, list[str]] = {}
+    order: list[str] = []
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped.startswith(prefix):
             continue
-        key, _, value = stripped.partition("=")
-        if key.strip().startswith(prefix):
-            values.append(value.strip().lstrip("-+!:@").strip())
-    return values
+        key, sep, value = stripped.partition("=")
+        if not sep:
+            continue
+        key = key.strip()
+        if not key.startswith(prefix):
+            continue
+        if key not in per_key:
+            per_key[key] = []
+            order.append(key)
+        cleaned = value.strip().lstrip("-+!:@").strip()
+        if not cleaned:
+            per_key[key].clear()
+            continue
+        per_key[key].append(cleaned)
+    return [value for key in order for value in per_key[key]]
 
 
 def _runs_as_root(text: str) -> bool:

@@ -15,7 +15,9 @@ afterEach(() => {
 });
 
 const leapData: LeapData = {
-  scan_time: "2026-07-02T14:00:00Z",
+  // Fresh: the TRADE BEST link is suppressed past the leap-scan freshness
+  // window, and these cases are about RANKING, not staleness. R-415.
+  scan_time: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
   min_gap: 5,
   results: [
     {
@@ -57,7 +59,7 @@ const leapData: LeapData = {
 };
 
 const garchData: GarchConvergenceData = {
-  scan_time: "2026-07-02T14:05:00Z",
+  scan_time: new Date(Date.now() - 25 * 60 * 1000).toISOString(),
   tickers: {},
   pairs: [
     {
@@ -159,6 +161,11 @@ describe("LeapScanner", () => {
   });
 
   it("picks the widest gap, not the first mispriced row", () => {
+    // R-388: ranking now reads the LINKED CONTRACT's own gap, not the group's
+    // `best_gap`, so the fixture raises both. `best_gap` alone described the
+    // delta bucket rather than the contract the button opens, which is how a
+    // ticker whose contract was worth 18 vol points lost the headline slot to
+    // one whose contract was worth 6.
     const wider = {
       ...leapData,
       results: [
@@ -167,7 +174,12 @@ describe("LeapScanner", () => {
           ...leapData.results[0],
           ticker: "CRM",
           best_gap: 44.8,
-          best_leap: { ...leapData.results[0].best_leap!, strike: 260, expiry: "2027-06-17" },
+          best_leap: {
+            ...leapData.results[0].best_leap!,
+            strike: 260,
+            expiry: "2027-06-17",
+            gap: 44.8,
+          },
         },
       ],
     };

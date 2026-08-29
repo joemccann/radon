@@ -69,10 +69,17 @@ ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 RUN bun run build \
-    && mkdir -p /ms-playwright /home/radon/radon/web/public/data \
-    && bun x playwright install chromium chromium-headless-shell \
+    && mkdir -p /ms-playwright /home/radon/radon/web/public/data
+
+# Newsfeed imports playwright from the repo-root package. `bun x` from this
+# web WORKDIR fetched a different CLI revision than runtime 1.59.1 looks up
+# (chromium_headless_shell-1217), so launch failed and radon-newsfeed
+# crash-looped (page 3e952746). Install via the locked root binary.
+WORKDIR /home/radon/radon
+RUN ./node_modules/.bin/playwright install chromium chromium-headless-shell \
     && chown -R radon:radon /home/radon/radon /ms-playwright
 
+WORKDIR /home/radon/radon/web
 USER radon
 
 # next start via the web package.json start script

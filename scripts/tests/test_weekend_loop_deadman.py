@@ -404,7 +404,11 @@ class TestBackgroundWorkIsNotSilentlyKilled:
                 "-c",
                 "set -Eeuo pipefail\n"
                 f'PHASE=audit\nremain=30\nRUN_LOG="{run_log}"\n'
-                + _claude_invocation_line(LOOPS[name]),
+                f'KILL_AFTER_SECS=60\n'
+                # Since REL-137 the round is backgrounded so bash can act on a
+                # SIGTERM while it is running; wait for it before reading back.
+                + _claude_invocation_line(LOOPS[name])
+                + "\nwait",
             ],
             env={**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"},
             capture_output=True,
