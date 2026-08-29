@@ -86,7 +86,7 @@ async function main() {
   let visionTagger = null;
   try {
     visionTagger = createVisionTagger({
-      publicRoot: paths.publicRoot,
+      mediaDir: paths.mediaDir,
       getTaxonomySnapshot: taxonomyFn,
     });
   } catch (err) {
