@@ -12875,6 +12875,21 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
 
 /* A deep link named a contract the chain cannot serve. Says so rather than
    letting the ticket sit empty with no explanation (R-378, R-413). */
+/* Provenance marker on a realized-P&L cell that fell back to IB's own figure.
+   Deliberately quiet: it flags a degraded number, it does not shout. R-408. */
+.fills-source-marker {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 4px;
+  border: 1px solid var(--warn);
+  border-radius: 2px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--warn);
+  vertical-align: middle;
+}
+
 .chain-prefill-unavailable {
   border: 1px solid var(--warn);
   border-radius: 4px;
