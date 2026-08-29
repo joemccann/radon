@@ -453,13 +453,23 @@ def parse_cash_transactions(xml_text: str) -> list[dict[str, Any]]:
     # those need disambiguating, and knowing it up front keeps the id a pure
     # function of the row's own content rather than of its position. R-329.
     counts: dict[str, int] = {}
+    cash_txn_ids: set[str] = set()
     for ct in root.findall(".//CashTransaction"):
         tid = (ct.get("transactionID") or "").strip()
         if tid and float(ct.get("amount") or 0.0) != 0.0:
             counts[tid] = counts.get(tid, 0) + 1
+            cash_txn_ids.add(tid)
     for node in root.findall(".//Transfer"):
         tid = _cash_transfer_id_and_amount(node)[0]
-        if tid:
+        # A Transfer sharing a transactionID with a CashTransaction is the SAME
+        # movement described twice: the NAV query (1442520) carries both
+        # sections in one document, so this is the expected shape. Counting it
+        # here marked the id `duplicated` and guaranteed the divergent-suffix
+        # path — the Transfer's `raw_type` is `Transfer:<type>:<direction>`
+        # against the CashTransaction's bare IBKR `type`, so the two hashed to
+        # different ids and BOTH were upserted, doubling external capital flow
+        # and the TWR denominator. R-390.
+        if tid and tid not in cash_txn_ids:
             counts[tid] = counts.get(tid, 0) + 1
     duplicated = {tid for tid, n in counts.items() if n > 1}
     for ct in root.findall(".//CashTransaction"):
@@ -493,6 +503,10 @@ def parse_cash_transactions(xml_text: str) -> list[dict[str, Any]]:
             "raw_type": raw_type or None,
         })
     for node in root.findall(".//Transfer"):
+        # The CashTransaction is the canonical booking for a shared id; the
+        # Transfer is the same money described from the other side. R-390.
+        if _cash_transfer_id_and_amount(node)[0] in cash_txn_ids:
+            continue
         row = _cash_transfer_row(node, duplicated)
         if row is not None:
             out.append(row)
