@@ -50,7 +50,7 @@ class TestPortConsistency:
 
     def test_caddyfile_routes_to_relay_port_8765(self, caddy_dir):
         caddyfile = read_text(caddy_dir / "Caddyfile")
-        assert "localhost:8765" in caddyfile
+        assert "127.0.0.1:8765" in caddyfile
 
     def test_deploy_health_checks_fastapi_port_8321(self, scripts_dir):
         deploy = read_text(scripts_dir / "deploy.sh")
@@ -63,18 +63,18 @@ class TestPortConsistency:
     def test_caddyfile_api_route_matches_api_service_port(self, caddy_dir, services_dir):
         caddyfile = read_text(caddy_dir / "Caddyfile")
         api = read_text(services_dir / "radon-api.service")
-        assert "localhost:8321" in caddyfile
+        assert "127.0.0.1:8321" in caddyfile
         assert "--port 8321" in api
 
     def test_relay_service_corresponds_to_port_8765(self, caddy_dir):
         caddyfile = read_text(caddy_dir / "Caddyfile")
         assert re.search(r"handle\s+/ws", caddyfile)
-        assert "localhost:8765" in caddyfile
+        assert "127.0.0.1:8765" in caddyfile
 
     def test_nextjs_service_corresponds_to_port_3000(self, caddy_dir, services_dir):
         caddyfile = read_text(caddy_dir / "Caddyfile")
         nextjs = read_text(services_dir / "radon-nextjs.service")
-        assert "localhost:3000" in caddyfile
+        assert "127.0.0.1:3000" in caddyfile
         assert "radon-nextjs" in nextjs.lower() or "Next.js" in nextjs
 
     def test_docker_compose_exposes_live_and_paper_gateway_ports(self, root):
