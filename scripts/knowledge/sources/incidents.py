@@ -1,7 +1,14 @@
 """Incidents connector — service_health is current-state-per-service (PK is
 service, upserted each writer cycle; no history retained), so this emits one
 live state digest per service. Historical incident knowledge lives in
-tasks/lessons.md via the docs connector."""
+tasks/lessons.md via the docs connector.
+
+Content carries only what changes when something HAPPENS: the state, and the
+error text for a non-ok state. Attempt/updated timestamps and the per-run
+detail payload of a healthy service are rewritten every writer cycle; putting
+them in content made every service re-distill every hour. Timestamps ride
+last_activity_at, which the store only bumps when content changes — so it
+reads as "when this service's state last changed", not "last run"."""
 from __future__ import annotations
 
 import json
@@ -24,7 +31,7 @@ def fetch(db) -> Iterator[KnowledgeDoc]:
             source=SOURCE,
             scope=SCOPE,
             doc_key=service,
-            content=_digest(service, state, started, finished, last_error, updated),
+            content=_digest(service, state, last_error),
             title=f"{service} service health: {state}",
             metadata={"service": service, "state": state},
             created_at=updated,
@@ -32,18 +39,11 @@ def fetch(db) -> Iterator[KnowledgeDoc]:
         )
 
 
-def _digest(service, state, started, finished, last_error, updated) -> str:
+def _digest(service, state, last_error) -> str:
     lines = [f"Service {service} is {state or 'unknown'}."]
-    if started or finished:
-        lines.append(
-            f"Last attempt started {started or 'unknown'}, finished {finished or 'unknown'}."
-        )
-    detail = _detail(last_error)
+    detail = _detail(last_error) if state != "ok" else None
     if detail:
-        label = "Last run detail" if state == "ok" else "Last error"
-        lines.append(f"{label}: {detail}")
-    if updated:
-        lines.append(f"Updated {updated}.")
+        lines.append(f"Last error: {detail}")
     return "\n".join(lines)
 
 
