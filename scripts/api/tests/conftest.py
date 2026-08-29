@@ -30,3 +30,21 @@ def _isolate_ib_2fa_lock_orphan_state(monkeypatch):
     monkeypatch.setattr(ib_2fa_lock, "ORPHAN_CONFIRM_INTERVAL_SECS", 0.0)
     yield
     ib_2fa_lock.reset_orphan_state()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_flow_reports_dir(tmp_path, monkeypatch):
+    """Point the flow-report cache at tmp_path for every test in this subtree.
+
+    `server._FLOW_REPORTS_DIR` is the REAL `data/flow_reports`, so any case
+    that reaches POST /flow-analysis/{ticker} writes a live cache entry into
+    the working tree. That dirties the tree the weekend loops require clean,
+    trips deploy.sh's tracked-drift guard, and seeds a stub report that both
+    the FastAPI GET handler and web/app/api/flow-analysis/[ticker]/route.ts
+    then serve for a real ticker. scripts/tests/test_api_flow_cache.py already
+    patches this per-case; this makes it the default for the api subtree. T-275.
+    """
+    from scripts.api import server
+
+    monkeypatch.setattr(server, "_FLOW_REPORTS_DIR", tmp_path / "flow_reports")
+    yield
