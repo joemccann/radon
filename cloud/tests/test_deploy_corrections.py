@@ -2219,6 +2219,60 @@ rollback {'a' * 40}
         else:
             assert "rollback complete" in output
 
+    def _run_rollback(self, tmp_path, prev_sha: str, marker_sha: str | None):
+        marker = tmp_path / "green-marker"
+        if marker_sha is not None:
+            marker.write_text(f"{marker_sha}\n", encoding="utf-8")
+        shell = f"""
+set -euo pipefail
+source {DEPLOY!s}
+git() {{ return 0; }}
+recover_pending_transition() {{ return 0; }}
+sleep() {{ return 0; }}
+deploy_gate() {{ return 0; }}
+rollback {prev_sha}
+"""
+        return subprocess.run(
+            ["bash", "-c", shell],
+            env={**os.environ, "RADON_DEPLOY_GREEN_MARKER": str(marker)},
+            capture_output=True,
+            text=True,
+        )
+
+    def test_rollback_without_green_evidence_never_claims_the_gate_passed(
+        self, tmp_path: Path
+    ) -> None:
+        """T-254: CI run 33239774951 rolled f7b5eeb9 back to e4bc7171, whose own
+        ci.yml run (33197706791) concluded `failure` at `pytest (cloud mz)` with
+        the deploy job skipped. The log still asserted the release "passed the
+        deploy gate". A rollback target with no green-gate record must be
+        reported as unverified — and must still complete."""
+        prev = "e" * 40
+        result = self._run_rollback(tmp_path, prev, marker_sha="b" * 40)
+        output = (result.stdout + result.stderr).lower()
+        assert result.returncode == 1, output
+        assert "rollback complete" in output
+        assert "passed the deploy gate" not in output
+        assert "no green deploy-gate record" in output
+
+    def test_rollback_with_no_marker_at_all_is_reported_unverified(
+        self, tmp_path: Path
+    ) -> None:
+        result = self._run_rollback(tmp_path, "e" * 40, marker_sha=None)
+        output = (result.stdout + result.stderr).lower()
+        assert result.returncode == 1, output
+        assert "no green deploy-gate record" in output
+
+    def test_rollback_to_a_recorded_green_release_still_reports_it_passed(
+        self, tmp_path: Path
+    ) -> None:
+        prev = "c" * 40
+        result = self._run_rollback(tmp_path, prev, marker_sha=prev)
+        output = (result.stdout + result.stderr).lower()
+        assert result.returncode == 1, output
+        assert "passed the deploy gate" in output
+        assert "no green deploy-gate record" not in output
+
 
 class TestFrozenArtifacts:
     def test_deploy_and_setup_use_only_immutable_node_installs(self, deploy_text: str) -> None:
