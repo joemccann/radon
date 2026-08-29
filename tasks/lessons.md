@@ -1,5 +1,19 @@
 # Lessons
 
+## 2026-08-29 — Container newsfeed needs the host Playwright revision
+
+- Page `3e952746`: `radon-newsfeed` crash-looped after the container
+  cutover (`NRestarts=21`, `Result=exit-code`). Turso
+  `newsfeed-scraper` said `Executable doesn't exist at
+  /ms-playwright/chromium_headless_shell-1217`.
+- `bun x playwright install` from WORKDIR `web/` is not the repo-root
+  playwright the scraper imports. Host deploy already had 1217 in
+  `~/.cache/ms-playwright`. Bind that cache onto `/ms-playwright`;
+  install in the image via `./node_modules/.bin/playwright` from
+  `/home/radon/radon`.
+- A new GHCR tag is not required to recover (R-234): the wrapper is
+  control-plane and takes effect on the next unit restart.
+
 ## 2026-08-29 — Sidecar Restart=always is activating, not just down
 
 - Page `0b7726f8` moved newsfeed/monitor `down` onto DEPENDENCY_UNITS.

@@ -197,7 +197,26 @@ cmd_run() {
       --mount "type=bind,src=${NOTIFY_SOCKET},dst=${NOTIFY_SOCKET}"
   fi
   if [[ "$unit" == "radon-newsfeed.service" ]]; then
-    set -- "$@" --ipc host --env PLAYWRIGHT_CHROMIUM_SANDBOX=0
+    # Page 3e952746: the image ENV is PLAYWRIGHT_BROWSERS_PATH=/ms-playwright,
+    # but `bun x playwright install` during the image build did not leave
+    # chromium_headless_shell-1217 there. Host deploy already caches that
+    # revision at radon's ms-playwright dir. Bind it onto /ms-playwright so
+    # this unit can launch without waiting for a new GHCR tag (R-234).
+    # Overlay scripts/newsfeed from the live checkout so --no-sandbox in
+    # browser.js applies before the next image build.
+    local newsfeed_browsers newsfeed_scripts
+    if [[ "${RADON_APP_RUNTIME_TEST_MODE:-0}" == "1" ]]; then
+      newsfeed_browsers="${RADON_NEWSFEED_BROWSERS_PATH:-${STATE_DIR}/ms-playwright}"
+      newsfeed_scripts="${RADON_NEWSFEED_SCRIPTS_PATH:-${DATA_DIR}/newsfeed-scripts}"
+    else
+      newsfeed_browsers="${RADON_NEWSFEED_BROWSERS_PATH:-/home/radon/.cache/ms-playwright}"
+      newsfeed_scripts="${RADON_NEWSFEED_SCRIPTS_PATH:-/home/radon/radon/scripts/newsfeed}"
+    fi
+    set -- "$@" --ipc host \
+      --env PLAYWRIGHT_CHROMIUM_SANDBOX=0 \
+      --env PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+      -v "${newsfeed_browsers}:/ms-playwright" \
+      -v "${newsfeed_scripts}:/home/radon/radon/scripts/newsfeed"
   fi
 
   set -- "$@" "$image"
