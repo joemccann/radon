@@ -11,7 +11,7 @@ SERVICES = CLOUD / "services"
 DEPLOY = CLOUD / "scripts" / "deploy.sh"
 DROPIN = CLOUD / "services" / "radon-.service.d" / "runtime-container.conf.example"
 UNIT_DROPINS = tuple(
-    CLOUD / "services" / f"{name}.d" / "runtime-container.conf.example"
+    CLOUD / "services" / f"{name}.d" / "runtime-container.conf"
     for name in (
         "radon-api.service",
         "radon-nextjs.service",
@@ -57,15 +57,30 @@ def test_deploy_sh_never_docker_pulls() -> None:
 
 
 def test_container_dropin_is_not_a_live_unit() -> None:
-    for path in (DROPIN, *UNIT_DROPINS):
-        text = path.read_text(encoding="utf-8")
-        for line in text.splitlines():
-            if line.strip():
-                assert line.lstrip().startswith("#"), path.name
+    """The FLEET template is inert; the per-unit drop-ins are live by design.
+
+    This case required every per-unit drop-in to be fully commented out. That
+    stopped being true when bootstrap and `refresh_install_file` began
+    installing the real `.conf` for all five on every deploy, which is exactly
+    what R-420 filed: the `.conf.example` files said "MUST NOT be installed"
+    while the installer shipped their siblings automatically. The half that
+    still holds — no fleet-wide runtime-container drop-in, and no `.example`
+    reaches an installer — is what is asserted now.
+    """
+    text = DROPIN.read_text(encoding="utf-8")
+    for line in text.splitlines():
+        if line.strip():
+            assert line.lstrip().startswith("#"), DROPIN.name
     bootstrap = BOOTSTRAP.read_text(encoding="utf-8")
     assert "runtime-container.conf.example" not in bootstrap
     setup = SETUP.read_text(encoding="utf-8")
     assert "runtime-container.conf.example" not in setup
+    # ...and the live ones are control-plane artifacts, not stray files.
+    helper = (CLOUD / "scripts" / "deploy-root-helper.sh").read_text(encoding="utf-8")
+    for path in UNIT_DROPINS:
+        assert path.is_file(), path
+        rel = path.relative_to(CLOUD).as_posix()
+        assert rel in helper, rel
 
 
 def test_live_units_do_not_reference_ghcr() -> None:
