@@ -71,6 +71,8 @@ async function buildFromJournal(): Promise<BlotterPayload | null> {
   return null;
 }
 
+export const radonCapability = { GET: "read", POST: "mutate.workspace" };
+
 export async function GET(): Promise<Response> {
   const access = await requireRouteAccess(undefined, { rate: { key: "blotter:route", limit: 20, windowMs: 60_000 } });
   if (!access.ok) return access.response;

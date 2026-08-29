@@ -56,6 +56,8 @@ async function readSloPayload(): Promise<SloPayload> {
   return { window_ms: SLO_WINDOW_MS, since, rows };
 }
 
+export const radonCapability = "admin";
+
 export async function GET(): Promise<Response> {
   const access = await requireRouteAccess(undefined, { operatorOnly: true });
   if (!access.ok) return access.response;

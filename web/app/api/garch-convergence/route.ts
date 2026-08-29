@@ -70,6 +70,8 @@ async function readGarchFromDisk(): Promise<TimestampedRead<Record<string, unkno
   return { data, timestampMs: contentTimestampMs(data.scan_time) };
 }
 
+export const radonCapability = "read";
+
 export async function GET(): Promise<Response> {
   const requestId = getRequestId();
   const result = await cachedRead("garch:snapshot", READ_CACHE_TTL_MS, () =>

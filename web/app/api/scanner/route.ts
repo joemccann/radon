@@ -70,6 +70,8 @@ async function readScannerFromDisk(): Promise<TimestampedRead<Record<string, unk
   return { data, timestampMs: contentTimestampMs(data.scan_time) };
 }
 
+export const radonCapability = { GET: "read", POST: "read.spawn" };
+
 export async function GET(): Promise<Response> {
   const access = await requireRouteAccess(undefined, { rate: { key: "scanner:route", limit: 20, windowMs: 60_000 } });
   if (!access.ok) return access.response;

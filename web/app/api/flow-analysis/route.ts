@@ -70,6 +70,8 @@ async function readFlowAnalysisFromDisk(): Promise<TimestampedRead<Record<string
   return { data, timestampMs: contentTimestampMs(data.analysis_time) };
 }
 
+export const radonCapability = { GET: "read", POST: "read.spawn" };
+
 export async function GET(): Promise<Response> {
   const access = await requireRouteAccess(undefined, { rate: { key: "flow-analysis:route", limit: 20, windowMs: 60_000 } });
   if (!access.ok) return access.response;

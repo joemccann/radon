@@ -101,6 +101,8 @@ function toTelemetryToolCalls(toolEvents: ToolEvent[]): AssistantTurnToolCall[] 
   }));
 }
 
+export const radonCapability = "internal";
+
 export async function POST(request: NextRequest): Promise<Response> {
   const access = await requireRouteAccess(request, {
     rate: { key: "assistant:route", limit: 10, windowMs: 60_000 },
