@@ -58,8 +58,8 @@ from test_caddyfile import (  # noqa: E402
 REPO = Path(__file__).resolve().parents[2]
 WS_TICKET = REPO / "web" / "lib" / "wsTicket.ts"
 
-APP_UPSTREAM = "localhost:3000"
-IB_UPSTREAM = "localhost:8321"
+APP_UPSTREAM = "127.0.0.1:3000"
+IB_UPSTREAM = "127.0.0.1:8321"
 
 
 def _directive_seconds(block: str, name: str) -> float | None:

@@ -31,7 +31,7 @@
     }
 
     handle /ws* {
-        reverse_proxy localhost:8765
+        reverse_proxy 127.0.0.1:8765
     }
 
     # Ride out an upstream restart instead of forwarding it to the browser.
@@ -43,7 +43,7 @@
     # Do NOT add fail_duration: marking the single upstream down would take
     # the retry loop out of the picture and 502 immediately again.
     handle_path /api/ib/* {
-        reverse_proxy localhost:8321 {
+        reverse_proxy 127.0.0.1:8321 {
             lb_try_duration 15s
             lb_try_interval 250ms
 
@@ -90,10 +90,18 @@
                 respond `{"reachable":false,"observer":"caddy"}` 200
             }
         }
+        # handle_response only sees an upstream HTTP response. A dial refused
+        # to :8330 (healthd stopped during deploy) is a Caddy-synthesized 502
+        # that never matches @down, which is how Tier-3 recorded status_http_502
+        # at 318ms while ping still returned 200.
+        handle_errors {
+            header Content-Type application/json
+            respond `{"reachable":false,"observer":"caddy"}` 200
+        }
     }
 
     handle {
-        reverse_proxy localhost:3000 {
+        reverse_proxy 127.0.0.1:3000 {
             lb_try_duration 15s
             lb_try_interval 250ms
 
