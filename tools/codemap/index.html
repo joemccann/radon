@@ -24,18 +24,21 @@
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; overflow: hidden; background: var(--bg-canvas); color: var(--text-primary); font-family: var(--font-ui); }
-  #gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; }
+  #gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
   #gl.dragging { cursor: grabbing; }
 
   #panel {
-    position: absolute; top: 16px; left: 16px; width: 320px; max-height: calc(100% - 32px);
+    position: absolute; top: 16px; left: 16px; width: min(320px, calc(100vw - 32px)); max-height: calc(100% - 32px);
     background: var(--bg-panel); border: 1px solid var(--line-grid); border-radius: 4px;
     display: flex; flex-direction: column; overflow: hidden; z-index: 10;
   }
   #panel header {
     padding: 10px 12px; border-bottom: 1px solid var(--line-grid);
-    display: flex; align-items: baseline; justify-content: space-between;
+    display: flex; align-items: baseline; justify-content: space-between; cursor: pointer;
+    -webkit-tap-highlight-color: transparent; user-select: none;
   }
+  #panel.collapsed .body, #panel.collapsed #selection, #panel.collapsed footer { display: none; }
+  #panel.collapsed header { border-bottom: none; }
   #panel header h1 { font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: 0.03em; color: var(--signal-core); }
   #panel header .meta { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
   #panel .body { padding: 12px; overflow-y: auto; }
@@ -481,6 +484,60 @@
       tooltip.style.display = "none";
     }
   }
+  // Touch: one finger pans (tap selects), two fingers pinch-zoom.
+  let touchMode = null; // "pan" | "pinch"
+  let touchMoved = false;
+  let lastTouch = null; // [x, y] for pan
+  let lastPinch = null; // { dist, cx, cy }
+  function touchPoints(ev) {
+    return Array.from(ev.touches).map((t) => [t.clientX, t.clientY]);
+  }
+  canvas.addEventListener("touchstart", (ev) => {
+    ev.preventDefault();
+    const pts = touchPoints(ev);
+    if (pts.length === 1) {
+      touchMode = "pan"; touchMoved = false; lastTouch = pts[0];
+    } else if (pts.length >= 2) {
+      touchMode = "pinch"; touchMoved = true;
+      const dx = pts[1][0] - pts[0][0], dy = pts[1][1] - pts[0][1];
+      lastPinch = { dist: Math.hypot(dx, dy), cx: (pts[0][0] + pts[1][0]) / 2, cy: (pts[0][1] + pts[1][1]) / 2 };
+    }
+  }, { passive: false });
+  canvas.addEventListener("touchmove", (ev) => {
+    ev.preventDefault();
+    const pts = touchPoints(ev);
+    if (touchMode === "pan" && pts.length === 1) {
+      const dx = pts[0][0] - lastTouch[0], dy = pts[0][1] - lastTouch[1];
+      if (Math.abs(dx) + Math.abs(dy) > 4) touchMoved = true;
+      cam.x -= dx / cam.scale;
+      cam.y -= dy / cam.scale;
+      lastTouch = pts[0];
+      requestDraw();
+    } else if (pts.length >= 2) {
+      touchMode = "pinch";
+      const dx = pts[1][0] - pts[0][0], dy = pts[1][1] - pts[0][1];
+      const pinch = { dist: Math.hypot(dx, dy), cx: (pts[0][0] + pts[1][0]) / 2, cy: (pts[0][1] + pts[1][1]) / 2 };
+      if (lastPinch && lastPinch.dist > 0) {
+        const [wx, wy] = screenToWorld(pinch.cx, pinch.cy);
+        cam.scale = Math.min(60, Math.max(0.01, cam.scale * (pinch.dist / lastPinch.dist)));
+        const [wx2, wy2] = screenToWorld(pinch.cx, pinch.cy);
+        cam.x += wx - wx2;
+        cam.y += wy - wy2;
+        restyle();
+      }
+      lastPinch = pinch;
+    }
+  }, { passive: false });
+  canvas.addEventListener("touchend", (ev) => {
+    ev.preventDefault();
+    if (ev.touches.length === 0) {
+      if (touchMode === "pan" && !touchMoved && lastTouch) select(pick(lastTouch[0], lastTouch[1]));
+      touchMode = null; lastTouch = null; lastPinch = null;
+    } else if (ev.touches.length === 1) {
+      touchMode = "pan"; touchMoved = true; lastTouch = touchPoints(ev)[0]; lastPinch = null;
+    }
+  }, { passive: false });
+
   canvas.addEventListener("wheel", (ev) => {
     ev.preventDefault();
     const factor = Math.exp(-ev.deltaY * 0.0016);
@@ -582,6 +639,11 @@
   document.getElementById("meta-counts").textContent = N + " files · " + E + " edges";
   document.getElementById("meta-footer").textContent =
     "generated " + DATA.meta.generated_at + " · python3 tools/codemap/generate_codemap.py";
+
+  // ---------- panel collapse (small screens start collapsed) ----------
+  const panel = document.getElementById("panel");
+  panel.querySelector("header").addEventListener("click", () => panel.classList.toggle("collapsed"));
+  if (window.innerWidth <= 640) panel.classList.add("collapsed");
 
   // ---------- boot ----------
   window.addEventListener("resize", resize);
