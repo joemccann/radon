@@ -173,7 +173,14 @@ def _health_names_written_by(unit_stem: str) -> set[str]:
         text = path.read_text(encoding="utf-8", errors="replace")
         names |= _names_in(text)
         if path.suffix == ".sh":
-            for inner in re.findall(r"(scripts/[A-Za-z0-9_./-]+\.(?:py|js))", text):
+            # Comments FIRST. `run_flow_refresh.sh` mentions
+            # `scripts/api/server.py` in a comment about a shed marker, which
+            # attributed every name that file writes to the flow-refresh timer.
+            # R-412.
+            code = "\n".join(
+                line for line in text.splitlines() if not line.lstrip().startswith("#")
+            )
+            for inner in re.findall(r"(scripts/[A-Za-z0-9_./-]+\.(?:py|js))", code):
                 inner_path = _resolve(inner)
                 if inner_path is not None:
                     names |= _names_in(inner_path.read_text(encoding="utf-8", errors="replace"))

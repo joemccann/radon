@@ -113,6 +113,12 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # Matches web/lib/serviceHealthWindows.ts.
     "cri-scan":         {"open": 35 * _MIN, "closed": 3 * _DAY, "requires_ib": True},
     "vcg-scan":         {"open": 15 * _MIN, "closed": 3 * _DAY, "requires_ib": True},
+    # gex-scan — the 15-minute RTH driver runs it (data_refresh._SCRIPT_SERVICES
+    # maps gex_scan.py -> "gex-scan"), but it was in neither this catalog nor
+    # the error bucket derived from it, so check.py never evaluated it and a
+    # failing gex_scan was invisible. Same windows as its vcg-scan sibling;
+    # UWClient only, so no IB dependency. R-422.
+    "gex-scan":         {"open": 15 * _MIN, "closed": 3 * _DAY, "requires_ib": False},
     # radon-breadth.timer fires every 5 min across ET trading hours into
     # run_breadth_scan.sh -> breadth_scan.py's mirror_scan_snapshot. It was in
     # NEITHER catalog, so it appeared in no BUCKETS list and check.py — which
@@ -404,6 +410,7 @@ OPEN_BELL_GRACE_SERVICES: frozenset[str] = frozenset({
 BUCKETS: dict[str, list[str]] = {
     "intraday": [
         "vcg-scan",
+        "gex-scan",
         "breadth-scan",
         # The 15-min RTH driver behind cri/vcg/gex. The scans heartbeat their
         # own names; nothing observed the DRIVER until R-325.
