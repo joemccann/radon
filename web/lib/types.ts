@@ -120,6 +120,13 @@ export type WorkspaceNavItem = {
   group: NavGroupId;
 };
 
+/**
+ * Where a leg's cost basis came from. `mixed` is position-level only: some
+ * legs carry this session's fill VWAP while others still carry IB's lagged
+ * avgCost, so no aggregate over the legs describes a real trade.
+ */
+export type BasisSource = "ib" | "journal" | "session_fills" | "mixed";
+
 export type PortfolioLeg = {
   con_id?: number | null;
   /** Per-leg expiry for calendars/diagonals. Falls back to position expiry. */
@@ -133,6 +140,7 @@ export type PortfolioLeg = {
   market_price: number | null;
   market_value: number | null;
   market_price_is_calculated?: boolean;
+  basis_source?: BasisSource | null;
 };
 
 export type LegacyPositionReturnCapitalPayload = {
@@ -202,8 +210,10 @@ export type PortfolioPosition = {
   expiry: string;
   contracts: number;
   direction: string;
-  entry_cost: number;
+  /** `null` when the legs disagree about their basis source (`mixed`). */
+  entry_cost: number | null;
   max_risk: number | null;
+  basis_source?: BasisSource | null;
   /**
    * Legacy projected margin field. It is not a valid return denominator unless
    * `init_margin_at_entry_metadata` proves the value is fill-linked.
