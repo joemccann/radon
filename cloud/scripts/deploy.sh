@@ -1775,6 +1775,18 @@ supervise_deploy_command() {
     fi
   fi
 
+  # Recovery-only pass. The deploy job runs this BEFORE sync-control-plane:
+  # bootstrap refuses while a transition journal is pending, and a journal
+  # left by a failed deploy was only ever recovered here, after the sync had
+  # already given up (run 33266012501: six refusals, then preflight aborted
+  # on the very control-plane change the sync would have installed). R-430.
+  if [[ "${RADON_DEPLOY_RECOVER_ONLY:-0}" == "1" ]]; then
+    log_info "Recovery pass complete; no deploy requested"
+    trap - TERM INT HUP
+    exec 9>&-
+    return 0
+  fi
+
   local exit_code=0
   timeout --signal=TERM --kill-after="${DEPLOY_KILL_AFTER}s" \
     "${DEPLOY_TIMEOUT}s" "$@" 9>&- &

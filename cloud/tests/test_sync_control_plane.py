@@ -200,17 +200,73 @@ class TestContracts:
         assert "ROOT_SYNC_ACTION_TIMEOUT" in selector
         assert "sync-control-plane" not in function_body(helper, "action_queues_radon_jobs")
 
-    def test_deploy_job_syncs_before_deploy_sh_and_prestage_does_not(self):
+    def test_deploy_job_recovers_then_syncs_then_deploys_and_prestage_does_neither(self):
         ci = CI.read_text(encoding="utf-8")
         deploy_job = ci.split("\n  deploy:\n", 1)[1]
         stage_job = ci.split("\n  stage-release:\n", 1)[1].split("\n  deploy:\n", 1)[0]
         assert "sync-control-plane.sh" not in stage_job
+        assert "RADON_DEPLOY_RECOVER_ONLY" not in stage_job
+        recover_at = deploy_job.index('RADON_DEPLOY_RECOVER_ONLY=1 bash "$RUNNER/cloud/scripts/deploy.sh" "$SHA"')
         sync_at = deploy_job.index('sync-control-plane.sh')
-        deploy_at = deploy_job.index('bash "$RUNNER/cloud/scripts/deploy.sh" "$SHA"')
-        assert sync_at < deploy_at
+        deploy_at = deploy_job.index('\n            bash "$RUNNER/cloud/scripts/deploy.sh" "$SHA"')
+        assert recover_at < sync_at < deploy_at
+        # A runner predating the flag would run a full deploy under it.
+        assert "grep -q 'RADON_DEPLOY_RECOVER_ONLY' \"$RUNNER/cloud/scripts/deploy.sh\"" in deploy_job
         # Runs from the immutable runner of the tested SHA, tolerant of a
         # release that predates the script.
         assert 'if [[ -f "$RUNNER/cloud/scripts/sync-control-plane.sh" ]]; then' in deploy_job
+
+    def _supervisor(self, tmp_path, *, journal: bool, recover_only: str, recovery_rc: int = 0):
+        journal_file = tmp_path / "transition.json"
+        if journal:
+            journal_file.write_text("{}", encoding="utf-8")
+        shell = f"""
+set -euo pipefail
+source {DEPLOY}
+# macOS test hosts have neither util-linux flock nor GNU timeout.
+flock() {{ return 0; }}
+timeout() {{ shift 3; "$@"; }}
+recover_pending_transition() {{ printf recovered > {tmp_path / 'recovered'}; return {recovery_rc}; }}
+supervise_deploy_command bash -c 'printf deployed > {tmp_path / "deployed"}'
+"""
+        return subprocess.run(
+            ["bash", "-c", shell],
+            env={
+                **os.environ,
+                "RADON_DEPLOY_LOCK_FILE": str(tmp_path / "deploy.lock"),
+                "RADON_DEPLOY_TRANSITION_JOURNAL": str(journal_file),
+                "RADON_DEPLOY_RECOVER_ONLY": recover_only,
+                "DEPLOY_TIMEOUT": "30",
+                "DEPLOY_KILL_AFTER": "5",
+            },
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+    def test_recover_only_pass_recovers_a_pending_journal_and_deploys_nothing(self, tmp_path):
+        result = self._supervisor(tmp_path, journal=True, recover_only="1")
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert (tmp_path / "recovered").exists()
+        assert not (tmp_path / "deployed").exists()
+        assert "Recovery pass complete" in result.stdout + result.stderr
+
+    def test_recover_only_pass_is_a_noop_without_a_journal(self, tmp_path):
+        result = self._supervisor(tmp_path, journal=False, recover_only="1")
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert not (tmp_path / "recovered").exists()
+        assert not (tmp_path / "deployed").exists()
+
+    def test_recover_only_pass_still_refuses_when_recovery_fails(self, tmp_path):
+        result = self._supervisor(tmp_path, journal=True, recover_only="1", recovery_rc=1)
+        assert result.returncode == 76
+        assert not (tmp_path / "deployed").exists()
+
+    def test_without_the_flag_the_supervisor_recovers_then_deploys(self, tmp_path):
+        result = self._supervisor(tmp_path, journal=True, recover_only="0")
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert (tmp_path / "recovered").exists()
+        assert (tmp_path / "deployed").exists()
 
     def test_prestage_skips_instead_of_failing_when_control_plane_is_not_ready(self, tmp_path):
         shell = f"""
