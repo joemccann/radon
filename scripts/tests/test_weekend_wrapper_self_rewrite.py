@@ -141,11 +141,23 @@ def _build(
         'exit "${STUB_CLAUDE_RC:-0}"\n' % attack_sh,
     )
 
+    # REL-137 gave the real invocation `-k <secs>` so a claude blocked on a
+    # hung child cannot make the cap advisory. The stub has to consume the
+    # option pair as well as the duration, or it execs the duration.
     _executable(
         bin_dir / "timeout",
         "#!/bin/bash\n"
-        "shift\n"
-        'if [ "${STUB_TIMEOUT_124:-0}" = "1" ]; then exit 124; fi\n'
+        'while [ $# -gt 0 ]; do\n'
+        '  case "$1" in\n'
+        '    -k|--kill-after) shift 2 ;;\n'
+        '    --foreground|--preserve-status) shift ;;\n'
+        '    *) shift; break ;;\n'
+        '  esac\n'
+        'done\n'
+        # Only the AGENT invocation simulates the cap. Since REL-137 the
+        # dead-man `gh` calls also run under `timeout` (R-409), and failing
+        # those left the run with no comment to assert on at all.
+        'if [ "${STUB_TIMEOUT_124:-0}" = "1" ] && [ "${1##*/}" = "claude" ]; then exit 124; fi\n'
         'exec "$@"\n',
     )
 
@@ -331,8 +343,12 @@ def test_a_clone_without_the_marker_is_refused_and_reported(tmp_path: Path, loop
     comments = _comments(cfg)
     assert len(comments) == 1, _why(result, cfg)
     assert "REFUSED" in comments[0], comments
-    # Third arg 0: the rolling issue carries it, no 00:00 Pushover.
-    assert _pages(cfg) == 0
+    # This case REQUIRED the page to be suppressed. A clone that lost its
+    # marker makes every daily fire exit 2 in under a second, forever, and the
+    # only signal was a comment on a rolling issue nobody watches — the file
+    # header and SKILL.md both promise the opposite. The half that still
+    # matters (exactly one comment, naming REFUSED) is kept. R-410.
+    assert _pages(cfg) == 1
 
 
 @pytest.mark.parametrize("loop", LOOP_IDS)
