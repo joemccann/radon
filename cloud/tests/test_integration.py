@@ -226,8 +226,11 @@ class TestSecurity:
         port_lines = re.findall(r'"(.+?)"', compose)
         for port_mapping in port_lines:
             if ":" in port_mapping and any(c.isdigit() for c in port_mapping):
-                bound_to_loopback = port_mapping.startswith("127.0.0.1:")
-                bound_to_tailscale = port_mapping.startswith("100.")
+                # A `${VAR:-default}` host part is judged by its default: that
+                # is what binds when the env leaves the override unset.
+                bind = re.sub(r"^\$\{[A-Z0-9_]+:-([^}]+)\}", r"\1", port_mapping)
+                bound_to_loopback = bind.startswith("127.0.0.1:")
+                bound_to_tailscale = bind.startswith("100.")
                 assert bound_to_loopback or bound_to_tailscale, (
                     f"Port mapping {port_mapping} must bind to 127.0.0.1 or the "
                     "Tailscale interface IP (100.x), never 0.0.0.0"
