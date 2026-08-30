@@ -130,7 +130,8 @@ _PRICE_HISTORY_INSERT_CHUNK_ROWS = 400
 def upsert_price_history_rows(symbol: str, rows: list[dict[str, Any]]) -> None:
     """Batched upsert of daily closes into price_history_daily.
 
-    Each row: {"date": "YYYY-MM-DD", "close": float, "source": "ib"|"uw"|"yahoo"}.
+    Each row: {"date": "YYYY-MM-DD", "close": float,
+    "source": "ib"|"uw"|"rh"|"yahoo"}.
     fetched_at is stamped at write time. Writes go as chunked multi-row
     INSERT statements, never per-row.
     """
@@ -953,6 +954,44 @@ def upsert_twr_history(date_str: str, twr: float) -> None:
         """,
         (date_str, float(twr), _now_iso()),
     )
+    db.commit()
+
+
+RH_CROWDING_UPSERT_SQL = """
+INSERT INTO rh_crowding
+  (date, symbol, popular_rank, watchlists, scan_hits, recorded_at)
+VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(date, symbol) DO UPDATE SET
+  popular_rank = excluded.popular_rank,
+  watchlists   = excluded.watchlists,
+  scan_hits    = excluded.scan_hits,
+  recorded_at  = excluded.recorded_at
+"""
+
+
+def upsert_rh_crowding_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
+    """Robinhood retail-crowding overlay — one row per (date, symbol).
+
+    Descriptive crowding features only (popular-watchlist rank + scan hits
+    from the read-only trading MCP). This series must never feed the Four
+    Gates; see migration 0066 and test_rh_crowding.py.
+    """
+    if not rows:
+        return
+    stamp = recorded_at or _now_iso()
+    db = get_db()
+    for row in rows:
+        db.execute(
+            RH_CROWDING_UPSERT_SQL,
+            (
+                row["date"],
+                row["symbol"],
+                row.get("popular_rank"),
+                json.dumps(row.get("watchlists") or []),
+                int(row.get("scan_hits") or 0),
+                stamp,
+            ),
+        )
     db.commit()
 
 
