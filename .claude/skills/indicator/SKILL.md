@@ -42,8 +42,12 @@ auth, or has hostile terms.
 Write `docs/indicators/<slug>.md`: signal definition and thresholds, source facts from
 Step 1, payload shape (`scan_time`, `source_last_modified`, `current`, `series[]`),
 migration DDL, API contract (missing object, cache headers, MAX_AGE reasoning), UI spec
-(strip cells, chart series/axes, presets, copy strings including tooltip), timer
-cadence, and the exact file checklist per the pattern skill.
+(strip cells, chart series/axes, presets, copy strings including tooltip), the
+**freshness rail** (the `<NAME>_REFRESH` constant that mirrors the timer's
+`OnCalendar`, the `<FreshnessRail>` mount under the strip with its two testIds, and
+which payload field feeds `asOf`), timer cadence, and the exact file checklist per
+the pattern skill. The countdown is not optional: an indicator with a timer always
+shows when its source is next sampled, and the spec must name the constant.
 
 Then write the failing tests against the spec (implementation files do not exist yet):
 
@@ -62,8 +66,8 @@ Partition by ownership so merges are near-disjoint:
 | Worktree branch | Owns | Its tests |
 |---|---|---|
 | `ind/<slug>-ingestion` | `scripts/fetch_<name>.py`, client, migration, `scripts/db/writer.py` additions, `scripts/watchdog/services.py`, `cloud/services/radon-<name>.{service,timer}`, `setup-vps.sh` array, `cloud/tests/test_systemd_services.py` | `pytest scripts/tests/test_<name>.py` + `pytest cloud/tests -q` |
-| `ind/<slug>-api` | `web/app/api/<name>/route.ts`, `web/lib/<name>.ts`, `web/lib/use<Name>.ts`, `web/lib/serviceHealthWindows.ts` entry + its pin test update | `bunx vitest run --config vitest.config.ts web/tests/<name>-api.test.ts web/tests/service-health-windows.test.ts` |
-| `ind/<slug>-ui` | `web/components/<Name>Panel.tsx`, `RegimePanel.tsx` registration (all four places), `web/app/regime/<slug>/page.tsx`, `web/tests/regime-tab-routes.test.tsx` update, `web/e2e/<name>-tab.spec.ts` | `bunx vitest run --config vitest.config.ts web/tests/<name>-panel.test.tsx web/tests/regime-tab-routes.test.tsx` |
+| `ind/<slug>-api` | `web/app/api/<name>/route.ts`, `web/lib/<name>.ts`, `web/lib/use<Name>.ts`, `web/lib/serviceHealthWindows.ts` entry + its pin test update, `web/lib/refreshSchedule.ts` `<NAME>_REFRESH` constant + its `web/tests/refresh-schedule.test.ts` case (mirrors the timer the ingestion worktree writes; both copy the `OnCalendar` from the spec) | `bunx vitest run --config vitest.config.ts web/tests/<name>-api.test.ts web/tests/service-health-windows.test.ts web/tests/refresh-schedule.test.ts` |
+| `ind/<slug>-ui` | `web/components/<Name>Panel.tsx` (with the `<FreshnessRail>` mount), `RegimePanel.tsx` registration (all four places), `web/app/regime/<slug>/page.tsx`, `web/tests/regime-tab-routes.test.tsx` update, `web/e2e/<name>-tab.spec.ts` | `bunx vitest run --config vitest.config.ts web/tests/<name>-panel.test.tsx web/tests/regime-tab-routes.test.tsx` |
 
 Mechanics:
 
@@ -116,9 +120,13 @@ lockstep pins, coverage ratchet). Do not loosen a pin test to get green.
    `page.screenshot({ path: "docs/indicators/<slug>-tab.png", fullPage: false })`.
 4. Assert on the live page: the chart `<svg>` has stroked paths (real data, not the
    empty state); the header clock/`SOURCE UPDATED` cell shows the actual ingest/source
-   timestamps; and **no copy claims a cadence the backend does not meet** — grep the
-   new UI strings for `Refresh|Updated|hourly|daily|5m` and check each against the
-   real timer OnCalendar. Screenshot both themes if the change touches theme tokens.
+   timestamps; the freshness rail (`[data-testid="<name>-freshness-rail"]`) shows
+   `As of <data_date>` and a ticking `Next sample` countdown whose target equals the
+   next `OnCalendar` slot of `cloud/services/radon-<name>.timer` (compute it from the
+   unit file, do not eyeball it); and **no copy claims a cadence the backend does not
+   meet** — grep the new UI strings for `Refresh|Updated|hourly|daily|5m` and check
+   each against the real timer OnCalendar. Screenshot both themes if the change
+   touches theme tokens.
 
 ## Step 6 — Ship and verify production
 
