@@ -32,7 +32,7 @@ export const SOURCE_FOOTNOTE = "Source: Interactive Brokers daily bars (Yahoo fa
 
 export type DispersionRegime = "BROAD STRESS" | "BELOW THE SURFACE" | "COMPRESSED" | "NORMAL";
 
-export type DispersionSourceKind = "ib" | "yahoo" | "mixed";
+export type DispersionSourceKind = "ib" | "yahoo" | "mixed" | "stored" | "none";
 
 export interface DispersionSource {
   prices: DispersionSourceKind;
