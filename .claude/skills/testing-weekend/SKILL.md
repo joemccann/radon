@@ -657,3 +657,39 @@ how this loop improves as the codebase grows.
   deploy. That is T-117 / T-248 recurring for a third time, and this audit saw
   it as a fact in the git log rather than as a hypothesis. Note the day of the
   week in the audit preamble; it changes what the gate run is evidence of.
+
+- **2026-08-30 (audit): when a gate flips red with NO source or test change in
+  the range, diff the ENVIRONMENT, and start with the files the setup script
+  copies.** Twenty-two pytest reds appeared in files untouched since May;
+  `git log` on every module in the import chain was empty. The cause was
+  `web/.env` — provisioned into this clone by the delta's own `14065b74`
+  (`cp -p`, so its mtime still read Aug 24 and looked old) — and a `load_dotenv`
+  spy on `import cash_flow_sync` named the loader in one run. Two rails:
+  (a) `stat -f '%SB'` (birth time) on any `.env`-class file, not `ls -l`; (b)
+  prove an env-dependence claim in BOTH directions before filing it
+  (`TURSO_DB_URL= TURSO_AUTH_TOKEN= pytest <files>` → green; unmasked → red),
+  and yesterday's gate output under `/tmp/tw-<date-1>/gates/` is the cheapest
+  proof that the tree, not the host, is what changed.
+- **2026-08-30 (audit): one detached script per collection ROOT for the added-
+  file determinism runs.** `pytest cloud/tests/x.py scripts/tests/y.py` in one
+  invocation dies at collection with `ImportPathMismatchError: tests.conftest`
+  (both roots own a `tests/conftest.py`), so the 3× run reported nothing and
+  looked like a hung job. Split by root — it is also why CI runs them as
+  separate jobs.
+- **2026-08-30 (audit): the reliability loop's gates WILL overlap yours, and
+  its vitest alone takes this host to load 250.** Round 2 of the full gate was
+  launched at load 4.5 with only two light agents left; nine minutes later the
+  other loop's `npx vitest run` started in `~/radon-weekend/radon/` and the
+  round's vitest came back `3 failed`, all bare timeouts, 22/22 green in
+  isolation. Before calling any round's number, `ps -eo pcpu,args | grep
+  radon-weekend/radon/` — if the other clone is mid-gate, the round is a load
+  sample, not a verdict, and the isolation re-run is the number to quote.
+- **2026-08-30 (audit): a delta TEST can create the artifact that reds an
+  UNTOUCHED test.** `test_next_clerk_guard.py`'s `"pk_live_" + "fixture" * 4`
+  dodges gitleaks and the source-level scan, but CPython constant-folds it into
+  the `.pyc` written at collection, and `test_integration.py`'s "tracked files"
+  walker reads `__pycache__`. CI never sees it because the two files are in
+  different shards. Add to the after-gate sweep: when a cloud red names a path
+  under `__pycache__`, `node_modules` or `.next`, the finding is the walker,
+  not the environment — and check whether the shard split is what keeps CI
+  green.
