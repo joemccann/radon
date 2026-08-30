@@ -58,11 +58,12 @@ class TestPortBindings:
     def test_port_4001_bound_to_loopback_and_tailscale(self, ports):
         # Host 4001 -> container 4003 (IB API), published on loopback (for the
         # VPS-local FastAPI) and the Tailscale interface IP (for the laptop),
-        # never on the public wildcard.
+        # never on the public wildcard. Tailscale bind is env-parameterized so
+        # a rebuilt node does not require editing compose.
         matching = [p for p in ports if "4001:4003" in p]
         assert len(matching) == 2
         assert any(p.startswith("127.0.0.1:") for p in matching)
-        assert any(p.startswith("100.") for p in matching)
+        assert any("IB_GATEWAY_TAILSCALE_BIND" in p and "100.112.32.16" in p for p in matching)
         assert all(not p.startswith("0.0.0.0") for p in matching)
 
     def test_paper_port_4002_maps_to_container_4004_on_localhost(self, ports):
@@ -82,6 +83,10 @@ class TestPortBindings:
     def test_no_ports_bound_to_all_interfaces(self, ports):
         for port in ports:
             assert "0.0.0.0" not in port, f"Port {port} is bound to 0.0.0.0"
+            if "IB_GATEWAY_TAILSCALE_BIND" in port:
+                assert port.endswith(":4001:4003")
+                assert ":-100.112.32.16}" in port
+                continue
             parts = port.split(":")
             assert len(parts) == 3, (
                 f"Port {port} missing explicit bind address (defaults to 0.0.0.0)"

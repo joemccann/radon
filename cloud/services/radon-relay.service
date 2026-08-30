@@ -1,9 +1,9 @@
 [Unit]
 Description=Radon WebSocket relay
 After=network.target radon-ib-gateway.service
-PartOf=radon-ib-gateway.service
-# Ordering only. Gateway-led starts pull relay via the Gateway unit's Wants=;
-# deploy/app restarts must never pull Gateway while holding the deploy lock.
+# Ordering only. Do not PartOf= the Gateway: a broker restart must not
+# cascade-stop the relay (needed for the two-host split and for 2FA cycles
+# on the combined host). Deploy/app restarts must never pull Gateway.
 # Anti-thrash: a wedge that will not clear hits the start limit (units.py
 # P1-alarms it) instead of crash-looping forever.
 StartLimitIntervalSec=300
