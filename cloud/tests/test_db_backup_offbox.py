@@ -671,7 +671,13 @@ class TestAnEmptyDumpIsNotABackup:
         assert detail["rows"] == 1
         assert detail["pruned"] == len(expired)
         assert detail["offbox_error"] is None
-        assert len(client.uploaded) == 1
+        # R-445: the off-box leg now runs BEFORE the prune, so the two expired
+        # dumps are backfilled and confirmed first, then unlinked. Tonight's
+        # dump is uploaded alongside them (was `== 1` when the prune ran first).
+        uploaded_names = [pathlib.Path(key).name for _path, key in client.uploaded]
+        assert len(uploaded_names) == 1 + len(expired)
+        assert detail["path"].endswith(tuple(uploaded_names))
+        assert set(expired) <= set(uploaded_names)
 
 
 # Production 2026-08-29 20:28Z (page 29c8a560): dump of 100 tables / 1.4M
@@ -791,3 +797,128 @@ class TestTransientB2UploadRetry:
             db_backup.sync_offbox(tmp_path, cfg, client=client)
         assert client.attempts == ["db_backups/radon-a.sql.gz"]
         assert client.uploaded == []
+
+
+# R-445: 1cb81bc9 cut local retention to 7 days, but `run_backup` pruned every
+# `*.sql.gz` past that window BEFORE the off-box leg ran, on mtime alone. B2
+# credentials rotate (AccessDenied is non-transient and not retried); each
+# night pages `error`, and on night 8 the night-1 dump is unlinked with no
+# off-box copy: a permanent hole in the 365-day series.
+class AccessDenied(Exception):
+    """Shape of a rotated-credential PUT failure: non-transient, not retried."""
+
+
+class _AccessDeniedClient(_StubClient):
+    def upload_file(self, path, bucket, key, **kwargs):
+        self.attempts.append(key)
+        raise AccessDenied(
+            "An error occurred (AccessDenied) when calling the PutObject operation"
+        )
+
+
+def _seed_nightly_dumps(backup_dir, nights=8):
+    """Eight nightly dumps aged 1..8 days (less an hour, so the 7-day one sits
+    inside the window), OLDEST FIRST; only the oldest is past RETENTION_DAYS."""
+    assert nights > db_backup.RETENTION_DAYS
+    names = []
+    for index in range(nights):
+        age_days = nights - index
+        name = f"radon-2026-08-{22 + index:02d}T090000Z.sql.gz"
+        path = backup_dir / name
+        path.write_bytes(b"real dump " + name.encode())
+        stamp = time.time() - age_days * DAY + 3600
+        os.utime(path, (stamp, stamp))
+        names.append(name)
+    return names
+
+
+class TestLocalPruneIsUploadAware:
+    def test_eight_nights_of_access_denied_unlink_nothing(self, backup_env, monkeypatch):
+        names = _seed_nightly_dumps(backup_env)
+        client = _AccessDeniedClient()
+        _install_fake_boto3(monkeypatch, client)
+
+        detail = db_backup.run_backup()
+
+        assert "AccessDenied" in detail["offbox_error"]
+        assert detail["pruned"] == 0
+        for name in names:
+            assert (backup_env / name).exists(), f"{name} unlinked with no off-box copy"
+
+    def test_a_dump_b2_already_holds_is_pruned(self, backup_env, monkeypatch):
+        names = _seed_nightly_dumps(backup_env)
+        oldest = names[0]
+        key = db_backup.object_key_for("db_backups/", oldest)
+        client = _StubClient(objects={key: ((backup_env / oldest).stat().st_size, 0.0)})
+        _install_fake_boto3(monkeypatch, client)
+
+        detail = db_backup.run_backup()
+
+        assert detail["offbox_error"] is None
+        assert detail["pruned"] == 1
+        assert not (backup_env / oldest).exists()
+        for name in names[1:]:
+            assert (backup_env / name).exists(), name
+
+    def test_a_dump_confirmed_by_tonights_backfill_is_pruned(self, backup_env, monkeypatch):
+        names = _seed_nightly_dumps(backup_env)
+        client = _StubClient()
+        _install_fake_boto3(monkeypatch, client)
+
+        detail = db_backup.run_backup()
+
+        assert detail["offbox_error"] is None
+        # The off-box leg ran FIRST: the expired dump was pushed, confirmed,
+        # and only then unlinked.
+        assert any(key.endswith(names[0]) for _path, key in client.uploaded), (
+            "the expired dump was unlinked before it was backfilled"
+        )
+        assert detail["pruned"] == 1
+        assert not (backup_env / names[0]).exists()
+
+    def test_a_budget_deferred_dump_is_kept(self, backup_env, monkeypatch):
+        names = _seed_nightly_dumps(backup_env)
+        client = _StubClient()
+        _install_fake_boto3(monkeypatch, client)
+        real_sync = db_backup.sync_offbox
+        monkeypatch.setattr(
+            db_backup,
+            "sync_offbox",
+            lambda backup_dir, cfg, **kw: real_sync(backup_dir, cfg, budget_secs=0, **kw),
+        )
+
+        detail = db_backup.run_backup()
+
+        assert detail["offbox_error"] is None
+        assert detail["offbox_deferred"] == len(names) + 1
+        assert detail["pruned"] == 0
+        assert (backup_env / names[0]).exists()
+
+    def test_without_a_b2_config_age_alone_still_prunes(self, backup_env, monkeypatch):
+        # No off-box leg configured: the pre-B2 contract (age-only prune)
+        # stands, and the missing credentials still heartbeat error.
+        names = _seed_nightly_dumps(backup_env)
+        for key in FULL_ARCHIVE_ENV:
+            monkeypatch.delenv(key, raising=False)
+
+        detail = db_backup.run_backup()
+
+        assert "credential" in detail["offbox_error"].lower()
+        assert detail["pruned"] == 1
+        assert not (backup_env / names[0]).exists()
+
+    def test_sync_reports_the_names_b2_holds_after_the_run(self, tmp_path):
+        _seed_dumps(tmp_path, ["radon-a.sql.gz", "radon-b.sql.gz", "radon-c.sql.gz"])
+        cfg = db_backup.s3_config_from_env(dict(FULL_ARCHIVE_ENV))
+        client = _StubClient(objects={"db_backups/radon-a.sql.gz": (32, 0.0)})
+        ticks = iter([0, 0, 999_999])
+
+        summary = db_backup.sync_offbox(
+            tmp_path, cfg, client=client, budget_secs=100, clock=lambda: next(ticks)
+        )
+
+        # a: already present; c: uploaded and confirmed tonight; b: deferred.
+        assert summary["uploaded"] == 1
+        assert summary["deferred"] == 1
+        assert summary["confirmed"] == ["radon-a.sql.gz", "radon-c.sql.gz"]
+
