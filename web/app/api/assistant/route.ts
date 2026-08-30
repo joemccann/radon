@@ -204,6 +204,19 @@ function toTelemetryToolCalls(toolEvents: ToolEvent[]): AssistantTurnToolCall[] 
 
 export const radonCapability = "internal";
 
+/**
+ * Gap between `heartbeat` frames while the loop works. Nothing downstream
+ * needs the payload; the point is that the connection is never idle long
+ * enough for an intermediary to reclaim it.
+ */
+export const ASSISTANT_HEARTBEAT_MS = 10_000;
+
+type SseEvent = "start" | "heartbeat" | "tool" | "done" | "error";
+
+function sseFrame(event: SseEvent, data: unknown): string {
+  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+}
+
 export async function POST(request: NextRequest): Promise<Response> {
   const access = await requireRouteAccess(request, {
     rate: { key: "assistant:route", limit: 10, windowMs: 60_000 },
@@ -235,47 +248,122 @@ export async function POST(request: NextRequest): Promise<Response> {
   const quota = await enforceDemoAiQuota("assistant");
   if (quota) return quota;
 
+  // ── Everything above this line still carries a real HTTP status. ──────
+  //
+  // Below it the response header is already on the wire, so a failure can
+  // only be an `error` FRAME on a 200. Nothing that needs 400/401/429 may
+  // move down here. R-262.
+
   const t0 = Date.now();
-  try {
-    const system = `${SYSTEM_PROMPT} Today is ${etCalendarDateString(new Date())} (America/New_York).`;
-    const selection = await resolveModelSelection(body?.model);
-    const result = await runAssistantLoop(toTurns(messages), system, access.principal, selection);
+  const encoder = new TextEncoder();
+  let heartbeat: ReturnType<typeof setInterval> | null = null;
 
-    const content =
-      mock && !result.proposal && isProviderMockContent(result.content)
-        ? `Mock Grok response: ${fallbackReply(lastUserContent(messages))}`
-        : result.content;
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      // Enqueue is best-effort from here on: the operator can close the tab
+      // mid-turn, and a dead controller must not take the loop down with it.
+      const send = (event: SseEvent, data: unknown) => {
+        try {
+          controller.enqueue(encoder.encode(sseFrame(event, data)));
+        } catch {
+          /* client hung up */
+        }
+      };
 
-    const outcome = result.proposal ? "proposal" : result.outcome;
-    console.log(
-      `[assistant] done rounds=${result.rounds} outcome=${outcome} toolCalls=${result.toolEvents.length} usageIn=${result.usage.inputTokens} usageOut=${result.usage.outputTokens} ms=${Date.now() - t0}`,
-    );
-    recordAssistantTurn({
-      ts: new Date().toISOString(),
-      userMsg: lastUserContent(messages),
-      rounds: result.rounds,
-      toolCalls: toTelemetryToolCalls(result.toolEvents),
-      usage: result.usage,
-      outcome,
-    });
+      // THE FIX. 2026-08-29: the route ran the whole multi-round loop and
+      // wrote nothing until it finished, so Caddy's header guard abandoned a
+      // still-running turn and the operator got a 504. This frame — written
+      // synchronously, before anything is awaited — is what makes the header
+      // exist no matter how long the turn takes.
+      send("start", { ts: new Date().toISOString() });
+      heartbeat = setInterval(
+        () => send("heartbeat", { ms: Date.now() - t0 }),
+        ASSISTANT_HEARTBEAT_MS,
+      );
 
-    return NextResponse.json({
-      content,
-      model: result.model,
-      toolEvents: result.toolEvents,
-      proposal: result.proposal ?? null,
-      rounds: result.rounds,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown assistant error.";
-    console.log(`[assistant] done rounds=0 outcome=error toolCalls=0 usageIn=0 usageOut=0 ms=${Date.now() - t0}`);
-    recordAssistantTurn({
-      ts: new Date().toISOString(),
-      userMsg: lastUserContent(messages),
-      rounds: 0,
-      toolCalls: [],
-      outcome: "error",
-    });
-    return NextResponse.json({ error: message }, { status: 502 });
-  }
+      const finish = () => {
+        if (heartbeat) clearInterval(heartbeat);
+        heartbeat = null;
+        try {
+          controller.close();
+        } catch {
+          /* already closed */
+        }
+      };
+
+      // Deliberately NOT awaited: `start` has to return so the header flushes.
+      void (async () => {
+        try {
+          const system = `${SYSTEM_PROMPT} Today is ${etCalendarDateString(new Date())} (America/New_York).`;
+          const selection = await resolveModelSelection(body?.model);
+          const result = await runAssistantLoop(
+            toTurns(messages),
+            system,
+            access.principal,
+            selection,
+            (event) => send("tool", event),
+          );
+
+          const content =
+            mock && !result.proposal && isProviderMockContent(result.content)
+              ? `Mock Grok response: ${fallbackReply(lastUserContent(messages))}`
+              : result.content;
+
+          const outcome = result.proposal ? "proposal" : result.outcome;
+          console.log(
+            `[assistant] done rounds=${result.rounds} outcome=${outcome} toolCalls=${result.toolEvents.length} usageIn=${result.usage.inputTokens} usageOut=${result.usage.outputTokens} ms=${Date.now() - t0}`,
+          );
+          recordAssistantTurn({
+            ts: new Date().toISOString(),
+            userMsg: lastUserContent(messages),
+            rounds: result.rounds,
+            toolCalls: toTelemetryToolCalls(result.toolEvents),
+            usage: result.usage,
+            outcome,
+          });
+
+          send("done", {
+            content,
+            model: result.model,
+            toolEvents: result.toolEvents,
+            proposal: result.proposal ?? null,
+            rounds: result.rounds,
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Unknown assistant error.";
+          console.log(
+            `[assistant] done rounds=0 outcome=error toolCalls=0 usageIn=0 usageOut=0 ms=${Date.now() - t0}`,
+          );
+          recordAssistantTurn({
+            ts: new Date().toISOString(),
+            userMsg: lastUserContent(messages),
+            rounds: 0,
+            toolCalls: [],
+            outcome: "error",
+          });
+          send("error", { error: message });
+        } finally {
+          finish();
+        }
+      })();
+    },
+    cancel() {
+      if (heartbeat) clearInterval(heartbeat);
+      heartbeat = null;
+    },
+  });
+
+  return new Response(stream, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      // `no-transform` keeps an intermediary from rewriting or compressing
+      // the body, which is another way of saying buffering it.
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      // nginx-family proxies honour this; Caddy uses flush_interval instead
+      // (cloud/caddy/Caddyfile), and neither costs anything to state.
+      "X-Accel-Buffering": "no",
+    },
+  });
 }

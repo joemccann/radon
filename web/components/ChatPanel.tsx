@@ -318,7 +318,20 @@ export default function ChatPanel({
           signal: streamAbortRef.current?.signal,
         });
       } else {
-        const turn = await requestAssistantTurn(conversation, cleaned, attachments, modelId);
+        // The route streams its envelope: `start` lands within milliseconds of
+        // the request, and each tool call lands as the loop completes it. Both
+        // are wired live so a 55s turn reads as alive rather than as a panel
+        // that has stopped responding. R-262.
+        const turn = await requestAssistantTurn(
+          conversation,
+          cleaned,
+          attachments,
+          modelId,
+          (event) => {
+            if (event.type === "start") setStatus("streaming");
+            else setTurnTools((current) => [...current, event.event]);
+          },
+        );
         setTurnTools(turn.toolEvents);
         setTurnModel(turn.model);
         setStatus("streaming");
