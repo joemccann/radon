@@ -227,7 +227,8 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # after the 16:00 ET close year-round (weekend/holiday runs are no-new-
     # session heartbeats). Uniform 26h window matches its daily siblings. IB
     # primary with a Yahoo fallback, so the job heartbeats through an IB
-    # outage: requires_ib stays False.
+    # outage: requires_ib stays False. A sweep IB served nothing on is `ok`
+    # with last_error class `ib_rung_dead` (R-434), not an error bucket.
     "dispersion":       {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # ivrank — radon-ivrank.timer, daily 22:10 UTC every calendar day, after
     # the 16:00 ET close year-round (weekend/holiday runs are unchanged-data

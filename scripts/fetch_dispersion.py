@@ -67,6 +67,8 @@ IB_CONCURRENCY = 8
 IB_HISTORY_TIMEOUT_S = 45          # ib_insync's own timeout= (the cancel path)
 IB_CANCEL_GRACE_S = 5              # outer asyncio bound fires only after that cancel
 SWEEP_BUDGET_S = 600               # wall clock for the whole sweep, both rungs
+IB_SWEEP_BUDGET_S = 420            # the IB rung's share; it never eats the fallback's
+YAHOO_SWEEP_BUDGET_S = 180         # reserved for the Yahoo rung even when IB overran (R-446)
 INCREMENTAL_DURATION = "1 M"
 BACKFILL_DURATION = "10 Y"         # IB's daily window floor is 2016-08-31
 YAHOO_INCREMENTAL_RANGE = "1mo"
@@ -316,13 +318,16 @@ def _fetch_yahoo_closes(symbols: list[str], backfill: bool, deadline: float) -> 
 # ── ladder ────────────────────────────────────────────────────────
 
 def fetch_closes_ladder(symbols: list[str], backfill: bool) -> SweepCloses:
-    """IB for every symbol, then Yahoo for whatever IB left empty, inside SWEEP_BUDGET_S."""
-    deadline = time.monotonic() + SWEEP_BUDGET_S
+    """IB for every symbol inside IB_SWEEP_BUDGET_S, then Yahoo for whatever IB
+    left empty with its own YAHOO_SWEEP_BUDGET_S. One shared deadline handed
+    the fallback nothing once an HMDS-inactive gateway had burned it (R-446)."""
+    started = time.monotonic()
     duration = BACKFILL_DURATION if backfill else INCREMENTAL_DURATION
     closes = SweepCloses()
-    closes.take(_fetch_ib_closes(symbols, duration, deadline), SOURCE_IB)
+    closes.take(_fetch_ib_closes(symbols, duration, started + IB_SWEEP_BUDGET_S), SOURCE_IB)
     _log(f"IB served {len(closes)}/{len(symbols)} symbols ({duration})")
-    closes.take(_fetch_yahoo_closes(closes.missing(symbols), backfill, deadline), SOURCE_YAHOO)
+    yahoo_deadline = max(started + SWEEP_BUDGET_S, time.monotonic() + YAHOO_SWEEP_BUDGET_S)
+    closes.take(_fetch_yahoo_closes(closes.missing(symbols), backfill, yahoo_deadline), SOURCE_YAHOO)
     return closes
 
 
@@ -358,6 +363,22 @@ def _collapse_sources(sources: set[str]) -> str:
     if len(sources) == 1:
         return next(iter(sources))
     return SOURCE_MIXED
+
+
+def _ib_rung_warning(fetch: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """A sweep IB served nothing on (gateway skipped, connect failed, every
+    request empty) is real data Yahoo built, not a healthy steady state:
+    rule 7 forbids Yahoo as the scheduled primary. The heartbeat stays ok
+    and carries the class so the operator can see the rung is dead (R-434)."""
+    if fetch["ib_ok"] > 0:
+        return None
+    return {
+        "message": (
+            f"dispersion: IB rung served 0 symbols; Yahoo served {fetch['yahoo_ok']}, "
+            f"{fetch['failed']} failed"
+        ),
+        "class": "ib_rung_dead",
+    }
 
 
 # ── universe ──────────────────────────────────────────────────────
@@ -445,18 +466,24 @@ def _write_db(
     *,
     rows_changed: bool,
     health_error: Optional[dict[str, Any]] = None,
+    health_warning: Optional[dict[str, Any]] = None,
 ) -> None:
     """Rows (only when changed) -> snapshot -> heartbeat, each isolated (R-192).
 
     A failed row upsert must not take the snapshot and the heartbeat down
     with it, and surfaces as an error heartbeat rather than a silent exit 0.
+    ``health_warning`` rides on an ok heartbeat as its error payload: the
+    run succeeded but not the way the ladder is meant to (R-434).
     """
     if writer is None:
         return
     row_error = _upsert_rows(new_rows, scan_time) if rows_changed else None
     snapshot_error = _upsert_snapshot(payload, scan_time)
     error = health_error or row_error or snapshot_error
-    _heartbeat("ok" if error is None else "error", scan_time, error)
+    if error is None:
+        _heartbeat("ok", scan_time, health_warning)
+    else:
+        _heartbeat("error", scan_time, error)
 
 
 def _upsert_rows(new_rows: list[dict[str, Any]], scan_time: str) -> Optional[dict[str, Any]]:
@@ -612,7 +639,13 @@ def _sweep_and_build(
         f"{len(new_rows)} new rows, {payload['count']} sessions through {payload['data_date']} "
         f"({payload['current']['regime']}, gap {payload['current']['surface_gap']})"
     )
-    _write_db(payload, new_rows, scan_time, rows_changed=bool(new_rows))
+    _write_db(
+        payload,
+        new_rows,
+        scan_time,
+        rows_changed=bool(new_rows),
+        health_warning=_ib_rung_warning(provenance["fetch"]),
+    )
     _write_json_cache(payload)
     return payload
 

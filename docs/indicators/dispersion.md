@@ -342,6 +342,8 @@ DISPERSION_JSON = _PROJECT_DIR / "data" / "dispersion.json"
 IB_CONCURRENCY = 8
 IB_HISTORY_TIMEOUT_S = 45          # passed as ib_insync's own timeout= (the cancel path)
 SWEEP_BUDGET_S = 600               # wall clock for the whole sweep, both rungs
+IB_SWEEP_BUDGET_S = 420            # the IB rung's share of it
+YAHOO_SWEEP_BUDGET_S = 180         # reserved for the Yahoo rung even when IB overran (R-446)
 INCREMENTAL_DURATION = "1 M"       # IB duration for a normal daily run
 BACKFILL_DURATION = "10 Y"         # --backfill; IB's daily window floor is 2016-08-31
 YAHOO_INCREMENTAL_RANGE = "1mo"
@@ -371,8 +373,13 @@ prints the payload to stdout; every progress line goes to **stderr**.
    `VIX_SYMBOL`. Members use `Stock(ticker.replace("-", " "), "SMART", "USD")`;
    VIX uses `Index("VIX", "CBOE", "USD")`.
 5. Fetch closes (`fetch_closes(symbols, backfill) -> dict[symbol, dict[date, close]]`):
-   IB rung for all symbols, then the Yahoo rung for whatever IB left empty, both
-   inside `SWEEP_BUDGET_S`. Duration `BACKFILL_DURATION` or `INCREMENTAL_DURATION`.
+   IB rung for all symbols inside `IB_SWEEP_BUDGET_S`, then the Yahoo rung for
+   whatever IB left empty with its own `YAHOO_SWEEP_BUDGET_S` (never the IB rung's
+   spent deadline, R-446). Duration `BACKFILL_DURATION` or `INCREMENTAL_DURATION`.
+   A sweep IB served nothing on (`fetch.ib_ok == 0`) still heartbeats `ok` but with
+   `error.class == "ib_rung_dead"`, and the panel renders `source.prices` in the
+   strip with a YAHOO FALLBACK badge: Yahoo is the last rung, never a silent
+   primary (R-434).
 6. If **VIX** came back empty from both rungs, or the resulting cross-section on
    `last_complete` is below `MIN_STOCKS`: `_serve_cached(...)` re-serves the stored
    payload as `status: "stale_source"` with an **`error` heartbeat** and exits

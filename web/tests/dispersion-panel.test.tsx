@@ -353,6 +353,54 @@ describe("DispersionPanel — stale badge", () => {
   });
 });
 
+// R-434: the strip names the rung that served the prices from
+// payload.source.prices, and a Yahoo-built sweep carries a visible degraded
+// marker (CLAUDE.md rule 7: Yahoo is the last rung, never a silent primary).
+describe("DispersionPanel — price source", () => {
+  it("renders the IB source label in the strip with no degraded marker", () => {
+    renderPanel(hookState({ data: buildData({ source: { prices: "ib", vix: "ib" } }) }));
+    expect(screen.getByTestId("dispersion-source").textContent).toContain("IB");
+    expect(screen.queryByTestId("dispersion-source-degraded")).toBeNull();
+  });
+
+  it("renders a visible degraded marker when Yahoo served the sweep", () => {
+    renderPanel(
+      hookState({
+        data: buildData({
+          source: { prices: "yahoo", vix: "yahoo" },
+          fetch: { ib_ok: 0, yahoo_ok: 514, failed: 0, failed_symbols: [] },
+        }),
+      }),
+    );
+    expect(screen.getByTestId("dispersion-source").textContent).toContain("YAHOO");
+    const badge = screen.getByTestId("dispersion-source-degraded") as HTMLElement;
+    expect(badge.textContent).toContain("YAHOO");
+    expect(badge.style.color).toBe("var(--warning)");
+    expect(badge.getAttribute("title") ?? "").toMatch(/Interactive Brokers/);
+  });
+
+  it("names Yahoo in the footnote when Yahoo served the sweep", () => {
+    const { container } = renderPanel(
+      hookState({ data: buildData({ source: { prices: "yahoo", vix: "yahoo" } }) }),
+    );
+    expect(container.textContent ?? "").toMatch(/Source: Yahoo/);
+  });
+
+  it("labels a mixed sweep and counts the Yahoo symbols in the footnote", () => {
+    const { container } = renderPanel(
+      hookState({
+        data: buildData({
+          source: { prices: "mixed", vix: "ib" },
+          fetch: { ib_ok: 400, yahoo_ok: 114, failed: 0, failed_symbols: [] },
+        }),
+      }),
+    );
+    expect(screen.getByTestId("dispersion-source").textContent).toContain("IB + YAHOO");
+    expect(screen.queryByTestId("dispersion-source-degraded")).toBeNull();
+    expect(container.textContent ?? "").toMatch(/Yahoo Finance fallback for 114 symbols/);
+  });
+});
+
 describe("DispersionPanel — chart + controls", () => {
   it("renders the chart title", () => {
     renderPanel(hookState({ data: buildData() }));
