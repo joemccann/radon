@@ -740,6 +740,19 @@ Incident: 2026-08-15 00:24Z, P1 page `34ab3e3c…`.
   admin panel), then approve the 2FA push. Regression tests:
   `test_health_service.py::TestStatusResponse::test_gateway_only_down_degrades_instead_of_down`,
   `test_health_probe.py::TestClassifyProbes::test_schema_v2_degraded_keeps_edge_ok`.
+- **Weekend deploy → false `status_http_502` P1 (2026-08-29, page
+  `d98c3364`):** off-box sampled `/edge-health/status` HTTP 502 at
+  16:45Z while user_path + freshness stayed green; deploy runners were
+  active 16:42–16:52 (healthd restart collateral). Aggregate was
+  `degraded` (IB weekend clean-exit). Deploy-window 5xx suppression
+  required `_local_aggregate_is_healthy` (`overall_state=up`), so the
+  weekend degraded state re-armed P1. Discriminating check: probe
+  history `status_http_502` with sibling user_path/freshness ok +
+  deploy-runner mtime inside the sample window + local serving path
+  up (api/relay/nextjs) → suppress, do not restart. Fix: suppression
+  now uses `_local_aggregate_serving_path_ok` (up OR dependency-only
+  degraded). Regression:
+  `test_deploy_window_5xx_with_dependency_only_degraded_is_suppressed`.
 - **Sidecar unit flap → false "edge unhealthy" (2026-08-29, page
   `0b7726f8`):** `radon-newsfeed.service` Restart=always flaps
   (`NRestarts` in the dozens; `InactiveEnterTimestamp` within the same
