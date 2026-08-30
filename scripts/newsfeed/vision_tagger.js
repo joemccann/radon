@@ -25,6 +25,11 @@ function ensureIpv4Dispatcher() {
 const ENDPOINT = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
 const DEFAULT_MODEL = "claude-haiku-4-5";
+// Bound on ONE model call. Without it a half-open connection to the API held
+// `hydrateTagsDual` (and the whole scrape cycle behind it) until kernel
+// keepalive gave up; the timeout is a per-post tagging failure, never a cycle
+// abort. R-466.
+const DEFAULT_FETCH_TIMEOUT_MS = 30_000;
 
 const VISION_INSTRUCTION = [
   "An image is attached to this post (usually a chart). Read the image first:",
@@ -84,10 +89,11 @@ function isRetryable(status) {
   return status === 429 || status >= 500;
 }
 
-async function callOnce({ model, systemPrompt, userPrompt, imageB64, mediaType, apiKey }) {
+async function callOnce({ model, systemPrompt, userPrompt, imageB64, mediaType, apiKey, timeoutMs }) {
   ensureIpv4Dispatcher();
   const res = await fetch(ENDPOINT, {
     method: "POST",
+    signal: AbortSignal.timeout(timeoutMs),
     headers: {
       "x-api-key": apiKey,
       "anthropic-version": ANTHROPIC_VERSION,
@@ -193,6 +199,7 @@ export function createVisionTagger({
   mediaDir,
   getTaxonomySnapshot,
   readImage = (p) => fs.promises.readFile(p),
+  timeoutMs = DEFAULT_FETCH_TIMEOUT_MS,
 } = {}) {
   if (!apiKey) {
     throw new Error("createVisionTagger: ANTHROPIC_API_KEY is not set");
@@ -224,7 +231,7 @@ export function createVisionTagger({
     const userPrompt = buildUserPrompt(post);
 
     try {
-      const raw = await callOnce({ model, systemPrompt, userPrompt, imageB64, mediaType, apiKey });
+      const raw = await callOnce({ model, systemPrompt, userPrompt, imageB64, mediaType, apiKey, timeoutMs });
       const tags = normaliseTags(raw).slice(0, 3);
       return tags.length === 3 ? tags : null;
     } catch (err) {

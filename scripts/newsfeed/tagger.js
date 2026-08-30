@@ -22,6 +22,9 @@ function ensureIpv4Dispatcher() {
 
 const ENDPOINT = "https://api.cerebras.ai/v1/chat/completions";
 const MODELS = ["gpt-oss-120b", "qwen-3-235b-a22b-instruct-2507"];
+// Bound on ONE model call; a timeout is a per-model tagging failure (the
+// fallback model is still tried), never a cycle hang. R-466.
+const DEFAULT_FETCH_TIMEOUT_MS = 30_000;
 
 // All tags are uppercase. Multi-word concepts are kebab-cased then uppercased
 // (e.g. "Put Call Ratio" → "PUT-CALL-RATIO"). Dedup is case-insensitive at the
@@ -112,10 +115,11 @@ function isRetryable(status) {
   return status === 429 || status >= 500;
 }
 
-async function callOnce(model, systemPrompt, userPrompt, apiKey) {
+async function callOnce(model, systemPrompt, userPrompt, apiKey, timeoutMs) {
   ensureIpv4Dispatcher();
   const res = await fetch(ENDPOINT, {
     method: "POST",
+    signal: AbortSignal.timeout(timeoutMs),
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
@@ -161,6 +165,7 @@ async function callOnce(model, systemPrompt, userPrompt, apiKey) {
 export function createTagger({
   apiKey = process.env.CEREBRAS_API_KEY,
   getTaxonomySnapshot,
+  timeoutMs = DEFAULT_FETCH_TIMEOUT_MS,
 } = {}) {
   if (!apiKey) {
     throw new Error("createTagger: CEREBRAS_API_KEY is not set");
@@ -176,7 +181,7 @@ export function createTagger({
 
     for (const model of MODELS) {
       try {
-        const raw = await callOnce(model, systemPrompt, userPrompt, apiKey);
+        const raw = await callOnce(model, systemPrompt, userPrompt, apiKey, timeoutMs);
         const tags = normaliseTags(raw).slice(0, 3);
         if (tags.length === 3) return tags;
         // <3 valid tags after normalisation — try the next model.

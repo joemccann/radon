@@ -277,3 +277,35 @@ describe("hydrateTags", () => {
     expect(posts[1].tags).toEqual(["BTC"]);
   });
 });
+
+// R-466 / REL-165: same unbounded-fetch shape as the vision tagger. A
+// half-open connection to api.cerebras.ai held the cycle; the bound is a
+// per-model tagging failure (the fallback model is still tried), never a hang.
+describe("R-466 / REL-165: the text fetch is bounded", () => {
+  function hangUntilAborted(init?: RequestInit): Promise<Response> {
+    return new Promise((_resolve, reject) => {
+      const signal = init?.signal;
+      if (signal) signal.addEventListener("abort", () => reject(signal.reason));
+    });
+  }
+
+  it("a fetch that never answers settles tagPost as untagged within the bound", async () => {
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => hangUntilAborted(init));
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const { createTagger } = await import("../../scripts/newsfeed/tagger.js");
+    const tagger = createTagger({ getTaxonomySnapshot: async () => TAXONOMY, timeoutMs: 50 });
+
+    const outcome = await Promise.race([
+      tagger.tagPost({ id: "p1", title: "Hangs", content: "x" }).then((tags) => ({ tags })),
+      new Promise<string>((resolve) => setTimeout(() => resolve("hung"), 1500)),
+    ]);
+
+    expect(outcome).toEqual({ tags: null });
+    // Both models were tried and both carried the bound on the wire.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(init?.signal).toBeInstanceOf(AbortSignal);
+    }
+  });
+});
