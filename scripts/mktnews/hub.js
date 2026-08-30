@@ -72,6 +72,7 @@ export function createHeadlinesHub({
   maxFrameBytes = MAX_FRAME_BYTES,
   delayFn = reconnectDelayMs,
   loadHistory = null,
+  store = null,
 } = {}) {
   const host = resolveHubListenHost(listenHost, security.bindHost);
   const ring = [];
@@ -85,12 +86,37 @@ export function createHeadlinesHub({
     if (!item) return false;
     const { content: _content, ...meta } = item;
     if (containsUpstreamHost(meta)) return false;
+    pushToRing(item);
+    persist(item);
+    for (const client of clients) sendJson(client, { type: "headline", item });
+    return true;
+  }
+
+  function pushToRing(item) {
     const existing = ring.findIndex((row) => row.id === item.id);
     if (existing >= 0) ring.splice(existing, 1);
     ring.push(item);
     while (ring.length > ringSize) ring.shift();
-    for (const client of clients) sendJson(client, { type: "headline", item });
-    return true;
+  }
+
+  function persist(item) {
+    if (!store) return;
+    Promise.resolve()
+      .then(() => store.put(item))
+      .catch((err) => {
+        process.stderr.write(`[mktnews] ring persist failed: ${err?.message ?? err}\n`);
+      });
+  }
+
+  async function restoreRing() {
+    if (!store || closed) return;
+    try {
+      const items = await store.load();
+      if (!Array.isArray(items)) return;
+      for (const item of items) pushToRing(item);
+    } catch (err) {
+      process.stderr.write(`[mktnews] ring restore failed: ${err?.message ?? err}\n`);
+    }
   }
 
   function ingestRaw(raw) {
@@ -191,6 +217,7 @@ export function createHeadlinesHub({
   }
 
   async function listen() {
+    await restoreRing();
     await seedRing();
     return new Promise((resolve) => {
       httpServer.listen(listenPort, host, () => {
