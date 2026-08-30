@@ -8,7 +8,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { Send } from "lucide-react";
 
 import type { LlmModelOption } from "@/lib/llm/catalog";
 import type { ChatImageAttachment, ChatImageMediaType } from "@/lib/types";
@@ -96,7 +95,7 @@ type AskComposerProps = {
 };
 
 export default function AskComposer({
-  placeholder = "Ask about flow, risk, structure. @ to scope an instrument, / for commands.",
+  placeholder = "Ask about flow, risk, structure...",
   busy = false,
   sources = [],
   onRemoveSource,
@@ -245,24 +244,35 @@ export default function AskComposer({
           ))}
         </div>
       ) : null}
-      <textarea
-        ref={inputRef}
-        className="ask-composer__input"
-        value={text}
-        rows={1}
-        maxLength={1000}
-        placeholder={placeholder}
-        aria-label="Ask Radon"
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={onKeyDown}
-        onPaste={onPaste}
-        onCompositionStart={() => {
-          composingRef.current = true;
-        }}
-        onCompositionEnd={() => {
-          composingRef.current = false;
-        }}
-      />
+      <div className="ask-composer__field">
+        <textarea
+          ref={inputRef}
+          className="ask-composer__input"
+          value={text}
+          rows={1}
+          maxLength={1000}
+          placeholder={placeholder}
+          aria-label="Ask Radon"
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={onKeyDown}
+          onPaste={onPaste}
+          onCompositionStart={() => {
+            composingRef.current = true;
+          }}
+          onCompositionEnd={() => {
+            composingRef.current = false;
+          }}
+        />
+        <button
+          type="submit"
+          className="ask-composer__enter"
+          disabled={(!text.trim() && !attachments.length) || busy}
+          title="Send (Enter)"
+          aria-label="Send"
+        >
+          ↵
+        </button>
+      </div>
       <div className="ask-composer__rail">
         <span className="agent-chip">@ SOURCES</span>
         <span className="agent-chip">/ COMMANDS</span>
@@ -288,16 +298,7 @@ export default function AskComposer({
             )}
           </select>
         </label>
-        <button
-          type="submit"
-          className="ask-composer__send"
-          disabled={(!text.trim() && !attachments.length) || busy}
-          title="Send (Enter)"
-          aria-label="Send"
-        >
-          <Send size={13} />
-          ASK
-        </button>
+        <span className="ask-composer__esc">ESC DISMISSES</span>
       </div>
     </form>
   );

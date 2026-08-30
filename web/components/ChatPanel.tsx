@@ -14,7 +14,6 @@ import type {
   PortfolioData,
   WorkspaceSection,
 } from "@/lib/types";
-import { quickPromptsBySection } from "@/lib/data";
 import { createTimestamp } from "@/lib/utils";
 import {
   fallbackReply,
@@ -37,6 +36,8 @@ import {
 } from "@/lib/quoteTelemetry";
 
 type ChatPanelProps = {
+  /** Retained for callers (WorkspaceShell hands it down); the composer-only
+      surface no longer varies by section since the starter prompts left. */
   activeSection: WorkspaceSection;
   portfolio?: PortfolioData | null;
   /**
@@ -189,7 +190,6 @@ function proposalQuote(
 }
 
 export default function ChatPanel({
-  activeSection,
   portfolio,
   isOpen = true,
   seedPrompt = null,
@@ -209,16 +209,10 @@ export default function ChatPanel({
   const riskInput = useMemo(() => proposalRiskInput(proposal), [proposal]);
   const quote = useMemo(() => proposalQuote(proposal, prices), [proposal, prices]);
   const [showJump, setShowJump] = useState(false);
-  // The composer owns the picker, but the starter-prompt pills send turns of
-  // their own. Mirroring the selection here keeps a pill on the model the
-  // operator can see selected instead of silently falling to the server
-  // default. "" until the catalog answers, which the API layer omits.
-  const [selectedModelId, setSelectedModelId] = useState("");
 
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const atBottomRef = useRef(true);
 
-  const sectionPrompts = quickPromptsBySection[activeSection];
   const isBusy = status === "submitted" || status === "streaming";
 
   // Stick-to-bottom: only auto-scroll while the user is already pinned to the
@@ -413,32 +407,12 @@ export default function ChatPanel({
   const lastAssistantId = [...messages].reverse().find((m) => m.role === "assistant")?.id ?? null;
 
   return (
-    <div className="chat-panel">
-      {/* The launcher head is the overlay's single header — ChatPanel no
-          longer renders its own, so the surface reads as one conversation. */}
+    <div className="chat-panel" data-empty={messages.length === 0 ? "true" : undefined}>
+      {/* Composer-only surface (design-lab Variant A): with no messages the
+          panel is just the composer, so the launcher sizes it to content. */}
       <div className="chat-shell">
+          {messages.length ? (
           <div className="chat-transcript-wrap">
-            {messages.length === 0 ? (
-              <div className="chat-empty-state">
-                <div className="chat-empty-state__title">Ask Radon</div>
-                <p className="chat-empty-state__copy">
-                  Flow analysis, scans, risk checks and journal queries. Type a request or pick one.
-                </p>
-                <div className="chat-empty-state__cards">
-                  {sectionPrompts.map((prompt) => (
-                    <button
-                      type="button"
-                      key={prompt}
-                      className="chat-empty-card"
-                      onClick={() => sendMessage(prompt, [], selectedModelId)}
-                    >
-                      <span className="chat-empty-card__slash">/</span>
-                      {prompt}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : (
               <div
                 ref={messagesRef}
                 className="chat-messages"
@@ -502,7 +476,6 @@ export default function ChatPanel({
                   );
                 })}
               </div>
-            )}
 
             <button
               type="button"
@@ -516,6 +489,7 @@ export default function ChatPanel({
               Latest
             </button>
           </div>
+          ) : null}
 
           {lastError ? <div className="chat-error">{lastError}</div> : null}
 
@@ -555,27 +529,12 @@ export default function ChatPanel({
           ) : null}
 
           <div className="chat-composer">
-            {messages.length ? (
-              <div className="chat-pills">
-                {sectionPrompts.map((prompt) => (
-                  <button
-                    type="button"
-                    key={prompt}
-                    onClick={() => sendMessage(prompt, [], selectedModelId)}
-                    className="pill-chip"
-                  >
-                    /{prompt}
-                  </button>
-                ))}
-              </div>
-            ) : null}
             <AskComposer
               busy={isBusy}
               focusKey={isOpen}
               onSubmit={(text, modelId, attachments) =>
                 void sendMessage(text, attachments, modelId)
               }
-              onModelChange={setSelectedModelId}
             />
           </div>
         </div>
