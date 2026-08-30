@@ -25,6 +25,10 @@
 - [x] T5 New tests green (client 25, priority 19, crowding 12, docs pins 4)
 - [x] T6 Full suite green, PR opened
 
+## Follow-up (2026-08-30): OAuth refresh
+
+- [x] T7 depends_on: [T1] - Token store: 0600 file (`ROBINHOOD_MCP_TOKEN_FILE`), env bootstrap, atomic rotate, refresh via official `oauth2/token/` (public client, no secret), refresh on missing/1h-window/401, invalid_grant = process-level unconfigured skip; 34 client tests green
+
 ## Review
 
 - Web `previous-close` route stays IB → UW → Yahoo (TS-side MCP consumer deferred; noted in the PR body).
