@@ -944,6 +944,53 @@ transient Turso HTTP 502 reading `scan_snapshots`.** Peak: 2026-08-21
 
 ---
 
+## db-backup-b2-connection-closed
+
+**`radon-db-backup.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) on a single B2 `ConnectionClosedError` during PUT of a
+~576 MB dump.** Peak: 2026-08-29 20:35Z, page `29c8a560…`. Recurred
+20:28Z and 20:34Z; a third start at 20:41Z uploaded 3/3.
+
+- **Mechanism:** daily 09:00 UTC oneshot dumps Turso then uploads
+  missing `*.sql.gz` to B2 prefix `db_backups/`. `_s3_client` already
+  had botocore `Config` retries (`max_attempts=3`). `sync_offbox`
+  called `upload_file` once with no application-level retry, so a
+  spent-retry `ConnectionClosedError` on a 576 MB multipart PUT aborted
+  the off-box leg. Local gzip had already landed. `Type=oneshot` has no
+  `Restart=`, so `NRestarts=0` until the next calendar fire (~12h at
+  page time). Unit watchdog pages P1. Credentials exist; later same-hour
+  run uploaded three dumps. Not fail-closed (missing `RADON_ARCHIVE_S3_*`).
+- **Detection:** journal
+  `db-backup: dumped 100 tables / …; b2 FAILED: ConnectionClosedError:
+  Connection was closed before we received a valid response from
+  endpoint URL: "https://s3.us-west-004.backblazeb2.com/radon-archive/db_bac…"`
+  then `service_health row written: db-backup = error`;
+  `systemctl show … -p Result,NRestarts` → `exit-code` / `0`. Edge and
+  `:8321/health/lite` stay up.
+- **Discriminating check:** `ConnectionClosedError` / `connection was
+  closed` on a PUT URL under `db_backups/` (this case) after a dump line
+  with table/row counts. Fail-closed missing-creds text is ops (secret).
+  `Result=signal` is deploy stop-clean. If `/health/lite` is down too →
+  API, stand down. B2 platform outage (every object, media-backup also
+  red) → stand down.
+- **Remediation (code):** application-level retry on transient transport
+  errors around LIST / PUT / HEAD / DELETE so an injected client (and a
+  client whose botocore retries are already spent) still retries the
+  dump and continues the rest of the plan. Persistent closed-connection
+  still exits 1. Local dump remains the critical path. Do not
+  restart-flap; next timer (09:00 UTC) or one
+  `radon unit restart radon-db-backup` after the fix deploys. Unit is
+  not on `RERUNNABLE_ONESHOT_UNITS`.
+- **Regression:**
+  `cloud/tests/test_db_backup_offbox.py::TestTransientB2UploadRetry`
+  (`test_connection_closed_on_first_dump_retries_and_uploads_the_rest`,
+  `test_persistent_connection_closed_still_fails_the_unit`,
+  `test_non_transient_upload_error_is_not_retried`).
+- **Code:** `cloud/scripts/db_backup.py`
+  (`call_s3_with_retry`, `is_transient_s3_error`, `sync_offbox`).
+
+---
+
 ## demo-mirror-schema-lag
 
 **`radon-demo-mirror.service` oneshot pages P1 `Result=exit-code` with

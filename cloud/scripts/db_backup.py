@@ -73,6 +73,19 @@ UPLOAD_BUDGET_SECS = 3600
 S3_CONNECT_TIMEOUT = 30
 S3_READ_TIMEOUT = 300
 S3_MAX_ATTEMPTS = 3
+S3_RETRY_DELAY_SECS = 1.0
+# Botocore Config retries can be spent (or skipped on an injected client).
+# Page 29c8a560: two consecutive 576 MB PUTs died on ConnectionClosedError
+# after the dump had already landed; the unit then paged P1.
+_TRANSIENT_S3_ERROR_NAMES = frozenset(
+    {
+        "ConnectionClosedError",
+        "EndpointConnectionError",
+        "ConnectTimeoutError",
+        "ReadTimeoutError",
+        "ResponseStreamingError",
+    }
+)
 MULTIPART_CHUNK_BYTES = 64 * 1024 * 1024
 MULTIPART_CONCURRENCY = 4
 # Plausibility floor. `dump_database` reports whatever `sqlite_master` gave
@@ -405,6 +418,30 @@ def dump_database(db, out, batch_size: int = BATCH_SIZE) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def is_transient_s3_error(exc: BaseException) -> bool:
+    """True for retryable B2/S3 transport faults (not auth / AccessDenied)."""
+    if type(exc).__name__ in _TRANSIENT_S3_ERROR_NAMES:
+        return True
+    text = str(exc).lower()
+    return "connection was closed" in text or "connection reset" in text
+
+
+def call_s3_with_retry(fn, *, attempts: int | None = None, sleep=None):
+    """Run ``fn`` up to ``S3_MAX_ATTEMPTS`` on transient S3 errors."""
+    n = S3_MAX_ATTEMPTS if attempts is None else max(1, int(attempts))
+    sleeper = time.sleep if sleep is None else sleep
+    last: BaseException | None = None
+    for i in range(n):
+        try:
+            return fn()
+        except Exception as exc:  # noqa: BLE001 — classify, then re-raise
+            last = exc
+            if not is_transient_s3_error(exc) or i + 1 >= n:
+                raise
+            sleeper(S3_RETRY_DELAY_SECS)
+    raise last  # pragma: no cover
+
+
 def _s3_client(cfg: dict[str, str]):
     import boto3  # lazy: unit tests and credential-less runs never import it
     from botocore.config import Config
@@ -451,7 +488,7 @@ def list_remote_dumps(client, bucket: str, prefix: str) -> dict[str, RemoteObjec
         kwargs = {"Bucket": bucket, "Prefix": prefix}
         if token:
             kwargs["ContinuationToken"] = token
-        resp = client.list_objects_v2(**kwargs)
+        resp = call_s3_with_retry(lambda k=kwargs: client.list_objects_v2(**k))
         for obj in resp.get("Contents") or []:
             key = obj["Key"]
             out[key] = RemoteObject(
@@ -467,7 +504,7 @@ def list_remote_dumps(client, bucket: str, prefix: str) -> dict[str, RemoteObjec
 
 def _confirm_upload(client, bucket: str, key: str) -> int:
     """Bytes the object actually holds in the bucket. Raises when absent."""
-    head = client.head_object(Bucket=bucket, Key=key)
+    head = call_s3_with_retry(lambda: client.head_object(Bucket=bucket, Key=key))
     return int(head["ContentLength"])
 
 
@@ -517,7 +554,9 @@ def sync_offbox(
         kwargs = {"Config": transfer} if transfer is not None else {}
         key = object_key_for(prefix, name)
         expected = path.stat().st_size
-        client.upload_file(str(path), bucket, key, **kwargs)
+        call_s3_with_retry(
+            lambda: client.upload_file(str(path), bucket, key, **kwargs)
+        )
         # CONFIRM before counting, and RAISE on a mismatch rather than
         # recording it — an upload failure already propagates here by design,
         # heartbeats `error` and exits non-zero, and a short landing is an
@@ -539,7 +578,7 @@ def sync_offbox(
         [(obj.key, obj.mtime) for obj in remote.values()], prune_now
     )
     for key in prunable:
-        client.delete_object(Bucket=bucket, Key=key)
+        call_s3_with_retry(lambda k=key: client.delete_object(Bucket=bucket, Key=k))
 
     dumps = [name for name, _size in local if is_dump_name(name)]
     return {
