@@ -632,6 +632,27 @@ plausibility guard raises rather than latching `ok` over a truncated or
 implausible series. Installed by the deploy's `install-units` verb from
 `installed-units.sha256`. Spec: [`indicators/vixts.md`](indicators/vixts.md).
 
+### DISPERSION (`radon-dispersion.timer`)
+
+Daily `22:20 UTC` (`RandomizedDelaySec=120`), oneshot `scripts/fetch_dispersion.py`,
+`TimeoutStartSec=900`. VIX close, the 95th-minus-5th percentile spread of daily
+single-stock returns across the S&P 500 seed, and the same spread across the 11
+Select Sector SPDRs, each rolled to a 60-session mean and z-scored over the full
+sample since 2017. IB daily `TRADES` bars for every symbol (`IBClient` auto client
+id, `asyncio.gather` under 8 slots, `1 M` incremental / `10 Y` `--backfill`), then
+Yahoo for whatever IB left empty (spark batches of 20 incrementally, per-symbol
+chart on backfill); UW is skipped so the 515-symbol sweep never spends the shared
+daily cap. Only raw per-session rows land in `dispersion_history`; the means and
+z-scores are rebuilt from every stored row each run. 22:20 clears the EST close
+and sits between ivrank 22:10 and yield-curve 22:30. Runs every calendar day;
+weekend and holiday runs find no new completed session, make no IB or Yahoo
+requests, and refresh only the snapshot + heartbeat that keep `dispersion` inside
+its 26h window. An empty VIX or a thin cross-section re-serves the stored series
+as `stale_source` with an `error` heartbeat and exits non-zero; a gap wider than
+the incremental window raises and asks for `--backfill`. Installed by the deploy's
+`install-units` verb from `installed-units.sha256`. Spec:
+[`indicators/dispersion.md`](indicators/dispersion.md).
+
 ### Model catalog (`radon-model-catalog.timer`)
 
 Daily `03:10 UTC` (`RandomizedDelaySec=300`), oneshot

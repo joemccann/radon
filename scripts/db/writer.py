@@ -1261,6 +1261,60 @@ def upsert_vixts_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = N
     db.commit()
 
 
+_DISPERSION_INSERT_HEAD = (
+    "INSERT INTO dispersion_history "
+    "(date, vix_close, stock_spread, sector_spread, n_stocks, n_sectors, recorded_at) "
+)
+_DISPERSION_ROW_PLACEHOLDER = "(?, ?, ?, ?, ?, ?, ?)"
+_DISPERSION_ON_CONFLICT = (
+    " ON CONFLICT(date) DO UPDATE SET "
+    "vix_close = excluded.vix_close, stock_spread = excluded.stock_spread, "
+    "sector_spread = excluded.sector_spread, n_stocks = excluded.n_stocks, "
+    "n_sectors = excluded.n_sectors, recorded_at = excluded.recorded_at"
+)
+
+
+def _dispersion_params(row: dict[str, Any], stamp: str) -> tuple:
+    return (
+        row["date"],
+        float(row["vix_close"]),
+        float(row["stock_spread"]),
+        float(row["sector_spread"]),
+        int(row["n_stocks"]),
+        int(row["n_sectors"]),
+        stamp,
+    )
+
+
+def upsert_dispersion_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
+    """DISPERSION indicator — one raw row per session, idempotent on date.
+
+    Chunked multi-row INSERTs (Hrana I/O bounding): a --backfill passes
+    ~2,500 rows in one run. Duplicate dates collapse to the last row before
+    the statement is built, since SQLite refuses to UPSERT one conflict
+    target twice inside a single INSERT (R-362).
+    """
+    if not rows:
+        return
+    deduped: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        deduped[str(row.get("date"))] = row
+    ordered = list(deduped.values())
+    stamp = recorded_at or _now_iso()
+    db = get_db()
+    for start in range(0, len(ordered), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = ordered[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        placeholders = ", ".join(_DISPERSION_ROW_PLACEHOLDER for _ in chunk)
+        params: list[Any] = []
+        for row in chunk:
+            params.extend(_dispersion_params(row, stamp))
+        db.execute(
+            f"{_DISPERSION_INSERT_HEAD}VALUES {placeholders}{_DISPERSION_ON_CONFLICT}",
+            tuple(params),
+        )
+    db.commit()
+
+
 def _iei_hyg_params(row: dict[str, Any], stamp: str) -> tuple:
     dxy = row.get("dxy_close")
     return (
