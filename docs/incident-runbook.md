@@ -247,6 +247,47 @@ Reported 2026-08-25 as "502 on https://app.radon.run/admin".
 
 ---
 
+## caddy-health-floor-pages-aggregate-invalid
+
+**Off-box observer pages P1 `aggregate_invalid` while ping and `/sign-in`
+stay 200.** Peak: 2026-08-29 23:05Z, page `1b0b049c…`. GitHub probe
+failed 23:03:36–23:03:56Z; deploy runner `1b2a82db` materialized 23:05Z
+(the first release that ships `cloud/caddy/Caddyfile`).
+
+- **Mechanism:** `/edge-health/ping` is Caddy-static 200. `/edge-health/status`
+  reverse-proxies `:8330`. The never-502 floor rewrites healthd 5xx and
+  dial-refused (healthd stopped during deploy `stop-clean`) to HTTP 200
+  `{"reachable":false,"observer":"caddy"}`. `classify_probes` treated that
+  opaque 200 as `aggregate_invalid`. Deploy-window suppression only matched
+  `(ping|status)_http_5xx`, so the rewritten 502 paged P1. Local
+  `:8330/status` was schema-v2 `up`; `/sign-in` 200. Not IB, not Turso.
+- **Detection:** Turso `external_probe.detail=aggregate_invalid` with
+  `http_status=200`; GitHub `external-health-probe.yml` FAILURE in the
+  same minute; ping 200; serving-path units up. After healthd binds,
+  the next off-box cycle writes `edge_ok`.
+- **Discriminating check:** the public `/edge-health/status` body (or the
+  Caddyfile literal) is `{"reachable":false,"observer":"caddy"}` while
+  loopback `:8330/status` is schema-v2, OR the sample sits inside a
+  deploy window with serving path up. A real schema contradiction
+  (`ok` vs `overall_state`) is still `aggregate_invalid` and still P1.
+  `status_http_502` is the pre-floor form of the same restart
+  (`deploy-restart-window-edge-502` / page `d98c3364`).
+- **Remediation (code):** classify the Caddy observer body as
+  `status_unreachable:caddy`. Suppress that reason inside the deploy
+  window when the local serving path is up, same arm as 5xx. Real
+  healthd-down outside a deploy still pages. Do not local-clear
+  perimeter unreachability.
+- **Regression:**
+  `test_health_probe.py::TestClassifyProbes::test_caddy_never_502_floor_is_status_unreachable_not_aggregate_invalid`,
+  `test_external_probe_deadman.py::test_deploy_window_caddy_status_unreachable_is_suppressed`,
+  `test_caddy_status_unreachable_outside_deploy_window_pages`,
+  `test_aggregate_invalid_inside_deploy_window_still_pages`.
+- **Code:** `scripts/health_probe/probe.py` (`classify_probes`),
+  `scripts/watchdog/external_probe.py` (`_DEPLOY_COLLATERAL_REASON`),
+  `cloud/caddy/Caddyfile` (`handle_response` / `handle_errors`).
+
+---
+
 ## assistant-turn-edge-504
 
 **A chat turn dies with `Assistant service returned an error.` and DevTools
