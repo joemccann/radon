@@ -410,7 +410,32 @@ consume_watchdog_lease_once() {
   fi
 }
 
+read_host_role() {
+  local role="${RADON_HOST_ROLE:-}"
+  if [[ -z "$role" && -n "${ENV_FILE:-}" && -f "$ENV_FILE" ]]; then
+    role="$(awk -F= '/^RADON_HOST_ROLE=/{v=$2} END{print v}' "$ENV_FILE" 2>/dev/null || true)"
+    role="${role%\"}"
+    role="${role#\"}"
+    role="${role%\'}"
+    role="${role#\'}"
+    role="${role//$'\r'/}"
+  fi
+  case "$role" in
+    app|broker|combined) printf '%s\n' "$role" ;;
+    *) printf 'combined\n' ;;
+  esac
+}
+
+refuse_app_role_mutation() {
+  if [[ "$(read_host_role)" == "app" ]]; then
+    echo "REFUSING Gateway mutation: RADON_HOST_ROLE=app (broker owns the session)" >&2
+    return 1
+  fi
+  return 0
+}
+
 start_gateway() {
+  refuse_app_role_mutation || return 1
   reconcile_pending_transition
   if container_running; then
     echo "IB Gateway container already running; no lease acquired"
@@ -425,6 +450,7 @@ start_gateway() {
 }
 
 restart_gateway() {
+  refuse_app_role_mutation || return 1
   reconcile_pending_transition
   require_new_lease
   compose_to_state stopped restart-down down
@@ -437,6 +463,7 @@ restart_gateway() {
 
 restart_gateway_preheld() {
   local expected_holder="${1:-}"
+  refuse_app_role_mutation || return 1
   reconcile_pending_transition
   consume_watchdog_lease_once "$expected_holder"
   compose_to_state stopped preheld-down down

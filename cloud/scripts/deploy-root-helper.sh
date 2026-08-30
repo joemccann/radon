@@ -237,6 +237,36 @@ root_ownership_matches() {
   fi
 }
 
+read_host_role() {
+  local role="${RADON_HOST_ROLE:-}"
+  local envf="${RADON_DEPLOY_ENV_FILE:-${CONTROL_PLANE_ROOT}/etc/radon/env}"
+  if [[ -z "$role" && -f "$envf" ]]; then
+    role="$(awk -F= '/^RADON_HOST_ROLE=/{v=$2} END{print v}' "$envf" 2>/dev/null || true)"
+    role="${role%\"}"
+    role="${role#\"}"
+    role="${role%\'}"
+    role="${role#\'}"
+    role="${role//$'\r'/}"
+  fi
+  case "$role" in
+    app|broker|combined) printf '%s\n' "$role" ;;
+    *) printf 'combined\n' ;;
+  esac
+}
+
+app_skips_control_plane_source() {
+  [[ "$(read_host_role)" == "app" ]] || return 1
+  case "$1" in
+    scripts/ib-gateway-control.sh|\
+    services/radon-ib-gateway.service|\
+    services/radon-ib-gateway-preheld-restart.service|\
+    services/radon-ib-watchdog.service|\
+    services/radon-ib-watchdog.timer)
+      return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 verify_control_plane() {
   local line expected_hash source_rel logical_target installed_target installed_hash
   local index=0
@@ -261,6 +291,12 @@ verify_control_plane() {
       return 1
     fi
     installed_target="${CONTROL_PLANE_ROOT}${logical_target}"
+    if app_skips_control_plane_source "$source_rel"; then
+      if [[ ! -f "$installed_target" || -L "$installed_target" ]]; then
+        index=$((index + 1))
+        continue
+      fi
+    fi
     if [[ ! -f "$installed_target" || -L "$installed_target" ]]; then
       echo "installed control-plane target is unavailable or unsafe: ${logical_target}" >&2
       return 1
@@ -1313,6 +1349,16 @@ write_control_plane_manifest_and_ready() {
   for index in "${!CONTROL_PLANE_SOURCES[@]}"; do
     source_rel="${CONTROL_PLANE_SOURCES[$index]}"
     dest="${CONTROL_PLANE_ROOT}${CONTROL_PLANE_TARGETS[$index]}"
+    if app_skips_control_plane_source "$source_rel" && \
+       [[ ! -f "$dest" || -L "$dest" ]]; then
+      digest="$(file_sha256 "${CLOUD_SOURCE}/${source_rel}")" || {
+        "$RM" -f "$tmp_manifest"
+        return 73
+      }
+      printf '%s  %s -> %s\n' "$digest" "$source_rel" "${CONTROL_PLANE_TARGETS[$index]}" \
+        >> "$tmp_manifest"
+      continue
+    fi
     if [[ ! -f "$dest" || -L "$dest" ]]; then
       # Same rollback shape as the skip in refresh_control_plane: a drop-in that
       # this checkout does not ship, and that was never installed, is not a
@@ -1369,6 +1415,15 @@ refresh_control_plane() {
     source_rel="${CONTROL_PLANE_SOURCES[$index]}"
     source="${CLOUD_SOURCE}/${source_rel}"
     dest="${CONTROL_PLANE_ROOT}${CONTROL_PLANE_TARGETS[$index]}"
+    if app_skips_control_plane_source "$source_rel"; then
+      if [[ -f "$dest" && ! -L "$dest" ]]; then
+        "$RM" -f "$dest" || {
+          echo "failed to strip app-role gateway artifact: ${dest}" >&2
+          return 73
+        }
+      fi
+      continue
+    fi
     if [[ ! -f "$source" || -L "$source" ]]; then
       # A drop-in source is absent from every checkout before 702ae26a, and the
       # INSTALLED helper is always the newest one, so a rollback enumerates
