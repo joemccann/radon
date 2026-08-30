@@ -13,7 +13,7 @@ const ROUTES = [
   "orders/cancel", "orders/modify", "orders/place", "orders", "orders/whatif",
   "paper/place", "performance", "pi", "portfolio", "preferences", "previous-close",
   "regime", "scanner", "scanner/strength", "scanner/strength/scan",
-  "scanner/theta", "scanner/theta/scan", "short-availability/[ticker]",
+  "scanner/theta", "scanner/theta/scan", "short-availability/[ticker]", "streaks",
   "ticker/info", "ticker/news", "ticker/ratings", "ticker/seasonality", "vcg",
   "workflow/run", "service-health",
 ] as const;

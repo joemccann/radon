@@ -1,3 +1,38 @@
+# Task: STREAKS regime tab — per-ticker consecutive daily gains (2026-08-30)
+
+## Objective
+
+- Operator enters any ticker and gets a daily-timeframe chart of price (log) plus a histogram of consecutive daily gains, per the Turning Point reference image.
+- Data path honors IB > UW > Robinhood > Yahoo, on demand (no timer, no migration).
+
+## Dependency graph
+
+- T1 depends_on: [] - Research repo data path for per-ticker daily closes (existing IB pool route, uw_surface, robinhood_client, price_cache, yahoo chart)
+- T2 depends_on: [T1] - Spec docs/indicators/streaks.md + failing tests (pytest utils/route, vitest api/panel, lockstep pins)
+- T3 depends_on: [T2] - Python slice: scripts/utils/streaks.py + scripts/api/routes/streaks.py + server mount, pytest green
+- T4 depends_on: [T2] - Next API slice: web/app/api/streaks/route.ts + catalog pin, vitest green
+- T5 depends_on: [T2] - UI slice: streaks lib/hook/chart/panel + regime registration + pins, vitest green
+- T6 depends_on: [T3, T4, T5] - Full vitest + pytest suites, typecheck
+- T7 depends_on: [T6] - Playwright e2e + browser screenshot evidence
+- T8 depends_on: [T7] - Commit, push, PR
+
+## Checklist
+
+- [x] T1 Data path mapped (historical.py IB pool helpers, uw get_stock_ohlc 1d, fetch_robinhood_closes, price_cache, yahoo v8 chart)
+- [x] T2 Spec + red tests recorded (pytest ModuleNotFoundError; vitest 12 failed / 4 files)
+- [x] T3 Python slice green (27 passed: utils compute + route ladder)
+- [x] T4 Next API slice green (streaks-api 7 passed)
+- [x] T5 UI slice green (panel 18, regime-tab-routes 60, regime-rail 20, catalog + authz pins)
+- [x] T6 Full suites green (vitest 8353, scripts pytest 8878; cloud 6 pre-existing baseline failures reproduced on clean main)
+- [x] T7 E2E 4/4 + live browser: SPY 5,027 sessions (record 14, 2010-03-17) via FastAPI->Yahoo; NVDA fresh fetch through the form; dark screenshot docs/indicators/streaks-tab.png
+- [x] T8 PR
+
+## Review
+
+- On-demand per-ticker indicator: no timer, no migration, no service_health writer, no FreshnessRail (spec states why); FastAPI `/streaks/{ticker}` walks IB pool -> UW -> Robinhood -> Yahoo with the 21-bar acceptance ladder and price_cache reuse.
+- Lockstep pins that fired and were updated: regime-tab-routes, regime-rail counts, web assistant-catalog PINNED, web route-local authz matrix, FastAPI assistant_catalog.CATALOG, docs/indicators README index, e2e ci-curation ledger.
+- Sandbox constraints: worktree swarm collapsed to sequential slices on one branch (single VM, per-worktree installs not worth it); live browser check bridged only the Clerk session seam (no Clerk in sandbox) while the payload came from the real FastAPI ladder.
+
 # Task: Diagnose HEADLINES FEED DOWN (2026-08-30, ~17:56–18:12+ UTC)
 
 ## Objective
