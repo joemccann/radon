@@ -548,7 +548,7 @@ their `config/installed-units.sha256` entries.
 
 Daily `21:45 UTC` (`RandomizedDelaySec=300`), oneshot
 `scripts/fetch_credit_spread.py`. IB daily closes for HYG + SPX, then UW, then
-Yahoo. Both units share IB client IDs 56/69 and therefore serialize on `flock -w <peer budget> -E 75 /run/lock/radon-ib-history-5669.lock`: the 21:45/21:55 gap is not a mutex once `RandomizedDelaySec=300` applies to both. The lock loser exits 75 (`SuccessExitStatus=75`) and defers to its next slot instead of entering `failed` (R-127).
+Robinhood (HYG only, when configured), then Yahoo. Both units share IB client IDs 56/69 and therefore serialize on `flock -w <peer budget> -E 75 /run/lock/radon-ib-history-5669.lock`: the 21:45/21:55 gap is not a mutex once `RandomizedDelaySec=300` applies to both. The lock loser exits 75 (`SuccessExitStatus=75`) and defers to its next slot instead of entering `failed` (R-127).
 Heartbeat `credit-spread`. Units are listed in `setup-vps.sh`
 `SERVICE_FILES`; root install-copy is still owed (`not-installed` allowlist
 expires 2026-12-31). Spec: [`indicators/credit.md`](indicators/credit.md).
@@ -558,7 +558,8 @@ expires 2026-12-31). Spec: [`indicators/credit.md`](indicators/credit.md).
 Daily `21:55 UTC` (`RandomizedDelaySec=300`), oneshot
 `scripts/fetch_iei_hyg.py`. IB daily closes for IEI + HYG (SMART) and the ICE
 dollar index (`DX`, NYBOT), then UW (IEI/HYG, regular-session rows only), then
-Yahoo (`DX-Y.NYB` for DXY). Serialized against `radon-credit-spread` on the
+Robinhood (IEI/HYG only, when configured), then Yahoo (`DX-Y.NYB` for DXY).
+Serialized against `radon-credit-spread` on the
 shared IB client IDs (see above). Heartbeat `iei-hyg`. Installed by the deploy's
 `install-units` verb from `installed-units.sha256`. Spec:
 [`indicators/iei-hyg.md`](indicators/iei-hyg.md).

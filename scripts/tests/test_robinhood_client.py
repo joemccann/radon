@@ -214,7 +214,7 @@ class TestQuoteBatching:
 
 
 class TestPayloadParsing:
-    """The option/equity payload schema is unpublished — parse defensively."""
+    """Payload shapes are probed, never assumed — parse defensively."""
 
     def test_closes_from_plausible_shapes(self):
         for payload in (
