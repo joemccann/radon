@@ -80,6 +80,7 @@ _TODAY = date.today()
 FIXTURES = Path(__file__).parent / "fixtures"
 FIXTURE = json.loads((FIXTURES / "dispersion_ib_bars_sample.json").read_text())
 MIGRATION = Path(__file__).parents[1] / "db" / "migrations" / "0061_dispersion.sql"
+SOURCE_MIGRATION = Path(__file__).parents[1] / "db" / "migrations" / "0064_dispersion_source.sql"
 
 FIXTURE_STOCKS = ["AAPL", "MSFT", "NVDA", "JPM", "XOM", "UNH", "PG"]
 FIXTURE_SECTORS = ["XLK", "XLF", "XLE", "XLV", "XLC"]
@@ -723,12 +724,19 @@ class _FakeWriter:
 
 
 class _StubFetch:
-    def __init__(self, closes):
-        self.closes = closes
-        self.calls: list[tuple[list[str], bool]] = []
+    """``by_duration`` answers a widened refetch (R-448); ``closes`` answers every call otherwise."""
 
-    def __call__(self, symbols, backfill):
+    def __init__(self, closes, *, by_duration=None):
+        self.closes = closes
+        self.by_duration = by_duration
+        self.calls: list[tuple[list[str], bool]] = []
+        self.durations: list[str | None] = []
+
+    def __call__(self, symbols, backfill, duration=None):
         self.calls.append((list(symbols), backfill))
+        self.durations.append(duration)
+        if self.by_duration is not None:
+            return self.by_duration[duration or fetch_dispersion.INCREMENTAL_DURATION]
         return self.closes
 
 
@@ -835,9 +843,12 @@ class TestRun:
         self.stored = rows[:40]
         tail_start = SHIFTED_SESSIONS[100]
         tail = {s: {d: c for d, c in series.items() if d >= tail_start} for s, series in SHIFTED_CLOSES.items()}
+        stub = _StubFetch(tail)
         with pytest.raises(Exception, match="backfill"):
-            self._run(_StubFetch(tail))
+            self._run(stub)
 
+        # R-448: every wider window was tried before giving up.
+        assert stub.durations == [None, "3 M", "1 Y"]
         assert self.fake.rows == []
         assert self.fake.health[-1][1] == "error"
 
@@ -904,6 +915,69 @@ class TestRun:
         payload = fetch_dispersion.run(now=NOW, universe=FIXTURE_UNIVERSE)
         assert payload["source"] == {"prices": "ib", "vix": "ib"}
         assert self.fake.health == [("dispersion", "ok", None)]
+
+    # R-447: a thin night is rewritten once the window refetches a wider cross-section.
+    def test_stored_row_with_a_thinner_cross_section_is_rewritten(self):
+        rows = self._all_rows()
+        thin_date = rows[-3]["date"]
+        self.stored = rows[:-3] + [{**rows[-3], "n_stocks": 6}] + rows[-2:-1]
+        payload = self._run(_StubFetch(SHIFTED_CLOSES))
+
+        assert len(self.fake.rows) == 1
+        upserted, _ = self.fake.rows[0]
+        assert [r["date"] for r in upserted] == [thin_date, LAST_SESSION]
+        by_date = {r["date"]: r for r in upserted}
+        assert by_date[thin_date]["n_stocks"] == 7
+        assert all(r["source"] == "ib" for r in upserted)
+        assert payload["status"] == "ok"
+        assert self.fake.health == [("dispersion", "ok", None)]
+
+    def test_stored_rows_at_the_same_cross_section_are_not_rewritten(self):
+        rows = self._all_rows()
+        self.stored = rows[:-1]
+        self._run(_StubFetch(SHIFTED_CLOSES))
+        upserted, _ = self.fake.rows[0]
+        assert [r["date"] for r in upserted] == [LAST_SESSION]
+
+    # R-448: a gap the 1 M window cannot bridge widens to 3 M, then 1 Y, before failing.
+    def test_gap_beyond_one_month_widens_the_window_and_succeeds(self):
+        rows = self._all_rows()
+        self.stored = rows[:-25]
+        narrow_start = SHIFTED_SESSIONS[-20]
+        narrow = {s: {d: c for d, c in series.items() if d >= narrow_start} for s, series in SHIFTED_CLOSES.items()}
+        stub = _StubFetch(None, by_duration={"1 M": narrow, "3 M": SHIFTED_CLOSES})
+        payload = self._run(stub)
+
+        assert stub.durations == [None, "3 M"]
+        assert len(self.fake.rows) == 1
+        upserted, _ = self.fake.rows[0]
+        assert [r["date"] for r in upserted] == [r["date"] for r in rows[-25:]]
+        assert payload["status"] == "ok"
+        assert self.fake.health == [("dispersion", "ok", None)]
+
+    def test_gap_beyond_three_months_widens_to_a_year(self):
+        rows = self._all_rows()
+        self.stored = rows[:-25]
+        narrow_start = SHIFTED_SESSIONS[-20]
+        narrow = {s: {d: c for d, c in series.items() if d >= narrow_start} for s, series in SHIFTED_CLOSES.items()}
+        stub = _StubFetch(None, by_duration={"1 M": narrow, "3 M": narrow, "1 Y": SHIFTED_CLOSES})
+        self._run(stub)
+        assert stub.durations == [None, "3 M", "1 Y"]
+        assert self.fake.health == [("dispersion", "ok", None)]
+
+    # R-449: one zero close drops that symbol's two adjacent returns, not the cycle.
+    def test_a_zero_close_drops_the_symbol_not_the_cycle(self):
+        rows = self._all_rows()
+        self.stored = rows[:-2]
+        corrupted = {s: dict(c) for s, c in SHIFTED_CLOSES.items()}
+        corrupted["MSFT"][SHIFTED_SESSIONS[-2]] = 0.0
+        payload = self._run(_StubFetch(corrupted))
+
+        upserted, _ = self.fake.rows[0]
+        by_date = {r["date"]: r for r in upserted}
+        assert by_date[SHIFTED_SESSIONS[-2]]["n_stocks"] == 6
+        assert by_date[LAST_SESSION]["n_stocks"] == 6
+        assert payload["status"] == "ok"
 
 
 # ── fetch_dispersion: _write_db isolation (R-192) ─────────────────
@@ -974,18 +1048,62 @@ class TestDispersionStorage:
         db.executescript(MIGRATION.read_text())
         assert db.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0] == 1
 
+    # R-447: provenance column, applied the way migrate.py applies it.
+    def _apply_source_migration(self, db):
+        import sys
+
+        sys.path.insert(0, str(Path(__file__).parents[1] / "db"))
+        from migrate import _is_already_applied, _split_statements
+
+        for statement in _split_statements(SOURCE_MIGRATION.read_text()):
+            try:
+                db.execute(statement)
+            except sqlite3.OperationalError as exc:
+                if not _is_already_applied(exc):
+                    raise
+
+    def _db_with_source(self):
+        db = self._db()
+        self._apply_source_migration(db)
+        return db
+
+    def test_source_migration_adds_a_nullable_column_and_registers_version_63(self):
+        db = self._db_with_source()
+        cols = {r[1]: r for r in db.execute("PRAGMA table_info(dispersion_history)")}
+        assert "source" in cols
+        assert cols["source"][2].upper() == "TEXT"
+        assert cols["source"][3] == 0, "existing rows have no provenance; the column is nullable"
+        assert [r[0] for r in db.execute("SELECT version FROM schema_migrations ORDER BY version")] == [61, 63]
+
+    def test_source_migration_is_idempotent(self):
+        db = self._db_with_source()
+        self._apply_source_migration(db)
+        assert db.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0] == 2
+        assert sum(1 for r in db.execute("PRAGMA table_info(dispersion_history)") if r[1] == "source") == 1
+
     def _row(self, d: str, vix: float, stock: float = 0.05) -> dict:
         return {"date": d, "vix_close": vix, "stock_spread": stock, "sector_spread": 0.02, "n_stocks": 501, "n_sectors": 11}
 
     def test_upsert_is_idempotent_per_date(self, monkeypatch):
         from db import writer
 
-        db = self._db()
+        db = self._db_with_source()
         monkeypatch.setattr(writer, "get_db", lambda: db)
         writer.upsert_dispersion_rows([self._row("2026-08-28", 14.43)], recorded_at="2026-08-29T22:21:07Z")
         writer.upsert_dispersion_rows([self._row("2026-08-28", 14.50, 0.06)], recorded_at="2026-08-30T22:21:07Z")
         rows = db.execute("SELECT date, vix_close, stock_spread, recorded_at FROM dispersion_history").fetchall()
         assert rows == [("2026-08-28", 14.50, 0.06, "2026-08-30T22:21:07Z")]
+
+    def test_upsert_writes_and_rewrites_the_source(self, monkeypatch):
+        from db import writer
+
+        db = self._db_with_source()
+        monkeypatch.setattr(writer, "get_db", lambda: db)
+        writer.upsert_dispersion_rows([{**self._row("2026-08-28", 14.43), "source": "yahoo"}], recorded_at="a")
+        writer.upsert_dispersion_rows([{**self._row("2026-08-28", 14.43), "source": "ib"}], recorded_at="b")
+        writer.upsert_dispersion_rows([self._row("2026-08-27", 14.0)], recorded_at="b")
+        rows = db.execute("SELECT date, source FROM dispersion_history ORDER BY date").fetchall()
+        assert rows == [("2026-08-27", None), ("2026-08-28", "ib")]
 
     def test_the_emitted_statement_carries_one_row_per_date(self, monkeypatch):
         from db import writer
@@ -1006,10 +1124,10 @@ class TestDispersionStorage:
         )
         assert len(calls) == 1
         sql, params = calls[0]
-        assert len(params) % 7 == 0
-        dates = [params[i] for i in range(0, len(params), 7)]
+        assert len(params) % 8 == 0
+        dates = [params[i] for i in range(0, len(params), 8)]
         assert dates == ["2026-08-27", "2026-08-28"], f"one row per conflict target; got {dates}"
-        vix = [params[i + 1] for i in range(0, len(params), 7)]
+        vix = [params[i + 1] for i in range(0, len(params), 8)]
         assert vix == [14.0, 14.50], "the LAST row for a date wins"
         assert "ON CONFLICT(date) DO UPDATE" in sql.replace(" (date)", "(date)")
 
@@ -1063,3 +1181,40 @@ class TestSweepBudget:
         assert seen["remaining"] > 0, "the fallback rung was handed a spent deadline"
         assert set(closes) == set(symbols)
         assert closes.sources == {s: "yahoo" for s in symbols}
+
+
+# ── non-positive closes (R-449) ───────────────────────────────────
+
+
+class TestNonPositiveCloses:
+    def test_ib_parser_drops_zero_and_negative_closes(self):
+        from types import SimpleNamespace
+
+        bars = [
+            SimpleNamespace(date="2026-08-26", close=100.0),
+            SimpleNamespace(date="2026-08-27", close=0.0),
+            SimpleNamespace(date="2026-08-28", close=-1.0),
+            SimpleNamespace(date="2026-08-29", close=None),
+        ]
+        assert fetch_dispersion._closes_from_bars(bars) == {"2026-08-26": 100.0}
+
+    def test_yahoo_parsers_drop_zero_closes(self):
+        ts = [
+            int(datetime(2026, 8, d, tzinfo=timezone.utc).timestamp()) for d in (26, 27)
+        ]
+        spark = fetch_dispersion.parse_yahoo_spark({"AAPL": {"timestamp": ts, "close": [100.0, 0.0]}})
+        assert spark == {"AAPL": {"2026-08-26": 100.0}}
+        chart = fetch_dispersion.parse_yahoo_chart(
+            {"timestamp": ts, "indicators": {"quote": [{"close": [0, 101.0]}]}}
+        )
+        assert chart == {"2026-08-27": 101.0}
+
+    @pytest.mark.usefixtures("fixture_floors")
+    def test_a_zero_close_in_the_cross_section_drops_both_adjacent_returns(self):
+        closes = _closes()
+        closes["MSFT"][VIX_DATES[-2]] = 0.0
+        rows = build_raw_rows(closes, FIXTURE_STOCKS, FIXTURE_SECTORS)
+        by_date = {r["date"]: r for r in rows}
+        assert by_date[VIX_DATES[-2]]["n_stocks"] == 6
+        assert by_date[VIX_DATES[-1]]["n_stocks"] == 6
+        assert by_date[VIX_DATES[-3]]["n_stocks"] == 7
