@@ -22,24 +22,30 @@ from fastapi import Request, HTTPException, Depends
 logger = logging.getLogger("radon.auth")
 
 _TAILNET = ipaddress.ip_network("100.64.0.0/10")
+# Hetzner Cloud Network radon-private (app 10.0.0.2, broker 10.0.0.4).
+# NIC attachment is the authenticated channel, same class as the tailnet.
+# Do not widen to all RFC1918 — docker0 is 172.17.0.0/16.
+_HETZNER_PRIVATE = ipaddress.ip_network("10.0.0.0/16")
 
 
 def is_local_or_tailnet(host: str | None) -> bool:
-    """True for loopback or Tailscale CGNAT (RFC 6598) addresses.
+    """True for loopback, Tailscale CGNAT, or the Hetzner private net.
 
     Tailnet membership is itself an authenticated channel, so tailnet peers
     are treated as 'local' for server-to-server calls — this is what lets
     the laptop's Next.js (in cloud-thin mode) reach the Hetzner FastAPI
-    without forwarding a Clerk JWT.
+    without forwarding a Clerk JWT. After the broker/app split the watchdog
+    on 10.0.0.4 probes FastAPI on 10.0.0.2 the same way.
     """
     if host in ("127.0.0.1", "::1"):
         return True
     if not host:
         return False
     try:
-        return ipaddress.ip_address(host) in _TAILNET
+        address = ipaddress.ip_address(host)
     except ValueError:
         return False
+    return address in _TAILNET or address in _HETZNER_PRIVATE
 
 
 # Headers a reverse proxy adds when it forwards a request. Caddy sets
