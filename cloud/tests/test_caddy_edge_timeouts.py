@@ -362,7 +362,13 @@ def _caddy_env(tmp_path):
     }
 
 
-def _run_caddy(tmp_path, proxy_sock, upstream_port, block):
+def _run_caddy(tmp_path, proxy_sock, upstream_port, block, site_prelude=""):
+    """Run a real caddy with `block` as the proxy body.
+
+    `site_prelude` injects site-level directives ahead of the handle — the
+    shipped site block puts `encode zstd gzip` in front of every proxy, and a
+    compressor that buffers is invisible to a test that omits it.
+    """
     _require_caddy()
     # caddy binds the listener itself, so the reservation is given up at the
     # last possible moment instead of at draw time.
@@ -371,6 +377,7 @@ def _run_caddy(tmp_path, proxy_sock, upstream_port, block):
     config.write_text(
         "{\n\tadmin off\n\tgrace_period 20s\n}\n\n"
         f"http://127.0.0.1:{proxy_port} {{\n"
+        f"{site_prelude}"
         "\thandle {\n"
         f"\t\treverse_proxy 127.0.0.1:{upstream_port} {block}\n"
         "\t}\n}\n"
@@ -616,3 +623,234 @@ class TestTheDeployPublishesTheEdgeConfig:
             "publish-caddy must be grant-checked like sync-scheduled-units so a "
             "host without the sudoers verb warns instead of failing the deploy"
         )
+
+
+# ── The assistant turn streams (R-262 durable fix) ───────────────────────
+#
+# Raising `response_header_timeout` only moved the cliff: the route wrote
+# nothing until `runAssistantLoop` finished, so any turn slower than the bound
+# still 504'd. The route now opens a `text/event-stream` and flushes a `start`
+# frame BEFORE the loop is awaited, so the response header exists within
+# milliseconds no matter how long the turn takes.
+
+# One `start` frame is a few dozen bytes, well under `encode`'s 512-byte
+# minimum_length. A compressor that waits for its buffer to fill, or a proxy
+# that batches writes, re-creates the exact bug being fixed here.
+STREAM_FIRST_BYTE_BUDGET_SECONDS = 5
+
+
+class _StreamsStartThenAnswersLate(http.server.BaseHTTPRequestHandler):
+    """The streaming route: header + `start` immediately, `done` much later.
+
+    `Connection: close` rather than a Content-Length or hand-rolled chunking:
+    the body is EOF-delimited, which is what a ReadableStream response looks
+    like to Caddy's transport, and it keeps the stub honest about never
+    knowing its own length up front.
+    """
+
+    protocol_version = "HTTP/1.1"
+    release = threading.Event()
+    START_FRAME = b"event: start\ndata: {}\n\n"
+    DONE_FRAME = b'event: done\ndata: {"content":"answered"}\n\n'
+
+    def do_POST(self):
+        # Drain the turn's JSON body. Closing a socket with unread request
+        # bytes still in it makes the kernel send RST rather than FIN, Caddy
+        # reads that as a severed upstream, and the client sees a truncated
+        # chunked stream instead of the clean end of a finished turn.
+        length = int(self.headers.get("Content-Length") or 0)
+        if length:
+            self.rfile.read(length)
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache, no-transform")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        with contextlib.suppress(OSError):
+            self.wfile.write(type(self).START_FRAME)
+            self.wfile.flush()
+        type(self).release.wait(300)
+        with contextlib.suppress(OSError):
+            self.wfile.write(type(self).DONE_FRAME)
+            self.wfile.flush()
+        self.close_connection = True
+
+    def log_message(self, *args):
+        pass
+
+    def handle_one_request(self):
+        with contextlib.suppress(OSError):
+            super().handle_one_request()
+
+
+def _assistant_proxy_block(caddy_dir):
+    content = read_caddyfile(caddy_dir)
+    return reverse_proxy_block(handle_block(content, ASSISTANT_MATCHER), APP_UPSTREAM)
+
+
+class TestTheAssistantHandleStatesItStreams:
+    def test_the_assistant_handle_flushes_every_write(self, caddy_dir):
+        block = _assistant_proxy_block(caddy_dir)
+        assert re.search(r"flush_interval\s+-1\b", block), (
+            "the assistant handle does not state flush_interval -1, so whether "
+            "the SSE frames reach the browser as they are written rests on "
+            "Caddy's content-type auto-detection; a stream that sits in the "
+            "proxy's buffer is the 504 all over again"
+        )
+
+    def test_the_route_writes_its_header_before_the_loop(self):
+        source = ASSISTANT_ROUTE.read_text(encoding="utf-8")
+        assert "text/event-stream" in source, (
+            "the assistant route does not answer with an event stream, so it "
+            "still writes nothing until runAssistantLoop resolves and any turn "
+            "slower than the edge's header bound reaches the operator as a 504"
+        )
+
+
+@pytest.mark.skipif(
+    os.environ.get("RADON_SKIP_CADDY_E2E") == "1",
+    reason="RADON_SKIP_CADDY_E2E=1 local-dev escape (T-205). CI installs caddy.",
+)
+class TestTheAssistantStreamMechanism:
+    """The money test: a real caddy in front of a deliberately slow upstream.
+
+    `test_a_hung_upstream_becomes_a_5xx_within_a_bound` above already proves
+    the other half — an upstream that writes NO header inside the guard, which
+    is what `/api/assistant` was until this change, becomes a 504. These drive
+    the same guard with the streaming shape and assert the opposite outcome, so
+    the pair is the before and after of the 2026-08-29 incident.
+    """
+
+    def test_a_streaming_turn_survives_the_generic_header_guard(
+        self, caddy_dir, tmp_path
+    ):
+        """The turn no longer depends on a bespoke bound to reach the operator.
+
+        Driven through the CATCH-ALL block on purpose: that is the 30 s guard
+        `/api/assistant` rode on 2026-08-29, and a turn that answers only after
+        it expires has to succeed anyway now that the header is written first.
+        """
+        block = proxy_block(read_caddyfile(caddy_dir), APP_UPSTREAM)
+        guard = _directive_seconds(block, "response_header_timeout")
+        assert guard is not None
+
+        stub = _StreamsStartThenAnswersLate
+        stub.release = threading.Event()
+        # The answer lands AFTER the guard the incident died on.
+        answer_at = threading.Timer(guard + LATE_HEADER_MARGIN_SECONDS, stub.release.set)
+
+        with held_port() as upstream_sock, held_port() as proxy_sock:
+            server = serve_on(upstream_sock, stub)
+            proxy_port = port_of(proxy_sock)
+            caddy = _run_caddy(tmp_path, proxy_sock, port_of(upstream_sock), block)
+            try:
+                assert wait_for_listener(proxy_port, time.monotonic() + 10)
+                answer_at.start()
+                request = urllib.request.Request(
+                    f"http://127.0.0.1:{proxy_port}/api/assistant",
+                    data=b'{"messages":[{"role":"user","content":"hi"}]}',
+                    headers={
+                        "Content-Type": "application/json",
+                        "Accept": "text/event-stream",
+                    },
+                    method="POST",
+                )
+                started = time.monotonic()
+                try:
+                    response = urllib.request.urlopen(
+                        request, timeout=guard + LATE_HEADER_MARGIN_SECONDS * 3
+                    )
+                except urllib.error.HTTPError as exc:
+                    pytest.fail(
+                        f"the edge answered {exc.code} instead of streaming the "
+                        "turn: the route wrote no header before the loop ran, "
+                        "which is exactly the 2026-08-29 incident"
+                    )
+                with response:
+                    assert response.status == 200
+                    header_at = time.monotonic() - started
+                    first = response.read(len(stub.START_FRAME))
+                    first_byte_at = time.monotonic() - started
+                    body = first + response.read()
+
+                assert first == stub.START_FRAME, (
+                    f"the first thing off the wire was {first!r}, not the start "
+                    "frame; something between the route and the client is "
+                    "holding the stream"
+                )
+                assert first_byte_at < STREAM_FIRST_BYTE_BUDGET_SECONDS, (
+                    f"the first byte took {first_byte_at:.1f}s against a "
+                    f"{guard}s guard; the stream is being buffered, so a slower "
+                    "turn still 504s"
+                )
+                assert header_at < STREAM_FIRST_BYTE_BUDGET_SECONDS
+                assert stub.DONE_FRAME in body, (
+                    "the connection did not carry the turn's answer through to "
+                    f"the end: {body!r}"
+                )
+            finally:
+                answer_at.cancel()
+                stub.release.set()
+                stop_serving(server)
+                caddy.terminate()
+                caddy.wait(timeout=10)
+
+    def test_the_shipped_assistant_handle_does_not_buffer_the_stream(
+        self, caddy_dir, tmp_path
+    ):
+        """`encode zstd gzip` sits in front of this path in the real site block.
+
+        A compressor that waits for `minimum_length` (512 bytes by default)
+        before deciding whether to compress would hold a ~24-byte `start` frame
+        until the turn finished, reintroducing the bug in the one place nobody
+        would look for it. So this drives the SHIPPED assistant proxy block with
+        the site's own `encode` directive in front of it.
+        """
+        block = _assistant_proxy_block(caddy_dir)
+        stub = _StreamsStartThenAnswersLate
+        stub.release = threading.Event()
+        answer_at = threading.Timer(
+            STREAM_FIRST_BYTE_BUDGET_SECONDS * 2, stub.release.set
+        )
+
+        with held_port() as upstream_sock, held_port() as proxy_sock:
+            server = serve_on(upstream_sock, stub)
+            proxy_port = port_of(proxy_sock)
+            caddy = _run_caddy(
+                tmp_path,
+                proxy_sock,
+                port_of(upstream_sock),
+                block,
+                site_prelude="\tencode zstd gzip\n",
+            )
+            try:
+                assert wait_for_listener(proxy_port, time.monotonic() + 10)
+                answer_at.start()
+                request = urllib.request.Request(
+                    f"http://127.0.0.1:{proxy_port}/api/assistant",
+                    data=b'{"messages":[{"role":"user","content":"hi"}]}',
+                    headers={
+                        "Content-Type": "application/json",
+                        "Accept": "text/event-stream",
+                        # What a browser sends. Without it `encode` is a no-op
+                        # and the buffering question is never asked.
+                        "Accept-Encoding": "gzip",
+                    },
+                    method="POST",
+                )
+                started = time.monotonic()
+                with urllib.request.urlopen(request, timeout=60) as response:
+                    assert response.status == 200
+                    first = response.read(len(stub.START_FRAME))
+                    first_byte_at = time.monotonic() - started
+                assert first == stub.START_FRAME, first
+                assert first_byte_at < STREAM_FIRST_BYTE_BUDGET_SECONDS, (
+                    f"the shipped assistant handle held the start frame for "
+                    f"{first_byte_at:.1f}s; the turn is buffered at the edge"
+                )
+            finally:
+                answer_at.cancel()
+                stub.release.set()
+                stop_serving(server)
+                caddy.terminate()
+                caddy.wait(timeout=10)

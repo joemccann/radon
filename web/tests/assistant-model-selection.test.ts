@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { assistantDonePayload, drainAssistantStream } from "./assistantStream";
+
 /**
  * Model selection on the assistant request path.
  *
@@ -85,6 +87,7 @@ describe("assistant model selection", () => {
     );
 
     expect(res.status).toBe(200);
+    await drainAssistantStream(res);
     expect(validateModelId).toHaveBeenCalledWith("claude-opus-5");
     expect(chat).toHaveBeenCalledTimes(1);
     expect(chat.mock.calls[0][0]).toMatchObject({ model: "claude-opus-5", provider: "anthropic" });
@@ -103,7 +106,7 @@ describe("assistant model selection", () => {
     );
 
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await assistantDonePayload<{ content: string }>(res);
     expect(body.content).toBeTruthy();
 
     expect(chat).toHaveBeenCalledTimes(1);
@@ -120,6 +123,7 @@ describe("assistant model selection", () => {
     const res = await POST(postRequest({ messages: [{ role: "user", content: "How is SPY flow?" }] }) as never);
 
     expect(res.status).toBe(200);
+    await drainAssistantStream(res);
     expect(validateModelId).not.toHaveBeenCalled();
     expect(chat).toHaveBeenCalledTimes(1);
     const request = chat.mock.calls[0][0] as Record<string, unknown>;
@@ -141,6 +145,7 @@ describe("assistant model selection", () => {
     );
 
     expect(res.status).toBe(200);
+    await drainAssistantStream(res);
     const request = chat.mock.calls[0][0] as Record<string, unknown>;
     expect(request).not.toHaveProperty("model");
   });
