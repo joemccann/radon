@@ -800,6 +800,7 @@ async def lifespan(app: FastAPI):
     # Journal reconciliation still runs once at startup because trade-fill
     # rehydration is lifecycle-bound, not periodic.
     lifecycle_tasks.append(asyncio.create_task(_warm_journal_reconciliation_on_startup()))
+    lifecycle_tasks.append(asyncio.create_task(_warm_knowledge_embedder_on_startup()))
 
     try:
         yield
@@ -1350,6 +1351,19 @@ async def _warm_journal_reconciliation_on_startup() -> None:
         logger.info("Journal startup reconcile complete")
     else:
         logger.warning("Journal startup reconcile failed: %s", result.error)
+
+
+async def _warm_knowledge_embedder_on_startup() -> None:
+    """Load the ~67 MB fastembed ONNX model off the event loop at boot so the
+    first /knowledge request after a deploy does not pay the cold load plus
+    fastembed's Hugging Face cache checks in-request (2026-08-30 03:04Z).
+    get_embedder caches the result (or None) for every later call."""
+    if test_mode:
+        return  # demo VM never serves the corpus; don't hold the model in RAM
+    embedder = await asyncio.to_thread(get_embedder)
+    logger.info(
+        "knowledge: embedder %s", "warm" if embedder else "unavailable, FTS-only"
+    )
 
 
 # Phase 6: _warm_cri_cache_on_startup and _warm_gex_cache_on_startup were
@@ -6012,6 +6026,14 @@ def _knowledge_search_in_thread(
         except db_http.DbHttpError:
             if attempt >= _KNOWLEDGE_RETRIEVAL_ATTEMPTS:
                 raise
+            if query_embedding is not None:
+                # vector_top_k over the ANN index is the statement that blows
+                # the Hrana bound under load (0.3-1.6s normally, >4s on a
+                # cold or busy host; 2026-08-30 03:05Z post-deploy 503s).
+                # Retry without the leg that just timed out rather than
+                # re-running it.
+                logger.warning("knowledge: hybrid retrieval timed out; retrying FTS-only")
+                query_embedding = None
             time.sleep(_KNOWLEDGE_RETRY_BACKOFF_SECS)
     retrieval = "hybrid" if query_embedding is not None else "fts-only"
     return results, retrieval
