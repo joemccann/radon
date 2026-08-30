@@ -228,6 +228,15 @@ class TestEdgeHealthRunbook:
         assert "never on the status code" in operations
 
 
+class TestDbBackupRunbook:
+    def test_local_prune_is_documented_as_upload_aware(self):
+        # R-445: the local window is 7 days and a dump is unlinked only once
+        # B2 holds it; the runbook still reasoned about a 30-day window.
+        text = (_ROOT / "docs" / "cloud-services.md").read_text(encoding="utf-8")
+        assert "Off-boxing a 30-day window would buy nothing" not in text
+        assert "present in B2" in text
+
+
 class TestOwnership:
     def test_matcher_requires_an_owner_when_a_glob_hits(self):
         rules = [
