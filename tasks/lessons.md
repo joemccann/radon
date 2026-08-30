@@ -707,3 +707,7 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 - Test a background helper at the wire while its parent is still alive: the notify proxy passed 34 argv-level tests and died in 250ms in production because it was spawned inside `$(...)`.
 - Before trusting a deploy on a busy day, check `df -h /` and that the pruner timer is `enabled`: a 4.8GB image pull per SHA on a 75G disk took production down with every gate failing at once, and `bootstrap` installs control-plane timers but never enables them.
 - Other sessions were merging PRs and running root bootstraps on the same VPS at the same time (PR #151 reverted the same drop-ins I was fixing). Re-read `origin/main` and the installed manifest before every privileged step; never assume the tip is yours.
+
+## 2026-08-29 - Done/Next format applies to background-job progress lines too
+
+- Second correction in one day: a background-job session narrated every step in prose ("Waiting on the ingestion implementer…", "Full vitest green: …") because the harness asks for narration. The harness "narrate" instruction sets WHEN to speak, not the SHAPE: every emitted message is still `**Done**` / `**Next**` bullets under 100 words. Fold the pre-tool line into a `**Done**` bullet or omit it.

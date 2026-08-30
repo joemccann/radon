@@ -3796,3 +3796,23 @@ Per /indicator swarm (spec: docs/indicators/skew.md). Slug/service `skew`, tab S
 - Local output-trace audit remains baseline-red because the development checkout contains 14.2 GB across 7,333 backup/archive files traced by the existing orders/place route; production compile itself passed.
 
 - PR: `#97` at commit `1e15b612`; replacement CI passed every build, security, Vitest, coverage, Python, perimeter, Playwright, Vercel preview, and app-image check.
+
+# DISPERSION indicator (2026-08-29)
+
+Spec: `docs/indicators/dispersion.md`. Pattern: `/indicator` swarm, single shared worktree, disjoint ownership.
+
+## Checklist
+
+- [x] T1 Research: IB `10 Y` TRADES daily bars reach 2016-08-31 for S&P seed, sector SPDRs, VIX (XLC from 2018-06-19); migration 0061 free; fixture captured.
+- [x] T2 Spec written and committed.
+- [x] T3 Red tests recorded failing on missing modules (34b038e4).
+- [x] T4 Implementers landed scoped commits: ingestion 94 pytest, api 259 vitest, ui 179 vitest.
+- [x] T5 Full gates: vitest 814 files / 8,228 passed; pytest 8,631 passed + 24 pre-existing Flex-embargo failures; tsc 0 errors post-rebase.
+- [x] T6 Backfill: IB 488/515 + Yahoo 27, 2,511 rows 2016-09-01..2026-08-28 verified in Turso; migration 61 applied.
+- [x] T7 Playwright mocked spec 3 passed; live screenshots dark+light with 12 stroked paths, 0 NaN, 0 cadence claims.
+- [ ] T8 Ship: branch pushed as ind/dispersion, PR open; merge deploys; then verify timer on the host.
+
+## Review
+
+- 2026-08-28 reading: stock +2.06, sector +2.02, VIX -0.32, BELOW THE SURFACE (gap +2.38), matching the Wellington chart.
+- IB daily bars DO throttle on a 515-symbol 10 Y sweep (20 error-162 retries); the incremental 1 M run is expected to be lighter, watch the first timer fire.
