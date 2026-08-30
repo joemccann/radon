@@ -1195,6 +1195,26 @@ def upsert_llm_model_catalog_rows(
     db.commit()
 
 
+def get_llm_model_catalog_rows() -> list[dict[str, Any]]:
+    """Every ``llm_model_catalog`` row in the dict shape
+    ``upsert_llm_model_catalog_rows`` accepts.
+
+    Seeds ``refresh_model_catalog.load_previous`` so a provider whose poll
+    fails is carried forward from Turso, not from a host-local JSON that is
+    ephemeral on the VPS (R-456). Raises on DB errors; the caller falls back
+    to the JSON cache.
+    """
+    db = get_db()
+    rows = db.execute(
+        "SELECT provider, model_id, display_name, refreshed_at "
+        "FROM llm_model_catalog ORDER BY provider ASC"
+    ).fetchall()
+    return [
+        {"provider": r[0], "model_id": r[1], "display_name": r[2], "refreshed_at": r[3]}
+        for r in rows
+    ]
+
+
 _VIXTS_INSERT_HEAD = (
     "INSERT INTO vixts_history (date, vix_close, vix3m_close, ratio, spx_close, recorded_at) "
 )

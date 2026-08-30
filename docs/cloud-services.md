@@ -666,8 +666,14 @@ non-chat modalities are dropped, and versions are compared as floats so
 `grok-4.20` reads as 4.2 rather than beating `grok-4.6`. A provider with no key
 is skipped silently, so the chat model picker lists exactly what this
 deployment can call. A provider that errors, times out or rate-limits keeps its
-existing row; a run that resolves no provider at all writes only the heartbeat,
-so a bad poll never blanks a good catalog. Per-provider operator overrides
+existing row (seeded from Turso, JSON cache second); a run that resolves no
+provider at all writes only the heartbeat, so a bad poll never blanks a good
+catalog. Any carried-forward keyed provider makes that heartbeat `error`
+(`class: provider_carry_forward`, naming the providers), a crash before the
+write leaves an `error` row (`class: cycle_failed`) and exit 1, each provider
+poll has its own 60s wall-clock budget and the Anthropic cursor walk is capped
+at 10 pages, so the 26h alarm reports content staleness rather than an `ok`
+with today's `finished_at` (R-455/R-456/R-458). Per-provider operator overrides
 (`ANTHROPIC_MODEL`, `OPENAI_MODEL`, `XAI_MODEL` / `GROK_MODEL` — the same
 variables `web/lib/llm/provider.ts` reads) win over discovery, so a bad
 heuristic is recoverable without a deploy. Rows in `llm_model_catalog`, payload

@@ -28,7 +28,14 @@ Selection is a pure filter -> sort -> head per provider (see each
 ``select_*_frontier``); the HTTP call is a thin shell around it. Nothing
 is ever written that a live response did not contain, except an explicit
 operator override. A provider that errors, times out or rate-limits
-keeps its EXISTING row - a failed poll never blanks a good one.
+keeps its EXISTING row - a failed poll never blanks a good one - but the
+run's heartbeat is ``error`` naming the carried-forward providers, so a
+key that 401s nightly pages instead of aging silently behind an ``ok``.
+The previous row comes from Turso first, the JSON cache second.
+
+Each provider poll has its own wall-clock budget (PROVIDER_BUDGET_S) and
+Anthropic's cursor walk is capped (ANTHROPIC_MAX_PAGES), so one slow or
+looping provider cannot consume the unit's TimeoutStartSec.
 
 Output is dual-written to Turso llm_model_catalog + scan_snapshots and
 data/llm_models.json (the fallback GET /api/models reads).
@@ -43,10 +50,13 @@ import argparse
 import json
 import os
 import re
+import signal
 import sys
+import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Iterator, Optional
 
 # -- path setup ----------------------------------------------------
 _SCRIPT_DIR = Path(__file__).resolve().parent
@@ -93,6 +103,14 @@ XAI_MODELS_URL = "https://api.x.ai/v1/models"
 
 USER_AGENT = "radon/2.0"
 FETCH_TIMEOUT_S = 30
+# Wall-clock bound per provider poll. urlopen's timeout bounds one socket
+# operation, not the request, so a slow-drip page could otherwise run to
+# the unit's TimeoutStartSec=300; three providers at this budget plus the
+# Turso writes stay inside it.
+PROVIDER_BUDGET_S = 60.0
+# Anthropic lists ~10 models; 10 pages of 100 is already absurd, and a
+# server that answers has_more with a repeating cursor must not spin.
+ANTHROPIC_MAX_PAGES = 10
 
 
 def _log(message: str) -> None:
@@ -145,17 +163,42 @@ def _http_get_json(url: str, headers: dict[str, str]) -> dict[str, Any]:
         return json.loads(response.read().decode("utf-8", "replace"))
 
 
+@contextmanager
+def _provider_budget() -> Iterator[None]:
+    """Raise TimeoutError inside the block once PROVIDER_BUDGET_S elapses.
+
+    SIGALRM, because it is the only bound that reaches into a blocking
+    urlopen read (PEP 475 aborts the syscall when the handler raises). Main
+    thread only - which this oneshot always is - and a no-op elsewhere.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+
+    def _expire(signum: int, frame: Any) -> None:
+        raise TimeoutError(f"poll exceeded its {PROVIDER_BUDGET_S:g}s budget")
+
+    restore = signal.signal(signal.SIGALRM, _expire)
+    signal.setitimer(signal.ITIMER_REAL, PROVIDER_BUDGET_S)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, restore)
+
+
 def fetch_anthropic_models(api_key: str) -> list[dict[str, Any]]:
     """Every page of GET /v1/models - the list is cursor-paginated."""
     headers = {"x-api-key": api_key, "anthropic-version": ANTHROPIC_VERSION}
     models: list[dict[str, Any]] = []
     url = f"{ANTHROPIC_MODELS_URL}?limit=100"
-    while True:
+    for _ in range(ANTHROPIC_MAX_PAGES):
         payload = _http_get_json(url, headers)
         models.extend(payload.get("data") or [])
         if not payload.get("has_more") or not payload.get("last_id"):
             return models
         url = f"{ANTHROPIC_MODELS_URL}?limit=100&after_id={payload['last_id']}"
+    raise RuntimeError(f"still has_more after {ANTHROPIC_MAX_PAGES} pages; cursor not advancing")
 
 
 def fetch_openai_models(api_key: str) -> list[dict[str, Any]]:
@@ -342,17 +385,31 @@ def build_output(
 
 
 def load_previous() -> dict[str, dict[str, Any]]:
-    """Last good catalog by provider, from the JSON fallback. Used only to
-    carry a failing provider's row forward untouched."""
+    """Last good catalog by provider. Used only to carry a failing
+    provider's row forward untouched.
+
+    Turso first: the JSON cache is host-local and ephemeral on the VPS, and
+    it is only rewritten on a run that resolved rows, so it lags Turso the
+    moment a provider fails (R-456). The JSON seeds what Turso cannot
+    answer - a cold table or an unreachable one.
+    """
+    previous: dict[str, dict[str, Any]] = {}
     try:
         payload = json.loads(LLM_MODELS_JSON.read_text())
     except Exception:  # noqa: BLE001 - a missing or corrupt cache is a cold start
-        return {}
-    return {
-        model["provider"]: dict(model)
-        for model in payload.get("models") or []
-        if model.get("provider") in PROVIDERS
-    }
+        payload = {}
+    for model in payload.get("models") or []:
+        if model.get("provider") in PROVIDERS:
+            previous[model["provider"]] = dict(model)
+    try:
+        turso_rows = writer.get_llm_model_catalog_rows()
+    except Exception as exc:  # noqa: BLE001 - the JSON tier carries a Turso outage
+        _log(f"llm_model_catalog read failed ({exc}); seeding from the JSON cache only")
+        turso_rows = []
+    for row in turso_rows:
+        if row.get("provider") in PROVIDERS:
+            previous[row["provider"]] = dict(row)
+    return previous
 
 
 # -- persistence ---------------------------------------------------
@@ -364,22 +421,59 @@ def _write_json_cache(payload: dict[str, Any]) -> None:
     os.replace(tmp, LLM_MODELS_JSON)
 
 
-def persist_result(payload: dict[str, Any], rows: list[dict[str, Any]]) -> None:
+def _carry_forward_error(failed: dict[str, str]) -> Optional[dict[str, Any]]:
+    if not failed:
+        return None
+    detail = "; ".join(f"{provider}: {reason}" for provider, reason in failed.items())
+    return {
+        "message": f"carried forward without a live poll - {detail}",
+        "class": "provider_carry_forward",
+        "providers": list(failed),
+    }
+
+
+def persist_result(
+    payload: dict[str, Any],
+    rows: list[dict[str, Any]],
+    failed: Optional[dict[str, str]] = None,
+) -> None:
     """Dual-write: Turso rows + snapshot + heartbeat, then the JSON
     fallback. Zero rows means every provider was keyless or failed, so
     nothing but the heartbeat is written - the last good Turso rows and
     JSON cache survive a total provider outage.
+
+    ``failed`` maps each keyed provider that did NOT get a live row this run
+    to its reason. Any entry makes the heartbeat ``error`` (R-455): an
+    ``ok`` with today's finished_at would satisfy the 26h alarm while the
+    catalog silently aged. Keyless providers are not failures.
     """
     scan_time = payload["scan_time"]
+    error = _carry_forward_error(failed or {})
+    state = "error" if error else "ok"
     writer.ensure_no_replica_for_writers()
     if not rows:
         _log("no provider rows resolved; leaving the existing catalog untouched")
-        writer.record_service_health(SERVICE, "ok", finished_at=scan_time)
+        writer.record_service_health(SERVICE, state, finished_at=scan_time, error=error)
         return
     writer.upsert_llm_model_catalog_rows(rows, refreshed_at=scan_time)
     writer.upsert_scan_snapshot(SERVICE, scan_time, payload)
-    writer.record_service_health(SERVICE, "ok", finished_at=scan_time)
+    writer.record_service_health(SERVICE, state, finished_at=scan_time, error=error)
     _write_json_cache(payload)
+
+
+def _record_cycle_failure(scan_time: str, exc: BaseException) -> None:
+    """Error heartbeat for a run that died before ``persist_result``. A row
+    that never appears is invisible until the 26h window; best-effort, so a
+    broken writer cannot mask the original failure."""
+    try:
+        writer.record_service_health(
+            SERVICE,
+            "error",
+            finished_at=scan_time,
+            error={"message": f"model-catalog cycle failed: {exc}", "class": "cycle_failed"},
+        )
+    except Exception as health_exc:  # noqa: BLE001 - best-effort mirror
+        _log(f"error heartbeat non-fatal: {health_exc}")
 
 
 # -- daily orchestration -------------------------------------------
@@ -404,38 +498,44 @@ def _row(provider: str, model_id: str, scan_time: str) -> dict[str, Any]:
 
 def resolve_provider_row(
     provider: str, key: str, scan_time: str, previous: dict[str, dict[str, Any]]
-) -> Optional[dict[str, Any]]:
+) -> tuple[Optional[dict[str, Any]], Optional[str]]:
     """One provider's catalog row: operator override, else discovery, else
-    the previous row untouched. Returns None only on a cold-start failure."""
+    the previous row untouched. Returns ``(row, failure)``: ``row`` is None
+    only on a cold-start failure; ``failure`` names why the row was carried
+    forward instead of polled live, None when the poll succeeded."""
     override = provider_override(provider)
     if override:
         _log(f"{provider}: operator override {override}")
-        return _row(provider, override, scan_time)
+        return _row(provider, override, scan_time), None
     try:
-        models = FETCHERS[provider](key)
+        with _provider_budget():
+            models = FETCHERS[provider](key)
     except Exception as exc:  # noqa: BLE001 - a bad poll must never blank a row
         _log(f"{provider}: model list failed ({exc}); keeping the existing row")
-        return previous.get(provider)
+        return previous.get(provider), f"model list failed ({exc})"
     selected = SELECTORS[provider](models)
     if selected is None:
         _log(f"{provider}: {len(models)} models, none frontier; keeping the existing row")
-        return previous.get(provider)
-    return _row(provider, str(selected["id"]), scan_time)
+        return previous.get(provider), f"{len(models)} models, none frontier"
+    return _row(provider, str(selected["id"]), scan_time), None
 
 
-def run() -> dict[str, Any]:
-    scan_time = _iso_utc_now()
+def run(scan_time: Optional[str] = None) -> dict[str, Any]:
+    scan_time = scan_time or _iso_utc_now()
     previous = load_previous()
     rows: list[dict[str, Any]] = []
+    failed: dict[str, str] = {}
     for provider in PROVIDERS:
         key = provider_key(provider)
         if not key:
             continue
-        row = resolve_provider_row(provider, key, scan_time, previous)
+        row, failure = resolve_provider_row(provider, key, scan_time, previous)
         if row is not None:
             rows.append(row)
+        if failure is not None:
+            failed[provider] = failure
     payload = build_output(rows=rows, scan_time=scan_time, preferred=preferred_provider())
-    persist_result(payload, rows)
+    persist_result(payload, rows, failed)
     return payload
 
 
@@ -455,7 +555,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--json", action="store_true", help="Output JSON to stdout")
     args = parser.parse_args(argv)
 
-    payload = run()
+    scan_time = _iso_utc_now()
+    try:
+        payload = run(scan_time)
+    except Exception as exc:  # noqa: BLE001 - R-455/R-458: a crash must leave a row, not a traceback
+        _log(f"cycle failed: {exc}")
+        _record_cycle_failure(scan_time, exc)
+        return 1
     if args.json:
         print(json.dumps(payload, indent=2))
     else:
