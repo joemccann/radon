@@ -2101,6 +2101,9 @@ body[data-mobile="true"] .dashboard-surface__feed {
   line-height: 1.4;
   color: var(--text-primary);
 }
+.headlines-tape__lede {
+  font-weight: 600;
+}
 .headlines-tape__imp {
   font-family: var(--font-mono);
   font-size: 9px;
