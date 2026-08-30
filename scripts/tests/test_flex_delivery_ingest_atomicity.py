@@ -45,6 +45,8 @@ def _claim_always_wins(monkeypatch):
     released: list[str] = []
     monkeypatch.setattr(ingest, "claim_flex_delivery", lambda _d, **_k: True)
     monkeypatch.setattr(ingest, "release_flex_delivery", lambda d: released.append(d))
+    # R-436: the applied mark after the writers is the same seam; grant it.
+    monkeypatch.setattr(ingest, "mark_flex_delivery_applied", lambda _d: True)
     return released
 
 
