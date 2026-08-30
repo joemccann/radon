@@ -50,6 +50,11 @@ LOOPS = {
         "testing-weekend",
         "com.radon.testing-daily.plist",
     ),
+    "ci-performance": (
+        "ci_performance_nightly.sh",
+        "ci-performance",
+        "com.radon.ci-performance-daily.plist",
+    ),
 }
 LOOP_IDS = sorted(LOOPS)
 

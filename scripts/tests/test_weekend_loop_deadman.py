@@ -46,11 +46,20 @@ import pytest
 REPO = Path(__file__).resolve().parents[2]
 RELIABILITY = REPO / "scripts" / "reliability_weekend.sh"
 TESTING = REPO / "scripts" / "testing_weekend.sh"
+CI_PERFORMANCE = REPO / "scripts" / "ci_performance_nightly.sh"
 PLISTS = {
     "reliability": REPO / "config" / "com.radon.reliability-daily.plist",
     "testing": REPO / "config" / "com.radon.testing-daily.plist",
+    "ci-performance": REPO / "config" / "com.radon.ci-performance-daily.plist",
 }
-LOOPS = {"reliability": RELIABILITY, "testing": TESTING}
+# Every nightly loop wrapper. A new loop that is not registered here inherits
+# none of the dead-man contract below, which is the whole reason the two
+# original loops have it.
+LOOPS = {
+    "reliability": RELIABILITY,
+    "testing": TESTING,
+    "ci-performance": CI_PERFORMANCE,
+}
 
 
 def _uncommented(path: Path) -> str:
@@ -229,7 +238,7 @@ class TestTestingPlistCanResolveBun:
         for name, plist in PLISTS.items():
             text = plist.read_text(encoding="utf-8")
             paths[name] = re.search(r"<key>PATH</key>\s*<string>([^<]*)</string>", text).group(1)
-        assert paths["testing"] == paths["reliability"], paths
+        assert len(set(paths.values())) == 1, paths
 
 
 class TestRotationSparesTheLaunchdSinks:
@@ -293,6 +302,7 @@ class TestSetupGuardsTheSharedVenv:
     SETUPS = {
         "reliability": REPO / "scripts" / "setup_reliability_weekend.sh",
         "testing": REPO / "scripts" / "setup_testing_weekend.sh",
+        "ci-performance": REPO / "scripts" / "setup_ci_performance.sh",
     }
 
     def test_the_two_setups_really_do_share_a_venv(self):
@@ -300,11 +310,11 @@ class TestSetupGuardsTheSharedVenv:
             name: re.search(r'WEEKEND_VENV="([^"]+)"', path.read_text(encoding="utf-8")).group(1)
             for name, path in self.SETUPS.items()
         }
-        assert venvs["reliability"] == venvs["testing"], (
+        assert len(set(venvs.values())) == 1, (
             f"precondition changed: {venvs}"
         )
 
-    @pytest.mark.parametrize("name", ["reliability", "testing"])
+    @pytest.mark.parametrize("name", ["reliability", "testing", "ci-performance"])
     def test_each_setup_checks_the_sibling_clone_lock(self, name):
         # Comments stripped first: the guard's own comment quotes the
         # `python3.13 -m venv` line it protects, and a naive slice ends there.
@@ -318,7 +328,7 @@ class TestSetupGuardsTheSharedVenv:
             "the other loop's cycle is executing against it"
         )
 
-    @pytest.mark.parametrize("name", ["reliability", "testing"])
+    @pytest.mark.parametrize("name", ["reliability", "testing", "ci-performance"])
     def test_each_setup_checks_the_bash_version(self, name):
         """GAP C: `/bin/bash` on this runner is 3.2, and `cloud/tests` needs 4+.
 
