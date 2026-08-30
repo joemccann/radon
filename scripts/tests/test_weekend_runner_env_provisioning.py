@@ -40,10 +40,15 @@ BASH = shutil.which("bash") or "/bin/bash"
 SETUPS = {
     "reliability": (REPO / "scripts" / "setup_reliability_weekend.sh", "radon"),
     "testing": (REPO / "scripts" / "setup_testing_weekend.sh", "radon-testing"),
+    "ci-performance": (
+        REPO / "scripts" / "setup_ci_performance.sh",
+        "radon-ci-performance",
+    ),
 }
 PLISTS = {
     "reliability": "com.radon.reliability-daily.plist",
     "testing": "com.radon.testing-daily.plist",
+    "ci-performance": "com.radon.ci-performance-daily.plist",
 }
 
 # Dummy values only. Never stage a real credential into a fixture.

@@ -89,12 +89,13 @@ fi
 # and site-packages a live testing agent is executing against, mid-run.
 # The guard above was written for the clone ("A live cycle owns this clone")
 # and never extended to the shared $WEEKEND_ROOT both loops depend on. R-266.
-SIBLING_REPO="$WEEKEND_ROOT/radon-testing"
-if [[ -d "$SIBLING_REPO" ]] \
-  && kill -0 "$(cat "$SIBLING_REPO/.weekend-runner.lock/pid" 2>/dev/null)" 2>/dev/null; then
-  echo "  a weekend run is in flight in $SIBLING_REPO and shares $WEEKEND_VENV; re-run when it finishes"
-  exit 1
-fi
+for SIBLING_REPO in "$WEEKEND_ROOT/radon-testing" "$WEEKEND_ROOT/radon-ci-performance"; do
+  if [[ -d "$SIBLING_REPO" ]] \
+    && kill -0 "$(cat "$SIBLING_REPO/.weekend-runner.lock/pid" 2>/dev/null)" 2>/dev/null; then
+    echo "  a weekend run is in flight in $SIBLING_REPO and shares $WEEKEND_VENV; re-run when it finishes"
+    exit 1
+  fi
+done
 # An already-provisioned clone must carry the current config/ and scripts/
 # before the job is installed from it. main is force-reset; any weekend
 # branch and its commits survive.

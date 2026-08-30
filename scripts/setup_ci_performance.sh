@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
-# One-command setup of the weekend testing loop on the always-on runner
-# (Mac mini). Run ON THE MINI from any checkout of the repo:
+# One-command setup of the nightly CI/deploy performance loop on the
+# always-on runner (Mac mini). Run ON THE MINI from any checkout of the repo:
 #
-#   bash scripts/setup_testing_weekend.sh
+#   bash scripts/setup_ci_performance.sh
 #
-# Provisions the testing loop's OWN dedicated clone
-# (~/radon-weekend/radon-testing — never edit it by hand; every run
+# Provisions this loop's OWN dedicated clone
+# (~/radon-weekend/radon-ci-performance — never edit it by hand; every run
 # hard-resets it to origin/main), installs the single daily launchd job
-# (one cycle: audit then remediate), and verifies the toolchain. The
-# clone is deliberately separate from the reliability loop's
-# (~/radon-weekend/radon): both loops hard-reset their working tree per
-# round and the reliability loop's continuation rounds make its wall
-# clock unbounded, so sharing a clone destroys in-flight work
-# (2026-08-16 incident).
+# (one cycle: audit then remediate), creates the dead-man label, and verifies
+# the toolchain. The clone is deliberately separate from the reliability
+# loop's (~/radon-weekend/radon) and the testing loop's
+# (~/radon-weekend/radon-testing): every loop hard-resets its working tree per
+# round and the reliability loop's continuation rounds make its wall clock
+# unbounded, so sharing a clone destroys in-flight work (2026-08-16 incident).
 set -euo pipefail
 
 WEEKEND_ROOT="${RADON_WEEKEND_ROOT:-$HOME/radon-weekend}"
-WEEKEND_REPO="$WEEKEND_ROOT/radon-testing"
+WEEKEND_REPO="$WEEKEND_ROOT/radon-ci-performance"
 WEEKEND_VENV="$WEEKEND_ROOT/venv"
 # Pushover creds for the per-phase page. Lives OUTSIDE the runner clone:
 # every round hard-resets and cleans that clone.
@@ -83,13 +83,14 @@ if kill -0 "$(cat "$WEEKEND_REPO/.weekend-runner.lock/pid" 2>/dev/null)" 2>/dev/
   echo "  a weekend run is in flight in $WEEKEND_REPO; re-run when it finishes"
   exit 1
 fi
-# The SIBLING loop's clone too. WEEKEND_VENV is literally the same path in
-# both setups, and both wrappers prepend it to the running agent's PATH — so
-# the `python3.13 -m venv` + `pip install` below would mutate the interpreter
-# and site-packages a live reliability agent is executing against, mid-run.
-# The guard above was written for the clone ("A live cycle owns this clone")
-# and never extended to the shared $WEEKEND_ROOT both loops depend on. R-266.
-for SIBLING_REPO in "$WEEKEND_ROOT/radon" "$WEEKEND_ROOT/radon-ci-performance"; do
+# Every SIBLING loop's clone too. WEEKEND_VENV is literally the same path in
+# all three setups, and every wrapper prepends it to the running agent's PATH
+# — so the `python3.13 -m venv` + `pip install` below would mutate the
+# interpreter and site-packages a live sibling agent is executing against,
+# mid-run. The guard above was written for the clone ("A live cycle owns this
+# clone") and never extended to the shared $WEEKEND_ROOT the loops depend
+# on. R-266.
+for SIBLING_REPO in "$WEEKEND_ROOT/radon" "$WEEKEND_ROOT/radon-testing"; do
   if [[ -d "$SIBLING_REPO" ]] \
     && kill -0 "$(cat "$SIBLING_REPO/.weekend-runner.lock/pid" 2>/dev/null)" 2>/dev/null; then
     echo "  a weekend run is in flight in $SIBLING_REPO and shares $WEEKEND_VENV; re-run when it finishes"
@@ -103,7 +104,7 @@ git -C "$WEEKEND_REPO" fetch origin --quiet
 git -C "$WEEKEND_REPO" checkout -f --quiet main
 git -C "$WEEKEND_REPO" reset --hard --quiet origin/main
 touch "$WEEKEND_REPO/.radon-weekend-runner"
-mkdir -p "$WEEKEND_REPO/logs/testing-weekend"
+mkdir -p "$WEEKEND_REPO/logs/ci-performance"
 
 # web/.env is gitignored, so a fresh `git clone` can never carry it and the
 # nightly hard-reset would drop it anyway; both wrappers already exclude it
@@ -160,12 +161,23 @@ python3.13 -m venv "$WEEKEND_VENV"
   && bun install --frozen-lockfile >/dev/null \
   && cd web && bun install --frozen-lockfile >/dev/null )
 
-echo "[4/4] launchd jobs"
+echo "[4/4] dead-man label + launchd jobs"
+# `gh issue create --label` FAILS on a label that does not exist, and the
+# wrapper swallows that failure — so a missing label turns the dead-man
+# channel off silently. Idempotent: an existing label makes this a no-op.
+gh label create ci-performance-nightly \
+  --description "Nightly CI/deploy performance loop dead-man" --color 0E8A16 \
+  >/dev/null 2>&1 || true
+if gh label list --limit 200 2>/dev/null | grep -q '^ci-performance-nightly'; then
+  echo "  ok  label ci-performance-nightly"
+else
+  echo "  MISSING  label ci-performance-nightly (dead-man comments will be dropped)"
+fi
 mkdir -p "$LAUNCH_AGENTS"
 # Retire the split audit/remediate jobs. An operator copy left loaded keeps
 # firing into the same clone as the daily cycle, which is the same-clone
 # collision the single job exists to avoid. Idempotent: absent is fine.
-for old in testing-audit testing-remediate; do
+for old in ci-performance-audit ci-performance-remediate; do
   legacy="$LAUNCH_AGENTS/com.radon.${old}.plist"
   if [[ -f "$legacy" ]]; then
     launchctl unload "$legacy" 2>/dev/null || true
@@ -173,9 +185,9 @@ for old in testing-audit testing-remediate; do
     echo "  removed $legacy"
   fi
 done
-JOB_PLIST="$LAUNCH_AGENTS/com.radon.testing-daily.plist"
+JOB_PLIST="$LAUNCH_AGENTS/com.radon.ci-performance-daily.plist"
 sed -e "s|__WEEKEND_REPO__|$WEEKEND_REPO|g" -e "s|__HOME__|$HOME|g" \
-  "$WEEKEND_REPO/config/com.radon.testing-daily.plist" > "$JOB_PLIST"
+  "$WEEKEND_REPO/config/com.radon.ci-performance-daily.plist" > "$JOB_PLIST"
 plutil -lint "$JOB_PLIST" >/dev/null
 launchctl unload "$JOB_PLIST" 2>/dev/null || true
 launchctl load "$JOB_PLIST"
@@ -188,14 +200,14 @@ SCHED_MIN="$(plutil -extract StartCalendarInterval.Minute raw -o - "$JOB_PLIST")
 echo
 printf 'Done. Schedule: one cycle daily at %02d:%02d local (audit, then remediate),\n' \
   "$SCHED_HOUR" "$SCHED_MIN"
-echo "in the testing loop's own clone at $WEEKEND_REPO."
-echo "Dead-man: GitHub issue labeled 'testing-weekend' gets a comment per"
+echo "in the CI-performance loop's own clone at $WEEKEND_REPO."
+echo "Dead-man: GitHub issue labeled 'ci-performance-nightly' gets a comment per"
 echo "phase, plus a Pushover when $WEEKEND_ENV carries creds."
 echo "A quiet day means the runner did not fire OR the previous cycle is"
 echo "still running: launchd will not start a second instance of the label."
 echo "Check with: launchctl list | grep radon"
 echo "Smoke test now with:"
-echo "  RADON_WEEKEND_REPO=$WEEKEND_REPO bash $WEEKEND_REPO/scripts/testing_weekend.sh audit"
+echo "  RADON_WEEKEND_REPO=$WEEKEND_REPO bash $WEEKEND_REPO/scripts/ci_performance_nightly.sh audit"
 echo "Upgrading the wrapper in this clone, with no run in flight"
 echo "(check: ls -d $WEEKEND_REPO/.weekend-runner.lock):"
 echo "  git -C $WEEKEND_REPO fetch origin && git -C $WEEKEND_REPO checkout -f main && git -C $WEEKEND_REPO reset --hard origin/main"
