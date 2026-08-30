@@ -3,11 +3,44 @@ import WebSocket from "ws";
 import { reconnectDelayMs } from "../lib/reconnectGate.js";
 import { MAX_FRAME_BYTES } from "./normalize.js";
 import {
+  DEFAULT_FLASH_URL,
   DEFAULT_ORIGIN,
   DEFAULT_URL,
   DEFAULT_USER_AGENT,
   parseFrame,
 } from "./protocol.js";
+
+const FLASH_HISTORY_TIMEOUT_MS = 5_000;
+
+export async function fetchFlashHistory({
+  url = DEFAULT_FLASH_URL,
+  origin = DEFAULT_ORIGIN,
+  userAgent = DEFAULT_USER_AGENT,
+  fetchImpl = fetch,
+  timeoutMs = FLASH_HISTORY_TIMEOUT_MS,
+} = {}) {
+  try {
+    const res = await fetchImpl(url, {
+      headers: {
+        Origin: origin,
+        "User-Agent": userAgent,
+        Accept: "application/json",
+      },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) return [];
+    const body = await res.json();
+    const rows = Array.isArray(body?.data) ? body.data : Array.isArray(body) ? body : [];
+    const frames = [];
+    for (const row of rows.slice().reverse()) {
+      const frame = parseFrame(JSON.stringify(row));
+      if (frame.kind === "flash") frames.push(frame);
+    }
+    return frames;
+  } catch {
+    return [];
+  }
+}
 
 export function connectMktnews({
   url = DEFAULT_URL,

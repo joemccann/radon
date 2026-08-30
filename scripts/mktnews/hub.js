@@ -7,7 +7,7 @@ import {
   resolveUpgradeTarget,
   shouldSkipTicketValidation,
 } from "../lib/wsTrust.js";
-import { connectMktnews } from "./client.js";
+import { connectMktnews, fetchFlashHistory } from "./client.js";
 import {
   MAX_FRAME_BYTES,
   RING_SIZE,
@@ -71,6 +71,7 @@ export function createHeadlinesHub({
   ringSize = RING_SIZE,
   maxFrameBytes = MAX_FRAME_BYTES,
   delayFn = reconnectDelayMs,
+  loadHistory = null,
 } = {}) {
   const host = resolveHubListenHost(listenHost, security.bindHost);
   const ring = [];
@@ -178,7 +179,19 @@ export function createHeadlinesHub({
     });
   }
 
-  function listen() {
+  async function seedRing() {
+    if (!loadHistory || closed) return;
+    try {
+      const items = await loadHistory();
+      if (!Array.isArray(items)) return;
+      for (const item of items) ingest(item);
+    } catch {
+      // Serve an empty cache rather than blocking the hub.
+    }
+  }
+
+  async function listen() {
+    await seedRing();
     return new Promise((resolve) => {
       httpServer.listen(listenPort, host, () => {
         startUpstream();
@@ -236,6 +249,7 @@ export async function startHeadlinesHub(overrides = {}) {
     security,
     listenPort: overrides.listenPort ?? DEFAULT_LISTEN_PORT,
     connectUpstream: overrides.connectUpstream === undefined ? connectMktnews : overrides.connectUpstream,
+    loadHistory: overrides.loadHistory === undefined ? fetchFlashHistory : overrides.loadHistory,
   });
   await hub.listen();
   return hub;

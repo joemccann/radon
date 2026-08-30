@@ -3,7 +3,8 @@ import { createServer } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
 
-import { connectMktnews } from "./client.js";
+import { connectMktnews, fetchFlashHistory } from "./client.js";
+import { DEFAULT_FLASH_URL } from "./protocol.js";
 
 function listenServer() {
   const httpServer = createServer();
@@ -104,6 +105,37 @@ describe("connectMktnews", () => {
     controller.abort();
     client.stop();
     expect(origins[0]).toBe("https://mktnews.net");
+  });
+});
+
+describe("fetchFlashHistory", () => {
+  it("parses REST flash rows oldest-first with the browser Origin", async () => {
+    const seen = [];
+    const fetchImpl = async (url, init) => {
+      seen.push({ url, origin: init.headers.Origin });
+      return {
+        ok: true,
+        json: async () => ({
+          status: 200,
+          data: [
+            { id: "n1", type: 0, time: "2026-08-30T01:55:21.000Z", data: { content: "Newer." } },
+            { id: "n0", type: 0, time: "2026-08-30T01:54:49.000Z", data: { content: "Older." } },
+          ],
+        }),
+      };
+    };
+    const frames = await fetchFlashHistory({ fetchImpl });
+    expect(seen[0].url).toBe(DEFAULT_FLASH_URL);
+    expect(seen[0].origin).toBe("https://mktnews.net");
+    expect(frames.map((row) => row.data.id)).toEqual(["n0", "n1"]);
+    expect(frames[0].kind).toBe("flash");
+  });
+
+  it("returns an empty list when the history endpoint errors", async () => {
+    const frames = await fetchFlashHistory({
+      fetchImpl: async () => ({ ok: false, status: 503, json: async () => ({}) }),
+    });
+    expect(frames).toEqual([]);
   });
 });
 
