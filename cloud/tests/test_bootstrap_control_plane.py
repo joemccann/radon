@@ -295,6 +295,11 @@ printf 'systemctl\\t%s\\n' "$*" >> "$RADON_BOOTSTRAP_TEST_COMMAND_LOG"
 while IFS= read -r candidate; do
   [[ -z "$candidate" || -f "$candidate" ]] || exit 92
 done <<< "${RADON_BOOTSTRAP_TEST_EXPECTED_TARGETS:-}"
+if [[ "${RADON_BOOTSTRAP_TEST_TERM_AFTER_RELOAD:-0}" == "1" ]]; then
+  # The root helper's deadline TERMs the bootstrap process group; bash runs
+  # the trap once this foreground command returns, i.e. after the reload.
+  kill -TERM "$PPID"
+fi
 [[ "${RADON_BOOTSTRAP_TEST_FAIL_RELOAD:-0}" != "1" ]]
 """,
     )
@@ -547,6 +552,29 @@ def test_daemon_reload_failure_restores_bundle_but_withdraws_readiness(
     snapshot.pop(_ready_path(sandbox.rootfs))
     _assert_snapshot(snapshot)
     assert not _ready_path(sandbox.rootfs).exists()
+    commands = sandbox.command_log.read_text(encoding="utf-8").splitlines()
+    assert [line for line in commands if line.startswith("systemctl\t")] == [
+        "systemctl\tdaemon-reload"
+    ]
+
+
+def test_termination_after_daemon_reload_restores_bundle_and_readiness(
+    tmp_path: Path,
+) -> None:
+    """R-440: `radon-deploy-root sync-control-plane` TERMs a bootstrap that
+    overruns its 300s budget. Once the reload had run, rollback put the old
+    bundle back but deliberately left readiness withdrawn, so the NEXT deploy
+    job saw no marker and routed to the legacy runner on a host whose app
+    units carry container drop-ins. The reload succeeded on a validated
+    bundle; only a reload that FAILED leaves the unit graph unknown."""
+    sandbox = _sandbox(tmp_path)
+    snapshot = _seed_bundle(sandbox)
+
+    result = sandbox.run(RADON_BOOTSTRAP_TEST_TERM_AFTER_RELOAD="1")
+
+    assert result.returncode == 143, result.stdout + result.stderr
+    _assert_snapshot(snapshot)
+    assert _ready_path(sandbox.rootfs).read_bytes() == b"old-ready\n"
     commands = sandbox.command_log.read_text(encoding="utf-8").splitlines()
     assert [line for line in commands if line.startswith("systemctl\t")] == [
         "systemctl\tdaemon-reload"

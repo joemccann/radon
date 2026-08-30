@@ -201,6 +201,8 @@ class TestTheClaimNamesTheDeliveredFile:
             ingest, "claim_flex_delivery",
             lambda _d, **kw: recorded.append(kw.get("source_path")) or True,
         )
+        # R-436: the applied mark after the writers is the same seam; grant it.
+        monkeypatch.setattr(ingest, "mark_flex_delivery_applied", lambda _d: True)
         monkeypatch.setattr(ingest, "classify_flex_xml", lambda _x: ingest.TRADES)
         monkeypatch.setattr(
             ingest, "statement_metadata", lambda _x: {"period_from": None, "period_to": None}

@@ -132,5 +132,39 @@ describe("/api/flow-analysis/[ticker]", () => {
       const res = await POST(makeRequest(), ctx("AAPL"));
       expect(res.status).toBe(502);
     });
+
+    /* R-464 / REL-164: FastAPI detaches the scan from this request (8db918a5),
+     * so the 25s client timeout is the DESIGN path, not a failure. It exited
+     * through the catch above and told the operator the API was unavailable
+     * while `_scan_and_cache` was still running. */
+    describe("the 25s timeout is a scan still running, not an outage", () => {
+      const timeout = () => new DOMException("The operation was aborted due to timeout", "TimeoutError");
+
+      it("202 scan_pending with the cached report and no API-unavailable warning", async () => {
+        mockRadonFetch.mockRejectedValue(timeout());
+        mockReadFile.mockResolvedValue(
+          JSON.stringify({ ticker: "AAPL", verdict: { direction: "NEUTRAL", confidence: 0 } }),
+        );
+        const res = await POST(makeRequest(), ctx("AAPL"));
+        expect(res.status).toBe(202);
+        const body = await res.json();
+        expect(body.scan_pending).toBe(true);
+        expect(body.is_stale).toBeUndefined();
+        expect(body.verdict.direction).toBe("NEUTRAL");
+        expect(body.cache_meta.last_refresh).toBe("2026-05-08T12:00:00.000Z");
+        expect(res.headers.get("X-Sync-Warning")).toBeNull();
+      });
+
+      it("202 scan_pending with no report when this is the ticker's first scan", async () => {
+        mockRadonFetch.mockRejectedValue(timeout());
+        mockReadFile.mockRejectedValue(new Error("ENOENT"));
+        const res = await POST(makeRequest(), ctx("AAPL"));
+        expect(res.status).toBe(202);
+        const body = await res.json();
+        expect(body).toMatchObject({ ticker: "AAPL", scan_pending: true });
+        expect(body.verdict).toBeUndefined();
+        expect(body.cache_meta).toBeTruthy();
+      });
+    });
   });
 });

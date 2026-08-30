@@ -242,7 +242,7 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // matches its cor / vixcor / straddle siblings. Cboe CDN CSVs only — no IB.
   "vixts": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
-  // ``dispersion`` — radon-dispersion.timer fires daily 22:20 UTC every calendar day (weekend runs are no-new-session heartbeats); the Yahoo rung keeps the writer alive through an IB outage, so requires_ib stays false.
+  // ``dispersion`` — radon-dispersion.timer fires daily 22:20 UTC every calendar day (weekend runs are no-new-session heartbeats); the Yahoo rung keeps the writer alive through an IB outage, so requires_ib stays false. A sweep IB served nothing on is ``ok`` with last_error class ``ib_rung_dead`` (R-434).
   "dispersion": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
   // ``trin`` — radon-trin.timer samples NYSE A/D + volume from IB every 5 minutes during RTH (3 missed cycles flag); off-hours the close heartbeat holds a day.
@@ -433,6 +433,14 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // umbrella (which requires_ib=true does) would suppress the very alert
   // we want.
   "ib-realtime-relay": { open: 5 * MIN, extended: 24 * HOUR, closed: 24 * HOUR, category: "scheduled", requires_ib: false },
+
+  // R-459: the MKTNews headlines hub (radon-mktnews.service, scripts/mktnews/
+  // hub.js) writes `ok` at most every 5 min while upstream frames flow (time
+  // heartbeats count) and `error` after 3 consecutive failed dials or 5 min
+  // of silence. The upstream is a 24/7 feed, so one uniform 15-min window
+  // (three missed heartbeats) applies in every market state. No row until
+  // the unit is installed: the watchdog reads no-row as dormant.
+  "mktnews-hub": { open: 15 * MIN, extended: 15 * MIN, closed: 15 * MIN, category: "scheduled", requires_ib: false },
 
   // ``deploy`` is NOT a writer — it's the deploy MARKER row upserted by
   // radon-cloud deploy.sh after each green post-deploy gate (DUR-11). The

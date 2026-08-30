@@ -23,6 +23,7 @@ half-written `cash_flows` is unrepairable without a manual DELETE.
 from __future__ import annotations
 
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import libsql_experimental as libsql
@@ -34,11 +35,15 @@ SCRIPTS = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-MIGRATION = SCRIPTS / "db" / "migrations" / "0059_flex_deliveries.sql"
+MIGRATIONS = (
+    SCRIPTS / "db" / "migrations" / "0059_flex_deliveries.sql",
+    SCRIPTS / "db" / "migrations" / "0063_flex_delivery_claim_status.sql",
+)
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 ACTIVITY_XML = FIXTURES / "cash_transactions_flex_ytd_detail_sample.xml"
 
 SHA = "a" * 64
+NOW = datetime(2026, 8, 30, 12, 0, 0, tzinfo=timezone.utc)
 
 
 def test_the_driver_under_test_is_the_real_one():
@@ -65,7 +70,8 @@ def db_path(tmp_path) -> Path:
     """
     path = tmp_path / "flex_claim.db"
     conn = libsql.connect(str(path))
-    conn.executescript(MIGRATION.read_text(encoding="utf-8"))
+    for migration in MIGRATIONS:
+        conn.executescript(migration.read_text(encoding="utf-8"))
     conn.commit()
     return path
 
@@ -117,6 +123,56 @@ class TestClaimAgainstTheRealDriver:
         writer.release_flex_delivery(SHA)
         assert _rows(db_path) == []
         assert writer.claim_flex_delivery(SHA, classified_as="activity") is True
+
+
+def _status(db_path: Path) -> list:
+    return libsql.connect(str(db_path)).execute(
+        "SELECT content_sha256, status FROM flex_deliveries"
+    ).fetchall()
+
+
+class TestClaimStatusAgainstTheRealDriver:
+    """R-436: the lease survives a failed release as `in_progress` and ages out."""
+
+    def test_a_fresh_in_progress_lease_is_not_reclaimable(self, writer, db_path):
+        assert writer.claim_flex_delivery(SHA, classified_as="activity", now=NOW) is True
+        assert _status(db_path) == [(SHA, "in_progress")]
+        assert writer.flex_delivery_status(SHA) == "in_progress"
+        later = NOW + timedelta(seconds=writer.FLEX_CLAIM_STALE_AFTER_S - 1)
+        assert writer.claim_flex_delivery(SHA, classified_as="activity", now=later) is False
+
+    def test_a_stale_in_progress_lease_is_reclaimable(self, writer, db_path):
+        assert writer.claim_flex_delivery(SHA, classified_as="activity", now=NOW) is True
+        later = NOW + timedelta(seconds=writer.FLEX_CLAIM_STALE_AFTER_S + 1)
+        assert writer.claim_flex_delivery(SHA, classified_as="activity", now=later) is True, (
+            "a lease older than one run period stayed unclaimable, so the "
+            "outage that failed both the writer and the release wedged the file"
+        )
+        assert _status(db_path) == [(SHA, "in_progress")]
+
+    def test_an_applied_row_is_never_reclaimable(self, writer, db_path):
+        assert writer.claim_flex_delivery(SHA, classified_as="activity", now=NOW) is True
+        assert writer.mark_flex_delivery_applied(SHA) is True
+        assert _status(db_path) == [(SHA, "applied")]
+        assert writer.flex_delivery_status(SHA) == "applied"
+        much_later = NOW + timedelta(days=30)
+        assert writer.claim_flex_delivery(SHA, classified_as="activity", now=much_later) is False
+
+    def test_mark_applied_is_a_no_op_without_a_lease(self, writer, db_path):
+        assert writer.mark_flex_delivery_applied(SHA) is False
+        assert _status(db_path) == []
+
+    def test_a_pre_migration_row_defaults_to_applied(self, writer, db_path):
+        """Rows claimed before 0063 keep the R-326 duplicate gate."""
+        conn = libsql.connect(str(db_path))
+        conn.execute(
+            "INSERT INTO flex_deliveries (content_sha256, classified_as, ingested_at) "
+            "VALUES (?, 'activity', ?)",
+            (SHA, "2026-08-01T00:00:00Z"),
+        )
+        conn.commit()
+        assert writer.flex_delivery_status(SHA) == "applied"
+        assert writer.claim_flex_delivery(SHA, classified_as="activity", now=NOW) is False
 
 
 class TestIngestOverTheRealClaim:

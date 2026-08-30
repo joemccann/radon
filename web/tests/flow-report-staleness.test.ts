@@ -68,6 +68,24 @@ describe("isFlowReportStale", () => {
     expect(stale).toBe(true);
   });
 
+  /* R-465 / REL-164: the after-hours TTL was 8h of wall clock with no check
+   * that the report postdates the close. A 09:00 ET pre-market scan viewed at
+   * 16:30 ET is 7.5h old, passed as fresh, and rendered the full verdict while
+   * the whole session's dark-pool flow postdated it. */
+  it("after hours: a pre-close report from the same session is stale inside the 8h TTL", () => {
+    const now = new Date("2026-05-08T20:30:00Z"); // 16:30 ET Friday, just after close
+    expect(
+      isFlowReportStale({ fetched_at: "2026-05-08T13:00:00Z" }, now, false), // 09:00 ET
+    ).toBe(true);
+  });
+
+  it("after hours: a post-close report from the same session is fresh", () => {
+    const now = new Date("2026-05-08T22:00:00Z"); // 18:00 ET Friday
+    expect(
+      isFlowReportStale({ fetched_at: "2026-05-08T20:05:00Z" }, now, false), // 16:05 ET
+    ).toBe(false);
+  });
+
   it("future timestamps are not stale (clock-skew tolerant)", () => {
     const now = new Date("2026-05-08T15:00:00Z");
     const result = isFlowReportStale(

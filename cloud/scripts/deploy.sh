@@ -110,6 +110,7 @@ readonly DEPLOY_ROOT_HELPER="${RADON_DEPLOY_ROOT_HELPER:-/usr/local/sbin/radon-d
 readonly GATEWAY_CONTROL_HELPER="${RADON_GATEWAY_CONTROL_HELPER:-/usr/local/bin/radon-ib-gateway-control}"
 readonly CONTROL_PLANE_MANIFEST="${RADON_CONTROL_PLANE_MANIFEST:-/var/lib/radon/control-plane-manifest.sha256}"
 readonly CONTROL_PLANE_READY="${RADON_CONTROL_PLANE_READY:-/var/lib/radon/control-plane-ready}"
+readonly CONTROL_PLANE_REJECTED="${RADON_CONTROL_PLANE_REJECTED:-/home/radon/.radon-control-plane-rejected}"
 readonly SHA256SUM="${RADON_SHA256SUM:-/usr/bin/sha256sum}"
 readonly REQUIRED_ENV_FILE="${RADON_REQUIRED_ENV_FILE:-${CLOUD_DIR}/config/required-env.txt}"
 readonly ENV_CHECKER="${CLOUD_DIR}/scripts/check-env.py"
@@ -253,6 +254,14 @@ preflight_control_plane() {
     }
     source_hash="$("$SHA256SUM" "$source_path" | awk '{print $1}')" || return 1
     if [[ "$source_hash" != "$expected_hash" ]]; then
+      # sync-control-plane.sh records a bootstrap rejection (or the root
+      # helper's deadline) here. The arms below would otherwise apply the same
+      # bundle through refresh_install_file while the app tier is stopped, so
+      # a rejected runtime restarts the tier through itself. R-437.
+      if [[ -f "$CONTROL_PLANE_REJECTED" ]]; then
+        log_error "[preflight] the control-plane sync rejected the GitHub main-tip bundle (exit $(cat "$CONTROL_PLANE_REJECTED" 2>/dev/null)); refusing to apply ${source_rel} after promote. Fix the bundle, or run cloud/scripts/bootstrap-control-plane.sh as root and remove ${CONTROL_PLANE_REJECTED}"
+        return 1
+      fi
       if [[ "$source_rel" == services/* ]]; then
         log_warn "[preflight] control-plane unit ${source_rel} differs from the installed manifest; refresh-control-plane will apply it after promote"
         [[ "$installed_target" == "$DEPLOY_ROOT_HELPER" ]] && deploy_helper_found=1

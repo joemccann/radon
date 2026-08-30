@@ -67,9 +67,12 @@ IB_CONCURRENCY = 8
 IB_HISTORY_TIMEOUT_S = 45          # ib_insync's own timeout= (the cancel path)
 IB_CANCEL_GRACE_S = 5              # outer asyncio bound fires only after that cancel
 SWEEP_BUDGET_S = 600               # wall clock for the whole sweep, both rungs
+IB_SWEEP_BUDGET_S = 420            # the IB rung's share; it never eats the fallback's
+YAHOO_SWEEP_BUDGET_S = 180         # reserved for the Yahoo rung even when IB overran (R-446)
 INCREMENTAL_DURATION = "1 M"
+WIDER_DURATIONS = ("3 M", "1 Y")   # tried in order when 1 M cannot bridge the stored gap (R-448)
 BACKFILL_DURATION = "10 Y"         # IB's daily window floor is 2016-08-31
-YAHOO_INCREMENTAL_RANGE = "1mo"
+YAHOO_RANGES = {"1 M": "1mo", "3 M": "3mo", "1 Y": "1y"}   # spark range per IB duration
 YAHOO_BACKFILL_PERIOD1 = "2016-08-01"
 YAHOO_SPARK_BATCH_SIZE = 20        # >20 symbols per spark request gets HTTP 400
 YAHOO_COURTESY_SLEEP_S = 0.25
@@ -87,7 +90,7 @@ SOURCE_MIXED = "mixed"
 SOURCE_NONE = "none"
 SOURCE_STORED = "stored"
 
-FetchCloses = Callable[[list[str], bool], dict[str, Closes]]
+FetchCloses = Callable[..., dict[str, Closes]]   # (symbols, backfill, duration=None)
 
 
 def _log(message: str) -> None:
@@ -136,7 +139,9 @@ def _bar_date(value: Any) -> str:
 
 
 def _closes_from_bars(bars: Any) -> Closes:
-    return {_bar_date(b.date): float(b.close) for b in bars or [] if b.close is not None}
+    """A 0 close (halted or newly listed name) is a missing session, not a
+    price: it would zero a return denominator and stop the cycle (R-449)."""
+    return {_bar_date(b.date): float(b.close) for b in bars or [] if b.close is not None and float(b.close) > 0}
 
 
 def _ib_contract(symbol: str) -> Any:
@@ -224,7 +229,7 @@ def _utc_date(ts: int) -> str:
 
 
 def _closes_from_timestamps(timestamps: list[int], closes: list[Any]) -> Closes:
-    return {_utc_date(ts): float(c) for ts, c in zip(timestamps, closes) if c is not None}
+    return {_utc_date(ts): float(c) for ts, c in zip(timestamps, closes) if c is not None and float(c) > 0}
 
 
 def _yahoo_get(url: str) -> Any:
@@ -254,13 +259,13 @@ def parse_yahoo_chart(result: dict[str, Any]) -> Closes:
     return _closes_from_timestamps(result.get("timestamp") or [], quote.get("close") or [])
 
 
-def _fetch_yahoo_spark_batch(symbols: list[str]) -> dict[str, Closes]:
+def _fetch_yahoo_spark_batch(symbols: list[str], range_: str) -> dict[str, Closes]:
     from urllib.parse import quote
 
     yahoo_symbols = ",".join(_yahoo_symbol(s) for s in symbols)
     url = (
         "https://query1.finance.yahoo.com/v8/finance/spark"
-        f"?symbols={quote(yahoo_symbols)}&range={YAHOO_INCREMENTAL_RANGE}&interval=1d"
+        f"?symbols={quote(yahoo_symbols)}&range={range_}&interval=1d"
     )
     parsed = parse_yahoo_spark(_yahoo_get(url))
     return {s: parsed[_yahoo_symbol(s)] for s in symbols if _yahoo_symbol(s) in parsed}
@@ -276,7 +281,7 @@ def _fetch_yahoo_chart(symbol: str, period1: str, now: datetime) -> Closes:
     return parse_yahoo_chart(_yahoo_get(url)["chart"]["result"][0])
 
 
-def _fetch_yahoo_incremental(symbols: list[str], deadline: float) -> dict[str, Closes]:
+def _fetch_yahoo_incremental(symbols: list[str], deadline: float, range_: str) -> dict[str, Closes]:
     fetched: dict[str, Closes] = {}
     for start in range(0, len(symbols), YAHOO_SPARK_BATCH_SIZE):
         if time.monotonic() >= deadline:
@@ -284,7 +289,7 @@ def _fetch_yahoo_incremental(symbols: list[str], deadline: float) -> dict[str, C
             break
         batch = symbols[start : start + YAHOO_SPARK_BATCH_SIZE]
         try:
-            fetched.update(_fetch_yahoo_spark_batch(batch))
+            fetched.update(_fetch_yahoo_spark_batch(batch, range_))
         except Exception as exc:  # noqa: BLE001 — the batch is reported as failed
             _log(f"Yahoo: spark batch at {start} failed: {exc}")
     return fetched
@@ -304,25 +309,33 @@ def _fetch_yahoo_backfill(symbols: list[str], deadline: float) -> dict[str, Clos
     return fetched
 
 
-def _fetch_yahoo_closes(symbols: list[str], backfill: bool, deadline: float) -> dict[str, Closes]:
+def _fetch_yahoo_closes(
+    symbols: list[str], backfill: bool, deadline: float, duration: str
+) -> dict[str, Closes]:
     if not symbols:
         return {}
     _log(f"Yahoo fallback for {len(symbols)} symbols IB left empty")
     if backfill:
         return _fetch_yahoo_backfill(symbols, deadline)
-    return _fetch_yahoo_incremental(symbols, deadline)
+    return _fetch_yahoo_incremental(symbols, deadline, YAHOO_RANGES[duration])
 
 
 # ── ladder ────────────────────────────────────────────────────────
 
-def fetch_closes_ladder(symbols: list[str], backfill: bool) -> SweepCloses:
-    """IB for every symbol, then Yahoo for whatever IB left empty, inside SWEEP_BUDGET_S."""
-    deadline = time.monotonic() + SWEEP_BUDGET_S
-    duration = BACKFILL_DURATION if backfill else INCREMENTAL_DURATION
+def fetch_closes_ladder(symbols: list[str], backfill: bool, duration: Optional[str] = None) -> SweepCloses:
+    """IB for every symbol inside IB_SWEEP_BUDGET_S, then Yahoo for whatever IB
+    left empty with its own YAHOO_SWEEP_BUDGET_S. One shared deadline handed
+    the fallback nothing once an HMDS-inactive gateway had burned it (R-446).
+    ``duration`` is the widened window of a gap-bridging refetch (R-448)."""
+    started = time.monotonic()
+    duration = duration or (BACKFILL_DURATION if backfill else INCREMENTAL_DURATION)
     closes = SweepCloses()
-    closes.take(_fetch_ib_closes(symbols, duration, deadline), SOURCE_IB)
+    closes.take(_fetch_ib_closes(symbols, duration, started + IB_SWEEP_BUDGET_S), SOURCE_IB)
     _log(f"IB served {len(closes)}/{len(symbols)} symbols ({duration})")
-    closes.take(_fetch_yahoo_closes(closes.missing(symbols), backfill, deadline), SOURCE_YAHOO)
+    yahoo_deadline = max(started + SWEEP_BUDGET_S, time.monotonic() + YAHOO_SWEEP_BUDGET_S)
+    closes.take(
+        _fetch_yahoo_closes(closes.missing(symbols), backfill, yahoo_deadline, duration), SOURCE_YAHOO
+    )
     return closes
 
 
@@ -360,6 +373,22 @@ def _collapse_sources(sources: set[str]) -> str:
     return SOURCE_MIXED
 
 
+def _ib_rung_warning(fetch: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """A sweep IB served nothing on (gateway skipped, connect failed, every
+    request empty) is real data Yahoo built, not a healthy steady state:
+    rule 7 forbids Yahoo as the scheduled primary. The heartbeat stays ok
+    and carries the class so the operator can see the rung is dead (R-434)."""
+    if fetch["ib_ok"] > 0:
+        return None
+    return {
+        "message": (
+            f"dispersion: IB rung served 0 symbols; Yahoo served {fetch['yahoo_ok']}, "
+            f"{fetch['failed']} failed"
+        ),
+        "class": "ib_rung_dead",
+    }
+
+
 # ── universe ──────────────────────────────────────────────────────
 
 def _resolve_universe() -> dict[str, list[str]]:
@@ -389,7 +418,7 @@ def _read_stored_rows() -> list[dict[str, Any]]:
     cursor = ""
     while True:
         page = db.execute(
-            "SELECT date, vix_close, stock_spread, sector_spread, n_stocks, n_sectors "
+            "SELECT date, vix_close, stock_spread, sector_spread, n_stocks, n_sectors, source "
             "FROM dispersion_history WHERE date > ? ORDER BY date LIMIT ?",
             (cursor, HISTORY_READ_PAGE_ROWS),
         ).fetchall()
@@ -410,6 +439,7 @@ def _stored_row(record: Any) -> dict[str, Any]:
         "sector_spread": float(record[3]),
         "n_stocks": int(record[4]),
         "n_sectors": int(record[5]),
+        "source": record[6],
     }
 
 
@@ -445,18 +475,24 @@ def _write_db(
     *,
     rows_changed: bool,
     health_error: Optional[dict[str, Any]] = None,
+    health_warning: Optional[dict[str, Any]] = None,
 ) -> None:
     """Rows (only when changed) -> snapshot -> heartbeat, each isolated (R-192).
 
     A failed row upsert must not take the snapshot and the heartbeat down
     with it, and surfaces as an error heartbeat rather than a silent exit 0.
+    ``health_warning`` rides on an ok heartbeat as its error payload: the
+    run succeeded but not the way the ladder is meant to (R-434).
     """
     if writer is None:
         return
     row_error = _upsert_rows(new_rows, scan_time) if rows_changed else None
     snapshot_error = _upsert_snapshot(payload, scan_time)
     error = health_error or row_error or snapshot_error
-    _heartbeat("ok" if error is None else "error", scan_time, error)
+    if error is None:
+        _heartbeat("ok", scan_time, health_warning)
+    else:
+        _heartbeat("error", scan_time, error)
 
 
 def _upsert_rows(new_rows: list[dict[str, Any]], scan_time: str) -> Optional[dict[str, Any]]:
@@ -553,14 +589,34 @@ def _stale_payload(
         return {**cached, "scan_time": scan_time, "status": STATUS_STALE_SOURCE}
 
 
+def _window_bridges_gap(stored: list[dict[str, Any]], sessions: list[str]) -> bool:
+    """An empty calendar is the stale path's problem, not a gap."""
+    return not stored or not sessions or sessions[0] <= stored[-1]["date"]
+
+
 def _ensure_window_bridges_gap(stored: list[dict[str, Any]], sessions: list[str]) -> None:
-    if not stored or not sessions:
-        return
-    stored_max = stored[-1]["date"]
-    if sessions[0] > stored_max:
+    if not _window_bridges_gap(stored, sessions):
         raise RuntimeError(
-            f"dispersion: gap since {stored_max} exceeds the incremental window; rerun with --backfill"
+            f"dispersion: gap since {stored[-1]['date']} exceeds the widest incremental window; "
+            "rerun with --backfill"
         )
+
+
+def _fetch_bridging_closes(
+    stored: list[dict[str, Any]], symbols: list[str], *, backfill: bool, fetch_closes: FetchCloses
+) -> dict[str, Closes]:
+    """The 1 M sweep, widened to 3 M then 1 Y while the stored max is older than
+    the window. A writer that missed more sessions than 1 M covers used to fail
+    identically every night until a manual --backfill (R-448)."""
+    closes = fetch_closes(symbols, backfill)
+    if backfill:
+        return closes
+    for wider in WIDER_DURATIONS:
+        if _window_bridges_gap(stored, master_sessions(closes)):
+            break
+        _log(f"gap since {stored[-1]['date']} exceeds the window; widening to {wider}")
+        closes = fetch_closes(symbols, backfill, duration=wider)
+    return closes
 
 
 def _merge_rows(stored: list[dict[str, Any]], new_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -572,10 +628,17 @@ def _merge_rows(stored: list[dict[str, Any]], new_rows: list[dict[str, Any]]) ->
 def _select_new_rows(
     fetched_rows: list[dict[str, Any]], stored: list[dict[str, Any]], backfill: bool
 ) -> list[dict[str, Any]]:
+    """Rows past the stored max, plus any stored-window session the refetch saw
+    a wider cross-section for: a 310-name night is otherwise permanent even
+    though the next night's window refetches that date in full (R-447)."""
     if backfill or not stored:
         return fetched_rows
     stored_max = stored[-1]["date"]
-    return [row for row in fetched_rows if row["date"] > stored_max]
+    stored_n = {row["date"]: row["n_stocks"] for row in stored}
+    return [
+        row for row in fetched_rows
+        if row["date"] > stored_max or row["n_stocks"] > stored_n.get(row["date"], 0)
+    ]
 
 
 def _sweep_and_build(
@@ -588,7 +651,7 @@ def _sweep_and_build(
     last_complete: str,
 ) -> dict[str, Any]:
     symbols = list(universe["stocks"]) + list(universe["sectors"]) + [VIX_SYMBOL]
-    closes = fetch_closes(symbols, backfill)
+    closes = _fetch_bridging_closes(stored, symbols, backfill=backfill, fetch_closes=fetch_closes)
     provenance = {
         "source": _describe_source(closes),
         "universe": _describe_universe(universe),
@@ -604,7 +667,8 @@ def _sweep_and_build(
         )
     if not backfill:
         _ensure_window_bridges_gap(stored, sessions)
-    new_rows = _select_new_rows(fetched_rows, stored, backfill)
+    source = provenance["source"]["prices"]
+    new_rows = [{**row, "source": source} for row in _select_new_rows(fetched_rows, stored, backfill)]
     ensure_plausible_rows(new_rows, backfill=backfill)
     merged = _merge_rows(stored, new_rows)
     payload = build_payload(merged, scan_time=scan_time, status=STATUS_OK, **provenance)
@@ -612,7 +676,13 @@ def _sweep_and_build(
         f"{len(new_rows)} new rows, {payload['count']} sessions through {payload['data_date']} "
         f"({payload['current']['regime']}, gap {payload['current']['surface_gap']})"
     )
-    _write_db(payload, new_rows, scan_time, rows_changed=bool(new_rows))
+    _write_db(
+        payload,
+        new_rows,
+        scan_time,
+        rows_changed=bool(new_rows),
+        health_warning=_ib_rung_warning(provenance["fetch"]),
+    )
     _write_json_cache(payload)
     return payload
 

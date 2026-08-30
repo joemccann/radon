@@ -6,6 +6,7 @@ Gateway lifecycle, no sudoers wildcards, privileged diffs fail closed.
 
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import os
 import re
@@ -49,6 +50,13 @@ def _bash_string_array(script: str, name: str) -> list[str]:
     )
     assert match, f"{name} missing"
     return match.group(1).split()
+
+
+def _strip_comments(text: str) -> str:
+    """Never assert structure over a comment that quotes the code it explains."""
+    return "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("#")
+    )
 
 
 def _sha256_bytes(payload: bytes) -> str:
@@ -108,6 +116,7 @@ class Sandbox:
         self.ready = self.rootfs / "var" / "lib" / "radon" / "control-plane-ready"
         self.systemctl_log = tmp_path / "systemctl.log"
         self.visudo_log = tmp_path / "visudo.log"
+        self.node_log = tmp_path / "node.log"
         fake_systemctl = tmp_path / "systemctl"
         _write_executable(
             fake_systemctl,
@@ -119,6 +128,18 @@ class Sandbox:
             f"""#!/bin/bash
 printf '%s\\n' "$*" >> {shlex.quote(str(self.visudo_log))}
 if [[ "${{RADON_TEST_VISUDO_FAIL:-0}}" == "1" ]]; then
+  exit 1
+fi
+exit 0
+""",
+        )
+        fake_node = tmp_path / "node"
+        _write_executable(
+            fake_node,
+            f"""#!/bin/bash
+printf '%s\\n' "$*" >> {shlex.quote(str(self.node_log))}
+[[ "$#" -eq 1 && "$1" == "--check" ]] || exit 93
+if [[ "${{RADON_TEST_NODE_FAIL:-0}}" == "1" ]]; then
   exit 1
 fi
 exit 0
@@ -160,6 +181,7 @@ exit 0
             "RADON_TEST_SYSTEMD_UNIT_DIR": str(self.unit_dir),
             "RADON_TEST_SHA256SUM": str(sha256sum),
             "RADON_TEST_VISUDO": str(fake_visudo),
+            "RADON_TEST_NODE": str(fake_node),
         }
 
     def write_manifest_and_ready(self) -> None:
@@ -461,7 +483,9 @@ def _preflight_runner(tmp_path: Path, mutate_rel: str | None) -> Path:
     return runner
 
 
-def _run_preflight(tmp_path: Path, mutate_rel: str | None) -> subprocess.CompletedProcess[str]:
+def _run_preflight(
+    tmp_path: Path, mutate_rel: str | None, *, extra_env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
     runner = _preflight_runner(tmp_path, mutate_rel)
     originals = {
         HELPER_SOURCE: (CLOUD_ROOT / HELPER_SOURCE).read_bytes(),
@@ -515,6 +539,7 @@ preflight_control_plane
             "RADON_CONTROL_PLANE_MANIFEST": str(manifest),
             "RADON_CONTROL_PLANE_READY": str(ready),
             "RADON_SHA256SUM": sha256sum,
+            **(extra_env or {}),
         },
         capture_output=True,
         text=True,
@@ -577,3 +602,109 @@ restart_services aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa bbbbbbbbbbbbbbbbbbbbbb
     lines = calls.read_text(encoding="utf-8").splitlines()
     assert "/fixed/root-helper restart-managed" in lines
     assert not any("rollback" in line.lower() for line in lines)
+
+
+# --- E. the every-deploy install path validates like bootstrap (R-437) -------
+#
+# refresh_install_file runs with the app tier STOPPED and is the path deploy.sh
+# takes for a bundle that differs from the manifest. It validated sudoers, the
+# three shell helpers and drop-ins only: no arm for radon-app-runtime (the
+# ExecStart of all five app units), polkit rules, the python helpers, nor
+# systemd-analyze for control-plane units. A bad runtime restarted the tier
+# through itself with no path back short of root SSH.
+
+RUNTIME_SOURCE = "scripts/radon-app-runtime.sh"
+DRIFT_AUDIT_SOURCE = "scripts/drift_audit.py"
+HEALTH_UNIT = "services/radon-health.service"
+
+
+def _refused_without_install(box: Sandbox, action: str, message: str) -> str:
+    snapshot = box.snapshot_installed()
+    manifest_before = box.manifest.read_bytes()
+    ready_before = box.ready.read_bytes()
+
+    result = box.run(action)
+
+    combined = result.stdout + result.stderr
+    assert result.returncode != 0, combined
+    assert message in combined
+    assert {path: path.read_bytes() for path in snapshot} == snapshot
+    assert box.manifest.read_bytes() == manifest_before
+    assert box.ready.read_bytes() == ready_before
+    assert box.systemctl_calls() == []
+    return combined
+
+
+def test_privileged_refresh_refuses_a_runtime_script_with_a_syntax_error(tmp_path: Path) -> None:
+    box = Sandbox(tmp_path)
+    source = box.cloud / RUNTIME_SOURCE
+    source.write_text(source.read_text(encoding="utf-8") + "\nif [[ broken\n", encoding="utf-8")
+
+    _refused_without_install(box, "refresh-control-plane-privileged", "shell syntax validation failed")
+    assert not list((box.rootfs / "usr" / "local" / "sbin").glob(".radon-refresh.*"))
+
+
+def test_privileged_refresh_refuses_polkit_rules_node_rejects(tmp_path: Path) -> None:
+    box = Sandbox(tmp_path)
+    box.mutate_source(POLKIT_SOURCE)
+    box.env["RADON_TEST_NODE_FAIL"] = "1"
+
+    _refused_without_install(box, "refresh-control-plane-privileged", "polkit syntax validation failed")
+    assert "--check" in box.node_log.read_text(encoding="utf-8")
+
+
+def test_privileged_refresh_runs_node_check_then_installs_polkit_rules(tmp_path: Path) -> None:
+    box = Sandbox(tmp_path)
+    box.mutate_source(POLKIT_SOURCE)
+    expected = (box.cloud / POLKIT_SOURCE).read_bytes()
+
+    result = box.run("refresh-control-plane-privileged")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert box.installed_path(POLKIT_SOURCE).read_bytes() == expected
+    assert box.node_log.read_text(encoding="utf-8").splitlines() == ["--check"]
+
+
+def test_privileged_refresh_refuses_a_python_helper_with_a_syntax_error(tmp_path: Path) -> None:
+    box = Sandbox(tmp_path)
+    source = box.cloud / DRIFT_AUDIT_SOURCE
+    source.write_text(source.read_text(encoding="utf-8") + "\ndef broken(:\n", encoding="utf-8")
+
+    _refused_without_install(box, "refresh-control-plane-privileged", "python syntax validation failed")
+
+
+def test_unit_refresh_refuses_a_unit_systemd_analyze_rejects(tmp_path: Path) -> None:
+    box = Sandbox(tmp_path)
+    box.mutate_source(HEALTH_UNIT)
+    analyze_log = tmp_path / "systemd-analyze.log"
+    fake_analyze = tmp_path / "systemd-analyze"
+    _write_executable(
+        fake_analyze,
+        f"#!/bin/bash\nprintf '%s\\n' \"$*\" >> {shlex.quote(str(analyze_log))}\nexit 1\n",
+    )
+    box.env["RADON_TEST_SYSTEMD_ANALYZE"] = str(fake_analyze)
+
+    _refused_without_install(box, "refresh-control-plane", "systemd unit validation failed")
+    calls = analyze_log.read_text(encoding="utf-8").splitlines()
+    assert len(calls) == 1
+    assert calls[0].startswith("verify ")
+    assert calls[0].endswith("/radon-health.service")
+
+
+def test_refresh_install_file_has_a_validator_arm_for_every_control_plane_target() -> None:
+    """Bootstrap's KINDS table and this case statement must cover the same
+    targets, or a future manifest entry ships through the weaker path."""
+    body = _strip_comments(function_body(HELPER_TEXT, "refresh_install_file"))
+    case = body.split('case "$dest" in', 1)[1].split("esac", 1)[0]
+    patterns = [
+        pattern
+        for arm in re.findall(r"^\s*(\*/\S+?)\)\s*$", case, re.MULTILINE)
+        for pattern in arm.split("|")
+    ]
+    assert patterns
+    uncovered = [
+        target
+        for target in CONTROL_PLANE_TARGETS
+        if not any(fnmatch.fnmatchcase(target, pattern) for pattern in patterns)
+    ]
+    assert uncovered == [], uncovered

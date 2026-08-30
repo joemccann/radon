@@ -211,11 +211,11 @@ describe("GET /api/dispersion", () => {
   });
 });
 
-// ── R-332 / R-366: the route obeys its own 48h freshness budget ───────────
+// ── R-332 / R-366 / R-450: the route obeys the catalog's 26h freshness budget ─
 //
 // The timer runs every calendar day at 22:20 UTC (weekend runs are
-// no-new-session heartbeats), so a snapshot older than 48h means the writer
-// is down. Serve `result.ok && result.fresh ? data : staleCollapse(...)`, and
+// no-new-session heartbeats), so a snapshot older than the catalog's 26h
+// window means the writer is down. Serve `result.ok && result.fresh ? data : staleCollapse(...)`, and
 // pass `isDegraded: isMissingPayload` so a newer missing:true heartbeat never
 // outranks a complete older snapshot.
 
@@ -232,7 +232,21 @@ describe("GET /api/dispersion freshness budget", () => {
     expect(json.current).toBeNull();
   });
 
-  it("still serves a snapshot inside the 48h budget verbatim", async () => {
+  // R-450: the route budget is the catalog's 26h (serviceHealthWindows /
+  // watchdog services.py), not a private 48h that let hours 26-48 render a
+  // confident regime beside a `behind` writer age.
+  it("collapses a 30h-old snapshot: the route budget matches the 26h catalog window", async () => {
+    const thirtyHours = new Date(Date.now() - 30 * 60 * 60_000).toISOString();
+    await insertSnapshot(buildPayload({ scan_time: thirtyHours }));
+    const { GET } = await import("../app/api/dispersion/route");
+    const json = await jsonOf(await GET());
+
+    expect(json.stale).toBe(true);
+    expect(json.missing).toBe(true);
+    expect(json.scan_time).toBe(thirtyHours);
+  });
+
+  it("still serves a snapshot inside the 26h budget verbatim", async () => {
     const recent = new Date(Date.now() - 12 * 60 * 60_000).toISOString();
     await insertSnapshot(buildPayload({ scan_time: recent }));
     const { GET } = await import("../app/api/dispersion/route");

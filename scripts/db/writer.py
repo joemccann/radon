@@ -649,6 +649,14 @@ def _journal_payload_with_compact_expiry(payload: dict[str, Any]) -> dict[str, A
     return {**payload, "expiry": compact}
 
 
+# A lease older than this is dead. `radon-flex-pull.service` bounds a run at
+# TimeoutStartSec=120 and the timer's closest two runs are 07:30 and 08:30, so
+# the window must sit between the two: long enough that no live run is ever
+# stolen from, short enough that the 08:30 re-pull repairs a 07:30 failure
+# instead of waiting a day. R-436.
+FLEX_CLAIM_STALE_AFTER_S = 15 * 60
+
+
 def claim_flex_delivery(
     content_sha256: str,
     *,
@@ -656,6 +664,7 @@ def claim_flex_delivery(
     period_from: Optional[str] = None,
     period_to: Optional[str] = None,
     source_path: Optional[str] = None,
+    now: Optional[datetime] = None,
 ) -> bool:
     """Claim one Flex file for ingest. True when THIS call won the claim.
 
@@ -666,22 +675,44 @@ def claim_flex_delivery(
     row-level upsert keys, which R-329 showed were ordinal-derived and unstable
     across a reissued statement. R-326.
 
-    `ON CONFLICT DO NOTHING` makes the claim atomic: a second ingest of the
-    same bytes affects zero rows and the caller skips every writer.
+    The upsert makes the claim atomic: a second ingest of the same bytes
+    affects zero rows and the caller skips every writer. The row is written
+    `status='in_progress'`; `mark_flex_delivery_applied` flips it once every
+    writer has committed. The ON CONFLICT branch re-takes ONLY a stale
+    in_progress lease (claimed_at older than FLEX_CLAIM_STALE_AFTER_S), which
+    is how the bytes stay retryable when the outage that failed the writer
+    also failed the release. R-436.
     """
+    moment = now or datetime.now(timezone.utc)
+    now_iso = moment.isoformat().replace("+00:00", "Z")
+    cutoff = moment - timedelta(seconds=FLEX_CLAIM_STALE_AFTER_S)
+    cutoff_iso = cutoff.isoformat().replace("+00:00", "Z")
     db = get_db()
     cursor = db.execute(
         "INSERT INTO flex_deliveries "
-        "(content_sha256, classified_as, period_from, period_to, ingested_at, source_path) "
-        "VALUES (?, ?, ?, ?, ?, ?) "
-        "ON CONFLICT(content_sha256) DO NOTHING",
+        "(content_sha256, classified_as, period_from, period_to, ingested_at, "
+        "source_path, status, claimed_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(content_sha256) DO UPDATE SET "
+        "classified_as = excluded.classified_as, "
+        "period_from = excluded.period_from, "
+        "period_to = excluded.period_to, "
+        "ingested_at = excluded.ingested_at, "
+        "source_path = excluded.source_path, "
+        "status = excluded.status, "
+        "claimed_at = excluded.claimed_at "
+        "WHERE flex_deliveries.status = 'in_progress' "
+        "AND flex_deliveries.claimed_at < ?",
         (
             content_sha256,
             classified_as,
             period_from,
             period_to,
-            _now_iso(),
+            now_iso,
             source_path,
+            "in_progress",
+            now_iso,
+            cutoff_iso,
         ),
     )
     db.commit()
@@ -713,6 +744,31 @@ def release_flex_delivery(content_sha256: str) -> bool:
     if not isinstance(released, int):
         released = getattr(result, "rows_affected", None)
     return isinstance(released, int) and released > 0
+
+
+def flex_delivery_status(content_sha256: str) -> Optional[str]:
+    """`in_progress` | `applied` | None (never claimed). R-436."""
+    db = get_db()
+    row = db.execute(
+        "SELECT status FROM flex_deliveries WHERE content_sha256 = ?",
+        (content_sha256,),
+    ).fetchone()
+    return None if row is None else row[0]
+
+
+def mark_flex_delivery_applied(content_sha256: str) -> bool:
+    """Flip the lease to `applied` after EVERY writer committed. R-436."""
+    db = get_db()
+    result = db.execute(
+        "UPDATE flex_deliveries SET status = 'applied' "
+        "WHERE content_sha256 = ? AND status = 'in_progress'",
+        (content_sha256,),
+    )
+    db.commit()
+    applied = getattr(result, "rowcount", None)
+    if not isinstance(applied, int):
+        applied = getattr(result, "rows_affected", None)
+    return isinstance(applied, int) and applied > 0
 
 
 def upsert_journal_entry(trade_id: str, payload: dict[str, Any], filled_at: Optional[str] = None) -> None:
@@ -1195,6 +1251,26 @@ def upsert_llm_model_catalog_rows(
     db.commit()
 
 
+def get_llm_model_catalog_rows() -> list[dict[str, Any]]:
+    """Every ``llm_model_catalog`` row in the dict shape
+    ``upsert_llm_model_catalog_rows`` accepts.
+
+    Seeds ``refresh_model_catalog.load_previous`` so a provider whose poll
+    fails is carried forward from Turso, not from a host-local JSON that is
+    ephemeral on the VPS (R-456). Raises on DB errors; the caller falls back
+    to the JSON cache.
+    """
+    db = get_db()
+    rows = db.execute(
+        "SELECT provider, model_id, display_name, refreshed_at "
+        "FROM llm_model_catalog ORDER BY provider ASC"
+    ).fetchall()
+    return [
+        {"provider": r[0], "model_id": r[1], "display_name": r[2], "refreshed_at": r[3]}
+        for r in rows
+    ]
+
+
 _VIXTS_INSERT_HEAD = (
     "INSERT INTO vixts_history (date, vix_close, vix3m_close, ratio, spx_close, recorded_at) "
 )
@@ -1263,14 +1339,15 @@ def upsert_vixts_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = N
 
 _DISPERSION_INSERT_HEAD = (
     "INSERT INTO dispersion_history "
-    "(date, vix_close, stock_spread, sector_spread, n_stocks, n_sectors, recorded_at) "
+    "(date, vix_close, stock_spread, sector_spread, n_stocks, n_sectors, recorded_at, source) "
 )
-_DISPERSION_ROW_PLACEHOLDER = "(?, ?, ?, ?, ?, ?, ?)"
+_DISPERSION_ROW_PLACEHOLDER = "(?, ?, ?, ?, ?, ?, ?, ?)"
 _DISPERSION_ON_CONFLICT = (
     " ON CONFLICT(date) DO UPDATE SET "
     "vix_close = excluded.vix_close, stock_spread = excluded.stock_spread, "
     "sector_spread = excluded.sector_spread, n_stocks = excluded.n_stocks, "
-    "n_sectors = excluded.n_sectors, recorded_at = excluded.recorded_at"
+    "n_sectors = excluded.n_sectors, recorded_at = excluded.recorded_at, "
+    "source = excluded.source"
 )
 
 
@@ -1283,6 +1360,7 @@ def _dispersion_params(row: dict[str, Any], stamp: str) -> tuple:
         int(row["n_stocks"]),
         int(row["n_sectors"]),
         stamp,
+        row.get("source"),
     )
 
 

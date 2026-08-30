@@ -139,6 +139,18 @@ tree, only ask it to converge on GitHub main. Prestage skips (does not fail)
 when the bundle is not ready. The manual sequence below remains the recovery
 path when the verb itself is not yet granted or GitHub is unreachable.
 
+Exit semantics (R-437, R-440): 75 (deploy lock held, pending transition) is
+retried and then handed to `deploy.sh`. Any other failure, a bootstrap
+rejection or the helper's 300s deadline (124), fails the deploy job and is
+recorded in `/home/radon/.radon-control-plane-rejected`; while that file
+exists `deploy.sh`'s preflight refuses to apply a differing bundle "after
+promote" (the every-deploy `refresh_install_file` path now carries
+bootstrap's full validator table anyway). A bootstrap TERMed after its
+`daemon-reload` restores the previous readiness marker with the previous
+bundle; only a reload systemd refused leaves readiness withdrawn. A missing
+marker on a host whose units carry `runtime-container.conf` drop-ins makes
+the deploy job refuse (exit 78) instead of using the legacy runner.
+
 ### Safe control-plane refresh (2026-07-18)
 
 Bootstrap validates the current `/home/radon/radon/cloud` contents, not the

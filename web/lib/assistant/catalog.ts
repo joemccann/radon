@@ -26,6 +26,11 @@ export type CatalogOperation = {
   summary: string;
   input: string;
   pattern: RegExp;
+  /**
+   * The Next twin of this backend action passes `operatorOnly` to
+   * requireRouteAccess; the catalog client mirrors it (R-451).
+   */
+  operatorOnly?: boolean;
 };
 
 export type CatalogSearchHit = {
@@ -87,6 +92,10 @@ function op(
   };
 }
 
+function operatorOnly(operation: CatalogOperation): CatalogOperation {
+  return { ...operation, operatorOnly: true };
+}
+
 const OPERATIONS: CatalogOperation[] = [
   op("GET", "/api/watchlist", "read", "next", "List the signed-in user's watchlist"),
   op(
@@ -133,9 +142,11 @@ const OPERATIONS: CatalogOperation[] = [
   op("POST", "/vcg/scan", "read.spawn", "fastapi", "Vol-credit gap scan"),
   op("POST", "/regime/scan", "read.spawn", "fastapi", "Regime scan"),
   op("POST", "/breadth/scan", "read.spawn", "fastapi", "Breadth scan"),
-  op("POST", "/portfolio/sync", "read.spawn", "fastapi", "Refresh IB portfolio snapshot"),
-  op("POST", "/orders/refresh", "read.spawn", "fastapi", "Refresh open-order snapshot"),
-  op("POST", "/performance", "read.spawn", "fastapi", "Performance snapshot"),
+  // Capabilities below follow scripts/api/assistant_catalog.py and the Next
+  // twin's radonCapability (assistant-catalog-parity.test.ts).
+  operatorOnly(op("POST", "/portfolio/sync", "mutate.workspace", "fastapi", "Refresh IB portfolio snapshot")),
+  operatorOnly(op("POST", "/orders/refresh", "mutate.workspace", "fastapi", "Refresh open-order snapshot")),
+  operatorOnly(op("POST", "/performance", "read.spawn", "fastapi", "Performance snapshot")),
   op("POST", "/leap/scan", "read.spawn", "fastapi", "LEAP IV-mispricing scan"),
   op("POST", "/garch-convergence/scan", "read.spawn", "fastapi", "GARCH convergence scan"),
   op("POST", "/theta-harvester/scan", "read.spawn", "fastapi", "Theta-harvester scan"),

@@ -204,7 +204,7 @@ describe("assistant loop hardening", () => {
       "get_portfolio",
       {},
       PRINCIPAL,
-      expect.objectContaining({ spawnSuccesses: expect.any(Number) }),
+      expect.objectContaining({ spawnAttempts: expect.any(Number) }),
     );
     expect(result.outcome).toBe("proposal");
     expect(result.proposal?.toolUseId).toBe("order-final");

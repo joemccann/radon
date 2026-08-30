@@ -45,6 +45,26 @@ def release_flex_delivery(content_sha256: str) -> bool:
     return _release(content_sha256)
 
 
+def flex_delivery_status(content_sha256: str) -> str | None:
+    """Indirection so the lookup is injectable in tests. See db.writer."""
+    from db.writer import flex_delivery_status as _status  # noqa: PLC0415
+
+    return _status(content_sha256)
+
+
+def mark_flex_delivery_applied(content_sha256: str) -> bool:
+    """Indirection so the mark is injectable in tests. See db.writer."""
+    from db.writer import mark_flex_delivery_applied as _mark  # noqa: PLC0415
+
+    return _mark(content_sha256)
+
+
+# The catalogued key whose timer drives this ingest in production. A release
+# failure pages on it rather than on a new key: an uncatalogued key is invisible
+# and a scheduled one for a no-cadence signal ages to stale and pages forever.
+HEALTH_SERVICE = "flex-pull"
+
+
 def ingest_xml(
     xml_text: str, *, source_path: str = "", record_as: str | None = None
 ) -> Dict[str, Any]:
@@ -66,6 +86,20 @@ def ingest_xml(
         period_to=meta["period_to"],
         source_path=record_as or source_path or None,
     ):
+        # A lost claim is `duplicate` only when the earlier run finished. A
+        # fresh `in_progress` lease belongs to a run that is still going, or
+        # to one whose release failed with its writer (R-436); reporting it
+        # `ok` lets the 08:30 re-pull heartbeat fine over a half-applied
+        # `cash_flows`. It becomes claimable again once stale.
+        if flex_delivery_status(digest) == "in_progress":
+            return {
+                "ok": False,
+                "outcome": "in_progress",
+                "classified_as": kind,
+                "content_sha256": digest,
+                "error": "claim is in_progress from an earlier run; retried once stale",
+                "source_path": source_path,
+            }
         return {
             "ok": True,
             "outcome": "duplicate",
@@ -84,15 +118,38 @@ def ingest_xml(
         raise
     if not result.get("ok"):
         _release_claim(digest)
+        return result
+    # Only now has every writer committed. R-436.
+    mark_flex_delivery_applied(digest)
     return result
 
 
 def _release_claim(digest: str) -> None:
-    """Best-effort release. A failure here must not mask the ingest failure."""
+    """Best-effort release. A failure here must not mask the ingest failure.
+
+    It is not silent either: the lease it leaves behind blocks the same bytes
+    until it goes stale, so the failure pages on the flex-pull row. R-436.
+    """
     try:
         release_flex_delivery(digest)
     except Exception as exc:  # noqa: BLE001 — the caller is already failing
-        print(f"[flex-ingest] claim release failed for {digest}: {exc}", file=sys.stderr)
+        message = f"claim release failed for {digest}: {exc}"
+        print(f"[flex-ingest] {message}", file=sys.stderr)
+        _page_release_failure(digest, message)
+
+
+def _page_release_failure(digest: str, message: str) -> None:
+    try:
+        from db import writer  # noqa: PLC0415
+
+        writer.record_service_health(
+            HEALTH_SERVICE,
+            "error",
+            finished_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            error={"message": message, "content_sha256": digest},
+        )
+    except Exception as exc:  # noqa: BLE001 — paging must not mask the ingest failure
+        print(f"[flex-ingest] release-failure page non-fatal: {exc}", file=sys.stderr)
 
 
 def _apply_classified(kind: str, xml_text: str, digest: str, source_path: str) -> Dict[str, Any]:

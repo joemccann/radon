@@ -34,7 +34,9 @@ journal and an ``error`` service_health heartbeat (exit 1). Fail-degraded
 in that one direction only.
 
 Remote retention is REMOTE_RETENTION_DAYS, deliberately longer than the
-on-box RETENTION_DAYS; off-boxing a 30-day window would buy nothing.
+on-box RETENTION_DAYS; off-boxing only the local window would buy nothing.
+A local dump past RETENTION_DAYS is unlinked only once B2 holds it (the
+off-box leg runs first); with no B2 config at all the prune is age-only.
 
 Restore runbook: main repo docs/cloud-services.md "DB backup & restore".
 """
@@ -91,7 +93,7 @@ MULTIPART_CONCURRENCY = 4
 # Plausibility floor. `dump_database` reports whatever `sqlite_master` gave
 # it, so an empty read (a credential rotation pointing at a fresh DB, a
 # libsql read returning no rows) produces a valid ~120-byte gzip. Promoting
-# it prunes the 30-day window of real dumps and pushes the empty artifact
+# it prunes the local window of real dumps and pushes the empty artifact
 # off-box, with the heartbeat still green. Same floor, same reason, as
 # lib/vixts_math.py:MIN_SERIES_ROWS.
 MIN_DUMP_TABLES = 1
@@ -109,7 +111,7 @@ def _path_env(key: str, default: str) -> Path:
     trailing-edit `RADON_DB_BACKUP_DIR=` line resolved BACKUP_DIR to
     `WorkingDirectory=/home/radon/radon` — `mkdir(exist_ok=True)` succeeded
     silently, the dump landed in the live repo checkout, the retention loop
-    unlinked every *.sql.gz older than 30 days IN THE REPO, and sync_offbox
+    unlinked every *.sql.gz older than RETENTION_DAYS IN THE REPO, and sync_offbox
     uploaded whatever it found there. R-344.
     """
     raw = (os.environ.get(key) or "").strip()
@@ -175,14 +177,27 @@ def is_internal_object(name: str) -> bool:
     return name.startswith(_INTERNAL_PREFIXES)
 
 
-def select_prunable(entries, now_secs: float, retention_days: int = RETENTION_DAYS):
+def select_prunable(
+    entries,
+    now_secs: float,
+    retention_days: int = RETENTION_DAYS,
+    offbox: set[str] | None = None,
+):
     """Names of dump files (``*.sql.gz`` ONLY) older than the retention
-    window. ``entries`` is an iterable of (name, mtime_secs)."""
+    window. ``entries`` is an iterable of (name, mtime_secs).
+
+    ``offbox`` is the set of dump names B2 is confirmed to hold. When given,
+    a dump is prunable only if it is in that set: age alone never unlinks the
+    last copy while an off-box leg is configured. ``None`` means no off-box
+    leg exists and the prune is age-only. R-445.
+    """
     cutoff = now_secs - retention_days * 86400
     return [
         name
         for name, mtime in entries
-        if name.endswith(".sql.gz") and mtime < cutoff
+        if name.endswith(".sql.gz")
+        and mtime < cutoff
+        and (offbox is None or name in offbox)
     ]
 
 
@@ -522,8 +537,11 @@ def sync_offbox(
     Idempotent: an object already present at the same size is skipped, so a
     re-run costs one LIST. Resumable: uploads run newest-first and stop when
     ``budget_secs`` is spent, leaving the rest for the next nightly run --
-    that is how the existing 30-dump local window backfills without any one
-    run overrunning TimeoutStartSec.
+    that is how a local backlog (thirty dumps at the 2026-08-27 cutover)
+    backfills without any one run overrunning TimeoutStartSec.
+    ``confirmed`` in the summary names every local dump B2 holds at the
+    expected size once the run ends: already present, or uploaded and
+    confirmed tonight. Deferred and failed dumps are not in it.
     """
     transfer = None
     if client is None:
@@ -546,6 +564,7 @@ def sync_offbox(
     uploaded = 0
     bytes_uploaded = 0
     deferred = 0
+    confirmed: set[str] = set()
     for index, name in enumerate(planned):
         if clock() - started >= budget_secs:
             deferred = len(planned) - index
@@ -563,7 +582,7 @@ def sync_offbox(
         # upload failure that the API call happened not to report. It was
         # counted as `b2 1/1` with state=ok, and `select_uploadable` re-uploads
         # only on a size DIFFERENCE, so the corruption was never detected while
-        # the local original ran down its 30-day retention. R-372.
+        # the local original ran down its local retention. R-372.
         landed = _confirm_upload(client, bucket, key)
         if landed != expected:
             raise RuntimeError(
@@ -572,6 +591,7 @@ def sync_offbox(
             )
         uploaded += 1
         bytes_uploaded += expected
+        confirmed.add(name)
 
     prune_now = time.time() if now is None else now
     prunable = select_remote_prunable(
@@ -581,6 +601,7 @@ def sync_offbox(
         call_s3_with_retry(lambda k=key: client.delete_object(Bucket=bucket, Key=k))
 
     dumps = [name for name, _size in local if is_dump_name(name)]
+    confirmed.update(name for name in dumps if name not in planned)
     return {
         "bucket": bucket,
         "prefix": prefix,
@@ -591,6 +612,7 @@ def sync_offbox(
         "deferred": deferred,
         "skipped_present": len(dumps) - len(planned),
         "remote_pruned": len(prunable),
+        "confirmed": sorted(confirmed),
     }
 
 
@@ -731,17 +753,25 @@ def run_backup() -> dict:
     finally:
         tmp_path.unlink(missing_ok=True)
 
-    now = time.time()
     assert_safe_backup_dir(BACKUP_DIR)
-    entries = [(p.name, p.stat().st_mtime) for p in BACKUP_DIR.iterdir() if p.is_file()]
-    pruned = select_prunable(entries, now)
-    for name in pruned:
-        (BACKUP_DIR / name).unlink(missing_ok=True)
-
     size = final_path.stat().st_size
 
-    # Off-box leg LAST and non-fatal: the artifact above is already durable.
+    # Off-box leg BEFORE the local prune and non-fatal: the artifact above is
+    # already durable, and a dump may leave the box only once B2 holds it.
+    # R-445: pruning on mtime first meant eight nights of AccessDenied (paged
+    # each night, never retried) unlinked the night-1 dump unheard.
     offbox, offbox_error = run_offbox(BACKUP_DIR)
+    if s3_config_from_env() is None:
+        confirmed = None  # no off-box leg configured: age is the only signal
+    else:
+        # A summary without the listing (a raise, a double) confirms nothing.
+        confirmed = set((offbox or {}).get("confirmed") or ())
+
+    now = time.time()
+    entries = [(p.name, p.stat().st_mtime) for p in BACKUP_DIR.iterdir() if p.is_file()]
+    pruned = select_prunable(entries, now, offbox=confirmed)
+    for name in pruned:
+        (BACKUP_DIR / name).unlink(missing_ok=True)
 
     duration = round(time.monotonic() - started, 1)
     summary = (

@@ -10,11 +10,14 @@
  *
  * Default: JSONL on stdout, time heartbeats omitted. Status on stderr.
  */
+import { recordServiceHealth } from "../db/writer.js";
 import { parseArgs } from "./cli.js";
 import { connectMktnews } from "./client.js";
 import { formatMessage } from "./format.js";
 import { DEFAULT_LISTEN_PORT, startHeadlinesHub } from "./hub.js";
 import { createHeadlinesStore } from "./store.js";
+
+const HEALTH_SERVICE = "mktnews-hub";
 
 export function runTap({
   argv = process.argv.slice(2),
@@ -71,6 +74,11 @@ function resolveRingStore() {
   return null;
 }
 
+function resolveHealthWriter() {
+  if (!process.env.TURSO_DB_URL) return null;
+  return (state, extra) => recordServiceHealth(HEALTH_SERVICE, state, extra);
+}
+
 const isMain = process.argv[1] && process.argv[1].endsWith("mktnews/index.js");
 if (isMain) {
   const opts = parseArgs(process.argv.slice(2));
@@ -78,6 +86,7 @@ if (isMain) {
     const hub = await startHeadlinesHub({
       listenPort: opts.port ?? DEFAULT_LISTEN_PORT,
       store: resolveRingStore(),
+      recordHealth: resolveHealthWriter(),
     });
     process.stderr.write(`[mktnews] hub ${hub.address()}\n`);
     const shutdown = () => {
