@@ -181,6 +181,25 @@ class TestClassifyProbes:
         result = probe.classify_probes(_ok_probe(), _ok_probe(status=503))
         assert result == {"ok": 0, "detail": "status_http_503"}
 
+    def test_caddy_never_502_floor_is_status_unreachable_not_aggregate_invalid(self):
+        # 2026-08-29 23:05Z page 1b0b049c: Caddy maps healthd-down (deploy
+        # restart, dial refused) to HTTP 200 {"reachable":false,"observer":"caddy"}
+        # so the never-502 floor stays up. Ping is Caddy-static 200. The
+        # classifier used to call that opaque 200 aggregate_invalid, which
+        # the deploy-window 5xx suppressor cannot match.
+        from pathlib import Path
+
+        caddy = (
+            Path(__file__).resolve().parents[2] / "cloud" / "caddy" / "Caddyfile"
+        ).read_text(encoding="utf-8")
+        literal = '{"reachable":false,"observer":"caddy"}'
+        assert literal in caddy
+        result = probe.classify_probes(
+            _ok_probe(),
+            _ok_probe(payload=json.loads(literal)),
+        )
+        assert result == {"ok": 0, "detail": "status_unreachable:caddy"}
+
     def test_aggregate_ok_false_fails(self):
         result = probe.classify_probes(_ok_probe(), _ok_probe(payload={"ok": False}))
         assert result == {"ok": 0, "detail": "aggregate_invalid"}

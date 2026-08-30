@@ -472,6 +472,71 @@ def test_non_5xx_reason_inside_deploy_window_pages(tmp_path, monkeypatch) -> Non
     assert outcome.severity == "P1"
 
 
+def test_deploy_window_caddy_status_unreachable_is_suppressed(
+    tmp_path, monkeypatch
+) -> None:
+    # 2026-08-29 23:05Z page 1b0b049c: after the Caddy never-502 floor shipped,
+    # healthd-down during deploy is HTTP 200 status_unreachable:caddy, not
+    # status_http_502. Same collateral as 5xx; suppress it the same way.
+    from scripts.watchdog import external_probe
+
+    monkeypatch.setattr(
+        external_probe.turso_http,
+        "fetch_external_probe",
+        lambda timeout, source=None: _row(
+            ok=0, age_minutes=2, detail="status_unreachable:caddy"
+        ),
+    )
+    monkeypatch.setattr(external_probe, "_local_aggregate_serving_path_ok", lambda: True)
+    _deploy_marker(tmp_path, monkeypatch, marker_age_minutes=1)
+
+    outcome = external_probe.check_external_probe(now=NOW)
+
+    assert outcome.status == "healthy"
+    assert outcome.fired is False
+    assert "deploy window" in outcome.message
+
+
+def test_caddy_status_unreachable_outside_deploy_window_pages(
+    tmp_path, monkeypatch
+) -> None:
+    from scripts.watchdog import external_probe
+
+    monkeypatch.setattr(
+        external_probe.turso_http,
+        "fetch_external_probe",
+        lambda timeout, source=None: _row(
+            ok=0, age_minutes=2, detail="status_unreachable:caddy"
+        ),
+    )
+    monkeypatch.setattr(external_probe, "_local_aggregate_serving_path_ok", lambda: True)
+    _deploy_marker(tmp_path, monkeypatch, marker_age_minutes=120)
+
+    outcome = external_probe.check_external_probe(now=NOW)
+
+    assert outcome.fired is True
+    assert outcome.severity == "P1"
+
+
+def test_aggregate_invalid_inside_deploy_window_still_pages(
+    tmp_path, monkeypatch
+) -> None:
+    from scripts.watchdog import external_probe
+
+    monkeypatch.setattr(
+        external_probe.turso_http,
+        "fetch_external_probe",
+        lambda timeout, source=None: _row(ok=0, age_minutes=2, detail="aggregate_invalid"),
+    )
+    monkeypatch.setattr(external_probe, "_local_aggregate_serving_path_ok", lambda: True)
+    _deploy_marker(tmp_path, monkeypatch, marker_age_minutes=1)
+
+    outcome = external_probe.check_external_probe(now=NOW)
+
+    assert outcome.fired is True
+    assert outcome.severity == "P1"
+
+
 def test_inflight_transition_journal_suppresses_fresh_edge_5xx(tmp_path, monkeypatch) -> None:
     from scripts.watchdog import external_probe
 
