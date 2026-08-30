@@ -35,7 +35,7 @@
 - [x] E10 Measure the first successful optimized deploy
 - [x] E11 Reduce node image publication latency
 - [x] E12 Reduce rollout transfer latency
-- [ ] E13 Prove the final measured CI/deploy gain
+- [x] E13 Prove the final measured CI/deploy gain
 
 ## Review
 
@@ -48,6 +48,7 @@
 - Implementation commit `44683993` is on `main`. Run 33293579469 finished in 341s versus the 468s baseline and cut `scripts-rs` from 204s to 70s, but did not deploy because pytest still collected an explicitly expanded Caddy file despite `--ignore`; the follow-up removes that file before invoking pytest.
 - Follow-up commit `92278f6a` completed production successfully in run 33294190643, but total wall time was 472s, not an improvement over 468s. Measured bottlenecks were node image 283s, exact-image prepull 85s, and deploy 94s; test sharding itself is no longer the critical path.
 - The 283s node job spent 83s creating a 582MiB recursive-chown layer, then 51s exporting and 66s cache-uploading it. Runtime ownership is now limited to writable Next cache/data directories; test-only trees are excluded from image contexts. The smaller immutable image also reduces exact-image host transfer while the installed helper pulls Python and node concurrently.
+- Commit `2f46a166` completed production successfully in run 33294882038 in 231s, down 237s / 50.6% from run 33290751126. Node image publication fell from 283s to 93s, image export from 51s to 2.8s, cache export from 65.7s to 7s, and exact-image prepull from 85s to 16s; the 40-second stability gate remained intact.
 
 ---
 
