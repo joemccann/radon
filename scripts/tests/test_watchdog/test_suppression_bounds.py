@@ -159,7 +159,7 @@ class TestStrandedTransitionJournal:
             "fetch_external_probe",
             lambda timeout, source=None: _row(ok=0, age_minutes=2, detail="status_http_502"),
         )
-        monkeypatch.setattr(external_probe, "_local_aggregate_is_healthy", lambda: True)
+        monkeypatch.setattr(external_probe, "_local_aggregate_serving_path_ok", lambda: True)
         _journal(
             tmp_path,
             monkeypatch,
@@ -180,7 +180,7 @@ class TestStrandedTransitionJournal:
             "fetch_external_probe",
             lambda timeout, source=None: _row(ok=0, age_minutes=2, detail="status_http_502"),
         )
-        monkeypatch.setattr(external_probe, "_local_aggregate_is_healthy", lambda: True)
+        monkeypatch.setattr(external_probe, "_local_aggregate_serving_path_ok", lambda: True)
         _journal(tmp_path, monkeypatch, age_seconds=120)
 
         outcome = external_probe.check_external_probe(now=NOW)
