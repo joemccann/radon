@@ -313,6 +313,58 @@ describe("createHeadlinesHub", () => {
     expect(snap.type).toBe("snapshot");
   });
 
+  it("restores the ring from the store before the first snapshot, oldest-first", async () => {
+    const stored = [
+      { kind: "headline", id: "s1", time: null, important: false, content: "stored one", impact: [] },
+      { kind: "headline", id: "s2", time: null, important: true, content: "stored two", impact: [] },
+    ];
+    const puts = [];
+    const hub = await boot({
+      store: { load: async () => stored, put: async (item) => puts.push(item.id) },
+      loadHistory: async () => [
+        parseFrame(JSON.stringify({ type: "flash", data: { id: "u1", data: { content: "upstream" } } })),
+      ],
+    });
+    const ws = new WebSocket(hub.address());
+    const [snapshot] = await collect(ws, 1);
+    ws.close();
+    expect(snapshot.items.map((row) => row.id)).toEqual(["s1", "s2", "u1"]);
+    expect(puts).toEqual(["u1"]);
+  });
+
+  it("persists every ingested print through the store", async () => {
+    const puts = [];
+    const hub = await boot({ store: { load: async () => [], put: async (item) => puts.push(item) } });
+    hub.ingest(parseFrame(JSON.stringify(FLASH)));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(puts).toEqual([
+      {
+        kind: "headline",
+        id: "h1",
+        time: "2026-08-29T20:35:56.000Z",
+        important: true,
+        content: "Explosions heard in Kyiv.",
+        impact: [{ symbol: "WTI", impact: "bearish" }],
+      },
+    ]);
+  });
+
+  it("still boots and fans out when the store is down", async () => {
+    const hub = await boot({
+      store: {
+        load: async () => {
+          throw new Error("turso unreachable");
+        },
+        put: async () => {
+          throw new Error("turso unreachable");
+        },
+      },
+    });
+    expect(hub.ingest(parseFrame(JSON.stringify(FLASH)))).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(hub.ring.map((row) => row.id)).toEqual(["h1"]);
+  });
+
   it("caps the ring", async () => {
     const hub = await boot({ ringSize: 3 });
     for (let i = 0; i < 6; i += 1) {
