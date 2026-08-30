@@ -53,6 +53,19 @@ function cachePathFor(ticker: string): string {
   return join(FLOW_REPORTS_DIR, `${ticker}.json`);
 }
 
+/** The client-side abort from radonFetch's own AbortSignal.timeout. */
+function isClientTimeout(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "TimeoutError";
+}
+
+async function readCachedReport(ticker: string): Promise<Record<string, unknown> | null> {
+  try {
+    return JSON.parse(await readFile(cachePathFor(ticker), "utf-8")) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
 type Params = { params: Promise<{ ticker: string }> };
 
 export const radonCapability = { GET: "read", POST: "read.spawn" };
@@ -123,20 +136,31 @@ export async function POST(_req: Request, ctx: Params): Promise<Response> {
       requestId,
     );
   } catch (error) {
-    // Serve cached data on failure so the UI degrades gracefully.
-    try {
-      const raw = await readFile(cachePathFor(ticker), "utf-8");
-      const cached = JSON.parse(raw);
-      const cache_meta = buildCacheMeta(cachePathFor(ticker));
-      const res = NextResponse.json({ ...cached, cache_meta, is_stale: true });
-      res.headers.set("X-Sync-Warning", "Radon API unavailable - serving cached data");
-      return setNoStoreResponseHeaders(res, requestId);
-    } catch {
-      const message = error instanceof Error ? error.message : "Flow report failed";
+    const cached = await readCachedReport(ticker);
+    const cache_meta = buildCacheMeta(cachePathFor(ticker));
+
+    // R-464: the 25s wait above ending is the design path, not an outage.
+    // FastAPI is still running `_scan_and_cache`, so this is a scan in
+    // flight: 202 with whatever cache exists, and the client polls GET until
+    // `cache_meta.last_refresh` advances. The "API unavailable" branch below
+    // is for a FastAPI that actually answered with a failure.
+    if (isClientTimeout(error)) {
       return setNoStoreResponseHeaders(
-        NextResponse.json({ error: message }, { status: 502 }),
+        NextResponse.json({ ...(cached ?? {}), ticker, scan_pending: true, cache_meta }, { status: 202 }),
         requestId,
       );
     }
+
+    // Serve cached data on failure so the UI degrades gracefully.
+    if (cached) {
+      const res = NextResponse.json({ ...cached, cache_meta, is_stale: true });
+      res.headers.set("X-Sync-Warning", "Radon API unavailable - serving cached data");
+      return setNoStoreResponseHeaders(res, requestId);
+    }
+    const message = error instanceof Error ? error.message : "Flow report failed";
+    return setNoStoreResponseHeaders(
+      NextResponse.json({ error: message }, { status: 502 }),
+      requestId,
+    );
   }
 }

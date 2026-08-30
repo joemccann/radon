@@ -15,12 +15,25 @@ import { flowReportErrorCopy } from "@/lib/flowReportError";
  *      - 5xx                 → state = { error, status: "error" }
  *   2. POST /api/flow-analysis/{TICKER}
  *      - 200 → state = { data, status: "fresh" }
+ *      - 202 scan_pending → state = { data: cache, status: "pending" }, then
+ *        poll GET until cache_meta.last_refresh advances → "fresh"
  *      - error → preserve cached data if any, expose error
  */
 
-/** `stale`: a POST came back 200 but degraded — cached data, not a scan. */
+/** `stale`: a POST came back 200 but degraded — cached data, not a scan.
+ *  `pending`: the scan is still running on the server (R-464); any data
+ *  held is the previous cache and GET is being polled for the landing. */
 export type FlowReportStatus =
-  | "idle" | "loading" | "scanning" | "fresh" | "stale" | "error";
+  | "idle" | "loading" | "scanning" | "pending" | "fresh" | "stale" | "error";
+
+/** FastAPI bounds a scan at 300s; poll at 5s for as long as that could take. */
+export const FLOW_REPORT_PENDING_POLL_MS = 5_000;
+export const FLOW_REPORT_PENDING_POLL_LIMIT = 60;
+
+export type UseTickerFlowReportOptions = {
+  pendingPollMs?: number;
+  pendingPollLimit?: number;
+};
 
 export type FlowReportData = {
   ticker: string;
@@ -28,6 +41,8 @@ export type FlowReportData = {
   missing?: boolean;
   /** Set by the route when it served cache instead of a completed scan. */
   is_stale?: boolean;
+  /** 202 from the route: the scan outlived the request and is still running. */
+  scan_pending?: boolean;
   fetched_at?: string;
   lookback_days?: number;
   verdict?: { direction: "BULLISH" | "NEUTRAL" | "BEARISH"; confidence: number };
@@ -86,12 +101,61 @@ export type UseTickerFlowReportReturn = {
   refresh: () => void;
 };
 
-export function useTickerFlowReport(ticker: string | null): UseTickerFlowReportReturn {
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    signal.addEventListener("abort", () => {
+      clearTimeout(timer);
+      resolve();
+    }, { once: true });
+  });
+}
+
+function hasReport(payload: FlowReportData | null | undefined): payload is FlowReportData {
+  return Boolean(payload && !payload.missing && payload.verdict);
+}
+
+export function useTickerFlowReport(
+  ticker: string | null,
+  options: UseTickerFlowReportOptions = {},
+): UseTickerFlowReportReturn {
+  const { pendingPollMs = FLOW_REPORT_PENDING_POLL_MS, pendingPollLimit = FLOW_REPORT_PENDING_POLL_LIMIT } = options;
   const [data, setData] = useState<FlowReportData | null>(null);
   const [status, setStatus] = useState<FlowReportStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const inflightRef = useRef<AbortController | null>(null);
   const triggerRef = useRef(0);
+
+  // R-464: the route answers 202 when its 25s wait ends while FastAPI's
+  // detached scan is still running. The landing is observed through GET:
+  // `cache_meta.last_refresh` moving past what the 202 carried. Never a
+  // second POST — that would only join the same in-flight task and wait
+  // another 25s for the same 202.
+  const awaitLanding = useCallback(
+    async (sym: string, baseline: string | null, signal: AbortSignal) => {
+      for (let poll = 0; poll < pendingPollLimit; poll += 1) {
+        await sleep(pendingPollMs, signal);
+        if (signal.aborted) return;
+        let payload: FlowReportData | null = null;
+        try {
+          const res = await fetch(`/api/flow-analysis/${sym}`, { cache: "no-store", signal });
+          if (res.ok) payload = (await res.json()) as FlowReportData;
+        } catch {
+          if (signal.aborted) return;
+        }
+        if (signal.aborted) return;
+        const landed = payload?.cache_meta?.last_refresh ?? null;
+        if (hasReport(payload) && landed && (baseline == null || landed > baseline)) {
+          setData(payload);
+          setStatus("fresh");
+          return;
+        }
+      }
+      setError(flowReportErrorCopy("Scan is still running; showing the last cached report."));
+      setStatus("stale");
+    },
+    [pendingPollLimit, pendingPollMs],
+  );
 
   const triggerScan = useCallback(async (sym: string, signal: AbortSignal) => {
     setStatus("scanning");
@@ -108,6 +172,12 @@ export function useTickerFlowReport(ticker: string | null): UseTickerFlowReportR
       }
       const payload = (await res.json()) as FlowReportData;
       if (signal.aborted) return;
+      if (res.status === 202 || payload?.scan_pending === true) {
+        if (hasReport(payload)) setData(payload);
+        setStatus("pending");
+        await awaitLanding(sym, payload?.cache_meta?.last_refresh ?? null, signal);
+        return;
+      }
       setData(payload);
       // R-350: the route returns HTTP 200 with `{...cached, is_stale: true}`
       // plus an `X-Sync-Warning` header when its own 130s timeout fires, a
@@ -129,7 +199,7 @@ export function useTickerFlowReport(ticker: string | null): UseTickerFlowReportR
       // Preserve any previously-cached data — caller decides how to display.
       setStatus("error");
     }
-  }, []);
+  }, [awaitLanding]);
 
   const load = useCallback(
     async (sym: string) => {
