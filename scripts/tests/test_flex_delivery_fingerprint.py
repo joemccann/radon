@@ -64,6 +64,18 @@ class TestStatementMetadata:
 
 
 class TestDeliveryFingerprintIsConsulted:
+    @pytest.fixture(autouse=True)
+    def _lease_bookkeeping(self, monkeypatch):
+        """R-436 added the applied mark and the status lookup around the claim.
+
+        Granted here: the lease lifecycle itself is covered by
+        `test_flex_delivery_claim_release.py`; these cases are about the gate.
+        """
+        import flex_delivery_ingest as ingest
+
+        monkeypatch.setattr(ingest, "mark_flex_delivery_applied", lambda _d: True)
+        monkeypatch.setattr(ingest, "flex_delivery_status", lambda _d: "applied")
+
     def test_the_same_file_twice_runs_the_writers_once(self, monkeypatch, tmp_path):
         import cash_flow_sync
         import flex_delivery_ingest as ingest
