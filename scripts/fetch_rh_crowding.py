@@ -42,6 +42,12 @@ except Exception:
 
 RH_CROWDING_JSON = _PROJECT_DIR / "data" / "rh_crowding.json"
 MAX_SCANS_PER_RUN = 5  # bound the tool calls; scans beyond this are ignored
+# Bounds against degenerate/hostile payloads: the popular watchlists carry
+# ~100 names, so anything near these limits is garbage, and an unbounded
+# row set would violate the Turso Hrana write-bounding rules downstream.
+MAX_WATCHLISTS = 50        # popular-watchlist payload iteration cap
+MAX_ROWS_PER_LIST = 2000   # per-watchlist / per-scan-result iteration cap
+MAX_CROWDING_ROWS = 1000   # total rows persisted per run
 
 _SYMBOL_KEYS = ("symbol", "ticker", "display_symbol")
 _NAME_KEYS = ("name", "display_name", "title", "id")
@@ -80,7 +86,7 @@ def _watchlist_symbols(watchlist: dict) -> list[str]:
             rows = value
             break
     symbols: list[str] = []
-    for row in rows:
+    for row in rows[:MAX_ROWS_PER_LIST]:
         symbol = _row_symbol(row)
         if symbol and symbol not in symbols:
             symbols.append(symbol)
@@ -101,7 +107,7 @@ def build_rows(
     rank: dict[str, int] = {}
     watchlists: dict[str, list[str]] = {}
     position = 0
-    for watchlist in popular_watchlists:
+    for watchlist in popular_watchlists[:MAX_WATCHLISTS]:
         name = _watchlist_name(watchlist)
         for symbol in _watchlist_symbols(watchlist):
             if symbol not in rank:
@@ -114,12 +120,26 @@ def build_rows(
     scan_hits: dict[str, int] = {}
     for _scan_id, rows in scan_results.items():
         seen: set[str] = set()
-        for row in rows:
+        for row in rows[:MAX_ROWS_PER_LIST]:
             symbol = _row_symbol(row)
             if symbol:
                 seen.add(symbol)
         for symbol in seen:
             scan_hits[symbol] = scan_hits.get(symbol, 0) + 1
+
+    symbols = sorted(set(rank) | set(scan_hits))
+    if len(symbols) > MAX_CROWDING_ROWS:
+        # Keep the ranked (most crowded) names first, then scan-only names
+        # alphabetically, and drop the rest — bounded writes, not best-effort.
+        _log(
+            f"crowding payload carried {len(symbols)} symbols; "
+            f"keeping the {MAX_CROWDING_ROWS} most crowded"
+        )
+        symbols = sorted(
+            symbols,
+            key=lambda s: (rank.get(s) is None, rank.get(s) or 0, s),
+        )[:MAX_CROWDING_ROWS]
+        symbols = sorted(symbols)
 
     return [
         {
@@ -129,7 +149,7 @@ def build_rows(
             "watchlists": watchlists.get(symbol, []),
             "scan_hits": scan_hits.get(symbol, 0),
         }
-        for symbol in sorted(set(rank) | set(scan_hits))
+        for symbol in symbols
     ]
 
 

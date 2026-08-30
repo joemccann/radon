@@ -106,6 +106,30 @@ class TestBuildRows:
             [{"weird": True}], {"scan-1": [{"no_symbol": 1}]}, "2026-08-30"
         ) == []
 
+    def test_degenerate_payloads_are_capped_keeping_the_most_crowded(self):
+        """A hostile/degenerate payload must not produce an unbounded Turso
+        write (Hrana bounding) — the ranked (most crowded) names survive."""
+        huge = [{
+            "name": "hostile",
+            "items": [{"symbol": f"S{i:05d}"} for i in range(crowding.MAX_ROWS_PER_LIST + 500)],
+        }]
+        rows = crowding.build_rows(huge, {}, "2026-08-30")
+
+        assert len(rows) == crowding.MAX_CROWDING_ROWS
+        kept = {r["symbol"] for r in rows}
+        assert "S00000" in kept, "rank 1 must survive the cap"
+        assert f"S{crowding.MAX_CROWDING_ROWS - 1:05d}" in kept
+        assert f"S{crowding.MAX_CROWDING_ROWS:05d}" not in kept
+
+    def test_watchlist_iteration_is_bounded(self):
+        beyond = [{"name": f"w{i}", "items": [{"symbol": f"W{i}"}]}
+                  for i in range(crowding.MAX_WATCHLISTS + 10)]
+        rows = crowding.build_rows(beyond, {}, "2026-08-30")
+        symbols = {r["symbol"] for r in rows}
+        assert f"W{crowding.MAX_WATCHLISTS}" not in symbols, (
+            "watchlists beyond the cap must not be iterated"
+        )
+
 
 class TestWriterUpsert:
     def test_rows_land_and_upsert_is_idempotent(self, db_with_schema):
@@ -131,6 +155,44 @@ class TestWriterUpsert:
 
         writer.upsert_rh_crowding_rows([])
         assert db_with_schema.execute("SELECT COUNT(*) FROM rh_crowding").fetchone()[0] == 0
+
+    def test_bulk_writes_are_chunked_multirow_not_per_row(
+        self, db_with_schema, monkeypatch
+    ):
+        """Hrana I/O bounding: per-row execute is one round-trip PER ROW
+        (the rv-ratio 2026-07-21 502 incident class). 900 rows must land
+        in ceil(900/400) = 3 INSERT statements, not 900."""
+        import db.writer as writer
+
+        insert_statements: list[str] = []
+        real_execute = db_with_schema.execute
+
+        def counting_execute(sql, *args):
+            if sql.lstrip().upper().startswith("INSERT INTO RH_CROWDING"):
+                insert_statements.append(sql)
+            return real_execute(sql, *args)
+
+        class _CountingConn:
+            def execute(self, sql, *args):
+                return counting_execute(sql, *args)
+
+            def commit(self):
+                return db_with_schema.commit()
+
+        monkeypatch.setattr(writer, "get_db", lambda: _CountingConn())
+
+        rows = [
+            {"date": "2026-08-30", "symbol": f"T{i:04d}", "popular_rank": i + 1,
+             "watchlists": ["popular"], "scan_hits": 0}
+            for i in range(900)
+        ]
+        writer.upsert_rh_crowding_rows(rows, recorded_at="2026-08-30T20:00:00Z")
+
+        assert len(insert_statements) == 3, (
+            f"expected 3 chunked statements for 900 rows, got {len(insert_statements)}"
+        )
+        stored = db_with_schema.execute("SELECT COUNT(*) FROM rh_crowding").fetchone()[0]
+        assert stored == 900
 
 
 class TestUnconfiguredSkip:

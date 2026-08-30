@@ -484,3 +484,199 @@ class TestTokenRefresh:
     ):
         assert robinhood_configured() is False
         assert fetch_robinhood_closes(["SPY"]) == {}
+
+
+class TestAdversarialHardening:
+    """Pins for the attack surfaces found in review: truncation-bisected
+    token leaks, refresh storms/races, and fabricated price values."""
+
+    # ── redaction survives truncation ────────────────────────────
+
+    def test_mcp_error_truncation_cannot_leak_a_bisected_token(self, monkeypatch):
+        token = "ZZSECRETZZ" * 4
+        client = RobinhoodClient(token=token)
+
+        class _Resp:
+            status_code = 500
+            headers: dict = {}
+            content = b"x"
+            # Token starts at char 295: a naive [:300] slice BEFORE the
+            # scrub keeps the first 5 chars of the secret and drops the
+            # rest, so the exact-match replace no longer fires.
+            text = "x" * 295 + token
+
+        monkeypatch.setattr(client._session, "post", lambda *a, **k: _Resp())
+        with pytest.raises(RobinhoodClientError) as excinfo:
+            client._post({"jsonrpc": "2.0", "id": 1, "method": "x"})
+        assert "ZZSECRET" not in str(excinfo.value)
+
+    def test_refresh_error_truncation_cannot_leak_a_bisected_token(
+        self, monkeypatch, isolated_token_state
+    ):
+        refresh = "RRSECRETRR" * 4
+        _write_token_file(
+            isolated_token_state, refresh_token=refresh, client_id="cid",
+        )
+
+        def post(url, data=None, headers=None, timeout=None):
+            return _FakeResponse(status_code=400, text="y" * 195 + refresh)
+
+        monkeypatch.setattr(rh.requests, "post", post)
+        with pytest.raises(RobinhoodAuthError) as excinfo:
+            RobinhoodTokenStore().refresh()
+        assert "RRSECRET" not in str(excinfo.value)
+
+    # ── fabricated prices ────────────────────────────────────────
+
+    def test_boolean_and_nonfinite_prices_are_rejected(self):
+        assert rh._to_price(True) is None, "float(True) == 1.0 fabricates a $1 print"
+        assert rh._to_price("inf") is None
+        assert rh._to_price(float("inf")) is None
+        assert rh._to_price("nan") is None
+        assert rh._to_price(-5) is None
+        assert rh._to_price("641.10") == pytest.approx(641.10)
+
+    def test_quote_helper_rejects_boolean_and_inf_payloads(self, monkeypatch):
+        monkeypatch.setenv("ROBINHOOD_MCP_TOKEN", "tok")
+        for poisoned in ({"last": True}, {"last": "inf"}, {"last": float("nan")}):
+            monkeypatch.setattr(
+                rh.RobinhoodClient, "get_equity_quotes",
+                lambda self, symbols, _p=poisoned: [_p],
+            )
+            assert fetch_robinhood_quote("SPY") is None, poisoned
+
+    def test_closes_parser_rejects_boolean_and_inf_closes(self):
+        assert rh._closes_from_historicals(
+            [{"date": "2026-08-27", "close": True}]
+        ) == {}
+        assert rh._closes_from_historicals(
+            [{"date": "2026-08-27", "close": "inf"}]
+        ) == {}
+
+    # ── refresh storms and races ─────────────────────────────────
+
+    def test_mcp_rejecting_a_fresh_token_disables_the_process(
+        self, monkeypatch, isolated_token_state
+    ):
+        """A token minted seconds ago being 401'd is structural. Without the
+        kill switch, a 500-ticker garch sweep would hit the token endpoint
+        once per symbol."""
+        _write_token_file(
+            isolated_token_state,
+            refresh_token="refresh-1", client_id="cid", token_type="Bearer",
+        )
+        refreshes: list = []
+        monkeypatch.setattr(
+            rh.requests, "post",
+            lambda url, data=None, headers=None, timeout=None: (
+                refreshes.append(dict(data)) or _FakeResponse(payload={
+                    "access_token": "fresh-access", "expires_in": 259200,
+                })
+            ),
+        )
+
+        client = RobinhoodClient()
+        monkeypatch.setattr(
+            client._session, "post",
+            lambda *a, **k: _FakeResponse(status_code=401, text="revoked"),
+        )
+        with pytest.raises(RobinhoodAuthError):
+            client.call_tool("get_equity_quotes", {"symbols": ["SPY"]})
+
+        assert len(refreshes) == 1, "exactly one refresh, no storm"
+        assert robinhood_configured() is False, (
+            "fresh-token rejection must degrade the process to the "
+            "unconfigured skip"
+        )
+        assert fetch_robinhood_closes(["SPY"]) == {}
+
+    def test_concurrent_refreshers_spend_the_refresh_token_once(
+        self, monkeypatch, isolated_token_state
+    ):
+        """Rotation race: the loser must re-read under the lock and reuse
+        the winner's rotated tokens instead of spending the (single-use)
+        old refresh token a second time."""
+        _write_token_file(
+            isolated_token_state,
+            access_token="stale", refresh_token="refresh-1",
+            client_id="cid", expires_at=time.time() - 10,
+        )
+        endpoint_calls: list = []
+        monkeypatch.setattr(
+            rh.requests, "post",
+            lambda url, data=None, headers=None, timeout=None: (
+                endpoint_calls.append(dict(data)) or _FakeResponse(payload={
+                    "access_token": "fresh-access", "expires_in": 259200,
+                    "refresh_token": "refresh-2",
+                })
+            ),
+        )
+
+        loser = RobinhoodTokenStore()   # snapshots the stale state first
+        winner = RobinhoodTokenStore()
+        assert winner.refresh() == "fresh-access"
+        assert loser.refresh() == "fresh-access"
+
+        assert len(endpoint_calls) == 1, (
+            "the second refresher must short-circuit on the re-read, "
+            "never POST the already-spent refresh token"
+        )
+
+    def test_ladder_helpers_use_the_bounded_timeout(self, monkeypatch):
+        """4 POSTs x LADDER_TIMEOUT_S must stay inside the ~30s per-rung
+        worst case the portfolio_risk budget math documents."""
+        assert rh.LADDER_TIMEOUT_S * 4 <= 30
+
+        monkeypatch.setenv("ROBINHOOD_MCP_TOKEN", "tok")
+        captured: dict = {}
+        real_client = rh.RobinhoodClient
+
+        class Spy(real_client):
+            def __init__(self, *args, **kwargs):
+                captured.update(kwargs)
+                super().__init__(*args, **kwargs)
+
+            def fetch_daily_closes(self, symbol):
+                return {}
+
+            def get_equity_quotes(self, symbols):
+                return []
+
+        monkeypatch.setattr(rh, "RobinhoodClient", Spy)
+        fetch_robinhood_closes(["SPY"])
+        assert captured.get("timeout") == rh.LADDER_TIMEOUT_S
+        captured.clear()
+        fetch_robinhood_quote("SPY")
+        assert captured.get("timeout") == rh.LADDER_TIMEOUT_S
+
+    # ── secret residue on disk ───────────────────────────────────
+
+    def test_token_file_and_write_artifacts_are_gitignored(self):
+        import subprocess
+
+        repo_root = SCRIPTS_DIR.parent
+        for artifact in (
+            "data/rh_mcp_token.json",
+            "data/rh_mcp_token.json.tmp",
+            "data/rh_mcp_token.json.lock",
+        ):
+            result = subprocess.run(
+                ["git", "check-ignore", "-q", artifact],
+                cwd=repo_root,
+            )
+            assert result.returncode == 0, f"{artifact} is not gitignored"
+
+    def test_loose_file_permissions_warn_without_leaking_values(
+        self, isolated_token_state, capsys
+    ):
+        isolated_token_state.write_text(
+            json.dumps({"access_token": "tok-open-perm", "refresh_token": "r"}),
+            encoding="utf-8",
+        )
+        os.chmod(isolated_token_state, 0o644)
+
+        RobinhoodTokenStore()
+
+        err = capsys.readouterr().err
+        assert "too open" in err
+        assert "tok-open-perm" not in err
