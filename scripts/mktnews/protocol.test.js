@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  DEFAULT_FLASH_URL,
   DEFAULT_URL,
   classifyMessage,
   parseFrame,
@@ -9,6 +10,10 @@ import {
 describe("mktnews protocol", () => {
   it("pins the public English websocket URL", () => {
     expect(DEFAULT_URL).toBe("wss://api.mktnews.net/?lang=en");
+  });
+
+  it("pins the public English flash history URL", () => {
+    expect(DEFAULT_FLASH_URL).toBe("https://api.mktnews.net/api/flash?lang=en");
   });
 
   it("classifies server time heartbeats", () => {

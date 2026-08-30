@@ -1,6 +1,7 @@
 export const DEFAULT_HOST = "wss://api.mktnews.net/";
 export const DEFAULT_LANG = "en";
 export const DEFAULT_URL = `${DEFAULT_HOST}?lang=${DEFAULT_LANG}`;
+export const DEFAULT_FLASH_URL = `https://api.mktnews.net/api/flash?lang=${DEFAULT_LANG}`;
 export const DEFAULT_ORIGIN = "https://mktnews.net";
 export const DEFAULT_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
