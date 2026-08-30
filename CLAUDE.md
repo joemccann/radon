@@ -83,7 +83,7 @@ Any gate fails → stop. Name the gate.
 
 1. Interactive Brokers (TWS / Gateway) — real-time
 2. Unusual Whales (`$UW_TOKEN`) — dark pool, sweeps, alerts
-3. Robinhood (`$ROBINHOOD_MCP_TOKEN`, official trading MCP, READ-ONLY) — quote/chain failover + retail-crowding overlay only. Never above IB or UW; execution stays on IB. No dark pool, OTC, sweeps, GEX, or vol surface.
+3. Robinhood (official trading MCP, READ-ONLY; tokens in the 0600 file `$ROBINHOOD_MCP_TOKEN_FILE`, auto-refreshed — access tokens expire ~3 days) — quote/chain failover + retail-crowding overlay only. Never above IB or UW; execution stays on IB. No dark pool, OTC, sweeps, GEX, or vol surface.
 4. Yahoo Finance — **ABSOLUTE LAST RESORT**
 5. Web scrape — after Yahoo
 

@@ -15,31 +15,58 @@ Radon's use of this surface is deliberately narrow:
   - No dark pool, OTC, sweeps, GEX, or vol surface: Robinhood does not
     serve them, and the option-quote schema is unpublished — options are
     NBBO/last failover only, never a greeks/surface source.
-  - Unconfigured is a clean no-op: without ``ROBINHOOD_MCP_TOKEN`` every
-    module-level fetch helper returns empty immediately (no network, no
-    raise) and the ladder falls through to Yahoo.
+  - Unconfigured is a clean no-op: with neither an access token nor a
+    refresh token, every module-level fetch helper returns empty
+    immediately (no network, no raise) and the ladder falls through to
+    Yahoo.
+
+Token lifecycle — access tokens expire in ~3 days, so REFRESH IS MANDATORY
+in production. Tokens persist in a 0600 JSON file (``ROBINHOOD_MCP_TOKEN_FILE``,
+default ``data/rh_mcp_token.json``, gitignored; ``/etc/radon/rh-mcp.json`` on
+the VPS) so the process can write rotated tokens back. Env vars bootstrap the
+file on first use. Refresh runs against the official token endpoint
+(``https://api.robinhood.com/oauth2/token/``, ``grant_type=refresh_token``,
+form-encoded, public client — NO client secret; discovery:
+https://agent.robinhood.com/.well-known/oauth-authorization-server/mcp/trading)
+when the access token is missing, within REFRESH_SAFETY_WINDOW_S of expiry,
+or after an MCP 401/403. An ``invalid_grant`` marks Robinhood unconfigured
+for the rest of the process so ladders fall through to Yahoo without
+crashing.
 
 Env (documented in .env.example + docs/external-services.md):
-  ROBINHOOD_MCP_URL    — optional; defaults to the official trading URL.
-  ROBINHOOD_MCP_TOKEN  — OAuth 2.1 access token minted by the operator's
-                         one-time PKCE authorization. Absent = unconfigured.
+  ROBINHOOD_MCP_URL            — optional; defaults to the official trading URL.
+  ROBINHOOD_MCP_TOKEN_FILE     — optional; token persistence path (0600).
+  ROBINHOOD_MCP_TOKEN          — bootstrap access token (optional if the
+                                 file already holds one).
+  ROBINHOOD_MCP_REFRESH_TOKEN  — bootstrap refresh token.
+  ROBINHOOD_MCP_CLIENT_ID      — the OAuth public client_id that minted it
+                                 (token_endpoint_auth_method=none).
 
-The token is a credential: it must never appear in logs, reprs, or
-exception text. ``_redact`` strips it defensively from error strings.
+Tokens are credentials: they must never appear in logs, reprs, or exception
+text. ``_redact`` strips every known secret defensively from error strings.
 """
 from __future__ import annotations
 
 import json
 import os
 import sys
+import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import requests
 
 DEFAULT_MCP_URL = "https://agent.robinhood.com/mcp/trading"
+TOKEN_ENDPOINT = "https://api.robinhood.com/oauth2/token/"
+# OAuth discovery document (informational; the endpoint above is the contract):
+# https://agent.robinhood.com/.well-known/oauth-authorization-server/mcp/trading
+DEFAULT_TOKEN_FILE = Path(__file__).resolve().parents[2] / "data" / "rh_mcp_token.json"
 _PROTOCOL_VERSION = "2025-06-18"
 _DEFAULT_TIMEOUT = 20
 _USER_AGENT = "radon/2.0"
+
+# Access tokens live ~3 days; refresh this far ahead of the recorded expiry.
+REFRESH_SAFETY_WINDOW_S = 3600
 
 # Documented ceiling on get_equity_quotes symbols per call.
 EQUITY_QUOTES_BATCH_MAX = 20
@@ -75,20 +102,223 @@ class RobinhoodClientError(Exception):
 
 
 class RobinhoodNotConfiguredError(RobinhoodClientError):
-    """Raised when a call is attempted without ROBINHOOD_MCP_TOKEN set."""
+    """Raised when a call is attempted with no access and no refresh token."""
 
 
 class RobinhoodAuthError(RobinhoodClientError):
-    """Token rejected (401/403)."""
+    """Token rejected (401/403) or the refresh grant failed."""
 
 
 class RobinhoodReadOnlyError(RobinhoodClientError):
     """A tool outside READ_ONLY_TOOLS was requested. Execution stays on IB."""
 
 
+# A refresh that failed with a non-transient grant error (invalid_grant)
+# cannot succeed again this process: treat Robinhood as unconfigured so
+# every ladder falls through to Yahoo instead of hammering the endpoint.
+_refresh_disabled = False
+
+
+def _disable_for_process(reason: str) -> None:
+    global _refresh_disabled
+    _refresh_disabled = True
+    print(f"  Robinhood disabled for this process: {reason}", file=sys.stderr)
+
+
+class RobinhoodTokenStore:
+    """0600-file-backed token state with env bootstrap and OAuth refresh.
+
+    Read paths never write. The env → file bootstrap happens on the first
+    actual token RESOLUTION (a client about to talk to the MCP), and every
+    refresh persists rotated tokens atomically (temp file + rename).
+    """
+
+    def __init__(self, path: Optional[str] = None):
+        self._path = Path(
+            path or os.environ.get("ROBINHOOD_MCP_TOKEN_FILE") or DEFAULT_TOKEN_FILE
+        )
+        self._state: Dict[str, Any] = self._read()
+
+    @property
+    def path(self) -> Path:
+        return self._path
+
+    def _read(self) -> Dict[str, Any]:
+        """File state overlaid on env bootstrap values. Read-only."""
+        state: Dict[str, Any] = {}
+        try:
+            loaded = json.loads(self._path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                state = loaded
+        except (OSError, ValueError):
+            state = {}
+        for key, env in (
+            ("access_token", "ROBINHOOD_MCP_TOKEN"),
+            ("refresh_token", "ROBINHOOD_MCP_REFRESH_TOKEN"),
+            ("client_id", "ROBINHOOD_MCP_CLIENT_ID"),
+        ):
+            if not state.get(key) and os.environ.get(env):
+                state[key] = os.environ[env]
+        state.setdefault("token_type", "Bearer")
+        return state
+
+    # ── introspection (never network) ────────────────────────────
+
+    @property
+    def access_token(self) -> str:
+        return str(self._state.get("access_token") or "")
+
+    @property
+    def refresh_token(self) -> str:
+        return str(self._state.get("refresh_token") or "")
+
+    @property
+    def client_id(self) -> str:
+        return str(self._state.get("client_id") or "")
+
+    def secrets(self) -> List[str]:
+        """Every credential value that must never reach logs or errors."""
+        return [s for s in (self.access_token, self.refresh_token) if s]
+
+    def can_refresh(self) -> bool:
+        return bool(self.refresh_token and self.client_id)
+
+    def is_configured(self) -> bool:
+        return bool(self.access_token) or self.can_refresh()
+
+    def _expires_at(self) -> Optional[float]:
+        value = self._state.get("expires_at")
+        if value is None and self._state.get("expires_in") is not None:
+            written = self._state.get("written_at")
+            if written is not None:
+                try:
+                    return float(written) + float(self._state["expires_in"])
+                except (TypeError, ValueError):
+                    return None
+            return None
+        try:
+            return float(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    def access_token_if_fresh(self, now: Optional[float] = None) -> Optional[str]:
+        """The access token unless it is inside the refresh safety window.
+
+        A token with no recorded expiry (env bootstrap) is used as-is; a
+        stale one surfaces as an MCP 401 and the retry path refreshes.
+        """
+        if not self.access_token:
+            return None
+        expires_at = self._expires_at()
+        moment = time.time() if now is None else now
+        if expires_at is not None and expires_at - REFRESH_SAFETY_WINDOW_S <= moment:
+            return None
+        return self.access_token
+
+    # ── persistence ──────────────────────────────────────────────
+
+    def persist(self) -> None:
+        """Atomic 0600 write: temp file in the same directory, then rename."""
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self._path.with_name(self._path.name + ".tmp")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(self._state, handle, indent=2)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
+        os.replace(tmp, self._path)
+        os.chmod(self._path, 0o600)
+
+    def bootstrap_file_if_missing(self) -> None:
+        """First configured run: materialize the env tokens into the file."""
+        if self.is_configured() and not self._path.exists():
+            self._state["written_at"] = time.time()
+            self.persist()
+
+    # ── refresh (the one network path in this class) ─────────────
+
+    def refresh(self, timeout: int = _DEFAULT_TIMEOUT) -> str:
+        """Mint a fresh access token via grant_type=refresh_token.
+
+        Public client: form-encoded refresh_token + client_id, NO client
+        secret. A rotated refresh_token in the response replaces the old
+        one. invalid_grant (or any 4xx) disables Robinhood for this process
+        — the ladder falls through to Yahoo rather than crashing.
+        """
+        if _refresh_disabled:
+            raise RobinhoodNotConfiguredError("Robinhood refresh disabled for this process")
+        if not self.can_refresh():
+            raise RobinhoodNotConfiguredError(
+                "no ROBINHOOD_MCP_REFRESH_TOKEN / ROBINHOOD_MCP_CLIENT_ID to refresh with"
+            )
+        try:
+            resp = requests.post(
+                TOKEN_ENDPOINT,
+                data={
+                    "grant_type": "refresh_token",
+                    "refresh_token": self.refresh_token,
+                    "client_id": self.client_id,
+                },
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "User-Agent": _USER_AGENT,
+                },
+                timeout=timeout,
+            )
+        except (requests.ConnectionError, requests.Timeout) as exc:
+            raise RobinhoodClientError(
+                f"Robinhood token endpoint unreachable: {_scrub(str(exc), self.secrets())}"
+            ) from None
+
+        if resp.status_code >= 400:
+            detail = _scrub(resp.text[:200], self.secrets())
+            if 400 <= resp.status_code < 500:
+                # invalid_grant / invalid_client: retrying cannot help.
+                _disable_for_process(
+                    f"token refresh rejected (HTTP {resp.status_code}); "
+                    "treating Robinhood as unconfigured"
+                )
+                raise RobinhoodAuthError(
+                    f"Robinhood token refresh rejected (HTTP {resp.status_code}): {detail}"
+                )
+            raise RobinhoodClientError(
+                f"Robinhood token endpoint HTTP {resp.status_code}: {detail}"
+            )
+
+        try:
+            payload = resp.json()
+        except ValueError:
+            raise RobinhoodClientError(
+                "Robinhood token endpoint returned a non-JSON body"
+            ) from None
+        access = payload.get("access_token")
+        if not access:
+            raise RobinhoodClientError("Robinhood token response carried no access_token")
+
+        now = time.time()
+        self._state["access_token"] = access
+        self._state["token_type"] = payload.get("token_type") or "Bearer"
+        self._state["written_at"] = now
+        if payload.get("expires_in") is not None:
+            self._state["expires_in"] = payload["expires_in"]
+            self._state["expires_at"] = now + float(payload["expires_in"])
+        if payload.get("refresh_token"):
+            self._state["refresh_token"] = payload["refresh_token"]
+        self.persist()
+        return str(access)
+
+
 def robinhood_configured() -> bool:
-    """True when the OAuth token is present in the environment."""
-    return bool(os.environ.get("ROBINHOOD_MCP_TOKEN"))
+    """True when an access token OR refresh credentials are available.
+
+    Never touches the network, and False for the rest of the process after
+    a rejected refresh grant.
+    """
+    if _refresh_disabled:
+        return False
+    return RobinhoodTokenStore().is_configured()
 
 
 class RobinhoodClient:
@@ -96,7 +326,8 @@ class RobinhoodClient:
 
     JSON-RPC over one POST per request; ``initialize`` runs lazily before the
     first ``tools/call`` and the returned ``Mcp-Session-Id`` (when the server
-    issues one) rides on every later request.
+    issues one) rides on every later request. Expired/rejected access tokens
+    are refreshed through the token store and the request retried once.
     """
 
     def __init__(
@@ -104,9 +335,12 @@ class RobinhoodClient:
         url: Optional[str] = None,
         token: Optional[str] = None,
         timeout: int = _DEFAULT_TIMEOUT,
+        token_file: Optional[str] = None,
     ):
         self._url = url or os.environ.get("ROBINHOOD_MCP_URL") or DEFAULT_MCP_URL
-        self._token = token if token is not None else os.environ.get("ROBINHOOD_MCP_TOKEN", "")
+        # Explicit ctor token = static mode (tests); no store I/O, no refresh.
+        self._explicit_token = token
+        self._store = RobinhoodTokenStore(token_file) if token is None else None
         self._timeout = timeout
         self._session_id: Optional[str] = None
         self._initialized = False
@@ -114,11 +348,13 @@ class RobinhoodClient:
         self._session = requests.Session()
         self._session.headers.update({"User-Agent": _USER_AGENT})
 
-    def __repr__(self) -> str:  # never leak the token
+    def __repr__(self) -> str:  # never leak a token
         return f"RobinhoodClient(url={self._url!r}, configured={self.is_configured()})"
 
     def is_configured(self) -> bool:
-        return bool(self._token)
+        if self._explicit_token is not None:
+            return bool(self._explicit_token)
+        return not _refresh_disabled and self._store.is_configured()
 
     def close(self) -> None:
         self._session.close()
@@ -131,12 +367,38 @@ class RobinhoodClient:
 
     # ── transport ────────────────────────────────────────────────
 
-    def _redact(self, text: str) -> str:
-        return text.replace(self._token, "[REDACTED]") if self._token else text
+    def _secrets(self) -> List[str]:
+        secrets = [self._explicit_token] if self._explicit_token else []
+        if self._store is not None:
+            secrets.extend(self._store.secrets())
+        return [s for s in secrets if s]
 
-    def _headers(self) -> Dict[str, str]:
+    def _redact(self, text: str) -> str:
+        return _scrub(text, self._secrets())
+
+    def _resolve_token(self) -> str:
+        """Current access token, refreshing through the store when needed."""
+        if self._explicit_token is not None:
+            if not self._explicit_token:
+                raise RobinhoodNotConfiguredError("empty Robinhood token")
+            return self._explicit_token
+        self._store.bootstrap_file_if_missing()
+        access = self._store.access_token_if_fresh()
+        if access:
+            return access
+        if self._store.can_refresh():
+            return self._store.refresh(timeout=self._timeout)
+        if self._store.access_token:
+            # No expiry metadata and nothing to refresh with: use it and let
+            # a 401 surface as RobinhoodAuthError.
+            return self._store.access_token
+        raise RobinhoodNotConfiguredError(
+            "no Robinhood access or refresh token configured; Robinhood is skipped"
+        )
+
+    def _headers(self, token: str) -> Dict[str, str]:
         headers = {
-            "Authorization": f"Bearer {self._token}",
+            "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
             "MCP-Protocol-Version": _PROTOCOL_VERSION,
@@ -145,16 +407,22 @@ class RobinhoodClient:
             headers["Mcp-Session-Id"] = self._session_id
         return headers
 
-    def _post(self, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _post(self, payload: Dict[str, Any], _retry_auth: bool = True) -> Optional[Dict[str, Any]]:
+        token = self._resolve_token()
         try:
             resp = self._session.post(
-                self._url, json=payload, headers=self._headers(), timeout=self._timeout
+                self._url, json=payload, headers=self._headers(token), timeout=self._timeout
             )
         except (requests.ConnectionError, requests.Timeout) as exc:
             raise RobinhoodClientError(
                 f"Robinhood MCP unreachable: {self._redact(str(exc))}"
             ) from None
         if resp.status_code in (401, 403):
+            # Access token expired or revoked mid-flight: refresh once and
+            # retry the same request with the new token.
+            if _retry_auth and self._store is not None and self._store.can_refresh():
+                self._store.refresh(timeout=self._timeout)
+                return self._post(payload, _retry_auth=False)
             raise RobinhoodAuthError(f"Robinhood MCP rejected the token (HTTP {resp.status_code})")
         if resp.status_code >= 400:
             raise RobinhoodClientError(
@@ -198,7 +466,7 @@ class RobinhoodClient:
             return
         if not self.is_configured():
             raise RobinhoodNotConfiguredError(
-                "ROBINHOOD_MCP_TOKEN is not set; Robinhood is skipped"
+                "no Robinhood access or refresh token configured; Robinhood is skipped"
             )
         self._rpc("initialize", {
             "protocolVersion": _PROTOCOL_VERSION,
@@ -290,6 +558,13 @@ _DATE_KEYS = ("begins_at", "date", "timestamp", "time", "session_date")
 _CLOSE_KEYS = ("close_price", "close", "last_trade_price", "adjusted_close")
 
 
+def _scrub(text: str, secrets: List[str]) -> str:
+    for secret in secrets:
+        if secret:
+            text = text.replace(secret, "[REDACTED]")
+    return text
+
+
 def _tool_text(result: Dict[str, Any]) -> Optional[str]:
     for item in result.get("content") or []:
         if isinstance(item, dict) and item.get("type") == "text":
@@ -347,8 +622,9 @@ def fetch_robinhood_closes(symbols: List[str]) -> Dict[str, Dict[str, float]]:
     """Daily closes per symbol for the failover ladders.
 
     Ranked BELOW IB / UW / Cboe and ABOVE Yahoo. Returns {} immediately —
-    no network — when ROBINHOOD_MCP_TOKEN is unset, so unconfigured hosts
-    fall straight through to Yahoo.
+    no network — when neither an access token nor refresh credentials are
+    configured (or after a rejected refresh grant), so those hosts fall
+    straight through to Yahoo.
     """
     if not robinhood_configured():
         return {}

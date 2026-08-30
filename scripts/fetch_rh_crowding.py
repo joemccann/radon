@@ -173,7 +173,10 @@ def run() -> Optional[dict[str, Any]]:
     from clients.robinhood_client import robinhood_configured
 
     if not robinhood_configured():
-        _log("ROBINHOOD_MCP_TOKEN not set; skipping cleanly (no fetch, no write)")
+        _log(
+            "no Robinhood credentials (access or refresh token); "
+            "skipping cleanly (no fetch, no write)"
+        )
         return None
 
     now = datetime.now(timezone.utc)

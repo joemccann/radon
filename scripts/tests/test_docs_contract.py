@@ -170,11 +170,32 @@ class TestRobinhoodRankRule:
 
     def test_env_vars_are_documented_with_the_other_vendors(self):
         env_example = (_ROOT / ".env.example").read_text(encoding="utf-8")
-        assert "ROBINHOOD_MCP_TOKEN" in env_example
-        assert "ROBINHOOD_MCP_URL" in env_example
         services = (_ROOT / "docs" / "external-services.md").read_text(encoding="utf-8")
-        assert "ROBINHOOD_MCP_TOKEN" in services
+        for name in (
+            "ROBINHOOD_MCP_TOKEN",
+            "ROBINHOOD_MCP_TOKEN_FILE",
+            "ROBINHOOD_MCP_REFRESH_TOKEN",
+            "ROBINHOOD_MCP_CLIENT_ID",
+            "ROBINHOOD_MCP_URL",
+        ):
+            assert name in env_example, name
+        for name in (
+            "ROBINHOOD_MCP_TOKEN_FILE",
+            "ROBINHOOD_MCP_REFRESH_TOKEN",
+            "ROBINHOOD_MCP_CLIENT_ID",
+        ):
+            assert name in services, name
         assert "https://agent.robinhood.com/mcp/trading" in services
+
+    def test_token_expiry_and_refresh_are_documented(self):
+        # A static access token goes stale in ~3 days; both env docs must say
+        # refresh is mandatory and point at the official token endpoint.
+        env_example = (_ROOT / ".env.example").read_text(encoding="utf-8")
+        services = (_ROOT / "docs" / "external-services.md").read_text(encoding="utf-8")
+        for text, rel in ((env_example, ".env.example"), (services, "docs/external-services.md")):
+            assert "~3 days" in text, rel
+            assert "refresh is mandatory" in text.lower(), rel
+            assert "https://api.robinhood.com/oauth2/token/" in text, rel
 
 
 class TestThinIndex:

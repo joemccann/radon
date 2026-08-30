@@ -102,7 +102,7 @@ Any UI or asset work must comply with Radon brand identity:
 4. Yahoo Finance — **ABSOLUTE LAST RESORT**. Never make Yahoo the scheduled, primary, or only source for a series IB or UW can serve.
 5. Web scrape / browser after Yahoo; use Exa for research/docs and interactive browser only for JS-rendered pages.
 
-Try IB every cycle. Skip the IB socket only when `/health` `auth_state` is set and not `authenticated`; then UW; then Robinhood (skipped cleanly when `ROBINHOOD_MCP_TOKEN` is unset); then Yahoo. 2FA, unattended timers, and "historical needs a gateway" do not skip IB or UW. Specialized official feeds (Cboe, Treasury, FINRA) may sit ahead of Robinhood and Yahoo when a script documents them as the source for that metric — the full order is IB > UW > Cboe > Robinhood > Yahoo.
+Try IB every cycle. Skip the IB socket only when `/health` `auth_state` is set and not `authenticated`; then UW; then Robinhood (skipped cleanly when no credentials (access or refresh token) are configured; access tokens expire ~3 days, refreshed automatically via the 0600 token file `ROBINHOOD_MCP_TOKEN_FILE`); then Yahoo. 2FA, unattended timers, and "historical needs a gateway" do not skip IB or UW. Specialized official feeds (Cboe, Treasury, FINRA) may sit ahead of Robinhood and Yahoo when a script documents them as the source for that metric — the full order is IB > UW > Cboe > Robinhood > Yahoo.
 
 ## Commands
 

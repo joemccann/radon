@@ -1,17 +1,27 @@
-"""Robinhood MCP client — read-only contract, unconfigured skip, parsing.
+"""Robinhood MCP client — read-only contract, unconfigured skip, token
+refresh, and parsing.
 
 Robinhood ranks BELOW IB / UW / Cboe and ABOVE Yahoo. These tests pin the
-three properties the ladder integration depends on:
+properties the ladder integration depends on:
 
-  1. Unconfigured (no ROBINHOOD_MCP_TOKEN) is a clean, network-free no-op.
+  1. Unconfigured (no access AND no refresh token) is a clean, network-free
+     no-op.
   2. The client is READ-ONLY: any tool outside the documented read
      allowlist — every place_* / cancel_* order-write — is refused
      client-side before any I/O. Execution stays on IB.
-  3. The token never leaks into reprs or exception text.
+  3. Tokens never leak into reprs, logs, or exception text.
+  4. Access tokens expire ~3 days: the client refreshes through the official
+     token endpoint (grant_type=refresh_token, public client, no secret),
+     persists rotated tokens to a 0600 file atomically, and a rejected
+     grant degrades to the unconfigured skip instead of crashing ladders.
 """
 from __future__ import annotations
 
+import json
+import os
+import stat
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -25,20 +35,36 @@ from clients.robinhood_client import (  # noqa: E402
     DEFAULT_MCP_URL,
     EQUITY_QUOTES_BATCH_MAX,
     READ_ONLY_TOOLS,
+    TOKEN_ENDPOINT,
+    RobinhoodAuthError,
     RobinhoodClient,
     RobinhoodClientError,
     RobinhoodNotConfiguredError,
     RobinhoodReadOnlyError,
+    RobinhoodTokenStore,
     fetch_robinhood_closes,
     fetch_robinhood_quote,
     robinhood_configured,
 )
 
 
-@pytest.fixture
-def unconfigured(monkeypatch):
+@pytest.fixture(autouse=True)
+def isolated_token_state(monkeypatch, tmp_path):
+    """Every test starts with no env credentials, a tmp token file path,
+    and the process-level refresh kill switch reset."""
+    monkeypatch.setattr(rh, "_refresh_disabled", False)
+    monkeypatch.setenv("ROBINHOOD_MCP_TOKEN_FILE", str(tmp_path / "rh-mcp.json"))
     monkeypatch.delenv("ROBINHOOD_MCP_TOKEN", raising=False)
+    monkeypatch.delenv("ROBINHOOD_MCP_REFRESH_TOKEN", raising=False)
+    monkeypatch.delenv("ROBINHOOD_MCP_CLIENT_ID", raising=False)
     monkeypatch.delenv("ROBINHOOD_MCP_URL", raising=False)
+    return tmp_path / "rh-mcp.json"
+
+
+@pytest.fixture
+def unconfigured():
+    """Alias for readability — the autouse fixture already cleared the env."""
+    return None
 
 
 @pytest.fixture
@@ -49,6 +75,47 @@ def no_network(monkeypatch):
 
     monkeypatch.setattr("requests.Session.post", _boom)
     monkeypatch.setattr("requests.Session.get", _boom)
+    monkeypatch.setattr(rh.requests, "post", _boom)
+
+
+def _write_token_file(path: Path, **fields) -> None:
+    path.write_text(json.dumps(fields), encoding="utf-8")
+    os.chmod(path, 0o600)
+
+
+class _FakeResponse:
+    def __init__(self, status_code=200, payload=None, text="", headers=None):
+        self.status_code = status_code
+        self._payload = payload
+        self.text = text if text else (json.dumps(payload) if payload is not None else "")
+        self.content = self.text.encode()
+        self.headers = headers or ({"Content-Type": "application/json"} if payload is not None else {})
+
+    def json(self):
+        if self._payload is None:
+            raise ValueError("no json")
+        return self._payload
+
+
+def _mcp_responder(expected_bearer, calls=None, reject_bearers=()):
+    """A fake MCP `Session.post` that 401s stale bearers and answers
+    initialize / notification / tools-call for the expected one."""
+    def post(url, json=None, headers=None, timeout=None):  # noqa: A002 - requests kwarg
+        if calls is not None:
+            calls.append({"url": url, "payload": json, "headers": dict(headers or {})})
+        bearer = (headers or {}).get("Authorization", "")
+        if bearer in {f"Bearer {b}" for b in reject_bearers}:
+            return _FakeResponse(status_code=401, text="expired_token")
+        assert bearer == f"Bearer {expected_bearer}", bearer
+        if json.get("method") == "initialize":
+            return _FakeResponse(payload={"jsonrpc": "2.0", "id": json["id"], "result": {}})
+        if json.get("method") == "notifications/initialized":
+            return _FakeResponse(status_code=202, text="")
+        return _FakeResponse(payload={
+            "jsonrpc": "2.0", "id": json["id"],
+            "result": {"structuredContent": {"results": [{"symbol": "SPY"}]}},
+        })
+    return post
 
 
 class TestUnconfiguredSkip:
@@ -218,3 +285,202 @@ class TestLadderHelpers:
             lambda self, symbols: (_ for _ in ()).throw(AssertionError("equity tool used")),
         )
         assert fetch_robinhood_quote("VIX", index=True) == pytest.approx(15.2)
+
+
+class TestTokenRefresh:
+    """Access tokens expire ~3 days: refresh is mandatory in production.
+
+    Official protocol only: POST https://api.robinhood.com/oauth2/token/ with
+    grant_type=refresh_token + refresh_token + client_id, form-encoded,
+    NO client secret (public client, token_endpoint_auth_method=none).
+    """
+
+    def _token_endpoint(self, monkeypatch, calls, *, status=200, payload=None, text=""):
+        payload = payload if payload is not None else {
+            "access_token": "fresh-access",
+            "token_type": "Bearer",
+            "expires_in": 259200,
+            "refresh_token": "refresh-2",
+        }
+
+        def post(url, data=None, headers=None, timeout=None):
+            assert url == TOKEN_ENDPOINT
+            calls.append({"data": dict(data or {}), "headers": dict(headers or {})})
+            if status >= 400:
+                return _FakeResponse(status_code=status, text=text or json.dumps(payload))
+            return _FakeResponse(payload=payload)
+
+        monkeypatch.setattr(rh.requests, "post", post)
+
+    def test_refresh_before_expiry_hits_the_official_endpoint(
+        self, monkeypatch, isolated_token_state
+    ):
+        _write_token_file(
+            isolated_token_state,
+            access_token="stale-access", refresh_token="refresh-1",
+            client_id="cid-public", token_type="Bearer",
+            expires_at=time.time() - 10,
+        )
+        refreshes: list = []
+        mcp_calls: list = []
+        self._token_endpoint(monkeypatch, refreshes)
+
+        client = RobinhoodClient()
+        monkeypatch.setattr(client._session, "post", _mcp_responder("fresh-access", mcp_calls))
+        rows = client.call_tool("get_equity_quotes", {"symbols": ["SPY"]})
+
+        assert rows == {"results": [{"symbol": "SPY"}]}
+        assert len(refreshes) == 1
+        form = refreshes[0]["data"]
+        assert form == {
+            "grant_type": "refresh_token",
+            "refresh_token": "refresh-1",
+            "client_id": "cid-public",
+        }
+        assert "client_secret" not in form, "public client: no secret, ever"
+        assert refreshes[0]["headers"]["Content-Type"] == "application/x-www-form-urlencoded"
+        assert all(
+            c["headers"]["Authorization"] == "Bearer fresh-access" for c in mcp_calls
+        ), "the stale access token must never reach the MCP"
+
+    def test_refresh_on_401_retries_once_with_the_new_token(
+        self, monkeypatch, isolated_token_state
+    ):
+        # No expiry metadata: the token looks usable until the MCP 401s it.
+        _write_token_file(
+            isolated_token_state,
+            access_token="revoked-access", refresh_token="refresh-1",
+            client_id="cid-public", token_type="Bearer",
+        )
+        refreshes: list = []
+        mcp_calls: list = []
+        self._token_endpoint(monkeypatch, refreshes)
+
+        client = RobinhoodClient()
+        monkeypatch.setattr(
+            client._session, "post",
+            _mcp_responder("fresh-access", mcp_calls, reject_bearers=["revoked-access"]),
+        )
+        rows = client.call_tool("get_equity_quotes", {"symbols": ["SPY"]})
+
+        assert rows == {"results": [{"symbol": "SPY"}]}
+        assert len(refreshes) == 1
+        bearers = [c["headers"]["Authorization"] for c in mcp_calls]
+        assert bearers[0] == "Bearer revoked-access"
+        assert set(bearers[1:]) == {"Bearer fresh-access"}
+
+    def test_refresh_persists_rotated_tokens_atomically_at_0600(
+        self, monkeypatch, isolated_token_state
+    ):
+        _write_token_file(
+            isolated_token_state,
+            access_token="stale-access", refresh_token="refresh-1",
+            client_id="cid-public", token_type="Bearer",
+            expires_at=time.time() - 10,
+        )
+        refreshes: list = []
+        self._token_endpoint(monkeypatch, refreshes)
+
+        before = time.time()
+        assert RobinhoodTokenStore().refresh() == "fresh-access"
+
+        state = json.loads(isolated_token_state.read_text())
+        assert state["access_token"] == "fresh-access"
+        assert state["refresh_token"] == "refresh-2", "rotated refresh must replace the old one"
+        assert state["client_id"] == "cid-public"
+        assert state["expires_at"] == pytest.approx(before + 259200, abs=30)
+        mode = stat.S_IMODE(isolated_token_state.stat().st_mode)
+        assert mode == 0o600, oct(mode)
+        assert not isolated_token_state.with_name(
+            isolated_token_state.name + ".tmp"
+        ).exists(), "atomic write must not leave a temp file behind"
+
+    def test_first_configured_run_bootstraps_the_file_from_env(
+        self, monkeypatch, isolated_token_state
+    ):
+        monkeypatch.setenv("ROBINHOOD_MCP_TOKEN", "env-access")
+        monkeypatch.setenv("ROBINHOOD_MCP_REFRESH_TOKEN", "env-refresh")
+        monkeypatch.setenv("ROBINHOOD_MCP_CLIENT_ID", "cid-public")
+        assert not isolated_token_state.exists()
+
+        client = RobinhoodClient()
+        assert client._resolve_token() == "env-access"
+
+        state = json.loads(isolated_token_state.read_text())
+        assert state["access_token"] == "env-access"
+        assert state["refresh_token"] == "env-refresh"
+        assert state["client_id"] == "cid-public"
+        assert stat.S_IMODE(isolated_token_state.stat().st_mode) == 0o600
+
+    def test_invalid_grant_degrades_to_the_unconfigured_skip(
+        self, monkeypatch, isolated_token_state, capsys
+    ):
+        # Refresh-only credentials: the first use must refresh, get refused,
+        # and every ladder falls through to Yahoo without crashing.
+        _write_token_file(
+            isolated_token_state,
+            refresh_token="refresh-dead", client_id="cid-public", token_type="Bearer",
+        )
+        refreshes: list = []
+        self._token_endpoint(
+            monkeypatch, refreshes, status=400,
+            text='{"error": "invalid_grant"}',
+        )
+
+        assert robinhood_configured() is True
+        assert fetch_robinhood_closes(["SPY"]) == {}
+        assert robinhood_configured() is False, (
+            "a rejected grant must mark Robinhood unconfigured for this process"
+        )
+        # And the next helper never even builds a client.
+        assert fetch_robinhood_closes(["SPY"]) == {}
+        assert len(refreshes) == 1, "no refresh retry storm after invalid_grant"
+        err = capsys.readouterr().err
+        assert "refresh-dead" not in err, "token values must never be logged"
+
+    def test_refresh_error_text_never_contains_tokens(
+        self, monkeypatch, isolated_token_state
+    ):
+        _write_token_file(
+            isolated_token_state,
+            refresh_token="refresh-super-secret", client_id="cid-public",
+        )
+        refreshes: list = []
+        self._token_endpoint(
+            monkeypatch, refreshes, status=400,
+            text='{"error": "invalid_grant", "echo": "refresh-super-secret"}',
+        )
+
+        with pytest.raises(RobinhoodAuthError) as excinfo:
+            RobinhoodTokenStore().refresh()
+        assert "refresh-super-secret" not in str(excinfo.value)
+        assert "[REDACTED]" in str(excinfo.value)
+
+    def test_transient_endpoint_error_does_not_disable_the_process(
+        self, monkeypatch, isolated_token_state
+    ):
+        _write_token_file(
+            isolated_token_state,
+            refresh_token="refresh-1", client_id="cid-public",
+        )
+        refreshes: list = []
+        self._token_endpoint(monkeypatch, refreshes, status=503, text="upstream sad")
+
+        with pytest.raises(RobinhoodClientError):
+            RobinhoodTokenStore().refresh()
+        assert robinhood_configured() is True, (
+            "a 5xx is transient — the next cycle must try again"
+        )
+
+    def test_refresh_only_credentials_count_as_configured(self, isolated_token_state):
+        _write_token_file(
+            isolated_token_state,
+            refresh_token="refresh-1", client_id="cid-public",
+        )
+        assert robinhood_configured() is True
+
+    def test_no_access_and_no_refresh_stays_unconfigured_no_network(
+        self, no_network
+    ):
+        assert robinhood_configured() is False
+        assert fetch_robinhood_closes(["SPY"]) == {}
