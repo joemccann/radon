@@ -1,3 +1,23 @@
+# Task: SPOF host-split Phase 0/0B/1-prep (2026-08-29)
+
+## Dependency graph
+
+- S1 depends_on: [] - Combined-host-safe code: parameterized Tailscale bind, auto-sync strays, cut PartOf, host role, privileged sudoers
+- S2 depends_on: [S1] - Focused cloud tests green
+- S3 depends_on: [S2] - PR. Operator runbook for backups, snapshot, bootstrap, second VM
+
+## Checklist
+
+- [x] S1 Code on `feat/spof-host-split`
+- [x] S2 Focused tests (333 passed / 3 skipped cloud subset; visudo OK)
+- [ ] S3 PR + operator instructions
+
+## Review
+
+- Live Hetzner backups, new CX, helper uninstall, and 2FA are NOT in CI.
+
+---
+
 # Task: Resolve testing/2026-08-29 merge conflicts (2026-08-29)
 
 ## Dependency graph
