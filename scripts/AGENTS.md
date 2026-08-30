@@ -4,7 +4,7 @@ Applies under `scripts/`. Mirrors `scripts/CLAUDE.md`; prefer the Claude file if
 
 ## Data Source Priority
 
-Yahoo Finance is **ABSOLUTE LAST RESORT**. Never make Yahoo the scheduled, primary, or only source for a series IB or UW can serve. Try IB every cycle (skip the socket only when `/health` `auth_state` is set and not `authenticated`), then UW, then Robinhood (`scripts/clients/robinhood_client.py` — official trading MCP, READ-ONLY, skipped cleanly when `ROBINHOOD_MCP_TOKEN` is unset), then Yahoo. Full order: IB > UW > Cboe > Robinhood > Yahoo. 2FA / unattended timers / "historical needs a gateway" do not skip IB or UW. Execution stays on IB — never call a place_*/cancel_* Robinhood tool.
+Yahoo Finance is **ABSOLUTE LAST RESORT**. Never make Yahoo the scheduled, primary, or only source for a series IB or UW can serve. Try IB every cycle (skip the socket only when `/health` `auth_state` is set and not `authenticated`), then UW, then Robinhood (`scripts/clients/robinhood_client.py` — official trading MCP, READ-ONLY, skipped cleanly when no credentials (access or refresh token) are configured; access tokens expire ~3 days, refreshed automatically via the 0600 token file `ROBINHOOD_MCP_TOKEN_FILE`), then Yahoo. Full order: IB > UW > Cboe > Robinhood > Yahoo. 2FA / unattended timers / "historical needs a gateway" do not skip IB or UW. Execution stays on IB — never call a place_*/cancel_* Robinhood tool.
 
 ## Python / IB Basics
 
