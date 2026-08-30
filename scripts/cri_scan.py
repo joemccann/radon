@@ -16,7 +16,9 @@ Data sources (priority order):
   3. Cboe official feeds — COR1M dashboard historical feed plus official
      VIX_History.csv / VVIX_History.csv daily close verification after market
      close + 20 minutes ET.
-  4. Yahoo Finance — ABSOLUTE LAST RESORT. Only for remaining gaps after
+  4. Robinhood (official trading MCP, read-only) — SPY equity historicals /
+     quotes when configured. Never above IB, UW or Cboe.
+  5. Yahoo Finance — ABSOLUTE LAST RESORT. Only for remaining gaps after
      higher-priority sources fail; COR1M reaches Yahoo only if IB + Cboe fail.
 
 Usage:
@@ -133,7 +135,7 @@ def _fetch_ib(tickers: List[str]) -> Dict[str, List[Tuple[str, float]]]:
     auth_state = _ib_auth_state()
     if auth_state and auth_state != "authenticated":
         print(
-            f"  IB skipped — gateway auth_state={auth_state} (falling back to UW/Cboe/Yahoo)",
+            f"  IB skipped — gateway auth_state={auth_state} (falling back to UW/Cboe/RH/Yahoo)",
             file=sys.stderr,
         )
         return {}
@@ -384,6 +386,30 @@ def fetch_cboe_vvix_close(session_date: str) -> Optional[float]:
     return fetch_cboe_daily_close_from_csv(CBOE_VVIX_HISTORY_CSV_URL, session_date, value_column="VVIX")
 
 
+def _fetch_rh(ticker: str) -> List[Tuple[str, float]]:
+    """Robinhood (read-only MCP) daily bars — after IB/UW/Cboe, before Yahoo.
+
+    Equities/ETFs only (SPY); the index tickers are not on Robinhood equity
+    historicals. Unconfigured hosts return [] without any network I/O.
+    """
+    try:
+        from clients.robinhood_client import fetch_robinhood_closes
+    except ImportError:
+        return []
+    closes = fetch_robinhood_closes([ticker]).get(ticker, {})
+    return [(date, closes[date]) for date in sorted(closes)]
+
+
+def _fetch_rh_current_quote(ticker: str) -> Optional[float]:
+    """Robinhood current quote — equities via get_equity_quotes, indices via
+    get_index_quotes. None when unconfigured (clean fall-through to Yahoo)."""
+    try:
+        from clients.robinhood_client import fetch_robinhood_quote
+    except ImportError:
+        return None
+    return fetch_robinhood_quote(ticker, index=ticker in YAHOO_TICKERS)
+
+
 def _fetch_yahoo(ticker: str, days: int = 400) -> List[Tuple[str, float]]:
     """Fetch daily bars from Yahoo Finance.  Returns [(date_str, close), ...]."""
     result = _fetch_yahoo_chart_result(ticker, days=days)
@@ -472,11 +498,16 @@ def _fetch_ib_current_quote(ticker: str) -> Optional[float]:
 
 
 def fetch_preferred_current_quote(ticker: str) -> Optional[float]:
-    """Fetch a current quote using IB first, then Yahoo as fallback."""
+    """Fetch a current quote using IB first, then Robinhood, then Yahoo."""
     ib_quote = _fetch_ib_current_quote(ticker)
     if ib_quote is not None:
         print(f"  IB: {ticker} current quote {ib_quote:.2f}", file=sys.stderr)
         return ib_quote
+
+    rh_quote = _fetch_rh_current_quote(ticker)
+    if rh_quote is not None:
+        print(f"  Robinhood: {ticker} current quote {rh_quote:.2f}", file=sys.stderr)
+        return rh_quote
 
     yahoo_quote = _fetch_yahoo_current_quote(ticker)
     if yahoo_quote is not None:
@@ -648,7 +679,30 @@ def fetch_all(tickers: List[str]) -> Tuple[Dict[str, np.ndarray], List[str]]:
             print(f"  CBOE: COR1M only {len(cboe_cor1m)} bars (need {MIN_BARS}), trying Yahoo", file=sys.stderr)
         fallback_needed = [ticker for ticker in fallback_needed if ticker != "COR1M" or "COR1M" not in raw]
 
-    # Priority 4 (LAST RESORT): Yahoo Finance
+    # Priority 4: Robinhood (read-only MCP) for equities/ETFs (SPY). Indices
+    # (VIX/VVIX/COR1M) are not on Robinhood equity historicals. Unconfigured
+    # hosts skip cleanly and fall through to Yahoo.
+    if fallback_needed:
+        rh_eligible = [t for t in fallback_needed if t not in YAHOO_TICKERS]
+        if rh_eligible:
+            print("  Trying Robinhood for remaining equity gaps...", file=sys.stderr)
+            still_needed = []
+            for t in fallback_needed:
+                if t in rh_eligible:
+                    rh_bars = _fetch_rh(t)
+                    if len(rh_bars) >= MIN_BARS:
+                        raw[t] = rh_bars
+                        print(f"  Robinhood: {t} — {len(rh_bars)} bars", file=sys.stderr)
+                        continue
+                    if rh_bars:
+                        print(
+                            f"  Robinhood: {t} only {len(rh_bars)} bars (need {MIN_BARS}), trying Yahoo",
+                            file=sys.stderr,
+                        )
+                still_needed.append(t)
+            fallback_needed = still_needed
+
+    # Priority 5 (LAST RESORT): Yahoo Finance
     for t in fallback_needed:
         print(f"  LAST RESORT: Yahoo for {t}", file=sys.stderr)
         time.sleep(0.5)  # Rate limit Yahoo

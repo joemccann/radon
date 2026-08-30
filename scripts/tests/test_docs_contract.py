@@ -145,6 +145,111 @@ class TestYahooLastResortRule:
             assert "Never make Yahoo the scheduled" in text, rel
 
 
+class TestRobinhoodRankRule:
+    """Robinhood is a READ-ONLY failover: it must rank ABOVE Yahoo and BELOW
+    IB / UW / Cboe everywhere the priority list is stated, and execution must
+    stay on IB."""
+
+    def test_instruction_files_state_the_full_order(self):
+        for rel in _YAHOO_LAST_RESORT_FILES:
+            text = (_ROOT / rel).read_text(encoding="utf-8")
+            assert "Robinhood" in text, rel
+            assert "IB > UW > Cboe > Robinhood > Yahoo" in text, rel
+
+    def test_strategies_table_slots_rh_between_cboe_and_yahoo(self):
+        text = (_ROOT / "docs" / "strategies.md").read_text(encoding="utf-8")
+        cboe = text.index("| **5th** | Cboe official index feeds")
+        rh = text.index("| **6th** | Robinhood")
+        yahoo = text.index("| **7th ⚠️** | Yahoo Finance")
+        assert cboe < rh < yahoo, "priority table must read Cboe -> Robinhood -> Yahoo"
+
+    def test_read_only_and_ib_execution_are_stated(self):
+        for rel in ("CLAUDE.md", "docs/external-services.md", "docs/strategies.md"):
+            text = (_ROOT / rel).read_text(encoding="utf-8").lower()
+            assert "execution stays on ib" in text, rel
+
+    def test_env_vars_are_documented_with_the_other_vendors(self):
+        env_example = (_ROOT / ".env.example").read_text(encoding="utf-8")
+        services = (_ROOT / "docs" / "external-services.md").read_text(encoding="utf-8")
+        for name in (
+            "ROBINHOOD_MCP_TOKEN",
+            "ROBINHOOD_MCP_TOKEN_FILE",
+            "ROBINHOOD_MCP_REFRESH_TOKEN",
+            "ROBINHOOD_MCP_CLIENT_ID",
+            "ROBINHOOD_MCP_URL",
+        ):
+            assert name in env_example, name
+        for name in (
+            "ROBINHOOD_MCP_TOKEN_FILE",
+            "ROBINHOOD_MCP_REFRESH_TOKEN",
+            "ROBINHOOD_MCP_CLIENT_ID",
+        ):
+            assert name in services, name
+        assert "https://agent.robinhood.com/mcp/trading" in services
+
+    def test_numbered_priority_lists_put_cboe_before_rh_before_yahoo(self):
+        # The class of mismatch where RH is numbered directly after UW and
+        # Cboe exists only in prose: the numbered list itself must read
+        # Cboe -> Robinhood -> Yahoo.
+        for rel in ("CLAUDE.md", "AGENTS.md", ".pi/AGENTS.md"):
+            text = (_ROOT / rel).read_text(encoding="utf-8")
+            start = text.index("## Data Source Priority")
+            end = text.find("\n## ", start + 1)
+            section = text[start:end] if end != -1 else text[start:]
+            cboe = section.index("Cboe official index feeds")
+            rh = section.index("Robinhood")
+            yahoo = section.index("Yahoo Finance — **ABSOLUTE LAST RESORT**")
+            assert cboe < rh < yahoo, (
+                f"{rel}: the numbered priority list must read "
+                "Cboe -> Robinhood -> Yahoo"
+            )
+
+    def test_vps_secret_paths_are_pinned(self):
+        # The rotating token store is a writable secret OUTSIDE the read-only
+        # env file: both operator docs must name it.
+        for rel in ("docs/external-services.md", "docs/operations.md"):
+            text = (_ROOT / rel).read_text(encoding="utf-8")
+            assert "/etc/radon/rh-mcp.json" in text, rel
+        operations = (_ROOT / "docs" / "operations.md").read_text(encoding="utf-8")
+        for name in (
+            "ROBINHOOD_MCP_TOKEN",
+            "ROBINHOOD_MCP_REFRESH_TOKEN",
+            "ROBINHOOD_MCP_CLIENT_ID",
+            "ROBINHOOD_MCP_TOKEN_FILE",
+        ):
+            assert name in operations, name
+
+    def test_official_links_and_non_dependencies_are_pinned(self):
+        services = (_ROOT / "docs" / "external-services.md").read_text(encoding="utf-8")
+        for link in (
+            "https://agent.robinhood.com/mcp/trading",
+            "https://agent.robinhood.com/.well-known/oauth-authorization-server/mcp/trading",
+            "https://api.robinhood.com/oauth2/token/",
+            "https://robinhood.com/us/en/support/articles/agentic-trading-overview/",
+            "https://robinhood.com/us/en/support/articles/trading-with-your-agent/",
+        ):
+            assert link in services, link
+        # Explicit non-dependencies: unofficial wrappers, Banking MCP, crypto
+        # REST, and the crowding series' gate isolation.
+        for marker in (
+            "robin-stocks",
+            "banking-agent.robinhood.com",
+            "trading.robinhood.com",
+            "cannot trip the three gates",
+        ):
+            assert marker in services, marker
+
+    def test_token_expiry_and_refresh_are_documented(self):
+        # A static access token goes stale in ~3 days; both env docs must say
+        # refresh is mandatory and point at the official token endpoint.
+        env_example = (_ROOT / ".env.example").read_text(encoding="utf-8")
+        services = (_ROOT / "docs" / "external-services.md").read_text(encoding="utf-8")
+        for text, rel in ((env_example, ".env.example"), (services, "docs/external-services.md")):
+            assert "~3 days" in text, rel
+            assert "refresh is mandatory" in text.lower(), rel
+            assert "https://api.robinhood.com/oauth2/token/" in text, rel
+
+
 class TestThinIndex:
     def test_readme_has_now_true_not_recent_additions(self):
         text = (_ROOT / "README.md").read_text(encoding="utf-8")

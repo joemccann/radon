@@ -29,6 +29,45 @@
 - Code hardening: hub now feeds the tape from the flash REST lane during a WS outage (health row deliberately stays error) and tells mid-outage dashboards the true state at admit.
 - Config hardening: the hub's unit is no longer excluded from every automated install path (R-092 trapdoor).
 
+# Task: Robinhood as a first-class read-only data source (2026-08-30)
+
+## Objective
+
+- Priority becomes IB > UW > Cboe > Robinhood > Yahoo everywhere it is encoded (docs, fallbacks, comments, tests).
+- Robinhood is READ-ONLY via the official trading MCP (`https://agent.robinhood.com/mcp/trading`); execution stays on IB.
+- Unconfigured hosts (no `ROBINHOOD_MCP_TOKEN`) skip cleanly to Yahoo.
+- Popular-watchlist / scan crowding features land in Turso and can never trip the three gates.
+
+## Dependency graph
+
+- T1 depends_on: [] - Read-only Robinhood MCP client (`scripts/clients/robinhood_client.py`) with allowlist + unconfigured no-op
+- T2 depends_on: [T1] - RH rung before Yahoo in every close/quote ladder (portfolio_risk, credit-spread, iei-hyg, rv-ratio, garch, leap, cri)
+- T3 depends_on: [T1] - Crowding ingest: migration 0066 `rh_crowding`, writer, `fetch_rh_crowding.py`
+- T4 depends_on: [] - Docs/env: priority lists, `.env.example`, external-services, instruction files
+- T5 depends_on: [T2, T3, T4] - Tests: client contract, per-ladder rank, crowding-not-in-gates, docs-contract pins
+- T6 depends_on: [T5] - Full pytest suite green; branch + PR
+
+## Checklist
+
+- [x] T1 Robinhood client (read-only allowlist, secret hygiene, 20-symbol quote batching)
+- [x] T2 RH-before-Yahoo rung in all seven Python ladders
+- [x] T3 rh_crowding migration + writer + ingest script (unconfigured exits 0)
+- [x] T4 Priority docs updated: CLAUDE/AGENTS (root + scripts), .pi, .gemini, strategies, prompt, external-services, .env.example
+- [x] T5 New tests green (client 25, priority 19, crowding 12, docs pins 4)
+- [x] T6 Full suite green, PR opened
+
+## Follow-up (2026-08-30): OAuth refresh
+
+- [x] T7 depends_on: [T1] - Token store: 0600 file (`ROBINHOOD_MCP_TOKEN_FILE`), env bootstrap, atomic rotate, refresh via official `oauth2/token/` (public client, no secret), refresh on missing/1h-window/401, invalid_grant = process-level unconfigured skip; 34 client tests green
+
+## Review
+
+- Web `previous-close` route stays IB → UW → Yahoo (TS-side MCP consumer deferred; noted in the PR body).
+- Option chains and L2 have no Yahoo rung today, so no RH rung was bolted on there; RH options remain NBBO/last-only per the unpublished schema.
+- Crowding is descriptive only: `workflow/gates.py`, `kelly.py`, `evaluate.py` are pinned free of any Robinhood/crowding reference.
+
+---
+
 # Task: Execute CI and production deploy acceleration (2026-08-29)
 
 ## Objective

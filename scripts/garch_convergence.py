@@ -152,7 +152,7 @@ class PairAnalysis:
         ])
 
 
-# ── Price data fetch (IB first, UW fallback, Yahoo last resort) ──
+# ── Price data fetch (IB first, UW fallback, RH, Yahoo last resort) ──
 
 def _fetch_uw_prices(ticker: str, uw_client: UWClient, ib: Any = None) -> List[float]:
     """Fetch daily closes: IB first, UW on miss. Returns list of floats."""
@@ -184,9 +184,25 @@ def _fetch_yahoo_prices(ticker: str, days: int = 400) -> List[float]:
         return []
 
 
+def _fetch_rh_prices(ticker: str) -> List[float]:
+    """Robinhood (read-only MCP) daily closes — after IB/UW, before Yahoo.
+
+    Unconfigured hosts return [] without any network I/O.
+    """
+    try:
+        from clients.robinhood_client import fetch_robinhood_closes
+    except ImportError:
+        return []
+    closes = fetch_robinhood_closes([ticker]).get(ticker, {})
+    return [closes[date] for date in sorted(closes)]
+
+
 def _fetch_prices(ticker: str, uw_client: UWClient, ib: Any = None) -> List[float]:
-    """Fetch daily closes: IB first, UW fallback, Yahoo last resort."""
+    """Fetch daily closes: IB first, UW fallback, Robinhood, then Yahoo last resort."""
     prices = _fetch_uw_prices(ticker, uw_client, ib=ib)
+    if len(prices) >= 60:
+        return prices
+    prices = _fetch_rh_prices(ticker)
     if len(prices) >= 60:
         return prices
     return _fetch_yahoo_prices(ticker)

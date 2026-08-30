@@ -457,17 +457,66 @@ class TestFetchClosesCascade:
     def test_yahoo_is_last_resort(self):
         ib_calls: list = []
         uw_calls: list = []
+        rh_calls: list = []
 
         closes, sources = fetch_closes(
             fetch_ib=lambda tickers: ib_calls.append(list(tickers)) or {},
             fetch_uw=lambda tickers: uw_calls.append(list(tickers)) or {},
+            fetch_rh=lambda tickers: rh_calls.append(list(tickers)) or {},
             fetch_yahoo=lambda tickers: {HYG_SYMBOL: HYG_BARS, SPX_SYMBOL: SPX_BARS},
         )
 
         assert ib_calls == [[HYG_SYMBOL, SPX_SYMBOL]]
         assert uw_calls == [[HYG_SYMBOL, SPX_SYMBOL]]
+        assert rh_calls == [[HYG_SYMBOL, SPX_SYMBOL]]
         assert sources == {HYG_SYMBOL: "yahoo", SPX_SYMBOL: "yahoo"}
         assert combine_source(sources) == "yahoo"
+
+    def test_robinhood_fills_before_yahoo(self):
+        """RH ranks after IB/UW and before Yahoo; a RH hit never asks Yahoo."""
+        yahoo_calls: list = []
+
+        closes, sources = fetch_closes(
+            fetch_ib=lambda tickers: {},
+            fetch_uw=lambda tickers: {},
+            fetch_rh=lambda tickers: {HYG_SYMBOL: HYG_BARS, SPX_SYMBOL: SPX_BARS},
+            fetch_yahoo=lambda tickers: yahoo_calls.append(list(tickers)) or {},
+        )
+
+        assert sources == {HYG_SYMBOL: "rh", SPX_SYMBOL: "rh"}
+        assert combine_source(sources) == "rh"
+        assert yahoo_calls == []
+
+    def test_robinhood_never_preempts_ib_or_uw(self):
+        rh_calls: list = []
+
+        closes, sources = fetch_closes(
+            fetch_ib=lambda tickers: {HYG_SYMBOL: HYG_BARS},
+            fetch_uw=lambda tickers: {SPX_SYMBOL: SPX_BARS},
+            fetch_rh=lambda tickers: rh_calls.append(list(tickers)) or {},
+            fetch_yahoo=lambda tickers: {},
+        )
+
+        assert sources == {HYG_SYMBOL: "ib", SPX_SYMBOL: "uw"}
+        assert rh_calls == [], "RH must never be asked when IB/UW served everything"
+
+    def test_unconfigured_robinhood_falls_through_to_yahoo(self, monkeypatch):
+        """Default RH rung with no ROBINHOOD_MCP_TOKEN: clean skip, no network."""
+        monkeypatch.delenv("ROBINHOOD_MCP_TOKEN", raising=False)
+        monkeypatch.setattr(
+            "requests.Session.post",
+            lambda *a, **k: (_ for _ in ()).throw(
+                AssertionError("unconfigured RH rung attempted network I/O")
+            ),
+        )
+
+        closes, sources = fetch_closes(
+            fetch_ib=lambda tickers: {},
+            fetch_uw=lambda tickers: {},
+            fetch_yahoo=lambda tickers: {HYG_SYMBOL: HYG_BARS, SPX_SYMBOL: SPX_BARS},
+        )
+
+        assert sources == {HYG_SYMBOL: "yahoo", SPX_SYMBOL: "yahoo"}
 
     def test_partial_ib_asks_uw_then_yahoo_only_for_the_gap(self):
         uw_calls: list = []

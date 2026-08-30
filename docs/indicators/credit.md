@@ -54,7 +54,10 @@ Pin: fixture last/max ≈ 0.97976 → true at 0.97, false at 0.98.
      `/health` `auth_state` is set and not `authenticated` (2FA lock). Fall
      through to UW/Yahoo. Client IDs `(56, 69)`.
   2. Unusual Whales — `get_stock_ohlc` for HYG. SPX is an index; UW is skipped.
-  3. Yahoo Finance — last resort for remaining gaps. Chart JSON, no API key,
+  3. Robinhood (read-only trading MCP, when configured) — equity historicals
+     for HYG via `fetch_rh_closes`; SPX is skipped (`RH_SKIP`). Unconfigured
+     hosts skip with zero network I/O.
+  4. Yahoo Finance — last resort for remaining gaps. Chart JSON, no API key,
      UA `Mozilla/5.0` (plain `radon/2.0` gets 429, same as the yield-curve
      SPX overlay):
      `https://query1.finance.yahoo.com/v8/finance/chart/{HYG|%5EGSPC}?period1={epoch2007-04-11}&period2={now}&interval=1d`
@@ -65,8 +68,9 @@ Pin: fixture last/max ≈ 0.97976 → true at 0.97, false at 0.98.
 - Diff on persisted `{date, hyg_close, spx_close}` tuples; unchanged days
   heartbeat only. Daily IB increment is 1Y; older history lives in cache
   (or Yahoo when IB+UW both miss a ticker).
-- Payload `source` is `ib` / `uw` / `yahoo`, or `ib+yahoo` when the pair
-  is mixed. Yahoo is never called when IB returns both series.
+- Payload `source` is `ib` / `uw` / `rh` / `yahoo`, or a `+`-joined mix when
+  the pair is split. Yahoo is never called when a higher rung returns both
+  series.
 - Licensing: HYG and SPX are exchange-traded prices. Display + storage allowed.
 - Fixtures (checked in, captured 2026-08-21):
   - `scripts/tests/fixtures/credit_spread_hyg_sample.json` — Yahoo chart, 2024-01-02
