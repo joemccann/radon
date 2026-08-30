@@ -31,6 +31,9 @@ LITERAL_TWS_BASELINE_COMMITS = {
     # content -- only the commit identity changed.
     "6ec11003bb4521e7f7b677ffbd78b7fd4d09458a",
     "da857b8b19a6e5778bb86bf37465346dca8da89b",
+    # 2026-08-30: PR #184's env-file fixture spelled a fake gateway password;
+    # vetted as test data, rewritten to runtime construction afterwards.
+    "020865adeff48b7182b7eb81d74a01fc70d00c82",
 }
 EXAMPLE_BASELINE_COMMITS = {
     "3ee6e6e8a50c24944c1983a75f5bf6dda9048f67",
