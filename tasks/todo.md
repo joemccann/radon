@@ -3796,3 +3796,21 @@ Per /indicator swarm (spec: docs/indicators/skew.md). Slug/service `skew`, tab S
 - Local output-trace audit remains baseline-red because the development checkout contains 14.2 GB across 7,333 backup/archive files traced by the existing orders/place route; production compile itself passed.
 
 - PR: `#97` at commit `1e15b612`; replacement CI passed every build, security, Vitest, coverage, Python, perimeter, Playwright, Vercel preview, and app-image check.
+
+# DISPERSION indicator (2026-08-29)
+
+Spec: `docs/indicators/dispersion.md`. Pattern: `/indicator` swarm, single shared worktree, disjoint ownership.
+
+## Checklist
+
+- [x] T1 Research: IB `10 Y` TRADES daily bars reach 2016-08-31 for S&P seed, sector SPDRs, VIX (XLC from 2018-06-19); migration 0061 free; fixture captured.
+- [x] T2 Spec written and committed.
+- [ ] T3 Red tests (pytest + vitest api + vitest panel) recorded failing on missing modules.
+- [ ] T4 Implementers: ingestion / api / ui land scoped commits, each suite green.
+- [ ] T5 Full gates: pytest (scripts, api, blotter, cloud), vitest, typecheck.
+- [ ] T6 Backfill against Turso from the laptop via the prod gateway; rows verified in `dispersion_history`.
+- [ ] T7 Playwright screenshot `docs/indicators/dispersion-tab.png` with real data; cadence-copy grep.
+- [ ] T8 Ship: push once, CI green, prod migration 61 + snapshot + timer verified.
+
+## Review
+
