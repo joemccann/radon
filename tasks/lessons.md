@@ -720,3 +720,7 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 ## 2026-08-29 - Never round-trip a diff through `git diff > file` under the rtk hook
 
 - `git diff HEAD -- f > patch` was rewritten to `rtk git diff`, which emits a token-compacted summary, not a patch. The follow-up `git checkout HEAD -- f` then discarded the only copy of the edit. Use `rtk proxy git diff` (or `git stash`) when the bytes matter, and never checkout-revert a file before confirming the saved patch applies (`git apply --check`).
+
+## 2026-08-29 - CI acceleration requires a successful production measurement
+
+- Do not stop at local green checks or a faster failed workflow. Commit and push the implementation, follow the real run through every required gate and production deploy, compare end-to-end wall time with the named baseline, and iterate on any release-only failure until the measured deploy is both green and materially faster.
