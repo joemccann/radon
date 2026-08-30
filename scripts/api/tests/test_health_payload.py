@@ -32,7 +32,7 @@ def _request(host, extra_headers=None):
 
 
 # Fields that must never reach an untrusted caller.
-_SENSITIVE_KEYS = {"ib_gateway", "ib_pool", "auth_state", "managed_accounts", "restart_backoff"}
+_SENSITIVE_KEYS = {"ib_gateway", "ib_pool", "auth_state", "managed_accounts", "restart_backoff", "host_role"}
 
 
 class TestHealthPayloadScoping:
@@ -79,6 +79,7 @@ class TestHealthPayloadScoping:
         result = await server.health(req)
 
         assert result["status"] == "ok"
+        assert result["host_role"] in {"app", "broker", "combined"}
         assert result["ib_gateway"]["auth_state"] == "authenticated"
         assert result["ib_gateway"]["managed_accounts"] == ["U1234567"]
         assert result["ib_pool"] == {"sync": {"connected": True}}

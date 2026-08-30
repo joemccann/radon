@@ -247,11 +247,29 @@ class TestOperatorHostRole:
         assert "radon-ib-gateway.service" in broker
         assert "radon-nextjs.service" not in broker
 
+    def test_broker_role_does_not_require_health(self):
+        body = OPERATOR.read_text(encoding="utf-8")
+        match = re.search(
+            r"broker\)\s*REQUIRED_UNITS=\((.*?)\)\s*;;",
+            body,
+            re.DOTALL,
+        )
+        assert match, "broker REQUIRED_UNITS block missing"
+        required = match.group(1)
+        assert "radon-ib-gateway.service" in required
+        assert "radon-health.service" not in required
+        assert "radon-api.service" not in required
+
     def test_app_role_skips_gateway_control(self):
         body = OPERATOR.read_text(encoding="utf-8")
         assert 'HOST_ROLE" != "app"' in body or "HOST_ROLE != app" in body.replace(
             " ", ""
         )
+
+    def test_app_role_copy_does_not_claim_gateway_cycle(self):
+        body = OPERATOR.read_text(encoding="utf-8")
+        assert "Gateway stays on the broker" in body
+        assert "app-plane radon units" in body
 
 
 class TestDeployHostRole:

@@ -478,6 +478,7 @@ export default function AdminWorkspace() {
               onRestartStack={restartStack}
               gatewayUnit={units.find((u) => u.unit === "radon-ib-gateway.service") ?? null}
               servicesSupported={services?.supported ?? false}
+              hostRole={services?.host_role ?? health?.host_role}
               onStopGateway={stopGateway}
               onStartGateway={restartStack}
               // Stopping the gateway cascade-stops radon-api — the very service
