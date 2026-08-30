@@ -30,7 +30,7 @@ GATE 4 — NO NAKED SHORTS: Never naked short stock, calls, futures, or bonds. E
 - **Data flow:** Next.js → `radonFetch()` → FastAPI → Python scripts / IB Gateway
 - **Auth:** Clerk JWT (FastAPI + Next.js middleware). Localhost bypass for dev.
 - **Clients:** `scripts/clients/` — `IBClient`, `UWClient`, `MenthorQClient`
-- **Data priority:** IB → UW → Yahoo (last resort). Never skip ahead.
+- **Data priority:** IB → UW → Cboe → Robinhood (read-only MCP) → Yahoo (last resort). Never skip ahead.
 
 ## Combo / BAG Order Rules
 

@@ -3,7 +3,8 @@
 LEAP IV Mispricing Scanner (Unusual Whales primary)
 
 Uses IB historical bars for daily closes when the gateway is up,
-Unusual Whales OHLC as fallback, and Yahoo as last resort.
+Unusual Whales OHLC as fallback, then Robinhood (read-only MCP) when
+configured, and Yahoo as ABSOLUTE LAST RESORT.
 UW remains the source for LEAP option IV.
 
 API Reference: docs/unusual_whales_api.md
@@ -281,13 +282,29 @@ def get_yahoo_history(ticker: str, days: int = 400) -> List[float]:
         return []
 
 
+def get_rh_history(ticker: str) -> List[float]:
+    """Robinhood (read-only MCP) daily closes — after IB/UW, before Yahoo.
+
+    Unconfigured hosts return [] without any network I/O.
+    """
+    try:
+        from clients.robinhood_client import fetch_robinhood_closes
+    except ImportError:
+        return []
+    closes = fetch_robinhood_closes([ticker]).get(ticker, {})
+    return [closes[date] for date in sorted(closes)]
+
+
 def get_price_history(
     ticker: str,
     uw_client: Optional[UWClient] = None,
     ib: Any = None,
 ) -> List[float]:
-    """Fetch daily closes: IB first, UW fallback, Yahoo last resort."""
+    """Fetch daily closes: IB first, UW fallback, Robinhood, then Yahoo last resort."""
     prices = get_uw_history(ticker, uw_client, ib=ib)
+    if len(prices) >= 60:
+        return prices
+    prices = get_rh_history(ticker)
     if len(prices) >= 60:
         return prices
     return get_yahoo_history(ticker)

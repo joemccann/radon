@@ -53,9 +53,20 @@ IB_FLEX_NAV_QUERY_ID=1497709            # cash transactions
 # Equibles (13F, ATS, COT, filings, short crowding)
 EQUIBLES_API_KEY=
 
+# Robinhood trading MCP (READ-ONLY failover + crowding overlay; optional —
+# unset skips Robinhood cleanly to Yahoo). Bootstrap only: the rotating
+# token store is the 0600 file below, rewritten by the OAuth refresh.
+ROBINHOOD_MCP_URL=https://agent.robinhood.com/mcp/trading
+ROBINHOOD_MCP_TOKEN=                    # access token, ~3 day expiry
+ROBINHOOD_MCP_REFRESH_TOKEN=            # required for production refresh
+ROBINHOOD_MCP_CLIENT_ID=                # public OAuth client, no secret
+ROBINHOOD_MCP_TOKEN_FILE=/etc/radon/rh-mcp.json
+
 # Loopback / off-box probes (not a Clerk session)
 RADON_PROBE_FRESHNESS_TOKEN=
 ```
+
+**Robinhood token file.** `/etc/radon/rh-mcp.json` (`0600`, radon-owned) holds `access_token` / `refresh_token` / `client_id` / `expires_at` and is rewritten atomically by the client's refresh against `https://api.robinhood.com/oauth2/token/` — it cannot live inside the read-only env file, and it must never be committed. Access tokens expire ~3 days; with no credentials at all every ladder skips Robinhood and falls through to Yahoo.
 
 `scripts/cta_sync_service.py` and `scripts/run_cta_sync.sh` parse `.env` values literally instead of shell-sourcing them, so unquoted secrets containing shell metacharacters (`$`, backticks, etc.) survive the scheduled CTA path.
 
@@ -142,7 +153,7 @@ Hetzner host systemd is the production surface. Laptop dev uses launchd plists i
 | `radon-vol-cone.timer` | Mon-Fri 20:45 UTC | Completed-session cheap-wing cone (16:45 ET, after the close grace). Spec: [`indicators/vol-cone.md`](indicators/vol-cone.md) |
 | `radon-vol-cone-intraday.timer` | Mon-Fri 09:00-16:30 ET every 15 min | Live sample ranked against that stored cone, so the tab is tradeable during the session instead of a day stale. Holds without spending a UW request outside market hours or under a nearly-spent daily budget, and a held pass no longer republishes the shared `vol-cone` snapshot. The 16:45 ET slot is deliberately absent: in EDT it is 20:45 UTC, the EOD writer's own minute (R-128). |
 | `radon-vixcor.timer` | daily 02:35 UTC | VIX x COR3M 20-session correlation, 15 min behind `radon-cor`. Spec: [`indicators/vixcor.md`](indicators/vixcor.md) |
-| `radon-credit-spread.timer` | daily 21:45 UTC | HYG vs SPX credit-equity series. IB first, then UW, then Yahoo. Spec: [`indicators/credit.md`](indicators/credit.md). Units are in `setup-vps.sh`; root install-copy still owed. |
+| `radon-credit-spread.timer` | daily 21:45 UTC | HYG vs SPX credit-equity series. IB first, then UW, then Robinhood (when configured), then Yahoo. Spec: [`indicators/credit.md`](indicators/credit.md). Units are in `setup-vps.sh`; root install-copy still owed. |
 | `radon-incident-watchdog.timer` | every 5 min | Writes `data/incidents/`. Cases: [`incident-runbook.md`](incident-runbook.md) |
 | `radon-grok-page-responder.timer` | 30s after last cycle | Headless Grok auto-fix from dedicated clone. Spec: [`grok-page-responder.md`](grok-page-responder.md) |
 
