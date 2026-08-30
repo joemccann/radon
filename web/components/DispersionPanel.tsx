@@ -36,17 +36,20 @@ import { useViewport } from "@/lib/useViewport";
  * Spec: docs/indicators/dispersion.md section H.
  */
 
+const STRESS_LEVEL = STRESS_Z.toFixed(0);
+const COMPRESSED_LEVEL = COMPRESSED_Z.toFixed(0);
+
 const INFO_TOOLTIP =
-  "Three volatility gauges on one z-score axis since 2017: the VIX, the spread between the 95th and 5th percentile " +
-  "of daily single-stock returns across the S&P 500, and the same spread across the 11 sector ETFs. Each is a rolling " +
-  `${WINDOW}-session mean. When the stock and sector lines run above ${STRESS_Z.toFixed(0)} while the VIX sits below zero, ` +
-  "volatility is rising below the surface: index hedges are cheap while idiosyncratic risk is extreme. " +
-  "Single stocks are the current S&P 500 constituent seed (503 names), which is survivorship-biased: names that left " +
-  "the index are absent and later joiners enter on their first session. Returns are split-adjusted price returns, not " +
-  "total returns. Sectors are the 11 Select Sector SPDRs; XLC begins 2018-06-19, so the cross-section holds 10 sectors " +
-  `before that seam. Regimes: VIX z at or above ${STRESS_Z.toFixed(0)} is BROAD STRESS; otherwise stock or sector z at or ` +
-  `above ${STRESS_Z.toFixed(0)} is BELOW THE SURFACE; all three at or below ${COMPRESSED_Z.toFixed(0)} is COMPRESSED; ` +
-  "anything else is NORMAL. Source: Interactive Brokers daily bars (Yahoo fallback).";
+  "Three volatility gauges on one z-score axis since 2017. VIX: the index. SINGLE STOCK: the gap between the " +
+  "95th and 5th percentile of daily S&P 500 constituent returns. CROSS SECTOR: the same gap across the 11 sector " +
+  `SPDRs. Each line is a rolling ${WINDOW}-session mean. ` +
+  `Stock or sector above +${STRESS_LEVEL} while the VIX sits below zero means volatility is rising below the surface: ` +
+  "index hedges are cheap while single-name risk is extreme. " +
+  `Regimes: VIX at or above +${STRESS_LEVEL} is BROAD STRESS. Otherwise stock or sector at or above +${STRESS_LEVEL} ` +
+  `is BELOW THE SURFACE. All three at or below ${COMPRESSED_LEVEL} is COMPRESSED. Anything else is NORMAL. ` +
+  "Caveats: the universe is today's 503-name S&P 500 seed, so departed names are missing and later joiners start on " +
+  "their first session. Returns are split-adjusted price returns, not total returns. XLC begins 2018-06-19, so " +
+  "earlier sessions hold 10 sectors. Source: Interactive Brokers daily bars, Yahoo fallback.";
 
 const EMPTY_SECONDARY =
   "The radon-dispersion timer populates this tab from Interactive Brokers daily bars for the S&P 500 seed, " +
