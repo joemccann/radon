@@ -26,6 +26,10 @@ REQUIRED_STATUS_CHECKS = (
 TEST_JOBS = (
     "secret-scan",
     "changes",
+    "app-images",
+    "contract-cloud-tests",
+    "contract-script-tests",
+    "contract-root-tests",
     "web-tests",
     "web-coverage",
     "py-tests",
@@ -151,6 +155,33 @@ def test_stage_release_is_gated_and_cancelable() -> None:
     assert jobs["deploy"]["concurrency"]["cancel-in-progress"] == "false"
 
 
+def test_exact_images_are_gated_and_prepulled_parallel_to_prestage() -> None:
+    jobs = _workflow()["jobs"]
+    images = jobs["app-images"]
+    prepull = jobs["prepull-images"]
+    stage = jobs["stage-release"]
+    deploy = jobs["deploy"]
+
+    assert images["uses"] == "./.github/workflows/app-images.yml"
+    assert images["permissions"]["packages"] == "write"
+    assert "refs/heads/main" in images["if"] and "push" in images["if"]
+    assert set(prepull["needs"]) == set(stage["needs"])
+    assert "app-images" in prepull["needs"]
+    assert prepull["concurrency"]["cancel-in-progress"] == "true"
+    assert prepull["concurrency"]["group"] != "deploy-production"
+
+    ssh_step = next(step for step in prepull["steps"] if "ssh-action" in step.get("uses", ""))
+    script = ssh_step["with"]["script"]
+    assert "/usr/local/sbin/radon-app-runtime pull \"$SHA\"" in script
+    assert "${{ github.sha }}" in script
+    assert "git " not in script and "deploy.sh" not in script
+
+    assert {"app-images", "prepull-images", "stage-release"} <= set(deploy["needs"])
+    assert "needs.app-images.result == 'success'" in deploy["if"]
+    assert "needs.prepull-images.result == 'failure'" in deploy["if"]
+    assert deploy["concurrency"]["cancel-in-progress"] == "false"
+
+
 def _job_commands(job: dict) -> str:
     return "\n".join(str(step.get("run", "")) for step in job.get("steps", []))
 
@@ -167,6 +198,19 @@ def test_ci_runs_cloud_infra_pytest() -> None:
     deploy_needs = jobs["deploy"]["needs"]
     assert "cloud-tests" in deploy_needs
     assert "py-tests" in deploy_needs
+
+
+def test_caddy_wall_clock_tests_have_their_own_shard() -> None:
+    cloud = _workflow()["jobs"]["cloud-tests"]
+    matrix = cloud["strategy"]["matrix"]
+    assert [str(shard) for shard in matrix["shard"]] == ["al", "edge", "mz"]
+    rows = {str(row["shard"]): str(row["paths"]) for row in matrix["include"]}
+    assert rows["edge"] == "cloud/tests/test_caddy_edge_timeouts.py"
+    assert "--ignore=cloud/tests/test_caddy_edge_timeouts.py" in rows["al"]
+    caddy_step = next(step for step in cloud["steps"] if step.get("name") == "Install caddy (edge mechanism tests)")
+    assert "edge" in caddy_step["if"]
+    assert "--durations=25" in _job_commands(cloud)
+    assert "--durations=25" in _job_commands(_workflow()["jobs"]["py-tests"])
 
 
 def test_python_ci_jobs_cache_pip_and_pin_the_test_toolchain() -> None:
@@ -416,6 +460,13 @@ def test_path_filter_skips_the_other_gate() -> None:
     jobs = _workflow()["jobs"]
     assert jobs["changes"]["outputs"]["python"]
     assert jobs["changes"]["outputs"]["web"]
+    assert jobs["changes"]["outputs"]["contracts"]
+    for group in ("cloud", "script", "root"):
+        output = f"contract_{group}_tests"
+        job = f"contract-{group}-tests"
+        assert jobs["changes"]["outputs"][output]
+        assert jobs[job]["needs"] == ["changes"]
+        assert output in jobs[job]["if"]
     assert "path_filter.py" in _job_commands(jobs["changes"])
     assert jobs["web-tests"]["needs"] == ["changes"]
     assert "web" in jobs["web-tests"]["if"]
@@ -430,6 +481,9 @@ def test_deploy_accepts_skipped_test_jobs() -> None:
     # web-coverage / py-coverage are `if: needs.<gate>-tests.result == 'success'`,
     # so a path-filtered push skips them too — they need the same clause.
     for job in (
+        "contract-cloud-tests",
+        "contract-script-tests",
+        "contract-root-tests",
         "web-tests",
         "py-tests",
         "cloud-tests",
@@ -442,16 +496,17 @@ def test_deploy_accepts_skipped_test_jobs() -> None:
 
 
 def test_cloud_infra_shards_partition_cloud_tests() -> None:
-    tokens = _shard_tokens("cloud-tests")
-    overlap, missing, unsharded_dirs = _partition(
-        WORKFLOW.parents[2] / "cloud" / "tests", "cloud/tests/", tokens
-    )
-    assert overlap == {}
-    assert missing == []
-    assert unsharded_dirs == [], (
-        "subdirectories of cloud/tests/ that no cloud-tests shard names verbatim "
-        f"(a filename glob cannot match a directory): {unsharded_dirs}"
-    )
+    root = WORKFLOW.parents[2]
+    assignments: dict[str, list[str]] = {}
+    matrix = _workflow()["jobs"]["cloud-tests"]["strategy"]["matrix"]
+    for row in matrix["include"]:
+        for path in _expand_shard_paths(root, str(row["paths"])):
+            assignments.setdefault(path, []).append(str(row["shard"]))
+    on_disk = _test_modules_under(root, root / "cloud" / "tests")
+    missing = sorted(on_disk - assignments.keys())
+    overlap = {path: shards for path, shards in assignments.items() if len(shards) > 1}
+    assert not missing, f"unsharded cloud tests: {missing[:6]}"
+    assert not overlap, f"cloud tests assigned to multiple shards: {overlap}"
 
 
 def test_py_coverage_installs_coverage_only() -> None:
@@ -513,13 +568,21 @@ def _test_modules_under(root: Path, base: Path) -> set[str]:
 
 def _expand_shard_paths(root: Path, paths: str) -> set[str]:
     out: set[str] = set()
+    ignored: set[str] = set()
     for token in paths.split():
+        if token.startswith("--ignore="):
+            ignored_path = root / token.split("=", 1)[1]
+            if ignored_path.is_dir():
+                ignored |= _test_modules_under(root, ignored_path)
+            elif ignored_path.is_file():
+                ignored.add(str(ignored_path.relative_to(root)))
+            continue
         target = root / token
         if target.is_dir():
             out |= _test_modules_under(root, target)
         else:
             out |= {str(f.relative_to(root)) for f in root.glob(token) if f.is_file()}
-    return out
+    return out - ignored
 
 
 def test_pytest_shard_union_equals_recursive_collection() -> None:

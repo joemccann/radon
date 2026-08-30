@@ -42,24 +42,21 @@ usage() {
   exit 64
 }
 
-# Tag used when the pinned SHA was never pushed. app-images.yml sets
-# cancel-in-progress, so a second push to main inside the 60-minute build
-# budget cancels the first build and SHA1's GHCR push steps never run while
-# ci.yml's deploy deliberately does not wait on app-images, so SHA1 still
-# deploys. Without a fallback all five app units docker-run a
-# `manifest unknown` at once. R-234.
-RADON_APP_IMAGE_FALLBACK_TAG="${RADON_APP_IMAGE_FALLBACK_TAG:-latest}"
-
 image_tag() {
+  local tag
   if [[ -n "${RADON_APP_IMAGE_TAG:-}" ]]; then
-    printf '%s\n' "$RADON_APP_IMAGE_TAG"
-    return 0
+    tag="$RADON_APP_IMAGE_TAG"
+  elif [[ -d /home/radon/radon/.git ]]; then
+    tag="$(/usr/bin/git -C /home/radon/radon rev-parse HEAD)"
+  else
+    echo "radon-app-runtime: exact release SHA is unavailable" >&2
+    return 69
   fi
-  if [[ -d /home/radon/radon/.git ]]; then
-    /usr/bin/git -C /home/radon/radon rev-parse HEAD
-    return 0
-  fi
-  printf 'latest\n'
+  [[ "$tag" =~ ^[0-9a-f]{40}$ ]] || {
+    echo "radon-app-runtime: image tag must be a 40-hex release SHA" >&2
+    return 69
+  }
+  printf '%s\n' "$tag"
 }
 
 image_in_registry() {
@@ -87,21 +84,18 @@ image_available() {
   return 1
 }
 
-# Resolve a repo to a tag that actually exists, preferring the pinned SHA.
+# Resolve a repo to the exact tested release. A moving tag can combine code
+# from a later push with an earlier deploy and is never a safe fallback.
 resolve_image() {
   local repo="$1"
-  local pinned="${repo}:$(image_tag)"
+  local tag pinned
+  tag="$(image_tag)" || return $?
+  pinned="${repo}:${tag}"
   if image_available "$pinned"; then
     printf '%s\n' "$pinned"
     return 0
   fi
-  local fallback="${repo}:${RADON_APP_IMAGE_FALLBACK_TAG}"
-  if image_available "$fallback"; then
-    printf 'image %s unavailable; falling back to %s\n' "$pinned" "$fallback" >&2
-    printf '%s\n' "$fallback"
-    return 0
-  fi
-  printf 'neither %s nor %s is available\n' "$pinned" "$fallback" >&2
+  printf 'exact release image %s is unavailable\n' "$pinned" >&2
   return 69
 }
 
@@ -142,16 +136,47 @@ refuse_host_plane() {
 # 4b332fd8 was the last green deploy; 33265501795 and 33266517375 rolled back
 # mid-pull). Untagged SHA pairs at ~5.8G each also filled the 75G disk.
 cmd_pull() {
-  local target="${1:-}"
+  local target="${1:-}" tag python_ref node_ref python_pid node_pid
+  local status=0
   if [[ -n "$target" ]]; then
     [[ "$target" =~ ^[0-9a-f]{40}$ ]] || {
       echo "radon-app-runtime: pull takes a 40-hex release SHA" >&2
       exit 64
     }
-    RADON_APP_IMAGE_TAG="$target"
+    tag="$target"
+  else
+    tag="$(image_tag)" || return $?
   fi
-  "$DOCKER" pull "$(python_image)"
-  "$DOCKER" pull "$(node_image)"
+  python_ref="ghcr.io/joemccann/radon-python:${tag}"
+  node_ref="ghcr.io/joemccann/radon-node:${tag}"
+
+  # The gated prepull job and the deploy both call this exact verb. When the
+  # pair is already local, deploy performs only these two fast inspections.
+  # On a miss, pull both independent images concurrently and wait for both.
+  if [[ -n "$target" ]] \
+    && image_in_local_store "$python_ref" \
+    && image_in_local_store "$node_ref"; then
+    printf 'exact release image pair already local: %s\n' "$tag" >&2
+  else
+    "$DOCKER" pull "$python_ref" &
+    python_pid=$!
+    "$DOCKER" pull "$node_ref" &
+    node_pid=$!
+    if ! wait "$python_pid"; then
+      status=1
+    fi
+    if ! wait "$node_pid"; then
+      status=1
+    fi
+    if (( status != 0 )); then
+      echo "radon-app-runtime: exact release image pull failed" >&2
+      return 69
+    fi
+    if ! image_in_local_store "$python_ref" || ! image_in_local_store "$node_ref"; then
+      echo "radon-app-runtime: exact release image pair is incomplete after pull" >&2
+      return 69
+    fi
+  fi
   [[ -n "$target" ]] && prune_stale_app_images "$target"
   return 0
 }

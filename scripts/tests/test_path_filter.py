@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import ast
 import re
 import subprocess
 from functools import lru_cache
 from pathlib import Path
 
-from ci.path_filter import DOC_SUFFIXES, classify, write_output
+from ci.path_filter import (
+    CROSS_TREE_CONTRACTS,
+    DOC_SUFFIXES,
+    classify,
+    select_gates,
+    write_output,
+)
 
 _ROOT = Path(__file__).resolve().parents[2]
 
@@ -155,12 +162,74 @@ def _python_test_files() -> tuple[Path, ...]:
     return tuple(files)
 
 
-def test_web_only_change_still_runs_python_gate() -> None:
+_WEB_READ_METHODS = {"exists", "glob", "is_file", "iterdir", "read_bytes", "read_text", "rglob"}
+_NON_REPOSITORY_WEB_FIXTURES = {
+    # These modules inspect temporary deploy fixtures named web/, not the
+    # checkout's web tree, so a real web change cannot affect their assertions.
+    "cloud/tests/test_deploy_corrections.py",
+    "cloud/tests/test_deploy_resilience.py",
+    "scripts/tests/test_weekend_runner_env_provisioning.py",
+}
+_DYNAMIC_WEB_READER_MODULES = {
+    # Their tracked web paths live in parameter tables and are joined to ROOT
+    # through loop variables, which the deliberately small AST pass cannot
+    # resolve without executing test code.
+    "scripts/tests/test_replica_safe_default.py",
+    "scripts/tests/test_uw_budget.py",
+}
+
+
+def _declared_cross_tree_modules() -> set[str]:
+    return {
+        target.split("::", 1)[0]
+        for contract in CROSS_TREE_CONTRACTS
+        for target in contract.tests
+    }
+
+
+def _direct_web_reader_modules() -> set[str]:
+    """Find pytest modules that directly read a tracked path under web/."""
+    readers: set[str] = set()
+    for path in _python_test_files():
+        relative = str(path.relative_to(_ROOT))
+        if relative in _NON_REPOSITORY_WEB_FIXTURES or relative == "scripts/tests/test_path_filter.py":
+            continue
+        source = path.read_text(encoding="utf-8", errors="ignore")
+        if not any(marker in source for marker in ('"web"', "'web'", "web/")):
+            continue
+        tree = ast.parse(source)
+        web_path_names: set[str] = set()
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.Assign, ast.AnnAssign)) or node.value is None:
+                continue
+            value = ast.get_source_segment(source, node.value) or ""
+            if "web" not in value.lower():
+                continue
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            web_path_names.update(
+                target.id for target in targets if isinstance(target, ast.Name)
+            )
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                continue
+            if node.func.attr not in _WEB_READ_METHODS:
+                continue
+            receiver = ast.get_source_segment(source, node.func.value) or ""
+            if '"web"' in receiver or "'web'" in receiver or any(
+                re.search(rf"\b{re.escape(name)}\b", receiver) for name in web_path_names
+            ):
+                readers.add(relative)
+                break
+    return readers
+
+
+def test_web_only_change_runs_only_web_and_mapped_cross_tree_contracts() -> None:
     # T-157: tests/test_no_tracked_account_figures.py and
     # scripts/tests/test_replica_safe_default.py read web/lib, so a web-only
     # push must not skip the gate that guards it.
-    python, web = classify(["web/lib/foo.ts", "web/tests/bar.test.tsx"])
-    assert (python, web) == (True, True)
+    selection = select_gates(["web/lib/agent/turnSteps.ts"])
+    assert (selection.python, selection.web, selection.contracts) == (False, True, True)
+    assert "scripts/tests/test_replica_safe_default.py" in selection.contract_tests
 
 
 def test_scripts_only_change_still_runs_web_gate() -> None:
@@ -168,6 +237,17 @@ def test_scripts_only_change_still_runs_web_gate() -> None:
     # web/tests reads scripts/ and cloud/ source directly.
     python, web = classify(["scripts/ib_sync.py", "cloud/scripts/deploy.sh"])
     assert (python, web) == (True, True)
+
+
+def test_python_change_does_not_duplicate_cross_tree_contract_job() -> None:
+    selection = select_gates(["scripts/ib_sync.py", "web/lib/agent/turnSteps.ts"])
+    assert (selection.python, selection.web, selection.contracts) == (True, True, False)
+    assert selection.contract_tests == ()
+
+
+def test_unread_web_asset_does_not_start_an_empty_contract_job() -> None:
+    selection = select_gates(["web/app/globals.css"])
+    assert (selection.python, selection.web, selection.contracts) == (False, True, False)
 
 
 def test_shared_ci_yaml_runs_both() -> None:
@@ -197,8 +277,26 @@ def test_empty_range_runs_both() -> None:
 
 def test_write_output_appends_github_output(tmp_path: Path) -> None:
     target = tmp_path / "github_output"
-    write_output(False, True, target)
-    assert target.read_text(encoding="utf-8") == "python=false\nweb=true\n"
+    selection = select_gates(["web/lib/agent/turnSteps.ts"])
+    write_output(selection, target)
+    output = target.read_text(encoding="utf-8")
+    assert "python=false\n" in output
+    assert "web=true\n" in output
+    assert "contracts=true\n" in output
+    assert "contract_cloud_tests=\n" in output
+    assert "contract_script_tests=scripts/tests/test_replica_safe_default.py\n" in output
+    assert "contract_root_tests=\n" in output
+
+
+def test_cross_tree_targets_are_split_by_pytest_root() -> None:
+    selection = select_gates(["web/lib/chat.ts", "web/lib/wsTicket.ts"])
+    assert selection.contract_cloud_tests
+    assert selection.contract_script_tests == (
+        "scripts/tests/test_replica_safe_default.py",
+    )
+    assert selection.contract_root_tests == (
+        "tests/test_no_tracked_account_figures.py",
+    )
 
 
 # --- T-156: the web gate must own everything vitest collects ----------------
@@ -243,7 +341,7 @@ def test_every_tree_read_by_a_vitest_test_routes_to_the_web_gate() -> None:
 # --- T-157: the python gate must own everything pytest reads ---------------
 
 
-def test_python_gate_fires_for_site_plates_and_web_lib() -> None:
+def test_python_contracts_fire_for_site_plates_and_web_lib() -> None:
     """The ⛔ PII guard and the account-figure guard live in pytest.
 
     tests/test_no_public_account_assets.py forbids `site/public/plates/dashboard-*`
@@ -251,7 +349,9 @@ def test_python_gate_fires_for_site_plates_and_web_lib() -> None:
     guard was being skipped by exactly the change it exists to catch.
     """
     assert classify(["site/public/plates/dashboard-x.png"])[0] is True
-    assert classify(["web/lib/chat.ts"])[0] is True
+    selection = select_gates(["web/lib/chat.ts"])
+    assert selection.python is False
+    assert "tests/test_no_tracked_account_figures.py" in selection.contract_tests
 
 
 def test_every_tree_read_by_a_python_test_routes_to_the_python_gate() -> None:
@@ -261,14 +361,37 @@ def test_every_tree_read_by_a_python_test_routes_to_the_python_gate() -> None:
     assert "web/" in reads and "site/" in reads, (
         "expected the python test trees to read web/ and site/; derivation is broken"
     )
+    # web/ is the one deliberately extracted tree; its focused inventory is
+    # guarded separately below. Every other read still arms full pytest.
     unrouted = {
         prefix: proof
         for prefix, proof in reads.items()
+        if prefix != "web/"
         if not classify([f"{prefix}{_SENTINEL}"])[0]
     }
     assert not unrouted, (
         "trees read by python tests that do NOT turn on the python gate: "
         + ", ".join(f"{prefix} (read by {proof})" for prefix, proof in sorted(unrouted.items()))
+    )
+
+
+def test_every_python_test_that_reads_web_has_a_cross_tree_contract() -> None:
+    discovered = _direct_web_reader_modules() | _DYNAMIC_WEB_READER_MODULES
+    undeclared = discovered - _declared_cross_tree_modules()
+    assert not undeclared, (
+        "pytest modules read tracked web files but have no CROSS_TREE_CONTRACTS entry: "
+        + ", ".join(sorted(undeclared))
+    )
+
+
+def test_cross_tree_targets_name_existing_test_modules() -> None:
+    missing = {
+        module
+        for module in _declared_cross_tree_modules()
+        if not (_ROOT / module).is_file()
+    }
+    assert not missing, "cross-tree pytest target modules do not exist: " + ", ".join(
+        sorted(missing)
     )
 
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Classify a SHA range as python-gate, web-gate, both, or neither.
+"""Select the CI gates and cross-tree contracts affected by a SHA range.
 
 Used by .github/workflows/ci.yml to skip a test gate that cannot be affected
 by the range. A gate is skipped only when NOTHING in the range is owned or
@@ -11,9 +11,11 @@ images under the skip prefixes) skip both gates.
 
 from __future__ import annotations
 
+import fnmatch
 import os
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 WEB_PREFIXES = (
@@ -77,9 +79,9 @@ WEB_READS = (
     "tests/",
     "web/",
 )
-# PYTHON: the ⛔ PII plate guard reads site/public/plates, the account-figure
-# guard reads web/lib/chat.ts, and the DUR-07 replica guard scans web/lib,
-# web/app, web/components. T-157.
+# PYTHON: pytest reads several non-python trees. Web reads are intentionally
+# handled by CROSS_TREE_CONTRACTS below so a web-only change does not start the
+# full python/cloud suite. T-157 / E3.
 #
 # The three root FILES are web-owned but python-asserted:
 # scripts/tests/test_merge_vitest_coverage.py holds the only assertion pinning
@@ -102,11 +104,146 @@ PYTHON_READS = (
     "site/",
     "tasks/",
     "tests/",
-    "web/",
     "bun.lock",
     "package.json",
     "vitest.config.ts",
 )
+
+
+@dataclass(frozen=True)
+class CrossTreeContract:
+    """A web path pattern and the focused pytest targets that assert on it."""
+
+    patterns: tuple[str, ...]
+    tests: tuple[str, ...]
+
+
+# Static inventory of pytest contracts that read tracked web files. Keep the
+# targets focused: cloud/tests/test_caddy_edge_timeouts.py contains live timing
+# mechanism tests, so selecting the whole module would erase the speedup.
+CROSS_TREE_CONTRACTS = (
+    CrossTreeContract(
+        patterns=(
+            "web/lib/*.js",
+            "web/lib/*.jsx",
+            "web/lib/*.mjs",
+            "web/lib/*.cjs",
+            "web/lib/*.ts",
+            "web/lib/*.tsx",
+            "web/app/*.js",
+            "web/app/*.jsx",
+            "web/app/*.mjs",
+            "web/app/*.cjs",
+            "web/app/*.ts",
+            "web/app/*.tsx",
+            "web/components/*.js",
+            "web/components/*.jsx",
+            "web/components/*.mjs",
+            "web/components/*.cjs",
+            "web/components/*.ts",
+            "web/components/*.tsx",
+        ),
+        tests=("scripts/tests/test_replica_safe_default.py",),
+    ),
+    CrossTreeContract(
+        patterns=("web/lib/chat.ts",),
+        tests=("tests/test_no_tracked_account_figures.py",),
+    ),
+    CrossTreeContract(
+        patterns=("web/lib/wsTicket.ts",),
+        tests=(
+            "cloud/tests/test_caddy_edge_timeouts.py::TestRideOutMatchesItsNamedClient::test_the_ib_window_is_not_longer_than_getwsticket_waits",
+        ),
+    ),
+    CrossTreeContract(
+        patterns=("web/app/api/assistant/route.ts",),
+        tests=(
+            "cloud/tests/test_caddy_edge_timeouts.py::TestTheAssistantTurnOutlivesTheGenericGuard::test_the_assistant_bound_stays_inside_the_routes_own_budget",
+            "cloud/tests/test_caddy_edge_timeouts.py::TestTheAssistantHandleStatesItStreams::test_the_route_writes_its_header_before_the_loop",
+        ),
+    ),
+    CrossTreeContract(
+        patterns=("web/middleware.ts",),
+        tests=(
+            "cloud/tests/test_nextjs_db_watchdog.py::test_service_health_is_bearer_gated_not_public",
+        ),
+    ),
+    CrossTreeContract(
+        patterns=("web/lib/serviceHealthWindows.ts",),
+        tests=(
+            "cloud/tests/test_nextjs_db_watchdog.py::TestHealthRowServiceIsInBothCatalogs::test_registered_in_the_typescript_catalog",
+            "scripts/tests/test_cadence_and_growth_bounds.py::TestSignalsFreshnessMatchesItsCadence::test_the_web_windows_agree_with_the_watchdog",
+            "scripts/tests/test_cadence_and_growth_bounds.py::TestSignalsFreshnessMatchesItsCadence::test_the_web_side_measures_from_the_open",
+            "scripts/tests/test_exit_orders_unregistered.py::test_exit_orders_absent_from_both_watchdog_catalogs",
+            "scripts/tests/test_indicator_storage_hygiene.py::TestTrinClosedWindowCoversTheWeekend::test_both_catalogs_use_a_multi_day_closed_window",
+            "scripts/tests/test_monitor_daemon/test_menthorq_session_check.py::TestRegistrationContract::test_typescript_window_mirrors_python",
+            "scripts/tests/test_rel141_catalog_exemptions_are_true.py::TestTheTwoGenuineGapsAreClosed::test_the_service_is_in_both_catalogs",
+            "scripts/tests/test_rel148_operability_fixes.py::TestEveryTimerDrivenScanIsWatched::test_the_web_catalog_no_longer_calls_it_on_demand",
+            "scripts/tests/test_service_registration_completeness.py",
+            "scripts/tests/test_watchdog/test_services.py",
+            "scripts/tests/test_watchdog_catalog_and_journal_bound.py::TestEveryScheduledServiceIsInABucket::test_perf_twr_is_in_both_catalogs",
+            "scripts/tests/test_watchdog_catalog_parity.py",
+        ),
+    ),
+    CrossTreeContract(
+        patterns=("web/lib/ieiHyg.ts",),
+        tests=(
+            "scripts/tests/test_silent_degradation_bounds.py::TestIeiHygNeedsAFullWindow::test_the_web_type_knows_the_unknown_state",
+        ),
+    ),
+    CrossTreeContract(
+        patterns=("web/components/WorkspaceSections.tsx",),
+        tests=(
+            "scripts/tests/test_uw_budget.py::test_scheduled_scan_defaults_resolve_under_the_universe_brake",
+        ),
+    ),
+    CrossTreeContract(
+        patterns=("web/tests/integration.test.ts", "web/tests/helpers/python313.ts"),
+        tests=("scripts/tests/test_vitest_python_gating.py",),
+    ),
+    CrossTreeContract(
+        patterns=("web/e2e/*.spec.ts", "web/e2e/ci-curation-ledger.txt"),
+        tests=("scripts/tests/test_e2e_ci_curation.py",),
+    ),
+    CrossTreeContract(
+        patterns=("web/package-lock.json", "web/bun.lock"),
+        tests=(
+            "cloud/tests/test_beta_sunset.py::test_root_and_web_do_not_ship_npm_lockfiles",
+        ),
+    ),
+    CrossTreeContract(
+        patterns=("web/README.md",),
+        tests=(
+            "scripts/tests/test_docs_contract.py::TestThinIndex::test_web_readme_does_not_teach_npm",
+        ),
+    ),
+)
+
+
+@dataclass(frozen=True)
+class GateSelection:
+    python: bool
+    web: bool
+    contract_tests: tuple[str, ...] = ()
+
+    @property
+    def contracts(self) -> bool:
+        return bool(self.contract_tests)
+
+    def tests_under(self, prefix: str) -> tuple[str, ...]:
+        return tuple(test for test in self.contract_tests if test.startswith(prefix))
+
+    @property
+    def contract_cloud_tests(self) -> tuple[str, ...]:
+        return self.tests_under("cloud/tests/")
+
+    @property
+    def contract_script_tests(self) -> tuple[str, ...]:
+        return self.tests_under("scripts/tests/")
+
+    @property
+    def contract_root_tests(self) -> tuple[str, ...]:
+        return self.tests_under("tests/")
 
 
 def _matches(path: str, prefixes: tuple[str, ...]) -> bool:
@@ -149,6 +286,23 @@ def classify(paths: list[str]) -> tuple[bool, bool]:
     return python, web
 
 
+def select_gates(paths: list[str]) -> GateSelection:
+    """Return full gates plus focused pytest contracts for web-only changes."""
+    python, web = classify(paths)
+    if python:
+        return GateSelection(python=python, web=web)
+
+    tests = {
+        test
+        for path in paths
+        if not _is_documentation(path)
+        for contract in CROSS_TREE_CONTRACTS
+        if any(fnmatch.fnmatchcase(path, pattern) for pattern in contract.patterns)
+        for test in contract.tests
+    }
+    return GateSelection(python=python, web=web, contract_tests=tuple(sorted(tests)))
+
+
 def changed_paths(base: str, head: str, cwd: Path | None = None) -> list[str]:
     if not base or set(base) <= {"0"}:
         return []
@@ -162,8 +316,18 @@ def changed_paths(base: str, head: str, cwd: Path | None = None) -> list[str]:
     return [line for line in result.stdout.splitlines() if line]
 
 
-def write_output(python: bool, web: bool, output_path: Path) -> None:
-    line = f"python={'true' if python else 'false'}\nweb={'true' if web else 'false'}\n"
+def write_output(selection: GateSelection, output_path: Path) -> None:
+    def joined(tests: tuple[str, ...]) -> str:
+        return " ".join(tests)
+
+    line = (
+        f"python={'true' if selection.python else 'false'}\n"
+        f"web={'true' if selection.web else 'false'}\n"
+        f"contracts={'true' if selection.contracts else 'false'}\n"
+        f"contract_cloud_tests={joined(selection.contract_cloud_tests)}\n"
+        f"contract_script_tests={joined(selection.contract_script_tests)}\n"
+        f"contract_root_tests={joined(selection.contract_root_tests)}\n"
+    )
     with output_path.open("a", encoding="utf-8") as handle:
         handle.write(line)
 
@@ -177,9 +341,12 @@ def main(argv: list[str] | None = None) -> int:
         print("GITHUB_OUTPUT is required", file=sys.stderr)
         return 2
     paths = changed_paths(base, head)
-    python, web = classify(paths)
-    write_output(python, web, Path(output))
-    print(f"python={python} web={web} files={len(paths)}")
+    selection = select_gates(paths)
+    write_output(selection, Path(output))
+    print(
+        f"python={selection.python} web={selection.web} "
+        f"contracts={selection.contracts} files={len(paths)}"
+    )
     return 0
 
 

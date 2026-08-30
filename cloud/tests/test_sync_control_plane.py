@@ -289,16 +289,16 @@ prepull_app_images {'f' * 40}
         main = function_body(deploy, "main")
         assert main.index("build_staged_release") < main.index('prepull_app_images "$requested_sha"') < main.index("restart_services")
 
-    def test_prepull_runs_the_exact_sudo_verb_and_never_fails_the_deploy(self, tmp_path):
+    def test_prepull_runs_the_exact_sudo_verb_and_fails_before_teardown(self, tmp_path):
         result, log = self._prepull(tmp_path, granted=True, pull_rc=1)
-        assert result.returncode == 0, result.stdout + result.stderr
+        assert result.returncode != 0, result.stdout + result.stderr
         assert "prepull failed" in result.stdout + result.stderr
         assert f"-n /usr/local/sbin/radon-app-runtime pull {'f' * 40}" in log.read_text(encoding="utf-8").splitlines()
 
-    def test_prepull_skips_when_the_verb_is_not_granted(self, tmp_path):
+    def test_prepull_fails_before_teardown_when_the_verb_is_not_granted(self, tmp_path):
         result, log = self._prepull(tmp_path, granted=False)
-        assert result.returncode == 0
-        assert "not granted yet" in result.stdout + result.stderr
+        assert result.returncode != 0
+        assert "not granted" in result.stdout + result.stderr
         assert f"-n /usr/local/sbin/radon-app-runtime pull {'f' * 40}" not in log.read_text(encoding="utf-8")
 
     def test_prestage_skips_instead_of_failing_when_control_plane_is_not_ready(self, tmp_path):

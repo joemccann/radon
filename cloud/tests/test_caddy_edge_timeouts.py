@@ -32,6 +32,7 @@ retry loop would have reached the restarted upstream.
 from __future__ import annotations
 
 import re
+import shlex
 import sys
 from pathlib import Path
 
@@ -409,10 +410,22 @@ class TestCiProvidesTheCaddyBinary:
 
     def _shard_that_collects_this_file(self, job) -> str:
         name = Path(__file__).name
+
+        def collects(entry) -> bool:
+            tokens = shlex.split(entry["paths"])
+            included = [token for token in tokens if not token.startswith("-")]
+            ignored = [
+                token.split("=", 1)[1]
+                for token in tokens
+                if token.startswith("--ignore=")
+            ]
+            return any(fnmatch.fnmatch(name, Path(token).name) for token in included) \
+                and not any(fnmatch.fnmatch(name, Path(token).name) for token in ignored)
+
         shards = [
             entry["shard"]
             for entry in job["strategy"]["matrix"]["include"]
-            if fnmatch.fnmatch(name, Path(entry["paths"]).name)
+            if collects(entry)
         ]
         assert len(shards) == 1, (
             f"{name} is collected by shards {shards}; the caddy install step "
