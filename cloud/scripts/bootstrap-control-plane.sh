@@ -243,24 +243,38 @@ STAGE_DIR=""
 BACKUP_DIR=""
 TRANSACTION_ACTIVE=0
 TRANSACTION_COMMITTED=0
-DAEMON_RELOAD_ATTEMPTED=0
+DAEMON_RELOAD_FAILED=0
 declare -a TRANSACTION_TARGETS=()
 declare -a BACKUP_EXISTED=()
 
+restore_target() {
+  local index="$1" target="$2"
+  rm -f -- "$target"
+  if [[ "${BACKUP_EXISTED[$index]:-0}" == "1" ]]; then
+    mkdir -p "$(dirname "$target")"
+    cp -a -- "$BACKUP_DIR/$index" "$target"
+  fi
+}
+
 rollback_bundle() {
-  local index target
-  for ((index=${#TRANSACTION_TARGETS[@]} - 1; index >= 0; index--)); do
-    target="${TRANSACTION_TARGETS[$index]}"
-    rm -f -- "$target"
-    if [[ "${BACKUP_EXISTED[$index]:-0}" == "1" ]]; then
-      mkdir -p "$(dirname "$target")"
-      cp -a -- "$BACKUP_DIR/$index" "$target"
-    fi
+  # READY_PATH is the last transaction target. Put it back LAST, so the root
+  # helper's KILL (5s after its TERM) landing mid-rollback leaves readiness
+  # withdrawn rather than published over a half-restored bundle.
+  local index ready_index=$(( ${#TRANSACTION_TARGETS[@]} - 1 ))
+  for ((index=ready_index - 1; index >= 0; index--)); do
+    restore_target "$index" "${TRANSACTION_TARGETS[$index]}"
   done
-  if [[ "$DAEMON_RELOAD_ATTEMPTED" == "1" ]]; then
-    # The in-memory unit graph may reflect the rejected bundle. A second
-    # reload is intentionally forbidden, so readiness remains withdrawn.
+  if [[ "$DAEMON_RELOAD_FAILED" == "1" ]]; then
+    # systemd refused the reload, so the in-memory unit graph is unknown. A
+    # second reload is intentionally forbidden, so readiness stays withdrawn.
     rm -f -- "$READY_PATH"
+  else
+    # Every other uncommitted exit (the root sync's deadline TERM, a readiness
+    # publish failure) restored the previous bundle above, and the previous
+    # marker describes that bundle. Leaving it withdrawn sent the next deploy
+    # job to the legacy runner on a host whose app units carry container
+    # drop-ins. R-440.
+    restore_target "$ready_index" "$READY_PATH"
   fi
 }
 
@@ -506,8 +520,10 @@ cmp -s "$STAGED_MANIFEST" "$MANIFEST_PATH" || \
 mode_matches "$MANIFEST_PATH" 0644 && ownership_matches "$MANIFEST_PATH" || \
   die "installed control-plane manifest metadata verification failed"
 
-DAEMON_RELOAD_ATTEMPTED=1
-"$SYSTEMCTL_BIN" daemon-reload || die "systemd daemon reload failed"
+"$SYSTEMCTL_BIN" daemon-reload || {
+  DAEMON_RELOAD_FAILED=1
+  die "systemd daemon reload failed"
+}
 
 atomic_install "$STAGED_READY" "$READY_PATH" 0644 || \
   die "failed to publish control-plane readiness"

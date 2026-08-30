@@ -936,8 +936,17 @@ jobs:
             }
 
             # Until a root operator installs the target control-plane bundle,
-            # keep the already-proven legacy runner.
+            # keep the already-proven legacy runner. Not on a host whose app
+            # units already carry the container drop-ins: that host was
+            # bootstrapped once, so a missing marker there is a bundle the
+            # root sync's deadline KILLed half-installed (no trap runs), and
+            # the legacy runner would restart the tier through units it does
+            # not understand. R-440.
             if [[ ! -e "$RADON_CONTROL_PLANE_READY" && ! -L "$RADON_CONTROL_PLANE_READY" ]]; then
+              if compgen -G '/etc/systemd/system/radon-*.service.d/runtime-container.conf' >/dev/null; then
+                echo "refusing the legacy runner: control-plane readiness is missing but container drop-ins are installed; run cloud/scripts/bootstrap-control-plane.sh as root" >&2
+                exit 78
+              fi
               deploy_with_legacy_runner
               exit 0
             fi
