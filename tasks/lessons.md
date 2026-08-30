@@ -1,5 +1,14 @@
 # Lessons
 
+## 2026-08-29 — Botocore Config retries are not application-level retry
+
+- Page `29c8a560`: `radon-db-backup` dumped 100 tables then paged P1 on
+  `ConnectionClosedError` of a 576 MB B2 PUT. `_s3_client` already had
+  `retries max_attempts=3 mode=standard`.
+- Media-backup (page `02ccb70e`) treated those botocore bounds as enough.
+  An injected client and a spent-retry multipart PUT still fail the
+  oneshot. Wrap LIST/PUT/HEAD/DELETE in `call_s3_with_retry`.
+
 ## 2026-08-29 — Container newsfeed needs the host Playwright revision
 
 - Page `3e952746`: `radon-newsfeed` crash-looped after the container

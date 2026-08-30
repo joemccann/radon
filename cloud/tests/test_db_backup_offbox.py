@@ -60,6 +60,7 @@ class _StubClient:
         self.fail_on = fail_on
         self.uploaded: list[tuple[str, str]] = []
         self.deleted: list[str] = []
+        self.attempts: list[str] = []
 
     def list_objects_v2(self, **kwargs):
         prefix = kwargs.get("Prefix", "")
@@ -71,6 +72,7 @@ class _StubClient:
         return {"Contents": contents, "IsTruncated": False}
 
     def upload_file(self, path, bucket, key, **kwargs):
+        self.attempts.append(key)
         if self.fail_on is not None and self.fail_on in key:
             raise RuntimeError("b2 wedged")
         self.uploaded.append((str(path), key))
@@ -670,3 +672,122 @@ class TestAnEmptyDumpIsNotABackup:
         assert detail["pruned"] == len(expired)
         assert detail["offbox_error"] is None
         assert len(client.uploaded) == 1
+
+
+# Production 2026-08-29 20:28Z (page 29c8a560): dump of 100 tables / 1.4M
+# rows landed, then botocore raised this class with this text on PUT of
+# radon-2026-08-29T202254Z.sql.gz (~576 MB). The oneshot exited 1. A
+# second run 20:34Z failed the same way. A third run 20:41Z uploaded 3/3.
+# Botocore Config retries were already set; they were spent.
+_CLOSED_MSG = (
+    "Connection was closed before we received a valid response from endpoint "
+    'URL: "https://s3.us-west-004.backblazeb2.com/radon-archive/db_backups/'
+    'radon-2026-08-29T202254Z.sql.gz".'
+)
+_FAILED_DUMP = "radon-2026-08-29T202254Z.sql.gz"
+_OTHER_DUMP = "radon-2026-08-28T090000Z.sql.gz"
+
+
+class ConnectionClosedError(Exception):
+    """Stand-in for botocore.exceptions.ConnectionClosedError (CI has no boto3)."""
+
+
+class _ClosedConnectionClient:
+    """list/upload/head/delete double. Fail the first N PUTs of one dump."""
+
+    def __init__(self, *, fail_on=None, fail_times=1):
+        self.objects: dict[str, tuple[int, float]] = {}
+        self.uploaded: list[tuple[str, str]] = []
+        self.attempts: list[str] = []
+        self.deleted: list[str] = []
+        self._fail_on = fail_on
+        self._fail_times = fail_times
+        self._failed = 0
+
+    def list_objects_v2(self, **kwargs):
+        prefix = kwargs.get("Prefix", "")
+        return {
+            "Contents": [
+                {"Key": k, "Size": v[0], "LastModified": _Stamp(v[1])}
+                for k, v in sorted(self.objects.items())
+                if k.startswith(prefix)
+            ],
+            "IsTruncated": False,
+        }
+
+    def upload_file(self, path, bucket, key, **kwargs):
+        self.attempts.append(key)
+        if (
+            self._fail_on is not None
+            and self._fail_on in key
+            and self._failed < self._fail_times
+        ):
+            self._failed += 1
+            raise ConnectionClosedError(_CLOSED_MSG)
+        self.uploaded.append((str(path), key))
+        self.objects[key] = (pathlib.Path(path).stat().st_size, 0.0)
+
+    def head_object(self, Bucket, Key):  # noqa: N803 — boto3 kwarg casing
+        if Key not in self.objects:
+            raise RuntimeError(f"NoSuchKey: {Key}")
+        return {"ContentLength": self.objects[Key][0]}
+
+    def delete_object(self, Bucket, Key):  # noqa: N803 — boto3 kwarg casing
+        self.deleted.append(Key)
+        self.objects.pop(Key, None)
+
+
+class TestTransientB2UploadRetry:
+    """Page 29c8a560: one ConnectionClosedError must not fail the nightly unit."""
+
+    def test_connection_closed_on_first_dump_retries_and_uploads_the_rest(
+        self, tmp_path, monkeypatch
+    ):
+        _seed_dumps(tmp_path, [_FAILED_DUMP, _OTHER_DUMP])
+        monkeypatch.setattr(db_backup.time, "sleep", lambda _s: None)
+        client = _ClosedConnectionClient(fail_on=_FAILED_DUMP, fail_times=1)
+        cfg = db_backup.s3_config_from_env(dict(FULL_ARCHIVE_ENV))
+
+        summary = db_backup.sync_offbox(tmp_path, cfg, client=client)
+
+        assert summary["uploaded"] == 2
+        assert summary["deferred"] == 0
+        assert [k for _p, k in client.uploaded] == [
+            f"db_backups/{_FAILED_DUMP}",
+            f"db_backups/{_OTHER_DUMP}",
+        ]
+        assert client.attempts.count(f"db_backups/{_FAILED_DUMP}") == 2
+        assert client.attempts.count(f"db_backups/{_OTHER_DUMP}") == 1
+
+    def test_persistent_connection_closed_still_fails_the_unit(
+        self, backup_env, monkeypatch
+    ):
+        monkeypatch.setattr(db_backup.time, "sleep", lambda _s: None)
+        _install_fake_boto3(
+            monkeypatch,
+            _ClosedConnectionClient(fail_on="radon-", fail_times=99),
+        )
+        beats: list[tuple] = []
+        monkeypatch.setattr(
+            db_backup,
+            "write_service_health",
+            lambda state, detail, started_at: beats.append((state, detail)),
+        )
+
+        rc = db_backup.main()
+
+        assert rc == 1
+        assert beats and beats[0][0] == "error"
+        assert "ConnectionClosedError" in beats[0][1]["summary"]
+        assert len(sorted(backup_env.glob("*.sql.gz"))) == 1
+
+    def test_non_transient_upload_error_is_not_retried(self, tmp_path, monkeypatch):
+        _seed_dumps(tmp_path, ["radon-a.sql.gz"])
+        monkeypatch.setattr(db_backup.time, "sleep", lambda _s: None)
+        cfg = db_backup.s3_config_from_env(dict(FULL_ARCHIVE_ENV))
+        client = _StubClient(fail_on="radon-a")
+
+        with pytest.raises(RuntimeError, match="b2 wedged"):
+            db_backup.sync_offbox(tmp_path, cfg, client=client)
+        assert client.attempts == ["db_backups/radon-a.sql.gz"]
+        assert client.uploaded == []
