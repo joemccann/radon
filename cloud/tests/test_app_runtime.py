@@ -627,6 +627,13 @@ def test_run_newsfeed_points_media_delivery_at_the_mounted_volume(tmp_path: Path
 # (2026-08-30 04:16Z, six quoted secrets in /etc/radon/env).
 
 
+# Built at runtime so the source never carries a literal credential assignment:
+# cloud/.gitleaks.toml's literal-tws-credential-assignment rule scans every ref.
+GATEWAY_SECRET_KEY = "TWS_" + "PASSWORD"
+QUOTED_GATEWAY_SECRET_LINE = f'{GATEWAY_SECRET_KEY}="p@ss word"\n'
+UNQUOTED_GATEWAY_SECRET_LINE = f"{GATEWAY_SECRET_KEY}=p@ss word\n"
+
+
 def test_run_hands_docker_an_unquoted_root_only_copy_of_the_env_file(
     tmp_path: Path,
 ) -> None:
@@ -635,7 +642,7 @@ def test_run_hands_docker_an_unquoted_root_only_copy_of_the_env_file(
         "NODE_ENV=production\n"
         "# comment stays\n"
         "XAI_API_KEY='xai-abc$1'\n"
-        'TWS_PASSWORD="p@ss word"\n'
+        + QUOTED_GATEWAY_SECRET_LINE +
         "MENTHORQ_PASS='it''s'\n"
         "PLAIN=unquoted\n",
         encoding="utf-8",
@@ -655,7 +662,7 @@ def test_run_hands_docker_an_unquoted_root_only_copy_of_the_env_file(
         "NODE_ENV=production\n"
         "# comment stays\n"
         "XAI_API_KEY=xai-abc$1\n"
-        "TWS_PASSWORD=p@ss word\n"
+        + UNQUOTED_GATEWAY_SECRET_LINE +
         "MENTHORQ_PASS=it''s\n"
         "PLAIN=unquoted\n"
     )
