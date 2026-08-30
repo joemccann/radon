@@ -455,3 +455,21 @@ Backlog: `RELIABILITY_AUDIT.md` §Delta audit 2026-08-28 §Backlog. Order: P0, t
   (R-395). The class is not specific to these five files and is worth a standing sweep of its own:
   every mechanism that converts a failure into a non-page must answer "for how long?" and "what
   else does it swallow?". Carried by REL-135, REL-139 and REL-140.
+- **NF triage 2026-08-30 (delta audit):** NF-1 (Gate-3 bankroll-% cap) still open and unchanged; the
+  order-path change in this range is a funnel gap (R-467: a price-less order skips the notional bound),
+  not sizing. NF-2 (unpaginated journal reads) unchanged, still carried by REL-108. NF-3 (a stale feed
+  presented as live) gains a NEW instance in the headlines tape: R-435 (hub never detects a half-open
+  upstream) plus R-463 (a populated tape renders identically to live, dated by a clock without a date,
+  under a footer whose freshness fields belong to the commentary feed); carried by REL-155. NF-4
+  (aggregated Flex buckets vs 1:1 fingerprints) unchanged in this range, but REL-132's claim release is
+  PARTIAL (R-436: the release is a best-effort DELETE on the same Turso the writer just failed on) and
+  is carried by REL-156. NF-5, NF-6, NF-7 unchanged. **NF-8 (standing-sweep scope) is CLOSED** — the
+  parity test's own iteration over all 57 timer-backed units resolves every non-exempt unit, and the
+  executing walk verified every exemption reason is true. **NF-9 (happy-path-only heartbeats) recurs in
+  BOTH timers this delta catalogued:** `dispersion` heartbeats `ok` with `error=None` when the IB rung is
+  dead and Yahoo serves the universe (R-434, rule-7 violation on a schedule), and `model-catalog`
+  heartbeats `ok` on total provider failure and writes nothing on a crash (R-455). Five-for-five now.
+  NF-10 (suppression without a dwell bound): the two deploy-window suppressions added this range
+  (7a45f294, 857bbad0) were checked against all three questions and are bounded, ordered and scoped
+  (clean); but REL-135's own dwell is in-process memory that resets on a health-daemon restart and
+  covers units only (R-468), carried by REL-167. REL-021b remainder unchanged (all P2).
