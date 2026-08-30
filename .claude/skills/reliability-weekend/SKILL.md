@@ -559,3 +559,28 @@ how this loop improves as the codebase grows.
   it into the clone, so this residual is closed for later runs), and R-402's `signals-refresh` registration
   (deliberately refused, above). Writing the reason into the row is the difference between a known
   residual and a silent gap.
+- 2026-08-30 (audit): **the operator can consume R-numbers outside this loop.** REL-149/REL-150 were
+  written by the operator on 2026-08-29 citing R-429…R-431 in commit messages, `cloud/CLAUDE.md` and
+  the log, with no findings row. `grep -o "R-[0-9]{3}" RELIABILITY_AUDIT.md | sort -u | tail -1` says
+  R-428 and would have collided. Take the max over BOTH documents plus `git log --grep 'R-[0-9]'` since
+  the anchor, skip the consumed ids, and say so in the section header and the ledger line.
+- 2026-08-30 (audit): when the range holds both weekend loops' remediation merges AND the operator's
+  own fixes, splitting "at the last commit that touched RELIABILITY_LOG.md" picks the operator's
+  commit and hides the reliability remediation inside the feature half. Split by branch ancestry
+  instead: `git log <anchor>..HEAD ^origin/reliability/<prev> ^origin/testing/<prev>` is the feature
+  set, and hand the executing regression walk the operator's REL rows too.
+- 2026-08-30 (audit): **an ad-hoc call of a test's resolver is not the test's iteration.** The lead
+  called `_health_names_written_by(<service path>)` over `cloud/services/*.timer` and got six
+  exempt-but-resolving units; the walk that ran the test's own `_timer_backed_services` got zero,
+  and `test_every_exempt_unit_still_lacks_a_resolvable_name` already rejects a resolving exemption.
+  The 2026-08-28 lesson says call the TEST's functions — it also has to be the test's INPUTS. Run
+  the test file, then reuse only what it exports at module scope with the same arguments it uses.
+- 2026-08-30 (audit): the executing regression walk found all three PARTIALs (REL-132, REL-150 and
+  the REL-149 socket mode) with SCRATCH cases the shipped tests did not cover — "release also
+  fails", "one previous unit is down", "who can write the socket". The pattern is that an incident
+  fix's test pins the branch the incident exercised. Give the regression walk one explicit
+  instruction per fix: name the case the shipped test does not cover and run it.
+- 2026-08-30 (audit): a `git diff --name-only` of 232 source files collapsed to ~110 once the 130
+  `route.ts` files touched only by a two-line export were set aside (`git diff --numstat` per file,
+  keep > 10 lines). Check for a mechanical sweep commit before sizing the walks; the capability
+  export itself was audited in the lead with one grep over the sensitive routes.
