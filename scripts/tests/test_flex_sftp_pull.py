@@ -386,6 +386,10 @@ def test_run_without_ingest_drives_default_ingest(tmp_path, monkeypatch):
         return True
 
     monkeypatch.setattr(flex_delivery_ingest, "claim_flex_delivery", fake_claim)
+    # R-436: the applied mark after the writers and the status lookup behind a
+    # lost claim are the same seam; the fake above only ever holds applied rows.
+    monkeypatch.setattr(flex_delivery_ingest, "mark_flex_delivery_applied", lambda _d: True)
+    monkeypatch.setattr(flex_delivery_ingest, "flex_delivery_status", lambda _d: "applied")
     rehydrated = []
     monkeypatch.setattr(
         journal_rehydrate,

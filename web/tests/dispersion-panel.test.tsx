@@ -270,6 +270,22 @@ describe("DispersionPanel — gating", () => {
     renderPanel(hookState());
     expect(screen.getByTestId("section-empty-state")).toBeTruthy();
   });
+
+  // R-450: the route's staleCollapse keeps `stale: true` + the last scan_time;
+  // "died Tuesday" must not render as "never seeded".
+  it("renders the writer-stale state with the last scan_time, not the empty state", () => {
+    const scanTime = "2026-08-25T22:21:07Z";
+    renderPanel(
+      hookState({
+        data: { ...MISSING_DISPERSION, stale: true, scan_time: scanTime } as unknown as DispersionData,
+      }),
+    );
+    const stale = screen.getByTestId("dispersion-writer-stale");
+    expect(stale.textContent ?? "").toContain(scanTime);
+    expect(stale.textContent ?? "").toMatch(/stale/i);
+    expect(stale.textContent ?? "").not.toMatch(/No dispersion data yet/);
+    expect(screen.queryByTestId("section-empty-state")).toBeNull();
+  });
 });
 
 describe("DispersionPanel — header strip", () => {
@@ -350,6 +366,54 @@ describe("DispersionPanel — stale badge", () => {
   it("omits the badge on a healthy payload", () => {
     renderPanel(hookState({ data: buildData() }));
     expect(screen.queryByTestId("dispersion-source-stale")).toBeNull();
+  });
+});
+
+// R-434: the strip names the rung that served the prices from
+// payload.source.prices, and a Yahoo-built sweep carries a visible degraded
+// marker (CLAUDE.md rule 7: Yahoo is the last rung, never a silent primary).
+describe("DispersionPanel — price source", () => {
+  it("renders the IB source label in the strip with no degraded marker", () => {
+    renderPanel(hookState({ data: buildData({ source: { prices: "ib", vix: "ib" } }) }));
+    expect(screen.getByTestId("dispersion-source").textContent).toContain("IB");
+    expect(screen.queryByTestId("dispersion-source-degraded")).toBeNull();
+  });
+
+  it("renders a visible degraded marker when Yahoo served the sweep", () => {
+    renderPanel(
+      hookState({
+        data: buildData({
+          source: { prices: "yahoo", vix: "yahoo" },
+          fetch: { ib_ok: 0, yahoo_ok: 514, failed: 0, failed_symbols: [] },
+        }),
+      }),
+    );
+    expect(screen.getByTestId("dispersion-source").textContent).toContain("YAHOO");
+    const badge = screen.getByTestId("dispersion-source-degraded") as HTMLElement;
+    expect(badge.textContent).toContain("YAHOO");
+    expect(badge.style.color).toBe("var(--warning)");
+    expect(badge.getAttribute("title") ?? "").toMatch(/Interactive Brokers/);
+  });
+
+  it("names Yahoo in the footnote when Yahoo served the sweep", () => {
+    const { container } = renderPanel(
+      hookState({ data: buildData({ source: { prices: "yahoo", vix: "yahoo" } }) }),
+    );
+    expect(container.textContent ?? "").toMatch(/Source: Yahoo/);
+  });
+
+  it("labels a mixed sweep and counts the Yahoo symbols in the footnote", () => {
+    const { container } = renderPanel(
+      hookState({
+        data: buildData({
+          source: { prices: "mixed", vix: "ib" },
+          fetch: { ib_ok: 400, yahoo_ok: 114, failed: 0, failed_symbols: [] },
+        }),
+      }),
+    );
+    expect(screen.getByTestId("dispersion-source").textContent).toContain("IB + YAHOO");
+    expect(screen.queryByTestId("dispersion-source-degraded")).toBeNull();
+    expect(container.textContent ?? "").toMatch(/Yahoo Finance fallback for 114 symbols/);
   });
 });
 

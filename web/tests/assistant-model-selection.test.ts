@@ -1,14 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { assistantDonePayload, drainAssistantStream } from "./assistantStream";
+import { drainAssistantStream } from "./assistantStream";
 
 /**
  * Model selection on the assistant request path.
  *
  * The picker sends a model id with the turn. The route honours it ONLY when the
  * catalog recognises it — a client must never be able to bill an arbitrary
- * model string — and an unknown id is ignored rather than thrown on, so a stale
- * picker degrades to the deployment default instead of failing the turn.
+ * model string — and an unknown id is a 400 (R-457): a silent swap onto another
+ * vendor's default ran the turn at a different price and capability with no
+ * signal. Only a catalog that is DOWN degrades to the deployment default.
  *
  * Provider routing is derived from the model id itself: picking a Grok model
  * must reach xAI even on a host whose default provider is Anthropic.
@@ -93,7 +94,7 @@ describe("assistant model selection", () => {
     expect(chat.mock.calls[0][0]).toMatchObject({ model: "claude-opus-5", provider: "anthropic" });
   });
 
-  it("ignores an uncatalogued model string and still answers on the default", async () => {
+  it("rejects an uncatalogued model string with 400 and never bills a default", async () => {
     mockCatalog();
     const chat = mockChat();
 
@@ -105,14 +106,9 @@ describe("assistant model selection", () => {
       }) as never,
     );
 
-    expect(res.status).toBe(200);
-    const body = await assistantDonePayload<{ content: string }>(res);
-    expect(body.content).toBeTruthy();
-
-    expect(chat).toHaveBeenCalledTimes(1);
-    const request = chat.mock.calls[0][0] as Record<string, unknown>;
-    expect(request).not.toHaveProperty("model");
-    expect(request).not.toHaveProperty("provider");
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Unknown model id: claude-opus-9000-free" });
+    expect(chat).not.toHaveBeenCalled();
   });
 
   it("no model in the payload reproduces today's behavior — catalog untouched", async () => {

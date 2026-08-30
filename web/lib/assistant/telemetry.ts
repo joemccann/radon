@@ -23,13 +23,18 @@ export type AssistantTurnRecord = {
   toolCalls: AssistantTurnToolCall[];
   usage?: { inputTokens: number; outputTokens: number };
   outcome: string;
+  /** Image blocks forwarded to the provider this turn (R-454, migration 0063). */
+  imageCount?: number;
+  /** Provider / model that actually answered, not the one requested. */
+  provider?: string | null;
+  model?: string | null;
 };
 
 export function recordAssistantTurn(record: AssistantTurnRecord): void {
   try {
     void dbExecute(
       {
-        sql: "INSERT INTO assistant_turns (ts, user_msg, rounds, tool_calls, usage, outcome) VALUES (?, ?, ?, ?, ?, ?)",
+        sql: "INSERT INTO assistant_turns (ts, user_msg, rounds, tool_calls, usage, outcome, image_count, provider, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         args: [
           record.ts,
           record.userMsg.slice(0, USER_MSG_MAX_CHARS),
@@ -37,6 +42,9 @@ export function recordAssistantTurn(record: AssistantTurnRecord): void {
           JSON.stringify(record.toolCalls),
           record.usage ? JSON.stringify(record.usage) : null,
           record.outcome,
+          record.imageCount ?? 0,
+          record.provider ?? null,
+          record.model ?? null,
         ],
       },
       { timeoutMs: WRITE_TIMEOUT_MS, label: "assistant-turns" },

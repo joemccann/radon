@@ -14,13 +14,14 @@ import { getFreshnessWindowMs, getMarketStateFromDate } from "@/lib/serviceHealt
 import { presetRange, type RangePresetSlug } from "@/lib/historyRange";
 import {
   COMPRESSED_Z,
-  SOURCE_FOOTNOTE,
   STRESS_Z,
   WINDOW,
+  formatSource,
   formatSpreadPct,
   formatVix,
   formatZ,
   regimeTone,
+  sourceFootnote,
   type DispersionPoint,
 } from "@/lib/dispersion";
 import { useDispersion } from "@/lib/useDispersion";
@@ -56,6 +57,13 @@ const EMPTY_SECONDARY =
   "the sector SPDRs and the VIX. Data appears after the first successful sweep.";
 
 const STALE_BADGE_TITLE = "Source stale: re-serving the last confirmed series";
+
+const WRITER_STALE_SECONDARY =
+  "The last snapshot is older than the freshness window, so the series is withheld rather than " +
+  "shown as current. Check radon-dispersion.service on the host.";
+
+const YAHOO_BADGE_TITLE =
+  "The Interactive Brokers rung served nothing this sweep; every price is a Yahoo Finance bar";
 
 function finiteOrNull(v: number | null | undefined): number | null {
   return v != null && Number.isFinite(v) ? v : null;
@@ -123,6 +131,20 @@ export default function DispersionPanel() {
     return <SpectralLoader label="Loading dispersion series" />;
   }
 
+  // R-450: the route's staleCollapse keeps `stale: true` + the last scan_time;
+  // a dead writer must read as "stale since", never as "never seeded".
+  if (data?.stale) {
+    return (
+      <SectionEmptyState
+        icon={Layers}
+        headline={`Dispersion writer stale since ${data.scan_time ?? "an unknown time"}`}
+        secondary={WRITER_STALE_SECONDARY}
+        tone="danger"
+        testId="dispersion-writer-stale"
+      />
+    );
+  }
+
   if (!data || data.missing || !data.current) {
     return (
       <SectionEmptyState
@@ -140,6 +162,8 @@ export default function DispersionPanel() {
   const isStale = data.status === "stale_source";
   const sourceSession = data.data_date ?? current.date ?? "---";
   const coverage = `${current.n_stocks ?? "---"} stocks / ${current.n_sectors ?? "---"} sectors`;
+  const sourceText = formatSource(data.source);
+  const yahooOnly = data.source?.prices === "yahoo";
   const regimeDetail = `stock ${formatPlainZ(current.z_stock)} / sector ${formatPlainZ(current.z_sector)} / VIX ${formatPlainZ(current.z_vix)}`;
 
   const rows: DispersionPoint[] = series.map((p) => ({
@@ -172,6 +196,25 @@ export default function DispersionPanel() {
     </span>
   ) : null;
 
+  // R-434: a Yahoo-built sweep is real data but never a silent primary (rule 7).
+  const yahooBadge = yahooOnly ? (
+    <span
+      data-testid="dispersion-source-degraded"
+      title={YAHOO_BADGE_TITLE}
+      style={{
+        fontFamily: "var(--font-mono)",
+        fontSize: "9px",
+        letterSpacing: "0.08em",
+        color: "var(--warning)",
+        border: "1px solid var(--warning)",
+        borderRadius: "4px",
+        padding: "1px 6px",
+      }}
+    >
+      YAHOO FALLBACK
+    </span>
+  ) : null;
+
   return (
     <>
       <div className="section">
@@ -183,6 +226,7 @@ export default function DispersionPanel() {
           </div>
           <span style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
             {staleBadge}
+            {yahooBadge}
             <span
               data-testid="dispersion-writer-age"
               data-state={writer.state}
@@ -205,7 +249,7 @@ export default function DispersionPanel() {
             <MetricCell label="CROSS SECTOR" value={formatZ(current.z_sector)} title={`95-5 spread ${formatSpreadPct(current.sector_spread)}`} />
             <MetricCell label="VIX" value={formatZ(current.z_vix)} title={formatVix(current.vix)} />
             <MetricCell label="SURFACE GAP" value={formatZ(current.surface_gap)} title="max(stock, sector) minus VIX" />
-            <MetricCell label="SOURCE UPDATED" value={sourceSession} title={coverage} />
+            <MetricCell label="SOURCE UPDATED" value={sourceSession} title={`${coverage} · ${sourceText}`} />
           </div>
         ) : (
           <RegimeStrip>
@@ -247,7 +291,11 @@ export default function DispersionPanel() {
               testId="dispersion-strip-source-updated"
               label="SOURCE UPDATED"
               value={<span data-testid="dispersion-source-updated">{sourceSession}</span>}
-              sub={<>{coverage}</>}
+              sub={
+                <>
+                  {coverage} · <span data-testid="dispersion-source">{sourceText}</span>
+                </>
+              }
             />
           </RegimeStrip>
         )}
@@ -283,7 +331,7 @@ export default function DispersionPanel() {
             marginTop: "8px",
           }}
         >
-          {SOURCE_FOOTNOTE}
+          {sourceFootnote(data.source, data.fetch)}
         </div>
       </div>
     </>

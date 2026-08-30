@@ -178,19 +178,36 @@ function lastUserContent(messages: ChatMessage[]): string {
   return message ? contentText(message.content) : "";
 }
 
-// A client-supplied model is never trusted: only an id the catalog knows is
-// forwarded, so a caller cannot bill an arbitrary model string. Anything else
-// (unknown id, or a catalog that is down) silently falls back to the
-// deployment default rather than failing the operator's turn.
-async function resolveModelSelection(raw: unknown): Promise<AssistantModelSelection> {
-  const requested = cleanString(raw);
-  if (!requested) return {};
-  try {
-    const model = await validateModelId(requested);
-    return model ? { model: model.id, provider: model.provider } : {};
-  } catch {
-    return {};
+/** Image blocks that will leave the box with this turn (R-454). */
+function imageCount(messages: ChatMessage[]): number {
+  let count = 0;
+  for (const message of messages) {
+    if (typeof message.content === "string") continue;
+    count += message.content.filter((block) => block.type === "image").length;
   }
+  return count;
+}
+
+type ModelResolution =
+  | { ok: true; selection: AssistantModelSelection }
+  | { ok: false; error: string };
+
+// A client-supplied model is never trusted: only an id the catalog knows is
+// forwarded, so a caller cannot bill an arbitrary model string. An id the
+// catalog rejects is a 400, never a silent swap onto another vendor's default
+// (R-457). A catalog that is DOWN is not an unknown id: the turn runs on the
+// deployment default and the `done` frame shows `requestedModel` != `model`.
+async function resolveModelSelection(raw: unknown): Promise<ModelResolution> {
+  const requested = cleanString(raw);
+  if (!requested) return { ok: true, selection: {} };
+  let model: Awaited<ReturnType<typeof validateModelId>>;
+  try {
+    model = await validateModelId(requested);
+  } catch {
+    return { ok: true, selection: {} };
+  }
+  if (!model) return { ok: false, error: `Unknown model id: ${requested}` };
+  return { ok: true, selection: { model: model.id, provider: model.provider } };
 }
 
 function toTelemetryToolCalls(toolEvents: ToolEvent[]): AssistantTurnToolCall[] {
@@ -210,6 +227,13 @@ export const radonCapability = "internal";
  * enough for an intermediary to reclaim it.
  */
 export const ASSISTANT_HEARTBEAT_MS = 10_000;
+
+/**
+ * Server-side bound on one turn. `maxDuration` above is a Vercel hint the
+ * Hetzner `radon-nextjs` unit never enforces, so without this a turn whose
+ * client has gone keeps spawning scans until the round cap (R-453).
+ */
+export const ASSISTANT_TURN_WALL_CLOCK_MS = maxDuration * 1000;
 
 type SseEvent = "start" | "heartbeat" | "tool" | "done" | "error";
 
@@ -248,6 +272,13 @@ export async function POST(request: NextRequest): Promise<Response> {
   const quota = await enforceDemoAiQuota("assistant");
   if (quota) return quota;
 
+  const requestedModel = cleanString(body?.model) || undefined;
+  const resolution = await resolveModelSelection(requestedModel);
+  if (!resolution.ok) {
+    return NextResponse.json({ error: resolution.error }, { status: 400 });
+  }
+  const selection = resolution.selection;
+
   // ── Everything above this line still carries a real HTTP status. ──────
   //
   // Below it the response header is already on the wire, so a failure can
@@ -257,6 +288,12 @@ export async function POST(request: NextRequest): Promise<Response> {
   const t0 = Date.now();
   const encoder = new TextEncoder();
   let heartbeat: ReturnType<typeof setInterval> | null = null;
+  const images = imageCount(messages);
+
+  // One abort per turn: the client cancelling the stream and the wall clock
+  // both fire it, and the loop hands it to every model round and tool call.
+  const turn = new AbortController();
+  const wallClock = setTimeout(() => turn.abort(), ASSISTANT_TURN_WALL_CLOCK_MS);
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -284,6 +321,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       const finish = () => {
         if (heartbeat) clearInterval(heartbeat);
         heartbeat = null;
+        clearTimeout(wallClock);
         try {
           controller.close();
         } catch {
@@ -295,13 +333,13 @@ export async function POST(request: NextRequest): Promise<Response> {
       void (async () => {
         try {
           const system = `${SYSTEM_PROMPT} Today is ${etCalendarDateString(new Date())} (America/New_York).`;
-          const selection = await resolveModelSelection(body?.model);
           const result = await runAssistantLoop(
             toTurns(messages),
             system,
             access.principal,
             selection,
             (event) => send("tool", event),
+            turn.signal,
           );
 
           const content =
@@ -320,11 +358,16 @@ export async function POST(request: NextRequest): Promise<Response> {
             toolCalls: toTelemetryToolCalls(result.toolEvents),
             usage: result.usage,
             outcome,
+            imageCount: images,
+            provider: result.provider ?? null,
+            model: result.model,
           });
 
           send("done", {
             content,
             model: result.model,
+            ...(requestedModel ? { requestedModel } : {}),
+            ...(result.usedFallback ? { usedFallback: true } : {}),
             toolEvents: result.toolEvents,
             proposal: result.proposal ?? null,
             rounds: result.rounds,
@@ -340,6 +383,7 @@ export async function POST(request: NextRequest): Promise<Response> {
             rounds: 0,
             toolCalls: [],
             outcome: "error",
+            imageCount: images,
           });
           send("error", { error: message });
         } finally {
@@ -350,6 +394,8 @@ export async function POST(request: NextRequest): Promise<Response> {
     cancel() {
       if (heartbeat) clearInterval(heartbeat);
       heartbeat = null;
+      // The client is gone; nothing the loop does from here can be rendered.
+      turn.abort();
     },
   });
 

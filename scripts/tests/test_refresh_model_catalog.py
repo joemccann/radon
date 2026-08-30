@@ -257,11 +257,19 @@ class TestBuildOutput:
 
 
 @pytest.fixture()
-def persist_calls(tmp_path, monkeypatch):
+def turso_catalog():
+    """Rows the fake Turso ``llm_model_catalog`` table answers with."""
+    return []
+
+
+@pytest.fixture()
+def persist_calls(tmp_path, monkeypatch, turso_catalog):
     import refresh_model_catalog as mod
 
     calls: list[tuple] = []
     monkeypatch.setattr(mod, "LLM_MODELS_JSON", tmp_path / "llm_models.json")
+    monkeypatch.setattr(mod.writer, "get_llm_model_catalog_rows",
+                        lambda: [dict(row) for row in turso_catalog], raising=False)
     monkeypatch.setattr(mod.writer, "ensure_no_replica_for_writers",
                         lambda: calls.append(("guard",)))
     monkeypatch.setattr(mod.writer, "upsert_llm_model_catalog_rows",
@@ -269,8 +277,13 @@ def persist_calls(tmp_path, monkeypatch):
     monkeypatch.setattr(mod.writer, "upsert_scan_snapshot",
                         lambda service, scan_time, payload: calls.append(("snapshot", service)))
     monkeypatch.setattr(mod.writer, "record_service_health",
-                        lambda service, state, **kw: calls.append(("health", service, state)))
+                        lambda service, state, **kw: calls.append(
+                            ("health", service, state, kw.get("error"))))
     return calls
+
+
+def _health_rows(calls: list[tuple]) -> list[tuple]:
+    return [call for call in calls if call[0] == "health"]
 
 
 class TestPersistResult:
@@ -287,23 +300,57 @@ class TestPersistResult:
             ("guard",),
             ("rows", 1),
             ("snapshot", "model-catalog"),
-            ("health", "model-catalog", "ok"),
+            ("health", "model-catalog", "ok", None),
         ]
         fallback = json.loads(mod.LLM_MODELS_JSON.read_text())
         assert fallback["defaultId"] == "claude-opus-5"
         assert fallback["models"][0]["model_id"] == "claude-opus-5"
 
-    def test_zero_rows_never_blanks_a_good_catalog(self, persist_calls):
+    def test_zero_rows_keeps_the_catalog_and_reports_the_failure(self, persist_calls):
+        """Every keyed provider failed: the last good Turso rows and JSON
+        cache must survive untouched (the old guarantee), and the heartbeat
+        must say so - an ``ok`` here is the NF-9 shape (R-455): the 26h
+        alarm can never fire on a catalog that is silently aging.
+        """
         import refresh_model_catalog as mod
 
         scan_time = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
         payload = build_output(rows=[], scan_time=scan_time, preferred="anthropic")
-        persist_result(payload, [])
+        persist_result(payload, [], failed={"anthropic": "401 unauthorized"})
 
         assert ("rows", 0) not in persist_calls
         assert ("snapshot", "model-catalog") not in persist_calls
-        assert ("health", "model-catalog", "ok") in persist_calls
         assert not mod.LLM_MODELS_JSON.exists()
+        [(_, service, state, error)] = _health_rows(persist_calls)
+        assert (service, state) == ("model-catalog", "error")
+        assert error["class"] == "provider_carry_forward"
+        assert error["providers"] == ["anthropic"]
+        assert "401 unauthorized" in error["message"]
+
+    def test_zero_rows_with_no_keyed_provider_is_a_plain_ok(self, persist_calls):
+        # No key anywhere is a supported state, not a failure.
+        scan_time = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        payload = build_output(rows=[], scan_time=scan_time, preferred="anthropic")
+        persist_result(payload, [])
+
+        assert _health_rows(persist_calls) == [("health", "model-catalog", "ok", None)]
+
+    def test_a_carried_forward_provider_is_named_even_when_others_refreshed(self, persist_calls):
+        scan_time = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        stale = (date.today() - timedelta(days=3)).isoformat()
+        rows = [
+            {"provider": "anthropic", "model_id": "claude-opus-5",
+             "display_name": "CLAUDE OPUS 5", "refreshed_at": scan_time},
+            {"provider": "openai", "model_id": "gpt-5.5", "display_name": "GPT 5.5",
+             "refreshed_at": stale},
+        ]
+        payload = build_output(rows=rows, scan_time=scan_time, preferred="anthropic")
+        persist_result(payload, rows, failed={"openai": "429 rate limited"})
+
+        assert ("rows", 2) in persist_calls
+        [(_, _, state, error)] = _health_rows(persist_calls)
+        assert state == "error"
+        assert error["providers"] == ["openai"]
 
 
 class TestRun:
@@ -404,6 +451,221 @@ class TestRun:
         assert payload["models"][0]["model_id"] == "claude-opus-4-8"
         assert payload["models"][0]["display_name"] == "CLAUDE OPUS 4 8"
 
+    def test_every_keyed_provider_failing_is_not_an_ok_heartbeat(self, persist_calls, clean_env):
+        """R-455: a revoked key that 401s nightly must not look like a
+        healthy daily run with today's finished_at."""
+        import refresh_model_catalog as mod
+
+        clean_env.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+        clean_env.setenv("OPENAI_API_KEY", "sk-openai-test")
+
+        def unauthorized(key):
+            raise RuntimeError("HTTP Error 401: Unauthorized")
+
+        clean_env.setattr(mod, "fetch_anthropic_models", unauthorized)
+        clean_env.setattr(mod, "fetch_openai_models", unauthorized)
+
+        payload = mod.run()
+
+        assert payload["models"] == []
+        assert ("rows", 0) not in persist_calls
+        [(_, service, state, error)] = _health_rows(persist_calls)
+        assert service == "model-catalog"
+        assert state == "error"
+        assert error is not None
+        assert error["providers"] == ["anthropic", "openai"]
+        assert "401" in error["message"]
+
+    def test_a_carried_forward_provider_is_reported_by_run(self, persist_calls, clean_env):
+        import refresh_model_catalog as mod
+
+        stale = (date.today() - timedelta(days=3)).isoformat()
+        mod.LLM_MODELS_JSON.write_text(json.dumps({
+            "models": [{"provider": "openai", "model_id": "gpt-5.5",
+                        "display_name": "GPT 5.5", "refreshed_at": stale}],
+            "defaultId": "gpt-5.5",
+        }))
+        clean_env.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+        clean_env.setenv("OPENAI_API_KEY", "sk-openai-test")
+
+        def rate_limited(key):
+            raise RuntimeError("429 rate limited")
+
+        clean_env.setattr(mod, "fetch_anthropic_models", lambda key: ANTHROPIC)
+        clean_env.setattr(mod, "fetch_openai_models", rate_limited)
+
+        payload = mod.run()
+
+        assert {m["provider"] for m in payload["models"]} == {"anthropic", "openai"}
+        [(_, _, state, error)] = _health_rows(persist_calls)
+        assert state == "error"
+        assert error["providers"] == ["openai"]
+
+    def test_a_writer_failure_leaves_an_error_row_not_a_traceback(
+        self, persist_calls, clean_env, capsys
+    ):
+        """R-455/R-458: a Turso failure in the upsert used to exit with a
+        traceback and no row at all, invisible until the 26h window."""
+        import refresh_model_catalog as mod
+
+        clean_env.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+        clean_env.setattr(mod, "fetch_anthropic_models", lambda key: ANTHROPIC)
+
+        def turso_down(rows, refreshed_at=None):
+            raise ConnectionError("Hrana stream closed")
+
+        clean_env.setattr(mod.writer, "upsert_llm_model_catalog_rows", turso_down)
+
+        assert mod.main([]) == 1
+
+        [(_, service, state, error)] = _health_rows(persist_calls)
+        assert (service, state) == ("model-catalog", "error")
+        assert error["class"] == "cycle_failed"
+        assert "Hrana stream closed" in error["message"]
+        assert not mod.LLM_MODELS_JSON.exists()
+
+    def test_previous_rows_are_seeded_from_turso_when_the_json_is_absent(
+        self, persist_calls, clean_env, turso_catalog
+    ):
+        """R-456: the carry-forward guarantee must not depend on a
+        host-local file that is ephemeral on the VPS."""
+        import refresh_model_catalog as mod
+
+        stale = (date.today() - timedelta(days=5)).isoformat()
+        turso_catalog.append({"provider": "openai", "model_id": "gpt-5.5",
+                              "display_name": "GPT 5.5", "refreshed_at": stale})
+        assert not mod.LLM_MODELS_JSON.exists()
+        clean_env.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+        clean_env.setenv("OPENAI_API_KEY", "sk-openai-test")
+
+        def rate_limited(key):
+            raise RuntimeError("429 rate limited")
+
+        clean_env.setattr(mod, "fetch_anthropic_models", lambda key: ANTHROPIC)
+        clean_env.setattr(mod, "fetch_openai_models", rate_limited)
+
+        payload = mod.run()
+
+        by_provider = {m["provider"]: m for m in payload["models"]}
+        assert by_provider["openai"] == {
+            "provider": "openai", "model_id": "gpt-5.5", "display_name": "GPT 5.5",
+            "refreshed_at": stale,
+        }
+        assert ("rows", 2) in persist_calls
+
+    def test_turso_rows_win_over_a_lagging_json(self, persist_calls, clean_env, turso_catalog):
+        import refresh_model_catalog as mod
+
+        turso_catalog.append({"provider": "openai", "model_id": "gpt-5.5",
+                              "display_name": "GPT 5.5", "refreshed_at": "turso-stamp"})
+        mod.LLM_MODELS_JSON.write_text(json.dumps({
+            "models": [{"provider": "openai", "model_id": "gpt-5.4",
+                        "display_name": "GPT 5.4", "refreshed_at": "json-stamp"}],
+            "defaultId": "gpt-5.4",
+        }))
+        clean_env.setenv("OPENAI_API_KEY", "sk-openai-test")
+
+        def rate_limited(key):
+            raise RuntimeError("429 rate limited")
+
+        clean_env.setattr(mod, "fetch_openai_models", rate_limited)
+
+        payload = mod.run()
+
+        assert payload["models"][0]["model_id"] == "gpt-5.5"
+        assert payload["models"][0]["refreshed_at"] == "turso-stamp"
+
+    def test_json_still_seeds_previous_when_turso_is_unreachable(self, persist_calls, clean_env):
+        import refresh_model_catalog as mod
+
+        def turso_down():
+            raise ConnectionError("Hrana stream closed")
+
+        clean_env.setattr(mod.writer, "get_llm_model_catalog_rows", turso_down)
+        mod.LLM_MODELS_JSON.write_text(json.dumps({
+            "models": [{"provider": "openai", "model_id": "gpt-5.5",
+                        "display_name": "GPT 5.5", "refreshed_at": "json-stamp"}],
+            "defaultId": "gpt-5.5",
+        }))
+        clean_env.setenv("OPENAI_API_KEY", "sk-openai-test")
+
+        def rate_limited(key):
+            raise RuntimeError("429 rate limited")
+
+        clean_env.setattr(mod, "fetch_openai_models", rate_limited)
+
+        payload = mod.run()
+
+        assert payload["models"][0]["refreshed_at"] == "json-stamp"
+
+
+class TestFetchBounds:
+    def test_anthropic_pagination_terminates_within_the_page_cap(self, monkeypatch):
+        """R-458: a server that answers has_more: true forever (or with a
+        repeating last_id) used to spin until systemd killed the unit."""
+        import refresh_model_catalog as mod
+
+        pages: list[str] = []
+
+        def always_more(url, headers):
+            pages.append(url)
+            if len(pages) > 50:
+                raise AssertionError("pagination is uncapped")
+            return {"data": [{"id": "claude-opus-5", "type": "model"}],
+                    "has_more": True, "last_id": "claude-opus-5"}
+
+        monkeypatch.setattr(mod, "_http_get_json", always_more)
+
+        with pytest.raises(RuntimeError, match="page"):
+            mod.fetch_anthropic_models("sk-ant-test")
+
+        assert 1 < len(pages) <= mod.ANTHROPIC_MAX_PAGES
+
+    def test_anthropic_pagination_still_follows_a_finite_cursor(self, monkeypatch):
+        import refresh_model_catalog as mod
+
+        def two_pages(url, headers):
+            if "after_id" in url:
+                return {"data": [{"id": "b"}], "has_more": False, "last_id": "b"}
+            return {"data": [{"id": "a"}], "has_more": True, "last_id": "a"}
+
+        monkeypatch.setattr(mod, "_http_get_json", two_pages)
+
+        assert [m["id"] for m in mod.fetch_anthropic_models("sk-ant-test")] == ["a", "b"]
+
+    def test_a_provider_that_overruns_its_budget_is_carried_forward(self, persist_calls, clean_env):
+        """R-458: urlopen's timeout bounds one socket read, not the request;
+        each provider gets its own wall-clock budget so one slow provider
+        cannot consume the unit's TimeoutStartSec and lose the whole run."""
+        import time
+
+        import refresh_model_catalog as mod
+
+        mod.LLM_MODELS_JSON.write_text(json.dumps({
+            "models": [{"provider": "anthropic", "model_id": "claude-opus-4-8",
+                        "display_name": "CLAUDE OPUS 4 8", "refreshed_at": "stale"}],
+            "defaultId": "claude-opus-4-8",
+        }))
+        clean_env.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+        clean_env.setattr(mod, "PROVIDER_BUDGET_S", 0.1, raising=False)
+
+        def slow_drip(key):
+            time.sleep(1.5)
+            return ANTHROPIC
+
+        clean_env.setattr(mod, "fetch_anthropic_models", slow_drip)
+
+        started = time.monotonic()
+        payload = mod.run()
+        elapsed = time.monotonic() - started
+
+        assert elapsed < 1.0
+        assert payload["models"][0]["model_id"] == "claude-opus-4-8"
+        [(_, _, state, error)] = _health_rows(persist_calls)
+        assert state == "error"
+        assert error["providers"] == ["anthropic"]
+        assert "budget" in error["message"]
+
 
 class TestStorage:
     @pytest.fixture()
@@ -492,4 +754,22 @@ class TestStorage:
 
         assert list(inspect.signature(writer.upsert_llm_model_catalog_rows).parameters) == [
             "rows", "refreshed_at",
+        ]
+
+    def test_reader_round_trips_the_catalog_reader_fields(self, db, monkeypatch):
+        """The Turso seed for ``load_previous`` (R-456) must hand back the
+        exact dict shape ``upsert_llm_model_catalog_rows`` accepts, so a
+        carried-forward row round-trips with its own refreshed_at."""
+        from db import writer
+
+        monkeypatch.setattr(writer, "get_db", lambda: db)
+        assert writer.get_llm_model_catalog_rows() == []
+        writer.upsert_llm_model_catalog_rows(
+            [{"provider": "openai", "model_id": "gpt-5.5",
+              "display_name": "GPT 5.5", "refreshed_at": "r1"}],
+            refreshed_at="batch",
+        )
+        assert writer.get_llm_model_catalog_rows() == [
+            {"provider": "openai", "model_id": "gpt-5.5",
+             "display_name": "GPT 5.5", "refreshed_at": "r1"},
         ]
