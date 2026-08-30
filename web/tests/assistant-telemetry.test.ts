@@ -77,6 +77,9 @@ describe("assistant telemetry", () => {
       JSON.stringify(baseRecord.toolCalls),
       JSON.stringify(baseRecord.usage),
       "answered",
+      0,
+      null,
+      null,
     ]);
     expect(opts).toMatchObject({ label: "assistant-turns" });
   });
@@ -150,6 +153,7 @@ describe("assistant telemetry", () => {
     expect(JSON.parse(stmt.args[3])).toEqual([{ name: "get_flow", ok: true }]);
     expect(JSON.parse(stmt.args[4])).toEqual({ inputTokens: 30, outputTokens: 13 });
     expect(stmt.args[5]).toBe("answered");
+    expect(stmt.args.slice(6)).toEqual([0, "anthropic", "mock"]);
 
     const lines = logSpy.mock.calls.map((call) => call.join(" "));
     expect(lines.filter((line) => /^\[assistant\] round=\d+ /.test(line))).toHaveLength(2);
