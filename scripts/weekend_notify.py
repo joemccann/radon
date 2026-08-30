@@ -111,7 +111,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--loop", required=True, choices=["reliability", "testing", "ci-performance"]
     )
-    parser.add_argument("--phase", required=True, choices=["audit", "remediate"])
+    # `prologue` is not decorative: every wrapper's report() is reachable with
+    # PHASE="prologue" — the marker refusal, the held-lock refusal and the ERR
+    # trap armed over the whole prologue all fire before begin_phase runs.
+    # Rejecting it exited 2 before the Pushover call, and the wrapper sends the
+    # page with `|| true`, so those failures posted an issue comment and never
+    # paged.
+    parser.add_argument(
+        "--phase", required=True, choices=["prologue", "audit", "remediate"]
+    )
     parser.add_argument("--status", required=True)
     parser.add_argument("--pr-url", default="")
     parser.add_argument("--detail", default="")
