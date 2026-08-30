@@ -28,6 +28,13 @@ export const MAX_CLIENTS = 32;
 export const FAILURE_THRESHOLD = 3;
 export const SILENCE_MS = 5 * 60_000;
 const HEALTH_TICK_MS = 60_000;
+// 2026-08-30 incident: the upstream WS dial from the VPS was refused for 16+
+// minutes (vendor edge is Cloudflare; other networks connected fine) while
+// the SAME data stayed reachable over the flash REST endpoint the hub already
+// uses to seed its ring at boot. While the WS lane is down, poll that lane so
+// the tape keeps printing; the service_health row stays `error` on purpose —
+// the WS outage still needs an operator.
+export const FLASH_POLL_MS = 60_000;
 // R-460: a client that stops draining keeps its socket OPEN while every
 // headline queues on the hub heap, and a peer that vanished behind NAT pins a
 // slot until the kernel's retransmit timeout. Clients are pinged every
@@ -99,6 +106,7 @@ export function createHeadlinesHub({
   healthTickMs = HEALTH_TICK_MS,
   pingIntervalMs = PING_INTERVAL_MS,
   maxBufferedBytes = MAX_BUFFERED_BYTES,
+  flashPollMs = FLASH_POLL_MS,
 } = {}) {
   const host = resolveHubListenHost(listenHost, security.bindHost);
   const ring = [];
@@ -108,11 +116,16 @@ export function createHeadlinesHub({
   let closed = false;
   let healthTimer = null;
   let pingTimer = null;
+  let pollTimer = null;
+  let pollInFlight = false;
   let pendingUpgrades = 0;
   let lastFrameAt = null;
   let startedAt = null;
   let consecutiveFailures = 0;
   let lastOkWriteAt = 0;
+  // "unknown" until the first upstream open/close so a healthy boot does not
+  // greet its first dashboard with a spurious down frame.
+  let upstreamState = "unknown";
 
   function dropClient(client, reason) {
     clients.delete(client);
@@ -132,12 +145,15 @@ export function createHeadlinesHub({
 
   // R-462: a seed row the store already restored is re-pushed (same id) but
   // not re-persisted; only rows genuinely missing from the store hit Turso.
-  function ingest(parsed, { seed = false } = {}) {
+  // `onlyNew` (the flash poll lane) goes further: a row the ring already has
+  // is skipped outright, so repeated polls neither re-broadcast nor reorder.
+  function ingest(parsed, { seed = false, onlyNew = false } = {}) {
     if (frameByteLength(parsed) > maxFrameBytes) return false;
     const item = toHeadline(parsed);
     if (!item) return false;
     const { content: _content, ...meta } = item;
     if (containsUpstreamHost(meta)) return false;
+    if (onlyNew && ring.some((row) => row.id === item.id)) return false;
     const restored = seed && ring.some((row) => row.id === item.id);
     pushToRing(item);
     if (!restored) persist(item);
@@ -269,6 +285,10 @@ export function createHeadlinesHub({
         // Client is receive-only. Drop inbound payloads.
       });
       deliver(ws, { type: "snapshot", items: ring.slice() });
+      // A client admitted mid-outage used to render its snapshot as live
+      // (the close-driven broadcast had already happened, and the next one
+      // could be a full backoff interval away). Say the state at admit.
+      if (upstreamState === "down") deliver(ws, { type: "status", state: "upstream-down" });
     });
   }
 
@@ -299,9 +319,11 @@ export function createHeadlinesHub({
   function onUpstreamStatus(event) {
     if (event.event === "open") {
       consecutiveFailures = 0;
+      upstreamState = "open";
       log(`[mktnews] upstream open ${event.url}`);
       broadcastStatus("upstream-open");
     } else if (event.event === "close") {
+      upstreamState = "down";
       log(`[mktnews] close ${event.code} ${event.reason}`);
       broadcastStatus("upstream-down");
     } else if (event.event === "idle") {
@@ -314,6 +336,26 @@ export function createHeadlinesHub({
       }
     } else if (event.event === "error") {
       log(`[mktnews] error ${event.error}`);
+    }
+  }
+
+  async function pollTick() {
+    if (closed || pollInFlight) return;
+    const sinceFrame = Date.now() - (lastFrameAt ?? startedAt);
+    if (upstreamState !== "down" && sinceFrame <= silenceMs) return;
+    pollInFlight = true;
+    try {
+      const items = await loadHistory();
+      if (!Array.isArray(items) || closed) return;
+      let fed = 0;
+      for (const item of items.slice(-ringSize)) {
+        if (ingest(item, { onlyNew: true })) fed += 1;
+      }
+      if (fed > 0) log(`[mktnews] flash poll fed ${fed} print(s) while upstream ws down`);
+    } catch {
+      // The WS reconnect path and health row already cover a dead vendor.
+    } finally {
+      pollInFlight = false;
     }
   }
 
@@ -332,6 +374,12 @@ export function createHeadlinesHub({
     if (recordHealth) {
       healthTimer = setInterval(healthTick, healthTickMs);
       healthTimer.unref?.();
+    }
+    if (loadHistory && flashPollMs > 0) {
+      pollTimer = setInterval(() => {
+        void pollTick();
+      }, flashPollMs);
+      pollTimer.unref?.();
     }
   }
 
@@ -370,6 +418,10 @@ export function createHeadlinesHub({
     if (pingTimer != null) {
       clearInterval(pingTimer);
       pingTimer = null;
+    }
+    if (pollTimer != null) {
+      clearInterval(pollTimer);
+      pollTimer = null;
     }
     upstream?.stop?.();
     for (const client of clients) {
