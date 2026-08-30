@@ -35,6 +35,11 @@ commits = [
   # test_gitleaks_policy.py for the mirrored baseline.
   "6ec11003bb4521e7f7b677ffbd78b7fd4d09458a",
   "da857b8b19a6e5778bb86bf37465346dca8da89b",
+  # 2026-08-30: PR #184's test fixture spelled a fake gateway password
+  # (TWS_PASSWORD="p@ss word") to prove the env-file unquoting; merged before
+  # the scan ran. Not a credential; the fixture was rewritten to runtime
+  # construction in the next commit so no later SHA re-trips the rule.
+  "020865adeff48b7182b7eb81d74a01fc70d00c82",
 ]
 
 [[rules]]
