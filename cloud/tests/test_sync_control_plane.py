@@ -181,7 +181,7 @@ class TestContracts:
         # Still no way for radon to hand root an arbitrary tree: the verb takes
         # no argument and reads through the GitHub main tip only.
         assert "sync-control-plane *" not in sudoers
-        assert "refresh-control-plane-privileged" not in sudoers
+        assert "sync-control-plane-privileged" not in sudoers
         body = function_body(helper, "sync_control_plane")
         assert "resolve_fetched_main_tip" in body
         assert 'archive --format=tar "$tip" cloud' in body

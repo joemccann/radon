@@ -8,13 +8,10 @@ After=docker.service tailscaled.service
 Requires=docker.service
 Wants=tailscaled.service
 
-# DUR-10 (2026-06-12): a gateway stop cascade-stops relay+monitor through
-# PartOf=radon-ib-gateway.service in their units, and a clean container exit never
-# re-fires after a clean cascade stop — they stayed down silently after a
-# manual stop -> start. Wants= makes ANY gateway start pull the cascade
-# victims back; their own After=radon-ib-gateway ordering still applies.
-# Deliberately NOT ExecStartPost=systemctl (job-queue deadlock).
-Wants=radon-relay.service radon-monitor.service
+# Relay and monitor used to be PartOf= this unit (DUR-10). That cascade is
+# gone: a Gateway stop/restart must not take the app plane with it, on this
+# combined host or after the broker split. Do not Wants= those units here;
+# radon start / deploy restart-managed own the app plane.
 
 # DUR-02 (2026-06-12): brake crash loops — after StartLimitBurst starts inside
 # StartLimitIntervalSec, systemd parks the unit as failed (Result=start-limit-hit)

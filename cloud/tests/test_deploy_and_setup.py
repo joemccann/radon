@@ -269,9 +269,9 @@ class TestSetupSudoers:
             "install-units",
             "sync-scheduled-units",
             "refresh-control-plane",
+            "refresh-control-plane-privileged",
         ):
             assert f"radon-deploy-root {action}" in sudoers
-        assert "radon-deploy-root refresh-control-plane-privileged" not in sudoers
         assert "radon-deploy-root start-nextjs" not in sudoers
 
     def test_watchdog_sudoers_file_provisioned(self, setup_sh: str) -> None:
