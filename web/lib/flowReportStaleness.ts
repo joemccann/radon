@@ -8,10 +8,12 @@
  * Mirrors the pattern used by `gexStaleness.ts` and `vcgStaleness.ts`.
  */
 
+import { lastCompletedSessionDate } from "./marketSession";
 import { parseScanTime } from "./parseScanTime";
 
 const MARKET_HOURS_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const AFTER_HOURS_TTL_MS = 8 * 60 * 60 * 1000; // 8 hours
+const CLOSE_MINUTES = 16 * 60;
 
 export type FlowReportLike = {
   fetched_at?: string | null;
@@ -41,6 +43,21 @@ function isMarketOpenNow(now: Date = new Date()): boolean {
 }
 
 /**
+ * R-465: the after-hours TTL alone let a 09:00 ET scan pass as fresh at
+ * 16:30 ET, with the whole session's flow postdating it. After hours a report
+ * is fresh only if it was generated at or after the 16:00 ET close of the
+ * last completed session (the "EOD report" the header comment assumes).
+ */
+function postdatesLastClose(report: Date, now: Date): boolean {
+  const closeDate = lastCompletedSessionDate(now);
+  const et = new Date(report.toLocaleString("en-US", { timeZone: "America/New_York" }));
+  const reportDate = marketDate(report);
+  if (reportDate > closeDate) return true;
+  if (reportDate < closeDate) return false;
+  return et.getHours() * 60 + et.getMinutes() >= CLOSE_MINUTES;
+}
+
+/**
  * @param report - parsed flow report
  * @param now - injectable clock for testing
  * @param marketOpenOverride - injectable market state for testing
@@ -61,8 +78,9 @@ export function isFlowReportStale(
   if (ageMs < 0) return false;
 
   const marketOpen = marketOpenOverride ?? isMarketOpenNow(now);
-  const ttl = marketOpen ? MARKET_HOURS_TTL_MS : AFTER_HOURS_TTL_MS;
-  return ageMs > ttl;
+  if (marketOpen) return ageMs > MARKET_HOURS_TTL_MS;
+  if (ageMs > AFTER_HOURS_TTL_MS) return true;
+  return !postdatesLastClose(parsed, now);
 }
 
 export const FLOW_REPORT_STALENESS = {
