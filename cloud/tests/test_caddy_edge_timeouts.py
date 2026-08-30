@@ -32,7 +32,6 @@ retry loop would have reached the restarted upstream.
 from __future__ import annotations
 
 import re
-import shlex
 import sys
 from pathlib import Path
 
@@ -412,15 +411,9 @@ class TestCiProvidesTheCaddyBinary:
         name = Path(__file__).name
 
         def collects(entry) -> bool:
-            tokens = shlex.split(entry["paths"])
-            included = [token for token in tokens if not token.startswith("-")]
-            ignored = [
-                token.split("=", 1)[1]
-                for token in tokens
-                if token.startswith("--ignore=")
-            ]
-            return any(fnmatch.fnmatch(name, Path(token).name) for token in included) \
-                and not any(fnmatch.fnmatch(name, Path(token).name) for token in ignored)
+            included = fnmatch.fnmatch(name, Path(entry["paths"]).name)
+            omitted = Path(entry.get("omit", "")).name
+            return included and name != omitted
 
         shards = [
             entry["shard"]

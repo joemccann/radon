@@ -28,7 +28,7 @@
 - [x] E6 Gate concurrent exact-SHA prepull
 - [x] E7 Reuse the tested production artifact
 - [x] E8 Complete focused and full verification
-- [ ] E9 Commit and push to main
+- [x] E9 Commit and push to main
 - [ ] E10 Verify the measured CI/deploy gain
 
 ## Review
@@ -39,6 +39,7 @@
 - Prestaging and image prepull overlap. A duplicate host Next compile is skipped only after exact-image, rollback-artifact, matching-drop-in, and effective-systemd checks pass.
 - Commit gate: focused 322 passed / 5 skipped; cloud full 1,454 passed / 12 skipped; gitleaks scanned 2,380 commits with no findings; actionlint and shell syntax passed.
 - Full Vitest load timeouts all passed in isolation. Full monolithic Python retained unrelated Flex/scan baseline failures, while both changed timeout regressions passed under xdist; GitHub's isolated shards are the release gate.
+- Implementation commit `44683993` is on `main`. Run 33293579469 finished in 341s versus the 468s baseline and cut `scripts-rs` from 204s to 70s, but did not deploy because pytest still collected an explicitly expanded Caddy file despite `--ignore`; the follow-up removes that file before invoking pytest.
 
 ---
 

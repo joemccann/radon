@@ -206,7 +206,14 @@ def test_caddy_wall_clock_tests_have_their_own_shard() -> None:
     assert [str(shard) for shard in matrix["shard"]] == ["al", "edge", "mz"]
     rows = {str(row["shard"]): str(row["paths"]) for row in matrix["include"]}
     assert rows["edge"] == "cloud/tests/test_caddy_edge_timeouts.py"
-    assert "--ignore=cloud/tests/test_caddy_edge_timeouts.py" in rows["al"]
+    assert rows["al"] == "cloud/tests/test_[a-l]*.py"
+    omits = {
+        str(row["shard"]): str(row.get("omit", ""))
+        for row in matrix["include"]
+    }
+    assert omits["al"] == "cloud/tests/test_caddy_edge_timeouts.py"
+    assert "matrix.omit" in _job_commands(cloud)
+    assert "selected" in _job_commands(cloud)
     caddy_step = next(step for step in cloud["steps"] if step.get("name") == "Install caddy (edge mechanism tests)")
     assert "edge" in caddy_step["if"]
     assert "--durations=25" in _job_commands(cloud)
@@ -500,7 +507,7 @@ def test_cloud_infra_shards_partition_cloud_tests() -> None:
     assignments: dict[str, list[str]] = {}
     matrix = _workflow()["jobs"]["cloud-tests"]["strategy"]["matrix"]
     for row in matrix["include"]:
-        for path in _expand_shard_paths(root, str(row["paths"])):
+        for path in _expand_shard_row(root, row):
             assignments.setdefault(path, []).append(str(row["shard"]))
     on_disk = _test_modules_under(root, root / "cloud" / "tests")
     missing = sorted(on_disk - assignments.keys())
@@ -585,6 +592,12 @@ def _expand_shard_paths(root: Path, paths: str) -> set[str]:
     return out - ignored
 
 
+def _expand_shard_row(root: Path, row: dict) -> set[str]:
+    selected = _expand_shard_paths(root, str(row["paths"]))
+    omitted = str(row.get("omit", ""))
+    return selected - (_expand_shard_paths(root, omitted) if omitted else set())
+
+
 def test_pytest_shard_union_equals_recursive_collection() -> None:
     root = WORKFLOW.parents[2]
     py_tests = _workflow()["jobs"]["py-tests"]
@@ -625,7 +638,7 @@ def test_cloud_shard_union_equals_recursive_collection() -> None:
     cloud_tests = _workflow()["jobs"]["cloud-tests"]
     sharded: set[str] = set()
     for item in cloud_tests["strategy"]["matrix"]["include"]:
-        sharded |= _expand_shard_paths(root, str(item["paths"]))
+        sharded |= _expand_shard_row(root, item)
     on_disk = _test_modules_under(root, root / "cloud" / "tests")
     assert on_disk, "cloud/tests moved; this guard is measuring nothing"
     missing = sorted(on_disk - sharded)
