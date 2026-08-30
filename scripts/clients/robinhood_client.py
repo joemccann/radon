@@ -50,12 +50,16 @@ text. ``_redact`` strips every known secret defensively from error strings.
 """
 from __future__ import annotations
 
+import fcntl
 import json
+import math
 import os
+import stat
 import sys
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 import requests
 
@@ -66,6 +70,11 @@ TOKEN_ENDPOINT = "https://api.robinhood.com/oauth2/token/"
 DEFAULT_TOKEN_FILE = Path(__file__).resolve().parents[2] / "data" / "rh_mcp_token.json"
 _PROTOCOL_VERSION = "2025-06-18"
 _DEFAULT_TIMEOUT = 20
+# The failover ladders budget ~30s per rung (portfolio_risk
+# BACKFILL_SYMBOL_WORST_CASE_S). One symbol costs at most 4 POSTs
+# (initialize + initialized + tools/call + one refresh), so the ladder
+# helpers use this bound: 4 x 7s = 28s worst case, inside the rung budget.
+LADDER_TIMEOUT_S = 7
 _USER_AGENT = "radon/2.0"
 
 # Access tokens live ~3 days; refresh this far ahead of the recorded expiry.
@@ -150,6 +159,17 @@ class RobinhoodTokenStore:
         """File state overlaid on env bootstrap values. Read-only."""
         state: Dict[str, Any] = {}
         try:
+            mode = stat.S_IMODE(self._path.stat().st_mode)
+            if mode & 0o077:
+                # Never print values — only the path and the mode.
+                print(
+                    f"  Robinhood token file {self._path} permissions "
+                    f"{oct(mode)} are too open; expected 0600",
+                    file=sys.stderr,
+                )
+        except OSError:
+            pass
+        try:
             loaded = json.loads(self._path.read_text(encoding="utf-8"))
             if isinstance(loaded, dict):
                 state = loaded
@@ -204,6 +224,18 @@ class RobinhoodTokenStore:
         except (TypeError, ValueError):
             return None
 
+    def minted_recently(self, token: str, within_s: float = 60.0) -> bool:
+        """True when ``token`` is the stored access token and it was written
+        within ``within_s`` — i.e. it just came out of a refresh, so an MCP
+        401 against it is structural and another refresh cannot help."""
+        if not token or token != self.access_token:
+            return False
+        written = self._state.get("written_at")
+        try:
+            return written is not None and (time.time() - float(written)) < within_s
+        except (TypeError, ValueError):
+            return False
+
     def access_token_if_fresh(self, now: Optional[float] = None) -> Optional[str]:
         """The access token unless it is inside the refresh safety window.
 
@@ -242,8 +274,33 @@ class RobinhoodTokenStore:
 
     # ── refresh (the one network path in this class) ─────────────
 
-    def refresh(self, timeout: int = _DEFAULT_TIMEOUT) -> str:
+    @contextmanager
+    def _exclusive_lock(self) -> Iterator[None]:
+        """flock on <path>.lock — serializes refresh across processes AND
+        threads (garch fans fetches across a 16-worker pool), so a
+        single-use rotated refresh token is never spent twice."""
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path = self._path.with_name(self._path.name + ".lock")
+        fd = os.open(lock_path, os.O_WRONLY | os.O_CREAT, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+
+    def refresh(
+        self, timeout: int = _DEFAULT_TIMEOUT, invalid_access: Optional[str] = None
+    ) -> str:
         """Mint a fresh access token via grant_type=refresh_token.
+
+        Single-flight: an exclusive file lock serializes concurrent
+        refreshers, and the state is re-read under the lock so a process
+        that lost the race reuses the winner's rotated tokens instead of
+        spending the (single-use) old refresh token a second time.
+        ``invalid_access`` names an access token the MCP just rejected, so
+        the re-read short-circuit cannot hand back the same known-bad token
+        (a no-expiry bootstrap token otherwise looks "fresh").
 
         Public client: form-encoded refresh_token + client_id, NO client
         secret. A rotated refresh_token in the response replaces the old
@@ -256,6 +313,14 @@ class RobinhoodTokenStore:
             raise RobinhoodNotConfiguredError(
                 "no ROBINHOOD_MCP_REFRESH_TOKEN / ROBINHOOD_MCP_CLIENT_ID to refresh with"
             )
+        with self._exclusive_lock():
+            self._state = self._read()
+            already_fresh = self.access_token_if_fresh()
+            if already_fresh and already_fresh != (invalid_access or ""):
+                return already_fresh  # another process/thread won the race
+            return self._refresh_locked(timeout)
+
+    def _refresh_locked(self, timeout: int) -> str:
         try:
             resp = requests.post(
                 TOKEN_ENDPOINT,
@@ -276,7 +341,9 @@ class RobinhoodTokenStore:
             ) from None
 
         if resp.status_code >= 400:
-            detail = _scrub(resp.text[:200], self.secrets())
+            # Scrub BEFORE truncating: a slice can cut a token in half and
+            # leave a prefix the exact-match scrub would no longer find.
+            detail = _scrub(resp.text, self.secrets())[:200]
             if 400 <= resp.status_code < 500:
                 # invalid_grant / invalid_client: retrying cannot help.
                 _disable_for_process(
@@ -423,13 +490,38 @@ class RobinhoodClient:
         if resp.status_code in (401, 403):
             # Access token expired or revoked mid-flight: refresh once and
             # retry the same request with the new token.
-            if _retry_auth and self._store is not None and self._store.can_refresh():
-                self._store.refresh(timeout=self._timeout)
+            if (
+                _retry_auth
+                and self._store is not None
+                and self._store.can_refresh()
+                and not _refresh_disabled
+            ):
+                if self._store.minted_recently(token):
+                    # The rejected token just came out of a refresh: another
+                    # mint cannot help, and retrying per symbol would hammer
+                    # the token endpoint across a whole scan.
+                    _disable_for_process(
+                        f"MCP rejected a freshly refreshed token (HTTP {resp.status_code})"
+                    )
+                    raise RobinhoodAuthError(
+                        f"Robinhood MCP rejected the token (HTTP {resp.status_code})"
+                    )
+                self._store.refresh(timeout=self._timeout, invalid_access=token)
                 return self._post(payload, _retry_auth=False)
+            if not _retry_auth:
+                # This request already carried a token minted seconds ago.
+                # The MCP rejecting it is structural (revoked grant, wrong
+                # client) — refreshing again per symbol would hammer the
+                # token endpoint across a whole scan, so degrade the
+                # process to the unconfigured skip.
+                _disable_for_process(
+                    f"MCP rejected a freshly refreshed token (HTTP {resp.status_code})"
+                )
             raise RobinhoodAuthError(f"Robinhood MCP rejected the token (HTTP {resp.status_code})")
         if resp.status_code >= 400:
+            # Scrub BEFORE truncating (a slice can bisect a token).
             raise RobinhoodClientError(
-                f"Robinhood MCP HTTP {resp.status_code}: {self._redact(resp.text[:300])}"
+                f"Robinhood MCP HTTP {resp.status_code}: {self._redact(resp.text)[:300]}"
             )
         session_id = resp.headers.get("Mcp-Session-Id")
         if session_id:
@@ -443,7 +535,7 @@ class RobinhoodClient:
             return resp.json()
         except ValueError:
             raise RobinhoodClientError(
-                f"Robinhood MCP returned non-JSON body: {self._redact(resp.text[:200])}"
+                f"Robinhood MCP returned non-JSON body: {self._redact(resp.text)[:200]}"
             ) from None
 
     def _rpc(self, method: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -587,18 +679,33 @@ def _result_rows(payload: Any) -> List[Dict[str, Any]]:
     return []
 
 
+def _to_price(value: Any) -> Optional[float]:
+    """A finite positive price, or None.
+
+    Rejects booleans (``float(True) == 1.0`` would fabricate a $1 print)
+    and non-finite floats (``float("inf") > 0`` is True and would poison
+    every downstream return/vol calculation).
+    """
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(parsed) or parsed <= 0:
+        return None
+    return parsed
+
+
 def _closes_from_historicals(rows: List[Dict[str, Any]]) -> Dict[str, float]:
     closes: Dict[str, float] = {}
     for row in rows:
         date = next((row[k] for k in _DATE_KEYS if row.get(k)), None)
         close = next((row[k] for k in _CLOSE_KEYS if row.get(k) is not None), None)
-        if date is None or close is None:
+        if date is None:
             continue
-        try:
-            value = float(close)
-        except (TypeError, ValueError):
-            continue
-        if value > 0:
+        value = _to_price(close)
+        if value is not None:
             closes[str(date)[:10]] = value
     return closes
 
@@ -633,7 +740,7 @@ def fetch_robinhood_closes(symbols: List[str]) -> Dict[str, Dict[str, float]]:
         return {}
     out: Dict[str, Dict[str, float]] = {}
     try:
-        with RobinhoodClient() as rh:
+        with RobinhoodClient(timeout=LADDER_TIMEOUT_S) as rh:
             for symbol in symbols:
                 try:
                     closes = rh.fetch_daily_closes(symbol)
@@ -656,7 +763,7 @@ def fetch_robinhood_quote(symbol: str, *, index: bool = False) -> Optional[float
     if not robinhood_configured():
         return None
     try:
-        with RobinhoodClient() as rh:
+        with RobinhoodClient(timeout=LADDER_TIMEOUT_S) as rh:
             rows = (
                 rh.get_index_quotes([symbol]) if index else rh.get_equity_quotes([symbol])
             )
@@ -665,11 +772,7 @@ def fetch_robinhood_quote(symbol: str, *, index: bool = False) -> Optional[float
         return None
     for row in rows:
         for key in ("last_trade_price", "last", "last_price", "price", "mark_price"):
-            value = row.get(key)
-            try:
-                parsed = float(value)
-            except (TypeError, ValueError):
-                continue
-            if parsed > 0:
+            parsed = _to_price(row.get(key))
+            if parsed is not None:
                 return parsed
     return None

@@ -957,16 +957,7 @@ def upsert_twr_history(date_str: str, twr: float) -> None:
     db.commit()
 
 
-RH_CROWDING_UPSERT_SQL = """
-INSERT INTO rh_crowding
-  (date, symbol, popular_rank, watchlists, scan_hits, recorded_at)
-VALUES (?, ?, ?, ?, ?, ?)
-ON CONFLICT(date, symbol) DO UPDATE SET
-  popular_rank = excluded.popular_rank,
-  watchlists   = excluded.watchlists,
-  scan_hits    = excluded.scan_hits,
-  recorded_at  = excluded.recorded_at
-"""
+_RH_CROWDING_INSERT_CHUNK_ROWS = 400
 
 
 def upsert_rh_crowding_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
@@ -975,22 +966,40 @@ def upsert_rh_crowding_rows(rows: list[dict[str, Any]], recorded_at: Optional[st
     Descriptive crowding features only (popular-watchlist rank + scan hits
     from the read-only trading MCP). This series must never feed the Four
     Gates; see migration 0066 and test_rh_crowding.py.
+
+    Chunked multi-row INSERTs (Hrana I/O bounding): one statement per ~400
+    rows, never one per row — per-row executemany is one round-trip PER ROW
+    over Hrana (the rv-ratio 2026-07-21 502 incident class).
     """
     if not rows:
         return
     stamp = recorded_at or _now_iso()
     db = get_db()
-    for row in rows:
+    for start in range(0, len(rows), _RH_CROWDING_INSERT_CHUNK_ROWS):
+        chunk = rows[start:start + _RH_CROWDING_INSERT_CHUNK_ROWS]
+        placeholders = ", ".join("(?, ?, ?, ?, ?, ?)" for _ in chunk)
+        params: list[Any] = []
+        for row in chunk:
+            params.extend(
+                (
+                    row["date"],
+                    row["symbol"],
+                    row.get("popular_rank"),
+                    json.dumps(row.get("watchlists") or []),
+                    int(row.get("scan_hits") or 0),
+                    stamp,
+                )
+            )
         db.execute(
-            RH_CROWDING_UPSERT_SQL,
-            (
-                row["date"],
-                row["symbol"],
-                row.get("popular_rank"),
-                json.dumps(row.get("watchlists") or []),
-                int(row.get("scan_hits") or 0),
-                stamp,
-            ),
+            "INSERT INTO rh_crowding "
+            "(date, symbol, popular_rank, watchlists, scan_hits, recorded_at) "
+            f"VALUES {placeholders} "
+            "ON CONFLICT(date, symbol) DO UPDATE SET "
+            "popular_rank = excluded.popular_rank, "
+            "watchlists   = excluded.watchlists, "
+            "scan_hits    = excluded.scan_hits, "
+            "recorded_at  = excluded.recorded_at",
+            tuple(params),
         )
     db.commit()
 

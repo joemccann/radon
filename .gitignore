@@ -100,6 +100,9 @@ reports/*.json
 reports/*.png
 data/*.json
 !data/flex_token_config.example.json
+# Robinhood OAuth token store + its atomic-write/lock artifacts (secrets;
+# data/*.json does not match the .tmp / .lock suffixes)
+data/rh_mcp_token.json*
 data/*.bak
 
 # Ticker/market data caches (regenerated at runtime)
