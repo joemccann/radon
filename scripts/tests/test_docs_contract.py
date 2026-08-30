@@ -210,6 +210,24 @@ class TestThinIndex:
         assert "npm run" not in text
 
 
+class TestEdgeHealthRunbook:
+    def test_edge_health_status_caveat_states_the_200_body_contract(self):
+        # R-444: after cd6af110 / b8eda2b6 every failure mode of
+        # /edge-health/status is HTTP 200 -- an upstream 5xx and a
+        # Caddy-synthesized dial-refused are both rewritten to
+        # {"reachable":false,"observer":"caddy"}. The runbook still told the
+        # operator the path "returns 502 when the daemon is down", which is
+        # the discriminating check a status-code-only monitor would rely on.
+        for rel in ("docs/operations.md", "scripts/health_service/CLAUDE.md"):
+            text = (_ROOT / rel).read_text(encoding="utf-8")
+            assert "returns `502` when the daemon" not in text, rel
+            assert "502s when the daemon is down" not in text, rel
+            assert '{"reachable":false,"observer":"caddy"}' in text, rel
+        operations = (_ROOT / "docs" / "operations.md").read_text(encoding="utf-8")
+        assert "no `ok` field" in operations
+        assert "never on the status code" in operations
+
+
 class TestOwnership:
     def test_matcher_requires_an_owner_when_a_glob_hits(self):
         rules = [

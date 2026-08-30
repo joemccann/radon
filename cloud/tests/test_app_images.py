@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
+
+import pytest
 
 CLOUD_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = CLOUD_ROOT.parent
@@ -201,6 +204,119 @@ class TestImageSafety:
             "web/e2e/",
         ):
             assert pattern in text, pattern
+
+
+def _dockerignore_patterns() -> list[str]:
+    return [
+        line.strip()
+        for line in DOCKERIGNORE.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+
+
+def _dockerignore_regex(pattern: str) -> re.Pattern[str]:
+    """moby/patternmatcher: `**` spans directories, `*` and `?` stop at `/`."""
+    out = ""
+    i = 0
+    while i < len(pattern):
+        if pattern.startswith("**", i):
+            i += 2
+            if i >= len(pattern) or pattern[i] == "/":
+                out += "(.*/)?"
+                i += 1
+            else:
+                out += ".*"
+            continue
+        ch = pattern[i]
+        if ch == "*":
+            out += "[^/]*"
+        elif ch == "?":
+            out += "[^/]"
+        else:
+            out += re.escape(ch)
+        i += 1
+    return re.compile("^" + out + "$")
+
+
+def _dockerignore_excludes(patterns: list[str], path: str) -> bool:
+    """Pure-Python evaluator for a build context path (no docker binary here).
+
+    Docker semantics: the LAST matching pattern wins, `!` re-includes, and a
+    pattern that matches any parent directory of ``path`` matches ``path``
+    (``MatchesOrParentMatches``). Patterns are anchored at the context root.
+    """
+    parts = path.split("/")
+    candidates = [path] + ["/".join(parts[:n]) for n in range(len(parts) - 1, 0, -1)]
+    excluded = False
+    for raw in patterns:
+        negate = raw.startswith("!")
+        regex = _dockerignore_regex((raw[1:] if negate else raw).strip("/"))
+        if any(regex.match(candidate) for candidate in candidates):
+            excluded = not negate
+    return excluded
+
+
+class TestDockerContextExcludesEveryEnvFile:
+    """R-443: `.dockerignore` excluded only the literal `**/.env`, while
+    `COPY scripts/ ./scripts` and `COPY web/ ./web` take everything else in
+    the context. The gitignored secret files the repo itself enumerates
+    (`.env.local`, `.env.*.local`, `.env.production`, `.env.ib-mode`) were
+    not matched, and the Dockerfile header says to build from the repo root
+    on a workstation where they exist. CI is a clean checkout; this bites a
+    laptop build pushed under a 40-hex tag, which the runtime accepts.
+    """
+
+    SECRET_FILES = (
+        ".env",
+        ".env.ib-mode",
+        ".env.local",
+        ".env.production",
+        ".env.development",
+        "web/.env",
+        "web/.env.local",
+        "web/.env.production.local",
+        "scripts/.env",
+        "scripts/api/.env.local",
+    )
+    KEPT_FILES = (
+        ".env.example",
+        "web/.env.example",
+        "web/.env.local.example",
+        "web/next-env.d.ts",
+        "scripts/lib/env.py",
+    )
+
+    def test_matcher_follows_docker_semantics(self) -> None:
+        assert _dockerignore_excludes(["cloud/"], "cloud/tests/x.py")
+        assert _dockerignore_excludes(["**/node_modules"], "web/node_modules/a/b.js")
+        assert not _dockerignore_excludes([".git"], "web/.gitkeep")
+        assert not _dockerignore_excludes(["data/replica.db"], "web/data/replica.db")
+        assert _dockerignore_excludes(["**/.env"], "web/.env")
+        assert not _dockerignore_excludes(["**/.env"], "web/.env.local")
+        assert _dockerignore_excludes(["**/.env*"], "web/.env.local")
+        assert not _dockerignore_excludes(
+            ["**/.env*", "!**/.env.example"], "web/.env.example"
+        )
+
+    @pytest.mark.parametrize("path", SECRET_FILES)
+    def test_gitignored_secret_files_stay_out_of_the_context(self, path: str) -> None:
+        assert _dockerignore_excludes(_dockerignore_patterns(), path), path
+
+    @pytest.mark.parametrize("path", KEPT_FILES)
+    def test_examples_and_env_named_source_stay_in_the_context(self, path: str) -> None:
+        assert not _dockerignore_excludes(_dockerignore_patterns(), path), path
+
+    def test_every_tracked_env_file_in_the_context_is_an_example(self) -> None:
+        tracked = subprocess.check_output(
+            ["git", "ls-files"], cwd=REPO_ROOT, text=True
+        ).split("\n")
+        env_like = [p for p in tracked if p and Path(p).name.startswith(".env")]
+        assert env_like, "git ls-files returned no .env* files"
+        patterns = _dockerignore_patterns()
+        for path in env_like:
+            in_context = not _dockerignore_excludes(patterns, path)
+            outside_pruned_dirs = not path.startswith(("cloud/", "docker/ib-gateway/"))
+            assert in_context == (path.endswith(".example") and outside_pruned_dirs), path
 
 
 class TestRuntimeContainerDropin:
