@@ -108,7 +108,9 @@ def notify_weekend_phase(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="weekend_notify")
-    parser.add_argument("--loop", required=True, choices=["reliability", "testing"])
+    parser.add_argument(
+        "--loop", required=True, choices=["reliability", "testing", "ci-performance"]
+    )
     parser.add_argument("--phase", required=True, choices=["audit", "remediate"])
     parser.add_argument("--status", required=True)
     parser.add_argument("--pr-url", default="")

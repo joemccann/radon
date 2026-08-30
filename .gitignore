@@ -204,6 +204,7 @@ web/verify-regime-internals.mjs
 # The starred form (not a bare dir) lets repo-owned skills below re-include.
 /.agents/
 /.claude/skills/*
+!/.claude/skills/ci-performance/
 !/.claude/skills/incident-response/
 !/.claude/skills/long-horizon-jobs/
 !/.claude/skills/reliability-weekend/
