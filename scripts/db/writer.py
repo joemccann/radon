@@ -1339,14 +1339,15 @@ def upsert_vixts_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = N
 
 _DISPERSION_INSERT_HEAD = (
     "INSERT INTO dispersion_history "
-    "(date, vix_close, stock_spread, sector_spread, n_stocks, n_sectors, recorded_at) "
+    "(date, vix_close, stock_spread, sector_spread, n_stocks, n_sectors, recorded_at, source) "
 )
-_DISPERSION_ROW_PLACEHOLDER = "(?, ?, ?, ?, ?, ?, ?)"
+_DISPERSION_ROW_PLACEHOLDER = "(?, ?, ?, ?, ?, ?, ?, ?)"
 _DISPERSION_ON_CONFLICT = (
     " ON CONFLICT(date) DO UPDATE SET "
     "vix_close = excluded.vix_close, stock_spread = excluded.stock_spread, "
     "sector_spread = excluded.sector_spread, n_stocks = excluded.n_stocks, "
-    "n_sectors = excluded.n_sectors, recorded_at = excluded.recorded_at"
+    "n_sectors = excluded.n_sectors, recorded_at = excluded.recorded_at, "
+    "source = excluded.source"
 )
 
 
@@ -1359,6 +1360,7 @@ def _dispersion_params(row: dict[str, Any], stamp: str) -> tuple:
         int(row["n_stocks"]),
         int(row["n_sectors"]),
         stamp,
+        row.get("source"),
     )
 
 

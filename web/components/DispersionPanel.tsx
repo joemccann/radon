@@ -58,6 +58,10 @@ const EMPTY_SECONDARY =
 
 const STALE_BADGE_TITLE = "Source stale: re-serving the last confirmed series";
 
+const WRITER_STALE_SECONDARY =
+  "The last snapshot is older than the freshness window, so the series is withheld rather than " +
+  "shown as current. Check radon-dispersion.service on the host.";
+
 const YAHOO_BADGE_TITLE =
   "The Interactive Brokers rung served nothing this sweep; every price is a Yahoo Finance bar";
 
@@ -125,6 +129,20 @@ export default function DispersionPanel() {
 
   if ((loading || syncing) && !data) {
     return <SpectralLoader label="Loading dispersion series" />;
+  }
+
+  // R-450: the route's staleCollapse keeps `stale: true` + the last scan_time;
+  // a dead writer must read as "stale since", never as "never seeded".
+  if (data?.stale) {
+    return (
+      <SectionEmptyState
+        icon={Layers}
+        headline={`Dispersion writer stale since ${data.scan_time ?? "an unknown time"}`}
+        secondary={WRITER_STALE_SECONDARY}
+        tone="danger"
+        testId="dispersion-writer-stale"
+      />
+    );
   }
 
   if (!data || data.missing || !data.current) {

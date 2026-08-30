@@ -345,8 +345,9 @@ SWEEP_BUDGET_S = 600               # wall clock for the whole sweep, both rungs
 IB_SWEEP_BUDGET_S = 420            # the IB rung's share of it
 YAHOO_SWEEP_BUDGET_S = 180         # reserved for the Yahoo rung even when IB overran (R-446)
 INCREMENTAL_DURATION = "1 M"       # IB duration for a normal daily run
+WIDER_DURATIONS = ("3 M", "1 Y")   # tried in order when 1 M cannot bridge the stored gap (R-448)
 BACKFILL_DURATION = "10 Y"         # --backfill; IB's daily window floor is 2016-08-31
-YAHOO_INCREMENTAL_RANGE = "1mo"
+YAHOO_RANGES = {"1 M": "1mo", "3 M": "3mo", "1 Y": "1y"}
 YAHOO_BACKFILL_PERIOD1 = "2016-08-01"
 HISTORY_READ_PAGE_ROWS = 500       # Hrana bounding on the dispersion_history read
 # Mirrors radon-dispersion.timer (OnCalendar=*-*-* 22:20:00 UTC)
@@ -385,9 +386,12 @@ prints the payload to stdout; every progress line goes to **stderr**.
    payload as `status: "stale_source"` with an **`error` heartbeat** and exits
    non-zero (ivrank pattern; never latch `ok` over unconfirmed data).
 7. Compute raw rows for every session in the fetched window (C.2-C.3); keep the
-   new ones (`date > stored max`, or all when `--backfill`). Guard with
+   new ones (`date > stored max`, plus any stored-window session whose refetched
+   `n_stocks` exceeds the stored value, or all when `--backfill`) and stamp each
+   with `source` = the sweep's `source.prices` (R-447). Guard with
    `ensure_plausible_rows(rows)` (C.1 bands, **every** row). Merge into the stored
-   rows by date (new wins).
+   rows by date (new wins). A 0 close is dropped by both parsers and by the
+   return math, so a halted name costs one symbol, not the cycle (R-449).
 8. Writes, in order: `writer.upsert_dispersion_rows(new_rows, recorded_at=scan_time)`
    **chunked** (model `upsert_hhlev_rows`; a backfill passes ~2,500 rows) — only
    when there are new rows; `writer.upsert_scan_snapshot("dispersion", scan_time, payload)`;
@@ -398,9 +402,10 @@ prints the payload to stdout; every progress line goes to **stderr**.
    `error` heartbeat rather than a silent exit 0.
 
 If the incremental window cannot bridge the gap (stored max is older than the
-sessions `INCREMENTAL_DURATION` covers), raise
-`"gap since <date> exceeds the incremental window; rerun with --backfill"` and
-record an `error` heartbeat. Do not silently emit a series with a hole.
+sessions `INCREMENTAL_DURATION` covers), refetch with each of `WIDER_DURATIONS`
+in turn (R-448); only when `1 Y` still cannot bridge it, raise
+`"gap since <date> exceeds the widest incremental window; rerun with --backfill"`
+and record an `error` heartbeat. Do not silently emit a series with a hole.
 
 ### E.3 Backfill
 

@@ -59,10 +59,11 @@ def daily_returns(closes: dict[str, Closes], sessions: list[str]) -> dict[str, d
 
 
 def _returns_between(closes: dict[str, Closes], previous: str, session: str) -> dict[str, float]:
+    """A non-positive close on either side is a missing session (R-449)."""
     return {
         symbol: series[session] / series[previous] - 1.0
         for symbol, series in closes.items()
-        if session in series and previous in series
+        if series.get(session, 0.0) > 0 and series.get(previous, 0.0) > 0
     }
 
 

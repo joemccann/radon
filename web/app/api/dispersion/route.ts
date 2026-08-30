@@ -5,6 +5,7 @@ import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
 import { contentTimestampMs, dbFirstRead, isMissingPayload, staleCollapse, type TimestampedRead } from "@/lib/dbFirstRead";
 import { MISSING_DISPERSION } from "@/lib/dispersion";
+import { getFreshnessWindowMs } from "@/lib/serviceHealthWindows";
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
 // first response and serves stale data until the dev server restarts.
@@ -16,9 +17,11 @@ const CACHE_PATH = join(process.cwd(), "..", "data", "dispersion.json");
 
 // radon-dispersion.timer runs the IB daily-bar sweep at 22:20 UTC on every
 // calendar day — weekend and holiday runs are no-new-session heartbeats — so
-// a snapshot older than 48h means the writer is down, not that the data is
-// merely stale across a weekend.
-const DISPERSION_MAX_AGE_MS = 48 * 60 * 60_000;
+// a snapshot older than the catalog's uniform 26h window means the writer is
+// down. The panel's writer age and the watchdog read the same window; a
+// private 48h here let hours 26-48 render a confident regime beside a
+// `behind` age (R-450).
+const DISPERSION_MAX_AGE_MS = getFreshnessWindowMs("dispersion", "closed");
 
 async function readDispersionFromDb(): Promise<TimestampedRead<Record<string, unknown>> | null> {
   const db = getDb();

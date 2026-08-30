@@ -270,6 +270,22 @@ describe("DispersionPanel — gating", () => {
     renderPanel(hookState());
     expect(screen.getByTestId("section-empty-state")).toBeTruthy();
   });
+
+  // R-450: the route's staleCollapse keeps `stale: true` + the last scan_time;
+  // "died Tuesday" must not render as "never seeded".
+  it("renders the writer-stale state with the last scan_time, not the empty state", () => {
+    const scanTime = "2026-08-25T22:21:07Z";
+    renderPanel(
+      hookState({
+        data: { ...MISSING_DISPERSION, stale: true, scan_time: scanTime } as unknown as DispersionData,
+      }),
+    );
+    const stale = screen.getByTestId("dispersion-writer-stale");
+    expect(stale.textContent ?? "").toContain(scanTime);
+    expect(stale.textContent ?? "").toMatch(/stale/i);
+    expect(stale.textContent ?? "").not.toMatch(/No dispersion data yet/);
+    expect(screen.queryByTestId("section-empty-state")).toBeNull();
+  });
 });
 
 describe("DispersionPanel — header strip", () => {
