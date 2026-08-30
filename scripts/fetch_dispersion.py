@@ -65,6 +65,7 @@ SERVICE = "dispersion"
 DISPERSION_JSON = _PROJECT_DIR / "data" / "dispersion.json"
 IB_CONCURRENCY = 8
 IB_HISTORY_TIMEOUT_S = 45          # ib_insync's own timeout= (the cancel path)
+IB_CANCEL_GRACE_S = 5              # outer asyncio bound fires only after that cancel
 SWEEP_BUDGET_S = 600               # wall clock for the whole sweep, both rungs
 INCREMENTAL_DURATION = "1 M"
 BACKFILL_DURATION = "10 Y"         # IB's daily window floor is 2016-08-31
@@ -155,15 +156,18 @@ async def _ib_sweep(ib: Any, symbols: list[str], duration: str, deadline: float)
             if time.monotonic() >= deadline:
                 return
             try:
-                bars = await ib.reqHistoricalDataAsync(
-                    _ib_contract(symbol),
-                    endDateTime="",
-                    durationStr=duration,
-                    barSizeSetting="1 day",
-                    whatToShow="TRADES",
-                    useRTH=True,
-                    formatDate=1,
-                    timeout=IB_HISTORY_TIMEOUT_S,
+                bars = await asyncio.wait_for(
+                    ib.reqHistoricalDataAsync(
+                        _ib_contract(symbol),
+                        endDateTime="",
+                        durationStr=duration,
+                        barSizeSetting="1 day",
+                        whatToShow="TRADES",
+                        useRTH=True,
+                        formatDate=1,
+                        timeout=IB_HISTORY_TIMEOUT_S,
+                    ),
+                    timeout=IB_HISTORY_TIMEOUT_S + IB_CANCEL_GRACE_S,
                 )
             except Exception as exc:  # noqa: BLE001 — Yahoo rung picks it up
                 _log(f"IB: {symbol} failed: {exc}")
@@ -178,13 +182,27 @@ async def _ib_sweep(ib: Any, symbols: list[str], duration: str, deadline: float)
     return results
 
 
+def _construct_ib_client() -> Any:
+    """A client that cannot even be BUILT is misconfiguration, not a gateway
+    outage: record it and die loudly rather than silently falling to Yahoo."""
+    from clients.ib_client import IBClient
+
+    try:
+        return IBClient()
+    except Exception as exc:
+        _heartbeat(
+            "error",
+            _iso(datetime.now(timezone.utc)),
+            {"message": f"IB client construction failed: {exc}", "class": "client_construction"},
+        )
+        raise
+
+
 def _fetch_ib_closes(symbols: list[str], duration: str, deadline: float) -> dict[str, Closes]:
     if _ib_gateway_unavailable():
         return {}
+    client = _construct_ib_client()
     try:
-        from clients.ib_client import IBClient
-
-        client = IBClient()
         client.connect(client_id="auto", timeout=10)
     except Exception as exc:  # noqa: BLE001 — Yahoo rung covers the whole universe
         _log(f"IB connect failed: {exc}")
