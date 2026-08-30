@@ -2,6 +2,20 @@
 
 import type { Headline, HeadlinesStatus } from "@/lib/useHeadlines";
 
+const BRACKET_LEDE = /(【[^【】]*】)/g;
+
+function renderLedes(content: string) {
+  return content.split(BRACKET_LEDE).map((part, i) =>
+    part.startsWith("【") && part.endsWith("】") ? (
+      <strong key={i} className="headlines-tape__lede">
+        {part}
+      </strong>
+    ) : (
+      part
+    ),
+  );
+}
+
 function fmtTime(iso: string | null): string {
   if (!iso) return "--";
   const ms = Date.parse(iso);
@@ -44,7 +58,7 @@ export default function HeadlinesTape({
           </time>
           <p className="headlines-tape__body">
             {row.important ? <span className="headlines-tape__imp">Important</span> : null}
-            {row.content}
+            {renderLedes(row.content)}
           </p>
           {row.impact[0] ? (
             <span
