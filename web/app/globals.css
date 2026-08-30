@@ -3083,20 +3083,16 @@ a.signals-hero__row:hover { background: var(--bg-panel-raised); }
   overflow: hidden;
 }
 
-.chat-launcher__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--line-grid);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+/* Composer-only empty state (design-lab Variant A): the panel shrinks to the
+   composer and floats in the upper third instead of filling the viewport. */
+.chat-launcher:has(.chat-panel[data-empty]) {
+  align-items: flex-start;
+  padding-top: 18vh;
 }
 
-.chat-launcher__kicker { color: var(--signal-core-text); }
-.chat-launcher__hint   { color: var(--text-muted); }
+.chat-launcher__panel:has(.chat-panel[data-empty]) {
+  width: min(640px, 100%);
+}
 
 /* ───────────────────────────────────────────────────────────
    Footer telemetry strip — collapses the three legacy banners
@@ -4558,7 +4554,7 @@ td.last-price-cell {
 }
 
 .chat-shell {
-  padding: 0 20px 16px;
+  padding: 16px 20px;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -5528,66 +5524,6 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh--rail {
   padding: 16px 4px;
 }
 
-/* Empty / first-run state — clickable domain prompts instead of a blank box. */
-.chat-empty-state {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 12px;
-  padding: 24px 8px;
-}
-
-.chat-empty-state__title {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--signal-core-text);
-}
-
-.chat-empty-state__copy {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--text-muted);
-  max-width: 46ch;
-}
-
-.chat-empty-state__cards {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.chat-empty-card {
-  display: flex;
-  align-items: center;
-  /* The slash and the command are one token ("/portfolio"), so the flex gap
-     must be 0 — an 8px gap rendered it as "/ portfolio". */
-  gap: 0;
-  text-align: left;
-  padding: 10px 12px;
-  border: 1px solid var(--border-dim);
-  border-radius: 4px;
-  background: var(--bg-panel);
-  color: var(--text-primary);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  cursor: pointer;
-  transition: border-color 160ms ease, background 160ms ease;
-}
-
-.chat-empty-card:hover {
-  border-color: var(--signal-core-text);
-  background: var(--bg-hover);
-}
-
-.chat-empty-card__slash {
-  color: var(--text-muted);
-}
-
 /* Floating jump-to-latest, shown only when the user has scrolled up. Always
    mounted; toggled via opacity/pointer-events so it never causes reflow. */
 .chat-jump-btn {
@@ -6105,28 +6041,6 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh--rail {
   cursor: not-allowed;
 }
 
-.chat-pills {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.pill-chip {
-  border: 0;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--bg-hover) 70%, transparent);
-  color: var(--text-secondary);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 6px 10px;
-  font-family: var(--font-mono);
-  cursor: pointer;
-}
-
-.pill-chip:hover {
-  background: var(--bg-hover);
-}
 
 @media (max-width: 1200px) {
   .two-col {
@@ -20991,20 +20905,31 @@ body[data-mobile="true"] .alerts-rule__channel {
 .ask-composer__input:focus { outline: none; }
 .ask-composer__rail { display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--line-grid); padding: 8px 12px; }
 .ask-composer__spacer { flex: 1; }
-.ask-composer__model { display: flex; align-items: center; gap: 6px; border: 1px solid var(--line-grid); border-radius: 4px; padding: 3px 8px; }
+.ask-composer__model { display: flex; align-items: center; gap: 6px; }
 .ask-composer__model-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; color: var(--text-muted); }
 .ask-composer__model select {
   background: transparent; border: none; color: var(--text-secondary);
   font-family: var(--font-mono); font-size: var(--text-meta); letter-spacing: 0.06em;
 }
-.ask-composer__send {
-  display: flex; align-items: center; gap: 6px;
-  font-family: var(--font-mono); font-size: var(--text-meta); font-weight: 600; letter-spacing: 0.06em;
-  padding: 6px 14px; border-radius: 4px; border: 1px solid var(--accent-bg);
-  background: var(--accent-bg); color: var(--accent-text); cursor: pointer;
+.ask-composer__field { display: flex; align-items: flex-end; }
+.ask-composer__field .ask-composer__input { flex: 1; }
+/* Quiet Enter affordance replaces the ASK button (design-lab Variant A):
+   Enter sends; this is the same submit, drawn as a kbd hint. */
+.ask-composer__enter {
+  margin: 0 10px 8px 0;
+  padding: 2px 8px; border-radius: 2px;
+  border: 1px solid var(--line-grid); background: var(--bg-panel-raised);
+  font-family: var(--font-mono); font-size: 11px; line-height: 1.4;
+  color: var(--text-muted); cursor: pointer;
   transition: var(--transition-controls);
 }
-.ask-composer__send:disabled { opacity: 0.45; cursor: default; }
+.ask-composer__enter:not(:disabled):hover { border-color: var(--signal-core-text); color: var(--signal-core-text); }
+.ask-composer__enter:disabled { opacity: 0.45; cursor: default; }
+.ask-composer__esc { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; color: var(--text-muted); white-space: nowrap; }
+/* Rail chrome reads as one muted footer line, not a row of boxed controls. */
+.ask-composer__rail .agent-chip { border: 0; padding: 0; border-radius: 0; color: var(--text-muted); }
+/* Hero focus: with no messages the composer is the whole surface. */
+.chat-panel[data-empty] .ask-composer:focus-within { box-shadow: 0 0 0 3px var(--wash-signal); }
 
 /* — AnalysisSources — */
 .analysis-sources { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }

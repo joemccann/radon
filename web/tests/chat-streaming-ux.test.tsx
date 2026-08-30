@@ -29,11 +29,10 @@ describe("ChatPanel streaming UX", () => {
     vi.restoreAllMocks();
   });
 
-  it("shows the first-run prompt cards before any message is sent", () => {
-    render(<ChatPanel activeSection="portfolio" />);
-    expect(screen.getByText("Ask Radon")).toBeTruthy();
-    const buttons = screen.getAllByRole("button");
-    expect(buttons.some((b) => /portfolio/i.test(b.textContent ?? ""))).toBe(true);
+  it("first run is the composer alone (starter cards removed 2026-08-29)", () => {
+    const { container } = render(<ChatPanel activeSection="portfolio" />);
+    expect(container.querySelector(".chat-empty-state")).toBeNull();
+    expect(screen.getByLabelText("Ask Radon")).toBeTruthy();
   });
 
   // The pending affordance is now <EngineTrace> (a real step trace fed by the

@@ -35,9 +35,8 @@ describe("Radon Chat conversational surface", () => {
     cleanup();
   });
 
-  it("transcript and empty state are open canvas — no inner border box", () => {
+  it("transcript is open canvas — no inner border box", () => {
     expect(ruleBlock(".chat-messages")).not.toMatch(/border: 1px solid/);
-    expect(ruleBlock(".chat-empty-state")).not.toMatch(/border: 1px solid/);
   });
 
   it("messages separate by spacing, not dashed rules", () => {

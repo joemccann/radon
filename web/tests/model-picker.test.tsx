@@ -228,35 +228,8 @@ describe("ChatPanel — the selected model reaches POST /api/assistant", () => {
     expect(bodyOf(assistantRequests()[0])).not.toHaveProperty("model");
   });
 
-  it("carries the picked model id when a starter-prompt pill is clicked", async () => {
-    // The pills sit directly above the picker and send a turn of their own. A
-    // pill that omits the selection runs on the server default while the
-    // visible control still reads the model the operator chose.
-    render(<ChatPanel activeSection="flow-analysis" />);
-    await waitFor(() => expect(optionLabels()).toHaveLength(3));
-
-    fireEvent.change(picker(), { target: { value: "grok-4.6" } });
-    // Paired negative: nothing is on the wire until the pill is clicked.
-    expect(assistantRequests()).toHaveLength(0);
-
-    fireEvent.click(screen.getByRole("button", { name: /review watch list/ }));
-
-    await waitFor(() => expect(assistantRequests()).toHaveLength(1));
-    const request = assistantRequests()[0];
-    expect(request.url).toBe("/api/assistant");
-    expect(request.method).toBe("POST");
-    expect(bodyOf(request).model).toBe("grok-4.6");
-  });
-
-  it("sends the catalog default from a pill when the picker is never touched", async () => {
-    render(<ChatPanel activeSection="flow-analysis" />);
-    await waitFor(() => expect(optionLabels()).toHaveLength(3));
-
-    fireEvent.click(screen.getByRole("button", { name: /review watch list/ }));
-
-    await waitFor(() => expect(assistantRequests()).toHaveLength(1));
-    expect(bodyOf(assistantRequests()[0]).model).toBe("claude-opus-5");
-  });
+  // Starter-prompt pills/cards removed 2026-08-29 (composer-only surface); the
+  // picked-model-reaches-the-wire contract is held by the typed-send tests above.
 
   it("still carries a pasted image alongside the model id", async () => {
     render(<ChatPanel activeSection="orders" />);
