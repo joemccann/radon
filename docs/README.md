@@ -15,7 +15,7 @@ Archived session artifacts live in [`docs/archive/`](archive/).
 | Operator contributing rules | [`CONTRIBUTING.md`](../CONTRIBUTING.md) |
 | Security reports | [`SECURITY.md`](../SECURITY.md) |
 | Support (proprietary, unsupported clones) | [`SUPPORT.md`](../SUPPORT.md) |
-| External services and signup | [`docs/external-services.md`](external-services.md) |
+| External services and signup (incl. Robinhood read-only MCP) | [`docs/external-services.md`](external-services.md) |
 | CLI commands | [`docs/scripts-reference.md`](scripts-reference.md) |
 | Python script map | [`scripts/README.md`](../scripts/README.md) |
 | Repo layout plan | [`docs/monorepo-legibility-plan.md`](monorepo-legibility-plan.md) |
