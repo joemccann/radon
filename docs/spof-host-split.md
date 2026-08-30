@@ -108,6 +108,15 @@ App VM (current box):
 Move window is off RTH plus one Mobile tap on the broker. App deploy must
 leave `auth_state=authenticated` on 4001.
 
+Operator commands after the cut:
+
+- App: `ssh root@ib-gateway radon {start|stop|restart|status}`
+  App-plane only. Does not cycle Gateway.
+- Broker: `ssh root@<broker> radon {start|stop|restart|status}`
+  Gateway via `radon-ib-gateway-control`. Does not require radon-health.
+- Admin page Force 2FA / Stop / Start Gateway is hidden on the app host.
+  Do not POST `/api/admin/services/radon-ib-gateway.service/*` there.
+
 Do not put the broker in Falkenstein. Do not run two Gateways. Do not
 restore a broker snapshot beside a live broker. Do not start a standby
 FastAPI pool against a live Gateway.

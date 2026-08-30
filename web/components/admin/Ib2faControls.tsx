@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { AdminHealthPayload, UnitStatus } from "@/lib/adminTypes";
+import type { AdminHealthPayload, HostRole, UnitStatus } from "@/lib/adminTypes";
 import {
   forcePushDisabledReason,
   gatewayPowerState,
@@ -36,6 +36,8 @@ type Ib2faControlsProps = {
    *  unreachable, which is exactly what a gateway stop causes (cascade). The
    *  cached unit row then reads a stale value; treat the gateway as unknown. */
   apiUnreachable?: boolean;
+  /** App hosts must not cycle the broker Gateway. Unset means combined. */
+  hostRole?: HostRole;
   onAfter?: () => void;
 };
 
@@ -54,6 +56,7 @@ export default function Ib2faControls({
   onStopGateway,
   onStartGateway,
   apiUnreachable = false,
+  hostRole,
   onAfter,
 }: Ib2faControlsProps) {
   const [showForceConfirm, setShowForceConfirm] = useState(false);
@@ -103,6 +106,7 @@ export default function Ib2faControls({
     return () => clearTimeout(timer);
   }, [optimisticPower, polledPowerState]);
 
+  const ownsGatewayLifecycle = hostRole !== "app";
   const gatewayDependents = unitDependents(GATEWAY_UNIT);
   // Start triggers a fresh 2FA login, so gate it on the same push lock as
   // Force 2FA to keep two pushes from racing (feedback_2fa_push_stacking).
@@ -214,6 +218,7 @@ export default function Ib2faControls({
       </header>
 
       <div className="admin-actions-row">
+        {ownsGatewayLifecycle ? (
         <button
           type="button"
           className="admin-btn admin-btn-primary"
@@ -224,6 +229,7 @@ export default function Ib2faControls({
         >
           Force 2FA Push
         </button>
+        ) : null}
 
         <button
           type="button"
@@ -241,19 +247,30 @@ export default function Ib2faControls({
           className="admin-btn admin-btn-danger"
           onClick={() => setShowRestartConfirm(true)}
           disabled={pendingRestart}
-          title="Run radon restart on the VPS: stops then starts every radon-* unit in order"
+          title={
+            ownsGatewayLifecycle
+              ? "Run radon restart on the VPS: stops then starts every radon-* unit in order"
+              : "Run radon restart on this app host. Gateway stays on the broker."
+          }
           data-testid="restart-stack-button"
         >
           {pendingRestart ? "Restarting..." : "Restart All Services"}
         </button>
       </div>
 
-      {disableReason && (
+      {ownsGatewayLifecycle && disableReason && (
         <p className="admin-card-note" data-testid="force-2fa-disabled-reason">
           {disableReason}
         </p>
       )}
 
+      {!ownsGatewayLifecycle ? (
+        <p className="admin-card-note" data-testid="gateway-broker-note">
+          Gateway lifecycle is on the broker. This app host cannot Force 2FA, stop, or start IB Gateway. SSH to the broker and run radon-ib-gateway-control.
+        </p>
+      ) : null}
+
+      {ownsGatewayLifecycle ? (
       <div className="admin-gateway-power" data-testid="gateway-power">
         <span className="admin-card-note-inline">Gateway power</span>
         <p
@@ -285,6 +302,7 @@ export default function Ib2faControls({
           </p>
         )}
       </div>
+      ) : null}
 
       <ConfirmDialog
         open={showForceConfirm}
@@ -308,7 +326,11 @@ export default function Ib2faControls({
       <ConfirmDialog
         open={showRestartConfirm}
         title="Restart all radon services?"
-        body="Runs radon restart on the VPS: stops every radon-* systemd unit, then starts them in dependency order (IB Gateway first). Takes about 60 to 90 seconds. The page will briefly lose its connection while FastAPI cycles. IB Gateway will need a fresh 2FA approval on your phone when it comes back up."
+        body={
+          ownsGatewayLifecycle
+            ? "Runs radon restart on the VPS: stops every radon-* systemd unit, then starts them in dependency order (IB Gateway first). Takes about 60 to 90 seconds. The page will briefly lose its connection while FastAPI cycles. IB Gateway will need a fresh 2FA approval on your phone when it comes back up."
+            : "Runs radon restart on this app host. App-plane units only. Gateway stays on the broker. The page will briefly lose its connection while FastAPI cycles."
+        }
         confirmLabel="Restart all"
         destructive
         pending={pendingRestart}

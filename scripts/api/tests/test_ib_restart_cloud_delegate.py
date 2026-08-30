@@ -113,6 +113,27 @@ class TestCloudDelegate:
         monkeypatch.setenv("RADON_HOST_ROLE", "broker")
         assert server._gateway_unit_controllable() is True
 
+    def test_app_role_admin_gateway_restart_does_not_touch_helper(
+        self, client, monkeypatch, tmp_path
+    ):
+        monkeypatch.setenv("RADON_HOST_ROLE", "app")
+        log = tmp_path / "gateway-helper.log"
+        helper = tmp_path / "radon-ib-gateway-control"
+        helper.write_text(
+            "#!/bin/sh\n"
+            f"printf '%s\\n' \"$*\" >> '{log}'\n"
+            "exit 0\n"
+        )
+        helper.chmod(0o755)
+        monkeypatch.setattr(admin_services, "GATEWAY_CONTROL_PATH", str(helper))
+        monkeypatch.setattr(admin_services, "is_systemd_available", lambda: True)
+        resp = client.post("/admin/services/radon-ib-gateway.service/restart")
+        assert resp.status_code == 400
+        detail = resp.json()["detail"]
+        assert detail["ok"] is False
+        assert "broker" in detail["detail"].lower()
+        assert not log.exists()
+
     def test_service_action_maps_lease_conflict_to_409(self, client):
         with patch.object(
             admin_services, "control_unit", new=AsyncMock(return_value=_lease_held_result())
