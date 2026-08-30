@@ -3,7 +3,7 @@ import net from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 
-import { createHeadlinesHub } from "./hub.js";
+import { createHeadlinesHub, startHeadlinesHub } from "./hub.js";
 import { parseFrame } from "./protocol.js";
 import { RING_SIZE } from "./normalize.js";
 
@@ -104,6 +104,123 @@ describe("createHeadlinesHub", () => {
     await hub.listen();
     return hub;
   }
+
+  it("seeds the in-memory ring from flash history before the first snapshot", async () => {
+    const loadHistory = async () => [
+      parseFrame(
+        JSON.stringify({
+          id: "old",
+          type: 0,
+          time: "2026-08-29T20:00:00.000Z",
+          data: { content: "Older print." },
+        }),
+      ),
+      parseFrame(
+        JSON.stringify({
+          id: "new",
+          type: 0,
+          time: "2026-08-29T21:00:00.000Z",
+          data: { content: "Newer print." },
+        }),
+      ),
+    ];
+    const hub = await boot({ loadHistory });
+    const ws = new WebSocket(hub.address());
+    const [snap] = await collect(ws, 1);
+    ws.close();
+    expect(snap).toEqual({
+      type: "snapshot",
+      items: [
+        {
+          kind: "headline",
+          id: "old",
+          time: "2026-08-29T20:00:00.000Z",
+          important: false,
+          content: "Older print.",
+          impact: [],
+        },
+        {
+          kind: "headline",
+          id: "new",
+          time: "2026-08-29T21:00:00.000Z",
+          important: false,
+          content: "Newer print.",
+          impact: [],
+        },
+      ],
+    });
+  });
+
+  it("a later handshake receives seed plus live items", async () => {
+    const hub = await boot({
+      loadHistory: async () => [
+        parseFrame(
+          JSON.stringify({
+            id: "seeded",
+            type: 0,
+            data: { content: "Cached on host." },
+          }),
+        ),
+      ],
+    });
+    hub.ingest(
+      parseFrame(
+        JSON.stringify({
+          type: "flash",
+          data: { id: "live", data: { content: "Just printed." } },
+        }),
+      ),
+    );
+    const ws = new WebSocket(hub.address());
+    const [snap] = await collect(ws, 1);
+    ws.close();
+    expect(snap.items.map((row) => row.id)).toEqual(["seeded", "live"]);
+  });
+
+  it("still boots when flash history seed fails", async () => {
+    const hub = await boot({
+      loadHistory: async () => {
+        throw new Error("flash history down");
+      },
+    });
+    const ws = new WebSocket(hub.address());
+    const [snap] = await collect(ws, 1);
+    ws.close();
+    expect(snap).toEqual({ type: "snapshot", items: [] });
+  });
+
+  it("startHeadlinesHub seeds via loadHistory then fans out live prints", async () => {
+    const hub = await startHeadlinesHub({
+      security: AUTHLESS,
+      listenHost: "127.0.0.1",
+      listenPort: 0,
+      connectUpstream: null,
+      loadHistory: async () => [
+        parseFrame(
+          JSON.stringify({
+            id: "seeded",
+            type: 0,
+            data: { content: "Cached on host." },
+          }),
+        ),
+      ],
+    });
+    hubs.push(hub);
+    const ws = new WebSocket(hub.address());
+    const [snap] = await collect(ws, 1);
+    hub.ingest(
+      parseFrame(
+        JSON.stringify({
+          type: "flash",
+          data: { id: "live", data: { content: "Just printed." } },
+        }),
+      ),
+    );
+    const [live] = await collect(ws, 1);
+    ws.close();
+    expect(snap.items.map((row) => row.id)).toEqual(["seeded"]);
+    expect(live.item.id).toBe("live");
+  });
 
   it("sends a snapshot then live headlines, never time ticks or upstream hosts", async () => {
     const hub = await boot();
