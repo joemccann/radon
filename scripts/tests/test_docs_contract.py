@@ -145,6 +145,38 @@ class TestYahooLastResortRule:
             assert "Never make Yahoo the scheduled" in text, rel
 
 
+class TestRobinhoodRankRule:
+    """Robinhood is a READ-ONLY failover: it must rank ABOVE Yahoo and BELOW
+    IB / UW / Cboe everywhere the priority list is stated, and execution must
+    stay on IB."""
+
+    def test_instruction_files_state_the_full_order(self):
+        for rel in _YAHOO_LAST_RESORT_FILES:
+            text = (_ROOT / rel).read_text(encoding="utf-8")
+            assert "Robinhood" in text, rel
+            assert "IB > UW > Cboe > Robinhood > Yahoo" in text, rel
+
+    def test_strategies_table_slots_rh_between_cboe_and_yahoo(self):
+        text = (_ROOT / "docs" / "strategies.md").read_text(encoding="utf-8")
+        cboe = text.index("| **5th** | Cboe official index feeds")
+        rh = text.index("| **6th** | Robinhood")
+        yahoo = text.index("| **7th ⚠️** | Yahoo Finance")
+        assert cboe < rh < yahoo, "priority table must read Cboe -> Robinhood -> Yahoo"
+
+    def test_read_only_and_ib_execution_are_stated(self):
+        for rel in ("CLAUDE.md", "docs/external-services.md", "docs/strategies.md"):
+            text = (_ROOT / rel).read_text(encoding="utf-8").lower()
+            assert "execution stays on ib" in text, rel
+
+    def test_env_vars_are_documented_with_the_other_vendors(self):
+        env_example = (_ROOT / ".env.example").read_text(encoding="utf-8")
+        assert "ROBINHOOD_MCP_TOKEN" in env_example
+        assert "ROBINHOOD_MCP_URL" in env_example
+        services = (_ROOT / "docs" / "external-services.md").read_text(encoding="utf-8")
+        assert "ROBINHOOD_MCP_TOKEN" in services
+        assert "https://agent.robinhood.com/mcp/trading" in services
+
+
 class TestThinIndex:
     def test_readme_has_now_true_not_recent_additions(self):
         text = (_ROOT / "README.md").read_text(encoding="utf-8")

@@ -250,10 +250,12 @@ When fetching any market data, **ALWAYS** use sources in this priority order:
 | **3rd** | Exa (web search) | Company research, news, data not in IB/UW | API key required |
 | **4th** | agent-browser | Interactive pages, JS-rendered content | Slow, fallback only |
 | **5th** | Cboe official index feeds | COR1M historical fallback before Yahoo; official VIX/VVIX daily close verification after market close + 20 minutes ET | COR1M delayed historical feed; VIX_History.csv and VVIX_History.csv official daily close files |
-| **6th ⚠️** | Yahoo Finance | **ABSOLUTE LAST RESORT** — only if ALL above fail | Rate limited, unreliable, delayed |
+| **6th** | Robinhood (official trading MCP, READ-ONLY) | Equity quote/historicals failover before Yahoo; popular-watchlist / scan retail-crowding overlay | OAuth token required; option schema unpublished (NBBO/last only — no greeks/IV/OI/surface); no dark pool, OTC, sweeps, or GEX; never used for orders — execution stays on IB |
+| **7th ⚠️** | Yahoo Finance | **ABSOLUTE LAST RESORT** — only if ALL above fail | Rate limited, unreliable, delayed |
 
 **For COR1M, use the official Cboe dashboard historical feed before Yahoo Finance.**
-**Yahoo Finance is the ABSOLUTE LAST RESORT. Never use it if IB, UW, Exa, agent-browser, or an official Cboe feed can provide the data.**
+**Robinhood ranks after IB, UW and the official Cboe feeds and before Yahoo, and is read-only: Radon never places or cancels an order through it.**
+**Yahoo Finance is the ABSOLUTE LAST RESORT. Never use it if IB, UW, Exa, agent-browser, an official Cboe feed, or Robinhood can provide the data.**
 
 ### Scripts
 
