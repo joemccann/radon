@@ -14,6 +14,7 @@ import { parseArgs } from "./cli.js";
 import { connectMktnews } from "./client.js";
 import { formatMessage } from "./format.js";
 import { DEFAULT_LISTEN_PORT, startHeadlinesHub } from "./hub.js";
+import { createHeadlinesStore } from "./store.js";
 
 export function runTap({
   argv = process.argv.slice(2),
@@ -64,12 +65,19 @@ export function runTap({
   return { stop, controller };
 }
 
+function resolveRingStore() {
+  if (process.env.TURSO_DB_URL) return createHeadlinesStore();
+  process.stderr.write("[mktnews] TURSO_DB_URL unset; ring will not survive restarts\n");
+  return null;
+}
+
 const isMain = process.argv[1] && process.argv[1].endsWith("mktnews/index.js");
 if (isMain) {
   const opts = parseArgs(process.argv.slice(2));
   if (opts.serve) {
     const hub = await startHeadlinesHub({
       listenPort: opts.port ?? DEFAULT_LISTEN_PORT,
+      store: resolveRingStore(),
     });
     process.stderr.write(`[mktnews] hub ${hub.address()}\n`);
     const shutdown = () => {
