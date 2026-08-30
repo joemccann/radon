@@ -19,6 +19,15 @@ import { parseFrame } from "./protocol.js";
 export const HEADLINES_PATH = "/ws-headlines";
 export const DEFAULT_LISTEN_PORT = 8766;
 export const MAX_CLIENTS = 32;
+// R-459: the serve path dropped the client's `reconnect` / `error` events and
+// wrote no service_health row, so a refused or silent upstream left only a
+// status pill on whichever dashboard happened to be open. The hub now
+// journals every upstream event and keeps a `mktnews-hub` row: `error` after
+// FAILURE_THRESHOLD consecutive failed dials or SILENCE_MS without any frame
+// (time heartbeats included), `ok` at most every SILENCE_MS while frames flow.
+export const FAILURE_THRESHOLD = 3;
+export const SILENCE_MS = 5 * 60_000;
+const HEALTH_TICK_MS = 60_000;
 const TICKET_VALIDATION_TIMEOUT_MS = 3000;
 const LOOPBACK_LISTEN_HOSTS = new Set(["127.0.0.1", "::1"]);
 
@@ -73,12 +82,22 @@ export function createHeadlinesHub({
   delayFn = reconnectDelayMs,
   loadHistory = null,
   store = null,
+  log = (line) => process.stderr.write(`${line}\n`),
+  recordHealth = null,
+  failureThreshold = FAILURE_THRESHOLD,
+  silenceMs = SILENCE_MS,
+  healthTickMs = HEALTH_TICK_MS,
 } = {}) {
   const host = resolveHubListenHost(listenHost, security.bindHost);
   const ring = [];
   const clients = new Set();
   let upstream = null;
   let closed = false;
+  let healthTimer = null;
+  let lastFrameAt = null;
+  let startedAt = null;
+  let consecutiveFailures = 0;
+  let lastOkWriteAt = 0;
 
   function ingest(parsed) {
     if (frameByteLength(parsed) > maxFrameBytes) return false;
@@ -192,17 +211,67 @@ export function createHeadlinesHub({
     });
   });
 
+  function writeHealth(state, message) {
+    if (!recordHealth) return;
+    Promise.resolve()
+      .then(() => recordHealth(state, message ? { error: { message } } : {}))
+      .catch((err) => {
+        log(`[mktnews] health write failed: ${err?.message ?? err}`);
+      });
+  }
+
+  function healthTick() {
+    if (closed) return;
+    const now = Date.now();
+    const sinceFrame = now - (lastFrameAt ?? startedAt);
+    if (sinceFrame > silenceMs) {
+      writeHealth("error", `no upstream frame for ${Math.round(sinceFrame / 1000)}s`);
+      return;
+    }
+    if (consecutiveFailures >= failureThreshold) return;
+    if (lastFrameAt != null && now - lastOkWriteAt >= silenceMs) {
+      lastOkWriteAt = now;
+      writeHealth("ok");
+    }
+  }
+
+  function onUpstreamStatus(event) {
+    if (event.event === "open") {
+      consecutiveFailures = 0;
+      log(`[mktnews] upstream open ${event.url}`);
+      broadcastStatus("upstream-open");
+    } else if (event.event === "close") {
+      log(`[mktnews] close ${event.code} ${event.reason}`);
+      broadcastStatus("upstream-down");
+    } else if (event.event === "idle") {
+      log(`[mktnews] idle: no upstream frame for ${event.idleMs}ms, terminating`);
+    } else if (event.event === "reconnect") {
+      consecutiveFailures = event.attempt;
+      log(`[mktnews] reconnect attempt=${event.attempt} delayMs=${event.delayMs}`);
+      if (event.attempt >= failureThreshold) {
+        writeHealth("error", `upstream unreachable: ${event.attempt} consecutive failed attempts`);
+      }
+    } else if (event.event === "error") {
+      log(`[mktnews] error ${event.error}`);
+    }
+  }
+
   function startUpstream() {
     if (!connectUpstream || closed) return;
+    startedAt = Date.now();
     upstream = connectUpstream({
       delayFn,
       maxPayload: maxFrameBytes,
-      onMessage: (msg) => ingest(msg),
-      onStatus: (event) => {
-        if (event.event === "open") broadcastStatus("upstream-open");
-        if (event.event === "close") broadcastStatus("upstream-down");
+      onMessage: (msg) => {
+        lastFrameAt = Date.now();
+        ingest(msg);
       },
+      onStatus: onUpstreamStatus,
     });
+    if (recordHealth) {
+      healthTimer = setInterval(healthTick, healthTickMs);
+      healthTimer.unref?.();
+    }
   }
 
   async function seedRing() {
@@ -229,6 +298,10 @@ export function createHeadlinesHub({
 
   async function stop() {
     closed = true;
+    if (healthTimer != null) {
+      clearInterval(healthTimer);
+      healthTimer = null;
+    }
     upstream?.stop?.();
     for (const client of clients) {
       try {

@@ -12,6 +12,13 @@ import {
 
 const FLASH_HISTORY_TIMEOUT_MS = 5_000;
 
+// R-435: a peer that drops without a FIN keeps `readyState` OPEN forever and
+// `close` never fires, so nothing reconnected. The upstream sends periodic
+// `time` heartbeats, so any frame within this bound is proof of life; past it
+// the socket is torn down (`terminate`, not `close` -- a close handshake would
+// wait on the same dead peer) and the ordinary reconnect path takes over.
+export const UPSTREAM_IDLE_MS = 90_000;
+
 export async function fetchFlashHistory({
   url = DEFAULT_FLASH_URL,
   origin = DEFAULT_ORIGIN,
@@ -53,10 +60,12 @@ export function connectMktnews({
   reconnect = true,
   delayFn = reconnectDelayMs,
   maxPayload = MAX_FRAME_BYTES,
+  idleTimeoutMs = UPSTREAM_IDLE_MS,
 } = {}) {
   let attempt = 0;
   let socket = null;
   let timer = null;
+  let idleTimer = null;
   let stopped = false;
 
   function status(event, extra = {}) {
@@ -70,29 +79,57 @@ export function connectMktnews({
     }
   }
 
+  function clearIdleTimer() {
+    if (idleTimer != null) {
+      clearTimeout(idleTimer);
+      idleTimer = null;
+    }
+  }
+
+  function armIdleTimer(target) {
+    clearIdleTimer();
+    if (!(idleTimeoutMs > 0)) return;
+    idleTimer = setTimeout(() => {
+      idleTimer = null;
+      if (stopped || socket !== target) return;
+      status("idle", { idleMs: idleTimeoutMs });
+      try {
+        target.terminate();
+      } catch {
+        // already gone; the close handler reconnects either way
+      }
+    }, idleTimeoutMs);
+  }
+
   function open() {
     if (stopped || signal?.aborted) return;
     clearTimer();
-    socket = new WebSocketImpl(url, {
+    const ws = new WebSocketImpl(url, {
       maxPayload,
       headers: {
         Origin: origin,
         "User-Agent": userAgent,
       },
     });
-    socket.on("open", () => {
+    socket = ws;
+    ws.on("open", () => {
       attempt = 0;
+      armIdleTimer(ws);
       status("open", { url });
     });
-    socket.on("message", (data) => {
+    ws.on("message", (data) => {
+      armIdleTimer(ws);
       onMessage?.(parseFrame(data));
     });
-    socket.on("error", (error) => {
+    ws.on("error", (error) => {
       status("error", { error: error?.message ?? String(error) });
     });
-    socket.on("close", (code, reason) => {
+    ws.on("close", (code, reason) => {
+      if (socket === ws) {
+        clearIdleTimer();
+        socket = null;
+      }
       status("close", { code, reason: reason?.toString?.() ?? String(reason ?? "") });
-      socket = null;
       scheduleReconnect();
     });
   }
@@ -108,6 +145,7 @@ export function connectMktnews({
   function stop() {
     stopped = true;
     clearTimer();
+    clearIdleTimer();
     if (socket) {
       try {
         socket.close();

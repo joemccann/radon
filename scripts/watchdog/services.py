@@ -301,6 +301,11 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # the relay error IS the IB-data-plane-dead signal, so grouping it under
     # IB-outage suppression would mute the alert.
     "ib-realtime-relay": {"open": 5 * _MIN, "closed": 24 * _HOUR, "requires_ib": False},
+    # R-459: the MKTNews headlines hub (radon-mktnews.service) writes `ok` at
+    # most every 5 min while upstream frames flow and `error` after 3 failed
+    # dials or 5 min of silence; 24/7 feed, so one 15-min window (three missed
+    # heartbeats) in every state. Mirrors web/lib/serviceHealthWindows.ts.
+    "mktnews-hub":      {"open": 15 * _MIN, "closed": 15 * _MIN, "requires_ib": False},
     # Event-driven writer when a replica file exists. Match the 24h window
     # from web/lib/serviceHealthWindows.ts; applicability is checked at
     # evaluation time so a retired replica's historical row cannot alert.
@@ -462,6 +467,8 @@ BUCKETS: dict[str, list[str]] = {
         # recovery). The error bucket below catches the escalation; including
         # it in continuous lets the 24h staleness window flag a dead relay.
         "ib-realtime-relay",
+        # Headlines hub: 5-min ok heartbeat while upstream frames flow (R-459).
+        "mktnews-hub",
         # Minute-cadence host sampler heartbeat — the 10-min staleness
         # window flags a dead sampler within one continuous cycle.
         "host-metrics",

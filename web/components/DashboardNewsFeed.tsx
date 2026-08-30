@@ -16,7 +16,7 @@ import { useBookmarks } from "../lib/useBookmarks";
 import NewsfeedTagBar from "./NewsfeedTagBar";
 import NewsfeedLightbox, { type NewsfeedLightboxFocus } from "./NewsfeedLightbox";
 import StarToggle from "./StarToggle";
-import HeadlinesTape from "./dashboard/HeadlinesTape";
+import HeadlinesTape, { newestHeadlineTime } from "./dashboard/HeadlinesTape";
 import { useHeadlines } from "../lib/useHeadlines";
 import styles from "./DashboardNewsFeed.module.css";
 
@@ -243,11 +243,18 @@ export default function DashboardNewsFeed() {
     scrollToTop();
   }, [safePage, totalPages, scrollToTop]);
 
-  const lastSample = lastUpdated
-    ? new Date(lastUpdated).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })
-    : "---";
-  const captureBasis = error ? "fault" : loading ? "awaiting" : "scraper";
   const commentaryOpen = feedTab === "commentary";
+  // R-463: the footer's freshness fields belong to the OPEN tab. Under
+  // Headlines they read the hub's own status and the newest print's time,
+  // not the commentary scraper's.
+  const newestHeadlineMs = newestHeadlineTime(headlines);
+  const sampleAt = commentaryOpen ? (lastUpdated ? new Date(lastUpdated) : null) : (newestHeadlineMs == null ? null : new Date(newestHeadlineMs));
+  const lastSample = sampleAt
+    ? sampleAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })
+    : "---";
+  const captureBasis = commentaryOpen
+    ? (error ? "fault" : loading ? "awaiting" : "scraper")
+    : (headlinesStatus === "down" ? "fault" : headlinesStatus === "connecting" ? "awaiting" : "hub");
   const live = commentaryOpen
     ? !loading && !error && posts.length > 0
     : headlinesStatus === "live";

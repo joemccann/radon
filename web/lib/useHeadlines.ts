@@ -68,6 +68,10 @@ export function useHeadlines() {
       }
       if (frame.type === "status" && frame.state === "upstream-down") {
         setStatus("down");
+        return;
+      }
+      if (frame.type === "status" && frame.state === "upstream-open") {
+        setStatus("live");
       }
     }
 

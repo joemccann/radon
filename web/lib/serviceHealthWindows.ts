@@ -434,6 +434,14 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // we want.
   "ib-realtime-relay": { open: 5 * MIN, extended: 24 * HOUR, closed: 24 * HOUR, category: "scheduled", requires_ib: false },
 
+  // R-459: the MKTNews headlines hub (radon-mktnews.service, scripts/mktnews/
+  // hub.js) writes `ok` at most every 5 min while upstream frames flow (time
+  // heartbeats count) and `error` after 3 consecutive failed dials or 5 min
+  // of silence. The upstream is a 24/7 feed, so one uniform 15-min window
+  // (three missed heartbeats) applies in every market state. No row until
+  // the unit is installed: the watchdog reads no-row as dormant.
+  "mktnews-hub": { open: 15 * MIN, extended: 15 * MIN, closed: 15 * MIN, category: "scheduled", requires_ib: false },
+
   // ``deploy`` is NOT a writer — it's the deploy MARKER row upserted by
   // radon-cloud deploy.sh after each green post-deploy gate (DUR-11). The
   // triggers from migration 0011 mirror it into service_health_events so
