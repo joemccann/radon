@@ -248,6 +248,26 @@ start_notify_proxy() {
   return 71
 }
 
+# docker --env-file takes each line VERBATIM: there is no shell quoting, so
+# XAI_API_KEY='xai-…' reached the container WITH its quotes and xAI answered
+# 400 "Incorrect API key" (2026-08-30; six secrets in /etc/radon/env are
+# single-quoted because `set -a; . file` consumers need $-bearing values
+# quoted, see CLAUDE.md). Strip one matching pair of surrounding quotes per
+# line into a root-only copy under the runtime dir and hand docker that; the
+# host file stays the secret of record and is never rewritten.
+render_env_file() {
+  local unit="$1" out="${NOTIFY_PROXY_DIR}/${unit}.env"
+  mkdir -p "$NOTIFY_PROXY_DIR"
+  (
+    umask 077
+    sed -E \
+      -e "s/^([A-Za-z_][A-Za-z0-9_]*=)'(.*)'[[:space:]]*\$/\1\2/" \
+      -e 's/^([A-Za-z_][A-Za-z0-9_]*=)"(.*)"[[:space:]]*$/\1\2/' \
+      "$ENV_FILE" > "$out"
+  )
+  printf '%s\n' "$out"
+}
+
 cmd_run() {
   local unit="${1:-}"
   local ids image workdir
@@ -306,7 +326,7 @@ cmd_run() {
     --security-opt no-new-privileges \
     --cgroupns host \
     --cgroup-parent=system.slice \
-    --env-file "$ENV_FILE" \
+    --env-file "$(render_env_file "$unit")" \
     --env RADON_DB_NO_REPLICA=1 \
     --env PYTHONPATH=/home/radon/radon/scripts \
     -w "$workdir" \
