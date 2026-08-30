@@ -153,6 +153,8 @@ readonly SERVICE_FILES=(
   radon-hhlev.timer
   radon-vixts.service
   radon-vixts.timer
+  radon-dispersion.service
+  radon-dispersion.timer
 )
 
 
