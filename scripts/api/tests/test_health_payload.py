@@ -96,6 +96,19 @@ class TestHealthPayloadScoping:
 
         assert result["ib_gateway"]["auth_state"] == "awaiting_2fa"
 
+    @pytest.mark.asyncio
+    async def test_trusted_hetzner_private_caller_gets_full_payload(self, monkeypatch):
+        async def _gw(*args, **kwargs):
+            return {"auth_state": "authenticated", "host": "10.0.0.4"}
+
+        monkeypatch.setattr(server, "check_ib_gateway", _gw)
+        monkeypatch.setattr(server, "ib_pool", SimpleNamespace(status=lambda: {}))
+
+        req = _request("10.0.0.4")  # broker watchdog over radon-private
+        result = await server.health(req)
+
+        assert result["ib_gateway"]["auth_state"] == "authenticated"
+
 
 class TestHealthProbeBounding:
     """/health must NEVER hang. The IB gateway probe (check_ib_gateway) can block
