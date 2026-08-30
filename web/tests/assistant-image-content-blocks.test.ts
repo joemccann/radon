@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { drainAssistantStream } from "./assistantStream";
+
 /**
  * Pasted-image attachments on the assistant turn.
  *
@@ -68,7 +70,13 @@ describe("assistant route image content blocks", () => {
 
   async function post(messages: unknown[]): Promise<Response> {
     const { POST } = await import("@/app/api/assistant/route");
-    return POST(postRequest({ messages }) as never);
+    const res = await POST(postRequest({ messages }) as never);
+    // The route answers as soon as the header is flushed and runs the loop on
+    // the open stream, so nothing about the turn is settled until it closes.
+    if (res.headers.get("content-type")?.includes("text/event-stream")) {
+      await drainAssistantStream(res.clone());
+    }
+    return res;
   }
 
   function turns(): Array<{ role: string; content: unknown }> {
