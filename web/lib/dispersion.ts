@@ -26,8 +26,6 @@ export const WINDOW = 60;
 /** Start of the z-score base sample. */
 export const ZSCORE_BASE_START = "2017-01-01";
 
-export const SOURCE_FOOTNOTE = "Source: Interactive Brokers daily bars (Yahoo fallback)";
-
 /* ─── Payload types ──────────────────────────────────── */
 
 export type DispersionRegime = "BROAD STRESS" | "BELOW THE SURFACE" | "COMPRESSED" | "NORMAL";
@@ -150,4 +148,33 @@ export function formatSpreadPct(v: number | null | undefined): string {
 export function formatVix(v: number | null | undefined): string {
   if (v == null || !Number.isFinite(v)) return "---";
   return v.toFixed(2);
+}
+
+/* ─── Source provenance (R-434) ──────────────────────── */
+
+/** Strip label for the rung that served the prices: "IB", "YAHOO", "IB + YAHOO", "STORED". */
+export function formatSource(source: DispersionSource | null | undefined): string {
+  const prices = source?.prices;
+  if (prices === "mixed") return "IB + YAHOO";
+  if (!prices || prices === "none") return "---";
+  return prices.toUpperCase();
+}
+
+/** Footnote derived from the payload, never a static claim about the ladder. */
+export function sourceFootnote(
+  source: DispersionSource | null | undefined,
+  fetch: DispersionFetch | null | undefined,
+): string {
+  switch (source?.prices) {
+    case "ib":
+      return "Source: Interactive Brokers daily bars";
+    case "yahoo":
+      return "Source: Yahoo Finance daily bars; the Interactive Brokers rung served nothing this sweep";
+    case "mixed":
+      return `Source: Interactive Brokers daily bars, Yahoo Finance fallback for ${fetch?.yahoo_ok ?? "some"} symbols`;
+    case "stored":
+      return "Source: stored sessions, no new session this run (Interactive Brokers daily bars, Yahoo fallback)";
+    default:
+      return "Source: unavailable";
+  }
 }

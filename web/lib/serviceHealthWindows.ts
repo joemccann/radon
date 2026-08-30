@@ -242,7 +242,7 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // matches its cor / vixcor / straddle siblings. Cboe CDN CSVs only — no IB.
   "vixts": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
-  // ``dispersion`` — radon-dispersion.timer fires daily 22:20 UTC every calendar day (weekend runs are no-new-session heartbeats); the Yahoo rung keeps the writer alive through an IB outage, so requires_ib stays false.
+  // ``dispersion`` — radon-dispersion.timer fires daily 22:20 UTC every calendar day (weekend runs are no-new-session heartbeats); the Yahoo rung keeps the writer alive through an IB outage, so requires_ib stays false. A sweep IB served nothing on is ``ok`` with last_error class ``ib_rung_dead`` (R-434).
   "dispersion": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
   // ``trin`` — radon-trin.timer samples NYSE A/D + volume from IB every 5 minutes during RTH (3 missed cycles flag); off-hours the close heartbeat holds a day.

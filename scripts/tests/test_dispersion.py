@@ -36,6 +36,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import statistics
+import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -863,6 +864,47 @@ class TestRun:
             self._run(_StubFetch(corrupted))
         assert self.fake.rows == []
 
+    # R-434: a sweep IB served nothing on is real data (Yahoo built it) but not
+    # a healthy steady state under CLAUDE.md rule 7; the heartbeat stays ok and
+    # carries the class so the operator sees the rung is dead.
+    def test_ib_rung_dead_heartbeats_ok_with_the_ib_rung_dead_class(self, monkeypatch):
+        rows = self._all_rows()
+        self.stored = rows[:-1]
+        monkeypatch.setattr(fetch_dispersion, "_fetch_ib_closes", lambda symbols, duration, deadline: {})
+        monkeypatch.setattr(
+            fetch_dispersion,
+            "_fetch_yahoo_closes",
+            lambda symbols, backfill, deadline, *rest: {s: dict(SHIFTED_CLOSES[s]) for s in symbols},
+        )
+        payload = fetch_dispersion.run(now=NOW, universe=FIXTURE_UNIVERSE)
+
+        assert payload["status"] == "ok"
+        assert payload["source"] == {"prices": "yahoo", "vix": "yahoo"}
+        assert payload["fetch"]["ib_ok"] == 0
+        assert len(self.fake.rows) == 1
+        assert self.fake.snapshots == [("dispersion", NOW_ISO)]
+        assert len(self.fake.health) == 1
+        service, state, error = self.fake.health[0]
+        assert (service, state) == ("dispersion", "ok")
+        assert error is not None, "pre-fix: ok with error=None hides a dead IB rung"
+        assert error["class"] == "ib_rung_dead"
+        assert "IB" in error["message"]
+
+    def test_ib_serving_the_sweep_heartbeats_ok_without_an_error_class(self, monkeypatch):
+        rows = self._all_rows()
+        self.stored = rows[:-1]
+        monkeypatch.setattr(
+            fetch_dispersion,
+            "_fetch_ib_closes",
+            lambda symbols, duration, deadline: {s: dict(SHIFTED_CLOSES[s]) for s in symbols},
+        )
+        monkeypatch.setattr(
+            fetch_dispersion, "_fetch_yahoo_closes", lambda symbols, backfill, deadline, *rest: {}
+        )
+        payload = fetch_dispersion.run(now=NOW, universe=FIXTURE_UNIVERSE)
+        assert payload["source"] == {"prices": "ib", "vix": "ib"}
+        assert self.fake.health == [("dispersion", "ok", None)]
+
 
 # ── fetch_dispersion: _write_db isolation (R-192) ─────────────────
 
@@ -976,3 +1018,48 @@ class TestDispersionStorage:
 
         monkeypatch.setattr(writer, "get_db", lambda: (_ for _ in ()).throw(AssertionError("no db call expected")))
         writer.upsert_dispersion_rows([], recorded_at="2026-08-29T22:21:07Z")
+
+
+# ── fetch_dispersion: sweep budget (R-446) ────────────────────────
+
+
+class TestSweepBudget:
+    def test_budget_split_covers_the_whole_sweep(self):
+        assert fetch_dispersion.SWEEP_BUDGET_S == 600
+        assert fetch_dispersion.IB_SWEEP_BUDGET_S == 420
+        assert fetch_dispersion.YAHOO_SWEEP_BUDGET_S == 180
+        assert fetch_dispersion.IB_SWEEP_BUDGET_S + fetch_dispersion.YAHOO_SWEEP_BUDGET_S == fetch_dispersion.SWEEP_BUDGET_S
+
+    def test_yahoo_rung_keeps_its_own_budget_after_ib_spends_the_deadline(self, monkeypatch):
+        """An HMDS-inactive gateway answers every request empty on its own
+        timeout and overruns the deadline; the fallback must still get a
+        positive budget instead of the spent one (pre-fix: {} at 0/N)."""
+        monkeypatch.setattr(fetch_dispersion, "SWEEP_BUDGET_S", 0.2)
+        monkeypatch.setattr(fetch_dispersion, "IB_SWEEP_BUDGET_S", 0.05, raising=False)
+        monkeypatch.setattr(fetch_dispersion, "YAHOO_SWEEP_BUDGET_S", 0.5, raising=False)
+        symbols = ["AAPL", "MSFT", VIX_SYMBOL]
+        seen: dict[str, float] = {}
+
+        def ib_spent(requested, duration, deadline):
+            time.sleep(max(0.0, deadline - time.monotonic()) + 0.05)
+            return {}
+
+        real_incremental = fetch_dispersion._fetch_yahoo_incremental
+
+        def yahoo_incremental(requested, deadline, *rest):
+            seen["remaining"] = deadline - time.monotonic()
+            return real_incremental(requested, deadline, *rest)
+
+        monkeypatch.setattr(fetch_dispersion, "_fetch_ib_closes", ib_spent)
+        monkeypatch.setattr(fetch_dispersion, "_fetch_yahoo_incremental", yahoo_incremental)
+        monkeypatch.setattr(
+            fetch_dispersion,
+            "_fetch_yahoo_spark_batch",
+            lambda batch, *rest: {s: {"2026-08-28": 100.0} for s in batch},
+        )
+
+        closes = fetch_dispersion.fetch_closes_ladder(symbols, backfill=False)
+
+        assert seen["remaining"] > 0, "the fallback rung was handed a spent deadline"
+        assert set(closes) == set(symbols)
+        assert closes.sources == {s: "yahoo" for s in symbols}
