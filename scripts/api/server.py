@@ -2022,7 +2022,13 @@ async def demo_trial_expiry(request: Request):
 def _gateway_unit_controllable() -> bool:
     """True when THIS host owns the gateway lifecycle: systemd is present and
     the installed control helper (single 2FA-lease owner) exists. True on the
-    Hetzner deployment, False on the laptop pointing at the remote gateway."""
+    Hetzner deployment, False on the laptop pointing at the remote gateway.
+
+    RADON_HOST_ROLE=app must never own the session even if a deploy reinstalls
+    the helper onto the app VM.
+    """
+    if os.environ.get("RADON_HOST_ROLE", "combined") == "app":
+        return False
     return (
         admin_services.is_systemd_available()
         and Path(admin_services.GATEWAY_CONTROL_PATH).exists()

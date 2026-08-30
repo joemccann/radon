@@ -100,6 +100,19 @@ class TestCloudDelegate:
         assert resp.status_code == 503
         assert "remote" in resp.json()["detail"]["error"].lower()
 
+    def test_app_role_is_not_controllable_even_with_helper(self, monkeypatch, tmp_path):
+        helper = tmp_path / "radon-ib-gateway-control"
+        helper.write_text("#!/bin/sh\n")
+        helper.chmod(0o755)
+        monkeypatch.setattr(admin_services, "GATEWAY_CONTROL_PATH", str(helper))
+        monkeypatch.setattr(admin_services, "is_systemd_available", lambda: True)
+        monkeypatch.setenv("RADON_HOST_ROLE", "app")
+        assert server._gateway_unit_controllable() is False
+        monkeypatch.setenv("RADON_HOST_ROLE", "combined")
+        assert server._gateway_unit_controllable() is True
+        monkeypatch.setenv("RADON_HOST_ROLE", "broker")
+        assert server._gateway_unit_controllable() is True
+
     def test_service_action_maps_lease_conflict_to_409(self, client):
         with patch.object(
             admin_services, "control_unit", new=AsyncMock(return_value=_lease_held_result())
