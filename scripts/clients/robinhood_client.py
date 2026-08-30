@@ -13,8 +13,11 @@ Radon's use of this surface is deliberately narrow:
     anything outside the documented read-tool allowlist, so a place_* /
     cancel_* call can never leave this process even if a caller asks.
   - No dark pool, OTC, sweeps, GEX, or vol surface: Robinhood does not
-    serve them, and the option-quote schema is unpublished — options are
-    NBBO/last failover only, never a greeks/surface source.
+    serve them. The option surface was probed live (2026-08-30 tool dump,
+    67 tools): ``get_option_quotes`` takes ``instrument_ids`` (UUIDs) and
+    returns real-time quotes plus the official prior-session close, with
+    no greeks/IV/OI fields — so options are NBBO/last + prior-close
+    failover only, never a greeks/surface source.
   - Unconfigured is a clean no-op: with neither an access token nor a
     refresh token, every module-level fetch helper returns empty
     immediately (no network, no raise) and the ladder falls through to
@@ -544,14 +547,14 @@ class RobinhoodClient:
     def fetch_daily_closes(self, symbol: str) -> Dict[str, float]:
         """date (YYYY-MM-DD) -> close from get_equity_historicals.
 
-        The payload schema is unpublished, so field names are probed
-        defensively; any shape this cannot read yields {} and the ladder
-        falls through to Yahoo.
+        Row/field names are probed defensively rather than assumed; any
+        shape this cannot read yields {} and the ladder falls through to
+        Yahoo.
         """
         return _closes_from_historicals(self.get_equity_historicals(symbol))
 
 
-# ── payload parsing (schema unpublished — probe, never assume) ────
+# ── payload parsing (fields probed live, never assumed) ──────────
 
 _ROW_LIST_KEYS = ("data_points", "historicals", "results", "quotes", "data", "bars", "items")
 _DATE_KEYS = ("begins_at", "date", "timestamp", "time", "session_date")

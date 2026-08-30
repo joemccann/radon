@@ -53,9 +53,20 @@ IB_FLEX_NAV_QUERY_ID=1497709            # cash transactions
 # Equibles (13F, ATS, COT, filings, short crowding)
 EQUIBLES_API_KEY=
 
+# Robinhood trading MCP (READ-ONLY failover + crowding overlay; optional —
+# unset skips Robinhood cleanly to Yahoo). Bootstrap only: the rotating
+# token store is the 0600 file below, rewritten by the OAuth refresh.
+ROBINHOOD_MCP_URL=https://agent.robinhood.com/mcp/trading
+ROBINHOOD_MCP_TOKEN=                    # access token, ~3 day expiry
+ROBINHOOD_MCP_REFRESH_TOKEN=            # required for production refresh
+ROBINHOOD_MCP_CLIENT_ID=                # public OAuth client, no secret
+ROBINHOOD_MCP_TOKEN_FILE=/etc/radon/rh-mcp.json
+
 # Loopback / off-box probes (not a Clerk session)
 RADON_PROBE_FRESHNESS_TOKEN=
 ```
+
+**Robinhood token file.** `/etc/radon/rh-mcp.json` (`0600`, radon-owned) holds `access_token` / `refresh_token` / `client_id` / `expires_at` and is rewritten atomically by the client's refresh against `https://api.robinhood.com/oauth2/token/` — it cannot live inside the read-only env file, and it must never be committed. Access tokens expire ~3 days; with no credentials at all every ladder skips Robinhood and falls through to Yahoo.
 
 `scripts/cta_sync_service.py` and `scripts/run_cta_sync.sh` parse `.env` values literally instead of shell-sourcing them, so unquoted secrets containing shell metacharacters (`$`, backticks, etc.) survive the scheduled CTA path.
 

@@ -187,6 +187,58 @@ class TestRobinhoodRankRule:
             assert name in services, name
         assert "https://agent.robinhood.com/mcp/trading" in services
 
+    def test_numbered_priority_lists_put_cboe_before_rh_before_yahoo(self):
+        # The class of mismatch where RH is numbered directly after UW and
+        # Cboe exists only in prose: the numbered list itself must read
+        # Cboe -> Robinhood -> Yahoo.
+        for rel in ("CLAUDE.md", "AGENTS.md", ".pi/AGENTS.md"):
+            text = (_ROOT / rel).read_text(encoding="utf-8")
+            start = text.index("## Data Source Priority")
+            end = text.find("\n## ", start + 1)
+            section = text[start:end] if end != -1 else text[start:]
+            cboe = section.index("Cboe official index feeds")
+            rh = section.index("Robinhood")
+            yahoo = section.index("Yahoo Finance — **ABSOLUTE LAST RESORT**")
+            assert cboe < rh < yahoo, (
+                f"{rel}: the numbered priority list must read "
+                "Cboe -> Robinhood -> Yahoo"
+            )
+
+    def test_vps_secret_paths_are_pinned(self):
+        # The rotating token store is a writable secret OUTSIDE the read-only
+        # env file: both operator docs must name it.
+        for rel in ("docs/external-services.md", "docs/operations.md"):
+            text = (_ROOT / rel).read_text(encoding="utf-8")
+            assert "/etc/radon/rh-mcp.json" in text, rel
+        operations = (_ROOT / "docs" / "operations.md").read_text(encoding="utf-8")
+        for name in (
+            "ROBINHOOD_MCP_TOKEN",
+            "ROBINHOOD_MCP_REFRESH_TOKEN",
+            "ROBINHOOD_MCP_CLIENT_ID",
+            "ROBINHOOD_MCP_TOKEN_FILE",
+        ):
+            assert name in operations, name
+
+    def test_official_links_and_non_dependencies_are_pinned(self):
+        services = (_ROOT / "docs" / "external-services.md").read_text(encoding="utf-8")
+        for link in (
+            "https://agent.robinhood.com/mcp/trading",
+            "https://agent.robinhood.com/.well-known/oauth-authorization-server/mcp/trading",
+            "https://api.robinhood.com/oauth2/token/",
+            "https://robinhood.com/us/en/support/articles/agentic-trading-overview/",
+            "https://robinhood.com/us/en/support/articles/trading-with-your-agent/",
+        ):
+            assert link in services, link
+        # Explicit non-dependencies: unofficial wrappers, Banking MCP, crypto
+        # REST, and the crowding series' gate isolation.
+        for marker in (
+            "robin-stocks",
+            "banking-agent.robinhood.com",
+            "trading.robinhood.com",
+            "cannot trip the three gates",
+        ):
+            assert marker in services, marker
+
     def test_token_expiry_and_refresh_are_documented(self):
         # A static access token goes stale in ~3 days; both env docs must say
         # refresh is mandatory and point at the official token endpoint.

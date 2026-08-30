@@ -83,9 +83,10 @@ Any gate fails → stop. Name the gate.
 
 1. Interactive Brokers (TWS / Gateway) — real-time
 2. Unusual Whales (`$UW_TOKEN`) — dark pool, sweeps, alerts
-3. Robinhood (official trading MCP, READ-ONLY; tokens in the 0600 file `$ROBINHOOD_MCP_TOKEN_FILE`, auto-refreshed — access tokens expire ~3 days) — quote/chain failover + retail-crowding overlay only. Never above IB or UW; execution stays on IB. No dark pool, OTC, sweeps, GEX, or vol surface.
-4. Yahoo Finance — **ABSOLUTE LAST RESORT**
-5. Web scrape — after Yahoo
+3. Cboe official index feeds — COR1M dashboard history, official VIX/VVIX daily closes. Other specialized official feeds (Treasury, FINRA) rank here when a script documents them as the source for that metric.
+4. Robinhood (official trading MCP, READ-ONLY; tokens in the 0600 file `$ROBINHOOD_MCP_TOKEN_FILE`, auto-refreshed — access tokens expire ~3 days) — quote/chain failover + retail-crowding overlay only. Never above IB, UW, or Cboe; execution stays on IB. No dark pool, OTC, sweeps, GEX, or vol surface; options are NBBO/last + prior-close only.
+5. Yahoo Finance — **ABSOLUTE LAST RESORT**
+6. Web scrape — after Yahoo
 
 Never make Yahoo the scheduled, primary, or only source for a series IB or UW can serve. Try IB every cycle. Skip the IB socket only when `/health` `auth_state` is set and not `authenticated`; then UW; then Robinhood (skipped cleanly when unconfigured); then Yahoo. Specialized official feeds (Cboe, Treasury, FINRA) may sit ahead of Robinhood and Yahoo when a script documents them as the source for that metric — the full order is IB > UW > Cboe > Robinhood > Yahoo. Clients live in `scripts/clients/`.
 
