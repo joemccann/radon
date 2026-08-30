@@ -81,7 +81,10 @@ RUN bun run build \
     && mkdir -p /ms-playwright /home/radon/radon/web/public/data
 
 WORKDIR /home/radon/radon
-RUN chown -R radon:radon /home/radon/radon /ms-playwright
+RUN rm -rf /home/radon/radon/web/.next/cache \
+    && install -d -o radon -g radon \
+      /home/radon/radon/web/.next/cache \
+      /home/radon/radon/web/public/data
 
 COPY docker/app/next-clerk-guard.sh /usr/local/bin/next-clerk-guard
 RUN chmod 0755 /usr/local/bin/next-clerk-guard

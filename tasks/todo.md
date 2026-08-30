@@ -16,7 +16,10 @@
 - E7 depends_on: [E5, E6] - Reuse one SHA/checksummed production Next artifact where provenance and output-trace checks stay equivalent
 - E8 depends_on: [E2, E3, E4, E5, E6, E7] - Run focused regressions, full project suites, workflow/static checks, and review the final critical path
 - E9 depends_on: [E8] - Commit and push the verified implementation to main
-- E10 depends_on: [E9] - Observe the real CI and production deploy, compare timings with run 33290751126, and keep iterating until the gain is proven
+- E10 depends_on: [E9] - Observe the first successful CI and production deploy and identify any remaining measured bottlenecks
+- E11 depends_on: [E10] - Reduce exact-node-image publication latency without weakening cache correctness or exact-SHA provenance
+- E12 depends_on: [E10] - Reduce redundant host image-transfer and rollout work while preserving the 40-second stability window and rollback guarantees
+- E13 depends_on: [E11, E12] - Commit, push, and observe a successful production deploy with a material end-to-end gain versus run 33290751126
 
 ## Checklist
 
@@ -29,7 +32,10 @@
 - [x] E7 Reuse the tested production artifact
 - [x] E8 Complete focused and full verification
 - [x] E9 Commit and push to main
-- [ ] E10 Verify the measured CI/deploy gain
+- [x] E10 Measure the first successful optimized deploy
+- [x] E11 Reduce node image publication latency
+- [x] E12 Reduce rollout transfer latency
+- [ ] E13 Prove the final measured CI/deploy gain
 
 ## Review
 
@@ -40,6 +46,8 @@
 - Commit gate: focused 322 passed / 5 skipped; cloud full 1,454 passed / 12 skipped; gitleaks scanned 2,380 commits with no findings; actionlint and shell syntax passed.
 - Full Vitest load timeouts all passed in isolation. Full monolithic Python retained unrelated Flex/scan baseline failures, while both changed timeout regressions passed under xdist; GitHub's isolated shards are the release gate.
 - Implementation commit `44683993` is on `main`. Run 33293579469 finished in 341s versus the 468s baseline and cut `scripts-rs` from 204s to 70s, but did not deploy because pytest still collected an explicitly expanded Caddy file despite `--ignore`; the follow-up removes that file before invoking pytest.
+- Follow-up commit `92278f6a` completed production successfully in run 33294190643, but total wall time was 472s, not an improvement over 468s. Measured bottlenecks were node image 283s, exact-image prepull 85s, and deploy 94s; test sharding itself is no longer the critical path.
+- The 283s node job spent 83s creating a 582MiB recursive-chown layer, then 51s exporting and 66s cache-uploading it. Runtime ownership is now limited to writable Next cache/data directories; test-only trees are excluded from image contexts. The smaller immutable image also reduces exact-image host transfer while the installed helper pulls Python and node concurrently.
 
 ---
 

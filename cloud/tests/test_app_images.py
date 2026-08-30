@@ -146,6 +146,18 @@ class TestNodeImage:
         assert "web/public/data" in text
         assert "socat" in text
 
+    def test_runtime_writes_do_not_require_a_recursive_chown_layer(self) -> None:
+        """A final recursive chown copied the entire 4.7 GB filesystem into a
+        new layer on every source change. Keep immutable dependency and source
+        trees readable, and own only the cache/data paths written at runtime.
+        """
+        text = NODE_DF.read_text(encoding="utf-8")
+        assert "chown -R radon:radon /home/radon/radon /ms-playwright" not in text
+        assert "rm -rf /home/radon/radon/web/.next/cache" in text
+        assert "install -d -o radon -g radon" in text
+        assert "/home/radon/radon/web/.next/cache" in text
+        assert "/home/radon/radon/web/public/data" in text
+
     def test_clerk_public_env_is_required_at_build(self) -> None:
         text = NODE_DF.read_text(encoding="utf-8")
         assert 'ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=""' not in text
@@ -177,7 +189,17 @@ class TestImageSafety:
 
     def test_dockerignore_pins(self) -> None:
         text = DOCKERIGNORE.read_text(encoding="utf-8")
-        for pattern in (".git", "data/replica.db", "**/.env", "cloud/", "docker/ib-gateway"):
+        for pattern in (
+            ".git",
+            "data/replica.db",
+            "**/.env",
+            "cloud/",
+            "docker/ib-gateway",
+            "scripts/tests/",
+            "scripts/api/tests/",
+            "web/tests/",
+            "web/e2e/",
+        ):
             assert pattern in text, pattern
 
 
