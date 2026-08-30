@@ -53,7 +53,7 @@ Sub-directory CLAUDE.md files auto-load when cwd is anywhere under that subtree.
 4. **API keys** in `.env` files. Never `~/.zshrc` unless fallback.
 5. **No raw hex in UI.** Use brand tokens. 4px max border-radius on panels.
 6. **No em dashes in user-facing copy.**
-7. **Yahoo is last resort.** Never make Yahoo the scheduled, primary, or only source for a series IB or UW can serve. 2FA, unattended timers, and "historical needs a gateway" do not skip IB or UW. Try IB, then UW, then Yahoo.
+7. **Yahoo is last resort.** Never make Yahoo the scheduled, primary, or only source for a series IB or UW can serve. 2FA, unattended timers, and "historical needs a gateway" do not skip IB or UW. Try IB, then UW, then Robinhood (read-only MCP, when configured), then Yahoo.
 
 ## ⛔ Four Gates — Sequential, No Exceptions
 
@@ -83,10 +83,11 @@ Any gate fails → stop. Name the gate.
 
 1. Interactive Brokers (TWS / Gateway) — real-time
 2. Unusual Whales (`$UW_TOKEN`) — dark pool, sweeps, alerts
-3. Yahoo Finance — **ABSOLUTE LAST RESORT**
-4. Web scrape — after Yahoo
+3. Robinhood (`$ROBINHOOD_MCP_TOKEN`, official trading MCP, READ-ONLY) — quote/chain failover + retail-crowding overlay only. Never above IB or UW; execution stays on IB. No dark pool, OTC, sweeps, GEX, or vol surface.
+4. Yahoo Finance — **ABSOLUTE LAST RESORT**
+5. Web scrape — after Yahoo
 
-Never make Yahoo the scheduled, primary, or only source for a series IB or UW can serve. Try IB every cycle. Skip the IB socket only when `/health` `auth_state` is set and not `authenticated`; then UW; then Yahoo. Specialized official feeds (Cboe, Treasury, FINRA) may sit ahead of Yahoo when a script documents them as the source for that metric. Clients live in `scripts/clients/`.
+Never make Yahoo the scheduled, primary, or only source for a series IB or UW can serve. Try IB every cycle. Skip the IB socket only when `/health` `auth_state` is set and not `authenticated`; then UW; then Robinhood (skipped cleanly when unconfigured); then Yahoo. Specialized official feeds (Cboe, Treasury, FINRA) may sit ahead of Robinhood and Yahoo when a script documents them as the source for that metric — the full order is IB > UW > Cboe > Robinhood > Yahoo. Clients live in `scripts/clients/`.
 
 ## Credentials
 
