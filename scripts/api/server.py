@@ -2027,7 +2027,7 @@ def _gateway_unit_controllable() -> bool:
     RADON_HOST_ROLE=app must never own the session even if a deploy reinstalls
     the helper onto the app VM.
     """
-    if os.environ.get("RADON_HOST_ROLE") == "app":
+    if os.environ.get("RADON_HOST_ROLE", "combined") == "app":
         return False
     return (
         admin_services.is_systemd_available()
