@@ -160,6 +160,13 @@ DEPENDENCY_UNITS = frozenset({
     "radon-newsfeed.service",
     "radon-monitor.service",
 })
+# R-382 dwell escalates a sidecar that stays non-up past the bound
+# (newsfeed / monitor Restart=always deaths). The broker is not a flap:
+# IBKR weekend session shutdown leaves radon-ib-gateway inactive/dead
+# Result=success for 40+ hours, IBC auto-restart frozen off-hours. Applying
+# the 900s dwell to that unit recreated the 2026-08-09 false edge P1
+# (page a45d6410, 2026-08-30). On-box still pages ib-gateway-grouped.
+DWELL_ESCALATE_UNITS = DEPENDENCY_UNITS - frozenset({"radon-ib-gateway.service"})
 
 
 def _evidence_current(age_secs, bound: float) -> bool:
@@ -271,7 +278,7 @@ def aggregate_state(probe_results: dict, units: dict,
                 # `non_up_secs` is stamped by UnitStateCache: how long this unit
                 # has been continuously not-`up`. None means the cache has no
                 # dwell evidence, which must never invent an escalation.
-                if is_dependency and state != "up":
+                if name in DWELL_ESCALATE_UNITS and state != "up":
                     dwell = value.get("non_up_secs")
                     if isinstance(dwell, (int, float)) and dwell >= DEPENDENCY_DWELL_LIMIT_SECS:
                         dependency_stuck = True
