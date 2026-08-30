@@ -950,6 +950,7 @@ if "pytest" in sys.modules:
 # `--host 0.0.0.0 ... 100.112.32.16:8321`), which TrustedHostMiddleware cannot
 # express: it matches whole names or one leading "*." only, never a CIDR.
 _TAILNET_CGNAT = ipaddress.ip_network("100.64.0.0/10")
+_HETZNER_PRIVATE = ipaddress.ip_network("10.0.0.0/16")
 
 
 def split_host_header(raw_host: str) -> Tuple[str, str]:
@@ -974,17 +975,24 @@ def split_host_header(raw_host: str) -> Tuple[str, str]:
 def is_pinned_ip_literal(hostname: str) -> bool:
     """True for the IP literals this API legitimately answers on.
 
-    Loopback (the Next.js / relay / watchdog hop) and the Tailscale CGNAT range
-    (the cloud-thin laptop). Allowing IP literals does not reopen DNS rebinding:
-    a rebind needs a NAME whose resolution the attacker controls, and a literal
-    resolves only to itself. Any other literal — a public address, a routable
-    IPv6 — is not a caller we serve and falls through to the name pin.
+    Loopback (the Next.js / relay / watchdog hop), the Tailscale CGNAT range
+    (the cloud-thin laptop), and the Hetzner private net (broker watchdog at
+    10.0.0.4 hitting app 10.0.0.2). Allowing IP literals does not reopen DNS
+    rebinding: a rebind needs a NAME whose resolution the attacker controls,
+    and a literal resolves only to itself. Any other literal — a public
+    address, a routable IPv6, docker0 — is not a caller we serve and falls
+    through to the name pin.
     """
     try:
         address = ipaddress.ip_address(hostname)
     except ValueError:
         return False
-    return address.is_loopback or address.is_unspecified or address in _TAILNET_CGNAT
+    return (
+        address.is_loopback
+        or address.is_unspecified
+        or address in _TAILNET_CGNAT
+        or address in _HETZNER_PRIVATE
+    )
 
 
 # Carried on the per-request ASGI scope (never on scope["state"], which some
