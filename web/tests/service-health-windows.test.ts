@@ -504,6 +504,23 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
     expect(requiresIb("vixts")).toBe(false);
   });
 
+  // ``dispersion`` — radon-dispersion.timer fires daily 22:20 UTC every
+  // calendar day (weekend and holiday runs are no-new-session heartbeats),
+  // so a uniform 26h window matches its vixts sibling. IB daily bars with a
+  // Yahoo rung that keeps the writer alive through an IB outage, so
+  // requires_ib stays false.
+  it("dispersion is registered as scheduled with a uniform 26h window", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["dispersion"]).toBeDefined();
+    expect(getServiceCategory("dispersion")).toBe("scheduled");
+    for (const state of ["open", "extended", "closed"] as MarketState[]) {
+      expect(getFreshnessWindowMs("dispersion", state)).toBe(26 * HOUR);
+      expect(getFreshnessWindowMs("dispersion", state)).toBe(
+        getFreshnessWindowMs("vixts", state),
+      );
+    }
+    expect(requiresIb("dispersion")).toBe(false);
+  });
+
   // ``credit-spread`` — radon-credit-spread.timer fires daily 21:45 UTC
   // including weekends (heartbeat), so a uniform 26h window matches its
   // yield-curve sibling. IB-primary with UW/Yahoo fallback; Yahoo is
@@ -792,6 +809,7 @@ describe("SERVICE_FRESHNESS_WINDOWS — requires_ib field", () => {
     ["discover", false],
     ["flow-analysis", false],
     ["ib-watchdog", false],
+    ["dispersion", false],
   ])("%s requires_ib = %s", (service, expected) => {
     expect(SERVICE_FRESHNESS_WINDOWS[service]?.requires_ib).toBe(expected);
   });

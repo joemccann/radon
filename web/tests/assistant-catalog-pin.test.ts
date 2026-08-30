@@ -46,6 +46,7 @@ const PINNED: Record<string, PinnedCapability> = {
   "cor": "read",
   "credit-spread": "read",
   "discover": { GET: "read", POST: "read.spawn" },
+  "dispersion": "read",
   "divyield": "read",
   "equibles-ats-venue-share": "read",
   "equibles-cot-positioning": "read",
