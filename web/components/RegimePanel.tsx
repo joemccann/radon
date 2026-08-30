@@ -16,6 +16,7 @@ import StraddlePanel from "./StraddlePanel";
 import CorPanel from "./CorPanel";
 import VixCorPanel from "./VixCorPanel";
 import VixTsPanel from "./VixTsPanel";
+import DispersionPanel from "./DispersionPanel";
 import IvRankPanel from "./IvRankPanel";
 import SkewPanel from "./SkewPanel";
 import Skew2dPanel from "./Skew2dPanel";
@@ -49,6 +50,7 @@ import {
 import { useRegime } from "@/lib/useRegime";
 import { useVcg } from "@/lib/useVcg";
 import { useGex } from "@/lib/useGex";
+import { useDispersion } from "@/lib/useDispersion";
 import { SECTION_TOOLTIPS } from "@/lib/sectionTooltips";
 import { computeCri, type CriLevel, type CriResult } from "@/lib/criCalc";
 import { MarketState } from "@/lib/useMarketHours";
@@ -59,6 +61,7 @@ const MOBILE_TAB_LABEL: Partial<Record<RegimeTab, string>> = {
   skew2d: "SKEW 2D",
   vixcor: "VIX-COR",
   vixts: "VIX TS",
+  dispersion: "DISPERSION",
   ivrank: "IV RANK",
   "iei-hyg": "TSY/HY",
   trin: "TRIN",
@@ -71,7 +74,7 @@ const MOBILE_TAB_LABEL: Partial<Record<RegimeTab, string>> = {
 function tabFromPathname(pathname: string | null): RegimeTab {
   if (!pathname) return "cri";
   // Longest prefix first within each family: skew2d before skew, vixcor before cor.
-  const match = pathname.match(/^\/regime\/(cri|vcg|gex|grg|breadth|bpi|margin|straddle|vixcor|vixts|ivrank|cor|skew2d|skew|curve|credit|iei-hyg|trin|divyield|hyad|hhlev|cot|ats|short|llm|backtest)(?:\/|$)/);
+  const match = pathname.match(/^\/regime\/(cri|vcg|gex|grg|breadth|bpi|margin|straddle|vixcor|vixts|dispersion|ivrank|cor|skew2d|skew|curve|credit|iei-hyg|trin|divyield|hyad|hhlev|cot|ats|short|llm|backtest)(?:\/|$)/);
   if (match && (REGIME_TABS as readonly string[]).includes(match[1])) {
     return match[1] as RegimeTab;
   }
@@ -181,6 +184,7 @@ export default function RegimePanel({
   // a POST scan on top of GexPanel's own trigger.
   const { data: railVcgData } = useVcg(marketState);
   const { data: railGexData } = useGex(marketState, { passive: true });
+  const { data: railDispersionData } = useDispersion();
   const shareModal = shareEndpoint ? (
     <ShareReportModal
       modalTitle={shareModalTitle}
@@ -343,13 +347,14 @@ export default function RegimePanel({
         cor1m: activeCorr,
         vcg: railVcgData,
         gex: railGexData,
+        dispersion: railDispersionData,
       }),
-    [cri?.score, cri?.level, activeCorr, railVcgData, railGexData],
+    [cri?.score, cri?.level, activeCorr, railVcgData, railGexData, railDispersionData],
   );
 
   const tabBar = compact ? (
     <div className="m-regime-tabs" role="tablist" aria-label="Regime tabs">
-      {(["cri", "vcg", "gex", "grg", "breadth", "trin", "divyield", "hyad", "bpi", "margin", "hhlev", "credit", "iei-hyg", "straddle", "cor", "vixcor", "vixts", "ivrank", "skew", "skew2d", "curve", "cot", "ats", "short", "llm", "backtest"] as RegimeTab[]).map((t) => (
+      {(["cri", "vcg", "gex", "grg", "breadth", "trin", "divyield", "hyad", "bpi", "margin", "hhlev", "credit", "iei-hyg", "straddle", "cor", "vixcor", "vixts", "dispersion", "ivrank", "skew", "skew2d", "curve", "cot", "ats", "short", "llm", "backtest"] as RegimeTab[]).map((t) => (
         <button
           key={t}
           type="button"
@@ -426,6 +431,10 @@ export default function RegimePanel({
 
   if (activeTab === "vixts") {
     return renderShell(<VixTsPanel />);
+  }
+
+  if (activeTab === "dispersion") {
+    return renderShell(<DispersionPanel />);
   }
 
   if (activeTab === "ivrank") {
