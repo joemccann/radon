@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { assistantDonePayload } from "./assistantStream";
+
 /**
  * F7 — Agentic tool-calling assistant loop.
  *
@@ -107,7 +109,7 @@ describe("assistant tool-calling loop", () => {
     const res = await POST(postRequest({ messages: [{ role: "user", content: "How is SPY flow?" }] }) as never);
 
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await assistantDonePayload(res);
 
     expect(chat).toHaveBeenCalledTimes(2);
     expect(executeTool).toHaveBeenCalledTimes(1);
@@ -164,7 +166,7 @@ describe("assistant tool-calling loop", () => {
     const res = await POST(postRequest({ messages: [{ role: "user", content: "Buy 1 SPY call" }] }) as never);
 
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await assistantDonePayload(res);
 
     // Destructive tool must NOT be auto-executed.
     expect(executeTool).not.toHaveBeenCalled();

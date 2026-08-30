@@ -277,17 +277,34 @@ their TLT position.
   no idempotency key: a retry would replay a billed vision turn). Do NOT raise
   the guard globally; R-219 needs the catch-all short so a wedged upstream
   still becomes an observable 5xx.
-- **Known limit:** the bump only moves the cliff. A turn slower than 180 s
-  still 504s because nothing is written until the loop finishes. The durable
-  fix is for the route to start writing a response early (stream, or flush a
-  header before the first round).
+- **Durable fix (shipped after the bump):** the route STREAMS. It answers
+  `text/event-stream` and writes `event: start` before `runAssistantLoop` is
+  awaited, then a `heartbeat` every 10 s, a `tool` frame per completed tool
+  call, and a terminal `done` (or `error`) frame. The response header therefore
+  exists within milliseconds of the request no matter how long the turn takes,
+  so no header guard anywhere can abandon a running turn.
+  `flush_interval -1` on the assistant handle states that every frame is
+  forwarded as written. Two consequences worth knowing at 3am:
+  - Once the header is flushed there is no status left to set. A mid-turn
+    failure is an `error` FRAME on a **200**, not a 502. Every rejection that
+    still carries a status (`requireRouteAccess`, `enforceDemoAiQuota`, the
+    empty-turn guard) runs BEFORE the stream opens.
+  - A stream that ends with no `done` frame is a failure. The client renders
+    "The connection dropped and the turn did not finish." — never an empty
+    assistant bubble.
 - **Publishing:** as with every edge change, the Caddyfile is NOT shipped by
   the CI deploy. After merge, on the VPS as `radon`:
   `sudo -n /usr/local/sbin/radon-deploy-root publish-caddy`.
 - **Regression:** `cloud/tests/test_caddy_edge_timeouts.py::TestTheAssistantTurnOutlivesTheGenericGuard`
   (the assistant handle exists, outlasts the longest observed answered turn,
   stays inside the route's own `maxDuration`, never retries, and the generic
-  30 s guard is untouched) and `web/tests/assistant-timeout-copy.test.ts`
+  30 s guard is untouched), `::TestTheAssistantHandleStatesItStreams` and
+  `::TestTheAssistantStreamMechanism` (a real caddy carries a streaming turn's
+  first byte through in well under the guard, with the site's `encode` in
+  front of it), `web/tests/assistant-stream-route.test.ts` (start flushed
+  before the loop resolves; heartbeats; error-as-frame; pre-stream statuses
+  intact), `web/tests/assistant-stream-client.test.ts` (a truncated stream is
+  an error, never an empty bubble) and `web/tests/assistant-timeout-copy.test.ts`
   (a 504 or 408 names the timeout instead of the generic error).
 
 ---

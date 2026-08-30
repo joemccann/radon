@@ -269,10 +269,25 @@ export async function runAssistantLoop(
   system: string,
   principal: AssistantPrincipal,
   selection: AssistantModelSelection = {},
+  /**
+   * Called as each tool call settles, so the route can write it to the open
+   * event stream instead of the client waiting for the whole turn. Optional:
+   * the returned `toolEvents` stays the authoritative list.
+   */
+  onToolEvent?: (event: ToolEvent) => void,
 ): Promise<AssistantLoopResult> {
   if (!principal?.userId) throw new Error("Verified assistant principal required");
   const messages: LoopMessage[] = turns.map((turn) => ({ role: turn.role, content: turn.content }));
   const toolEvents: ToolEvent[] = [];
+  // A client that has already hung up must never fail the turn it is watching.
+  const emit = (event: ToolEvent) => {
+    toolEvents.push(event);
+    try {
+      onToolEvent?.(event);
+    } catch {
+      /* the stream is gone; the loop still owes its caller a result */
+    }
+  };
   const spawnBudget = createAssistantTurnBudget();
   const priorResults = new Map<string, string>();
   const usage: LlmUsage = { inputTokens: 0, outputTokens: 0 };
@@ -350,7 +365,7 @@ export async function runAssistantLoop(
           deferred: true,
           reason: "Complete prerequisite reads, then submit a fresh validated proposal.",
         });
-        toolEvents.push({
+        emit({
           name: call.name,
           input: call.input,
           ok: false,
@@ -362,7 +377,7 @@ export async function runAssistantLoop(
       const key = callKey(call);
       const prior = priorResults.get(key);
       if (prior !== undefined) {
-        toolEvents.push({ name: call.name, input: call.input, ok: true, repeated: true });
+        emit({ name: call.name, input: call.input, ok: true, repeated: true });
         results.push({
           type: "tool_result",
           tool_use_id: call.id,
@@ -383,7 +398,7 @@ export async function runAssistantLoop(
         knowledgeBoundaryReached = true;
       }
       priorResults.set(key, content);
-      toolEvents.push({ name: call.name, input: call.input, ok: result.ok, error: result.error });
+      emit({ name: call.name, input: call.input, ok: result.ok, error: result.error });
       results.push({
         type: "tool_result",
         tool_use_id: call.id,
