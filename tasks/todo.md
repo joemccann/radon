@@ -1,3 +1,82 @@
+# Task: Execute CI and production deploy acceleration (2026-08-29)
+
+## Objective
+
+- Implement the approved acceleration plan while preserving gate coverage, the 40-second production stability window, exact-SHA deployment, and the non-canceling post-teardown boundary.
+- Target web-only push-to-production p50 at or below 4:45 and Python-bearing p50 at or below 5:15.
+
+## Dependency graph
+
+- E1 depends_on: [] - Pin current workflow safety and partition contracts with failing tests where behavior changes
+- E2 depends_on: [E1] - Replace production-length weekend-wrapper waits with test-only bounded deadlines; keep real subprocess and process-group assertions
+- E3 depends_on: [E1] - Separate cross-tree contract tests from broad Python/cloud path ownership without weakening fail-closed handling
+- E4 depends_on: [E1] - Add Buildx GHA caches, stable Docker layer ordering, and one-pass SHA/latest image publication
+- E5 depends_on: [E2, E3, E4] - Integrate balanced CI shards, duration telemetry, exact-image fan-in, and gated prepull into the workflow DAG
+- E6 depends_on: [E4, E5] - Pull exact Python/node images concurrently with prestage and require both locally before teardown; remove `latest` fallback
+- E7 depends_on: [E5, E6] - Reuse one SHA/checksummed production Next artifact where provenance and output-trace checks stay equivalent
+- E8 depends_on: [E2, E3, E4, E5, E6, E7] - Run focused regressions, full project suites, workflow/static checks, and review the final critical path
+- E9 depends_on: [E8] - Commit and push the verified implementation to main
+- E10 depends_on: [E9] - Observe the real CI and production deploy, compare timings with run 33290751126, and keep iterating until the gain is proven
+
+## Checklist
+
+- [x] E1 Pin safety and partition contracts
+- [x] E2 Bound weekend-wrapper test deadlines
+- [x] E3 Isolate cross-tree contracts
+- [x] E4 Add image cache and stable layer ordering
+- [x] E5 Integrate workflow parallelism and telemetry
+- [x] E6 Gate concurrent exact-SHA prepull
+- [x] E7 Reuse the tested production artifact
+- [x] E8 Complete focused and full verification
+- [ ] E9 Commit and push to main
+- [ ] E10 Verify the measured CI/deploy gain
+
+## Review
+
+- Weekend-wrapper focused regression fell from 171.15s to a bounded test-only path; the final combined CI contract suite passed 92 tests in 33.42s while production retained its 60s launch floor.
+- Web-only changes now run Vitest plus explicit cross-tree pytest contracts instead of the full Python/cloud gate; contract inventory and AST omission guards are pinned.
+- Exact SHA Python/node images build in parallel with isolated Buildx caches, pull concurrently, and are required locally before teardown; moving-tag runtime fallback was removed.
+- Prestaging and image prepull overlap. A duplicate host Next compile is skipped only after exact-image, rollback-artifact, matching-drop-in, and effective-systemd checks pass.
+- Commit gate: focused 322 passed / 5 skipped; cloud full 1,454 passed / 12 skipped; gitleaks scanned 2,380 commits with no findings; actionlint and shell syntax passed.
+- Full Vitest load timeouts all passed in isolation. Full monolithic Python retained unrelated Flex/scan baseline failures, while both changed timeout regressions passed under xdist; GitHub's isolated shards are the release gate.
+
+---
+
+# Task: CI and production deploy acceleration plan (2026-08-29)
+
+## Objective
+
+- Reduce push-to-production wall time from the observed ~8 minutes without weakening required gates, deployment safety, or rollback guarantees.
+- Produce an evidence-backed implementation sequence with owners, expected impact, risks, and acceptance checks.
+
+## Dependency graph
+
+- T1 depends_on: [] - Measure run 33290751126 job/step durations, queue time, and critical path
+- T2 depends_on: [] - Audit workflow DAG, change detection, caches, matrices, test sharding, and duplicated setup
+- T3 depends_on: [] - Audit deploy trigger, artifact/image flow, remote rollout, health checks, and serialized waits
+- T4 depends_on: [] - Validate proposed techniques against current GitHub Actions guidance
+- T5 depends_on: [T1, T2, T3, T4] - Rank changes by wall-time impact, effort, safety, and implementation dependency
+- T6 depends_on: [T5] - Publish and open the actionable browser brief; verify the rendered handoff
+
+## Checklist
+
+- [x] T1 Measure the referenced run and recent baseline
+- [x] T2 Audit CI workflow parallelism, caching, and sharding
+- [x] T3 Audit production deployment critical path
+- [x] T4 Verify current platform best practices
+- [x] T5 Write prioritized implementation plan and target SLA
+- [x] T6 Open and verify browser brief
+
+## Review
+
+- Run 33290751126 completed in 468s; runner queueing was only 1-4s.
+- Critical path: launch 11s, `scripts-rs` 204s, coverage barrier 22s, prestage 60s, deploy 170s.
+- Highest-impact work: bounded regression-test deadlines, isolated cross-tree contracts, and gated concurrent exact-SHA image prepull.
+- Phase-one target: web-only p50 at or below 4:45 while retaining the 40s stability window and non-canceling deploy boundary.
+- Published `docs/ci-deploy-acceleration-plan.html`; opened in the system browser and verified at 1440x900 and 393x852 with Playwright.
+
+---
+
 # Task: SPOF host-split Phase 0/0B/1-prep (2026-08-29)
 
 ## Dependency graph

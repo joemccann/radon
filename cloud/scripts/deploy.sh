@@ -102,6 +102,8 @@ UNITS_RESTARTED=1
 readonly ENV_FILE_DEFAULT="$(_default_env_file)"
 readonly APP_RUNTIME_HELPER="${RADON_APP_RUNTIME_HELPER:-/usr/local/sbin/radon-app-runtime}"
 readonly APP_IMAGE_PREPULL_TIMEOUT="${RADON_APP_IMAGE_PREPULL_TIMEOUT:-600}"
+readonly NEXT_RUNTIME_DROPIN="${RADON_NEXT_RUNTIME_DROPIN:-/etc/systemd/system/radon-nextjs.service.d/runtime-container.conf}"
+readonly SYSTEMCTL="${RADON_SYSTEMCTL:-/usr/bin/systemctl}"
 readonly DEPLOY_LOCK_FILE="${RADON_DEPLOY_LOCK_FILE:-/home/radon/.radon-deploy.lock}"
 readonly GREEN_MARKER_FILE="${RADON_DEPLOY_GREEN_MARKER:-/home/radon/.radon-last-green-deploy}"
 readonly DEPLOY_ROOT_HELPER="${RADON_DEPLOY_ROOT_HELPER:-/usr/local/sbin/radon-deploy-root}"
@@ -372,21 +374,22 @@ publish_edge_config() {
   log_success "Edge config matches cloud/caddy/Caddyfile"
 }
 
-# Pull the target release's app image pair BEFORE teardown, while the current
-# release still serves. Without this every containerised deploy pulled a 4.8G
-# image after restart and failed the HTTP gate on a container still
-# downloading (no green deploy since the drop-ins went live). Warn-and-proceed:
-# `run` resolves the pinned tag or :latest on its own. R-431.
+# Confirm the target release's exact app image pair BEFORE teardown, while the
+# current release still serves. The gated prepull job normally makes this a
+# fast local check; a miss retries both pulls synchronously. A moving fallback
+# tag is version skew, so any failure aborts before services are stopped.
 prepull_app_images() {
   local requested_sha="$1"
   if ! sudo -n -l -- "$APP_RUNTIME_HELPER" pull "$requested_sha" >/dev/null 2>&1; then
-    log_warn "App image prepull is not granted yet; containers will pull at restart"
-    return 0
+    log_error "App image prepull is not granted; refusing teardown"
+    return 1
   fi
-  log_info "Prepulling app images for ${requested_sha:0:7} while the current release still serves..."
+  log_info "Verifying exact app images for ${requested_sha:0:7} while the current release still serves..."
   if ! timeout "$APP_IMAGE_PREPULL_TIMEOUT" sudo -n "$APP_RUNTIME_HELPER" pull "$requested_sha"; then
-    log_warn "App image prepull failed; containers will resolve images at restart"
+    log_error "App image prepull failed; refusing teardown"
+    return 1
   fi
+  log_success "Exact app image pair is local for ${requested_sha:0:7}"
   return 0
 }
 
@@ -656,6 +659,43 @@ should_rebuild_next() {
   [[ -n "$changed" ]]
 }
 
+# The gated node image already contains the production Next build. Prestaging
+# may reuse it instead of compiling the same SHA again, but only when the host
+# can prove that this release will actually run that image. Every check fails
+# closed to the host compile so manual/fallback deploys and control-plane drift
+# retain the established artifact path.
+container_node_image_replaces_next_compile() {
+  local release_dir="$1"
+  local target_sha target_dropin dropin_paths need_reload unit_environment exec_start
+
+  [[ "${RADON_DEPLOY_USE_NODE_IMAGE_BUILD:-0}" == "1" ]] || return 1
+  target_sha="$(git -C "$release_dir" rev-parse HEAD 2>/dev/null)" || return 1
+  [[ "$target_sha" =~ ^[0-9a-f]{40}$ ]] || return 1
+
+  target_dropin="${release_dir}/cloud/services/radon-nextjs.service.d/runtime-container.conf"
+  [[ -f "$target_dropin" && ! -L "$target_dropin" ]] || return 1
+  [[ -f "$NEXT_RUNTIME_DROPIN" && ! -L "$NEXT_RUNTIME_DROPIN" ]] || return 1
+  cmp -s "$target_dropin" "$NEXT_RUNTIME_DROPIN" || return 1
+  grep -qxF 'Environment=RADON_RUNTIME=container' "$target_dropin" || return 1
+  grep -qxF 'ExecStart=/usr/local/sbin/radon-app-runtime run %n' "$target_dropin" || return 1
+  [[ -f "${release_dir}/web/.next/BUILD_ID" ]] || return 1
+
+  [[ -x "$SYSTEMCTL" ]] || return 1
+  dropin_paths="$($SYSTEMCTL show radon-nextjs.service --property=DropInPaths --value 2>/dev/null)" || return 1
+  grep -qwF -- "$NEXT_RUNTIME_DROPIN" <<< "$dropin_paths" || return 1
+  need_reload="$($SYSTEMCTL show radon-nextjs.service --property=NeedDaemonReload --value 2>/dev/null)" || return 1
+  [[ "$need_reload" == "no" ]] || return 1
+  unit_environment="$($SYSTEMCTL show radon-nextjs.service --property=Environment --value 2>/dev/null)" || return 1
+  grep -qwF 'RADON_RUNTIME=container' <<< "$unit_environment" || return 1
+  exec_start="$($SYSTEMCTL show radon-nextjs.service --property=ExecStart --value 2>/dev/null)" || return 1
+  grep -qF '/usr/local/sbin/radon-app-runtime run' <<< "$exec_start" || return 1
+
+  # This proves the immutable build artifact is present before host compile is
+  # skipped. It shares the exact pull verb with the parallel prepull job; the
+  # deploy repeats a fast local inspection before any service is stopped.
+  prepull_app_images "$target_sha" || return 1
+}
+
 seed_staged_node_modules() {
   local release_dir="$1"
   local live="${RADON_DIR}"
@@ -768,7 +808,11 @@ build_nextjs_at() {
       fi
     fi
     if should_rebuild_next "$release_dir"; then
-      run_with_cloud_env "$cloud_env" bun run build
+      if container_node_image_replaces_next_compile "$release_dir"; then
+        log_info "Skipping next build; exact node image is the canonical production artifact"
+      else
+        run_with_cloud_env "$cloud_env" bun run build
+      fi
     else
       log_info "Skipping next build; web inputs unchanged and web/.next is seeded"
     fi

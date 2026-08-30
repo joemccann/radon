@@ -37,6 +37,7 @@ APP_UNITS = (
     "radon-monitor.service",
     "radon-newsfeed.service",
 )
+TEST_SHA = "d" * 40
 FORBIDDEN_UNITS = (
     "radon-ib-gateway.service",
     "radon-health.service",
@@ -93,7 +94,7 @@ def _runtime_env(tmp_path: Path, fake_docker: Path | None = None) -> dict[str, s
         "RADON_TEST_DATA_DIR": str(data_dir),
         "RADON_TEST_MEDIA_DIR": str(media_dir),
         "RADON_TEST_STATE_DIR": str(state_dir),
-        "RADON_APP_IMAGE_TAG": "testsha",
+        "RADON_APP_IMAGE_TAG": TEST_SHA,
         "NOTIFY_SOCKET": str(notify),
         "WATCHDOG_USEC": "45000000",
         "RADON_TEST_NOTIFY_PROXY_DIR": str(proxy_dir),
@@ -178,8 +179,8 @@ def test_pull_pulls_only_app_images(tmp_path: Path) -> None:
     result = _run(tmp_path, ["pull"])
     assert result.returncode == 0, result.stderr
     log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
-    assert "pull ghcr.io/joemccann/radon-python:testsha" in log
-    assert "pull ghcr.io/joemccann/radon-node:testsha" in log
+    assert f"pull ghcr.io/joemccann/radon-python:{TEST_SHA}" in log
+    assert f"pull ghcr.io/joemccann/radon-node:{TEST_SHA}" in log
     assert "ib-gateway" not in log
     assert "gnzsnz" not in log
     assert "docker.sock" not in log
@@ -201,11 +202,8 @@ exit 0
 """
 
 
-def test_pull_with_a_release_sha_pins_that_pair_and_prunes_stale_pairs(tmp_path: Path) -> None:
-    """R-431: the deploy pre-pulls the pair `run` will resolve for the target
-    release, then drops SHA-tagged pairs that are neither the target, the
-    fallback tag, nor in use by a running container (the previous release
-    keeps its pair so a rollback never pulls)."""
+def test_pull_with_a_local_release_pair_skips_network_and_prunes_stale_pairs(tmp_path: Path) -> None:
+    """A successful parallel prepull makes deploy's exact-SHA check local."""
     target = "a" * 40
     previous = "b" * 40
     stale = "c" * 40
@@ -220,15 +218,48 @@ def test_pull_with_a_release_sha_pins_that_pair_and_prunes_stale_pairs(tmp_path:
     )
     assert result.returncode == 0, result.stderr
     lines = result.docker_log.read_text(encoding="utf-8").splitlines()  # type: ignore[attr-defined]
-    assert f"pull ghcr.io/joemccann/radon-python:{target}" in lines
-    assert f"pull ghcr.io/joemccann/radon-node:{target}" in lines
-    assert "pull ghcr.io/joemccann/radon-python:testsha" not in lines
+    assert f"pull ghcr.io/joemccann/radon-python:{target}" not in lines
+    assert f"pull ghcr.io/joemccann/radon-node:{target}" not in lines
     removed = sorted(line for line in lines if line.startswith("rmi "))
     assert removed == sorted([
         f"rmi ghcr.io/joemccann/radon-node:{stale}",
         f"rmi ghcr.io/joemccann/radon-python:{stale}",
     ])
     assert "gnzsnz" not in "\n".join(lines) and "ib-gateway" not in "\n".join(lines)
+
+
+_CONCURRENT_PULL_DOCKER = """#!/bin/bash
+printf '%s\\n' "$*" >> {log}
+if [[ "$1 $2" == "image inspect" ]]; then
+  [[ -f "${{RADON_STUB_PULL_DIR}}/${{3##*/}}" ]]
+  exit $?
+fi
+if [[ "$1" == "pull" ]]; then
+  touch "${{RADON_STUB_PULL_DIR}}/${{2##*/}}"
+  for _ in $(seq 1 80); do
+    [[ "$(find "${{RADON_STUB_PULL_DIR}}" -type f | wc -l | tr -d ' ')" == "2" ]] && exit 0
+    sleep 0.025
+  done
+  exit 42
+fi
+exit 0
+"""
+
+
+def test_missing_release_pair_pulls_both_images_concurrently(tmp_path: Path) -> None:
+    target = "a" * 40
+    pull_dir = tmp_path / "pull-sync"
+    pull_dir.mkdir()
+    result = _run(
+        tmp_path,
+        ["pull", target],
+        extra_env={"RADON_STUB_PULL_DIR": str(pull_dir)},
+        docker_body=_CONCURRENT_PULL_DOCKER,
+    )
+    assert result.returncode == 0, result.stderr
+    lines = result.docker_log.read_text(encoding="utf-8").splitlines()  # type: ignore[attr-defined]
+    assert f"pull ghcr.io/joemccann/radon-python:{target}" in lines
+    assert f"pull ghcr.io/joemccann/radon-node:{target}" in lines
 
 
 def test_pull_without_a_sha_never_removes_images(tmp_path: Path) -> None:
@@ -291,14 +322,14 @@ def _run_line(result: subprocess.CompletedProcess[str]) -> str:
     return lines[-1]
 
 
-def test_run_falls_back_to_latest_when_the_sha_tag_was_never_pushed(
+def test_run_refuses_latest_when_the_exact_sha_tag_was_never_pushed(
     tmp_path: Path,
 ) -> None:
-    # R-234: app-images.yml cancels in-progress builds, so SHA1's tags can be
-    # missing while ci.yml still deploys SHA1.
     result = _resolve(tmp_path, f"{PYTHON_REPO}:latest", "")
-    assert result.returncode == 0, result.stderr
-    assert f"{PYTHON_REPO}:latest" in _run_line(result)
+    assert result.returncode == 69, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert f"{PYTHON_REPO}:latest" not in log
+    assert not [line for line in log.splitlines() if line.startswith("run ")]
 
 
 def test_run_uses_the_local_image_when_the_registry_cannot_be_reached(
@@ -306,20 +337,22 @@ def test_run_uses_the_local_image_when_the_registry_cannot_be_reached(
 ) -> None:
     # T-198: neither probe reaches GHCR, but the pinned image is already in the
     # local store. Parking five units on a registry outage is the defect.
-    result = _resolve(tmp_path, "", f"{PYTHON_REPO}:testsha")
+    result = _resolve(tmp_path, "", f"{PYTHON_REPO}:{TEST_SHA}")
     assert result.returncode == 0, (
         "a GHCR outage parked the unit even though the pinned image is in the "
         f"local store\nstderr:\n{result.stderr}"
     )
-    assert f"{PYTHON_REPO}:testsha" in _run_line(result)
+    assert f"{PYTHON_REPO}:{TEST_SHA}" in _run_line(result)
 
 
-def test_run_falls_back_to_a_local_latest_when_the_sha_is_nowhere(
+def test_run_refuses_a_local_latest_when_the_exact_sha_is_nowhere(
     tmp_path: Path,
 ) -> None:
     result = _resolve(tmp_path, "", f"{PYTHON_REPO}:latest")
-    assert result.returncode == 0, result.stderr
-    assert f"{PYTHON_REPO}:latest" in _run_line(result)
+    assert result.returncode == 69, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert f"{PYTHON_REPO}:latest" not in log
+    assert not [line for line in log.splitlines() if line.startswith("run ")]
 
 
 def test_run_exits_69_when_the_image_is_absent_from_registry_and_local_store(
@@ -327,7 +360,7 @@ def test_run_exits_69_when_the_image_is_absent_from_registry_and_local_store(
 ) -> None:
     result = _resolve(tmp_path, "", "")
     assert result.returncode == 69, result.stderr
-    assert "neither" in result.stderr
+    assert "unavailable" in result.stderr
     log_path = result.docker_log  # type: ignore[attr-defined]
     log = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
     assert not [line for line in log.splitlines() if line.startswith("run ")]
@@ -580,22 +613,22 @@ def _function_body_setup(script: str) -> str:
     return match.group(1)
 
 
-def test_image_workflow_exists_and_is_not_a_deploy_need() -> None:
+def test_image_workflow_exists_and_is_a_deploy_need() -> None:
     assert IMAGES_WF.is_file()
     ci = CI.read_text(encoding="utf-8")
     wf = IMAGES_WF.read_text(encoding="utf-8")
     deploy = ci.split("\n  deploy:", 1)[-1]
     assert "needs:" in deploy
-    assert "app-images" not in ci
+    assert "app-images" in ci
     assert "docker/app/Dockerfile.python" in wf
     assert "docker/app/Dockerfile.node" in wf
     assert "docker/app/.dockerignore" in wf
     assert "--ignorefile" not in wf
     assert "packages: write" in wf
     assert "environment:" not in wf
-    assert "--build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" in wf
-    assert "--build-arg NEXT_PUBLIC_RADON_API_URL" in wf
-    assert "--build-arg NEXT_PUBLIC_IB_REALTIME_WS_URL" in wf
+    assert "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ vars.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}" in wf
+    assert "NEXT_PUBLIC_RADON_API_URL=${{ vars.NEXT_PUBLIC_RADON_API_URL }}" in wf
+    assert "NEXT_PUBLIC_IB_REALTIME_WS_URL=${{ vars.NEXT_PUBLIC_IB_REALTIME_WS_URL }}" in wf
     assert "vars.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" in wf
 
 
