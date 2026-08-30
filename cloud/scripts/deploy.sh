@@ -197,11 +197,30 @@ preflight_env() {
   return 0
 }
 
+read_host_role() {
+  local role="${RADON_HOST_ROLE:-}"
+  local envf="${ENV_FILE:-$ENV_FILE_DEFAULT}"
+  if [[ -z "$role" && -n "${envf:-}" && -f "$envf" ]]; then
+    role="$(awk -F= '/^RADON_HOST_ROLE=/{v=$2} END{print v}' "$envf" 2>/dev/null || true)"
+    role="${role%\"}"
+    role="${role#\"}"
+    role="${role%\'}"
+    role="${role#\'}"
+    role="${role//$'\r'/}"
+  fi
+  case "$role" in
+    app|broker|combined) printf '%s\n' "$role" ;;
+    *) printf 'combined\n' ;;
+  esac
+}
+
 preflight_control_plane() {
   local line expected_hash source_rel installed_target source_path source_hash installed_hash
   local entries=0
   local deploy_helper_found=0
   local gateway_helper_found=0
+  local host_role
+  host_role="$(read_host_role)"
 
   if [[ ! -x "$SHA256SUM" || ! -r "$CONTROL_PLANE_MANIFEST" || ! -r "$CONTROL_PLANE_READY" ]]; then
     log_error "[preflight] control-plane readiness manifest is missing"
@@ -239,6 +258,14 @@ preflight_control_plane() {
         entries=$((entries + 1))
         continue
       fi
+      if [[ "$source_rel" == scripts/* || "$source_rel" == config/* ]] \
+        && sudo -n -l -- "$DEPLOY_ROOT_HELPER" refresh-control-plane-privileged >/dev/null 2>&1; then
+        log_warn "[preflight] privileged control-plane ${source_rel} differs from the installed manifest; refresh-control-plane-privileged will apply it after promote"
+        [[ "$installed_target" == "$DEPLOY_ROOT_HELPER" ]] && deploy_helper_found=1
+        [[ "$installed_target" == "$GATEWAY_CONTROL_HELPER" ]] && gateway_helper_found=1
+        entries=$((entries + 1))
+        continue
+      fi
       log_error "[preflight] installed control plane is incompatible with ${source_rel}"
       return 1
     fi
@@ -258,7 +285,11 @@ preflight_control_plane() {
     entries=$((entries + 1))
   done < "$CONTROL_PLANE_MANIFEST"
 
-  if (( entries == 0 || deploy_helper_found == 0 || gateway_helper_found == 0 )); then
+  if (( entries == 0 || deploy_helper_found == 0 )); then
+    log_error "[preflight] control-plane manifest is incomplete"
+    return 1
+  fi
+  if [[ "$host_role" != "app" && "$gateway_helper_found" -eq 0 ]]; then
     log_error "[preflight] control-plane manifest is incomplete"
     return 1
   fi
@@ -266,7 +297,11 @@ preflight_control_plane() {
     log_error "[preflight] installed control-plane target contract failed privileged verification"
     return 1
   fi
-  if [[ ! -x "$DEPLOY_ROOT_HELPER" || ! -x "$GATEWAY_CONTROL_HELPER" ]]; then
+  if [[ ! -x "$DEPLOY_ROOT_HELPER" ]]; then
+    log_error "[preflight] required installed control-plane helper is unavailable"
+    return 1
+  fi
+  if [[ "$host_role" != "app" && ! -x "$GATEWAY_CONTROL_HELPER" ]]; then
     log_error "[preflight] required installed control-plane helper is unavailable"
     return 1
   fi
@@ -356,11 +391,14 @@ prepull_app_images() {
 }
 
 refresh_control_plane() {
-  if ! sudo -n -l -- "$DEPLOY_ROOT_HELPER" refresh-control-plane >/dev/null 2>&1; then
+  local verb="refresh-control-plane"
+  if sudo -n -l -- "$DEPLOY_ROOT_HELPER" refresh-control-plane-privileged >/dev/null 2>&1; then
+    verb="refresh-control-plane-privileged"
+  elif ! sudo -n -l -- "$DEPLOY_ROOT_HELPER" refresh-control-plane >/dev/null 2>&1; then
     log_warn "Control-plane refresh is not granted yet; run cloud/scripts/bootstrap-control-plane.sh once as root"
     return 0
   fi
-  if ! sudo "$DEPLOY_ROOT_HELPER" refresh-control-plane; then
+  if ! sudo "$DEPLOY_ROOT_HELPER" "$verb"; then
     log_error "Control-plane refresh failed"
     return 1
   fi

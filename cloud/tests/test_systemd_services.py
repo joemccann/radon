@@ -670,7 +670,7 @@ class TestRelay:
     def test_depends_on_ib_gateway(self, unit):
         u = unit(self.FILENAME)["Unit"]
         assert "radon-ib-gateway.service" in u["after"]
-        assert "radon-ib-gateway.service" in u["partof"]
+        assert "partof" not in u
         assert "radon-ib-gateway.service" not in u.get("requires", "")
         assert "radon-ib-gateway.service" not in u.get("wants", "")
 
@@ -692,7 +692,7 @@ class TestMonitor:
         u = unit(self.FILENAME)["Unit"]
         assert "radon-ib-gateway.service" in u["after"]
         assert "radon-api.service" in u["after"]
-        assert "radon-ib-gateway.service" in u["partof"]
+        assert "partof" not in u
 
     def test_restart_sec_longer(self, unit):
         svc = unit(self.FILENAME)["Service"]

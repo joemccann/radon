@@ -221,13 +221,13 @@ exit 0
 # --- A. sudoers --------------------------------------------------------------
 
 
-def test_sudoers_grants_exact_refresh_verb_and_not_privileged() -> None:
+def test_sudoers_grants_exact_refresh_verb_and_privileged() -> None:
     sudoers = SUDOERS.read_text(encoding="utf-8")
     verbs = sudoers_helper_verbs(sudoers)
     assert "/usr/local/sbin/radon-deploy-root refresh-control-plane" in sudoers
+    assert "/usr/local/sbin/radon-deploy-root refresh-control-plane-privileged" in sudoers
     assert "refresh-control-plane" in verbs
-    assert "refresh-control-plane-privileged" not in verbs
-    assert "refresh-control-plane-privileged" not in sudoers
+    assert "refresh-control-plane-privileged" in verbs
     assert "radon-*" not in sudoers
     assert "/usr/bin/systemctl" not in sudoers
     for verb in verbs:
@@ -235,14 +235,11 @@ def test_sudoers_grants_exact_refresh_verb_and_not_privileged() -> None:
         assert "?" not in verb
 
 
-def test_privileged_refresh_action_is_not_in_sudoers() -> None:
+def test_privileged_refresh_action_is_exact_sudoers_verb() -> None:
     sudoers = SUDOERS.read_text(encoding="utf-8")
-    helper = ROOT_HELPER.read_text(encoding="utf-8")
     verbs = sudoers_helper_verbs(sudoers)
-    assert "refresh-control-plane-privileged" not in verbs
-    assert "refresh-control-plane-privileged" not in sudoers
-    if re.search(r"refresh-control-plane-privileged\)", helper):
-        assert "refresh-control-plane-privileged" not in verbs
+    assert "refresh-control-plane-privileged" in verbs
+    assert verbs.count("refresh-control-plane-privileged") == 1
 
 
 # --- B. helper usage / timeout / job-cancel ----------------------------------
@@ -439,7 +436,7 @@ def test_restart_services_refreshes_before_restart_and_installs_units_after() ->
     assert activate_at < refresh_at < start_at < install_at
     refresh = function_body(deploy, "refresh_control_plane")
     assert "refresh-control-plane" in refresh
-    assert "refresh-control-plane-privileged" not in refresh
+    assert "refresh-control-plane-privileged" in refresh
     assert "sudo -n -l --" in refresh
     assert "bootstrap-control-plane.sh" in refresh
     assert "return 0" in refresh

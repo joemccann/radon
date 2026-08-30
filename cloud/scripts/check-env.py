@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import re
 import stat
 from pathlib import Path
@@ -15,11 +16,11 @@ GATEWAY_PORT_BY_MODE = {"live": "4001", "paper": "4002"}
 PRODUCTION_INVARIANTS = {
     # cloud = FastAPI must not own Compose lifecycle; the installed helper does.
     "IB_GATEWAY_MODE": "cloud",
-    "IB_GATEWAY_HOST": "127.0.0.1",
     # Monorepo Hetzner host topology (schedulers on VPS). Not "local".
     "RADON_MODE": "hetzner",
     "NODE_ENV": "production",
 }
+HOST_ROLES = frozenset({"combined", "app", "broker"})
 
 
 def required_keys(path: Path) -> list[str]:
@@ -85,12 +86,49 @@ def gateway_contract_errors(assignments: dict[str, str]) -> list[str]:
     return []
 
 
+def _literal_host_role(assignments: dict[str, str]) -> str:
+    raw = assignments.get("RADON_HOST_ROLE")
+    if raw is None or literal_value(raw) == "":
+        return "combined"
+    return literal_value(raw)
+
+
+def _gateway_host_ok(role: str, host: str) -> bool:
+    """Loopback on combined/broker. RFC1918 only on app. Never public, CGNAT, or DNS."""
+    if role in {"combined", "broker"}:
+        return host == "127.0.0.1"
+    if role != "app":
+        return False
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return bool(ip.version == 4 and ip.is_private and not ip.is_loopback)
+
+
 def production_invariant_errors(assignments: dict[str, str]) -> list[str]:
-    return [
+    errors = [
         f"{key} must match the production safety invariant"
         for key, expected in PRODUCTION_INVARIANTS.items()
         if key not in assignments or literal_value(assignments[key]) != expected
     ]
+    role = _literal_host_role(assignments)
+    if role not in HOST_ROLES:
+        errors.append("RADON_HOST_ROLE must be combined, app, or broker")
+        return errors
+    host = (
+        literal_value(assignments["IB_GATEWAY_HOST"])
+        if "IB_GATEWAY_HOST" in assignments
+        else ""
+    )
+    if not _gateway_host_ok(role, host):
+        if role == "app":
+            errors.append(
+                "IB_GATEWAY_HOST must be an RFC1918 address on the app host"
+            )
+        else:
+            errors.append("IB_GATEWAY_HOST must match the production safety invariant")
+    return errors
 
 
 def validate(env_file: Path, contract: Path, *, skip_required: bool) -> list[str]:
