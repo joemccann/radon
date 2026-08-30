@@ -120,6 +120,10 @@ export type AssistantOrderInput =
 export type AssistantResponse = {
   content?: string;
   model?: string;
+  /** The picker's id when one was sent; compare with `model` (R-457). */
+  requestedModel?: string;
+  /** Some round ran on LLM_FALLBACK_PROVIDER, not the requested model. */
+  usedFallback?: boolean;
   error?: string;
   toolEvents?: AssistantToolEvent[];
   proposal?: AssistantOrderProposal | null;

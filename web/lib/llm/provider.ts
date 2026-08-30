@@ -47,6 +47,8 @@ export type LlmChatRequest = {
   model?: string;
   provider?: LlmProviderName;
   maxTokens?: number;
+  /** Per-turn abort (client hung up, wall clock); merged with the request timeout. */
+  signal?: AbortSignal;
 };
 
 export type LlmToolCall = {
@@ -212,8 +214,9 @@ async function readErrorDetail(response: Response): Promise<string> {
 
 const LLM_REQUEST_TIMEOUT_MS = 45_000;
 
-function llmRequestSignal(): AbortSignal {
-  return AbortSignal.timeout(LLM_REQUEST_TIMEOUT_MS);
+function llmRequestSignal(request: Pick<LlmChatRequest, "signal">): AbortSignal {
+  const timeout = AbortSignal.timeout(LLM_REQUEST_TIMEOUT_MS);
+  return request.signal ? AbortSignal.any([request.signal, timeout]) : timeout;
 }
 
 // --- Anthropic (native Messages API) -------------------------------------
@@ -259,7 +262,7 @@ async function callAnthropic(request: LlmChatRequest): Promise<LlmChatResponse> 
       accept: "application/json",
     },
     body: JSON.stringify(body),
-    signal: llmRequestSignal(),
+    signal: llmRequestSignal(request),
   });
 
   if (!response.ok) {
@@ -454,7 +457,7 @@ async function callOpenAiCompatible(
       accept: "application/json",
     },
     body: JSON.stringify(body),
-    signal: llmRequestSignal(),
+    signal: llmRequestSignal(request),
   });
 
   if (!response.ok) {
@@ -533,7 +536,7 @@ async function callGemini(request: LlmChatRequest): Promise<LlmChatResponse> {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify(body),
-    signal: llmRequestSignal(),
+    signal: llmRequestSignal(request),
   });
 
   if (!response.ok) {

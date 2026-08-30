@@ -17,6 +17,7 @@ import {
   createAssistantTurnBudget,
   listApis,
   type AssistantTurnBudget,
+  type PrincipalKind,
 } from "@/lib/assistant/dispatch";
 import { rankVerticalSpreads, type ChainContract, type SpreadKind } from "@/lib/assistant/spreads";
 import {
@@ -51,6 +52,7 @@ export type ToolResult = {
 
 export type AssistantPrincipal = {
   userId: string;
+  kind?: PrincipalKind;
   token?: string;
 };
 
@@ -924,6 +926,10 @@ export async function executeTool(
   }
   if (tool.destructive) {
     return { ok: false, error: `Tool ${name} is destructive and requires user confirmation.` };
+  }
+  // A cancelled turn starts no new work; nobody is left to render it (R-453).
+  if (budget.signal?.aborted) {
+    return { ok: false, error: "Turn cancelled; no further tool calls." };
   }
   try {
     if (name === "call_api") {
