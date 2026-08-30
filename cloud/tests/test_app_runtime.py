@@ -619,3 +619,45 @@ def test_run_newsfeed_points_media_delivery_at_the_mounted_volume(tmp_path: Path
     assert result.returncode == 0, result.stderr
     log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
     assert "RADON_MEDIA_REMOTE=/var/lib/radon/media/" in log, log
+
+
+# docker --env-file takes lines verbatim (no shell quoting), so a secret the
+# host file single-quotes for `set -a; . file` consumers reached the container
+# WITH its quotes: XAI_API_KEY='xai-…' → xAI 400 "Incorrect API key"
+# (2026-08-30 04:16Z, six quoted secrets in /etc/radon/env).
+
+
+def test_run_hands_docker_an_unquoted_root_only_copy_of_the_env_file(
+    tmp_path: Path,
+) -> None:
+    host_env = tmp_path / "secrets.env"
+    host_env.write_text(
+        "NODE_ENV=production\n"
+        "# comment stays\n"
+        "XAI_API_KEY='xai-abc$1'\n"
+        'TWS_PASSWORD="p@ss word"\n'
+        "MENTHORQ_PASS='it''s'\n"
+        "PLAIN=unquoted\n",
+        encoding="utf-8",
+    )
+    result = _run(
+        tmp_path, ["run", "radon-nextjs.service"],
+        extra_env={"RADON_TEST_ENV_FILE": str(host_env)},
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+
+    match = re.search(r"--env-file (\S+)", _run_line(result))
+    assert match, _run_line(result)
+    rendered = Path(match.group(1))
+    assert rendered != host_env
+    assert stat.S_IMODE(rendered.stat().st_mode) == 0o600
+    assert rendered.read_text(encoding="utf-8") == (
+        "NODE_ENV=production\n"
+        "# comment stays\n"
+        "XAI_API_KEY=xai-abc$1\n"
+        "TWS_PASSWORD=p@ss word\n"
+        "MENTHORQ_PASS=it''s\n"
+        "PLAIN=unquoted\n"
+    )
+    # The host file is the secret of record and is never rewritten.
+    assert "XAI_API_KEY='xai-abc$1'" in host_env.read_text(encoding="utf-8")
