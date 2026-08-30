@@ -34,7 +34,9 @@ journal and an ``error`` service_health heartbeat (exit 1). Fail-degraded
 in that one direction only.
 
 Remote retention is REMOTE_RETENTION_DAYS, deliberately longer than the
-on-box RETENTION_DAYS; off-boxing a 30-day window would buy nothing.
+on-box RETENTION_DAYS; off-boxing only the local window would buy nothing.
+A local dump past RETENTION_DAYS is unlinked only once B2 holds it (the
+off-box leg runs first); with no B2 config at all the prune is age-only.
 
 Restore runbook: main repo docs/cloud-services.md "DB backup & restore".
 """
@@ -73,12 +75,25 @@ UPLOAD_BUDGET_SECS = 3600
 S3_CONNECT_TIMEOUT = 30
 S3_READ_TIMEOUT = 300
 S3_MAX_ATTEMPTS = 3
+S3_RETRY_DELAY_SECS = 1.0
+# Botocore Config retries can be spent (or skipped on an injected client).
+# Page 29c8a560: two consecutive 576 MB PUTs died on ConnectionClosedError
+# after the dump had already landed; the unit then paged P1.
+_TRANSIENT_S3_ERROR_NAMES = frozenset(
+    {
+        "ConnectionClosedError",
+        "EndpointConnectionError",
+        "ConnectTimeoutError",
+        "ReadTimeoutError",
+        "ResponseStreamingError",
+    }
+)
 MULTIPART_CHUNK_BYTES = 64 * 1024 * 1024
 MULTIPART_CONCURRENCY = 4
 # Plausibility floor. `dump_database` reports whatever `sqlite_master` gave
 # it, so an empty read (a credential rotation pointing at a fresh DB, a
 # libsql read returning no rows) produces a valid ~120-byte gzip. Promoting
-# it prunes the 30-day window of real dumps and pushes the empty artifact
+# it prunes the local window of real dumps and pushes the empty artifact
 # off-box, with the heartbeat still green. Same floor, same reason, as
 # lib/vixts_math.py:MIN_SERIES_ROWS.
 MIN_DUMP_TABLES = 1
@@ -96,7 +111,7 @@ def _path_env(key: str, default: str) -> Path:
     trailing-edit `RADON_DB_BACKUP_DIR=` line resolved BACKUP_DIR to
     `WorkingDirectory=/home/radon/radon` — `mkdir(exist_ok=True)` succeeded
     silently, the dump landed in the live repo checkout, the retention loop
-    unlinked every *.sql.gz older than 30 days IN THE REPO, and sync_offbox
+    unlinked every *.sql.gz older than RETENTION_DAYS IN THE REPO, and sync_offbox
     uploaded whatever it found there. R-344.
     """
     raw = (os.environ.get(key) or "").strip()
@@ -162,14 +177,27 @@ def is_internal_object(name: str) -> bool:
     return name.startswith(_INTERNAL_PREFIXES)
 
 
-def select_prunable(entries, now_secs: float, retention_days: int = RETENTION_DAYS):
+def select_prunable(
+    entries,
+    now_secs: float,
+    retention_days: int = RETENTION_DAYS,
+    offbox: set[str] | None = None,
+):
     """Names of dump files (``*.sql.gz`` ONLY) older than the retention
-    window. ``entries`` is an iterable of (name, mtime_secs)."""
+    window. ``entries`` is an iterable of (name, mtime_secs).
+
+    ``offbox`` is the set of dump names B2 is confirmed to hold. When given,
+    a dump is prunable only if it is in that set: age alone never unlinks the
+    last copy while an off-box leg is configured. ``None`` means no off-box
+    leg exists and the prune is age-only. R-445.
+    """
     cutoff = now_secs - retention_days * 86400
     return [
         name
         for name, mtime in entries
-        if name.endswith(".sql.gz") and mtime < cutoff
+        if name.endswith(".sql.gz")
+        and mtime < cutoff
+        and (offbox is None or name in offbox)
     ]
 
 
@@ -405,6 +433,30 @@ def dump_database(db, out, batch_size: int = BATCH_SIZE) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def is_transient_s3_error(exc: BaseException) -> bool:
+    """True for retryable B2/S3 transport faults (not auth / AccessDenied)."""
+    if type(exc).__name__ in _TRANSIENT_S3_ERROR_NAMES:
+        return True
+    text = str(exc).lower()
+    return "connection was closed" in text or "connection reset" in text
+
+
+def call_s3_with_retry(fn, *, attempts: int | None = None, sleep=None):
+    """Run ``fn`` up to ``S3_MAX_ATTEMPTS`` on transient S3 errors."""
+    n = S3_MAX_ATTEMPTS if attempts is None else max(1, int(attempts))
+    sleeper = time.sleep if sleep is None else sleep
+    last: BaseException | None = None
+    for i in range(n):
+        try:
+            return fn()
+        except Exception as exc:  # noqa: BLE001 — classify, then re-raise
+            last = exc
+            if not is_transient_s3_error(exc) or i + 1 >= n:
+                raise
+            sleeper(S3_RETRY_DELAY_SECS)
+    raise last  # pragma: no cover
+
+
 def _s3_client(cfg: dict[str, str]):
     import boto3  # lazy: unit tests and credential-less runs never import it
     from botocore.config import Config
@@ -451,7 +503,7 @@ def list_remote_dumps(client, bucket: str, prefix: str) -> dict[str, RemoteObjec
         kwargs = {"Bucket": bucket, "Prefix": prefix}
         if token:
             kwargs["ContinuationToken"] = token
-        resp = client.list_objects_v2(**kwargs)
+        resp = call_s3_with_retry(lambda k=kwargs: client.list_objects_v2(**k))
         for obj in resp.get("Contents") or []:
             key = obj["Key"]
             out[key] = RemoteObject(
@@ -467,7 +519,7 @@ def list_remote_dumps(client, bucket: str, prefix: str) -> dict[str, RemoteObjec
 
 def _confirm_upload(client, bucket: str, key: str) -> int:
     """Bytes the object actually holds in the bucket. Raises when absent."""
-    head = client.head_object(Bucket=bucket, Key=key)
+    head = call_s3_with_retry(lambda: client.head_object(Bucket=bucket, Key=key))
     return int(head["ContentLength"])
 
 
@@ -485,8 +537,11 @@ def sync_offbox(
     Idempotent: an object already present at the same size is skipped, so a
     re-run costs one LIST. Resumable: uploads run newest-first and stop when
     ``budget_secs`` is spent, leaving the rest for the next nightly run --
-    that is how the existing 30-dump local window backfills without any one
-    run overrunning TimeoutStartSec.
+    that is how a local backlog (thirty dumps at the 2026-08-27 cutover)
+    backfills without any one run overrunning TimeoutStartSec.
+    ``confirmed`` in the summary names every local dump B2 holds at the
+    expected size once the run ends: already present, or uploaded and
+    confirmed tonight. Deferred and failed dumps are not in it.
     """
     transfer = None
     if client is None:
@@ -509,6 +564,7 @@ def sync_offbox(
     uploaded = 0
     bytes_uploaded = 0
     deferred = 0
+    confirmed: set[str] = set()
     for index, name in enumerate(planned):
         if clock() - started >= budget_secs:
             deferred = len(planned) - index
@@ -517,14 +573,16 @@ def sync_offbox(
         kwargs = {"Config": transfer} if transfer is not None else {}
         key = object_key_for(prefix, name)
         expected = path.stat().st_size
-        client.upload_file(str(path), bucket, key, **kwargs)
+        call_s3_with_retry(
+            lambda: client.upload_file(str(path), bucket, key, **kwargs)
+        )
         # CONFIRM before counting, and RAISE on a mismatch rather than
         # recording it — an upload failure already propagates here by design,
         # heartbeats `error` and exits non-zero, and a short landing is an
         # upload failure that the API call happened not to report. It was
         # counted as `b2 1/1` with state=ok, and `select_uploadable` re-uploads
         # only on a size DIFFERENCE, so the corruption was never detected while
-        # the local original ran down its 30-day retention. R-372.
+        # the local original ran down its local retention. R-372.
         landed = _confirm_upload(client, bucket, key)
         if landed != expected:
             raise RuntimeError(
@@ -533,15 +591,17 @@ def sync_offbox(
             )
         uploaded += 1
         bytes_uploaded += expected
+        confirmed.add(name)
 
     prune_now = time.time() if now is None else now
     prunable = select_remote_prunable(
         [(obj.key, obj.mtime) for obj in remote.values()], prune_now
     )
     for key in prunable:
-        client.delete_object(Bucket=bucket, Key=key)
+        call_s3_with_retry(lambda k=key: client.delete_object(Bucket=bucket, Key=k))
 
     dumps = [name for name, _size in local if is_dump_name(name)]
+    confirmed.update(name for name in dumps if name not in planned)
     return {
         "bucket": bucket,
         "prefix": prefix,
@@ -552,6 +612,7 @@ def sync_offbox(
         "deferred": deferred,
         "skipped_present": len(dumps) - len(planned),
         "remote_pruned": len(prunable),
+        "confirmed": sorted(confirmed),
     }
 
 
@@ -692,17 +753,25 @@ def run_backup() -> dict:
     finally:
         tmp_path.unlink(missing_ok=True)
 
-    now = time.time()
     assert_safe_backup_dir(BACKUP_DIR)
-    entries = [(p.name, p.stat().st_mtime) for p in BACKUP_DIR.iterdir() if p.is_file()]
-    pruned = select_prunable(entries, now)
-    for name in pruned:
-        (BACKUP_DIR / name).unlink(missing_ok=True)
-
     size = final_path.stat().st_size
 
-    # Off-box leg LAST and non-fatal: the artifact above is already durable.
+    # Off-box leg BEFORE the local prune and non-fatal: the artifact above is
+    # already durable, and a dump may leave the box only once B2 holds it.
+    # R-445: pruning on mtime first meant eight nights of AccessDenied (paged
+    # each night, never retried) unlinked the night-1 dump unheard.
     offbox, offbox_error = run_offbox(BACKUP_DIR)
+    if s3_config_from_env() is None:
+        confirmed = None  # no off-box leg configured: age is the only signal
+    else:
+        # A summary without the listing (a raise, a double) confirms nothing.
+        confirmed = set((offbox or {}).get("confirmed") or ())
+
+    now = time.time()
+    entries = [(p.name, p.stat().st_mtime) for p in BACKUP_DIR.iterdir() if p.is_file()]
+    pruned = select_prunable(entries, now, offbox=confirmed)
+    for name in pruned:
+        (BACKUP_DIR / name).unlink(missing_ok=True)
 
     duration = round(time.monotonic() - started, 1)
     summary = (

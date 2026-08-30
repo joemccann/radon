@@ -509,7 +509,19 @@ def classify_probes(ping: dict, status: dict) -> dict:
     if not (200 <= status_code < 300):
         return {"ok": 0, "detail": "status_http_%d" % status_code}
 
-    aggregate = _classify_status_payload(status.get("payload", {}))
+    payload = status.get("payload") or {}
+    # Caddy's never-502 floor rewrites healthd 5xx and dial-refused into
+    # HTTP 200 {"reachable":false,"observer":"caddy"}. Ping stays Caddy-static
+    # 200, so this used to land as aggregate_invalid and page P1 during every
+    # healthd restart (2026-08-29 23:05Z, page 1b0b049c).
+    if (
+        isinstance(payload, dict)
+        and payload.get("observer") == "caddy"
+        and payload.get("reachable") is False
+    ):
+        return {"ok": 0, "detail": "status_unreachable:caddy"}
+
+    aggregate = _classify_status_payload(payload)
     if aggregate == "down":
         return {"ok": 0, "detail": "aggregate_down"}
     if aggregate == "degraded":

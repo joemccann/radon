@@ -8,20 +8,26 @@ import {
   useRef,
   useState,
 } from "react";
-import { Send } from "lucide-react";
 
+import type { LlmModelOption } from "@/lib/llm/catalog";
 import type { ChatImageAttachment, ChatImageMediaType } from "@/lib/types";
 
 /**
  * AskComposer — conversational composer adopted from beautifului.dev
  * "Prompt Bar" (Vanilla variant; the pill variant is rejected — 4px radius).
- * Adds @-instrument source tokens, a / commands hint, and an engine picker
- * in place of a model picker. Preserves ChatPanel's Enter-to-send and IME
- * composition guards. Rendered inside .chat-composer.
+ * Adds @-instrument source tokens, a / commands hint, and a model picker.
+ * Preserves ChatPanel's Enter-to-send and IME composition guards. Rendered
+ * inside .chat-composer.
+ *
+ * The picker is DERIVED, never compiled in: GET /api/models lists one entry per
+ * provider whose API key is present in this deployment, so a single-provider
+ * host honestly shows a single-entry select and the others appear the moment
+ * their keys land. Until the catalog answers — and if it never does — the model
+ * id is the empty string, which ChatPanel reads as "let the server decide".
  */
 
-export const ENGINES = ["AUTO", "SPECTRAL", "EIGEN", "MARKOV", "LAPLACE"] as const;
-export type Engine = (typeof ENGINES)[number];
+/** Placeholder occupant of the select so the rail never reflows on load. */
+const SERVER_DEFAULT_LABEL = "DEFAULT";
 
 /** Mirrors the server allowlist in app/api/assistant/route.ts. */
 const ALLOWED_MEDIA_TYPES: ChatImageMediaType[] = [
@@ -74,29 +80,80 @@ type AskComposerProps = {
    * (replaces ChatPanel's composerRef focus effect).
    */
   focusKey?: string | number | boolean;
-  onSubmit: (text: string, engine: Engine, attachments: ChatImageAttachment[]) => void;
+  /**
+   * `modelId` is a catalog id, or "" when no catalog answered — an empty id
+   * means the request carries no model and the server picks as it always has.
+   */
+  onSubmit: (text: string, modelId: string, attachments: ChatImageAttachment[]) => void;
+  /**
+   * Fires whenever the effective selection changes: once when the catalog
+   * resolves, then on every pick. The panel needs it because it sends turns of
+   * its own (the starter-prompt pills) that must run on the model the operator
+   * can see selected, not on the server default.
+   */
+  onModelChange?: (modelId: string) => void;
 };
 
 export default function AskComposer({
-  placeholder = "Ask about flow, risk, structure. @ to scope an instrument, / for commands.",
+  placeholder = "Ask about flow, risk, structure...",
   busy = false,
   sources = [],
   onRemoveSource,
   focusKey,
   onSubmit,
+  onModelChange,
 }: AskComposerProps) {
   const [text, setText] = useState("");
-  const [engine, setEngine] = useState<Engine>("AUTO");
+  const [models, setModels] = useState<LlmModelOption[]>([]);
+  const [modelId, setModelId] = useState("");
   const [attachments, setAttachments] = useState<ChatImageAttachment[]>([]);
   const composingRef = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   // Monotonic so a removal can never let a later paste reuse a live id.
   const nextIdRef = useRef(0);
+  // Read through a ref so the one-shot catalog effect keeps its [] deps and
+  // still calls the CURRENT callback, never a first-render closure.
+  const onModelChangeRef = useRef(onModelChange);
+  onModelChangeRef.current = onModelChange;
+
 
   useEffect(() => {
     if (focusKey === false) return;
     inputRef.current?.focus();
   }, [focusKey]);
+
+  // One read of the deployment's live catalog. A failure is not an error state:
+  // the composer keeps working on the server's own default rather than blocking
+  // the operator behind a model list.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch("/api/models", { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = (await response.json()) as {
+          models?: LlmModelOption[];
+          defaultId?: string;
+        };
+        const catalog = Array.isArray(payload?.models) ? payload.models : [];
+        if (cancelled || !catalog.length) return;
+        const fallback = catalog[0].id;
+        const preferred =
+          typeof payload.defaultId === "string" &&
+          catalog.some((option) => option.id === payload.defaultId)
+            ? payload.defaultId
+            : fallback;
+        setModels(catalog);
+        setModelId(preferred);
+        onModelChangeRef.current?.(preferred);
+      } catch {
+        // Offline or route absent: stay on the server default.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const attach = async (files: File[]) => {
     for (const file of files) {
@@ -126,7 +183,7 @@ export default function AskComposer({
   const submit = () => {
     const cleaned = text.trim();
     if ((!cleaned && !attachments.length) || busy) return;
-    onSubmit(cleaned, engine, attachments);
+    onSubmit(cleaned, modelId, attachments);
     setText("");
     setAttachments([]);
     inputRef.current?.focus();
@@ -187,52 +244,61 @@ export default function AskComposer({
           ))}
         </div>
       ) : null}
-      <textarea
-        ref={inputRef}
-        className="ask-composer__input"
-        value={text}
-        rows={1}
-        maxLength={1000}
-        placeholder={placeholder}
-        aria-label="Ask Radon"
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={onKeyDown}
-        onPaste={onPaste}
-        onCompositionStart={() => {
-          composingRef.current = true;
-        }}
-        onCompositionEnd={() => {
-          composingRef.current = false;
-        }}
-      />
-      <div className="ask-composer__rail">
-        <span className="agent-chip">@ SOURCES</span>
-        <span className="agent-chip">/ COMMANDS</span>
-        <span className="ask-composer__spacer" />
-        <label className="ask-composer__engine">
-          <span className="ask-composer__engine-label">ENGINE</span>
-          <select
-            value={engine}
-            aria-label="Engine"
-            onChange={(e) => setEngine(e.target.value as Engine)}
-          >
-            {ENGINES.map((e) => (
-              <option key={e} value={e}>
-                {e}
-              </option>
-            ))}
-          </select>
-        </label>
+      <div className="ask-composer__field">
+        <textarea
+          ref={inputRef}
+          className="ask-composer__input"
+          value={text}
+          rows={1}
+          maxLength={1000}
+          placeholder={placeholder}
+          aria-label="Ask Radon"
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={onKeyDown}
+          onPaste={onPaste}
+          onCompositionStart={() => {
+            composingRef.current = true;
+          }}
+          onCompositionEnd={() => {
+            composingRef.current = false;
+          }}
+        />
         <button
           type="submit"
-          className="ask-composer__send"
+          className="ask-composer__enter"
           disabled={(!text.trim() && !attachments.length) || busy}
           title="Send (Enter)"
           aria-label="Send"
         >
-          <Send size={13} />
-          ASK
+          ↵
         </button>
+      </div>
+      <div className="ask-composer__rail">
+        <span className="agent-chip">@ SOURCES</span>
+        <span className="agent-chip">/ COMMANDS</span>
+        <span className="ask-composer__spacer" />
+        <label className="ask-composer__model">
+          <span className="ask-composer__model-label">MODEL</span>
+          <select
+            value={modelId}
+            aria-label="Model"
+            onChange={(event) => {
+              setModelId(event.target.value);
+              onModelChange?.(event.target.value);
+            }}
+          >
+            {models.length ? (
+              models.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))
+            ) : (
+              <option value="">{SERVER_DEFAULT_LABEL}</option>
+            )}
+          </select>
+        </label>
+        <span className="ask-composer__esc">ESC DISMISSES</span>
       </div>
     </form>
   );

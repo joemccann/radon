@@ -581,3 +581,80 @@ describe("hydrateTagsDual", () => {
     expect((post as any).tags).toEqual(["A", "B", "C"]);
   });
 });
+
+// R-466 / REL-165: the model call carried no timeout or abort signal, so a
+// half-open connection to api.anthropic.com held `hydrateTagsDual` (and the
+// whole scrape cycle behind it) until kernel keepalive gave up. The bound is
+// a per-post tagging failure, never a cycle abort.
+describe("R-466 / REL-165: the vision fetch is bounded", () => {
+  // A realistic transport: never answers on its own, rejects only when the
+  // caller's signal fires. Without a signal it hangs forever, which is the
+  // pre-fix shape.
+  function hangUntilAborted(init?: RequestInit): Promise<Response> {
+    return new Promise((_resolve, reject) => {
+      const signal = init?.signal;
+      if (signal) signal.addEventListener("abort", () => reject(signal.reason));
+    });
+  }
+
+  const fakeImage = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+
+  it("a fetch that never answers settles hydrateTagsDual within the bound with the post untagged", async () => {
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => hangUntilAborted(init));
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const { createVisionTagger, hydrateTagsDual } = await import("../../scripts/newsfeed/vision_tagger.js");
+    const visionTagger = createVisionTagger({
+      mediaDir: MEDIA_DIR,
+      getTaxonomySnapshot: async () => TAXONOMY,
+      readImage: async () => fakeImage,
+      timeoutMs: 50,
+    });
+    const post = { id: "p1", title: "Chart", content: "x", images: ["/media/p1.png"] };
+
+    const outcome = await Promise.race([
+      hydrateTagsDual([post], { visionTagger }).then(() => "settled"),
+      new Promise<string>((resolve) => setTimeout(() => resolve("hung"), 1500)),
+    ]);
+
+    expect(outcome).toBe("settled");
+    expect((post as any).tags_vision).toBeUndefined();
+    expect((post as any).tags).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("the timeout is a per-post failure, not a cycle abort: the next post is still tagged", async () => {
+    let calls = 0;
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
+      calls += 1;
+      if (calls === 1) return hangUntilAborted(init);
+      return Promise.resolve(
+        jsonResponse(anthropicCompletion(JSON.stringify({ tags: ["SPX", "VOL", "EQUITIES"] }))),
+      );
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const { createVisionTagger, hydrateTagsDual } = await import("../../scripts/newsfeed/vision_tagger.js");
+    const visionTagger = createVisionTagger({
+      mediaDir: MEDIA_DIR,
+      getTaxonomySnapshot: async () => TAXONOMY,
+      readImage: async () => fakeImage,
+      timeoutMs: 50,
+    });
+    const posts = [
+      { id: "p1", title: "Hangs", content: "x", images: ["/media/p1.png"] },
+      { id: "p2", title: "Answers", content: "y", images: ["/media/p2.png"] },
+    ];
+
+    const outcome = await Promise.race([
+      hydrateTagsDual(posts, { visionTagger }),
+      new Promise<string>((resolve) => setTimeout(() => resolve("hung"), 1500)),
+    ]);
+
+    expect(outcome).toBe(true);
+    expect((posts[0] as any).tags_vision).toBeUndefined();
+    expect((posts[1] as any).tags_vision).toEqual(["SPX", "VOL", "EQUITIES"]);
+  });
+});

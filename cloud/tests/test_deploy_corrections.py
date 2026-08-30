@@ -854,6 +854,11 @@ recover_pending_transition
             "/usr/local/sbin/radon-deploy-root commit-transition",
             "-n -l -- /usr/local/sbin/radon-deploy-root sync-scheduled-units",
             "/usr/local/sbin/radon-deploy-root sync-scheduled-units",
+            # The edge config publishes on the same verified-release path as
+            # the unit sync; before this, cloud/caddy/Caddyfile was the one
+            # release artifact no deploy shipped.
+            "-n -l -- /usr/local/sbin/radon-deploy-root publish-caddy",
+            "/usr/local/sbin/radon-deploy-root publish-caddy",
         ]
 
     def test_verified_journal_finalizes_when_unit_sync_refuses_stale_head(
@@ -2160,6 +2165,7 @@ deploy_gate() {{
 }}
 build_staged_release() {{ printf 'build\\n' >> {calls!s}; }}
 activate_staged_release() {{ printf 'activate\\n' >> {calls!s}; }}
+prepull_app_images() {{ return 0; }}
 restart_services() {{ printf 'restart\\n' >> {calls!s}; }}
 write_transition_phase() {{ return 0; }}
 record_deploy_marker() {{ return 0; }}
@@ -2313,6 +2319,110 @@ class TestFrozenArtifacts:
         assert stop_at < restart.find(
             "activate_staged_release", stop_at
         ) < restart.find("start_services_after_transition")
+
+    def _container_node_image_contract(
+        self, tmp_path: Path, *, matching_dropin: bool = True
+    ) -> tuple[subprocess.CompletedProcess[str], Path]:
+        sha = "d" * 40
+        fake_bin = tmp_path / "bin"
+        fake_bin.mkdir()
+        _write_executable(
+            fake_bin / "git",
+            f"""#!{sys.executable}
+print("{sha}")
+""",
+        )
+        systemctl = tmp_path / "systemctl"
+        _write_executable(
+            systemctl,
+            """#!/bin/bash
+case "$*" in
+  *--property=DropInPaths*) printf '%s\n' "$RADON_NEXT_RUNTIME_DROPIN" ;;
+  *--property=NeedDaemonReload*) printf 'no\n' ;;
+  *--property=Environment*) printf 'RADON_RUNTIME=container PATH=/usr/bin\n' ;;
+  *--property=ExecStart*) printf '{ path=/usr/local/sbin/radon-app-runtime ; argv[]=/usr/local/sbin/radon-app-runtime run %%n ; }\n' ;;
+  *) exit 2 ;;
+esac
+""",
+        )
+        staged = tmp_path / "staged"
+        target_dropin = (
+            staged
+            / "cloud"
+            / "services"
+            / "radon-nextjs.service.d"
+            / "runtime-container.conf"
+        )
+        target_dropin.parent.mkdir(parents=True)
+        source_dropin = (
+            ROOT
+            / "services"
+            / "radon-nextjs.service.d"
+            / "runtime-container.conf"
+        ).read_text(encoding="utf-8")
+        target_dropin.write_text(source_dropin, encoding="utf-8")
+        installed_dropin = tmp_path / "installed-runtime-container.conf"
+        installed_dropin.write_text(
+            source_dropin if matching_dropin else source_dropin + "# drift\n",
+            encoding="utf-8",
+        )
+        (staged / "web" / ".next").mkdir(parents=True)
+        (staged / "web" / ".next" / "BUILD_ID").write_text(
+            "rollback-build\n", encoding="utf-8"
+        )
+        pull_log = tmp_path / "pull.log"
+        shell = f"""
+set -euo pipefail
+source {DEPLOY}
+prepull_app_images() {{ printf '%s\n' "$1" > {pull_log}; }}
+container_node_image_replaces_next_compile {staged}
+"""
+        result = subprocess.run(
+            ["bash", "-c", shell],
+            env={
+                **os.environ,
+                "PATH": f"{fake_bin}:{os.environ['PATH']}",
+                "RADON_DEPLOY_USE_NODE_IMAGE_BUILD": "1",
+                "RADON_NEXT_RUNTIME_DROPIN": str(installed_dropin),
+                "RADON_SYSTEMCTL": str(systemctl),
+            },
+            capture_output=True,
+            text=True,
+        )
+        return result, pull_log
+
+    def test_exact_node_image_can_replace_duplicate_host_compile(
+        self, tmp_path: Path
+    ) -> None:
+        result, pull_log = self._container_node_image_contract(tmp_path)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert pull_log.read_text(encoding="utf-8").strip() == "d" * 40
+
+    def test_node_image_reuse_fails_closed_when_target_dropin_differs(
+        self, tmp_path: Path
+    ) -> None:
+        result, pull_log = self._container_node_image_contract(
+            tmp_path, matching_dropin=False
+        )
+        assert result.returncode != 0
+        assert not pull_log.exists()
+
+    def test_node_image_reuse_is_only_enabled_by_gated_prestage(
+        self, deploy_text: str
+    ) -> None:
+        contract = function_body(
+            deploy_text, "container_node_image_replaces_next_compile"
+        )
+        assert "RADON_DEPLOY_USE_NODE_IMAGE_BUILD" in contract
+        assert "prepull_app_images" in contract
+        assert "NeedDaemonReload" in contract
+        assert "DropInPaths" in contract
+        ci = ROOT_CI.read_text(encoding="utf-8")
+        stage = ci.split("\n  stage-release:\n", 1)[1].split(
+            "\n  prepull-images:\n", 1
+        )[0]
+        assert "app-images" in stage.split("needs:", 1)[1].split("\n", 1)[0]
+        assert "RADON_DEPLOY_USE_NODE_IMAGE_BUILD=1" in stage
 
     def test_seed_staged_node_modules_reuses_live_tree_when_lockfiles_match(
         self, tmp_path: Path
@@ -2912,6 +3022,7 @@ git() {{
 }}
 verify_tracked_drift_matches_target() {{ return 0; }}
 build_staged_release() {{ printf 'build\\n' >> {calls!s}; }}
+prepull_app_images() {{ return 0; }}
 restart_services() {{ printf 'restart\\n' >> {calls!s}; }}
 deploy_gate() {{ return 0; }}
 write_transition_phase() {{ return 0; }}
@@ -3181,7 +3292,7 @@ class TestCloudSecretScan:
             for job in jobs.values()
             if re.search(
                 r"python\s+-m\s+pytest",
-                "\n".join(str(step.get("run", "")) for step in job["steps"]),
+                "\n".join(str(step.get("run", "")) for step in job.get("steps", [])),
             )
         ]
         assert len(pytest_jobs) >= 2
@@ -3193,7 +3304,7 @@ class TestCloudSecretScan:
         assert "cloud/tests/test_" in str(cloud["strategy"]["matrix"]["include"])
         assert "matrix.paths" in "\n".join(str(step.get("run", "")) for step in cloud["steps"])
         all_commands = [
-            "\n".join(str(step.get("run", "")) for step in job["steps"])
+            "\n".join(str(step.get("run", "")) for step in job.get("steps", []))
             for job in jobs.values()
         ]
         assert any("fail-under=56" in commands for commands in all_commands)

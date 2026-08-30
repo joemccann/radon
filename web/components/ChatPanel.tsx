@@ -14,7 +14,6 @@ import type {
   PortfolioData,
   WorkspaceSection,
 } from "@/lib/types";
-import { quickPromptsBySection } from "@/lib/data";
 import { createTimestamp } from "@/lib/utils";
 import {
   fallbackReply,
@@ -37,6 +36,8 @@ import {
 } from "@/lib/quoteTelemetry";
 
 type ChatPanelProps = {
+  /** Retained for callers (WorkspaceShell hands it down); the composer-only
+      surface no longer varies by section since the starter prompts left. */
   activeSection: WorkspaceSection;
   portfolio?: PortfolioData | null;
   /**
@@ -189,7 +190,6 @@ function proposalQuote(
 }
 
 export default function ChatPanel({
-  activeSection,
   portfolio,
   isOpen = true,
   seedPrompt = null,
@@ -213,7 +213,6 @@ export default function ChatPanel({
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const atBottomRef = useRef(true);
 
-  const sectionPrompts = quickPromptsBySection[activeSection];
   const isBusy = status === "submitted" || status === "streaming";
 
   // Stick-to-bottom: only auto-scroll while the user is already pinned to the
@@ -251,7 +250,11 @@ export default function ChatPanel({
     scrollToBottom();
   }, [scrollToBottom]);
 
-  const sendMessage = async (prompt: string, attachments: ChatImageAttachment[] = []) => {
+  const sendMessage = async (
+    prompt: string,
+    attachments: ChatImageAttachment[] = [],
+    modelId = "",
+  ) => {
     // One controller per turn: a new send supersedes the previous stream.
     streamAbortRef.current?.abort();
     streamAbortRef.current = new AbortController();
@@ -309,7 +312,20 @@ export default function ChatPanel({
           signal: streamAbortRef.current?.signal,
         });
       } else {
-        const turn = await requestAssistantTurn(conversation, cleaned, attachments);
+        // The route streams its envelope: `start` lands within milliseconds of
+        // the request, and each tool call lands as the loop completes it. Both
+        // are wired live so a 55s turn reads as alive rather than as a panel
+        // that has stopped responding. R-262.
+        const turn = await requestAssistantTurn(
+          conversation,
+          cleaned,
+          attachments,
+          modelId,
+          (event) => {
+            if (event.type === "start") setStatus("streaming");
+            else setTurnTools((current) => [...current, event.event]);
+          },
+        );
         setTurnTools(turn.toolEvents);
         setTurnModel(turn.model);
         setStatus("streaming");
@@ -391,32 +407,12 @@ export default function ChatPanel({
   const lastAssistantId = [...messages].reverse().find((m) => m.role === "assistant")?.id ?? null;
 
   return (
-    <div className="chat-panel">
-      {/* The launcher head is the overlay's single header — ChatPanel no
-          longer renders its own, so the surface reads as one conversation. */}
+    <div className="chat-panel" data-empty={messages.length === 0 ? "true" : undefined}>
+      {/* Composer-only surface (design-lab Variant A): with no messages the
+          panel is just the composer, so the launcher sizes it to content. */}
       <div className="chat-shell">
+          {messages.length ? (
           <div className="chat-transcript-wrap">
-            {messages.length === 0 ? (
-              <div className="chat-empty-state">
-                <div className="chat-empty-state__title">Ask Radon</div>
-                <p className="chat-empty-state__copy">
-                  Flow analysis, scans, risk checks and journal queries. Type a request or pick one.
-                </p>
-                <div className="chat-empty-state__cards">
-                  {sectionPrompts.map((prompt) => (
-                    <button
-                      type="button"
-                      key={prompt}
-                      className="chat-empty-card"
-                      onClick={() => sendMessage(prompt)}
-                    >
-                      <span className="chat-empty-card__slash">/</span>
-                      {prompt}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : (
               <div
                 ref={messagesRef}
                 className="chat-messages"
@@ -480,7 +476,6 @@ export default function ChatPanel({
                   );
                 })}
               </div>
-            )}
 
             <button
               type="button"
@@ -494,6 +489,7 @@ export default function ChatPanel({
               Latest
             </button>
           </div>
+          ) : null}
 
           {lastError ? <div className="chat-error">{lastError}</div> : null}
 
@@ -533,24 +529,12 @@ export default function ChatPanel({
           ) : null}
 
           <div className="chat-composer">
-            {messages.length ? (
-              <div className="chat-pills">
-                {sectionPrompts.map((prompt) => (
-                  <button
-                    type="button"
-                    key={prompt}
-                    onClick={() => sendMessage(prompt)}
-                    className="pill-chip"
-                  >
-                    /{prompt}
-                  </button>
-                ))}
-              </div>
-            ) : null}
             <AskComposer
               busy={isBusy}
               focusKey={isOpen}
-              onSubmit={(text, _engine, attachments) => void sendMessage(text, attachments)}
+              onSubmit={(text, modelId, attachments) =>
+                void sendMessage(text, attachments, modelId)
+              }
             />
           </div>
         </div>

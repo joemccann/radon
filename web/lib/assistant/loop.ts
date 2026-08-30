@@ -16,7 +16,14 @@
  * them in `toOpenAiMessages`. String turns from the UI stay strings.
  */
 
-import { chat, type LlmContentBlock, type LlmMessage, type LlmToolCall, type LlmUsage } from "@/lib/llm/provider";
+import {
+  chat,
+  type LlmContentBlock,
+  type LlmMessage,
+  type LlmProviderName,
+  type LlmToolCall,
+  type LlmUsage,
+} from "@/lib/llm/provider";
 import {
   createAssistantTurnBudget,
   executeTool,
@@ -62,7 +69,18 @@ export type ToolEvent = {
   repeated?: boolean;
 };
 
-export type AssistantLoopOutcome = "answered" | "proposal" | "cap_forced_final" | "cap_fallback";
+/**
+ * The model the operator picked for this turn, already validated against the
+ * catalog by the route. Empty means the deployment default, unchanged.
+ */
+export type AssistantModelSelection = {
+  model?: string;
+  provider?: LlmProviderName;
+};
+
+export type AssistantLoopOutcome = "answered" | "proposal" | "cap_forced_final" | "cap_fallback" | "cancelled";
+
+const CANCELLED_MESSAGE = "Turn cancelled before it finished.";
 
 export type OrderProposal = {
   tool: string;
@@ -75,6 +93,10 @@ export type OrderProposal = {
 export type AssistantLoopResult = {
   content: string;
   model: string;
+  /** Provider that answered the last round; "unknown" before any round settles. */
+  provider: string;
+  /** True when any round ran on LLM_FALLBACK_PROVIDER instead of the selection (R-457). */
+  usedFallback?: boolean;
   toolEvents: ToolEvent[];
   proposal?: OrderProposal;
   rounds: number;
@@ -239,11 +261,15 @@ function safeExtraction(text: string): string {
   }
 }
 
-async function isolateKnowledgeResult(content: string): Promise<{ content: string; usage?: LlmUsage }> {
+async function isolateKnowledgeResult(
+  content: string,
+  signal?: AbortSignal,
+): Promise<{ content: string; usage?: LlmUsage }> {
   const extraction = await chat({
     messages: [{ role: "user", content }],
     system: KNOWLEDGE_EXTRACTION_SYSTEM,
     maxTokens: 500,
+    ...(signal ? { signal } : {}),
   });
   return { content: safeExtraction(extraction.text), usage: extraction.usage };
 }
@@ -252,14 +278,38 @@ export async function runAssistantLoop(
   turns: AssistantTurn[],
   system: string,
   principal: AssistantPrincipal,
+  selection: AssistantModelSelection = {},
+  /**
+   * Called as each tool call settles, so the route can write it to the open
+   * event stream instead of the client waiting for the whole turn. Optional:
+   * the returned `toolEvents` stays the authoritative list.
+   */
+  onToolEvent?: (event: ToolEvent) => void,
+  /**
+   * Per-turn abort from the route: the client hung up or the wall clock
+   * fired. Checked before every model round and every tool call, and handed
+   * to chat() and call_api so in-flight requests stop too (R-453).
+   */
+  signal?: AbortSignal,
 ): Promise<AssistantLoopResult> {
   if (!principal?.userId) throw new Error("Verified assistant principal required");
   const messages: LoopMessage[] = turns.map((turn) => ({ role: turn.role, content: turn.content }));
   const toolEvents: ToolEvent[] = [];
-  const spawnBudget = createAssistantTurnBudget();
+  // A client that has already hung up must never fail the turn it is watching.
+  const emit = (event: ToolEvent) => {
+    toolEvents.push(event);
+    try {
+      onToolEvent?.(event);
+    } catch {
+      /* the stream is gone; the loop still owes its caller a result */
+    }
+  };
+  const spawnBudget = createAssistantTurnBudget(signal);
   const priorResults = new Map<string, string>();
   const usage: LlmUsage = { inputTokens: 0, outputTokens: 0 };
   let model = "unknown";
+  let provider = "unknown";
+  let usedFallback = false;
   let knowledgeBoundaryReached = false;
 
   const accumulateUsage = (roundUsage?: LlmUsage) => {
@@ -267,20 +317,35 @@ export async function runAssistantLoop(
     usage.inputTokens += roundUsage.inputTokens;
     usage.outputTokens += roundUsage.outputTokens;
   };
+  const provenance = () => (usedFallback ? { provider, usedFallback: true as const } : { provider });
+  const cancelled = (round: number): AssistantLoopResult => ({
+    content: CANCELLED_MESSAGE,
+    model,
+    ...provenance(),
+    toolEvents,
+    rounds: round,
+    usage,
+    outcome: "cancelled",
+  });
 
   for (let round = 1; round <= MAX_ROUNDS; round += 1) {
+    if (signal?.aborted) return cancelled(round - 1);
     const response = await chat({
       messages: messages as unknown as LlmMessage[],
       system,
+      ...selection,
       ...(knowledgeBoundaryReached ? {} : { tools: toolSchemas() }),
+      ...(signal ? { signal } : {}),
     });
     model = response.model;
+    provider = response.provider;
+    usedFallback = usedFallback || Boolean(response.usedFallback);
     accumulateUsage(response.usage);
 
     const toolCalls = response.toolCalls ?? [];
     logRound(round, response.model, toolCalls);
     if (!toolCalls.length) {
-      return { content: response.text, model, toolEvents, rounds: round, usage, outcome: "answered" };
+      return { content: response.text, model, ...provenance(), toolEvents, rounds: round, usage, outcome: "answered" };
     }
 
     const destructive = toolCalls.find((call) => isDestructiveTool(call.name));
@@ -290,6 +355,7 @@ export async function runAssistantLoop(
         return {
           content: response.text.trim() || "I need an explicit current-turn order instruction before I can prepare an order proposal.",
           model,
+          ...provenance(),
           toolEvents: [...toolEvents, {
             name: destructive.name,
             input: destructive.input,
@@ -306,6 +372,7 @@ export async function runAssistantLoop(
         return {
           content: "The proposed order did not include a complete validated instrument identity, so it cannot be confirmed.",
           model,
+          ...provenance(),
           toolEvents: [...toolEvents, { name: destructive.name, input: destructive.input, ok: false, error: "Invalid order proposal" }],
           rounds: round,
           usage,
@@ -315,6 +382,7 @@ export async function runAssistantLoop(
       return {
         content: response.text,
         model,
+        ...provenance(),
         toolEvents,
         proposal,
         rounds: round,
@@ -327,12 +395,13 @@ export async function runAssistantLoop(
 
     const results: ToolResultBlock[] = [];
     for (const call of toolCalls) {
+      if (signal?.aborted) return cancelled(round);
       if (isDestructiveTool(call.name)) {
         const content = JSON.stringify({
           deferred: true,
           reason: "Complete prerequisite reads, then submit a fresh validated proposal.",
         });
-        toolEvents.push({
+        emit({
           name: call.name,
           input: call.input,
           ok: false,
@@ -344,7 +413,7 @@ export async function runAssistantLoop(
       const key = callKey(call);
       const prior = priorResults.get(key);
       if (prior !== undefined) {
-        toolEvents.push({ name: call.name, input: call.input, ok: true, repeated: true });
+        emit({ name: call.name, input: call.input, ok: true, repeated: true });
         results.push({
           type: "tool_result",
           tool_use_id: call.id,
@@ -356,7 +425,7 @@ export async function runAssistantLoop(
       let content = stringifyToolResult(result);
       if (result.ok && isKnowledgeTool(call.name)) {
         try {
-          const isolated = await isolateKnowledgeResult(content);
+          const isolated = await isolateKnowledgeResult(content, signal);
           content = isolated.content;
           accumulateUsage(isolated.usage);
         } catch {
@@ -365,7 +434,7 @@ export async function runAssistantLoop(
         knowledgeBoundaryReached = true;
       }
       priorResults.set(key, content);
-      toolEvents.push({ name: call.name, input: call.input, ok: result.ok, error: result.error });
+      emit({ name: call.name, input: call.input, ok: result.ok, error: result.error });
       results.push({
         type: "tool_result",
         tool_use_id: call.id,
@@ -379,15 +448,24 @@ export async function runAssistantLoop(
   // forced tool-less final call lets the model answer with everything it has
   // instead of discarding the turn behind a canned error.
   messages.push({ role: "user", content: CAP_FORCED_FINAL_INSTRUCTION });
+  if (signal?.aborted) return cancelled(MAX_ROUNDS);
   try {
-    const finalResponse = await chat({ messages: messages as unknown as LlmMessage[], system });
+    const finalResponse = await chat({
+      messages: messages as unknown as LlmMessage[],
+      system,
+      ...selection,
+      ...(signal ? { signal } : {}),
+    });
     accumulateUsage(finalResponse.usage);
     logRound(MAX_ROUNDS + 1, finalResponse.model, []);
+    provider = finalResponse.provider;
+    usedFallback = usedFallback || Boolean(finalResponse.usedFallback);
     const text = finalResponse.text?.trim();
     if (text) {
       return {
         content: text,
         model: finalResponse.model,
+        ...provenance(),
         toolEvents,
         rounds: MAX_ROUNDS + 1,
         usage,
@@ -401,6 +479,7 @@ export async function runAssistantLoop(
   return {
     content: CAP_FALLBACK_MESSAGE,
     model,
+    ...provenance(),
     toolEvents,
     rounds: MAX_ROUNDS,
     usage,

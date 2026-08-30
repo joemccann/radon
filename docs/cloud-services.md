@@ -22,7 +22,7 @@ This document covers Radon's two-mode architecture introduced in Phase 0–6 of 
 
 - **Database**: Turso (libSQL) — every Radon process talks **directly** to the cloud DB for both reads and writes. Direct-to-cloud is the code default (DUR-07; replica is opt-in only via `RADON_DB_USE_REPLICA=1`), and the prefix drop-in `/etc/systemd/system/radon-.service.d/common.conf` sets the `RADON_DB_NO_REPLICA=1` kill switch on every `radon-*` unit as belt-and-suspenders. The embedded-replica architecture (`data/replica.db`) was retired 2026-05-20 after two same-day incidents: multi-writer WAL checkpoint contention (radon-cloud `741cfc6`) followed by single-writer frame conflicts between the replica owner and direct-cloud writers (radon-cloud `2c46232`). The libsql embedded-replica model only works when ONE host has exactly ONE writer; Radon's split between Node and Python writers can't satisfy that constraint. Reads cost +30–60 ms cloud round-trip, absorbed by SWR caching. See `feedback_libsql_replica_one_writer.md` for the full failure-mode catalog.
 - **Media**: Hetzner-hosted Caddy serves `https://media.radon.run`; the laptop's newsfeed scraper rsyncs new images over Tailscale.
-- **Schedulers**: laptop launchd plists (local mode) OR Hetzner host systemd (cloud mode). Production is host systemd; IB Gateway is the only production container until per-unit app drop-ins are installed. App-plane images default `RADON_RUNTIME=host`. Unit sources live in `/home/radon/radon/cloud/services/` and are installed through the reviewed control-plane path. The former `docker/services/` tree was deleted as decoy units in `40cfff2a` and is not a scheduler alternative.
+- **Schedulers**: laptop launchd plists (local mode) OR Hetzner host systemd (cloud mode). Production scheduling remains host systemd. Installed per-unit drop-ins run Next.js, FastAPI, relay, monitor, and newsfeed in exact-SHA app containers; timer-owned oneshots remain on the host. Unit sources live in `/home/radon/radon/cloud/services/` and are installed through the reviewed control-plane path. The former `docker/services/` tree was deleted as decoy units in `40cfff2a` and is not a scheduler alternative.
 - **Self-contained**: themarketear.com newsfeed scraper is now a headless Playwright flow that runs on either the laptop or Hetzner. No magic-link or Chrome Debug.app dependency.
 
 ## Newsfeed (`themarketear.com`) — Self-contained headless flow
@@ -174,7 +174,7 @@ Related: `scripts/db/migrate.py` (radon-api `ExecStartPre`) retries transport-cl
 
 ### Runtime planes
 
-Production is three planes: host (never container), broker (already Docker), app (host default). IB Gateway in `cloud/docker-compose.yml` is the only production container until per-unit `runtime-container.conf` drop-ins are installed after hours. App-plane images (`docker/app`) plus `/usr/local/sbin/radon-app-runtime` are the optional container path; the default is `RADON_RUNTIME=host`. Do not install the fleet `radon-.service.d` example (it would override Gateway and health). The former `docker/services/` tree was deleted as decoy units in `40cfff2a` and is not a containerized scheduler alternative.
+Production is three planes: host, broker, and app. IB Gateway runs from `cloud/docker-compose.yml`; the five long-lived app services run from exact-SHA `docker/app` images through installed per-unit `runtime-container.conf` drop-ins; timer-owned oneshots remain host systemd. Main CI gates deploy on both app images, pre-pulls them in parallel with prestage, and the runtime refuses `latest`. Do not install the fleet `radon-.service.d` example because it would override Gateway and health. The former `docker/services/` tree was deleted as decoy units in `40cfff2a` and is not a scheduler alternative.
 
 ## Trades — single source of truth
 
@@ -393,7 +393,7 @@ bounded.
 |---|---|---|
 | `radon-db-backup.timer` | VPS | Nightly **09:00 UTC** (after archive 05:40 + retention 08:10), `Persistent=true` |
 | `radon-db-backup.service` | VPS | Oneshot, `User=radon`, `TimeoutStartSec=3600` (libsql has no client timeouts — the unit bound is the real one) |
-| `radon-cloud/scripts/db_backup.py` / monorepo `cloud/scripts/db_backup.py` | VPS | Iterates `sqlite_master` — the ENTIRE DB, no hand-picked table list, so new migration tables are captured automatically. Paged `SELECT`s (500 rows/page). Emits portable SQL (schema + INSERTs), gzip'd to `/home/radon/radon-cloud/backups/db/radon-<UTC>.sql.gz`. Prunes dumps older than `RETENTION_DAYS` (7) in-script. |
+| `radon-cloud/scripts/db_backup.py` / monorepo `cloud/scripts/db_backup.py` | VPS | Iterates `sqlite_master` — the ENTIRE DB, no hand-picked table list, so new migration tables are captured automatically. Paged `SELECT`s (500 rows/page). Emits portable SQL (schema + INSERTs), gzip'd to `/home/radon/radon-cloud/backups/db/radon-<UTC>.sql.gz`. Prunes dumps older than `RETENTION_DAYS` (7) in-script, and only those present in B2 once the off-box leg has run (R-445). |
 | `service_health` heartbeat | row `db-backup` | Written on EVERY run — `ok` with `{size_bytes, duration_secs, tables, rows, pruned}` detail, `error` with the failure summary. 48h freshness window. |
 | `com.radon.db-backup-pull` | laptop launchd | Daily rsync of dump dir over Tailscale into `data/db_backups/` (no `--delete`). |
 
@@ -631,6 +631,58 @@ heartbeats that keep `vixts` inside its 26h window. Single-source, so a
 plausibility guard raises rather than latching `ok` over a truncated or
 implausible series. Installed by the deploy's `install-units` verb from
 `installed-units.sha256`. Spec: [`indicators/vixts.md`](indicators/vixts.md).
+
+### DISPERSION (`radon-dispersion.timer`)
+
+Daily `22:20 UTC` (`RandomizedDelaySec=120`), oneshot `scripts/fetch_dispersion.py`,
+`TimeoutStartSec=900`. VIX close, the 95th-minus-5th percentile spread of daily
+single-stock returns across the S&P 500 seed, and the same spread across the 11
+Select Sector SPDRs, each rolled to a 60-session mean and z-scored over the full
+sample since 2017. IB daily `TRADES` bars for every symbol (`IBClient` auto client
+id, `asyncio.gather` under 8 slots, `1 M` incremental / `10 Y` `--backfill`), then
+Yahoo for whatever IB left empty (spark batches of 20 incrementally, per-symbol
+chart on backfill); UW is skipped so the 515-symbol sweep never spends the shared
+daily cap. Only raw per-session rows land in `dispersion_history`; the means and
+z-scores are rebuilt from every stored row each run. 22:20 clears the EST close
+and sits between ivrank 22:10 and yield-curve 22:30. Runs every calendar day;
+weekend and holiday runs find no new completed session, make no IB or Yahoo
+requests, and refresh only the snapshot + heartbeat that keep `dispersion` inside
+its 26h window. An empty VIX or a thin cross-section re-serves the stored series
+as `stale_source` with an `error` heartbeat and exits non-zero; a gap wider than
+the incremental window raises and asks for `--backfill`. Installed by the deploy's
+`install-units` verb from `installed-units.sha256`. Spec:
+[`indicators/dispersion.md`](indicators/dispersion.md).
+
+### Model catalog (`radon-model-catalog.timer`)
+
+Daily `03:10 UTC` (`RandomizedDelaySec=300`), oneshot
+`scripts/refresh_model_catalog.py`, `TimeoutStartSec=300`. Picks ONE frontier
+chat model per LLM provider whose API key is present in the unit env
+(`ANTHROPIC_API_KEY` today; `XAI_API_KEY` / `GROK_API_KEY` and `OPENAI_API_KEY`
+light up automatically when added to `/etc/radon/env`) by listing that
+provider's own models endpoint and applying a deterministic filter, sort, head:
+dated snapshots lose to the undated alias they pin, cheap and preview tiers and
+non-chat modalities are dropped, and versions are compared as floats so
+`grok-4.20` reads as 4.2 rather than beating `grok-4.6`. A provider with no key
+is skipped silently, so the chat model picker lists exactly what this
+deployment can call. A provider that errors, times out or rate-limits keeps its
+existing row (seeded from Turso, JSON cache second); a run that resolves no
+provider at all writes only the heartbeat, so a bad poll never blanks a good
+catalog. Any carried-forward keyed provider makes that heartbeat `error`
+(`class: provider_carry_forward`, naming the providers), a crash before the
+write leaves an `error` row (`class: cycle_failed`) and exit 1, each provider
+poll has its own 60s wall-clock budget and the Anthropic cursor walk is capped
+at 10 pages, so the 26h alarm reports content staleness rather than an `ok`
+with today's `finished_at` (R-455/R-456/R-458). Per-provider operator overrides
+(`ANTHROPIC_MODEL`, `OPENAI_MODEL`, `XAI_MODEL` / `GROK_MODEL` — the same
+variables `web/lib/llm/provider.ts` reads) win over discovery, so a bad
+heuristic is recoverable without a deploy. Rows in `llm_model_catalog`, payload
+in `scan_snapshots`, heartbeat `model-catalog`, JSON fallback
+`data/llm_models.json`. A key added to `/etc/radon/env` only becomes visible to
+the picker after `systemctl restart radon-nextjs` — `write_web_env()` rewrites
+`web/.env` on every deploy with `NEXT_PUBLIC_*` only, so provider keys must
+live in the unit env, never in `web/.env` on the host. Installed by the
+deploy's `install-units` verb from `installed-units.sha256`.
 
 ### IV RANK (`radon-ivrank.timer`)
 
@@ -896,8 +948,8 @@ automated off-box push, and is not a backup strategy.
 | Unit | Unchanged `radon-db-backup.service` + `.timer` (09:00 UTC). `TimeoutStartSec=19500` already covers dump + upload. |
 | Target | S3-compatible API to the existing B2 bucket `radon-archive`, prefix **`db_backups/`** (never collides with `portfolio_snapshots/` or `media/`). |
 | Credentials | `RADON_ARCHIVE_S3_*` from `/etc/radon/env` (already required-env). Optional per-field overrides `RADON_DB_BACKUP_S3_{ENDPOINT,BUCKET,ACCESS_KEY_ID,SECRET_ACCESS_KEY,REGION}` and `RADON_DB_BACKUP_PREFIX`, same shape as `RADON_MEDIA_BACKUP_S3_*`. |
-| Local retention | `RETENTION_DAYS = 7` since 2026-08-29 (was 30 at cutover), operator policy; B2 is the archive. |
-| Remote retention | `REMOTE_RETENTION_DAYS = 365`. Off-boxing a 30-day window would buy nothing; a year of nightly dumps is ~190 GB in B2 at current sizes. |
+| Local retention | `RETENTION_DAYS = 7` since 2026-08-29 (was 30 at cutover), operator policy; B2 is the archive. The off-box leg runs BEFORE the local prune and a dump past the window is unlinked only when it is present in B2 (already listed, or uploaded and size-confirmed tonight); a failed or budget-deferred upload keeps the local copy, so a red `db-backup` row is also a disk-growth signal. Without any B2 config the prune is age-only. |
+| Remote retention | `REMOTE_RETENTION_DAYS = 365`. Off-boxing only the local window would buy nothing; a year of nightly dumps is ~190 GB in B2 at current sizes. |
 | Transport bound | Multipart at 64 MB chunks, 4 threads, botocore `connect_timeout=30` / `read_timeout=300` / 3 attempts, plus a `UPLOAD_BUDGET_SECS = 3600` wall-clock ceiling. |
 | Heartbeat | Existing `db-backup` row, extended detail: `offbox_bucket`, `offbox_prefix`, `offbox_uploaded`, `offbox_bytes_uploaded`, `offbox_deferred`, `offbox_remote_pruned`, and `offbox_error`. Summary gains `; b2 <uploaded>/<planned> (<bytes> B), deferred N, remote pruned N`. |
 

@@ -247,6 +247,109 @@ Reported 2026-08-25 as "502 on https://app.radon.run/admin".
 
 ---
 
+## caddy-health-floor-pages-aggregate-invalid
+
+**Off-box observer pages P1 `aggregate_invalid` while ping and `/sign-in`
+stay 200.** Peak: 2026-08-29 23:05Z, page `1b0b049c…`. GitHub probe
+failed 23:03:36–23:03:56Z; deploy runner `1b2a82db` materialized 23:05Z
+(the first release that ships `cloud/caddy/Caddyfile`).
+
+- **Mechanism:** `/edge-health/ping` is Caddy-static 200. `/edge-health/status`
+  reverse-proxies `:8330`. The never-502 floor rewrites healthd 5xx and
+  dial-refused (healthd stopped during deploy `stop-clean`) to HTTP 200
+  `{"reachable":false,"observer":"caddy"}`. `classify_probes` treated that
+  opaque 200 as `aggregate_invalid`. Deploy-window suppression only matched
+  `(ping|status)_http_5xx`, so the rewritten 502 paged P1. Local
+  `:8330/status` was schema-v2 `up`; `/sign-in` 200. Not IB, not Turso.
+- **Detection:** Turso `external_probe.detail=aggregate_invalid` with
+  `http_status=200`; GitHub `external-health-probe.yml` FAILURE in the
+  same minute; ping 200; serving-path units up. After healthd binds,
+  the next off-box cycle writes `edge_ok`.
+- **Discriminating check:** the public `/edge-health/status` body (or the
+  Caddyfile literal) is `{"reachable":false,"observer":"caddy"}` while
+  loopback `:8330/status` is schema-v2, OR the sample sits inside a
+  deploy window with serving path up. A real schema contradiction
+  (`ok` vs `overall_state`) is still `aggregate_invalid` and still P1.
+  `status_http_502` is the pre-floor form of the same restart
+  (`deploy-restart-window-edge-502` / page `d98c3364`).
+- **Remediation (code):** classify the Caddy observer body as
+  `status_unreachable:caddy`. Suppress that reason inside the deploy
+  window when the local serving path is up, same arm as 5xx. Real
+  healthd-down outside a deploy still pages. Do not local-clear
+  perimeter unreachability.
+- **Regression:**
+  `test_health_probe.py::TestClassifyProbes::test_caddy_never_502_floor_is_status_unreachable_not_aggregate_invalid`,
+  `test_external_probe_deadman.py::test_deploy_window_caddy_status_unreachable_is_suppressed`,
+  `test_caddy_status_unreachable_outside_deploy_window_pages`,
+  `test_aggregate_invalid_inside_deploy_window_still_pages`.
+- **Code:** `scripts/health_probe/probe.py` (`classify_probes`),
+  `scripts/watchdog/external_probe.py` (`_DEPLOY_COLLATERAL_REASON`),
+  `cloud/caddy/Caddyfile` (`handle_response` / `handle_errors`).
+
+---
+
+## assistant-turn-edge-504
+
+**A chat turn dies with `Assistant service returned an error.` and DevTools
+shows `POST /api/assistant -> 504` after tens of seconds.** Reported
+2026-08-29 after the operator pasted a chart and asked how it related to
+their TLT position.
+
+- **Mechanism:** `/api/assistant` rode the catch-all `handle` in
+  `cloud/caddy/Caddyfile`, whose R-219 guard abandons a request after
+  `response_header_timeout 30s`. The route is NON-STREAMING: it runs the whole
+  multi-round `runAssistantLoop` and writes its JSON only at the end, so a turn
+  emits no response header at all until it has finished, and it declares
+  `maxDuration = 300`. Any turn slower than 30 s therefore reached the operator
+  as a 504 while radon-nextjs was still working on it. The edge's 504 body is
+  not JSON, so `payload.error` in `requestAssistantTurn` was null and the chat
+  fell through to the generic string.
+- **Detection:** the browser gets a 504 on `POST /api/assistant`, but
+  `journalctl -u radon-nextjs | grep '\[assistant\] done'` shows the SAME turn
+  with `outcome=answered` and `ms=` above 30000. The answer existed; nobody
+  received it. `/var/log/caddy/radon.log` (root-readable only) carries the
+  matching `"status":504` with a ~30 s `duration`.
+- **Discriminating check:** an `outcome=error` journal line means the loop
+  itself failed and this is NOT the case (read the error). An `outcome=answered`
+  line whose `ms` exceeds the path's `response_header_timeout`, or no journal
+  line at all with the request still counted at the edge, is this case.
+- **Fix (`cloud/caddy/Caddyfile`):** a dedicated `handle /api/assistant*` with
+  `response_header_timeout 180s` and no `lb_try_duration` (POST-only path with
+  no idempotency key: a retry would replay a billed vision turn). Do NOT raise
+  the guard globally; R-219 needs the catch-all short so a wedged upstream
+  still becomes an observable 5xx.
+- **Durable fix (shipped after the bump):** the route STREAMS. It answers
+  `text/event-stream` and writes `event: start` before `runAssistantLoop` is
+  awaited, then a `heartbeat` every 10 s, a `tool` frame per completed tool
+  call, and a terminal `done` (or `error`) frame. The response header therefore
+  exists within milliseconds of the request no matter how long the turn takes,
+  so no header guard anywhere can abandon a running turn.
+  `flush_interval -1` on the assistant handle states that every frame is
+  forwarded as written. Two consequences worth knowing at 3am:
+  - Once the header is flushed there is no status left to set. A mid-turn
+    failure is an `error` FRAME on a **200**, not a 502. Every rejection that
+    still carries a status (`requireRouteAccess`, `enforceDemoAiQuota`, the
+    empty-turn guard) runs BEFORE the stream opens.
+  - A stream that ends with no `done` frame is a failure. The client renders
+    "The connection dropped and the turn did not finish." — never an empty
+    assistant bubble.
+- **Publishing:** as with every edge change, the Caddyfile is NOT shipped by
+  the CI deploy. After merge, on the VPS as `radon`:
+  `sudo -n /usr/local/sbin/radon-deploy-root publish-caddy`.
+- **Regression:** `cloud/tests/test_caddy_edge_timeouts.py::TestTheAssistantTurnOutlivesTheGenericGuard`
+  (the assistant handle exists, outlasts the longest observed answered turn,
+  stays inside the route's own `maxDuration`, never retries, and the generic
+  30 s guard is untouched), `::TestTheAssistantHandleStatesItStreams` and
+  `::TestTheAssistantStreamMechanism` (a real caddy carries a streaming turn's
+  first byte through in well under the guard, with the site's `encode` in
+  front of it), `web/tests/assistant-stream-route.test.ts` (start flushed
+  before the loop resolves; heartbeats; error-as-frame; pre-stream statuses
+  intact), `web/tests/assistant-stream-client.test.ts` (a truncated stream is
+  an error, never an empty bubble) and `web/tests/assistant-timeout-copy.test.ts`
+  (a 504 or 408 names the timeout instead of the generic error).
+
+---
+
 ## signals-refresh-curl-timeout-pages-p1
 
 **`radon-signals-refresh.service` oneshot pages P1 `Result=exit-code`
@@ -695,6 +798,19 @@ Incident: 2026-08-15 00:24Z, P1 page `34ab3e3c…`.
   admin panel), then approve the 2FA push. Regression tests:
   `test_health_service.py::TestStatusResponse::test_gateway_only_down_degrades_instead_of_down`,
   `test_health_probe.py::TestClassifyProbes::test_schema_v2_degraded_keeps_edge_ok`.
+- **Weekend deploy → false `status_http_502` P1 (2026-08-29, page
+  `d98c3364`):** off-box sampled `/edge-health/status` HTTP 502 at
+  16:45Z while user_path + freshness stayed green; deploy runners were
+  active 16:42–16:52 (healthd restart collateral). Aggregate was
+  `degraded` (IB weekend clean-exit). Deploy-window 5xx suppression
+  required `_local_aggregate_is_healthy` (`overall_state=up`), so the
+  weekend degraded state re-armed P1. Discriminating check: probe
+  history `status_http_502` with sibling user_path/freshness ok +
+  deploy-runner mtime inside the sample window + local serving path
+  up (api/relay/nextjs) → suppress, do not restart. Fix: suppression
+  now uses `_local_aggregate_serving_path_ok` (up OR dependency-only
+  degraded). Regression:
+  `test_deploy_window_5xx_with_dependency_only_degraded_is_suppressed`.
 - **Sidecar unit flap → false "edge unhealthy" (2026-08-29, page
   `0b7726f8`):** `radon-newsfeed.service` Restart=always flaps
   (`NRestarts` in the dozens; `InactiveEnterTimestamp` within the same
@@ -883,6 +999,53 @@ transient Turso HTTP 502 reading `scan_snapshots`.** Peak: 2026-08-21
   `test_s3_client_uses_bounded_standard_retries`).
 - **Code:** `cloud/scripts/media_backup.py`
   (`_s3_client`, `call_s3_with_retry`, `is_transient_s3_error`, `upload_file`).
+
+---
+
+## db-backup-b2-connection-closed
+
+**`radon-db-backup.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) on a single B2 `ConnectionClosedError` during PUT of a
+~576 MB dump.** Peak: 2026-08-29 20:35Z, page `29c8a560…`. Recurred
+20:28Z and 20:34Z; a third start at 20:41Z uploaded 3/3.
+
+- **Mechanism:** daily 09:00 UTC oneshot dumps Turso then uploads
+  missing `*.sql.gz` to B2 prefix `db_backups/`. `_s3_client` already
+  had botocore `Config` retries (`max_attempts=3`). `sync_offbox`
+  called `upload_file` once with no application-level retry, so a
+  spent-retry `ConnectionClosedError` on a 576 MB multipart PUT aborted
+  the off-box leg. Local gzip had already landed. `Type=oneshot` has no
+  `Restart=`, so `NRestarts=0` until the next calendar fire (~12h at
+  page time). Unit watchdog pages P1. Credentials exist; later same-hour
+  run uploaded three dumps. Not fail-closed (missing `RADON_ARCHIVE_S3_*`).
+- **Detection:** journal
+  `db-backup: dumped 100 tables / …; b2 FAILED: ConnectionClosedError:
+  Connection was closed before we received a valid response from
+  endpoint URL: "https://s3.us-west-004.backblazeb2.com/radon-archive/db_bac…"`
+  then `service_health row written: db-backup = error`;
+  `systemctl show … -p Result,NRestarts` → `exit-code` / `0`. Edge and
+  `:8321/health/lite` stay up.
+- **Discriminating check:** `ConnectionClosedError` / `connection was
+  closed` on a PUT URL under `db_backups/` (this case) after a dump line
+  with table/row counts. Fail-closed missing-creds text is ops (secret).
+  `Result=signal` is deploy stop-clean. If `/health/lite` is down too →
+  API, stand down. B2 platform outage (every object, media-backup also
+  red) → stand down.
+- **Remediation (code):** application-level retry on transient transport
+  errors around LIST / PUT / HEAD / DELETE so an injected client (and a
+  client whose botocore retries are already spent) still retries the
+  dump and continues the rest of the plan. Persistent closed-connection
+  still exits 1. Local dump remains the critical path. Do not
+  restart-flap; next timer (09:00 UTC) or one
+  `radon unit restart radon-db-backup` after the fix deploys. Unit is
+  not on `RERUNNABLE_ONESHOT_UNITS`.
+- **Regression:**
+  `cloud/tests/test_db_backup_offbox.py::TestTransientB2UploadRetry`
+  (`test_connection_closed_on_first_dump_retries_and_uploads_the_rest`,
+  `test_persistent_connection_closed_still_fails_the_unit`,
+  `test_non_transient_upload_error_is_not_retried`).
+- **Code:** `cloud/scripts/db_backup.py`
+  (`call_s3_with_retry`, `is_transient_s3_error`, `sync_offbox`).
 
 ---
 

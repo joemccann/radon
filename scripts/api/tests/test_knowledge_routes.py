@@ -570,3 +570,57 @@ def test_build_embedder_keeps_explicit_cache_path(monkeypatch, capsys):
 
     assert embed_mod._build_embedder() is None
     assert os.environ["FASTEMBED_CACHE_PATH"] == "/custom/fastembed-cache"
+
+
+# ── FTS-only fallback + startup warm (2026-08-30 03:05Z post-deploy 503s) ──
+
+
+def test_search_retries_fts_only_after_hybrid_db_error(client, monkeypatch, no_backoff):
+    """The vector leg is the statement that blows the Hrana bound under
+    load; the retry must drop it instead of re-running it."""
+    from scripts.api import server
+
+    embeddings: list = []
+
+    def flaky_hybrid_search(db, query, *, query_embedding=None, **_kwargs):
+        embeddings.append(query_embedding)
+        if len(embeddings) == 1:
+            raise server.db_http.DbHttpError("timeout: _ssl.c:980 read timed out")
+        return [_kb_row()]
+
+    monkeypatch.setattr(server, "hybrid_search", flaky_hybrid_search)
+    monkeypatch.setattr(server, "get_embedder", lambda: lambda texts: [EMBEDDING for _ in texts])
+
+    response = client.post("/knowledge/search", json={"query": "3 DTE risk reversals"})
+
+    assert response.status_code == 200
+    assert embeddings == [EMBEDDING, None]
+    assert response.json()["retrieval"] == "fts-only"
+
+
+@pytest.mark.asyncio
+async def test_warm_knowledge_embedder_on_startup_loads_off_loop(monkeypatch):
+    from scripts.api import server
+
+    calls: list[str] = []
+    monkeypatch.setattr(server, "test_mode", False)
+    monkeypatch.setattr(server, "get_embedder", lambda: calls.append("built") or (lambda t: []))
+
+    await server._warm_knowledge_embedder_on_startup()
+
+    assert calls == ["built"]
+
+
+@pytest.mark.asyncio
+async def test_warm_knowledge_embedder_skipped_in_test_mode(monkeypatch):
+    from scripts.api import server
+
+    monkeypatch.setattr(server, "test_mode", True)
+    monkeypatch.setattr(server, "get_embedder", lambda: pytest.fail("demo VM must not load the model"))
+
+    await server._warm_knowledge_embedder_on_startup()
+
+
+def test_lifespan_schedules_knowledge_embedder_warm():
+    source = (Path(__file__).resolve().parents[1] / "server.py").read_text(encoding="utf-8")
+    assert "asyncio.create_task(_warm_knowledge_embedder_on_startup())" in source

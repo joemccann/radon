@@ -324,6 +324,27 @@ ground_truth() {
 # runs died to ENOTFOUND / connection-lost on the runner's flaky uplink);
 # real failures and timeouts surface immediately.
 KILL_AFTER_SECS="${RADON_WEEKEND_KILL_AFTER_SECS:-60}"
+# Production always gives `timeout` the real phase remainder after the 60s
+# launch floor below. The survivability regression needs to exercise the real
+# process group and SIGKILL path without sleeping for that production-sized
+# deadline. Refuse this narrow override unless pytest explicitly owns the
+# process, and accept only the bounded values the regression needs.
+TEST_ROUND_TIMEOUT_SECS=""
+if [[ -n "${RADON_WEEKEND_TEST_ROUND_TIMEOUT_SECS:-}" ]]; then
+  if [[ -z "${PYTEST_CURRENT_TEST:-}" ]]; then
+    echo "REFUSING: RADON_WEEKEND_TEST_ROUND_TIMEOUT_SECS is test-only" >&2
+    report "REFUSED" "RADON_WEEKEND_TEST_ROUND_TIMEOUT_SECS is test-only and cannot alter a production deadline" || true
+    exit 2
+  fi
+  case "$RADON_WEEKEND_TEST_ROUND_TIMEOUT_SECS" in 1|2|5) ;;
+    *)
+      echo "REFUSING: RADON_WEEKEND_TEST_ROUND_TIMEOUT_SECS must be 1, 2, or 5" >&2
+      report "REFUSED" "RADON_WEEKEND_TEST_ROUND_TIMEOUT_SECS must be the bounded test value 1, 2, or 5" || true
+      exit 2
+      ;;
+  esac
+  TEST_ROUND_TIMEOUT_SECS="$RADON_WEEKEND_TEST_ROUND_TIMEOUT_SECS"
+fi
 ROUND_LOG_MARK=0
 MAX_ATTEMPTS=3
 RETRY_PAUSE_SECS=60
@@ -360,6 +381,7 @@ run_phase() {
   while :; do
     remain=$((CAP_SECS - (SECONDS - start_ts)))
     if [[ $remain -le 60 ]]; then RC=124; break; fi
+    [[ -z "$TEST_ROUND_TIMEOUT_SECS" ]] || remain="$TEST_ROUND_TIMEOUT_SECS"
     ROUND_LOG_MARK=$(( $(wc -c < "$RUN_LOG" 2>/dev/null || echo 0) ))
     # Backgrounded and `wait`ed rather than run in the foreground: bash defers
     # trap handling until a foreground child completes, so a SIGTERM to the

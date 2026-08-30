@@ -139,6 +139,18 @@ tree, only ask it to converge on GitHub main. Prestage skips (does not fail)
 when the bundle is not ready. The manual sequence below remains the recovery
 path when the verb itself is not yet granted or GitHub is unreachable.
 
+Exit semantics (R-437, R-440): 75 (deploy lock held, pending transition) is
+retried and then handed to `deploy.sh`. Any other failure, a bootstrap
+rejection or the helper's 300s deadline (124), fails the deploy job and is
+recorded in `/home/radon/.radon-control-plane-rejected`; while that file
+exists `deploy.sh`'s preflight refuses to apply a differing bundle "after
+promote" (the every-deploy `refresh_install_file` path now carries
+bootstrap's full validator table anyway). A bootstrap TERMed after its
+`daemon-reload` restores the previous readiness marker with the previous
+bundle; only a reload systemd refused leaves readiness withdrawn. A missing
+marker on a host whose units carry `runtime-container.conf` drop-ins makes
+the deploy job refuse (exit 78) instead of using the legacy runner.
+
 ### Safe control-plane refresh (2026-07-18)
 
 Bootstrap validates the current `/home/radon/radon/cloud` contents, not the
@@ -209,8 +221,10 @@ Immutable runners under `~/.radon-deploy-runners/` are extracted `a-w`.
 - `scripts/check-env.py` validates names, permissions, literal values, and mode
   consistency without sourcing secrets.
 - Production invariants on Hetzner monorepo hosts:
-  `IB_GATEWAY_MODE=cloud`, `RADON_MODE=hetzner`, `IB_GATEWAY_HOST=127.0.0.1`,
-  `NODE_ENV=production`.
+  `IB_GATEWAY_MODE=cloud`, `RADON_MODE=hetzner`, `NODE_ENV=production`.
+  `IB_GATEWAY_HOST=127.0.0.1` on `RADON_HOST_ROLE=combined` (default) and
+  `broker`. App-role hosts must use an RFC1918 address, never Tailscale
+  CGNAT and never a public NIC. See `docs/spof-host-split.md`.
 - Canonical future secrets path: `/etc/radon/env`. Compatibility path
   `/home/radon/radon-cloud/.env` remains until one green host cutover.
   `deploy.sh` prefers `/etc/radon/env` when that path is a regular file.
@@ -260,11 +274,11 @@ starts, stops, or enables units.
 After promote, `deploy.sh` runs `radon-deploy-root refresh-control-plane`
 (unit-class diffs only: `services/*` at `0644 root:root`, one
 `daemon-reload`). It does not start, stop, or restart Gateway. Privileged
-diffs (`scripts/*`, `config/*`) fail closed unless root runs
-`refresh-control-plane-privileged`, which is not in sudoers. The SHA
-that adds the `refresh-control-plane` sudoers verb still needs one
-`bootstrap-control-plane.sh`. After that verb is installed, a unit-only
-push does not need root SSH.
+diffs (`scripts/*`, `config/*`) fail closed unless the installed sudoers
+grants `refresh-control-plane-privileged`; then preflight warns and the
+deploy applies the hashed privileged refresh. The SHA that *adds* that
+sudoers verb still needs one `bootstrap-control-plane.sh`. After that
+verb is installed, helper/sudoers/polkit edits deploy without root SSH.
 
 The drift audit runs from `/home/radon/radon/cloud` and compares live Caddy,
 Compose, systemd, polkit, sudoers, and installed helpers with this source. It

@@ -21,6 +21,114 @@
 
 ---
 
+# Task: Execute CI and production deploy acceleration (2026-08-29)
+
+## Objective
+
+- Implement the approved acceleration plan while preserving gate coverage, the 40-second production stability window, exact-SHA deployment, and the non-canceling post-teardown boundary.
+- Target web-only push-to-production p50 at or below 4:45 and Python-bearing p50 at or below 5:15.
+
+## Dependency graph
+
+- E1 depends_on: [] - Pin current workflow safety and partition contracts with failing tests where behavior changes
+- E2 depends_on: [E1] - Replace production-length weekend-wrapper waits with test-only bounded deadlines; keep real subprocess and process-group assertions
+- E3 depends_on: [E1] - Separate cross-tree contract tests from broad Python/cloud path ownership without weakening fail-closed handling
+- E4 depends_on: [E1] - Add Buildx GHA caches, stable Docker layer ordering, and one-pass SHA/latest image publication
+- E5 depends_on: [E2, E3, E4] - Integrate balanced CI shards, duration telemetry, exact-image fan-in, and gated prepull into the workflow DAG
+- E6 depends_on: [E4, E5] - Pull exact Python/node images concurrently with prestage and require both locally before teardown; remove `latest` fallback
+- E7 depends_on: [E5, E6] - Reuse one SHA/checksummed production Next artifact where provenance and output-trace checks stay equivalent
+- E8 depends_on: [E2, E3, E4, E5, E6, E7] - Run focused regressions, full project suites, workflow/static checks, and review the final critical path
+- E9 depends_on: [E8] - Commit and push the verified implementation to main
+- E10 depends_on: [E9] - Observe the first successful CI and production deploy and identify any remaining measured bottlenecks
+- E11 depends_on: [E10] - Reduce exact-node-image publication latency without weakening cache correctness or exact-SHA provenance
+- E12 depends_on: [E10] - Reduce redundant host image-transfer and rollout work while preserving the 40-second stability window and rollback guarantees
+- E13 depends_on: [E11, E12] - Commit, push, and observe a successful production deploy with a material end-to-end gain versus run 33290751126
+
+## Checklist
+
+- [x] E1 Pin safety and partition contracts
+- [x] E2 Bound weekend-wrapper test deadlines
+- [x] E3 Isolate cross-tree contracts
+- [x] E4 Add image cache and stable layer ordering
+- [x] E5 Integrate workflow parallelism and telemetry
+- [x] E6 Gate concurrent exact-SHA prepull
+- [x] E7 Reuse the tested production artifact
+- [x] E8 Complete focused and full verification
+- [x] E9 Commit and push to main
+- [x] E10 Measure the first successful optimized deploy
+- [x] E11 Reduce node image publication latency
+- [x] E12 Reduce rollout transfer latency
+- [x] E13 Prove the final measured CI/deploy gain
+
+## Review
+
+- Weekend-wrapper focused regression fell from 171.15s to a bounded test-only path; the final combined CI contract suite passed 92 tests in 33.42s while production retained its 60s launch floor.
+- Web-only changes now run Vitest plus explicit cross-tree pytest contracts instead of the full Python/cloud gate; contract inventory and AST omission guards are pinned.
+- Exact SHA Python/node images build in parallel with isolated Buildx caches, pull concurrently, and are required locally before teardown; moving-tag runtime fallback was removed.
+- Prestaging and image prepull overlap. A duplicate host Next compile is skipped only after exact-image, rollback-artifact, matching-drop-in, and effective-systemd checks pass.
+- Commit gate: focused 322 passed / 5 skipped; cloud full 1,454 passed / 12 skipped; gitleaks scanned 2,380 commits with no findings; actionlint and shell syntax passed.
+- Full Vitest load timeouts all passed in isolation. Full monolithic Python retained unrelated Flex/scan baseline failures, while both changed timeout regressions passed under xdist; GitHub's isolated shards are the release gate.
+- Implementation commit `44683993` is on `main`. Run 33293579469 finished in 341s versus the 468s baseline and cut `scripts-rs` from 204s to 70s, but did not deploy because pytest still collected an explicitly expanded Caddy file despite `--ignore`; the follow-up removes that file before invoking pytest.
+- Follow-up commit `92278f6a` completed production successfully in run 33294190643, but total wall time was 472s, not an improvement over 468s. Measured bottlenecks were node image 283s, exact-image prepull 85s, and deploy 94s; test sharding itself is no longer the critical path.
+- The 283s node job spent 83s creating a 582MiB recursive-chown layer, then 51s exporting and 66s cache-uploading it. Runtime ownership is now limited to writable Next cache/data directories; test-only trees are excluded from image contexts. The smaller immutable image also reduces exact-image host transfer while the installed helper pulls Python and node concurrently.
+- Commit `2f46a166` completed production successfully in run 33294882038 in 231s, down 237s / 50.6% from run 33290751126. Node image publication fell from 283s to 93s, image export from 51s to 2.8s, cache export from 65.7s to 7s, and exact-image prepull from 85s to 16s; the 40-second stability gate remained intact.
+
+---
+
+# Task: CI and production deploy acceleration plan (2026-08-29)
+
+## Objective
+
+- Reduce push-to-production wall time from the observed ~8 minutes without weakening required gates, deployment safety, or rollback guarantees.
+- Produce an evidence-backed implementation sequence with owners, expected impact, risks, and acceptance checks.
+
+## Dependency graph
+
+- T1 depends_on: [] - Measure run 33290751126 job/step durations, queue time, and critical path
+- T2 depends_on: [] - Audit workflow DAG, change detection, caches, matrices, test sharding, and duplicated setup
+- T3 depends_on: [] - Audit deploy trigger, artifact/image flow, remote rollout, health checks, and serialized waits
+- T4 depends_on: [] - Validate proposed techniques against current GitHub Actions guidance
+- T5 depends_on: [T1, T2, T3, T4] - Rank changes by wall-time impact, effort, safety, and implementation dependency
+- T6 depends_on: [T5] - Publish and open the actionable browser brief; verify the rendered handoff
+
+## Checklist
+
+- [x] T1 Measure the referenced run and recent baseline
+- [x] T2 Audit CI workflow parallelism, caching, and sharding
+- [x] T3 Audit production deployment critical path
+- [x] T4 Verify current platform best practices
+- [x] T5 Write prioritized implementation plan and target SLA
+- [x] T6 Open and verify browser brief
+
+## Review
+
+- Run 33290751126 completed in 468s; runner queueing was only 1-4s.
+- Critical path: launch 11s, `scripts-rs` 204s, coverage barrier 22s, prestage 60s, deploy 170s.
+- Highest-impact work: bounded regression-test deadlines, isolated cross-tree contracts, and gated concurrent exact-SHA image prepull.
+- Phase-one target: web-only p50 at or below 4:45 while retaining the 40s stability window and non-canceling deploy boundary.
+- Published `docs/ci-deploy-acceleration-plan.html`; opened in the system browser and verified at 1440x900 and 393x852 with Playwright.
+
+---
+
+# Task: SPOF host-split Phase 0/0B/1-prep (2026-08-29)
+
+## Dependency graph
+
+- S1 depends_on: [] - Combined-host-safe code: parameterized Tailscale bind, auto-sync strays, cut PartOf, host role, privileged sudoers
+- S2 depends_on: [S1] - Focused cloud tests green
+- S3 depends_on: [S2] - PR. Operator runbook for backups, snapshot, bootstrap, second VM
+
+## Checklist
+
+- [x] S1 Code on `feat/spof-host-split`
+- [x] S2 Focused tests (333 passed / 3 skipped cloud subset; visudo OK)
+- [ ] S3 PR + operator instructions
+
+## Review
+
+- Live Hetzner backups, new CX, helper uninstall, and 2FA are NOT in CI.
+---
+
 # Task: Resolve testing/2026-08-29 merge conflicts (2026-08-29)
 
 ## Dependency graph
@@ -3819,3 +3927,23 @@ Per /indicator swarm (spec: docs/indicators/skew.md). Slug/service `skew`, tab S
 - Local output-trace audit remains baseline-red because the development checkout contains 14.2 GB across 7,333 backup/archive files traced by the existing orders/place route; production compile itself passed.
 
 - PR: `#97` at commit `1e15b612`; replacement CI passed every build, security, Vitest, coverage, Python, perimeter, Playwright, Vercel preview, and app-image check.
+
+# DISPERSION indicator (2026-08-29)
+
+Spec: `docs/indicators/dispersion.md`. Pattern: `/indicator` swarm, single shared worktree, disjoint ownership.
+
+## Checklist
+
+- [x] T1 Research: IB `10 Y` TRADES daily bars reach 2016-08-31 for S&P seed, sector SPDRs, VIX (XLC from 2018-06-19); migration 0061 free; fixture captured.
+- [x] T2 Spec written and committed.
+- [x] T3 Red tests recorded failing on missing modules (34b038e4).
+- [x] T4 Implementers landed scoped commits: ingestion 94 pytest, api 259 vitest, ui 179 vitest.
+- [x] T5 Full gates: vitest 814 files / 8,228 passed; pytest 8,631 passed + 24 pre-existing Flex-embargo failures; tsc 0 errors post-rebase.
+- [x] T6 Backfill: IB 488/515 + Yahoo 27, 2,511 rows 2016-09-01..2026-08-28 verified in Turso; migration 61 applied.
+- [x] T7 Playwright mocked spec 3 passed; live screenshots dark+light with 12 stroked paths, 0 NaN, 0 cadence claims.
+- [ ] T8 Ship: branch pushed as ind/dispersion, PR open; merge deploys; then verify timer on the host.
+
+## Review
+
+- 2026-08-28 reading: stock +2.06, sector +2.02, VIX -0.32, BELOW THE SURFACE (gap +2.38), matching the Wellington chart.
+- IB daily bars DO throttle on a 515-symbol 10 Y sweep (20 error-162 retries); the incremental 1 M run is expected to be lighter, watch the first timer fire.

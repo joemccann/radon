@@ -9,13 +9,20 @@ import { radonFetch } from "@/lib/radonApi";
 import { backendQueryPath } from "@/lib/assistant/backend";
 import { authorize, search } from "@/lib/assistant/catalog";
 
+/** Mirrors RoutePrincipal["kind"]; absent = not an operator (fail closed). */
+export type PrincipalKind = "operator" | "demo" | "authenticated" | "test";
+
 export type DispatchPrincipal = {
   userId: string;
+  kind?: PrincipalKind;
   token?: string;
 };
 
 export type AssistantTurnBudget = {
-  spawnSuccesses: number;
+  /** read.spawn ATTEMPTS, not successes: a timed-out scan still ran (R-453). */
+  spawnAttempts: number;
+  /** Per-turn abort: client hung up or the wall clock fired. */
+  signal?: AbortSignal;
 };
 
 export type DispatchResult = {
@@ -35,8 +42,13 @@ const UNTRUSTED_EXCERPT_CLOSE = "[END UNTRUSTED RETRIEVED CONTENT]";
 
 const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
-export function createAssistantTurnBudget(): AssistantTurnBudget {
-  return { spawnSuccesses: 0 };
+export function createAssistantTurnBudget(signal?: AbortSignal): AssistantTurnBudget {
+  return { spawnAttempts: 0, ...(signal ? { signal } : {}) };
+}
+
+// The test seam principal passes operatorOnly in requireRouteAccess; mirror it.
+function isOperator(principal: DispatchPrincipal): boolean {
+  return principal.kind === "operator" || principal.kind === "test";
 }
 
 function neutralizeMarkup(text: string): string {
@@ -174,12 +186,14 @@ async function dispatchFastApi(
   query: Record<string, string> | undefined,
   body: unknown,
   token?: string,
+  signal?: AbortSignal,
 ): Promise<Record<string, unknown>> {
   const pathWithQuery = backendQueryPath(normalized, query);
   const opts: RequestInit & { timeout?: number; token?: string } = {
     method,
     timeout: READ_TIMEOUT_MS,
     token,
+    ...(signal ? { signal } : {}),
   };
   if (method !== "GET" && body !== undefined) {
     opts.headers = { "Content-Type": "application/json" };
@@ -204,11 +218,18 @@ export async function callApi(
   const authz = authorize(methodRaw, path);
   if (!authz.ok) return { ok: false, error: authz.error };
 
-  if (authz.capability === "read.spawn" && budget.spawnSuccesses >= MAX_SPAWN_PER_TURN) {
-    return {
-      ok: false,
-      error: `read.spawn cap: at most ${MAX_SPAWN_PER_TURN} successful spawns per turn.`,
-    };
+  if (authz.operation.operatorOnly && !isOperator(principal)) {
+    return { ok: false, error: "Operator-only API. This principal cannot run it." };
+  }
+
+  if (authz.capability === "read.spawn") {
+    if (budget.spawnAttempts >= MAX_SPAWN_PER_TURN) {
+      return {
+        ok: false,
+        error: `read.spawn cap: at most ${MAX_SPAWN_PER_TURN} spawn attempts per turn.`,
+      };
+    }
+    budget.spawnAttempts += 1;
   }
 
   let body: unknown;
@@ -228,8 +249,8 @@ export async function callApi(
             mergedQuery(path, input),
             body,
             principal.token,
+            budget.signal,
           );
-    if (authz.capability === "read.spawn") budget.spawnSuccesses += 1;
     return { ok: true, data: wrapped };
   } catch (error) {
     const message = error instanceof Error ? error.message : "call_api failed.";

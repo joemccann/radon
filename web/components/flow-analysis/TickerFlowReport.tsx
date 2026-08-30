@@ -25,7 +25,7 @@ type Props = {
 export default function TickerFlowReport({ ticker }: Props) {
   const { data, status, error, refresh } = useTickerFlowReport(ticker);
   const verdict = useMemo(() => deriveVerdict(data), [data]);
-  const isAnalyzing = status === "loading" || status === "scanning";
+  const isAnalyzing = status === "loading" || status === "scanning" || status === "pending";
   const { isMobile, hasMounted } = useViewport();
   const cachedAge = data && isServingCachedReport(status) ? flowReportAgeLabel(data) : null;
 
@@ -73,11 +73,14 @@ type Verdict = ReturnType<typeof classifyFlowSignal>;
 
 type FlowReportStatus = ReturnType<typeof useTickerFlowReport>["status"];
 
-/** The hook preserves the previous report on any failed scan, so these two
- * statuses render real figures that did not come from a completed scan. */
+/** The hook preserves the previous report on any failed scan, and holds it
+ * while a server-side scan is still running (R-464), so these statuses render
+ * real figures that did not come from a completed scan. */
 function isServingCachedReport(status: FlowReportStatus): boolean {
-  return status === "error" || status === "stale";
+  return status === "error" || status === "stale" || status === "pending";
 }
+
+const PENDING_NOTE = "Scan still running on the server. Figures update when it lands.";
 
 /* ── Mobile ticker flow report ── */
 
@@ -185,7 +188,7 @@ function MobileTickerFlowReport({
           )}
           {isAnalyzing && (
             <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--warn-text)" }}>
-              {status === "scanning" ? "ANALYZING" : "LOADING"}
+              {status === "loading" ? "LOADING" : "ANALYZING"}
             </span>
           )}
         </div>
@@ -210,7 +213,7 @@ function MobileTickerFlowReport({
           }}
         >
           <RefreshCw size={12} style={{ opacity: isAnalyzing ? 0.5 : 1 }} />
-          {status === "scanning" ? "Analyzing" : "Refresh"}
+          {status === "scanning" || status === "pending" ? "Analyzing" : "Refresh"}
         </button>
       </div>
 
@@ -224,6 +227,7 @@ function MobileTickerFlowReport({
         <div style={{ padding: "8px 16px" }}>
           <div className="alert-item bearish" role="alert" data-testid="flow-stale-age">
             Last good scan {cachedAge}. Every figure below is from that scan, not from live flow.
+            {status === "pending" ? ` ${PENDING_NOTE}` : ""}
           </div>
         </div>
       )}
@@ -442,7 +446,7 @@ function SignalBadge({
   const failed = status === "error" && !verdict;
   const showVerdict =
     !failed
-    && (status === "fresh" || status === "error" || status === "stale" || status === "scanning");
+    && (status === "fresh" || status === "error" || status === "stale" || status === "scanning" || status === "pending");
   // R-358: `showVerdict` deliberately includes `error`, and the hook preserves
   // prior data on POST failure by design — so on any failure that left a
   // cached verdict the hero rendered the direction label and rationale with
@@ -463,11 +467,11 @@ function SignalBadge({
           type="button"
           className="ticker-flow-refresh"
           onClick={onRefresh}
-          disabled={status === "loading" || status === "scanning"}
+          disabled={status === "loading" || status === "scanning" || status === "pending"}
           aria-label="Refresh flow report"
         >
           <RefreshCw size={12} />
-          <span>{status === "scanning" ? "Analyzing" : "Refresh"}</span>
+          <span>{status === "scanning" || status === "pending" ? "Analyzing" : "Refresh"}</span>
         </button>
       </div>
 
@@ -503,6 +507,11 @@ function SignalBadge({
               {flowReportErrorCopy(error)}
             </div>
           )}
+          {status === "pending" && (
+            <div className="ticker-flow-badge-stale-note" data-testid="flow-hero-pending">
+              {PENDING_NOTE}
+            </div>
+          )}
         </div>
         {showVerdict && verdict && (
           <div className="ticker-flow-badge-conviction">
@@ -535,9 +544,9 @@ function AnalyzingPanel({
   // `--days 20`, so "5 sessions" told the operator one sample size during the
   // scan and the footer told them another when it landed. R-357.
   const label =
-    status === "scanning"
-      ? `Sampling ${ticker} flow · ${lookbackDays} sessions`
-      : `Loading cached ${ticker} report`;
+    status === "loading"
+      ? `Loading cached ${ticker} report`
+      : `Sampling ${ticker} flow · ${lookbackDays} sessions`;
   return (
     <section className="section">
       <div className="section-body">

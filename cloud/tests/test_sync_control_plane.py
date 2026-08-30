@@ -21,6 +21,13 @@ import pathlib
 import re
 import shlex
 import subprocess
+import sys
+
+import yaml
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+
+from test_refresh_control_plane import API_UNIT, _run_preflight  # noqa: E402
 
 CLOUD_ROOT = pathlib.Path(__file__).resolve().parent.parent
 REPO_ROOT = CLOUD_ROOT.parent
@@ -181,7 +188,7 @@ class TestContracts:
         # Still no way for radon to hand root an arbitrary tree: the verb takes
         # no argument and reads through the GitHub main tip only.
         assert "sync-control-plane *" not in sudoers
-        assert "refresh-control-plane-privileged" not in sudoers
+        assert "sync-control-plane-privileged" not in sudoers
         body = function_body(helper, "sync_control_plane")
         assert "resolve_fetched_main_tip" in body
         assert 'archive --format=tar "$tip" cloud' in body
@@ -289,16 +296,16 @@ prepull_app_images {'f' * 40}
         main = function_body(deploy, "main")
         assert main.index("build_staged_release") < main.index('prepull_app_images "$requested_sha"') < main.index("restart_services")
 
-    def test_prepull_runs_the_exact_sudo_verb_and_never_fails_the_deploy(self, tmp_path):
+    def test_prepull_runs_the_exact_sudo_verb_and_fails_before_teardown(self, tmp_path):
         result, log = self._prepull(tmp_path, granted=True, pull_rc=1)
-        assert result.returncode == 0, result.stdout + result.stderr
+        assert result.returncode != 0, result.stdout + result.stderr
         assert "prepull failed" in result.stdout + result.stderr
         assert f"-n /usr/local/sbin/radon-app-runtime pull {'f' * 40}" in log.read_text(encoding="utf-8").splitlines()
 
-    def test_prepull_skips_when_the_verb_is_not_granted(self, tmp_path):
+    def test_prepull_fails_before_teardown_when_the_verb_is_not_granted(self, tmp_path):
         result, log = self._prepull(tmp_path, granted=False)
-        assert result.returncode == 0
-        assert "not granted yet" in result.stdout + result.stderr
+        assert result.returncode != 0
+        assert "not granted" in result.stdout + result.stderr
         assert f"-n /usr/local/sbin/radon-app-runtime pull {'f' * 40}" not in log.read_text(encoding="utf-8")
 
     def test_prestage_skips_instead_of_failing_when_control_plane_is_not_ready(self, tmp_path):
@@ -360,6 +367,10 @@ exit "${{codes[$n]:-0}}"
     return sudo, log
 
 
+def _rejected(tmp_path: pathlib.Path) -> pathlib.Path:
+    return tmp_path / "control-plane-rejected"
+
+
 def _run_sync_script(tmp_path: pathlib.Path, sudo: pathlib.Path) -> subprocess.CompletedProcess[str]:
     fake_sleep = tmp_path / "sleep"
     _write_executable(fake_sleep, f"#!/bin/bash\nprintf 'sleep %s\\n' \"$1\" >> {shlex.quote(str(tmp_path / 'sudo.log'))}\n")
@@ -371,6 +382,7 @@ def _run_sync_script(tmp_path: pathlib.Path, sudo: pathlib.Path) -> subprocess.C
             "RADON_SYNC_SLEEP": str(fake_sleep),
             "RADON_SYNC_RETRIES": "3",
             "RADON_SYNC_RETRY_WAIT": "7",
+            "RADON_CONTROL_PLANE_REJECTED": str(_rejected(tmp_path)),
         },
         capture_output=True,
         text=True,
@@ -407,11 +419,116 @@ class TestRadonSideScript:
         assert text.count(f"-n {self.HELPER} sync-control-plane") == 3
         assert text.count("sleep 7") == 2
 
-    def test_any_other_failure_defers_to_deploy_preflight_without_retry(self, tmp_path):
+    def test_any_other_failure_is_propagated_without_retry(self, tmp_path):
+        # Used to exit 0 and "defer to deploy.sh preflight", whose differs arm
+        # then reinstalled the bundle bootstrap had just REJECTED, with the app
+        # tier stopped, through a refresh path with fewer validators. R-437.
         sudo, log = _fake_sudo(tmp_path, granted=True, exits=[66])
         result = _run_sync_script(tmp_path, sudo)
-        assert result.returncode == 0
+        assert result.returncode == 66
         assert "exit 66" in result.stderr
         text = log.read_text(encoding="utf-8")
         assert text.count(f"-n {self.HELPER} sync-control-plane") == 1
         assert "sleep" not in text
+        assert _rejected(tmp_path).read_text(encoding="utf-8").strip() == "66"
+
+    def test_bootstrap_rejection_and_root_deadline_are_hard_failures(self, tmp_path):
+        # 1: bootstrap `die` (bash -n, visudo, node --check, systemd-analyze).
+        # 124: the helper TERM/KILLed an overrunning bootstrap (R-440).
+        for code in (1, 124):
+            sub = tmp_path / f"exit-{code}"
+            sub.mkdir()
+            sudo, log = _fake_sudo(sub, granted=True, exits=[code])
+            result = _run_sync_script(sub, sudo)
+            assert result.returncode == code, result.stderr
+            assert f"exit {code}" in result.stderr
+            assert log.read_text(encoding="utf-8").count(f"-n {self.HELPER} sync-control-plane") == 1
+            assert _rejected(sub).read_text(encoding="utf-8").strip() == str(code)
+
+    def test_success_clears_a_previous_rejection(self, tmp_path):
+        _rejected(tmp_path).write_text("66\n", encoding="utf-8")
+        sudo, _ = _fake_sudo(tmp_path, granted=True, exits=[0])
+        result = _run_sync_script(tmp_path, sudo)
+        assert result.returncode == 0, result.stderr
+        assert not _rejected(tmp_path).exists()
+
+    def test_exhausted_lock_retries_still_hand_off_and_keep_a_previous_rejection(self, tmp_path):
+        # The 75 path is unchanged: deploy.sh takes the lock itself and recovers
+        # a pending transition. A rejection recorded earlier is not cleared by
+        # a sync that never ran bootstrap.
+        _rejected(tmp_path).write_text("1\n", encoding="utf-8")
+        sudo, log = _fake_sudo(tmp_path, granted=True, exits=[75, 75, 75])
+        result = _run_sync_script(tmp_path, sudo)
+        assert result.returncode == 0, result.stderr
+        assert "still blocked" in result.stderr
+        assert log.read_text(encoding="utf-8").count(f"-n {self.HELPER} sync-control-plane") == 3
+        assert _rejected(tmp_path).read_text(encoding="utf-8").strip() == "1"
+
+    def test_not_granted_writes_no_rejection(self, tmp_path):
+        sudo, _ = _fake_sudo(tmp_path, granted=False, exits=[0])
+        result = _run_sync_script(tmp_path, sudo)
+        assert result.returncode == 0
+        assert not _rejected(tmp_path).exists()
+
+
+class TestRejectedBundleNeverReachesTeardown:
+    """R-437: a bundle bootstrap rejected must abort deploy.sh's preflight, not
+    be re-applied "after promote" by refresh-control-plane(-privileged) while
+    stop_services_for_transition has the app tier down."""
+
+    def test_rejected_bundle_aborts_preflight_before_any_teardown(self, tmp_path):
+        sudo, _ = _fake_sudo(tmp_path, granted=True, exits=[1])
+        sync = _run_sync_script(tmp_path, sudo)
+        assert sync.returncode == 1, sync.stderr
+        rejected = _rejected(tmp_path)
+        assert rejected.is_file()
+
+        result = _run_preflight(
+            tmp_path, API_UNIT, extra_env={"RADON_CONTROL_PLANE_REJECTED": str(rejected)}
+        )
+        combined = result.stdout + result.stderr
+        assert result.returncode != 0, combined
+        assert "rejected" in combined
+        assert API_UNIT in combined
+        assert "will apply it after promote" not in combined
+
+        deploy = DEPLOY.read_text(encoding="utf-8")
+        main = function_body(deploy, "main")
+        assert main.index("preflight_control_plane") < main.index("restart_services")
+        assert "stop_services_for_transition" not in main
+        assert "stop_services_for_transition" in function_body(deploy, "restart_services")
+
+    def test_without_a_rejection_the_services_arm_still_defers_to_refresh(self, tmp_path):
+        result = _run_preflight(
+            tmp_path, API_UNIT, extra_env={"RADON_CONTROL_PLANE_REJECTED": str(tmp_path / "absent")}
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    def test_deploy_job_does_not_tolerate_a_sync_failure(self):
+        ci = CI.read_text(encoding="utf-8")
+        deploy_job = ci.split("\n  deploy:\n", 1)[1]
+        assert "set -euo pipefail" in deploy_job.split("sync-control-plane.sh", 1)[0]
+        sync_lines = [
+            line.strip() for line in deploy_job.splitlines()
+            if line.strip().startswith("bash ") and "sync-control-plane.sh" in line
+        ]
+        assert sync_lines == ['bash "$RUNNER/cloud/scripts/sync-control-plane.sh"']
+
+
+class TestLegacyRunnerRefusal:
+    """R-440: a KILLed bootstrap (helper deadline, no trap runs) leaves the
+    bundle half-installed with readiness withdrawn. The next deploy job must
+    not route a host whose app units already carry the container drop-ins to
+    the legacy runner, which knows nothing about them."""
+
+    def test_deploy_job_refuses_the_legacy_runner_on_a_bootstrapped_host(self):
+        workflow = yaml.safe_load(CI.read_text(encoding="utf-8"))
+        script = workflow["jobs"]["deploy"]["steps"][0]["with"]["script"]
+        marker_check = script.index(
+            'if [[ ! -e "$RADON_CONTROL_PLANE_READY" && ! -L "$RADON_CONTROL_PLANE_READY" ]]; then'
+        )
+        legacy_call = script.index("deploy_with_legacy_runner\n", marker_check)
+        guard = script[marker_check:legacy_call]
+        assert "compgen -G '/etc/systemd/system/radon-*.service.d/runtime-container.conf'" in guard
+        assert "exit 78" in guard
+        assert "bootstrap-control-plane.sh" in guard

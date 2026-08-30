@@ -133,6 +133,7 @@ if [[ "${RADON_DEPLOY_HELPER_TEST_MODE:-0}" == "1" ]]; then
   readonly CLOUD_SOURCE="${RADON_TEST_CLOUD_SOURCE:-${RADON_TEST_CLOUD_ROOT:-}}"
   readonly SHA256SUM="${RADON_TEST_SHA256SUM:-$(command -v sha256sum)}"
   readonly VISUDO="${RADON_TEST_VISUDO:-$(command -v visudo)}"
+  readonly NODE="${RADON_TEST_NODE:-$(command -v node || true)}"
   test_replica_prefix="${RADON_TEST_REPLICA_PREFIX:?test replica prefix is required}"
   readonly REPLICA_FILES=(
     "$test_replica_prefix"
@@ -163,6 +164,7 @@ else
   readonly CLOUD_SOURCE=/home/radon/radon/cloud
   readonly SHA256SUM=/usr/bin/sha256sum
   readonly VISUDO=/usr/sbin/visudo
+  readonly NODE=/usr/bin/node
   readonly ROOT_MUTATION_ACTION_TIMEOUT=180
   readonly ROOT_VERIFY_ACTION_TIMEOUT=30
   readonly ROOT_COMMIT_ACTION_TIMEOUT=30
@@ -1240,9 +1242,35 @@ refresh_install_file() {
         return 73
       fi
       ;;
-    */radon-deploy-root|*/radon-ib-gateway-control|*/usr/local/bin/radon)
+    */radon-deploy-root|*/radon-ib-gateway-control|*/usr/local/bin/radon|*/radon-app-runtime)
       if ! bash -n "$candidate"; then
         echo "shell syntax validation failed: ${dest}" >&2
+        "$RM" -f "$candidate"
+        return 73
+      fi
+      ;;
+    # The arms below mirror bootstrap-control-plane.sh's KINDS table. This
+    # path runs on every deploy with the app tier STOPPED and used to install
+    # the app runtime, polkit rules, python helpers and control-plane units
+    # unvalidated; test_refresh_control_plane pins one arm per target. R-437.
+    */polkit-1/rules.d/*.rules)
+      if [[ -z "$NODE" || ! -x "$NODE" ]] || ! "$NODE" --check < "$candidate"; then
+        echo "polkit syntax validation failed: ${dest}" >&2
+        "$RM" -f "$candidate"
+        return 73
+      fi
+      ;;
+    */lib/radon/*.py)
+      # Parse only; importing would execute candidate code as root.
+      if ! "$SESSION_PYTHON" -c 'import ast, sys; ast.parse(open(sys.argv[1], encoding="utf-8").read(), sys.argv[1])' "$candidate"; then
+        echo "python syntax validation failed: ${dest}" >&2
+        "$RM" -f "$candidate"
+        return 73
+      fi
+      ;;
+    */systemd/system/radon-*.service|*/systemd/system/radon-*.timer)
+      if ! unit_candidate_verifies "$candidate" "$(basename -- "$dest")"; then
+        echo "systemd unit validation failed: ${dest}" >&2
         "$RM" -f "$candidate"
         return 73
       fi

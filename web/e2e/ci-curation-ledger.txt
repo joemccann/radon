@@ -47,9 +47,11 @@ crox-bull-call-stale-price.spec.ts
 cta-page.spec.ts
 cta-stale-banner.spec.ts
 curve-tab.spec.ts
+dashboard-feed-tabs.spec.ts
 dashboard-panel-chrome.spec.ts
 dashboard-vol-cone-hero.spec.ts
 day-move-ib-daily-pnl.spec.ts
+dispersion-tab.spec.ts
 divyield-tab.spec.ts
 dollar-delta-leverage.spec.ts
 fill-toast.spec.ts

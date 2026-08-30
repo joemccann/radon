@@ -1,5 +1,14 @@
 # Lessons
 
+## 2026-08-29 — Botocore Config retries are not application-level retry
+
+- Page `29c8a560`: `radon-db-backup` dumped 100 tables then paged P1 on
+  `ConnectionClosedError` of a 576 MB B2 PUT. `_s3_client` already had
+  `retries max_attempts=3 mode=standard`.
+- Media-backup (page `02ccb70e`) treated those botocore bounds as enough.
+  An injected client and a spent-retry multipart PUT still fail the
+  oneshot. Wrap LIST/PUT/HEAD/DELETE in `call_s3_with_retry`.
+
 ## 2026-08-29 — Container newsfeed needs the host Playwright revision
 
 - Page `3e952746`: `radon-newsfeed` crash-looped after the container
@@ -698,3 +707,20 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 - Test a background helper at the wire while its parent is still alive: the notify proxy passed 34 argv-level tests and died in 250ms in production because it was spawned inside `$(...)`.
 - Before trusting a deploy on a busy day, check `df -h /` and that the pruner timer is `enabled`: a 4.8GB image pull per SHA on a 75G disk took production down with every gate failing at once, and `bootstrap` installs control-plane timers but never enables them.
 - Other sessions were merging PRs and running root bootstraps on the same VPS at the same time (PR #151 reverted the same drop-ins I was fixing). Re-read `origin/main` and the installed manifest before every privileged step; never assume the tip is yours.
+
+## 2026-08-29 - Done/Next format applies to background-job progress lines too
+
+- Second correction in one day: a background-job session narrated every step in prose ("Waiting on the ingestion implementer…", "Full vitest green: …") because the harness asks for narration. The harness "narrate" instruction sets WHEN to speak, not the SHAPE: every emitted message is still `**Done**` / `**Next**` bullets under 100 words. Fold the pre-tool line into a `**Done**` bullet or omit it.
+## 2026-08-29 - Every user-visible message is Done/Next, including mid-task and pre-tool-call lines
+
+- The format rule was followed on closing messages and dropped on every other turn: one-line narration before a tool call ("Pre-existing duplicate keys... bypassing"), progress lines after arming a monitor ("Checks running on #180; I'll merge when green"), and status replies to `Status` prompts all shipped as prose. The user reads ALL of them as output.
+- The rule at `CLAUDE.md` §Response Format says "Mid-task progress messages follow the same shape". A message that ends a turn while work continues in the background is a closing message. Use `**Done** / **Next**` there too; when nothing changed, one bullet.
+- The harness "say in a line what you're about to do" instruction does not override the repo format: fold that line into a single bullet or emit nothing and let the tool call's description carry it.
+
+## 2026-08-29 - Never round-trip a diff through `git diff > file` under the rtk hook
+
+- `git diff HEAD -- f > patch` was rewritten to `rtk git diff`, which emits a token-compacted summary, not a patch. The follow-up `git checkout HEAD -- f` then discarded the only copy of the edit. Use `rtk proxy git diff` (or `git stash`) when the bytes matter, and never checkout-revert a file before confirming the saved patch applies (`git apply --check`).
+
+## 2026-08-29 - CI acceleration requires a successful production measurement
+
+- Do not stop at local green checks or a faster failed workflow. Commit and push the implementation, follow the real run through every required gate and production deploy, compare end-to-end wall time with the named baseline, and iterate on any release-only failure until the measured deploy is both green and materially faster.

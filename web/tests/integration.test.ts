@@ -158,7 +158,8 @@ test("assistant API route returns mock response when mock mode is enabled", asyn
     });
 
     const response = await mod.POST(req);
-    const body = await response.json();
+    const { assistantDonePayload } = await import("./assistantStream");
+    const body = await assistantDonePayload<{ content: string; model: string }>(response);
 
     expect(response.status).toBe(200);
     expect(typeof body.content).toBe("string");

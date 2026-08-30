@@ -78,6 +78,14 @@ def _stub_bin(tmp_path: Path, *, claude_body: str) -> tuple[Path, Path, Path]:
     return bin_dir, gh_log, py_log
 
 
+def _pid_exists(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
 # --- (a) R-384: a signalled cycle reports its own death ----------------------
 
 
@@ -169,11 +177,32 @@ class TestTheCapIsEnforceable:
         assert re.search(r"^\s*wait \"\$ROUND_PID\"", body, re.M), body
 
     @pytest.mark.parametrize("name", sorted(LOOPS))
+    def test_the_short_deadline_override_is_test_only_and_bounded(self, name):
+        body = _uncommented(LOOPS[name])
+        assert "RADON_WEEKEND_TEST_ROUND_TIMEOUT_SECS" in body, body
+        assert "PYTEST_CURRENT_TEST" in body, (
+            "a short deadline must fail closed outside pytest so production "
+            "cannot silently weaken its phase cap"
+        )
+        assert re.search(r'RADON_WEEKEND_TEST_ROUND_TIMEOUT_SECS.*1\|2\|5', body), body
+        assert "if [[ $remain -le 60 ]]" in body, (
+            "production must retain at least a full minute before launching a round"
+        )
+
+    @pytest.mark.parametrize("name", sorted(LOOPS))
     def test_a_claude_that_ignores_term_still_ends_the_round(self, name, tmp_path):
         repo = _runner_clone(tmp_path, name)
+        pids_file = tmp_path / "claude-pids"
         bin_dir, gh_log, _py = _stub_bin(
             tmp_path,
-            claude_body="#!/bin/sh\ntrap '' TERM\nsleep 600\n",
+            claude_body=(
+                "#!/bin/sh\n"
+                "trap '' TERM\n"
+                "sleep 600 &\n"
+                "child=$!\n"
+                f'printf "%s %s\\n" "$$" "$child" > "{pids_file}"\n'
+                'wait "$child"\n'
+            ),
         )
         start = time.monotonic()
         proc = subprocess.run(
@@ -183,16 +212,68 @@ class TestTheCapIsEnforceable:
                 "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
                 "RADON_WEEKEND_REPO": str(repo),
                 "RADON_WEEKEND_AUDIT_CAP_SECS": "70",
-                "RADON_WEEKEND_KILL_AFTER_SECS": "5",
+                "RADON_WEEKEND_KILL_AFTER_SECS": "1",
+                # One second is enough in isolation but can expire before the
+                # stub records its process tree under the full xdist load.
+                # Five remains bounded and cuts more than two minutes from the
+                # old production-length regression without scheduler flake.
+                "RADON_WEEKEND_TEST_ROUND_TIMEOUT_SECS": "5",
             },
             capture_output=True,
             text=True,
-            timeout=180,
+            timeout=30,
         )
         elapsed = time.monotonic() - start
-        assert elapsed < 150, f"the cap did not bite: {elapsed}s"
+        assert 1 <= elapsed < 20, f"the test-only deadline did not bite: {elapsed}s"
         calls = gh_log.read_text(encoding="utf-8") if gh_log.exists() else ""
         assert "TIMEOUT" in calls, (calls, proc.stdout, proc.stderr)
+        assert not (repo / ".weekend-runner.lock").exists(), "the lock was not released"
+
+        assert pids_file.exists(), (proc.stdout, proc.stderr)
+        pids = [int(value) for value in pids_file.read_text(encoding="utf-8").split()]
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if all(not _pid_exists(pid) for pid in pids):
+                break
+            time.sleep(0.05)
+        assert all(not _pid_exists(pid) for pid in pids), (
+            "timeout left the ignored-SIGTERM claude process or its child alive",
+            pids,
+        )
+
+    @pytest.mark.parametrize("name", sorted(LOOPS))
+    def test_short_deadline_override_is_refused_outside_pytest(self, name, tmp_path):
+        repo = _runner_clone(tmp_path, name)
+        started = tmp_path / "claude-started"
+        bin_dir, gh_log, py_log = _stub_bin(
+            tmp_path,
+            claude_body=f"#!/bin/sh\ntouch {started}\nexit 0\n",
+        )
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if key != "PYTEST_CURRENT_TEST"
+        }
+        proc = subprocess.run(
+            [BASH, str(LOOPS[name]), "audit"],
+            env={
+                **env,
+                "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
+                "RADON_WEEKEND_REPO": str(repo),
+                "RADON_WEEKEND_TEST_ROUND_TIMEOUT_SECS": "1",
+            },
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert proc.returncode == 2, (proc.stdout, proc.stderr)
+        assert "test-only" in proc.stderr, proc.stderr
+        assert not started.exists(), "the agent launched despite a refused test override"
+        assert not (repo / ".weekend-runner.lock").exists(), "the lock was not released"
+        calls = gh_log.read_text(encoding="utf-8") if gh_log.exists() else ""
+        assert "REFUSED" in calls, f"the fail-closed refusal was not reported: {calls!r}"
+        pages = py_log.read_text(encoding="utf-8") if py_log.exists() else ""
+        assert "weekend_notify.py" in pages, f"the fail-closed refusal did not page: {pages!r}"
 
 
 # --- (c) R-385: the continuation re-ground cannot end the run silently -------

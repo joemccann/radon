@@ -67,10 +67,8 @@ export default function ChatLauncher({ activeSection, portfolio, prices }: ChatL
         aria-label="Dismiss chat"
       />
       <div className="chat-launcher__panel">
-        <div className="chat-launcher__head">
-          <span className="chat-launcher__kicker">Radon Chat</span>
-          <span className="chat-launcher__hint">Esc to dismiss</span>
-        </div>
+        {/* No header bar (design-lab Variant A): the composer rail carries the
+            esc affordance, so the overlay is the conversation and nothing else. */}
         <ChatPanel
           activeSection={activeSection}
           portfolio={portfolio}

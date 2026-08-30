@@ -96,6 +96,9 @@ readonly SERVICE_FILES=(
   radon-demo-mirror.timer
   radon-margin-debt.service
   radon-margin-debt.timer
+  radon-mktnews.service
+  radon-model-catalog.service
+  radon-model-catalog.timer
   radon-oi-changes.service
   radon-oi-changes.timer
   radon-knowledge.service
@@ -150,6 +153,8 @@ readonly SERVICE_FILES=(
   radon-hhlev.timer
   radon-vixts.service
   radon-vixts.timer
+  radon-dispersion.service
+  radon-dispersion.timer
 )
 
 

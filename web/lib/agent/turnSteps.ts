@@ -28,8 +28,6 @@ const TOOL_LABELS: Record<string, string> = {
   find_prior_evals: "Find prior evaluations",
   get_realized_pnl: "Read realized P&L",
   query_journal: "Query trade journal",
-  list_apis: "List APIs",
-  call_api: "Call API",
   place_order: "Stage order proposal",
   list_apis: "Search API catalog",
   call_api: "Call Radon API",

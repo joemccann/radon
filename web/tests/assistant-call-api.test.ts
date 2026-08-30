@@ -45,7 +45,7 @@ async function execute(
   name: string,
   input: Record<string, unknown>,
   principal = PRINCIPAL,
-  budget?: { spawnSuccesses: number },
+  budget?: { spawnAttempts: number },
 ) {
   const { executeTool } = await import("@/lib/assistant/tools");
   return executeTool(name, input, principal, budget);
@@ -54,7 +54,7 @@ async function execute(
 async function callApi(
   input: Record<string, unknown>,
   principal = PRINCIPAL,
-  budget?: { spawnSuccesses: number },
+  budget?: { spawnAttempts: number },
 ) {
   return execute("call_api", input, principal, budget);
 }

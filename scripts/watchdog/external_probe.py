@@ -41,7 +41,13 @@ DEPLOY_MARKER_GRACE_SECONDS = 60
 # 900s deploy budget, covering stacked deploys.
 TRANSITION_JOURNAL_STRANDED_AFTER_SECONDS = 3600
 
-_EDGE_5XX_REASON = re.compile(r"(?:ping|status)_http_5\d\d$")
+# Deploy restart collateral as seen from off-box: raw 5xx through Caddy, or
+# the never-502 health floor that rewrites those into HTTP 200
+# {reachable:false, observer:caddy} (page 1b0b049c). Generic *_unreachable
+# (runner timeout, DNS) is NOT collateral — a deploy never stops Caddy.
+_DEPLOY_COLLATERAL_REASON = re.compile(
+    r"(?:(?:ping|status)_http_5\d\d|status_unreachable:caddy)$"
+)
 
 
 def _read_local_aggregate(timeout: float = FETCH_TIMEOUT_SECONDS) -> dict | None:
@@ -61,7 +67,7 @@ def _read_local_aggregate(timeout: float = FETCH_TIMEOUT_SECONDS) -> dict | None
 
 
 def _local_aggregate_is_healthy(timeout: float = FETCH_TIMEOUT_SECONDS) -> bool:
-    """True only for schema-v2 ``up``. Used by deploy-window 5xx suppression."""
+    """True only for schema-v2 ``up`` (strict). Prefer serving-path-ok for 5xx."""
     payload = _read_local_aggregate(timeout)
     if payload is None:
         return False
@@ -70,6 +76,26 @@ def _local_aggregate_is_healthy(timeout: float = FETCH_TIMEOUT_SECONDS) -> bool:
         and payload.get("ok") is True
         and str(payload.get("overall_state") or "").lower() == "up"
     )
+
+
+def _local_aggregate_serving_path_ok(timeout: float = FETCH_TIMEOUT_SECONDS) -> bool:
+    """Serving path up, including dependency-only ``degraded``.
+
+    Deploy-window 5xx suppression used to require ``overall_state=up``. On
+    weekends the broker is clean-exited so the aggregate is ``degraded``; every
+    deploy then re-paged ``status_http_502`` as P1 (2026-08-29 16:49Z, page
+    d98c3364) even though api/relay/nextjs and ``/sign-in`` stayed up.
+    """
+    payload = _read_local_aggregate(timeout)
+    if payload is None or payload.get("schema_version") != 2:
+        return False
+    state = str(payload.get("overall_state") or "").lower()
+    ok = payload.get("ok")
+    if state == "up":
+        return ok is True
+    if state == "degraded":
+        return ok is False and _degradation_is_dependency_only(payload)
+    return False
 
 
 def _aggregate_is_newer_than(payload: dict, sampled_at: datetime | None) -> bool:
@@ -250,22 +276,25 @@ def check_external_probe(*, now: datetime | None = None) -> CheckOutcome:
             now=checked_at,
         )
 
-    # A validated edge 5xx whose sample was taken while a deploy was cycling
-    # the app tier is restart collateral, not an outage (2026-08-09: the
-    # 17:43Z probe ran entirely inside the Deploy-to-VPS window and paged P1).
-    # Scope is deliberately narrow: 5xx-through-Caddy reasons only — transport
-    # failures (*_unreachable) can't be produced by a deploy, which never
-    # stops Caddy — and the local aggregate must be healthy (fail closed).
-    # The next off-box cycle still independently proves perimeter recovery.
+    # A validated edge 5xx (or the Caddy never-502 rewrite of that 5xx)
+    # whose sample was taken while a deploy was cycling the app tier is
+    # restart collateral, not an outage (2026-08-09: the 17:43Z probe ran
+    # entirely inside the Deploy-to-VPS window and paged P1; 2026-08-29
+    # 23:05Z page 1b0b049c: the floor turned the same restart into
+    # aggregate_invalid). Scope is narrow: 5xx-through-Caddy plus the
+    # matching caddy-observer body. Runner-side *_unreachable still pages.
+    # Dependency-only degraded (weekend IB clean-exit, sidecar flap) still
+    # counts: requiring overall_state=up re-paged d98c3364 on every weekend
+    # deploy. The next off-box cycle still independently proves perimeter recovery.
     if state == reader.VERDICT_DOWN:
         down_reason = str(verdict.get("reason") or "")
         age = verdict.get("age_seconds")
         sample_time = checked_at - timedelta(seconds=float(age)) if age is not None else None
         if (
-            _EDGE_5XX_REASON.fullmatch(down_reason)
+            _DEPLOY_COLLATERAL_REASON.fullmatch(down_reason)
             and sample_time is not None
             and _sampled_during_deploy_window(sample_time, checked_at)
-            and _local_aggregate_is_healthy()
+            and _local_aggregate_serving_path_ok()
         ):
             return CheckOutcome(
                 service=SERVICE,
