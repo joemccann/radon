@@ -79,6 +79,9 @@ export function useHeadlines() {
       if (stopped) return;
       try {
         const url = await buildHeadlinesWebSocketUrl(getToken);
+        // R-460: cleanup can run during the await above; a socket built after
+        // it would never be closed (its onclose returns on `stopped`).
+        if (stopped) return;
         if (headlinesUrlLeaksUpstream(url)) {
           setStatus("down");
           return;

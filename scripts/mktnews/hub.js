@@ -28,6 +28,14 @@ export const MAX_CLIENTS = 32;
 export const FAILURE_THRESHOLD = 3;
 export const SILENCE_MS = 5 * 60_000;
 const HEALTH_TICK_MS = 60_000;
+// R-460: a client that stops draining keeps its socket OPEN while every
+// headline queues on the hub heap, and a peer that vanished behind NAT pins a
+// slot until the kernel's retransmit timeout. Clients are pinged every
+// PING_INTERVAL_MS and dropped on the next sweep if no pong came back, and a
+// send that would push a client's backlog past MAX_BUFFERED_BYTES terminates
+// it instead (a close handshake would queue behind the same backlog).
+export const PING_INTERVAL_MS = 30_000;
+export const MAX_BUFFERED_BYTES = 1_048_576;
 const TICKET_VALIDATION_TIMEOUT_MS = 3000;
 const LOOPBACK_LISTEN_HOSTS = new Set(["127.0.0.1", "::1"]);
 
@@ -62,10 +70,12 @@ function envelopeLeaksUpstream(payload) {
   return containsUpstreamHost(payload);
 }
 
-function sendJson(socket, payload) {
-  if (socket.readyState !== 1) return;
-  if (envelopeLeaksUpstream(payload)) return;
+function sendJson(socket, payload, maxBufferedBytes = MAX_BUFFERED_BYTES) {
+  if (socket.readyState !== 1) return true;
+  if (envelopeLeaksUpstream(payload)) return true;
+  if (socket.bufferedAmount >= maxBufferedBytes) return false;
   socket.send(JSON.stringify(payload));
+  return true;
 }
 
 export function createHeadlinesHub({
@@ -87,27 +97,51 @@ export function createHeadlinesHub({
   failureThreshold = FAILURE_THRESHOLD,
   silenceMs = SILENCE_MS,
   healthTickMs = HEALTH_TICK_MS,
+  pingIntervalMs = PING_INTERVAL_MS,
+  maxBufferedBytes = MAX_BUFFERED_BYTES,
 } = {}) {
   const host = resolveHubListenHost(listenHost, security.bindHost);
   const ring = [];
   const clients = new Set();
+  const alive = new WeakSet();
   let upstream = null;
   let closed = false;
   let healthTimer = null;
+  let pingTimer = null;
+  let pendingUpgrades = 0;
   let lastFrameAt = null;
   let startedAt = null;
   let consecutiveFailures = 0;
   let lastOkWriteAt = 0;
 
-  function ingest(parsed) {
+  function dropClient(client, reason) {
+    clients.delete(client);
+    log(`[mktnews] dropping client: ${reason}`);
+    try {
+      client.terminate();
+    } catch {
+      // already gone
+    }
+  }
+
+  function deliver(client, payload) {
+    if (!sendJson(client, payload, maxBufferedBytes)) {
+      dropClient(client, `${client.bufferedAmount} buffered bytes >= ${maxBufferedBytes}`);
+    }
+  }
+
+  // R-462: a seed row the store already restored is re-pushed (same id) but
+  // not re-persisted; only rows genuinely missing from the store hit Turso.
+  function ingest(parsed, { seed = false } = {}) {
     if (frameByteLength(parsed) > maxFrameBytes) return false;
     const item = toHeadline(parsed);
     if (!item) return false;
     const { content: _content, ...meta } = item;
     if (containsUpstreamHost(meta)) return false;
+    const restored = seed && ring.some((row) => row.id === item.id);
     pushToRing(item);
-    persist(item);
-    for (const client of clients) sendJson(client, { type: "headline", item });
+    if (!restored) persist(item);
+    for (const client of clients) deliver(client, { type: "headline", item });
     return true;
   }
 
@@ -145,7 +179,22 @@ export function createHeadlinesHub({
   }
 
   function broadcastStatus(state) {
-    for (const client of clients) sendJson(client, { type: "status", state });
+    for (const client of clients) deliver(client, { type: "status", state });
+  }
+
+  function sweepClients() {
+    for (const client of clients) {
+      if (!alive.has(client)) {
+        dropClient(client, `no pong within ${pingIntervalMs}ms`);
+        continue;
+      }
+      alive.delete(client);
+      try {
+        client.ping();
+      } catch {
+        dropClient(client, "ping failed");
+      }
+    }
   }
 
   const httpServer = http.createServer((_req, res) => {
@@ -161,12 +210,22 @@ export function createHeadlinesHub({
       socket.destroy();
       return;
     }
-    if (clients.size >= maxClients) {
+    // R-461: count upgrades still awaiting ticket validation against the cap,
+    // or a burst of N simultaneous handshakes all passes this check in flight.
+    if (clients.size + pendingUpgrades >= maxClients) {
       socket.write("HTTP/1.1 503 Service Unavailable\r\n\r\n");
       socket.destroy();
       return;
     }
+    pendingUpgrades += 1;
+    try {
+      await admitUpgrade(req, socket, head, target);
+    } finally {
+      pendingUpgrades -= 1;
+    }
+  });
 
+  async function admitUpgrade(req, socket, head, target) {
     const remoteAddr = socket.remoteAddress || "";
     const skipTicket = shouldSkipTicketValidation({
       clerkConfigured: security.clerkConfigured,
@@ -202,14 +261,16 @@ export function createHeadlinesHub({
 
     wss.handleUpgrade(req, socket, head, (ws) => {
       clients.add(ws);
-      sendJson(ws, { type: "snapshot", items: ring.slice() });
+      alive.add(ws);
+      ws.on("pong", () => alive.add(ws));
       ws.on("close", () => clients.delete(ws));
       ws.on("error", () => clients.delete(ws));
       ws.on("message", () => {
         // Client is receive-only. Drop inbound payloads.
       });
+      deliver(ws, { type: "snapshot", items: ring.slice() });
     });
-  });
+  }
 
   function writeHealth(state, message) {
     if (!recordHealth) return;
@@ -279,7 +340,9 @@ export function createHeadlinesHub({
     try {
       const items = await loadHistory();
       if (!Array.isArray(items)) return;
-      for (const item of items) ingest(item);
+      // Only the newest ringSize rows can survive; the rest would be N
+      // concurrent Turso batches for nothing (R-462).
+      for (const item of items.slice(-ringSize)) ingest(item, { seed: true });
     } catch {
       // Serve an empty cache rather than blocking the hub.
     }
@@ -291,6 +354,8 @@ export function createHeadlinesHub({
     return new Promise((resolve) => {
       httpServer.listen(listenPort, host, () => {
         startUpstream();
+        pingTimer = setInterval(sweepClients, pingIntervalMs);
+        pingTimer.unref?.();
         resolve();
       });
     });
@@ -301,6 +366,10 @@ export function createHeadlinesHub({
     if (healthTimer != null) {
       clearInterval(healthTimer);
       healthTimer = null;
+    }
+    if (pingTimer != null) {
+      clearInterval(pingTimer);
+      pingTimer = null;
     }
     upstream?.stop?.();
     for (const client of clients) {
