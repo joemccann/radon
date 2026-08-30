@@ -49,8 +49,11 @@ export type IbGatewayHealth = {
   container_health?: string;
 };
 
+export type HostRole = "app" | "broker" | "combined";
+
 export type AdminHealthPayload = {
   status: string;
+  host_role?: HostRole;
   ib_gateway: IbGatewayHealth;
   ib_pool: IbPoolStatus;
   uw?: boolean;
@@ -74,6 +77,7 @@ export type UnitStatus = {
 
 export type ServicesListResponse = {
   supported: boolean;
+  host_role?: HostRole;
   units: UnitStatus[];
 };
 

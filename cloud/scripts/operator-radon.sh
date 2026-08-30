@@ -304,7 +304,6 @@ case "$HOST_ROLE" in
   broker)
     REQUIRED_UNITS=(
       radon-ib-gateway.service
-      radon-health.service
     )
     ;;
   *)
@@ -432,6 +431,16 @@ systemctl_many() {
   return "$rc"
 }
 
+emit_stack_result() {
+  local verb="$1"
+  local count="$2"
+  if [[ "$HOST_ROLE" == "app" ]]; then
+    echo "${verb} ${count} app-plane radon units. Gateway stays on the broker."
+  else
+    echo "${verb} Gateway and ${count} radon units"
+  fi
+}
+
 case "$requested_action" in
   stop)
     STOP_UNITS=()
@@ -447,7 +456,7 @@ case "$requested_action" in
     if [[ "$HOST_ROLE" != "app" ]]; then
       gateway_control stop
     fi
-    echo "stopped Gateway and ${#STOP_UNITS[@]} active radon units"
+    emit_stack_result "stopped" "${#STOP_UNITS[@]}"
     ;;
   start)
     if [[ -f "$TOPOLOGY_PATH" ]]; then
@@ -466,7 +475,7 @@ case "$requested_action" in
     fi
     systemctl_many start "${START_UNITS[@]}"
     rm -f "$TOPOLOGY_PATH"
-    echo "started Gateway and ${#START_UNITS[@]} radon units"
+    emit_stack_result "started" "${#START_UNITS[@]}"
     ;;
   restart)
     mapfile -t RESTART_UNITS < <(
@@ -480,13 +489,15 @@ case "$requested_action" in
       gateway_control restart
     fi
     systemctl_many restart "${RESTART_UNITS[@]}"
-    echo "restarted Gateway and ${#RESTART_UNITS[@]} radon units"
+    emit_stack_result "restarted" "${#RESTART_UNITS[@]}"
     ;;
   status)
     run_bounded "$SYSTEMCTL_QUERY_TIMEOUT_SECS" \
       systemctl list-units 'radon-*' --all --no-pager --no-legend
     gateway_status=0
-    if [[ "$HOST_ROLE" != "app" ]]; then
+    if [[ "$HOST_ROLE" == "app" ]]; then
+      echo "ib-gateway-container: broker (not this host)"
+    else
       printf 'ib-gateway-container: '
       gateway_control status || gateway_status=$?
     fi

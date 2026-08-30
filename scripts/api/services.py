@@ -100,6 +100,14 @@ def is_valid_unit(unit: str) -> bool:
     return unit not in _INTERNAL_UNITS and bool(_UNIT_PATTERN.match(unit))
 
 
+def host_role() -> str:
+    """RADON_HOST_ROLE for this process. Unset or garbage is combined."""
+    raw = (os.environ.get("RADON_HOST_ROLE") or "combined").strip().strip("\"'")
+    if raw in {"app", "broker", "combined"}:
+        return raw
+    return "combined"
+
+
 def is_systemd_available() -> bool:
     """True when this host can run ``systemctl`` against ``radon-*`` units.
 
@@ -327,6 +335,10 @@ async def show_unit(unit: str) -> UnitStatus:
     if unit != GATEWAY_UNIT:
         return status
 
+    if host_role() == "app":
+        status.can_control = False
+        return status
+
     # A Type=oneshot/RemainAfterExit wrapper can stay active (exited) after
     # the Docker container dies. Never surface that stale unit state as a
     # healthy Gateway; ask the authoritative helper for the real container.
@@ -494,6 +506,14 @@ def is_gateway_control_available() -> bool:
 
 async def _control_gateway(action: str) -> ActionResult:
     """Delegate Gateway lifecycle to the helper that owns lease acquisition."""
+    if host_role() == "app":
+        return ActionResult(
+            GATEWAY_UNIT,
+            action,
+            False,
+            "RADON_HOST_ROLE=app. Gateway lifecycle is on the broker.",
+            -1,
+        )
     if not is_gateway_control_available():
         return ActionResult(
             GATEWAY_UNIT,

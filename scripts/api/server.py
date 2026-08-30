@@ -1911,6 +1911,7 @@ async def health(request: Request):
     return {
         "status": "ok",
         "test_mode": test_mode,
+        "host_role": admin_services.host_role(),
         "ib_gateway": gw,
         "ib_pool": pool_status or {},
         "uw": uw_available,
@@ -2112,6 +2113,7 @@ async def admin_services_list():
     units = await admin_services.list_units_with_status()
     return {
         "supported": supported,
+        "host_role": admin_services.host_role(),
         "units": [u.to_dict() for u in units],
     }
 
