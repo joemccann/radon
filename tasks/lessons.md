@@ -711,3 +711,12 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 ## 2026-08-29 - Done/Next format applies to background-job progress lines too
 
 - Second correction in one day: a background-job session narrated every step in prose ("Waiting on the ingestion implementer…", "Full vitest green: …") because the harness asks for narration. The harness "narrate" instruction sets WHEN to speak, not the SHAPE: every emitted message is still `**Done**` / `**Next**` bullets under 100 words. Fold the pre-tool line into a `**Done**` bullet or omit it.
+## 2026-08-29 - Every user-visible message is Done/Next, including mid-task and pre-tool-call lines
+
+- The format rule was followed on closing messages and dropped on every other turn: one-line narration before a tool call ("Pre-existing duplicate keys... bypassing"), progress lines after arming a monitor ("Checks running on #180; I'll merge when green"), and status replies to `Status` prompts all shipped as prose. The user reads ALL of them as output.
+- The rule at `CLAUDE.md` §Response Format says "Mid-task progress messages follow the same shape". A message that ends a turn while work continues in the background is a closing message. Use `**Done** / **Next**` there too; when nothing changed, one bullet.
+- The harness "say in a line what you're about to do" instruction does not override the repo format: fold that line into a single bullet or emit nothing and let the tool call's description carry it.
+
+## 2026-08-29 - Never round-trip a diff through `git diff > file` under the rtk hook
+
+- `git diff HEAD -- f > patch` was rewritten to `rtk git diff`, which emits a token-compacted summary, not a patch. The follow-up `git checkout HEAD -- f` then discarded the only copy of the edit. Use `rtk proxy git diff` (or `git stash`) when the bytes matter, and never checkout-revert a file before confirming the saved patch applies (`git apply --check`).

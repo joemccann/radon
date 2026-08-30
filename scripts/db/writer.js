@@ -106,7 +106,7 @@ function recordOperationFailure(label, err) {
 
 // Every Turso operation goes through here: circuit check, then up to
 // 1 + retryBackoffMs.length attempts on transport errors.
-async function withDbBounds(label, run) {
+export async function withDbBounds(label, run) {
   assertCircuitAllowsRequest(label);
   let lastErr;
   for (let attempt = 0; attempt <= bounds.retryBackoffMs.length; attempt++) {
