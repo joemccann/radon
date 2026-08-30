@@ -182,6 +182,20 @@ def test_exact_images_are_gated_and_prepulled_parallel_to_prestage() -> None:
     assert deploy["concurrency"]["cancel-in-progress"] == "false"
 
 
+def test_exact_images_publish_only_after_the_secret_scan() -> None:
+    """R-442: the callee pushes the release SHA tag and the moving `:latest`
+    tag in one BuildKit operation, and the caller job had an `if:` but no
+    `needs:`, so a push to main that failed gitleaks still overwrote the
+    public GHCR `:latest` pointer with an image carrying the Next client
+    bundle and `scripts/`. Deploy was never at risk (`resolve_image` refuses
+    non-SHA tags); this is supply-chain hygiene for a public tag.
+    """
+    jobs = _workflow()["jobs"]
+    assert "secret-scan" in jobs["app-images"].get("needs", []), (
+        "app-images must wait for secret-scan before publishing :latest"
+    )
+
+
 def _job_commands(job: dict) -> str:
     return "\n".join(str(step.get("run", "")) for step in job.get("steps", []))
 

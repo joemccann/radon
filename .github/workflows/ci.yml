@@ -85,6 +85,11 @@ jobs:
 
   app-images:
     name: Exact app images
+    # The callee pushes the SHA tag and the moving `:latest` tag in one
+    # BuildKit operation, so it must not start until gitleaks has passed:
+    # without this a commit that failed secret-scan still overwrote the
+    # public GHCR `:latest` pointer. R-442.
+    needs: [secret-scan]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     uses: ./.github/workflows/app-images.yml
     permissions:
