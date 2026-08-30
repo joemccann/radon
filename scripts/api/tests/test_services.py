@@ -401,6 +401,20 @@ class TestControlUnitGatewayPushLock:
         assert helper_log.read_text().splitlines() == ["restart"]
         assert calls == []
 
+    def test_app_role_refuses_gateway_even_with_helper(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("RADON_HOST_ROLE", "app")
+        helper_log = self._install_helper(tmp_path, monkeypatch)
+        calls: list = []
+        result = self._control(self.GATEWAY, "restart", calls)
+
+        assert result.ok is False
+        assert result.returncode == -1
+        assert "broker" in result.detail.lower()
+        assert not helper_log.exists() or helper_log.read_text() == ""
+        assert calls == []
+
     def test_helper_deploy_lock_refusal_maps_to_conflict(
         self, tmp_path: Path, monkeypatch
     ) -> None:

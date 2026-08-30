@@ -199,6 +199,40 @@ describe("admin destructive actions reach the wire", () => {
     expect(sent[0].cache).toBe("no-store");
   });
 
+  it("sends no Gateway mutation when the host role is app", async () => {
+    const calls: RecordedCall[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input.toString();
+        calls.push({ url, method: init?.method ?? "GET", cache: init?.cache });
+        if (url.endsWith("/api/admin/services") && (init?.method ?? "GET") === "GET") {
+          return jsonResponse({ ...SERVICES, host_role: "app" });
+        }
+        if (init?.method === "POST") {
+          return jsonResponse({ ok: true, detail: "done", returncode: 0 });
+        }
+        return jsonResponse(HEALTHY);
+      }),
+    );
+    render(<AdminWorkspace />);
+    await settle();
+
+    expect(screen.queryByTestId("force-2fa-button")).toBeNull();
+    expect(screen.queryByTestId("gateway-power-button")).toBeNull();
+    expect(screen.getByTestId("gateway-broker-note").textContent).toMatch(/broker/i);
+    expect(posts(calls)).toHaveLength(0);
+
+    await click("restart-stack-button");
+    expect(posts(calls)).toHaveLength(0);
+    await click("admin-confirm-action");
+    const sent = posts(calls);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].url).toBe("/api/admin/stack/restart");
+    expect(sent.some((c) => c.url.includes("radon-ib-gateway"))).toBe(false);
+    expect(sent.some((c) => c.url === "/api/admin/ib/restart")).toBe(false);
+  });
+
   it("stops a service on the stop path, not the restart path", async () => {
     const calls = await renderWorkspace();
 
