@@ -79,7 +79,7 @@ Open `http://localhost:3000`. Clerk auto-bypasses on localhost in non-production
 
 ![Production network topology](docs/radon-network-topology.png)
 
-Operator clients, Hetzner spread placement (`radon-app` / `radon-broker`), IBKR, outbound-only third parties. Host-split runbook: [`docs/spof-host-split.md`](docs/spof-host-split.md).
+Operator clients, Hetzner spread placement (`radon-app` / `radon-broker`), IBKR, outbound-only third parties. Illustrative only, rendered at 39bf6f5e; it omits the app → broker `:8340` mTLS Gateway-control edge. Authoritative edges and the host-split runbook: [`docs/spof-host-split.md`](docs/spof-host-split.md).
 
 ```
        Unusual Whales ─┐
