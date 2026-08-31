@@ -36,7 +36,14 @@ function pythonPins(): Map<string, string> {
 
 function nextRoutePin(method: string, template: string): string | undefined {
   const route = template.replace(/^\/api\//, "").replace(/\{([^}]+)\}/g, "[$1]");
-  const source = readFileSync(resolve(WEB_ROOT, "app", "api", route, "route.ts"), "utf8");
+  const ts = resolve(WEB_ROOT, "app", "api", route, "route.ts");
+  const tsx = resolve(WEB_ROOT, "app", "api", route, "route.tsx");
+  let source: string;
+  try {
+    source = readFileSync(ts, "utf8");
+  } catch {
+    source = readFileSync(tsx, "utf8");
+  }
   const match = source.match(/export\s+const\s+radonCapability(?:\s*:\s*[^=;]+)?\s*=\s*([^;]+);/);
   if (!match) return undefined;
   const expr = match[1].trim();
@@ -84,8 +91,15 @@ describe("assistant catalog parity", () => {
     // catalog client must not be a cheaper door to the same backend action.
     const operatorOnly = catalogOperations()
       .filter((item) => item.operatorOnly)
-      .map((item) => `${item.method} ${item.path}`)
-      .sort();
-    expect(operatorOnly).toEqual(["POST /orders/refresh", "POST /performance", "POST /portfolio/sync"]);
+      .map((item) => `${item.method} ${item.path}`);
+    expect(operatorOnly).toEqual(
+      expect.arrayContaining(["POST /orders/refresh", "POST /performance", "POST /portfolio/sync"]),
+    );
+    expect(catalogOperations().find((item) => item.path === "/quote/{ticker}")?.operatorOnly).toBeFalsy();
+    const workspace = catalogOperations().filter(
+      (item) => item.surface === "fastapi" && item.capability === "mutate.workspace",
+    );
+    expect(workspace.length).toBeGreaterThan(0);
+    expect(workspace.every((item) => item.operatorOnly)).toBe(true);
   });
 });
