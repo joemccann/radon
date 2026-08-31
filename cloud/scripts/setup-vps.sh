@@ -34,6 +34,7 @@ readonly CADDY_SYNC="${RADON_CADDY_SYNC:-/usr/bin/sync}"
 readonly SERVICE_FILES=(
   radon-ib-gateway.service
   radon-ib-gateway-preheld-restart.service
+  radon-ib-gateway-remote.service
   radon-nextjs.service
   radon-api.service
   radon-relay.service
@@ -633,6 +634,9 @@ enable_services() {
   local base svc
   for svc in "${SERVICE_FILES[@]}"; do
     [[ "$svc" == "radon-ib-gateway-preheld-restart.service" ]] && continue
+    # Broker-only. Combined/app copy the unit but do not enable it. Certs plus
+    # `systemctl enable --now` happen on the broker after the split.
+    [[ "$svc" == "radon-ib-gateway-remote.service" ]] && continue
     if [[ "$svc" == *.timer ]]; then
       timer_units+=("$svc")
     elif [[ -f "${CLOUD_DIR}/services/${svc%.service}.timer" ]]; then
