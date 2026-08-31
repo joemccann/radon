@@ -45,6 +45,21 @@ EXAMPLE_BASELINE_COMMITS = {
 }
 
 
+# generic-api-key is a gitleaks DEFAULT rule, so its exceptions live in a
+# global [[allowlists]] entry scoped with targetRules rather than in a
+# [[rules]] block.
+GENERIC_API_KEY_BASELINE_COMMITS = {
+    # 2026-08-31 (#212): the weekend-redactor test spelled a fake UW token to
+    # prove the redactor scrubs env values; merged before the scan ran. The
+    # fixture was rewritten to runtime construction afterwards.
+    "38eeecb91eedb3b90966821bff12d5b240d89708",
+}
+
+
+def _config() -> dict:
+    return tomllib.loads(GITLEAKS_CONFIG.read_text(encoding="utf-8"))
+
+
 def _config_rules() -> dict[str, dict]:
     config = tomllib.loads(GITLEAKS_CONFIG.read_text(encoding="utf-8"))
     return {rule["id"]: rule for rule in config["rules"]}
@@ -83,6 +98,21 @@ def test_historical_exceptions_are_rule_scoped_and_commit_exact() -> None:
     assert _rule_allowlist_commits(rules["credential-shaped-example"]) == (
         EXAMPLE_BASELINE_COMMITS
     )
+
+
+def test_global_commit_exceptions_are_rule_scoped_and_commit_exact() -> None:
+    config = _config()
+    assert "allowlist" not in config, (
+        "the singular [allowlist] table cannot coexist with [[allowlists]]; "
+        "gitleaks refuses to load the config"
+    )
+    exceptions = [a for a in config["allowlists"] if a.get("commits")]
+    assert len(exceptions) == 1
+    entry = exceptions[0]
+    # Without targetRules a commit exception blanket-allows EVERY rule for
+    # that SHA, including the custom TWS ones.
+    assert entry["targetRules"] == ["generic-api-key"]
+    assert set(entry["commits"]) == GENERIC_API_KEY_BASELINE_COMMITS
 
 
 def test_custom_rules_still_match_new_literals_but_not_empty_placeholders() -> None:

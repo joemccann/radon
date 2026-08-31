@@ -109,7 +109,7 @@ def test_short_sources_fall_through_to_yahoo(client):
 
 
 def test_robinhood_outranks_yahoo_when_it_serves_enough_bars(client):
-    from api.routes.streaks import MIN_ACCEPT_BARS
+    from api.routes.streaks import MIN_ACCEPT_BARS, RH_SOURCE
 
     yahoo = MagicMock()
     with patch("api.routes.streaks._read_cached_closes", return_value=None), patch(
@@ -127,7 +127,7 @@ def test_robinhood_outranks_yahoo_when_it_serves_enough_bars(client):
 
     assert resp.status_code == 200
     body = resp.json()
-    assert body["source"] == "robinhood"
+    assert body["source"] == RH_SOURCE  # REL-174 (R-485): the writer vocabulary spelling
     assert body["count"] == MIN_ACCEPT_BARS
     yahoo.assert_not_called()
 
