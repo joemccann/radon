@@ -341,7 +341,7 @@ journald on the VPS is on-box only (capped at 1G). A laptop launchd job (`~/Libr
 (`/home/radon/radon-page-responder.env`). It must not use
 `/home/radon/radon` or `/home/radon/radon-cloud/.env`. Laptop launchd is
 off. Spec: [`grok-page-responder.md`](grok-page-responder.md).
-Do not install this on `~/radon-weekend/radon` (that clone hard-resets).
+Do not install this on any clone under `~/radon-weekend/` (the five nightly loops hard-reset them every phase; table in [`operations.md`](operations.md#background-services)).
 
 ### Error tracking — Sentry (not wired; recommended next step)
 
