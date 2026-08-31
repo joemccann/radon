@@ -253,7 +253,12 @@ Writer: chunked `INSERT ... ON CONFLICT(ticker, date, expiry) DO UPDATE`.
 `web/app/api/vol-cone/route.ts` — GET only, `dynamic = "force-dynamic"`,
 `runtime = "nodejs"`. `dbFirstRead` on `scan_snapshots` where
 `service = 'vol-cone'`, disk `data/vol_cone.json`.
-`MAX_AGE_MS = 48h` (daily timer; older means the writer is down).
+`MAX_AGE_MS = getFreshnessWindowMs("vol-cone", "closed")` (4d, shared with
+the watchdog catalog in `web/lib/serviceHealthWindows.ts` /
+`scripts/watchdog/services.py`). Both writers are Mon-Fri only, so Friday's
+20:45 UTC snapshot is legitimately the newest until Monday; a private 48h
+budget here collapsed it into the outage banner every Sunday (`e7323e4e`).
+Never give this route its own budget.
 Cache headers 300 / 3600, tag `vol-cone`.
 
 Hook `web/lib/useVolCone.ts`: `useSyncHook` GET `/api/vol-cone`, hourly,
@@ -312,7 +317,9 @@ Scanner mode, same shelf as LEAP / GARCH: `ScannerMode` union, query
   TimeoutStartSec=900 (backfill headroom).
 - Timer: `OnCalendar=Mon..Fri *-*-* 20:45:00 UTC` (16:45 ET after the
   close grace). `Persistent=true`. `RandomizedDelaySec=60`.
-- Windows: 26h open / 3d closed, `category: scheduled`, `requires_ib: false`.
+- Windows: 26h open / 4d closed, `category: scheduled`, `requires_ib: false`.
+  3d sat exactly on the holiday-Monday heartbeat gap (Fri 20:45 UTC + 72h +
+  jitter); 4d follows the cash-flow-sync precedent.
   Daily watchdog bucket.
 
 `cloud/services/radon-vol-cone-intraday.service` + `.timer`.
@@ -323,7 +330,8 @@ Scanner mode, same shelf as LEAP / GARCH: `ScannerMode` union, query
   `Persistent=false`. The scanner gates on `market_state`, so pre-open and
   post-close slots hold without spending a request.
 - Health row is `vol-cone-intraday` (the snapshot is shared; the row belongs
-  to the writer that produced it). 45m open / 3d closed, intraday bucket.
+  to the writer that produced it). 45m open / 4d closed (moves with its EOD
+  parent), intraday bucket.
 
 ## File checklist
 
