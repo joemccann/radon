@@ -52,8 +52,10 @@ def _runner_clone(tmp_path: Path, name: str) -> Path:
     repo = tmp_path / f"radon-{name}"
     (repo / "scripts").mkdir(parents=True)
     (repo / ".radon-weekend-runner").write_text("", encoding="utf-8")
-    # the security wrapper additionally requires this marker; inert elsewhere
-    (repo / ".radon-security-runner").write_text("", encoding="utf-8")
+    # REL-180 (R-504): every wrapper requires its OWN loop marker as well.
+    for marker in (".radon-security-runner", ".radon-reliability-runner", ".radon-testing-runner",
+                   ".radon-ci-performance-runner", ".radon-documentation-runner"):
+        (repo / marker).write_text("", encoding="utf-8")
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
     return repo
 

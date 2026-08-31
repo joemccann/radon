@@ -168,18 +168,23 @@ class TestIsLocalOrTailnet:
     def test_garbage_false(self):
         assert is_local_or_tailnet("not-an-ip") is False
 
-    def test_hetzner_private_net_true(self):
-        # radon-private: app 10.0.0.2, broker 10.0.0.4. Same trust class as
-        # the tailnet — NIC attachment is the authenticated channel.
-        assert is_local_or_tailnet("10.0.0.2") is True
-        assert is_local_or_tailnet("10.0.0.4") is True
-        assert is_local_or_tailnet("10.0.255.255") is True
+    def test_hetzner_private_net_is_a_peer_not_local(self):
+        # radon-private: app 10.0.0.2, broker 10.0.0.4. REL-170 (R-473): NIC
+        # attachment authenticates the peer for its /health probe only, so
+        # the net is recognised by is_private_net_peer and is NOT local.
+        from api.auth import is_private_net_peer
+
+        for host in ("10.0.0.2", "10.0.0.4", "10.0.255.255"):
+            assert is_local_or_tailnet(host) is False
+            assert is_private_net_peer(host) is True
 
     def test_other_rfc1918_false(self):
         # docker0 is 172.17.0.0/16. Do not widen to all RFC1918.
-        assert is_local_or_tailnet("10.1.0.1") is False
-        assert is_local_or_tailnet("172.17.0.1") is False
-        assert is_local_or_tailnet("192.168.1.1") is False
+        from api.auth import is_private_net_peer
+
+        for host in ("10.1.0.1", "172.17.0.1", "192.168.1.1"):
+            assert is_local_or_tailnet(host) is False
+            assert is_private_net_peer(host) is False
 
 
 class TestIsTrustedLocalRequest:
@@ -200,12 +205,21 @@ class TestIsTrustedLocalRequest:
     def test_tailnet_without_forwarding_is_trusted(self):
         assert is_trusted_local_request(_FakeRequest(host="100.100.5.5")) is True
 
-    def test_hetzner_private_without_forwarding_is_trusted(self):
-        assert is_trusted_local_request(_FakeRequest(host="10.0.0.4")) is True
+    def test_hetzner_private_without_forwarding_is_a_probe_not_trusted(self):
+        # REL-170 (R-473): rewritten from "is trusted" — the private net gets
+        # the /health probe only, never the global bypass.
+        from api.auth import is_private_net_probe
+
+        req = _FakeRequest(host="10.0.0.4")
+        assert is_trusted_local_request(req) is False
+        assert is_private_net_probe(req) is True
 
     def test_hetzner_private_with_forwarding_not_trusted(self):
+        from api.auth import is_private_net_probe
+
         req = _FakeRequest(host="10.0.0.4", extra_headers={"X-Forwarded-For": "8.8.8.8"})
         assert is_trusted_local_request(req) is False
+        assert is_private_net_probe(req) is False
 
     def test_loopback_with_x_forwarded_for_not_trusted(self):
         req = _FakeRequest(host="127.0.0.1", extra_headers={"X-Forwarded-For": "8.8.8.8"})
@@ -513,3 +527,91 @@ class TestGetIssuer:
         with patch.dict(os.environ, {}, clear=True):
             os.environ.pop("CLERK_ISSUER", None)
             assert _get_issuer() == ""
+
+
+# --- REL-170 (R-473): private-net trust is scoped to the broker's /health probe ---
+
+
+class TestPrivateNetScope:
+    """The 10.0.0.0/16 trust exists for ONE caller: the broker watchdog's
+    ``GET /health`` (``scripts/ib_watchdog.py:DEFAULT_HEALTH_URL``). It must
+    never feed the global server-to-server bypass."""
+
+    def test_private_net_is_not_local_or_tailnet(self):
+        from api.auth import is_local_or_tailnet
+
+        assert is_local_or_tailnet("10.0.0.2") is False
+        assert is_local_or_tailnet("10.0.0.4") is False
+        assert is_local_or_tailnet("127.0.0.1") is True
+        assert is_local_or_tailnet("100.100.5.5") is True
+
+    def test_private_net_peer_is_a_probe_not_a_trusted_local(self):
+        from api.auth import is_private_net_probe, is_trusted_local_request
+
+        req = _FakeRequest(host="10.0.0.4", path="/health")
+        assert is_trusted_local_request(req) is False
+        assert is_private_net_probe(req) is True
+
+    def test_private_net_probe_denied_when_forwarded_or_browser(self):
+        from api.auth import is_private_net_probe
+
+        assert is_private_net_probe(
+            _FakeRequest(host="10.0.0.4", extra_headers={"X-Forwarded-For": "8.8.8.8"})
+        ) is False
+        assert is_private_net_probe(
+            _FakeRequest(host="10.0.0.4", extra_headers={"Sec-Fetch-Site": "cross-site"})
+        ) is False
+        assert is_private_net_probe(_FakeRequest(host="172.17.0.1")) is False
+        assert is_private_net_probe(_FakeRequest(host="127.0.0.1")) is False
+        assert is_private_net_probe(_FakeRequest(host=None)) is False
+
+
+class TestPrivateNetThroughMiddleware:
+    """Wire-level: a 10.0.0.4 peer with no Authorization header."""
+
+    @pytest.fixture(autouse=True)
+    def _clerk_configured(self, monkeypatch):
+        monkeypatch.setenv("CLERK_JWKS_URL", "https://example.test/jwks.json")
+        monkeypatch.delenv("RADON_AUTH_DISABLED", raising=False)
+
+    def _client(self, peer):
+        from fastapi.testclient import TestClient
+        from scripts.api.server import app
+
+        return TestClient(app, client=(peer, 40000))
+
+    def test_broker_watchdog_health_probe_is_allowed(self, monkeypatch):
+        from scripts.api import server
+        from scripts.ib_watchdog import DEFAULT_HEALTH_URL
+
+        assert DEFAULT_HEALTH_URL.endswith("/health")
+
+        async def _gw(*args, **kwargs):
+            return {"auth_state": "authenticated", "host": "10.0.0.4"}
+
+        monkeypatch.setattr(server, "check_ib_gateway", _gw)
+        res = self._client("10.0.0.4").get("/health", headers={"Host": "10.0.0.2:8321"})
+        assert res.status_code == 200
+        assert res.json()["ib_gateway"]["auth_state"] == "authenticated"
+
+    @pytest.mark.parametrize(
+        "path",
+        ["/orders/place", "/orders/cancel", "/admin/stack/restart", "/pi/exec"],
+    )
+    def test_private_net_mutations_require_a_jwt(self, path):
+        res = self._client("10.0.0.4").post(
+            path, json={"script": "x"}, headers={"Host": "10.0.0.2:8321"}
+        )
+        assert res.status_code == 401, (path, res.status_code, res.text[:200])
+
+    @pytest.mark.parametrize("peer", ["127.0.0.1", "100.100.5.5"])
+    def test_loopback_and_tailnet_bypass_unchanged(self, peer, monkeypatch):
+        from scripts.api import server
+
+        async def _gw(*args, **kwargs):
+            return {"auth_state": "authenticated"}
+
+        monkeypatch.setattr(server, "check_ib_gateway", _gw)
+        res = self._client(peer).get("/health", headers={"Host": "127.0.0.1:8321"})
+        assert res.status_code == 200
+        assert "ib_gateway" in res.json()

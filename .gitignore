@@ -270,6 +270,11 @@ docs/security-audit-*.html
 
 # Weekend reliability runner marker (dedicated clone only, never committed)
 .radon-weekend-runner
+# REL-180 (R-507): per-loop markers and the runner lock live untracked in every
+# loop clone where an agent stages files; a committed lock pid would make all
+# five loops REFUSE at 00:00 after the next reset --hard.
+.radon-*-runner
+.weekend-runner.lock/
 
 # One-shot security-scan scratch directories (never commit)
 CLAUDE-SECURITY-*/

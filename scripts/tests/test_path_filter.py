@@ -6,6 +6,8 @@ import ast
 import re
 import subprocess
 from functools import lru_cache
+
+import pytest
 from pathlib import Path
 
 from ci import path_filter
@@ -261,6 +263,9 @@ def test_shared_ci_yaml_runs_both() -> None:
 
 
 def test_docs_only_skips_both_gates() -> None:
+    # `classify` is the prefix layer and still treats every .md as
+    # documentation; REL-179 routes the ones tests read in `select_gates`
+    # (see test_a_doc_a_test_reads_routes_to_that_test).
     python, web = classify(["docs/cloud-services.md", "tasks/todo.md", "README.md"])
     assert (python, web) == (False, False)
 
@@ -654,3 +659,100 @@ def test_ci_changes_job_resolves_the_push_base_from_deploy_history() -> None:
     assert env["GH_TOKEN"] == "${{ github.token }}"
     assert changes["permissions"]["actions"] == "read"
     assert changes["permissions"]["contents"] == "read"
+
+
+# ---------------------------------------------------------------------------
+# REL-179 (R-476, R-509): documentation a test asserts on is not documentation
+# for gate purposes, and the `changes` job is bounded.
+# ---------------------------------------------------------------------------
+
+
+def _md_literal_re() -> re.Pattern[str]:
+    return re.compile(r"""["']([A-Za-z0-9_./-]+\.md)["']""")
+
+
+def _unread_docs() -> list[str]:
+    """Tracked .md files no test names by path or basename (so they may skip)."""
+    tracked = subprocess.run(
+        ["git", "ls-files", "*.md", "**/*.md"], cwd=_ROOT, check=True, capture_output=True, text=True
+    ).stdout.split()
+    literals: set[str] = set()
+    for root in (*_PYTHON_TEST_ROOTS, "web/tests"):
+        for path in (_ROOT / root).rglob("*"):
+            if path.suffix in {".py", ".ts", ".tsx", ".js"}:
+                literals.update(_md_literal_re().findall(path.read_text(encoding="utf-8", errors="ignore")))
+    return [
+        doc for doc in tracked
+        if doc not in literals
+        and Path(doc).name not in literals
+        and Path(doc).name not in path_filter.FAIL_CLOSED_DOC_BASENAMES
+    ]
+
+
+@pytest.mark.parametrize(
+    "path", ["CLAUDE.md", ".claude/skills/security-nightly/SKILL.md", "AGENTS.md", "scripts/AGENTS.md"]
+)
+def test_agent_rails_fail_closed_to_both_gates(path: str) -> None:
+    selection = select_gates([path])
+    assert (selection.python, selection.web) == (True, True), selection
+
+
+def test_a_subtree_claude_md_arms_the_python_gate() -> None:
+    selection = select_gates(["scripts/CLAUDE.md"])
+    assert selection.python is True
+
+
+def test_a_doc_a_test_reads_routes_to_that_test() -> None:
+    selection = select_gates(["docs/operations.md"])
+    assert selection.python is False
+    assert selection.contract_tests, "docs/operations.md is asserted on by pytest; nothing was selected"
+    for test in selection.contract_tests:
+        module = test.split("::", 1)[0]
+        assert (_ROOT / module).is_file(), test
+        assert "operations.md" in (_ROOT / module).read_text(encoding="utf-8")
+
+
+def test_an_unread_doc_still_skips_both_gates() -> None:
+    unread = _unread_docs()
+    assert unread, "every tracked .md is read by a test?"
+    # Built at runtime: a literal here would make THIS module the reader.
+    phantom = "docs/" + "this-file-does-not-exist" + ".m" + "d"
+    selection = select_gates([phantom, unread[0]])
+    assert (selection.python, selection.web, selection.contract_tests) == (False, False, ())
+
+
+def test_docs_only_skips_both_gates_when_nothing_reads_them() -> None:
+    # REL-179: rewritten from a fixed list — docs/cloud-services.md, tasks/todo.md
+    # and README.md are all read by tests now, so they legitimately route.
+    unread = _unread_docs()
+    assert unread
+    python, web = classify(unread[:3])
+    assert (python, web) == (False, False)
+    assert select_gates(unread[:3]).contract_tests == ()
+
+
+def test_changes_job_and_gh_api_lookback_are_bounded(monkeypatch) -> None:
+    import yaml
+
+    workflow = yaml.load(
+        (_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"),
+        Loader=yaml.BaseLoader,
+    )
+    changes = workflow["jobs"]["changes"]
+    assert int(changes.get("timeout-minutes", "0")) > 0, "the changes job has no timeout-minutes (R-509)"
+
+    seen: dict = {}
+
+    def fake_run(cmd, **kwargs):
+        seen.update(kwargs)
+        return subprocess.CompletedProcess(cmd, 0, stdout="aaa\n", stderr="")
+
+    monkeypatch.setattr(path_filter.subprocess, "run", fake_run)
+    green_main_push_shas("joemccann/radon")
+    assert seen.get("timeout"), "gh api lookback runs with no timeout= (R-509)"
+
+    def hung_run(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout", 0))
+
+    monkeypatch.setattr(path_filter.subprocess, "run", hung_run)
+    assert resolve_gate_base("head", lambda: green_main_push_shas("x/y"), lambda a, b: True) is None

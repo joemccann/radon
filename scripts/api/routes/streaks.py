@@ -162,17 +162,24 @@ def _fetch_yahoo_closes(symbol: str) -> dict[str, float]:
     return parse_yahoo_chart(payload)
 
 
+# REL-174 (R-485): one spelling for the Robinhood source across the persisted
+# ladders, price_history_daily and this payload.
+RH_SOURCE = "rh"
+# (label, fetcher NAME): resolved at call time so tests can patch the rungs.
+FALLBACK_LADDER = (
+    ("uw", "_fetch_uw_closes"),
+    (RH_SOURCE, "_fetch_rh_closes"),
+    ("yahoo", "_fetch_yahoo_closes"),
+)
+
+
 def _fetch_fallback_closes(
     symbol: str,
     best: dict[str, float],
     best_source: Optional[str],
 ) -> tuple[dict[str, float], Optional[str]]:
     """UW -> Robinhood -> Yahoo, keeping the longest short answer as backup."""
-    ladder = (
-        ("uw", _fetch_uw_closes),
-        ("robinhood", _fetch_rh_closes),
-        ("yahoo", _fetch_yahoo_closes),
-    )
+    ladder = tuple((label, globals()[name]) for label, name in FALLBACK_LADDER)
     for source, fetch in ladder:
         try:
             closes = fetch(symbol)

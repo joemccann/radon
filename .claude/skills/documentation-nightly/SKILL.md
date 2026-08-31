@@ -1,6 +1,6 @@
 ---
 name: documentation-nightly
-description: Nightly documentation maintainer - daily audit that classifies the documentation impact of everything merged since the last audited SHA (rolling issue labeled documentation-nightly), then smallest source-backed remediation of P0/P1/P2 drift on a PR branch documentation/<date> without inventing prose, duplicating machine truth, or touching live systems. Runs unattended on the always-on runner via scripts/documentation_nightly.sh, one daily cycle at 00:00 local that runs audit then remediate; invoke as /documentation-nightly audit or /documentation-nightly remediate.
+description: Nightly documentation maintainer - daily audit that classifies the documentation impact of everything merged since the last audited SHA (rolling issue labeled documentation-nightly), then smallest source-backed remediation of P0/P1/P2 drift on a PR branch documentation/<date> without inventing prose, duplicating machine truth, or touching live systems. Runs unattended on the always-on runner via scripts/documentation_nightly.sh, one daily cycle at 00:30 local that runs audit then remediate; invoke as /documentation-nightly audit or /documentation-nightly remediate.
 ---
 
 # Nightly Documentation Maintainer
@@ -17,7 +17,7 @@ operator contract is a defect. Creating a page with no concrete reader and
 decision is also a defect.
 
 The first argument is the mode: `audit` or `remediate`. The launchd job fires
-daily at 00:00 local and runs `audit` followed by `remediate` in this loop's
+daily at 00:30 local and runs `audit` followed by `remediate` in this loop's
 dedicated clone.
 
 ## Runner integration

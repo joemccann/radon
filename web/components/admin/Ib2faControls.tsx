@@ -237,7 +237,11 @@ export default function Ib2faControls({
           className="admin-btn admin-btn-ghost"
           onClick={() => setShowResetConfirm(true)}
           disabled={pendingReset}
-          title="Release the push lock and clear the restart backoff counter"
+          title={
+            hostRole === "app"
+              ? "Release the broker's 2FA push lease and clear the restart backoff counter"
+              : "Release the push lock and clear the restart backoff counter"
+          }
           data-testid="reset-backoff-button"
         >
           Reset Backoff
@@ -317,8 +321,12 @@ export default function Ib2faControls({
       />
       <ConfirmDialog
         open={showResetConfirm}
-        title="Reset restart backoff?"
-        body="Use only after manually approving the in-flight 2FA push outside the lock window. This clears the backoff counter and releases the push lock so the next legitimate restart fires immediately."
+        title={hostRole === "app" ? "Release the broker's push lease?" : "Reset restart backoff?"}
+        body={
+          hostRole === "app"
+            ? "Use only after manually approving the in-flight 2FA push outside the lock window. This clears the backoff counter AND releases the 2FA push lease on the broker over mTLS; the broker refuses a fresh login for 60s afterwards so two pushes cannot stack."
+            : "Use only after manually approving the in-flight 2FA push outside the lock window. This clears the backoff counter and releases the push lock so the next legitimate restart fires immediately."
+        }
         confirmLabel="Reset"
         pending={pendingReset}
         onConfirm={runReset}

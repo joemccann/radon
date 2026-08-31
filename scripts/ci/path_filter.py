@@ -23,11 +23,15 @@ from __future__ import annotations
 
 import fnmatch
 import os
+import posixpath
 import subprocess
 import sys
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[2]
 
 GATE_WORKFLOW = "ci.yml"
 GATE_BRANCH = "main"
@@ -35,6 +39,20 @@ GATE_BRANCH = "main"
 # force-push that rewrites more than this many releases resolves nothing and
 # runs both gates, which is the fail-closed answer for a rewritten main.
 GREEN_RUN_LOOKBACK = 30
+# Bound on the `gh api` lookback: a stalled GitHub API socket must not park
+# every downstream gate and the deploy for the default 360 min (R-509). A
+# TimeoutExpired is caught by resolve_gate_base and runs both gates.
+GREEN_RUN_LOOKUP_TIMEOUT_S = 60
+
+# REL-179 (R-476): documentation a TEST asserts on is not documentation for
+# gate purposes. Agent rails and repo contracts (every CLAUDE.md, AGENTS.md
+# and skill SKILL.md) fail CLOSED to both gates — a push that removes a rail
+# from an unattended loop must not skip the gate that pins it. Any other .md
+# that a test names (by path or by basename) routes to the focused pytest
+# modules that read it, or arms the web gate when a vitest suite reads it.
+FAIL_CLOSED_DOC_BASENAMES = frozenset({"CLAUDE.md", "AGENTS.md", "SKILL.md"})
+TEST_TREES = ("tests", "scripts/tests", "cloud/tests", "web/tests")
+TEST_SOURCE_SUFFIXES = (".py", ".ts", ".tsx", ".js", ".jsx", ".mjs")
 
 WEB_PREFIXES = (
     "web/",
@@ -304,9 +322,60 @@ def classify(paths: list[str]) -> tuple[bool, bool]:
     return python, web
 
 
+@lru_cache(maxsize=4)
+def _test_sources(root: Path) -> tuple[tuple[str, str], ...]:
+    """(repo-relative path, text) for every test source under TEST_TREES."""
+    found: list[tuple[str, str]] = []
+    for tree in TEST_TREES:
+        base = root / tree
+        if not base.is_dir():
+            continue
+        for path in sorted(base.rglob("*")):
+            if path.suffix not in TEST_SOURCE_SUFFIXES or not path.is_file():
+                continue
+            try:
+                text = path.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            found.append((path.relative_to(root).as_posix(), text))
+    return tuple(found)
+
+
+@dataclass(frozen=True)
+class DocRouting:
+    fail_closed: bool = False
+    web: bool = False
+    tests: tuple[str, ...] = ()
+
+
+def route_documentation(paths: Iterable[str], root: Path = REPO) -> DocRouting:
+    """Where documentation paths must run, derived from the test trees (R-476)."""
+    fail_closed = False
+    web = False
+    tests: set[str] = set()
+    for path in paths:
+        name = posixpath.basename(path)
+        if name in FAIL_CLOSED_DOC_BASENAMES:
+            fail_closed = True
+            continue
+        needles = {f'"{path}"', f"'{path}'", f'"{name}"', f"'{name}'"}
+        for rel, text in _test_sources(root):
+            if not any(needle in text for needle in needles):
+                continue
+            if rel.endswith(".py"):
+                tests.add(rel)
+            else:
+                web = True
+    return DocRouting(fail_closed=fail_closed, web=web, tests=tuple(sorted(tests)))
+
+
 def select_gates(paths: list[str]) -> GateSelection:
     """Return full gates plus focused pytest contracts for web-only changes."""
     python, web = classify(paths)
+    docs = route_documentation(path for path in paths if _is_documentation(path))
+    if docs.fail_closed:
+        python = web = True
+    web = web or docs.web
     if python:
         return GateSelection(python=python, web=web)
 
@@ -318,6 +387,7 @@ def select_gates(paths: list[str]) -> GateSelection:
         if any(fnmatch.fnmatchcase(path, pattern) for pattern in contract.patterns)
         for test in contract.tests
     }
+    tests.update(docs.tests)
     return GateSelection(python=python, web=web, contract_tests=tuple(sorted(tests)))
 
 
@@ -341,6 +411,7 @@ def green_main_push_shas(repo: str) -> list[str]:
         check=True,
         capture_output=True,
         text=True,
+        timeout=GREEN_RUN_LOOKUP_TIMEOUT_S,
     )
     return result.stdout.split()
 

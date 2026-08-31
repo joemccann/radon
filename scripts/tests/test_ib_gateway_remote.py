@@ -121,6 +121,9 @@ def _config(tmp_path: Path, certs: dict[str, Path], **overrides) -> dict:
         "RADON_IB_REMOTE_BIND": "127.0.0.1",
         "RADON_IB_REMOTE_PORT": "0",
         "RADON_IB_REMOTE_ALLOW": "127.0.0.1",
+        # REL-168 (R-495): the daemon allowlists the client cert's CN/DNS SAN;
+        # mint_mtls issues the client pair as CN=client.
+        "RADON_IB_REMOTE_CLIENT_NAMES": "client",
         "RADON_IB_REMOTE_CERT": str(certs["cert"]),
         "RADON_IB_REMOTE_KEY": str(certs["key"]),
         "RADON_IB_REMOTE_CA": str(certs["ca"]),
@@ -277,7 +280,11 @@ class TestDaemon:
         )
         httpd = _start(config)
         try:
-            with pytest.raises(urllib.error.HTTPError) as err:
+            # REL-168 (R-471): a disallowed peer is dropped BEFORE the TLS
+            # handshake, so the header never reaches the daemon at all. The
+            # original 403 shape is kept as the accepted alternative for a
+            # handler constructed any other way.
+            with pytest.raises((urllib.error.HTTPError, urllib.error.URLError, ssl.SSLError, OSError)) as err:
                 _call(
                     httpd,
                     certs,
@@ -285,7 +292,8 @@ class TestDaemon:
                     "POST",
                     headers={"X-Forwarded-For": "10.0.0.2"},
                 )
-            assert err.value.code == 403
+            if isinstance(err.value, urllib.error.HTTPError):
+                assert err.value.code == 403
         finally:
             httpd.shutdown()
         assert not (tmp_path / "helper.log").exists()

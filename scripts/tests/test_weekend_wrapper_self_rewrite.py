@@ -99,7 +99,10 @@ def _build(
     wrapper.chmod(wrapper.stat().st_mode | stat.S_IXUSR)
     if marker:
         (clone / ".radon-weekend-runner").touch()
-        (clone / ".radon-security-runner").touch()
+        # REL-180 (R-504): every wrapper requires its OWN loop marker as well.
+        for loop_marker in (".radon-security-runner", ".radon-reliability-runner", ".radon-testing-runner",
+                            ".radon-ci-performance-runner", ".radon-documentation-runner"):
+            (clone / loop_marker).touch()
     # notify_phase shells `python3 $REPO/scripts/weekend_notify.py`; python3
     # is stubbed, but the file must exist for the call to look real.
     (clone / "scripts" / "weekend_notify.py").write_text("# stub\n", encoding="utf-8")
@@ -251,9 +254,14 @@ def _comments(cfg: dict) -> list[str]:
 
 
 def _pages(cfg: dict) -> int:
+    """python3 invocations of the NOTIFIER. The stub records every python3
+    call; since REL-180 report() also runs weekend_redact.py through it."""
     if not cfg["push_log"].exists():
         return 0
-    return len([ln for ln in cfg["push_log"].read_text(encoding="utf-8").splitlines() if ln.strip()])
+    return len([
+        ln for ln in cfg["push_log"].read_text(encoding="utf-8").splitlines()
+        if ln.strip() and "weekend_notify.py" in ln
+    ])
 
 
 def _why(result: subprocess.CompletedProcess, cfg: dict) -> str:

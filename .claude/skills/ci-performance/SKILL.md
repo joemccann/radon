@@ -1,6 +1,6 @@
 ---
 name: ci-performance
-description: Nightly CI and deploy optimizer - measure the real push-to-green-production critical path from GitHub Actions and production deploy timestamps, then land one bounded, evidence-backed optimization per night on a PR branch without weakening any test, gate, provenance, health, recovery or rollback guarantee. Runs unattended on the always-on runner via scripts/ci_performance_nightly.sh, one daily cycle at 00:00 local that runs audit then remediate; invoke as /ci-performance audit or /ci-performance remediate.
+description: Nightly CI and deploy optimizer - measure the real push-to-green-production critical path from GitHub Actions and production deploy timestamps, then land one bounded, evidence-backed optimization per night on a PR branch without weakening any test, gate, provenance, health, recovery or rollback guarantee. Runs unattended on the always-on runner via scripts/ci_performance_nightly.sh, one daily cycle at 00:20 local that runs audit then remediate; invoke as /ci-performance audit or /ci-performance remediate.
 ---
 
 # Nightly CI and Deploy Optimizer
@@ -15,7 +15,7 @@ evidence-backed bottleneck at a time. Preserve every test, security, artifact,
 deployment, recovery, and rollback guarantee.
 
 The first argument is the mode: `audit` or `remediate`. The launchd job fires
-daily at 00:00 local and runs `audit` followed by `remediate` in this loop's
+daily at 00:20 local and runs `audit` followed by `remediate` in this loop's
 dedicated clone.
 
 ## Objective
@@ -367,7 +367,7 @@ each correction into a concrete rule that prevents recurrence.
 ## Lessons
 
 - 2026-08-30 bootstrap: the testing and reliability launchd jobs already fire
-  at 00:00 local in separate clones. This loop needs its own clone and lock.
+  at 00:20 local in separate clones. This loop needs its own clone and lock.
   Run local full gates serially, and use GitHub job/step timestamps rather than
   contention-distorted Mac mini timing for performance claims.
 - 2026-08-31 first audit: `gh run list --json` has no `runAttempt` field (it

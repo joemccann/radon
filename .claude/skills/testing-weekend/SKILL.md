@@ -1,6 +1,6 @@
 ---
 name: testing-weekend
-description: Weekend testing loop - daily delta-audit of test-suite health for everything merged since the last audited SHA (new findings appended to TEST_AUDIT.md), then red/green remediation of new P0/P1 findings on a PR branch. Runs unattended on the always-on runner via scripts/testing_weekend.sh, one daily cycle at 00:00 local that runs audit then remediate; invoke as /testing-weekend audit or /testing-weekend remediate.
+description: Weekend testing loop - daily delta-audit of test-suite health for everything merged since the last audited SHA (new findings appended to TEST_AUDIT.md), then red/green remediation of new P0/P1 findings on a PR branch. Runs unattended on the always-on runner via scripts/testing_weekend.sh, one daily cycle at 00:10 local that runs audit then remediate; invoke as /testing-weekend audit or /testing-weekend remediate.
 ---
 
 # Testing Weekend Loop
@@ -12,7 +12,7 @@ exist to stop a real-money defect from shipping, so the question for every
 suite is not "does it pass" but "what defect would it actually catch."
 
 The mode is the first argument: `audit` or `remediate`. The unattended job
-fires once a day at 00:00 local and runs `audit` then `remediate`
+fires once a day at 00:10 local and runs `audit` then `remediate`
 sequentially in this loop's own clone.
 
 ## Hard rails (both modes — violating any of these is a failed run)

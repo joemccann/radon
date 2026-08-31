@@ -91,8 +91,11 @@ def _fake_runner_clone(tmp_path: Path, name: str) -> Path:
     repo = tmp_path / f"radon-{name}"
     repo.mkdir()
     (repo / ".radon-weekend-runner").write_text("", encoding="utf-8")
-    # the security wrapper additionally requires this marker; inert elsewhere
-    (repo / ".radon-security-runner").write_text("", encoding="utf-8")
+    # REL-180 (R-504): every wrapper requires its OWN loop marker as well; a
+    # generic clone carries all five so each wrapper finds its own.
+    for marker in (".radon-security-runner", ".radon-reliability-runner", ".radon-testing-runner",
+                   ".radon-ci-performance-runner", ".radon-documentation-runner"):
+        (repo / marker).write_text("", encoding="utf-8")
     lock = repo / ".weekend-runner.lock"
     lock.mkdir()
     # This process is alive, so acquire_runner_lock cannot reclaim the lock.

@@ -56,6 +56,8 @@ import math
 import os
 import stat
 import sys
+import tempfile
+import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -76,6 +78,28 @@ _DEFAULT_TIMEOUT = 20
 # helpers use this bound: 4 x 7s = 28s worst case, inside the rung budget.
 LADDER_TIMEOUT_S = 7
 _USER_AGENT = "radon/2.0"
+# REL-173 (R-482): `timeout=` bounds each socket read only. A Streamable-HTTP
+# server that keeps the response open with keepalive pings never trips it, so
+# every body is read as a stream under a wall-clock deadline and a size cap.
+RESPONSE_DEADLINE_FACTOR = 2.0
+MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+# REL-173 (R-469): where a rotated refresh token is saved when the store
+# cannot be committed AFTER the endpoint already spent the old one.
+ROTATED_TOKEN_FALLBACK_DIR = Path(tempfile.gettempdir())
+# REL-174 (R-485): the one spelling of this source in persisted rows, ladder
+# heartbeats and the streaks payload (price_history_daily vocabulary).
+RH_SOURCE = "rh"
+# REL-174 (R-470, R-480, R-481): failure classes the ladders can surface.
+# `auth` is structural and disables the rung for the process; the others open
+# a circuit breaker for BREAKER_COOLDOWN_S so a dead or rate-limited MCP is
+# hit once per scan, not once per symbol.
+FAILURE_AUTH = "auth"
+FAILURE_RATE_LIMITED = "rate_limited"
+FAILURE_NETWORK = "network"
+FAILURE_TOKEN_ENDPOINT = "token_endpoint"
+BREAKER_COOLDOWN_S = 300.0
+# robinhood_configured() re-reads the token file at most this often (R-484).
+CONFIGURED_MEMO_S = 60.0
 
 # Access tokens live ~3 days; refresh this far ahead of the recorded expiry.
 REFRESH_SAFETY_WINDOW_S = 3600
@@ -121,6 +145,14 @@ class RobinhoodAuthError(RobinhoodClientError):
     """Token rejected (401/403) or the refresh grant failed."""
 
 
+class RobinhoodRateLimitError(RobinhoodClientError):
+    """HTTP 429 from the MCP: the rung is closed for BREAKER_COOLDOWN_S."""
+
+
+class RobinhoodNetworkError(RobinhoodClientError):
+    """Connect/timeout to the MCP: the rung is closed for BREAKER_COOLDOWN_S."""
+
+
 class RobinhoodReadOnlyError(RobinhoodClientError):
     """A tool outside READ_ONLY_TOOLS was requested. Execution stays on IB."""
 
@@ -131,10 +163,135 @@ class RobinhoodReadOnlyError(RobinhoodClientError):
 _refresh_disabled = False
 
 
-def _disable_for_process(reason: str) -> None:
-    global _refresh_disabled
-    _refresh_disabled = True
+def _iter_body(resp: Any) -> Iterator[bytes]:
+    """Body chunks as they ARRIVE. ``iter_content(8192)`` waits for a full
+    8192 bytes, which a keepalive stream never delivers; urllib3's ``read1``
+    returns whatever is available up to the chunk size."""
+    raw = getattr(resp, "raw", None)
+    read1 = getattr(raw, "read1", None)
+    if callable(read1):
+        while True:
+            chunk = read1(8192)
+            if not chunk:
+                return
+            yield chunk
+        return
+    yield from resp.iter_content(chunk_size=8192)
+
+
+def _read_bounded(resp: Any, timeout: float, what: str) -> bytes:
+    """Whole body under ``RESPONSE_DEADLINE_FACTOR * timeout`` wall-clock and
+    ``MAX_RESPONSE_BYTES``. Closes the response either way."""
+    deadline = time.monotonic() + RESPONSE_DEADLINE_FACTOR * float(timeout)
+    chunks: List[bytes] = []
+    size = 0
+    try:
+        for chunk in _iter_body(resp):
+            if chunk:
+                chunks.append(chunk)
+                size += len(chunk)
+            if size > MAX_RESPONSE_BYTES:
+                raise RobinhoodClientError(
+                    f"{what} response exceeded the {MAX_RESPONSE_BYTES} byte cap"
+                )
+            if time.monotonic() > deadline:
+                raise RobinhoodClientError(
+                    f"{what} response exceeded the {RESPONSE_DEADLINE_FACTOR * float(timeout):.0f}s "
+                    "wall-clock deadline (keepalive stream never closed)"
+                )
+    except (requests.ConnectionError, requests.Timeout) as exc:
+        raise RobinhoodClientError(f"{what} body read failed: {exc.__class__.__name__}") from None
+    finally:
+        try:
+            resp.close()
+        except Exception:  # noqa: BLE001 - best effort
+            pass
+    return b"".join(chunks)
+
+
+_process_lock = threading.RLock()
+_failure: Optional[Dict[str, Any]] = None
+_breaker_until: float = 0.0
+_shared_client: Optional["RobinhoodClient"] = None
+_configured_memo: Optional[tuple[float, tuple, bool]] = None
+_warned_paths: set = set()
+
+
+def _disable_for_process(reason: str, failure_class: str = FAILURE_AUTH) -> None:
+    """Structural failure: no retry in this process can help."""
+    global _refresh_disabled, _failure
+    with _process_lock:
+        _refresh_disabled = True
+        _failure = {"class": failure_class, "reason": reason, "at": time.time()}
     print(f"  Robinhood disabled for this process: {reason}", file=sys.stderr)
+
+
+def _open_breaker(reason: str, failure_class: str) -> None:
+    """Transient failure: close the rung for BREAKER_COOLDOWN_S (R-480)."""
+    global _breaker_until, _failure
+    with _process_lock:
+        _breaker_until = time.monotonic() + BREAKER_COOLDOWN_S
+        _failure = {"class": failure_class, "reason": reason, "at": time.time()}
+    print(
+        f"  Robinhood rung closed for {BREAKER_COOLDOWN_S:.0f}s ({failure_class}): {reason}",
+        file=sys.stderr,
+    )
+
+
+def robinhood_available() -> bool:
+    """False while disabled for the process or inside a breaker cooldown."""
+    with _process_lock:
+        return not _refresh_disabled and time.monotonic() >= _breaker_until
+
+
+def robinhood_rung_error() -> Optional[Dict[str, Any]]:
+    """The failure that currently closes the rung, or None when it is open.
+
+    Ladders read this after a fetch to say WHY a ticker fell to Yahoo
+    (``robinhood_degradation``) instead of heartbeating ``ok``/``yahoo``.
+    """
+    with _process_lock:
+        if robinhood_available() or _failure is None:
+            return None
+        return dict(_failure)
+
+
+def robinhood_degradation(
+    service: str, sources: Dict[str, str], *, skip: Iterable[str] = ()
+) -> Optional[Dict[str, Any]]:
+    """Heartbeat ``error`` payload when the closed rung demoted tickers to Yahoo."""
+    failure = robinhood_rung_error()
+    if failure is None:
+        return None
+    skipped = set(skip)
+    demoted = sorted(t for t, s in sources.items() if s == "yahoo" and t not in skipped)
+    if not demoted:
+        return None
+    return {
+        "class": failure["class"],
+        "source": "robinhood",
+        "message": (
+            f"{service}: Robinhood rung failed ({failure['class']}: {failure['reason']}); "
+            f"{', '.join(demoted)} served by Yahoo"
+        ),
+    }
+
+
+def _reset_process_state() -> None:
+    """Test hook: forget the breaker, the failure, the shared client, the memo."""
+    global _refresh_disabled, _failure, _breaker_until, _shared_client, _configured_memo
+    with _process_lock:
+        _refresh_disabled = False
+        _failure = None
+        _breaker_until = 0.0
+        if _shared_client is not None:
+            try:
+                _shared_client.close()
+            except Exception:  # noqa: BLE001
+                pass
+        _shared_client = None
+        _configured_memo = None
+        _warned_paths.clear()
 
 
 class RobinhoodTokenStore:
@@ -160,8 +317,10 @@ class RobinhoodTokenStore:
         state: Dict[str, Any] = {}
         try:
             mode = stat.S_IMODE(self._path.stat().st_mode)
-            if mode & 0o077:
-                # Never print values — only the path and the mode.
+            if mode & 0o077 and str(self._path) not in _warned_paths:
+                # Never print values — only the path and the mode. Once per
+                # process (R-484): garch/leap call this per ticker from 16 threads.
+                _warned_paths.add(str(self._path))
                 print(
                     f"  Robinhood token file {self._path} permissions "
                     f"{oct(mode)} are too open; expected 0600",
@@ -252,19 +411,55 @@ class RobinhoodTokenStore:
 
     # ── persistence ──────────────────────────────────────────────
 
-    def persist(self) -> None:
-        """Atomic 0600 write: temp file in the same directory, then rename."""
+    def _tmp_path(self) -> Path:
+        return self._path.with_name(self._path.name + ".tmp")
+
+    def _open_persist_tmp(self) -> int:
+        """Open the temp file the commit will rename over the store.
+
+        Raises OSError when the store is not writable. Called BEFORE the
+        token endpoint is hit so a single-use refresh token is never spent
+        with nowhere to persist its rotation (R-469).
+        """
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self._path.with_name(self._path.name + ".tmp")
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        return os.open(self._tmp_path(), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+
+    def _discard_persist_tmp(self, fd: int) -> None:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        self._tmp_path().unlink(missing_ok=True)
+
+    def _commit_persist(self, fd: int) -> None:
+        """Write the state through ``fd`` and rename it over the store."""
+        tmp = self._tmp_path()
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 json.dump(self._state, handle, indent=2)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp, self._path)
         except BaseException:
             tmp.unlink(missing_ok=True)
             raise
-        os.replace(tmp, self._path)
         os.chmod(self._path, 0o600)
+
+    def persist(self) -> None:
+        """Atomic 0600 write: temp file in the same directory, then rename."""
+        self._commit_persist(self._open_persist_tmp())
+
+    def _save_rotation_fallback(self) -> Path:
+        """Last resort after the endpoint rotated the token but the store
+        could not be committed: write the state somewhere writable, 0600."""
+        ROTATED_TOKEN_FALLBACK_DIR.mkdir(parents=True, exist_ok=True)
+        fd, name = tempfile.mkstemp(
+            prefix="rh-mcp-rotated-", suffix=".json", dir=str(ROTATED_TOKEN_FALLBACK_DIR)
+        )
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(self._state, handle, indent=2)
+        os.chmod(name, 0o600)
+        return Path(name)
 
     def bootstrap_file_if_missing(self) -> None:
         """First configured run: materialize the env tokens into the file."""
@@ -321,6 +516,24 @@ class RobinhoodTokenStore:
             return self._refresh_locked(timeout)
 
     def _refresh_locked(self, timeout: int) -> str:
+        # R-469: prove the store is writable BEFORE the endpoint spends the
+        # single-use refresh token. A local write problem is not an auth
+        # failure, so it neither disables the process nor touches the wire.
+        try:
+            tmp_fd = self._open_persist_tmp()
+        except OSError as exc:
+            raise RobinhoodClientError(
+                f"Robinhood token store is not writable ({exc.strerror}: {self._path}); "
+                "refusing to spend the single-use refresh token"
+            ) from None
+        try:
+            return self._refresh_with_open_store(timeout, tmp_fd)
+        except BaseException:
+            # Every failure before the commit leaves the temp file behind.
+            self._tmp_path().unlink(missing_ok=True)
+            raise
+
+    def _refresh_with_open_store(self, timeout: int, tmp_fd: int) -> str:
         try:
             resp = requests.post(
                 TOKEN_ENDPOINT,
@@ -334,16 +547,26 @@ class RobinhoodTokenStore:
                     "User-Agent": _USER_AGENT,
                 },
                 timeout=timeout,
+                stream=True,
             )
         except (requests.ConnectionError, requests.Timeout) as exc:
-            raise RobinhoodClientError(
-                f"Robinhood token endpoint unreachable: {_scrub(str(exc), self.secrets())}"
-            ) from None
+            self._discard_persist_tmp(tmp_fd)
+            reason = f"Robinhood token endpoint unreachable: {_scrub(str(exc), self.secrets())}"
+            _open_breaker(reason, FAILURE_TOKEN_ENDPOINT)
+            raise RobinhoodClientError(reason) from None
+
+        try:
+            body = _read_bounded(resp, timeout, "Robinhood token endpoint")
+        except RobinhoodClientError:
+            self._discard_persist_tmp(tmp_fd)
+            raise
+        text = body.decode("utf-8", errors="replace")
 
         if resp.status_code >= 400:
+            self._discard_persist_tmp(tmp_fd)
             # Scrub BEFORE truncating: a slice can cut a token in half and
             # leave a prefix the exact-match scrub would no longer find.
-            detail = _scrub(resp.text, self.secrets())[:200]
+            detail = _scrub(text, self.secrets())[:200]
             if 400 <= resp.status_code < 500:
                 # invalid_grant / invalid_client: retrying cannot help.
                 _disable_for_process(
@@ -353,18 +576,22 @@ class RobinhoodTokenStore:
                 raise RobinhoodAuthError(
                     f"Robinhood token refresh rejected (HTTP {resp.status_code}): {detail}"
                 )
-            raise RobinhoodClientError(
-                f"Robinhood token endpoint HTTP {resp.status_code}: {detail}"
-            )
+            reason = f"Robinhood token endpoint HTTP {resp.status_code}: {detail}"
+            _open_breaker(reason, FAILURE_TOKEN_ENDPOINT)
+            raise RobinhoodClientError(reason)
 
         try:
-            payload = resp.json()
+            payload = json.loads(text)
+            if not isinstance(payload, dict):
+                raise ValueError("not an object")
         except ValueError:
+            self._discard_persist_tmp(tmp_fd)
             raise RobinhoodClientError(
                 "Robinhood token endpoint returned a non-JSON body"
             ) from None
         access = payload.get("access_token")
         if not access:
+            self._discard_persist_tmp(tmp_fd)
             raise RobinhoodClientError("Robinhood token response carried no access_token")
 
         now = time.time()
@@ -376,7 +603,22 @@ class RobinhoodTokenStore:
             self._state["expires_at"] = now + float(payload["expires_in"])
         if payload.get("refresh_token"):
             self._state["refresh_token"] = payload["refresh_token"]
-        self.persist()
+        try:
+            self._commit_persist(tmp_fd)
+        except OSError as exc:
+            # The endpoint already rotated the token; disk still holds the
+            # spent one. Save the rotation somewhere writable and stop this
+            # process from refreshing again on the stale file.
+            saved = self._save_rotation_fallback()
+            _disable_for_process(
+                f"rotated Robinhood token could not be persisted to {self._path} "
+                f"({exc.strerror}); saved to {saved}"
+            )
+            raise RobinhoodClientError(
+                f"Robinhood token rotated but {self._path} could not be written "
+                f"({exc.strerror}); the new tokens are at {saved} — restore them to "
+                f"{self._path} before the next run"
+            ) from None
         return str(access)
 
 
@@ -386,9 +628,28 @@ def robinhood_configured() -> bool:
     Never touches the network, and False for the rest of the process after
     a rejected refresh grant.
     """
-    if _refresh_disabled:
+    global _configured_memo
+    if not robinhood_available():
         return False
-    return RobinhoodTokenStore().is_configured()
+    # Keyed on the env the store reads, so a credential change (operator
+    # exports a token, a test swaps the file path) is never served stale.
+    key = tuple(
+        os.environ.get(name) or ""
+        for name in (
+            "ROBINHOOD_MCP_TOKEN_FILE",
+            "ROBINHOOD_MCP_TOKEN",
+            "ROBINHOOD_MCP_REFRESH_TOKEN",
+            "ROBINHOOD_MCP_CLIENT_ID",
+        )
+    )
+    with _process_lock:
+        memo = _configured_memo
+        now = time.monotonic()
+        if memo is not None and memo[1] == key and now - memo[0] < CONFIGURED_MEMO_S:
+            return memo[2]
+        configured = RobinhoodTokenStore().is_configured()
+        _configured_memo = (now, key, configured)
+        return configured
 
 
 class RobinhoodClient:
@@ -417,6 +678,8 @@ class RobinhoodClient:
         self._next_id = 0
         self._session = requests.Session()
         self._session.headers.update({"User-Agent": _USER_AGENT})
+        # Bodies are read by _read_bounded (deadline + cap), never by requests.
+        self._session.stream = True
 
     def __repr__(self) -> str:  # never leak a token
         return f"RobinhoodClient(url={self._url!r}, configured={self.is_configured()})"
@@ -478,15 +741,25 @@ class RobinhoodClient:
         return headers
 
     def _post(self, payload: Dict[str, Any], _retry_auth: bool = True) -> Optional[Dict[str, Any]]:
+        if not robinhood_available():
+            failure = robinhood_rung_error() or {}
+            raise RobinhoodNotConfiguredError(
+                f"Robinhood rung closed ({failure.get('class', 'disabled')}): "
+                f"{failure.get('reason', 'disabled for this process')}"
+            )
         token = self._resolve_token()
         try:
             resp = self._session.post(
                 self._url, json=payload, headers=self._headers(token), timeout=self._timeout
             )
         except (requests.ConnectionError, requests.Timeout) as exc:
-            raise RobinhoodClientError(
-                f"Robinhood MCP unreachable: {self._redact(str(exc))}"
-            ) from None
+            reason = f"Robinhood MCP unreachable: {self._redact(str(exc))}"
+            _open_breaker(reason, FAILURE_NETWORK)
+            raise RobinhoodNetworkError(reason) from None
+        # The session is created with stream=True; read the body ourselves
+        # under the wall-clock deadline and size cap (R-482).
+        body = _read_bounded(resp, self._timeout, "Robinhood MCP")
+        text = body.decode("utf-8", errors="replace")
         if resp.status_code in (401, 403):
             # Access token expired or revoked mid-flight: refresh once and
             # retry the same request with the new token.
@@ -508,35 +781,39 @@ class RobinhoodClient:
                     )
                 self._store.refresh(timeout=self._timeout, invalid_access=token)
                 return self._post(payload, _retry_auth=False)
-            if not _retry_auth:
-                # This request already carried a token minted seconds ago.
-                # The MCP rejecting it is structural (revoked grant, wrong
-                # client) — refreshing again per symbol would hammer the
-                # token endpoint across a whole scan, so degrade the
-                # process to the unconfigured skip.
-                _disable_for_process(
-                    f"MCP rejected a freshly refreshed token (HTTP {resp.status_code})"
-                )
+            # Structural either way (R-470a): a token minted seconds ago was
+            # rejected, or there is nothing to refresh with. Retrying per
+            # symbol would hammer the endpoint for the rest of the scan, so
+            # degrade the process to the unconfigured skip.
+            _disable_for_process(
+                f"MCP rejected the access token (HTTP {resp.status_code}) and "
+                + ("a fresh refresh cannot help" if not _retry_auth else "no refresh credentials exist")
+            )
             raise RobinhoodAuthError(f"Robinhood MCP rejected the token (HTTP {resp.status_code})")
+        if resp.status_code == 429:
+            reason = f"Robinhood MCP rate limited (HTTP 429): {self._redact(text)[:120]}"
+            _open_breaker(reason, FAILURE_RATE_LIMITED)
+            raise RobinhoodRateLimitError(reason)
         if resp.status_code >= 400:
             # Scrub BEFORE truncating (a slice can bisect a token).
             raise RobinhoodClientError(
-                f"Robinhood MCP HTTP {resp.status_code}: {self._redact(resp.text)[:300]}"
+                f"Robinhood MCP HTTP {resp.status_code}: {self._redact(text)[:300]}"
             )
         session_id = resp.headers.get("Mcp-Session-Id")
         if session_id:
             self._session_id = session_id
-        if resp.status_code == 202 or not resp.content:
+        if resp.status_code == 202 or not body:
             return None  # accepted notification
         content_type = resp.headers.get("Content-Type", "")
         if "text/event-stream" in content_type:
-            return _parse_sse_response(resp.text)
+            return _parse_sse_response(text)
         try:
-            return resp.json()
+            parsed = json.loads(text)
         except ValueError:
             raise RobinhoodClientError(
-                f"Robinhood MCP returned non-JSON body: {self._redact(resp.text)[:200]}"
+                f"Robinhood MCP returned non-JSON body: {self._redact(text)[:200]}"
             ) from None
+        return parsed if isinstance(parsed, dict) else None
 
     def _rpc(self, method: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         self._next_id += 1
@@ -739,20 +1016,31 @@ def fetch_robinhood_closes(symbols: List[str]) -> Dict[str, Dict[str, float]]:
     if not robinhood_configured():
         return {}
     out: Dict[str, Dict[str, float]] = {}
-    try:
-        with RobinhoodClient(timeout=LADDER_TIMEOUT_S) as rh:
-            for symbol in symbols:
-                try:
-                    closes = rh.fetch_daily_closes(symbol)
-                except RobinhoodClientError as exc:
-                    print(f"  Robinhood: {symbol} failed — {exc}", file=sys.stderr)
-                    continue
-                if closes:
-                    out[symbol] = closes
-                    print(f"  Robinhood: {symbol} — {len(closes)} bars", file=sys.stderr)
-    except Exception as exc:  # noqa: BLE001 - the ladder falls through to Yahoo
-        print(f"  Robinhood connection failed — {exc}", file=sys.stderr)
+    # One client per process, calls serialized (R-480): the MCP session is
+    # initialized once, and a 16-worker pool cannot fan 48 handshakes at a
+    # dead endpoint. A closed rung ends the loop; a per-symbol error of ANY
+    # shape skips only that symbol (R-470).
+    with _process_lock:
+        for symbol in symbols:
+            if not robinhood_available():
+                break
+            try:
+                closes = _client().fetch_daily_closes(symbol)
+            except Exception as exc:  # noqa: BLE001 - the ladder falls through to Yahoo
+                print(f"  Robinhood: {symbol} failed — {exc}", file=sys.stderr)
+                continue
+            if closes:
+                out[symbol] = closes
+                print(f"  Robinhood: {symbol} — {len(closes)} bars", file=sys.stderr)
     return out
+
+
+def _client() -> "RobinhoodClient":
+    """The process-wide ladder client (caller holds _process_lock)."""
+    global _shared_client
+    if _shared_client is None:
+        _shared_client = RobinhoodClient(timeout=LADDER_TIMEOUT_S)
+    return _shared_client
 
 
 def fetch_robinhood_quote(symbol: str, *, index: bool = False) -> Optional[float]:
@@ -763,7 +1051,8 @@ def fetch_robinhood_quote(symbol: str, *, index: bool = False) -> Optional[float
     if not robinhood_configured():
         return None
     try:
-        with RobinhoodClient(timeout=LADDER_TIMEOUT_S) as rh:
+        with _process_lock:
+            rh = _client()
             rows = (
                 rh.get_index_quotes([symbol]) if index else rh.get_equity_quotes([symbol])
             )

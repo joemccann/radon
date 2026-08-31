@@ -433,7 +433,7 @@ class TestCli:
                 {"IEI": "yahoo", "HYG": "yahoo", "DXY": "yahoo"},
             ),
         )
-        monkeypatch.setattr(fih, "persist_result", lambda payload, rows, health_error=None: None)
+        monkeypatch.setattr(fih, "persist_result", lambda payload, rows, health_error=None, **_kw: None)
         assert main(["--json"]) == 0
         out = capsys.readouterr().out
         payload = json.loads(out)

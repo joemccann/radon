@@ -124,7 +124,7 @@ def test_longest_short_result_used_when_every_source_is_short(client):
 
     assert resp.status_code == 200
     body = resp.json()
-    assert body["source"] == "robinhood"
+    assert body["source"] == "rh"  # REL-174 (R-485): the writer vocabulary spelling
     assert body["count"] == 5
 
 
@@ -166,3 +166,13 @@ def test_all_sources_empty_is_missing_200(client):
 def test_invalid_ticker_is_400(client):
     resp = client.get("/streaks/ba%24d")
     assert resp.status_code == 400
+
+
+def test_robinhood_rung_label_is_the_writer_vocabulary():
+    """REL-174 (R-485): one spelling for the source everywhere."""
+    from api.routes import streaks
+    from clients.robinhood_client import RH_SOURCE
+
+    assert streaks.RH_SOURCE == RH_SOURCE == "rh"
+    assert [label for label, _ in streaks.FALLBACK_LADDER] == ["uw", "rh", "yahoo"]
+    assert all(callable(getattr(streaks, name)) for _, name in streaks.FALLBACK_LADDER)

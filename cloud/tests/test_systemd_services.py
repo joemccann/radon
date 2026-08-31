@@ -328,6 +328,20 @@ class TestIBGatewayRemote:
         assert "radon-ib-gateway.service" not in u.get("partof", "")
         assert "radon-ib-gateway.service" not in u.get("requires", "")
 
+    def test_network_exposed_daemon_is_sandboxed(self, unit):
+        """REL-168 (R-497): the daemon execs a Docker-mutating helper on a
+        private-net port; it gets the same sandbox as the other radon units."""
+        svc = unit(self.FILENAME)["Service"]
+        assert svc.get("nonewprivileges") == "yes"
+        assert svc.get("protectsystem") == "strict"
+        assert svc.get("privatetmp") == "yes"
+        assert "capabilityboundingset" in svc
+        # The helper writes the 2FA lease, control guard and transition file
+        # under /var/lib/radon and the deploy lock under /home/radon.
+        rw = svc.get("readwritepaths", "")
+        assert "/var/lib/radon" in rw
+        assert "/home/radon" in rw
+
 
 # ---------------------------------------------------------------------------
 # radon-api.service

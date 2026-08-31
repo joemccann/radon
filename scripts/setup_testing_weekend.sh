@@ -104,6 +104,7 @@ git -C "$WEEKEND_REPO" fetch origin --quiet
 git -C "$WEEKEND_REPO" checkout -f --quiet main
 git -C "$WEEKEND_REPO" reset --hard --quiet origin/main
 touch "$WEEKEND_REPO/.radon-weekend-runner"
+touch "$WEEKEND_REPO/.radon-testing-runner"  # REL-180 (R-504): this loop's own marker
 mkdir -p "$WEEKEND_REPO/logs/testing-weekend"
 
 # web/.env is gitignored, so a fresh `git clone` can never carry it and the

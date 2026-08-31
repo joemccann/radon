@@ -57,6 +57,7 @@ describe("streaks lib formatters", () => {
   it("labels every source honestly", () => {
     expect(sourceLabel("ib")).toBe("IB");
     expect(sourceLabel("uw")).toBe("UNUSUAL WHALES");
+    expect(sourceLabel("rh")).toBe("ROBINHOOD");
     expect(sourceLabel("robinhood")).toBe("ROBINHOOD");
     expect(sourceLabel("yahoo")).toBe("YAHOO");
     expect(sourceLabel("cache")).toBe("CACHED");

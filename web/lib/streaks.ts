@@ -5,7 +5,9 @@
  * module only formats it. Spec: docs/indicators/streaks.md.
  */
 
-export type StreaksSource = "ib" | "uw" | "robinhood" | "yahoo" | "cache" | null;
+// "rh" is the persisted vocabulary (REL-174, R-485); "robinhood" is accepted
+// for cache envelopes written before the rename.
+export type StreaksSource = "ib" | "uw" | "rh" | "robinhood" | "yahoo" | "cache" | null;
 
 export interface StreakEntry {
   date: string;
@@ -83,6 +85,7 @@ export function formatUpDayPct(v: number | null | undefined): string {
 const SOURCE_LABELS: Record<Exclude<StreaksSource, null>, string> = {
   ib: "IB",
   uw: "UNUSUAL WHALES",
+  rh: "ROBINHOOD",
   robinhood: "ROBINHOOD",
   yahoo: "YAHOO",
   cache: "CACHED",

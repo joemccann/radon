@@ -19,7 +19,8 @@ export async function POST(): Promise<Response> {
   try {
     const data = await radonFetch("/ib/restart", {
       method: "POST",
-      timeout: 120_000,
+      // REL-171: must outlive FastAPI REMOTE_TIMEOUT_S (135s) on the app role.
+      timeout: 150_000,
       token: access.principal.token,
     });
     const response = NextResponse.json(data);

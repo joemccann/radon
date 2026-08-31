@@ -11,11 +11,14 @@
          would have restored it, and every later fire repeats that
          silently. Skipped while a live run holds the lock, so the fire
          cannot reset the tree under a running agent. -->
+    <!-- REL-180 (R-477): the pre-lock fetch runs under `timeout` with ssh
+         keepalives, so a blackholed port cannot park the job outside the
+         wrapper's lock, traps and dead-man. -->
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
         <string>-c</string>
-        <string>C=__WEEKEND_REPO__; kill -0 "$(cat "$C/.weekend-runner.lock/pid" 2&gt;/dev/null)" 2&gt;/dev/null || { git -C "$C" fetch -q origin &amp;&amp; git -C "$C" checkout -f -q main &amp;&amp; git -C "$C" reset --hard -q origin/main; }; exec /bin/bash "$C/scripts/security_nightly.sh" cycle</string>
+        <string>C=__WEEKEND_REPO__; kill -0 "$(cat "$C/.weekend-runner.lock/pid" 2&gt;/dev/null)" 2&gt;/dev/null || { T="$(command -v timeout || true)"; ${T:+"$T" -k 15 180} git -C "$C" -c core.sshCommand="ssh -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4" fetch -q origin &amp;&amp; git -C "$C" checkout -f -q main &amp;&amp; git -C "$C" reset --hard -q origin/main; }; exec /bin/bash "$C/scripts/security_nightly.sh" cycle</string>
     </array>
 
     <key>WorkingDirectory</key>
@@ -44,7 +47,7 @@
         <key>Hour</key>
         <integer>0</integer>
         <key>Minute</key>
-        <integer>0</integer>
+        <integer>40</integer>
     </dict>
 
     <key>RunAtLoad</key>

@@ -269,6 +269,16 @@ cd "$REPO"
   exit 2
 }
 
+# REL-180 (R-506): CREDENTIAL-FREE is a check, not a comment. A credential
+# file that ever lands in this clone (an operator copy, a stray provision)
+# would ride every nightly reset into the third-party scanners' tree.
+for credential_file in .env .env.ib-mode web/.env; do
+  [[ -e "$credential_file" ]] || continue
+  echo "REFUSING: $REPO holds a credential file ($credential_file); the security clone must stay credential-free — remove it" >&2
+  report "REFUSED" "$REPO holds a credential file ($credential_file); the security loop runs credential-free only — remove it from the clone" || true
+  exit 2
+done
+
 RUNNER_LOCK="$REPO/.weekend-runner.lock"
 acquire_runner_lock "$RUNNER_LOCK" || {
   echo "REFUSING: another weekend run owns $REPO" >&2
