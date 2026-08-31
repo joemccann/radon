@@ -48,11 +48,13 @@ RELIABILITY = REPO / "scripts" / "reliability_weekend.sh"
 TESTING = REPO / "scripts" / "testing_weekend.sh"
 CI_PERFORMANCE = REPO / "scripts" / "ci_performance_nightly.sh"
 DOCUMENTATION = REPO / "scripts" / "documentation_nightly.sh"
+SECURITY = REPO / "scripts" / "security_nightly.sh"
 PLISTS = {
     "reliability": REPO / "config" / "com.radon.reliability-daily.plist",
     "testing": REPO / "config" / "com.radon.testing-daily.plist",
     "ci-performance": REPO / "config" / "com.radon.ci-performance-daily.plist",
     "documentation": REPO / "config" / "com.radon.documentation-daily.plist",
+    "security": REPO / "config" / "com.radon.security-daily.plist",
 }
 # Every nightly loop wrapper. A new loop that is not registered here inherits
 # none of the dead-man contract below, which is the whole reason the two
@@ -62,6 +64,7 @@ LOOPS = {
     "testing": TESTING,
     "ci-performance": CI_PERFORMANCE,
     "documentation": DOCUMENTATION,
+    "security": SECURITY,
 }
 
 
@@ -88,6 +91,8 @@ def _fake_runner_clone(tmp_path: Path, name: str) -> Path:
     repo = tmp_path / f"radon-{name}"
     repo.mkdir()
     (repo / ".radon-weekend-runner").write_text("", encoding="utf-8")
+    # the security wrapper additionally requires this marker; inert elsewhere
+    (repo / ".radon-security-runner").write_text("", encoding="utf-8")
     lock = repo / ".weekend-runner.lock"
     lock.mkdir()
     # This process is alive, so acquire_runner_lock cannot reclaim the lock.
@@ -307,6 +312,7 @@ class TestSetupGuardsTheSharedVenv:
         "testing": REPO / "scripts" / "setup_testing_weekend.sh",
         "ci-performance": REPO / "scripts" / "setup_ci_performance.sh",
         "documentation": REPO / "scripts" / "setup_documentation_nightly.sh",
+        "security": REPO / "scripts" / "setup_security_nightly.sh",
     }
 
     def test_the_two_setups_really_do_share_a_venv(self):
@@ -318,7 +324,7 @@ class TestSetupGuardsTheSharedVenv:
             f"precondition changed: {venvs}"
         )
 
-    @pytest.mark.parametrize("name", ["reliability", "testing", "ci-performance", "documentation"])
+    @pytest.mark.parametrize("name", ["reliability", "testing", "ci-performance", "documentation", "security"])
     def test_each_setup_checks_the_sibling_clone_lock(self, name):
         # Comments stripped first: the guard's own comment quotes the
         # `python3.13 -m venv` line it protects, and a naive slice ends there.
@@ -332,7 +338,7 @@ class TestSetupGuardsTheSharedVenv:
             "the other loop's cycle is executing against it"
         )
 
-    @pytest.mark.parametrize("name", ["reliability", "testing", "ci-performance", "documentation"])
+    @pytest.mark.parametrize("name", ["reliability", "testing", "ci-performance", "documentation", "security"])
     def test_each_setup_checks_the_bash_version(self, name):
         """GAP C: `/bin/bash` on this runner is 3.2, and `cloud/tests` needs 4+.
 

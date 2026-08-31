@@ -33,7 +33,7 @@ SKILL = REPO / ".claude" / "skills" / "documentation-nightly" / "SKILL.md"
 CLONE = "radon-documentation"
 LABEL = "documentation-nightly"
 LOG_DIR = "logs/documentation-nightly"
-SIBLING_CLONES = ("radon-testing", "radon-ci-performance")
+SIBLING_CLONES = ("radon-testing", "radon-ci-performance", "radon-security")
 
 
 def _uncommented(path: Path) -> str:
@@ -195,7 +195,7 @@ class TestSetupProvisionsTheDeadmanLabel:
         assert "com.radon.documentation-daily.plist" in body, body
 
     @pytest.mark.parametrize(
-        "sibling", ("radon", "radon-testing", "radon-ci-performance")
+        "sibling", ("radon", "radon-testing", "radon-ci-performance", "radon-security")
     )
     def test_setup_stands_down_on_every_sibling_lock(self, sibling):
         """All four setups write the SAME `$WEEKEND_ROOT/venv`.
@@ -217,6 +217,7 @@ class TestSetupProvisionsTheDeadmanLabel:
             "setup_reliability_weekend.sh",
             "setup_testing_weekend.sh",
             "setup_ci_performance.sh",
+            "setup_security_nightly.sh",
         ],
     )
     def test_every_sibling_setup_stands_down_on_this_loops_lock(self, setup_name):
