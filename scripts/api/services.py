@@ -304,6 +304,29 @@ async def show_unit(unit: str) -> UnitStatus:
     if not is_valid_unit(unit):
         return UnitStatus(unit, "rejected", "unknown", "unknown", "", can_control=False)
 
+    # App FastAPI runs in a container with no systemctl. Gateway status still
+    # comes from the broker daemon over mTLS.
+    if unit == GATEWAY_UNIT and host_role() == "app":
+        status = UnitStatus(
+            unit,
+            load_state="remote",
+            active_state="unknown",
+            sub_state="unknown",
+            description="IB Gateway on broker",
+            can_control=False,
+        )
+        if not is_remote_gateway_configured():
+            return status
+        remote = await remote_gateway_action("status")
+        status.can_control = True
+        if remote.ok and "running" in remote.detail:
+            status.active_state = "active"
+            status.sub_state = "running"
+        elif "stopped" in remote.detail:
+            status.active_state = "inactive"
+            status.sub_state = "dead"
+        return status
+
     if not is_systemd_available():
         return UnitStatus(
             unit,
@@ -344,23 +367,6 @@ async def show_unit(unit: str) -> UnitStatus:
         uptime_secs=_derive_uptime_secs(parsed),
     )
     if unit != GATEWAY_UNIT:
-        return status
-
-    if host_role() == "app":
-        if not is_remote_gateway_configured():
-            status.can_control = False
-            return status
-        remote = await remote_gateway_action("status")
-        status.can_control = True
-        if remote.ok and "running" in remote.detail:
-            status.active_state = "active"
-            status.sub_state = "running"
-        elif "stopped" in remote.detail:
-            status.active_state = "inactive"
-            status.sub_state = "dead"
-        else:
-            status.active_state = "unknown"
-            status.sub_state = "unknown"
         return status
 
     # A Type=oneshot/RemainAfterExit wrapper can stay active (exited) after

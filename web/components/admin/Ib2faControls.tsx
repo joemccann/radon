@@ -112,7 +112,7 @@ export default function Ib2faControls({
   // Start triggers a fresh 2FA login, so gate it on the same push lock as
   // Force 2FA to keep two pushes from racing (feedback_2fa_push_stacking).
   const startBlockedByPush = isForcePushDisabled({ pushLock, pending: false });
-  const powerDisabledReason = !servicesSupported
+  const powerDisabledReason = !servicesSupported && !remoteGateway
     ? "Read-only: this browser is not on the Hetzner VPS."
     : powerState === "unknown"
       ? "Gateway state is unknown while the control plane is unreachable."

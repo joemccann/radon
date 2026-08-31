@@ -105,6 +105,29 @@ class TestNonSystemdHost:
         assert status.load_state == "unsupported"
         assert status.can_control is False
 
+    def test_app_gateway_status_does_not_need_systemctl(self, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.setenv("RADON_HOST_ROLE", "app")
+        ca = tmp_path / "ca.pem"
+        cert = tmp_path / "client.pem"
+        key = tmp_path / "client.key"
+        for path in (ca, cert, key):
+            path.write_text("x")
+        monkeypatch.setenv("RADON_IB_REMOTE_URL", "https://10.0.0.4:8340")
+        monkeypatch.setenv("RADON_IB_REMOTE_CA", str(ca))
+        monkeypatch.setenv("RADON_IB_REMOTE_CLIENT_CERT", str(cert))
+        monkeypatch.setenv("RADON_IB_REMOTE_CLIENT_KEY", str(key))
+        remote = admin_services.ActionResult(
+            "radon-ib-gateway.service", "status", True, "running", 0,
+        )
+        async def fake_remote(_action: str):
+            return remote
+        with patch.object(admin_services, "is_systemd_available", return_value=False), \
+             patch.object(admin_services, "remote_gateway_action", side_effect=fake_remote):
+            status = asyncio.run(admin_services.show_unit("radon-ib-gateway.service"))
+        assert status.can_control is True
+        assert status.active_state == "active"
+        assert status.sub_state == "running"
+
     def test_control_unit_refuses_without_systemctl(self) -> None:
         with patch.object(admin_services, "is_systemd_available", return_value=False):
             result = asyncio.run(

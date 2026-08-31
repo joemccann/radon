@@ -359,6 +359,16 @@ cmd_run() {
     -v "${MEDIA_DIR}:${MEDIA_DIR_IN_CONTAINER}" \
     -v "${LEASE_DIR}:/var/lib/radon/ib-lease"
 
+  # App-role Gateway control: mTLS client pair lives on the host at
+  # /etc/radon/ib-remote. Mount that directory only, never /etc/radon
+  # (TWS secrets, Turso tokens). Read-only. Missing dir is combined/broker.
+  if [[ "$unit" == "radon-api.service" ]]; then
+    local ib_remote_certs="${RADON_IB_REMOTE_CERT_DIR:-/etc/radon/ib-remote}"
+    if [[ -d "$ib_remote_certs" ]]; then
+      set -- "$@" -v "${ib_remote_certs}:${ib_remote_certs}:ro"
+    fi
+  fi
+
   if [[ -n "${NOTIFY_SOCKET:-}" && "${NOTIFY_SOCKET}" == /* ]]; then
     start_notify_proxy "$unit" "$NOTIFY_SOCKET" || exit $?
     set -- "$@" --env "NOTIFY_SOCKET=${NOTIFY_PROXY_SOCKET}" --env WATCHDOG_USEC \
