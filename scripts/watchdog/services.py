@@ -237,15 +237,17 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # requires_ib stays False.
     "ivrank":           {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # vol-cone — radon-vol-cone.timer, Mon-Fri 20:45 UTC after the 16:45 ET
-    # close grace. UW greeks only — no IB. 26h open catches a missed weekday;
-    # 3d closed covers Fri 20:45 UTC → Mon 20:45 UTC.
-    "vol-cone":         {"open": 26 * _HOUR, "closed": 3 * _DAY, "requires_ib": False},
+    # close grace. UW greeks only — no IB. 26h open catches a missed weekday.
+    # The holiday-Monday heartbeat lands Fri 20:45 UTC + 72h + jitter, so a
+    # 3d closed window sat exactly on the longest healthy gap; 4d per the
+    # cash-flow-sync precedent (weekend plus one holiday-drift day).
+    "vol-cone":         {"open": 26 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
     # vol-cone-intraday — radon-vol-cone-intraday.timer, every 15m during ET
     # trading hours. Ranks a live UW sample against the stored cone so the
     # tab is tradeable during the session instead of a day stale. 45m open
-    # tolerates one missed cycle; 3d closed covers Fri 16:00 ET -> Mon open,
-    # since a market-hours-only writer is silent by design off-session.
-    "vol-cone-intraday": {"open": 45 * _MIN, "closed": 3 * _DAY, "requires_ib": False},
+    # tolerates one missed cycle; 4d closed matches its EOD parent, since a
+    # market-hours-only writer is silent by design off-session.
+    "vol-cone-intraday": {"open": 45 * _MIN, "closed": 4 * _DAY, "requires_ib": False},
     # skew — radon-skew.timer fires every 5 minutes during RTH plus a daily
     # 21:45 UTC finalization. 10m open = two timer cycles, so one slow or
     # skipped run never flips skew to stale.

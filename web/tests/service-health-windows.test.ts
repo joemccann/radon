@@ -661,13 +661,16 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
   });
 
   // ``vol-cone`` — radon-vol-cone.timer fires daily 20:45 UTC Mon-Fri
-  // (16:45 ET after the close grace). UW greeks only — no IB.
-  it("vol-cone is scheduled, 26h open, 3d closed/extended, requires_ib false", () => {
+  // (16:45 ET after the close grace). UW greeks only — no IB. The holiday
+  // Monday heartbeat lands Fri 20:45 UTC + 72h + RandomizedDelaySec + run
+  // time, so a 3d window sat exactly on the boundary; 4d per the
+  // cash-flow-sync precedent.
+  it("vol-cone is scheduled, 26h open, 4d closed/extended, requires_ib false", () => {
     expect(SERVICE_FRESHNESS_WINDOWS["vol-cone"]).toBeDefined();
     expect(getServiceCategory("vol-cone")).toBe("scheduled");
     expect(getFreshnessWindowMs("vol-cone", "open")).toBe(26 * HOUR);
-    expect(getFreshnessWindowMs("vol-cone", "extended")).toBe(3 * DAY);
-    expect(getFreshnessWindowMs("vol-cone", "closed")).toBe(3 * DAY);
+    expect(getFreshnessWindowMs("vol-cone", "extended")).toBe(4 * DAY);
+    expect(getFreshnessWindowMs("vol-cone", "closed")).toBe(4 * DAY);
     expect(requiresIb("vol-cone")).toBe(false);
   });
 });
@@ -932,12 +935,12 @@ describe("vol-cone-intraday freshness window", () => {
   const MIN = 60_000;
   const DAY = 24 * 60 * 60_000;
 
-  it("is scheduled, 45m open, 3d closed/extended, requires_ib false", () => {
+  it("is scheduled, 45m open, 4d closed/extended, requires_ib false", () => {
     expect(SERVICE_FRESHNESS_WINDOWS["vol-cone-intraday"]).toBeDefined();
     expect(getServiceCategory("vol-cone-intraday")).toBe("scheduled");
     expect(getFreshnessWindowMs("vol-cone-intraday", "open")).toBe(45 * MIN);
-    expect(getFreshnessWindowMs("vol-cone-intraday", "extended")).toBe(3 * DAY);
-    expect(getFreshnessWindowMs("vol-cone-intraday", "closed")).toBe(3 * DAY);
+    expect(getFreshnessWindowMs("vol-cone-intraday", "extended")).toBe(4 * DAY);
+    expect(getFreshnessWindowMs("vol-cone-intraday", "closed")).toBe(4 * DAY);
     expect(requiresIb("vol-cone-intraday")).toBe(false);
   });
 });
