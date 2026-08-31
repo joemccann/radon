@@ -60,6 +60,11 @@ LOOPS = {
         "documentation-nightly",
         "com.radon.documentation-daily.plist",
     ),
+    "security": (
+        "security_nightly.sh",
+        "security-nightly",
+        "com.radon.security-daily.plist",
+    ),
 }
 LOOP_IDS = sorted(LOOPS)
 
@@ -94,6 +99,7 @@ def _build(
     wrapper.chmod(wrapper.stat().st_mode | stat.S_IXUSR)
     if marker:
         (clone / ".radon-weekend-runner").touch()
+        (clone / ".radon-security-runner").touch()
     # notify_phase shells `python3 $REPO/scripts/weekend_notify.py`; python3
     # is stubbed, but the file must exist for the call to look real.
     (clone / "scripts" / "weekend_notify.py").write_text("# stub\n", encoding="utf-8")
@@ -540,7 +546,7 @@ class TestTheJobRestoresTheEntryPointBeforeReadingIt:
 
     @pytest.mark.parametrize(
         "setup",
-        ["setup_reliability_weekend.sh", "setup_testing_weekend.sh", "setup_documentation_nightly.sh"],
+        ["setup_reliability_weekend.sh", "setup_testing_weekend.sh", "setup_documentation_nightly.sh", "setup_security_nightly.sh"],
     )
     def test_the_setup_script_states_the_deploy_rule(self, setup: str) -> None:
         src = (REPO / "scripts" / setup).read_text(encoding="utf-8")
@@ -551,7 +557,7 @@ class TestTheJobRestoresTheEntryPointBeforeReadingIt:
 
     @pytest.mark.parametrize(
         "setup",
-        ["setup_reliability_weekend.sh", "setup_testing_weekend.sh", "setup_documentation_nightly.sh"],
+        ["setup_reliability_weekend.sh", "setup_testing_weekend.sh", "setup_documentation_nightly.sh", "setup_security_nightly.sh"],
     )
     def test_the_setup_script_refuses_while_a_run_is_in_flight(self, setup: str) -> None:
         src = (REPO / "scripts" / setup).read_text(encoding="utf-8")
