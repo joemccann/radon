@@ -1,5 +1,7 @@
 # SPOF host split — operator runbook
 
+![Production network topology](radon-network-topology.png)
+
 Code in this SHA is combined-host safe. `RADON_HOST_ROLE` defaults to
 `combined`. Merging does not create a second VM, move Gateway, or enable
 Hetzner backups. Those steps are below and cannot be done by CI.
