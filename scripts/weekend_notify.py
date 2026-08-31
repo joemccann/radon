@@ -18,6 +18,11 @@ from urllib import error as urllib_error
 from urllib import request as urllib_request
 
 PUSHOVER_API_URL = "https://api.pushover.net/1/messages.json"
+# The only keys --env-file may import. Every wrapper passes
+# `$WEEKEND_ROOT/.env`, which on the runner carries more than Pushover;
+# importing the whole file handed IB_FLEX_TOKEN / TURSO_AUTH_TOKEN / CLERK_*
+# to the security loop's child process, against rail 5 (T-351).
+ENV_FILE_KEYS = ("PUSHOVER_USER", "PUSHOVER_TOKEN")
 
 
 def _load_env_file(path: Optional[str]) -> None:
@@ -30,8 +35,10 @@ def _load_env_file(path: Optional[str]) -> None:
         from dotenv import dotenv_values
     except ImportError:
         return
-    for key, value in dotenv_values(env_path, interpolate=False).items():
-        if key and value is not None and key not in os.environ:
+    values = dotenv_values(env_path, interpolate=False)
+    for key in ENV_FILE_KEYS:
+        value = values.get(key)
+        if value is not None and key not in os.environ:
             os.environ[key] = value
 
 
