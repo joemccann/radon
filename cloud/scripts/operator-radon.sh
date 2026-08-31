@@ -304,6 +304,7 @@ case "$HOST_ROLE" in
   broker)
     REQUIRED_UNITS=(
       radon-ib-gateway.service
+      radon-ib-gateway-remote.service
     )
     ;;
   *)
@@ -341,7 +342,9 @@ GATEWAY_CONTROL="${RADON_IB_GATEWAY_CONTROL:-/usr/local/bin/radon-ib-gateway-con
 TOPOLOGY_PATH="${RADON_OPERATOR_TOPOLOGY_PATH:-/var/lib/radon/operator-topology}"
 case "$HOST_ROLE" in
   broker)
-    PERSISTENT_UNITS=()
+    PERSISTENT_UNITS=(
+      radon-ib-gateway-remote.service
+    )
     ;;
   *)
     PERSISTENT_UNITS=(
@@ -375,7 +378,7 @@ fi
 ACTIVE_SCHEDULED_SERVICES=()
 for unit in "${ACTIVE_UNITS[@]}"; do
   case "$unit" in
-    radon-beta-*|radon-health.service|radon-ib-gateway.service|radon-ib-gateway-preheld-restart.service) ;;
+    radon-beta-*|radon-health.service|radon-ib-gateway.service|radon-ib-gateway-preheld-restart.service|radon-ib-gateway-remote.service) ;;
     radon-api.service|radon-nextjs.service|radon-relay.service|radon-monitor.service|radon-newsfeed.service) ;;
     radon-*.service) ACTIVE_SCHEDULED_SERVICES+=("$unit") ;;
   esac

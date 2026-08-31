@@ -870,7 +870,7 @@ async def auth_middleware(request: Request, call_next):
     # Requests forwarded through the public reverse proxy are NOT trusted.
     # Checked BEFORE the JWKS-configured gate so a server-to-server call never
     # depends on Clerk being configured.
-    if is_trusted_local_request(request):
+    if is_trusted_local_request(request) and not _is_app_role_gateway_mutation(request):
         return await call_next(request)
 
     # API key auth — scoped to historical/contract endpoints only
@@ -2022,16 +2022,34 @@ async def demo_trial_expiry(request: Request):
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-def _gateway_unit_controllable() -> bool:
-    """True when THIS host owns the gateway lifecycle: systemd is present and
-    the installed control helper (single 2FA-lease owner) exists. True on the
-    Hetzner deployment, False on the laptop pointing at the remote gateway.
+def _is_app_role_gateway_mutation(request: Request) -> bool:
+    """True for Gateway lifecycle POSTs on the app host.
 
-    RADON_HOST_ROLE=app must never own the session even if a deploy reinstalls
-    the helper onto the app VM.
+    Loopback trust would let a compromised Next.js on the public terminator
+    restart IBKR without a Clerk operator JWT. Combined/broker keep the
+    existing local-helper path.
     """
-    if os.environ.get("RADON_HOST_ROLE", "combined") == "app":
+    if admin_services.host_role() != "app":
         return False
+    if request.method != "POST":
+        return False
+    path = request.url.path
+    if path in {"/ib/restart", "/ib/reset-backoff"}:
+        return True
+    prefix = "/admin/services/radon-ib-gateway.service/"
+    if path.startswith(prefix) and path.rsplit("/", 1)[-1] in {"start", "stop", "restart"}:
+        return True
+    return False
+
+
+def _gateway_unit_controllable() -> bool:
+    """True when THIS host can cycle Gateway: local helper, or app-role mTLS.
+
+    RADON_HOST_ROLE=app must never exec the helper even if a deploy reinstalls
+    it. The app host proxies to the broker daemon instead.
+    """
+    if admin_services.host_role() == "app":
+        return admin_services.is_remote_gateway_configured()
     return (
         admin_services.is_systemd_available()
         and Path(admin_services.GATEWAY_CONTROL_PATH).exists()
@@ -2096,7 +2114,11 @@ async def ib_restart():
 @app.post("/ib/reset-backoff")
 async def ib_reset_backoff():
     """Clear restart backoff state. Operator path: 'I just approved 2FA, try now'."""
-    return reset_restart_backoff()
+    result = reset_restart_backoff()
+    if admin_services.host_role() == "app" and admin_services.is_remote_gateway_configured():
+        remote = await admin_services.remote_gateway_action("reset-lease")
+        result["remote"] = remote.to_dict()
+    return result
 
 
 # ---------------------------------------------------------------------------

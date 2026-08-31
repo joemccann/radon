@@ -124,6 +124,7 @@ readonly -a SOURCES=(
   services/radon-ib-watchdog.service
   services/radon-ib-watchdog.timer
   services/radon-ib-gateway.service
+  services/radon-ib-gateway-remote.service
   services/radon-api.service
   services/radon-monitor.service
   services/radon-relay.service
@@ -162,6 +163,7 @@ readonly -a LOGICAL_TARGETS=(
   /etc/systemd/system/radon-ib-watchdog.service
   /etc/systemd/system/radon-ib-watchdog.timer
   /etc/systemd/system/radon-ib-gateway.service
+  /etc/systemd/system/radon-ib-gateway-remote.service
   /etc/systemd/system/radon-api.service
   /etc/systemd/system/radon-monitor.service
   /etc/systemd/system/radon-relay.service
@@ -188,7 +190,7 @@ readonly -a MODES=(
   0440 0440 0440 0440
   0644
   0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644
-  0644 0644 0644 0644 0644
+  0644 0644 0644 0644 0644 0644
   0644 0644 0644 0644 0644
 )
 readonly -a KINDS=(
@@ -197,6 +199,7 @@ readonly -a KINDS=(
   polkit
   systemd systemd systemd systemd systemd systemd systemd systemd systemd systemd
   systemd systemd systemd systemd systemd systemd systemd systemd systemd systemd
+  systemd
   dropin dropin dropin dropin dropin
 )
 

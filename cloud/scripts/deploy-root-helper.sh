@@ -28,6 +28,7 @@ readonly -a CONTROL_PLANE_SOURCES=(
   services/radon-ib-watchdog.service
   services/radon-ib-watchdog.timer
   services/radon-ib-gateway.service
+  services/radon-ib-gateway-remote.service
   services/radon-api.service
   services/radon-monitor.service
   services/radon-relay.service
@@ -66,6 +67,7 @@ readonly -a CONTROL_PLANE_TARGETS=(
   /etc/systemd/system/radon-ib-watchdog.service
   /etc/systemd/system/radon-ib-watchdog.timer
   /etc/systemd/system/radon-ib-gateway.service
+  /etc/systemd/system/radon-ib-gateway-remote.service
   /etc/systemd/system/radon-api.service
   /etc/systemd/system/radon-monitor.service
   /etc/systemd/system/radon-relay.service
@@ -91,7 +93,7 @@ readonly -a CONTROL_PLANE_MODES=(
   755 755 755 644 644 755
   440 440 440 440
   644
-  644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644
+  644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644
   644 644 644 644 644
 )
 
@@ -255,14 +257,23 @@ read_host_role() {
 }
 
 app_skips_control_plane_source() {
-  [[ "$(read_host_role)" == "app" ]] || return 1
+  role_skips_control_plane_source "$1"
+}
+
+role_skips_control_plane_source() {
+  local role
+  role="$(read_host_role)"
   case "$1" in
     scripts/ib-gateway-control.sh|\
     services/radon-ib-gateway.service|\
     services/radon-ib-gateway-preheld-restart.service|\
     services/radon-ib-watchdog.service|\
     services/radon-ib-watchdog.timer)
-      return 0 ;;
+      [[ "$role" == "app" ]] && return 0
+      return 1 ;;
+    services/radon-ib-gateway-remote.service)
+      [[ "$role" == "app" ]] && return 0
+      return 1 ;;
     *) return 1 ;;
   esac
 }

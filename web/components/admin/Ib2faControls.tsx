@@ -106,7 +106,8 @@ export default function Ib2faControls({
     return () => clearTimeout(timer);
   }, [optimisticPower, polledPowerState]);
 
-  const ownsGatewayLifecycle = hostRole !== "app";
+  const remoteGateway = hostRole === "app" && gatewayUnit?.can_control === true;
+  const ownsGatewayLifecycle = hostRole !== "app" || remoteGateway;
   const gatewayDependents = unitDependents(GATEWAY_UNIT);
   // Start triggers a fresh 2FA login, so gate it on the same push lock as
   // Force 2FA to keep two pushes from racing (feedback_2fa_push_stacking).

@@ -51,6 +51,7 @@ export async function POST(
     const data = await radonFetch(`/admin/services/${unit}/${action}`, {
       method: "POST",
       timeout: 60_000,
+      token: access.principal.token,
     });
     const response = NextResponse.json(data);
     return setNoStoreResponseHeaders(response, requestId);

@@ -121,6 +121,19 @@ def test_healthy_start_does_not_take_lease(control_env):
     assert "compose up" not in log.read_text()
 
 
+def test_reset_lease_does_not_touch_compose(control_env):
+    env, state, log, lock = control_env
+    state.write_text("running\n")
+    _acquire(env, "radon-cloud.ib-gateway-control")
+    assert lock.exists()
+
+    result = _run_control(env, "reset-lease")
+
+    assert result.returncode == 0, result.stderr
+    assert "released" in result.stdout.lower() or "released" in result.stderr.lower()
+    assert not log.exists() or "compose" not in log.read_text()
+
+
 def test_app_role_refuses_start_even_if_container_is_stopped(control_env):
     env, state, log, _lock = control_env
     env["RADON_HOST_ROLE"] = "app"
