@@ -370,3 +370,9 @@ each correction into a concrete rule that prevents recurrence.
   at 00:00 local in separate clones. This loop needs its own clone and lock.
   Run local full gates serially, and use GitHub job/step timestamps rather than
   contention-distorted Mac mini timing for performance claims.
+- 2026-08-31 first audit: `gh run list --json` has no `runAttempt` field (it
+  is `attempt`); `cloud/tests` and `scripts/tests` cannot be collected in one
+  local pytest invocation (conftest import-path clash, same reason CI shards
+  them), so run the contract sets in two commands; the repo is on a free plan
+  so `/timing` reports zero billable ms and runner cost must be tracked as the
+  sum of job wall seconds.
