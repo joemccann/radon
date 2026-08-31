@@ -66,7 +66,7 @@ from api import services as admin_services
 from clients.ib_client import DEFAULT_GATEWAY_PORT
 from api.pool_order_manage import pool_cancel_order, pool_modify_order
 from api.order_audit import record_order_event
-from api.auth import verify_clerk_jwt, verify_api_key, is_trusted_local_request
+from api.auth import verify_clerk_jwt, verify_clerk_bearer, verify_api_key, is_trusted_local_request
 from api.ws_ticket import create_ticket, validate_ticket
 from api.routes.historical import router as historical_router
 from api.routes.preferences import router as preferences_router
@@ -869,8 +869,11 @@ async def auth_middleware(request: Request, call_next):
     # (Next.js → FastAPI; cloud-thin laptop dev → Hetzner FastAPI over Tailscale).
     # Requests forwarded through the public reverse proxy are NOT trusted.
     # Checked BEFORE the JWKS-configured gate so a server-to-server call never
-    # depends on Clerk being configured.
-    if is_trusted_local_request(request) and not _is_app_role_gateway_mutation(request):
+    # depends on Clerk being configured. App-host Gateway mutations are the
+    # one exception: they need an operator JWT even from loopback, and the
+    # same holds below where verify_clerk_jwt would re-grant the bypass.
+    operator_jwt_required = _is_app_role_gateway_mutation(request)
+    if is_trusted_local_request(request) and not operator_jwt_required:
         return await call_next(request)
 
     # API key auth — scoped to historical/contract endpoints only
@@ -897,7 +900,10 @@ async def auth_middleware(request: Request, call_next):
         )
 
     try:
-        payload = await verify_clerk_jwt(request)
+        if operator_jwt_required:
+            payload = await verify_clerk_bearer(request)
+        else:
+            payload = await verify_clerk_jwt(request)
         request.state.user = payload
     except HTTPException as exc:
         return JSONResponse(

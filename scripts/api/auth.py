@@ -271,6 +271,17 @@ async def verify_clerk_jwt(request: Request) -> dict:
     if is_trusted_service_request(request):
         return {"sub": "demo-frontend", "service": True}
 
+    return await verify_clerk_bearer(request)
+
+
+async def verify_clerk_bearer(request: Request) -> dict:
+    """Validate the Clerk JWT in ``Authorization`` with NO caller-trust bypass.
+
+    The middleware uses this for app-host Gateway mutations
+    (``server._is_app_role_gateway_mutation``): a loopback peer must still
+    present an operator JWT there, so the loopback / service-token shortcuts
+    in :func:`verify_clerk_jwt` must not be reachable.
+    """
     import jwt as pyjwt
 
     auth_header = request.headers.get("Authorization", "")
