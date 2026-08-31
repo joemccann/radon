@@ -108,6 +108,30 @@ def test_short_sources_fall_through_to_yahoo(client):
     assert body["count"] == 30
 
 
+def test_robinhood_outranks_yahoo_when_it_serves_enough_bars(client):
+    from api.routes.streaks import MIN_ACCEPT_BARS
+
+    yahoo = MagicMock()
+    with patch("api.routes.streaks._read_cached_closes", return_value=None), patch(
+        "api.routes.streaks._fetch_ib_closes", new=_no_ib
+    ), patch(
+        "api.routes.streaks._fetch_uw_closes", return_value={}
+    ), patch(
+        "api.routes.streaks._fetch_rh_closes", return_value=_closes(MIN_ACCEPT_BARS)
+    ), patch(
+        "api.routes.streaks._fetch_yahoo_closes", yahoo
+    ), patch(
+        "api.routes.streaks._write_cached_closes"
+    ):
+        resp = client.get("/streaks/SPY")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["source"] == "robinhood"
+    assert body["count"] == MIN_ACCEPT_BARS
+    yahoo.assert_not_called()
+
+
 def test_longest_short_result_used_when_every_source_is_short(client):
     with patch("api.routes.streaks._read_cached_closes", return_value=None), patch(
         "api.routes.streaks._fetch_ib_closes", new=_no_ib
