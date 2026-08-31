@@ -510,3 +510,19 @@ landing.
 | T-262 | DONE | `67041685` | **A real product defect.** An EMPTY dump was promoted, pruned the 30-day window of real dumps against, uploaded off-box, and reported success — `dump_database` reports whatever `sqlite_master` gave it, so an empty read (a credential rotation pointing at a fresh DB, a libsql read returning no rows) yields a valid ~120-byte gzip. RED drove the REAL prune/upload sequence rather than mocking it, which reproduced the loss directly: `pruned: 2 / survivors: [the 168-byte empty dump] / uploaded: [...] / dumped 0 tables / 0 rows`, with `service_health row written: db-backup = ok`. `assert_plausible_dump` runs while the dump is still `.tmp`, so a failure never promotes, never prunes, never uploads, and leaves nothing on disk for a LATER run's B2 backfill to push; `main` converts the raise to an `error` heartbeat and rc 1. Floor is deliberately 1 table / 1 row — catches the observed 0/0 without risking a false refusal on a legitimately small DB. ⚠️ touches `cloud/scripts/db_backup.py`. |
 | T-263 | DONE | `acebbae5` | **A real product defect, shipping.** R-333 built the freshness defence on the 304 branch only — the one branch that CANNOT carry new data. The rebuild branch emitted no verdict at all: no `status`, no `lag_days`, no `expected_session`, and a bare `ok` heartbeat. Cboe re-touches `Last-Modified` intraday WITHOUT appending the session row, so a 200 that rebuilds an unmoved series is exactly as stale as a 304 that reuses one, and `ensure_plausible_series` never checks recency — a two-week-old session rendered a confident regime badge inside the 48h `scan_time` budget. `fetch_vixcor.py` already applied the verdict on both branches; `fetch_vixts.py` was the odd one out. RED at HEAD: `assert None == '2026-08-20'`, `assert None == 'ok'`, "rebuild branch is missing {'status','expected_session','lag_days'}". |
 | T-264 | DONE | `acebbae5` | "A rejected value writes no row" was never asserted, and the test double made it UNASSERTABLE: `_Recorder.upsert_vixts_rows` was `pass`, so nothing could observe a write. It now records, `_write_json_cache` is spied, and the new test drives the REAL `ensure_plausible_series` with VIX 1000 / VIX3M 20 (ratio 50), asserting 0 row upserts, 0 snapshots, 0 JSON writes, `data/vixts.json` byte-identical, and exactly one `error` heartbeat — paired with a plausible-pull case asserting all three writes DO happen, so the zero counts are not vacuous. RED via the exact reorder the audit names (moving `ensure_plausible_series` after `_write_db` + `_write_json_cache`): `a rejected value must not reach vixts_history; 1 upsert_vixts_rows call(s) landed`. |
+
+## Remediation 2026-08-30 — remediation branch
+
+Backlog entered this run with **34 new findings (T-312…T-345; 1 P0, 14 P1,
+19 P2)** filed by the same cycle's audit phase (PR #189, merged 13:10Z, so
+`origin/testing/2026-08-30` no longer existed at pre-flight and this phase
+branched `testing/2026-08-30-remediate` from `origin/main` `6d10f1e1`). This
+phase works the P0 first, then the P1s; the P2s are DEFERRED. Pre-flight:
+Sunday, load average 4.5, `rtk` IS installed here so every git call is
+`rtk proxy git`, `node` v24.14.0 via `~/.nvm`, `pytest-asyncio` +
+`pytest-xdist` present in `~/radon-weekend/venv`. Open PRs at pre-flight
+(#197, #176, #126, #125) — none matches a finding subject. Scratch namespaced
+to `/tmp/tw-2026-08-30-rem/`.
+
+| Task | Status | Commits | Evidence |
+|---|---|---|---|
