@@ -257,6 +257,7 @@ class TestOperatorHostRole:
         assert match, "broker REQUIRED_UNITS block missing"
         required = match.group(1)
         assert "radon-ib-gateway.service" in required
+        assert "radon-ib-gateway-remote.service" in required
         assert "radon-health.service" not in required
         assert "radon-api.service" not in required
 
@@ -270,6 +271,26 @@ class TestOperatorHostRole:
         body = OPERATOR.read_text(encoding="utf-8")
         assert "Gateway stays on the broker" in body
         assert "app-plane radon units" in body
+
+
+class TestRemoteDaemonUnit:
+    def test_binds_private_nic_only(self):
+        unit = (CLOUD / "services" / "radon-ib-gateway-remote.service").read_text(
+            encoding="utf-8"
+        )
+        assert "RADON_IB_REMOTE_BIND=10.0.0.4" in unit
+        assert "RADON_IB_REMOTE_PORT=8340" in unit
+        assert "RADON_IB_REMOTE_ALLOW=10.0.0.2" in unit
+        assert "0.0.0.0" not in unit
+        assert "python -m scripts.ib_gateway_remote.serve" in unit
+        assert "\nRequires=" not in unit
+        assert "\nPartOf=" not in unit
+        assert "PartOf=radon-ib-gateway" not in unit
+
+    def test_role_skip_covers_remote_unit(self):
+        helper = (CLOUD / "scripts" / "deploy-root-helper.sh").read_text(encoding="utf-8")
+        assert "services/radon-ib-gateway-remote.service" in helper
+        assert "role_skips_control_plane_source" in helper
 
 
 class TestDeployHostRole:

@@ -532,6 +532,11 @@ case "${1:-}" in
     acquire_lifecycle_mutex "$@"
     stop_gateway
     ;;
+  reset-lease)
+    refuse_app_role_mutation || exit 1
+    acquire_lifecycle_mutex "$@"
+    release_any_lease
+    ;;
   status)
     if [[ -e "$TRANSITION_PATH" ]]; then
       echo "transition-pending"
@@ -550,7 +555,7 @@ case "${1:-}" in
     fi
     ;;
   *)
-    echo "usage: $0 {start|restart|restart-preheld HOLDER|stop|status}" >&2
+    echo "usage: $0 {start|restart|restart-preheld HOLDER|stop|status|reset-lease}" >&2
     exit 2
     ;;
 esac

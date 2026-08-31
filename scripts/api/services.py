@@ -19,15 +19,21 @@ from __future__ import annotations
 
 import asyncio
 import fcntl
+import ipaddress
+import json
 import logging
 import os
 import re
 import signal
 import shutil
+import ssl
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
+from urllib.parse import urlparse
 
 logger = logging.getLogger("radon.services")
 
@@ -106,6 +112,11 @@ def host_role() -> str:
     if raw in {"app", "broker", "combined"}:
         return raw
     return "combined"
+
+
+_HETZNER_PRIVATE = ipaddress.ip_network("10.0.0.0/16")
+REMOTE_VERBS = frozenset({"start", "stop", "restart", "reset-lease", "status"})
+
 
 
 def is_systemd_available() -> bool:
@@ -336,7 +347,20 @@ async def show_unit(unit: str) -> UnitStatus:
         return status
 
     if host_role() == "app":
-        status.can_control = False
+        if not is_remote_gateway_configured():
+            status.can_control = False
+            return status
+        remote = await remote_gateway_action("status")
+        status.can_control = True
+        if remote.ok and "running" in remote.detail:
+            status.active_state = "active"
+            status.sub_state = "running"
+        elif "stopped" in remote.detail:
+            status.active_state = "inactive"
+            status.sub_state = "dead"
+        else:
+            status.active_state = "unknown"
+            status.sub_state = "unknown"
         return status
 
     # A Type=oneshot/RemainAfterExit wrapper can stay active (exited) after
@@ -381,6 +405,84 @@ GATEWAY_CONTROL_TIMEOUT_S = 120.0
 GATEWAY_LEASE_HELD_RC = 75
 GATEWAY_CONTROL_BUSY_RC = 74
 PROCESS_TERM_GRACE_S = 1.0
+REMOTE_TIMEOUT_S = GATEWAY_CONTROL_TIMEOUT_S
+
+
+def _remote_url_allowed(url: str) -> bool:
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or parsed.path not in {"", "/"}:
+        return False
+    host = parsed.hostname or ""
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return addr.is_loopback or addr in _HETZNER_PRIVATE
+
+
+def is_remote_gateway_configured() -> bool:
+    """True when the app host can call the broker daemon over mTLS."""
+    if host_role() != "app":
+        return False
+    url = (os.environ.get("RADON_IB_REMOTE_URL") or "").strip()
+    if not _remote_url_allowed(url):
+        return False
+    ca = Path(os.environ.get("RADON_IB_REMOTE_CA") or "")
+    cert = Path(os.environ.get("RADON_IB_REMOTE_CLIENT_CERT") or "")
+    key = Path(os.environ.get("RADON_IB_REMOTE_CLIENT_KEY") or "")
+    return ca.is_file() and cert.is_file() and key.is_file()
+
+
+def _remote_ssl_context() -> ssl.SSLContext:
+    ctx = ssl.create_default_context(
+        cafile=os.environ["RADON_IB_REMOTE_CA"],
+    )
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    ctx.check_hostname = False
+    ctx.load_cert_chain(
+        os.environ["RADON_IB_REMOTE_CLIENT_CERT"],
+        os.environ["RADON_IB_REMOTE_CLIENT_KEY"],
+    )
+    return ctx
+
+
+def _remote_http(verb: str, timeout: float) -> tuple[int, dict]:
+    if verb not in REMOTE_VERBS:
+        return -1, {"ok": False, "detail": f"verb not allowed: {verb}"}
+    base = os.environ["RADON_IB_REMOTE_URL"].rstrip("/")
+    path = "/status" if verb == "status" else f"/{verb}"
+    method = "GET" if verb == "status" else "POST"
+    req = urllib.request.Request(base + path, method=method, data=b"" if method == "POST" else None)
+    try:
+        with urllib.request.urlopen(req, context=_remote_ssl_context(), timeout=timeout) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+            return resp.status, payload if isinstance(payload, dict) else {"ok": False}
+    except urllib.error.HTTPError as exc:
+        try:
+            payload = json.loads(exc.read().decode("utf-8"))
+        except (ValueError, json.JSONDecodeError):
+            payload = {"ok": False, "detail": str(exc)}
+        if not isinstance(payload, dict):
+            payload = {"ok": False, "detail": str(exc)}
+        payload.setdefault("detail", str(exc))
+        return exc.code, payload
+    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+        return -1, {"ok": False, "detail": str(exc)}
+
+
+async def remote_gateway_action(action: str) -> ActionResult:
+    """POST one allowlisted verb to the broker daemon. Never execs the helper."""
+    if action not in REMOTE_VERBS:
+        return ActionResult(GATEWAY_UNIT, action, False, f"action {action!r} is not allowed", -1)
+    status, payload = await asyncio.to_thread(_remote_http, action, REMOTE_TIMEOUT_S)
+    detail = str(payload.get("detail") or payload.get("state") or payload.get("error") or "")
+    rc = int(payload.get("returncode") or (0 if payload.get("ok") else status))
+    if status == 409 or rc in {GATEWAY_LEASE_HELD_RC, GATEWAY_CONTROL_BUSY_RC, PUSH_LOCK_HELD_RC}:
+        return ActionResult(GATEWAY_UNIT, action, False, detail, PUSH_LOCK_HELD_RC)
+    ok = bool(payload.get("ok")) or (action == "status" and payload.get("state") in {"running", "stopped"})
+    return ActionResult(GATEWAY_UNIT, action, ok, detail or f"remote {action} HTTP {status}", rc if ok else (rc or -1))
+
+
 OPERATOR_CLI_PATH = "/usr/local/bin/radon"
 OPERATOR_UNIT_TIMEOUT_S = 75.0
 # Shared with radon-cloud deploy/operator control so admin mutations never
@@ -507,13 +609,15 @@ def is_gateway_control_available() -> bool:
 async def _control_gateway(action: str) -> ActionResult:
     """Delegate Gateway lifecycle to the helper that owns lease acquisition."""
     if host_role() == "app":
-        return ActionResult(
-            GATEWAY_UNIT,
-            action,
-            False,
-            "RADON_HOST_ROLE=app. Gateway lifecycle is on the broker.",
-            -1,
-        )
+        if not is_remote_gateway_configured():
+            return ActionResult(
+                GATEWAY_UNIT,
+                action,
+                False,
+                "RADON_HOST_ROLE=app. Gateway lifecycle is on the broker.",
+                -1,
+            )
+        return await remote_gateway_action(action)
     if not is_gateway_control_available():
         return ActionResult(
             GATEWAY_UNIT,

@@ -114,8 +114,14 @@ Operator commands after the cut:
   App-plane only. Does not cycle Gateway.
 - Broker: `ssh root@<broker> radon {start|stop|restart|status}`
   Gateway via `radon-ib-gateway-control`. Does not require radon-health.
-- Admin page Force 2FA / Stop / Start Gateway is hidden on the app host.
-  Do not POST `/api/admin/services/radon-ib-gateway.service/*` there.
+- App admin Force 2FA / Stop / Start Gateway proxies over mTLS to
+  `https://10.0.0.4:8340`. Mint certs with
+  `cloud/scripts/ib-gateway-remote-certs.sh` on the broker, copy the
+  client pair to the app, then
+  `systemctl enable --now radon-ib-gateway-remote.service` on the broker.
+  Hetzner firewall: 8340 and 4001 from `10.0.0.2` only. Bind is
+  `10.0.0.4`, never `0.0.0.0`.
+- App `Restart All Services` stays app-plane. It does not cycle Gateway.
 
 Do not put the broker in Falkenstein. Do not run two Gateways. Do not
 restore a broker snapshot beside a live broker. Do not start a standby

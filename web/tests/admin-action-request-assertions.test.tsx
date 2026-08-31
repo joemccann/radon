@@ -199,7 +199,7 @@ describe("admin destructive actions reach the wire", () => {
     expect(sent[0].cache).toBe("no-store");
   });
 
-  it("sends no Gateway mutation when the host role is app", async () => {
+  it("sends no Gateway mutation when the app host has no remote control", async () => {
     const calls: RecordedCall[] = [];
     vi.stubGlobal(
       "fetch",
@@ -207,12 +207,18 @@ describe("admin destructive actions reach the wire", () => {
         const url = typeof input === "string" ? input : input.toString();
         calls.push({ url, method: init?.method ?? "GET", cache: init?.cache });
         if (url.endsWith("/api/admin/services") && (init?.method ?? "GET") === "GET") {
-          return jsonResponse({ ...SERVICES, host_role: "app" });
+          return jsonResponse({
+            ...SERVICES,
+            host_role: "app",
+            units: SERVICES.units.map((unit) =>
+              unit.unit === GATEWAY_UNIT ? { ...unit, can_control: false } : unit,
+            ),
+          });
         }
         if (init?.method === "POST") {
           return jsonResponse({ ok: true, detail: "done", returncode: 0 });
         }
-        return jsonResponse(HEALTHY);
+        return jsonResponse({ ...HEALTHY, host_role: "app" });
       }),
     );
     render(<AdminWorkspace />);
@@ -231,6 +237,38 @@ describe("admin destructive actions reach the wire", () => {
     expect(sent[0].url).toBe("/api/admin/stack/restart");
     expect(sent.some((c) => c.url.includes("radon-ib-gateway"))).toBe(false);
     expect(sent.some((c) => c.url === "/api/admin/ib/restart")).toBe(false);
+  });
+
+  it("Force 2FA on an app host with remote control hits /api/admin/ib/restart", async () => {
+    const calls: RecordedCall[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input.toString();
+        calls.push({ url, method: init?.method ?? "GET", cache: init?.cache });
+        if (url.endsWith("/api/admin/services") && (init?.method ?? "GET") === "GET") {
+          return jsonResponse({ ...SERVICES, host_role: "app" });
+        }
+        if (init?.method === "POST") {
+          return jsonResponse({ ok: true, detail: "done", returncode: 0, restarted: true });
+        }
+        return jsonResponse({ ...HEALTHY, host_role: "app" });
+      }),
+    );
+    render(<AdminWorkspace />);
+    await settle();
+
+    expect(screen.getByTestId("force-2fa-button")).toBeTruthy();
+    expect(screen.getByTestId("gateway-power-button")).toBeTruthy();
+    expect(screen.queryByTestId("gateway-broker-note")).toBeNull();
+
+    await click("force-2fa-button");
+    expect(posts(calls)).toHaveLength(0);
+    await click("admin-confirm-action");
+    const sent = posts(calls);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].url).toBe("/api/admin/ib/restart");
+    expect(sent[0].method).toBe("POST");
   });
 
   it("stops a service on the stop path, not the restart path", async () => {

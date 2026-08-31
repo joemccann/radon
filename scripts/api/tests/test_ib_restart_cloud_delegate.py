@@ -107,16 +107,40 @@ class TestCloudDelegate:
         monkeypatch.setattr(admin_services, "GATEWAY_CONTROL_PATH", str(helper))
         monkeypatch.setattr(admin_services, "is_systemd_available", lambda: True)
         monkeypatch.setenv("RADON_HOST_ROLE", "app")
+        monkeypatch.delenv("RADON_IB_REMOTE_URL", raising=False)
         assert server._gateway_unit_controllable() is False
         monkeypatch.setenv("RADON_HOST_ROLE", "combined")
         assert server._gateway_unit_controllable() is True
         monkeypatch.setenv("RADON_HOST_ROLE", "broker")
         assert server._gateway_unit_controllable() is True
 
+    def test_app_role_is_controllable_via_remote_not_helper(
+        self, monkeypatch, tmp_path
+    ):
+        helper = tmp_path / "radon-ib-gateway-control"
+        helper.write_text("#!/bin/sh\n")
+        helper.chmod(0o755)
+        ca = tmp_path / "ca.pem"
+        cert = tmp_path / "client.pem"
+        key = tmp_path / "client.key"
+        ca.write_text("x")
+        cert.write_text("x")
+        key.write_text("x")
+        monkeypatch.setattr(admin_services, "GATEWAY_CONTROL_PATH", str(helper))
+        monkeypatch.setattr(admin_services, "is_systemd_available", lambda: True)
+        monkeypatch.setenv("RADON_HOST_ROLE", "app")
+        monkeypatch.setenv("RADON_IB_REMOTE_URL", "https://10.0.0.4:8340")
+        monkeypatch.setenv("RADON_IB_REMOTE_CA", str(ca))
+        monkeypatch.setenv("RADON_IB_REMOTE_CLIENT_CERT", str(cert))
+        monkeypatch.setenv("RADON_IB_REMOTE_CLIENT_KEY", str(key))
+        assert server._gateway_unit_controllable() is True
+        assert admin_services.is_remote_gateway_configured() is True
+
     def test_app_role_admin_gateway_restart_does_not_touch_helper(
         self, client, monkeypatch, tmp_path
     ):
         monkeypatch.setenv("RADON_HOST_ROLE", "app")
+        monkeypatch.setattr(server, "_is_app_role_gateway_mutation", lambda request: False)
         log = tmp_path / "gateway-helper.log"
         helper = tmp_path / "radon-ib-gateway-control"
         helper.write_text(
@@ -133,6 +157,66 @@ class TestCloudDelegate:
         assert detail["ok"] is False
         assert "broker" in detail["detail"].lower()
         assert not log.exists()
+
+    def test_app_role_restart_proxies_remote_not_helper(
+        self, client, monkeypatch, tmp_path
+    ):
+        monkeypatch.setenv("RADON_HOST_ROLE", "app")
+        monkeypatch.setattr(server, "_is_app_role_gateway_mutation", lambda request: False)
+        monkeypatch.setattr(server.ib_gateway, "GATEWAY_MODE", "cloud")
+        log = tmp_path / "gateway-helper.log"
+        helper = tmp_path / "radon-ib-gateway-control"
+        helper.write_text(
+            "#!/bin/sh\n"
+            f"printf '%s\\n' \"$*\" >> '{log}'\n"
+            "exit 0\n"
+        )
+        helper.chmod(0o755)
+        ca = tmp_path / "ca.pem"
+        cert = tmp_path / "client.pem"
+        key = tmp_path / "client.key"
+        ca.write_text("x")
+        cert.write_text("x")
+        key.write_text("x")
+        monkeypatch.setattr(admin_services, "GATEWAY_CONTROL_PATH", str(helper))
+        monkeypatch.setenv("RADON_IB_REMOTE_URL", "https://10.0.0.4:8340")
+        monkeypatch.setenv("RADON_IB_REMOTE_CA", str(ca))
+        monkeypatch.setenv("RADON_IB_REMOTE_CLIENT_CERT", str(cert))
+        monkeypatch.setenv("RADON_IB_REMOTE_CLIENT_KEY", str(key))
+        remote = AsyncMock(return_value=_ok_result())
+        with patch.object(admin_services, "remote_gateway_action", new=remote):
+            resp = client.post("/ib/restart", headers=_auth_headers())
+        assert resp.status_code == 200
+        remote.assert_awaited_once_with("restart")
+        assert not log.exists()
+
+    def test_app_role_rejects_http_and_public_remote_url(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("RADON_HOST_ROLE", "app")
+        ca = tmp_path / "ca.pem"
+        cert = tmp_path / "client.pem"
+        key = tmp_path / "client.key"
+        for path in (ca, cert, key):
+            path.write_text("x")
+        monkeypatch.setenv("RADON_IB_REMOTE_CA", str(ca))
+        monkeypatch.setenv("RADON_IB_REMOTE_CLIENT_CERT", str(cert))
+        monkeypatch.setenv("RADON_IB_REMOTE_CLIENT_KEY", str(key))
+        monkeypatch.setenv("RADON_IB_REMOTE_URL", "http://10.0.0.4:8340")
+        assert admin_services.is_remote_gateway_configured() is False
+        monkeypatch.setenv("RADON_IB_REMOTE_URL", "https://5.78.144.125:8340")
+        assert admin_services.is_remote_gateway_configured() is False
+        monkeypatch.setenv("RADON_IB_REMOTE_URL", "https://broker.example:8340")
+        assert admin_services.is_remote_gateway_configured() is False
+
+    def test_app_role_gateway_mutation_flag(self, monkeypatch):
+        monkeypatch.setenv("RADON_HOST_ROLE", "app")
+        restart = type("R", (), {"method": "POST", "url": type("U", (), {"path": "/ib/restart"})()})()
+        health = type("R", (), {"method": "GET", "url": type("U", (), {"path": "/health"})()})()
+        stack = type("R", (), {"method": "POST", "url": type("U", (), {"path": "/admin/stack/restart"})()})()
+        assert server._is_app_role_gateway_mutation(restart) is True
+        assert server._is_app_role_gateway_mutation(health) is False
+        assert server._is_app_role_gateway_mutation(stack) is False
+        monkeypatch.setenv("RADON_HOST_ROLE", "combined")
+        assert server._is_app_role_gateway_mutation(restart) is False
 
     def test_service_action_maps_lease_conflict_to_409(self, client):
         with patch.object(
