@@ -77,6 +77,10 @@ Open `http://localhost:3000`. Clerk auto-bypasses on localhost in non-production
 
 ## Architecture at a glance
 
+![Production network topology](docs/radon-network-topology.png)
+
+Operator clients, Hetzner spread placement (`radon-app` / `radon-broker`), IBKR, outbound-only third parties. Host-split runbook: [`docs/spof-host-split.md`](docs/spof-host-split.md).
+
 ```
        Unusual Whales ─┐
    Interactive Brokers ├──> Signal Detection ──> Strategy Evaluation
