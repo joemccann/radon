@@ -247,7 +247,7 @@ describe("admin destructive actions reach the wire", () => {
         const url = typeof input === "string" ? input : input.toString();
         calls.push({ url, method: init?.method ?? "GET", cache: init?.cache });
         if (url.endsWith("/api/admin/services") && (init?.method ?? "GET") === "GET") {
-          return jsonResponse({ ...SERVICES, host_role: "app" });
+          return jsonResponse({ ...SERVICES, supported: false, host_role: "app" });
         }
         if (init?.method === "POST") {
           return jsonResponse({ ok: true, detail: "done", returncode: 0, restarted: true });

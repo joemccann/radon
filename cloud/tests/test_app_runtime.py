@@ -518,6 +518,45 @@ def test_run_binds_only_the_narrow_state_subdirectories(tmp_path: Path) -> None:
     assert ":/var/lib/radon/ib-lease" in log
 
 
+def test_run_api_mounts_ib_remote_certs_readonly_when_present(tmp_path: Path) -> None:
+    certs = tmp_path / "ib-remote"
+    certs.mkdir()
+    result = _run(
+        tmp_path,
+        ["run", "radon-api.service"],
+        extra_env={"RADON_IB_REMOTE_CERT_DIR": str(certs)},
+    )
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert f"{certs}:{certs}:ro" in log
+    assert f"{certs.parent}:" not in log.replace(f"{certs}:", "")
+
+
+def test_run_api_skips_ib_remote_certs_mount_when_absent(tmp_path: Path) -> None:
+    missing = tmp_path / "no-ib-remote"
+    result = _run(
+        tmp_path,
+        ["run", "radon-api.service"],
+        extra_env={"RADON_IB_REMOTE_CERT_DIR": str(missing)},
+    )
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert "ib-remote" not in log
+
+
+def test_run_newsfeed_does_not_mount_ib_remote_certs(tmp_path: Path) -> None:
+    certs = tmp_path / "ib-remote"
+    certs.mkdir()
+    result = _run(
+        tmp_path,
+        ["run", "radon-newsfeed.service"],
+        extra_env={"RADON_IB_REMOTE_CERT_DIR": str(certs)},
+    )
+    assert result.returncode == 0, result.stderr
+    log = result.docker_log.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    assert "ib-remote" not in log
+
+
 def test_run_newsfeed_mounts_host_playwright_browsers(tmp_path: Path) -> None:
     """Page 3e952746: container newsfeed crash-looped because Playwright
     looked up chromium_headless_shell-1217 under the image ENV
