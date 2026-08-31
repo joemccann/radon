@@ -1,3 +1,23 @@
+# Task: Assistant catalog always tracks live API pins (2026-08-30)
+
+## Objective
+
+- Chat list_apis / call_api see GET /streaks/{ticker} and every later add/remove without a handwritten OPERATIONS seed.
+
+## Dependency graph
+
+- C1 depends_on: [] - Adversarial freshness tests (reverse pin inclusion, streaks search, add/remove fixture, Next loader lockstep)
+- C2 depends_on: [C1] - Derive runtime catalog from assistant_catalog.py + radonCapability; FastAPI twins win; Next-only static loaders
+- C3 depends_on: [C2] - Focused vitest green, then full gate, commit, push
+
+## Checklist
+
+- [x] C1 Freshness tests written
+- [x] C2 Pin-derived catalog + dispatch
+- [x] C3 Verify, commit, push
+
+---
+
 # Task: STREAKS regime tab — per-ticker consecutive daily gains (2026-08-30)
 
 ## Objective
