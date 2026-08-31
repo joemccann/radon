@@ -262,13 +262,18 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // Turso skew_history transform only — no IB.
   "skew2d": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
-  // ``vol-cone`` — daily 20:45 UTC timer, UW-only, 26h open / 3d closed.
-  "vol-cone": { open: 26 * HOUR, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: false },
+  // ``vol-cone`` — daily 20:45 UTC Mon-Fri timer, UW-only, 26h open. The
+  // holiday-Monday heartbeat lands Fri 20:45 UTC + 72h + RandomizedDelaySec
+  // + run time, so the previous 3d closed window sat exactly on the longest
+  // healthy gap; 4d per the cash-flow-sync precedent (weekend + one
+  // holiday-drift day). /api/vol-cone shares this closed window as its
+  // serve budget, so tightening it re-opens the Sunday-night false outage.
+  "vol-cone": { open: 26 * HOUR, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
 
   // ``vol-cone-intraday`` — 15m live UW sample during ET trading hours; a
   // market-hours-only writer is silent by design off-session, so extended
-  // and closed carry the same 3d floor as its EOD parent.
-  "vol-cone-intraday": { open: 45 * MIN, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: false },
+  // and closed carry the same 4d floor as its EOD parent.
+  "vol-cone-intraday": { open: 45 * MIN, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
 
   // ``knowledge-ingest`` — hourly knowledge-base ingest oneshot
   // (scripts/knowledge/ingest.py via radon-knowledge.timer, 24/7; no
