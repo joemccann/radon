@@ -109,7 +109,7 @@ def notify_weekend_phase(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="weekend_notify")
     parser.add_argument(
-        "--loop", required=True, choices=["reliability", "testing", "ci-performance", "documentation"]
+        "--loop", required=True, choices=["reliability", "testing", "ci-performance", "documentation", "security"]
     )
     # `prologue` is not decorative: every wrapper's report() is reachable with
     # PHASE="prologue" — the marker refusal, the held-lock refusal and the ERR

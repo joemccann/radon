@@ -30,11 +30,13 @@ RELIABILITY = REPO / "scripts" / "reliability_weekend.sh"
 TESTING = REPO / "scripts" / "testing_weekend.sh"
 CI_PERFORMANCE = REPO / "scripts" / "ci_performance_nightly.sh"
 DOCUMENTATION = REPO / "scripts" / "documentation_nightly.sh"
+SECURITY = REPO / "scripts" / "security_nightly.sh"
 LOOPS = {
     "reliability": RELIABILITY,
     "testing": TESTING,
     "ci-performance": CI_PERFORMANCE,
     "documentation": DOCUMENTATION,
+    "security": SECURITY,
 }
 BASH = shutil.which("bash") or "/bin/bash"
 
@@ -50,6 +52,8 @@ def _runner_clone(tmp_path: Path, name: str) -> Path:
     repo = tmp_path / f"radon-{name}"
     (repo / "scripts").mkdir(parents=True)
     (repo / ".radon-weekend-runner").write_text("", encoding="utf-8")
+    # the security wrapper additionally requires this marker; inert elsewhere
+    (repo / ".radon-security-runner").write_text("", encoding="utf-8")
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
     return repo
 
