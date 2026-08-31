@@ -152,6 +152,7 @@ skew-tab.spec.ts
 skew2d-tab.spec.ts
 spread-price-bar.spec.ts
 straddle-tab.spec.ts
+streaks-tab.spec.ts
 strength-confirmation-scanner.spec.ts
 sync-fallback.spec.ts
 theta-harvester-prefill.spec.ts

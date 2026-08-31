@@ -1,0 +1,110 @@
+{
+ "chart": {
+  "result": [
+   {
+    "meta": {
+     "currency": "USD",
+     "symbol": "SPY",
+     "exchangeName": "PCX",
+     "fullExchangeName": "NYSEArca",
+     "instrumentType": "ETF",
+     "firstTradeDate": 728317800,
+     "regularMarketTime": 1787947200,
+     "hasPrePostMarketData": true,
+     "gmtoffset": -14400,
+     "timezone": "EDT",
+     "exchangeTimezoneName": "America/New_York",
+     "regularMarketPrice": 769.35,
+     "regularMarketChangePercent": -0.227,
+     "fiftyTwoWeekHigh": 779.37,
+     "fiftyTwoWeekLow": 629.28,
+     "regularMarketDayHigh": 775.292,
+     "regularMarketDayLow": 768.308,
+     "regularMarketVolume": 36342284,
+     "longName": "State Street SPDR S&P 500 ETF Trust",
+     "shortName": "State Street SPDR S&P 500 ETF T",
+     "chartPreviousClose": 754.6,
+     "priceHint": 2,
+     "currentTradingPeriod": {
+      "pre": {
+       "timezone": "EDT",
+       "start": 1787904000,
+       "end": 1787923800,
+       "gmtoffset": -14400
+      },
+      "regular": {
+       "timezone": "EDT",
+       "start": 1787923800,
+       "end": 1787947200,
+       "gmtoffset": -14400
+      },
+      "post": {
+       "timezone": "EDT",
+       "start": 1787947200,
+       "end": 1787961600,
+       "gmtoffset": -14400
+      }
+     },
+     "dataGranularity": "1d",
+     "range": "3mo",
+     "validRanges": [
+      "1d",
+      "5d",
+      "1mo",
+      "3mo",
+      "6mo",
+      "1y",
+      "2y",
+      "5y",
+      "10y",
+      "ytd",
+      "max"
+     ]
+    },
+    "timestamp": [
+     1786627800,
+     1786714200,
+     1786973400,
+     1787059800,
+     1787146200,
+     1787232600,
+     1787319000,
+     1787578200,
+     1787664600,
+     1787751000,
+     1787837400,
+     1787923800
+    ],
+    "events": {
+     "dividends": {
+      "1781789400": {
+       "amount": 1.904,
+       "date": 1781789400
+      }
+     }
+    },
+    "indicators": {
+     "quote": [
+      {
+       "close": [
+        777.8800048828125,
+        776.3400268554688,
+        772.6699829101562,
+        767.4500122070312,
+        769.0599975585938,
+        762.5999755859375,
+        765.719970703125,
+        763.469970703125,
+        765.9099731445312,
+        766.0800170898438,
+        771.0999755859375,
+        769.3499755859375
+       ]
+      }
+     ]
+    }
+   }
+  ],
+  "error": null
+ }
+}
