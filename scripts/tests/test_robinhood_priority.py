@@ -259,3 +259,50 @@ class TestFetchAllStillFatalsWhenEverySourceIsDown:
 
         with pytest.raises(SystemExit):
             cri_scan.fetch_all(["SPY"])
+
+
+class TestCriBudgetUnderBlackholedRobinhood:
+    """REL-174 (R-481): one timed-out Robinhood POST opens the breaker for the
+    process, so the post-close snapshot does not pay the rung again per quote."""
+
+    def test_fetch_all_plus_snapshot_stays_inside_the_budget(self, monkeypatch, tmp_path):
+        import time as _time
+
+        import requests as _requests
+
+        from clients import robinhood_client as rh
+
+        token = tmp_path / "rh.json"
+        token.write_text('{"access_token": "tok", "token_type": "Bearer"}')
+        token.chmod(0o600)
+        monkeypatch.setenv("ROBINHOOD_MCP_TOKEN_FILE", str(token))
+        monkeypatch.delenv("ROBINHOOD_MCP_REFRESH_TOKEN", raising=False)
+        monkeypatch.setattr(rh, "_refresh_disabled", False)
+        if hasattr(rh, "_reset_process_state"):
+            rh._reset_process_state()
+
+        posts: list = []
+
+        def blackholed(self, url, json=None, headers=None, timeout=None, **_kw):  # noqa: A002
+            posts.append(url)
+            _time.sleep(rh.LADDER_TIMEOUT_S)
+            raise _requests.Timeout("read timed out")
+
+        monkeypatch.setattr(rh.requests.Session, "post", blackholed)
+        bars = [(f"2026-{m:02d}-{d:02d}", 100.0) for m in range(1, 13) for d in range(1, 22)]
+        monkeypatch.setattr(cri_scan, "_fetch_ib", lambda tickers: {})
+        monkeypatch.setattr(cri_scan, "_fetch_uw", lambda tickers: {})
+        monkeypatch.setattr(cri_scan, "_fetch_cboe_cor1m", lambda: [])
+        monkeypatch.setattr(cri_scan, "_fetch_yahoo", lambda t, days=400: list(bars))
+        # time.sleep stays REAL here: the stub's 7s sleep is the blackhole.
+        monkeypatch.setattr(cri_scan, "_fetch_ib_current_quote", lambda t: None)
+        monkeypatch.setattr(cri_scan, "_fetch_yahoo_current_quote", lambda t: 1.0)
+        monkeypatch.setattr(cri_scan, "fetch_cor1m_current_quote", lambda: 1.0)
+
+        started = _time.monotonic()
+        raw, _ = cri_scan.fetch_all(["SPY", "VIX", "VVIX", "COR1M"])
+        snapshot = cri_scan.build_post_close_snapshot("2026-08-31", use_official_cboe_close=False)
+        elapsed = _time.monotonic() - started
+        assert "SPY" in raw and snapshot["SPY"] == 1.0
+        assert elapsed < 20, f"{elapsed:.1f}s: the rung was paid again after the first timeout ({len(posts)} POSTs)"
+        assert len(posts) == 1

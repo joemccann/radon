@@ -266,6 +266,15 @@ def _take(
             sources[ticker] = label
 
 
+def _robinhood_degradation(sources: dict[str, str]) -> Optional[dict[str, Any]]:
+    """Heartbeat detail when the Robinhood rung failed and Yahoo served (REL-174)."""
+    try:
+        from clients.robinhood_client import robinhood_degradation
+    except ImportError:
+        return None
+    return robinhood_degradation(SERVICE, sources, skip=RH_SKIP)
+
+
 def fetch_rh_closes(tickers: list[str]) -> dict[str, Closes]:
     """Robinhood daily closes (read-only MCP). DXY is skipped.
 
@@ -455,6 +464,8 @@ def persist_result(
     payload: dict[str, Any],
     changed_rows: list[dict[str, Any]],
     health_error: Optional[dict[str, Any]] = None,
+    *,
+    degraded: Optional[dict[str, Any]] = None,
 ) -> None:
     """Dual-write: Turso rows + snapshot + heartbeat, then the JSON fallback.
 
@@ -474,11 +485,15 @@ def persist_result(
     if changed_rows:
         writer.upsert_iei_hyg_rows(changed_rows, recorded_at=scan_time)
     writer.upsert_scan_snapshot(SERVICE, scan_time, payload)
+    # REL-174 (R-470): `degraded` rides on an `ok` row — the writer succeeded
+    # (writer-state semantics), but a closed Robinhood rung that demoted a
+    # ticker to Yahoo is named in last_error instead of hidden under
+    # `ok`/`yahoo`. It clears on the next clean cycle.
     writer.record_service_health(
         SERVICE,
         "ok" if health_error is None else "error",
         finished_at=scan_time,
-        error=health_error,
+        error=health_error if health_error is not None else degraded,
     )
     _write_json_cache(payload)
 
@@ -571,7 +586,7 @@ def run() -> dict[str, Any]:
         if not new_rows:
             _log("source unchanged; refreshing snapshot only")
         payload = build_output(series, source=source, source_by_ticker=source_by_ticker)
-        persist_result(payload, new_rows)
+        persist_result(payload, new_rows, degraded=_robinhood_degradation(source_by_ticker))
     except Exception as exc:
         _record_error_health(f"{SERVICE}: {exc}", "cycle_failed")
         raise

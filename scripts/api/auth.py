@@ -23,19 +23,22 @@ logger = logging.getLogger("radon.auth")
 
 _TAILNET = ipaddress.ip_network("100.64.0.0/10")
 # Hetzner Cloud Network radon-private (app 10.0.0.2, broker 10.0.0.4).
-# NIC attachment is the authenticated channel, same class as the tailnet.
-# Do not widen to all RFC1918 — docker0 is 172.17.0.0/16.
+# NIC attachment authenticates the PEER, not its intent: the only caller
+# this net carries is the broker watchdog's GET /health, so the trust is
+# scoped to that probe (is_private_net_probe) and never feeds the global
+# server-to-server bypass (REL-170, R-473). Do not widen to all RFC1918 —
+# docker0 is 172.17.0.0/16.
 _HETZNER_PRIVATE = ipaddress.ip_network("10.0.0.0/16")
 
 
 def is_local_or_tailnet(host: str | None) -> bool:
-    """True for loopback, Tailscale CGNAT, or the Hetzner private net.
+    """True for loopback or the Tailscale CGNAT range.
 
     Tailnet membership is itself an authenticated channel, so tailnet peers
     are treated as 'local' for server-to-server calls — this is what lets
     the laptop's Next.js (in cloud-thin mode) reach the Hetzner FastAPI
-    without forwarding a Clerk JWT. After the broker/app split the watchdog
-    on 10.0.0.4 probes FastAPI on 10.0.0.2 the same way.
+    without forwarding a Clerk JWT. The Hetzner private net is deliberately
+    NOT here; see is_private_net_probe.
     """
     if host in ("127.0.0.1", "::1"):
         return True
@@ -45,7 +48,17 @@ def is_local_or_tailnet(host: str | None) -> bool:
         address = ipaddress.ip_address(host)
     except ValueError:
         return False
-    return address in _TAILNET or address in _HETZNER_PRIVATE
+    return address in _TAILNET
+
+
+def is_private_net_peer(host: str | None) -> bool:
+    """True when the TCP peer is on the Hetzner private network."""
+    if not host:
+        return False
+    try:
+        return ipaddress.ip_address(host) in _HETZNER_PRIVATE
+    except ValueError:
+        return False
 
 
 # Headers a reverse proxy adds when it forwards a request. Caddy sets
@@ -120,6 +133,22 @@ def is_trusted_local_request(request) -> bool:
     """
     client_host = request.client.host if getattr(request, "client", None) else None
     if not is_local_or_tailnet(client_host):
+        return False
+    if _arrived_via_proxy(request):
+        return False
+    return not _is_browser_page_request(request)
+
+
+def is_private_net_probe(request) -> bool:
+    """True for the broker watchdog's read-only probe over radon-private.
+
+    Same proxy/browser discipline as is_trusted_local_request, but this is
+    consulted ONLY by the auth-exempt read paths the broker reads (/health);
+    it is not an input to the global bypass, so a private-net peer still
+    needs a Clerk JWT or API key for orders, admin and exec.
+    """
+    client_host = request.client.host if getattr(request, "client", None) else None
+    if not is_private_net_peer(client_host):
         return False
     if _arrived_via_proxy(request):
         return False

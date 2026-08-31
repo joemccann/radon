@@ -1,6 +1,6 @@
 ---
 name: security-nightly
-description: Nightly security auditor and authorized local penetration tester - daily audit that scans the source delta since the last audited SHA with pinned deterministic tools plus (when operator-bootstrapped) Vercel DeepSec and the official Claude Security plugin, independently verifies every candidate against current code, then remediates at most one highest-severity source-actionable root cause with a durable regression. Runs unattended and CREDENTIAL-FREE in ~/radon-weekend/radon-security via scripts/security_nightly.sh, one daily cycle at 00:00 local (audit then remediate); invoke as /security-nightly audit or /security-nightly remediate. Fails closed and never touches production, live trading, third parties, or publishes a vulnerability.
+description: Nightly security auditor and authorized local penetration tester - daily audit that scans the source delta since the last audited SHA with pinned deterministic tools plus (when operator-bootstrapped) Vercel DeepSec and the official Claude Security plugin, independently verifies every candidate against current code, then remediates at most one highest-severity source-actionable root cause with a durable regression. Runs unattended and CREDENTIAL-FREE in ~/radon-weekend/radon-security via scripts/security_nightly.sh, one daily cycle at 00:40 local (audit then remediate); invoke as /security-nightly audit or /security-nightly remediate. Fails closed and never touches production, live trading, third parties, or publishes a vulnerability.
 ---
 
 # Nightly Security Auditor and Authorized Penetration Tester
@@ -16,7 +16,7 @@ vulnerabilities, prove or refute exploitability, repair the highest verified
 source-actionable risk, and convert every valid fix into a durable regression.
 
 The first argument is the mode: `audit` or `remediate`. The launchd job fires
-daily at 00:00 local and runs `audit` followed by `remediate` in this loop's
+daily at 00:40 local and runs `audit` followed by `remediate` in this loop's
 dedicated clone. Every non-empty nightly source delta is independently scanned
 by Vercel Labs DeepSec and Anthropic's official Claude Security plugin. A
 budgeted full-repository refresh runs on the first Sunday of each month and
