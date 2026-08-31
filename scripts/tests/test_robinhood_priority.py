@@ -125,6 +125,20 @@ class TestRvRatioIncrementalChain:
         assert source == "uw"
         assert rh_calls == []
 
+    def test_empty_rh_falls_through_to_yahoo(self, monkeypatch):
+        yahoo_calls: list = []
+        monkeypatch.setattr(rv_ratio_scan, "_ib_auth_state", lambda: "awaiting_2fa")
+        monkeypatch.setattr(rv_ratio_scan, "_fetch_uw_daily", lambda s: {})
+        monkeypatch.setattr(rv_ratio_scan, "_fetch_rh_daily", lambda s: {})
+        monkeypatch.setattr(
+            rv_ratio_scan, "_fetch_yahoo_daily",
+            lambda s, years: yahoo_calls.append(s) or dict(BARS),
+        )
+
+        bars, source = rv_ratio_scan._fetch_incremental("SPY")
+        assert (bars, source) == (BARS, "yahoo")
+        assert yahoo_calls == ["SPY"], "an empty RH answer must still reach Yahoo"
+
 
 class TestGarchAndLeapPriceHistory:
     def test_garch_uses_rh_before_yahoo(self, monkeypatch):
@@ -174,6 +188,18 @@ class TestGarchAndLeapPriceHistory:
         leap_scanner_uw.get_price_history("SPY")
         assert rh_calls == []
 
+    def test_leap_empty_rh_falls_through_to_yahoo(self, monkeypatch):
+        yahoo_calls: list = []
+        monkeypatch.setattr(leap_scanner_uw, "get_uw_history", lambda *a, **k: [])
+        monkeypatch.setattr(leap_scanner_uw, "get_rh_history", lambda t: [])
+        monkeypatch.setattr(
+            leap_scanner_uw, "get_yahoo_history",
+            lambda t, days=400: yahoo_calls.append(t) or [99.0] * 90,
+        )
+
+        assert leap_scanner_uw.get_price_history("SPY") == [99.0] * 90
+        assert yahoo_calls == ["SPY"], "an empty RH answer must still reach Yahoo"
+
 
 class TestCriScanRank:
     """CRI is the ladder where Cboe already outranks Yahoo — Robinhood slots
@@ -199,6 +225,18 @@ class TestCriScanRank:
         )
         assert cri_scan.fetch_preferred_current_quote("SPY") == pytest.approx(640.5)
         assert rh_calls == []
+
+    def test_current_quote_empty_rh_falls_through_to_yahoo(self, monkeypatch):
+        yahoo_calls: list = []
+        monkeypatch.setattr(cri_scan, "_fetch_ib_current_quote", lambda t: None)
+        monkeypatch.setattr(cri_scan, "_fetch_rh_current_quote", lambda t: None)
+        monkeypatch.setattr(
+            cri_scan, "_fetch_yahoo_current_quote",
+            lambda t: yahoo_calls.append(t) or 640.0,
+        )
+
+        assert cri_scan.fetch_preferred_current_quote("SPY") == pytest.approx(640.0)
+        assert yahoo_calls == ["SPY"], "an empty RH answer must still reach Yahoo"
 
     def test_history_fallback_uses_rh_for_spy_before_yahoo(self, monkeypatch):
         bars = [

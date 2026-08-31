@@ -27,6 +27,12 @@ from pathlib import Path
 
 import pytest
 
+# The setup-execution stubs live beside this file; pytest's rootdir is the
+# repo, so the directory is not on sys.path by default.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from test_weekend_runner_env_provisioning import DUMMY, _stub_bin as _setup_stub_bin  # noqa: E402
+
 REPO = Path(__file__).resolve().parents[2]
 WRAPPER = REPO / "scripts" / "security_nightly.sh"
 SETUP = REPO / "scripts" / "setup_security_nightly.sh"
@@ -38,6 +44,7 @@ LABEL = "security-nightly"
 LOG_DIR = "logs/security-nightly"
 SIBLING_CLONES = ("radon", "radon-testing", "radon-ci-performance", "radon-documentation")
 BASH = shutil.which("bash") or "/bin/bash"
+COMMENT_MARK = "<<<COMMENT>>>"
 
 
 def _uncommented(path: Path) -> str:
@@ -46,6 +53,19 @@ def _uncommented(path: Path) -> str:
         for line in path.read_text(encoding="utf-8").splitlines()
         if not line.lstrip().startswith("#")
     )
+
+
+def _clone(tmp_path: Path, *, security_marker: bool) -> Path:
+    repo = tmp_path / "clone"
+    (repo / "scripts").mkdir(parents=True)
+    (repo / "logs" / LABEL).mkdir(parents=True)
+    shutil.copy2(WRAPPER, repo / "scripts" / "security_nightly.sh")
+    (repo / "scripts" / "security_nightly.sh").chmod(0o755)
+    (repo / "scripts" / "weekend_notify.py").write_text("# stub\n", encoding="utf-8")
+    (repo / ".radon-weekend-runner").write_text("", encoding="utf-8")
+    if security_marker:
+        (repo / ".radon-security-runner").write_text("", encoding="utf-8")
+    return repo
 
 
 class TestTheLoopOwnsItsOwnLane:
@@ -159,21 +179,9 @@ class TestTheTwoMarkerGate:
             exe.chmod(exe.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
         return bin_dir, gh_log
 
-    def _clone(self, tmp_path: Path, *, security_marker: bool) -> Path:
-        repo = tmp_path / "clone"
-        (repo / "scripts").mkdir(parents=True)
-        (repo / "logs" / LABEL).mkdir(parents=True)
-        shutil.copy2(WRAPPER, repo / "scripts" / "security_nightly.sh")
-        (repo / "scripts" / "security_nightly.sh").chmod(0o755)
-        (repo / "scripts" / "weekend_notify.py").write_text("# stub\n", encoding="utf-8")
-        (repo / ".radon-weekend-runner").write_text("", encoding="utf-8")
-        if security_marker:
-            (repo / ".radon-security-runner").write_text("", encoding="utf-8")
-        return repo
-
     def test_a_clone_without_the_security_marker_is_refused(self, tmp_path):
         bin_dir, gh_log = self._stub_bin(tmp_path)
-        repo = self._clone(tmp_path, security_marker=False)
+        repo = _clone(tmp_path, security_marker=False)
         proc = subprocess.run(
             [BASH, str(repo / "scripts" / "security_nightly.sh"), "audit"],
             cwd=repo,
@@ -189,7 +197,7 @@ class TestTheTwoMarkerGate:
     def test_a_clone_with_only_the_weekend_marker_of_a_sibling_is_refused(self, tmp_path):
         # This is precisely the shape of every sibling loop's clone.
         bin_dir, _gh = self._stub_bin(tmp_path)
-        repo = self._clone(tmp_path, security_marker=False)
+        repo = _clone(tmp_path, security_marker=False)
         proc = subprocess.run(
             [BASH, str(repo / "scripts" / "security_nightly.sh"), "cycle"],
             cwd=repo,
@@ -224,6 +232,113 @@ class TestTheDeadmanIsSanitized:
         body = _uncommented(WRAPPER)
         assert 'report "$status"' in body, body
 
+    # T-350: the two greps above are tripwires for the sibling-loop shape
+    # (`tail_text` / `tail -c 1500`), but `report "$status" "$(tail -c 800
+    # "$RUN_LOG")"` passes both. Rail 7 is enforced at the wire: run the real
+    # wrapper with an agent that prints a canary into the run log, and read
+    # every `gh issue comment --body` the dead-man received.
+    CANARY = "CANARY-7f3a"
+
+    def _phase_stub_bin(
+        self, tmp_path: Path, *, claude_rc: int = 0, timeout_124: bool = False,
+        truncated: bool = False,
+    ) -> tuple[Path, Path, Path]:
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        gh_log = tmp_path / "gh.log"
+        bodies = tmp_path / "bodies.log"
+        stubs = {
+            # Every argv line, plus each comment body on its own (a body spans
+            # lines, so `$*` alone cannot be split back into comments).
+            "gh": (
+                "#!/bin/bash\n"
+                f'printf "%s\\n" "$*" >> "{gh_log}"\n'
+                'if [ "$1 $2" = "issue list" ]; then echo 4242; fi\n'
+                'if [ "$1 $2" = "issue comment" ]; then\n'
+                '  while [ $# -gt 0 ]; do\n'
+                '    if [ "$1" = "--body" ]; then shift\n'
+                f'      printf \'{COMMENT_MARK}%s\\n\' "$1" >> "{bodies}"\n'
+                "      break\n"
+                "    fi\n"
+                "    shift\n"
+                "  done\n"
+                "fi\n"
+                "exit 0\n"
+            ),
+            # The agent: scanner-shaped output into the run log, then the
+            # exit the case under test needs.
+            "claude": (
+                "#!/bin/sh\n"
+                f"echo 'gitleaks: {self.CANARY} matched in web/lib/secret.ts:12'\n"
+                + ("echo 'Background tasks still running after 600s'\n" if truncated else "")
+                + f"exit {claude_rc}\n"
+            ),
+            # `timeout -k <secs> <secs> cmd`: consume the options, then run the
+            # command. The 124 path still runs the agent first, so the run log
+            # holds the canary when the cap is reported.
+            "timeout": (
+                "#!/bin/bash\n"
+                'while [ $# -gt 0 ]; do\n'
+                '  case "$1" in\n'
+                '    -k|--kill-after) shift 2 ;;\n'
+                '    *) shift; break ;;\n'
+                '  esac\n'
+                'done\n'
+                f'if [ "{int(timeout_124)}" = "1" ] && [ "${{1##*/}}" = "claude" ]; then "$@"; exit 124; fi\n'
+                'exec "$@"\n'
+            ),
+            "git": "#!/bin/sh\nexit 0\n",
+            "python3": "#!/bin/sh\nexit 0\n",
+        }
+        for name, body in stubs.items():
+            exe = bin_dir / name
+            exe.write_text(body, encoding="utf-8")
+            exe.chmod(0o755)
+        return bin_dir, gh_log, bodies
+
+    def _run_audit(self, tmp_path: Path, **stub_kwargs) -> tuple[subprocess.CompletedProcess, str, list[str]]:
+        bin_dir, gh_log, bodies = self._phase_stub_bin(tmp_path, **stub_kwargs)
+        repo = _clone(tmp_path, security_marker=True)
+        proc = subprocess.run(
+            [BASH, str(repo / "scripts" / "security_nightly.sh"), "audit"],
+            cwd=repo,
+            env={"PATH": f"{bin_dir}:/usr/bin:/bin", "HOME": str(tmp_path / "home"),
+                 "RADON_WEEKEND_REPO": str(repo)},
+            capture_output=True, text=True, timeout=120,
+        )
+        calls = gh_log.read_text(encoding="utf-8") if gh_log.exists() else ""
+        raw = bodies.read_text(encoding="utf-8") if bodies.exists() else ""
+        run_logs = list((repo / "logs" / LABEL).glob("audit-*.log"))
+        assert run_logs and self.CANARY in run_logs[0].read_text(encoding="utf-8"), (
+            "the harness must put the canary in the run log, or a clean "
+            f"dead-man proves nothing: {run_logs}"
+        )
+        return proc, calls, [c for c in raw.split(COMMENT_MARK) if c.strip()]
+
+    @pytest.mark.parametrize(
+        "case, stub_kwargs, expected_status, expected_rc",
+        [
+            ("ok", {"claude_rc": 0}, "**OK**", 0),
+            ("failed", {"claude_rc": 7}, "FAILED (exit 7)", 7),
+            ("timeout", {"timeout_124": True}, "TIMEOUT", 124),
+            ("truncated", {"truncated": True}, "TRUNCATED", 0),
+        ],
+    )
+    def test_no_run_log_content_reaches_the_public_deadman(
+        self, tmp_path, case, stub_kwargs, expected_status, expected_rc
+    ):
+        proc, calls, comments = self._run_audit(tmp_path, **stub_kwargs)
+        assert proc.returncode == expected_rc, (proc.returncode, proc.stdout, proc.stderr)
+        assert "issue comment" in calls, f"{case}: the phase never reached the dead-man: {calls!r}"
+        assert comments, f"{case}: no --body was posted: {calls!r}"
+        assert any(expected_status in c for c in comments), (case, comments)
+        assert self.CANARY not in calls, (
+            f"{case}: run-log content reached a public `gh` call; rail 7 forbids "
+            f"posting the run-log tail to the dead-man issue: {calls!r}"
+        )
+        for comment in comments:
+            assert self.CANARY not in comment, (case, comment)
+
 
 class TestTheSetupIsCredentialFree:
     """Rail 5: the security clone receives NO Radon credential."""
@@ -238,6 +353,56 @@ class TestTheSetupIsCredentialFree:
         assert "install -m 600" not in body, (
             "the security setup still installs a credential file into the clone"
         )
+
+    # T-351: the greps above pin the sibling setups' provisioning SHAPE
+    # (`provision_env_file`, `install -m 600`); a plain `cp` of web/.env
+    # passes all three. Rail 5 is enforced by running the real setup against
+    # a staged source checkout that DOES carry every env file, with the whole
+    # toolchain stubbed, and asserting none of them lands in the clone.
+    def _stage_setup(self, tmp_path: Path) -> tuple[Path, dict]:
+        src = tmp_path / "src"
+        (src / "web").mkdir(parents=True)
+        for rel, body in DUMMY.items():
+            (src / rel).write_text(body, encoding="utf-8")
+        root = tmp_path / "weekend"
+        clone = root / CLONE
+        (clone / ".git").mkdir(parents=True)
+        (clone / "web").mkdir()
+        (clone / "config").mkdir()
+        (clone / "requirements.txt").write_text("", encoding="utf-8")
+        shutil.copy(PLIST, clone / "config" / PLIST.name)
+        venv_bin = root / "venv" / "bin"
+        venv_bin.mkdir(parents=True)
+        for tool in ("python", "pip"):
+            exe = venv_bin / tool
+            exe.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            exe.chmod(0o755)
+        (root / ".env").write_text("PUSHOVER_USER=dummy\nPUSHOVER_TOKEN=dummy\n", encoding="utf-8")
+        (tmp_path / "home").mkdir()
+        env = {
+            "PATH": f"{_setup_stub_bin(tmp_path)}:/usr/bin:/bin:/usr/sbin:/sbin",
+            "HOME": str(tmp_path / "home"),
+            "RADON_WEEKEND_ROOT": str(root),
+            "RADON_WEEKEND_SRC_REPO": str(src),
+        }
+        return clone, env
+
+    def test_an_executed_setup_lands_no_env_file_in_the_clone(self, tmp_path):
+        clone, env = self._stage_setup(tmp_path)
+        proc = subprocess.run(
+            [BASH, str(SETUP)], env=env, cwd=str(tmp_path),
+            capture_output=True, text=True, timeout=120,
+        )
+        out = proc.stdout + proc.stderr
+        assert proc.returncode == 0, out
+        assert (clone / ".radon-security-runner").is_file(), out
+        for rel in DUMMY:
+            assert not (clone / rel).exists(), (
+                f"{rel} landed in the security clone although the source "
+                f"checkout offered it; rail 5 forbids any Radon credential "
+                f"in this clone:\n{out}"
+            )
+        assert "rail 5" in out.split("[2/4]", 1)[-1], out
 
     def test_setup_stamps_both_markers(self):
         body = _uncommented(SETUP)
