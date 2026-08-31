@@ -71,6 +71,13 @@ class TestTotalDeadline:
         with pytest.raises(mq.MenthorQDashboardAuthError):
             client._remaining_ms(time.monotonic() - 1, cap_seconds=10)
 
+    def test_the_production_request_budget_is_forty_seconds(self):
+        """test_menthorq_dashboard_bootstrap overrides the budget per-test so
+        the expired-session poll runs out in 0.5s instead of 40s (CIP-001).
+        Pin the module default so that test-only override can never become
+        the production value."""
+        assert mq.REQUEST_PATH_AUTH_BUDGET_SECONDS == 40.0
+
 
 class TestEmbargoIsDistinguishable:
     def test_the_embargo_raises_its_own_subclass(self):
