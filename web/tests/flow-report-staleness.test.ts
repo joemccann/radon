@@ -5,6 +5,7 @@ import {
   flowReportTimestamp,
   FLOW_REPORT_STALENESS,
 } from "@/lib/flowReportStaleness";
+import { useProcessTimeZone } from "./helpers/processTimeZone";
 
 describe("flowReportTimestamp", () => {
   it("prefers fetched_at over analysis_time", () => {
@@ -147,13 +148,21 @@ describe("flowReportAgeLabel", () => {
     ).toBe("2026-08-27 · 1 day old");
   });
 
-  it("dates the report in market time, not UTC", () => {
+  describe("under a non-ET process zone", () => {
     // 2026-08-27 21:30 ET is 2026-08-28 01:30 UTC. A UTC label would move an
-    // after-hours scan to the next trading day.
-    const now = new Date("2026-08-28T18:24:00Z");
-    expect(
-      flowReportAgeLabel({ fetched_at: "2026-08-28T01:30:00Z" }, now),
-    ).toBe("2026-08-27 · 1 day old");
+    // after-hours scan to the next trading day. The suite pins TZ to ET, under
+    // which a process-local date read is indistinguishable from a market-time
+    // one, so this runs under UTC where the two diverge (T-319).
+    const AFTER_HOURS_SCAN = "2026-08-28T01:30:00Z";
+    useProcessTimeZone("UTC", { iso: AFTER_HOURS_SCAN, localHour: 1 });
+
+    it("dates the report in market time, not process-local", () => {
+      expect(new Date(AFTER_HOURS_SCAN).getDate()).toBe(28);
+      const now = new Date("2026-08-28T18:24:00Z");
+      expect(
+        flowReportAgeLabel({ fetched_at: AFTER_HOURS_SCAN }, now),
+      ).toBe("2026-08-27 · 1 day old");
+    });
   });
 
   it("returns null when there is no usable timestamp", () => {
