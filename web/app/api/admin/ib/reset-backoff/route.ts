@@ -17,7 +17,11 @@ export async function POST(): Promise<Response> {
   if (!access.ok) return access.response;
   const requestId = getRequestId();
   try {
-    const data = await radonFetch("/ib/reset-backoff", { method: "POST", timeout: 15_000 });
+    const data = await radonFetch("/ib/reset-backoff", {
+      method: "POST",
+      timeout: 15_000,
+      token: access.principal.token,
+    });
     const response = NextResponse.json(data);
     return setNoStoreResponseHeaders(response, requestId);
   } catch (error) {

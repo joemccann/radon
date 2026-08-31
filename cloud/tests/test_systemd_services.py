@@ -11,6 +11,7 @@ EXPECTED_SERVICE_FILES = [
     "radon-api.service",
     "radon-ib-gateway.service",
     "radon-ib-gateway-preheld-restart.service",
+    "radon-ib-gateway-remote.service",
     "radon-monitor.service",
     "radon-newsfeed.service",
     "radon-nextjs.service",
@@ -308,6 +309,24 @@ class TestIBGateway:
     def test_exec_stop_uses_gateway_control_helper(self, unit):
         svc = unit(self.FILENAME)["Service"]
         assert svc["execstop"] == "/usr/local/bin/radon-ib-gateway-control stop"
+
+
+class TestIBGatewayRemote:
+    FILENAME = "radon-ib-gateway-remote.service"
+
+    def test_bind_is_private_nic(self, unit, services_dir):
+        text = (services_dir / self.FILENAME).read_text()
+        svc = unit(self.FILENAME)["Service"]
+        assert "RADON_IB_REMOTE_BIND=10.0.0.4" in text
+        assert "RADON_IB_REMOTE_PORT=8340" in text
+        assert "RADON_IB_REMOTE_ALLOW=10.0.0.2" in text
+        assert "0.0.0.0" not in text
+        assert "python -m scripts.ib_gateway_remote.serve" in svc["execstart"]
+
+    def test_not_part_of_gateway(self, unit):
+        u = unit(self.FILENAME)["Unit"]
+        assert "radon-ib-gateway.service" not in u.get("partof", "")
+        assert "radon-ib-gateway.service" not in u.get("requires", "")
 
 
 # ---------------------------------------------------------------------------

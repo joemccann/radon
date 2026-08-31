@@ -66,6 +66,11 @@ ARTIFACTS = (
         "/etc/systemd/system/radon-ib-gateway.service",
         0o644,
     ),
+    Artifact(
+        "services/radon-ib-gateway-remote.service",
+        "/etc/systemd/system/radon-ib-gateway-remote.service",
+        0o644,
+    ),
     Artifact("services/radon-api.service", "/etc/systemd/system/radon-api.service", 0o644),
     Artifact(
         "services/radon-monitor.service", "/etc/systemd/system/radon-monitor.service", 0o644

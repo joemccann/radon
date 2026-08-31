@@ -1,0 +1,26 @@
+[Unit]
+Description=Radon IB Gateway remote-control daemon (broker private-net mTLS)
+# Broker-only. App and combined hosts skip this unit at control-plane refresh.
+# No Requires=/PartOf= on radon-ib-gateway: a Gateway stop must not kill the
+# path the app host uses to start it again.
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=radon
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/etc/radon/env
+Environment=RADON_IB_REMOTE_BIND=10.0.0.4
+Environment=RADON_IB_REMOTE_PORT=8340
+Environment=RADON_IB_REMOTE_ALLOW=10.0.0.2
+TasksMax=32
+MemoryMax=256M
+ExecStart=/home/radon/radon/.venv/bin/python -m scripts.ib_gateway_remote.serve
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
