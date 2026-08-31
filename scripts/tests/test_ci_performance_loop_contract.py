@@ -33,7 +33,7 @@ SKILL = REPO / ".claude" / "skills" / "ci-performance" / "SKILL.md"
 CLONE = "radon-ci-performance"
 LABEL = "ci-performance-nightly"
 LOG_DIR = "logs/ci-performance"
-SIBLING_CLONES = ("radon-testing", "radon-documentation")
+SIBLING_CLONES = ("radon-testing", "radon-documentation", "radon-security")
 
 
 def _uncommented(path: Path) -> str:
@@ -173,7 +173,7 @@ class TestSetupProvisionsTheDeadmanLabel:
         assert f'WEEKEND_REPO="$WEEKEND_ROOT/{CLONE}"' in body, body
         assert "com.radon.ci-performance-daily.plist" in body, body
 
-    @pytest.mark.parametrize("sibling", ("radon", "radon-testing", "radon-documentation"))
+    @pytest.mark.parametrize("sibling", ("radon", "radon-testing", "radon-documentation", "radon-security"))
     def test_setup_stands_down_on_every_sibling_lock(self, sibling):
         """All three setups write the SAME `$WEEKEND_ROOT/venv`.
 

@@ -1,22 +1,28 @@
 #!/usr/bin/env bash
-# One-command setup of the nightly documentation loop on the always-on runner
+# One-command setup of the nightly security loop on the always-on runner
 # (Mac mini). Run ON THE MINI from any checkout of the repo:
 #
-#   bash scripts/setup_documentation_nightly.sh
+#   bash scripts/setup_security_nightly.sh
 #
-# Provisions the documentation loop's OWN dedicated clone
-# (~/radon-weekend/radon-documentation — never edit it by hand; every run
-# hard-resets it to origin/main), installs the single daily launchd job
-# (one cycle: audit then remediate), and verifies the toolchain. The
-# clone is deliberately separate from the reliability loop's
-# (~/radon-weekend/radon): both loops hard-reset their working tree per
-# round and the reliability loop's continuation rounds make its wall
-# clock unbounded, so sharing a clone destroys in-flight work
-# (2026-08-16 incident).
+# Provisions the security loop's OWN dedicated clone
+# (~/radon-weekend/radon-security — never edit it by hand; every run
+# hard-resets it to origin/main), stamps BOTH runner markers, installs the
+# single daily launchd job (one cycle: audit then remediate), creates the
+# dead-man label, and verifies the toolchain. The clone is deliberately
+# separate from every other loop's; all loops hard-reset their tree per
+# round, so a shared clone destroys in-flight work (2026-08-16 incident).
+#
+# SECURITY loop rails this setup enforces:
+#   - it NEVER provisions web/.env or any Radon credential into the clone
+#     (rail 5); the security agent runs credential-free by design;
+#   - it stamps .radon-security-runner alongside .radon-weekend-runner so
+#     the wrapper's two-marker gate can distinguish this clone;
+#   - DeepSec and the Claude Security plugin are OPERATOR-bootstrapped, not
+#     installed here (rail 8); this script only checks and reports them.
 set -euo pipefail
 
 WEEKEND_ROOT="${RADON_WEEKEND_ROOT:-$HOME/radon-weekend}"
-WEEKEND_REPO="$WEEKEND_ROOT/radon-documentation"
+WEEKEND_REPO="$WEEKEND_ROOT/radon-security"
 WEEKEND_VENV="$WEEKEND_ROOT/venv"
 # Pushover creds for the per-phase page. Lives OUTSIDE the runner clone:
 # every round hard-resets and cleans that clone.
@@ -61,8 +67,13 @@ check "git ssh to origin" git ls-remote --exit-code "$ORIGIN_URL" HEAD
 check "pushover creds"    grep -qE '^PUSHOVER_(USER|TOKEN)=.+' "$WEEKEND_ENV"
 check "bash 4+ (cloud/tests)" bash -c '((BASH_VERSINFO[0] >= 4))'
 check "caddy (cloud/tests edge)" command -v caddy
-advise "$SRC_REPO/web/.env (else no dev server, so no browser verification)" \
-  test -s "$SRC_REPO/web/.env"
+# Rail 8/9: these are OPERATOR-bootstrapped and pinned; setup only reports
+# their presence. Absent ones make the matching audit stage OPERATOR_REQUIRED
+# (fail-closed), never an install trigger.
+advise "DeepSec workspace (.deepsec pinned, OPERATOR-bootstrapped)" \
+  test -x "$WEEKEND_REPO/.deepsec/node_modules/.bin/deepsec"
+advise "Claude Security plugin (official, OPERATOR-installed)" \
+  bash -c 'claude plugin list --json 2>/dev/null | grep -q claude-security'
 if [[ $fail -ne 0 ]]; then
   echo "Fix the MISSING items above, then re-run."
   echo "  bash 3.2 leaves 34 cloud/tests permanently red on this runner (13 in"
@@ -90,7 +101,7 @@ fi
 # The guard above was written for the clone ("A live cycle owns this clone")
 # and never extended to the shared $WEEKEND_ROOT both loops depend on. R-266.
 for SIBLING_REPO in "$WEEKEND_ROOT/radon" "$WEEKEND_ROOT/radon-testing" \
-  "$WEEKEND_ROOT/radon-ci-performance" "$WEEKEND_ROOT/radon-security"; do
+  "$WEEKEND_ROOT/radon-ci-performance" "$WEEKEND_ROOT/radon-documentation"; do
   if [[ -d "$SIBLING_REPO" ]] \
     && kill -0 "$(cat "$SIBLING_REPO/.weekend-runner.lock/pid" 2>/dev/null)" 2>/dev/null; then
     echo "  a weekend run is in flight in $SIBLING_REPO and shares $WEEKEND_VENV; re-run when it finishes"
@@ -104,46 +115,20 @@ git -C "$WEEKEND_REPO" fetch origin --quiet
 git -C "$WEEKEND_REPO" checkout -f --quiet main
 git -C "$WEEKEND_REPO" reset --hard --quiet origin/main
 touch "$WEEKEND_REPO/.radon-weekend-runner"
-mkdir -p "$WEEKEND_REPO/logs/documentation-nightly"
+# Rail 1: the security marker the wrapper additionally requires. Without
+# it the wrapper refuses, so a stray RADON_WEEKEND_REPO can never run
+# credential-free security work in a sibling loop or operator checkout.
+touch "$WEEKEND_REPO/.radon-security-runner"
+mkdir -p "$WEEKEND_REPO/logs/security-nightly"
 
-# web/.env is gitignored, so a fresh `git clone` can never carry it and the
-# nightly hard-reset would drop it anyway; both wrappers already exclude it
-# from their per-round `git clean`. Without it the Next dev server cannot
-# boot, so the loop cannot do the browser verification CLAUDE.md requires
-# (T-248 filed the resulting permanent local false-red on 2026-08-29).
-#
-# ONLY web/.env. The root .env is deliberately NOT provisioned: it would put
-# IB_FLEX_TOKEN in a second place. web/.env IS read by pytest, not only by
-# Next: 50 scripts/**/*.py producers (grep -rl 'load_dotenv(.*web.*\.env'
-# scripts --include='*.py') call load_dotenv(web/.env) at import, so the
-# clone's TURSO creds land in os.environ under every collected module.
-# scripts/tests/conftest.py::_strip_turso_credentials removes them per test;
-# that fixture, not this file, keeps the pytest gate host-independent (T-317:
-# without it 22 tests red with FlexTokenLocked on a provisioned clone).
-# Re-copied every setup run so a rotated key propagates. Never inline a value.
-provision_env_file() {
-  local rel="$1"
-  local src="$SRC_REPO/$rel"
-  local dst="$WEEKEND_REPO/$rel"
-  if [[ ! -s "$src" ]]; then
-    echo "  skipped $rel (none at $src; the loops run without it)"
-    return 0
-  fi
-  if [[ -s "$dst" && "$dst" -nt "$src" ]]; then
-    echo "  kept $rel (clone copy is newer than $src)"
-    return 0
-  fi
-  mkdir -p "$(dirname "$dst")"
-  install -m 600 "$src" "$dst"
-  echo "  provisioned $rel from $SRC_REPO (0600)"
-}
-if [[ "$SRC_REPO" == "$WEEKEND_REPO" ]]; then
-  echo "  MISSING  env provisioning: run setup from your own checkout, not the runner clone"
-else
-  for env_rel in web/.env; do
-    provision_env_file "$env_rel"
-  done
-fi
+# Rail 5: the security clone receives NO Radon credential. Unlike the other
+# nightly loops, this setup deliberately does NOT provision web/.env (or the
+# root .env, or .env.ib-mode). The security agent runs credential-free — its
+# only allowed secrets are the narrowly scoped model credential launchd/gh
+# already hold, a write-only private-archive credential, and the sanitized
+# dead-man channel — none of which live in the clone. The per-round
+# `git clean` and the launchd env carry nothing broker/deploy/db-scoped.
+echo "  rail 5: web/.env and Radon credentials are NOT provisioned into the security clone"
 
 if [[ ! -f "$WEEKEND_ENV" ]]; then
   cat > "$WEEKEND_ENV" <<'EOF'
@@ -169,18 +154,18 @@ echo "[4/4] dead-man label + launchd jobs"
 # `gh issue create --label` FAILS on a label that does not exist, and the
 # wrapper swallows that failure — so a missing label turns the dead-man
 # channel off silently. Idempotent: an existing label makes this a no-op.
-gh label create documentation-nightly \
-  --description "Nightly documentation loop dead-man" --color 0E8A16 \
+gh label create security-nightly \
+  --description "Nightly security loop dead-man (sanitized status only)" --color B60205 \
   >/dev/null 2>&1 || true
-if gh label list --limit 200 2>/dev/null | grep -q '^documentation-nightly'; then
-  echo "  ok  label documentation-nightly"
+if gh label list --limit 200 2>/dev/null | grep -q '^security-nightly'; then
+  echo "  ok  label security-nightly"
 else
-  echo "  MISSING  label documentation-nightly (dead-man comments will be dropped)"
+  echo "  MISSING  label security-nightly (dead-man comments will be dropped)"
 fi
 mkdir -p "$LAUNCH_AGENTS"
-JOB_PLIST="$LAUNCH_AGENTS/com.radon.documentation-daily.plist"
+JOB_PLIST="$LAUNCH_AGENTS/com.radon.security-daily.plist"
 sed -e "s|__WEEKEND_REPO__|$WEEKEND_REPO|g" -e "s|__HOME__|$HOME|g" \
-  "$WEEKEND_REPO/config/com.radon.documentation-daily.plist" > "$JOB_PLIST"
+  "$WEEKEND_REPO/config/com.radon.security-daily.plist" > "$JOB_PLIST"
 plutil -lint "$JOB_PLIST" >/dev/null
 launchctl unload "$JOB_PLIST" 2>/dev/null || true
 launchctl load "$JOB_PLIST"
@@ -193,14 +178,14 @@ SCHED_MIN="$(plutil -extract StartCalendarInterval.Minute raw -o - "$JOB_PLIST")
 echo
 printf 'Done. Schedule: one cycle daily at %02d:%02d local (audit, then remediate),\n' \
   "$SCHED_HOUR" "$SCHED_MIN"
-echo "in the documentation loop's own clone at $WEEKEND_REPO."
-echo "Dead-man: GitHub issue labeled 'documentation-nightly' gets a comment per"
+echo "in the security loop's own clone at $WEEKEND_REPO."
+echo "Dead-man: GitHub issue labeled 'security-nightly' gets a comment per"
 echo "phase, plus a Pushover when $WEEKEND_ENV carries creds."
 echo "A quiet day means the runner did not fire OR the previous cycle is"
 echo "still running: launchd will not start a second instance of the label."
 echo "Check with: launchctl list | grep radon"
 echo "Smoke test now with:"
-echo "  RADON_WEEKEND_REPO=$WEEKEND_REPO bash $WEEKEND_REPO/scripts/documentation_nightly.sh audit"
+echo "  RADON_WEEKEND_REPO=$WEEKEND_REPO bash $WEEKEND_REPO/scripts/security_nightly.sh audit"
 echo "Upgrading the wrapper in this clone, with no run in flight"
 echo "(check: ls -d $WEEKEND_REPO/.weekend-runner.lock):"
 echo "  git -C $WEEKEND_REPO fetch origin && git -C $WEEKEND_REPO checkout -f main && git -C $WEEKEND_REPO reset --hard origin/main"
