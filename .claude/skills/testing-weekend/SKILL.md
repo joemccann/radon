@@ -131,7 +131,11 @@ Every phase outcome is reported three ways, so a silent-dead runner shows up
 the next morning at the latest: a comment on the rolling GitHub issue
 labeled `testing-nightly`, a Pushover notification per phase carrying the
 status and the nightly PR link when one exists, and the PR itself.
-A quiet day means one of two things: the runner did not fire, or the
+`INCOMPLETE (agent exited 0 without committing to the nightly branch)` is
+the status the wrapper posts when `claude -p` returned 0 but no commit landed
+on the nightly branch during the phase (T-379): treat it exactly like
+TRUNCATED — the phase's draft work, if any, is under `/tmp/tw-<date>/` and
+the next phase must land it. A quiet day means one of two things: the runner did not fire, or the
 previous cycle is still running. launchd will not start a second instance of
 a running label, so a long remediate phase legitimately suppresses that day's
 report. Check `launchctl list | grep radon` before treating quiet as dead.
@@ -693,3 +697,40 @@ how this loop improves as the codebase grows.
   under `__pycache__`, `node_modules` or `.next`, the finding is the walker,
   not the environment — and check whether the shard split is what keeps CI
   green.
+
+- **2026-08-31 (remediate): a text-only reply ENDS the run — every response
+  in this loop must carry a tool call until the phase is finished.** The
+  audit phase drafted 33 findings to `/tmp/tw-2026-08-31/findings.md`,
+  launched its gates from a detached script, and then answered a mid-run
+  "say what you're doing" nudge with a sentence and no tool call. Print mode
+  read that as the end of the turn: `claude -p` exited 0 after 18 minutes with
+  zero commits, no PR, and `phase_status` said OK on all three dead-man
+  channels while the cloud gate was still running (T-379, now INCOMPLETE).
+  Two rails: (a) when you are only waiting, wait INSIDE a tool call — a
+  foreground `until`/poll loop under the 600 s cap, or a `run_in_background`
+  waiter — never by replying with text; (b) the remediate phase must check
+  `/tmp/tw-<date>/findings.md` and `logs/testing-weekend/audit-<stamp>.log`
+  at pre-flight when `origin/testing/<date>` sits at `origin/main` with no
+  commits, and land the draft under `## Delta audit <date> (landed by the
+  remediation phase)` before touching the backlog. The draft is the audit's
+  work product; re-auditing the range would have cost two hours and thrown
+  away six agents' convergences.
+- **2026-08-31 (remediate): a "coverage gap" P1 on an auth gate was a live
+  bypass — read the fall-through, not only the guard.** T-346 was filed as
+  "the `:873` predicate is stubbed open in every test"; the agent's first
+  un-stubbed wire test returned 200 with no bearer at HEAD, because the
+  middleware withheld the loopback bypass and then called `verify_clerk_jwt`,
+  which re-grants the same loopback trust. The guard was correct; the code
+  path AFTER the guard undid it. When a finding says "this line is untested",
+  write the wire test against HEAD before assuming green, and read what the
+  request reaches once the guard says no.
+- **2026-08-31 (remediate): an agent probing a Gateway route in DOCKER mode
+  will try to start the stack — pin `GATEWAY_MODE=cloud` in the PROMPT, not
+  only in the committed tests.** A T-346 recon probe of `/ib/restart` ran with
+  the clone's default mode and attempted `docker compose up` on this laptop
+  (daemon not running, nothing started; the 2FA push-lock file it created
+  was released by the probe's own `/ib/reset-backoff`). Rail 1 was brushed,
+  not broken, and only because Docker was down. Any prompt that hands an
+  agent an `/ib/*` or `radon-ib-gateway.service` route must say: stub
+  `remote_gateway_action` / `control_unit`, set `GATEWAY_MODE=cloud`, never
+  call the route un-stubbed.
