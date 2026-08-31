@@ -738,7 +738,9 @@ export function useOrderRisk(
         return withCorrelation({
           summary: brand(closeSummary, coverageStatus, traceId),
           coverageStatus,
-          okToSubmit: summaryFiguresAreFinite(closeSummary),
+          okToSubmit:
+            coverageStatus === "resolved"
+            && summaryFiguresAreFinite(closeSummary),
           coveringLegs: [],
         });
       }
