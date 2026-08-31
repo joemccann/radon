@@ -150,14 +150,24 @@ def _build(
         "exit 0\n" % attack_sh,
     )
 
+    # The security wrapper (operator policy 2026-08-31) keys OK on the skill's
+    # phase-completion marker, not on exit 0 alone, so its stub agent prints
+    # the marker the way a phase that actually finished would. The other
+    # loops' wrappers do not grep for it and the extra line is inert there.
+    complete_line = ""
+    if loop == "security":
+        src = (REPO / "scripts" / script).read_text(encoding="utf-8")
+        marker = re.search(r'PHASE_COMPLETE_MARKER="([^"]+)"', src).group(1)
+        complete_line = f"echo '{marker} stub run_id=stub'\n"
     _executable(
         bin_dir / "claude",
         "#!/bin/bash\n"
         f'echo "claude $*" >> "{agent_log}"\n'
-        'if [ "${STUB_ATTACK_ON:-off}" = "agent" ]; then "%s"; fi\n'
+        f'if [ "${{STUB_ATTACK_ON:-off}}" = "agent" ]; then "{attack_sh}"; fi\n'
         'if [ "${STUB_CLAUDE_SLEEP:-0}" != "0" ]; then sleep "$STUB_CLAUDE_SLEEP"; fi\n'
         "echo 'stub agent output'\n"
-        'exit "${STUB_CLAUDE_RC:-0}"\n' % attack_sh,
+        + complete_line
+        + 'exit "${STUB_CLAUDE_RC:-0}"\n',
     )
 
     # REL-137 gave the real invocation `-k <secs>` so a claude blocked on a
