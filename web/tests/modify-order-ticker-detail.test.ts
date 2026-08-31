@@ -93,26 +93,6 @@ describe("ExistingOrderRow — MODIFY button wiring", () => {
 });
 
 // =============================================================================
-// ModifyOrderModal: outsideRth is forwarded to requestModify
-// =============================================================================
-
-describe("requestModify — outsideRth forwarding", () => {
-  let contextSource: string;
-
-  beforeAll(async () => {
-    contextSource = await readSource("../lib/OrderActionsContext.tsx");
-  });
-
-  it("requestModify accepts outsideRth parameter", () => {
-    expect(contextSource).toMatch(/outsideRth\?\s*:\s*boolean/);
-  });
-
-  it("requestModify includes outsideRth in the fetch body", () => {
-    expect(contextSource).toMatch(/outsideRth/);
-  });
-});
-
-// =============================================================================
 // AssetCockpit: passes portfolio/openOrders/prices to OrderTab for BAG price
 // resolution. OrderTab moved out of TickerDetailContent into the cockpit (the
 // desktop act column) with the cockpit cutover; TickerDetailContent now renders

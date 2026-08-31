@@ -798,6 +798,17 @@ Incident: 2026-08-15 00:24Z, P1 page `34ab3e3c…`.
   admin panel), then approve the 2FA push. Regression tests:
   `test_health_service.py::TestStatusResponse::test_gateway_only_down_degrades_instead_of_down`,
   `test_health_probe.py::TestClassifyProbes::test_schema_v2_degraded_keeps_edge_ok`.
+- **Weekend dwell escalation → false `aggregate_down` (2026-08-30, page
+  `a45d6410`):** R-382 applied the 900s sidecar dwell to every
+  `DEPENDENCY_UNIT`, including `radon-ib-gateway`. Weekend clean-exit
+  (`inactive`/`dead`, `Result=success` at 20:28Z) plus a 21:41 deploy
+  that reset healthd's in-process dwell: at t+15m the aggregate flipped
+  `degraded` → `down` and off-box paged P1 while ping and `/sign-in`
+  stayed 200 and api/relay/nextjs stayed `up`. Discriminating check:
+  market closed + serving path up + gateway `Result=success` +
+  `ConnectionRefusedError` → stay `degraded`. Dwell still escalates
+  newsfeed/monitor. Regression:
+  `test_rel135_dependency_dwell.py::test_broker_weekend_clean_exit_does_not_escalate_past_dwell`.
 - **Weekend deploy → false `status_http_502` P1 (2026-08-29, page
   `d98c3364`):** off-box sampled `/edge-health/status` HTTP 502 at
   16:45Z while user_path + freshness stayed green; deploy runners were

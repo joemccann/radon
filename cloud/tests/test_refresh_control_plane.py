@@ -287,6 +287,30 @@ def test_refresh_timeout_is_mutation_class_and_does_not_queue_radon_jobs() -> No
 # --- C. sandbox --------------------------------------------------------------
 
 
+def test_app_role_verify_allows_missing_gateway_helper(tmp_path: Path) -> None:
+    sandbox = Sandbox(tmp_path)
+    helper = sandbox.installed_path("scripts/ib-gateway-control.sh")
+    helper.unlink()
+    sandbox.env["RADON_HOST_ROLE"] = "app"
+    result = sandbox.run("verify-control-plane")
+    assert result.returncode == 0, result.stderr
+
+
+def test_app_role_refresh_removes_gateway_helper(tmp_path: Path) -> None:
+    sandbox = Sandbox(tmp_path)
+    helper = sandbox.installed_path("scripts/ib-gateway-control.sh")
+    unit = sandbox.installed_path("services/radon-ib-gateway.service")
+    assert helper.exists()
+    assert unit.exists()
+    sandbox.env["RADON_HOST_ROLE"] = "app"
+    sandbox.mutate_source("scripts/ib-gateway-control.sh")
+    result = sandbox.run("refresh-control-plane-privileged")
+    assert result.returncode == 0, result.stderr
+    assert not helper.exists()
+    assert not unit.exists()
+    sandbox.assert_no_gateway_lifecycle()
+
+
 def test_unit_only_refresh_copies_diff_reloads_once_and_skips_gateway(tmp_path: Path) -> None:
     box = Sandbox(tmp_path)
     gateway = box.installed_path(GATEWAY_UNIT)

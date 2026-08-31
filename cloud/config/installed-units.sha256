@@ -160,3 +160,12 @@ c0fbaff90cb1e57758374ac63e7793c7a80108470589d3a0fae071f3976ccfc3  radon-flex-pul
 b5532b732c2a1b7347b3ddddcafe5d5b8123ad8671cdfcad9ba3a8176ee88d50  radon-flex-pull.timer
 51edb86e5991cccda21d12dfdff71e9da727652bbd2e34cb0067320a232e65bb  radon-model-catalog.service
 246c4751fd4619f339b6e983be50d4d16b7e09d55e47062d79258e9ebb0100c5  radon-model-catalog.timer
+
+# radon-mktnews (2026-08-30 headlines incident). The hub has been serving
+# production /ws-headlines while its unit sat behind a `not-installed:` ack —
+# the R-092 trapdoor: excluded from every automated install path, so unit
+# edits (and the REL-155/163 ExecStart contract) could drift from the host
+# copy with nothing at review time saying so. Manifest-pinned from this
+# commit: install-units converges the body on the next deploy; being a
+# .service (not a timer) it is never `enable --now`ed by the installer.
+6d095d97ff9872e8919aa1aec930ed34a152c8047fd58a5f377f39fef3ef3487  radon-mktnews.service

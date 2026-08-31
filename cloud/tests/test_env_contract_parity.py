@@ -44,6 +44,11 @@ EXEMPT: dict[str, str] = {
     # them, so requiring them would fail the preflight on a value nothing needs.
     "FRED_API_KEY": "optional; margin-debt normalization views go null and say so",
     "FRED_KEY": "legacy alias tried after FRED_API_KEY",
+    "ROBINHOOD_MCP_TOKEN": "optional read-only failover; unset (with no refresh) skips Robinhood cleanly to Yahoo",
+    "ROBINHOOD_MCP_REFRESH_TOKEN": "bootstrap only; the 0600 token file is the writable refresh store and owns the rotated value",
+    "ROBINHOOD_MCP_CLIENT_ID": "bootstrap only; public OAuth client_id (auth method none), no secret exists",
+    "ROBINHOOD_MCP_TOKEN_FILE": "override for DEFAULT_TOKEN_FILE in clients/robinhood_client.py; points at the writable 0600 refresh store (/etc/radon/rh-mcp.json in production)",
+    "ROBINHOOD_MCP_URL": "override for DEFAULT_MCP_URL in clients/robinhood_client.py",
     "MDW_API_KEY": "optional X-API-Key lane; unset means no service principal",
     "RADON_SERVICE_TOKEN": "never configured on prod; unset makes the lane a no-op",
     "MENTHORQ_ARTIFACT_DIR": "debug artifact dump; unset means no artifacts",

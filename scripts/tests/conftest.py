@@ -172,3 +172,42 @@ def index_preset_dir(tmp_path, monkeypatch):
 
     monkeypatch.setattr(presets, "PRESETS_DIR", tmp_path)
     return tmp_path
+
+
+TURSO_CREDENTIAL_KEYS = ("TURSO_DB_URL", "TURSO_AUTH_TOKEN")
+
+
+@pytest.fixture(autouse=True)
+def _strip_turso_credentials(monkeypatch):
+    """Keep every test's verdict independent of the host's env files.
+
+    50 `scripts/**/*.py` producers (`cash_flow_sync.py`, `fetch_*.py`,
+    `scanner.py`, `api/server.py`, ...) call `load_dotenv(web/.env)` at
+    IMPORT, so collecting any of them copies the host's Turso credentials
+    into `os.environ`. With credentials present, `flex_embargo` treats the
+    durable store as configured, `db.hrana_http` refuses the connection under
+    pytest, and `active_until` fails CLOSED: 22 CI-green tests then red with
+    `FlexTokenLocked` on any host that has a `web/.env` (the weekend runners
+    provision one). Tests about the durable store set the keys themselves.
+
+    Both halves matter: the delenv covers producers imported at collection,
+    the `load_dotenv` wrapper covers a producer first imported INSIDE a test
+    body, which would otherwise re-populate the keys after setup. T-317.
+    """
+    def strip():
+        for key in TURSO_CREDENTIAL_KEYS:
+            monkeypatch.delenv(key, raising=False)
+
+    strip()
+    try:
+        import dotenv
+    except Exception:
+        return
+    real_load_dotenv = dotenv.load_dotenv
+
+    def load_dotenv_then_strip(*args, **kwargs):
+        loaded = real_load_dotenv(*args, **kwargs)
+        strip()
+        return loaded
+
+    monkeypatch.setattr(dotenv, "load_dotenv", load_dotenv_then_strip)

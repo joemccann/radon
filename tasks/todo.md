@@ -21,6 +21,112 @@
 
 ---
 
+# Task: STREAKS regime tab — per-ticker consecutive daily gains (2026-08-30)
+
+## Objective
+
+- Operator enters any ticker and gets a daily-timeframe chart of price (log) plus a histogram of consecutive daily gains, per the Turning Point reference image.
+- Data path honors IB > UW > Robinhood > Yahoo, on demand (no timer, no migration).
+
+## Dependency graph
+
+- T1 depends_on: [] - Research repo data path for per-ticker daily closes (existing IB pool route, uw_surface, robinhood_client, price_cache, yahoo chart)
+- T2 depends_on: [T1] - Spec docs/indicators/streaks.md + failing tests (pytest utils/route, vitest api/panel, lockstep pins)
+- T3 depends_on: [T2] - Python slice: scripts/utils/streaks.py + scripts/api/routes/streaks.py + server mount, pytest green
+- T4 depends_on: [T2] - Next API slice: web/app/api/streaks/route.ts + catalog pin, vitest green
+- T5 depends_on: [T2] - UI slice: streaks lib/hook/chart/panel + regime registration + pins, vitest green
+- T6 depends_on: [T3, T4, T5] - Full vitest + pytest suites, typecheck
+- T7 depends_on: [T6] - Playwright e2e + browser screenshot evidence
+- T8 depends_on: [T7] - Commit, push, PR
+
+## Checklist
+
+- [x] T1 Data path mapped (historical.py IB pool helpers, uw get_stock_ohlc 1d, fetch_robinhood_closes, price_cache, yahoo v8 chart)
+- [x] T2 Spec + red tests recorded (pytest ModuleNotFoundError; vitest 12 failed / 4 files)
+- [x] T3 Python slice green (27 passed: utils compute + route ladder)
+- [x] T4 Next API slice green (streaks-api 7 passed)
+- [x] T5 UI slice green (panel 18, regime-tab-routes 60, regime-rail 20, catalog + authz pins)
+- [x] T6 Full suites green (vitest 8353, scripts pytest 8878; cloud 6 pre-existing baseline failures reproduced on clean main)
+- [x] T7 E2E 4/4 + live browser: SPY 5,027 sessions (record 14, 2010-03-17) via FastAPI->Yahoo; NVDA fresh fetch through the form; dark screenshot docs/indicators/streaks-tab.png
+- [x] T8 PR
+
+## Review
+
+- On-demand per-ticker indicator: no timer, no migration, no service_health writer, no FreshnessRail (spec states why); FastAPI `/streaks/{ticker}` walks IB pool -> UW -> Robinhood -> Yahoo with the 21-bar acceptance ladder and price_cache reuse.
+- Lockstep pins that fired and were updated: regime-tab-routes, regime-rail counts, web assistant-catalog PINNED, web route-local authz matrix, FastAPI assistant_catalog.CATALOG, docs/indicators README index, e2e ci-curation ledger.
+- Sandbox constraints: worktree swarm collapsed to sequential slices on one branch (single VM, per-worktree installs not worth it); live browser check bridged only the Clerk session seam (no Clerk in sandbox) while the payload came from the real FastAPI ladder.
+
+# Task: Diagnose HEADLINES FEED DOWN (2026-08-30, ~17:56–18:12+ UTC)
+
+## Objective
+
+- Identify why the LIVE MARKET FEED headlines tape showed "HEADLINES FEED DOWN. LAST PRINT 16M AGO" on Sunday 2026-08-30 while the rest of the dashboard stayed live.
+- Ship only the hardening the evidence supports; hand off the ops action it cannot fix from the repo.
+
+## Dependency graph
+
+- T1 depends_on: [] - Map the pipeline (mktnews hub, radon-mktnews.service, /ws-headlines edge, useHeadlines) and the exact banner trigger
+- T2 depends_on: [T1] - Localize the stall with external probes (edge health, hub handshake, vendor WS tap, CI/deploy timeline)
+- T3 depends_on: [T2] - Red tests: flash REST poll lane while the upstream WS is down; upstream-down status at client admit
+- T4 depends_on: [T3] - Implement hub changes green
+- T5 depends_on: [T2] - Manifest-pin radon-mktnews.service; retire the stale not-installed drift ack
+- T6 depends_on: [T4, T5] - Full JS suite + cloud pytest; commit; PR with diagnosis and the ops action
+
+## Checklist
+
+- [x] T1 Pipeline mapped (hub.js / client.js / Caddy :8766 / useHeadlines status machine)
+- [x] T2 Stall localized to the VPS→api.mktnews.net WS dial (vendor healthy globally, hub process alive, no deploy in the window)
+- [x] T3 Red tests written (3 red / 2 guard-green pre-fix)
+- [x] T4 Hub poll fallback + admit-time status frame green (68/68 mktnews)
+- [x] T5 installed-units.sha256 pin + drift-allowlist retirement (cloud tests green)
+- [x] T6 8307 vitest passed, 1503 cloud pytest passed; PR opened
+
+## Review
+
+- Root cause is VPS-side upstream WS dial failure to the Cloudflare-fronted api.mktnews.net (ops: journalctl -u radon-mktnews shows the close/reconnect codes; egress/IP remediation if 403/1015).
+- Code hardening: hub now feeds the tape from the flash REST lane during a WS outage (health row deliberately stays error) and tells mid-outage dashboards the true state at admit.
+- Config hardening: the hub's unit is no longer excluded from every automated install path (R-092 trapdoor).
+
+# Task: Robinhood as a first-class read-only data source (2026-08-30)
+
+## Objective
+
+- Priority becomes IB > UW > Cboe > Robinhood > Yahoo everywhere it is encoded (docs, fallbacks, comments, tests).
+- Robinhood is READ-ONLY via the official trading MCP (`https://agent.robinhood.com/mcp/trading`); execution stays on IB.
+- Unconfigured hosts (no `ROBINHOOD_MCP_TOKEN`) skip cleanly to Yahoo.
+- Popular-watchlist / scan crowding features land in Turso and can never trip the three gates.
+
+## Dependency graph
+
+- T1 depends_on: [] - Read-only Robinhood MCP client (`scripts/clients/robinhood_client.py`) with allowlist + unconfigured no-op
+- T2 depends_on: [T1] - RH rung before Yahoo in every close/quote ladder (portfolio_risk, credit-spread, iei-hyg, rv-ratio, garch, leap, cri)
+- T3 depends_on: [T1] - Crowding ingest: migration 0066 `rh_crowding`, writer, `fetch_rh_crowding.py`
+- T4 depends_on: [] - Docs/env: priority lists, `.env.example`, external-services, instruction files
+- T5 depends_on: [T2, T3, T4] - Tests: client contract, per-ladder rank, crowding-not-in-gates, docs-contract pins
+- T6 depends_on: [T5] - Full pytest suite green; branch + PR
+
+## Checklist
+
+- [x] T1 Robinhood client (read-only allowlist, secret hygiene, 20-symbol quote batching)
+- [x] T2 RH-before-Yahoo rung in all seven Python ladders
+- [x] T3 rh_crowding migration + writer + ingest script (unconfigured exits 0)
+- [x] T4 Priority docs updated: CLAUDE/AGENTS (root + scripts), .pi, .gemini, strategies, prompt, external-services, .env.example
+- [x] T5 New tests green (client 25, priority 19, crowding 12, docs pins 4)
+- [x] T6 Full suite green, PR opened
+
+## Follow-up (2026-08-30): OAuth refresh
+
+- [x] T7 depends_on: [T1] - Token store: 0600 file (`ROBINHOOD_MCP_TOKEN_FILE`), env bootstrap, atomic rotate, refresh via official `oauth2/token/` (public client, no secret), refresh on missing/1h-window/401, invalid_grant = process-level unconfigured skip; 34 client tests green
+
+## Review
+
+- Web `previous-close` route stays IB → UW → Yahoo (TS-side MCP consumer deferred; noted in the PR body).
+- Option chains and L2 have no Yahoo rung today, so no RH rung was bolted on there; RH options remain NBBO/last-only per the unpublished schema.
+- Crowding is descriptive only: `workflow/gates.py`, `kelly.py`, `evaluate.py` are pinned free of any Robinhood/crowding reference.
+
+
+---
+
 # Task: Execute CI and production deploy acceleration (2026-08-29)
 
 ## Objective

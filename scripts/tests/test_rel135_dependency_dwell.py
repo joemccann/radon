@@ -84,6 +84,59 @@ class TestDependencyDwellBound:
         legacy = {"radon-monitor.service": {"state": "down"}}
         assert probes.aggregate_state(UP_PROBES, legacy, "ok", 2.0) == "degraded"
 
+    def test_broker_weekend_clean_exit_does_not_escalate_past_dwell(self):
+        """2026-08-30 page a45d6410: IBKR weekend session shutdown leaves
+        radon-ib-gateway inactive/dead Result=success for hours. Serving path
+        stays up. R-382 dwell treated the broker like a sidecar death and
+        collapsed the aggregate to down, so the off-box observer paged
+        aggregate_down. The broker already has on-box ib-gateway-grouped; the
+        edge must stay degraded, not down, even after 16 minutes.
+        """
+        weekend = {
+            "radon-api.service": {"state": "up"},
+            "radon-relay.service": {"state": "up"},
+            "radon-nextjs.service": {"state": "up"},
+            "radon-monitor.service": {"state": "up"},
+            "radon-newsfeed.service": {"state": "up"},
+            "radon-ib-gateway.service": {
+                "state": "down",
+                "sub_state": "dead",
+                "result": "success",
+                "non_up_secs": 16 * 60.0,
+            },
+        }
+        live_probes = {
+            "radon-api": {
+                "state": "up",
+                "payload": {
+                    "status": "ok",
+                    "auth_state": "authenticated",
+                    "service_state": "reachable",
+                    "upstream_dead": False,
+                    "port_listening": True,
+                },
+            },
+            "radon-relay": {"state": "up"},
+            "radon-nextjs": {"state": "up"},
+            "ib-gateway": {"state": "down", "detail": "ConnectionRefusedError"},
+        }
+        assert probes.aggregate_state(live_probes, weekend, "ok", 2.0) == "degraded"
+        payload = probes.build_status(
+            live_probes, weekend, "2026-08-30T22:06:00Z", "ok", 2.0
+        )
+        assert payload["overall_state"] == "degraded"
+        verdict = edge_probe.classify_probes(
+            {"reachable": True, "http_status": 200},
+            {"reachable": True, "http_status": 200, "payload": payload},
+        )
+        assert verdict == {"ok": 1, "detail": "edge_ok:aggregate_degraded"}
+
+    def test_dwell_escalate_excludes_the_broker_only(self):
+        assert "radon-ib-gateway.service" not in probes.DWELL_ESCALATE_UNITS
+        assert probes.DWELL_ESCALATE_UNITS == (
+            probes.DEPENDENCY_UNITS - frozenset({"radon-ib-gateway.service"})
+        )
+
 
 class TestUnitStateCacheCarriesDwell:
     def test_the_cache_stamps_first_seen_and_ages_it(self, monkeypatch):

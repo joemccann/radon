@@ -71,6 +71,7 @@ from api.ws_ticket import create_ticket, validate_ticket
 from api.routes.historical import router as historical_router
 from api.routes.preferences import router as preferences_router
 from api.routes.assistant_market import router as assistant_market_router
+from api.routes.streaks import router as streaks_router
 
 import app_preferences
 from clients.menthorq_dashboard_client import (
@@ -817,6 +818,7 @@ app = FastAPI(title="Radon API", version="1.0.0", lifespan=lifespan)
 app.include_router(historical_router)
 app.include_router(preferences_router)
 app.include_router(assistant_market_router)
+app.include_router(streaks_router)
 
 # Explicit origin allowlist (was a `https://.*\.radon\.run` wildcard regex). The
 # wildcard matched ANY *.radon.run subdomain, so a subdomain takeover of a stale
@@ -950,6 +952,7 @@ if "pytest" in sys.modules:
 # `--host 0.0.0.0 ... 100.112.32.16:8321`), which TrustedHostMiddleware cannot
 # express: it matches whole names or one leading "*." only, never a CIDR.
 _TAILNET_CGNAT = ipaddress.ip_network("100.64.0.0/10")
+_HETZNER_PRIVATE = ipaddress.ip_network("10.0.0.0/16")
 
 
 def split_host_header(raw_host: str) -> Tuple[str, str]:
@@ -974,17 +977,24 @@ def split_host_header(raw_host: str) -> Tuple[str, str]:
 def is_pinned_ip_literal(hostname: str) -> bool:
     """True for the IP literals this API legitimately answers on.
 
-    Loopback (the Next.js / relay / watchdog hop) and the Tailscale CGNAT range
-    (the cloud-thin laptop). Allowing IP literals does not reopen DNS rebinding:
-    a rebind needs a NAME whose resolution the attacker controls, and a literal
-    resolves only to itself. Any other literal — a public address, a routable
-    IPv6 — is not a caller we serve and falls through to the name pin.
+    Loopback (the Next.js / relay / watchdog hop), the Tailscale CGNAT range
+    (the cloud-thin laptop), and the Hetzner private net (broker watchdog at
+    10.0.0.4 hitting app 10.0.0.2). Allowing IP literals does not reopen DNS
+    rebinding: a rebind needs a NAME whose resolution the attacker controls,
+    and a literal resolves only to itself. Any other literal — a public
+    address, a routable IPv6, docker0 — is not a caller we serve and falls
+    through to the name pin.
     """
     try:
         address = ipaddress.ip_address(hostname)
     except ValueError:
         return False
-    return address.is_loopback or address.is_unspecified or address in _TAILNET_CGNAT
+    return (
+        address.is_loopback
+        or address.is_unspecified
+        or address in _TAILNET_CGNAT
+        or address in _HETZNER_PRIVATE
+    )
 
 
 # Carried on the per-request ASGI scope (never on scope["state"], which some
@@ -1903,6 +1913,7 @@ async def health(request: Request):
     return {
         "status": "ok",
         "test_mode": test_mode,
+        "host_role": admin_services.host_role(),
         "ib_gateway": gw,
         "ib_pool": pool_status or {},
         "uw": uw_available,
@@ -2014,7 +2025,13 @@ async def demo_trial_expiry(request: Request):
 def _gateway_unit_controllable() -> bool:
     """True when THIS host owns the gateway lifecycle: systemd is present and
     the installed control helper (single 2FA-lease owner) exists. True on the
-    Hetzner deployment, False on the laptop pointing at the remote gateway."""
+    Hetzner deployment, False on the laptop pointing at the remote gateway.
+
+    RADON_HOST_ROLE=app must never own the session even if a deploy reinstalls
+    the helper onto the app VM.
+    """
+    if os.environ.get("RADON_HOST_ROLE", "combined") == "app":
+        return False
     return (
         admin_services.is_systemd_available()
         and Path(admin_services.GATEWAY_CONTROL_PATH).exists()
@@ -2098,6 +2115,7 @@ async def admin_services_list():
     units = await admin_services.list_units_with_status()
     return {
         "supported": supported,
+        "host_role": admin_services.host_role(),
         "units": [u.to_dict() for u in units],
     }
 

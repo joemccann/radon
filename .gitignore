@@ -100,7 +100,12 @@ reports/*.json
 reports/*.png
 data/*.json
 !data/flex_token_config.example.json
+# Robinhood OAuth token store + its atomic-write/lock artifacts (secrets;
+# data/*.json does not match the .tmp / .lock suffixes)
+data/rh_mcp_token.json*
 data/*.bak
+# cri_scan advisory lock (T-314): lives under data/ so host and container share it
+data/radon-cri-scan.lock
 
 # Ticker/market data caches (regenerated at runtime)
 data/ticker_cache.json
@@ -204,6 +209,7 @@ web/verify-regime-internals.mjs
 # The starred form (not a bare dir) lets repo-owned skills below re-include.
 /.agents/
 /.claude/skills/*
+!/.claude/skills/ci-performance/
 !/.claude/skills/incident-response/
 !/.claude/skills/long-horizon-jobs/
 !/.claude/skills/reliability-weekend/

@@ -18,20 +18,57 @@ import { OrderActionsProvider } from "../lib/OrderActionsContext";
 import type { OrdersData, PortfolioData } from "../lib/types";
 import type { PriceData } from "../lib/pricesProtocol";
 
-let searchParamsString = "";
-const replaceMock = vi.fn();
-vi.mock("next/navigation", () => ({
-  useSearchParams: () => new URLSearchParams(searchParamsString),
-  usePathname: () => "/MU",
-  useRouter: () => ({
-    replace: replaceMock,
+// The navigation mock is STATEFUL (T-321). A static `useSearchParams` that
+// returns the ORIGINAL query on every render can never observe what
+// `router.replace` wrote, so the R-378 strip in `useChainUrlState.syncUrl` was
+// only ever asserted against whichever `replace` call happened to be last. This
+// store mirrors the App Router contract that the hook relies on: one stable
+// `URLSearchParams` instance per committed URL, a stable router object, and a
+// re-render of every `useSearchParams` consumer when `replace` commits.
+const nav = vi.hoisted(() => {
+  const listeners = new Set<() => void>();
+  let query = "";
+  let snapshot = new URLSearchParams(query);
+  const commit = (next: string) => {
+    query = next;
+    snapshot = new URLSearchParams(next);
+  };
+  return {
+    get query() {
+      return query;
+    },
+    snapshot: () => snapshot,
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    reset: (next: string) => commit(next),
+    navigate: (url: string) => {
+      commit(url.split("?")[1] ?? "");
+      listeners.forEach((listener) => listener());
+    },
+  };
+});
+const replaceMock = vi.hoisted(() => vi.fn<(url: string, options?: { scroll?: boolean }) => void>());
+vi.mock("next/navigation", async () => {
+  const { useSyncExternalStore } = await import("react");
+  const router = {
+    replace: (url: string, options?: { scroll?: boolean }) => {
+      replaceMock(url, options);
+      nav.navigate(url);
+    },
     push: vi.fn(),
     prefetch: vi.fn(),
     back: vi.fn(),
     forward: vi.fn(),
     refresh: vi.fn(),
-  }),
-}));
+  };
+  return {
+    useSearchParams: () => useSyncExternalStore(nav.subscribe, nav.snapshot, nav.snapshot),
+    usePathname: () => "/MU",
+    useRouter: () => router,
+  };
+});
 
 vi.mock("@/lib/useWatchlist", () => ({
   useWatchlist: () => ({ isWatched: () => false, toggleWatch: vi.fn() }),
@@ -108,7 +145,7 @@ function renderChain() {
 
 describe("Options chain prefill expiry contract", () => {
   beforeEach(() => {
-    searchParamsString = "";
+    nav.reset("");
     replaceMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
     Object.defineProperty(Element.prototype, "scrollTo", { configurable: true, value: vi.fn() });
@@ -137,32 +174,44 @@ describe("Options chain prefill expiry contract", () => {
   });
 
   it("arms nothing when the requested LEAP expiry is not listed", async () => {
-    searchParamsString =
-      `deck=c&expiry=${UNLISTED_LEAP_EXPIRY.dashed}&strikes=100&legs=BUY:1x970C&src=leap`;
+    nav.reset(`deck=c&expiry=${UNLISTED_LEAP_EXPIRY.dashed}&strikes=100&legs=BUY:1x970C&src=leap`);
     renderChain();
 
-    // The fallback expiry resolves and the URL writer runs.
+    // The fallback expiry resolves and the URL writer rewrites ?expiry to it.
     const expirySelect = (await screen.findAllByRole("combobox"))[0] as HTMLSelectElement;
     await waitFor(() => expect(expirySelect.value).toBe(NEAR_EXPIRY.compact));
-    await waitFor(() => expect(replaceMock).toHaveBeenCalled());
 
-    // No prefill may be applied against an expiry the link did not name.
-    expect(screen.queryByText("PREFILLED FROM LEAP SCAN")).toBeNull();
-    expect(document.querySelector(".order-builder")).toBeNull();
+    // The un-honoured contract must not survive in the COMMITTED URL, where the
+    // next render reads it back and would re-apply it against the fallback.
+    await waitFor(() => {
+      expect(nav.query).toContain(`expiry=${NEAR_EXPIRY.dashed}`);
+      expect(nav.query).not.toContain("legs=");
+      expect(nav.query).not.toContain("src=");
+    });
+    expect(nav.query).toContain("deck=c");
 
-    // And the un-honoured contract must not survive in the URL to be re-applied.
-    const url = replaceMock.mock.calls.at(-1)![0] as string;
-    expect(url).not.toContain("legs=");
-    expect(url).not.toContain("src=");
+    // Every write carried the resolved expiry: a write that dropped ?expiry while
+    // keeping ?legs/?src would leave the next pass with no requested expiry to
+    // mismatch against, and the prefill would arm under the scanner label.
+    expect(replaceMock).toHaveBeenCalled();
+    for (const [url] of replaceMock.mock.calls) {
+      expect(url).toContain(`expiry=${NEAR_EXPIRY.dashed}`);
+    }
 
     // The operator is told, rather than shown a silently different ticket.
     expect((await screen.findByTestId("prefill-unavailable")).textContent).toContain(
       "PREFILL CONTRACT UNAVAILABLE",
     );
+
+    // No prefill may be applied against an expiry the link did not name, on
+    // any render — including the one that read the rewritten URL back.
+    await waitFor(() => expect(screen.queryByTestId("prefill-unavailable")).not.toBeNull());
+    expect(screen.queryByText("PREFILLED FROM LEAP SCAN")).toBeNull();
+    expect(document.querySelector(".order-builder")).toBeNull();
   });
 
   it("keeps the prefill when the requested expiry IS listed", async () => {
-    searchParamsString = `deck=c&expiry=${NEAR_EXPIRY.dashed}&strikes=100&legs=BUY:1x970C&src=leap`;
+    nav.reset(`deck=c&expiry=${NEAR_EXPIRY.dashed}&strikes=100&legs=BUY:1x970C&src=leap`);
     renderChain();
 
     await screen.findByText("PREFILLED FROM LEAP SCAN");
@@ -173,7 +222,7 @@ describe("Options chain prefill expiry contract", () => {
   });
 
   it("drops a leg whose strike the loaded chain does not list", async () => {
-    searchParamsString = `deck=c&expiry=${NEAR_EXPIRY.dashed}&strikes=100&legs=BUY:1x517.5C`;
+    nav.reset(`deck=c&expiry=${NEAR_EXPIRY.dashed}&strikes=100&legs=BUY:1x517.5C`);
     renderChain();
 
     await screen.findByTestId("prefill-unavailable");

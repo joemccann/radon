@@ -21,6 +21,7 @@ to `User=root` are invisible to the guard that exists to reject exactly that.
 
 from __future__ import annotations
 
+import os
 import pathlib
 import re
 import shutil
@@ -79,8 +80,98 @@ def test_a_missing_unit_source_is_still_fatal(tmp_path) -> None:
     assert result.returncode == 66, result.stdout + result.stderr
 
 
-def test_restart_services_restarts_the_app_tier_when_the_refresh_fails() -> None:
-    """Every non-zero return from refresh_control_plane brings the tier back."""
+RESTART_STUBS = (
+    "prepare_release_transition",
+    "payload_paths_changed",
+    "stop_services_for_transition",
+    "activate_staged_release",
+    "recover_pending_transition",
+    "refresh_control_plane",
+    "start_services_after_transition",
+    "install_release_units",
+)
+
+
+def _restart_services(tmp_path: pathlib.Path, *, refresh_rc: int) -> subprocess.CompletedProcess:
+    """Source deploy.sh, stub everything restart_services delegates to, run it.
+
+    Every stub appends its name to `calls`; the only side effect that is not
+    a log line is `start_services_after_transition` touching `started`. The
+    call sits bare under `set -e`, exactly as `run_deploy_internal` calls it,
+    so the script's exit status IS the function's return.
+    """
+    calls = tmp_path / "calls"
+    started = tmp_path / "started"
+    stubs = "\n".join(
+        f"{name}() {{ printf '%s\\n' {name} >> {calls}; {body}; }}"
+        for name, body in (
+            ("prepare_release_transition", "return 0"),
+            ("payload_paths_changed", "return 0"),
+            ("stop_services_for_transition", "return 0"),
+            ("activate_staged_release", "return 0"),
+            ("recover_pending_transition", "return 0"),
+            ("refresh_control_plane", f"return {refresh_rc}"),
+            ("start_services_after_transition", f"touch {started}"),
+            ("install_release_units", "return 0"),
+        )
+    )
+    shell = f"""
+set -euo pipefail
+source {DEPLOY}
+{stubs}
+restart_services deadbeef cafef00d
+"""
+    result = subprocess.run(
+        ["bash", "-c", shell],
+        env={**os.environ, "NO_COLOR": "1"},
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    result.calls = calls.read_text(encoding="utf-8").split() if calls.exists() else []  # type: ignore[attr-defined]
+    result.started = started.exists()  # type: ignore[attr-defined]
+    return result
+
+
+def test_restart_services_restarts_the_app_tier_when_the_refresh_fails(tmp_path) -> None:
+    """The R-380 outage class: refresh_control_plane fails BETWEEN stop_ and
+    start_services_after_transition. The failure must still propagate (rc 1),
+    the tier must be back up first, and the release units must NOT be
+    installed on a failed transition."""
+    result = _restart_services(tmp_path, refresh_rc=1)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.started, result.calls  # type: ignore[attr-defined]
+    assert result.calls == [  # type: ignore[attr-defined]
+        "prepare_release_transition",
+        "payload_paths_changed",
+        "stop_services_for_transition",
+        "activate_staged_release",
+        "refresh_control_plane",
+        "start_services_after_transition",
+    ], result.stdout + result.stderr
+
+
+def test_restart_services_installs_units_only_after_a_successful_refresh(tmp_path) -> None:
+    """Control: the green path restarts the tier and then installs units."""
+    result = _restart_services(tmp_path, refresh_rc=0)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.calls == [  # type: ignore[attr-defined]
+        "prepare_release_transition",
+        "payload_paths_changed",
+        "stop_services_for_transition",
+        "activate_staged_release",
+        "refresh_control_plane",
+        "start_services_after_transition",
+        "install_release_units",
+    ], result.stdout + result.stderr
+
+
+def test_restart_services_failure_arm_is_shaped_to_restart_before_returning() -> None:
+    """Structural smoke over the comment-stripped body. Text order is not a
+    contract (a `return 1` ahead of a dead restart call satisfies it); the
+    behavioural test above is."""
     restart = _strip_comments(function_body(DEPLOY.read_text(encoding="utf-8"), "restart_services"))
     stop_at = restart.index("stop_services_for_transition")
     tail = restart[stop_at:]

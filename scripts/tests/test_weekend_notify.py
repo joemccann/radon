@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from weekend_notify import (
     build_weekend_payload,
     main,
@@ -165,3 +167,40 @@ class TestEnvFile:
     @staticmethod
     def argv(env_file):
         return TestMainAlwaysExitsZero.ARGV + ["--env-file", str(env_file)]
+
+
+class TestProloguePhaseStillPages:
+    """A prologue death must page, not just post an issue comment.
+
+    Every wrapper's `report()` is reachable with `PHASE="prologue"`: the
+    marker refusal, the held-lock refusal and the ERR trap armed over the
+    whole prologue all fire before `begin_phase` ever runs. `--phase`
+    accepted only audit/remediate, so argparse exited 2 BEFORE the Pushover
+    call, and the wrapper sends the page with `|| true` — the loudest
+    failures (a moved clone, a full disk, a reused pid that makes every
+    subsequent daily fire exit 3 in under a second) posted a comment and
+    never paged. Observed on the 2026-08-30 CI-performance install smoke
+    test, which reproduced the held-lock refusal end to end.
+    """
+
+    LOOPS = ("reliability", "testing", "ci-performance")
+
+    @pytest.mark.parametrize("loop", LOOPS)
+    def test_the_prologue_page_is_sent(self, loop, monkeypatch):
+        monkeypatch.setenv("PUSHOVER_USER", "u")
+        monkeypatch.setenv("PUSHOVER_TOKEN", "t")
+        argv = [
+            "--loop",
+            loop,
+            "--phase",
+            "prologue",
+            "--status",
+            "REFUSED (lock held)",
+        ]
+        with patch("weekend_notify._http_post", return_value=(200, b"")) as post:
+            assert main(argv) == 0
+        post.assert_called_once()
+        payload = post.call_args[0][1]
+        assert payload["title"] == f"radon {loop} prologue"
+        assert "REFUSED (lock held)" in payload["message"]
+        assert payload["priority"] == 0

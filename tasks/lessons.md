@@ -1,5 +1,13 @@
 # Lessons
 
+## 2026-08-30 — Broker weekend downtime is not a sidecar death
+
+- Page `a45d6410`: R-382 dwell on ALL `DEPENDENCY_UNITS` re-paged the
+  2026-08-09 weekend IB clean-exit as edge `aggregate_down` after 15m.
+- Broker downtime is hours by doctrine (IBC auto-restart frozen
+  off-hours). Dwell-escalate only Restart=always sidecars
+  (newsfeed/monitor). On-box still pages `ib-gateway-grouped`.
+
 ## 2026-08-29 — Botocore Config retries are not application-level retry
 
 - Page `29c8a560`: `radon-db-backup` dumped 100 tables then paged P1 on

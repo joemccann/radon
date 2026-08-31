@@ -168,6 +168,19 @@ class TestIsLocalOrTailnet:
     def test_garbage_false(self):
         assert is_local_or_tailnet("not-an-ip") is False
 
+    def test_hetzner_private_net_true(self):
+        # radon-private: app 10.0.0.2, broker 10.0.0.4. Same trust class as
+        # the tailnet — NIC attachment is the authenticated channel.
+        assert is_local_or_tailnet("10.0.0.2") is True
+        assert is_local_or_tailnet("10.0.0.4") is True
+        assert is_local_or_tailnet("10.0.255.255") is True
+
+    def test_other_rfc1918_false(self):
+        # docker0 is 172.17.0.0/16. Do not widen to all RFC1918.
+        assert is_local_or_tailnet("10.1.0.1") is False
+        assert is_local_or_tailnet("172.17.0.1") is False
+        assert is_local_or_tailnet("192.168.1.1") is False
+
 
 class TestIsTrustedLocalRequest:
     """The server-to-server bypass must apply ONLY to genuine local/tailnet
@@ -186,6 +199,13 @@ class TestIsTrustedLocalRequest:
 
     def test_tailnet_without_forwarding_is_trusted(self):
         assert is_trusted_local_request(_FakeRequest(host="100.100.5.5")) is True
+
+    def test_hetzner_private_without_forwarding_is_trusted(self):
+        assert is_trusted_local_request(_FakeRequest(host="10.0.0.4")) is True
+
+    def test_hetzner_private_with_forwarding_not_trusted(self):
+        req = _FakeRequest(host="10.0.0.4", extra_headers={"X-Forwarded-For": "8.8.8.8"})
+        assert is_trusted_local_request(req) is False
 
     def test_loopback_with_x_forwarded_for_not_trusted(self):
         req = _FakeRequest(host="127.0.0.1", extra_headers={"X-Forwarded-For": "8.8.8.8"})

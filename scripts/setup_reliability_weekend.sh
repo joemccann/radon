@@ -89,12 +89,13 @@ fi
 # and site-packages a live testing agent is executing against, mid-run.
 # The guard above was written for the clone ("A live cycle owns this clone")
 # and never extended to the shared $WEEKEND_ROOT both loops depend on. R-266.
-SIBLING_REPO="$WEEKEND_ROOT/radon-testing"
-if [[ -d "$SIBLING_REPO" ]] \
-  && kill -0 "$(cat "$SIBLING_REPO/.weekend-runner.lock/pid" 2>/dev/null)" 2>/dev/null; then
-  echo "  a weekend run is in flight in $SIBLING_REPO and shares $WEEKEND_VENV; re-run when it finishes"
-  exit 1
-fi
+for SIBLING_REPO in "$WEEKEND_ROOT/radon-testing" "$WEEKEND_ROOT/radon-ci-performance"; do
+  if [[ -d "$SIBLING_REPO" ]] \
+    && kill -0 "$(cat "$SIBLING_REPO/.weekend-runner.lock/pid" 2>/dev/null)" 2>/dev/null; then
+    echo "  a weekend run is in flight in $SIBLING_REPO and shares $WEEKEND_VENV; re-run when it finishes"
+    exit 1
+  fi
+done
 # An already-provisioned clone must carry the current config/ and scripts/
 # before the job is installed from it. main is force-reset; any weekend
 # branch and its commits survive.
@@ -110,10 +111,14 @@ mkdir -p "$WEEKEND_REPO/logs/reliability-weekend"
 # boot, so the loop cannot do the browser verification CLAUDE.md requires
 # (filed as R-408's residual on 2026-08-29).
 #
-# ONLY web/.env. The root .env is deliberately NOT provisioned: python-dotenv
-# already walks up from the clone to $WEEKEND_ROOT/.env, which carries the
-# same TURSO/IB keys, so a copy is redundant, and it would put IB_FLEX_TOKEN
-# in a second place. web/.env is read by Next, never by pytest.
+# ONLY web/.env. The root .env is deliberately NOT provisioned: it would put
+# IB_FLEX_TOKEN in a second place. web/.env IS read by pytest, not only by
+# Next: 50 scripts/**/*.py producers (grep -rl 'load_dotenv(.*web.*\.env'
+# scripts --include='*.py') call load_dotenv(web/.env) at import, so the
+# clone's TURSO creds land in os.environ under every collected module.
+# scripts/tests/conftest.py::_strip_turso_credentials removes them per test;
+# that fixture, not this file, keeps the pytest gate host-independent (T-317:
+# without it 22 tests red with FlexTokenLocked on a provisioned clone).
 # Re-copied every setup run so a rotated key propagates. Never inline a value.
 provision_env_file() {
   local rel="$1"

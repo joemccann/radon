@@ -415,6 +415,7 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
   const returnBasis = resolveReturnCapital(pos);
   const returnTitle = describeReturnCapital(returnBasis);
   const avgEntry = getAvgEntry(pos);
+  const initialValue = getInitialValue(pos);
   // Legs on disagreeing bases have no aggregate basis to show (T-253).
   const blendedBasis = hasBlendedLegBasis(pos);
   // `pos.contracts` is typed `number` with no positivity constraint, so a row
@@ -507,7 +508,7 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
         )}
         {columns.avg_entry && (
           <td className="right" title={blendedBasis ? MIXED_BASIS_TITLE : undefined}>
-            {blendedBasis ? "—" : fmtPrice(avgEntry)}
+            {avgEntry == null ? "—" : fmtPrice(avgEntry)}
           </td>
         )}
         {columns.last_price && (
@@ -545,12 +546,12 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
         {columns.market_value && <td className="right">{mv != null ? fmtUsd(mv) : "—"}</td>}
         {columns.entry_cost && (
           <td className="right" title={blendedBasis ? MIXED_BASIS_TITLE : undefined}>
-            {blendedBasis ? "—" : fmtUsd(entryCost)}
+            {entryCost == null ? "—" : fmtUsd(entryCost)}
           </td>
         )}
         {columns.initial_value && (
           <td className="right" title={blendedBasis ? MIXED_BASIS_TITLE : undefined}>
-            {blendedBasis ? "—" : fmtUsd(getInitialValue(pos))}
+            {initialValue == null ? "—" : fmtUsd(initialValue)}
           </td>
         )}
         {columns.pnl && (
