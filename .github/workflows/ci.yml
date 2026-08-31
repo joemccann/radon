@@ -63,6 +63,9 @@ jobs:
   changes:
     name: Path filter
     runs-on: ubuntu-latest
+    # R-509: a stalled `gh api` lookback must not park every gate and the
+    # deploy for the default 360 min (path_filter.py bounds the call too).
+    timeout-minutes: 5
     # actions:read lets path_filter.py read this workflow's own run history
     # (`gh api .../actions/workflows/ci.yml/runs`) to find the last green SHA.
     permissions:
