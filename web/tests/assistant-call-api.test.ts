@@ -121,6 +121,26 @@ describe("assistant call_api catalog client", () => {
     );
   });
 
+  it("list_apis then call_api can use GET /streaks/{ticker}", async () => {
+    const { listApis } = await import("@/lib/assistant/dispatch");
+    const listed = listApis({ q: "streaks" });
+    expect(listed.operations.map((item) => `${item.method} ${item.path}`)).toContain(
+      "GET /streaks/{ticker}",
+    );
+
+    mocks.radonFetch.mockResolvedValue({
+      symbol: "AAPL",
+      current_streak: 8,
+      missing: false,
+    });
+    const result = await callApi({ method: "GET", path: "/streaks/AAPL" });
+    expect(result.ok).toBe(true);
+    expect(mocks.radonFetch).toHaveBeenCalledWith(
+      "/streaks/AAPL",
+      expect.objectContaining({ token: PRINCIPAL.token }),
+    );
+  });
+
   it("A5 watchlist POST as user_test_1 is invisible to another Clerk user", async () => {
     const posted = await callApi({
       method: "POST",

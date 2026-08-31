@@ -7,7 +7,9 @@
 
 import { radonFetch } from "@/lib/radonApi";
 import { backendQueryPath } from "@/lib/assistant/backend";
-import { authorize, search } from "@/lib/assistant/catalog";
+import { authorize, search, type CatalogOperation } from "@/lib/assistant/catalog";
+import { NEXT_MODULES } from "@/lib/assistant/nextLoaders";
+import { routeIdFromNextPath } from "@/lib/assistant/pinSources";
 
 /** Mirrors RoutePrincipal["kind"]; absent = not an operator (fail closed). */
 export type PrincipalKind = "operator" | "demo" | "authenticated" | "test";
@@ -150,34 +152,50 @@ async function fromNextResponse(res: Response): Promise<Record<string, unknown>>
   return fencePayload(payload, res.status);
 }
 
+function paramsFromTemplate(template: string, normalized: string): Record<string, string> {
+  const templateParts = template.split("/");
+  const pathParts = normalized.split("/");
+  const params: Record<string, string> = {};
+  for (let i = 0; i < templateParts.length && i < pathParts.length; i += 1) {
+    const slot = templateParts[i].match(/^\{([^}]+)\}$/);
+    if (slot) params[slot[1]] = decodeURIComponent(pathParts[i]);
+  }
+  return params;
+}
+
+type NextHandler = (
+  req: Request,
+  ctx?: { params: Promise<Record<string, string>> },
+) => Promise<Response> | Response;
+
 async function dispatchNext(
   method: string,
   normalized: string,
   body: unknown,
+  query: Record<string, string> | undefined,
+  operation: CatalogOperation,
 ): Promise<Record<string, unknown>> {
-  if (normalized === "/api/watchlist" && method === "GET") {
-    const { GET } = await import("@/app/api/watchlist/route");
-    return fromNextResponse(await GET());
+  const routeId = routeIdFromNextPath(operation.path);
+  const loader = NEXT_MODULES[routeId];
+  if (!loader) throw new Error("Next surface is not wired for this path.");
+  const mod = await loader();
+  const handler = mod[method];
+  if (typeof handler !== "function") {
+    throw new Error(`${method} ${normalized} has no Next handler.`);
   }
-  if (normalized === "/api/watchlist" && method === "POST") {
-    const { POST } = await import("@/app/api/watchlist/route");
-    const req = new Request("http://localhost/api/watchlist", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body ?? {}),
-    });
-    return fromNextResponse(await POST(req));
+
+  const url = new URL(`http://assistant.local${normalized}`);
+  if (query) {
+    for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value);
   }
-  const del = normalized.match(/^\/api\/watchlist\/([^/]+)$/);
-  if (del && method === "DELETE") {
-    const { DELETE } = await import("@/app/api/watchlist/[symbol]/route");
-    const symbol = del[1];
-    const res = await DELETE(new Request(`http://localhost${normalized}`, { method: "DELETE" }), {
-      params: Promise.resolve({ symbol }),
-    });
-    return fromNextResponse(res);
-  }
-  throw new Error("Next surface is not wired for this path.");
+  const req = new Request(url, {
+    method,
+    headers: method === "GET" || body === undefined ? undefined : { "Content-Type": "application/json" },
+    body: method === "GET" || body === undefined ? undefined : JSON.stringify(body),
+  });
+  const params = paramsFromTemplate(operation.path, normalized);
+  const res = await (handler as NextHandler)(req, { params: Promise.resolve(params) });
+  return fromNextResponse(res);
 }
 
 async function dispatchFastApi(
@@ -240,13 +258,14 @@ export async function callApi(
   }
 
   try {
+    const query = mergedQuery(path, input);
     const wrapped =
       authz.surface === "next"
-        ? await dispatchNext(methodRaw, authz.normalized, body)
+        ? await dispatchNext(methodRaw, authz.normalized, body, query, authz.operation)
         : await dispatchFastApi(
             methodRaw,
             authz.normalized,
-            mergedQuery(path, input),
+            query,
             body,
             principal.token,
             budget.signal,
