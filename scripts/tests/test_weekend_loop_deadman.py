@@ -515,3 +515,149 @@ class TestBackgroundWorkIsNotSilentlyKilled:
         # A truncated run that ALSO timed out is a timeout, not a truncation:
         # the cap is the more specific fact and it already implies partial work.
         assert status(124, truncated) == "TIMEOUT after 7200s", status(124, truncated)
+
+
+INCOMPLETE_STATUS = "INCOMPLETE (agent exited 0 without committing to the nightly branch)"
+
+
+def _committing_clone(tmp_path: Path, git: str) -> Path:
+    """A marker-bearing runner clone with a REAL git history.
+
+    `main` has one commit and `origin/main` points at it, so the wrapper's
+    `checkout -f main` / `reset --hard origin/main` / `clean` all run for
+    real; only `fetch` is stubbed out (see `_committing_stub_bin`).
+    """
+    repo = tmp_path / "radon-testing"
+    (repo / "scripts").mkdir(parents=True)
+    (repo / ".radon-weekend-runner").write_text("", encoding="utf-8")
+    subprocess.run([git, "init", "-q", str(repo)], check=True, env=_GIT_ENV)
+    at = [git, "-C", str(repo)]
+    subprocess.run([*at, "symbolic-ref", "HEAD", "refs/heads/main"], check=True, env=_GIT_ENV)
+    subprocess.run([*at, "commit", "-q", "--allow-empty", "-m", "main tip"], check=True, env=_GIT_ENV)
+    subprocess.run([*at, "update-ref", "refs/remotes/origin/main", "HEAD"], check=True, env=_GIT_ENV)
+    return repo
+
+
+_GIT_ENV = {
+    **os.environ,
+    "GIT_CONFIG_GLOBAL": "/dev/null",
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_AUTHOR_NAME": "t",
+    "GIT_AUTHOR_EMAIL": "t@example.invalid",
+    "GIT_COMMITTER_NAME": "t",
+    "GIT_COMMITTER_EMAIL": "t@example.invalid",
+}
+
+
+def _committing_stub_bin(tmp_path: Path, *, claude_body: str) -> tuple[Path, Path, Path]:
+    """`gh` / `python3` record their calls; `git` is REAL except `fetch`."""
+    real_git = shutil.which("git")
+    assert real_git, "a real git is required to exercise the commit check"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh_log = tmp_path / "gh.log"
+    py_log = tmp_path / "py.log"
+    gh = bin_dir / "gh"
+    gh.write_text(
+        "#!/bin/sh\n"
+        f'printf "%s\\n" "$*" >> "{gh_log}"\n'
+        'if [ "$1 $2" = "issue list" ]; then echo 4242; fi\n'
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    gh.chmod(0o755)
+    py = bin_dir / "python3"
+    py.write_text(
+        "#!/bin/sh\n"
+        f'printf "%s\\n" "$*" >> "{py_log}"\n'
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    py.chmod(0o755)
+    git = bin_dir / "git"
+    git.write_text(
+        "#!/bin/sh\n"
+        'for a in "$@"; do [ "$a" = fetch ] && exit 0; done\n'
+        f'exec "{real_git}" "$@"\n',
+        encoding="utf-8",
+    )
+    git.chmod(0o755)
+    claude = bin_dir / "claude"
+    claude.write_text(claude_body, encoding="utf-8")
+    claude.chmod(0o755)
+    return bin_dir, gh_log, py_log
+
+
+class TestAnAgentThatCommitsNothingIsNotReportedOk:
+    """T-379 (T-239 recurring): the 2026-08-31 audit exited 0 and did nothing.
+
+    `claude -p` answered a mid-run nudge with text and no tool call, print
+    mode treated that as the end of the turn, and the phase ended after 18
+    minutes with zero commits, no ledger advance and no PR. rc was 0 and the
+    ceiling marker was absent, so `phase_status` said OK and every dead-man
+    channel repeated it. SKILL.md's contract is that every phase commits at
+    least once on the nightly branch (audit: ledger line + PR, even for an
+    empty range; remediate: the gate-count rows), so "exit 0 and no commit
+    landed during the phase" is INCOMPLETE, not OK.
+
+    Executed, not grepped: the whole wrapper runs against a real-git clone
+    with a stub `claude`, and the status is read back off the `gh issue
+    comment` body and the Pushover call. Only the testing wrapper is under
+    test here; the other four carry the same gap and are reported, not fixed.
+    """
+
+    def _run(self, tmp_path: Path, claude_body: str) -> tuple[subprocess.CompletedProcess, str, str]:
+        repo = _committing_clone(tmp_path, shutil.which("git"))
+        bin_dir, gh_log, py_log = _committing_stub_bin(tmp_path, claude_body=claude_body)
+        proc = subprocess.run(
+            [BASH, str(TESTING), "audit"],
+            env={
+                **_GIT_ENV,
+                "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+                "RADON_WEEKEND_REPO": str(repo),
+            },
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        calls = gh_log.read_text(encoding="utf-8") if gh_log.exists() else ""
+        pages = py_log.read_text(encoding="utf-8") if py_log.exists() else ""
+        return proc, calls, pages
+
+    def test_exit_0_with_no_commit_is_reported_incomplete_on_both_channels(self, tmp_path):
+        proc, calls, pages = self._run(
+            tmp_path,
+            "#!/bin/sh\n"
+            "echo 'Draft findings numbered T-346..T-378 are ready; wait on its completion.'\n"
+            "exit 0\n",
+        )
+        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
+        comment = next((ln for ln in calls.splitlines() if ln.startswith("issue comment")), "")
+        assert comment, f"no dead-man comment at all: {calls!r} {proc.stderr!r}"
+        assert "**audit** " in comment and f"**{INCOMPLETE_STATUS}**" in comment, (
+            "the agent exited 0 having committed nothing — no ledger line, no "
+            f"PR — and the dead-man comment did not say so: {comment!r}"
+        )
+        assert "**OK**" not in comment, comment
+        assert f"--status {INCOMPLETE_STATUS}" in pages, (
+            f"the Pushover page must carry the same status: {pages!r}"
+        )
+        assert "--status OK" not in pages, pages
+
+    def test_a_commit_on_the_nightly_branch_during_the_phase_is_ok(self, tmp_path):
+        proc, calls, pages = self._run(
+            tmp_path,
+            "#!/bin/sh\n"
+            "git checkout -q -b testing/2026-08-31\n"
+            "git commit -q --allow-empty -m 'T-379 stub: ledger line'\n"
+            "echo 'ledger appended, PR opened'\n"
+            "exit 0\n",
+        )
+        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
+        comment = next((ln for ln in calls.splitlines() if ln.startswith("issue comment")), "")
+        assert "**audit** " in comment and "**OK**" in comment, (
+            f"a phase that committed must still read OK: {comment!r} {proc.stderr!r}"
+        )
+        assert "INCOMPLETE" not in comment, comment
+        assert "--status OK" in pages, pages
+        assert "INCOMPLETE" not in pages, pages

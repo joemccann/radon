@@ -44,14 +44,4 @@ describe("operator admin page gate", () => {
       expect(text, rel).not.toContain("requireDemoAdmin");
     }
   });
-
-  it("forwards the Clerk principal token on Gateway mutations", () => {
-    for (const rel of [
-      "app/api/admin/ib/restart/route.ts",
-      "app/api/admin/ib/reset-backoff/route.ts",
-      "app/api/admin/services/[unit]/[action]/route.ts",
-    ] as const) {
-      expect(source(rel), rel).toContain("token: access.principal.token");
-    }
-  });
 });

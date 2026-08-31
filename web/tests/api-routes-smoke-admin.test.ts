@@ -39,6 +39,12 @@ vi.mock("@/lib/routeAccess", () => ({
   requireRouteAccess: mockRequireRouteAccess,
 }));
 
+// The Clerk session JWT requireRouteAccess resolves. On the production app
+// host it is the ONLY credential that gets Force 2FA / Start Gateway through
+// FastAPI's app-role gate, so each mutation route must forward it to radonFetch
+// (which sets Authorization: Bearer only when `token` is passed).
+const PRINCIPAL_TOKEN = "clerk-session-jwt-operator";
+
 function denyOperator(): { ok: false; response: Response } {
   return {
     ok: false,
@@ -56,7 +62,7 @@ beforeEach(() => {
   mockRequireRouteAccess.mockReset();
   mockRequireRouteAccess.mockResolvedValue({
     ok: true,
-    principal: { userId: "operator-user-id", kind: "operator" },
+    principal: { userId: "operator-user-id", kind: "operator", token: PRINCIPAL_TOKEN },
   });
 });
 
@@ -90,6 +96,11 @@ describe("POST /api/admin/ib/restart", () => {
     expect(res.status).toBe(200);
     const body = (await jsonOf(res)) as Record<string, unknown>;
     expect(body.ok).toBe(true);
+    expect(mockRadonFetch).toHaveBeenCalledTimes(1);
+    expect(mockRadonFetch).toHaveBeenCalledWith(
+      "/ib/restart",
+      expect.objectContaining({ method: "POST", token: PRINCIPAL_TOKEN }),
+    );
   });
 
   it("returns 502 envelope on FastAPI failure", async () => {
@@ -108,6 +119,11 @@ describe("POST /api/admin/ib/reset-backoff", () => {
     const { POST } = await import("../app/api/admin/ib/reset-backoff/route");
     const res = await POST();
     expect(res.status).toBe(200);
+    expect(mockRadonFetch).toHaveBeenCalledTimes(1);
+    expect(mockRadonFetch).toHaveBeenCalledWith(
+      "/ib/reset-backoff",
+      expect.objectContaining({ method: "POST", token: PRINCIPAL_TOKEN }),
+    );
   });
 
   it("returns 502 envelope on FastAPI failure", async () => {
@@ -159,6 +175,11 @@ describe("POST /api/admin/services/[unit]/[action]", () => {
       { params: Promise.resolve({ unit: "radon-api.service", action: "restart" }) },
     );
     expect(res.status).toBe(200);
+    expect(mockRadonFetch).toHaveBeenCalledTimes(1);
+    expect(mockRadonFetch).toHaveBeenCalledWith(
+      "/admin/services/radon-api.service/restart",
+      expect.objectContaining({ method: "POST", token: PRINCIPAL_TOKEN }),
+    );
   });
 
   it("returns 400 when unit name is disallowed", async () => {

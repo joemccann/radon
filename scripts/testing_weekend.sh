@@ -190,6 +190,28 @@ phase_status() {
   fi
 }
 
+# T-379 (T-239 recurring): `claude -p` also exits 0 when the agent answers a
+# mid-run nudge with text and no tool call — print mode reads that as the end
+# of the turn. The 2026-08-31 audit ended that way after 18 minutes: zero
+# commits, no ledger advance, no PR, and rc 0 with no ceiling marker, so every
+# dead-man channel said OK. SKILL.md's contract is that every phase commits at
+# least once on the nightly branch (audit: the ledger line + PR, even for an
+# empty range; remediate: the gate-count rows), so "exit 0 and nothing was
+# committed during the phase" is INCOMPLETE. Both the SHA and the committer
+# date are checked: the remediate phase legitimately moves HEAD from main onto
+# the audit's branch tip without committing, so a moved HEAD alone is not
+# evidence — the commit under HEAD must also be newer than the phase start.
+INCOMPLETE_STATUS="INCOMPLETE (agent exited 0 without committing to the nightly branch)"
+PHASE_HEAD_BEFORE=""
+PHASE_START_EPOCH=0
+phase_committed() {
+  local head epoch
+  head="$(git rev-parse HEAD 2>/dev/null || true)"
+  [[ -n "$head" && "$head" != "$PHASE_HEAD_BEFORE" ]] || return 1
+  epoch="$(git log -1 --format=%ct HEAD 2>/dev/null || true)"
+  [[ -n "$epoch" && "$epoch" -ge "$PHASE_START_EPOCH" ]]
+}
+
 on_crash() {
   report "CRASHED (exit $?)" "wrapper died before the agent finished — check the runner"
 }
@@ -392,6 +414,8 @@ run_phase() {
   # over it, so every failed or timed-out run posted a false
   # "CRASHED — wrapper died" dead-man comment AND then its real status.
   trap - ERR
+  PHASE_HEAD_BEFORE="$(git rev-parse HEAD 2>/dev/null || true)"
+  PHASE_START_EPOCH="$(date +%s)"
   local attempt=1 start_ts=$SECONDS remain round_start
   set +e
   while :; do
@@ -435,9 +459,17 @@ run_phase() {
   tail_text="$(tail -c 1500 "$RUN_LOG" 2>/dev/null | python3 "$REPO/scripts/weekend_redact.py" --repo "$REPO" 2>/dev/null || true)"
   local status
   status="$(phase_status "$RC" "$RUN_LOG" "$ROUND_LOG_MARK")"
+  # Only the rc-0-no-marker arm gains this check; TIMEOUT / FAILED /
+  # TRUNCATED keep their precedence. T-379.
+  if [[ "$status" == OK ]] && ! phase_committed; then status="$INCOMPLETE_STATUS"; fi
   case "$status" in
     OK)
       report "$status" "\`\`\`
+${tail_text}
+\`\`\`" ;;
+    INCOMPLETE*)
+      report "$status" "the agent exited 0 but no commit landed on the nightly branch during this phase (no ledger line / PR / gate rows) — this phase's output is INCOMPLETE and must not be read as a finished run
+\`\`\`
 ${tail_text}
 \`\`\`" ;;
     TRUNCATED*)
