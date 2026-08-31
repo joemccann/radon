@@ -47,10 +47,12 @@ REPO = Path(__file__).resolve().parents[2]
 RELIABILITY = REPO / "scripts" / "reliability_weekend.sh"
 TESTING = REPO / "scripts" / "testing_weekend.sh"
 CI_PERFORMANCE = REPO / "scripts" / "ci_performance_nightly.sh"
+DOCUMENTATION = REPO / "scripts" / "documentation_nightly.sh"
 PLISTS = {
     "reliability": REPO / "config" / "com.radon.reliability-daily.plist",
     "testing": REPO / "config" / "com.radon.testing-daily.plist",
     "ci-performance": REPO / "config" / "com.radon.ci-performance-daily.plist",
+    "documentation": REPO / "config" / "com.radon.documentation-daily.plist",
 }
 # Every nightly loop wrapper. A new loop that is not registered here inherits
 # none of the dead-man contract below, which is the whole reason the two
@@ -59,6 +61,7 @@ LOOPS = {
     "reliability": RELIABILITY,
     "testing": TESTING,
     "ci-performance": CI_PERFORMANCE,
+    "documentation": DOCUMENTATION,
 }
 
 
@@ -303,6 +306,7 @@ class TestSetupGuardsTheSharedVenv:
         "reliability": REPO / "scripts" / "setup_reliability_weekend.sh",
         "testing": REPO / "scripts" / "setup_testing_weekend.sh",
         "ci-performance": REPO / "scripts" / "setup_ci_performance.sh",
+        "documentation": REPO / "scripts" / "setup_documentation_nightly.sh",
     }
 
     def test_the_two_setups_really_do_share_a_venv(self):
@@ -314,7 +318,7 @@ class TestSetupGuardsTheSharedVenv:
             f"precondition changed: {venvs}"
         )
 
-    @pytest.mark.parametrize("name", ["reliability", "testing", "ci-performance"])
+    @pytest.mark.parametrize("name", ["reliability", "testing", "ci-performance", "documentation"])
     def test_each_setup_checks_the_sibling_clone_lock(self, name):
         # Comments stripped first: the guard's own comment quotes the
         # `python3.13 -m venv` line it protects, and a naive slice ends there.
@@ -328,7 +332,7 @@ class TestSetupGuardsTheSharedVenv:
             "the other loop's cycle is executing against it"
         )
 
-    @pytest.mark.parametrize("name", ["reliability", "testing", "ci-performance"])
+    @pytest.mark.parametrize("name", ["reliability", "testing", "ci-performance", "documentation"])
     def test_each_setup_checks_the_bash_version(self, name):
         """GAP C: `/bin/bash` on this runner is 3.2, and `cloud/tests` needs 4+.
 
