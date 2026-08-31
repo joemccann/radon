@@ -2151,6 +2151,10 @@ async def admin_service_action(unit: str, action: str):
     if not result.ok:
         if result.returncode == admin_services.PUSH_LOCK_HELD_RC:
             raise HTTPException(status_code=409, detail=result.to_dict())
+        if result.returncode == admin_services.REMOTE_UNREACHABLE_RC:
+            # REL-171 (R-500): a dead mTLS link to the broker is a gateway
+            # timeout, not a caller error.
+            raise HTTPException(status_code=504, detail=result.to_dict())
         raise HTTPException(status_code=400 if result.returncode == -1 else 502, detail=result.to_dict())
     return result.to_dict()
 
