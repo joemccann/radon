@@ -505,3 +505,29 @@ fails ENOENT (`1 failed, 8259 passed` from `web/`).
   (7a45f294, 857bbad0) were checked against all three questions and are bounded, ordered and scoped
   (clean); but REL-135's own dwell is in-process memory that resets on a health-daemon restart and
   covers units only (R-468), carried by REL-167. REL-021b remainder unchanged (all P2).
+- **NF triage 2026-08-31 (delta audit):** NF-1 (Gate-3 bankroll-% cap) still open and unchanged; this
+  range's order-path finding is a funnel gap the standing sweep found (R-479: `place_bracket_order` carries
+  neither guard and the REL-145 tripwire is module-granular, so it passes on the same file's `place_order`),
+  not sizing. NF-2 (unpaginated journal reads) unchanged, still carried by REL-108. NF-3 (a stale feed
+  presented as live) recurs on the headlines tape one week after REL-155 closed the last instance: R-513 —
+  the 838558bf flash-REST rows arrive as ordinary `headline` frames while `upstreamState === "down"`, and the
+  client flips to `live` on any headline frame, so the banner REL-155 added clears on the first fed print;
+  carried by REL-182. NF-4 (aggregated Flex buckets vs 1:1 fingerprints) unchanged; REL-156 verified HOLDING
+  by execution against real libsql (two claimants, post-commit mark failure, stale lease, clock step back —
+  the stale-lease re-apply is idempotent on the `cash_flows.id` fingerprint). NF-5 unchanged. **NF-6 (retry
+  and error classifiers) recurs on day one of a new vendor:** 46897eec inserted the Robinhood rung into eight
+  ladders and R-470 shows `fetch_robinhood_closes` collapses 401/403, 429/5xx and connect/timeout to `{}`,
+  which every caller reads as "no data" and demotes to Yahoo under an `ok` heartbeat — R-296's UW-leg class
+  exactly, now on the RH leg, with the aggravation that an access-token-only store can never disable itself.
+  Carried by REL-174. NF-7 unchanged. NF-8 (standing-sweep scope) stays CLOSED for the parity test, but the
+  SAME class appears in a different test: the REL-145 tripwire's `"check_order_limits" in body` is a
+  module-level check, so a second placement function in an already-compliant module is asserted on by
+  nothing (R-479, REL-186). NF-9 (happy-path-only heartbeats) does NOT recur — the two new jobs this range
+  (`fetch_rh_crowding.py`, unscheduled; `/streaks/{ticker}`, on-demand) write no heartbeat by design and sit
+  in neither catalog, which is consistent. **NF-10 (suppression without a dwell bound) recurs:** 8a0b95ce
+  answers a real false page (a45d6410, 2026-08-30) by removing `radon-ib-gateway.service` from
+  `DWELL_ESCALATE_UNITS` outright — no calendar, no `Result=success` discriminator, no bound — so a gateway
+  dead on a Tuesday can never escalate the edge floor to `aggregate_down`, and the same commit makes
+  REL-167's acceptance case unreachable without touching the backlog row (R-478, REL-181). The two NF-10
+  questions ("for how long?" and "what else does it swallow?") would have caught it in review. REL-021b
+  remainder unchanged (all P2).
