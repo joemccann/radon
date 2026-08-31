@@ -412,14 +412,20 @@ consume_watchdog_lease_once() {
 
 read_host_role() {
   local role="${RADON_HOST_ROLE:-}"
-  if [[ -z "$role" && -n "${ENV_FILE:-}" && -f "$ENV_FILE" ]]; then
-    role="$(awk -F= '/^RADON_HOST_ROLE=/{v=$2} END{print v}' "$ENV_FILE" 2>/dev/null || true)"
+  local envf
+  # REL-169 (R-472): every other role reader (root helper, operator CLI, app
+  # runtime, setup-vps) canonicalizes /etc/radon/env. Read that first; the
+  # legacy deploy env file is a fallback, never the source of the role.
+  for envf in "${RADON_ENV_FILE:-/etc/radon/env}" "${ENV_FILE:-}"; do
+    [[ -z "$role" ]] || break
+    [[ -n "$envf" && -f "$envf" ]] || continue
+    role="$(awk -F= '/^RADON_HOST_ROLE=/{v=$2} END{print v}' "$envf" 2>/dev/null || true)"
     role="${role%\"}"
     role="${role#\"}"
     role="${role%\'}"
     role="${role#\'}"
     role="${role//$'\r'/}"
-  fi
+  done
   case "$role" in
     app|broker|combined) printf '%s\n' "$role" ;;
     *) printf 'combined\n' ;;

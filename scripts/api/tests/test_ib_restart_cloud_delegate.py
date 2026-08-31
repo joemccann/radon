@@ -240,3 +240,83 @@ class TestCloudDelegate:
         ):
             resp = client.post("/admin/stack/restart")
         assert resp.status_code == 502
+
+
+# Captured before any fixture replaces it with a mock.
+_REAL_DOCKER_COMPOSE = server.ib_gateway._docker_compose
+
+
+class TestAppRoleRuntimeGate:
+    """REL-169 (R-472b): the app host must never take the combined path to a
+    local ``docker compose`` even when its env drifts off ``cloud`` mode. The
+    deploy-time check-env.py is not a runtime gate."""
+
+    @pytest.fixture(autouse=True)
+    def _app_role_docker_mode(self, monkeypatch):
+        import asyncio
+
+        monkeypatch.setenv("RADON_HOST_ROLE", "app")
+        monkeypatch.setattr(server.ib_gateway, "GATEWAY_MODE", "docker")
+        monkeypatch.setattr(server.ib_gateway, "_port_listening", lambda *a, **k: False)
+        monkeypatch.setattr(
+            server.ib_gateway,
+            "_docker_container_state",
+            AsyncMock(return_value=("exited", None)),
+        )
+        monkeypatch.setattr(server.ib_gateway, "_acquire_gateway_push_lease", lambda *a, **k: None)
+        monkeypatch.setattr(server.ib_gateway, "_poll_port", AsyncMock(return_value=(False, 0)))
+        monkeypatch.setattr(
+            server.ib_gateway, "_acquire_2fa_push_lock_bounded", lambda *a, **k: (True, None)
+        )
+        monkeypatch.setattr(server.ib_gateway, "_release_2fa_push_lock_bounded", lambda *a, **k: None)
+        server.ib_gateway.reset_restart_backoff()
+        self.compose = AsyncMock(return_value=("", "", 0))
+        monkeypatch.setattr(server.ib_gateway, "_docker_compose", self.compose)
+        self.restart_docker = AsyncMock(return_value={"restarted": True, "port_listening": False})
+        monkeypatch.setattr(server.ib_gateway, "_restart_docker", self.restart_docker)
+        self.run = asyncio.run
+
+    def test_ensure_ib_gateway_refuses_without_compose(self):
+        result = self.run(server.ib_gateway.ensure_ib_gateway())
+        assert result.get("restarted") is not True
+        assert result.get("reason") == "app_role"
+        assert "RADON_HOST_ROLE=app" in result["error"]
+        self.compose.assert_not_awaited()
+
+    def test_restart_ib_gateway_refuses_without_compose(self):
+        result = self.run(server.ib_gateway.restart_ib_gateway())
+        assert result["restarted"] is False
+        assert result.get("reason") == "app_role"
+        self.restart_docker.assert_not_awaited()
+        self.compose.assert_not_awaited()
+
+    def test_post_ib_restart_is_503_app_role(self, client, monkeypatch):
+        # The Clerk carve-out for app-role Gateway POSTs is the primary gate;
+        # this case hollows it out on purpose so the runtime gate under it is
+        # what refuses (the finding's defence-in-depth claim).
+        monkeypatch.setattr(server, "_is_app_role_gateway_mutation", lambda request: False)
+        monkeypatch.setattr(server, "_gateway_unit_controllable", lambda: False)
+        resp = client.post("/ib/restart", headers=_auth_headers())
+        assert resp.status_code == 503, resp.text
+        detail = resp.json()["detail"]
+        assert isinstance(detail, dict), detail
+        assert detail["reason"] == "app_role"
+        self.compose.assert_not_awaited()
+        self.restart_docker.assert_not_awaited()
+
+    def test_docker_compose_chokepoint_refuses(self, monkeypatch):
+        import asyncio
+
+        monkeypatch.setattr(
+            asyncio, "create_subprocess_exec",
+            AsyncMock(side_effect=AssertionError("compose must not spawn on the app role")),
+        )
+        out, err, rc = self.run(_REAL_DOCKER_COMPOSE("up", "-d"))
+        assert rc != 0
+        assert "RADON_HOST_ROLE=app" in err
+
+    def test_combined_role_still_reaches_compose(self, monkeypatch):
+        monkeypatch.setenv("RADON_HOST_ROLE", "combined")
+        result = self.run(server.ib_gateway.ensure_ib_gateway())
+        assert result.get("reason") != "app_role"
+        self.compose.assert_awaited()
