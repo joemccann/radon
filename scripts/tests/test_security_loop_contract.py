@@ -55,6 +55,13 @@ def _uncommented(path: Path) -> str:
     )
 
 
+def _phase_complete_marker() -> str:
+    body = WRAPPER.read_text(encoding="utf-8")
+    match = re.search(r'PHASE_COMPLETE_MARKER="([^"]+)"', body)
+    assert match, "the wrapper lost PHASE_COMPLETE_MARKER"
+    return match.group(1)
+
+
 def _clone(tmp_path: Path, *, security_marker: bool) -> Path:
     repo = tmp_path / "clone"
     (repo / "scripts").mkdir(parents=True)
@@ -241,7 +248,7 @@ class TestTheDeadmanIsSanitized:
 
     def _phase_stub_bin(
         self, tmp_path: Path, *, claude_rc: int = 0, timeout_124: bool = False,
-        truncated: bool = False,
+        truncated: bool = False, complete: bool = True,
     ) -> tuple[Path, Path, Path]:
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir()
@@ -267,10 +274,14 @@ class TestTheDeadmanIsSanitized:
             ),
             # The agent: scanner-shaped output into the run log, then the
             # exit the case under test needs.
+            # A phase that ends OK must print the completion marker (R-517);
+            # without it the wrapper downgrades to INCOMPLETE and exits 75.
             "claude": (
                 "#!/bin/sh\n"
                 f"echo 'gitleaks: {self.CANARY} matched in web/lib/secret.ts:12'\n"
                 + ("echo 'Background tasks still running after 600s'\n" if truncated else "")
+                + (f"echo '{_phase_complete_marker()} audit'\n"
+                   if complete and not truncated else "")
                 + f"exit {claude_rc}\n"
             ),
             # `timeout -k <secs> <secs> cmd`: consume the options, then run the
@@ -321,7 +332,10 @@ class TestTheDeadmanIsSanitized:
             ("ok", {"claude_rc": 0}, "**OK**", 0),
             ("failed", {"claude_rc": 7}, "FAILED (exit 7)", 7),
             ("timeout", {"timeout_124": True}, "TIMEOUT", 124),
-            ("truncated", {"truncated": True}, "TRUNCATED", 0),
+            # R-517: an incomplete phase exits 75, so neither the dead-man nor
+            # launchd is told an unfinished night succeeded.
+            ("truncated", {"truncated": True}, "TRUNCATED", 75),
+            ("incomplete", {"complete": False}, "INCOMPLETE", 75),
         ],
     )
     def test_no_run_log_content_reaches_the_public_deadman(

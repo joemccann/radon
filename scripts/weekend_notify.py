@@ -40,8 +40,13 @@ def _load_env_file(path: Optional[str]) -> Optional[str]:
         from dotenv import dotenv_values
     except ImportError:
         return "python-dotenv is not importable (is the venv on PATH?)"
-    for key, value in dotenv_values(env_path, interpolate=False).items():
-        if key and value is not None and key not in os.environ:
+    values = dotenv_values(env_path, interpolate=False)
+    # T-351 (rail 5): import ONLY the Pushover keys. Every wrapper passes the
+    # shared `$WEEKEND_ROOT/.env`, which on the runner also carries
+    # IB_FLEX_TOKEN / TURSO_AUTH_TOKEN / CLERK_*.
+    for key in ENV_FILE_KEYS:
+        value = values.get(key)
+        if value is not None and key not in os.environ:
             os.environ[key] = value
     return None
 
