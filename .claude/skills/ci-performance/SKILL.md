@@ -382,3 +382,10 @@ each correction into a concrete rule that prevents recurrence.
   contended Mac mini. Build path lists with native zsh globs
   (`files=(cloud/tests/test_[a-l]*.py)`) and always echo `${#files}` into the
   status file before invoking pytest. Local timings stay diagnostic only.
+- 2026-08-31 remediate: before proposing a shard re-order, check whether the
+  shard is WORK-bound (pytest step ~ total work / 4 vCPU) or TAIL-bound (one
+  floor module collected late). `scripts-npsz` and `scripts-rs` are
+  work-bound (~290-300s each), so leading the 20-45s modules changed nothing;
+  `--durations=25` cannot tell the two cases apart. Get per-module work from a
+  Linux run (`--durations=0` on a PR branch or a junitxml artifact) before
+  spending a night on ordering.

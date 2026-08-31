@@ -307,3 +307,43 @@ fixed ~88s deploy (40s stability window). Next: CIP-002 (node image
 PR: https://github.com/joemccann/radon/pull/211 (commit is the branch tip carrying `CIP-001` in its subject).
 
 Outcome: `VALIDATING` (0 of 5 comparable after-runs; human merge required).
+
+**First Linux sample - PR run
+[33370066924](https://github.com/joemccann/radon/actions/runs/33370066924)
+(`pull_request`, `a0b3b178`, warm cache, n=1; not a production run, not an
+after-sample).** Every pytest job green with the same inventories. Per-shard
+pytest step, before (run 33359053839) -> now:
+
+| Shard | Before | Now | Read |
+|---|---|---|---|
+| `cloud al` | 91.2s (job 97s) | 29.9s (job 45s), 765 passed 2 skipped | (a) confirmed; the contention-sensitive marker-wait test passed |
+| `cloud mz` | 17.4s (job 21s) | 10.0s (job 21s) | (a) confirmed, off the path |
+| `scripts-jm` | 64.7s (job 81s) | 41.3s (job 59s) | (c) confirmed, -23s |
+| `scripts-npsz` | 72.8s (job 86s) | 73.7s (job 88s); top files unchanged (vixcor 23.2s, self_rewrite 20.3s) | (b) no effect: the shard is work-bound, W ~ 4 x 73s ~ 290s across 78 modules, so lead order cannot move the wall |
+| `scripts-rs` | 70.7s (job 71s; before-window job range 71-97s) | 80.1s (job 97s) | (b) inconclusive at n=1 inside the shard's own noise band; also work-bound (W ~ 300s) |
+
+Python gate authorization in this run: run created 07:49:19Z -> `pytest
+coverage ratchet` completed 07:51:25Z = 126s (before p50 123s), bound by
+`scripts-rs` 97s + 2s hop + 16s ratchet. Correction to the audit model: the
+binding constraint on `npsz` and `rs` is total per-shard work divided by the
+4 runner vCPUs, not the position of the 20-45s floor modules. (b) is
+therefore `INSUFFICIENT_SAMPLE` and (a)/(c) are the measured cuts; CIP-001
+as merged is expected to remove the `cloud al` and `scripts-jm` walls only,
+leaving the mixed p50 roughly unchanged until the work-bound shards are
+re-partitioned.
+
+Unrelated in the same run: `Playwright P0-financial smoke (non-gating)` failed
+at `bun install --frozen-lockfile` with `Fail extracting tarball for "next"`
+(registry transient; the job is non-gating and did not run on the last six
+`main` runs). Re-run requested for a clean PR check.
+
+**Next safest candidate - CIP-005 (supersedes the (b) part of CIP-001):**
+re-partition `scripts-npsz` / `scripts-rs` by measured per-module work into
+the light shards (`scripts-gh` 16.7s, `rest` 12.6s, `scripts-daemons` 19.3s,
+`rest-api` 19.5s, `scripts-ac` 28.8s) without changing shard count. Needs
+per-module work on Linux: `--durations=25` truncates it and local Mac mini
+profiles are contention-distorted (self_rewrite 488s locally vs 20s in CI).
+Cheapest evidence: one PR-branch run with `--durations=0` on the two shards
+(log-only, no workflow change on `main`), or a `--junitxml` artifact from
+`py-tests`. Target: every scripts shard <= ~55s pytest step, python gate
+<= ~85s, which makes the web gate (~106s) the wall as originally predicted.
