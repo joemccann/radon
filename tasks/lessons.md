@@ -1,5 +1,16 @@
 # Lessons
 
+## 2026-08-30 — Pin parity that only checks OPERATIONS ⊆ pins misses new routes
+
+- STREAKS shipped `radonCapability` and FastAPI `assistant_catalog.py`, CI green.
+- Chat `list_apis("streaks")` still missed GET `/streaks/{ticker}` because
+  `web/lib/assistant/catalog.ts` kept a third handwritten OPERATIONS seed.
+- REL-161 parity asserted capability match for listed ops, never reverse
+  inclusion. A new pin cannot be invisible: derive the runtime catalog from
+  the pins, and fail CI when advertised pins are absent from list_apis.
+
+---
+
 ## 2026-08-30 — Broker weekend downtime is not a sidecar death
 
 - Page `a45d6410`: R-382 dwell on ALL `DEPENDENCY_UNITS` re-paged the

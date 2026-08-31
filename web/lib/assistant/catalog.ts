@@ -1,12 +1,15 @@
 /**
  * Runtime capability catalog for assistant list_apis / call_api.
  *
- * Self-contained: does not import route annotations. Chat keeps named tools
- * for quote / evaluate / portfolio / journal / place_order; everything else
- * goes through this catalog.
+ * Derived from pin sources (FastAPI assistant_catalog.py + Next
+ * radonCapability exports). Chat keeps named tools for quote / evaluate /
+ * portfolio / journal / place_order; everything else goes through this catalog.
  */
 
 import path from "node:path";
+
+import { buildRuntimeCatalog, CALLABLE_CAPS } from "@/lib/assistant/catalogBuild";
+import { loadPinSourcesFromDisk } from "@/lib/assistant/pinSources";
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 export type Capability =
@@ -60,100 +63,39 @@ export type AuthorizeDenied = {
 export type AuthorizeResult = AuthorizeOk | AuthorizeDenied;
 
 const HTTP_METHODS = new Set<string>(["GET", "POST", "PUT", "PATCH", "DELETE"]);
-const CALLABLE = new Set<Capability>(["read", "read.spawn", "mutate.workspace"]);
-const TICKER = "[A-Z0-9.\\-]+";
 
 export const WATCHLIST_HINT =
   "Watchlist is GET /api/watchlist, POST /api/watchlist, DELETE /api/watchlist/{symbol}.";
 
-function compile(template: string): RegExp {
-  const source = template
-    .replace(/\{ticker\}/g, TICKER)
-    .replace(/\{symbol\}/g, "[^/]+");
-  return new RegExp(`^${source}$`);
+const SEARCH_STOP = new Set([
+  "the",
+  "and",
+  "for",
+  "with",
+  "any",
+  "that",
+  "this",
+  "from",
+  "more",
+  "than",
+  "days",
+  "day",
+  "one",
+  "use",
+  "api",
+  "route",
+]);
+
+let cached: CatalogOperation[] | null = null;
+
+function operations(): CatalogOperation[] {
+  if (!cached) cached = buildRuntimeCatalog(loadPinSourcesFromDisk());
+  return cached;
 }
 
-function op(
-  method: HttpMethod,
-  pathTemplate: string,
-  capability: Capability,
-  surface: Surface,
-  summary: string,
-  input = "",
-): CatalogOperation {
-  return {
-    method,
-    path: pathTemplate,
-    capability,
-    surface,
-    summary,
-    input,
-    pattern: compile(pathTemplate),
-  };
+export function resetCatalogCache(): void {
+  cached = null;
 }
-
-function operatorOnly(operation: CatalogOperation): CatalogOperation {
-  return { ...operation, operatorOnly: true };
-}
-
-const OPERATIONS: CatalogOperation[] = [
-  op("GET", "/api/watchlist", "read", "next", "List the signed-in user's watchlist"),
-  op(
-    "POST",
-    "/api/watchlist",
-    "mutate.workspace",
-    "next",
-    "Add a symbol to the signed-in user's watchlist",
-    "{symbol, sector?}",
-  ),
-  op(
-    "DELETE",
-    "/api/watchlist/{symbol}",
-    "mutate.workspace",
-    "next",
-    "Remove a symbol from the signed-in user's watchlist",
-    "{symbol}",
-  ),
-
-  op("GET", "/quote/{ticker}", "read", "fastapi", "Live last/bid/ask for an underlying", "{ticker}"),
-  op("GET", "/options/uw-chain", "read", "fastapi", "Priced Unusual Whales option chain", "symbol, expiry?, right?"),
-  op("GET", "/options/chain", "read", "fastapi", "IB option chain", "symbol, expiry?"),
-  op("GET", "/options/expirations", "read", "fastapi", "Listed option expirations", "symbol"),
-  op("GET", "/options/exposure/{ticker}", "read", "fastapi", "Options exposure / GEX by strike", "{ticker}"),
-  op("GET", "/options/rv-ratio/{ticker}", "read", "fastapi", "Realized vs implied vol ratio", "{ticker}"),
-  op("GET", "/index-options/chain", "read", "fastapi", "Index option chain", "symbol"),
-  op("GET", "/catalysts", "read", "fastapi", "Upcoming catalysts"),
-  op("GET", "/earnings", "read", "fastapi", "Earnings calendar"),
-  op("GET", "/earnings/{ticker}", "read", "fastapi", "Earnings for one ticker", "{ticker}"),
-  op("GET", "/informed-flow/{ticker}", "read", "fastapi", "Informed-flow prints", "{ticker}"),
-  op("GET", "/short-availability/{ticker}", "read", "fastapi", "Stock-loan availability", "{ticker}"),
-  op("GET", "/ticker/ratings", "read", "fastapi", "Analyst ratings", "symbol"),
-  op("GET", "/market-calendar", "read", "fastapi", "Session calendar"),
-  op("GET", "/internals/skew-history", "read", "fastapi", "Skew history"),
-  op("GET", "/cash-flows", "read", "fastapi", "Account cash flows"),
-  op("GET", "/attribution", "read", "fastapi", "P&L attribution"),
-  op("GET", "/llm-token-index", "read", "fastapi", "LLM token index"),
-  op("GET", "/flow-analysis/{ticker}", "read", "fastapi", "Dark-pool / OTC flow analysis", "{ticker}"),
-
-  op("POST", "/flow-analysis/{ticker}", "read.spawn", "fastapi", "Run flow analysis and persist a snapshot", "{ticker}"),
-  op("POST", "/scan", "read.spawn", "fastapi", "Market-wide flow scan"),
-  op("POST", "/discover", "read.spawn", "fastapi", "Discovery scan"),
-  op("POST", "/gex/scan", "read.spawn", "fastapi", "Gamma exposure scan"),
-  op("POST", "/vcg/scan", "read.spawn", "fastapi", "Vol-credit gap scan"),
-  op("POST", "/regime/scan", "read.spawn", "fastapi", "Regime scan"),
-  op("POST", "/breadth/scan", "read.spawn", "fastapi", "Breadth scan"),
-  // Capabilities below follow scripts/api/assistant_catalog.py and the Next
-  // twin's radonCapability (assistant-catalog-parity.test.ts).
-  operatorOnly(op("POST", "/portfolio/sync", "mutate.workspace", "fastapi", "Refresh IB portfolio snapshot")),
-  operatorOnly(op("POST", "/orders/refresh", "mutate.workspace", "fastapi", "Refresh open-order snapshot")),
-  operatorOnly(op("POST", "/performance", "read.spawn", "fastapi", "Performance snapshot")),
-  op("POST", "/leap/scan", "read.spawn", "fastapi", "LEAP IV-mispricing scan"),
-  op("POST", "/garch-convergence/scan", "read.spawn", "fastapi", "GARCH convergence scan"),
-  op("POST", "/theta-harvester/scan", "read.spawn", "fastapi", "Theta-harvester scan"),
-  op("POST", "/strength-confirmation/scan", "read.spawn", "fastapi", "Strength-confirmation scan"),
-  op("POST", "/gamma-rotation/scan", "read.spawn", "fastapi", "Gamma-rotation scan"),
-  op("POST", "/bpi/scan", "read.spawn", "fastapi", "BPI scan"),
-];
 
 function fullyDecode(value: string): string {
   let current = value;
@@ -245,11 +187,11 @@ export function authorize(method: string, rawPath: string): AuthorizeResult {
     return { ok: false, normalized, capability: denied.capability, error: denied.error };
   }
 
-  const operation = OPERATIONS.find((item) => item.method === verb && item.pattern.test(normalized));
+  const operation = operations().find((item) => item.method === verb && item.pattern.test(normalized));
   if (!operation) {
     return { ok: false, normalized, error: unknownPathError(rawPath, normalized) };
   }
-  if (!CALLABLE.has(operation.capability)) {
+  if (!CALLABLE_CAPS.has(operation.capability)) {
     return {
       ok: false,
       normalized,
@@ -267,24 +209,44 @@ export function authorize(method: string, rawPath: string): AuthorizeResult {
   };
 }
 
+function searchTokens(q: string): string[] {
+  return q
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((token) => token.length >= 3 && !SEARCH_STOP.has(token));
+}
+
+function searchScore(hay: string, tokens: string[]): number {
+  if (!tokens.length) return 1;
+  let score = 0;
+  for (const token of tokens) {
+    if (hay.includes(token)) score += 1;
+  }
+  return score;
+}
+
 export function search(q: string): CatalogSearchHit[] {
-  const tokens = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  const hits: CatalogSearchHit[] = [];
-  for (const item of OPERATIONS) {
-    if (!CALLABLE.has(item.capability)) continue;
+  const tokens = searchTokens(q);
+  const hits: Array<CatalogSearchHit & { score: number }> = [];
+  for (const item of operations()) {
+    if (!CALLABLE_CAPS.has(item.capability)) continue;
     const hay = `${item.method} ${item.path} ${item.capability} ${item.summary} ${item.input}`.toLowerCase();
-    if (tokens.length && !tokens.every((token) => hay.includes(token))) continue;
+    const score = searchScore(hay, tokens);
+    if (!score) continue;
     hits.push({
       method: item.method,
       path: item.path,
       capability: item.capability,
       summary: item.summary,
       input: item.input,
+      score,
     });
   }
-  return hits.slice(0, 40);
+  hits.sort((a, b) => b.score - a.score || a.path.localeCompare(b.path) || a.method.localeCompare(b.method));
+  return hits.slice(0, 80).map(({ score: _score, ...hit }) => hit);
 }
 
 export function catalogOperations(): CatalogOperation[] {
-  return OPERATIONS.slice();
+  return operations().slice();
 }
