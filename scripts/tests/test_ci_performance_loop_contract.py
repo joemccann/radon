@@ -136,7 +136,10 @@ class TestTheLaunchdJobPointsAtThisLoop:
             .replace("__HOME__", "/tmp/home")
         )
         job = plistlib.loads(resolved.encode("utf-8"))
-        assert job["StartCalendarInterval"] == {"Hour": 0, "Minute": 0}
+        # REL-180 (R-503): the five loops are staggered inside the 00:xx hour
+        # (pairwise-distinct minutes are pinned in test_rel180_loop_launchers).
+        assert job["StartCalendarInterval"]["Hour"] == 0
+        assert 0 <= job["StartCalendarInterval"]["Minute"] < 60
         assert "Weekday" not in job["StartCalendarInterval"], (
             "a Weekday key would make this a weekend-only loop"
         )
