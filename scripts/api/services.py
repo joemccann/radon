@@ -412,6 +412,10 @@ GATEWAY_LEASE_HELD_RC = 75
 GATEWAY_CONTROL_BUSY_RC = 74
 PROCESS_TERM_GRACE_S = 1.0
 REMOTE_TIMEOUT_S = GATEWAY_CONTROL_TIMEOUT_S
+# ActionResult.returncode sentinel for "broker daemon unreachable" (socket /
+# TLS failure before any HTTP status). Distinct from -1, which the route maps
+# to 400 for actions refused on THIS host; an upstream outage is a 502.
+REMOTE_UNREACHABLE_RC = 502
 
 
 def _remote_url_allowed(url: str) -> bool:
@@ -482,6 +486,8 @@ async def remote_gateway_action(action: str) -> ActionResult:
         return ActionResult(GATEWAY_UNIT, action, False, f"action {action!r} is not allowed", -1)
     status, payload = await asyncio.to_thread(_remote_http, action, REMOTE_TIMEOUT_S)
     detail = str(payload.get("detail") or payload.get("state") or payload.get("error") or "")
+    if status == -1:
+        return ActionResult(GATEWAY_UNIT, action, False, detail, REMOTE_UNREACHABLE_RC)
     rc = int(payload.get("returncode") or (0 if payload.get("ok") else status))
     if status == 409 or rc in {GATEWAY_LEASE_HELD_RC, GATEWAY_CONTROL_BUSY_RC, PUSH_LOCK_HELD_RC}:
         return ActionResult(GATEWAY_UNIT, action, False, detail, PUSH_LOCK_HELD_RC)
