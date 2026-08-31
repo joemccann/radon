@@ -99,9 +99,12 @@ export interface OptionOrderRiskInput {
    * contract so the hook can project retained portfolio risk before treating
    * the order as a pure close. `estimatedPnl` is computed from cash flow minus
    * sunk basis. Used by close paths in OrderTab and InstrumentDetailModal.
+   * `entryCostDollars: null` means the held position has no aggregate basis
+   * (legs on disagreeing basis sources, T-315): still a pure close, but the
+   * ticket surfaces no realised figure.
    */
   closeOut?: {
-    entryCostDollars: number;
+    entryCostDollars: number | null;
     estimatedPnlLabel?: string;
   } | null;
   /**
@@ -185,10 +188,10 @@ export interface LinearOrderRiskInput {
   /**
    * Close-out economics. Required when the action is closing a held
    * position (SELL against LONG OR BUY against SHORT). Provides cost basis
-   * so the summary can report realised P&L.
+   * so the summary can report realised P&L (`null` basis → no figure).
    */
   closeOut?: {
-    entryCostDollars: number;
+    entryCostDollars: number | null;
     estimatedPnlLabel?: string;
   } | null;
 }
@@ -709,10 +712,13 @@ export function useOrderRisk(
         const postCloseUndefinedRiskReason = retainedShortCallRiskAfterStockClose(input, portfolio);
         const hasPostCloseUndefinedRisk =
           postCloseUndefinedRiskReason != null && postCloseUndefinedRiskReason.length > 0;
+        const basis = input.closeOut.entryCostDollars;
         const pnl =
-          input.action === "SELL"
-            ? grossCash - input.closeOut.entryCostDollars
-            : input.closeOut.entryCostDollars - grossCash;
+          basis == null
+            ? null
+            : input.action === "SELL"
+              ? grossCash - basis
+              : basis - grossCash;
         const closeSummary: OrderPresentationSummary = {
           ...baseSummary,
           totalCost: grossCash,
@@ -807,7 +813,8 @@ export function useOrderRisk(
     // exposure before surfacing proceeds + realized P&L.
     if (opt.closeOut != null) {
       const proceeds = opt.totalCost ?? 0;
-      const pnl = proceeds - opt.closeOut.entryCostDollars;
+      const basis = opt.closeOut.entryCostDollars;
+      const pnl = basis == null ? null : proceeds - basis;
       const residualRisk = retainedOptionRiskAfterClose(opt, portfolio);
       const closeSummary: OrderPresentationSummary = {
         ...baseSummary,
