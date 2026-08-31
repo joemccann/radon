@@ -37,7 +37,7 @@ if str(SCRIPTS) not in sys.path:
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import flex_sftp_pull as pull  # noqa: E402
-from test_flex_sftp_pull import FakeSftp, _ssh_config  # noqa: E402
+from test_flex_sftp_pull import AFTER_FIRST_DELIVERY, FakeSftp, _ssh_config  # noqa: E402
 
 ZONE = "America/New_York"
 
@@ -143,6 +143,7 @@ class TestAHungSessionStillHeartbeats:
             config=_write(tmp_path, _config_lines()),
             inbox=tmp_path / "inbox",
             runner=_runner,
+            now=AFTER_FIRST_DELIVERY,
         )
         assert code == 1
         assert beats and beats[-1][0] == "error", beats

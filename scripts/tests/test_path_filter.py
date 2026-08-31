@@ -8,10 +8,15 @@ import subprocess
 from functools import lru_cache
 from pathlib import Path
 
+from ci import path_filter
 from ci.path_filter import (
     CROSS_TREE_CONTRACTS,
     DOC_SUFFIXES,
+    _is_ancestor,
+    changed_paths,
     classify,
+    green_main_push_shas,
+    resolve_gate_base,
     select_gates,
     write_output,
 )
@@ -456,3 +461,196 @@ def test_every_root_file_read_by_a_python_test_routes_to_the_python_gate() -> No
         "root files read by python tests that do NOT turn on the python gate: "
         + ", ".join(f"{name} (read by {proof})" for name, proof in sorted(unrouted.items()))
     )
+
+
+# --- T-312: a push's diff base is the last GREEN main SHA, not event.before --
+#
+# `github.event.before` is whatever `main` pointed at a moment ago, green or
+# red. A docs-only push on top of a red `main` diffed as documentation, skipped
+# every gate, and `deploy` (which accepts `skipped`) shipped the red runtime
+# tree as a green release. The base must be the newest SHA whose ci.yml push
+# run concluded `success` AND that HEAD descends from; anything less resolvable
+# runs both gates.
+
+
+def _git(repo: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+def _commit(repo: Path, path: str, message: str) -> str:
+    target = repo / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(f"# {message}\n", encoding="utf-8")
+    _git(repo, "add", path)
+    _git(repo, "commit", "-q", "--no-verify", "-m", message)
+    return _git(repo, "rev-parse", "HEAD")
+
+
+def _red_then_docs_history(tmp_path: Path) -> tuple[Path, str, str, str]:
+    """green (runtime, gate passed) -> red (runtime, gate failed) -> head (docs)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    green = _commit(repo, "scripts/ok.py", "green")
+    red = _commit(repo, "scripts/broken.py", "red")
+    head = _commit(repo, "tasks/todo.md", "docs only")
+    return repo, green, red, head
+
+
+def _is_ancestor_in(repo: Path):
+    return lambda sha, head: _is_ancestor(sha, head, cwd=repo)
+
+
+def test_docs_push_after_a_red_main_runs_both_gates_from_the_last_green_base(
+    tmp_path: Path,
+) -> None:
+    repo, green, red, head = _red_then_docs_history(tmp_path)
+    # The finding: event.before is the red SHA and before..head is documentation.
+    assert classify(changed_paths(red, head, cwd=repo)) == (False, False)
+
+    base = resolve_gate_base(head, lambda: [green], _is_ancestor_in(repo))
+    assert base == green
+    assert classify(changed_paths(base, head, cwd=repo)) == (True, True)
+
+
+def test_green_base_equal_to_before_keeps_the_docs_only_skip(tmp_path: Path) -> None:
+    repo, _green, before, head = _red_then_docs_history(tmp_path)
+    base = resolve_gate_base(head, lambda: [before], _is_ancestor_in(repo))
+    assert base == before
+    assert classify(changed_paths(base, head, cwd=repo)) == (False, False)
+
+
+def test_unresolvable_green_base_runs_both_gates(tmp_path: Path) -> None:
+    repo, _green, _red, head = _red_then_docs_history(tmp_path)
+
+    def api_down() -> list[str]:
+        raise RuntimeError("gh api: 502")
+
+    def git_down(_sha: str, _head: str) -> bool:
+        raise OSError("git missing")
+
+    for base in (
+        resolve_gate_base(head, lambda: [], _is_ancestor_in(repo)),
+        resolve_gate_base(head, lambda: ["", "not-a-sha"], _is_ancestor_in(repo)),
+        resolve_gate_base(head, api_down, _is_ancestor_in(repo)),
+        resolve_gate_base(head, lambda: ["deadbeef"], git_down),
+    ):
+        assert base is None
+        assert changed_paths(base or "", head, cwd=repo) == []
+        assert classify(changed_paths(base or "", head, cwd=repo)) == (True, True)
+
+
+def test_a_green_sha_off_the_ancestry_is_skipped_for_an_older_ancestor(
+    tmp_path: Path,
+) -> None:
+    repo, green, _red, head = _red_then_docs_history(tmp_path)
+    _git(repo, "checkout", "-q", "-b", "other", green)
+    off_ancestry = _commit(repo, "scripts/other.py", "sibling branch")
+    _git(repo, "checkout", "-q", "main")
+    assert _is_ancestor(green, head, cwd=repo)
+    assert not _is_ancestor(off_ancestry, head, cwd=repo)
+
+    base = resolve_gate_base(head, lambda: [off_ancestry, green], _is_ancestor_in(repo))
+    assert base == green
+
+
+def _run_main(monkeypatch, tmp_path: Path, repo: Path, **env: str) -> str:
+    output = tmp_path / "github_output"
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setenv("GITHUB_REPOSITORY", "joemccann/radon")
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    assert path_filter.main() == 0
+    return output.read_text(encoding="utf-8")
+
+
+def test_main_on_a_push_diffs_against_deploy_history_not_event_before(
+    monkeypatch, tmp_path: Path
+) -> None:
+    repo, green, red, head = _red_then_docs_history(tmp_path)
+    # The pre-T-312 wiring: BASE_SHA is event.before, the red SHA.
+    monkeypatch.setattr(path_filter, "green_main_push_shas", lambda _repo: [green], raising=False)
+    output = _run_main(
+        monkeypatch, tmp_path, repo, GITHUB_EVENT_NAME="push", BASE_SHA=red, HEAD_SHA=head
+    )
+    assert "python=true\n" in output
+    assert "web=true\n" in output
+
+
+def test_main_on_a_push_with_unreadable_history_runs_both_gates(
+    monkeypatch, tmp_path: Path
+) -> None:
+    repo, _green, red, head = _red_then_docs_history(tmp_path)
+
+    def api_down(_repo: str) -> list[str]:
+        raise subprocess.CalledProcessError(1, ["gh", "api"])
+
+    monkeypatch.setattr(path_filter, "green_main_push_shas", api_down, raising=False)
+    output = _run_main(
+        monkeypatch, tmp_path, repo, GITHUB_EVENT_NAME="push", BASE_SHA=red, HEAD_SHA=head
+    )
+    assert "python=true\n" in output
+    assert "web=true\n" in output
+
+
+def test_main_on_a_pull_request_still_diffs_against_the_pr_base(
+    monkeypatch, tmp_path: Path
+) -> None:
+    repo, _green, red, head = _red_then_docs_history(tmp_path)
+
+    def must_not_be_called(_repo: str) -> list[str]:
+        raise AssertionError("pull_request events diff against the PR base, not deploy history")
+
+    monkeypatch.setattr(path_filter, "green_main_push_shas", must_not_be_called, raising=False)
+    output = _run_main(
+        monkeypatch, tmp_path, repo, GITHUB_EVENT_NAME="pull_request", BASE_SHA=red, HEAD_SHA=head
+    )
+    assert "python=false\n" in output
+    assert "web=false\n" in output
+
+
+def test_green_main_push_shas_asks_for_successful_push_runs_of_the_gate_workflow(
+    monkeypatch,
+) -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout="aaa\nbbb\n", stderr="")
+
+    monkeypatch.setattr(path_filter.subprocess, "run", fake_run)
+    assert green_main_push_shas("joemccann/radon") == ["aaa", "bbb"]
+    (cmd,) = calls
+    assert cmd[:2] == ["gh", "api"]
+    query = cmd[2]
+    assert query.startswith("repos/joemccann/radon/actions/workflows/ci.yml/runs?")
+    for clause in ("branch=main", "event=push", "status=success"):
+        assert clause in query
+    assert ".workflow_runs[].head_sha" in cmd
+
+
+def test_ci_changes_job_resolves_the_push_base_from_deploy_history() -> None:
+    import yaml
+
+    workflow = yaml.load(
+        (_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"),
+        Loader=yaml.BaseLoader,
+    )
+    changes = workflow["jobs"]["changes"]
+    (filter_step,) = [step for step in changes["steps"] if step.get("id") == "filter"]
+    env = filter_step["env"]
+    assert "github.event.before" not in env["BASE_SHA"], (
+        "event.before is whatever main pointed at, red or green; the push base "
+        "comes from deploy history (T-312)"
+    )
+    assert "github.event.pull_request.base.sha" in env["BASE_SHA"]
+    assert env["GH_TOKEN"] == "${{ github.token }}"
+    assert changes["permissions"]["actions"] == "read"
+    assert changes["permissions"]["contents"] == "read"

@@ -7,7 +7,7 @@ import type { OpenOrder, PortfolioData, PortfolioPosition } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
 import { optionKey } from "@/lib/pricesProtocol";
 import { useOrderActions, useOrderActionsOptional } from "@/lib/OrderActionsContext";
-import { fmtPrice, legPriceKey, resolveEntryCost, resolveNaturalSpreadQuote } from "@/lib/positionUtils";
+import { fmtPrice, legPriceKey, resolveClosingBasis, resolveNaturalSpreadQuote } from "@/lib/positionUtils";
 import { computeLegImpliedValue } from "@/lib/impliedValue";
 import { useRiskFreeRate } from "@/lib/useRiskFreeRate";
 import ModifyOrderModal from "@/components/ModifyOrderModal";
@@ -866,7 +866,7 @@ function ComboOrderForm({
         description,
         totalCost: closeCashFlow,
         closeOut: {
-          entryCostDollars: resolveEntryCost(position) * (parsedQty / comboUnits),
+          entryCostDollars: resolveClosingBasis(position, parsedQty, comboUnits),
         },
       };
     }

@@ -32,6 +32,7 @@ import argparse
 import csv
 import json
 import math
+import os
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -1614,10 +1615,19 @@ def is_post_close_cboe_official_window(now: Optional[datetime] = None) -> bool:
 # CLI
 # ══════════════════════════════════════════════════════════════════
 
-# One in-flight cri_scan per host. The handle is kept in a module global for the
-# life of the process: closing it releases the flock. R-423.
-CRI_SCAN_LOCK_PATH = "/tmp/radon-cri-scan.lock"
+# One in-flight cri_scan per host. The timer runs this script on the HOST
+# (radon-refresh.service) while /regime/scan runs it INSIDE the app container,
+# and `data/` is the one directory radon-app-runtime.sh binds into that
+# container: a lock anywhere else (`/tmp`) is a different inode on each side
+# and serialises nothing. The handle is kept in a module global for the life of
+# the process: closing it releases the flock. R-423, T-314.
+CRI_SCAN_LOCK_PATH = _PROJECT_DIR / "data" / "radon-cri-scan.lock"
 _scan_lock_handle = None
+
+
+def scan_lock_path() -> Path:
+    override = os.environ.get("RADON_CRI_SCAN_LOCK")
+    return Path(override) if override else CRI_SCAN_LOCK_PATH
 
 
 def _acquire_scan_lock():
@@ -1626,14 +1636,22 @@ def _acquire_scan_lock():
 
     import fcntl  # noqa: PLC0415 — POSIX-only, and only this path needs it
 
-    path = os.environ.get("RADON_CRI_SCAN_LOCK") or CRI_SCAN_LOCK_PATH
     try:
-        handle = open(path, "a+")  # noqa: SIM115 — held for the process lifetime
+        handle = open(scan_lock_path(), "a+")  # noqa: SIM115 — held for the process lifetime
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         return None
     _scan_lock_handle = handle
     return handle
+
+
+def _read_cached_scan(path: Path) -> Optional[dict]:
+    """The last written payload regardless of session date, else None."""
+    try:
+        data = json.loads(Path(path).read_text())
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def main():
@@ -1695,12 +1713,10 @@ Examples:
     lock_handle = _acquire_scan_lock()
     if lock_handle is None:
         if args.json:
-            try:
-                from utils.scan_cache_gate import cached_scan_if_fresh
-
-                cached = cached_scan_if_fresh(_PROJECT_DIR / "data" / "cri.json", force=True)
-            except Exception:
-                cached = None
+            # Not the off-hours gate: `cached_scan_if_fresh(force=True)` is
+            # "never serve", and the winner is about to rewrite this file
+            # anyway, so whatever it holds now is the best answer available.
+            cached = _read_cached_scan(_PROJECT_DIR / "data" / "cri.json")
             if cached is not None:
                 print("  Another CRI scan is in flight; serving cache.", file=sys.stderr)
                 print(json.dumps(cached, indent=2))
