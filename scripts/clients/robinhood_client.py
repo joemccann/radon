@@ -56,6 +56,7 @@ import math
 import os
 import stat
 import sys
+import tempfile
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -76,6 +77,14 @@ _DEFAULT_TIMEOUT = 20
 # helpers use this bound: 4 x 7s = 28s worst case, inside the rung budget.
 LADDER_TIMEOUT_S = 7
 _USER_AGENT = "radon/2.0"
+# REL-173 (R-482): `timeout=` bounds each socket read only. A Streamable-HTTP
+# server that keeps the response open with keepalive pings never trips it, so
+# every body is read as a stream under a wall-clock deadline and a size cap.
+RESPONSE_DEADLINE_FACTOR = 2.0
+MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+# REL-173 (R-469): where a rotated refresh token is saved when the store
+# cannot be committed AFTER the endpoint already spent the old one.
+ROTATED_TOKEN_FALLBACK_DIR = Path(tempfile.gettempdir())
 
 # Access tokens live ~3 days; refresh this far ahead of the recorded expiry.
 REFRESH_SAFETY_WINDOW_S = 3600
@@ -129,6 +138,52 @@ class RobinhoodReadOnlyError(RobinhoodClientError):
 # cannot succeed again this process: treat Robinhood as unconfigured so
 # every ladder falls through to Yahoo instead of hammering the endpoint.
 _refresh_disabled = False
+
+
+def _iter_body(resp: Any) -> Iterator[bytes]:
+    """Body chunks as they ARRIVE. ``iter_content(8192)`` waits for a full
+    8192 bytes, which a keepalive stream never delivers; urllib3's ``read1``
+    returns whatever is available up to the chunk size."""
+    raw = getattr(resp, "raw", None)
+    read1 = getattr(raw, "read1", None)
+    if callable(read1):
+        while True:
+            chunk = read1(8192)
+            if not chunk:
+                return
+            yield chunk
+        return
+    yield from resp.iter_content(chunk_size=8192)
+
+
+def _read_bounded(resp: Any, timeout: float, what: str) -> bytes:
+    """Whole body under ``RESPONSE_DEADLINE_FACTOR * timeout`` wall-clock and
+    ``MAX_RESPONSE_BYTES``. Closes the response either way."""
+    deadline = time.monotonic() + RESPONSE_DEADLINE_FACTOR * float(timeout)
+    chunks: List[bytes] = []
+    size = 0
+    try:
+        for chunk in _iter_body(resp):
+            if chunk:
+                chunks.append(chunk)
+                size += len(chunk)
+            if size > MAX_RESPONSE_BYTES:
+                raise RobinhoodClientError(
+                    f"{what} response exceeded the {MAX_RESPONSE_BYTES} byte cap"
+                )
+            if time.monotonic() > deadline:
+                raise RobinhoodClientError(
+                    f"{what} response exceeded the {RESPONSE_DEADLINE_FACTOR * float(timeout):.0f}s "
+                    "wall-clock deadline (keepalive stream never closed)"
+                )
+    except (requests.ConnectionError, requests.Timeout) as exc:
+        raise RobinhoodClientError(f"{what} body read failed: {exc.__class__.__name__}") from None
+    finally:
+        try:
+            resp.close()
+        except Exception:  # noqa: BLE001 - best effort
+            pass
+    return b"".join(chunks)
 
 
 def _disable_for_process(reason: str) -> None:
@@ -252,19 +307,55 @@ class RobinhoodTokenStore:
 
     # ── persistence ──────────────────────────────────────────────
 
-    def persist(self) -> None:
-        """Atomic 0600 write: temp file in the same directory, then rename."""
+    def _tmp_path(self) -> Path:
+        return self._path.with_name(self._path.name + ".tmp")
+
+    def _open_persist_tmp(self) -> int:
+        """Open the temp file the commit will rename over the store.
+
+        Raises OSError when the store is not writable. Called BEFORE the
+        token endpoint is hit so a single-use refresh token is never spent
+        with nowhere to persist its rotation (R-469).
+        """
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self._path.with_name(self._path.name + ".tmp")
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        return os.open(self._tmp_path(), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+
+    def _discard_persist_tmp(self, fd: int) -> None:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        self._tmp_path().unlink(missing_ok=True)
+
+    def _commit_persist(self, fd: int) -> None:
+        """Write the state through ``fd`` and rename it over the store."""
+        tmp = self._tmp_path()
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 json.dump(self._state, handle, indent=2)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp, self._path)
         except BaseException:
             tmp.unlink(missing_ok=True)
             raise
-        os.replace(tmp, self._path)
         os.chmod(self._path, 0o600)
+
+    def persist(self) -> None:
+        """Atomic 0600 write: temp file in the same directory, then rename."""
+        self._commit_persist(self._open_persist_tmp())
+
+    def _save_rotation_fallback(self) -> Path:
+        """Last resort after the endpoint rotated the token but the store
+        could not be committed: write the state somewhere writable, 0600."""
+        ROTATED_TOKEN_FALLBACK_DIR.mkdir(parents=True, exist_ok=True)
+        fd, name = tempfile.mkstemp(
+            prefix="rh-mcp-rotated-", suffix=".json", dir=str(ROTATED_TOKEN_FALLBACK_DIR)
+        )
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(self._state, handle, indent=2)
+        os.chmod(name, 0o600)
+        return Path(name)
 
     def bootstrap_file_if_missing(self) -> None:
         """First configured run: materialize the env tokens into the file."""
@@ -321,6 +412,24 @@ class RobinhoodTokenStore:
             return self._refresh_locked(timeout)
 
     def _refresh_locked(self, timeout: int) -> str:
+        # R-469: prove the store is writable BEFORE the endpoint spends the
+        # single-use refresh token. A local write problem is not an auth
+        # failure, so it neither disables the process nor touches the wire.
+        try:
+            tmp_fd = self._open_persist_tmp()
+        except OSError as exc:
+            raise RobinhoodClientError(
+                f"Robinhood token store is not writable ({exc.strerror}: {self._path}); "
+                "refusing to spend the single-use refresh token"
+            ) from None
+        try:
+            return self._refresh_with_open_store(timeout, tmp_fd)
+        except BaseException:
+            # Every failure before the commit leaves the temp file behind.
+            self._tmp_path().unlink(missing_ok=True)
+            raise
+
+    def _refresh_with_open_store(self, timeout: int, tmp_fd: int) -> str:
         try:
             resp = requests.post(
                 TOKEN_ENDPOINT,
@@ -334,16 +443,26 @@ class RobinhoodTokenStore:
                     "User-Agent": _USER_AGENT,
                 },
                 timeout=timeout,
+                stream=True,
             )
         except (requests.ConnectionError, requests.Timeout) as exc:
+            self._discard_persist_tmp(tmp_fd)
             raise RobinhoodClientError(
                 f"Robinhood token endpoint unreachable: {_scrub(str(exc), self.secrets())}"
             ) from None
 
+        try:
+            body = _read_bounded(resp, timeout, "Robinhood token endpoint")
+        except RobinhoodClientError:
+            self._discard_persist_tmp(tmp_fd)
+            raise
+        text = body.decode("utf-8", errors="replace")
+
         if resp.status_code >= 400:
+            self._discard_persist_tmp(tmp_fd)
             # Scrub BEFORE truncating: a slice can cut a token in half and
             # leave a prefix the exact-match scrub would no longer find.
-            detail = _scrub(resp.text, self.secrets())[:200]
+            detail = _scrub(text, self.secrets())[:200]
             if 400 <= resp.status_code < 500:
                 # invalid_grant / invalid_client: retrying cannot help.
                 _disable_for_process(
@@ -358,13 +477,17 @@ class RobinhoodTokenStore:
             )
 
         try:
-            payload = resp.json()
+            payload = json.loads(text)
+            if not isinstance(payload, dict):
+                raise ValueError("not an object")
         except ValueError:
+            self._discard_persist_tmp(tmp_fd)
             raise RobinhoodClientError(
                 "Robinhood token endpoint returned a non-JSON body"
             ) from None
         access = payload.get("access_token")
         if not access:
+            self._discard_persist_tmp(tmp_fd)
             raise RobinhoodClientError("Robinhood token response carried no access_token")
 
         now = time.time()
@@ -376,7 +499,22 @@ class RobinhoodTokenStore:
             self._state["expires_at"] = now + float(payload["expires_in"])
         if payload.get("refresh_token"):
             self._state["refresh_token"] = payload["refresh_token"]
-        self.persist()
+        try:
+            self._commit_persist(tmp_fd)
+        except OSError as exc:
+            # The endpoint already rotated the token; disk still holds the
+            # spent one. Save the rotation somewhere writable and stop this
+            # process from refreshing again on the stale file.
+            saved = self._save_rotation_fallback()
+            _disable_for_process(
+                f"rotated Robinhood token could not be persisted to {self._path} "
+                f"({exc.strerror}); saved to {saved}"
+            )
+            raise RobinhoodClientError(
+                f"Robinhood token rotated but {self._path} could not be written "
+                f"({exc.strerror}); the new tokens are at {saved} — restore them to "
+                f"{self._path} before the next run"
+            ) from None
         return str(access)
 
 
@@ -417,6 +555,8 @@ class RobinhoodClient:
         self._next_id = 0
         self._session = requests.Session()
         self._session.headers.update({"User-Agent": _USER_AGENT})
+        # Bodies are read by _read_bounded (deadline + cap), never by requests.
+        self._session.stream = True
 
     def __repr__(self) -> str:  # never leak a token
         return f"RobinhoodClient(url={self._url!r}, configured={self.is_configured()})"
@@ -487,6 +627,10 @@ class RobinhoodClient:
             raise RobinhoodClientError(
                 f"Robinhood MCP unreachable: {self._redact(str(exc))}"
             ) from None
+        # The session is created with stream=True; read the body ourselves
+        # under the wall-clock deadline and size cap (R-482).
+        body = _read_bounded(resp, self._timeout, "Robinhood MCP")
+        text = body.decode("utf-8", errors="replace")
         if resp.status_code in (401, 403):
             # Access token expired or revoked mid-flight: refresh once and
             # retry the same request with the new token.
@@ -521,22 +665,23 @@ class RobinhoodClient:
         if resp.status_code >= 400:
             # Scrub BEFORE truncating (a slice can bisect a token).
             raise RobinhoodClientError(
-                f"Robinhood MCP HTTP {resp.status_code}: {self._redact(resp.text)[:300]}"
+                f"Robinhood MCP HTTP {resp.status_code}: {self._redact(text)[:300]}"
             )
         session_id = resp.headers.get("Mcp-Session-Id")
         if session_id:
             self._session_id = session_id
-        if resp.status_code == 202 or not resp.content:
+        if resp.status_code == 202 or not body:
             return None  # accepted notification
         content_type = resp.headers.get("Content-Type", "")
         if "text/event-stream" in content_type:
-            return _parse_sse_response(resp.text)
+            return _parse_sse_response(text)
         try:
-            return resp.json()
+            parsed = json.loads(text)
         except ValueError:
             raise RobinhoodClientError(
-                f"Robinhood MCP returned non-JSON body: {self._redact(resp.text)[:200]}"
+                f"Robinhood MCP returned non-JSON body: {self._redact(text)[:200]}"
             ) from None
+        return parsed if isinstance(parsed, dict) else None
 
     def _rpc(self, method: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         self._next_id += 1

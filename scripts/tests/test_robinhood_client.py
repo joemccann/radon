@@ -96,6 +96,14 @@ class _FakeResponse:
             raise ValueError("no json")
         return self._payload
 
+    # REL-173: the client reads bodies as a bounded stream.
+    def iter_content(self, chunk_size=8192):
+        for start in range(0, len(self.content), chunk_size):
+            yield self.content[start:start + chunk_size]
+
+    def close(self):
+        pass
+
 
 def _mcp_responder(expected_bearer, calls=None, reject_bearers=()):
     """A fake MCP `Session.post` that 401s stale bearers and answers
@@ -187,6 +195,12 @@ class TestSecretHygiene:
             headers: dict = {}
             content = b"x"
             text = "boom Bearer tok-super-secret boom"
+
+            def iter_content(self, chunk_size=8192):  # REL-173: bodies are streamed
+                yield self.text.encode()
+
+            def close(self):
+                pass
 
         monkeypatch.setattr(client._session, "post", lambda *a, **k: _Resp())
         with pytest.raises(RobinhoodClientError) as excinfo:
@@ -303,7 +317,7 @@ class TestTokenRefresh:
             "refresh_token": "refresh-2",
         }
 
-        def post(url, data=None, headers=None, timeout=None):
+        def post(url, data=None, headers=None, timeout=None, **_kw):  # REL-173: stream=True
             assert url == TOKEN_ENDPOINT
             calls.append({"data": dict(data or {}), "headers": dict(headers or {})})
             if status >= 400:
@@ -505,6 +519,12 @@ class TestAdversarialHardening:
             # rest, so the exact-match replace no longer fires.
             text = "x" * 295 + token
 
+            def iter_content(self, chunk_size=8192):  # REL-173: bodies are streamed
+                yield self.text.encode()
+
+            def close(self):
+                pass
+
         monkeypatch.setattr(client._session, "post", lambda *a, **k: _Resp())
         with pytest.raises(RobinhoodClientError) as excinfo:
             client._post({"jsonrpc": "2.0", "id": 1, "method": "x"})
@@ -518,7 +538,7 @@ class TestAdversarialHardening:
             isolated_token_state, refresh_token=refresh, client_id="cid",
         )
 
-        def post(url, data=None, headers=None, timeout=None):
+        def post(url, data=None, headers=None, timeout=None, **_kw):  # REL-173: stream=True
             return _FakeResponse(status_code=400, text="y" * 195 + refresh)
 
         monkeypatch.setattr(rh.requests, "post", post)
@@ -568,7 +588,7 @@ class TestAdversarialHardening:
         refreshes: list = []
         monkeypatch.setattr(
             rh.requests, "post",
-            lambda url, data=None, headers=None, timeout=None: (
+            lambda url, data=None, headers=None, timeout=None, **_kw: (  # REL-173: stream=True
                 refreshes.append(dict(data)) or _FakeResponse(payload={
                     "access_token": "fresh-access", "expires_in": 259200,
                 })
@@ -604,7 +624,7 @@ class TestAdversarialHardening:
         endpoint_calls: list = []
         monkeypatch.setattr(
             rh.requests, "post",
-            lambda url, data=None, headers=None, timeout=None: (
+            lambda url, data=None, headers=None, timeout=None, **_kw: (  # REL-173: stream=True
                 endpoint_calls.append(dict(data)) or _FakeResponse(payload={
                     "access_token": "fresh-access", "expires_in": 259200,
                     "refresh_token": "refresh-2",
@@ -680,3 +700,170 @@ class TestAdversarialHardening:
         err = capsys.readouterr().err
         assert "too open" in err
         assert "tok-open-perm" not in err
+
+
+# ---------------------------------------------------------------------------
+# REL-173 (R-469, R-482): the single-use refresh token is never spent before
+# the store is proven writable, and no Robinhood call can hang a worker.
+# ---------------------------------------------------------------------------
+
+
+class TestRefreshDurability:
+    def _seed(self, path: Path) -> None:
+        _write_token_file(
+            path,
+            access_token="stale-access", refresh_token="refresh-1",
+            client_id="cid-public", token_type="Bearer",
+            expires_at=time.time() - 10,
+        )
+
+    def _endpoint(self, monkeypatch, calls):
+        def post(url, data=None, headers=None, timeout=None, **_kw):
+            assert url == TOKEN_ENDPOINT
+            calls.append(dict(data or {}))
+            return _FakeResponse(payload={
+                "access_token": "fresh-access", "token_type": "Bearer",
+                "expires_in": 259200, "refresh_token": "refresh-2",
+            })
+
+        monkeypatch.setattr(rh.requests, "post", post)
+
+    def test_unwritable_store_refuses_before_spending_the_token(
+        self, monkeypatch, isolated_token_state
+    ):
+        if os.geteuid() == 0:
+            pytest.skip("root ignores directory modes")
+        self._seed(isolated_token_state)
+        # The lock file already exists (a previous refresh made it), so the
+        # exclusive lock still opens; only the token write itself would fail.
+        isolated_token_state.with_name(isolated_token_state.name + ".lock").touch(mode=0o600)
+        calls: list = []
+        self._endpoint(monkeypatch, calls)
+        token_dir = isolated_token_state.parent
+        os.chmod(token_dir, 0o500)
+        try:
+            with pytest.raises(RobinhoodClientError) as err:
+                RobinhoodTokenStore().refresh()
+        finally:
+            os.chmod(token_dir, 0o700)
+        assert calls == [], "the single-use refresh token was spent with nowhere to persist the rotation"
+        assert "writable" in str(err.value) or "persist" in str(err.value)
+        assert json.loads(isolated_token_state.read_text())["refresh_token"] == "refresh-1"
+        assert rh._refresh_disabled is False, "a local write problem is not an auth failure"
+
+    def test_persist_failure_after_the_post_saves_the_rotation_and_disables(
+        self, monkeypatch, isolated_token_state, tmp_path
+    ):
+        self._seed(isolated_token_state)
+        calls: list = []
+        self._endpoint(monkeypatch, calls)
+        fallback_dir = tmp_path / "fallback"
+        fallback_dir.mkdir()
+        monkeypatch.setattr(rh, "ROTATED_TOKEN_FALLBACK_DIR", fallback_dir)
+        real_replace = os.replace
+
+        def failing_replace(src, dst, *a, **k):
+            if str(dst) == str(isolated_token_state):
+                raise PermissionError(1, "Operation not permitted", str(dst))
+            return real_replace(src, dst, *a, **k)
+
+        monkeypatch.setattr(rh.os, "replace", failing_replace)
+        with pytest.raises(RobinhoodClientError) as err:
+            RobinhoodTokenStore().refresh()
+        assert len(calls) == 1
+        saved = list(fallback_dir.glob("*.json"))
+        assert len(saved) == 1, "the rotated refresh token must survive somewhere"
+        assert json.loads(saved[0].read_text())["refresh_token"] == "refresh-2"
+        assert stat.S_IMODE(saved[0].stat().st_mode) == 0o600
+        assert str(saved[0]) in str(err.value)
+        assert rh._refresh_disabled is True, "disk still holds a spent token; stop refreshing this process"
+
+
+class TestBoundedResponses:
+    """R-482: per-read timeouts do not bound a server that keeps the stream
+    open with keepalive pings. A wall-clock deadline and a body cap do."""
+
+    def _ping_server(self, ping_every_s: float = 0.5):
+        import http.server
+        import socketserver
+        import threading
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):  # noqa: D401
+                pass
+
+            def do_POST(self):  # noqa: N802
+                length = int(self.headers.get("Content-Length") or 0)
+                self.rfile.read(length)
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.end_headers()
+                try:
+                    while True:
+                        self.wfile.write(b": ping\n\n")
+                        self.wfile.flush()
+                        time.sleep(ping_every_s)
+                except (BrokenPipeError, ConnectionResetError):
+                    return
+
+        class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
+            daemon_threads = True
+            allow_reuse_address = True
+
+        httpd = Server(("127.0.0.1", 0), Handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        return httpd
+
+    def test_keepalive_stream_cannot_hang_a_ladder_worker(self):
+        httpd = self._ping_server()
+        try:
+            client = RobinhoodClient(
+                url=f"http://127.0.0.1:{httpd.server_address[1]}/mcp", token="static", timeout=2
+            )
+            started = time.monotonic()
+            with pytest.raises(RobinhoodClientError) as err:
+                client.call_tool("get_scans")
+            elapsed = time.monotonic() - started
+            assert elapsed < 2 * 2 + 2, f"hung {elapsed:.1f}s on a keepalive stream"
+            assert "deadline" in str(err.value) or "exceeded" in str(err.value)
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+
+    def test_oversized_body_is_refused(self, monkeypatch):
+        class Huge:
+            status_code = 200
+            headers = {"Content-Type": "application/json"}
+
+            def iter_content(self, chunk_size=8192):
+                while True:
+                    yield b"x" * chunk_size
+
+            def close(self):
+                pass
+
+        client = RobinhoodClient(url="http://127.0.0.1:9/mcp", token="static", timeout=2)
+        monkeypatch.setattr(client._session, "post", lambda *a, **k: Huge())
+        with pytest.raises(RobinhoodClientError) as err:
+            client.call_tool("get_scans")
+        assert "exceeded" in str(err.value) or "cap" in str(err.value)
+
+    def test_refresh_post_streams_under_the_same_deadline(self, monkeypatch, isolated_token_state):
+        _write_token_file(
+            isolated_token_state,
+            access_token="stale-access", refresh_token="refresh-1",
+            client_id="cid-public", token_type="Bearer",
+            expires_at=time.time() - 10,
+        )
+        seen: dict = {}
+
+        def post(url, data=None, headers=None, timeout=None, **kw):
+            seen.update(kw)
+            return _FakeResponse(payload={
+                "access_token": "fresh-access", "token_type": "Bearer",
+                "expires_in": 259200, "refresh_token": "refresh-2",
+            })
+
+        monkeypatch.setattr(rh.requests, "post", post)
+        assert RobinhoodTokenStore().refresh() == "fresh-access"
+        assert seen.get("stream") is True
