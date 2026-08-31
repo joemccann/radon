@@ -136,12 +136,16 @@ class TestRouteMapping:
         assert resp.status_code == 502
         assert resp.json()["detail"]["returncode"] == 1
 
-    def test_broker_down_is_502_not_400(self, broker, client):
+    def test_broker_down_is_504_not_400(self, broker, client):
+        # T-347 pinned "not the 400 caller-error bucket"; REL-171 (R-500) then
+        # split the upstream failures: a dead mTLS link is a gateway TIMEOUT,
+        # a malformed broker reply stays a 502.
         httpd = broker()
         httpd.shutdown()
         httpd.server_close()
         resp = client.post(self.ROUTE)
-        assert resp.status_code == 502, resp.text
+        assert resp.status_code == 504, resp.text
+        assert resp.json()["detail"]["returncode"] == services.REMOTE_UNREACHABLE_RC
         assert resp.json()["detail"]["ok"] is False
 
 

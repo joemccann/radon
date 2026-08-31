@@ -49,7 +49,10 @@ def _build(tmp_path: Path, *, marker: bool, lock_held: bool) -> dict:
     (clone / "scripts").mkdir(parents=True)
     if marker:
         (clone / ".radon-weekend-runner").touch()
-        (clone / ".radon-security-runner").touch()
+        # REL-180 (R-504): every wrapper requires its OWN loop marker too, so
+        # this generic clone carries all five.
+        for loop in LOOPS:
+            (clone / f".radon-{loop}-runner").touch()
     if lock_held:
         lock = clone / ".weekend-runner.lock"
         lock.mkdir()

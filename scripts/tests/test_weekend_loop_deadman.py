@@ -530,6 +530,8 @@ def _committing_clone(tmp_path: Path, git: str) -> Path:
     repo = tmp_path / "radon-testing"
     (repo / "scripts").mkdir(parents=True)
     (repo / ".radon-weekend-runner").write_text("", encoding="utf-8")
+    # REL-180 (R-504): the testing wrapper requires its own loop marker too.
+    (repo / ".radon-testing-runner").write_text("", encoding="utf-8")
     subprocess.run([git, "init", "-q", str(repo)], check=True, env=_GIT_ENV)
     at = [git, "-C", str(repo)]
     subprocess.run([*at, "symbolic-ref", "HEAD", "refs/heads/main"], check=True, env=_GIT_ENV)

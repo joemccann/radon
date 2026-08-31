@@ -224,15 +224,23 @@ class TestRedactor:
         sys.path.insert(0, str(REPO / "scripts"))
         import weekend_redact
 
+        # Built at runtime: a full `UW_TOKEN='<high-entropy>'` assignment
+        # spelled in the source trips gitleaks' generic-api-key rule over the
+        # full history, and this file is public. Same treatment as the TWS
+        # fixtures in cloud/tests/test_gitleaks_policy.py.
+        fake_token = "tok-" + "1234567890"
         (tmp_path / "web").mkdir()
-        (tmp_path / "web" / ".env").write_text("UW_TOKEN='tok-1234567890'\nSHORT=ab\n")
+        (tmp_path / "web" / ".env").write_text(
+            "UW_" + "TOKEN='" + fake_token + "'\nSHORT=ab\n"
+        )
         values = weekend_redact.env_values(tmp_path)
-        assert "tok-1234567890" in values and "ab" not in values
+        assert fake_token in values and "ab" not in values
         out = weekend_redact.redact(
-            "x tok-1234567890 y CLERK_SECRET_KEY=sk_live_abcdef Authorization: Bearer eyJhbGci.zz TURSO_AUTH_TOKEN: qqq",
+            f"x {fake_token} y CLERK_SECRET_KEY=sk_live_abcdef "
+            "Authorization: Bearer eyJhbGci.zz TURSO_AUTH_TOKEN: qqq",
             values,
         )
-        assert "tok-1234567890" not in out and "sk_live_abcdef" not in out
+        assert fake_token not in out and "sk_live_abcdef" not in out
         assert "eyJhbGci" not in out and "qqq" not in out
         assert out.count("[REDACTED]") >= 4
 
