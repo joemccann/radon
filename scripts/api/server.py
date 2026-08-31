@@ -66,7 +66,7 @@ from api import services as admin_services
 from clients.ib_client import DEFAULT_GATEWAY_PORT
 from api.pool_order_manage import pool_cancel_order, pool_modify_order
 from api.order_audit import record_order_event
-from api.auth import verify_clerk_jwt, verify_api_key, is_trusted_local_request
+from api.auth import verify_clerk_jwt, verify_api_key, is_trusted_local_request, is_private_net_probe
 from api.ws_ticket import create_ticket, validate_ticket
 from api.routes.historical import router as historical_router
 from api.routes.preferences import router as preferences_router
@@ -1877,8 +1877,10 @@ async def health(request: Request):
     # `handle_path /api/ib/*`. Untrusted (proxied/public) callers get liveness
     # only — never IB auth/connection state, account IDs, restart backoff, or
     # internal topology. Short-circuit BEFORE check_ib_gateway so an internet
-    # GET can't drive its pool-reconnect / heal side effects.
-    if not is_trusted_local_request(request):
+    # GET can't drive its pool-reconnect / heal side effects. The broker
+    # watchdog on radon-private is a probe-only caller (REL-170): full payload
+    # here, no bypass anywhere else.
+    if not (is_trusted_local_request(request) or is_private_net_probe(request)):
         return {"status": "ok"}
 
     pool_status = ib_pool.status() if ib_pool else None
