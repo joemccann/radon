@@ -53,6 +53,8 @@ def isolated_token_state(monkeypatch, tmp_path):
     """Every test starts with no env credentials, a tmp token file path,
     and the process-level refresh kill switch reset."""
     monkeypatch.setattr(rh, "_refresh_disabled", False)
+    if hasattr(rh, "_reset_process_state"):  # REL-174: breaker, shared client, memo
+        rh._reset_process_state()
     monkeypatch.setenv("ROBINHOOD_MCP_TOKEN_FILE", str(tmp_path / "rh-mcp.json"))
     monkeypatch.delenv("ROBINHOOD_MCP_TOKEN", raising=False)
     monkeypatch.delenv("ROBINHOOD_MCP_REFRESH_TOKEN", raising=False)
@@ -482,9 +484,16 @@ class TestTokenRefresh:
 
         with pytest.raises(RobinhoodClientError):
             RobinhoodTokenStore().refresh()
-        assert robinhood_configured() is True, (
-            "a 5xx is transient — the next cycle must try again"
-        )
+        # REL-174 (R-480): rewritten from "still configured right away". A 5xx
+        # is transient, so it must NOT disable the process — but it does close
+        # the rung for BREAKER_COOLDOWN_S so a token-endpoint outage costs one
+        # hit per scan, not one per symbol. The next cycle (after the cooldown)
+        # tries again.
+        assert rh._refresh_disabled is False, "a 5xx is transient — never a process disable"
+        assert rh.robinhood_rung_error()["class"] == rh.FAILURE_TOKEN_ENDPOINT
+        assert robinhood_configured() is False
+        monkeypatch.setattr(rh.time, "monotonic", lambda: 10 ** 9)
+        assert robinhood_configured() is True, "the next cycle must try again"
 
     def test_refresh_only_credentials_count_as_configured(self, isolated_token_state):
         _write_token_file(
@@ -665,9 +674,12 @@ class TestAdversarialHardening:
         monkeypatch.setattr(rh, "RobinhoodClient", Spy)
         fetch_robinhood_closes(["SPY"])
         assert captured.get("timeout") == rh.LADDER_TIMEOUT_S
-        captured.clear()
+        # REL-174 (R-480): one client per process — the quote helper reuses
+        # the client the closes helper built, so assert the SHARED client's
+        # bound instead of expecting a second construction.
         fetch_robinhood_quote("SPY")
-        assert captured.get("timeout") == rh.LADDER_TIMEOUT_S
+        assert isinstance(rh._shared_client, Spy)
+        assert rh._shared_client._timeout == rh.LADDER_TIMEOUT_S
 
     # ── secret residue on disk ───────────────────────────────────
 
@@ -867,3 +879,100 @@ class TestBoundedResponses:
         monkeypatch.setattr(rh.requests, "post", post)
         assert RobinhoodTokenStore().refresh() == "fresh-access"
         assert seen.get("stream") is True
+
+
+# ---------------------------------------------------------------------------
+# REL-174 (R-470, R-480, R-481, R-484, R-485): the rung classifies its
+# failures, stops after the first structural one, and tells the operator.
+# ---------------------------------------------------------------------------
+
+
+def _static_token(monkeypatch, isolated_token_state):
+    """An access-token-only store: nothing to refresh with (R-470a)."""
+    _write_token_file(isolated_token_state, access_token="tok-static", token_type="Bearer")
+
+
+class _CountingPost:
+    def __init__(self, status=401, sleep_s=0.0, exc=None):
+        self.calls: list = []
+        self.status = status
+        self.sleep_s = sleep_s
+        self.exc = exc
+
+    def __call__(self, url, json=None, headers=None, timeout=None, **_kw):  # noqa: A002
+        self.calls.append(json)
+        if self.sleep_s:
+            time.sleep(self.sleep_s)
+        if self.exc is not None:
+            raise self.exc
+        if self.status >= 400:
+            return _FakeResponse(status_code=self.status, text="nope")
+        if json.get("method") == "notifications/initialized":
+            return _FakeResponse(status_code=202, text="")
+        return _FakeResponse(payload={"jsonrpc": "2.0", "id": json.get("id"), "result": {
+            "structuredContent": {"results": [{"symbol": "SPY", "begins_at": "2026-08-27", "close_price": "1.0"}]}
+        }})
+
+
+class TestRungClassification:
+    def test_structural_401_disables_after_one_post_even_without_refresh(
+        self, monkeypatch, isolated_token_state
+    ):
+        _static_token(monkeypatch, isolated_token_state)
+        post = _CountingPost(status=401)
+        monkeypatch.setattr(rh.requests.Session, "post", post)
+        assert fetch_robinhood_closes(["A", "B", "C"]) == {}
+        assert len(post.calls) == 1, f"{len(post.calls)} POSTs for three symbols after a structural 401"
+        assert robinhood_configured() is False
+        failure = rh.robinhood_rung_error()
+        assert failure["class"] == "auth"
+        assert "401" in failure["reason"]
+
+    def test_rate_limit_stops_the_scan_across_threads(self, monkeypatch, isolated_token_state):
+        from concurrent.futures import ThreadPoolExecutor
+
+        _static_token(monkeypatch, isolated_token_state)
+        post = _CountingPost(status=429)
+        monkeypatch.setattr(rh.requests.Session, "post", post)
+        symbols = [f"S{i}" for i in range(50)]
+        with ThreadPoolExecutor(max_workers=16) as pool:
+            list(pool.map(lambda s: fetch_robinhood_closes([s]), symbols))
+        assert len(post.calls) <= 2, f"{len(post.calls)} POSTs after the first 429 (pre-fix ~150)"
+        assert rh.robinhood_rung_error()["class"] == "rate_limited"
+        assert robinhood_configured() is False
+
+    def test_network_failure_opens_the_breaker_then_heals(self, monkeypatch, isolated_token_state):
+        import requests as _requests
+
+        _static_token(monkeypatch, isolated_token_state)
+        post = _CountingPost(exc=_requests.Timeout("read timed out"))
+        monkeypatch.setattr(rh.requests.Session, "post", post)
+        assert fetch_robinhood_closes(["A", "B"]) == {}
+        assert len(post.calls) == 1
+        assert rh.robinhood_rung_error()["class"] == "network"
+        assert fetch_robinhood_quote("SPY") is None
+        assert len(post.calls) == 1, "the breaker must short-circuit the quote too"
+        # A transient class heals after the cooldown; auth does not.
+        monkeypatch.setattr(rh.time, "monotonic", lambda: 10 ** 9)
+        assert robinhood_configured() is True
+        assert rh.robinhood_rung_error() is None
+
+    def test_one_client_per_process_initializes_once(self, monkeypatch, isolated_token_state):
+        _static_token(monkeypatch, isolated_token_state)
+        post = _CountingPost(status=200)
+        monkeypatch.setattr(rh.requests.Session, "post", post)
+        fetch_robinhood_closes(["A"])
+        fetch_robinhood_closes(["B"])
+        inits = [c for c in post.calls if c.get("method") == "initialize"]
+        assert len(inits) == 1, f"{len(inits)} initialize handshakes for two ladder calls"
+
+    def test_permissions_warning_prints_once_per_process(self, monkeypatch, isolated_token_state, capsys):
+        _write_token_file(isolated_token_state, access_token="tok", token_type="Bearer")
+        os.chmod(isolated_token_state, 0o644)
+        for _ in range(50):
+            robinhood_configured()
+        err = capsys.readouterr().err
+        assert err.count("too open") == 1, err
+
+    def test_source_label_constant(self):
+        assert rh.RH_SOURCE == "rh"
