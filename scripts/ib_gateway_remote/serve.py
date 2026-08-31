@@ -17,9 +17,19 @@ import os
 import ssl
 import subprocess
 import sys
+import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Iterable
+
+# The lease module is stdlib-only (the helper itself runs it under the system
+# interpreter); it lets /status report the broker's 2FA push lease to the app
+# host, which cannot see this VM's lock file (REL-172, R-475).
+try:
+    from utils import ib_2fa_lock
+except ImportError:  # pragma: no cover - `python -m scripts.ib_gateway_remote.serve`
+    from scripts.utils import ib_2fa_lock
 
 DEFAULT_BIND = "10.0.0.4"
 DEFAULT_PORT = 8340
@@ -37,6 +47,17 @@ MAX_BODY_BYTES = 4096
 PRIVATE_NET = ipaddress.ip_network("10.0.0.0/16")
 MUTATIONS = frozenset({"start", "stop", "restart", "reset-lease"})
 VERBS = MUTATIONS | {"status"}
+# REL-172 (R-475): a per-verb cooldown a caller cannot clear. `stop` releases
+# the lease unconditionally and `reset-lease` exists to release it, so either
+# followed by a fresh login within seconds stacks a second IBKR push behind
+# one still in flight. Only time clears an entry; no verb does.
+VERB_COOLDOWN_S = 60.0
+_COOLDOWN_AFTER: dict[str, tuple[str, ...]] = {
+    "start": ("stop", "reset-lease"),
+    "restart": ("stop", "reset-lease"),
+}
+_verb_history: dict[str, float] = {}
+_verb_history_guard = threading.Lock()
 LEASE_HELD_RC = 75
 CONTROL_BUSY_RC = 74
 FORBIDDEN_BINDS = frozenset({"0.0.0.0", "::", "::0", ""})
@@ -182,6 +203,49 @@ def run_helper(helper: str, verb: str, timeout: float) -> tuple[int, str]:
     return rc, text
 
 
+def cooldown_refusal(verb: str, now: float | None = None) -> str | None:
+    """Reason a mutation is refused by the per-verb cooldown, else None."""
+    now = time.monotonic() if now is None else now
+    with _verb_history_guard:
+        for prior in _COOLDOWN_AFTER.get(verb, ()):
+            at = _verb_history.get(prior)
+            if at is None:
+                continue
+            elapsed = now - at
+            if elapsed < VERB_COOLDOWN_S:
+                return (
+                    f"cooldown: {prior} ran {elapsed:.0f}s ago; {verb} allowed in "
+                    f"{VERB_COOLDOWN_S - elapsed:.0f}s (a fresh login now would stack a 2FA push)"
+                )
+    return None
+
+
+def record_verb(verb: str, now: float | None = None) -> None:
+    with _verb_history_guard:
+        _verb_history[verb] = time.monotonic() if now is None else now
+
+
+def broker_lease() -> dict | None:
+    """The 2FA push lease on disk, or None. Cheap read: no orphan probe."""
+    try:
+        with ib_2fa_lock._guard(exclusive=False, timeout_secs=1.0):
+            lock = ib_2fa_lock._read_lock_file()
+    except Exception:  # noqa: BLE001 - status must never fail on the lease read
+        return None
+    if lock is None:
+        return None
+    now = time.time()
+    if lock.is_expired(now):
+        return None
+    return {
+        "holder": lock.holder,
+        "acquired_at": lock.acquired_at,
+        "expires_at": lock.expires_at,
+        "remaining_secs": max(0, int(lock.expires_at - now)),
+        "reason": lock.reason,
+    }
+
+
 def peer_allowed(peer: str, allow: Iterable[str]) -> bool:
     try:
         addr = ipaddress.ip_address(peer)
@@ -278,19 +342,33 @@ class GatewayRemoteHandler(BaseHTTPRequestHandler):
 
     def _helper(self, verb: str) -> None:
         cfg = self.server.gateway_config
+        if verb in MUTATIONS:
+            refusal = cooldown_refusal(verb)
+            if refusal is not None:
+                self._ok({"ok": False, "verb": verb, "returncode": CONTROL_BUSY_RC, "detail": refusal}, 409)
+                return
         rc, detail = run_helper(cfg["helper"], verb, cfg["timeout"])
-        if rc in {LEASE_HELD_RC, CONTROL_BUSY_RC}:
-            self._ok({"ok": False, "verb": verb, "returncode": rc, "detail": detail}, 409)
-            return
         if verb == "status":
             state = "running" if rc == 0 and detail.strip() == "running" else (
                 "stopped" if "stopped" in detail else "unknown"
             )
             if detail.strip() in {"running", "stopped", "unknown", "transition-pending"}:
                 state = detail.strip()
-            self._ok({"ok": rc == 0 or state == "stopped", "state": state, "detail": detail, "returncode": rc})
+            payload = {
+                "ok": rc == 0 or state == "stopped",
+                "state": state,
+                "detail": detail,
+                "returncode": rc,
+                "lease": broker_lease(),
+                "transition": "pending" if state == "transition-pending" else None,
+            }
+            self._ok(payload, 409 if rc in {LEASE_HELD_RC, CONTROL_BUSY_RC} else 200)
+            return
+        if rc in {LEASE_HELD_RC, CONTROL_BUSY_RC}:
+            self._ok({"ok": False, "verb": verb, "returncode": rc, "detail": detail}, 409)
             return
         if rc == 0:
+            record_verb(verb)
             self._ok({"ok": True, "verb": verb, "detail": detail, "returncode": 0})
             return
         self._ok({"ok": False, "verb": verb, "detail": detail, "returncode": rc}, 502)

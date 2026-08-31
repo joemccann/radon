@@ -2118,8 +2118,11 @@ async def ib_reset_backoff():
     """Clear restart backoff state. Operator path: 'I just approved 2FA, try now'."""
     result = reset_restart_backoff()
     if admin_services.host_role() == "app" and admin_services.is_remote_gateway_configured():
+        # REL-172 (R-475): on the app host this ALSO releases the broker's 2FA
+        # push lease over mTLS; say so in the payload (the panel copy does too).
         remote = await admin_services.remote_gateway_action("reset-lease")
         result["remote"] = remote.to_dict()
+        result["broker_lease_released"] = bool(remote.ok)
     return result
 
 

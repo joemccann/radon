@@ -272,6 +272,53 @@ def restart_backoff_state() -> Dict:
     }
 
 
+# Synthetic hold while the broker reports a pending container transition: a
+# push may be in flight that no lease describes yet. Sized to the helper's
+# settle budget so it clears on the next poll once the transition converges.
+BROKER_TRANSITION_HOLD_SECS = 60
+
+
+async def _overlay_broker_push_lock(backoff: Dict) -> None:
+    """Replace ``push_lock`` with the broker's lease on the app role."""
+    from api import services  # lazy: services imports nothing from here
+
+    if services.host_role() != "app" or not services.is_remote_gateway_configured():
+        return
+    status, payload = await services._remote_status()
+    if status == -1 or not isinstance(payload, dict):
+        backoff["source"] = "broker-unreachable"
+        return
+    backoff["source"] = "broker"
+    lease = payload.get("lease")
+    if isinstance(lease, dict) and lease.get("holder"):
+        try:
+            remaining = max(0, int(lease.get("remaining_secs") or 0))
+        except (TypeError, ValueError):
+            remaining = 0
+        backoff["push_lock"] = {
+            "holder": str(lease.get("holder")),
+            "acquired_at": lease.get("acquired_at"),
+            "expires_at": lease.get("expires_at"),
+            "remaining_secs": remaining,
+            "reason": str(lease.get("reason") or ""),
+        }
+        return
+    transition = payload.get("transition") or (
+        "pending" if str(payload.get("detail") or payload.get("state") or "").strip() == "transition-pending" else None
+    )
+    if transition:
+        now = time.time()
+        backoff["push_lock"] = {
+            "holder": "broker:transition-pending",
+            "acquired_at": now,
+            "expires_at": now + BROKER_TRANSITION_HOLD_SECS,
+            "remaining_secs": BROKER_TRANSITION_HOLD_SECS,
+            "reason": "broker Gateway transition pending",
+        }
+        return
+    backoff["push_lock"] = None
+
+
 def reset_restart_backoff() -> Dict:
     """Manually clear backoff. Operator path: 'I just approved 2FA, try again now'.
 
@@ -1303,6 +1350,10 @@ async def check_ib_gateway(
         # It is local control-plane state and must be present regardless of
         # where the Gateway itself runs.
         result["restart_backoff"] = await asyncio.to_thread(restart_backoff_state)
+        # REL-172 (R-475): on the app host the lease lives on the BROKER; the
+        # local lock file is never held by its helper. Proxy the broker's
+        # lease / transition so Force 2FA and Start disarm during a push.
+        await _overlay_broker_push_lock(result["restart_backoff"])
         if not result.get("port_listening") or result.get("upstream_dead"):
             result["auth_state"] = "unreachable"
         elif pool_status:

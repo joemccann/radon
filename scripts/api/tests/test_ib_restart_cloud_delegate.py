@@ -320,3 +320,82 @@ class TestAppRoleRuntimeGate:
         result = self.run(server.ib_gateway.ensure_ib_gateway())
         assert result.get("reason") != "app_role"
         self.compose.assert_awaited()
+
+
+class TestSplit2faContract:
+    """REL-172 (R-475): on the app host, /health.ib_gateway.restart_backoff
+    reflects the BROKER's lease and transition, and show_unit maps a pending
+    transition to `activating` so the panel disarms Start."""
+
+    @pytest.fixture(autouse=True)
+    def _app_remote(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("RADON_HOST_ROLE", "app")
+        monkeypatch.setenv("IB_2FA_LOCK_PATH", str(tmp_path / "no-local-lock.json"))
+        for name in ("ca.pem", "client.pem", "client.key"):
+            (tmp_path / name).write_text("x")
+        monkeypatch.setenv("RADON_IB_REMOTE_URL", "https://10.0.0.4:8340")
+        monkeypatch.setenv("RADON_IB_REMOTE_CA", str(tmp_path / "ca.pem"))
+        monkeypatch.setenv("RADON_IB_REMOTE_CLIENT_CERT", str(tmp_path / "client.pem"))
+        monkeypatch.setenv("RADON_IB_REMOTE_CLIENT_KEY", str(tmp_path / "client.key"))
+        monkeypatch.setattr(server.ib_gateway, "GATEWAY_MODE", "cloud")
+        monkeypatch.setattr(server.ib_gateway, "_port_listening", lambda *a, **k: False)
+        monkeypatch.setattr(admin_services, "is_systemd_available", lambda: False)
+        admin_services._reset_remote_status_cache()
+
+    def _stub_status(self, monkeypatch, status, payload):
+        monkeypatch.setattr(admin_services, "_remote_http", lambda verb, timeout: (status, payload))
+
+    def test_transition_pending_disarms_force_and_start(self, monkeypatch):
+        import asyncio
+
+        self._stub_status(
+            monkeypatch, 409, {"ok": False, "detail": "transition-pending", "returncode": 74,
+                               "state": "transition-pending", "transition": "pending", "lease": None},
+        )
+        gw = asyncio.run(server.ib_gateway.check_ib_gateway())
+        lock = gw["restart_backoff"]["push_lock"]
+        assert lock is not None
+        assert lock["remaining_secs"] > 0
+        assert "transition" in lock["holder"]
+        admin_services._reset_remote_status_cache()
+        unit = asyncio.run(admin_services.show_unit(admin_services.GATEWAY_UNIT))
+        assert unit.active_state == "activating"
+
+    def test_broker_lease_is_proxied_into_push_lock(self, monkeypatch):
+        import asyncio
+        import time
+
+        now = time.time()
+        self._stub_status(
+            monkeypatch, 200, {"ok": True, "state": "running", "detail": "running", "returncode": 0,
+                               "transition": None,
+                               "lease": {"holder": "radon-cloud.ib-watchdog", "acquired_at": now - 5,
+                                         "expires_at": now + 300, "remaining_secs": 300, "reason": "probe"}},
+        )
+        gw = asyncio.run(server.ib_gateway.check_ib_gateway())
+        lock = gw["restart_backoff"]["push_lock"]
+        assert lock["holder"] == "radon-cloud.ib-watchdog"
+        assert lock["remaining_secs"] > 0
+        assert gw["restart_backoff"]["source"] == "broker"
+
+    def test_no_broker_lease_means_no_push_lock(self, monkeypatch):
+        import asyncio
+
+        self._stub_status(
+            monkeypatch, 200, {"ok": True, "state": "running", "detail": "running", "returncode": 0,
+                               "transition": None, "lease": None},
+        )
+        gw = asyncio.run(server.ib_gateway.check_ib_gateway())
+        assert gw["restart_backoff"]["push_lock"] is None
+
+    def test_reset_backoff_response_names_the_broker_lease(self, client, monkeypatch):
+        monkeypatch.setattr(server, "_is_app_role_gateway_mutation", lambda request: False)
+        remote = AsyncMock(return_value=admin_services.ActionResult(
+            admin_services.GATEWAY_UNIT, "reset-lease", True, "2FA push lease: released", 0))
+        with patch.object(admin_services, "remote_gateway_action", new=remote):
+            resp = client.post("/ib/reset-backoff", headers=_auth_headers())
+        assert resp.status_code == 200
+        body = resp.json()
+        remote.assert_awaited_once_with("reset-lease")
+        assert body["remote"]["action"] == "reset-lease"
+        assert body["broker_lease_released"] is True

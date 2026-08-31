@@ -322,7 +322,12 @@ async def show_unit(unit: str) -> UnitStatus:
             return status
         remote = await remote_gateway_action("status")
         status.can_control = True
-        if remote.ok and "running" in remote.detail:
+        if "transition-pending" in remote.detail:
+            # REL-172 (R-475): mid-restart on the broker. `activating` is what
+            # gatewayPowerState reads as transitional, so Start stays disarmed.
+            status.active_state = "activating"
+            status.sub_state = "transition-pending"
+        elif remote.ok and "running" in remote.detail:
             status.active_state = "active"
             status.sub_state = "running"
         elif "stopped" in remote.detail:

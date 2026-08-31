@@ -228,3 +228,131 @@ class TestCertsScript:
         assert "extendedKeyUsage=serverAuth" in text
         assert "extendedKeyUsage=clientAuth" in text
         assert "DNS:radon-app" in text
+
+
+# ---------------------------------------------------------------------------
+# REL-172 (R-475): the 2FA-aware restart contract across the split.
+# ---------------------------------------------------------------------------
+
+
+def _lease_file(tmp_path: Path, *, holder: str = "radon-cloud.ib-watchdog", ttl: float = 300.0) -> Path:
+    import json as _json
+    import time as _time
+
+    path = tmp_path / "lease" / "ib-2fa-push-lock.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    now = _time.time()
+    path.write_text(
+        _json.dumps(
+            {
+                "holder": holder,
+                "acquired_at": now,
+                "expires_at": now + ttl,
+                "reason": "test",
+                "port_down_since": None,
+            }
+        )
+    )
+    return path
+
+
+class TestStatusCarriesBrokerLease:
+    def test_status_reports_held_lease(self, tmp_path, monkeypatch):
+        certs = mint_mtls(tmp_path)
+        lease = _lease_file(tmp_path)
+        monkeypatch.setenv("IB_2FA_LOCK_PATH", str(lease))
+        httpd = _start(_config(tmp_path, certs, helper=_helper_script(tmp_path)))
+        try:
+            status, body = _call(httpd, certs, "/status")
+            assert status == 200
+            assert body["state"] == "running"
+            assert body["lease"]["holder"] == "radon-cloud.ib-watchdog"
+            assert body["lease"]["remaining_secs"] > 0
+            assert body["transition"] is None
+        finally:
+            httpd.shutdown()
+
+    def test_status_reports_no_lease_and_transition(self, tmp_path, monkeypatch):
+        certs = mint_mtls(tmp_path)
+        monkeypatch.setenv("IB_2FA_LOCK_PATH", str(tmp_path / "absent" / "lock.json"))
+        helper = _helper_script(tmp_path, rc=serve.CONTROL_BUSY_RC, stdout="transition-pending")
+        httpd = _start(_config(tmp_path, certs, helper=helper))
+        try:
+            with pytest.raises(urllib.error.HTTPError) as err:
+                _call(httpd, certs, "/status")
+            assert err.value.code == 409
+            body = json.loads(err.value.read().decode())
+            assert body["state"] == "transition-pending"
+            assert body["transition"] == "pending"
+            assert body["lease"] is None
+        finally:
+            httpd.shutdown()
+
+
+class TestVerbCooldown:
+    """A caller cannot fire a second IBKR push seconds after clearing the
+    only thing that would have refused it."""
+
+    def _daemon(self, tmp_path):
+        certs = mint_mtls(tmp_path)
+        helper = _helper_script(tmp_path, stdout="ok")
+        config = _config(tmp_path, certs, helper=helper)
+        return certs, _start(config)
+
+    def test_start_within_cooldown_of_stop_is_409(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(serve, "_verb_history", {})
+        certs, httpd = self._daemon(tmp_path)
+        try:
+            status, _ = _call(httpd, certs, "/stop", "POST")
+            assert status == 200
+            with pytest.raises(urllib.error.HTTPError) as err:
+                _call(httpd, certs, "/start", "POST")
+            assert err.value.code == 409
+            body = json.loads(err.value.read().decode())
+            assert "cooldown" in body["detail"]
+        finally:
+            httpd.shutdown()
+        assert (tmp_path / "helper.log").read_text().splitlines() == ["stop"]
+
+    @pytest.mark.parametrize("follow", ["restart", "start"])
+    def test_restart_or_start_within_cooldown_of_reset_lease_is_409(self, tmp_path, monkeypatch, follow):
+        monkeypatch.setattr(serve, "_verb_history", {})
+        certs, httpd = self._daemon(tmp_path)
+        try:
+            status, _ = _call(httpd, certs, "/reset-lease", "POST")
+            assert status == 200
+            with pytest.raises(urllib.error.HTTPError) as err:
+                _call(httpd, certs, f"/{follow}", "POST")
+            assert err.value.code == 409
+        finally:
+            httpd.shutdown()
+        assert (tmp_path / "helper.log").read_text().splitlines() == ["reset-lease"]
+
+    def test_cooldown_expires_and_cannot_be_cleared_by_a_verb(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(serve, "_verb_history", {})
+        certs, httpd = self._daemon(tmp_path)
+        try:
+            _call(httpd, certs, "/stop", "POST")
+            # reset-lease does not clear the stop->start cooldown.
+            _call(httpd, certs, "/reset-lease", "POST")
+            with pytest.raises(urllib.error.HTTPError) as err:
+                _call(httpd, certs, "/start", "POST")
+            assert err.value.code == 409
+            # Only time clears it.
+            for verb in list(serve._verb_history):
+                serve._verb_history[verb] -= serve.VERB_COOLDOWN_S + 1
+            status, _ = _call(httpd, certs, "/start", "POST")
+            assert status == 200
+        finally:
+            httpd.shutdown()
+
+    def test_status_and_stop_are_never_cooled_down(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(serve, "_verb_history", {})
+        certs, httpd = self._daemon(tmp_path)
+        try:
+            _call(httpd, certs, "/start", "POST")
+            status, _ = _call(httpd, certs, "/stop", "POST")
+            assert status == 200
+            _call(httpd, certs, "/status")
+        finally:
+            httpd.shutdown()
