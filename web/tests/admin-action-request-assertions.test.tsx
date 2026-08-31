@@ -271,6 +271,50 @@ describe("admin destructive actions reach the wire", () => {
     expect(sent[0].method).toBe("POST");
   });
 
+  it("Start Gateway hits the gateway start path, not stack restart", async () => {
+    const calls: RecordedCall[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input.toString();
+        calls.push({ url, method: init?.method ?? "GET", cache: init?.cache });
+        if (url.endsWith("/api/admin/services") && (init?.method ?? "GET") === "GET") {
+          return jsonResponse({
+            ...SERVICES,
+            supported: false,
+            host_role: "app",
+            units: SERVICES.units.map((unit) =>
+              unit.unit === GATEWAY_UNIT
+                ? { ...unit, active_state: "inactive", sub_state: "dead", can_control: true }
+                : unit,
+            ),
+          });
+        }
+        if (init?.method === "POST") {
+          return jsonResponse({ ok: true, detail: "done", returncode: 0 });
+        }
+        return jsonResponse({
+          ...HEALTHY,
+          host_role: "app",
+          ib_gateway: { ...HEALTHY.ib_gateway, port_listening: false, auth_state: "unreachable" },
+        });
+      }),
+    );
+    render(<AdminWorkspace />);
+    await settle();
+
+    expect(screen.getByTestId("gateway-power-button").textContent).toBe("Start Gateway");
+    await click("gateway-power-button");
+    expect(posts(calls)).toHaveLength(0);
+    await click("admin-confirm-action");
+    const sent = posts(calls);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].url).toBe(`/api/admin/services/${GATEWAY_UNIT}/start`);
+    expect(sent[0].method).toBe("POST");
+    expect(sent[0].cache).toBe("no-store");
+    expect(sent.some((c) => c.url === "/api/admin/stack/restart")).toBe(false);
+  });
+
   it("stops a service on the stop path, not the restart path", async () => {
     const calls = await renderWorkspace();
 

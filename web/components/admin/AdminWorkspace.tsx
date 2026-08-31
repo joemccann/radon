@@ -345,8 +345,9 @@ export default function AdminWorkspace() {
   }, [appendLog, fetchHealth, fetchServices]);
 
   // Targeted per-unit stop of the gateway. Leaves it cleanly stopped + stable
-  // (watchdog stands down on a port-down gateway). Start is NOT a per-unit
-  // start — it routes through restartStack so the cascade dependents recover.
+  // (watchdog stands down on a port-down gateway). Start is the matching
+  // per-unit start: on the app host that is the broker mTLS daemon, not
+  // `radon restart` (no operator CLI in the API container).
   const stopGateway = useCallback(async () => {
     const at = new Date().toISOString();
     const unit = "radon-ib-gateway.service";
@@ -373,6 +374,38 @@ export default function AdminWorkspace() {
     } catch (err) {
       const detail = err instanceof Error ? err.message : "gateway stop failed";
       appendLog({ at, action: "service-action", target: `${unit} stop`, ok: false, detail });
+    }
+    void fetchServices();
+    void fetchHealth();
+    return succeeded;
+  }, [appendLog, fetchHealth, fetchServices]);
+
+  const startGateway = useCallback(async () => {
+    const at = new Date().toISOString();
+    const unit = "radon-ib-gateway.service";
+    let succeeded = false;
+    try {
+      const res = await fetch(`/api/admin/services/${unit}/start`, {
+        method: "POST",
+        cache: "no-store",
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const detail = typeof body.error === "string" ? body.error : `HTTP ${res.status}`;
+        appendLog({ at, action: "service-action", target: `${unit} start`, ok: false, detail });
+      } else {
+        succeeded = true;
+        appendLog({
+          at,
+          action: "service-action",
+          target: `${unit} start`,
+          ok: true,
+          detail: typeof body.detail === "string" ? body.detail.slice(0, 120) : "ok",
+        });
+      }
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : "gateway start failed";
+      appendLog({ at, action: "service-action", target: `${unit} start`, ok: false, detail });
     }
     void fetchServices();
     void fetchHealth();
@@ -480,7 +513,7 @@ export default function AdminWorkspace() {
               servicesSupported={services?.supported ?? false}
               hostRole={services?.host_role ?? health?.host_role}
               onStopGateway={stopGateway}
-              onStartGateway={restartStack}
+              onStartGateway={startGateway}
               // Stopping the gateway cascade-stops radon-api — the very service
               // serving /admin/services + /health — so both polls fail. When the
               // API is unreachable, the last-known unit row reads stale "active";
