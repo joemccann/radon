@@ -216,3 +216,94 @@ non-tip). Together ~8-10s p50; root-helper edits ship via
 Outcome for tonight: `VALIDATING` pending remediate (CIP-001). Residual
 bottleneck after CIP-001: web gate ~106s and node image ~95-110s in parallel,
 then the fixed ~88s deploy (40s of it the stability window).
+
+### 2026-08-31 - remediate - CIP-001 implemented - branch `ci-performance/2026-08-31`
+
+**Pre-edit record.** Baseline: the 15 mixed warm after-runs in the audit table
+(p50 238s / p95 269s; python gate p50 123s = slowest scripts shard job ~87s +
+2s hop + ratchet ~13-18s; `cloud al` job 97s with no ratchet behind it).
+Critical path: `Path filter` -> slowest pytest shard -> `pytest coverage
+ratchet` -> `Prestage VPS release` -> `Deploy to VPS`. Hypothesis: three
+independent, separately measurable cuts to the python gate tail: (a) xdist on
+cloud `al`/`mz`, (b) lead the measured wall-floor modules in the scripts
+shards, (c) deadline-inject the one test that burns a real 40s. Expected:
+python gate 123s -> ~85-90s, mixed p50 238s -> ~218-222s (-7 to -8%), the web
+gate (~106s) becomes the wall. Affected paths: `.github/workflows/ci.yml`,
+`scripts/tests/test_ci_deploy_concurrency.py`,
+`scripts/tests/test_menthorq_dashboard_bootstrap.py`,
+`scripts/tests/test_menthorq_bootstrap_deadline.py`. Revert trigger: a cloud
+`al`/`mz` failure attributable to worker contention in the first five `main`
+runs, or a python gate p50 that stays above 105s.
+
+**Change.**
+
+- `ci.yml` `cloud-tests`: new matrix key `xdist` (`-n auto --dist loadfile`
+  on `al` and `mz`, empty on `edge`) word-split into the run line. `edge`
+  stays serial (Caddy wall-clock mechanism). `al`'s only other caddy spawner,
+  `test_caddyfile.py::TestRestartWindowMechanism`, runs `admin off` on
+  ephemeral ports and `loadfile` keeps the module on one worker.
+  `test_deploy_corrections.py` kill-groups target children started with
+  `start_new_session=True` / their own recorded pgid, never the worker's.
+- `ci.yml` `py-tests`: `scripts-jm`, `scripts-npsz`, `scripts-rs` name their
+  measured wall-floor modules ahead of the letter glob (pytest de-duplicates
+  the glob hit; `--collect-only` counts identical: jm 795, npsz 1464, rs
+  1024; first collected id is the lead in all three). Shard names, count (10),
+  globs, `DOCS_CONTRACT_BASE` fetch-depth pin and coverage combine unchanged.
+- `test_menthorq_dashboard_bootstrap.py::test_expired_session_payload_is_rejected`:
+  the fake page's `wait_for_timeout` returns instantly, so the session poll
+  spun on `time.monotonic()` for the full 40.0s budget. It now monkeypatches
+  `REQUEST_PATH_AUTH_BUDGET_SECONDS` to 0.5 for that test only and asserts the
+  poll exits in < 5s. `test_menthorq_bootstrap_deadline.py` pins the module
+  default `== 40.0` so the override can never become the production value;
+  the existing `< 50` proxy-fit and total-deadline contracts are untouched.
+
+**Contracts (red -> green).**
+
+- New `test_heavy_pytest_modules_lead_their_shard` (pins
+  `PYTEST_SHARD_LEAD_MODULES`, asserts each lead exists on disk and matches
+  its own shard's glob so a lead can only reorder, never move, a module) and
+  `test_cloud_shards_parallelise_except_the_wall_clock_edge_shard`: both
+  failed on the pre-change workflow (`KeyError: 'xdist'`, lead order), pass
+  after.
+- `_partition` in `test_pytest_filename_shards_partition_scripts_tests` now
+  counts overlap per shard ROW instead of per token (a same-row lead + glob
+  is one shard; the fixture test gains the two-row double-run case that must
+  still red). Recursive-union contracts
+  `test_pytest_shard_union_equals_recursive_collection` /
+  `test_cloud_shard_union_equals_recursive_collection` unchanged and green.
+- Baseline red for (c): `7 passed in 40.20s`, `40.00s call
+  test_expired_session_payload_is_rejected`. After: 41 menthorq tests in
+  0.89s, that test 0.50s.
+- Focused: `test_ci_deploy_concurrency.py` + `test_ci_gate_integrity.py` +
+  `test_path_filter.py` = 69 passed; `cloud/tests/test_app_images.py` +
+  `test_actions_node24.py` = 40 passed. YAML parses; every cloud matrix row
+  dry-run through the real step script (mapfile shim on bash 3.2): `al` 26
+  files + xdist flags with the edge module omitted, `edge` 1 file serial, `mz`
+  17 files + xdist flags; `bash -n` clean.
+
+**Local xdist evidence (diagnostic only; Mac mini at load 6-14 with three
+other nightly loops running).** `cloud mz` under `-n 4 --dist loadfile`: 744
+passed in 61.8s. `cloud al` under `-n 4`, two runs: 723/725 passed, 38/36
+failed, 35 of them identical serially (`operator-radon.sh: line 266:
+mapfile: command not found`, macOS bash 3.2 baseline; two supervisor tests
+are serially flaky on macOS too). One test,
+`test_ib_gateway_control.py::test_healthy_start_and_concurrent_stop_are_serialized`
+(2.0s wait for the fake-docker inspect marker), failed in both loaded xdist
+runs and passed serially and when its module ran alone under `-n 4`: a
+cross-worker CPU-contention sensitivity, not an xdist ordering defect. Its
+budget was NOT loosened (rail 6). It is the named revert trigger; the PR's
+own `pull_request` run is the first Linux sample.
+
+**Full local gate (serial, this tree).** ac 1825, df 1283, i 816, gh 401, jm 795, npsz 1463, rs 1024, daemons 772, rest-api 786, rest 346 passed (0 failed); cloud mz 744, edge 30 passed; cloud al 725 passed + 35 macOS-only baseline failures (`mapfile` on bash 3.2, identical on the unchanged tree) + the contention-sensitive marker-wait test noted below.
+
+**Runner-seconds.** Shard count unchanged (10 + 3). Expected -80 to -100s per
+mixed run (`cloud al` 97 -> ~45s job, `scripts-jm` 81 -> ~40s), about -5%.
+
+**Residual bottleneck after CIP-001.** Web gate ~106s (8 Vitest shards p50
+63-74s + coverage merge) in parallel with the node image ~95-110s, then the
+fixed ~88s deploy (40s stability window). Next: CIP-002 (node image
+`scripts/` copy boundary), then CIP-003 (Vitest shard balance).
+
+PR: https://github.com/joemccann/radon/pull/211 (commit is the branch tip carrying `CIP-001` in its subject).
+
+Outcome: `VALIDATING` (0 of 5 comparable after-runs; human merge required).

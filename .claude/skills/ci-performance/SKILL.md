@@ -376,3 +376,9 @@ each correction into a concrete rule that prevents recurrence.
   them), so run the contract sets in two commands; the repo is on a free plan
   so `/timing` reports zero billable ms and runner cost must be tracked as the
   sum of job wall seconds.
+- 2026-08-31 remediate: local diagnostic scripts run under zsh; `compgen -G`
+  is a bash builtin, so a `$(compgen ...)` path list silently expands to
+  nothing and `pytest -n 4` then collects the WHOLE repo (~10k tests) on the
+  contended Mac mini. Build path lists with native zsh globs
+  (`files=(cloud/tests/test_[a-l]*.py)`) and always echo `${#files}` into the
+  status file before invoking pytest. Local timings stay diagnostic only.
