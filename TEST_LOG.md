@@ -526,3 +526,4 @@ to `/tmp/tw-2026-08-30-rem/`.
 
 | Task | Status | Commits | Evidence |
 |---|---|---|---|
+| T-313 | DONE | `c224915b` | **A real product defect.** A `check_order_limits` refusal in `ExitOrdersHandler.execute()` incremented `orders_failed` and `continue`d without setting `result["error"]`, so the exit-orders cycle heartbeat `ok` while the position sat unprotected and the leg was retried every 5 min. RED `2 failed, 12 passed` (`result['error']` unset; heartbeat `ok` != `error`); GREEN `14 passed` ×3 (0.57 s). Both funnels now driven end to end with stub clients (`execute()` / `ib_order_manage` with `output()` silenced). Mutations: delete `if violation:` → 2 failed; delete `continue` → 2 failed; `violation = None and …` → 2 failed; delete `ib_order_manage` `return` → 1 failed. Scoped sweep of 22 files referencing either module: `331 passed`. |
