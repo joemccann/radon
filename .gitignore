@@ -210,6 +210,7 @@ web/verify-regime-internals.mjs
 /.agents/
 /.claude/skills/*
 !/.claude/skills/ci-performance/
+!/.claude/skills/documentation-nightly/
 !/.claude/skills/incident-response/
 !/.claude/skills/long-horizon-jobs/
 !/.claude/skills/reliability-weekend/

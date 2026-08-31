@@ -55,6 +55,11 @@ LOOPS = {
         "ci-performance",
         "com.radon.ci-performance-daily.plist",
     ),
+    "documentation": (
+        "documentation_nightly.sh",
+        "documentation-nightly",
+        "com.radon.documentation-daily.plist",
+    ),
 }
 LOOP_IDS = sorted(LOOPS)
 
@@ -535,7 +540,7 @@ class TestTheJobRestoresTheEntryPointBeforeReadingIt:
 
     @pytest.mark.parametrize(
         "setup",
-        ["setup_reliability_weekend.sh", "setup_testing_weekend.sh"],
+        ["setup_reliability_weekend.sh", "setup_testing_weekend.sh", "setup_documentation_nightly.sh"],
     )
     def test_the_setup_script_states_the_deploy_rule(self, setup: str) -> None:
         src = (REPO / "scripts" / setup).read_text(encoding="utf-8")
@@ -546,7 +551,7 @@ class TestTheJobRestoresTheEntryPointBeforeReadingIt:
 
     @pytest.mark.parametrize(
         "setup",
-        ["setup_reliability_weekend.sh", "setup_testing_weekend.sh"],
+        ["setup_reliability_weekend.sh", "setup_testing_weekend.sh", "setup_documentation_nightly.sh"],
     )
     def test_the_setup_script_refuses_while_a_run_is_in_flight(self, setup: str) -> None:
         src = (REPO / "scripts" / setup).read_text(encoding="utf-8")
