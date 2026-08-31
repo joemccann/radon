@@ -341,7 +341,7 @@ export default function Ib2faControls({
       <ConfirmDialog
         open={showStopConfirm}
         title="Stop the IB Gateway?"
-        body="This runs systemctl stop on the IB Gateway. It takes IB offline and cascade-stops the API, realtime relay, and monitor. Those will NOT come back on their own. To bring everything back, use Start Gateway (or Restart All Services), which restarts the whole stack in order."
+        body="This stops the IB Gateway. IB data and orders go offline. App services stay up. Start Gateway brings the Gateway back and fires one 2FA push."
         confirmLabel="Stop Gateway"
         destructive
         affectedUnits={gatewayDependents}
@@ -353,7 +353,7 @@ export default function Ib2faControls({
       <ConfirmDialog
         open={showStartConfirm}
         title="Start the IB Gateway?"
-        body="This starts the IB Gateway and brings the API, relay, and monitor back in order. Starting the gateway triggers one IBKR Mobile 2FA push to your phone. Approve it promptly, and approve only ONE push to avoid stacking. This takes about 60 to 90 seconds and the page will briefly lose its connection while FastAPI cycles."
+        body="This starts the IB Gateway. It fires one IBKR Mobile 2FA push. Approve only one. App services stay up."
         confirmLabel="Start Gateway"
         pending={pendingPower}
         onConfirm={runStart}
