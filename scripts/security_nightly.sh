@@ -182,6 +182,18 @@ log: \`${RUN_LOG##*/}\` on the runner"
 # so that if it is ever cut off anyway the operator is not told it succeeded.
 BG_CEILING_MARKER="Background tasks still running after"
 
+# Operator policy 2026-08-31 (run 20260831T000007): `claude -p` exited 0 with
+# the remediate phase parked mid-flight ("Suite at ~35%; I'll pick up when the
+# background run completes") and text that matched no ceiling marker, so the
+# wrapper paged OK while the private run-record still had a full pytest suite
+# in flight. Exit code 0 alone is therefore NOT completion for this loop: the
+# skill prints this exact prefix as the LAST line of a phase that actually
+# finished (a clean fail-closed OPERATOR_REQUIRED night included), and an
+# exit-0 round without it is INCOMPLETE — reported as such, exited non-zero,
+# audited SHA untouched, so the next fire resumes the same private run in
+# ~/radon-weekend/.security-nightly-scratch/ instead of calling the night OK.
+PHASE_COMPLETE_MARKER="SECURITY-NIGHTLY PHASE COMPLETE:"
+
 phase_status() {
   # rc + run log -> the one status string every dead-man channel carries.
   # `mark` is the size of $run_log before THIS round's invocation. RUN_LOG is
@@ -452,9 +464,21 @@ run_phase() {
   # security archive, out of this wrapper's reach.
   local status
   status="$(phase_status "$RC" "$RUN_LOG" "$ROUND_LOG_MARK")"
+  # OK additionally requires the skill's completion marker in THIS round's
+  # slice (same scoping as the TRUNCATED detector, R-426). Any incomplete
+  # phase — no marker, or ceiling-truncated — must also exit non-zero so
+  # neither the dead-man nor launchd is told an unfinished night succeeded.
+  if [[ "$status" == "OK" ]] && ! tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null | grep -qF "$PHASE_COMPLETE_MARKER"; then
+    status="INCOMPLETE (exit 0 without the phase-completion marker)"
+    RC=75
+  elif [[ $RC -eq 0 && "$status" == TRUNCATED* ]]; then
+    RC=75
+  fi
   case "$status" in
     OK)
       report "$status" "sanitized: audit/remediate completed; findings (if any) are in the private security run dir and archive, never here" ;;
+    INCOMPLETE*)
+      report "$status" "the agent exited 0 without declaring the phase complete — this phase is INCOMPLETE; the audited SHA was NOT advanced and the next fire resumes the same private run on the runner" ;;
     TRUNCATED*)
       report "$status" "the harness killed unfinished background work and the agent still exited 0 — this phase is INCOMPLETE; the audited SHA was NOT advanced" ;;
     TIMEOUT*)

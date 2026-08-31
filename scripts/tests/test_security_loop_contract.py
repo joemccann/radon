@@ -363,3 +363,188 @@ class TestTheSkillCarriesTheNonNegotiableRails:
     def test_the_skill_names_both_external_engines(self):
         text = SKILL.read_text(encoding="utf-8")
         assert "DeepSec" in text and "Claude Security" in text
+
+
+class TestBudgetFollowsClaudeAuthMethod:
+    """Operator policy 2026-08-31: the Claude Security spend cap is derived at
+    run time from `claude auth status` — a claude.ai subscription session runs
+    with NO --max-budget-usd, an API key runs with --max-budget-usd 50, and no
+    surface invents a default when nothing is configured (a fabricated $25 cap
+    killed the 2026-08-31 remediate attempt mid-scan).
+    """
+
+    def test_no_surface_documents_an_operator_budget_env(self):
+        for path in (SKILL, WRAPPER, SETUP, PLIST):
+            assert "CLAUDE_APPROVED_MAX_USD" not in path.read_text(encoding="utf-8"), (
+                f"{path} still tells the operator/agent to source the budget "
+                "from an environment variable; the cap is derived from "
+                "`claude auth status` at run time"
+            )
+
+    def test_the_skill_detects_the_auth_method_at_run_time(self):
+        text = SKILL.read_text(encoding="utf-8")
+        assert "claude auth status" in text, (
+            "the skill no longer derives the spend cap from the runner's "
+            "actual Claude Code authentication"
+        )
+        for key in ("loggedIn", "authMethod", "subscriptionType"):
+            assert key in text, f"the auth-status JSON key {key} is undocumented"
+        assert "OPERATOR_REQUIRED" in text
+
+    def test_the_only_budget_ever_passed_is_the_api_key_50(self):
+        text = SKILL.read_text(encoding="utf-8")
+        assert "--max-budget-usd 50" in text, "the API-key path lost its $50 cap"
+        numeric = set(re.findall(r'--max-budget-usd\s+"?(\d+)', text))
+        assert numeric == {"50"}, (
+            f"--max-budget-usd must be exactly 50 on the API-key path and "
+            f"absent everywhere else: {sorted(numeric)}"
+        )
+        assert not re.search(r'--max-budget-usd\s+"?\$', text), (
+            "a variable-driven budget is back; the cap comes from the auth "
+            "method, never an env var"
+        )
+
+    def test_the_keychain_env_for_the_subscription_session_is_kept(self):
+        text = SKILL.read_text(encoding="utf-8")
+        for var in ("`HOME`", "`USER`", "`LOGNAME`"):
+            assert var in text, (
+                f"the skill no longer keeps {var} for Claude Code invocations; "
+                "macOS Keychain cannot unlock the claude.ai subscription "
+                "session without it (2026-08-31 attempt 1: Not logged in)"
+            )
+
+
+class TestAnIncompletePhaseIsNeverReportedOk:
+    """Operator policy 2026-08-31 (run 20260831T000007): `claude -p` exited 0
+    with the remediate phase parked mid-flight ("Suite at ~35%; I'll pick up
+    when the background run completes"), the text matched no T-239 ceiling
+    marker, and the wrapper paged OK while the private run-record still had a
+    full pytest suite in flight. OK now additionally requires the completion
+    marker the skill prints as a finished phase's last line; without it the
+    status is INCOMPLETE, the wrapper exits non-zero, and the dead-man says
+    the audited SHA was not advanced so the next fire resumes the same
+    private run. Both paths are RUN here, not grepped.
+    """
+
+    def _marker(self) -> str:
+        body = WRAPPER.read_text(encoding="utf-8")
+        match = re.search(r'PHASE_COMPLETE_MARKER="([^"]+)"', body)
+        assert match, (
+            "the wrapper lost PHASE_COMPLETE_MARKER, so OK is keyed on the "
+            "agent's exit code alone again — the 20260831T000007 defect"
+        )
+        return match.group(1)
+
+    def _harness(self, tmp_path: Path, claude_body: str) -> tuple[Path, dict, Path]:
+        clone = tmp_path / "clone"
+        (clone / "scripts").mkdir(parents=True)
+        (clone / "logs" / LABEL).mkdir(parents=True)
+        shutil.copy2(WRAPPER, clone / "scripts" / "security_nightly.sh")
+        (clone / "scripts" / "security_nightly.sh").chmod(0o755)
+        (clone / "scripts" / "weekend_notify.py").write_text("# stub\n", encoding="utf-8")
+        (clone / ".radon-weekend-runner").write_text("", encoding="utf-8")
+        (clone / ".radon-security-runner").write_text("", encoding="utf-8")
+
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        gh_log = tmp_path / "gh.log"
+        stubs = {
+            "gh": (
+                "#!/bin/sh\n"
+                f'printf "%s\\n" "$*" >> "{gh_log}"\n'
+                'if [ "$1 $2" = "issue list" ]; then echo 4242; fi\n'
+                "exit 0\n"
+            ),
+            "git": "#!/bin/sh\nexit 0\n",
+            "python3": "#!/bin/sh\nexit 0\n",
+            "claude": claude_body,
+            # Consume `-k <secs>` and the duration, then run the child, the
+            # same shape the self-rewrite harness uses (the mini has no
+            # /usr/bin/timeout, so the wrapper's calls must go through this).
+            "timeout": (
+                "#!/bin/bash\n"
+                'while [ $# -gt 0 ]; do\n'
+                '  case "$1" in\n'
+                '    -k|--kill-after) shift 2 ;;\n'
+                '    --foreground|--preserve-status) shift ;;\n'
+                '    *) shift; break ;;\n'
+                '  esac\n'
+                'done\n'
+                'exec "$@"\n'
+            ),
+        }
+        for name, body in stubs.items():
+            exe = bin_dir / name
+            exe.write_text(body, encoding="utf-8")
+            exe.chmod(0o755)
+        env = {
+            "PATH": f"{bin_dir}:/usr/bin:/bin",
+            "HOME": str(tmp_path / "home"),
+            "RADON_WEEKEND_REPO": str(clone),
+        }
+        return clone, env, gh_log
+
+    def test_a_phase_that_prints_the_completion_marker_reports_ok(self, tmp_path):
+        marker = self._marker()
+        clone, env, gh_log = self._harness(
+            tmp_path,
+            "#!/bin/sh\n"
+            "echo 'deterministic gates green; OPERATOR_REQUIRED recorded'\n"
+            f"echo '{marker} audit run_id=20260831-audit'\n"
+            "exit 0\n",
+        )
+        proc = subprocess.run(
+            [BASH, str(clone / "scripts" / "security_nightly.sh"), "audit"],
+            cwd=clone, env=env, capture_output=True, text=True, timeout=120,
+        )
+        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
+        calls = gh_log.read_text(encoding="utf-8") if gh_log.exists() else ""
+        assert "**OK**" in calls, calls
+
+    def test_exit_zero_without_the_marker_is_incomplete_and_nonzero(self, tmp_path):
+        # The literal shape of last night's failure: a deferral sentence that
+        # matches neither the ceiling marker nor any error, and exit 0.
+        clone, env, gh_log = self._harness(
+            tmp_path,
+            "#!/bin/sh\n"
+            "echo \"Suite at ~35%; I'll pick up when the background run completes.\"\n"
+            "exit 0\n",
+        )
+        proc = subprocess.run(
+            [BASH, str(clone / "scripts" / "security_nightly.sh"), "audit"],
+            cwd=clone, env=env, capture_output=True, text=True, timeout=120,
+        )
+        assert proc.returncode == 75, (
+            "an incomplete phase must not exit 0 — launchd and the operator "
+            f"were told last night's half-run succeeded: rc={proc.returncode} "
+            f"{proc.stdout} {proc.stderr}"
+        )
+        calls = gh_log.read_text(encoding="utf-8") if gh_log.exists() else ""
+        assert "INCOMPLETE" in calls, calls
+        assert "**OK**" not in calls, calls
+        assert "NOT advanced" in calls, (
+            f"the dead-man must say the audited SHA stayed put: {calls!r}"
+        )
+        assert "resumes the same private run" in calls, calls
+
+    def test_the_skill_prints_the_exact_marker_the_wrapper_greps(self):
+        marker = self._marker()
+        assert marker in SKILL.read_text(encoding="utf-8"), (
+            f"the wrapper greps {marker!r} but the skill never tells the agent "
+            "to print it, so every finished phase would page INCOMPLETE"
+        )
+
+    def test_the_skill_owns_the_resume_contract(self):
+        text = SKILL.read_text(encoding="utf-8")
+        assert "run-record.md" in text, (
+            "the skill no longer names the private run-record that makes an "
+            "interrupted phase resumable"
+        )
+        assert "RESUME" in text or "resume" in text
+        assert ".security-nightly-scratch" in text
+        # The exact conditions the operator listed as INCOMPLETE, not OK.
+        for condition in ("budget", "SIGTERM", "I'll pick up later"):
+            assert condition in text, (
+                f"the skill no longer classifies {condition!r} as an "
+                "INCOMPLETE phase"
+            )
