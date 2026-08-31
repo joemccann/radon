@@ -29,10 +29,12 @@ REPO = Path(__file__).resolve().parents[2]
 RELIABILITY = REPO / "scripts" / "reliability_weekend.sh"
 TESTING = REPO / "scripts" / "testing_weekend.sh"
 CI_PERFORMANCE = REPO / "scripts" / "ci_performance_nightly.sh"
+DOCUMENTATION = REPO / "scripts" / "documentation_nightly.sh"
 LOOPS = {
     "reliability": RELIABILITY,
     "testing": TESTING,
     "ci-performance": CI_PERFORMANCE,
+    "documentation": DOCUMENTATION,
 }
 BASH = shutil.which("bash") or "/bin/bash"
 

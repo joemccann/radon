@@ -49,11 +49,16 @@ SETUPS = {
         REPO / "scripts" / "setup_ci_performance.sh",
         "radon-ci-performance",
     ),
+    "documentation": (
+        REPO / "scripts" / "setup_documentation_nightly.sh",
+        "radon-documentation",
+    ),
 }
 PLISTS = {
     "reliability": "com.radon.reliability-daily.plist",
     "testing": "com.radon.testing-daily.plist",
     "ci-performance": "com.radon.ci-performance-daily.plist",
+    "documentation": "com.radon.documentation-daily.plist",
 }
 
 # Dummy values only. Never stage a real credential into a fixture.

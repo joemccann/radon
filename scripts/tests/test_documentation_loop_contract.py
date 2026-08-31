@@ -1,7 +1,7 @@
-"""The nightly CI/deploy performance loop's own identity contract.
+"""The nightly documentation loop's own identity contract.
 
-The three nightly loops share one wrapper shape, one runner-lock primitive and
-one `$WEEKEND_ROOT/venv`, and all three fire at 00:00. Everything that keeps
+The four nightly loops share one wrapper shape, one runner-lock primitive and
+one `$WEEKEND_ROOT/venv`, and all four fire at 00:00. Everything that keeps
 them from destroying each other is a NAME: the clone directory, the dead-man
 label, the PR branch prefix, the log directory, the launchd label and the
 skill the wrapper invokes. A copy-paste that leaves one of those pointing at a
@@ -25,15 +25,15 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
-WRAPPER = REPO / "scripts" / "ci_performance_nightly.sh"
-SETUP = REPO / "scripts" / "setup_ci_performance.sh"
-PLIST = REPO / "config" / "com.radon.ci-performance-daily.plist"
-SKILL = REPO / ".claude" / "skills" / "ci-performance" / "SKILL.md"
+WRAPPER = REPO / "scripts" / "documentation_nightly.sh"
+SETUP = REPO / "scripts" / "setup_documentation_nightly.sh"
+PLIST = REPO / "config" / "com.radon.documentation-daily.plist"
+SKILL = REPO / ".claude" / "skills" / "documentation-nightly" / "SKILL.md"
 
-CLONE = "radon-ci-performance"
-LABEL = "ci-performance-nightly"
-LOG_DIR = "logs/ci-performance"
-SIBLING_CLONES = ("radon-testing", "radon-documentation")
+CLONE = "radon-documentation"
+LABEL = "documentation-nightly"
+LOG_DIR = "logs/documentation-nightly"
+SIBLING_CLONES = ("radon-testing", "radon-ci-performance")
 
 
 def _uncommented(path: Path) -> str:
@@ -65,17 +65,38 @@ class TestTheLoopOwnsItsOwnLane:
     def test_the_deadman_label_and_branch_prefix_are_this_loop(self):
         body = _uncommented(WRAPPER)
         assert f'DEADMAN_LABEL="{LABEL}"' in body, body
-        assert 'PR_BRANCH_PREFIX="ci-performance/"' in body, (
+        assert 'PR_BRANCH_PREFIX="documentation/"' in body, (
             "the wrapper resolves the PR to page about by head-ref prefix; a "
             "sibling prefix pages this loop's status against that loop's PR"
         )
 
     def test_the_wrapper_invokes_this_loops_skill(self):
         body = _uncommented(WRAPPER)
-        assert "/ci-performance $PHASE" in body, (
+        assert "/documentation-nightly $PHASE" in body, (
             "the wrapper spawns the agent with another loop's slash command"
         )
         assert SKILL.is_file(), f"{SKILL} does not exist, so the run has no prompt"
+
+    def test_the_skill_is_not_gitignored(self):
+        """`.claude/skills/*` is ignored by default with per-skill whitelists.
+
+        A missing whitelist line is silent locally (the file sits on disk) and
+        fatal on the runner: the hard-reset clone never receives the skill, so
+        every nightly `claude -p "/documentation-nightly ..."` runs without a
+        prompt.
+        """
+        proc = subprocess.run(
+            ["git", "check-ignore", "-q",
+             ".claude/skills/documentation-nightly/SKILL.md"],
+            cwd=REPO,
+            capture_output=True,
+            timeout=60,
+        )
+        assert proc.returncode != 0, (
+            ".claude/skills/documentation-nightly/ is gitignored; add the "
+            "whitelist line to .gitignore or the runner clone never gets the "
+            "skill"
+        )
 
     def test_the_log_directory_is_this_loops(self):
         body = _uncommented(WRAPPER)
@@ -92,7 +113,7 @@ class TestTheLoopOwnsItsOwnLane:
                 sys.executable,
                 str(REPO / "scripts" / "weekend_notify.py"),
                 "--loop",
-                "ci-performance",
+                "documentation",
                 "--phase",
                 "audit",
                 "--status",
@@ -104,7 +125,7 @@ class TestTheLoopOwnsItsOwnLane:
             env={"PATH": "/usr/bin:/bin"},
         )
         assert proc.returncode == 0, (
-            "weekend_notify rejects --loop ci-performance, so every phase page "
+            "weekend_notify rejects --loop documentation, so every phase page "
             f"is dropped: {proc.stdout}{proc.stderr}"
         )
 
@@ -118,9 +139,9 @@ class TestTheLaunchdJobPointsAtThisLoop:
             "__HOME__", "/tmp/home"
         )
         job = plistlib.loads(resolved.encode("utf-8"))
-        assert job["Label"] == "com.radon.ci-performance-daily"
+        assert job["Label"] == "com.radon.documentation-daily"
         program = " ".join(job["ProgramArguments"])
-        assert "scripts/ci_performance_nightly.sh" in program, program
+        assert "scripts/documentation_nightly.sh" in program, program
         assert program.rstrip().endswith("cycle"), (
             "the daily fire must run the full cycle (audit then remediate)"
         )
@@ -171,15 +192,18 @@ class TestSetupProvisionsTheDeadmanLabel:
     def test_setup_targets_this_loops_clone_and_job(self):
         body = _uncommented(SETUP)
         assert f'WEEKEND_REPO="$WEEKEND_ROOT/{CLONE}"' in body, body
-        assert "com.radon.ci-performance-daily.plist" in body, body
+        assert "com.radon.documentation-daily.plist" in body, body
 
-    @pytest.mark.parametrize("sibling", ("radon", "radon-testing", "radon-documentation"))
+    @pytest.mark.parametrize(
+        "sibling", ("radon", "radon-testing", "radon-ci-performance")
+    )
     def test_setup_stands_down_on_every_sibling_lock(self, sibling):
-        """All three setups write the SAME `$WEEKEND_ROOT/venv`.
+        """All four setups write the SAME `$WEEKEND_ROOT/venv`.
 
         Re-creating it re-installs site-packages under whichever sibling agent
         is mid-run, because every wrapper prepends that venv to the agent's
-        PATH. R-266 fixed this for two loops; a third makes the guard a set.
+        PATH. R-266 fixed this for two loops; every further loop extends the
+        guard set.
         """
         body = _uncommented(SETUP)
         install = body[: body.index("python3.13 -m venv")]
@@ -187,12 +211,29 @@ class TestSetupProvisionsTheDeadmanLabel:
             f"setup re-creates the shared venv without checking {sibling}"
         )
 
+    @pytest.mark.parametrize(
+        "setup_name",
+        [
+            "setup_reliability_weekend.sh",
+            "setup_testing_weekend.sh",
+            "setup_ci_performance.sh",
+        ],
+    )
+    def test_every_sibling_setup_stands_down_on_this_loops_lock(self, setup_name):
+        """The guard is symmetric: their setups must also wait on THIS clone."""
+        body = _uncommented(REPO / "scripts" / setup_name)
+        install = body[: body.index("python3.13 -m venv")]
+        assert f'"$WEEKEND_ROOT/{CLONE}"' in install, (
+            f"{setup_name} re-creates the shared venv without checking {CLONE}"
+        )
+
 
 class TestTheSkillCarriesTheNonNegotiableRails:
-    """The rails that keep an unattended optimizer from buying speed with
+    """The rails that keep an unattended documentation maintainer from
 
-    safety. Each is quoted from the skill because the agent has no other
-    source of them at 00:00.
+    inventing prose, touching live systems, or manufacturing busywork. Each is
+    quoted from the skill because the agent has no other source of them at
+    00:00.
     """
 
     @pytest.mark.parametrize(
@@ -200,12 +241,16 @@ class TestTheSkillCarriesTheNonNegotiableRails:
         [
             ".radon-weekend-runner",
             "Never push to `main`",
-            "Never trigger a dummy production deployment",
-            "Never weaken a gate",
-            "40-second production stability window",
-            "exact 40-character commit SHA",
-            "CI_PERFORMANCE_LOG.md",
-            "ci-performance/<YYYY-MM-DD>",
+            "Never touch live trading or production state",
+            "Never read or reproduce secret values",
+            "Never invent reality",
+            "Do not create proof-of-life documentation",
+            "documentation/<YYYY-MM-DD>",
+            "Documentation <YYYY-MM-DD>",
+            "NO_ACTIONABLE_DRIFT",
+            "audited-through",
+            "docs/owners.json",
+            "OPERATOR_REQUIRED",
         ],
     )
     def test_the_rail_is_present(self, rail):

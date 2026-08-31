@@ -89,7 +89,8 @@ fi
 # and site-packages a live reliability agent is executing against, mid-run.
 # The guard above was written for the clone ("A live cycle owns this clone")
 # and never extended to the shared $WEEKEND_ROOT both loops depend on. R-266.
-for SIBLING_REPO in "$WEEKEND_ROOT/radon" "$WEEKEND_ROOT/radon-ci-performance"; do
+for SIBLING_REPO in "$WEEKEND_ROOT/radon" "$WEEKEND_ROOT/radon-ci-performance" \
+  "$WEEKEND_ROOT/radon-documentation"; do
   if [[ -d "$SIBLING_REPO" ]] \
     && kill -0 "$(cat "$SIBLING_REPO/.weekend-runner.lock/pid" 2>/dev/null)" 2>/dev/null; then
     echo "  a weekend run is in flight in $SIBLING_REPO and shares $WEEKEND_VENV; re-run when it finishes"
