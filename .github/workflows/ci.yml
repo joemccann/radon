@@ -63,6 +63,11 @@ jobs:
   changes:
     name: Path filter
     runs-on: ubuntu-latest
+    # actions:read lets path_filter.py read this workflow's own run history
+    # (`gh api .../actions/workflows/ci.yml/runs`) to find the last green SHA.
+    permissions:
+      contents: read
+      actions: read
     outputs:
       python: ${{ steps.filter.outputs.python }}
       web: ${{ steps.filter.outputs.web }}
@@ -78,9 +83,16 @@ jobs:
         with:
           fetch-depth: 0
       - id: filter
+        # BASE_SHA is the PR base on pull_request and EMPTY on push: on a push
+        # path_filter.py resolves the base itself as the newest main SHA whose
+        # ci.yml push run concluded `success` and that HEAD descends from.
+        # `github.event.before` is whatever main pointed at a moment ago, red
+        # or green; a docs-only push on top of a red main diffed as
+        # documentation, skipped every gate and deployed the red tree. T-312.
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ github.token }}
         run: python3 scripts/ci/path_filter.py
 
   app-images:
