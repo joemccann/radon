@@ -809,6 +809,17 @@ Incident: 2026-08-15 00:24Z, P1 page `34ab3e3c…`.
   `ConnectionRefusedError` → stay `degraded`. Dwell still escalates
   newsfeed/monitor. Regression:
   `test_rel135_dependency_dwell.py::test_broker_weekend_clean_exit_does_not_escalate_past_dwell`.
+- **Weekend vol-cone "outage" banner (2026-08-31, `e7323e4e`):** `/api/vol-cone`
+  carried a private 48h `MAX_AGE_MS` while both vol-cone writers are Mon-Fri
+  only, so from Sunday ~20:45 UTC Friday's healthy EOD snapshot collapsed to
+  `missing:true` and the tab rendered the R-245 outage banner; the watchdog's
+  own `vol-cone` window still read the writer as `ok`. Discriminating check:
+  newest `scan_snapshots` row for `vol-cone` is Friday 20:45 UTC and
+  `service_health` `vol-cone` is `ok` → not an outage. Fix pattern (R-450):
+  the route shares `getFreshnessWindowMs("vol-cone", "closed")` (4d) with the
+  watchdog catalog; a session-gated writer never gets a route-private budget.
+  Regression: `web/tests/vol-cone-api.test.ts` "serves a weekend-aged snapshot
+  (60h) instead of collapsing to missing".
 - **Weekend deploy → false `status_http_502` P1 (2026-08-29, page
   `d98c3364`):** off-box sampled `/edge-health/status` HTTP 502 at
   16:45Z while user_path + freshness stayed green; deploy runners were
@@ -1254,6 +1265,39 @@ heartbeats.** Peak: 2026-08-24 19:30Z, page `60096761…`, 19m silent
 
 ---
 
+## mktnews-upstream-ws-refused
+
+**Symptom:** the headline tape keeps printing while the `service_health` row
+`mktnews-hub` is `error` (banner, `/api/service-health`). Not a contradiction:
+`radon-mktnews.service` (`scripts/mktnews/hub.js`) polls the vendor's flash
+REST lane every `FLASH_POLL_MS` (60s) while the upstream WebSocket is down,
+and keeps the row `error` on purpose because the WS outage still needs an
+operator. 2026-08-30: the VPS dial was refused for 16+ minutes at the vendor's
+Cloudflare edge while other networks connected fine.
+
+**Discriminate** before touching the unit:
+`journalctl -u radon-mktnews.service --since -30min | grep -E 'close|reconnect attempt|error|flash poll|idle'`
+
+- `close <code>` + `reconnect attempt=N` repeating and `flash poll fed N
+  print(s)` present → WS lane refused, REST lane alive. Vendor edge or VPS
+  egress-IP problem, not the hub.
+- No `flash poll` lines and no frames → both lanes down. Compare reachability
+  of the vendor host from the VPS and from the laptop.
+- `idle: no upstream frame for` → the socket was accepted but went silent;
+  the hub terminates and redials by itself.
+
+**Action:** a restart does not fix a refused dial (same egress IP, same edge).
+Confirm the vendor is reachable off-net. If only the VPS is blocked the fix is
+on the vendor-edge or egress-IP side, which is operator-only (external
+console); nothing in the repo changes it. The row clears itself on
+`upstream open`. Do not raise the `mktnews-hub` window to hide the state.
+
+**Regression:** `scripts/mktnews/upstream-down-fallback.test.js` ("flash poll
+fallback while the upstream WS is down", "clients admitted during an outage
+are told the upstream is down"); `scripts/mktnews/rel155-upstream-liveness.test.js`.
+
+---
+
 ## service-health-degraded / service-down (generic cases)
 
 `service-health-degraded`: `/api/service-health` body lists failing rows (error,
@@ -1292,9 +1336,11 @@ every fired outcome while `cooldown_allows_fire` only gates Pushover. A `×N`
 count on a latched daily handler is cycles-since-latch, never N incidents.
 
 `service-down`: `:8321/health/lite` connection-refused. Check
-`systemctl status radon-api` and journald; remember the cascade-stop rule — a
-cleanly stopped unit will NOT `Restart=always` back (`radon restart` respects
-the 2FA lock).
+`systemctl status radon-api` and journald; remember: a cleanly stopped unit
+will NOT `Restart=always` back (`radon restart` respects the 2FA lock). A
+Gateway stop or 2FA cycle does not take radon-api down (no `PartOf=` since
+44e89e1b, `After=` ordering only), so api connection-refused after a Gateway
+cycle is its own fault, not a cascade.
 
 ---
 

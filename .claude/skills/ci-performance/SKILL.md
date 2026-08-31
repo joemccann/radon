@@ -1,6 +1,6 @@
 ---
 name: ci-performance
-description: Nightly CI and deploy optimizer - measure the real push-to-green-production critical path from GitHub Actions and production deploy timestamps, then land one bounded, evidence-backed optimization per night on a PR branch without weakening any test, gate, provenance, health, recovery or rollback guarantee. Runs unattended on the always-on runner via scripts/ci_performance_nightly.sh, one daily cycle at 00:00 local that runs audit then remediate; invoke as /ci-performance audit or /ci-performance remediate.
+description: Nightly CI and deploy optimizer - measure the real push-to-green-production critical path from GitHub Actions and production deploy timestamps, then land one bounded, evidence-backed optimization per night on a PR branch without weakening any test, gate, provenance, health, recovery or rollback guarantee. Runs unattended on the always-on runner via scripts/ci_performance_nightly.sh, one daily cycle at 00:20 local that runs audit then remediate; invoke as /ci-performance audit or /ci-performance remediate.
 ---
 
 # Nightly CI and Deploy Optimizer
@@ -15,7 +15,7 @@ evidence-backed bottleneck at a time. Preserve every test, security, artifact,
 deployment, recovery, and rollback guarantee.
 
 The first argument is the mode: `audit` or `remediate`. The launchd job fires
-daily at 00:00 local and runs `audit` followed by `remediate` in this loop's
+daily at 00:20 local and runs `audit` followed by `remediate` in this loop's
 dedicated clone.
 
 ## Objective
@@ -367,6 +367,25 @@ each correction into a concrete rule that prevents recurrence.
 ## Lessons
 
 - 2026-08-30 bootstrap: the testing and reliability launchd jobs already fire
-  at 00:00 local in separate clones. This loop needs its own clone and lock.
+  at 00:20 local in separate clones. This loop needs its own clone and lock.
   Run local full gates serially, and use GitHub job/step timestamps rather than
   contention-distorted Mac mini timing for performance claims.
+- 2026-08-31 first audit: `gh run list --json` has no `runAttempt` field (it
+  is `attempt`); `cloud/tests` and `scripts/tests` cannot be collected in one
+  local pytest invocation (conftest import-path clash, same reason CI shards
+  them), so run the contract sets in two commands; the repo is on a free plan
+  so `/timing` reports zero billable ms and runner cost must be tracked as the
+  sum of job wall seconds.
+- 2026-08-31 remediate: local diagnostic scripts run under zsh; `compgen -G`
+  is a bash builtin, so a `$(compgen ...)` path list silently expands to
+  nothing and `pytest -n 4` then collects the WHOLE repo (~10k tests) on the
+  contended Mac mini. Build path lists with native zsh globs
+  (`files=(cloud/tests/test_[a-l]*.py)`) and always echo `${#files}` into the
+  status file before invoking pytest. Local timings stay diagnostic only.
+- 2026-08-31 remediate: before proposing a shard re-order, check whether the
+  shard is WORK-bound (pytest step ~ total work / 4 vCPU) or TAIL-bound (one
+  floor module collected late). `scripts-npsz` and `scripts-rs` are
+  work-bound (~290-300s each), so leading the 20-45s modules changed nothing;
+  `--durations=25` cannot tell the two cases apart. Get per-module work from a
+  Linux run (`--durations=0` on a PR branch or a junitxml artifact) before
+  spending a night on ordering.

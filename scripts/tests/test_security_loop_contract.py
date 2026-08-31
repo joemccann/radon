@@ -484,7 +484,10 @@ class TestThePlistFreezesUpdatesAndCarriesNoSecret:
 
     def test_the_job_fires_daily_at_midnight_and_not_at_load(self):
         job = self._job()
-        assert job["StartCalendarInterval"] == {"Hour": 0, "Minute": 0}
+        # REL-180 (R-503): the five loops are staggered inside the 00:xx hour
+        # (pairwise-distinct minutes are pinned in test_rel180_loop_launchers).
+        assert job["StartCalendarInterval"]["Hour"] == 0
+        assert 0 <= job["StartCalendarInterval"]["Minute"] < 60
         assert job["RunAtLoad"] is False
 
     def test_the_pre_reset_stands_down_on_a_live_lock(self):

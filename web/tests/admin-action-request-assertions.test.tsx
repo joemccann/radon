@@ -271,6 +271,90 @@ describe("admin destructive actions reach the wire", () => {
     expect(sent[0].method).toBe("POST");
   });
 
+  it("Reset Backoff hits /api/admin/ib/reset-backoff only after confirming (REL-172)", async () => {
+    const calls = await renderWorkspace();
+
+    await click("reset-backoff-button");
+    expect(screen.getByTestId("admin-confirm")).toBeTruthy();
+    expect(posts(calls)).toHaveLength(0);
+
+    await click("admin-confirm-action");
+    const sent = posts(calls);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].url).toBe("/api/admin/ib/reset-backoff");
+    expect(sent[0].method).toBe("POST");
+    expect(sent[0].cache).toBe("no-store");
+  });
+
+  it("on the app host the Reset Backoff gate says it releases the broker's lease (REL-172)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.endsWith("/api/admin/services") && (init?.method ?? "GET") === "GET") {
+          return jsonResponse({ ...SERVICES, supported: false, host_role: "app" });
+        }
+        return jsonResponse({ ...HEALTHY, host_role: "app" });
+      }),
+    );
+    render(<AdminWorkspace />);
+    await settle();
+
+    await click("reset-backoff-button");
+    expect(screen.getByTestId("admin-confirm").textContent).toMatch(/broker/i);
+  });
+
+  it("a broker transition disarms Force 2FA and Start on the app host (REL-172)", async () => {
+    const calls: RecordedCall[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input.toString();
+        calls.push({ url, method: init?.method ?? "GET", cache: init?.cache });
+        if (url.endsWith("/api/admin/services") && (init?.method ?? "GET") === "GET") {
+          return jsonResponse({
+            ...SERVICES,
+            supported: false,
+            host_role: "app",
+            units: SERVICES.units.map((unit) =>
+              unit.unit === GATEWAY_UNIT
+                ? { ...unit, load_state: "remote", active_state: "activating", sub_state: "transition-pending" }
+                : unit,
+            ),
+          });
+        }
+        return jsonResponse({
+          ...HEALTHY,
+          host_role: "app",
+          ib_gateway: {
+            ...HEALTHY.ib_gateway,
+            port_listening: false,
+            auth_state: "unreachable",
+            restart_backoff: {
+              ...HEALTHY.ib_gateway.restart_backoff!,
+              push_lock: {
+                holder: "broker:transition-pending",
+                acquired_at: 0,
+                expires_at: 0,
+                remaining_secs: 60,
+                reason: "broker transition pending",
+              },
+            },
+          },
+        });
+      }),
+    );
+    render(<AdminWorkspace />);
+    await settle();
+
+    expect((screen.getByTestId("force-2fa-button") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId("gateway-power-button") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId("gateway-power-disabled-reason").textContent).toMatch(/transition/i);
+    await click("force-2fa-button");
+    await click("gateway-power-button");
+    expect(posts(calls)).toHaveLength(0);
+  });
+
   it("Start Gateway hits the gateway start path, not stack restart", async () => {
     const calls: RecordedCall[] = [];
     vi.stubGlobal(

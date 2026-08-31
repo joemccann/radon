@@ -389,3 +389,163 @@ class TestAppRoleGateAtTheWire:
         assert resp.status_code == 200, resp.text
         control.assert_awaited_once_with("radon-api.service", "restart")
         remote.assert_not_awaited()
+
+
+# Captured before any fixture replaces it with a mock.
+_REAL_DOCKER_COMPOSE = server.ib_gateway._docker_compose
+
+
+class TestAppRoleRuntimeGate:
+    """REL-169 (R-472b): the app host must never take the combined path to a
+    local ``docker compose`` even when its env drifts off ``cloud`` mode. The
+    deploy-time check-env.py is not a runtime gate."""
+
+    @pytest.fixture(autouse=True)
+    def _app_role_docker_mode(self, monkeypatch):
+        import asyncio
+
+        monkeypatch.setenv("RADON_HOST_ROLE", "app")
+        monkeypatch.setattr(server.ib_gateway, "GATEWAY_MODE", "docker")
+        monkeypatch.setattr(server.ib_gateway, "_port_listening", lambda *a, **k: False)
+        monkeypatch.setattr(
+            server.ib_gateway,
+            "_docker_container_state",
+            AsyncMock(return_value=("exited", None)),
+        )
+        monkeypatch.setattr(server.ib_gateway, "_acquire_gateway_push_lease", lambda *a, **k: None)
+        monkeypatch.setattr(server.ib_gateway, "_poll_port", AsyncMock(return_value=(False, 0)))
+        monkeypatch.setattr(
+            server.ib_gateway, "_acquire_2fa_push_lock_bounded", lambda *a, **k: (True, None)
+        )
+        monkeypatch.setattr(server.ib_gateway, "_release_2fa_push_lock_bounded", lambda *a, **k: None)
+        server.ib_gateway.reset_restart_backoff()
+        self.compose = AsyncMock(return_value=("", "", 0))
+        monkeypatch.setattr(server.ib_gateway, "_docker_compose", self.compose)
+        self.restart_docker = AsyncMock(return_value={"restarted": True, "port_listening": False})
+        monkeypatch.setattr(server.ib_gateway, "_restart_docker", self.restart_docker)
+        self.run = asyncio.run
+
+    def test_ensure_ib_gateway_refuses_without_compose(self):
+        result = self.run(server.ib_gateway.ensure_ib_gateway())
+        assert result.get("restarted") is not True
+        assert result.get("reason") == "app_role"
+        assert "RADON_HOST_ROLE=app" in result["error"]
+        self.compose.assert_not_awaited()
+
+    def test_restart_ib_gateway_refuses_without_compose(self):
+        result = self.run(server.ib_gateway.restart_ib_gateway())
+        assert result["restarted"] is False
+        assert result.get("reason") == "app_role"
+        self.restart_docker.assert_not_awaited()
+        self.compose.assert_not_awaited()
+
+    def test_post_ib_restart_is_503_app_role(self, client, monkeypatch):
+        # The Clerk carve-out for app-role Gateway POSTs is the primary gate;
+        # this case hollows it out on purpose so the runtime gate under it is
+        # what refuses (the finding's defence-in-depth claim).
+        monkeypatch.setattr(server, "_is_app_role_gateway_mutation", lambda request: False)
+        monkeypatch.setattr(server, "_gateway_unit_controllable", lambda: False)
+        resp = client.post("/ib/restart", headers=_auth_headers())
+        assert resp.status_code == 503, resp.text
+        detail = resp.json()["detail"]
+        assert isinstance(detail, dict), detail
+        assert detail["reason"] == "app_role"
+        self.compose.assert_not_awaited()
+        self.restart_docker.assert_not_awaited()
+
+    def test_docker_compose_chokepoint_refuses(self, monkeypatch):
+        import asyncio
+
+        monkeypatch.setattr(
+            asyncio, "create_subprocess_exec",
+            AsyncMock(side_effect=AssertionError("compose must not spawn on the app role")),
+        )
+        out, err, rc = self.run(_REAL_DOCKER_COMPOSE("up", "-d"))
+        assert rc != 0
+        assert "RADON_HOST_ROLE=app" in err
+
+    def test_combined_role_still_reaches_compose(self, monkeypatch):
+        monkeypatch.setenv("RADON_HOST_ROLE", "combined")
+        result = self.run(server.ib_gateway.ensure_ib_gateway())
+        assert result.get("reason") != "app_role"
+        self.compose.assert_awaited()
+
+
+class TestSplit2faContract:
+    """REL-172 (R-475): on the app host, /health.ib_gateway.restart_backoff
+    reflects the BROKER's lease and transition, and show_unit maps a pending
+    transition to `activating` so the panel disarms Start."""
+
+    @pytest.fixture(autouse=True)
+    def _app_remote(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("RADON_HOST_ROLE", "app")
+        monkeypatch.setenv("IB_2FA_LOCK_PATH", str(tmp_path / "no-local-lock.json"))
+        for name in ("ca.pem", "client.pem", "client.key"):
+            (tmp_path / name).write_text("x")
+        monkeypatch.setenv("RADON_IB_REMOTE_URL", "https://10.0.0.4:8340")
+        monkeypatch.setenv("RADON_IB_REMOTE_CA", str(tmp_path / "ca.pem"))
+        monkeypatch.setenv("RADON_IB_REMOTE_CLIENT_CERT", str(tmp_path / "client.pem"))
+        monkeypatch.setenv("RADON_IB_REMOTE_CLIENT_KEY", str(tmp_path / "client.key"))
+        monkeypatch.setattr(server.ib_gateway, "GATEWAY_MODE", "cloud")
+        monkeypatch.setattr(server.ib_gateway, "_port_listening", lambda *a, **k: False)
+        monkeypatch.setattr(admin_services, "is_systemd_available", lambda: False)
+        admin_services._reset_remote_status_cache()
+
+    def _stub_status(self, monkeypatch, status, payload):
+        monkeypatch.setattr(admin_services, "_remote_http", lambda verb, timeout: (status, payload))
+
+    def test_transition_pending_disarms_force_and_start(self, monkeypatch):
+        import asyncio
+
+        self._stub_status(
+            monkeypatch, 409, {"ok": False, "detail": "transition-pending", "returncode": 74,
+                               "state": "transition-pending", "transition": "pending", "lease": None},
+        )
+        gw = asyncio.run(server.ib_gateway.check_ib_gateway())
+        lock = gw["restart_backoff"]["push_lock"]
+        assert lock is not None
+        assert lock["remaining_secs"] > 0
+        assert "transition" in lock["holder"]
+        admin_services._reset_remote_status_cache()
+        unit = asyncio.run(admin_services.show_unit(admin_services.GATEWAY_UNIT))
+        assert unit.active_state == "activating"
+
+    def test_broker_lease_is_proxied_into_push_lock(self, monkeypatch):
+        import asyncio
+        import time
+
+        now = time.time()
+        self._stub_status(
+            monkeypatch, 200, {"ok": True, "state": "running", "detail": "running", "returncode": 0,
+                               "transition": None,
+                               "lease": {"holder": "radon-cloud.ib-watchdog", "acquired_at": now - 5,
+                                         "expires_at": now + 300, "remaining_secs": 300, "reason": "probe"}},
+        )
+        gw = asyncio.run(server.ib_gateway.check_ib_gateway())
+        lock = gw["restart_backoff"]["push_lock"]
+        assert lock["holder"] == "radon-cloud.ib-watchdog"
+        assert lock["remaining_secs"] > 0
+        assert gw["restart_backoff"]["source"] == "broker"
+
+    def test_no_broker_lease_means_no_push_lock(self, monkeypatch):
+        import asyncio
+
+        self._stub_status(
+            monkeypatch, 200, {"ok": True, "state": "running", "detail": "running", "returncode": 0,
+                               "transition": None, "lease": None},
+        )
+        gw = asyncio.run(server.ib_gateway.check_ib_gateway())
+        assert gw["restart_backoff"]["push_lock"] is None
+
+    def test_reset_backoff_response_names_the_broker_lease(self, client, monkeypatch):
+        monkeypatch.setattr(server, "_is_app_role_gateway_mutation", lambda request: False)
+        remote = AsyncMock(return_value=admin_services.ActionResult(
+            admin_services.GATEWAY_UNIT, "reset-lease", True, "2FA push lease: released", 0))
+        with patch.object(admin_services, "remote_gateway_action", new=remote):
+            resp = client.post("/ib/reset-backoff", headers=_auth_headers())
+        assert resp.status_code == 200
+        body = resp.json()
+        remote.assert_awaited_once_with("reset-lease")
+        assert body["remote"]["action"] == "reset-lease"
+        assert body["broker_lease_released"] is True
+

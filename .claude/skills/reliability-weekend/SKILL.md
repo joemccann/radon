@@ -584,3 +584,28 @@ how this loop improves as the codebase grows.
   `route.ts` files touched only by a two-line export were set aside (`git diff --numstat` per file,
   keep > 10 lines). Check for a mechanical sweep commit before sizing the walks; the capability
   export itself was audited in the lead with one grep over the sensitive routes.
+- 2026-08-31 (audit): **when the merged nightly branches have been deleted remotely, split by the merge
+  commits' second parents, not by branch name.** `^origin/reliability/<prev> ^origin/testing/<prev>` from the
+  2026-08-30 lesson silently excludes nothing once those refs are gone; `git log <anchor>..HEAD ^<merge>^2
+  ^<merge>^2` (find the merges with `git log --merges --first-parent`) gives the same feature set and does
+  not depend on branch retention. Also: another loop's remediation can land as a SQUASH (7c627f30, #198), so
+  it is in the feature set by ancestry — hand it to the executing regression walk, not a feature walk.
+- 2026-08-31 (audit): a `.md` finding-count check must anchor on `\n## Delta audit <date>\n`, not the bare
+  heading string — the ledger line quotes the heading inside backticks, so a plain `index()` finds the
+  ledger first and the ascending-id assertion runs over the whole document (it failed on R-048 here).
+  Write the doc, then re-validate with the anchored slice.
+- 2026-08-31 (audit): the permanent drill suites live in TWO directories — `scripts/tests/` and
+  `scripts/tests/test_monitor_daemon/` (`test_exit_orders_ack.py`, `test_exit_orders_guard_durability.py`,
+  `test_fill_monitor_degraded_session.py`) plus `scripts/tests/test_watchdog/test_snapshot_unavailable.py`.
+  An executing walk reported the ack drill as "does not exist" after `ls scripts/tests | grep`; use
+  `grep -rl` over the tree before accepting a "missing test" claim, and verify it in the lead.
+- 2026-08-31 (audit): a week that lands a host split produces P1s that are all one shape — a mechanism that
+  worked on one host relied on something only that host had (its own lock file, its own env file, its own
+  systemctl). Give the walk covering a topology change an explicit question per shared-state file the
+  pre-split code read (`/health` lock state, `RADON_HOST_ROLE` source, `installed-units` role strip) and
+  ask "which host reads this now, and from where"; five of this week's P1s fall out of that question.
+- 2026-08-31 (audit): nine walks capped at 10-14 files finished in 4-8 minutes with none lost to the stream
+  watchdog, while five loops ran full suites on the same host. Two walks told to EXECUTE returned literal
+  outputs (`select_gates(...)` results, libsql claim races, `place_order` call counts) that settled four
+  fixes as HOLDS and produced four P2s from the uncovered cases — the "name one case the shipped test does
+  not cover and run it" instruction paid for itself again.

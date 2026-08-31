@@ -25,21 +25,25 @@ PUSHOVER_API_URL = "https://api.pushover.net/1/messages.json"
 ENV_FILE_KEYS = ("PUSHOVER_USER", "PUSHOVER_TOKEN")
 
 
-def _load_env_file(path: Optional[str]) -> None:
+def _load_env_file(path: Optional[str]) -> Optional[str]:
+    """Overlay an env file; returns the reason it could NOT be read, else None.
+
+    REL-180 (R-508): a missing file or an absent python-dotenv used to return
+    silently, so "paged" and "no credentials" were indistinguishable.
+    """
     if not path:
-        return
+        return None
     env_path = Path(path)
     if not env_path.is_file():
-        return
+        return f"env file {env_path} not found"
     try:
         from dotenv import dotenv_values
     except ImportError:
-        return
-    values = dotenv_values(env_path, interpolate=False)
-    for key in ENV_FILE_KEYS:
-        value = values.get(key)
-        if value is not None and key not in os.environ:
+        return "python-dotenv is not importable (is the venv on PATH?)"
+    for key, value in dotenv_values(env_path, interpolate=False).items():
+        if key and value is not None and key not in os.environ:
             os.environ[key] = value
+    return None
 
 
 def _creds() -> Optional[tuple[str, str]]:
@@ -132,7 +136,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--detail", default="")
     parser.add_argument("--env-file", default=None)
     args = parser.parse_args(argv)
-    _load_env_file(args.env_file)
+    env_reason = _load_env_file(args.env_file)
+    if _creds() is None:
+        reason = "no PUSHOVER_USER/PUSHOVER_TOKEN in the environment"
+        if env_reason:
+            reason += f"; {env_reason}"
+        print(f"pushover skipped: {reason}", file=sys.stderr)
+        return 0
     error = notify_weekend_phase(
         loop=args.loop,
         phase=args.phase,

@@ -556,3 +556,56 @@ class TestCreditIbClientIds:
         # CRI 50-61 (55 is portfolio_report), breadth 62-66, RV-ratio 67-68.
         taken = set(range(50, 55)) | {55} | set(range(57, 69))
         assert set(CREDIT_IB_HISTORY_CLIENT_IDS).isdisjoint(taken)
+
+
+class TestRobinhoodRungIsNotSilent:
+    """REL-174 (R-470): a structural Robinhood failure that demotes a ticker to
+    Yahoo is written into the heartbeat, not hidden under `ok`/`yahoo`."""
+
+    def test_auth_failure_reaches_the_service_health_row(self, monkeypatch, tmp_path, persist_calls):
+        import os
+
+        import fetch_credit_spread as fcs
+        from clients import robinhood_client as rh
+
+        health: list = []
+        monkeypatch.setattr(
+            fcs.writer, "record_service_health",
+            lambda service, state, finished_at=None, error=None: health.append((state, error)),
+        )
+        # Access-token-only Robinhood store, MCP answering 401 to everything.
+        token = tmp_path / "rh.json"
+        token.write_text('{"access_token": "tok", "token_type": "Bearer"}')
+        os.chmod(token, 0o600)
+        monkeypatch.setenv("ROBINHOOD_MCP_TOKEN_FILE", str(token))
+        monkeypatch.delenv("ROBINHOOD_MCP_REFRESH_TOKEN", raising=False)
+        monkeypatch.setattr(rh, "_refresh_disabled", False)
+        if hasattr(rh, "_reset_process_state"):
+            rh._reset_process_state()
+
+        class _R:
+            status_code = 401
+            headers: dict = {}
+            text = "nope"
+            content = b"nope"
+
+            def iter_content(self, chunk_size=8192):
+                yield b"nope"
+
+            def close(self):
+                pass
+
+        monkeypatch.setattr(rh.requests.Session, "post", lambda *a, **k: _R())
+        bars = {f"2026-0{m}-{d:02d}": 100.0 + d for m in (6, 7, 8) for d in range(1, 29)}
+        monkeypatch.setattr(fcs, "fetch_ib_closes", lambda tickers: {})
+        monkeypatch.setattr(fcs, "fetch_uw_closes", lambda tickers: {})
+        monkeypatch.setattr(fcs, "fetch_yahoo_closes", lambda tickers: {t: dict(bars) for t in tickers})
+        monkeypatch.setattr(fcs, "_read_cached_series", lambda: [])
+        monkeypatch.setattr(fcs, "_write_json_cache", lambda payload: None)
+
+        payload = fcs.run()
+        assert payload["source_by_ticker"][fcs.HYG_SYMBOL] == "yahoo"
+        assert health, "no heartbeat written"
+        state, error = health[-1]
+        assert state != "ok" or (error and error.get("class") == "auth"), (state, error)
+        assert "robinhood" in json.dumps(error).lower()

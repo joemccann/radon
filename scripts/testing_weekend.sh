@@ -269,6 +269,22 @@ cd "$REPO"
   exit 2
 }
 
+# REL-180 (R-504): .radon-weekend-runner is every loop's clone; this loop's
+# OWN marker is what stops a stray RADON_WEEKEND_REPO from running inside a
+# sibling loop's clone (taking ITS lock, hard-resetting ITS tree). Installed
+# clones predate the marker: the canonical path is admitted once and stamps
+# itself, so a merge cannot silence a loop until setup is re-run.
+LOOP_MARKER=".radon-testing-runner"
+if [[ ! -f "$LOOP_MARKER" ]]; then
+  if [[ "$(pwd -P)" == "$(cd "$HOME/radon-weekend/radon-testing" 2>/dev/null && pwd -P)" ]]; then
+    touch "$LOOP_MARKER"
+  else
+    echo "REFUSING: $REPO is not the dedicated testing runner clone ($LOOP_MARKER absent)" >&2
+    report "REFUSED" "$REPO lacks the $LOOP_MARKER marker; the testing loop runs only in ~/radon-weekend/radon-testing" || true
+    exit 2
+  fi
+fi
+
 RUNNER_LOCK="$REPO/.weekend-runner.lock"
 acquire_runner_lock "$RUNNER_LOCK" || {
   echo "REFUSING: another weekend run owns $REPO" >&2
@@ -337,7 +353,7 @@ ground_truth() {
   fetch_origin_with_retry
   git checkout -f --quiet main
   git reset --hard --quiet origin/main
-  git clean -fdq --exclude=.radon-weekend-runner --exclude=.weekend-runner.lock --exclude=logs/ --exclude=.env --exclude=.env.ib-mode --exclude=web/.env
+  git clean -fdq --exclude=.radon-weekend-runner --exclude=.radon-testing-runner --exclude=.weekend-runner.lock --exclude=logs/ --exclude=.env --exclude=.env.ib-mode --exclude=web/.env
 }
 
 # The agent commits per completed task and the skill resumes from the
@@ -437,7 +453,10 @@ run_phase() {
   trap on_crash ERR
 
   local tail_text
-  tail_text="$(tail -c 1500 "$RUN_LOG" 2>/dev/null || true)"
+  # REL-180 (R-505): this tail is posted to a PUBLIC issue. Every value from
+  # the clone's env files and any KEY=/Bearer shape is scrubbed before it
+  # leaves; a redactor failure posts nothing rather than the raw tail.
+  tail_text="$(tail -c 1500 "$RUN_LOG" 2>/dev/null | python3 "$REPO/scripts/weekend_redact.py" --repo "$REPO" 2>/dev/null || true)"
   local status
   status="$(phase_status "$RC" "$RUN_LOG" "$ROUND_LOG_MARK")"
   # Only the rc-0-no-marker arm gains this check; TIMEOUT / FAILED /

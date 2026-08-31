@@ -531,7 +531,41 @@ def _repo_unit_counter(repo_path: Path) -> Counter:
     return merge_unit_counters(texts)
 
 
+CANONICAL_ENV_FILE = Path("/etc/radon/env")
+HOST_ROLES = frozenset({"app", "broker", "combined"})
+# Units the control-plane refresh strips by role. Mirrors
+# role_skips_control_plane_source() in scripts/deploy-root-helper.sh; their
+# absence on that role is the intended state, not drift (REL-169, R-498).
+ROLE_SKIPPED_UNITS: dict[str, frozenset[str]] = {
+    "app": frozenset(
+        {
+            "radon-ib-gateway.service",
+            "radon-ib-gateway-preheld-restart.service",
+            "radon-ib-watchdog.service",
+            "radon-ib-watchdog.timer",
+            "radon-ib-gateway-remote.service",
+        }
+    ),
+}
+
+
+def resolve_host_role(environ=None) -> str:
+    """RADON_HOST_ROLE: process env, then /etc/radon/env, then RADON_ENV_FILE."""
+    environ = os.environ if environ is None else environ
+    raw = (environ.get("RADON_HOST_ROLE") or "").strip().strip("\"'")
+    if not raw:
+        candidates = [CANONICAL_ENV_FILE]
+        if environ.get("RADON_ENV_FILE"):
+            candidates.append(Path(environ["RADON_ENV_FILE"]))
+        for path in candidates:
+            raw = load_env_keys(path, ("RADON_HOST_ROLE",)).get("RADON_HOST_ROLE", "").strip()
+            if raw:
+                break
+    return raw if raw in HOST_ROLES else "combined"
+
+
 def _check_units(drifts: list[dict], known_untracked: list[str]) -> None:
+    role_skipped = ROLE_SKIPPED_UNITS.get(resolve_host_role(), frozenset())
     repo_units = {
         p.name: p
         for pattern in UNIT_GLOBS
@@ -548,6 +582,9 @@ def _check_units(drifts: list[dict], known_untracked: list[str]) -> None:
     for name, repo_path in sorted(repo_units.items()):
         live_path = live_units.get(name)
         if live_path is None:
+            if name in role_skipped:
+                known_untracked.append(f"role-skipped:{name}")
+                continue
             drifts.append({"id": f"not-installed:{name}", "detail": f"services/{name}"})
             continue
         if live_path.is_symlink():
