@@ -97,6 +97,71 @@ class TestIdenticalCashSuppressionIsNotATaint:
         assert realized_pnl_by_exec_id(rows) == {API_ID: 2000.0, "c2": 3000.0}
 
 
+class TestASecondEqualPricePartialIsNotADuplicate:
+    """T-316: the identical-cash carve-out covers ONE duplicate per counted fill.
+
+    The fingerprint `(contract, date, signed_qty)` collapses a SECOND equal-price
+    Flex partial onto the daemon's one, and R-383 waved it through at `info`
+    because the cash matched. But the daemon's row has already been matched by
+    the first Flex row; the second has no counted counterpart to duplicate, so
+    suppressing it drops a real fill and the inventory is short by one lot.
+    """
+
+    _KEY = "SLV|20261016|C|60.0"
+
+    @staticmethod
+    def _five_rows():
+        """api BUY 10@1, flex BUY 10@1 (dup), flex BUY 10@1 (distinct), BUY 10@3,
+        SELL 20@5. True basis (20x1 + 10x3)/30 -> 6,666.67 with 10 still long;
+        the short-by-one replay prices it at $2/unit -> 6,000 and goes flat.
+        """
+        return [
+            _row(API_ID, "BUY_OPTION", 10, 1.00, 0.0, _C60, "2026-08-07", "w1",
+                 "2026-08-07T14:00:00-04:00"),
+            _row(FLEX_ID, "BUY_OPTION", 10, 1.00, 0.0, _C60, "2026-08-07", "w2",
+                 "2026-08-07T14:00:00-04:00"),
+            _row(FLEX_ID_2, "BUY_OPTION", 10, 1.00, 0.0, _C60, "2026-08-07", "w3",
+                 "2026-08-07T15:30:00-04:00"),
+            _row("o2", "BUY_OPTION", 10, 3.00, 0.0, _C60, "2026-08-11", "w4"),
+            _row("c1", "SELL_OPTION", 20, 5.00, 0.0, _C60, "2026-08-20", "w5"),
+        ]
+
+    def test_the_close_priced_against_the_short_inventory_is_withheld(self, caplog):
+        with caplog.at_level("WARNING"):
+            realized = realized_pnl_by_exec_id(self._five_rows())
+        assert "c1" not in realized, f"published {realized} against a true 6666.67"
+        warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+        assert any(self._KEY in message for message in warnings), warnings
+
+    def test_the_taint_reaches_the_close_that_flattens_the_replay(self, caplog):
+        """`c1` takes the replay to zero; R-406's reset must apply AFTER it."""
+        with caplog.at_level("WARNING"):
+            realized = realized_pnl_by_exec_id(self._five_rows())
+        assert realized == {}
+        assert any("withholding c1" in r.getMessage() for r in caplog.records)
+
+    def test_a_dual_written_pair_of_partials_still_publishes(self, caplog):
+        """Two daemon partials + two Flex partials, all equal cash: every Flex
+        row has a counted counterpart, so the carve-out holds and no taint."""
+        rows = [
+            _row(API_ID, "BUY_OPTION", 10, 1.00, 0.0, _C60, "2026-08-07", "w1",
+                 "2026-08-07T14:00:00-04:00"),
+            _row(API_ID_2, "BUY_OPTION", 10, 1.00, 0.0, _C60, "2026-08-07", "w2",
+                 "2026-08-07T14:30:00-04:00"),
+            _row(FLEX_ID, "BUY_OPTION", 10, 1.00, 0.0, _C60, "2026-08-07", "w3",
+                 "2026-08-07T15:00:00-04:00"),
+            _row(FLEX_ID_2, "BUY_OPTION", 10, 1.00, 0.0, _C60, "2026-08-07", "w4",
+                 "2026-08-07T15:30:00-04:00"),
+            _row("o2", "BUY_OPTION", 10, 3.00, 0.0, _C60, "2026-08-11", "w5"),
+            _row("c1", "SELL_OPTION", 30, 5.00, 0.0, _C60, "2026-08-20", "w6"),
+        ]
+        with caplog.at_level("WARNING"):
+            realized = realized_pnl_by_exec_id(rows)
+        # basis (2x1.00 + 3.00)/3 = 1.6667/unit -> 30 x (500 - 166.67) = 10,000
+        assert realized == {"c1": 10000.0}
+        assert [r for r in caplog.records if r.levelname == "WARNING"] == []
+
+
 class TestFlatPositionClearsTheTaint:
     def test_a_reopened_contract_is_replayed_against_its_own_basis(self):
         """Cycle 1 dual-written at identical cash, cycle 2 clean. Both publish."""

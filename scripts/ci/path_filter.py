@@ -7,6 +7,16 @@ read by it: the trees each gate's own tests read across the tree boundary are
 routed to that gate too (WEB_READS / PYTHON_READS below), so a change can
 never skip the gate that asserts on it. Documentation-only ranges (.md, and
 images under the skip prefixes) skip both gates.
+
+The base of the range is what makes a skip safe. On a pull_request it is the
+PR base. On a push to main it is the newest SHA whose own ci.yml push run
+concluded `success` AND that HEAD descends from (`resolve_gate_base`), never
+`github.event.before`: `before` is whatever main pointed at a moment ago, red
+or green, so a docs-only push on top of a red main diffed as documentation,
+skipped every gate, and `deploy` (which accepts `skipped`) shipped the red
+runtime tree as a green release. When that base cannot be resolved (API error,
+no green run, none on HEAD's ancestry) the range is empty and both gates run.
+T-312.
 """
 
 from __future__ import annotations
@@ -15,8 +25,16 @@ import fnmatch
 import os
 import subprocess
 import sys
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
+
+GATE_WORKFLOW = "ci.yml"
+GATE_BRANCH = "main"
+# Successful push runs to look back through for one on HEAD's ancestry. A
+# force-push that rewrites more than this many releases resolves nothing and
+# runs both gates, which is the fail-closed answer for a rewritten main.
+GREEN_RUN_LOOKBACK = 30
 
 WEB_PREFIXES = (
     "web/",
@@ -303,6 +321,70 @@ def select_gates(paths: list[str]) -> GateSelection:
     return GateSelection(python=python, web=web, contract_tests=tuple(sorted(tests)))
 
 
+def green_main_push_shas(repo: str) -> list[str]:
+    """head_sha of the newest successful push runs of the gate workflow, newest first.
+
+    A push run of ci.yml concludes `success` only when every job that ran
+    passed: the test gates, the coverage ratchets and `deploy`, which is part
+    of the same run. Gates a run skipped were skipped because THEIR range
+    resolved to a green base, so success is transitive down this list. The
+    Deployments API would need a second call per record for its status and
+    says nothing about a run whose deploy was skipped by its `if:`; this is one
+    call and answers the question the filter asks: did the gate pass at that SHA.
+    """
+    query = (
+        f"repos/{repo}/actions/workflows/{GATE_WORKFLOW}/runs"
+        f"?branch={GATE_BRANCH}&event=push&status=success&per_page={GREEN_RUN_LOOKBACK}"
+    )
+    result = subprocess.run(
+        ["gh", "api", query, "--jq", ".workflow_runs[].head_sha"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.split()
+
+
+def _is_ancestor(sha: str, head: str, cwd: Path | None = None) -> bool:
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", sha, head],
+        cwd=cwd,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0
+
+
+def resolve_gate_base(
+    head: str,
+    green_shas: Callable[[], Iterable[str]],
+    is_ancestor: Callable[[str, str], bool],
+) -> str | None:
+    """The newest green SHA that HEAD descends from; None when nothing qualifies.
+
+    None is the fail-closed answer: `changed_paths` turns it into an empty
+    range and `classify` runs both gates on an empty range.
+    """
+    try:
+        candidates = list(green_shas())
+        for sha in candidates:
+            if sha and is_ancestor(sha, head):
+                return sha
+    except Exception as error:  # noqa: BLE001 - unreadable history must run both gates
+        print(f"gate base unresolved ({error!r}); running both gates", file=sys.stderr)
+        return None
+    return None
+
+
+def gate_base(head: str) -> str:
+    """PR base on pull_request; last green main SHA on push; '' when unknown."""
+    if os.environ.get("GITHUB_EVENT_NAME") != "push":
+        return os.environ.get("BASE_SHA", "")
+    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    return resolve_gate_base(head, lambda: green_main_push_shas(repo), _is_ancestor) or ""
+
+
 def changed_paths(base: str, head: str, cwd: Path | None = None) -> list[str]:
     if not base or set(base) <= {"0"}:
         return []
@@ -334,18 +416,19 @@ def write_output(selection: GateSelection, output_path: Path) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     del argv
-    base = os.environ.get("BASE_SHA", "")
     head = os.environ.get("HEAD_SHA", "") or "HEAD"
     output = os.environ.get("GITHUB_OUTPUT")
     if not output:
         print("GITHUB_OUTPUT is required", file=sys.stderr)
         return 2
+    base = gate_base(head)
     paths = changed_paths(base, head)
     selection = select_gates(paths)
     write_output(selection, Path(output))
     print(
         f"python={selection.python} web={selection.web} "
-        f"contracts={selection.contracts} files={len(paths)}"
+        f"contracts={selection.contracts} files={len(paths)} "
+        f"base={base or 'unresolved'}"
     )
     return 0
 

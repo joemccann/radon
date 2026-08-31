@@ -703,6 +703,13 @@ class ExitOrdersHandler(BaseHandler):
                                 "contract": contract.localSymbol,
                                 "error": violation["message"],
                             })
+                            # T-313: the position stays unprotected, so
+                            # this cycle must heartbeat error, not ok.
+                            result["error"] = (
+                                f"exit order refused by the order limit "
+                                f"({ticker} {order_info['order_type']}): "
+                                f"{violation['message']}"
+                            )
                             continue
 
                         trade = client.place_order(contract, limit_order)

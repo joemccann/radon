@@ -111,10 +111,14 @@ mkdir -p "$WEEKEND_REPO/logs/testing-weekend"
 # boot, so the loop cannot do the browser verification CLAUDE.md requires
 # (T-248 filed the resulting permanent local false-red on 2026-08-29).
 #
-# ONLY web/.env. The root .env is deliberately NOT provisioned: python-dotenv
-# already walks up from the clone to $WEEKEND_ROOT/.env, which carries the
-# same TURSO/IB keys, so a copy is redundant, and it would put IB_FLEX_TOKEN
-# in a second place. web/.env is read by Next, never by pytest.
+# ONLY web/.env. The root .env is deliberately NOT provisioned: it would put
+# IB_FLEX_TOKEN in a second place. web/.env IS read by pytest, not only by
+# Next: 50 scripts/**/*.py producers (grep -rl 'load_dotenv(.*web.*\.env'
+# scripts --include='*.py') call load_dotenv(web/.env) at import, so the
+# clone's TURSO creds land in os.environ under every collected module.
+# scripts/tests/conftest.py::_strip_turso_credentials removes them per test;
+# that fixture, not this file, keeps the pytest gate host-independent (T-317:
+# without it 22 tests red with FlexTokenLocked on a provisioned clone).
 # Re-copied every setup run so a rotated key propagates. Never inline a value.
 provision_env_file() {
   local rel="$1"

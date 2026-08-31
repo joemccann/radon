@@ -175,7 +175,7 @@ class TestProbeEvidenceHasAnAge:
 class TestFlexPullAlwaysHeartbeats:
     def test_an_unexpected_exception_writes_an_error_row(self, monkeypatch, tmp_path):
         import flex_sftp_pull as pull
-        from test_flex_sftp_pull import FakeSftp, _ssh_config
+        from test_flex_sftp_pull import AFTER_FIRST_DELIVERY, FakeSftp, _ssh_config
 
         beats: list[tuple] = []
         monkeypatch.setattr(pull, "_heartbeat", lambda state, error=None: beats.append((state, error)))
@@ -195,6 +195,7 @@ class TestFlexPullAlwaysHeartbeats:
             runner=FakeSftp({"activity.gpg": b"<FlexQueryResponse/>"}),
             decrypt=lambda data, **k: data.decode(),
             ingest=_boom,
+            now=AFTER_FIRST_DELIVERY,
         )
         assert code == 1
         assert beats and beats[-1][0] == "error", beats
@@ -202,7 +203,7 @@ class TestFlexPullAlwaysHeartbeats:
     def test_a_raise_outside_every_handler_still_heartbeats(self, monkeypatch, tmp_path):
         """`_ensure_inbox` / `retain_newest_gpg` sit outside every per-file handler."""
         import flex_sftp_pull as pull
-        from test_flex_sftp_pull import FakeSftp, _ssh_config
+        from test_flex_sftp_pull import AFTER_FIRST_DELIVERY, FakeSftp, _ssh_config
 
         beats: list[tuple] = []
         monkeypatch.setattr(pull, "_heartbeat", lambda state, error=None: beats.append((state, error)))
@@ -220,13 +221,14 @@ class TestFlexPullAlwaysHeartbeats:
             runner=FakeSftp({"activity.gpg": b"<FlexQueryResponse/>"}),
             decrypt=lambda data, **k: data.decode(),
             ingest=lambda xml_text, source_path="": {"ok": True, "outcome": "applied"},
+            now=AFTER_FIRST_DELIVERY,
         )
         assert code == 1
         assert beats and beats[-1][0] == "error", beats
 
     def test_a_clean_run_still_heartbeats_ok(self, monkeypatch, tmp_path):
         import flex_sftp_pull as pull
-        from test_flex_sftp_pull import FakeSftp, _ssh_config
+        from test_flex_sftp_pull import AFTER_FIRST_DELIVERY, FakeSftp, _ssh_config
 
         beats: list[tuple] = []
         monkeypatch.setattr(pull, "_heartbeat", lambda state, error=None: beats.append((state, error)))
@@ -243,6 +245,7 @@ class TestFlexPullAlwaysHeartbeats:
             runner=FakeSftp({"activity.gpg": b"<FlexQueryResponse/>"}),
             decrypt=lambda data, **k: data.decode(),
             ingest=lambda xml_text, source_path="": {"ok": True, "outcome": "applied"},
+            now=AFTER_FIRST_DELIVERY,
         )
         assert code == 0
         assert [state for state, _ in beats] == ["ok"], beats

@@ -7,6 +7,7 @@ import type { PortfolioData } from "@/lib/types";
 import {
   getPnlDollars,
   getPnlPct,
+  hasBlendedLegBasis,
   resolveEntryCost,
   resolveMarketValue,
 } from "@/lib/positionUtils";
@@ -29,7 +30,7 @@ export function computeUnrealizedBreakdown(
     if (mv == null) return [];
     const entry = resolveEntryCost(pos);
     const pnl = getPnlDollars(pos, mv);
-    if (pnl == null) return [];
+    if (entry == null || pnl == null) return [];
     const pnlPct = getPnlPct(pos, mv);
     return [{
       id: pos.id,
@@ -47,9 +48,16 @@ export function computeUnrealizedBreakdown(
 export function sumUnrealizedBreakdown(portfolio: PortfolioData): number {
   let total = 0;
   for (const pos of portfolio.positions) {
-    const mv = resolveMarketValue(pos);
-    if (mv == null) continue;
-    total += mv - resolveEntryCost(pos);
+    const pnl = getPnlDollars(pos, resolveMarketValue(pos));
+    if (pnl != null) total += pnl;
   }
   return total;
+}
+
+/**
+ * Positions the open-P&L total leaves out because their legs disagree about
+ * their basis (T-315). Non-zero means the total is a partial read.
+ */
+export function countUnmeasuredBasis(portfolio: PortfolioData): number {
+  return portfolio.positions.filter(hasBlendedLegBasis).length;
 }

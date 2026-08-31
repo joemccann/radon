@@ -56,7 +56,7 @@ export type AssetCockpitProps = {
 function MobilePositionSummary({ position }: { position: PortfolioPosition }) {
   const mv = resolveMarketValue(position);
   const ec = resolveEntryCost(position);
-  const pnl = mv != null ? mv - ec : null;
+  const pnl = mv != null && ec != null ? mv - ec : null;
   const pnlTone = pnl == null ? "mut" : pnl > 0 ? "pos" : pnl < 0 ? "neg" : "mut";
   // Signed per the credit/debit convention: a credit combo's avg entry reads
   // NEGATIVE (the operator was paid to open). `getAvgEntry` owns the leg-count

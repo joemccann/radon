@@ -23,8 +23,11 @@ subject is inside the 120s cooldown, so the condition is sticky.
 
 from __future__ import annotations
 
+import fcntl
+import json
 import re
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -72,31 +75,170 @@ class TestOneCriTimeoutConstant:
         )
         assert data_refresh.CRI_SCAN_TIMEOUT_SECS == 180
 
-    def test_cri_scan_serialises_concurrent_runs(self):
-        source = (SCRIPTS / "cri_scan.py").read_text(encoding="utf-8")
-        body = "\n".join(ln for ln in source.splitlines() if not ln.lstrip().startswith("#"))
-        assert "fcntl" in body or "flock" in body, (
-            "a browser POST landing during a timer fire runs a second cri_scan "
-            "concurrently, racing the same data/cri.json and IB client-id range"
-        )
 
-    def test_the_advisory_lock_is_non_blocking(self):
-        """A second caller must serve cache, not queue behind a 180s run."""
-        source = (SCRIPTS / "cri_scan.py").read_text(encoding="utf-8")
-        assert "LOCK_NB" in source, source[:0] or "expected a non-blocking flock"
+
+# A blocking flock would park the loser behind a 180s run; a bounded join turns
+# that hang into a failure instead of a stuck test session.
+LOCK_LOSER_BUDGET_S = 15.0
+CACHED_CRI = {"date": "2026-08-28", "cri": 42.0, "level": "T-314 cached payload"}
+
+
+class _IBNeverConstructed:
+    """Stands in for `ib_insync.IB`: the lock loser must not open a socket."""
+
+    def __init__(self, *args, **kwargs):
+        raise AssertionError("the lock loser constructed an IB client")
+
+
+@pytest.fixture
+def cri_scan_sandbox(monkeypatch, tmp_path):
+    """`cri_scan` pointed at a throwaway project dir, with IB and the
+    off-hours cache gate stubbed so ONLY the advisory lock decides the path."""
+    import ib_insync
+
+    import cri_scan
+    from utils import scan_cache_gate
+
+    monkeypatch.setattr(cri_scan, "_PROJECT_DIR", tmp_path)
+    (tmp_path / "data").mkdir()
+    monkeypatch.setattr(ib_insync, "IB", _IBNeverConstructed)
+    monkeypatch.setattr(cri_scan, "fetch_all", _IBNeverConstructed)
+    monkeypatch.setattr(scan_cache_gate, "cached_scan_if_fresh", lambda *a, **k: None)
+    monkeypatch.setenv("RADON_CRI_SCAN_LOCK", str(tmp_path / "held.lock"))
+    return cri_scan
+
+
+@pytest.fixture
+def held_scan_lock(tmp_path):
+    """The test process holds the lock the way an in-flight timer run would."""
+    with open(tmp_path / "held.lock", "a+") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        yield handle
+
+
+def _run_cri_main(monkeypatch, cri_scan, *argv) -> int:
+    """`cri_scan.main()` under a wall-clock budget; its exit code."""
+    monkeypatch.setattr(sys, "argv", ["cri_scan.py", *argv])
+    outcome: dict = {}
+
+    def target() -> None:
+        try:
+            cri_scan.main()
+            outcome["exit"] = 0
+        except SystemExit as exc:
+            outcome["exit"] = exc.code
+        except BaseException as exc:  # noqa: BLE001 — re-raised on the test thread
+            outcome["error"] = exc
+
+    worker = threading.Thread(target=target, daemon=True)
+    worker.start()
+    worker.join(LOCK_LOSER_BUDGET_S)
+    assert not worker.is_alive(), (
+        "the advisory lock BLOCKED: a loser must serve cache or exit 75, "
+        "not queue behind a run that may take 180s"
+    )
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome["exit"]
+
+
+class TestCriScanLockLoserServesCacheOrYields:
+    def test_a_lock_loser_prints_the_cached_payload_and_touches_no_ib(
+        self, monkeypatch, tmp_path, capsys, cri_scan_sandbox, held_scan_lock
+    ):
+        (tmp_path / "data" / "cri.json").write_text(json.dumps(CACHED_CRI))
+
+        exit_code = _run_cri_main(monkeypatch, cri_scan_sandbox, "--json")
+
+        assert exit_code == 0
+        assert json.loads(capsys.readouterr().out) == CACHED_CRI
+
+    def test_a_lock_loser_with_no_cache_exits_75(
+        self, monkeypatch, tmp_path, capsys, cri_scan_sandbox, held_scan_lock
+    ):
+        assert not (tmp_path / "data" / "cri.json").exists()
+
+        exit_code = _run_cri_main(monkeypatch, cri_scan_sandbox, "--json")
+
+        assert exit_code == 75
+        assert capsys.readouterr().out == ""
+
+
+def _container_data_bind(runtime_script: str) -> tuple[Path, Path]:
+    """(host DATA_DIR, container mount point) from radon-app-runtime.sh."""
+    host = re.search(r"^\s*DATA_DIR=(\S+)$", runtime_script, re.M).group(1)
+    mount = re.search(r'-v "\$\{DATA_DIR\}:(\S+)"', runtime_script).group(1)
+    return Path(host), Path(mount)
+
+
+def _container_workdir(runtime_script: str) -> Path:
+    return Path(re.search(r"^\s*workdir=(\S+)$", runtime_script, re.M).group(1))
+
+
+def _host_timer_workdir(unit: str) -> Path:
+    return Path(re.search(r"^WorkingDirectory=(\S+)$", unit, re.M).group(1))
+
+
+class TestCriScanLockIsSharedAcrossTheContainerBoundary:
+    """The timer runs `cri_scan` on the HOST (`radon-refresh.service`); the
+    browser's `/regime/scan` runs it INSIDE the app container. `/tmp` is a
+    different inode on each side, so a `/tmp` lock serialises nothing across
+    them. The lock must live under the one directory both sides share."""
+
+    def test_the_default_lock_path_lands_inside_the_shared_data_bind(self, monkeypatch):
+        import cri_scan
+
+        monkeypatch.delenv("RADON_CRI_SCAN_LOCK", raising=False)
+        runtime = (REPO / "cloud" / "scripts" / "radon-app-runtime.sh").read_text(encoding="utf-8")
+        refresh_unit = (REPO / "cloud" / "services" / "radon-refresh.service").read_text(encoding="utf-8")
+        host_data_dir, container_data_dir = _container_data_bind(runtime)
+
+        lock = Path(cri_scan.scan_lock_path())
+        assert lock.is_relative_to(cri_scan._PROJECT_DIR), (
+            f"{lock} is outside the project tree, so it is outside every bind "
+            "radon-app-runtime.sh hands the container"
+        )
+        in_project = lock.relative_to(cri_scan._PROJECT_DIR)
+
+        on_host = _host_timer_workdir(refresh_unit) / in_project
+        in_container = _container_workdir(runtime) / in_project
+        assert on_host.is_relative_to(host_data_dir), on_host
+        assert in_container.is_relative_to(container_data_dir), in_container
+
+    def test_the_env_override_still_wins(self, monkeypatch, tmp_path):
+        import cri_scan
+
+        monkeypatch.setenv("RADON_CRI_SCAN_LOCK", str(tmp_path / "elsewhere.lock"))
+        assert Path(cri_scan.scan_lock_path()) == tmp_path / "elsewhere.lock"
 
 
 class TestGateSaturationIsVisible:
-    def test_the_overflow_branch_records_saturation(self):
-        server = (SCRIPTS / "api" / "server.py").read_text(encoding="utf-8")
-        body = "\n".join(ln for ln in server.splitlines() if not ln.lstrip().startswith("#"))
-        start = body.index("def _scan_gate_for(")
-        end = body.index("\ndef ", start + 1)
-        branch = body[start:end]
-        assert "_record_scan_gate_saturation" in branch, (
-            "the only externally visible artifact of saturation is a 429 whose "
-            "detail says 'backing off after a failure'"
-        )
+    def test_a_novel_subject_on_a_saturated_map_records_saturation(self, monkeypatch):
+        import importlib
+
+        from api.scan_gate import ScanGate
+
+        server = importlib.import_module("api.server")
+        emitted: list = []
+        monkeypatch.setattr(server, "_write_scan_gate_saturation_row", lambda detail: emitted.append(detail))
+        monkeypatch.setattr(server, "_SCAN_GATE_SATURATION_REPORTED_AT", None, raising=False)
+        server._reset_scan_gates()
+        try:
+            for i in range(server.MAX_SUBJECT_SCAN_GATES):
+                armed = ScanGate(f"cri:S{i}")
+                armed.mark_failure()
+                server._SUBJECT_SCAN_GATES[("cri", f"S{i}")] = armed
+
+            gate = server._scan_gate_for("x", "new")
+
+            assert gate is server._OVERFLOW_SCAN_GATE
+            assert ("x", "NEW") not in server._SUBJECT_SCAN_GATES
+            assert len(emitted) == 1, (
+                "every tracked subject is backing off, nothing is evictable, and "
+                f"the refusal left no trace: {emitted}"
+            )
+        finally:
+            server._reset_scan_gates()
 
     def test_the_saturation_detail_names_the_cause(self):
         import importlib

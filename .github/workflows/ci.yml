@@ -63,6 +63,11 @@ jobs:
   changes:
     name: Path filter
     runs-on: ubuntu-latest
+    # actions:read lets path_filter.py read this workflow's own run history
+    # (`gh api .../actions/workflows/ci.yml/runs`) to find the last green SHA.
+    permissions:
+      contents: read
+      actions: read
     outputs:
       python: ${{ steps.filter.outputs.python }}
       web: ${{ steps.filter.outputs.web }}
@@ -78,9 +83,16 @@ jobs:
         with:
           fetch-depth: 0
       - id: filter
+        # BASE_SHA is the PR base on pull_request and EMPTY on push: on a push
+        # path_filter.py resolves the base itself as the newest main SHA whose
+        # ci.yml push run concluded `success` and that HEAD descends from.
+        # `github.event.before` is whatever main pointed at a moment ago, red
+        # or green; a docs-only push on top of a red main diffed as
+        # documentation, skipped every gate and deployed the red tree. T-312.
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ github.token }}
         run: python3 scripts/ci/path_filter.py
 
   app-images:
@@ -464,8 +476,12 @@ jobs:
       # caddy binary both skip, and a Caddy release that changes retry_match
       # semantics ships green. Deliberately tracks stable rather than pinning:
       # detecting that semantics change is the point. T-205 (T-164 recurrence).
+      # `al` collects cloud/tests/test_caddyfile.py::TestRestartWindowMechanism,
+      # the executable proof that a request arriving during the deploy restart
+      # window is held and served rather than 502'd; it is gated on the same
+      # binary, so the install runs on both shards (T-322, third recurrence).
       - name: Install caddy (edge mechanism tests)
-        if: matrix.shard == 'edge'
+        if: matrix.shard == 'edge' || matrix.shard == 'al'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -501,7 +517,7 @@ jobs:
             echo "cloud shard selected no tests" >&2
             exit 1
           fi
-          python -m pytest "${selected[@]}" -q --durations=25
+          python -m pytest "${selected[@]}" -q -rs --durations=25
 
   perimeter-smoke:
     name: Perimeter smoke (next start + curl)

@@ -130,7 +130,14 @@ export function hasBlendedLegBasis(pos: PortfolioPosition): boolean {
   return pos.basis_source === "mixed";
 }
 
-export function resolveEntryCost(pos: PortfolioPosition): number {
+/**
+ * Signed aggregate basis, or `null` when the legs disagree about their basis
+ * source (T-315): the blend is the basis of a trade that was never placed, so
+ * every P&L, return, Today P&L and close-ticket figure downstream goes null
+ * with it rather than presenting mv − blend as fact.
+ */
+export function resolveEntryCost(pos: PortfolioPosition): number | null {
+  if (hasBlendedLegBasis(pos)) return null;
   if (pos.legs.length > 1) {
     return pos.legs.reduce((s, l) => {
       const sign = l.direction === "LONG" ? 1 : -1;
@@ -142,9 +149,24 @@ export function resolveEntryCost(pos: PortfolioPosition): number {
   return pos.entry_cost ?? 0;
 }
 
-export function getAvgEntry(pos: PortfolioPosition): number {
+/**
+ * The signed basis a pure combo close of `quantity` of `comboUnits` held
+ * units retires, for the ticket's realised P&L. `null` when the position has
+ * no aggregate basis, so the ticket prints no realised figure at all.
+ */
+export function resolveClosingBasis(
+  pos: PortfolioPosition,
+  quantity: number,
+  comboUnits: number,
+): number | null {
+  const entryCost = resolveEntryCost(pos);
+  return entryCost == null ? null : entryCost * (quantity / comboUnits);
+}
+
+export function getAvgEntry(pos: PortfolioPosition): number | null {
   const mult = getMultiplier(pos);
   const raw = resolveEntryCost(pos);
+  if (raw == null) return null;
   const denom = Math.abs(pos.contracts) * mult;
   // A multi-leg combo carries the net credit/debit sign (credit → negative),
   // per the "credits negative" convention. `Math.abs(pos.contracts)` keeps a
@@ -163,8 +185,9 @@ export function getAvgEntry(pos: PortfolioPosition): number {
   return isShort ? -magnitude : magnitude;
 }
 
-export function getInitialValue(pos: PortfolioPosition): number {
+export function getInitialValue(pos: PortfolioPosition): number | null {
   const raw = resolveEntryCost(pos);
+  if (raw == null) return null;
   // A multi-leg combo carries the net credit/debit sign (credit → negative).
   if (pos.legs.length > 1) return raw;
   // Single-leg: mirror getAvgEntry. A SHORT option's initial value is a premium
@@ -341,7 +364,7 @@ export function resolveReturnCapital(pos: PortfolioPosition): ReturnCapitalBasis
   }
 
   const entryCost = resolveEntryCost(pos);
-  if (isNetDebitPaid(pos, entryCost)) {
+  if (entryCost != null && isNetDebitPaid(pos, entryCost)) {
     const entryDate = String(pos.entry_date ?? "").trim();
     return {
       amount: entryCost,
@@ -379,8 +402,9 @@ export function getPnlDollars(
   marketValue?: number | null,
 ): number | null {
   const mv = marketValue !== undefined ? marketValue : resolveMarketValue(pos);
-  if (mv == null) return null;
-  return mv - resolveEntryCost(pos);
+  const entryCost = resolveEntryCost(pos);
+  if (mv == null || entryCost == null) return null;
+  return mv - entryCost;
 }
 
 /**
@@ -635,7 +659,7 @@ export function getOptionDailyChg(pos: PortfolioPosition, prices?: Record<string
   // when the entire position was opened today.
   if (isSameDay(pos)) {
     const ec = resolveEntryCost(pos);
-    if (ec === 0) return null;
+    if (ec == null || ec === 0) return null;
     const rtMv = computeRtMv(pos, prices);
     const mv = rtMv ?? resolveMarketValue(pos);
     if (mv == null) return null;
@@ -681,7 +705,7 @@ export function getStockDailyChg(pos: PortfolioPosition, prices?: Record<string,
 
   if (isSameDay(pos)) {
     const entryCost = resolveEntryCost(pos);
-    if (entryCost === 0) return null;
+    if (entryCost == null || entryCost === 0) return null;
     const todayPnl = getTodayPnlDollars(pos, prices);
     if (todayPnl == null) return null;
     return (todayPnl / Math.abs(entryCost)) * 100;
@@ -724,8 +748,7 @@ export function getTodayPnlDollars(pos: PortfolioPosition, prices?: Record<strin
   if (isSameDay(pos)) {
     const rtMv = computeRtMv(pos, prices);
     const mv = rtMv ?? resolveMarketValue(pos);
-    if (mv == null) return null;
-    return mv - resolveEntryCost(pos);
+    return getPnlDollars(pos, mv);
   }
 
   // Prefer IB's per-position daily P&L for overnight positions

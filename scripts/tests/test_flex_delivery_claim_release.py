@@ -472,7 +472,7 @@ class TestSftpRetryAfterAFailedIngest:
         """
         import cash_flow_sync
         import flex_sftp_pull as pull
-        from test_flex_sftp_pull import FakeSftp, _ssh_config
+        from test_flex_sftp_pull import AFTER_FIRST_DELIVERY, FakeSftp, _ssh_config
 
         heartbeats: list[tuple] = []
         monkeypatch.setattr(pull, "_heartbeat", lambda state, error=None: heartbeats.append((state, error)))
@@ -494,6 +494,7 @@ class TestSftpRetryAfterAFailedIngest:
                     inbox=inbox,
                     runner=FakeSftp({"activity.gpg": payload}),
                     decrypt=lambda data, **k: data.decode(),
+                    now=AFTER_FIRST_DELIVERY,
                 )
             )
 

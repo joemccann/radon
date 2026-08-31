@@ -8,16 +8,21 @@ already exclude it from their per-round `git clean`
 `testing_weekend.sh` `ground_truth`), i.e. surviving the reset has always been
 the intent; only the provisioning step was never written.
 
-ONLY `web/.env` is provisioned. The root `.env` is deliberately left out:
-python-dotenv already walks up from the clone to `$WEEKEND_ROOT/.env` for the
-same TURSO/IB keys, so a copy is redundant and would duplicate IB_FLEX_TOKEN.
-`test_setup_does_not_provision_the_root_env` guards that.
+ONLY `web/.env` is provisioned. The root `.env` is deliberately left out: a
+copy would duplicate IB_FLEX_TOKEN. `test_setup_does_not_provision_the_root_env`
+guards that.
 
-Consequences the loops actually hit: no `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
-means a dev server the browser-verification step starts renders no
-Clerk-wrapped page, and no `TURSO_DB_URL` in `os.environ` means the runner's
-pytest pins the OPPOSITE of production wherever a collected module's
-import-time `load_dotenv` would have set it.
+`web/.env` IS read by pytest, not only by Next: 50 `scripts/**/*.py` producers
+(`cash_flow_sync.py`, `fetch_*.py`, `scanner.py`, `api/server.py`, ...) call
+`load_dotenv(web/.env)` at import, so provisioning it puts the clone's TURSO
+credentials into `os.environ` for every collected module. That flipped 22
+CI-green tests red with `FlexTokenLocked` (T-317). `scripts/tests/conftest.py`
+`_strip_turso_credentials` removes the keys per test;
+`TestPytestReadsTheProvisionedWebEnv` pins both halves of that contract.
+
+Consequence the loops actually hit without it: no
+`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` means a dev server the browser-verification
+step starts renders no Clerk-wrapped page.
 
 These tests drive the real setup scripts against a staged fake source checkout
 and a staged fake clone, with the whole toolchain stubbed on PATH. No real
@@ -169,9 +174,9 @@ class TestRunnerEnvProvisioning:
     def test_setup_does_not_provision_the_root_env(self, name, tmp_path):
         """The root .env must stay OUT of the runner clone.
 
-        python-dotenv already walks up from the clone to $WEEKEND_ROOT/.env for
-        the same TURSO/IB keys, so a second copy is redundant, and it would put
-        IB_FLEX_TOKEN in one more place. web/.env is read by Next, never pytest.
+        A copy would put IB_FLEX_TOKEN in one more place. This says nothing
+        about pytest: web/.env alone already reaches it through the producers'
+        import-time `load_dotenv(web/.env)` (see the module docstring, T-317).
         """
         src, clone, env = _stage(tmp_path, name)
 
@@ -216,3 +221,44 @@ class TestRunnerEnvProvisioning:
             f"{name}: an older source copy overwrote a newer clone copy:\n{out}"
         )
         assert "web/.env" in out.split("[2/4]", 1)[-1], out
+
+
+def _web_env_loaders() -> list[Path]:
+    """Every scripts/**/*.py producer whose import-time load_dotenv reads web/.env."""
+    loaders = []
+    for path in (REPO / "scripts").rglob("*.py"):
+        if "tests" in path.parts or "node_modules" in path.parts:
+            continue
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if "load_dotenv(" in line and "web" in line and ".env" in line:
+                loaders.append(path)
+                break
+    return sorted(loaders)
+
+
+class TestPytestReadsTheProvisionedWebEnv:
+    """The provisioned web/.env reaches pytest, and the gate must not care.
+
+    T-317: `14065b74` provisioned web/.env into the runner clone on the premise
+    that only Next reads it. 50 producers `load_dotenv(web/.env)` at import,
+    so the clone's TURSO credentials landed in `os.environ`, `flex_embargo`
+    saw a configured-but-unreadable durable store, and 22 CI-green tests red
+    with `FlexTokenLocked`. The conftest fixture is the host-independence.
+    """
+
+    def test_producers_load_web_env_at_import(self):
+        loaders = {p.relative_to(REPO).as_posix() for p in _web_env_loaders()}
+        assert "scripts/cash_flow_sync.py" in loaders, sorted(loaders)
+        assert len(loaders) >= 22, (
+            f"{len(loaders)} producers load web/.env at import; the T-317 "
+            f"finding counted 22, and a drop below that means a loader moved "
+            f"or the scan broke: {sorted(loaders)}"
+        )
+
+    def test_the_gate_strips_the_clones_turso_credentials(self):
+        """Holds on a provisioned clone ONLY because of
+        `scripts/tests/conftest.py::_strip_turso_credentials`."""
+        import cash_flow_sync  # noqa: F401  a loader, imported inside the test on purpose
+
+        assert "TURSO_DB_URL" not in os.environ
+        assert "TURSO_AUTH_TOKEN" not in os.environ

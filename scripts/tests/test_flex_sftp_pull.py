@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -16,6 +18,11 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures"
 ACTIVITY_YTD = FIXTURES / "cash_transactions_flex_ytd_detail_sample.xml"
 ACTIVITY_365 = FIXTURES / "cash_transactions_flex_sample.xml"
 TRADES = FIXTURES / "flex_trade_confirm_sample.xml"
+# T-318: every `run()` pins the clock. `empty_remote_is_expected()` reads the
+# live ET clock when `now` is None, so an unpinned call flips on the R-416
+# `FIRST_DELIVERY_DATE` cutover (2026-08-31). Tests that are not about the
+# cutover run on the production side of it.
+AFTER_FIRST_DELIVERY = datetime(2026, 9, 1, 8, 0, tzinfo=ZoneInfo("America/New_York"))
 
 
 def _ssh_config(path: Path) -> Path:
@@ -180,7 +187,7 @@ def test_host_key_failure_is_fail_closed(tmp_path, monkeypatch):
     monkeypatch.setattr(pull, "_heartbeat", lambda state, error=None: heartbeats.append((state, error)))
     config = _ssh_config(tmp_path / "ssh_config")
     fake = FakeSftp({}, returncode=255, stderr="Host key verification failed.\n")
-    code = pull.run(config=config, inbox=tmp_path / "inbox", runner=fake)
+    code = pull.run(config=config, inbox=tmp_path / "inbox", runner=fake, now=AFTER_FIRST_DELIVERY)
     assert code == 1
     assert heartbeats[0][0] == "error"
     assert "host key" in str(heartbeats[0][1]).lower()
@@ -203,6 +210,7 @@ def test_rejects_365_day_and_ytd_period(tmp_path, monkeypatch):
         runner=fake,
         decrypt=lambda data, **k: data.decode(),
         ingest=lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not ingest")),
+        now=AFTER_FIRST_DELIVERY,
     )
     assert code == 1
     assert (inbox / "activity365.gpg").exists()
@@ -224,6 +232,7 @@ def test_pulls_last_business_day_trades_and_ingests(tmp_path, monkeypatch):
         runner=fake,
         decrypt=lambda data, **k: data.decode(),
         ingest=lambda xml_text, source_path="": ingested.append((xml_text, source_path)) or {"ok": True},
+        now=AFTER_FIRST_DELIVERY,
     )
     assert code == 0
     assert ingested
@@ -245,7 +254,7 @@ def test_decrypt_failure_keeps_gpg(tmp_path, monkeypatch):
         raise pull.FlexSftpError("pgp_decrypt_failed")
 
     fake = FakeSftp({"trades.gpg": b"not-really-gpg"})
-    code = pull.run(config=config, inbox=inbox, runner=fake, decrypt=boom)
+    code = pull.run(config=config, inbox=inbox, runner=fake, decrypt=boom, now=AFTER_FIRST_DELIVERY)
     assert code == 1
     assert (inbox / "trades.gpg").exists()
 
@@ -271,6 +280,7 @@ def test_ambiguous_xml_keeps_gpg_and_does_not_ingest(tmp_path, monkeypatch):
         runner=fake,
         decrypt=lambda data, **k: data.decode(),
         ingest=lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not ingest")),
+        now=AFTER_FIRST_DELIVERY,
     )
     assert code == 1
     assert (inbox / "mixed.gpg").exists()
@@ -334,6 +344,7 @@ def test_multi_file_delivery_pulls_every_file(tmp_path, monkeypatch):
         runner=fake,
         decrypt=lambda data, **k: data.decode(),
         ingest=lambda xml_text, source_path="": ingested.append(source_path) or {"ok": True},
+        now=AFTER_FIRST_DELIVERY,
     )
     assert code == 0
     assert len(ingested) == 3
@@ -362,18 +373,24 @@ def test_no_trade_session_trade_confirm_is_ok(tmp_path, monkeypatch):
         runner=FakeSftp({"quiet.gpg": quiet.encode()}),
         decrypt=lambda data, **k: data.decode(),
         ingest=lambda xml_text, source_path="": {"ok": True},
+        now=AFTER_FIRST_DELIVERY,
     )
     assert code == 0
     assert heartbeats[-1][0] == "ok"
 
 
 def test_run_without_ingest_drives_default_ingest(tmp_path, monkeypatch):
-    """The production wiring: `run()` with no `ingest=` must reach the writers. T-259."""
+    """The production wiring: `run()` with no `ingest=` must reach the writers. T-259.
+
+    The re-pull of the same bytes is the R-389 stale-remote case: after the
+    cutover a duplicate-only run is an error, not progress. T-318.
+    """
     import flex_delivery_ingest
     import flex_sftp_pull as pull
     import journal_rehydrate
 
-    monkeypatch.setattr(pull, "_heartbeat", lambda *a, **k: None)
+    heartbeats = []
+    monkeypatch.setattr(pull, "_heartbeat", lambda state, error=None: heartbeats.append((state, error)))
     # T-250 (`db.writer.claim_flex_delivery` reads `rows_affected`) is a
     # different change's lane; stub the claim at flex_delivery_ingest's own
     # indirection with a stateful fake so the rest of the wiring runs for real.
@@ -401,9 +418,16 @@ def test_run_without_ingest_drives_default_ingest(tmp_path, monkeypatch):
     inbox = tmp_path / "inbox"
     inbox.mkdir()
     fake = FakeSftp({"trades.gpg": TRADES.read_bytes()})
-    code = pull.run(config=config, inbox=inbox, runner=fake, decrypt=lambda data, **k: data.decode())
+    code = pull.run(
+        config=config,
+        inbox=inbox,
+        runner=fake,
+        decrypt=lambda data, **k: data.decode(),
+        now=AFTER_FIRST_DELIVERY,
+    )
 
     assert code == 0
+    assert heartbeats[-1][0] == "ok"
     assert len(rehydrated) == 1
     assert "NAK" in rehydrated[0]["xml_text"]
     # Provenance is the delivered filename the operator can map back to sFTP,
@@ -412,8 +436,16 @@ def test_run_without_ingest_drives_default_ingest(tmp_path, monkeypatch):
     # Decrypted plaintext must not linger beside the .gpg.
     assert list(inbox.glob("*.xml")) == []
 
-    code_again = pull.run(config=config, inbox=inbox, runner=fake, decrypt=lambda data, **k: data.decode())
-    assert code_again == 0
+    code_again = pull.run(
+        config=config,
+        inbox=inbox,
+        runner=fake,
+        decrypt=lambda data, **k: data.decode(),
+        now=AFTER_FIRST_DELIVERY,
+    )
+    assert code_again == 1
+    assert heartbeats[-1][0] == "error"
+    assert "no NEW statement" in str(heartbeats[-1][1])
     assert len(rehydrated) == 1
 
 

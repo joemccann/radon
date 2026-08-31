@@ -375,7 +375,7 @@ def _replay_contract(
 
         cash = entry["notional"] + entry["commission"] if is_buy else entry["notional"] - entry["commission"]
 
-        suppressed, cash_matched = _already_journaled_under_other_namespace(
+        suppressed, proven_duplicate = _already_journaled_under_other_namespace(
             seen_fingerprints, entry, key, cash
         )
         if suppressed:
@@ -396,8 +396,12 @@ def _replay_contract(
             # with its quantity. At IDENTICAL cash the average is invariant to
             # whether the fill is counted once or twice, so the basis is exact
             # either way and there is nothing to taint.
+            # That holds for ONE duplicate per counted fill. A second equal-cash
+            # row from the same writer has no counted counterpart left to be a
+            # duplicate of; suppressing it drops a real lot and the inventory is
+            # short by one, so the taint is carried (T-316).
             if same_direction:
-                if not cash_matched:
+                if not proven_duplicate:
                     basis_tainted = True
             else:
                 # A suppressed REDUCING fill is different: cash equality says
@@ -468,26 +472,40 @@ def _id_namespaces(parts: list[str]) -> set[str]:
 def _already_journaled_under_other_namespace(
     seen: dict[tuple, dict[str, Any]], entry: dict[str, Any], key: str, cash: float
 ) -> tuple[bool, bool]:
-    """``(suppressed, cash_matched)`` for this fill.
+    """``(suppressed, proven_duplicate)`` for this fill.
 
     Suppressed when this fill (contract, session date, signed qty) was already
     replayed from a row keyed in the OTHER id namespace — the same close written
     by both writers (T-124). Two equal same-day partials from ONE writer share a
     namespace and both count, as in the backfill.
 
-    ``cash_matched`` reports whether the suppressed row carried the SAME cash as
-    the one already counted. The fingerprint cannot see price, but this can, and
-    it is the difference between a proven cross-writer duplicate (basis after
-    suppression is exact) and two distinct partials (basis is short by one).
-    R-383.
+    ``proven_duplicate`` reports whether the suppressed row is the other
+    writer's copy of a row already counted: it carries the SAME cash, and the
+    counted rows under this fingerprint have not all been claimed by earlier
+    suppressions. The fingerprint cannot see price, but this can, and it is the
+    difference between a proven cross-writer duplicate (basis after suppression
+    is exact) and a distinct partial (basis is short by one). R-383, T-316.
     """
     fingerprint = entry.get("fingerprint")
     namespaces = _id_namespaces(entry["parts"])
     if fingerprint is None or not namespaces:
         return False, False
-    prior = seen.setdefault(fingerprint, {"namespaces": set(), "cash": cash})
+    prior = seen.setdefault(
+        fingerprint, {"namespaces": set(), "cash": cash, "counted": 0, "suppressed": 0}
+    )
     if prior["namespaces"] and prior["namespaces"].isdisjoint(namespaces):
-        matched = round(prior["cash"], 4) == round(cash, 4)
+        prior["suppressed"] += 1
+        has_counterpart = prior["suppressed"] <= prior["counted"]
+        matched = has_counterpart and round(prior["cash"], 4) == round(cash, 4)
+        if not has_counterpart:
+            logger.warning(
+                "journal_realized: %s skipped %s — %s fill(s) already counted under %s "
+                "and each has a cross-writer duplicate; this one is a distinct partial "
+                "the fingerprint cannot separate, inventory short by %s",
+                key, "+".join(entry["parts"]), prior["counted"],
+                "/".join(sorted(prior["namespaces"])), entry["qty"],
+            )
+            return True, False
         logger.info(
             "journal_realized: %s skipped %s — same fill already journaled under %s (cash %s)",
             key, "+".join(entry["parts"]), "/".join(sorted(prior["namespaces"])),
@@ -495,5 +513,5 @@ def _already_journaled_under_other_namespace(
         )
         return True, matched
     prior["namespaces"] |= namespaces
+    prior["counted"] += 1
     return False, False
-

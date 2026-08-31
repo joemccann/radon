@@ -104,6 +104,8 @@ data/*.json
 # data/*.json does not match the .tmp / .lock suffixes)
 data/rh_mcp_token.json*
 data/*.bak
+# cri_scan advisory lock (T-314): lives under data/ so host and container share it
+data/radon-cri-scan.lock
 
 # Ticker/market data caches (regenerated at runtime)
 data/ticker_cache.json

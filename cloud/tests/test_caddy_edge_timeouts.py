@@ -407,9 +407,28 @@ class TestCiProvidesTheCaddyBinary:
         job = workflow["jobs"]["cloud-tests"]
         return job
 
-    def _shard_that_collects_this_file(self, job) -> str:
-        name = Path(__file__).name
+    @staticmethod
+    def _modules_gated_on_the_caddy_binary() -> list[str]:
+        """Every cloud test module whose collection silently shrinks without caddy.
 
+        T-322 (T-164 -> T-205 recurring a third time): the self-check below was
+        scoped to THIS file, so when the caddy install moved to the `edge`
+        shard, `test_caddyfile.py::TestRestartWindowMechanism` (the executable
+        proof that a request arriving during the deploy restart window is held
+        and served, not 502'd) began skipping on `al` with nobody watching.
+        """
+        gate = re.compile(r'shutil\.which\((?:CADDY_BIN|"caddy")\)')
+        here = Path(__file__).resolve().parent
+        gated = sorted(
+            module.name
+            for module in here.glob("test_*.py")
+            if gate.search(module.read_text(encoding="utf-8"))
+        )
+        assert Path(__file__).name in gated, "the self-check lost its own gate"
+        return gated
+
+    @staticmethod
+    def _shard_that_collects(job, name: str) -> str:
         def collects(entry) -> bool:
             included = fnmatch.fnmatch(name, Path(entry["paths"]).name)
             omitted = Path(entry.get("omit", "")).name
@@ -426,9 +445,15 @@ class TestCiProvidesTheCaddyBinary:
         )
         return shards[0]
 
-    def test_a_cloud_tests_shard_installs_caddy(self):
+    @staticmethod
+    def _shards_named_in(condition: str, all_shards: list[str]) -> set[str]:
+        if not condition:
+            return set(all_shards)
+        return set(re.findall(r"matrix\.shard\s*==\s*'([^']+)'", condition))
+
+    def test_every_caddy_gated_module_runs_on_a_shard_that_installs_caddy(self):
         job = self._cloud_tests_job()
-        shard = self._shard_that_collects_this_file(job)
+        all_shards = [str(shard) for shard in job["strategy"]["matrix"]["shard"]]
         providers = [
             step for step in job["steps"]
             if "caddy" in str(step.get("run", "")).lower()
@@ -440,11 +465,34 @@ class TestCiProvidesTheCaddyBinary:
             "ships production and the R-219 / R-220 fixes are proved by regex "
             "over Caddyfile text only"
         )
+        provided: set[str] = set()
         for step in providers:
-            condition = str(step.get("if", ""))
-            assert not condition or shard in condition, (
-                f"the caddy step is gated {condition!r} but this file is "
-                f"collected by shard {shard!r}"
+            provided |= self._shards_named_in(str(step.get("if", "")), all_shards)
+        unprovided = {
+            module: shard
+            for module in self._modules_gated_on_the_caddy_binary()
+            if (shard := self._shard_that_collects(job, module)) not in provided
+        }
+        assert not unprovided, (
+            f"caddy is installed only on shards {sorted(provided)}, but these "
+            f"binary-gated modules are collected elsewhere and silently skip "
+            f"their mechanism tests on the gate that ships production: "
+            f"{unprovided}"
+        )
+
+    def test_cloud_shards_print_skip_reasons(self):
+        """`-q` hides skips; the T-322 class skipped for weeks as a +1 count."""
+        job = self._cloud_tests_job()
+        invocations = [
+            line.strip()
+            for step in job["steps"]
+            for line in str(step.get("run", "")).splitlines()
+            if re.search(r"python\s+-m\s+pytest\b", line)
+        ]
+        assert invocations, "no pytest invocation in the cloud-tests job"
+        for invocation in invocations:
+            assert re.search(r"\s-r\w*[saA]\w*(?=\s|$)", invocation), (
+                f"cloud shard invocation hides skip reasons: {invocation!r}"
             )
 
     def test_the_only_escape_is_the_declared_env_var(self):

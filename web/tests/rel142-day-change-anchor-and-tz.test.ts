@@ -20,6 +20,7 @@ import { describe, expect, it } from "vitest";
 
 import { resolvePreviousSessionClose, resolveRegimeStripLiveState } from "../lib/regimeLiveStrip";
 import { formatHoldDuration, isEarlierLocalDay } from "../lib/holdTime";
+import { useProcessTimeZone } from "./helpers/processTimeZone";
 
 const HISTORY = (dates: string[]) =>
   dates.map((date) => ({ date, vix: 16.5, vvix: 95, spy: 640 }));
@@ -91,10 +92,15 @@ describe("degraded regime strip", () => {
 });
 
 describe("trading-day classification is ET, not process-local", () => {
-  // 01:00Z is Aug 28 in ET and Aug 29 in UTC. Under the suite's TZ pin the old
-  // code answered ET; on the UTC server it answered UTC, so same-day-trade
-  // classification and the entry-before-exit rejection flipped between the two.
+  // 01:00Z is Aug 28 in ET and Aug 29 in UTC. Under the suite's TZ pin ET and
+  // process-local answer the same, so this block runs under UTC (the production
+  // zone) where a process-local day read flips every assertion below (T-319).
   const LATE_UTC = "2026-08-29T01:00:00Z";
+  useProcessTimeZone("UTC", { iso: LATE_UTC, localHour: 1 });
+
+  it("runs under a process zone whose day boundary differs from ET", () => {
+    expect(new Date(LATE_UTC).getDate()).toBe(29);
+  });
 
   it("treats a 01:00Z stamp as the previous ET day", () => {
     expect(isEarlierLocalDay("2026-08-28", LATE_UTC)).toBe(false);
@@ -107,12 +113,5 @@ describe("trading-day classification is ET, not process-local", () => {
 
   it("still measures a real multi-day hold", () => {
     expect(formatHoldDuration("2026-08-20", LATE_UTC)).toBe("9 days");
-  });
-
-  it("does not read the process timezone for day boundaries", () => {
-    const source = String(formatHoldDuration);
-    expect(source.length).toBeGreaterThan(0);
-    // The module under test must name the exchange timezone explicitly.
-    // (The behavioural cases above are the real proof; this pins the mechanism.)
   });
 });
