@@ -74,6 +74,13 @@ advise "DeepSec workspace (.deepsec pinned, OPERATOR-bootstrapped)" \
   test -x "$WEEKEND_REPO/.deepsec/node_modules/.bin/deepsec"
 advise "Claude Security plugin (official, OPERATOR-installed)" \
   bash -c 'claude plugin list --json 2>/dev/null | grep -q claude-security'
+# Operator policy 2026-08-31: the Claude Security spend cap is derived at run
+# time from `claude auth status` (claude.ai subscription -> no --max-budget-usd;
+# API key -> --max-budget-usd 50; logged out -> OPERATOR_REQUIRED). No
+# operator budget env var exists any more, so nothing here provisions one;
+# this advisory just shows which budget path the run will take.
+advise "claude authed (subscription: no cap; API key: \$50 cap)" \
+  bash -c 'claude auth status 2>/dev/null | grep -q "\"loggedIn\"[[:space:]]*:[[:space:]]*true"'
 if [[ $fail -ne 0 ]]; then
   echo "Fix the MISSING items above, then re-run."
   echo "  bash 3.2 leaves 34 cloud/tests permanently red on this runner (13 in"

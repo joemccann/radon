@@ -1,3 +1,34 @@
+# Task: Security nightly — auth-derived Claude budget + incomplete-run resume (2026-08-31)
+
+## Objective
+
+- Claude Security spend cap follows the runner's real auth: claude.ai subscription -> no --max-budget-usd; API key -> --max-budget-usd 50; never an invented default (the fabricated $25 cap killed 20260831 attempt 2).
+- A phase that halts before completing (budget stop, timeout, SIGTERM, "I'll pick up later", suite in flight) is INCOMPLETE — non-zero exit, audited SHA untouched, next launchd fire resumes the same private run_id — never OK (20260831T000007 paged OK on a half-run).
+
+## Dependency graph
+
+- S1 depends_on: [] - Wrapper: PHASE_COMPLETE_MARKER gate; exit-0 without marker -> INCOMPLETE rc=75; TRUNCATED also rc=75
+- S2 depends_on: [] - Skill: run-record/resume contract, auth-derived Stage 4 budget, HOME/USER/LOGNAME kept for Keychain, anti-patterns
+- S3 depends_on: [] - Setup: advisory `claude auth status` check; no operator budget env story
+- S4 depends_on: [S1, S2] - Tests: contract classes (budget policy, incomplete-never-OK run at the wire, marker parity, resume rails); self-rewrite stub prints the security marker
+- S5 depends_on: [S4] - Focused suites green, commit, push, PR
+
+## Checklist
+
+- [x] S1 Wrapper marker gate
+- [x] S2 Skill budget + resume
+- [x] S3 Setup advisory
+- [x] S4 Tests
+- [x] S5 Verified (contract+deadman+launchers 140 passed; self-rewrite+rel137 214 passed; documentation contract 35 passed; bash -n clean)
+
+## Review
+
+- The wrapper stays mechanical: it keys OK on the skill-printed completion marker in the last round's log slice (R-426 scoping) and exits 75 on any incomplete rc-0 phase; run-identity resume lives entirely in the skill against ~/radon-weekend/.security-nightly-scratch/<run-id>/run-record.md, which the per-round git clean cannot reach.
+- No new env knob: budget is derived from `claude auth status` inside Stage 4; logged-out/unparseable fails closed as OPERATOR_REQUIRED.
+- Shared five-loop harnesses untouched except the self-rewrite claude stub, which now prints the marker for the security loop only.
+
+---
+
 # Task: Assistant catalog always tracks live API pins (2026-08-30)
 
 ## Objective

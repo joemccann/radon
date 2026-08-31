@@ -53,6 +53,49 @@ markers, lesson log — in a mode-`0700` directory OUTSIDE the repository
 dump, secret, or sensitive topology into any tracked file, commit message,
 branch, PR, or the public dead-man issue.
 
+### Completion marker, INCOMPLETE, and resume
+
+The wrapper cannot trust your exit code: `claude -p` exits 0 even when a
+phase was stopped early (2026-08-31, run 20260831T000007 — the remediate
+phase parked a full pytest suite in the background, said "I'll pick up when
+the background run completes", exited 0, and the wrapper paged OK). The
+completion contract is therefore explicit, in both the private run-record and
+the public run log:
+
+1. Every phase runs against a private run directory
+   `~/radon-weekend/.security-nightly-scratch/<run-id>/` whose `run-record.md`
+   records the `run_id`, the phase, the immutable SHAs and range, each
+   pipeline stage's completion as it finishes, and a terminal `status:` line.
+2. **At phase start, look for an incomplete run of the SAME phase**: the
+   newest run directory whose `run-record.md` has no terminal completed
+   status. If one exists, RESUME it — same `run_id`, same recorded immutable
+   `HEAD_SHA`/`LAST_AUDITED_SHA` scope, skip stages the record already marks
+   complete, and finish the in-flight work (a suite still running, a scan cut
+   off, an unarchived finding) — instead of opening a new run id. The
+   wrapper's fresh log stamp and `git reset` do not reset your run identity;
+   the scratch directory outside the clone is the durable state.
+3. A phase is INCOMPLETE — not failed, and never OK — when any of these
+   happened: a provider budget/spend stop, the wall-clock cap or an outer
+   timeout, SIGTERM/kill, work deferred to a background task you did not see
+   finish ("I'll pick up later" IS incomplete now), a test suite still
+   running, a Claude Security scan marked INCOMPLETE, or a stage whose
+   completion marker is missing from the run-record. Record
+   `status: INCOMPLETE` with what remains, do NOT advance any audited SHA,
+   and do NOT print the completion marker — the next fire resumes this run.
+4. Only when the phase truly completed — every applicable stage finished or
+   cleanly recorded `OPERATOR_REQUIRED`/`BLOCKED`, private archival done or
+   explicitly recorded as the blocker, verification gates satisfied — write
+   the terminal status into `run-record.md` and print, as the phase's LAST
+   stdout line, exactly:
+
+   `SECURITY-NIGHTLY PHASE COMPLETE: <phase> run_id=<run-id>`
+
+   The wrapper greps that prefix; without it an exit-0 phase is reported
+   INCOMPLETE and exits non-zero. A clean fail-closed `OPERATOR_REQUIRED`
+   night IS complete and DOES print the marker. Never emit the marker text
+   anywhere else — not in a plan, a quote of this skill, or an interim
+   message.
+
 ## Mission
 
 - Protect operator credentials, brokerage access, live orders, journal
@@ -175,19 +218,24 @@ Before every run:
 4. Create a unique private run directory with mode `0700` outside the public
    repository. Record tool versions, command shapes, timestamps, exit codes,
    immutable SHAs, and sanitized counts. Never record environment values.
-5. Start with an allow-empty environment. Add only `PATH`, locale, temporary
-   directory, `DISABLE_AUTOUPDATER=1`, the approved model credential, and
-   synthetic test variables. Network egress is limited to the exact read-only
+5. Start with an allow-empty environment. Add only `PATH`, `HOME`, `USER`,
+   `LOGNAME`, locale, temporary directory, `DISABLE_AUTOUPDATER=1`, the
+   approved model credential, and synthetic test variables. `HOME`, `USER`,
+   and `LOGNAME` are REQUIRED whenever Claude Code itself runs: macOS
+   Keychain will not unlock the claude.ai subscription session without them
+   (2026-08-31: `env -i` without `USER`/`LOGNAME` produced "Not logged in"
+   on attempt 1). Network egress is limited to the exact read-only
    Git `origin`, pre-approved model endpoint during AI scans, approved
    advisory endpoints during dependency checks, the canonical private archive,
    and the sanitized dead-man endpoint. Package-registry access is allowed
    only during separately authorized bootstrap. If advisory freshness cannot
    be checked within that allowlist, use the last locally cached database and
    mark freshness incomplete.
-6. Apply an outer wall-clock deadline, provider hard-spend ceiling, process
-   group, memory/CPU bounds, and cleanup trap. A timeout is incomplete, not a
-   clean scan. Preserve private resumable state and do not advance the audited
-   SHA.
+6. Apply an outer wall-clock deadline, a provider hard-spend ceiling on the
+   API-key path (a claude.ai subscription session has no dollar cap — the
+   wall clock is its bound), process group, memory/CPU bounds, and cleanup
+   trap. A timeout or spend stop is incomplete, not a clean scan. Preserve
+   private resumable state and do not advance the audited SHA.
 
 ## Ground truth and change selection
 
@@ -337,14 +385,40 @@ Dynamic Workflows, or `auto`-mode permission is unavailable, the stage is
 `OPERATOR_REQUIRED` — never fall back to `bypassPermissions` or an improvised
 scan.
 
-When bootstrapped, require the checked-out `HEAD` to equal `HEAD_SHA` and
-`LAST_AUDITED_SHA` to be its ancestor (the plugin computes `merge-base..HEAD`
-from a base ref; it does not promise arbitrary two-SHA parsing — if ancestry
-fails, run the approved full scan or fail closed), then, with `umask 077`:
+The spend cap is derived AT RUN TIME from how Claude Code is authenticated on
+the runner — never from an operator environment variable and never an
+invented default (operator policy 2026-08-31; a fabricated $25 cap killed the
+2026-08-31 attempt mid-scan). `claude auth status` prints JSON on the runner
+(`loggedIn`, `authMethod`, `subscriptionType`):
+
+- **claude.ai subscription** (`authMethod` `claude.ai` — Max/Pro/Team): pass
+  NO `--max-budget-usd` at all. There is no dollar cap; the outer wall-clock
+  deadline is the bound.
+- **API key** (logged in, any other `authMethod`): pass
+  `--max-budget-usd 50`, exactly.
+- **Logged out or unparseable output**: the stage is `OPERATOR_REQUIRED` —
+  fail closed, never guess a cap and never run uncapped by accident.
+
+Run every `claude` command with `HOME`, `USER`, and `LOGNAME` present
+(trusted-environment rule 5) or the Keychain-held subscription session will
+not unlock. When bootstrapped, require the checked-out `HEAD` to equal
+`HEAD_SHA` and `LAST_AUDITED_SHA` to be its ancestor (the plugin computes
+`merge-base..HEAD` from a base ref; it does not promise arbitrary two-SHA
+parsing — if ancestry fails, run the approved full scan or fail closed),
+then, with `umask 077`:
 
 ```sh
+CLAUDE_AUTH="$(claude auth status 2>/dev/null || true)"
+if ! printf '%s' "$CLAUDE_AUTH" | grep -q '"loggedIn"[[:space:]]*:[[:space:]]*true'; then
+  # OPERATOR_REQUIRED: Claude Code is not authenticated on the runner.
+  exit_stage_operator_required
+fi
+CLAUDE_BUDGET=""
+if ! printf '%s' "$CLAUDE_AUTH" | grep -q '"authMethod"[[:space:]]*:[[:space:]]*"claude\.ai"'; then
+  CLAUDE_BUDGET="--max-budget-usd 50"   # API key; subscription runs uncapped
+fi
 claude --agent claude-security:claude-security --permission-mode auto \
-  --output-format stream-json --verbose --max-budget-usd "$CLAUDE_APPROVED_MAX_USD" \
+  --output-format stream-json --verbose $CLAUDE_BUDGET \
   -p "Scan changes with --base $LAST_AUDITED_SHA --effort medium. I understand it may take a while and use a significant number of tokens. Do not suggest patches or modify tracked files. Write only the standard ignored CLAUDE-SECURITY report." \
   >"$PRIVATE_RUN_DIR/claude-stream.jsonl" 2>"$PRIVATE_RUN_DIR/claude-stderr.log"
 ```
@@ -352,8 +426,8 @@ claude --agent claude-security:claude-security --permission-mode auto \
 For the budgeted monthly refresh, replace the first sentence with a
 whole-repository medium-effort scan. Treat a missing `Workflow` tool,
 unavailable agent/`auto` mode, interactive question, version mismatch,
-incomplete inventory, timeout, or missing revision stamp as an INCOMPLETE scan;
-do not downgrade to a weaker mode. Keep the timestamped `CLAUDE-SECURITY-*/`
+incomplete inventory, timeout, provider budget/spend stop, or missing
+revision stamp as an INCOMPLETE scan; do not downgrade to a weaker mode. Keep the timestamped `CLAUDE-SECURITY-*/`
 Markdown/JSONL/SARIF/revision artifacts private (relocate to the mode-0700 run
 dir), never let model output reach ordinary launchd stdout/stderr, and never
 commit them. The suggestion job is disabled in `audit` mode; in `remediate`
@@ -516,6 +590,11 @@ finding in stdout, public Git, public CI, or a public surface; private
 artifacts copied to the verified canonical `radon-cloud:security-archive`,
 checksum-verified, and removed from the public clone; last-audited SHAs
 advanced only for engines/stages that completed and archived successfully.
+Only after all of that (or a cleanly recorded fail-closed
+`OPERATOR_REQUIRED`) does the phase write its terminal status to the private
+`run-record.md` and print the completion-marker line the wrapper requires; an
+incomplete phase prints nothing, keeps its run-record resumable, and leaves
+every audited SHA where it was.
 
 A completed remediation additionally requires red/green regression evidence,
 all full project suites green or a clearly unrelated pre-existing baseline
@@ -555,7 +634,13 @@ job; send a source tree containing a possible secret to a model; use
 verification into a live curl/port scan/console action; publish a red
 regression that teaches exploitation before the fix is coordinated; advance the
 audited SHA after a timeout/incomplete inventory/failed archive/runtime error;
-generate work merely so the nightly loop appears productive.
+invent a Claude Security spend cap ($25 or any other number) when
+`claude auth status` cannot prove the auth method; print the phase-completion
+marker while work is parked in a background task or a suite is still running
+("I'll pick up when the background run completes" is an INCOMPLETE phase, not
+a completed one); start a fresh run id while a resumable incomplete
+run-record for the same phase exists; generate work merely so the nightly
+loop appears productive.
 
 ## Industry basis
 
