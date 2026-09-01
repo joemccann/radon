@@ -303,7 +303,8 @@ describe("SERVICE_FRESHNESS_WINDOWS — category field", () => {
     ["discover", "scheduled"],
     ["flow-analysis", "scheduled"],
     ["analyst-ratings", "on-demand"],
-    ["gex-scan", "on-demand"],
+    // R-422: data_refresh's 15-minute RTH driver runs it, so it is scheduled.
+    ["gex-scan", "scheduled"],
     // cta-sync is scheduled by radon-cta-sync.timer on Hetzner — flipped
     // from on-demand when the autonomous timer landed.
     ["cta-sync", "scheduled"],
@@ -473,6 +474,20 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
     expect(requiresIb("hhlev")).toBe(false);
   });
 
+  // ``model-catalog``: radon-model-catalog.timer fires daily 03:10 UTC every
+  // calendar day, refreshing the chat picker's frontier model per keyed LLM
+  // provider. Provider releases follow a release cadence, not a market one,
+  // so weekend runs heartbeat and a uniform 26h window applies. Provider
+  // HTTP only, no IB.
+  it("model-catalog is registered as scheduled with a uniform 26h window", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["model-catalog"]).toBeDefined();
+    expect(getServiceCategory("model-catalog")).toBe("scheduled");
+    for (const state of ["open", "extended", "closed"] as MarketState[]) {
+      expect(getFreshnessWindowMs("model-catalog", state)).toBe(26 * HOUR);
+    }
+    expect(requiresIb("model-catalog")).toBe(false);
+  });
+
   // ``vixts`` — radon-vixts.timer fires daily 02:45 UTC every calendar day,
   // ten minutes behind radon-vixcor so the Cboe CDN hits stay staggered
   // (weekend and holiday runs are 304 heartbeats), so a uniform 26h window
@@ -487,6 +502,23 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
       );
     }
     expect(requiresIb("vixts")).toBe(false);
+  });
+
+  // ``dispersion`` — radon-dispersion.timer fires daily 22:20 UTC every
+  // calendar day (weekend and holiday runs are no-new-session heartbeats),
+  // so a uniform 26h window matches its vixts sibling. IB daily bars with a
+  // Yahoo rung that keeps the writer alive through an IB outage, so
+  // requires_ib stays false.
+  it("dispersion is registered as scheduled with a uniform 26h window", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["dispersion"]).toBeDefined();
+    expect(getServiceCategory("dispersion")).toBe("scheduled");
+    for (const state of ["open", "extended", "closed"] as MarketState[]) {
+      expect(getFreshnessWindowMs("dispersion", state)).toBe(26 * HOUR);
+      expect(getFreshnessWindowMs("dispersion", state)).toBe(
+        getFreshnessWindowMs("vixts", state),
+      );
+    }
+    expect(requiresIb("dispersion")).toBe(false);
   });
 
   // ``credit-spread`` — radon-credit-spread.timer fires daily 21:45 UTC
@@ -629,13 +661,16 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
   });
 
   // ``vol-cone`` — radon-vol-cone.timer fires daily 20:45 UTC Mon-Fri
-  // (16:45 ET after the close grace). UW greeks only — no IB.
-  it("vol-cone is scheduled, 26h open, 3d closed/extended, requires_ib false", () => {
+  // (16:45 ET after the close grace). UW greeks only — no IB. The holiday
+  // Monday heartbeat lands Fri 20:45 UTC + 72h + RandomizedDelaySec + run
+  // time, so a 3d window sat exactly on the boundary; 4d per the
+  // cash-flow-sync precedent.
+  it("vol-cone is scheduled, 26h open, 4d closed/extended, requires_ib false", () => {
     expect(SERVICE_FRESHNESS_WINDOWS["vol-cone"]).toBeDefined();
     expect(getServiceCategory("vol-cone")).toBe("scheduled");
     expect(getFreshnessWindowMs("vol-cone", "open")).toBe(26 * HOUR);
-    expect(getFreshnessWindowMs("vol-cone", "extended")).toBe(3 * DAY);
-    expect(getFreshnessWindowMs("vol-cone", "closed")).toBe(3 * DAY);
+    expect(getFreshnessWindowMs("vol-cone", "extended")).toBe(4 * DAY);
+    expect(getFreshnessWindowMs("vol-cone", "closed")).toBe(4 * DAY);
     expect(requiresIb("vol-cone")).toBe(false);
   });
 });
@@ -777,6 +812,7 @@ describe("SERVICE_FRESHNESS_WINDOWS — requires_ib field", () => {
     ["discover", false],
     ["flow-analysis", false],
     ["ib-watchdog", false],
+    ["dispersion", false],
   ])("%s requires_ib = %s", (service, expected) => {
     expect(SERVICE_FRESHNESS_WINDOWS[service]?.requires_ib).toBe(expected);
   });
@@ -899,12 +935,12 @@ describe("vol-cone-intraday freshness window", () => {
   const MIN = 60_000;
   const DAY = 24 * 60 * 60_000;
 
-  it("is scheduled, 45m open, 3d closed/extended, requires_ib false", () => {
+  it("is scheduled, 45m open, 4d closed/extended, requires_ib false", () => {
     expect(SERVICE_FRESHNESS_WINDOWS["vol-cone-intraday"]).toBeDefined();
     expect(getServiceCategory("vol-cone-intraday")).toBe("scheduled");
     expect(getFreshnessWindowMs("vol-cone-intraday", "open")).toBe(45 * MIN);
-    expect(getFreshnessWindowMs("vol-cone-intraday", "extended")).toBe(3 * DAY);
-    expect(getFreshnessWindowMs("vol-cone-intraday", "closed")).toBe(3 * DAY);
+    expect(getFreshnessWindowMs("vol-cone-intraday", "extended")).toBe(4 * DAY);
+    expect(getFreshnessWindowMs("vol-cone-intraday", "closed")).toBe(4 * DAY);
     expect(requiresIb("vol-cone-intraday")).toBe(false);
   });
 });

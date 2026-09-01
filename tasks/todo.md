@@ -1,26 +1,32 @@
 # Task: Profile overhaul — preferences + secure credentials (2026-08-28) [WIP]
 
-Blocked on operator answers (asked 2026-08-28): scope of /preferences merge, which
-credentials are UI-managed vs bootstrap-only, save effect (env overlay + reload vs
-manual sync), IB Flex live-validation (throttle embargo — recommend format-only),
-MenthorQ/TheMarketEar Playwright validation depth, cheekiness level vs brand voice,
-operator-only access confirmation.
+Operator answers (2026-09-01): fold /preferences into profile + promote localStorage
+prefs; ALL credentials UI-manageable (self-service ground-up onboarding for a fresh
+clone — first-run setup wizard, no manual backend work); saves take effect live;
+IB is sFTP now, part of onboarding; MenthorQ/TheMarketEar real async login with
+delay notice; playful error copy; operator-only CRUD.
 
 ## Dependency graph
 
-- P1 depends_on: [] - Secret store module: libsodium/age-encrypted values in local
-  SQLite on host; master key via systemd-creds `LoadCredential` (TPM-sealed where
-  available). CRUD + audit events. Red tests first.
+- P1 depends_on: [] - Secret store module: AES-256-GCM-encrypted values (existing
+  `cryptography` dep) in local SQLite on host; master key auto-generated on first
+  run, systemd-creds `LoadCredential` on VPS / 0600 file fallback for dev.
+  CRUD + audit events. Red tests first.
 - P2 depends_on: [P1] - FastAPI credentials routes (operator-only, redacted reads,
   never return plaintext after write).
 - P3 depends_on: [P2] - Per-service async validators (Anthropic, UW, Exa, Cerebras,
-  xAI, MDW, Pushover, ...; IB Flex format-only pending answer).
-- P4 depends_on: [] - Profile page IA: fold preferences in (pending answer on
-  /preferences merge), new Credentials tab.
+  xAI, MDW, Pushover, Turso, Clerk, ...; sFTP for IB).
+- P4 depends_on: [] - Profile page IA: fold /preferences in as tab, promote
+  theme/column-visibility to persisted store, new Credentials tab.
 - P5 depends_on: [P2, P3, P4] - Credentials UI: masked inputs, submit -> async
-  validate -> cheeky error copy on failure.
-- P6 depends_on: [P5] - Gated-action wire tests (full URL + payload), Playwright
-  E2E, screenshots.
+  validate -> playful error copy on failure; slow-validator delay notice.
+- P6 depends_on: [P1] - First-run setup wizard: setup mode when bootstrap keys
+  absent (Clerk middleware bypassed, one-shot console setup token), wizard
+  collects bootstrap + third-party creds, writes store + env overlay, restarts.
+- P7 depends_on: [P2] - Live effect: env overlay regenerated on save + affected
+  service reload.
+- P8 depends_on: [P5, P6, P7] - Gated-action wire tests (full URL + payload),
+  Playwright E2E, screenshots.
 
 ## Checklist
 
@@ -29,7 +35,327 @@ operator-only access confirmation.
 - [ ] P3 Async validators
 - [ ] P4 Profile IA
 - [ ] P5 Credentials UI
-- [ ] P6 E2E + verify
+- [ ] P6 Setup wizard
+- [ ] P7 Live effect
+- [ ] P8 E2E + verify
+
+---
+# Task: Security nightly — auth-derived Claude budget + incomplete-run resume (2026-08-31)
+
+## Objective
+
+- Claude Security spend cap follows the runner's real auth: claude.ai subscription -> no --max-budget-usd; API key -> --max-budget-usd 50; never an invented default (the fabricated $25 cap killed 20260831 attempt 2).
+- A phase that halts before completing (budget stop, timeout, SIGTERM, "I'll pick up later", suite in flight) is INCOMPLETE — non-zero exit, audited SHA untouched, next launchd fire resumes the same private run_id — never OK (20260831T000007 paged OK on a half-run).
+
+## Dependency graph
+
+- S1 depends_on: [] - Wrapper: PHASE_COMPLETE_MARKER gate; exit-0 without marker -> INCOMPLETE rc=75; TRUNCATED also rc=75
+- S2 depends_on: [] - Skill: run-record/resume contract, auth-derived Stage 4 budget, HOME/USER/LOGNAME kept for Keychain, anti-patterns
+- S3 depends_on: [] - Setup: advisory `claude auth status` check; no operator budget env story
+- S4 depends_on: [S1, S2] - Tests: contract classes (budget policy, incomplete-never-OK run at the wire, marker parity, resume rails); self-rewrite stub prints the security marker
+- S5 depends_on: [S4] - Focused suites green, commit, push, PR
+
+## Checklist
+
+- [x] S1 Wrapper marker gate
+- [x] S2 Skill budget + resume
+- [x] S3 Setup advisory
+- [x] S4 Tests
+- [x] S5 Verified (contract+deadman+launchers 140 passed; self-rewrite+rel137 214 passed; documentation contract 35 passed; bash -n clean)
+
+## Review
+
+- The wrapper stays mechanical: it keys OK on the skill-printed completion marker in the last round's log slice (R-426 scoping) and exits 75 on any incomplete rc-0 phase; run-identity resume lives entirely in the skill against ~/radon-weekend/.security-nightly-scratch/<run-id>/run-record.md, which the per-round git clean cannot reach.
+- No new env knob: budget is derived from `claude auth status` inside Stage 4; logged-out/unparseable fails closed as OPERATOR_REQUIRED.
+- Shared five-loop harnesses untouched except the self-rewrite claude stub, which now prints the marker for the security loop only.
+
+---
+
+# Task: Assistant catalog always tracks live API pins (2026-08-30)
+
+## Objective
+
+- Chat list_apis / call_api see GET /streaks/{ticker} and every later add/remove without a handwritten OPERATIONS seed.
+
+## Dependency graph
+
+- C1 depends_on: [] - Adversarial freshness tests (reverse pin inclusion, streaks search, add/remove fixture, Next loader lockstep)
+- C2 depends_on: [C1] - Derive runtime catalog from assistant_catalog.py + radonCapability; FastAPI twins win; Next-only static loaders
+- C3 depends_on: [C2] - Focused vitest green, then full gate, commit, push
+
+## Checklist
+
+- [x] C1 Freshness tests written
+- [x] C2 Pin-derived catalog + dispatch
+- [x] C3 Verify, commit, push
+
+---
+
+# Task: STREAKS regime tab — per-ticker consecutive daily gains (2026-08-30)
+
+## Objective
+
+- Operator enters any ticker and gets a daily-timeframe chart of price (log) plus a histogram of consecutive daily gains, per the Turning Point reference image.
+- Data path honors IB > UW > Robinhood > Yahoo, on demand (no timer, no migration).
+
+## Dependency graph
+
+- T1 depends_on: [] - Research repo data path for per-ticker daily closes (existing IB pool route, uw_surface, robinhood_client, price_cache, yahoo chart)
+- T2 depends_on: [T1] - Spec docs/indicators/streaks.md + failing tests (pytest utils/route, vitest api/panel, lockstep pins)
+- T3 depends_on: [T2] - Python slice: scripts/utils/streaks.py + scripts/api/routes/streaks.py + server mount, pytest green
+- T4 depends_on: [T2] - Next API slice: web/app/api/streaks/route.ts + catalog pin, vitest green
+- T5 depends_on: [T2] - UI slice: streaks lib/hook/chart/panel + regime registration + pins, vitest green
+- T6 depends_on: [T3, T4, T5] - Full vitest + pytest suites, typecheck
+- T7 depends_on: [T6] - Playwright e2e + browser screenshot evidence
+- T8 depends_on: [T7] - Commit, push, PR
+
+## Checklist
+
+- [x] T1 Data path mapped (historical.py IB pool helpers, uw get_stock_ohlc 1d, fetch_robinhood_closes, price_cache, yahoo v8 chart)
+- [x] T2 Spec + red tests recorded (pytest ModuleNotFoundError; vitest 12 failed / 4 files)
+- [x] T3 Python slice green (27 passed: utils compute + route ladder)
+- [x] T4 Next API slice green (streaks-api 7 passed)
+- [x] T5 UI slice green (panel 18, regime-tab-routes 60, regime-rail 20, catalog + authz pins)
+- [x] T6 Full suites green (vitest 8353, scripts pytest 8878; cloud 6 pre-existing baseline failures reproduced on clean main)
+- [x] T7 E2E 4/4 + live browser: SPY 5,027 sessions (record 14, 2010-03-17) via FastAPI->Yahoo; NVDA fresh fetch through the form; dark screenshot docs/indicators/streaks-tab.png
+- [x] T8 PR
+
+## Review
+
+- On-demand per-ticker indicator: no timer, no migration, no service_health writer, no FreshnessRail (spec states why); FastAPI `/streaks/{ticker}` walks IB pool -> UW -> Robinhood -> Yahoo with the 21-bar acceptance ladder and price_cache reuse.
+- Lockstep pins that fired and were updated: regime-tab-routes, regime-rail counts, web assistant-catalog PINNED, web route-local authz matrix, FastAPI assistant_catalog.CATALOG, docs/indicators README index, e2e ci-curation ledger.
+- Sandbox constraints: worktree swarm collapsed to sequential slices on one branch (single VM, per-worktree installs not worth it); live browser check bridged only the Clerk session seam (no Clerk in sandbox) while the payload came from the real FastAPI ladder.
+
+# Task: Diagnose HEADLINES FEED DOWN (2026-08-30, ~17:56–18:12+ UTC)
+
+## Objective
+
+- Identify why the LIVE MARKET FEED headlines tape showed "HEADLINES FEED DOWN. LAST PRINT 16M AGO" on Sunday 2026-08-30 while the rest of the dashboard stayed live.
+- Ship only the hardening the evidence supports; hand off the ops action it cannot fix from the repo.
+
+## Dependency graph
+
+- T1 depends_on: [] - Map the pipeline (mktnews hub, radon-mktnews.service, /ws-headlines edge, useHeadlines) and the exact banner trigger
+- T2 depends_on: [T1] - Localize the stall with external probes (edge health, hub handshake, vendor WS tap, CI/deploy timeline)
+- T3 depends_on: [T2] - Red tests: flash REST poll lane while the upstream WS is down; upstream-down status at client admit
+- T4 depends_on: [T3] - Implement hub changes green
+- T5 depends_on: [T2] - Manifest-pin radon-mktnews.service; retire the stale not-installed drift ack
+- T6 depends_on: [T4, T5] - Full JS suite + cloud pytest; commit; PR with diagnosis and the ops action
+
+## Checklist
+
+- [x] T1 Pipeline mapped (hub.js / client.js / Caddy :8766 / useHeadlines status machine)
+- [x] T2 Stall localized to the VPS→api.mktnews.net WS dial (vendor healthy globally, hub process alive, no deploy in the window)
+- [x] T3 Red tests written (3 red / 2 guard-green pre-fix)
+- [x] T4 Hub poll fallback + admit-time status frame green (68/68 mktnews)
+- [x] T5 installed-units.sha256 pin + drift-allowlist retirement (cloud tests green)
+- [x] T6 8307 vitest passed, 1503 cloud pytest passed; PR opened
+
+## Review
+
+- Root cause is VPS-side upstream WS dial failure to the Cloudflare-fronted api.mktnews.net (ops: journalctl -u radon-mktnews shows the close/reconnect codes; egress/IP remediation if 403/1015).
+- Code hardening: hub now feeds the tape from the flash REST lane during a WS outage (health row deliberately stays error) and tells mid-outage dashboards the true state at admit.
+- Config hardening: the hub's unit is no longer excluded from every automated install path (R-092 trapdoor).
+
+# Task: Robinhood as a first-class read-only data source (2026-08-30)
+
+## Objective
+
+- Priority becomes IB > UW > Cboe > Robinhood > Yahoo everywhere it is encoded (docs, fallbacks, comments, tests).
+- Robinhood is READ-ONLY via the official trading MCP (`https://agent.robinhood.com/mcp/trading`); execution stays on IB.
+- Unconfigured hosts (no `ROBINHOOD_MCP_TOKEN`) skip cleanly to Yahoo.
+- Popular-watchlist / scan crowding features land in Turso and can never trip the three gates.
+
+## Dependency graph
+
+- T1 depends_on: [] - Read-only Robinhood MCP client (`scripts/clients/robinhood_client.py`) with allowlist + unconfigured no-op
+- T2 depends_on: [T1] - RH rung before Yahoo in every close/quote ladder (portfolio_risk, credit-spread, iei-hyg, rv-ratio, garch, leap, cri)
+- T3 depends_on: [T1] - Crowding ingest: migration 0066 `rh_crowding`, writer, `fetch_rh_crowding.py`
+- T4 depends_on: [] - Docs/env: priority lists, `.env.example`, external-services, instruction files
+- T5 depends_on: [T2, T3, T4] - Tests: client contract, per-ladder rank, crowding-not-in-gates, docs-contract pins
+- T6 depends_on: [T5] - Full pytest suite green; branch + PR
+
+## Checklist
+
+- [x] T1 Robinhood client (read-only allowlist, secret hygiene, 20-symbol quote batching)
+- [x] T2 RH-before-Yahoo rung in all seven Python ladders
+- [x] T3 rh_crowding migration + writer + ingest script (unconfigured exits 0)
+- [x] T4 Priority docs updated: CLAUDE/AGENTS (root + scripts), .pi, .gemini, strategies, prompt, external-services, .env.example
+- [x] T5 New tests green (client 25, priority 19, crowding 12, docs pins 4)
+- [x] T6 Full suite green, PR opened
+
+## Follow-up (2026-08-30): OAuth refresh
+
+- [x] T7 depends_on: [T1] - Token store: 0600 file (`ROBINHOOD_MCP_TOKEN_FILE`), env bootstrap, atomic rotate, refresh via official `oauth2/token/` (public client, no secret), refresh on missing/1h-window/401, invalid_grant = process-level unconfigured skip; 34 client tests green
+
+## Review
+
+- Web `previous-close` route stays IB → UW → Yahoo (TS-side MCP consumer deferred; noted in the PR body).
+- Option chains and L2 have no Yahoo rung today, so no RH rung was bolted on there; RH options remain NBBO/last-only per the unpublished schema.
+- Crowding is descriptive only: `workflow/gates.py`, `kelly.py`, `evaluate.py` are pinned free of any Robinhood/crowding reference.
+
+---
+
+# Task: Execute CI and production deploy acceleration (2026-08-29)
+
+## Objective
+
+- Implement the approved acceleration plan while preserving gate coverage, the 40-second production stability window, exact-SHA deployment, and the non-canceling post-teardown boundary.
+- Target web-only push-to-production p50 at or below 4:45 and Python-bearing p50 at or below 5:15.
+
+## Dependency graph
+
+- E1 depends_on: [] - Pin current workflow safety and partition contracts with failing tests where behavior changes
+- E2 depends_on: [E1] - Replace production-length weekend-wrapper waits with test-only bounded deadlines; keep real subprocess and process-group assertions
+- E3 depends_on: [E1] - Separate cross-tree contract tests from broad Python/cloud path ownership without weakening fail-closed handling
+- E4 depends_on: [E1] - Add Buildx GHA caches, stable Docker layer ordering, and one-pass SHA/latest image publication
+- E5 depends_on: [E2, E3, E4] - Integrate balanced CI shards, duration telemetry, exact-image fan-in, and gated prepull into the workflow DAG
+- E6 depends_on: [E4, E5] - Pull exact Python/node images concurrently with prestage and require both locally before teardown; remove `latest` fallback
+- E7 depends_on: [E5, E6] - Reuse one SHA/checksummed production Next artifact where provenance and output-trace checks stay equivalent
+- E8 depends_on: [E2, E3, E4, E5, E6, E7] - Run focused regressions, full project suites, workflow/static checks, and review the final critical path
+- E9 depends_on: [E8] - Commit and push the verified implementation to main
+- E10 depends_on: [E9] - Observe the first successful CI and production deploy and identify any remaining measured bottlenecks
+- E11 depends_on: [E10] - Reduce exact-node-image publication latency without weakening cache correctness or exact-SHA provenance
+- E12 depends_on: [E10] - Reduce redundant host image-transfer and rollout work while preserving the 40-second stability window and rollback guarantees
+- E13 depends_on: [E11, E12] - Commit, push, and observe a successful production deploy with a material end-to-end gain versus run 33290751126
+
+## Checklist
+
+- [x] E1 Pin safety and partition contracts
+- [x] E2 Bound weekend-wrapper test deadlines
+- [x] E3 Isolate cross-tree contracts
+- [x] E4 Add image cache and stable layer ordering
+- [x] E5 Integrate workflow parallelism and telemetry
+- [x] E6 Gate concurrent exact-SHA prepull
+- [x] E7 Reuse the tested production artifact
+- [x] E8 Complete focused and full verification
+- [x] E9 Commit and push to main
+- [x] E10 Measure the first successful optimized deploy
+- [x] E11 Reduce node image publication latency
+- [x] E12 Reduce rollout transfer latency
+- [x] E13 Prove the final measured CI/deploy gain
+
+## Review
+
+- Weekend-wrapper focused regression fell from 171.15s to a bounded test-only path; the final combined CI contract suite passed 92 tests in 33.42s while production retained its 60s launch floor.
+- Web-only changes now run Vitest plus explicit cross-tree pytest contracts instead of the full Python/cloud gate; contract inventory and AST omission guards are pinned.
+- Exact SHA Python/node images build in parallel with isolated Buildx caches, pull concurrently, and are required locally before teardown; moving-tag runtime fallback was removed.
+- Prestaging and image prepull overlap. A duplicate host Next compile is skipped only after exact-image, rollback-artifact, matching-drop-in, and effective-systemd checks pass.
+- Commit gate: focused 322 passed / 5 skipped; cloud full 1,454 passed / 12 skipped; gitleaks scanned 2,380 commits with no findings; actionlint and shell syntax passed.
+- Full Vitest load timeouts all passed in isolation. Full monolithic Python retained unrelated Flex/scan baseline failures, while both changed timeout regressions passed under xdist; GitHub's isolated shards are the release gate.
+- Implementation commit `44683993` is on `main`. Run 33293579469 finished in 341s versus the 468s baseline and cut `scripts-rs` from 204s to 70s, but did not deploy because pytest still collected an explicitly expanded Caddy file despite `--ignore`; the follow-up removes that file before invoking pytest.
+- Follow-up commit `92278f6a` completed production successfully in run 33294190643, but total wall time was 472s, not an improvement over 468s. Measured bottlenecks were node image 283s, exact-image prepull 85s, and deploy 94s; test sharding itself is no longer the critical path.
+- The 283s node job spent 83s creating a 582MiB recursive-chown layer, then 51s exporting and 66s cache-uploading it. Runtime ownership is now limited to writable Next cache/data directories; test-only trees are excluded from image contexts. The smaller immutable image also reduces exact-image host transfer while the installed helper pulls Python and node concurrently.
+- Commit `2f46a166` completed production successfully in run 33294882038 in 231s, down 237s / 50.6% from run 33290751126. Node image publication fell from 283s to 93s, image export from 51s to 2.8s, cache export from 65.7s to 7s, and exact-image prepull from 85s to 16s; the 40-second stability gate remained intact.
+
+---
+
+# Task: CI and production deploy acceleration plan (2026-08-29)
+
+## Objective
+
+- Reduce push-to-production wall time from the observed ~8 minutes without weakening required gates, deployment safety, or rollback guarantees.
+- Produce an evidence-backed implementation sequence with owners, expected impact, risks, and acceptance checks.
+
+## Dependency graph
+
+- T1 depends_on: [] - Measure run 33290751126 job/step durations, queue time, and critical path
+- T2 depends_on: [] - Audit workflow DAG, change detection, caches, matrices, test sharding, and duplicated setup
+- T3 depends_on: [] - Audit deploy trigger, artifact/image flow, remote rollout, health checks, and serialized waits
+- T4 depends_on: [] - Validate proposed techniques against current GitHub Actions guidance
+- T5 depends_on: [T1, T2, T3, T4] - Rank changes by wall-time impact, effort, safety, and implementation dependency
+- T6 depends_on: [T5] - Publish and open the actionable browser brief; verify the rendered handoff
+
+## Checklist
+
+- [x] T1 Measure the referenced run and recent baseline
+- [x] T2 Audit CI workflow parallelism, caching, and sharding
+- [x] T3 Audit production deployment critical path
+- [x] T4 Verify current platform best practices
+- [x] T5 Write prioritized implementation plan and target SLA
+- [x] T6 Open and verify browser brief
+
+## Review
+
+- Run 33290751126 completed in 468s; runner queueing was only 1-4s.
+- Critical path: launch 11s, `scripts-rs` 204s, coverage barrier 22s, prestage 60s, deploy 170s.
+- Highest-impact work: bounded regression-test deadlines, isolated cross-tree contracts, and gated concurrent exact-SHA image prepull.
+- Phase-one target: web-only p50 at or below 4:45 while retaining the 40s stability window and non-canceling deploy boundary.
+- Published `docs/ci-deploy-acceleration-plan.html`; opened in the system browser and verified at 1440x900 and 393x852 with Playwright.
+
+---
+
+# Task: SPOF host-split Phase 0/0B/1-prep (2026-08-29)
+
+## Dependency graph
+
+- S1 depends_on: [] - Combined-host-safe code: parameterized Tailscale bind, auto-sync strays, cut PartOf, host role, privileged sudoers
+- S2 depends_on: [S1] - Focused cloud tests green
+- S3 depends_on: [S2] - PR. Operator runbook for backups, snapshot, bootstrap, second VM
+
+## Checklist
+
+- [x] S1 Code on `feat/spof-host-split`
+- [x] S2 Focused tests (333 passed / 3 skipped cloud subset; visudo OK)
+- [ ] S3 PR + operator instructions
+
+## Review
+
+- Live Hetzner backups, new CX, helper uninstall, and 2FA are NOT in CI.
+
+---
+
+# Task: Resolve testing/2026-08-29 merge conflicts (2026-08-29)
+
+## Dependency graph
+
+- M1 depends_on: [] - Fetch main, inspect divergence, identify conflicting files and intended state
+- M2 depends_on: [M1] - Resolve conflicts surgically, preserving both remediation and reliability fixes
+- M3 depends_on: [M2] - Run focused validation for touched files and inspect final diff
+- M4 depends_on: [M3] - Secret scan, review, CodeQL, commit/push, PR reply
+
+## Checklist
+
+- [x] M1 Inspect divergence and conflict set
+- [x] M2 Resolve merge conflicts
+- [x] M3 Verify focused tests
+- [x] M4 Review, scan, ship
+
+## Review
+
+- `git merge --no-commit --no-ff origin/main` surfaced 3 content conflicts; resolved and finalized as merge commit `a2dfa96f`
+- Focused pytest green: `scripts/tests/test_flex_delivery_claim_writer.py scripts/tests/test_flex_delivery_claim_release.py scripts/tests/test_flex_sftp_pull.py` → 31 passed
+- Focused pytest green: `cloud/tests/test_app_plane_cutover_safety.py cloud/tests/test_unit_install_acknowledgment.py` → 30 passed, 2 skipped
+
+---
+
+# Task: Flex sFTP remaining (steps 6-9)
+
+Canonical operator board: `docs/show-me-flex-sftp-ops.html`
+Plan: `docs/flex-sftp-cutover.md`
+
+P1/P2 (steps 1-5 code) are on `main` (`26668ef8`). Timer not enabled. No SendRequest.
+
+## Dependency graph
+
+- S6 depends_on: [] - Written Flex grant from filedelivery@. Then VPS: pin host key, IPv4-only ssh_config, first list-dir. Do not ingest. Do not `accept-new`.
+- S7 depends_on: [S6] - Portal: method sFTP only if step 2 inventory did not stop. Tick only 1442520 and 1422766. Period Last Business Day. XML. No `IB_FLEX_FLOWS_QUERY_ID`.
+- S8 depends_on: [S6] - Code: OpenSSH IPv4 puller, PGP in-memory, classify, `flex-inbox`, stub-SSH tests. Enable `radon-flex-pull.timer` Tue-Sat 07:30 ET only after a file is on the remote. Empty dir: 08:30 list-dir retry. No SendRequest.
+- S9 depends_on: [S7, S8] - Dual-run sFTP vs Portal Run `--from-file`. First SendRequest recon Sun after embargo (`raise_if_blocked()` first). Weekday SendRequest = 0.
+
+## Checklist
+
+- [x] S6 Pin host key + first list-dir (2026-08-28). Host `ftp2.interactivebrokers.com` `64.190.196.110` RSA SHA256:C3STmRsxF9UfYvQ8yeJ9vwvK7lMHQ2FcMHchtQd7/wg. Dir `outgoing` empty (first files 8/31).
+- [ ] S7 Confirm Portal: only 1442520 + 1422766 ticked. IBKR already set Last Business Day XML. Stop if extra reports are on sFTP.
+- [x] S8 Puller + timer (timer disabled until S6 file exists; `flex_sftp_pull.py` stub-SSH tests; not-installed ack)
+- [ ] S9 Dual-run then demote
+
+## Stops
+
+- Grant is reporting-integration / master-sub → refuse. Email ingest.
+- Human mailbox still needs a statement → do not flip method to sFTP.
+- Host-key change, PGP fail, IPv6, 365-day nightly file, ambiguous XML → fail closed.
+- `/orders` still POSTs rehydrate → do not enable the timer.
 
 ---
 
@@ -3777,3 +4103,23 @@ Per /indicator swarm (spec: docs/indicators/skew.md). Slug/service `skew`, tab S
 - Local output-trace audit remains baseline-red because the development checkout contains 14.2 GB across 7,333 backup/archive files traced by the existing orders/place route; production compile itself passed.
 
 - PR: `#97` at commit `1e15b612`; replacement CI passed every build, security, Vitest, coverage, Python, perimeter, Playwright, Vercel preview, and app-image check.
+
+# DISPERSION indicator (2026-08-29)
+
+Spec: `docs/indicators/dispersion.md`. Pattern: `/indicator` swarm, single shared worktree, disjoint ownership.
+
+## Checklist
+
+- [x] T1 Research: IB `10 Y` TRADES daily bars reach 2016-08-31 for S&P seed, sector SPDRs, VIX (XLC from 2018-06-19); migration 0061 free; fixture captured.
+- [x] T2 Spec written and committed.
+- [x] T3 Red tests recorded failing on missing modules (34b038e4).
+- [x] T4 Implementers landed scoped commits: ingestion 94 pytest, api 259 vitest, ui 179 vitest.
+- [x] T5 Full gates: vitest 814 files / 8,228 passed; pytest 8,631 passed + 24 pre-existing Flex-embargo failures; tsc 0 errors post-rebase.
+- [x] T6 Backfill: IB 488/515 + Yahoo 27, 2,511 rows 2016-09-01..2026-08-28 verified in Turso; migration 61 applied.
+- [x] T7 Playwright mocked spec 3 passed; live screenshots dark+light with 12 stroked paths, 0 NaN, 0 cadence claims.
+- [ ] T8 Ship: branch pushed as ind/dispersion, PR open; merge deploys; then verify timer on the host.
+
+## Review
+
+- 2026-08-28 reading: stock +2.06, sector +2.02, VIX -0.32, BELOW THE SURFACE (gap +2.38), matching the Wellington chart.
+- IB daily bars DO throttle on a 515-symbol 10 Y sweep (20 error-162 retries); the incremental 1 M run is expected to be lighter, watch the first timer fire.

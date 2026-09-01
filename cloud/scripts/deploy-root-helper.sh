@@ -16,6 +16,7 @@ readonly -a CONTROL_PLANE_SOURCES=(
   scripts/ib-gateway-control.sh
   scripts/operator-radon.sh
   scripts/drift_audit.py
+  scripts/disk_cleanup.py
   scripts/radon-app-runtime.sh
   config/sudoers.d/radon-deploy
   config/sudoers.d/radon-monitor
@@ -27,6 +28,7 @@ readonly -a CONTROL_PLANE_SOURCES=(
   services/radon-ib-watchdog.service
   services/radon-ib-watchdog.timer
   services/radon-ib-gateway.service
+  services/radon-ib-gateway-remote.service
   services/radon-api.service
   services/radon-monitor.service
   services/radon-relay.service
@@ -36,16 +38,24 @@ readonly -a CONTROL_PLANE_SOURCES=(
   services/radon-refresh.timer
   services/radon-db-backup.service
   services/radon-db-backup.timer
+  services/radon-disk-cleanup.service
+  services/radon-disk-cleanup.timer
   services/radon-drift-audit.service
   services/radon-drift-audit.timer
   services/radon-nextjs-db-watchdog.service
   services/radon-nextjs-db-watchdog.timer
+  services/radon-api.service.d/runtime-container.conf
+  services/radon-nextjs.service.d/runtime-container.conf
+  services/radon-relay.service.d/runtime-container.conf
+  services/radon-monitor.service.d/runtime-container.conf
+  services/radon-newsfeed.service.d/runtime-container.conf
 )
 readonly -a CONTROL_PLANE_TARGETS=(
   /usr/local/sbin/radon-deploy-root
   /usr/local/bin/radon-ib-gateway-control
   /usr/local/bin/radon
   /usr/local/lib/radon/drift_audit.py
+  /usr/local/lib/radon/disk_cleanup.py
   /usr/local/sbin/radon-app-runtime
   /etc/sudoers.d/radon-deploy
   /etc/sudoers.d/radon-monitor
@@ -57,6 +67,7 @@ readonly -a CONTROL_PLANE_TARGETS=(
   /etc/systemd/system/radon-ib-watchdog.service
   /etc/systemd/system/radon-ib-watchdog.timer
   /etc/systemd/system/radon-ib-gateway.service
+  /etc/systemd/system/radon-ib-gateway-remote.service
   /etc/systemd/system/radon-api.service
   /etc/systemd/system/radon-monitor.service
   /etc/systemd/system/radon-relay.service
@@ -66,16 +77,24 @@ readonly -a CONTROL_PLANE_TARGETS=(
   /etc/systemd/system/radon-refresh.timer
   /etc/systemd/system/radon-db-backup.service
   /etc/systemd/system/radon-db-backup.timer
+  /etc/systemd/system/radon-disk-cleanup.service
+  /etc/systemd/system/radon-disk-cleanup.timer
   /etc/systemd/system/radon-drift-audit.service
   /etc/systemd/system/radon-drift-audit.timer
   /etc/systemd/system/radon-nextjs-db-watchdog.service
   /etc/systemd/system/radon-nextjs-db-watchdog.timer
+  /etc/systemd/system/radon-api.service.d/runtime-container.conf
+  /etc/systemd/system/radon-nextjs.service.d/runtime-container.conf
+  /etc/systemd/system/radon-relay.service.d/runtime-container.conf
+  /etc/systemd/system/radon-monitor.service.d/runtime-container.conf
+  /etc/systemd/system/radon-newsfeed.service.d/runtime-container.conf
 )
 readonly -a CONTROL_PLANE_MODES=(
-  755 755 755 644 755
+  755 755 755 644 644 755
   440 440 440 440
   644
-  644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644
+  644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644 644
+  644 644 644 644 644
 )
 
 if [[ "${RADON_DEPLOY_HELPER_TEST_MODE:-0}" == "1" ]]; then
@@ -92,6 +111,7 @@ if [[ "${RADON_DEPLOY_HELPER_TEST_MODE:-0}" == "1" ]]; then
   readonly ROOT_MUTATION_ACTION_TIMEOUT="${RADON_TEST_ROOT_MUTATION_ACTION_TIMEOUT:-${RADON_TEST_ROOT_ACTION_TIMEOUT:-180}}"
   readonly ROOT_VERIFY_ACTION_TIMEOUT="${RADON_TEST_ROOT_VERIFY_ACTION_TIMEOUT:-${RADON_TEST_ROOT_ACTION_TIMEOUT:-30}}"
   readonly ROOT_COMMIT_ACTION_TIMEOUT="${RADON_TEST_ROOT_COMMIT_ACTION_TIMEOUT:-${RADON_TEST_ROOT_ACTION_TIMEOUT:-30}}"
+  readonly ROOT_SYNC_ACTION_TIMEOUT="${RADON_TEST_ROOT_SYNC_ACTION_TIMEOUT:-${RADON_TEST_ROOT_ACTION_TIMEOUT:-300}}"
   readonly ROOT_KILL_AFTER="${RADON_TEST_ROOT_KILL_AFTER:-5}"
   readonly ROOT_LOCK_WAIT="${RADON_TEST_ROOT_LOCK_WAIT:-190}"
   readonly SESSION_PYTHON="${RADON_TEST_SESSION_PYTHON:-$(command -v python3)}"
@@ -101,6 +121,8 @@ if [[ "${RADON_DEPLOY_HELPER_TEST_MODE:-0}" == "1" ]]; then
   readonly CADDY_BIN="${RADON_TEST_CADDY_BIN:-}"
   readonly SYSTEMD_UNIT_DIR="${RADON_TEST_SYSTEMD_UNIT_DIR:-}"
   readonly GIT="${RADON_TEST_GIT:-$(command -v git)}"
+  readonly TAR="${RADON_TEST_TAR:-$(command -v tar)}"
+  readonly BOOTSTRAP_RUNNER="${RADON_TEST_BOOTSTRAP_RUNNER:-/bin/bash}"
   readonly RADON_GIT_DIR="${RADON_TEST_GIT_DIR:-}"
   readonly UNIT_REMOTE="${RADON_TEST_UNIT_REMOTE:-}"
   readonly SYSTEMD_DIR="${RADON_TEST_SYSTEMD_DIR:-}"
@@ -113,6 +135,7 @@ if [[ "${RADON_DEPLOY_HELPER_TEST_MODE:-0}" == "1" ]]; then
   readonly CLOUD_SOURCE="${RADON_TEST_CLOUD_SOURCE:-${RADON_TEST_CLOUD_ROOT:-}}"
   readonly SHA256SUM="${RADON_TEST_SHA256SUM:-$(command -v sha256sum)}"
   readonly VISUDO="${RADON_TEST_VISUDO:-$(command -v visudo)}"
+  readonly NODE="${RADON_TEST_NODE:-$(command -v node || true)}"
   test_replica_prefix="${RADON_TEST_REPLICA_PREFIX:?test replica prefix is required}"
   readonly REPLICA_FILES=(
     "$test_replica_prefix"
@@ -143,9 +166,11 @@ else
   readonly CLOUD_SOURCE=/home/radon/radon/cloud
   readonly SHA256SUM=/usr/bin/sha256sum
   readonly VISUDO=/usr/sbin/visudo
+  readonly NODE=/usr/bin/node
   readonly ROOT_MUTATION_ACTION_TIMEOUT=180
   readonly ROOT_VERIFY_ACTION_TIMEOUT=30
   readonly ROOT_COMMIT_ACTION_TIMEOUT=30
+  readonly ROOT_SYNC_ACTION_TIMEOUT=300
   readonly ROOT_KILL_AFTER=5
   readonly ROOT_LOCK_WAIT=190
   readonly SESSION_PYTHON=/usr/bin/python3.13
@@ -154,6 +179,8 @@ else
   readonly CADDY_BIN=/usr/bin/caddy
   readonly SYSTEMD_UNIT_DIR=/etc/systemd/system
   readonly GIT=/usr/bin/git
+  readonly TAR=/usr/bin/tar
+  readonly BOOTSTRAP_RUNNER=/bin/bash
   readonly RADON_GIT_DIR=/home/radon/radon/.git
   readonly UNIT_REMOTE=https://github.com/joemccann/radon.git
   readonly SYSTEMD_DIR=/etc/systemd/system
@@ -189,7 +216,7 @@ prepare_state_dir() {
 }
 
 if (( $# != 1 )); then
-  echo "usage: radon-deploy-root {stop-clean|restart-managed|recover|verify-restored|verify-control-plane|commit-transition|publish-caddy|install-units|revert-units|sync-scheduled-units|refresh-control-plane|refresh-control-plane-privileged}" >&2
+  echo "usage: radon-deploy-root {stop-clean|restart-managed|recover|verify-restored|verify-control-plane|commit-transition|publish-caddy|install-units|revert-units|sync-scheduled-units|sync-control-plane|refresh-control-plane|refresh-control-plane-privileged}" >&2
   exit 64
 fi
 
@@ -210,6 +237,45 @@ root_ownership_matches() {
   else
     [[ "$(stat -f '%Su:%Sg' "$1")" == "root:root" ]]
   fi
+}
+
+read_host_role() {
+  local role="${RADON_HOST_ROLE:-}"
+  local envf="${RADON_DEPLOY_ENV_FILE:-${CONTROL_PLANE_ROOT}/etc/radon/env}"
+  if [[ -z "$role" && -f "$envf" ]]; then
+    role="$(awk -F= '/^RADON_HOST_ROLE=/{v=$2} END{print v}' "$envf" 2>/dev/null || true)"
+    role="${role%\"}"
+    role="${role#\"}"
+    role="${role%\'}"
+    role="${role#\'}"
+    role="${role//$'\r'/}"
+  fi
+  case "$role" in
+    app|broker|combined) printf '%s\n' "$role" ;;
+    *) printf 'combined\n' ;;
+  esac
+}
+
+app_skips_control_plane_source() {
+  role_skips_control_plane_source "$1"
+}
+
+role_skips_control_plane_source() {
+  local role
+  role="$(read_host_role)"
+  case "$1" in
+    scripts/ib-gateway-control.sh|\
+    services/radon-ib-gateway.service|\
+    services/radon-ib-gateway-preheld-restart.service|\
+    services/radon-ib-watchdog.service|\
+    services/radon-ib-watchdog.timer)
+      [[ "$role" == "app" ]] && return 0
+      return 1 ;;
+    services/radon-ib-gateway-remote.service)
+      [[ "$role" == "app" ]] && return 0
+      return 1 ;;
+    *) return 1 ;;
+  esac
 }
 
 verify_control_plane() {
@@ -236,6 +302,12 @@ verify_control_plane() {
       return 1
     fi
     installed_target="${CONTROL_PLANE_ROOT}${logical_target}"
+    if app_skips_control_plane_source "$source_rel"; then
+      if [[ ! -f "$installed_target" || -L "$installed_target" ]]; then
+        index=$((index + 1))
+        continue
+      fi
+    fi
     if [[ ! -f "$installed_target" || -L "$installed_target" ]]; then
       echo "installed control-plane target is unavailable or unsafe: ${logical_target}" >&2
       return 1
@@ -985,6 +1057,83 @@ resolve_trusted_main_tip() {
   printf '%s\n' "$remote_sha"
 }
 
+# The GitHub main tip, required to be present in the local object store (the
+# deploy job fetches it as radon before asking). Unlike
+# resolve_trusted_main_tip this does NOT require HEAD to be the tip: it runs
+# before promote, while HEAD is still the previous release.
+resolve_fetched_main_tip() {
+  local remote_sha
+
+  unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+        GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_EXEC_PATH GIT_SSH GIT_SSH_COMMAND \
+        GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM \
+        GIT_SSL_NO_VERIFY GIT_HTTP_USER_AGENT GIT_PROXY_COMMAND || true
+
+  [[ -n "$GIT" && -n "$RADON_GIT_DIR" && -n "$UNIT_REMOTE" ]] || {
+    echo "control-plane trust-source paths are not configured" >&2
+    return 78
+  }
+  if [[ "$FORCE_GITHUB_REMOTE_CHECK" == "1" ]]; then
+    github_origin_is_allowed "$UNIT_REMOTE" || {
+      echo "control-plane remote is not the GitHub radon repo" >&2
+      return 76
+    }
+  fi
+  remote_sha="$(git_bounded ls-remote --refs "$UNIT_REMOTE" refs/heads/main | awk '{print $1}')" || {
+    echo "could not read the GitHub main tip" >&2
+    return 69
+  }
+  [[ "$remote_sha" =~ ^[0-9a-f]{40}$ ]] || {
+    echo "invalid GitHub main tip" >&2
+    return 69
+  }
+  git_bounded --git-dir="$RADON_GIT_DIR" cat-file -e "${remote_sha}^{commit}" || {
+    echo "local git store is missing the main tip; fetch origin main first" >&2
+    return 66
+  }
+  printf '%s\n' "$remote_sha"
+}
+
+# Installs the control-plane bundle (helpers, sudoers, polkit, control-plane
+# units and drop-ins) at the GitHub main tip by running that tip's own
+# bootstrap-control-plane.sh from a root-owned extraction. Same trust anchor
+# as install-units: content is read through the commit that GitHub reports as
+# main, never from the radon-writable working tree. Bootstrap owns the deploy
+# lock, refuses pending transitions, validates every artifact, installs
+# atomically, and rewrites the readiness manifest; a bundle that is already
+# current is a no-op. Before this verb every helper/sudoers/polkit edit, and
+# every root hot-patch of a drop-in, blocked all deploys at preflight until
+# a human ran bootstrap over SSH (2026-08-21, 2026-08-29). R-430.
+sync_control_plane() {
+  local tip workdir bootstrap rc
+
+  tip="$(resolve_fetched_main_tip)" || return $?
+  workdir="$(mktemp -d "${STATE_DIR}/control-plane-sync.XXXXXX")" || {
+    echo "could not create a root-owned control-plane staging tree" >&2
+    return 73
+  }
+  if ! git_bounded --git-dir="$RADON_GIT_DIR" archive --format=tar "$tip" cloud \
+      | "$TAR" -x -C "$workdir"; then
+    "$RM" -rf "$workdir"
+    echo "could not extract cloud/ at the GitHub main tip ${tip}" >&2
+    return 66
+  fi
+  bootstrap="${workdir}/cloud/scripts/bootstrap-control-plane.sh"
+  if [[ ! -f "$bootstrap" || -L "$bootstrap" ]]; then
+    "$RM" -rf "$workdir"
+    echo "GitHub main tip ${tip} ships no control-plane bootstrap" >&2
+    return 66
+  fi
+  printf 'sync-control-plane: reconciling the installed control plane with %s\n' "$tip"
+  if RADON_BOOTSTRAP_CLOUD_ROOT="${workdir}/cloud" "$BOOTSTRAP_RUNNER" "$bootstrap"; then
+    rc=0
+  else
+    rc=$?
+  fi
+  "$RM" -rf "$workdir"
+  return "$rc"
+}
+
 sync_scheduled_units() {
   local remote_sha allowlist manifest unit expected actual live
   local tmp dest installed=0
@@ -1081,6 +1230,34 @@ sync_scheduled_units() {
   return 0
 }
 
+# Drop-in content gate. Mirrors the `dropin` validator in
+# bootstrap-control-plane.sh; cloud/tests/test_rel133_control_plane_recovery.py
+# pins the two against each other so they cannot drift. R-394.
+dropin_body_is_valid() {
+  local path="$1" label="${2:-$1}"
+  grep -qE '^Type=(simple|notify)$' "$path" || {
+    echo "drop-in must set Type=simple or Type=notify: ${label}" >&2
+    return 1
+  }
+  grep -q '^ExecStart=/usr/local/sbin/radon-app-runtime run %n$' "$path" || {
+    echo "drop-in must ExecStart radon-app-runtime: ${label}" >&2
+    return 1
+  }
+  grep -q '^ExecStartPre=$' "$path" || {
+    echo "drop-in must reset ExecStartPre: ${label}" >&2
+    return 1
+  }
+  if grep -q 'radon-ib-gateway' "$path"; then
+    echo "drop-in must not mention radon-ib-gateway: ${label}" >&2
+    return 1
+  fi
+  if grep -qE '^Exec[A-Za-z]*=[^ ]*/home/radon' "$path"; then
+    echo "drop-in must not execute from /home/radon: ${label}" >&2
+    return 1
+  fi
+  return 0
+}
+
 refresh_install_file() {
   local source="$1"
   local dest="$2"
@@ -1112,9 +1289,57 @@ refresh_install_file() {
         return 73
       fi
       ;;
-    */radon-deploy-root|*/radon-ib-gateway-control|*/usr/local/bin/radon)
+    */radon-deploy-root|*/radon-ib-gateway-control|*/usr/local/bin/radon|*/radon-app-runtime)
       if ! bash -n "$candidate"; then
         echo "shell syntax validation failed: ${dest}" >&2
+        "$RM" -f "$candidate"
+        return 73
+      fi
+      ;;
+    # The arms below mirror bootstrap-control-plane.sh's KINDS table. This
+    # path runs on every deploy with the app tier STOPPED and used to install
+    # the app runtime, polkit rules, python helpers and control-plane units
+    # unvalidated; test_refresh_control_plane pins one arm per target. R-437.
+    */polkit-1/rules.d/*.rules)
+      if [[ -z "$NODE" || ! -x "$NODE" ]] || ! "$NODE" --check < "$candidate"; then
+        echo "polkit syntax validation failed: ${dest}" >&2
+        "$RM" -f "$candidate"
+        return 73
+      fi
+      ;;
+    */lib/radon/*.py)
+      # Parse only; importing would execute candidate code as root.
+      if ! "$SESSION_PYTHON" -c 'import ast, sys; ast.parse(open(sys.argv[1], encoding="utf-8").read(), sys.argv[1])' "$candidate"; then
+        echo "python syntax validation failed: ${dest}" >&2
+        "$RM" -f "$candidate"
+        return 73
+      fi
+      ;;
+    */systemd/system/radon-*.service|*/systemd/system/radon-*.timer)
+      if ! unit_candidate_verifies "$candidate" "$(basename -- "$dest")"; then
+        echo "systemd unit validation failed: ${dest}" >&2
+        "$RM" -f "$candidate"
+        return 73
+      fi
+      ;;
+    */radon-*.service.d/*.conf)
+      # An operator who followed the (now deleted) .conf.example instructions
+      # and hand-copied a drop-in to this exact path has it overwritten with no
+      # backup and no journal entry, unlike install_manifest_units'
+      # UNIT_BACKUP_PREFIX snapshot. Record what was replaced so the change is
+      # at least attributable in the deploy log. R-420.
+      if [[ -f "$dest" && ! -L "$dest" ]]; then
+        local previous
+        previous="$(file_sha256 "$dest" 2>/dev/null || echo unknown)"
+        if [[ "$previous" != "$(file_sha256 "$candidate" 2>/dev/null || echo unknown)" ]]; then
+          echo "replacing drop-in ${dest} (previous digest ${previous})" >&2
+        fi
+      fi
+      # The same rules bootstrap-control-plane.sh enforces. That path almost
+      # never runs; THIS one installs the drop-in on every deploy, out of the
+      # radon-writable /home/radon/radon/cloud, and had no arm at all. A drop-in
+      # is the root-run unit definition of all five app services. R-394.
+      if ! dropin_body_is_valid "$candidate" "$dest"; then
         "$RM" -f "$candidate"
         return 73
       fi
@@ -1135,7 +1360,25 @@ write_control_plane_manifest_and_ready() {
   for index in "${!CONTROL_PLANE_SOURCES[@]}"; do
     source_rel="${CONTROL_PLANE_SOURCES[$index]}"
     dest="${CONTROL_PLANE_ROOT}${CONTROL_PLANE_TARGETS[$index]}"
+    if app_skips_control_plane_source "$source_rel" && \
+       [[ ! -f "$dest" || -L "$dest" ]]; then
+      digest="$(file_sha256 "${CLOUD_SOURCE}/${source_rel}")" || {
+        "$RM" -f "$tmp_manifest"
+        return 73
+      }
+      printf '%s  %s -> %s\n' "$digest" "$source_rel" "${CONTROL_PLANE_TARGETS[$index]}" \
+        >> "$tmp_manifest"
+      continue
+    fi
     if [[ ! -f "$dest" || -L "$dest" ]]; then
+      # Same rollback shape as the skip in refresh_control_plane: a drop-in that
+      # this checkout does not ship, and that was never installed, is not a
+      # manifest entry. R-380.
+      case "$source_rel" in
+        services/*.service.d/*.conf)
+          [[ -f "${CLOUD_SOURCE}/${source_rel}" ]] || continue
+          ;;
+      esac
       "$RM" -f "$tmp_manifest"
       echo "installed control-plane target is unavailable after refresh: ${CONTROL_PLANE_TARGETS[$index]}" >&2
       return 73
@@ -1183,7 +1426,26 @@ refresh_control_plane() {
     source_rel="${CONTROL_PLANE_SOURCES[$index]}"
     source="${CLOUD_SOURCE}/${source_rel}"
     dest="${CONTROL_PLANE_ROOT}${CONTROL_PLANE_TARGETS[$index]}"
+    if app_skips_control_plane_source "$source_rel"; then
+      if [[ -f "$dest" && ! -L "$dest" ]]; then
+        "$RM" -f "$dest" || {
+          echo "failed to strip app-role gateway artifact: ${dest}" >&2
+          return 73
+        }
+      fi
+      continue
+    fi
     if [[ ! -f "$source" || -L "$source" ]]; then
+      # A drop-in source is absent from every checkout before 702ae26a, and the
+      # INSTALLED helper is always the newest one, so a rollback enumerates
+      # sources the restored tree does not have. Aborting here left all five app
+      # units stopped with no path back; skip and warn instead. R-380.
+      case "$source_rel" in
+        services/*.service.d/*.conf)
+          echo "control-plane source absent, leaving installed copy in place: ${source_rel}" >&2
+          continue
+          ;;
+      esac
       echo "control-plane source is missing or is not a regular file: ${source_rel}" >&2
       return 66
     fi
@@ -1349,6 +1611,11 @@ root_action_timeout() {
     refresh-control-plane|refresh-control-plane-privileged)
       printf '%s\n' "$ROOT_MUTATION_ACTION_TIMEOUT"
       ;;
+    sync-control-plane)
+      # git archive + bootstrap validation (systemd-analyze, visudo, node,
+      # py_compile) for the whole bundle; not in the job-cancel class.
+      printf '%s\n' "$ROOT_SYNC_ACTION_TIMEOUT"
+      ;;
     verify-restored|verify-control-plane)
       printf '%s\n' "$ROOT_VERIFY_ACTION_TIMEOUT"
       ;;
@@ -1453,6 +1720,9 @@ case "$1" in
     ;;
   sync-scheduled-units)
     sync_scheduled_units
+    ;;
+  sync-control-plane)
+    sync_control_plane
     ;;
   refresh-control-plane)
     refresh_control_plane

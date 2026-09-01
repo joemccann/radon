@@ -40,10 +40,11 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from test_app_runtime import _run as _run_runtime  # noqa: E402
+from test_app_runtime import TEST_SHA, _run as _run_runtime  # noqa: E402
 from test_caddyfile import read_caddyfile  # noqa: E402,F401  (path bootstrap)
 
 PYTHON_REPO = "ghcr.io/joemccann/radon-python"
@@ -54,6 +55,10 @@ RUNTIME = CLOUD / "scripts" / "radon-app-runtime.sh"
 SERVICES = CLOUD / "services"
 WORKFLOW = CLOUD.parent / ".github" / "workflows" / "app-images.yml"
 DOCKERFILE_NODE = CLOUD.parent / "docker" / "app" / "Dockerfile.node"
+DOCKERFILE_PYTHON = CLOUD.parent / "docker" / "app" / "Dockerfile.python"
+
+SETUP_BUILDX_ACTION = "docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e"
+BUILD_PUSH_ACTION = "docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a"
 
 NEXT_PUBLIC_ARGS = (
     "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
@@ -89,14 +94,33 @@ DROP_IN_SKIP_BASELINE = {
 
 
 def _drop_in_example_params():
+    """Both the `.example` docs AND the real installed drop-ins.
+
+    T-281: `702ae26a` shipped five REAL
+    `*.service.d/runtime-container.conf` files and taught
+    `bootstrap-control-plane.sh` to install them to `/etc/systemd/system/`,
+    and `8cd7909b` pinned their hashes into `installed-units.sha256`. This
+    glob still matched `.example` only, so the guard below inspected
+    DOCUMENTATION and never once looked at a file that actually reaches the
+    host. All five currently DO reset ExecStartPre, so this is a coverage
+    hole rather than a live defect — but a sixth unit added without the reset
+    ships green.
+    """
     params = []
-    for example in sorted(SERVICES.glob("*.service.d/runtime-container.conf.example")):
+    # The SHIPPED drop-ins, plus the fleet template that is still an example.
+    # R-420.
+    candidates = sorted(SERVICES.glob("*.service.d/runtime-container.conf"))
+    candidates += sorted(SERVICES.glob("*.service.d/runtime-container.conf.example"))
+    for example in sorted(candidates, key=lambda p: p.parent.name):
         unit_dir = example.parent.name
-        reason = DROP_IN_SKIP_BASELINE.get(unit_dir)
+        installed = example.suffix != ".example"
+        # The baseline is about a template that declares no ExecStart at all.
+        # An INSTALLED file is never a template, so it is never baselined.
+        reason = None if installed else DROP_IN_SKIP_BASELINE.get(unit_dir)
         params.append(
             pytest.param(
                 example,
-                id=unit_dir,
+                id=f"{unit_dir}{'' if installed else '.example'}",
                 marks=pytest.mark.skip(reason=reason) if reason else (),
             )
         )
@@ -189,6 +213,116 @@ class TestImageBuildCarriesPublicEnv:
         for name in NEXT_PUBLIC_ARGS:
             assert f"ARG {name}" in text
 
+    def test_the_client_bundle_must_contain_the_clerk_key(self):
+        text = DOCKERFILE_NODE.read_text(encoding="utf-8")
+        assert "grep -RF" in text
+        assert ".next/static" in text
+        assert "next-clerk-guard" in text
+
+    def test_the_workflow_pushes_latest_only_after_the_node_image_bakes(self):
+        jobs = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+        node = jobs["node-image"]
+        python = jobs["python-image"]
+        node_blob = yaml.dump(node)
+        python_blob = yaml.dump(python)
+        assert "Dockerfile.node" in node_blob
+        assert "radon-node:latest" in node_blob
+        assert "Dockerfile.python" not in node_blob
+        assert "radon-python:latest" not in node_blob
+        assert "Dockerfile.python" in python_blob
+        assert "radon-python:latest" in python_blob
+        assert "Dockerfile.node" not in python_blob
+        assert "radon-node:latest" not in python_blob
+
+    def test_python_and_node_image_jobs_run_in_parallel(self):
+        """One runner doing python then node serializes ~2m of node behind 34s
+        of python, then four sequential GHCR pushes. Sibling jobs with no
+        needs: cut wall clock to the slower image."""
+        parsed = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+        jobs = parsed["jobs"]
+        assert "python-image" in jobs
+        assert "node-image" in jobs
+        assert "needs" not in jobs["python-image"]
+        assert "needs" not in jobs["node-image"]
+        concurrency = parsed.get("concurrency") or jobs["python-image"].get("concurrency")
+        assert concurrency
+        assert concurrency.get("cancel-in-progress") is True
+
+
+class TestImageBuildUsesRemoteCache:
+    @pytest.mark.parametrize(
+        ("job_name", "dockerfile", "image", "scope"),
+        (
+            (
+                "python-image",
+                "docker/app/Dockerfile.python",
+                "radon-python",
+                "radon-python",
+            ),
+            ("node-image", "docker/app/Dockerfile.node", "radon-node", "radon-node"),
+        ),
+    )
+    def test_each_image_is_built_and_published_once(
+        self, job_name, dockerfile, image, scope
+    ):
+        jobs = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+        steps = jobs[job_name]["steps"]
+        setup_steps = [step for step in steps if step.get("uses") == SETUP_BUILDX_ACTION]
+        build_steps = [step for step in steps if step.get("uses") == BUILD_PUSH_ACTION]
+        assert len(setup_steps) == 1
+        assert len(build_steps) == 1
+
+        config = build_steps[0]["with"]
+        assert config["context"] == "."
+        assert config["file"] == dockerfile
+        assert config["platforms"] == "linux/amd64"
+        assert config["provenance"] is False
+        assert "github.ref == 'refs/heads/main'" in config["push"]
+        assert "github.event_name == 'push'" in config["push"]
+        assert f"ghcr.io/joemccann/{image}:${{{{ github.sha }}}}" in config["tags"]
+        assert f"ghcr.io/joemccann/{image}:latest" in config["tags"]
+        assert config["cache-from"] == f"type=gha,scope={scope}"
+        assert config["cache-to"] == f"type=gha,mode=max,scope={scope}"
+
+    def test_python_and_node_do_not_share_a_cache_scope(self):
+        jobs = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+        scopes = []
+        for job_name in ("python-image", "node-image"):
+            build_step = next(
+                step for step in jobs[job_name]["steps"]
+                if step.get("uses") == BUILD_PUSH_ACTION
+            )
+            scopes.append(build_step["with"]["cache-to"])
+        assert len(set(scopes)) == 2
+
+    def test_no_serial_shell_build_tag_or_push_remains(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        assert "docker build " not in workflow
+        assert "docker tag " not in workflow
+        assert "docker push " not in workflow
+
+    def test_dependency_layers_precede_changing_source(self):
+        node = DOCKERFILE_NODE.read_text(encoding="utf-8")
+        assert node.index("COPY package.json bun.lock ./") < node.index(
+            "RUN bun install --frozen-lockfile"
+        )
+        assert node.index("COPY web/package.json web/bun.lock ./web/") < node.index(
+            "WORKDIR /home/radon/radon/web\nRUN bun install --frozen-lockfile"
+        )
+        web_install = node.index(
+            "WORKDIR /home/radon/radon/web\nRUN bun install --frozen-lockfile"
+        )
+        assert web_install < node.index("COPY scripts/ ./scripts")
+        assert web_install < node.index("COPY web/ ./web")
+
+        python = DOCKERFILE_PYTHON.read_text(encoding="utf-8")
+        assert python.index("COPY requirements.txt ./requirements.txt") < python.index(
+            "COPY --chown=radon:radon scripts ./scripts"
+        )
+        assert python.index("COPY scripts/requirements-api.txt") < python.index(
+            "COPY --chown=radon:radon scripts ./scripts"
+        )
+
 
 class TestImageTagIsPreflighted:
     """T-232: drive the runtime with a stub docker; do not grep the script.
@@ -207,32 +341,28 @@ class TestImageTagIsPreflighted:
             for line in result.docker_log.read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
-        assert calls[0] == f"manifest inspect {PYTHON_REPO}:testsha", (
+        assert calls[0] == f"manifest inspect {PYTHON_REPO}:{TEST_SHA}", (
             "the run path pins the exact deploy SHA and docker-runs it with no "
             f"existence check, so a cancelled image build fails all five units: {calls}"
         )
         launch = next(line for line in calls if line.startswith("run "))
-        assert f"{PYTHON_REPO}:testsha" in launch, launch
+        assert f"{PYTHON_REPO}:{TEST_SHA}" in launch, launch
 
-    def test_there_is_a_fallback_when_the_sha_tag_is_absent(self, tmp_path):
+    def test_a_missing_exact_sha_never_falls_back_to_latest(self, tmp_path):
         result = _run_runtime(
             tmp_path,
             ["run", "radon-api.service"],
-            extra_env={"RADON_TEST_MISSING_TAGS": f"{PYTHON_REPO}:testsha"},
+            extra_env={"RADON_TEST_MISSING_TAGS": f"{PYTHON_REPO}:{TEST_SHA}"},
         )
-        assert result.returncode == 0, result.stderr
+        assert result.returncode == 69, result.stderr
         calls = [
             line
             for line in result.docker_log.read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
-        assert f"manifest inspect {PYTHON_REPO}:latest" in calls, calls
-        launch = next(line for line in calls if line.startswith("run "))
-        assert f"{PYTHON_REPO}:latest" in launch, (
-            "no usable fallback tag, so a cancelled build is an unrecoverable "
-            f"manifest unknown across api, nextjs, relay, monitor and newsfeed: {launch}"
-        )
-        assert "falling back" in result.stderr
+        assert f"manifest inspect {PYTHON_REPO}:latest" not in calls, calls
+        assert not [line for line in calls if line.startswith("run ")]
+        assert "exact release image" in result.stderr
 
 
 class TestDropInsResetExecStartPre:
@@ -322,4 +452,36 @@ class TestTheDropInGuardIsNotDecorative:
             f"{self.NODE} executed {executed} of {executed + skipped} "
             "parametrized cases. A guard that skips its way to a single unit "
             "does not guard the fleet."
+        )
+
+    def test_every_installed_drop_in_reaches_the_assertion(self):
+        """T-281: the floor that keeps the guard on the DEPLOYED files.
+
+        The `.example` files are documentation; these are the ones
+        `bootstrap-control-plane.sh` copies to `/etc/systemd/system/` and
+        `installed-units.sha256` pins. Counting them here means a new unit
+        cannot ship a drop-in that the guard silently never opens.
+        """
+        installed = sorted(
+            path.parent.name
+            for path in SERVICES.glob("*.service.d/runtime-container.conf")
+        )
+        assert installed, "no installed runtime-container drop-ins found at all"
+        extra_examples = sum(
+            1
+            for path in SERVICES.glob("*.service.d/runtime-container.conf.example")
+            if path.parent.name not in DROP_IN_SKIP_BASELINE
+        )
+
+        executed, skipped = self._counts()
+        assert executed >= len(installed) + extra_examples, (
+            f"{self.NODE} executed {executed} cases but there are "
+            f"{len(installed)} INSTALLED drop-ins ({installed}) and "
+            f"{extra_examples} unbaselined examples. An installed drop-in is not reaching the "
+            "ExecStart/ExecStartPre assertion."
+        )
+        assert not any(name in DROP_IN_SKIP_BASELINE for name in installed), (
+            "an INSTALLED drop-in was baselined out of the guard. The "
+            "baseline exists for templates that declare no ExecStart "
+            "override; a file that ships to the host is never that."
         )

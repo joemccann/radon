@@ -63,9 +63,21 @@ jobs:
   changes:
     name: Path filter
     runs-on: ubuntu-latest
+    # R-509: a stalled `gh api` lookback must not park every gate and the
+    # deploy for the default 360 min (path_filter.py bounds the call too).
+    timeout-minutes: 5
+    # actions:read lets path_filter.py read this workflow's own run history
+    # (`gh api .../actions/workflows/ci.yml/runs`) to find the last green SHA.
+    permissions:
+      contents: read
+      actions: read
     outputs:
       python: ${{ steps.filter.outputs.python }}
       web: ${{ steps.filter.outputs.web }}
+      contracts: ${{ steps.filter.outputs.contracts }}
+      contract_cloud_tests: ${{ steps.filter.outputs.contract_cloud_tests }}
+      contract_script_tests: ${{ steps.filter.outputs.contract_script_tests }}
+      contract_root_tests: ${{ steps.filter.outputs.contract_root_tests }}
     concurrency:
       group: ci-changes-${{ github.ref }}
       cancel-in-progress: true
@@ -74,10 +86,101 @@ jobs:
         with:
           fetch-depth: 0
       - id: filter
+        # BASE_SHA is the PR base on pull_request and EMPTY on push: on a push
+        # path_filter.py resolves the base itself as the newest main SHA whose
+        # ci.yml push run concluded `success` and that HEAD descends from.
+        # `github.event.before` is whatever main pointed at a moment ago, red
+        # or green; a docs-only push on top of a red main diffed as
+        # documentation, skipped every gate and deployed the red tree. T-312.
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ github.token }}
         run: python3 scripts/ci/path_filter.py
+
+  app-images:
+    name: Exact app images
+    # The callee pushes the SHA tag and the moving `:latest` tag in one
+    # BuildKit operation, so it must not start until gitleaks has passed:
+    # without this a commit that failed secret-scan still overwrote the
+    # public GHCR `:latest` pointer. R-442.
+    needs: [secret-scan]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    uses: ./.github/workflows/app-images.yml
+    permissions:
+      contents: read
+      packages: write
+    concurrency:
+      group: ci-app-images-${{ github.ref }}
+      cancel-in-progress: true
+
+  contract-cloud-tests:
+    name: Cross-tree contracts (cloud)
+    needs: [changes]
+    if: needs.changes.outputs.contract_cloud_tests != ''
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ci-contract-cloud-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@803947b9bd8e9f986429fa0c5a41c367cd732b41 # v7.2.1
+        with:
+          python-version: "3.13"
+          enable-cache: true
+          activate-environment: true
+          cache-dependency-glob: |
+            requirements-dev.txt
+            cloud/requirements-test.txt
+      - run: uv pip install -r requirements-dev.txt -r cloud/requirements-test.txt
+      - run: >-
+          python -m pytest ${{ needs.changes.outputs.contract_cloud_tests }}
+          -q --durations=25
+
+  contract-script-tests:
+    name: Cross-tree contracts (scripts)
+    needs: [changes]
+    if: needs.changes.outputs.contract_script_tests != ''
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ci-contract-scripts-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@803947b9bd8e9f986429fa0c5a41c367cd732b41 # v7.2.1
+        with:
+          python-version: "3.13"
+          enable-cache: true
+          activate-environment: true
+          cache-dependency-glob: |
+            requirements.txt
+            scripts/requirements-api.txt
+            requirements-dev.txt
+      - run: uv pip install -r requirements.txt -r scripts/requirements-api.txt -r requirements-dev.txt
+      - run: >-
+          python -m pytest ${{ needs.changes.outputs.contract_script_tests }}
+          -q --durations=25
+
+  contract-root-tests:
+    name: Cross-tree contracts (root)
+    needs: [changes]
+    if: needs.changes.outputs.contract_root_tests != ''
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ci-contract-root-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@803947b9bd8e9f986429fa0c5a41c367cd732b41 # v7.2.1
+        with:
+          python-version: "3.13"
+          enable-cache: true
+          activate-environment: true
+          cache-dependency-glob: requirements-dev.txt
+      - run: uv pip install -r requirements-dev.txt
+      - run: >-
+          python -m pytest ${{ needs.changes.outputs.contract_root_tests }}
+          -q --durations=25
 
   web-tests:
     name: Vitest (shard ${{ matrix.shard }}/8)
@@ -119,11 +222,17 @@ jobs:
       # config resolve from root node_modules; web/tests files resolve their
       # imports from web/node_modules.
       #
-      # Exclude only the integration tests that spawn `python3.13` (via
-      # runScript): integration.test.ts, kelly.test.ts (kelly wrapper →
-      # scripts/kelly.py), and runner.test.ts (runScript → scripts/*.py). The
-      # Bun-only job has no Python, so these ENOENT here; they run locally where
-      # Python exists (this mirrors pytest's `-m 'not integration'`).
+      # NOTE: there are NO --exclude flags here any more (T-276). Three files
+      # used to be excluded wholesale for spawning `python3.13`, which the
+      # Bun-only job does not have. But those files are MIXED: only 9 of their
+      # 27 tests spawn anything. The other 18 — PI command dispatch, the
+      # /api/prices deprecation contract, and the 2026-05-22 bare-`python3.13`
+      # outage regression in resolvePythonBin — need no subprocess and now run
+      # in this gate. The 9 that do skip BY NAME via `hasPython313()`
+      # (web/tests/helpers/python313.ts), so the reason is visible in the run
+      # output instead of buried in this file.
+      # scripts/tests/test_vitest_python_gating.py fails if an --exclude for
+      # any of those three paths comes back.
       # NOTE: data-reader.test.ts is NO LONGER excluded — it was failing only
       # from a non-root cwd (fixtures written cwd-relative while readDataFile
       # reads from resolveProjectRoot()); the test now writes under the project
@@ -140,9 +249,6 @@ jobs:
           --coverage.thresholds.lines=0
           --coverage.thresholds.functions=0
           --coverage.thresholds.branches=0
-          --exclude '**/web/tests/integration.test.ts'
-          --exclude '**/lib/tools/__tests__/kelly.test.ts'
-          --exclude '**/lib/tools/__tests__/runner.test.ts'
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: vitest-coverage-${{ matrix.shard }}
@@ -189,6 +295,10 @@ jobs:
         # monitor_daemon/ and watchdog/ subdirectories need their own shard
         # (TEST_AUDIT T-122 — 752 tests left CI unnoticed without it).
         # test_ci_deploy_concurrency.py asserts shard-union == recursive.
+        # CIP-001: a module named before its letter glob is collected first
+        # (pytest de-duplicates the glob hit), so `--dist loadfile` starts the
+        # 10-45s wall-floor modules at t=0 instead of alone at the tail.
+        # PYTEST_SHARD_LEAD_MODULES in test_ci_deploy_concurrency.py pins them.
         shard: [scripts-ac, scripts-df, scripts-i, scripts-gh, scripts-jm, scripts-npsz, scripts-rs, scripts-daemons, rest-api, rest]
         include:
           - shard: scripts-ac
@@ -200,11 +310,11 @@ jobs:
           - shard: scripts-gh
             paths: "scripts/tests/test_[g-h]*.py"
           - shard: scripts-jm
-            paths: "scripts/tests/test_[j-m]*.py"
+            paths: "scripts/tests/test_leap_garch_no_duplicate_scan.py scripts/tests/test_[j-m]*.py"
           - shard: scripts-npsz
-            paths: "scripts/tests/test_[n-p]*.py scripts/tests/test_[t-z]*.py"
+            paths: "scripts/tests/test_vixcor.py scripts/tests/test_weekend_wrapper_self_rewrite.py scripts/tests/test_[n-p]*.py scripts/tests/test_[t-z]*.py"
           - shard: scripts-rs
-            paths: "scripts/tests/test_[r-s]*.py"
+            paths: "scripts/tests/test_rel137_weekend_wrapper_survivability.py scripts/tests/test_run_flow_refresh_wrapper.py scripts/tests/test_run_portfolio_refresh_retry.py scripts/tests/test_run_signals_refresh_wrapper.py scripts/tests/test_[r-s]*.py"
           - shard: scripts-daemons
             paths: "scripts/tests/test_monitor_daemon scripts/tests/test_watchdog"
           - shard: rest-api
@@ -253,12 +363,20 @@ jobs:
       - run: >-
           python -m pytest ${{ matrix.paths }}
           -n auto --dist loadfile
+          --durations=25
+          --junitxml=pytest-junit.xml
           --cov=scripts --cov=api
           --cov-fail-under=0
+      # CIP-005: the junit XML rides in the coverage artifact so per-module work
+      # on Linux is readable for every shard (--durations=25 shows under a third
+      # of a work-bound shard). py-coverage finds `.coverage` by name; the XML
+      # is inert there. ~50KB, same upload step, 0s on the critical path.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: pytest-coverage-${{ matrix.shard }}
-          path: .coverage
+          path: |
+            .coverage
+            pytest-junit.xml
           include-hidden-files: true
           if-no-files-found: error
           compression-level: 0
@@ -335,12 +453,24 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [al, mz]
+        shard: [al, edge, mz]
+        # CIP-001: al ran 765 tests serially in 91s while pytest-xdist was
+        # already installed. edge is the Caddy wall-clock mechanism shard and
+        # stays serial; loadfile keeps test_caddyfile.py's restart-window
+        # mechanism (the only other caddy spawner) on one worker.
         include:
           - shard: al
             paths: "cloud/tests/test_[a-l]*.py"
+            omit: "cloud/tests/test_caddy_edge_timeouts.py"
+            xdist: "-n auto --dist loadfile"
+          - shard: edge
+            paths: "cloud/tests/test_caddy_edge_timeouts.py"
+            omit: ""
+            xdist: ""
           - shard: mz
             paths: "cloud/tests/test_[m-z]*.py"
+            omit: ""
+            xdist: "-n auto --dist loadfile"
     concurrency:
       group: ci-cloud-tests-${{ github.ref }}-${{ matrix.shard }}
       cancel-in-progress: true
@@ -367,8 +497,12 @@ jobs:
       # caddy binary both skip, and a Caddy release that changes retry_match
       # semantics ships green. Deliberately tracks stable rather than pinning:
       # detecting that semantics change is the point. T-205 (T-164 recurrence).
+      # `al` collects cloud/tests/test_caddyfile.py::TestRestartWindowMechanism,
+      # the executable proof that a request arriving during the deploy restart
+      # window is held and served rather than 502'd; it is gated on the same
+      # binary, so the install runs on both shards (T-322, third recurrence).
       - name: Install caddy (edge mechanism tests)
-        if: matrix.shard == 'al'
+        if: matrix.shard == 'edge' || matrix.shard == 'al'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -384,7 +518,28 @@ jobs:
       # cloud/tests/conftest.py collides with scripts/tests/conftest.py on the
       # import path `tests.conftest`. Running it after unit pytest serialized
       # ~60s onto the deploy critical path.
-      - run: python -m pytest ${{ matrix.paths }} -q
+      # pytest does not apply --ignore to an explicitly expanded CLI target.
+      # Expand the row first, remove its exact omission, then pass only the
+      # selected files so the Caddy mechanism module runs solely on edge.
+      - name: Run cloud shard
+        run: |
+          set -euo pipefail
+          paths='${{ matrix.paths }}'
+          omit='${{ matrix.omit }}'
+          mapfile -t selected < <(compgen -G "$paths" | sort)
+          if [[ -n "$omit" ]]; then
+            kept=()
+            for target in "${selected[@]}"; do
+              [[ "$target" == "$omit" ]] || kept+=("$target")
+            done
+            selected=("${kept[@]}")
+          fi
+          if (( ${#selected[@]} == 0 )); then
+            echo "cloud shard selected no tests" >&2
+            exit 1
+          fi
+          # shellcheck disable=SC2086  # matrix.xdist is a deliberate word-split
+          python -m pytest "${selected[@]}" ${{ matrix.xdist }} -q -rs --durations=25
 
   perimeter-smoke:
     name: Perimeter smoke (next start + curl)
@@ -556,6 +711,11 @@ jobs:
           e2e/orders-realized-pnl-portfolio-fallback.spec.ts
           e2e/orders-partial-realized-pnl.spec.ts
           e2e/share-pnl-entry-exit.spec.ts
+          e2e/chain-deck-ticket-scroll.spec.ts
+          e2e/leap-order-prefill.spec.ts
+          e2e/mobile-orders-session.spec.ts
+          e2e/orders-session-window.spec.ts
+          e2e/vixts-tab.spec.ts
       - name: Upload traces on failure
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -571,17 +731,26 @@ jobs:
     # on. Without it, untested code executed on production before a single
     # test ran, and `continue-on-error` hid the fact. R-201.
     #
-    # Keep this list identical to `deploy.needs` minus `stage-release` itself.
+    # Keep this list identical to the prepull job and to `deploy.needs` minus
+    # the two host-preparation jobs (`stage-release` and `prepull-images`).
     # `test_ci_gate_integrity.py` derives the gate FROM `deploy.needs` and will
     # fail if the two drift again — which is how web-coverage and py-coverage
-    # were found missing here. R-299.
-    needs: [secret-scan, changes, web-tests, web-coverage, py-tests, py-coverage, cloud-tests, perimeter-smoke]
+    # were found missing here. R-299. It also asserts every gate job appears in
+    # the `if:` BELOW: `!cancelled()` is a status function, so GitHub drops the
+    # implicit success() on `needs` and only the expression gates. R-324.
+    needs: [secret-scan, changes, app-images, contract-cloud-tests, contract-script-tests, contract-root-tests, web-tests, web-coverage, py-tests, py-coverage, cloud-tests, perimeter-smoke]
     if: >-
       github.ref == 'refs/heads/main' && github.event_name == 'push' && !cancelled()
       && needs.secret-scan.result == 'success'
       && needs.changes.result == 'success'
+      && needs.app-images.result == 'success'
+      && (needs.contract-cloud-tests.result == 'success' || needs.contract-cloud-tests.result == 'skipped')
+      && (needs.contract-script-tests.result == 'success' || needs.contract-script-tests.result == 'skipped')
+      && (needs.contract-root-tests.result == 'success' || needs.contract-root-tests.result == 'skipped')
       && (needs.web-tests.result == 'success' || needs.web-tests.result == 'skipped')
+      && (needs.web-coverage.result == 'success' || needs.web-coverage.result == 'skipped')
       && (needs.py-tests.result == 'success' || needs.py-tests.result == 'skipped')
+      && (needs.py-coverage.result == 'success' || needs.py-coverage.result == 'skipped')
       && (needs.cloud-tests.result == 'success' || needs.cloud-tests.result == 'skipped')
       && (needs.perimeter-smoke.result == 'success' || needs.perimeter-smoke.result == 'skipped')
     runs-on: ubuntu-latest
@@ -645,7 +814,49 @@ jobs:
             export RADON_DEPLOY_ENV_FILE="$ENV_FILE"
             export RADON_CONTROL_PLANE_READY
             export RADON_DEPLOY_STAGE=1
+            # app-images is a hard need of this job. deploy.sh still proves
+            # the exact local pair and loaded container drop-in before it can
+            # omit the duplicate host-side Next compile.
+            export RADON_DEPLOY_USE_NODE_IMAGE_BUILD=1
             bash "$RUNNER/cloud/scripts/deploy.sh" "$SHA"
+
+  prepull-images:
+    name: Prepull exact app images
+    # Safe to overlap prestage: every code/test gate and the exact image build
+    # are green before this fixed installed helper touches the host. The job is
+    # cancelable because it never stops or restarts a service.
+    needs: [secret-scan, changes, app-images, contract-cloud-tests, contract-script-tests, contract-root-tests, web-tests, web-coverage, py-tests, py-coverage, cloud-tests, perimeter-smoke]
+    if: >-
+      github.ref == 'refs/heads/main' && github.event_name == 'push' && !cancelled()
+      && needs.secret-scan.result == 'success'
+      && needs.changes.result == 'success'
+      && needs.app-images.result == 'success'
+      && (needs.contract-cloud-tests.result == 'success' || needs.contract-cloud-tests.result == 'skipped')
+      && (needs.contract-script-tests.result == 'success' || needs.contract-script-tests.result == 'skipped')
+      && (needs.contract-root-tests.result == 'success' || needs.contract-root-tests.result == 'skipped')
+      && (needs.web-tests.result == 'success' || needs.web-tests.result == 'skipped')
+      && (needs.web-coverage.result == 'success' || needs.web-coverage.result == 'skipped')
+      && (needs.py-tests.result == 'success' || needs.py-tests.result == 'skipped')
+      && (needs.py-coverage.result == 'success' || needs.py-coverage.result == 'skipped')
+      && (needs.cloud-tests.result == 'success' || needs.cloud-tests.result == 'skipped')
+      && (needs.perimeter-smoke.result == 'success' || needs.perimeter-smoke.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: ci-prepull-images-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Pull exact SHA pair via installed helper
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: radon
+          key: ${{ secrets.VPS_SSH_KEY }}
+          command_timeout: 12m
+          script: |
+            set -euo pipefail
+            SHA='${{ github.sha }}'
+            sudo -n /usr/local/sbin/radon-app-runtime pull "$SHA"
 
   deploy:
     name: Deploy to VPS
@@ -657,11 +868,15 @@ jobs:
     # were advisory. Combine genuinely needs its own barrier VM, so this costs
     # the deploy critical path ~1min. Gating and that latency cannot both be
     # had; a coverage regression must be able to fail the release.
-    needs: [secret-scan, changes, web-tests, web-coverage, py-tests, py-coverage, cloud-tests, perimeter-smoke, stage-release]
+    needs: [secret-scan, changes, app-images, contract-cloud-tests, contract-script-tests, contract-root-tests, web-tests, web-coverage, py-tests, py-coverage, cloud-tests, perimeter-smoke, stage-release, prepull-images]
     if: >-
       github.ref == 'refs/heads/main' && github.event_name == 'push' && !cancelled()
       && needs.secret-scan.result == 'success'
       && needs.changes.result == 'success'
+      && needs.app-images.result == 'success'
+      && (needs.contract-cloud-tests.result == 'success' || needs.contract-cloud-tests.result == 'skipped')
+      && (needs.contract-script-tests.result == 'success' || needs.contract-script-tests.result == 'skipped')
+      && (needs.contract-root-tests.result == 'success' || needs.contract-root-tests.result == 'skipped')
       && (needs.web-tests.result == 'success' || needs.web-tests.result == 'skipped')
       && (needs.web-coverage.result == 'success' || needs.web-coverage.result == 'skipped')
       && (needs.py-tests.result == 'success' || needs.py-tests.result == 'skipped')
@@ -669,6 +884,7 @@ jobs:
       && (needs.cloud-tests.result == 'success' || needs.cloud-tests.result == 'skipped')
       && (needs.perimeter-smoke.result == 'success' || needs.perimeter-smoke.result == 'skipped')
       && (needs.stage-release.result == 'success' || needs.stage-release.result == 'failure' || needs.stage-release.result == 'skipped')
+      && (needs.prepull-images.result == 'success' || needs.prepull-images.result == 'failure')
     runs-on: ubuntu-latest
     # Outer budget: deploy.sh gets 15m, then 30s to kill descendants. A root
     # action can hold its lifecycle lock for 180s. Worst-case durable recovery
@@ -758,8 +974,17 @@ jobs:
             }
 
             # Until a root operator installs the target control-plane bundle,
-            # keep the already-proven legacy runner.
+            # keep the already-proven legacy runner. Not on a host whose app
+            # units already carry the container drop-ins: that host was
+            # bootstrapped once, so a missing marker there is a bundle the
+            # root sync's deadline KILLed half-installed (no trap runs), and
+            # the legacy runner would restart the tier through units it does
+            # not understand. R-440.
             if [[ ! -e "$RADON_CONTROL_PLANE_READY" && ! -L "$RADON_CONTROL_PLANE_READY" ]]; then
+              if compgen -G '/etc/systemd/system/radon-*.service.d/runtime-container.conf' >/dev/null; then
+                echo "refusing the legacy runner: control-plane readiness is missing but container drop-ins are installed; run cloud/scripts/bootstrap-control-plane.sh as root" >&2
+                exit 78
+              fi
               deploy_with_legacy_runner
               exit 0
             fi
@@ -805,6 +1030,18 @@ jobs:
             export RADON_DEPLOY_SUPPORT_DIR="$RUNNER/cloud/scripts"
             export RADON_DEPLOY_ENV_FILE="$ENV_FILE"
             export RADON_CONTROL_PLANE_READY
+            # Reconcile the root-owned control plane with this tip BEFORE
+            # deploy.sh holds the deploy lock (bootstrap needs that lock).
+            # Runs only here, after every gate job is green. R-430.
+            # A transition journal left by a failed deploy makes bootstrap
+            # refuse, so recover it first (deploy.sh does exactly this pass
+            # at its own start; here it runs before the sync instead).
+            if grep -q 'RADON_DEPLOY_RECOVER_ONLY' "$RUNNER/cloud/scripts/deploy.sh"; then
+              RADON_DEPLOY_RECOVER_ONLY=1 bash "$RUNNER/cloud/scripts/deploy.sh" "$SHA"
+            fi
+            if [[ -f "$RUNNER/cloud/scripts/sync-control-plane.sh" ]]; then
+              bash "$RUNNER/cloud/scripts/sync-control-plane.sh"
+            fi
             bash "$RUNNER/cloud/scripts/deploy.sh" "$SHA"
             "$RUNNER/cloud/scripts/prune-deploy-runners.py" \
               --root "$RUNNER_ROOT" \

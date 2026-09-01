@@ -29,6 +29,8 @@ const TOOL_LABELS: Record<string, string> = {
   get_realized_pnl: "Read realized P&L",
   query_journal: "Query trade journal",
   place_order: "Stage order proposal",
+  list_apis: "Search API catalog",
+  call_api: "Call Radon API",
 };
 
 /**

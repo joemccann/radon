@@ -156,11 +156,8 @@ describe("GET /api/performance rebuild loop (R5)", () => {
       vi.setSystemTime(new Date(Date.now() + 5_000));
     }
 
-    expect(backgroundRebuildCalls()).toHaveLength(1);
-    expect(mockRadonFetch).toHaveBeenCalledWith(
-      "/performance/background",
-      expect.objectContaining({ method: "POST", timeout: 5_000 }),
-    );
+    expect(backgroundRebuildCalls()).toHaveLength(0);
+    expect(mockRadonFetch).not.toHaveBeenCalled();
   });
 
   it("5 GETs can never exceed one rebuild inside the minimum interval, whatever the freshness verdict", async () => {
@@ -174,6 +171,6 @@ describe("GET /api/performance rebuild loop (R5)", () => {
     const { GET } = await import("../app/api/performance/route");
     for (let i = 0; i < 5; i += 1) await GET();
 
-    expect(backgroundRebuildCalls().length).toBeLessThanOrEqual(1);
+    expect(backgroundRebuildCalls().length).toBe(0);
   });
 });

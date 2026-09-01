@@ -34,6 +34,7 @@ ARTIFACTS = (
     # Root runs the audit, so its payload cannot live in the radon-writable
     # checkout. It is data for a root-owned interpreter, hence 0644 not 0755.
     Artifact("scripts/drift_audit.py", "/usr/local/lib/radon/drift_audit.py", 0o644),
+    Artifact("scripts/disk_cleanup.py", "/usr/local/lib/radon/disk_cleanup.py", 0o644),
     Artifact("scripts/radon-app-runtime.sh", "/usr/local/sbin/radon-app-runtime", 0o755),
     Artifact("config/sudoers.d/radon-deploy", "/etc/sudoers.d/radon-deploy", 0o440),
     Artifact("config/sudoers.d/radon-monitor", "/etc/sudoers.d/radon-monitor", 0o440),
@@ -63,6 +64,11 @@ ARTIFACTS = (
     Artifact(
         "services/radon-ib-gateway.service",
         "/etc/systemd/system/radon-ib-gateway.service",
+        0o644,
+    ),
+    Artifact(
+        "services/radon-ib-gateway-remote.service",
+        "/etc/systemd/system/radon-ib-gateway-remote.service",
         0o644,
     ),
     Artifact("services/radon-api.service", "/etc/systemd/system/radon-api.service", 0o644),
@@ -99,6 +105,16 @@ ARTIFACTS = (
         0o644,
     ),
     Artifact(
+        "services/radon-disk-cleanup.service",
+        "/etc/systemd/system/radon-disk-cleanup.service",
+        0o644,
+    ),
+    Artifact(
+        "services/radon-disk-cleanup.timer",
+        "/etc/systemd/system/radon-disk-cleanup.timer",
+        0o644,
+    ),
+    Artifact(
         "services/radon-drift-audit.service",
         "/etc/systemd/system/radon-drift-audit.service",
         0o644,
@@ -118,7 +134,54 @@ ARTIFACTS = (
         "/etc/systemd/system/radon-nextjs-db-watchdog.timer",
         0o644,
     ),
+    Artifact(
+        "services/radon-api.service.d/runtime-container.conf",
+        "/etc/systemd/system/radon-api.service.d/runtime-container.conf",
+        0o644,
+    ),
+    Artifact(
+        "services/radon-nextjs.service.d/runtime-container.conf",
+        "/etc/systemd/system/radon-nextjs.service.d/runtime-container.conf",
+        0o644,
+    ),
+    Artifact(
+        "services/radon-relay.service.d/runtime-container.conf",
+        "/etc/systemd/system/radon-relay.service.d/runtime-container.conf",
+        0o644,
+    ),
+    Artifact(
+        "services/radon-monitor.service.d/runtime-container.conf",
+        "/etc/systemd/system/radon-monitor.service.d/runtime-container.conf",
+        0o644,
+    ),
+    Artifact(
+        "services/radon-newsfeed.service.d/runtime-container.conf",
+        "/etc/systemd/system/radon-newsfeed.service.d/runtime-container.conf",
+        0o644,
+    ),
 )
+
+
+def _dropin_base_units() -> tuple[str, ...]:
+    """`services/<unit>` for every manifested `services/<unit>.d/*.conf`.
+
+    A drop-in is only parsed by `systemd-analyze verify` beside its base unit,
+    so bootstrap stages the pair and refuses when the base unit is missing
+    (R-394). Two of the five base units — radon-nextjs.service and
+    radon-newsfeed.service — are NOT control-plane artifacts: the app tier owns
+    them, only their runtime-container drop-ins are manifested. The sandbox
+    therefore has to stage them even though they are not in ARTIFACTS.
+    """
+    bases = []
+    for artifact in ARTIFACTS:
+        source = Path(artifact.source)
+        # `config/sudoers.d/*` is a .d directory too, and has no base unit.
+        if source.parent.parent.name != "services" or source.parent.suffix != ".d":
+            continue
+        base = f"services/{source.parent.name.removesuffix('.d')}"
+        if base not in bases:
+            bases.append(base)
+    return tuple(bases)
 
 
 def _write_executable(path: Path, body: str) -> None:
@@ -169,6 +232,11 @@ def _sandbox(tmp_path: Path) -> Sandbox:
         destination = source / artifact.source
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(CLOUD_ROOT / artifact.source, destination)
+
+    for base in _dropin_base_units():
+        destination = source / base
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(CLOUD_ROOT / base, destination)
 
     _write_executable(
         fake_bin / "flock",
@@ -232,6 +300,11 @@ printf 'systemctl\\t%s\\n' "$*" >> "$RADON_BOOTSTRAP_TEST_COMMAND_LOG"
 while IFS= read -r candidate; do
   [[ -z "$candidate" || -f "$candidate" ]] || exit 92
 done <<< "${RADON_BOOTSTRAP_TEST_EXPECTED_TARGETS:-}"
+if [[ "${RADON_BOOTSTRAP_TEST_TERM_AFTER_RELOAD:-0}" == "1" ]]; then
+  # The root helper's deadline TERMs the bootstrap process group; bash runs
+  # the trap once this foreground command returns, i.e. after the reload.
+  kill -TERM "$PPID"
+fi
 [[ "${RADON_BOOTSTRAP_TEST_FAIL_RELOAD:-0}" != "1" ]]
 """,
     )
@@ -484,6 +557,29 @@ def test_daemon_reload_failure_restores_bundle_but_withdraws_readiness(
     snapshot.pop(_ready_path(sandbox.rootfs))
     _assert_snapshot(snapshot)
     assert not _ready_path(sandbox.rootfs).exists()
+    commands = sandbox.command_log.read_text(encoding="utf-8").splitlines()
+    assert [line for line in commands if line.startswith("systemctl\t")] == [
+        "systemctl\tdaemon-reload"
+    ]
+
+
+def test_termination_after_daemon_reload_restores_bundle_and_readiness(
+    tmp_path: Path,
+) -> None:
+    """R-440: `radon-deploy-root sync-control-plane` TERMs a bootstrap that
+    overruns its 300s budget. Once the reload had run, rollback put the old
+    bundle back but deliberately left readiness withdrawn, so the NEXT deploy
+    job saw no marker and routed to the legacy runner on a host whose app
+    units carry container drop-ins. The reload succeeded on a validated
+    bundle; only a reload that FAILED leaves the unit graph unknown."""
+    sandbox = _sandbox(tmp_path)
+    snapshot = _seed_bundle(sandbox)
+
+    result = sandbox.run(RADON_BOOTSTRAP_TEST_TERM_AFTER_RELOAD="1")
+
+    assert result.returncode == 143, result.stdout + result.stderr
+    _assert_snapshot(snapshot)
+    assert _ready_path(sandbox.rootfs).read_bytes() == b"old-ready\n"
     commands = sandbox.command_log.read_text(encoding="utf-8").splitlines()
     assert [line for line in commands if line.startswith("systemctl\t")] == [
         "systemctl\tdaemon-reload"

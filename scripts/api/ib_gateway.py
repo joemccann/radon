@@ -42,7 +42,7 @@ logger = logging.getLogger("radon.ib_gateway")
 
 # Identifier used when this module takes the shared 2FA push lock. Other
 # restart paths (ib_watchdog.py, ib_orderly_restart.py, …) use distinct
-# holder strings so a glance at /var/lib/radon/ib-2fa-push-lock.json tells
+# holder strings so a glance at /var/lib/radon/ib-lease/ib-2fa-push-lock.json tells
 # the operator which component is mid-2FA-cycle.
 IB_GATEWAY_LOCK_HOLDER = "scripts.api.ib_gateway.restart_ib_gateway"
 IB_GATEWAY_ENSURE_LOCK_HOLDER = "scripts.api.ib_gateway.ensure_ib_gateway"
@@ -270,6 +270,53 @@ def restart_backoff_state() -> Dict:
         "last_outcome": _restart_state["last_outcome"],
         "push_lock": push_lock,
     }
+
+
+# Synthetic hold while the broker reports a pending container transition: a
+# push may be in flight that no lease describes yet. Sized to the helper's
+# settle budget so it clears on the next poll once the transition converges.
+BROKER_TRANSITION_HOLD_SECS = 60
+
+
+async def _overlay_broker_push_lock(backoff: Dict) -> None:
+    """Replace ``push_lock`` with the broker's lease on the app role."""
+    from api import services  # lazy: services imports nothing from here
+
+    if services.host_role() != "app" or not services.is_remote_gateway_configured():
+        return
+    status, payload = await services._remote_status()
+    if status == -1 or not isinstance(payload, dict):
+        backoff["source"] = "broker-unreachable"
+        return
+    backoff["source"] = "broker"
+    lease = payload.get("lease")
+    if isinstance(lease, dict) and lease.get("holder"):
+        try:
+            remaining = max(0, int(lease.get("remaining_secs") or 0))
+        except (TypeError, ValueError):
+            remaining = 0
+        backoff["push_lock"] = {
+            "holder": str(lease.get("holder")),
+            "acquired_at": lease.get("acquired_at"),
+            "expires_at": lease.get("expires_at"),
+            "remaining_secs": remaining,
+            "reason": str(lease.get("reason") or ""),
+        }
+        return
+    transition = payload.get("transition") or (
+        "pending" if str(payload.get("detail") or payload.get("state") or "").strip() == "transition-pending" else None
+    )
+    if transition:
+        now = time.time()
+        backoff["push_lock"] = {
+            "holder": "broker:transition-pending",
+            "acquired_at": now,
+            "expires_at": now + BROKER_TRANSITION_HOLD_SECS,
+            "remaining_secs": BROKER_TRANSITION_HOLD_SECS,
+            "reason": "broker Gateway transition pending",
+        }
+        return
+    backoff["push_lock"] = None
 
 
 def reset_restart_backoff() -> Dict:
@@ -561,8 +608,40 @@ async def _restart_launchd() -> Dict:
 # ---------------------------------------------------------------------------
 
 
+def host_role() -> str:
+    """RADON_HOST_ROLE for this process (same rule as ``api.services``)."""
+    from api import services  # lazy: keeps this module importable standalone
+
+    return services.host_role()
+
+
+def _app_role_refusal(action: str) -> Optional[Dict]:
+    """REL-169 (R-472): the app host never owns a Gateway session at runtime.
+
+    ``check-env.py`` only checks role/mode consistency at deploy time; an app
+    host whose env drifts off ``cloud`` mode would otherwise take the combined
+    path to a local ``docker compose`` and fire a 2FA push at the broker's
+    login. Returns the structured refusal, or None when this host may proceed.
+    """
+    if host_role() != "app":
+        return None
+    logger.error("REFUSING %s: RADON_HOST_ROLE=app (broker owns the Gateway session)", action)
+    return {
+        "restarted": False,
+        "reason": "app_role",
+        "gateway_mode": GATEWAY_MODE,
+        "error": (
+            f"REFUSING {action}: RADON_HOST_ROLE=app (broker owns the Gateway "
+            "session). Use the broker's remote-control daemon."
+        ),
+    }
+
+
 async def _docker_compose(*args: str, timeout: float = 30.0) -> tuple:
     """Run docker compose command in the ib-gateway directory."""
+    if host_role() == "app":
+        # Chokepoint belt: every local Gateway mutation funnels through here.
+        return ("", "REFUSING docker compose: RADON_HOST_ROLE=app (broker owns the Gateway session)", 1)
     compose_file = COMPOSE_DIR / "docker-compose.yml"
     env_file = COMPOSE_DIR / ".env"
 
@@ -1271,6 +1350,10 @@ async def check_ib_gateway(
         # It is local control-plane state and must be present regardless of
         # where the Gateway itself runs.
         result["restart_backoff"] = await asyncio.to_thread(restart_backoff_state)
+        # REL-172 (R-475): on the app host the lease lives on the BROKER; the
+        # local lock file is never held by its helper. Proxy the broker's
+        # lease / transition so Force 2FA and Start disarm during a push.
+        await _overlay_broker_push_lock(result["restart_backoff"])
         if not result.get("port_listening") or result.get("upstream_dead"):
             result["auth_state"] = "unreachable"
         elif pool_status:
@@ -1307,6 +1390,9 @@ async def ensure_ib_gateway() -> Dict:
     async with _restart_lock:
         if is_cloud_mode():
             return await _ensure_cloud()
+        refusal = _app_role_refusal("ensure_ib_gateway")
+        if refusal is not None:
+            return refusal
         if is_docker_mode():
             return await _ensure_docker_container()
         return await _ensure_launchd()
@@ -1361,6 +1447,10 @@ async def restart_ib_gateway(pool=None) -> Dict:
                 "gateway_mode": "cloud",
                 "error": f"Cannot restart remote Gateway at {IB_HOST}:{IB_PORT}. Manage it on the remote host.",
             }
+
+        refusal = _app_role_refusal("restart_ib_gateway")
+        if refusal is not None:
+            return refusal
 
         now = time.time()
 

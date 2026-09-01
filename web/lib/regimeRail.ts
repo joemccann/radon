@@ -1,6 +1,7 @@
 import { vcgRow, gexRow } from "./engineState";
 import type { VcgData } from "./useVcg";
 import type { GexData } from "./useGex";
+import type { DispersionData } from "./dispersion";
 
 /**
  * Grouped registry for the /regime indicator rail ("Regime — Grouped Rail").
@@ -12,16 +13,17 @@ import type { GexData } from "./useGex";
 export type RegimeTab =
   | "cri" | "vcg" | "gex" | "grg"
   | "breadth" | "bpi" | "margin" | "straddle"
-  | "cor" | "vixcor" | "vixts" | "ivrank" | "skew" | "skew2d" | "curve"
-  | "cot" | "ats" | "short" | "llm" | "backtest" | "credit" | "iei-hyg" | "trin" | "divyield" | "hyad" | "hhlev";
+  | "cor" | "vixcor" | "vixts" | "dispersion" | "ivrank" | "skew" | "skew2d" | "curve"
+  | "cot" | "ats" | "short" | "llm" | "backtest" | "credit" | "iei-hyg" | "trin" | "divyield" | "hyad" | "hhlev"
+  | "streaks";
 
 export type RegimeRailGroup = { label: string; tabs: readonly RegimeTab[] };
 
 export const REGIME_RAIL_GROUPS: readonly RegimeRailGroup[] = [
   { label: "Composite", tabs: ["cri", "grg", "vcg"] },
-  { label: "Volatility", tabs: ["vixcor", "vixts", "ivrank", "skew", "skew2d", "curve", "straddle"] },
+  { label: "Volatility", tabs: ["vixcor", "vixts", "dispersion", "ivrank", "skew", "skew2d", "curve", "straddle"] },
   { label: "Positioning", tabs: ["gex", "margin", "hhlev", "credit", "iei-hyg", "cot", "short", "ats"] },
-  { label: "Breadth & sentiment", tabs: ["breadth", "trin", "divyield", "hyad", "bpi", "cor"] },
+  { label: "Breadth & sentiment", tabs: ["breadth", "trin", "divyield", "hyad", "bpi", "cor", "streaks"] },
   { label: "Models", tabs: ["llm", "backtest"] },
 ];
 
@@ -33,6 +35,7 @@ export const REGIME_TAB_LABEL: Record<RegimeTab, string> = {
   vcg: "VCG",
   vixcor: "VIX-COR",
   vixts: "VIX TS",
+  dispersion: "DISPERSION",
   ivrank: "IV RANK",
   skew: "SKEW",
   skew2d: "SKEW 2D",
@@ -52,6 +55,7 @@ export const REGIME_TAB_LABEL: Record<RegimeTab, string> = {
   hyad: "HY AD",
   bpi: "BULLISH %",
   cor: "COR",
+  streaks: "STREAKS",
   llm: "LLM",
   backtest: "BACKTEST",
 };
@@ -91,6 +95,18 @@ function gexStatus(data: GexData | null | undefined): RailStatus | null {
 }
 
 /**
+ * BROAD STRESS is index-level stress (fault); BELOW THE SURFACE is the
+ * dispersion warning the tab exists to show; COMPRESSED and NORMAL are calm.
+ */
+function dispersionStatus(data: DispersionData | null | undefined): RailStatus | null {
+  const regime = data?.current?.regime;
+  if (!regime) return null;
+  const tone: RailTone =
+    regime === "BROAD STRESS" ? "fault" : regime === "BELOW THE SURFACE" ? "warn" : "core";
+  return { value: regime, tone };
+}
+
+/**
  * Derive per-indicator rail readings from whatever payloads are loaded.
  * Missing data yields no entry — the rail renders an honest neutral row,
  * never a fault.
@@ -100,6 +116,7 @@ export function buildRailStatuses(inputs: {
   cor1m?: number | null;
   vcg?: VcgData | null;
   gex?: GexData | null;
+  dispersion?: DispersionData | null;
 }): RailStatuses {
   const statuses: RailStatuses = {};
   const cri = criStatus(inputs.cri);
@@ -110,6 +127,8 @@ export function buildRailStatuses(inputs: {
   if (vcg) statuses.vcg = vcg;
   const gex = gexStatus(inputs.gex);
   if (gex) statuses.gex = gex;
+  const dispersion = dispersionStatus(inputs.dispersion);
+  if (dispersion) statuses.dispersion = dispersion;
   return statuses;
 }
 
@@ -124,7 +143,7 @@ export function isFlagged(status: RailStatus | undefined): boolean {
  * "0 of 22 elevated" read as broad calm when 18 of them were never asked.
  * Adding a tab to the rail means adding it here AND to buildRailStatuses.
  */
-export const FLAGGABLE_REGIME_TABS: readonly RegimeTab[] = ["cri", "cor", "vcg", "gex"];
+export const FLAGGABLE_REGIME_TABS: readonly RegimeTab[] = ["cri", "cor", "vcg", "gex", "dispersion"];
 
 export function elevatedCount(statuses: RailStatuses): number {
   return FLAGGABLE_REGIME_TABS.filter((tab) => isFlagged(statuses[tab])).length;

@@ -30,6 +30,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import scripts.perf_twr_builder as builder  # noqa: E402
 
 
+def _freeze_embargo_clock(monkeypatch, when: datetime) -> None:
+    class _FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return when if tz is None else when.astimezone(tz)
+
+    monkeypatch.setattr("utils.flex_embargo.datetime", _FrozenDateTime)
+
+
+@pytest.fixture(autouse=True)
+def _no_flex_embargo(request, monkeypatch):
+    if "lockout" in request.node.name or "sidecar" in request.node.name:
+        return
+    monkeypatch.setattr("utils.flex_embargo.raise_if_blocked", lambda: None)
+
+
 def test_r13_the_read_timeout_is_not_thirty_seconds():
     import inspect
 
@@ -167,6 +183,9 @@ def test_r13_a_live_lockout_skips_sendrequest(monkeypatch, tmp_path):
     """Saturday 07:30 TWR must not poke a token cash-flow-sync already locked."""
     from utils.flex_embargo import FlexTokenLocked, record_lockout
 
+    _freeze_embargo_clock(
+        monkeypatch, datetime(2026, 8, 23, 22, 0, tzinfo=timezone.utc)
+    )
     monkeypatch.setattr(
         "utils.flex_embargo.SIDECAR", tmp_path / "flex_token_embargo.json"
     )
@@ -189,6 +208,9 @@ def test_r13_missing_sidecar_reconstructs_live_1025_and_skips_sendrequest(
 
     from utils.flex_embargo import FlexTokenLocked
 
+    _freeze_embargo_clock(
+        monkeypatch, datetime(2026, 8, 23, 22, 0, tzinfo=timezone.utc)
+    )
     monkeypatch.setattr(
         "utils.flex_embargo.SIDECAR", tmp_path / "flex_token_embargo.json"
     )

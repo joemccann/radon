@@ -18,6 +18,15 @@ function isHeadless() {
   return raw !== "0" && raw.toLowerCase() !== "false";
 }
 
+export function chromiumLaunchOptions({
+  headless = isHeadless(),
+  sandbox = process.env.PLAYWRIGHT_CHROMIUM_SANDBOX,
+} = {}) {
+  const disabled = sandbox === "0" || (typeof sandbox === "string" && sandbox.toLowerCase() === "false");
+  if (!disabled) return { headless };
+  return { headless, args: ["--no-sandbox", "--disable-dev-shm-usage"] };
+}
+
 async function readStorageStateIfPresent(storageStatePath) {
   if (!storageStatePath) return undefined;
   if (!(await fs.pathExists(storageStatePath))) return undefined;
@@ -33,7 +42,7 @@ export async function createBrowser({
 } = {}) {
   await fs.ensureDir(path.dirname(storageStatePath));
 
-  const browser = await launcher.launch({ headless });
+  const browser = await launcher.launch(chromiumLaunchOptions({ headless }));
   let context;
   let storageState;
   try {

@@ -457,17 +457,66 @@ class TestFetchClosesCascade:
     def test_yahoo_is_last_resort(self):
         ib_calls: list = []
         uw_calls: list = []
+        rh_calls: list = []
 
         closes, sources = fetch_closes(
             fetch_ib=lambda tickers: ib_calls.append(list(tickers)) or {},
             fetch_uw=lambda tickers: uw_calls.append(list(tickers)) or {},
+            fetch_rh=lambda tickers: rh_calls.append(list(tickers)) or {},
             fetch_yahoo=lambda tickers: {HYG_SYMBOL: HYG_BARS, SPX_SYMBOL: SPX_BARS},
         )
 
         assert ib_calls == [[HYG_SYMBOL, SPX_SYMBOL]]
         assert uw_calls == [[HYG_SYMBOL, SPX_SYMBOL]]
+        assert rh_calls == [[HYG_SYMBOL, SPX_SYMBOL]]
         assert sources == {HYG_SYMBOL: "yahoo", SPX_SYMBOL: "yahoo"}
         assert combine_source(sources) == "yahoo"
+
+    def test_robinhood_fills_before_yahoo(self):
+        """RH ranks after IB/UW and before Yahoo; a RH hit never asks Yahoo."""
+        yahoo_calls: list = []
+
+        closes, sources = fetch_closes(
+            fetch_ib=lambda tickers: {},
+            fetch_uw=lambda tickers: {},
+            fetch_rh=lambda tickers: {HYG_SYMBOL: HYG_BARS, SPX_SYMBOL: SPX_BARS},
+            fetch_yahoo=lambda tickers: yahoo_calls.append(list(tickers)) or {},
+        )
+
+        assert sources == {HYG_SYMBOL: "rh", SPX_SYMBOL: "rh"}
+        assert combine_source(sources) == "rh"
+        assert yahoo_calls == []
+
+    def test_robinhood_never_preempts_ib_or_uw(self):
+        rh_calls: list = []
+
+        closes, sources = fetch_closes(
+            fetch_ib=lambda tickers: {HYG_SYMBOL: HYG_BARS},
+            fetch_uw=lambda tickers: {SPX_SYMBOL: SPX_BARS},
+            fetch_rh=lambda tickers: rh_calls.append(list(tickers)) or {},
+            fetch_yahoo=lambda tickers: {},
+        )
+
+        assert sources == {HYG_SYMBOL: "ib", SPX_SYMBOL: "uw"}
+        assert rh_calls == [], "RH must never be asked when IB/UW served everything"
+
+    def test_unconfigured_robinhood_falls_through_to_yahoo(self, monkeypatch):
+        """Default RH rung with no ROBINHOOD_MCP_TOKEN: clean skip, no network."""
+        monkeypatch.delenv("ROBINHOOD_MCP_TOKEN", raising=False)
+        monkeypatch.setattr(
+            "requests.Session.post",
+            lambda *a, **k: (_ for _ in ()).throw(
+                AssertionError("unconfigured RH rung attempted network I/O")
+            ),
+        )
+
+        closes, sources = fetch_closes(
+            fetch_ib=lambda tickers: {},
+            fetch_uw=lambda tickers: {},
+            fetch_yahoo=lambda tickers: {HYG_SYMBOL: HYG_BARS, SPX_SYMBOL: SPX_BARS},
+        )
+
+        assert sources == {HYG_SYMBOL: "yahoo", SPX_SYMBOL: "yahoo"}
 
     def test_partial_ib_asks_uw_then_yahoo_only_for_the_gap(self):
         uw_calls: list = []
@@ -507,3 +556,56 @@ class TestCreditIbClientIds:
         # CRI 50-61 (55 is portfolio_report), breadth 62-66, RV-ratio 67-68.
         taken = set(range(50, 55)) | {55} | set(range(57, 69))
         assert set(CREDIT_IB_HISTORY_CLIENT_IDS).isdisjoint(taken)
+
+
+class TestRobinhoodRungIsNotSilent:
+    """REL-174 (R-470): a structural Robinhood failure that demotes a ticker to
+    Yahoo is written into the heartbeat, not hidden under `ok`/`yahoo`."""
+
+    def test_auth_failure_reaches_the_service_health_row(self, monkeypatch, tmp_path, persist_calls):
+        import os
+
+        import fetch_credit_spread as fcs
+        from clients import robinhood_client as rh
+
+        health: list = []
+        monkeypatch.setattr(
+            fcs.writer, "record_service_health",
+            lambda service, state, finished_at=None, error=None: health.append((state, error)),
+        )
+        # Access-token-only Robinhood store, MCP answering 401 to everything.
+        token = tmp_path / "rh.json"
+        token.write_text('{"access_token": "tok", "token_type": "Bearer"}')
+        os.chmod(token, 0o600)
+        monkeypatch.setenv("ROBINHOOD_MCP_TOKEN_FILE", str(token))
+        monkeypatch.delenv("ROBINHOOD_MCP_REFRESH_TOKEN", raising=False)
+        monkeypatch.setattr(rh, "_refresh_disabled", False)
+        if hasattr(rh, "_reset_process_state"):
+            rh._reset_process_state()
+
+        class _R:
+            status_code = 401
+            headers: dict = {}
+            text = "nope"
+            content = b"nope"
+
+            def iter_content(self, chunk_size=8192):
+                yield b"nope"
+
+            def close(self):
+                pass
+
+        monkeypatch.setattr(rh.requests.Session, "post", lambda *a, **k: _R())
+        bars = {f"2026-0{m}-{d:02d}": 100.0 + d for m in (6, 7, 8) for d in range(1, 29)}
+        monkeypatch.setattr(fcs, "fetch_ib_closes", lambda tickers: {})
+        monkeypatch.setattr(fcs, "fetch_uw_closes", lambda tickers: {})
+        monkeypatch.setattr(fcs, "fetch_yahoo_closes", lambda tickers: {t: dict(bars) for t in tickers})
+        monkeypatch.setattr(fcs, "_read_cached_series", lambda: [])
+        monkeypatch.setattr(fcs, "_write_json_cache", lambda payload: None)
+
+        payload = fcs.run()
+        assert payload["source_by_ticker"][fcs.HYG_SYMBOL] == "yahoo"
+        assert health, "no heartbeat written"
+        state, error = health[-1]
+        assert state != "ok" or (error and error.get("class") == "auth"), (state, error)
+        assert "robinhood" in json.dumps(error).lower()

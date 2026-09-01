@@ -61,6 +61,8 @@ async function readCachedBreadth(): Promise<Record<string, unknown> | null> {
   return result.ok ? result.data : null;
 }
 
+export const radonCapability = { GET: "read", POST: "read.spawn" };
+
 export async function GET(): Promise<Response> {
   const access = await requireRouteAccess(undefined, { rate: { key: "breadth:route", limit: 20, windowMs: 60_000 } });
   if (!access.ok) return access.response;

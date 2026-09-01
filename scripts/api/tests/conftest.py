@@ -30,3 +30,41 @@ def _isolate_ib_2fa_lock_orphan_state(monkeypatch):
     monkeypatch.setattr(ib_2fa_lock, "ORPHAN_CONFIRM_INTERVAL_SECS", 0.0)
     yield
     ib_2fa_lock.reset_orphan_state()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_order_rate_budget():
+    """Hand every test a fresh per-minute order budget.
+
+    `server._order_rate_timestamps` is process-wide and holds every accepted
+    placement for a rolling 60 s, capped at RADON_MAX_ORDERS_PER_MIN (10). A
+    placement posted without an `orderRef` appends `None`, which the dedupe
+    branch never matches, so cases spent a SHARED budget and the eleventh
+    placement in a worker got a 429 it never asked for. Under
+    `pytest -n auto --dist loadfile` the victim depends on file-to-worker
+    assignment; on 2026-08-29 it was the /orders/place timeout contract, the
+    last red job on main. Contract: test_order_rate_limit_isolation.py.
+    """
+    from scripts.api import server
+
+    server._order_rate_timestamps.clear()
+    yield
+    server._order_rate_timestamps.clear()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_flow_reports_dir(tmp_path, monkeypatch):
+    """Point the flow-report cache at tmp_path for every test in this subtree.
+
+    `server._FLOW_REPORTS_DIR` is the REAL `data/flow_reports`, so any case
+    that reaches POST /flow-analysis/{ticker} writes a live cache entry into
+    the working tree. That dirties the tree the weekend loops require clean,
+    trips deploy.sh's tracked-drift guard, and seeds a stub report that both
+    the FastAPI GET handler and web/app/api/flow-analysis/[ticker]/route.ts
+    then serve for a real ticker. scripts/tests/test_api_flow_cache.py already
+    patches this per-case; this makes it the default for the api subtree. T-275.
+    """
+    from scripts.api import server
+
+    monkeypatch.setattr(server, "_FLOW_REPORTS_DIR", tmp_path / "flow_reports")
+    yield

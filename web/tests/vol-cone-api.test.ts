@@ -135,6 +135,33 @@ describe("GET /api/vol-cone", () => {
     });
   });
 
+  // The writers are Mon-Fri only (intraday RTH + EOD 20:45 UTC), so the
+  // longest healthy quiet period is Fri 20:45 UTC -> Mon 20:45 UTC + jitter
+  // on a holiday Monday (~73h). A 48h budget collapsed Friday's healthy
+  // snapshot into the "outage, not an empty result" banner every Sunday
+  // evening (screenshot 2026-08-31 02:26 UTC, snapshot 2026-08-28 20:45 UTC).
+  it("serves a weekend-aged snapshot (60h) instead of collapsing to missing", async () => {
+    const sundayAge = new Date(Date.now() - 60 * 60 * 60_000).toISOString();
+    await insertSnapshot(buildPayload({ scan_time: sundayAge }), sundayAge);
+
+    const { GET } = await import("../app/api/vol-cone/route");
+    const json = await jsonOf(await GET());
+    expect(json.missing).toBeUndefined();
+    expect(json.count).toBe(2);
+  });
+
+  it("still collapses a snapshot past the closed window, keeping its scan_time", async () => {
+    const deadAge = new Date(Date.now() - 5 * 24 * 60 * 60_000).toISOString();
+    await insertSnapshot(buildPayload({ scan_time: deadAge }), deadAge);
+
+    const { GET } = await import("../app/api/vol-cone/route");
+    const json = await jsonOf(await GET());
+    expect(json.missing).toBe(true);
+    expect(json.stale).toBe(true);
+    expect(json.scan_time).toBe(deadAge);
+    expect(json.hits).toEqual([]);
+  });
+
   it("only reads the vol-cone service's snapshots", async () => {
     await db.execute({
       sql: `INSERT INTO scan_snapshots (service, scan_time, payload) VALUES ('skew', ?, ?)`,

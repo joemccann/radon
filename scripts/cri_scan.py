@@ -16,7 +16,9 @@ Data sources (priority order):
   3. Cboe official feeds — COR1M dashboard historical feed plus official
      VIX_History.csv / VVIX_History.csv daily close verification after market
      close + 20 minutes ET.
-  4. Yahoo Finance — ABSOLUTE LAST RESORT. Only for remaining gaps after
+  4. Robinhood (official trading MCP, read-only) — SPY equity historicals /
+     quotes when configured. Never above IB, UW or Cboe.
+  5. Yahoo Finance — ABSOLUTE LAST RESORT. Only for remaining gaps after
      higher-priority sources fail; COR1M reaches Yahoo only if IB + Cboe fail.
 
 Usage:
@@ -30,6 +32,7 @@ import argparse
 import csv
 import json
 import math
+import os
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -133,7 +136,7 @@ def _fetch_ib(tickers: List[str]) -> Dict[str, List[Tuple[str, float]]]:
     auth_state = _ib_auth_state()
     if auth_state and auth_state != "authenticated":
         print(
-            f"  IB skipped — gateway auth_state={auth_state} (falling back to UW/Cboe/Yahoo)",
+            f"  IB skipped — gateway auth_state={auth_state} (falling back to UW/Cboe/RH/Yahoo)",
             file=sys.stderr,
         )
         return {}
@@ -384,6 +387,30 @@ def fetch_cboe_vvix_close(session_date: str) -> Optional[float]:
     return fetch_cboe_daily_close_from_csv(CBOE_VVIX_HISTORY_CSV_URL, session_date, value_column="VVIX")
 
 
+def _fetch_rh(ticker: str) -> List[Tuple[str, float]]:
+    """Robinhood (read-only MCP) daily bars — after IB/UW/Cboe, before Yahoo.
+
+    Equities/ETFs only (SPY); the index tickers are not on Robinhood equity
+    historicals. Unconfigured hosts return [] without any network I/O.
+    """
+    try:
+        from clients.robinhood_client import fetch_robinhood_closes
+    except ImportError:
+        return []
+    closes = fetch_robinhood_closes([ticker]).get(ticker, {})
+    return [(date, closes[date]) for date in sorted(closes)]
+
+
+def _fetch_rh_current_quote(ticker: str) -> Optional[float]:
+    """Robinhood current quote — equities via get_equity_quotes, indices via
+    get_index_quotes. None when unconfigured (clean fall-through to Yahoo)."""
+    try:
+        from clients.robinhood_client import fetch_robinhood_quote
+    except ImportError:
+        return None
+    return fetch_robinhood_quote(ticker, index=ticker in YAHOO_TICKERS)
+
+
 def _fetch_yahoo(ticker: str, days: int = 400) -> List[Tuple[str, float]]:
     """Fetch daily bars from Yahoo Finance.  Returns [(date_str, close), ...]."""
     result = _fetch_yahoo_chart_result(ticker, days=days)
@@ -472,11 +499,16 @@ def _fetch_ib_current_quote(ticker: str) -> Optional[float]:
 
 
 def fetch_preferred_current_quote(ticker: str) -> Optional[float]:
-    """Fetch a current quote using IB first, then Yahoo as fallback."""
+    """Fetch a current quote using IB first, then Robinhood, then Yahoo."""
     ib_quote = _fetch_ib_current_quote(ticker)
     if ib_quote is not None:
         print(f"  IB: {ticker} current quote {ib_quote:.2f}", file=sys.stderr)
         return ib_quote
+
+    rh_quote = _fetch_rh_current_quote(ticker)
+    if rh_quote is not None:
+        print(f"  Robinhood: {ticker} current quote {rh_quote:.2f}", file=sys.stderr)
+        return rh_quote
 
     yahoo_quote = _fetch_yahoo_current_quote(ticker)
     if yahoo_quote is not None:
@@ -648,7 +680,30 @@ def fetch_all(tickers: List[str]) -> Tuple[Dict[str, np.ndarray], List[str]]:
             print(f"  CBOE: COR1M only {len(cboe_cor1m)} bars (need {MIN_BARS}), trying Yahoo", file=sys.stderr)
         fallback_needed = [ticker for ticker in fallback_needed if ticker != "COR1M" or "COR1M" not in raw]
 
-    # Priority 4 (LAST RESORT): Yahoo Finance
+    # Priority 4: Robinhood (read-only MCP) for equities/ETFs (SPY). Indices
+    # (VIX/VVIX/COR1M) are not on Robinhood equity historicals. Unconfigured
+    # hosts skip cleanly and fall through to Yahoo.
+    if fallback_needed:
+        rh_eligible = [t for t in fallback_needed if t not in YAHOO_TICKERS]
+        if rh_eligible:
+            print("  Trying Robinhood for remaining equity gaps...", file=sys.stderr)
+            still_needed = []
+            for t in fallback_needed:
+                if t in rh_eligible:
+                    rh_bars = _fetch_rh(t)
+                    if len(rh_bars) >= MIN_BARS:
+                        raw[t] = rh_bars
+                        print(f"  Robinhood: {t} — {len(rh_bars)} bars", file=sys.stderr)
+                        continue
+                    if rh_bars:
+                        print(
+                            f"  Robinhood: {t} only {len(rh_bars)} bars (need {MIN_BARS}), trying Yahoo",
+                            file=sys.stderr,
+                        )
+                still_needed.append(t)
+            fallback_needed = still_needed
+
+    # Priority 5 (LAST RESORT): Yahoo Finance
     for t in fallback_needed:
         print(f"  LAST RESORT: Yahoo for {t}", file=sys.stderr)
         time.sleep(0.5)  # Rate limit Yahoo
@@ -1560,6 +1615,45 @@ def is_post_close_cboe_official_window(now: Optional[datetime] = None) -> bool:
 # CLI
 # ══════════════════════════════════════════════════════════════════
 
+# One in-flight cri_scan per host. The timer runs this script on the HOST
+# (radon-refresh.service) while /regime/scan runs it INSIDE the app container,
+# and `data/` is the one directory radon-app-runtime.sh binds into that
+# container: a lock anywhere else (`/tmp`) is a different inode on each side
+# and serialises nothing. The handle is kept in a module global for the life of
+# the process: closing it releases the flock. R-423, T-314.
+CRI_SCAN_LOCK_PATH = _PROJECT_DIR / "data" / "radon-cri-scan.lock"
+_scan_lock_handle = None
+
+
+def scan_lock_path() -> Path:
+    override = os.environ.get("RADON_CRI_SCAN_LOCK")
+    return Path(override) if override else CRI_SCAN_LOCK_PATH
+
+
+def _acquire_scan_lock():
+    """The open file handle when this process won, `None` when one is running."""
+    global _scan_lock_handle
+
+    import fcntl  # noqa: PLC0415 — POSIX-only, and only this path needs it
+
+    try:
+        handle = open(scan_lock_path(), "a+")  # noqa: SIM115 — held for the process lifetime
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return None
+    _scan_lock_handle = handle
+    return handle
+
+
+def _read_cached_scan(path: Path) -> Optional[dict]:
+    """The last written payload regardless of session date, else None."""
+    try:
+        data = json.loads(Path(path).read_text())
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Crash Risk Index (CRI) Scanner",
@@ -1610,6 +1704,25 @@ Examples:
                 print("  Serving cached CRI (market closed); skipping IB/UW fetch.", file=sys.stderr)
                 print(json.dumps(cached, indent=2))
                 return
+
+    # Advisory, NON-BLOCKING. cri_scan held no lock at all, so a browser POST
+    # landing during a 15-minute timer fire ran a SECOND scan concurrently for
+    # up to 180s — both racing the same `data/cri.json` write and the same IB
+    # client-id range (50-61). A loser serves the cache rather than queueing
+    # behind a run that may take three minutes. R-423.
+    lock_handle = _acquire_scan_lock()
+    if lock_handle is None:
+        if args.json:
+            # Not the off-hours gate: `cached_scan_if_fresh(force=True)` is
+            # "never serve", and the winner is about to rewrite this file
+            # anyway, so whatever it holds now is the best answer available.
+            cached = _read_cached_scan(_PROJECT_DIR / "data" / "cri.json")
+            if cached is not None:
+                print("  Another CRI scan is in flight; serving cache.", file=sys.stderr)
+                print(json.dumps(cached, indent=2))
+                return
+        print("  Another CRI scan is in flight and no cache is available.", file=sys.stderr)
+        sys.exit(75)
 
     t_start = time.time()
 

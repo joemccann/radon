@@ -8,7 +8,7 @@ import type { ModifyComboLeg, ModifyOrderRequest } from "@/lib/orderModify";
 import Modal from "./Modal";
 import { getQuoteMetrics } from "@/lib/quoteTelemetry";
 import { applyRestingLimitToQuote } from "@/lib/modifyOrderQuote";
-import { fmtPrice, legPriceKey, resolveEntryCost } from "@/lib/positionUtils";
+import { fmtPrice, legPriceKey, resolveClosingBasis } from "@/lib/positionUtils";
 import {
   findHeldComboForClose,
   heldComboUnits,
@@ -423,7 +423,7 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, op
           totalCost,
           quote: priceData ? { bid: priceData.bid, ask: priceData.ask } : null,
           closeOut: {
-            entryCostDollars: resolveEntryCost(closingCombo) * (parsedQtyLocal / units),
+            entryCostDollars: resolveClosingBasis(closingCombo, parsedQtyLocal, units),
           },
         };
       }

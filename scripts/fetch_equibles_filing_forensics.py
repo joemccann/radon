@@ -38,6 +38,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import threading
+import time
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -98,6 +100,20 @@ GOING_CONCERN_PAGE_LIMIT = 200
 GOING_CONCERN_MAX_PAGES = 12
 PROPOSED_SALES_PAGE_LIMIT = 100
 EXECUTIVE_CHANGES_PAGE_LIMIT = 100
+
+# Wall-clock ceiling for the watchlist walk. 2026-09-01: Equibles HTTPS
+# tarpitted the shared Session (idle-read timeout never fired; sibling
+# radon-equibles-ats Result=timeout the same morning). TimeoutStartSec=900
+# SIGTERM'd the oneshot (Result=timeout, NRestarts=0, ExecMainStatus=15)
+# 10:03:53Z → 10:18:54Z with no FILING FORENSICS summary and no
+# service_health row; timeout is not on the exit-code latch so the unit
+# re-pages P1 every cycle until the next 10:00 UTC fire. Must fit inside
+# cloud/services/radon-equibles-filings.service TimeoutStartSec with
+# one in-flight TICKER_FETCH_BUDGET_S of slack.
+SWEEP_BUDGET_S = 780
+# Hard abandon per ticker / going-concern walk (thread). requests' idle-read
+# timeout does not bound a slow-drip TLS tarpit; thread.join(timeout=) does.
+TICKER_FETCH_BUDGET_S = 90
 
 NO_FILINGS_DETAIL = "No filings found"
 UNAVAILABLE_DETAIL = "Could not verify: the filing source did not answer"
@@ -554,6 +570,34 @@ def fetch_going_concern_universe(client: Any) -> GoingConcernUniverse:
     return GoingConcernUniverse(STATUS_OK, tickers, truncated=has_more)
 
 
+def _call_bounded(name: str, fn: Callable[[], Any], *, timeout_s: float) -> Any:
+    """Run ``fn`` under a hard wall-clock abandon.
+
+    ``requests`` idle-read timeouts do not bound a slow-drip TLS tarpit
+    (2026-09-01 Equibles hang). The worker is a daemon thread so a timed-out
+    join cannot block process exit via ``ThreadPoolExecutor``'s atexit wait
+    (verified on 3.13: abandoned executors re-page ``Result=timeout``).
+    Python cannot kill the worker; the caller must not reuse ``client``
+    afterward because the shared Session may still be mid-request.
+    """
+    box: dict[str, Any] = {}
+
+    def worker() -> None:
+        try:
+            box["value"] = fn()
+        except Exception as exc:  # noqa: BLE001 — re-raised on the joiner
+            box["exc"] = exc
+
+    thread = threading.Thread(target=worker, name=f"filings-{name}", daemon=True)
+    thread.start()
+    thread.join(timeout=max(timeout_s, 0.001))
+    if thread.is_alive():
+        raise TimeoutError(f"{name}: fetch exceeded {timeout_s:.0f}s wall-clock")
+    if "exc" in box:
+        raise box["exc"]
+    return box["value"]
+
+
 def fetch_dossier(
     client: Any,
     ticker: str,
@@ -683,6 +727,12 @@ def run(
     # before any _record_health call, so NO service_health row was written at
     # all. The service is registered for freshness, so a row that never
     # arrives is silent rather than stale and nothing alerts.
+    as_of = _now_iso()
+    today = today or datetime.now(timezone.utc).date()
+    dossiers: list[dict[str, Any]] = []
+    skipped: list[str] = []
+    budget_spent = False
+    going_concern = GoingConcernUniverse(STATUS_ERROR, set(), True, "not fetched")
     try:
         if client is None:
             from clients.equibles_client import EquiblesClient
@@ -690,24 +740,91 @@ def run(
 
         as_of = _now_iso()
         today = today or datetime.now(timezone.utc).date()
-        going_concern = fetch_going_concern_universe(client)
+        deadline = time.monotonic() + SWEEP_BUDGET_S
 
-        dossiers: list[dict[str, Any]] = []
-        skipped: list[str] = []
-        for ticker in tickers:
-            dossier = fetch_dossier(client, ticker, going_concern, today=today, as_of=as_of)
-            if not has_usable_data(dossier):
-                skipped.append(dossier["ticker"])
-                continue
-            _write_db_row(dossier)
-            _write_json_cache(dossier)
-            dossiers.append(dossier)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            budget_spent = True
+            skipped.extend(tickers)
+        else:
+            try:
+                going_concern = _call_bounded(
+                    "going-concern",
+                    lambda: fetch_going_concern_universe(client),
+                    timeout_s=min(TICKER_FETCH_BUDGET_S, remaining),
+                )
+            except TimeoutError as exc:
+                budget_spent = True
+                skipped.extend(tickers)
+                going_concern = GoingConcernUniverse(
+                    STATUS_ERROR, set(), True, str(exc)
+                )
+                print(
+                    f"[filing-forensics] {exc}; deferring {len(tickers)} ticker(s)",
+                    file=sys.stderr,
+                )
+
+        if not budget_spent:
+            for index, ticker in enumerate(tickers):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    deferred = tickers[index:]
+                    budget_spent = True
+                    skipped.extend(deferred)
+                    print(
+                        f"[filing-forensics] wall-clock budget spent "
+                        f"({len(dossiers)}/{len(tickers)}); "
+                        f"deferring {len(deferred)} ticker(s)",
+                        file=sys.stderr,
+                    )
+                    break
+
+                ticker_timeout = min(TICKER_FETCH_BUDGET_S, remaining)
+                try:
+                    dossier = _call_bounded(
+                        ticker,
+                        lambda t=ticker: fetch_dossier(
+                            client, t, going_concern, today=today, as_of=as_of
+                        ),
+                        timeout_s=ticker_timeout,
+                    )
+                except TimeoutError as exc:
+                    # Abandon the shared Session: a timed-out worker may still
+                    # hold it mid-request. Defer every remaining ticker and
+                    # exit cleanly so systemd records Result=success instead
+                    # of Result=timeout.
+                    budget_spent = True
+                    skipped.append(ticker)
+                    deferred = tickers[index + 1 :]
+                    skipped.extend(deferred)
+                    print(
+                        f"[filing-forensics] {exc}; deferring "
+                        f"{len(deferred)} remaining ticker(s)",
+                        file=sys.stderr,
+                    )
+                    break
+                if not has_usable_data(dossier):
+                    skipped.append(dossier["ticker"])
+                    continue
+                _write_db_row(dossier)
+                _write_json_cache(dossier)
+                dossiers.append(dossier)
     except Exception as exc:  # noqa: BLE001 — re-raised; the row must exist first
         _record_health("error", {"message": f"cycle aborted: {exc}"})
         raise
 
     persisted = len(dossiers)
-    if persisted or not tickers:
+    if budget_spent:
+        _record_health(
+            "error",
+            {
+                "message": "wall-clock budget spent",
+                "requested": len(tickers),
+                "persisted": persisted,
+                "skipped": len(skipped),
+            },
+        )
+    elif persisted or not tickers:
         _record_health("ok")
     else:
         _record_health("error", {"message": f"no usable dossier for {len(skipped)} ticker(s)"})

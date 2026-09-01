@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
+
+import pytest
 
 CLOUD_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = CLOUD_ROOT.parent
@@ -68,7 +71,8 @@ def _start_lines(text: str) -> list[str]:
 
 
 def _dropin_for(unit: str) -> Path:
-    return CLOUD_ROOT / "services" / f"{unit}.d" / "runtime-container.conf.example"
+    # The SHIPPED drop-in, not the deleted `.conf.example`. R-420.
+    return CLOUD_ROOT / "services" / f"{unit}.d" / "runtime-container.conf"
 
 
 class TestAppDockerfilesExist:
@@ -116,8 +120,26 @@ class TestNodeImage:
         assert "bun run build" in text
         assert "playwright" in text.lower()
         assert "bunx" not in text
-        assert "bun x playwright" in text
         assert "next start" in text or '"next", "start"' in text or "npm run start" in text
+
+    def test_playwright_install_uses_repo_root_binary(self) -> None:
+        """Newsfeed imports playwright from the repo-root package
+        (scripts/newsfeed/browser.js). `bun x playwright install` from
+        WORKDIR web fetched a CLI revision that was not
+        chromium_headless_shell-1217, so launch failed with Executable
+        doesn't exist and the unit crash-looped (page 3e952746).
+        """
+        text = NODE_DF.read_text(encoding="utf-8")
+        assert "bun x playwright" not in text
+        assert "./node_modules/.bin/playwright install chromium chromium-headless-shell" in text
+        workdir = None
+        install_workdir = None
+        for line in text.splitlines():
+            if line.startswith("WORKDIR "):
+                workdir = line.split(maxsplit=1)[1].strip()
+            if "node_modules/.bin/playwright install" in line:
+                install_workdir = workdir
+        assert install_workdir == "/home/radon/radon", install_workdir
 
     def test_user_radon_is_final(self) -> None:
         text = NODE_DF.read_text(encoding="utf-8")
@@ -127,11 +149,27 @@ class TestNodeImage:
         assert "web/public/data" in text
         assert "socat" in text
 
+    def test_runtime_writes_do_not_require_a_recursive_chown_layer(self) -> None:
+        """A final recursive chown copied the entire 4.7 GB filesystem into a
+        new layer on every source change. Keep immutable dependency and source
+        trees readable, and own only the cache/data paths written at runtime.
+        """
+        text = NODE_DF.read_text(encoding="utf-8")
+        assert "chown -R radon:radon /home/radon/radon /ms-playwright" not in text
+        assert "rm -rf /home/radon/radon/web/.next/cache" in text
+        assert "install -d -o radon -g radon" in text
+        assert "/home/radon/radon/web/.next/cache" in text
+        assert "/home/radon/radon/web/public/data" in text
+
     def test_clerk_public_env_is_required_at_build(self) -> None:
         text = NODE_DF.read_text(encoding="utf-8")
         assert 'ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=""' not in text
         assert "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" in text
         assert 'test -n "$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY"' in text
+        # Runtime env cannot repair a client bundle baked without the key.
+        assert ".next/static" in text
+        assert "grep -RF" in text
+        assert "next-clerk-guard" in text
 
 
 class TestImageSafety:
@@ -154,8 +192,131 @@ class TestImageSafety:
 
     def test_dockerignore_pins(self) -> None:
         text = DOCKERIGNORE.read_text(encoding="utf-8")
-        for pattern in (".git", "data/replica.db", "**/.env", "cloud/", "docker/ib-gateway"):
+        for pattern in (
+            ".git",
+            "data/replica.db",
+            "**/.env",
+            "cloud/",
+            "docker/ib-gateway",
+            "scripts/tests/",
+            "scripts/api/tests/",
+            "web/tests/",
+            "web/e2e/",
+        ):
             assert pattern in text, pattern
+
+
+def _dockerignore_patterns() -> list[str]:
+    return [
+        line.strip()
+        for line in DOCKERIGNORE.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+
+
+def _dockerignore_regex(pattern: str) -> re.Pattern[str]:
+    """moby/patternmatcher: `**` spans directories, `*` and `?` stop at `/`."""
+    out = ""
+    i = 0
+    while i < len(pattern):
+        if pattern.startswith("**", i):
+            i += 2
+            if i >= len(pattern) or pattern[i] == "/":
+                out += "(.*/)?"
+                i += 1
+            else:
+                out += ".*"
+            continue
+        ch = pattern[i]
+        if ch == "*":
+            out += "[^/]*"
+        elif ch == "?":
+            out += "[^/]"
+        else:
+            out += re.escape(ch)
+        i += 1
+    return re.compile("^" + out + "$")
+
+
+def _dockerignore_excludes(patterns: list[str], path: str) -> bool:
+    """Pure-Python evaluator for a build context path (no docker binary here).
+
+    Docker semantics: the LAST matching pattern wins, `!` re-includes, and a
+    pattern that matches any parent directory of ``path`` matches ``path``
+    (``MatchesOrParentMatches``). Patterns are anchored at the context root.
+    """
+    parts = path.split("/")
+    candidates = [path] + ["/".join(parts[:n]) for n in range(len(parts) - 1, 0, -1)]
+    excluded = False
+    for raw in patterns:
+        negate = raw.startswith("!")
+        regex = _dockerignore_regex((raw[1:] if negate else raw).strip("/"))
+        if any(regex.match(candidate) for candidate in candidates):
+            excluded = not negate
+    return excluded
+
+
+class TestDockerContextExcludesEveryEnvFile:
+    """R-443: `.dockerignore` excluded only the literal `**/.env`, while
+    `COPY scripts/ ./scripts` and `COPY web/ ./web` take everything else in
+    the context. The gitignored secret files the repo itself enumerates
+    (`.env.local`, `.env.*.local`, `.env.production`, `.env.ib-mode`) were
+    not matched, and the Dockerfile header says to build from the repo root
+    on a workstation where they exist. CI is a clean checkout; this bites a
+    laptop build pushed under a 40-hex tag, which the runtime accepts.
+    """
+
+    SECRET_FILES = (
+        ".env",
+        ".env.ib-mode",
+        ".env.local",
+        ".env.production",
+        ".env.development",
+        "web/.env",
+        "web/.env.local",
+        "web/.env.production.local",
+        "scripts/.env",
+        "scripts/api/.env.local",
+    )
+    KEPT_FILES = (
+        ".env.example",
+        "web/.env.example",
+        "web/.env.local.example",
+        "web/next-env.d.ts",
+        "scripts/lib/env.py",
+    )
+
+    def test_matcher_follows_docker_semantics(self) -> None:
+        assert _dockerignore_excludes(["cloud/"], "cloud/tests/x.py")
+        assert _dockerignore_excludes(["**/node_modules"], "web/node_modules/a/b.js")
+        assert not _dockerignore_excludes([".git"], "web/.gitkeep")
+        assert not _dockerignore_excludes(["data/replica.db"], "web/data/replica.db")
+        assert _dockerignore_excludes(["**/.env"], "web/.env")
+        assert not _dockerignore_excludes(["**/.env"], "web/.env.local")
+        assert _dockerignore_excludes(["**/.env*"], "web/.env.local")
+        assert not _dockerignore_excludes(
+            ["**/.env*", "!**/.env.example"], "web/.env.example"
+        )
+
+    @pytest.mark.parametrize("path", SECRET_FILES)
+    def test_gitignored_secret_files_stay_out_of_the_context(self, path: str) -> None:
+        assert _dockerignore_excludes(_dockerignore_patterns(), path), path
+
+    @pytest.mark.parametrize("path", KEPT_FILES)
+    def test_examples_and_env_named_source_stay_in_the_context(self, path: str) -> None:
+        assert not _dockerignore_excludes(_dockerignore_patterns(), path), path
+
+    def test_every_tracked_env_file_in_the_context_is_an_example(self) -> None:
+        tracked = subprocess.check_output(
+            ["git", "ls-files"], cwd=REPO_ROOT, text=True
+        ).split("\n")
+        env_like = [p for p in tracked if p and Path(p).name.startswith(".env")]
+        assert env_like, "git ls-files returned no .env* files"
+        patterns = _dockerignore_patterns()
+        for path in env_like:
+            in_context = not _dockerignore_excludes(patterns, path)
+            outside_pruned_dirs = not path.startswith(("cloud/", "docker/ib-gateway/"))
+            assert in_context == (path.endswith(".example") and outside_pruned_dirs), path
 
 
 class TestRuntimeContainerDropin:
@@ -170,7 +331,13 @@ class TestRuntimeContainerDropin:
             if line.strip():
                 assert line.lstrip().startswith("#")
 
-    def test_per_unit_examples_call_wrapper_and_stay_commented(self) -> None:
+    def test_per_unit_dropins_call_the_wrapper(self) -> None:
+    # R-420: the per-unit drop-ins are LIVE artifacts now — `bootstrap-control-
+    # plane.sh` and `refresh_install_file` install the real `.conf` for all five
+    # on every deploy — so the `.conf.example` files that said "MUST NOT be
+    # installed" were deleted and these assertions moved onto the shipped file.
+    # The FLEET template (`radon-.service.d`) keeps its example: nothing installs
+    # a fleet-wide runtime-container drop-in, and it exists to say so.
         for unit in APP_UNITS:
             path = _dropin_for(unit)
             assert path.is_file(), unit
@@ -180,9 +347,6 @@ class TestRuntimeContainerDropin:
             assert "radon-app-runtime run %n" in text, unit
             assert "NotifyAccess=all" in text, unit
             assert "User=root" in text, unit
-            for line in text.splitlines():
-                if line.strip():
-                    assert line.lstrip().startswith("#"), f"{unit}: {line}"
 
     def test_example_not_in_bootstrap_sources(self) -> None:
         sources = _readonly_array(BOOTSTRAP.read_text(encoding="utf-8"), "SOURCES")
@@ -203,3 +367,21 @@ class TestRuntimeContainerDropin:
         assert "scripts/radon-app-runtime.sh" in sources
         assert "/usr/local/sbin/radon-app-runtime" in targets
         assert "runtime-container.conf.example" not in sources
+
+    def test_live_dropins_are_control_plane_and_type_simple(self) -> None:
+        sources = _readonly_array(BOOTSTRAP.read_text(encoding="utf-8"), "SOURCES")
+        helper = _readonly_array(HELPER.read_text(encoding="utf-8"), "CONTROL_PLANE_SOURCES")
+        assert "radon-ib-gateway.service.d" not in sources
+        assert "radon-health.service.d" not in sources
+        for unit in APP_UNITS:
+            rel = f"services/{unit}.d/runtime-container.conf"
+            live = CLOUD_ROOT / "services" / f"{unit}.d" / "runtime-container.conf"
+            assert live.is_file(), unit
+            text = live.read_text(encoding="utf-8")
+            assert "Type=simple" in text, unit
+            assert "WatchdogSec=infinity" in text, unit
+            assert "ExecStart=/usr/local/sbin/radon-app-runtime run %n" in text, unit
+            assert "ExecStartPre=" in text, unit
+            assert "ib-gateway" not in text, unit
+            assert rel in sources, unit
+            assert rel in helper, unit

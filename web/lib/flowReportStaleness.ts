@@ -8,10 +8,12 @@
  * Mirrors the pattern used by `gexStaleness.ts` and `vcgStaleness.ts`.
  */
 
+import { lastCompletedSessionDate } from "./marketSession";
 import { parseScanTime } from "./parseScanTime";
 
 const MARKET_HOURS_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const AFTER_HOURS_TTL_MS = 8 * 60 * 60 * 1000; // 8 hours
+const CLOSE_MINUTES = 16 * 60;
 
 export type FlowReportLike = {
   fetched_at?: string | null;
@@ -41,6 +43,21 @@ function isMarketOpenNow(now: Date = new Date()): boolean {
 }
 
 /**
+ * R-465: the after-hours TTL alone let a 09:00 ET scan pass as fresh at
+ * 16:30 ET, with the whole session's flow postdating it. After hours a report
+ * is fresh only if it was generated at or after the 16:00 ET close of the
+ * last completed session (the "EOD report" the header comment assumes).
+ */
+function postdatesLastClose(report: Date, now: Date): boolean {
+  const closeDate = lastCompletedSessionDate(now);
+  const et = new Date(report.toLocaleString("en-US", { timeZone: "America/New_York" }));
+  const reportDate = marketDate(report);
+  if (reportDate > closeDate) return true;
+  if (reportDate < closeDate) return false;
+  return et.getHours() * 60 + et.getMinutes() >= CLOSE_MINUTES;
+}
+
+/**
  * @param report - parsed flow report
  * @param now - injectable clock for testing
  * @param marketOpenOverride - injectable market state for testing
@@ -61,11 +78,54 @@ export function isFlowReportStale(
   if (ageMs < 0) return false;
 
   const marketOpen = marketOpenOverride ?? isMarketOpenNow(now);
-  const ttl = marketOpen ? MARKET_HOURS_TTL_MS : AFTER_HOURS_TTL_MS;
-  return ageMs > ttl;
+  if (marketOpen) return ageMs > MARKET_HOURS_TTL_MS;
+  if (ageMs > AFTER_HOURS_TTL_MS) return true;
+  return !postdatesLastClose(parsed, now);
 }
 
 export const FLOW_REPORT_STALENESS = {
   MARKET_HOURS_TTL_MS,
   AFTER_HOURS_TTL_MS,
 };
+
+/** Report date in market time, `YYYY-MM-DD` — the format the daily history
+ * table already uses. UTC would move an after-hours scan to the next day. */
+function marketDate(when: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(when);
+}
+
+function calendarDaysApart(from: string, to: string): number {
+  return Math.round(
+    (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000,
+  );
+}
+
+/**
+ * "2026-06-16 · 73 days old" — the age of a report, for rendering next to the
+ * figures it produced. Returns null when no timestamp is usable.
+ *
+ * A cached flow report is served whenever a live scan fails, and the cache has
+ * no upper age: /flow-analysis/AMZN served a June report through August. The
+ * verdict, the aggregate and the options bias all render identically to a
+ * fresh scan, so the age has to travel with them.
+ */
+export function flowReportAgeLabel(
+  report: FlowReportLike | null | undefined,
+  now: Date = new Date(),
+): string | null {
+  const ts = flowReportTimestamp(report);
+  if (!ts) return null;
+  const parsed = parseScanTime(ts);
+  if (!parsed) return null;
+
+  const reportDate = marketDate(parsed);
+  const days = Math.max(0, calendarDaysApart(reportDate, marketDate(now)));
+  if (days === 0) return `${reportDate} · today`;
+  if (days === 1) return `${reportDate} · 1 day old`;
+  return `${reportDate} · ${days} days old`;
+}

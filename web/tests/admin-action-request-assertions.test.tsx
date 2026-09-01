@@ -199,6 +199,206 @@ describe("admin destructive actions reach the wire", () => {
     expect(sent[0].cache).toBe("no-store");
   });
 
+  it("sends no Gateway mutation when the app host has no remote control", async () => {
+    const calls: RecordedCall[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input.toString();
+        calls.push({ url, method: init?.method ?? "GET", cache: init?.cache });
+        if (url.endsWith("/api/admin/services") && (init?.method ?? "GET") === "GET") {
+          return jsonResponse({
+            ...SERVICES,
+            host_role: "app",
+            units: SERVICES.units.map((unit) =>
+              unit.unit === GATEWAY_UNIT ? { ...unit, can_control: false } : unit,
+            ),
+          });
+        }
+        if (init?.method === "POST") {
+          return jsonResponse({ ok: true, detail: "done", returncode: 0 });
+        }
+        return jsonResponse({ ...HEALTHY, host_role: "app" });
+      }),
+    );
+    render(<AdminWorkspace />);
+    await settle();
+
+    expect(screen.queryByTestId("force-2fa-button")).toBeNull();
+    expect(screen.queryByTestId("gateway-power-button")).toBeNull();
+    expect(screen.getByTestId("gateway-broker-note").textContent).toMatch(/broker/i);
+    expect(posts(calls)).toHaveLength(0);
+
+    await click("restart-stack-button");
+    expect(posts(calls)).toHaveLength(0);
+    await click("admin-confirm-action");
+    const sent = posts(calls);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].url).toBe("/api/admin/stack/restart");
+    expect(sent.some((c) => c.url.includes("radon-ib-gateway"))).toBe(false);
+    expect(sent.some((c) => c.url === "/api/admin/ib/restart")).toBe(false);
+  });
+
+  it("Force 2FA on an app host with remote control hits /api/admin/ib/restart", async () => {
+    const calls: RecordedCall[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input.toString();
+        calls.push({ url, method: init?.method ?? "GET", cache: init?.cache });
+        if (url.endsWith("/api/admin/services") && (init?.method ?? "GET") === "GET") {
+          return jsonResponse({ ...SERVICES, supported: false, host_role: "app" });
+        }
+        if (init?.method === "POST") {
+          return jsonResponse({ ok: true, detail: "done", returncode: 0, restarted: true });
+        }
+        return jsonResponse({ ...HEALTHY, host_role: "app" });
+      }),
+    );
+    render(<AdminWorkspace />);
+    await settle();
+
+    expect(screen.getByTestId("force-2fa-button")).toBeTruthy();
+    expect(screen.getByTestId("gateway-power-button")).toBeTruthy();
+    expect(screen.queryByTestId("gateway-broker-note")).toBeNull();
+
+    await click("force-2fa-button");
+    expect(posts(calls)).toHaveLength(0);
+    await click("admin-confirm-action");
+    const sent = posts(calls);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].url).toBe("/api/admin/ib/restart");
+    expect(sent[0].method).toBe("POST");
+  });
+
+  it("Reset Backoff hits /api/admin/ib/reset-backoff only after confirming (REL-172)", async () => {
+    const calls = await renderWorkspace();
+
+    await click("reset-backoff-button");
+    expect(screen.getByTestId("admin-confirm")).toBeTruthy();
+    expect(posts(calls)).toHaveLength(0);
+
+    await click("admin-confirm-action");
+    const sent = posts(calls);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].url).toBe("/api/admin/ib/reset-backoff");
+    expect(sent[0].method).toBe("POST");
+    expect(sent[0].cache).toBe("no-store");
+  });
+
+  it("on the app host the Reset Backoff gate says it releases the broker's lease (REL-172)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.endsWith("/api/admin/services") && (init?.method ?? "GET") === "GET") {
+          return jsonResponse({ ...SERVICES, supported: false, host_role: "app" });
+        }
+        return jsonResponse({ ...HEALTHY, host_role: "app" });
+      }),
+    );
+    render(<AdminWorkspace />);
+    await settle();
+
+    await click("reset-backoff-button");
+    expect(screen.getByTestId("admin-confirm").textContent).toMatch(/broker/i);
+  });
+
+  it("a broker transition disarms Force 2FA and Start on the app host (REL-172)", async () => {
+    const calls: RecordedCall[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input.toString();
+        calls.push({ url, method: init?.method ?? "GET", cache: init?.cache });
+        if (url.endsWith("/api/admin/services") && (init?.method ?? "GET") === "GET") {
+          return jsonResponse({
+            ...SERVICES,
+            supported: false,
+            host_role: "app",
+            units: SERVICES.units.map((unit) =>
+              unit.unit === GATEWAY_UNIT
+                ? { ...unit, load_state: "remote", active_state: "activating", sub_state: "transition-pending" }
+                : unit,
+            ),
+          });
+        }
+        return jsonResponse({
+          ...HEALTHY,
+          host_role: "app",
+          ib_gateway: {
+            ...HEALTHY.ib_gateway,
+            port_listening: false,
+            auth_state: "unreachable",
+            restart_backoff: {
+              ...HEALTHY.ib_gateway.restart_backoff!,
+              push_lock: {
+                holder: "broker:transition-pending",
+                acquired_at: 0,
+                expires_at: 0,
+                remaining_secs: 60,
+                reason: "broker transition pending",
+              },
+            },
+          },
+        });
+      }),
+    );
+    render(<AdminWorkspace />);
+    await settle();
+
+    expect((screen.getByTestId("force-2fa-button") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId("gateway-power-button") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId("gateway-power-disabled-reason").textContent).toMatch(/transition/i);
+    await click("force-2fa-button");
+    await click("gateway-power-button");
+    expect(posts(calls)).toHaveLength(0);
+  });
+
+  it("Start Gateway hits the gateway start path, not stack restart", async () => {
+    const calls: RecordedCall[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input.toString();
+        calls.push({ url, method: init?.method ?? "GET", cache: init?.cache });
+        if (url.endsWith("/api/admin/services") && (init?.method ?? "GET") === "GET") {
+          return jsonResponse({
+            ...SERVICES,
+            supported: false,
+            host_role: "app",
+            units: SERVICES.units.map((unit) =>
+              unit.unit === GATEWAY_UNIT
+                ? { ...unit, active_state: "inactive", sub_state: "dead", can_control: true }
+                : unit,
+            ),
+          });
+        }
+        if (init?.method === "POST") {
+          return jsonResponse({ ok: true, detail: "done", returncode: 0 });
+        }
+        return jsonResponse({
+          ...HEALTHY,
+          host_role: "app",
+          ib_gateway: { ...HEALTHY.ib_gateway, port_listening: false, auth_state: "unreachable" },
+        });
+      }),
+    );
+    render(<AdminWorkspace />);
+    await settle();
+
+    expect(screen.getByTestId("gateway-power-button").textContent).toBe("Start Gateway");
+    await click("gateway-power-button");
+    expect(posts(calls)).toHaveLength(0);
+    await click("admin-confirm-action");
+    const sent = posts(calls);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].url).toBe(`/api/admin/services/${GATEWAY_UNIT}/start`);
+    expect(sent[0].method).toBe("POST");
+    expect(sent[0].cache).toBe("no-store");
+    expect(sent.some((c) => c.url === "/api/admin/stack/restart")).toBe(false);
+  });
+
   it("stops a service on the stop path, not the restart path", async () => {
     const calls = await renderWorkspace();
 

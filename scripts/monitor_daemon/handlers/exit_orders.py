@@ -481,6 +481,11 @@ class ExitOrdersHandler(BaseHandler):
         except ImportError:
             pass
 
+        # Both guards, at the placement funnel — the halt refuses first (it is a
+        # deliberate operator state), the limits bound what a non-halted cycle
+        # may send. R-427.
+        from order_limits import check_order_limits
+
         try:
             pending = self._load_pending_orders()
         except Exception as e:
@@ -672,6 +677,40 @@ class ExitOrdersHandler(BaseHandler):
                             ocaGroup=oca_group,
                             ocaType=1,
                         )
+
+                        # R-427: this was the only order-placing path left in
+                        # the repo with the halt and NOT the limits, and unlike
+                        # exit_order_service.py it is definitely running — a
+                        # handler inside radon-monitor.service. The exit leg is
+                        # sized from the existing position, so the fat-finger
+                        # class is bounded in practice, but the notional branch
+                        # was skipped entirely and a corrupt position size
+                        # reached IB unbounded.
+                        violation = check_order_limits({
+                            "type": "option",
+                            "quantity": contracts,
+                            "symbol": ticker,
+                            "limitPrice": target_price,
+                        })
+                        if violation:
+                            logger.warning(
+                                "Order limit refused the exit order for %s: %s",
+                                ticker, violation["message"],
+                            )
+                            result["orders_failed"] = result.get("orders_failed", 0) + 1
+                            result.setdefault("failed", []).append({
+                                "ticker": ticker,
+                                "contract": contract.localSymbol,
+                                "error": violation["message"],
+                            })
+                            # T-313: the position stays unprotected, so
+                            # this cycle must heartbeat error, not ok.
+                            result["error"] = (
+                                f"exit order refused by the order limit "
+                                f"({ticker} {order_info['order_type']}): "
+                                f"{violation['message']}"
+                            )
+                            continue
 
                         trade = client.place_order(contract, limit_order)
 

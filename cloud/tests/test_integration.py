@@ -6,7 +6,9 @@ shell scripts, and documentation.
 """
 
 import os
+import pathlib
 import re
+import subprocess
 
 import pytest
 
@@ -27,19 +29,63 @@ def read_all_services(services_dir):
     }
 
 
+def read_text_lossy(path):
+    return path.read_text(encoding="utf-8", errors="ignore")
+
+
 def tracked_files(root):
-    """Return the text content of every tracked file in the repo."""
-    results = {}
-    for dirpath, _dirnames, filenames in os.walk(root):
-        if ".git" in dirpath:
-            continue
-        for fname in filenames:
-            full = os.path.join(dirpath, fname)
-            try:
-                results[full] = open(full, encoding="utf-8", errors="ignore").read()
-            except (IsADirectoryError, PermissionError):
-                continue
+    """Return every git-tracked file under ``root`` as an absolute Path."""
+    try:
+        listing = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z"],
+            capture_output=True,
+            check=True,
+        ).stdout
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return _walk_source_files(root)
+    return [
+        root / rel
+        for rel in listing.decode("utf-8").split("\0")
+        if rel and (root / rel).is_file()
+    ]
+
+
+UNTRACKED_DIRS = {".git", "__pycache__", "node_modules", ".next", ".venv"}
+
+
+def _walk_source_files(root):
+    # Fallback ONLY when git is unavailable: prune build artifacts so a
+    # constant-folded fixture in a .pyc cannot masquerade as a tracked secret.
+    results = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in UNTRACKED_DIRS]
+        results.extend(
+            pathlib.Path(dirpath) / fname
+            for fname in filenames
+            if not fname.endswith(".pyc")
+        )
     return results
+
+
+SECRET_PATTERNS = [
+    r"sk_live_[a-zA-Z0-9]{20,}",
+    r"sk_test_[a-zA-Z0-9]{20,}",
+    r"pk_live_[a-zA-Z0-9]{20,}",
+    r"ghp_[a-zA-Z0-9]{36,}",
+    r"AKIA[0-9A-Z]{16}",
+]
+
+
+def scan_for_secrets(paths, read=read_text_lossy):
+    """Return one violation line per (path, pattern) with a secret-shaped match."""
+    violations = []
+    for path in paths:
+        content = read(path)
+        for pattern in SECRET_PATTERNS:
+            matches = re.findall(pattern, content)
+            if matches:
+                violations.append(f"{path}: matched {pattern} -> {matches}")
+    return violations
 
 
 # ---------------------------------------------------------------------------
@@ -50,7 +96,7 @@ class TestPortConsistency:
 
     def test_caddyfile_routes_to_relay_port_8765(self, caddy_dir):
         caddyfile = read_text(caddy_dir / "Caddyfile")
-        assert "localhost:8765" in caddyfile
+        assert "127.0.0.1:8765" in caddyfile
 
     def test_deploy_health_checks_fastapi_port_8321(self, scripts_dir):
         deploy = read_text(scripts_dir / "deploy.sh")
@@ -63,18 +109,18 @@ class TestPortConsistency:
     def test_caddyfile_api_route_matches_api_service_port(self, caddy_dir, services_dir):
         caddyfile = read_text(caddy_dir / "Caddyfile")
         api = read_text(services_dir / "radon-api.service")
-        assert "localhost:8321" in caddyfile
+        assert "127.0.0.1:8321" in caddyfile
         assert "--port 8321" in api
 
     def test_relay_service_corresponds_to_port_8765(self, caddy_dir):
         caddyfile = read_text(caddy_dir / "Caddyfile")
         assert re.search(r"handle\s+/ws", caddyfile)
-        assert "localhost:8765" in caddyfile
+        assert "127.0.0.1:8765" in caddyfile
 
     def test_nextjs_service_corresponds_to_port_3000(self, caddy_dir, services_dir):
         caddyfile = read_text(caddy_dir / "Caddyfile")
         nextjs = read_text(services_dir / "radon-nextjs.service")
-        assert "localhost:3000" in caddyfile
+        assert "127.0.0.1:3000" in caddyfile
         assert "radon-nextjs" in nextjs.lower() or "Next.js" in nextjs
 
     def test_docker_compose_exposes_live_and_paper_gateway_ports(self, root):
@@ -94,7 +140,7 @@ class TestPathConsistency:
         services = read_all_services(services_dir)
         env_paths = set()
         for name, content in services.items():
-            if name.startswith("radon-grok-page-responder"):
+            if name.startswith("radon-grok-page-responder") or name.startswith("radon-flex-pull"):
                 continue
             match = re.search(r"EnvironmentFile=(.+)", content)
             if match:
@@ -226,8 +272,11 @@ class TestSecurity:
         port_lines = re.findall(r'"(.+?)"', compose)
         for port_mapping in port_lines:
             if ":" in port_mapping and any(c.isdigit() for c in port_mapping):
-                bound_to_loopback = port_mapping.startswith("127.0.0.1:")
-                bound_to_tailscale = port_mapping.startswith("100.")
+                # A `${VAR:-default}` host part is judged by its default: that
+                # is what binds when the env leaves the override unset.
+                bind = re.sub(r"^\$\{[A-Z0-9_]+:-([^}]+)\}", r"\1", port_mapping)
+                bound_to_loopback = bind.startswith("127.0.0.1:")
+                bound_to_tailscale = bind.startswith("100.")
                 assert bound_to_loopback or bound_to_tailscale, (
                     f"Port mapping {port_mapping} must bind to 127.0.0.1 or the "
                     "Tailscale interface IP (100.x), never 0.0.0.0"
@@ -238,26 +287,33 @@ class TestSecurity:
         assert ".env" in gitignore
 
     def test_no_real_secrets_in_tracked_files(self, root):
-        secret_patterns = [
-            r"sk_live_[a-zA-Z0-9]{20,}",
-            r"sk_test_[a-zA-Z0-9]{20,}",
-            r"pk_live_[a-zA-Z0-9]{20,}",
-            r"ghp_[a-zA-Z0-9]{36,}",
-            r"AKIA[0-9A-Z]{16}",
-        ]
-        all_files = tracked_files(root)
-        violations = []
-        for path, content in all_files.items():
-            if ".git/" in path:
-                continue
-            for pattern in secret_patterns:
-                matches = re.findall(pattern, content)
-                if matches:
-                    violations.append(f"{path}: matched {pattern} -> {matches}")
+        violations = scan_for_secrets(tracked_files(root))
         assert not violations, (
             "Found potential real secrets in tracked files:\n"
             + "\n".join(violations)
         )
+
+    def test_secret_scan_set_is_the_tracked_set(self, root):
+        scanned = tracked_files(root)
+        assert root / "tests" / "test_next_clerk_guard.py" in scanned
+        assert root / "tests" / "test_integration.py" in scanned
+        artifacts = [p for p in scanned if "__pycache__" in p.parts or p.suffix == ".pyc"]
+        assert not artifacts, f"scan set includes untracked build artifacts: {artifacts}"
+
+    def test_secret_scan_catches_planted_clerk_key(self, tmp_path):
+        # Built at runtime so CPython cannot fold it into this file's .pyc and
+        # so no tracked file ever carries a key-shaped literal.
+        planted = "pk_live_" + "".join(chr(c) for c in range(ord("a"), ord("a") + 20))
+        clean = tmp_path / "clean.txt"
+        clean.write_text("nothing to see\n", encoding="utf-8")
+        leaked = tmp_path / "leaked.txt"
+        leaked.write_text(f"key={planted}\n", encoding="utf-8")
+
+        assert scan_for_secrets([clean]) == []
+        violations = scan_for_secrets([clean, leaked])
+        assert len(violations) == 1
+        assert str(leaked) in violations[0]
+        assert planted in violations[0]
 
     def test_fastapi_tailnet_bind_preserves_proxy_trust_boundary(self, services_dir):
         api = read_text(services_dir / "radon-api.service")

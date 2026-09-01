@@ -15,11 +15,14 @@
  * uses the xAI Inference API (console.x.ai) with XAI_API_KEY / GROK_API_KEY.
  */
 
+import { DEFAULT_MODELS } from "./frontier";
+
 export type LlmRole = "user" | "assistant";
 
 /** Structured content blocks used by the multi-round tool loop. */
 export type LlmContentBlock =
   | { type: "text"; text: string }
+  | { type: "image"; source: { type: "base64"; media_type: string; data: string } }
   | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
   | { type: "tool_result"; tool_use_id: string; content: string };
 
@@ -44,6 +47,8 @@ export type LlmChatRequest = {
   model?: string;
   provider?: LlmProviderName;
   maxTokens?: number;
+  /** Per-turn abort (client hung up, wall clock); merged with the request timeout. */
+  signal?: AbortSignal;
 };
 
 export type LlmToolCall = {
@@ -80,6 +85,14 @@ const KNOWN_PROVIDERS: readonly LlmProviderName[] = [
 const ANTHROPIC_ENV_KEYS = ["ANTHROPIC_API_KEY", "CLAUDE_CODE_API_KEY", "CLAUDE_API_KEY"];
 const XAI_ENV_KEYS = ["XAI_API_KEY", "GROK_API_KEY"];
 
+/**
+ * The model each provider is called with when nothing else names one: no
+ * per-turn selection from the picker and no `<PROVIDER>_MODEL` env pin. Same
+ * ids lib/llm/catalog.ts serves as BUILTIN_FRONTIER; see lib/llm/frontier.ts
+ * for why they have to be one constant.
+ */
+export { DEFAULT_MODELS };
+
 const isMockMode = () =>
   process.env.ASSISTANT_MOCK === "1" ||
   (process.env.NODE_ENV === "test" && process.env.ASSISTANT_MOCK !== "0");
@@ -115,14 +128,38 @@ export function normalizeProvider(name: LlmProviderName): Exclude<LlmProviderNam
 }
 
 /**
+ * Which provider owns a model id. The picker sends a model, not a provider, so
+ * a Grok selection has to reach xAI on a host whose default is Anthropic.
+ * Prefix match only: xAI uses dots (`grok-4.6`), Anthropic dashes.
+ */
+export function providerForModel(model: string | undefined): Exclude<LlmProviderName, "grok"> | undefined {
+  const id = model?.trim().toLowerCase();
+  if (!id) return undefined;
+  if (id.startsWith("claude-")) return "anthropic";
+  if (id.startsWith("grok-")) return "xai";
+  if (id.startsWith("gpt-") || id.startsWith("o1") || id.startsWith("o3")) return "openai";
+  if (id.startsWith("gemini-")) return "gemini";
+  return undefined;
+}
+
+/**
  * Provider resolution order:
  * 1. Explicit request.provider
- * 2. LLM_PROVIDER env
- * 3. Auto-prefer xAI when XAI_API_KEY / GROK_API_KEY is set (CMD+J → Grok)
- * 4. Anthropic fallback
+ * 2. The provider that owns request.model (a per-turn selection outranks host env)
+ * 3. LLM_PROVIDER env
+ * 4. Auto-prefer xAI when XAI_API_KEY / GROK_API_KEY is set (CMD+J → Grok)
+ * 5. Anthropic fallback
  */
-export function resolveProvider(request: Pick<LlmChatRequest, "provider"> = {}): Exclude<LlmProviderName, "grok"> {
-  const requested = request.provider ?? (envValue("LLM_PROVIDER") as LlmProviderName | undefined);
+export function resolveProvider(
+  request: Pick<LlmChatRequest, "provider" | "model"> = {},
+): Exclude<LlmProviderName, "grok"> {
+  if (isKnownProvider(request.provider)) {
+    return normalizeProvider(request.provider);
+  }
+  const byModel = providerForModel(request.model);
+  if (byModel) return byModel;
+
+  const requested = envValue("LLM_PROVIDER") as LlmProviderName | undefined;
   if (isKnownProvider(requested)) {
     return normalizeProvider(requested);
   }
@@ -177,8 +214,9 @@ async function readErrorDetail(response: Response): Promise<string> {
 
 const LLM_REQUEST_TIMEOUT_MS = 45_000;
 
-function llmRequestSignal(): AbortSignal {
-  return AbortSignal.timeout(LLM_REQUEST_TIMEOUT_MS);
+function llmRequestSignal(request: Pick<LlmChatRequest, "signal">): AbortSignal {
+  const timeout = AbortSignal.timeout(LLM_REQUEST_TIMEOUT_MS);
+  return request.signal ? AbortSignal.any([request.signal, timeout]) : timeout;
 }
 
 // --- Anthropic (native Messages API) -------------------------------------
@@ -205,7 +243,7 @@ async function callAnthropic(request: LlmChatRequest): Promise<LlmChatResponse> 
   }
 
   const url = envValue("ANTHROPIC_API_URL") || "https://api.anthropic.com/v1/messages";
-  const model = request.model || envValue("ANTHROPIC_MODEL") || "claude-sonnet-4-5-20250929";
+  const model = request.model || envValue("ANTHROPIC_MODEL") || DEFAULT_MODELS.anthropic;
 
   const body: Record<string, unknown> = {
     model,
@@ -224,7 +262,7 @@ async function callAnthropic(request: LlmChatRequest): Promise<LlmChatResponse> 
       accept: "application/json",
     },
     body: JSON.stringify(body),
-    signal: llmRequestSignal(),
+    signal: llmRequestSignal(request),
   });
 
   if (!response.ok) {
@@ -269,8 +307,12 @@ type OpenAiResponse = {
   usage?: { prompt_tokens?: number; completion_tokens?: number };
 };
 
+type OpenAiContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+
 type OpenAiOutboundMessage =
-  | { role: string; content: string | null; tool_calls?: OpenAiToolCall[] }
+  | { role: string; content: string | OpenAiContentPart[] | null; tool_calls?: OpenAiToolCall[] }
   | { role: "tool"; tool_call_id: string; content: string };
 
 function openAiConfig(provider: Exclude<LlmProviderName, "grok" | "anthropic" | "gemini">) {
@@ -278,14 +320,14 @@ function openAiConfig(provider: Exclude<LlmProviderName, "grok" | "anthropic" | 
     return {
       apiKey: resolveXaiApiKey(),
       baseUrl: envValue("XAI_BASE_URL") || envValue("GROK_BASE_URL") || "https://api.x.ai/v1",
-      model: envValue("XAI_MODEL") || envValue("GROK_MODEL") || "grok-4",
+      model: envValue("XAI_MODEL") || envValue("GROK_MODEL") || DEFAULT_MODELS.xai,
       label: "xAI Grok",
     };
   }
   return {
     apiKey: envValue("OPENAI_API_KEY"),
     baseUrl: envValue("OPENAI_BASE_URL") || "https://api.openai.com/v1",
-    model: envValue("OPENAI_MODEL") || "gpt-4o",
+    model: envValue("OPENAI_MODEL") || DEFAULT_MODELS.openai,
     label: "OpenAI",
   };
 }
@@ -326,6 +368,7 @@ export function toOpenAiMessages(request: LlmChatRequest): OpenAiOutboundMessage
     const toolUses = blocks.filter(
       (block): block is Extract<LlmContentBlock, { type: "tool_use" }> => block.type === "tool_use",
     );
+    const hasImage = blocks.some((block) => block.type === "image");
 
     if (toolUses.length > 0) {
       messages.push({
@@ -339,6 +382,25 @@ export function toOpenAiMessages(request: LlmChatRequest): OpenAiOutboundMessage
             arguments: JSON.stringify(call.input ?? {}),
           },
         })),
+      });
+      continue;
+    }
+
+    if (hasImage) {
+      // Images force the array content shape; text-only turns stay plain
+      // strings so the provider-side prompt cache keeps hitting.
+      messages.push({
+        role: message.role,
+        content: blocks.flatMap((block): OpenAiContentPart[] => {
+          if (block.type === "text") return [{ type: "text", text: block.text }];
+          if (block.type === "image") {
+            return [{
+              type: "image_url",
+              image_url: { url: `data:${block.source.media_type};base64,${block.source.data}` },
+            }];
+          }
+          return [];
+        }),
       });
       continue;
     }
@@ -395,7 +457,7 @@ async function callOpenAiCompatible(
       accept: "application/json",
     },
     body: JSON.stringify(body),
-    signal: llmRequestSignal(),
+    signal: llmRequestSignal(request),
   });
 
   if (!response.ok) {
@@ -474,7 +536,7 @@ async function callGemini(request: LlmChatRequest): Promise<LlmChatResponse> {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify(body),
-    signal: llmRequestSignal(),
+    signal: llmRequestSignal(request),
   });
 
   if (!response.ok) {
@@ -538,7 +600,17 @@ export async function chat(request: LlmChatRequest): Promise<LlmChatResponse> {
     const fallback = resolveFallbackProvider(provider);
     if (!fallback) throw primaryError;
 
-    const fallbackResult = await dispatch(fallback, request);
+    // The fallback provider gets its OWN default model. A per-turn selection
+    // is scoped to the provider that owns it, so handing "grok-4.6" to
+    // Anthropic 404s and converts a transient xAI blip into a hard turn
+    // failure - the exact outage the fallback exists to absorb. Dropping
+    // `provider` too keeps an explicit request.provider from pinning the
+    // retry back onto the endpoint that just failed.
+    const fallbackResult = await dispatch(fallback, {
+      ...request,
+      model: undefined,
+      provider: undefined,
+    });
     return { ...fallbackResult, usedFallback: true };
   }
 }

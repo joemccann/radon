@@ -298,3 +298,42 @@ class TestNonThrottleFailures:
                 fetch_cash_transactions("tok", "qid")
             # 2 attempts total (initial + 1 retry).
             assert mock_urlopen.call_count == 2
+
+
+class TestUnreadableDurableStoreFailsClosed:
+    """The ONE deliberate exercise of the R-212 fail-closed path THROUGH
+    `fetch_cash_transactions`.
+
+    T-317: every other test in this file runs with the host's Turso
+    credentials stripped by `scripts/tests/conftest.py`, so this is the only
+    place the `FlexTokenLocked` preflight is meant to fire, and it fires
+    because the store is patched to be configured-but-unreadable, not because
+    of whatever `web/.env` this host happens to carry.
+    """
+
+    def test_configured_but_unreadable_store_blocks_the_sendrequest(self, monkeypatch):
+        from datetime import datetime, timedelta, timezone
+
+        from utils import flex_embargo as fe
+
+        monkeypatch.setattr(fe, "_read_sidecar", lambda: None)
+        monkeypatch.setattr(fe, "_cleared_marker_covers", lambda moment: False)
+        monkeypatch.setattr(fe, "_durable_store_available", lambda: True)
+
+        def store_unreachable(*a, **k):
+            raise RuntimeError("turso read failed")
+
+        monkeypatch.setattr(fe, "_query_health_rows", store_unreachable)
+
+        before = datetime.now(timezone.utc)
+        with patch("cash_flow_sync.urlopen") as mock_urlopen:
+            with pytest.raises(fe.FlexTokenLocked, match="Flex token locked until") as excinfo:
+                fetch_cash_transactions("tok", "qid")
+        assert mock_urlopen.call_count == 0, (
+            "a SendRequest under an unknown lockout state extends a live IBKR 1025 embargo"
+        )
+
+        until_iso = str(excinfo.value).rsplit(" ", 1)[1].replace("Z", "+00:00")
+        block = datetime.fromisoformat(until_iso) - before
+        expected = timedelta(hours=fe.UNKNOWN_STATE_BLOCK_HOURS)
+        assert expected - timedelta(seconds=5) <= block <= expected + timedelta(seconds=5), block

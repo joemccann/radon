@@ -10,7 +10,9 @@ extreme. The US Dollar Index is stored as a nullable overlay only.
 Sources, in order (never skip ahead):
   1. Interactive Brokers — Stock IEI/HYG on SMART, Index DX (then DXY) on NYBOT
   2. Unusual Whales — regular-session OHLC for IEI/HYG. DXY is not on UW.
-  3. Yahoo Finance — last resort: IEI, HYG, DX-Y.NYB
+  3. Robinhood (official trading MCP, read-only) — equity historicals for
+     IEI/HYG when configured. DXY is not on Robinhood.
+  4. Yahoo Finance — ABSOLUTE LAST RESORT: IEI, HYG, DX-Y.NYB
 
 Output is dual-written to Turso iei_hyg_history + data/iei_hyg.json.
 
@@ -73,6 +75,7 @@ DXY_SYMBOL = "DXY"
 TICKERS = [IEI_SYMBOL, HYG_SYMBOL, DXY_SYMBOL]
 YAHOO_SYMBOLS = {IEI_SYMBOL: "IEI", HYG_SYMBOL: "HYG", DXY_SYMBOL: "DX-Y.NYB"}
 UW_SKIP = frozenset({DXY_SYMBOL})
+RH_SKIP = frozenset({DXY_SYMBOL})  # Robinhood equity historicals: no FX index
 UW_REGULAR_SESSION = "r"
 # Shared with credit-spread: the jobs run 21:45 and 21:55 UTC and never overlap.
 IEI_HYG_IB_HISTORY_CLIENT_IDS = (56, 69)
@@ -154,7 +157,7 @@ async def _ib_daily_closes(ib: Any, contract: Any) -> Closes:
 def _ib_gateway_unavailable() -> bool:
     auth_state = _ib_auth_state()
     if auth_state and auth_state != "authenticated":
-        _log(f"IB skipped: gateway auth_state={auth_state} (falling back to UW/Yahoo)")
+        _log(f"IB skipped: gateway auth_state={auth_state} (falling back to UW/RH/Yahoo)")
         return True
     return False
 
@@ -263,14 +266,40 @@ def _take(
             sources[ticker] = label
 
 
+def _robinhood_degradation(sources: dict[str, str]) -> Optional[dict[str, Any]]:
+    """Heartbeat detail when the Robinhood rung failed and Yahoo served (REL-174)."""
+    try:
+        from clients.robinhood_client import robinhood_degradation
+    except ImportError:
+        return None
+    return robinhood_degradation(SERVICE, sources, skip=RH_SKIP)
+
+
+def fetch_rh_closes(tickers: list[str]) -> dict[str, Closes]:
+    """Robinhood daily closes (read-only MCP). DXY is skipped.
+
+    Ranked after IB and UW, before Yahoo. Unconfigured hosts return {}
+    without any network I/O so the ladder falls through to Yahoo.
+    """
+    fetchable = [t for t in tickers if t not in RH_SKIP]
+    if not fetchable:
+        return {}
+    try:
+        from clients.robinhood_client import fetch_robinhood_closes
+    except ImportError:
+        return {}
+    return fetch_robinhood_closes(fetchable)
+
+
 def fetch_closes(
     tickers: Optional[list[str]] = None,
     *,
     fetch_ib: Optional[FetchCloses] = None,
     fetch_uw: Optional[FetchCloses] = None,
+    fetch_rh: Optional[FetchCloses] = None,
     fetch_yahoo: Optional[FetchCloses] = None,
 ) -> tuple[dict[str, Closes], str, dict[str, str]]:
-    """IB first, then UW for gaps, then Yahoo.
+    """IB first, then UW for gaps, then Robinhood, then Yahoo.
 
     Returns ``(closes, combined source, per-ticker sources)``. R-190: the
     combined string alone cannot say WHICH leg fell back, so a mixed IB+Yahoo
@@ -281,6 +310,7 @@ def fetch_closes(
     sources: dict[str, str] = {}
     _take(fetch_ib or fetch_ib_closes, wanted, "ib", closes, sources)
     _take(fetch_uw or fetch_uw_closes, wanted, "uw", closes, sources)
+    _take(fetch_rh or fetch_rh_closes, wanted, "rh", closes, sources)
     _take(fetch_yahoo or fetch_yahoo_closes, wanted, "yahoo", closes, sources)
     return closes, combine_source(sources) or NO_SOURCE, dict(sources)
 
@@ -434,6 +464,8 @@ def persist_result(
     payload: dict[str, Any],
     changed_rows: list[dict[str, Any]],
     health_error: Optional[dict[str, Any]] = None,
+    *,
+    degraded: Optional[dict[str, Any]] = None,
 ) -> None:
     """Dual-write: Turso rows + snapshot + heartbeat, then the JSON fallback.
 
@@ -453,11 +485,15 @@ def persist_result(
     if changed_rows:
         writer.upsert_iei_hyg_rows(changed_rows, recorded_at=scan_time)
     writer.upsert_scan_snapshot(SERVICE, scan_time, payload)
+    # REL-174 (R-470): `degraded` rides on an `ok` row — the writer succeeded
+    # (writer-state semantics), but a closed Robinhood rung that demoted a
+    # ticker to Yahoo is named in last_error instead of hidden under
+    # `ok`/`yahoo`. It clears on the next clean cycle.
     writer.record_service_health(
         SERVICE,
         "ok" if health_error is None else "error",
         finished_at=scan_time,
-        error=health_error,
+        error=health_error if health_error is not None else degraded,
     )
     _write_json_cache(payload)
 
@@ -504,19 +540,22 @@ def load_cached_series() -> list[dict[str, Any]]:
 
 
 def _serve_cached(cached: list[dict[str, Any]]) -> dict[str, Any]:
-    """IB, UW and Yahoo all down: re-serve the cache as stale_source, page.
+    """IB, UW, Robinhood and Yahoo all down: re-serve the cache as
+    stale_source, page.
 
     R-098: see fetch_credit_spread; a dead source lived only in
     payload["source"], which nothing reads.
     """
     if not cached:
-        raise RuntimeError(f"{SERVICE}: IB, UW and Yahoo all failed with no cached series")
+        raise RuntimeError(
+            f"{SERVICE}: IB, UW, Robinhood and Yahoo all failed with no cached series"
+        )
     payload = {**build_output(cached, source=NO_SOURCE), "status": STATUS_STALE_SOURCE}
     through = payload["current"]["date"]
     _log(f"all sources down; re-serving cached series through {through}")
     health_error = {
         "message": (
-            f"{SERVICE}: every source failed (IB, UW, Yahoo); serving the "
+            f"{SERVICE}: every source failed (IB, UW, Robinhood, Yahoo); serving the "
             f"cached series through {through}"
         ),
         "class": "source_down",
@@ -533,7 +572,7 @@ def run() -> dict[str, Any]:
     `service_health`. The whole body is inside the health-reporting block
     (docs/operations.md) so an outage is recorded, not merely silent.
     """
-    _log("fetching IEI, HYG and DXY (IB -> UW -> Yahoo)")
+    _log("fetching IEI, HYG and DXY (IB -> UW -> RH -> Yahoo)")
     try:
         closes, source, source_by_ticker = fetch_closes()
         cached = load_cached_series()
@@ -547,7 +586,7 @@ def run() -> dict[str, Any]:
         if not new_rows:
             _log("source unchanged; refreshing snapshot only")
         payload = build_output(series, source=source, source_by_ticker=source_by_ticker)
-        persist_result(payload, new_rows)
+        persist_result(payload, new_rows, degraded=_robinhood_degradation(source_by_ticker))
     except Exception as exc:
         _record_error_health(f"{SERVICE}: {exc}", "cycle_failed")
         raise

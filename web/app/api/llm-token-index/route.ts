@@ -8,6 +8,8 @@ import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+export const radonCapability = "read";
+
 export async function GET(req: NextRequest): Promise<Response> {
   const url = new URL(req.url);
   const days = url.searchParams.get("days") ?? "180";

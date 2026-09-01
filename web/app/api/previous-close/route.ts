@@ -265,6 +265,8 @@ async function getPreviousClose(symbol: string): Promise<number | null> {
 
 /* ── Route handler ──────────────────────────────────────── */
 
+export const radonCapability = "read";
+
 export async function POST(req: Request) {
   const access = await requireRouteAccess(undefined, { rate: { key: "previous-close:route", limit: 20, windowMs: 60_000 } });
   if (!access.ok) return access.response;

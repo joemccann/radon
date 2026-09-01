@@ -200,7 +200,12 @@ describe("assistant loop hardening", () => {
     );
 
     expect(executeTool).toHaveBeenCalledTimes(1);
-    expect(executeTool).toHaveBeenCalledWith("get_portfolio", {}, PRINCIPAL);
+    expect(executeTool).toHaveBeenCalledWith(
+      "get_portfolio",
+      {},
+      PRINCIPAL,
+      expect.objectContaining({ spawnAttempts: expect.any(Number) }),
+    );
     expect(result.outcome).toBe("proposal");
     expect(result.proposal?.toolUseId).toBe("order-final");
   });

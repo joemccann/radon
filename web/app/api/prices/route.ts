@@ -11,6 +11,8 @@ const WS_SERVER_URL = process.env.IB_REALTIME_WS_URL || "ws://localhost:8765";
  * 
  * Legacy SSE endpoint removed.
  */
+export const radonCapability = { GET: "read", POST: "read" };
+
 export async function GET(): Promise<Response> {
   return NextResponse.json(
     {

@@ -9,6 +9,7 @@ waits on (REL-070 / R-201).
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import yaml
@@ -120,3 +121,90 @@ def test_no_production_host_job_swallows_its_own_failure() -> None:
         f"{offenders} run against the production host with continue-on-error: "
         "a failure there is invisible to the operator"
     )
+
+
+# ---------------------------------------------------------------------------
+# R-324 / REL-113: `needs` alone does not gate. The `if:` expression does.
+#
+# GitHub drops the implicit `success()` requirement on `needs` as soon as the
+# `if:` contains a status function, and `!cancelled()` is one. `stage-release`
+# carries `!cancelled()` and lists `web-coverage`/`py-coverage` in `needs`, but
+# its `if:` never checks their results — so a failing coverage job correctly
+# skipped `deploy` while `stage-release` still SSHed to the live trading host
+# and ran the pushed commit's own `deploy.sh`. The checks above compare `needs`
+# name sets only, which is why this stayed green through REL-070, R-299/REL-102
+# and now R-324. This is the third attempt at the invariant, so it is asserted
+# on the mechanism that actually gates.
+
+
+def _if_expression(job: dict) -> str:
+    return str(job.get("if") or "")
+
+
+def _neutralises_implicit_success(expression: str) -> bool:
+    """A status function in `if:` removes GitHub's implicit `success()`."""
+    return any(
+        fn in expression
+        for fn in ("cancelled()", "always()", "failure()", "success()")
+    )
+
+
+def test_every_gate_job_is_named_in_each_host_job_if_expression() -> None:
+    gate = _gate_jobs(_workflow()["jobs"])
+    offenders: dict[str, list[str]] = {}
+    for name, job in _production_host_jobs().items():
+        expression = _if_expression(job)
+        if not _neutralises_implicit_success(expression):
+            # No status function -> GitHub's implicit `success()` still binds
+            # every entry in `needs`, so the expression need not repeat them.
+            continue
+        missing = sorted(dep for dep in gate if dep not in expression)
+        if missing:
+            offenders[name] = missing
+    assert not offenders, (
+        "these jobs reach the production host behind an `if:` that neutralises "
+        "GitHub's implicit success() but does not check every gate job's "
+        f"result, so a RED gate job does not stop them: {offenders}"
+    )
+
+
+def test_the_coverage_gates_are_checked_in_the_stage_release_expression() -> None:
+    """Names the two R-324 found missing, so a silent removal is caught."""
+    expression = _if_expression(_workflow()["jobs"]["stage-release"])
+    assert "needs.web-coverage.result" in expression
+    assert "needs.py-coverage.result" in expression
+
+
+def test_removing_a_gate_from_an_if_expression_alone_fails_the_check() -> None:
+    """Fault injection: the check must read the expression, not just `needs`.
+
+    Deletes ONLY the `web-coverage` clause from `stage-release.if`, leaving
+    `needs` untouched — the exact shape R-324 describes. The `needs`-based
+    checks above stay green on this mutation; this one must not.
+    """
+    workflow = _workflow()
+    jobs = workflow["jobs"]
+    stage = jobs["stage-release"]
+    # The `if:` is a folded scalar, so it arrives as ONE line — strip the
+    # clause, not the line.
+    stage["if"] = re.sub(
+        r"&&\s*\(needs\.web-coverage\.result[^)]*\)\s*",
+        "",
+        _if_expression(stage),
+    )
+    assert "needs.web-coverage.result" not in _if_expression(stage)
+    # `needs` is untouched, so the name-set invariant still passes ...
+    assert "web-coverage" in _needs(stage)
+
+    gate = _gate_jobs(jobs)
+    host_jobs = {n: j for n, j in jobs.items() if _touches_production_host(j)}
+    offenders = {}
+    for name, job in host_jobs.items():
+        expression = _if_expression(job)
+        if not _neutralises_implicit_success(expression):
+            continue
+        missing = sorted(dep for dep in gate if dep not in expression)
+        if missing:
+            offenders[name] = missing
+    # ... but the expression-level check catches it.
+    assert offenders.get("stage-release") == ["web-coverage"], offenders

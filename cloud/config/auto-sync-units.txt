@@ -29,6 +29,8 @@ radon-equibles-filings.service
 radon-equibles-filings.timer
 radon-equibles-short-crowding.service
 radon-equibles-short-crowding.timer
+radon-flex-pull.service
+radon-flex-pull.timer
 radon-flow-refresh.service
 radon-flow-refresh.timer
 radon-forecast-nightly.service
@@ -39,6 +41,10 @@ radon-grok-page-responder.service
 radon-grok-page-responder.timer
 radon-host-metrics.service
 radon-host-metrics.timer
+radon-hhlev.service
+radon-hhlev.timer
+radon-hyad.service
+radon-hyad.timer
 radon-iei-hyg.service
 radon-iei-hyg.timer
 radon-incident-watchdog.service
@@ -53,6 +59,8 @@ radon-margin-debt.service
 radon-margin-debt.timer
 radon-media-backup.service
 radon-media-backup.timer
+radon-model-catalog.service
+radon-model-catalog.timer
 radon-oi-changes.service
 radon-oi-changes.timer
 radon-perf-twr.service
@@ -73,6 +81,8 @@ radon-vcg-refresh.service
 radon-vcg-refresh.timer
 radon-vixcor.service
 radon-vixcor.timer
+radon-vixts.service
+radon-vixts.timer
 radon-vol-cone-intraday.service
 radon-vol-cone-intraday.timer
 radon-vol-cone.service

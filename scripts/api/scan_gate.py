@@ -67,5 +67,9 @@ class ScanGate:
     def mark_failure(self) -> None:
         self._last_failure = self._clock()
 
+    def reset(self) -> None:
+        """Disarm the gate: no cooldown, no backoff."""
+        self._last_success = self._last_failure = _NEVER
+
     def __repr__(self) -> str:
         return f"ScanGate({self.name!r}, retry_after={self.retry_after():.1f}s)"

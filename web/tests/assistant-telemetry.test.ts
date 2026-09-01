@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { assistantDonePayload } from "./assistantStream";
+
 /**
  * Item 5 — assistant telemetry.
  *
@@ -75,6 +77,9 @@ describe("assistant telemetry", () => {
       JSON.stringify(baseRecord.toolCalls),
       JSON.stringify(baseRecord.usage),
       "answered",
+      0,
+      null,
+      null,
     ]);
     expect(opts).toMatchObject({ label: "assistant-turns" });
   });
@@ -137,7 +142,7 @@ describe("assistant telemetry", () => {
     const res = await POST(postRequest({ messages: [{ role: "user", content: "How is SPY flow?" }] }) as never);
 
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await assistantDonePayload<{ content: string; rounds: number }>(res);
     expect(body.content).toBe("SPY flow is bullish accumulation.");
 
     await vi.waitFor(() => expect(dbExecute).toHaveBeenCalledTimes(1));
@@ -148,6 +153,7 @@ describe("assistant telemetry", () => {
     expect(JSON.parse(stmt.args[3])).toEqual([{ name: "get_flow", ok: true }]);
     expect(JSON.parse(stmt.args[4])).toEqual({ inputTokens: 30, outputTokens: 13 });
     expect(stmt.args[5]).toBe("answered");
+    expect(stmt.args.slice(6)).toEqual([0, "anthropic", "mock"]);
 
     const lines = logSpy.mock.calls.map((call) => call.join(" "));
     expect(lines.filter((line) => /^\[assistant\] round=\d+ /.test(line))).toHaveLength(2);
@@ -174,7 +180,7 @@ describe("assistant telemetry", () => {
     const res = await POST(postRequest({ messages: [{ role: "user", content: "How is SPY flow?" }] }) as never);
 
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await assistantDonePayload<{ content: string; rounds: number }>(res);
     expect(body.content).toBe("SPY flow is bullish accumulation.");
     expect(body.rounds).toBe(1);
 

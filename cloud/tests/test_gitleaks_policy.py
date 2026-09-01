@@ -31,6 +31,9 @@ LITERAL_TWS_BASELINE_COMMITS = {
     # content -- only the commit identity changed.
     "6ec11003bb4521e7f7b677ffbd78b7fd4d09458a",
     "da857b8b19a6e5778bb86bf37465346dca8da89b",
+    # 2026-08-30: PR #184's env-file fixture spelled a fake gateway password;
+    # vetted as test data, rewritten to runtime construction afterwards.
+    "020865adeff48b7182b7eb81d74a01fc70d00c82",
 }
 EXAMPLE_BASELINE_COMMITS = {
     "3ee6e6e8a50c24944c1983a75f5bf6dda9048f67",
@@ -40,6 +43,21 @@ EXAMPLE_BASELINE_COMMITS = {
     # Same 2026-08-13 rebase; recreated fixture commit, identical blob.
     "da857b8b19a6e5778bb86bf37465346dca8da89b",
 }
+
+
+# generic-api-key is a gitleaks DEFAULT rule, so its exceptions live in a
+# global [[allowlists]] entry scoped with targetRules rather than in a
+# [[rules]] block.
+GENERIC_API_KEY_BASELINE_COMMITS = {
+    # 2026-08-31 (#212): the weekend-redactor test spelled a fake UW token to
+    # prove the redactor scrubs env values; merged before the scan ran. The
+    # fixture was rewritten to runtime construction afterwards.
+    "38eeecb91eedb3b90966821bff12d5b240d89708",
+}
+
+
+def _config() -> dict:
+    return tomllib.loads(GITLEAKS_CONFIG.read_text(encoding="utf-8"))
 
 
 def _config_rules() -> dict[str, dict]:
@@ -80,6 +98,21 @@ def test_historical_exceptions_are_rule_scoped_and_commit_exact() -> None:
     assert _rule_allowlist_commits(rules["credential-shaped-example"]) == (
         EXAMPLE_BASELINE_COMMITS
     )
+
+
+def test_global_commit_exceptions_are_rule_scoped_and_commit_exact() -> None:
+    config = _config()
+    assert "allowlist" not in config, (
+        "the singular [allowlist] table cannot coexist with [[allowlists]]; "
+        "gitleaks refuses to load the config"
+    )
+    exceptions = [a for a in config["allowlists"] if a.get("commits")]
+    assert len(exceptions) == 1
+    entry = exceptions[0]
+    # Without targetRules a commit exception blanket-allows EVERY rule for
+    # that SHA, including the custom TWS ones.
+    assert entry["targetRules"] == ["generic-api-key"]
+    assert set(entry["commits"]) == GENERIC_API_KEY_BASELINE_COMMITS
 
 
 def test_custom_rules_still_match_new_literals_but_not_empty_placeholders() -> None:

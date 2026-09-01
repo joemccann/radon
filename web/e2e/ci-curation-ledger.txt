@@ -1,0 +1,168 @@
+# CI e2e curation ledger — every web/e2e/*.spec.ts must appear HERE or in the
+# curated `npx playwright test` arg list of the `e2e-financial-smoke` job in
+# .github/workflows/ci.yml. scripts/tests/test_e2e_ci_curation.py enforces it.
+#
+# Why (TEST_AUDIT T-223, T-271): the CI Playwright job runs a HAND-TYPED subset.
+# It was byte-identical across a delta that added five specs, so order prefill,
+# the order-routing session window, the mobile orders shell and an entire new
+# regime tab shipped with zero browser evidence in CI and nobody noticed. The
+# list not growing was invisible because nothing compared it to the tree.
+#
+# This file makes the gap explicit and FROZEN. A NEW spec now fails the pytest
+# gate until someone either curates it (after preflighting it under a
+# production `next start` — this repo has a documented dev-vs-prod divergence)
+# or adds it below. Adding a line is cheap and honest; not noticing is not.
+#
+# Two kinds of entry:
+#
+#   1. DOCUMENTED HOLD-OUTS — preflighted and deliberately NOT curated.
+#      account-day-move-ib-daily-pnl.spec.ts
+#          Day Move renders differently under `next dev` and `next start`; the
+#          spec pins the dev reading. Runs locally only. (ci.yml:505-508)
+#      performance-twr-payload.spec.ts
+#          Asserts against a live TWR payload; no CI data source.
+#
+#   2. UNTRIAGED BACKLOG — everything else below. These have NOT been
+#      preflighted under `next start`, which is the only reason they are not
+#      curated. Not a judgement that they are unfit for CI. Move a line up
+#      into ci.yml once it is green under a production server 3x.
+#
+aaoi-risk-reversal-max-loss.spec.ts
+account-day-move-ib-daily-pnl.spec.ts
+admin-panel.spec.ts
+admin-visual-snapshot.spec.ts
+book-depth-client-nav.spec.ts
+bpi-tab.spec.ts
+cash-flows-section.spec.ts
+cash-flows-withdrawal-may8.spec.ts
+catalyst-card-weekend.spec.ts
+chain-held-leg-prices.spec.ts
+chain-sticky-header.spec.ts
+chain-strikes-selector.spec.ts
+chat-launcher-focus.spec.ts
+cor-tab.spec.ts
+crcl-spread-builder.spec.ts
+credit-spread-tab.spec.ts
+crox-bull-call-stale-price.spec.ts
+cta-page.spec.ts
+cta-stale-banner.spec.ts
+curve-tab.spec.ts
+dashboard-feed-tabs.spec.ts
+dashboard-panel-chrome.spec.ts
+dashboard-vol-cone-hero.spec.ts
+day-move-ib-daily-pnl.spec.ts
+dispersion-tab.spec.ts
+divyield-tab.spec.ts
+dollar-delta-leverage.spec.ts
+fill-toast.spec.ts
+flow-analysis-ticker.spec.ts
+header-fullscreen.spec.ts
+hhlev-tab.spec.ts
+historical-trades-filter.spec.ts
+hyad-tab.spec.ts
+ib-mfa-reconnect-alert.spec.ts
+iei-hyg-tab.spec.ts
+internals-market-closed.spec.ts
+ivrank-tab.spec.ts
+iwm-close-order-summary.spec.ts
+iwm-synthetic-mark-label.spec.ts
+iwm-ticker-detail-combo-sign.spec.ts
+margin-debt-tab.spec.ts
+margin-warning-toast.spec.ts
+mobile-a11y-pwa.spec.ts
+mobile-blotter.spec.ts
+mobile-chain-ladder.spec.ts
+mobile-charts.spec.ts
+mobile-cockpit-book-layout.spec.ts
+mobile-combo-instrument-switcher.spec.ts
+mobile-executed-journal.spec.ts
+mobile-newsfeed-layout.spec.ts
+mobile-order-ticket.spec.ts
+mobile-orders.spec.ts
+mobile-p2-polish.spec.ts
+mobile-positions.spec.ts
+mobile-same-day-pnl-parity.spec.ts
+mobile-scanner-mode-tabs-overflow.spec.ts
+mobile-shell.spec.ts
+mobile-short-strangle-skew.spec.ts
+mobile-stop-order.spec.ts
+mobile-ticker-search.spec.ts
+mobile-vol-cone-table.spec.ts
+modify-combo-order.spec.ts
+modify-order-confirmation.spec.ts
+modify-order-resting-limit.spec.ts
+modify-order-spread-telemetry.spec.ts
+newsfeed-lightbox-image-fit.spec.ts
+open-order-combo.spec.ts
+open-order-single-detail.spec.ts
+options-exposure.spec.ts
+order-cancel-error-propagation.spec.ts
+order-margin-impact-unavailable.spec.ts
+order-payoff-ratio.spec.ts
+order-ticket-quote-telemetry.spec.ts
+orders-empty-state.spec.ts
+orders-historical-trades-refresh.spec.ts
+orders-historical-trades-today.spec.ts
+orders-section-layout.spec.ts
+orders-ux-command-strip.spec.ts
+performance-chart-axes.spec.ts
+performance-chart-theme.spec.ts
+performance-market-closed.spec.ts
+performance-page.spec.ts
+performance-twr-payload.spec.ts
+pltr-chain-position-focus.spec.ts
+portfolio-leg-row-runtime.spec.ts
+portfolio-market-closed.spec.ts
+portfolio-ratio-risk-reversal-label.spec.ts
+portfolio-request-cadence.spec.ts
+portfolio-return-capital.spec.ts
+price-chart-theme.spec.ts
+regime-close-transition-refresh.spec.ts
+regime-closed-refresh.spec.ts
+regime-cor1m-live-route.spec.ts
+regime-cor1m-live-stream.spec.ts
+regime-cor1m.spec.ts
+regime-cta-share-pattern.spec.ts
+regime-day-change.spec.ts
+regime-detail-panels-responsive.spec.ts
+regime-history-responsive.spec.ts
+regime-history-tooltip.spec.ts
+regime-live-index-stream.spec.ts
+regime-live-index-streaming.spec.ts
+regime-live-stream-values.spec.ts
+regime-market-closed-eod.spec.ts
+regime-relationship-view.spec.ts
+regime-rvol-history-live-cache.spec.ts
+regime-rvol-history-live-route.spec.ts
+regime-rvol-history.spec.ts
+regime-stale-market-open.spec.ts
+regime-strip-responsive.spec.ts
+regime-vcg-edr-badge.spec.ts
+regime-vix-live-badge.spec.ts
+risk-reversal-midprice.spec.ts
+risk-reversal-skew.spec.ts
+rv-ratio.spec.ts
+scanner-discover.spec.ts
+scanner-leap-garch-tabs.spec.ts
+scanner-tab-gaps.spec.ts
+scanner-ticker-scan.spec.ts
+short-strangle-skew.spec.ts
+sidebar-performance-hidden.spec.ts
+skew-tab.spec.ts
+skew2d-tab.spec.ts
+spread-price-bar.spec.ts
+straddle-tab.spec.ts
+streaks-tab.spec.ts
+strength-confirmation-scanner.spec.ts
+sync-fallback.spec.ts
+theta-harvester-prefill.spec.ts
+theta-harvester-scanner.spec.ts
+ticker-page.spec.ts
+ticker-search-chain.spec.ts
+ticker-search-live.spec.ts
+trin-tab.spec.ts
+vixcor-tab.spec.ts
+vol-cone-tab.spec.ts
+vxn-index-routing.spec.ts
+watchlist-page.spec.ts
+ws-connection-stability.spec.ts

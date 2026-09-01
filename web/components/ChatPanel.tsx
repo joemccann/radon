@@ -9,11 +9,11 @@ import type {
   AssistantOrderInput,
   AssistantOrderProposal,
   AssistantToolEvent,
+  ChatImageAttachment,
   Message,
   PortfolioData,
   WorkspaceSection,
 } from "@/lib/types";
-import { quickPromptsBySection } from "@/lib/data";
 import { createTimestamp } from "@/lib/utils";
 import {
   fallbackReply,
@@ -36,6 +36,8 @@ import {
 } from "@/lib/quoteTelemetry";
 
 type ChatPanelProps = {
+  /** Retained for callers (WorkspaceShell hands it down); the composer-only
+      surface no longer varies by section since the starter prompts left. */
   activeSection: WorkspaceSection;
   portfolio?: PortfolioData | null;
   /**
@@ -188,7 +190,6 @@ function proposalQuote(
 }
 
 export default function ChatPanel({
-  activeSection,
   portfolio,
   isOpen = true,
   seedPrompt = null,
@@ -212,7 +213,6 @@ export default function ChatPanel({
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const atBottomRef = useRef(true);
 
-  const sectionPrompts = quickPromptsBySection[activeSection];
   const isBusy = status === "submitted" || status === "streaming";
 
   // Stick-to-bottom: only auto-scroll while the user is already pinned to the
@@ -250,12 +250,18 @@ export default function ChatPanel({
     scrollToBottom();
   }, [scrollToBottom]);
 
-  const sendMessage = async (prompt: string) => {
+  const sendMessage = async (
+    prompt: string,
+    attachments: ChatImageAttachment[] = [],
+    modelId = "",
+  ) => {
     // One controller per turn: a new send supersedes the previous stream.
     streamAbortRef.current?.abort();
     streamAbortRef.current = new AbortController();
     const cleaned = prompt.trim();
-    if (!cleaned || isBusy) {
+    // An attachment alone is a complete turn: the composer enables Send with no
+    // text once an image is pasted, so an empty prompt must not drop it here.
+    if ((!cleaned && !attachments.length) || isBusy) {
       return;
     }
     // A new turn invalidates any prior model-controlled destructive intent.
@@ -267,6 +273,7 @@ export default function ChatPanel({
       role: "user",
       timestamp: createTimestamp(),
       content: cleaned,
+      ...(attachments.length ? { attachments } : {}),
     };
 
     const conversation: ApiMessage[] = messages.map((message) => ({
@@ -293,8 +300,11 @@ export default function ChatPanel({
     setTurnTools([]);
     setTurnModel(null);
 
+    // A PI command runs a script and never sees an image, so a turn carrying a
+    // pasted image always goes to the assistant rather than silently dropping it.
+    const piCommand = attachments.length ? null : routeToPiPrompt(cleaned);
+
     try {
-      const piCommand = routeToPiPrompt(cleaned);
       if (piCommand) {
         const assistantContent = await requestPiReply(piCommand);
         setStatus("streaming");
@@ -302,7 +312,20 @@ export default function ChatPanel({
           signal: streamAbortRef.current?.signal,
         });
       } else {
-        const turn = await requestAssistantTurn(conversation, cleaned);
+        // The route streams its envelope: `start` lands within milliseconds of
+        // the request, and each tool call lands as the loop completes it. Both
+        // are wired live so a 55s turn reads as alive rather than as a panel
+        // that has stopped responding. R-262.
+        const turn = await requestAssistantTurn(
+          conversation,
+          cleaned,
+          attachments,
+          modelId,
+          (event) => {
+            if (event.type === "start") setStatus("streaming");
+            else setTurnTools((current) => [...current, event.event]);
+          },
+        );
         setTurnTools(turn.toolEvents);
         setTurnModel(turn.model);
         setStatus("streaming");
@@ -317,7 +340,7 @@ export default function ChatPanel({
       }
       setStatus("done");
     } catch (error) {
-      const isPiCommand = Boolean(routeToPiPrompt(cleaned));
+      const isPiCommand = Boolean(piCommand);
       const fallback = isPiCommand ? "PI command failed to run in this session." : fallbackReply(cleaned);
       const errorMessage =
         error instanceof Error
@@ -384,32 +407,12 @@ export default function ChatPanel({
   const lastAssistantId = [...messages].reverse().find((m) => m.role === "assistant")?.id ?? null;
 
   return (
-    <div className="chat-panel">
-      {/* The launcher head is the overlay's single header — ChatPanel no
-          longer renders its own, so the surface reads as one conversation. */}
+    <div className="chat-panel" data-empty={messages.length === 0 ? "true" : undefined}>
+      {/* Composer-only surface (design-lab Variant A): with no messages the
+          panel is just the composer, so the launcher sizes it to content. */}
       <div className="chat-shell">
+          {messages.length ? (
           <div className="chat-transcript-wrap">
-            {messages.length === 0 ? (
-              <div className="chat-empty-state">
-                <div className="chat-empty-state__title">Ask Radon</div>
-                <p className="chat-empty-state__copy">
-                  Flow analysis, scans, risk checks and journal queries. Type a request or pick one.
-                </p>
-                <div className="chat-empty-state__cards">
-                  {sectionPrompts.map((prompt) => (
-                    <button
-                      type="button"
-                      key={prompt}
-                      className="chat-empty-card"
-                      onClick={() => sendMessage(prompt)}
-                    >
-                      <span className="chat-empty-card__slash">/</span>
-                      {prompt}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : (
               <div
                 ref={messagesRef}
                 className="chat-messages"
@@ -442,6 +445,21 @@ export default function ChatPanel({
                           />
                         ) : (
                           <>
+                            {message.attachments?.length ? (
+                              // Same thumbnail treatment the composer used, so
+                              // the operator sees exactly what they sent.
+                              <div className="ask-composer__attachments" aria-label="Attached images">
+                                {message.attachments.map((attachment) => (
+                                  <span key={attachment.id} className="ask-composer__thumb">
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img
+                                      src={`data:${attachment.mediaType};base64,${attachment.data}`}
+                                      alt={attachment.name || "Pasted image"}
+                                    />
+                                  </span>
+                                ))}
+                              </div>
+                            ) : null}
                             <MarkdownRenderer content={message.content} />
                             {isStreamingThis ? (
                               <span className="chat-cursor" aria-hidden="true" />
@@ -458,7 +476,6 @@ export default function ChatPanel({
                   );
                 })}
               </div>
-            )}
 
             <button
               type="button"
@@ -472,6 +489,7 @@ export default function ChatPanel({
               Latest
             </button>
           </div>
+          ) : null}
 
           {lastError ? <div className="chat-error">{lastError}</div> : null}
 
@@ -511,24 +529,12 @@ export default function ChatPanel({
           ) : null}
 
           <div className="chat-composer">
-            {messages.length ? (
-              <div className="chat-pills">
-                {sectionPrompts.map((prompt) => (
-                  <button
-                    type="button"
-                    key={prompt}
-                    onClick={() => sendMessage(prompt)}
-                    className="pill-chip"
-                  >
-                    / {prompt}
-                  </button>
-                ))}
-              </div>
-            ) : null}
             <AskComposer
               busy={isBusy}
               focusKey={isOpen}
-              onSubmit={(text) => void sendMessage(text)}
+              onSubmit={(text, modelId, attachments) =>
+                void sendMessage(text, attachments, modelId)
+              }
             />
           </div>
         </div>

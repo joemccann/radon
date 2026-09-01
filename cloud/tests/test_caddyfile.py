@@ -1,6 +1,7 @@
 """Tests for caddy/Caddyfile configuration."""
 
 import contextlib
+import errno
 import http.server
 import os
 import re
@@ -9,6 +10,7 @@ import socket
 import subprocess
 import threading
 import time
+import urllib.error
 import urllib.request
 
 import pytest
@@ -69,17 +71,34 @@ class TestRouting:
     def test_websocket_route_to_8765(self, caddy_dir):
         content = read_caddyfile(caddy_dir)
         assert re.search(r"handle\s+/ws\*", content)
-        assert "localhost:8765" in content
+        assert "127.0.0.1:8765" in content
+
+    def test_headlines_websocket_before_generic_ws(self, caddy_dir):
+        content = read_caddyfile(caddy_dir)
+        active = "\n".join(
+            line for line in content.splitlines() if not line.lstrip().startswith("#")
+        )
+        headlines = active.find("handle /ws-headlines")
+        generic = active.find("handle /ws*")
+        assert headlines != -1, "Caddy must proxy /ws-headlines"
+        assert generic != -1
+        assert headlines < generic, "/ws-headlines must win over /ws*"
+        assert "handle /ws-headlines*" not in active
+        # 127.0.0.1, not the localhost hostname, per
+        # test_reverse_proxy_does_not_dial_localhost_hostname. #169 shipped
+        # both assertions and they contradicted each other; the loopback
+        # literal wins, as it does in every other block in this file.
+        assert "127.0.0.1:8766" in active
 
     def test_api_ib_route_to_8321(self, caddy_dir):
         content = read_caddyfile(caddy_dir)
         assert re.search(r"handle_path\s+/api/ib/\*", content)
-        assert "localhost:8321" in content
+        assert "127.0.0.1:8321" in content
 
     def test_default_route_to_3000(self, caddy_dir):
         content = read_caddyfile(caddy_dir)
         assert re.search(r"handle\s*\{", content, re.MULTILINE)
-        assert "localhost:3000" in content
+        assert "127.0.0.1:3000" in content
 
     def test_handle_path_used_for_api_ib(self, caddy_dir):
         content = read_caddyfile(caddy_dir)
@@ -88,6 +107,26 @@ class TestRouting:
         assert match.group(1) == "handle_path", (
             "/api/ib/* must use handle_path (not handle) for prefix stripping"
         )
+
+    def test_reverse_proxy_does_not_dial_localhost_hostname(self, caddy_dir):
+        # `localhost` prefers ::1. Relay binds 127.0.0.1:8765 only, so
+        # reverse_proxy localhost:8765 502s with connection refused. Same
+        # trap hit [::1]:3000 during nextjs restarts (2026-08-25).
+        content = read_caddyfile(caddy_dir)
+        stripped = re.sub(r"(?m)^\s*#.*$", "", content)
+        assert not re.search(r"reverse_proxy\s+localhost:", stripped), (
+            "reverse_proxy must dial 127.0.0.1, not localhost"
+        )
+
+    def test_edge_health_status_maps_dial_errors_to_200(self, caddy_dir):
+        content = read_caddyfile(caddy_dir)
+        block = reverse_proxy_block(content, "127.0.0.1:8330")
+        assert "handle_response" in block
+        assert "handle_errors" in content
+        assert "@edge_health_err" in content
+        ws_block = content.split("handle /ws*", 1)[1].split("handle_path", 1)[0]
+        assert "handle_errors" not in ws_block
+        assert '{"reachable":false,"observer":"caddy"}' in content
 
 
 class TestRetiredBetaStack:
@@ -179,6 +218,11 @@ CADDY_DEFAULT_TRY_INTERVAL_SECONDS = 0.25
 # attempts across the window.
 MAX_RETRY_INTERVAL_SECONDS = 1.0
 
+# The Next.js app and the FastAPI IB surface. Both are dialled from more than
+# one place in the Caddyfile, so the tests name them once.
+APP_UPSTREAM = "127.0.0.1:3000"
+IB_UPSTREAM = "127.0.0.1:8321"
+
 
 def strip_comments(content):
     """Drop Caddyfile `#` comments, leaving quoted and backticked literals alone.
@@ -203,25 +247,17 @@ def strip_comments(content):
     return "\n".join(kept)
 
 
-def reverse_proxy_block(content, upstream):
-    """Return the body of the `reverse_proxy <upstream>` block, '' if inline.
+def _balanced_block(text, start):
+    """The `{...}` run beginning at `start`, brace-balanced and quote-aware.
 
-    Brace-balanced (the health block nests `handle_response`) and
-    quote-aware (it responds with a JSON literal full of braces), so a setting
-    can only satisfy or trip an assertion from inside the block it belongs to.
+    Quote-aware because the health block responds with a JSON literal full of
+    braces, so a setting can only satisfy or trip an assertion from inside the
+    block it belongs to.
     """
-    active = strip_comments(content)
-    directive = re.search(r"reverse_proxy\s+" + re.escape(upstream) + r"\b", active)
-    assert directive, f"no reverse_proxy directive for {upstream}"
-    rest = active[directive.end():]
-    opener = re.match(r"[^\S\n]*\{", rest)
-    if not opener:
-        return ""
-    start = opener.end() - 1
     depth = 0
     quote = None
-    for index in range(start, len(rest)):
-        char = rest[index]
+    for index in range(start, len(text)):
+        char = text[index]
         if quote is not None:
             if char == quote:
                 quote = None
@@ -232,8 +268,47 @@ def reverse_proxy_block(content, upstream):
         elif char == "}":
             depth -= 1
             if depth == 0:
-                return rest[start:index + 1]
-    raise AssertionError(f"unbalanced braces in the reverse_proxy {upstream} block")
+                return text[start:index + 1]
+    raise AssertionError("unbalanced braces")
+
+
+def reverse_proxy_block(content, upstream):
+    """Return the body of the `reverse_proxy <upstream>` block, '' if inline."""
+    active = strip_comments(content)
+    directive = re.search(r"reverse_proxy\s+" + re.escape(upstream) + r"\b", active)
+    assert directive, f"no reverse_proxy directive for {upstream}"
+    rest = active[directive.end():]
+    opener = re.match(r"[^\S\n]*\{", rest)
+    if not opener:
+        return ""
+    return _balanced_block(rest, opener.end() - 1)
+
+
+def handle_block(content, matcher=None):
+    """Body of a `handle` block, selected by its matcher; None = the catch-all.
+
+    Two `handle` blocks now dial 127.0.0.1:3000 — the `/api/assistant*` one
+    (R-262) and the catch-all everything else rides — so an assertion about
+    "the app proxy" has to say which one it means instead of taking whichever
+    `reverse_proxy 127.0.0.1:3000` appears first in the file.
+    """
+    active = strip_comments(content)
+    pattern = r"handle\s*\{" if matcher is None else r"handle\s+" + re.escape(matcher) + r"\s*\{"
+    match = re.search(pattern, active)
+    assert match, f"no handle block for matcher {matcher!r}"
+    return _balanced_block(active, match.end() - 1)
+
+
+def proxy_block(content, upstream):
+    """The proxy block for an upstream, disambiguating the shared app port.
+
+    `127.0.0.1:3000` is scoped to the catch-all `handle`: that is the block
+    every route but `/api/assistant*` rides, and the block R-219's short header
+    timeout and R-220's retry restriction are about.
+    """
+    if upstream == APP_UPSTREAM:
+        return reverse_proxy_block(handle_block(content), upstream)
+    return reverse_proxy_block(content, upstream)
 
 
 def retry_window_seconds(block):
@@ -260,22 +335,22 @@ class TestUpstreamRestartWindow:
     """
 
     def test_app_proxy_retries_across_the_restart_gap(self, caddy_dir):
-        block = reverse_proxy_block(read_caddyfile(caddy_dir), "localhost:3000")
+        block = proxy_block(read_caddyfile(caddy_dir), APP_UPSTREAM)
         assert retry_window_seconds(block) >= MIN_RETRY_WINDOW_SECONDS, (
             "the app upstream has no retry window that outlasts a radon-nextjs "
             "restart; every request during the deploy gap 502s"
         )
 
     def test_api_proxy_retries_across_the_restart_gap(self, caddy_dir):
-        block = reverse_proxy_block(read_caddyfile(caddy_dir), "localhost:8321")
+        block = reverse_proxy_block(read_caddyfile(caddy_dir), "127.0.0.1:8321")
         assert retry_window_seconds(block) >= MIN_RETRY_WINDOW_SECONDS, (
             "the /api/ib/* upstream has no retry window that outlasts a "
             "radon-api restart; ws-ticket calls 502 through every deploy"
         )
 
-    @pytest.mark.parametrize("upstream", ["localhost:3000", "localhost:8321"])
+    @pytest.mark.parametrize("upstream", ["127.0.0.1:3000", "127.0.0.1:8321"])
     def test_retry_interval_re_dials_across_the_gap(self, caddy_dir, upstream):
-        block = reverse_proxy_block(read_caddyfile(caddy_dir), upstream)
+        block = proxy_block(read_caddyfile(caddy_dir), upstream)
         interval = retry_interval_seconds(block)
         assert 0 < interval <= MAX_RETRY_INTERVAL_SECONDS, (
             f"lb_try_interval {interval}s on {upstream} is too coarse: the "
@@ -306,9 +381,9 @@ class TestSingleUpstreamStaysInThePool:
     proxy block so the warning comment itself neither satisfies nor trips it.
     """
 
-    @pytest.mark.parametrize("upstream", ["localhost:3000", "localhost:8321"])
+    @pytest.mark.parametrize("upstream", ["127.0.0.1:3000", "127.0.0.1:8321"])
     def test_no_fail_duration_on_the_single_upstream_blocks(self, caddy_dir, upstream):
-        block = reverse_proxy_block(read_caddyfile(caddy_dir), upstream)
+        block = proxy_block(read_caddyfile(caddy_dir), upstream)
         assert "fail_duration" not in block, (
             f"reverse_proxy {upstream} sets fail_duration: the only upstream "
             "gets marked down on the first refused dial of a deploy restart, "
@@ -330,10 +405,73 @@ class _RestoredUpstream(http.server.BaseHTTPRequestHandler):
         pass
 
 
-def free_port():
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
+@contextlib.contextmanager
+def held_port():
+    """Reserve an ephemeral port and KEEP it bound for the caller's lifetime.
+
+    Binding, closing and returning the bare number leaves a TOCTOU window: the
+    number is unowned from that moment until the test finally uses it, and the
+    kernel hands it to whatever binds next. Two concurrent edge tests then draw
+    the same port and one of them dies on EADDRINUSE. Holding the socket keeps
+    the reservation for as long as the test needs it.
+
+    A test that needs the port to REFUSE connections (a stopped unit, not a
+    wedged one) has to give the reservation up first -- on darwin a
+    bound-but-unlistening socket swallows the SYN instead of resetting it -- so
+    use `release_to_peer` at the point the gap has to start, not at draw time.
+    """
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    try:
+        yield sock
+    finally:
+        sock.close()
+
+
+def port_of(sock):
+    return sock.getsockname()[1]
+
+
+def release_to_peer(sock):
+    """Give the reservation up at the last possible moment.
+
+    For a peer that has to bind the port itself (caddy), which cannot be handed
+    an already-bound socket.
+    """
+    port = port_of(sock)
+    sock.close()
+    return port
+
+
+def serve_on(sock, handler):
+    """Start a ThreadingHTTPServer on the ALREADY-BOUND socket from `held_port`.
+
+    The reservation is handed straight to the server, so the port is never
+    unowned between the draw and the listen.
+    """
+    server = http.server.ThreadingHTTPServer(
+        sock.getsockname()[:2], handler, bind_and_activate=False
+    )
+    server.socket.close()
+    server.socket = sock
+    server.server_name, server.server_port = sock.getsockname()
+    server.server_activate()
+    threading.Thread(
+        target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True
+    ).start()
+    return server
+
+
+def stop_serving(server):
+    """Stop the loop AND close the listener.
+
+    `shutdown()` alone only ends `serve_forever`; the listening socket stays
+    open for the rest of the pytest process.
+    """
+    with contextlib.suppress(Exception):
+        server.shutdown()
+    with contextlib.suppress(Exception):
+        server.server_close()
 
 
 def wait_for_listener(port, deadline):
@@ -365,62 +503,103 @@ class TestRestartWindowMechanism:
     def test_request_during_an_upstream_gap_is_served_not_502ed(
         self, caddy_dir, tmp_path
     ):
-        upstream_port = free_port()
-        proxy_port = free_port()
-        proxied = reverse_proxy_block(read_caddyfile(caddy_dir), "localhost:3000")
-        config = tmp_path / "Caddyfile"
-        config.write_text(
-            "{\n\tadmin off\n\tgrace_period 10s\n}\n\n"
-            f"http://127.0.0.1:{proxy_port} {{\n"
-            "\thandle {\n"
-            f"\t\treverse_proxy 127.0.0.1:{upstream_port} {proxied}\n"
-            "\t}\n}\n"
-        )
+        proxied = proxy_block(read_caddyfile(caddy_dir), APP_UPSTREAM)
+        order = []
+        request_issued = threading.Event()
 
-        caddy = subprocess.Popen(
-            [CADDY_BIN, "run", "--config", str(config), "--adapter", "caddyfile"],
-            env={
-                **os.environ,
-                "XDG_DATA_HOME": str(tmp_path / "data"),
-                "XDG_CONFIG_HOME": str(tmp_path / "config"),
-            },
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        upstream = []
-        try:
-            assert wait_for_listener(proxy_port, time.monotonic() + 10), (
-                "caddy never started listening"
+        with held_port() as upstream_sock, held_port() as proxy_sock:
+            # Both ports stay reserved across the slow setup below; each is
+            # released only at the instant its owner needs it.
+            upstream_port = port_of(upstream_sock)
+            proxy_port = release_to_peer(proxy_sock)
+            config = tmp_path / "Caddyfile"
+            config.write_text(
+                "{\n\tadmin off\n\tgrace_period 10s\n}\n\n"
+                f"http://127.0.0.1:{proxy_port} {{\n"
+                "\thandle {\n"
+                f"\t\treverse_proxy 127.0.0.1:{upstream_port} {proxied}\n"
+                "\t}\n}\n"
             )
 
-            # Nothing is listening on the upstream port yet -- exactly what
-            # radon-nextjs looks like between systemd's stop and `next start`.
-            def serve_after_the_gap():
-                time.sleep(1.5)
-                server = http.server.ThreadingHTTPServer(
-                    ("127.0.0.1", upstream_port), _RestoredUpstream
+            caddy = subprocess.Popen(
+                [CADDY_BIN, "run", "--config", str(config), "--adapter", "caddyfile"],
+                env={
+                    **os.environ,
+                    "XDG_DATA_HOME": str(tmp_path / "data"),
+                    "XDG_CONFIG_HOME": str(tmp_path / "config"),
+                },
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            upstream = []
+            try:
+                assert wait_for_listener(proxy_port, time.monotonic() + 10), (
+                    "caddy never started listening"
                 )
-                upstream.append(server)
-                server.serve_forever(poll_interval=0.05)
 
-            threading.Thread(target=serve_after_the_gap, daemon=True).start()
+                # The gap starts here: the reservation is given up so the port
+                # REFUSES connections, exactly what radon-nextjs looks like
+                # between systemd's stop and `next start`.
+                release_to_peer(upstream_sock)
+                with socket.socket() as probe:
+                    probe.settimeout(0.5)
+                    refusal = probe.connect_ex(("127.0.0.1", upstream_port))
+                assert refusal == errno.ECONNREFUSED, (
+                    f"the upstream port answered connect_ex with {refusal} "
+                    f"({errno.errorcode.get(refusal, '?')}), not ECONNREFUSED: "
+                    "this is a wedged upstream, not the restart gap, and a SYN "
+                    "the kernel merely swallows gets retransmitted onto the "
+                    "restored listener with no retry loop involved"
+                )
 
-            started = time.monotonic()
-            with urllib.request.urlopen(
-                f"http://127.0.0.1:{proxy_port}/admin", timeout=30
-            ) as response:
-                status, body = response.status, response.read()
-            waited = time.monotonic() - started
+                def serve_after_the_gap():
+                    request_issued.wait(30)
+                    # Hold the gap open across several lb_try_interval re-dials
+                    # so the retry loop must actually run. A stimulus, not a
+                    # bound on the behaviour being asserted.
+                    time.sleep(retry_interval_seconds(proxied) * 4)
+                    server = http.server.ThreadingHTTPServer(
+                        ("127.0.0.1", upstream_port), _RestoredUpstream
+                    )
+                    upstream.append(server)
+                    order.append("upstream-listening")
+                    server.serve_forever(poll_interval=0.05)
 
-            assert status == 200, f"upstream gap surfaced as HTTP {status}"
-            assert body == b"admin", body
-            assert waited >= 1.0, (
-                f"answered in {waited:.2f}s -- the request cannot have waited "
-                "out the gap, so this is not the retry path"
-            )
-        finally:
-            for server in upstream:
-                with contextlib.suppress(Exception):
-                    server.shutdown()
-            caddy.terminate()
-            caddy.wait(timeout=10)
+                threading.Thread(target=serve_after_the_gap, daemon=True).start()
+
+                order.append("request-issued")
+                request_issued.set()
+                try:
+                    with urllib.request.urlopen(
+                        f"http://127.0.0.1:{proxy_port}/admin",
+                        # Safety net only, and derived: the edge's own retry
+                        # window plus the drain it exists to cover.
+                        timeout=retry_window_seconds(proxied)
+                        + SHUTDOWN_GRACE_SECONDS,
+                    ) as response:
+                        status, body = response.status, response.read()
+                except urllib.error.HTTPError as exc:
+                    pytest.fail(
+                        f"the upstream gap surfaced as HTTP {exc.code}: the "
+                        "edge forwarded the restart straight to the browser "
+                        "instead of riding it out"
+                    )
+                order.append("response")
+
+                assert status == 200, f"upstream gap surfaced as HTTP {status}"
+                assert body == b"admin", body
+                # The ordering fact, not an elapsed float: the request was in
+                # flight while the port refused connections, and it was
+                # answered only after the upstream came back. An elapsed bound
+                # is calibrated to the stub's sleep and to host load, so it
+                # reds on a slow machine and greens on a fast wrong one.
+                assert order == [
+                    "request-issued",
+                    "upstream-listening",
+                    "response",
+                ], f"the 200 did not come from the retry path: {order}"
+            finally:
+                for server in upstream:
+                    stop_serving(server)
+                caddy.terminate()
+                caddy.wait(timeout=10)

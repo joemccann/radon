@@ -19,15 +19,24 @@ from __future__ import annotations
 
 import asyncio
 import fcntl
+import ipaddress
+import json
 import logging
 import os
 import re
 import signal
 import shutil
+import ssl
+import threading
+import time
+import urllib.error
+import urllib.request
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
+from urllib.parse import urlparse
 
 logger = logging.getLogger("radon.services")
 
@@ -98,6 +107,19 @@ def is_valid_unit(unit: str) -> bool:
     same rule. Anything outside this pattern is rejected at the boundary.
     """
     return unit not in _INTERNAL_UNITS and bool(_UNIT_PATTERN.match(unit))
+
+
+def host_role() -> str:
+    """RADON_HOST_ROLE for this process. Unset or garbage is combined."""
+    raw = (os.environ.get("RADON_HOST_ROLE") or "combined").strip().strip("\"'")
+    if raw in {"app", "broker", "combined"}:
+        return raw
+    return "combined"
+
+
+_HETZNER_PRIVATE = ipaddress.ip_network("10.0.0.0/16")
+REMOTE_VERBS = frozenset({"start", "stop", "restart", "reset-lease", "status"})
+
 
 
 def is_systemd_available() -> bool:
@@ -285,6 +307,34 @@ async def show_unit(unit: str) -> UnitStatus:
     if not is_valid_unit(unit):
         return UnitStatus(unit, "rejected", "unknown", "unknown", "", can_control=False)
 
+    # App FastAPI runs in a container with no systemctl. Gateway status still
+    # comes from the broker daemon over mTLS.
+    if unit == GATEWAY_UNIT and host_role() == "app":
+        status = UnitStatus(
+            unit,
+            load_state="remote",
+            active_state="unknown",
+            sub_state="unknown",
+            description="IB Gateway on broker",
+            can_control=False,
+        )
+        if not is_remote_gateway_configured():
+            return status
+        remote = await remote_gateway_action("status")
+        status.can_control = True
+        if "transition-pending" in remote.detail:
+            # REL-172 (R-475): mid-restart on the broker. `activating` is what
+            # gatewayPowerState reads as transitional, so Start stays disarmed.
+            status.active_state = "activating"
+            status.sub_state = "transition-pending"
+        elif remote.ok and "running" in remote.detail:
+            status.active_state = "active"
+            status.sub_state = "running"
+        elif "stopped" in remote.detail:
+            status.active_state = "inactive"
+            status.sub_state = "dead"
+        return status
+
     if not is_systemd_available():
         return UnitStatus(
             unit,
@@ -369,6 +419,184 @@ GATEWAY_CONTROL_TIMEOUT_S = 120.0
 GATEWAY_LEASE_HELD_RC = 75
 GATEWAY_CONTROL_BUSY_RC = 74
 PROCESS_TERM_GRACE_S = 1.0
+# REL-171 (R-499): deadlines on the remote path are monotonic. The broker
+# helper runs under HELPER_TIMEOUT_S = 120 (scripts/ib_gateway_remote/serve.py);
+# this budget must outlive it plus the mTLS round trip, and the Next routes
+# (web/app/api/admin/**) must outlive this. Literals on purpose: both tests
+# (test_services.py, web/tests/admin-remote-timeouts.test.ts) parse them.
+REMOTE_TIMEOUT_S = 135.0
+# REL-171 (R-474): the status probe backs a 5s UI poll. It gets its own short
+# socket timeout, one in-flight probe per process (later polls coalesce onto
+# it instead of stacking executor threads) and a brief result cache.
+REMOTE_STATUS_TIMEOUT_S = 5.0
+REMOTE_STATUS_CACHE_S = 2.0
+# ActionResult.returncode sentinels for the remote path (R-500): a dead mTLS
+# link is a gateway timeout, a malformed broker reply is a bad gateway —
+# never the -1 "caller error" bucket the route maps to 400.
+REMOTE_UNREACHABLE_RC = 504
+REMOTE_BAD_REPLY_RC = 502
+
+
+def _remote_url_allowed(url: str) -> bool:
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or parsed.path not in {"", "/"}:
+        return False
+    host = parsed.hostname or ""
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return addr.is_loopback or addr in _HETZNER_PRIVATE
+
+
+def is_remote_gateway_configured() -> bool:
+    """True when the app host can call the broker daemon over mTLS."""
+    if host_role() != "app":
+        return False
+    url = (os.environ.get("RADON_IB_REMOTE_URL") or "").strip()
+    if not _remote_url_allowed(url):
+        return False
+    ca = Path(os.environ.get("RADON_IB_REMOTE_CA") or "")
+    cert = Path(os.environ.get("RADON_IB_REMOTE_CLIENT_CERT") or "")
+    key = Path(os.environ.get("RADON_IB_REMOTE_CLIENT_KEY") or "")
+    return ca.is_file() and cert.is_file() and key.is_file()
+
+
+def _remote_ssl_context() -> ssl.SSLContext:
+    ctx = ssl.create_default_context(
+        cafile=os.environ["RADON_IB_REMOTE_CA"],
+    )
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    ctx.check_hostname = False
+    ctx.load_cert_chain(
+        os.environ["RADON_IB_REMOTE_CLIENT_CERT"],
+        os.environ["RADON_IB_REMOTE_CLIENT_KEY"],
+    )
+    return ctx
+
+
+def _decode_remote_body(raw: bytes) -> dict:
+    """Broker body -> dict, or a structured failure. Never raises (R-501)."""
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return {"ok": False, "detail": "broker reply is not JSON", "malformed": True}
+    if not isinstance(payload, dict):
+        return {"ok": False, "detail": "broker reply is not an object", "malformed": True}
+    return payload
+
+
+def _remote_http(verb: str, timeout: float) -> tuple[int, dict]:
+    if verb not in REMOTE_VERBS:
+        return -1, {"ok": False, "detail": f"verb not allowed: {verb}"}
+    base = os.environ["RADON_IB_REMOTE_URL"].rstrip("/")
+    path = "/status" if verb == "status" else f"/{verb}"
+    method = "GET" if verb == "status" else "POST"
+    req = urllib.request.Request(base + path, method=method, data=b"" if method == "POST" else None)
+    try:
+        with urllib.request.urlopen(req, context=_remote_ssl_context(), timeout=timeout) as resp:
+            return resp.status, _decode_remote_body(resp.read())
+    except urllib.error.HTTPError as exc:
+        payload = _decode_remote_body(exc.read())
+        payload.setdefault("detail", str(exc))
+        return exc.code, payload
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+        return -1, {"ok": False, "detail": str(exc)}
+
+
+_remote_status_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ib-remote-status")
+_remote_status_guard = threading.Lock()
+_remote_status_inflight: Optional[Future] = None
+_remote_status_cache: Optional[tuple[float, tuple[int, dict]]] = None
+
+
+def _reset_remote_status_cache() -> None:
+    """Test hook: forget the cached probe and the in-flight handle."""
+    global _remote_status_inflight, _remote_status_cache
+    with _remote_status_guard:
+        _remote_status_inflight = None
+        _remote_status_cache = None
+
+
+def _remote_status_future() -> Future:
+    """The one in-flight status probe, started if none is running."""
+    global _remote_status_inflight
+    with _remote_status_guard:
+        if _remote_status_inflight is None or _remote_status_inflight.done():
+            _remote_status_inflight = _remote_status_executor.submit(
+                _remote_http, "status", REMOTE_STATUS_TIMEOUT_S
+            )
+        return _remote_status_inflight
+
+
+async def _remote_status() -> tuple[int, dict]:
+    """Bounded, coalesced, briefly cached broker status (R-474).
+
+    Ten concurrent UI polls against a silently unreachable broker used to
+    stack ten 120s executor threads and starve every other to_thread user.
+    Now one probe is in flight at a time, every caller waits at most
+    REMOTE_STATUS_TIMEOUT_S on it, and a fresh answer is reused for
+    REMOTE_STATUS_CACHE_S.
+    """
+    global _remote_status_cache
+    cached = _remote_status_cache
+    if cached is not None and time.monotonic() - cached[0] < REMOTE_STATUS_CACHE_S:
+        return cached[1]
+    future = _remote_status_future()
+    try:
+        result = await asyncio.wait_for(
+            asyncio.wrap_future(future), timeout=REMOTE_STATUS_TIMEOUT_S + 0.5
+        )
+    except asyncio.TimeoutError:
+        return -1, {
+            "ok": False,
+            "detail": (
+                f"broker status probe exceeded {REMOTE_STATUS_TIMEOUT_S:.0f}s "
+                "(one probe stays in flight; later polls coalesce onto it)"
+            ),
+        }
+    with _remote_status_guard:
+        _remote_status_cache = (time.monotonic(), result)
+    return result
+
+
+def _remote_returncode(payload: dict, status: int) -> int:
+    """``returncode`` from the broker body as an int, or the bad-reply sentinel."""
+    raw = payload.get("returncode")
+    if raw is None or raw == "":
+        return 0 if payload.get("ok") else status
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return REMOTE_BAD_REPLY_RC
+
+
+async def remote_gateway_action(action: str) -> ActionResult:
+    """POST one allowlisted verb to the broker daemon. Never execs the helper."""
+    if action not in REMOTE_VERBS:
+        return ActionResult(GATEWAY_UNIT, action, False, f"action {action!r} is not allowed", -1)
+    if action == "status":
+        status, payload = await _remote_status()
+    else:
+        status, payload = await asyncio.to_thread(_remote_http, action, REMOTE_TIMEOUT_S)
+    if not isinstance(payload, dict):
+        payload = {"ok": False, "detail": "broker reply is not an object", "malformed": True}
+    detail = str(payload.get("detail") or payload.get("state") or payload.get("error") or "")
+    rc = _remote_returncode(payload, status)
+    if status == 409 or rc in {GATEWAY_LEASE_HELD_RC, GATEWAY_CONTROL_BUSY_RC, PUSH_LOCK_HELD_RC}:
+        return ActionResult(GATEWAY_UNIT, action, False, detail, PUSH_LOCK_HELD_RC)
+    ok = bool(payload.get("ok")) or (action == "status" and payload.get("state") in {"running", "stopped"})
+    if ok:
+        return ActionResult(GATEWAY_UNIT, action, True, detail or f"remote {action} HTTP {status}", rc)
+    if status == -1:
+        failure_rc = REMOTE_UNREACHABLE_RC
+    elif payload.get("malformed") or rc in {0, -1}:
+        failure_rc = REMOTE_BAD_REPLY_RC
+    else:
+        failure_rc = rc
+    return ActionResult(GATEWAY_UNIT, action, False, detail or f"remote {action} HTTP {status}", failure_rc)
+
+
 OPERATOR_CLI_PATH = "/usr/local/bin/radon"
 OPERATOR_UNIT_TIMEOUT_S = 75.0
 # Shared with radon-cloud deploy/operator control so admin mutations never
@@ -494,6 +722,16 @@ def is_gateway_control_available() -> bool:
 
 async def _control_gateway(action: str) -> ActionResult:
     """Delegate Gateway lifecycle to the helper that owns lease acquisition."""
+    if host_role() == "app":
+        if not is_remote_gateway_configured():
+            return ActionResult(
+                GATEWAY_UNIT,
+                action,
+                False,
+                "RADON_HOST_ROLE=app. Gateway lifecycle is on the broker.",
+                -1,
+            )
+        return await remote_gateway_action(action)
     if not is_gateway_control_available():
         return ActionResult(
             GATEWAY_UNIT,

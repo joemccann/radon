@@ -8,7 +8,9 @@ while HYG is down.
 Sources, in order (never skip ahead):
   1. Interactive Brokers — Stock('HYG','SMART','USD'), Index('SPX','CBOE')
   2. Unusual Whales — OHLC for HYG. Does not serve the SPX index.
-  3. Yahoo Finance — last resort for remaining gaps.
+  3. Robinhood (official trading MCP, read-only) — equity historicals for
+     HYG when configured. Does not serve the SPX index.
+  4. Yahoo Finance — ABSOLUTE LAST RESORT for remaining gaps.
 
 ICE CCC OAS is not stored.
 
@@ -64,6 +66,7 @@ HYG_SYMBOL = "HYG"
 SPX_SYMBOL = "SPX"
 YAHOO_SYMBOLS = {HYG_SYMBOL: "HYG", SPX_SYMBOL: "^GSPC"}
 UW_SKIP = frozenset({SPX_SYMBOL})
+RH_SKIP = frozenset({SPX_SYMBOL})  # Robinhood equity historicals: no indices
 CREDIT_IB_HISTORY_CLIENT_IDS = (56, 69)
 
 _PERIOD1 = int(datetime(2007, 4, 11, tzinfo=timezone.utc).timestamp())
@@ -165,7 +168,7 @@ def fetch_ib_closes(tickers: list[str]) -> dict[str, dict[str, float]]:
     auth_state = _ib_auth_state()
     if auth_state and auth_state != "authenticated":
         print(
-            f"  IB skipped — gateway auth_state={auth_state} (falling back to UW/Yahoo)",
+            f"  IB skipped — gateway auth_state={auth_state} (falling back to UW/RH/Yahoo)",
             file=sys.stderr,
         )
         return {}
@@ -267,17 +270,47 @@ def fetch_uw_closes(tickers: list[str]) -> dict[str, dict[str, float]]:
     return results
 
 
+def _robinhood_degradation(sources: dict[str, str]) -> Optional[dict[str, Any]]:
+    """Heartbeat detail when the Robinhood rung failed and Yahoo served (REL-174)."""
+    try:
+        from clients.robinhood_client import robinhood_degradation
+    except ImportError:
+        return None
+    return robinhood_degradation(SERVICE, sources, skip=RH_SKIP)
+
+
+def fetch_rh_closes(tickers: list[str]) -> dict[str, dict[str, float]]:
+    """Robinhood daily closes (read-only MCP). Indices (SPX) are skipped.
+
+    Ranked after IB and UW, before Yahoo. Unconfigured hosts return {}
+    without any network I/O so the ladder falls through to Yahoo.
+    """
+    fetchable = [t for t in tickers if t not in RH_SKIP]
+    if not fetchable:
+        return {}
+    try:
+        from clients.robinhood_client import fetch_robinhood_closes
+    except ImportError:
+        return {}
+    return fetch_robinhood_closes(fetchable)
+
+
 def fetch_closes(
     tickers: Optional[list[str]] = None,
     *,
     fetch_ib: Optional[FetchCloses] = None,
     fetch_uw: Optional[FetchCloses] = None,
+    fetch_rh: Optional[FetchCloses] = None,
     fetch_yahoo: Optional[FetchCloses] = None,
 ) -> tuple[dict[str, dict[str, float]], dict[str, str]]:
-    """IB first, then UW for gaps, then Yahoo. Yahoo is never called on a hit."""
+    """IB first, then UW for gaps, then Robinhood, then Yahoo.
+
+    Yahoo is never called on a hit from any higher rung.
+    """
     wanted = list(tickers or [HYG_SYMBOL, SPX_SYMBOL])
     ib_fn = fetch_ib or fetch_ib_closes
     uw_fn = fetch_uw or fetch_uw_closes
+    rh_fn = fetch_rh or fetch_rh_closes
     yahoo_fn = fetch_yahoo or fetch_yahoo_closes
 
     closes: dict[str, dict[str, float]] = {}
@@ -294,6 +327,13 @@ def fetch_closes(
             if series:
                 closes[ticker] = series
                 sources[ticker] = "uw"
+
+    missing = [t for t in wanted if t not in closes]
+    if missing:
+        for ticker, series in rh_fn(missing).items():
+            if series:
+                closes[ticker] = series
+                sources[ticker] = "rh"
 
     missing = [t for t in wanted if t not in closes]
     if missing:
@@ -487,6 +527,8 @@ def persist_result(
     payload: dict[str, Any],
     rows_changed_rows: list[dict[str, Any]],
     health_error: Optional[dict[str, Any]] = None,
+    *,
+    degraded: Optional[dict[str, Any]] = None,
 ) -> None:
     """Dual-write: Turso rows + snapshot + heartbeat, then the JSON fallback.
 
@@ -507,11 +549,15 @@ def persist_result(
     if rows_changed_rows:
         writer.upsert_credit_spread_rows(rows_changed_rows, recorded_at=scan_time)
     writer.upsert_scan_snapshot(SERVICE, scan_time, payload)
+    # REL-174 (R-470): `degraded` rides on an `ok` row — the writer succeeded
+    # (writer-state semantics), but a closed Robinhood rung that demoted a
+    # ticker to Yahoo is named in last_error instead of hidden under
+    # `ok`/`yahoo`. It clears on the next clean cycle.
     writer.record_service_health(
         SERVICE,
         "ok" if health_error is None else "error",
         finished_at=scan_time,
-        error=health_error,
+        error=health_error if health_error is not None else degraded,
     )
     _write_json_cache(payload)
 
@@ -557,14 +603,16 @@ def _read_cached_series() -> list[dict[str, Any]]:
 
 
 def _serve_cached(cached: list[dict[str, Any]]) -> dict[str, Any]:
-    """IB, UW and Yahoo all down: re-serve the cache as stale_source, page.
+    """IB, UW, Robinhood and Yahoo all down: re-serve the cache as stale_source, page.
 
     R-098: `source="none"` used to live only in payload["source"], which
     nothing consumed; the row heartbeated ok off the cached series and the
     panel rendered it as current.
     """
     if not cached:
-        raise RuntimeError(f"{SERVICE}: IB, UW and Yahoo all failed with no cached series")
+        raise RuntimeError(
+            f"{SERVICE}: IB, UW, Robinhood and Yahoo all failed with no cached series"
+        )
     payload = {**build_output(cached, source=NO_SOURCE), "status": STATUS_STALE_SOURCE}
     through = payload["current"]["date"]
     print(
@@ -573,7 +621,7 @@ def _serve_cached(cached: list[dict[str, Any]]) -> dict[str, Any]:
     )
     health_error = {
         "message": (
-            f"{SERVICE}: every source failed (IB, UW, Yahoo); serving the "
+            f"{SERVICE}: every source failed (IB, UW, Robinhood, Yahoo); serving the "
             f"cached series through {through}"
         ),
         "class": "source_down",
@@ -590,7 +638,7 @@ def run() -> dict[str, Any]:
     `service_health`. The whole body is inside the health-reporting block
     (docs/operations.md) so an outage is recorded, not merely silent.
     """
-    print(f"[{SERVICE}] fetching HYG and SPX (IB → UW → Yahoo)", file=sys.stderr)
+    print(f"[{SERVICE}] fetching HYG and SPX (IB → UW → RH → Yahoo)", file=sys.stderr)
     try:
         closes, sources = fetch_closes()
         cached = _read_cached_series()
@@ -608,7 +656,7 @@ def run() -> dict[str, Any]:
             print(f"[{SERVICE}] source unchanged; refreshing snapshot only", file=sys.stderr)
 
         payload = build_output(series, source=source, source_by_ticker=sources)
-        persist_result(payload, new_rows)
+        persist_result(payload, new_rows, degraded=_robinhood_degradation(sources))
     except Exception as exc:
         _record_error_health(f"{SERVICE}: {exc}", "cycle_failed")
         raise

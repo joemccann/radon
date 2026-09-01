@@ -500,6 +500,18 @@ def _merge_covered_call_groups(groups: dict) -> dict:
     return merged
 
 
+def _position_basis_source(formatted_legs: list) -> Optional[str]:
+    """`session_fills` only when EVERY leg is; `mixed` when they disagree."""
+    if not formatted_legs:
+        return None
+    sources = {leg.get("basis_source") for leg in formatted_legs}
+    if sources == {"session_fills"}:
+        return "session_fills"
+    if "session_fills" in sources:
+        return "mixed"
+    return None
+
+
 def collapse_positions(positions: list) -> list:
     """
     Collapse individual legs into multi-leg structures.
@@ -622,6 +634,17 @@ def collapse_positions(positions: list) -> list:
                 "market_price_is_calculated": bool(leg.get('marketPriceIsCalculated'))
             })
         
+        # R-374 / T-253: `mixed` means one leg carries today's session VWAP
+        # while another keeps IB's lagged avgCost, so `total_entry_cost` — and
+        # `max_risk`, which Gate 3 sizes the bankroll cap off — describe a
+        # trade that was never placed. Naming the blend was not enough: refuse
+        # to publish the aggregate at all so the display layer renders no value
+        # rather than presenting a blended basis as fact.
+        position_basis_source = _position_basis_source(formatted_legs)
+        basis_is_blended = position_basis_source == "mixed"
+        if basis_is_blended:
+            max_risk = None
+
         collapsed.append({
             "id": position_id,
             "account_id": account_id,
@@ -632,19 +655,13 @@ def collapse_positions(positions: list) -> list:
             "expiry": expiry,
             "contracts": contracts,
             "direction": direction,
-            "entry_cost": round(total_entry_cost, 2),
+            "entry_cost": None if basis_is_blended else round(total_entry_cost, 2),
             "max_risk": round(max_risk, 2) if max_risk is not None else None,
             "market_value": round(total_market_value, 2) if total_market_value is not None else None,
             "market_price_is_calculated": bool(is_market_price_calculated) if total_market_value is not None else False,
             "ib_daily_pnl": ib_daily_pnl,
             "session_fill_date": session_fill_date,
-            "basis_source": (
-                "session_fills"
-                if formatted_legs and all(
-                    l.get("basis_source") == "session_fills" for l in formatted_legs
-                )
-                else None
-            ),
+            "basis_source": position_basis_source,
             "legs": formatted_legs,
             "kelly_optimal": None,
             "target": None,
@@ -808,27 +825,18 @@ def _session_fill_cover(fill: dict, position_size: float):
     """
     if not fill or position_size == 0:
         return None
-    sign = 1 if position_size > 0 else -1
-    need = abs(float(position_size))
-    picked: list[tuple[float, float]] = []
-    picked_qty = 0.0
-    for lot in reversed(fill.get("lots") or []):
-        try:
-            signed = float(lot["signed_qty"])
-            price = float(lot["per_share"])
-        except (TypeError, ValueError, KeyError):
-            continue
-        if signed == 0 or (1 if signed > 0 else -1) != sign:
-            continue
-        qty = abs(signed)
-        picked.append((qty, price))
-        picked_qty += qty
-        if picked_qty >= need - 1e-9:
-            break
-    if abs(picked_qty - need) > 1e-9:
+    remaining = _session_remaining_from_fills(fill, position_size)
+    if remaining is None:
         return None
-    vwap = sum(qty * price for qty, price in picked) / need
-    entry_cost = need * vwap * 100.0
+    need = abs(float(position_size))
+    vwap = sum(abs(qty) * price for qty, price, _date, _s in remaining) / need
+    try:
+        multiplier = float(fill.get("multiplier") or 100.0)
+    except (TypeError, ValueError):
+        multiplier = 100.0
+    if not math.isfinite(multiplier) or multiplier <= 0:
+        multiplier = 100.0
+    entry_cost = need * vwap * multiplier
     return abs(entry_cost), entry_cost / need
 
 
@@ -845,22 +853,86 @@ def _session_fill_open_date(fill: dict, position_size: float) -> Optional[str]:
     -$9,425 against a -$1,750 total). Overnight inventory or a partial add
     leaves the net short of the live size and returns None.
     """
+    remaining = _session_remaining_from_fills(fill, position_size)
+    if remaining is None:
+        return None
+    dates = [date for _qty, _price, date, _s in remaining if date]
+    if not dates:
+        return None
+    return min(dates)
+
+
+def _session_remaining_from_fills(fill: dict, position_size: float) -> Optional[list]:
+    """FIFO walk: the lots making up the CURRENTLY held inventory, or None.
+
+    ONE coverage decision, read by both the basis override and the open-date
+    override, so they can never disagree (R-348). The two used to differ — the
+    cover matched newest same-sign lots and skipped opposite-sign ones, the
+    open date required NET session qty to equal live size — so an
+    overnight-25-long / sell-25 / rebuy-25 session took today's basis and kept
+    the journal's stale entry_date, measuring Total P&L off today's basis
+    while Today P&L used yesterday's close.
+
+    The walk seeds the queue with the inventory implied at the session open
+    (live size minus the session's net), then applies each session lot in time
+    order: a same-direction lot is added as session inventory, an opposing lot
+    consumes from the front. Returns the remaining lots only when they account
+    for the whole live size AND every one of them came from this session;
+    otherwise None, which leaves IB/journal basis in place.
+
+    A same-session round trip therefore DOES cover: selling the overnight 25
+    and rebuying 25 means the 25 held now really are today's fills.
+    """
     lots = (fill or {}).get("lots") or []
     if not lots or not position_size:
         return None
-    net = 0.0
-    dates: list[str] = []
-    for lot in lots:
-        try:
-            net += float(lot["signed_qty"])
-        except (TypeError, ValueError, KeyError):
-            return None
-        date = lot.get("date")
-        if date:
-            dates.append(date)
-    if abs(net - float(position_size)) > 1e-9 or not dates:
+    try:
+        parsed = [
+            (float(lot["signed_qty"]), float(lot["per_share"]), lot.get("date"))
+            for lot in lots
+        ]
+    except (TypeError, ValueError, KeyError):
         return None
-    return min(dates)
+
+    live = float(position_size)
+    sign = 1.0 if live > 0 else -1.0
+    net = sum(qty for qty, _price, _date in parsed)
+    opening = live - net
+
+    # queue entries: [signed_qty, per_share, date, from_session]
+    queue: list[list] = []
+    if abs(opening) > 1e-9:
+        if (1.0 if opening > 0 else -1.0) != sign:
+            # Opening inventory on the other side of the live position: the
+            # walk cannot describe it, so leave existing basis alone.
+            return None
+        queue.append([opening, None, None, False])
+
+    for qty, price, date in parsed:
+        if qty == 0:
+            continue
+        if (1.0 if qty > 0 else -1.0) == sign:
+            queue.append([qty, price, date, True])
+            continue
+        remaining = abs(qty)
+        while remaining > 1e-9 and queue:
+            head = queue[0]
+            available = abs(head[0])
+            take = min(available, remaining)
+            head[0] -= sign * take
+            remaining -= take
+            if abs(head[0]) <= 1e-9:
+                queue.pop(0)
+        if remaining > 1e-9:
+            # Sold more than the walk can account for; the model is wrong.
+            return None
+
+    held = sum(entry[0] for entry in queue)
+    if abs(held - live) > 1e-9:
+        return None
+    if any(not entry[3] for entry in queue):
+        return None
+    return queue
 
 
 def fetch_positions(
@@ -1130,14 +1202,22 @@ def display_portfolio(account: dict, positions: list, collapsed: list = None):
             risk_icon = "✓" if pos['risk_profile'] == 'defined' else "⚠"
             print(f"\n  [{pos['id']}] {pos['ticker']} — {pos['structure']}")
             print(f"      {risk_icon} {pos['risk_profile'].upper()} | {pos['direction']} | {pos['contracts']}x")
-            print(f"      Entry: ${pos['entry_cost']:,.2f}", end="")
+            # `None` = mixed leg basis; there is no aggregate to print.
+            entry_cost = pos['entry_cost']
+            if entry_cost is None:
+                print("      Entry: --- (mixed leg basis)", end="")
+            else:
+                print(f"      Entry: ${entry_cost:,.2f}", end="")
             if pos['max_risk'] is not None:
                 print(f" | Max Risk: ${pos['max_risk']:,.2f}", end="")
             print()
             if pos.get('market_value') is not None:
-                pnl = pos['market_value'] - pos['entry_cost']
-                pnl_pct = (pnl / abs(pos['entry_cost']) * 100) if pos['entry_cost'] != 0 else 0
-                print(f"      Market Value: ${pos['market_value']:,.2f} ({pnl_pct:+.1f}%)")
+                if entry_cost is None:
+                    print(f"      Market Value: ${pos['market_value']:,.2f}")
+                else:
+                    pnl = pos['market_value'] - entry_cost
+                    pnl_pct = (pnl / abs(entry_cost) * 100) if entry_cost != 0 else 0
+                    print(f"      Market Value: ${pos['market_value']:,.2f} ({pnl_pct:+.1f}%)")
             if pos['expiry'] and pos['expiry'] != "N/A":
                 print(f"      Expiry: {pos['expiry']}")
             
@@ -1302,32 +1382,54 @@ def build_fill_basis(fills) -> dict[str, dict]:
         signed = _fill_signed_qty(
             getattr(execution, "side", None), getattr(execution, "shares", 0)
         )
-        price = getattr(execution, "avgPrice", None)
+        # `price` FIRST. IB reports `avgPrice` as the running average over the
+        # ORDER's cumulative quantity, and this lot is weighted by THIS
+        # execution's `shares` — so one order for 25 filling 10 @ $5.00 then
+        # 15 @ $6.00 produced lots (10, 5.00) and (15, 5.60), a vwap of $5.36
+        # against a true $5.60 and an entry_cost of $13,400 against $14,000,
+        # stamped `session_fills` so it outranked IB's avgCost and the
+        # journal. `avgPrice` remains the fallback for a fill that carries no
+        # per-execution price. R-347.
+        price = getattr(execution, "price", None)
         if price is None:
-            price = getattr(execution, "price", None)
+            price = getattr(execution, "avgPrice", None)
         try:
             price_f = float(price)
         except (TypeError, ValueError):
             continue
         if signed == 0 or not math.isfinite(price_f):
             continue
-        buckets.setdefault(key, []).append((_fill_exec_time(fill), signed, price_f))
+        # The contract's own multiplier, not a literal 100 downstream: a
+        # corporate-action-adjusted OCC contract or a mini option is wrong by
+        # the multiplier ratio, and `session_fills` beats the journal's
+        # correct lot basis. R-373.
+        try:
+            multiplier = float(getattr(contract, "multiplier", None) or 100.0)
+        except (TypeError, ValueError):
+            multiplier = 100.0
+        if not math.isfinite(multiplier) or multiplier <= 0:
+            multiplier = 100.0
+        buckets.setdefault(key, []).append(
+            (_fill_exec_time(fill), signed, price_f, multiplier)
+        )
 
     out: dict[str, dict] = {}
     for key, rows in buckets.items():
         rows.sort(key=lambda row: row[0])
         out[key] = {
+            "multiplier": rows[0][3] if rows else 100.0,
             "lots": [
                 {
                     "signed_qty": signed,
                     "per_share": price,
+                    "multiplier": multiplier,
                     # ET trading day, not the host's — a 20:00 ET fill is
                     # already tomorrow in UTC, and `entry_date` is compared
                     # against an ET `today`.
                     "date": _et_date(when),
                 }
-                for when, signed, price in rows
-            ]
+                for when, signed, price, multiplier in rows
+            ],
         }
     return out
 
@@ -1392,7 +1494,17 @@ def convert_to_portfolio_format(account: dict, collapsed_positions: list, pnl_da
     bankroll = account.get('NetLiquidation', account.get('TotalCashValue', 0))
 
     # Calculate totals from collapsed positions
-    total_deployed = sum(p['entry_cost'] for p in collapsed_positions)
+    # A position with a mixed leg basis publishes no entry_cost, so it
+    # contributes nothing to deployed capital rather than a blended figure.
+    # That makes the total an UNDER-statement, which makes
+    # `remaining_capacity_pct` an OVER-statement — the unsafe direction for
+    # Gate 3's 2.5% cap. Count the omissions so the figure is never silently
+    # wrong: a non-zero count means "deployed is a floor, not the number".
+    # T-253.
+    unmeasured_basis_count = len(
+        [p for p in collapsed_positions if p.get('entry_cost') is None]
+    )
+    total_deployed = sum(p['entry_cost'] or 0 for p in collapsed_positions)
     deployed_pct = (total_deployed / bankroll * 100) if bankroll > 0 else 0
 
     # Derive entry_date from journal rows and the previous portfolio snapshot.
@@ -1567,6 +1679,9 @@ def convert_to_portfolio_format(account: dict, collapsed_positions: list, pnl_da
         "total_deployed_pct": round(deployed_pct, 2),
         "total_deployed_dollars": round(total_deployed, 2),
         "remaining_capacity_pct": round(100 - deployed_pct, 2),
+        # >0 means total_deployed_dollars is a FLOOR and remaining_capacity_pct
+        # a CEILING — that many positions have an unmeasurable (mixed) basis.
+        "unmeasured_basis_count": unmeasured_basis_count,
         "position_count": len(collapsed_positions),
         "defined_risk_count": len([p for p in collapsed_positions if p['risk_profile'] == 'defined']),
         "undefined_risk_count": len([p for p in collapsed_positions if p['risk_profile'] != 'defined']),

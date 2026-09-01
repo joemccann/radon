@@ -164,12 +164,19 @@ how this loop improves as the codebase grows.
   the runner clone does not inherit that. Run the full gate FIRST, and if
   it is red, diff the failure set against `ci.yml`'s install line before
   attributing anything to your own changes.
-- 2026-08-16 (remediate): 10 `cloud/tests` cases fail on darwin only —
-  they assert on a `sha256sum` binary macOS does not ship
-  (`shutil.which("sha256sum")` is `None`). They pass in Linux CI. Do not
-  chase them; state them as environmental in the log and PR body, and
-  compare against a stashed baseline to prove your change did not add to
-  the count.
+- 2026-08-16 (remediate): `cloud/tests` cases fail on darwin only. They
+  pass in Linux CI. Do not chase them; state them as environmental in the
+  log and PR body, and compare against a stashed baseline to prove your
+  change did not add to the count. **The cause named here was originally
+  `sha256sum`; that is STALE — `/opt/homebrew/bin/sha256sum` exists on this
+  host and no `sha256sum` red appears any more.** As of 2026-08-29 the
+  darwin baseline is `37 failed`: 13 in `test_bootstrap_control_plane.py`
+  (`exec {fd}<>` is bash 4+; `/bin/bash` here is 3.2, so it exits 127), 21
+  in `test_ib_gateway_control.py` (`operator-radon.sh` uses `mapfile`,
+  bash 4+), and 3 in `test_caddy_edge_timeouts.py` (no `caddy` on PATH).
+  `setup_reliability_weekend.sh` now checks both and names the
+  consequence. Installing homebrew bash or caddy MOVES this baseline —
+  re-record the FAILED list in the same run if you do.
 - 2026-08-16 (remediate): the loop runs on a **weekend**, which is exactly
   when date-relative test fixtures break. `previous-close-yahoo-daily-array`
   spaced its bars by calendar days, so "yesterday" was a Saturday and the
@@ -403,3 +410,202 @@ how this loop improves as the codebase grows.
   DISAGREE: one filed `oldestQuoteTimestamp`'s fail-closed aggregation as a defect and another
   listed the same code as clean. The lead resolved it by reading the docstring, which states the
   intent verbatim; file the half that survives and record the rejected half in the row.
+- 2026-08-28 (audit): **reproduce a P0 regression claim by EXECUTING it, not by reading it.** The
+  regression walk claimed REL-094's P0 fix did not hold. Importing the fix's own test seed and
+  running `realized_pnl_by_exec_id` in the lead context took one tool call and turned a plausible
+  agent claim into a verified P0 with exact numbers (`strike=0` -> `{'c1': 4000.0}` against a true
+  `3000.0`, no warning logged). The same move settled the catalog-parity scope claim: importing the
+  test module and calling its own `_health_names_written_by` over `cloud/services/*.timer` returned
+  25-of-54 exactly, matching the agent. Two ad-hoc reimplementations of that resolver first gave 54
+  and then 32 — when a finding is about a test's scope, call the TEST's functions, never your own
+  approximation of them.
+- 2026-08-28 (audit): the delta was 24 commits / 262 files, small enough that seven walks capped at
+  ~12 files each finished in 3-7 minutes with none lost to the stream watchdog. At this size the
+  binding constraint is not agent capacity but DEDUPLICATION: three of the ten highest-severity
+  findings were reached by two walks each (`_run_script_retrying_capacity` from connectivity and
+  error-handling, the vixts route from the indicator and the standing catalog sweep, the flex
+  embargo from state and connectivity). Merge before numbering, as the standing lesson says, and
+  record which walks converged — a defect two independent walks reach is worth more confidence than
+  one walk's P0.
+- 2026-08-28 (audit): **the standing sweeps found a P1 that eight scoped walks structurally could
+  not.** `exit_order_service.py` places a live GTC combo with neither `is_trading_halted()` nor
+  `check_order_limits()` — the only order-placing module in the repo with neither. No walk's file
+  list contained it because it is not in the delta; it is old code the sweep reached by grepping
+  `place_order(` across the tree. Keep running sweep 6 over the WHOLE repo, not the diff. The
+  corollary from 2026-08-26 also held again: verify reachability before rating. This one is
+  launchd-installable and holds a reserved client id but appears in no `cloud/` unit or `*.sh`
+  entry point, so it was filed P1-with-contingency rather than P0.
+- 2026-08-28 (audit): a finding whose severity the lead RAISES needs the reasoning in the row, not
+  just the number. The TWR coverage bound was filed P1 by the walk; reading `perf_twr_builder.py`
+  around it showed the comment at `:1640-1643` justifies the `info` payload severity on the grounds
+  that "the mirror's age is policed by the coverage bound below" — i.e. the one mechanism the
+  severity defers to is the one that fails open. That sentence is what makes it a P0, and it came
+  from reading 25 lines of context the walk had already cited.
+- 2026-08-28 (remediate): **a second weekend loop was running full suites in a sibling clone
+  the whole time** (`radon-weekend/radon-testing`, the testing-weekend cycle). Load average hit
+  58; a `pytest -q` that baselines at 7m36s took over 20 minutes and had to be killed. Check
+  `ps ax | grep -E "vitest run|pytest"` for OTHER clones before planning the gate cadence, and
+  when one is present run the cheap targeted suite per task and batch the full gate at tranche
+  boundaries — three gates for 22 tasks, not 22. Also: run pytest and vitest SEQUENTIALLY even
+  across clones; one vitest file (`stale-option-quote-guard`) failed only under that contention
+  and passed on isolated re-run.
+- 2026-08-28 (remediate): **a finding's acceptance criteria can name a remedy the repo forbids.**
+  R-341 asked for an `ExecStart` flock like `radon-db-backup.service`, but the deploy lock lives
+  at `/home/radon/.radon-deploy.lock` and `cloud/tests/test_root_execution_paths.py` rejects ANY
+  `/home/radon` path in a `User=root` ExecStart — the first implementation went red on exactly
+  that test. Taking the lock in-process with `O_NOFOLLOW` satisfies both and closes a hole the
+  ExecStart form would have left open. Same shape as last week's lesson: test the remedy against
+  the repo's existing assertions first, and when a guard blocks you, read WHY before routing
+  around it.
+- 2026-08-28 (remediate): **the pinned test that goes red can be telling you the fix is wrong in
+  DIRECTION, not just in detail.** REL-127 unified two coverage tests behind "net session qty ==
+  live size", which made `test_close_then_reopen_uses_new_fill_price` fail. It was right: selling
+  the overnight 25 and rebuying 25 means the 25 held now ARE today's fills, so the honest
+  resolution is that BOTH mechanisms cover, not neither. A FIFO walk gives that. When a pinned
+  test contradicts a conservative fix, check whether the conservative answer is actually the
+  correct one before rewriting the test.
+- 2026-08-28 (remediate): **a test that round-trips through `sqlite3` cannot prove a libsql
+  constraint.** R-362 is "ON CONFLICT DO UPDATE command does not affect row a second time"; this
+  runner's SQLite is 3.53.4, which RELAXED that restriction, so the duplicate silently succeeded
+  and the test passed against the UNFIXED writer. Pin what the fix guarantees and what is
+  engine-independent instead — here, the parameters of the emitted statement — and always verify
+  red by stashing the source, never by reasoning that it must be red.
+- 2026-08-28 (remediate): four separate test-authoring bugs cost round trips and all four are
+  mechanical: `_warning(**context)` nests extras under `context` (not top level); importing
+  `lib.twr_math` when the module under test imports `scripts.lib.twr_math` loads a SECOND enum
+  class so every `is` check fails; `monkeypatch.setattr(server.asyncio, "sleep", lambda: asyncio
+  .sleep(0))` recurses because `server.asyncio` IS the global module; and `asyncio.run` consumes
+  a `time.monotonic()` call during loop setup, so a call-counting clock stub hands the wrong
+  value to the code's own `started`. Advance a fake clock from inside the fake work, not by call
+  ordinal.
+- 2026-08-28 (remediate): **say which half of a finding you did not close, in the row and in the
+  PR.** R-320's `strike=600` / `expiry='20260819'` cases are information-theoretically
+  unreachable from journal rows alone, and REL-128's per-ticker in-flight dedupe was deliberately
+  left out as a new shared-mutable-state surface. Both are recorded with the reason rather than
+  quietly dropped, which is the difference between a BLOCKED sub-part and an unnoticed gap.
+- 2026-08-29 (audit): **a walk can be right about the defect and backwards about the mechanism.** The
+  control-plane walk filed the new container drop-ins as invisible to `drift_audit`. Reading
+  `_live_unit_counter` in the lead context showed the opposite and worse: the live side merges
+  `<unit>.d/*.conf` and the repo side does not, so the auditor goes permanently RED on all five app
+  units, and the allowlist (verified: two entries, both `not-installed:radon-llm-index.*`) does not
+  acknowledge them. File the verified reading and record the rejected half IN the row — "drift is
+  invisible" and "drift is permanently red" have opposite fixes, and an allowlist entry would have
+  been the wrong one.
+- 2026-08-29 (audit): **when a fix's anti-recurrence mechanism is free text, audit the text against
+  the code.** REL-114 closed NF-8 by adding `EXEMPT_UNITS` with a `parser:` / `gap:` reason per
+  entry. The count genuinely improved (25-of-54 to 16-of-55) and the new assertion is legitimately
+  green — but `test_every_exempt_unit_states_a_reason` checks only the PREFIX, and eight of ten
+  `gap: writes no service_health row` labels are false. Two lines of Python (resolve each exempt
+  unit's ExecStart, grep the target for `write_service_health`) turned a green suite into a P1. Run
+  that check on every exemption list a remediation introduces, the week after it ships.
+- 2026-08-29 (audit): the delta's dominant defect class was **suppression added to stop a false
+  page**, five mechanisms across `probes.py`, `external_probe.py` and `data_refresh.py`, four of them
+  unbounded. Two questions catch all four and neither needs deep reading: does the suppression have a
+  DWELL bound (how long may this state persist before it pages anyway), and what is its ORDERING
+  against the checks it precedes. `aggregate_state` has no timestamp input at all — a one-line grep
+  for any clock in the module proved it. Filed as standing class NF-10.
+- 2026-08-29 (audit): nine walks capped at ~12 files each finished in 4-9 minutes with none lost to
+  the stream watchdog. Two walks were told to EXECUTE rather than read (the journal_realized P0 and
+  the remediation regression) and both returned literal command output that settled claims a reading
+  walk would have left plausible — the `strike`/`right` halves of REL-109 verified holding, the
+  `expiry`-lifetime half verified NOT implemented, and REL-110's two `None` causes verified
+  separated. Budget one executing walk per P0 fix under review; it is the difference between "the
+  mechanism is present" and "the mechanism covers the claim".
+- 2026-08-29 (audit): the backlog-coverage set difference earned its place this run — it caught that
+  every `R-###` reference in the 18 backlog rows was written against the pre-numbering draft order,
+  so twelve of eighteen tasks pointed at the wrong findings. Two further mechanics matter: apply the
+  per-task remap SIMULTANEOUSLY through one `re.sub` callback (the corrections chained, e.g.
+  R-385 to R-386 while R-384 to R-385), and keep the remap OFF the task's own id field. Also, a
+  finding body containing `payload["date"]` breaks a double-quoted Python literal in the generator —
+  write repo code samples with single quotes inside the table strings.
+
+- 2026-08-29 (remediate): **a finding's remedy can be a REGRESSION the pinned tests catch, and they
+  were right every time.** Four this run. R-428's "check the limits on the modify path" classified a
+  `secType == "BAG"` order as `type: "combo"`, and `check_order_limits` fails CLOSED on a combo whose
+  `legs` it cannot read — a `comboLeg` carries a conId, not a strike — so that shape refused EVERY
+  combo modify and placement; `check_quantity_limit` is the bound actually derivable at a funnel.
+  R-421's "divide the reserve by `len(indices)`" made a SINGLE-index bpi run demand a reserve sized
+  for three; dividing by `len(INDEX_NAMES)` is what the finding meant. R-386 asked for
+  `timeout --foreground`, which stops timeout creating its own process group and therefore defeats
+  the orphan reaping the SAME finding asks for. R-402 asked to register `signals-refresh`, whose
+  wrapper POSTs two scanners that each write their own already-catalogued row — a key nothing writes
+  ages to stale and pages forever. Test the remedy against the repo's existing assertions first.
+- 2026-08-29 (remediate): **widening a scope-limited test surfaces real gaps immediately, and they
+  are in scope.** Teaching `_names_in` the bounded-stdlib writer shape (REL-141) dropped the
+  unresolved set from 16/55 to 7/55 AND surfaced `flow-refresh` — an hourly RTH job that had always
+  written its own health row and was in NEITHER catalog, which no scoped walk had found. Merging
+  drop-ins into `_unit_texts` (REL-133) surfaced five `User=root` units with no pinned PATH. Adding
+  the `place_order` tripwire (REL-145) surfaced `clients/ib_client.py`, the transport every caller
+  goes through. Budget for one extra fix per widened guard; the guard finding the gap on its first
+  run is the guard working.
+- 2026-08-29 (remediate): the comment-quotes-its-own-code trap bit twice more, once in a test I
+  wrote (`assert "infinity" not in _dropin(unit)` matched the comment explaining the removal) and
+  once in the parity resolver itself — `run_flow_refresh.sh` mentions `scripts/api/server.py` in a
+  COMMENT about a shed marker, so every health name that file writes was attributed to the
+  flow-refresh timer. Strip comments before ANY structural scan, in test AND in source-walking code.
+- 2026-08-29 (remediate): **editing the running wrapper is safe only via rename.** REL-137 rewrites
+  `reliability_weekend.sh` while this very loop is executing it. Bash reads a script lazily by byte
+  offset, so `Path.write_text` (truncate + rewrite of the SAME inode) can strand the live run at a
+  stale offset. Every edit went through `tempfile.mkstemp` in the same directory plus `os.replace`,
+  which hands the running shell an untouched old inode. The file header already says this for `cp`;
+  it applies to any in-place writer, including Python's.
+- 2026-08-29 (remediate): a `-k` filter is not a gate. `pytest -k "scan or gate or api or catalog"`
+  matched 7645 of 8686 tests and read like a full run at a glance. When reporting a targeted result,
+  report the DESELECTED count too, or the number means nothing.
+- 2026-08-29 (remediate): three findings this run were closed only PARTIALLY and each says so in its
+  own row — R-424's `service_health` row (no error-only catalog category exists, and a scheduled key
+  for a no-cadence signal ages to stale and pages forever), R-408's browser screenshot (this runner
+  clone had no `web/.env`, so the app could not boot; `setup_reliability_weekend.sh` now provisions
+  it into the clone, so this residual is closed for later runs), and R-402's `signals-refresh` registration
+  (deliberately refused, above). Writing the reason into the row is the difference between a known
+  residual and a silent gap.
+- 2026-08-30 (audit): **the operator can consume R-numbers outside this loop.** REL-149/REL-150 were
+  written by the operator on 2026-08-29 citing R-429…R-431 in commit messages, `cloud/CLAUDE.md` and
+  the log, with no findings row. `grep -o "R-[0-9]{3}" RELIABILITY_AUDIT.md | sort -u | tail -1` says
+  R-428 and would have collided. Take the max over BOTH documents plus `git log --grep 'R-[0-9]'` since
+  the anchor, skip the consumed ids, and say so in the section header and the ledger line.
+- 2026-08-30 (audit): when the range holds both weekend loops' remediation merges AND the operator's
+  own fixes, splitting "at the last commit that touched RELIABILITY_LOG.md" picks the operator's
+  commit and hides the reliability remediation inside the feature half. Split by branch ancestry
+  instead: `git log <anchor>..HEAD ^origin/reliability/<prev> ^origin/testing/<prev>` is the feature
+  set, and hand the executing regression walk the operator's REL rows too.
+- 2026-08-30 (audit): **an ad-hoc call of a test's resolver is not the test's iteration.** The lead
+  called `_health_names_written_by(<service path>)` over `cloud/services/*.timer` and got six
+  exempt-but-resolving units; the walk that ran the test's own `_timer_backed_services` got zero,
+  and `test_every_exempt_unit_still_lacks_a_resolvable_name` already rejects a resolving exemption.
+  The 2026-08-28 lesson says call the TEST's functions — it also has to be the test's INPUTS. Run
+  the test file, then reuse only what it exports at module scope with the same arguments it uses.
+- 2026-08-30 (audit): the executing regression walk found all three PARTIALs (REL-132, REL-150 and
+  the REL-149 socket mode) with SCRATCH cases the shipped tests did not cover — "release also
+  fails", "one previous unit is down", "who can write the socket". The pattern is that an incident
+  fix's test pins the branch the incident exercised. Give the regression walk one explicit
+  instruction per fix: name the case the shipped test does not cover and run it.
+- 2026-08-30 (audit): a `git diff --name-only` of 232 source files collapsed to ~110 once the 130
+  `route.ts` files touched only by a two-line export were set aside (`git diff --numstat` per file,
+  keep > 10 lines). Check for a mechanical sweep commit before sizing the walks; the capability
+  export itself was audited in the lead with one grep over the sensitive routes.
+- 2026-08-31 (audit): **when the merged nightly branches have been deleted remotely, split by the merge
+  commits' second parents, not by branch name.** `^origin/reliability/<prev> ^origin/testing/<prev>` from the
+  2026-08-30 lesson silently excludes nothing once those refs are gone; `git log <anchor>..HEAD ^<merge>^2
+  ^<merge>^2` (find the merges with `git log --merges --first-parent`) gives the same feature set and does
+  not depend on branch retention. Also: another loop's remediation can land as a SQUASH (7c627f30, #198), so
+  it is in the feature set by ancestry — hand it to the executing regression walk, not a feature walk.
+- 2026-08-31 (audit): a `.md` finding-count check must anchor on `\n## Delta audit <date>\n`, not the bare
+  heading string — the ledger line quotes the heading inside backticks, so a plain `index()` finds the
+  ledger first and the ascending-id assertion runs over the whole document (it failed on R-048 here).
+  Write the doc, then re-validate with the anchored slice.
+- 2026-08-31 (audit): the permanent drill suites live in TWO directories — `scripts/tests/` and
+  `scripts/tests/test_monitor_daemon/` (`test_exit_orders_ack.py`, `test_exit_orders_guard_durability.py`,
+  `test_fill_monitor_degraded_session.py`) plus `scripts/tests/test_watchdog/test_snapshot_unavailable.py`.
+  An executing walk reported the ack drill as "does not exist" after `ls scripts/tests | grep`; use
+  `grep -rl` over the tree before accepting a "missing test" claim, and verify it in the lead.
+- 2026-08-31 (audit): a week that lands a host split produces P1s that are all one shape — a mechanism that
+  worked on one host relied on something only that host had (its own lock file, its own env file, its own
+  systemctl). Give the walk covering a topology change an explicit question per shared-state file the
+  pre-split code read (`/health` lock state, `RADON_HOST_ROLE` source, `installed-units` role strip) and
+  ask "which host reads this now, and from where"; five of this week's P1s fall out of that question.
+- 2026-08-31 (audit): nine walks capped at 10-14 files finished in 4-8 minutes with none lost to the stream
+  watchdog, while five loops ran full suites on the same host. Two walks told to EXECUTE returned literal
+  outputs (`select_gates(...)` results, libsql claim races, `place_order` call counts) that settled four
+  fixes as HOLDS and produced four P2s from the uncovered cases — the "name one case the shipped test does
+  not cover and run it" instruction paid for itself again.

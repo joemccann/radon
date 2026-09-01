@@ -18,6 +18,8 @@ import { OPTION_EXPIRY_PATTERN } from "@/lib/requestBounds";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+export const radonCapability = "read";
+
 export async function GET(request: Request): Promise<Response> {
   const access = await requireRouteAccess(undefined, { rate: { key: "index-options/chain:route", limit: 20, windowMs: 60_000 } });
   if (!access.ok) return access.response;

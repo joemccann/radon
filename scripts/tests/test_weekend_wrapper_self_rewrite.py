@@ -50,6 +50,21 @@ LOOPS = {
         "testing-weekend",
         "com.radon.testing-daily.plist",
     ),
+    "ci-performance": (
+        "ci_performance_nightly.sh",
+        "ci-performance",
+        "com.radon.ci-performance-daily.plist",
+    ),
+    "documentation": (
+        "documentation_nightly.sh",
+        "documentation-nightly",
+        "com.radon.documentation-daily.plist",
+    ),
+    "security": (
+        "security_nightly.sh",
+        "security-nightly",
+        "com.radon.security-daily.plist",
+    ),
 }
 LOOP_IDS = sorted(LOOPS)
 
@@ -84,6 +99,10 @@ def _build(
     wrapper.chmod(wrapper.stat().st_mode | stat.S_IXUSR)
     if marker:
         (clone / ".radon-weekend-runner").touch()
+        # REL-180 (R-504): every wrapper requires its OWN loop marker as well.
+        for loop_marker in (".radon-security-runner", ".radon-reliability-runner", ".radon-testing-runner",
+                            ".radon-ci-performance-runner", ".radon-documentation-runner"):
+            (clone / loop_marker).touch()
     # notify_phase shells `python3 $REPO/scripts/weekend_notify.py`; python3
     # is stubbed, but the file must exist for the call to look real.
     (clone / "scripts" / "weekend_notify.py").write_text("# stub\n", encoding="utf-8")
@@ -131,21 +150,43 @@ def _build(
         "exit 0\n" % attack_sh,
     )
 
+    # The security wrapper (operator policy 2026-08-31) keys OK on the skill's
+    # phase-completion marker, not on exit 0 alone, so its stub agent prints
+    # the marker the way a phase that actually finished would. The other
+    # loops' wrappers do not grep for it and the extra line is inert there.
+    complete_line = ""
+    if loop == "security":
+        src = (REPO / "scripts" / script).read_text(encoding="utf-8")
+        marker = re.search(r'PHASE_COMPLETE_MARKER="([^"]+)"', src).group(1)
+        complete_line = f"echo '{marker} stub run_id=stub'\n"
     _executable(
         bin_dir / "claude",
         "#!/bin/bash\n"
         f'echo "claude $*" >> "{agent_log}"\n'
-        'if [ "${STUB_ATTACK_ON:-off}" = "agent" ]; then "%s"; fi\n'
+        f'if [ "${{STUB_ATTACK_ON:-off}}" = "agent" ]; then "{attack_sh}"; fi\n'
         'if [ "${STUB_CLAUDE_SLEEP:-0}" != "0" ]; then sleep "$STUB_CLAUDE_SLEEP"; fi\n'
         "echo 'stub agent output'\n"
-        'exit "${STUB_CLAUDE_RC:-0}"\n' % attack_sh,
+        + complete_line
+        + 'exit "${STUB_CLAUDE_RC:-0}"\n',
     )
 
+    # REL-137 gave the real invocation `-k <secs>` so a claude blocked on a
+    # hung child cannot make the cap advisory. The stub has to consume the
+    # option pair as well as the duration, or it execs the duration.
     _executable(
         bin_dir / "timeout",
         "#!/bin/bash\n"
-        "shift\n"
-        'if [ "${STUB_TIMEOUT_124:-0}" = "1" ]; then exit 124; fi\n'
+        'while [ $# -gt 0 ]; do\n'
+        '  case "$1" in\n'
+        '    -k|--kill-after) shift 2 ;;\n'
+        '    --foreground|--preserve-status) shift ;;\n'
+        '    *) shift; break ;;\n'
+        '  esac\n'
+        'done\n'
+        # Only the AGENT invocation simulates the cap. Since REL-137 the
+        # dead-man `gh` calls also run under `timeout` (R-409), and failing
+        # those left the run with no comment to assert on at all.
+        'if [ "${STUB_TIMEOUT_124:-0}" = "1" ] && [ "${1##*/}" = "claude" ]; then exit 124; fi\n'
         'exec "$@"\n',
     )
 
@@ -223,9 +264,14 @@ def _comments(cfg: dict) -> list[str]:
 
 
 def _pages(cfg: dict) -> int:
+    """python3 invocations of the NOTIFIER. The stub records every python3
+    call; since REL-180 report() also runs weekend_redact.py through it."""
     if not cfg["push_log"].exists():
         return 0
-    return len([ln for ln in cfg["push_log"].read_text(encoding="utf-8").splitlines() if ln.strip()])
+    return len([
+        ln for ln in cfg["push_log"].read_text(encoding="utf-8").splitlines()
+        if ln.strip() and "weekend_notify.py" in ln
+    ])
 
 
 def _why(result: subprocess.CompletedProcess, cfg: dict) -> str:
@@ -331,8 +377,12 @@ def test_a_clone_without_the_marker_is_refused_and_reported(tmp_path: Path, loop
     comments = _comments(cfg)
     assert len(comments) == 1, _why(result, cfg)
     assert "REFUSED" in comments[0], comments
-    # Third arg 0: the rolling issue carries it, no 00:00 Pushover.
-    assert _pages(cfg) == 0
+    # This case REQUIRED the page to be suppressed. A clone that lost its
+    # marker makes every daily fire exit 2 in under a second, forever, and the
+    # only signal was a comment on a rolling issue nobody watches — the file
+    # header and SKILL.md both promise the opposite. The half that still
+    # matters (exactly one comment, naming REFUSED) is kept. R-410.
+    assert _pages(cfg) == 1
 
 
 @pytest.mark.parametrize("loop", LOOP_IDS)
@@ -514,7 +564,7 @@ class TestTheJobRestoresTheEntryPointBeforeReadingIt:
 
     @pytest.mark.parametrize(
         "setup",
-        ["setup_reliability_weekend.sh", "setup_testing_weekend.sh"],
+        ["setup_reliability_weekend.sh", "setup_testing_weekend.sh", "setup_documentation_nightly.sh", "setup_security_nightly.sh"],
     )
     def test_the_setup_script_states_the_deploy_rule(self, setup: str) -> None:
         src = (REPO / "scripts" / setup).read_text(encoding="utf-8")
@@ -525,7 +575,7 @@ class TestTheJobRestoresTheEntryPointBeforeReadingIt:
 
     @pytest.mark.parametrize(
         "setup",
-        ["setup_reliability_weekend.sh", "setup_testing_weekend.sh"],
+        ["setup_reliability_weekend.sh", "setup_testing_weekend.sh", "setup_documentation_nightly.sh", "setup_security_nightly.sh"],
     )
     def test_the_setup_script_refuses_while_a_run_is_in_flight(self, setup: str) -> None:
         src = (REPO / "scripts" / setup).read_text(encoding="utf-8")

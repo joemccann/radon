@@ -65,7 +65,8 @@ Every decision must satisfy ALL THREE. Any fails → do not trade.
 2. **Unusual Whales** — Dark pool, options activity, alerts, ratings
 3. **Exa** — Web search, research
 4. **Cboe official feeds** — COR1M historical
-5. **Yahoo Finance** — ABSOLUTE LAST RESORT
+5. **Robinhood** — official trading MCP, READ-ONLY quote/chain failover + crowding overlay; execution stays on IB
+6. **Yahoo Finance** — ABSOLUTE LAST RESORT
 
 ## Infrastructure
 

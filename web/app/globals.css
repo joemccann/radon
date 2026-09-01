@@ -2052,6 +2052,99 @@ body[data-mobile="true"] .dashboard-surface__feed {
   overflow-y: visible;
 }
 
+.feed-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--line-grid);
+  margin: 0 0 12px;
+}
+.feed-tabs__tab {
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  letter-spacing: var(--tracking-meta);
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: transparent;
+  border: 0;
+  border-right: 1px solid var(--line-grid);
+  padding: 8px 14px;
+  cursor: pointer;
+  min-height: var(--hit-min);
+}
+.feed-tabs__tab--on {
+  color: var(--text-primary);
+  background: var(--bg-panel-raised);
+  border-bottom: 1px solid var(--signal-core);
+  margin-bottom: -1px;
+}
+.headlines-tape {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.headlines-tape__row {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line-grid);
+}
+.headlines-tape__row:last-child {
+  border-bottom: none;
+}
+.headlines-tape__meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+.headlines-tape__time {
+  font-variant-numeric: tabular-nums;
+}
+.headlines-tape__headline {
+  margin: 6px 0 0;
+  max-inline-size: 680px;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.005em;
+  line-height: 1.35;
+  color: var(--text-primary);
+  text-wrap: balance;
+}
+.headlines-tape__body {
+  margin: 8px 0 0;
+  max-inline-size: 680px;
+  font-size: var(--text-body);
+  line-height: 1.6;
+  color: color-mix(in srgb, var(--text-primary) 82%, transparent);
+  text-wrap: pretty;
+}
+.headlines-tape__body--solo {
+  margin-top: 6px;
+  color: var(--text-primary);
+}
+.headlines-tape__lede {
+  font-weight: 600;
+}
+.headlines-tape__imp {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  border-radius: var(--radius-capsule);
+  padding: 1px 5px;
+}
+.headlines-tape__hit {
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  color: var(--fault);
+  white-space: nowrap;
+}
+.headlines-tape__hit--up {
+  color: var(--signal-strong);
+}
+
 .dashboard-surface__right {
   display: flex;
   flex-direction: column;
@@ -2990,20 +3083,16 @@ a.signals-hero__row:hover { background: var(--bg-panel-raised); }
   overflow: hidden;
 }
 
-.chat-launcher__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--line-grid);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+/* Composer-only empty state (design-lab Variant A): the panel shrinks to the
+   composer and floats in the upper third instead of filling the viewport. */
+.chat-launcher:has(.chat-panel[data-empty]) {
+  align-items: flex-start;
+  padding-top: 18vh;
 }
 
-.chat-launcher__kicker { color: var(--signal-core-text); }
-.chat-launcher__hint   { color: var(--text-muted); }
+.chat-launcher__panel:has(.chat-panel[data-empty]) {
+  width: min(640px, 100%);
+}
 
 /* ───────────────────────────────────────────────────────────
    Footer telemetry strip — collapses the three legacy banners
@@ -4465,7 +4554,7 @@ td.last-price-cell {
 }
 
 .chat-shell {
-  padding: 0 20px 16px;
+  padding: 16px 20px;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -4733,10 +4822,6 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh--rail {
   color: var(--text-muted);
 }
 
-.news-feed-meta__source {
-  color: var(--text-secondary);
-}
-
 .news-feed-item .news-feed-tags {
   margin-top: 16px;
 }
@@ -4782,10 +4867,6 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh--rail {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.news-feed-figcaption span:last-child {
-  flex: none;
 }
 
 .news-feed-image-wrapper {
@@ -5235,29 +5316,6 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh--rail {
   padding: 14px 0 6px;
 }
 
-.news-feed-link-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 12px;
-  border: 1px solid var(--line-grid);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  text-decoration: none;
-  transition: color 150ms ease, border-color 150ms ease, background 150ms ease;
-}
-
-.news-feed-link-pill:hover {
-  color: var(--signal-core-text);
-  border-color: var(--line-grid);
-  background: var(--bg-panel-raised);
-}
-
 .news-feed-timestamp {
   margin-left: auto;
   font-family: var(--font-mono);
@@ -5464,64 +5522,6 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh--rail {
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 16px 4px;
-}
-
-/* Empty / first-run state — clickable domain prompts instead of a blank box. */
-.chat-empty-state {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 12px;
-  padding: 24px 8px;
-}
-
-.chat-empty-state__title {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--signal-core-text);
-}
-
-.chat-empty-state__copy {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--text-muted);
-  max-width: 46ch;
-}
-
-.chat-empty-state__cards {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.chat-empty-card {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  text-align: left;
-  padding: 10px 12px;
-  border: 1px solid var(--border-dim);
-  border-radius: 4px;
-  background: var(--bg-panel);
-  color: var(--text-primary);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  cursor: pointer;
-  transition: border-color 160ms ease, background 160ms ease;
-}
-
-.chat-empty-card:hover {
-  border-color: var(--signal-core-text);
-  background: var(--bg-hover);
-}
-
-.chat-empty-card__slash {
-  color: var(--text-muted);
 }
 
 /* Floating jump-to-latest, shown only when the user has scrolled up. Always
@@ -6041,28 +6041,6 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh--rail {
   cursor: not-allowed;
 }
 
-.chat-pills {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.pill-chip {
-  border: 0;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--bg-hover) 70%, transparent);
-  color: var(--text-secondary);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 6px 10px;
-  font-family: var(--font-mono);
-  cursor: pointer;
-}
-
-.pill-chip:hover {
-  background: var(--bg-hover);
-}
 
 @media (max-width: 1200px) {
   .two-col {
@@ -12763,12 +12741,40 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
 
 /* Docked ticket rail — chain keeps its column, the ticket sits beside it so
    legs, price, risk and CTA are readable without scrolling. Below the
-   breakpoint the rail unstacks and the ticket returns to full width. */
+   breakpoint the rail unstacks and the ticket returns to full width.
+
+   The deck is height-locked, so the chain is the deck body's only child and
+   fills it exactly: chain table and ticket are then the ONLY scroll
+   containers. Without this the deck body scrolls too, and a ticket sized off
+   the viewport (`100dvh`) overflows its much shorter scrollport — the risk
+   block and transmit CTA are reachable only by scrolling the panel AROUND the
+   form, never the form. */
+.asset-deck-body:has(.chain-tab) {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.chain-tab {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 0 0;
+  /* Last resort. Above 1180px the only inner scrollports are
+     .chain-grid-wrapper and .order-builder--rail, so any OTHER child — the
+     expiry bar, the hint line, and notably an error or empty-chain block — was
+     clipped with no scrollbar anywhere on the page. R-425. */
+  overflow-y: auto;
+}
+
 .chain-rail {
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 12px;
-  align-items: start;
+  align-items: stretch;
 }
 
 .chain-rail[data-docked="true"] {
@@ -12777,32 +12783,55 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
 
 .chain-rail-main {
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
 
+/* The chain takes whatever height the toolbar and hint leave it — a fixed box
+   would either strand empty deck below it or clip rows on a short window.
+   `0 1 auto` hugs a short chain and shrinks-to-scroll a long one. */
 .chain-rail .chain-grid-wrapper {
+  flex: 0 1 auto;
   min-width: 0;
+  min-height: 0;
+  max-height: none;
 }
 
+/* Hugs its content, caps at the deck and scrolls itself past that — so the
+   risk block and TRANSMIT are always reachable from inside the ticket. */
 .order-builder--rail {
-  position: sticky;
-  top: 8px;
-  /* Never taller than the viewport: the ticket scrolls internally so the
-     transmit CTA stays reachable on a short window. */
-  max-height: calc(100dvh - 96px);
+  align-self: start;
+  max-height: 100%;
+  margin-top: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
 
+/* Narrow: the rail unstacks, so the deck body goes back to being the single
+   scroll container and both panes size to content. */
 @media (max-width: 1180px) {
-  .chain-rail[data-docked="true"] {
-    grid-template-columns: minmax(0, 1fr);
+  .asset-deck-body:has(.chain-tab) {
+    overflow-y: auto;
+    display: block;
+  }
+
+  .chain-tab {
+    display: block;
+  }
+
+  .chain-rail,
+  .chain-rail-main {
+    display: block;
+  }
+
+  .chain-rail .chain-grid-wrapper {
+    max-height: 520px;
   }
 
   .order-builder--rail {
-    position: static;
-    max-height: none;
+    height: auto;
+    margin-top: 12px;
     overflow-y: visible;
   }
 }
@@ -12825,6 +12854,34 @@ body[data-mobile="true"] .vol-cone-analysis .vol-cone-analysis-metrics {
   font-size: 9px;
   letter-spacing: 0.08em;
   color: var(--text-muted);
+}
+
+/* Provenance marker on a realized-P&L cell that fell back to IB's own figure.
+   Deliberately quiet: it flags a degraded number, it does not shout. R-408. */
+.fills-source-marker {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 4px;
+  border: 1px solid var(--warn);
+  border-radius: 2px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--warn);
+  vertical-align: middle;
+}
+
+/* A deep link named a contract the chain cannot serve. Says so rather than
+   letting the ticket sit empty with no explanation (R-378, R-413). */
+.chain-prefill-unavailable {
+  border: 1px solid var(--warn);
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin-bottom: 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--warn);
 }
 
 /* Unbounded-risk acknowledgement. Deliberately loud: it is the last thing
@@ -18149,6 +18206,23 @@ body[data-mobile="true"] td.right {
   color: var(--fault);
 }
 
+/* A cached verdict's age must not read as part of the direction. R-358 added
+   this span with no styling, so "BULLISH" and "LAST GOOD SCAN 2026-06-16" ran
+   together at 22px as one headline. */
+.ticker-flow-badge-stale {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--warn-text) 34%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--warn-text) 12%, transparent);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--warn-text);
+  vertical-align: middle;
+}
+
 .ticker-flow-badge-rationale {
   font-family: var(--font-sans);
   font-size: 12px;
@@ -19334,6 +19408,12 @@ body[data-mobile="true"] td.right {
 .m-metric__value--mut  { color: var(--text-muted); }
 
 /* ── .m-signal-card ── */
+.m-signal-card-link {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+
 .m-signal-card {
   display: flex;
   flex-direction: column;
@@ -20802,6 +20882,20 @@ body[data-mobile="true"] .alerts-rule__channel {
   border: 1px solid var(--signal-core); border-radius: 3px; padding: 0 5px;
   cursor: pointer;
 }
+.ask-composer__attachments { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 12px 0; }
+.ask-composer__thumb {
+  position: relative; width: 44px; height: 44px; overflow: hidden;
+  border: 1px solid var(--line-grid); border-radius: 4px; background: var(--bg-panel-raised);
+}
+.ask-composer__thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.ask-composer__thumb-remove {
+  position: absolute; top: 0; right: 0; width: 14px; height: 14px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-size: 10px; line-height: 1;
+  color: var(--text-primary); background: var(--bg-panel);
+  border: 1px solid var(--line-grid); border-radius: 0 4px 0 4px;
+  cursor: pointer;
+}
 .ask-composer__input {
   width: 100%; box-sizing: border-box; resize: none;
   padding: 10px 12px; border: none; background: transparent;
@@ -20811,20 +20905,31 @@ body[data-mobile="true"] .alerts-rule__channel {
 .ask-composer__input:focus { outline: none; }
 .ask-composer__rail { display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--line-grid); padding: 8px 12px; }
 .ask-composer__spacer { flex: 1; }
-.ask-composer__engine { display: flex; align-items: center; gap: 6px; border: 1px solid var(--line-grid); border-radius: 4px; padding: 3px 8px; }
-.ask-composer__engine-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; color: var(--text-muted); }
-.ask-composer__engine select {
+.ask-composer__model { display: flex; align-items: center; gap: 6px; }
+.ask-composer__model-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; color: var(--text-muted); }
+.ask-composer__model select {
   background: transparent; border: none; color: var(--text-secondary);
   font-family: var(--font-mono); font-size: var(--text-meta); letter-spacing: 0.06em;
 }
-.ask-composer__send {
-  display: flex; align-items: center; gap: 6px;
-  font-family: var(--font-mono); font-size: var(--text-meta); font-weight: 600; letter-spacing: 0.06em;
-  padding: 6px 14px; border-radius: 4px; border: 1px solid var(--accent-bg);
-  background: var(--accent-bg); color: var(--accent-text); cursor: pointer;
+.ask-composer__field { display: flex; align-items: flex-end; }
+.ask-composer__field .ask-composer__input { flex: 1; }
+/* Quiet Enter affordance replaces the ASK button (design-lab Variant A):
+   Enter sends; this is the same submit, drawn as a kbd hint. */
+.ask-composer__enter {
+  margin: 0 10px 8px 0;
+  padding: 2px 8px; border-radius: 2px;
+  border: 1px solid var(--line-grid); background: var(--bg-panel-raised);
+  font-family: var(--font-mono); font-size: 11px; line-height: 1.4;
+  color: var(--text-muted); cursor: pointer;
   transition: var(--transition-controls);
 }
-.ask-composer__send:disabled { opacity: 0.45; cursor: default; }
+.ask-composer__enter:not(:disabled):hover { border-color: var(--signal-core-text); color: var(--signal-core-text); }
+.ask-composer__enter:disabled { opacity: 0.45; cursor: default; }
+.ask-composer__esc { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; color: var(--text-muted); white-space: nowrap; }
+/* Rail chrome reads as one muted footer line, not a row of boxed controls. */
+.ask-composer__rail .agent-chip { border: 0; padding: 0; border-radius: 0; color: var(--text-muted); }
+/* Hero focus: with no messages the composer is the whole surface. */
+.chat-panel[data-empty] .ask-composer:focus-within { box-shadow: 0 0 0 3px var(--wash-signal); }
 
 /* — AnalysisSources — */
 .analysis-sources { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }

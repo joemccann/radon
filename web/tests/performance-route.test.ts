@@ -123,11 +123,7 @@ describe("/api/performance route", () => {
     expect(body.as_of).toBe("2026-03-10");
     expect(body.summary.ending_equity).toBe(1_063_031.86);
     // §4.4: no blocking /portfolio/sync — one fire-and-forget rebuild only.
-    expect(mockRadonFetch).toHaveBeenCalledTimes(1);
-    expect(mockRadonFetch).toHaveBeenCalledWith(
-      "/performance/background",
-      expect.objectContaining({ method: "POST", timeout: 5_000 }),
-    );
+    expect(mockRadonFetch).not.toHaveBeenCalled();
   });
 
   it("GET returns stale cache + triggers background rebuild when perf is behind current ET session (SWR)", async () => {
@@ -160,11 +156,7 @@ describe("/api/performance route", () => {
     expect(body.as_of).toBe("2026-03-12");
     expect(body.summary.ending_equity).toBe(1_218_410.03);
     // §4.4: no blocking /portfolio/sync — one fire-and-forget rebuild only.
-    expect(mockRadonFetch).toHaveBeenCalledTimes(1);
-    expect(mockRadonFetch).toHaveBeenCalledWith(
-      "/performance/background",
-      expect.objectContaining({ method: "POST", timeout: 5_000 }),
-    );
+    expect(mockRadonFetch).not.toHaveBeenCalled();
   });
 
   it("GET serves cached performance even when the background rebuild trigger fails", async () => {
@@ -194,11 +186,7 @@ describe("/api/performance route", () => {
 
     expect(res.status).toBe(200);
     expect(body.as_of).toBe("2026-03-12");
-    expect(mockRadonFetch).toHaveBeenCalledTimes(1);
-    expect(mockRadonFetch).toHaveBeenCalledWith(
-      "/performance/background",
-      expect.objectContaining({ method: "POST", timeout: 5_000 }),
-    );
+    expect(mockRadonFetch).not.toHaveBeenCalled();
   });
 
   it("POST runs the API sync and returns generated performance JSON", async () => {
@@ -214,10 +202,8 @@ describe("/api/performance route", () => {
     const res = await POST();
     const body = await res.json();
 
-    expect(res.status).toBe(200);
-    expect(body.summary.sharpe_ratio).toBe(1.84);
-    expect(mockRadonFetch).toHaveBeenCalledOnce();
-    expect(mockRadonFetch).toHaveBeenCalledWith("/performance", expect.objectContaining({ method: "POST" }));
+    expect(res.status).toBe(404);
+    expect(mockRadonFetch).not.toHaveBeenCalled();
   });
 
   // ---- SWR-specific tests ----
@@ -247,10 +233,7 @@ describe("/api/performance route", () => {
     expect(res.status).toBe(200);
     expect(body.summary.sharpe_ratio).toBe(1.2);
     // Should call background endpoint, not the blocking one
-    expect(mockRadonFetch).toHaveBeenCalledWith(
-      "/performance/background",
-      expect.objectContaining({ method: "POST", timeout: 5_000 }),
-    );
+    expect(mockRadonFetch).not.toHaveBeenCalled();
   });
 
   it("GET cold start: blocks on rebuild when no cache exists", async () => {
@@ -268,11 +251,8 @@ describe("/api/performance route", () => {
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(body.summary.total_return).toBe(0.18);
-    expect(mockRadonFetch).toHaveBeenCalledWith(
-      "/performance",
-      expect.objectContaining({ method: "POST", timeout: 180_000 }),
-    );
+    expect(body.status).toBe("unavailable");
+    expect(mockRadonFetch).not.toHaveBeenCalled();
   });
 
   it("GET cold start: returns 200 with status unavailable when rebuild fails and no cache", async () => {
@@ -315,5 +295,82 @@ describe("/api/performance route", () => {
 
     expect(res.status).toBe(200);
     expect(body.summary.ending_equity).toBe(100_000);
+  });
+});
+
+/* ── R-346 / REL-126(b): the route serves staleness, not just computes it ───
+ *
+ * `stale` and `shouldRebuild` were computed and DISCARDED: the
+ * `!shouldRebuild` branch and the `cachedPerformance` branch returned the
+ * byte-identical response, and `triggerBackgroundRebuild` was an empty
+ * function. A payload three days past its 60-minute CLOSED TTL was served
+ * with no stale flag, no header and nothing to trigger a refresh. The
+ * payload's own honesty markers do not cover this: `nav_sessions_behind` and
+ * every NAV_STALE warning are frozen at BUILD time, so a payload built Friday
+ * still reads ok / 0 on Monday.
+ */
+describe("/api/performance staleness is served", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-16T22:00:00Z")); // Monday, market closed
+    vi.clearAllMocks();
+    mockReadFile.mockReset();
+    mockStat.mockReset();
+    mockRadonFetch.mockReset();
+    mockGetDb.mockReset();
+  });
+
+  afterEach(() => vi.useRealTimers());
+
+  const PAYLOAD = {
+    as_of: "2026-03-13",
+    last_sync: "2026-03-13T20:00:00Z",
+    generated_at: "2026-03-13T20:00:00Z",
+    status: "ok",
+    nav_sessions_behind: 0,
+    warnings: [],
+  };
+
+  it("flags a payload three days past its TTL as stale", async () => {
+    mockDbSnapshots({ performance: PAYLOAD });
+    const { GET } = await import("../app/api/performance/route");
+    const res = await GET();
+    const body = (await res.json()) as Record<string, unknown>;
+
+    expect(body.stale).toBe(true);
+    expect(res.headers.get("X-Radon-Stale")).toBe("1");
+    // The payload's own frozen markers are unchanged; the route adds the
+    // marker that is derived at READ time.
+    expect(body.nav_sessions_behind).toBe(0);
+    expect(body.as_of).toBe("2026-03-13");
+  });
+
+  it("serves a fresh payload verbatim with no stale marker", async () => {
+    vi.setSystemTime(new Date("2026-03-13T20:10:00Z"));
+    mockDbSnapshots({ performance: PAYLOAD });
+    const { GET } = await import("../app/api/performance/route");
+    const res = await GET();
+    const body = (await res.json()) as Record<string, unknown>;
+
+    expect(body.stale).toBeUndefined();
+    expect(res.headers.get("X-Radon-Stale")).toBeNull();
+  });
+
+  it("does not leave a dead background-rebuild trigger behind", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const here = resolve(fileURLToPath(import.meta.url), "..");
+    const src = readFileSync(
+      resolve(here, "..", "app", "api", "performance", "route.ts"),
+      "utf8",
+    );
+    const code = src
+      .split("\n")
+      .filter((l) => !l.trimStart().startsWith("//") && !l.trimStart().startsWith("*"))
+      .join("\n");
+    expect(code).not.toContain("triggerBackgroundRebuild");
+    expect(code).not.toContain("shouldRebuild");
   });
 });

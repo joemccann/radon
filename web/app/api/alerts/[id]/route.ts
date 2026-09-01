@@ -6,6 +6,8 @@ import { requireRouteAccess } from "@/lib/routeAccess";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+export const radonCapability = "mutate.workspace";
+
 export async function DELETE(
   req: Request,
   { params }: { params: Promise<{ id: string }> },

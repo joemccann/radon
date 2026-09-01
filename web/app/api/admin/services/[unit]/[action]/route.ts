@@ -13,6 +13,8 @@ export const runtime = "nodejs";
 const ALLOWED_ACTIONS = new Set(["start", "stop", "restart"]);
 const UNIT_PATTERN = /^radon-[a-z0-9-]+(?:\.service|\.timer)?$|^radon-ib-gateway\.service$/;
 
+export const radonCapability = "admin";
+
 export async function POST(
   _req: NextRequest,
   { params }: { params: Promise<{ unit: string; action: string }> },
@@ -48,7 +50,9 @@ export async function POST(
   try {
     const data = await radonFetch(`/admin/services/${unit}/${action}`, {
       method: "POST",
-      timeout: 60_000,
+      // REL-171: must outlive FastAPI REMOTE_TIMEOUT_S (135s) on the app role.
+      timeout: 150_000,
+      token: access.principal.token,
     });
     const response = NextResponse.json(data);
     return setNoStoreResponseHeaders(response, requestId);

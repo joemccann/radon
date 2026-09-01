@@ -1,7 +1,6 @@
 import { requireRouteAccess } from "@/lib/routeAccess";
 
 import { NextResponse } from "next/server";
-import { radonFetch } from "@/lib/radonApi";
 import { dbExecute } from "@/lib/dbExecute";
 import { cachedRead } from "@/lib/dbCache";
 import {
@@ -72,6 +71,8 @@ async function buildFromJournal(): Promise<BlotterPayload | null> {
   return null;
 }
 
+export const radonCapability = { GET: "read", POST: "mutate.workspace" };
+
 export async function GET(): Promise<Response> {
   const access = await requireRouteAccess(undefined, { rate: { key: "blotter:route", limit: 20, windowMs: 60_000 } });
   if (!access.ok) return access.response;
@@ -79,7 +80,18 @@ export async function GET(): Promise<Response> {
   try {
     const blotter = await buildFromJournal();
     if (blotter) return setNoStoreResponseHeaders(NextResponse.json(blotter), requestId);
-    return setNoStoreResponseHeaders(NextResponse.json(emptyBlotter()), requestId);
+    // A journal read that returned ZERO rows is not a flat book. A replica
+    // pointed at the wrong database, or a journal not yet rehydrated, was
+    // indistinguishable from a genuinely empty one: `realized_pnl: 0` served
+    // as authoritative with `as_of: ""`, which `useBlotter` maps to null so
+    // no timestamp contradicted it, and POST returns 404 so the operator
+    // could not force a rebuild. R-375.
+    const response = setNoStoreResponseHeaders(
+      NextResponse.json({ ...emptyBlotter(), missing: true as const }),
+      requestId,
+    );
+    response.headers.set("X-Radon-Stale", "1");
+    return response;
   } catch {
     return setNoStoreResponseHeaders(
       NextResponse.json({ error: "Blotter data unavailable" }, { status: 503 }),
@@ -96,23 +108,11 @@ export async function POST(): Promise<Response> {
   });
   if (!access.ok) return access.response;
   const requestId = getRequestId();
-  try {
-    await radonFetch("/journal/rehydrate", { method: "POST", timeout: 300_000 });
-    const blotter = await buildFromJournal();
-    return setNoStoreResponseHeaders(NextResponse.json(blotter ?? emptyBlotter()), requestId);
-  } catch {
-    const blotter = await buildFromJournal();
-    if (blotter) {
-      const res = NextResponse.json(blotter);
-      res.headers.set(
-        "X-Sync-Warning",
-        "Blotter sync failed - serving Turso journal",
-      );
-      return setNoStoreResponseHeaders(res, requestId);
-    }
-    return setNoStoreResponseHeaders(
-      NextResponse.json({ error: "Blotter sync failed" }, { status: 502 }),
-      requestId,
-    );
-  }
+  return setNoStoreResponseHeaders(
+    NextResponse.json(
+      { error: "Blotter rehydrate is file-ingest only. GET reads journal_sync." },
+      { status: 404 },
+    ),
+    requestId,
+  );
 }

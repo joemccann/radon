@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { NextRequest } from "next/server";
 import { buildEvaluateCommand, __resolvePiInput, __normalizeScanArgs } from "../app/api/pi/route";
+import { hasPython313, python313Label } from "./helpers/python313";
 
 const mockExecute = vi.fn();
 vi.mock("@/lib/db", () => ({ resetDb: () => {}, getDb: () => ({ execute: mockExecute }) }));
@@ -157,7 +158,8 @@ test("assistant API route returns mock response when mock mode is enabled", asyn
     });
 
     const response = await mod.POST(req);
-    const body = await response.json();
+    const { assistantDonePayload } = await import("./assistantStream");
+    const body = await assistantDonePayload<{ content: string; model: string }>(response);
 
     expect(response.status).toBe(200);
     expect(typeof body.content).toBe("string");
@@ -169,7 +171,11 @@ test("assistant API route returns mock response when mock mode is enabled", asyn
   }
 }, 15_000);
 
-test("pi command --help screens are available", () => {
+// The two cases below are the ONLY ones in this file that spawn a real
+// interpreter. They skip by name without python3.13 so the other ten — which
+// are pure route/dispatch tests — can run on the Bun-only CI shard instead of
+// being --exclude'd along with them. T-276.
+test.skipIf(!hasPython313())(python313Label("pi command --help screens are available"), () => {
   const helpCommands = [
     { command: ["scripts/fetch_flow.py", "--help"], expectedStatus: 0 },
     { command: ["scripts/discover.py", "--help"], expectedStatus: 0 },
@@ -185,7 +191,7 @@ test("pi command --help screens are available", () => {
   }
 }, 15_000);
 
-test("kelly command returns valid risk sizing JSON", () => {
+test.skipIf(!hasPython313())(python313Label("kelly command returns valid risk sizing JSON"), () => {
   const result = runPython([
     "scripts/kelly.py",
     "--prob",

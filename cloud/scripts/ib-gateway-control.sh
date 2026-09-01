@@ -410,7 +410,38 @@ consume_watchdog_lease_once() {
   fi
 }
 
+read_host_role() {
+  local role="${RADON_HOST_ROLE:-}"
+  local envf
+  # REL-169 (R-472): every other role reader (root helper, operator CLI, app
+  # runtime, setup-vps) canonicalizes /etc/radon/env. Read that first; the
+  # legacy deploy env file is a fallback, never the source of the role.
+  for envf in "${RADON_ENV_FILE:-/etc/radon/env}" "${ENV_FILE:-}"; do
+    [[ -z "$role" ]] || break
+    [[ -n "$envf" && -f "$envf" ]] || continue
+    role="$(awk -F= '/^RADON_HOST_ROLE=/{v=$2} END{print v}' "$envf" 2>/dev/null || true)"
+    role="${role%\"}"
+    role="${role#\"}"
+    role="${role%\'}"
+    role="${role#\'}"
+    role="${role//$'\r'/}"
+  done
+  case "$role" in
+    app|broker|combined) printf '%s\n' "$role" ;;
+    *) printf 'combined\n' ;;
+  esac
+}
+
+refuse_app_role_mutation() {
+  if [[ "$(read_host_role)" == "app" ]]; then
+    echo "REFUSING Gateway mutation: RADON_HOST_ROLE=app (broker owns the session)" >&2
+    return 1
+  fi
+  return 0
+}
+
 start_gateway() {
+  refuse_app_role_mutation || return 1
   reconcile_pending_transition
   if container_running; then
     echo "IB Gateway container already running; no lease acquired"
@@ -425,6 +456,7 @@ start_gateway() {
 }
 
 restart_gateway() {
+  refuse_app_role_mutation || return 1
   reconcile_pending_transition
   require_new_lease
   compose_to_state stopped restart-down down
@@ -437,6 +469,7 @@ restart_gateway() {
 
 restart_gateway_preheld() {
   local expected_holder="${1:-}"
+  refuse_app_role_mutation || return 1
   reconcile_pending_transition
   consume_watchdog_lease_once "$expected_holder"
   compose_to_state stopped preheld-down down
@@ -505,6 +538,11 @@ case "${1:-}" in
     acquire_lifecycle_mutex "$@"
     stop_gateway
     ;;
+  reset-lease)
+    refuse_app_role_mutation || exit 1
+    acquire_lifecycle_mutex "$@"
+    release_any_lease
+    ;;
   status)
     if [[ -e "$TRANSITION_PATH" ]]; then
       echo "transition-pending"
@@ -523,7 +561,7 @@ case "${1:-}" in
     fi
     ;;
   *)
-    echo "usage: $0 {start|restart|restart-preheld HOLDER|stop|status}" >&2
+    echo "usage: $0 {start|restart|restart-preheld HOLDER|stop|status|reset-lease}" >&2
     exit 2
     ;;
 esac

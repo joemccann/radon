@@ -42,12 +42,33 @@ def test_local_aggregate_recovery_requires_healthy_schema_v2() -> None:
 
     response = MagicMock()
     response.status = 200
+    # `generated_at` and the two sections are now REQUIRED evidence: an
+    # aggregate produced before the off-box sample cannot describe its recovery,
+    # and `degraded` only clears when the serving path is green. R-399.
     response.read.return_value = (
-        b'{"schema_version":2,"ok":true,"overall_state":"up"}'
+        b'{"schema_version":2,"ok":true,"overall_state":"up",'
+        b'"generated_at":"2026-08-29T12:00:00Z",'
+        b'"probes":{"api":{"state":"up"}},"units":{"radon-api.service":{"state":"up"}}}'
     )
+    sampled_at = datetime(2026, 8, 29, 11, 0, 0, tzinfo=timezone.utc)
     with patch.object(external_probe.urllib.request, "urlopen") as urlopen:
         urlopen.return_value.__enter__.return_value = response
         assert external_probe._local_aggregate_is_healthy() is True
+        assert external_probe._local_aggregate_clears_offbox_down(sampled_at) is True
+
+
+def test_local_starting_aggregate_does_not_clear_offbox_down() -> None:
+    from scripts.watchdog import external_probe
+
+    response = MagicMock()
+    response.status = 200
+    response.read.return_value = (
+        b'{"schema_version":2,"ok":false,"overall_state":"starting"}'
+    )
+    with patch.object(external_probe.urllib.request, "urlopen") as urlopen:
+        urlopen.return_value.__enter__.return_value = response
+        assert external_probe._local_aggregate_clears_offbox_down() is False
+        assert external_probe._local_aggregate_is_healthy() is False
 
 
 def test_local_aggregate_recovery_fails_closed_on_malformed_payload() -> None:
@@ -138,7 +159,9 @@ def test_recovered_local_aggregate_clears_fresh_aggregate_failure(monkeypatch) -
             detail="aggregate_down",
         ),
     )
-    monkeypatch.setattr(external_probe, "_local_aggregate_is_healthy", lambda: True)
+    monkeypatch.setattr(
+        external_probe, "_local_aggregate_clears_offbox_down", lambda *_a, **_k: True
+    )
 
     outcome = external_probe.check_external_probe(now=NOW)
 
@@ -161,12 +184,58 @@ def test_still_unhealthy_local_aggregate_keeps_fresh_failure_active(monkeypatch)
         ),
     )
     monkeypatch.setattr(external_probe, "_local_aggregate_is_healthy", lambda: False)
+    monkeypatch.setattr(
+        external_probe, "_local_aggregate_clears_offbox_down", lambda *_a, **_k: False
+    )
 
     outcome = external_probe.check_external_probe(now=NOW)
 
     assert outcome.status == "error"
     assert outcome.fired is True
     assert outcome.severity == "P1"
+
+
+def test_local_degraded_aggregate_clears_fresh_aggregate_down() -> None:
+    # 2026-08-29 page 344f0592: sidecar flap makes the on-box aggregate
+    # degraded (ok=false) while the 5-min off-box row is still aggregate_down.
+    # Serving path is up, so local degraded is recovery evidence.
+    from scripts.watchdog import external_probe
+
+    response = MagicMock()
+    response.status = 200
+    response.read.return_value = (
+        b'{"schema_version":2,"ok":false,"overall_state":"degraded",'
+        b'"generated_at":"2026-08-29T12:00:00Z",'
+        b'"probes":{"api":{"state":"up"},"ib-gateway":{"state":"down"}},'
+        b'"units":{"radon-api.service":{"state":"up"},'
+        b'"radon-newsfeed.service":{"state":"down"}}}'
+    )
+    sampled_at = datetime(2026, 8, 29, 11, 0, 0, tzinfo=timezone.utc)
+    with patch.object(external_probe.urllib.request, "urlopen") as urlopen:
+        urlopen.return_value.__enter__.return_value = response
+        assert external_probe._local_aggregate_clears_offbox_down(sampled_at) is True
+        assert external_probe._local_aggregate_is_healthy() is False
+
+    from scripts.watchdog import external_probe as ep
+
+    with (
+        patch.object(
+            ep.turso_http,
+            "fetch_external_probe",
+            lambda timeout, source=None: _row(
+                ok=0,
+                age_minutes=5,
+                detail="aggregate_down",
+            ),
+        ),
+        patch.object(ep, "_local_aggregate_clears_offbox_down", lambda *_a, **_k: True),
+    ):
+        outcome = ep.check_external_probe(now=NOW)
+
+    assert outcome.status == "healthy"
+    assert outcome.fired is False
+    assert outcome.severity is None
+    assert outcome.message == "off-box aggregate recovered locally"
 
 
 def test_legacy_aggregate_unhealthy_stays_fail_closed(monkeypatch) -> None:
@@ -305,10 +374,47 @@ def test_deploy_window_edge_5xx_with_healthy_aggregate_is_suppressed(tmp_path, m
         "fetch_external_probe",
         lambda timeout, source=None: _row(ok=0, age_minutes=2, detail="status_http_502"),
     )
-    monkeypatch.setattr(external_probe, "_local_aggregate_is_healthy", lambda: True)
+    monkeypatch.setattr(external_probe, "_local_aggregate_serving_path_ok", lambda: True)
     _deploy_marker(tmp_path, monkeypatch, marker_age_minutes=1)
 
     outcome = external_probe.check_external_probe(now=NOW)
+
+    assert outcome.status == "healthy"
+    assert outcome.fired is False
+    assert "deploy window" in outcome.message
+
+
+def test_deploy_window_5xx_with_dependency_only_degraded_is_suppressed(
+    tmp_path, monkeypatch
+) -> None:
+    # 2026-08-29 page d98c3364: Saturday deploy while IB weekend clean-exit
+    # left the aggregate degraded. Off-box sampled status_http_502 (healthd
+    # restart) with user_path+freshness still green. Requiring overall_state
+    # == "up" re-paged P1 on every weekend deploy.
+    from scripts.watchdog import external_probe
+
+    monkeypatch.setattr(
+        external_probe.turso_http,
+        "fetch_external_probe",
+        lambda timeout, source=None: _row(ok=0, age_minutes=2, detail="status_http_502"),
+    )
+    _deploy_marker(tmp_path, monkeypatch, marker_age_minutes=1)
+
+    response = MagicMock()
+    response.status = 200
+    response.read.return_value = (
+        b'{"schema_version":2,"ok":false,"overall_state":"degraded",'
+        b'"generated_at":"2026-08-29T16:50:00Z",'
+        b'"probes":{"radon-api":{"state":"up"},"radon-relay":{"state":"up"},'
+        b'"radon-nextjs":{"state":"up"},"ib-gateway":{"state":"down"}},'
+        b'"units":{"radon-api.service":{"state":"up"},'
+        b'"radon-relay.service":{"state":"up"},'
+        b'"radon-nextjs.service":{"state":"up"},'
+        b'"radon-ib-gateway.service":{"state":"up"}}}'
+    )
+    with patch.object(external_probe.urllib.request, "urlopen") as urlopen:
+        urlopen.return_value.__enter__.return_value = response
+        outcome = external_probe.check_external_probe(now=NOW)
 
     assert outcome.status == "healthy"
     assert outcome.fired is False
@@ -323,7 +429,7 @@ def test_deploy_window_5xx_with_sick_aggregate_still_pages(tmp_path, monkeypatch
         "fetch_external_probe",
         lambda timeout, source=None: _row(ok=0, age_minutes=2, detail="status_http_502"),
     )
-    monkeypatch.setattr(external_probe, "_local_aggregate_is_healthy", lambda: False)
+    monkeypatch.setattr(external_probe, "_local_aggregate_serving_path_ok", lambda: False)
     _deploy_marker(tmp_path, monkeypatch, marker_age_minutes=1)
 
     outcome = external_probe.check_external_probe(now=NOW)
@@ -340,7 +446,7 @@ def test_edge_5xx_outside_deploy_window_pages(tmp_path, monkeypatch) -> None:
         "fetch_external_probe",
         lambda timeout, source=None: _row(ok=0, age_minutes=2, detail="status_http_502"),
     )
-    monkeypatch.setattr(external_probe, "_local_aggregate_is_healthy", lambda: True)
+    monkeypatch.setattr(external_probe, "_local_aggregate_serving_path_ok", lambda: True)
     _deploy_marker(tmp_path, monkeypatch, marker_age_minutes=120)
 
     outcome = external_probe.check_external_probe(now=NOW)
@@ -357,7 +463,72 @@ def test_non_5xx_reason_inside_deploy_window_pages(tmp_path, monkeypatch) -> Non
         "fetch_external_probe",
         lambda timeout, source=None: _row(ok=0, age_minutes=2, detail="ping_unreachable:timeout"),
     )
-    monkeypatch.setattr(external_probe, "_local_aggregate_is_healthy", lambda: True)
+    monkeypatch.setattr(external_probe, "_local_aggregate_serving_path_ok", lambda: True)
+    _deploy_marker(tmp_path, monkeypatch, marker_age_minutes=1)
+
+    outcome = external_probe.check_external_probe(now=NOW)
+
+    assert outcome.fired is True
+    assert outcome.severity == "P1"
+
+
+def test_deploy_window_caddy_status_unreachable_is_suppressed(
+    tmp_path, monkeypatch
+) -> None:
+    # 2026-08-29 23:05Z page 1b0b049c: after the Caddy never-502 floor shipped,
+    # healthd-down during deploy is HTTP 200 status_unreachable:caddy, not
+    # status_http_502. Same collateral as 5xx; suppress it the same way.
+    from scripts.watchdog import external_probe
+
+    monkeypatch.setattr(
+        external_probe.turso_http,
+        "fetch_external_probe",
+        lambda timeout, source=None: _row(
+            ok=0, age_minutes=2, detail="status_unreachable:caddy"
+        ),
+    )
+    monkeypatch.setattr(external_probe, "_local_aggregate_serving_path_ok", lambda: True)
+    _deploy_marker(tmp_path, monkeypatch, marker_age_minutes=1)
+
+    outcome = external_probe.check_external_probe(now=NOW)
+
+    assert outcome.status == "healthy"
+    assert outcome.fired is False
+    assert "deploy window" in outcome.message
+
+
+def test_caddy_status_unreachable_outside_deploy_window_pages(
+    tmp_path, monkeypatch
+) -> None:
+    from scripts.watchdog import external_probe
+
+    monkeypatch.setattr(
+        external_probe.turso_http,
+        "fetch_external_probe",
+        lambda timeout, source=None: _row(
+            ok=0, age_minutes=2, detail="status_unreachable:caddy"
+        ),
+    )
+    monkeypatch.setattr(external_probe, "_local_aggregate_serving_path_ok", lambda: True)
+    _deploy_marker(tmp_path, monkeypatch, marker_age_minutes=120)
+
+    outcome = external_probe.check_external_probe(now=NOW)
+
+    assert outcome.fired is True
+    assert outcome.severity == "P1"
+
+
+def test_aggregate_invalid_inside_deploy_window_still_pages(
+    tmp_path, monkeypatch
+) -> None:
+    from scripts.watchdog import external_probe
+
+    monkeypatch.setattr(
+        external_probe.turso_http,
+        "fetch_external_probe",
+        lambda timeout, source=None: _row(ok=0, age_minutes=2, detail="aggregate_invalid"),
+    )
+    monkeypatch.setattr(external_probe, "_local_aggregate_serving_path_ok", lambda: True)
     _deploy_marker(tmp_path, monkeypatch, marker_age_minutes=1)
 
     outcome = external_probe.check_external_probe(now=NOW)
@@ -374,7 +545,7 @@ def test_inflight_transition_journal_suppresses_fresh_edge_5xx(tmp_path, monkeyp
         "fetch_external_probe",
         lambda timeout, source=None: _row(ok=0, age_minutes=2, detail="ping_http_503"),
     )
-    monkeypatch.setattr(external_probe, "_local_aggregate_is_healthy", lambda: True)
+    monkeypatch.setattr(external_probe, "_local_aggregate_serving_path_ok", lambda: True)
     _deploy_marker(tmp_path, monkeypatch, journal_exists=True)
 
     outcome = external_probe.check_external_probe(now=NOW)
@@ -391,7 +562,7 @@ def test_missing_deploy_markers_never_suppress(tmp_path, monkeypatch) -> None:
         "fetch_external_probe",
         lambda timeout, source=None: _row(ok=0, age_minutes=2, detail="status_http_502"),
     )
-    monkeypatch.setattr(external_probe, "_local_aggregate_is_healthy", lambda: True)
+    monkeypatch.setattr(external_probe, "_local_aggregate_serving_path_ok", lambda: True)
     _deploy_marker(tmp_path, monkeypatch)
 
     outcome = external_probe.check_external_probe(now=NOW)

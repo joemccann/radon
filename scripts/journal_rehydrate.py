@@ -26,7 +26,8 @@ Failure mode:
     journal.
 
 Usage:
-    python3 journal_rehydrate.py [--days 365]
+    python3 journal_rehydrate.py --from-file statement.xml
+    python3 journal_rehydrate.py [--days 365] --sendrequest
 
 Output (stdout):
     {"imported": N, "skipped": M, "latest_date": "YYYY-MM-DD", "ok": true}
@@ -648,10 +649,19 @@ def rehydrate_from_executions(
     return {"trades": trades}, imported, skipped, latest_date
 
 
+class _XmlExecutionFetcher:
+    def __init__(self, executions: List[Any]) -> None:
+        self._executions = executions
+
+    def fetch_executions(self, days_back: int = 365) -> List[Any]:
+        return self._executions
+
+
 def rehydrate(
     days: int = 365,
     fetcher: Optional[Any] = None,
     existing: Optional[Dict[str, Any]] = None,
+    xml_text: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Run the full rehydrate cycle and persist new rows to Turso.
 
@@ -659,7 +669,31 @@ def rehydrate(
         days: Lookback window for the Flex Query.
         fetcher: Optional pre-built FlexQueryFetcher for tests/mocking.
         existing: Optional existing journal-shaped payload for tests.
+        xml_text: Saved Flex statement. Makes no network call.
     """
+    # Only the saved-statement path can see per-row parse drops; a live
+    # `fetch_executions` returns rows and no tally. R-330.
+    dropped_rows = 0
+    if xml_text is not None:
+        from lib.flex_classify import TRADES, FlexClassifyError, classify_flex_xml
+        from trade_blotter.flex_query import FlexQueryFetcher
+
+        try:
+            kind = classify_flex_xml(xml_text)
+        except FlexClassifyError as exc:
+            return {"ok": False, "imported": 0, "skipped": 0, "error": str(exc)}
+        if kind != TRADES:
+            return {
+                "ok": False,
+                "imported": 0,
+                "skipped": 0,
+                "error": f"not_trade_statement:{kind}",
+            }
+        executions, dropped_rows = FlexQueryFetcher(
+            token="x", query_id="x"
+        ).parse_xml_with_drops(xml_text)
+        fetcher = _XmlExecutionFetcher(executions)
+
     if fetcher is None:
         token = os.environ.get("IB_FLEX_TOKEN")
         query_id = os.environ.get("IB_FLEX_QUERY_ID")
@@ -702,23 +736,52 @@ def rehydrate(
     updated, imported, skipped, latest_date = rehydrate_from_executions(executions, existing)
 
     if imported > 0:
+        # The loop is per-entry with no transaction, so entries written before
+        # a failure ARE committed. Reporting `imported: 0` sent the operator
+        # to re-run against a canonical store they believed was untouched.
+        # R-327.
+        written = 0
         try:
             from db.writer import upsert_journal_entry
             for entry in updated["trades"][-imported:]:
                 trade_id = str(entry.get("ib_exec_id") or f"{entry.get('date')}#{entry.get('id')}")
                 upsert_journal_entry(trade_id, entry, filled_at=entry.get("date"))
+                written += 1
         except Exception as exc:  # noqa: BLE001
             return {
                 "ok": False,
-                "imported": 0,
+                "imported": written,
                 "skipped": skipped,
-                "error": f"Failed to write Turso journal: {exc}",
+                "dropped_rows": dropped_rows,
+                "error": (
+                    f"Failed to write Turso journal after {written} of "
+                    f"{imported} entries: {exc}"
+                ),
             }
+
+    if dropped_rows:
+        # Fail CLOSED on a row-level parse drop. `_parse_xml` warns and
+        # continues per row, so a file whose tail carries a corrupted
+        # attribute imported the head and returned ok — the missing fills were
+        # not in `skipped` either, and nothing downstream could tell. R-330.
+        return {
+            "ok": False,
+            "imported": imported,
+            "skipped": skipped,
+            "dropped_rows": dropped_rows,
+            "latest_date": latest_date,
+            "executions_seen": len(executions),
+            "error": (
+                f"{dropped_rows} <Trade> row(s) failed to parse; the canonical "
+                "trades store would be silently short by that many fills"
+            ),
+        }
 
     return {
         "ok": True,
         "imported": imported,
         "skipped": skipped,
+        "dropped_rows": 0,
         "latest_date": latest_date,
         "executions_seen": len(executions),
     }
@@ -732,9 +795,30 @@ def rehydrate(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--days", type=int, default=365, help="Flex Query lookback window")
+    parser.add_argument(
+        "--from-file",
+        metavar="PATH",
+        help="Parse a saved Flex statement. Makes no Flex Web Service call.",
+    )
+    parser.add_argument(
+        "--sendrequest",
+        action="store_true",
+        help="Permit a live Flex SendRequest (Sunday recon, after embargo).",
+    )
     args = parser.parse_args()
 
-    result = rehydrate(days=args.days)
+    if args.from_file:
+        xml_text = Path(args.from_file).read_text(encoding="utf-8")
+        result = rehydrate(days=args.days, xml_text=xml_text)
+    else:
+        try:
+            from utils.flex_send import assert_sendrequest_permitted
+
+            assert_sendrequest_permitted(allowed=args.sendrequest)
+        except Exception as exc:
+            result = {"ok": False, "imported": 0, "skipped": 0, "error": str(exc)}
+        else:
+            result = rehydrate(days=args.days)
     print(json.dumps(result))
     return 0 if result.get("ok") else 1
 

@@ -168,41 +168,41 @@ describe("classifyOrderSession eligibility", () => {
     expect(session.eligibility).toBe("rth-only");
   });
 
-  it("classifies FUT as extended even without outsideRth", () => {
-    const session = classifyOrderSession(
-      makeOrder({
-        tif: "GTC",
-        contract: {
-          conId: 3,
-          symbol: "ES",
-          secType: "FUT",
-          strike: null,
-          right: null,
-          expiry: "202609",
-        },
-      }),
-      OPEN_NOW,
-    );
-    expect(session.eligibility).toBe("extended");
+  // R-338: these two asserted the defect. `outsideRth: false` is what
+  // `/api/orders/place` actually transmits for a futures order entered during
+  // RTH (`body.outsideRth ?? getMarketStateFromDate() !== "open"`), so
+  // "extended even without outsideRth" made the chip promise an after-hours
+  // fill for an order that is inert until the next morning. The STK rule
+  // beside it always required the flag. Both cases keep their original shape
+  // and now assert the eligibility on BOTH sides of the flag.
+  it("classifies FUT as extended only when the order opted in", () => {
+    const contract = {
+      conId: 3, symbol: "ES", secType: "FUT",
+      strike: null, right: null, expiry: "202609",
+    };
+    expect(
+      classifyOrderSession(makeOrder({ tif: "GTC", contract }), OPEN_NOW).eligibility,
+    ).toBe("rth-only");
+    expect(
+      classifyOrderSession(
+        makeOrder({ tif: "GTC", contract, outsideRth: true }), OPEN_NOW,
+      ).eligibility,
+    ).toBe("extended");
   });
 
-  it("classifies FOP as extended even without outsideRth", () => {
-    const session = classifyOrderSession(
-      makeOrder({
-        tif: "GTC",
-        contract: {
-          conId: 4,
-          symbol: "ES",
-          secType: "FOP",
-          strike: 5000,
-          right: "C",
-          expiry: "202609",
-        },
-      }),
-      OPEN_NOW,
+  it("classifies FOP as extended only when the order opted in", () => {
+    const contract = {
+      conId: 4, symbol: "ES", secType: "FOP",
+      strike: 5000, right: "C", expiry: "202609",
+    };
+    expect(
+      classifyOrderSession(makeOrder({ tif: "GTC", contract }), OPEN_NOW).eligibility,
+    ).toBe("rth-only");
+    const optedIn = classifyOrderSession(
+      makeOrder({ tif: "GTC", contract, outsideRth: true }), OPEN_NOW,
     );
-    expect(session.eligibility).toBe("extended");
-    expect(session.hint).toBe("Can fill after 16:00 ET.");
+    expect(optedIn.eligibility).toBe("extended");
+    expect(optedIn.hint).toBe("Can fill after 16:00 ET.");
   });
 });
 
@@ -301,5 +301,139 @@ describe("classifyDisplayRowSession", () => {
     expect(session.eligibility).toBe("rth-only");
     expect(session.label).toBe("RTH");
     expect(session.hint).toBe("Will not fill after 16:00 ET.");
+  });
+});
+
+/* ── R-336 / R-337 / R-338 / R-367 / REL-121 ───────────────────────────────
+ *
+ * The chip makes a definitive fill claim off `marketStateAt`, which models
+ * neither US holidays nor early closes. Four independent ways it was wrong:
+ *
+ *  R-336 at 14:30 ET on a weekday holiday or an early-close day it read RTH,
+ *        every resting DAY order was presented as still fillable, and the
+ *        EXPIRES warning that would otherwise fire post-close was suppressed.
+ *  R-337 a grouped combo carries `tif: "MIXED"` when its legs disagree, which
+ *        fell through to the GTC branch and was labelled NEXT RTH — "survives
+ *        to the next session". In fact the DAY leg is cancelled at the close
+ *        and the GTC leg rests alone as a naked short.
+ *  R-338 FUT/FOP returned "extended" unconditionally, ignoring the order's own
+ *        `outsideRth`, where the STK rule correctly requires it. A futures
+ *        order entered at 11:00 ET is transmitted with `outsideRth: false` and
+ *        still read EXT LIVE at 18:00 ET.
+ *  R-367 the extended branch returned BEFORE the TIF check, so an
+ *        extended-eligible DAY order could never be labelled EXPIRES — the
+ *        operator got an expiry warning or not based on a flag unrelated to
+ *        expiry.
+ */
+
+const HOLIDAY_1430_ET = new Date("2026-11-26T19:30:00.000Z"); // Thanksgiving
+const EARLY_CLOSE_1430_ET = new Date("2026-11-27T19:30:00.000Z"); // 13:00 ET close
+const EARLY_CLOSE_1200_ET = new Date("2026-11-27T17:00:00.000Z"); // before the 13:00 close
+
+function fut(overrides: Partial<OpenOrder> = {}): OpenOrder {
+  return makeOrder({
+    symbol: "ES",
+    contract: {
+      conId: 99, symbol: "ES", secType: "FUT",
+      strike: null, right: null, expiry: "2026-12-18",
+    },
+    ...overrides,
+  });
+}
+
+describe("session chip — calendar awareness (R-336)", () => {
+  it("does not claim RTH at 14:30 ET on a weekday holiday", () => {
+    const session = classifyOrderSession(makeOrder({ tif: "DAY" }), HOLIDAY_1430_ET);
+    expect(session.label).not.toBe("RTH");
+    expect(session.marketState).not.toBe(MarketState.OPEN);
+  });
+
+  it("does not claim RTH at 14:30 ET on an early-close day", () => {
+    const session = classifyOrderSession(makeOrder({ tif: "DAY" }), EARLY_CLOSE_1430_ET);
+    expect(session.label).not.toBe("RTH");
+  });
+
+  it("still claims RTH before the early close on that same day", () => {
+    const session = classifyOrderSession(makeOrder({ tif: "DAY" }), EARLY_CLOSE_1200_ET);
+    expect(session.label).toBe("RTH");
+  });
+
+  it("warns that a DAY order expires once the holiday session is over", () => {
+    const session = classifyOrderSession(makeOrder({ tif: "DAY" }), HOLIDAY_1430_ET);
+    expect(session.label).toBe("EXPIRES");
+    expect(session.tone).toBe("expires");
+  });
+
+  it("leaves an ordinary full session exactly as before", () => {
+    expect(classifyOrderSession(makeOrder({ tif: "DAY" }), OPEN_NOW).label).toBe("RTH");
+  });
+});
+
+describe("session chip — MIXED combo tif (R-337)", () => {
+  it("does not label a MIXED combo containing a DAY leg as NEXT RTH", () => {
+    const session = classifyOrderSession(
+      { tif: "MIXED", contract: { secType: "BAG" } },
+      CLOSED_NOW,
+    );
+    expect(session.label).not.toBe("NEXT RTH");
+    expect(session.label).toBe("EXPIRES");
+    expect(session.tone).toBe("expires");
+  });
+
+  it("a genuinely all-GTC combo still reads NEXT RTH", () => {
+    const session = classifyOrderSession(
+      { tif: "GTC", contract: { secType: "BAG" } },
+      CLOSED_NOW,
+    );
+    expect(session.label).toBe("NEXT RTH");
+  });
+
+  it("drives the same verdict through the display-row path", () => {
+    const row = comboRow([
+      opt({ orderId: 1, tif: "DAY" }),
+      opt({ orderId: 2, tif: "GTC" }),
+    ]);
+    row.tif = "MIXED";
+    expect(classifyDisplayRowSession(row, CLOSED_NOW).label).toBe("EXPIRES");
+  });
+});
+
+describe("session chip — futures need outsideRth (R-338)", () => {
+  it("does not render EXT LIVE for a futures order with outsideRth false", () => {
+    const session = classifyOrderSession(
+      fut({ tif: "GTC", outsideRth: false }),
+      EXTENDED_NOW,
+    );
+    expect(session.label).not.toBe("EXT LIVE");
+    expect(session.eligibility).toBe("rth-only");
+  });
+
+  it("still renders EXT LIVE for a futures order that opted in", () => {
+    const session = classifyOrderSession(
+      fut({ tif: "GTC", outsideRth: true }),
+      EXTENDED_NOW,
+    );
+    expect(session.label).toBe("EXT LIVE");
+    expect(session.eligibility).toBe("extended");
+  });
+});
+
+describe("session chip — DAY expiry on the extended branch (R-367)", () => {
+  it("warns a DAY order with outsideRth true that IB cancels it at 20:00 ET", () => {
+    const session = classifyOrderSession(
+      makeOrder({ tif: "DAY", outsideRth: true }),
+      EXTENDED_NOW,
+    );
+    expect(session.tone).toBe("expires");
+    expect(session.hint).toMatch(/20:00 ET/);
+  });
+
+  it("a GTC extended order keeps the plain EXT LIVE chip", () => {
+    const session = classifyOrderSession(
+      makeOrder({ tif: "GTC", outsideRth: true }),
+      EXTENDED_NOW,
+    );
+    expect(session.label).toBe("EXT LIVE");
+    expect(session.tone).toBe("extended");
   });
 });

@@ -25,37 +25,19 @@ NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
 
 ### Root `.env`
 
-```bash
-MENTHORQ_USER=
-MENTHORQ_PASS=
+The variable inventory is owned by the example files, not by this page:
+[`.env.example`](../.env.example) (laptop and combined-host root),
+[`cloud/.env.example`](../cloud/.env.example) (template for Hetzner
+`/etc/radon/env`, including `RADON_HOST_ROLE` and the split-topology
+`RADON_IB_REMOTE_*` block) and
+[`cloud/config/required-env.txt`](../cloud/config/required-env.txt) (what the
+deploy preflight refuses without). Production values: `IB_GATEWAY_MODE=cloud`,
+`RADON_MODE=hetzner`, `IB_GATEWAY_COMPOSE_DIR=/home/radon/radon/cloud`;
+`IB_GATEWAY_HOST` is loopback on a combined or broker host and the broker's
+`10.0.0.4` on an app host. Read Flex query ids from the live env, never from a
+doc (root `CLAUDE.md` "Credentials").
 
-# IB Gateway
-IB_GATEWAY_HOST=127.0.0.1               # loopback on Hetzner; ib-gateway only for special topologies
-IB_GATEWAY_PORT=4001
-IB_GATEWAY_MODE=cloud                  # Hetzner production. Local laptop: docker | launchd
-IB_GATEWAY_COMPOSE_DIR=/home/radon/radon/cloud   # monorepo cloud path on Hetzner (not ~/radon-cloud)
-RADON_MODE=hetzner                      # Hetzner production. Laptop: local
-
-# Clerk JWT validation (FastAPI + WS relay)
-CLERK_JWKS_URL=
-CLERK_ISSUER=
-ALLOWED_USER_IDS=user_...               # comma-separated allowlist
-
-# Newsfeed scraper
-THEMARKETEAR_EMAIL=
-THEMARKETEAR_PASSWORD=
-
-# IB Flex Web Service (Hetzner)
-IB_FLEX_TOKEN=
-IB_FLEX_QUERY_ID=1422766                # blotter
-IB_FLEX_NAV_QUERY_ID=1497709            # cash transactions
-
-# Equibles (13F, ATS, COT, filings, short crowding)
-EQUIBLES_API_KEY=
-
-# Loopback / off-box probes (not a Clerk session)
-RADON_PROBE_FRESHNESS_TOKEN=
-```
+**Robinhood token file.** `ROBINHOOD_MCP_TOKEN_FILE` (production `/etc/radon/rh-mcp.json`, `0600`, radon-owned) holds `access_token` / `refresh_token` / `client_id` / `expires_at`; the env vars `ROBINHOOD_MCP_TOKEN`, `ROBINHOOD_MCP_REFRESH_TOKEN`, `ROBINHOOD_MCP_CLIENT_ID` only bootstrap it on first run. The file is rewritten atomically by the client's refresh against `https://api.robinhood.com/oauth2/token/` — it cannot live inside the read-only env file, and it must never be committed. Access tokens expire ~3 days; with no credentials at all every ladder skips Robinhood and falls through to Yahoo.
 
 `scripts/cta_sync_service.py` and `scripts/run_cta_sync.sh` parse `.env` values literally instead of shell-sourcing them, so unquoted secrets containing shell metacharacters (`$`, backticks, etc.) survive the scheduled CTA path.
 
@@ -122,6 +104,16 @@ Deeper troubleshooting and full Docker setup live in [`docs/ib-gateway-docker.md
 
 Hetzner host systemd is the production surface. Laptop dev uses launchd plists in `config/`. Laptop `com.radon.data-refresh` must stay unloaded. VPS `radon-flow-refresh.timer` owns hourly scanner/discover/flow during ET RTH.
 
+**Nightly loops on the Mac mini** (launchd, all fire 00:00 local, audit then remediate). Each runs in its own clone under `~/radon-weekend/` that hard-resets to `origin/main` every phase, shares `~/radon-weekend/venv` + `.env`, and holds a per-clone `.weekend-runner.lock`. Never point another job, worktree, or responder at these clones. Loop semantics live in `.claude/skills/<loop>/SKILL.md`; wrapper mechanics in the wrapper script; state on the rolling GitHub issue carrying the label.
+
+| Loop | Clone | Wrapper / plist | Issue label |
+|---|---|---|---|
+| reliability | `~/radon-weekend/radon` | `scripts/reliability_weekend.sh` / `config/com.radon.reliability-daily.plist` | `reliability-nightly` |
+| testing | `~/radon-weekend/radon-testing` | `scripts/testing_weekend.sh` / `config/com.radon.testing-daily.plist` | `testing-nightly` |
+| ci-performance | `~/radon-weekend/radon-ci-performance` | `scripts/ci_performance_nightly.sh` / `config/com.radon.ci-performance-daily.plist` | `ci-performance-nightly` |
+| documentation | `~/radon-weekend/radon-documentation` | `scripts/documentation_nightly.sh` / `config/com.radon.documentation-daily.plist` | `documentation-nightly` |
+| security | `~/radon-weekend/radon-security` | `scripts/security_nightly.sh` / `config/com.radon.security-daily.plist` | `security-nightly` |
+
 | Service | Cadence | Purpose |
 |---------|---------|---------|
 | `radon-ib-gateway` | always-on | Broker session for live quotes, execution, reports |
@@ -130,7 +122,7 @@ Hetzner host systemd is the production surface. Laptop dev uses launchd plists i
 | `radon-nextjs` | always-on | Next.js terminal at `app.radon.run` |
 | `radon-newsfeed` | 120s loop | Headless Playwright scraper for The Market Ear |
 | `radon-monitor` | 30s loop | Fills, exit orders, journal sync, cash flow handler |
-| `radon-health` | always-on | **Isolated** stdlib health daemon on `:8330` (see Health monitoring below). NO dependency on `radon-ib-gateway` — survives the cascade-stop. |
+| `radon-health` | always-on | **Isolated** stdlib health daemon on `:8330` (see Health monitoring below). NO dependency on `radon-ib-gateway`; a Gateway stop never touches it. |
 | `radon-refresh.timer` | 60s | Schedules data-refresh sweeps |
 | `radon-vcg-refresh.timer` | Mon-Fri 13-21 UTC every 5 min | Autonomous VCG scan |
 | `radon-portfolio-sync.timer` | Mon-Fri 13-21 UTC every 60s | Autonomous portfolio sync |
@@ -142,7 +134,7 @@ Hetzner host systemd is the production surface. Laptop dev uses launchd plists i
 | `radon-vol-cone.timer` | Mon-Fri 20:45 UTC | Completed-session cheap-wing cone (16:45 ET, after the close grace). Spec: [`indicators/vol-cone.md`](indicators/vol-cone.md) |
 | `radon-vol-cone-intraday.timer` | Mon-Fri 09:00-16:30 ET every 15 min | Live sample ranked against that stored cone, so the tab is tradeable during the session instead of a day stale. Holds without spending a UW request outside market hours or under a nearly-spent daily budget, and a held pass no longer republishes the shared `vol-cone` snapshot. The 16:45 ET slot is deliberately absent: in EDT it is 20:45 UTC, the EOD writer's own minute (R-128). |
 | `radon-vixcor.timer` | daily 02:35 UTC | VIX x COR3M 20-session correlation, 15 min behind `radon-cor`. Spec: [`indicators/vixcor.md`](indicators/vixcor.md) |
-| `radon-credit-spread.timer` | daily 21:45 UTC | HYG vs SPX credit-equity series. IB first, then UW, then Yahoo. Spec: [`indicators/credit.md`](indicators/credit.md). Units are in `setup-vps.sh`; root install-copy still owed. |
+| `radon-credit-spread.timer` | daily 21:45 UTC | HYG vs SPX credit-equity series. IB first, then UW, then Robinhood (when configured), then Yahoo. Spec: [`indicators/credit.md`](indicators/credit.md). Units are in `setup-vps.sh`; root install-copy still owed. |
 | `radon-incident-watchdog.timer` | every 5 min | Writes `data/incidents/`. Cases: [`incident-runbook.md`](incident-runbook.md) |
 | `radon-grok-page-responder.timer` | 30s after last cycle | Headless Grok auto-fix from dedicated clone. Spec: [`grok-page-responder.md`](grok-page-responder.md) |
 
@@ -163,13 +155,13 @@ From the laptop: `ssh root@ib-gateway radon stop`. The operator CLI is installed
 
 The health surface is **decoupled from the trading stack** so it keeps reporting precisely when the stack is down. Two layers plus an off-box witness:
 
-- **`radon-health.service`** (`scripts/health_service/`, stdlib-only) — a standalone daemon on `127.0.0.1:8330` with **no `Requires=`/`After=radon-ib-gateway`**, so the cascade-stop (stop `radon-ib-gateway` → clean-stops api/relay/monitor; `Restart=always` does NOT re-fire) cannot take it down. `Restart=always` + `StartLimitIntervalSec=60`/`StartLimitBurst=5` so a crash-loop parks as `failed`, not an invisible hot-loop. Imports **nothing** from the trading stack (enforced by a subprocess isolation test).
+- **`radon-health.service`** (`scripts/health_service/`, stdlib-only) — a standalone daemon on `127.0.0.1:8330` with **no `Requires=`/`After=radon-ib-gateway`**. (Since 44e89e1b no app unit is `PartOf=` the Gateway either: `radon-api`, `radon-relay`, `radon-monitor` carry `After=` ordering only, so a Gateway stop or 2FA restart leaves the app plane running. A unit that IS cleanly stopped does not `Restart=always` back; use `radon restart`.) `Restart=always` + `StartLimitIntervalSec=60`/`StartLimitBurst=5` so a crash-loop parks as `failed`, not an invisible hot-loop. Imports **nothing** from the trading stack (enforced by a subprocess isolation test).
   - `GET /healthz` — zero-I/O static `200` (liveness pin).
   - `GET /status` — **always `200`**; concurrent live probes (`radon-api` via `/health/lite`, relay/Next.js/IB-gateway TCP) + cached `systemctl` unit states (`active(exited)` reads `up`) + the Turso `service_health` table (read over stdlib libSQL HTTP — no libsql import; degrades to `unknown` on any failure). Degraded sources are body fields, never error codes.
-- **Caddy edge** (`app.radon.run`): `GET /edge-health/ping` — static `respond "ok" 200`, the **never-502 floor** (depends only on Caddy). `GET /edge-health/status` → `reverse_proxy 127.0.0.1:8330`. **Caveat:** Caddy `handle_response` catches upstream 5xx, NOT dial failures, so `/edge-health/status` returns `502` when the daemon process is down — `/edge-health/ping` is the guaranteed floor.
+- **Caddy edge** (`app.radon.run`): `GET /edge-health/ping` — static `respond "ok" 200`, the **never-502 floor** (depends only on Caddy). `GET /edge-health/status` → `reverse_proxy 127.0.0.1:8330`. **Caveat:** every failure mode of `/edge-health/status` is ALSO `200`: an upstream 5xx (`handle_response @down`) and a dial-refused daemon (`handle_errors`, the Caddy-synthesized 502) are both rewritten to `{"reachable":false,"observer":"caddy"}`, i.e. `200` with `reachable:false` and no `ok` field. A status-code-only uptime monitor therefore reads UP in every state except Caddy dead: pin the external monitor on the body (`ok` is a boolean and `overall_state` is `up`), never on the status code. The repo prober already does (`scripts/health_probe/probe.py` `_classify_status_payload` treats the synthetic body as `invalid`). `/edge-health/ping` is the guaranteed floor.
 - **Off-box prober (Tier-3):** `.github/workflows/external-health-probe.yml` (GitHub Actions, `*/5`) hits the public edge from off the VPS and UPSERTs to the Turso `external_probe` table (`scripts/health_probe/`), so a whole-box outage is still recorded externally. `reader.py` is the dead-man's-switch (flags stale `external_probe` rows). Needs repo secrets `TURSO_DB_URL`/`TURSO_AUTH_TOKEN`.
 
-**Consumers:** the always-on IB status chip (`web/lib/IBStatusContext.tsx`) reads `/edge-health/status` in prod (falls back to `/api/admin/health` in dev / as a prod safety net). The admin panel stays on `/api/admin/health` (needs `managed_accounts`). The `/health` payload itself is **trust-scoped**: public/proxied callers get `{"status":"ok"}` only; account/state detail is local/tailnet only. See `scripts/api/CLAUDE.md` and `scripts/health_service/CLAUDE.md`.
+**Consumers:** the always-on IB status chip (`web/lib/IBStatusContext.tsx`) reads `/edge-health/status` in prod (falls back to `/api/admin/health` in dev / as a prod safety net). The admin panel stays on `/api/admin/health` (needs `managed_accounts`). The `/health` payload itself is **trust-scoped**: public/proxied callers get `{"status":"ok"}` only; account/state detail goes to trusted peers only (loopback, tailnet `100.64.0.0/10`, Hetzner private net `10.0.0.0/16`; never a request carrying reverse-proxy forwarding headers). Any watchdog or off-box probe that needs the full payload must originate from one of those peers, not via Caddy. See `scripts/api/CLAUDE.md` and `scripts/health_service/CLAUDE.md`.
 
 **Recovery heartbeat:** the `awaiting_2fa → authenticated` pool reconnect (`pool.reconnect_all`) is driven server-side by a FastAPI lifespan task (`_ib_recovery_heartbeat_loop`, 15s) — independent of any browser poll, since the chip is now a read-only consumer. The every-minute `radon-ib-watchdog` `/health` curl is the slower backstop.
 

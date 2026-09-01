@@ -121,6 +121,32 @@ def test_healthy_start_does_not_take_lease(control_env):
     assert "compose up" not in log.read_text()
 
 
+def test_reset_lease_does_not_touch_compose(control_env):
+    env, state, log, lock = control_env
+    state.write_text("running\n")
+    _acquire(env, "radon-cloud.ib-gateway-control")
+    assert lock.exists()
+
+    result = _run_control(env, "reset-lease")
+
+    assert result.returncode == 0, result.stderr
+    assert "released" in result.stdout.lower() or "released" in result.stderr.lower()
+    assert not log.exists() or "compose" not in log.read_text()
+
+
+def test_app_role_refuses_start_even_if_container_is_stopped(control_env):
+    env, state, log, _lock = control_env
+    env["RADON_HOST_ROLE"] = "app"
+    state.write_text("stopped\n")
+
+    result = _run_control(env, "start")
+
+    assert result.returncode != 0
+    assert "RADON_HOST_ROLE=app" in result.stderr
+    assert state.read_text().strip() == "stopped"
+    assert not log.exists() or "compose up" not in log.read_text()
+
+
 def test_dead_container_start_acquires_lease_before_compose(control_env):
     env, state, log, lock = control_env
     state.write_text("stopped\n")
@@ -1221,4 +1247,42 @@ def test_start_still_defers_to_a_lease_with_a_live_gateway_port(control_env):
         listener.close()
 
     assert result.returncode == 75, result.stdout + result.stderr
+    assert state.read_text().strip() == "stopped"
+
+
+def test_app_role_in_canonical_env_file_refuses_start(control_env, tmp_path):
+    """REL-169 (R-472a): the role lives in /etc/radon/env for every other
+    reader; the helper must refuse on it even when the legacy env file and
+    the process environment carry no role at all."""
+    env, state, log, _lock = control_env
+    env.pop("RADON_HOST_ROLE", None)
+    canonical = tmp_path / "etc-radon-env"
+    canonical.write_text("IB_GATEWAY_MODE=cloud\nRADON_HOST_ROLE=app\n")
+    legacy = tmp_path / "legacy.env"
+    legacy.write_text("IB_GATEWAY_MODE=cloud\n")
+    env["RADON_ENV_FILE"] = str(canonical)
+    env["RADON_DEPLOY_ENV_FILE"] = str(legacy)
+    state.write_text("stopped\n")
+
+    result = _run_control(env, "start")
+
+    assert result.returncode != 0
+    assert "RADON_HOST_ROLE=app" in result.stderr
+    assert state.read_text().strip() == "stopped"
+    assert not log.exists() or "compose up" not in log.read_text()
+
+
+def test_role_in_legacy_env_file_still_read_when_canonical_is_absent(control_env, tmp_path):
+    env, state, log, _lock = control_env
+    env.pop("RADON_HOST_ROLE", None)
+    env["RADON_ENV_FILE"] = str(tmp_path / "does-not-exist")
+    legacy = tmp_path / "legacy.env"
+    legacy.write_text("RADON_HOST_ROLE='app'\n")
+    env["RADON_DEPLOY_ENV_FILE"] = str(legacy)
+    state.write_text("stopped\n")
+
+    result = _run_control(env, "start")
+
+    assert result.returncode != 0
+    assert "RADON_HOST_ROLE=app" in result.stderr
     assert state.read_text().strip() == "stopped"

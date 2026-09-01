@@ -19,9 +19,10 @@ import re
 import sys
 from datetime import datetime, timedelta, timezone
 import sys
+import random
 import time
 import uuid
-from collections import deque
+from collections import OrderedDict, deque
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -65,11 +66,12 @@ from api import services as admin_services
 from clients.ib_client import DEFAULT_GATEWAY_PORT
 from api.pool_order_manage import pool_cancel_order, pool_modify_order
 from api.order_audit import record_order_event
-from api.auth import verify_clerk_jwt, verify_api_key, is_trusted_local_request
+from api.auth import verify_clerk_jwt, verify_clerk_bearer, verify_api_key, is_trusted_local_request, is_private_net_probe
 from api.ws_ticket import create_ticket, validate_ticket
 from api.routes.historical import router as historical_router
 from api.routes.preferences import router as preferences_router
 from api.routes.assistant_market import router as assistant_market_router
+from api.routes.streaks import router as streaks_router
 
 import app_preferences
 from clients.menthorq_dashboard_client import (
@@ -434,13 +436,79 @@ ORDERS_SYNC_SHED_RETRY_DELAY_SECS = 8.0
 # Operator POST /flow-analysis/{ticker} shares that general lane. Fail-fast
 # 502 leaves the UI on ANALYZING with a raw capacity error. Retry the claim
 # with the same budget as orders-sync; persistent shed still 502s.
-FLOW_REPORT_SHED_RETRIES = 2
-FLOW_REPORT_SHED_RETRY_DELAY_SECS = 8.0
+# A shed is fail-fast — `_claim_subprocess_slot` returns False with no awaits —
+# so 2 retries cost ~21s of a 120s budget and 502'd while the journal showed
+# general-lane slots freeing every few seconds. /flow-analysis/AMZN served a
+# Jun 16 report through 2026-08-28 on exactly that. The deadline below is the
+# real bound; this is the ceiling that keeps the loop finite.
+FLOW_REPORT_SHED_RETRIES = 12
+# NOT 8.0 like orders-sync: a shared constant put both retry chains on the
+# same 8s grid, contending in lockstep against a lane already saturated. R-355.
+FLOW_REPORT_SHED_RETRY_DELAY_SECS = 5.0
+# Uncapped, the exponential doubling spends the whole budget on two sleeps.
+_SHED_BACKOFF_CAP_SECS = 20.0
+# A 20-session AMZN pull measured 81s end to end. Claiming a slot with less
+# budget than that left burns the lane and the UW spend on a run that must
+# time out, so the chain stops probing below it.
+FLOW_REPORT_MIN_RUN_SECS = 90.0
+# Total wall clock one scan may occupy a general-lane slot for, probing
+# included. Worst case was 3 x 300 + 16 = 916s of saturation for the next
+# caller. R-354. Sized to seat one real scan plus a retry window. No longer
+# tied to the HTTP round trip: the edge cuts the browser at 30s either way, so
+# `_scan_once_per_ticker` detaches the scan and this budget bounds the CACHE
+# WRITE, not a response anyone is still waiting on.
+FLOW_REPORT_TOTAL_DEADLINE_SECS = 225.0
 _CAPACITY_SHED_MARKER = "subprocess capacity exhausted"
+
+# One in-flight scan per ticker. Nothing deduped concurrent requests, so N
+# browser tabs on the same symbol each claimed a slot. R-354.
+_FLOW_REPORT_INFLIGHT: dict[str, "asyncio.Task"] = {}
+_FLOW_REPORT_INFLIGHT_LOCK: Optional["asyncio.Lock"] = None
 
 
 def _is_capacity_shed(error: Optional[str]) -> bool:
     return bool(error) and _CAPACITY_SHED_MARKER in error.lower()
+
+
+def _flow_report_inflight_lock() -> "asyncio.Lock":
+    """Created on first use: the loop does not exist at import time."""
+    global _FLOW_REPORT_INFLIGHT_LOCK
+    if _FLOW_REPORT_INFLIGHT_LOCK is None:
+        _FLOW_REPORT_INFLIGHT_LOCK = asyncio.Lock()
+    return _FLOW_REPORT_INFLIGHT_LOCK
+
+
+async def _scan_once_per_ticker(ticker: str, scan) -> Any:
+    """Collapse concurrent scans of one ticker onto a single detached run.
+
+    Two properties, both load-bearing:
+
+    Dedupe — N tabs on one symbol each claimed a general-lane slot, so the
+    operator's own duplicates were part of the saturation that then shed the
+    scan they were all waiting for.
+
+    Detachment — Caddy bounds the app upstream at a 30s
+    `response_header_timeout` and a 20-session AMZN pull measures 81s, so the
+    browser request is always cut first. Shielding the scan from its caller's
+    cancellation lets the cache write land anyway, so the next page load is
+    fresh instead of replaying the same doomed scan.
+    """
+    lock = _flow_report_inflight_lock()
+    async with lock:
+        task = _FLOW_REPORT_INFLIGHT.get(ticker)
+        if task is None or task.done():
+            task = asyncio.create_task(scan())
+            # Nobody may be awaiting when this settles; consume the outcome so
+            # a detached failure is not an "exception was never retrieved" log.
+            task.add_done_callback(
+                lambda t: None if t.cancelled() else t.exception()
+            )
+            _FLOW_REPORT_INFLIGHT[ticker] = task
+    try:
+        return await asyncio.shield(task)
+    finally:
+        if task.done() and _FLOW_REPORT_INFLIGHT.get(ticker) is task:
+            _FLOW_REPORT_INFLIGHT.pop(ticker, None)
 
 
 async def _run_script_retrying_capacity(
@@ -451,30 +519,85 @@ async def _run_script_retrying_capacity(
     retries: int,
     delay_s: float,
     label: str,
+    deadline_s: Optional[float] = None,
+    min_run_s: Optional[float] = None,
 ) -> ScriptResult:
     """Re-claim a general-lane slot after a capacity shed.
 
     The claim is fail-fast. Peer scans often free a slot in seconds, so a
     bounded sleep-and-retry is the operator-facing equivalent of the
     orders-sync / flow-refresh wrappers. Real script failures do not retry.
+
+    `min_run_s` is the shortest window the script can finish in. Once less
+    than that remains, probing stops: a slot claimed too late burns the lane
+    and the upstream spend on a run that is guaranteed to time out.
     """
-    result = await run_script(script, args, timeout=timeout)
+    started = time.monotonic()
+
+    def _budget_left() -> Optional[float]:
+        if deadline_s is None:
+            return None
+        return deadline_s - (time.monotonic() - started)
+
+    def _attempt_timeout() -> float:
+        left = _budget_left()
+        return timeout if left is None else max(1.0, min(timeout, left))
+
+    def _can_seat_a_run(after_backoff: float) -> bool:
+        left = _budget_left()
+        if left is None:
+            return True
+        remaining = left - after_backoff
+        return remaining > 0 and (min_run_s is None or remaining >= min_run_s)
+
+    result = await run_script(script, args, timeout=_attempt_timeout())
     attempts = 0
     while (
         not result.ok
         and _is_capacity_shed(result.error)
         and attempts < retries
     ):
+        # Exponential with jitter. A fixed delay meant every client shed in the
+        # same instant retried in the same instant — synchronised waves against
+        # a lane that is by definition already saturated. R-355.
+        backoff = min(
+            _SHED_BACKOFF_CAP_SECS,
+            delay_s * (2 ** attempts) * (0.5 + random.random()),
+        )
+        if not _can_seat_a_run(backoff):
+            logger.info(
+                "%s: capacity shed and the %.0fs deadline no longer seats a run "
+                "— giving up after %d attempt(s) rather than holding a lane slot",
+                label, deadline_s, attempts + 1,
+            )
+            return ScriptResult(
+                ok=False,
+                data=None,
+                error=(
+                    f"{_CAPACITY_SHED_MARKER}: still shed after {attempts + 1} "
+                    f"attempts within the {deadline_s:.0f}s budget"
+                ),
+            )
         attempts += 1
         logger.info(
-            "%s: capacity shed — retry %d/%d in %.0fs",
+            "%s: capacity shed — retry %d/%d in %.1fs",
             label,
             attempts,
             retries,
-            delay_s,
+            backoff,
         )
-        await asyncio.sleep(delay_s)
-        result = await run_script(script, args, timeout=timeout)
+        await asyncio.sleep(backoff)
+        result = await run_script(script, args, timeout=_attempt_timeout())
+    if not result.ok and _is_capacity_shed(result.error) and attempts >= retries > 0:
+        # R-356: the client cannot otherwise tell a first shed from one the
+        # server already proved persistent across its whole budget.
+        result = ScriptResult(
+            ok=False,
+            data=None,
+            error=(
+                f"{_CAPACITY_SHED_MARKER}: still shed after {attempts + 1} attempts"
+            ),
+        )
     return result
 
 
@@ -678,6 +801,7 @@ async def lifespan(app: FastAPI):
     # Journal reconciliation still runs once at startup because trade-fill
     # rehydration is lifecycle-bound, not periodic.
     lifecycle_tasks.append(asyncio.create_task(_warm_journal_reconciliation_on_startup()))
+    lifecycle_tasks.append(asyncio.create_task(_warm_knowledge_embedder_on_startup()))
 
     try:
         yield
@@ -694,6 +818,7 @@ app = FastAPI(title="Radon API", version="1.0.0", lifespan=lifespan)
 app.include_router(historical_router)
 app.include_router(preferences_router)
 app.include_router(assistant_market_router)
+app.include_router(streaks_router)
 
 # Explicit origin allowlist (was a `https://.*\.radon\.run` wildcard regex). The
 # wildcard matched ANY *.radon.run subdomain, so a subdomain takeover of a stale
@@ -744,8 +869,11 @@ async def auth_middleware(request: Request, call_next):
     # (Next.js → FastAPI; cloud-thin laptop dev → Hetzner FastAPI over Tailscale).
     # Requests forwarded through the public reverse proxy are NOT trusted.
     # Checked BEFORE the JWKS-configured gate so a server-to-server call never
-    # depends on Clerk being configured.
-    if is_trusted_local_request(request):
+    # depends on Clerk being configured. App-host Gateway mutations are the
+    # one exception: they need an operator JWT even from loopback, and the
+    # same holds below where verify_clerk_jwt would re-grant the bypass.
+    operator_jwt_required = _is_app_role_gateway_mutation(request)
+    if is_trusted_local_request(request) and not operator_jwt_required:
         return await call_next(request)
 
     # API key auth — scoped to historical/contract endpoints only
@@ -772,7 +900,10 @@ async def auth_middleware(request: Request, call_next):
         )
 
     try:
-        payload = await verify_clerk_jwt(request)
+        if operator_jwt_required:
+            payload = await verify_clerk_bearer(request)
+        else:
+            payload = await verify_clerk_jwt(request)
         request.state.user = payload
     except HTTPException as exc:
         return JSONResponse(
@@ -827,6 +958,7 @@ if "pytest" in sys.modules:
 # `--host 0.0.0.0 ... 100.112.32.16:8321`), which TrustedHostMiddleware cannot
 # express: it matches whole names or one leading "*." only, never a CIDR.
 _TAILNET_CGNAT = ipaddress.ip_network("100.64.0.0/10")
+_HETZNER_PRIVATE = ipaddress.ip_network("10.0.0.0/16")
 
 
 def split_host_header(raw_host: str) -> Tuple[str, str]:
@@ -851,17 +983,24 @@ def split_host_header(raw_host: str) -> Tuple[str, str]:
 def is_pinned_ip_literal(hostname: str) -> bool:
     """True for the IP literals this API legitimately answers on.
 
-    Loopback (the Next.js / relay / watchdog hop) and the Tailscale CGNAT range
-    (the cloud-thin laptop). Allowing IP literals does not reopen DNS rebinding:
-    a rebind needs a NAME whose resolution the attacker controls, and a literal
-    resolves only to itself. Any other literal — a public address, a routable
-    IPv6 — is not a caller we serve and falls through to the name pin.
+    Loopback (the Next.js / relay / watchdog hop), the Tailscale CGNAT range
+    (the cloud-thin laptop), and the Hetzner private net (broker watchdog at
+    10.0.0.4 hitting app 10.0.0.2). Allowing IP literals does not reopen DNS
+    rebinding: a rebind needs a NAME whose resolution the attacker controls,
+    and a literal resolves only to itself. Any other literal — a public
+    address, a routable IPv6, docker0 — is not a caller we serve and falls
+    through to the name pin.
     """
     try:
         address = ipaddress.ip_address(hostname)
     except ValueError:
         return False
-    return address.is_loopback or address.is_unspecified or address in _TAILNET_CGNAT
+    return (
+        address.is_loopback
+        or address.is_unspecified
+        or address in _TAILNET_CGNAT
+        or address in _HETZNER_PRIVATE
+    )
 
 
 # Carried on the per-request ASGI scope (never on scope["state"], which some
@@ -1228,6 +1367,19 @@ async def _warm_journal_reconciliation_on_startup() -> None:
         logger.info("Journal startup reconcile complete")
     else:
         logger.warning("Journal startup reconcile failed: %s", result.error)
+
+
+async def _warm_knowledge_embedder_on_startup() -> None:
+    """Load the ~67 MB fastembed ONNX model off the event loop at boot so the
+    first /knowledge request after a deploy does not pay the cold load plus
+    fastembed's Hugging Face cache checks in-request (2026-08-30 03:04Z).
+    get_embedder caches the result (or None) for every later call."""
+    if test_mode:
+        return  # demo VM never serves the corpus; don't hold the model in RAM
+    embedder = await asyncio.to_thread(get_embedder)
+    logger.info(
+        "knowledge: embedder %s", "warm" if embedder else "unavailable, FTS-only"
+    )
 
 
 # Phase 6: _warm_cri_cache_on_startup and _warm_gex_cache_on_startup were
@@ -1731,8 +1883,10 @@ async def health(request: Request):
     # `handle_path /api/ib/*`. Untrusted (proxied/public) callers get liveness
     # only — never IB auth/connection state, account IDs, restart backoff, or
     # internal topology. Short-circuit BEFORE check_ib_gateway so an internet
-    # GET can't drive its pool-reconnect / heal side effects.
-    if not is_trusted_local_request(request):
+    # GET can't drive its pool-reconnect / heal side effects. The broker
+    # watchdog on radon-private is a probe-only caller (REL-170): full payload
+    # here, no bypass anywhere else.
+    if not (is_trusted_local_request(request) or is_private_net_probe(request)):
         return {"status": "ok"}
 
     pool_status = ib_pool.status() if ib_pool else None
@@ -1767,6 +1921,7 @@ async def health(request: Request):
     return {
         "status": "ok",
         "test_mode": test_mode,
+        "host_role": admin_services.host_role(),
         "ib_gateway": gw,
         "ib_pool": pool_status or {},
         "uw": uw_available,
@@ -1875,10 +2030,34 @@ async def demo_trial_expiry(request: Request):
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+def _is_app_role_gateway_mutation(request: Request) -> bool:
+    """True for Gateway lifecycle POSTs on the app host.
+
+    Loopback trust would let a compromised Next.js on the public terminator
+    restart IBKR without a Clerk operator JWT. Combined/broker keep the
+    existing local-helper path.
+    """
+    if admin_services.host_role() != "app":
+        return False
+    if request.method != "POST":
+        return False
+    path = request.url.path
+    if path in {"/ib/restart", "/ib/reset-backoff"}:
+        return True
+    prefix = "/admin/services/radon-ib-gateway.service/"
+    if path.startswith(prefix) and path.rsplit("/", 1)[-1] in {"start", "stop", "restart"}:
+        return True
+    return False
+
+
 def _gateway_unit_controllable() -> bool:
-    """True when THIS host owns the gateway lifecycle: systemd is present and
-    the installed control helper (single 2FA-lease owner) exists. True on the
-    Hetzner deployment, False on the laptop pointing at the remote gateway."""
+    """True when THIS host can cycle Gateway: local helper, or app-role mTLS.
+
+    RADON_HOST_ROLE=app must never exec the helper even if a deploy reinstalls
+    it. The app host proxies to the broker daemon instead.
+    """
+    if admin_services.host_role() == "app":
+        return admin_services.is_remote_gateway_configured()
     return (
         admin_services.is_systemd_available()
         and Path(admin_services.GATEWAY_CONTROL_PATH).exists()
@@ -1943,7 +2122,14 @@ async def ib_restart():
 @app.post("/ib/reset-backoff")
 async def ib_reset_backoff():
     """Clear restart backoff state. Operator path: 'I just approved 2FA, try now'."""
-    return reset_restart_backoff()
+    result = reset_restart_backoff()
+    if admin_services.host_role() == "app" and admin_services.is_remote_gateway_configured():
+        # REL-172 (R-475): on the app host this ALSO releases the broker's 2FA
+        # push lease over mTLS; say so in the payload (the panel copy does too).
+        remote = await admin_services.remote_gateway_action("reset-lease")
+        result["remote"] = remote.to_dict()
+        result["broker_lease_released"] = bool(remote.ok)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1962,6 +2148,7 @@ async def admin_services_list():
     units = await admin_services.list_units_with_status()
     return {
         "supported": supported,
+        "host_role": admin_services.host_role(),
         "units": [u.to_dict() for u in units],
     }
 
@@ -1973,6 +2160,10 @@ async def admin_service_action(unit: str, action: str):
     if not result.ok:
         if result.returncode == admin_services.PUSH_LOCK_HELD_RC:
             raise HTTPException(status_code=409, detail=result.to_dict())
+        if result.returncode == admin_services.REMOTE_UNREACHABLE_RC:
+            # REL-171 (R-500): a dead mTLS link to the broker is a gateway
+            # timeout, not a caller error.
+            raise HTTPException(status_code=504, detail=result.to_dict())
         raise HTTPException(status_code=400 if result.returncode == -1 else 502, detail=result.to_dict())
     return result.to_dict()
 
@@ -2057,13 +2248,13 @@ async def _run_flow_tab(
         return await demo_scan_response(demo_key, demo_payload)
     cache_path = DATA_DIR / cache_name
     lock = _flow_tab_locks.setdefault(name, asyncio.Lock())
-    now = _time.monotonic()
+    now = time.monotonic()
     if not force and now - _flow_tab_last.get(name, 0.0) < FLOW_TAB_COOLDOWN_S:
         cached = _read_cache(cache_path)
         if cached:
             return cached
     async with lock:
-        if not force and _time.monotonic() - _flow_tab_last.get(name, 0.0) < FLOW_TAB_COOLDOWN_S:
+        if not force and time.monotonic() - _flow_tab_last.get(name, 0.0) < FLOW_TAB_COOLDOWN_S:
             cached = _read_cache(cache_path)
             if cached:
                 return cached
@@ -2073,7 +2264,7 @@ async def _run_flow_tab(
         if result.data and result.data.get("error"):
             raise HTTPException(status_code=400, detail=result.data["error"])
         _write_cache(cache_path, result.data)
-        _flow_tab_last[name] = _time.monotonic()
+        _flow_tab_last[name] = time.monotonic()
         return result.data
 
 
@@ -2380,6 +2571,11 @@ async def run_flow_report(ticker: str):
                 pass
         return demo_disabled_payload(f"Live flow analysis for {upper}")
 
+    return await _scan_once_per_ticker(upper, lambda: _scan_and_cache(upper))
+
+
+async def _scan_and_cache(upper: str) -> dict:
+    """One flow scan for one ticker: run it, gate it, persist it, return it."""
     # 20 trading-day dark-pool history (flow_report DEFAULT_LOOKBACK_DAYS).
     # Cold liquid names paginate UW heavily; allow longer than the old 120s.
     # Capacity shed is retryable: the general lane is often full for seconds
@@ -2391,6 +2587,8 @@ async def run_flow_report(ticker: str):
         retries=FLOW_REPORT_SHED_RETRIES,
         delay_s=FLOW_REPORT_SHED_RETRY_DELAY_SECS,
         label=f"flow-report {upper}",
+        deadline_s=FLOW_REPORT_TOTAL_DEADLINE_SECS,
+        min_run_s=FLOW_REPORT_MIN_RUN_SECS,
     )
     if not result.ok:
         raise HTTPException(status_code=502, detail=result.error)
@@ -3082,18 +3280,15 @@ async def journal_reconcile():
 
 @app.post("/journal/rehydrate")
 async def journal_rehydrate(days: int = 365):
-    """Backfill the Turso journal from IB Flex Query (up to 365 days).
+    """Removed. Journal recon is file ingest (flex_delivery_ingest / --from-file).
 
-    Idempotent: each row carries an ib_exec_id and existing rows are
-    skipped on re-run. Use this after multi-day reconcile gaps where
-    in-session fills (24h window) are no longer reachable.
+    Live fills stay on journal_sync. A page-driven SendRequest is how this
+    token earned Flex 1025.
     """
-    result = await run_script("journal_rehydrate.py", ["--days", str(days)], timeout=300)
-    if not result.ok:
-        raise HTTPException(status_code=502, detail=result.error)
-    if result.data and result.data.get("ok") is False:
-        raise HTTPException(status_code=502, detail=result.data.get("error", "Rehydrate failed"))
-    return result.data or {"ok": True, "imported": 0, "skipped": 0}
+    raise HTTPException(
+        status_code=404,
+        detail="Journal rehydrate is file-ingest only. Use journal_rehydrate.py --from-file.",
+    )
 
 
 # ── Intraday scan admission (regime / breadth / vcg / gex) ──────────
@@ -3111,21 +3306,111 @@ SCAN_GATES: dict[str, ScanGate] = {
 # gex.json holds exactly one ticker's payload, a successful NDX scan armed a
 # cooldown whose cache read returned None for an SPX poll, so two tickers
 # polled alternately spawned back-to-back 120 s subprocesses forever. R-217.
-_SUBJECT_SCAN_GATES: dict[tuple[str, str], ScanGate] = {}
+#
+# The key is caller-supplied (/gex/scan takes any <=10-char alnum ticker) and
+# the process lives for days, so the map needs a ceiling. Eviction is
+# fail-CLOSED: only an IDLE gate is evictable, because re-minting an armed gate
+# hands the next poll a COLD gate that bypasses the very cooldown/backoff that
+# was dropped — R-217 re-entering through the eviction path. When every gate is
+# armed, a novel subject is refused on the shared overflow gate instead of
+# growing the map or displacing a live backoff. T-230.
+MAX_SUBJECT_SCAN_GATES = 256
+
+# ONE definition of the cri_scan child budget, shared by the 15-minute timer
+# driver and the browser's /regime/scan. R-423.
+from data_refresh import CRI_SCAN_TIMEOUT_SECS  # noqa: E402,PLC0415
+
+# Saturation of the subject-gate map is a HOST condition, not a per-request
+# failure: `_evict_idle_scan_gate` cannot evict while every tracked subject is
+# inside the 120s cooldown, so it is sticky, and the only externally visible
+# artifact was a 429 whose detail read "backing off after a failure". One record
+# per burst, not one per request. R-424.
+SCAN_GATE_SATURATION_REPORT_INTERVAL_S = 300.0
+# None, NOT 0.0: `time.monotonic()` counts host uptime, so `0.0` reads as
+# "reported at boot" and swallowed the whole first burst on any host less than
+# SCAN_GATE_SATURATION_REPORT_INTERVAL_S old. The sentinel has to mean never.
+_SCAN_GATE_SATURATION_REPORTED_AT: Optional[float] = None
+
+
+def _scan_gate_overflow_detail() -> str:
+    return (
+        f"scan-gate map saturated: all {MAX_SUBJECT_SCAN_GATES} tracked subjects "
+        "are cooling down or backing off, so a novel subject is refused rather "
+        "than spawning a subprocess storm"
+    )
+
+
+def _write_scan_gate_saturation_row(detail: str) -> None:
+    """DELIBERATELY log-only. R-424 asked for a `service_health` row as well.
+
+    There is no honest name to write it under: `radon-api` is a UNIT, not a
+    health name, and `check.py` only ever reads names in `SCHEDULED_SERVICES` —
+    while `test_python_does_not_track_non_scheduled_services` requires every
+    entry there to be `category: "scheduled"` in the web catalog, i.e. to have a
+    CADENCE. Saturation has none: an absent row is the normal state, so a
+    scheduled key for it would age to stale and page forever. The durable trace
+    is this WARNING plus the 429 detail the caller actually sees; closing the
+    row half needs an error-only catalog category, which does not exist yet.
+    """
+    logger.warning("%s", detail)
+
+
+def _record_scan_gate_saturation() -> None:
+    global _SCAN_GATE_SATURATION_REPORTED_AT
+
+    detail = _scan_gate_overflow_detail()
+    now = time.monotonic()
+    reported_at = _SCAN_GATE_SATURATION_REPORTED_AT
+    if (
+        reported_at is not None
+        and now - reported_at < SCAN_GATE_SATURATION_REPORT_INTERVAL_S
+    ):
+        return
+    _SCAN_GATE_SATURATION_REPORTED_AT = now
+    _write_scan_gate_saturation_row(detail)
+
+_SUBJECT_SCAN_GATES: "OrderedDict[tuple[str, str], ScanGate]" = OrderedDict()
+_OVERFLOW_SCAN_GATE = ScanGate("scan-overflow")
+
+
+def _evict_idle_scan_gate() -> bool:
+    """Drop the least-recently-used gate that is neither cooling down nor backing off."""
+    victim = next(
+        (
+            key
+            for key, gate in _SUBJECT_SCAN_GATES.items()
+            if not gate.in_cooldown() and not gate.in_backoff()
+        ),
+        None,
+    )
+    if victim is None:
+        return False
+    del _SUBJECT_SCAN_GATES[victim]
+    return True
 
 
 def _scan_gate_for(scan: str, subject: str) -> ScanGate:
     key = (scan, subject.strip().upper())
     gate = _SUBJECT_SCAN_GATES.get(key)
-    if gate is None:
-        gate = ScanGate(f"{scan}:{key[1]}")
-        _SUBJECT_SCAN_GATES[key] = gate
+    if gate is not None:
+        _SUBJECT_SCAN_GATES.move_to_end(key)
+        return gate
+    if len(_SUBJECT_SCAN_GATES) >= MAX_SUBJECT_SCAN_GATES and not _evict_idle_scan_gate():
+        # Every tracked subject is already cooling down or backing off, i.e.
+        # the host is saturated. Admitting a novel subject here is exactly the
+        # subprocess storm the gates exist to stop, so refuse it.
+        _record_scan_gate_saturation()
+        _OVERFLOW_SCAN_GATE.mark_failure()
+        return _OVERFLOW_SCAN_GATE
+    gate = ScanGate(f"{scan}:{key[1]}")
+    _SUBJECT_SCAN_GATES[key] = gate
     return gate
 
 
 def _reset_scan_gates() -> None:
     """Drop every per-subject gate (tests)."""
     _SUBJECT_SCAN_GATES.clear()
+    _OVERFLOW_SCAN_GATE.reset()
 
 
 async def _gated_scan(
@@ -3144,9 +3429,19 @@ async def _gated_scan(
             if cached is not None:
                 return cached
         if gate.in_backoff():
+            # The overflow gate is SHARED and is marked failed the instant the
+            # map saturates, so "backing off after a failure" named the wrong
+            # cause — the caller's own scan never ran and never failed. A
+            # dashboard widening its ticker list past the cap silently 429'd
+            # every novel ticker with a message that pointed at the scan. R-424.
+            detail = (
+                _scan_gate_overflow_detail()
+                if gate is _OVERFLOW_SCAN_GATE
+                else f"{gate.name} scan backing off after a failure"
+            )
             raise HTTPException(
                 status_code=429,
-                detail=f"{gate.name} scan backing off after a failure",
+                detail=detail,
                 headers=gate.retry_after_header(),
             )
         return None
@@ -3190,7 +3485,11 @@ async def regime_scan():
     return await _gated_scan(
         SCAN_GATES["regime"],
         lambda: _read_cache(DATA_DIR / "cri.json"),
-        lambda: run_script("cri_scan.py", ["--json"], timeout=120),
+        # The SAME budget the timer child gets. At 120 the browser path
+        # SIGKILLed exactly the slow-IB runs (60-103s) the timer budget was
+        # raised to 180 to accommodate, which armed the regime scan gate for
+        # 60s and 502'd the panel. R-423.
+        lambda: run_script("cri_scan.py", ["--json"], timeout=CRI_SCAN_TIMEOUT_SECS),
         _persist,
     )
 
@@ -3322,14 +3621,14 @@ async def leap_scan(preset: str = "largecaps", min_gap: float = 10.0, tickers: s
     import time as _time
     if _leap_scan_lock is None:
         _leap_scan_lock = asyncio.Lock()
-    now = _time.monotonic()
+    now = time.monotonic()
     is_ticker_scan = bool(requested)
     if not is_ticker_scan and now - _leap_last_scan < LEAP_COOLDOWN_S:
         cached = _read_cache(DATA_DIR / "leap.json")
         if _scan_cache_matches_preset(cached, preset):
             return cached
     async with _leap_scan_lock:
-        if not is_ticker_scan and _time.monotonic() - _leap_last_scan < LEAP_COOLDOWN_S:
+        if not is_ticker_scan and time.monotonic() - _leap_last_scan < LEAP_COOLDOWN_S:
             cached = _read_cache(DATA_DIR / "leap.json")
             if _scan_cache_matches_preset(cached, preset):
                 return cached
@@ -3354,7 +3653,7 @@ async def leap_scan(preset: str = "largecaps", min_gap: float = 10.0, tickers: s
         if not result.ok:
             raise HTTPException(status_code=502, detail=result.error)
         if not is_ticker_scan:
-            _leap_last_scan = _time.monotonic()
+            _leap_last_scan = time.monotonic()
         # The leap scanner subprocess wrote the JSON cache atomically AND
         # recorded its own service_health[leap-scan] row (db/scan_mirror.py).
         cached = _read_cache(DATA_DIR / "leap.json")
@@ -3465,14 +3764,14 @@ async def theta_harvester_scan(
         )
     if _theta_scan_lock is None:
         _theta_scan_lock = asyncio.Lock()
-    now = _time.monotonic()
+    now = time.monotonic()
     is_ticker_scan = bool(ticker)
     if not is_ticker_scan and now - _theta_last_scan < THETA_COOLDOWN_S:
         cached = _read_cache(DATA_DIR / "theta_harvester.json")
         if _theta_cache_matches(cached, preset, min_dte, max_dte, min_credit):
             return cached
     async with _theta_scan_lock:
-        if not is_ticker_scan and _time.monotonic() - _theta_last_scan < THETA_COOLDOWN_S:
+        if not is_ticker_scan and time.monotonic() - _theta_last_scan < THETA_COOLDOWN_S:
             cached = _read_cache(DATA_DIR / "theta_harvester.json")
             if _theta_cache_matches(cached, preset, min_dte, max_dte, min_credit):
                 return cached
@@ -3497,7 +3796,7 @@ async def theta_harvester_scan(
         # A budget-blocked / coverage-failed scan never ran — stamping the 1h
         # cooldown would pin the stale snapshot for another hour (R-070).
         if not is_ticker_scan and not scan_status:
-            _theta_last_scan = _time.monotonic()
+            _theta_last_scan = time.monotonic()
         if scan_status and payload is not None:
             return payload
         cached = _read_cache(DATA_DIR / "theta_harvester.json")
@@ -3557,14 +3856,14 @@ async def strength_confirmation_scan(preset: str = "ndx100", limit: int = 0, tic
         )
     if _strength_scan_lock is None:
         _strength_scan_lock = asyncio.Lock()
-    now = _time.monotonic()
+    now = time.monotonic()
     is_ticker_scan = bool(ticker)
     if not is_ticker_scan and now - _strength_last_scan < STRENGTH_COOLDOWN_S:
         cached = _read_cache(DATA_DIR / "strength_confirmation.json")
         if _strength_cache_matches_preset(cached, preset):
             return cached
     async with _strength_scan_lock:
-        if not is_ticker_scan and _time.monotonic() - _strength_last_scan < STRENGTH_COOLDOWN_S:
+        if not is_ticker_scan and time.monotonic() - _strength_last_scan < STRENGTH_COOLDOWN_S:
             cached = _read_cache(DATA_DIR / "strength_confirmation.json")
             if _strength_cache_matches_preset(cached, preset):
                 return cached
@@ -3584,7 +3883,7 @@ async def strength_confirmation_scan(preset: str = "ndx100", limit: int = 0, tic
         # A budget-blocked / coverage-failed scan never ran — stamping the 1h
         # cooldown would pin the stale snapshot for another hour (R-070).
         if not is_ticker_scan and not scan_status:
-            _strength_last_scan = _time.monotonic()
+            _strength_last_scan = time.monotonic()
         if scan_status and payload is not None:
             return payload
         cached = _read_cache(DATA_DIR / "strength_confirmation.json")
@@ -3925,14 +4224,14 @@ async def garch_convergence_scan(preset: str = "largecaps", tickers: str = ""):
     import time as _time
     if _garch_scan_lock is None:
         _garch_scan_lock = asyncio.Lock()
-    now = _time.monotonic()
+    now = time.monotonic()
     is_ticker_scan = bool(requested)
     if not is_ticker_scan and now - _garch_last_scan < GARCH_COOLDOWN_S:
         cached = _read_cache(DATA_DIR / "garch_convergence.json")
         if _scan_cache_matches_preset(cached, preset):
             return cached
     async with _garch_scan_lock:
-        if not is_ticker_scan and _time.monotonic() - _garch_last_scan < GARCH_COOLDOWN_S:
+        if not is_ticker_scan and time.monotonic() - _garch_last_scan < GARCH_COOLDOWN_S:
             cached = _read_cache(DATA_DIR / "garch_convergence.json")
             if _scan_cache_matches_preset(cached, preset):
                 return cached
@@ -3955,7 +4254,7 @@ async def garch_convergence_scan(preset: str = "largecaps", tickers: str = ""):
         if not result.ok:
             raise HTTPException(status_code=502, detail=result.error)
         if not is_ticker_scan:
-            _garch_last_scan = _time.monotonic()
+            _garch_last_scan = time.monotonic()
         cached = _read_cache(DATA_DIR / "garch_convergence.json")
         return cached or {
             "scan_time": "",
@@ -4040,13 +4339,13 @@ async def gamma_rotation_scan():
     import time as _time
     if _gamma_rotation_scan_lock is None:
         _gamma_rotation_scan_lock = asyncio.Lock()
-    now = _time.monotonic()
+    now = time.monotonic()
     if now - _gamma_rotation_last_scan < GAMMA_ROTATION_COOLDOWN_S:
         cached = _read_cache(DATA_DIR / "gamma_rotation_gap.json")
         if cached:
             return cached
     async with _gamma_rotation_scan_lock:
-        if _time.monotonic() - _gamma_rotation_last_scan < GAMMA_ROTATION_COOLDOWN_S:
+        if time.monotonic() - _gamma_rotation_last_scan < GAMMA_ROTATION_COOLDOWN_S:
             cached = _read_cache(DATA_DIR / "gamma_rotation_gap.json")
             if cached:
                 return cached
@@ -4054,7 +4353,7 @@ async def gamma_rotation_scan():
         if not result.ok:
             raise HTTPException(status_code=502, detail=result.error)
         _write_cache(DATA_DIR / "gamma_rotation_gap.json", result.data)
-        _gamma_rotation_last_scan = _time.monotonic()
+        _gamma_rotation_last_scan = time.monotonic()
         return result.data
 
 
@@ -4083,7 +4382,7 @@ async def llm_token_index(days: int = Query(default=180, ge=1, le=3650)):
     timer fires.
     """
     import time as _time
-    now = _time.monotonic()
+    now = time.monotonic()
     if (
         _llm_token_index_cache["data"] is not None
         and _llm_token_index_cache["days"] == days
@@ -4213,11 +4512,11 @@ async def internals_skew_history(
 
 @app.post("/blotter")
 async def blotter_sync():
-    """Run IB Flex Query for historical trades. 120s timeout."""
-    result = await run_module("trade_blotter.flex_query", ["--json"], timeout=120)
-    if not result.ok:
-        raise HTTPException(status_code=502, detail=result.error)
-    return result.data
+    """Removed. Historical blotter is Turso journal. Flex recon is --from-file."""
+    raise HTTPException(
+        status_code=404,
+        detail="POST /blotter is file-ingest only. GET /orders reads journal_sync.",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -4290,14 +4589,10 @@ async def performance_sync():
     failing, EVERY GET /api/performance blocked on a full builder run — the
     request storm that earned the 1025 in the first place.
     """
-    global _running_build
-    if _running_build is not None and not _running_build.done():
-        return await _running_build
-
-    _refuse_rebuild_or_none()  # raises 503 on lockout / 429 on cooldown
-    _record_rebuild_attempt()
-    _running_build = asyncio.create_task(_do_performance_rebuild())
-    return await _running_build
+    raise HTTPException(
+        status_code=404,
+        detail="Performance rebuild is file-ingest only. Use perf_twr_builder.py --from-file.",
+    )
 
 
 # Floor between on-demand rebuilds. Every rebuild attempts an IBKR Flex fetch,
@@ -4382,21 +4677,10 @@ async def performance_background():
     Refuses a duplicate while one is in flight, and refuses a fresh Flex fetch
     inside the cooldown window or during a token lockout.
     """
-    global _running_build
-    if _running_build is not None and not _running_build.done():
-        return {"status": "already_running"}
-
-    refusal = _rebuild_refusal()
-    if refusal is not None:
-        logger.warning("background performance rebuild refused: %s", refusal)
-        return JSONResponse(
-            status_code=503 if refusal["status"] == "lockout" else 429,
-            content=refusal,
-        )
-
-    _record_rebuild_attempt()
-    _running_build = asyncio.create_task(_do_performance_rebuild())
-    return {"status": "accepted"}
+    return JSONResponse(
+        status_code=404,
+        content={"status": "file_ingest_only", "detail": "Use perf_twr_builder.py --from-file."},
+    )
 
 
 _EQUITY_OPTIONS_CHAIN_TIMEOUT_S = 45.0
@@ -5797,6 +6081,14 @@ def _knowledge_search_in_thread(
         except db_http.DbHttpError:
             if attempt >= _KNOWLEDGE_RETRIEVAL_ATTEMPTS:
                 raise
+            if query_embedding is not None:
+                # vector_top_k over the ANN index is the statement that blows
+                # the Hrana bound under load (0.3-1.6s normally, >4s on a
+                # cold or busy host; 2026-08-30 03:05Z post-deploy 503s).
+                # Retry without the leg that just timed out rather than
+                # re-running it.
+                logger.warning("knowledge: hybrid retrieval timed out; retrying FTS-only")
+                query_embedding = None
             time.sleep(_KNOWLEDGE_RETRY_BACKOFF_SECS)
     retrieval = "hybrid" if query_embedding is not None else "fts-only"
     return results, retrieval

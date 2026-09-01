@@ -1,8 +1,14 @@
 .git
 data/replica.db
-**/.env
+**/.env*
+!**/.env.example
+!**/.env.local.example
 cloud/
 docker/ib-gateway
 **/.venv
 **/node_modules
 **/.next
+scripts/tests/
+scripts/api/tests/
+web/tests/
+web/e2e/

@@ -26,6 +26,10 @@ REQUIRED_STATUS_CHECKS = (
 TEST_JOBS = (
     "secret-scan",
     "changes",
+    "app-images",
+    "contract-cloud-tests",
+    "contract-script-tests",
+    "contract-root-tests",
     "web-tests",
     "web-coverage",
     "py-tests",
@@ -151,6 +155,47 @@ def test_stage_release_is_gated_and_cancelable() -> None:
     assert jobs["deploy"]["concurrency"]["cancel-in-progress"] == "false"
 
 
+def test_exact_images_are_gated_and_prepulled_parallel_to_prestage() -> None:
+    jobs = _workflow()["jobs"]
+    images = jobs["app-images"]
+    prepull = jobs["prepull-images"]
+    stage = jobs["stage-release"]
+    deploy = jobs["deploy"]
+
+    assert images["uses"] == "./.github/workflows/app-images.yml"
+    assert images["permissions"]["packages"] == "write"
+    assert "refs/heads/main" in images["if"] and "push" in images["if"]
+    assert set(prepull["needs"]) == set(stage["needs"])
+    assert "app-images" in prepull["needs"]
+    assert prepull["concurrency"]["cancel-in-progress"] == "true"
+    assert prepull["concurrency"]["group"] != "deploy-production"
+
+    ssh_step = next(step for step in prepull["steps"] if "ssh-action" in step.get("uses", ""))
+    script = ssh_step["with"]["script"]
+    assert "/usr/local/sbin/radon-app-runtime pull \"$SHA\"" in script
+    assert "${{ github.sha }}" in script
+    assert "git " not in script and "deploy.sh" not in script
+
+    assert {"app-images", "prepull-images", "stage-release"} <= set(deploy["needs"])
+    assert "needs.app-images.result == 'success'" in deploy["if"]
+    assert "needs.prepull-images.result == 'failure'" in deploy["if"]
+    assert deploy["concurrency"]["cancel-in-progress"] == "false"
+
+
+def test_exact_images_publish_only_after_the_secret_scan() -> None:
+    """R-442: the callee pushes the release SHA tag and the moving `:latest`
+    tag in one BuildKit operation, and the caller job had an `if:` but no
+    `needs:`, so a push to main that failed gitleaks still overwrote the
+    public GHCR `:latest` pointer with an image carrying the Next client
+    bundle and `scripts/`. Deploy was never at risk (`resolve_image` refuses
+    non-SHA tags); this is supply-chain hygiene for a public tag.
+    """
+    jobs = _workflow()["jobs"]
+    assert "secret-scan" in jobs["app-images"].get("needs", []), (
+        "app-images must wait for secret-scan before publishing :latest"
+    )
+
+
 def _job_commands(job: dict) -> str:
     return "\n".join(str(step.get("run", "")) for step in job.get("steps", []))
 
@@ -167,6 +212,26 @@ def test_ci_runs_cloud_infra_pytest() -> None:
     deploy_needs = jobs["deploy"]["needs"]
     assert "cloud-tests" in deploy_needs
     assert "py-tests" in deploy_needs
+
+
+def test_caddy_wall_clock_tests_have_their_own_shard() -> None:
+    cloud = _workflow()["jobs"]["cloud-tests"]
+    matrix = cloud["strategy"]["matrix"]
+    assert [str(shard) for shard in matrix["shard"]] == ["al", "edge", "mz"]
+    rows = {str(row["shard"]): str(row["paths"]) for row in matrix["include"]}
+    assert rows["edge"] == "cloud/tests/test_caddy_edge_timeouts.py"
+    assert rows["al"] == "cloud/tests/test_[a-l]*.py"
+    omits = {
+        str(row["shard"]): str(row.get("omit", ""))
+        for row in matrix["include"]
+    }
+    assert omits["al"] == "cloud/tests/test_caddy_edge_timeouts.py"
+    assert "matrix.omit" in _job_commands(cloud)
+    assert "selected" in _job_commands(cloud)
+    caddy_step = next(step for step in cloud["steps"] if step.get("name") == "Install caddy (edge mechanism tests)")
+    assert "edge" in caddy_step["if"]
+    assert "--durations=25" in _job_commands(cloud)
+    assert "--durations=25" in _job_commands(_workflow()["jobs"]["py-tests"])
 
 
 def test_python_ci_jobs_cache_pip_and_pin_the_test_toolchain() -> None:
@@ -274,7 +339,14 @@ def test_pytest_shards_then_combines_coverage_ratchet() -> None:
         for step in py_tests["steps"]
         if "upload-artifact" in step.get("uses", "")
     )
-    assert upload["with"]["path"] == ".coverage"
+    # CIP-005: the shard ships its junit XML beside the data file so per-module
+    # work on Linux is readable from the artifact (`--durations=25` covers under
+    # a third of a work-bound shard). py-coverage finds `.coverage` BY NAME, so
+    # the sibling XML cannot reach the ratchet.
+    upload_paths = str(upload["with"]["path"]).split()
+    assert ".coverage" in upload_paths
+    assert "pytest-junit.xml" in upload_paths
+    assert "--junitxml=pytest-junit.xml" in commands
     # upload-artifact v4+ skips dotfiles unless this is set (PR 88 first green
     # pytest run: 1586 passed, then "No files were found ... path: .coverage").
     assert str(upload["with"].get("include-hidden-files", "")).lower() in ("true", "True")
@@ -303,8 +375,17 @@ def _shard_tokens(job: str) -> list[str]:
     ]
 
 
+def _shard_rows(job: str) -> list[list[str]]:
+    """`paths` tokens grouped per matrix row (one list per shard)."""
+    include = _workflow()["jobs"][job]["strategy"]["matrix"]["include"]
+    return [
+        [token.strip('"').rstrip("/") for token in str(row["paths"]).split()]
+        for row in include
+    ]
+
+
 def _partition(
-    tests_dir: Path, prefix: str, tokens: list[str]
+    tests_dir: Path, prefix: str, rows: list[list[str]]
 ) -> tuple[dict[str, list[str]], list[str], list[str]]:
     """(overlapped files, unsharded files, unsharded subdirs) for one tests tree.
 
@@ -313,12 +394,25 @@ def _partition(
     was the T-122 defect (752 tests), and it can recur because the guard used to
     build its universe from a non-recursive `glob("test_*.py")`. A subdirectory
     is only covered when a shard names it verbatim. T-216.
+
+    Overlap is counted per SHARD, not per token: a row may name a module
+    explicitly ahead of the glob that also matches it (CIP-001 lead modules,
+    de-duplicated by pytest), but two rows matching one module runs it twice.
     """
+    tokens = [token for row in rows for token in row]
     owned = [token for token in tokens if token.startswith(prefix)]
-    globs = [Path(token).name for token in owned]
+    row_globs = [
+        [Path(token).name for token in row if token.startswith(prefix)] for row in rows
+    ]
     files = [path.name for path in tests_dir.glob("test_*.py")]
     assigned = {
-        name: [glob for glob in globs if fnmatch.fnmatch(name, glob)] for name in files
+        name: [
+            glob
+            for globs in row_globs
+            for glob in globs[:1]
+            if any(fnmatch.fnmatch(name, candidate) for candidate in globs)
+        ]
+        for name in files
     }
     subdirs = [
         path.name
@@ -336,7 +430,7 @@ def _partition(
 def test_pytest_filename_shards_partition_scripts_tests() -> None:
     tokens = _shard_tokens("py-tests")
     overlap, missing, unsharded_dirs = _partition(
-        WORKFLOW.parents[2] / "scripts" / "tests", "scripts/tests/", tokens
+        WORKFLOW.parents[2] / "scripts" / "tests", "scripts/tests/", _shard_rows("py-tests")
     )
     assert overlap == {}
     assert missing == []
@@ -363,13 +457,21 @@ def test_shard_partition_guard_reds_for_an_unlisted_subdirectory(tmp_path: Path)
     (tests_dir / "test_newdaemon" / "test_handler.py").write_text("", encoding="utf-8")
     (tests_dir / "fixtures").mkdir()
     (tests_dir / "test_alpha.py").write_text("", encoding="utf-8")
-    tokens = ["scripts/tests/test_[a-c]*.py", "scripts/tests/test_monitor_daemon"]
+    rows = [["scripts/tests/test_[a-c]*.py", "scripts/tests/test_monitor_daemon"]]
 
-    overlap, missing, unsharded_dirs = _partition(tests_dir, "scripts/tests/", tokens)
+    overlap, missing, unsharded_dirs = _partition(tests_dir, "scripts/tests/", rows)
 
     assert overlap == {}
     assert missing == []
     assert unsharded_dirs == ["test_newdaemon"]
+
+    # A lead module named ahead of its own row's glob is not an overlap; the
+    # same module reached from a SECOND row is (it would run twice).
+    (tests_dir / "test_beta.py").write_text("", encoding="utf-8")
+    lead_rows = [["scripts/tests/test_beta.py", "scripts/tests/test_[a-c]*.py", "scripts/tests/test_monitor_daemon"]]
+    assert _partition(tests_dir, "scripts/tests/", lead_rows)[0] == {}
+    two_rows = [["scripts/tests/test_beta.py"], ["scripts/tests/test_[a-c]*.py", "scripts/tests/test_monitor_daemon"]]
+    assert list(_partition(tests_dir, "scripts/tests/", two_rows)[0]) == ["test_beta.py"]
 
 
 def test_coverage_ratchets_gate_the_deploy() -> None:
@@ -416,6 +518,13 @@ def test_path_filter_skips_the_other_gate() -> None:
     jobs = _workflow()["jobs"]
     assert jobs["changes"]["outputs"]["python"]
     assert jobs["changes"]["outputs"]["web"]
+    assert jobs["changes"]["outputs"]["contracts"]
+    for group in ("cloud", "script", "root"):
+        output = f"contract_{group}_tests"
+        job = f"contract-{group}-tests"
+        assert jobs["changes"]["outputs"][output]
+        assert jobs[job]["needs"] == ["changes"]
+        assert output in jobs[job]["if"]
     assert "path_filter.py" in _job_commands(jobs["changes"])
     assert jobs["web-tests"]["needs"] == ["changes"]
     assert "web" in jobs["web-tests"]["if"]
@@ -430,6 +539,9 @@ def test_deploy_accepts_skipped_test_jobs() -> None:
     # web-coverage / py-coverage are `if: needs.<gate>-tests.result == 'success'`,
     # so a path-filtered push skips them too — they need the same clause.
     for job in (
+        "contract-cloud-tests",
+        "contract-script-tests",
+        "contract-root-tests",
         "web-tests",
         "py-tests",
         "cloud-tests",
@@ -442,16 +554,17 @@ def test_deploy_accepts_skipped_test_jobs() -> None:
 
 
 def test_cloud_infra_shards_partition_cloud_tests() -> None:
-    tokens = _shard_tokens("cloud-tests")
-    overlap, missing, unsharded_dirs = _partition(
-        WORKFLOW.parents[2] / "cloud" / "tests", "cloud/tests/", tokens
-    )
-    assert overlap == {}
-    assert missing == []
-    assert unsharded_dirs == [], (
-        "subdirectories of cloud/tests/ that no cloud-tests shard names verbatim "
-        f"(a filename glob cannot match a directory): {unsharded_dirs}"
-    )
+    root = WORKFLOW.parents[2]
+    assignments: dict[str, list[str]] = {}
+    matrix = _workflow()["jobs"]["cloud-tests"]["strategy"]["matrix"]
+    for row in matrix["include"]:
+        for path in _expand_shard_row(root, row):
+            assignments.setdefault(path, []).append(str(row["shard"]))
+    on_disk = _test_modules_under(root, root / "cloud" / "tests")
+    missing = sorted(on_disk - assignments.keys())
+    overlap = {path: shards for path, shards in assignments.items() if len(shards) > 1}
+    assert not missing, f"unsharded cloud tests: {missing[:6]}"
+    assert not overlap, f"cloud tests assigned to multiple shards: {overlap}"
 
 
 def test_py_coverage_installs_coverage_only() -> None:
@@ -513,13 +626,27 @@ def _test_modules_under(root: Path, base: Path) -> set[str]:
 
 def _expand_shard_paths(root: Path, paths: str) -> set[str]:
     out: set[str] = set()
+    ignored: set[str] = set()
     for token in paths.split():
+        if token.startswith("--ignore="):
+            ignored_path = root / token.split("=", 1)[1]
+            if ignored_path.is_dir():
+                ignored |= _test_modules_under(root, ignored_path)
+            elif ignored_path.is_file():
+                ignored.add(str(ignored_path.relative_to(root)))
+            continue
         target = root / token
         if target.is_dir():
             out |= _test_modules_under(root, target)
         else:
             out |= {str(f.relative_to(root)) for f in root.glob(token) if f.is_file()}
-    return out
+    return out - ignored
+
+
+def _expand_shard_row(root: Path, row: dict) -> set[str]:
+    selected = _expand_shard_paths(root, str(row["paths"]))
+    omitted = str(row.get("omit", ""))
+    return selected - (_expand_shard_paths(root, omitted) if omitted else set())
 
 
 def test_pytest_shard_union_equals_recursive_collection() -> None:
@@ -541,6 +668,39 @@ def test_pytest_shard_union_equals_recursive_collection() -> None:
     assert not stray, f"shard globs reach outside the collection roots: {stray[:6]}"
 
 
+def test_cloud_shard_union_equals_recursive_collection() -> None:
+    """The cloud-tests matrix must reach every module under cloud/tests/.
+
+    TEST_AUDIT T-173. ``test_cloud_infra_shards_partition_cloud_tests`` builds
+    its universe from a NON-recursive ``glob("test_*.py")``, so it can only
+    reason about a subdirectory through the separate name heuristic in
+    ``_partition``; it never checks that the shard union equals what pytest
+    actually collects. That is the T-122 shape (752 tests left CI while the
+    workflow stayed green), and cloud/tests/ is one ``mkdir`` away from it.
+
+    Swapping ``_partition`` itself to ``rglob`` is NOT the fix: it is shared
+    with the py-tests guard, whose shards name ``scripts/tests/test_watchdog``
+    and ``scripts/tests/test_monitor_daemon`` as DIRECTORY tokens, and a
+    recursive file listing there reports every already-sharded module inside
+    them as unsharded. Set-equality against recursive collection is the check
+    that generalises, so cloud gets the same one py-tests has.
+    """
+    root = WORKFLOW.parents[2]
+    cloud_tests = _workflow()["jobs"]["cloud-tests"]
+    sharded: set[str] = set()
+    for item in cloud_tests["strategy"]["matrix"]["include"]:
+        sharded |= _expand_shard_row(root, item)
+    on_disk = _test_modules_under(root, root / "cloud" / "tests")
+    assert on_disk, "cloud/tests moved; this guard is measuring nothing"
+    missing = sorted(on_disk - sharded)
+    assert not missing, (
+        f"{len(missing)} cloud test modules are collected by NO cloud-tests "
+        f"shard (CI reads green without running them): {missing[:6]}"
+    )
+    stray = sorted(sharded - on_disk)
+    assert not stray, f"cloud shard globs reach outside cloud/tests: {stray[:6]}"
+
+
 def test_pytest_coverage_ratchet_measures_branches() -> None:
     """TEST_AUDIT T-123: the 56 ratchet was rebased (T-050) on combined
     statement+branch coverage. The shard rewrite dropped ``--cov-branch`` and
@@ -556,3 +716,69 @@ def test_pytest_coverage_ratchet_measures_branches() -> None:
         "pytest coverage ratchet is scoring statement-only; the 56 threshold "
         "was set against statement+branch (T-050)"
     )
+
+
+# CIP-001 (CI_PERFORMANCE_LOG.md): the slowest pytest shard sets the python
+# deploy gate. xdist ``--dist loadfile`` hands modules to workers in COLLECTION
+# order, so a 20-45s module collected near the end of its shard runs alone at
+# the tail while the other workers idle (run 33359053839: test_vixcor.py and
+# test_weekend_wrapper_self_rewrite.py were modules #59 and #71 of 78 on
+# scripts-npsz). Every module below is a measured >= 10s wall floor: real
+# subprocess timeout / SIGKILL drills and wall-clock wrapper tests that cannot
+# be made faster without weakening what they prove. Naming it FIRST in its
+# shard's ``paths`` starts it at t=0. pytest de-duplicates a module named both
+# explicitly and by the letter glob (``--keep-duplicates`` is off by default),
+# so shard membership stays glob-derived and the union contract holds.
+PYTEST_SHARD_LEAD_MODULES = {
+    "scripts-jm": ["scripts/tests/test_leap_garch_no_duplicate_scan.py"],
+    "scripts-npsz": [
+        "scripts/tests/test_vixcor.py",
+        "scripts/tests/test_weekend_wrapper_self_rewrite.py",
+    ],
+    "scripts-rs": [
+        "scripts/tests/test_rel137_weekend_wrapper_survivability.py",
+        "scripts/tests/test_run_flow_refresh_wrapper.py",
+        "scripts/tests/test_run_portfolio_refresh_retry.py",
+        "scripts/tests/test_run_signals_refresh_wrapper.py",
+    ],
+}
+
+
+def test_heavy_pytest_modules_lead_their_shard() -> None:
+    root = WORKFLOW.parents[2]
+    rows = {
+        str(row["shard"]): str(row["paths"]).split()
+        for row in _workflow()["jobs"]["py-tests"]["strategy"]["matrix"]["include"]
+    }
+    for shard, leads in PYTEST_SHARD_LEAD_MODULES.items():
+        tokens = rows[shard]
+        assert tokens[: len(leads)] == leads, (
+            f"{shard}: the wall-floor modules must be the first collection "
+            f"targets so loadfile schedules them at t=0; got {tokens[:len(leads)]}"
+        )
+        globs = tokens[len(leads):]
+        assert globs, f"{shard}: lead modules must be followed by the shard's letter globs"
+        for lead in leads:
+            # A renamed module makes pytest error on the explicit path (fail
+            # closed) rather than silently dropping it; update the list.
+            assert (root / lead).is_file(), f"{shard}: lead module {lead} is gone"
+            assert any(fnmatch.fnmatch(lead, glob) for glob in globs), (
+                f"{shard}: {lead} is outside this shard's globs; leads only "
+                "reorder a shard, they never move a module between shards"
+            )
+
+
+def test_cloud_shards_parallelise_except_the_wall_clock_edge_shard() -> None:
+    """CIP-001: ``pytest (cloud al)`` ran 765 tests serially in 91s (three
+    control-plane modules are 15-18s each of real subprocess drills) while
+    pytest-xdist was already installed from requirements-dev.txt. ``edge`` is
+    the Caddy wall-clock mechanism shard (real R-219 / R-220 timeouts, given
+    its own job for exactly that reason) and stays serial; ``loadfile`` keeps
+    test_caddyfile.py's restart-window mechanism, the only other caddy spawner
+    (``admin off``, ephemeral ports), on one worker."""
+    cloud = _workflow()["jobs"]["cloud-tests"]
+    rows = {str(row["shard"]): row for row in cloud["strategy"]["matrix"]["include"]}
+    assert rows["al"]["xdist"] == "-n auto --dist loadfile"
+    assert rows["mz"]["xdist"] == "-n auto --dist loadfile"
+    assert rows["edge"]["xdist"] == "", "the edge shard is wall-clock; keep it serial"
+    assert "matrix.xdist" in _job_commands(cloud)

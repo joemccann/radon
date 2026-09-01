@@ -501,23 +501,23 @@ def _fetch_nav_document() -> Optional[FlexDocument]:
         return FlexDocument(query_id=query_id, error=str(exc))
 
 
-def get_nav_snapshots() -> NavResolution:
-    """Resolve NAV: live Flex -> disk cache -> Turso.
+def get_nav_snapshots(*, sendrequest: bool = False) -> NavResolution:
+    """Resolve NAV. Live Flex only when ``sendrequest`` is true.
 
-    The fetched statement travels with the result so the flows query can be
-    parsed out of the document already in memory. IBKR throttles repeat
-    requests for one query id into an embargo, and with
-    `IB_FLEX_FLOWS_QUERY_ID` unset both queries resolve to the same id.
+    Default is disk then Turso. Page-driven and weekday jobs must not
+    SendRequest. A saved statement uses ``build_and_persist(from_file=...)``.
     """
-    document = _fetch_nav_document()
-    entries, gap_dates = consolidate_nav(
-        parse_nav_by_account(document.xml)
-        if document is not None and document.xml is not None
-        else {}
-    )
-    if entries:
-        _cache_nav_to_disk(entries)
-        return NavResolution(entries, "flex_live", tuple(gap_dates), document)
+    document: Optional[FlexDocument] = None
+    if sendrequest:
+        document = _fetch_nav_document()
+        entries, gap_dates = consolidate_nav(
+            parse_nav_by_account(document.xml)
+            if document is not None and document.xml is not None
+            else {}
+        )
+        if entries:
+            _cache_nav_to_disk(entries)
+            return NavResolution(entries, "flex_live", tuple(gap_dates), document)
 
     disk = load_nav_from_disk()
     if disk:
@@ -542,14 +542,22 @@ def _query_turso(sql: str) -> Optional[List[Any]]:
     if not _os.environ.get("TURSO_DB_URL") or not _os.environ.get("TURSO_AUTH_TOKEN"):
         return None
     try:
-        try:
-            from db.client import get_db  # type: ignore
-        except ImportError:
-            from scripts.db.client import get_db  # type: ignore
-
-        return get_db().execute(sql).fetchall()
+        return _query_turso_strict(sql)
     except Exception:  # noqa: BLE001
         return None
+
+
+def _query_turso_strict(sql: str) -> Optional[List[Any]]:
+    """`_query_turso` without the blanket swallow, for callers that must tell
+    an unreachable Turso from an empty result (R-321)."""
+    if not _os.environ.get("TURSO_DB_URL") or not _os.environ.get("TURSO_AUTH_TOKEN"):
+        return None
+    try:
+        from db.client import get_db  # type: ignore
+    except ImportError:
+        from scripts.db.client import get_db  # type: ignore
+
+    return get_db().execute(sql).fetchall()
 
 
 def _row_values(row: Any, *keys: str) -> Tuple[Any, ...]:
@@ -560,6 +568,11 @@ def _row_values(row: Any, *keys: str) -> Tuple[Any, ...]:
 
 # The builder's own mirror of a net subperiod flow; never a classified source row.
 _MIRRORED_FLOW_TYPE = "external"
+
+
+# Cents. Below this the two writers agree for practical purposes.
+_FLOW_DIVERGENCE_TOLERANCE = 0.01
+_FLOW_SOURCE_DIVERGENCE: Dict[Tuple[str, str], Tuple[float, float]] = {}
 
 
 def load_flows_from_turso() -> Optional[Dict[str, float]]:
@@ -599,13 +612,74 @@ def load_flows_from_turso() -> Optional[Dict[str, float]]:
         bucket = mirrored if flow_type == _MIRRORED_FLOW_TYPE else classified
         bucket[key] = bucket.get(key, 0.0) + value
 
+    # Classified rows win for a key they cover (T-081), but the two sources
+    # DISAGREEING for that key is new information, not a tie to break
+    # silently: the `--from-file` path parses CashTransaction + Transfers
+    # directly and sums both, so a session carrying a deposit AND an ACATS
+    # publishes a different net depending on which invocation last wrote
+    # performance.json. Precedence is unchanged; the divergence is now
+    # recorded so the caller can floor the payload status. R-345.
+    _FLOW_SOURCE_DIVERGENCE.clear()
     per_account = dict(mirrored)
-    per_account.update(classified)
+    for key, value in classified.items():
+        prior = per_account.get(key)
+        if prior is not None and abs(prior - value) > _FLOW_DIVERGENCE_TOLERANCE:
+            _FLOW_SOURCE_DIVERGENCE[key] = (prior, value)
+        per_account[key] = value
 
     out: Dict[str, float] = {}
     for (_account_id, normalized), value in per_account.items():
         out[normalized] = out.get(normalized, 0.0) + value
     return out or None
+
+
+def flow_source_divergences() -> Dict[Tuple[str, str], Tuple[float, float]]:
+    """`(account_id, report_date) -> (mirrored_net, classified_net)` for every
+    key the two `external_flows` writers disagreed on in the last load."""
+    return dict(_FLOW_SOURCE_DIVERGENCE)
+
+
+def flow_divergence_warnings() -> List[Dict[str, Any]]:
+    """One `warn` per disagreeing session. `warn` floors the payload to stale,
+    which is the honest state when the same session nets two ways. R-345."""
+    return [
+        _warning(
+            "FLOWS_SOURCE_DISAGREEMENT",
+            "warn",
+            f"External flows for {report_date} net to {classified} from the "
+            f"classified rows and {mirrored} from this builder's own mirror; "
+            "the no-fetch and --from-file paths would publish different "
+            "returns for that session.",
+            account_id=account_id,
+            report_date=report_date,
+            mirrored=mirrored,
+            classified=classified,
+        )
+        for (account_id, report_date), (mirrored, classified) in sorted(
+            _FLOW_SOURCE_DIVERGENCE.items()
+        )
+    ]
+
+
+_COVERAGE_SQL = "SELECT MAX(report_date) AS report_date FROM twr_subperiods"
+
+
+def load_flows_coverage_state() -> Tuple[Optional[str], bool]:
+    """``(covered_through, query_succeeded)``.
+
+    `_query_turso` returns None both when the query RAISED and when it came
+    back empty, and the caller cannot tell an unreachable Turso from a
+    genuinely empty `twr_subperiods`. Both mean zero verified coverage, but
+    only the first is an infrastructure failure the operator needs told
+    about, so the two are reported separately. R-321.
+    """
+    try:
+        rows = _query_turso_strict(_COVERAGE_SQL)
+    except Exception:  # noqa: BLE001 — the read is advisory; the caller fails closed
+        return None, False
+    if not rows:
+        return None, True
+    return _normalize_date(_row_values(rows[0], "report_date")[0]), True
 
 
 def load_flows_coverage_through() -> Optional[str]:
@@ -614,11 +688,11 @@ def load_flows_coverage_through() -> Optional[str]:
     `external_flows` only stores dates that HAD a flow, so its own MAX says
     nothing about coverage. `twr_subperiods` carries a row per session with an
     explicit zero, which makes its MAX the honest coverage marker.
+
+    ``None`` means NO verified coverage — never "all covered". Callers must
+    fail closed on it; see `bound_observations_to_coverage`.
     """
-    rows = _query_turso("SELECT MAX(report_date) AS report_date FROM twr_subperiods")
-    if not rows:
-        return None
-    return _normalize_date(_row_values(rows[0], "report_date")[0])
+    return load_flows_coverage_state()[0]
 
 
 def bound_observations_to_coverage(
@@ -628,9 +702,15 @@ def bound_observations_to_coverage(
 
     Chaining a session the mirror never saw asserts "no external flow that day"
     on no evidence — the invented zero that inflates TWR.
+
+    An absent ``covered_through`` is ZERO verified coverage, so it drops
+    EVERYTHING. It previously returned the full series untouched, which made
+    the one mechanism `FLOWS_SOURCE_MIRROR`'s `info` severity defers to fail
+    open on both of its None paths — an unreachable Turso and an empty
+    `twr_subperiods`. R-321.
     """
     if not covered_through:
-        return observations
+        return []
     return [o for o in observations if o.date <= covered_through]
 
 
@@ -687,10 +767,17 @@ def _flows_after_fetch_failure(reason: str) -> Tuple[FlowSet, List[Dict[str, Any
         f"[perf_twr] Serving {len(mirrored)} mirrored flows from Turso after Flex failure",
         file=_sys.stderr,
     )
-    return FlowSet(status=FlowsStatus.OK, by_date=mirrored, source="turso"), []
+    return (
+        FlowSet(status=FlowsStatus.OK, by_date=mirrored, source="turso"),
+        flow_divergence_warnings(),
+    )
 
 
-def resolve_flows(document: Optional[FlexDocument] = None) -> Tuple[FlowSet, List[Dict[str, Any]]]:
+def resolve_flows(
+    document: Optional[FlexDocument] = None,
+    *,
+    allow_fetch: bool = True,
+) -> Tuple[FlowSet, List[Dict[str, Any]]]:
     """Resolve external flows plus any coverage warnings about the statement.
 
     The NAV statement is reused when the flows query id matches it, so one
@@ -698,6 +785,9 @@ def resolve_flows(document: Optional[FlexDocument] = None) -> Tuple[FlowSet, Lis
     FAILED this run is not requested again either. Retrying it cannot succeed
     seconds later on the same token, and the repeat is what escalates a
     transient 1001 into a 1025 "too many failed attempts" lockout.
+
+    ``allow_fetch=False`` (file ingest / weekday timer) never SendRequests.
+    An Activity statement already carries CashTransaction + Transfers.
     """
     token = _os.environ.get("IB_FLEX_TOKEN")
     query_id = _flows_query_id()
@@ -714,11 +804,25 @@ def resolve_flows(document: Optional[FlexDocument] = None) -> Tuple[FlowSet, Lis
         )
         return _flows_after_fetch_failure(reason)
 
+    if already_attempted:
+        statement = document.xml if document is not None else None
+    elif not allow_fetch:
+        if document is not None and document.xml:
+            statement = document.xml
+        else:
+            return _flows_after_fetch_failure("file_ingest_no_fetch")
+    else:
+        statement = None
+
     try:
-        statement = document.xml if already_attempted else fetch_flex_xml(token, query_id)
+        if statement is None:
+            statement = fetch_flex_xml(token, query_id)
     except Exception as exc:  # noqa: BLE001
         print(f"[perf_twr] Flex flows fetch failed: {exc}", file=_sys.stderr)
         return _flows_after_fetch_failure(str(exc))
+
+    if not statement:
+        return FlowSet.failed("empty_statement"), []
 
     coverage = _transfers_section_warnings(statement, query_id)
     try:
@@ -1600,12 +1704,21 @@ def _apply_mirrored_flow_coverage(
     if flows.source != "turso" or not observations:
         return observations, flows, []
 
-    covered_through = load_flows_coverage_through()
+    covered_through, query_ok = load_flows_coverage_state()
     bounded = bound_observations_to_coverage(observations, covered_through)
     if not bounded:
         return observations, FlowSet.failed(
             f"mirrored_flows_cover_nothing_through_{covered_through or 'unknown'}"
-        ), []
+        ), [
+            _warning(
+                "FLOWS_COVERAGE_QUERY_FAILED",
+                "warn",
+                "The mirrored-flow coverage query failed, so no session can be "
+                "shown to have verified flows; the TWR build is held rather "
+                "than chained against implied zero flows.",
+                flows_source="turso",
+            )
+        ] if not query_ok else []
 
     dropped = len(observations) - len(bounded)
     return (
@@ -1631,14 +1744,44 @@ def _apply_mirrored_flow_coverage(
     )
 
 
-def build_and_persist(*, persist: bool = True, allow_inferred_flows: bool = False) -> Dict[str, Any]:
+def _resolution_from_file(path: str) -> NavResolution:
+    xml = _Path(path).read_text(encoding="utf-8")
+    from lib.flex_classify import ACTIVITY, FlexClassifyError, classify_flex_xml
+
+    try:
+        kind = classify_flex_xml(xml)
+    except FlexClassifyError as exc:
+        raise RuntimeError(f"not_activity_statement:{exc}") from exc
+    if kind != ACTIVITY:
+        raise RuntimeError(f"not_activity_statement:{kind}")
+    query_id = _os.environ.get("IB_FLEX_NAV_QUERY_ID") or "from-file"
+    document = FlexDocument(query_id=query_id, xml=xml)
+    entries, gap_dates = consolidate_nav(parse_nav_by_account(xml))
+    if not entries:
+        return NavResolution({}, "none", (), document)
+    return NavResolution(entries, "flex_from_file", tuple(gap_dates), document)
+
+
+def build_and_persist(
+    *,
+    persist: bool = True,
+    allow_inferred_flows: bool = False,
+    from_file: Optional[str] = None,
+    sendrequest: bool = False,
+) -> Dict[str, Any]:
     """Resolve NAV + flows, apply the gates, assemble and optionally persist."""
-    resolution = get_nav_snapshots()
+    if from_file:
+        resolution = _resolution_from_file(from_file)
+    else:
+        resolution = get_nav_snapshots(sendrequest=sendrequest)
     observations = [
         NavObservation(date=d, nav=float(v)) for d, v in sorted(resolution.by_date.items())
     ]
     if observations:
-        flows, coverage = resolve_flows(resolution.document)
+        flows, coverage = resolve_flows(
+            resolution.document,
+            allow_fetch=bool(sendrequest) and not from_file,
+        )
     else:
         flows, coverage = FlowSet.failed("no_nav_series"), []
 
@@ -1719,10 +1862,28 @@ def main() -> None:
         action="store_true",
         help="Apply inferred flows for quarantined sessions (diagnostic; forces degraded)",
     )
+    parser.add_argument(
+        "--from-file",
+        metavar="PATH",
+        help="Parse a saved Activity Flex statement. No Flex Web Service call. No disk-cache fallback.",
+    )
+    parser.add_argument(
+        "--sendrequest",
+        action="store_true",
+        help="Permit a live Flex SendRequest (Sunday recon, after embargo).",
+    )
     args = parser.parse_args()
 
+    if args.sendrequest and not args.from_file:
+        from utils.flex_send import assert_sendrequest_permitted
+
+        assert_sendrequest_permitted(allowed=True)
+
     payload = build_and_persist(
-        persist=not args.no_persist, allow_inferred_flows=args.allow_inferred_flows
+        persist=not args.no_persist,
+        allow_inferred_flows=args.allow_inferred_flows,
+        from_file=args.from_file,
+        sendrequest=args.sendrequest,
     )
     if not args.no_persist:
         _record_perf_twr_health(

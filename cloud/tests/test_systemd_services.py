@@ -11,6 +11,7 @@ EXPECTED_SERVICE_FILES = [
     "radon-api.service",
     "radon-ib-gateway.service",
     "radon-ib-gateway-preheld-restart.service",
+    "radon-ib-gateway-remote.service",
     "radon-monitor.service",
     "radon-newsfeed.service",
     "radon-nextjs.service",
@@ -33,6 +34,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-watchdog-error.timer",
     "radon-db-backup.service",
     "radon-db-backup.timer",
+    "radon-disk-cleanup.service",
+    "radon-disk-cleanup.timer",
     "radon-portfolio-archive.service",
     "radon-portfolio-archive.timer",
     "radon-media-backup.service",
@@ -80,6 +83,9 @@ EXPECTED_SERVICE_FILES = [
     "radon-demo-mirror.timer",
     "radon-margin-debt.service",
     "radon-margin-debt.timer",
+    "radon-mktnews.service",
+    "radon-model-catalog.service",
+    "radon-model-catalog.timer",
     "radon-oi-changes.service",
     "radon-oi-changes.timer",
     "radon-knowledge.service",
@@ -122,6 +128,10 @@ EXPECTED_SERVICE_FILES = [
     "radon-hhlev.timer",
     "radon-vixts.service",
     "radon-vixts.timer",
+    "radon-dispersion.service",
+    "radon-dispersion.timer",
+    "radon-flex-pull.service",
+    "radon-flex-pull.timer",
 ]
 
 LONG_RUNNING_SERVICES = [
@@ -142,9 +152,9 @@ IB_GATEWAY_DEPENDENTS = [
 
 ENV_FILE_PATH = "/etc/radon/env"
 STRIPPED_ENV_SERVICES = {
-    "radon-grok-page-responder.service",
+    "radon-grok-page-responder.service": "/home/radon/radon-page-responder.env",
+    "radon-flex-pull.service": "/var/lib/radon/flex-secrets/env",
 }
-STRIPPED_ENV_FILE_PATH = "/home/radon/radon-page-responder.env"
 STATIC_SERVICES = {
     "radon-refresh.service",
     "radon-drift-audit.service",
@@ -153,8 +163,13 @@ STATIC_SERVICES = {
 # The drift audit must read 0440 root sudoers and run `docker inspect`, so it
 # stays root -- but it executes a root-owned control-plane copy of the audit,
 # never the radon-writable checkout (cloud/tests/test_root_execution_paths.py).
+# The weekend disk sweep must talk to the root-only docker engine socket
+# (radon is deliberately not in group docker) and vacuum journald -- so it
+# stays root, and like the drift audit it executes a root-owned
+# control-plane copy, never the radon-writable checkout.
 ROOT_REQUIRED_SERVICES = {
     "radon-drift-audit.service",
+    "radon-disk-cleanup.service",
 }
 
 
@@ -294,6 +309,38 @@ class TestIBGateway:
     def test_exec_stop_uses_gateway_control_helper(self, unit):
         svc = unit(self.FILENAME)["Service"]
         assert svc["execstop"] == "/usr/local/bin/radon-ib-gateway-control stop"
+
+
+class TestIBGatewayRemote:
+    FILENAME = "radon-ib-gateway-remote.service"
+
+    def test_bind_is_private_nic(self, unit, services_dir):
+        text = (services_dir / self.FILENAME).read_text()
+        svc = unit(self.FILENAME)["Service"]
+        assert "RADON_IB_REMOTE_BIND=10.0.0.4" in text
+        assert "RADON_IB_REMOTE_PORT=8340" in text
+        assert "RADON_IB_REMOTE_ALLOW=10.0.0.2" in text
+        assert "0.0.0.0" not in text
+        assert "python -m scripts.ib_gateway_remote.serve" in svc["execstart"]
+
+    def test_not_part_of_gateway(self, unit):
+        u = unit(self.FILENAME)["Unit"]
+        assert "radon-ib-gateway.service" not in u.get("partof", "")
+        assert "radon-ib-gateway.service" not in u.get("requires", "")
+
+    def test_network_exposed_daemon_is_sandboxed(self, unit):
+        """REL-168 (R-497): the daemon execs a Docker-mutating helper on a
+        private-net port; it gets the same sandbox as the other radon units."""
+        svc = unit(self.FILENAME)["Service"]
+        assert svc.get("nonewprivileges") == "yes"
+        assert svc.get("protectsystem") == "strict"
+        assert svc.get("privatetmp") == "yes"
+        assert "capabilityboundingset" in svc
+        # The helper writes the 2FA lease, control guard and transition file
+        # under /var/lib/radon and the deploy lock under /home/radon.
+        rw = svc.get("readwritepaths", "")
+        assert "/var/lib/radon" in rw
+        assert "/home/radon" in rw
 
 
 # ---------------------------------------------------------------------------
@@ -656,7 +703,7 @@ class TestRelay:
     def test_depends_on_ib_gateway(self, unit):
         u = unit(self.FILENAME)["Unit"]
         assert "radon-ib-gateway.service" in u["after"]
-        assert "radon-ib-gateway.service" in u["partof"]
+        assert "partof" not in u
         assert "radon-ib-gateway.service" not in u.get("requires", "")
         assert "radon-ib-gateway.service" not in u.get("wants", "")
 
@@ -678,7 +725,7 @@ class TestMonitor:
         u = unit(self.FILENAME)["Unit"]
         assert "radon-ib-gateway.service" in u["after"]
         assert "radon-api.service" in u["after"]
-        assert "radon-ib-gateway.service" in u["partof"]
+        assert "partof" not in u
 
     def test_restart_sec_longer(self, unit):
         svc = unit(self.FILENAME)["Service"]
@@ -700,9 +747,10 @@ class TestTimerOneshotExecutionBounds:
     The breadth and VCG endpoints each cap their scan child at 120 seconds;
     their wrapper has a 130-second HTTP deadline plus a direct fallback, so a
     240-second service ceiling leaves normal-path room while releasing the
-    five-minute timer before its next slot. ``data_refresh`` runs three
-    sequential 120-second children, so 480 seconds preserves that documented
-    budget and still leaves seven minutes for the next 15-minute cadence.
+    five-minute timer before its next slot. ``data_refresh`` runs cri at
+    180s plus vcg/gex at 120s each (sum 420s), so 480 seconds preserves that
+    documented budget and still leaves seven minutes for the next 15-minute
+    cadence.
     """
 
     EXECUTION_CAPS = {
@@ -868,7 +916,7 @@ class TestCrossCutting:
             if env_file is None:
                 continue
             if name in STRIPPED_ENV_SERVICES:
-                assert env_file == STRIPPED_ENV_FILE_PATH, (
+                assert env_file.lstrip("-") == STRIPPED_ENV_SERVICES[name], (
                     f"{name} must not load production secrets; "
                     f"got EnvironmentFile={env_file}"
                 )
@@ -952,6 +1000,48 @@ class TestDivyieldScanBudget:
         assert int(svc["timeoutstartsec"]) <= 3600
 
 
+class TestEquiblesAtsScanBudget:
+    """Weekly Tue 09:15 UTC Equibles ATS venue-share walk. TimeoutStartSec=900
+    killed the 2026-09-01 run (Result=timeout, NRestarts=0, CPU 734ms) while
+    Equibles HTTPS tarpitted the Session. The process now self-limits at
+    SWEEP_BUDGET_S=780; this TimeoutStartSec must cover that budget plus one
+    in-flight TICKER_FETCH_BUDGET_S=90 and still end long before the next
+    calendar fire (7d). Nesting is pinned in
+    test_equibles_ats_venue_share.py::TestSweepBudget."""
+
+    def test_service_is_oneshot_with_start_timeout(self, unit):
+        svc = unit("radon-equibles-ats.service")["Service"]
+        assert svc["type"] == "oneshot"
+        assert int(svc["timeoutstartsec"]) == 900
+
+    def test_start_budget_ends_before_the_next_calendar_fire(self, unit):
+        svc = unit("radon-equibles-ats.service")["Service"]
+        # Next fire is seven days out; keep the oneshot well under a day so a
+        # hung run cannot swallow the following Tuesday.
+        assert int(svc["timeoutstartsec"]) <= 3600
+
+
+class TestEquiblesFilingsScanBudget:
+    """Daily 10:00 UTC Equibles filing-forensics walk. TimeoutStartSec=900
+    killed the 2026-09-01 run (Result=timeout, NRestarts=0, ExecMainStatus=15,
+    10:03:53Z → 10:18:54Z) while Equibles HTTPS tarpitted the Session. The
+    process now self-limits at SWEEP_BUDGET_S=780; this TimeoutStartSec must
+    cover that budget plus one in-flight TICKER_FETCH_BUDGET_S=90 and still
+    end long before the next calendar fire (24h). Nesting is pinned in
+    test_equibles_filing_forensics.py::TestSweepBudget."""
+
+    def test_service_is_oneshot_with_start_timeout(self, unit):
+        svc = unit("radon-equibles-filings.service")["Service"]
+        assert svc["type"] == "oneshot"
+        assert int(svc["timeoutstartsec"]) == 900
+
+    def test_start_budget_ends_before_the_next_calendar_fire(self, unit):
+        svc = unit("radon-equibles-filings.service")["Service"]
+        # Next fire is a day out; keep the oneshot well under a day so a
+        # hung run cannot swallow tomorrow's 10:00 UTC slot.
+        assert int(svc["timeoutstartsec"]) <= 3600
+
+
 class TestLeapGarchScanBudget:
     """Index-universe LEAP/GARCH scans need an hour-scale FastAPI budget
     (3600s) plus systemd headroom so TimeoutStartSec does not kill the
@@ -963,6 +1053,31 @@ class TestLeapGarchScanBudget:
         assert int(svc["timeoutstartsec"]) >= 3900
 
 
+class TestFlexPull:
+    """sFTP puller. Empty outgoing is ok skip, not a page."""
+
+    def test_oneshot_stripped_env_and_timeout(self, unit):
+        svc = unit("radon-flex-pull.service")["Service"]
+        assert svc["type"] == "oneshot"
+        assert int(svc["timeoutstartsec"]) >= 120
+        assert svc["environmentfile"].lstrip("-") == STRIPPED_ENV_SERVICES["radon-flex-pull.service"]
+        assert "/etc/radon/env" not in svc["environmentfile"]
+        assert "flex_sftp_pull.py" in svc["execstart"]
+        hidden = svc.get("inaccessiblepaths", "")
+        assert "/etc/radon/env" in hidden
+
+    def test_timer_is_morning_after_with_empty_dir_retry(self, services_dir):
+        text = (services_dir / "radon-flex-pull.timer").read_text()
+        assert "OnCalendar=Tue..Sat *-*-* 07:30:00 America/New_York" in text
+        assert "OnCalendar=Tue..Sat *-*-* 08:30:00 America/New_York" in text
+
+    def test_on_auto_sync_allowlist(self):
+        allowlist = Path(__file__).resolve().parent.parent / "config" / "auto-sync-units.txt"
+        text = allowlist.read_text()
+        assert "radon-flex-pull.service" in text
+        assert "radon-flex-pull.timer" in text
+
+
 class TestGrokPageResponder:
     """Dedicated clone + stripped env. Never the live checkout."""
 
@@ -971,7 +1086,7 @@ class TestGrokPageResponder:
         assert svc["type"] == "oneshot"
         assert int(svc["timeoutstartsec"]) >= 3900
         assert svc["workingdirectory"] == "/home/radon/radon-page-responder"
-        assert svc["environmentfile"] == STRIPPED_ENV_FILE_PATH
+        assert svc["environmentfile"] == STRIPPED_ENV_SERVICES["radon-grok-page-responder.service"]
         assert "radon-cloud/.env" not in svc["environmentfile"]
         assert "grok_page_responder.py" in svc["execstart"]
         assert "/home/radon/radon/.venv" not in svc["execstart"]
@@ -1094,3 +1209,50 @@ class TestDemoMirrorSchemaGate:
         assert "migrate.py" in pre
         assert "--demo" in pre
         assert "TimeoutStartSec=300" in raw
+
+
+# ---------------------------------------------------------------------------
+# radon-newsfeed.service
+# ---------------------------------------------------------------------------
+
+
+class TestNewsfeedShutdownExitStatus:
+    """T-229: exit 75 on a mid-cycle SIGTERM must not read as `failed`.
+
+    scripts/newsfeed/scheduler.js:86 exits 75 when the shutdown grace expires
+    with a scrape cycle still in flight (R-262 — the truncated-cycle signal).
+    The scraper loops every 120 s, so an ordinary `systemctl stop` during a
+    deploy lands mid-cycle most of the time. Without SuccessExitStatus=75 that
+    deliberate signal leaves the unit in `failed`, which
+    scripts/watchdog/units.py pages on, and Restart=on-failure then restarts it
+    5 x 30 s = 150 s < StartLimitIntervalSec=300 straight into
+    Result=start-limit-hit: a parked newsfeed nobody restarts.
+
+    75 is the repo's established EX_TEMPFAIL convention, already paired with
+    SuccessExitStatus=75 in radon-db-retention.service and
+    radon-db-backup.service.
+    """
+
+    FILENAME = "radon-newsfeed.service"
+
+    def test_truncated_cycle_exit_is_not_a_unit_failure(self, unit):
+        svc = unit(self.FILENAME)["Service"]
+        assert svc.get("successexitstatus") == "75", (
+            "radon-newsfeed.service must declare SuccessExitStatus=75: the "
+            "scheduler exits 75 on a SIGTERM that lands mid-cycle, so without "
+            "it an ordinary deploy stop parks the unit failed and the watchdog "
+            "pages for a routine restart"
+        )
+
+    def test_restart_ladder_would_otherwise_park_the_unit(self, unit):
+        """The blast radius, pinned: the ladder cannot outlast the window, so
+        a repeated exit-75 without the mapping ends at start-limit-hit."""
+        cfg = unit(self.FILENAME)
+        burst = int(cfg["Unit"]["startlimitburst"])
+        interval = int(cfg["Unit"]["startlimitintervalsec"])
+        restart_sec = int(cfg["Service"]["restartsec"])
+        assert cfg["Service"]["restart"] == "on-failure"
+        assert burst * restart_sec < interval, (
+            "if this ever stops holding, re-derive the reason "
+            "SuccessExitStatus=75 is load-bearing here"
+        )

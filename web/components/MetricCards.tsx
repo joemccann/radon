@@ -9,8 +9,8 @@ import type { PortfolioData, AccountSummary, ExecutedOrder } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
 import { computeExposureDetailed, type ExposureDataWithBreakdown } from "@/lib/exposureBreakdown";
 import { computeDayMoveBreakdown } from "@/lib/dayMoveBreakdown";
-import { computeUnrealizedBreakdown } from "@/lib/unrealizedBreakdown";
-import { resolveEntryCost, resolveMarketValue } from "@/lib/positionUtils";
+import { computeUnrealizedBreakdown, countUnmeasuredBasis, sumUnrealizedBreakdown } from "@/lib/unrealizedBreakdown";
+import { resolveMarketValue } from "@/lib/positionUtils";
 import { getMarketPhaseFromDate } from "@/lib/serviceHealthWindows";
 import {
   computeLeverageRatio,
@@ -537,12 +537,20 @@ function TodayPnlRow({
 
 /* ─── Legacy NET LEVERAGE row (no account_summary) ───────── */
 
-function LegacyLeverageRow({ portfolio, pnl, pnlPct }: { portfolio: PortfolioData; pnl: number; pnlPct: number }) {
+function LegacyLeverageRow({ portfolio, pnl, pnlPct, unmeasuredBasisCount }: {
+  portfolio: PortfolioData; pnl: number; pnlPct: number; unmeasuredBasisCount: number;
+}) {
+  const pnlChange = `${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(1)}%`;
   const cards: CardDef[] = [
     { label: "Net Liquidation", value: fmt(portfolio.bankroll), change: "BANKROLL", tone: "neutral" },
     { label: "Positions", value: String(portfolio.position_count), change: `${portfolio.defined_risk_count} DEFINED / ${portfolio.undefined_risk_count} UNDEFINED`, tone: "neutral" },
     { label: "Deployed", value: fmt(portfolio.total_deployed_dollars), change: `${portfolio.total_deployed_pct.toFixed(1)}% OF BANKROLL`, tone: portfolio.total_deployed_pct > 100 ? "negative" : "neutral" },
-    { label: "Open P&L", value: fmtSigned(pnl), change: `${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(1)}%`, tone: tone(pnl) },
+    {
+      label: "Open P&L",
+      value: fmtSigned(pnl),
+      change: unmeasuredBasisCount > 0 ? `${pnlChange} · ${unmeasuredBasisCount} UNMEASURED BASIS` : pnlChange,
+      tone: tone(pnl),
+    },
   ];
 
   return (
@@ -621,14 +629,8 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
     );
   }
 
-  const pnl = (() => {
-    let total = 0;
-    for (const pos of portfolio.positions) {
-      const mv = resolveMarketValue(pos);
-      if (mv != null) total += mv - resolveEntryCost(pos);
-    }
-    return total;
-  })();
+  const pnl = sumUnrealizedBreakdown(portfolio);
+  const unmeasuredBasisCount = countUnmeasuredBasis(portfolio);
   const pnlPct = portfolio.total_deployed_dollars > 0
     ? (pnl / portfolio.total_deployed_dollars) * 100
     : 0;
@@ -687,7 +689,7 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
           onDividendsClick={() => setDividendsModalOpen(true)}
         />
       ) : (
-        <LegacyLeverageRow portfolio={portfolio} pnl={pnl} pnlPct={pnlPct} />
+        <LegacyLeverageRow portfolio={portfolio} pnl={pnl} pnlPct={pnlPct} unmeasuredBasisCount={unmeasuredBasisCount} />
       )}
 
       {/* Row 2: RISK */}

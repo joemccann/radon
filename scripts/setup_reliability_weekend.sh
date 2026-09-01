@@ -17,6 +17,9 @@ WEEKEND_VENV="$WEEKEND_ROOT/venv"
 # every round hard-resets and cleans that clone.
 WEEKEND_ENV="$WEEKEND_ROOT/.env"
 LAUNCH_AGENTS="$HOME/Library/LaunchAgents"
+# The checkout this script lives in is the source of the gitignored env files
+# the runner clone cannot get from `git clone`. Override for an unusual layout.
+SRC_REPO="${RADON_WEEKEND_SRC_REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 ORIGIN_URL="$(git config --get remote.origin.url 2>/dev/null || echo git@github.com:joemccann/radon.git)"
 
 fail=0
@@ -27,6 +30,18 @@ check() {
   else
     echo "  MISSING  $name  ($*)"
     fail=1
+  fi
+}
+
+# Same report shape as `check`, but advisory only: an absent env file must not
+# block installing the job on a fresh machine — the provisioning step below
+# says what it did instead.
+advise() {
+  local name="$1"; shift
+  if "$@" >/dev/null 2>&1; then
+    echo "  ok  $name"
+  else
+    echo "  MISSING  $name  ($*)"
   fi
 }
 
@@ -41,9 +56,18 @@ check "git ssh to origin" git ls-remote --exit-code "$ORIGIN_URL" HEAD
 check "pushover creds"    grep -qE '^PUSHOVER_(USER|TOKEN)=.+' "$WEEKEND_ENV"
 check "root ssh to VPS (optional, for operator use only)" \
   ssh -o BatchMode=yes -o ConnectTimeout=5 root@ib-gateway true
+check "bash 4+ (cloud/tests)" bash -c '((BASH_VERSINFO[0] >= 4))'
+check "caddy (cloud/tests edge)" command -v caddy
+advise "$SRC_REPO/web/.env (else no dev server, so no browser verification)" \
+  test -s "$SRC_REPO/web/.env"
 if [[ $fail -ne 0 ]]; then
   echo "Fix the MISSING items above, then re-run. (VPS ssh is optional —"
   echo "the unattended loop never uses it; it is for your follow-ups.)"
+  echo "  bash 3.2 leaves 34 cloud/tests permanently red on this runner (13 in"
+  echo "  test_bootstrap_control_plane.py via 'exec {fd}<>', 21 in"
+  echo "  test_ib_gateway_control.py via 'mapfile'); no caddy leaves 3 more."
+  echo "  Installing either MOVES the recorded darwin baseline — the next audit"
+  echo "  must re-record the FAILED list in the same run."
   # VPS ssh alone should not block install:
   # continue only if everything except that check passed.
 fi
@@ -65,12 +89,14 @@ fi
 # and site-packages a live testing agent is executing against, mid-run.
 # The guard above was written for the clone ("A live cycle owns this clone")
 # and never extended to the shared $WEEKEND_ROOT both loops depend on. R-266.
-SIBLING_REPO="$WEEKEND_ROOT/radon-testing"
-if [[ -d "$SIBLING_REPO" ]] \
-  && kill -0 "$(cat "$SIBLING_REPO/.weekend-runner.lock/pid" 2>/dev/null)" 2>/dev/null; then
-  echo "  a weekend run is in flight in $SIBLING_REPO and shares $WEEKEND_VENV; re-run when it finishes"
-  exit 1
-fi
+for SIBLING_REPO in "$WEEKEND_ROOT/radon-testing" "$WEEKEND_ROOT/radon-ci-performance" \
+  "$WEEKEND_ROOT/radon-documentation" "$WEEKEND_ROOT/radon-security"; do
+  if [[ -d "$SIBLING_REPO" ]] \
+    && kill -0 "$(cat "$SIBLING_REPO/.weekend-runner.lock/pid" 2>/dev/null)" 2>/dev/null; then
+    echo "  a weekend run is in flight in $SIBLING_REPO and shares $WEEKEND_VENV; re-run when it finishes"
+    exit 1
+  fi
+done
 # An already-provisioned clone must carry the current config/ and scripts/
 # before the job is installed from it. main is force-reset; any weekend
 # branch and its commits survive.
@@ -78,7 +104,47 @@ git -C "$WEEKEND_REPO" fetch origin --quiet
 git -C "$WEEKEND_REPO" checkout -f --quiet main
 git -C "$WEEKEND_REPO" reset --hard --quiet origin/main
 touch "$WEEKEND_REPO/.radon-weekend-runner"
+touch "$WEEKEND_REPO/.radon-reliability-runner"  # REL-180 (R-504): this loop's own marker
 mkdir -p "$WEEKEND_REPO/logs/reliability-weekend"
+
+# web/.env is gitignored, so a fresh `git clone` can never carry it and the
+# nightly hard-reset would drop it anyway; both wrappers already exclude it
+# from their per-round `git clean`. Without it the Next dev server cannot
+# boot, so the loop cannot do the browser verification CLAUDE.md requires
+# (filed as R-408's residual on 2026-08-29).
+#
+# ONLY web/.env. The root .env is deliberately NOT provisioned: it would put
+# IB_FLEX_TOKEN in a second place. web/.env IS read by pytest, not only by
+# Next: 50 scripts/**/*.py producers (grep -rl 'load_dotenv(.*web.*\.env'
+# scripts --include='*.py') call load_dotenv(web/.env) at import, so the
+# clone's TURSO creds land in os.environ under every collected module.
+# scripts/tests/conftest.py::_strip_turso_credentials removes them per test;
+# that fixture, not this file, keeps the pytest gate host-independent (T-317:
+# without it 22 tests red with FlexTokenLocked on a provisioned clone).
+# Re-copied every setup run so a rotated key propagates. Never inline a value.
+provision_env_file() {
+  local rel="$1"
+  local src="$SRC_REPO/$rel"
+  local dst="$WEEKEND_REPO/$rel"
+  if [[ ! -s "$src" ]]; then
+    echo "  skipped $rel (none at $src; the loops run without it)"
+    return 0
+  fi
+  if [[ -s "$dst" && "$dst" -nt "$src" ]]; then
+    echo "  kept $rel (clone copy is newer than $src)"
+    return 0
+  fi
+  mkdir -p "$(dirname "$dst")"
+  install -m 600 "$src" "$dst"
+  echo "  provisioned $rel from $SRC_REPO (0600)"
+}
+if [[ "$SRC_REPO" == "$WEEKEND_REPO" ]]; then
+  echo "  MISSING  env provisioning: run setup from your own checkout, not the runner clone"
+else
+  for env_rel in web/.env; do
+    provision_env_file "$env_rel"
+  done
+fi
 
 if [[ ! -f "$WEEKEND_ENV" ]]; then
   cat > "$WEEKEND_ENV" <<'EOF'

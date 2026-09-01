@@ -1,0 +1,54 @@
+[Unit]
+Description=Radon weekend disk cleanup (stale deploy images, leaked release worktrees, caches, journald)
+Wants=network-online.target
+After=network-online.target docker.service
+# DUR-02 pattern: brake crash loops -- after StartLimitBurst starts inside
+# StartLimitIntervalSec, systemd parks the unit as failed instead of
+# restarting forever. The disk-cleanup service_health heartbeat (8-day
+# window) surfaces a parked/silent sweep on the dashboard + watchdog daily
+# bucket.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+# Root on purpose: the docker engine socket is root-only (radon is
+# deliberately NOT in group docker, see radon-app-runtime.sh) and journald
+# vacuuming is root-only. The leaked stage./backup. worktrees also outlive
+# the radon processes that created them.
+User=root
+WorkingDirectory=/
+# This unit deliberately declares NO environment-file directive, for the same
+# reason radon-drift-audit.service does not: the stable secret file is 0600
+# radon:radon and systemd merges every KEY=VALUE line of such a file into the
+# process environment unfiltered, so one appended LD_PRELOAD line would load
+# radon-authored code into root and PATH= would redirect the bare binary names
+# below. The two Turso keys the heartbeat needs are READ out of that file as
+# data (disk_cleanup.load_env_keys).
+Environment=RADON_ENV_FILE=/home/radon/radon-cloud/.env
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# Root runs the control-plane copy installed root-owned by
+# cloud/scripts/bootstrap-control-plane.sh, never the radon-writable checkout
+# (cloud/tests/test_root_execution_paths.py).
+# -I (isolated): CPython otherwise prepends the script's own directory to
+# sys.path, so a module dropped beside it would be imported by root.
+ExecStart=/usr/bin/python3 -I /usr/local/lib/radon/disk_cleanup.py
+# The deploy lock is taken IN-PROCESS (disk_cleanup.acquire_deploy_lock), not
+# by an ExecStart flock as radon-db-backup.service uses. Two reasons: the lock
+# deploy.sh holds lives at /home/radon/.radon-deploy.lock, and naming any
+# /home/radon path in a User=root ExecStart is exactly what
+# cloud/tests/test_root_execution_paths.py forbids; and opening it in-process
+# lets us pass O_NOFOLLOW, so the radon account cannot swap the lock file for
+# a symlink and have root open the target. 75 is EX_TEMPFAIL: a run skipped
+# because a deploy holds the lock is not a failure. R-341.
+SuccessExitStatus=75
+StandardOutput=journal
+StandardError=journal
+# A oneshot with no runtime ceiling can hang forever and freeze its timer
+# (the ib-watchdog self-hang, 2026-06-10). The dominant cost is walking
+# ~9 GB of cache trees and a handful of `docker image rm` calls; 900s is far
+# above the observed manual reclaim and still finite.
+TimeoutStartSec=900
+
+[Install]
+WantedBy=multi-user.target

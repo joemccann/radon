@@ -247,6 +247,109 @@ Reported 2026-08-25 as "502 on https://app.radon.run/admin".
 
 ---
 
+## caddy-health-floor-pages-aggregate-invalid
+
+**Off-box observer pages P1 `aggregate_invalid` while ping and `/sign-in`
+stay 200.** Peak: 2026-08-29 23:05Z, page `1b0b049c…`. GitHub probe
+failed 23:03:36–23:03:56Z; deploy runner `1b2a82db` materialized 23:05Z
+(the first release that ships `cloud/caddy/Caddyfile`).
+
+- **Mechanism:** `/edge-health/ping` is Caddy-static 200. `/edge-health/status`
+  reverse-proxies `:8330`. The never-502 floor rewrites healthd 5xx and
+  dial-refused (healthd stopped during deploy `stop-clean`) to HTTP 200
+  `{"reachable":false,"observer":"caddy"}`. `classify_probes` treated that
+  opaque 200 as `aggregate_invalid`. Deploy-window suppression only matched
+  `(ping|status)_http_5xx`, so the rewritten 502 paged P1. Local
+  `:8330/status` was schema-v2 `up`; `/sign-in` 200. Not IB, not Turso.
+- **Detection:** Turso `external_probe.detail=aggregate_invalid` with
+  `http_status=200`; GitHub `external-health-probe.yml` FAILURE in the
+  same minute; ping 200; serving-path units up. After healthd binds,
+  the next off-box cycle writes `edge_ok`.
+- **Discriminating check:** the public `/edge-health/status` body (or the
+  Caddyfile literal) is `{"reachable":false,"observer":"caddy"}` while
+  loopback `:8330/status` is schema-v2, OR the sample sits inside a
+  deploy window with serving path up. A real schema contradiction
+  (`ok` vs `overall_state`) is still `aggregate_invalid` and still P1.
+  `status_http_502` is the pre-floor form of the same restart
+  (`deploy-restart-window-edge-502` / page `d98c3364`).
+- **Remediation (code):** classify the Caddy observer body as
+  `status_unreachable:caddy`. Suppress that reason inside the deploy
+  window when the local serving path is up, same arm as 5xx. Real
+  healthd-down outside a deploy still pages. Do not local-clear
+  perimeter unreachability.
+- **Regression:**
+  `test_health_probe.py::TestClassifyProbes::test_caddy_never_502_floor_is_status_unreachable_not_aggregate_invalid`,
+  `test_external_probe_deadman.py::test_deploy_window_caddy_status_unreachable_is_suppressed`,
+  `test_caddy_status_unreachable_outside_deploy_window_pages`,
+  `test_aggregate_invalid_inside_deploy_window_still_pages`.
+- **Code:** `scripts/health_probe/probe.py` (`classify_probes`),
+  `scripts/watchdog/external_probe.py` (`_DEPLOY_COLLATERAL_REASON`),
+  `cloud/caddy/Caddyfile` (`handle_response` / `handle_errors`).
+
+---
+
+## assistant-turn-edge-504
+
+**A chat turn dies with `Assistant service returned an error.` and DevTools
+shows `POST /api/assistant -> 504` after tens of seconds.** Reported
+2026-08-29 after the operator pasted a chart and asked how it related to
+their TLT position.
+
+- **Mechanism:** `/api/assistant` rode the catch-all `handle` in
+  `cloud/caddy/Caddyfile`, whose R-219 guard abandons a request after
+  `response_header_timeout 30s`. The route is NON-STREAMING: it runs the whole
+  multi-round `runAssistantLoop` and writes its JSON only at the end, so a turn
+  emits no response header at all until it has finished, and it declares
+  `maxDuration = 300`. Any turn slower than 30 s therefore reached the operator
+  as a 504 while radon-nextjs was still working on it. The edge's 504 body is
+  not JSON, so `payload.error` in `requestAssistantTurn` was null and the chat
+  fell through to the generic string.
+- **Detection:** the browser gets a 504 on `POST /api/assistant`, but
+  `journalctl -u radon-nextjs | grep '\[assistant\] done'` shows the SAME turn
+  with `outcome=answered` and `ms=` above 30000. The answer existed; nobody
+  received it. `/var/log/caddy/radon.log` (root-readable only) carries the
+  matching `"status":504` with a ~30 s `duration`.
+- **Discriminating check:** an `outcome=error` journal line means the loop
+  itself failed and this is NOT the case (read the error). An `outcome=answered`
+  line whose `ms` exceeds the path's `response_header_timeout`, or no journal
+  line at all with the request still counted at the edge, is this case.
+- **Fix (`cloud/caddy/Caddyfile`):** a dedicated `handle /api/assistant*` with
+  `response_header_timeout 180s` and no `lb_try_duration` (POST-only path with
+  no idempotency key: a retry would replay a billed vision turn). Do NOT raise
+  the guard globally; R-219 needs the catch-all short so a wedged upstream
+  still becomes an observable 5xx.
+- **Durable fix (shipped after the bump):** the route STREAMS. It answers
+  `text/event-stream` and writes `event: start` before `runAssistantLoop` is
+  awaited, then a `heartbeat` every 10 s, a `tool` frame per completed tool
+  call, and a terminal `done` (or `error`) frame. The response header therefore
+  exists within milliseconds of the request no matter how long the turn takes,
+  so no header guard anywhere can abandon a running turn.
+  `flush_interval -1` on the assistant handle states that every frame is
+  forwarded as written. Two consequences worth knowing at 3am:
+  - Once the header is flushed there is no status left to set. A mid-turn
+    failure is an `error` FRAME on a **200**, not a 502. Every rejection that
+    still carries a status (`requireRouteAccess`, `enforceDemoAiQuota`, the
+    empty-turn guard) runs BEFORE the stream opens.
+  - A stream that ends with no `done` frame is a failure. The client renders
+    "The connection dropped and the turn did not finish." — never an empty
+    assistant bubble.
+- **Publishing:** as with every edge change, the Caddyfile is NOT shipped by
+  the CI deploy. After merge, on the VPS as `radon`:
+  `sudo -n /usr/local/sbin/radon-deploy-root publish-caddy`.
+- **Regression:** `cloud/tests/test_caddy_edge_timeouts.py::TestTheAssistantTurnOutlivesTheGenericGuard`
+  (the assistant handle exists, outlasts the longest observed answered turn,
+  stays inside the route's own `maxDuration`, never retries, and the generic
+  30 s guard is untouched), `::TestTheAssistantHandleStatesItStreams` and
+  `::TestTheAssistantStreamMechanism` (a real caddy carries a streaming turn's
+  first byte through in well under the guard, with the site's `encode` in
+  front of it), `web/tests/assistant-stream-route.test.ts` (start flushed
+  before the loop resolves; heartbeats; error-as-frame; pre-stream statuses
+  intact), `web/tests/assistant-stream-client.test.ts` (a truncated stream is
+  an error, never an empty bubble) and `web/tests/assistant-timeout-copy.test.ts`
+  (a 504 or 408 names the timeout instead of the generic error).
+
+---
+
 ## signals-refresh-curl-timeout-pages-p1
 
 **`radon-signals-refresh.service` oneshot pages P1 `Result=exit-code`
@@ -328,6 +431,101 @@ on the daily 22:40 UTC timer.** Peak: 2026-08-23 23:57Z, page `c52496dd…`.
   `test_page_responder.py::test_timeout_reruns_when_a_fix_deployed_after_the_failure`.
 - **Code:** `scripts/fetch_divyield.py` (`SWEEP_BUDGET_S`, `sweep_yields`),
   `cloud/services/radon-divyield.service` (`TimeoutStartSec=2100`).
+
+---
+
+## equibles-ats-sweep-timeout
+
+**`radon-equibles-ats.service` oneshot pages P1 `Result=timeout`
+(`NRestarts=0`) on the weekly Tue 09:15 UTC fire.** Peak: 2026-09-01
+09:35Z, page `239247ed…`.
+
+- **Mechanism:** `fetch_equibles_ats_venue_share.py` walks the Turso
+  watchlist sequentially (off-exchange + short-volume + prices pages per
+  ticker). Equibles HTTPS tarpitted the shared `requests.Session`: idle-read
+  `timeout=30` never fired (slow-drip TLS), CPU stayed under 1s, and
+  systemd SIGTERM'd at `TimeoutStartSec=900` (09:16:04Z start →
+  InactiveEnter 09:31:04Z, `ExecMainStatus=15`). `Type=oneshot` has no
+  `Restart=`, so `NRestarts=0`. No `service_health` row was written (kill
+  sat inside the fetch loop). Unit watchdog pages P1; `Result=timeout` is
+  **not** on the exit-code latch, so the same InactiveEnter re-pages every
+  cycle until reset or the next Tuesday. Sibling
+  `radon-equibles-short-crowding` hung the same way on `:443` during triage.
+  IB unused; `/health/lite` stayed up.
+- **Detection:** `systemctl show radon-equibles-ats.service -p
+  Result,NRestarts,ExecMainStartTimestamp,InactiveEnterTimestamp` →
+  `timeout` / `0` / span exactly `TimeoutStartSec`; process `wchan` in
+  `do_poll` on Equibles `:443`; edge and `:8321/health/lite` up.
+  `service_health.equibles-ats-venue-share` may still be `ok` from an
+  earlier week.
+- **Discriminating check:** `Result=timeout` with ExecMainStart→Inactive
+  equal to `TimeoutStartSec` and low CPU. `Result=signal` is deploy
+  stop-clean (do not raise the budget). Auth/quota abort is
+  `Result=exit-code` with a health `error` row. If `/health/lite` is down
+  too → API, stand down.
+- **Remediation (code):** wall-clock `SWEEP_BUDGET_S=780` with per-ticker
+  `TICKER_FETCH_BUDGET_S=90` via `future.result(timeout=)` so a tarpitted
+  request is abandoned and the process exits, heartbeats `error`, and
+  leaves unfinished tickers for the next weekly fire.
+  `TimeoutStartSec` stays 900. Do not restart-flap the hung run; after the
+  fix deploys, one `radon unit restart radon-equibles-ats` (next timer is
+  7d out). Polkit cannot gain a new rerun grant in the same release.
+- **Regression:**
+  `test_equibles_ats_venue_share.py::TestSweepBudget`
+  (`test_tarpitted_equibles_stops_inside_the_wall_clock_budget`,
+  `test_tickers_finished_before_the_deadline_are_kept`,
+  `test_sweep_budget_fits_inside_unit_start_timeout`),
+  `test_systemd_services.py::TestEquiblesAtsScanBudget`.
+- **Code:** `scripts/fetch_equibles_ats_venue_share.py` (`SWEEP_BUDGET_S`,
+  `TICKER_FETCH_BUDGET_S`, `_fetch_ticker_bounded`),
+  `cloud/services/radon-equibles-ats.service` (`TimeoutStartSec=900`).
+
+---
+
+## equibles-filings-sweep-timeout
+
+**`radon-equibles-filings.service` oneshot pages P1 `Result=timeout`
+(`NRestarts=0`) on the daily 10:00 UTC fire.** Peak: 2026-09-01
+10:20Z, page `ba499c69…`.
+
+- **Mechanism:** `fetch_equibles_filing_forensics.py` walks the going-concern
+  screener then the Turso watchlist sequentially (4 filing endpoints per
+  ticker). Equibles HTTPS tarpitted the shared `requests.Session`: idle-read
+  `timeout=30` never fired (slow-drip TLS), and systemd SIGTERM'd at
+  `TimeoutStartSec=900` (10:03:53Z start → InactiveEnter 10:18:54Z,
+  `ExecMainStatus=15`). `Type=oneshot` has no `Restart=`, so `NRestarts=0`.
+  No `FILING FORENSICS` summary and no `service_health` row (kill sat inside
+  the fetch loop). Unit watchdog pages P1; `Result=timeout` is **not** on
+  the exit-code latch, so the same InactiveEnter re-pages every cycle until
+  reset or the next 10:00 UTC fire. Sibling `radon-equibles-ats` hung the
+  same way 09:16–09:31Z. IB unused; `/health/lite` stayed up.
+- **Detection:** `systemctl show radon-equibles-filings.service -p
+  Result,NRestarts,ExecMainStartTimestamp,InactiveEnterTimestamp` →
+  `timeout` / `0` / span exactly `TimeoutStartSec`; edge and
+  `:8321/health/lite` up. `service_health.equibles-filing-forensics` may
+  still be `ok` from an earlier day.
+- **Discriminating check:** `Result=timeout` with ExecMainStart→Inactive
+  equal to `TimeoutStartSec` and no today's `FILING FORENSICS` summary.
+  `Result=signal` is deploy stop-clean (do not raise the budget). Auth/quota
+  abort is `Result=exit-code` with a health `error` row. If `/health/lite`
+  is down too → API, stand down.
+- **Remediation (code):** wall-clock `SWEEP_BUDGET_S=780` with per-call
+  `TICKER_FETCH_BUDGET_S=90` via daemon `thread.join(timeout=)` so a
+  tarpitted request is abandoned and the process exits, heartbeats `error`,
+  and leaves unfinished tickers for the next daily fire.
+  `TimeoutStartSec` stays 900. Do not restart-flap the hung run; after the
+  fix deploys, one `radon unit restart radon-equibles-filings` (next timer
+  is 24h out). Polkit cannot gain a new rerun grant in the same release.
+- **Regression:**
+  `test_equibles_filing_forensics.py::TestSweepBudget`
+  (`test_tarpitted_equibles_stops_inside_the_wall_clock_budget`,
+  `test_tarpitted_going_concern_stops_inside_the_wall_clock_budget`,
+  `test_tickers_finished_before_the_deadline_are_kept`,
+  `test_sweep_budget_fits_inside_unit_start_timeout`),
+  `test_systemd_services.py::TestEquiblesFilingsScanBudget`.
+- **Code:** `scripts/fetch_equibles_filing_forensics.py` (`SWEEP_BUDGET_S`,
+  `TICKER_FETCH_BUDGET_S`, `_call_bounded`),
+  `cloud/services/radon-equibles-filings.service` (`TimeoutStartSec=900`).
 
 ---
 
@@ -547,6 +745,21 @@ Incident: 2026-08-15 00:24Z, P1 page `34ab3e3c…`.
     snapshot, exit 0 so the unit does not page. Ticker eval lookups still
     exit 1. Other 429s still fail the oneshot.
     Regression: `test_fetch_oi_changes.py::test_market_uw_daily_quota_exits_zero_and_embargoes_until_reset`.
+- **(g) data-refresh soft-fail silence (2026-08-28, `cri-scan`):**
+  `radon-refresh.timer` runs `scripts.data_refresh` every 15m. `cri_scan.py`
+  only heartbeats `service_health[cri-scan]` at successful completion. When
+  the parent kills the child at the budget, no row is written; two consecutive
+  kills freeze `updated_at` past the 35m open window and page stale
+  (`silent for 43m`, page `441a4316…`, last ok 14:31Z, timeouts 14:45/15:00Z).
+  Neighbouring cycles finished in 63-103s against the old 120s ceiling; IB
+  pool stayed connected and vcg/gex completed in seconds. Discriminating
+  check: journal `cri_scan.py timed out after Ns — keeping existing cri.json`
+  with `Data refresh complete (cri: FAIL, …)` while `/health` `ib_pool` is
+  connected. Not IB 2FA, not Turso. Fix: raise cri budget to 180s (still
+  fits `TimeoutStartSec=480` with vcg/gex at 120s) and parent-heartbeat
+  `error` + `next_attempt_at` on every soft-fail so `_check_stale` cannot
+  page silence. Regression: `test_data_refresh.py::test_run_scan_timeout_heartbeats_cri_scan_error`,
+  `test_cri_scan_budget_exceeds_observed_slow_path`.
 - **Detection:** `GET /api/probe/freshness` (bearer `RADON_PROBE_FRESHNESS_TOKEN`,
   always 200) — `all_fresh: false` with the failing `checks` named; it is already
   market-state aware, so `all_fresh: null` off-hours is normal.
@@ -655,7 +868,7 @@ Incident: 2026-08-15 00:24Z, P1 page `34ab3e3c…`.
   bounded restart); stuck-2FA recovery requires `upstream_dead=false`; ≤2
   stuck-2FA restarts/hour.
 - **2FA push stacking:** stacked pushes reject all approvals; every restart path
-  goes through `ib_2fa_lock.py` (`/var/lib/radon/ib-2fa-push-lock.json`). Use the
+  goes through `ib_2fa_lock.py` (`/var/lib/radon/ib-lease/ib-2fa-push-lock.json`). Use the
   lock-held `POST /ib/restart`, never a raw `radon restart` alongside the
   watchdog.
 - **False awaiting-2FA after deploy:** fresh radon-api reports `awaiting_2fa` for
@@ -680,6 +893,118 @@ Incident: 2026-08-15 00:24Z, P1 page `34ab3e3c…`.
   admin panel), then approve the 2FA push. Regression tests:
   `test_health_service.py::TestStatusResponse::test_gateway_only_down_degrades_instead_of_down`,
   `test_health_probe.py::TestClassifyProbes::test_schema_v2_degraded_keeps_edge_ok`.
+- **Weekend dwell escalation → false `aggregate_down` (2026-08-30, page
+  `a45d6410`):** R-382 applied the 900s sidecar dwell to every
+  `DEPENDENCY_UNIT`, including `radon-ib-gateway`. Weekend clean-exit
+  (`inactive`/`dead`, `Result=success` at 20:28Z) plus a 21:41 deploy
+  that reset healthd's in-process dwell: at t+15m the aggregate flipped
+  `degraded` → `down` and off-box paged P1 while ping and `/sign-in`
+  stayed 200 and api/relay/nextjs stayed `up`. Discriminating check:
+  market closed + serving path up + gateway `Result=success` +
+  `ConnectionRefusedError` → stay `degraded`. Dwell still escalates
+  newsfeed/monitor. Regression:
+  `test_rel135_dependency_dwell.py::test_broker_weekend_clean_exit_does_not_escalate_past_dwell`.
+- **Weekend vol-cone "outage" banner (2026-08-31, `e7323e4e`):** `/api/vol-cone`
+  carried a private 48h `MAX_AGE_MS` while both vol-cone writers are Mon-Fri
+  only, so from Sunday ~20:45 UTC Friday's healthy EOD snapshot collapsed to
+  `missing:true` and the tab rendered the R-245 outage banner; the watchdog's
+  own `vol-cone` window still read the writer as `ok`. Discriminating check:
+  newest `scan_snapshots` row for `vol-cone` is Friday 20:45 UTC and
+  `service_health` `vol-cone` is `ok` → not an outage. Fix pattern (R-450):
+  the route shares `getFreshnessWindowMs("vol-cone", "closed")` (4d) with the
+  watchdog catalog; a session-gated writer never gets a route-private budget.
+  Regression: `web/tests/vol-cone-api.test.ts` "serves a weekend-aged snapshot
+  (60h) instead of collapsing to missing".
+- **Weekend deploy → false `status_http_502` P1 (2026-08-29, page
+  `d98c3364`):** off-box sampled `/edge-health/status` HTTP 502 at
+  16:45Z while user_path + freshness stayed green; deploy runners were
+  active 16:42–16:52 (healthd restart collateral). Aggregate was
+  `degraded` (IB weekend clean-exit). Deploy-window 5xx suppression
+  required `_local_aggregate_is_healthy` (`overall_state=up`), so the
+  weekend degraded state re-armed P1. Discriminating check: probe
+  history `status_http_502` with sibling user_path/freshness ok +
+  deploy-runner mtime inside the sample window + local serving path
+  up (api/relay/nextjs) → suppress, do not restart. Fix: suppression
+  now uses `_local_aggregate_serving_path_ok` (up OR dependency-only
+  degraded). Regression:
+  `test_deploy_window_5xx_with_dependency_only_degraded_is_suppressed`.
+- **Sidecar unit flap → false "edge unhealthy" (2026-08-29, page
+  `0b7726f8`):** `radon-newsfeed.service` Restart=always flaps
+  (`NRestarts` in the dozens; `InactiveEnterTimestamp` within the same
+  minute as the page) while api/relay/nextjs stay up. Newsfeed and monitor
+  were counted as serving-path units, so the aggregate went `down`, the
+  off-box row wrote `aggregate_down`, and continuous paged P1 edge
+  unhealthy alongside the correct newsfeed unit page. Discriminating
+  check: `https://app.radon.run/edge-health/ping` 200 + `/sign-in` 200 +
+  `:8330/status` probes for api/relay/nextjs `up` + only
+  `radon-newsfeed.service` / `radon-monitor.service` downish → NOT an edge
+  outage. Those units are now `DEPENDENCY_UNITS` (degraded, not down);
+  on-box continuous still pages the sidecar itself. Regression:
+  `test_newsfeed_only_unit_down_degrades_instead_of_down`,
+  `test_monitor_only_unit_down_degrades_instead_of_down`,
+  `test_newsfeed_unit_down_payload_keeps_edge_ok`.
+- **Sidecar activating → false aggregate_down (2026-08-29, page
+  `344f0592`):** same newsfeed Restart=always storm (NRestarts=105,
+  InactiveEnter 06:49:29Z) but sampled in `activating` ("starting"),
+  not `down`. 35071d85 only reclassified sidecar *down*; the starting
+  check still scanned every unit, so the aggregate stayed `starting`
+  and the off-box probe mapped that to `aggregate_down` while
+  api/relay/nextjs and the public edge (`/edge-health/ping` 200,
+  `/sign-in` 200) stayed up. Sidecar-only starting is now `degraded`
+  (same as sidecar down). Serving-path starting stays `starting`.
+  Local watchdog recovery from a stale off-box `aggregate_down` now
+  accepts schema-v2 `degraded` as well as `up`. Regression:
+  `test_newsfeed_only_unit_starting_degrades_instead_of_starting`,
+  `test_monitor_only_unit_starting_degrades_instead_of_starting`,
+  `test_nextjs_unit_starting_stays_starting`,
+  `test_newsfeed_unit_starting_payload_keeps_edge_ok`,
+  `test_local_degraded_aggregate_clears_fresh_aggregate_down`.
+
+---
+
+## newsfeed-container-playwright-missing
+
+**`radon-newsfeed.service` crash-loops `Result=exit-code` after the
+container cutover because Chromium is not at the path Playwright
+expects.** Peak: 2026-08-29 08:45Z, page `3e952746…`, NRestarts=21.
+
+- **Mechanism:** the runtime-container drop-in `docker run`s
+  `node scripts/newsfeed/index.js` from the node image. Image ENV is
+  `PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`. `Dockerfile.node` ran
+  `bun x playwright install` from WORKDIR `web/`, which is not the
+  repo-root `playwright@1.59.1` the scraper imports
+  (`scripts/newsfeed/browser.js`). Runtime launch looked up
+  `/ms-playwright/chromium_headless_shell-1217/...` and threw
+  `Executable doesn't exist`. `runForever` exits after 3 consecutive
+  cycle failures; `Restart=on-failure` / `RestartSec=30` loops every
+  ~5 min and never hits `StartLimitBurst=5`. Host cache already had
+  revision 1217 at `/home/radon/.cache/ms-playwright`. Sibling app
+  units stayed `NRestarts=0`. Edge and `:8321/health/lite` stayed up.
+- **Detection:** unit `NRestarts` climbing, `SubState=auto-restart` in
+  two consecutive watchdog cycles; Turso `newsfeed-scraper` error
+  `newsfeed pre-cycle failure: browserType.launch: Executable doesn't
+  exist at /ms-playwright/chromium_headless_shell-1217/...`;
+  `posts.json` frozen at the last host-runtime cycle.
+- **Discriminating check:** health row names `/ms-playwright` and
+  `Executable doesn't exist`; host
+  `~/.cache/ms-playwright/chromium_headless_shell-1217` is present;
+  `/health/lite` authenticated. `Result=signal` is deploy stop-clean.
+  A themarketear `page.goto` timeout is a different class (cycle
+  error, not launch). If `/health/lite` is down too → API/IB, stand
+  down.
+- **Remediation (code):** wrapper bind-mounts the host Playwright
+  cache onto `/ms-playwright` and overlays `scripts/newsfeed` from the
+  live checkout so `--no-sandbox` applies before the next image.
+  Dockerfile installs via `./node_modules/.bin/playwright` from
+  `/home/radon/radon`. After deploy, `refresh-control-plane` updates
+  the wrapper; the unit picks up the mount on the next RestartSec.
+- **Regression:**
+  `test_app_runtime.py::test_run_newsfeed_mounts_host_playwright_browsers`,
+  `test_app_images.py::TestNodeImage::test_playwright_install_uses_repo_root_binary`,
+  `web/tests/newsfeed-scraper.test.ts` (`launches chromium without a
+  sandbox when PLAYWRIGHT_CHROMIUM_SANDBOX=0`).
+- **Code:** `cloud/scripts/radon-app-runtime.sh`,
+  `docker/app/Dockerfile.node`, `scripts/newsfeed/browser.js`.
 
 ---
 
@@ -746,6 +1071,98 @@ transient Turso HTTP 502 reading `scan_snapshots`.** Peak: 2026-08-21
   `test_demo_seed_guard.py::test_market_mirror_retries_transient_turso_502`.
 - **Code:** `scripts/db/mirror_market_snapshots_to_demo.js`
   (`isTransientTursoError`, `runMarketMirror`).
+
+---
+
+## media-backup-b2-connection-closed
+
+**`radon-media-backup.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) on a single B2 `ConnectionClosedError` during PUT.** Peak:
+2026-08-29 10:17Z, page `02ccb70e…`.
+
+- **Mechanism:** daily 10:15 UTC oneshot walks `/var/lib/radon/media` and
+  uploads size-new files to B2 prefix `media/`. `_s3_client` had no botocore
+  timeouts or retries (unlike `db_backup.py` on the same bucket). One
+  `ConnectionClosedError` on PUT of a single PNG aborted the loop; remaining
+  planned files were never attempted. `Type=oneshot` has no `Restart=`, so
+  `NRestarts=0` until the next calendar fire (~24h). Unit watchdog pages P1.
+  Same-host `radon-db-backup` had already uploaded 31 dumps to that bucket
+  ~1h earlier; credentials exist. Not fail-closed (missing `RADON_ARCHIVE_S3_*`).
+- **Detection:** journal
+  `media-backup failed: ConnectionClosedError: Connection was closed before
+  we received a valid response from endpoint URL:
+  "https://s3.us-west-004.backblazeb2.com/radon-archive/media/<file>.png"`;
+  `systemctl show … -p Result,NRestarts` → `exit-code` / `0`; ExecMainStart
+  to InactiveEnter is a few seconds. Edge and `:8321/health/lite` stay up.
+  Prior nights `ok: true` with `uploaded` in the dozens.
+- **Discriminating check:** `ConnectionClosedError` / `connection was closed`
+  on a PUT URL under `media/` (this case). Fail-closed missing-creds text is
+  ops (secret). `Result=signal` is deploy stop-clean. If `/health/lite` is
+  down too → API, stand down. B2 platform outage (every object, db-backup
+  also red) → stand down.
+- **Remediation (code):** botocore `Config` with
+  `connect_timeout=30` / `read_timeout=300` / `retries max_attempts=3 mode=standard`
+  plus application-level retry on transient transport errors so an injected
+  client (and a client whose retries are already spent) still retries the
+  file and continues the rest of the plan. Persistent closed-connection
+  still exits 1. Do not restart-flap; next timer (10:15 UTC) or one
+  `radon unit restart radon-media-backup` after the fix deploys. Unit is
+  not on `RERUNNABLE_ONESHOT_UNITS`.
+- **Regression:**
+  `cloud/tests/test_media_backup.py::TestTransientB2UploadRetry`
+  (`test_connection_closed_on_first_png_retries_and_uploads_the_rest`,
+  `test_persistent_connection_closed_still_fails_the_unit`,
+  `test_non_transient_upload_error_is_not_retried`,
+  `test_s3_client_uses_bounded_standard_retries`).
+- **Code:** `cloud/scripts/media_backup.py`
+  (`_s3_client`, `call_s3_with_retry`, `is_transient_s3_error`, `upload_file`).
+
+---
+
+## db-backup-b2-connection-closed
+
+**`radon-db-backup.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) on a single B2 `ConnectionClosedError` during PUT of a
+~576 MB dump.** Peak: 2026-08-29 20:35Z, page `29c8a560…`. Recurred
+20:28Z and 20:34Z; a third start at 20:41Z uploaded 3/3.
+
+- **Mechanism:** daily 09:00 UTC oneshot dumps Turso then uploads
+  missing `*.sql.gz` to B2 prefix `db_backups/`. `_s3_client` already
+  had botocore `Config` retries (`max_attempts=3`). `sync_offbox`
+  called `upload_file` once with no application-level retry, so a
+  spent-retry `ConnectionClosedError` on a 576 MB multipart PUT aborted
+  the off-box leg. Local gzip had already landed. `Type=oneshot` has no
+  `Restart=`, so `NRestarts=0` until the next calendar fire (~12h at
+  page time). Unit watchdog pages P1. Credentials exist; later same-hour
+  run uploaded three dumps. Not fail-closed (missing `RADON_ARCHIVE_S3_*`).
+- **Detection:** journal
+  `db-backup: dumped 100 tables / …; b2 FAILED: ConnectionClosedError:
+  Connection was closed before we received a valid response from
+  endpoint URL: "https://s3.us-west-004.backblazeb2.com/radon-archive/db_bac…"`
+  then `service_health row written: db-backup = error`;
+  `systemctl show … -p Result,NRestarts` → `exit-code` / `0`. Edge and
+  `:8321/health/lite` stay up.
+- **Discriminating check:** `ConnectionClosedError` / `connection was
+  closed` on a PUT URL under `db_backups/` (this case) after a dump line
+  with table/row counts. Fail-closed missing-creds text is ops (secret).
+  `Result=signal` is deploy stop-clean. If `/health/lite` is down too →
+  API, stand down. B2 platform outage (every object, media-backup also
+  red) → stand down.
+- **Remediation (code):** application-level retry on transient transport
+  errors around LIST / PUT / HEAD / DELETE so an injected client (and a
+  client whose botocore retries are already spent) still retries the
+  dump and continues the rest of the plan. Persistent closed-connection
+  still exits 1. Local dump remains the critical path. Do not
+  restart-flap; next timer (09:00 UTC) or one
+  `radon unit restart radon-db-backup` after the fix deploys. Unit is
+  not on `RERUNNABLE_ONESHOT_UNITS`.
+- **Regression:**
+  `cloud/tests/test_db_backup_offbox.py::TestTransientB2UploadRetry`
+  (`test_connection_closed_on_first_dump_retries_and_uploads_the_rest`,
+  `test_persistent_connection_closed_still_fails_the_unit`,
+  `test_non_transient_upload_error_is_not_retried`).
+- **Code:** `cloud/scripts/db_backup.py`
+  (`call_s3_with_retry`, `is_transient_s3_error`, `sync_offbox`).
 
 ---
 
@@ -943,6 +1360,39 @@ heartbeats.** Peak: 2026-08-24 19:30Z, page `60096761…`, 19m silent
 
 ---
 
+## mktnews-upstream-ws-refused
+
+**Symptom:** the headline tape keeps printing while the `service_health` row
+`mktnews-hub` is `error` (banner, `/api/service-health`). Not a contradiction:
+`radon-mktnews.service` (`scripts/mktnews/hub.js`) polls the vendor's flash
+REST lane every `FLASH_POLL_MS` (60s) while the upstream WebSocket is down,
+and keeps the row `error` on purpose because the WS outage still needs an
+operator. 2026-08-30: the VPS dial was refused for 16+ minutes at the vendor's
+Cloudflare edge while other networks connected fine.
+
+**Discriminate** before touching the unit:
+`journalctl -u radon-mktnews.service --since -30min | grep -E 'close|reconnect attempt|error|flash poll|idle'`
+
+- `close <code>` + `reconnect attempt=N` repeating and `flash poll fed N
+  print(s)` present → WS lane refused, REST lane alive. Vendor edge or VPS
+  egress-IP problem, not the hub.
+- No `flash poll` lines and no frames → both lanes down. Compare reachability
+  of the vendor host from the VPS and from the laptop.
+- `idle: no upstream frame for` → the socket was accepted but went silent;
+  the hub terminates and redials by itself.
+
+**Action:** a restart does not fix a refused dial (same egress IP, same edge).
+Confirm the vendor is reachable off-net. If only the VPS is blocked the fix is
+on the vendor-edge or egress-IP side, which is operator-only (external
+console); nothing in the repo changes it. The row clears itself on
+`upstream open`. Do not raise the `mktnews-hub` window to hide the state.
+
+**Regression:** `scripts/mktnews/upstream-down-fallback.test.js` ("flash poll
+fallback while the upstream WS is down", "clients admitted during an outage
+are told the upstream is down"); `scripts/mktnews/rel155-upstream-liveness.test.js`.
+
+---
+
 ## service-health-degraded / service-down (generic cases)
 
 `service-health-degraded`: `/api/service-health` body lists failing rows (error,
@@ -981,18 +1431,20 @@ every fired outcome while `cooldown_allows_fire` only gates Pushover. A `×N`
 count on a latched daily handler is cycles-since-latch, never N incidents.
 
 `service-down`: `:8321/health/lite` connection-refused. Check
-`systemctl status radon-api` and journald; remember the cascade-stop rule — a
-cleanly stopped unit will NOT `Restart=always` back (`radon restart` respects
-the 2FA lock).
+`systemctl status radon-api` and journald; remember: a cleanly stopped unit
+will NOT `Restart=always` back (`radon restart` respects the 2FA lock). A
+Gateway stop or 2FA cycle does not take radon-api down (no `PartOf=` since
+44e89e1b, `After=` ordering only), so api connection-refused after a Gateway
+cycle is its own fault, not a cascade.
 
 ---
 
 ## flex-1025-lockout
 
-**IBKR Flex code 1025 is a token lockout. A persisted `class=permanent` row
-plus a missing sidecar will SendRequest at the next 08:00 ET window and
-extend it.** Operator lozenge: `SYNCED 7D AGO · FLEX LOCKOUT. DO NOT RETRY.
-INGEST WITH --FROM-FILE, RETRY 08:00 ET TOMORROW`.
+**IBKR Flex code 1025 is a token lockout.** Routine ingest is sFTP
+(`docs/flex-sftp-setup.md`). Do not SendRequest to recover. Use
+`--from-file` or wait for `radon-flex-pull`. A persisted `class=permanent`
+row plus a missing sidecar used to SendRequest at the next 08:00 ET window.
 
 - **Mechanism:** 1025 is undocumented ("Too many failed attempts"), earned by
   retrying 1001. `75ded753` classified new 1025s as lockout (exit 15, 7-day
@@ -1016,8 +1468,8 @@ python3.13 -c "from utils.flex_embargo import active_until, is_blocked; print(is
   the 2026-08-21 row) even if `next_attempt_at` is the next 08:00 ET window.
   A 1012/config permanent row must not reconstruct as a 7-day lockout.
 - **Remediation:** reconstruct the sidecar from Turso; do not probe Flex.
-  Recover the table with `python3.13 -m scripts.cash_flow_sync --from-file`.
-  Portal Run on query `1442520` only. Do not set `IB_FLEX_FLOWS_QUERY_ID`.
+  Recover with `--from-file` or the sFTP inbox. Portal Run on `1442520` only.
+  Do not set `IB_FLEX_FLOWS_QUERY_ID`.
 - **Fix commits:** `75ded753` (new 1025s), plus the reconstruction commit
   that made a missing sidecar + `class=permanent` 1025 fail closed through
   `last_attempt+7d`.
@@ -1065,11 +1517,61 @@ a systemd `OnFailure=` hook). Env: `INCIDENT_WATCHDOG_{NEXTJS,API,HEALTH}_BASE`,
 `INCIDENT_WATCHDOG_DIR`, `INCIDENT_WATCHDOG_GREEN_MARKER`,
 `INCIDENT_WATCHDOG_REPO_DIR`, `RADON_PROBE_FRESHNESS_TOKEN`.
 
+The `--once` (timer) path wraps its cycle in `service_cycle("incident-watchdog",
+market_hours_class="continuous")`, so the prober itself is staleness-checked on
+the `continuous` bucket and in `web/lib/serviceHealthWindows.ts` (15 min open
+and closed, matching the 5-minute timer). It previously wrote no
+`service_health` row at all and sat in neither catalog, so a wedged prober was
+silent by nature (R-325). The heartbeat closes `ok` BEFORE the exit code is
+set: an open P1 is a FINDING, not a watchdog failure, and recording `error`
+whenever the tool did its job would make the row useless.
+
+`__main__.py` prepends `scripts/` to `sys.path` (same as
+`scripts/watchdog/__main__.py`) so the systemd `-m` invocation can resolve
+`from db.service_cycle`. Without that, R-325 parks the oneshot
+`Result=exit-code` every 5 minutes (`incident-watchdog-db-import-exit`).
+
 It intentionally does NOT restart anything and does NOT page — remediation
 stays with the dedicated units (`feedback_ib_auto_recovery_conservative`,
 `feedback_watchdog_works_dont_deploy_autoheal`), and paging stays with
 `scripts/watchdog`. This tool's job is evidence: a structured artifact a human
 or `/incident` can act on.
+
+---
+
+## incident-watchdog-db-import-exit
+
+**`radon-incident-watchdog.service` oneshot pages P1 `Result=exit-code`
+(`NRestarts=0`) on the 5-minute timer after R-325.** Peak: 2026-08-28
+16:05Z, page `05511a4f…`.
+
+- **Mechanism:** R-325 wrapped `--once` in
+  `from db.service_cycle import service_cycle`. systemd ExecStart is
+  `python -m scripts.incident_watchdog --once` with
+  `WorkingDirectory` = repo root and no `PYTHONPATH`. That puts the repo
+  root on `sys.path`, not `scripts/`, so `db` is not a top-level package.
+  `Type=oneshot` has no `Restart=`, so `NRestarts=0`. The 16:00 cycle
+  still ran the pre-R-325 body (exit 0); the checkout fast-forwarded
+  02133f8b at 16:02Z; 16:05 crashed. `scripts/watchdog/__main__.py`
+  already documents this exact `-m` topology.
+- **Detection:** journal
+  `ModuleNotFoundError: No module named 'db'` at
+  `scripts/incident_watchdog/__main__.py` `from db.service_cycle`;
+  `systemctl show … -p Result,NRestarts` → `exit-code` / `0`. Edge and
+  `:8321/health/lite` stay up. Prior cycle 5 min earlier was OK JSON.
+- **Discriminating check:** traceback is ImportError on `db` at process
+  start (ExecMainStart equals InactiveEnter). A probe/classify exception
+  after a JSON summary is a different class. `Result=signal` is deploy
+  stop-clean. If `/health/lite` is down too → API, stand down.
+- **Remediation (code):** prepend `scripts/` to `sys.path` in
+  `__main__.py` before the `db.service_cycle` import, same as
+  `scripts/watchdog/__main__.py`. Do not add a unit `PYTHONPATH` as the
+  only fix — the `-m` entry point must be self-contained. After deploy,
+  next timer (5 min) recovers; `reset-failed` is not required once the
+  next fire exits 0.
+- **Regression:**
+  `test_incident_watchdog.py::TestSystemdDashMImport::test_dash_m_once_resolves_db_without_pythonpath`.
+- **Code:** `scripts/incident_watchdog/__main__.py`.
 
 ## Laptop responder + pending-diagnoses session hook
 

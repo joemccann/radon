@@ -1,5 +1,56 @@
 # Lessons
 
+## 2026-08-30 — Pin parity that only checks OPERATIONS ⊆ pins misses new routes
+
+- STREAKS shipped `radonCapability` and FastAPI `assistant_catalog.py`, CI green.
+- Chat `list_apis("streaks")` still missed GET `/streaks/{ticker}` because
+  `web/lib/assistant/catalog.ts` kept a third handwritten OPERATIONS seed.
+- REL-161 parity asserted capability match for listed ops, never reverse
+  inclusion. A new pin cannot be invisible: derive the runtime catalog from
+  the pins, and fail CI when advertised pins are absent from list_apis.
+
+---
+
+## 2026-08-30 — Broker weekend downtime is not a sidecar death
+
+- Page `a45d6410`: R-382 dwell on ALL `DEPENDENCY_UNITS` re-paged the
+  2026-08-09 weekend IB clean-exit as edge `aggregate_down` after 15m.
+- Broker downtime is hours by doctrine (IBC auto-restart frozen
+  off-hours). Dwell-escalate only Restart=always sidecars
+  (newsfeed/monitor). On-box still pages `ib-gateway-grouped`.
+
+## 2026-08-29 — Botocore Config retries are not application-level retry
+
+- Page `29c8a560`: `radon-db-backup` dumped 100 tables then paged P1 on
+  `ConnectionClosedError` of a 576 MB B2 PUT. `_s3_client` already had
+  `retries max_attempts=3 mode=standard`.
+- Media-backup (page `02ccb70e`) treated those botocore bounds as enough.
+  An injected client and a spent-retry multipart PUT still fail the
+  oneshot. Wrap LIST/PUT/HEAD/DELETE in `call_s3_with_retry`.
+
+## 2026-08-29 — Container newsfeed needs the host Playwright revision
+
+- Page `3e952746`: `radon-newsfeed` crash-looped after the container
+  cutover (`NRestarts=21`, `Result=exit-code`). Turso
+  `newsfeed-scraper` said `Executable doesn't exist at
+  /ms-playwright/chromium_headless_shell-1217`.
+- `bun x playwright install` from WORKDIR `web/` is not the repo-root
+  playwright the scraper imports. Host deploy already had 1217 in
+  `~/.cache/ms-playwright`. Bind that cache onto `/ms-playwright`;
+  install in the image via `./node_modules/.bin/playwright` from
+  `/home/radon/radon`.
+- A new GHCR tag is not required to recover (R-234): the wrapper is
+  control-plane and takes effect on the next unit restart.
+
+## 2026-08-29 — Sidecar Restart=always is activating, not just down
+
+- Page `0b7726f8` moved newsfeed/monitor `down` onto DEPENDENCY_UNITS.
+- Page `344f0592` sampled the same storm in `activating`. The starting
+  check still scanned every unit, so overall_state stayed `starting` and
+  the off-box probe wrote `aggregate_down` while ping and `/sign-in` were 200.
+- Classify sidecar `starting` like sidecar `down`: degraded, not an edge
+  outage. Serving-path starting stays `starting`.
+
 ## 2026-08-27 — Ticket max gain is the limit fill, not mid minus spread
 
 - CBRS 40× short $182.5 put, limit $4: TOTAL $16,000 CR, MAX GAIN $12,248.
@@ -661,3 +712,34 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 - `chrome-cdp` drives the operator's LIVE Chrome, not a disposable harness. An `Emulation.setDeviceMetricsOverride` left active after a measurement made the terminal lay out at 1800px inside a ~1367px window; the right ~430px rendered off-screen and the user reported a broken UI that was entirely my leftover state. Pair every Emulation override (device metrics, emulateMedia, throttling, geolocation) with its clear call in the SAME step, not "at the end" of a sequence. When a specific viewport is needed, use a local Playwright run against a built app instead. Also leave no modals open and no order tickets populated - it is a live trading account.
 - Corollary for diagnosis: before chasing a "regression" in a UI the user screenshotted, first check whether the session itself mutated their browser. Measure `document.documentElement.scrollWidth vs clientWidth` and `window.innerWidth` against the real window; zero internal overflow plus a mismatched innerWidth means the harness, not the code.
 - ResizeObserver notifications are throttled in background/occluded tabs. A responsive chart that "stops tracking resizes" under CDP is usually the tab not rendering, not a bug - foreground the tab (`Page.bringToFront`) and re-test before touching the code. Prove it by attaching an independent observer: if that one also never fires, it is throttling.
+
+## 2026-08-29 - Terse closing messages are a hard format, not a preference
+
+- The `Response Format` rule already existed at `CLAUDE.md:187` and was ignored on every turn of a long session: closing messages ran 200-350 words against a stated ~150 cap, with prose paragraphs, diagnosis tables, and "Worth knowing…" / "Correction to my earlier report…" openers the rule banned by name. Restating a guideline in prose does not change behaviour.
+- The fix is structural: a literal `**Done**` / `**Next**` bullet template, a 100-word cap enforced by DELETING lines rather than compressing prose, and a banned-phrase table quoting the exact openers that shipped. Paired with a `UserPromptSubmit` hook in `.claude/settings.json` that re-injects the contract at generation time, because a rule 200 lines up in a long file loses to momentum.
+- Causes belong in the commit message and PR body; chat carries state and next action only. Length creep started every time with narrating WHY something broke after the user had already been told WHAT broke.
+
+## 2026-08-29 - Deploys must reconcile the root control plane themselves
+
+- Every control-plane edit (helper, sudoers, polkit, control-plane unit, drop-in) and every root hot-patch of an installed drop-in blocked ALL deploys at preflight until a human ran `bootstrap-control-plane.sh` over root SSH. The durable fix is a privileged verb the deploy calls BEFORE `deploy.sh` holds the lock (`radon-deploy-root sync-control-plane`: extract `cloud/` at the GitHub main tip, run that tip's own bootstrap). Anything root must do "after a deploy" is a design gap, not an ops chore.
+- A unit that looks fixed in a text assertion is not fixed: REL-138 restored `Type=notify` on containerised units and its test asserted env-var NAMES in the source, while systemd silently dropped every `READY=1` from the container cgroup. Verify supervision contracts live (`STATUS=` probe through the real socket path) before shipping them as control-plane.
+- Test a background helper at the wire while its parent is still alive: the notify proxy passed 34 argv-level tests and died in 250ms in production because it was spawned inside `$(...)`.
+- Before trusting a deploy on a busy day, check `df -h /` and that the pruner timer is `enabled`: a 4.8GB image pull per SHA on a 75G disk took production down with every gate failing at once, and `bootstrap` installs control-plane timers but never enables them.
+- Other sessions were merging PRs and running root bootstraps on the same VPS at the same time (PR #151 reverted the same drop-ins I was fixing). Re-read `origin/main` and the installed manifest before every privileged step; never assume the tip is yours.
+
+## 2026-08-29 - Done/Next format applies to background-job progress lines too
+
+- Second correction in one day: a background-job session narrated every step in prose ("Waiting on the ingestion implementer…", "Full vitest green: …") because the harness asks for narration. The harness "narrate" instruction sets WHEN to speak, not the SHAPE: every emitted message is still `**Done**` / `**Next**` bullets under 100 words. Fold the pre-tool line into a `**Done**` bullet or omit it.
+## 2026-08-29 - Every user-visible message is Done/Next, including mid-task and pre-tool-call lines
+
+- The format rule was followed on closing messages and dropped on every other turn: one-line narration before a tool call ("Pre-existing duplicate keys... bypassing"), progress lines after arming a monitor ("Checks running on #180; I'll merge when green"), and status replies to `Status` prompts all shipped as prose. The user reads ALL of them as output.
+- The rule at `CLAUDE.md` §Response Format says "Mid-task progress messages follow the same shape". A message that ends a turn while work continues in the background is a closing message. Use `**Done** / **Next**` there too; when nothing changed, one bullet.
+- The harness "say in a line what you're about to do" instruction does not override the repo format: fold that line into a single bullet or emit nothing and let the tool call's description carry it.
+
+## 2026-08-29 - Never round-trip a diff through `git diff > file` under the rtk hook
+
+- `git diff HEAD -- f > patch` was rewritten to `rtk git diff`, which emits a token-compacted summary, not a patch. The follow-up `git checkout HEAD -- f` then discarded the only copy of the edit. Use `rtk proxy git diff` (or `git stash`) when the bytes matter, and never checkout-revert a file before confirming the saved patch applies (`git apply --check`).
+
+## 2026-08-29 - CI acceleration requires a successful production measurement
+
+- Do not stop at local green checks or a faster failed workflow. Commit and push the implementation, follow the real run through every required gate and production deploy, compare end-to-end wall time with the named baseline, and iterate on any release-only failure until the measured deploy is both green and materially faster.

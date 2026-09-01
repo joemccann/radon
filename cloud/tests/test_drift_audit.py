@@ -446,3 +446,60 @@ def test_clean_audit_fails_when_health_result_cannot_publish(monkeypatch):
         da, "write_service_health_with_retry", lambda *_args: (_ for _ in ()).throw(TimeoutError("offline"))
     )
     assert da.main() == 1
+
+
+class TestRoleSkippedUnits:
+    """REL-169 (R-498): refresh strips the broker/app-only units by role, so
+    their absence on that role is the intended state, not drift."""
+
+    def _stage(self, tmp_path, monkeypatch, *, install_remote: bool):
+        services = tmp_path / "services"
+        live = tmp_path / "systemd"
+        services.mkdir()
+        live.mkdir()
+        api = "[Service]\nExecStart=/bin/true\n"
+        (services / "radon-api.service").write_text(api)
+        (live / "radon-api.service").write_text(api)
+        remote = "[Service]\nExecStart=/usr/bin/python3 -m scripts.ib_gateway_remote.serve\n"
+        (services / "radon-ib-gateway-remote.service").write_text(remote)
+        if install_remote:
+            (live / "radon-ib-gateway-remote.service").write_text(remote)
+        monkeypatch.setattr(da, "REPO", tmp_path)
+        monkeypatch.setattr(da, "SYSTEMD_DIR", live)
+
+    def test_app_role_does_not_report_remote_unit_missing(self, tmp_path, monkeypatch):
+        self._stage(tmp_path, monkeypatch, install_remote=False)
+        monkeypatch.setattr(da, "resolve_host_role", lambda environ=None: "app")
+        drifts, known = [], []
+        da._check_units(drifts, known)
+        assert [d["id"] for d in drifts] == []
+        assert "role-skipped:radon-ib-gateway-remote.service" in known
+
+    def test_combined_role_still_reports_remote_unit_missing(self, tmp_path, monkeypatch):
+        self._stage(tmp_path, monkeypatch, install_remote=False)
+        monkeypatch.setattr(da, "resolve_host_role", lambda environ=None: "combined")
+        drifts, known = [], []
+        da._check_units(drifts, known)
+        assert [d["id"] for d in drifts] == ["not-installed:radon-ib-gateway-remote.service"]
+
+    def test_app_role_still_audits_the_unit_when_it_is_installed(self, tmp_path, monkeypatch):
+        self._stage(tmp_path, monkeypatch, install_remote=True)
+        (tmp_path / "systemd" / "radon-ib-gateway-remote.service").write_text(
+            "[Service]\nExecStart=/bin/false\n"
+        )
+        monkeypatch.setattr(da, "resolve_host_role", lambda environ=None: "app")
+        drifts, known = [], []
+        da._check_units(drifts, known)
+        assert [d["id"] for d in drifts] == ["unit-mismatch:radon-ib-gateway-remote.service"]
+
+    def test_role_resolves_env_then_canonical_then_legacy(self, tmp_path, monkeypatch):
+        canonical = tmp_path / "etc-radon-env"
+        legacy = tmp_path / "legacy.env"
+        monkeypatch.setattr(da, "CANONICAL_ENV_FILE", canonical)
+        assert da.resolve_host_role({"RADON_HOST_ROLE": "app"}) == "app"
+        assert da.resolve_host_role({}) == "combined"
+        legacy.write_text("RADON_HOST_ROLE=broker\n")
+        assert da.resolve_host_role({"RADON_ENV_FILE": str(legacy)}) == "broker"
+        canonical.write_text("RADON_HOST_ROLE='app'\n")
+        assert da.resolve_host_role({"RADON_ENV_FILE": str(legacy)}) == "app"
+        assert da.resolve_host_role({"RADON_HOST_ROLE": "garbage"}) == "combined"

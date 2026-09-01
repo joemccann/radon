@@ -57,6 +57,8 @@ def _assert_no_legacy_data_files(path: Path) -> None:
                 or "ib_twr_series.json" in text
                 or "NAV_HISTORY_PATH" in text
             )
+            # Operator-supplied Activity/Trade Confirmation XML, not trade_log.json.
+            allowed_flex_from_file = path.name == "journal_rehydrate.py" and "from_file" in text
             assert (
                 allowed_nav_history
                 or allowed_price_cache
@@ -66,6 +68,7 @@ def _assert_no_legacy_data_files(path: Path) -> None:
                 or allowed_service_log
                 or allowed_strategy_config
                 or allowed_performance_cache
+                or allowed_flex_from_file
             ), (
                 f"{path} must not read or write flat JSON source files"
             )

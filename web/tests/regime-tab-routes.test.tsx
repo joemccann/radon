@@ -79,6 +79,8 @@ describe.each([
   ["short", "app/regime/short/page.tsx"],
   ["ivrank", "app/regime/ivrank/page.tsx"],
   ["vixts", "app/regime/vixts/page.tsx"],
+  ["dispersion", "app/regime/dispersion/page.tsx"],
+  ["streaks", "app/regime/streaks/page.tsx"],
 ])("app/regime/%s/page.tsx exists and mounts WorkspaceShell", (tab, rel) => {
   it(`file ${rel} exists`, () => {
     expect(existsSync(join(ROOT, rel))).toBe(true);
@@ -173,6 +175,12 @@ vi.mock("../components/IvRankPanel", () => ({
 }));
 vi.mock("../components/VixTsPanel", () => ({
   default: () => <div data-testid="vixts-panel-stub" />,
+}));
+vi.mock("../components/DispersionPanel", () => ({
+  default: () => <div data-testid="dispersion-panel-stub" />,
+}));
+vi.mock("../components/StreaksPanel", () => ({
+  default: () => <div data-testid="streaks-panel-stub" />,
 }));
 vi.mock("../components/CriHistoryChart", () => ({ default: () => null }));
 vi.mock("../components/RegimeRelationshipView", () => ({ default: () => null }));
@@ -522,6 +530,34 @@ describe("RegimePanel — tab is URL-driven", () => {
     const { container } = render(<RegimePanel prices={{}} />);
     within(container).getByRole("button", { name: /^VIX TS$/ }).click();
     expect(pushSpy).toHaveBeenCalledWith("/regime/vixts");
+  });
+
+  it("renders the DISPERSION panel when pathname is /regime/dispersion", () => {
+    mockedPathname = "/regime/dispersion";
+    const { container } = render(<RegimePanel prices={{}} />);
+    expect(within(container).getByTestId("dispersion-panel-stub")).toBeTruthy();
+    expect(within(container).queryByTestId("vixts-panel-stub")).toBeNull();
+  });
+
+  it("clicking DISPERSION tab pushes /regime/dispersion", () => {
+    mockedPathname = "/regime/cri";
+    const { container } = render(<RegimePanel prices={{}} />);
+    within(container).getByRole("button", { name: /^DISPERSION$/ }).click();
+    expect(pushSpy).toHaveBeenCalledWith("/regime/dispersion");
+  });
+
+  it("renders the STREAKS panel when pathname is /regime/streaks", () => {
+    mockedPathname = "/regime/streaks";
+    const { container } = render(<RegimePanel prices={{}} />);
+    expect(within(container).getByTestId("streaks-panel-stub")).toBeTruthy();
+    expect(within(container).queryByTestId("straddle-panel-stub")).toBeNull();
+  });
+
+  it("clicking STREAKS tab pushes /regime/streaks", () => {
+    mockedPathname = "/regime/cri";
+    const { container } = render(<RegimePanel prices={{}} />);
+    within(container).getByRole("button", { name: /^STREAKS$/ }).click();
+    expect(pushSpy).toHaveBeenCalledWith("/regime/streaks");
   });
 
   it("clicking CRI from VCG pushes /regime/cri", () => {

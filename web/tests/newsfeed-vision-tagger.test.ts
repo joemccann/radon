@@ -32,7 +32,7 @@ function anthropicCompletion(content: string): unknown {
 }
 
 const TAXONOMY = ["BTC", "VOL", "POSITIONING", "EQUITIES"];
-const PUBLIC_ROOT = "/fake/public";
+const MEDIA_DIR = "/fake/public/media";
 
 describe("createVisionTagger.tagPost", () => {
   it("sends image + caption to Anthropic and returns the model's 3 tags normalised", async () => {
@@ -45,7 +45,7 @@ describe("createVisionTagger.tagPost", () => {
 
     const { createVisionTagger } = await import("../../scripts/newsfeed/vision_tagger.js");
     const tagger = createVisionTagger({
-      publicRoot: PUBLIC_ROOT,
+      mediaDir: MEDIA_DIR,
       getTaxonomySnapshot: async () => TAXONOMY,
       readImage: async () => fakeImage,
     });
@@ -93,7 +93,7 @@ describe("createVisionTagger.tagPost", () => {
 
     const { createVisionTagger } = await import("../../scripts/newsfeed/vision_tagger.js");
     const tagger = createVisionTagger({
-      publicRoot: PUBLIC_ROOT,
+      mediaDir: MEDIA_DIR,
       getTaxonomySnapshot: async () => TAXONOMY,
       readImage: async () => Buffer.from([]),
     });
@@ -109,7 +109,7 @@ describe("createVisionTagger.tagPost", () => {
 
     const { createVisionTagger } = await import("../../scripts/newsfeed/vision_tagger.js");
     const tagger = createVisionTagger({
-      publicRoot: PUBLIC_ROOT,
+      mediaDir: MEDIA_DIR,
       getTaxonomySnapshot: async () => TAXONOMY,
       readImage: async () => {
         throw new Error("ENOENT");
@@ -134,7 +134,7 @@ describe("createVisionTagger.tagPost", () => {
 
     const { createVisionTagger } = await import("../../scripts/newsfeed/vision_tagger.js");
     const tagger = createVisionTagger({
-      publicRoot: PUBLIC_ROOT,
+      mediaDir: MEDIA_DIR,
       getTaxonomySnapshot: async () => TAXONOMY,
       readImage: async () => Buffer.from([1, 2, 3]),
     });
@@ -160,7 +160,7 @@ describe("createVisionTagger.tagPost", () => {
 
     const { createVisionTagger } = await import("../../scripts/newsfeed/vision_tagger.js");
     const tagger = createVisionTagger({
-      publicRoot: PUBLIC_ROOT,
+      mediaDir: MEDIA_DIR,
       getTaxonomySnapshot: async () => TAXONOMY,
       readImage: async () => Buffer.from([0x89, 0x50, 0x4e, 0x47]),
     });
@@ -187,7 +187,7 @@ describe("createVisionTagger.tagPost", () => {
 
     const { createVisionTagger } = await import("../../scripts/newsfeed/vision_tagger.js");
     const tagger = createVisionTagger({
-      publicRoot: PUBLIC_ROOT,
+      mediaDir: MEDIA_DIR,
       getTaxonomySnapshot: async () => TAXONOMY,
       readImage: async () => Buffer.from([0x89, 0x50, 0x4e, 0x47]),
     });
@@ -210,7 +210,7 @@ describe("createVisionTagger.tagPost", () => {
 
     const { createVisionTagger } = await import("../../scripts/newsfeed/vision_tagger.js");
     const tagger = createVisionTagger({
-      publicRoot: PUBLIC_ROOT,
+      mediaDir: MEDIA_DIR,
       getTaxonomySnapshot: async () => TAXONOMY,
       readImage: async () => Buffer.from([0x89, 0x50, 0x4e, 0x47]),
     });
@@ -226,7 +226,7 @@ describe("createVisionTagger.tagPost", () => {
 
     const { createVisionTagger } = await import("../../scripts/newsfeed/vision_tagger.js");
     const tagger = createVisionTagger({
-      publicRoot: PUBLIC_ROOT,
+      mediaDir: MEDIA_DIR,
       getTaxonomySnapshot: async () => TAXONOMY,
       readImage: async () => Buffer.from([0x89, 0x50, 0x4e, 0x47]),
     });
@@ -240,19 +240,50 @@ describe("createVisionTagger.tagPost", () => {
     const { createVisionTagger } = await import("../../scripts/newsfeed/vision_tagger.js");
     expect(() =>
       createVisionTagger({
-        publicRoot: PUBLIC_ROOT,
+        mediaDir: MEDIA_DIR,
         getTaxonomySnapshot: async () => TAXONOMY,
       }),
     ).toThrow(/ANTHROPIC_API_KEY/);
   });
 
-  it("throws when publicRoot is missing", async () => {
+  it("throws when mediaDir is missing", async () => {
     const { createVisionTagger } = await import("../../scripts/newsfeed/vision_tagger.js");
     expect(() =>
       createVisionTagger({
         getTaxonomySnapshot: async () => TAXONOMY,
       }),
-    ).toThrow(/publicRoot/);
+    ).toThrow(/mediaDir/);
+  });
+
+  // The tagger used to rebuild the on-disk path as `<publicRoot>/media/<file>`,
+  // duplicating the download location that resolveScraperPaths already owns.
+  // Under the container runtime the media tree moves to the bind-mounted
+  // /var/lib/radon/media and that second copy of the knowledge went stale —
+  // every vision tag logged "missing image" against a path nothing writes.
+  it("reads the image from the configured media dir, not <publicRoot>/media", async () => {
+    global.fetch = vi.fn().mockResolvedValue(
+      jsonResponse(anthropicCompletion(JSON.stringify({ tags: ["vol", "spx", "equities"] }))),
+    ) as unknown as typeof fetch;
+
+    const seen: string[] = [];
+    const { createVisionTagger } = await import("../../scripts/newsfeed/vision_tagger.js");
+    const tagger = createVisionTagger({
+      mediaDir: "/var/lib/radon/media",
+      getTaxonomySnapshot: async () => TAXONOMY,
+      readImage: async (p: string) => {
+        seen.push(p);
+        return Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+      },
+    });
+
+    await tagger.tagPost({
+      id: "p9",
+      title: "Vol",
+      content: "vol",
+      images: ["https://media.radon.run/p9-01.png"],
+    });
+
+    expect(seen).toEqual(["/var/lib/radon/media/p9-01.png"]);
   });
 });
 
@@ -300,17 +331,21 @@ describe("__extractFirstJsonObject (balanced-brace extractor)", () => {
 });
 
 describe("__resolveImageAbsolutePath / __detectMediaType", () => {
-  it("resolves leading-slash and bare relative paths against publicRoot", async () => {
+  it("resolves absolute, leading-slash and bare relative paths into mediaDir", async () => {
     const { __resolveImageAbsolutePath } = await import("../../scripts/newsfeed/vision_tagger.js");
-    expect(__resolveImageAbsolutePath({ images: ["/media/x.png"] }, "/root")).toBe("/root/media/x.png");
-    expect(__resolveImageAbsolutePath({ images: ["media/x.png"] }, "/root")).toBe("/root/media/x.png");
+    expect(__resolveImageAbsolutePath({ images: ["/media/x.png"] }, "/root/media")).toBe("/root/media/x.png");
+    expect(__resolveImageAbsolutePath({ images: ["media/x.png"] }, "/root/media")).toBe("/root/media/x.png");
+    expect(__resolveImageAbsolutePath({ images: ["x.png"] }, "/root/media")).toBe("/root/media/x.png");
+    expect(
+      __resolveImageAbsolutePath({ images: ["https://media.radon.run/x.png"] }, "/root/media"),
+    ).toBe("/root/media/x.png");
   });
 
   it("returns null for empty/missing images", async () => {
     const { __resolveImageAbsolutePath } = await import("../../scripts/newsfeed/vision_tagger.js");
-    expect(__resolveImageAbsolutePath({}, "/root")).toBeNull();
-    expect(__resolveImageAbsolutePath({ images: [] }, "/root")).toBeNull();
-    expect(__resolveImageAbsolutePath({ images: [""] }, "/root")).toBeNull();
+    expect(__resolveImageAbsolutePath({}, "/root/media")).toBeNull();
+    expect(__resolveImageAbsolutePath({ images: [] }, "/root/media")).toBeNull();
+    expect(__resolveImageAbsolutePath({ images: [""] }, "/root/media")).toBeNull();
   });
 
   it("detects media type from extension", async () => {
@@ -544,5 +579,82 @@ describe("hydrateTagsDual", () => {
     expect((post as any).tags_text).toEqual(["A", "B", "C"]);
     expect((post as any).tags_vision).toBeUndefined();
     expect((post as any).tags).toEqual(["A", "B", "C"]);
+  });
+});
+
+// R-466 / REL-165: the model call carried no timeout or abort signal, so a
+// half-open connection to api.anthropic.com held `hydrateTagsDual` (and the
+// whole scrape cycle behind it) until kernel keepalive gave up. The bound is
+// a per-post tagging failure, never a cycle abort.
+describe("R-466 / REL-165: the vision fetch is bounded", () => {
+  // A realistic transport: never answers on its own, rejects only when the
+  // caller's signal fires. Without a signal it hangs forever, which is the
+  // pre-fix shape.
+  function hangUntilAborted(init?: RequestInit): Promise<Response> {
+    return new Promise((_resolve, reject) => {
+      const signal = init?.signal;
+      if (signal) signal.addEventListener("abort", () => reject(signal.reason));
+    });
+  }
+
+  const fakeImage = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+
+  it("a fetch that never answers settles hydrateTagsDual within the bound with the post untagged", async () => {
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => hangUntilAborted(init));
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const { createVisionTagger, hydrateTagsDual } = await import("../../scripts/newsfeed/vision_tagger.js");
+    const visionTagger = createVisionTagger({
+      mediaDir: MEDIA_DIR,
+      getTaxonomySnapshot: async () => TAXONOMY,
+      readImage: async () => fakeImage,
+      timeoutMs: 50,
+    });
+    const post = { id: "p1", title: "Chart", content: "x", images: ["/media/p1.png"] };
+
+    const outcome = await Promise.race([
+      hydrateTagsDual([post], { visionTagger }).then(() => "settled"),
+      new Promise<string>((resolve) => setTimeout(() => resolve("hung"), 1500)),
+    ]);
+
+    expect(outcome).toBe("settled");
+    expect((post as any).tags_vision).toBeUndefined();
+    expect((post as any).tags).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("the timeout is a per-post failure, not a cycle abort: the next post is still tagged", async () => {
+    let calls = 0;
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
+      calls += 1;
+      if (calls === 1) return hangUntilAborted(init);
+      return Promise.resolve(
+        jsonResponse(anthropicCompletion(JSON.stringify({ tags: ["SPX", "VOL", "EQUITIES"] }))),
+      );
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const { createVisionTagger, hydrateTagsDual } = await import("../../scripts/newsfeed/vision_tagger.js");
+    const visionTagger = createVisionTagger({
+      mediaDir: MEDIA_DIR,
+      getTaxonomySnapshot: async () => TAXONOMY,
+      readImage: async () => fakeImage,
+      timeoutMs: 50,
+    });
+    const posts = [
+      { id: "p1", title: "Hangs", content: "x", images: ["/media/p1.png"] },
+      { id: "p2", title: "Answers", content: "y", images: ["/media/p2.png"] },
+    ];
+
+    const outcome = await Promise.race([
+      hydrateTagsDual(posts, { visionTagger }),
+      new Promise<string>((resolve) => setTimeout(() => resolve("hung"), 1500)),
+    ]);
+
+    expect(outcome).toBe(true);
+    expect((posts[0] as any).tags_vision).toBeUndefined();
+    expect((posts[1] as any).tags_vision).toEqual(["SPX", "VOL", "EQUITIES"]);
   });
 });

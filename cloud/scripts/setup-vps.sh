@@ -34,6 +34,7 @@ readonly CADDY_SYNC="${RADON_CADDY_SYNC:-/usr/bin/sync}"
 readonly SERVICE_FILES=(
   radon-ib-gateway.service
   radon-ib-gateway-preheld-restart.service
+  radon-ib-gateway-remote.service
   radon-nextjs.service
   radon-api.service
   radon-relay.service
@@ -62,6 +63,8 @@ readonly SERVICE_FILES=(
   radon-incident-watchdog.timer
   radon-grok-page-responder.service
   radon-grok-page-responder.timer
+  radon-flex-pull.service
+  radon-flex-pull.timer
   radon-llm-index.service
   radon-llm-index.timer
   radon-leap.service
@@ -72,6 +75,8 @@ readonly SERVICE_FILES=(
   radon-drift-audit.timer
   radon-db-backup.service
   radon-db-backup.timer
+  radon-disk-cleanup.service
+  radon-disk-cleanup.timer
   radon-portfolio-archive.service
   radon-portfolio-archive.timer
   radon-media-backup.service
@@ -92,6 +97,9 @@ readonly SERVICE_FILES=(
   radon-demo-mirror.timer
   radon-margin-debt.service
   radon-margin-debt.timer
+  radon-mktnews.service
+  radon-model-catalog.service
+  radon-model-catalog.timer
   radon-oi-changes.service
   radon-oi-changes.timer
   radon-knowledge.service
@@ -146,6 +154,8 @@ readonly SERVICE_FILES=(
   radon-hhlev.timer
   radon-vixts.service
   radon-vixts.timer
+  radon-dispersion.service
+  radon-dispersion.timer
 )
 
 
@@ -624,6 +634,9 @@ enable_services() {
   local base svc
   for svc in "${SERVICE_FILES[@]}"; do
     [[ "$svc" == "radon-ib-gateway-preheld-restart.service" ]] && continue
+    # Broker-only. Combined/app copy the unit but do not enable it. Certs plus
+    # `systemctl enable --now` happen on the broker after the split.
+    [[ "$svc" == "radon-ib-gateway-remote.service" ]] && continue
     if [[ "$svc" == *.timer ]]; then
       timer_units+=("$svc")
     elif [[ -f "${CLOUD_DIR}/services/${svc%.service}.timer" ]]; then

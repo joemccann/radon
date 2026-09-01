@@ -54,8 +54,8 @@ function fmtPnl(value: number | null | undefined): string {
  * credit-combo bug. Only "-" is prefixed; a debit shows bare, matching the
  * desktop Initial Value column.
  */
-function fmtEntryCost(value: number): string {
-  if (!Number.isFinite(value)) return "—";
+function fmtEntryCost(value: number | null): string {
+  if (value == null || !Number.isFinite(value)) return "—";
   return `${value < 0 ? "-" : ""}${fmtUsd(Math.abs(value))}`;
 }
 
@@ -144,6 +144,7 @@ function PositionCard({ pos, prices, showExpiry, onLegClick }: { pos: PortfolioP
             label="Today"
             value={fmtPnl(todayPnl)}
             tone={toneFor(todayPnl)}
+            testId="mobile-position-today"
           />
           <MetricCell
             label="Return %"

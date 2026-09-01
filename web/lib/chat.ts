@@ -4,6 +4,7 @@ import type {
   AssistantOrderProposal,
   AssistantResponse,
   AssistantToolEvent,
+  ChatImageAttachment,
   Message,
   PiResponse,
   WorkspaceSection,
@@ -155,34 +156,57 @@ async function readJsonBody<T>(response: Response): Promise<T | null> {
   }
 }
 
+/**
+ * The edge abandons an assistant turn before the route does, and its 504 body
+ * is not JSON, so `payload.error` is empty and the status is the only thing
+ * carrying the reason. "Assistant service returned an error." told the
+ * operator nothing on 2026-08-29 when a pasted-chart turn timed out at the
+ * proxy while the turn itself was still running.
+ */
+const TIMEOUT_STATUSES = new Set([408, 504]);
+
+function assistantErrorMessage(status: number | undefined, error: string | undefined): string {
+  if (typeof status === "number" && TIMEOUT_STATUSES.has(status)) {
+    return "The turn timed out before the assistant answered. A smaller image or a shorter question may get through.";
+  }
+  return error ? `Error: ${error}` : "Assistant service returned an error.";
+}
+
+/**
+ * Text-only assistant turn. Delegates to {@link requestAssistantTurn} so there
+ * is ONE reader of the endpoint: the route answers `text/event-stream` now, and
+ * a second call site parsing the body as JSON would silently fall back to
+ * canned copy on every real turn.
+ */
 export async function requestAssistantReply(history: ApiMessage[], latestMessage: string): Promise<string> {
-  const response = await fetch("/api/assistant", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      messages: [
-        ...history,
-        { role: "user", content: latestMessage },
-      ],
-    }),
-  });
+  const turn = await requestAssistantTurn(history, latestMessage);
+  return turn.content;
+}
 
-  const payload = await readJsonBody<AssistantResponse>(response);
-
-  if (!response.ok) {
-    if (payload?.error) {
-      return `Error: ${payload.error}`;
-    }
-    return "Assistant service returned an error.";
+/**
+ * The turn's user message. Text-only turns keep the plain-string content shape
+ * the endpoint has always accepted; pasted images promote it to the Anthropic
+ * block array, images first so the model reads them before the question.
+ */
+function buildUserMessage(text: string, attachments: ChatImageAttachment[]): ApiMessage {
+  if (!attachments.length) {
+    return { role: "user", content: text };
   }
-
-  if (typeof payload?.content === "string" && payload.content.trim()) {
-    return formatAssistantPayload(payload.content);
-  }
-
-  return fallbackReply(latestMessage);
+  return {
+    role: "user",
+    content: [
+      ...attachments.map((attachment) => ({
+        type: "image" as const,
+        source: {
+          type: "base64" as const,
+          media_type: attachment.mediaType,
+          data: attachment.data,
+        },
+      })),
+      // An image-only turn carries no text block: an empty one is not content.
+      ...(text ? [{ type: "text" as const, text }] : []),
+    ],
+  };
 }
 
 export type AssistantTurn = {
@@ -194,6 +218,115 @@ export type AssistantTurn = {
   model: string | null;
 };
 
+/** Live progress from the open turn, before its final payload exists. */
+export type AssistantStreamEvent =
+  | { type: "start" }
+  | { type: "tool"; event: AssistantToolEvent };
+
+/**
+ * A stream that ends without a `done` frame — killed upstream, severed
+ * connection, a proxy that gave up mid-body. It MUST read as a failure: an
+ * empty assistant bubble is worse than the 504 this replaced, because nothing
+ * on screen says the turn did not finish.
+ */
+const TRUNCATED_STREAM_MESSAGE =
+  "The connection dropped and the turn did not finish. No order was placed. Ask again.";
+
+function parseFrameData(raw: string): unknown {
+  try {
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reads the `/api/assistant` event stream. Frames are `event:`/`data:` lines
+ * terminated by a blank line, and arrive on arbitrary chunk boundaries, so the
+ * buffer is split on the terminator rather than per read.
+ */
+async function readAssistantStream(
+  body: ReadableStream<Uint8Array>,
+  latestMessage: string,
+  onEvent?: (event: AssistantStreamEvent) => void,
+): Promise<AssistantTurn> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  const streamedTools: AssistantToolEvent[] = [];
+  let buffer = "";
+  let settled: AssistantTurn | null = null;
+  let failure: string | null = null;
+
+  const handle = (event: string, raw: string) => {
+    if (event === "start") {
+      onEvent?.({ type: "start" });
+      return;
+    }
+    if (event === "tool") {
+      const parsed = parseFrameData(raw) as AssistantToolEvent | null;
+      if (parsed) {
+        streamedTools.push(parsed);
+        onEvent?.({ type: "tool", event: parsed });
+      }
+      return;
+    }
+    if (event === "error") {
+      const parsed = parseFrameData(raw) as { error?: string } | null;
+      failure = assistantErrorMessage(undefined, parsed?.error);
+      return;
+    }
+    if (event === "done") {
+      const payload = parseFrameData(raw) as AssistantResponse | null;
+      settled = {
+        content:
+          typeof payload?.content === "string" && payload.content.trim()
+            ? formatAssistantPayload(payload.content)
+            : fallbackReply(latestMessage),
+        proposal: payload?.proposal ?? null,
+        toolEvents: Array.isArray(payload?.toolEvents) ? payload.toolEvents : streamedTools,
+        model: typeof payload?.model === "string" ? payload.model : null,
+      };
+    }
+  };
+
+  const drainFrames = () => {
+    let boundary = buffer.indexOf("\n\n");
+    while (boundary !== -1) {
+      const chunk = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      let event = "";
+      const dataLines: string[] = [];
+      for (const line of chunk.split("\n")) {
+        if (line.startsWith("event: ")) event = line.slice(7).trim();
+        else if (line.startsWith("data: ")) dataLines.push(line.slice(6));
+      }
+      if (event) handle(event, dataLines.join("\n"));
+      boundary = buffer.indexOf("\n\n");
+    }
+  };
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (value) {
+        buffer += decoder.decode(value, { stream: true });
+        drainFrames();
+      }
+      if (done) break;
+    }
+  } catch {
+    // A read that throws is the same failure as a stream that stops early.
+  }
+
+  if (settled) return settled;
+  return {
+    content: failure ?? TRUNCATED_STREAM_MESSAGE,
+    proposal: null,
+    toolEvents: streamedTools,
+    model: null,
+  };
+}
+
 /**
  * Like {@link requestAssistantReply} but preserves the structured order
  * proposal (F7). The agentic loop returns a `place_order` proposal instead of
@@ -203,21 +336,36 @@ export type AssistantTurn = {
 export async function requestAssistantTurn(
   history: ApiMessage[],
   latestMessage: string,
+  attachments: ChatImageAttachment[] = [],
+  /** Catalog model id from the composer's picker. "" leaves the choice to the server. */
+  model = "",
+  /** Live progress while the turn is still open — flips the panel to alive. */
+  onEvent?: (event: AssistantStreamEvent) => void,
 ): Promise<AssistantTurn> {
   const response = await fetch("/api/assistant", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
     body: JSON.stringify({
-      messages: [...history, { role: "user", content: latestMessage }],
+      messages: [...history, buildUserMessage(latestMessage, attachments)],
+      // Omitted rather than sent empty: the route treats an absent model as
+      // "unchanged behavior", and validates any id it does receive.
+      ...(model ? { model } : {}),
     }),
   });
 
-  const payload = await readJsonBody<AssistantResponse>(response);
-
+  // Every rejection that carries a status is written before the stream opens,
+  // so a non-2xx is still a JSON body.
   if (!response.ok) {
-    const message = payload?.error ? `Error: ${payload.error}` : "Assistant service returned an error.";
+    const failed = await readJsonBody<AssistantResponse>(response);
+    const message = assistantErrorMessage(response.status, failed?.error);
     return { content: message, proposal: null, toolEvents: [], model: null };
   }
+
+  if (response.headers?.get?.("content-type")?.includes("text/event-stream") && response.body) {
+    return readAssistantStream(response.body, latestMessage, onEvent);
+  }
+
+  const payload = await readJsonBody<AssistantResponse>(response);
 
   const content =
     typeof payload?.content === "string" && payload.content.trim()

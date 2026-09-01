@@ -433,7 +433,7 @@ class TestCli:
                 {"IEI": "yahoo", "HYG": "yahoo", "DXY": "yahoo"},
             ),
         )
-        monkeypatch.setattr(fih, "persist_result", lambda payload, rows, health_error=None: None)
+        monkeypatch.setattr(fih, "persist_result", lambda payload, rows, health_error=None, **_kw: None)
         assert main(["--json"]) == 0
         out = capsys.readouterr().out
         payload = json.loads(out)
@@ -510,6 +510,65 @@ class TestFetchClosesCascade:
         assert yahoo_calls == [[DXY_SYMBOL]]
         assert sorted(closes) == sorted(TICKERS)
         assert source == "ib+uw+yahoo"
+
+    def test_robinhood_fills_before_yahoo(self):
+        """RH sits between UW and Yahoo; a RH hit never reaches Yahoo."""
+        yahoo_calls: list = []
+
+        closes, source, sources = fetch_closes(
+            fetch_ib=lambda tickers: {},
+            fetch_uw=lambda tickers: {},
+            fetch_rh=lambda tickers: {t: {"2026-08-21": 1.0} for t in tickers},
+            fetch_yahoo=lambda tickers: yahoo_calls.append(list(tickers)) or {},
+        )
+
+        assert sorted(closes) == sorted(TICKERS)
+        assert source == "rh"
+        assert yahoo_calls == []
+
+    def test_robinhood_never_preempts_ib_or_uw(self):
+        rh_calls: list = []
+
+        closes, source, _ = fetch_closes(
+            fetch_ib=lambda tickers: {t: {"2026-08-21": 1.0} for t in tickers},
+            fetch_uw=lambda tickers: {},
+            fetch_rh=lambda tickers: rh_calls.append(list(tickers)) or {},
+            fetch_yahoo=lambda tickers: {},
+        )
+
+        assert source == "ib"
+        assert rh_calls == []
+
+    def test_unconfigured_robinhood_default_rung_skips_to_yahoo(self, monkeypatch):
+        monkeypatch.delenv("ROBINHOOD_MCP_TOKEN", raising=False)
+        monkeypatch.setattr(
+            "requests.Session.post",
+            lambda *a, **k: (_ for _ in ()).throw(
+                AssertionError("unconfigured RH rung attempted network I/O")
+            ),
+        )
+
+        closes, source, _ = fetch_closes(
+            fetch_ib=lambda tickers: {},
+            fetch_uw=lambda tickers: {},
+            fetch_yahoo=lambda tickers: {t: {"2026-08-21": 1.0} for t in tickers},
+        )
+
+        assert source == "yahoo"
+
+    def test_rh_rung_skips_dxy(self, monkeypatch):
+        from fetch_iei_hyg import fetch_rh_closes
+
+        calls: list = []
+        monkeypatch.setattr(
+            "clients.robinhood_client.fetch_robinhood_closes",
+            lambda symbols: calls.append(list(symbols)) or {},
+        )
+
+        assert fetch_rh_closes([DXY_SYMBOL]) == {}
+        assert calls == [], "an index-only gap must not touch Robinhood"
+        fetch_rh_closes([IEI_SYMBOL, DXY_SYMBOL])
+        assert calls == [[IEI_SYMBOL]]
 
     def test_an_empty_series_from_a_rung_does_not_claim_the_ticker(self):
         yahoo_calls: list = []

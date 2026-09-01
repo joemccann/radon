@@ -541,6 +541,86 @@ class TestRun:
         ]
 
 
+class TestSweepBudget:
+    """2026-09-01: radon-equibles-ats Result=timeout after TimeoutStartSec=900
+    (09:16:04Z → 09:31:04Z, NRestarts=0, CPU 734ms). Equibles HTTPS tarpitted
+    the shared Session (sibling short-crowding still do_poll on :443 minutes
+    later). No process wall-clock budget, so systemd SIGTERM'd the oneshot
+    with no service_health row and the unit re-pages P1 every cycle (timeout
+    is not on the exit-code latch). Next timer is a week out."""
+
+    @pytest.fixture(autouse=True)
+    def _isolate_caches(self, tmp_path, monkeypatch):
+        import fetch_equibles_ats_venue_share as mod
+
+        monkeypatch.setattr(mod, "ATS_VENUE_SHARE_JSON", tmp_path / "ats_venue_share.json")
+        self.db_writes = []
+        self.health = []
+        monkeypatch.setattr(
+            mod, "_write_db_cache",
+            lambda payload, scan_time: self.db_writes.append(payload),
+        )
+        monkeypatch.setattr(
+            mod, "_record_health",
+            lambda state, scan_time, error=None: self.health.append(
+                {"state": state, "error": error}
+            ),
+        )
+        self.mod = mod
+
+    def test_tarpitted_equibles_stops_inside_the_wall_clock_budget(self, monkeypatch):
+        import time
+
+        monkeypatch.setattr(self.mod, "SWEEP_BUDGET_S", 0.2, raising=False)
+        monkeypatch.setattr(self.mod, "TICKER_FETCH_BUDGET_S", 0.15, raising=False)
+
+        def hang(_client, ticker, _start, _end):
+            time.sleep(0.5)
+            raise AssertionError(f"tarpit returned for {ticker}")
+
+        monkeypatch.setattr(self.mod, "_fetch_ticker", hang)
+        tickers = [f"T{i:02d}" for i in range(8)]
+        client = _StubClient({}, {})
+        started = time.monotonic()
+        payload = self.mod.run(client=client, tickers=tickers)
+        elapsed = time.monotonic() - started
+
+        # A bare for-loop over 8×0.5s sleeps would take ~4s and still be
+        # running when systemd SIGTERM'd at 900s. The budget must cut this
+        # off well under a second and still reach a health write.
+        assert elapsed < 1.0
+        assert self.db_writes == []
+        assert self.health and self.health[0]["state"] == "error"
+        assert payload.get("partial") is True or not payload_has_data(payload)
+
+    def test_tickers_finished_before_the_deadline_are_kept(self, monkeypatch):
+        monkeypatch.setattr(self.mod, "SWEEP_BUDGET_S", 30.0, raising=False)
+        weeks = mondays(MIN_HISTORY_WEEKS + 4)
+        off = {t: [off_exchange_row(w) for w in weeks] for t in ("AAPL", "MSFT")}
+        short = {t: [r for w in weeks for r in short_volume_week(w)] for t in ("AAPL", "MSFT")}
+        client = _StubClient(off, short)
+        payload = self.mod.run(client=client, tickers=["AAPL", "MSFT"])
+        assert payload["count"] == 2
+        assert self.health[-1]["state"] == "ok"
+        assert len(self.db_writes) == 1
+
+    def test_sweep_budget_fits_inside_unit_start_timeout(self):
+        service = (
+            Path(__file__).resolve().parents[2]
+            / "cloud"
+            / "services"
+            / "radon-equibles-ats.service"
+        )
+        timeout_line = next(
+            line for line in service.read_text().splitlines()
+            if line.startswith("TimeoutStartSec=")
+        )
+        unit_timeout = int(timeout_line.split("=", 1)[1])
+        from fetch_equibles_ats_venue_share import SWEEP_BUDGET_S, TICKER_FETCH_BUDGET_S
+
+        assert SWEEP_BUDGET_S + TICKER_FETCH_BUDGET_S <= unit_timeout
+
+
 # ── migration + upsert (sqlite3 stand-in for libsql) ───────────────
 
 

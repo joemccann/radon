@@ -122,7 +122,10 @@ describe("llm provider", () => {
     ).toBe("Bearer xai-test-key");
 
     const payload = bodyOf(call);
-    expect(payload.model).toBe("grok-4");
+    // grok-4 is no longer a listed xAI model and reportedly bills as grok-4.3
+    // rather than erroring, so the compiled-in default has to be the frontier
+    // id the catalog also serves.
+    expect(payload.model).toBe("grok-4.6");
     const messages = payload.messages as Array<{ role: string; content: string }>;
     expect(messages[0]).toEqual({ role: "system", content: "You are Radon." });
     expect(messages[1]).toEqual({ role: "user", content: "What is flow?" });
@@ -195,6 +198,7 @@ describe("llm provider", () => {
     expect(payload.system).toBe("You are Radon.");
     expect(payload.messages).toEqual([{ role: "user", content: "What is flow?" }]);
     expect(payload).toHaveProperty("max_tokens");
+    expect(payload.model).toBe("claude-opus-5");
 
     expect(result.provider).toBe("anthropic");
     expect(result.text).toBe("Flow is institutional positioning.");
@@ -221,6 +225,7 @@ describe("llm provider", () => {
     expect((call.init.headers as Record<string, string>)["authorization"] ?? (call.init.headers as Record<string, string>)["Authorization"]).toBe("Bearer sk-openai-test");
 
     const payload = bodyOf(call);
+    expect(payload.model).toBe("gpt-5.5");
     const messages = payload.messages as Array<{ role: string; content: string }>;
     expect(messages[0]).toEqual({ role: "system", content: "You are Radon." });
     expect(messages[1]).toEqual({ role: "user", content: "What is flow?" });
@@ -300,6 +305,51 @@ describe("llm provider", () => {
     expect(calls[1].url).toContain("api.anthropic.com");
     expect(result.provider).toBe("anthropic");
     expect(result.text).toBe("Fallback answer.");
+    expect(result.usedFallback).toBe(true);
+  });
+
+  it("does not carry the picked model id into the fallback provider", async () => {
+    // A picked model is scoped to the provider that owns it. Handing "grok-4.6"
+    // to Anthropic turns a transient xAI blip into a hard 404 and kills the one
+    // rescue path the operator configured.
+    process.env.XAI_API_KEY = "xai-test-key";
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+    process.env.LLM_FALLBACK_PROVIDER = "anthropic";
+
+    const { calls } = captureFetch((call) => {
+      if (call.url.includes("/chat/completions")) return jsonResponse({ error: "rate limited" }, 429);
+      return jsonResponse({
+        content: [{ type: "text", text: "Rescued." }],
+        stop_reason: "end_turn",
+      });
+    });
+
+    const result = await chat({ ...SAMPLE_REQUEST, model: "grok-4.6" });
+
+    expect(calls).toHaveLength(2);
+    expect(calls[0].url).toContain("api.x.ai");
+    expect(bodyOf(calls[0]).model).toBe("grok-4.6");
+    expect(calls[1].url).toContain("api.anthropic.com");
+    expect(bodyOf(calls[1]).model).toBe("claude-opus-5");
+    expect(result.provider).toBe("anthropic");
+    expect(result.usedFallback).toBe(true);
+  });
+
+  it("does not let an explicit request.provider pin the fallback back onto the failed provider", async () => {
+    process.env.OPENAI_API_KEY = "sk-openai-test";
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+    process.env.LLM_FALLBACK_PROVIDER = "anthropic";
+
+    const { calls } = captureFetch((call) => {
+      if (call.url.includes("/chat/completions")) return jsonResponse({ error: "boom" }, 500);
+      return jsonResponse({ content: [{ type: "text", text: "Rescued." }], stop_reason: "end_turn" });
+    });
+
+    const result = await chat({ ...SAMPLE_REQUEST, provider: "openai", model: "gpt-5.5" });
+
+    expect(calls).toHaveLength(2);
+    expect(calls[1].url).toContain("api.anthropic.com");
+    expect(bodyOf(calls[1]).model).toBe("claude-opus-5");
     expect(result.usedFallback).toBe(true);
   });
 

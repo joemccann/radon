@@ -44,6 +44,7 @@ wheels/
 # Testing / coverage
 .pytest_cache/
 .coverage
+pytest-junit.xml
 htmlcov/
 .tox/
 .nox/
@@ -100,7 +101,12 @@ reports/*.json
 reports/*.png
 data/*.json
 !data/flex_token_config.example.json
+# Robinhood OAuth token store + its atomic-write/lock artifacts (secrets;
+# data/*.json does not match the .tmp / .lock suffixes)
+data/rh_mcp_token.json*
 data/*.bak
+# cri_scan advisory lock (T-314): lives under data/ so host and container share it
+data/radon-cri-scan.lock
 
 # Ticker/market data caches (regenerated at runtime)
 data/ticker_cache.json
@@ -204,6 +210,9 @@ web/verify-regime-internals.mjs
 # The starred form (not a bare dir) lets repo-owned skills below re-include.
 /.agents/
 /.claude/skills/*
+!/.claude/skills/ci-performance/
+!/.claude/skills/documentation-nightly/
+!/.claude/skills/security-nightly/
 !/.claude/skills/incident-response/
 !/.claude/skills/long-horizon-jobs/
 !/.claude/skills/reliability-weekend/
@@ -262,6 +271,11 @@ docs/security-audit-*.html
 
 # Weekend reliability runner marker (dedicated clone only, never committed)
 .radon-weekend-runner
+# REL-180 (R-507): per-loop markers and the runner lock live untracked in every
+# loop clone where an agent stages files; a committed lock pid would make all
+# five loops REFUSE at 00:00 after the next reset --hard.
+.radon-*-runner
+.weekend-runner.lock/
 
 # One-shot security-scan scratch directories (never commit)
 CLAUDE-SECURITY-*/

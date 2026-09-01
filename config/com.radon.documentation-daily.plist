@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.radon.documentation-daily</string>
+
+    <!-- __WEEKEND_REPO__ is substituted by scripts/setup_documentation_nightly.sh.
+         The clone is restored BEFORE the wrapper is read: a wrapper left
+         corrupt on disk dies at the top, before the ground_truth that
+         would have restored it, and every later fire repeats that
+         silently. Skipped while a live run holds the lock, so the fire
+         cannot reset the tree under a running agent. -->
+    <!-- REL-180 (R-477): the pre-lock fetch runs under `timeout` with ssh
+         keepalives, so a blackholed port cannot park the job outside the
+         wrapper's lock, traps and dead-man. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-c</string>
+        <string>C=__WEEKEND_REPO__; kill -0 "$(cat "$C/.weekend-runner.lock/pid" 2&gt;/dev/null)" 2&gt;/dev/null || { T="$(command -v timeout || true)"; ${T:+"$T" -k 15 180} git -C "$C" -c core.sshCommand="ssh -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4" fetch -q origin &amp;&amp; git -C "$C" checkout -f -q main &amp;&amp; git -C "$C" reset --hard -q origin/main; }; exec /bin/bash "$C/scripts/documentation_nightly.sh" cycle</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__WEEKEND_REPO__</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:__HOME__/.local/bin:__HOME__/.bun/bin</string>
+        <key>RADON_WEEKEND_REPO</key>
+        <string>__WEEKEND_REPO__</string>
+        <key>HOME</key>
+        <string>__HOME__</string>
+    </dict>
+
+    <!-- Daily 00:00 local (no Weekday key). One job runs the audit phase then
+         the remediate phase, sequentially. Runs in the documentation loop's own
+         clone; no shared working tree with the reliability loop. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>0</integer>
+        <key>Minute</key>
+        <integer>30</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>__WEEKEND_REPO__/logs/documentation-nightly/launchd-cycle.log</string>
+    <key>StandardErrorPath</key>
+    <string>__WEEKEND_REPO__/logs/documentation-nightly/launchd-cycle.err</string>
+</dict>
+</plist>

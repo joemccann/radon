@@ -62,6 +62,8 @@ async function readProfile(userId: string): Promise<ProfileRow> {
   return { username: row.username ?? null, avatar_url };
 }
 
+export const radonCapability = { GET: "read", PUT: "mutate.workspace" };
+
 export async function GET(): Promise<Response> {
   const requestId = getRequestId();
   const { userId } = await auth();

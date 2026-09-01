@@ -30,6 +30,17 @@
       "owners": ["docs/incident-runbook.md", "docs/grok-page-responder.md"]
     },
     {
+      "id": "host-split",
+      "globs": [
+        "scripts/ib_gateway_remote/**",
+        "cloud/services/radon-ib-gateway-remote.service",
+        "cloud/scripts/ib-gateway-remote-certs.sh",
+        "cloud/scripts/check-env.py"
+      ],
+      "owners": ["docs/spof-host-split.md"],
+      "note": "App/broker split contract: mTLS Gateway control, cert lifecycle, role env checks. Recurring runbook drift class (DOC-002/006/009/010/017/018/019)."
+    },
+    {
       "id": "ops-timers",
       "globs": ["cloud/services/*.timer"],
       "owners": ["docs/operations.md", "docs/cloud-services.md"]

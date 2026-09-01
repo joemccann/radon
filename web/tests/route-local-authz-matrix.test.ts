@@ -13,7 +13,7 @@ const ROUTES = [
   "orders/cancel", "orders/modify", "orders/place", "orders", "orders/whatif",
   "paper/place", "performance", "pi", "portfolio", "preferences", "previous-close",
   "regime", "scanner", "scanner/strength", "scanner/strength/scan",
-  "scanner/theta", "scanner/theta/scan", "short-availability/[ticker]",
+  "scanner/theta", "scanner/theta/scan", "short-availability/[ticker]", "streaks",
   "ticker/info", "ticker/news", "ticker/ratings", "ticker/seasonality", "vcg",
   "workflow/run", "service-health",
 ] as const;
@@ -52,12 +52,16 @@ const MIDDLEWARE_PERIMETER_ONLY_ROUTES = [
   "bookmarks", "bookmarks/[post_id]", "bpi", "catalysts",
   // cor/skew2d/vol-cone/equibles-*: read-only market-data indicators (R-079
   // classification) — same posture as bpi/margin-debt/straddle.
-  "cor", "credit-spread", "divyield", "iei-hyg", "trin", "equibles-ats-venue-share", "equibles-cot-positioning",
+  "cor", "credit-spread", "dispersion", "divyield", "iei-hyg", "trin", "equibles-ats-venue-share", "equibles-cot-positioning",
   "equibles-filing-forensics", "equibles-short-crowding",
   "equibles-smart-money-13f",
   "flex-token", "flow-surprise", "futures-quote", "garch-convergence",
   "hhlev", "hyad", "index-quote",
-  "informed-flow/[ticker]", "ivrank", "llm-token-index", "margin-debt", "prices",
+  "informed-flow/[ticker]", "ivrank", "llm-token-index", "margin-debt",
+  // models: read-only chat model picker catalog. Reports WHICH provider keys
+  // are present in this deployment, never any key material — same posture as
+  // its llm-token-index sibling, so the middleware perimeter is the only layer.
+  "models", "prices",
   "profile", "risk-free-rate", "skew", "skew2d", "straddle", "vixcor", "vixts",
   "vol-cone", "watchlist", "watchlist/[symbol]", "workflow", "yield-curve",
   "yield-curve/live",

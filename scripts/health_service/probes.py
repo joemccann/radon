@@ -93,6 +93,13 @@ def unit_coarse_state(active_state: str, sub_state: str) -> str:
     if active_state == "failed":
         return "down"
     if active_state in ("activating", "reloading"):
+        # `activating` + `auto-restart` is systemd's signature for a crash loop:
+        # the unit is not on its way up, it has already failed and is being
+        # respawned. A unit with a bad config spends 100% of its life there and
+        # never reaches `active`, so reading it as "starting" reported a
+        # permanently dead service as a transient. R-397.
+        if sub_state == "auto-restart":
+            return "down"
         return "starting"
     if active_state in ("inactive", "deactivating"):
         return "down"
@@ -127,16 +134,52 @@ def parse_unit_states(raw: str) -> dict:
 
 
 UNIT_STATE_MAX_AGE_SECS = 30.0
+# Probe evidence gets the same treatment as unit evidence. The refresh interval
+# is 5s, so 30s is six missed sweeps. R-401.
+PROBE_STATE_MAX_AGE_SECS = 30.0
 STATUS_SCHEMA_VERSION = 2
+
+# Non-edge components: reported in /status, but a failure here must not
+# collapse the public edge aggregate to "down". Off-box pages P1 on
+# aggregate_down; these units already have their own on-box alarms.
+# ib-gateway: broker dependency (2026-08-09 weekend clean-exit false P1).
+# newsfeed / monitor: sidecars — Restart=always flaps briefly read as unit
+# "down" or "starting" and were paging edge-unhealthy (2026-08-29 pages
+# 0b7726f8 / 344f0592).
+# How long a dependency may sit non-`up` before its failure stops being a flap.
+# `degraded` converts off-box to an explicit non-page, so with no dwell bound a
+# permanently dead radon-monitor (the fill / order / journal daemon) was edge
+# green forever. 15 minutes absorbs every Restart=always flap the 2026-08-29
+# pages were about and still catches a death well inside one trading session.
+# R-382.
+DEPENDENCY_DWELL_LIMIT_SECS = 900.0
+
+DEPENDENCY_PROBES = frozenset({"ib-gateway"})
+DEPENDENCY_UNITS = frozenset({
+    "radon-ib-gateway.service",
+    "radon-newsfeed.service",
+    "radon-monitor.service",
+})
+# R-382 dwell escalates a sidecar that stays non-up past the bound
+# (newsfeed / monitor Restart=always deaths). The broker is not a flap:
+# IBKR weekend session shutdown leaves radon-ib-gateway inactive/dead
+# Result=success for 40+ hours, IBC auto-restart frozen off-hours. Applying
+# the 900s dwell to that unit recreated the 2026-08-09 false edge P1
+# (page a45d6410, 2026-08-30). On-box still pages ib-gateway-grouped.
+DWELL_ESCALATE_UNITS = DEPENDENCY_UNITS - frozenset({"radon-ib-gateway.service"})
+
+
+def _evidence_current(age_secs, bound: float) -> bool:
+    return (
+        not isinstance(age_secs, bool)
+        and isinstance(age_secs, (int, float))
+        and math.isfinite(age_secs)
+        and 0 <= age_secs <= bound
+    )
 
 
 def _unit_evidence_current(units_age_secs) -> bool:
-    return (
-        not isinstance(units_age_secs, bool)
-        and isinstance(units_age_secs, (int, float))
-        and math.isfinite(units_age_secs)
-        and 0 <= units_age_secs <= UNIT_STATE_MAX_AGE_SECS
-    )
+    return _evidence_current(units_age_secs, UNIT_STATE_MAX_AGE_SECS)
 
 
 def _nested_api_state(probe_results: dict) -> str | None:
@@ -193,34 +236,52 @@ def _nested_api_state(probe_results: dict) -> str | None:
 
 
 def aggregate_state(probe_results: dict, units: dict,
-                    health_service: str = "ok", units_age_secs=None) -> str:
+                    health_service: str = "ok", units_age_secs=None,
+                    probes_age_secs=None) -> str:
     """Return the canonical state for this daemon's direct observations.
 
     The off-box ``external_probe`` row is deliberately excluded: folding an old
     off-box verdict into the endpoint it probes would create a feedback loop.
     """
-    # The broker dependency is reported but must not masquerade as an edge
-    # outage: IBKR's weekend session shutdown exits the gateway cleanly while
-    # every serving-path component stays up, and collapsing the aggregate to
-    # "down" made the off-box observer page P1 "edge unhealthy
-    # (aggregate_down)" for it (2026-08-09). Gateway-only failure => the NEW
-    # "degraded" state; any serving-path failure still wins as "down". Both
-    # gateway signals count as dependency: the ib-gateway probe AND the
-    # nested FastAPI payload's broker fields (_nested_api_state).
+    # Non-edge dependencies/sidecars are reported but must not masquerade as
+    # an edge outage. Collapsing the aggregate to "down" made the off-box
+    # observer page P1 "edge unhealthy (aggregate_down)" for broker-only
+    # (2026-08-09) and newsfeed-flap (2026-08-29) failures while api/relay/
+    # nextjs stayed up. Dependency-only failure => "degraded"; any serving-
+    # path failure still wins as "down". Nested FastAPI broker fields
+    # (_nested_api_state) count as dependency too.
     _DOWNISH = {"down", "error", "failed", "unhealthy"}
     serving_states = []
     dependency_states = []
     for name, value in (probe_results or {}).items():
         if isinstance(value, dict):
             state = str(value.get("state", "unknown")).lower()
-            (dependency_states if name == "ib-gateway" else serving_states).append(state)
+            target = dependency_states if name in DEPENDENCY_PROBES else serving_states
+            target.append(state)
+    # Probe evidence is age-gated exactly like unit evidence: `ProbeCache`
+    # keeps its last value through every failure, so an hours-old dict would
+    # otherwise report `radon-api: up` the moment the unit reads `active`.
+    # `None` means the caller has no age to offer (a bare `run_probes`), which
+    # is current by construction. R-401.
+    probes_current = probes_age_secs is None or _evidence_current(
+        probes_age_secs, PROBE_STATE_MAX_AGE_SECS
+    )
     units_current = _unit_evidence_current(units_age_secs)
+    dependency_stuck = False
     if units_current:
         for name, value in (units or {}).items():
             if isinstance(value, dict):
                 state = str(value.get("state", "unknown")).lower()
-                target = dependency_states if name == "radon-ib-gateway.service" else serving_states
+                is_dependency = name in DEPENDENCY_UNITS
+                target = dependency_states if is_dependency else serving_states
                 target.append(state)
+                # `non_up_secs` is stamped by UnitStateCache: how long this unit
+                # has been continuously not-`up`. None means the cache has no
+                # dwell evidence, which must never invent an escalation.
+                if name in DWELL_ESCALATE_UNITS and state != "up":
+                    dwell = value.get("non_up_secs")
+                    if isinstance(dwell, (int, float)) and dwell >= DEPENDENCY_DWELL_LIMIT_SECS:
+                        dependency_stuck = True
     nested_api_state = _nested_api_state(probe_results)
     if nested_api_state is not None:
         dependency_states.append(nested_api_state)
@@ -232,14 +293,29 @@ def aggregate_state(probe_results: dict, units: dict,
         health_service != "ok"
         or not states
         or not units_current
+        or not probes_current
     ):
         return "unknown"
     if any(state == "unknown" for state in states):
         return "unknown"
+    if dependency_stuck:
+        # Past the dwell bound this is not a flap. Suppressing it forever meant
+        # a dead fill/order/journal daemon read as edge-green. R-382.
+        return "down"
+    # The serving-path verdict is decided BEFORE the dependency suppression: a
+    # failed sidecar must never make a serving-path signal invisible. Ordered
+    # the other way, `systemctl reload radon-nextjs` wedging in ExecReload was
+    # silent whenever radon-newsfeed happened to be failed at the same moment,
+    # and pageable when it was not. R-398.
+    if any(state == "starting" for state in serving_states):
+        return "starting"
     if any(state in _DOWNISH for state in dependency_states):
         return "degraded"
-    if any(state == "starting" for state in states):
-        return "starting"
+    if any(state == "starting" for state in dependency_states):
+        # Sidecar Restart=always spends the flap in activating. Collapsing
+        # the aggregate to "starting" made the off-box probe write
+        # aggregate_down (page 344f0592) while api/relay/nextjs stayed up.
+        return "degraded"
     if all(state in {"up", "ok", "healthy"} for state in states):
         return "up"
     return "unknown"
@@ -247,7 +323,8 @@ def aggregate_state(probe_results: dict, units: dict,
 
 def build_status(probes: dict, units: dict, generated_at: str,
                  health_service: str = "ok", units_age_secs=None,
-                 service_health=None, external_probe=None) -> dict:
+                 service_health=None, external_probe=None,
+                 probes_age_secs=None) -> dict:
     """Assemble the always-200 /status body. Degraded sources are fields, never
     error codes (per feedback_http_status_for_real_errors.md).
 
@@ -261,6 +338,7 @@ def build_status(probes: dict, units: dict, generated_at: str,
         units,
         health_service,
         units_age_secs,
+        probes_age_secs,
     )
     return {
         "schema_version": STATUS_SCHEMA_VERSION,
@@ -271,6 +349,7 @@ def build_status(probes: dict, units: dict, generated_at: str,
         "probes": probes,
         "units": units,
         "units_age_secs": units_age_secs,
+        "probes_age_secs": probes_age_secs,
         "service_health": service_health
         if service_health is not None
         else {"state": "unknown", "detail": "not_collected", "rows": []},

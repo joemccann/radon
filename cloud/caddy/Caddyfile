@@ -30,8 +30,12 @@
         format json
     }
 
+    handle /ws-headlines {
+        reverse_proxy 127.0.0.1:8766
+    }
+
     handle /ws* {
-        reverse_proxy localhost:8765
+        reverse_proxy 127.0.0.1:8765
     }
 
     # Ride out an upstream restart instead of forwarding it to the browser.
@@ -43,7 +47,7 @@
     # Do NOT add fail_duration: marking the single upstream down would take
     # the retry loop out of the picture and 502 immediately again.
     handle_path /api/ib/* {
-        reverse_proxy localhost:8321 {
+        reverse_proxy 127.0.0.1:8321 {
             lb_try_duration 15s
             lb_try_interval 250ms
 
@@ -92,8 +96,56 @@
         }
     }
 
+    # The assistant turn is a Server-Sent Event stream.
+    # 2026-08-29: the operator pasted a chart into chat and got a 504 while
+    # radon-nextjs was still working on the turn. /api/assistant rode the
+    # catch-all, whose R-219 guard abandons a request after 30s without a
+    # response header, and the route was NON-STREAMING: it ran the whole
+    # multi-round runAssistantLoop and wrote its JSON only at the end, so a
+    # turn emitted no header at all until it had finished. The first mitigation
+    # was a 180s bound here, which only moved the cliff.
+    #
+    # The route now writes `event: start` BEFORE awaiting the loop and
+    # heartbeats every 10s until it is done, so the response header exists
+    # within milliseconds of the request no matter how long the turn takes.
+    #
+    # flush_interval -1 states what must happen to those frames: forward every
+    # write immediately, never batch. Caddy already infers this from the
+    # text/event-stream content type, but inferring it means the fix silently
+    # depends on a header the route could change; say it instead. `encode zstd
+    # gzip` at the top of this site block does NOT hold the stream — its
+    # writer flushes through — which cloud/tests/test_caddy_edge_timeouts.py
+    # drives against a real caddy rather than assuming.
+    #
+    # response_header_timeout stays at 180s as a BACKSTOP, not as the
+    # mechanism: it now only bounds a radon-nextjs that dies before the stream
+    # opens, i.e. during Clerk verification, the durable rate limiter, or the
+    # demo quota check — all of which are DB round trips and all of which run
+    # before the header. It is under the route's own maxDuration 300, so the
+    # edge never waits on a request the route has already abandoned.
+    #
+    # Scoped to this one path on purpose. Raising the guard globally would undo
+    # R-219 for every other route, where an upstream that accepts the socket
+    # and never writes a header must still become an observable 5xx quickly.
+    #
+    # No lb_try_duration here, deliberately: this path is POST-only and has no
+    # idempotency key, so a retry loop could replay a vision turn the operator
+    # is billed for and re-run its tool calls. Caddy's default is zero retries.
+    # R-262.
+    handle /api/assistant* {
+        reverse_proxy 127.0.0.1:3000 {
+            flush_interval -1
+
+            transport http {
+                dial_timeout 5s
+                response_header_timeout 180s
+                read_timeout 300s
+            }
+        }
+    }
+
     handle {
-        reverse_proxy localhost:3000 {
+        reverse_proxy 127.0.0.1:3000 {
             lb_try_duration 15s
             lb_try_interval 250ms
 
@@ -115,6 +167,17 @@
                 response_header_timeout 30s
                 read_timeout 300s
             }
+        }
+    }
+
+    # handle_response on :8330 only sees an upstream HTTP 5xx. A dial refused
+    # (healthd stopped during deploy) is a Caddy-synthesized 502 that never
+    # matches @down. Scope this to the health paths so /ws 502s stay 502s.
+    handle_errors {
+        @edge_health_err path /edge-health/status /status
+        handle @edge_health_err {
+            header Content-Type application/json
+            respond `{"reachable":false,"observer":"caddy"}` 200
         }
     }
 }

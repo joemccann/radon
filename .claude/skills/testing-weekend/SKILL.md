@@ -1,6 +1,6 @@
 ---
 name: testing-weekend
-description: Weekend testing loop - daily delta-audit of test-suite health for everything merged since the last audited SHA (new findings appended to TEST_AUDIT.md), then red/green remediation of new P0/P1 findings on a PR branch. Runs unattended on the always-on runner via scripts/testing_weekend.sh, one daily cycle at 00:00 local that runs audit then remediate; invoke as /testing-weekend audit or /testing-weekend remediate.
+description: Weekend testing loop - daily delta-audit of test-suite health for everything merged since the last audited SHA (new findings appended to TEST_AUDIT.md), then red/green remediation of new P0/P1 findings on a PR branch. Runs unattended on the always-on runner via scripts/testing_weekend.sh, one daily cycle at 00:10 local that runs audit then remediate; invoke as /testing-weekend audit or /testing-weekend remediate.
 ---
 
 # Testing Weekend Loop
@@ -12,7 +12,7 @@ exist to stop a real-money defect from shipping, so the question for every
 suite is not "does it pass" but "what defect would it actually catch."
 
 The mode is the first argument: `audit` or `remediate`. The unattended job
-fires once a day at 00:00 local and runs `audit` then `remediate`
+fires once a day at 00:10 local and runs `audit` then `remediate`
 sequentially in this loop's own clone.
 
 ## Hard rails (both modes — violating any of these is a failed run)
@@ -107,8 +107,12 @@ then any older non-P2 stragglers), exactly by the PART B contract:
    correct); for a net-negative test, show what real defect it passes
    over; (b) implement surgically; (c) show green; (d) run the full gates
    from the repo root (`python3.13 -m pytest`, `npx vitest run`, and
-   `pytest cloud/tests` when units/cloud files changed); (e) append the
-   TEST_LOG.md row with red/green counts; (f) commit with the T-### id.
+   `pytest cloud/tests` when units/cloud files changed); when the task
+   changed UI, also run the relevant `web/e2e` spec in the worktree and
+   attach the screenshot: the clone-copied `node_modules` is what makes
+   that possible, and CLAUDE.md does not accept unit-only evidence for
+   UI; (e) append the TEST_LOG.md row with red/green counts; (f) commit
+   with the T-### id.
    Source-code fixes are in scope ONLY when a test correctly fails
    against a real defect the audit identified — fix the defect, keep the
    test; never the reverse.
@@ -127,7 +131,11 @@ Every phase outcome is reported three ways, so a silent-dead runner shows up
 the next morning at the latest: a comment on the rolling GitHub issue
 labeled `testing-nightly`, a Pushover notification per phase carrying the
 status and the nightly PR link when one exists, and the PR itself.
-A quiet day means one of two things: the runner did not fire, or the
+`INCOMPLETE (agent exited 0 without committing to the nightly branch)` is
+the status the wrapper posts when `claude -p` returned 0 but no commit landed
+on the nightly branch during the phase (T-379): treat it exactly like
+TRUNCATED — the phase's draft work, if any, is under `/tmp/tw-<date>/` and
+the next phase must land it. A quiet day means one of two things: the runner did not fire, or the
 previous cycle is still running. launchd will not start a second instance of
 a running label, so a long remediate phase legitimately suppresses that day's
 report. Check `launchctl list | grep radon` before treating quiet as dead.
@@ -195,12 +203,20 @@ how this loop improves as the codebase grows.
   reproduced and had to be logged as an observation rather than a finding.
   Write the full reporter output to a file per gate run and read the tail
   from that file, so a flake round is nameable the first time it happens.
-- **2026-08-17 (remediate): `pytest cloud/tests` is 10-red on macOS on
-  `origin/main` too.** Ten `sha256sum`-dependent control-plane tests cannot
-  pass on a darwin runner. Diff the failure LIST against a clean
-  `origin/main` worktree before treating any cloud red as yours; the count
-  alone is not a signal. Baseline as of this run: `10 failed, 848 passed,
-  4 skipped`.
+- **2026-08-17 (remediate): `pytest cloud/tests` is red on macOS on
+  `origin/main` too.** Diff the failure LIST against a clean `origin/main`
+  worktree before treating any cloud red as yours; the count alone is not a
+  signal. Baseline as of this run: `10 failed, 848 passed, 4 skipped`, then
+  attributed to `sha256sum`. **That attribution is STALE as of 2026-08-29**
+  — `/opt/homebrew/bin/sha256sum` exists on this host and no `sha256sum`
+  red remains. The current darwin baseline is `37 failed`: 13 in
+  `test_bootstrap_control_plane.py` (`exec {fd}<>` is bash 4+ and
+  `/bin/bash` here is 3.2, so it exits 127), 21 in
+  `test_ib_gateway_control.py` (`operator-radon.sh` uses `mapfile`, bash
+  4+), 3 in `test_caddy_edge_timeouts.py` (no `caddy` on PATH).
+  `setup_testing_weekend.sh` now checks both and names the consequence;
+  installing either MOVES this baseline, so re-record the FAILED list in
+  the same run.
 - **2026-08-17 (remediate): pre-flight a spec under `next start` before
   curating it into CI.** The e2e job builds and serves a production
   server, and this repo has a documented dev-vs-prod divergence. Every
@@ -217,7 +233,9 @@ how this loop improves as the codebase grows.
 - **2026-08-22 (audit): the darwin cloud baseline is a LIST, not a count, and
   it moves.** Round 1 read `12 failed` against a recorded baseline of 10; the
   diff of `FAILED` lines against the 2026-08-17 list is what separated two
-  new `sha256sum`-shim reds (T-088) from the known ten. Always `sort` the
+  new environment-shim reds (T-088) from the known ten. (The environment
+  cause has since changed from `sha256sum` to bash 3.2 + missing `caddy`;
+  the list is 37 today.) Always `sort` the
   `FAILED` lines to a file and `diff` them; update the recorded baseline in
   the audit whenever it changes.
 - **2026-08-22 (audit, second pass): CHECK `origin` FOR AN EXISTING WEEKEND
@@ -276,13 +294,20 @@ how this loop improves as the codebase grows.
   `TEST_LOG.md`.
 - **2026-08-23 (remediate): fan the backlog out to one worktree per task
   group; cherry-pick back serially.** `git worktree add --detach /tmp/...`
-  plus symlinked `node_modules` (root AND `web/`) gives each subagent a clean
-  tree; the shared venv needs nothing. Group findings that touch the SAME
-  test file into one agent (T-082+T-097, T-084+T-099, T-086+T-098 here) or
-  the cherry-picks conflict. The main clone stays untouched, so a baseline
-  gate can run there while the agents work, and each `cherry-pick -n` +
-  docs row + push is one durable commit. Sixteen P1s landed in ~15 minutes
-  of wall clock this way versus one-at-a-time.
+  plus an APFS clone copy of `node_modules` (`cp -Rc <clone>/node_modules
+  <wt>/node_modules` and the same for `web/`; fall back to `cp -R` off APFS)
+  gives each subagent a clean tree; the shared venv needs nothing. NEVER
+  symlink `node_modules`: a symlink out of the worktree root breaks BOTH
+  gates. vitest cannot resolve `@rollup/rollup-darwin-arm64` through the
+  link's real path, and Turbopack hard-fails the Playwright webServer with
+  `Symlink [project]/web/node_modules is invalid, it points out of the
+  filesystem root`, so the worktree cannot run e2e at all. `cp -Rc` is
+  copy-on-write, so it costs seconds and near-zero disk. Group findings that
+  touch the SAME test file into one agent (T-082+T-097, T-084+T-099,
+  T-086+T-098 here) or the cherry-picks conflict. The main clone stays
+  untouched, so a baseline gate can run there while the agents work, and
+  each `cherry-pick -n` + docs row + push is one durable commit. Sixteen
+  P1s landed in ~15 minutes of wall clock this way versus one-at-a-time.
 - **2026-08-23 (remediate): a subagent's "green" is scoped; re-read the
   source diff before landing.** Two things the per-task reports could not
   show: (a) the relay is ESM with socket side effects on import, so T-087's
@@ -293,10 +318,11 @@ how this loop improves as the codebase grows.
   scoped run. Grep every caller of a changed signature in the LANDED tree,
   not the worktree.
 - **2026-08-23 (remediate): the darwin cloud baseline grew by three
-  `sha256sum`-class reds without any test being wrong.** At `4985a7f8`
+  environment-class reds without any test being wrong.** At `4985a7f8`
   this host reads 12; at `2e904678` it reads 15 because
-  `test_refresh_control_plane.py` (new in the delta) also asserts
-  `shutil.which("sha256sum")`. Same rule as the audit lesson: sort the
+  `test_refresh_control_plane.py` was new in the delta. (The `sha256sum`
+  cause named at the time is stale; as of 2026-08-29 the baseline is 37 and
+  the cause is bash 3.2 + missing `caddy`.) Same rule as the audit lesson: sort the
   `FAILED` lines, run the base SHA in a worktree, `diff` — and record the
   new list in the log so the next run does not misattribute it.
 - **2026-08-23 (remediate): two hosts remediated the same branch at once —
@@ -453,16 +479,18 @@ how this loop improves as the codebase grows.
   the main clone after each cherry-pick. Doing that caught nothing wrong this
   run, but it is what makes the closing gate a confirmation rather than a
   discovery. Never run the closing 3x gate until the fan-out is fully drained.
-- **2026-08-26 (remediate): a worktree with symlinked `node_modules` cannot
-  start vitest on this host** — `@rollup/rollup-darwin-arm64` resolves relative
-  to the symlink's real path and is absent, so vitest dies at startup. Three
-  agents hit it independently and each worked around it by installing that one
-  binding to a scratch dir and setting `NODE_PATH`, which is the right move:
-  the main clone is UNAFFECTED (verified with a scoped `npx vitest run` before
-  trusting the closing gate) and nothing in the repo was modified. Put the
-  workaround in the agent prompt next time instead of making each one discover
-  it, and always smoke-test vitest in the MAIN clone before concluding the
-  suite is broken.
+- **2026-08-26 (remediate): SUPERSEDED by the `cp -Rc` rule at the fan-out
+  bullet above. Kept for the symptom.** A worktree with symlinked
+  `node_modules` cannot start vitest on this host: `@rollup/rollup-darwin-arm64`
+  resolves relative to the symlink's real path and is absent, so vitest dies at
+  startup. Three agents hit it independently and each worked around it by
+  installing that one binding to a scratch dir and setting `NODE_PATH`; do NOT
+  do that any more, clone-copy `node_modules` instead, because the `NODE_PATH`
+  patch rescues vitest but leaves e2e dead, which is worse because it looks
+  green. The main clone is UNAFFECTED (verified with a scoped `npx vitest run`
+  before trusting the closing gate) and nothing in the repo was modified.
+  Always smoke-test vitest in the MAIN clone before concluding the suite is
+  broken.
 - **2026-08-26 (remediate): two agents branched from the same base can land
   CONTRADICTORY pins — diff the landed tree, not the two reports.** T-162
   wrapped `run()` in the credit-spread and IEI/HYG producers; T-163, working
@@ -587,3 +615,122 @@ how this loop improves as the codebase grows.
   deprecation, so the body goes through
   `gh api -X PATCH repos/{owner}/{repo}/pulls/<n> --input <json>` and is
   verified with a grep for a phrase you just wrote.
+
+- **2026-08-29 (audit): check `git status` AFTER the gates, not only before.**
+  The clean-tree rail is a pre-flight check in this skill, but a gate run can
+  DIRTY the tree: `scripts/api/tests/test_flow_report_capacity_shed.py` (new in
+  the delta) POSTs `/flow-analysis/JOBY` without redirecting
+  `server._FLOW_REPORTS_DIR`, so every run writes `data/flow_reports/JOBY.json`
+  into the checkout — reproduced isolated in 0.56 s, `3 passed`, file recreated
+  every time (T-275). It surfaced only because a mid-run `git status` (run to
+  confirm the read-only agents were behaving) showed an untracked path that was
+  not there at pre-flight. Two rails: run `git status --porcelain` after each
+  gate and attribute anything new to the file that wrote it; and treat a test
+  that writes into the repo as a P1, not housekeeping — the loop's own
+  clean-tree precondition is what it breaks.
+- **2026-08-29 (audit): "green in the full suite, red in isolation" is a real
+  shape — do not assume isolation is the clean signal.** The standing
+  `orders-place-cache-race.test.ts` item had been recorded as cross-file
+  pollution on the strength of "6-passed ×3 in isolation". At HEAD it is
+  `1 failed | 5 passed` on one isolated run and `6 passed` on the next, always
+  the same case, while the FULL vitest gate passed it — the full run's
+  scheduling happens to be kinder to a `vi.waitFor` polling for an in-flight
+  route handler (T-311). When a finding's diagnosis rests on an isolation run,
+  run it at least twice; one green in isolation proves nothing about a race.
+- **2026-08-29 (audit): probe the installed dependency, do not read the driver
+  docs.** The headline P0 (T-250) is `getattr(result, "rows_affected", 0)`
+  against a libsql Cursor that exposes only `rowcount`. Two agents found it
+  independently, but what made it filable in one tool call was ten lines of
+  python against the PINNED build — `connect(':memory:')`, insert twice, print
+  `dir(cursor)` and both `rowcount`s. Any finding of the form "this code reads
+  an attribute that is not there" should be settled that way before it is
+  written down, never from the source alone.
+- **2026-08-29 (audit): run the gates BEFORE the fan-out, or after it drains —
+  not alongside it.** Launching six audit agents concurrently with round 1 drove
+  load average from 74 to 224 (`corespotlightd` was already at 589% CPU), which
+  made pytest take 870 s instead of ~275 s and produced three timing-shaped reds
+  that all needed isolation re-runs to attribute. The reds were correctly called
+  as load — scattered across three files, timing-shaped, CI green at the same
+  SHA — but the attribution cost several rounds. The agents are read-only and
+  cheap to start late; the gate is the thing whose numbers have to be quotable.
+- **2026-08-29 (audit): running on a Saturday makes the weekend-false-red class
+  LIVE, and that is worth keeping.** `f7b5eeb9` — the newest commit in the
+  delta, authored by the grok responder hours before this run — pins
+  `web/tests/account-metric-modal.test.ts:165-170` to a Friday session because
+  the unpinned test redded vitest shard 7 on Saturday 2026-08-29 and blocked the
+  deploy. That is T-117 / T-248 recurring for a third time, and this audit saw
+  it as a fact in the git log rather than as a hypothesis. Note the day of the
+  week in the audit preamble; it changes what the gate run is evidence of.
+
+- **2026-08-30 (audit): when a gate flips red with NO source or test change in
+  the range, diff the ENVIRONMENT, and start with the files the setup script
+  copies.** Twenty-two pytest reds appeared in files untouched since May;
+  `git log` on every module in the import chain was empty. The cause was
+  `web/.env` — provisioned into this clone by the delta's own `14065b74`
+  (`cp -p`, so its mtime still read Aug 24 and looked old) — and a `load_dotenv`
+  spy on `import cash_flow_sync` named the loader in one run. Two rails:
+  (a) `stat -f '%SB'` (birth time) on any `.env`-class file, not `ls -l`; (b)
+  prove an env-dependence claim in BOTH directions before filing it
+  (`TURSO_DB_URL= TURSO_AUTH_TOKEN= pytest <files>` → green; unmasked → red),
+  and yesterday's gate output under `/tmp/tw-<date-1>/gates/` is the cheapest
+  proof that the tree, not the host, is what changed.
+- **2026-08-30 (audit): one detached script per collection ROOT for the added-
+  file determinism runs.** `pytest cloud/tests/x.py scripts/tests/y.py` in one
+  invocation dies at collection with `ImportPathMismatchError: tests.conftest`
+  (both roots own a `tests/conftest.py`), so the 3× run reported nothing and
+  looked like a hung job. Split by root — it is also why CI runs them as
+  separate jobs.
+- **2026-08-30 (audit): the reliability loop's gates WILL overlap yours, and
+  its vitest alone takes this host to load 250.** Round 2 of the full gate was
+  launched at load 4.5 with only two light agents left; nine minutes later the
+  other loop's `npx vitest run` started in `~/radon-weekend/radon/` and the
+  round's vitest came back `3 failed`, all bare timeouts, 22/22 green in
+  isolation. Before calling any round's number, `ps -eo pcpu,args | grep
+  radon-weekend/radon/` — if the other clone is mid-gate, the round is a load
+  sample, not a verdict, and the isolation re-run is the number to quote.
+- **2026-08-30 (audit): a delta TEST can create the artifact that reds an
+  UNTOUCHED test.** `test_next_clerk_guard.py`'s `"pk_live_" + "fixture" * 4`
+  dodges gitleaks and the source-level scan, but CPython constant-folds it into
+  the `.pyc` written at collection, and `test_integration.py`'s "tracked files"
+  walker reads `__pycache__`. CI never sees it because the two files are in
+  different shards. Add to the after-gate sweep: when a cloud red names a path
+  under `__pycache__`, `node_modules` or `.next`, the finding is the walker,
+  not the environment — and check whether the shard split is what keeps CI
+  green.
+
+- **2026-08-31 (remediate): a text-only reply ENDS the run — every response
+  in this loop must carry a tool call until the phase is finished.** The
+  audit phase drafted 33 findings to `/tmp/tw-2026-08-31/findings.md`,
+  launched its gates from a detached script, and then answered a mid-run
+  "say what you're doing" nudge with a sentence and no tool call. Print mode
+  read that as the end of the turn: `claude -p` exited 0 after 18 minutes with
+  zero commits, no PR, and `phase_status` said OK on all three dead-man
+  channels while the cloud gate was still running (T-379, now INCOMPLETE).
+  Two rails: (a) when you are only waiting, wait INSIDE a tool call — a
+  foreground `until`/poll loop under the 600 s cap, or a `run_in_background`
+  waiter — never by replying with text; (b) the remediate phase must check
+  `/tmp/tw-<date>/findings.md` and `logs/testing-weekend/audit-<stamp>.log`
+  at pre-flight when `origin/testing/<date>` sits at `origin/main` with no
+  commits, and land the draft under `## Delta audit <date> (landed by the
+  remediation phase)` before touching the backlog. The draft is the audit's
+  work product; re-auditing the range would have cost two hours and thrown
+  away six agents' convergences.
+- **2026-08-31 (remediate): a "coverage gap" P1 on an auth gate was a live
+  bypass — read the fall-through, not only the guard.** T-346 was filed as
+  "the `:873` predicate is stubbed open in every test"; the agent's first
+  un-stubbed wire test returned 200 with no bearer at HEAD, because the
+  middleware withheld the loopback bypass and then called `verify_clerk_jwt`,
+  which re-grants the same loopback trust. The guard was correct; the code
+  path AFTER the guard undid it. When a finding says "this line is untested",
+  write the wire test against HEAD before assuming green, and read what the
+  request reaches once the guard says no.
+- **2026-08-31 (remediate): an agent probing a Gateway route in DOCKER mode
+  will try to start the stack — pin `GATEWAY_MODE=cloud` in the PROMPT, not
+  only in the committed tests.** A T-346 recon probe of `/ib/restart` ran with
+  the clone's default mode and attempted `docker compose up` on this laptop
+  (daemon not running, nothing started; the 2FA push-lock file it created
+  was released by the probe's own `/ib/reset-backoff`). Rail 1 was brushed,
+  not broken, and only because Docker was down. Any prompt that hands an
+  agent an `/ib/*` or `radon-ib-gateway.service` route must say: stub
+  `remote_gateway_action` / `control_unit`, set `GATEWAY_MODE=cloud`, never
+  call the route un-stubbed.

@@ -1,5 +1,9 @@
 # IB Flex Transfers — closing the last TWR data gap
 
+**Current transport (2026-08-28):** routine 1442520/1422766 ingest is IBKR
+sFTP. Setup: [`flex-sftp-setup.md`](flex-sftp-setup.md). Do not weekday
+SendRequest. This runbook remains the query-shape / Transfers-section spec.
+
 ## STATUS: the Portal edit is DONE (2026-08-16)
 
 The operator amended Activity Flex Query `1442520` and the export now carries all three sections:

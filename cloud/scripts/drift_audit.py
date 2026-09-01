@@ -512,7 +512,60 @@ def _live_unit_counter(unit_path: Path) -> Counter:
     return merge_unit_counters(texts)
 
 
+def _repo_unit_counter(repo_path: Path) -> Counter:
+    """Repo base unit merged with its OWN drop-ins, mirroring the live side.
+
+    Comparing a merged live counter against the repo BASE alone made every
+    setting a shipped drop-in adds — `User=root`, the `ExecStartPre=` reset,
+    both `ExecStart=` lines — read as live-only, so all five app units went
+    permanently `unit-mismatch` the moment the container drop-ins were
+    installed, and a permanently-red `config-drift` buries every real drift.
+    Not resolvable with an allowlist entry: the R-058 ratchet is a bounded
+    acknowledgment, not a suppression for a permanent, intended state. R-392.
+    """
+    texts = [_read_repo(repo_path.relative_to(REPO)) or ""]
+    dropin_dir = repo_path.with_name(repo_path.name + ".d")
+    if dropin_dir.is_dir():
+        for conf in sorted(dropin_dir.glob("*.conf")):
+            texts.append(_read_repo(conf.relative_to(REPO)) or "")
+    return merge_unit_counters(texts)
+
+
+CANONICAL_ENV_FILE = Path("/etc/radon/env")
+HOST_ROLES = frozenset({"app", "broker", "combined"})
+# Units the control-plane refresh strips by role. Mirrors
+# role_skips_control_plane_source() in scripts/deploy-root-helper.sh; their
+# absence on that role is the intended state, not drift (REL-169, R-498).
+ROLE_SKIPPED_UNITS: dict[str, frozenset[str]] = {
+    "app": frozenset(
+        {
+            "radon-ib-gateway.service",
+            "radon-ib-gateway-preheld-restart.service",
+            "radon-ib-watchdog.service",
+            "radon-ib-watchdog.timer",
+            "radon-ib-gateway-remote.service",
+        }
+    ),
+}
+
+
+def resolve_host_role(environ=None) -> str:
+    """RADON_HOST_ROLE: process env, then /etc/radon/env, then RADON_ENV_FILE."""
+    environ = os.environ if environ is None else environ
+    raw = (environ.get("RADON_HOST_ROLE") or "").strip().strip("\"'")
+    if not raw:
+        candidates = [CANONICAL_ENV_FILE]
+        if environ.get("RADON_ENV_FILE"):
+            candidates.append(Path(environ["RADON_ENV_FILE"]))
+        for path in candidates:
+            raw = load_env_keys(path, ("RADON_HOST_ROLE",)).get("RADON_HOST_ROLE", "").strip()
+            if raw:
+                break
+    return raw if raw in HOST_ROLES else "combined"
+
+
 def _check_units(drifts: list[dict], known_untracked: list[str]) -> None:
+    role_skipped = ROLE_SKIPPED_UNITS.get(resolve_host_role(), frozenset())
     repo_units = {
         p.name: p
         for pattern in UNIT_GLOBS
@@ -529,6 +582,9 @@ def _check_units(drifts: list[dict], known_untracked: list[str]) -> None:
     for name, repo_path in sorted(repo_units.items()):
         live_path = live_units.get(name)
         if live_path is None:
+            if name in role_skipped:
+                known_untracked.append(f"role-skipped:{name}")
+                continue
             drifts.append({"id": f"not-installed:{name}", "detail": f"services/{name}"})
             continue
         if live_path.is_symlink():
@@ -541,7 +597,7 @@ def _check_units(drifts: list[dict], known_untracked: list[str]) -> None:
             continue
         detail = unit_counter_diff(
             _live_unit_counter(live_path),
-            merge_unit_counters([_read_repo(repo_path.relative_to(REPO)) or ""]),
+            _repo_unit_counter(repo_path),
         )
         if detail:
             drifts.append({"id": f"unit-mismatch:{name}", "detail": detail})

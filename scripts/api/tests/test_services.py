@@ -105,6 +105,29 @@ class TestNonSystemdHost:
         assert status.load_state == "unsupported"
         assert status.can_control is False
 
+    def test_app_gateway_status_does_not_need_systemctl(self, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.setenv("RADON_HOST_ROLE", "app")
+        ca = tmp_path / "ca.pem"
+        cert = tmp_path / "client.pem"
+        key = tmp_path / "client.key"
+        for path in (ca, cert, key):
+            path.write_text("x")
+        monkeypatch.setenv("RADON_IB_REMOTE_URL", "https://10.0.0.4:8340")
+        monkeypatch.setenv("RADON_IB_REMOTE_CA", str(ca))
+        monkeypatch.setenv("RADON_IB_REMOTE_CLIENT_CERT", str(cert))
+        monkeypatch.setenv("RADON_IB_REMOTE_CLIENT_KEY", str(key))
+        remote = admin_services.ActionResult(
+            "radon-ib-gateway.service", "status", True, "running", 0,
+        )
+        async def fake_remote(_action: str):
+            return remote
+        with patch.object(admin_services, "is_systemd_available", return_value=False), \
+             patch.object(admin_services, "remote_gateway_action", side_effect=fake_remote):
+            status = asyncio.run(admin_services.show_unit("radon-ib-gateway.service"))
+        assert status.can_control is True
+        assert status.active_state == "active"
+        assert status.sub_state == "running"
+
     def test_control_unit_refuses_without_systemctl(self) -> None:
         with patch.object(admin_services, "is_systemd_available", return_value=False):
             result = asyncio.run(
@@ -401,6 +424,20 @@ class TestControlUnitGatewayPushLock:
         assert helper_log.read_text().splitlines() == ["restart"]
         assert calls == []
 
+    def test_app_role_refuses_gateway_even_with_helper(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("RADON_HOST_ROLE", "app")
+        helper_log = self._install_helper(tmp_path, monkeypatch)
+        calls: list = []
+        result = self._control(self.GATEWAY, "restart", calls)
+
+        assert result.ok is False
+        assert result.returncode == -1
+        assert "broker" in result.detail.lower()
+        assert not helper_log.exists() or helper_log.read_text() == ""
+        assert calls == []
+
     def test_helper_deploy_lock_refusal_maps_to_conflict(
         self, tmp_path: Path, monkeypatch
     ) -> None:
@@ -628,3 +665,144 @@ class TestRestartFullStack:
         assert result.returncode == -1
         assert "timed out" in result.detail.lower()
         assert not marker.exists(), "timed-out full-stack descendant survived its process group"
+
+
+# ---------------------------------------------------------------------------
+# REL-171 (R-474, R-499, R-500, R-501): the remote status probe is cheap and
+# coalesced; deadlines are monotonic; remote failures are structured.
+# ---------------------------------------------------------------------------
+
+
+def _configure_app_remote(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("RADON_HOST_ROLE", "app")
+    for name in ("ca.pem", "client.pem", "client.key"):
+        (tmp_path / name).write_text("x")
+    monkeypatch.setenv("RADON_IB_REMOTE_URL", "https://10.0.0.4:8340")
+    monkeypatch.setenv("RADON_IB_REMOTE_CA", str(tmp_path / "ca.pem"))
+    monkeypatch.setenv("RADON_IB_REMOTE_CLIENT_CERT", str(tmp_path / "client.pem"))
+    monkeypatch.setenv("RADON_IB_REMOTE_CLIENT_KEY", str(tmp_path / "client.key"))
+    monkeypatch.setattr(admin_services, "is_systemd_available", lambda: False)
+    if hasattr(admin_services, "_reset_remote_status_cache"):
+        admin_services._reset_remote_status_cache()
+
+
+class TestRemoteStatusProbeBounds:
+    def test_hung_broker_does_not_block_the_services_poll(self, monkeypatch, tmp_path: Path) -> None:
+        import threading
+
+        _configure_app_remote(monkeypatch, tmp_path)
+        release = threading.Event()
+        calls: list[tuple[str, float]] = []
+
+        def hung(verb: str, timeout: float):
+            calls.append((verb, timeout))
+            release.wait(20)
+            return 200, {"ok": True, "state": "running", "detail": "running"}
+
+        monkeypatch.setattr(admin_services, "_remote_http", hung)
+        try:
+
+            async def ten_polls():
+                return await asyncio.gather(
+                    *(admin_services.list_units_with_status() for _ in range(10))
+                )
+
+            started = time.monotonic()
+            batches = asyncio.run(ten_polls())
+            elapsed = time.monotonic() - started
+            assert elapsed < 8.0, f"services poll blocked {elapsed:.1f}s behind a hung broker"
+            gateway_rows = [
+                u for batch in batches for u in batch if u.unit == admin_services.GATEWAY_UNIT
+            ]
+            assert len(gateway_rows) == 10
+            assert {u.active_state for u in gateway_rows} == {"unknown"}
+            assert len(calls) == 1, f"{len(calls)} probes in flight for ten concurrent polls"
+            assert calls[0][1] <= 5.0
+
+            # A later poll while the first probe is still hung coalesces onto it.
+            asyncio.run(admin_services.show_unit(admin_services.GATEWAY_UNIT))
+            assert len(calls) == 1
+        finally:
+            release.set()
+
+    def test_status_probe_result_is_cached_briefly(self, monkeypatch, tmp_path: Path) -> None:
+        _configure_app_remote(monkeypatch, tmp_path)
+        calls: list[str] = []
+
+        def fast(verb: str, timeout: float):
+            calls.append(verb)
+            return 200, {"ok": True, "state": "running", "detail": "running"}
+
+        monkeypatch.setattr(admin_services, "_remote_http", fast)
+        first = asyncio.run(admin_services.show_unit(admin_services.GATEWAY_UNIT))
+        second = asyncio.run(admin_services.show_unit(admin_services.GATEWAY_UNIT))
+        assert first.active_state == second.active_state == "active"
+        assert len(calls) == 1
+
+    def test_deadlines_are_monotonic_across_the_split(self) -> None:
+        from ib_gateway_remote import serve
+
+        assert admin_services.REMOTE_STATUS_TIMEOUT_S <= 5.0
+        assert admin_services.REMOTE_TIMEOUT_S >= serve.HELPER_TIMEOUT_S + 15
+
+
+class TestRemoteFailuresAreStructured:
+    def test_unreachable_broker_is_a_gateway_timeout_not_a_client_error(
+        self, monkeypatch, tmp_path: Path
+    ) -> None:
+        from fastapi.testclient import TestClient
+
+        from scripts.api import auth, server
+
+        _configure_app_remote(monkeypatch, tmp_path)
+        monkeypatch.setattr(auth, "is_trusted_local_request", lambda request: True)
+        monkeypatch.setattr(server, "is_trusted_local_request", lambda request: True)
+        monkeypatch.setattr(server, "_is_app_role_gateway_mutation", lambda request: False)
+        # server.app binds `api.services`, a distinct module object from the
+        # `scripts.api.services` this file imports; patch the one the app uses.
+        for mod in {admin_services, server.admin_services}:
+            monkeypatch.setattr(
+                mod,
+                "_remote_http",
+                lambda verb, timeout: (-1, {"ok": False, "detail": "timed out"}),
+            )
+            monkeypatch.setattr(mod, "is_systemd_available", lambda: False)
+        resp = TestClient(server.app).post(
+            f"/admin/services/{admin_services.GATEWAY_UNIT}/start"
+        )
+        assert resp.status_code in {502, 504}, resp.text
+        assert resp.json()["detail"]["returncode"] != -1
+
+    def test_non_numeric_returncode_is_a_structured_failure(self, monkeypatch, tmp_path: Path) -> None:
+        _configure_app_remote(monkeypatch, tmp_path)
+        monkeypatch.setattr(
+            admin_services,
+            "_remote_http",
+            lambda verb, timeout: (200, {"ok": False, "returncode": "busy"}),
+        )
+        result = asyncio.run(admin_services.remote_gateway_action("start"))
+        assert result.ok is False
+        assert result.returncode not in {0, -1}
+
+    def test_undecodable_body_is_a_structured_failure(self, monkeypatch, tmp_path: Path) -> None:
+        import urllib.request
+
+        _configure_app_remote(monkeypatch, tmp_path)
+
+        class _Resp:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return b"\xff\xfe\x00"
+
+        monkeypatch.setattr(admin_services, "_remote_ssl_context", lambda: None)
+        monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _Resp())
+        status, payload = admin_services._remote_http("start", 1.0)
+        assert payload["ok"] is False
+        assert "detail" in payload

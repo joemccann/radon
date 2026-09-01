@@ -334,6 +334,32 @@ def place_target_order(
         log("Invalid legs configuration", "ERROR")
         return None
 
+    # R-351: this was the ONLY order-placing module in the repo carrying
+    # neither guard, while `ib_order_manage.py` states the contract as "every
+    # order-placing process on the host". The halt is the operator's kill
+    # switch and this module is launchd-installable with a reserved client id.
+    # Both checks run BEFORE any contract qualification or client call, so a
+    # halted host does not even open the socket.
+    from trading_halt import get_halt_state, is_trading_halted
+
+    if is_trading_halted():
+        reason = get_halt_state().get("reason", "manual halt")
+        log(f"TRADING HALTED — exit order not placed ({reason})", "WARNING")
+        return None
+
+    from order_limits import check_order_limits
+
+    violation = check_order_limits({
+        "type": "combo",
+        "quantity": contracts,
+        "legs": legs,
+        "symbol": ticker,
+        "limitPrice": target_price,
+    })
+    if violation:
+        log(f"Order limit refused the exit order: {violation['message']}", "WARNING")
+        return None
+
     # Parse legs
     long_leg = None
     short_leg = None

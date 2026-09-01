@@ -286,6 +286,8 @@ async function runCriScanAndArchive(): Promise<void> {
 
 const triggerBackgroundScan = createBackgroundScanTrigger({ label: "CRI", run: runCriScanAndArchive });
 
+export const radonCapability = { GET: "read", POST: "read.spawn" };
+
 export async function GET(): Promise<Response> {
   const access = await requireRouteAccess(undefined, { rate: { key: "regime:route", limit: 20, windowMs: 60_000 } });
   if (!access.ok) return access.response;

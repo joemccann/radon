@@ -15,6 +15,8 @@ import {
   fmtPriceOrCalculated,
   resolveMarketValue,
   resolveRealtimeMarketValue,
+  hasBlendedLegBasis,
+  MIXED_BASIS_TITLE,
   resolveEntryCost,
   positionDirectionSign,
   getAvgEntry,
@@ -282,12 +284,19 @@ function LegRow({
       : columns.qty
         ? "qty"
         : null;
+  // The count lives in the Qty cell ONLY while that cell is actually
+  // rendering it. Column visibility is user-controlled and persisted, so with
+  // Qty hidden — or with the description displaced INTO the Qty cell — a 1x2
+  // ratio rendered byte-identically to a 1x1 vertical and an uncovered ratio
+  // read as defined risk. R-339.
+  const qtyCellShowsCount = columns.qty && descColumn !== "qty";
   const legDescription = (
     <td
       className={`cell-indent cell-muted ${onLegClick ? "leg-clickable" : ""}`}
       onClick={onLegClick ? () => onLegClick(leg) : undefined}
     >
-      {leg.direction} {leg.type}{leg.strike ? ` $${leg.strike}` : ""}
+      {leg.direction} {qtyCellShowsCount ? "" : `${leg.contracts}x `}
+      {leg.type}{leg.strike ? ` $${leg.strike}` : ""}
     </td>
   );
 
@@ -406,6 +415,9 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
   const returnBasis = resolveReturnCapital(pos);
   const returnTitle = describeReturnCapital(returnBasis);
   const avgEntry = getAvgEntry(pos);
+  const initialValue = getInitialValue(pos);
+  // Legs on disagreeing bases have no aggregate basis to show (T-253).
+  const blendedBasis = hasBlendedLegBasis(pos);
   // `pos.contracts` is typed `number` with no positivity constraint, so a row
   // flattened mid-sync (or a partial payload) divided by zero and reached
   // fmtPrice's .toLocaleString() as Infinity/NaN — printing `$∞`/`$NaN` and
@@ -494,7 +506,11 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
             {underlyingDirection === "down" && <ArrowDown size={11} className="price-trend-icon price-trend-down" aria-label="underlying down" />}
           </td>
         )}
-        {columns.avg_entry && <td className="right">{fmtPrice(avgEntry)}</td>}
+        {columns.avg_entry && (
+          <td className="right" title={blendedBasis ? MIXED_BASIS_TITLE : undefined}>
+            {avgEntry == null ? "—" : fmtPrice(avgEntry)}
+          </td>
+        )}
         {columns.last_price && (
           <td className={`right last-price-cell ${flashDirection ? `last-price-${flashDirection}` : ""}`}>
             {lastPrice != null ? fmtPriceOrCalculated(lastPrice, lastPriceIsCalculated) : "—"}
@@ -528,8 +544,16 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
           </td>
         )}
         {columns.market_value && <td className="right">{mv != null ? fmtUsd(mv) : "—"}</td>}
-        {columns.entry_cost && <td className="right">{fmtUsd(entryCost)}</td>}
-        {columns.initial_value && <td className="right">{fmtUsd(getInitialValue(pos))}</td>}
+        {columns.entry_cost && (
+          <td className="right" title={blendedBasis ? MIXED_BASIS_TITLE : undefined}>
+            {entryCost == null ? "—" : fmtUsd(entryCost)}
+          </td>
+        )}
+        {columns.initial_value && (
+          <td className="right" title={blendedBasis ? MIXED_BASIS_TITLE : undefined}>
+            {initialValue == null ? "—" : fmtUsd(initialValue)}
+          </td>
+        )}
         {columns.pnl && (
           <td className={`right ${pnl != null ? (pnl >= 0 ? "positive" : "negative") : ""}`}>
             {pnl != null ? `${pnl >= 0 ? "+" : "-"}${fmtUsd(Math.abs(pnl))}` : "—"}

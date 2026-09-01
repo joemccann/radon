@@ -100,12 +100,17 @@ UNITS_RESTARTED=1
 # Prefer /etc/radon/env when that regular file exists; else ~/radon-cloud/.env.
 # Discord vars are intentionally absent — the notification stack uses Pushover.
 readonly ENV_FILE_DEFAULT="$(_default_env_file)"
+readonly APP_RUNTIME_HELPER="${RADON_APP_RUNTIME_HELPER:-/usr/local/sbin/radon-app-runtime}"
+readonly APP_IMAGE_PREPULL_TIMEOUT="${RADON_APP_IMAGE_PREPULL_TIMEOUT:-600}"
+readonly NEXT_RUNTIME_DROPIN="${RADON_NEXT_RUNTIME_DROPIN:-/etc/systemd/system/radon-nextjs.service.d/runtime-container.conf}"
+readonly SYSTEMCTL="${RADON_SYSTEMCTL:-/usr/bin/systemctl}"
 readonly DEPLOY_LOCK_FILE="${RADON_DEPLOY_LOCK_FILE:-/home/radon/.radon-deploy.lock}"
 readonly GREEN_MARKER_FILE="${RADON_DEPLOY_GREEN_MARKER:-/home/radon/.radon-last-green-deploy}"
 readonly DEPLOY_ROOT_HELPER="${RADON_DEPLOY_ROOT_HELPER:-/usr/local/sbin/radon-deploy-root}"
 readonly GATEWAY_CONTROL_HELPER="${RADON_GATEWAY_CONTROL_HELPER:-/usr/local/bin/radon-ib-gateway-control}"
 readonly CONTROL_PLANE_MANIFEST="${RADON_CONTROL_PLANE_MANIFEST:-/var/lib/radon/control-plane-manifest.sha256}"
 readonly CONTROL_PLANE_READY="${RADON_CONTROL_PLANE_READY:-/var/lib/radon/control-plane-ready}"
+readonly CONTROL_PLANE_REJECTED="${RADON_CONTROL_PLANE_REJECTED:-/home/radon/.radon-control-plane-rejected}"
 readonly SHA256SUM="${RADON_SHA256SUM:-/usr/bin/sha256sum}"
 readonly REQUIRED_ENV_FILE="${RADON_REQUIRED_ENV_FILE:-${CLOUD_DIR}/config/required-env.txt}"
 readonly ENV_CHECKER="${CLOUD_DIR}/scripts/check-env.py"
@@ -195,11 +200,30 @@ preflight_env() {
   return 0
 }
 
+read_host_role() {
+  local role="${RADON_HOST_ROLE:-}"
+  local envf="${ENV_FILE:-$ENV_FILE_DEFAULT}"
+  if [[ -z "$role" && -n "${envf:-}" && -f "$envf" ]]; then
+    role="$(awk -F= '/^RADON_HOST_ROLE=/{v=$2} END{print v}' "$envf" 2>/dev/null || true)"
+    role="${role%\"}"
+    role="${role#\"}"
+    role="${role%\'}"
+    role="${role#\'}"
+    role="${role//$'\r'/}"
+  fi
+  case "$role" in
+    app|broker|combined) printf '%s\n' "$role" ;;
+    *) printf 'combined\n' ;;
+  esac
+}
+
 preflight_control_plane() {
   local line expected_hash source_rel installed_target source_path source_hash installed_hash
   local entries=0
   local deploy_helper_found=0
   local gateway_helper_found=0
+  local host_role
+  host_role="$(read_host_role)"
 
   if [[ ! -x "$SHA256SUM" || ! -r "$CONTROL_PLANE_MANIFEST" || ! -r "$CONTROL_PLANE_READY" ]]; then
     log_error "[preflight] control-plane readiness manifest is missing"
@@ -230,8 +254,24 @@ preflight_control_plane() {
     }
     source_hash="$("$SHA256SUM" "$source_path" | awk '{print $1}')" || return 1
     if [[ "$source_hash" != "$expected_hash" ]]; then
+      # sync-control-plane.sh records a bootstrap rejection (or the root
+      # helper's deadline) here. The arms below would otherwise apply the same
+      # bundle through refresh_install_file while the app tier is stopped, so
+      # a rejected runtime restarts the tier through itself. R-437.
+      if [[ -f "$CONTROL_PLANE_REJECTED" ]]; then
+        log_error "[preflight] the control-plane sync rejected the GitHub main-tip bundle (exit $(cat "$CONTROL_PLANE_REJECTED" 2>/dev/null)); refusing to apply ${source_rel} after promote. Fix the bundle, or run cloud/scripts/bootstrap-control-plane.sh as root and remove ${CONTROL_PLANE_REJECTED}"
+        return 1
+      fi
       if [[ "$source_rel" == services/* ]]; then
         log_warn "[preflight] control-plane unit ${source_rel} differs from the installed manifest; refresh-control-plane will apply it after promote"
+        [[ "$installed_target" == "$DEPLOY_ROOT_HELPER" ]] && deploy_helper_found=1
+        [[ "$installed_target" == "$GATEWAY_CONTROL_HELPER" ]] && gateway_helper_found=1
+        entries=$((entries + 1))
+        continue
+      fi
+      if [[ "$source_rel" == scripts/* || "$source_rel" == config/* ]] \
+        && sudo -n -l -- "$DEPLOY_ROOT_HELPER" refresh-control-plane-privileged >/dev/null 2>&1; then
+        log_warn "[preflight] privileged control-plane ${source_rel} differs from the installed manifest; refresh-control-plane-privileged will apply it after promote"
         [[ "$installed_target" == "$DEPLOY_ROOT_HELPER" ]] && deploy_helper_found=1
         [[ "$installed_target" == "$GATEWAY_CONTROL_HELPER" ]] && gateway_helper_found=1
         entries=$((entries + 1))
@@ -256,7 +296,11 @@ preflight_control_plane() {
     entries=$((entries + 1))
   done < "$CONTROL_PLANE_MANIFEST"
 
-  if (( entries == 0 || deploy_helper_found == 0 || gateway_helper_found == 0 )); then
+  if (( entries == 0 || deploy_helper_found == 0 )); then
+    log_error "[preflight] control-plane manifest is incomplete"
+    return 1
+  fi
+  if [[ "$host_role" != "app" && "$gateway_helper_found" -eq 0 ]]; then
     log_error "[preflight] control-plane manifest is incomplete"
     return 1
   fi
@@ -264,7 +308,11 @@ preflight_control_plane() {
     log_error "[preflight] installed control-plane target contract failed privileged verification"
     return 1
   fi
-  if [[ ! -x "$DEPLOY_ROOT_HELPER" || ! -x "$GATEWAY_CONTROL_HELPER" ]]; then
+  if [[ ! -x "$DEPLOY_ROOT_HELPER" ]]; then
+    log_error "[preflight] required installed control-plane helper is unavailable"
+    return 1
+  fi
+  if [[ "$host_role" != "app" && ! -x "$GATEWAY_CONTROL_HELPER" ]]; then
     log_error "[preflight] required installed control-plane helper is unavailable"
     return 1
   fi
@@ -308,12 +356,61 @@ sync_scheduled_units() {
   log_success "Scheduled units match the GitHub main tip allowlist"
 }
 
+# The Caddyfile was the one release artifact no deploy ever shipped. Editing
+# cloud/caddy/Caddyfile, merging it and watching CI go green published nothing,
+# so the repo and /etc/caddy silently diverged until someone ran publish-caddy
+# by hand. It cost two incidents on 2026-08-29: the assistant 504 fix
+# (response_header_timeout on /api/assistant) and the headlines websocket
+# dialling `localhost:8766` when the hub listens on 127.0.0.1 only, so Caddy
+# tried ::1 first and never reached it. Both fixes merged and neither reached
+# the edge. The helper validates the config before it installs and reloads
+# rather than restarts, so a bad Caddyfile fails here instead of taking the
+# edge down; a failure warns like the unit sync rather than failing a release
+# that is already serving.
+edge_config_publish_is_granted() {
+  sudo -n -l -- "$DEPLOY_ROOT_HELPER" publish-caddy >/dev/null 2>&1
+}
+
+publish_edge_config() {
+  if ! edge_config_publish_is_granted; then
+    log_warn "Caddy publish is not granted yet; run cloud/scripts/bootstrap-control-plane.sh once as root"
+    return 0
+  fi
+  if ! sudo "$DEPLOY_ROOT_HELPER" publish-caddy; then
+    log_error "Caddy publish failed"
+    return 1
+  fi
+  log_success "Edge config matches cloud/caddy/Caddyfile"
+}
+
+# Confirm the target release's exact app image pair BEFORE teardown, while the
+# current release still serves. The gated prepull job normally makes this a
+# fast local check; a miss retries both pulls synchronously. A moving fallback
+# tag is version skew, so any failure aborts before services are stopped.
+prepull_app_images() {
+  local requested_sha="$1"
+  if ! sudo -n -l -- "$APP_RUNTIME_HELPER" pull "$requested_sha" >/dev/null 2>&1; then
+    log_error "App image prepull is not granted; refusing teardown"
+    return 1
+  fi
+  log_info "Verifying exact app images for ${requested_sha:0:7} while the current release still serves..."
+  if ! timeout "$APP_IMAGE_PREPULL_TIMEOUT" sudo -n "$APP_RUNTIME_HELPER" pull "$requested_sha"; then
+    log_error "App image prepull failed; refusing teardown"
+    return 1
+  fi
+  log_success "Exact app image pair is local for ${requested_sha:0:7}"
+  return 0
+}
+
 refresh_control_plane() {
-  if ! sudo -n -l -- "$DEPLOY_ROOT_HELPER" refresh-control-plane >/dev/null 2>&1; then
+  local verb="refresh-control-plane"
+  if sudo -n -l -- "$DEPLOY_ROOT_HELPER" refresh-control-plane-privileged >/dev/null 2>&1; then
+    verb="refresh-control-plane-privileged"
+  elif ! sudo -n -l -- "$DEPLOY_ROOT_HELPER" refresh-control-plane >/dev/null 2>&1; then
     log_warn "Control-plane refresh is not granted yet; run cloud/scripts/bootstrap-control-plane.sh once as root"
     return 0
   fi
-  if ! sudo "$DEPLOY_ROOT_HELPER" refresh-control-plane; then
+  if ! sudo "$DEPLOY_ROOT_HELPER" "$verb"; then
     log_error "Control-plane refresh failed"
     return 1
   fi
@@ -571,6 +668,43 @@ should_rebuild_next() {
   [[ -n "$changed" ]]
 }
 
+# The gated node image already contains the production Next build. Prestaging
+# may reuse it instead of compiling the same SHA again, but only when the host
+# can prove that this release will actually run that image. Every check fails
+# closed to the host compile so manual/fallback deploys and control-plane drift
+# retain the established artifact path.
+container_node_image_replaces_next_compile() {
+  local release_dir="$1"
+  local target_sha target_dropin dropin_paths need_reload unit_environment exec_start
+
+  [[ "${RADON_DEPLOY_USE_NODE_IMAGE_BUILD:-0}" == "1" ]] || return 1
+  target_sha="$(git -C "$release_dir" rev-parse HEAD 2>/dev/null)" || return 1
+  [[ "$target_sha" =~ ^[0-9a-f]{40}$ ]] || return 1
+
+  target_dropin="${release_dir}/cloud/services/radon-nextjs.service.d/runtime-container.conf"
+  [[ -f "$target_dropin" && ! -L "$target_dropin" ]] || return 1
+  [[ -f "$NEXT_RUNTIME_DROPIN" && ! -L "$NEXT_RUNTIME_DROPIN" ]] || return 1
+  cmp -s "$target_dropin" "$NEXT_RUNTIME_DROPIN" || return 1
+  grep -qxF 'Environment=RADON_RUNTIME=container' "$target_dropin" || return 1
+  grep -qxF 'ExecStart=/usr/local/sbin/radon-app-runtime run %n' "$target_dropin" || return 1
+  [[ -f "${release_dir}/web/.next/BUILD_ID" ]] || return 1
+
+  [[ -x "$SYSTEMCTL" ]] || return 1
+  dropin_paths="$($SYSTEMCTL show radon-nextjs.service --property=DropInPaths --value 2>/dev/null)" || return 1
+  grep -qwF -- "$NEXT_RUNTIME_DROPIN" <<< "$dropin_paths" || return 1
+  need_reload="$($SYSTEMCTL show radon-nextjs.service --property=NeedDaemonReload --value 2>/dev/null)" || return 1
+  [[ "$need_reload" == "no" ]] || return 1
+  unit_environment="$($SYSTEMCTL show radon-nextjs.service --property=Environment --value 2>/dev/null)" || return 1
+  grep -qwF 'RADON_RUNTIME=container' <<< "$unit_environment" || return 1
+  exec_start="$($SYSTEMCTL show radon-nextjs.service --property=ExecStart --value 2>/dev/null)" || return 1
+  grep -qF '/usr/local/sbin/radon-app-runtime run' <<< "$exec_start" || return 1
+
+  # This proves the immutable build artifact is present before host compile is
+  # skipped. It shares the exact pull verb with the parallel prepull job; the
+  # deploy repeats a fast local inspection before any service is stopped.
+  prepull_app_images "$target_sha" || return 1
+}
+
 seed_staged_node_modules() {
   local release_dir="$1"
   local live="${RADON_DIR}"
@@ -683,7 +817,11 @@ build_nextjs_at() {
       fi
     fi
     if should_rebuild_next "$release_dir"; then
-      run_with_cloud_env "$cloud_env" bun run build
+      if container_node_image_replaces_next_compile "$release_dir"; then
+        log_info "Skipping next build; exact node image is the canonical production artifact"
+      else
+        run_with_cloud_env "$cloud_env" bun run build
+      fi
     else
       log_info "Skipping next build; web inputs unchanged and web/.next is seeded"
     fi
@@ -1008,6 +1146,8 @@ recover_pending_transition() {
       sudo "$DEPLOY_ROOT_HELPER" commit-transition || return 1
       sync_scheduled_units || log_warn \
         "Scheduled unit sync failed after a verified release; the next deploy will republish them"
+      publish_edge_config || log_warn \
+        "Caddy publish failed after a verified release; the next deploy will republish it"
       DEPLOY_RELEASE_UNVERIFIED=0
       finalize_release_artifacts "$JOURNAL_STAGE_DIR" "$JOURNAL_BACKUP_DIR"
       log_success "Finalized previously verified release ${JOURNAL_REQUESTED_SHA:0:7}"
@@ -1170,7 +1310,16 @@ restart_services() {
       recover_pending_transition || true
       return "$status"
     fi
-    refresh_control_plane || return 1
+    # This sits between stop_ and start_services_after_transition, so ANY
+    # non-zero return here used to leave all five app units down with no path
+    # back -- including exit 66 on a rollback to a checkout that predates the
+    # container drop-ins, and exit 75 on an in-flight Gateway 2FA transition.
+    # Bring the tier back before propagating. R-380.
+    if ! refresh_control_plane; then
+      log_error "Control-plane refresh failed; restarting the app tier before aborting"
+      start_services_after_transition
+      return 1
+    fi
   fi
   start_services_after_transition
   # R-094: this used to run while the app tier was down. 32 timers in
@@ -1473,7 +1622,19 @@ rollback() {
     exit 3
   fi
 
-  log_error "Rollback complete. Previous release ${prev_commit} passed the deploy gate."
+  # T-254: the live gate above proves the restored release SERVES; it says
+  # nothing about whether that SHA ever cleared its own release gate. A SHA
+  # whose ci.yml concluded `failure` never reaches a deploy, so it never gets a
+  # green marker -- the marker is the on-host record of "this SHA passed". Read
+  # it rather than a GitHub API call: the rollback runs on the VPS, where the
+  # network or a token may be unavailable, and a rollback that refuses to
+  # finish strands production. Report honestly, always complete.
+  if green_marker_matches "$prev_commit"; then
+    log_error "Rollback complete. Previous release ${prev_commit} passed the deploy gate."
+  else
+    log_error "Rollback complete, but ${prev_commit} has no green deploy-gate record on this host."
+    log_error "Its own CI gate may never have passed. Production is serving an UNVERIFIED release; verify it manually."
+  fi
   exit 1
 }
 
@@ -1494,6 +1655,14 @@ main() {
   fi
 
   if ! preflight_control_plane; then
+    if [[ "${RADON_DEPLOY_STAGE:-0}" == "1" ]]; then
+      # The deploy job runs `radon-deploy-root sync-control-plane` before its
+      # own deploy.sh; prestage is best-effort and must not go red for a
+      # bundle that job will install minutes later. R-430.
+      log_warn "Installed control plane is not ready for this release; skipping prestage (the deploy job syncs it)"
+      trap - TERM INT HUP
+      return 0
+    fi
     log_error "Aborting deploy: installed control plane is not ready for this release."
     return 1
   fi
@@ -1535,6 +1704,8 @@ main() {
     if deploy_gate; then
       sync_scheduled_units || log_warn \
         "Scheduled unit sync failed on an already-green release; the next deploy will republish them"
+      publish_edge_config || log_warn \
+        "Caddy publish failed on an already-green release; the next deploy will republish it"
       trap - TERM INT HUP
       log_success "Deploy already green: $(short_log)"
       return 0
@@ -1569,6 +1740,8 @@ main() {
     build_staged_release "$requested_sha"
   fi
 
+  prepull_app_images "$requested_sha"
+
   log_info "Promoting staged artifacts and restarting services..."
   restart_services "$requested_sha" "$prev_commit"
 
@@ -1589,6 +1762,8 @@ main() {
     # carry on; the next deploy publishes the units.
     sync_scheduled_units || log_warn \
       "Scheduled unit sync failed after a verified release; the next deploy will republish them"
+    publish_edge_config || log_warn \
+      "Caddy publish failed after a verified release; the next deploy will republish it"
     DEPLOY_RELEASE_UNVERIFIED=0
     finalize_release_artifacts
   fi
@@ -1744,6 +1919,18 @@ supervise_deploy_command() {
       exec 9>&-
       return 76
     fi
+  fi
+
+  # Recovery-only pass. The deploy job runs this BEFORE sync-control-plane:
+  # bootstrap refuses while a transition journal is pending, and a journal
+  # left by a failed deploy was only ever recovered here, after the sync had
+  # already given up (run 33266012501: six refusals, then preflight aborted
+  # on the very control-plane change the sync would have installed). R-430.
+  if [[ "${RADON_DEPLOY_RECOVER_ONLY:-0}" == "1" ]]; then
+    log_info "Recovery pass complete; no deploy requested"
+    trap - TERM INT HUP
+    exec 9>&-
+    return 0
   fi
 
   local exit_code=0

@@ -21,13 +21,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-ALL_NAMES=(next ib api scraper)
+ALL_NAMES=(next ib api scraper headlines)
 ONLY=""
 PROFILE="${RADON_DEV_PROFILE:-full}"
 
 usage() {
   cat <<EOF
-Usage: npm run dev [-- --only <next|ib|api|scraper>]
+Usage: npm run dev [-- --only <next|ib|api|scraper|headlines>]
 
   npm run dev                       Run all four services with full logs.
   npm run dev -- --only <name>      Show only that service's logs.
@@ -94,9 +94,10 @@ if [[ "$PROFILE" == "cloud-thin" ]]; then
 fi
 
 exec npx concurrently "${HIDE_ARGS[@]}" \
-  -n next,ib,api,scraper \
-  -c cyan,yellow,green,magenta \
+  -n next,ib,api,scraper,headlines \
+  -c cyan,yellow,green,magenta,white \
   "next dev" \
   "node ../scripts/ib_realtime_server.js" \
   "python3.13 -m uvicorn scripts.api.server:app --host 127.0.0.1 --port 8321 --reload --app-dir .. --reload-dir ../scripts" \
-  "node ../scripts/newsfeed/index.js"
+  "node ../scripts/newsfeed/index.js" \
+  "node ../scripts/mktnews/index.js --serve"

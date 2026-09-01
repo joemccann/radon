@@ -99,9 +99,12 @@ export interface OptionOrderRiskInput {
    * contract so the hook can project retained portfolio risk before treating
    * the order as a pure close. `estimatedPnl` is computed from cash flow minus
    * sunk basis. Used by close paths in OrderTab and InstrumentDetailModal.
+   * `entryCostDollars: null` means the held position has no aggregate basis
+   * (legs on disagreeing basis sources, T-315): still a pure close, but the
+   * ticket surfaces no realised figure.
    */
   closeOut?: {
-    entryCostDollars: number;
+    entryCostDollars: number | null;
     estimatedPnlLabel?: string;
   } | null;
   /**
@@ -185,10 +188,10 @@ export interface LinearOrderRiskInput {
   /**
    * Close-out economics. Required when the action is closing a held
    * position (SELL against LONG OR BUY against SHORT). Provides cost basis
-   * so the summary can report realised P&L.
+   * so the summary can report realised P&L (`null` basis → no figure).
    */
   closeOut?: {
-    entryCostDollars: number;
+    entryCostDollars: number | null;
     estimatedPnlLabel?: string;
   } | null;
 }
@@ -291,6 +294,32 @@ function brand(
 }
 
 type MarginImpact = NonNullable<OrderPresentationSummary["marginImpact"]>;
+
+/** Every numeric figure the confirm panel renders is a real number.
+ *
+ * `okToSubmit` gated on coverage alone, so a non-finite input (a blank Limit
+ * on a STP ticket reaching `netPremium` as NaN) armed Transmit on a risk
+ * verdict that reads `NaN` in every tile. Unbounded risk stays advisory —
+ * it is expressed as `maxLossUnbounded` with a `null` figure, not as a
+ * non-finite number. R-322.
+ */
+function summaryFiguresAreFinite(summary: OrderPresentationSummary): boolean {
+  const figures: unknown[] = [
+    summary.totalCost,
+    summary.maxGain,
+    summary.maxLoss,
+    summary.breakeven,
+    summary.estimatedPnl,
+    summary.marginImpact?.requirement,
+    summary.marginImpact?.availableBefore,
+    summary.marginImpact?.availableAfter,
+  ];
+  return figures.every(
+    (value) => typeof value !== "number" || Number.isFinite(value),
+  );
+}
+
+
 
 /**
  * Resolve the operator-visible margin baseline from the account summary.
@@ -683,10 +712,13 @@ export function useOrderRisk(
         const postCloseUndefinedRiskReason = retainedShortCallRiskAfterStockClose(input, portfolio);
         const hasPostCloseUndefinedRisk =
           postCloseUndefinedRiskReason != null && postCloseUndefinedRiskReason.length > 0;
+        const basis = input.closeOut.entryCostDollars;
         const pnl =
-          input.action === "SELL"
-            ? grossCash - input.closeOut.entryCostDollars
-            : input.closeOut.entryCostDollars - grossCash;
+          basis == null
+            ? null
+            : input.action === "SELL"
+              ? grossCash - basis
+              : basis - grossCash;
         const closeSummary: OrderPresentationSummary = {
           ...baseSummary,
           totalCost: grossCash,
@@ -712,7 +744,9 @@ export function useOrderRisk(
         return withCorrelation({
           summary: brand(closeSummary, coverageStatus, traceId),
           coverageStatus,
-          okToSubmit: true,
+          okToSubmit:
+            coverageStatus === "resolved"
+            && summaryFiguresAreFinite(closeSummary),
           coveringLegs: [],
         });
       }
@@ -739,8 +773,10 @@ export function useOrderRisk(
       };
 
       // Unbounded / undefined risk is advisory (Gate 1 warning), not a
-      // block — only unresolved coverage disables submit.
-      const okToSubmit = coverageStatus === "resolved";
+      // block — only unresolved coverage and a non-finite figure disable
+      // submit.
+      const okToSubmit =
+        coverageStatus === "resolved" && summaryFiguresAreFinite(resolved);
 
       return withCorrelation({
         summary: brand(resolved, coverageStatus, traceId),
@@ -777,7 +813,8 @@ export function useOrderRisk(
     // exposure before surfacing proceeds + realized P&L.
     if (opt.closeOut != null) {
       const proceeds = opt.totalCost ?? 0;
-      const pnl = proceeds - opt.closeOut.entryCostDollars;
+      const basis = opt.closeOut.entryCostDollars;
+      const pnl = basis == null ? null : proceeds - basis;
       const residualRisk = retainedOptionRiskAfterClose(opt, portfolio);
       const closeSummary: OrderPresentationSummary = {
         ...baseSummary,
@@ -800,7 +837,10 @@ export function useOrderRisk(
       return withCorrelation({
         summary: brand(closeSummary, coverageStatus, traceId),
         coverageStatus,
-        okToSubmit: coverageStatus === "resolved" && residualRisk == null,
+        okToSubmit:
+          coverageStatus === "resolved"
+          && residualRisk == null
+          && summaryFiguresAreFinite(closeSummary),
         coveringLegs: [],
       });
     }
@@ -844,8 +884,10 @@ export function useOrderRisk(
     };
 
     // Unbounded / undefined risk is advisory (Gate 1 warning), not a
-    // block — only unresolved coverage disables submit.
-    const okToSubmit = coverageStatus === "resolved";
+    // block — only unresolved coverage and a non-finite figure disable
+    // submit.
+    const okToSubmit =
+      coverageStatus === "resolved" && summaryFiguresAreFinite(resolved);
 
     return withCorrelation({
       summary: brand(resolved, coverageStatus, traceId),

@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>sFTP Flex: operator steps</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --canvas: #0a0f14;
+      --panel: #0f1519;
+      --raised: #151c22;
+      --grid: #1e293b;
+      --ink: #e2e8f0;
+      --muted: #94a3b8;
+      --dim: #64748b;
+      --signal: #05AD98;
+      --fault: #ef4444;
+      --warn: #d4a017;
+      --r: 4px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--canvas);
+      color: var(--ink);
+      font-family: Inter, system-ui, sans-serif;
+      font-size: 14px;
+      line-height: 1.45;
+    }
+    .wrap { max-width: 820px; margin: 0 auto; padding: 24px 16px 56px; }
+    h1 {
+      font-size: 13px; font-weight: 600; letter-spacing: 0.1em;
+      text-transform: uppercase; margin: 0 0 4px;
+    }
+    .sub { color: var(--muted); margin: 0 0 20px; font-size: 13px; }
+    .ban {
+      border: 1px solid var(--fault);
+      color: var(--fault);
+      border-radius: var(--r);
+      padding: 10px 12px;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 12px;
+      margin-bottom: 20px;
+    }
+    .step {
+      background: var(--panel);
+      border: 1px solid var(--grid);
+      border-radius: var(--r);
+      padding: 14px 16px;
+      margin-bottom: 10px;
+    }
+    .step.stop { border-color: var(--fault); }
+    .n {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--signal);
+      margin-bottom: 6px;
+    }
+    .step.stop .n { color: var(--fault); }
+    h2 { font-size: 15px; font-weight: 600; margin: 0 0 8px; }
+    ol, ul { margin: 0; padding-left: 18px; color: var(--muted); }
+    li { margin: 4px 0; }
+    strong { color: var(--ink); font-weight: 500; }
+    pre, code {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 12px;
+    }
+    pre {
+      background: var(--raised);
+      border: 1px solid var(--grid);
+      border-radius: var(--r);
+      padding: 10px 12px;
+      overflow-x: auto;
+      color: var(--ink);
+      margin: 8px 0 0;
+      white-space: pre-wrap;
+    }
+    a { color: var(--signal); }
+    .who {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--dim);
+      float: right;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>sFTP Flex. Operator steps.</h1>
+    <p class="sub">VPS is the SSH client. IBKR hosts sFTP. Queries 1442520 and 1422766 only. Install: docs/flex-sftp-setup.md. Timer on main. Empty outgoing ok through 2026-08-31, error from 2026-09-01.</p>
+    <div class="ban">Do not SendRequest. Embargo until 2026-08-28T13:58:28Z. Do not rotate IB_FLEX_TOKEN. Do not open an inbound port. Do not set IB_FLEX_FLOWS_QUERY_ID.</div>
+
+    <div class="step">
+      <div class="n">Step 1 <span class="who">you · Portal</span></div>
+      <h2>Prove both queries generate</h2>
+      <ol>
+        <li>Client Portal → Performance &amp; Reports → Flex Queries.</li>
+        <li><strong>Run</strong> Activity <code>1442520</code> (not SendRequest). XML. Confirm sections: NAV in Base, Cash Transactions, Transfers.</li>
+        <li><strong>Run</strong> Trade Confirmation <code>1422766</code>. Confirm Trades.</li>
+        <li>Screenshot section counts. If either Run fails, stop. Do not request delivery for that query.</li>
+      </ol>
+    </div>
+
+    <div class="step stop">
+      <div class="n">Step 2 · stop <span class="who">you · Portal</span></div>
+      <h2>Inventory current delivery</h2>
+      <ol>
+        <li>Same page → Flex Queries Delivery (gear) and Statements Delivery.</li>
+        <li>Write down every ticked report, method, encryption, destination email.</li>
+        <li><strong>If any report you still want in a human mailbox is enabled, do not set method to sFTP.</strong> One method for everything enabled. Use email Flex ingest instead, or disable those reports first.</li>
+      </ol>
+    </div>
+
+    <div class="step">
+      <div class="n">Step 3 <span class="who">VPS as radon</span></div>
+      <h2>Make keys on the VPS, not the laptop</h2>
+      <pre>sudo mkdir -p /var/lib/radon/flex-secrets
+sudo chown radon:radon /var/lib/radon/flex-secrets
+sudo chmod 0700 /var/lib/radon/flex-secrets
+
+# as radon
+ssh-keygen -t rsa -b 4096 -f /var/lib/radon/flex-secrets/ibkr_sftp -N '' -C 'radon-flex-sftp'
+gpg --homedir /var/lib/radon/flex-secrets/gnupg --batch --passphrase '' \
+  --quick-generate-key 'radon-flex &lt;flex@stmt.radon.run&gt;' rsa4096 cert,sign,encrypt never
+chmod 0600 /var/lib/radon/flex-secrets/ibkr_sftp
+chmod 0700 /var/lib/radon/flex-secrets/gnupg</pre>
+      <ol>
+        <li>Copy <code>ibkr_sftp.pub</code> and the PGP public key off-box.</li>
+        <li>Encrypted backup of the PGP <em>private</em> key to the laptop. Not git. Not MCP mail.</li>
+        <li>Measure VPS <strong>IPv4</strong> egress only: <code>curl -4 -s ifconfig.me</code>. Do not send AAAA.</li>
+      </ol>
+    </div>
+
+    <div class="step">
+      <div class="n">Step 4 <span class="who">you · email</span></div>
+      <h2>Ask IBKR for the right product</h2>
+      <p class="sub" style="margin-bottom:8px">To <code>filedelivery@interactivebrokers.com</code>. 1–2 business days.</p>
+      <pre>Account ID: &lt;IBKR account&gt;
+
+(A) Client Portal Flex Query delivery over IB-hosted sFTP.
+    We pull. We are not asking you to upload to us.
+
+    Queries: 1442520 (Activity, XML) and 1422766 (Trade Confirmation, XML).
+    Period: Last Business Day. Format: XML. PGP encryption requested.
+    Separate remote directories per query if possible.
+
+(B) Not reporting-integration, not EmployeeTrack, not acct_status, not master/sub.
+
+RSA public key: attached
+PGP public key: attached
+Egress IPv4 allowlist: &lt;VPS IPv4 only&gt;</pre>
+      <ol>
+        <li>If the reply names master/sub, reportingintegration@, or a data feed: <strong>refuse</strong>. Email ingest. No sFTP timer.</li>
+        <li>If it names Flex Queries / Statements and gives host, username, directory: continue.</li>
+      </ol>
+    </div>
+
+    <div class="step">
+      <div class="n">Step 5 <span class="who">code · parallel, no wait</span></div>
+      <h2>Ship ingest and kill SendRequest (does not wait on IBKR)</h2>
+      <ol>
+        <li>P1: <code>flex_deliveries</code>, TWR + journal <code>--from-file</code>, section classifier tests. Timer disabled.</li>
+        <li>P2: blotter GET-only. 404 <code>/journal/rehydrate</code> and FastAPI <code>/blotter</code>. Performance file-only. Grep allowlist on <code>gdcdyn</code> / <code>FlexReport(</code>.</li>
+        <li>Prove: fill while /orders is open, journal_sync row on GET within 300s. No SendRequest.</li>
+      </ol>
+    </div>
+
+    <div class="step">
+      <div class="n">Step 6 <span class="who">VPS after written grant</span></div>
+      <h2>Pin host key. First list-dir. IPv4 only.</h2>
+      <pre>cat &gt; /var/lib/radon/flex-secrets/ssh_config &lt;&lt;'EOF'
+Host ibkr-flex
+  HostName ftp2.interactivebrokers.com
+  User &lt;IBKR_SFTP_USER&gt;
+  Port 22
+  IdentityFile /var/lib/radon/flex-secrets/ibkr_sftp
+  IdentitiesOnly yes
+  AddressFamily inet
+  UserKnownHostsFile /var/lib/radon/flex-secrets/known_hosts
+  StrictHostKeyChecking yes
+EOF
+ssh-keyscan -4 -t rsa &lt;IBKR_SFTP_HOST&gt; &gt;&gt; /var/lib/radon/flex-secrets/known_hosts
+sftp -F /var/lib/radon/flex-secrets/ssh_config ibkr-flex
+# ls. Confirm 1442520 and 1422766 paths. Do not ingest yet.</pre>
+      <p class="sub" style="margin:8px 0 0">Host-key change later = fail closed. Do not <code>accept-new</code>.</p>
+    </div>
+
+    <div class="step stop">
+      <div class="n">Step 7 · stop <span class="who">you · Portal</span></div>
+      <h2>Enable delivery only after grant + empty-or-ok inventory</h2>
+      <ol>
+        <li>Flex Queries Delivery → method <strong>sFTP</strong> only if step 2 did not stop you.</li>
+        <li>Tick <strong>only</strong> 1442520 and 1422766. Untick every other Flex query.</li>
+        <li>Each query: Period <strong>Last Business Day</strong> (not Last 365 Days). Format XML. PGP if they enabled it.</li>
+        <li>Save. Do not create a third query. Do not set <code>IB_FLEX_FLOWS_QUERY_ID</code>.</li>
+      </ol>
+    </div>
+
+    <div class="step">
+      <div class="n">Step 8 <span class="who">VPS · Tue–Sat 07:30 ET</span></div>
+      <h2>Pull, decrypt, classify, ingest</h2>
+      <ol>
+        <li>Enable <code>radon-flex-pull.timer</code> only after a file is on the remote and P1/P2 are live.</li>
+        <li>Pull <code>*.gpg</code> → <code>/var/lib/radon/flex-inbox/</code> (0700/0600). Decrypt in memory.</li>
+        <li>1442520 iff NAV AND CashTransaction AND Transfers AND no Trade → cash_flow + TWR.</li>
+        <li>1422766 iff Trade AND no NAV → journal recon. Live blotter stays Gateway <code>journal_sync</code>.</li>
+        <li>Else: keep <code>.gpg</code>, error heartbeat. Empty dir: retry 08:30 list-dir. <strong>No SendRequest.</strong></li>
+      </ol>
+    </div>
+
+    <div class="step">
+      <div class="n">Step 9 <span class="who">after embargo</span></div>
+      <h2>Dual-run, then demote</h2>
+      <ol>
+        <li>Until <code>2026-08-28T13:58:28Z</code>: compare sFTP file vs Portal Run <code>--from-file</code>. Never SendRequest.</li>
+        <li>First allowed SendRequest recon: <strong>Sun 2026-08-30</strong>, one query, <code>raise_if_blocked()</code> first, and only if <code>is_blocked()</code> is false.</li>
+        <li>Weekday SendRequest = 0. Token stays for that Sunday job only.</li>
+      </ol>
+    </div>
+
+    <div class="step stop">
+      <div class="n">Stops</div>
+      <ul>
+        <li>Grant is reporting-integration / master-sub → refuse. Email ingest.</li>
+        <li>Human mailbox still needs a statement → do not flip method to sFTP.</li>
+        <li>Portal Run fails → do not deliver that query.</li>
+        <li>Ambiguous XML, host-key change, PGP fail, IPv6, 365-day nightly file → fail closed.</li>
+        <li><code>/orders</code> still POSTs rehydrate → P2 not done. Do not enable the timer.</li>
+      </ul>
+    </div>
+  </div>
+</body>
+</html>

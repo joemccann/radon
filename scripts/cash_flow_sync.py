@@ -71,6 +71,7 @@ Throttle handling:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -124,6 +125,10 @@ EXIT_FLEX_LOCKOUT = 15
 # deadline. It exited 15 like a real lockout, and the daemon handler mapped
 # 15 straight back to record_lockout — every arming path extended the outage.
 EXIT_FLEX_PREFLIGHT_EMBARGO = 16
+# A run with no statement source did no work. Distinct from EXIT_OK so the
+# 25h cash-flow-sync freshness window is not held green by a nightly no-op,
+# and distinct from the error codes because nothing failed. R-328.
+EXIT_FLEX_SEND_DISABLED = 17
 
 
 def _classify(raw_type: str, amount: float) -> str:
@@ -426,19 +431,47 @@ def parse_cash_transactions(xml_text: str) -> list[dict[str, Any]]:
     Lets a saved statement be replayed after a throttle embargo, and makes
     the parse rules testable without ever hitting the Flex Web Service.
 
-    Two rows are dropped:
+    Two CashTransaction rows are dropped:
       * no `transactionID` — IBKR emits per-day aggregate rows alongside the
         detail rows they summarize (2026-06-24 carries -42,000 and -60,000
         details plus a -102,000 aggregate). Keeping them double-counts.
       * `amount` of exactly zero — nothing moved.
 
-    Rows sharing a `transactionID` are all kept; IBKR genuinely reuses ids
-    across distinct transactions.
+    Cash `<Transfer>` rows (`assetCategory=CASH`, non-zero `cashTransfer`)
+    become Deposit/Withdrawal. Securities ACATS with cash 0 are not cash
+    flows (TWR already counts them as external flow).
+
+    Rows sharing a `transactionID` are all kept. The first keeps that id;
+    later ones get `{transactionID}#{n}` so upsert cannot last-write-wins
+    the extra amounts (2026-07-06 interest trio: $38.18).
 
     Returns a list of dicts ready to feed `upsert_cash_flow_rows`.
     """
     out: list[dict[str, Any]] = []
     root = ET.fromstring(xml_text)
+    # First pass: which transactionIDs are carried by more than one row. Only
+    # those need disambiguating, and knowing it up front keeps the id a pure
+    # function of the row's own content rather than of its position. R-329.
+    counts: dict[str, int] = {}
+    cash_txn_ids: set[str] = set()
+    for ct in root.findall(".//CashTransaction"):
+        tid = (ct.get("transactionID") or "").strip()
+        if tid and float(ct.get("amount") or 0.0) != 0.0:
+            counts[tid] = counts.get(tid, 0) + 1
+            cash_txn_ids.add(tid)
+    for node in root.findall(".//Transfer"):
+        tid = _cash_transfer_id_and_amount(node)[0]
+        # A Transfer sharing a transactionID with a CashTransaction is the SAME
+        # movement described twice: the NAV query (1442520) carries both
+        # sections in one document, so this is the expected shape. Counting it
+        # here marked the id `duplicated` and guaranteed the divergent-suffix
+        # path — the Transfer's `raw_type` is `Transfer:<type>:<direction>`
+        # against the CashTransaction's bare IBKR `type`, so the two hashed to
+        # different ids and BOTH were upserted, doubling external capital flow
+        # and the TWR denominator. R-390.
+        if tid and tid not in cash_txn_ids:
+            counts[tid] = counts.get(tid, 0) + 1
+    duplicated = {tid for tid, n in counts.items() if n > 1}
     for ct in root.findall(".//CashTransaction"):
         txn_id = (ct.get("transactionID") or "").strip()
         if not txn_id:
@@ -448,16 +481,104 @@ def parse_cash_transactions(xml_text: str) -> list[dict[str, Any]]:
             continue
         raw_type = (ct.get("type") or "").strip()
         date_str = _normalize_date(ct.get("reportDate") or ct.get("dateTime") or "")
+        description = (ct.get("description") or "").strip() or None
+        # R-329: the suffix used to be the row's DOCUMENT POSITION
+        # (`txn_id if occurrence == 0 else f"{txn_id}#{occurrence}"`), so the
+        # id of a given economic row moved whenever IBKR reissued the
+        # statement with a sibling dropped, reordered, or a row inserted
+        # ahead. `upsert_cash_flow_rows` is insert/update-only with no delete
+        # pass, so the stale id survived as a phantom row and the cash-flow
+        # total was overstated. Keying the suffix on the row's own CONTENT
+        # makes the same economics map to the same id every time.
+        unique_id = _disambiguated_id(
+            txn_id, raw_type, amt, date_str, description, duplicated
+        )
         out.append({
-            "id": txn_id,
+            "id": unique_id,
             "date": date_str,
             "type": _classify(raw_type, amt),
             "amount": amt,
             "currency": (ct.get("currency") or "USD").upper(),
-            "description": (ct.get("description") or "").strip() or None,
+            "description": description,
             "raw_type": raw_type or None,
         })
+    for node in root.findall(".//Transfer"):
+        # The CashTransaction is the canonical booking for a shared id; the
+        # Transfer is the same money described from the other side. R-390.
+        if _cash_transfer_id_and_amount(node)[0] in cash_txn_ids:
+            continue
+        row = _cash_transfer_row(node, duplicated)
+        if row is not None:
+            out.append(row)
     return out
+
+
+def _disambiguated_id(
+    txn_id: str,
+    raw_type: str,
+    amount: float,
+    date_str: str,
+    description: str | None,
+    duplicated: set[str],
+) -> str:
+    """A stable id for one of several rows sharing a `transactionID`.
+
+    IBKR really does issue one transactionID per posting batch with one row
+    per sub-category, so the id alone is not unique. A row whose id appears
+    ONCE in the statement keeps the raw IBKR id — the overwhelmingly common
+    case, and changing it would rewrite every existing key for nothing.
+
+    Every row of a duplicated id is suffixed with a short hash of its own
+    content, INCLUDING the first: "first keeps the raw id" is still an ordinal
+    rule, so a row inserted ahead of the trio would take the unsuffixed id and
+    push the original onto a hash. Suffixing all of them makes the mapping a
+    pure function of the row's economics, independent of how many siblings
+    there are or what order they arrive in. R-329.
+
+    Membership of `duplicated` is computed in a first pass over the whole
+    document, so it cannot depend on position either.
+    """
+    if txn_id not in duplicated:
+        return txn_id
+    fingerprint = "|".join((raw_type, f"{amount!r}", date_str, description or ""))
+    digest = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()[:12]
+    return f"{txn_id}#{digest}"
+
+
+def _cash_transfer_id_and_amount(node: ET.Element) -> tuple[str, float]:
+    if (node.get("assetCategory") or "").strip().upper() != "CASH":
+        return "", 0.0
+    txn_id = (node.get("transactionID") or "").strip()
+    try:
+        amt = float((node.get("cashTransfer") or "0").replace(",", ""))
+    except ValueError:
+        return "", 0.0
+    if not txn_id or amt == 0.0:
+        return "", 0.0
+    return txn_id, amt
+
+
+def _cash_transfer_row(node: ET.Element, duplicated: set[str]) -> Optional[dict[str, Any]]:
+    """Cash ACATS / wires on <Transfer>. Securities ACATS (cash 0) stay out."""
+    txn_id, amt = _cash_transfer_id_and_amount(node)
+    if not txn_id:
+        return None
+    desc = (node.get("description") or "").strip()
+    if desc in ("", "--"):
+        desc = (node.get("type") or "ACATS").strip() or "ACATS"
+    xfer_type = (node.get("type") or "ACATS").strip() or "ACATS"
+    direction = (node.get("direction") or "").strip().upper()
+    raw_type = f"Transfer:{xfer_type}:{direction}" if direction else f"Transfer:{xfer_type}"
+    date_str = _normalize_date(node.get("reportDate") or node.get("dateTime") or "")
+    return {
+        "id": _disambiguated_id(txn_id, raw_type, amt, date_str, desc, duplicated),
+        "date": date_str,
+        "type": "Deposit" if amt > 0 else "Withdrawal",
+        "amount": amt,
+        "currency": (node.get("currency") or "USD").upper(),
+        "description": desc,
+        "raw_type": raw_type,
+    }
 
 
 def describe_statement_shape(xml_text: str) -> dict[str, Any]:
@@ -542,8 +663,8 @@ def statement_shape_warnings(shape: dict[str, Any]) -> list[str]:
         )
     if shape["has_transfers_section"]:
         warnings.append(
-            f"statement carries {shape['transfer_count']} <Transfer> row(s), which "
-            "cash_flows does not ingest — external capital flow is understated"
+            f"statement carries {shape['transfer_count']} <Transfer> row(s); "
+            "cash ACATS are cash_flows, securities ACATS are TWR-only"
         )
     if shape["non_usd_rows"]:
         others = [c for c in shape["currencies"] if c != "USD"]
@@ -703,11 +824,14 @@ def _record_token_lockout(code: str) -> bool:
     return True
 
 
-def _fetch_live_statement() -> str:
+def _fetch_live_statement(*, sendrequest: bool = False) -> str:
+    from utils.flex_send import assert_sendrequest_permitted
+
     token = os.environ.get("IB_FLEX_TOKEN")
     query_id = os.environ.get("IB_FLEX_NAV_QUERY_ID")
     if not token or not query_id:
         raise _ConfigError("IB_FLEX_TOKEN / IB_FLEX_NAV_QUERY_ID not configured")
+    assert_sendrequest_permitted(allowed=sendrequest)
     return fetch_statement_xml(token, query_id)
 
 
@@ -739,6 +863,11 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="YYYY-MM-DD",
         help="Only keep rows dated on or after this date.",
     )
+    parser.add_argument(
+        "--sendrequest",
+        action="store_true",
+        help="Permit a live Flex SendRequest (Sunday recon, after embargo).",
+    )
     return parser
 
 
@@ -751,7 +880,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             xml_text = _read_statement_file(args.from_file)
             source = args.from_file
         else:
-            xml_text = _fetch_live_statement()
+            xml_text = _fetch_live_statement(sendrequest=args.sendrequest)
             source = "flex"
     except _ConfigError as exc:
         print(f"ERR: {exc}", file=sys.stderr)
@@ -782,6 +911,15 @@ def main(argv: Optional[list[str]] = None) -> int:
             print(f"ERR: {exc}", file=sys.stderr)
             _emit_status("error", "preflight_embargo", code="1025", message=str(exc))
             return EXIT_FLEX_PREFLIGHT_EMBARGO
+        if type(exc).__name__ == "FlexSendDisabled":
+            # NOT `ok`, and NOT EXIT_OK. The scheduled daily unit passes
+            # neither --from-file nor --sendrequest, so this branch runs every
+            # night; reporting healthy meant the 25h `cash-flow-sync`
+            # staleness window could never fire — the exact stale-data
+            # condition it exists to catch. R-328.
+            print(f"SKIP: {exc}", file=sys.stderr)
+            _emit_status("skipped", "file_ingest_only", message=str(exc))
+            return EXIT_FLEX_SEND_DISABLED
         print(f"ERR: cash flow fetch failed: {exc}", file=sys.stderr)
         _emit_status("error", "transport", message=str(exc))
         return EXIT_STATEMENT_NOT_READY

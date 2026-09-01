@@ -112,6 +112,7 @@ readonly -a SOURCES=(
   scripts/ib-gateway-control.sh
   scripts/operator-radon.sh
   scripts/drift_audit.py
+  scripts/disk_cleanup.py
   scripts/radon-app-runtime.sh
   config/sudoers.d/radon-deploy
   config/sudoers.d/radon-monitor
@@ -123,6 +124,7 @@ readonly -a SOURCES=(
   services/radon-ib-watchdog.service
   services/radon-ib-watchdog.timer
   services/radon-ib-gateway.service
+  services/radon-ib-gateway-remote.service
   services/radon-api.service
   services/radon-monitor.service
   services/radon-relay.service
@@ -132,16 +134,24 @@ readonly -a SOURCES=(
   services/radon-refresh.timer
   services/radon-db-backup.service
   services/radon-db-backup.timer
+  services/radon-disk-cleanup.service
+  services/radon-disk-cleanup.timer
   services/radon-drift-audit.service
   services/radon-drift-audit.timer
   services/radon-nextjs-db-watchdog.service
   services/radon-nextjs-db-watchdog.timer
+  services/radon-api.service.d/runtime-container.conf
+  services/radon-nextjs.service.d/runtime-container.conf
+  services/radon-relay.service.d/runtime-container.conf
+  services/radon-monitor.service.d/runtime-container.conf
+  services/radon-newsfeed.service.d/runtime-container.conf
 )
 readonly -a LOGICAL_TARGETS=(
   /usr/local/sbin/radon-deploy-root
   /usr/local/bin/radon-ib-gateway-control
   /usr/local/bin/radon
   /usr/local/lib/radon/drift_audit.py
+  /usr/local/lib/radon/disk_cleanup.py
   /usr/local/sbin/radon-app-runtime
   /etc/sudoers.d/radon-deploy
   /etc/sudoers.d/radon-monitor
@@ -153,6 +163,7 @@ readonly -a LOGICAL_TARGETS=(
   /etc/systemd/system/radon-ib-watchdog.service
   /etc/systemd/system/radon-ib-watchdog.timer
   /etc/systemd/system/radon-ib-gateway.service
+  /etc/systemd/system/radon-ib-gateway-remote.service
   /etc/systemd/system/radon-api.service
   /etc/systemd/system/radon-monitor.service
   /etc/systemd/system/radon-relay.service
@@ -162,24 +173,34 @@ readonly -a LOGICAL_TARGETS=(
   /etc/systemd/system/radon-refresh.timer
   /etc/systemd/system/radon-db-backup.service
   /etc/systemd/system/radon-db-backup.timer
+  /etc/systemd/system/radon-disk-cleanup.service
+  /etc/systemd/system/radon-disk-cleanup.timer
   /etc/systemd/system/radon-drift-audit.service
   /etc/systemd/system/radon-drift-audit.timer
   /etc/systemd/system/radon-nextjs-db-watchdog.service
   /etc/systemd/system/radon-nextjs-db-watchdog.timer
+  /etc/systemd/system/radon-api.service.d/runtime-container.conf
+  /etc/systemd/system/radon-nextjs.service.d/runtime-container.conf
+  /etc/systemd/system/radon-relay.service.d/runtime-container.conf
+  /etc/systemd/system/radon-monitor.service.d/runtime-container.conf
+  /etc/systemd/system/radon-newsfeed.service.d/runtime-container.conf
 )
 readonly -a MODES=(
-  0755 0755 0755 0644 0755
+  0755 0755 0755 0644 0644 0755
   0440 0440 0440 0440
   0644
   0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644
-  0644 0644 0644
+  0644 0644 0644 0644 0644 0644
+  0644 0644 0644 0644 0644
 )
 readonly -a KINDS=(
-  shell shell shell python shell
+  shell shell shell python python shell
   sudoers sudoers sudoers sudoers
   polkit
-  systemd systemd systemd systemd systemd systemd systemd systemd systemd
-  systemd systemd systemd systemd systemd systemd systemd systemd systemd
+  systemd systemd systemd systemd systemd systemd systemd systemd systemd systemd
+  systemd systemd systemd systemd systemd systemd systemd systemd systemd systemd
+  systemd
+  dropin dropin dropin dropin dropin
 )
 
 [[ "${#SOURCES[@]}" -eq "${#LOGICAL_TARGETS[@]}" && \
@@ -225,24 +246,38 @@ STAGE_DIR=""
 BACKUP_DIR=""
 TRANSACTION_ACTIVE=0
 TRANSACTION_COMMITTED=0
-DAEMON_RELOAD_ATTEMPTED=0
+DAEMON_RELOAD_FAILED=0
 declare -a TRANSACTION_TARGETS=()
 declare -a BACKUP_EXISTED=()
 
+restore_target() {
+  local index="$1" target="$2"
+  rm -f -- "$target"
+  if [[ "${BACKUP_EXISTED[$index]:-0}" == "1" ]]; then
+    mkdir -p "$(dirname "$target")"
+    cp -a -- "$BACKUP_DIR/$index" "$target"
+  fi
+}
+
 rollback_bundle() {
-  local index target
-  for ((index=${#TRANSACTION_TARGETS[@]} - 1; index >= 0; index--)); do
-    target="${TRANSACTION_TARGETS[$index]}"
-    rm -f -- "$target"
-    if [[ "${BACKUP_EXISTED[$index]:-0}" == "1" ]]; then
-      mkdir -p "$(dirname "$target")"
-      cp -a -- "$BACKUP_DIR/$index" "$target"
-    fi
+  # READY_PATH is the last transaction target. Put it back LAST, so the root
+  # helper's KILL (5s after its TERM) landing mid-rollback leaves readiness
+  # withdrawn rather than published over a half-restored bundle.
+  local index ready_index=$(( ${#TRANSACTION_TARGETS[@]} - 1 ))
+  for ((index=ready_index - 1; index >= 0; index--)); do
+    restore_target "$index" "${TRANSACTION_TARGETS[$index]}"
   done
-  if [[ "$DAEMON_RELOAD_ATTEMPTED" == "1" ]]; then
-    # The in-memory unit graph may reflect the rejected bundle. A second
-    # reload is intentionally forbidden, so readiness remains withdrawn.
+  if [[ "$DAEMON_RELOAD_FAILED" == "1" ]]; then
+    # systemd refused the reload, so the in-memory unit graph is unknown. A
+    # second reload is intentionally forbidden, so readiness stays withdrawn.
     rm -f -- "$READY_PATH"
+  else
+    # Every other uncommitted exit (the root sync's deadline TERM, a readiness
+    # publish failure) restored the previous bundle above, and the previous
+    # marker describes that bundle. Leaving it withdrawn sent the next deploy
+    # job to the legacy runner on a host whose app units carry container
+    # drop-ins. R-440.
+    restore_target "$ready_index" "$READY_PATH"
   fi
 }
 
@@ -310,6 +345,41 @@ for index in "${!SOURCES[@]}"; do
       ;;
     systemd)
       SYSTEMD_CANDIDATES+=("$staged_path")
+      ;;
+    dropin)
+      # Kept byte-for-byte in step with dropin_body_is_valid() in
+      # deploy-root-helper.sh; test_rel133_control_plane_recovery.py pins the
+      # two gates against each other. R-394.
+      # NOT Type=simple only: R-391 moved the monitor and relay drop-ins to
+      # Type=notify + WatchdogSec because forcing simple made systemd stop
+      # requiring keepalives, and a relay with a dead socket sat
+      # `active (running)` forever. Both gates refused what the repo ships.
+      grep -qE '^Type=(simple|notify)$' "$staged_path" || \
+        die "drop-in must set Type=simple or Type=notify: $relative_source"
+      grep -q '^ExecStart=/usr/local/sbin/radon-app-runtime run %n$' "$staged_path" || \
+        die "drop-in must ExecStart radon-app-runtime: $relative_source"
+      grep -q '^ExecStartPre=$' "$staged_path" || \
+        die "drop-in must reset ExecStartPre: $relative_source"
+      grep -q 'radon-ib-gateway' "$staged_path" && \
+        die "drop-in must not mention radon-ib-gateway: $relative_source"
+      grep -qE '^Exec[A-Za-z]*=[^ ]*/home/radon' "$staged_path" && \
+        die "drop-in must not execute from /home/radon: $relative_source"
+      # A drop-in is only parsed by `systemd-analyze verify` beside its base
+      # unit, so stage the pair and hand the BASE unit to the verifier. Without
+      # this the artifacts that define five root-run units skipped verification
+      # entirely. R-394.
+      dropin_base_name="$(basename "$(dirname "$relative_source")" .d)"
+      dropin_base_source="$CLOUD_ROOT/services/$dropin_base_name"
+      if [[ -f "$dropin_base_source" && ! -L "$dropin_base_source" ]]; then
+        dropin_verify_dir="$STAGE_DIR/verify/$index"
+        mkdir -p "$dropin_verify_dir/${dropin_base_name}.d"
+        install -m 0644 "$dropin_base_source" "$dropin_verify_dir/$dropin_base_name"
+        install -m 0644 "$staged_path" \
+          "$dropin_verify_dir/${dropin_base_name}.d/$(basename "$relative_source")"
+        SYSTEMD_CANDIDATES+=("$dropin_verify_dir/$dropin_base_name")
+      else
+        die "drop-in has no base unit to verify against: $relative_source"
+      fi
       ;;
     *)
       die "unknown validator for: $relative_source"
@@ -453,8 +523,10 @@ cmp -s "$STAGED_MANIFEST" "$MANIFEST_PATH" || \
 mode_matches "$MANIFEST_PATH" 0644 && ownership_matches "$MANIFEST_PATH" || \
   die "installed control-plane manifest metadata verification failed"
 
-DAEMON_RELOAD_ATTEMPTED=1
-"$SYSTEMCTL_BIN" daemon-reload || die "systemd daemon reload failed"
+"$SYSTEMCTL_BIN" daemon-reload || {
+  DAEMON_RELOAD_FAILED=1
+  die "systemd daemon reload failed"
+}
 
 atomic_install "$STAGED_READY" "$READY_PATH" 0644 || \
   die "failed to publish control-plane readiness"

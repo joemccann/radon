@@ -83,6 +83,15 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // radon-nextjs-db-watchdog fires every 60s around the clock. Registered so
   // a wedged or never-firing watchdog is itself staleness-checked (REL-033).
   "nextjs-db-read": { open: 5 * MIN, extended: 5 * MIN, closed: 5 * MIN, category: "scheduled", requires_ib: false },
+  // R-325: three timer-backed units wrote no service_health row and sat in
+  // neither catalog. Windows mirror scripts/watchdog/services.py.
+  // radon-refresh.timer fires every 15 min through RTH (Mon-Fri 13..21 UTC);
+  // the job self-skips holidays and weekends, so `closed` absorbs the weekend.
+  "data-refresh": { open: 35 * MIN, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: false },
+  // radon-incident-watchdog.timer fires every 5 min around the clock.
+  "incident-watchdog": { open: 15 * MIN, extended: 15 * MIN, closed: 15 * MIN, category: "scheduled", requires_ib: false },
+  // radon-demo-mirror.timer fires weekdays at 21:45 UTC, once a day.
+  "demo-mirror": { open: 26 * HOUR, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
 
   // Market-hours-only IB feeds. The monitor daemon gates these on
   // `requires_market_hours=True`, so they only run 09:30–16:00 ET. The
@@ -138,6 +147,8 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // (portfolio_performance.py). Tue..Sat 07:30 ET; 26h open catches a missed
   // weekday run, 4d closed covers the Sat->Tue gap.
   "perf-twr": { open: 26 * HOUR, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
+  // radon-flex-pull.timer Tue..Sat 07:30/08:30 ET. Same gap as perf-twr.
+  "flex-pull": { open: 26 * HOUR, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
   "flex-token-check": { open: 25 * HOUR, extended: 25 * HOUR, closed: 25 * HOUR, category: "scheduled", requires_ib: false },
   // Token-wide Flex 1025 lockout sidecar (scripts/utils/flex_embargo.py).
   // Written only on lockout as error + next_attempt_at (7 days). Not a
@@ -218,11 +229,21 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // legitimate quarterly lag, never writer health. FRED HTTP only, no IB.
   "hhlev": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
+  // ``model-catalog``: radon-model-catalog.timer fires daily 03:10 UTC every
+  // calendar day, refreshing the chat picker's frontier model per LLM
+  // provider whose API key is present. Provider releases are not a market
+  // cadence, so weekend runs heartbeat like any other and a uniform 26h
+  // window applies. Provider HTTP only, no IB.
+  "model-catalog": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+
   // ``vixts`` — radon-vixts.timer fires daily 02:45 UTC every calendar day,
   // ten minutes behind radon-vixcor so the Cboe CDN hits stay staggered
   // (weekend and holiday runs are 304 heartbeats), so a uniform 26h window
   // matches its cor / vixcor / straddle siblings. Cboe CDN CSVs only — no IB.
   "vixts": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+
+  // ``dispersion`` — radon-dispersion.timer fires daily 22:20 UTC every calendar day (weekend runs are no-new-session heartbeats); the Yahoo rung keeps the writer alive through an IB outage, so requires_ib stays false. A sweep IB served nothing on is ``ok`` with last_error class ``ib_rung_dead`` (R-434).
+  "dispersion": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
   // ``trin`` — radon-trin.timer samples NYSE A/D + volume from IB every 5 minutes during RTH (3 missed cycles flag); off-hours the close heartbeat holds a day.
   // R-122: 24h closed against a Mon-Fri-only timer went stale every Saturday
@@ -241,13 +262,18 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // Turso skew_history transform only — no IB.
   "skew2d": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
-  // ``vol-cone`` — daily 20:45 UTC timer, UW-only, 26h open / 3d closed.
-  "vol-cone": { open: 26 * HOUR, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: false },
+  // ``vol-cone`` — daily 20:45 UTC Mon-Fri timer, UW-only, 26h open. The
+  // holiday-Monday heartbeat lands Fri 20:45 UTC + 72h + RandomizedDelaySec
+  // + run time, so the previous 3d closed window sat exactly on the longest
+  // healthy gap; 4d per the cash-flow-sync precedent (weekend + one
+  // holiday-drift day). /api/vol-cone shares this closed window as its
+  // serve budget, so tightening it re-opens the Sunday-night false outage.
+  "vol-cone": { open: 26 * HOUR, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
 
   // ``vol-cone-intraday`` — 15m live UW sample during ET trading hours; a
   // market-hours-only writer is silent by design off-session, so extended
-  // and closed carry the same 3d floor as its EOD parent.
-  "vol-cone-intraday": { open: 45 * MIN, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: false },
+  // and closed carry the same 4d floor as its EOD parent.
+  "vol-cone-intraday": { open: 45 * MIN, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
 
   // ``knowledge-ingest`` — hourly knowledge-base ingest oneshot
   // (scripts/knowledge/ingest.py via radon-knowledge.timer, 24/7; no
@@ -267,7 +293,9 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // ``gex-scan`` still flows through ``record_service_health`` only when
   // a user POSTs the scan endpoint, so it's on-demand for banner purposes.
   // Source: scripts/gex_scan.py uses UWClient only — no IB dependency.
-  "gex-scan": { open: 30 * MIN, extended: 30 * MIN, closed: 1 * DAY, category: "on-demand", requires_ib: false },
+  // SCHEDULED, not on-demand: data_refresh's 15-minute RTH driver runs it, so
+  // the same windows as its vcg-scan sibling. R-422.
+  "gex-scan": { open: 15 * MIN, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: false },
   "gamma-rotation-scan": { open: 30 * MIN, extended: 30 * MIN, closed: 1 * DAY, category: "on-demand", requires_ib: false },
   // ``breadth-scan`` is SCHEDULED, not on-demand: radon-breadth.timer fires
   // every 5 min across ET trading hours. It was catalogued on-demand, which
@@ -411,6 +439,14 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // we want.
   "ib-realtime-relay": { open: 5 * MIN, extended: 24 * HOUR, closed: 24 * HOUR, category: "scheduled", requires_ib: false },
 
+  // R-459: the MKTNews headlines hub (radon-mktnews.service, scripts/mktnews/
+  // hub.js) writes `ok` at most every 5 min while upstream frames flow (time
+  // heartbeats count) and `error` after 3 consecutive failed dials or 5 min
+  // of silence. The upstream is a 24/7 feed, so one uniform 15-min window
+  // (three missed heartbeats) applies in every market state. No row until
+  // the unit is installed: the watchdog reads no-row as dormant.
+  "mktnews-hub": { open: 15 * MIN, extended: 15 * MIN, closed: 15 * MIN, category: "scheduled", requires_ib: false },
+
   // ``deploy`` is NOT a writer — it's the deploy MARKER row upserted by
   // radon-cloud deploy.sh after each green post-deploy gate (DUR-11). The
   // triggers from migration 0011 mirror it into service_health_events so
@@ -429,6 +465,19 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // weekends are normal run days so no wide closed window is needed.
   // Reads the filesystem + systemctl only — no IB dependency.
   "config-drift": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+
+  // ``flow-refresh`` is the hourly RTH dark-pool flow driver
+  // (scripts/run_flow_refresh.sh via radon-flow-refresh.timer,
+  // Mon..Fri 09..16:00 ET). It has always written its own ok/error row
+  // through write_service_health_http; it was in NEITHER catalog, so nothing
+  // aged it. Surfaced by R-412's widened resolver.
+  "flow-refresh": { open: 3 * HOUR, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
+
+  // ``forecast-nightly`` is the Chronos-2 backfill + calibration
+  // (scripts/nightly_forecast.py via radon-forecast-nightly.timer, 07:00 UTC,
+  // 24/7). R-402: it wrote no row on any path, so a throwing backfill left the
+  // forecast tables silently not advancing with nothing at the edge saying so.
+  "forecast-nightly": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
   // ``db-backup`` is the nightly full Turso dump on the VPS (radon-cloud
   // scripts/db_backup.py via radon-db-backup.timer, 07:52 UTC, 24/7 —
@@ -534,6 +583,14 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // Polymarket only — no IB.
   "event-odds": { open: 7 * HOUR, extended: 7 * HOUR, closed: 4 * DAY, category: "scheduled", requires_ib: false },
 
+  // ``disk-cleanup`` is the WEEKLY root-filesystem reclaim on the VPS
+  // (cloud/scripts/disk_cleanup.py via radon-disk-cleanup.timer, Sun 03:20
+  // UTC) — stale deploy images, leaked release worktrees, npm/pip caches,
+  // journald. Heartbeats ok/error on every run. Uniform 8d window on the
+  // preset-rebalance weekly precedent: weekly cadence plus timer jitter, so
+  // one missed Sunday surfaces before the second. Docker + local disk only.
+  "disk-cleanup": { open: 8 * DAY, extended: 8 * DAY, closed: 8 * DAY, category: "scheduled", requires_ib: false },
+
 };
 
 const DEFAULT_WINDOW: Window = {
@@ -611,6 +668,8 @@ const RTH_ONLY_SERVICES = new Set([
   // only, so their open-window age must be measured from today's open.
   "theta-harvester",
   "strength-confirmation",
+  // Same shape: radon-flow-refresh.timer is Mon..Fri 09..16:00 ET.
+  "flow-refresh",
   "orders-sync",
   "portfolio-sync",
   "journal-sync",

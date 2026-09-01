@@ -10,6 +10,13 @@ import SpectralLoader from "@/components/SpectralLoader";
 import { useViewport } from "@/lib/useViewport";
 import DailyDarkPoolHistory from "@/components/flow-analysis/DailyDarkPoolHistory";
 import { flowReportErrorCopy } from "@/lib/flowReportError";
+import { flowReportAgeLabel } from "@/lib/flowReportStaleness";
+
+/** The scan the server actually runs is `--days 20` (server.py). Every piece
+ * of window copy derives from this or from the payload's own
+ * `lookback_days`; hardcoding it told the operator "5 sessions" during the
+ * scan and "20 Trading Days" when it landed. R-357. */
+export const DEFAULT_LOOKBACK_DAYS = 20;
 
 type Props = {
   ticker: string;
@@ -18,8 +25,9 @@ type Props = {
 export default function TickerFlowReport({ ticker }: Props) {
   const { data, status, error, refresh } = useTickerFlowReport(ticker);
   const verdict = useMemo(() => deriveVerdict(data), [data]);
-  const isAnalyzing = status === "loading" || status === "scanning";
+  const isAnalyzing = status === "loading" || status === "scanning" || status === "pending";
   const { isMobile, hasMounted } = useViewport();
+  const cachedAge = data && isServingCachedReport(status) ? flowReportAgeLabel(data) : null;
 
   if (hasMounted && isMobile) {
     return (
@@ -30,6 +38,7 @@ export default function TickerFlowReport({ ticker }: Props) {
         status={status}
         error={error}
         isAnalyzing={isAnalyzing}
+        cachedAge={cachedAge}
         onRefresh={refresh}
       />
     );
@@ -37,9 +46,9 @@ export default function TickerFlowReport({ ticker }: Props) {
 
   return (
     <div className="ticker-flow-report" data-testid="ticker-flow-report">
-      <SignalBadge ticker={ticker} verdict={verdict} status={status} error={error} onRefresh={refresh} />
+      <SignalBadge ticker={ticker} verdict={verdict} status={status} error={error} cachedAge={cachedAge} onRefresh={refresh} />
 
-      {error && (
+      {error && !cachedAge && (
         <div className="section">
           <div className="section-body">
             <div className="alert-item bearish" role="alert">{flowReportErrorCopy(error)}</div>
@@ -47,14 +56,31 @@ export default function TickerFlowReport({ ticker }: Props) {
         </div>
       )}
 
-      {isAnalyzing && !data && <AnalyzingPanel ticker={ticker} status={status} />}
+      {isAnalyzing && !data && (
+        <AnalyzingPanel
+          ticker={ticker}
+          status={status}
+          lookbackDays={DEFAULT_LOOKBACK_DAYS}
+        />
+      )}
 
-      {data && <ReportSections data={data} isAnalyzing={isAnalyzing} />}
+      {data && <ReportSections data={data} isAnalyzing={isAnalyzing} cachedAge={cachedAge} />}
     </div>
   );
 }
 
 type Verdict = ReturnType<typeof classifyFlowSignal>;
+
+type FlowReportStatus = ReturnType<typeof useTickerFlowReport>["status"];
+
+/** The hook preserves the previous report on any failed scan, and holds it
+ * while a server-side scan is still running (R-464), so these statuses render
+ * real figures that did not come from a completed scan. */
+function isServingCachedReport(status: FlowReportStatus): boolean {
+  return status === "error" || status === "stale" || status === "pending";
+}
+
+const PENDING_NOTE = "Scan still running on the server. Figures update when it lands.";
 
 /* ── Mobile ticker flow report ── */
 
@@ -80,14 +106,16 @@ function MobileTickerFlowReport({
   status,
   error,
   isAnalyzing,
+  cachedAge,
   onRefresh,
 }: {
   ticker: string;
   data: FlowReportData | null;
   verdict: Verdict | null;
-  status: ReturnType<typeof useTickerFlowReport>["status"];
+  status: FlowReportStatus;
   error: string | null;
   isAnalyzing: boolean;
+  cachedAge: string | null;
   onRefresh: () => void;
 }) {
   const [section, setSection] = useState<MobileFlowSection>("overview");
@@ -160,7 +188,7 @@ function MobileTickerFlowReport({
           )}
           {isAnalyzing && (
             <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--warn-text)" }}>
-              {status === "scanning" ? "ANALYZING" : "LOADING"}
+              {status === "loading" ? "LOADING" : "ANALYZING"}
             </span>
           )}
         </div>
@@ -185,13 +213,22 @@ function MobileTickerFlowReport({
           }}
         >
           <RefreshCw size={12} style={{ opacity: isAnalyzing ? 0.5 : 1 }} />
-          {status === "scanning" ? "Analyzing" : "Refresh"}
+          {status === "scanning" || status === "pending" ? "Analyzing" : "Refresh"}
         </button>
       </div>
 
-      {error && (
+      {error && !cachedAge && (
         <div style={{ padding: "8px 16px" }}>
           <div className="alert-item bearish" role="alert">{flowReportErrorCopy(error)}</div>
+        </div>
+      )}
+
+      {cachedAge && (
+        <div style={{ padding: "8px 16px" }}>
+          <div className="alert-item bearish" role="alert" data-testid="flow-stale-age">
+            Last good scan {cachedAge}. Every figure below is from that scan, not from live flow.
+            {status === "pending" ? ` ${PENDING_NOTE}` : ""}
+          </div>
         </div>
       )}
 
@@ -215,7 +252,7 @@ function MobileTickerFlowReport({
         {section === "overview" && (
           <>
             {!data && isAnalyzing && (
-              <SpectralLoader label={`Sampling ${ticker} flow · 5 sessions`} />
+              <SpectralLoader label={`Sampling ${ticker} flow · ${DEFAULT_LOOKBACK_DAYS} sessions`} />
             )}
             {verdict && (
               <SignalCard
@@ -393,19 +430,31 @@ function SignalBadge({
   verdict,
   status,
   error,
+  cachedAge,
   onRefresh,
 }: {
   ticker: string;
   verdict: Verdict | null;
-  status: ReturnType<typeof useTickerFlowReport>["status"];
+  status: FlowReportStatus;
   error: string | null;
+  cachedAge: string | null;
   onRefresh: () => void;
 }) {
   const direction = verdict?.direction ?? null;
   const meta = directionMeta(direction);
   const Icon = meta.Icon;
   const failed = status === "error" && !verdict;
-  const showVerdict = !failed && (status === "fresh" || status === "error" || status === "scanning");
+  const showVerdict =
+    !failed
+    && (status === "fresh" || status === "error" || status === "stale" || status === "scanning" || status === "pending");
+  // R-358: `showVerdict` deliberately includes `error`, and the hook preserves
+  // prior data on POST failure by design — so on any failure that left a
+  // cached verdict the hero rendered the direction label and rationale with
+  // NO staleness marking, identical to a fresh report. A 429 yielded a raw
+  // "Too Many Requests" strip above a hero still showing BULLISH with
+  // yesterday's rationale, and the `Retry-After` the route sets was read by
+  // nobody.
+  const servingStale = showVerdict && isServingCachedReport(status);
 
   return (
     <section className="section ticker-flow-hero">
@@ -418,11 +467,11 @@ function SignalBadge({
           type="button"
           className="ticker-flow-refresh"
           onClick={onRefresh}
-          disabled={status === "loading" || status === "scanning"}
+          disabled={status === "loading" || status === "scanning" || status === "pending"}
           aria-label="Refresh flow report"
         >
           <RefreshCw size={12} />
-          <span>{status === "scanning" ? "Analyzing" : "Refresh"}</span>
+          <span>{status === "scanning" || status === "pending" ? "Analyzing" : "Refresh"}</span>
         </button>
       </div>
 
@@ -432,6 +481,7 @@ function SignalBadge({
         aria-live="polite"
         data-direction={direction ?? "PENDING"}
         data-status={status}
+        data-stale={servingStale ? "true" : undefined}
       >
         <div className="ticker-flow-badge-icon">
           {showVerdict && verdict ? <Icon size={28} /> : <PulseDot />}
@@ -439,6 +489,11 @@ function SignalBadge({
         <div className="ticker-flow-badge-body">
           <div className="ticker-flow-badge-label">
             {failed ? "Scan failed" : showVerdict && verdict ? meta.label : `Analyzing ${ticker}`}
+            {servingStale && verdict && (
+              <span className="ticker-flow-badge-stale" data-testid="flow-hero-stale">
+                {" "}LAST GOOD SCAN{cachedAge ? ` · ${cachedAge}` : ""}
+              </span>
+            )}
           </div>
           <div className="ticker-flow-badge-rationale">
             {failed
@@ -447,6 +502,16 @@ function SignalBadge({
                 ? verdict.rationale
                 : "Reconstructing dark pool and options flow"}
           </div>
+          {servingStale && error && (
+            <div className="ticker-flow-badge-stale-note" data-testid="flow-hero-stale-note">
+              {flowReportErrorCopy(error)}
+            </div>
+          )}
+          {status === "pending" && (
+            <div className="ticker-flow-badge-stale-note" data-testid="flow-hero-pending">
+              {PENDING_NOTE}
+            </div>
+          )}
         </div>
         {showVerdict && verdict && (
           <div className="ticker-flow-badge-conviction">
@@ -463,20 +528,32 @@ function PulseDot() {
   return <span className="ticker-flow-pulse" aria-hidden="true" />;
 }
 
-function AnalyzingPanel({ ticker, status }: { ticker: string; status: string }) {
+function AnalyzingPanel({
+  ticker,
+  status,
+  lookbackDays,
+}: {
+  ticker: string;
+  status: string;
+  lookbackDays: number;
+}) {
   // The hero badge above already announces "Analyzing {ticker}". This panel
   // names the sample being taken, so the two read as one thought.
+  //
+  // The count is DERIVED, never hardcoded: the scan the server runs is
+  // `--days 20`, so "5 sessions" told the operator one sample size during the
+  // scan and the footer told them another when it landed. R-357.
   const label =
-    status === "scanning"
-      ? `Sampling ${ticker} flow · 5 sessions`
-      : `Loading cached ${ticker} report`;
+    status === "loading"
+      ? `Loading cached ${ticker} report`
+      : `Sampling ${ticker} flow · ${lookbackDays} sessions`;
   return (
     <section className="section">
       <div className="section-body">
         <div className="ticker-flow-analyzing">
           <SpectralLoader label={label} />
           <ul className="ticker-flow-analyzing-steps">
-            <li>Pulling dark pool prints across the last 5 trading sessions</li>
+            <li>Pulling dark pool prints across the last {lookbackDays} trading sessions</li>
             <li>Reconstructing buy / sell pressure from NBBO mid-cross</li>
             <li>Aggregating institutional options flow</li>
             <li>Synthesizing directional verdict</li>
@@ -487,12 +564,30 @@ function AnalyzingPanel({ ticker, status }: { ticker: string; status: string }) 
   );
 }
 
+/** The figures below this strip are real, and they are old: /flow-analysis/AMZN
+ * served a Jun 16 aggregate through late August because every live scan lost
+ * the general subprocess lane. The age and only the age — the hero carries WHY
+ * the scan did not complete, and this exists to outlive scrolling past it. */
+function CachedReportAge({ ageLabel }: { ageLabel: string }) {
+  return (
+    <section className="section">
+      <div className="section-body">
+        <div className="alert-item bearish" role="alert" data-testid="flow-stale-age">
+          Last good scan {ageLabel}. Every figure below is from that scan, not from live flow.
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function ReportSections({
   data,
   isAnalyzing,
+  cachedAge,
 }: {
   data: FlowReportData;
   isAnalyzing: boolean;
+  cachedAge: string | null;
 }) {
   const dpAgg = data.dark_pool?.aggregate ?? {};
   const buyRatio = dpAgg.dp_buy_ratio;
@@ -505,6 +600,8 @@ function ReportSections({
 
   return (
     <>
+      {cachedAge && <CachedReportAge ageLabel={cachedAge} />}
+
       <section className="section">
         <div className="section-header">
           <div className="section-title">Dark Pool Aggregate</div>
@@ -571,7 +668,7 @@ function ReportSections({
       <section className="section">
         <div className="report-meta">
           {data.fetched_at
-            ? `Report Generated: ${new Date(data.fetched_at).toLocaleString()} - Source: UW API - Dark Pool Lookback: ${data.lookback_days ?? 20} Trading Days`
+            ? `Report Generated: ${new Date(data.fetched_at).toLocaleString()} - Source: UW API - Dark Pool Lookback: ${data.lookback_days ?? DEFAULT_LOOKBACK_DAYS} Trading Days`
             : "No report timestamp available"}
           {isAnalyzing ? " - Refreshing in background..." : ""}
         </div>

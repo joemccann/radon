@@ -18,21 +18,37 @@ from urllib import error as urllib_error
 from urllib import request as urllib_request
 
 PUSHOVER_API_URL = "https://api.pushover.net/1/messages.json"
+# The only keys --env-file may import. Every wrapper passes
+# `$WEEKEND_ROOT/.env`, which on the runner carries more than Pushover;
+# importing the whole file handed IB_FLEX_TOKEN / TURSO_AUTH_TOKEN / CLERK_*
+# to the security loop's child process, against rail 5 (T-351).
+ENV_FILE_KEYS = ("PUSHOVER_USER", "PUSHOVER_TOKEN")
 
 
-def _load_env_file(path: Optional[str]) -> None:
+def _load_env_file(path: Optional[str]) -> Optional[str]:
+    """Overlay an env file; returns the reason it could NOT be read, else None.
+
+    REL-180 (R-508): a missing file or an absent python-dotenv used to return
+    silently, so "paged" and "no credentials" were indistinguishable.
+    """
     if not path:
-        return
+        return None
     env_path = Path(path)
     if not env_path.is_file():
-        return
+        return f"env file {env_path} not found"
     try:
         from dotenv import dotenv_values
     except ImportError:
-        return
-    for key, value in dotenv_values(env_path, interpolate=False).items():
-        if key and value is not None and key not in os.environ:
+        return "python-dotenv is not importable (is the venv on PATH?)"
+    values = dotenv_values(env_path, interpolate=False)
+    # T-351 (rail 5): import ONLY the Pushover keys. Every wrapper passes the
+    # shared `$WEEKEND_ROOT/.env`, which on the runner also carries
+    # IB_FLEX_TOKEN / TURSO_AUTH_TOKEN / CLERK_*.
+    for key in ENV_FILE_KEYS:
+        value = values.get(key)
+        if value is not None and key not in os.environ:
             os.environ[key] = value
+    return None
 
 
 def _creds() -> Optional[tuple[str, str]]:
@@ -108,14 +124,30 @@ def notify_weekend_phase(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="weekend_notify")
-    parser.add_argument("--loop", required=True, choices=["reliability", "testing"])
-    parser.add_argument("--phase", required=True, choices=["audit", "remediate"])
+    parser.add_argument(
+        "--loop", required=True, choices=["reliability", "testing", "ci-performance", "documentation", "security"]
+    )
+    # `prologue` is not decorative: every wrapper's report() is reachable with
+    # PHASE="prologue" — the marker refusal, the held-lock refusal and the ERR
+    # trap armed over the whole prologue all fire before begin_phase runs.
+    # Rejecting it exited 2 before the Pushover call, and the wrapper sends the
+    # page with `|| true`, so those failures posted an issue comment and never
+    # paged.
+    parser.add_argument(
+        "--phase", required=True, choices=["prologue", "audit", "remediate"]
+    )
     parser.add_argument("--status", required=True)
     parser.add_argument("--pr-url", default="")
     parser.add_argument("--detail", default="")
     parser.add_argument("--env-file", default=None)
     args = parser.parse_args(argv)
-    _load_env_file(args.env_file)
+    env_reason = _load_env_file(args.env_file)
+    if _creds() is None:
+        reason = "no PUSHOVER_USER/PUSHOVER_TOKEN in the environment"
+        if env_reason:
+            reason += f"; {env_reason}"
+        print(f"pushover skipped: {reason}", file=sys.stderr)
+        return 0
     error = notify_weekend_phase(
         loop=args.loop,
         phase=args.phase,

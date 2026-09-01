@@ -19,6 +19,8 @@ Owner specs for regime tabs and the cheap-wing scanner. Add a row here when a sp
 | hyad | `/regime/hyad` | `hy-ad` | [hyad.md](hyad.md) |
 | hhlev | `/regime/hhlev` | `hhlev` | [hhlev.md](hhlev.md) |
 | vixts | `/regime/vixts` | `vixts` | [vixts.md](vixts.md) |
+| dispersion | `/regime/dispersion` | `dispersion` | [dispersion.md](dispersion.md) |
+| streaks | `/regime/streaks` | on-demand, no timer | [streaks.md](streaks.md) |
 
 `divyield` oneshot `TimeoutStartSec=2100` covers a tarpitted Yahoo constituent sweep (`SWEEP_BUDGET_S=1800` plus one in-flight fetch). 900s SIGTERM'd the 2026-08-24 run.
 
@@ -33,7 +35,7 @@ builder `PREFILLED FROM VOL CONE` off that `src`. Any other `src` falls back to
 `PREFILLED FROM THETA HARVESTER`, so a new indicator that prefills the builder
 must add its own `src` value rather than reuse one.
 
-A price-series indicator whose every source (IB, UW, Yahoo) fails must re-serve
+A price-series indicator whose every source (IB, UW, Robinhood when configured, Yahoo) fails must re-serve
 its cache as `status: "stale_source"` with an `error` heartbeat, never a fresh `ok`
 over unconfirmed data: the watchdog gates purely on the 26h heartbeat window, so an
 `ok` here pins it open through a permanent outage. Pattern: `fetch_ivrank._serve_cached`,

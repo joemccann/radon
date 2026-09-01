@@ -6,8 +6,8 @@ import React from "react";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import LeapScanner from "../components/LeapScanner";
-import GarchConvergenceScanner from "../components/GarchConvergenceScanner";
+import LeapScanner, { leapOrderHref } from "../components/LeapScanner";
+import GarchConvergenceScanner, { garchOrderHref } from "../components/GarchConvergenceScanner";
 import type { GarchConvergenceData, LeapData } from "../lib/types";
 
 afterEach(() => {
@@ -15,7 +15,9 @@ afterEach(() => {
 });
 
 const leapData: LeapData = {
-  scan_time: "2026-07-02T14:00:00Z",
+  // Fresh: the TRADE BEST link is suppressed past the leap-scan freshness
+  // window, and these cases are about RANKING, not staleness. R-415.
+  scan_time: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
   min_gap: 5,
   results: [
     {
@@ -29,6 +31,17 @@ const leapData: LeapData = {
       leap_count: 8,
       best_gap: 13.7,
       is_mispriced: true,
+      best_leap: {
+        symbol: "NVDA270115C00210000",
+        expiry: "2027-01-15",
+        strike: 210,
+        right: "C",
+        iv: 28.4,
+        delta: 0.42,
+        gap: 13.7,
+        oi: 900,
+        volume: 12,
+      },
     },
     {
       ticker: "MSFT",
@@ -46,7 +59,7 @@ const leapData: LeapData = {
 };
 
 const garchData: GarchConvergenceData = {
-  scan_time: "2026-07-02T14:05:00Z",
+  scan_time: new Date(Date.now() - 25 * 60 * 1000).toISOString(),
   tickers: {},
   pairs: [
     {
@@ -75,8 +88,43 @@ const garchData: GarchConvergenceData = {
       expected_iv: null,
       expected_move: null,
     },
+    {
+      pair: ["TSM", "ASML"],
+      leader: "",
+      lagger: "",
+      divergence: 0,
+      lagger_hv_iv_gap: 0,
+      lagger_iv_rank: null,
+      signal: "",
+      gates_passed: false,
+      failing_gates: ["MISSING_DATA"],
+      expected_iv: null,
+      expected_move: null,
+    },
   ],
 };
+
+describe("leapOrderHref", () => {
+  it("deep-links the contract into the chain order builder", () => {
+    expect(leapOrderHref(leapData.results[0])).toBe(
+      "/NVDA?deck=c&expiry=2027-01-15&strikes=100&legs=BUY%3A1x210C&src=leap",
+    );
+  });
+
+  it("keeps fractional strikes intact", () => {
+    expect(
+      leapOrderHref({
+        ...leapData.results[0],
+        ticker: "spy",
+        best_leap: { ...leapData.results[0].best_leap!, strike: 612.5, right: "P" },
+      }),
+    ).toBe("/SPY?deck=c&expiry=2027-01-15&strikes=100&legs=BUY%3A1x612.5P&src=leap");
+  });
+
+  it("has no destination for a row without a contract", () => {
+    expect(leapOrderHref(leapData.results[1])).toBeNull();
+  });
+});
 
 describe("LeapScanner", () => {
   it("renders result rows with the headline gap and mispriced status", () => {
@@ -93,6 +141,63 @@ describe("LeapScanner", () => {
 
     fireEvent.click(within(section).getByRole("button", { name: /^scan$/i }));
     expect(onScan).toHaveBeenCalledTimes(1);
+  });
+
+  it("links the widest-gap mispriced row into the options order entry view", () => {
+    render(<LeapScanner data={leapData} />);
+
+    const section = screen.getByTestId("leap-scanner-section");
+    const best = within(section).getByTestId("leap-best-order-link");
+    expect(best.getAttribute("href")).toBe(
+      "/NVDA?deck=c&expiry=2027-01-15&strikes=100&legs=BUY%3A1x210C&src=leap",
+    );
+    expect(best.textContent).toContain("NVDA 210C");
+
+    const row = within(section).getByTestId("leap-order-link-NVDA");
+    expect(row.getAttribute("href")).toBe(
+      "/NVDA?deck=c&expiry=2027-01-15&strikes=100&legs=BUY%3A1x210C&src=leap",
+    );
+    expect(within(section).queryByTestId("leap-order-link-MSFT")).toBeNull();
+  });
+
+  it("picks the widest gap, not the first mispriced row", () => {
+    // R-388: ranking now reads the LINKED CONTRACT's own gap, not the group's
+    // `best_gap`, so the fixture raises both. `best_gap` alone described the
+    // delta bucket rather than the contract the button opens, which is how a
+    // ticker whose contract was worth 18 vol points lost the headline slot to
+    // one whose contract was worth 6.
+    const wider = {
+      ...leapData,
+      results: [
+        leapData.results[0],
+        {
+          ...leapData.results[0],
+          ticker: "CRM",
+          best_gap: 44.8,
+          best_leap: {
+            ...leapData.results[0].best_leap!,
+            strike: 260,
+            expiry: "2027-06-17",
+            gap: 44.8,
+          },
+        },
+      ],
+    };
+    render(<LeapScanner data={wider} />);
+    expect(
+      screen.getByTestId("leap-best-order-link").getAttribute("href"),
+    ).toBe("/CRM?deck=c&expiry=2027-06-17&strikes=100&legs=BUY%3A1x260C&src=leap");
+  });
+
+  it("omits the order action when the scan predates contract detail", () => {
+    const legacy = {
+      ...leapData,
+      results: leapData.results.map(({ best_leap: _ignored, ...rest }) => rest),
+    };
+    render(<LeapScanner data={legacy} />);
+    const section = screen.getByTestId("leap-scanner-section");
+    expect(within(section).queryByTestId("leap-best-order-link")).toBeNull();
+    expect(within(section).queryByTestId("leap-order-link-NVDA")).toBeNull();
   });
 
   it("renders the empty state when no scan is on file", () => {
@@ -166,9 +271,7 @@ describe("LeapScanner", () => {
     render(<LeapScanner data={three} />);
     const section = screen.getByTestId("leap-scanner-section");
     const tickers = () =>
-      within(section)
-        .getAllByRole("link")
-        .map((el) => el.textContent);
+      Array.from(section.querySelectorAll("tbody tr td:first-child a")).map((el) => el.textContent);
 
     expect(tickers()).toEqual(["NVDA", "AAPL", "MSFT"]);
     expect(within(section).getByRole("columnheader", { name: /best gap/i }).getAttribute("aria-sort")).toBe(
@@ -192,6 +295,26 @@ describe("LeapScanner", () => {
     expect(within(section).getByRole("columnheader", { name: /^status$/i }).getAttribute("aria-sort")).toBe(
       "ascending",
     );
+  });
+});
+
+describe("garchOrderHref", () => {
+  it("deep-links the lagger into the chain deck", () => {
+    expect(garchOrderHref(garchData.pairs[0])).toBe("/AMD?deck=c&src=garch");
+  });
+
+  it("uppercases and encodes the lagger", () => {
+    expect(garchOrderHref({ ...garchData.pairs[0], lagger: "brk.b" })).toBe(
+      "/BRK.B?deck=c&src=garch",
+    );
+  });
+
+  it("has no destination for a row that fails its gates", () => {
+    expect(garchOrderHref(garchData.pairs[1])).toBeNull();
+  });
+
+  it("has no destination for a row with no established lagger", () => {
+    expect(garchOrderHref(garchData.pairs[2])).toBeNull();
   });
 });
 
@@ -223,6 +346,20 @@ describe("GarchConvergenceScanner", () => {
     fireEvent.click(within(section).getByTestId("garch-filter-actionable"));
     expect(within(section).getByTestId("garch-row-NVDA-AMD")).toBeTruthy();
     expect(within(section).queryByTestId("garch-row-GOOGL-META")).toBeNull();
+  });
+
+  it("links an actionable lagger into the chain deck and leaves failed rows alone", () => {
+    render(<GarchConvergenceScanner data={garchData} />);
+    const section = screen.getByTestId("garch-scanner-section");
+
+    const link = within(section).getByTestId("garch-order-link-AMD");
+    expect(link.getAttribute("href")).toBe("/AMD?deck=c&src=garch");
+    expect(link.textContent).toBe("AMD");
+
+    expect(within(section).queryByTestId("garch-order-link-META")).toBeNull();
+    const failed = within(section).getByTestId("garch-row-GOOGL-META");
+    const failedLinks = Array.from(failed.querySelectorAll("a"));
+    expect(failedLinks.map((a) => a.getAttribute("href"))).toEqual(["/META"]);
   });
 
   it("renders the empty state when no scan is on file", () => {

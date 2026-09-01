@@ -7,6 +7,7 @@ Applies under `web/`. Mirrors `web/CLAUDE.md`; prefer the Claude file if it is n
 - Next.js 16 build uses `next build --experimental-build-mode=compile`.
 - `app/error.tsx`, `app/[ticker]/not-found.tsx`, and `app/global-error.tsx` must stay pure JSX with plain `<a>` links, no `next/link`, no `useEffect`, and no `globals.css`.
 - Every GET handler reading live disk state (`data/*.json`, `data/menthorq_cache/`) must export `dynamic = "force-dynamic"`.
+- New `app/api/**/route.ts(x)` files must `export const radonCapability` (usually GET `"read"`). Pin: `web/tests/assistant-catalog-pin.test.ts`. Chat catalog is derived from that pin plus `scripts/api/assistant_catalog.py`; freshness: `web/tests/assistant-catalog-freshness.test.ts`. Next-only routes also need `web/lib/assistant/nextLoaders.ts`.
 - Every client fetch hitting those routes must use `cache: "no-store"`. Contract test: `web/tests/api-routes-no-cache-contract.test.ts`.
 - Middleware runs in Edge runtime; no `node:*` imports in `web/middleware.ts`.
 - Use `RADON_AUTHLESS_TEST=1` for Playwright.

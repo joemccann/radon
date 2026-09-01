@@ -53,7 +53,7 @@ Sub-directory CLAUDE.md files auto-load when cwd is anywhere under that subtree.
 4. **API keys** in `.env` files. Never `~/.zshrc` unless fallback.
 5. **No raw hex in UI.** Use brand tokens. 4px max border-radius on panels.
 6. **No em dashes in user-facing copy.**
-7. **Yahoo is last resort.** Never make Yahoo the scheduled, primary, or only source for a series IB or UW can serve. 2FA, unattended timers, and "historical needs a gateway" do not skip IB or UW. Try IB, then UW, then Yahoo.
+7. **Yahoo is last resort.** Never make Yahoo the scheduled, primary, or only source for a series IB or UW can serve. 2FA, unattended timers, and "historical needs a gateway" do not skip IB or UW. Try IB, then UW, then Robinhood (read-only MCP, when configured), then Yahoo.
 
 ## ⛔ Four Gates — Sequential, No Exceptions
 
@@ -83,10 +83,12 @@ Any gate fails → stop. Name the gate.
 
 1. Interactive Brokers (TWS / Gateway) — real-time
 2. Unusual Whales (`$UW_TOKEN`) — dark pool, sweeps, alerts
-3. Yahoo Finance — **ABSOLUTE LAST RESORT**
-4. Web scrape — after Yahoo
+3. Cboe official index feeds — COR1M dashboard history, official VIX/VVIX daily closes. Other specialized official feeds (Treasury, FINRA) rank here when a script documents them as the source for that metric.
+4. Robinhood (official trading MCP, READ-ONLY; tokens in the 0600 file `$ROBINHOOD_MCP_TOKEN_FILE`, auto-refreshed — access tokens expire ~3 days) — quote/chain failover + retail-crowding overlay only. Never above IB, UW, or Cboe; execution stays on IB. No dark pool, OTC, sweeps, GEX, or vol surface; options are NBBO/last + prior-close only.
+5. Yahoo Finance — **ABSOLUTE LAST RESORT**
+6. Web scrape — after Yahoo
 
-Never make Yahoo the scheduled, primary, or only source for a series IB or UW can serve. Try IB every cycle. Skip the IB socket only when `/health` `auth_state` is set and not `authenticated`; then UW; then Yahoo. Specialized official feeds (Cboe, Treasury, FINRA) may sit ahead of Yahoo when a script documents them as the source for that metric. Clients live in `scripts/clients/`.
+Never make Yahoo the scheduled, primary, or only source for a series IB or UW can serve. Try IB every cycle. Skip the IB socket only when `/health` `auth_state` is set and not `authenticated`; then UW; then Robinhood (skipped cleanly when unconfigured); then Yahoo. Specialized official feeds (Cboe, Treasury, FINRA) may sit ahead of Robinhood and Yahoo when a script documents them as the source for that metric — the full order is IB > UW > Cboe > Robinhood > Yahoo. Clients live in `scripts/clients/`.
 
 ## Credentials
 
@@ -128,7 +130,7 @@ Both modes read/write the **same Turso DB** (`libsql://radon-joemccann.aws-us-we
 - `scripts/cloud.sh` → `RADON_MODE=hetzner`. Schedulers run as systemd on Hetzner (`radon-{api,monitor,relay,refresh,nextjs}`); laptop runs only Next.js + newsfeed. `app.radon.run` serves when laptop closed.
 - `scripts/local.sh` → `RADON_MODE=local`. Laptop launchd plists own all schedulers.
 
-**Auto-deploy on push to main.** `.github/workflows/ci.yml` runs the Vitest + pytest gate (including `cloud/tests`) then deploys on green: it SSHes to Hetzner, materializes an immutable `cloud/` runner from the release SHA under `~/.radon-deploy-runners/`, and runs that runner's `deploy.sh '$SHA'`. The deploy job remains bound to the GitHub Environment `Production` for deployment history, URL metadata, environment-scoped configuration, and a main-only deployment branch policy; it has no required-reviewer rule, so no manual approval is needed after the automated gates pass. Host secrets stay at `~/radon-cloud/.env` (`RADON_DEPLOY_ENV_FILE`). After root bootstrap publishes `/var/lib/radon/control-plane-ready`, legacy dual-checkout deploy is retired for new releases; pre-ready SHAs still use the compatibility path. Confirm: `gh run list --workflow=ci.yml --limit 1`. Migration/rollback: `docs/monorepo-cloud-migration.md`. Cutover lessons: `tasks/lessons.md` (2026-07-11). The deploy health-gates the relay restart: before tearing services down (while the current radon-api still serves `/health`), `wait_for_gateway_ready` confirms the IB gateway is authenticated + port_listening (bounded 60s, warn-and-proceed). The relay self-heals on reconnect and raises a `service_health` row (`ib-realtime-relay`) instead of looping silently on no-ticks.
+**Auto-deploy on push to main.** `.github/workflows/ci.yml` runs the Vitest + pytest gate (including `cloud/tests`) then deploys on green: it SSHes to Hetzner, materializes an immutable `cloud/` runner from the release SHA under `~/.radon-deploy-runners/`, and runs that runner's `deploy.sh '$SHA'`. The deploy job remains bound to the GitHub Environment `Production` for deployment history, URL metadata, environment-scoped configuration, and a main-only deployment branch policy; it has no required-reviewer rule, so no manual approval is needed after the automated gates pass. Host secrets stay at `~/radon-cloud/.env` (`RADON_DEPLOY_ENV_FILE`). After root bootstrap publishes `/var/lib/radon/control-plane-ready`, legacy dual-checkout deploy is retired for new releases; pre-ready SHAs still use the compatibility path. Before `deploy.sh`, the deploy job runs `cloud/scripts/sync-control-plane.sh` → `radon-deploy-root sync-control-plane`, which installs the GitHub-main-tip control-plane bundle (helper, sudoers, polkit, control-plane units, drop-ins) via that tip's own bootstrap, so control-plane edits and root hot-patches need no manual bootstrap (R-430, 2026-08-29). Confirm: `gh run list --workflow=ci.yml --limit 1`. Migration/rollback: `docs/monorepo-cloud-migration.md`. Cutover lessons: `tasks/lessons.md` (2026-07-11). The deploy health-gates the relay restart: before tearing services down (while the current radon-api still serves `/health`), `wait_for_gateway_ready` confirms the IB gateway is authenticated + port_listening (bounded 60s, warn-and-proceed). The relay self-heals on reconnect and raises a `service_health` row (`ib-realtime-relay`) instead of looping silently on no-ticks.
 
 Schema: `scripts/db/migrations/0001_init.sql`. Writers: `scripts/db/writer.{js,py}`. Routes prefer DB, fall back to disk.
 
@@ -186,17 +188,34 @@ Schema: `scripts/db/migrations/0001_init.sql`. Writers: `scripts/db/writer.{js,p
 
 ## Response Format
 
-**Answer only what was asked. Bulleted lists by default.**
+⛔ **This is a HARD FORMAT, not a style preference.** Every closing message uses this shape and nothing else:
 
-- No preamble, no recap of the request, no narration of what you are about to do.
-- **Bullets over prose.** Prose paragraphs only when a bullet genuinely cannot carry it.
-- **Ship the outcome, not the journey.** No "what surfaced", "worth noting", "interesting", "one thing you should know", "also found", "for the record", "lessons". If it is not the answer to the prompt, cut it.
-- No tangents about adjacent bugs, other sessions' work, test flake, or process observations unless they BLOCK the requested task — then one bullet, no story.
-- No self-narration of reasoning, corrections, or how hard something was.
-- Verification = one line of evidence (counts, status codes, SHAs). Not a transcript.
-- Don't restate what a diff already says.
-- Follow-ups: at most one line, only if genuinely actionable. Otherwise omit.
-- Length target: under ~150 words unless the user asked for depth.
+```
+**Done**
+- <one line per outcome, with its evidence inline: count, SHA, status code, path>
+
+**Next**
+- <one line per action the user must take, command first>
+```
+
+- **100 words max.** Over that, delete lines — do not compress prose. Only a direct request for depth ("explain", "why", "walk me through") lifts the cap.
+- **Bullets only.** No prose paragraph anywhere. One line per bullet. No sub-bullets.
+- **Omit `Next` entirely when there is nothing for the user to do.** Never pad it.
+- **Causes go in the commit message and the PR body, never in chat.** The user reads chat for state and next action; they read the PR for the story. If it explains WHY something broke, it does not belong here.
+
+**Banned outright** — these have all shipped in this repo and each one cost the user a re-read:
+
+| Banned | Instead |
+|---|---|
+| "Worth knowing…", "Worth noting…", "The sharpest find is…" | cut |
+| "Two things that changed…", "Correction to my earlier report…" | fix it in one bullet under Done, no narration |
+| A table or code block re-explaining a diagnosis | link the PR |
+| A paragraph offering follow-up work | one bullet under Next, or cut |
+| Restating what a commit message, PR body, or diff already says | cut |
+| Preamble, recap of the request, "I'll now…" | cut |
+
+- Verification is evidence, not a transcript: `8482 passed, 0 failed`, `e40107b4`, `30/30 gating green`. One fragment, inline.
+- Mid-task progress messages follow the same shape. Length creep in this repo has always started with "while that runs, here is what I found".
 
 ## Trade Output Discipline
 

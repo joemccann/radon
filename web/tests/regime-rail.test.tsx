@@ -14,6 +14,7 @@ import { join } from "path";
 import React from "react";
 import { render, cleanup, fireEvent, within } from "@testing-library/react";
 import {
+  FLAGGABLE_REGIME_TABS,
   REGIME_RAIL_GROUPS,
   REGIME_TABS,
   REGIME_TAB_LABEL,
@@ -21,6 +22,7 @@ import {
 } from "../lib/regimeRail";
 import type { VcgData } from "../lib/useVcg";
 import type { GexData } from "../lib/useGex";
+import { MISSING_DISPERSION, type DispersionData } from "../lib/dispersion";
 import RegimeRail from "../components/RegimeRail";
 
 const ROOT = join(__dirname, "..");
@@ -39,11 +41,11 @@ describe("REGIME_RAIL_GROUPS — grouped registry covers every tab exactly once"
     ]);
   });
 
-  it("flattens to all 26 regime tabs with no duplicates", () => {
-    expect(REGIME_TABS).toHaveLength(26);
-    expect(new Set(REGIME_TABS).size).toBe(26);
+  it("flattens to all 28 regime tabs with no duplicates", () => {
+    expect(REGIME_TABS).toHaveLength(28);
+    expect(new Set(REGIME_TABS).size).toBe(28);
     expect([...REGIME_TABS].sort()).toEqual(
-      ["cri", "vcg", "gex", "grg", "breadth", "trin", "divyield", "hyad", "hhlev", "bpi", "margin", "credit", "iei-hyg", "straddle", "cor", "vixcor", "vixts", "ivrank", "skew", "skew2d", "curve", "cot", "ats", "short", "llm", "backtest"].sort(),
+      ["cri", "vcg", "gex", "grg", "breadth", "trin", "divyield", "hyad", "hhlev", "bpi", "margin", "credit", "iei-hyg", "straddle", "cor", "streaks", "vixcor", "vixts", "dispersion", "ivrank", "skew", "skew2d", "curve", "cot", "ats", "short", "llm", "backtest"].sort(),
     );
   });
 
@@ -56,6 +58,7 @@ describe("REGIME_RAIL_GROUPS — grouped registry covers every tab exactly once"
     expect(groupOf.vcg).toBe("Composite");
     expect(groupOf.vixcor).toBe("Volatility");
     expect(groupOf.vixts).toBe("Volatility");
+    expect(groupOf.dispersion).toBe("Volatility");
     expect(groupOf.ivrank).toBe("Volatility");
     expect(groupOf.skew).toBe("Volatility");
     expect(groupOf.skew2d).toBe("Volatility");
@@ -72,6 +75,7 @@ describe("REGIME_RAIL_GROUPS — grouped registry covers every tab exactly once"
     expect(groupOf.hyad).toBe("Breadth & sentiment");
     expect(groupOf.bpi).toBe("Breadth & sentiment");
     expect(groupOf.cor).toBe("Breadth & sentiment");
+    expect(groupOf.streaks).toBe("Breadth & sentiment");
     expect(groupOf.llm).toBe("Models");
     expect(groupOf.backtest).toBe("Models");
   });
@@ -84,6 +88,7 @@ describe("REGIME_RAIL_GROUPS — grouped registry covers every tab exactly once"
     expect(REGIME_TAB_LABEL.skew2d).toBe("SKEW 2D");
     expect(REGIME_TAB_LABEL.vixcor).toBe("VIX-COR");
     expect(REGIME_TAB_LABEL.vixts).toBe("VIX TS");
+    expect(REGIME_TAB_LABEL.dispersion).toBe("DISPERSION");
     expect(REGIME_TAB_LABEL.ivrank).toBe("IV RANK");
     expect(REGIME_TAB_LABEL.credit).toBe("CREDIT");
     expect(REGIME_TAB_LABEL.hyad).toBe("HY AD");
@@ -98,6 +103,9 @@ const vcgData = (interpretation: string): VcgData =>
 
 const gexData = (direction: string): GexData =>
   ({ ticker: "SPY", spot: 776, bias: { direction }, levels: {}, expected_range: null }) as unknown as GexData;
+
+const dispersionData = (regime: string): DispersionData =>
+  ({ ...MISSING_DISPERSION, missing: false, current: { regime } }) as unknown as DispersionData;
 
 describe("buildRailStatuses — pure derivation from loaded payloads", () => {
   it("returns empty for null inputs", () => {
@@ -128,6 +136,19 @@ describe("buildRailStatuses — pure derivation from loaded payloads", () => {
     expect(buildRailStatuses({ gex: gexData("NEUTRAL") }).gex).toEqual({ value: "NEUTRAL", tone: "warn" });
     expect(buildRailStatuses({ gex: gexData("CAUTIOUS_BEAR") }).gex).toEqual({ value: "CAUTIOUS BEAR", tone: "fault" });
   });
+
+  it("derives DISPERSION from the current regime", () => {
+    expect(buildRailStatuses({ dispersion: dispersionData("BROAD STRESS") }).dispersion).toEqual({ value: "BROAD STRESS", tone: "fault" });
+    expect(buildRailStatuses({ dispersion: dispersionData("BELOW THE SURFACE") }).dispersion).toEqual({ value: "BELOW THE SURFACE", tone: "warn" });
+    expect(buildRailStatuses({ dispersion: dispersionData("COMPRESSED") }).dispersion).toEqual({ value: "COMPRESSED", tone: "core" });
+    expect(buildRailStatuses({ dispersion: dispersionData("NORMAL") }).dispersion).toEqual({ value: "NORMAL", tone: "core" });
+    expect(buildRailStatuses({ dispersion: { ...MISSING_DISPERSION } }).dispersion).toBeUndefined();
+    expect(buildRailStatuses({ dispersion: null })).toEqual({});
+  });
+
+  it("counts DISPERSION among the flaggable tabs", () => {
+    expect(FLAGGABLE_REGIME_TABS).toContain("dispersion");
+  });
 });
 
 /* ─── 3. Rail component ────────────────────────────────── */
@@ -143,12 +164,12 @@ describe("RegimeRail — grouped rail rendering + navigation", () => {
     return { onSelect, ...utils };
   };
 
-  it("renders all five group headers and 26 items", () => {
+  it("renders all five group headers and 28 items", () => {
     const { container } = renderRail();
     for (const g of REGIME_RAIL_GROUPS) {
       expect(within(container).getByText(g.label)).toBeTruthy();
     }
-    expect(container.querySelectorAll("[data-tab]")).toHaveLength(26);
+    expect(container.querySelectorAll("[data-tab]")).toHaveLength(28);
   });
 
   it("marks the active tab with the active class and aria-current", () => {
@@ -178,8 +199,8 @@ describe("RegimeRail — grouped rail rendering + navigation", () => {
     expect(within(container).getAllByText("1 FLAGGED")).toHaveLength(2);
     // R-196: the footer counts the tabs buildRailStatuses can actually flag,
     // not all 22 REGIME_TABS. "0 of 22 elevated" read as broad calm when 18
-    // of them were never asked.
-    expect(within(container).getByText(/4 MONITORED · 2 ELEVATED/i)).toBeTruthy();
+    // of them were never asked. DISPERSION joined the flaggable set.
+    expect(within(container).getByText(/5 MONITORED · 2 ELEVATED/i)).toBeTruthy();
   });
 
   it("filter narrows items and hides empty groups", () => {
