@@ -33,6 +33,7 @@
       "id": "host-split",
       "globs": [
         "scripts/ib_gateway_remote/**",
+        "scripts/api/services.py",
         "cloud/services/radon-ib-gateway-remote.service",
         "cloud/scripts/ib-gateway-remote-certs.sh",
         "cloud/scripts/check-env.py"

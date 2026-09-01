@@ -152,15 +152,30 @@ Operator commands after the cut:
      directory exists when the unit starts (`radon-app-runtime.sh`).
   3. Broker: `systemctl enable --now radon-ib-gateway-remote.service`.
      `RADON_IB_REMOTE_ALLOW` is host addresses only (`10.0.0.2`); the
-     daemon refuses to start on a subnet. Bind is `10.0.0.4`, never
-     `0.0.0.0`. Hetzner firewall: 8340 and 4001 from `10.0.0.2` only.
+     daemon refuses to start on a subnet. `RADON_IB_REMOTE_CLIENT_NAMES` is
+     the second half of the perimeter — the client-certificate CN / DNS SAN
+     allowlist, default `radon-app`, matching the `DNS:radon-app` SAN the
+     mint script writes. An empty value is a `ConfigError` at startup, not a
+     silent open door; set it only if you mint a client cert under a
+     different name. Bind is `10.0.0.4`, never `0.0.0.0`. Hetzner firewall:
+     8340 and 4001 from `10.0.0.2` only.
   Verify from the app host, no Gateway side effect:
   `curl --cacert /etc/radon/ib-remote/ca.pem --cert /etc/radon/ib-remote/client.pem --key /etc/radon/ib-remote/client-key.pem https://10.0.0.4:8340/healthz`
   → `{"ok":true,"service":"ib-gateway-remote"}`.
   Certificates expire 825 days after minting (`-days 825` in the script).
-  Expiry symptom: admin Gateway actions return `URLError` / HTTP `-1` and
-  the Gateway row shows `load_state=remote`, `active_state=unknown`. Re-run
-  the mint script and steps 1-3; Gateway itself is untouched.
+  The proxy's status ladder (`scripts/api/services.py`,
+  `scripts/ib_gateway_remote/serve.py`) discriminates the failure:
+  `504` (`REMOTE_UNREACHABLE_RC`) the daemon was not reachable at all —
+  down, firewalled, or wrong `RADON_IB_REMOTE_URL`; `502`
+  (`REMOTE_BAD_REPLY_RC`) it answered but not with a usable reply, which is
+  where an expired or untrusted certificate lands; `403` the peer address is
+  not in `RADON_IB_REMOTE_ALLOW` (`source not allowlisted`) or the client
+  certificate's CN/DNS SAN is not in `RADON_IB_REMOTE_CLIENT_NAMES`
+  (`client certificate not allowlisted`); `409` the request was refused, not
+  failed — a held 2FA lease or the 60s per-verb cooldown, with the reason in
+  `detail`. Expiry also shows the Gateway row as `load_state=remote`,
+  `active_state=unknown`. For 502/403, re-run the mint script and steps 1-3;
+  Gateway itself is untouched. A 409 needs no action but time.
   Reversal: `systemctl disable --now radon-ib-gateway-remote.service` on
   the broker and unset `RADON_IB_REMOTE_URL` on the app (controls go
   read-only, no error).

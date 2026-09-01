@@ -40,7 +40,7 @@ uvicorn runs ONE worker (one asyncio event loop). **Never run a synchronous/bloc
 
 **DB access from this process goes through `scripts/api/db_http.py` (`hrana_execute`) — the libSQL HTTP pipeline over stdlib urllib with a real socket timeout (urllib releases the GIL, so `asyncio.to_thread` around it is genuinely bounded).** Importing `db.client` / `db.writer` / `libsql*` anywhere under `scripts/api/` fails the AST lint `scripts/tests/test_no_sync_libsql_in_api.py`. The `service_health` upsert SQL is shared with the sync writer via `scripts/db/service_health_sql.py` (no libsql import) so serialization stays single-source.
 
-**`radon-api` survives a gateway stop.** Its unit uses `Wants=` (NOT `Requires=`) `radon-ib-gateway.service`, so a deliberate gateway stop (the operator page's "Stop Gateway" control) does not cascade-kill api — the control plane (`/health`, `/admin/services`, the Start action) stays up. Unit file: `cloud/services/radon-api.service`. The operator page's gateway Stop/Start lives in `web/components/admin/Ib2faControls.tsx` (Stop is type-to-confirm cascade-aware for relay+monitor; Start reuses the full-stack `radon restart`).
+**`radon-api` survives a gateway stop.** Its unit carries `After=radon-ib-gateway.service` and NOTHING else — no `Wants=`, no `Requires=`, no `PartOf=` — so a deliberate gateway stop (the operator page's "Stop Gateway" control) does not cascade-kill api — the control plane (`/health`, `/admin/services`, the Start action) stays up. Unit file: `cloud/services/radon-api.service`. The operator page's gateway Stop/Start lives in `web/components/admin/Ib2faControls.tsx` (Stop is type-to-confirm cascade-aware for relay+monitor; Start reuses the full-stack `radon restart`).
 
 ---
 
