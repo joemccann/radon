@@ -339,7 +339,14 @@ def test_pytest_shards_then_combines_coverage_ratchet() -> None:
         for step in py_tests["steps"]
         if "upload-artifact" in step.get("uses", "")
     )
-    assert upload["with"]["path"] == ".coverage"
+    # CIP-005: the shard ships its junit XML beside the data file so per-module
+    # work on Linux is readable from the artifact (`--durations=25` covers under
+    # a third of a work-bound shard). py-coverage finds `.coverage` BY NAME, so
+    # the sibling XML cannot reach the ratchet.
+    upload_paths = str(upload["with"]["path"]).split()
+    assert ".coverage" in upload_paths
+    assert "pytest-junit.xml" in upload_paths
+    assert "--junitxml=pytest-junit.xml" in commands
     # upload-artifact v4+ skips dotfiles unless this is set (PR 88 first green
     # pytest run: 1586 passed, then "No files were found ... path: .coverage").
     assert str(upload["with"].get("include-hidden-files", "")).lower() in ("true", "True")

@@ -44,6 +44,7 @@ wheels/
 # Testing / coverage
 .pytest_cache/
 .coverage
+pytest-junit.xml
 htmlcov/
 .tox/
 .nox/
