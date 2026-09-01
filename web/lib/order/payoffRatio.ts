@@ -71,8 +71,20 @@ export function computePayoffRatio(summary: PayoffInput): PayoffRatio | null {
   return { kind: "ratio", ratio, meetsConvexity: ratio >= CONVEXITY_MIN_RATIO };
 }
 
-/** "7.2 : 1" — one decimal, trailing ".0" dropped so 2:1 reads clean. */
+/**
+ * "7.2 : 1" — one decimal, trailing ".0" dropped so 2:1 reads clean.
+ *
+ * Below 1 the left side keeps TWO decimals ("0.73 : 1"): sold call/put
+ * spreads live entirely in that band, and one decimal rounded away the
+ * difference between distinct credit-vs-risk trades (0.73 vs 0.70 both
+ * read "0.7 : 1").
+ */
 export function formatPayoffRatio(ratio: number): string {
+  if (ratio < 1) {
+    const hundredths = Math.round(ratio * 100) / 100;
+    // 0.995..0.999 rounds up to 1.00 — hand it to the >=1 format below.
+    if (hundredths < 1) return `${hundredths.toFixed(2)} : 1`;
+  }
   const rounded = Math.round(ratio * 10) / 10;
   return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(1)} : 1`;
 }
