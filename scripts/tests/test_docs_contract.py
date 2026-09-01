@@ -603,3 +603,39 @@ class TestNightlyLoopIndex:
                 f"scripts/{wrapper} no longer names .radon-{loop}-runner; "
                 "docs/operations.md documents that marker as the rail"
             )
+
+
+# DOC-045 (2026-09-01): TEST_LOG.md is not the only append-only root ledger,
+# and it was only guarded after a truncation shipped green. `path_filter.py`
+# classifies every root `.md` as documentation and routes it to a contract
+# test ONLY when a test names the file, so the other five ledgers selected no
+# gate at all. Naming them here is what puts them behind one.
+
+_LEDGERS = {
+    "RELIABILITY_AUDIT.md": r"^\| R-\d+",
+    "RELIABILITY_LOG.md": r"^\| REL-\d+",
+    "TEST_AUDIT.md": r"^\| T-\d+",
+    "REMEDIATION_LOG.md": r"^\| T-\d+",
+    "CI_PERFORMANCE_LOG.md": r"^### CIP-\d+",
+}
+
+
+class TestRootLedgersAreAppendOnly:
+    @pytest.mark.parametrize("ledger,row", sorted(_LEDGERS.items()))
+    def test_entry_count_never_decreases_against_the_base(self, ledger, row):
+        base = _ledger_base_ref()
+        if base is None:
+            pytest.skip("no base ref to compare the ledger against")
+        try:
+            before = _git("show", f"{base}:{ledger}")
+        except subprocess.CalledProcessError:
+            pytest.skip(f"{ledger} absent at {base}")
+        pattern = re.compile(row, re.MULTILINE)
+        now = (_ROOT / ledger).read_text(encoding="utf-8")
+        was, is_now = len(pattern.findall(before)), len(pattern.findall(now))
+        assert is_now >= was, (
+            f"{ledger} has {is_now} entries but {base} has {was}: the nightly "
+            "ledgers are append-only — restore the rows instead of rewriting "
+            "history (see TEST_LOG.md, truncated 543 -> 2 lines in 4584e84a "
+            "with every gate green)"
+        )
