@@ -145,6 +145,27 @@ class TestFormatPrTitle:
         with pytest.raises(ValueError, match="issue"):
             pr.format_pr_title(loop="testing", date="2026-09-01", issue="  ")
 
+    @pytest.mark.parametrize(
+        "loop, bad_date",
+        [
+            ("security", "2026-09-01 A sanitized one-line description of the patched class."),
+            ("reliability", "2026-09-01 The TLS handshake ran on the accept thread."),
+            ("security", "2026-9-1"),
+            ("testing", "09/01/2026"),
+            ("documentation", "2026-13-01"),
+        ],
+    )
+    def test_date_must_be_yyyy_mm_dd(self, loop, bad_date):
+        with pytest.raises(ValueError, match="YYYY-MM-DD"):
+            pr.format_pr_title(loop=loop, date=bad_date, issue="A.")
+
+    @pytest.mark.parametrize("loop", list(pr.LOOP_TITLES))
+    def test_every_loop_title_fits_github_256_char_limit(self, loop):
+        issue = ("The TLS handshake ran on the accept thread. " * 20).strip()
+        title = pr.format_pr_title(loop=loop, date="2026-09-01", issue=issue)
+        assert len(title) <= pr.GITHUB_PR_TITLE_MAX
+        assert title.startswith(pr.LOOP_TITLES[loop] + " 2026-09-01")
+
     def test_title_fits_github_256_char_limit(self):
         issue = (
             "The TLS handshake ran on the accept thread, so one half-open "
@@ -237,6 +258,18 @@ class TestCli:
         payload = json.loads(proc.stdout)
         assert len(payload["title"]) <= pr.GITHUB_PR_TITLE_MAX
         assert issue in payload["body"]
+
+    def test_json_refuses_a_pasted_issue_in_date(self):
+        proc = self._run(
+            "--loop", "security",
+            "--date", "2026-09-01 A sanitized one-line description of the patched class.",
+            "--issue", "A sanitized one-line description of the patched class.",
+            "--fix", "The chokepoint now refuses the input.",
+            "--json",
+        )
+        assert proc.returncode == 2
+        assert "YYYY-MM-DD" in proc.stderr
+        assert proc.stdout == ""
 
 
 class TestNightlyTemplateMatchesFormatter:

@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
+from datetime import date
 
 LOOP_TITLES = {
     "reliability": "Reliability",
@@ -28,6 +30,7 @@ FIX_HEADING = "What was done to fix it"
 NEXT_HEADING = "Next"
 GREEN_DEPLOYMENT = "Fixed with green deployment"
 GITHUB_PR_TITLE_MAX = 256
+_DATE = re.compile(r"\A\d{4}-\d{2}-\d{2}\Z")
 
 
 def _clean(value: str, *, field: str) -> str:
@@ -35,6 +38,17 @@ def _clean(value: str, *, field: str) -> str:
     if not text:
         raise ValueError(f"{field} must be non-empty plain language")
     return text
+
+
+def _calendar_date(value: str) -> str:
+    day = _clean(value, field="date")
+    if not _DATE.fullmatch(day):
+        raise ValueError("date must be YYYY-MM-DD")
+    try:
+        date.fromisoformat(day)
+    except ValueError as exc:
+        raise ValueError("date must be YYYY-MM-DD") from exc
+    return day
 
 
 def format_pr_title(*, loop: str, date: str, issue: str) -> str:
@@ -47,11 +61,12 @@ def format_pr_title(*, loop: str, date: str, issue: str) -> str:
     if prefix is None:
         known = ", ".join(sorted(LOOP_TITLES))
         raise ValueError(f"unknown loop {loop!r}; expected one of: {known}")
-    day = _clean(date, field="date")
+    day = _calendar_date(date)
     summary = _clean(issue, field="issue")
     if loop == "security":
-        return f"{prefix} {day}"
-    title = f"{prefix} {day}: {summary}"
+        title = f"{prefix} {day}"
+    else:
+        title = f"{prefix} {day}: {summary}"
     if len(title) > GITHUB_PR_TITLE_MAX:
         return title[:GITHUB_PR_TITLE_MAX]
     return title
