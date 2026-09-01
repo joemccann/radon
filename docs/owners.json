@@ -33,6 +33,7 @@
       "id": "host-split",
       "globs": [
         "scripts/ib_gateway_remote/**",
+        "scripts/api/services.py",
         "cloud/services/radon-ib-gateway-remote.service",
         "cloud/scripts/ib-gateway-remote-certs.sh",
         "cloud/scripts/check-env.py"
@@ -41,9 +42,27 @@
       "note": "App/broker split contract: mTLS Gateway control, cert lifecycle, role env checks. Recurring runbook drift class (DOC-002/006/009/010/017/018/019)."
     },
     {
+      "id": "api-trust-boundary",
+      "globs": ["scripts/api/auth.py"],
+      "owners": ["scripts/api/CLAUDE.md", "docs/spof-host-split.md"],
+      "note": "Who FastAPI trusts without a JWT (loopback, tailnet, the private-net /health probe). Both owners restated the 10.0.0.0/16 scope wrongly after REL-170 (DOC-020/022)."
+    },
+    {
       "id": "ops-timers",
       "globs": ["cloud/services/*.timer"],
       "owners": ["docs/operations.md", "docs/cloud-services.md"]
+    },
+    {
+      "id": "nightly-loops",
+      "globs": [
+        "scripts/*_weekend.sh",
+        "scripts/*_nightly.sh",
+        "scripts/weekend_notify.py",
+        "scripts/weekend_redact.py",
+        "config/com.radon.*-daily.plist"
+      ],
+      "owners": ["docs/operations.md"],
+      "note": "operations.md is the one place indexing all five nightly loops: fire times, clone + marker rails, the model pin and the status vocabulary an operator reads off a page. #219 changed operator-facing behaviour in all five wrappers with no owner update (DOC-032/033/034/040). Loop SEMANTICS stay in .claude/skills/<loop>/SKILL.md; only the operator contract belongs here."
     },
     {
       "id": "factory",
