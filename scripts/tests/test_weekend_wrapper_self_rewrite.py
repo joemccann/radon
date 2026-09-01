@@ -26,7 +26,6 @@ code and on what the dead-man was told.
 """
 from __future__ import annotations
 
-import hashlib
 import os
 import re
 import shutil
@@ -113,22 +112,13 @@ def _build(
     agent_log = tmp_path / "agent.log"
     attack_sh = tmp_path / "attack.sh"
 
-    # Hash-pinned notify execs /usr/bin/python3 on a copy outside the clone.
-    # PATH python3 is the agent-writable venv; this stub must be what that
-    # copy runs, and the wrapper copy's pin must match it.
-    notify_stub = (
-        "#!/usr/bin/env python3\n"
-        "import sys\n"
-        f"open({str(push_log)!r}, 'a').write('notify ' + ' '.join(sys.argv) + '\\n')\n"
+    (clone / "scripts" / "weekend_notify.py").write_text("# unused\n", encoding="utf-8")
+    curl_stub = bin_dir / "curl"
+    (tmp_path / ".env").write_text(
+        "PUSHOVER_USER=test-user\nPUSHOVER_TOKEN=test-token\n", encoding="utf-8"
     )
-    (clone / "scripts" / "weekend_notify.py").write_text(notify_stub, encoding="utf-8")
-    digest = hashlib.sha256(notify_stub.encode()).hexdigest()
     wrapper.write_text(
-        re.sub(
-            r'NOTIFY_SHA256="[0-9a-f]{64}"',
-            f'NOTIFY_SHA256="{digest}"',
-            wrapper.read_text(encoding="utf-8"),
-        ),
+        wrapper.read_text(encoding="utf-8").replace("/usr/bin/curl", str(curl_stub)),
         encoding="utf-8",
     )
 
@@ -229,6 +219,10 @@ def _build(
         bin_dir / "python3",
         "#!/bin/bash\n" f'echo "notify $*" >> "{push_log}"\n' "exit 0\n",
     )
+    _executable(
+        curl_stub,
+        "#!/bin/bash\n" f'echo "curl $*" >> "{push_log}"\n' "exit 0\n",
+    )
 
     env = {
         # launchd hands the job a minimal environment; mirror it.
@@ -281,17 +275,13 @@ def _comments(cfg: dict) -> list[str]:
 
 
 def _pages(cfg: dict) -> int:
-    """Pushover attempts: hash-pinned /usr/bin/python3 copy (argv is the
-    dest outside the clone) or the curl fallback."""
+    """Pushover attempts via the wrapper's /usr/bin/curl (rewired in the
+    test copy to a logging stub)."""
     if not cfg["push_log"].exists():
         return 0
     return len([
         ln for ln in cfg["push_log"].read_text(encoding="utf-8").splitlines()
-        if ln.strip() and (
-            "weekend_notify.py" in ln
-            or ".weekend-notify" in ln
-            or "pushover.net" in ln
-        )
+        if ln.strip() and "pushover.net" in ln
     ])
 
 

@@ -2,31 +2,19 @@
 
 The 2026-08-30 fix made every wrapper's prologue deaths (marker refusal,
 held-lock refusal, the ERR trap armed over the whole prologue) call
-``report()`` with ``PHASE="prologue"``, and taught ``weekend_notify.py`` to
-accept ``--phase prologue``. Nothing executed crossed that seam: every
-wrapper test stubs ``python3`` and counts calls, and the notifier test
-hardcodes ``"prologue"`` on its own side. ``PHASE="pre-flight"`` in one
-wrapper, or a ``choices`` edit, makes argparse exit 2 behind ``|| true`` and
-every prologue death posts a comment and never pages, all tests green.
-
-Here the ``python3`` stub RECORDS the wrapper's real argv, and that exact argv
-(minus the script path) is fed to the real ``weekend_notify.main()``
-in-process with the transport patched.
+``report()`` with ``PHASE="prologue"``. Notify is in-main ``_notify_curl``
+(never post-agent python). A ``PHASE="pre-flight"`` typo would still comment
+and never page. This records the wrapper's real curl argv.
 """
 from __future__ import annotations
 
-import hashlib
 import os
-import re
 import shutil
 import stat
 import subprocess
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
-
-import weekend_notify
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -71,24 +59,20 @@ def _build(tmp_path: Path, *, marker: bool, lock_held: bool, loop: str) -> dict:
     bin_dir.mkdir()
     argv_dir = tmp_path / "notify-argv"
     argv_dir.mkdir()
-
-    notify_stub = (
-        "#!/usr/bin/env python3\n"
-        "import os, sys\n"
-        f"open({str(argv_dir)!r} + '/' + str(os.getpid()), 'wb').write("
-        "('\\0'.join(sys.argv) + '\\0').encode())\n"
+    curl_stub = bin_dir / "curl"
+    (tmp_path / ".env").write_text(
+        "PUSHOVER_USER=test-user\nPUSHOVER_TOKEN=test-token\n", encoding="utf-8"
     )
-    (clone / "scripts" / "weekend_notify.py").write_text(notify_stub, encoding="utf-8")
-    digest = hashlib.sha256(notify_stub.encode()).hexdigest()
     wrapper.write_text(
-        re.sub(
-            r'NOTIFY_SHA256="[0-9a-f]{64}"',
-            f'NOTIFY_SHA256="{digest}"',
-            wrapper.read_text(encoding="utf-8"),
-        ),
+        wrapper.read_text(encoding="utf-8").replace("/usr/bin/curl", str(curl_stub)),
         encoding="utf-8",
     )
+    (clone / "scripts" / "weekend_notify.py").write_text("# unused\n", encoding="utf-8")
 
+    _executable(
+        curl_stub,
+        "#!/bin/bash\n" f'printf \'%s\\0\' "$@" > "{argv_dir}/$$"\n' "exit 0\n",
+    )
     _executable(
         bin_dir / "python3",
         "#!/bin/bash\n" f'printf \'%s\\0\' "$@" > "{argv_dir}/$$"\n' "exit 0\n",
@@ -145,39 +129,31 @@ def _recorded_argv(cfg: dict) -> list[list[str]]:
     return records
 
 
-def _replay(argv: list[str], loop: str, status: str, monkeypatch) -> None:
-    """Feed the wrapper's argv to the real notifier and assert the page."""
-    script, notify_argv = argv[0], argv[1:]
-    assert ".weekend-notify" in script or script.endswith("scripts/weekend_notify.py"), argv
-    monkeypatch.setenv("PUSHOVER_USER", "u")
-    monkeypatch.setenv("PUSHOVER_TOKEN", "t")
-    with patch("weekend_notify._http_post", return_value=(200, b"")) as post:
-        assert weekend_notify.main(notify_argv) == 0
-    post.assert_called_once()
-    url, payload = post.call_args[0]
-    assert url == weekend_notify.PUSHOVER_API_URL
-    assert payload["title"] == f"radon {loop} prologue"
-    assert payload["message"].startswith(status), payload["message"]
-    assert payload["priority"] == 0
+def _assert_curl_page(argv: list[str], loop: str, status: str) -> None:
+    joined = " ".join(argv)
+    assert "api.pushover.net" in joined, argv
+    assert f"title=radon {loop} prologue" in joined, argv
+    assert status in joined, argv
+    assert "priority=0" in joined, argv
 
 
 @pytest.mark.parametrize("loop", LOOP_IDS)
-def test_marker_refusal_pages_through_the_real_notifier(tmp_path: Path, loop: str, monkeypatch) -> None:
+def test_marker_refusal_pages_through_the_real_notifier(tmp_path: Path, loop: str) -> None:
     cfg = _build(tmp_path, marker=False, lock_held=False, loop=loop)
     result = _run(cfg, loop)
     assert result.returncode == 2, result.stderr
     assert "REFUSING" in result.stderr
     records = _recorded_argv(cfg)
     assert len(records) == 1, records
-    _replay(records[0], loop, "REFUSED", monkeypatch)
+    _assert_curl_page(records[0], loop, "REFUSED")
 
 
 @pytest.mark.parametrize("loop", LOOP_IDS)
-def test_held_lock_refusal_pages_through_the_real_notifier(tmp_path: Path, loop: str, monkeypatch) -> None:
+def test_held_lock_refusal_pages_through_the_real_notifier(tmp_path: Path, loop: str) -> None:
     cfg = _build(tmp_path, marker=True, lock_held=True, loop=loop)
     result = _run(cfg, loop)
     assert result.returncode == 3, result.stderr
     assert "another weekend run owns" in result.stderr
     records = _recorded_argv(cfg)
     assert len(records) == 1, records
-    _replay(records[0], loop, "REFUSED (lock held)", monkeypatch)
+    _assert_curl_page(records[0], loop, "REFUSED (lock held)")

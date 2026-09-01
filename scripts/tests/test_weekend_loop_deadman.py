@@ -35,7 +35,6 @@ unlinked, and unlinked BEFORE `run_phase`.
 
 from __future__ import annotations
 
-import hashlib
 import os
 import re
 import shutil
@@ -573,22 +572,16 @@ def _committing_clone(tmp_path: Path, git: str) -> Path:
     wrapper = repo / "scripts" / "testing_weekend.sh"
     shutil.copy2(TESTING, wrapper)
     wrapper.chmod(wrapper.stat().st_mode | 0o100)
-    py_log = tmp_path / "py.log"
-    notify_stub = (
-        "#!/usr/bin/env python3\n"
-        "import sys\n"
-        f"open({str(py_log)!r}, 'a').write(' '.join(sys.argv) + '\\n')\n"
+    (tmp_path / ".env").write_text(
+        "PUSHOVER_USER=test-user\nPUSHOVER_TOKEN=test-token\n", encoding="utf-8"
     )
-    (repo / "scripts" / "weekend_notify.py").write_text(notify_stub, encoding="utf-8")
-    digest = hashlib.sha256(notify_stub.encode()).hexdigest()
+    curl_stub = tmp_path / "bin" / "curl"
+    (tmp_path / "bin").mkdir(exist_ok=True)
     wrapper.write_text(
-        re.sub(
-            r'NOTIFY_SHA256="[0-9a-f]{64}"',
-            f'NOTIFY_SHA256="{digest}"',
-            wrapper.read_text(encoding="utf-8"),
-        ),
+        wrapper.read_text(encoding="utf-8").replace("/usr/bin/curl", str(curl_stub)),
         encoding="utf-8",
     )
+    (repo / "scripts" / "weekend_notify.py").write_text("# unused\n", encoding="utf-8")
     subprocess.run([git, "init", "-q", str(repo)], check=True, env=_GIT_ENV)
     at = [git, "-C", str(repo)]
     subprocess.run([*at, "symbolic-ref", "HEAD", "refs/heads/main"], check=True, env=_GIT_ENV)
@@ -618,11 +611,11 @@ _GIT_ENV = {
 
 
 def _committing_stub_bin(tmp_path: Path, *, claude_body: str) -> tuple[Path, Path, Path]:
-    """`gh` / `python3` record their calls; `git` is REAL except `fetch`."""
+    """`gh` / curl record their calls; `git` is REAL except `fetch`."""
     real_git = shutil.which("git")
     assert real_git, "a real git is required to exercise the commit check"
     bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
+    bin_dir.mkdir(exist_ok=True)
     gh_log = tmp_path / "gh.log"
     py_log = tmp_path / "py.log"
     gh = bin_dir / "gh"
@@ -642,6 +635,14 @@ def _committing_stub_bin(tmp_path: Path, *, claude_body: str) -> tuple[Path, Pat
         encoding="utf-8",
     )
     py.chmod(0o755)
+    curl = bin_dir / "curl"
+    curl.write_text(
+        "#!/bin/sh\n"
+        f'printf "%s\\n" "$*" >> "{py_log}"\n'
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    curl.chmod(0o755)
     git = bin_dir / "git"
     git.write_text(
         "#!/bin/sh\n"
@@ -710,10 +711,10 @@ class TestAnAgentThatCommitsNothingIsNotReportedOk:
             f"PR — and the issue comment did not say so: {calls!r}"
         )
         assert "Nothing went wrong" not in calls, calls
-        assert f"--status {INCOMPLETE_STATUS}" in pages, (
+        assert INCOMPLETE_STATUS in pages, (
             f"the Pushover page must carry the same status: {pages!r}"
         )
-        assert "--status OK" not in pages, pages
+        assert "message=OK" not in pages, pages
 
     def test_a_commit_on_the_nightly_branch_during_the_phase_is_ok(self, tmp_path):
         proc, calls, pages = self._run(
@@ -730,5 +731,5 @@ class TestAnAgentThatCommitsNothingIsNotReportedOk:
         )
         assert "Nothing went wrong this audit phase." in calls, calls
         assert INCOMPLETE_STATUS not in calls, calls
-        assert "--status OK" in pages, pages
-        assert "INCOMPLETE" not in pages, pages
+        assert "message=OK" in pages, pages
+        assert INCOMPLETE_STATUS not in pages, pages

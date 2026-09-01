@@ -7,7 +7,6 @@ body they actually read.
 """
 from __future__ import annotations
 
-import hashlib
 import os
 import re
 import shutil
@@ -85,11 +84,6 @@ def _secret_detail() -> str:
         + "Hq7notreal and "
         "ops@radon.run saw the dump at https://app.radon.run/admin"
     )
-
-
-NOTIFY_SHA256 = hashlib.sha256(
-    (REPO / "scripts" / "weekend_notify.py").read_bytes()
-).hexdigest()
 
 
 class TestNoRunYetBody:
@@ -359,9 +353,9 @@ class TestWrapperFormatterNeverExecsDiskPython:
 
 
 class TestNotifyPhaseIsFenced:
-    """venv python3 and $REPO/scripts/weekend_notify.py are agent-writable.
-    Lock-held overlapping fires also run leftover clone files in prologue.
-    Hash-pin a copy outside the clone; mismatch pages via /usr/bin/curl."""
+    """Never exec python for Pushover. Clone/venv python3 and
+    /usr/bin/python3 without -I import agent-writable WEEKEND_ROOT modules.
+    Always _notify_curl via /usr/bin/curl."""
 
     @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
     def test_does_not_exec_clone_path_notify_via_path_python3(self, wrapper: Path):
@@ -369,34 +363,41 @@ class TestNotifyPhaseIsFenced:
         notify = _notify_phase_fn(wrapper)
         assert 'python3 "$REPO/scripts/weekend_notify.py"' not in body, wrapper.name
         assert "python3 $REPO/scripts/weekend_notify.py" not in body, wrapper.name
-        assert 'python3 "$REPO' not in notify, wrapper.name
+        assert "python3" not in notify, wrapper.name
 
     @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
-    def test_hash_pin_matches_weekend_notify_and_mismatch_curls(self, wrapper: Path):
+    def test_notify_phase_always_curls_and_never_execs_python(self, wrapper: Path):
         body = _uncommented(wrapper)
         notify = _notify_phase_fn(wrapper)
-        assert f'NOTIFY_SHA256="{NOTIFY_SHA256}"' in body, wrapper.name
-        assert "/usr/bin/python3" in notify, wrapper.name
-        assert "/usr/bin/curl" in notify or "/usr/bin/curl" in body, wrapper.name
+        assert "_notify_curl" in notify, wrapper.name
+        assert "/usr/bin/curl" in body, wrapper.name
         assert "api.pushover.net" in body, wrapper.name
-        assert "WEEKEND_ROOT" in notify, wrapper.name
-        assert "NOTIFY_SHA256" in notify, wrapper.name
-        assert "/usr/bin/mktemp" in notify, wrapper.name
-        assert ".weekend-notify.pinned" not in notify, wrapper.name
-        python3_at = notify.index("/usr/bin/python3")
-        assert notify.rfind("_sha256_file", 0, python3_at) != -1, wrapper.name
+        assert "NOTIFY_SHA256" not in body, wrapper.name
+        assert "_sha256_file" not in body, wrapper.name
+        assert "/usr/bin/python3" not in notify, wrapper.name
+        assert "weekend_notify.py" not in notify, wrapper.name
 
     def test_rewritten_clone_notifier_is_not_execed(self, tmp_path: Path):
         clone = tmp_path / "clone"
         (clone / "scripts").mkdir(parents=True)
         (clone / "logs" / "security-nightly").mkdir(parents=True)
-        shutil.copy2(REPO / "scripts" / "security_nightly.sh", clone / "scripts" / "security_nightly.sh")
-        (clone / "scripts" / "security_nightly.sh").chmod(
-            (clone / "scripts" / "security_nightly.sh").stat().st_mode | stat.S_IXUSR
-        )
+        wrapper = clone / "scripts" / "security_nightly.sh"
+        shutil.copy2(REPO / "scripts" / "security_nightly.sh", wrapper)
+        wrapper.chmod(wrapper.stat().st_mode | stat.S_IXUSR)
         marker = tmp_path / "PWNED_NOTIFY"
+        dotenv_marker = tmp_path / "PWNED_DOTENV"
+        json_marker = tmp_path / "PWNED_JSON"
         (clone / "scripts" / "weekend_notify.py").write_text(
             f"open({str(marker)!r}, 'w').write('PWN')\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "dotenv.py").write_text(
+            f"open({str(dotenv_marker)!r}, 'w').write('PWN')\n"
+            "def dotenv_values(*_a, **_k):\n    return {}\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "json.py").write_text(
+            f"open({str(json_marker)!r}, 'w').write('PWN')\n",
             encoding="utf-8",
         )
         for name in (".radon-weekend-runner", ".radon-security-runner"):
@@ -410,6 +411,12 @@ class TestNotifyPhaseIsFenced:
         bin_dir.mkdir()
         gh_log = tmp_path / "gh.log"
         py_log = tmp_path / "path-python3.log"
+        curl_log = tmp_path / "curl.log"
+        curl_stub = bin_dir / "curl"
+        wrapper.write_text(
+            wrapper.read_text(encoding="utf-8").replace("/usr/bin/curl", str(curl_stub)),
+            encoding="utf-8",
+        )
         for name, content in {
             "gh": (
                 "#!/bin/sh\n"
@@ -433,6 +440,11 @@ class TestNotifyPhaseIsFenced:
                 f'echo "$*" >> "{py_log}"\n'
                 "exit 0\n"
             ),
+            "curl": (
+                "#!/bin/sh\n"
+                f'echo "$*" >> "{curl_log}"\n'
+                "exit 0\n"
+            ),
             "claude": (
                 "#!/bin/sh\n"
                 "echo 'SECURITY-NIGHTLY PHASE COMPLETE: audit'\n"
@@ -444,7 +456,7 @@ class TestNotifyPhaseIsFenced:
             exe.chmod(exe.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
         proc = subprocess.run(
-            ["/bin/bash", str(clone / "scripts" / "security_nightly.sh"), "audit"],
+            ["/bin/bash", str(wrapper), "audit"],
             env={
                 "PATH": f"{bin_dir}{os.pathsep}/usr/bin{os.pathsep}/bin",
                 "HOME": str(tmp_path / "home"),
@@ -456,8 +468,14 @@ class TestNotifyPhaseIsFenced:
         )
         assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
         assert not marker.exists(), "leftover clone notifier must not run"
+        assert not dotenv_marker.exists(), "WEEKEND_ROOT dotenv.py must not be imported"
+        assert not json_marker.exists(), "WEEKEND_ROOT json.py must not be imported"
         py_calls = py_log.read_text(encoding="utf-8") if py_log.exists() else ""
         assert "weekend_notify.py" not in py_calls, py_calls
+        assert py_calls == "", py_calls
+        curl_calls = curl_log.read_text(encoding="utf-8") if curl_log.exists() else ""
+        assert "api.pushover.net" in curl_calls, curl_calls
+        assert "title=radon security audit" in curl_calls, curl_calls
 
 
 class TestSanitizeUsesPinnedSed:

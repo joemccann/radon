@@ -119,7 +119,6 @@ DEADMAN_TITLE="Nightly CI performance runner"
 DEADMAN_LABEL="ci-performance-nightly"
 ISSUE_SANITIZE=0
 LOOP_SLUG="ci-performance"
-NOTIFY_SHA256="b100e71ceb7e262b51181da30c44fcee4921f3a30406ee53c76de718b428d4bf"
 NO_RUN_YET_BODY='**Issue discovered**
 No run yet.
 
@@ -142,17 +141,6 @@ resolve_pr_url() {
     2>/dev/null || true)"
   [[ "$url" == "null" ]] && url=""
   printf '%s' "$url"
-}
-
-_sha256_file() {
-  local f="$1" out=""
-  [[ -f "$f" ]] || { printf ''; return 0; }
-  if [[ -x /usr/bin/shasum ]]; then
-    out="$(/usr/bin/shasum -a 256 "$f" 2>/dev/null || true)"
-  elif [[ -x /usr/bin/sha256sum ]]; then
-    out="$(/usr/bin/sha256sum "$f" 2>/dev/null || true)"
-  fi
-  printf '%s' "${out%% *}"
 }
 
 _notify_cred() {
@@ -207,35 +195,14 @@ _notify_curl() {
 notify_phase() {
   # One Pushover per phase so a hung phase is visible immediately.
   # Best-effort: it must never change the run's exit code.
-  # venv python3 and the clone notifier are agent-writable; lock-held
-  # overlapping fires also run leftover clone files in prologue. Copy
-  # outside the clone, refuse unless the copy still hashes to the pin
-  # baked into this wrapper, else page with /usr/bin/curl.
-  local status="$1" pr_url dest got
+  # Never exec python after the agent: clone/venv python3 and
+  # /usr/bin/python3 without -I both import agent-writable modules
+  # from WEEKEND_ROOT (sys.path[0]). System python also lacks dotenv,
+  # so a 0 exit would skip _notify_curl. Always page with /usr/bin/curl.
+  local status="$1" pr_url
   pr_url="$(resolve_pr_url)"
-  dest=""
-  if [[ -f "$REPO/scripts/weekend_notify.py" ]]; then
-    dest="$(/usr/bin/mktemp "${WEEKEND_ROOT}/.weekend-notify.XXXXXX" 2>/dev/null || true)"
-  fi
-  if [[ -n "$dest" ]] && cp "$REPO/scripts/weekend_notify.py" "$dest" 2>/dev/null; then
-    chmod a-w "$dest" 2>/dev/null || true
-    got="$(_sha256_file "$dest")"
-    if [[ -n "$got" && "$got" == "$NOTIFY_SHA256" && -x /usr/bin/python3 ]]; then
-      got="$(_sha256_file "$dest")"
-      if [[ "$got" == "$NOTIFY_SHA256" ]] && /usr/bin/python3 "$dest" \
-        --loop "$LOOP_SLUG" --phase "$PHASE" --status "$status" \
-        --pr-url "$pr_url" --detail "log: ${RUN_LOG##*/}" \
-        --env-file "$WEEKEND_ROOT/.env" >/dev/null 2>&1; then
-        rm -f "$dest"
-        return 0
-      fi
-    fi
-  fi
-  [[ -n "$dest" ]] && rm -f "$dest"
   _notify_curl "$LOOP_SLUG" "$PHASE" "$status" "$pr_url" "log: ${RUN_LOG##*/}" || true
 }
-
-
 
 _sanitize_issue_text() {
   # Parsed with main(). Never exec disk python3 or a formatter file: both
