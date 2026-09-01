@@ -58,6 +58,13 @@ def _format_issue_body_fn(wrapper: Path) -> str:
     return body[start:end]
 
 
+def _notify_curl_fn(wrapper: Path) -> str:
+    body = _uncommented(wrapper)
+    start = body.index("_notify_curl() {")
+    end = body.index("\nnotify_phase() {", start)
+    return body[start:end]
+
+
 def _notify_phase_fn(wrapper: Path) -> str:
     body = _uncommented(wrapper)
     start = body.index("notify_phase() {")
@@ -369,6 +376,7 @@ class TestNotifyPhaseIsFenced:
     def test_notify_phase_always_curls_and_never_execs_python(self, wrapper: Path):
         body = _uncommented(wrapper)
         notify = _notify_phase_fn(wrapper)
+        curl = _notify_curl_fn(wrapper)
         assert "_notify_curl" in notify, wrapper.name
         assert "/usr/bin/curl" in body, wrapper.name
         assert "api.pushover.net" in body, wrapper.name
@@ -376,6 +384,9 @@ class TestNotifyPhaseIsFenced:
         assert "_sha256_file" not in body, wrapper.name
         assert "/usr/bin/python3" not in notify, wrapper.name
         assert "weekend_notify.py" not in notify, wrapper.name
+        assert "/usr/bin/tr" in curl, wrapper.name
+        assert "| tr " not in curl, wrapper.name
+        assert "|tr " not in curl, wrapper.name
 
     def test_rewritten_clone_notifier_is_not_execed(self, tmp_path: Path):
         clone = tmp_path / "clone"
@@ -476,6 +487,83 @@ class TestNotifyPhaseIsFenced:
         curl_calls = curl_log.read_text(encoding="utf-8") if curl_log.exists() else ""
         assert "api.pushover.net" in curl_calls, curl_calls
         assert "title=radon security audit" in curl_calls, curl_calls
+
+    def test_a_planted_venv_tr_cannot_skip_the_page(self, tmp_path: Path):
+        clone = tmp_path / "clone"
+        (clone / "scripts").mkdir(parents=True)
+        (clone / "logs" / "security-nightly").mkdir(parents=True)
+        wrapper = clone / "scripts" / "security_nightly.sh"
+        shutil.copy2(REPO / "scripts" / "security_nightly.sh", wrapper)
+        wrapper.chmod(wrapper.stat().st_mode | stat.S_IXUSR)
+        for name in (".radon-weekend-runner", ".radon-security-runner"):
+            (clone / name).write_text("", encoding="utf-8")
+        (tmp_path / ".env").write_text(
+            "PUSHOVER_USER=test-user\nPUSHOVER_TOKEN=test-token\n",
+            encoding="utf-8",
+        )
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        gh_log = tmp_path / "gh.log"
+        curl_log = tmp_path / "curl.log"
+        tr_marker = tmp_path / "PWNED_TR"
+        curl_stub = bin_dir / "curl"
+        wrapper.write_text(
+            wrapper.read_text(encoding="utf-8").replace("/usr/bin/curl", str(curl_stub)),
+            encoding="utf-8",
+        )
+        for name, content in {
+            "gh": (
+                "#!/bin/sh\n"
+                f'printf "%s\\n" "$*" >> "{gh_log}"\n'
+                'if [ "$1 $2" = "issue list" ]; then echo 4242; fi\n'
+                "exit 0\n"
+            ),
+            "git": "#!/bin/sh\nexit 0\n",
+            "timeout": (
+                "#!/bin/bash\n"
+                "while [ $# -gt 0 ]; do\n"
+                '  case "$1" in\n'
+                "    -k|--kill-after) shift 2 ;;\n"
+                "    *) shift; break ;;\n"
+                "  esac\n"
+                "done\n"
+                'exec "$@"\n'
+            ),
+            "tr": (
+                "#!/bin/sh\n"
+                f"echo PWN > '{tr_marker}'\n"
+                "exit 1\n"
+            ),
+            "curl": (
+                "#!/bin/sh\n"
+                f'echo "$*" >> "{curl_log}"\n'
+                "exit 0\n"
+            ),
+            "claude": (
+                "#!/bin/sh\n"
+                "echo 'SECURITY-NIGHTLY PHASE COMPLETE: audit'\n"
+                "exit 0\n"
+            ),
+        }.items():
+            exe = bin_dir / name
+            exe.write_text(content, encoding="utf-8")
+            exe.chmod(exe.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+        proc = subprocess.run(
+            ["/bin/bash", str(wrapper), "audit"],
+            env={
+                "PATH": f"{bin_dir}{os.pathsep}/usr/bin{os.pathsep}/bin",
+                "HOME": str(tmp_path / "home"),
+                "RADON_WEEKEND_REPO": str(clone),
+            },
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
+        assert not tr_marker.exists(), "PATH tr must not run inside _notify_curl"
+        curl_calls = curl_log.read_text(encoding="utf-8") if curl_log.exists() else ""
+        assert "api.pushover.net" in curl_calls, curl_calls
 
 
 class TestSanitizeUsesPinnedSed:

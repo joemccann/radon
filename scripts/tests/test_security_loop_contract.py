@@ -131,14 +131,11 @@ class TestTheLoopOwnsItsOwnLane:
         assert f'LOG_DIR="$REPO/{LOG_DIR}"' in body, body
 
     def test_the_notifier_accepts_this_loop(self):
-        proc = subprocess.run(
-            [sys.executable, str(REPO / "scripts" / "weekend_notify.py"),
-             "--loop", "security", "--phase", "audit", "--status", "OK"],
-            capture_output=True, text=True, timeout=60, env={"PATH": "/usr/bin:/bin"},
-        )
-        assert proc.returncode == 0, (
-            "weekend_notify rejects --loop security, so every phase page is "
-            f"dropped: {proc.stdout}{proc.stderr}"
+        body = _uncommented(WRAPPER)
+        assert 'LOOP_SLUG="security"' in body, body
+        assert '_notify_curl "$LOOP_SLUG"' in body, (
+            "the wrapper must page this loop via in-main _notify_curl; "
+            "weekend_notify.py is not the pager"
         )
 
 

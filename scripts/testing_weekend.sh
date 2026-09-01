@@ -171,8 +171,10 @@ _notify_curl() {
   [[ -n "$user" && -n "$token" ]] || return 0
   [[ -x /usr/bin/curl ]] || return 0
   title="radon ${loop} ${phase}"
-  message="$(printf '%s' "$status" | tr -s '[:space:]' ' ')"
-  detail="$(printf '%s' "$detail" | tr -s '[:space:]' ' ')"
+  # PATH is $VENV/bin first. A planted or failing PATH tr under set -e
+  # aborts before curl; notify_phase's || true would swallow the page.
+  message="$(printf '%s' "$status" | /usr/bin/tr -s '[:space:]' ' ')"
+  detail="$(printf '%s' "$detail" | /usr/bin/tr -s '[:space:]' ' ')"
   [[ -n "$detail" ]] && message="${message}"$'
 '"${detail}"
   [[ -n "$pr_url" ]] && message="${message}"$'
