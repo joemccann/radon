@@ -30,9 +30,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # gitleaks scans git history, not just the working tree, so a secret
-          # committed-then-reverted is still caught. fetch-depth: 0 pulls the
-          # full history; a shallow clone would scan only the tip and miss it.
+          # History must be deep enough for merge-base on long PRs and for a
+          # committed-then-reverted secret on the branch being scanned. The
+          # detect step still limits git log: PRs use merge-base..head, pushes
+          # use HEAD. fetch-depth: 0 also downloads sibling refs; --log-opts
+          # keeps those out of the scan.
           fetch-depth: 0
       # Pinned gitleaks binary (not gitleaks/gitleaks-action@v2): the action
       # defaults to scanning only the PUSH/PR commit RANGE and short-circuits
@@ -57,8 +59,24 @@ jobs:
       # `detect` exits non-zero (code 1) on any finding, which fails the job and
       # therefore blocks deploy (see the deploy `needs:`). --redact keeps the
       # actual secret value out of the public Actions log on a real hit.
+      # Default gitleaks git log is --all, so a fetch-depth: 0 clone of every
+      # open branch would fail this PR on sibling test fixtures. Scope PRs to
+      # merge-base..head; pushes scan HEAD lineage only.
       - name: Scan repo history for committed secrets
-        run: gitleaks detect --source . --config cloud/.gitleaks.toml --redact --no-banner --verbose
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            git fetch --no-tags origin "$PR_BASE" "$PR_HEAD"
+            merge_base="$(git merge-base "$PR_BASE" "$PR_HEAD")"
+            log_opts="${merge_base}..${PR_HEAD}"
+          else
+            log_opts="HEAD"
+          fi
+          gitleaks detect --source . --config cloud/.gitleaks.toml --redact --no-banner --verbose --log-opts="$log_opts"
 
   changes:
     name: Path filter
