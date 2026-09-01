@@ -727,3 +727,114 @@ class TestAnIncompletePhaseIsNeverReportedOk:
                 f"the skill no longer classifies {condition!r} as an "
                 "INCOMPLETE phase"
             )
+
+
+class TestTheLoopBillsTheSubscriptionNotTheApiKey:
+    """Rail 5b: model spend rides the operator's claude.ai login, never a key.
+
+    Claude Code and every scanner the agent drives through the Claude Agent
+    SDK (`deepsec process` / `revalidate`) prefer an Anthropic API key over the
+    claude.ai login whenever one is visible in their environment, and say so on
+    stderr: "claude.ai connectors are disabled because ANTHROPIC_API_KEY or
+    another auth source is set and takes precedence over your claude.ai login".
+    On 2026-09-01 that moved an 83-finding process + revalidate round onto
+    metered API billing without a line in any run record. Two halves: the
+    wrapper strips key material from the environment it hands its children, and
+    it refuses outright when a key sits in a file the scanners read themselves.
+    """
+
+    KEY = "sk-ant-api03-CONTRACT-TEST-NOT-A-REAL-KEY"
+    ENV_VARS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")
+
+    def _stub_bin(self, tmp_path: Path, env_dump: Path) -> Path:
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        stubs = {
+            "gh": (
+                "#!/bin/sh\n"
+                'if [ "$1 $2" = "issue list" ]; then echo 4242; fi\n'
+                "exit 0\n"
+            ),
+            # The agent records the environment it was actually launched with.
+            "claude": (
+                "#!/bin/sh\n"
+                f"env > '{env_dump}'\n"
+                f"echo '{_phase_complete_marker()} audit'\n"
+                "exit 0\n"
+            ),
+            "timeout": (
+                "#!/bin/bash\n"
+                "while [ $# -gt 0 ]; do\n"
+                '  case "$1" in\n'
+                "    -k|--kill-after) shift 2 ;;\n"
+                "    *) shift; break ;;\n"
+                "  esac\n"
+                "done\n"
+                'exec "$@"\n'
+            ),
+            "git": "#!/bin/sh\nexit 0\n",
+            "python3": "#!/bin/sh\nexit 0\n",
+        }
+        for name, body in stubs.items():
+            exe = bin_dir / name
+            exe.write_text(body, encoding="utf-8")
+            exe.chmod(0o755)
+        return bin_dir
+
+    def _audit(self, tmp_path: Path, *, env_extra=None, deepsec_env=None):
+        env_dump = tmp_path / "agent-env.txt"
+        bin_dir = self._stub_bin(tmp_path, env_dump)
+        repo = _clone(tmp_path, security_marker=True)
+        if deepsec_env is not None:
+            (repo / ".deepsec").mkdir()
+            (repo / ".deepsec" / ".env.local").write_text(deepsec_env, encoding="utf-8")
+        env = {
+            "PATH": f"{bin_dir}:/usr/bin:/bin",
+            "HOME": str(tmp_path / "home"),
+            "RADON_WEEKEND_REPO": str(repo),
+        }
+        env.update(env_extra or {})
+        proc = subprocess.run(
+            [BASH, str(repo / "scripts" / "security_nightly.sh"), "audit"],
+            cwd=repo, env=env, capture_output=True, text=True, timeout=120,
+        )
+        return proc, env_dump
+
+    @pytest.mark.parametrize("var", ENV_VARS)
+    def test_the_agent_child_never_inherits_api_key_material(self, tmp_path, var):
+        proc, env_dump = self._audit(tmp_path, env_extra={var: self.KEY})
+        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
+        dump = env_dump.read_text(encoding="utf-8") if env_dump.exists() else ""
+        assert dump, "the agent stub never ran, so the env it saw proves nothing"
+        assert f"{var}=" not in dump, (
+            f"{var} reached the agent; Claude Code prefers it over the "
+            "claude.ai login, so the whole night bills metered API usage"
+        )
+        assert self.KEY not in dump, dump
+
+    def test_a_key_file_the_scanners_read_themselves_refuses_the_run(self, tmp_path):
+        proc, env_dump = self._audit(
+            tmp_path, deepsec_env=f"ANTHROPIC_API_KEY={self.KEY}\n"
+        )
+        out = proc.stdout + proc.stderr
+        assert proc.returncode == 2, (proc.returncode, out)
+        assert "REFUSING" in out, out
+        assert ".deepsec/.env.local" in out, (
+            "the refusal must name the file the operator has to clear"
+        )
+        assert self.KEY not in out, "the refusal echoed the key it found"
+        assert not env_dump.exists(), "the agent ran anyway after the refusal"
+
+    def test_a_deepsec_env_file_without_key_material_still_runs(self, tmp_path):
+        proc, _env_dump = self._audit(
+            tmp_path,
+            deepsec_env="# ANTHROPIC_API_KEY= (removed 2026-09-01)\nVERCEL_TOKEN=dummy\n",
+        )
+        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
+
+    def test_the_skill_pins_subscription_auth_for_the_scanners(self):
+        text = SKILL.read_text(encoding="utf-8")
+        assert "ANTHROPIC_API_KEY" in text, (
+            "the skill never tells the agent that an API key must not be used "
+            "or provisioned for the scanner stages"
+        )
