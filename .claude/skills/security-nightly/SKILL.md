@@ -428,8 +428,17 @@ CLAUDE_BUDGET=""
 if ! printf '%s' "$CLAUDE_AUTH" | grep -q '"authMethod"[[:space:]]*:[[:space:]]*"claude\.ai"'; then
   CLAUDE_BUDGET="--max-budget-usd 50"   # API key; subscription runs uncapped
 fi
+# This is a SECOND claude process, so the wrapper's own `--model` does not
+# reach it. `$RADON_WEEKEND_MODEL` is the ladder rung the wrapper is running
+# this round on (re-exported after every quota drop); without it the night's
+# longest and most expensive call falls back to the machine's global
+# `~/.claude/settings.json` default — the single-point kill switch that killed
+# the 2026-09-01 run. It is unset only when a human ran this skill by hand
+# outside the wrapper; then, and only then, the session's own model is right.
+CLAUDE_MODEL_ARG=""
+[ -n "${RADON_WEEKEND_MODEL:-}" ] && CLAUDE_MODEL_ARG="--model $RADON_WEEKEND_MODEL"
 claude --agent claude-security:claude-security --permission-mode auto \
-  --output-format stream-json --verbose $CLAUDE_BUDGET \
+  --output-format stream-json --verbose $CLAUDE_MODEL_ARG $CLAUDE_BUDGET \
   -p "Scan changes with --base $LAST_AUDITED_SHA --effort medium. I understand it may take a while and use a significant number of tokens. Do not suggest patches or modify tracked files. Write only the standard ignored CLAUDE-SECURITY report." \
   >"$PRIVATE_RUN_DIR/claude-stream.jsonl" 2>"$PRIVATE_RUN_DIR/claude-stderr.log"
 ```
