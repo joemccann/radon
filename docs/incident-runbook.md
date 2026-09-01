@@ -650,6 +650,43 @@ on an instant FastAPI 502 capacity shed at the 10:00 ET timer.** Peak:
 
 ---
 
+## garch-capacity-502
+
+**`radon-garch.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+on an instant FastAPI 502 capacity shed at the 14:00 UTC timer.** Peak:
+2026-09-01 14:00:12Z, page `776ea756…`. Sibling of `leap-capacity-502`.
+
+- **Mechanism:** 3x/RTH timer POSTs `/garch-convergence/scan?preset=largecaps`.
+  At 14:00 UTC peer scanners fill the shared `run_script` lanes (hard cap 4 /
+  lane cap 3). The POST returned instant HTTP 502 (`curl=0, http=502`).
+  `/health/lite` stayed 200 / authenticated. The wrapper (R-144) treated any
+  non-exit-7 response as indeterminate, refused the direct fallback, and
+  exited 1 once. `Type=oneshot` has no `Restart=`, so `NRestarts=0`. Next
+  timer ~3h (17:00 UTC). Same window's LEAP POST at 14:01:16Z completed OK
+  at 14:02:33Z — the lane cleared within ~2 minutes. Leap already retried
+  sheds (2026-08-27); garch did not.
+- **Detection:** unit journal
+  `GARCH FastAPI outcome indeterminate (curl=0, http=502)` in the same
+  second as the POST; ExecMainStart equals InactiveEnter (instant fail);
+  `/health/lite` 200.
+- **Discriminating check:** instant 502 (this case). A long run that ends
+  `Script garch_convergence.py failed` is a scanner defect. `Result=signal`
+  is deploy stop-clean. If `/health/lite` is down too → API/IB, stand down.
+- **Remediation (code):** wait/retry HTTP 502/503 only when the body
+  matches `subprocess capacity exhausted` (R-221), charged against
+  `RADON_GARCH_SHED_WAIT_SECS` default 240 (fits under
+  `TimeoutStartSec=3900` with the 3610s scan curl). Keep the
+  no-duplicate rule for every other non-exit-7 outcome. Persistent shed
+  after the wait still exits 1 (next slot is the 17:00/20:00 timer).
+- **Regression:**
+  `test_garch_capacity_shed_retry.py::test_capacity_502_then_ok_retries_without_direct_fallback`,
+  `test_script_failed_502_does_not_retry_as_shed`,
+  `test_persistent_capacity_shed_no_duplicate_still_fails`.
+- **Code:** `scripts/run_garch_refresh.sh`
+  (`RADON_GARCH_SHED_WAIT_SECS`, `CAPACITY_SHED_MARKER`).
+
+---
+
 ## knowledge-ingest-sqlite-busy
 
 **`radon-knowledge.service` oneshot exits `Result=exit-code` on a single

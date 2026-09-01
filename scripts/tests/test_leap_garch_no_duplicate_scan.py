@@ -169,6 +169,7 @@ def _run(
         "RADON_PYTHON_BIN": str(py),
         spec["port_env"]: str(port),
         "RADON_LEAP_SLEEP_CMD": str(repo.parent / "bin" / "sleep-recorder"),
+        "RADON_GARCH_SLEEP_CMD": str(repo.parent / "bin" / "sleep-recorder"),
     }
     if timeout_secs is not None:
         env["RADON_SCAN_FASTAPI_TIMEOUT_SECS"] = timeout_secs
@@ -191,16 +192,14 @@ def test_capacity_502_does_not_launch_a_direct_duplicate(tmp_path, name):
     marker = tmp_path / "direct-ran"
     repo, py = _repo(tmp_path, spec, marker)
     port = _free_port()
-    # Leap waits out capacity shed (2026-08-27); keep the wait tiny here so
-    # the no-duplicate assertion stays fast. Garch still fails on first 502.
-    extra = (
-        {
-            "RADON_LEAP_SHED_WAIT_SECS": "2",
-            "RADON_LEAP_REFRESH_RETRY_DELAY_SECS": "1",
-        }
-        if name == "leap"
-        else None
-    )
+    # Leap (2026-08-27) and garch (2026-09-01) wait out capacity shed;
+    # keep the wait tiny here so the no-duplicate assertion stays fast.
+    extra = {
+        "RADON_LEAP_SHED_WAIT_SECS": "2",
+        "RADON_LEAP_REFRESH_RETRY_DELAY_SECS": "1",
+        "RADON_GARCH_SHED_WAIT_SECS": "2",
+        "RADON_GARCH_REFRESH_RETRY_DELAY_SECS": "1",
+    }
 
     with _Stub(port, 502) as stub:
         result = _run(repo, py, spec, port, extra_env=extra)
@@ -211,13 +210,9 @@ def test_capacity_502_does_not_launch_a_direct_duplicate(tmp_path, name):
     )
     assert result.returncode != 0, result.stdout + result.stderr
     combined = (result.stdout + result.stderr).lower()
-    if name == "leap":
-        # 2s budget at a 1s delay: two waits, three POSTs, then give up.
-        assert stub.calls == [spec["path"]] * 3, stub.calls
-        assert "capacity" in combined or "shed" in combined
-    else:
-        assert stub.calls == [spec["path"]], stub.calls
-        assert "indeterminate" in combined
+    # 2s budget at a 1s delay: two waits, three POSTs, then give up.
+    assert stub.calls == [spec["path"]] * 3, stub.calls
+    assert "capacity" in combined or "shed" in combined
 
 
 @pytest.mark.parametrize("name", sorted(WRAPPERS))

@@ -1,5 +1,16 @@
 # Lessons
 
+## 2026-09-01 — A capacity-shed retry on one sibling wrapper is not the other
+
+- Page `776ea756`: `radon-garch` instant FastAPI 502 at 14:00:12Z,
+  `curl=0 http=502`, `NRestarts=0`. `/health/lite` authenticated. LEAP in
+  the same window POSTed at 14:01:16Z and completed OK at 14:02:33Z.
+- `leap-capacity-502` (2026-08-27, `4350c666`) taught
+  `run_leap_refresh.sh` to wait on the R-221 body marker. `run_garch_refresh.sh`
+  kept the R-144 single-shot exit. The 14:00 UTC pile-up hits both.
+- When two wrappers share a FastAPI lane, a shed-retry on one is a defect
+  on the other until it is copied. Pin both in the same regression file.
+
 ## 2026-08-30 — Pin parity that only checks OPERATIONS ⊆ pins misses new routes
 
 - STREAKS shipped `radonCapability` and FastAPI `assistant_catalog.py`, CI green.
