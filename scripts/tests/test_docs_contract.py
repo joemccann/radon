@@ -500,3 +500,48 @@ class TestPrivateNetTrustScope:
             assert "is_private_net_probe" in text, rel
             assert "trusts exactly `10.0.0.0/16`" not in text, rel
             assert "tailnet/`10.0.0.0/16`" not in text, rel
+
+
+# ── DOC-021: TEST_LOG.md is an append-only ledger ─────────────────
+#
+# 4584e84a (#213) replaced the 543-line ledger with its one new row: header
+# and 176 prior T-rows vanished from HEAD while testing-weekend/SKILL.md kept
+# declaring the file append-only and reading it at pre-flight. Rows may only
+# be added relative to the base the change is reviewed against.
+
+_TEST_LOG = "TEST_LOG.md"
+_LEDGER_ROW = re.compile(r"^\| T-\d{3} \|", re.MULTILINE)
+
+
+def _ledger_base_ref() -> str | None:
+    base = (os.environ.get("DOCS_CONTRACT_BASE") or "").strip()
+    if base in {"", _ZERO}:
+        base = "origin/main"
+    try:
+        _git("rev-parse", "--verify", base)
+    except subprocess.CalledProcessError:
+        return None
+    return base
+
+
+class TestTestLogLedgerIsAppendOnly:
+    def test_header_is_present(self):
+        text = (_ROOT / _TEST_LOG).read_text(encoding="utf-8")
+        assert text.startswith("# TEST_LOG.md — testing remediation execution log"), (
+            "TEST_LOG.md lost its header: the ledger was overwritten, not appended"
+        )
+
+    def test_row_count_never_decreases_against_the_base(self):
+        base = _ledger_base_ref()
+        if base is None:
+            pytest.skip("no base ref to compare the ledger against")
+        try:
+            before = _git("show", f"{base}:{_TEST_LOG}")
+        except subprocess.CalledProcessError:
+            pytest.skip(f"{_TEST_LOG} absent at {base}")
+        now = (_ROOT / _TEST_LOG).read_text(encoding="utf-8")
+        was, is_now = len(_LEDGER_ROW.findall(before)), len(_LEDGER_ROW.findall(now))
+        assert is_now >= was, (
+            f"TEST_LOG.md has {is_now} T-rows but {base} has {was}: the ledger "
+            "is append-only (testing-weekend/SKILL.md rail 4); restore the rows"
+        )
