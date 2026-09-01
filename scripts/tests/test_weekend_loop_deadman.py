@@ -35,6 +35,7 @@ unlinked, and unlinked BEFORE `run_phase`.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shutil
@@ -569,10 +570,38 @@ def _committing_clone(tmp_path: Path, git: str) -> Path:
     (repo / ".radon-weekend-runner").write_text("", encoding="utf-8")
     # REL-180 (R-504): the testing wrapper requires its own loop marker too.
     (repo / ".radon-testing-runner").write_text("", encoding="utf-8")
+    wrapper = repo / "scripts" / "testing_weekend.sh"
+    shutil.copy2(TESTING, wrapper)
+    wrapper.chmod(wrapper.stat().st_mode | 0o100)
+    py_log = tmp_path / "py.log"
+    notify_stub = (
+        "#!/usr/bin/env python3\n"
+        "import sys\n"
+        f"open({str(py_log)!r}, 'a').write(' '.join(sys.argv) + '\\n')\n"
+    )
+    (repo / "scripts" / "weekend_notify.py").write_text(notify_stub, encoding="utf-8")
+    digest = hashlib.sha256(notify_stub.encode()).hexdigest()
+    wrapper.write_text(
+        re.sub(
+            r'NOTIFY_SHA256="[0-9a-f]{64}"',
+            f'NOTIFY_SHA256="{digest}"',
+            wrapper.read_text(encoding="utf-8"),
+        ),
+        encoding="utf-8",
+    )
     subprocess.run([git, "init", "-q", str(repo)], check=True, env=_GIT_ENV)
     at = [git, "-C", str(repo)]
     subprocess.run([*at, "symbolic-ref", "HEAD", "refs/heads/main"], check=True, env=_GIT_ENV)
-    subprocess.run([*at, "commit", "-q", "--allow-empty", "-m", "main tip"], check=True, env=_GIT_ENV)
+    subprocess.run(
+        [*at, "add", "-f",
+         "scripts/testing_weekend.sh",
+         "scripts/weekend_notify.py",
+         ".radon-weekend-runner",
+         ".radon-testing-runner"],
+        check=True,
+        env=_GIT_ENV,
+    )
+    subprocess.run([*at, "commit", "-q", "-m", "main tip"], check=True, env=_GIT_ENV)
     subprocess.run([*at, "update-ref", "refs/remotes/origin/main", "HEAD"], check=True, env=_GIT_ENV)
     return repo
 
@@ -649,7 +678,7 @@ class TestAnAgentThatCommitsNothingIsNotReportedOk:
         repo = _committing_clone(tmp_path, shutil.which("git"))
         bin_dir, gh_log, py_log = _committing_stub_bin(tmp_path, claude_body=claude_body)
         proc = subprocess.run(
-            [BASH, str(TESTING), "audit"],
+            [BASH, str(repo / "scripts" / "testing_weekend.sh"), "audit"],
             env={
                 **_GIT_ENV,
                 "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
@@ -673,11 +702,14 @@ class TestAnAgentThatCommitsNothingIsNotReportedOk:
         assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
         comment = next((ln for ln in calls.splitlines() if ln.startswith("issue comment")), "")
         assert comment, f"no dead-man comment at all: {calls!r} {proc.stderr!r}"
-        assert "**audit** " in comment and f"**{INCOMPLETE_STATUS}**" in comment, (
-            "the agent exited 0 having committed nothing — no ledger line, no "
-            f"PR — and the dead-man comment did not say so: {comment!r}"
+        assert "**Issue discovered**" in calls, (
+            f"no three-section issue comment: {calls!r} {proc.stderr!r}"
         )
-        assert "**OK**" not in comment, comment
+        assert INCOMPLETE_STATUS in calls, (
+            "the agent exited 0 having committed nothing — no ledger line, no "
+            f"PR — and the issue comment did not say so: {calls!r}"
+        )
+        assert "Nothing went wrong" not in calls, calls
         assert f"--status {INCOMPLETE_STATUS}" in pages, (
             f"the Pushover page must carry the same status: {pages!r}"
         )
@@ -693,10 +725,10 @@ class TestAnAgentThatCommitsNothingIsNotReportedOk:
             "exit 0\n",
         )
         assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
-        comment = next((ln for ln in calls.splitlines() if ln.startswith("issue comment")), "")
-        assert "**audit** " in comment and "**OK**" in comment, (
-            f"a phase that committed must still read OK: {comment!r} {proc.stderr!r}"
+        assert "**Issue discovered**" in calls, (
+            f"a phase that committed must still report: {calls!r} {proc.stderr!r}"
         )
-        assert "INCOMPLETE" not in comment, comment
+        assert "Nothing went wrong this audit phase." in calls, calls
+        assert INCOMPLETE_STATUS not in calls, calls
         assert "--status OK" in pages, pages
         assert "INCOMPLETE" not in pages, pages

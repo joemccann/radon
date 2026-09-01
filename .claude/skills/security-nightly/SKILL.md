@@ -29,9 +29,12 @@ The wrapper (`scripts/security_nightly.sh`) owns the runner mechanics: it
 refuses unless BOTH `.radon-weekend-runner` and `.radon-security-runner` exist
 (so it can never run in a sibling loop's clone or the operator checkout), takes
 the exclusive `.weekend-runner.lock`, hard-resets to `origin/main` before each
-phase, enforces the wall-clock caps, and posts a SANITIZED per-phase dead-man
-comment (status only, never a route, file, attack, secret, or account) plus a
-Pushover page. It does NOT scrub the environment for you and it does NOT
+phase, enforces the wall-clock caps, and posts a SANITIZED per-phase GitHub
+issue comment (Issue discovered / What was done / Next; never a route, file
+attack path, exploit, secret, account, or log pointer) plus a Pushover page.
+You never author that comment: do not run `gh issue comment`, `gh issue
+create`, or `gh issue edit`. Wrapper-only. It does NOT scrub the environment
+for you and it does NOT
 provide the private archive or DeepSec/Claude-Security tooling.
 
 **Fail closed is the default, not an error.** Most of the pipeline below is
@@ -658,13 +661,31 @@ by severity; private finding records and artifact checksums; tests/rescans run,
 remediation commit if any, rollback note; next monthly full-refresh date and
 unresolved private queue.
 
-The public repository receives no audit ledger. The dead-man notification (the
-wrapper's sanitized GitHub issue comment plus Pushover) may contain only the
-run ID, completion status, sanitized counts, and private archive pointer —
-never a route, file, attack, secret, topology, account, or vulnerability
-detail. If the private notification/archive service is not configured, record
-`OPERATOR_REQUIRED`, retain the mode-`0700` run directory locally, mark
-archival and the audit incomplete, and do NOT advance the audited SHA.
+The public repository receives no audit ledger. Do not run `gh issue comment`,
+`gh issue create`, or `gh issue edit`. The wrapper posts the only public
+GitHub issue comment, already sanitized, in this shape (so you know what the
+operator will see). You do not author that comment.
+
+**Issue discovered**
+What went wrong, in plain language (or that nothing public needs
+disclosure). Sanitized counts are allowed.
+
+**What was done to fix it**
+What THIS run actually changed. If nothing: "Nothing this run."
+
+**Next**
+Only work that must happen OUTSIDE of CI pushing a new deployment. If
+nothing remains: "Fixed with green deployment"
+
+The wrapper keeps it sanitized: no routes, file attack paths, exploits,
+secrets, or account identifiers. Put raw findings only in the private
+mode-`0700` run directory and, when a fix ships, in the PR. If the private
+archive service is not configured,
+record `OPERATOR_REQUIRED` in Next, retain the mode-`0700` run directory
+locally, mark archival and the audit incomplete, and do NOT advance the
+audited SHA. If the rolling issue has no run yet, the wrapper's issue body is
+the same three headings with "No run yet." / "Nothing this run." / "Waiting
+for the first nightly cycle."
 
 ## Anti-patterns
 
@@ -687,7 +708,8 @@ marker while work is parked in a background task or a suite is still running
 ("I'll pick up when the background run completes" is an INCOMPLETE phase, not
 a completed one); start a fresh run id while a resumable incomplete
 run-record for the same phase exists; generate work merely so the nightly
-loop appears productive.
+loop appears productive; run `gh issue comment`, `gh issue create`, or
+`gh issue edit` (the wrapper posts the only public issue comment).
 
 ## Industry basis
 

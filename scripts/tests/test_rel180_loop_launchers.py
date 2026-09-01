@@ -216,7 +216,7 @@ class TestRunLogTailIsRedacted:
         assert "issue comment" in calls, (result.returncode, result.stderr[-400:])
         assert "abc123secretvalue" not in calls, "the raw agent tail reached the public issue"
         assert "sk-ant-zzz999888" not in calls
-        assert "[REDACTED]" in calls
+        assert "**Issue discovered**" in calls
 
 
 class TestRedactor:

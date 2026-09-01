@@ -26,6 +26,7 @@ code and on what the dead-man was told.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shutil
@@ -103,9 +104,6 @@ def _build(
         for loop_marker in (".radon-security-runner", ".radon-reliability-runner", ".radon-testing-runner",
                             ".radon-ci-performance-runner", ".radon-documentation-runner"):
             (clone / loop_marker).touch()
-    # notify_phase shells `python3 $REPO/scripts/weekend_notify.py`; python3
-    # is stubbed, but the file must exist for the call to look real.
-    (clone / "scripts" / "weekend_notify.py").write_text("# stub\n", encoding="utf-8")
 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -114,6 +112,25 @@ def _build(
     git_log = tmp_path / "git.log"
     agent_log = tmp_path / "agent.log"
     attack_sh = tmp_path / "attack.sh"
+
+    # Hash-pinned notify execs /usr/bin/python3 on a copy outside the clone.
+    # PATH python3 is the agent-writable venv; this stub must be what that
+    # copy runs, and the wrapper copy's pin must match it.
+    notify_stub = (
+        "#!/usr/bin/env python3\n"
+        "import sys\n"
+        f"open({str(push_log)!r}, 'a').write('notify ' + ' '.join(sys.argv) + '\\n')\n"
+    )
+    (clone / "scripts" / "weekend_notify.py").write_text(notify_stub, encoding="utf-8")
+    digest = hashlib.sha256(notify_stub.encode()).hexdigest()
+    wrapper.write_text(
+        re.sub(
+            r'NOTIFY_SHA256="[0-9a-f]{64}"',
+            f'NOTIFY_SHA256="{digest}"',
+            wrapper.read_text(encoding="utf-8"),
+        ),
+        encoding="utf-8",
+    )
 
     # The rewriter. `> "$f"` truncates in place: same inode, which is the only
     # writer shape that can strand a running interpreter at a stale offset.
@@ -264,13 +281,17 @@ def _comments(cfg: dict) -> list[str]:
 
 
 def _pages(cfg: dict) -> int:
-    """python3 invocations of the NOTIFIER. The stub records every python3
-    call; since REL-180 report() also runs weekend_redact.py through it."""
+    """Pushover attempts: hash-pinned /usr/bin/python3 copy (argv is the
+    dest outside the clone) or the curl fallback."""
     if not cfg["push_log"].exists():
         return 0
     return len([
         ln for ln in cfg["push_log"].read_text(encoding="utf-8").splitlines()
-        if ln.strip() and "weekend_notify.py" in ln
+        if ln.strip() and (
+            "weekend_notify.py" in ln
+            or ".weekend-notify" in ln
+            or "pushover.net" in ln
+        )
     ])
 
 
@@ -299,7 +320,7 @@ def test_a_mid_run_rewrite_cannot_change_the_runs_outcome(
     assert result.returncode == 7, _why(result, cfg)
     comments = _comments(cfg)
     assert len(comments) == 1, _why(result, cfg)
-    assert "**audit**" in comments[0], comments
+    assert "**Issue discovered**" in comments[0], comments
     assert "FAILED (exit 7)" in comments[0], comments
     assert "CRASHED" not in comments[0], "a finished agent is not a wrapper crash"
     assert _pages(cfg) == 1, "exactly one Pushover per phase"
@@ -314,7 +335,7 @@ def test_the_agent_exit_code_survives_the_rewrite(
     result = _run(cfg, "remediate")
 
     assert result.returncode == agent_rc, _why(result, cfg)
-    assert "**remediate**" in _comments(cfg)[-1]
+    assert "remediate" in _comments(cfg)[-1], _comments(cfg)
 
 
 @pytest.mark.parametrize("loop", LOOP_IDS)
@@ -334,7 +355,8 @@ def test_a_cycle_still_reports_both_phases(tmp_path: Path, loop: str) -> None:
 
     assert result.returncode == 0, _why(result, cfg)
     bodies = "\n".join(_comments(cfg))
-    assert "**audit**" in bodies and "**remediate**" in bodies, bodies
+    assert bodies.count("**Issue discovered**") >= 2, bodies
+    assert "audit" in bodies and "remediate" in bodies, bodies
     assert "CRASHED" not in bodies, bodies
 
 

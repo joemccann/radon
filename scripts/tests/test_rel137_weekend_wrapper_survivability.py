@@ -15,6 +15,7 @@ Each item applies to BOTH twins.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shutil
@@ -56,8 +57,34 @@ def _runner_clone(tmp_path: Path, name: str) -> Path:
     for marker in (".radon-security-runner", ".radon-reliability-runner", ".radon-testing-runner",
                    ".radon-ci-performance-runner", ".radon-documentation-runner"):
         (repo / marker).write_text("", encoding="utf-8")
+    wrapper_src = LOOPS[name]
+    wrapper = repo / "scripts" / wrapper_src.name
+    shutil.copy2(wrapper_src, wrapper)
+    wrapper.chmod(wrapper.stat().st_mode | 0o100)
+    # Hash-pin matches this stub so /usr/bin/python3 pages; PATH python3 is
+    # the agent-writable venv and must not be the notify interpreter.
+    py_log = tmp_path / "py.log"
+    notify_stub = (
+        "#!/usr/bin/env python3\n"
+        "import sys\n"
+        f"open({str(py_log)!r}, 'a').write(' '.join(sys.argv) + '\\n')\n"
+    )
+    (repo / "scripts" / "weekend_notify.py").write_text(notify_stub, encoding="utf-8")
+    digest = hashlib.sha256(notify_stub.encode()).hexdigest()
+    wrapper.write_text(
+        re.sub(
+            r'NOTIFY_SHA256="[0-9a-f]{64}"',
+            f'NOTIFY_SHA256="{digest}"',
+            wrapper.read_text(encoding="utf-8"),
+        ),
+        encoding="utf-8",
+    )
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
     return repo
+
+
+def _cloned_wrapper(repo: Path, name: str) -> Path:
+    return repo / "scripts" / LOOPS[name].name
 
 
 def _stub_bin(tmp_path: Path, *, claude_body: str) -> tuple[Path, Path, Path]:
@@ -124,7 +151,7 @@ class TestSignalledRunReportsItsDeath:
             claude_body=f"#!/bin/sh\ntouch {started}\nsleep 60\n",
         )
         proc = subprocess.Popen(
-            [BASH, str(LOOPS[name]), "audit"],
+            [BASH, str(_cloned_wrapper(repo, name)), "audit"],
             env={
                 **os.environ,
                 "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
@@ -152,7 +179,9 @@ class TestSignalledRunReportsItsDeath:
         assert "issue comment" in calls, f"no dead-man comment on SIGTERM: {calls!r}"
         assert "KILLED" in calls, calls
         pages = py_log.read_text(encoding="utf-8") if py_log.exists() else ""
-        assert "weekend_notify.py" in pages, f"no Pushover on SIGTERM: {pages!r}"
+        assert ".weekend-notify" in pages or "weekend_notify.py" in pages, (
+            f"no Pushover on SIGTERM: {pages!r}"
+        )
         assert proc.returncode == 143, proc.returncode
         assert not (repo / ".weekend-runner.lock").exists(), "the lock was not released"
 
@@ -219,7 +248,7 @@ class TestTheCapIsEnforceable:
         )
         start = time.monotonic()
         proc = subprocess.run(
-            [BASH, str(LOOPS[name]), "audit"],
+            [BASH, str(_cloned_wrapper(repo, name)), "audit"],
             env={
                 **os.environ,
                 "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
@@ -268,7 +297,7 @@ class TestTheCapIsEnforceable:
             if key != "PYTEST_CURRENT_TEST"
         }
         proc = subprocess.run(
-            [BASH, str(LOOPS[name]), "audit"],
+            [BASH, str(_cloned_wrapper(repo, name)), "audit"],
             env={
                 **env,
                 "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
@@ -286,7 +315,9 @@ class TestTheCapIsEnforceable:
         calls = gh_log.read_text(encoding="utf-8") if gh_log.exists() else ""
         assert "REFUSED" in calls, f"the fail-closed refusal was not reported: {calls!r}"
         pages = py_log.read_text(encoding="utf-8") if py_log.exists() else ""
-        assert "weekend_notify.py" in pages, f"the fail-closed refusal did not page: {pages!r}"
+        assert ".weekend-notify" in pages or "weekend_notify.py" in pages, (
+            f"the fail-closed refusal did not page: {pages!r}"
+        )
 
 
 # --- (c) R-385: the continuation re-ground cannot end the run silently -------

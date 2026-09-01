@@ -329,7 +329,7 @@ class TestTheDeadmanIsSanitized:
     @pytest.mark.parametrize(
         "case, stub_kwargs, expected_status, expected_rc",
         [
-            ("ok", {"claude_rc": 0}, "**OK**", 0),
+            ("ok", {"claude_rc": 0}, "Nothing went wrong this audit phase.", 0),
             ("failed", {"claude_rc": 7}, "FAILED (exit 7)", 7),
             ("timeout", {"timeout_124": True}, "TIMEOUT", 124),
             # R-517: an incomplete phase exits 75, so neither the dead-man nor
@@ -678,7 +678,7 @@ class TestAnIncompletePhaseIsNeverReportedOk:
         )
         assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
         calls = gh_log.read_text(encoding="utf-8") if gh_log.exists() else ""
-        assert "**OK**" in calls, calls
+        assert "**Issue discovered**" in calls or "Nothing went wrong this audit phase." in calls, calls
 
     def test_exit_zero_without_the_marker_is_incomplete_and_nonzero(self, tmp_path):
         # The literal shape of last night's failure: a deferral sentence that
@@ -700,7 +700,7 @@ class TestAnIncompletePhaseIsNeverReportedOk:
         )
         calls = gh_log.read_text(encoding="utf-8") if gh_log.exists() else ""
         assert "INCOMPLETE" in calls, calls
-        assert "**OK**" not in calls, calls
+        assert "Nothing went wrong this audit phase." not in calls, calls
         assert "NOT advanced" in calls, (
             f"the dead-man must say the audited SHA stayed put: {calls!r}"
         )

@@ -613,24 +613,29 @@ A zero-finding run still does not open a PR (rail 4).
 
 Use the rolling GitHub issue labeled `documentation-nightly` as the compact,
 append-only audit state. Do not create a repository audit log. Every phase
-posts:
+posts this shape, never a status dump or a pointer to a log on a machine:
 
-- status: `DONE`, `NO_ACTIONABLE_DRIFT`, `BLOCKED`, or
-  `OPERATOR_REQUIRED`;
-- `audited-through: <verified SHA>` and the examined range;
-- changed high-risk categories and classification counts;
-- `DOC-###` findings with severity, actor/action/harm, source evidence, owner,
-  and smallest remediation;
-- deterministic failures versus external-network warnings;
-- files changed/deleted/consolidated/generated;
-- exact validation commands and counts;
-- PR URL only when a real repository change exists;
-- operator action, if any, and residual risk.
+**Issue discovered**
+What went wrong, in plain language. If nothing went wrong, say that
+(`NO_ACTIONABLE_DRIFT` lives here).
+
+**What was done to fix it**
+What THIS run actually changed: `audited-through: <SHA>`, classification
+counts, `DOC-###` findings (severity, actor/action/harm, owner), files
+changed. If nothing: "Nothing this run."
+
+**Next**
+Only work that must happen OUTSIDE of CI pushing a new deployment
+(`OPERATOR_REQUIRED`, `BLOCKED`). If nothing remains: "Fixed with green deployment"
+
+If the rolling issue has no run yet, the issue body is the same three
+headings with "No run yet." / "Nothing this run." / "Waiting for the first
+nightly cycle."
 
 The wrapper also sends the per-phase Pushover notification and posts the
-wrapper-level dead-man comment. A missing issue comment is the dead-man
-signal. A zero-finding night has an issue comment and notification, but no PR
-or repository artifact.
+wrapper-level comment. A missing issue comment is the dead-man signal. A
+zero-finding night has an issue comment and notification, but no PR or
+repository artifact.
 
 Before allocating `DOC-###`, inspect the rolling issue, open/closed
 documentation PRs, and git history to avoid collisions. The issue and PR

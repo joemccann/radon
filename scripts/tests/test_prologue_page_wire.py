@@ -15,7 +15,10 @@ in-process with the transport patched.
 """
 from __future__ import annotations
 
+import hashlib
 import os
+import re
+import shutil
 import stat
 import subprocess
 from pathlib import Path
@@ -43,16 +46,20 @@ def _executable(path: Path, content: str) -> None:
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
-def _build(tmp_path: Path, *, marker: bool, lock_held: bool) -> dict:
+def _build(tmp_path: Path, *, marker: bool, lock_held: bool, loop: str) -> dict:
     """Stage a runner clone whose prologue will refuse, plus recording stubs."""
     clone = tmp_path / "clone"
     (clone / "scripts").mkdir(parents=True)
+    wrapper_src = REPO / "scripts" / LOOPS[loop]
+    wrapper = clone / "scripts" / LOOPS[loop]
+    shutil.copy2(wrapper_src, wrapper)
+    wrapper.chmod(wrapper.stat().st_mode | stat.S_IXUSR)
     if marker:
         (clone / ".radon-weekend-runner").touch()
         # REL-180 (R-504): every wrapper requires its OWN loop marker too, so
         # this generic clone carries all five.
-        for loop in LOOPS:
-            (clone / f".radon-{loop}-runner").touch()
+        for loop_name in LOOPS:
+            (clone / f".radon-{loop_name}-runner").touch()
     if lock_held:
         lock = clone / ".weekend-runner.lock"
         lock.mkdir()
@@ -65,8 +72,23 @@ def _build(tmp_path: Path, *, marker: bool, lock_held: bool) -> dict:
     argv_dir = tmp_path / "notify-argv"
     argv_dir.mkdir()
 
-    # One NUL-separated argv record per invocation, keyed by the stub's pid:
-    # the record count is the page count, and the bytes are the wire.
+    notify_stub = (
+        "#!/usr/bin/env python3\n"
+        "import os, sys\n"
+        f"open({str(argv_dir)!r} + '/' + str(os.getpid()), 'wb').write("
+        "('\\0'.join(sys.argv) + '\\0').encode())\n"
+    )
+    (clone / "scripts" / "weekend_notify.py").write_text(notify_stub, encoding="utf-8")
+    digest = hashlib.sha256(notify_stub.encode()).hexdigest()
+    wrapper.write_text(
+        re.sub(
+            r'NOTIFY_SHA256="[0-9a-f]{64}"',
+            f'NOTIFY_SHA256="{digest}"',
+            wrapper.read_text(encoding="utf-8"),
+        ),
+        encoding="utf-8",
+    )
+
     _executable(
         bin_dir / "python3",
         "#!/bin/bash\n" f'printf \'%s\\0\' "$@" > "{argv_dir}/$$"\n' "exit 0\n",
@@ -99,12 +121,12 @@ def _build(tmp_path: Path, *, marker: bool, lock_held: bool) -> dict:
         "HOME": str(tmp_path / "home"),
         "RADON_WEEKEND_REPO": str(clone),
     }
-    return {"clone": clone, "env": env, "argv_dir": argv_dir}
+    return {"clone": clone, "env": env, "argv_dir": argv_dir, "wrapper": wrapper}
 
 
 def _run(cfg: dict, loop: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["/bin/bash", str(REPO / "scripts" / LOOPS[loop]), "audit"],
+        ["/bin/bash", str(cfg["wrapper"]), "audit"],
         cwd=cfg["clone"],
         env=cfg["env"],
         capture_output=True,
@@ -126,7 +148,7 @@ def _recorded_argv(cfg: dict) -> list[list[str]]:
 def _replay(argv: list[str], loop: str, status: str, monkeypatch) -> None:
     """Feed the wrapper's argv to the real notifier and assert the page."""
     script, notify_argv = argv[0], argv[1:]
-    assert script.endswith("scripts/weekend_notify.py"), argv
+    assert ".weekend-notify" in script or script.endswith("scripts/weekend_notify.py"), argv
     monkeypatch.setenv("PUSHOVER_USER", "u")
     monkeypatch.setenv("PUSHOVER_TOKEN", "t")
     with patch("weekend_notify._http_post", return_value=(200, b"")) as post:
@@ -141,7 +163,7 @@ def _replay(argv: list[str], loop: str, status: str, monkeypatch) -> None:
 
 @pytest.mark.parametrize("loop", LOOP_IDS)
 def test_marker_refusal_pages_through_the_real_notifier(tmp_path: Path, loop: str, monkeypatch) -> None:
-    cfg = _build(tmp_path, marker=False, lock_held=False)
+    cfg = _build(tmp_path, marker=False, lock_held=False, loop=loop)
     result = _run(cfg, loop)
     assert result.returncode == 2, result.stderr
     assert "REFUSING" in result.stderr
@@ -152,7 +174,7 @@ def test_marker_refusal_pages_through_the_real_notifier(tmp_path: Path, loop: st
 
 @pytest.mark.parametrize("loop", LOOP_IDS)
 def test_held_lock_refusal_pages_through_the_real_notifier(tmp_path: Path, loop: str, monkeypatch) -> None:
-    cfg = _build(tmp_path, marker=True, lock_held=True)
+    cfg = _build(tmp_path, marker=True, lock_held=True, loop=loop)
     result = _run(cfg, loop)
     assert result.returncode == 3, result.stderr
     assert "another weekend run owns" in result.stderr

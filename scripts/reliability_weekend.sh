@@ -117,6 +117,17 @@ VENV="$WEEKEND_ROOT/venv-reliability"
 [[ -f "$VENV/bin/activate" ]] && export PATH="$VENV/bin:$PATH"
 DEADMAN_TITLE="Nightly reliability runner"
 DEADMAN_LABEL="reliability-nightly"
+ISSUE_SANITIZE=0
+LOOP_SLUG="reliability"
+NOTIFY_SHA256="b100e71ceb7e262b51181da30c44fcee4921f3a30406ee53c76de718b428d4bf"
+NO_RUN_YET_BODY='**Issue discovered**
+No run yet.
+
+**What was done to fix it**
+Nothing this run.
+
+**Next**
+Waiting for the first nightly cycle.'
 # Branch prefix the skill opens/updates its PR from. Matched on the head
 # ref, not the title: the title is now `Reliability <date>`, which a
 # hand-written PR could also start with.
@@ -133,15 +144,163 @@ resolve_pr_url() {
   printf '%s' "$url"
 }
 
+_sha256_file() {
+  local f="$1" out=""
+  [[ -f "$f" ]] || { printf ''; return 0; }
+  if [[ -x /usr/bin/shasum ]]; then
+    out="$(/usr/bin/shasum -a 256 "$f" 2>/dev/null || true)"
+  elif [[ -x /usr/bin/sha256sum ]]; then
+    out="$(/usr/bin/sha256sum "$f" 2>/dev/null || true)"
+  fi
+  printf '%s' "${out%% *}"
+}
+
+_notify_cred() {
+  local key="$1" envf="$WEEKEND_ROOT/.env" line val=""
+  val="${!key:-}"
+  if [[ -n "$val" ]]; then
+    printf '%s' "$val"
+    return 0
+  fi
+  [[ -f "$envf" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'
+'}"
+    case "$line" in
+      "${key}="*)
+        val="${line#*=}"
+        val="${val#\"}"
+        val="${val%\"}"
+        val="${val#\'}"
+        val="${val%\'}"
+        printf '%s' "$val"
+        return 0
+        ;;
+    esac
+  done < "$envf"
+}
+
+_notify_curl() {
+  local loop="$1" phase="$2" status="$3" pr_url="$4" detail="$5"
+  local user token title message
+  user="$(_notify_cred PUSHOVER_USER || true)"
+  token="$(_notify_cred PUSHOVER_TOKEN || true)"
+  [[ -n "$user" && -n "$token" ]] || return 0
+  [[ -x /usr/bin/curl ]] || return 0
+  title="radon ${loop} ${phase}"
+  message="$(printf '%s' "$status" | tr -s '[:space:]' ' ')"
+  detail="$(printf '%s' "$detail" | tr -s '[:space:]' ' ')"
+  [[ -n "$detail" ]] && message="${message}"$'
+'"${detail}"
+  [[ -n "$pr_url" ]] && message="${message}"$'
+'"${pr_url}"
+  /usr/bin/curl -sS --max-time 10 -o /dev/null \
+    --data-urlencode "token=${token}" \
+    --data-urlencode "user=${user}" \
+    --data-urlencode "title=${title}" \
+    --data-urlencode "message=${message}" \
+    --data-urlencode "priority=0" \
+    https://api.pushover.net/1/messages.json \
+    >/dev/null 2>&1 || true
+}
+
 notify_phase() {
   # One Pushover per phase so a hung phase is visible immediately.
   # Best-effort: it must never change the run's exit code.
-  local status="$1" pr_url
+  # venv python3 and the clone notifier are agent-writable; lock-held
+  # overlapping fires also run leftover clone files in prologue. Copy
+  # outside the clone, refuse unless the copy still hashes to the pin
+  # baked into this wrapper, else page with /usr/bin/curl.
+  local status="$1" pr_url dest got
   pr_url="$(resolve_pr_url)"
-  python3 "$REPO/scripts/weekend_notify.py" \
-    --loop reliability --phase "$PHASE" --status "$status" \
-    --pr-url "$pr_url" --detail "log: ${RUN_LOG##*/}" \
-    --env-file "$WEEKEND_ROOT/.env" >/dev/null 2>&1 || true
+  dest=""
+  if [[ -f "$REPO/scripts/weekend_notify.py" ]]; then
+    dest="$(/usr/bin/mktemp "${WEEKEND_ROOT}/.weekend-notify.XXXXXX" 2>/dev/null || true)"
+  fi
+  if [[ -n "$dest" ]] && cp "$REPO/scripts/weekend_notify.py" "$dest" 2>/dev/null; then
+    chmod a-w "$dest" 2>/dev/null || true
+    got="$(_sha256_file "$dest")"
+    if [[ -n "$got" && "$got" == "$NOTIFY_SHA256" && -x /usr/bin/python3 ]]; then
+      got="$(_sha256_file "$dest")"
+      if [[ "$got" == "$NOTIFY_SHA256" ]] && /usr/bin/python3 "$dest" \
+        --loop "$LOOP_SLUG" --phase "$PHASE" --status "$status" \
+        --pr-url "$pr_url" --detail "log: ${RUN_LOG##*/}" \
+        --env-file "$WEEKEND_ROOT/.env" >/dev/null 2>&1; then
+        rm -f "$dest"
+        return 0
+      fi
+    fi
+  fi
+  [[ -n "$dest" ]] && rm -f "$dest"
+  _notify_curl "$LOOP_SLUG" "$PHASE" "$status" "$pr_url" "log: ${RUN_LOG##*/}" || true
+}
+
+
+
+_sanitize_issue_text() {
+  # Parsed with main(). Never exec disk python3 or a formatter file: both
+  # are writable by the agent (venv python3, clone file, PID-guessable snapshot).
+  local text="$1"
+  [[ -n "$text" ]] || { printf '%s' "$text"; return 0; }
+  text="${text//https:\/\/claude.ai\/settings\/usage/$'\x01USAGE\x01'}"
+  text="${text//http:\/\/claude.ai\/settings\/usage/$'\x01USAGE\x01'}"
+  text="${text//claude.ai\/settings\/usage/$'\x01USAGE\x01'}"
+  text="$(printf '%s' "$text" | /usr/bin/sed -E \
+    -e 's,https?://[^[:space:]]+,[REDACTED],g' \
+    -e 's,(^|[^[:alnum:].])/(api|admin)/[A-Za-z0-9._/-]+,\1[REDACTED],g' \
+    -e 's,[A-Za-z0-9./_-]+\.(py|ts|tsx|js|mjs|cjs|sh|go|rb|java|json|yml|yaml|toml|md):[0-9]+,[REDACTED],g' \
+    -e 's,[Bb]earer [^[:space:]]+,Bearer [REDACTED],g' \
+    -e 's,[A-Za-z0-9_]*(TOKEN|SECRET|PASSWORD|PASSWD|PASS|AUTH|CREDENTIAL|API_KEY|APIKEY|_KEY)[A-Za-z0-9_]*[[:space:]]*[=:][[:space:]]*[^[:space:]]+,[REDACTED],g' \
+    -e 's,[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z][A-Za-z]+,[REDACTED],g' \
+    -e 's,(^|[^A-Za-z0-9])(radon)?(trader|operator)[0-9]+,\1[REDACTED],g' \
+    -e 's,[Cc]heck the runner,,g' \
+    -e 's,[Oo]n the runner,,g' \
+    || true)"
+  text="${text//$'\x01USAGE\x01'/claude.ai/settings/usage}"
+  printf '%s' "$text"
+}
+
+_format_issue_body() {
+  # In-main bash only. A later python3 exec would run agent-writable code
+  # and post stdout that merely contains "Issue discovered".
+  local phase="$1" status="$2" detail="$3"
+  local clean discovered done_s next body
+  if [[ "${ISSUE_SANITIZE:-0}" == "1" ]]; then
+    phase="$(_sanitize_issue_text "$phase")"
+    status="$(_sanitize_issue_text "$status")"
+    detail="$(_sanitize_issue_text "$detail")"
+  fi
+  clean="${detail%%\`\`\`*}"
+  case "$status" in
+    OK)
+      discovered="Nothing went wrong this ${phase} phase."
+      if [[ -n "$clean" ]]; then
+        done_s="$clean"
+      else
+        done_s="The ${phase} phase completed."
+      fi
+      next="Fixed with green deployment"
+      ;;
+    *)
+      discovered="${phase} ${status}."
+      if [[ -n "$clean" ]]; then
+        discovered="${discovered} ${clean}"
+      fi
+      done_s="Nothing this run."
+      case "$status" in
+        *"quotas exhausted"*) next="Top up at claude.ai/settings/usage, then let the next fire resume." ;;
+        INCOMPLETE*|TRUNCATED*) next="The next fire resumes this phase. Do not read this as a finished run." ;;
+        TIMEOUT*) next="The next fire resumes. Partial work may exist on the nightly branch." ;;
+        *) next="${clean:-The next fire retries this phase.}" ;;
+      esac
+      ;;
+  esac
+  body="$(printf '**Issue discovered**\n%s\n\n**What was done to fix it**\n%s\n\n**Next**\n%s' \
+    "$discovered" "$done_s" "$next")"
+  if [[ "${ISSUE_SANITIZE:-0}" == "1" ]]; then
+    body="$(_sanitize_issue_text "$body")"
+  fi
+  printf '%s\n' "$body"
 }
 
 report() {
@@ -149,15 +308,14 @@ report() {
   # must not mask the run's own exit code. Third arg 0 suppresses the
   # Pushover (interim continuation rounds stay issue-only).
   local status="$1" detail="$2" push="${3:-1}"
-  local body="**${PHASE}** ${STAMP} — **${status}**
-${detail}
-log: \`${RUN_LOG##*/}\` on the runner"
+  local body
+  body="$(_format_issue_body "$PHASE" "$status" "$detail")"
   local issue
   issue="$(net_bounded gh issue list --label "$DEADMAN_LABEL" --state open \
     --json number -q '.[0].number' 2>/dev/null || true)"
   if [[ -z "$issue" ]]; then
     net_bounded gh issue create --title "$DEADMAN_TITLE" --label "$DEADMAN_LABEL" \
-      --body "Rolling dead-man for the nightly reliability loop. A missing daily comment means the runner did not fire." \
+      --body "$NO_RUN_YET_BODY" \
       >/dev/null 2>&1 || true
     issue="$(net_bounded gh issue list --label "$DEADMAN_LABEL" --state open \
       --json number -q '.[0].number' 2>/dev/null || true)"
@@ -198,7 +356,7 @@ phase_status() {
 }
 
 on_crash() {
-  report "CRASHED (exit $?)" "wrapper died before the agent finished — check the runner"
+  report "CRASHED (exit $?)" "wrapper died before the agent finished"
 }
 
 # Bash runs the EXIT trap on an untrapped SIGTERM, so the lock released and the
@@ -323,8 +481,8 @@ begin_phase() {
     && echo "${RADON_WEEKEND_AUDIT_CAP_SECS:-7200}" \
     || echo "${RADON_WEEKEND_REMEDIATE_CAP_SECS:-21600}")
   MAX_ROUNDS=$([[ "$PHASE" == "remediate" ]] && echo 8 || echo 1)
-  # One log per phase: the transient-network detector and the report tail
-  # both read $RUN_LOG.
+  # One log per phase: the transient-network detector reads $RUN_LOG.
+  # Issue comments do not include a run-log tail.
   RUN_LOG="$LOG_DIR/$PHASE-$STAMP.log"
   RC=0
 }
@@ -524,11 +682,6 @@ run_phase() {
   # A genuine wrapper death AFTER the rounds finished must still page.
   trap on_crash ERR
 
-  local tail_text
-  # REL-180 (R-505): this tail is posted to a PUBLIC issue. Every value from
-  # the clone's env files and any KEY=/Bearer shape is scrubbed before it
-  # leaves; a redactor failure posts nothing rather than the raw tail.
-  tail_text="$(tail -c 1500 "$RUN_LOG" 2>/dev/null | python3 "$REPO/scripts/weekend_redact.py" --repo "$REPO" 2>/dev/null || true)"
   local status
   status="$(phase_status "$RC" "$RUN_LOG" "$ROUND_LOG_MARK")"
   # An exhausted ladder is not a generic non-zero exit: the operator needs the
@@ -538,23 +691,13 @@ run_phase() {
   fi
   case "$status" in
     OK)
-      report "$status" "\`\`\`
-${tail_text}
-\`\`\`" ;;
+      report "$status" "The audit or remediate phase completed." ;;
     TRUNCATED*)
-      report "$status" "the harness killed unfinished background work and the agent still exited 0 — this phase's output is INCOMPLETE and must not be read as a finished run
-\`\`\`
-${tail_text}
-\`\`\`" ;;
+      report "$status" "the harness killed unfinished background work and the agent still exited 0 — this phase's output is INCOMPLETE and must not be read as a finished run" ;;
     TIMEOUT*)
-      report "$status" "partial work may exist on the weekend branch/PR
-\`\`\`
-${tail_text}
-\`\`\`" ;;
+      report "$status" "partial work may exist on the weekend branch/PR" ;;
     *)
-      report "$status" "\`\`\`
-${tail_text}
-\`\`\`" ;;
+      report "$status" "" ;;
   esac
   echo "[weekend] $PHASE done rc=$RC" | tee -a "$RUN_LOG"
 }

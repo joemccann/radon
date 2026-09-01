@@ -363,7 +363,23 @@ Zero-finding nights still open the PR as the dead-man signal:
 ## Required nightly report
 
 The nightly PR uses §Pull request output. The rolling GitHub issue
-labeled `ci-performance-nightly` still includes:
+labeled `ci-performance-nightly` still includes those facts, posted in
+this shape, never a status dump or a pointer to a log on a machine:
+
+**Issue discovered**
+What went wrong, in plain language. If nothing went wrong, say that.
+
+**What was done to fix it**
+What THIS run actually changed. If nothing: "Nothing this run."
+
+**Next**
+Only work that must happen OUTSIDE of CI pushing a new deployment. If
+nothing remains: "Fixed with green deployment"
+
+If the rolling issue has no run yet, the issue body is the same three
+headings with "No run yet." / "Nothing this run." / "Waiting for the first
+nightly cycle." Put the following inside those sections. A zero-change
+night still comments.
 
 - `DONE`, `VALIDATING`, `BLOCKED`, or `NO_SAFE_CHANGE` status;
 - audited SHA range and GitHub run URLs;
@@ -382,7 +398,7 @@ A zero-change night must still report. Silence is a runner failure signal.
 The wrapper (`scripts/ci_performance_nightly.sh`) already posts a per-phase
 comment on the rolling issue and a per-phase Pushover with the phase status
 and the PR URL, so the agent owns the formatter-produced PR body and the
-issue's substantive content, not the dead-man plumbing.
+issue's three-section write-up, not the dead-man plumbing.
 
 ## Self-improvement
 
