@@ -96,9 +96,12 @@ root SSH.
 
 Create, in the same Ashburn DC, spread placement group, Hetzner Cloud
 Network `radon-private` `10.0.0.0/16` (app `10.0.0.2`, broker `10.0.0.4`).
-Small CX. Tailscale + private net. FastAPI trusts exactly `10.0.0.0/16`
-(`scripts/api/auth.py`), not all RFC1918: `172.16.0.0/12` is `docker0`
-territory and stays untrusted. `check-env.py` accepts any private v4 for
+Small CX. Tailscale + private net. FastAPI trusts `10.0.0.0/16` only for
+the broker watchdog's `GET /health` probe (`is_private_net_probe`,
+`scripts/api/auth.py`); it is not in the global server-to-server bypass, so
+a private-net peer still needs a Clerk JWT or API key for orders, admin and
+exec. Not all RFC1918: `172.16.0.0/12` is `docker0` territory and stays
+untrusted. `check-env.py` accepts any private v4 for
 `IB_GATEWAY_HOST`, so a non-`10.0/16` network deploys green and then every
 private-net probe is silently unauthenticated.
 

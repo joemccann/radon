@@ -469,3 +469,34 @@ class TestPreflightContractClaims:
             "file:\n  " + "\n  ".join(sorted(set(wrong))) +
             "\nFix the doc, or add the key to the contract deliberately."
         )
+
+
+# ── DOC-020/022: the private-net trust scope must read the same in code and docs ─
+#
+# REL-170 narrowed 10.0.0.0/16 from the global server-to-server bypass to the
+# broker watchdog's /health probe. Both owner docs kept describing the old
+# global trust, so a reviewer or broker-side integrator worked from a wrong
+# trust map. The docs must name the scoping function; the code must keep the
+# private net out of the bypass helper.
+
+_AUTH_SRC = _ROOT / "scripts" / "api" / "auth.py"
+_TRUST_DOCS = ("scripts/api/CLAUDE.md", "docs/spof-host-split.md")
+
+
+class TestPrivateNetTrustScope:
+    def test_auth_keeps_the_private_net_out_of_the_global_bypass(self):
+        src = _AUTH_SRC.read_text(encoding="utf-8")
+        assert "def is_private_net_probe" in src
+        start = src.index("def is_local_or_tailnet")
+        end = src.index("def is_private_net_peer")
+        assert "_HETZNER_PRIVATE" not in src[start:end], (
+            "is_local_or_tailnet consults the Hetzner private net: the docs in "
+            f"{_TRUST_DOCS} describe it as probe-only and must change with this"
+        )
+
+    def test_owner_docs_describe_the_private_net_as_probe_only(self):
+        for rel in _TRUST_DOCS:
+            text = (_ROOT / rel).read_text(encoding="utf-8")
+            assert "is_private_net_probe" in text, rel
+            assert "trusts exactly `10.0.0.0/16`" not in text, rel
+            assert "tailnet/`10.0.0.0/16`" not in text, rel
