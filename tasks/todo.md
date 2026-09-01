@@ -28,6 +28,38 @@
 
 ---
 
+# Task: Mobile order ticket — size controls own one sheet scroll (2026-09-01)
+
+## Objective
+
+- Sizing the structure on the mobile order sheet (legs, +/- steppers, +5/+10/+25/+50/+100 chips) is fully visible and tappable at 393x852 — no nested scroller between the header and a pinned RISK card.
+
+## Dependency graph
+
+- M1 depends_on: [] - Red Vitest: risk panel must live in .m-sheet__body-scroll, never .m-sheet__footer
+- M2 depends_on: [] - Baseline shots + footer/body height telemetry (footer 405px = 48% of viewport, body 196px)
+- M3 depends_on: [M1] - Fix: move TicketRiskBlock from the BottomSheet footer slot into the build-view body, below legs/price/TIF
+- M4 depends_on: [M3] - E2E geometry pin: chips in-viewport on open, real click, footer < 30% of viewport
+- M5 depends_on: [M2, M3] - After shots + docs/design-shots/mobile-order-size/README.md
+- M6 depends_on: [M4, M5] - Full suite, commit, push, PR
+
+## Checklist
+
+- [x] M1 Red test (3/3 failed pre-fix)
+- [x] M2 Baseline artifacts
+- [x] M3 Layout fix (footer 405px -> 69px, body 196px -> 532px)
+- [x] M4 E2E pin green
+- [x] M5 After artifacts + README
+- [x] M6 Full Vitest 8387 passed; 2 cwd-artifact files re-run green from root; combo-payload E2E red is pre-existing (fails identically on the unmodified component in this env: no live quote -> Review disabled)
+
+## Review
+
+- Surgical: only MobileOrderTicket JSX placement moved; no CSS changes needed — .m-sheet__body-scroll already owned the single sheet scroll.
+- Confirm step untouched: its footer (status + ack + Back/Confirm) was already compact.
+- Desktop untouched: TicketRiskBlock placement in the chain rail and PositionTradeTicket unchanged.
+
+---
+
 # Task: Security nightly — auth-derived Claude budget + incomplete-run resume (2026-08-31)
 
 ## Objective

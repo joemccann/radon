@@ -431,6 +431,15 @@ MODEL_LADDER="${RADON_WEEKEND_MODEL_LADDER:-claude-fable-5[1m] claude-opus-5[1m]
 read -r -a MODEL_RUNGS <<< "$MODEL_LADDER"
 MODEL_INDEX=0
 ALL_MODELS_EXHAUSTED=0
+# `--model` binds ONE process. The skill's Stage 4 spawns a SECOND, nested
+# `claude` — the Claude Security agent scan, the longest and most expensive
+# call of the night — and a flag on the outer process does not reach it, so
+# that call still resolved ~/.claude/settings.json: the single-point kill
+# switch of 2026-09-01, alive inside the loop it killed. The rung therefore
+# travels as environment. Re-exported after every ladder drop below, so a
+# dropped or resumed round scans on the rung actually in force. DOC-042.
+use_model_rung() { export RADON_WEEKEND_MODEL="${MODEL_RUNGS[$MODEL_INDEX]}"; }
+use_model_rung
 
 # Scoped to THIS round's slice of the log, like the ceiling detector: RUN_LOG
 # is per phase and every round appends to it, so a whole-file grep would let
@@ -500,6 +509,7 @@ run_phase() {
     if (( RC != 0 )) && is_quota_exhausted; then
       if (( MODEL_INDEX + 1 < ${#MODEL_RUNGS[@]} )); then
         MODEL_INDEX=$((MODEL_INDEX + 1))
+        use_model_rung
         echo "[security-nightly] ${MODEL_RUNGS[$((MODEL_INDEX - 1))]} is out of usage credits; dropping to ${MODEL_RUNGS[$MODEL_INDEX]}" | tee -a "$RUN_LOG"
         continue
       fi
@@ -524,10 +534,17 @@ run_phase() {
   # security archive, out of this wrapper's reach.
   local status
   status="$(phase_status "$RC" "$RUN_LOG" "$ROUND_LOG_MARK")"
-  # An exhausted ladder is not a generic non-zero exit: the operator needs the
-  # cause and the one place it is fixed, or they re-fire into the same wall.
+  # An exhausted ladder is a provider spend stop, which the skill classifies as
+  # INCOMPLETE — not failed, and never OK. FAILED is neither OK nor
+  # INCOMPLETE*, so it fell to the generic `*)` arm: the one arm that withholds
+  # the run log (rail 7, public repo) and states neither of the two things the
+  # operator needs from a spend stop — that the audited SHA did not advance,
+  # and that the next fire resumes the same private run. Nothing was audited
+  # and no state moved, so a refilled quota genuinely does resume it; 75 is
+  # this loop's incomplete-and-resumable exit code. DOC-043.
   if (( ALL_MODELS_EXHAUSTED )); then
-    status="FAILED (all model quotas exhausted; top up at claude.ai/settings/usage)"
+    status="INCOMPLETE (all model quotas exhausted; top up at claude.ai/settings/usage)"
+    RC=75
   fi
   # OK additionally requires the skill's completion marker in THIS round's
   # slice (same scoping as the TRUNCATED detector, R-426). Any incomplete
@@ -542,6 +559,8 @@ run_phase() {
   case "$status" in
     OK)
       report "$status" "sanitized: audit/remediate completed; findings (if any) are in the private security run dir and archive, never here" ;;
+    "INCOMPLETE (all model quotas"*)
+      report "$status" "every model rung on the ladder reported an exhausted subscription quota — this phase is INCOMPLETE; the audited SHA was NOT advanced and the next fire resumes the same private run on the runner once the quota refills" ;;
     INCOMPLETE*)
       report "$status" "the agent exited 0 without declaring the phase complete — this phase is INCOMPLETE; the audited SHA was NOT advanced and the next fire resumes the same private run on the runner" ;;
     TRUNCATED*)
