@@ -364,12 +364,19 @@ jobs:
           python -m pytest ${{ matrix.paths }}
           -n auto --dist loadfile
           --durations=25
+          --junitxml=pytest-junit.xml
           --cov=scripts --cov=api
           --cov-fail-under=0
+      # CIP-005: the junit XML rides in the coverage artifact so per-module work
+      # on Linux is readable for every shard (--durations=25 shows under a third
+      # of a work-bound shard). py-coverage finds `.coverage` by name; the XML
+      # is inert there. ~50KB, same upload step, 0s on the critical path.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: pytest-coverage-${{ matrix.shard }}
-          path: .coverage
+          path: |
+            .coverage
+            pytest-junit.xml
           include-hidden-files: true
           if-no-files-found: error
           compression-level: 0
