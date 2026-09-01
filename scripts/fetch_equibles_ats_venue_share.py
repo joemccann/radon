@@ -60,6 +60,8 @@ import argparse
 import json
 import statistics
 import sys
+import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Optional
@@ -97,6 +99,19 @@ SHORT_VOLUME_MAX_PAGES = 3
 PRICES_MAX_PAGES = 3
 
 _UPSERT_CHUNK_ROWS = 200
+
+# Wall-clock ceiling for the watchlist walk. 2026-09-01: Equibles HTTPS
+# tarpitted the shared Session (idle-read timeout never fired; sibling
+# short-crowding still do_poll on :443 minutes later). TimeoutStartSec=900
+# SIGTERM'd the oneshot (Result=timeout, NRestarts=0, CPU 734ms) with no
+# service_health row; timeout is not on the exit-code latch so the unit
+# re-pages P1 every cycle until the next Tue 09:15 UTC fire. Must fit
+# inside cloud/services/radon-equibles-ats.service TimeoutStartSec with
+# one in-flight TICKER_FETCH_BUDGET_S of slack.
+SWEEP_BUDGET_S = 780
+# Hard abandon per ticker (thread). requests' idle-read timeout does not
+# bound a slow-drip TLS tarpit; future.result(timeout=) does.
+TICKER_FETCH_BUDGET_S = 90
 
 CLASSIFICATION_ACCUMULATION = "accumulation"
 CLASSIFICATION_DISTRIBUTION = "distribution"
@@ -586,6 +601,37 @@ def _fetch_ticker(
     return build_ticker_series(off_exchange.rows, short_volume.rows, price_rows)
 
 
+def _fetch_ticker_bounded(
+    client: Any,
+    ticker: str,
+    start_date: str,
+    end_date: str,
+    *,
+    timeout_s: float,
+) -> list[dict[str, Any]]:
+    """Run ``_fetch_ticker`` under a hard wall-clock abandon.
+
+    ``requests`` idle-read timeouts do not bound a slow-drip TLS tarpit
+    (2026-09-01 Equibles hang). The worker thread is abandoned on timeout —
+    Python cannot kill it — and the caller must not reuse ``client`` afterward
+    because the shared Session may still be mid-request.
+    """
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"ats-{ticker}")
+    future = executor.submit(_fetch_ticker, client, ticker, start_date, end_date)
+    try:
+        return future.result(timeout=max(timeout_s, 0.001))
+    except FuturesTimeoutError as exc:
+        executor.shutdown(wait=False, cancel_futures=True)
+        raise TimeoutError(
+            f"{ticker}: fetch exceeded {timeout_s:.0f}s wall-clock"
+        ) from exc
+    finally:
+        # Only wait when the future finished; a timed-out worker is retained
+        # until process exit (same contract as monitor_daemon hard deadlines).
+        if future.done():
+            executor.shutdown(wait=True)
+
+
 def run(
     client: Optional[Any] = None,
     *,
@@ -612,11 +658,15 @@ def run(
     scan_time = now.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
     end_date = now.date()
     start_date = end_date - timedelta(weeks=lookback_weeks)
+    start_s = start_date.isoformat()
+    end_s = end_date.isoformat()
+    deadline = time.monotonic() + SWEEP_BUDGET_S
 
     owned_client = client is None
     series_by_ticker: dict[str, list[dict[str, Any]]] = {}
     errors: list[dict[str, Any]] = []
     universe: list[str] = list(tickers) if tickers else []
+    client_wedged = False
     # Client construction is INSIDE the health-reporting try: an absent or
     # rejected EQUIBLES_API_KEY raises EquiblesAuthError from
     # EquiblesClient.__init__, and outside the try that killed the oneshot
@@ -629,11 +679,54 @@ def run(
             client = EquiblesClient()
 
         universe = list(tickers or watchlist_tickers())
-        for ticker in universe:
-            try:
-                series = _fetch_ticker(
-                    client, ticker, start_date.isoformat(), end_date.isoformat()
+        for index, ticker in enumerate(universe):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or client_wedged:
+                deferred = universe[index:]
+                print(
+                    f"[ats-venue-share] wall-clock budget spent "
+                    f"({len(series_by_ticker)}/{len(universe)}); "
+                    f"deferring {len(deferred)} ticker(s)",
+                    file=sys.stderr,
                 )
+                for skipped in deferred:
+                    errors.append(
+                        {
+                            "ticker": skipped,
+                            "error": "wall-clock budget spent",
+                            "code": "budget",
+                        }
+                    )
+                break
+
+            ticker_timeout = min(TICKER_FETCH_BUDGET_S, remaining)
+            try:
+                series = _fetch_ticker_bounded(
+                    client, ticker, start_s, end_s, timeout_s=ticker_timeout
+                )
+            except TimeoutError as exc:
+                # Abandon the shared Session: a timed-out worker may still hold
+                # it mid-request. Defer every remaining ticker and exit cleanly
+                # so systemd records Result=success instead of Result=timeout.
+                client_wedged = True
+                errors.append(
+                    {"ticker": ticker, "error": str(exc), "code": "timeout"}
+                )
+                deferred = universe[index + 1 :]
+                print(
+                    f"[ats-venue-share] {exc}; deferring "
+                    f"{len(deferred)} remaining ticker(s)",
+                    file=sys.stderr,
+                )
+                for skipped in deferred:
+                    errors.append(
+                        {
+                            "ticker": skipped,
+                            "error": "wall-clock budget spent",
+                            "code": "budget",
+                        }
+                    )
+                break
             except _CYCLE_FATAL:
                 # An exhausted allowance or a rejected key is not a gap in THIS
                 # ticker's data — every remaining ticker fails for the same
@@ -662,7 +755,10 @@ def run(
         raise
     finally:
         if owned_client and client is not None:
-            client.close()
+            try:
+                client.close()
+            except Exception:  # noqa: BLE001 — best-effort; may be mid-tarpit
+                pass
 
     payload = build_payload(series_by_ticker, scan_time, errors)
     if not payload_has_data(payload):

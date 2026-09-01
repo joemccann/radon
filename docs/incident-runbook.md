@@ -434,6 +434,54 @@ on the daily 22:40 UTC timer.** Peak: 2026-08-23 23:57Z, page `c52496dd…`.
 
 ---
 
+## equibles-ats-sweep-timeout
+
+**`radon-equibles-ats.service` oneshot pages P1 `Result=timeout`
+(`NRestarts=0`) on the weekly Tue 09:15 UTC fire.** Peak: 2026-09-01
+09:35Z, page `239247ed…`.
+
+- **Mechanism:** `fetch_equibles_ats_venue_share.py` walks the Turso
+  watchlist sequentially (off-exchange + short-volume + prices pages per
+  ticker). Equibles HTTPS tarpitted the shared `requests.Session`: idle-read
+  `timeout=30` never fired (slow-drip TLS), CPU stayed under 1s, and
+  systemd SIGTERM'd at `TimeoutStartSec=900` (09:16:04Z start →
+  InactiveEnter 09:31:04Z, `ExecMainStatus=15`). `Type=oneshot` has no
+  `Restart=`, so `NRestarts=0`. No `service_health` row was written (kill
+  sat inside the fetch loop). Unit watchdog pages P1; `Result=timeout` is
+  **not** on the exit-code latch, so the same InactiveEnter re-pages every
+  cycle until reset or the next Tuesday. Sibling
+  `radon-equibles-short-crowding` hung the same way on `:443` during triage.
+  IB unused; `/health/lite` stayed up.
+- **Detection:** `systemctl show radon-equibles-ats.service -p
+  Result,NRestarts,ExecMainStartTimestamp,InactiveEnterTimestamp` →
+  `timeout` / `0` / span exactly `TimeoutStartSec`; process `wchan` in
+  `do_poll` on Equibles `:443`; edge and `:8321/health/lite` up.
+  `service_health.equibles-ats-venue-share` may still be `ok` from an
+  earlier week.
+- **Discriminating check:** `Result=timeout` with ExecMainStart→Inactive
+  equal to `TimeoutStartSec` and low CPU. `Result=signal` is deploy
+  stop-clean (do not raise the budget). Auth/quota abort is
+  `Result=exit-code` with a health `error` row. If `/health/lite` is down
+  too → API, stand down.
+- **Remediation (code):** wall-clock `SWEEP_BUDGET_S=780` with per-ticker
+  `TICKER_FETCH_BUDGET_S=90` via `future.result(timeout=)` so a tarpitted
+  request is abandoned and the process exits, heartbeats `error`, and
+  leaves unfinished tickers for the next weekly fire.
+  `TimeoutStartSec` stays 900. Do not restart-flap the hung run; after the
+  fix deploys, one `radon unit restart radon-equibles-ats` (next timer is
+  7d out). Polkit cannot gain a new rerun grant in the same release.
+- **Regression:**
+  `test_equibles_ats_venue_share.py::TestSweepBudget`
+  (`test_tarpitted_equibles_stops_inside_the_wall_clock_budget`,
+  `test_tickers_finished_before_the_deadline_are_kept`,
+  `test_sweep_budget_fits_inside_unit_start_timeout`),
+  `test_systemd_services.py::TestEquiblesAtsScanBudget`.
+- **Code:** `scripts/fetch_equibles_ats_venue_share.py` (`SWEEP_BUDGET_S`,
+  `TICKER_FETCH_BUDGET_S`, `_fetch_ticker_bounded`),
+  `cloud/services/radon-equibles-ats.service` (`TimeoutStartSec=900`).
+
+---
+
 ## bpi-yahoo-sweep-timeout
 
 **`radon-bpi.service` oneshot pages P1 `Result=timeout` (`NRestarts=0`)

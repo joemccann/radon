@@ -1000,6 +1000,27 @@ class TestDivyieldScanBudget:
         assert int(svc["timeoutstartsec"]) <= 3600
 
 
+class TestEquiblesAtsScanBudget:
+    """Weekly Tue 09:15 UTC Equibles ATS venue-share walk. TimeoutStartSec=900
+    killed the 2026-09-01 run (Result=timeout, NRestarts=0, CPU 734ms) while
+    Equibles HTTPS tarpitted the Session. The process now self-limits at
+    SWEEP_BUDGET_S=780; this TimeoutStartSec must cover that budget plus one
+    in-flight TICKER_FETCH_BUDGET_S=90 and still end long before the next
+    calendar fire (7d). Nesting is pinned in
+    test_equibles_ats_venue_share.py::TestSweepBudget."""
+
+    def test_service_is_oneshot_with_start_timeout(self, unit):
+        svc = unit("radon-equibles-ats.service")["Service"]
+        assert svc["type"] == "oneshot"
+        assert int(svc["timeoutstartsec"]) == 900
+
+    def test_start_budget_ends_before_the_next_calendar_fire(self, unit):
+        svc = unit("radon-equibles-ats.service")["Service"]
+        # Next fire is seven days out; keep the oneshot well under a day so a
+        # hung run cannot swallow the following Tuesday.
+        assert int(svc["timeoutstartsec"]) <= 3600
+
+
 class TestLeapGarchScanBudget:
     """Index-universe LEAP/GARCH scans need an hour-scale FastAPI budget
     (3600s) plus systemd headroom so TimeoutStartSec does not kill the
