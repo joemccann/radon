@@ -70,6 +70,10 @@ from api.auth import verify_clerk_jwt, verify_clerk_bearer, verify_api_key, is_t
 from api.ws_ticket import create_ticket, validate_ticket
 from api.routes.historical import router as historical_router
 from api.routes.preferences import router as preferences_router
+from api.routes.credentials import (
+    router as credentials_router,
+    bootstrap_exported_names as bootstrap_credentials,
+)
 from api.routes.assistant_market import router as assistant_market_router
 from api.routes.streaks import router as streaks_router
 
@@ -747,6 +751,12 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning("Operator preferences unavailable; env and code defaults in force")
 
+    # Stored credentials next, same contract: exported into os.environ so
+    # every subprocess inherits them; store wins over the deployed .env.
+    exported = await asyncio.to_thread(bootstrap_credentials)
+    if exported:
+        logger.info("Credentials loaded from secret store: %d", len(exported))
+
     if test_mode:
         logger.info("Radon API starting in test mode; IB Gateway and pool startup are disabled")
         uw_available = bool(os.environ.get("UW_TOKEN"))
@@ -817,6 +827,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Radon API", version="1.0.0", lifespan=lifespan)
 app.include_router(historical_router)
 app.include_router(preferences_router)
+app.include_router(credentials_router)
 app.include_router(assistant_market_router)
 app.include_router(streaks_router)
 
