@@ -389,3 +389,12 @@ each correction into a concrete rule that prevents recurrence.
   `--durations=25` cannot tell the two cases apart. Get per-module work from a
   Linux run (`--durations=0` on a PR branch or a junitxml artifact) before
   spending a night on ordering.
+- 2026-09-01 audit: `gh run view --log --job <id>` lines are
+  `<job>\t<step>\t<timestamp> <text>` and macOS `sed` does not understand
+  `\t` inside a bracket expression, so a `sed 's/^[^\t]*\t...//'` strip
+  silently matches nothing and every grep after it returns empty. Split on
+  the tab in Python (`line.split('\t', 2)[-1]`) before parsing timestamps.
+  Also: main runs that FAIL on an unrelated job (gitleaks) still run every
+  test shard to completion, so their per-shard step durations are valid
+  Linux shard-timing samples even though they never count as production
+  samples.
