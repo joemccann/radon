@@ -541,9 +541,14 @@ def test_operator_quiesces_active_oneshot_without_restarting_it(tmp_path: Path):
         fake_bin / "systemctl",
         """#!/bin/sh
 if [ "${1:-}" = list-units ]; then
-  for unit in radon-ib-gateway radon-api radon-nextjs radon-relay radon-monitor radon-newsfeed radon-health; do
-    printf '%s.service loaded active running persistent\n' "$unit"
-  done
+  printf '%s\n' 'radon-ib-gateway.service loaded active running persistent'
+  printf '%s\n' 'radon-ib-gateway-remote.service loaded active running persistent'
+  printf '%s\n' 'radon-api.service loaded active running persistent'
+  printf '%s\n' 'radon-nextjs.service loaded active running persistent'
+  printf '%s\n' 'radon-relay.service loaded active running persistent'
+  printf '%s\n' 'radon-monitor.service loaded active running persistent'
+  printf '%s\n' 'radon-newsfeed.service loaded active running persistent'
+  printf '%s\n' 'radon-health.service loaded active running persistent'
   printf '%s\n' 'radon-portfolio-sync.timer loaded active waiting timer'
   printf '%s\n' 'radon-portfolio-sync.service loaded activating start scheduled-job'
   exit 0
@@ -567,6 +572,7 @@ printf 'gateway %s\n' "$*" >> "$RADON_OPERATOR_EVENTS"
         "RADON_OPERATOR_ALLOW_ROOT": "1",
         "RADON_OPERATOR_PYTHON": sys.executable,
         "RADON_DEPLOY_LOCK_FILE": str(tmp_path / "deploy.lock"),
+        "RADON_HOST_ROLE": "combined",
     }
 
     result = subprocess.run(
