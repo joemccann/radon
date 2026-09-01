@@ -291,6 +291,31 @@ for credential_file in .env .env.ib-mode web/.env; do
   exit 2
 done
 
+# Rail 5b: model spend rides the operator's claude.ai subscription, never an
+# Anthropic API key. Claude Code and the Claude Agent SDK subprocesses that
+# `deepsec process`/`revalidate` fan out both PREFER a key over the claude.ai
+# login whenever one is visible, and only whisper it on stderr ("claude.ai
+# connectors are disabled because ANTHROPIC_API_KEY or another auth source is
+# set and takes precedence over your claude.ai login"). On 2026-09-01 that put
+# an 83-finding process + revalidate round on metered API billing with nothing
+# in the run record to show for it. Strip the environment first: launchd hands
+# this job no key today, but a hand-run `cycle` from an operator shell inherits
+# the whole environment.
+unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL \
+      CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX AWS_BEARER_TOKEN_BEDROCK
+
+# `unset` cannot reach a key the scanner loads for itself: deepsec reads
+# .deepsec/.env*.local out of its own workspace, which is gitignored and
+# survives every nightly `git clean`. Refuse rather than edit operator state —
+# and never echo the value, only the path the operator has to clear.
+for key_file in .deepsec/.env .deepsec/.env.local .deepsec/.env.*.local .env.local; do
+  [[ -f "$key_file" ]] || continue
+  grep -qE '^[[:space:]]*(export[[:space:]]+)?ANTHROPIC_(API_KEY|AUTH_TOKEN)[[:space:]]*=[[:space:]]*[^[:space:]]' "$key_file" || continue
+  echo "REFUSING: $key_file holds Anthropic API key material; this loop bills the claude.ai subscription only — remove the key line" >&2
+  report "REFUSED" "$key_file holds Anthropic API key material; the scanners would bill metered API usage instead of the claude.ai subscription — remove the key line (rotate the key too, it has been used)" || true
+  exit 2
+done
+
 RUNNER_LOCK="$REPO/.weekend-runner.lock"
 acquire_runner_lock "$RUNNER_LOCK" || {
   echo "REFUSING: another weekend run owns $REPO" >&2
