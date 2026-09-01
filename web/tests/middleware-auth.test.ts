@@ -82,6 +82,13 @@ describe("isPublicRoute — explicit allowlist", () => {
     expect(isPublicRoute(reqFor("/sign-up/verify"))).toBe(true);
   });
 
+  it("exempts /design.md (public agent design guidance, static file)", () => {
+    expect(isPublicRoute(reqFor("/design.md"))).toBe(true);
+    // Only the exact file — no pattern that could widen to other .md paths.
+    expect(isPublicRoute(reqFor("/design.md/other"))).toBe(false);
+    expect(isPublicRoute(reqFor("/docs/design.md"))).toBe(false);
+  });
+
   it("exempts /api/share/<thing> for OG image renders", () => {
     expect(isPublicRoute(reqFor("/api/share/pnl"))).toBe(true);
     expect(isPublicRoute(reqFor("/api/share/pnl?ticker=AAPL&pnl=420"))).toBe(true);

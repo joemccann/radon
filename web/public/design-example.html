@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>XMPL Flow Evaluation — Radon artifact example</title>
+<link rel="stylesheet" href="/radon.css" />
+</head>
+<body>
+<div class="rd-page">
+
+  <header class="rd-masthead">
+    <span class="rd-wordmark">RADON</span>
+    <span class="rd-meta">Flow evaluation</span>
+    <span class="rd-meta">2026-08-28 · 14:32 ET · Sample data</span>
+  </header>
+
+  <h1 class="rd-title">XMPL: dark pool accumulation ahead of guidance</h1>
+  <p class="rd-subtitle">Off-exchange prints absorbed 3.4x average notional over five sessions while lit price held a 1.2% range. Options positioning has not repriced.</p>
+
+  <section class="rd-section">
+    <div class="rd-stats">
+      <div class="rd-stat">
+        <div class="rd-stat-label">Signal state</div>
+        <div class="rd-stat-value"><span class="rd-badge rd-clear">Clear</span></div>
+        <div class="rd-stat-note">Structural candidate</div>
+      </div>
+      <div class="rd-stat">
+        <div class="rd-stat-label">DP notional / 5d</div>
+        <div class="rd-stat-value">$481M</div>
+        <div class="rd-stat-note"><span class="rd-delta-up">+238%</span> vs 20d mean</div>
+      </div>
+      <div class="rd-stat">
+        <div class="rd-stat-label">Lit ratio</div>
+        <div class="rd-stat-value">0.34</div>
+        <div class="rd-stat-note"><span class="rd-delta-down">-0.18</span> vs baseline</div>
+      </div>
+      <div class="rd-stat">
+        <div class="rd-stat-label">IV rank</div>
+        <div class="rd-stat-value">22</div>
+        <div class="rd-stat-note">30d percentile</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="rd-section">
+    <h2 class="rd-label">Off-exchange evidence</h2>
+    <div class="rd-panel">
+      <div class="rd-panel-header">
+        <span class="rd-panel-title">Block prints, five sessions</span>
+        <span class="rd-meta">Source: UW dark pool feed</span>
+      </div>
+      <table class="rd-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Venue</th>
+            <th class="rd-num">Prints</th>
+            <th class="rd-num">Notional</th>
+            <th class="rd-num">VWAP dist</th>
+            <th class="rd-num">% of ADV</th>
+            <th>State</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>08-28</td><td>OTC non-ATS</td>
+            <td class="rd-num">61</td><td class="rd-num">$142.1M</td>
+            <td class="rd-num">+0.04%</td><td class="rd-num">18.2%</td>
+            <td><span class="rd-badge rd-strong">Strong</span></td>
+          </tr>
+          <tr>
+            <td>08-27</td><td>ATS block</td>
+            <td class="rd-num">44</td><td class="rd-num">$118.6M</td>
+            <td class="rd-num">-0.02%</td><td class="rd-num">15.1%</td>
+            <td><span class="rd-badge rd-clear">Clear</span></td>
+          </tr>
+          <tr>
+            <td>08-26</td><td>ATS block</td>
+            <td class="rd-num">37</td><td class="rd-num">$96.4M</td>
+            <td class="rd-num">+0.07%</td><td class="rd-num">12.9%</td>
+            <td><span class="rd-badge rd-clear">Clear</span></td>
+          </tr>
+          <tr>
+            <td>08-25</td><td>OTC non-ATS</td>
+            <td class="rd-num">29</td><td class="rd-num">$71.8M</td>
+            <td class="rd-num">+0.11%</td><td class="rd-num">9.6%</td>
+            <td><span class="rd-badge rd-emerging">Emerging</span></td>
+          </tr>
+          <tr>
+            <td>08-24</td><td>ATS block</td>
+            <td class="rd-num">18</td><td class="rd-num">$52.3M</td>
+            <td class="rd-num">-0.05%</td><td class="rd-num">7.0%</td>
+            <td><span class="rd-badge rd-baseline">Baseline</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="rd-section">
+    <div class="rd-grid">
+      <div class="rd-span-6">
+        <div class="rd-panel">
+          <div class="rd-panel-header">
+            <span class="rd-panel-title">Peer 5d off-exchange share</span>
+            <span class="rd-meta">One scale</span>
+          </div>
+          <div class="rd-bar">
+            <span class="rd-bar-label">XMPL</span>
+            <div class="rd-bar-track"><div class="rd-bar-fill" style="width: 66%"></div></div>
+            <span class="rd-bar-value">66%</span>
+          </div>
+          <div class="rd-bar">
+            <span class="rd-bar-label">PEER A</span>
+            <div class="rd-bar-track"><div class="rd-bar-fill rd-neutral" style="width: 41%"></div></div>
+            <span class="rd-bar-value">41%</span>
+          </div>
+          <div class="rd-bar">
+            <span class="rd-bar-label">PEER B</span>
+            <div class="rd-bar-track"><div class="rd-bar-fill rd-neutral" style="width: 38%"></div></div>
+            <span class="rd-bar-value">38%</span>
+          </div>
+          <div class="rd-bar">
+            <span class="rd-bar-label">SECTOR MEDIAN</span>
+            <div class="rd-bar-track"><div class="rd-bar-fill rd-neutral" style="width: 35%"></div></div>
+            <span class="rd-bar-value">35%</span>
+          </div>
+        </div>
+      </div>
+      <div class="rd-span-6">
+        <div class="rd-panel">
+          <div class="rd-panel-header">
+            <span class="rd-panel-title">Vol surface</span>
+            <span class="rd-meta">30d tenor</span>
+          </div>
+          <div class="rd-bar">
+            <span class="rd-bar-label">IV 30D</span>
+            <div class="rd-bar-track"><div class="rd-bar-fill" style="width: 31%"></div></div>
+            <span class="rd-bar-value">31.2</span>
+          </div>
+          <div class="rd-bar">
+            <span class="rd-bar-label">RV 21D</span>
+            <div class="rd-bar-track"><div class="rd-bar-fill rd-neutral" style="width: 27%"></div></div>
+            <span class="rd-bar-value">26.8</span>
+          </div>
+          <div class="rd-bar">
+            <span class="rd-bar-label">SKEW 25D</span>
+            <div class="rd-bar-track"><div class="rd-bar-fill rd-warn" style="width: 12%"></div></div>
+            <span class="rd-bar-value">-1.4</span>
+          </div>
+          <div class="rd-panel-rail">
+            <span class="rd-meta">Surface flat vs 60d history</span>
+            <span class="rd-meta">Call wing unpriced</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="rd-section">
+    <h2 class="rd-label">Decision</h2>
+    <div class="rd-callout">
+      <div class="rd-panel-header">
+        <span class="rd-panel-title">Structure: Nov 21 call spread, defined risk</span>
+        <span class="rd-badge rd-clear">Gates 1-3 pass</span>
+      </div>
+      <p style="margin: 0 0 8px">Accumulation is absorbed and unpriced: five sessions of block prints at 3.4x average notional with the lit tape flat and IV rank at 22. A 60/70 call spread pays 2.8x its debit at the upper strike. Kelly fraction 0.9% of bankroll, inside the 2.5% cap.</p>
+      <p class="rd-note">Probability estimate is model-derived and uncertain. Signal decays if lit price moves more than 3% before entry, or if off-exchange share reverts below 45%.</p>
+    </div>
+  </section>
+
+  <footer class="rd-footer">
+    <span class="rd-meta">Data: IB, Unusual Whales · window 2026-08-24 to 2026-08-28</span>
+    <span class="rd-meta">Radon · reconstructing market structure from noisy signals</span>
+  </footer>
+
+</div>
+</body>
+</html>

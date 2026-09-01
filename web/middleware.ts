@@ -169,6 +169,12 @@ export const isPublicRoute = createRouteMatcher([
   // this exemption /robots.txt redirects to /sign-in and the disallow-all
   // policy is never served (Google indexed exactly that redirect URL).
   "/robots.txt",
+  // Public agent design guidance (web/public/design.md) — the whole point is
+  // a stable URL any external agent can load (see docs/design-evals.md). The
+  // matcher's static-file exclusion covers .css/.html companions
+  // (/radon.css, /design-example.html) but not .md, so this one static file
+  // needs an explicit exemption. Serves brand guidance only; no account data.
+  "/design.md",
   ...PUBLIC_SHARE_API_ROUTES,
   ...PUBLIC_WEBHOOK_API_ROUTES,
   "/api/health",
