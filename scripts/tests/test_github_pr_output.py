@@ -115,7 +115,6 @@ class TestFormatPrTitle:
             ("testing", "Testing"),
             ("documentation", "Documentation"),
             ("ci-performance", "CI Performance"),
-            ("security", "Security"),
         ],
     )
     def test_loop_date_and_plain_language_issue(self, loop, prefix):
@@ -127,6 +126,16 @@ class TestFormatPrTitle:
         assert title == (
             f"{prefix} 2026-09-01: The TLS handshake ran on the accept thread."
         )
+
+    def test_security_title_is_date_only(self):
+        issue = "A sanitized one-line description of the patched class."
+        title = pr.format_pr_title(
+            loop="security", date="2026-09-01", issue=issue
+        )
+        assert title == "Security 2026-09-01"
+        assert issue not in title
+        body = _body(issue=issue, fix="The chokepoint now refuses the input.")
+        assert issue in body
 
     def test_unknown_loop_is_refused(self):
         with pytest.raises(ValueError, match="loop"):
@@ -186,6 +195,20 @@ class TestCli:
         assert payload["title"].startswith("Reliability 2026-09-01:")
         assert ISSUE_HEADING in payload["body"]
         assert payload["body"].rstrip().endswith(GREEN)
+
+    def test_security_json_title_is_date_only(self):
+        issue = "A sanitized one-line description of the patched class."
+        proc = self._run(
+            "--loop", "security",
+            "--date", "2026-09-01",
+            "--issue", issue,
+            "--fix", "The chokepoint now refuses the input.",
+            "--json",
+        )
+        assert proc.returncode == 0, proc.stderr
+        payload = json.loads(proc.stdout)
+        assert payload["title"] == "Security 2026-09-01"
+        assert issue in payload["body"]
 
     def test_text_emits_title_then_body(self):
         proc = self._run(
@@ -262,6 +285,16 @@ class TestSkillsInstructTheFormatter:
         assert "--head" in text and "--base" in text, loop
         assert "PATCH" in text, loop
         assert "title, body" in text or "{title, body}" in text, loop
+
+    def test_security_skill_documents_date_only_title(self):
+        raw = (SKILLS / "security-nightly" / "SKILL.md").read_text(encoding="utf-8")
+        start = raw.index("## Pull request output")
+        nxt = raw.find("\n## ", start + 1)
+        section = raw[start:nxt if nxt != -1 else None]
+        text = " ".join(section.split())
+        assert "`Security <YYYY-MM-DD>`" in text
+        assert "`Security <YYYY-MM-DD>: <plain-language issue>`" not in text
+        assert "only in the body" in text or "issue only in the body" in text
 
 
 class TestIssueGenerationIsUntouched:

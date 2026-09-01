@@ -38,13 +38,19 @@ def _clean(value: str, *, field: str) -> str:
 
 
 def format_pr_title(*, loop: str, date: str, issue: str) -> str:
-    """`Reliability 2026-09-01: the handshake froze Gateway`."""
+    """`Reliability 2026-09-01: the handshake froze Gateway`.
+
+    Security titles stay date-only (`Security 2026-09-01`); the issue lives
+    only in the body.
+    """
     prefix = LOOP_TITLES.get(loop)
     if prefix is None:
         known = ", ".join(sorted(LOOP_TITLES))
         raise ValueError(f"unknown loop {loop!r}; expected one of: {known}")
     day = _clean(date, field="date")
     summary = _clean(issue, field="issue")
+    if loop == "security":
+        return f"{prefix} {day}"
     title = f"{prefix} {day}: {summary}"
     if len(title) > GITHUB_PR_TITLE_MAX:
         return title[:GITHUB_PR_TITLE_MAX]

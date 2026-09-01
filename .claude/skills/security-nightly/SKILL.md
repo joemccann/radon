@@ -607,8 +607,9 @@ emits `Fixed with green deployment`.
 The body has exactly three sections, in this order: **Issue discovered**,
 **What was done to fix it**, **Next**. The public PR stays sanitized: no
 route, file, attack, secret, topology, or vulnerability detail (rail 7).
-Title shape: `Security <YYYY-MM-DD>: <plain-language issue>`. Create a new
-dated branch, or a new remediation PR after the audit PR merged, with
+Title shape: `Security <YYYY-MM-DD>`. The plain-language issue goes only
+in the body. Create a new dated branch, or a new remediation PR after the
+audit PR merged, with
 `gh pr create --title <title> --body <body> --head <branch> --base main`
 (or `POST /repos/{owner}/{repo}/pulls` with `head`, `base`, `title`, and
 `body`). Formatter `--json` is `{title, body}` only; do not POST it as the
