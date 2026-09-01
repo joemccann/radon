@@ -330,7 +330,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # docs contract (test_docs_contract.py) diffs against DOCS_CONTRACT_BASE.
-          fetch-depth: ${{ matrix.shard == 'scripts-df' && 0 || 1 }}
+          # The branches are QUOTED. GitHub casts the number 0 to false, so the
+          # unquoted `cond && 0 || 1` fell through to the `||` and handed every
+          # shard depth 1 — the base commit was absent, `git diff BASE...HEAD`
+          # failed, _changed_paths swallowed it and the ownership gate passed
+          # for every commit from 424e66da on. A non-empty string is truthy, so
+          # '0' survives the ||. DOC-038.
+          fetch-depth: ${{ matrix.shard == 'scripts-df' && '0' || '1' }}
       - uses: astral-sh/setup-uv@803947b9bd8e9f986429fa0c5a41c367cd732b41 # v7.2.1
         with:
           python-version: "3.13"

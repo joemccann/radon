@@ -639,3 +639,82 @@ class TestRootLedgersAreAppendOnly:
             "history (see TEST_LOG.md, truncated 543 -> 2 lines in 4584e84a "
             "with every gate green)"
         )
+
+
+# --- the workflow has to hand this contract a history it can diff -------------
+#
+# DOC-038. `_changed_paths` diffs `$DOCS_CONTRACT_BASE...HEAD`. In a depth-1
+# clone that base commit is not in the object graph, `git diff` exits non-zero,
+# and the loop `continue`s — so the contract sees ZERO changed paths and passes
+# for every commit. It fails OPEN, silently.
+#
+# ci.yml asked for the full history with
+#     fetch-depth: ${{ matrix.shard == 'scripts-df' && 0 || 1 }}
+# but GitHub casts the NUMBER 0 to false, so the true branch falls through to
+# the `||` and every shard, `scripts-df` included, got depth 1. The ownership
+# gate has been vacuous since 424e66da; two commits in that range violated it
+# and went green.
+
+_WORKFLOW = _ROOT / ".github" / "workflows" / "ci.yml"
+# The shard whose checkout must carry history: it is the one that runs this file.
+_HISTORY_SHARD = "scripts-df"
+_TERNARY = re.compile(
+    r"\$\{\{\s*matrix\.shard\s*==\s*'(?P<shard>[^']+)'\s*"
+    r"&&\s*(?P<yes>\S+)\s*\|\|\s*(?P<no>\S+?)\s*\}\}"
+)
+
+
+def _gha_truthy(token: str) -> bool:
+    """GitHub's documented cast to Boolean.
+
+    ``null``, ``false``, the NUMBER ``0`` and the EMPTY string are false;
+    everything else is true — including the non-empty string ``'0'``, which is
+    why quoting the branches is the fix and not a cosmetic change.
+    """
+    return token not in {"0", "false", "null", "''", '""'}
+
+
+def _resolve_ternary(match: re.Match, *, condition: bool) -> str:
+    yes, no = match.group("yes"), match.group("no")
+    chosen = yes if condition and _gha_truthy(yes) else no
+    return chosen.strip("'\"")
+
+
+class TestTheWorkflowGivesThisContractAHistoryToDiff:
+    def _fetch_depth_expression(self) -> re.Match:
+        text = _WORKFLOW.read_text(encoding="utf-8")
+        line = next(
+            (l for l in text.splitlines() if "fetch-depth:" in l and "matrix.shard" in l),
+            None,
+        )
+        assert line is not None, (
+            "ci.yml no longer varies fetch-depth by shard; if the python job "
+            "now checks out a fixed depth, this contract needs the deep one"
+        )
+        match = _TERNARY.search(line)
+        assert match is not None, f"unrecognised fetch-depth expression: {line.strip()}"
+        assert match.group("shard") == _HISTORY_SHARD, (
+            f"the deep checkout is keyed on {match.group('shard')!r}, but this "
+            f"contract runs in the {_HISTORY_SHARD!r} shard"
+        )
+        return match
+
+    def test_the_shard_that_runs_this_file_checks_out_full_history(self):
+        match = self._fetch_depth_expression()
+        depth = _resolve_ternary(match, condition=True)
+        assert depth == "0", (
+            f"the {_HISTORY_SHARD} shard resolves to fetch-depth {depth!r}, not "
+            "'0'. GitHub casts the number 0 to false, so `cond && 0 || 1` "
+            "always yields 1: the base commit is absent from the clone, every "
+            "`git diff BASE...HEAD` fails, _changed_paths returns nothing, and "
+            "this ownership gate passes for every commit. Quote the branches "
+            "('0' / '1') so the true branch survives the ||."
+        )
+
+    def test_the_other_shards_stay_shallow(self):
+        match = self._fetch_depth_expression()
+        depth = _resolve_ternary(match, condition=False)
+        assert depth == "1", (
+            f"the non-{_HISTORY_SHARD} shards resolve to fetch-depth {depth!r}; "
+            "a full clone on every python shard is a needless CI cost"
+        )
