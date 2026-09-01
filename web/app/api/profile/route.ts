@@ -9,10 +9,13 @@ export const runtime = "nodejs";
 
 const USERNAME_PATTERN = /^[A-Za-z0-9_\- ]{1,32}$/;
 const MAX_AVATAR_LENGTH = 256 * 1024; // ~256KB — keep Turso rows sane
+const MAX_UI_PREFERENCES_LENGTH = 8 * 1024;
+const UI_PREFERENCE_KEYS = new Set(["theme", "columns"]);
 
 type ProfileRow = {
   username: string | null;
   avatar_url: string | null;
+  ui_preferences: Record<string, unknown> | null;
 };
 
 function validateUsername(raw: unknown): { value: string } | { error: string } {
@@ -44,22 +47,70 @@ function validateAvatarUrl(raw: unknown): { value: string | null } | { error: st
   return { value: trimmed };
 }
 
+function validateUiPreferences(
+  raw: unknown,
+): { value: string | null } | { error: string } {
+  if (raw === undefined || raw === null) return { value: null };
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    return { error: "ui_preferences must be a JSON object" };
+  }
+  const entries = raw as Record<string, unknown>;
+  for (const key of Object.keys(entries)) {
+    if (!UI_PREFERENCE_KEYS.has(key)) {
+      return { error: `ui_preferences.${key} is not a known preference` };
+    }
+  }
+  if (
+    "theme" in entries &&
+    entries.theme !== "dark" &&
+    entries.theme !== "light"
+  ) {
+    return { error: "ui_preferences.theme must be dark or light" };
+  }
+  const serialized = JSON.stringify(entries);
+  if (serialized.length > MAX_UI_PREFERENCES_LENGTH) {
+    return { error: "ui_preferences exceeds size limit" };
+  }
+  return { value: serialized };
+}
+
+function parseUiPreferences(raw: unknown): Record<string, unknown> | null {
+  if (typeof raw !== "string" || !raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {}
+  return null;
+}
+
 async function readProfile(userId: string): Promise<ProfileRow> {
   const result = await dbExecute(
     {
-      sql: `SELECT username, avatar_url FROM user_profiles WHERE user_id = ? LIMIT 1`,
+      sql: `SELECT username, avatar_url, ui_preferences FROM user_profiles WHERE user_id = ? LIMIT 1`,
       args: [userId],
     },
     { label: "profile" },
   );
-  if (result.rows.length === 0) return { username: null, avatar_url: null };
-  const row = result.rows[0] as unknown as ProfileRow;
+  if (result.rows.length === 0) {
+    return { username: null, avatar_url: null, ui_preferences: null };
+  }
+  const row = result.rows[0] as unknown as {
+    username: string | null;
+    avatar_url: string | null;
+    ui_preferences: string | null;
+  };
   const stored = row.avatar_url ?? null;
   // Avatars stored before the host allowlist existed may point somewhere CSP
   // now blocks. Dropping them here degrades to the default avatar instead of a
   // broken image the user cannot explain or clear.
   const avatar_url = stored && isAllowedImageUrl(stored) ? stored : null;
-  return { username: row.username ?? null, avatar_url };
+  return {
+    username: row.username ?? null,
+    avatar_url,
+    ui_preferences: parseUiPreferences(row.ui_preferences),
+  };
 }
 
 export const radonCapability = { GET: "read", PUT: "mutate.workspace" };
@@ -96,7 +147,7 @@ export async function PUT(req: Request): Promise<Response> {
     );
   }
 
-  let body: { username?: unknown; avatar_url?: unknown };
+  let body: { username?: unknown; avatar_url?: unknown; ui_preferences?: unknown };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -111,6 +162,19 @@ export async function PUT(req: Request): Promise<Response> {
   // avatar, and vice versa); an explicit empty string clears the field.
   const hasUsername = body.username !== undefined;
   const hasAvatar = body.avatar_url !== undefined;
+  const hasUiPreferences = body.ui_preferences !== undefined;
+
+  let nextUiPreferences: string | null = null;
+  if (hasUiPreferences) {
+    const uiResult = validateUiPreferences(body.ui_preferences);
+    if ("error" in uiResult) {
+      return setNoStoreResponseHeaders(
+        jsonApiError({ status: 400, code: "VALIDATION_ERROR", message: uiResult.error, requestId }),
+        requestId,
+      );
+    }
+    nextUiPreferences = uiResult.value;
+  }
 
   let nextUsername: string | null = null;
   if (hasUsername) {
@@ -160,6 +224,15 @@ export async function PUT(req: Request): Promise<Response> {
               ON CONFLICT(user_id) DO UPDATE SET avatar_url = excluded.avatar_url,
                 updated_at = excluded.updated_at`,
         args: [userId, nextAvatar],
+      }, { label: "profile" });
+    }
+    if (hasUiPreferences) {
+      await dbExecute({
+        sql: `INSERT INTO user_profiles (user_id, username, avatar_url, ui_preferences, updated_at)
+              VALUES (?, NULL, NULL, ?, datetime('now'))
+              ON CONFLICT(user_id) DO UPDATE SET ui_preferences = excluded.ui_preferences,
+                updated_at = excluded.updated_at`,
+        args: [userId, nextUiPreferences],
       }, { label: "profile" });
     }
     const saved = await readProfile(userId);
