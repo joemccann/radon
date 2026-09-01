@@ -162,6 +162,14 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
               connectingRef.current = false;
               if (!mountedRef.current) return;
               wsRef.current = null;
+              // A search queued behind this (now failed) connection attempt
+              // will not resolve promptly — tell the operator instead of
+              // spinning silently. The pattern stays queued for the retry.
+              if (pendingPatternRef.current) {
+                setResults([]);
+                setLoading(false);
+                onSearchUnavailable?.();
+              }
               // Reconnect with exponential backoff
               const strategy = reconnectStrategyRef.current;
               if (strategy.canRetry()) {
@@ -198,9 +206,15 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
       }
     }, [onSearchUnavailable]);
 
+    // Deliberately no eager connect on mount: this component remounts on every
+    // App Router navigation (Header lives in the per-page WorkspaceShell, and
+    // stays mounted-but-hidden on the mobile shell), so a mount-time connect
+    // fetched a fresh ws-ticket and opened a fresh relay socket on every page
+    // change. The socket now opens on first focus; a search dispatched before
+    // it opens is queued in pendingPatternRef and fires on open.
+    // Pin: web/tests/ticker-search-lazy-connect.test.tsx.
     useEffect(() => {
       mountedRef.current = true;
-      connectWs();
       return () => {
         mountedRef.current = false;
         if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
@@ -241,6 +255,11 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
           if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ action: "search", pattern: pattern.trim() }));
             pendingPatternRef.current = null;
+          } else if (connectingRef.current) {
+            // First-focus connect still in flight (lazy connect) — keep the
+            // spinner; the queued pattern fires on open, and onclose surfaces
+            // the failure if the attempt dies.
+            pendingPatternRef.current = pattern.trim();
           } else {
             // WS not ready — relay (or upstream IB) is unreachable. Surface that.
             pendingPatternRef.current = pattern.trim();
@@ -348,6 +367,9 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
             dispatchSearch(val);
           }}
           onFocus={() => {
+            // Lazy connect: the relay socket opens on first focus, not on
+            // mount (mount happens on every route change).
+            connectWs();
             if (query.trim() && results.length > 0) setIsOpen(true);
           }}
           onKeyDown={handleKeyDown}

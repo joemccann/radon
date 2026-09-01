@@ -45,6 +45,13 @@ async function flushSocketOpen() {
   });
 }
 
+// Lazy connect (2026-09-01): the socket opens on first focus, not on mount —
+// mount happens on every App Router navigation. Focus the combobox to connect.
+async function focusToConnect() {
+  act(() => { fireEvent.focus(screen.getByRole("combobox")); });
+  await flushSocketOpen();
+}
+
 beforeEach(() => {
   wsInstances = [];
   vi.useFakeTimers();
@@ -63,7 +70,7 @@ describe("TickerSearch IB-disconnected handling", () => {
     const onSelect = vi.fn();
     const onSearchUnavailable = vi.fn();
     render(React.createElement(TickerSearch, { onSelect, onSearchUnavailable }));
-    await flushSocketOpen();
+    await focusToConnect();
     const ws = latestWs();
     act(() => ws.simulateOpen());
 
@@ -85,7 +92,7 @@ describe("TickerSearch IB-disconnected handling", () => {
     const onSelect = vi.fn();
     const onSearchUnavailable = vi.fn();
     render(React.createElement(TickerSearch, { onSelect, onSearchUnavailable }));
-    await flushSocketOpen();
+    await focusToConnect();
     const ws = latestWs();
     act(() => ws.simulateOpen());
 
@@ -102,11 +109,35 @@ describe("TickerSearch IB-disconnected handling", () => {
     expect(screen.getByText("No results")).toBeDefined();
   });
 
-  it("calls onSearchUnavailable when WS isn't open at dispatch time", () => {
+  it("stays quiet while the focus-connect is in flight, then surfaces the failure when it dies", async () => {
     const onSelect = vi.fn();
     const onSearchUnavailable = vi.fn();
     render(React.createElement(TickerSearch, { onSelect, onSearchUnavailable }));
+    await focusToConnect();
+    const ws = latestWs();
     // intentionally do not simulateOpen — WS stays CONNECTING
+
+    const input = screen.getByRole("combobox");
+    act(() => { fireEvent.change(input, { target: { value: "AAPL" } }); });
+    act(() => vi.advanceTimersByTime(300));
+
+    // Dispatch races the first connect: queue silently, no false alarm.
+    expect(onSearchUnavailable).not.toHaveBeenCalled();
+
+    // The connection attempt dies with the search still queued — now tell.
+    act(() => { ws.onclose?.(new Event("close")); });
+    expect(onSearchUnavailable).toHaveBeenCalledTimes(1);
+  });
+
+  it("calls onSearchUnavailable when the socket is gone at dispatch time", async () => {
+    const onSelect = vi.fn();
+    const onSearchUnavailable = vi.fn();
+    render(React.createElement(TickerSearch, { onSelect, onSearchUnavailable }));
+    await focusToConnect();
+    const ws = latestWs();
+    act(() => ws.simulateOpen());
+    // Relay drops; no connect attempt is in flight at dispatch time.
+    act(() => { ws.readyState = MockWebSocket.CLOSED; ws.onclose?.(new Event("close")); });
 
     const input = screen.getByRole("combobox");
     act(() => { fireEvent.change(input, { target: { value: "AAPL" } }); });

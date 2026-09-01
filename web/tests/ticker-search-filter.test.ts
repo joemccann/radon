@@ -47,6 +47,13 @@ async function flushSocketOpen() {
   });
 }
 
+// Lazy connect (2026-09-01): the socket opens on first focus, not on mount —
+// mount happens on every App Router navigation. Focus the combobox to connect.
+async function focusToConnect() {
+  act(() => { fireEvent.focus(screen.getByRole("combobox")); });
+  await flushSocketOpen();
+}
+
 beforeEach(() => {
   wsInstances = [];
   vi.useFakeTimers();
@@ -78,7 +85,7 @@ describe("TickerSearch secType filter", () => {
   it("STK results pass through filter", async () => {
     const onSelect = vi.fn();
     render(React.createElement(TickerSearch, { onSelect }));
-    await flushSocketOpen();
+    await focusToConnect();
     const ws = latestWs();
     act(() => ws.simulateOpen());
 
@@ -95,7 +102,7 @@ describe("TickerSearch secType filter", () => {
   it("IND results pass through filter", async () => {
     const onSelect = vi.fn();
     render(React.createElement(TickerSearch, { onSelect }));
-    await flushSocketOpen();
+    await focusToConnect();
     const ws = latestWs();
     act(() => ws.simulateOpen());
 
@@ -112,7 +119,7 @@ describe("TickerSearch secType filter", () => {
   it("FUT results pass through filter", async () => {
     const onSelect = vi.fn();
     render(React.createElement(TickerSearch, { onSelect }));
-    await flushSocketOpen();
+    await focusToConnect();
     const ws = latestWs();
     act(() => ws.simulateOpen());
 
@@ -129,7 +136,7 @@ describe("TickerSearch secType filter", () => {
   it("WAR and BOND are filtered out", async () => {
     const onSelect = vi.fn();
     render(React.createElement(TickerSearch, { onSelect }));
-    await flushSocketOpen();
+    await focusToConnect();
     const ws = latestWs();
     act(() => ws.simulateOpen());
 
@@ -153,7 +160,7 @@ describe("TickerSearch secType filter", () => {
 
   it("ignores an out-of-order result for an older query", async () => {
     render(React.createElement(TickerSearch, { onSelect: vi.fn() }));
-    await flushSocketOpen();
+    await focusToConnect();
     const ws = latestWs();
     act(() => ws.simulateOpen());
     const input = screen.getByRole("combobox");

@@ -1,3 +1,33 @@
+# Task: Mobile page-change lag — realtime socket must survive navigation (2026-09-01)
+
+## Objective
+
+- Client-side page transitions (mobile tab bar especially) do not tear down the realtime prices socket: no reconnect, no new ws-ticket, no reconnect backoff, no snapshot resync. Reconnect for genuine drops unchanged; desktop unregressed.
+
+## Dependency graph
+
+- N1 depends_on: [] - Map socket owners; confirm App Router remounts the per-page WorkspaceShell (usePrices) and Header/TickerSearch on every navigation
+- N2 depends_on: [N1] - RealtimePricesProvider in root Providers owns the ONE usePrices instance; shells publish subscriptions (content-diffed, last-write-wins, no cleanup-clear, 5s shrink linger)
+- N3 depends_on: [N1] - TickerSearch lazy connect on first focus (Header remounts per page, mounted-but-hidden on mobile)
+- N4 depends_on: [N2, N3] - Wire-level regression pins: navigation persistence, ownership contract, lazy connect; update dependent suites
+- N5 depends_on: [N4] - Typecheck + lint + full web vitest; prod-build browser nav check; docs; PR
+
+## Checklist
+
+- [x] N1 Ownership map (usePrices per-page = the bug; IBStatusContext already root-owned; useHeadlines route-scoped by design)
+- [x] N2 RealtimePricesProvider + WorkspaceShell publish
+- [x] N3 TickerSearch focus connect
+- [x] N4 Tests (realtime-prices-navigation-persistence 6, realtime-socket-ownership-contract 3, ticker-search-lazy-connect 4; 81 green across 11 impacted suites)
+- [x] N5 Verified (7935 passed full web vitest; tsc clean; lint 0 errors; prod-build mobile tab-bar navs client-side, 0 doc navs; PR #228)
+
+## Review
+
+- The provider must diff publishes by CONTENT: publisher memo chains hand fresh array identities on every render, and identity-diffing looped provider setState -> consumer re-render into a silent sync spin (caught re-running the chat-launcher wire test; now pinned by the "content-identical republish" case).
+- The shrink linger exists because a remounting shell first publishes while portfolio/orders are still resolving — committing that shrink immediately is a snapshot resync through the side door.
+- E2E was deliberately NOT the pin: the e2e harness cannot authenticate the realtime socket (dummy Clerk key blocks getToken), so a navigation e2e passes vacuously. Component tests at the provider seam + a source ownership contract pin the invariant.
+
+---
+
 # Task: Mobile order ticket — size controls own one sheet scroll (2026-09-01)
 
 ## Objective
