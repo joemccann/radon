@@ -78,6 +78,19 @@ describe("computePayoffRatio", () => {
     expect(formatPayoffRatio(2)).toBe("2 : 1");
     expect(formatPayoffRatio(12.35)).toBe("12.4 : 1");
   });
+
+  it("keeps two decimals below 1 so credit-spread risk is not rounded away", () => {
+    // Sold call/put spreads live here: 0.73 credit per dollar risked is a
+    // materially different trade from 0.70, and one decimal hid the gap.
+    expect(formatPayoffRatio(0.73)).toBe("0.73 : 1");
+    expect(formatPayoffRatio(0.712)).toBe("0.71 : 1");
+    expect(formatPayoffRatio(0.7)).toBe("0.70 : 1");
+    expect(formatPayoffRatio(0.05)).toBe("0.05 : 1");
+  });
+
+  it("falls back to the >=1 format when a sub-1 ratio rounds up to 1.00", () => {
+    expect(formatPayoffRatio(0.999)).toBe("1 : 1");
+  });
 });
 
 describe("OrderConfirmSummary — leveraged payoff row", () => {
