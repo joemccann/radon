@@ -98,6 +98,29 @@ FASTAPI_HOST="${RADON_GARCH_REFRESH_FASTAPI_HOST:-127.0.0.1}"
 FASTAPI_PORT="${RADON_GARCH_REFRESH_FASTAPI_PORT:-8321}"
 FASTAPI_TIMEOUT_SECS="${RADON_SCAN_FASTAPI_TIMEOUT_SECS:-3610}"
 FASTAPI_URL="http://${FASTAPI_HOST}:${FASTAPI_PORT}/garch-convergence/scan?preset=${PRESET}"
+# 14:00 UTC oneshot shares the FastAPI lane with leap and the top-of-hour
+# pile-up. 2026-09-01 14:00:12Z: instant 502 capacity shed, LEAP cleared
+# the same lane at 14:02. Wait up to SHED_WAIT for a slot; keep the 3610s
+# scan budget intact (TimeoutStartSec=3900 → 240s headroom).
+SHED_WAIT_SECS="${RADON_GARCH_SHED_WAIT_SECS:-240}"
+RETRY_DELAY="${RADON_GARCH_REFRESH_RETRY_DELAY_SECS:-15}"
+# Injection point for the ladder's wait (T-283). Production leaves this as
+# `sleep`; the tests substitute a recorder so the retry ladder is driven by
+# the accounted budget instead of the wall clock.
+SLEEP_CMD="${RADON_GARCH_SLEEP_CMD:-sleep}"
+# Matches scripts/api/server.py _CAPACITY_SHED_MARKER. Status alone cannot
+# tell a shed from a script-failed 502 (R-221).
+CAPACITY_SHED_MARKER="subprocess capacity exhausted"
+
+_is_capacity_shed() {
+    # $1 = curl exit, $2 = http code, $3 = response body
+    [ "$1" -eq 0 ] || return 1
+    case "$2" in
+        502|503) ;;
+        *) return 1 ;;
+    esac
+    printf '%s' "$3" | tr '[:upper:]' '[:lower:]' | grep -qF "$CAPACITY_SHED_MARKER"
+}
 
 # Try FastAPI first. 3610s matches the FastAPI preset subprocess timeout
 # (3600s) + 10s slack.
@@ -107,14 +130,42 @@ echo "$(date): POST ${FASTAPI_URL}"
 # running too many scans, and a -m timeout means FastAPI's child may still be
 # mid-flight — falling back on either launches a duplicate outside
 # MAX_CONCURRENT_SUBPROCESSES and outside the cooldown. Same guard as
-# run_signals_refresh.sh.
-HTTP_CODE=$(curl -sS -X POST -m "$FASTAPI_TIMEOUT_SECS" -o /dev/null \
-    -w "%{http_code}" "${FASTAPI_URL}" 2>/tmp/garch-refresh.curl.err)
-CURL_EXIT=$?
-if [ "$CURL_EXIT" -eq 0 ] && [[ "$HTTP_CODE" == 2* ]]; then
-    echo "$(date): GARCH refresh via FastAPI complete (OK)"
-    exit 0
-fi
+# run_signals_refresh.sh. Capacity shed is retried inside SHED_WAIT_SECS;
+# other non-7 outcomes still refuse the direct fallback.
+# T-283: budget the shed wait against the seconds this loop actually WAITS,
+# not against `SECONDS` since the script started. A shed 502 returns
+# instantly, so in production the two accountings differ by milliseconds.
+attempt=0
+shed_waited=0
+HTTP_CODE=000
+CURL_EXIT=28
+RESPONSE_BODY=""
+while :; do
+    BODY_FILE="$(mktemp)"
+    HTTP_CODE=$(curl -sS -X POST -m "$FASTAPI_TIMEOUT_SECS" -o "$BODY_FILE" \
+        -w "%{http_code}" "${FASTAPI_URL}" 2>/tmp/garch-refresh.curl.err)
+    CURL_EXIT=$?
+    RESPONSE_BODY="$(cat "$BODY_FILE" 2>/dev/null || true)"
+    rm -f "$BODY_FILE"
+    if [ "$CURL_EXIT" -eq 0 ] && [[ "$HTTP_CODE" == 2* ]]; then
+        echo "$(date): GARCH refresh via FastAPI complete (OK)"
+        exit 0
+    fi
+    if ! _is_capacity_shed "$CURL_EXIT" "$HTTP_CODE" "$RESPONSE_BODY"; then
+        break
+    fi
+    remaining=$((SHED_WAIT_SECS - shed_waited))
+    if [ "$remaining" -le 0 ]; then
+        echo "$(date): GARCH shed for subprocess capacity (http=${HTTP_CODE}) after ${attempt} retries; not launching duplicate" >&2
+        exit 1
+    fi
+    attempt=$((attempt + 1))
+    delay="$RETRY_DELAY"
+    [ "$delay" -gt "$remaining" ] && delay="$remaining"
+    echo "$(date): GARCH FastAPI capacity shed (curl=${CURL_EXIT} http=${HTTP_CODE}) - retry ${attempt} in ${delay}s"
+    "$SLEEP_CMD" "$delay"
+    shed_waited=$((shed_waited + delay))
+done
 
 if [ "$CURL_EXIT" -ne 7 ]; then
     echo "$(date): GARCH FastAPI outcome indeterminate (curl=${CURL_EXIT}, http=${HTTP_CODE}); not launching duplicate" >&2
