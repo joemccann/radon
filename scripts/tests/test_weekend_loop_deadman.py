@@ -449,6 +449,11 @@ class TestBackgroundWorkIsNotSilentlyKilled:
                 "set -Eeuo pipefail\n"
                 f'PHASE=audit\nremain=30\nRUN_LOG="{run_log}"\n'
                 f'KILL_AFTER_SECS=60\n'
+                # The line also pins the model rung it asks for, so the round's
+                # ladder state has to exist here too — under `set -u` an unset
+                # MODEL_RUNGS kills the command before `claude` is ever reached
+                # and this test would pass no judgement on the ceiling at all.
+                'MODEL_RUNGS=(stub-model)\nMODEL_INDEX=0\n'
                 # Since REL-137 the round is backgrounded so bash can act on a
                 # SIGTERM while it is running; wait for it before reading back.
                 + _claude_invocation_line(LOOPS[name])
