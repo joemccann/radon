@@ -30,14 +30,27 @@ delay notice; playful error copy; operator-only CRUD.
 
 ## Checklist
 
-- [ ] P1 Secret store (red/green)
-- [ ] P2 FastAPI CRUD
-- [ ] P3 Async validators
-- [ ] P4 Profile IA
-- [ ] P5 Credentials UI
-- [ ] P6 Setup wizard
-- [ ] P7 Live effect
-- [ ] P8 E2E + verify
+- [x] P1 Secret store (red/green) — 28 passed
+- [x] P2 FastAPI CRUD — 14 passed + authz matrix green
+- [x] P3 Async validators — 38 passed (registry + validators)
+- [x] P4 Profile IA — tabs folded in; theme/columns promoted (migration 0067)
+- [x] P5 Credentials UI — 8 wire tests
+- [x] P6 Setup wizard — 11 tests + live keyless-server verification
+- [x] P7 Live effect — PUT exports os.environ + lifespan bootstrap
+- [x] P8 E2E + verify — Playwright 2 passed, screenshots captured
+
+## Review
+
+- vitest full gate: 8415 passed, 18 skipped (after fixing the two suites my
+  route/Providers changes tripped: authz matrix classification + wiring pin)
+- pytest focused: 274 passed (secret store, registry, validators, routes,
+  authz matrix, leakage, preferences); the 93 full-api failures on this VM
+  reproduce identically on clean origin/main (missing env baseline, not mine)
+- Playwright: profile-credentials-tab.spec.ts 2 passed; setup mode verified
+  live on a keyless dev server (/ -> 307 /setup, /api -> 503, token 401/200)
+- Known follow-ups: systemd unit reload on credential save (only FastAPI +
+  subprocesses get live effect today); IB Flex sFTP key upload not UI-managed
+  (fields registered, ssh_config stays operator-owned)
 
 ---
 # Task: Security nightly — auth-derived Claude budget + incomplete-run resume (2026-08-31)

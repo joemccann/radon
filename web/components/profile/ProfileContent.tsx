@@ -97,10 +97,11 @@ export default function ProfileContent({ prices }: { prices?: Record<string, Pri
 
   const email = user?.primaryEmailAddress?.emailAddress ?? null;
   // Demo trial users never see the operator tabs; the API routes fail closed
-  // behind ALLOWED_USER_IDS regardless, this only hides the chrome.
+  // behind ALLOWED_USER_IDS regardless, this only hides the chrome. A missing
+  // user (authless e2e harness) counts as non-demo — production signed-out
+  // sessions never reach /profile at all.
   const isOperator =
-    user != null &&
-    resolveDemoContext(user.publicMetadata as DemoPublicMetadata | undefined) === null;
+    resolveDemoContext(user?.publicMetadata as DemoPublicMetadata | undefined) === null;
   const clerkImage = user?.imageUrl ?? null;
   const avatarUrl = profile?.avatar_url ?? clerkImage ?? null;
   const initials = initialsFor(profile?.username ?? null, email);

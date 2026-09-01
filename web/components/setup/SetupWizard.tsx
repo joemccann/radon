@@ -300,8 +300,10 @@ export default function SetupWizard() {
                   {service.fields.map((field) => (
                     <div className="preferences-row__control" key={field.name}>
                       <label className="preferences-row__meta" htmlFor={`setup-${field.name}`}>
-                        <span className="preferences-row__label">{field.label}</span>
-                        <code className="preferences-row__key">{field.name}</code>
+                        <span className="preferences-row__head">
+                          <span className="preferences-row__label">{field.label}</span>
+                          <code className="preferences-row__key">{field.name}</code>
+                        </span>
                       </label>
                       <input
                         id={`setup-${field.name}`}

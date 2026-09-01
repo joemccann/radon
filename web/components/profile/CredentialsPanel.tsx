@@ -234,8 +234,10 @@ export default function CredentialsPanel() {
                 {service.fields.map((field) => (
                   <div className="preferences-row__control" key={field.name}>
                     <label className="preferences-row__meta" htmlFor={`cred-${field.name}`}>
-                      <span className="preferences-row__label">{field.label}</span>
-                      <code className="preferences-row__key">{field.name}</code>
+                      <span className="preferences-row__head">
+                        <span className="preferences-row__label">{field.label}</span>
+                        <code className="preferences-row__key">{field.name}</code>
+                      </span>
                       <span className="preferences-row__metaline" data-testid={`credential-status-${field.name}`}>
                         {fieldStatus(field)}
                       </span>

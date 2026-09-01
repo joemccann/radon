@@ -7,14 +7,11 @@ response body.
 """
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-
-os.environ.setdefault("RADON_API_TEST_MODE", "1")
 
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent
 if str(SCRIPTS_DIR) not in sys.path:
@@ -80,10 +77,12 @@ def invalid_verdict(monkeypatch):
 
 @pytest.fixture
 def client():
+    # No `with` (no lifespan): these tests exercise the route handlers only,
+    # and running the lifespan would leak RADON_API_TEST_MODE process-wide
+    # (the documented test-ordering pollution class in this suite).
     from scripts.api.server import app
 
-    with TestClient(app) as test_client:
-        yield test_client
+    return TestClient(app)
 
 
 def _store() -> SecretStore:
