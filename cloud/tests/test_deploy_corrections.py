@@ -3287,6 +3287,7 @@ class TestCloudSecretScan:
         script = scan["run"]
         assert "git merge-base" in script
         assert "${merge_base}..${PR_HEAD}" in script
+        assert 'log_opts="${PUSH_BEFORE}..${PUSH_HEAD}"' in script
         assert "--log-opts=" in script
 
     def test_root_ci_runs_full_python313_cloud_suite(self) -> None:
