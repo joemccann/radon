@@ -16,6 +16,7 @@ No live network: every test drives a stub client.
 import json
 import sqlite3
 import sys
+import time
 from datetime import date
 from typing import Optional
 from pathlib import Path
@@ -608,6 +609,179 @@ class TestRun:
             self.mod.main()
         assert excinfo.value.code == 2
         assert self.health and self.health[0][0] == "error"
+
+
+class TestSweepBudget:
+    """2026-09-01: radon-equibles-filings Result=timeout after TimeoutStartSec=900
+    (10:03:53Z → 10:18:54Z, NRestarts=0, ExecMainStatus=15). Equibles HTTPS
+    tarpitted the shared Session the same morning as radon-equibles-ats
+    (sibling short-crowding still do_poll on :443). No process wall-clock
+    budget, so systemd SIGTERM'd the oneshot with no FILING FORENSICS
+    summary and no service_health row. Timeout is not on the exit-code
+    latch, so the unit re-pages P1 every cycle until the next 10:00 UTC
+    fire (~24h)."""
+
+    @pytest.fixture(autouse=True)
+    def _isolate(self, tmp_path, monkeypatch):
+        import fetch_equibles_filing_forensics as mod
+
+        monkeypatch.setattr(mod, "CACHE_DIR", tmp_path / "equibles_filing_forensics")
+        self.db_writes: list[dict] = []
+        self.health: list[tuple] = []
+        monkeypatch.setattr(mod, "_write_db_row", lambda dossier: self.db_writes.append(dossier))
+        monkeypatch.setattr(
+            mod, "_record_health", lambda state, error=None: self.health.append((state, error))
+        )
+        self.mod = mod
+
+    def test_tarpitted_equibles_stops_inside_the_wall_clock_budget(self, monkeypatch):
+        import threading
+
+        monkeypatch.setattr(self.mod, "SWEEP_BUDGET_S", 0.2, raising=False)
+        monkeypatch.setattr(self.mod, "TICKER_FETCH_BUDGET_S", 0.15, raising=False)
+
+        release = threading.Event()
+
+        def hang(_client, ticker, _going_concern, today=None, as_of=None):
+            release.wait(2.0)
+            raise AssertionError(f"tarpit returned for {ticker}")
+
+        monkeypatch.setattr(self.mod, "fetch_dossier", hang)
+        tickers = [f"T{i:02d}" for i in range(8)]
+        started = time.monotonic()
+        result = self.mod.run(tickers, client=_StubClient(), today=TODAY)
+        elapsed = time.monotonic() - started
+        release.set()
+
+        # A bare for-loop over 8 blocked fetches would hang until systemd
+        # SIGTERM'd at 900s. The budget must cut this off well under a
+        # second, reach a health write, and let the process exit (daemon
+        # worker) without waiting out the tarpit.
+        assert elapsed < 1.0
+        assert self.db_writes == []
+        assert self.health and self.health[0][0] == "error"
+        assert result["persisted"] == 0
+        assert len(result["skipped"]) == 8
+
+    def test_tarpitted_going_concern_stops_inside_the_wall_clock_budget(self, monkeypatch):
+        import threading
+
+        monkeypatch.setattr(self.mod, "SWEEP_BUDGET_S", 0.2, raising=False)
+        monkeypatch.setattr(self.mod, "TICKER_FETCH_BUDGET_S", 0.15, raising=False)
+
+        release = threading.Event()
+
+        def hang(_client):
+            release.wait(2.0)
+            raise AssertionError("tarpit returned for going-concern")
+
+        monkeypatch.setattr(self.mod, "fetch_going_concern_universe", hang)
+        started = time.monotonic()
+        result = self.mod.run(["AAPL", "MSFT"], client=_StubClient(), today=TODAY)
+        elapsed = time.monotonic() - started
+        release.set()
+
+        assert elapsed < 1.0
+        assert self.db_writes == []
+        assert self.health and self.health[0][0] == "error"
+        assert result["persisted"] == 0
+
+    def test_abandoned_ticker_fetch_does_not_block_process_exit(self, monkeypatch):
+        """Daemon workers must not register an atexit join.
+
+        2026-09-01 ATS follow-up: ThreadPoolExecutor.shutdown(wait=False) still
+        waits on workers at interpreter exit, so a tarpitted oneshot that
+        'timed out' in-process was still Result=timeout under systemd.
+        """
+        import os
+        import signal
+        import textwrap
+
+        script = textwrap.dedent(
+            """
+            import sys, time
+            sys.path.insert(0, {scripts!r})
+            import fetch_equibles_filing_forensics as mod
+
+            def hang(*_a, **_k):
+                time.sleep(60)
+
+            try:
+                mod._call_bounded("X", lambda: hang(), timeout_s=0.1)
+            except TimeoutError:
+                pass
+            sys.exit(0)
+            """
+        ).format(scripts=str(Path(__file__).resolve().parents[1]))
+
+        pid = os.fork()
+        if pid == 0:
+            os.execv(sys.executable, [sys.executable, "-c", script])
+        blocked = True
+        for _ in range(30):
+            wpid, status = os.waitpid(pid, os.WNOHANG)
+            if wpid == pid:
+                assert status == 0
+                blocked = False
+                break
+            time.sleep(0.1)
+        if blocked:
+            os.kill(pid, signal.SIGKILL)
+            os.waitpid(pid, 0)
+            raise AssertionError("abandoned ticker fetch blocked process exit")
+
+        contrast = textwrap.dedent(
+            """
+            import concurrent.futures, sys, time
+            def hang():
+                time.sleep(60)
+            ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            fut = ex.submit(hang)
+            try:
+                fut.result(timeout=0.1)
+            except concurrent.futures.TimeoutError:
+                ex.shutdown(wait=False, cancel_futures=True)
+            sys.exit(0)
+            """
+        )
+        pid = os.fork()
+        if pid == 0:
+            os.execv(sys.executable, [sys.executable, "-c", contrast])
+        blocked = True
+        for _ in range(20):
+            wpid, _status = os.waitpid(pid, os.WNOHANG)
+            if wpid == pid:
+                blocked = False
+                break
+            time.sleep(0.1)
+        if not blocked:
+            raise AssertionError("expected ThreadPoolExecutor atexit to block")
+        os.kill(pid, signal.SIGKILL)
+        os.waitpid(pid, 0)
+
+    def test_tickers_finished_before_the_deadline_are_kept(self, monkeypatch):
+        monkeypatch.setattr(self.mod, "SWEEP_BUDGET_S", 30.0, raising=False)
+        client = _StubClient(atm_programs={"data": [_atm_program(ATM_REMAINING_MATERIAL_USD * 3)]})
+        result = self.mod.run(["AAPL", "MSFT"], client=client, today=TODAY)
+        assert result["persisted"] == 2
+        assert self.health[-1][0] == "ok"
+        assert [d["ticker"] for d in self.db_writes] == ["AAPL", "MSFT"]
+
+    def test_sweep_budget_fits_inside_unit_start_timeout(self):
+        service = (
+            Path(__file__).resolve().parents[2]
+            / "cloud"
+            / "services"
+            / "radon-equibles-filings.service"
+        )
+        timeout_line = next(
+            line for line in service.read_text().splitlines()
+            if line.startswith("TimeoutStartSec=")
+        )
+        unit_timeout = int(timeout_line.split("=", 1)[1])
+        from fetch_equibles_filing_forensics import SWEEP_BUDGET_S, TICKER_FETCH_BUDGET_S
+
+        assert SWEEP_BUDGET_S + TICKER_FETCH_BUDGET_S <= unit_timeout
 
 
 # ── migration + upsert ────────────────────────────────────────────

@@ -482,6 +482,53 @@ on the daily 22:40 UTC timer.** Peak: 2026-08-23 23:57Z, page `c52496dd…`.
 
 ---
 
+## equibles-filings-sweep-timeout
+
+**`radon-equibles-filings.service` oneshot pages P1 `Result=timeout`
+(`NRestarts=0`) on the daily 10:00 UTC fire.** Peak: 2026-09-01
+10:20Z, page `ba499c69…`.
+
+- **Mechanism:** `fetch_equibles_filing_forensics.py` walks the going-concern
+  screener then the Turso watchlist sequentially (4 filing endpoints per
+  ticker). Equibles HTTPS tarpitted the shared `requests.Session`: idle-read
+  `timeout=30` never fired (slow-drip TLS), and systemd SIGTERM'd at
+  `TimeoutStartSec=900` (10:03:53Z start → InactiveEnter 10:18:54Z,
+  `ExecMainStatus=15`). `Type=oneshot` has no `Restart=`, so `NRestarts=0`.
+  No `FILING FORENSICS` summary and no `service_health` row (kill sat inside
+  the fetch loop). Unit watchdog pages P1; `Result=timeout` is **not** on
+  the exit-code latch, so the same InactiveEnter re-pages every cycle until
+  reset or the next 10:00 UTC fire. Sibling `radon-equibles-ats` hung the
+  same way 09:16–09:31Z. IB unused; `/health/lite` stayed up.
+- **Detection:** `systemctl show radon-equibles-filings.service -p
+  Result,NRestarts,ExecMainStartTimestamp,InactiveEnterTimestamp` →
+  `timeout` / `0` / span exactly `TimeoutStartSec`; edge and
+  `:8321/health/lite` up. `service_health.equibles-filing-forensics` may
+  still be `ok` from an earlier day.
+- **Discriminating check:** `Result=timeout` with ExecMainStart→Inactive
+  equal to `TimeoutStartSec` and no today's `FILING FORENSICS` summary.
+  `Result=signal` is deploy stop-clean (do not raise the budget). Auth/quota
+  abort is `Result=exit-code` with a health `error` row. If `/health/lite`
+  is down too → API, stand down.
+- **Remediation (code):** wall-clock `SWEEP_BUDGET_S=780` with per-call
+  `TICKER_FETCH_BUDGET_S=90` via daemon `thread.join(timeout=)` so a
+  tarpitted request is abandoned and the process exits, heartbeats `error`,
+  and leaves unfinished tickers for the next daily fire.
+  `TimeoutStartSec` stays 900. Do not restart-flap the hung run; after the
+  fix deploys, one `radon unit restart radon-equibles-filings` (next timer
+  is 24h out). Polkit cannot gain a new rerun grant in the same release.
+- **Regression:**
+  `test_equibles_filing_forensics.py::TestSweepBudget`
+  (`test_tarpitted_equibles_stops_inside_the_wall_clock_budget`,
+  `test_tarpitted_going_concern_stops_inside_the_wall_clock_budget`,
+  `test_tickers_finished_before_the_deadline_are_kept`,
+  `test_sweep_budget_fits_inside_unit_start_timeout`),
+  `test_systemd_services.py::TestEquiblesFilingsScanBudget`.
+- **Code:** `scripts/fetch_equibles_filing_forensics.py` (`SWEEP_BUDGET_S`,
+  `TICKER_FETCH_BUDGET_S`, `_call_bounded`),
+  `cloud/services/radon-equibles-filings.service` (`TimeoutStartSec=900`).
+
+---
+
 ## bpi-yahoo-sweep-timeout
 
 **`radon-bpi.service` oneshot pages P1 `Result=timeout` (`NRestarts=0`)
