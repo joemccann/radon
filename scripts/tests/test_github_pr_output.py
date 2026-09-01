@@ -136,6 +136,20 @@ class TestFormatPrTitle:
         with pytest.raises(ValueError, match="issue"):
             pr.format_pr_title(loop="testing", date="2026-09-01", issue="  ")
 
+    def test_title_fits_github_256_char_limit(self):
+        issue = (
+            "The TLS handshake ran on the accept thread, so one half-open "
+            "TCP connect froze Gateway control, healthz, and every mTLS "
+            "restart from the app host while the broker still looked up."
+        ) * 4
+        title = pr.format_pr_title(
+            loop="reliability", date="2026-09-01", issue=issue
+        )
+        assert len(title) <= pr.GITHUB_PR_TITLE_MAX
+        assert title.startswith("Reliability 2026-09-01:")
+        body = _body(issue=issue, fix="Handshake now runs per connection.")
+        assert issue[:80] in body
+
 
 class TestZeroFindingDeadman:
     def test_no_deploy_needed_variant(self):
@@ -187,6 +201,20 @@ class TestCli:
         assert ISSUE_HEADING in body
         assert "No deploy needed." in body
 
+    def test_json_still_exits_zero_when_the_issue_would_overflow_the_title(self):
+        issue = ("One half-open TCP connect froze Gateway control. " * 20).strip()
+        proc = self._run(
+            "--loop", "reliability",
+            "--date", "2026-09-01",
+            "--issue", issue,
+            "--fix", "Handshake now runs per connection under a socket timeout.",
+            "--json",
+        )
+        assert proc.returncode == 0, proc.stderr
+        payload = json.loads(proc.stdout)
+        assert len(payload["title"]) <= pr.GITHUB_PR_TITLE_MAX
+        assert issue in payload["body"]
+
 
 class TestNightlyTemplateMatchesFormatter:
     def test_template_has_the_three_headings_and_green_default(self):
@@ -222,6 +250,18 @@ class TestSkillsInstructTheFormatter:
         testing = (SKILLS / "testing-weekend" / "SKILL.md").read_text(encoding="utf-8")
         assert "with the delta summary in the body" not in reliability
         assert "update the PR body with: tasks DONE/BLOCKED" not in testing
+
+    @pytest.mark.parametrize("loop", LOOPS)
+    def test_pull_request_output_can_create_and_update(self, loop):
+        raw = (SKILLS / loop / "SKILL.md").read_text(encoding="utf-8")
+        start = raw.index("## Pull request output")
+        nxt = raw.find("\n## ", start + 1)
+        section = raw[start:nxt if nxt != -1 else None]
+        text = " ".join(section.split())
+        assert "gh pr create" in text, loop
+        assert "--head" in text and "--base" in text, loop
+        assert "PATCH" in text, loop
+        assert "title, body" in text or "{title, body}" in text, loop
 
 
 class TestIssueGenerationIsUntouched:

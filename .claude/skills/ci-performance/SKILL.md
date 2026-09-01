@@ -347,7 +347,12 @@ The body has exactly three sections, in this order: **Issue discovered**,
 **What was done to fix it**, **Next**. Sample tables, SHA ranges, CIP
 inventories, and gate counts stay on the rolling GitHub issue and in
 `CI_PERFORMANCE_LOG.md`, not the PR. Title shape: `CI Performance
-<YYYY-MM-DD>: <plain-language issue>`. Open or update via
+<YYYY-MM-DD>: <plain-language issue>`. Create a new dated branch, or a
+new remediation PR after the audit PR merged, with `gh pr create --title
+<title> --body <body> --head <branch> --base main` (or `POST
+/repos/{owner}/{repo}/pulls` with `head`, `base`, `title`, and `body`).
+Formatter `--json` is `{title, body}` only; do not POST it as the create
+payload. Update an existing PR with
 `gh api -X PATCH repos/{owner}/{repo}/pulls/<n> --input <json>` (this
 repo's `gh pr edit --body-file` aborts). Verify with a grep for a phrase
 you just wrote.

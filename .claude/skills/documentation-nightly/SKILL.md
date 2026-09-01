@@ -597,10 +597,15 @@ deployment. Omit `--next` and the formatter emits `Fixed with green deployment`.
 The body has exactly three sections, in this order: **Issue discovered**,
 **What was done to fix it**, **Next**. Audit tables, SHA ranges, finding
 inventories, and gate counts stay on the rolling GitHub issue, not the PR.
-Title shape: `Documentation <YYYY-MM-DD>: <plain-language issue>`. Open or
-update via `gh api -X PATCH repos/{owner}/{repo}/pulls/<n> --input <json>`
-(this repo's `gh pr edit --body-file` aborts). Verify with a grep for a
-phrase you just wrote.
+Title shape: `Documentation <YYYY-MM-DD>: <plain-language issue>`. Create a
+new dated branch, or a new remediation PR after the audit PR merged, with
+`gh pr create --title <title> --body <body> --head <branch> --base main`
+(or `POST /repos/{owner}/{repo}/pulls` with `head`, `base`, `title`, and
+`body`). Formatter `--json` is `{title, body}` only; do not POST it as the
+create payload. Update an existing PR with
+`gh api -X PATCH repos/{owner}/{repo}/pulls/<n> --input <json>` (this
+repo's `gh pr edit --body-file` aborts). Verify with a grep for a phrase
+you just wrote.
 
 A zero-finding run still does not open a PR (rail 4).
 

@@ -27,6 +27,7 @@ ISSUE_HEADING = "Issue discovered"
 FIX_HEADING = "What was done to fix it"
 NEXT_HEADING = "Next"
 GREEN_DEPLOYMENT = "Fixed with green deployment"
+GITHUB_PR_TITLE_MAX = 256
 
 
 def _clean(value: str, *, field: str) -> str:
@@ -44,7 +45,10 @@ def format_pr_title(*, loop: str, date: str, issue: str) -> str:
         raise ValueError(f"unknown loop {loop!r}; expected one of: {known}")
     day = _clean(date, field="date")
     summary = _clean(issue, field="issue")
-    return f"{prefix} {day}: {summary}"
+    title = f"{prefix} {day}: {summary}"
+    if len(title) > GITHUB_PR_TITLE_MAX:
+        return title[:GITHUB_PR_TITLE_MAX]
+    return title
 
 
 def format_pr_body(
@@ -92,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--json",
         action="store_true",
-        help="emit {title, body} JSON for gh api --input",
+        help="emit {title, body} JSON (not a POST /pulls create payload)",
     )
     args = parser.parse_args(argv)
     payload = render(
