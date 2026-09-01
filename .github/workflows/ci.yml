@@ -82,9 +82,13 @@ jobs:
           else
             ensure_commit "$PUSH_HEAD"
             zero="0000000000000000000000000000000000000000"
-            if [ "$PUSH_BEFORE" = "$zero" ] || ! git cat-file -e "${PUSH_BEFORE}^{commit}" 2>/dev/null; then
+            if [ "$PUSH_BEFORE" = "$zero" ]; then
               log_opts="-n 1 ${PUSH_HEAD}"
             else
+              # A force-push / orphaned `before` used to skip ensure_commit and
+              # fall through to `-n 1 $PUSH_HEAD`, scanning only the tip on the
+              # deploy event. Fetch it; if it is still missing, fail the job.
+              ensure_commit "$PUSH_BEFORE"
               log_opts="${PUSH_BEFORE}..${PUSH_HEAD}"
             fi
           fi
