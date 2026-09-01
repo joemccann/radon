@@ -129,6 +129,13 @@ Small pure functions (composed-method), stdlib `json` parsing, `requests` fetch:
   error=...)` EVERY cycle; atomic JSON to `data/credit_spread.json`.
 - Unchanged day prints `[credit-spread] source unchanged; refreshing snapshot only`
   and is still an `ok` heartbeat (a source answered).
+- **An `ok` row may still carry `last_error`.** When the Robinhood rung is closed
+  and a ticker is demoted to Yahoo, `persist_result` writes `ok` with
+  `error={"class": ..., "source": "robinhood", "message": ...}` (REL-174 / R-470):
+  the writer succeeded, so writer-state semantics say `ok`, but the demotion is
+  named rather than hidden under `ok`/`yahoo`. It clears on the next clean cycle.
+  Do not read a non-null `last_error` on an `ok` row as a stuck error state.
+  `fetch_iei_hyg.py` does the same; see [`iei-hyg.md`](iei-hyg.md).
 - All three sources down (`combine_source(sources)` empty): `run` re-serves the JSON
   cache through `_serve_cached` as `status: "stale_source"` with an `error` heartbeat
   (mirrors `fetch_ivrank`), so the watchdog pages instead of reading a fresh `ok`

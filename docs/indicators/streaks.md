@@ -64,7 +64,7 @@ refresh cadence.
 {
   "symbol": "SPY",
   "scan_time": "2026-08-30T21:14:00+00:00",
-  "source": "ib | uw | robinhood | yahoo | cache",
+  "source": "ib | uw | rh | yahoo | cache",
   "missing": false,
   "count": 2515,
   "first_date": "2016-08-30",
@@ -82,6 +82,11 @@ refresh cadence.
 }
 ```
 
+- `source` uses the persisted writer vocabulary: the Robinhood rung is
+  `"rh"` (`clients/robinhood_client.py` `RH_SOURCE`, pinned by
+  `test_streaks_route.py`). `web/lib/streaks.ts` still accepts a legacy
+  `"robinhood"` from cache envelopes written before REL-174; nothing emits
+  it today.
 - Closes are deduped by date (last write wins), sorted ascending; only
   finite closes > 0 survive.
 - `max_streak_end` = the most recent date whose streak equals `max_streak`.
