@@ -135,6 +135,16 @@ def _stub_bin(tmp_path: Path, models_log: Path, exhausted: Path, gh_log: Path) -
 
 
 def _audit(tmp_path: Path, loop: str, exhausted_models, ladder: str | None = None):
+    return _run(tmp_path, loop, "audit", exhausted_models, ladder)
+
+
+def _run(
+    tmp_path: Path,
+    loop: str,
+    phase: str,
+    exhausted_models,
+    ladder: str | None = None,
+):
     wrapper = LOOPS[loop]
     models_log = tmp_path / "models.txt"
     gh_log = tmp_path / "gh.log"
@@ -150,7 +160,7 @@ def _audit(tmp_path: Path, loop: str, exhausted_models, ladder: str | None = Non
     if ladder is not None:
         env["RADON_WEEKEND_MODEL_LADDER"] = ladder
     proc = subprocess.run(
-        [BASH, str(repo / "scripts" / wrapper.name), "audit"],
+        [BASH, str(repo / "scripts" / wrapper.name), phase],
         cwd=repo, env=env, capture_output=True, text=True, timeout=180,
     )
     models = (
@@ -217,4 +227,29 @@ class TestAnExhaustedQuotaDropsARung:
         )
         assert "claude.ai/settings/usage" in calls, (
             f"{loop}: the dead-man must carry the one place this is fixed: {calls!r}"
+        )
+
+
+# DOC-044 (2026-09-01): every case above runs `audit`, where MAX_ROUNDS=1, so
+# the continuation-round suppression each wrapper added for an exhausted
+# ladder was never executed by a test. `remediate` is the mode with 8 rounds —
+# the mode where losing the guard relaunches the whole ladder into the same
+# wall eight times over.
+
+
+@pytest.mark.parametrize("loop", sorted(LOOPS))
+class TestAnExhaustedLadderStopsTheRemediateRounds:
+    def test_remediate_walks_the_ladder_once_not_once_per_round(
+        self, tmp_path, loop
+    ):
+        proc, models, calls = _run(tmp_path, loop, "remediate", LADDER)
+        assert models == LADDER, (
+            f"{loop}: remediate must walk the ladder exactly once and stop. "
+            f"Every rung is exhausted, so a continuation round can only "
+            f"re-fire into the same wall; models attempted: {models!r}\n"
+            f"{proc.stdout}{proc.stderr}"
+        )
+        assert proc.returncode != 0, (proc.returncode, proc.stdout, proc.stderr)
+        assert "all model quotas exhausted" in calls, (
+            f"{loop}: the remediate dead-man must name the cause too: {calls!r}"
         )

@@ -110,7 +110,7 @@ Next.js footer reads via `useIBStatusContext().displayStatus` (polls `/api/admin
 
 ## Operator Escape Hatches
 
-`POST /ib/reset-backoff` clears BOTH in-memory backoff AND the cross-process push lock. Use after manually approving 2FA on the phone.
+`POST /ib/reset-backoff` clears BOTH in-memory backoff AND the cross-process push lock. Use after manually approving 2FA on the phone. On a split-topology **app**-role host with a remote gateway configured it ALSO issues `reset-lease` to the broker daemon over mTLS and reports `remote` / `broker_lease_released` in the payload (`server.py` `ib_reset_backoff`). That release starts the broker's 60s per-verb cooldown (`VERB_COOLDOWN_S`, `scripts/ib_gateway_remote/serve.py`), so a Start or Restart issued in the next minute comes back `409` with the reason in `detail` — a refusal, not a failure. Wait it out; no verb clears it. See [`spof-host-split.md`](spof-host-split.md).
 
 `/usr/local/bin/radon restart` and the admin Gateway controls delegate to `/usr/local/bin/radon-ib-gateway-control`. A healthy start is a no-op with no lease; a stopped/missing start or any restart atomically acquires the lease before touching Docker.
 
@@ -145,7 +145,7 @@ Next.js footer reads via `useIBStatusContext().displayStatus` (polls `/api/admin
 
 - `feedback_2fa_push_stacking` — stacked push rejection
 - `feedback_ib_gateway_2fa_verification` — managedAccounts probe
-- `feedback_systemd_cascade_stop_no_autorecover` — cascade-stop issue (+ radon-api now Wants, not Requires, the gateway)
+- `feedback_systemd_cascade_stop_no_autorecover` — cascade-stop issue
 - `feedback_ib_pool_stuck_after_2fa` — post-2FA pool recovery
 - `feedback_ib_insync_no_request_timeouts` — request-bounding pattern needed because ib_insync blocks indefinitely during awaiting_2fa
 - `feedback_gateway_api_hang_and_watchdog_self_hang` — API-listener wedge + watchdog self-hang (TimeoutStartSec, no-replica)

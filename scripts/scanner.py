@@ -202,6 +202,9 @@ def _process_ticker(
     try:
         # Use the wrapper seam so tests and callers can patch scanner.fetch_flow_data
         # without needing to know the internal fetch_flow import path.
+        # 5 days, not 3. A 3-day window was measured 67% faster and reverted:
+        # it can miss a distribution day on day 4 and rank the ticker as a
+        # sustained accumulation it is not. Signal accuracy over scan speed.
         flow = fetch_flow_data(
             ticker,
             days=5,

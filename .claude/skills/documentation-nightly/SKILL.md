@@ -24,7 +24,8 @@ dedicated clone.
 
 The wrapper (`scripts/documentation_nightly.sh`) owns the runner mechanics so
 this skill does not re-implement them: it refuses outside the dedicated clone
-(`.radon-weekend-runner` marker), takes the exclusive loop lock
+(both the shared `.radon-weekend-runner` and this loop's own
+`.radon-documentation-runner` marker), takes the exclusive loop lock
 (`.weekend-runner.lock` — do NOT acquire a second lock), hard-resets the clone
 to `origin/main` before each phase, enforces the wall-clock caps (audit 2h,
 remediate 6h), and posts the per-phase dead-man comment on the rolling issue
@@ -110,7 +111,8 @@ changes the tree. Otherwise generate it on demand and link to the source.
 Violating any rail is a failed run.
 
 1. **Use only the dedicated runner clone.** Refuse unless
-   `.radon-weekend-runner` exists at the repository root. The intended clone
+   BOTH `.radon-weekend-runner` and `.radon-documentation-runner` exist at
+   the repository root. The intended clone
    is `~/radon-weekend/radon-documentation`. Never use the operator clone or
    the reliability, testing, or CI-performance loop clones.
 2. **Take an exclusive loop lock.** The wrapper's `.weekend-runner.lock` is

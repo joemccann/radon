@@ -469,3 +469,173 @@ class TestPreflightContractClaims:
             "file:\n  " + "\n  ".join(sorted(set(wrong))) +
             "\nFix the doc, or add the key to the contract deliberately."
         )
+
+
+# ── DOC-020/022: the private-net trust scope must read the same in code and docs ─
+#
+# REL-170 narrowed 10.0.0.0/16 from the global server-to-server bypass to the
+# broker watchdog's /health probe. Both owner docs kept describing the old
+# global trust, so a reviewer or broker-side integrator worked from a wrong
+# trust map. The docs must name the scoping function; the code must keep the
+# private net out of the bypass helper.
+
+_AUTH_SRC = _ROOT / "scripts" / "api" / "auth.py"
+_TRUST_DOCS = ("scripts/api/CLAUDE.md", "docs/spof-host-split.md")
+
+
+class TestPrivateNetTrustScope:
+    def test_auth_keeps_the_private_net_out_of_the_global_bypass(self):
+        src = _AUTH_SRC.read_text(encoding="utf-8")
+        assert "def is_private_net_probe" in src
+        start = src.index("def is_local_or_tailnet")
+        end = src.index("def is_private_net_peer")
+        assert "_HETZNER_PRIVATE" not in src[start:end], (
+            "is_local_or_tailnet consults the Hetzner private net: the docs in "
+            f"{_TRUST_DOCS} describe it as probe-only and must change with this"
+        )
+
+    def test_owner_docs_describe_the_private_net_as_probe_only(self):
+        for rel in _TRUST_DOCS:
+            text = (_ROOT / rel).read_text(encoding="utf-8")
+            assert "is_private_net_probe" in text, rel
+            assert "trusts exactly `10.0.0.0/16`" not in text, rel
+            assert "tailnet/`10.0.0.0/16`" not in text, rel
+
+
+# ── DOC-021: TEST_LOG.md is an append-only ledger ─────────────────
+#
+# 4584e84a (#213) replaced the 543-line ledger with its one new row: header
+# and 176 prior T-rows vanished from HEAD while testing-weekend/SKILL.md kept
+# declaring the file append-only and reading it at pre-flight. Rows may only
+# be added relative to the base the change is reviewed against.
+
+_TEST_LOG = "TEST_LOG.md"
+_LEDGER_ROW = re.compile(r"^\| T-\d{3} \|", re.MULTILINE)
+
+
+def _ledger_base_ref() -> str | None:
+    base = (os.environ.get("DOCS_CONTRACT_BASE") or "").strip()
+    if base in {"", _ZERO}:
+        base = "origin/main"
+    try:
+        _git("rev-parse", "--verify", base)
+    except subprocess.CalledProcessError:
+        return None
+    return base
+
+
+class TestTestLogLedgerIsAppendOnly:
+    def test_header_is_present(self):
+        text = (_ROOT / _TEST_LOG).read_text(encoding="utf-8")
+        assert text.startswith("# TEST_LOG.md — testing remediation execution log"), (
+            "TEST_LOG.md lost its header: the ledger was overwritten, not appended"
+        )
+
+    def test_row_count_never_decreases_against_the_base(self):
+        base = _ledger_base_ref()
+        if base is None:
+            pytest.skip("no base ref to compare the ledger against")
+        try:
+            before = _git("show", f"{base}:{_TEST_LOG}")
+        except subprocess.CalledProcessError:
+            pytest.skip(f"{_TEST_LOG} absent at {base}")
+        now = (_ROOT / _TEST_LOG).read_text(encoding="utf-8")
+        was, is_now = len(_LEDGER_ROW.findall(before)), len(_LEDGER_ROW.findall(now))
+        assert is_now >= was, (
+            f"TEST_LOG.md has {is_now} T-rows but {base} has {was}: the ledger "
+            "is append-only (testing-weekend/SKILL.md rail 4); restore the rows"
+        )
+
+
+# DOC-032 / DOC-033 (2026-09-01): docs/operations.md is the one place that
+# indexes all five nightly loops. Its "all fire 00:00 local" sentence had been
+# wrong since the loops were staggered, and its rails named only the shared
+# runner marker while every wrapper also requires a per-loop one. Both facts
+# are mechanically derivable, so pin them instead of re-reading the prose.
+
+_LOOPS = {
+    "reliability": ("com.radon.reliability-daily.plist", "reliability_weekend.sh"),
+    "testing": ("com.radon.testing-daily.plist", "testing_weekend.sh"),
+    "ci-performance": ("com.radon.ci-performance-daily.plist", "ci_performance_nightly.sh"),
+    "documentation": ("com.radon.documentation-daily.plist", "documentation_nightly.sh"),
+    "security": ("com.radon.security-daily.plist", "security_nightly.sh"),
+}
+
+
+def _operations_text() -> str:
+    return (_ROOT / "docs" / "operations.md").read_text(encoding="utf-8")
+
+
+class TestNightlyLoopIndex:
+    def test_each_loop_row_states_the_plist_fire_time(self):
+        import plistlib
+
+        text = _operations_text()
+        for loop, (plist_name, _) in _LOOPS.items():
+            plist = _ROOT / "config" / plist_name
+            assert plist.is_file(), f"{plist} is missing"
+            with plist.open("rb") as fh:
+                when = plistlib.load(fh)["StartCalendarInterval"]
+            fires = f"{when['Hour']:02d}:{when['Minute']:02d}"
+            row = next(
+                (ln for ln in text.splitlines() if ln.startswith(f"| {loop} |")),
+                None,
+            )
+            assert row is not None, (
+                f"docs/operations.md has no nightly-loop row for {loop}"
+            )
+            assert f"| {fires} |" in row, (
+                f"docs/operations.md says {row.strip()} but "
+                f"{plist_name} fires at {fires}"
+            )
+
+    def test_the_per_loop_runner_marker_rail_is_stated(self):
+        assert ".radon-<loop>-runner" in _operations_text(), (
+            "docs/operations.md must state that a wrapper needs BOTH "
+            ".radon-weekend-runner and its own .radon-<loop>-runner marker; "
+            "every wrapper refuses the clone without the second one"
+        )
+
+    def test_each_wrapper_actually_requires_its_own_marker(self):
+        for loop, (_, wrapper) in _LOOPS.items():
+            text = (_ROOT / "scripts" / wrapper).read_text(encoding="utf-8")
+            assert f".radon-{loop}-runner" in text, (
+                f"scripts/{wrapper} no longer names .radon-{loop}-runner; "
+                "docs/operations.md documents that marker as the rail"
+            )
+
+
+# DOC-045 (2026-09-01): TEST_LOG.md is not the only append-only root ledger,
+# and it was only guarded after a truncation shipped green. `path_filter.py`
+# classifies every root `.md` as documentation and routes it to a contract
+# test ONLY when a test names the file, so the other five ledgers selected no
+# gate at all. Naming them here is what puts them behind one.
+
+_LEDGERS = {
+    "RELIABILITY_AUDIT.md": r"^\| R-\d+",
+    "RELIABILITY_LOG.md": r"^\| REL-\d+",
+    "TEST_AUDIT.md": r"^\| T-\d+",
+    "REMEDIATION_LOG.md": r"^\| T-\d+",
+    "CI_PERFORMANCE_LOG.md": r"^### CIP-\d+",
+}
+
+
+class TestRootLedgersAreAppendOnly:
+    @pytest.mark.parametrize("ledger,row", sorted(_LEDGERS.items()))
+    def test_entry_count_never_decreases_against_the_base(self, ledger, row):
+        base = _ledger_base_ref()
+        if base is None:
+            pytest.skip("no base ref to compare the ledger against")
+        try:
+            before = _git("show", f"{base}:{ledger}")
+        except subprocess.CalledProcessError:
+            pytest.skip(f"{ledger} absent at {base}")
+        pattern = re.compile(row, re.MULTILINE)
+        now = (_ROOT / ledger).read_text(encoding="utf-8")
+        was, is_now = len(pattern.findall(before)), len(pattern.findall(now))
+        assert is_now >= was, (
+            f"{ledger} has {is_now} entries but {base} has {was}: the nightly "
+            "ledgers are append-only — restore the rows instead of rewriting "
+            "history (see TEST_LOG.md, truncated 543 -> 2 lines in 4584e84a "
+            "with every gate green)"
+        )
