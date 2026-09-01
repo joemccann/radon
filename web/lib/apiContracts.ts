@@ -18,6 +18,10 @@ export type ErrorCode =
   // A stored row exists but will not parse. The database is fine; the
   // persisted payload is not, so retrying re-reads the same bad bytes.
   | "SNAPSHOT_CORRUPT"
+  // First-run setup: the whole API surface is parked until /setup finishes.
+  | "SETUP_MODE"
+  | "SETUP_TOKEN_INVALID"
+  | "BACKEND_UNAVAILABLE"
   | "INTERNAL_ERROR";
 
 export type CacheState = "HIT" | "MISS" | "STALE" | "BYPASS";

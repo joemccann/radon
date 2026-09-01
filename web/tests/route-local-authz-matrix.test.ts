@@ -27,6 +27,9 @@ const GUARDED_ADMIN_ACTION_ROUTES = [
   "admin/ib/reset-backoff", "admin/ib/restart", "admin/services",
   "admin/services/[unit]/[action]", "admin/stack/restart",
   "admin/trading/[action]", "alerts", "alerts/[id]",
+  // Operator credentials CRUD (PR #125): requireRouteAccess operatorOnly on
+  // every verb, reads included — masked hints are nobody's business on demo.
+  "credentials", "credentials/[service]",
   // R-179: minting a relay ticket is not read-only — with an OPTIONAL bearer
   // this route was a loopback-trusted deputy (the Next.js server IS loopback
   // to FastAPI's /ws-ticket).
@@ -42,6 +45,14 @@ const GUARDED_ADMIN_ACTION_ROUTES = [
 // route-local guard" described the wrong posture and left the guard it does
 // have unexercised by either matrix.
 const DEMO_ADMIN_GUARDED_ROUTES = ["admin/demo-users"] as const;
+
+// First-run setup wizard (PR #125): guarded by a DIFFERENT mechanism again —
+// hard 404 unless setup mode is active (no Clerk keys configured anywhere),
+// then a timing-safe console-token check on every POST. Never reachable on a
+// deployment with auth configured; tests: setup-first-run.test.tsx.
+const SETUP_TOKEN_GUARDED_ROUTES = [
+  "setup/complete", "setup/status", "setup/validate",
+] as const;
 
 // Routes with NO route-local guard: the middleware default-deny perimeter is
 // their only auth layer — a deliberate classification for read-only market
@@ -109,6 +120,7 @@ describe("security report route-local authorization matrix", () => {
       ...ADMIN_ROUTES.map((route) => `admin/${route}`),
       ...GUARDED_ADMIN_ACTION_ROUTES,
       ...DEMO_ADMIN_GUARDED_ROUTES,
+      ...SETUP_TOKEN_GUARDED_ROUTES,
       ...MIDDLEWARE_PERIMETER_ONLY_ROUTES,
       ...PINNED_ELSEWHERE_ROUTES,
     ]);
