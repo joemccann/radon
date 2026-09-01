@@ -2743,20 +2743,19 @@ _order_rate_timestamps: deque = deque()
 def _refuse_if_order_rate_exceeded(order_ref: Optional[str] = None) -> None:
     """Claim one slot in the per-minute placement budget.
 
-    REL-026: `/orders/replace` reserves its slot BEFORE the destructive cancel
-    loop, so passing the same `order_ref` again from the inner `orders_place`
-    must not consume a second one — the replace is one placement, not two.
-    The reservation is tagged with `order_ref` only until
-    :func:`_consume_order_rate_reservation` runs after the placement; a
-    later request that repeats a client-supplied ref must claim a new slot.
+    Every call claims a new slot or 429s. An in-flight `order_ref` does not
+    skip the claim — two overlapping `/orders/place` calls with the same
+    client ref must not share one cap slot.
+
+    `/orders/replace` reserves once, then places through
+    :func:`_orders_place_after_rate_reservation` so the inner placement does
+    not claim a second slot (REL-026).
     """
     from order_limits import max_orders_per_min
 
     now = time.monotonic()
     while _order_rate_timestamps and now - _order_rate_timestamps[0][0] > 60.0:
         _order_rate_timestamps.popleft()
-    if order_ref and any(ref == order_ref for _stamp, ref in _order_rate_timestamps):
-        return
     cap = max_orders_per_min()
     if len(_order_rate_timestamps) >= cap:
         raise HTTPException(
@@ -2832,8 +2831,7 @@ async def orders_place(request: Request):
     body = await request.json()
     _refuse_if_order_limits_violated(body)
     # REL-006: mint the orderRef BEFORE the rate check so it survives a
-    # SIGKILLed subprocess, and so a slot /orders/replace already reserved
-    # for this ref is recognised instead of double-counted (REL-026).
+    # SIGKILLed subprocess.
     if not body.get("orderRef"):
         body["orderRef"] = f"radon-{uuid.uuid4().hex[:20]}"
     reserved_ref = body["orderRef"]
@@ -3065,7 +3063,7 @@ async def _orders_replace_after_rate_reservation(cancel_orders, replacement):
                 "permId": target.get("permId"),
                 "status": (result or {}).get("finalStatus", "cancelled"),
             })
-        placed = await orders_place(_internal_json_request(replacement))
+        placed = await _orders_place_after_rate_reservation(replacement)
     except HTTPException as exc:
         status = exc.status_code if exc.status_code == 504 else 502
         raise HTTPException(

@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -87,7 +88,7 @@ class TestOrderRateCap:
     def test_repeating_client_order_ref_cannot_reuse_the_cap(
         self, trusted_client, monkeypatch
     ):
-        """A reserved slot is consumed after use, so the same orderRef is a new claim."""
+        """The same client orderRef is a new claim, not a free pass on the cap."""
         client, server = trusted_client
         monkeypatch.setenv("RADON_MAX_ORDERS_PER_MIN", "1")
         monkeypatch.setattr(
@@ -97,6 +98,48 @@ class TestOrderRateCap:
         body = {
             "type": "stock", "symbol": "AAPL", "action": "BUY",
             "quantity": 1, "limitPrice": 200.0, "orderRef": "client-ref-1",
+        }
+        assert client.post("/orders/place", json=body).status_code == 200
+        reused = client.post("/orders/place", json=body)
+        assert reused.status_code == 429
+        assert reused.json()["detail"]["code"] == "ORDER_RATE_LIMIT"
+
+    def test_inflight_same_order_ref_cannot_share_one_cap_slot(
+        self, trusted_client, monkeypatch
+    ):
+        """Two overlapping claims with the same orderRef each take a slot.
+
+        The skip that treated a still-tagged ref as "already reserved" let
+        parallel `/orders/place` calls share one cap slot. Consume never
+        ran between them.
+        """
+        _, server = trusted_client
+        monkeypatch.setenv("RADON_MAX_ORDERS_PER_MIN", "1")
+        server._order_rate_timestamps.clear()
+        try:
+            server._refuse_if_order_rate_exceeded("same-ref")
+            with pytest.raises(HTTPException) as exc:
+                server._refuse_if_order_rate_exceeded("same-ref")
+            assert exc.value.status_code == 429
+            assert exc.value.detail["code"] == "ORDER_RATE_LIMIT"
+        finally:
+            server._order_rate_timestamps.clear()
+
+    def test_place_route_same_order_ref_still_tagged_cannot_reuse_slot(
+        self, trusted_client, monkeypatch
+    ):
+        """Hold the reservation tag (as if consume has not run) and a second
+        `/orders/place` with the same client orderRef must still 429."""
+        client, server = trusted_client
+        monkeypatch.setenv("RADON_MAX_ORDERS_PER_MIN", "1")
+        monkeypatch.setattr(server, "_consume_order_rate_reservation", lambda *a, **k: None)
+        monkeypatch.setattr(
+            server, "_run_ib_script_with_recovery", AsyncMock(return_value=_ok_result())
+        )
+
+        body = {
+            "type": "stock", "symbol": "AAPL", "action": "BUY",
+            "quantity": 1, "limitPrice": 200.0, "orderRef": "in-flight-ref",
         }
         assert client.post("/orders/place", json=body).status_code == 200
         reused = client.post("/orders/place", json=body)
