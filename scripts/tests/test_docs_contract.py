@@ -545,3 +545,61 @@ class TestTestLogLedgerIsAppendOnly:
             f"TEST_LOG.md has {is_now} T-rows but {base} has {was}: the ledger "
             "is append-only (testing-weekend/SKILL.md rail 4); restore the rows"
         )
+
+
+# DOC-032 / DOC-033 (2026-09-01): docs/operations.md is the one place that
+# indexes all five nightly loops. Its "all fire 00:00 local" sentence had been
+# wrong since the loops were staggered, and its rails named only the shared
+# runner marker while every wrapper also requires a per-loop one. Both facts
+# are mechanically derivable, so pin them instead of re-reading the prose.
+
+_LOOPS = {
+    "reliability": ("com.radon.reliability-daily.plist", "reliability_weekend.sh"),
+    "testing": ("com.radon.testing-daily.plist", "testing_weekend.sh"),
+    "ci-performance": ("com.radon.ci-performance-daily.plist", "ci_performance_nightly.sh"),
+    "documentation": ("com.radon.documentation-daily.plist", "documentation_nightly.sh"),
+    "security": ("com.radon.security-daily.plist", "security_nightly.sh"),
+}
+
+
+def _operations_text() -> str:
+    return (_ROOT / "docs" / "operations.md").read_text(encoding="utf-8")
+
+
+class TestNightlyLoopIndex:
+    def test_each_loop_row_states_the_plist_fire_time(self):
+        import plistlib
+
+        text = _operations_text()
+        for loop, (plist_name, _) in _LOOPS.items():
+            plist = _ROOT / "config" / plist_name
+            assert plist.is_file(), f"{plist} is missing"
+            with plist.open("rb") as fh:
+                when = plistlib.load(fh)["StartCalendarInterval"]
+            fires = f"{when['Hour']:02d}:{when['Minute']:02d}"
+            row = next(
+                (ln for ln in text.splitlines() if ln.startswith(f"| {loop} |")),
+                None,
+            )
+            assert row is not None, (
+                f"docs/operations.md has no nightly-loop row for {loop}"
+            )
+            assert f"| {fires} |" in row, (
+                f"docs/operations.md says {row.strip()} but "
+                f"{plist_name} fires at {fires}"
+            )
+
+    def test_the_per_loop_runner_marker_rail_is_stated(self):
+        assert ".radon-<loop>-runner" in _operations_text(), (
+            "docs/operations.md must state that a wrapper needs BOTH "
+            ".radon-weekend-runner and its own .radon-<loop>-runner marker; "
+            "every wrapper refuses the clone without the second one"
+        )
+
+    def test_each_wrapper_actually_requires_its_own_marker(self):
+        for loop, (_, wrapper) in _LOOPS.items():
+            text = (_ROOT / "scripts" / wrapper).read_text(encoding="utf-8")
+            assert f".radon-{loop}-runner" in text, (
+                f"scripts/{wrapper} no longer names .radon-{loop}-runner; "
+                "docs/operations.md documents that marker as the rail"
+            )

@@ -52,6 +52,18 @@
       "owners": ["docs/operations.md", "docs/cloud-services.md"]
     },
     {
+      "id": "nightly-loops",
+      "globs": [
+        "scripts/*_weekend.sh",
+        "scripts/*_nightly.sh",
+        "scripts/weekend_notify.py",
+        "scripts/weekend_redact.py",
+        "config/com.radon.*-daily.plist"
+      ],
+      "owners": ["docs/operations.md"],
+      "note": "operations.md is the one place indexing all five nightly loops: fire times, clone + marker rails, the model pin and the status vocabulary an operator reads off a page. #219 changed operator-facing behaviour in all five wrappers with no owner update (DOC-032/033/034/040). Loop SEMANTICS stay in .claude/skills/<loop>/SKILL.md; only the operator contract belongs here."
+    },
+    {
       "id": "factory",
       "globs": ["scripts/factory_sandbox_setup.sh"],
       "owners": ["docs/factory.md"],
