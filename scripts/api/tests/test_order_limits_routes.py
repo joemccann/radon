@@ -84,6 +84,25 @@ class TestOrderRateCap:
         assert third.status_code == 429
         assert third.json()["detail"]["code"] == "ORDER_RATE_LIMIT"
 
+    def test_repeating_client_order_ref_cannot_reuse_the_cap(
+        self, trusted_client, monkeypatch
+    ):
+        """A reserved slot is consumed after use, so the same orderRef is a new claim."""
+        client, server = trusted_client
+        monkeypatch.setenv("RADON_MAX_ORDERS_PER_MIN", "1")
+        monkeypatch.setattr(
+            server, "_run_ib_script_with_recovery", AsyncMock(return_value=_ok_result())
+        )
+
+        body = {
+            "type": "stock", "symbol": "AAPL", "action": "BUY",
+            "quantity": 1, "limitPrice": 200.0, "orderRef": "client-ref-1",
+        }
+        assert client.post("/orders/place", json=body).status_code == 200
+        reused = client.post("/orders/place", json=body)
+        assert reused.status_code == 429
+        assert reused.json()["detail"]["code"] == "ORDER_RATE_LIMIT"
+
     def test_refused_orders_do_not_consume_budget(self, trusted_client, monkeypatch):
         """A 422-refused order must not eat the rate budget."""
         client, server = trusted_client

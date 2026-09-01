@@ -301,13 +301,12 @@ class TestRotationSparesTheLaunchdSinks:
         assert survivors[0] == "audit-20260827T000008.log", survivors[0]
 
 
-class TestSetupGuardsTheSharedVenv:
-    """R-266: `WEEKEND_VENV` is the same path in both setup scripts.
+class TestSetupGuardsPerLoopVenvs:
+    """Each full-permission loop prepends its own venv to PATH.
 
-    Both wrappers prepend it to the running agent's `PATH`, so running one
-    setup while the other loop's cycle is live re-creates the interpreter and
-    re-installs site-packages under a running agent. The in-flight guard was
-    written for the clone and never extended to the shared root.
+    The five setups previously wrote one `$WEEKEND_ROOT/venv`. The shared
+    path is not deleted here (operator follow-up). Sibling in-flight
+    locks stay so a setup still stands down on a live sibling clone.
     """
 
     SETUPS = {
@@ -317,15 +316,48 @@ class TestSetupGuardsTheSharedVenv:
         "documentation": REPO / "scripts" / "setup_documentation_nightly.sh",
         "security": REPO / "scripts" / "setup_security_nightly.sh",
     }
+    WRAPPERS = {
+        "reliability": REPO / "scripts" / "reliability_weekend.sh",
+        "testing": REPO / "scripts" / "testing_weekend.sh",
+        "ci-performance": REPO / "scripts" / "ci_performance_nightly.sh",
+        "documentation": REPO / "scripts" / "documentation_nightly.sh",
+        "security": REPO / "scripts" / "security_nightly.sh",
+    }
+    VENV_DIR = {
+        "reliability": "$WEEKEND_ROOT/venv-reliability",
+        "testing": "$WEEKEND_ROOT/venv-testing",
+        "ci-performance": "$WEEKEND_ROOT/venv-ci-performance",
+        "documentation": "$WEEKEND_ROOT/venv-documentation",
+        "security": "$WEEKEND_ROOT/venv-security",
+    }
 
-    def test_the_two_setups_really_do_share_a_venv(self):
+    def test_each_setup_writes_a_distinct_venv(self):
         venvs = {
             name: re.search(r'WEEKEND_VENV="([^"]+)"', path.read_text(encoding="utf-8")).group(1)
             for name, path in self.SETUPS.items()
         }
-        assert len(set(venvs.values())) == 1, (
-            f"precondition changed: {venvs}"
-        )
+        assert venvs == self.VENV_DIR, venvs
+        assert len(set(venvs.values())) == len(venvs)
+        assert "$WEEKEND_ROOT/venv" not in venvs.values()
+
+    def test_each_wrapper_prepends_its_own_venv(self):
+        for name, path in self.WRAPPERS.items():
+            body = path.read_text(encoding="utf-8")
+            match = re.search(r'^VENV="([^"]+)"', body, re.M)
+            assert match, f"{name} wrapper lost VENV="
+            assert match.group(1) == self.VENV_DIR[name], (name, match.group(1))
+            assert 'VENV="$WEEKEND_ROOT/venv"' not in body
+
+    def test_no_setup_deletes_the_legacy_shared_venv(self):
+        for name, path in self.SETUPS.items():
+            uncommented = "\n".join(
+                line for line in path.read_text(encoding="utf-8").splitlines()
+                if not line.lstrip().startswith("#")
+            )
+            assert not re.search(r"\brm\b.*\$WEEKEND_ROOT/venv\b", uncommented), (
+                f"{name} setup deletes the legacy shared venv; operator removal "
+                "is a follow-up after this ships"
+            )
 
     @pytest.mark.parametrize("name", ["reliability", "testing", "ci-performance", "documentation", "security"])
     def test_each_setup_checks_the_sibling_clone_lock(self, name):
@@ -337,7 +369,7 @@ class TestSetupGuardsTheSharedVenv:
         )
         install = body[: body.index("python3.13 -m venv")]
         assert "SIBLING_REPO" in install, (
-            f"{name} setup re-creates the shared venv without checking whether "
+            f"{name} setup re-creates the venv without checking whether "
             "the other loop's cycle is executing against it"
         )
 

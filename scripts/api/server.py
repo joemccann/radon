@@ -2036,18 +2036,28 @@ def _is_app_role_gateway_mutation(request: Request) -> bool:
     Loopback trust would let a compromised Next.js on the public terminator
     restart IBKR without a Clerk operator JWT. Combined/broker keep the
     existing local-helper path.
+
+    The unit name is canonicalized before the comparison: systemd treats
+    ``radon-ib-gateway`` and ``radon-ib-gateway.service`` as the same unit,
+    so matching the caller's spelling would skip this privileged-action gate.
     """
     if admin_services.host_role() != "app":
         return False
     if request.method != "POST":
         return False
-    path = request.url.path
+    path = request.url.path.rstrip("/")
     if path in {"/ib/restart", "/ib/reset-backoff"}:
         return True
-    prefix = "/admin/services/radon-ib-gateway.service/"
-    if path.startswith(prefix) and path.rsplit("/", 1)[-1] in {"start", "stop", "restart"}:
-        return True
-    return False
+    prefix = "/admin/services/"
+    if not path.startswith(prefix):
+        return False
+    rest = path[len(prefix):]
+    if "/" not in rest:
+        return False
+    unit, action = rest.rsplit("/", 1)
+    if action not in {"start", "stop", "restart"}:
+        return False
+    return admin_services.canonicalize_unit_name(unit) == admin_services.GATEWAY_UNIT
 
 
 def _gateway_unit_controllable() -> bool:
@@ -2736,6 +2746,9 @@ def _refuse_if_order_rate_exceeded(order_ref: Optional[str] = None) -> None:
     REL-026: `/orders/replace` reserves its slot BEFORE the destructive cancel
     loop, so passing the same `order_ref` again from the inner `orders_place`
     must not consume a second one — the replace is one placement, not two.
+    The reservation is tagged with `order_ref` only until
+    :func:`_consume_order_rate_reservation` runs after the placement; a
+    later request that repeats a client-supplied ref must claim a new slot.
     """
     from order_limits import max_orders_per_min
 
@@ -2755,6 +2768,21 @@ def _refuse_if_order_rate_exceeded(order_ref: Optional[str] = None) -> None:
             },
         )
     _order_rate_timestamps.append((now, order_ref))
+
+
+def _consume_order_rate_reservation(order_ref: Optional[str] = None) -> None:
+    """Drop the order_ref tag so the same client ref cannot reuse this slot.
+
+    The timestamp stays in the window — the cap still counts the placement.
+    Called after the placement attempt (success or failure) so a repeated
+    client-supplied orderRef is a new claim, not a free pass.
+    """
+    if not order_ref:
+        return
+    for i, (stamp, ref) in enumerate(_order_rate_timestamps):
+        if ref == order_ref:
+            _order_rate_timestamps[i] = (stamp, None)
+            return
 
 
 def _refuse_if_order_limits_violated(params: dict) -> None:
@@ -2808,7 +2836,19 @@ async def orders_place(request: Request):
     # for this ref is recognised instead of double-counted (REL-026).
     if not body.get("orderRef"):
         body["orderRef"] = f"radon-{uuid.uuid4().hex[:20]}"
-    _refuse_if_order_rate_exceeded(body["orderRef"])
+    reserved_ref = body["orderRef"]
+    _refuse_if_order_rate_exceeded(reserved_ref)
+    try:
+        return await _orders_place_after_rate_reservation(body)
+    finally:
+        # Drop the orderRef tag so a later request that repeats a
+        # client-supplied ref claims a new slot. The timestamp stays;
+        # the cap still counts this placement.
+        _consume_order_rate_reservation(reserved_ref)
+
+
+async def _orders_place_after_rate_reservation(body: dict):
+    """Body of /orders/place after the per-minute slot is reserved."""
     if test_mode:
         order_id, perm_id = _next_test_order_ids()
         return {
@@ -2996,8 +3036,18 @@ async def orders_replace(request: Request):
     # destructive. It used to be claimed inside orders_place, which runs after
     # the cancel loop — an exhausted budget left the operator's working orders
     # cancelled and the replacement refused, i.e. the position unhedged.
-    _refuse_if_order_rate_exceeded(replacement["orderRef"])
+    reserved_ref = replacement["orderRef"]
+    _refuse_if_order_rate_exceeded(reserved_ref)
+    try:
+        return await _orders_replace_after_rate_reservation(
+            cancel_orders, replacement,
+        )
+    finally:
+        _consume_order_rate_reservation(reserved_ref)
 
+
+async def _orders_replace_after_rate_reservation(cancel_orders, replacement):
+    """Body of /orders/replace after the per-minute slot is reserved."""
     # Complete every non-transmitting validation before the first cancellation.
     await orders_whatif(_internal_json_request(replacement))
 
