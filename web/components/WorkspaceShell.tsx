@@ -14,7 +14,7 @@ import { useAutoSyncOnStale } from "@/lib/useAutoSyncOnStale";
 import { useSnapshotStaleness } from "@/lib/useSnapshotStaleness";
 import { useToast } from "@/lib/useToast";
 import { useOrderActions } from "@/lib/OrderActionsContext";
-import { usePrices } from "@/lib/usePrices";
+import { useRealtimePrices } from "@/lib/RealtimePricesContext";
 import { hasUsableIndexPrice, mergeIndexFallbackPrices, useIndexQuoteFallback } from "@/lib/useIndexQuoteFallback";
 import { useFuturesQuoteFallback } from "@/lib/useFuturesQuoteFallback";
 import { computeRealizedPnlFromFills } from "@/lib/realized-pnl";
@@ -50,7 +50,6 @@ import OfflineBanner from "@/components/OfflineBanner";
 import { useOfflineStatus } from "@/lib/offline/OfflineStatusContext";
 import { deriveLiveDataError } from "@/lib/offline/offlineStatus";
 import { useTheme } from "@/lib/ThemeContext";
-import { useRealtimeAuth } from "@/lib/RealtimeAuthContext";
 import CommandPalette from "@/components/CommandPalette";
 
 type WorkspaceShellProps = {
@@ -61,7 +60,6 @@ type WorkspaceShellProps = {
 
 export default function WorkspaceShell({ section, tickerParam, initialPortfolio }: WorkspaceShellProps) {
   const { theme: resolvedTheme, toggleTheme } = useTheme();
-  const getRealtimeToken = useRealtimeAuth();
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const pathname = usePathname();
@@ -265,22 +263,41 @@ export default function WorkspaceShell({ section, tickerParam, initialPortfolio 
     ibIssue,
     ibStatusMessage,
     error: priceError,
-  } = usePrices({
-    symbols: allSymbols,
-    contracts: allContracts,
-    indexes: allIndexes,
-    // Single focused depth ticket for the open ticker-detail subject. The
-    // detail view publishes the resolved book key (option key for single-leg
-    // options, else the ticker); null releases the ticket. Never forces a
-    // connection on its own — the subject already streams L1.
-    depthSymbol: tickerDetail.depthSymbol,
-    depthSymbols: tickerDetail.depthSymbols,
-    // For a futures-backed depth subject (VIX), the order-ticket selected
-    // expiry decides which listed future the relay resolves under that key.
-    // Null → relay falls back to front-month.
-    depthExpiry: tickerDetail.depthFutureExpiry,
-    getToken: getRealtimeToken,
-  });
+    publishSubscriptions,
+  } = useRealtimePrices();
+
+  // The realtime socket is owned by RealtimePricesProvider in the root
+  // Providers tree — it survives App Router navigations, which REMOUNT this
+  // per-page shell. Each shell instance only publishes WHAT to stream; the
+  // provider diffs the set over the already-open socket (no reconnect, no new
+  // ws-ticket, no snapshot resync on a route change). Deliberately NO effect
+  // cleanup: last write wins, so a page swap can never empty the set mid-swap.
+  // Pin: web/tests/realtime-prices-navigation-persistence.test.tsx.
+  useEffect(() => {
+    publishSubscriptions({
+      symbols: allSymbols,
+      contracts: allContracts,
+      indexes: allIndexes,
+      // Single focused depth ticket for the open ticker-detail subject. The
+      // detail view publishes the resolved book key (option key for single-leg
+      // options, else the ticker); null releases the ticket. Never forces a
+      // connection on its own — the subject already streams L1.
+      depthSymbol: tickerDetail.depthSymbol,
+      depthSymbols: tickerDetail.depthSymbols,
+      // For a futures-backed depth subject (VIX), the order-ticket selected
+      // expiry decides which listed future the relay resolves under that key.
+      // Null → relay falls back to front-month.
+      depthExpiry: tickerDetail.depthFutureExpiry,
+    });
+  }, [
+    publishSubscriptions,
+    allSymbols,
+    allContracts,
+    allIndexes,
+    tickerDetail.depthSymbol,
+    tickerDetail.depthSymbols,
+    tickerDetail.depthFutureExpiry,
+  ]);
 
   const missingIndexFallbackSymbols = useMemo(
     () => allIndexes
