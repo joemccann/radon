@@ -266,6 +266,50 @@ test.describe("Mobile order ticket — Phase 1-3 UX", () => {
     await expect(strip).toContainText("Bull Call Spread");
   });
 
+  test("size controls own the sheet scroll; risk pins below them, footer stays compact", async ({ page }) => {
+    await stubChainApis(page);
+    await page.goto("/AAPL?tab=chain");
+
+    // Two-leg spread — the layout regression repro (2026-09-01): the pinned
+    // footer used to carry the RISK grid + payoff and ate ~48% of a 393x852
+    // viewport, crushing the legs/qty/preset region into a ~196px nested
+    // scroller with a 20px gutter.
+    await tapJs(page.getByTestId("mobile-chain-call-200"));
+    await tapJs(page.getByTestId("mobile-chain-detail-buy"));
+    await tapJs(page.getByTestId("mobile-chain-call-210"));
+    await tapJs(page.getByTestId("mobile-chain-detail-sell"));
+    await tapJs(page.getByTestId("mobile-chain-pending-strip"));
+    await expect(page.getByTestId("mobile-order-ticket")).toBeVisible();
+
+    // Every quick-add chip of the FIRST leg is geometrically visible as the
+    // sheet opens — sizing the structure never requires hunting a scrollbar.
+    for (const preset of [5, 10, 25, 50, 100]) {
+      await expect(
+        page.getByTestId(`mobile-order-ticket-leg-AAPL_20260320_200_C-qty-${preset}`),
+      ).toBeInViewport();
+    }
+
+    // A REAL geometry-checked click (not the tapJs escape hatch the crushed
+    // layout forced on every other test in this file) adds 25 to the qty.
+    await page.getByTestId("mobile-order-ticket-leg-AAPL_20260320_200_C-qty-25").click();
+    await expect(page.getByTestId("mobile-order-ticket-legs")).toContainText("26x");
+
+    // One sheet scroll: the risk grid + payoff live in the body scroller,
+    // never in the pinned footer, and the footer is a compact thumb-zone.
+    const layout = await page.evaluate(() => {
+      const footer = document.querySelector(".m-sheet__footer")!;
+      const body = document.querySelector(".m-sheet__body-scroll")!;
+      return {
+        footerPct: footer.getBoundingClientRect().height / window.innerHeight,
+        riskInFooter: Boolean(footer.querySelector(".ticket-risk")),
+        riskInBody: Boolean(body.querySelector(".ticket-risk")),
+      };
+    });
+    expect(layout.footerPct).toBeLessThan(0.3);
+    expect(layout.riskInFooter).toBe(false);
+    expect(layout.riskInBody).toBe(true);
+  });
+
   test("long-press on a chain cell opens the BUY/SELL quick-add and adds a leg", async ({ page }) => {
     await stubChainApis(page);
     await page.goto("/AAPL?tab=chain");
