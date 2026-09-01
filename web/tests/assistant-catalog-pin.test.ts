@@ -44,6 +44,8 @@ const PINNED: Record<string, PinnedCapability> = {
   "cash-flows": "read",
   "catalysts": "read",
   "cor": "read",
+  "credentials": { GET: "admin" },
+  "credentials/[service]": "admin",
   "credit-spread": "read",
   "discover": { GET: "read", POST: "read.spawn" },
   "dispersion": "read",
