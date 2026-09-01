@@ -29,6 +29,7 @@ sequence of models actually attempted, not the shape of the script.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -90,6 +91,10 @@ def _clone(tmp_path: Path, wrapper: Path) -> Path:
 def _stub_bin(tmp_path: Path, models_log: Path, exhausted: Path, gh_log: Path) -> Path:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
+    # What the agent's OWN nested `claude` calls would inherit. The wrapper's
+    # `--model` binds only the outer process; the security skill's Stage 4
+    # Claude Security scan is a separate `claude` invocation and reads this.
+    env_models = tmp_path / "env_models.txt"
     stubs = {
         "gh": (
             "#!/bin/sh\n"
@@ -107,6 +112,7 @@ def _stub_bin(tmp_path: Path, models_log: Path, exhausted: Path, gh_log: Path) -
             "  shift\n"
             "done\n"
             f'printf "%s\\n" "$model" >> "{models_log}"\n'
+            f'printf "%s\\n" "${{RADON_WEEKEND_MODEL:-<unset>}}" >> "{env_models}"\n'
             f'if grep -qxF -- "$model" "{exhausted}"; then\n'
             f"  echo \"{QUOTA_LINE}\"\n"
             "  exit 1\n"
@@ -253,3 +259,96 @@ class TestAnExhaustedLadderStopsTheRemediateRounds:
         assert "all model quotas exhausted" in calls, (
             f"{loop}: the remediate dead-man must name the cause too: {calls!r}"
         )
+
+
+class TestTheSecurityScanInheritsTheWrappersRung:
+    """DOC-042: #219 pinned the OUTER `claude -p` and stopped there.
+
+    The security skill's Stage 4 spawns a SECOND, nested `claude` — the Claude
+    Security agent scan, the longest and most expensive call of the night — and
+    that one carried no `--model`, so it still resolved the operator's global
+    `~/.claude/settings.json` default: the exact single-point kill switch that
+    killed the 2026-09-01 night, surviving inside the loop that died to it.
+
+    A `--model` flag binds one process, so the rung has to travel as
+    environment. The wrapper exports it where the rung is chosen AND after
+    every ladder drop, so a dropped or resumed round scans on the rung actually
+    in force rather than the one the round started on.
+    """
+
+    SKILL = REPO / ".claude" / "skills" / "security-nightly" / "SKILL.md"
+    SCAN_INVOCATION = "claude --agent claude-security:claude-security"
+
+    def _stage4_block(self) -> str:
+        skill = self.SKILL.read_text(encoding="utf-8")
+        at = skill.index(self.SCAN_INVOCATION)
+        return skill[skill.rindex("```sh", 0, at):skill.index("```", at)]
+
+    def test_the_wrapper_exports_the_rung_it_is_running(self, tmp_path):
+        proc, models, _calls = _audit(tmp_path, "security", [LADDER[0]])
+        exported = (tmp_path / "env_models.txt").read_text(encoding="utf-8").splitlines()
+        assert models == LADDER[:2], (models, proc.stdout, proc.stderr)
+        assert exported == models, (
+            "every round must export the rung it is about to run on, at the "
+            "point the rung is chosen and again after each ladder drop — "
+            f"exported {exported!r} for attempts {models!r}"
+        )
+
+    def test_the_skill_scan_command_passes_an_explicit_model(self):
+        block = self._stage4_block()
+        assert "--model" in block, (
+            "the Stage 4 Claude Security scan inherits ~/.claude/settings.json "
+            "for its model, so the night's longest call still hangs off the "
+            "operator's global default that #219 removed from the wrapper"
+        )
+        assign = re.search(r'(\w+)="--model \$RADON_WEEKEND_MODEL"', block)
+        assert assign, (
+            "the scan's --model must be the wrapper's exported rung, not a "
+            f"second model name that can drift from the ladder:\n{block}"
+        )
+        invocation = block[block.index(self.SCAN_INVOCATION):]
+        assert f"${assign.group(1)}" in invocation, (
+            "the model argument is built but never handed to the scan:\n"
+            f"{invocation}"
+        )
+
+
+class TestAnExhaustedLadderIsAProviderSpendStop:
+    """DOC-043: the wrapper reported a status its own skill rules out.
+
+    `SKILL.md` classifies a provider budget/spend stop as INCOMPLETE — *not
+    failed, and never OK* — carrying two facts the operator needs: the audited
+    SHA was not advanced, and the next fire resumes the same private run. An
+    exhausted model ladder is a provider spend stop, and it is resumable: the
+    quota refills, nothing was audited, no state moved. Reporting it FAILED
+    dropped it into the generic non-zero arm, the one arm that withholds the
+    run log (rail 7, public repo) and states neither fact.
+
+    Security only. The other four loops post a redacted log tail on their
+    generic arm, so their operator already sees the quota line, none of their
+    skills classify a spend stop, and `INCOMPLETE` is spoken for in the testing
+    loop ("exited 0 without committing"). Repointing it there would overload a
+    status that already means something else.
+    """
+
+    def test_it_reports_incomplete_and_exits_75(self, tmp_path):
+        proc, models, calls = _audit(tmp_path, "security", LADDER)
+        assert models == LADDER, (models, proc.stdout, proc.stderr)
+        assert proc.returncode == 75, (
+            "a spend stop is the skill's INCOMPLETE/resume case, which exits "
+            f"75 like every other incomplete phase: {proc.returncode}"
+        )
+        assert "INCOMPLETE (all model quotas exhausted" in calls, calls
+        assert "FAILED" not in calls, (
+            "the skill says a provider budget/spend stop is never reported "
+            f"failed: {calls!r}"
+        )
+
+    def test_the_dead_man_carries_the_resume_facts(self, tmp_path):
+        _proc, _models, calls = _audit(tmp_path, "security", LADDER)
+        assert "the audited SHA was NOT advanced" in calls, calls
+        assert "resumes" in calls, (
+            "an exhausted quota refills, so the operator must be told the next "
+            f"fire picks the same private run back up: {calls!r}"
+        )
+        assert "claude.ai/settings/usage" in calls, calls
