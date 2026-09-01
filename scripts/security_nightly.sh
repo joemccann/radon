@@ -417,6 +417,28 @@ fi
 ROUND_LOG_MARK=0
 MAX_ATTEMPTS=3
 RETRY_PAUSE_SECS=60
+# A subscription quota is per MODEL, so an exhausted one is a reason to drop a
+# rung, not to lose the night. 2026-09-01: `~/.claude/settings.json` carried
+# `model: claude-fable-5[1m]`, these wrappers passed no --model and inherited
+# it, that model's quota was gone, and `claude -p` printed one line and exited
+# 1 in under a second — the security loop's audit AND remediate both died that
+# way at 00:00 while `--model opus` and `--model sonnet` answered normally on
+# the same Max login. Pinning the model also takes the operator's global
+# default off the unattended path: an interactive session changing it must not
+# decide what tonight runs on.
+QUOTA_EXHAUSTED_MARKER="out of usage credits"
+MODEL_LADDER="${RADON_WEEKEND_MODEL_LADDER:-claude-fable-5[1m] claude-opus-5[1m] claude-opus-5 claude-sonnet-5}"
+read -r -a MODEL_RUNGS <<< "$MODEL_LADDER"
+MODEL_INDEX=0
+ALL_MODELS_EXHAUSTED=0
+
+# Scoped to THIS round's slice of the log, like the ceiling detector: RUN_LOG
+# is per phase and every round appends to it, so a whole-file grep would let
+# round 1's exhausted rung drop a model on every later round forever. R-426.
+is_quota_exhausted() {
+  tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null | grep -qF "$QUOTA_EXHAUSTED_MARKER"
+}
+
 is_transient_network_failure() {
   tail -c 500 "$RUN_LOG" | grep -qE 'API Error|ENOTFOUND|Connection lost|Execution error'
 }
@@ -458,6 +480,7 @@ run_phase() {
     # never, in the case that matters. `-k` escalates to SIGKILL so a claude
     # blocked on a hung child cannot make the cap advisory. R-384, R-386.
     CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 timeout -k "$KILL_AFTER_SECS" "$remain" claude -p "/security-nightly $PHASE" \
+      --model "${MODEL_RUNGS[$MODEL_INDEX]}" \
       --dangerously-skip-permissions \
       --output-format text >> "$RUN_LOG" 2>&1 &
     ROUND_PID=$!
@@ -471,6 +494,18 @@ run_phase() {
     # The cap is OUR clock, so classify from it rather than from the code, or a
     # round the cap genuinely killed is reported as a crash. R-386.
     if (( RC != 0 && SECONDS - round_start >= remain )); then RC=124; fi
+    # A quota drop is not one of the three transient-network attempts: it
+    # costs no wall clock, and the next rung is a different quota, so it
+    # retries immediately and `attempt` is untouched. Bounded by the ladder.
+    if (( RC != 0 )) && is_quota_exhausted; then
+      if (( MODEL_INDEX + 1 < ${#MODEL_RUNGS[@]} )); then
+        MODEL_INDEX=$((MODEL_INDEX + 1))
+        echo "[security-nightly] ${MODEL_RUNGS[$((MODEL_INDEX - 1))]} is out of usage credits; dropping to ${MODEL_RUNGS[$MODEL_INDEX]}" | tee -a "$RUN_LOG"
+        continue
+      fi
+      ALL_MODELS_EXHAUSTED=1
+      break
+    fi
     [[ $RC -eq 0 || $RC -eq 124 || $attempt -ge $MAX_ATTEMPTS ]] && break
     is_transient_network_failure || break
     echo "[security-nightly] transient network failure (rc=$RC) — attempt $attempt/$MAX_ATTEMPTS, retrying in ${RETRY_PAUSE_SECS}s" | tee -a "$RUN_LOG"
@@ -489,6 +524,11 @@ run_phase() {
   # security archive, out of this wrapper's reach.
   local status
   status="$(phase_status "$RC" "$RUN_LOG" "$ROUND_LOG_MARK")"
+  # An exhausted ladder is not a generic non-zero exit: the operator needs the
+  # cause and the one place it is fixed, or they re-fire into the same wall.
+  if (( ALL_MODELS_EXHAUSTED )); then
+    status="FAILED (all model quotas exhausted; top up at claude.ai/settings/usage)"
+  fi
   # OK additionally requires the skill's completion marker in THIS round's
   # slice (same scoping as the TRUNCATED detector, R-426). Any incomplete
   # phase — no marker, or ceiling-truncated — must also exit non-zero so
