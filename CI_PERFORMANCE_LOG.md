@@ -347,3 +347,201 @@ Cheapest evidence: one PR-branch run with `--durations=0` on the two shards
 (log-only, no workflow change on `main`), or a `--junitxml` artifact from
 `py-tests`. Target: every scripts shard <= ~55s pytest step, python gate
 <= ~85s, which makes the web gate (~106s) the wall as originally predicted.
+
+### 2026-09-01 - audit - branch `ci-performance/2026-09-01`
+
+- Audited range: `39bf6f5e..b1c0008a` (7 commits: PRs #210-#216). Runner
+  state: dedicated clone `~/radon-weekend/radon-ci-performance`, lock
+  `.weekend-runner.lock` owned by this cycle's wrapper (pid 31517), clean
+  tree at `b1c0008a`, no orphaned stash, Mac mini load 6.1 (three sibling
+  loops running; local timings diagnostic only).
+- Changed CI/build/deploy surfaces in range: `.github/workflows/ci.yml`
+  (+23/-4: CIP-001 xdist/lead modules, `changes` job `timeout-minutes: 5`
+  R-509), `scripts/ci/path_filter.py` (+71: 60s bound on the green-run
+  lookback; REL-179 routes `CLAUDE.md`/`AGENTS.md`/`SKILL.md` edits fail-CLOSED
+  to both gates and test-referenced `.md` files to their focused modules),
+  `cloud/scripts/{drift_audit.py,ib-gateway-control.sh,ib-gateway-remote-certs.sh}`,
+  `cloud/.gitleaks.toml` (+18, allowlist repair). No Dockerfile, action pin,
+  `needs:` edge, timeout, health wait or rollback path changed; every `uses:`
+  in `ci.yml` / `app-images.yml` is still a 40-char SHA. Test inventory:
+  +30 files / +2519 lines across `scripts/tests`, `cloud/tests`, `web/tests`.
+- Gate closure re-verified on `origin/main`: `test_ci_deploy_concurrency.py`
+  + `test_ci_gate_integrity.py` + `test_path_filter.py` = 78 passed (was 69;
+  the range added 9 path-filter contracts). All 14 gate jobs remain in
+  `deploy.needs` and in the `if:` expression; `branches/main/protection` still
+  carries `enforce_admins` and no `required_status_checks` (unchanged; the
+  workflow `needs` closure is the gate). Environment `Production`: branch
+  policy only, no reviewer rule.
+
+**Samples (last 30 `push` runs of `ci.yml` on `main`, 2026-08-30T05:31Z ..
+2026-09-01T01:57Z; 20 success, 8 failure, 2 cancelled; queue delay 2-4s on
+every run, no degraded run).**
+
+| Class / cache | n | p50 | p95 | min-max | Notes |
+|---|---|---|---|---|---|
+| mixed, warm | 15 | 238s | 274s | 214-305s | 14 before CIP-001 merge + 1 after |
+| web, warm | 3 | 212s | 282s | 206-282s | 282s run had a 60s gateway wait |
+| docs, warm | 2 | 134s | 141s | 127-141s | |
+| python, warm | 0 | - | - | - | |
+
+Runner-seconds per mixed run p50 ~1690 (free plan, billable 0); latest
+mixed run 1759 (the `scripts-i` shard grew, see below).
+
+**Reliability record (not performance).** Five consecutive `main` runs failed
+between 13:18Z and 15:46Z on 2026-08-31 (33396202710, 33396538584 = the
+CIP-001 merge, 33396577585, 33407177442, 33410378860): all five at `Secret
+scan (gitleaks)` on a `generic-api-key` hit in
+`scripts/tests/test_rel180_loop_launchers.py` (fixture `.env` literal,
+introduced by #210's range; allowlisted in `cloud/.gitleaks.toml` by
+32318ae4 with `test_gitleaks_policy.py`), plus three merge-collision test
+failures in 33410378860 (`scripts-npsz`, `scripts-rs`, `rest-api`). No
+production deploy for 11h 10m (39bf6f5e 05:19Z -> 32318ae4 16:35Z). Not
+caused by CIP-001: the CIP-001 run's own test jobs were cancelled by the next
+push's per-shard `cancel-in-progress` groups, as designed.
+
+**CIP-001 status: `INSUFFICIENT_SAMPLE` (1 of 5 comparable mixed after-runs).**
+The one after-run, 33414421566, took 305s (deploy 139s, see the 59s gap
+below), so the mixed p50 is unchanged at 238s. The shard-level effect is
+confirmed on all four post-merge Linux `main` runs (33396577585, 33407177442,
+33410378860, 33414421566; the failed runs still ran the shards to completion):
+
+| Shard | before step p50 (n=15) | after step p50 (n=4) | Read |
+|---|---|---|---|
+| `cloud al` | 84s (job 97s) | 34s (job 47s) | (a) confirmed |
+| `cloud mz` | 18s | 10s | (a) confirmed, off path |
+| `scripts-jm` | 65s (job 80s) | 46s (job 60s) | (c) confirmed |
+| `scripts-npsz` | 73s (job 86s) | 76s (job 90s) | (b) no effect, work-bound |
+| `scripts-rs` | 63s (job 76s, max 99s) | 80s (job 94s, max 106s) | (b) no effect; grew with new `test_s*`/`test_r*` modules |
+| `scripts-i` | 27s (max 48s) | 54s (job 68s) | grew ~+27s in range (new `test_i*` modules) |
+
+Python gate authorization (run created -> `pytest coverage ratchet` done):
+after-runs 129s, 134s, 141s, 129s vs before p50 123s. The gate is
+`scripts-rs` job (94s p50) + 2s hop + ratchet 20s. Web gate p50 104s
+(slowest Vitest job p50 78s + hop + ratchet 8s). The revert trigger
+("python gate p50 > 105s") is technically hit but by the work-bound shards
+CIP-001 (b) could never move, not by (a)/(c), which removed 50s and 20s of
+work from their shards with zero flake in four Linux runs; no revert.
+
+**Critical path, mixed (33414421566, 305s):** `Path filter` 8s -> `pytest
+(scripts-rs)` 92s -> `pytest coverage ratchet` 20s -> auth at 129s ->
+`Prestage VPS release` 24s -> `Deploy to VPS` 145s (of which a 59s silent
+gap, below) -> 305s. **Critical path, web (33460698950, 206s):** `Path
+filter` 8s -> `Vitest (shard 4/8)` 72s -> `Vitest coverage ratchet` 8s ->
+auth at 95s (node image done at 94s: co-critical for web-only runs) ->
+prestage 18s -> deploy 86s -> 206s.
+
+**Deploy decomposition (normal, 33460698950, job 86s):** SSH + runner
+extract + recover-only pass 6s; `sync-control-plane` 3s; preflight +
+`deploy.sh` fetch of origin/main 4s (the ci.yml step already fetched: CIP-004
+duplicate); prestaged release reuse + exact image pair verify <1s; gateway
+ready + python env check 5s; `stop-clean` + checkout + `restart-managed`
+15s; post-deploy gate <1s; stability window 40s (fixed); `sync-scheduled-units`
+7s (CIP-004); edge config + prune + SSH close 4s.
+
+**Deploy p95 drivers (4 of 20 successful deploys >= 123s).** 33342589109 and
+33359662191: `wait_for_gateway_ready` ran all 12 attempts (60s, rail 9,
+gateway not authenticated); 33414421566: a 59s silent gap between `IB gateway
+data plane ready` 16:32:50 and `HEAD is now at 32318ae4` 16:33:49, i.e.
+inside `stop_services_for_transition` (`sudo radon-deploy-root stop-clean`)
+or the checkout in `activate_staged_release` (`deploy.sh:1027,1225-1236`);
+normal runs take 5s here and neither step logs a duration. 33336928809:
+worktree build 37s because no prestaged release existed (`Seeded web/.next`
+path). Hypothesis for the 59s: a unit whose stop waited on its
+`TimeoutStopSec` after 11h without a deploy; unverifiable from the log.
+
+**Standing sweeps.** No new serialized `needs` edge; no duplicate checkout /
+install added; caches at floor (uv hit, bun 225MB restore ~6s); node image
+warm 60-62s (cold 250-340s, none in window); prepull 6-7s; no `latest` tag
+fallback; path filter fail-closed strengthened (REL-179); Vitest shard
+imbalance unchanged (step p50 48-59s, slowest per run p50 78s job).
+
+#### CIP-005 - re-partition the work-bound `scripts-rs` / `scripts-npsz` shards by measured per-module work, with a durations instrument - SELECTED
+
+- Evidence: `ci.yml:311-316` letter globs; `scripts-rs` step 74-89s across
+  the four post-merge runs (1080-1089 tests; `--durations=25` top files:
+  `test_rel137_weekend_wrapper_survivability.py` 45.3s serial floor,
+  `test_run_flow_refresh_wrapper.py` 11.8s, `test_run_portfolio_refresh_retry.py`
+  11.1s, `test_run_signals_refresh_wrapper.py` 9.6s, `test_robinhood_priority.py`
+  9.0s, `test_robinhood_client.py` 4.0s; top-25 sum 93s of ~300s total
+  work), `scripts-npsz` step 69-76s (1472-1486 tests; `test_vixcor.py`
+  22.3s, `test_weekend_wrapper_self_rewrite.py` 20.3s, `test_path_filter.py`
+  6.0s; top-25 sum 51s of ~290s). Light shards with headroom: `scripts-gh`
+  18s step, `rest` 13s, `scripts-daemons` 21s, `rest-api` 30s, `scripts-df`
+  32s, `scripts-ac` 36s. `--durations=25` covers under a third of each
+  shard's work, so the remaining ~200s per shard is invisible; last night's
+  lesson says do not re-partition on that.
+- Hypothesis: (1) instrument first: add `--junitxml` to the `py-tests` run
+  line and ship the XML inside the existing `pytest-coverage-<shard>`
+  artifact (same upload step, +~50KB, 0s on the critical path; retention 3
+  days); the PR's own `pull_request` run then yields exact per-module work
+  on Linux for all ten shards. (2) Move whole module groups by bash glob
+  negation, keeping ten shards and the recursive-union contract: `test_ru*.py`
+  (~33s) to `rest`, `test_ro*.py` (~13s) to `scripts-gh`, `test_vi*.py` and
+  `test_we*.py` (~50s) to `scripts-daemons` / `rest-api`, and whichever
+  further modules the junit data shows are needed to bring every scripts
+  shard to <= ~60s step (`test_r[!ou]*.py test_s*.py`, `test_v[!i]*.py
+  test_w[!e]*.py` style rows; `fnmatch` in `_partition` and `glob` in
+  `_expand_shard_paths` both honour `[!x]`). Predicted python gate 129s ->
+  ~97-101s (slowest scripts job ~75-79s + 2s + 20s), which puts the web gate
+  (104s) on the wall: mixed p50 238s -> ~215-220s (-18 to -23s, -8 to -10%),
+  p95 274s -> ~255s. Borderline for the 10% bar alone; with CIP-004 (-8 to
+  -10s on every class) it clears it. Each shard's effect is separately
+  measurable from job timestamps.
+- Shard count unchanged (10 + 3); runner-seconds ~0 (work moves, no new
+  job); junit adds <1s per shard.
+- Affected paths: `.github/workflows/ci.yml` (`py-tests` matrix rows, run
+  line, upload path), `scripts/tests/test_ci_deploy_concurrency.py`
+  (`test_pytest_shards_then_combines_coverage_ratchet` pins `upload.path ==
+  ".coverage"`; `PYTEST_SHARD_LEAD_MODULES` names the lead modules that move
+  with their glob; the per-row overlap guard and both union contracts are the
+  safety net), `scripts/ci/merge_vitest_coverage.py` untouched, `py-coverage`
+  `find -name .coverage` untouched.
+- Safety: no test removed, skipped or deselected; union == recursive
+  inventory contracts stay green; coverage combine reads `.coverage` by name
+  so a sibling XML in the artifact cannot change the ratchet;
+  `DOCS_CONTRACT_BASE` fetch-depth pin (`scripts-df`) untouched. Risk: a
+  moved module that depends on shard-local state (none of the candidates
+  share fixtures across files; `loadfile` keeps each module on one worker).
+- Revert trigger: any moved module failing on its new shard in the first
+  five `main` runs, or `scripts-rs`/`npsz` step p50 not dropping below 65s.
+- Validation: five comparable mixed warm after-runs vs the 15 before-runs
+  above; per-shard job wall + junit per-module sums from
+  `gh api .../runs/<id>/jobs` and the artifacts.
+
+#### CIP-004 - deploy tail (`sync-scheduled-units` 7s + duplicate fetch 3-4s) - DEFERRED (second)
+
+Unchanged from 2026-08-31; measured again tonight at 7s + 4s on 33460698950.
+On every class's critical path; root-helper edit ships via
+`sync-control-plane`. Next after CIP-005.
+
+#### CIP-006 - deploy p95: silent 59s `stop-clean`/checkout gap and 60s gateway wait are unattributable from the log - DEFERRED (observability only)
+
+`deploy.sh` logs nothing between `IB gateway data plane ready` and `HEAD is
+now at` (`deploy.sh:1225-1236` -> root helper `stop-clean` ->
+`activate_staged_release`), and `wait_for_gateway_ready` logs neither
+`auth_state` nor `port_listening` per attempt. Log the per-unit stop
+duration and the observed gateway fields; no wait shortened (rail 9). Worth
+~0s p50, but it is the only way to classify the 4/20 slow deploys.
+
+#### CIP-002 (node image `scripts/` copy boundary) / CIP-003 (Vitest balance) - DEFERRED
+
+Node image (94s from run start) is co-critical only for web-only runs (3 of
+20); in mixed runs it finishes ~35s before the python gate. Vitest slowest
+job p50 78s vs shard p50 67-70s: ~8-10s of imbalance, becomes the wall only
+after CIP-005 lands.
+
+#### Rejected / no-change
+
+- Gateway-wait early exit (rail 9) and a shorter stability window (rail 9):
+  never.
+- Dropping the `py-coverage` barrier VM (20s hop) to a check inside the
+  slowest shard: the ratchet must see all ten data files; T-160.
+- Increasing to 11 scripts shards: +35-45 runner-seconds per run for the
+  same effect CIP-005 gets by moving work into shards with 40-60s of
+  headroom.
+
+Outcome for tonight: `VALIDATING` pending remediate (CIP-005). CIP-001
+remains `INSUFFICIENT_SAMPLE` (1/5 mixed after-runs; shard effects
+confirmed n=4). Residual bottleneck after CIP-005: web gate ~104s in
+parallel with the python gate ~100s, then prestage ~18s + deploy ~86s (40s
+fixed), with CIP-004 the next cut.
