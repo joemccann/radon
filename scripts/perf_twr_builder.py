@@ -791,10 +791,16 @@ def resolve_flows(
     """
     token = _os.environ.get("IB_FLEX_TOKEN")
     query_id = _flows_query_id()
-    if not token or not query_id:
+    already_attempted = document is not None and document.query_id == query_id
+    # A statement already in hand (file ingest, or the NAV fetch this run)
+    # carries its own CashTransaction + Transfers; no token is needed to read
+    # it. The sFTP unit runs on an env with no IB_FLEX_TOKEN by design, and
+    # demanding one here made every nightly activity file `flex_not_configured`
+    # -> degraded -> rejected (2026-09-02).
+    in_hand = document is not None and bool(document.xml) and (already_attempted or not allow_fetch)
+    if not in_hand and (not token or not query_id):
         return FlowSet.failed("flex_not_configured"), []
 
-    already_attempted = document is not None and document.query_id == query_id
     if already_attempted and document.xml is None:
         reason = document.error or "nav_fetch_failed"
         print(
