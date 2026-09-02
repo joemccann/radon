@@ -137,10 +137,16 @@ class TestEncryptionAtRest:
         assert second.get_secret("UW_TOKEN") == UW_SAMPLE
 
     def test_wrong_key_raises_integrity_error(self, tmp_path):
+        # REL-189 rewrite, same intent (wrong key must never decrypt): the
+        # key file now EXISTS with wrong bytes. The old shape (a missing
+        # second key path over a DB with rows) is the R-522 mint-refusal
+        # path and raises SecretKeyMismatchError at construction instead —
+        # covered by test_rel189_credential_store_durability.py.
         first = SecretStore(
             db_path=tmp_path / "secrets.db", key_path=tmp_path / "k1.key"
         )
         first.set_secret("UW_TOKEN", UW_SAMPLE, actor="operator")
+        (tmp_path / "k2.key").write_bytes(os.urandom(32))
         second = SecretStore(
             db_path=tmp_path / "secrets.db", key_path=tmp_path / "k2.key"
         )
