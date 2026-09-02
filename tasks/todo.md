@@ -48,8 +48,17 @@ Root causes (code-verified):
 - [x] T8 scripts transmit test — 9 passed (SELL close DAY+outsideRth verbatim)
 - [x] T9 e2e — orders-session-window 3 passed (Working at 17:30 ET, Queued at
       21:00 ET), modify-order-correlation-risk + mobile-orders-session green
-- [ ] T10 full test gates
-- [ ] T11 PR
+- [x] T10 full test gates — vitest 7990 passed, 10 skipped (1 unrelated
+      chat-image unhandled-rejection noise); pytest pins 21 passed
+- [x] T11 PR https://github.com/joemccann/radon/pull/236
+
+## Review
+- Status: PreSubmitted + live EXT window -> Working; after 20:00 ET -> Queued + EXT
+- Gate 3: reduce of a breached-cluster ticker renders no banner; add still critical
+- Wire: armed TQQQ close modify POSTs /api/orders/modify; closed gate fires nothing
+- Transmit: SELL stock close DAY + outsideRth=True on LimitOrder kwargs, one place_order
+- ARM/SPCX NEXT RTH left alone
+- Do not merge. Do not place a real IB order.
 
 ---
 
