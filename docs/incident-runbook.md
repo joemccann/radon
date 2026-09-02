@@ -1668,7 +1668,7 @@ bug. Revisit only if Radon grows a real operator desktop shell.
 
 ## preferences-operator-403
 
-**Operator Save on `/preferences` returns 403 `Operator authorization required`.**
+**Operator Save on the profile Preferences tab (`/profile?tab=preferences`, formerly the `/preferences` page) returns 403 `Operator authorization required`.**
 Peak incident: 2026-08-15, operator signed in as joemccann on app.radon.run,
 `PUT /api/preferences` (`RADON_MAX_ORDER_NOTIONAL` → 1_000_000) 403.
 
