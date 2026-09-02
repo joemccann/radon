@@ -106,6 +106,14 @@ def _sqlite_guarded(fn):
     return wrapper
 
 
+def _ensure_private_file(path: Path) -> None:
+    if not path.is_file():
+        return
+    mode = path.stat().st_mode & 0o777
+    if mode != 0o600:
+        os.chmod(path, 0o600)
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -151,6 +159,7 @@ class SecretStore:
                     )
                 return key
         if self._key_path.is_file():
+            _ensure_private_file(self._key_path)
             key = self._key_path.read_bytes()
             if len(key) != _KEY_BYTES:
                 raise SecretStoreError(
@@ -230,6 +239,8 @@ class SecretStore:
     def _connect(self) -> sqlite3.Connection:
         existed = self._db_path.is_file()
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        if existed:
+            _ensure_private_file(self._db_path)
         conn = sqlite3.connect(self._db_path)
         conn.execute("PRAGMA busy_timeout = 5000")
         conn.executescript(_SCHEMA)

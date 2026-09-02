@@ -49,19 +49,41 @@ function sanitize(raw: unknown): UiPreferences {
   return prefs;
 }
 
+export function mergeUiPreferences(
+  local: UiPreferences | null,
+  server: UiPreferences,
+): UiPreferences {
+  if (!local) return server;
+  const merged: UiPreferences = { ...local };
+  if (local.theme === undefined && server.theme !== undefined) {
+    merged.theme = server.theme;
+  }
+  if (server.columns) {
+    const columns = { ...(local.columns ?? {}) };
+    for (const [tableId, table] of Object.entries(server.columns)) {
+      columns[tableId] = { ...(columns[tableId] ?? {}), ...table };
+    }
+    merged.columns = columns;
+  }
+  return merged;
+}
+
 export function hydrateUiPreferences(): Promise<UiPreferences> {
   if (cache) return Promise.resolve(cache);
   if (!hydratePromise) {
     hydratePromise = fetch("/api/profile", { cache: "no-store" })
       .then(async (res) => {
-        if (!res.ok) return {};
+        if (!res.ok) throw new Error(`profile hydrate ${res.status}`);
         const json = (await res.json()) as { ui_preferences?: unknown };
         return sanitize(json.ui_preferences);
       })
-      .catch(() => ({}))
       .then((prefs) => {
-        cache = cache ?? prefs;
-        return cache;
+        cache = mergeUiPreferences(cache, prefs);
+        return cache ?? {};
+      })
+      .catch(() => {
+        hydratePromise = null;
+        return cache ?? {};
       });
   }
   return hydratePromise;
@@ -109,4 +131,9 @@ export function __resetUiPreferencesForTests(): void {
   hydratePromise = null;
   if (flushTimer) clearTimeout(flushTimer);
   flushTimer = null;
+}
+
+/** Test-only: seed the in-memory cache without a network round-trip. */
+export function __seedUiPreferencesForTests(prefs: UiPreferences): void {
+  cache = prefs;
 }
