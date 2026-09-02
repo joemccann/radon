@@ -15,6 +15,7 @@ export type RegimeTab =
   | "breadth" | "bpi" | "margin" | "straddle"
   | "cor" | "vixcor" | "vixts" | "dispersion" | "ivrank" | "skew" | "skew2d" | "curve"
   | "cot" | "ats" | "short" | "llm" | "backtest" | "credit" | "iei-hyg" | "trin" | "divyield" | "hyad" | "hhlev"
+  | "ma-ratio"
   | "streaks";
 
 export type RegimeRailGroup = { label: string; tabs: readonly RegimeTab[] };
@@ -23,7 +24,7 @@ export const REGIME_RAIL_GROUPS: readonly RegimeRailGroup[] = [
   { label: "Composite", tabs: ["cri", "grg", "vcg"] },
   { label: "Volatility", tabs: ["vixcor", "vixts", "dispersion", "ivrank", "skew", "skew2d", "curve", "straddle"] },
   { label: "Positioning", tabs: ["gex", "margin", "hhlev", "credit", "iei-hyg", "cot", "short", "ats"] },
-  { label: "Breadth & sentiment", tabs: ["breadth", "trin", "divyield", "hyad", "bpi", "cor", "streaks"] },
+  { label: "Breadth & sentiment", tabs: ["breadth", "ma-ratio", "trin", "divyield", "hyad", "bpi", "cor", "streaks"] },
   { label: "Models", tabs: ["llm", "backtest"] },
 ];
 
@@ -50,6 +51,7 @@ export const REGIME_TAB_LABEL: Record<RegimeTab, string> = {
   short: "SHORT",
   ats: "ATS",
   breadth: "BREADTH",
+  "ma-ratio": "MA RATIO",
   trin: "TRIN",
   divyield: "DIV YIELD",
   hyad: "HY AD",

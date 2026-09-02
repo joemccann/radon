@@ -41,11 +41,11 @@ describe("REGIME_RAIL_GROUPS — grouped registry covers every tab exactly once"
     ]);
   });
 
-  it("flattens to all 28 regime tabs with no duplicates", () => {
-    expect(REGIME_TABS).toHaveLength(28);
-    expect(new Set(REGIME_TABS).size).toBe(28);
+  it("flattens to all 29 regime tabs with no duplicates", () => {
+    expect(REGIME_TABS).toHaveLength(29);
+    expect(new Set(REGIME_TABS).size).toBe(29);
     expect([...REGIME_TABS].sort()).toEqual(
-      ["cri", "vcg", "gex", "grg", "breadth", "trin", "divyield", "hyad", "hhlev", "bpi", "margin", "credit", "iei-hyg", "straddle", "cor", "streaks", "vixcor", "vixts", "dispersion", "ivrank", "skew", "skew2d", "curve", "cot", "ats", "short", "llm", "backtest"].sort(),
+      ["cri", "vcg", "gex", "grg", "breadth", "ma-ratio", "trin", "divyield", "hyad", "hhlev", "bpi", "margin", "credit", "iei-hyg", "straddle", "cor", "streaks", "vixcor", "vixts", "dispersion", "ivrank", "skew", "skew2d", "curve", "cot", "ats", "short", "llm", "backtest"].sort(),
     );
   });
 
@@ -72,6 +72,7 @@ describe("REGIME_RAIL_GROUPS — grouped registry covers every tab exactly once"
     expect(groupOf.short).toBe("Positioning");
     expect(groupOf.ats).toBe("Positioning");
     expect(groupOf.breadth).toBe("Breadth & sentiment");
+    expect(groupOf["ma-ratio"]).toBe("Breadth & sentiment");
     expect(groupOf.hyad).toBe("Breadth & sentiment");
     expect(groupOf.bpi).toBe("Breadth & sentiment");
     expect(groupOf.cor).toBe("Breadth & sentiment");
@@ -164,12 +165,12 @@ describe("RegimeRail — grouped rail rendering + navigation", () => {
     return { onSelect, ...utils };
   };
 
-  it("renders all five group headers and 28 items", () => {
+  it("renders all five group headers and 29 items", () => {
     const { container } = renderRail();
     for (const g of REGIME_RAIL_GROUPS) {
       expect(within(container).getByText(g.label)).toBeTruthy();
     }
-    expect(container.querySelectorAll("[data-tab]")).toHaveLength(28);
+    expect(container.querySelectorAll("[data-tab]")).toHaveLength(29);
   });
 
   it("marks the active tab with the active class and aria-current", () => {
