@@ -106,6 +106,13 @@ def ingest_xml(
                 "error": "claim is in_progress from an earlier run; retried once stale",
                 "source_path": source_path,
             }
+        if kind == ACTIVITY:
+            # Its cash flows are already in Turso. The 08:30 re-pull and every
+            # manual re-run land here, so without this the row the lozenge
+            # reads keeps whatever error was written last, over data that is
+            # current. flex-pull's own row still calls a duplicate-only run
+            # stale (R-389); that is a delivery signal, not a cash-flows one.
+            _heartbeat_cash_flow_sync("ok")
         return {
             "ok": True,
             "outcome": "duplicate",

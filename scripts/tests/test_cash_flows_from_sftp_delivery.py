@@ -121,6 +121,39 @@ class TestSftpIngestOwnsTheCashFlowHeartbeat:
         assert kw["error"]["cash_exit"] == cash_flow_sync.EXIT_WRITE_ERROR
         assert "cash_flow_sync" in kw["error"]["message"]
 
+    def test_an_applied_duplicate_activity_statement_heartbeats_ok(
+        self, monkeypatch, heartbeats, activity
+    ):
+        """The 08:30 re-pull and every manual re-run see the same bytes again.
+        Their cash flows are already in Turso, so the row must say the sFTP
+        path is current; otherwise the last error row outlives the data."""
+        monkeypatch.setattr(ingest, "claim_flex_delivery", lambda *_a, **_k: False)
+        monkeypatch.setattr(ingest, "flex_delivery_status", lambda _d: "applied", raising=False)
+
+        xml_text, path = activity
+        result = ingest.ingest_xml(xml_text, source_path=path)
+        assert result["ok"] is True and result["outcome"] == "duplicate"
+
+        cash = [row for row in heartbeats if row[0] == "cash-flow-sync"]
+        assert [state for _, state, _ in cash] == ["ok"]
+
+    def test_an_in_progress_duplicate_does_not_heartbeat(self, monkeypatch, heartbeats, activity):
+        """A fresh lease belongs to a run that may still be half-written (R-436)."""
+        monkeypatch.setattr(ingest, "claim_flex_delivery", lambda *_a, **_k: False)
+        monkeypatch.setattr(ingest, "flex_delivery_status", lambda _d: "in_progress", raising=False)
+
+        xml_text, path = activity
+        assert ingest.ingest_xml(xml_text, source_path=path)["ok"] is False
+        assert [row for row in heartbeats if row[0] == "cash-flow-sync"] == []
+
+    def test_an_applied_duplicate_trades_statement_does_not_heartbeat(self, monkeypatch, heartbeats):
+        monkeypatch.setattr(ingest, "claim_flex_delivery", lambda *_a, **_k: False)
+        monkeypatch.setattr(ingest, "flex_delivery_status", lambda _d: "applied", raising=False)
+
+        trades = (FIXTURES / "flex_trade_confirm_sample.xml").read_text()
+        assert ingest.ingest_xml(trades, source_path="trades.xml")["outcome"] == "duplicate"
+        assert [row for row in heartbeats if row[0] == "cash-flow-sync"] == []
+
     def test_a_trades_statement_does_not_touch_the_cash_flow_row(self, monkeypatch, claims, heartbeats):
         import journal_rehydrate
 
