@@ -5,6 +5,7 @@
  */
 
 import type { OpenOrder, PortfolioPosition } from "@/lib/types";
+import { classifyOrderSession, isExtendedFillLive } from "@/lib/orders/sessionWindow";
 
 export type OperatorOrderStatus =
   | "Working"
@@ -261,13 +262,19 @@ export function cardToneForIntent(
 
 export function summarizeOpenOrders(
   orders: readonly OpenOrder[],
+  now: Date = new Date(),
 ): OpenOrdersSummary {
   let partialCount = 0;
   let workingCount = 0;
   for (const order of orders) {
-    if (isPartialFill(order)) {
+    const mapped = mapOrderStatus(order.status, {
+      filled: order.filled,
+      remaining: order.remaining,
+      extendedFillLive: isExtendedFillLive(classifyOrderSession(order, now)),
+    });
+    if (mapped.label === "Partial") {
       partialCount += 1;
-    } else {
+    } else if (mapped.label === "Working") {
       workingCount += 1;
     }
   }

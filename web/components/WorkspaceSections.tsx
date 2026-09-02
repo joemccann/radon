@@ -3100,8 +3100,8 @@ function OrdersSections({
   }
 
   const canModify = (o: OpenOrder) => o.orderType === "LMT" || o.orderType === "STP LMT";
-  const openOrdersSummary = summarizeOpenOrders(orders.open_orders);
   const now = new Date();
+  const openOrdersSummary = summarizeOpenOrders(orders.open_orders, now);
   const sessionCounts = summarizeSessionWindows(openOrderRows, now);
   const lastSyncLabel = orders.last_sync
     ? formatRelativeTime(orders.last_sync)
