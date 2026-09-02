@@ -4199,3 +4199,23 @@ Spec: `docs/indicators/dispersion.md`. Pattern: `/indicator` swarm, single share
 
 - 2026-08-28 reading: stock +2.06, sector +2.02, VIX -0.32, BELOW THE SURFACE (gap +2.38), matching the Wellington chart.
 - IB daily bars DO throttle on a 515-symbol 10 Y sweep (20 error-162 retries); the incremental 1 M run is expected to be lighter, watch the first timer fire.
+
+# Mobile portfolio position parity (2026-09-02)
+
+Goal: ≤640px position cards expose the desktop default-ON field set (position + legs) without a squeezed table.
+
+## Checklist
+
+- [x] T1 Read desktop PositionTable / mobile card / mobile kit / tests / e2e before editing (depends_on: []).
+- [x] T2 Three prototypes (instrument-strip inline expand; minimal card + BottomSheet; metric-rail list) built at 393px and graded against the rubric (depends_on: [T1]).
+- [x] T3 Winner (instrument-strip card) shipped into MobilePositionList: quote strip (Last + arrows + C-flag + spot), Day Chg cell for stocks AND options, single Return % paired with P&L, expanded basis ledger (Avg Entry / Implied) + full leg field set, aria-expanded, ColumnsToggle hidden on mobile (depends_on: [T2]).
+- [x] T4 New vitest web/tests/mobile-position-field-parity.test.tsx (21 tests) (depends_on: [T3]).
+- [x] T5 Gates: full web vitest 793 files / 7,992 passed from repo root; mobile-positions e2e 5/5; tsc 0 errors (depends_on: [T3]).
+- [x] T6 393×852 screenshots committed under docs/design-shots/skill-stack/mobile-position-parity/ (depends_on: [T3]).
+
+## Review
+
+- Every default-ON desktop position column is now on the collapsed card or one tap away; legs carry signed Avg / Last / Impl / MV / Init per the desktop LegRow sign scoping.
+- All figures route through the shared positionUtils / impliedValue helpers; the card still resolves ONE market value per position.
+- Full mobile Playwright project: 21–23 failures are pre-existing on main in this environment (same specs, verified in a main worktree); mobile-positions.spec.ts and mobile-same-day-pnl-parity.spec.ts pass.
+- Follow-up candidate (out of scope): InstrumentDetailModal still opens the desktop modal on mobile rather than a BottomSheet.

@@ -9277,6 +9277,12 @@ body[data-mobile="true"] .table-wrap td { white-space: nowrap; }
   position: relative;
   display: inline-block;
 }
+/* Mobile card lists don't consume column visibility, so the toggle is dead
+   UI on the phone shell — hide it rather than ship a control that does
+   nothing (mobile parity rubric, 2026-09-02). */
+body[data-mobile="true"] .columns-toggle {
+  display: none;
+}
 .columns-toggle-btn {
   display: inline-flex;
   align-items: center;
@@ -16501,29 +16507,78 @@ body[data-mobile="true"] .toast-container {
   color: var(--text-muted);
 }
 
-/* Underlying spot on an option position card: where the stock trades relative
-   to the strikes, without leaving the card (2026-08-07 request). */
-.mobile-card__underlying {
+/* Quote strip on a position card: live last (+trend arrow), day change and —
+   for option structures — the underlying spot relative to the strikes
+   (2026-08-07 request), in one hairline-topped mono line. */
+.mobile-card__quote {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 8px;
+  gap: 14px;
+  flex-wrap: wrap;
   padding-top: 8px;
   border-top: 1px solid var(--line-grid);
 }
-.mobile-card__underlying-k {
+.mobile-card__quote-seg {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+}
+.mobile-card__quote-seg--spot { margin-left: auto; }
+.mobile-card__quote-k {
   font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.12em;
+  font-size: 9px;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--text-muted);
+  white-space: nowrap;
 }
-.mobile-card__underlying-v {
+.mobile-card__quote-v {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   color: var(--text-primary);
+  white-space: nowrap;
+}
+
+/* Return % annotated under the header P&L — the desktop P&L / Return % pair. */
+.mobile-card__return {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+.mobile-card__return-v {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+}
+.mobile-card__return-k {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* Collapsed scan grid (MV / Today / EC / Day Chg). */
+.mobile-card__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+}
+
+/* Expanded basis ledger (Avg Entry / Implied) — desktop default-ON columns
+   that don't earn collapsed space. */
+.mobile-card__ledger {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-grid);
 }
 
 .mobile-card__leg-row {
@@ -16560,6 +16615,75 @@ body[data-mobile="true"] .toast-container {
 
 .mobile-card__leg-meta {
   color: var(--text-muted);
+}
+
+/* Expanded position leg block: description + leg P&L header over a mini-grid
+   of the desktop default-ON leg cells (Avg / Last / Impl / MV / Init). The
+   whole block is the instrument-detail tap target (44px floor). */
+.mobile-card__leg {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 44px;
+  padding: 8px;
+  border: 1px solid var(--line-grid);
+  border-radius: 4px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: opacity 100ms ease;
+}
+.mobile-card__leg:active { opacity: 0.7; }
+.mobile-card__leg:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 1px;
+}
+
+.mobile-card__leg-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mobile-card__leg-pnl {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.mobile-card__leg-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px 10px;
+}
+
+.mobile-card__leg-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.mobile-card__leg-cell-k {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.mobile-card__leg-cell-v {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .mobile-empty-state {
