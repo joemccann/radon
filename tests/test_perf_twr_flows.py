@@ -376,6 +376,53 @@ def test_76c_the_thirty_day_boundary(tmp_path, monkeypatch):
     assert load_nav_from_disk() is None
 
 
+def _nav_map(newest: date, count: int = 5) -> dict[str, float]:
+    return {
+        (newest - timedelta(days=count - 1 - i)).isoformat(): 100_000.0 + i
+        for i in range(count)
+    }
+
+
+def test_76d_a_fresher_turso_mirror_beats_a_within_budget_disk_cache(monkeypatch):
+    """Live defect 2026-09-02: the sFTP ingest mirrored NAV through 09-01 into
+    Turso, but the daily builder served the 08-21 disk cache for another 18
+    days because "disk then Turso" never compared dates."""
+    disk = _nav_map(date.today() - timedelta(days=12))
+    turso = _nav_map(date.today() - timedelta(days=1), count=20)
+    monkeypatch.setattr(builder, "load_nav_from_disk", lambda: disk)
+    monkeypatch.setattr(builder, "load_nav_from_turso", lambda: turso)
+
+    resolution = builder.get_nav_snapshots(sendrequest=False)
+    assert resolution.source == "turso"
+    assert max(resolution.by_date) == max(turso)
+
+
+def test_76e_a_fresher_disk_cache_still_wins_and_ties_stay_on_disk(monkeypatch):
+    disk = _nav_map(date.today() - timedelta(days=1))
+    turso = _nav_map(date.today() - timedelta(days=4), count=20)
+    monkeypatch.setattr(builder, "load_nav_from_disk", lambda: disk)
+    monkeypatch.setattr(builder, "load_nav_from_turso", lambda: turso)
+    assert builder.get_nav_snapshots(sendrequest=False).source == "disk_cache"
+
+    monkeypatch.setattr(builder, "load_nav_from_turso", lambda: _nav_map(date.today() - timedelta(days=1), count=20))
+    assert builder.get_nav_snapshots(sendrequest=False).source == "disk_cache"
+
+
+def test_76f_turso_alone_and_disk_alone_still_resolve(monkeypatch):
+    only = _nav_map(date.today() - timedelta(days=1))
+    monkeypatch.setattr(builder, "load_nav_from_disk", lambda: None)
+    monkeypatch.setattr(builder, "load_nav_from_turso", lambda: only)
+    assert builder.get_nav_snapshots(sendrequest=False).source == "turso"
+
+    monkeypatch.setattr(builder, "load_nav_from_disk", lambda: only)
+    monkeypatch.setattr(builder, "load_nav_from_turso", lambda: None)
+    assert builder.get_nav_snapshots(sendrequest=False).source == "disk_cache"
+
+    monkeypatch.setattr(builder, "load_nav_from_disk", lambda: None)
+    monkeypatch.setattr(builder, "load_nav_from_turso", lambda: None)
+    assert builder.get_nav_snapshots(sendrequest=False).source == "none"
+
+
 @pytest.mark.parametrize(
     "nav_source,sessions_behind,expected_status,expected_codes",
     [
