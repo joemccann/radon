@@ -368,8 +368,12 @@ comment (`**PHASE** STAMP **status**`) on the rolling GitHub issue labeled
 The issue is created once with a timeless rolling-dead-man description; run
 history stays in comments; the wrapper does not edit the issue body.
 
-You still post the three-section issue update below, never a status dump or a
-pointer to a log on a machine:
+You still post the three-section issue update below as a `gh issue comment`
+on the rolling issue, never a status dump or a pointer to a log on a
+machine. Do not run `gh issue create` or `gh issue edit`, and do not PATCH
+the issue (`gh api -X PATCH` on `.../issues/`). That would overwrite the
+dead-man description. Comment-only. The wrapper also comments; you are not
+the only commenter.
 
 **Issue discovered**
 What went wrong, in plain language. If nothing went wrong, say that.

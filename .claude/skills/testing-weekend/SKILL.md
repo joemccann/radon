@@ -166,7 +166,11 @@ The issue is created once with a timeless rolling-dead-man description. Run
 history stays in comments. The wrapper does not edit the issue body after
 the first run. A missing daily comment means the runner did not fire.
 
-You still post the three-section issue update below. GitHub issue write-ups
+You still post the three-section issue update below as a `gh issue comment`
+on the rolling issue. Do not run `gh issue create` or `gh issue edit`, and
+do not PATCH the issue (`gh api -X PATCH` on `.../issues/`). That would
+overwrite the dead-man description. Comment-only. The wrapper also comments;
+you are not the only commenter. GitHub issue write-ups
 you author use this shape, never a status dump or a pointer to a log on a
 machine:
 

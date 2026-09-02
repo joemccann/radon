@@ -111,32 +111,9 @@ WEEKEND_ROOT="$(dirname "$REPO")"
 # Per-loop venv. The legacy $WEEKEND_ROOT/venv is not deleted here
 # (operator follow-up after this ships).
 VENV="$WEEKEND_ROOT/venv-testing"
-# Snapshot gh BEFORE the venv prepend. PATH is $VENV/bin first after this,
-# and a planted venv gh can replace the wrapper-only comment.
-GH_BIN="$(command -v gh || true)"
-# Activate the venv so any python3.13 calls inside the agent use it.
-[[ -f "$VENV/bin/activate" ]] && export PATH="$VENV/bin:$PATH"
-DEADMAN_TITLE="Nightly testing runner"
-DEADMAN_LABEL="testing-nightly"
-ISSUE_SANITIZE=0
-LOOP_SLUG="testing"
-DEADMAN_CREATE_BODY="Rolling dead-man for the nightly ${LOOP_SLUG} loop. A missing daily comment means the runner did not fire."
-# Branch prefix the skill opens/updates its PR from. Matched on the head
-# ref, not the title: the title is now `Testing <date>`, which a
-# hand-written PR could also start with.
-PR_BRANCH_PREFIX="testing/"
-
-resolve_pr_url() {
-  # Newest-updated open PR the skill opened for this loop. A gh failure or
-  # no match must yield an empty string, never a non-zero exit under set -e.
-  local url
-  url="$(net_bounded "$GH_BIN" pr list --state open --limit 20 --json url,headRefName,updatedAt \
-    -q "[.[] | select(.headRefName | startswith(\"$PR_BRANCH_PREFIX\"))] | sort_by(.updatedAt) | reverse | .[0].url" \
-    2>/dev/null || true)"
-  [[ "$url" == "null" ]] && url=""
-  printf '%s' "$url"
-}
-
+# Snapshot gh and Pushover BEFORE the venv prepend / agent. PATH is
+# $VENV/bin first after this. WEEKEND_ROOT/.env is shared across loops
+# and writable by a skip-permissions agent.
 _notify_cred() {
   local key="$1" envf="$WEEKEND_ROOT/.env" line val=""
   val="${!key:-}"
@@ -160,12 +137,37 @@ _notify_cred() {
     esac
   done < "$envf"
 }
+GH_BIN="$(command -v gh || true)"
+NOTIFY_PUSHOVER_USER="$(_notify_cred PUSHOVER_USER || true)"
+NOTIFY_PUSHOVER_TOKEN="$(_notify_cred PUSHOVER_TOKEN || true)"
+# Activate the venv so any python3.13 calls inside the agent use it.
+[[ -f "$VENV/bin/activate" ]] && export PATH="$VENV/bin:$PATH"
+DEADMAN_TITLE="Nightly testing runner"
+DEADMAN_LABEL="testing-nightly"
+ISSUE_SANITIZE=0
+LOOP_SLUG="testing"
+DEADMAN_CREATE_BODY="Rolling dead-man for the nightly ${LOOP_SLUG} loop. A missing daily comment means the runner did not fire."
+# Branch prefix the skill opens/updates its PR from. Matched on the head
+# ref, not the title: the title is now `Testing <date>`, which a
+# hand-written PR could also start with.
+PR_BRANCH_PREFIX="testing/"
+
+resolve_pr_url() {
+  # Newest-updated open PR the skill opened for this loop. A gh failure or
+  # no match must yield an empty string, never a non-zero exit under set -e.
+  local url
+  url="$(net_bounded "$GH_BIN" pr list --state open --limit 20 --json url,headRefName,updatedAt \
+    -q "[.[] | select(.headRefName | startswith(\"$PR_BRANCH_PREFIX\"))] | sort_by(.updatedAt) | reverse | .[0].url" \
+    2>/dev/null || true)"
+  [[ "$url" == "null" ]] && url=""
+  printf '%s' "$url"
+}
 
 _notify_curl() {
   local loop="$1" phase="$2" status="$3" pr_url="$4" detail="$5"
   local user token title message
-  user="$(_notify_cred PUSHOVER_USER || true)"
-  token="$(_notify_cred PUSHOVER_TOKEN || true)"
+  user="$NOTIFY_PUSHOVER_USER"
+  token="$NOTIFY_PUSHOVER_TOKEN"
   [[ -n "$user" && -n "$token" ]] || return 0
   [[ -x /usr/bin/curl ]] || return 0
   title="radon ${loop} ${phase}"

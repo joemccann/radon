@@ -1,5 +1,16 @@
 # Lessons
 
+## 2026-09-02 — Snapshot Pushover creds before the agent; comment-only issue writes
+
+- `_notify_curl` read WEEKEND_ROOT/.env at page time. Launchd does not set
+  PUSHOVER_*. A skip-permissions agent can rewrite the shared .env and
+  redirect or blank later loops the same night. Snapshot next to GH_BIN
+  and use only those copies in `_notify_curl`.
+- Non-security skills said "post the three-section issue update" without
+  requiring `gh issue comment` or banning `gh issue edit`/create/PATCH.
+  Agents already PATCH PR bodies; the same on the rolling issue overwrites
+  the dead-man description. Comment-only; wrapper is not the only commenter.
+
 ## 2026-09-02 — TIMEOUT_BIN must be snapshotted before --lock-lib-only
 
 - `net_bounded` expands `"$TIMEOUT_BIN"` under `set -u`. A snapshot inside
