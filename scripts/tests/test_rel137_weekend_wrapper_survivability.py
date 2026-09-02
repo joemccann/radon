@@ -56,13 +56,50 @@ def _runner_clone(tmp_path: Path, name: str) -> Path:
     for marker in (".radon-security-runner", ".radon-reliability-runner", ".radon-testing-runner",
                    ".radon-ci-performance-runner", ".radon-documentation-runner"):
         (repo / marker).write_text("", encoding="utf-8")
+    wrapper_src = LOOPS[name]
+    wrapper = repo / "scripts" / wrapper_src.name
+    shutil.copy2(wrapper_src, wrapper)
+    wrapper.chmod(wrapper.stat().st_mode | 0o100)
+    (tmp_path / ".env").write_text(
+        "PUSHOVER_USER=test-user\nPUSHOVER_TOKEN=test-token\n", encoding="utf-8"
+    )
+    curl_stub = tmp_path / "bin" / "curl"
+    (tmp_path / "bin").mkdir(exist_ok=True)
+    wrapper.write_text(
+        wrapper.read_text(encoding="utf-8").replace("/usr/bin/curl", str(curl_stub)),
+        encoding="utf-8",
+    )
+    (repo / "scripts" / "weekend_notify.py").write_text("# unused\n", encoding="utf-8")
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
     return repo
 
 
+def _cloned_wrapper(repo: Path, name: str) -> Path:
+    return repo / "scripts" / LOOPS[name].name
+
+
+def _curl_log_stub(log: Path) -> str:
+    return (
+        "#!/bin/bash\n"
+        f'printf "%s\\n" "$*" >> "{log}"\n'
+        "i=1\n"
+        'while [ "$i" -le "$#" ]; do\n'
+        '  eval "arg=\\${$i}"\n'
+        '  if [ "$arg" = "--config" ] || [ "$arg" = "-K" ]; then\n'
+        "    i=$((i + 1))\n"
+        '    eval "cfg=\\${$i}"\n'
+        f'    if [ "$cfg" = "-" ]; then cat >> "{log}"\n'
+        f'    elif [ -f "$cfg" ]; then cat "$cfg" >> "{log}"; fi\n'
+        "  fi\n"
+        "  i=$((i + 1))\n"
+        "done\n"
+        "exit 0\n"
+    )
+
+
 def _stub_bin(tmp_path: Path, *, claude_body: str) -> tuple[Path, Path, Path]:
     bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
+    bin_dir.mkdir(exist_ok=True)
     gh_log = tmp_path / "gh.log"
     py_log = tmp_path / "py.log"
     gh = bin_dir / "gh"
@@ -82,6 +119,9 @@ def _stub_bin(tmp_path: Path, *, claude_body: str) -> tuple[Path, Path, Path]:
         encoding="utf-8",
     )
     py.chmod(0o755)
+    curl = bin_dir / "curl"
+    curl.write_text(_curl_log_stub(py_log), encoding="utf-8")
+    curl.chmod(0o755)
     claude = bin_dir / "claude"
     claude.write_text(claude_body, encoding="utf-8")
     claude.chmod(0o755)
@@ -124,7 +164,7 @@ class TestSignalledRunReportsItsDeath:
             claude_body=f"#!/bin/sh\ntouch {started}\nsleep 60\n",
         )
         proc = subprocess.Popen(
-            [BASH, str(LOOPS[name]), "audit"],
+            [BASH, str(_cloned_wrapper(repo, name)), "audit"],
             env={
                 **os.environ,
                 "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
@@ -152,7 +192,7 @@ class TestSignalledRunReportsItsDeath:
         assert "issue comment" in calls, f"no dead-man comment on SIGTERM: {calls!r}"
         assert "KILLED" in calls, calls
         pages = py_log.read_text(encoding="utf-8") if py_log.exists() else ""
-        assert "weekend_notify.py" in pages, f"no Pushover on SIGTERM: {pages!r}"
+        assert "pushover.net" in pages, f"no Pushover on SIGTERM: {pages!r}"
         assert proc.returncode == 143, proc.returncode
         assert not (repo / ".weekend-runner.lock").exists(), "the lock was not released"
 
@@ -164,7 +204,11 @@ class TestTheCapIsEnforceable:
     @pytest.mark.parametrize("name", sorted(LOOPS))
     def test_timeout_escalates_to_sigkill(self, name):
         body = _uncommented(LOOPS[name])
-        line = next(ln for ln in body.splitlines() if "timeout" in ln and "claude" in ln)
+        line = next(
+            ln
+            for ln in body.splitlines()
+            if "TIMEOUT_BIN" in ln and "claude" in ln
+        )
         assert re.search(r"-k\s+\"?\$?\{?[A-Za-z0-9_]", line), (
             "no --kill-after: only SIGTERM is sent, so a claude blocked on a "
             f"hung child makes the cap advisory: {line}"
@@ -219,7 +263,7 @@ class TestTheCapIsEnforceable:
         )
         start = time.monotonic()
         proc = subprocess.run(
-            [BASH, str(LOOPS[name]), "audit"],
+            [BASH, str(_cloned_wrapper(repo, name)), "audit"],
             env={
                 **os.environ,
                 "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
@@ -268,7 +312,7 @@ class TestTheCapIsEnforceable:
             if key != "PYTEST_CURRENT_TEST"
         }
         proc = subprocess.run(
-            [BASH, str(LOOPS[name]), "audit"],
+            [BASH, str(_cloned_wrapper(repo, name)), "audit"],
             env={
                 **env,
                 "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
@@ -286,7 +330,7 @@ class TestTheCapIsEnforceable:
         calls = gh_log.read_text(encoding="utf-8") if gh_log.exists() else ""
         assert "REFUSED" in calls, f"the fail-closed refusal was not reported: {calls!r}"
         pages = py_log.read_text(encoding="utf-8") if py_log.exists() else ""
-        assert "weekend_notify.py" in pages, f"the fail-closed refusal did not page: {pages!r}"
+        assert "pushover.net" in pages, f"the fail-closed refusal did not page: {pages!r}"
 
 
 # --- (c) R-385: the continuation re-ground cannot end the run silently -------

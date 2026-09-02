@@ -344,6 +344,16 @@ class TestIssueGenerationIsUntouched:
             assert "github_pr_output" not in text, name
 
     def test_wrappers_still_post_the_rolling_issue_comment(self):
+        # Captain d1: wrapper comments are **PHASE** STAMP **status**,
+        # not the three-section write-up. report() uses the GH_BIN snapshot.
         for path in WRAPPERS:
             text = path.read_text(encoding="utf-8")
-            assert "gh issue comment" in text, path.name
+            assert '"$GH_BIN" issue comment' in text, path.name
+            assert "gh issue comment" not in text, path.name
+            fmt_start = text.index("_format_issue_body() {")
+            fmt_end = text.index("\nreport() {", fmt_start)
+            fmt = text[fmt_start:fmt_end]
+            assert "'**%s** %s **%s**'" in fmt, path.name
+            assert "**Issue discovered**" not in fmt, path.name
+            assert "**What was done to fix it**" not in fmt, path.name
+            assert "Fixed with green deployment" not in fmt, path.name

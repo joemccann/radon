@@ -612,25 +612,36 @@ A zero-finding run still does not open a PR (rail 4).
 ## Reporting and state
 
 Use the rolling GitHub issue labeled `documentation-nightly` as the compact,
-append-only audit state. Do not create a repository audit log. Every phase
-posts:
+append-only audit state. Do not create a repository audit log. The wrapper
+posts one runner-health comment (`**PHASE** STAMP **status**`) per phase.
+That comment is not the three-section write-up. The issue is created once
+with a timeless rolling-dead-man description; run history stays in comments;
+the wrapper does not edit the issue body.
 
-- status: `DONE`, `NO_ACTIONABLE_DRIFT`, `BLOCKED`, or
-  `OPERATOR_REQUIRED`;
-- `audited-through: <verified SHA>` and the examined range;
-- changed high-risk categories and classification counts;
-- `DOC-###` findings with severity, actor/action/harm, source evidence, owner,
-  and smallest remediation;
-- deterministic failures versus external-network warnings;
-- files changed/deleted/consolidated/generated;
-- exact validation commands and counts;
-- PR URL only when a real repository change exists;
-- operator action, if any, and residual risk.
+You still post the three-section issue update below as a `gh issue comment`
+on the rolling issue, never a status dump or a pointer to a log on a
+machine. Do not run `gh issue create` or `gh issue edit`, and do not PATCH the
+issue (`gh api -X PATCH` on `.../issues/`). That would overwrite the
+dead-man description. Comment-only. The wrapper also comments; you are not
+the only commenter.
+
+**Issue discovered**
+What went wrong, in plain language. If nothing went wrong, say that
+(`NO_ACTIONABLE_DRIFT` lives here).
+
+**What was done to fix it**
+What THIS run actually changed: `audited-through: <SHA>`, classification
+counts, `DOC-###` findings (severity, actor/action/harm, owner), files
+changed. If nothing: "Nothing this run."
+
+**Next**
+Only work that must happen OUTSIDE of CI pushing a new deployment
+(`OPERATOR_REQUIRED`, `BLOCKED`). If nothing remains: "Fixed with green deployment"
 
 The wrapper also sends the per-phase Pushover notification and posts the
-wrapper-level dead-man comment. A missing issue comment is the dead-man
-signal. A zero-finding night has an issue comment and notification, but no PR
-or repository artifact.
+wrapper-level comment. A missing issue comment is the dead-man signal. A
+zero-finding night has an issue comment and notification, but no PR or
+repository artifact.
 
 Before allocating `DOC-###`, inspect the rolling issue, open/closed
 documentation PRs, and git history to avoid collisions. The issue and PR

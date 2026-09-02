@@ -108,7 +108,10 @@ class TestDeadManDoesNotCryWolf:
     def test_the_trap_is_re_armed_after_the_loop(self, wrapper):
         src = wrapper.read_text()
         loop = src.index(LOOP_MARKERS[wrapper.name])
-        loop_end = src.index("tail_text=")
+        # report() used to build `tail_text=` (redacted log tail) immediately
+        # after re-arming. Issue comments are now a three-section body, so the
+        # next local after the loop is the status string handed to report().
+        loop_end = src.index("local status", loop)
         assert "trap on_crash ERR" in src[loop:loop_end], (
             "a genuine wrapper death after the agent finishes must still page"
         )
