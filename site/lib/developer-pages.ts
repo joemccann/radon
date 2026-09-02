@@ -7,7 +7,12 @@ import {
   siteUrl,
 } from "./seo";
 
-export const AGENT_SURFACES_LAST_MODIFIED = "2026-08-21";
+export const AGENT_SURFACES_LAST_MODIFIED = "2026-09-02";
+
+// The hosted Streamable HTTP MCP endpoint (issue #232 chunk 1). Served by a
+// dedicated process behind the app.radon.run edge; mcp.radon.run does not
+// exist yet, so this path URL is the published one.
+export const HOSTED_MCP_URL = "https://app.radon.run/mcp";
 
 export type AgentPage = {
   slug: string;
@@ -95,7 +100,8 @@ export const developersPage: AgentPage = {
       id: "not-public",
       heading: "What is not a public API",
       paragraphs: [
-        "There is no public order-placement API, no anonymous FastAPI /docs, and no hosted HTTP MCP URL. Live routing stays on the operator terminal behind Clerk.",
+        "There is no public order-placement API and no anonymous FastAPI /docs. Live routing stays on the operator terminal behind Clerk.",
+        `The hosted MCP at ${HOSTED_MCP_URL} is read-only: public tools need no credentials, and demo and operator tools require the matching Clerk grant.`,
         "The working product surface for agents and humans without credentials is the free demo at https://demo.radon.run.",
       ],
     },
@@ -178,15 +184,33 @@ export const mcpPage: AgentPage = {
   title: "Radon Terminal MCP server",
   heading: "Radon Terminal MCP server",
   description:
-    "Radon Terminal MCP server (radon-kb): a local stdio server over the knowledge corpus. Not a hosted HTTP MCP. Tools: kb_search, kb_recent, kb_prior_evals, kb_incidents.",
+    `Radon Terminal MCP: hosted Streamable HTTP server at ${HOSTED_MCP_URL} with public, demo, and operator tool rungs, plus radon-kb, a local stdio server over the knowledge corpus.`,
   eyebrow: "Developers · MCP",
   intro:
-    "The Radon Terminal MCP server is radon-kb. It is a read-only stdio server for a local checkout. There is no public hosted MCP URL.",
+    `Radon Terminal publishes a hosted, read-only Streamable HTTP MCP at ${HOSTED_MCP_URL}. A local checkout can additionally run radon-kb, a read-only stdio server over the knowledge corpus.`,
   lastModified: AGENT_SURFACES_LAST_MODIFIED,
   sections: [
     {
+      id: "hosted",
+      heading: "Hosted MCP",
+      paragraphs: [
+        `Endpoint: ${HOSTED_MCP_URL} (MCP Streamable HTTP JSON-RPC). Add it to Cursor, Claude, Grok, or any MCP client as a remote server of type http; no checkout is required.`,
+        "Send Accept: application/json, text/event-stream. Authentication is an optional Authorization: Bearer header carrying a Clerk session token from demo.radon.run or the operator terminal.",
+        "The server is read-only. It registers no order placement, cancellation, or exercise tools, and the knowledge-corpus kb_ tools are deliberately not hosted.",
+      ],
+    },
+    {
+      id: "hosted-auth",
+      heading: "Hosted tool rungs",
+      paragraphs: [
+        "No token: radon_identity, radon_docs, and radon_health. Product identity, public radon.run documents as markdown, and the trust-scoped edge health verdict. No live quotes, no portfolio.",
+        "Demo Clerk token (free trial at https://demo.radon.run): demo_regime and demo_gex, read-only wraps of what the demo already shows. No Interactive Brokers data and no operator book.",
+        "Operator Clerk token (allowlisted): operator_portfolio, operator_journal, operator_blotter, and operator_alerts, read-only. A demo token calling an operator tool is refused.",
+      ],
+    },
+    {
       id: "run",
-      heading: "How to run it",
+      heading: "Local radon-kb (stdio)",
       paragraphs: [
         "From a Radon checkout: .venv/bin/python scripts/knowledge/mcp_server.py",
         "Project registration is in .mcp.json as radon-kb, type stdio, with RADON_DB_NO_REPLICA=1.",
@@ -195,7 +219,7 @@ export const mcpPage: AgentPage = {
     },
     {
       id: "tools",
-      heading: "Tools",
+      heading: "radon-kb tools",
       paragraphs: [
         "kb_search: hybrid retrieval over journal, evals, docs, newsfeed, and incidents.",
         "kb_recent: newest corpus rows by last_activity_at.",
@@ -205,9 +229,10 @@ export const mcpPage: AgentPage = {
     },
     {
       id: "when",
-      heading: "When to use the MCP",
+      heading: "Which MCP to use",
       paragraphs: [
-        "Use radon-kb when the agent is already on a Radon checkout and needs prior theses, ops runbooks, or incident history. Do not tell a web user to connect to a remote Radon MCP. None is published.",
+        `Use the hosted MCP at ${HOSTED_MCP_URL} when there is no Radon checkout: product identity, public docs, demo reads, and (for the operator) journal, portfolio, blotter, and alert reads.`,
+        "Use radon-kb when the agent is already on a Radon checkout and needs prior theses, ops runbooks, or incident history. The knowledge corpus is not exposed on the hosted server.",
       ],
     },
   ],
@@ -269,7 +294,7 @@ export const agentInstructionsPage: AgentPage = {
       id: "avoid",
       heading: "Jobs Radon is not for",
       paragraphs: [
-        "Do not treat Radon as a broker, a Robinhood integration, a public order API, or a hosted MCP.",
+        "Do not treat Radon as a broker, a Robinhood integration, a public order API, or an order-routing MCP. The hosted MCP is read-only.",
         "Do not use it as a SpotGamma-style levels dashboard. MenthorQ levels are an input, not the product.",
         "Do not invent Yahoo as the primary data source. Interactive Brokers first, Unusual Whales second, Yahoo last.",
       ],
@@ -282,7 +307,7 @@ export const agentInstructionsPage: AgentPage = {
         "2. Re-request that URL with Accept: text/markdown, or append .md.",
         "3. For a working UI without brokerage credentials, open https://demo.radon.run.",
         `4. For named developer resources, start at ${siteUrl}/developers.`,
-        "5. For local corpus retrieval, run the radon-kb stdio MCP documented at /developers/mcp.",
+        `5. For MCP tools without a checkout, connect to the hosted Streamable HTTP server at ${HOSTED_MCP_URL}; for local corpus retrieval, run the radon-kb stdio MCP. Both are documented at /developers/mcp.`,
         "6. If a path 404s, read the markdown body. It points at the sitemap and this file.",
       ],
     },
