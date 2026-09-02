@@ -290,6 +290,70 @@ class TestCriScanRank:
         assert yahoo_calls == []
 
 
+class TestWrapperAdaptersExecute:
+    """The dict->list adapters INSIDE the ladder rung wrappers execute for
+    real: the ladder tests above replace the wrappers themselves, so a
+    wrapper returning the closes unsorted, or _fetch_rh_current_quote
+    calling the equity tool for VIX, stayed green. Monkeypatch sits at
+    clients.robinhood_client (the layer BELOW the wrappers). T-358."""
+
+    # Insertion order is deliberately reverse-chronological so a dropped
+    # sorted() flips the expected output.
+    CLOSES = {"2026-08-28": 101.0, "2026-08-27": 100.0}
+
+    def _wire_closes(self, monkeypatch):
+        calls: list = []
+
+        def fake(symbols):
+            calls.append(list(symbols))
+            return {s: dict(self.CLOSES) for s in symbols}
+
+        monkeypatch.setattr("clients.robinhood_client.fetch_robinhood_closes", fake)
+        return calls
+
+    def test_garch_rh_prices_are_date_sorted(self, monkeypatch):
+        calls = self._wire_closes(monkeypatch)
+        assert garch_convergence._fetch_rh_prices("SPY") == [100.0, 101.0]
+        assert calls == [["SPY"]]
+
+    def test_leap_rh_history_is_date_sorted(self, monkeypatch):
+        calls = self._wire_closes(monkeypatch)
+        assert leap_scanner_uw.get_rh_history("SPY") == [100.0, 101.0]
+        assert calls == [["SPY"]]
+
+    def test_cri_rh_bars_are_sorted_date_close_tuples(self, monkeypatch):
+        calls = self._wire_closes(monkeypatch)
+        assert cri_scan._fetch_rh("SPY") == [
+            ("2026-08-27", 100.0),
+            ("2026-08-28", 101.0),
+        ]
+        assert calls == [["SPY"]]
+
+    def test_portfolio_risk_and_rv_ratio_pass_the_per_symbol_dict_through(
+        self, monkeypatch
+    ):
+        calls = self._wire_closes(monkeypatch)
+        assert portfolio_risk._fetch_rh_closes("SPY") == self.CLOSES
+        assert rv_ratio_scan._fetch_rh_daily("QQQ") == self.CLOSES
+        assert calls == [["SPY"], ["QQQ"]]
+
+    def test_cri_current_quote_routes_index_tickers_to_the_index_tool(
+        self, monkeypatch
+    ):
+        quote_calls: list = []
+
+        def fake_quote(symbol, *, index=False):
+            quote_calls.append((symbol, index))
+            return 15.5
+
+        monkeypatch.setattr("clients.robinhood_client.fetch_robinhood_quote", fake_quote)
+        assert cri_scan._fetch_rh_current_quote("VIX") == pytest.approx(15.5)
+        assert cri_scan._fetch_rh_current_quote("SPY") == pytest.approx(15.5)
+        assert quote_calls == [("VIX", True), ("SPY", False)], (
+            "VIX must use the index tool (index=True); equities the equity tool"
+        )
+
+
 class TestFetchAllStillFatalsWhenEverySourceIsDown:
     def test_fetch_all_exits_when_no_source_serves(self, monkeypatch):
         monkeypatch.setattr(cri_scan, "_fetch_ib", lambda tickers: {})
