@@ -62,6 +62,15 @@ QUOTA_LINE = (
     "You're out of usage credits. Switch to another model, or manage usage "
     "credits at claude.ai/settings/usage?from=cc_cli_limit_message, to continue."
 )
+RATE_LIMIT_LINE = "Request rejected (429)"
+CAPACITY_LINE = "API Error: Repeated 529 Overloaded errors"
+# Claude Code tool-skip categories. Official docs say retry the SAME model.
+# Bare `overloaded` / `rate.limit` in is_quota_exhausted treated these as a
+# dead rung and walked the ladder, including on timeout 124 whose log merely
+# mentioned rate limits.
+TOOL_SKIP_OVERLOADED = "Claude Code skipped a tool (overloaded)"
+TOOL_SKIP_RATE_LIMITED = "Claude Code skipped a tool (rate-limited)"
+CASUAL_RATE_LIMITS = "the 500 mentioned rate limits in a timeout log"
 # The security wrapper refuses to call a phase OK without this; harmless noise
 # for the other four.
 COMPLETION = "SECURITY-NIGHTLY PHASE COMPLETE: audit"
@@ -88,7 +97,13 @@ def _clone(tmp_path: Path, wrapper: Path) -> Path:
     return repo
 
 
-def _stub_bin(tmp_path: Path, models_log: Path, exhausted: Path, gh_log: Path) -> Path:
+def _stub_bin(
+    tmp_path: Path,
+    models_log: Path,
+    exhausted: Path,
+    gh_log: Path,
+    exhausted_line: str = QUOTA_LINE,
+) -> Path:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     # What the agent's OWN nested `claude` calls would inherit. The wrapper's
@@ -114,7 +129,7 @@ def _stub_bin(tmp_path: Path, models_log: Path, exhausted: Path, gh_log: Path) -
             f'printf "%s\\n" "$model" >> "{models_log}"\n'
             f'printf "%s\\n" "${{RADON_WEEKEND_MODEL:-<unset>}}" >> "{env_models}"\n'
             f'if grep -qxF -- "$model" "{exhausted}"; then\n'
-            f"  echo \"{QUOTA_LINE}\"\n"
+            f"  echo \"{exhausted_line}\"\n"
             "  exit 1\n"
             "fi\n"
             f'echo "{COMPLETION}"\n'
@@ -140,8 +155,16 @@ def _stub_bin(tmp_path: Path, models_log: Path, exhausted: Path, gh_log: Path) -
     return bin_dir
 
 
-def _audit(tmp_path: Path, loop: str, exhausted_models, ladder: str | None = None):
-    return _run(tmp_path, loop, "audit", exhausted_models, ladder)
+def _audit(
+    tmp_path: Path,
+    loop: str,
+    exhausted_models,
+    ladder: str | None = None,
+    exhausted_line: str = QUOTA_LINE,
+):
+    return _run(
+        tmp_path, loop, "audit", exhausted_models, ladder, exhausted_line=exhausted_line
+    )
 
 
 def _run(
@@ -150,13 +173,16 @@ def _run(
     phase: str,
     exhausted_models,
     ladder: str | None = None,
+    exhausted_line: str = QUOTA_LINE,
 ):
     wrapper = LOOPS[loop]
     models_log = tmp_path / "models.txt"
     gh_log = tmp_path / "gh.log"
     exhausted = tmp_path / "exhausted.txt"
     exhausted.write_text("".join(f"{m}\n" for m in exhausted_models), encoding="utf-8")
-    bin_dir = _stub_bin(tmp_path, models_log, exhausted, gh_log)
+    bin_dir = _stub_bin(
+        tmp_path, models_log, exhausted, gh_log, exhausted_line=exhausted_line
+    )
     repo = _clone(tmp_path, wrapper)
     env = {
         "PATH": f"{bin_dir}:/usr/bin:/bin",
@@ -233,6 +259,69 @@ class TestAnExhaustedQuotaDropsARung:
         )
         assert "claude.ai/settings/usage" in calls, (
             f"{loop}: the dead-man must carry the one place this is fixed: {calls!r}"
+        )
+
+    def test_a_rate_limit_drops_a_rung_instead_of_exit_1(self, tmp_path, loop):
+        proc, models, _calls = _audit(
+            tmp_path, loop, [LADDER[0]], exhausted_line=RATE_LIMIT_LINE
+        )
+        assert models[:2] == LADDER[:2], (
+            f"{loop}: a 429 rate limit on {LADDER[0]!r} must drop to "
+            f"{LADDER[1]!r}, not exit 1; models attempted: {models!r}\n"
+            f"{proc.stdout}{proc.stderr}"
+        )
+        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
+
+    def test_a_capacity_overload_drops_a_rung_instead_of_exit_1(self, tmp_path, loop):
+        proc, models, _calls = _audit(
+            tmp_path, loop, [LADDER[0]], exhausted_line=CAPACITY_LINE
+        )
+        assert models[:2] == LADDER[:2], (
+            f"{loop}: a 529 overload on {LADDER[0]!r} must drop to "
+            f"{LADDER[1]!r}, not exit 1; models attempted: {models!r}\n"
+            f"{proc.stdout}{proc.stderr}"
+        )
+        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
+
+    def test_quota_matcher_is_the_cli_strings_not_bare_words(self, loop):
+        body = LOOPS[loop].read_text(encoding="utf-8")
+        start = body.index("is_quota_exhausted()")
+        fn = body[start:body.index("\n}\n", start)]
+        assert "rate.limit" not in fn, (
+            f"{loop}: bare rate.limit matches tool-skip (rate-limited) and "
+            f"ordinary text: {fn}"
+        )
+        assert "rate_limit" not in fn, (
+            f"{loop}: bare rate_limit is wider than Request rejected (429): {fn}"
+        )
+        assert re.search(r"(?<!529 )overloaded", fn, re.I) is None, (
+            f"{loop}: bare overloaded matches tool-skip (overloaded); keep "
+            f"'529 Overloaded' only: {fn}"
+        )
+        assert "529 Overloaded" in fn, fn
+        assert "Request rejected \\(429\\)" in fn, fn
+        assert "out of usage credits" in fn, fn
+        assert "experiencing high load" in fn, fn
+
+    @pytest.mark.parametrize(
+        "line",
+        (TOOL_SKIP_OVERLOADED, TOOL_SKIP_RATE_LIMITED, CASUAL_RATE_LIMITS),
+    )
+    def test_a_tool_skip_or_casual_mention_does_not_drop_a_rung(
+        self, tmp_path, loop, line
+    ):
+        proc, models, calls = _audit(
+            tmp_path, loop, [LADDER[0]], exhausted_line=line
+        )
+        assert models == [LADDER[0]], (
+            f"{loop}: {line!r} on {LADDER[0]!r} must retry/fail that rung, "
+            f"not walk the ladder; models attempted: {models!r}\n"
+            f"{proc.stdout}{proc.stderr}"
+        )
+        assert proc.returncode != 0, (proc.returncode, proc.stdout, proc.stderr)
+        assert "all model quotas exhausted" not in calls, (
+            f"{loop}: a tool-skip or a log that merely mentions rate limits "
+            f"was reported as every quota gone: {calls!r}"
         )
 
 
