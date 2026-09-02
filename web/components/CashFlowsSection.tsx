@@ -48,8 +48,8 @@ function fmtDate(iso: string): string {
 
 // IBKR Flex publishes the CashTransaction section once per day with a
 // ~1-day settlement lag — a withdrawal initiated on day N appears in
-// Flex on the morning of day N+1, and the radon daemon syncs once per
-// ET trading day at 17:00 ET. The lozenge surfaces the last successful
+// Flex on the morning of day N+1, and the sFTP delivery ingest applies it
+// Tue..Sat at 07:30 ET. The lozenge surfaces the last successful
 // sync so an operator who initiated a withdrawal today understands why
 // it hasn't appeared yet. See feedback_flex_cash_transaction_lag.md.
 const SYNC_LOZENGE_EXPLANATION =

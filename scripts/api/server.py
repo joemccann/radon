@@ -5570,9 +5570,10 @@ async def cash_flows(
 ):
     """Return cash transactions from the `cash_flows` Turso table.
 
-    Reads-only — populated by `scripts/cash_flow_sync.py` which runs daily
-    via the monitor_daemon `cash_flow_sync` handler. Falls back to
-    `data/cash_flows.json` if the DB read fails.
+    Reads-only — populated by `scripts/cash_flow_sync.py --from-file` on the
+    sFTP-delivered statement (radon-flex-pull.timer, Tue..Sat 07:30 ET, via
+    `flex_delivery_ingest`). Falls back to `data/cash_flows.json` if the DB
+    read fails.
 
     Query params:
       days  - lookback window in days, default 90

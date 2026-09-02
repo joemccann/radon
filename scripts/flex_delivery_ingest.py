@@ -63,6 +63,12 @@ def mark_flex_delivery_applied(content_sha256: str) -> bool:
 # failure pages on it rather than on a new key: an uncatalogued key is invisible
 # and a scheduled one for a no-cadence signal ages to stale and pages forever.
 HEALTH_SERVICE = "flex-pull"
+# The cash-flows row. The monitor daemon's cash_flow_sync handler wrote it until
+# 2026-09-02 by spawning a no-source SendRequest run that exited
+# EXIT_FLEX_SEND_DISABLED daily. This ingest is the only path that writes
+# `cash_flows`, so it owns the heartbeat the watchdog's daily window and the
+# `/cash-flows` lozenge read.
+CASH_FLOW_HEALTH_SERVICE = "cash-flow-sync"
 
 
 def ingest_xml(
@@ -152,6 +158,20 @@ def _page_release_failure(digest: str, message: str) -> None:
         print(f"[flex-ingest] release-failure page non-fatal: {exc}", file=sys.stderr)
 
 
+def _heartbeat_cash_flow_sync(state: str, error: Dict[str, Any] | None = None) -> None:
+    try:
+        from db import writer  # noqa: PLC0415
+
+        writer.record_service_health(
+            CASH_FLOW_HEALTH_SERVICE,
+            state,
+            finished_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            error=error,
+        )
+    except Exception as exc:  # noqa: BLE001 — best-effort, never masks the ingest result
+        print(f"[flex-ingest] cash-flow-sync heartbeat non-fatal: {exc}", file=sys.stderr)
+
+
 def _apply_classified(kind: str, xml_text: str, digest: str, source_path: str) -> Dict[str, Any]:
     if kind == ACTIVITY:
         import cash_flow_sync
@@ -161,6 +181,14 @@ def _apply_classified(kind: str, xml_text: str, digest: str, source_path: str) -
             raise FlexClassifyError("activity ingest requires a filesystem path")
         cash_code = cash_flow_sync.main(["--from-file", source_path, "--no-file"])
         if cash_code != 0:
+            _heartbeat_cash_flow_sync(
+                "error",
+                {
+                    "message": f"cash_flow_sync --from-file failed (exit {cash_code})",
+                    "cash_exit": cash_code,
+                    "content_sha256": digest,
+                },
+            )
             # `upsert_cash_flow_rows` chunks its writes, so a failure leaves the
             # earlier chunks committed. Building the TWR series over a
             # half-written `cash_flows` and persisting it as authoritative
@@ -178,6 +206,7 @@ def _apply_classified(kind: str, xml_text: str, digest: str, source_path: str) -
                 "error": f"cash_flow_sync failed (exit {cash_code}); TWR not rebuilt",
                 "source_path": source_path,
             }
+        _heartbeat_cash_flow_sync("ok")
         twr = perf_twr_builder.build_and_persist(from_file=source_path, persist=True)
         return {
             "ok": twr.get("status") in ("ok", "stale"),
