@@ -344,7 +344,7 @@ class TestHostedServerPins:
     def test_module_never_reads_service_secrets(self):
         """AST pin: every os.environ key the hosted MCP modules read is either
         an RADON_MCP_* knob or one of the three Clerk/allowlist values. No
-        RADON_SERVICE_TOKEN, no MDW_API_KEY, no UW/IB/Turso credentials."""
+        service-token or vendor-key env vars."""
         import ast
 
         allowed = {"CLERK_JWKS_URL", "CLERK_ISSUER", "ALLOWED_USER_IDS"}

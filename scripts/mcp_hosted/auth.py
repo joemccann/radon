@@ -19,7 +19,7 @@ A valid Clerk JWT with neither grant is denied (403). Verification mirrors
 scripts/api/auth.py (RS256 only, kid pattern, bounded token size, issuer
 from CLERK_ISSUER, JWKS from CLERK_JWKS_URL) but is synchronous and carries
 NO caller-trust bypass: there is no loopback/tailnet shortcut and no
-RADON_SERVICE_TOKEN / X-API-Key acceptance on this surface.
+service-token or machine-key header is accepted on this surface.
 """
 from __future__ import annotations
 

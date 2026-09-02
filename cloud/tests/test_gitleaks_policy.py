@@ -57,6 +57,9 @@ GENERIC_API_KEY_BASELINE_COMMITS = {
     # next to *_TOKEN/*_KEY identifiers; rewritten to runtime construction in
     # the follow-up commit.
     "fd1eb140d324cf8b61373723ee34a744a0ddaab2",
+    # 2026-09-02 (PR #234): hosted-MCP docstring listed env names next to
+    # "credentials"; rewritten in the follow-up commit.
+    "9db5f7aff4a947c1ee4965b467a79eefe1800ae9",
 }
 
 

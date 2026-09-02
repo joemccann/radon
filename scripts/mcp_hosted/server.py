@@ -24,9 +24,9 @@ Auth split (v1, default deny — see mcp_hosted/auth.py):
 
 No write tools: nothing named place_* / cancel_* / exercise_* is registered
 (test-pinned), radon.trade is out of v1, and the knowledge corpus kb_* tools
-stay checkout-only on the radon-kb stdio server. Server-side secrets
-(RADON_SERVICE_TOKEN, MDW_API_KEY, Turso/Clerk/IB credentials) are never
-read by this module and never forwarded to MCP clients (test-pinned).
+stay checkout-only on the radon-kb stdio server. This process never
+reads service tokens or vendor keys and never forwards them to MCP
+clients (AST-pinned).
 
 Tool logic lives in `_*_impl(principal, ...)` functions with an injectable
 HTTP getter so tests never touch the network.
