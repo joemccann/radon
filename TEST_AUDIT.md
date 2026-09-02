@@ -8263,6 +8263,59 @@ from T-345.
   the untriaged ledger section did not grow); green — `streaks-tab.spec.ts`
   in the `ci.yml` arg list and out of the ledger.
 
+## Remediation 2026-09-02
+
+**Two consecutive cycles produced no audit — the range `39bf6f5e..db25990d`
+(32 commits / 259 files / +26958-1135) is UNAUDITED.** The next audit must
+take `39bf6f5e` (the 2026-08-31 ledger SHA) as its base so the range is
+re-covered. It includes the profile/credential-store overhaul (#125), the
+hosted MCP endpoint (#234), the MA RATIO tab (#235), two orders-surface fixes
+(#236, #237) and the nightly-wrapper billing rework (#238, #239).
+
+- **2026-09-01:** both phases exited 1 four seconds in — `claude -p` refused
+  with "out of usage credits" before any work; the subscription-only billing
+  fix (#238/#239) merged later that day, after the fire. The wrapper pushed
+  `origin/testing/2026-09-01` empty and reported FAILED on all three
+  dead-man channels, correctly. No T-number: the cause was fixed in-range.
+- **2026-09-02 (this cycle):** the audit phase computed the delta, launched
+  its serial gates as a detached script, then exited 0 after ~4 minutes on a
+  text-only progress message ("Gates at 53% on pytest") with ZERO findings
+  drafted — the T-379 shape recurring verbatim despite the 2026-08-31 skill
+  rail. T-379's wrapper detection WORKED: the phase was posted as
+  `INCOMPLETE (agent exited 0 without committing to the nightly branch)` at
+  07:06:32Z. Unlike 2026-08-31 there is no findings draft to land;
+  `/tmp/tw-2026-09-02/` holds only delta scaffolding plus the still-running
+  gates script, which this remediation adopted as its round 1.
+
+**Backlog state at the start of this remediation: zero un-DONE P0 or P1.**
+T-346…T-352 and T-379 all landed 2026-08-31 via PR #213 (squash `4584e84a`,
+merged and deployed). So, per the 2026-08-28 precedent, this run files one
+new finding against the recurrence itself (T-380, below) and works the
+newest **P2** stragglers (T-353…T-378) in value order. Evidence rows land in
+`TEST_LOG.md` under `## Remediation 2026-09-02`.
+
+### New finding
+
+- **T-380 [P1] (T-239 → T-379 recurring; third lost audit night in six fired
+  cycles) The dead-man now DETECTS a zero-commit phase but nothing RECOVERS
+  it — an INCOMPLETE audit still forfeits the whole night's audit, and the
+  skill-rail fix alone demonstrably does not prevent the exit.**
+  `scripts/testing_weekend.sh` — T-379 (`743408fd`) downgrades a zero-commit
+  OK to `INCOMPLETE (…)` and reported it correctly tonight at 07:06:32Z, but
+  the wrapper then proceeds straight to remediate; the unaudited range
+  compounds (now 32 commits). Lost audit nights: 2026-08-28 (T-239),
+  2026-08-31 (T-379, draft recovered), 2026-09-02 (nothing to recover). The
+  2026-08-31 Lessons rail ("wait INSIDE a tool call") was in tonight's
+  prompt and the agent still replied with text mid-gates.
+  **AC:** RED — in `test_weekend_loop_deadman.py`'s real-git harness, a stub
+  `claude` whose first audit invocation prints-and-exits-0 without
+  committing and whose second invocation commits: today's wrapper runs the
+  audit once, posts INCOMPLETE, never retries → red. GREEN — the wrapper
+  retries the audit phase exactly once when (and only when) the dead-man
+  check downgrades it to INCOMPLETE, within the same wall-clock cap; a retry
+  that also lands nothing still posts INCOMPLETE (no third attempt);
+  TIMEOUT / FAILED / TRUNCATED arms and exit codes unchanged.
+
 ## 11 · Audit ledger
 
 The weekend loop (`.claude/skills/testing-weekend/`) reads the last line
@@ -8280,6 +8333,8 @@ Delta findings continue the T-### numbering in dated `## Delta audit` sections.
 - Audited through: `f7b5eeb9` on 2026-08-29 — 62 new findings (T-250…T-311: 5 P0, 30 P1, 27 P2) over 61 commits / 366 files / +36023-2510, base `789aabea` because the 2026-08-28 audit was truncated (T-239) and did not advance the ledger. Gates round 1 serial under load 74→224: pytest **3 failed** / 8558 passed — all three timing-shaped, in three unrelated files, 4 passed in 14.8s isolated, and CI's ten shards were green at this SHA (load, filed as T-283 and T-284); vitest 787 files / **9 failed** / 7934 passed — deterministic, all 9 in the three files `ci.yml:143-145` EXCLUDES, so the CI-gated set is fully green (T-276); cloud **37 failed** / 1263 passed on darwin vs **35 failed** / 1098 at the base SHA run in a worktree — the 4-line diff is +3 deliberate caddy reds (T-205 working, no `caddy` binary here) and −1 fixed relay watchdog, so the recorded darwin baseline is now 37. Collection union clean on all three gates (pytest 8562 = shard union, cloud 38/38 files, vitest 787/787) so T-122 holds. Enforcement improved — `stage-release.needs` GAINED both coverage ratchets — but `main` still has no `required_status_checks` (T-222 re-confirmed). One new skip, honest and linked to T-204; no `.only`; no exclusion growth; no threshold moved. `resolveSpreadPriceData` closed as fixed; the standing `orders-place-cache-race` item re-diagnosed from cross-file pollution to an intra-file race and numbered T-311.
 - Audited through: `fda36450` on 2026-08-30 — 34 new findings (T-312…T-345: 1 P0, 14 P1, 19 P2) over 154 commits / 472 files / +38160-1917, base `f7b5eeb9`. Gates ×2 serial: pytest **22 failed** / 8973 passed both rounds — ONE deterministic cluster in five Flex-embargo files that flips green when `TURSO_DB_URL` is masked; the runner clone gained `web/.env` via `14065b74` and CI is green only because it has no creds (T-317, the T-277 class recurring); vitest 819 files / **1 failed** / 8265 (r1, an intra-file `replaceMock.calls.at(-1)` race, 3/3 green isolated, T-321) and **3 failed** / 8263 (r2, bare timeouts in three unrelated files under load 255 with the reliability loop's vitest concurrent, 22/22 green isolated — load); cloud **35 failed** both rounds, FAILED lists byte-identical — `caddy` is now installed here so the three T-205 reds are gone, and one NEW test-defect red (`test_no_real_secrets_in_tracked_files` on a constant-folded `.pyc`, T-325) joins the 34 bash-3.2 reds. Added-file determinism 3×3 green (vitest 27 files/239, pytest 357, cloud 80). Collection union clean on all three gates (pytest 8996 = shard sum, cloud 44/44, vitest 8266 = CI) so T-122 holds. Enforcement: `deploy.needs` 9 → 14, ratchets retained, thresholds unmoved, no `.only`/`xfail`, every new skip linked — but `main` still has no `required_status_checks` (T-222) and a docs-only push deploys with every gate skipped, LIVE at this HEAD (T-312, P0). CI was red 04:20–05:12Z inside the range for three separate causes, all fixed in-range, deploy skipped each time.
 - Audited through: `39bf6f5e` on 2026-08-31 — 34 new findings (T-346…T-379: 8 P1, 26 P2) over 51 commits / 247 files / +20997-853, base `fda36450`. Landed by the REMEDIATION phase: the audit phase drafted T-346…T-378 and exited 0 on a progress message without committing (T-379, T-239 class), so its ledger line is written here. Gates round 1 (audit's detached script, load 4.6→20): pytest **9508 passed / 0 failed** (first green pytest round on this clone since `web/.env`; T-317 fixed); vitest 832 files / **8392 passed / 0 failed**; cloud **35 failed** / 1500 passed on darwin — one-for-one swap against the 2026-08-30 list (+1 new bash-3.2 red from `1b85a8b3`, −1 T-325 fixed), baseline stays 35. Collection union clean on all three gates (pytest 9509 = shard sum, cloud 44/44, vitest 8392 = CI + 1) so T-122 holds. `deploy.needs` identical base→HEAD (14 jobs, ratchets retained); `main` still has no `required_status_checks` (T-222). Zero code skips in the delta, no `.only`/`xfail`, no exclusion growth, no threshold moved. Delta-file determinism 3× recorded in `TEST_LOG.md`.
+- Audited through: **NOT ADVANCED** on 2026-09-01 — both phases exited 1 on "out of usage credits" four seconds in (pre-#238/#239 wrapper); the branch was pushed empty and FAILED reported on all three dead-man channels. Written retroactively by the 2026-09-02 remediation phase.
+- Audited through: **NOT ADVANCED** on 2026-09-02 — the audit phase exited 0 at ~4 minutes on a text-only progress message with zero findings drafted (T-379 class; the wrapper correctly posted INCOMPLETE, so T-379's detection works — recovery does not exist, filed as T-380). `39bf6f5e..db25990d` (32 commits / 259 files / +26958-1135) is **UNAUDITED**; the next audit must take `39bf6f5e` as its base. The remediation phase adopted the audit's detached gates for round 1, filed T-380, and worked the P2 backlog (T-353…T-378).
 
 ## Remediation 2026-08-29 — PR #140
 

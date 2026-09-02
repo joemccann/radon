@@ -547,3 +547,14 @@ to `/tmp/tw-2026-08-30-rem/`.
 | Task | Status | Commits | Evidence |
 |---|---|---|---|
 | T-379 | DONE | `4584e84a` | **The loop's own dead-man.** `scripts/testing_weekend.sh` now records the clone's HEAD and the phase-start epoch before the first round; when `phase_status` says `OK` but HEAD did not move OR the commit under HEAD is older than the phase start, the status is downgraded to `INCOMPLETE (agent exited 0 without committing to the nightly branch)` with its own report arm. TIMEOUT / FAILED / TRUNCATED precedence and the wrapper exit code are unchanged. The committer-date check is what keeps remediate honest: it legitimately moves HEAD from `main` onto the audit's branch tip by checkout alone. Executed regression in `test_weekend_loop_deadman.py` (`TestAnAgentThatCommitsNothingIsNotReportedOk`, real-git clone, stub `claude`): a stub that prints and exits 0 must post INCOMPLETE on the issue comment AND the Pushover call — RED `1 failed / 1 passed` (posted OK); a stub that commits once on `testing/<date>` still posts OK. GREEN 2; harness files 138; the other wrapper-inspecting suites 227 + 16. Lead re-ran the two harness files in the landed tree: 138 passed. The same four-arm `phase_status` with no commit check exists in `reliability_weekend.sh:194/:479`, `security_nightly.sh:200/:446`, `documentation_nightly.sh:190/:421`, `ci_performance_nightly.sh:194/:425` — reported to those loops, not edited (lane rule). |
+
+## Remediation 2026-09-02 — nightly branch `testing/2026-09-02`
+
+Audit phase produced nothing (T-379 class, wrapper posted INCOMPLETE; range
+`39bf6f5e..db25990d` left for the next audit — see `TEST_AUDIT.md`
+`## Remediation 2026-09-02`). Zero un-DONE P0/P1 at start; this phase filed
+T-380 and works the DEFERRED P2 backlog T-353…T-378. Rows land as tasks
+finish.
+
+| Task | Status | Commits | Evidence |
+|---|---|---|---|
