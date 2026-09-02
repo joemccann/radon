@@ -326,7 +326,7 @@ describe("positionGroupShareData", () => {
     expect(data.pnlPct).toBeNull();
   });
 
-  it("handles stock-only position groups (no OPT fills → pnlPct from P&L identity or null)", () => {
+  it("handles stock-only position groups (pnlPct from the P&L identity with a ×1 multiplier)", () => {
     const group: PositionFillGroup = {
       id: "stock", symbol: "AAPL",
       description: "Closed AAPL Stock",
@@ -341,8 +341,9 @@ describe("positionGroupShareData", () => {
       }],
     };
     const data = positionGroupShareData(group);
-    // No OPT fills means closedGroupOpenCash returns null → pnlPct is null
-    expect(data.pnlPct).toBeNull();
+    // Stock close: closeCash = 252.50 × 100 × 1 = 25250, openCash = 500 − 25250,
+    // pnlPct = 500 / 24750 × 100 ≈ 2.02%.
+    expect(data.pnlPct).toBeCloseTo(2.0202, 3);
     expect(data.pnl).toBe(500);
   });
 
