@@ -24,7 +24,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import os
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
@@ -48,6 +50,13 @@ logger = logging.getLogger("radon.credentials")
 router = APIRouter()
 
 UPDATED_BY_MAX_LEN = 64
+
+# Vendor validators hold a thread for up to SLOW_LOGIN_TIMEOUT_S (~90s):
+# bound what is in flight and how often one service can be re-validated.
+VALIDATOR_CONCURRENCY = 2
+VALIDATOR_COOLDOWN_S = 5.0
+_validator_slots: Optional[asyncio.Semaphore] = None
+_validator_last_run: Dict[str, float] = {}
 
 
 def _generated_at() -> str:
@@ -89,6 +98,31 @@ def _unknown_service(service_id: str) -> HTTPException:
             "message": f"no credential service {service_id!r}",
         },
     )
+
+
+async def _run_validator(service_id: str, merged: Dict[str, str]):
+    """One validation per service per cooldown, VALIDATOR_CONCURRENCY in flight."""
+    global _validator_slots
+    now = time.monotonic()
+    elapsed = now - _validator_last_run.get(service_id, float("-inf"))
+    if elapsed < VALIDATOR_COOLDOWN_S:
+        retry_after = max(1, math.ceil(VALIDATOR_COOLDOWN_S - elapsed))
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": "VALIDATION_COOLDOWN",
+                "service": service_id,
+                "message": f"{service_id} was validated {elapsed:.0f}s ago",
+            },
+            headers={"Retry-After": str(retry_after)},
+        )
+    _validator_last_run[service_id] = now
+    if _validator_slots is None:
+        _validator_slots = asyncio.Semaphore(VALIDATOR_CONCURRENCY)
+    async with _validator_slots:
+        return await asyncio.to_thread(
+            credential_validators.validate, service_id, merged
+        )
 
 
 async def _json_object(request: Request) -> dict:
@@ -199,9 +233,7 @@ async def put_credentials(service_id: str, request: Request):
     store = _store()
 
     merged = await asyncio.to_thread(_merged_values, service, submitted, store)
-    verdict = await asyncio.to_thread(
-        credential_validators.validate, service_id, merged
-    )
+    verdict = await _run_validator(service_id, merged)
     if verdict.blocks_save:
         raise HTTPException(
             status_code=422,
@@ -249,9 +281,7 @@ async def validate_credentials(service_id: str, request: Request):
         submitted = _clean_values(service, body)
     store = _store()
     merged = await asyncio.to_thread(_merged_values, service, submitted, store)
-    verdict = await asyncio.to_thread(
-        credential_validators.validate, service_id, merged
-    )
+    verdict = await _run_validator(service_id, merged)
     return {"validation": verdict.to_dict()}
 
 

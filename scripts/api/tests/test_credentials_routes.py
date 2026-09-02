@@ -53,6 +53,14 @@ def tmp_store(tmp_path, monkeypatch):
     return tmp_path
 
 
+@pytest.fixture(autouse=True)
+def reset_validator_throttle(monkeypatch):
+    """Cooldown + concurrency state is module-level; every test starts cold."""
+    for module in _route_module_instances():
+        monkeypatch.setattr(module, "_validator_last_run", {}, raising=False)
+        monkeypatch.setattr(module, "_validator_slots", None, raising=False)
+
+
 @pytest.fixture()
 def valid_verdict(monkeypatch):
     calls = []
@@ -259,6 +267,76 @@ class TestValidateEgressPin:
         assert resp.status_code == 200
         assert resp.json()["validation"]["status"] == "invalid"
         assert calls == []
+
+
+class TestValidatorThrottle:
+    """Validators hold a thread for up to ~90s. Bound them at the route."""
+
+    def test_second_validation_inside_cooldown_429s_without_vendor_call(
+        self, client, valid_verdict
+    ):
+        first = client.post("/credentials/unusual_whales/validate", json={})
+        assert first.status_code == 200
+        second = client.post("/credentials/unusual_whales/validate", json={})
+        assert second.status_code == 429
+        assert int(second.headers["Retry-After"]) >= 1
+        assert second.json()["detail"]["code"] == "VALIDATION_COOLDOWN"
+        assert len(valid_verdict) == 1
+
+    def test_put_shares_the_cooldown_and_stores_nothing(
+        self, client, valid_verdict, monkeypatch
+    ):
+        monkeypatch.delenv("UW_TOKEN", raising=False)
+        assert client.post("/credentials/unusual_whales/validate", json={}).status_code == 200
+        response = client.put(
+            "/credentials/unusual_whales",
+            json={"values": {"UW_TOKEN": "uw-throttled-token"}},
+        )
+        assert response.status_code == 429
+        assert len(valid_verdict) == 1
+        assert _store().get_secret("UW_TOKEN") is None
+
+    def test_cooldown_is_per_service_and_expires(self, client, valid_verdict):
+        assert client.post("/credentials/unusual_whales/validate", json={}).status_code == 200
+        assert client.post("/credentials/anthropic/validate", json={}).status_code == 200
+        for module in _route_module_instances():
+            for service_id in module._validator_last_run:
+                module._validator_last_run[service_id] -= module.VALIDATOR_COOLDOWN_S
+        assert client.post("/credentials/unusual_whales/validate", json={}).status_code == 200
+        assert len(valid_verdict) == 3
+
+    def test_in_flight_validators_are_bounded(self, monkeypatch):
+        import asyncio
+        import threading
+
+        from scripts.api.routes import credentials as credentials_module
+
+        release = threading.Event()
+        started = []
+
+        def _slow_validate(service_id, values):
+            started.append(service_id)
+            release.wait(timeout=5)
+            return ValidationResult("valid", "")
+
+        for module in _route_module_instances():
+            monkeypatch.setattr(module.credential_validators, "validate", _slow_validate)
+
+        async def _drive():
+            tasks = [
+                asyncio.create_task(credentials_module._run_validator(service_id, {}))
+                for service_id in ("unusual_whales", "anthropic", "cerebras")
+            ]
+            await asyncio.sleep(0.3)
+            in_flight = list(started)
+            release.set()
+            verdicts = await asyncio.gather(*tasks)
+            return in_flight, verdicts
+
+        in_flight, verdicts = asyncio.run(_drive())
+        assert len(in_flight) == credentials_module.VALIDATOR_CONCURRENCY == 2
+        assert len(started) == 3
+        assert all(verdict.status == "valid" for verdict in verdicts)
 
 
 class TestDelete:
