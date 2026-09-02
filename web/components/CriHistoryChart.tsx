@@ -43,6 +43,15 @@ export interface ReferenceLevel {
   color?: string;
 }
 
+export interface ReferenceBand {
+  from: number;
+  to: number;
+  label: string;
+  color?: string;
+  /** Which y-scale the band belongs to; its bounds fold into that scale's domain. */
+  axis: "left" | "right";
+}
+
 interface CriHistoryChartProps<T extends { date: string }> {
   history: T[];
   series: [ChartSeries<T>, ChartSeries<T>];
@@ -53,6 +62,9 @@ interface CriHistoryChartProps<T extends { date: string }> {
   /** Dashed horizontal guide lines on the left scale (e.g. signal zones);
    *  their values are folded into the scale domain so they are always visible. */
   referenceLevels?: ReferenceLevel[];
+  /** Shaded horizontal zones (e.g. the MA RATIO 0.25-0.5 signal zone), each
+   *  drawn on the scale of its declared axis and folded into that domain. */
+  referenceBands?: ReferenceBand[];
   /** Override for today's live values — keys match the entry type fields */
   liveValues?: Partial<Record<keyof T, number>>;
   /** X-axis tick label override; defaults to "%b %-d" (e.g. "Mar 5"). */
@@ -101,6 +113,7 @@ export default function CriHistoryChart<T extends { date: string }>({
   xTickFormat,
   sharedAxis = false,
   referenceLevels,
+  referenceBands,
 }: CriHistoryChartProps<T>) {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -181,6 +194,11 @@ export default function CriHistoryChart<T extends { date: string }>({
         .filter((v): v is number => isPlottable(s, v));
       for (const level of referenceLevels ?? []) {
         if (isPlottable(s, level.value)) vals.push(level.value);
+      }
+      for (const band of referenceBands ?? []) {
+        if (band.axis !== s.axis && !sharedAxis) continue;
+        if (isPlottable(s, band.from)) vals.push(band.from);
+        if (isPlottable(s, band.to)) vals.push(band.to);
       }
       if (vals.length === 0) return d3.scaleLinear().domain([0, 100]).range([innerH, 0]);
       const ext = d3.extent(vals) as [number, number];
@@ -271,6 +289,44 @@ export default function CriHistoryChart<T extends { date: string }>({
           .attr("stroke-width", 1)
           .attr("opacity", 0.5);
       }
+    }
+
+    // Reference bands: shaded zones under the data lines, on the scale of
+    // their declared axis, with dashed edge guides and a right-edge label.
+    for (const band of referenceBands ?? []) {
+      const scale = band.axis === "left" || sharedAxis ? yLeft : yRight;
+      const bandSeries = band.axis === "left" ? leftSeries : rightSeries;
+      if (!isPlottable(bandSeries, band.from) || !isPlottable(bandSeries, band.to)) continue;
+      const color = band.color ?? CHART_AXIS_MUTED;
+      const yTop = scale(Math.max(band.from, band.to));
+      const yBottom = scale(Math.min(band.from, band.to));
+      g.append("rect")
+        .attr("class", "reference-band")
+        .attr("data-testid", "chart-reference-band")
+        .attr("x", 0)
+        .attr("width", innerW)
+        .attr("y", yTop)
+        .attr("height", Math.max(0, yBottom - yTop))
+        .attr("fill", `color-mix(in srgb, ${color} 12%, transparent)`);
+      for (const edge of [band.from, band.to]) {
+        g.append("line")
+          .attr("class", "reference-band-edge")
+          .attr("x1", 0)
+          .attr("x2", innerW)
+          .attr("y1", scale(edge))
+          .attr("y2", scale(edge))
+          .attr("stroke", color)
+          .attr("stroke-width", 1)
+          .attr("stroke-dasharray", "4 4");
+      }
+      g.append("text")
+        .attr("x", innerW - 4)
+        .attr("y", yTop - 4)
+        .attr("text-anchor", "end")
+        .attr("fill", color)
+        .attr("font-size", 9)
+        .attr("font-family", "var(--font-mono)")
+        .text(band.label);
     }
 
     // Reference levels: dashed guides under the data lines, labelled at the
@@ -407,7 +463,7 @@ export default function CriHistoryChart<T extends { date: string }>({
       .on("touchend touchcancel", function () {
         setTooltip({ visible: false, x: 0, y: 0, d: null });
       });
-  }, [chartData, width, series, leftSeries, rightSeries, xTickFormat]);
+  }, [chartData, width, series, leftSeries, rightSeries, xTickFormat, sharedAxis, referenceLevels, referenceBands]);
 
   const showEmpty = !chartData || chartData.length < 2;
   const tooltipSideStyle =

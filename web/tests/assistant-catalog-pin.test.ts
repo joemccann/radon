@@ -50,6 +50,7 @@ const PINNED: Record<string, PinnedCapability> = {
   "discover": { GET: "read", POST: "read.spawn" },
   "dispersion": "read",
   "divyield": "read",
+  "ma-ratio": "read",
   "equibles-ats-venue-share": "read",
   "equibles-cot-positioning": "read",
   "equibles-filing-forensics": "read",

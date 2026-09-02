@@ -123,6 +123,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-trin.timer",
     "radon-divyield.service",
     "radon-divyield.timer",
+    "radon-ma-ratio.service",
+    "radon-ma-ratio.timer",
     "radon-hyad.service",
     "radon-hyad.timer",
     "radon-hhlev.service",
@@ -998,6 +1000,24 @@ class TestDivyieldScanBudget:
 
     def test_start_budget_ends_before_the_next_calendar_fire(self, unit):
         svc = unit("radon-divyield.service")["Service"]
+        assert int(svc["timeoutstartsec"]) <= 3600
+
+
+class TestMaRatioScanBudget:
+    """Daily 22:45 UTC SPX member-close sweep for the MA RATIO tab. The
+    script self-limits at SWEEP_BUDGET_S=1500 (an SPX-only universe, one
+    fifth of bpi's), so the start budget covers that plus one in-flight
+    FETCH_TIMEOUT_S and persist slack — the divyield precedent, not bpi's
+    three-index 6900s budget. Nesting is pinned in
+    scripts/tests/test_ma_ratio.py::TestSweepBudget."""
+
+    def test_service_start_budget_covers_the_spx_sweep(self, unit):
+        svc = unit("radon-ma-ratio.service")["Service"]
+        assert svc["type"] == "oneshot"
+        assert int(svc["timeoutstartsec"]) >= 2100
+
+    def test_start_budget_ends_before_the_next_calendar_fire(self, unit):
+        svc = unit("radon-ma-ratio.service")["Service"]
         assert int(svc["timeoutstartsec"]) <= 3600
 
 

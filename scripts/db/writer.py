@@ -1171,6 +1171,50 @@ def upsert_divyield_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] 
 
 
 
+def upsert_ma_ratio_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
+    """MA RATIO indicator — one row per session date, idempotent on date.
+
+    Chunked multi-row INSERTs (Hrana I/O bounding): the daily run upserts the
+    full computed window (~350 rows), which per-row would be hundreds of
+    statements on one stream (the rv-ratio 2026-07-21 502 incident). ``ratio``
+    and ``spx_close`` are nullable by contract (zero-denominator guard /
+    optional overlay).
+    """
+    if not rows:
+        return
+    stamp = recorded_at or _now_iso()
+    db = get_db()
+    for start in range(0, len(rows), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = rows[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        placeholders = ", ".join("(?, ?, ?, ?, ?, ?)" for _ in chunk)
+        params: list[Any] = []
+        for row in chunk:
+            ratio = row.get("ratio")
+            spx_close = row.get("spx_close")
+            params.extend(
+                (
+                    row["date"],
+                    float(row["pct_above_50"]),
+                    float(row["pct_above_200"]),
+                    float(ratio) if ratio is not None else None,
+                    float(spx_close) if spx_close is not None else None,
+                    stamp,
+                )
+            )
+        db.execute(
+            "INSERT INTO ma_ratio_history "
+            "(date, pct_above_50, pct_above_200, ratio, spx_close, recorded_at) "
+            f"VALUES {placeholders} "
+            "ON CONFLICT(date) DO UPDATE SET "
+            "pct_above_50 = excluded.pct_above_50, "
+            "pct_above_200 = excluded.pct_above_200, "
+            "ratio = excluded.ratio, spx_close = excluded.spx_close, "
+            "recorded_at = excluded.recorded_at",
+            tuple(params),
+        )
+    db.commit()
+
+
 def upsert_hyad_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
     """HYAD indicator — one row per date, idempotent on date.
 

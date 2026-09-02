@@ -33,6 +33,13 @@ export const IV_RANK_REFRESH: UtcSchedule = {
   minuteUtc: 10,
 };
 
+/** cloud/services/radon-ma-ratio.timer */
+export const MA_RATIO_REFRESH: UtcSchedule = {
+  cadence: "daily",
+  hourUtc: 22,
+  minuteUtc: 45,
+};
+
 /** cloud/services/radon-equibles-cot.timer */
 export const COT_POSITIONING_REFRESH: UtcSchedule = {
   cadence: "weekly",

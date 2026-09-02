@@ -444,6 +444,22 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
     expect(requiresIb("div-yield")).toBe(false);
   });
 
+  // ``ma-ratio`` — radon-ma-ratio.timer fires daily 22:45 UTC every calendar
+  // day (weekend/holiday runs are unchanged-data heartbeats), so a uniform
+  // 26h window matches its div-yield sibling. Shared price_history_daily
+  // member closes (Yahoo sweep) + Turso only, no IB.
+  it("ma-ratio is registered as scheduled with a uniform 26h window", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["ma-ratio"]).toBeDefined();
+    expect(getServiceCategory("ma-ratio")).toBe("scheduled");
+    for (const state of ["open", "extended", "closed"] as MarketState[]) {
+      expect(getFreshnessWindowMs("ma-ratio", state)).toBe(26 * HOUR);
+      expect(getFreshnessWindowMs("ma-ratio", state)).toBe(
+        getFreshnessWindowMs("div-yield", state),
+      );
+    }
+    expect(requiresIb("ma-ratio")).toBe(false);
+  });
+
   // ``hy-ad`` — radon-hyad.timer fires Tue..Sat 11:00 UTC, the morning after
   // FINRA TRACE end-of-day finalization (T+1). Uniform 120h window covers the
   // T+1 lag plus 3-day weekends and bond-market-only holidays; older means

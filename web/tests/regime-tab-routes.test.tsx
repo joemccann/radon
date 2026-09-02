@@ -72,6 +72,7 @@ describe.each([
   ["iei-hyg", "app/regime/iei-hyg/page.tsx"],
   ["trin", "app/regime/trin/page.tsx"],
   ["divyield", "app/regime/divyield/page.tsx"],
+  ["ma-ratio", "app/regime/ma-ratio/page.tsx"],
   ["hyad", "app/regime/hyad/page.tsx"],
   ["hhlev", "app/regime/hhlev/page.tsx"],
   ["cot", "app/regime/cot/page.tsx"],
@@ -154,6 +155,9 @@ vi.mock("../components/TrinPanel", () => ({
 }));
 vi.mock("../components/DivYieldPanel", () => ({
   default: () => <div data-testid="divyield-panel-stub" />,
+}));
+vi.mock("../components/MaRatioPanel", () => ({
+  default: () => <div data-testid="ma-ratio-panel-stub" />,
 }));
 vi.mock("../components/HyAdPanel", () => ({
   default: () => <div data-testid="hyad-panel-stub" />,
@@ -426,6 +430,22 @@ describe("RegimePanel — tab is URL-driven", () => {
     const { container } = render(<RegimePanel prices={{}} />);
     within(container).getByRole("button", { name: /^DIV YIELD$/ }).click();
     expect(pushSpy).toHaveBeenCalledWith("/regime/divyield");
+  });
+
+  it("renders the MA RATIO panel when pathname is /regime/ma-ratio", () => {
+    mockedPathname = "/regime/ma-ratio";
+    const { container } = render(<RegimePanel prices={{}} />);
+    expect(within(container).getByTestId("ma-ratio-panel-stub")).toBeTruthy();
+    expect(within(container).queryByTestId("divyield-panel-stub")).toBeNull();
+    // "ma-ratio" must not be swallowed by the "margin" alternation.
+    expect(within(container).queryByTestId("margin-panel-stub")).toBeNull();
+  });
+
+  it("clicking MA RATIO tab pushes /regime/ma-ratio", () => {
+    mockedPathname = "/regime/cri";
+    const { container } = render(<RegimePanel prices={{}} />);
+    within(container).getByRole("button", { name: /^MA RATIO$/ }).click();
+    expect(pushSpy).toHaveBeenCalledWith("/regime/ma-ratio");
   });
 
   it("renders the HY AD panel when pathname is /regime/hyad", () => {

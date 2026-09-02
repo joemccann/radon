@@ -173,6 +173,11 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # window: no weekend/holiday gap to widen for. GitHub/Wikipedia
     # constituents + Yahoo quotes + Turso y10 — no IB dependency.
     "div-yield":        {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # ma-ratio — radon-ma-ratio.timer, daily 22:45 UTC every calendar day
+    # (weekend/holiday runs are unchanged-data heartbeats). Uniform 26h
+    # window: no weekend/holiday gap to widen for. Shared price_history_daily
+    # member closes (Yahoo sweep) + Turso — no IB dependency.
+    "ma-ratio":         {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # credit-spread — radon-credit-spread.timer, daily 21:45 UTC every calendar
     # day (weekend/holiday runs heartbeat with no new rows). Uniform
     # 26h window: no weekend/holiday gap to widen for. IB HYG + SPX first,
@@ -524,6 +529,9 @@ BUCKETS: dict[str, list[str]] = {
         # Daily 22:40 UTC SPX dividend-yield breadth sweep — hourly check
         # surfaces a missed run within 1h of the 26h window expiring.
         "div-yield",
+        # Daily 22:45 UTC SPX 50d/200d MA breadth-ratio sweep — hourly check
+        # surfaces a missed run within 1h of the 26h window expiring.
+        "ma-ratio",
         # Tue..Sat 11:00 UTC FINRA HY bond breadth pull — hourly check
         # surfaces a missed run within 1h of the 120h window expiring.
         "hy-ad",

@@ -1,0 +1,24 @@
+[Unit]
+Description=Radon MA RATIO Indicator (SPX pct above 50d MA / pct above 200d MA, daily)
+After=network.target
+
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+User=radon
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/etc/radon/env
+Environment=RADON_DB_NO_REPLICA=1
+ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/ma_ratio_scan.py
+StandardOutput=journal
+StandardError=journal
+# SPX-only member-close sweep: the script self-limits at SWEEP_BUDGET_S=1500,
+# so 2100 covers that budget plus one in-flight FETCH_TIMEOUT_S and persist
+# slack (the divyield 503-symbol precedent; NOT bpi's three-index 6900s
+# budget). Nesting pinned in scripts/tests/test_ma_ratio.py.
+TimeoutStartSec=2100
+
+[Install]
+WantedBy=multi-user.target
