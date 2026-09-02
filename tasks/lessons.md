@@ -1,5 +1,13 @@
 # Lessons
 
+## 2026-09-02 — Piped curl config; snapshot gh/timeout before venv PATH
+
+- A 0600 mktemp curl config still leaves PUSHOVER_* in $TMPDIR if the
+  wrapper dies during the POST. Pipe `--config -`. Keep `-q` as argv[1].
+- Snapshot `gh` and `timeout` before prepending `$VENV/bin`. report()
+  must invoke those snapshots; a planted venv gh can replace the
+  wrapper-only security comment.
+
 ## 2026-09-02 — curl -q must be argv[1] or curlrc intercepts the 0600 POST
 
 - `_notify_curl` `--config` still loads `$HOME/.curlrc` unless `-q` is

@@ -77,7 +77,11 @@ def _build(tmp_path: Path, *, marker: bool, lock_held: bool, loop: str) -> dict:
         'while [ "$i" -lt "${#args[@]}" ]; do\n'
         '  if [ "${args[$i]}" = "--config" ] || [ "${args[$i]}" = "-K" ]; then\n'
         '    cfg="${args[$((i + 1))]}"\n'
-        '    if [ -f "$cfg" ]; then\n'
+        '    if [ "$cfg" = "-" ]; then\n'
+        '      while IFS= read -r line || [ -n "$line" ]; do\n'
+        '        args+=("$line")\n'
+        "      done\n"
+        '    elif [ -f "$cfg" ]; then\n'
         '      while IFS= read -r line || [ -n "$line" ]; do\n'
         '        args+=("$line")\n'
         "      done < \"$cfg\"\n"

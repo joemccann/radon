@@ -88,7 +88,7 @@ def _sanitize_issue_text_fn(wrapper: Path) -> str:
 
 
 def _curl_log_stub(log: Path) -> str:
-    """Log argv, then dump any --config / -K file so title= is still visible."""
+    """Log argv, then dump --config file or stdin (`--config -`)."""
     return (
         "#!/bin/bash\n"
         f'printf "%s\\n" "$*" >> "{log}"\n'
@@ -98,7 +98,8 @@ def _curl_log_stub(log: Path) -> str:
         '  if [ "$arg" = "--config" ] || [ "$arg" = "-K" ]; then\n'
         "    i=$((i + 1))\n"
         '    eval "cfg=\\${$i}"\n'
-        f'    if [ -f "$cfg" ]; then cat "$cfg" >> "{log}"; fi\n'
+        f'    if [ "$cfg" = "-" ]; then cat >> "{log}"\n'
+        f'    elif [ -f "$cfg" ]; then cat "$cfg" >> "{log}"; fi\n'
         "  fi\n"
         "  i=$((i + 1))\n"
         "done\n"
@@ -436,17 +437,32 @@ class TestNotifyPhaseIsFenced:
         assert "| tr " not in curl, wrapper.name
         assert "|tr " not in curl, wrapper.name
         assert "--config" in curl, wrapper.name
-        assert "/usr/bin/mktemp" in curl, wrapper.name
-        assert "0600" in curl, wrapper.name
+        assert "--config -" in curl, wrapper.name
+        assert "/usr/bin/mktemp" not in curl, wrapper.name
+        assert "0600" not in curl, wrapper.name
         assert '--data-urlencode "token=${token}"' not in curl, wrapper.name
         assert '--data-urlencode "user=${user}"' not in curl, wrapper.name
         # -q must be argv[1], immediately before --config.
-        assert '/usr/bin/curl -q --config' in curl, wrapper.name
+        assert "/usr/bin/curl -q --config -" in curl, wrapper.name
         invoke = [ln.strip() for ln in curl.splitlines() if "curl" in ln and "--config" in ln]
         assert invoke, wrapper.name
         first = invoke[-1].split()
         curl_i = next(i for i, tok in enumerate(first) if tok.endswith("curl") or "/curl" in tok)
         assert first[curl_i + 1] == "-q", (wrapper.name, first)
+        assert first[curl_i + 2] == "--config", (wrapper.name, first)
+        assert first[curl_i + 3] == "-", (wrapper.name, first)
+
+    @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
+    def test_gh_and_timeout_are_snapshotted_before_venv_path(self, wrapper: Path):
+        body = _uncommented(wrapper)
+        timeout_i = body.index('TIMEOUT_BIN="$(command -v timeout || true)"')
+        gh_i = body.index('GH_BIN="$(command -v gh || true)"')
+        path_i = body.index('export PATH="$VENV/bin:$PATH"')
+        assert timeout_i < path_i, wrapper.name
+        assert gh_i < path_i, wrapper.name
+        assert 'net_bounded "$GH_BIN"' in body, wrapper.name
+        assert "net_bounded gh " not in body, wrapper.name
+        assert '"$TIMEOUT_BIN"' in body, wrapper.name
 
     @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
     def test_notify_cred_strips_cr_not_a_quoted_newline(self, wrapper: Path):
@@ -652,6 +668,80 @@ class TestNotifyPhaseIsFenced:
         argv_line = curl_calls.splitlines()[0] if curl_calls.strip() else ""
         assert argv_line.split()[0] == "-q", argv_line
         assert "api.pushover.net" in curl_calls, curl_calls
+
+    def test_a_planted_venv_gh_cannot_author_the_security_comment(self, tmp_path: Path):
+        clone = tmp_path / "clone"
+        (clone / "scripts").mkdir(parents=True)
+        (clone / "logs" / "security-nightly").mkdir(parents=True)
+        wrapper = clone / "scripts" / "security_nightly.sh"
+        shutil.copy2(REPO / "scripts" / "security_nightly.sh", wrapper)
+        wrapper.chmod(wrapper.stat().st_mode | stat.S_IXUSR)
+        for name in (".radon-weekend-runner", ".radon-security-runner"):
+            (clone / name).write_text("", encoding="utf-8")
+        venv_bin = tmp_path / "venv-security" / "bin"
+        venv_bin.mkdir(parents=True)
+        (venv_bin / "activate").write_text("#\n", encoding="utf-8")
+        planted = tmp_path / "PWNED_VENV_GH"
+        (venv_bin / "gh").write_text(
+            "#!/bin/sh\n"
+            f"echo PWN > '{planted}'\n"
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        (venv_bin / "gh").chmod(0o755)
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        gh_log = tmp_path / "gh.log"
+        curl_stub = bin_dir / "curl"
+        wrapper.write_text(
+            wrapper.read_text(encoding="utf-8").replace("/usr/bin/curl", str(curl_stub)),
+            encoding="utf-8",
+        )
+        for name, content in {
+            "gh": (
+                "#!/bin/sh\n"
+                f'printf "%s\\n" "$*" >> "{gh_log}"\n'
+                'if [ "$1 $2" = "issue list" ]; then echo 4242; fi\n'
+                "exit 0\n"
+            ),
+            "git": "#!/bin/sh\nexit 0\n",
+            "timeout": (
+                "#!/bin/bash\n"
+                "while [ $# -gt 0 ]; do\n"
+                '  case "$1" in\n'
+                "    -k|--kill-after) shift 2 ;;\n"
+                "    *) shift; break ;;\n"
+                "  esac\n"
+                "done\n"
+                'exec "$@"\n'
+            ),
+            "curl": "#!/bin/sh\nexit 0\n",
+            "claude": (
+                "#!/bin/sh\n"
+                "echo 'SECURITY-NIGHTLY PHASE COMPLETE: audit'\n"
+                "exit 0\n"
+            ),
+        }.items():
+            exe = bin_dir / name
+            exe.write_text(content, encoding="utf-8")
+            exe.chmod(exe.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+        proc = subprocess.run(
+            ["/bin/bash", str(wrapper), "audit"],
+            env={
+                "PATH": f"{bin_dir}{os.pathsep}/usr/bin{os.pathsep}/bin",
+                "HOME": str(tmp_path / "home"),
+                "RADON_WEEKEND_REPO": str(clone),
+            },
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
+        assert not planted.exists(), "venv gh must not run after the snapshot"
+        calls = gh_log.read_text(encoding="utf-8") if gh_log.exists() else ""
+        assert "issue comment" in calls, calls
+        assert "PWN" not in calls, calls
 
 
 class TestSanitizeUsesPinnedSed:

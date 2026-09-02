@@ -79,7 +79,7 @@ release_runner_lock() {
 # while it was trying to report its own death, holding the runner lock and
 # dropping every subsequent daily fire. R-409.
 NET_TIMEOUT_SECS="${RADON_WEEKEND_NET_TIMEOUT_SECS:-120}"
-net_bounded() { timeout "$NET_TIMEOUT_SECS" "$@"; }
+net_bounded() { "$TIMEOUT_BIN" "$NET_TIMEOUT_SECS" "$@"; }
 
 # A VPN flap that establishes TCP and then stalls hangs an ssh transport with
 # no keepalive, and the attempt-count retry below bounds attempts, not time.
@@ -108,6 +108,10 @@ WEEKEND_ROOT="$(dirname "$REPO")"
 # Per-loop venv. The legacy $WEEKEND_ROOT/venv is not deleted here
 # (operator follow-up after this ships).
 VENV="$WEEKEND_ROOT/venv-testing"
+# Snapshot gh/timeout BEFORE the venv prepend. PATH is $VENV/bin first
+# after this, and a planted venv gh can replace the wrapper-only comment.
+TIMEOUT_BIN="$(command -v timeout || true)"
+GH_BIN="$(command -v gh || true)"
 # Activate the venv so any python3.13 calls inside the agent use it.
 [[ -f "$VENV/bin/activate" ]] && export PATH="$VENV/bin:$PATH"
 DEADMAN_TITLE="Nightly testing runner"
@@ -124,7 +128,7 @@ resolve_pr_url() {
   # Newest-updated open PR the skill opened for this loop. A gh failure or
   # no match must yield an empty string, never a non-zero exit under set -e.
   local url
-  url="$(net_bounded gh pr list --state open --limit 20 --json url,headRefName,updatedAt \
+  url="$(net_bounded "$GH_BIN" pr list --state open --limit 20 --json url,headRefName,updatedAt \
     -q "[.[] | select(.headRefName | startswith(\"$PR_BRANCH_PREFIX\"))] | sort_by(.updatedAt) | reverse | .[0].url" \
     2>/dev/null || true)"
   [[ "$url" == "null" ]] && url=""
@@ -157,7 +161,7 @@ _notify_cred() {
 
 _notify_curl() {
   local loop="$1" phase="$2" status="$3" pr_url="$4" detail="$5"
-  local user token title message cfg
+  local user token title message
   user="$(_notify_cred PUSHOVER_USER || true)"
   token="$(_notify_cred PUSHOVER_TOKEN || true)"
   [[ -n "$user" && -n "$token" ]] || return 0
@@ -170,9 +174,7 @@ _notify_curl() {
   [[ -n "$detail" ]] && message="${message} ${detail}"
   [[ -n "$pr_url" ]] && message="${message} ${pr_url}"
   message="$(printf '%s' "$message" | /usr/bin/tr -s '[:space:]' ' ')"
-  # Creds stay off curl argv. 0600 config file, then --config.
-  cfg="$(/usr/bin/mktemp)" || return 0
-  /usr/bin/chmod 0600 "$cfg" || { /usr/bin/rm -f "$cfg"; return 0; }
+  # Creds stay off curl argv and off disk. -q must be argv[1].
   {
     printf 'url = "https://api.pushover.net/1/messages.json"\n'
     printf 'request = POST\n'
@@ -185,10 +187,7 @@ _notify_curl() {
     printf 'data-urlencode = "title=%s"\n' "$title"
     printf 'data-urlencode = "message=%s"\n' "$message"
     printf 'data-urlencode = "priority=0"\n'
-  } >"$cfg"
-  # -q must be argv[1]: skip $HOME/.curlrc, $CURL_HOME/.curlrc, XDG curlrc.
-  /usr/bin/curl -q --config "$cfg" >/dev/null 2>&1 || true
-  /usr/bin/rm -f "$cfg"
+  } | /usr/bin/curl -q --config - >/dev/null 2>&1 || true
 }
 
 notify_phase() {
@@ -255,16 +254,16 @@ report() {
   local body
   body="$(_format_issue_body "$PHASE" "$status" "$detail")"
   local issue
-  issue="$(net_bounded gh issue list --label "$DEADMAN_LABEL" --state open \
+  issue="$(net_bounded "$GH_BIN" issue list --label "$DEADMAN_LABEL" --state open \
     --json number -q '.[0].number' 2>/dev/null || true)"
   if [[ -z "$issue" ]]; then
-    net_bounded gh issue create --title "$DEADMAN_TITLE" --label "$DEADMAN_LABEL" \
+    net_bounded "$GH_BIN" issue create --title "$DEADMAN_TITLE" --label "$DEADMAN_LABEL" \
       --body "$DEADMAN_CREATE_BODY" \
       >/dev/null 2>&1 || true
-    issue="$(net_bounded gh issue list --label "$DEADMAN_LABEL" --state open \
+    issue="$(net_bounded "$GH_BIN" issue list --label "$DEADMAN_LABEL" --state open \
       --json number -q '.[0].number' 2>/dev/null || true)"
   fi
-  [[ -n "$issue" ]] && net_bounded gh issue comment "$issue" --body "$body" >/dev/null 2>&1 || true
+  [[ -n "$issue" ]] && net_bounded "$GH_BIN" issue comment "$issue" --body "$body" >/dev/null 2>&1 || true
   if [[ "$push" == "1" ]]; then
     notify_phase "$status"
   fi

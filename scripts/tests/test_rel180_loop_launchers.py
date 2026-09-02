@@ -129,7 +129,8 @@ def _stub_bin(tmp_path: Path, *, claude_body: str = "#!/bin/sh\nexit 0\n") -> tu
         '  if [ "$arg" = "--config" ] || [ "$arg" = "-K" ]; then\n'
         "    i=$((i + 1))\n"
         '    eval "cfg=\\${$i}"\n'
-        f'    if [ -f "$cfg" ]; then cat "$cfg" >> "{py_log}"; fi\n'
+        f'    if [ "$cfg" = "-" ]; then cat >> "{py_log}"\n'
+        f'    elif [ -f "$cfg" ]; then cat "$cfg" >> "{py_log}"; fi\n'
         "  fi\n"
         "  i=$((i + 1))\n"
         "done\n"

@@ -88,7 +88,8 @@ def _curl_log_stub(log: Path) -> str:
         '  if [ "$arg" = "--config" ] || [ "$arg" = "-K" ]; then\n'
         "    i=$((i + 1))\n"
         '    eval "cfg=\\${$i}"\n'
-        f'    if [ -f "$cfg" ]; then cat "$cfg" >> "{log}"; fi\n'
+        f'    if [ "$cfg" = "-" ]; then cat >> "{log}"\n'
+        f'    elif [ -f "$cfg" ]; then cat "$cfg" >> "{log}"; fi\n'
         "  fi\n"
         "  i=$((i + 1))\n"
         "done\n"
