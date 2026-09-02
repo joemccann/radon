@@ -321,15 +321,23 @@ class TestWrappersAndSkillsUseTheTemplate:
         assert "do not run `gh issue comment`" not in testing.lower()
 
     def test_pr_title_body_generation_is_untouched_in_skills(self):
-        # A sibling agent owns PR title/body. These title contracts stay.
+        # #229 owns PR title/body via github_pr_output.py. Issue comments are
+        # this branch; do not retarget PR generation at nightly_issue_format.
         testing = (
             REPO / ".claude" / "skills" / "testing-weekend" / "SKILL.md"
         ).read_text(encoding="utf-8")
         reliability = (
             REPO / ".claude" / "skills" / "reliability-weekend" / "SKILL.md"
         ).read_text(encoding="utf-8")
-        assert "PR titled `Testing <date>`" in testing or "PR titled `Testing <YYYY-MM-DD>`" in testing or "nightly PR titled `Testing" in testing
-        assert "PR titled `Reliability <date>`" in reliability or "nightly PR titled `Reliability" in reliability
+        security = (
+            REPO / ".claude" / "skills" / "security-nightly" / "SKILL.md"
+        ).read_text(encoding="utf-8")
+        for text in (testing, reliability, security):
+            assert "scripts/github_pr_output.py" in text
+            assert "nightly_issue_format.py" not in text
+        assert "Title shape: `Testing <date>" in testing
+        assert "Title shape: `Reliability <date>" in reliability
+        assert "Title shape: `Security <YYYY-MM-DD>`" in security
 
 
 class TestWrapperFormatterNeverExecsDiskPython:
