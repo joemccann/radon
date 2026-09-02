@@ -364,9 +364,11 @@ class TestWrappersAndSkillsUseTheTemplate:
             text = skill.read_text(encoding="utf-8")
             lowered = text.lower()
             assert "`gh issue comment`" in text, skill
-            assert "do not run `gh issue create` or `gh issue edit`" in lowered, skill
-            assert re.search(r"do not patch\s+the issue", lowered), skill
-            assert "not the only commenter" in lowered, skill
+            assert re.search(
+                r"do not run `gh issue create` or `gh issue edit`", lowered
+            ), skill
+            assert re.search(r"do not patch\s+the\s+issue", lowered), skill
+            assert re.search(r"not\s+the\s+only\s+commenter", lowered), skill
             assert "wrapper posts the only public" not in lowered, skill
             assert "do not run `gh issue comment`" not in lowered, skill
 
