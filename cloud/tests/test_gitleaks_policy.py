@@ -99,20 +99,26 @@ def test_active_root_ci_scopes_pr_gitleaks_to_merge_base_head() -> None:
     assert "github.event_name" in str(env.get("EVENT_NAME", ""))
     assert "github.event.pull_request.base.sha" in str(env.get("PR_BASE", ""))
     assert "github.event.pull_request.head.sha" in str(env.get("PR_HEAD", ""))
+    assert "github.event.before" in str(env.get("PUSH_BEFORE", ""))
+    assert "github.sha" in str(env.get("PUSH_HEAD", ""))
 
     script = scan["run"]
     assert 'EVENT_NAME" = "pull_request"' in script
     assert "git merge-base" in script
     assert "log_opts=" in script
     assert "${merge_base}..${PR_HEAD}" in script
+    assert 'ensure_commit "$PUSH_HEAD"' in script
+    assert 'ensure_commit "$PUSH_BEFORE"' in script
+    assert 'log_opts="${PUSH_BEFORE}..${PUSH_HEAD}"' in script
+    assert 'log_opts="HEAD"' not in script
+    # A missing non-zero before must fail the job, not scan only the tip.
+    assert '[ "$PUSH_BEFORE" = "$zero" ] || ! git cat-file -e "${PUSH_BEFORE}^{commit}"' not in script
     collapsed = " ".join(script.split())
     expected = (
         "gitleaks detect --source . --config cloud/.gitleaks.toml "
-        '--redact --no-banner --verbose --log-opts="$log_opts"'
+        "--redact --no-banner --verbose --log-opts="
     )
     assert expected in collapsed
-    # Push/main still scans HEAD lineage, never sibling remotes (--all).
-    assert 'log_opts="HEAD"' in script
 
 
 def test_this_branch_has_no_static_tws_credential_assignments() -> None:

@@ -17,7 +17,9 @@ set -euo pipefail
 
 WEEKEND_ROOT="${RADON_WEEKEND_ROOT:-$HOME/radon-weekend}"
 WEEKEND_REPO="$WEEKEND_ROOT/radon-testing"
-WEEKEND_VENV="$WEEKEND_ROOT/venv"
+# Per-loop venv. The legacy $WEEKEND_ROOT/venv is not deleted here
+# (operator follow-up after this ships).
+WEEKEND_VENV="$WEEKEND_ROOT/venv-testing"
 # Pushover creds for the per-phase page. Lives OUTSIDE the runner clone:
 # every round hard-resets and cleans that clone.
 WEEKEND_ENV="$WEEKEND_ROOT/.env"
@@ -83,17 +85,13 @@ if kill -0 "$(cat "$WEEKEND_REPO/.weekend-runner.lock/pid" 2>/dev/null)" 2>/dev/
   echo "  a weekend run is in flight in $WEEKEND_REPO; re-run when it finishes"
   exit 1
 fi
-# The SIBLING loop's clone too. WEEKEND_VENV is literally the same path in
-# both setups, and both wrappers prepend it to the running agent's PATH — so
-# the `python3.13 -m venv` + `pip install` below would mutate the interpreter
-# and site-packages a live reliability agent is executing against, mid-run.
-# The guard above was written for the clone ("A live cycle owns this clone")
-# and never extended to the shared $WEEKEND_ROOT both loops depend on. R-266.
+# The SIBLING loop's clone too. Each loop now has its own venv; the
+# lock stays so a setup does not race a live sibling. R-266.
 for SIBLING_REPO in "$WEEKEND_ROOT/radon" "$WEEKEND_ROOT/radon-ci-performance" \
   "$WEEKEND_ROOT/radon-documentation" "$WEEKEND_ROOT/radon-security"; do
   if [[ -d "$SIBLING_REPO" ]] \
     && kill -0 "$(cat "$SIBLING_REPO/.weekend-runner.lock/pid" 2>/dev/null)" 2>/dev/null; then
-    echo "  a weekend run is in flight in $SIBLING_REPO and shares $WEEKEND_VENV; re-run when it finishes"
+    echo "  a weekend run is in flight in $SIBLING_REPO; re-run when it finishes"
     exit 1
   fi
 done

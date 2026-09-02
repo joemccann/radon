@@ -33,17 +33,14 @@ jobs:
           # History must be deep enough for merge-base on long PRs and for a
           # committed-then-reverted secret on the branch being scanned. The
           # detect step still limits git log: PRs use merge-base..head, pushes
-          # use HEAD. fetch-depth: 0 also downloads sibling refs; --log-opts
-          # keeps those out of the scan.
+          # use before..HEAD. fetch-depth: 0 also downloads sibling refs;
+          # --log-opts keeps those out of the scan.
           fetch-depth: 0
       # Pinned gitleaks binary (not gitleaks/gitleaks-action@v2): the action
-      # defaults to scanning only the PUSH/PR commit RANGE and short-circuits
-      # to a no-op on some event types, and it nags about an org GITLEAKS_LICENSE.
-      # The bare CLI over the full history is deterministic, license-free, and
-      # is exactly what was verified locally (gitleaks 8.x: the dummy Clerk
-      # publishable key on the `# gitleaks:allow` line is honored; removing that
-      # comment makes the scan FAIL with a generic-api-key finding — proving the
-      # gate has teeth and the allow is load-bearing, not decorative).
+      # short-circuits to a no-op on some event types and nags about an org
+      # GITLEAKS_LICENSE. The CLI is deterministic and license-free. We pass
+      # --log-opts ourselves so a pull_request scans merge-base..PR_HEAD only,
+      # not sibling-branch history that fetch-depth: 0 pulled in.
       - name: Install gitleaks
         run: |
           version="8.30.1"
@@ -61,22 +58,42 @@ jobs:
       # actual secret value out of the public Actions log on a real hit.
       # Default gitleaks git log is --all, so a fetch-depth: 0 clone of every
       # open branch would fail this PR on sibling test fixtures. Scope PRs to
-      # merge-base..head; pushes scan HEAD lineage only.
-      - name: Scan repo history for committed secrets
+      # merge-base..PR_HEAD; pushes use before..HEAD.
+      - name: Scan this event's commits for secrets
         env:
           EVENT_NAME: ${{ github.event_name }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_HEAD: ${{ github.sha }}
         run: |
           set -euo pipefail
+          ensure_commit() {
+            local sha="$1"
+            git cat-file -e "${sha}^{commit}" 2>/dev/null && return 0
+            git fetch --no-tags --prune origin "$sha"
+            git cat-file -e "${sha}^{commit}"
+          }
           if [ "$EVENT_NAME" = "pull_request" ]; then
-            git fetch --no-tags origin "$PR_BASE" "$PR_HEAD"
+            ensure_commit "$PR_BASE"
+            ensure_commit "$PR_HEAD"
             merge_base="$(git merge-base "$PR_BASE" "$PR_HEAD")"
             log_opts="${merge_base}..${PR_HEAD}"
           else
-            log_opts="HEAD"
+            ensure_commit "$PUSH_HEAD"
+            zero="0000000000000000000000000000000000000000"
+            if [ "$PUSH_BEFORE" = "$zero" ]; then
+              log_opts="-n 1 ${PUSH_HEAD}"
+            else
+              # A force-push / orphaned `before` used to skip ensure_commit and
+              # fall through to `-n 1 $PUSH_HEAD`, scanning only the tip on the
+              # deploy event. Fetch it; if it is still missing, fail the job.
+              ensure_commit "$PUSH_BEFORE"
+              log_opts="${PUSH_BEFORE}..${PUSH_HEAD}"
+            fi
           fi
-          gitleaks detect --source . --config cloud/.gitleaks.toml --redact --no-banner --verbose --log-opts="$log_opts"
+          echo "gitleaks log-opts: ${log_opts}"
+          gitleaks detect --source . --config cloud/.gitleaks.toml --redact --no-banner --verbose --log-opts="${log_opts}"
 
   changes:
     name: Path filter
