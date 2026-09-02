@@ -464,6 +464,7 @@ def test_two_instances_in_one_clone_do_not_both_run(tmp_path: Path, loop: str) -
 # --------------------------------------------------------------------------
 ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=\S*$")
 GUARD = '[[ "${1:-}" == "--lock-lib-only" ]] && return 0 2>/dev/null'
+TIMEOUT_SNAP = 'TIMEOUT_BIN="$(command -v timeout || true)"'
 
 
 def _prologue_top_level(src: str) -> list[str]:
@@ -534,7 +535,7 @@ class TestTheRunBodyIsParsedBeforeItRuns:
         # command above `main() {` re-opens the window the wrap closes.
         src = (REPO / "scripts" / LOOPS[loop][0]).read_text(encoding="utf-8")
         for line in _prologue_top_level(src):
-            if line in ("set -Eeuo pipefail", GUARD):
+            if line in ("set -Eeuo pipefail", GUARD, TIMEOUT_SNAP):
                 continue
             assert ASSIGNMENT.match(line) or re.match(r'^[A-Za-z_][A-Za-z0-9_]*="[^`]*"$', line), (
                 f"unexpected top-level statement before main(): {line!r}"

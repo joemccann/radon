@@ -69,6 +69,9 @@ release_runner_lock() {
 # while it was trying to report its own death, holding the runner lock and
 # dropping every subsequent daily fire. R-409.
 NET_TIMEOUT_SECS="${RADON_WEEKEND_NET_TIMEOUT_SECS:-120}"
+# Before --lock-lib-only and before the venv PATH prepend. lock-lib-only
+# fetch always calls net_bounded under set -u.
+TIMEOUT_BIN="$(command -v timeout || true)"
 net_bounded() { "$TIMEOUT_BIN" "$NET_TIMEOUT_SECS" "$@"; }
 
 # A VPN flap that establishes TCP and then stalls hangs an ssh transport with
@@ -113,9 +116,8 @@ WEEKEND_ROOT="$(dirname "$REPO")"
 # Per-loop venv. The legacy $WEEKEND_ROOT/venv is not deleted here
 # (operator follow-up after this ships).
 VENV="$WEEKEND_ROOT/venv-reliability"
-# Snapshot gh/timeout BEFORE the venv prepend. PATH is $VENV/bin first
-# after this, and a planted venv gh can replace the wrapper-only comment.
-TIMEOUT_BIN="$(command -v timeout || true)"
+# Snapshot gh BEFORE the venv prepend. PATH is $VENV/bin first after this,
+# and a planted venv gh can replace the wrapper-only comment.
 GH_BIN="$(command -v gh || true)"
 # Activate the venv so any python3.13 calls inside the agent use it.
 [[ -f "$VENV/bin/activate" ]] && export PATH="$VENV/bin:$PATH"

@@ -65,6 +65,13 @@ class TestGroundTruthFetchRetry:
         assert "fetch_origin_with_retry" in ground_truth
         assert "git fetch origin" not in ground_truth
 
+    def test_timeout_bin_is_snapshotted_before_lock_lib_only(self):
+        text = WRAPPER.read_text(encoding="utf-8")
+        snap = 'TIMEOUT_BIN="$(command -v timeout || true)"'
+        guard = '[[ "${1:-}" == "--lock-lib-only" ]] && return 0 2>/dev/null'
+        assert text.index(snap) < text.index(guard)
+        assert text.count(snap) == 1
+
 
 class TestDailyPlistPath:
     def test_bun_is_reachable_from_launchd(self):

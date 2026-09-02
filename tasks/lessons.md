@@ -1,5 +1,13 @@
 # Lessons
 
+## 2026-09-02 — TIMEOUT_BIN must be snapshotted before --lock-lib-only
+
+- `net_bounded` expands `"$TIMEOUT_BIN"` under `set -u`. A snapshot inside
+  `main()` is after the `--lock-lib-only` return, so sourced fetch-retry
+  aborts unbound. Snapshot `command -v timeout` next to `net_bounded`,
+  before that return and before the venv PATH prepend. Do not fall back
+  to PATH `timeout` after venv prepend.
+
 ## 2026-09-02 — Agent wall-clock must use TIMEOUT_BIN; escape curl --config
 
 - Snapshotting `timeout` before `$VENV/bin` is not enough if the agent

@@ -462,6 +462,10 @@ class TestNotifyPhaseIsFenced:
         timeout_i = body.index('TIMEOUT_BIN="$(command -v timeout || true)"')
         gh_i = body.index('GH_BIN="$(command -v gh || true)"')
         path_i = body.index('export PATH="$VENV/bin:$PATH"')
+        guard_i = body.index(
+            '[[ "${1:-}" == "--lock-lib-only" ]] && return 0 2>/dev/null'
+        )
+        assert timeout_i < guard_i, wrapper.name
         assert timeout_i < path_i, wrapper.name
         assert gh_i < path_i, wrapper.name
         assert 'net_bounded "$GH_BIN"' in body, wrapper.name
