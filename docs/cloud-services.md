@@ -692,7 +692,7 @@ Yahoo for whatever IB left empty (spark batches of 20 incrementally, per-symbol
 chart on backfill); UW is skipped so the 515-symbol sweep never spends the shared
 daily cap. Only raw per-session rows land in `dispersion_history`; the means and
 z-scores are rebuilt from every stored row each run. 22:20 clears the EST close
-and sits between ivrank 22:10 and yield-curve 22:30. Runs every calendar day;
+and sits between iv-spread 22:15 and yield-curve 22:30. Runs every calendar day;
 weekend and holiday runs find no new completed session, make no IB or Yahoo
 requests, and refresh only the snapshot + heartbeat that keep `dispersion` inside
 its 26h window. An empty VIX or a thin cross-section re-serves the stored series
