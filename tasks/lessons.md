@@ -1,5 +1,19 @@
 # Lessons
 
+## 2026-09-02 — localhost needs local.sh; local.sh stops the VPS gateway
+
+- Do not curl localhost:3000 / :8321 unless `scripts/local.sh` is already
+  running. Starting local.sh during live cloud trading stops the Hetzner
+  IB gateway and requires 2FA. Diagnose against Turso / production instead.
+
+## 2026-09-02 — EXT fills need orders-sync + fill-monitor past 16:00 ET
+
+- outsideRth DAY stock orders fill 04:00-20:00 ET. Gating orders-sync and
+  fill-monitor on RTH (09:30-16:00) left AVGO SELL 1000 @ 355 WORKING on
+  /orders after the 16:24 ET fill. Overnight 20:00-03:50 is not EXT.
+- fill_monitor journals fills but /orders reads open_orders +
+  executed_orders. Mirror the IB snapshot on fill.
+
 ## 2026-09-02 — Quota drop matches CLI strings; USE_* flags are truthy-only
 
 - `is_quota_exhausted` must not grep bare `rate.limit` / `rate_limit` /

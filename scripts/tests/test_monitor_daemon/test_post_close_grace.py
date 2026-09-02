@@ -163,6 +163,11 @@ class TestHandlerOptIn:
         assert FillMonitorHandler.post_close_grace_minutes == 0
         assert ExitOrdersHandler.post_close_grace_minutes == 0
 
+    def test_fill_monitor_opts_into_equity_ext_session(self):
+        from monitor_daemon.handlers.fill_monitor import FillMonitorHandler
+
+        assert getattr(FillMonitorHandler, "session_window", "rth") == "equity_ext"
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
