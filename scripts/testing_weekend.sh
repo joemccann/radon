@@ -174,6 +174,15 @@ _notify_curl() {
   [[ -n "$detail" ]] && message="${message} ${detail}"
   [[ -n "$pr_url" ]] && message="${message} ${pr_url}"
   message="$(printf '%s' "$message" | /usr/bin/tr -s '[:space:]' ' ')"
+  local k v
+  for k in token user title message; do
+    v="${!k}"
+    v="${v//\\/\\\\}"
+    v="${v//\"/\\\"}"
+    v="${v//$'\n'/ }"
+    v="${v//$'\r'/}"
+    printf -v "$k" '%s' "$v"
+  done
   # Creds stay off curl argv and off disk. -q must be argv[1].
   {
     printf 'url = "https://api.pushover.net/1/messages.json"\n'
@@ -558,7 +567,7 @@ run_phase() {
     # wrapper was not acted on until `claude` finished on its own — which is
     # never, in the case that matters. `-k` escalates to SIGKILL so a claude
     # blocked on a hung child cannot make the cap advisory. R-384, R-386.
-    CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 timeout -k "$KILL_AFTER_SECS" "$remain" claude -p "/testing-weekend $PHASE" \
+    CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 "$TIMEOUT_BIN" -k "$KILL_AFTER_SECS" "$remain" claude -p "/testing-weekend $PHASE" \
       --model "${MODEL_RUNGS[$MODEL_INDEX]}" \
       --dangerously-skip-permissions \
       --output-format text >> "$RUN_LOG" 2>&1 &

