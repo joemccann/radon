@@ -132,6 +132,11 @@ class TestServiceCatalogContract:
             # TRIN 5m RTH sampler: the hourly series has no non-IB source
             # (scripts/fetch_trin.py sample_live connects via IBClient).
             "trin",
+            # IV SPREAD daily NDX/SPX 30d IV pull: IB OPTION_IMPLIED_VOLATILITY
+            # bars are the only source (scripts/fetch_iv_spread.py
+            # _real_ib_fetch connects via IBClient; no UW/Yahoo rung serves
+            # index-level 30d IV).
+            "iv-spread",
         }
         assert ib_dependent == expected, (
             f"requires_ib=true mismatch.\n"
