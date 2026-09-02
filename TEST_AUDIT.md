@@ -8316,6 +8316,25 @@ newest **P2** stragglers (T-353…T-378) in value order. Evidence rows land in
   that also lands nothing still posts INCOMPLETE (no third attempt);
   TIMEOUT / FAILED / TRUNCATED arms and exit codes unchanged.
 
+- **T-381 [P1] (found by this run's adopted gate round 1; T-317/T-277 env
+  class, but LEAKS instead of reds) `test_notify_cred_reads_a_crlf_env_file`
+  inherits the runner's environment, and because `_notify_cred` prefers an
+  exported `PUSHOVER_*` over the env file BY DESIGN, a wrapper-launched
+  pytest prints the runner's LIVE Pushover token and user key into the gate
+  log.** `scripts/tests/test_nightly_issue_format.py:519-526` ran
+  `subprocess.run(["/bin/bash", script], …)` with no `env=`;
+  `security_nightly.sh` `_notify_cred` returns `${!key}` first. Under the
+  wrapper (which exports the real credentials to page) the assertion diff
+  embedded both live values in `/tmp/tw-2026-09-02/gates/pytest-r1.txt` —
+  the only red in a 10,764-test round, `93 passed` in isolation, so it also
+  false-reds every wrapper-launched full gate. **Fixed this run** (same
+  commit): explicit `env={"PATH": …}` on the subprocess. RED reproduced
+  with dummy exports (`PUSHOVER_TOKEN=env-wins-tok … → 1 failed`); GREEN
+  `1 passed` + full file `93 passed` with and without the planted env.
+  Residual: the live values sit in this run's local gate log under
+  `/tmp/tw-2026-09-02/` (root-only host, never committed); operator MAY
+  rotate the Pushover token if that residue is a concern.
+
 ## 11 · Audit ledger
 
 The weekend loop (`.claude/skills/testing-weekend/`) reads the last line
