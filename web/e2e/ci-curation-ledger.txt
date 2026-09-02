@@ -64,6 +64,7 @@ hyad-tab.spec.ts
 ib-mfa-reconnect-alert.spec.ts
 iei-hyg-tab.spec.ts
 internals-market-closed.spec.ts
+iv-spread-tab.spec.ts
 ivrank-tab.spec.ts
 iwm-close-order-summary.spec.ts
 iwm-synthetic-mark-label.spec.ts

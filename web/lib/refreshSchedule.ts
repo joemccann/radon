@@ -33,6 +33,9 @@ export const IV_RANK_REFRESH: UtcSchedule = {
   minuteUtc: 10,
 };
 
+/** cloud/services/radon-iv-spread.timer */
+export const IV_SPREAD_REFRESH: UtcSchedule = { cadence: "daily", hourUtc: 22, minuteUtc: 15 };
+
 /** cloud/services/radon-ma-ratio.timer */
 export const MA_RATIO_REFRESH: UtcSchedule = {
   cadence: "daily",

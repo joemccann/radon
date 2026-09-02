@@ -192,7 +192,12 @@ export default function CriHistoryChart<T extends { date: string }>({
       const vals = sources
         .flatMap((src) => chartData.map((d) => d[src.key] as number | null | undefined))
         .filter((v): v is number => isPlottable(s, v));
+      // Reference levels draw on the LEFT scale, so they fold into the left
+      // domain only (or the shared one). Folding them into an independent
+      // right scale dragged a percent axis to a vol-point guide (IV SPREAD:
+      // SPX 1M IV read 0..600% against the 5.32 AVG line).
       for (const level of referenceLevels ?? []) {
+        if (s.axis !== "left" && !sharedAxis) break;
         if (isPlottable(s, level.value)) vals.push(level.value);
       }
       for (const band of referenceBands ?? []) {

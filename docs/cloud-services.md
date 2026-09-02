@@ -742,6 +742,17 @@ ranked over the trailing 252 sessions. Heartbeat `ivrank`. Units are listed in
 (`not-installed` allowlist expires 2026-12-31). Spec:
 [`indicators/ivrank.md`](indicators/ivrank.md).
 
+### IV SPREAD (`radon-iv-spread.timer`)
+
+Daily `22:15 UTC` (`RandomizedDelaySec=120`), oneshot
+`scripts/fetch_iv_spread.py`. NDX and SPX 30-day implied vol from IB
+(`OPTION_IMPLIED_VOLATILITY` daily bars on both index legs, health-gated),
+spread in volatility points against its full stored history. IB is the only
+feed: an IB outage re-serves the cached payload as `stale_source` with an
+`error` heartbeat. Heartbeat `iv-spread`. Installed by the deploy's
+`install-units` verb from `installed-units.sha256`. Spec:
+[`indicators/iv-spread.md`](indicators/iv-spread.md).
+
 ### Flex sFTP pull (`radon-flex-pull.timer`)
 
 Install dependency: IBKR-hosted sFTP, not Flex Web Service. Full recipe:

@@ -215,6 +215,12 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // heartbeats through an IB outage: requires_ib stays false.
   "ivrank": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
+  // ``iv-spread`` — radon-iv-spread.timer fires daily 22:15 UTC every calendar day
+  // (weekend runs are unchanged-data heartbeats), so a uniform 26h window matches
+  // its ivrank sibling. IB is the ONLY feed (no UW/Yahoo rung serves index 30d IV),
+  // so an IB outage is the one thing that explains a missing reading: requires_ib true.
+  "iv-spread": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: true },
+
   // ``iei-hyg`` — radon-iei-hyg.timer fires daily 21:55 UTC; IB → UW → Yahoo cascade, so requires_ib stays false.
   "iei-hyg": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 

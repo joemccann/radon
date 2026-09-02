@@ -243,6 +243,12 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # with a UW fallback, so the job heartbeats through an IB outage:
     # requires_ib stays False.
     "ivrank":           {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # iv-spread — radon-iv-spread.timer, daily 22:15 UTC every calendar day,
+    # after the 16:00 ET close year-round (weekend/holiday runs are unchanged-
+    # data heartbeats). Uniform 26h window matches its ivrank sibling. IB is
+    # the ONLY feed (no UW/Yahoo rung serves index 30d IV), so an IB outage is
+    # the one thing that explains a missing reading: requires_ib True.
+    "iv-spread":        {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": True},
     # vol-cone — radon-vol-cone.timer, Mon-Fri 20:45 UTC after the 16:45 ET
     # close grace. UW greeks only — no IB. 26h open catches a missed weekday.
     # The holiday-Monday heartbeat lands Fri 20:45 UTC + 72h + jitter, so a
@@ -564,6 +570,10 @@ BUCKETS: dict[str, list[str]] = {
         # UW fallback) — hourly check surfaces a missed run within 1h of the
         # 26h window expiring.
         "ivrank",
+        # Daily 22:15 UTC NDX minus SPX 1M IV spread pull (post-close, IB
+        # only) — hourly check surfaces a missed run within 1h of the 26h
+        # window expiring.
+        "iv-spread",
         # Daily Mon-Fri 20:45 UTC UW vol-cone pull — hourly check surfaces a
         # missed run within 1h of the 26h window expiring.
         "vol-cone",

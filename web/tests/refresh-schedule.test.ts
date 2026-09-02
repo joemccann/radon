@@ -14,6 +14,7 @@ import {
   ATS_VENUE_SHARE_REFRESH,
   COT_POSITIONING_REFRESH,
   IV_RANK_REFRESH,
+  IV_SPREAD_REFRESH,
   MA_RATIO_REFRESH,
   SHORT_CROWDING_REFRESH,
   dataAgeDays,
@@ -55,6 +56,10 @@ describe("schedule constants are pinned to the systemd timers", () => {
 
   it("IV rank mirrors radon-ivrank.timer", () => {
     expect(expectedOnCalendar(IV_RANK_REFRESH)).toBe(timerOnCalendar("radon-ivrank.timer"));
+  });
+
+  it("IV spread mirrors radon-iv-spread.timer", () => {
+    expect(expectedOnCalendar(IV_SPREAD_REFRESH)).toBe(timerOnCalendar("radon-iv-spread.timer"));
   });
 
   it("MA ratio mirrors radon-ma-ratio.timer", () => {

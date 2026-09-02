@@ -629,6 +629,22 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
     expect(requiresIb("ivrank")).toBe(false);
   });
 
+  // ``iv-spread`` — radon-iv-spread.timer fires daily 22:15 UTC every calendar
+  // day (weekend runs are unchanged-data heartbeats), so a uniform 26h window
+  // matches its ivrank sibling. IB is the ONLY feed (no UW/Yahoo rung serves
+  // index 30d IV), so an IB outage explains a missing reading: requires_ib true.
+  it("iv-spread is registered as scheduled with a uniform 26h window", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["iv-spread"]).toBeDefined();
+    expect(getServiceCategory("iv-spread")).toBe("scheduled");
+    for (const state of ["open", "extended", "closed"] as MarketState[]) {
+      expect(getFreshnessWindowMs("iv-spread", state)).toBe(26 * HOUR);
+      expect(getFreshnessWindowMs("iv-spread", state)).toBe(
+        getFreshnessWindowMs("ivrank", state),
+      );
+    }
+    expect(requiresIb("iv-spread")).toBe(true);
+  });
+
   // ``iei-hyg`` — radon-iei-hyg.timer fires daily 21:55 UTC every calendar day
   // (weekend runs are unchanged-data heartbeats), so a uniform 26h window
   // matches its daily siblings. IB → UW → Yahoo cascade, so the job
@@ -872,6 +888,9 @@ describe("SERVICE_FRESHNESS_WINDOWS — requires_ib field", () => {
       "position-reconcile",
       // radon-trin.timer samples NYSE A/D + up/down volume from IB every 5 min RTH.
       "trin",
+      // radon-iv-spread.timer pulls NDX + SPX 30d IV daily bars from IB only
+      // (no UW/Yahoo rung serves index 30d IV).
+      "iv-spread",
     ]);
     expect(ibTrue).toEqual(expected);
   });
