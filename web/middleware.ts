@@ -14,6 +14,7 @@ import {
 } from "@/lib/publicShareRoutes";
 import { handleDemoGate } from "@/lib/demo/demoGate";
 import type { DemoPublicMetadata } from "@/lib/demo/demoRole";
+import { isSetupMode, isSetupPath, SETUP_PAGE_PATH } from "@/lib/setup/setupMode";
 
 // ── Enforced Content-Security-Policy (per-request nonce) ────────────────────
 //
@@ -404,10 +405,37 @@ const clerkHandler = clerkMiddleware(async (auth, request) => {
 // Entry point. The probe bearer gate and the local/authless bypass run BEFORE
 // (and OUTSIDE) clerkMiddleware, so a bypassed request never triggers Clerk's
 // dev-browser handshake. Everything else delegates to the Clerk-wrapped handler.
+// First-run setup mode (no Clerk keys configured): the entire app collapses
+// to /setup + its API, where the token-gated wizard collects credentials.
+// Everything else redirects (pages) or 503s (APIs) until the wizard writes
+// the Clerk keys and the stack restarts with auth enabled. Never active once
+// any Clerk key exists, so production behavior is untouched.
+export function handleSetupModeGate(request: NextRequest): NextResponse | null {
+  if (!isSetupMode()) return null;
+  const pathname = request.nextUrl.pathname;
+  if (isSetupPath(pathname)) return withNonceCsp(request);
+  if (isApiPath(pathname)) {
+    const requestId = getRequestId();
+    const response = jsonApiError({
+      message: "Radon is in first-run setup mode. Finish /setup first.",
+      status: 503,
+      code: "SETUP_MODE",
+      requestId,
+    });
+    return setNoStoreResponseHeaders(response, requestId);
+  }
+  return NextResponse.redirect(new URL(SETUP_PAGE_PATH, request.url));
+}
+
 export default async function middleware(
   request: NextRequest,
   event: NextFetchEvent,
 ) {
+  // First-run setup mode short-circuits BEFORE Clerk: with no keys configured
+  // clerkMiddleware cannot run at all, and there is nothing to protect yet.
+  const setupGate = handleSetupModeGate(request);
+  if (setupGate) return setupGate;
+
   // Probe routes are bearer-gated EVERYWHERE — before the local-dev bypass —
   // so the gate behaves identically in dev, tests, and production.
   const probeGate = await handleProbeBearerGate(request);

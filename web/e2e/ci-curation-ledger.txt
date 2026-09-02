@@ -117,6 +117,7 @@ portfolio-ratio-risk-reversal-label.spec.ts
 portfolio-request-cadence.spec.ts
 portfolio-return-capital.spec.ts
 price-chart-theme.spec.ts
+profile-credentials-tab.spec.ts
 regime-close-transition-refresh.spec.ts
 regime-closed-refresh.spec.ts
 regime-cor1m-live-route.spec.ts

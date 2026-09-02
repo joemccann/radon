@@ -30,7 +30,8 @@ vi.mock("@/lib/db", () => ({ resetDb: () => {},
 
 async function seedSchema(client: Client): Promise<void> {
   await client.execute(`CREATE TABLE user_profiles (
-    user_id TEXT PRIMARY KEY, username TEXT, avatar_url TEXT, updated_at TEXT NOT NULL)`);
+    user_id TEXT PRIMARY KEY, username TEXT, avatar_url TEXT,
+    ui_preferences TEXT, updated_at TEXT NOT NULL)`);
   await client.execute(`CREATE TABLE bookmarks (
     id TEXT PRIMARY KEY, user_id TEXT NOT NULL, post_id TEXT NOT NULL,
     snapshot TEXT, saved_at TEXT NOT NULL, UNIQUE(user_id, post_id))`);

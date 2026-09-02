@@ -53,6 +53,10 @@ GENERIC_API_KEY_BASELINE_COMMITS = {
     # prove the redactor scrubs env values; merged before the scan ran. The
     # fixture was rewritten to runtime construction afterwards.
     "38eeecb91eedb3b90966821bff12d5b240d89708",
+    # 2026-09-02 (PR #125): the secret-store tests spelled fake sample values
+    # next to *_TOKEN/*_KEY identifiers; rewritten to runtime construction in
+    # the follow-up commit.
+    "fd1eb140d324cf8b61373723ee34a744a0ddaab2",
 }
 
 

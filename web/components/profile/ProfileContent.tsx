@@ -8,13 +8,16 @@ import { useWatchlist, type WatchlistEntry } from "@/lib/useWatchlist";
 import { useViewport } from "@/lib/useViewport";
 import { useTickerNav } from "@/lib/useTickerNav";
 import StarToggle from "@/components/StarToggle";
+import PreferencesSection from "@/components/PreferencesSection";
+import CredentialsPanel from "@/components/profile/CredentialsPanel";
 import { resizeImageToSquareDataUrl } from "@/lib/profile/resizeImage";
 import { formatRelative } from "@/lib/newsfeedTime";
+import { resolveDemoContext, type DemoPublicMetadata } from "@/lib/demo/demoContext";
 import type { PriceData } from "@/lib/pricesProtocol";
 
 const USERNAME_PATTERN = /^[A-Za-z0-9_\- ]{1,32}$/;
 
-type ProfileTab = "bookmarks" | "watchlist";
+type ProfileTab = "bookmarks" | "watchlist" | "preferences" | "credentials";
 
 /** Defensive read of a bookmark snapshot. The snapshot is `unknown` per the
  *  Phase 1 contract; news posts shaped like MarketEarPost are the common case. */
@@ -93,6 +96,12 @@ export default function ProfileContent({ prices }: { prices?: Record<string, Pri
   const { watchlist, isLoading: watchlistLoading, toggleWatch } = useWatchlist();
 
   const email = user?.primaryEmailAddress?.emailAddress ?? null;
+  // Demo trial users never see the operator tabs; the API routes fail closed
+  // behind ALLOWED_USER_IDS regardless, this only hides the chrome. A missing
+  // user (authless e2e harness) counts as non-demo — production signed-out
+  // sessions never reach /profile at all.
+  const isOperator =
+    resolveDemoContext(user?.publicMetadata as DemoPublicMetadata | undefined) === null;
   const clerkImage = user?.imageUrl ?? null;
   const avatarUrl = profile?.avatar_url ?? clerkImage ?? null;
   const initials = initialsFor(profile?.username ?? null, email);
@@ -236,6 +245,28 @@ export default function ProfileContent({ prices }: { prices?: Record<string, Pri
             Watchlist
             <span className="profile-tab__count">{watchlist.length}</span>
           </button>
+          {isOperator ? (
+            <>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === "preferences"}
+                className={`m-segment__item${tab === "preferences" ? " m-segment__item--active" : ""}`}
+                onClick={() => setTab("preferences")}
+              >
+                Prefs
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === "credentials"}
+                className={`m-segment__item${tab === "credentials" ? " m-segment__item--active" : ""}`}
+                onClick={() => setTab("credentials")}
+              >
+                Keys
+              </button>
+            </>
+          ) : null}
         </div>
 
         {tab === "bookmarks" ? (
@@ -244,14 +275,18 @@ export default function ProfileContent({ prices }: { prices?: Record<string, Pri
             isLoading={bookmarksLoading}
             onUnstar={(b) => toggleBookmark({ id: b.post_id, snapshot: b.snapshot })}
           />
-        ) : (
+        ) : tab === "watchlist" ? (
           <WatchlistPanelMobile
             watchlist={watchlist}
             isLoading={watchlistLoading}
             prices={prices}
             onRemove={(symbol) => toggleWatch(symbol)}
           />
-        )}
+        ) : tab === "preferences" && isOperator ? (
+          <PreferencesSection />
+        ) : tab === "credentials" && isOperator ? (
+          <CredentialsPanel />
+        ) : null}
 
         {/* ── Sticky Save Profile button ── */}
         <div className="m-sticky-cta">
@@ -363,6 +398,28 @@ export default function ProfileContent({ prices }: { prices?: Record<string, Pri
           Watchlist
           <span className="profile-tab__count">{watchlist.length}</span>
         </button>
+        {isOperator ? (
+          <>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === "preferences"}
+              className={`profile-tab${tab === "preferences" ? " profile-tab--active" : ""}`}
+              onClick={() => setTab("preferences")}
+            >
+              Preferences
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === "credentials"}
+              className={`profile-tab${tab === "credentials" ? " profile-tab--active" : ""}`}
+              onClick={() => setTab("credentials")}
+            >
+              Credentials
+            </button>
+          </>
+        ) : null}
       </div>
 
       {tab === "bookmarks" ? (
@@ -371,14 +428,18 @@ export default function ProfileContent({ prices }: { prices?: Record<string, Pri
           isLoading={bookmarksLoading}
           onUnstar={(b) => toggleBookmark({ id: b.post_id, snapshot: b.snapshot })}
         />
-      ) : (
+      ) : tab === "watchlist" ? (
         <WatchlistPanel
           watchlist={watchlist}
           isLoading={watchlistLoading}
           prices={prices}
           onRemove={(symbol) => toggleWatch(symbol)}
         />
-      )}
+      ) : tab === "preferences" && isOperator ? (
+        <PreferencesSection />
+      ) : tab === "credentials" && isOperator ? (
+        <CredentialsPanel />
+      ) : null}
     </div>
   );
 }

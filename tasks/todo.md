@@ -1,3 +1,59 @@
+# Task: Profile overhaul — preferences + secure credentials (2026-08-28) [WIP]
+
+Operator answers (2026-09-01): fold /preferences into profile + promote localStorage
+prefs; ALL credentials UI-manageable (self-service ground-up onboarding for a fresh
+clone — first-run setup wizard, no manual backend work); saves take effect live;
+IB is sFTP now, part of onboarding; MenthorQ/TheMarketEar real async login with
+delay notice; playful error copy; operator-only CRUD.
+
+## Dependency graph
+
+- P1 depends_on: [] - Secret store module: AES-256-GCM-encrypted values (existing
+  `cryptography` dep) in local SQLite on host; master key auto-generated on first
+  run, systemd-creds `LoadCredential` on VPS / 0600 file fallback for dev.
+  CRUD + audit events. Red tests first.
+- P2 depends_on: [P1] - FastAPI credentials routes (operator-only, redacted reads,
+  never return plaintext after write).
+- P3 depends_on: [P2] - Per-service async validators (Anthropic, UW, Exa, Cerebras,
+  xAI, MDW, Pushover, Turso, Clerk, ...; sFTP for IB).
+- P4 depends_on: [] - Profile page IA: fold /preferences in as tab, promote
+  theme/column-visibility to persisted store, new Credentials tab.
+- P5 depends_on: [P2, P3, P4] - Credentials UI: masked inputs, submit -> async
+  validate -> playful error copy on failure; slow-validator delay notice.
+- P6 depends_on: [P1] - First-run setup wizard: setup mode when bootstrap keys
+  absent (Clerk middleware bypassed, one-shot console setup token), wizard
+  collects bootstrap + third-party creds, writes store + env overlay, restarts.
+- P7 depends_on: [P2] - Live effect: env overlay regenerated on save + affected
+  service reload.
+- P8 depends_on: [P5, P6, P7] - Gated-action wire tests (full URL + payload),
+  Playwright E2E, screenshots.
+
+## Checklist
+
+- [x] P1 Secret store (red/green) — 28 passed
+- [x] P2 FastAPI CRUD — 14 passed + authz matrix green
+- [x] P3 Async validators — 38 passed (registry + validators)
+- [x] P4 Profile IA — tabs folded in; theme/columns promoted (migration 0067)
+- [x] P5 Credentials UI — 8 wire tests
+- [x] P6 Setup wizard — 11 tests + live keyless-server verification
+- [x] P7 Live effect — PUT exports os.environ + lifespan bootstrap
+- [x] P8 E2E + verify — Playwright 2 passed, screenshots captured
+
+## Review
+
+- vitest full gate: 8415 passed, 18 skipped (after fixing the two suites my
+  route/Providers changes tripped: authz matrix classification + wiring pin)
+- pytest focused: 274 passed (secret store, registry, validators, routes,
+  authz matrix, leakage, preferences); the 93 full-api failures on this VM
+  reproduce identically on clean origin/main (missing env baseline, not mine)
+- Playwright: profile-credentials-tab.spec.ts 2 passed; setup mode verified
+  live on a keyless dev server (/ -> 307 /setup, /api -> 503, token 401/200)
+- Known follow-ups: systemd unit reload on credential save (only FastAPI +
+  subprocesses get live effect today); IB Flex sFTP key upload not UI-managed
+  (fields registered, ssh_config stays operator-owned)
+
+---
+
 # Task: Mobile page-change lag — realtime socket must survive navigation (2026-09-01)
 
 ## Objective
