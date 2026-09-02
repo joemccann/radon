@@ -69,17 +69,36 @@ the ciphertext unrecoverable — back up the key file together with
 
 ### First-run setup wizard (`/setup`)
 
-With NO Clerk key configured, the whole app collapses to `/setup` plus its
-API: other pages redirect there and other APIs return 503 `SETUP_MODE`
-(`web/middleware.ts`, `web/lib/setup/setupMode.ts`). The wizard is gated by a
-one-shot token printed to the console that launched Radon
-(`RADON_SETUP_TOKEN` overrides it for automation; only read while no Clerk
-key is set). It writes collected values into the secret store AND
-materializes root `.env` / `web/.env` (`web/lib/setup/envFiles.ts` — Next.js
-and python-dotenv need real files at boot; values are single-quoted per the
-`$`-expansion rule above). Setup mode ends at the first restart after the
-Clerk keys are written; the setup surface then hard-refuses with 404. It can
-never activate while any Clerk key exists, so production is untouched.
+With NO Clerk key configured and no completion latch, the whole app collapses
+to `/setup` plus its API: other pages redirect there and other APIs return
+503 `SETUP_MODE` (`web/middleware.ts`, `web/lib/setup/setupMode.ts`). The
+wizard is gated by a one-shot token printed to the console that launched
+Radon (`RADON_SETUP_TOKEN` overrides it for automation; only read while no
+Clerk key is set); `POST /api/setup/complete` consumes it, so a replay is
+rejected. It writes collected values into the secret store AND materializes
+root `.env` / `web/.env` (`web/lib/setup/envFiles.ts`: Next.js and
+python-dotenv need real files at boot). Values are quoted per consumer,
+python-dotenv dialect for the root `.env` and `@next/env` dialect for
+`web/.env`; a value neither dialect can encode (a newline, or a quote or
+backslash mixed with `$`) is refused with an error instead of being written,
+so enter it in the Credentials tab or by hand. Writes are temp-file + rename
+(never truncate-in-place) and every duplicate occurrence of a managed key is
+rewritten. Only the web subset (`WEB_ENV_KEYS` in `envFiles.ts`: the Clerk
+keys, Turso, and the model and data API keys) reaches `web/.env`.
+
+**Completion latch.** Completion writes `<repo root>/.radon/setup-complete`
+(0600, gitignored) and sets `RADON_SETUP_COMPLETE=1` in the running process;
+`web/instrumentation.ts` re-promotes the marker into that flag at every Node
+boot (Edge middleware reads only the flag). Setup mode ends the moment the
+latch is set, not at restart: until the stack is restarted with the Clerk
+keys loaded, every page and API answers 503 `AUTH_MISCONFIGURED` ("Restart
+the stack") and the setup APIs answer 403 `SETUP_ALREADY_COMPLETE`. After that
+restart the setup surface hard-refuses with 404. Completion returns 500
+`SETUP_REPO_ROOT_INVALID` unless the directory above `web/` holds both
+`package.json` and `web/package.json`. To re-run the wizard, delete the
+marker and unset `RADON_SETUP_COMPLETE` while the Clerk keys are still
+absent. The wizard can never activate while any Clerk key exists, so
+production is untouched.
 
 ## IB Gateway
 
