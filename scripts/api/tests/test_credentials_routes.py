@@ -228,6 +228,39 @@ class TestValidateDryRun:
         assert call[1]["UW_TOKEN"] == "uw-already-stored"
 
 
+class TestValidateEgressPin:
+    """Full flow with the REAL validator: a /validate body carrying ONLY a
+    destination URL merges the stored/env token, so the probe destination is
+    an egress decision — a non-Turso URL must refuse before any wire call."""
+
+    def test_url_only_body_with_env_token_refuses_without_egress(
+        self, client, monkeypatch
+    ):
+        monkeypatch.setenv("TURSO_AUTH_TOKEN", "SYNTHETIC-STORED-TOKEN-NOT-REAL")
+        calls = []
+
+        def _wire(*args, **kwargs):
+            calls.append((args, kwargs))
+            raise AssertionError("credential egress attempted")
+
+        seen = set()
+        for module in _route_module_instances():
+            cv_mod = module.credential_validators
+            if id(cv_mod) in seen:
+                continue
+            seen.add(id(cv_mod))
+            monkeypatch.setattr(cv_mod.requests, "post", _wire)
+            monkeypatch.setattr(cv_mod.requests, "get", _wire)
+
+        resp = client.post(
+            "/credentials/turso/validate",
+            json={"values": {"TURSO_DB_URL": "https://collector.example.net"}},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["validation"]["status"] == "invalid"
+        assert calls == []
+
+
 class TestDelete:
     def test_delete_removes_field(self, client):
         _store().set_secret("UW_TOKEN", "uw-to-delete", actor="test")

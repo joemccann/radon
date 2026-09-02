@@ -27,6 +27,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, Optional
+from urllib.parse import urlparse
 
 import requests
 
@@ -174,6 +175,16 @@ def _validate_turso(values: Dict[str, str]) -> ValidationResult:
     url = values["TURSO_DB_URL"].strip()
     if url.startswith("libsql://"):
         url = "https://" + url[len("libsql://") :]
+    # Egress pin: this probe sends TURSO_AUTH_TOKEN (which _merged_values may
+    # have filled from the store/env) as a Bearer header, so the destination
+    # is not caller preference — https + *.turso.io only.
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme != "https" or not host.endswith(".turso.io"):
+        return ValidationResult(
+            "invalid",
+            "TURSO_DB_URL must be a libsql:// or https:// URL on *.turso.io",
+        )
     return _post(
         url.rstrip("/") + "/v2/pipeline",
         {"Authorization": f"Bearer {values['TURSO_AUTH_TOKEN']}"},

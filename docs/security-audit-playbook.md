@@ -107,6 +107,12 @@ line here whenever you ship a security fix.**
   committed; git *history* must stay clean (2026-07-05 sweep found creds pending
   rotation — verify purge status each run).
   (`project_public_repo_leak_sweep_2026_07_05`)
+- **Stored-credential egress is vendor-pinned** — any validator/probe that sends a
+  credential which the server merged from the SecretStore/env (not submitted by the
+  caller) must hardcode or allowlist the vendor destination; a caller-supplied URL
+  field is an egress decision, never preference (Turso: https + `*.turso.io` only).
+  (`scripts/tests/test_credential_validators.py::TestTursoEgressPin`,
+  `scripts/api/tests/test_credentials_routes.py::TestValidateEgressPin`)
 
 ## Triage & patch policy
 
