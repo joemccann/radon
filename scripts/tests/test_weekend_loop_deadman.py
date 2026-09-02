@@ -396,7 +396,7 @@ class TestSetupGuardsPerLoopVenvs:
 
 
 def _claude_invocation_line(path: Path) -> str:
-    """The `timeout ... claude -p` command lifted verbatim, so a test can RUN it.
+    """The `"$TIMEOUT_BIN" ... claude -p` command lifted verbatim, so a test can RUN it.
 
     The invocation is a multi-line backslash continuation; join it back into
     one command so it can be handed to `bash -c`.
@@ -406,7 +406,7 @@ def _claude_invocation_line(path: Path) -> str:
         i
         for i, line in enumerate(lines)
         if "claude -p" in line
-        and "timeout" in line
+        and "TIMEOUT_BIN" in line
         and not line.lstrip().startswith("#")
     )
     out = []
@@ -481,6 +481,7 @@ class TestBackgroundWorkIsNotSilentlyKilled:
                 "set -Eeuo pipefail\n"
                 f'PHASE=audit\nremain=30\nRUN_LOG="{run_log}"\n'
                 f'KILL_AFTER_SECS=60\n'
+                'TIMEOUT_BIN="$(command -v timeout)"\n'
                 # The line also pins the model rung it asks for, so the round's
                 # ladder state has to exist here too — under `set -u` an unset
                 # MODEL_RUNGS kills the command before `claude` is ever reached

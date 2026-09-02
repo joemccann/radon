@@ -204,7 +204,11 @@ class TestTheCapIsEnforceable:
     @pytest.mark.parametrize("name", sorted(LOOPS))
     def test_timeout_escalates_to_sigkill(self, name):
         body = _uncommented(LOOPS[name])
-        line = next(ln for ln in body.splitlines() if "timeout" in ln and "claude" in ln)
+        line = next(
+            ln
+            for ln in body.splitlines()
+            if "TIMEOUT_BIN" in ln and "claude" in ln
+        )
         assert re.search(r"-k\s+\"?\$?\{?[A-Za-z0-9_]", line), (
             "no --kill-after: only SIGTERM is sent, so a claude blocked on a "
             f"hung child makes the cap advisory: {line}"
