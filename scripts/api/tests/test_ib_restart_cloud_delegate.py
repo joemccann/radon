@@ -51,6 +51,9 @@ _GATEWAY_MUTATIONS = [
     ("/ib/restart", "restart"),
     ("/ib/reset-backoff", "reset-lease"),
     ("/admin/services/radon-ib-gateway.service/start", "start"),
+    # systemd alias: missing .service suffix is the same unit. The
+    # privileged-action gate must fire on this spelling too.
+    ("/admin/services/radon-ib-gateway/restart", "restart"),
 ]
 
 
@@ -298,6 +301,8 @@ class TestCloudDelegate:
         for action in ("start", "stop", "restart"):
             unit_action = _req("POST", f"/admin/services/radon-ib-gateway.service/{action}")
             assert server._is_app_role_gateway_mutation(unit_action) is True, action
+            unsuffixed = _req("POST", f"/admin/services/radon-ib-gateway/{action}")
+            assert server._is_app_role_gateway_mutation(unsuffixed) is True, action
         assert server._is_app_role_gateway_mutation(health) is False
         assert server._is_app_role_gateway_mutation(stack) is False
         assert server._is_app_role_gateway_mutation(_req("GET", "/ib/restart")) is False

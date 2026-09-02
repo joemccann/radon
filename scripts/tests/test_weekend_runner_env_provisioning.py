@@ -124,8 +124,14 @@ def _stage(tmp_path: Path, name: str) -> tuple[Path, Path, dict]:
     (clone / "requirements.txt").write_text("", encoding="utf-8")
     shutil.copy(REPO / "config" / PLISTS[name], clone / "config" / PLISTS[name])
 
-    # The venv the toolchain check and the pip lines address.
-    venv_bin = root / "venv" / "bin"
+    # The venv the toolchain check and the pip lines address. Per-loop.
+    venv_name = {
+        "reliability": "venv-reliability",
+        "testing": "venv-testing",
+        "ci-performance": "venv-ci-performance",
+        "documentation": "venv-documentation",
+    }[name]
+    venv_bin = root / venv_name / "bin"
     venv_bin.mkdir(parents=True)
     for tool in ("python", "pip"):
         exe = venv_bin / tool

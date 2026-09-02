@@ -1,7 +1,7 @@
 """The nightly security loop's own identity and isolation contract.
 
 The five nightly loops share one wrapper shape, one runner-lock primitive and
-one `$WEEKEND_ROOT/venv`, and all five fire at 00:00. The security loop is the
+per-loop venvs, and all five fire at 00:00. The security loop is the
 one that must NEVER: run in a sibling clone or the operator checkout, receive a
 Radon credential, or leak a scanner artifact into the public repository. Those
 three properties are enforced by concrete, testable facts asserted here — the
@@ -385,7 +385,7 @@ class TestTheSetupIsCredentialFree:
         (clone / "config").mkdir()
         (clone / "requirements.txt").write_text("", encoding="utf-8")
         shutil.copy(PLIST, clone / "config" / PLIST.name)
-        venv_bin = root / "venv" / "bin"
+        venv_bin = root / "venv-security" / "bin"
         venv_bin.mkdir(parents=True)
         for tool in ("python", "pip"):
             exe = venv_bin / tool

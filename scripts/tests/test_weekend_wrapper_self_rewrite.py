@@ -541,6 +541,29 @@ class TestTheRunnerLockIsTakenOnce:
             if "git clean" in line and not line.strip().startswith("#"):
                 assert "--exclude=.weekend-runner.lock" in line, line
 
+    @pytest.mark.parametrize("loop", LOOP_IDS)
+    def test_hard_reset_cleans_ignored_agent_files_and_keeps_env_cache(self, loop: str) -> None:
+        """-x drops leftover ignored skills/settings; --exclude keeps env/build-cache."""
+        src = (REPO / "scripts" / LOOPS[loop][0]).read_text(encoding="utf-8")
+        cleans = [
+            line for line in src.splitlines()
+            if "git clean" in line and not line.strip().startswith("#")
+        ]
+        assert cleans, f"{loop} wrapper lost git clean"
+        for line in cleans:
+            assert "git clean -fdxq" in line, line
+            for kept in (
+                "--exclude=.env",
+                "--exclude=.env.ib-mode",
+                "--exclude=web/.env",
+                "--exclude=node_modules/",
+                "--exclude=.next/",
+                "--exclude=.deepsec/",
+                "--exclude=logs/",
+            ):
+                assert kept in line, (loop, kept, line)
+            assert "--exclude=.claude" not in line, line
+
 
 class TestTheJobRestoresTheEntryPointBeforeReadingIt:
     """A wrapper left corrupt on disk dies at the top, before the ground_truth

@@ -35,7 +35,7 @@ set -Eeuo pipefail
 
 # One writer per runner clone. The daily fire, a hand-run smoke test and the
 # setup script all drive the SAME tree, and every entry point runs
-# `git clean -fdq`, so a second run would delete the live agent's uncommitted
+# `git clean -fdxq`, so a second run would delete the live agent's uncommitted
 # work mid-write with both runs reporting success. The plist pre-reset and
 # setup_documentation_nightly.sh both stand down on this lock, so it has to exist.
 # mkdir is the atomic primitive here: flock(1) does not exist on macOS.
@@ -47,7 +47,7 @@ acquire_runner_lock() {
       # No pid yet means the winner is between its mkdir and its pid write.
       # That window used to skip the `kill -0` test entirely — the loser read
       # an empty pid, called the lock stale, `rm -rf`d it and took it, and two
-      # cycles then ran `git clean -fdq` in the same clone. Absent evidence is
+      # cycles then ran `git clean -fdxq` in the same clone. Absent evidence is
       # not evidence of staleness. R-411.
       echo "weekend runner lock held (pid not yet published): $dir" >&2
       return 1
@@ -106,7 +106,9 @@ MODE="${1:?usage: documentation_nightly.sh audit|remediate|cycle}"
 
 REPO="${RADON_WEEKEND_REPO:-$HOME/radon-weekend/radon-documentation}"
 WEEKEND_ROOT="$(dirname "$REPO")"
-VENV="$WEEKEND_ROOT/venv"
+# Per-loop venv. The legacy $WEEKEND_ROOT/venv is not deleted here
+# (operator follow-up after this ships).
+VENV="$WEEKEND_ROOT/venv-documentation"
 # Activate the venv so any python3.13 calls inside the agent use it.
 [[ -f "$VENV/bin/activate" ]] && export PATH="$VENV/bin:$PATH"
 DEADMAN_TITLE="Nightly documentation runner"
@@ -207,7 +209,7 @@ kill_round_group() {
   # process-group leader, so the negative pid reaches claude and anything it
   # left behind. --foreground would signal only timeout's direct child, which
   # is the opposite of what reaping orphaned subagents needs — they would keep
-  # writing into the clone while the next round runs `git clean -fdq`. R-386.
+  # writing into the clone while the next round runs `git clean -fdxq`. R-386.
   kill -TERM -- "-$ROUND_PID" 2>/dev/null || kill -TERM "$ROUND_PID" 2>/dev/null || true
   ROUND_PID=""
 }
@@ -332,7 +334,7 @@ ground_truth() {
   fetch_origin_with_retry
   git checkout -f --quiet main
   git reset --hard --quiet origin/main
-  git clean -fdq --exclude=.radon-weekend-runner --exclude=.radon-documentation-runner --exclude=.weekend-runner.lock --exclude=logs/ --exclude=.env --exclude=.env.ib-mode --exclude=web/.env
+  git clean -fdxq --exclude=.radon-weekend-runner --exclude=.radon-documentation-runner --exclude=.weekend-runner.lock --exclude=logs/ --exclude=.env --exclude=.env.ib-mode --exclude=web/.env --exclude=node_modules/ --exclude=.next/ --exclude=.deepsec/
 }
 
 # The agent commits per completed task and the skill resumes from the

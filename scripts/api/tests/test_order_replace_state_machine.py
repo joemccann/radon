@@ -56,7 +56,7 @@ def test_replace_preserves_indeterminate_status_and_cancel_audit(trusted_client,
     monkeypatch.setattr(server, "orders_cancel", AsyncMock(return_value={"finalStatus": "Cancelled"}))
     monkeypatch.setattr(
         server,
-        "orders_place",
+        "_orders_place_after_rate_reservation",
         AsyncMock(side_effect=HTTPException(status_code=504, detail={"code": "ORDER_INDETERMINATE"})),
     )
 
@@ -100,7 +100,7 @@ class TestReplaceReservesRateBudgetBeforeCancelling:
         place = AsyncMock(return_value={"status": "ok"})
         monkeypatch.setattr(server, "orders_whatif", AsyncMock(return_value={"status": "ok"}))
         monkeypatch.setattr(server, "orders_cancel", cancel)
-        monkeypatch.setattr(server, "orders_place", place)
+        monkeypatch.setattr(server, "_orders_place_after_rate_reservation", place)
         _exhaust_order_rate_budget(server)
 
         try:
@@ -132,7 +132,7 @@ class TestReplaceReservesRateBudgetBeforeCancelling:
 
         monkeypatch.setattr(server, "orders_whatif", halt_during_whatif)
         monkeypatch.setattr(server, "orders_cancel", cancel)
-        monkeypatch.setattr(server, "orders_place", place)
+        monkeypatch.setattr(server, "_orders_place_after_rate_reservation", place)
         server._order_rate_timestamps.clear()
 
         try:
@@ -149,8 +149,9 @@ class TestReplaceReservesRateBudgetBeforeCancelling:
         place.assert_not_awaited()
 
     def test_replace_consumes_exactly_one_rate_slot(self, trusted_client, monkeypatch):
-        """The reservation must not be double-counted: the inner orders_place
-        is the same placement the pre-flight already reserved for."""
+        """The reservation must not be double-counted: the inner placement
+        goes through `_orders_place_after_rate_reservation`, not the public
+        `/orders/place` route that would claim a second slot."""
         from scripts.api import server
 
         monkeypatch.setattr(server, "orders_whatif", AsyncMock(return_value={"status": "ok"}))
@@ -178,7 +179,11 @@ class TestReplaceReservesRateBudgetBeforeCancelling:
         cancel = AsyncMock(return_value={"finalStatus": "Cancelled"})
         monkeypatch.setattr(server, "orders_whatif", AsyncMock(return_value={"status": "ok"}))
         monkeypatch.setattr(server, "orders_cancel", cancel)
-        monkeypatch.setattr(server, "orders_place", AsyncMock(return_value={"status": "ok", "orderId": 7}))
+        monkeypatch.setattr(
+            server,
+            "_orders_place_after_rate_reservation",
+            AsyncMock(return_value={"status": "ok", "orderId": 7}),
+        )
         server._order_rate_timestamps.clear()
 
         try:

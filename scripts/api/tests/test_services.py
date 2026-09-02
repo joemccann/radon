@@ -32,6 +32,8 @@ class TestIsValidUnit:
         "unit",
         [
             "radon-api.service",
+            "radon-api",  # systemd alias: missing suffix is .service
+            "radon-ib-gateway",
             "radon-relay.service",
             "radon-monitor.service",
             "radon-newsfeed.service",
@@ -57,6 +59,7 @@ class TestIsValidUnit:
             "",
             "../radon-api.service",
             "radon-ib-gateway-preheld-restart.service",
+            "radon-ib-gateway-preheld-restart",
         ],
     )
     def test_rejects_non_radon_units(self, unit: str) -> None:
@@ -88,6 +91,40 @@ class TestControlUnitRejection:
         )
         assert result.ok is False
         assert result.returncode == -1
+
+
+class TestCanonicalizeUnitName:
+    """systemd treats a missing type suffix as .service. Interlocks must too."""
+
+    def test_appends_service_when_suffix_missing(self) -> None:
+        assert admin_services.canonicalize_unit_name("radon-ib-gateway") == (
+            "radon-ib-gateway.service"
+        )
+        assert admin_services.canonicalize_unit_name("radon-api") == "radon-api.service"
+
+    def test_keeps_service_and_timer_suffixes(self) -> None:
+        assert admin_services.canonicalize_unit_name("radon-api.service") == (
+            "radon-api.service"
+        )
+        assert admin_services.canonicalize_unit_name("radon-refresh.timer") == (
+            "radon-refresh.timer"
+        )
+
+    def test_strips_surrounding_whitespace(self) -> None:
+        assert admin_services.canonicalize_unit_name("  radon-api  ") == (
+            "radon-api.service"
+        )
+
+    def test_unsuffixed_preheld_is_denied(self) -> None:
+        assert admin_services.is_valid_unit("radon-ib-gateway-preheld-restart") is False
+        assert admin_services.is_valid_unit(
+            "radon-ib-gateway-preheld-restart.service"
+        ) is False
+
+    def test_unsuffixed_gateway_is_still_the_gateway(self) -> None:
+        assert admin_services.canonicalize_unit_name("radon-ib-gateway") == (
+            admin_services.GATEWAY_UNIT
+        )
 
 
 class TestNonSystemdHost:
@@ -405,6 +442,35 @@ class TestControlUnitGatewayPushLock:
         assert helper_log.read_text().splitlines() == [action]
         assert calls == []
         assert not lock_path.exists(), "admin API must not pre-acquire the helper's lease"
+
+    def test_unsuffixed_gateway_name_still_takes_the_lease_path(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """``radon-ib-gateway`` is the same unit as ``.service`` to systemd.
+
+        Comparing the caller's spelling skipped the helper and ran
+        ``systemctl restart``, bypassing the broker restart lease.
+        """
+        helper_log = self._install_helper(tmp_path, monkeypatch)
+        calls: list = []
+        result = self._control("radon-ib-gateway", "restart", calls)
+
+        assert result.ok is True
+        assert result.unit == self.GATEWAY
+        assert helper_log.read_text().splitlines() == ["restart"]
+        assert calls == []
+
+    def test_unsuffixed_preheld_unit_is_rejected_before_systemctl(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        helper_log = self._install_helper(tmp_path, monkeypatch)
+        calls: list = []
+        result = self._control("radon-ib-gateway-preheld-restart", "restart", calls)
+
+        assert result.ok is False
+        assert "unit" in result.detail.lower()
+        assert calls == []
+        assert not helper_log.exists() or helper_log.read_text() == ""
 
     def test_helper_lease_refusal_maps_to_conflict(
         self, tmp_path: Path, monkeypatch

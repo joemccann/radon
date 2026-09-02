@@ -12,6 +12,32 @@ export const runtime = "nodejs";
 
 const ALLOWED_ACTIONS = new Set(["start", "stop", "restart"]);
 const UNIT_PATTERN = /^radon-[a-z0-9-]+(?:\.service|\.timer)?$|^radon-ib-gateway\.service$/;
+// systemd unit types. A name with none of these suffixes is a .service —
+// matching the FastAPI canonicalize_unit_name helper. Interlock checks
+// (denylist, broker restart lease, privileged-action gate) must see the
+// canonical spelling or they compare against a different string than
+// systemctl does.
+const UNIT_TYPE_SUFFIXES = [
+  ".service",
+  ".socket",
+  ".target",
+  ".device",
+  ".mount",
+  ".automount",
+  ".swap",
+  ".timer",
+  ".path",
+  ".slice",
+  ".scope",
+  ".snapshot",
+] as const;
+
+function canonicalizeUnitName(unit: string): string {
+  const name = unit.trim();
+  if (!name) return name;
+  if (UNIT_TYPE_SUFFIXES.some((suffix) => name.endsWith(suffix))) return name;
+  return `${name}.service`;
+}
 
 export const radonCapability = "admin";
 
@@ -22,7 +48,8 @@ export async function POST(
   const access = await requireRouteAccess(undefined, { operatorOnly: true });
   if (!access.ok) return access.response;
   const requestId = getRequestId();
-  const { unit, action } = await params;
+  const { unit: rawUnit, action } = await params;
+  const unit = canonicalizeUnitName(rawUnit);
 
   if (!UNIT_PATTERN.test(unit)) {
     return setNoStoreResponseHeaders(

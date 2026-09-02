@@ -1,7 +1,7 @@
 """The nightly documentation loop's own identity contract.
 
 The four nightly loops share one wrapper shape, one runner-lock primitive and
-one `$WEEKEND_ROOT/venv`, and all four fire at 00:00. Everything that keeps
+per-loop venvs, and all four fire at 00:00. Everything that keeps
 them from destroying each other is a NAME: the clone directory, the dead-man
 label, the PR branch prefix, the log directory, the launchd label and the
 skill the wrapper invokes. A copy-paste that leaves one of those pointing at a
@@ -201,12 +201,10 @@ class TestSetupProvisionsTheDeadmanLabel:
         "sibling", ("radon", "radon-testing", "radon-ci-performance", "radon-security")
     )
     def test_setup_stands_down_on_every_sibling_lock(self, sibling):
-        """All four setups write the SAME `$WEEKEND_ROOT/venv`.
+        """Each setup writes its own `$WEEKEND_ROOT/venv-<loop>`.
 
-        Re-creating it re-installs site-packages under whichever sibling agent
-        is mid-run, because every wrapper prepends that venv to the agent's
-        PATH. R-266 fixed this for two loops; every further loop extends the
-        guard set.
+        Sibling in-flight locks stay so a setup still stands down on a live
+        sibling clone. R-266.
         """
         body = _uncommented(SETUP)
         install = body[: body.index("python3.13 -m venv")]

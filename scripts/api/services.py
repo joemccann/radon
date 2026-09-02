@@ -54,8 +54,26 @@ _SYSTEMCTL_TIMESTAMP_FORMATS = (
 
 # Whitelisted unit-name pattern. Any unit listed by /admin/services or passed
 # to /admin/services/<unit>/<action> must match. This keeps the panel from
-# being a generic systemctl proxy.
+# being a generic systemctl proxy. Compared against the canonical form
+# (missing type suffix → ``.service``), matching systemd.
 _UNIT_PATTERN = re.compile(r"^radon-[a-z0-9-]+(?:\.service|\.timer)?$|^radon-ib-gateway\.service$")
+
+# systemd unit types. A name with none of these suffixes is a .service.
+# Tuple so ``str.endswith`` can take it in one call.
+_UNIT_TYPE_SUFFIXES = (
+    ".service",
+    ".socket",
+    ".target",
+    ".device",
+    ".mount",
+    ".automount",
+    ".swap",
+    ".timer",
+    ".path",
+    ".slice",
+    ".scope",
+    ".snapshot",
+)
 
 # Internal systemd adapter used only by the IB watchdog after it has acquired
 # its exact preheld lease. It must never be listed or controllable through the
@@ -100,12 +118,33 @@ class UnitStatus:
         return asdict(self)
 
 
+def canonicalize_unit_name(unit: str) -> str:
+    """Return systemd's implied unit name for ``unit``.
+
+    ``systemctl`` treats a name without a type suffix as ``.service``, so
+    ``radon-ib-gateway`` and ``radon-ib-gateway.service`` are the same unit.
+    Denylist, broker-restart lease, and the app-role privileged-action gate
+    must compare this form; matching the caller's spelling lets those
+    interlocks be skipped.
+    """
+    if not isinstance(unit, str):
+        return ""
+    name = unit.strip()
+    if not name:
+        return name
+    if name.endswith(_UNIT_TYPE_SUFFIXES):
+        return name
+    return f"{name}.service"
+
+
 def is_valid_unit(unit: str) -> bool:
     """True when ``unit`` is in the allowlist for service control.
 
     Centralised so both the listing endpoint and the action endpoint use the
     same rule. Anything outside this pattern is rejected at the boundary.
+    Canonicalizes first so an unsuffixed denylist name cannot slip through.
     """
+    unit = canonicalize_unit_name(unit)
     return unit not in _INTERNAL_UNITS and bool(_UNIT_PATTERN.match(unit))
 
 
@@ -304,6 +343,7 @@ async def show_unit(unit: str) -> UnitStatus:
     Always returns a value, never raises — a not-found / unreadable unit
     surfaces as ``load_state="not-found"`` so the UI can render the row.
     """
+    unit = canonicalize_unit_name(unit)
     if not is_valid_unit(unit):
         return UnitStatus(unit, "rejected", "unknown", "unknown", "", can_control=False)
 
@@ -631,7 +671,11 @@ async def control_unit(unit: str, action: str) -> ActionResult:
 
     Returns an :class:`ActionResult` whether or not the call succeeded so
     the route handler can shape an HTTP response from a single object.
+    Canonicalizes the unit name before every interlock so systemd aliases
+    (``radon-ib-gateway`` ≡ ``radon-ib-gateway.service``) cannot skip the
+    denylist, the broker restart lease, or the privileged-action gate.
     """
+    unit = canonicalize_unit_name(unit)
     if action not in ALLOWED_ACTIONS:
         return ActionResult(unit, action, False, f"action {action!r} is not allowed", -1)
 

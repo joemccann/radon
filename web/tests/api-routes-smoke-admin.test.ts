@@ -182,6 +182,22 @@ describe("POST /api/admin/services/[unit]/[action]", () => {
     );
   });
 
+  it("canonicalizes an unsuffixed unit name before forwarding", async () => {
+    mockRadonFetch.mockResolvedValueOnce({ ok: true, unit: "radon-api.service" });
+    const { POST } = await import(
+      "../app/api/admin/services/[unit]/[action]/route"
+    );
+    const res = await POST(
+      req("http://localhost/api/admin/services/radon-api/restart") as never,
+      { params: Promise.resolve({ unit: "radon-api", action: "restart" }) },
+    );
+    expect(res.status).toBe(200);
+    expect(mockRadonFetch).toHaveBeenCalledWith(
+      "/admin/services/radon-api.service/restart",
+      expect.objectContaining({ method: "POST", token: PRINCIPAL_TOKEN }),
+    );
+  });
+
   it("returns 400 when unit name is disallowed", async () => {
     const { POST } = await import(
       "../app/api/admin/services/[unit]/[action]/route"
