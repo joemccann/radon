@@ -38,6 +38,7 @@ function makeOrder(overrides: Partial<OpenOrder> = {}): OpenOrder {
     remaining: overrides.remaining ?? totalQuantity,
     avgFillPrice: overrides.avgFillPrice ?? null,
     tif: overrides.tif ?? "DAY",
+    outsideRth: overrides.outsideRth,
   };
 }
 
@@ -340,5 +341,67 @@ describe("summarizeOpenOrders", () => {
     expect(summary.openCount).toBe(2);
     expect(summary.partialCount).toBe(1);
     expect(summary.workingCount).toBe(1);
+  });
+
+  // 2026-09-02: after 20:00 ET the table showed three QUEUED chips
+  // (ARM/SPCX NEXT RTH + TQQQ DAY+EXT) while the header said WORKING 3.
+  // Working must match the mapped row status, not "any non-partial open order".
+  const OVERNIGHT_NOW = new Date("2026-08-28T01:00:00.000Z"); // 21:00 ET Thursday
+  const AH_NOW = new Date("2026-08-27T21:30:00.000Z"); // 17:30 ET Thursday
+
+  it("does not count overnight PreSubmitted rows as Working", () => {
+    const summary = summarizeOpenOrders(
+      [
+        makeOrder({
+          status: "PreSubmitted",
+          tif: "GTC",
+          symbol: "ARM",
+          contract: {
+            conId: 1, symbol: "ARM", secType: "OPT",
+            strike: 260, right: "C", expiry: "2026-09-18",
+          },
+        }),
+        makeOrder({
+          permId: 2,
+          status: "PreSubmitted",
+          tif: "GTC",
+          symbol: "SPCX",
+          contract: {
+            conId: 2, symbol: "SPCX", secType: "BAG",
+            strike: null, right: null, expiry: null,
+          },
+        }),
+        makeOrder({
+          permId: 3,
+          status: "PreSubmitted",
+          tif: "DAY",
+          outsideRth: true,
+          symbol: "TQQQ",
+          contract: {
+            conId: 3, symbol: "TQQQ", secType: "STK",
+            strike: null, right: null, expiry: null,
+          },
+        }),
+      ],
+      OVERNIGHT_NOW,
+    );
+    expect(summary.openCount).toBe(3);
+    expect(summary.workingCount).toBe(0);
+    expect(summary.partialCount).toBe(0);
+  });
+
+  it("counts a PreSubmitted EXT stock as Working only while after hours is live", () => {
+    const tqqq = makeOrder({
+      status: "PreSubmitted",
+      tif: "DAY",
+      outsideRth: true,
+      symbol: "TQQQ",
+      contract: {
+        conId: 3, symbol: "TQQQ", secType: "STK",
+        strike: null, right: null, expiry: null,
+      },
+    });
+    expect(summarizeOpenOrders([tqqq], AH_NOW).workingCount).toBe(1);
+    expect(summarizeOpenOrders([tqqq], OVERNIGHT_NOW).workingCount).toBe(0);
   });
 });
