@@ -2,7 +2,10 @@
 
 Radon is glued together from third-party services. The env-var matrix lives
 in [`.env.example`](../.env.example) and [`web/.env.example`](../web/.env.example).
-This page is why each service exists and where to sign up.
+This page is why each service exists and where to sign up. Keys entered in
+the profile Credentials tab live in the host-local encrypted secret store and
+WIN over these `.env` values at FastAPI startup — rotation and key-loss
+recovery: [`docs/operations.md`](operations.md) "Encrypted credential store".
 
 Production `.env` lives on the VPS at `/home/radon/radon-cloud/.env` (`0600`).
 That path is the sole legacy-directory exception during the monorepo

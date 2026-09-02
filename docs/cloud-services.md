@@ -370,8 +370,9 @@ The `data/*.json` files keep advancing on every cycle, so reverting is a no-data
 Public read-only MCP at **`https://app.radon.run/mcp`** (Streamable HTTP
 JSON-RPC), documented for consumers at radon.run `/developers/mcp`.
 
-- **Process**: `radon-mcp.service` runs `scripts/mcp_hosted/serve.py`
-  (FastMCP, stateless, loopback `127.0.0.1:8334`). Deliberately a DEDICATED
+- **Process**: `radon-mcp.service` runs `python -m scripts.mcp_hosted.serve`
+  (module invocation — a path invocation fails on import; FastMCP, stateless,
+  loopback `127.0.0.1:8334`). Deliberately a DEDICATED
   process — never a mount on `scripts/api/server.py` — so an anonymous MCP
   caller can never reach the FastAPI `/docs` / operator `/openapi.json`
   surface. Caddy intercepts `handle /mcp*` before the Next.js catch-all
@@ -385,7 +386,11 @@ JSON-RPC), documented for consumers at radon.run `/developers/mcp`.
   own token. No write tools; no `kb_*` corpus tools (operator journal/P&L
   stays on the checkout-only radon-kb stdio server); no service tokens.
 - **Env**: `CLERK_JWKS_URL` / `CLERK_ISSUER` / `ALLOWED_USER_IDS` from
-  `/etc/radon/env`. Optional overrides `RADON_MCP_{HOST,PORT,SITE_BASE,EDGE_BASE,APP_BASE,DEMO_BASE}`.
+  `/etc/radon/env`. Optional overrides `RADON_MCP_{HOST,PORT,SITE_BASE,EDGE_BASE,APP_BASE,DEMO_BASE}`
+  and `RADON_MCP_ALLOWED_HOSTS` (comma list; default
+  `app.radon.run,app.radon.run:*,127.0.0.1:*,localhost:*` — the SDK's
+  DNS-rebinding protection 421s any Host not on it, so a serving-host change
+  must update this list).
 - **First enable** (install-units only auto-enables new timers):
   `sudo systemctl enable --now radon-mcp.service`, then
   `curl -s -X POST https://app.radon.run/mcp -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'`.

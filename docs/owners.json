@@ -86,6 +86,18 @@
       ],
       "owners": ["docs/README.md"],
       "note": "GitHub front door. Root README.md is pinned by TestThinIndex, not this glob: a bare README.md glob matches every nested README via basename."
+    },
+    {
+      "id": "credential-store",
+      "globs": [
+        "scripts/secret_store.py",
+        "scripts/credentials_registry.py",
+        "scripts/api/routes/credentials.py",
+        "web/lib/setup/**",
+        "web/components/setup/**"
+      ],
+      "owners": ["docs/operations.md"],
+      "note": "Store-wins-over-.env precedence, master-key loss recovery, and setup-mode entry/exit are operator contracts (DOC-051)."
     }
   ]
 }

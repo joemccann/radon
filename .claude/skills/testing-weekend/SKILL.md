@@ -315,7 +315,8 @@ how this loop improves as the codebase grows.
 - **2026-08-22 (audit): verify the RUNNER TOOLCHAIN before trusting a red
   gate, the same way you verify the tree is clean.** One round reported
   `107 failed` and every failure was "async def functions are not natively
-  supported" — the shared venv (`~/radon-weekend/venv`) had pytest but no
+  supported" — the venv (then the shared `~/radon-weekend/venv`; now this
+  loop's `~/radon-weekend/venv-testing`) had pytest but no
   `pytest-asyncio`, which only CI installs. The same tree was `7216 passed`
   once the plugin was in. `node` was also absent from the agent's PATH until
   `~/.nvm/versions/node/<v>/bin` was prepended (the wrapper exports it, but a
@@ -349,7 +350,7 @@ how this loop improves as the codebase grows.
   group; cherry-pick back serially.** `git worktree add --detach /tmp/...`
   plus an APFS clone copy of `node_modules` (`cp -Rc <clone>/node_modules
   <wt>/node_modules` and the same for `web/`; fall back to `cp -R` off APFS)
-  gives each subagent a clean tree; the shared venv needs nothing. NEVER
+  gives each subagent a clean tree; the loop venv needs nothing. NEVER
   symlink `node_modules`: a symlink out of the worktree root breaks BOTH
   gates. vitest cannot resolve `@rollup/rollup-darwin-arm64` through the
   link's real path, and Turbopack hard-fails the Playwright webServer with
@@ -458,7 +459,9 @@ how this loop improves as the codebase grows.
   `pytest-xdist`.** Bare `git` is the only git here and its output was
   trustworthy (the 2026-08-16 rtk lesson applies only where rtk is installed —
   check `which rtk` first). `pytest-xdist` is CI-only like `pytest-asyncio`
-  was: install it in the shared venv before verifying anything under
+  was: install it in this loop's venv (`~/radon-weekend/venv-testing` — the
+  legacy shared `~/radon-weekend/venv` is unused since the per-loop split)
+  before verifying anything under
   `-n auto --dist loadfile` (a new shard is only proven with CI's flags).
   `setsid` does not exist on darwin: detach a long job with
   `subprocess.Popen(..., start_new_session=True)`, never `nohup setsid`.
