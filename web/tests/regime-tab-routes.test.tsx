@@ -79,6 +79,7 @@ describe.each([
   ["ats", "app/regime/ats/page.tsx"],
   ["short", "app/regime/short/page.tsx"],
   ["ivrank", "app/regime/ivrank/page.tsx"],
+  ["iv-spread", "app/regime/iv-spread/page.tsx"],
   ["vixts", "app/regime/vixts/page.tsx"],
   ["dispersion", "app/regime/dispersion/page.tsx"],
   ["streaks", "app/regime/streaks/page.tsx"],
@@ -176,6 +177,9 @@ vi.mock("../components/equibles/EquiblesShortCrowdingPanel", () => ({
 }));
 vi.mock("../components/IvRankPanel", () => ({
   default: () => <div data-testid="ivrank-panel-stub" />,
+}));
+vi.mock("../components/IvSpreadPanel", () => ({
+  default: () => <div data-testid="iv-spread-panel-stub" />,
 }));
 vi.mock("../components/VixTsPanel", () => ({
   default: () => <div data-testid="vixts-panel-stub" />,
@@ -536,6 +540,21 @@ describe("RegimePanel — tab is URL-driven", () => {
     const { container } = render(<RegimePanel prices={{}} />);
     within(container).getByRole("button", { name: /^IV RANK$/ }).click();
     expect(pushSpy).toHaveBeenCalledWith("/regime/ivrank");
+  });
+
+  it("renders the IV SPREAD panel when pathname is /regime/iv-spread", () => {
+    mockedPathname = "/regime/iv-spread";
+    const { container } = render(<RegimePanel prices={{}} />);
+    expect(within(container).getByTestId("iv-spread-panel-stub")).toBeTruthy();
+    // "iv-spread" shares a prefix with "ivrank": neither may swallow the other.
+    expect(within(container).queryByTestId("ivrank-panel-stub")).toBeNull();
+  });
+
+  it("clicking IV SPREAD tab pushes /regime/iv-spread", () => {
+    mockedPathname = "/regime/cri";
+    const { container } = render(<RegimePanel prices={{}} />);
+    within(container).getByRole("button", { name: /^IV SPREAD$/ }).click();
+    expect(pushSpy).toHaveBeenCalledWith("/regime/iv-spread");
   });
 
   it("renders the VIX TS panel when pathname is /regime/vixts", () => {
