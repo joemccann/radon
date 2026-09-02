@@ -1017,3 +1017,64 @@ def test_rewritten_formatter_class_is_defined_once():
         if ln.startswith("class TestARewrittenCloneFormatterCannotAuthorTheIssue")
     ]
     assert len(defs) == 1, defs
+
+
+# Synthetic credential literals BUILT at runtime so no well-known prefix sits
+# in the tree as a contiguous secret-shaped literal. None is a credential.
+def _credential_literals() -> dict[str, str]:
+    return {
+        "anthropic": "sk-" + "ant-" + "api03-" + "NOTAREALKEY" * 4,
+        "github_pat_classic": "ghp" + "_" + "NOTAREALTOKEN" + "0" * 23,
+        "github_pat_fine": "github" + "_pat_" + "NOTAREALTOKEN" + "0" * 30,
+        "slack_bot": "xox" + "b-" + "0000000000-" + "NOTAREALTOKEN",
+        "aws_access_key": "AKIA" + "NOTAREALKEY00000",
+        "jwt": "eyJ" + "hbGciOiJub25lIn0" + "." + "eyJ" + "zdWIiOiJub3RyZWFsIn0"
+        + "." + "NOT-A-REAL-SIG_123",
+    }
+
+
+class TestSanitizeCredentialLiterals:
+    @pytest.mark.parametrize("kind", sorted(_credential_literals()))
+    def test_bare_credential_literal_is_redacted(self, kind: str):
+        literal = _credential_literals()[kind]
+        out = nif.sanitize(f"gitleaks matched {literal} in the scanner output")
+        assert literal not in out, (kind, out)
+        assert "[REDACTED]" in out
+        assert "gitleaks matched" in out
+
+    def test_ordinary_prose_and_shas_are_untouched(self):
+        text = (
+            "Nothing went wrong this audit phase. The audited SHA "
+            "db25990d3c1e4b7a9f0e2d6c8b1a5f4e3d2c1b0a did not advance; "
+            "short SHA 1f04011f. Ask about the key rotation policy."
+        )
+        assert nif.sanitize(text) == text
+
+
+class TestSecurityBashSanitizesCredentialLiterals:
+    def test_bash_sanitizer_redacts_bare_credential_literals(self, tmp_path: Path):
+        src = (REPO / "scripts" / "security_nightly.sh").read_text(encoding="utf-8")
+        start = src.index("_sanitize_issue_text() {")
+        end = src.index("\nreport() {", start)
+        fns = src[start:end]
+        literals = _credential_literals()
+        detail = "scanner tail: " + " ".join(literals.values()) + " sha 1f04011f"
+        script = tmp_path / "run.sh"
+        script.write_text(
+            "#!/usr/bin/env bash\nset -euo pipefail\nISSUE_SANITIZE=1\n"
+            + fns
+            + f"\n_format_issue_body audit OK {detail!r}\n",
+            encoding="utf-8",
+        )
+        proc = subprocess.run(
+            ["/bin/bash", str(script)],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert proc.returncode == 0, proc.stderr
+        for kind, literal in literals.items():
+            assert literal not in proc.stdout, (kind, proc.stdout)
+        assert "[REDACTED]" in proc.stdout
+        assert "1f04011f" in proc.stdout
+        assert "scanner tail:" in proc.stdout

@@ -26,6 +26,7 @@ from __future__ import annotations
 import os
 import re
 import sqlite3
+import stat
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -42,6 +43,8 @@ _VALUE_MAX_BYTES = 8192
 _ACTOR_MAX_LEN = 64
 _NONCE_BYTES = 12
 _KEY_BYTES = 32
+# Below this length a last-4 hint is a meaningful fraction of a password.
+_HINT_MIN_LEN = 20
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS secrets (
@@ -80,9 +83,17 @@ def _now() -> str:
 
 
 def _mask(value: str) -> str:
-    if len(value) >= 8:
+    if len(value) >= _HINT_MIN_LEN:
         return "\u2022" * 4 + value[-4:]
     return "\u2022" * 4
+
+
+def _check_owner_only(path: Path, what: str) -> None:
+    mode = stat.S_IMODE(os.stat(path).st_mode)
+    if mode & 0o077:
+        raise SecretStoreError(
+            f"{what} {path} is mode {mode:04o}; must be 0600 (owner-only)"
+        )
 
 
 class SecretStore:
@@ -118,6 +129,7 @@ class SecretStore:
                     )
                 return key
         if self._key_path.is_file():
+            _check_owner_only(self._key_path, "key file")
             key = self._key_path.read_bytes()
             if len(key) != _KEY_BYTES:
                 raise SecretStoreError(
@@ -140,6 +152,8 @@ class SecretStore:
 
     def _connect(self) -> sqlite3.Connection:
         existed = self._db_path.is_file()
+        if existed:
+            _check_owner_only(self._db_path, "secret store")
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self._db_path)
         conn.executescript(_SCHEMA)
