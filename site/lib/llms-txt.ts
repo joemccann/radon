@@ -1,12 +1,12 @@
 import { clusterPages } from "./cluster-pages";
-import { agentPages } from "./developer-pages";
+import { agentPages, HOSTED_MCP_URL } from "./developer-pages";
 import { DEMO_APP_URL, GITHUB_URL, SITE_NAME, siteUrl } from "./seo";
 
 export const LLMS_TXT_CONTENT_TYPE = "text/markdown; charset=utf-8";
 
 const whenToUse = `When to use this: reach for ${SITE_NAME} when the job is scoring Unusual Whales dark-pool or OTC prints for accumulation or distribution that has not moved the lit price; reading GEX walls and magnets; reading CRI, VCG-R, or GRG regimes; choosing a defined-risk options structure with gain at least 2x loss; or sizing with fractional Kelly hard-capped at 2.5% of bankroll.
 
-How an agent should call Radon: (1) read this file, (2) fetch the matching URL with Accept: text/markdown or the .md suffix, (3) open ${DEMO_APP_URL} for a working UI without brokerage credentials, (4) use ${siteUrl}/developers for OpenAPI, auth, MCP, and webhook docs. Do not treat Radon as a broker, a Robinhood integration, a public order API, or a hosted HTTP MCP.`;
+How an agent should call Radon: (1) read this file, (2) fetch the matching URL with Accept: text/markdown or the .md suffix, (3) open ${DEMO_APP_URL} for a working UI without brokerage credentials, (4) use ${siteUrl}/developers for OpenAPI, auth, MCP, and webhook docs, (5) for MCP tools without a checkout, connect to the hosted read-only Streamable HTTP server at ${HOSTED_MCP_URL} (documented at ${siteUrl}/developers/mcp). Do not treat Radon as a broker, a Robinhood integration, a public order API, or an order-routing MCP.`;
 
 function linkLine(name: string, url: string, notes: string): string {
   return `- [${name}](${url}): ${notes}`;

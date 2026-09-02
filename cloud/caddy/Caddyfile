@@ -68,6 +68,23 @@
         }
     }
 
+    # Hosted MCP (issue #232 chunk 1): Streamable HTTP JSON-RPC served by the
+    # DEDICATED radon-mcp.service process on 8334 — never the FastAPI app on
+    # 8321 and never Next.js — so an anonymous MCP caller can never reach the
+    # operator /docs or /openapi.json surface through this route. `handle`
+    # (not handle_path): the MCP app serves at /mcp itself. This path is
+    # POST-only JSON-RPC with no idempotency key, so no lb_try_* retry loop
+    # here — Caddy's default is zero retries.
+    handle /mcp* {
+        reverse_proxy 127.0.0.1:8334 {
+            transport http {
+                dial_timeout 5s
+                response_header_timeout 30s
+                read_timeout 300s
+            }
+        }
+    }
+
     # Tier-2 edge health surface. Reached Caddy->daemon DIRECTLY (never via
     # Next.js), so the health surface never re-enters the radon-nextjs cascade.
     # /edge-health/ping is a static 200 served entirely by Caddy — the never-502

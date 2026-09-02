@@ -65,6 +65,7 @@ EXPECTED_SERVICE_FILES = [
     "radon-garch.service",
     "radon-garch.timer",
     "radon-health.service",
+    "radon-mcp.service",
     "radon-host-metrics.service",
     "radon-host-metrics.timer",
     "radon-ib-watchdog.service",

@@ -365,6 +365,34 @@ The migration was implemented as dual-write at every step — every prior JSON r
 
 The `data/*.json` files keep advancing on every cycle, so reverting is a no-data-loss change.
 
+## Hosted MCP (`radon-mcp.service`, issue #232 chunk 1)
+
+Public read-only MCP at **`https://app.radon.run/mcp`** (Streamable HTTP
+JSON-RPC), documented for consumers at radon.run `/developers/mcp`.
+
+- **Process**: `radon-mcp.service` runs `scripts/mcp_hosted/serve.py`
+  (FastMCP, stateless, loopback `127.0.0.1:8334`). Deliberately a DEDICATED
+  process — never a mount on `scripts/api/server.py` — so an anonymous MCP
+  caller can never reach the FastAPI `/docs` / operator `/openapi.json`
+  surface. Caddy intercepts `handle /mcp*` before the Next.js catch-all
+  (same pattern as `/api/ib/*`).
+- **Auth rungs** (`scripts/mcp_hosted/auth.py`, default deny): anonymous →
+  `radon_identity` / `radon_docs` / `radon_health` only; Clerk demo-trial
+  token (`metadata.demoRole`) → `demo_*` reads proxied to demo.radon.run
+  with the caller's own token; allowlisted operator token (the same
+  `ALLOWED_USER_IDS` FastAPI enforces, failing CLOSED when empty) →
+  `operator_*` reads proxied to the local Next.js routes with the caller's
+  own token. No write tools; no `kb_*` corpus tools (operator journal/P&L
+  stays on the checkout-only radon-kb stdio server); no service tokens.
+- **Env**: `CLERK_JWKS_URL` / `CLERK_ISSUER` / `ALLOWED_USER_IDS` from
+  `/etc/radon/env`. Optional overrides `RADON_MCP_{HOST,PORT,SITE_BASE,EDGE_BASE,APP_BASE,DEMO_BASE}`.
+- **First enable** (install-units only auto-enables new timers):
+  `sudo systemctl enable --now radon-mcp.service`, then
+  `curl -s -X POST https://app.radon.run/mcp -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'`.
+- **`mcp.radon.run` does not exist** (no DNS record, no Caddy site block);
+  the published URL is the path-based one above. Moving to a dedicated host
+  needs a human DNS record first, then a Caddyfile site block.
+
 ## MenthorQ Playwright session refresh
 
 When MenthorQ's session cookie rotates, the headless Playwright run will fail. To re-establish the session:

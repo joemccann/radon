@@ -1,0 +1,30 @@
+[Unit]
+Description=Radon hosted MCP (Streamable HTTP at app.radon.run/mcp)
+# No Requires=/BindsTo=/PartOf= on any radon-* unit: the hosted MCP reads
+# through the public HTTP surfaces (radon.run, demo.radon.run, the local
+# Next.js) with the caller's own Clerk token and must never join the trading
+# cascade. It only orders after the network.
+After=network-online.target
+Wants=network-online.target
+# Park a crash loop as `failed` so the unit watchdog can see it.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=radon
+WorkingDirectory=/home/radon/radon
+# CLERK_JWKS_URL / CLERK_ISSUER / ALLOWED_USER_IDS come from the canonical
+# env contract; systemd EnvironmentFile is a literal parser, so $-containing
+# values are safe (feedback_env_file_shell_expansion.md).
+EnvironmentFile=/etc/radon/env
+Environment=RADON_MCP_HOST=127.0.0.1
+Environment=RADON_MCP_PORT=8334
+TasksMax=64
+MemoryMax=512M
+ExecStart=/home/radon/radon/.venv/bin/python -m scripts.mcp_hosted.serve
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

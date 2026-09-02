@@ -118,6 +118,36 @@ class TestRouting:
             "reverse_proxy must dial 127.0.0.1, not localhost"
         )
 
+    def test_hosted_mcp_route_to_dedicated_process(self, caddy_dir):
+        """Issue #232 chunk 1: /mcp* must reach the dedicated radon-mcp
+        process on 8334 — never the FastAPI app (whose /docs and operator
+        /openapi.json must stay unreachable to anonymous callers) and never
+        the Next.js catch-all."""
+        content = read_caddyfile(caddy_dir)
+        assert re.search(r"handle\s+/mcp\*", content), "no /mcp* handle block"
+        block = handle_block(content, "/mcp*")
+        assert "127.0.0.1:8334" in block
+        assert "127.0.0.1:8321" not in block, "/mcp* must never proxy to FastAPI"
+        assert "127.0.0.1:3000" not in block, "/mcp* must never fall through to Next.js"
+
+    def test_hosted_mcp_keeps_the_path_prefix(self, caddy_dir):
+        """The MCP app serves at /mcp itself (streamable_http_path), so the
+        route must be `handle`, not the prefix-stripping `handle_path`."""
+        content = read_caddyfile(caddy_dir)
+        match = re.search(r"(handle_path|handle)\s+/mcp\*", content)
+        assert match is not None
+        assert match.group(1) == "handle", (
+            "/mcp* must use handle (not handle_path); the MCP app expects the "
+            "/mcp prefix to survive"
+        )
+
+    def test_hosted_mcp_has_no_retry_loop(self, caddy_dir):
+        """POST-only JSON-RPC with no idempotency key: a retry loop could
+        replay a tool call. Caddy's default is zero retries — keep it."""
+        content = read_caddyfile(caddy_dir)
+        block = reverse_proxy_block(content, "127.0.0.1:8334")
+        assert "lb_try_duration" not in block
+
     def test_edge_health_status_maps_dial_errors_to_200(self, caddy_dir):
         content = read_caddyfile(caddy_dir)
         block = reverse_proxy_block(content, "127.0.0.1:8330")
