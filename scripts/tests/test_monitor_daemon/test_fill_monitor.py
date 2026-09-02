@@ -17,6 +17,18 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from monitor_daemon.handlers.fill_monitor import FillMonitorHandler
 
 
+@pytest.fixture(autouse=True)
+def _disable_orders_mirror(monkeypatch):
+    """Persist-to-open_orders is covered in TestFillMonitorOrdersSnapshotMirror.
+    Default it off so execute() never hits ib_orders.save_orders in unit tests.
+    """
+    monkeypatch.setattr(
+        FillMonitorHandler,
+        "_mirror_ib_orders_snapshot",
+        lambda self, client: None,
+    )
+
+
 def make_mock_client(trades=None):
     """Create a mock IBClient for fill monitor tests."""
     mock_client = MagicMock()
@@ -152,6 +164,81 @@ class TestFillMonitorExecute:
 
             assert result["complete_fills"] == 1
             assert result["completed"][0]["order_id"] == 5
+
+
+class TestFillMonitorOrdersSnapshotMirror:
+    """Fills must also replace Turso open_orders/executed_orders.
+
+    fill_monitor already journals the fill, but /orders reads those two
+    tables. After RTH the autonomous ib_orders --sync loop is dark, so an
+    EXT fill (AVGO SELL 1000 @ 355 at 16:24 ET 2026-09-02) stayed WORKING
+    in the UI until a manual SYNC NOW.
+    """
+
+    def test_complete_fill_mirrors_orders_snapshot(self):
+        with patch("monitor_daemon.handlers.fill_monitor.IBClient") as mock_cls:
+            mock_client = make_mock_client(trades=[])
+            mock_cls.return_value = mock_client
+            mock_client.get_managed_accounts.return_value = ["DU123"]
+            fill = MagicMock()
+            fill.execution.orderId = 5
+            mock_client.get_fills.return_value = [fill]
+
+            handler = FillMonitorHandler(send_notifications=False)
+            handler.known_orders = {
+                5: {
+                    "symbol": "AVGO",
+                    "contract": "AVGO",
+                    "action": "SELL",
+                    "quantity": 1000,
+                    "filled": 0,
+                    "limit": 355.0,
+                }
+            }
+            with patch.object(
+                FillMonitorHandler, "_mirror_ib_orders_snapshot"
+            ) as mock_mirror:
+                result = handler.execute()
+
+            assert result["complete_fills"] == 1
+            mock_mirror.assert_called_once_with(mock_client)
+
+    def test_partial_fill_mirrors_orders_snapshot(self):
+        with patch("monitor_daemon.handlers.fill_monitor.IBClient") as mock_cls:
+            mock_trade = MagicMock()
+            mock_trade.order.orderId = 5
+            mock_trade.order.action = "SELL"
+            mock_trade.order.totalQuantity = 1000
+            mock_trade.order.lmtPrice = 355.0
+            mock_trade.orderStatus.status = "Submitted"
+            mock_trade.orderStatus.filled = 400
+            mock_trade.orderStatus.remaining = 600
+            mock_trade.orderStatus.avgFillPrice = 355.0
+            mock_trade.contract.symbol = "AVGO"
+            mock_trade.contract.localSymbol = "AVGO"
+            mock_client = make_mock_client(trades=[mock_trade])
+            mock_cls.return_value = mock_client
+
+            handler = FillMonitorHandler(send_notifications=False)
+            handler.known_orders = {5: {"filled": 0}}
+            with patch.object(
+                FillMonitorHandler, "_mirror_ib_orders_snapshot"
+            ) as mock_mirror:
+                result = handler.execute()
+
+            assert result["partial_fills"] == 1
+            mock_mirror.assert_called_once_with(mock_client)
+
+    def test_no_fill_does_not_mirror(self):
+        with patch("monitor_daemon.handlers.fill_monitor.IBClient") as mock_cls:
+            mock_client = make_mock_client(trades=[])
+            mock_cls.return_value = mock_client
+            handler = FillMonitorHandler(send_notifications=False)
+            with patch.object(
+                FillMonitorHandler, "_mirror_ib_orders_snapshot"
+            ) as mock_mirror:
+                handler.execute()
+            mock_mirror.assert_not_called()
 
     def test_disconnects_after_execution(self):
         """Handler disconnects from IB after execution."""

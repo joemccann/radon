@@ -19,6 +19,7 @@ import { upsertEnvContent, writeSetupEnvFiles } from "../lib/setup/envFiles";
 const CLERK_ENV_KEYS = [
   "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
   "CLERK_SECRET_KEY",
+  "RADON_SETUP_COMPLETE",
 ] as const;
 
 let savedEnv: Record<string, string | undefined> = {};
@@ -34,6 +35,15 @@ const FASTAPI_REGISTRY = {
   ],
   generated_at: "2026-09-01T00:00:00Z",
 };
+
+/** Temp monorepo root the complete route accepts (package.json + web/package.json). */
+async function makeRepoRoot(prefix: string): Promise<string> {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
+  await fs.mkdir(path.join(tmp, "web"));
+  await fs.writeFile(path.join(tmp, "package.json"), "{}");
+  await fs.writeFile(path.join(tmp, "web", "package.json"), "{}");
+  return tmp;
+}
 
 beforeEach(() => {
   savedEnv = {};
@@ -56,11 +66,15 @@ afterEach(async () => {
 });
 
 describe("setup mode detection", () => {
-  it("active only when BOTH Clerk keys are absent", () => {
+  it("active only when BOTH Clerk keys are absent and setup is not complete", async () => {
+    const { isSetupMode, isAuthMisconfigured } = await import("../lib/setup/setupMode");
     expect(isSetupMode(undefined, undefined)).toBe(true);
     expect(isSetupMode("", "  ")).toBe(true);
     expect(isSetupMode("pk_live_x", undefined)).toBe(false);
     expect(isSetupMode(undefined, "sk_live_x")).toBe(false);
+    process.env.RADON_SETUP_COMPLETE = "1";
+    expect(isSetupMode()).toBe(false);
+    expect(isAuthMisconfigured()).toBe(true);
   });
 
   it("setup paths are the page and its API only", () => {
@@ -205,6 +219,9 @@ describe("setup API routes", () => {
     process.env.RADON_SETUP_TOKEN = "tok-1";
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "radon-setup-"));
     await fs.mkdir(path.join(tmp, "web"));
+    await fs.writeFile(path.join(tmp, "package.json"), "{}");
+    await fs.writeFile(path.join(tmp, "web", "package.json"), "{}");
+    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(path.join(tmp, "web"));
     const puts: Array<{ path: string; body: unknown }> = [];
     vi.doMock("@/lib/radonApi", () => ({
       radonFetch: vi.fn(async (apiPath: string, init?: { method?: string; body?: string }) => {
@@ -218,43 +235,32 @@ describe("setup API routes", () => {
       },
       radonErrorDetailText: () => "",
     }));
-    // Real env-file writer, pointed at the temp repo root.
-    vi.doMock("@/lib/setup/envFiles", async (importOriginal) => {
-      const actual = await importOriginal<typeof import("../lib/setup/envFiles")>();
-      return {
-        ...actual,
-        writeSetupEnvFiles: (values: Record<string, string>) => actual.writeSetupEnvFiles(values, tmp),
-      };
-    });
-    try {
-      const route = await import("../app/api/setup/complete/route");
-      const res = await route.POST(
-        new Request("http://x/api/setup/complete", {
-          method: "POST",
-          body: JSON.stringify({
-            token: "tok-1",
-            services: {
-              clerk: { CLERK_SECRET_KEY: "sk_live_1" },
-              unusual_whales: { UW_TOKEN: "uw-1" },
-            },
-          }),
+    const route = await import("../app/api/setup/complete/route");
+    const res = await route.POST(
+      new Request("http://x/api/setup/complete", {
+        method: "POST",
+        body: JSON.stringify({
+          token: "tok-1",
+          services: {
+            clerk: { CLERK_SECRET_KEY: "sk_live_1" },
+            unusual_whales: { UW_TOKEN: "uw-1" },
+          },
         }),
-      );
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { outcomes: unknown[]; written: string[] };
-      expect(puts.map((p) => p.path).sort()).toEqual([
-        "/credentials/clerk",
-        "/credentials/unusual_whales",
-      ]);
-      expect(puts[0].body).toMatchObject({ updated_by: "setup-wizard" });
-      expect(body.outcomes).toHaveLength(2);
-      expect(body.written.length).toBeGreaterThan(0);
-      const root = await fs.readFile(path.join(tmp, ".env"), "utf8");
-      expect(root).toContain("UW_TOKEN='uw-1'");
-    } finally {
-      vi.doUnmock("@/lib/radonApi");
-      vi.doUnmock("@/lib/setup/envFiles");
-    }
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { outcomes: unknown[]; written: string[] };
+    expect(puts.map((p) => p.path).sort()).toEqual([
+      "/credentials/clerk",
+      "/credentials/unusual_whales",
+    ]);
+    expect(puts[0].body).toMatchObject({ updated_by: "setup-wizard" });
+    expect(body.outcomes).toHaveLength(2);
+    expect(body.written.length).toBeGreaterThan(0);
+    const root = await fs.readFile(path.join(tmp, ".env"), "utf8");
+    expect(root).toContain("UW_TOKEN='uw-1'");
+    cwdSpy.mockRestore();
+    vi.doUnmock("@/lib/radonApi");
   });
 });
 
@@ -262,13 +268,18 @@ describe("setup completion writes only registry-known, backend-accepted values",
   type Reply = { status: number; detail?: unknown } | Record<string, unknown>;
   let replies: Record<string, Reply>;
   let calls: Array<{ path: string; method: string; body: unknown }>;
+  let cwdSpy: ReturnType<typeof vi.spyOn>;
   const writeSetupEnvFiles = vi.fn(async () => ["/repo/.env"]);
 
-  beforeEach(() => {
+  beforeEach(async () => {
     process.env.RADON_SETUP_TOKEN = "tok-1";
     calls = [];
     replies = { "GET /credentials": FASTAPI_REGISTRY };
     writeSetupEnvFiles.mockClear();
+    // The completion latch writes a marker under the repo root: keep that in a
+    // temp root, never the checkout running the tests.
+    const tmp = await makeRepoRoot("radon-setup-registry-");
+    cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(path.join(tmp, "web"));
     vi.doMock("@/lib/setup/envFiles", async (importOriginal) => ({
       ...(await importOriginal<typeof import("../lib/setup/envFiles")>()),
       writeSetupEnvFiles,
@@ -297,6 +308,7 @@ describe("setup completion writes only registry-known, backend-accepted values",
   });
 
   afterEach(() => {
+    cwdSpy.mockRestore();
     vi.doUnmock("@/lib/setup/envFiles");
     vi.doUnmock("@/lib/radonApi");
   });
@@ -520,5 +532,73 @@ describe("setup wizard wire contract", () => {
       services: { clerk: { CLERK_SECRET_KEY: "sk_live_new" } },
     });
     expect(document.body.innerHTML).not.toContain("sk_live_new");
+  });
+});
+
+describe("setup completion latch (REL-192)", () => {
+  it("setup complete + blank Clerk yields auth-misconfigured, not /setup", async () => {
+    process.env.RADON_SETUP_COMPLETE = "1";
+    const { handleSetupModeGate, handleAuthMisconfiguredGate } = await import("../middleware");
+    expect(handleSetupModeGate(new NextRequest("http://localhost/orders"))).toBeNull();
+    const api = handleAuthMisconfiguredGate(
+      new NextRequest("http://localhost/api/portfolio"),
+    );
+    expect(api?.status).toBe(503);
+    const page = handleAuthMisconfiguredGate(new NextRequest("http://localhost/orders"));
+    expect(page?.status).toBe(503);
+  });
+
+  it("consumed setup token rejects replay", async () => {
+    process.env.RADON_SETUP_TOKEN = "tok-1";
+    const { verifySetupToken, consumeSetupToken } = await import("../lib/setup/setupToken");
+    expect(verifySetupToken("tok-1")).toBe(true);
+    consumeSetupToken();
+    expect(verifySetupToken("tok-1")).toBe(false);
+  });
+
+  it("complete writes marker, consumes token, and rejects invalid repo root", async () => {
+    process.env.RADON_SETUP_TOKEN = "tok-1";
+    vi.doMock("@/lib/radonApi", () => ({
+      radonFetch: vi.fn(async () => ({ validation: { status: "valid", message: "" } })),
+      RadonApiError: class RadonApiError extends Error {
+        status = 500;
+        detail: unknown = null;
+      },
+      radonErrorDetailText: () => "",
+    }));
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "radon-setup-latch-"));
+    await fs.mkdir(path.join(tmp, "web"));
+    await fs.writeFile(path.join(tmp, "package.json"), "{}");
+    await fs.writeFile(path.join(tmp, "web", "package.json"), "{}");
+    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(path.join(tmp, "web"));
+    const route = await import("../app/api/setup/complete/route");
+    const res = await route.POST(
+      new Request("http://x/api/setup/complete", {
+        method: "POST",
+        body: JSON.stringify({
+          token: "tok-1",
+          services: { clerk: { CLERK_SECRET_KEY: "sk_live_1" } },
+        }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    await fs.access(path.join(tmp, ".radon", "setup-complete"));
+    const { verifySetupToken } = await import("../lib/setup/setupToken");
+    expect(verifySetupToken("tok-1")).toBe(false);
+    cwdSpy.mockRestore();
+    vi.doUnmock("@/lib/radonApi");
+  });
+
+  it("setup API returns 403 when auth is misconfigured", async () => {
+    process.env.RADON_SETUP_COMPLETE = "1";
+    process.env.RADON_SETUP_TOKEN = "tok-1";
+    const route = await import("../app/api/setup/complete/route");
+    const res = await route.POST(
+      new Request("http://x/api/setup/complete", {
+        method: "POST",
+        body: JSON.stringify({ token: "tok-1", services: { clerk: { CLERK_SECRET_KEY: "x" } } }),
+      }),
+    );
+    expect(res.status).toBe(403);
   });
 });

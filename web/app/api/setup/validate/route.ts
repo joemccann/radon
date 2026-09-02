@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { radonFetch, RadonApiError } from "@/lib/radonApi";
 import { getRequestId, jsonApiError, setNoStoreResponseHeaders } from "@/lib/apiContracts";
-import { isSetupMode } from "@/lib/setup/setupMode";
+import { isSetupMode, isAuthMisconfigured } from "@/lib/setup/setupMode";
 import { setupTokenRejection } from "@/lib/setup/setupToken";
 
 /**
@@ -21,6 +21,17 @@ export const radonCapability = "internal";
 
 export async function POST(request: Request): Promise<Response> {
   const requestId = getRequestId();
+  if (isAuthMisconfigured()) {
+    return setNoStoreResponseHeaders(
+      jsonApiError({
+        message: "Setup already completed. Restart the stack to load authentication keys.",
+        status: 403,
+        code: "SETUP_ALREADY_COMPLETE",
+        requestId,
+      }),
+      requestId,
+    );
+  }
   if (!isSetupMode()) {
     return setNoStoreResponseHeaders(
       jsonApiError({ message: "Not found", status: 404, code: "NOT_FOUND", requestId }),

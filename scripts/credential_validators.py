@@ -32,6 +32,11 @@ from urllib.parse import urlparse
 import requests
 
 try:
+    import credential_redaction
+except ImportError:  # pragma: no cover
+    from scripts import credential_redaction
+
+try:
     import credentials_registry
 except ImportError:  # pragma: no cover - depends on which root is on sys.path
     from scripts import credentials_registry
@@ -57,7 +62,11 @@ class ValidationResult:
         return self.status == "invalid"
 
     def to_dict(self) -> Dict[str, str]:
-        return {"status": self.status, "message": self.message}
+        return scrub_validation_message({"status": self.status, "message": self.message})
+
+
+def scrub_validation_message(payload: Dict[str, str]) -> Dict[str, str]:
+    return credential_redaction.scrub_credential_text(payload)
 
 
 def _verdict_from_status_code(code: int, vendor: str) -> ValidationResult:
@@ -172,12 +181,16 @@ def _validate_pushover(values: Dict[str, str]) -> ValidationResult:
 
 
 def _validate_turso(values: Dict[str, str]) -> ValidationResult:
-    url = values["TURSO_DB_URL"].strip()
+    raw_url = values["TURSO_DB_URL"].strip()
+    if raw_url.startswith("http://"):
+        return ValidationResult("invalid", "Turso URL must use HTTPS")
+    url = raw_url
     if url.startswith("libsql://"):
         url = "https://" + url[len("libsql://") :]
     # Egress pin: this probe sends TURSO_AUTH_TOKEN (which _merged_values may
     # have filled from the store/env) as a Bearer header, so the destination
-    # is not caller preference — https + *.turso.io only.
+    # is not caller preference — https + *.turso.io only, and when a database
+    # host is configured the probe may only go to that host.
     parsed = urlparse(url)
     host = (parsed.hostname or "").lower()
     if parsed.scheme != "https" or not host.endswith(".turso.io"):
@@ -185,6 +198,17 @@ def _validate_turso(values: Dict[str, str]) -> ValidationResult:
             "invalid",
             "TURSO_DB_URL must be a libsql:// or https:// URL on *.turso.io",
         )
+    configured = os.environ.get("TURSO_DB_URL", "").strip()
+    if configured:
+        cfg = configured
+        if cfg.startswith("libsql://"):
+            cfg = "https://" + cfg[len("libsql://") :]
+        expected_host = urlparse(cfg).netloc
+        if expected_host and parsed.netloc != expected_host:
+            return ValidationResult(
+                "invalid",
+                "Turso URL host does not match the configured database host",
+            )
     return _post(
         url.rstrip("/") + "/v2/pipeline",
         {"Authorization": f"Bearer {values['TURSO_AUTH_TOKEN']}"},
@@ -214,7 +238,9 @@ def _run_login_subprocess(
         timeout=SLOW_LOGIN_TIMEOUT_S,
     )
     if proc.returncode != 0:
-        detail = (proc.stderr or proc.stdout or "").strip()[-200:]
+        detail = scrub_validation_message(
+            {"message": (proc.stderr or proc.stdout or "").strip()[-200:]}
+        )["message"]
         return ValidationResult(
             "error", f"login check for {service_id} failed to run: {detail}"
         )
@@ -222,7 +248,10 @@ def _run_login_subprocess(
     status = verdict.get("status")
     if status not in _STATUSES:
         raise ValueError(f"login check returned unknown status {status!r}")
-    return ValidationResult(status, str(verdict.get("message", "")))
+    return ValidationResult(
+        status,
+        scrub_validation_message({"message": str(verdict.get("message", ""))})["message"],
+    )
 
 
 def _validate_menthorq(values: Dict[str, str]) -> ValidationResult:

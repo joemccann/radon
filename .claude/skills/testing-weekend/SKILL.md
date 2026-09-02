@@ -315,7 +315,8 @@ how this loop improves as the codebase grows.
 - **2026-08-22 (audit): verify the RUNNER TOOLCHAIN before trusting a red
   gate, the same way you verify the tree is clean.** One round reported
   `107 failed` and every failure was "async def functions are not natively
-  supported" — the shared venv (`~/radon-weekend/venv`) had pytest but no
+  supported" — the venv (then the shared `~/radon-weekend/venv`; now this
+  loop's `~/radon-weekend/venv-testing`) had pytest but no
   `pytest-asyncio`, which only CI installs. The same tree was `7216 passed`
   once the plugin was in. `node` was also absent from the agent's PATH until
   `~/.nvm/versions/node/<v>/bin` was prepended (the wrapper exports it, but a
@@ -349,7 +350,7 @@ how this loop improves as the codebase grows.
   group; cherry-pick back serially.** `git worktree add --detach /tmp/...`
   plus an APFS clone copy of `node_modules` (`cp -Rc <clone>/node_modules
   <wt>/node_modules` and the same for `web/`; fall back to `cp -R` off APFS)
-  gives each subagent a clean tree; the shared venv needs nothing. NEVER
+  gives each subagent a clean tree; the loop venv needs nothing. NEVER
   symlink `node_modules`: a symlink out of the worktree root breaks BOTH
   gates. vitest cannot resolve `@rollup/rollup-darwin-arm64` through the
   link's real path, and Turbopack hard-fails the Playwright webServer with
@@ -458,7 +459,9 @@ how this loop improves as the codebase grows.
   `pytest-xdist`.** Bare `git` is the only git here and its output was
   trustworthy (the 2026-08-16 rtk lesson applies only where rtk is installed —
   check `which rtk` first). `pytest-xdist` is CI-only like `pytest-asyncio`
-  was: install it in the shared venv before verifying anything under
+  was: install it in this loop's venv (`~/radon-weekend/venv-testing` — the
+  legacy shared `~/radon-weekend/venv` is unused since the per-loop split)
+  before verifying anything under
   `-n auto --dist loadfile` (a new shard is only proven with CI's flags).
   `setsid` does not exist on darwin: detach a long job with
   `subprocess.Popen(..., start_new_session=True)`, never `nohup setsid`.
@@ -787,3 +790,29 @@ how this loop improves as the codebase grows.
   agent an `/ib/*` or `radon-ib-gateway.service` route must say: stub
   `remote_gateway_action` / `control_unit`, set `GATEWAY_MODE=cloud`, never
   call the route un-stubbed.
+- **2026-09-02 (remediate): the T-379 exit recurred VERBATIM with the rail in
+  the prompt — detection is not prevention, and the fix that sticks is
+  structural.** Tonight's audit again answered a mid-run nudge with text at
+  "gates 53%" and exited 0 at four minutes; the wrapper correctly posted
+  INCOMPLETE (T-379's check works) but the night's audit was still forfeit
+  (T-380: the wrapper now retries an INCOMPLETE phase once). Two things that
+  worked and should repeat: the remediate phase ADOPTED the dead audit's
+  still-running detached gates script as its round 1 (zero wasted wall
+  clock), and `/tmp/tw-<date>/` scratch survived the phase boundary exactly
+  as designed.
+- **2026-09-02 (remediate): two subagents stalled by ENDING THEIR TURN to
+  "wait" for a build/suite — put the anti-wait rail in every agent PROMPT,
+  not just this skill.** The 2026-08-26 resume-don't-redo lesson worked both
+  times (SendMessage got each back on track with context intact), but the
+  stall is now a pattern: any prompt that can involve a long build or
+  detached run must say "wait inside a bounded foreground poll; never end
+  your turn to wait; the lead owns the full gates."
+- **2026-09-02 (remediate): grep the gate logs for the runner's own exported
+  secrets before calling a round harvested.** T-381: a test that subprocesses
+  a wrapper snippet WITHOUT `env=` printed the runner's live PUSHOVER_* into
+  the pytest gate log, because the wrapper exports them to page and the
+  snippet prefers env over file by design. The red was also invisible in
+  isolation (93 passed) — it only fires under the wrapper. After each gate
+  run: `grep -c "$PUSHOVER_TOKEN"`-style checks on the gate output for every
+  secret the wrapper exports, and treat any hit as a P1 test-isolation
+  finding.

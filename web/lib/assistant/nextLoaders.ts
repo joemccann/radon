@@ -36,6 +36,7 @@ export const NEXT_MODULES: Record<string, () => Promise<NextRouteModule>> = {
   "index-quote": () => import("@/app/api/index-quote/route") as Promise<NextRouteModule>,
   "internals": () => import("@/app/api/internals/route") as Promise<NextRouteModule>,
   "ivrank": () => import("@/app/api/ivrank/route") as Promise<NextRouteModule>,
+  "iv-spread": () => import("@/app/api/iv-spread/route") as Promise<NextRouteModule>,
   "journal": () => import("@/app/api/journal/route") as Promise<NextRouteModule>,
   "journal/sync": () => import("@/app/api/journal/sync/route") as Promise<NextRouteModule>,
   "leap": () => import("@/app/api/leap/route") as Promise<NextRouteModule>,

@@ -10,8 +10,8 @@ import { expect, test, type Page } from "@playwright/test";
  *    than the viewport (right-edge clipping).
  * 3. `.book-window-head` (nowrap + overflow hidden) clipped SPRD and the tape
  *    toggle clean off a 393px screen.
- * 4. The header position chip repeated the FULL structure string that the
- *    position summary right below it already shows.
+ * 4. The header HELD chip sat on its own wrap row above the structure card.
+ *    Summary owns the held cue; the header chip is gone when a position is held.
  */
 
 const now = new Date().toISOString();
@@ -222,10 +222,9 @@ test("a credit combo's AVG ENTRY reads negative, not positive (2026-08-07)", asy
   expect(avgEntry ?? "").not.toMatch(/(?<![-])\$0\.12/);
 });
 
-test("the structure string renders once — summary owns it, the header chip stays compact", async ({ page }) => {
+test("the structure string renders once — summary owns it, the header has no HELD chip", async ({ page }) => {
   await openCockpit(page);
   await expect(page.locator(".ckp-pos-summary")).toContainText(STRUCTURE);
-  const chip = page.locator(".ckh-poschip");
-  await expect(chip).toBeVisible();
-  await expect(chip).not.toContainText("Risk Reversal");
+  await expect(page.locator(".ckh-poschip")).toHaveCount(0);
+  await expect(page.locator(".cockpit-head")).not.toContainText("HELD");
 });

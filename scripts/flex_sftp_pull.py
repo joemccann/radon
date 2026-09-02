@@ -39,6 +39,10 @@ FIRST_DELIVERY_DATE = date(2026, 8, 31)
 FIRST_DELIVERY_ENV = "RADON_FLEX_FIRST_DELIVERY"
 MAX_NIGHTLY_SPAN_DAYS = 5
 KEEP_GPG = 3
+# IBKR names a PGP delivery `<acct>.<Query_Name>.<from>.<to>.xml.pgp`. The
+# filter kept only `.gpg`, so three days of files sat in `outgoing` while every
+# run reported an empty directory (2026-09-01 .. 2026-09-02).
+ENCRYPTED_SUFFIXES = (".pgp", ".gpg")
 
 # Directive -> the value it must carry, or None when any value will do.
 # ConnectTimeout / ServerAliveInterval are required because `_sftp`'s own
@@ -143,7 +147,7 @@ def list_remote_gpg(*, config: Path, runner, remote_dir: str = DEFAULT_REMOTE_DI
         # one line. `-1` above asks for one per line; this reads every token
         # regardless, so a server that ignores it still yields every file.
         for token in line.split():
-            if token.lower().endswith(".gpg"):
+            if token.lower().endswith(ENCRYPTED_SUFFIXES):
                 names.append(token.split("/")[-1])
     return names
 
@@ -227,7 +231,10 @@ def _flex_day(value: Optional[str]) -> Optional[date]:
 
 
 def retain_newest_gpg(inbox: Path, keep: int = KEEP_GPG) -> None:
-    files = sorted(inbox.glob("*.gpg"), key=lambda p: p.stat().st_mtime)
+    files = sorted(
+        (p for p in inbox.iterdir() if p.is_file() and p.suffix.lower() in ENCRYPTED_SUFFIXES),
+        key=lambda p: p.stat().st_mtime,
+    )
     for stale in files[:-keep] if keep > 0 else files:
         stale.unlink(missing_ok=True)
 
@@ -382,7 +389,11 @@ def _run(
             if not nightly_period_ok(xml_text):
                 raise FlexSftpError("period_gate: nightly path rejects 365-day/YTD")
             classify_flex_xml(xml_text)
-            result = ingest_fn(xml_text, source_path=str(dest.with_suffix(".xml")))
+            # `a.xml.pgp` labels as `a.xml`, `trades.gpg` as `trades.xml`.
+            plain = dest.with_suffix("")
+            if plain.suffix.lower() != ".xml":
+                plain = plain.with_suffix(".xml")
+            result = ingest_fn(xml_text, source_path=str(plain))
             if not result.get("ok", True):
                 raise FlexSftpError(f"ingest_failed:{result}")
             # `_sftp` issues no `rm` or `rename`, so a delivered file is never

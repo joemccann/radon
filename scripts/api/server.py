@@ -664,7 +664,7 @@ async def _heartbeat_orders_sync_skip(reason: str) -> None:
 
 
 async def _orders_sync_tick() -> None:
-    """Refresh open orders from IB during market hours.
+    """Refresh open orders from IB during equity EXT hours.
 
     Keeps the orders-sync service_health row fresh so the watchdog's
     intraday bucket (10-min window) does not fire stale alerts during the
@@ -675,15 +675,18 @@ async def _orders_sync_tick() -> None:
 
     Guards (all must pass):
     - not test_mode          — never run subprocess syncs in unit tests
-    - market hours open      — the watchdog window is intraday-only; no
-                               need to run outside 09:30–16:00 ET weekdays
+    - equity EXT session     — 04:00–20:00 ET weekdays (RTH + pre-market
+                               + AH). outsideRth stock orders fill after
+                               16:00; gating on RTH-only left those fills
+                               stuck as WORKING on /orders (AVGO 16:24 ET
+                               2026-09-02). Overnight 20:00–03:50 is not EXT.
     - pool has a connection  — proxy for "IB Gateway authenticated"; if
                                the pool is fully disconnected we would
                                just burn the IB cooldown and log an error
     """
     if test_mode:
         return
-    if not _is_market_open_now_et():
+    if not _is_orders_session_live_now_et():
         return
     if not _pool_has_any_connection():
         logger.debug("orders-sync loop: pool disconnected — skipping tick")
@@ -719,7 +722,7 @@ async def _orders_sync_tick() -> None:
 
 
 async def _orders_sync_loop(interval: float = ORDERS_SYNC_INTERVAL_SECS) -> None:
-    """Autonomous market-hours orders refresh loop.
+    """Autonomous equity-EXT orders refresh loop (04:00-20:00 ET).
 
     Sleeps first so the initial page-load /orders/refresh call (fired
     by the Next.js /orders route a few seconds after startup) has
@@ -1281,6 +1284,19 @@ def _is_market_open_now_et() -> bool:
             return False
         minutes = et.hour * 60 + et.minute
         return 9 * 60 + 30 <= minutes <= 16 * 60
+
+
+def _is_orders_session_live_now_et() -> bool:
+    """True while outsideRth equity orders can still fill (04:00-20:00 ET).
+
+    Falls back to RTH if the EXT helper cannot import so a calendar
+    regression cannot silently unsync the book all day.
+    """
+    try:
+        from utils.market_calendar import is_equity_ext_session_et
+        return is_equity_ext_session_et()
+    except Exception:
+        return _is_market_open_now_et()
 
 
 def _scan_time_to_et_date(scan_time: str) -> Optional[str]:
@@ -5570,9 +5586,10 @@ async def cash_flows(
 ):
     """Return cash transactions from the `cash_flows` Turso table.
 
-    Reads-only — populated by `scripts/cash_flow_sync.py` which runs daily
-    via the monitor_daemon `cash_flow_sync` handler. Falls back to
-    `data/cash_flows.json` if the DB read fails.
+    Reads-only — populated by `scripts/cash_flow_sync.py --from-file` on the
+    sFTP-delivered statement (radon-flex-pull.timer, Tue..Sat 07:30 ET, via
+    `flex_delivery_ingest`). Falls back to `data/cash_flows.json` if the DB
+    read fails.
 
     Query params:
       days  - lookback window in days, default 90

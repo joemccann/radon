@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import path from "node:path";
 import { radonFetch, RadonApiError, radonErrorDetailText } from "@/lib/radonApi";
 import { getRequestId, jsonApiError, setNoStoreResponseHeaders } from "@/lib/apiContracts";
-import { isSetupMode } from "@/lib/setup/setupMode";
-import { setupTokenRejection } from "@/lib/setup/setupToken";
+import { isSetupMode, isAuthMisconfigured } from "@/lib/setup/setupMode";
+import { setupTokenRejection, consumeSetupToken } from "@/lib/setup/setupToken";
+import { markSetupComplete, resolveRepoRoot } from "@/lib/setup/setupComplete";
 import { WEB_ENV_KEYS, writeSetupEnvFiles } from "@/lib/setup/envFiles";
 
 /**
@@ -61,6 +61,17 @@ async function fetchRegistry(): Promise<Map<string, Set<string>> | null> {
 
 export async function POST(request: Request): Promise<Response> {
   const requestId = getRequestId();
+  if (isAuthMisconfigured()) {
+    return setNoStoreResponseHeaders(
+      jsonApiError({
+        message: "Setup already completed. Restart the stack to load authentication keys.",
+        status: 403,
+        code: "SETUP_ALREADY_COMPLETE",
+        requestId,
+      }),
+      requestId,
+    );
+  }
   if (!isSetupMode()) {
     return setNoStoreResponseHeaders(
       jsonApiError({ message: "Not found", status: 404, code: "NOT_FOUND", requestId }),
@@ -166,9 +177,23 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   let written: string[] = [];
-  if (Object.keys(collected).length > 0) {
-    written = await writeSetupEnvFiles(collected, path.resolve(process.cwd(), ".."));
+  const repoRoot = resolveRepoRoot(process.cwd());
+  if (!repoRoot) {
+    return setNoStoreResponseHeaders(
+      jsonApiError({
+        message: `Cannot resolve repo root from ${process.cwd()}`,
+        status: 500,
+        code: "SETUP_REPO_ROOT_INVALID",
+        requestId,
+      }),
+      requestId,
+    );
   }
+  if (Object.keys(collected).length > 0) {
+    written = await writeSetupEnvFiles(collected, repoRoot);
+  }
+  await markSetupComplete(repoRoot);
+  consumeSetupToken();
 
   return setNoStoreResponseHeaders(
     NextResponse.json({

@@ -20,6 +20,7 @@ const FAILURE_WINDOW_MS = 15 * 60_000;
 
 let generated: string | null = null;
 let failures: number[] = [];
+let consumed = false;
 
 export function getSetupToken(): string {
   const fromEnv = (process.env.RADON_SETUP_TOKEN || "").trim();
@@ -50,8 +51,14 @@ function digest(value: string): Buffer {
  * returning early.
  */
 export function verifySetupToken(provided: unknown): boolean {
+  if (consumed) return false;
   if (typeof provided !== "string" || !provided.trim()) return false;
   return timingSafeEqual(digest(getSetupToken()), digest(provided.trim()));
+}
+
+/** One-shot: invalidate the token after a successful wizard completion. */
+export function consumeSetupToken(): void {
+  consumed = true;
 }
 
 function pruneFailures(now: number): void {
@@ -90,8 +97,9 @@ export function setupTokenRejection(provided: unknown, requestId: string): Respo
   );
 }
 
-/** Test-only: reset the generated token and the failure budget between cases. */
+/** Test-only: reset the generated token, consumption, and the failure budget. */
 export function __resetSetupTokenForTests(): void {
   generated = null;
+  consumed = false;
   failures = [];
 }
