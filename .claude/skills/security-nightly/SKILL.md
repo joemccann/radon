@@ -334,9 +334,11 @@ provision `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` / `CLAUDE_CODE_API_KEY`
 launch environment, and treat this stderr line as a FAILED stage, not a
 warning: "claude.ai connectors are disabled because ANTHROPIC_API_KEY or
 another auth source is set and takes precedence over your claude.ai login".
-The wrapper unsets those variables and refuses when any of them is set in the
-environment or a key file, so a stage that reports API-key auth means the
-wrapper was bypassed.
+The wrapper ignores any of those variables in the launch environment (names
+it on stderr, unsets it, runs on the subscription), scrubs reroute lines out
+of a provisioned `web/.env`, and refuses only a key file or a Claude Code
+settings-level `apiKeyHelper` / `env` reroute that `unset` cannot reach. A
+stage that reports API-key auth therefore means the wrapper was bypassed.
 
 When the workspace IS bootstrapped and matches approved private runner state,
 require a clean tree, require `git rev-parse HEAD` to equal `HEAD_SHA`, verify

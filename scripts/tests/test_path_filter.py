@@ -176,6 +176,7 @@ _NON_REPOSITORY_WEB_FIXTURES = {
     "cloud/tests/test_deploy_corrections.py",
     "cloud/tests/test_deploy_resilience.py",
     "scripts/tests/test_weekend_runner_env_provisioning.py",
+    "scripts/tests/test_weekend_subscription_only.py",
 }
 _DYNAMIC_WEB_READER_MODULES = {
     # Their tracked web paths live in parameter tables and are joined to ROOT
