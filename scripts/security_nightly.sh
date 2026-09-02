@@ -23,8 +23,10 @@
 #   - the clone and this wrapper carry NO Radon .env / broker / deploy
 #     credential (rail 5). launchd hands the job only the plist env, and
 #     the setup script never provisions web/.env into this clone;
-#   - the dead-man comment is SANITIZED to the status line only — the
-#     agent's run-log tail is never posted to the public repo (rail 7).
+#   - the dead-man comment is a sanitized PHASE STAMP status line.
+#     No three-section write-up, no run-log tail, no log-file pointer,
+#     no routes or exploits (rail 7). The issue create body is a
+#     timeless rolling-dead-man description; run history stays in comments.
 #
 # Safety model:
 #   - runs ONLY in the dedicated runner clone (marker file required);
@@ -90,7 +92,10 @@ release_runner_lock() {
 # while it was trying to report its own death, holding the runner lock and
 # dropping every subsequent daily fire. R-409.
 NET_TIMEOUT_SECS="${RADON_WEEKEND_NET_TIMEOUT_SECS:-120}"
-net_bounded() { timeout "$NET_TIMEOUT_SECS" "$@"; }
+# Before --lock-lib-only and before the venv PATH prepend. lock-lib-only
+# fetch always calls net_bounded under set -u.
+TIMEOUT_BIN="$(command -v timeout || true)"
+net_bounded() { "$TIMEOUT_BIN" "$NET_TIMEOUT_SECS" "$@"; }
 
 # A VPN flap that establishes TCP and then stalls hangs an ssh transport with
 # no keepalive, and the attempt-count retry below bounds attempts, not time.
@@ -119,10 +124,42 @@ WEEKEND_ROOT="$(dirname "$REPO")"
 # Per-loop venv. The legacy $WEEKEND_ROOT/venv is not deleted here
 # (operator follow-up after this ships).
 VENV="$WEEKEND_ROOT/venv-security"
+# Snapshot gh and Pushover BEFORE the venv prepend / agent. PATH is
+# $VENV/bin first after this. WEEKEND_ROOT/.env is shared across loops
+# and writable by a skip-permissions agent.
+_notify_cred() {
+  local key="$1" envf="$WEEKEND_ROOT/.env" line val=""
+  val="${!key:-}"
+  if [[ -n "$val" ]]; then
+    printf '%s' "$val"
+    return 0
+  fi
+  [[ -f "$envf" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    case "$line" in
+      "${key}="*)
+        val="${line#*=}"
+        val="${val#\"}"
+        val="${val%\"}"
+        val="${val#\'}"
+        val="${val%\'}"
+        printf '%s' "$val"
+        return 0
+        ;;
+    esac
+  done < "$envf"
+}
+GH_BIN="$(command -v gh || true)"
+NOTIFY_PUSHOVER_USER="$(_notify_cred PUSHOVER_USER || true)"
+NOTIFY_PUSHOVER_TOKEN="$(_notify_cred PUSHOVER_TOKEN || true)"
 # Activate the venv so any python3.13 calls inside the agent use it.
 [[ -f "$VENV/bin/activate" ]] && export PATH="$VENV/bin:$PATH"
 DEADMAN_TITLE="Nightly security runner"
 DEADMAN_LABEL="security-nightly"
+ISSUE_SANITIZE=1
+LOOP_SLUG="security"
+DEADMAN_CREATE_BODY="Rolling dead-man for the nightly ${LOOP_SLUG} loop. Sanitized status only. Never a route, file, attack, secret, or account. A missing daily comment means the runner did not fire."
 # Branch prefix the skill opens/updates its PR from. Matched on the head
 # ref, not the title: the title is now `Security <date>`, which a
 # hand-written PR could also start with.
@@ -132,22 +169,107 @@ resolve_pr_url() {
   # Newest-updated open PR the skill opened for this loop. A gh failure or
   # no match must yield an empty string, never a non-zero exit under set -e.
   local url
-  url="$(net_bounded gh pr list --state open --limit 20 --json url,headRefName,updatedAt \
+  url="$(net_bounded "$GH_BIN" pr list --state open --limit 20 --json url,headRefName,updatedAt \
     -q "[.[] | select(.headRefName | startswith(\"$PR_BRANCH_PREFIX\"))] | sort_by(.updatedAt) | reverse | .[0].url" \
     2>/dev/null || true)"
   [[ "$url" == "null" ]] && url=""
   printf '%s' "$url"
 }
 
+_notify_curl() {
+  local loop="$1" phase="$2" status="$3" pr_url="$4" detail="$5"
+  local user token title message
+  user="$NOTIFY_PUSHOVER_USER"
+  token="$NOTIFY_PUSHOVER_TOKEN"
+  [[ -n "$user" && -n "$token" ]] || return 0
+  [[ -x /usr/bin/curl ]] || return 0
+  title="radon ${loop} ${phase}"
+  # PATH is $VENV/bin first. A planted or failing PATH tr under set -e
+  # aborts before curl; notify_phase's || true would swallow the page.
+  message="$(printf '%s' "$status" | /usr/bin/tr -s '[:space:]' ' ')"
+  detail="$(printf '%s' "$detail" | /usr/bin/tr -s '[:space:]' ' ')"
+  [[ -n "$detail" ]] && message="${message} ${detail}"
+  [[ -n "$pr_url" ]] && message="${message} ${pr_url}"
+  message="$(printf '%s' "$message" | /usr/bin/tr -s '[:space:]' ' ')"
+  local k v
+  for k in token user title message; do
+    v="${!k}"
+    v="${v//\\/\\\\}"
+    v="${v//\"/\\\"}"
+    v="${v//$'\n'/ }"
+    v="${v//$'\r'/}"
+    printf -v "$k" '%s' "$v"
+  done
+  # Creds stay off curl argv and off disk. -q must be argv[1].
+  {
+    printf 'url = "https://api.pushover.net/1/messages.json"\n'
+    printf 'request = POST\n'
+    printf 'silent = true\n'
+    printf 'show-error = true\n'
+    printf 'max-time = 10\n'
+    printf 'output = "/dev/null"\n'
+    printf 'data-urlencode = "token=%s"\n' "$token"
+    printf 'data-urlencode = "user=%s"\n' "$user"
+    printf 'data-urlencode = "title=%s"\n' "$title"
+    printf 'data-urlencode = "message=%s"\n' "$message"
+    printf 'data-urlencode = "priority=0"\n'
+  } | /usr/bin/curl -q --config - >/dev/null 2>&1 || true
+}
+
 notify_phase() {
   # One Pushover per phase so a hung phase is visible immediately.
   # Best-effort: it must never change the run's exit code.
+  # Never exec python after the agent: clone/venv python3 and
+  # /usr/bin/python3 without -I both import agent-writable modules
+  # from WEEKEND_ROOT (sys.path[0]). System python also lacks dotenv,
+  # so a 0 exit would skip _notify_curl. Always page with /usr/bin/curl.
   local status="$1" pr_url
   pr_url="$(resolve_pr_url)"
-  python3 "$REPO/scripts/weekend_notify.py" \
-    --loop security --phase "$PHASE" --status "$status" \
-    --pr-url "$pr_url" --detail "log: ${RUN_LOG##*/}" \
-    --env-file "$WEEKEND_ROOT/.env" >/dev/null 2>&1 || true
+  _notify_curl "$LOOP_SLUG" "$PHASE" "$status" "$pr_url" "log: ${RUN_LOG##*/}" || true
+}
+
+_sanitize_issue_text() {
+  # Parsed with main(). Never exec disk python3 or a formatter file: both
+  # are writable by the agent (venv python3, clone file, PID-guessable snapshot).
+  local text="$1"
+  [[ -n "$text" ]] || { printf '%s' "$text"; return 0; }
+  text="${text//https:\/\/claude.ai\/settings\/usage/$'\x01USAGE\x01'}"
+  text="${text//http:\/\/claude.ai\/settings\/usage/$'\x01USAGE\x01'}"
+  text="${text//claude.ai\/settings\/usage/$'\x01USAGE\x01'}"
+  text="$(printf '%s' "$text" | /usr/bin/sed -E \
+    -e 's,https?://[^[:space:]]+,[REDACTED],g' \
+    -e 's,(^|[^[:alnum:].])/(api|admin)/[A-Za-z0-9._/-]+,\1[REDACTED],g' \
+    -e 's,[A-Za-z0-9./_-]+\.(py|ts|tsx|js|mjs|cjs|sh|go|rb|java|json|yml|yaml|toml|md):[0-9]+,[REDACTED],g' \
+    -e 's,[Bb]earer [^[:space:]]+,Bearer [REDACTED],g' \
+    -e 's,[A-Za-z0-9_]*(TOKEN|SECRET|PASSWORD|PASSWD|PASS|AUTH|CREDENTIAL|API_KEY|APIKEY|_KEY)[A-Za-z0-9_]*[[:space:]]*[=:][[:space:]]*[^[:space:]]+,[REDACTED],g' \
+    -e 's,[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z][A-Za-z]+,[REDACTED],g' \
+    -e 's,(^|[^A-Za-z0-9])(radon)?(trader|operator)[0-9]+,\1[REDACTED],g' \
+    -e 's,[Cc]heck the runner,,g' \
+    -e 's,[Oo]n the runner,,g' \
+    || true)"
+  text="${text//$'\x01USAGE\x01'/claude.ai/settings/usage}"
+  printf '%s' "$text"
+}
+
+_format_issue_body() {
+  # In-main bash only. Wrapper dead-man is PHASE STAMP status, not the
+  # three-section agent write-up. Never exec disk python3 after the agent.
+  local phase="$1" status="$2" detail="$3"
+  local clean body
+  if [[ "${ISSUE_SANITIZE:-0}" == "1" ]]; then
+    phase="$(_sanitize_issue_text "$phase")"
+    status="$(_sanitize_issue_text "$status")"
+    detail="$(_sanitize_issue_text "$detail")"
+  fi
+  clean="${detail%%\`\`\`*}"
+  body="$(printf '**%s** %s **%s**' "$phase" "${STAMP:-}" "$status")"
+  if [[ -n "$clean" ]]; then
+    body="${body}"$'\n'"${clean}"
+  fi
+  if [[ "${ISSUE_SANITIZE:-0}" == "1" ]]; then
+    body="$(_sanitize_issue_text "$body")"
+  fi
+  printf '%s\n' "$body"
 }
 
 report() {
@@ -155,20 +277,19 @@ report() {
   # must not mask the run's own exit code. Third arg 0 suppresses the
   # Pushover.
   local status="$1" detail="$2" push="${3:-1}"
-  local body="**${PHASE}** ${STAMP} — **${status}**
-${detail}
-log: \`${RUN_LOG##*/}\` on the runner"
+  local body
+  body="$(_format_issue_body "$PHASE" "$status" "$detail")"
   local issue
-  issue="$(net_bounded gh issue list --label "$DEADMAN_LABEL" --state open \
+  issue="$(net_bounded "$GH_BIN" issue list --label "$DEADMAN_LABEL" --state open \
     --json number -q '.[0].number' 2>/dev/null || true)"
   if [[ -z "$issue" ]]; then
-    net_bounded gh issue create --title "$DEADMAN_TITLE" --label "$DEADMAN_LABEL" \
-      --body "Rolling dead-man for the nightly security loop. Sanitized status only — never a route, file, attack, secret, or account. A missing daily comment means the runner did not fire." \
+    net_bounded "$GH_BIN" issue create --title "$DEADMAN_TITLE" --label "$DEADMAN_LABEL" \
+      --body "$DEADMAN_CREATE_BODY" \
       >/dev/null 2>&1 || true
-    issue="$(net_bounded gh issue list --label "$DEADMAN_LABEL" --state open \
+    issue="$(net_bounded "$GH_BIN" issue list --label "$DEADMAN_LABEL" --state open \
       --json number -q '.[0].number' 2>/dev/null || true)"
   fi
-  [[ -n "$issue" ]] && net_bounded gh issue comment "$issue" --body "$body" >/dev/null 2>&1 || true
+  [[ -n "$issue" ]] && net_bounded "$GH_BIN" issue comment "$issue" --body "$body" >/dev/null 2>&1 || true
   if [[ "$push" == "1" ]]; then
     notify_phase "$status"
   fi
@@ -216,7 +337,7 @@ phase_status() {
 }
 
 on_crash() {
-  report "CRASHED (exit $?)" "wrapper died before the agent finished — check the runner"
+  report "CRASHED (exit $?)" "wrapper died before the agent finished"
 }
 
 # Bash runs the EXIT trap on an untrapped SIGTERM, so the lock released and the
@@ -358,8 +479,8 @@ begin_phase() {
   CAP_SECS=$([[ "$PHASE" == "audit" ]] \
     && echo "${RADON_WEEKEND_AUDIT_CAP_SECS:-7200}" \
     || echo "${RADON_WEEKEND_REMEDIATE_CAP_SECS:-21600}")
-  # One log per phase: the transient-network detector and the report tail
-  # both read $RUN_LOG.
+  # One log per phase: the transient-network detector reads $RUN_LOG.
+  # Issue comments do not include a run-log tail.
   RUN_LOG="$LOG_DIR/$PHASE-$STAMP.log"
   RC=0
 }
@@ -490,7 +611,7 @@ run_phase() {
     # wrapper was not acted on until `claude` finished on its own — which is
     # never, in the case that matters. `-k` escalates to SIGKILL so a claude
     # blocked on a hung child cannot make the cap advisory. R-384, R-386.
-    CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 timeout -k "$KILL_AFTER_SECS" "$remain" claude -p "/security-nightly $PHASE" \
+    CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 "$TIMEOUT_BIN" -k "$KILL_AFTER_SECS" "$remain" claude -p "/security-nightly $PHASE" \
       --model "${MODEL_RUNGS[$MODEL_INDEX]}" \
       --dangerously-skip-permissions \
       --output-format text >> "$RUN_LOG" 2>&1 &
@@ -530,10 +651,9 @@ run_phase() {
 
   # Rail 7: Radon is public. The run log holds scanner output, file:line
   # evidence and possibly a matched secret class, so its tail is NEVER posted
-  # to the public dead-man issue — only the sanitized status line and the
-  # local log filename (report() already appends the filename). The agent
-  # writes its real findings to the private mode-0700 run dir and the private
-  # security archive, out of this wrapper's reach.
+  # to the public issue. report() writes a sanitized PHASE STAMP status
+  # dead-man comment. The agent writes raw findings to the private
+  # mode-0700 run dir and archive.
   local status
   status="$(phase_status "$RC" "$RUN_LOG" "$ROUND_LOG_MARK")"
   # An exhausted ladder is a provider spend stop, which the skill classifies as
@@ -560,17 +680,17 @@ run_phase() {
   fi
   case "$status" in
     OK)
-      report "$status" "sanitized: audit/remediate completed; findings (if any) are in the private security run dir and archive, never here" ;;
+      report "$status" "0 public findings to disclose. The phase completed. Verified findings stay private." ;;
     "INCOMPLETE (all model quotas"*)
-      report "$status" "every model rung on the ladder reported an exhausted subscription quota — this phase is INCOMPLETE; the audited SHA was NOT advanced and the next fire resumes the same private run on the runner once the quota refills" ;;
+      report "$status" "every model rung on the ladder reported an exhausted subscription quota — this phase is INCOMPLETE; the audited SHA was NOT advanced and the next fire resumes the same private run once the quota refills" ;;
     INCOMPLETE*)
-      report "$status" "the agent exited 0 without declaring the phase complete — this phase is INCOMPLETE; the audited SHA was NOT advanced and the next fire resumes the same private run on the runner" ;;
+      report "$status" "the agent exited 0 without declaring the phase complete — this phase is INCOMPLETE; the audited SHA was NOT advanced and the next fire resumes the same private run" ;;
     TRUNCATED*)
       report "$status" "the harness killed unfinished background work and the agent still exited 0 — this phase is INCOMPLETE; the audited SHA was NOT advanced" ;;
     TIMEOUT*)
-      report "$status" "the phase hit its wall-clock cap; incomplete, the audited SHA was NOT advanced, resumable private state is on the runner" ;;
+      report "$status" "the phase hit its wall-clock cap; incomplete, the audited SHA was NOT advanced" ;;
     *)
-      report "$status" "the phase ended with a non-zero status; see the private run log on the runner, never posted here" ;;
+      report "$status" "the phase ended with a non-zero status; the audited SHA was NOT advanced" ;;
   esac
   echo "[security-nightly] $PHASE done rc=$RC" | tee -a "$RUN_LOG"
 }

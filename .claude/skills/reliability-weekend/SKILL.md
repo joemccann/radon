@@ -140,6 +140,35 @@ Every phase outcome is reported three ways, so a silent-dead runner shows up
 the next morning at the latest: a comment on the rolling GitHub issue
 labeled `reliability-nightly`, a Pushover notification per phase carrying
 the status and the nightly PR link when one exists, and the PR itself.
+
+The wrapper posts one runner-health comment per phase, not the three-section
+write-up:
+
+**PHASE** STAMP **status**
+optional detail
+
+The issue is created once with a timeless rolling-dead-man description. Run
+history stays in comments. The wrapper does not edit the issue body after
+the first run. A missing daily comment means the runner did not fire.
+
+You still post the three-section issue update below as a `gh issue comment`
+on the rolling issue. Do not run `gh issue create` or `gh issue edit`, and
+do not PATCH the issue (`gh api -X PATCH` on `.../issues/`). That would
+overwrite the dead-man description. Comment-only. The wrapper also comments;
+you are not the only commenter. GitHub issue write-ups
+you author use this shape, never a status dump or a pointer to a log on a
+machine:
+
+**Issue discovered**
+What went wrong, in plain language. If nothing went wrong, say that.
+
+**What was done to fix it**
+What THIS run actually changed. If nothing: "Nothing this run."
+
+**Next**
+Only work that must happen OUTSIDE of CI pushing a new deployment. If
+nothing remains: "Fixed with green deployment"
+
 A quiet day means one of two things: the runner did not fire, or the
 previous cycle is still running. launchd will not start a second instance of
 a running label, so a long remediate phase legitimately suppresses that day's

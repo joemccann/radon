@@ -1,5 +1,60 @@
 # Lessons
 
+## 2026-09-02 — Snapshot Pushover creds before the agent; comment-only issue writes
+
+- `_notify_curl` read WEEKEND_ROOT/.env at page time. Launchd does not set
+  PUSHOVER_*. A skip-permissions agent can rewrite the shared .env and
+  redirect or blank later loops the same night. Snapshot next to GH_BIN
+  and use only those copies in `_notify_curl`.
+- Non-security skills said "post the three-section issue update" without
+  requiring `gh issue comment` or banning `gh issue edit`/create/PATCH.
+  Agents already PATCH PR bodies; the same on the rolling issue overwrites
+  the dead-man description. Comment-only; wrapper is not the only commenter.
+
+## 2026-09-02 — TIMEOUT_BIN must be snapshotted before --lock-lib-only
+
+- `net_bounded` expands `"$TIMEOUT_BIN"` under `set -u`. A snapshot inside
+  `main()` is after the `--lock-lib-only` return, so sourced fetch-retry
+  aborts unbound. Snapshot `command -v timeout` next to `net_bounded`,
+  before that return and before the venv PATH prepend. Do not fall back
+  to PATH `timeout` after venv prepend.
+
+## 2026-09-02 — Agent wall-clock must use TIMEOUT_BIN; escape curl --config
+
+- Snapshotting `timeout` before `$VENV/bin` is not enough if the agent
+  wall-clock still runs PATH `timeout`. A skip-permissions agent can
+  plant `$VENV/bin/timeout` on the first ladder rung; later invokes skip
+  the cap. Use `"$TIMEOUT_BIN" -k` in all five wrappers.
+- Piped curl `--config` interpolates token/user/title/message. A quote
+  or newline in WEEKEND_ROOT/.env closes the value and injects
+  url/output/proxy. Escape backslash, double-quote, and newlines.
+
+## 2026-09-02 — Piped curl config; snapshot gh/timeout before venv PATH
+
+- A 0600 mktemp curl config still leaves PUSHOVER_* in $TMPDIR if the
+  wrapper dies during the POST. Pipe `--config -`. Keep `-q` as argv[1].
+- Snapshot `gh` and `timeout` before prepending `$VENV/bin`. report()
+  must invoke those snapshots; a planted venv gh can replace the
+  wrapper-only security comment.
+
+## 2026-09-02 — curl -q must be argv[1] or curlrc intercepts the 0600 POST
+
+- `_notify_curl` `--config` still loads `$HOME/.curlrc` unless `-q` is
+  argv[1]. A skip-permissions agent can plant curlrc outside the clone.
+- REL-180 `_run` must copy the wrapper, rewrite `/usr/bin/curl` to a stub,
+  and drop host `PUSHOVER_*`. Inheriting `os.environ` plus pinned curl
+  fires a real page from CI.
+
+## 2026-09-02 — Wrapper dead-man comments are not the three-section write-up
+
+- Captain: wrapper OK/runner-health comments stay a distinct PHASE status
+  dead-man line. The three-section template (Issue discovered / What was
+  done / Next: Fixed with green deployment) is the agent issue update, not
+  the wrapper comment. Security stays wrapper-only sanitized comments.
+- The `gh issue create` body is a timeless rolling-dead-man description.
+  Run history stays in comments. Do not `gh issue edit` the body after the
+  first run, and do not leave "No run yet." as the lasting body.
+
 ## 2026-09-01 — A capacity-shed retry on one sibling wrapper is not the other
 
 - Page `776ea756`: `radon-garch` instant FastAPI 502 at 14:00:12Z,

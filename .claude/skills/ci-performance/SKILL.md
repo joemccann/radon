@@ -362,8 +362,31 @@ Zero-finding nights still open the PR as the dead-man signal:
 
 ## Required nightly report
 
-The nightly PR uses §Pull request output. The rolling GitHub issue
-labeled `ci-performance-nightly` still includes:
+The nightly PR uses §Pull request output. The wrapper posts one runner-health
+comment (`**PHASE** STAMP **status**`) on the rolling GitHub issue labeled
+`ci-performance-nightly`. That comment is not the three-section write-up.
+The issue is created once with a timeless rolling-dead-man description; run
+history stays in comments; the wrapper does not edit the issue body.
+
+You still post the three-section issue update below as a `gh issue comment`
+on the rolling issue, never a status dump or a pointer to a log on a
+machine. Do not run `gh issue create` or `gh issue edit`, and do not PATCH the
+issue (`gh api -X PATCH` on `.../issues/`). That would overwrite the
+dead-man description. Comment-only. The wrapper also comments; you are not
+the only commenter.
+
+**Issue discovered**
+What went wrong, in plain language. If nothing went wrong, say that.
+
+**What was done to fix it**
+What THIS run actually changed. If nothing: "Nothing this run."
+
+**Next**
+Only work that must happen OUTSIDE of CI pushing a new deployment. If
+nothing remains: "Fixed with green deployment"
+
+Put the following inside those sections. A zero-change
+night still comments.
 
 - `DONE`, `VALIDATING`, `BLOCKED`, or `NO_SAFE_CHANGE` status;
 - audited SHA range and GitHub run URLs;
@@ -382,7 +405,7 @@ A zero-change night must still report. Silence is a runner failure signal.
 The wrapper (`scripts/ci_performance_nightly.sh`) already posts a per-phase
 comment on the rolling issue and a per-phase Pushover with the phase status
 and the PR URL, so the agent owns the formatter-produced PR body and the
-issue's substantive content, not the dead-man plumbing.
+issue's three-section write-up, not the dead-man plumbing.
 
 ## Self-improvement
 

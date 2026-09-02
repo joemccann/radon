@@ -343,6 +343,15 @@ class TestAnExhaustedLadderIsAProviderSpendStop:
             "the skill says a provider budget/spend stop is never reported "
             f"failed: {calls!r}"
         )
+        assert "**audit**" in calls and "**INCOMPLETE" in calls, calls
+        assert "claude.ai/settings/usage" in calls, (
+            "the dead-man must name the top-up URL: {calls!r}"
+        )
+        assert "Top up at claude.ai/settings/usage, then let the next fire resume." not in calls, (
+            "wrapper comments are PHASE status, not the three-section Next: "
+            f"{calls!r}"
+        )
+        assert "Do not read this as a finished run" not in calls, calls
 
     def test_the_dead_man_carries_the_resume_facts(self, tmp_path):
         _proc, _models, calls = _audit(tmp_path, "security", LADDER)

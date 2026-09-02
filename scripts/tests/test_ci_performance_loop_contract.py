@@ -18,8 +18,6 @@ from __future__ import annotations
 
 import plistlib
 import re
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -82,30 +80,11 @@ class TestTheLoopOwnsItsOwnLane:
         assert f'LOG_DIR="$REPO/{LOG_DIR}"' in body, body
 
     def test_the_notifier_accepts_this_loop(self):
-        """`weekend_notify.py` validates `--loop` with argparse `choices`.
-
-        An unlisted value exits 2 BEFORE the Pushover call, and the wrapper
-        sends the page with `|| true`, so the loop would silently never page.
-        """
-        proc = subprocess.run(
-            [
-                sys.executable,
-                str(REPO / "scripts" / "weekend_notify.py"),
-                "--loop",
-                "ci-performance",
-                "--phase",
-                "audit",
-                "--status",
-                "OK",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=60,
-            env={"PATH": "/usr/bin:/bin"},
-        )
-        assert proc.returncode == 0, (
-            "weekend_notify rejects --loop ci-performance, so every phase page "
-            f"is dropped: {proc.stdout}{proc.stderr}"
+        body = _uncommented(WRAPPER)
+        assert 'LOOP_SLUG="ci-performance"' in body, body
+        assert '_notify_curl "$LOOP_SLUG"' in body, (
+            "the wrapper must page this loop via in-main _notify_curl; "
+            "weekend_notify.py is not the pager"
         )
 
 

@@ -71,6 +71,25 @@ LOOP_IDS = sorted(LOOPS)
 COMMENT_MARK = "<<<COMMENT>>>"
 
 
+def _curl_log_stub(log: Path) -> str:
+    return (
+        "#!/bin/bash\n"
+        f'printf "%s\\n" "$*" >> "{log}"\n'
+        "i=1\n"
+        'while [ "$i" -le "$#" ]; do\n'
+        '  eval "arg=\\${$i}"\n'
+        '  if [ "$arg" = "--config" ] || [ "$arg" = "-K" ]; then\n'
+        "    i=$((i + 1))\n"
+        '    eval "cfg=\\${$i}"\n'
+        f'    if [ "$cfg" = "-" ]; then cat >> "{log}"\n'
+        f'    elif [ -f "$cfg" ]; then cat "$cfg" >> "{log}"; fi\n'
+        "  fi\n"
+        "  i=$((i + 1))\n"
+        "done\n"
+        "exit 0\n"
+    )
+
+
 def _executable(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
@@ -103,9 +122,6 @@ def _build(
         for loop_marker in (".radon-security-runner", ".radon-reliability-runner", ".radon-testing-runner",
                             ".radon-ci-performance-runner", ".radon-documentation-runner"):
             (clone / loop_marker).touch()
-    # notify_phase shells `python3 $REPO/scripts/weekend_notify.py`; python3
-    # is stubbed, but the file must exist for the call to look real.
-    (clone / "scripts" / "weekend_notify.py").write_text("# stub\n", encoding="utf-8")
 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -114,6 +130,16 @@ def _build(
     git_log = tmp_path / "git.log"
     agent_log = tmp_path / "agent.log"
     attack_sh = tmp_path / "attack.sh"
+
+    (clone / "scripts" / "weekend_notify.py").write_text("# unused\n", encoding="utf-8")
+    curl_stub = bin_dir / "curl"
+    (tmp_path / ".env").write_text(
+        "PUSHOVER_USER=test-user\nPUSHOVER_TOKEN=test-token\n", encoding="utf-8"
+    )
+    wrapper.write_text(
+        wrapper.read_text(encoding="utf-8").replace("/usr/bin/curl", str(curl_stub)),
+        encoding="utf-8",
+    )
 
     # The rewriter. `> "$f"` truncates in place: same inode, which is the only
     # writer shape that can strand a running interpreter at a stale offset.
@@ -212,6 +238,10 @@ def _build(
         bin_dir / "python3",
         "#!/bin/bash\n" f'echo "notify $*" >> "{push_log}"\n' "exit 0\n",
     )
+    _executable(
+        curl_stub,
+        _curl_log_stub(push_log),
+    )
 
     env = {
         # launchd hands the job a minimal environment; mirror it.
@@ -264,13 +294,13 @@ def _comments(cfg: dict) -> list[str]:
 
 
 def _pages(cfg: dict) -> int:
-    """python3 invocations of the NOTIFIER. The stub records every python3
-    call; since REL-180 report() also runs weekend_redact.py through it."""
+    """Pushover attempts via the wrapper's /usr/bin/curl (rewired in the
+    test copy to a logging stub)."""
     if not cfg["push_log"].exists():
         return 0
     return len([
         ln for ln in cfg["push_log"].read_text(encoding="utf-8").splitlines()
-        if ln.strip() and "weekend_notify.py" in ln
+        if ln.strip() and "pushover.net" in ln
     ])
 
 
@@ -300,7 +330,8 @@ def test_a_mid_run_rewrite_cannot_change_the_runs_outcome(
     comments = _comments(cfg)
     assert len(comments) == 1, _why(result, cfg)
     assert "**audit**" in comments[0], comments
-    assert "FAILED (exit 7)" in comments[0], comments
+    assert "**FAILED (exit 7)**" in comments[0], comments
+    assert "**Issue discovered**" not in comments[0], comments
     assert "CRASHED" not in comments[0], "a finished agent is not a wrapper crash"
     assert _pages(cfg) == 1, "exactly one Pushover per phase"
 
@@ -314,7 +345,7 @@ def test_the_agent_exit_code_survives_the_rewrite(
     result = _run(cfg, "remediate")
 
     assert result.returncode == agent_rc, _why(result, cfg)
-    assert "**remediate**" in _comments(cfg)[-1]
+    assert "remediate" in _comments(cfg)[-1], _comments(cfg)
 
 
 @pytest.mark.parametrize("loop", LOOP_IDS)
@@ -334,7 +365,8 @@ def test_a_cycle_still_reports_both_phases(tmp_path: Path, loop: str) -> None:
 
     assert result.returncode == 0, _why(result, cfg)
     bodies = "\n".join(_comments(cfg))
-    assert "**audit**" in bodies and "**remediate**" in bodies, bodies
+    assert bodies.count("**audit**") >= 1 and bodies.count("**remediate**") >= 1, bodies
+    assert "audit" in bodies and "remediate" in bodies, bodies
     assert "CRASHED" not in bodies, bodies
 
 
@@ -432,6 +464,7 @@ def test_two_instances_in_one_clone_do_not_both_run(tmp_path: Path, loop: str) -
 # --------------------------------------------------------------------------
 ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=\S*$")
 GUARD = '[[ "${1:-}" == "--lock-lib-only" ]] && return 0 2>/dev/null'
+TIMEOUT_SNAP = 'TIMEOUT_BIN="$(command -v timeout || true)"'
 
 
 def _prologue_top_level(src: str) -> list[str]:
@@ -502,7 +535,7 @@ class TestTheRunBodyIsParsedBeforeItRuns:
         # command above `main() {` re-opens the window the wrap closes.
         src = (REPO / "scripts" / LOOPS[loop][0]).read_text(encoding="utf-8")
         for line in _prologue_top_level(src):
-            if line in ("set -Eeuo pipefail", GUARD):
+            if line in ("set -Eeuo pipefail", GUARD, TIMEOUT_SNAP):
                 continue
             assert ASSIGNMENT.match(line) or re.match(r'^[A-Za-z_][A-Za-z0-9_]*="[^`]*"$', line), (
                 f"unexpected top-level statement before main(): {line!r}"

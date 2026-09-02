@@ -396,7 +396,7 @@ class TestSetupGuardsPerLoopVenvs:
 
 
 def _claude_invocation_line(path: Path) -> str:
-    """The `timeout ... claude -p` command lifted verbatim, so a test can RUN it.
+    """The `"$TIMEOUT_BIN" ... claude -p` command lifted verbatim, so a test can RUN it.
 
     The invocation is a multi-line backslash continuation; join it back into
     one command so it can be handed to `bash -c`.
@@ -406,7 +406,7 @@ def _claude_invocation_line(path: Path) -> str:
         i
         for i, line in enumerate(lines)
         if "claude -p" in line
-        and "timeout" in line
+        and "TIMEOUT_BIN" in line
         and not line.lstrip().startswith("#")
     )
     out = []
@@ -481,6 +481,7 @@ class TestBackgroundWorkIsNotSilentlyKilled:
                 "set -Eeuo pipefail\n"
                 f'PHASE=audit\nremain=30\nRUN_LOG="{run_log}"\n'
                 f'KILL_AFTER_SECS=60\n'
+                'TIMEOUT_BIN="$(command -v timeout)"\n'
                 # The line also pins the model rung it asks for, so the round's
                 # ladder state has to exist here too — under `set -u` an unset
                 # MODEL_RUNGS kills the command before `claude` is ever reached
@@ -569,10 +570,32 @@ def _committing_clone(tmp_path: Path, git: str) -> Path:
     (repo / ".radon-weekend-runner").write_text("", encoding="utf-8")
     # REL-180 (R-504): the testing wrapper requires its own loop marker too.
     (repo / ".radon-testing-runner").write_text("", encoding="utf-8")
+    wrapper = repo / "scripts" / "testing_weekend.sh"
+    shutil.copy2(TESTING, wrapper)
+    wrapper.chmod(wrapper.stat().st_mode | 0o100)
+    (tmp_path / ".env").write_text(
+        "PUSHOVER_USER=test-user\nPUSHOVER_TOKEN=test-token\n", encoding="utf-8"
+    )
+    curl_stub = tmp_path / "bin" / "curl"
+    (tmp_path / "bin").mkdir(exist_ok=True)
+    wrapper.write_text(
+        wrapper.read_text(encoding="utf-8").replace("/usr/bin/curl", str(curl_stub)),
+        encoding="utf-8",
+    )
+    (repo / "scripts" / "weekend_notify.py").write_text("# unused\n", encoding="utf-8")
     subprocess.run([git, "init", "-q", str(repo)], check=True, env=_GIT_ENV)
     at = [git, "-C", str(repo)]
     subprocess.run([*at, "symbolic-ref", "HEAD", "refs/heads/main"], check=True, env=_GIT_ENV)
-    subprocess.run([*at, "commit", "-q", "--allow-empty", "-m", "main tip"], check=True, env=_GIT_ENV)
+    subprocess.run(
+        [*at, "add", "-f",
+         "scripts/testing_weekend.sh",
+         "scripts/weekend_notify.py",
+         ".radon-weekend-runner",
+         ".radon-testing-runner"],
+        check=True,
+        env=_GIT_ENV,
+    )
+    subprocess.run([*at, "commit", "-q", "-m", "main tip"], check=True, env=_GIT_ENV)
     subprocess.run([*at, "update-ref", "refs/remotes/origin/main", "HEAD"], check=True, env=_GIT_ENV)
     return repo
 
@@ -588,12 +611,31 @@ _GIT_ENV = {
 }
 
 
+def _curl_log_stub(log: Path) -> str:
+    return (
+        "#!/bin/bash\n"
+        f'printf "%s\\n" "$*" >> "{log}"\n'
+        "i=1\n"
+        'while [ "$i" -le "$#" ]; do\n'
+        '  eval "arg=\\${$i}"\n'
+        '  if [ "$arg" = "--config" ] || [ "$arg" = "-K" ]; then\n'
+        "    i=$((i + 1))\n"
+        '    eval "cfg=\\${$i}"\n'
+        f'    if [ "$cfg" = "-" ]; then cat >> "{log}"\n'
+        f'    elif [ -f "$cfg" ]; then cat "$cfg" >> "{log}"; fi\n'
+        "  fi\n"
+        "  i=$((i + 1))\n"
+        "done\n"
+        "exit 0\n"
+    )
+
+
 def _committing_stub_bin(tmp_path: Path, *, claude_body: str) -> tuple[Path, Path, Path]:
-    """`gh` / `python3` record their calls; `git` is REAL except `fetch`."""
+    """`gh` / curl record their calls; `git` is REAL except `fetch`."""
     real_git = shutil.which("git")
     assert real_git, "a real git is required to exercise the commit check"
     bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
+    bin_dir.mkdir(exist_ok=True)
     gh_log = tmp_path / "gh.log"
     py_log = tmp_path / "py.log"
     gh = bin_dir / "gh"
@@ -613,6 +655,9 @@ def _committing_stub_bin(tmp_path: Path, *, claude_body: str) -> tuple[Path, Pat
         encoding="utf-8",
     )
     py.chmod(0o755)
+    curl = bin_dir / "curl"
+    curl.write_text(_curl_log_stub(py_log), encoding="utf-8")
+    curl.chmod(0o755)
     git = bin_dir / "git"
     git.write_text(
         "#!/bin/sh\n"
@@ -649,7 +694,7 @@ class TestAnAgentThatCommitsNothingIsNotReportedOk:
         repo = _committing_clone(tmp_path, shutil.which("git"))
         bin_dir, gh_log, py_log = _committing_stub_bin(tmp_path, claude_body=claude_body)
         proc = subprocess.run(
-            [BASH, str(TESTING), "audit"],
+            [BASH, str(repo / "scripts" / "testing_weekend.sh"), "audit"],
             env={
                 **_GIT_ENV,
                 "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
@@ -673,15 +718,19 @@ class TestAnAgentThatCommitsNothingIsNotReportedOk:
         assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
         comment = next((ln for ln in calls.splitlines() if ln.startswith("issue comment")), "")
         assert comment, f"no dead-man comment at all: {calls!r} {proc.stderr!r}"
-        assert "**audit** " in comment and f"**{INCOMPLETE_STATUS}**" in comment, (
-            "the agent exited 0 having committed nothing — no ledger line, no "
-            f"PR — and the dead-man comment did not say so: {comment!r}"
+        assert "**audit**" in calls and "**INCOMPLETE" in calls, (
+            f"no PHASE status dead-man comment: {calls!r} {proc.stderr!r}"
         )
-        assert "**OK**" not in comment, comment
-        assert f"--status {INCOMPLETE_STATUS}" in pages, (
+        assert "**Issue discovered**" not in calls, calls
+        assert INCOMPLETE_STATUS in calls, (
+            "the agent exited 0 having committed nothing — no ledger line, no "
+            f"PR — and the issue comment did not say so: {calls!r}"
+        )
+        assert "Nothing went wrong" not in calls, calls
+        assert INCOMPLETE_STATUS in pages, (
             f"the Pushover page must carry the same status: {pages!r}"
         )
-        assert "--status OK" not in pages, pages
+        assert "message=OK" not in pages, pages
 
     def test_a_commit_on_the_nightly_branch_during_the_phase_is_ok(self, tmp_path):
         proc, calls, pages = self._run(
@@ -693,10 +742,11 @@ class TestAnAgentThatCommitsNothingIsNotReportedOk:
             "exit 0\n",
         )
         assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
-        comment = next((ln for ln in calls.splitlines() if ln.startswith("issue comment")), "")
-        assert "**audit** " in comment and "**OK**" in comment, (
-            f"a phase that committed must still read OK: {comment!r} {proc.stderr!r}"
+        assert "**audit**" in calls and "**OK**" in calls, (
+            f"a phase that committed must still report: {calls!r} {proc.stderr!r}"
         )
-        assert "INCOMPLETE" not in comment, comment
-        assert "--status OK" in pages, pages
-        assert "INCOMPLETE" not in pages, pages
+        assert "**Issue discovered**" not in calls, calls
+        assert "Nothing went wrong this audit phase." not in calls, calls
+        assert INCOMPLETE_STATUS not in calls, calls
+        assert "message=OK" in pages, pages
+        assert INCOMPLETE_STATUS not in pages, pages

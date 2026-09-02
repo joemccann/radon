@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import plistlib
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -118,23 +119,90 @@ def _stub_bin(tmp_path: Path, *, claude_body: str = "#!/bin/sh\nexit 0\n") -> tu
     )
     _executable(bin_dir / "claude", claude_body)
     _executable(bin_dir / "git", "#!/bin/sh\nexit 0\n")
+    _executable(
+        bin_dir / "curl",
+        "#!/bin/bash\n"
+        f'printf "%s\\n" "$*" >> "{py_log}"\n'
+        "i=1\n"
+        'while [ "$i" -le "$#" ]; do\n'
+        '  eval "arg=\\${$i}"\n'
+        '  if [ "$arg" = "--config" ] || [ "$arg" = "-K" ]; then\n'
+        "    i=$((i + 1))\n"
+        '    eval "cfg=\\${$i}"\n'
+        f'    if [ "$cfg" = "-" ]; then cat >> "{py_log}"\n'
+        f'    elif [ -f "$cfg" ]; then cat "$cfg" >> "{py_log}"; fi\n'
+        "  fi\n"
+        "  i=$((i + 1))\n"
+        "done\n"
+        "exit 0\n",
+    )
     return bin_dir, gh_log, py_log
 
 
+_HOST_PUSHOVER_KEYS = ("PUSHOVER_USER", "PUSHOVER_TOKEN")
+
+
 def _run(loop: str, repo: Path, bin_dir: Path, home: Path, *, timeout: int = 120) -> subprocess.CompletedProcess:
+    src = REPO / "scripts" / WRAPPERS[loop]
+    dest = repo / "scripts" / WRAPPERS[loop]
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dest)
+    dest.chmod(dest.stat().st_mode | 0o100)
+    curl_stub = bin_dir / "curl"
+    dest.write_text(
+        dest.read_text(encoding="utf-8").replace("/usr/bin/curl", str(curl_stub)),
+        encoding="utf-8",
+    )
+    env = {k: v for k, v in os.environ.items() if k not in _HOST_PUSHOVER_KEYS}
+    env["PATH"] = f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '/usr/bin:/bin')}"
+    env["RADON_WEEKEND_REPO"] = str(repo)
+    env["HOME"] = str(home)
+    for key in _HOST_PUSHOVER_KEYS:
+        env.pop(key, None)
     return subprocess.run(
-        [BASH, str(REPO / "scripts" / WRAPPERS[loop]), "audit"],
-        env={
-            **os.environ,
-            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-            "RADON_WEEKEND_REPO": str(repo),
-            "HOME": str(home),
-        },
+        [BASH, str(dest), "audit"],
+        env=env,
         capture_output=True,
         text=True,
         timeout=timeout,
         check=False,
     )
+
+
+class TestRunDoesNotFireHostPushover:
+    def test_host_pushover_env_is_dropped_and_curl_is_the_stub(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PUSHOVER_USER", "host-user")
+        monkeypatch.setenv("PUSHOVER_TOKEN", "host-token")
+        home = tmp_path / "home"
+        home.mkdir()
+        repo = _clone(
+            tmp_path,
+            "own-clone",
+            markers=[".radon-weekend-runner", LOOP_MARKERS["testing"]],
+        )
+        (tmp_path / ".env").write_text(
+            "PUSHOVER_USER=test-user\nPUSHOVER_TOKEN=test-token\n",
+            encoding="utf-8",
+        )
+        started = tmp_path / "claude-started"
+        bin_dir, _gh_log, py_log = _stub_bin(
+            tmp_path,
+            claude_body=f"#!/bin/sh\ntouch {started}\nexit 0\n",
+        )
+        result = _run("testing", repo, bin_dir, home)
+        assert started.exists(), (result.returncode, result.stderr[-600:])
+        pages = py_log.read_text(encoding="utf-8") if py_log.exists() else ""
+        assert "host-token" not in pages, pages
+        assert "host-user" not in pages, pages
+        assert "pushover.net" in pages, pages
+        assert "test-token" in pages, pages
+        argv_line = pages.splitlines()[0]
+        assert argv_line.split()[0] == "-q", argv_line
+        src = Path(__file__).read_text(encoding="utf-8")
+        run = src[src.index("def _run(") : src.index("class TestLoopMarkerGuard")]
+        assert 'replace("/usr/bin/curl"' in run
+        assert "[BASH, str(dest)" in run
+        assert "**os.environ" not in run
 
 
 # --- R-504: every loop needs its OWN marker ---------------------------------
@@ -216,7 +284,8 @@ class TestRunLogTailIsRedacted:
         assert "issue comment" in calls, (result.returncode, result.stderr[-400:])
         assert "abc123secretvalue" not in calls, "the raw agent tail reached the public issue"
         assert "sk-ant-zzz999888" not in calls
-        assert "[REDACTED]" in calls
+        assert "**Issue discovered**" not in calls
+        assert "**audit**" in calls or "**OK**" in calls
 
 
 class TestRedactor:
