@@ -237,10 +237,11 @@ describe("StreaksPanel chart", () => {
     expect(screen.getByTestId("streaks-chart-section")).toBeTruthy();
     const svg = container.querySelector("svg[data-testid='streaks-chart']");
     expect(svg).toBeTruthy();
-    const paths = svg!.querySelectorAll("path");
-    expect(paths.length).toBeGreaterThanOrEqual(1);
+    const pricePath = svg!.querySelector("[data-testid='streaks-price-path']");
+    expect(pricePath).toBeTruthy();
+    expect(pricePath!.getAttribute("stroke")).toBeTruthy();
     // 32 sessions cycling 0,1,2,0 -> 16 sessions carry a positive streak.
-    expect(svg!.querySelectorAll("rect.streaks-bar")).toHaveLength(16);
+    expect(svg!.querySelectorAll("[data-testid='streaks-bar']")).toHaveLength(16);
     expect(screen.getByText("SPY DAILY CLOSE VS CONSECUTIVE DAILY GAINS")).toBeTruthy();
   });
 

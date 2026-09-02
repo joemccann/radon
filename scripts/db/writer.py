@@ -1767,6 +1767,39 @@ def upsert_ivrank_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = 
     db.commit()
 
 
+def upsert_iv_spread_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
+    """IV SPREAD indicator - one row per paired SPX/NDX session, idempotent on
+    date. spread is NULL only for a session the leg-level bad-print gate
+    excluded (the raw leg closes stay).
+
+    Chunked multi-row INSERTs (Hrana I/O bounding): every run rewrites the
+    full stored series (~1,250 sessions under the 5Y seed), which per-row
+    would be thousands of statements on one stream (the rv-ratio 2026-07-21
+    502 incident). ~4 chunked round-trips instead.
+    """
+    if not rows:
+        return
+    stamp = recorded_at or _now_iso()
+    db = get_db()
+    for start in range(0, len(rows), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = rows[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        placeholders = ", ".join("(?, ?, ?, ?, ?)" for _ in chunk)
+        params: list[Any] = []
+        for row in chunk:
+            params.extend(
+                (row["date"], row["spx_iv"], row["ndx_iv"], row.get("spread"), stamp)
+            )
+        db.execute(
+            "INSERT INTO iv_spread_history (date, spx_iv, ndx_iv, spread, recorded_at) "
+            f"VALUES {placeholders} "
+            "ON CONFLICT(date) DO UPDATE SET "
+            "spx_iv = excluded.spx_iv, ndx_iv = excluded.ndx_iv, "
+            "spread = excluded.spread, recorded_at = excluded.recorded_at",
+            tuple(params),
+        )
+    db.commit()
+
+
 SKEW_UPSERT_SQL = """
 INSERT INTO skew_history
   (date, expiry, dte, put_iv, call_iv, ratio, change, recorded_at)

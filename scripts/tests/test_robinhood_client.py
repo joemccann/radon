@@ -23,6 +23,7 @@ import stat
 import sys
 import time
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -71,13 +72,26 @@ def unconfigured():
 
 @pytest.fixture
 def no_network(monkeypatch):
-    """Any HTTP attempt fails the test — unconfigured must never touch the wire."""
-    def _boom(*_a, **_k):
-        raise AssertionError("network I/O attempted while Robinhood is unconfigured")
+    """Any HTTP attempt fails the test — unconfigured must never touch the wire.
 
-    monkeypatch.setattr("requests.Session.post", _boom)
-    monkeypatch.setattr("requests.Session.get", _boom)
-    monkeypatch.setattr(rh.requests, "post", _boom)
+    Spies with a teardown zero-call assertion, not planted raises: the ladder
+    helpers (fetch_robinhood_closes / fetch_robinhood_quote) swallow every
+    per-symbol exception on purpose, so a raising stub is silently absorbed
+    and proves nothing. T-356.
+    """
+    spies = {
+        "requests.Session.post": MagicMock(name="Session.post"),
+        "requests.Session.get": MagicMock(name="Session.get"),
+        "rh.requests.post": MagicMock(name="requests.post"),
+    }
+    monkeypatch.setattr("requests.Session.post", spies["requests.Session.post"])
+    monkeypatch.setattr("requests.Session.get", spies["requests.Session.get"])
+    monkeypatch.setattr(rh.requests, "post", spies["rh.requests.post"])
+    yield spies
+    for name, spy in spies.items():
+        assert spy.call_count == 0, (
+            f"network I/O attempted while Robinhood is unconfigured: {name}"
+        )
 
 
 def _write_token_file(path: Path, **fields) -> None:

@@ -12,6 +12,7 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 
 let generated: string | null = null;
+let consumed = false;
 
 export function getSetupToken(): string {
   const fromEnv = (process.env.RADON_SETUP_TOKEN || "").trim();
@@ -33,6 +34,7 @@ export function getSetupToken(): string {
 }
 
 export function verifySetupToken(provided: unknown): boolean {
+  if (consumed) return false;
   if (typeof provided !== "string" || !provided.trim()) return false;
   const expected = Buffer.from(getSetupToken(), "utf8");
   const candidate = Buffer.from(provided.trim(), "utf8");
@@ -40,7 +42,13 @@ export function verifySetupToken(provided: unknown): boolean {
   return timingSafeEqual(expected, candidate);
 }
 
+/** One-shot: invalidate the token after a successful wizard completion. */
+export function consumeSetupToken(): void {
+  consumed = true;
+}
+
 /** Test-only: reset the generated token between cases. */
 export function __resetSetupTokenForTests(): void {
   generated = null;
+  consumed = false;
 }

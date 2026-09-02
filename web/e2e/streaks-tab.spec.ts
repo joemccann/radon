@@ -97,7 +97,10 @@ test.describe("/regime/streaks — Consecutive Daily Gains tab", () => {
     await setupMocks(page);
     await page.goto("/regime/streaks");
 
-    await expect(page.locator('.regime-rail__item[data-tab="streaks"]')).toHaveClass(/active/);
+    // Key on the accessibility contract, not CSS: RegimeRail marks the active
+    // item with aria-current="page".
+    const rail = page.getByRole("navigation", { name: "Regime indicators" });
+    await expect(rail.locator('[aria-current="page"]')).toHaveAttribute("data-tab", "streaks");
 
     const current = page.locator('[data-testid="streaks-strip-current"]');
     await current.waitFor({ timeout: 10_000 });
@@ -114,11 +117,12 @@ test.describe("/regime/streaks — Consecutive Daily Gains tab", () => {
     const section = page.locator('[data-testid="streaks-chart-section"]');
     await section.waitFor({ timeout: 10_000 });
 
-    await expect(section.locator("svg[data-testid='streaks-chart'] path[stroke]").first()).toBeVisible();
-    const bars = await section.locator("svg[data-testid='streaks-chart'] rect.streaks-bar").count();
+    await expect(section.getByTestId("streaks-price-path")).toBeVisible();
+    const bars = await section.getByTestId("streaks-bar").count();
     expect(bars).toBeGreaterThanOrEqual(10);
     await expect(section.locator('[data-testid="streaks-brush"]')).toBeVisible();
     await expect(section).toContainText("DAILY CLOSE VS CONSECUTIVE DAILY GAINS");
+    await page.screenshot({ path: "test-results/streaks-tab-chart.png", fullPage: true });
   });
 
   test("submitting a new symbol requests it and updates the URL", async ({ page }) => {

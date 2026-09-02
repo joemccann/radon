@@ -33,7 +33,6 @@ from monitor_daemon.handlers import FillMonitorHandler, PresetRebalanceHandler, 
 from monitor_daemon.handlers.flex_token_check import FlexTokenCheck
 from monitor_daemon.handlers.menthorq_session_check import MenthorQSessionCheck
 from monitor_daemon.handlers.menthorq_login_probe import MenthorQLoginProbe
-from monitor_daemon.handlers.cash_flow_sync import CashFlowSyncHandler
 from monitor_daemon.handlers.evening_execution_sweep import EveningExecutionSweepHandler
 from monitor_daemon.handlers.journal_reconcile import JournalReconcileHandler
 from monitor_daemon.handlers.expiry_sweep import ExpirySweepHandler
@@ -105,7 +104,12 @@ def create_daemon() -> MonitorDaemon:
         ib_port=4001
     ))
 
-    daemon.register(CashFlowSyncHandler())
+    # cash_flow_sync is NOT registered (2026-09-02): cash flows come from the
+    # sFTP-delivered statement (radon-flex-pull.timer -> flex_delivery_ingest
+    # -> cash_flow_sync --from-file), which heartbeats `cash-flow-sync` itself.
+    # The no-source SendRequest run this handler spawned exited
+    # EXIT_FLEX_SEND_DISABLED every morning and painted that skip over the
+    # rows the delivery had already synced.
 
     daemon.register(EveningExecutionSweepHandler(
         ib_port=4001

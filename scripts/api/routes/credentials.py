@@ -49,6 +49,10 @@ logger = logging.getLogger("radon.credentials")
 
 router = APIRouter()
 
+# Names exported from the store into os.environ this process lifetime.
+# Distinguishes live exports from .env-file fallbacks after a delete (R-541).
+_SESSION_EXPORTED: set[str] = set()
+
 UPDATED_BY_MAX_LEN = 64
 
 # Vendor validators hold a thread for up to SLOW_LOGIN_TIMEOUT_S (~90s):
@@ -66,6 +70,26 @@ def _generated_at() -> str:
 def _store() -> SecretStore:
     """Fresh handle per request: paths resolve from env, opens are cheap."""
     return SecretStore()
+
+
+def _store_unavailable(exc: SecretStoreError) -> HTTPException:
+    return HTTPException(
+        status_code=503,
+        detail={
+            "code": "CREDENTIAL_STORE_UNAVAILABLE",
+            "message": str(exc),
+        },
+    )
+
+
+def _open_store() -> SecretStore:
+    """Route-facing constructor: a store that cannot open (missing/mismatched
+    key, unopenable DB) is the crafted 503, never a raw 500 (R-521/R-522)."""
+    try:
+        return _store()
+    except SecretStoreError as exc:
+        logger.warning("credential store unavailable: %s", exc)
+        raise _store_unavailable(exc)
 
 
 def _actor(request: Request, body: dict | None = None) -> str:
@@ -142,6 +166,9 @@ def _service_entry(
     fields = []
     for field in service.fields:
         row = stored.get(field.name)
+        env_present = bool(os.environ.get(field.name))
+        exported_only = row is None and env_present and field.name in _SESSION_EXPORTED
+        env_fallback = row is None and env_present and field.name not in _SESSION_EXPORTED
         fields.append(
             {
                 "name": field.name,
@@ -153,7 +180,8 @@ def _service_entry(
                 "version": row["version"] if row else 0,
                 "updated_at": row["updated_at"] if row else None,
                 "updated_by": row["updated_by"] if row else None,
-                "env_fallback": row is None and bool(os.environ.get(field.name)),
+                "env_fallback": env_fallback,
+                "exported_only": exported_only,
             }
         )
     return {
@@ -196,7 +224,17 @@ def _merged_values(
         if field.name in submitted:
             merged[field.name] = submitted[field.name]
             continue
-        stored_value = store.get_secret(field.name)
+        try:
+            stored_value = store.get_secret(field.name)
+        except SecretStoreError as exc:
+            # A corrupted sibling row must not 500 rotation of a healthy
+            # field (R-538): treat it as absent and fall through to env.
+            logger.warning(
+                "credential merge: skipping unreadable row %s: %s",
+                field.name,
+                exc,
+            )
+            stored_value = None
         if stored_value:
             merged[field.name] = stored_value
             continue
@@ -209,8 +247,12 @@ def _merged_values(
 @router.get("/credentials")
 async def list_credentials(request: Request):
     """Every registry service with masked stored state. Never plaintext."""
-    store = _store()
-    stored = await asyncio.to_thread(_stored_by_name, store)
+    store = _open_store()
+    try:
+        stored = await asyncio.to_thread(_stored_by_name, store)
+    except SecretStoreError as exc:
+        logger.warning("credential list failed: %s", exc)
+        raise _store_unavailable(exc)
     return {
         "services": [
             _service_entry(service, stored)
@@ -230,42 +272,42 @@ async def put_credentials(service_id: str, request: Request):
     body = await _json_object(request)
     submitted = _clean_values(service, body)
     actor = _actor(request, body)
-    store = _store()
+    store = _open_store()
 
     merged = await asyncio.to_thread(_merged_values, service, submitted, store)
     verdict = await _run_validator(service_id, merged)
     if verdict.blocks_save:
         raise HTTPException(
             status_code=422,
-            detail={
-                "code": "CREDENTIAL_REJECTED",
-                "service": service_id,
-                "status": verdict.status,
-                "message": verdict.message,
-            },
+            detail=credential_validators.scrub_validation_message(
+                {
+                    "code": "CREDENTIAL_REJECTED",
+                    "service": service_id,
+                    "status": verdict.status,
+                    "message": verdict.message,
+                }
+            ),
         )
 
     def _save() -> None:
+        # One transaction for every field, and export to os.environ only
+        # after the store write succeeded — a mid-save failure must not
+        # leave a half-stored, half-exported service (R-539).
+        store.set_secrets(submitted, actor=actor)
         for name, value in submitted.items():
-            store.set_secret(name, value, actor=actor)
             os.environ[name] = value
+            _SESSION_EXPORTED.add(name)
 
     try:
         await asyncio.to_thread(_save)
     except SecretStoreError as exc:
         logger.warning("credential store write failed for %s: %s", service_id, exc)
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "CREDENTIAL_STORE_UNAVAILABLE",
-                "message": "credential store temporarily unavailable",
-            },
-        ) from exc
+        raise _store_unavailable(exc) from exc
 
     stored = await asyncio.to_thread(_stored_by_name, store)
     return {
         "service": _service_entry(service, stored),
-        "validation": verdict.to_dict(),
+        "validation": credential_validators.scrub_validation_message(verdict.to_dict()),
     }
 
 
@@ -279,10 +321,10 @@ async def validate_credentials(service_id: str, request: Request):
     submitted: Dict[str, str] = {}
     if body.get("values"):
         submitted = _clean_values(service, body)
-    store = _store()
+    store = _open_store()
     merged = await asyncio.to_thread(_merged_values, service, submitted, store)
     verdict = await _run_validator(service_id, merged)
-    return {"validation": verdict.to_dict()}
+    return {"validation": credential_validators.scrub_validation_message(verdict.to_dict())}
 
 
 @router.delete("/credentials/{service_id}/{name}")
@@ -293,10 +335,14 @@ async def delete_credential(service_id: str, name: str, request: Request):
         raise _unknown_service(service_id)
     if name not in {field.name for field in service.fields}:
         raise _bad_request(f"{name} is not a field of {service.id}")
-    store = _store()
-    removed = await asyncio.to_thread(
-        store.delete_secret, name, _actor(request)
-    )
+    store = _open_store()
+    try:
+        removed = await asyncio.to_thread(
+            store.delete_secret, name, _actor(request)
+        )
+    except SecretStoreError as exc:
+        logger.warning("credential delete failed for %s: %s", name, exc)
+        raise _store_unavailable(exc) from exc
     stored = await asyncio.to_thread(_stored_by_name, store)
     return {"removed": removed, "service": _service_entry(service, stored)}
 
@@ -308,17 +354,27 @@ def bootstrap_exported_names() -> list:
     subprocesses inherit the operator's credentials without a restart chain.
     Only registry names are ever touched.
     """
-    store = _store()
     exported = []
     try:
+        store = _store()
         stored = _stored_by_name(store)
     except Exception as exc:  # noqa: BLE001 - startup must not die on this
         logger.warning("credential bootstrap skipped: %s", exc)
         return exported
     for name in credentials_registry.all_field_names():
-        if name in stored:
+        if name not in stored:
+            continue
+        try:
             value = store.get_secret(name)
-            if value:
-                os.environ[name] = value
-                exported.append(name)
+        except Exception as exc:  # noqa: BLE001 - one bad row must not stop the rest (R-521)
+            logger.warning(
+                "credential bootstrap: skipping undecryptable row %s: %s",
+                name,
+                exc,
+            )
+            continue
+        if value:
+            os.environ[name] = value
+            _SESSION_EXPORTED.add(name)
+            exported.append(name)
     return exported
