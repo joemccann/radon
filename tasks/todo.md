@@ -10,7 +10,13 @@ structure card wastes a row. Drop it. Keep FLAT, LIVE, STOCK/OPTION.
 ## Checklist
 - [x] H1 failing test
 - [x] H2 remove chip
-- [ ] H3 tests green
+- [x] H3 tests green — 8508 passed, 18 skipped
+
+## Review
+- Mobile header omits HELD when a position is held; FLAT stays
+- STOCK/OPTION switcher and LIVE dot unchanged
+- Desktop structure chip unchanged
+- No PR per ticket
 
 ---
 
