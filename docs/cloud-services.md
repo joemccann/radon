@@ -797,8 +797,12 @@ never installed on the VPS (`systemctl is-enabled` → `not-found`) and nothing
 rebuilt the payload on a schedule at all; the only refreshes came from the
 page's own SWR trigger.
 
-**A Flex outage must not blank the page.** NAV degrades `flex → disk_cache →
-turso`; flows now degrade `flex → turso external_flows` via
+**A Flex outage must not blank the page.** NAV resolves `flex` (only with
+`--sendrequest`) → the fresher of the disk cache and Turso (a tie stays on
+disk; "disk then Turso" served an 18-day-old cache after the sFTP ingest had
+mirrored newer NAV into Turso, 2026-09-02). Flows come from a statement
+already in hand (the file ingest, or the NAV fetch this run) with no
+`IB_FLEX_TOKEN` required, then degrade `flex → turso external_flows` via
 `load_flows_from_turso()`. Before that fallback existed, one `fetch_flex_xml`
 exception produced `FlowSet.failed`, which suppresses TWR, Max DD, Sharpe and
 the equity curve — so the page flipped between +90.81% and `--` depending on
