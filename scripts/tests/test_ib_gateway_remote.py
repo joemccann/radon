@@ -1,6 +1,7 @@
 """Adversarial tests for the broker-local IB Gateway remote-control daemon."""
 from __future__ import annotations
 
+import errno
 import json
 import os
 import shutil
@@ -211,6 +212,36 @@ def _call(httpd, certs, path: str, method: str = "GET", *, ctx=None, headers=Non
         return resp.status, json.loads(resp.read().decode())
 
 
+def _assert_mtls_handshake_rejected(exc: BaseException) -> None:
+    """Pin a CERT_REQUIRED reject that dies before the HTTP handler.
+
+    Some OpenSSL builds surface ssl.SSLError. Others RST after
+    QuietTLSServer.finish_request catches the handshake failure and
+    closes, so urllib raises URLError([Errno 104] Connection reset by
+    peer) — CI scripts-i 2026-09-02. HTTPError means the handshake
+    completed and the handler ran.
+    """
+    assert not isinstance(exc, urllib.error.HTTPError), (
+        "handshake succeeded; request reached the handler"
+    )
+    reason = getattr(exc, "reason", exc)
+    if isinstance(exc, ssl.SSLError) or isinstance(reason, ssl.SSLError):
+        return
+    if _is_connection_reset(exc) or _is_connection_reset(reason):
+        return
+    raise AssertionError(f"not a handshake reject: {type(exc).__name__}: {exc!r}")
+
+
+def _is_connection_reset(exc: object) -> bool:
+    if isinstance(exc, (ConnectionResetError, ConnectionAbortedError, BrokenPipeError)):
+        return True
+    return isinstance(exc, OSError) and exc.errno in {
+        errno.ECONNRESET,
+        errno.ECONNABORTED,
+        errno.EPIPE,
+    }
+
+
 class TestStdlibOnlyIsolation:
     def test_import_pulls_in_no_trading_stack(self):
         forbidden = {"ib_insync", "uvicorn", "fastapi", "starlette", "libsql", "ibapi"}
@@ -342,10 +373,28 @@ class TestDaemon:
         httpd = _start(_config(tmp_path, certs))
         try:
             ctx = _ctx(certs, client=False)
-            with pytest.raises(ssl.SSLError):
+            with pytest.raises((ssl.SSLError, urllib.error.URLError, OSError)) as err:
                 _call(httpd, certs, "/healthz", ctx=ctx)
+            _assert_mtls_handshake_rejected(err.value)
         finally:
             _stop(httpd)
+
+    def test_connection_reset_is_a_handshake_reject_not_an_http_response(self):
+        _assert_mtls_handshake_rejected(ssl.SSLError("CERTIFICATE_REQUIRED"))
+        _assert_mtls_handshake_rejected(
+            urllib.error.URLError(ConnectionResetError(errno.ECONNRESET, "Connection reset by peer"))
+        )
+        _assert_mtls_handshake_rejected(
+            urllib.error.URLError(OSError(errno.ECONNRESET, "Connection reset by peer"))
+        )
+        with pytest.raises(AssertionError, match="handshake succeeded"):
+            _assert_mtls_handshake_rejected(
+                urllib.error.HTTPError(
+                    "https://127.0.0.1/healthz", 403, "Forbidden", hdrs=None, fp=None
+                )
+            )
+        with pytest.raises(AssertionError, match="not a handshake reject"):
+            _assert_mtls_handshake_rejected(urllib.error.URLError(TimeoutError("timed out")))
 
     def test_rogue_client_cert_is_tls_failure(self, tmp_path, certs):
         httpd = _start(_config(tmp_path, certs))
