@@ -276,7 +276,7 @@ def _write_json_cache(payload: dict[str, Any]) -> None:
 
 
 def _data_dir() -> Path:
-    return Path(os.environ.get("MA_RATIO_DATA_DIR") or (_PROJECT_DIR / "data"))
+    return Path(os.environ.get("MA_RATIO_DATA_DIR", str(_PROJECT_DIR / "data")))
 
 
 # ── orchestration ─────────────────────────────────────────────────
