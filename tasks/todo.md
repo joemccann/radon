@@ -1,3 +1,25 @@
+# Task: Remove mobile cockpit HELD chip (FM-RADON-HELD) [WIP]
+
+Captain: the teal HELD badge between the SMH OPTION header and the
+structure card wastes a row. Drop it. Keep FLAT, LIVE, STOCK/OPTION.
+
+- H1 depends_on: [] - failing mobile header test
+- H2 depends_on: [H1] - omit HELD chip when a position is held
+- H3 depends_on: [H2] - focused vitest + e2e spec update
+
+## Checklist
+- [x] H1 failing test
+- [x] H2 remove chip
+- [x] H3 tests green — 8508 passed, 18 skipped
+
+## Review
+- Mobile header omits HELD when a position is held; FLAT stays
+- STOCK/OPTION switcher and LIVE dot unchanged
+- Desktop structure chip unchanged
+- No PR per ticket
+
+---
+
 # Task: Orders header WORKING vs QUEUED rows (2026-09-02) [WIP]
 
 PR 236 comment: Overnight TIF is a separate IB venue from EXT `outsideRth`.
