@@ -30,6 +30,8 @@ CATALOG: dict[CatalogKey, Capability] = {
     ("GET", "/attribution"): "read",
     ("GET", "/backtest"): "read",
     ("GET", "/backtest/{strategy}"): "read",
+    # refresh spawns a 180s subprocess that persists to Turso: a mutation.
+    ("POST", "/backtest/{strategy}/refresh"): "mutate.workspace",
     ("POST", "/blotter"): "mutate.workspace",
     ("POST", "/bpi/scan"): "read.spawn",
     ("POST", "/breadth/scan"): "read.spawn",

@@ -2465,18 +2465,31 @@ async def paper_place(request: Request):
 
 
 @app.get("/backtest/{strategy}")
-async def backtest_strategy(request: Request, strategy: str, refresh: bool = False):
+async def backtest_strategy(request: Request, strategy: str, refresh: Optional[str] = None):
     """F12 — latest walk-forward backtest run for a strategy.
 
     Returns the most recent persisted run from ``backtest_runs`` (bounded hrana
-    read, off-loop). When none exists or ``refresh=true``, runs the subprocess
-    (which persists the fresh run) and returns its result.
+    read, off-loop). When none exists, runs the subprocess (which persists the
+    fresh run) and returns its result. A forced re-run is a mutation:
+    POST /backtest/{strategy}/refresh.
     """
-    if not refresh:
-        cached = await asyncio.to_thread(_load_latest_backtest_run, strategy)
-        if cached is not None:
-            return cached
+    if refresh is not None:
+        raise HTTPException(
+            status_code=400, detail="refresh is POST /backtest/{strategy}/refresh"
+        )
+    cached = await asyncio.to_thread(_load_latest_backtest_run, strategy)
+    if cached is not None:
+        return cached
+    return await _run_backtest(request, strategy)
 
+
+@app.post("/backtest/{strategy}/refresh")
+async def backtest_refresh(request: Request, strategy: str):
+    """F12 — force a fresh walk-forward run (180s subprocess, persists to Turso)."""
+    return await _run_backtest(request, strategy)
+
+
+async def _run_backtest(request: Request, strategy: str):
     task = asyncio.create_task(run_script(
         "backtest_run.py", ["--strategy", strategy, "--persist"], timeout=180
     ))
