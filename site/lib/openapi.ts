@@ -1,4 +1,4 @@
-import { agentPages } from "./developer-pages";
+import { agentPages, HOSTED_MCP_URL } from "./developer-pages";
 import { LEGAL_CONTACT_EMAIL } from "./legal";
 import { SITE_DESCRIPTION, SITE_NAME, siteUrl } from "./seo";
 
@@ -46,7 +46,7 @@ const documentedPaths = [
   {
     path: "/developers/mcp",
     summary: "Radon Terminal MCP server",
-    description: "Local stdio radon-kb server. No hosted HTTP MCP URL.",
+    description: `Hosted Streamable HTTP MCP at ${HOSTED_MCP_URL} plus the local stdio radon-kb server.`,
   },
   {
     path: "/developers/webhooks",
