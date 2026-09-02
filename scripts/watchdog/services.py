@@ -79,10 +79,12 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     "orders-sync":      {"open": 10 * _MIN, "closed": 3 * _DAY, "requires_ib": True},
     "portfolio-sync":   {"open": 10 * _MIN, "closed": 3 * _DAY, "requires_ib": True},
     "journal-sync":     {"open": 10 * _MIN, "closed": 3 * _DAY, "requires_ib": True},
-    # cash-flow-sync fires at 17:00 ET on trading days only; skips weekends
-    # + US holidays. Longest legit gap: Fri 17:00 ET → Mon 17:00 ET ≈ 72h.
-    # Prior 25h closed window tripped every Saturday. Widened to 4 days.
-    "cash-flow-sync":   {"open": 25 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
+    # cash-flow-sync is written by the sFTP ingest (radon-flex-pull.timer,
+    # Tue..Sat 07:30 ET) when a NEW Activity statement is applied. Longest
+    # legit gap in market hours: Sat 07:30 ET → Mon 16:00 ET ≈ 57h, so the
+    # 25h open window it had as a Mon-Fri daemon handler would trip every
+    # Monday. Closed stays 4 days for the weekend plus one holiday-drift day.
+    "cash-flow-sync":   {"open": 3 * _DAY, "closed": 4 * _DAY, "requires_ib": False},
     # execution-sweep fires at 20:30 ET on trading days only (evening
     # after-hours fill import, REL-012); skips weekends + US holidays.
     # Longest legit gap: Fri 20:30 ET → Mon 20:30 ET ≈ 72h, so closed is
@@ -241,6 +243,12 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # with a UW fallback, so the job heartbeats through an IB outage:
     # requires_ib stays False.
     "ivrank":           {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # iv-spread — radon-iv-spread.timer, daily 22:15 UTC every calendar day,
+    # after the 16:00 ET close year-round (weekend/holiday runs are unchanged-
+    # data heartbeats). Uniform 26h window matches its ivrank sibling. IB is
+    # the ONLY feed (no UW/Yahoo rung serves index 30d IV), so an IB outage is
+    # the one thing that explains a missing reading: requires_ib True.
+    "iv-spread":        {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": True},
     # vol-cone — radon-vol-cone.timer, Mon-Fri 20:45 UTC after the 16:45 ET
     # close grace. UW greeks only — no IB. 26h open catches a missed weekday.
     # The holiday-Monday heartbeat lands Fri 20:45 UTC + 72h + jitter, so a
@@ -562,6 +570,10 @@ BUCKETS: dict[str, list[str]] = {
         # UW fallback) — hourly check surfaces a missed run within 1h of the
         # 26h window expiring.
         "ivrank",
+        # Daily 22:15 UTC NDX minus SPX 1M IV spread pull (post-close, IB
+        # only) — hourly check surfaces a missed run within 1h of the 26h
+        # window expiring.
+        "iv-spread",
         # Daily Mon-Fri 20:45 UTC UW vol-cone pull — hourly check surfaces a
         # missed run within 1h of the 26h window expiring.
         "vol-cone",

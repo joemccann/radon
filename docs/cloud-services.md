@@ -370,8 +370,9 @@ The `data/*.json` files keep advancing on every cycle, so reverting is a no-data
 Public read-only MCP at **`https://app.radon.run/mcp`** (Streamable HTTP
 JSON-RPC), documented for consumers at radon.run `/developers/mcp`.
 
-- **Process**: `radon-mcp.service` runs `scripts/mcp_hosted/serve.py`
-  (FastMCP, stateless, loopback `127.0.0.1:8334`). Deliberately a DEDICATED
+- **Process**: `radon-mcp.service` runs `python -m scripts.mcp_hosted.serve`
+  (module invocation — a path invocation fails on import; FastMCP, stateless,
+  loopback `127.0.0.1:8334`). Deliberately a DEDICATED
   process — never a mount on `scripts/api/server.py` — so an anonymous MCP
   caller can never reach the FastAPI `/docs` / operator `/openapi.json`
   surface. Caddy intercepts `handle /mcp*` before the Next.js catch-all
@@ -385,7 +386,11 @@ JSON-RPC), documented for consumers at radon.run `/developers/mcp`.
   own token. No write tools; no `kb_*` corpus tools (operator journal/P&L
   stays on the checkout-only radon-kb stdio server); no service tokens.
 - **Env**: `CLERK_JWKS_URL` / `CLERK_ISSUER` / `ALLOWED_USER_IDS` from
-  `/etc/radon/env`. Optional overrides `RADON_MCP_{HOST,PORT,SITE_BASE,EDGE_BASE,APP_BASE,DEMO_BASE}`.
+  `/etc/radon/env`. Optional overrides `RADON_MCP_{HOST,PORT,SITE_BASE,EDGE_BASE,APP_BASE,DEMO_BASE}`
+  and `RADON_MCP_ALLOWED_HOSTS` (comma list; default
+  `app.radon.run,app.radon.run:*,127.0.0.1:*,localhost:*` — the SDK's
+  DNS-rebinding protection 421s any Host not on it, so a serving-host change
+  must update this list).
 - **First enable** (install-units only auto-enables new timers):
   `sudo systemctl enable --now radon-mcp.service`, then
   `curl -s -X POST https://app.radon.run/mcp -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'`.
@@ -736,6 +741,17 @@ ranked over the trailing 252 sessions. Heartbeat `ivrank`. Units are listed in
 `setup-vps.sh` `SERVICE_FILES`; root install-copy is still owed
 (`not-installed` allowlist expires 2026-12-31). Spec:
 [`indicators/ivrank.md`](indicators/ivrank.md).
+
+### IV SPREAD (`radon-iv-spread.timer`)
+
+Daily `22:15 UTC` (`RandomizedDelaySec=120`), oneshot
+`scripts/fetch_iv_spread.py`. NDX and SPX 30-day implied vol from IB
+(`OPTION_IMPLIED_VOLATILITY` daily bars on both index legs, health-gated),
+spread in volatility points against its full stored history. IB is the only
+feed: an IB outage re-serves the cached payload as `stale_source` with an
+`error` heartbeat. Heartbeat `iv-spread`. Installed by the deploy's
+`install-units` verb from `installed-units.sha256`. Spec:
+[`indicators/iv-spread.md`](indicators/iv-spread.md).
 
 ### Flex sFTP pull (`radon-flex-pull.timer`)
 

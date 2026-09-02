@@ -54,6 +54,26 @@ def test_twr_from_file_uses_activity_xml_without_sendrequest(monkeypatch):
     assert payload.get("nav_as_of") or payload.get("period_end")
 
 
+def test_twr_from_file_parses_flows_from_the_file_without_a_token(monkeypatch):
+    """The sFTP unit runs on a stripped env with no IB_FLEX_TOKEN by design
+    (docs/flex-sftp-setup.md). `resolve_flows` demanded a token before looking
+    at the statement already in hand, so every nightly activity file built
+    `flows_status: failed (flex_not_configured)`, degraded, and was rejected
+    (2026-09-02, radon-flex-pull)."""
+    import perf_twr_builder
+
+    monkeypatch.delenv("IB_FLEX_TOKEN", raising=False)
+    monkeypatch.delenv("IB_FLEX_FLOWS_QUERY_ID", raising=False)
+    monkeypatch.delenv("IB_FLEX_NAV_QUERY_ID", raising=False)
+    monkeypatch.setattr(perf_twr_builder, "fetch_flex_xml", lambda *a, **k: (_ for _ in ()).throw(AssertionError("SendRequest")))
+    monkeypatch.setattr(perf_twr_builder, "load_benchmark_closes", lambda *a, **k: {})
+    monkeypatch.setattr(perf_twr_builder, "get_risk_free_rate", lambda **k: (0.0, "test"))
+    payload = perf_twr_builder.build_and_persist(from_file=str(ACTIVITY), persist=False)
+    assert payload.get("nav_source") == "flex_from_file"
+    assert payload.get("flows_status") != "failed", payload.get("warnings")
+    assert not [w for w in payload.get("warnings", []) if w.get("code") == "FLOWS_FETCH_FAILED"]
+
+
 def test_ingest_does_not_import_gdcdyn():
     source = (SCRIPTS / "flex_delivery_ingest.py").read_text()
     assert "gdcdyn" not in source

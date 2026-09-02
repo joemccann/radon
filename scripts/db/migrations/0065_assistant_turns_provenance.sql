@@ -17,4 +17,4 @@ ALTER TABLE assistant_turns ADD COLUMN provider TEXT;
 
 ALTER TABLE assistant_turns ADD COLUMN model TEXT;
 
-INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (63, datetime('now'));
+INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (65, datetime('now'));

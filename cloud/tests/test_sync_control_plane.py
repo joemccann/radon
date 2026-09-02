@@ -199,6 +199,17 @@ class TestContracts:
         assert "github_origin_is_allowed" in tip
         assert 'cat-file -e "${remote_sha}^{commit}"' in tip
 
+    def test_the_tip_is_read_over_git_protocol_v1(self):
+        """2026-09-02: from the VPS, an unauthenticated protocol-v2 `ls-remote`
+        against the public repo got HTTP 401 on the `ls-refs` POST ("could not
+        read Username for 'https://github.com'"), so the first real
+        sync-control-plane run failed every deploy with exit 69. Protocol v1
+        reads the refs from the `info/refs` GET, which answers 200."""
+        helper = ROOT_HELPER.read_text(encoding="utf-8")
+        for fn in ("resolve_fetched_main_tip", "resolve_trusted_main_tip"):
+            body = function_body(helper, fn)
+            assert '-c protocol.version=1 ls-remote --refs "$UNIT_REMOTE" refs/heads/main' in body, fn
+
     def test_verb_has_its_own_deadline_and_never_cancels_radon_jobs(self):
         helper = ROOT_HELPER.read_text(encoding="utf-8")
         assert "readonly ROOT_SYNC_ACTION_TIMEOUT=300" in helper
