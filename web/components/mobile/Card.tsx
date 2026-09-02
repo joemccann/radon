@@ -7,6 +7,8 @@ type CardProps = {
   onClick?: () => void;
   className?: string;
   ariaLabel?: string;
+  /** When the card toggles a disclosure, announce its state to AT. */
+  ariaExpanded?: boolean;
   testId?: string;
   tone?: "default" | "positive" | "negative" | "warning";
 };
@@ -18,7 +20,7 @@ const toneClass: Record<NonNullable<CardProps["tone"]>, string> = {
   warning: "mobile-card--warning",
 };
 
-export function Card({ children, onClick, className, ariaLabel, testId, tone = "default" }: CardProps) {
+export function Card({ children, onClick, className, ariaLabel, ariaExpanded, testId, tone = "default" }: CardProps) {
   const interactive = Boolean(onClick);
   const classes = [
     "mobile-card",
@@ -56,6 +58,7 @@ export function Card({ children, onClick, className, ariaLabel, testId, tone = "
       onClick={handleClick}
       onKeyDown={handleKey}
       aria-label={ariaLabel}
+      aria-expanded={ariaExpanded}
       data-testid={testId}
     >
       {children}
