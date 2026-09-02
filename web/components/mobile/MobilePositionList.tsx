@@ -186,8 +186,7 @@ function PositionCard({ pos, prices, showExpiry, riskFreeRate, onLegClick }: { p
 
   const handleToggle = () => setExpanded((prev) => !prev);
 
-  const subtitleParts: string[] = [pos.structure];
-  if (showExpiry && pos.expiry && pos.expiry !== "N/A") subtitleParts.push(pos.expiry);
+  const expiryShown = showExpiry && pos.expiry && pos.expiry !== "N/A";
 
   return (
     <div className="m-card-press" data-testid={`mobile-position-${pos.ticker}`}>
@@ -209,7 +208,11 @@ function PositionCard({ pos, prices, showExpiry, riskFreeRate, onLegClick }: { p
                 {pos.contracts}x
               </span>
             </div>
-            <span className="mobile-card__subtitle" style={{ fontSize: 11 }}>{subtitleParts.join(" · ")}</span>
+            <span className="mobile-card__subtitle" style={{ fontSize: 11 }}>
+              {pos.structure}
+              {/* nowrap keeps the date from breaking mid-token at the hyphens */}
+              {expiryShown ? <> · <span style={{ whiteSpace: "nowrap" }}>{pos.expiry}</span></> : null}
+            </span>
           </div>
           <div style={{ display: "flex", alignItems: "flex-start", gap: 4, flexShrink: 0 }}>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
