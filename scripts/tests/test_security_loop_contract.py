@@ -852,6 +852,8 @@ class TestTheLoopBillsTheSubscriptionNotTheApiKey:
         (
             f"ANTHROPIC_API_KEY={KEY}\n",
             "CLAUDE_CODE_USE_BEDROCK=1\n",
+            'CLAUDE_CODE_USE_BEDROCK="true"\n',
+            "CLAUDE_CODE_USE_VERTEX='1'\n",
             "CLAUDE_CODE_API_KEY=sk-ant-alias\n",
         ),
     )
@@ -882,6 +884,19 @@ class TestTheLoopBillsTheSubscriptionNotTheApiKey:
         assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
         assert env_dump.exists(), (
             "CLAUDE_CODE_USE_BEDROCK=0 in .deepsec/.env.local is subscription-only"
+        )
+
+    @pytest.mark.parametrize(
+        "deepsec_env",
+        ('CLAUDE_CODE_USE_BEDROCK="0"\n', "CLAUDE_CODE_USE_VERTEX='false'\n"),
+    )
+    def test_a_quoted_falsy_use_flag_in_deepsec_env_still_runs(
+        self, tmp_path, deepsec_env
+    ):
+        proc, env_dump = self._audit(tmp_path, deepsec_env=deepsec_env)
+        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
+        assert env_dump.exists(), (
+            f"{deepsec_env!r} is subscription-only after quote-strip"
         )
 
     def test_the_skill_pins_subscription_auth_for_the_scanners(self):

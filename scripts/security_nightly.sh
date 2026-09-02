@@ -450,7 +450,7 @@ unset _billing_var
 # .deepsec/.env*.local out of its own workspace, which is gitignored and
 # survives every nightly `git clean`. Refuse rather than edit operator state.
 BILLING_REROUTE_KEY_ASSIGN='^[[:space:]]*(export[[:space:]]+)?(ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_BASE_URL|CLAUDE_CODE_API_KEY|CLAUDE_API_KEY|AWS_BEARER_TOKEN_BEDROCK)[[:space:]]*=[[:space:]]*[^[:space:]#]'
-BILLING_REROUTE_FLAG_ASSIGN='^[[:space:]]*(export[[:space:]]+)?(CLAUDE_CODE_USE_BEDROCK|CLAUDE_CODE_USE_VERTEX)[[:space:]]*=[[:space:]]*(1|true|yes)([#[:space:]]|$)'
+BILLING_REROUTE_FLAG_ASSIGN='^[[:space:]]*(export[[:space:]]+)?(CLAUDE_CODE_USE_BEDROCK|CLAUDE_CODE_USE_VERTEX)[[:space:]]*=[[:space:]]*["'"'"']?(1|true|yes)["'"'"']?([#[:space:]]|$)'
 for key_file in .deepsec/.env .deepsec/.env.local .deepsec/.env.*.local .env.local; do
   [[ -f "$key_file" ]] || continue
   if grep -qE "$BILLING_REROUTE_KEY_ASSIGN" "$key_file" || grep -qiE "$BILLING_REROUTE_FLAG_ASSIGN" "$key_file"; then

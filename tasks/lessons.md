@@ -13,6 +13,9 @@
   off). Refuse USE_* only for 1/true/yes; keep -n refuse for keys/tokens.
   Match those with bash `case` character classes, never PATH `tr`. A
   planted venv `tr` is the same class of skip as a planted `timeout`.
+  File FLAG_ASSIGN must allow optional dotenv quotes (`"true"` / `'1'`);
+  KEY_ASSIGN already treats a leading quote as a value, and deepsec
+  loads the quoted flag as truthy after unset.
 
 ## 2026-09-02 — Snapshot Pushover creds before the agent; comment-only issue writes
 

@@ -266,3 +266,47 @@ class TestABillingRerouteInAnIgnoredEnvFileRefusesTheRun:
         assert env_dump.exists(), (
             f"{loop}: a file that locks Bedrock/Vertex off refused the run"
         )
+
+    @pytest.mark.parametrize(
+        "path,line",
+        (
+            (".env.local", 'CLAUDE_CODE_USE_BEDROCK="true"\n'),
+            (".deepsec/.env.local", "CLAUDE_CODE_USE_VERTEX='1'\n"),
+            (".env.local", 'CLAUDE_CODE_USE_BEDROCK="1"\n'),
+            (".deepsec/.env.local", "CLAUDE_CODE_USE_BEDROCK='yes'\n"),
+        ),
+    )
+    def test_a_quoted_truthy_use_flag_in_an_env_file_refuses(
+        self, tmp_path, loop, path, line
+    ):
+        proc, env_dump = _audit(tmp_path, loop, env_file=(path, line))
+        out = proc.stdout + proc.stderr
+        assert proc.returncode == 2, (
+            f"{loop}: dotenv-quoted {line!r} in {path} is truthy after "
+            f"quote-strip and must refuse: {proc.returncode} {out}"
+        )
+        assert "REFUSING" in out, out
+        assert path in out, out
+        assert not env_dump.exists(), (
+            f"{loop}: the agent ran after a quoted billing-reroute flag"
+        )
+
+    @pytest.mark.parametrize(
+        "path,line",
+        (
+            (".env.local", 'CLAUDE_CODE_USE_BEDROCK="0"\n'),
+            (".deepsec/.env.local", "CLAUDE_CODE_USE_VERTEX='false'\n"),
+            (".env.local", "CLAUDE_CODE_USE_BEDROCK='no'\n"),
+        ),
+    )
+    def test_a_quoted_falsy_use_flag_in_an_env_file_still_runs(
+        self, tmp_path, loop, path, line
+    ):
+        proc, env_dump = _audit(tmp_path, loop, env_file=(path, line))
+        assert proc.returncode == 0, (
+            f"{loop}: quoted {line!r} still locks Bedrock/Vertex off: "
+            f"{proc.returncode} {proc.stdout}{proc.stderr}"
+        )
+        assert env_dump.exists(), (
+            f"{loop}: a quoted 0/false/no in {path} refused the run"
+        )
