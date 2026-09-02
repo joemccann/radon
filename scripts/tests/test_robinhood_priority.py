@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -74,14 +75,16 @@ class TestPortfolioRiskLadder:
         assert portfolio_risk.BACKFILL_LADDER_RUNGS == 4
 
     def test_unconfigured_rh_rung_is_a_clean_networkless_empty(self, monkeypatch):
-        monkeypatch.delenv("ROBINHOOD_MCP_TOKEN", raising=False)
-        monkeypatch.setattr(
-            "requests.Session.post",
-            lambda *a, **k: (_ for _ in ()).throw(
-                AssertionError("unconfigured RH rung attempted network I/O")
-            ),
-        )
+        # Spy, not a planted raise: fetch_robinhood_closes swallows every
+        # per-symbol exception (the ladder falls through to Yahoo), so a
+        # raising stub proves nothing — only a zero call count does. T-356.
+        post_spy = MagicMock(name="Session.post")
+        refresh_spy = MagicMock(name="requests.post")
+        monkeypatch.setattr("requests.Session.post", post_spy)
+        monkeypatch.setattr("requests.post", refresh_spy)
         assert portfolio_risk._fetch_rh_closes("SPY") == {}
+        assert post_spy.call_count == 0
+        assert refresh_spy.call_count == 0
 
 
 class TestRvRatioIncrementalChain:

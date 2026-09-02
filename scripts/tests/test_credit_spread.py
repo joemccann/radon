@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -501,14 +502,15 @@ class TestFetchClosesCascade:
         assert rh_calls == [], "RH must never be asked when IB/UW served everything"
 
     def test_unconfigured_robinhood_falls_through_to_yahoo(self, monkeypatch):
-        """Default RH rung with no ROBINHOOD_MCP_TOKEN: clean skip, no network."""
-        monkeypatch.delenv("ROBINHOOD_MCP_TOKEN", raising=False)
-        monkeypatch.setattr(
-            "requests.Session.post",
-            lambda *a, **k: (_ for _ in ()).throw(
-                AssertionError("unconfigured RH rung attempted network I/O")
-            ),
-        )
+        """Default RH rung when unconfigured: clean skip, no network.
+
+        Spy, not a planted raise: fetch_robinhood_closes swallows every
+        per-symbol exception, so only a zero call count proves no network. T-356.
+        """
+        post_spy = MagicMock(name="Session.post")
+        refresh_spy = MagicMock(name="requests.post")
+        monkeypatch.setattr("requests.Session.post", post_spy)
+        monkeypatch.setattr("requests.post", refresh_spy)
 
         closes, sources = fetch_closes(
             fetch_ib=lambda tickers: {},
@@ -517,6 +519,8 @@ class TestFetchClosesCascade:
         )
 
         assert sources == {HYG_SYMBOL: "yahoo", SPX_SYMBOL: "yahoo"}
+        assert post_spy.call_count == 0
+        assert refresh_spy.call_count == 0
 
     def test_partial_ib_asks_uw_then_yahoo_only_for_the_gap(self):
         uw_calls: list = []
