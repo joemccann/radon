@@ -499,7 +499,7 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, op
       totalCost: action === "SELL" ? -totalCost : totalCost,
       quote: priceData ? { bid: priceData.bid, ask: priceData.ask } : null,
     };
-  }, [order, editableLegs, newPrice, newQuantity, priceData, portfolio]);
+  }, [order, editableLegs, newPrice, newQuantity, priceData, portfolio, openOrders]);
 
   const riskState = useOrderRisk(riskInput, portfolio);
 

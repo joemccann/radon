@@ -74,6 +74,7 @@ import {
 } from "@/lib/orders/orderDisplay";
 import {
   classifyDisplayRowSession,
+  isExtendedFillLive,
   summarizeSessionWindows,
 } from "@/lib/orders/sessionWindow";
 import SessionWindowChip from "./orders/SessionWindowChip";
@@ -3460,6 +3461,7 @@ function OrdersSections({
                     remaining: o.order.remaining,
                     isPendingCancel,
                     isPendingModify,
+                    extendedFillLive: isExtendedFillLive(session),
                   });
                   const intent = resolveOrderIntent(o.order, portfolio?.positions);
                   const singleRowClass = [

@@ -164,3 +164,37 @@ class TestLimitOrderKwargsContract:
 
         kwargs = limit_order_cls.call_args.kwargs
         assert kwargs["tif"] == "DAY", f"tif=DAY not verbatim: {kwargs}"
+
+    def test_stock_close_transmits_extended_eligible(self):
+        """2026-09-01 TQQQ flatten: a closing equity SELL placed for a live
+        extended session must be TRANSMITTED as extended-eligible in one shot
+        (DAY + outsideRth=True on the wire order), not held locally or sent
+        RTH-only. IB then works it in the current pre-market/after-hours
+        window; PreSubmitted from IB on such an order is a working state.
+
+        Quantity sits under the REL-005 notional cap on purpose: the cap is
+        its own control with its own tests, not part of this contract."""
+        client = _make_client(_make_trade(status="PreSubmitted"))
+        params = dict(
+            _BASE_PARAMS,
+            symbol="TQQQ",
+            action="SELL",
+            quantity=1_000,
+            limitPrice=68.80,
+            tif="DAY",
+            outsideRth=True,
+        )
+
+        result, limit_order_cls = _invoke_place_order(params, client)
+
+        assert result["status"] == "ok", f"extended close must transmit: {result}"
+        limit_order_cls.assert_called_once()
+        kwargs = limit_order_cls.call_args.kwargs
+        assert kwargs["action"] == "SELL"
+        assert kwargs["totalQuantity"] == 1_000
+        assert kwargs["lmtPrice"] == 68.80
+        assert kwargs["tif"] == "DAY"
+        assert kwargs["outsideRth"] is True, (
+            f"outsideRth must reach the IB order for an extended-session close: {kwargs}"
+        )
+        client.place_order.assert_called_once()

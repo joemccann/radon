@@ -167,6 +167,37 @@ describe("mapOrderStatus", () => {
     expect(mapOrderStatus("Cancelled").label).toBe("Cancelled");
     expect(mapOrderStatus("ApiCancelled").label).toBe("Cancelled");
   });
+
+  // IB holds extended-eligible equity orders in `PreSubmitted` while they are
+  // live and fillable in the extended session. Calling that QUEUED told the
+  // operator a marketable TQQQ close was not working during after hours
+  // (2026-09-01). When the order's extended fill window is live, PreSubmitted
+  // is Working; outside any live session, Queued stays the honest label.
+  it("maps PreSubmitted to Working while the order's extended fill window is live", () => {
+    const mapped = mapOrderStatus("PreSubmitted", { extendedFillLive: true });
+    expect(mapped.label).toBe("Working");
+    expect(mapped.tone).toBe("working");
+    expect(mapped.raw).toBe("PreSubmitted");
+  });
+
+  it("keeps PreSubmitted as Queued when no extended fill window is live", () => {
+    expect(mapOrderStatus("PreSubmitted", { extendedFillLive: false }).label).toBe("Queued");
+    expect(mapOrderStatus("PreSubmitted").label).toBe("Queued");
+  });
+
+  it("never promotes unacknowledged statuses, even in a live extended window", () => {
+    expect(mapOrderStatus("PendingSubmit", { extendedFillLive: true }).label).toBe("Queued");
+    expect(mapOrderStatus("ApiPending", { extendedFillLive: true }).label).toBe("Queued");
+  });
+
+  it("partial fill still outranks the live extended window", () => {
+    const mapped = mapOrderStatus("PreSubmitted", {
+      extendedFillLive: true,
+      filled: 2,
+      remaining: 3,
+    });
+    expect(mapped.label).toBe("Partial");
+  });
 });
 
 describe("distanceToFill", () => {

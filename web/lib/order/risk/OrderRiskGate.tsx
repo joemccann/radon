@@ -27,6 +27,7 @@ import { useShortAvailability } from "../hooks/useShortAvailability";
 import { useWhatIfMargin } from "./useWhatIfMargin";
 import { mergeWhatIfMargin } from "./mergeWhatIfMargin";
 import CorrelationRiskBanner from "@/components/CorrelationRiskBanner";
+import type { CorrelationOrderContext } from "@/lib/correlationRiskBanner";
 
 // Phase-2 IB what-if margin. Ships OFF: the backend (endpoint + script branch)
 // is inert until this flag is set, after live verification on an authenticated
@@ -164,6 +165,7 @@ export function OrderRiskGate({
       <CorrelationRiskBanner
         report={state.correlationReport}
         showUnavailable={state.coverageStatus === "resolved"}
+        order={resolveCorrelationOrderContext(input)}
       />
       {showLocateChip && (
         <LocateFeeChip status={locateStatus} data={locateData} />
@@ -199,6 +201,23 @@ export function resolveLocateChipEnabled(
   // and the projected order still carries an uncovered/naked obligation.
   if (portfolio == null || state?.coverageStatus !== "resolved") return false;
   return state.summary.undefinedRiskReason != null;
+}
+
+/**
+ * Working-order context for the Gate-3 correlation banner. Both input
+ * variants mark a close/reduce of held exposure with `closeOut` (the
+ * chokepoint's close-out branch), so its presence is the reduce signal:
+ * a breached cluster containing this ticker must not present as a block
+ * on the order that trims it.
+ */
+export function resolveCorrelationOrderContext(
+  input: OrderRiskInput | null,
+): CorrelationOrderContext | null {
+  if (input == null || !input.ticker) return null;
+  return {
+    ticker: input.ticker,
+    reducesExposure: (input as { closeOut?: unknown }).closeOut != null,
+  };
 }
 
 function inputHasSellLeg(input: OrderRiskInput): boolean {

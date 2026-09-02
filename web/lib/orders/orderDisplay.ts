@@ -72,6 +72,17 @@ export function mapOrderStatus(
     remaining?: number;
     isPendingCancel?: boolean;
     isPendingModify?: boolean;
+    /**
+     * True when the order's extended fill window is live right now
+     * (`isExtendedFillLive` from sessionWindow). IB reports `PreSubmitted`
+     * for extended-eligible equity orders that ARE live and fillable in the
+     * current pre-market / after-hours session; labelling those Queued told
+     * the operator a marketable TQQQ close was not working during AH
+     * (2026-09-01). Only IB-acknowledged `PreSubmitted` promotes to Working;
+     * `PendingSubmit` / `ApiPending` have no IB acknowledgement and stay
+     * Queued regardless.
+     */
+    extendedFillLive?: boolean;
   },
 ): MappedOrderStatus {
   const status = (raw ?? "").trim();
@@ -91,6 +102,9 @@ export function mapOrderStatus(
   const lower = status.toLowerCase();
 
   if (lower === "presubmitted" || lower === "pendingsubmit" || lower === "apipending") {
+    if (lower === "presubmitted" && opts?.extendedFillLive === true) {
+      return { label: "Working", raw: status, tone: "working" };
+    }
     return { label: "Queued", raw: status, tone: "working" };
   }
   if (
