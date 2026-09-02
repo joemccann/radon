@@ -43,6 +43,44 @@ doc (root `CLAUDE.md` "Credentials").
 
 `.env.ib-mode` overlays `.env` and stores the IB mode toggle from `scripts/ib mode local|cloud`.
 
+### Encrypted credential store (profile Credentials tab)
+
+**The store wins over `.env`.** Keys entered in the profile Credentials tab
+are AES-256-GCM-encrypted rows in a host-local SQLite file
+`~/.radon/secrets.db` (0600, override `RADON_SECRET_STORE_PATH`) that never
+leaves the host — deliberately NOT Turso, so plaintext and ciphertext stay on
+the machine that uses them (operator decision 2026-09-01, PR #125; no
+migration planned). On FastAPI startup every stored registry name is exported
+into `os.environ` over the deployed `.env` value
+(`bootstrap_exported_names()` in `scripts/api/routes/credentials.py`), and
+subprocesses inherit it. Rotating a key in `.env` alone does nothing while a
+stored value exists: rotate in the Credentials tab, or delete the stored
+value first. Deleting a stored secret does not unset the already-exported
+value in the running process — it takes effect at the next FastAPI restart.
+
+**Master key.** Resolution order: systemd credential
+`radon-secret-store-key` in `$CREDENTIALS_DIRECTORY` (production
+`LoadCredentialEncrypted=`), then the key file at
+`$RADON_SECRET_STORE_KEY_FILE` (default `~/.radon/secret_store.key`,
+auto-generated 0600 on first use). There is no escrow: losing the key makes
+the ciphertext unrecoverable — back up the key file together with
+`secrets.db`, or plan to re-enter every credential. Field inventory:
+`scripts/credentials_registry.py`. Implementation: `scripts/secret_store.py`.
+
+### First-run setup wizard (`/setup`)
+
+With NO Clerk key configured, the whole app collapses to `/setup` plus its
+API: other pages redirect there and other APIs return 503 `SETUP_MODE`
+(`web/middleware.ts`, `web/lib/setup/setupMode.ts`). The wizard is gated by a
+one-shot token printed to the console that launched Radon
+(`RADON_SETUP_TOKEN` overrides it for automation; only read while no Clerk
+key is set). It writes collected values into the secret store AND
+materializes root `.env` / `web/.env` (`web/lib/setup/envFiles.ts` — Next.js
+and python-dotenv need real files at boot; values are single-quoted per the
+`$`-expansion rule above). Setup mode ends at the first restart after the
+Clerk keys are written; the setup surface then hard-refuses with 404. It can
+never activate while any Clerk key exists, so production is untouched.
+
 ## IB Gateway
 
 Three deployment modes selected by `IB_GATEWAY_MODE`:
