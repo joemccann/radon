@@ -1,0 +1,15 @@
+{
+  "name": "Radon",
+  "install": "bash .cursor/install.sh",
+  "terminals": [
+    {
+      "name": "next",
+      "command": "export PATH=\"$HOME/.local/bin:$HOME/.bun/bin:$PATH\" && cd web && bun run dev:next"
+    },
+    {
+      "name": "fastapi",
+      "command": "export PATH=\"$HOME/.local/bin:$HOME/.bun/bin:$PATH\" && source .venv/bin/activate && RADON_API_TEST_MODE=1 python -m uvicorn scripts.api.server:app --host 127.0.0.1 --port 8321"
+    }
+  ],
+  "ports": [3000, 8321]
+}
