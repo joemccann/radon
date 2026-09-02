@@ -287,20 +287,24 @@ def test_ambiguous_xml_keeps_gpg_and_does_not_ingest(tmp_path, monkeypatch):
 
 
 def test_retains_at_most_three_newest_gpg(tmp_path):
+    import os
+
     import flex_sftp_pull as pull
-    import time
 
     inbox = tmp_path / "inbox"
     inbox.mkdir()
-    paths = []
-    for i in range(5):
-        p = inbox / f"{i}.gpg"
+    # Explicit mtime stamps, deliberately NOT in name order: "0.gpg" gets the
+    # NEWEST stamp, so a regression to name-order sorting (or coarse-mtime tie
+    # collapse to glob order) visibly fails here. T-372.
+    base = 1_700_000_000
+    stamps = {"0.gpg": 500, "1.gpg": 100, "2.gpg": 400, "3.gpg": 200, "4.gpg": 300}
+    for name, offset in stamps.items():
+        p = inbox / name
         p.write_bytes(b"x")
-        paths.append(p)
-        time.sleep(0.01)
+        os.utime(p, (base + offset, base + offset))
     pull.retain_newest_gpg(inbox, keep=3)
     remaining = sorted(p.name for p in inbox.glob("*.gpg"))
-    assert remaining == ["2.gpg", "3.gpg", "4.gpg"]
+    assert remaining == ["0.gpg", "2.gpg", "4.gpg"]
 
 
 def test_nightly_period_ok_on_last_business_day():
