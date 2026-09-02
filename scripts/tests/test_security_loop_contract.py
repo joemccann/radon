@@ -737,11 +737,14 @@ class TestTheLoopBillsTheSubscriptionNotTheApiKey:
     stderr: "claude.ai connectors are disabled because ANTHROPIC_API_KEY or
     another auth source is set and takes precedence over your claude.ai login".
     On 2026-09-01 that moved an 83-finding process + revalidate round onto
-    metered API billing without a line in any run record.     Two halves: the wrapper unsets every billing-reroute variable AND refuses
-    the run when one is set in the environment or sits in a file the scanners
-    read themselves. Unset alone left a gitignored .env file as a silent
-    reroute; refuse of only ANTHROPIC_API_KEY/AUTH_TOKEN left Bedrock/Vertex
-    and the CLAUDE_CODE_API_KEY alias as the same hole.
+    metered API billing without a line in any run record.
+
+    Two halves. A billing-reroute variable in the launch environment is
+    IGNORED (named on stderr, unset, the run proceeds on the subscription;
+    operator rule 2026-09-01). A key file the scanners read themselves still
+    REFUSES: `unset` cannot reach it, and a gitignored .env file was the
+    silent reroute. Refuse of only ANTHROPIC_API_KEY/AUTH_TOKEN left
+    Bedrock/Vertex and the CLAUDE_CODE_API_KEY alias as the same hole.
     """
 
     KEY = "sk-ant-api03-CONTRACT-TEST-NOT-A-REAL-KEY"
@@ -812,29 +815,42 @@ class TestTheLoopBillsTheSubscriptionNotTheApiKey:
         )
         return proc, env_dump
 
+    @staticmethod
+    def _agent_env(env_dump: Path) -> dict:
+        return dict(
+            line.partition("=")[::2]
+            for line in env_dump.read_text(encoding="utf-8").splitlines()
+            if "=" in line
+        )
+
     @pytest.mark.parametrize("var", KEY_VARS)
-    def test_a_billing_reroute_in_the_environment_refuses_the_run(self, tmp_path, var):
+    def test_a_billing_reroute_in_the_environment_is_ignored(self, tmp_path, var):
         proc, env_dump = self._audit(tmp_path, env_extra={var: self.KEY})
         out = proc.stdout + proc.stderr
-        assert proc.returncode == 2, (proc.returncode, out)
-        assert "REFUSING" in out, out
-        assert var in out, (
-            f"the refusal must name {var} so the operator knows what to unset"
+        assert proc.returncode == 0, (proc.returncode, out)
+        assert env_dump.exists(), f"the agent never ran with {var} in the shell"
+        assert var not in self._agent_env(env_dump), (
+            f"{var} reached the agent; it would bill metered API usage"
         )
-        assert self.KEY not in out, "the refusal echoed the secret it found"
-        assert not env_dump.exists(), "the agent ran anyway after the refusal"
+        assert "IGNORING" in out and var in out, (
+            f"the wrapper must name {var} so the operator knows the shell leaked it"
+        )
+        assert self.KEY not in out, "the wrapper echoed the secret it found"
+        assert self.KEY not in env_dump.read_text(encoding="utf-8")
 
     @pytest.mark.parametrize("var", FLAG_VARS)
     @pytest.mark.parametrize("value", ("1", "true", "yes"))
-    def test_a_truthy_use_flag_in_the_environment_refuses_the_run(
+    def test_a_truthy_use_flag_in_the_environment_is_ignored(
         self, tmp_path, var, value
     ):
         proc, env_dump = self._audit(tmp_path, env_extra={var: value})
         out = proc.stdout + proc.stderr
-        assert proc.returncode == 2, (proc.returncode, out)
-        assert "REFUSING" in out, out
-        assert var in out, out
-        assert not env_dump.exists(), "the agent ran anyway after the refusal"
+        assert proc.returncode == 0, (proc.returncode, out)
+        assert env_dump.exists(), f"the agent never ran with {var}={value}"
+        assert var not in self._agent_env(env_dump), (
+            f"{var}={value} reached the agent and rerouted billing"
+        )
+        assert "IGNORING" in out and var in out, out
 
     @pytest.mark.parametrize("var", FLAG_VARS)
     @pytest.mark.parametrize("value", ("0", "false"))

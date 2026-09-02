@@ -406,42 +406,74 @@ if [[ ! -f "$LOOP_MARKER" ]]; then
   fi
 fi
 
-# Subscription only. Claude Code prefers an API key / Bedrock / Vertex over
-# the claude.ai login whenever one is visible. Unset AND refuse: a hand-run
-# that inherited a key, or a gitignored env file the agent would reload,
-# would silently bill metered usage. Name the variable or file, never the value.
-BILLING_REROUTE_KEYS="ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL CLAUDE_CODE_API_KEY CLAUDE_API_KEY AWS_BEARER_TOKEN_BEDROCK"
-BILLING_REROUTE_FLAGS="CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX"
+# Subscription only. Claude Code prefers an API key / Bedrock / Vertex /
+# Foundry / gateway reroute over the claude.ai login whenever one is visible.
+# Operator rule 2026-09-01: a reroute variable the launch shell carries is
+# IGNORED, not fatal. Name it on stderr (never the value), unset it, run on
+# the subscription. Refuse only what `unset` cannot reach: a key file a
+# scanner reloads itself, or a Claude Code settings file carrying an
+# apiKeyHelper / env reroute. The lists are what `strings` on the installed
+# CLI (2.1.258) actually honors; a hand copy of six of them was the old hole.
+BILLING_REROUTE_KEYS="ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL CLAUDE_CODE_API_KEY CLAUDE_API_KEY CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR AWS_BEARER_TOKEN_BEDROCK ANTHROPIC_AWS_API_KEY ANTHROPIC_AWS_BASE_URL ANTHROPIC_BEDROCK_BASE_URL ANTHROPIC_BEDROCK_MANTLE_BASE_URL ANTHROPIC_VERTEX_BASE_URL ANTHROPIC_GOOGLE_CLOUD_BASE_URL ANTHROPIC_FOUNDRY_API_KEY ANTHROPIC_FOUNDRY_AUTH_TOKEN ANTHROPIC_FOUNDRY_BASE_URL ANTHROPIC_FOUNDRY_RESOURCE ANTHROPIC_IDENTITY_TOKEN ANTHROPIC_IDENTITY_TOKEN_FILE"
+BILLING_REROUTE_FLAGS="CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY CLAUDE_CODE_USE_GATEWAY CLAUDE_CODE_USE_MANTLE CLAUDE_CODE_USE_ANTHROPIC_AWS CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD"
+BILLING_IGNORED=""
 for _billing_var in $BILLING_REROUTE_KEYS; do
-  if [[ -n "${!_billing_var:-}" ]]; then
-    echo "REFUSING: $_billing_var is set; this loop bills the claude.ai subscription only — unset it" >&2
-    report "REFUSED" "$_billing_var is set; the agent would bill metered API usage instead of the claude.ai subscription — unset it from the launch environment" || true
-    exit 2
-  fi
+  [[ -n "${!_billing_var:-}" ]] || continue
+  echo "IGNORING: $_billing_var is set in the launch environment; unset for the agent, this loop bills the claude.ai subscription only" >&2
+  BILLING_IGNORED="$BILLING_IGNORED $_billing_var"
 done
-# 0/false/no lock Bedrock/Vertex OFF: that is subscription-only. Refuse only
-# a truthy value (1/true/yes), which is what actually reroutes billing.
+# 0/false/no lock the reroute OFF: that is subscription-only and not worth an
+# operator line. Only a truthy value (1/true/yes) actually reroutes billing.
 for _billing_var in $BILLING_REROUTE_FLAGS; do
   case "${!_billing_var:-}" in
     1|[Tt][Rr][Uu][Ee]|[Yy][Ee][Ss])
-      echo "REFUSING: $_billing_var is set; this loop bills the claude.ai subscription only — unset it" >&2
-      report "REFUSED" "$_billing_var is set; the agent would bill metered API usage instead of the claude.ai subscription — unset it from the launch environment" || true
-      exit 2
+      echo "IGNORING: $_billing_var is set in the launch environment; unset for the agent, this loop bills the claude.ai subscription only" >&2
+      BILLING_IGNORED="$BILLING_IGNORED $_billing_var"
       ;;
   esac
 done
-unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL \
-      CLAUDE_CODE_API_KEY CLAUDE_API_KEY \
-      CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX AWS_BEARER_TOKEN_BEDROCK
-unset _billing_var
+# shellcheck disable=SC2086
+unset $BILLING_REROUTE_KEYS $BILLING_REROUTE_FLAGS _billing_var
+BILLING_IGNORED="${BILLING_IGNORED# }"
 
-BILLING_REROUTE_KEY_ASSIGN='^[[:space:]]*(export[[:space:]]+)?(ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_BASE_URL|CLAUDE_CODE_API_KEY|CLAUDE_API_KEY|AWS_BEARER_TOKEN_BEDROCK)[[:space:]]*=[[:space:]]*[^[:space:]#]'
-BILLING_REROUTE_FLAG_ASSIGN='^[[:space:]]*(export[[:space:]]+)?(CLAUDE_CODE_USE_BEDROCK|CLAUDE_CODE_USE_VERTEX)[[:space:]]*=[[:space:]]*["'"'"']?(1|true|yes)["'"'"']?([#[:space:]]|$)'
+# `unset` cannot reach a key the scanner loads for itself: deepsec reads
+# .deepsec/.env*.local out of its own workspace, which is gitignored and
+# survives every nightly `git clean`. Refuse rather than edit operator state.
+BILLING_REROUTE_KEY_ASSIGN="^[[:space:]]*(export[[:space:]]+)?(${BILLING_REROUTE_KEYS// /|})[[:space:]]*=[[:space:]]*[^[:space:]#]"
+BILLING_REROUTE_FLAG_ASSIGN="^[[:space:]]*(export[[:space:]]+)?(${BILLING_REROUTE_FLAGS// /|})[[:space:]]*=[[:space:]]*[\"']?(1|true|yes)[\"']?([#[:space:]]|\$)"
 for key_file in .deepsec/.env .deepsec/.env.local .deepsec/.env.*.local .env.local; do
   [[ -f "$key_file" ]] || continue
   if grep -qE "$BILLING_REROUTE_KEY_ASSIGN" "$key_file" || grep -qiE "$BILLING_REROUTE_FLAG_ASSIGN" "$key_file"; then
-    echo "REFUSING: $key_file holds billing-reroute credentials; this loop bills the claude.ai subscription only — remove the key line" >&2
-    report "REFUSED" "$key_file holds billing-reroute credentials; the agent would bill metered API usage instead of the claude.ai subscription — remove the key line" || true
+    echo "REFUSING: $key_file holds billing-reroute credentials; this loop bills the claude.ai subscription only, remove the key line" >&2
+    report "REFUSED" "$key_file holds billing-reroute credentials; the agent would bill metered API usage instead of the claude.ai subscription, remove the key line" || true
+    exit 2
+  fi
+done
+
+# web/.env is provisioned into the Radon-credential clones for the Next dev
+# server and pytest's load_dotenv, and the product copy carries
+# ANTHROPIC_API_KEY. Neither the agent nor any child may use it: scrub the
+# reroute lines in place (same inode, mode kept) so the subscription is the
+# only model route in this clone. The security clone refuses the file above.
+if [[ -f web/.env ]] && { grep -qE "$BILLING_REROUTE_KEY_ASSIGN" web/.env || grep -qiE "$BILLING_REROUTE_FLAG_ASSIGN" web/.env; }; then
+  echo "IGNORING: web/.env holds billing-reroute credentials; removed from the clone copy, this loop bills the claude.ai subscription only" >&2
+  { grep -vE "$BILLING_REROUTE_KEY_ASSIGN" web/.env | grep -viE "$BILLING_REROUTE_FLAG_ASSIGN" || true; } > web/.env.scrub
+  cat web/.env.scrub > web/.env
+  rm -f web/.env.scrub
+  BILLING_IGNORED="${BILLING_IGNORED:+$BILLING_IGNORED }web/.env"
+fi
+
+# A settings-level apiKeyHelper or env reroute reaches the agent past any
+# unset. Refuse and name the file; the operator edits it, not the loop.
+BILLING_REROUTE_SETTINGS_KEY="\"(${BILLING_REROUTE_KEYS// /|})\"[[:space:]]*:[[:space:]]*\"[^\"]"
+BILLING_REROUTE_SETTINGS_FLAG="\"(${BILLING_REROUTE_FLAGS// /|})\"[[:space:]]*:[[:space:]]*\"?(1|true|yes)\"?"
+for settings_file in "$HOME/.claude/settings.json" .claude/settings.json .claude/settings.local.json; do
+  [[ -f "$settings_file" ]] || continue
+  if grep -qE '"apiKeyHelper"[[:space:]]*:[[:space:]]*"[^"]' "$settings_file" \
+     || grep -qE "$BILLING_REROUTE_SETTINGS_KEY" "$settings_file" \
+     || grep -qiE "$BILLING_REROUTE_SETTINGS_FLAG" "$settings_file"; then
+    echo "REFUSING: $settings_file holds an apiKeyHelper or billing-reroute env entry; this loop bills the claude.ai subscription only, remove it" >&2
+    report "REFUSED" "$settings_file holds an apiKeyHelper or billing-reroute env entry; the agent would bill metered API usage instead of the claude.ai subscription, remove it" || true
     exit 2
   fi
 done
@@ -574,7 +606,7 @@ is_transient_network_failure() {
 run_phase() {
   begin_phase "$1"
   trap on_crash ERR
-  echo "[testing-weekend] $PHASE start $STAMP repo=$REPO cap=${CAP_SECS}s" | tee -a "$RUN_LOG"
+  echo "[testing-weekend] $PHASE start $STAMP repo=$REPO cap=${CAP_SECS}s${BILLING_IGNORED:+ ignored=${BILLING_IGNORED// /,}}" | tee -a "$RUN_LOG"
   # NOT bare. Under `set -Eeuo pipefail` with the ERR trap armed, a failed
   # fetch made on_crash report and then the shell exit anyway — so
   # `run_phase audit` never returned and `run_phase remediate` was never run
