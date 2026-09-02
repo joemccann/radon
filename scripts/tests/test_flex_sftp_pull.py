@@ -459,3 +459,73 @@ def test_retain_newest_gpg_keep_zero_removes_all(tmp_path):
         (inbox / f"{i}.gpg").write_bytes(b"x")
     pull.retain_newest_gpg(inbox, keep=0)
     assert list(inbox.glob("*.gpg")) == []
+
+
+# --- IBKR's real delivery names end in .xml.pgp, not .gpg (2026-09-02) ------
+
+IBKR_LS = (
+    "U4698258.Equity_Summary_in_Base.20260901.20260901.xml.pgp\n"
+    "U4698258.Trade_History.20260901.20260901.xml.pgp\n"
+)
+
+
+def test_list_remote_gpg_accepts_ibkr_pgp_names(tmp_path):
+    """Three days of deliveries sat in `outgoing` while every run reported
+    `empty remote directory after 2026-08-31 delivery start`: IBKR names its
+    PGP files `*.xml.pgp`, and the filter only kept `*.gpg`."""
+    import flex_sftp_pull as pull
+
+    config = _ssh_config(tmp_path / "ssh_config")
+    fake = FakeSftp({}, ls_stdout=IBKR_LS + "notes.txt\n")
+    assert pull.list_remote_gpg(config=config, runner=fake) == [
+        "U4698258.Equity_Summary_in_Base.20260901.20260901.xml.pgp",
+        "U4698258.Trade_History.20260901.20260901.xml.pgp",
+    ]
+
+
+def test_run_ingests_ibkr_pgp_delivery(tmp_path):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    import flex_sftp_pull as pull
+
+    config = _ssh_config(tmp_path / "ssh_config")
+    inbox = tmp_path / "inbox"
+    name = "U4698258.Trade_History.20260901.20260901.xml.pgp"
+    fake = FakeSftp({name: TRADES.read_bytes()}, ls_stdout=f"{name}\n")
+    seen: list[str] = []
+
+    def ingest(xml, **k):
+        seen.append(k.get("source_path"))
+        return {"ok": True, "outcome": "applied"}
+
+    rc = pull.run(
+        config=config,
+        inbox=inbox,
+        runner=fake,
+        decrypt=lambda data, **k: data.decode(),
+        ingest=ingest,
+        now=datetime(2026, 9, 2, 7, 30, tzinfo=ZoneInfo("America/New_York")),
+    )
+    assert rc == 0
+    assert (inbox / name).exists()
+    assert seen == [str(inbox / "U4698258.Trade_History.20260901.20260901.xml")]
+
+
+def test_retain_newest_gpg_prunes_pgp_names(tmp_path):
+    import time
+
+    import flex_sftp_pull as pull
+
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    for i in range(5):
+        (inbox / f"U4698258.Trade_History.2026090{i}.2026090{i}.xml.pgp").write_bytes(b"x")
+        time.sleep(0.01)
+    pull.retain_newest_gpg(inbox, keep=3)
+    remaining = sorted(p.name for p in inbox.iterdir())
+    assert remaining == [
+        "U4698258.Trade_History.20260902.20260902.xml.pgp",
+        "U4698258.Trade_History.20260903.20260903.xml.pgp",
+        "U4698258.Trade_History.20260904.20260904.xml.pgp",
+    ]
