@@ -790,3 +790,29 @@ how this loop improves as the codebase grows.
   agent an `/ib/*` or `radon-ib-gateway.service` route must say: stub
   `remote_gateway_action` / `control_unit`, set `GATEWAY_MODE=cloud`, never
   call the route un-stubbed.
+- **2026-09-02 (remediate): the T-379 exit recurred VERBATIM with the rail in
+  the prompt — detection is not prevention, and the fix that sticks is
+  structural.** Tonight's audit again answered a mid-run nudge with text at
+  "gates 53%" and exited 0 at four minutes; the wrapper correctly posted
+  INCOMPLETE (T-379's check works) but the night's audit was still forfeit
+  (T-380: the wrapper now retries an INCOMPLETE phase once). Two things that
+  worked and should repeat: the remediate phase ADOPTED the dead audit's
+  still-running detached gates script as its round 1 (zero wasted wall
+  clock), and `/tmp/tw-<date>/` scratch survived the phase boundary exactly
+  as designed.
+- **2026-09-02 (remediate): two subagents stalled by ENDING THEIR TURN to
+  "wait" for a build/suite — put the anti-wait rail in every agent PROMPT,
+  not just this skill.** The 2026-08-26 resume-don't-redo lesson worked both
+  times (SendMessage got each back on track with context intact), but the
+  stall is now a pattern: any prompt that can involve a long build or
+  detached run must say "wait inside a bounded foreground poll; never end
+  your turn to wait; the lead owns the full gates."
+- **2026-09-02 (remediate): grep the gate logs for the runner's own exported
+  secrets before calling a round harvested.** T-381: a test that subprocesses
+  a wrapper snippet WITHOUT `env=` printed the runner's live PUSHOVER_* into
+  the pytest gate log, because the wrapper exports them to page and the
+  snippet prefers env over file by design. The red was also invisible in
+  isolation (93 passed) — it only fires under the wrapper. After each gate
+  run: `grep -c "$PUSHOVER_TOKEN"`-style checks on the gate output for every
+  secret the wrapper exports, and treat any hit as a P1 test-isolation
+  finding.

@@ -1,7 +1,9 @@
 """REL-063 / R-153 (P1) — a partially-applied ALTER TABLE bricks the API.
 
-Migration 0050 is the only real `ALTER TABLE` in 54 migrations (0003's hit is
-the comment warning against exactly this). The runner executes statements one
+Migration 0050 was the first real `ALTER TABLE` (0003's hit is the comment
+warning against exactly this); 0063, 0064, 0065 and 0067 have since added
+more, so this replay hazard now covers five migrations, not one. The runner
+executes statements one
 at a time and records the version only AFTER the loop, so a connection drop
 or a kill between the committed `ADD COLUMN disk_pct` and the version row
 leaves version 50 unrecorded. The next run re-applies 0050, gets

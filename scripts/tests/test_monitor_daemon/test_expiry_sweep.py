@@ -627,20 +627,35 @@ class TestSqlSchemaPins:
     def _table_columns(table: str) -> set:
         import re
 
+        columns = set()
+        created = False
         for path in sorted((SCRIPTS_DIR / "db" / "migrations").glob("*.sql")):
+            text = path.read_text()
             match = re.search(
                 rf"CREATE TABLE IF NOT EXISTS {table} \((.*?)\);",
-                path.read_text(),
+                text,
                 re.S,
             )
             if match:
-                columns = set()
+                created = True
                 for line in match.group(1).splitlines():
                     word = line.strip().rstrip(",").split()
                     if word and word[0].isidentifier():
                         columns.add(word[0])
-                return columns
-        raise AssertionError(f"no CREATE TABLE for {table} in migrations")
+            # T-373: columns added after the fact by ALTER TABLE (0050, 0063,
+            # 0064, 0065, 0067) were invisible to this walker — fold them in.
+            for alter in re.finditer(
+                rf"^\s*ALTER TABLE {table} ADD COLUMN (\w+)", text, re.M
+            ):
+                columns.add(alter.group(1))
+        if not created:
+            raise AssertionError(f"no CREATE TABLE for {table} in migrations")
+        return columns
+
+    def test_table_columns_folds_alter_added_columns(self):
+        """T-373 pin: the walker must see ALTER-added columns, not just the
+        CREATE TABLE body (0050 added host_metrics.disk_pct via ALTER)."""
+        assert "disk_pct" in self._table_columns("host_metrics")
 
     @pytest.mark.parametrize("table", ["journal", "executed_orders"])
     def test_selects_only_real_columns(self, table):

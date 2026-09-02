@@ -16,8 +16,9 @@ guards that.
 (`cash_flow_sync.py`, `fetch_*.py`, `scanner.py`, `api/server.py`, ...) call
 `load_dotenv(web/.env)` at import, so provisioning it puts the clone's TURSO
 credentials into `os.environ` for every collected module. That flipped 22
-CI-green tests red with `FlexTokenLocked` (T-317). `scripts/tests/conftest.py`
-`_strip_turso_credentials` removes the keys per test;
+CI-green tests red with `FlexTokenLocked` (T-317). `scripts/conftest.py`
+`_strip_turso_credentials` (hoisted for the api subtree, T-368) removes the
+keys per test;
 `TestPytestReadsTheProvisionedWebEnv` pins both halves of that contract.
 
 Consequence the loops actually hit without it: no
@@ -268,7 +269,7 @@ class TestPytestReadsTheProvisionedWebEnv:
 
     def test_the_gate_strips_the_clones_turso_credentials(self):
         """Holds on a provisioned clone ONLY because of
-        `scripts/tests/conftest.py::_strip_turso_credentials`."""
+        `scripts/conftest.py::_strip_turso_credentials` (hoisted, T-368)."""
         import cash_flow_sync  # noqa: F401  a loader, imported inside the test on purpose
 
         assert "TURSO_DB_URL" not in os.environ

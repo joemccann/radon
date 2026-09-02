@@ -521,6 +521,11 @@ class TestNotifyPhaseIsFenced:
             capture_output=True,
             text=True,
             timeout=10,
+            # _notify_cred prefers an exported PUSHOVER_* over the env file by
+            # design; the nightly wrappers export the real ones, so inheriting
+            # pytest's environment makes this file-read test print the runner's
+            # live credentials into the gate log (T-381).
+            env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")},
         )
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout.splitlines() == ["tok-from-crlf", "user-from-crlf"], proc.stdout

@@ -10,4 +10,4 @@
 
 ALTER TABLE dispersion_history ADD COLUMN source TEXT;
 
-INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (63, datetime('now'));
+INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (64, datetime('now'));

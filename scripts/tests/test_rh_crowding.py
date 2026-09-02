@@ -230,13 +230,120 @@ class TestConfiguredRun:
         assert len(persisted) == 1
 
 
+class TestFetchCrowdingExecutes:
+    """fetch_crowding() driven for real against a RobinhoodClient double:
+    the id/scan_id probing, the MAX_SCANS_PER_RUN slice, and the per-scan
+    error swallow all execute (previously only stubbed away). T-357."""
+
+    class _FakeClient:
+        def __init__(self, scans, raise_for=(), scans_error=None):
+            self.scans = scans
+            self.raise_for = set(raise_for)
+            self.scans_error = scans_error
+            self.run_scan_calls: list[str] = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return None
+
+        def get_popular_watchlists(self):
+            return list(POPULAR)
+
+        def get_scans(self):
+            if self.scans_error is not None:
+                raise self.scans_error
+            return list(self.scans)
+
+        def run_scan(self, scan_id):
+            from clients.robinhood_client import RobinhoodClientError
+
+            self.run_scan_calls.append(scan_id)
+            if scan_id in self.raise_for:
+                raise RobinhoodClientError(f"scan {scan_id}: HTTP 500")
+            return [{"symbol": "NVDA"}]
+
+    def _wire(self, monkeypatch, fake):
+        import clients.robinhood_client as rh_mod
+
+        monkeypatch.setattr(rh_mod, "RobinhoodClient", lambda *a, **k: fake)
+
+    def test_id_probing_slice_and_per_scan_swallow(self, monkeypatch):
+        assert crowding.MAX_SCANS_PER_RUN == 5  # the counts below assume this
+        scans = [
+            {"id": "s1"},
+            {"scan_id": "s2"},   # fallback key must still be probed
+            {"name": "no-id"},   # no id under either spelling -> skipped
+            {"id": "s3"},        # run_scan raises -> swallowed, others survive
+            {"id": "s4"},
+            {"id": "s5-beyond-slice"},
+            {"id": "s6-beyond-slice"},
+        ]
+        fake = self._FakeClient(scans, raise_for={"s3"})
+        self._wire(monkeypatch, fake)
+
+        popular, results = crowding.fetch_crowding()
+
+        assert popular == POPULAR
+        assert fake.run_scan_calls == ["s1", "s2", "s3", "s4"], (
+            "expected the 5-scan slice minus the id-less row; scans beyond "
+            "MAX_SCANS_PER_RUN must never run"
+        )
+        assert set(results) == {"s1", "s2", "s4"}, "the raiser is swallowed per-scan"
+        assert results["s2"] == [{"symbol": "NVDA"}]
+
+    def test_get_scans_failure_degrades_to_watchlists_only(self, monkeypatch):
+        from clients.robinhood_client import RobinhoodClientError
+
+        fake = self._FakeClient([], scans_error=RobinhoodClientError("scans down"))
+        self._wire(monkeypatch, fake)
+
+        popular, results = crowding.fetch_crowding()
+
+        assert popular == POPULAR
+        assert results == {}
+        assert fake.run_scan_calls == []
+
+
+def _local_import_closure(roots: list[Path]) -> set[Path]:
+    """Transitive closure of the roots' imports resolved inside scripts/."""
+    import ast
+
+    seen: set[Path] = set()
+    frontier = list(roots)
+    while frontier:
+        path = frontier.pop()
+        if path in seen:
+            continue
+        seen.add(path)
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        names: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+                names.add(node.module)
+        for name in names:
+            rel = name.replace(".", "/")
+            for candidate in (_SCRIPTS_DIR / f"{rel}.py", _SCRIPTS_DIR / rel / "__init__.py"):
+                if candidate.exists():
+                    frontier.append(candidate)
+    return seen
+
+
 class TestCrowdingCannotTripGates:
-    """Structural pin: the gate/sizing chokepoints cannot see rh_crowding.
+    """Belt-and-suspenders pin that the gate chokepoints cannot see rh_crowding.
 
     Gate 1 lives in scripts/workflow/gates.py (convexity_gate), Gate 2 in
     scripts/evaluate.py (determine_edge), Gate 3 in scripts/kelly.py +
-    the workflow kelly_gate. None of them may import the Robinhood client,
-    read the rh_crowding table, or accept crowding inputs.
+    the workflow kelly_gate.
+
+    Honest scope: the direct grep only reads the three chokepoint files, so a
+    gate importing an intermediary module that reads rh_crowding would slip
+    past it — the transitive test below walks the import closure to close
+    that hole. Neither proves runtime behavior (a DB query built from string
+    fragments would evade both); they are tripwires, not proofs.
     """
 
     GATE_FILES = (
@@ -245,6 +352,11 @@ class TestCrowdingCannotTripGates:
         "evaluate.py",
     )
     FORBIDDEN = re.compile(r"robinhood|rh_crowding|popular_watchlist", re.IGNORECASE)
+    # db/writer.py is the shared persistence layer: it DEFINES the
+    # upsert_rh_crowding_rows write path (INSERT only, no read/select of
+    # rh_crowding), so gate files importing db.writer cannot read crowding
+    # through it. Nothing else in the closure may match.
+    TRANSITIVE_ALLOWED = ("db/writer.py",)
 
     def test_gate_files_never_reference_crowding_or_robinhood(self):
         for rel in self.GATE_FILES:
@@ -254,6 +366,25 @@ class TestCrowdingCannotTripGates:
                 f"scripts/{rel} references {hit.group(0)!r} — the Robinhood "
                 "crowding overlay must never feed the Four Gates"
             )
+
+    def test_gate_import_closure_never_references_crowding(self):
+        """A gate importing a retail_overlay.py that reads rh_crowding must
+        fail here even though the direct grep above cannot see it. T-357."""
+        closure = _local_import_closure(
+            [_SCRIPTS_DIR / rel for rel in self.GATE_FILES]
+        )
+        allowed = {_SCRIPTS_DIR / rel for rel in self.TRANSITIVE_ALLOWED}
+        assert len(closure) > len(self.GATE_FILES), "closure walk found no imports"
+        for path in sorted(closure - allowed):
+            hit = self.FORBIDDEN.search(path.read_text(encoding="utf-8"))
+            assert hit is None, (
+                f"{path.relative_to(_SCRIPTS_DIR)} (imported by a gate file) "
+                f"references {hit.group(0)!r} — the crowding overlay must "
+                "never feed the Four Gates, directly or transitively"
+            )
+        # The allowlist stays honest: writer must never grow a crowding read.
+        writer_text = (_SCRIPTS_DIR / "db" / "writer.py").read_text(encoding="utf-8")
+        assert not re.search(r"SELECT[^;]*rh_crowding", writer_text, re.IGNORECASE)
 
     def test_crowding_script_never_imports_the_gate_chokepoints(self):
         text = (_SCRIPTS_DIR / "fetch_rh_crowding.py").read_text(encoding="utf-8")

@@ -231,6 +231,7 @@ export default function StreaksChart({
                 </g>
               ))}
               <path
+                data-testid="streaks-price-path"
                 d={linePath}
                 fill="none"
                 stroke={priceColor}
@@ -270,6 +271,7 @@ export default function StreaksChart({
                   p.streak > 0 ? (
                     <rect
                       key={`bar-${p.date}`}
+                      data-testid="streaks-bar"
                       className="streaks-bar"
                       x={xAt(i) - barWidth / 2}
                       y={yStreak(p.streak)}

@@ -658,3 +658,43 @@ describe("R-466 / REL-165: the vision fetch is bounded", () => {
     expect((posts[1] as any).tags_vision).toEqual(["SPX", "VOL", "EQUITIES"]);
   });
 });
+
+// T-374: the bounded-fetch tests above all inject timeoutMs, so the 30 s
+// DEFAULT (the REL-165 incident constant) was a free variable. AbortSignal
+// .timeout runs on Node's internal timer, which vitest fake timers cannot
+// advance (verified: advanceTimersByTimeAsync(30_001) leaves the signal
+// un-aborted), so the default's wiring is asserted directly: the
+// AbortSignal.timeout spy sees exactly 30 000 ms and the fetch carries the
+// very signal it returned. The abort path itself is proven end-to-end by the
+// timeoutMs: 50 tests above.
+describe("T-374: the default vision fetch bound is exactly 30 000 ms", () => {
+  it("with no timeoutMs override, the model call carries AbortSignal.timeout(30000) on the wire", async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(anthropicCompletion(JSON.stringify({ tags: ["SPX", "VOL", "EQUITIES"] }))),
+    );
+    global.fetch = fetchMock as typeof fetch;
+
+    const fakeImage = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+    const { createVisionTagger } = await import("../../scripts/newsfeed/vision_tagger.js");
+    const tagger = createVisionTagger({
+      mediaDir: MEDIA_DIR,
+      getTaxonomySnapshot: async () => TAXONOMY,
+      readImage: async () => fakeImage,
+    });
+
+    const tags = await tagger.tagPost({
+      id: "p-t374",
+      title: "Chart",
+      content: "x",
+      images: ["/media/p-t374.png"],
+    });
+    expect(tags).toEqual(["SPX", "VOL", "EQUITIES"]);
+
+    expect(timeoutSpy).toHaveBeenCalledTimes(1);
+    expect(timeoutSpy).toHaveBeenCalledWith(30_000);
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+    expect(init.signal).toBe(timeoutSpy.mock.results[0].value);
+  });
+});

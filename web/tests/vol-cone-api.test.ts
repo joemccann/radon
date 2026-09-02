@@ -150,6 +150,19 @@ describe("GET /api/vol-cone", () => {
     expect(json.count).toBe(2);
   });
 
+  // T-371: pin the bound the comment above actually names. Fri 20:45 UTC ->
+  // holiday Mon 20:45 UTC + jitter is ~73h; a regression of the shared
+  // closed window to 3d keeps the 60h case green but reds this one.
+  it("serves a holiday-Monday-aged snapshot (73h) instead of collapsing to missing", async () => {
+    const holidayAge = new Date(Date.now() - 73 * 60 * 60_000).toISOString();
+    await insertSnapshot(buildPayload({ scan_time: holidayAge }), holidayAge);
+
+    const { GET } = await import("../app/api/vol-cone/route");
+    const json = await jsonOf(await GET());
+    expect(json.missing).toBeUndefined();
+    expect(json.count).toBe(2);
+  });
+
   it("still collapses a snapshot past the closed window, keeping its scan_time", async () => {
     const deadAge = new Date(Date.now() - 5 * 24 * 60 * 60_000).toISOString();
     await insertSnapshot(buildPayload({ scan_time: deadAge }), deadAge);

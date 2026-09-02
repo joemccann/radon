@@ -286,11 +286,47 @@ class TestRemoteDaemonUnit:
         assert "\nRequires=" not in unit
         assert "\nPartOf=" not in unit
         assert "PartOf=radon-ib-gateway" not in unit
+        assert re.search(r"^\s*Requires\s*=", unit, re.MULTILINE) is None
+        assert re.search(r"^\s*PartOf\s*=", unit, re.MULTILINE) is None
 
     def test_role_skip_covers_remote_unit(self):
         helper = (CLOUD / "scripts" / "deploy-root-helper.sh").read_text(encoding="utf-8")
         assert "services/radon-ib-gateway-remote.service" in helper
         assert "role_skips_control_plane_source" in helper
+
+    @pytest.mark.parametrize(
+        ("role", "skips"),
+        (("app", True), ("broker", False), ("combined", False)),
+    )
+    def test_role_skip_arm_executes_for_remote_unit(self, role: str, skips: bool):
+        """EXECUTE the helper's role_skips_control_plane_source, not just grep it.
+
+        Deleting the remote-unit case arm falls through to `*) return 1` —
+        app hosts would install the broker-only mTLS daemon — so the app
+        row here must red on that mutation.
+        """
+        helper = HELPER.read_text(encoding="utf-8")
+        body = _function_body(helper, "role_skips_control_plane_source")
+        shell = f"""
+set -u
+role_skips_control_plane_source() {{
+{body}
+}}
+read_host_role() {{ printf '%s\\n' "$RADON_TEST_ROLE_SHIM"; }}
+role_skips_control_plane_source services/radon-ib-gateway-remote.service
+"""
+        result = subprocess.run(
+            ["bash", "-c", shell],
+            env={**os.environ, "RADON_TEST_ROLE_SHIM": role},
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        combined = result.stdout + result.stderr
+        if skips:
+            assert result.returncode == 0, combined
+        else:
+            assert result.returncode != 0, combined
 
 
 class TestDeployHostRole:

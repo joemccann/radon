@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -540,13 +541,12 @@ class TestFetchClosesCascade:
         assert rh_calls == []
 
     def test_unconfigured_robinhood_default_rung_skips_to_yahoo(self, monkeypatch):
-        monkeypatch.delenv("ROBINHOOD_MCP_TOKEN", raising=False)
-        monkeypatch.setattr(
-            "requests.Session.post",
-            lambda *a, **k: (_ for _ in ()).throw(
-                AssertionError("unconfigured RH rung attempted network I/O")
-            ),
-        )
+        # Spy, not a planted raise: fetch_robinhood_closes swallows every
+        # per-symbol exception, so only a zero call count proves no network. T-356.
+        post_spy = MagicMock(name="Session.post")
+        refresh_spy = MagicMock(name="requests.post")
+        monkeypatch.setattr("requests.Session.post", post_spy)
+        monkeypatch.setattr("requests.post", refresh_spy)
 
         closes, source, _ = fetch_closes(
             fetch_ib=lambda tickers: {},
@@ -555,6 +555,8 @@ class TestFetchClosesCascade:
         )
 
         assert source == "yahoo"
+        assert post_spy.call_count == 0
+        assert refresh_spy.call_count == 0
 
     def test_rh_rung_skips_dxy(self, monkeypatch):
         from fetch_iei_hyg import fetch_rh_closes

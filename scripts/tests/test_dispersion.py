@@ -1067,13 +1067,14 @@ class TestDispersionStorage:
         self._apply_source_migration(db)
         return db
 
-    def test_source_migration_adds_a_nullable_column_and_registers_version_63(self):
+    def test_source_migration_adds_a_nullable_column_and_registers_version_64(self):
         db = self._db_with_source()
         cols = {r[1]: r for r in db.execute("PRAGMA table_info(dispersion_history)")}
         assert "source" in cols
         assert cols["source"][2].upper() == "TEXT"
         assert cols["source"][3] == 0, "existing rows have no provenance; the column is nullable"
-        assert [r[0] for r in db.execute("SELECT version FROM schema_migrations ORDER BY version")] == [61, 63]
+        # 0063 is flex_delivery_claim_status; the source column is 0064 (T-373).
+        assert [r[0] for r in db.execute("SELECT version FROM schema_migrations ORDER BY version")] == [61, 64]
 
     def test_source_migration_is_idempotent(self):
         db = self._db_with_source()
