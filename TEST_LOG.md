@@ -558,3 +558,4 @@ finish.
 
 | Task | Status | Commits | Evidence |
 |---|---|---|---|
+| T-375 | NO-LONGER-APPLIES | — | Fixed inside the unaudited range by the reliability loop: `38eeecb9` (#212) added the `.radon-*-runner` glob at `.gitignore:277`. Verified: `git check-ignore -v .radon-security-runner` → `.gitignore:277:.radon-*-runner`, rc 0. No change needed. |
