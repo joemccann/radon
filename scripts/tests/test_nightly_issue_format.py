@@ -1,9 +1,10 @@
-"""Nightly GitHub ISSUE bodies use a three-section template, never a log pointer.
+"""Nightly GitHub ISSUE comments: wrapper dead-man vs agent three-section.
 
 The five loops post to rolling issues (security #204, testing #83, reliability
-#81, CI performance #196, documentation #202). Operators were getting status
-dumps, dead-man pings, and 'see the log on the runner'. This contract is the
-body they actually read.
+#81, CI performance #196, documentation #202). Wrapper runner-health comments
+are a PHASE STAMP status dead-man line. Non-security agents still write the
+three-section update. Wrappers create the issue once with a timeless
+rolling-dead-man description; run history stays in comments.
 """
 from __future__ import annotations
 
@@ -58,6 +59,13 @@ def _format_issue_body_fn(wrapper: Path) -> str:
     return body[start:end]
 
 
+def _notify_cred_fn(wrapper: Path) -> str:
+    body = _uncommented(wrapper)
+    start = body.index("_notify_cred() {")
+    end = body.index("\n_notify_curl() {", start)
+    return body[start:end]
+
+
 def _notify_curl_fn(wrapper: Path) -> str:
     body = _uncommented(wrapper)
     start = body.index("_notify_curl() {")
@@ -77,6 +85,25 @@ def _sanitize_issue_text_fn(wrapper: Path) -> str:
     start = body.index("_sanitize_issue_text() {")
     end = body.index("\n_format_issue_body() {", start)
     return body[start:end]
+
+
+def _curl_log_stub(log: Path) -> str:
+    """Log argv, then dump any --config / -K file so title= is still visible."""
+    return (
+        "#!/bin/bash\n"
+        f'printf "%s\\n" "$*" >> "{log}"\n'
+        "i=1\n"
+        'while [ "$i" -le "$#" ]; do\n'
+        '  eval "arg=\\${$i}"\n'
+        '  if [ "$arg" = "--config" ] || [ "$arg" = "-K" ]; then\n'
+        "    i=$((i + 1))\n"
+        '    eval "cfg=\\${$i}"\n'
+        f'    if [ -f "$cfg" ]; then cat "$cfg" >> "{log}"; fi\n'
+        "  fi\n"
+        "  i=$((i + 1))\n"
+        "done\n"
+        "exit 0\n"
+    )
 
 
 def _secret_detail() -> str:
@@ -275,12 +302,18 @@ class TestSecuritySanitize:
 
 class TestWrappersAndSkillsUseTheTemplate:
     @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
-    def test_wrapper_create_body_is_no_run_yet_not_a_deadman_blurb(self, wrapper: Path):
+    def test_wrapper_create_body_is_timeless_deadman_not_no_run_yet(self, wrapper: Path):
         body = _uncommented(wrapper)
-        assert "No run yet." in body, wrapper.name
-        assert "Rolling dead-man" not in body, wrapper.name
+        assert "Rolling dead-man" in body, wrapper.name
+        assert "No run yet." not in body, wrapper.name
+        assert "Waiting for the first nightly cycle." not in body, wrapper.name
+        assert "DEADMAN_CREATE_BODY" in body, wrapper.name
+        assert "NO_RUN_YET_BODY" not in wrapper.read_text(encoding="utf-8"), wrapper.name
+        assert "gh issue edit" not in body, wrapper.name
         assert 'log: \\`${RUN_LOG##*/}\\` on the runner' not in body, wrapper.name
         assert "on the runner" not in body, wrapper.name
+        if wrapper.name == "security_nightly.sh":
+            assert "Sanitized status only" in body, wrapper.name
 
     @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
     def test_wrapper_report_calls_the_formatter(self, wrapper: Path):
@@ -288,6 +321,14 @@ class TestWrappersAndSkillsUseTheTemplate:
         assert "_format_issue_body" in body, wrapper.name
         fmt = _format_issue_body_fn(wrapper)
         assert "python3" not in fmt, wrapper.name
+
+    @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
+    def test_wrapper_deadman_comment_is_phase_status_not_three_section(self, wrapper: Path):
+        fmt = _format_issue_body_fn(wrapper)
+        assert "**Issue discovered**" not in fmt, wrapper.name
+        assert "Fixed with green deployment" not in fmt, wrapper.name
+        assert "Nothing went wrong this" not in fmt, wrapper.name
+        assert "'**%s** %s **%s**'" in fmt, wrapper.name
 
     @pytest.mark.parametrize("skill", SKILLS, ids=lambda p: p.parent.name)
     def test_skill_tells_the_agent_to_use_the_three_headings(self, skill: Path):
@@ -352,11 +393,10 @@ class TestWrapperFormatterNeverExecsDiskPython:
         assert "_sanitize_issue_text" in body, wrapper.name
 
     @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
-    def test_bash_fallback_checks_quotas_before_incomplete(self, wrapper: Path):
+    def test_wrapper_deadman_interpolates_phase_and_status(self, wrapper: Path):
         fmt = _format_issue_body_fn(wrapper)
-        quota = fmt.index('*"quotas exhausted"*')
-        incomplete = fmt.index("INCOMPLETE*")
-        assert quota < incomplete, wrapper.name
+        assert "'**%s** %s **%s**'" in fmt, wrapper.name
+        assert "**Issue discovered**" not in fmt, wrapper.name
 
     @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
     def test_crash_comment_has_no_machine_pointer(self, wrapper: Path):
@@ -395,6 +435,40 @@ class TestNotifyPhaseIsFenced:
         assert "/usr/bin/tr" in curl, wrapper.name
         assert "| tr " not in curl, wrapper.name
         assert "|tr " not in curl, wrapper.name
+        assert "--config" in curl, wrapper.name
+        assert "/usr/bin/mktemp" in curl, wrapper.name
+        assert "0600" in curl, wrapper.name
+        assert '--data-urlencode "token=${token}"' not in curl, wrapper.name
+        assert '--data-urlencode "user=${user}"' not in curl, wrapper.name
+
+    @pytest.mark.parametrize("wrapper", WRAPPERS, ids=lambda p: p.name)
+    def test_notify_cred_strips_cr_not_a_quoted_newline(self, wrapper: Path):
+        cred = _notify_cred_fn(wrapper)
+        assert r"${line%$'\r'}" in cred, wrapper.name
+        assert r"${line%$'\n'}" not in cred, wrapper.name
+
+    def test_notify_cred_reads_a_crlf_env_file(self, tmp_path: Path):
+        src = (REPO / "scripts" / "security_nightly.sh").read_text(encoding="utf-8")
+        start = src.index("_notify_cred() {")
+        end = src.index("\n_notify_curl() {", start)
+        envf = tmp_path / ".env"
+        envf.write_bytes(b"PUSHOVER_TOKEN=tok-from-crlf\r\nPUSHOVER_USER=user-from-crlf\r\n")
+        script = tmp_path / "run.sh"
+        script.write_text(
+            "#!/usr/bin/env bash\nset -euo pipefail\n"
+            f'WEEKEND_ROOT="{tmp_path}"\n'
+            + src[start:end]
+            + "\n_notify_cred PUSHOVER_TOKEN; printf '\\n'; _notify_cred PUSHOVER_USER; printf '\\n'\n",
+            encoding="utf-8",
+        )
+        proc = subprocess.run(
+            ["/bin/bash", str(script)],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.splitlines() == ["tok-from-crlf", "user-from-crlf"], proc.stdout
 
     def test_rewritten_clone_notifier_is_not_execed(self, tmp_path: Path):
         clone = tmp_path / "clone"
@@ -459,11 +533,7 @@ class TestNotifyPhaseIsFenced:
                 f'echo "$*" >> "{py_log}"\n'
                 "exit 0\n"
             ),
-            "curl": (
-                "#!/bin/sh\n"
-                f'echo "$*" >> "{curl_log}"\n'
-                "exit 0\n"
-            ),
+            "curl": _curl_log_stub(curl_log),
             "claude": (
                 "#!/bin/sh\n"
                 "echo 'SECURITY-NIGHTLY PHASE COMPLETE: audit'\n"
@@ -493,8 +563,12 @@ class TestNotifyPhaseIsFenced:
         assert "weekend_notify.py" not in py_calls, py_calls
         assert py_calls == "", py_calls
         curl_calls = curl_log.read_text(encoding="utf-8") if curl_log.exists() else ""
+        argv_line = curl_calls.splitlines()[0] if curl_calls.strip() else ""
         assert "api.pushover.net" in curl_calls, curl_calls
         assert "title=radon security audit" in curl_calls, curl_calls
+        assert "test-token" not in argv_line, argv_line
+        assert "token=" not in argv_line, argv_line
+        assert "user=" not in argv_line, argv_line
 
     def test_a_planted_venv_tr_cannot_skip_the_page(self, tmp_path: Path):
         clone = tmp_path / "clone"
@@ -542,11 +616,7 @@ class TestNotifyPhaseIsFenced:
                 f"echo PWN > '{tr_marker}'\n"
                 "exit 1\n"
             ),
-            "curl": (
-                "#!/bin/sh\n"
-                f'echo "$*" >> "{curl_log}"\n'
-                "exit 0\n"
-            ),
+            "curl": _curl_log_stub(curl_log),
             "claude": (
                 "#!/bin/sh\n"
                 "echo 'SECURITY-NIGHTLY PHASE COMPLETE: audit'\n"
@@ -609,7 +679,9 @@ class TestSanitizeUsesPinnedSed:
         assert proc.returncode == 0, proc.stderr
         assert "PWNED_FROM_PATH_SED" not in proc.stdout, proc.stdout
         assert "Hq7notreal" not in proc.stdout
-        assert "**Issue discovered**" in proc.stdout
+        assert "**audit**" in proc.stdout
+        assert "**OK**" in proc.stdout
+        assert "**Issue discovered**" not in proc.stdout
 
 
 class TestSecurityBashFallbackSanitizes:
@@ -635,7 +707,9 @@ class TestSecurityBashFallbackSanitizes:
         )
         assert proc.returncode == 0, proc.stderr
         out = proc.stdout
-        assert "**Issue discovered**" in out
+        assert "**audit**" in out
+        assert "**OK**" in out
+        assert "**Issue discovered**" not in out
         assert "/api/orders/place" not in out
         assert "scripts/api/server.py:412" not in out
         assert "Hq7notreal" not in out
@@ -733,7 +807,9 @@ class TestARewrittenCloneFormatterCannotAuthorTheIssue:
         calls = gh_log.read_text(encoding="utf-8") if gh_log.exists() else ""
         assert "issue comment" in calls, calls
         assert pwn not in calls, calls
-        assert "**Issue discovered**" in calls, calls
+        assert "**audit**" in calls, calls
+        assert "**OK**" in calls, calls
+        assert "**Issue discovered**" not in calls, calls
         assert (clone / "scripts" / "nightly_issue_format.py").read_text(
             encoding="utf-8"
         ).count(pwn) >= 1

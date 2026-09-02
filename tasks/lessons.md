@@ -1,5 +1,15 @@
 # Lessons
 
+## 2026-09-02 — Wrapper dead-man comments are not the three-section write-up
+
+- Captain: wrapper OK/runner-health comments stay a distinct PHASE status
+  dead-man line. The three-section template (Issue discovered / What was
+  done / Next: Fixed with green deployment) is the agent issue update, not
+  the wrapper comment. Security stays wrapper-only sanitized comments.
+- The `gh issue create` body is a timeless rolling-dead-man description.
+  Run history stays in comments. Do not `gh issue edit` the body after the
+  first run, and do not leave "No run yet." as the lasting body.
+
 ## 2026-09-01 — A capacity-shed retry on one sibling wrapper is not the other
 
 - Page `776ea756`: `radon-garch` instant FastAPI 502 at 14:00:12Z,

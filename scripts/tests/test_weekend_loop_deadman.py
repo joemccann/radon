@@ -610,6 +610,24 @@ _GIT_ENV = {
 }
 
 
+def _curl_log_stub(log: Path) -> str:
+    return (
+        "#!/bin/bash\n"
+        f'printf "%s\\n" "$*" >> "{log}"\n'
+        "i=1\n"
+        'while [ "$i" -le "$#" ]; do\n'
+        '  eval "arg=\\${$i}"\n'
+        '  if [ "$arg" = "--config" ] || [ "$arg" = "-K" ]; then\n'
+        "    i=$((i + 1))\n"
+        '    eval "cfg=\\${$i}"\n'
+        f'    if [ -f "$cfg" ]; then cat "$cfg" >> "{log}"; fi\n'
+        "  fi\n"
+        "  i=$((i + 1))\n"
+        "done\n"
+        "exit 0\n"
+    )
+
+
 def _committing_stub_bin(tmp_path: Path, *, claude_body: str) -> tuple[Path, Path, Path]:
     """`gh` / curl record their calls; `git` is REAL except `fetch`."""
     real_git = shutil.which("git")
@@ -636,12 +654,7 @@ def _committing_stub_bin(tmp_path: Path, *, claude_body: str) -> tuple[Path, Pat
     )
     py.chmod(0o755)
     curl = bin_dir / "curl"
-    curl.write_text(
-        "#!/bin/sh\n"
-        f'printf "%s\\n" "$*" >> "{py_log}"\n'
-        "exit 0\n",
-        encoding="utf-8",
-    )
+    curl.write_text(_curl_log_stub(py_log), encoding="utf-8")
     curl.chmod(0o755)
     git = bin_dir / "git"
     git.write_text(
@@ -703,9 +716,10 @@ class TestAnAgentThatCommitsNothingIsNotReportedOk:
         assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
         comment = next((ln for ln in calls.splitlines() if ln.startswith("issue comment")), "")
         assert comment, f"no dead-man comment at all: {calls!r} {proc.stderr!r}"
-        assert "**Issue discovered**" in calls, (
-            f"no three-section issue comment: {calls!r} {proc.stderr!r}"
+        assert "**audit**" in calls and "**INCOMPLETE" in calls, (
+            f"no PHASE status dead-man comment: {calls!r} {proc.stderr!r}"
         )
+        assert "**Issue discovered**" not in calls, calls
         assert INCOMPLETE_STATUS in calls, (
             "the agent exited 0 having committed nothing — no ledger line, no "
             f"PR — and the issue comment did not say so: {calls!r}"
@@ -726,10 +740,11 @@ class TestAnAgentThatCommitsNothingIsNotReportedOk:
             "exit 0\n",
         )
         assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
-        assert "**Issue discovered**" in calls, (
+        assert "**audit**" in calls and "**OK**" in calls, (
             f"a phase that committed must still report: {calls!r} {proc.stderr!r}"
         )
-        assert "Nothing went wrong this audit phase." in calls, calls
+        assert "**Issue discovered**" not in calls, calls
+        assert "Nothing went wrong this audit phase." not in calls, calls
         assert INCOMPLETE_STATUS not in calls, calls
         assert "message=OK" in pages, pages
         assert INCOMPLETE_STATUS not in pages, pages

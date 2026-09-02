@@ -141,8 +141,19 @@ the next morning at the latest: a comment on the rolling GitHub issue
 labeled `reliability-nightly`, a Pushover notification per phase carrying
 the status and the nightly PR link when one exists, and the PR itself.
 
-GitHub issue bodies and comments use this shape, never a status dump or a
-pointer to a log on a machine:
+The wrapper posts one runner-health comment per phase, not the three-section
+write-up:
+
+**PHASE** STAMP **status**
+optional detail
+
+The issue is created once with a timeless rolling-dead-man description. Run
+history stays in comments. The wrapper does not edit the issue body after
+the first run. A missing daily comment means the runner did not fire.
+
+You still post the three-section issue update below. GitHub issue write-ups
+you author use this shape, never a status dump or a pointer to a log on a
+machine:
 
 **Issue discovered**
 What went wrong, in plain language. If nothing went wrong, say that.
@@ -153,10 +164,6 @@ What THIS run actually changed. If nothing: "Nothing this run."
 **Next**
 Only work that must happen OUTSIDE of CI pushing a new deployment. If
 nothing remains: "Fixed with green deployment"
-
-If the rolling issue has no run yet, the issue body is the same three
-headings with "No run yet." / "Nothing this run." / "Waiting for the first
-nightly cycle."
 
 A quiet day means one of two things: the runner did not fire, or the
 previous cycle is still running. launchd will not start a second instance of

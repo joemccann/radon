@@ -30,7 +30,7 @@ refuses unless BOTH `.radon-weekend-runner` and `.radon-security-runner` exist
 (so it can never run in a sibling loop's clone or the operator checkout), takes
 the exclusive `.weekend-runner.lock`, hard-resets to `origin/main` before each
 phase, enforces the wall-clock caps, and posts a SANITIZED per-phase GitHub
-issue comment (Issue discovered / What was done / Next; never a route, file
+issue comment (`**PHASE** STAMP **status**`; never a route, file
 attack path, exploit, secret, account, or log pointer) plus a Pushover page.
 You never author that comment: do not run `gh issue comment`, `gh issue
 create`, or `gh issue edit`. Wrapper-only. It does NOT scrub the environment
@@ -666,26 +666,21 @@ The public repository receives no audit ledger. Do not run `gh issue comment`,
 GitHub issue comment, already sanitized, in this shape (so you know what the
 operator will see). You do not author that comment.
 
-**Issue discovered**
-What went wrong, in plain language (or that nothing public needs
-disclosure). Sanitized counts are allowed.
+**PHASE** STAMP **status**
+optional sanitized detail
 
-**What was done to fix it**
-What THIS run actually changed. If nothing: "Nothing this run."
-
-**Next**
-Only work that must happen OUTSIDE of CI pushing a new deployment. If
-nothing remains: "Fixed with green deployment"
+That line is runner health, not the three-section PR write-up. The wrapper
+creates the rolling issue once with a timeless description (sanitized status
+only; a missing daily comment means the runner did not fire) and does not
+edit the issue body after that. Run history stays in comments.
 
 The wrapper keeps it sanitized: no routes, file attack paths, exploits,
 secrets, or account identifiers. Put raw findings only in the private
 mode-`0700` run directory and, when a fix ships, in the PR. If the private
 archive service is not configured,
-record `OPERATOR_REQUIRED` in Next, retain the mode-`0700` run directory
-locally, mark archival and the audit incomplete, and do NOT advance the
-audited SHA. If the rolling issue has no run yet, the wrapper's issue body is
-the same three headings with "No run yet." / "Nothing this run." / "Waiting
-for the first nightly cycle."
+record `OPERATOR_REQUIRED` in the private run-record, retain the mode-`0700`
+run directory locally, mark archival and the audit incomplete, and do NOT
+advance the audited SHA.
 
 ## Anti-patterns
 

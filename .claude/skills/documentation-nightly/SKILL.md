@@ -612,8 +612,14 @@ A zero-finding run still does not open a PR (rail 4).
 ## Reporting and state
 
 Use the rolling GitHub issue labeled `documentation-nightly` as the compact,
-append-only audit state. Do not create a repository audit log. Every phase
-posts this shape, never a status dump or a pointer to a log on a machine:
+append-only audit state. Do not create a repository audit log. The wrapper
+posts one runner-health comment (`**PHASE** STAMP **status**`) per phase.
+That comment is not the three-section write-up. The issue is created once
+with a timeless rolling-dead-man description; run history stays in comments;
+the wrapper does not edit the issue body.
+
+You still post the three-section issue update below, never a status dump or a
+pointer to a log on a machine:
 
 **Issue discovered**
 What went wrong, in plain language. If nothing went wrong, say that
@@ -627,10 +633,6 @@ changed. If nothing: "Nothing this run."
 **Next**
 Only work that must happen OUTSIDE of CI pushing a new deployment
 (`OPERATOR_REQUIRED`, `BLOCKED`). If nothing remains: "Fixed with green deployment"
-
-If the rolling issue has no run yet, the issue body is the same three
-headings with "No run yet." / "Nothing this run." / "Waiting for the first
-nightly cycle."
 
 The wrapper also sends the per-phase Pushover notification and posts the
 wrapper-level comment. A missing issue comment is the dead-man signal. A

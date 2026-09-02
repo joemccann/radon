@@ -71,7 +71,22 @@ def _build(tmp_path: Path, *, marker: bool, lock_held: bool, loop: str) -> dict:
 
     _executable(
         curl_stub,
-        "#!/bin/bash\n" f'printf \'%s\\0\' "$@" > "{argv_dir}/$$"\n' "exit 0\n",
+        "#!/bin/bash\n"
+        "args=(\"$@\")\n"
+        "i=0\n"
+        'while [ "$i" -lt "${#args[@]}" ]; do\n'
+        '  if [ "${args[$i]}" = "--config" ] || [ "${args[$i]}" = "-K" ]; then\n'
+        '    cfg="${args[$((i + 1))]}"\n'
+        '    if [ -f "$cfg" ]; then\n'
+        '      while IFS= read -r line || [ -n "$line" ]; do\n'
+        '        args+=("$line")\n'
+        "      done < \"$cfg\"\n"
+        "    fi\n"
+        "  fi\n"
+        "  i=$((i + 1))\n"
+        "done\n"
+        f'printf \'%s\\0\' "${{args[@]}}" > "{argv_dir}/$$"\n'
+        "exit 0\n",
     )
     _executable(
         bin_dir / "python3",

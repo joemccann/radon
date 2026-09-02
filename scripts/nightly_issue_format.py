@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""Format GitHub ISSUE bodies/comments for the five nightly loops.
+"""Format GitHub ISSUE write-ups for the four non-security nightly agents.
 
 Operators read the rolling issues (security, testing, reliability, CI
-performance, documentation). Status dumps, dead-man pings, and pointers to a
-log file on a machine are not a write-up.
+performance, documentation). Status dumps and pointers to a log file on a
+machine are not a write-up.
 
-Shape, always:
+This module is the agent three-section spec and CLI. Wrapper runner-health
+comments are a distinct PHASE STAMP status dead-man line in-main bash
+(never this file). Wrappers create the issue once with a timeless
+rolling-dead-man description and never exec this module after the agent.
+
+Agent write-up shape:
 
     **Issue discovered**
     ...
@@ -19,11 +24,10 @@ Shape, always:
 Next is only for work that still must happen OUTSIDE of CI pushing a new
 deployment. If nothing remains, Next is "Fixed with green deployment".
 
-Security comments pass --sanitize: no routes, file attack paths, exploits,
-secrets, or account identifiers. The GitHub issue carries the write-up itself.
+Security agents do not write GitHub issue comments. The wrapper posts the
+only public security comment, already sanitized.
 
-Stdlib only. Wrappers format issue comments in-main bash (never exec
-disk python3 after the agent can rewrite it). This module is the spec and CLI.
+Stdlib only.
 """
 from __future__ import annotations
 

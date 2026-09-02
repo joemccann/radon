@@ -78,6 +78,24 @@ def _cloned_wrapper(repo: Path, name: str) -> Path:
     return repo / "scripts" / LOOPS[name].name
 
 
+def _curl_log_stub(log: Path) -> str:
+    return (
+        "#!/bin/bash\n"
+        f'printf "%s\\n" "$*" >> "{log}"\n'
+        "i=1\n"
+        'while [ "$i" -le "$#" ]; do\n'
+        '  eval "arg=\\${$i}"\n'
+        '  if [ "$arg" = "--config" ] || [ "$arg" = "-K" ]; then\n'
+        "    i=$((i + 1))\n"
+        '    eval "cfg=\\${$i}"\n'
+        f'    if [ -f "$cfg" ]; then cat "$cfg" >> "{log}"; fi\n'
+        "  fi\n"
+        "  i=$((i + 1))\n"
+        "done\n"
+        "exit 0\n"
+    )
+
+
 def _stub_bin(tmp_path: Path, *, claude_body: str) -> tuple[Path, Path, Path]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
@@ -101,12 +119,7 @@ def _stub_bin(tmp_path: Path, *, claude_body: str) -> tuple[Path, Path, Path]:
     )
     py.chmod(0o755)
     curl = bin_dir / "curl"
-    curl.write_text(
-        "#!/bin/sh\n"
-        f'printf "%s\\n" "$*" >> "{py_log}"\n'
-        "exit 0\n",
-        encoding="utf-8",
-    )
+    curl.write_text(_curl_log_stub(py_log), encoding="utf-8")
     curl.chmod(0o755)
     claude = bin_dir / "claude"
     claude.write_text(claude_body, encoding="utf-8")

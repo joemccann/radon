@@ -114,14 +114,7 @@ DEADMAN_TITLE="Nightly testing runner"
 DEADMAN_LABEL="testing-nightly"
 ISSUE_SANITIZE=0
 LOOP_SLUG="testing"
-NO_RUN_YET_BODY='**Issue discovered**
-No run yet.
-
-**What was done to fix it**
-Nothing this run.
-
-**Next**
-Waiting for the first nightly cycle.'
+DEADMAN_CREATE_BODY="Rolling dead-man for the nightly ${LOOP_SLUG} loop. A missing daily comment means the runner did not fire."
 # Branch prefix the skill opens/updates its PR from. Matched on the head
 # ref, not the title: the title is now `Testing <date>`, which a
 # hand-written PR could also start with.
@@ -147,8 +140,7 @@ _notify_cred() {
   fi
   [[ -f "$envf" ]] || return 0
   while IFS= read -r line || [[ -n "$line" ]]; do
-    line="${line%$'
-'}"
+    line="${line%$'\r'}"
     case "$line" in
       "${key}="*)
         val="${line#*=}"
@@ -165,7 +157,7 @@ _notify_cred() {
 
 _notify_curl() {
   local loop="$1" phase="$2" status="$3" pr_url="$4" detail="$5"
-  local user token title message
+  local user token title message cfg
   user="$(_notify_cred PUSHOVER_USER || true)"
   token="$(_notify_cred PUSHOVER_TOKEN || true)"
   [[ -n "$user" && -n "$token" ]] || return 0
@@ -175,18 +167,27 @@ _notify_curl() {
   # aborts before curl; notify_phase's || true would swallow the page.
   message="$(printf '%s' "$status" | /usr/bin/tr -s '[:space:]' ' ')"
   detail="$(printf '%s' "$detail" | /usr/bin/tr -s '[:space:]' ' ')"
-  [[ -n "$detail" ]] && message="${message}"$'
-'"${detail}"
-  [[ -n "$pr_url" ]] && message="${message}"$'
-'"${pr_url}"
-  /usr/bin/curl -sS --max-time 10 -o /dev/null \
-    --data-urlencode "token=${token}" \
-    --data-urlencode "user=${user}" \
-    --data-urlencode "title=${title}" \
-    --data-urlencode "message=${message}" \
-    --data-urlencode "priority=0" \
-    https://api.pushover.net/1/messages.json \
-    >/dev/null 2>&1 || true
+  [[ -n "$detail" ]] && message="${message} ${detail}"
+  [[ -n "$pr_url" ]] && message="${message} ${pr_url}"
+  message="$(printf '%s' "$message" | /usr/bin/tr -s '[:space:]' ' ')"
+  # Creds stay off curl argv. 0600 config file, then --config.
+  cfg="$(/usr/bin/mktemp)" || return 0
+  /usr/bin/chmod 0600 "$cfg" || { /usr/bin/rm -f "$cfg"; return 0; }
+  {
+    printf 'url = "https://api.pushover.net/1/messages.json"\n'
+    printf 'request = POST\n'
+    printf 'silent = true\n'
+    printf 'show-error = true\n'
+    printf 'max-time = 10\n'
+    printf 'output = "/dev/null"\n'
+    printf 'data-urlencode = "token=%s"\n' "$token"
+    printf 'data-urlencode = "user=%s"\n' "$user"
+    printf 'data-urlencode = "title=%s"\n' "$title"
+    printf 'data-urlencode = "message=%s"\n' "$message"
+    printf 'data-urlencode = "priority=0"\n'
+  } >"$cfg"
+  /usr/bin/curl --config "$cfg" >/dev/null 2>&1 || true
+  /usr/bin/rm -f "$cfg"
 }
 
 notify_phase() {
@@ -225,42 +226,20 @@ _sanitize_issue_text() {
 }
 
 _format_issue_body() {
-  # In-main bash only. A later python3 exec would run agent-writable code
-  # and post stdout that merely contains "Issue discovered".
+  # In-main bash only. Wrapper dead-man is PHASE STAMP status, not the
+  # three-section agent write-up. Never exec disk python3 after the agent.
   local phase="$1" status="$2" detail="$3"
-  local clean discovered done_s next body
+  local clean body
   if [[ "${ISSUE_SANITIZE:-0}" == "1" ]]; then
     phase="$(_sanitize_issue_text "$phase")"
     status="$(_sanitize_issue_text "$status")"
     detail="$(_sanitize_issue_text "$detail")"
   fi
   clean="${detail%%\`\`\`*}"
-  case "$status" in
-    OK)
-      discovered="Nothing went wrong this ${phase} phase."
-      if [[ -n "$clean" ]]; then
-        done_s="$clean"
-      else
-        done_s="The ${phase} phase completed."
-      fi
-      next="Fixed with green deployment"
-      ;;
-    *)
-      discovered="${phase} ${status}."
-      if [[ -n "$clean" ]]; then
-        discovered="${discovered} ${clean}"
-      fi
-      done_s="Nothing this run."
-      case "$status" in
-        *"quotas exhausted"*) next="Top up at claude.ai/settings/usage, then let the next fire resume." ;;
-        INCOMPLETE*|TRUNCATED*) next="The next fire resumes this phase. Do not read this as a finished run." ;;
-        TIMEOUT*) next="The next fire resumes. Partial work may exist on the nightly branch." ;;
-        *) next="${clean:-The next fire retries this phase.}" ;;
-      esac
-      ;;
-  esac
-  body="$(printf '**Issue discovered**\n%s\n\n**What was done to fix it**\n%s\n\n**Next**\n%s' \
-    "$discovered" "$done_s" "$next")"
+  body="$(printf '**%s** %s **%s**' "$phase" "${STAMP:-}" "$status")"
+  if [[ -n "$clean" ]]; then
+    body="${body}"$'\n'"${clean}"
+  fi
   if [[ "${ISSUE_SANITIZE:-0}" == "1" ]]; then
     body="$(_sanitize_issue_text "$body")"
   fi
@@ -279,7 +258,7 @@ report() {
     --json number -q '.[0].number' 2>/dev/null || true)"
   if [[ -z "$issue" ]]; then
     net_bounded gh issue create --title "$DEADMAN_TITLE" --label "$DEADMAN_LABEL" \
-      --body "$NO_RUN_YET_BODY" \
+      --body "$DEADMAN_CREATE_BODY" \
       >/dev/null 2>&1 || true
     issue="$(net_bounded gh issue list --label "$DEADMAN_LABEL" --state open \
       --json number -q '.[0].number' 2>/dev/null || true)"

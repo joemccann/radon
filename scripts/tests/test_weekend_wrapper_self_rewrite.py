@@ -71,6 +71,24 @@ LOOP_IDS = sorted(LOOPS)
 COMMENT_MARK = "<<<COMMENT>>>"
 
 
+def _curl_log_stub(log: Path) -> str:
+    return (
+        "#!/bin/bash\n"
+        f'printf "%s\\n" "$*" >> "{log}"\n'
+        "i=1\n"
+        'while [ "$i" -le "$#" ]; do\n'
+        '  eval "arg=\\${$i}"\n'
+        '  if [ "$arg" = "--config" ] || [ "$arg" = "-K" ]; then\n'
+        "    i=$((i + 1))\n"
+        '    eval "cfg=\\${$i}"\n'
+        f'    if [ -f "$cfg" ]; then cat "$cfg" >> "{log}"; fi\n'
+        "  fi\n"
+        "  i=$((i + 1))\n"
+        "done\n"
+        "exit 0\n"
+    )
+
+
 def _executable(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
@@ -221,7 +239,7 @@ def _build(
     )
     _executable(
         curl_stub,
-        "#!/bin/bash\n" f'echo "curl $*" >> "{push_log}"\n' "exit 0\n",
+        _curl_log_stub(push_log),
     )
 
     env = {
@@ -310,8 +328,9 @@ def test_a_mid_run_rewrite_cannot_change_the_runs_outcome(
     assert result.returncode == 7, _why(result, cfg)
     comments = _comments(cfg)
     assert len(comments) == 1, _why(result, cfg)
-    assert "**Issue discovered**" in comments[0], comments
-    assert "FAILED (exit 7)" in comments[0], comments
+    assert "**audit**" in comments[0], comments
+    assert "**FAILED (exit 7)**" in comments[0], comments
+    assert "**Issue discovered**" not in comments[0], comments
     assert "CRASHED" not in comments[0], "a finished agent is not a wrapper crash"
     assert _pages(cfg) == 1, "exactly one Pushover per phase"
 
@@ -345,7 +364,7 @@ def test_a_cycle_still_reports_both_phases(tmp_path: Path, loop: str) -> None:
 
     assert result.returncode == 0, _why(result, cfg)
     bodies = "\n".join(_comments(cfg))
-    assert bodies.count("**Issue discovered**") >= 2, bodies
+    assert bodies.count("**audit**") >= 1 and bodies.count("**remediate**") >= 1, bodies
     assert "audit" in bodies and "remediate" in bodies, bodies
     assert "CRASHED" not in bodies, bodies
 

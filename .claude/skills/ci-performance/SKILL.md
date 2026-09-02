@@ -362,9 +362,14 @@ Zero-finding nights still open the PR as the dead-man signal:
 
 ## Required nightly report
 
-The nightly PR uses §Pull request output. The rolling GitHub issue
-labeled `ci-performance-nightly` still includes those facts, posted in
-this shape, never a status dump or a pointer to a log on a machine:
+The nightly PR uses §Pull request output. The wrapper posts one runner-health
+comment (`**PHASE** STAMP **status**`) on the rolling GitHub issue labeled
+`ci-performance-nightly`. That comment is not the three-section write-up.
+The issue is created once with a timeless rolling-dead-man description; run
+history stays in comments; the wrapper does not edit the issue body.
+
+You still post the three-section issue update below, never a status dump or a
+pointer to a log on a machine:
 
 **Issue discovered**
 What went wrong, in plain language. If nothing went wrong, say that.
@@ -376,9 +381,7 @@ What THIS run actually changed. If nothing: "Nothing this run."
 Only work that must happen OUTSIDE of CI pushing a new deployment. If
 nothing remains: "Fixed with green deployment"
 
-If the rolling issue has no run yet, the issue body is the same three
-headings with "No run yet." / "Nothing this run." / "Waiting for the first
-nightly cycle." Put the following inside those sections. A zero-change
+Put the following inside those sections. A zero-change
 night still comments.
 
 - `DONE`, `VALIDATING`, `BLOCKED`, or `NO_SAFE_CHANGE` status;
