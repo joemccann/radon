@@ -251,14 +251,26 @@ describe("weekend false-positive regression — cash-flow-sync and llm-token-ind
     expect(isStale(service, friFinish, "closed", SUN_EVENING_UTC)).toBe(false);
   });
 
-  it.each([
-    "cash-flow-sync",
-    "llm-token-index",
-  ])("%s: still alerts quickly during market hours when missed", (service) => {
+  it("llm-token-index: still alerts quickly during market hours when missed", () => {
     // 26h ago on a Wednesday market-hours check → stale (open window = 25h).
     const WED_MARKET = Date.parse("2026-05-13T15:00:00Z"); // 11 AM ET Wed
     const twentySixHAgo = new Date(WED_MARKET - 26 * 60 * 60_000).toISOString();
-    expect(isStale(service, twentySixHAgo, "open", WED_MARKET)).toBe(true);
+    expect(isStale("llm-token-index", twentySixHAgo, "open", WED_MARKET)).toBe(true);
+  });
+
+  // cash-flow-sync is written by the sFTP ingest Tue..Sat 07:30 ET since
+  // 2026-09-02, so a Monday session is legitimately ~57h past the Saturday
+  // run: the open window is 3 days, not 25h.
+  it("cash-flow-sync: a Saturday-morning sFTP ingest is not stale on Monday afternoon", () => {
+    const SAT_0730_ET = Date.parse("2026-05-09T11:30:00Z");
+    const MON_1500_ET = Date.parse("2026-05-11T19:00:00Z"); // ~55.5h later
+    expect(isStale("cash-flow-sync", new Date(SAT_0730_ET).toISOString(), "open", MON_1500_ET)).toBe(false);
+  });
+
+  it("cash-flow-sync: still alerts during market hours once 3 days have passed", () => {
+    const WED_MARKET = Date.parse("2026-05-13T15:00:00Z"); // 11 AM ET Wed
+    const seventyThreeHAgo = new Date(WED_MARKET - 73 * 60 * 60_000).toISOString();
+    expect(isStale("cash-flow-sync", seventyThreeHAgo, "open", WED_MARKET)).toBe(true);
   });
 });
 

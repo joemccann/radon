@@ -79,10 +79,12 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     "orders-sync":      {"open": 10 * _MIN, "closed": 3 * _DAY, "requires_ib": True},
     "portfolio-sync":   {"open": 10 * _MIN, "closed": 3 * _DAY, "requires_ib": True},
     "journal-sync":     {"open": 10 * _MIN, "closed": 3 * _DAY, "requires_ib": True},
-    # cash-flow-sync fires at 17:00 ET on trading days only; skips weekends
-    # + US holidays. Longest legit gap: Fri 17:00 ET → Mon 17:00 ET ≈ 72h.
-    # Prior 25h closed window tripped every Saturday. Widened to 4 days.
-    "cash-flow-sync":   {"open": 25 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
+    # cash-flow-sync is written by the sFTP ingest (radon-flex-pull.timer,
+    # Tue..Sat 07:30 ET) when a NEW Activity statement is applied. Longest
+    # legit gap in market hours: Sat 07:30 ET → Mon 16:00 ET ≈ 57h, so the
+    # 25h open window it had as a Mon-Fri daemon handler would trip every
+    # Monday. Closed stays 4 days for the weekend plus one holiday-drift day.
+    "cash-flow-sync":   {"open": 3 * _DAY, "closed": 4 * _DAY, "requires_ib": False},
     # execution-sweep fires at 20:30 ET on trading days only (evening
     # after-hours fill import, REL-012); skips weekends + US holidays.
     # Longest legit gap: Fri 20:30 ET → Mon 20:30 ET ≈ 72h, so closed is
