@@ -1,3 +1,22 @@
+# Task: Orders header WORKING vs QUEUED rows (2026-09-02) [WIP]
+
+PR 236 comment: Overnight TIF is a separate IB venue from EXT `outsideRth`.
+DAY+EXT sits Queued overnight and never routes Overnight. Separate honesty
+bug: header WORKING 3 while every visible row is QUEUED.
+
+- H1 depends_on: [] - lesson: Overnight != EXT
+- H2 depends_on: [] - summarizeOpenOrders uses mapped row status + session
+- H3 depends_on: [H2] - command-strip Working 0 when all rows Queued
+- H4 depends_on: [H2, H3] - tests + PR
+
+## Checklist
+- [x] H1 lesson
+- [ ] H2 summarizeOpenOrders
+- [ ] H3 command strip
+- [ ] H4 PR
+
+---
+
 # Task: Orders EXT close QUEUED + Gate 3 blocks reduce (2026-09-02) [WIP]
 
 Live symptom (app.radon.run /orders, ~22:51 ET 2026-09-01): TQQQ Long Stock

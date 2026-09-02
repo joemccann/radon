@@ -17,6 +17,18 @@
   KEY_ASSIGN already treats a leading quote as a value, and deepsec
   loads the quoted flag as truthy after unset.
 
+## 2026-09-02 — Overnight TIF is not EXT outsideRth
+
+- IB Overnight is 20:00-03:50 ET, limit (or Adaptive) only, TIF Overnight or
+  Overnight+Day. No GTC. A separate venue from pre-market / after-hours.
+- Radon EXT is `outsideRth` on pre-market + AH (04:00-09:30 and 16:00-20:00
+  ET). DAY+EXT sits Queued through overnight and never routes to Overnight.
+- Do not treat "overnight" as a synonym for EXT. Mapping PreSubmitted to
+  Working is only valid in a live pre-market/AH window.
+- The Orders header WORKING count must use the same mapped status as the
+  row chips. Counting every non-partial open order as Working while every
+  row reads QUEUED is a lie.
+
 ## 2026-09-02 — Snapshot Pushover creds before the agent; comment-only issue writes
 
 - `_notify_curl` read WEEKEND_ROOT/.env at page time. Launchd does not set
