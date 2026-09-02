@@ -238,8 +238,8 @@ migration executed into in-memory sqlite.
   `regime-tab-routes.test.tsx`, `service-health-windows.test.ts`,
   `refresh-schedule.test.ts`, `cloud/tests/test_systemd_services.py`.
 - `web/e2e/ma-ratio-tab.spec.ts` — route mocks per the divyield pattern; active
-  tab, stroked paths, brush, missing-state copy. Screenshot committed at
-  `docs/indicators/ma-ratio-tab.png`.
+  tab, stroked paths, brush, missing-state copy. No tab screenshot is
+  committed for this spec (sibling specs carry one).
 
 ## File checklist
 
