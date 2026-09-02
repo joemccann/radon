@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { hydrateUiPreferences, saveUiColumns } from "@/lib/uiPreferences";
 
 /**
  * Persistent per-table column visibility state.
@@ -34,9 +35,11 @@ export function useColumnVisibility<K extends string>(
 
   useEffect(() => {
     let next = { ...defaults };
+    let hadLocal = false;
     try {
       const raw = window.localStorage.getItem(storageKey);
       if (raw) {
+        hadLocal = true;
         const saved = JSON.parse(raw) as Partial<Record<K, boolean>>;
         for (const key of Object.keys(saved) as K[]) {
           if (key in next && typeof saved[key] === "boolean") next[key] = saved[key]!;
@@ -48,6 +51,26 @@ export function useColumnVisibility<K extends string>(
     for (const key of alwaysOnSet) next[key] = true;
     setVisible(next);
     setHydrated(true);
+
+    // Cross-device restore: the profile row fills in only when this device
+    // has no localStorage entry yet — a device-local choice stays untouched.
+    if (!hadLocal) {
+      let active = true;
+      void hydrateUiPreferences().then((prefs) => {
+        if (!active) return;
+        const server = prefs.columns?.[tableId];
+        if (!server) return;
+        const merged = { ...defaults };
+        for (const key of Object.keys(server) as K[]) {
+          if (key in merged && typeof server[key] === "boolean") merged[key] = server[key];
+        }
+        for (const key of alwaysOnSet) merged[key] = true;
+        setVisible(merged);
+      });
+      return () => {
+        active = false;
+      };
+    }
     // Storage hydration is intentionally post-mount to preserve SSR parity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storageKey]);
@@ -66,7 +89,13 @@ export function useColumnVisibility<K extends string>(
   const toggle = useCallback(
     (key: K) => {
       if (alwaysOnSet.has(key)) return;
-      setVisible((prev) => ({ ...prev, [key]: !prev[key] }));
+      setVisible((prev) => {
+        const next = { ...prev, [key]: !prev[key] };
+        // Server sync happens ONLY on a user action, never on hydration —
+        // pushing hydrated defaults would clobber another device's choice.
+        saveUiColumns(tableId, next);
+        return next;
+      });
     },
     // alwaysOnSet is derived from the same `alwaysOn` array — referentially stable per render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -77,6 +106,7 @@ export function useColumnVisibility<K extends string>(
     const reset: Record<K, boolean> = { ...defaults };
     for (const key of alwaysOnSet) reset[key] = true;
     setVisible(reset);
+    saveUiColumns(tableId, reset);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

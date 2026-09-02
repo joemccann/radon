@@ -36,6 +36,12 @@ CATALOG: dict[CatalogKey, Capability] = {
     ("GET", "/cash-flows"): "read",
     ("GET", "/catalysts"): "read",
     ("POST", "/contract/qualify"): "read.spawn",
+    # Operator credentials CRUD (PR #125): chat must never touch this surface,
+    # reads included — even masked hints are operator-only.
+    ("GET", "/credentials"): "admin",
+    ("PUT", "/credentials/{service_id}"): "admin",
+    ("POST", "/credentials/{service_id}/validate"): "admin",
+    ("DELETE", "/credentials/{service_id}/{name}"): "admin",
     ("POST", "/cta/share"): "internal",
     ("POST", "/demo/trial-expiry"): "internal",
     ("POST", "/discover"): "read.spawn",
