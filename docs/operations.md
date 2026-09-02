@@ -282,11 +282,11 @@ Staleness windows live in `web/lib/serviceHealthWindows.ts`. Cycle-driven writer
 
 ## Cash Flows
 
-`scripts/cash_flow_sync.py` pulls `CashTransaction` rows from IBKR Flex (`IB_FLEX_NAV_QUERY_ID=1497709`) and upserts into the `cash_flows` Turso table. Surfaces on `/orders` via `web/components/CashFlowsSection.tsx`.
+`scripts/cash_flow_sync.py` parses `CashTransaction` rows from an IBKR Flex Activity statement and upserts into the `cash_flows` Turso table. Surfaces on `/orders` via `web/components/CashFlowsSection.tsx`.
 
-**Cadence:** once per ET trading day at 17:00 ET (1h after the close). Flex publishes once per day, so faster polling buys nothing. Holidays and weekends are skipped via `utils.market_calendar`. Late-fires past 18:00 ET if the daemon was off.
+**Cadence:** the sFTP-delivered Activity statement: `radon-flex-pull.timer` (Tue..Sat 07:30 ET) -> `scripts/flex_delivery_ingest.py` -> `cash_flow_sync --from-file`. That ingest is the only path that writes `cash_flows` and it owns the `cash-flow-sync` service-health row (`ok` after a successful run or an already-applied duplicate statement, `error` with the exit code when the run fails). The monitor daemon's `CashFlowSyncHandler` is not registered (2026-09-02); a weekday SendRequest is off by policy. Query ids and the pull unit: [`cloud-services.md`](cloud-services.md) "Flex sFTP pull".
 
-**Throttle backoff.** Flex codes 1001 / 1018 / 1019 raise `FlexThrottleError` on the first hit (no internal retry, no sleep), and the handler advances an exponential breaker (24h → 48h → 72h → 168h capped) persisted across daemon restarts. The breaker composes with the daily window; embargo expiry waits until the next 17:00 ET slot.
+**Throttle backoff.** Only Flex code 1018 is a rate limit; the breaker ladder is 90s -> 5m -> 15m -> 1h. 1001/1009 take the soft lane; 1019 on a poll is not an error. Detail: `scripts/monitor_daemon/CLAUDE.md`.
 
 ## Deployment
 

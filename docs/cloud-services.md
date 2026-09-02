@@ -758,7 +758,12 @@ Install dependency: IBKR-hosted sFTP, not Flex Web Service. Full recipe:
 [`flex-sftp-setup.md`](flex-sftp-setup.md).
 
 `Tue..Sat 07:30 ET` plus `08:30 ET` empty-dir retry. Oneshot
-`scripts/flex_sftp_pull.py`. Heartbeat `flex-pull`. Stripped env
+`scripts/flex_sftp_pull.py`. Heartbeats `flex-pull` (the delivery signal)
+and, from the Activity branch of `flex_delivery_ingest`, `cash-flow-sync`
+(`ok` when `cash_flow_sync --from-file` succeeds or an already-applied
+statement is re-pulled, `error` with the exit code when it fails; a
+duplicate-only run is still a stale-remote `error` on `flex-pull`, R-389,
+but not on `cash-flow-sync`). Stripped env
 `/var/lib/radon/flex-secrets/env` (no `TWS_PASSWORD`). Units on
 `auto-sync-units.txt`.
 
