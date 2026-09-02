@@ -35,7 +35,7 @@ set -Eeuo pipefail
 
 # One writer per runner clone. The daily fire, a hand-run smoke test and the
 # setup script all drive the SAME tree, and every entry point runs
-# `git clean -fdq`, so a second run would delete the live agent's uncommitted
+# `git clean -fdxq`, so a second run would delete the live agent's uncommitted
 # work mid-write with both runs reporting success. The plist pre-reset and
 # setup_documentation_nightly.sh both stand down on this lock, so it has to exist.
 # mkdir is the atomic primitive here: flock(1) does not exist on macOS.
@@ -47,7 +47,7 @@ acquire_runner_lock() {
       # No pid yet means the winner is between its mkdir and its pid write.
       # That window used to skip the `kill -0` test entirely — the loser read
       # an empty pid, called the lock stale, `rm -rf`d it and took it, and two
-      # cycles then ran `git clean -fdq` in the same clone. Absent evidence is
+      # cycles then ran `git clean -fdxq` in the same clone. Absent evidence is
       # not evidence of staleness. R-411.
       echo "weekend runner lock held (pid not yet published): $dir" >&2
       return 1
@@ -106,7 +106,9 @@ MODE="${1:?usage: documentation_nightly.sh audit|remediate|cycle}"
 
 REPO="${RADON_WEEKEND_REPO:-$HOME/radon-weekend/radon-documentation}"
 WEEKEND_ROOT="$(dirname "$REPO")"
-VENV="$WEEKEND_ROOT/venv"
+# Per-loop venv. The legacy $WEEKEND_ROOT/venv is not deleted here
+# (operator follow-up after this ships).
+VENV="$WEEKEND_ROOT/venv-documentation"
 # Activate the venv so any python3.13 calls inside the agent use it.
 [[ -f "$VENV/bin/activate" ]] && export PATH="$VENV/bin:$PATH"
 DEADMAN_TITLE="Nightly documentation runner"
@@ -207,7 +209,7 @@ kill_round_group() {
   # process-group leader, so the negative pid reaches claude and anything it
   # left behind. --foreground would signal only timeout's direct child, which
   # is the opposite of what reaping orphaned subagents needs — they would keep
-  # writing into the clone while the next round runs `git clean -fdq`. R-386.
+  # writing into the clone while the next round runs `git clean -fdxq`. R-386.
   kill -TERM -- "-$ROUND_PID" 2>/dev/null || kill -TERM "$ROUND_PID" 2>/dev/null || true
   ROUND_PID=""
 }
@@ -332,7 +334,7 @@ ground_truth() {
   fetch_origin_with_retry
   git checkout -f --quiet main
   git reset --hard --quiet origin/main
-  git clean -fdq --exclude=.radon-weekend-runner --exclude=.radon-documentation-runner --exclude=.weekend-runner.lock --exclude=logs/ --exclude=.env --exclude=.env.ib-mode --exclude=web/.env
+  git clean -fdxq --exclude=.radon-weekend-runner --exclude=.radon-documentation-runner --exclude=.weekend-runner.lock --exclude=logs/ --exclude=.env --exclude=.env.ib-mode --exclude=web/.env --exclude=node_modules/ --exclude=.next/ --exclude=.deepsec/
 }
 
 # The agent commits per completed task and the skill resumes from the
@@ -365,6 +367,28 @@ fi
 ROUND_LOG_MARK=0
 MAX_ATTEMPTS=3
 RETRY_PAUSE_SECS=60
+# A subscription quota is per MODEL, so an exhausted one is a reason to drop a
+# rung, not to lose the night. 2026-09-01: `~/.claude/settings.json` carried
+# `model: claude-fable-5[1m]`, these wrappers passed no --model and inherited
+# it, that model's quota was gone, and `claude -p` printed one line and exited
+# 1 in under a second — the security loop's audit AND remediate both died that
+# way at 00:00 while `--model opus` and `--model sonnet` answered normally on
+# the same Max login. Pinning the model also takes the operator's global
+# default off the unattended path: an interactive session changing it must not
+# decide what tonight runs on.
+QUOTA_EXHAUSTED_MARKER="out of usage credits"
+MODEL_LADDER="${RADON_WEEKEND_MODEL_LADDER:-claude-fable-5[1m] claude-opus-5[1m] claude-opus-5 claude-sonnet-5}"
+read -r -a MODEL_RUNGS <<< "$MODEL_LADDER"
+MODEL_INDEX=0
+ALL_MODELS_EXHAUSTED=0
+
+# Scoped to THIS round's slice of the log, like the ceiling detector: RUN_LOG
+# is per phase and every round appends to it, so a whole-file grep would let
+# round 1's exhausted rung drop a model on every later round forever. R-426.
+is_quota_exhausted() {
+  tail -c "+$((ROUND_LOG_MARK + 1))" "$RUN_LOG" 2>/dev/null | grep -qF "$QUOTA_EXHAUSTED_MARKER"
+}
+
 is_transient_network_failure() {
   tail -c 500 "$RUN_LOG" | grep -qE 'API Error|ENOTFOUND|Connection lost|Execution error'
 }
@@ -406,6 +430,7 @@ run_phase() {
     # never, in the case that matters. `-k` escalates to SIGKILL so a claude
     # blocked on a hung child cannot make the cap advisory. R-384, R-386.
     CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 timeout -k "$KILL_AFTER_SECS" "$remain" claude -p "/documentation-nightly $PHASE" \
+      --model "${MODEL_RUNGS[$MODEL_INDEX]}" \
       --dangerously-skip-permissions \
       --output-format text >> "$RUN_LOG" 2>&1 &
     ROUND_PID=$!
@@ -419,6 +444,18 @@ run_phase() {
     # The cap is OUR clock, so classify from it rather than from the code, or a
     # round the cap genuinely killed is reported as a crash. R-386.
     if (( RC != 0 && SECONDS - round_start >= remain )); then RC=124; fi
+    # A quota drop is not one of the three transient-network attempts: it
+    # costs no wall clock, and the next rung is a different quota, so it
+    # retries immediately and `attempt` is untouched. Bounded by the ladder.
+    if (( RC != 0 )) && is_quota_exhausted; then
+      if (( MODEL_INDEX + 1 < ${#MODEL_RUNGS[@]} )); then
+        MODEL_INDEX=$((MODEL_INDEX + 1))
+        echo "[documentation-nightly] ${MODEL_RUNGS[$((MODEL_INDEX - 1))]} is out of usage credits; dropping to ${MODEL_RUNGS[$MODEL_INDEX]}" | tee -a "$RUN_LOG"
+        continue
+      fi
+      ALL_MODELS_EXHAUSTED=1
+      break
+    fi
     [[ $RC -eq 0 || $RC -eq 124 || $attempt -ge $MAX_ATTEMPTS ]] && break
     is_transient_network_failure || break
     echo "[documentation-nightly] transient network failure (rc=$RC) — attempt $attempt/$MAX_ATTEMPTS, retrying in ${RETRY_PAUSE_SECS}s" | tee -a "$RUN_LOG"
@@ -436,6 +473,11 @@ run_phase() {
   tail_text="$(tail -c 1500 "$RUN_LOG" 2>/dev/null | python3 "$REPO/scripts/weekend_redact.py" --repo "$REPO" 2>/dev/null || true)"
   local status
   status="$(phase_status "$RC" "$RUN_LOG" "$ROUND_LOG_MARK")"
+  # An exhausted ladder is not a generic non-zero exit: the operator needs the
+  # cause and the one place it is fixed, or they re-fire into the same wall.
+  if (( ALL_MODELS_EXHAUSTED )); then
+    status="FAILED (all model quotas exhausted; top up at claude.ai/settings/usage)"
+  fi
   case "$status" in
     OK)
       report "$status" "\`\`\`

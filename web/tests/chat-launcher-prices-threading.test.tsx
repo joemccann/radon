@@ -10,9 +10,11 @@
  * "No real-time data" panel in the running app and the operator confirms a
  * live order with no bid/ask in front of them.
  *
- * The map already exists exactly once, in WorkspaceShell (`usePrices` plus the
- * previous-close backfill). Pinned here is the path from that single owner to
- * the gate: WorkspaceShell -> ChatLauncher -> ChatPanel.
+ * The map exists exactly once: RealtimePricesProvider owns the socket (root
+ * Providers tree, so it survives App Router navigations); WorkspaceShell
+ * publishes subscriptions, backfills previous closes, and threads the map
+ * down. Pinned here is the path from that owner to the gate:
+ * RealtimePricesProvider -> WorkspaceShell -> ChatLauncher -> ChatPanel.
  *
  * TEST_AUDIT T-180: the second case used to read WorkspaceShell.tsx AS TEXT and
  * assert the substrings `prices={prices}` and `const prices = usePreviousClose(`.
@@ -184,6 +186,7 @@ vi.mock("@/components/mobile/MobileShell", () => ({ default: () => null }));
 vi.mock("@/components/Toast", () => ({ default: () => null }));
 
 import WorkspaceShell from "@/components/WorkspaceShell";
+import { RealtimePricesProvider } from "@/lib/RealtimePricesContext";
 
 /** Relay payload: a live MU book with NO previous close, so the shell's
  *  `usePreviousClose` backfill is the only thing that can fill the DAY row. */
@@ -301,9 +304,13 @@ describe("WorkspaceShell -> gate: the live quote map reaches the confirm card", 
   });
 
   it("paints the relay's own BID/ASK on the confirm card, not an empty panel", async () => {
-    render(<WorkspaceShell section="dashboard" />);
+    render(
+      <RealtimePricesProvider>
+        <WorkspaceShell section="dashboard" />
+      </RealtimePricesProvider>,
+    );
 
-    // The shell's ONE relay subscription opens and delivers the MU book.
+    // The provider's ONE relay subscription opens and delivers the MU book.
     await flush();
     expect(sockets.length).toBeGreaterThan(0);
     await act(async () => {
@@ -332,7 +339,11 @@ describe("WorkspaceShell -> gate: the live quote map reaches the confirm card", 
   });
 
   it("carries the previous-close backfill through to the gate's DAY row", async () => {
-    render(<WorkspaceShell section="dashboard" />);
+    render(
+      <RealtimePricesProvider>
+        <WorkspaceShell section="dashboard" />
+      </RealtimePricesProvider>,
+    );
 
     await flush();
     await act(async () => {

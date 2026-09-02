@@ -72,18 +72,75 @@ def _rule_allowlist_commits(rule: dict) -> set[str]:
     return set(allowlists[0]["commits"])
 
 
-def test_active_root_ci_runs_full_history_scan_with_cloud_policy() -> None:
+def _secret_scan_job() -> dict:
     workflow = yaml.safe_load(ACTIVE_CI.read_text(encoding="utf-8"))
-    steps = workflow["jobs"]["secret-scan"]["steps"]
+    job = workflow["jobs"]["secret-scan"]
+    assert job.get("continue-on-error") is not True
+    return job
+
+
+def _scan_step(job: dict) -> dict:
+    return next(
+        step
+        for step in job["steps"]
+        if "gitleaks detect" in str(step.get("run", ""))
+    )
+
+
+def test_active_root_ci_scopes_pr_gitleaks_to_merge_base_head() -> None:
+    job = _secret_scan_job()
+    steps = job["steps"]
     checkout = next(step for step in steps if "actions/checkout" in step.get("uses", ""))
     assert checkout["with"]["fetch-depth"] == 0
 
-    commands = "\n".join(str(step.get("run", "")) for step in steps)
+    scan = _scan_step(job)
+    assert scan.get("continue-on-error") is not True
+    env = scan.get("env") or {}
+    assert "github.event_name" in str(env.get("EVENT_NAME", ""))
+    assert "github.event.pull_request.base.sha" in str(env.get("PR_BASE", ""))
+    assert "github.event.pull_request.head.sha" in str(env.get("PR_HEAD", ""))
+    assert "github.event.before" in str(env.get("PUSH_BEFORE", ""))
+    assert "github.sha" in str(env.get("PUSH_HEAD", ""))
+
+    script = scan["run"]
+    assert 'EVENT_NAME" = "pull_request"' in script
+    assert "git merge-base" in script
+    assert "log_opts=" in script
+    assert "${merge_base}..${PR_HEAD}" in script
+    assert 'ensure_commit "$PUSH_HEAD"' in script
+    assert 'ensure_commit "$PUSH_BEFORE"' in script
+    assert 'log_opts="${PUSH_BEFORE}..${PUSH_HEAD}"' in script
+    assert 'log_opts="HEAD"' not in script
+    # A missing non-zero before must fail the job, not scan only the tip.
+    assert '[ "$PUSH_BEFORE" = "$zero" ] || ! git cat-file -e "${PUSH_BEFORE}^{commit}"' not in script
+    collapsed = " ".join(script.split())
     expected = (
         "gitleaks detect --source . --config cloud/.gitleaks.toml "
-        "--redact --no-banner --verbose"
+        "--redact --no-banner --verbose --log-opts="
     )
-    assert expected in " ".join(commands.split())
+    assert expected in collapsed
+
+
+def test_this_branch_has_no_static_tws_credential_assignments() -> None:
+    """HEAD fixtures must runtime-concatenate TWS_* so the assignment never
+    sits in the tree as a gitleaks hit. Sanitize/tests still see the value
+    after join.
+    """
+    rules = _config_rules()
+    literal = re.compile(rules["literal-tws-credential-assignment"]["regex"])
+    roots = (
+        REPO_ROOT / "scripts" / "tests",
+        REPO_ROOT / "cloud" / "tests",
+        REPO_ROOT / "scripts" / "github_pr_output.py",
+    )
+    hits: list[str] = []
+    for root in roots:
+        paths = [root] if root.is_file() else sorted(root.rglob("*.py"))
+        for path in paths:
+            text = path.read_text(encoding="utf-8")
+            if literal.search(text):
+                hits.append(str(path.relative_to(REPO_ROOT)))
+    assert hits == []
 
 
 def test_dead_nested_cloud_workflow_is_removed() -> None:

@@ -3283,6 +3283,14 @@ class TestCloudSecretScan:
         assert "gitleaks detect --source ." in commands
         assert "--redact" in commands
         assert "--config cloud/.gitleaks.toml" in commands
+        scan = next(step for step in steps if "gitleaks detect" in str(step.get("run", "")))
+        script = scan["run"]
+        assert "git merge-base" in script
+        assert "${merge_base}..${PR_HEAD}" in script
+        assert 'log_opts="${PUSH_BEFORE}..${PUSH_HEAD}"' in script
+        assert 'ensure_commit "$PUSH_BEFORE"' in script
+        assert '[ "$PUSH_BEFORE" = "$zero" ] || ! git cat-file -e "${PUSH_BEFORE}^{commit}"' not in script
+        assert "--log-opts=" in script
 
     def test_root_ci_runs_full_python313_cloud_suite(self) -> None:
         workflow = yaml.safe_load(ROOT_CI.read_text(encoding="utf-8"))

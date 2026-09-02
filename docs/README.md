@@ -59,6 +59,8 @@ Archived session artifacts live in [`docs/archive/`](archive/).
 | Performance reconstruction | [`docs/performance-reconstruction.md`](performance-reconstruction.md) |
 | Chart system | [`docs/chart-system.md`](chart-system.md) |
 | Brand identity | [`docs/brand-identity.md`](brand-identity.md) |
+| Public agent-design surface + eval scenarios | [`docs/design-evals.md`](design-evals.md) |
+| Short locate / borrow playbook | [`docs/short-locate-borrow.md`](short-locate-borrow.md) |
 | OAuth subscription auth | [`docs/oauth-subscription-auth.md`](oauth-subscription-auth.md) |
 
 ## Glossary

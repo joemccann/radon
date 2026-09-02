@@ -15,7 +15,9 @@ each artifact's `case_id` anchors into this file. Triage them with the
 - A bounded-probe timeout is `unknown`, never `down`. Off-hours quiet is normal
   for RTH writers.
 - `radon restart` cycles the IB Gateway (a 2FA push). App-tier-only work uses
-  `radon unit restart <unit>`.
+  `radon unit restart <unit>`. The wrapper takes the full unit name with its
+  `.service` or `.timer` suffix and exits 2 on a bare name
+  (`cloud/scripts/operator-radon.sh`).
 
 ---
 
@@ -43,7 +45,7 @@ Peak incident: 2026-07-02 21:32–23:37 UTC, P1, every DB-backed Next.js route d
   unrelated routes at once; `UND_ERR_DESTROYED` in `err.cause` = self-inflicted,
   `ECONNRESET`/`ETIMEDOUT` = real network. TCP probe on :3000 stays green.
 - **Discriminating canary:** a Python Turso read from the same host in the same
-  minute. Canary succeeds ⇒ Node-local wedge, `radon unit restart radon-nextjs`
+  minute. Canary succeeds ⇒ Node-local wedge, `radon unit restart radon-nextjs.service`
   helps. Both fail ⇒ upstream Turso — do NOT restart-flap; stand down and probe
   from a second network (`feedback_turso_http_pipeline_incident_signature`).
 - **2026-08-13, 401 is not a wedge.** `/api/service-health` stays Clerk-protected.
@@ -185,22 +187,34 @@ Incident: 2026-07-08, P1.
   age cap re-paged the latched oneshot as P1. Edge and
   `:8321/health/lite` stayed up. Classifier now evaluates
   kill-before-green before the in_flight branch.
+- **2026-09-01 23:50Z:** page `e741ed1a`. Deploy `e5285945`
+  stop-cleaned BPI at 23:48:27Z mid-RUT. `bpi_scan.install_sigterm_unwind`
+  caught SIGTERM and `SystemExit(143)`, so systemd recorded
+  `Result=exit-code` / `ExecMainStatus=143` (not `signal`). Green
+  23:49:29Z. Classifier only matched `Result=signal`, so the first
+  sight paged P1. Edge and `:8321/health/lite` stayed up. Classifier
+  now treats exit-code 143 as graceful-SIGTERM collateral inside a
+  deploy window; other exit-codes still stay P1.
 - **Discriminating check:** `InactiveEnterTimestamp` before a later
   green-marker mtime (within the 24h oneshot horizon) or within
   60 min after the last green (cancelled stack / not-yet-green);
   sibling oneshots often fail the same second; `Result=timeout` /
-  `exit-code` is a different class (do not downgrade). A fresh
-  successor journal does not override kill-before-green.
-- **Remediation:** classifier only, do not restart. Exit-code and
-  start-limit-hit stay P1.
+  non-143 `exit-code` is a different class (do not downgrade).
+  `Result=exit-code` + `ExecMainStatus=143` is graceful SIGTERM
+  unwind (same class as `signal`). A fresh successor journal does
+  not override kill-before-green.
+- **Remediation:** classifier only, do not restart. Non-143 exit-code
+  and start-limit-hit stay P1.
 - **Regression:** `test_units.py::TestDeployCollateralSignalKill`
   (`test_stacked_deploy_signal_kill_34min_before_green_is_p3`,
   `test_signal_kill_after_last_green_during_cancelled_stack_is_p3`,
   `test_oneshot_still_failed_61min_after_stop_clean_is_p3`,
   `test_stacked_successor_green_158min_after_kill_is_p3`,
-  `test_latched_kill_before_green_not_repaged_by_successor_inflight_journal`).
+  `test_latched_kill_before_green_not_repaged_by_successor_inflight_journal`,
+  `test_graceful_sigterm_exit_143_before_green_is_p3`,
+  `test_graceful_sigterm_exit_143_without_deploy_evidence_stays_p1`).
 - **Code:** `scripts/watchdog/units.py` (`DEPLOY_COLLATERAL_WINDOW_SECS=3600`,
-  `KILL_BEFORE_GREEN_FROZEN_CAP_SECS=86400`).
+  `KILL_BEFORE_GREEN_FROZEN_CAP_SECS=86400`, `GRACEFUL_SIGTERM_EXIT_STATUS=143`).
 
 ---
 
@@ -423,7 +437,7 @@ on the daily 22:40 UTC timer.** Peak: 2026-08-23 23:57Z, page `c52496dd…`.
   degenerate guard still refuses a thin sweep). `TimeoutStartSec=2100`
   covers the budget plus one in-flight `FETCH_TIMEOUT_S`. Do not
   restart-flap on the hung code; after the fix deploys, one
-  `radon unit restart radon-divyield`. Polkit cannot gain a new
+  `radon unit restart radon-divyield.service`. Polkit cannot gain a new
   rerun grant in the same release (control-plane preflight).
 - **Regression:**
   `test_divyield.py::TestSweepBudget::test_tarpitted_yahoo_stops_inside_the_wall_clock_budget`,
@@ -468,8 +482,10 @@ on the daily 22:40 UTC timer.** Peak: 2026-08-23 23:57Z, page `c52496dd…`.
   request is abandoned and the process exits, heartbeats `error`, and
   leaves unfinished tickers for the next weekly fire.
   `TimeoutStartSec` stays 900. Do not restart-flap the hung run; after the
-  fix deploys, one `radon unit restart radon-equibles-ats` (next timer is
-  7d out). Polkit cannot gain a new rerun grant in the same release.
+  fix deploys, one `radon unit restart radon-equibles-ats.service` (next
+  timer is 7d out). Unattended, that is `reset-failed` + start (unit is on
+  `RERUNNABLE_ONESHOT_UNITS`); polkit grants those two verbs and never
+  `restart`.
 - **Regression:**
   `test_equibles_ats_venue_share.py::TestSweepBudget`
   (`test_tarpitted_equibles_stops_inside_the_wall_clock_budget`,
@@ -514,8 +530,10 @@ on the daily 22:40 UTC timer.** Peak: 2026-08-23 23:57Z, page `c52496dd…`.
   tarpitted request is abandoned and the process exits, heartbeats `error`,
   and leaves unfinished tickers for the next daily fire.
   `TimeoutStartSec` stays 900. Do not restart-flap the hung run; after the
-  fix deploys, one `radon unit restart radon-equibles-filings` (next timer
-  is 24h out). Polkit cannot gain a new rerun grant in the same release.
+  fix deploys, one `radon unit restart radon-equibles-filings.service`
+  (next timer is 24h out). Unattended, that is `reset-failed` + start (unit
+  is on `RERUNNABLE_ONESHOT_UNITS`); polkit grants those two verbs and
+  never `restart`.
 - **Regression:**
   `test_equibles_filing_forensics.py::TestSweepBudget`
   (`test_tarpitted_equibles_stops_inside_the_wall_clock_budget`,
@@ -555,13 +573,13 @@ on the weekday 21:30 UTC fire.** Peak: 2026-08-24 23:30Z, page `bbaa065b…`.
   spent` / `RUT: Turso history`. `Result=signal` is deploy stop-clean
   (do not raise the budget). If `/health/lite` is down too → API,
   stand down.
-- **Remediation (code):** process-wide `SWEEP_BUDGET_S=6600` shared
+- **Remediation (code):** process-wide `bpi_scan.SWEEP_BUDGET_S` shared
   across NDX+SPX+RUT. Spark chunks and chart-fallback
   `wait(..., FIRST_COMPLETED)` stop submitting at the deadline so the
   process exits, heartbeats, and leaves unfinished members to the
   23:30 / 11:00 catch-up. `TimeoutStartSec` stays 6900 (R-071).
   Do not restart-flap the hung run; after the fix deploys, one
-  `radon unit restart radon-bpi` if the next timer is >12h out.
+  `radon unit restart radon-bpi.service` if the next timer is >12h out.
 - **Regression:**
   `test_bpi_scan.py::TestSweepBudget`
   (`test_tarpitted_spark_stops_inside_the_wall_clock_budget`,
@@ -599,7 +617,7 @@ largecaps scan.** Peak: 2026-08-20 14:15Z, page `99554c7a…`. Recurred
   oi-changes class. If `/health/lite` is down too → API/IB, stand down.
 - **Remediation (code):** exit 0 when at least one ticker produced a valid
   result; keep `failed_tickers` on the payload. Do not restart-flap; next
-  timer or one `radon unit restart radon-leap` after the fix deploys.
+  timer or one `radon unit restart radon-leap.service` after the fix deploys.
 - **Regression:**
   `test_leap_scanner.py::test_partial_ticker_failures_write_cache_and_exit_zero`,
   `test_all_provider_failures_preserve_cache_and_fail_health`.
@@ -623,11 +641,14 @@ on an instant FastAPI 502 capacity shed at the 10:00 ET timer.** Peak:
   `Type=oneshot` has no `Restart=`, so `NRestarts=0`. Next timer ~24h;
   `leap.json` stayed on the prior day. Same window's GARCH POST at
   14:02:02Z completed OK — the lane cleared within ~2 minutes.
-- **Detection:** unit journal
-  `LEAP FastAPI outcome indeterminate (curl=0, http=502)` in the same
-  second as the POST; radon-api
-  `Subprocess capacity exhausted for leap_scanner_uw.py`; ExecMainStart
-  equals InactiveEnter (instant fail); `/health/lite` 200.
+- **Detection:** unit journal `LEAP FastAPI capacity shed (curl=0
+  http=502) - retry N in Ds`, then on give-up `LEAP shed for subprocess
+  capacity (http=502) after N retries`; radon-api `Subprocess capacity
+  exhausted for leap_scanner_uw.py`; `/health/lite` 200. Since the R-221
+  retry landed, `LEAP FastAPI outcome indeterminate (curl=0, http=502)`
+  means the body did NOT match the capacity marker — a different case,
+  not this one. (The 2026-08-27 page predates the retry and shows the
+  indeterminate line.)
 - **Discriminating check:** instant 502 with the capacity-exhausted
   body (this case). A long run that ends
   `Script leap_scanner_uw.py failed (code 1)` after `SCAN COMPLETE` is
@@ -647,6 +668,48 @@ on an instant FastAPI 502 capacity shed at the 10:00 ET timer.** Peak:
   `test_persistent_capacity_shed_no_duplicate_still_fails`.
 - **Code:** `scripts/run_leap_refresh.sh`
   (`RADON_LEAP_SHED_WAIT_SECS`, `CAPACITY_SHED_MARKER`).
+
+---
+
+## garch-capacity-502
+
+**`radon-garch.service` oneshot pages P1 `Result=exit-code` (`NRestarts=0`)
+on an instant FastAPI 502 capacity shed at the 14:00 UTC timer.** Peak:
+2026-09-01 14:00:12Z, page `776ea756…`. Sibling of `leap-capacity-502`.
+
+- **Mechanism:** 3x/RTH timer POSTs `/garch-convergence/scan?preset=largecaps`.
+  At 14:00 UTC peer scanners fill the shared `run_script` lanes (hard cap 4 /
+  lane cap 3). The POST returned instant HTTP 502 (`curl=0, http=502`).
+  `/health/lite` stayed 200 / authenticated. The wrapper (R-144) treated any
+  non-exit-7 response as indeterminate, refused the direct fallback, and
+  exited 1 once. `Type=oneshot` has no `Restart=`, so `NRestarts=0`. Next
+  timer ~3h (17:00 UTC). Same window's LEAP POST at 14:01:16Z completed OK
+  at 14:02:33Z — the lane cleared within ~2 minutes. Leap already retried
+  sheds (2026-08-27); garch did not.
+- **Detection:** unit journal `GARCH FastAPI capacity shed (curl=0
+  http=502) - retry N in Ds`, then on give-up `GARCH shed for subprocess
+  capacity (http=502) after N retries`; `/health/lite` 200. Since the
+  R-221 retry landed, `GARCH FastAPI outcome indeterminate (curl=0,
+  http=502)` means the body did NOT match the capacity marker — a
+  different case, not this one. (The 2026-09-01 page predates the retry
+  and shows the indeterminate line.)
+- **Discriminating check:** instant 502 (this case). A long run that ends
+  `Script garch_convergence.py failed` is a scanner defect. `Result=signal`
+  is deploy stop-clean. If `/health/lite` is down too → API/IB, stand down.
+- **Remediation (code):** wait/retry HTTP 502/503 only when the body
+  matches `subprocess capacity exhausted` (R-221), charged against
+  `RADON_GARCH_SHED_WAIT_SECS` default 240 (fits under
+  `TimeoutStartSec=3900` with the 3610s scan curl). Keep the
+  no-duplicate rule for every other non-exit-7 outcome. Persistent shed
+  after the wait still exits 1 (next slot is the 17:00/20:00 timer).
+  After deploy, `reset-failed` + start (unit is on
+  `RERUNNABLE_ONESHOT_UNITS`) or wait for the next timer.
+- **Regression:**
+  `test_garch_capacity_shed_retry.py::test_capacity_502_then_ok_retries_without_direct_fallback`,
+  `test_script_failed_502_does_not_retry_as_shed`,
+  `test_persistent_capacity_shed_no_duplicate_still_fails`.
+- **Code:** `scripts/run_garch_refresh.sh`
+  (`RADON_GARCH_SHED_WAIT_SECS`, `CAPACITY_SHED_MARKER`).
 
 ---
 
@@ -678,7 +741,7 @@ Incident: 2026-08-15 00:24Z, P1 page `34ab3e3c…`.
   lock/stream markers, with `reset_connection()` so `get_db()` is a
   real fresh Hrana stream (the process singleton made the previous
   per-source `get_db()` a no-op). Do not restart-flap; next timer or
-  one `radon unit restart radon-knowledge` after the fix deploys.
+  one `radon unit restart radon-knowledge.service` after the fix deploys.
 - **2026-08-21 17:22Z recurrence (page `e3268a38…`):** `_SOURCE_ATTEMPTS=2`
   retried newsfeed once; both attempts SQLITE_BUSY; incidents in the
   same run succeeded 6s later; Turso canary `SELECT 1` ~961 ms. Budget
@@ -1106,7 +1169,7 @@ transient Turso HTTP 502 reading `scan_snapshots`.** Peak: 2026-08-21
   client (and a client whose retries are already spent) still retries the
   file and continues the rest of the plan. Persistent closed-connection
   still exits 1. Do not restart-flap; next timer (10:15 UTC) or one
-  `radon unit restart radon-media-backup` after the fix deploys. Unit is
+  `radon unit restart radon-media-backup.service` after the fix deploys. Unit is
   not on `RERUNNABLE_ONESHOT_UNITS`.
 - **Regression:**
   `cloud/tests/test_media_backup.py::TestTransientB2UploadRetry`
@@ -1154,7 +1217,7 @@ transient Turso HTTP 502 reading `scan_snapshots`.** Peak: 2026-08-21
   dump and continues the rest of the plan. Persistent closed-connection
   still exits 1. Local dump remains the critical path. Do not
   restart-flap; next timer (09:00 UTC) or one
-  `radon unit restart radon-db-backup` after the fix deploys. Unit is
+  `radon unit restart radon-db-backup.service` after the fix deploys. Unit is
   not on `RERUNNABLE_ONESHOT_UNITS`.
 - **Regression:**
   `cloud/tests/test_db_backup_offbox.py::TestTransientB2UploadRetry`

@@ -81,3 +81,4 @@ Applies under `web/`. Mirrors `web/CLAUDE.md`; prefer the Claude file if it is n
 - Column visibility persists under `localStorage` key `radon:columns:<tableId>`.
 - Dashboard uses 50/50 grid with sticky internal newsfeed rail.
 - Mobile shell activates at `<=640px`; PWA service worker must bypass `/api`, `/_next/data`, and `/ws`.
+- The realtime prices socket is owned by `RealtimePricesProvider` in root `Providers`, never by the per-page `WorkspaceShell` (App Router remounts pages on navigation; a shell-owned socket reconnects and re-tickets on every route change). Shells publish subscriptions via `publishSubscriptions`; do not call `usePrices` from page-level components. `TickerSearch` connects on first focus, not on mount. Pins: `web/tests/realtime-socket-ownership-contract.test.ts`, `web/tests/realtime-prices-navigation-persistence.test.tsx`.

@@ -53,6 +53,69 @@ delay notice; playful error copy; operator-only CRUD.
   (fields registered, ssh_config stays operator-owned)
 
 ---
+
+# Task: Mobile page-change lag — realtime socket must survive navigation (2026-09-01)
+
+## Objective
+
+- Client-side page transitions (mobile tab bar especially) do not tear down the realtime prices socket: no reconnect, no new ws-ticket, no reconnect backoff, no snapshot resync. Reconnect for genuine drops unchanged; desktop unregressed.
+
+## Dependency graph
+
+- N1 depends_on: [] - Map socket owners; confirm App Router remounts the per-page WorkspaceShell (usePrices) and Header/TickerSearch on every navigation
+- N2 depends_on: [N1] - RealtimePricesProvider in root Providers owns the ONE usePrices instance; shells publish subscriptions (content-diffed, last-write-wins, no cleanup-clear, 5s shrink linger)
+- N3 depends_on: [N1] - TickerSearch lazy connect on first focus (Header remounts per page, mounted-but-hidden on mobile)
+- N4 depends_on: [N2, N3] - Wire-level regression pins: navigation persistence, ownership contract, lazy connect; update dependent suites
+- N5 depends_on: [N4] - Typecheck + lint + full web vitest; prod-build browser nav check; docs; PR
+
+## Checklist
+
+- [x] N1 Ownership map (usePrices per-page = the bug; IBStatusContext already root-owned; useHeadlines route-scoped by design)
+- [x] N2 RealtimePricesProvider + WorkspaceShell publish
+- [x] N3 TickerSearch focus connect
+- [x] N4 Tests (realtime-prices-navigation-persistence 6, realtime-socket-ownership-contract 3, ticker-search-lazy-connect 4; 81 green across 11 impacted suites)
+- [x] N5 Verified (7935 passed full web vitest; tsc clean; lint 0 errors; prod-build mobile tab-bar navs client-side, 0 doc navs; PR #228)
+
+## Review
+
+- The provider must diff publishes by CONTENT: publisher memo chains hand fresh array identities on every render, and identity-diffing looped provider setState -> consumer re-render into a silent sync spin (caught re-running the chat-launcher wire test; now pinned by the "content-identical republish" case).
+- The shrink linger exists because a remounting shell first publishes while portfolio/orders are still resolving — committing that shrink immediately is a snapshot resync through the side door.
+- E2E was deliberately NOT the pin: the e2e harness cannot authenticate the realtime socket (dummy Clerk key blocks getToken), so a navigation e2e passes vacuously. Component tests at the provider seam + a source ownership contract pin the invariant.
+
+---
+
+# Task: Mobile order ticket — size controls own one sheet scroll (2026-09-01)
+
+## Objective
+
+- Sizing the structure on the mobile order sheet (legs, +/- steppers, +5/+10/+25/+50/+100 chips) is fully visible and tappable at 393x852 — no nested scroller between the header and a pinned RISK card.
+
+## Dependency graph
+
+- M1 depends_on: [] - Red Vitest: risk panel must live in .m-sheet__body-scroll, never .m-sheet__footer
+- M2 depends_on: [] - Baseline shots + footer/body height telemetry (footer 405px = 48% of viewport, body 196px)
+- M3 depends_on: [M1] - Fix: move TicketRiskBlock from the BottomSheet footer slot into the build-view body, below legs/price/TIF
+- M4 depends_on: [M3] - E2E geometry pin: chips in-viewport on open, real click, footer < 30% of viewport
+- M5 depends_on: [M2, M3] - After shots + docs/design-shots/mobile-order-size/README.md
+- M6 depends_on: [M4, M5] - Full suite, commit, push, PR
+
+## Checklist
+
+- [x] M1 Red test (3/3 failed pre-fix)
+- [x] M2 Baseline artifacts
+- [x] M3 Layout fix (footer 405px -> 69px, body 196px -> 532px)
+- [x] M4 E2E pin green
+- [x] M5 After artifacts + README
+- [x] M6 Full Vitest 8387 passed; 2 cwd-artifact files re-run green from root; combo-payload E2E red is pre-existing (fails identically on the unmodified component in this env: no live quote -> Review disabled)
+
+## Review
+
+- Surgical: only MobileOrderTicket JSX placement moved; no CSS changes needed — .m-sheet__body-scroll already owned the single sheet scroll.
+- Confirm step untouched: its footer (status + ack + Back/Confirm) was already compact.
+- Desktop untouched: TicketRiskBlock placement in the chain rail and PositionTradeTicket unchanged.
+
+---
+
 # Task: Security nightly — auth-derived Claude budget + incomplete-run resume (2026-08-31)
 
 ## Objective
