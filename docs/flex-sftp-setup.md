@@ -43,7 +43,7 @@ Keys and env live **outside** `/etc/radon/env` so `TWS_PASSWORD` is not in this 
   known_hosts                         0600  pinned IBKR host key
   env                                 0600  TURSO_* + IB_FLEX_NAV_QUERY_ID + IB_FLEX_QUERY_ID
                                             (no TWS_PASSWORD, no IB_FLEX_TOKEN required)
-/var/lib/radon/flex-inbox/            0700  pulled .gpg files
+/var/lib/radon/flex-inbox/            0700  pulled files (IBKR names them <acct>.<Query_Name>.<from>.<to>.xml.pgp)
 ```
 
 `radon-flex-pull.service` uses `EnvironmentFile=-/var/lib/radon/flex-secrets/env` and `InaccessiblePaths` on `/etc/radon/env`.
