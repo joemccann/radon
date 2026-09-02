@@ -1,3 +1,58 @@
+# Task: Orders EXT close QUEUED + Gate 3 blocks reduce (2026-09-02) [WIP]
+
+Live symptom (app.radon.run /orders, ~22:51 ET 2026-09-01): TQQQ Long Stock
+CLOSE, SELL 10,000 LMT 68.80, DAY + EXT, reads QUEUED; modify modal shows the
+Gate 3 critical breach (SMH+SPY+TQQQ 73.0% vs 2.5%) with "before adding
+correlated risk" copy on a flatten.
+
+Root causes (code-verified):
+1. `mapOrderStatus` maps IB `PreSubmitted` to "Queued" unconditionally. IB
+   holds extended-eligible equity orders in `PreSubmitted` while they are live
+   and fillable in the extended session, so the /orders status chip called a
+   working AH order QUEUED for the whole 16:00-20:00 window.
+2. `correlationRiskBanner` derives only from the held book; a working order
+   that CLOSES part of the breached cluster renders the same critical banner
+   and "adding" copy as an add. Gate 3 never actually gated `okToSubmit`, but
+   the surface read as a block on a flatten.
+
+## Dependency graph
+
+- T1 depends_on: [] - this plan
+- T2 depends_on: [] - `isExtendedFillLive(session)` in sessionWindow + tests
+- T3 depends_on: [T2] - `mapOrderStatus` PreSubmitted -> Working when the
+  extended fill window is live + tests
+- T4 depends_on: [T3] - wire into WorkspaceSections single rows + MobileOrderList
+- T5 depends_on: [] - `correlationRiskBanner(report, order)` reduce context:
+  breach cluster containing the reduce ticker suppressed (level "reduce",
+  banner absent); remaining breaches drop the "adding" copy on a close
+- T6 depends_on: [T5] - OrderRiskGate derives `{ticker, reducesExposure}` from
+  the risk input's closeOut and passes it to the banner
+- T7 depends_on: [T5, T6] - ModifyOrderModal test: breached report + stock
+  close -> no critical banner, armed Modify fires the full wire request
+- T8 depends_on: [] - scripts test: SELL stock close + outsideRth + DAY
+  transmits verbatim (LimitOrder kwargs + place_order called once)
+- T9 depends_on: [T4] - e2e orders-session-window: PreSubmitted EXT stock reads
+  WORKING at a frozen 17:30 ET clock, QUEUED at 21:00 ET
+- T10 depends_on: [T2..T9] - focused vitest + pytest, full web gate
+- T11 depends_on: [T10] - commit, push, PR (operator verification notes)
+
+## Checklist
+
+- [x] T2 sessionWindow helper — isExtendedFillLive, 4 unit cases
+- [x] T3 mapOrderStatus — PreSubmitted promotes only when the EXT window is live
+- [x] T4 surfaces wired — WorkspaceSections single rows + MobileOrderList
+- [x] T5 banner reduce context — level "reduce", no "adding" copy on a close
+- [x] T6 OrderRiskGate context — closeOut presence is the reduce signal
+- [x] T7 modal wire test — 5 passed (banner absent, closed gate silent, armed
+      click POSTs /api/orders/modify with exact payload)
+- [x] T8 scripts transmit test — 9 passed (SELL close DAY+outsideRth verbatim)
+- [x] T9 e2e — orders-session-window 3 passed (Working at 17:30 ET, Queued at
+      21:00 ET), modify-order-correlation-risk + mobile-orders-session green
+- [ ] T10 full test gates
+- [ ] T11 PR
+
+---
+
 # Task: Profile overhaul — preferences + secure credentials (2026-08-28) [WIP]
 
 Operator answers (2026-09-01): fold /preferences into profile + promote localStorage

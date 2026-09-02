@@ -6,6 +6,7 @@ import { MarketState } from "../lib/useMarketHours";
 import {
   classifyDisplayRowSession,
   classifyOrderSession,
+  isExtendedFillLive,
 } from "../lib/orders/sessionWindow";
 
 const OPEN_NOW = new Date("2026-07-09T15:00:00.000Z"); // 11:00 ET Thursday, RTH
@@ -258,6 +259,26 @@ describe("classifyOrderSession labels when the cash session is closed", () => {
     expect(session.eligibility).toBe("extended");
     expect(session.label).toBe("EXT");
     expect(session.tone).toBe("extended");
+  });
+});
+
+describe("isExtendedFillLive", () => {
+  const extStock = () => makeOrder({ tif: "DAY", outsideRth: true, symbol: "TQQQ" });
+
+  it("is true for an extended-eligible stock during a live extended session", () => {
+    expect(isExtendedFillLive(classifyOrderSession(extStock(), EXTENDED_NOW))).toBe(true);
+  });
+
+  it("is false for the same order once the extended session has closed", () => {
+    expect(isExtendedFillLive(classifyOrderSession(extStock(), CLOSED_NOW))).toBe(false);
+  });
+
+  it("is false during RTH (the regular session is the fill window, not EXT)", () => {
+    expect(isExtendedFillLive(classifyOrderSession(extStock(), OPEN_NOW))).toBe(false);
+  });
+
+  it("is false for an rth-only option even during extended hours", () => {
+    expect(isExtendedFillLive(classifyOrderSession(opt({ tif: "GTC" }), EXTENDED_NOW))).toBe(false);
   });
 });
 

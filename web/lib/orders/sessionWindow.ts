@@ -185,6 +185,20 @@ export function classifyDisplayRowSession(
   return classifyOrderSession(row.order, now);
 }
 
+/**
+ * True when the order's EXTENDED fill window is live RIGHT NOW: the order is
+ * extended-eligible and the market is currently in an extended session
+ * (pre-market or after hours). IB holds extended-eligible equity orders in
+ * `PreSubmitted` while they are live and fillable in that session, so the
+ * status mapper needs this to label them Working instead of Queued.
+ */
+export function isExtendedFillLive(session: OrderSession): boolean {
+  return (
+    session.eligibility === "extended"
+    && session.marketState === MarketState.EXTENDED
+  );
+}
+
 export type SessionWindowCounts = {
   rth: number;
   ext: number;
