@@ -545,3 +545,137 @@ remains `INSUFFICIENT_SAMPLE` (1/5 mixed after-runs; shard effects
 confirmed n=4). Residual bottleneck after CIP-005: web gate ~104s in
 parallel with the python gate ~100s, then prestage ~18s + deploy ~86s (40s
 fixed), with CIP-004 the next cut.
+
+### 2026-09-02 - audit - branch `ci-performance/2026-09-02`
+
+- Audited range: `b1c0008a..db25990d` (25 commits: PRs #217-#239 plus three
+  direct fixes). Runner state: dedicated clone
+  `~/radon-weekend/radon-ci-performance`, exclusive lock
+  `/tmp/radon-ci-performance.lock` owned by this cycle, clean tree at
+  `db25990d`, no orphaned stash.
+- Changed CI/build/deploy surfaces in range: `.github/workflows/ci.yml`
+  (+76/-15 across #217 CIP-005 instrument, #224 docs-ownership gate repair,
+  #229 PR-output formatter, #230 safety interlocks),
+  `cloud/scripts/setup-vps.sh` (+3), `test_ci_deploy_concurrency.py` (+9),
+  `test_path_filter.py` (+1). Range diff has NO `needs:`, `uses:`, `timeout`,
+  `continue-on-error` or `if:` gate-relevant change; all action pins remain
+  40-char SHAs. Gate closure re-verified on `origin/main`:
+  `test_ci_deploy_concurrency.py` + `test_ci_gate_integrity.py` +
+  `test_path_filter.py` = 78 passed (matches last night).
+- CIP-005 stage 1 (junitxml instrument) merged 12:26Z as `5664cb3c` (#217);
+  the re-partition was deliberately staged behind the junit data, so no gate
+  movement was expected or observed. The instrument works: all ten
+  `pytest-coverage-<shard>` artifacts on run 33598078630 carry
+  `pytest-junit.xml`.
+
+**Samples (25 `push` runs on `main` since last audit, 2026-09-01T09:44Z ..
+2026-09-02T06:15Z; 19 success, 5 failure, 1 cancelled; queue delay 2-4s).**
+
+| Class / cache | n | p50 | p95 | min-max | Notes |
+|---|---|---|---|---|---|
+| mixed, warm | 17 | 255s | ~343s | 235-344s | all post-CIP-001; 15 post-CIP-005-stage-1 |
+| web, warm | 2 | 267s | - | 231-303s | 303s run: node image 129s cold-ish layer |
+| docs, warm | 0 | - | - | - | |
+
+Decomposition of the mixed set: gate-auth (all required gates done) p50 135s
+(126-160s, stable); deploy job p50 94s but p95 ~180s. **The apparent total
+p50 regression (238s -> 255s) is entirely deploy-side: 7 of 20 successful
+deploys ran 113-182s against an 84-96s floor.** Decoded logs for the 182s
+(job 99995952645), 149s (100142669277) and 145s (100071713121) deploys show
+each burned the full bounded 60s `wait_for_gateway_ready` ("Gateway not
+ready (attempt 1/12)" at +12s, `HEAD is now at` at +77s; rail 9, wait
+preserved); the 182s run additionally lost ~90s after `Scheduled units match`
+to a "known-good caddy reload reconciliation also failed" retry path. The
+slow deploys cluster behind back-to-back merges (19:26-20:14Z, 23:44-23:55Z,
+05:59Z) - consistent with each deploy's restart leaving the gateway
+data-plane not-ready for the next deploy minutes later. Every deploy log also
+prints "install-units: ignoring malformed manifest line" x6 (benign-looking,
+unattributed; noted for CIP-006).
+
+**Critical path, fast mixed (33598078630, 235s):** `Path filter` 8s ->
+`pytest (scripts-rs)` 99s job (ends +112s) -> `pytest coverage ratchet` 18s
+(ends +133s = gate auth) -> `Prestage VPS release` 12s -> `Deploy to VPS`
+84s -> 235s. Web gate ends +109s: the python gate is the wall by ~24s on
+every mixed run.
+
+**Exact per-module work (junit, run 33598078630, Linux).** Shard work totals:
+`scripts-npsz` 157s, `scripts-rs` 115s, `scripts-i` 61s, `scripts-ac` 34s,
+`scripts-jm` 33s, `rest-api` 30s, `scripts-df` 23s, `scripts-daemons` 14s,
+`scripts-gh` 6s, `rest` 3s (total 476s; job wall = ~22-25s setup + makespan
++ upload). Serial floors (loadfile keeps a module on one worker):
+`test_vixcor` 50.4s, `test_rel137_weekend_wrapper_survivability` 47.2s,
+`test_weekend_subscription_only` 36.5s, `test_weekend_wrapper_self_rewrite`
+29.3s, `test_ib_gateway_remote_serve` 28.4s, `test_leap_garch_no_duplicate_scan`
+21.3s, `test_ib_gateway_remote` 20.2s. Movable bulk: `test_we*` in npsz
+~72s over 7 files; `test_ru*` in rs ~39s over 6 files; `test_ro*` in rs
+13.5s over 2 files. `--durations=25` had covered <1/3 of this; the junit
+data settles the 2026-08-31 work-bound-vs-tail-bound question: npsz and rs
+are BOTH - big movable bulk plus one ~50s floor each.
+
+#### CIP-005 stage 2 - move `test_we*` out of npsz and `test_ro*`/`test_ru*` out of rs - SELECTED
+
+- Hypothesis: with floors at 50.4s (vixcor, stays in npsz) and 47.2s
+  (rel137, stays in rs), the best achievable slowest scripts makespan is
+  ~52s. Moves: `test_we*.py` (~72s work) -> `scripts-gh` (6s work, job 28s);
+  `test_ru*.py` (~39s) -> `rest` (3s, job 28s); `test_ro*.py` (13.5s) ->
+  `scripts-daemons` (14s, job 34s). New globs stay letter-expressible:
+  npsz drops `test_we*` via `test_[t-v]*.py test_w[!e]*.py test_[x-z]*.py`;
+  rs becomes `test_r[!ou]*.py test_s*.py` (rel137 = `test_re…` stays; both
+  `fnmatch` and shell `[!x]` semantics already proven in the 09-01 plan).
+  No `test_q*.py` exists; union contract remains fail-closed.
+- Predicted: npsz work 157->85 (makespan ~52s, job ~77s from 95-118s); rs
+  work 115->63 (makespan ~48s, job ~73s from 95-99s); gh job ~60s, rest
+  ~40s, daemons ~36s; slowest scripts job ~77s, python gate ~133s ->
+  ~110-115s; gate-auth ~135s -> ~110-113s (web gate 109s becomes co-wall).
+  Mixed p50 -20 to -25s on the deploy-clean floor (235s -> ~212s). Clears
+  10% + 15s against the deploy-clean before-set; deploy-noise runs excluded
+  by class rules.
+- Shard count unchanged (10); runner-seconds ~0 (work moves); no new job.
+- Affected paths: `ci.yml` py-tests matrix rows (npsz, rs, gh, rest,
+  daemons), `test_ci_deploy_concurrency.py` (lead-module pin
+  `PYTEST_SHARD_LEAD_MODULES`: `test_weekend_subscription_only` leads gh;
+  vixcor keeps leading npsz, rel137 keeps leading rs; per-row overlap guard
+  and both union contracts are the safety net).
+- Safety: no test removed/skipped/deselected; union == recursive inventory
+  contract stays green; `DOCS_CONTRACT_BASE` fetch-depth pin (scripts-df)
+  untouched; coverage combine (`find -name .coverage`) untouched. Risk:
+  a moved module depending on shard-local state (candidates share no
+  cross-file fixtures; `loadfile` keeps each module on one worker).
+- Revert trigger: any moved module failing on its new shard in the first
+  five `main` runs, or npsz/rs job p50 not dropping below 85s.
+- Validation: five deploy-clean mixed warm after-runs vs the deploy-clean
+  before-set (235,236,237,240,247,250,252,254 - n=8 available); per-shard
+  job walls from `gh api .../runs/<id>/jobs`.
+
+#### CIP-001 - REJECTED as a performance win; kept merged
+
+n=17 mixed after-runs (>=5): total p50 255s vs 238s before fails every
+acceptance bar, but the regression is attributable to the deploy gateway-wait
+cluster, not the change: gate-auth p50 135s vs python gate 123-129s before
+(within noise). The real delivered effect: `cloud al` job 97s -> 44-48s
+(xdist), off the critical path, and a real 40.0s test burn removed. No gate
+weakened, runner minutes flat, nothing to revert. Closed.
+
+#### CIP-004 (deploy tail: `sync-scheduled-units` 7s + duplicate fetch) - DEFERRED (next after CIP-005 stage 2)
+
+Measured again at ~7s + 4s on 33598078630. Unchanged plan.
+
+#### CIP-006 - deploy p95 observability - DEFERRED, evidence grew
+
+Now 7/20 deploys (was 4/20) hit the 60s gateway wait; the caddy
+reconciliation retry (90s, one run) and the x6 "malformed manifest line"
+warnings are new unattributed signals. Per-attempt `auth_state` +
+`port_listening` logging and per-unit stop durations remain the ask; rail 9
+forbids any wait change. Worth ~0s p50; explains ~all of current p95.
+
+#### Reliability record (not performance)
+
+5 failures in range: 33507703819 (#217 merge - non-gating Playwright smoke
+only; deploy of `5664cb3c` still completed), 33531056589, 33563795226,
+33574419366, 33577243449; 1 cancelled (33585420153, superseded by the next
+push, as designed). Not performance samples.
+
+Outcome for tonight: `VALIDATING` pending remediate (CIP-005 stage 2).
+Residual bottleneck after stage 2: python gate ~110-115s and web gate ~109s
+co-wall, then prestage + deploy 84-96s floor with a 60s gateway-wait p95
+tail (CIP-006), with CIP-004 the next p50 cut.
