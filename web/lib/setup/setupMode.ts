@@ -10,7 +10,7 @@
  * Edge-safe: pure env reads, no node:* (the middleware imports this).
  */
 
-import { isSetupCompleteFlagSet } from "@/lib/setup/setupComplete";
+import { isSetupCompleteFlagSet } from "@/lib/setup/setupCompleteFlag";
 
 function clerkKeysAbsent(
   publishableKey: string | undefined = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,

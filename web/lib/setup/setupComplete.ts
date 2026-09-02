@@ -10,14 +10,10 @@ import { existsSync } from "node:fs";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-export const SETUP_COMPLETE_ENV = "RADON_SETUP_COMPLETE";
-export const SETUP_MARKER_REL = ".radon/setup-complete";
+import { SETUP_COMPLETE_ENV } from "@/lib/setup/setupCompleteFlag";
 
-export function isSetupCompleteFlagSet(
-  flag: string | undefined = process.env[SETUP_COMPLETE_ENV],
-): boolean {
-  return flag === "1";
-}
+export { SETUP_COMPLETE_ENV } from "@/lib/setup/setupCompleteFlag";
+export const SETUP_MARKER_REL = ".radon/setup-complete";
 
 export function isValidRepoRoot(root: string): boolean {
   return (
